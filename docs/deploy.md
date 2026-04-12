@@ -230,6 +230,8 @@ cd /opt/property-management
 sudo chown -R www-data:www-data /opt/property-management
 
 # 依存インストール
+# ⚠ @tailwindcss/postcss・tailwindcss はビルド時に必要なため dependencies に入っている
+#   NODE_ENV=production 環境下でも --omit=dev で除外されない（devDependencies ではないため）
 sudo -u www-data npm ci --omit=dev
 
 # Prisma クライアント生成（src/generated/prisma/ に出力）
@@ -487,7 +489,41 @@ npm run storage:migrate
 
 ---
 
-## 6. ロールバック手順
+## 6. 既存 VPS への差分適用（アップデート手順）
+
+初回デプロイ済みの VPS にコード変更を反映する場合:
+
+```bash
+cd /opt/property-management
+
+# 1. 最新コードを取得
+sudo -u www-data git pull origin main
+
+# 2. 依存を再インストール（package-lock.json が更新されている場合）
+sudo -u www-data npm ci --omit=dev
+
+# 3. Prisma クライアント再生成（スキーマ変更がある場合）
+set -a && source /etc/property-management/app.env && set +a
+sudo -E -u www-data npx prisma generate
+
+# 4. マイグレーション（スキーマ変更がある場合）
+sudo -E -u www-data npx prisma migrate deploy
+
+# 5. 再ビルド
+sudo -E -u www-data npm run build
+
+# 6. サービス再起動
+sudo systemctl restart property-management
+sudo systemctl status property-management --no-pager
+```
+
+> **注意**: `@tailwindcss/postcss` と `tailwindcss` を `devDependencies` から `dependencies` に移動した
+> コミット以降を反映する場合は、必ず `npm ci --omit=dev` を再実行してください。
+> 旧バージョンのまま `npm run build` すると `Cannot find module '@tailwindcss/postcss'` が発生します。
+
+---
+
+## 8. ロールバック手順
 
 ```bash
 cd /opt/property-management
@@ -495,6 +531,9 @@ set -a && source /etc/property-management/app.env && set +a
 
 # 1. 旧バージョンに戻す
 git checkout <previous-tag>
+# ⚠ ロールバック先が @tailwindcss/postcss を devDependencies に置いていたコミット以前の場合は
+#   npm ci --omit=dev だと tailwindcss 系がインストールされず build が失敗する。
+#   その場合は npm ci（--omit=dev なし）で全パッケージをインストールする。
 npm ci --omit=dev
 npx prisma generate
 
@@ -514,7 +553,7 @@ sudo systemctl status property-management --no-pager
 
 ---
 
-## 7. デプロイ資材テンプレート
+## 9. デプロイ資材テンプレート
 
 リポジトリの `deploy/` にサーバー設定テンプレートを用意している。
 
@@ -556,7 +595,7 @@ sudo vim /etc/property-management/app.env
 
 ---
 
-## 8. 定期メンテナンス
+## 10. 定期メンテナンス
 
 | タスク | 頻度 | コマンド |
 |--------|------|---------|
