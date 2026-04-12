@@ -1,0 +1,639 @@
+// ============================================================
+// 物件情報一元管理システム - Prisma Schema
+// Phase 0-1: 全テーブル定義
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// Enums (静的コード - 変更時はマイグレーション必要)
+// ============================================================
+
+enum Role {
+  field_staff
+  office_staff
+  admin
+}
+
+enum PropertyType {
+  land
+  building
+  unit
+  unknown
+}
+
+enum OccupancyStatus {
+  vacant
+  occupied
+  unknown
+}
+
+enum RegistryStatus {
+  unconfirmed
+  scheduled
+  obtained
+}
+
+enum DmStatus {
+  send
+  hold
+  no_send
+}
+
+enum CaseStatus {
+  new_case
+  site_checked
+  waiting_registry
+  dm_target
+  dm_sent
+  hold
+  done
+}
+
+enum RebuildPermission {
+  yes
+  no
+  needs_review
+}
+
+enum SetbackRequired {
+  yes
+  no
+  unknown
+}
+
+enum MatchCandidateLevel {
+  strong
+  medium
+  weak
+}
+
+enum MatchCandidateResult {
+  related
+  different
+  pending
+}
+
+enum ImportJobStatus {
+  pending
+  processing
+  completed
+  failed
+  rolled_back
+}
+
+enum ImportJobType {
+  property_csv
+  owner_csv
+  dm_history_csv
+  investigation_csv
+  property_pdf
+}
+
+enum ImportRowStatus {
+  success
+  error
+  skipped
+  needs_review
+}
+
+enum ChangeSource {
+  manual
+  api
+  csv_import
+  pdf_import
+}
+
+// ============================================================
+// 認証・権限
+// ============================================================
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique
+  name               String
+  passwordHash       String    @map("password_hash")
+  role               Role      @default(field_staff)
+  totpSecret         String?   @map("totp_secret")
+  totpEnabled        Boolean   @default(false) @map("totp_enabled")
+  loginFailedCount   Int       @default(0) @map("login_failed_count")
+  lockedUntil        DateTime? @map("locked_until")
+  isActive           Boolean   @default(true) @map("is_active")
+  lastLoginAt        DateTime? @map("last_login_at")
+  mustChangePassword Boolean   @default(true) @map("must_change_password")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  userPermissions         UserPermission[]
+  passwordResetTokens     PasswordResetToken[]
+  createdProperties       Property[]              @relation("PropertyCreatedBy")
+  assignedProperties      Property[]              @relation("PropertyAssignedTo")
+  propertyPhotos          PropertyPhoto[]
+  matchCandidateJudgedBy  PropertyMatchCandidate[] @relation("MatchCandidateJudgedBy")
+  investigationLogs       PropertyInvestigationLog[]
+  dmLogs                  PropertyDmLog[]
+  comments                Comment[]
+  nextActions             NextAction[]             @relation("NextActionAssignedTo")
+  createdNextActions      NextAction[]             @relation("NextActionCreatedBy")
+  attachments             Attachment[]
+  changeLogs              ChangeLog[]
+  auditLogs               AuditLog[]
+  importJobs              ImportJob[]
+  permissionChangesBy     PermissionChangeLog[]    @relation("PermissionChangedBy")
+  permissionChangesFor    PermissionChangeLog[]    @relation("PermissionChangedFor")
+  buildings               Building[]
+
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  token     String    @unique
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model PermissionTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  permissions Json     @default("{}") @db.JsonB
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  templatePermissions TemplatePermission[]
+
+  @@map("permission_templates")
+}
+
+/// テンプレートの個別権限エントリ (検索用に正規化)
+model TemplatePermission {
+  id         String  @id @default(uuid()) @db.Uuid
+  templateId String  @map("template_id") @db.Uuid
+  resource   String  // e.g. "property", "owner", "csv_export"
+  action     String  // e.g. "read", "write", "delete", "masked", "full"
+  granted    Boolean @default(true)
+
+  template PermissionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, resource, action])
+  @@map("template_permissions")
+}
+
+/// ユーザー個別権限上書き (user override > template > deny)
+model UserPermission {
+  id       String  @id @default(uuid()) @db.Uuid
+  userId   String  @map("user_id") @db.Uuid
+  resource String
+  action   String
+  granted  Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, resource, action])
+  @@map("user_permissions")
+}
+
+// ============================================================
+// 物件・所有者
+// ============================================================
+
+model Building {
+  id                  String    @id @default(uuid()) @db.Uuid
+  name                String
+  address             String
+  lotNumber           String?   @map("lot_number")
+  realEstateNumber    String?   @map("real_estate_number")
+  totalFloors         Int?      @map("total_floors")
+  totalUnits          Int?      @map("total_units")
+  builtYear           Int?      @map("built_year")
+  structureType       String?   @map("structure_type")
+  managementCompany   String?   @map("management_company")
+  note                String?
+  gpsLat              Decimal?  @map("gps_lat") @db.Decimal(10, 7)
+  gpsLng              Decimal?  @map("gps_lng") @db.Decimal(10, 7)
+  version             Int       @default(1)
+  createdBy           String    @map("created_by") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  creator    User       @relation(fields: [createdBy], references: [id])
+  properties Property[]
+
+  @@index([name])
+  @@index([address])
+  @@map("buildings")
+}
+
+model Property {
+  id                       String            @id @default(uuid()) @db.Uuid
+  propertyType             PropertyType      @map("property_type")
+  address                  String
+  originalAddress          String?           @map("original_address")
+  lotNumber                String?           @map("lot_number")
+  originalLotNumber        String?           @map("original_lot_number")
+  buildingNumber           String?           @map("building_number")
+  realEstateNumber         String?           @map("real_estate_number")
+  externalLinkKey          String?           @map("external_link_key")
+
+  // 区分マンション (unit) 固有
+  buildingId               String?           @map("building_id") @db.Uuid
+  roomNo                   String?           @map("room_no")
+  floorNo                  Int?              @map("floor_no")
+  exclusiveArea            Decimal?          @map("exclusive_area") @db.Decimal(8, 2)
+  balconyArea              Decimal?          @map("balcony_area") @db.Decimal(8, 2)
+  layoutType               String?           @map("layout_type")
+  orientation              String?
+  managementFee            Int?              @map("management_fee")
+  repairReserveFee         Int?              @map("repair_reserve_fee")
+  occupancyStatus          OccupancyStatus?  @map("occupancy_status")
+  ownershipShareNote       String?           @map("ownership_share_note")
+
+  registryStatus           RegistryStatus    @map("registry_status")
+  dmStatus                 DmStatus          @map("dm_status")
+  caseStatus               CaseStatus        @default(new_case) @map("case_status")
+  gpsLat                   Decimal?          @map("gps_lat") @db.Decimal(10, 7)
+  gpsLng                   Decimal?          @map("gps_lng") @db.Decimal(10, 7)
+
+  // 調査情報 (最新確定値)
+  zoningDistrict           String?           @map("zoning_district")
+  buildingCoverageRatio    Decimal?          @map("building_coverage_ratio") @db.Decimal(5, 2)
+  floorAreaRatio           Decimal?          @map("floor_area_ratio") @db.Decimal(5, 2)
+  heightDistrict           String?           @map("height_district")
+  firePreventionZone       String?           @map("fire_prevention_zone")
+  scenicRestriction        String?           @map("scenic_restriction")
+  roadType                 String?           @map("road_type")
+  roadWidth                Decimal?          @map("road_width") @db.Decimal(5, 2)
+  frontageWidth            Decimal?          @map("frontage_width") @db.Decimal(5, 2)
+  frontageDirection        String?           @map("frontage_direction")
+  setbackRequired          SetbackRequired?  @map("setback_required")
+  rosenkaValue             Int?              @map("rosenka_value")
+  rosenkaYear              Int?              @map("rosenka_year")
+  rebuildPermission        RebuildPermission? @map("rebuild_permission")
+
+  // 調査メタ
+  investigationSource      String?           @map("investigation_source")
+  investigationFetchedAt   DateTime?         @map("investigation_fetched_at")
+  investigationConfirmedAt DateTime?         @map("investigation_confirmed_at")
+  manuallyEdited           Boolean           @default(false) @map("manually_edited")
+  architectureNote         String?           @map("architecture_note")
+
+  // 運用
+  assignedTo               String?           @map("assigned_to") @db.Uuid
+  isArchived               Boolean           @default(false) @map("is_archived")
+  note                     String?
+  version                  Int               @default(1)
+  createdBy                String            @map("created_by") @db.Uuid
+  createdAt                DateTime          @default(now()) @map("created_at")
+  updatedAt                DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  creator            User                       @relation("PropertyCreatedBy", fields: [createdBy], references: [id])
+  assignee           User?                      @relation("PropertyAssignedTo", fields: [assignedTo], references: [id])
+  building           Building?                  @relation(fields: [buildingId], references: [id])
+  propertyOwners     PropertyOwner[]
+  photos             PropertyPhoto[]
+  matchCandidatesA   PropertyMatchCandidate[]    @relation("MatchCandidatePropertyA")
+  matchCandidatesB   PropertyMatchCandidate[]    @relation("MatchCandidatePropertyB")
+  investigationLogs  PropertyInvestigationLog[]
+  dmLogs             PropertyDmLog[]
+  comments           Comment[]
+  nextActions        NextAction[]
+  attachments        Attachment[]
+
+  @@index([caseStatus])
+  @@index([dmStatus])
+  @@index([registryStatus])
+  @@index([assignedTo])
+  @@index([isArchived])
+  @@index([updatedAt])
+  @@index([realEstateNumber])
+  @@index([externalLinkKey])
+  @@index([buildingId])
+  @@map("properties")
+}
+
+model Owner {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  nameKana        String?  @map("name_kana")
+  phone           String?
+  zip             String?
+  address         String?
+  note            String?
+  externalLinkKey String?  @map("external_link_key")
+  version         Int      @default(1)
+  isArchived      Boolean  @default(false) @map("is_archived")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  propertyOwners PropertyOwner[]
+  attachments    Attachment[]
+
+  @@index([nameKana])
+  @@index([externalLinkKey])
+  @@map("owners")
+}
+
+model PropertyOwner {
+  id           String    @id @default(uuid()) @db.Uuid
+  propertyId   String    @map("property_id") @db.Uuid
+  ownerId      String    @map("owner_id") @db.Uuid
+  relationship String?
+  isPrimary    Boolean   @default(false) @map("is_primary")
+  startDate    DateTime? @map("start_date") @db.Date
+  endDate      DateTime? @map("end_date") @db.Date
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  owner    Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, ownerId])
+  @@map("property_owners")
+}
+
+model PropertyPhoto {
+  id           String    @id @default(uuid()) @db.Uuid
+  propertyId   String    @map("property_id") @db.Uuid
+  fileUrl      String    @map("file_url")
+  thumbnailUrl String?   @map("thumbnail_url")
+  fileName     String    @map("file_name")
+  fileSize     Int       @map("file_size")
+  mimeType     String    @map("mime_type")
+  gpsLat       Decimal?  @map("gps_lat") @db.Decimal(10, 7)
+  gpsLng       Decimal?  @map("gps_lng") @db.Decimal(10, 7)
+  takenAt      DateTime? @map("taken_at")
+  takenBy      String    @map("taken_by") @db.Uuid
+  sortOrder    Int       @default(0) @map("sort_order")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  photographer User     @relation(fields: [takenBy], references: [id])
+
+  @@map("property_photos")
+}
+
+model PropertyMatchCandidate {
+  id             String               @id @default(uuid()) @db.Uuid
+  propertyAId    String               @map("property_a_id") @db.Uuid
+  propertyBId    String               @map("property_b_id") @db.Uuid
+  level          MatchCandidateLevel
+  result         MatchCandidateResult @default(pending)
+  distanceMeters Decimal?             @map("distance_meters") @db.Decimal(8, 2)
+  matchReason    String?              @map("match_reason")
+  judgedBy       String?              @map("judged_by") @db.Uuid
+  judgedAt       DateTime?            @map("judged_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  propertyA Property @relation("MatchCandidatePropertyA", fields: [propertyAId], references: [id], onDelete: Cascade)
+  propertyB Property @relation("MatchCandidatePropertyB", fields: [propertyBId], references: [id], onDelete: Cascade)
+  judge     User?    @relation("MatchCandidateJudgedBy", fields: [judgedBy], references: [id])
+
+  @@unique([propertyAId, propertyBId])
+  @@map("property_match_candidates")
+}
+
+model PropertyInvestigationLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  propertyId     String   @map("property_id") @db.Uuid
+  source         String
+  fetchedAt      DateTime @map("fetched_at")
+  fetchedBy      String   @map("fetched_by") @db.Uuid
+  status         String   @default("success") // success / failed
+  targetYear     Int?     @map("target_year")
+  data           Json     @default("{}") @db.JsonB
+  manuallyEdited Boolean  @default(false) @map("manually_edited")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  fetcher  User     @relation(fields: [fetchedBy], references: [id])
+
+  @@index([propertyId, fetchedAt])
+  @@map("property_investigation_logs")
+}
+
+model PropertyDmLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  propertyId String   @map("property_id") @db.Uuid
+  sentAt     DateTime @map("sent_at") @db.Date
+  method     String?
+  sentBy     String   @map("sent_by") @db.Uuid
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  sender   User     @relation(fields: [sentBy], references: [id])
+
+  @@map("property_dm_logs")
+}
+
+// ============================================================
+// 運用
+// ============================================================
+
+model Attachment {
+  id         String   @id @default(uuid()) @db.Uuid
+  targetType String   @map("target_type") // "property" | "owner" | "comment"
+  targetId   String   @map("target_id") @db.Uuid
+  fileName   String   @map("file_name")
+  fileUrl    String   @map("file_url")
+  fileSize   Int      @map("file_size") // bytes
+  mimeType   String   @map("mime_type")
+  uploadedBy String   @map("uploaded_by") @db.Uuid
+  isDeleted  Boolean  @default(false) @map("is_deleted")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  uploader   User      @relation(fields: [uploadedBy], references: [id])
+  property   Property? @relation(fields: [propertyId], references: [id])
+  propertyId String?   @map("property_id") @db.Uuid
+  owner      Owner?    @relation(fields: [ownerId], references: [id])
+  ownerId    String?   @map("owner_id") @db.Uuid
+
+  @@index([targetType, targetId])
+  @@map("attachments")
+}
+
+model Comment {
+  id         String   @id @default(uuid()) @db.Uuid
+  propertyId String   @map("property_id") @db.Uuid
+  authorId   String   @map("author_id") @db.Uuid
+  body       String
+  parentId   String?  @map("parent_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  property Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  author   User      @relation(fields: [authorId], references: [id])
+  parent   Comment?  @relation("CommentThread", fields: [parentId], references: [id])
+  replies  Comment[] @relation("CommentThread")
+
+  @@index([propertyId, createdAt])
+  @@map("comments")
+}
+
+model ChangeLog {
+  id          String       @id @default(uuid()) @db.Uuid
+  targetTable String       @map("target_table")
+  targetId    String       @map("target_id") @db.Uuid
+  fieldName   String       @map("field_name")
+  oldValue    String?      @map("old_value")
+  newValue    String?      @map("new_value")
+  source      ChangeSource @default(manual)
+  changedBy   String       @map("changed_by") @db.Uuid
+  changedAt   DateTime     @default(now()) @map("changed_at")
+
+  changer User @relation(fields: [changedBy], references: [id])
+
+  @@index([targetTable, targetId])
+  @@index([changedAt])
+  @@map("change_logs")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  action      String   // login, logout, property_view, owner_view, csv_export, etc.
+  targetTable String?  @map("target_table")
+  targetId    String?  @map("target_id") @db.Uuid
+  detail      Json?    @db.JsonB
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([targetTable, targetId])
+  @@map("audit_logs")
+}
+
+model NextAction {
+  id          String    @id @default(uuid()) @db.Uuid
+  propertyId  String    @map("property_id") @db.Uuid
+  assignedTo  String    @map("assigned_to") @db.Uuid
+  scheduledAt DateTime  @map("scheduled_at") @db.Date
+  actionType  String?   @map("action_type")
+  content     String
+  isCompleted Boolean   @default(false) @map("is_completed")
+  completedAt DateTime? @map("completed_at")
+  createdBy   String    @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  assignee User     @relation("NextActionAssignedTo", fields: [assignedTo], references: [id])
+  creator  User     @relation("NextActionCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([propertyId])
+  @@index([assignedTo, isCompleted])
+  @@index([scheduledAt])
+  @@map("next_actions")
+}
+
+model PermissionChangeLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  targetUserId String   @map("target_user_id") @db.Uuid
+  changedBy    String   @map("changed_by") @db.Uuid
+  changeType   String   @map("change_type") // template_assign, override_add, override_remove, role_change
+  oldValue     Json?    @map("old_value") @db.JsonB
+  newValue     Json?    @map("new_value") @db.JsonB
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  targetUser User @relation("PermissionChangedFor", fields: [targetUserId], references: [id])
+  changer    User @relation("PermissionChangedBy", fields: [changedBy], references: [id])
+
+  @@index([targetUserId])
+  @@index([createdAt])
+  @@map("permission_change_logs")
+}
+
+// ============================================================
+// 取込
+// ============================================================
+
+model ImportJob {
+  id           String          @id @default(uuid()) @db.Uuid
+  jobType      ImportJobType   @map("job_type")
+  fileName     String          @map("file_name")
+  fileHash     String?         @map("file_hash")
+  status       ImportJobStatus @default(pending)
+  totalRows    Int?            @map("total_rows")
+  successCount Int?            @map("success_count")
+  errorCount   Int?            @map("error_count")
+  executedBy   String          @map("executed_by") @db.Uuid
+  startedAt    DateTime?       @map("started_at")
+  completedAt  DateTime?       @map("completed_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  executor User           @relation(fields: [executedBy], references: [id])
+  rows     ImportJobRow[]
+
+  @@index([fileHash])
+  @@index([createdAt])
+  @@map("import_jobs")
+}
+
+model ImportJobRow {
+  id           String          @id @default(uuid()) @db.Uuid
+  jobId        String          @map("job_id") @db.Uuid
+  rowNumber    Int             @map("row_number")
+  status       ImportRowStatus @default(needs_review)
+  rawData      Json?           @map("raw_data") @db.JsonB
+  errorMessage String?         @map("error_message")
+  createdId    String?         @map("created_id") @db.Uuid
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  job ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, rowNumber])
+  @@map("import_job_rows")
+}
+
+// ============================================================
+// マスタコード (動的管理)
+// ============================================================
+
+model MasterCode {
+  id        String   @id @default(uuid()) @db.Uuid
+  type      String
+  value     String
+  label     String
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([type, value])
+  @@index([type, isActive])
+  @@map("master_codes")
+}
+
+// ============================================================
+// システム設定 (候補距離閾値など)
+// ============================================================
+
+model SystemSetting {
+  id    String  @id @default(uuid()) @db.Uuid
+  key   String  @unique
+  value String
+  label String?
+
+  @@map("system_settings")
+}

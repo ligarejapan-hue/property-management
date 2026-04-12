@@ -1,0 +1,39 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pm-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: property_management
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # -----------------------------------------------------------------------
+  # GeoServer — KSJ A29 (用途地域) 調査情報プロバイダ用
+  # 起動: docker compose up -d geoserver
+  # UI:   http://localhost:8080/geoserver  (admin / geoserver)
+  # KSJ_API_URL=http://localhost:8080/geoserver/ksj/ows
+  # -----------------------------------------------------------------------
+  geoserver:
+    image: kartoza/geoserver:2.24.2
+    container_name: pm-geoserver
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      GEOSERVER_ADMIN_USER: admin
+      GEOSERVER_ADMIN_PASSWORD: geoserver
+      INITIAL_MEMORY: 512M
+      MAXIMUM_MEMORY: 1G
+    volumes:
+      - geoserver_data:/opt/geoserver/data_dir
+      - ./tmp/ksj:/opt/geoserver/ksj   # KSJ データファイル置き場
+
+volumes:
+  pgdata:
+  geoserver_data:

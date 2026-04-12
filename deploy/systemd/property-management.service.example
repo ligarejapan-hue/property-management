@@ -1,0 +1,44 @@
+# =============================================================================
+# property-management systemd サービスユニット
+# =============================================================================
+# 使い方:
+#   sudo cp deploy/systemd/property-management.service.example \
+#            /etc/systemd/system/property-management.service
+#   # ExecStart の node パスを `which node` の結果に合わせて編集
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now property-management
+# =============================================================================
+
+[Unit]
+Description=Property Management App
+Documentation=https://github.com/<YOUR_ORG>/property-management
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/property-management
+
+# env はサーバー上の app.env から読み込む（git 管理外・chmod 600）
+EnvironmentFile=/etc/property-management/app.env
+
+# node のフルパスは `which node` で確認すること
+# Ubuntu 22.04 + NodeSource: /usr/bin/node
+# nvm 経由: /home/<user>/.nvm/versions/node/v20.x.x/bin/node
+ExecStart=/usr/bin/node /opt/property-management/node_modules/.bin/next start
+
+# クラッシュ時に自動再起動（5秒後）
+Restart=on-failure
+RestartSec=5
+
+# ログを journald に出力
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=property-management
+
+# プロセス制限
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx next:*)",
+      "Bash(curl -s http://localhost:3001/api/auth/session)",
+      "Bash(curl -s http://localhost:3002/api/auth/session)",
+      "Bash(powershell -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Content 'C:\\\\Users\\\\issin\\\\Desktop\\\\Claude\\\\property-management\\\\.env' | Select-String 'NEXTAUTH_URL\\\\|AUTH_URL'\")",
+      "Bash(powershell -Command 'Get-NetTCPConnection -LocalPort 3002 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Write-Host '\\\\''port 3002 released'\\\\''')",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(NODE_ENV=production ADMIN_EMAIL=\"admin@your-domain.com\" ADMIN_INITIAL_PASSWORD=\"short\" npx tsx prisma/seed.ts)",
+      "Bash(npm --version)",
+      "Bash(npx prisma:*)",
+      "Bash(printenv)"
+    ]
+  }
+}

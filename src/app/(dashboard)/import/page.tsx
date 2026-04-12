@@ -1,0 +1,1060 @@
+"use client";
+
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  Upload,
+  FileText,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  RefreshCw,
+  ChevronRight,
+  GripVertical,
+  Eye,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  FileUp,
+  Table2,
+  ClipboardCheck,
+  DownloadCloud,
+} from "lucide-react";
+import Link from "next/link";
+import { importCsv, fetchImportJobs, previewCsvDuplicates } from "@/lib/api-client";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface ImportJob {
+  id: string;
+  jobType: string;
+  fileName: string;
+  status: string;
+  totalRows: number | null;
+  successCount: number | null;
+  errorCount: number | null;
+  createdAt: string;
+  executor: { id: string; name: string };
+}
+
+interface ImportResult {
+  jobId: string;
+  totalRows: number;
+  successCount: number;
+  errorCount: number;
+  needsReviewCount: number;
+  parseErrors: Array<{ row: number; message: string }>;
+}
+
+type Step = 1 | 2 | 3 | 4;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const TARGET_FIELDS = [
+  "住所",
+  "地番",
+  "家屋番号",
+  "不動産番号",
+  "種別",
+  "登記状況",
+  "DM判断",
+  "案件ステータス",
+  "用途地域",
+  "路線価",
+  "緯度",
+  "経度",
+  "備考",
+  "リンクキー",
+] as const;
+
+type TargetField = (typeof TARGET_FIELDS)[number];
+
+const TEMPLATES: Record<
+  string,
+  { label: string; columns: string[] }
+> = {
+  standard: {
+    label: "標準物件CSV",
+    columns: [
+      "住所(必須)",
+      "地番",
+      "家屋番号",
+      "不動産番号",
+      "種別",
+      "登記状況",
+      "DM判断",
+      "案件ステータス",
+      "用途地域",
+      "路線価",
+      "緯度",
+      "経度",
+      "備考",
+    ],
+  },
+  homukyoku: {
+    label: "法務局形式",
+    columns: [
+      "所在地",
+      "地番",
+      "家屋番号",
+      "不動産番号",
+      "地目",
+      "地積",
+      "登記年月日",
+      "権利者",
+    ],
+  },
+  gyosha: {
+    label: "不動産業者形式",
+    columns: [
+      "物件名",
+      "所在地",
+      "価格",
+      "面積",
+      "築年数",
+      "構造",
+      "用途地域",
+      "備考",
+    ],
+  },
+};
+
+/** Auto-mapping from common header names to target fields. */
+const AUTO_MAP: Record<string, TargetField> = {
+  "住所": "住所",
+  "所在地": "住所",
+  "物件住所": "住所",
+  "address": "住所",
+  "地番": "地番",
+  "家屋番号": "家屋番号",
+  "不動産番号": "不動産番号",
+  "種別": "種別",
+  "地目": "種別",
+  "登記状況": "登記状況",
+  "DM判断": "DM判断",
+  "dm判断": "DM判断",
+  "案件ステータス": "案件ステータス",
+  "ステータス": "案件ステータス",
+  "用途地域": "用途地域",
+  "路線価": "路線価",
+  "緯度": "緯度",
+  "lat": "緯度",
+  "経度": "経度",
+  "lng": "経度",
+  "lon": "経度",
+  "備考": "備考",
+  "メモ": "備考",
+  "リンクキー": "リンクキー",
+  "外部キー": "リンクキー",
+  "link_key": "リンクキー",
+  "externalLinkKey": "リンクキー",
+};
+
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; icon: typeof CheckCircle2; color: string }
+> = {
+  completed: { label: "完了", icon: CheckCircle2, color: "text-green-600" },
+  failed: { label: "エラーあり", icon: XCircle, color: "text-red-600" },
+  processing: { label: "処理中", icon: Loader2, color: "text-blue-600" },
+  pending: { label: "待機中", icon: AlertTriangle, color: "text-amber-600" },
+};
+
+const STEP_META: Record<Step, { label: string; icon: typeof Upload }> = {
+  1: { label: "ファイル選択", icon: FileUp },
+  2: { label: "カラム対応", icon: Table2 },
+  3: { label: "プレビュー", icon: ClipboardCheck },
+  4: { label: "取込結果", icon: DownloadCloud },
+};
+
+// ---------------------------------------------------------------------------
+// CSV Parsing (client-side, handles quoted fields)
+// ---------------------------------------------------------------------------
+
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = "";
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuote) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuote = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuote = true;
+      } else if (ch === "," || ch === "\t") {
+        fields.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
+function parseCsv(text: string): { headers: string[]; rows: string[][] } {
+  const lines = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter((l) => l.trim() !== "");
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const headers = parseCsvLine(lines[0]);
+  const rows = lines.slice(1).map(parseCsvLine);
+  return { headers, rows };
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
+
+type RowStatus = "valid" | "warning" | "error";
+
+function validateRow(
+  row: string[],
+  headers: string[],
+  mapping: Record<string, string>
+): { status: RowStatus; message: string } {
+  // Find which column index maps to 住所
+  const addressIdx = headers.findIndex((h) => mapping[h] === "住所");
+  if (addressIdx === -1) {
+    return { status: "warning", message: "住所カラム未設定" };
+  }
+  const addressVal = row[addressIdx] ?? "";
+  if (!addressVal.trim()) {
+    return { status: "error", message: "住所が空です" };
+  }
+  // Check for unusually short address
+  if (addressVal.length < 3) {
+    return { status: "warning", message: "住所が短すぎる可能性" };
+  }
+  return { status: "valid", message: "" };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function ImportPage() {
+  // Step state
+  const [step, setStep] = useState<Step>(1);
+
+  // File state
+  const [csvText, setCsvText] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+
+  // Template
+  const [template, setTemplate] = useState<string>("standard");
+
+  // Parsed CSV
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<string[][]>([]);
+
+  // Column mapping
+  const [columnMapping, setColumnMapping] = useState<Record<string, string>>(
+    {}
+  );
+
+  // Import state
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Duplicate preview
+  const [duplicatePreview, setDuplicatePreview] = useState<{
+    totalRows: number;
+    validRows: number;
+    errorRows: number;
+    duplicateCount: number;
+    duplicates: Array<{ rowNumber: number; address: string; matchedAddress: string; matchReason: string }>;
+  } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Job history
+  const [jobs, setJobs] = useState<ImportJob[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ------ Jobs ------
+  const fetchJobs = async () => {
+    setJobsLoading(true);
+    try {
+      const json = await fetchImportJobs();
+      setJobs((json.data ?? []) as ImportJob[]);
+    } catch {
+      // ignore
+    } finally {
+      setJobsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchJobs();
+  }, []);
+
+  // ------ File handling ------
+  const processFile = useCallback((file: File) => {
+    setFileName(file.name);
+    setError(null);
+    setResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      setCsvText(text);
+      const { headers: h, rows: r } = parseCsv(text);
+      setHeaders(h);
+      setRows(r);
+
+      // Auto-map
+      const mapping: Record<string, string> = {};
+      h.forEach((header) => {
+        const normalized = header.trim();
+        if (AUTO_MAP[normalized]) {
+          mapping[normalized] = AUTO_MAP[normalized];
+        }
+      });
+      setColumnMapping(mapping);
+      setStep(2);
+    };
+    reader.readAsText(file, "UTF-8");
+  }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+  };
+
+  // ------ Drag & Drop ------
+  const handleDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
+      const file = e.dataTransfer.files?.[0];
+      if (file) processFile(file);
+    },
+    [processFile]
+  );
+
+  // ------ Mapping ------
+  const updateMapping = (header: string, value: string) => {
+    setColumnMapping((prev) => {
+      const next = { ...prev };
+      if (value === "") {
+        delete next[header];
+      } else {
+        next[header] = value;
+      }
+      return next;
+    });
+  };
+
+  const mappedFields = useMemo(
+    () => new Set(Object.values(columnMapping)),
+    [columnMapping]
+  );
+
+  // ------ Validation ------
+  const validationSummary = useMemo(() => {
+    let valid = 0;
+    let warnings = 0;
+    let errors = 0;
+    const rowStatuses: { status: RowStatus; message: string }[] = [];
+    rows.forEach((row) => {
+      const v = validateRow(row, headers, columnMapping);
+      rowStatuses.push(v);
+      if (v.status === "valid") valid++;
+      else if (v.status === "warning") warnings++;
+      else errors++;
+    });
+    return { valid, warnings, errors, rowStatuses };
+  }, [rows, headers, columnMapping]);
+
+  // ------ Import ------
+  const handleImport = async () => {
+    if (!csvText.trim()) return;
+    setUploading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const json = await importCsv(fileName || "import.csv", csvText, columnMapping);
+      setResult(json as ImportResult);
+      setStep(4);
+      fetchJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取込に失敗しました");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ------ Reset ------
+  const handleReset = () => {
+    setStep(1);
+    setCsvText("");
+    setFileName("");
+    setHeaders([]);
+    setRows([]);
+    setColumnMapping({});
+    setResult(null);
+    setError(null);
+    setDuplicatePreview(null);
+    setPreviewLoading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // ------ Render helpers ------
+  const statusIcon = (status: RowStatus) => {
+    if (status === "valid")
+      return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+    if (status === "warning")
+      return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+    return <XCircle className="h-4 w-4 text-red-500" />;
+  };
+
+  return (
+    <div>
+      <h2 className="mb-6 text-2xl font-bold text-gray-800">CSV取込</h2>
+
+      {/* ============ Step Indicator ============ */}
+      <div className="mb-8 flex items-center justify-center gap-0">
+        {([1, 2, 3, 4] as Step[]).map((s, idx) => {
+          const meta = STEP_META[s];
+          const Icon = meta.icon;
+          const isActive = s === step;
+          const isDone = s < step;
+          return (
+            <div key={s} className="flex items-center">
+              {idx > 0 && (
+                <ChevronRight
+                  className={`mx-1 h-4 w-4 shrink-0 ${
+                    isDone ? "text-blue-500" : "text-gray-300"
+                  }`}
+                />
+              )}
+              <button
+                onClick={() => {
+                  if (isDone) setStep(s);
+                }}
+                disabled={!isDone}
+                className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-blue-600 text-white"
+                    : isDone
+                      ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                      : "bg-gray-100 text-gray-400"
+                }`}
+              >
+                {isDone ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Icon className="h-3.5 w-3.5" />
+                )}
+                {meta.label}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ============ Step 1: File Upload ============ */}
+      {step === 1 && (
+        <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-700">
+            ファイル選択
+          </h3>
+
+          {/* Template selection */}
+          <div className="mb-5">
+            <label className="mb-1 block text-sm font-medium text-gray-600">
+              テンプレート
+            </label>
+            <div className="relative inline-block">
+              <select
+                value={template}
+                onChange={(e) => setTemplate(e.target.value)}
+                className="appearance-none rounded-md border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {Object.entries(TEMPLATES).map(([key, t]) => (
+                  <option key={key} value={key}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            </div>
+            <div className="mt-2 rounded bg-gray-50 p-3 text-xs text-gray-500">
+              <span className="font-medium text-gray-600">対応カラム: </span>
+              {TEMPLATES[template].columns.join(", ")}
+            </div>
+          </div>
+
+          {/* Drag & Drop zone */}
+          <div
+            onDragEnter={handleDrag}
+            onDragOver={handleDrag}
+            onDragLeave={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`group cursor-pointer rounded-lg border-2 border-dashed p-12 text-center transition-colors ${
+              dragActive
+                ? "border-blue-500 bg-blue-50"
+                : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+            }`}
+          >
+            <Upload
+              className={`mx-auto mb-3 h-10 w-10 ${
+                dragActive ? "text-blue-500" : "text-gray-400"
+              }`}
+            />
+            <p className="mb-1 text-sm font-medium text-gray-700">
+              CSVファイルをここにドラッグ＆ドロップ
+            </p>
+            <p className="text-xs text-gray-400">
+              またはクリックしてファイルを選択
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.tsv,.txt"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+          </div>
+
+          {fileName && (
+            <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+              <FileText className="h-4 w-4" />
+              <span>{fileName}</span>
+              <span className="text-gray-400">
+                ({rows.length} 行)
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============ Step 2: Column Mapping ============ */}
+      {step === 2 && (
+        <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-700">
+            カラム対応設定
+          </h3>
+          <p className="mb-4 text-sm text-gray-500">
+            CSVのヘッダーと取込先フィールドを対応させてください。
+          </p>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-gray-200 bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 font-medium text-gray-600 w-8"></th>
+                  <th className="px-3 py-2 font-medium text-gray-600">
+                    CSVヘッダー
+                  </th>
+                  <th className="px-3 py-2 font-medium text-gray-600 w-8">
+                    <ArrowRight className="h-4 w-4" />
+                  </th>
+                  <th className="px-3 py-2 font-medium text-gray-600">
+                    取込先フィールド
+                  </th>
+                  <th className="px-3 py-2 font-medium text-gray-600 w-12">
+                    状態
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {headers.map((header) => {
+                  const mapped = columnMapping[header] ?? "";
+                  const isMapped = mapped !== "";
+                  return (
+                    <tr key={header} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 text-gray-300">
+                        <GripVertical className="h-4 w-4" />
+                      </td>
+                      <td className="px-3 py-2 font-mono text-gray-800">
+                        {header}
+                      </td>
+                      <td className="px-3 py-2 text-gray-300">
+                        <ArrowRight className="h-4 w-4" />
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="relative inline-block">
+                          <select
+                            value={mapped}
+                            onChange={(e) =>
+                              updateMapping(header, e.target.value)
+                            }
+                            className="appearance-none rounded border border-gray-300 bg-white py-1 pl-2 pr-7 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value="">-- 未設定 --</option>
+                            {TARGET_FIELDS.map((f) => (
+                              <option
+                                key={f}
+                                value={f}
+                                disabled={
+                                  mappedFields.has(f) && mapped !== f
+                                }
+                              >
+                                {f}
+                                {mappedFields.has(f) && mapped !== f
+                                  ? " (使用済)"
+                                  : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        {isMapped ? (
+                          <CheckCircle2 className="h-5 w-5 text-green-500" />
+                        ) : (
+                          <AlertTriangle className="h-5 w-5 text-amber-400" />
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+            <span>
+              {Object.keys(columnMapping).length} / {headers.length}{" "}
+              カラム対応済
+            </span>
+            {!mappedFields.has("住所") && (
+              <span className="text-amber-600 font-medium">
+                <AlertTriangle className="mr-1 inline h-4 w-4" />
+                住所フィールドの対応を推奨
+              </span>
+            )}
+          </div>
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={() => setStep(1)}
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              戻る
+            </button>
+            <button
+              onClick={async () => {
+                setStep(3);
+                setPreviewLoading(true);
+                setDuplicatePreview(null);
+                try {
+                  const res = await previewCsvDuplicates(csvText, columnMapping);
+                  setDuplicatePreview(res as typeof duplicatePreview);
+                } catch {
+                  // preview is best-effort
+                } finally {
+                  setPreviewLoading(false);
+                }
+              }}
+              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              <Eye className="h-4 w-4" />
+              プレビューへ
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ============ Step 3: Preview & Validate ============ */}
+      {step === 3 && (
+        <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-700">
+            プレビュー・検証
+          </h3>
+
+          {/* Summary cards */}
+          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-center">
+              <div className="text-2xl font-bold text-gray-800">
+                {rows.length}
+              </div>
+              <div className="text-xs text-gray-500">総行数</div>
+            </div>
+            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center">
+              <div className="text-2xl font-bold text-green-700">
+                {validationSummary.valid}
+              </div>
+              <div className="text-xs text-green-600">有効</div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center">
+              <div className="text-2xl font-bold text-amber-700">
+                {validationSummary.warnings}
+              </div>
+              <div className="text-xs text-amber-600">警告</div>
+            </div>
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-center">
+              <div className="text-2xl font-bold text-red-700">
+                {validationSummary.errors}
+              </div>
+              <div className="text-xs text-red-600">エラー</div>
+            </div>
+          </div>
+
+          {/* Preview table (first 5 rows) */}
+          <p className="mb-2 text-sm font-medium text-gray-600">
+            先頭5行プレビュー
+          </p>
+          <div className="overflow-x-auto rounded border border-gray-200">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-gray-200 bg-gray-50">
+                <tr>
+                  <th className="px-2 py-1.5 font-medium text-gray-500 w-8">
+                    #
+                  </th>
+                  <th className="px-2 py-1.5 font-medium text-gray-500 w-10">
+                    状態
+                  </th>
+                  {headers.map((h) => (
+                    <th
+                      key={h}
+                      className="px-2 py-1.5 font-medium text-gray-600 whitespace-nowrap"
+                    >
+                      {h}
+                      {columnMapping[h] && (
+                        <span className="ml-1 text-blue-500 font-normal">
+                          ({columnMapping[h]})
+                        </span>
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {rows.slice(0, 5).map((row, i) => {
+                  const v = validationSummary.rowStatuses[i];
+                  return (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-2 py-1.5 text-gray-400">{i + 1}</td>
+                      <td className="px-2 py-1.5">
+                        <div className="flex items-center gap-1">
+                          {statusIcon(v?.status ?? "valid")}
+                        </div>
+                      </td>
+                      {headers.map((h, j) => (
+                        <td
+                          key={j}
+                          className="px-2 py-1.5 text-gray-700 max-w-[200px] truncate whitespace-nowrap"
+                          title={row[j] ?? ""}
+                        >
+                          {row[j] ?? ""}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {rows.length > 5 && (
+            <p className="mt-1 text-xs text-gray-400">
+              ...他 {rows.length - 5} 行
+            </p>
+          )}
+
+          {/* Duplicate preview section */}
+          {previewLoading && (
+            <div className="mt-4 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              重複チェック中...
+            </div>
+          )}
+
+          {duplicatePreview && !previewLoading && (
+            <div className="mt-4">
+              <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-center">
+                  <div className="text-lg font-bold text-gray-800">{duplicatePreview.totalRows}</div>
+                  <div className="text-xs text-gray-500">総行数(サーバー)</div>
+                </div>
+                <div className="rounded-lg border border-green-200 bg-green-50 p-2 text-center">
+                  <div className="text-lg font-bold text-green-700">{duplicatePreview.validRows}</div>
+                  <div className="text-xs text-green-600">新規登録予定</div>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-center">
+                  <div className="text-lg font-bold text-amber-700">{duplicatePreview.duplicateCount}</div>
+                  <div className="text-xs text-amber-600">重複候補</div>
+                </div>
+                <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-center">
+                  <div className="text-lg font-bold text-red-700">{duplicatePreview.errorRows}</div>
+                  <div className="text-xs text-red-600">エラー行</div>
+                </div>
+              </div>
+
+              {duplicatePreview.duplicates.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-800">
+                    <AlertTriangle className="h-4 w-4" />
+                    重複候補 ({duplicatePreview.duplicateCount}件)
+                  </div>
+                  <p className="mb-3 text-xs text-amber-600">
+                    以下の行は既存物件と重複する可能性があります。取込実行時は「要レビュー」として記録されます。
+                  </p>
+                  <div className="overflow-x-auto rounded border border-amber-200 bg-white">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-amber-100 bg-amber-50">
+                        <tr>
+                          <th className="px-2 py-1.5 font-medium text-amber-700">行番号</th>
+                          <th className="px-2 py-1.5 font-medium text-amber-700">CSV住所</th>
+                          <th className="px-2 py-1.5 font-medium text-amber-700">既存物件住所</th>
+                          <th className="px-2 py-1.5 font-medium text-amber-700">一致理由</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-amber-50">
+                        {duplicatePreview.duplicates.map((d, i) => (
+                          <tr key={i} className="hover:bg-amber-50/50">
+                            <td className="px-2 py-1.5 text-gray-600">{d.rowNumber}</td>
+                            <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.address}>{d.address}</td>
+                            <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
+                            <td className="px-2 py-1.5">
+                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">{d.matchReason}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {duplicatePreview.duplicateCount > 20 && (
+                    <p className="mt-2 text-xs text-amber-500">
+                      ※ 上位20件のみ表示（全{duplicatePreview.duplicateCount}件）
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {duplicatePreview.duplicates.length === 0 && duplicatePreview.duplicateCount === 0 && (
+                <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" />
+                  重複候補はありません
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={() => setStep(2)}
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              戻る
+            </button>
+            <button
+              onClick={handleImport}
+              disabled={uploading}
+              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  取込中...
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" />
+                  取込実行
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ============ Step 4: Import Result ============ */}
+      {step === 4 && result && (
+        <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-700">
+            取込結果
+          </h3>
+
+          <div className="mb-6 rounded-md border border-green-200 bg-green-50 p-5">
+            <div className="mb-3 flex items-center gap-2 text-green-800">
+              <CheckCircle2 className="h-5 w-5" />
+              <span className="font-semibold">取込が完了しました</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+              <div>
+                <span className="text-gray-600">総行数:</span>{" "}
+                <strong>{result.totalRows}</strong>
+              </div>
+              <div>
+                <span className="text-green-600">成功:</span>{" "}
+                <strong className="text-green-700">
+                  {result.successCount}
+                </strong>
+              </div>
+              <div>
+                <span className="text-red-600">エラー:</span>{" "}
+                <strong className="text-red-700">{result.errorCount}</strong>
+              </div>
+              <div>
+                <span className="text-amber-600">要レビュー:</span>{" "}
+                <strong className="text-amber-700">
+                  {result.needsReviewCount}
+                </strong>
+              </div>
+            </div>
+            {result.parseErrors.length > 0 && (
+              <div className="mt-3 border-t border-green-200 pt-3">
+                <p className="mb-1 text-xs font-medium text-red-600">
+                  パースエラー:
+                </p>
+                {result.parseErrors.map((e, i) => (
+                  <p key={i} className="text-xs text-red-500">
+                    行 {e.row}: {e.message}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <Link
+              href={`/import/jobs/${result.jobId}`}
+              className="flex items-center gap-2 rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
+            >
+              <Eye className="h-4 w-4" />
+              ジョブ詳細を見る
+            </Link>
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              <RefreshCw className="h-4 w-4" />
+              新しいファイルを取込
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ============ Job History ============ */}
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-700">取込履歴</h3>
+          <button
+            onClick={fetchJobs}
+            className="rounded p-1 text-gray-400 hover:text-gray-600"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
+
+        {jobsLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+          </div>
+        ) : jobs.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-400">
+            取込履歴はありません
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-gray-200 bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 font-medium text-gray-600">状態</th>
+                  <th className="px-3 py-2 font-medium text-gray-600">
+                    ファイル名
+                  </th>
+                  <th className="px-3 py-2 font-medium text-gray-600">種別</th>
+                  <th className="px-3 py-2 font-medium text-gray-600">行数</th>
+                  <th className="px-3 py-2 font-medium text-gray-600">
+                    成功/エラー
+                  </th>
+                  <th className="px-3 py-2 font-medium text-gray-600">
+                    実行者
+                  </th>
+                  <th className="px-3 py-2 font-medium text-gray-600">日時</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {jobs.map((job) => {
+                  const config =
+                    STATUS_CONFIG[job.status] ?? STATUS_CONFIG.pending;
+                  const Icon = config.icon;
+                  return (
+                    <tr key={job.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => window.location.href = `/import/jobs/${job.id}`}>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`flex items-center gap-1 text-xs ${config.color}`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          {config.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-blue-600 hover:underline">
+                        {job.fileName}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-500">
+                        {job.jobType}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">
+                        {job.totalRows ?? "-"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-green-600">
+                          {job.successCount ?? 0}
+                        </span>
+                        {" / "}
+                        <span className="text-red-600">
+                          {job.errorCount ?? 0}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-gray-500">
+                        {job.executor.name}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-500">
+                        {new Date(job.createdAt).toLocaleString("ja-JP")}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
