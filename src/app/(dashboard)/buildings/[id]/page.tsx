@@ -20,6 +20,7 @@ import {
   fetchBuildingProperties,
   createBuildingUnit,
 } from "@/lib/api-client";
+import BuildingPhotoTab from "@/components/buildings/building-photo-tab";
 
 // ---------- Types ----------
 
@@ -290,6 +291,11 @@ export default function BuildingDetailPage({
             )}
           </div>
         )}
+      </div>
+
+      {/* Building photos */}
+      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6">
+        <BuildingPhotoTab buildingId={building.id} />
       </div>
 
       {/* Units list */}

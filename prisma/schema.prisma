@@ -137,6 +137,7 @@ model User {
   createdProperties       Property[]              @relation("PropertyCreatedBy")
   assignedProperties      Property[]              @relation("PropertyAssignedTo")
   propertyPhotos          PropertyPhoto[]
+  buildingPhotos          BuildingPhoto[]         @relation("BuildingPhotoPhotographer")
   matchCandidateJudgedBy  PropertyMatchCandidate[] @relation("MatchCandidateJudgedBy")
   investigationLogs       PropertyInvestigationLog[]
   dmLogs                  PropertyDmLog[]
@@ -232,8 +233,9 @@ model Building {
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  creator    User       @relation(fields: [createdBy], references: [id])
+  creator    User            @relation(fields: [createdBy], references: [id])
   properties Property[]
+  photos     BuildingPhoto[]
 
   @@index([name])
   @@index([address])
@@ -386,6 +388,27 @@ model PropertyPhoto {
   photographer User     @relation(fields: [takenBy], references: [id])
 
   @@map("property_photos")
+}
+
+model BuildingPhoto {
+  id           String    @id @default(uuid()) @db.Uuid
+  buildingId   String    @map("building_id") @db.Uuid
+  fileUrl      String    @map("file_url")
+  thumbnailUrl String?   @map("thumbnail_url")
+  fileName     String    @map("file_name")
+  fileSize     Int       @map("file_size")
+  mimeType     String    @map("mime_type")
+  caption      String?
+  sortOrder    Int       @default(0) @map("sort_order")
+  isPrimary    Boolean   @default(false) @map("is_primary")
+  takenBy      String    @map("taken_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  building     Building  @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  photographer User      @relation("BuildingPhotoPhotographer", fields: [takenBy], references: [id])
+
+  @@index([buildingId])
+  @@map("building_photos")
 }
 
 model PropertyMatchCandidate {

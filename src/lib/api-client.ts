@@ -644,6 +644,96 @@ export async function deletePhoto(propertyId: string, photoId: string) {
   });
 }
 
+// ---------- Building Photos ----------
+
+export async function fetchBuildingPhotos(buildingId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: [] };
+  }
+  return apiFetch<{ data: BuildingPhotoData[] }>(
+    `/api/buildings/${buildingId}/photos`,
+  );
+}
+
+export async function uploadBuildingPhoto(
+  buildingId: string,
+  file: File,
+  caption?: string,
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      data: {
+        id: "bp-mock-" + Date.now(),
+        buildingId,
+        fileUrl: URL.createObjectURL(file),
+        thumbnailUrl: null,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        caption: caption ?? null,
+        sortOrder: 0,
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+        photographer: { id: "mock", name: "Mock User" },
+      } satisfies BuildingPhotoData,
+    };
+  }
+  const formData = new FormData();
+  formData.append("file", file);
+  if (caption?.trim()) formData.append("caption", caption.trim());
+  // Content-Type は FormData の場合ブラウザが自動設定するため指定しない
+  return apiFetch<{ data: BuildingPhotoData }>(
+    `/api/buildings/${buildingId}/photos`,
+    { method: "POST", body: formData },
+  );
+}
+
+export async function deleteBuildingPhoto(buildingId: string, photoId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { message: "削除しました" };
+  }
+  return apiFetch(`/api/buildings/${buildingId}/photos/${photoId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function updateBuildingPhoto(
+  buildingId: string,
+  photoId: string,
+  data: { caption?: string | null; isPrimary?: boolean; sortOrder?: number },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data };
+  }
+  return apiFetch<{ data: BuildingPhotoData }>(
+    `/api/buildings/${buildingId}/photos/${photoId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+export interface BuildingPhotoData {
+  id: string;
+  buildingId: string;
+  fileUrl: string;
+  thumbnailUrl: string | null;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  caption: string | null;
+  sortOrder: number;
+  isPrimary: boolean;
+  createdAt: string;
+  photographer: { id: string; name: string };
+}
+
 // ---------- Investigation Data ----------
 
 export async function fetchInvestigationData(propertyId: string) {
