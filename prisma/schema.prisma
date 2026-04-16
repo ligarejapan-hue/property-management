@@ -23,10 +23,22 @@ enum Role {
 }
 
 enum PropertyType {
+  // アクティブな種別
   land
+  house
+  apartment_unit
+  apartment_building
+  apartment_block
+  store
+  office
+  warehouse
+  factory
+  parking
+  other
+  unknown
+  // 後方互換（旧値。既存データ保持のため削除しない）
   building
   unit
-  unknown
 }
 
 enum OccupancyStatus {

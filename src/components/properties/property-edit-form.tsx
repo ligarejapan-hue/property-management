@@ -52,9 +52,20 @@ interface FormField {
 
 const FORM_FIELDS: FormField[] = [
   { key: "propertyType", label: "種別", type: "select", section: "基本", options: [
-    { value: "land", label: "土地" },
-    { value: "building", label: "建物" },
-    { value: "unknown", label: "不明" },
+    { value: "land",               label: "土地" },
+    { value: "house",              label: "戸建" },
+    { value: "apartment_unit",     label: "区分マンション" },
+    { value: "apartment_building", label: "一棟マンション" },
+    { value: "apartment_block",    label: "一棟アパート" },
+    { value: "store",              label: "店舗" },
+    { value: "office",             label: "事務所" },
+    { value: "warehouse",          label: "倉庫" },
+    { value: "factory",            label: "工場" },
+    { value: "parking",            label: "駐車場" },
+    { value: "other",              label: "その他" },
+    { value: "unknown",            label: "不明" },
+    { value: "building",           label: "建物（旧）" },
+    { value: "unit",               label: "区分（旧）" },
   ]},
   { key: "address", label: "住所", type: "text", section: "基本" },
   { key: "lotNumber", label: "地番", type: "text", section: "基本" },

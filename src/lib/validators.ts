@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PROPERTY_TYPE_VALUES } from "@/lib/property-types";
 
 // ---------- Property list query ----------
 
@@ -6,7 +7,7 @@ export const propertyListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   keyword: z.string().optional(),
-  propertyType: z.enum(["land", "building", "unknown"]).optional(),
+  propertyType: z.enum(PROPERTY_TYPE_VALUES).optional(),
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   caseStatus: z
@@ -34,7 +35,7 @@ export const propertyListQuerySchema = z.object({
 // ---------- Create property ----------
 
 export const createPropertySchema = z.object({
-  propertyType: z.enum(["land", "building", "unknown"]),
+  propertyType: z.enum(PROPERTY_TYPE_VALUES),
   address: z.string().min(1, "住所は必須です"),
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
@@ -61,7 +62,7 @@ export const createPropertySchema = z.object({
 // ---------- Update property ----------
 
 export const updatePropertySchema = z.object({
-  propertyType: z.enum(["land", "building", "unknown"]).optional(),
+  propertyType: z.enum(PROPERTY_TYPE_VALUES).optional(),
   address: z.string().min(1).optional(),
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),

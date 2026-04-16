@@ -7,12 +7,7 @@ import { fetchProperties as apiFetchProperties, bulkUpdateProperties } from "@/l
 
 // ---------- Label maps ----------
 
-const PROPERTY_TYPE_LABELS: Record<string, string> = {
-  land: "土地",
-  building: "建物",
-  unit: "区分",
-  unknown: "不明",
-};
+import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
 const REGISTRY_STATUS_LABELS: Record<string, string> = {
   unconfirmed: "未取得",
@@ -177,9 +172,19 @@ export default function PropertiesPage() {
         >
           <option value="">種別: すべて</option>
           <option value="land">土地</option>
-          <option value="building">建物</option>
-          <option value="unit">区分</option>
+          <option value="house">戸建</option>
+          <option value="apartment_unit">区分マンション</option>
+          <option value="apartment_building">一棟マンション</option>
+          <option value="apartment_block">一棟アパート</option>
+          <option value="store">店舗</option>
+          <option value="office">事務所</option>
+          <option value="warehouse">倉庫</option>
+          <option value="factory">工場</option>
+          <option value="parking">駐車場</option>
+          <option value="other">その他</option>
           <option value="unknown">不明</option>
+          <option value="building">建物（旧）</option>
+          <option value="unit">区分（旧）</option>
         </select>
 
         <select

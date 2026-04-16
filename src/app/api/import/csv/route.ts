@@ -14,8 +14,12 @@ import {
   PROPERTY_CSV_COLUMN_MAP,
 } from "@/lib/csv-parser";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
+import {
+  PROPERTY_TYPE_VALUES,
+  PROPERTY_TYPE_JP_TO_VALUE,
+} from "@/lib/property-types";
 
-const VALID_PROPERTY_TYPES = ["land", "building", "unit", "unknown"];
+const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
 const VALID_DM_STATUS = ["send", "hold", "no_send"];
 const VALID_CASE_STATUS = [
@@ -308,12 +312,16 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Validate enum fields
-        if (
-          mapped.propertyType &&
-          !VALID_PROPERTY_TYPES.includes(mapped.propertyType)
-        ) {
-          mapped.propertyType = "unknown";
+        // Validate / normalize propertyType
+        // 1. 日本語ラベルを enum 値に変換（例: "土地" → "land"）
+        // 2. 不明な値は "unknown" にフォールバック
+        if (mapped.propertyType) {
+          const jpMapped = PROPERTY_TYPE_JP_TO_VALUE[mapped.propertyType];
+          if (jpMapped) {
+            mapped.propertyType = jpMapped;
+          } else if (!VALID_PROPERTY_TYPES.includes(mapped.propertyType)) {
+            mapped.propertyType = "unknown";
+          }
         }
         if (
           mapped.registryStatus &&

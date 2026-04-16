@@ -28,12 +28,7 @@ import {
 
 // ---------- Label maps ----------
 
-const PROPERTY_TYPE_LABELS: Record<string, string> = {
-  land: "土地",
-  building: "建物",
-  unit: "区分",
-  unknown: "不明",
-};
+import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
 const REGISTRY_STATUS_LABELS: Record<string, string> = {
   unconfirmed: "未取得",
