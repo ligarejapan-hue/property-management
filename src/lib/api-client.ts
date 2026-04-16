@@ -739,7 +739,7 @@ export interface BuildingPhotoData {
 export interface PropertyInvestigationData {
   id: string;
   propertyId: string;
-  status: "draft" | "needs_review" | "confirmed";
+  status: "draft" | "fetching" | "needs_review" | "confirmed" | "failed";
   sourceAddress: string | null;
   normalizedAddress: string | null;
   landLotNumber: string | null;
@@ -753,6 +753,22 @@ export interface PropertyInvestigationData {
   infrastructureSummary: string | null;
   autoFetchSummary: string | null;
   sourceSummary: string | null;
+  // 住所正規化
+  postalCode: string | null;
+  municipalityCode: string | null;
+  geocodePrecision: string | null;
+  // 規制
+  firePreventionArea: string | null;
+  heightDistrict: string | null;
+  // 価格・周辺情報
+  nearbyPriceSummary: string | null;
+  landPriceSummary: string | null;
+  facilitySummary: string | null;
+  // 生データ・出典・エラー
+  fieldSourcesJson: Record<string, unknown> | null;
+  rawPayloadJson: Record<string, unknown> | null;
+  lastFetchError: string | null;
+  fetchVersion: number;
   fetchedAt: string | null;
   confirmedAt: string | null;
   confirmedBy: { id: string; name: string } | null;
@@ -805,6 +821,18 @@ export async function triggerPropertyInvestigation(
       infrastructureSummary: null,
       autoFetchSummary: "StubProvider: success",
       sourceSummary: "国土数値情報API（モック）",
+      postalCode: null,
+      municipalityCode: null,
+      geocodePrecision: null,
+      firePreventionArea: null,
+      heightDistrict: null,
+      nearbyPriceSummary: null,
+      landPriceSummary: null,
+      facilitySummary: null,
+      fieldSourcesJson: null,
+      rawPayloadJson: null,
+      lastFetchError: null,
+      fetchVersion: 1,
       fetchedAt: new Date().toISOString(),
       confirmedAt: null,
       confirmedBy: null,
@@ -834,7 +862,12 @@ export async function patchPropertyInvestigation(
       latitude: null, longitude: null, zoningDistrict: null,
       buildingCoverageRatio: null, floorAreaRatio: null, hazardSummary: null,
       roadSummary: null, infrastructureSummary: null, autoFetchSummary: null,
-      sourceSummary: null, fetchedAt: null, confirmedAt: null, confirmedBy: null,
+      sourceSummary: null,
+      postalCode: null, municipalityCode: null, geocodePrecision: null,
+      firePreventionArea: null, heightDistrict: null,
+      nearbyPriceSummary: null, landPriceSummary: null, facilitySummary: null,
+      fieldSourcesJson: null, rawPayloadJson: null, lastFetchError: null, fetchVersion: 1,
+      fetchedAt: null, confirmedAt: null, confirmedBy: null,
       version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       auditLogs: [],
       ...data,
@@ -863,7 +896,12 @@ export async function confirmPropertyInvestigation(
       latitude: null, longitude: null, zoningDistrict: "第一種住居地域",
       buildingCoverageRatio: 60, floorAreaRatio: 200, hazardSummary: null,
       roadSummary: null, infrastructureSummary: null, autoFetchSummary: null,
-      sourceSummary: null, fetchedAt: new Date().toISOString(),
+      sourceSummary: null,
+      postalCode: null, municipalityCode: null, geocodePrecision: null,
+      firePreventionArea: null, heightDistrict: null,
+      nearbyPriceSummary: null, landPriceSummary: null, facilitySummary: null,
+      fieldSourcesJson: null, rawPayloadJson: null, lastFetchError: null, fetchVersion: 1,
+      fetchedAt: new Date().toISOString(),
       confirmedAt: new Date().toISOString(), confirmedBy: { id: "mock", name: "モックユーザー" },
       version: 2, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       auditLogs: [],

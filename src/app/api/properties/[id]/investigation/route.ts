@@ -40,6 +40,7 @@ export async function GET(
 // Partial update of investigation fields
 
 const patchSchema = z.object({
+  // 既存フィールド
   zoningDistrict: z.string().optional().nullable(),
   buildingCoverageRatio: z.number().optional().nullable(),
   floorAreaRatio: z.number().optional().nullable(),
@@ -51,6 +52,15 @@ const patchSchema = z.object({
   landLotNumber: z.string().optional().nullable(),
   latitude: z.number().optional().nullable(),
   longitude: z.number().optional().nullable(),
+  // 新規フィールド
+  postalCode: z.string().optional().nullable(),
+  municipalityCode: z.string().optional().nullable(),
+  geocodePrecision: z.string().optional().nullable(),
+  firePreventionArea: z.string().optional().nullable(),
+  heightDistrict: z.string().optional().nullable(),
+  nearbyPriceSummary: z.string().optional().nullable(),
+  landPriceSummary: z.string().optional().nullable(),
+  facilitySummary: z.string().optional().nullable(),
   note: z.string().optional().nullable(),
 });
 
@@ -70,7 +80,7 @@ export async function PATCH(
     const body = await request.json();
     const parsed = patchSchema.safeParse(body);
     if (!parsed.success) {
-      throw new ApiError(400, parsed.error.errors[0]?.message ?? "入力エラー", "VALIDATION_ERROR");
+      throw new ApiError(400, parsed.error.issues[0]?.message ?? "入力エラー", "VALIDATION_ERROR");
     }
 
     const { note, ...fields } = parsed.data;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Loader2,
   RefreshCw,
@@ -29,11 +29,19 @@ interface InvestigationTabProps {
 
 // ---------- Status helpers ----------
 
-const STATUS_CONFIG = {
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; badge: string; icon: React.ElementType }
+> = {
   draft: {
     label: "未取得",
     badge: "bg-gray-100 text-gray-600",
     icon: Clock,
+  },
+  fetching: {
+    label: "取得中",
+    badge: "bg-blue-100 text-blue-800",
+    icon: Loader2,
   },
   needs_review: {
     label: "要確認",
@@ -45,7 +53,12 @@ const STATUS_CONFIG = {
     badge: "bg-green-100 text-green-800",
     icon: CheckCircle2,
   },
-} as const;
+  failed: {
+    label: "取得失敗",
+    badge: "bg-red-100 text-red-800",
+    icon: AlertTriangle,
+  },
+};
 
 // ---------- Field definitions ----------
 
@@ -94,9 +107,17 @@ const FIELDS: FieldDef[] = [
 ];
 
 const ACTION_LABELS: Record<string, string> = {
+  // 旧アクション名（既存レコード互換）
   fetch: "自動取得",
   edit: "手動編集",
   confirm: "確認済み設定",
+  // 新アクション名
+  fetch_requested: "取得開始",
+  fetch_succeeded: "取得成功",
+  fetch_failed: "取得失敗",
+  updated: "手動編集",
+  confirmed: "確認済み設定",
+  reopened: "再オープン",
 };
 
 // ---------- Component ----------
@@ -203,7 +224,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
   }
 
   const status = investigation?.status ?? "draft";
-  const statusCfg = STATUS_CONFIG[status];
+  const statusCfg = STATUS_CONFIG[status] ?? STATUS_CONFIG["draft"]!;
   const StatusIcon = statusCfg.icon;
   const isConfirmed = status === "confirmed";
 

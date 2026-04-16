@@ -125,8 +125,10 @@ enum ChangeSource {
 
 enum InvestigationStatus {
   draft
+  fetching
   needs_review
   confirmed
+  failed
 }
 
 // ============================================================
@@ -489,6 +491,22 @@ model PropertyInvestigation {
   infrastructureSummary String?             @map("infrastructure_summary")
   autoFetchSummary      String?             @map("auto_fetch_summary")
   sourceSummary         String?             @map("source_summary")
+  // 住所正規化追加フィールド
+  postalCode            String?             @map("postal_code")
+  municipalityCode      String?             @map("municipality_code")
+  geocodePrecision      String?             @map("geocode_precision")
+  // 規制追加フィールド
+  firePreventionArea    String?             @map("fire_prevention_area")
+  heightDistrict        String?             @map("height_district")
+  // 価格・周辺情報サマリー
+  nearbyPriceSummary    String?             @map("nearby_price_summary")
+  landPriceSummary      String?             @map("land_price_summary")
+  facilitySummary       String?             @map("facility_summary")
+  // 生データ・出典・エラー保存
+  fieldSourcesJson      Json?               @map("field_sources_json") @db.JsonB
+  rawPayloadJson        Json?               @map("raw_payload_json") @db.JsonB
+  lastFetchError        String?             @map("last_fetch_error")
+  fetchVersion          Int                 @default(0) @map("fetch_version")
   fetchedAt             DateTime?           @map("fetched_at")
   confirmedAt           DateTime?           @map("confirmed_at")
   confirmedBy           String?             @map("confirmed_by") @db.Uuid

@@ -3,6 +3,14 @@
  *
  * Service layer: runs investigation providers, upserts PropertyInvestigation
  * record, and writes audit log.
+ *
+ * Audit action names:
+ *   fetch_requested  – 取得開始 (status→fetching)
+ *   fetch_succeeded  – 取得成功 (status→needs_review)
+ *   fetch_failed     – 取得失敗 (status→failed)
+ *   updated          – 手動編集
+ *   confirmed        – 確認済み設定
+ *   reopened         – 再オープン
  */
 
 import prisma from "@/lib/prisma";
@@ -12,10 +20,12 @@ import { runInvestigation } from "./index";
 // Types
 // ---------------------------------------------------------------------------
 
+export type InvestigationStatus = "draft" | "fetching" | "needs_review" | "confirmed" | "failed";
+
 export interface InvestigationRecord {
   id: string;
   propertyId: string;
-  status: "draft" | "needs_review" | "confirmed";
+  status: InvestigationStatus;
   sourceAddress: string | null;
   normalizedAddress: string | null;
   landLotNumber: string | null;
@@ -29,6 +39,22 @@ export interface InvestigationRecord {
   infrastructureSummary: string | null;
   autoFetchSummary: string | null;
   sourceSummary: string | null;
+  // 住所正規化
+  postalCode: string | null;
+  municipalityCode: string | null;
+  geocodePrecision: string | null;
+  // 規制
+  firePreventionArea: string | null;
+  heightDistrict: string | null;
+  // 価格・周辺情報
+  nearbyPriceSummary: string | null;
+  landPriceSummary: string | null;
+  facilitySummary: string | null;
+  // 生データ・出典・エラー
+  fieldSourcesJson: Record<string, unknown> | null;
+  rawPayloadJson: Record<string, unknown> | null;
+  lastFetchError: string | null;
+  fetchVersion: number;
   fetchedAt: string | null;
   confirmedAt: string | null;
   confirmedBy: { id: string; name: string } | null;
@@ -56,49 +82,96 @@ function toDecimal(v: unknown): number | null {
   return isNaN(n) ? null : n;
 }
 
-function serializeRecord(
-  raw: Awaited<ReturnType<typeof prisma.propertyInvestigation.findUnique>>
-): InvestigationRecord | null {
+type RawInvestigation = {
+  id: string;
+  propertyId: string;
+  status: string;
+  sourceAddress: string | null;
+  normalizedAddress: string | null;
+  landLotNumber: string | null;
+  latitude: unknown;
+  longitude: unknown;
+  zoningDistrict: string | null;
+  buildingCoverageRatio: unknown;
+  floorAreaRatio: unknown;
+  hazardSummary: string | null;
+  roadSummary: string | null;
+  infrastructureSummary: string | null;
+  autoFetchSummary: string | null;
+  sourceSummary: string | null;
+  postalCode: string | null;
+  municipalityCode: string | null;
+  geocodePrecision: string | null;
+  firePreventionArea: string | null;
+  heightDistrict: string | null;
+  nearbyPriceSummary: string | null;
+  landPriceSummary: string | null;
+  facilitySummary: string | null;
+  fieldSourcesJson: unknown;
+  rawPayloadJson: unknown;
+  lastFetchError: string | null;
+  fetchVersion: number;
+  fetchedAt: Date | null;
+  confirmedAt: Date | null;
+  confirmedBy: string | null;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+  confirmer?: { id: string; name: string } | null;
+  auditLogs?: Array<{
+    id: string;
+    action: string;
+    note: string | null;
+    creator: { id: string; name: string };
+    createdAt: Date;
+  }>;
+};
+
+function serializeRecord(raw: unknown): InvestigationRecord | null {
   if (!raw) return null;
+  const r = raw as RawInvestigation;
   return {
-    id: raw.id,
-    propertyId: raw.propertyId,
-    status: raw.status as "draft" | "needs_review" | "confirmed",
-    sourceAddress: raw.sourceAddress,
-    normalizedAddress: raw.normalizedAddress,
-    landLotNumber: raw.landLotNumber,
-    latitude: raw.latitude != null ? Number(raw.latitude) : null,
-    longitude: raw.longitude != null ? Number(raw.longitude) : null,
-    zoningDistrict: raw.zoningDistrict,
-    buildingCoverageRatio: raw.buildingCoverageRatio != null ? Number(raw.buildingCoverageRatio) : null,
-    floorAreaRatio: raw.floorAreaRatio != null ? Number(raw.floorAreaRatio) : null,
-    hazardSummary: raw.hazardSummary,
-    roadSummary: raw.roadSummary,
-    infrastructureSummary: raw.infrastructureSummary,
-    autoFetchSummary: raw.autoFetchSummary,
-    sourceSummary: raw.sourceSummary,
-    fetchedAt: raw.fetchedAt?.toISOString() ?? null,
-    confirmedAt: raw.confirmedAt?.toISOString() ?? null,
-    confirmedBy: (raw as unknown as { confirmer?: { id: string; name: string } | null }).confirmer ?? null,
-    version: raw.version,
-    createdAt: raw.createdAt.toISOString(),
-    updatedAt: raw.updatedAt.toISOString(),
-    auditLogs: ((raw as unknown as { auditLogs?: unknown[] }).auditLogs ?? []).map((log) => {
-      const l = log as {
-        id: string;
-        action: string;
-        note: string | null;
-        creator: { id: string; name: string };
-        createdAt: Date;
-      };
-      return {
-        id: l.id,
-        action: l.action,
-        note: l.note,
-        creator: l.creator,
-        createdAt: l.createdAt.toISOString(),
-      };
-    }),
+    id: r.id,
+    propertyId: r.propertyId,
+    status: r.status as InvestigationStatus,
+    sourceAddress: r.sourceAddress,
+    normalizedAddress: r.normalizedAddress,
+    landLotNumber: r.landLotNumber,
+    latitude: r.latitude != null ? Number(r.latitude) : null,
+    longitude: r.longitude != null ? Number(r.longitude) : null,
+    zoningDistrict: r.zoningDistrict,
+    buildingCoverageRatio: toDecimal(r.buildingCoverageRatio),
+    floorAreaRatio: toDecimal(r.floorAreaRatio),
+    hazardSummary: r.hazardSummary,
+    roadSummary: r.roadSummary,
+    infrastructureSummary: r.infrastructureSummary,
+    autoFetchSummary: r.autoFetchSummary,
+    sourceSummary: r.sourceSummary,
+    postalCode: r.postalCode,
+    municipalityCode: r.municipalityCode,
+    geocodePrecision: r.geocodePrecision,
+    firePreventionArea: r.firePreventionArea,
+    heightDistrict: r.heightDistrict,
+    nearbyPriceSummary: r.nearbyPriceSummary,
+    landPriceSummary: r.landPriceSummary,
+    facilitySummary: r.facilitySummary,
+    fieldSourcesJson: r.fieldSourcesJson != null ? (r.fieldSourcesJson as Record<string, unknown>) : null,
+    rawPayloadJson: r.rawPayloadJson != null ? (r.rawPayloadJson as Record<string, unknown>) : null,
+    lastFetchError: r.lastFetchError,
+    fetchVersion: r.fetchVersion,
+    fetchedAt: r.fetchedAt?.toISOString() ?? null,
+    confirmedAt: r.confirmedAt?.toISOString() ?? null,
+    confirmedBy: r.confirmer ?? null,
+    version: r.version,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+    auditLogs: (r.auditLogs ?? []).map((l) => ({
+      id: l.id,
+      action: l.action,
+      note: l.note,
+      creator: l.creator,
+      createdAt: l.createdAt.toISOString(),
+    })),
   };
 }
 
@@ -125,8 +198,13 @@ export async function getInvestigation(propertyId: string): Promise<Investigatio
 }
 
 /**
- * Run investigation providers, upsert record (status→needs_review),
- * write fetch audit log. Returns the updated record.
+ * Run investigation providers, upsert record, write audit logs.
+ *
+ * Lifecycle:
+ *   1. Upsert → status=fetching + audit: fetch_requested
+ *   2. runInvestigation (providers, server-side)
+ *   3a. Success → update → status=needs_review + audit: fetch_succeeded
+ *   3b. Failure → update → status=failed   + audit: fetch_failed
  */
 export async function runAndUpsertInvestigation(
   propertyId: string,
@@ -139,16 +217,83 @@ export async function runAndUpsertInvestigation(
     targetYear?: number;
   }
 ): Promise<InvestigationRecord> {
-  // Run providers
-  const result = await runInvestigation({
-    propertyId,
-    address: context.address,
-    lotNumber: context.lotNumber,
-    gpsLat: context.gpsLat,
-    gpsLng: context.gpsLng,
-    targetYear: context.targetYear,
+  // ---- Step 1: set status=fetching ----------------------------------------
+  const { invId, beforeStatus } = await prisma.$transaction(async (tx) => {
+    const existing = await tx.propertyInvestigation.findUnique({
+      where: { propertyId },
+      select: { id: true, status: true },
+    });
+
+    const inv = await tx.propertyInvestigation.upsert({
+      where: { propertyId },
+      create: {
+        propertyId,
+        status: "fetching",
+        sourceAddress: context.address,
+        lastFetchError: null,
+      },
+      update: {
+        status: "fetching",
+        sourceAddress: context.address,
+        lastFetchError: null,
+        version: { increment: 1 },
+      },
+      select: { id: true },
+    });
+
+    await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: inv.id,
+        action: "fetch_requested",
+        beforeJson: existing ? { status: existing.status } : undefined,
+        afterJson: { status: "fetching", address: context.address },
+        createdBy: userId,
+      },
+    });
+
+    return { invId: inv.id, beforeStatus: existing?.status ?? null };
   });
 
+  // ---- Step 2: run providers (outside transaction) -------------------------
+  let result: Awaited<ReturnType<typeof runInvestigation>>;
+  try {
+    result = await runInvestigation({
+      propertyId,
+      address: context.address,
+      lotNumber: context.lotNumber,
+      gpsLat: context.gpsLat,
+      gpsLng: context.gpsLng,
+      targetYear: context.targetYear,
+    });
+  } catch (err) {
+    // ---- Step 3a: failure path --------------------------------------------
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await prisma.$transaction(async (tx) => {
+      await tx.propertyInvestigation.update({
+        where: { propertyId },
+        data: {
+          status: "failed",
+          lastFetchError: errMsg,
+          fetchedAt: new Date(),
+          version: { increment: 1 },
+        },
+      });
+      await tx.propertyInvestigationAuditLog.create({
+        data: {
+          propertyId,
+          investigationId: invId,
+          action: "fetch_failed",
+          beforeJson: { status: "fetching" },
+          afterJson: { status: "failed", error: errMsg },
+          createdBy: userId,
+        },
+      });
+    });
+    throw err;
+  }
+
+  // ---- Step 3b: success path -----------------------------------------------
   const data = result.data;
   const now = new Date();
 
@@ -156,11 +301,12 @@ export async function runAndUpsertInvestigation(
     .map((p) => `${p.name}: ${p.status}${p.error ? ` (${p.error})` : ""}`)
     .join("\n");
 
-  const sourceSummary = result.providers
-    .filter((p) => p.status === "success")
-    .map((p) => p.source)
-    .filter(Boolean)
-    .join(", ") || null;
+  const sourceSummary =
+    result.providers
+      .filter((p) => p.status === "success")
+      .map((p) => p.source)
+      .filter(Boolean)
+      .join(", ") || null;
 
   // Build road summary from structured fields
   const roadParts: string[] = [];
@@ -176,51 +322,67 @@ export async function runAndUpsertInvestigation(
   if (data.scenicRestriction) hazardParts.push(`景観: ${data.scenicRestriction}`);
   const hazardSummary = hazardParts.length > 0 ? hazardParts.join(" / ") : null;
 
-  const upsertData = {
-    status: "needs_review" as const,
-    sourceAddress: context.address,
-    latitude: context.gpsLat != null ? context.gpsLat : null,
-    longitude: context.gpsLng != null ? context.gpsLng : null,
-    zoningDistrict: (data.zoningDistrict as string) ?? null,
-    buildingCoverageRatio: toDecimal(data.buildingCoverageRatio),
-    floorAreaRatio: toDecimal(data.floorAreaRatio),
-    hazardSummary,
-    roadSummary,
-    autoFetchSummary,
-    sourceSummary,
-    fetchedAt: now,
-  };
+  // Build field sources map (field→source)
+  const fieldSourcesJson: Record<string, string> = {};
+  for (const p of result.providers) {
+    if (p.status === "success") {
+      for (const f of p.fields) {
+        fieldSourcesJson[f] = p.source;
+      }
+    }
+  }
 
-  // Get current record for audit before_json
-  const existing = await prisma.propertyInvestigation.findUnique({
-    where: { propertyId },
-    select: { id: true, status: true, zoningDistrict: true, buildingCoverageRatio: true, floorAreaRatio: true },
-  });
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const rawPayloadJson = JSON.parse(JSON.stringify(result));
 
-  const inv = await prisma.propertyInvestigation.upsert({
-    where: { propertyId },
-    create: { propertyId, ...upsertData },
-    update: { ...upsertData, version: { increment: 1 } },
-    include: WITH_RELATIONS,
-  });
+  const inv = await prisma.$transaction(async (tx) => {
+    const updated = await tx.propertyInvestigation.update({
+      where: { propertyId },
+      data: {
+        status: "needs_review",
+        latitude: context.gpsLat ?? null,
+        longitude: context.gpsLng ?? null,
+        zoningDistrict: (data.zoningDistrict as string) ?? null,
+        buildingCoverageRatio: toDecimal(data.buildingCoverageRatio),
+        floorAreaRatio: toDecimal(data.floorAreaRatio),
+        firePreventionArea: (data.firePreventionZone as string) ?? null,
+        heightDistrict: (data.heightDistrict as string) ?? null,
+        hazardSummary,
+        roadSummary,
+        autoFetchSummary,
+        sourceSummary,
+        fieldSourcesJson,
+        rawPayloadJson,
+        lastFetchError: null,
+        fetchedAt: now,
+        fetchVersion: { increment: 1 },
+        version: { increment: 1 },
+      },
+      include: WITH_RELATIONS,
+    });
 
-  // Write audit log
-  await prisma.propertyInvestigationAuditLog.create({
-    data: {
-      propertyId,
-      investigationId: inv.id,
-      action: "fetch",
-      beforeJson: existing ? JSON.parse(JSON.stringify(existing)) : null,
-      afterJson: JSON.parse(JSON.stringify({ ...upsertData, _providers: result.providers })),
-      createdBy: userId,
-    },
+    await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: updated.id,
+        action: "fetch_succeeded",
+        beforeJson: { status: beforeStatus },
+        afterJson: {
+          status: "needs_review",
+          providers: result.providers.map((p) => ({ name: p.name, status: p.status })),
+        },
+        createdBy: userId,
+      },
+    });
+
+    return updated;
   });
 
   return serializeRecord(inv)!;
 }
 
 /**
- * Patch investigation fields (user edits). Writes edit audit log.
+ * Patch investigation fields (user edits). Writes "updated" audit log.
  * Returns updated record.
  */
 export async function patchInvestigation(
@@ -238,6 +400,14 @@ export async function patchInvestigation(
     landLotNumber: string | null;
     latitude: number | null;
     longitude: number | null;
+    postalCode: string | null;
+    municipalityCode: string | null;
+    geocodePrecision: string | null;
+    firePreventionArea: string | null;
+    heightDistrict: string | null;
+    nearbyPriceSummary: string | null;
+    landPriceSummary: string | null;
+    facilitySummary: string | null;
   }>,
   note?: string
 ): Promise<InvestigationRecord> {
@@ -249,6 +419,9 @@ export async function patchInvestigation(
       hazardSummary: true, roadSummary: true, infrastructureSummary: true,
       sourceSummary: true, normalizedAddress: true, landLotNumber: true,
       latitude: true, longitude: true,
+      postalCode: true, municipalityCode: true, geocodePrecision: true,
+      firePreventionArea: true, heightDistrict: true,
+      nearbyPriceSummary: true, landPriceSummary: true, facilitySummary: true,
     },
   });
 
@@ -266,7 +439,7 @@ export async function patchInvestigation(
     data: {
       propertyId,
       investigationId: existing.id,
-      action: "edit",
+      action: "updated",
       beforeJson: JSON.parse(JSON.stringify(existing)),
       afterJson: JSON.parse(JSON.stringify(fields)),
       note: note ?? null,
@@ -279,7 +452,7 @@ export async function patchInvestigation(
 
 /**
  * Confirm investigation: set status=confirmed, copy data to Property fields,
- * write confirm audit log.
+ * write "confirmed" audit log.
  */
 export async function confirmInvestigationRecord(
   propertyId: string,
@@ -299,7 +472,6 @@ export async function confirmInvestigationRecord(
 
   const now = new Date();
 
-  // Update investigation status
   const updated = await prisma.propertyInvestigation.update({
     where: { propertyId },
     data: {
@@ -327,7 +499,7 @@ export async function confirmInvestigationRecord(
     data: {
       propertyId,
       investigationId: inv.id,
-      action: "confirm",
+      action: "confirmed",
       beforeJson: JSON.parse(JSON.stringify({ status: inv.status })),
       afterJson: JSON.parse(JSON.stringify({ status: "confirmed", confirmedAt: now.toISOString() })),
       createdBy: userId,
