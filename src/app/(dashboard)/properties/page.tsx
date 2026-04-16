@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Search, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Loader2, Plus } from "lucide-react";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties } from "@/lib/api-client";
+import NewPropertyModal from "@/components/properties/new-property-modal";
 
 // ---------- Label maps ----------
 
@@ -91,6 +92,7 @@ export default function PropertiesPage() {
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [showNewModal, setShowNewModal] = useState(false);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -159,9 +161,20 @@ export default function PropertiesPage() {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-6 flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-800">物件一覧</h2>
+        <button
+          onClick={() => setShowNewModal(true)}
+          className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          <Plus className="h-4 w-4" />
+          新規物件登録
+        </button>
       </div>
+
+      {showNewModal && (
+        <NewPropertyModal onClose={() => setShowNewModal(false)} />
+      )}
 
       {/* Filter bar */}
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4">

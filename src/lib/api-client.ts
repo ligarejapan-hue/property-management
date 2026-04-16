@@ -1090,6 +1090,25 @@ export async function uploadFile(
   return res.json();
 }
 
+// ---------- Property Create ----------
+
+export async function createProperty(data: {
+  propertyType: string;
+  address: string;
+  lotNumber?: string | null;
+  note?: string | null;
+}): Promise<{ id: string }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-new-property-id" };
+  }
+  return apiFetch<{ id: string }>("/api/properties", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
 // ---------- Audit Logs ----------
 
 export async function fetchAuditLogs() {
