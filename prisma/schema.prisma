@@ -123,6 +123,12 @@ enum ChangeSource {
   pdf_import
 }
 
+enum InvestigationStatus {
+  draft
+  needs_review
+  confirmed
+}
+
 // ============================================================
 // 認証・権限
 // ============================================================
@@ -152,6 +158,8 @@ model User {
   buildingPhotos          BuildingPhoto[]         @relation("BuildingPhotoPhotographer")
   matchCandidateJudgedBy  PropertyMatchCandidate[] @relation("MatchCandidateJudgedBy")
   investigationLogs       PropertyInvestigationLog[]
+  investigationConfirmed    PropertyInvestigation[]         @relation("InvestigationConfirmer")
+  investigationAuditLogs    PropertyInvestigationAuditLog[] @relation("InvestigationAuditCreator")
   dmLogs                  PropertyDmLog[]
   comments                Comment[]
   nextActions             NextAction[]             @relation("NextActionAssignedTo")
@@ -325,6 +333,8 @@ model Property {
   matchCandidatesA   PropertyMatchCandidate[]    @relation("MatchCandidatePropertyA")
   matchCandidatesB   PropertyMatchCandidate[]    @relation("MatchCandidatePropertyB")
   investigationLogs  PropertyInvestigationLog[]
+  investigation         PropertyInvestigation?
+  investigationAuditLogs PropertyInvestigationAuditLog[]
   dmLogs             PropertyDmLog[]
   comments           Comment[]
   nextActions        NextAction[]
@@ -460,6 +470,56 @@ model PropertyInvestigationLog {
 
   @@index([propertyId, fetchedAt])
   @@map("property_investigation_logs")
+}
+
+model PropertyInvestigation {
+  id                    String              @id @default(uuid()) @db.Uuid
+  propertyId            String              @unique @map("property_id") @db.Uuid
+  status                InvestigationStatus @default(draft)
+  sourceAddress         String?             @map("source_address")
+  normalizedAddress     String?             @map("normalized_address")
+  landLotNumber         String?             @map("land_lot_number")
+  latitude              Decimal?            @db.Decimal(10, 7)
+  longitude             Decimal?            @db.Decimal(10, 7)
+  zoningDistrict        String?             @map("zoning_district")
+  buildingCoverageRatio Decimal?            @map("building_coverage_ratio") @db.Decimal(5, 2)
+  floorAreaRatio        Decimal?            @map("floor_area_ratio") @db.Decimal(5, 2)
+  hazardSummary         String?             @map("hazard_summary")
+  roadSummary           String?             @map("road_summary")
+  infrastructureSummary String?             @map("infrastructure_summary")
+  autoFetchSummary      String?             @map("auto_fetch_summary")
+  sourceSummary         String?             @map("source_summary")
+  fetchedAt             DateTime?           @map("fetched_at")
+  confirmedAt           DateTime?           @map("confirmed_at")
+  confirmedBy           String?             @map("confirmed_by") @db.Uuid
+  version               Int                 @default(1)
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  property  Property                        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  confirmer User?                           @relation("InvestigationConfirmer", fields: [confirmedBy], references: [id])
+  auditLogs PropertyInvestigationAuditLog[]
+
+  @@map("property_investigations")
+}
+
+model PropertyInvestigationAuditLog {
+  id              String   @id @default(uuid()) @db.Uuid
+  propertyId      String   @map("property_id") @db.Uuid
+  investigationId String?  @map("investigation_id") @db.Uuid
+  action          String
+  beforeJson      Json?    @map("before_json") @db.JsonB
+  afterJson       Json?    @map("after_json") @db.JsonB
+  note            String?
+  createdBy       String   @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  property      Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  investigation PropertyInvestigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+  creator       User                   @relation("InvestigationAuditCreator", fields: [createdBy], references: [id])
+
+  @@index([propertyId, createdAt])
+  @@map("property_investigation_audit_logs")
 }
 
 model PropertyDmLog {

@@ -736,56 +736,155 @@ export interface BuildingPhotoData {
 
 // ---------- Investigation Data ----------
 
-export async function fetchInvestigationData(propertyId: string) {
+export interface PropertyInvestigationData {
+  id: string;
+  propertyId: string;
+  status: "draft" | "needs_review" | "confirmed";
+  sourceAddress: string | null;
+  normalizedAddress: string | null;
+  landLotNumber: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  zoningDistrict: string | null;
+  buildingCoverageRatio: number | null;
+  floorAreaRatio: number | null;
+  hazardSummary: string | null;
+  roadSummary: string | null;
+  infrastructureSummary: string | null;
+  autoFetchSummary: string | null;
+  sourceSummary: string | null;
+  fetchedAt: string | null;
+  confirmedAt: string | null;
+  confirmedBy: { id: string; name: string } | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  auditLogs: Array<{
+    id: string;
+    action: string;
+    note: string | null;
+    creator: { id: string; name: string };
+    createdAt: string;
+  }>;
+}
+
+/** GET /investigation – returns record or null */
+export async function fetchPropertyInvestigation(
+  propertyId: string,
+): Promise<PropertyInvestigationData | null> {
   if (USE_MOCK) {
     await mockDelay();
-    const result = MOCK_INVESTIGATION_RESULTS[propertyId];
-    if (result) return result;
-    return { status: "idle" as const, fetchedAt: null, data: {}, source: "" };
+    return null;
   }
-  return apiFetch<(typeof MOCK_INVESTIGATION_RESULTS)[string]>(
+  const res = await apiFetch<{ investigation: PropertyInvestigationData | null }>(
     `/api/properties/${propertyId}/investigation`,
   );
+  return res.investigation;
 }
 
-export async function triggerInvestigation(propertyId: string) {
+/** POST /investigation/fetch – trigger providers, returns upserted record */
+export async function triggerPropertyInvestigation(
+  propertyId: string,
+): Promise<PropertyInvestigationData> {
   if (USE_MOCK) {
     await mockDelay();
-    // Simulate fetching process
     return {
-      status: "done" as const,
+      id: "mock-inv-1",
+      propertyId,
+      status: "needs_review",
+      sourceAddress: "モック住所",
+      normalizedAddress: null,
+      landLotNumber: null,
+      latitude: 35.6762,
+      longitude: 139.6503,
+      zoningDistrict: "第一種住居地域",
+      buildingCoverageRatio: 60,
+      floorAreaRatio: 200,
+      hazardSummary: "ハザードマップ: 洪水リスク低",
+      roadSummary: "公道 / 幅員: 6m",
+      infrastructureSummary: null,
+      autoFetchSummary: "StubProvider: success",
+      sourceSummary: "国土数値情報API（モック）",
       fetchedAt: new Date().toISOString(),
-      data: {
-        zoningDistrict: "第一種住居地域",
-        buildingCoverageRatio: 60,
-        floorAreaRatio: 200,
-        firePreventionZone: "指定なし",
-        roadType: "公道",
-        roadWidth: 6.0,
-        rosenkaValue: 350000,
-        rosenkaYear: 2025,
-      },
-      source: "国土数値情報API（モック）",
+      confirmedAt: null,
+      confirmedBy: null,
+      version: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      auditLogs: [],
     };
   }
-  return apiFetch(`/api/properties/${propertyId}/investigation`, {
-    method: "POST",
-  });
+  const res = await apiFetch<{ investigation: PropertyInvestigationData }>(
+    `/api/properties/${propertyId}/investigation/fetch`,
+    { method: "POST" },
+  );
+  return res.investigation;
 }
 
-export async function confirmInvestigation(
+/** PATCH /investigation – partial field update */
+export async function patchPropertyInvestigation(
   propertyId: string,
-  data: Record<string, unknown>,
-) {
+  data: Record<string, string | number | null>,
+): Promise<PropertyInvestigationData> {
   if (USE_MOCK) {
     await mockDelay();
-    return { message: "調査情報を確認しました", confirmedAt: new Date().toISOString() };
+    return {
+      id: "mock-inv-1", propertyId, status: "needs_review",
+      sourceAddress: null, normalizedAddress: null, landLotNumber: null,
+      latitude: null, longitude: null, zoningDistrict: null,
+      buildingCoverageRatio: null, floorAreaRatio: null, hazardSummary: null,
+      roadSummary: null, infrastructureSummary: null, autoFetchSummary: null,
+      sourceSummary: null, fetchedAt: null, confirmedAt: null, confirmedBy: null,
+      version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      auditLogs: [],
+      ...data,
+    } as PropertyInvestigationData;
   }
-  return apiFetch(`/api/properties/${propertyId}/investigation/confirm`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
+  const res = await apiFetch<{ investigation: PropertyInvestigationData }>(
+    `/api/properties/${propertyId}/investigation`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    },
+  );
+  return res.investigation;
+}
+
+/** POST /investigation/confirm – set status=confirmed */
+export async function confirmPropertyInvestigation(
+  propertyId: string,
+): Promise<PropertyInvestigationData> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      id: "mock-inv-1", propertyId, status: "confirmed",
+      sourceAddress: null, normalizedAddress: null, landLotNumber: null,
+      latitude: null, longitude: null, zoningDistrict: "第一種住居地域",
+      buildingCoverageRatio: 60, floorAreaRatio: 200, hazardSummary: null,
+      roadSummary: null, infrastructureSummary: null, autoFetchSummary: null,
+      sourceSummary: null, fetchedAt: new Date().toISOString(),
+      confirmedAt: new Date().toISOString(), confirmedBy: { id: "mock", name: "モックユーザー" },
+      version: 2, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      auditLogs: [],
+    };
+  }
+  const res = await apiFetch<{ investigation: PropertyInvestigationData }>(
+    `/api/properties/${propertyId}/investigation/confirm`,
+    { method: "POST" },
+  );
+  return res.investigation;
+}
+
+// Keep legacy exports for backward compatibility (used nowhere after page.tsx is updated)
+export async function fetchInvestigationData(propertyId: string) {
+  return fetchPropertyInvestigation(propertyId);
+}
+export async function triggerInvestigation(propertyId: string) {
+  return triggerPropertyInvestigation(propertyId);
+}
+export async function confirmInvestigation(propertyId: string, _data?: unknown) {
+  return confirmPropertyInvestigation(propertyId);
 }
 
 // ---------- Candidate Judgments ----------
