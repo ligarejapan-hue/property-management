@@ -263,16 +263,26 @@ export class ReinfilibProvider implements InvestigationProvider {
 
   /**
    * REINFOLIB タイル API を呼び出す。
-   * URL 形式: /{endpoint}/{z}/{x}/{y}?response_format=geojson&epsg=4326
-   * z/x/y はパスセグメント（クエリパラメータではない）。
+   *
+   * URL 形式（公式マニュアル準拠）:
+   *   /{endpoint}?response_format=geojson&z={z}&x={x}&y={y}
+   *   z/x/y はクエリパラメータ（パスセグメントではない）。
+   *
+   * curl 再現例:
+   *   curl -H "Ocp-Apim-Subscription-Key: <KEY>" \
+   *     "https://www.reinfolib.mlit.go.jp/ex-api/external/XKT002?response_format=geojson&z=16&x=58192&y=25816"
+   *   curl -H "Ocp-Apim-Subscription-Key: <KEY>" \
+   *     "https://www.reinfolib.mlit.go.jp/ex-api/external/XKT014?response_format=geojson&z=16&x=58192&y=25816"
    *
    * 200 OK でも features が空配列の場合がある（指定なし地域では正常）。
    * HTTP エラー時のみ throw する。
    */
   private async callTileApi(endpoint: string, x: number, y: number): Promise<GeoJsonFC> {
     const url =
-      `${REINFOLIB_BASE}/${endpoint}/${ZOOM}/${x}/${y}` +
-      `?response_format=geojson&epsg=4326`;
+      `${REINFOLIB_BASE}/${endpoint}` +
+      `?response_format=geojson&z=${ZOOM}&x=${x}&y=${y}`;
+
+    console.debug(`[reinfolib] ${endpoint} → ${url}`);
 
     const res = await fetch(url, {
       headers: this.authHeaders(),
