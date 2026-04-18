@@ -70,7 +70,7 @@ interface FieldDef {
     | "autoFetchSummary" | "fieldSourcesJson" | "rawPayloadJson"
     | "lastFetchError" | "fetchVersion"
     | "postalCode" | "municipalityCode" | "geocodePrecision"
-    | "firePreventionArea" | "heightDistrict" | "facilitySummary"
+    | "heightDistrict" | "facilitySummary"
   >;
   label: string;
   type: "text" | "number" | "textarea";
@@ -81,22 +81,29 @@ interface FieldDef {
 
 const FIELDS: FieldDef[] = [
   // ── 法規制情報 ─────────────────────────────────────────────────────
-  { key: "zoningDistrict",        label: "用途地域", type: "text",     sectionLabel: "法規制情報" },
-  { key: "buildingCoverageRatio", label: "建蔽率",   type: "number",   format: (v) => (v != null ? `${v}%` : "-") },
-  { key: "floorAreaRatio",        label: "容積率",   type: "number",   format: (v) => (v != null ? `${v}%` : "-") },
-  // ── ハザード・道路・インフラ ─────────────────────────────────────────
-  { key: "hazardSummary",         label: "ハザード概要",  type: "textarea", sectionLabel: "ハザード・道路・インフラ" },
-  { key: "roadSummary",           label: "道路概要",      type: "textarea" },
-  { key: "infrastructureSummary", label: "インフラ概要",  type: "textarea" },
+  { key: "zoningDistrict",        label: "用途地域",           type: "text",     sectionLabel: "法規制情報" },
+  { key: "buildingCoverageRatio", label: "建蔽率",             type: "number",   format: (v) => (v != null ? `${v}%` : "-") },
+  { key: "floorAreaRatio",        label: "容積率",             type: "number",   format: (v) => (v != null ? `${v}%` : "-") },
+  { key: "firePreventionArea",    label: "防火地域/準防火地域", type: "text" },
+  // ── ハザード詳細 ──────────────────────────────────────────────────
+  { key: "hazardSummary",         label: "ハザード概要（自動）", type: "textarea", sectionLabel: "ハザード詳細" },
+  { key: "floodRiskLevel",        label: "洪水",               type: "text" },
+  { key: "stormSurgeRiskLevel",   label: "高潮",               type: "text" },
+  { key: "tsunamiRiskLevel",      label: "津波",               type: "text" },
+  { key: "sedimentRiskCategory",  label: "土砂災害",           type: "text" },
+  { key: "liquefactionRiskLevel", label: "液状化",             type: "text" },
+  // ── 道路・インフラ ─────────────────────────────────────────────────
+  { key: "roadSummary",           label: "道路概要",           type: "textarea", sectionLabel: "道路・インフラ" },
+  { key: "infrastructureSummary", label: "インフラ概要",       type: "textarea" },
   // ── 価格参考情報 ──────────────────────────────────────────────────
-  { key: "nearbyPriceSummary",    label: "近隣価格参考",  type: "textarea", sectionLabel: "価格参考情報" },
-  { key: "landPriceSummary",      label: "路線価参考",    type: "textarea" },
+  { key: "nearbyPriceSummary",    label: "近隣価格参考",       type: "textarea", sectionLabel: "価格参考情報" },
+  { key: "landPriceSummary",      label: "公示地価/地価調査参考", type: "textarea" },
   // ── 位置・出典 ───────────────────────────────────────────────────
-  { key: "normalizedAddress",     label: "正規化住所", type: "text",   sectionLabel: "位置・出典" },
-  { key: "landLotNumber",         label: "地番",       type: "text" },
-  { key: "latitude",              label: "緯度",       type: "number", format: (v) => (v != null ? String(v) : "-") },
-  { key: "longitude",             label: "経度",       type: "number", format: (v) => (v != null ? String(v) : "-") },
-  { key: "sourceSummary",         label: "出典",       type: "text" },
+  { key: "normalizedAddress",     label: "正規化住所",         type: "text",     sectionLabel: "位置・出典" },
+  { key: "landLotNumber",         label: "地番",               type: "text" },
+  { key: "latitude",              label: "緯度",               type: "number",   format: (v) => (v != null ? String(v) : "-") },
+  { key: "longitude",             label: "経度",               type: "number",   format: (v) => (v != null ? String(v) : "-") },
+  { key: "sourceSummary",         label: "出典",               type: "text" },
 ];
 
 const ACTION_LABELS: Record<string, string> = {

@@ -498,6 +498,12 @@ model PropertyInvestigation {
   // 規制追加フィールド
   firePreventionArea    String?             @map("fire_prevention_area")
   heightDistrict        String?             @map("height_district")
+  // ハザード詳細（reinfolib XKT系 個別フィールド）
+  floodRiskLevel        String?             @map("flood_risk_level")        // XKT026
+  stormSurgeRiskLevel   String?             @map("storm_surge_risk_level")  // XKT027
+  tsunamiRiskLevel      String?             @map("tsunami_risk_level")      // XKT028
+  sedimentRiskCategory  String?             @map("sediment_risk_category")  // XKT029
+  liquefactionRiskLevel String?             @map("liquefaction_risk_level") // XKT025
   // 価格・周辺情報サマリー
   nearbyPriceSummary    String?             @map("nearby_price_summary")
   landPriceSummary      String?             @map("land_price_summary")

@@ -46,6 +46,12 @@ export interface InvestigationRecord {
   // 規制
   firePreventionArea: string | null;
   heightDistrict: string | null;
+  // ハザード詳細（reinfolib XKT系 個別フィールド）
+  floodRiskLevel: string | null;
+  stormSurgeRiskLevel: string | null;
+  tsunamiRiskLevel: string | null;
+  sedimentRiskCategory: string | null;
+  liquefactionRiskLevel: string | null;
   // 価格・周辺情報
   nearbyPriceSummary: string | null;
   landPriceSummary: string | null;
@@ -104,6 +110,11 @@ type RawInvestigation = {
   geocodePrecision: string | null;
   firePreventionArea: string | null;
   heightDistrict: string | null;
+  floodRiskLevel: string | null;
+  stormSurgeRiskLevel: string | null;
+  tsunamiRiskLevel: string | null;
+  sedimentRiskCategory: string | null;
+  liquefactionRiskLevel: string | null;
   nearbyPriceSummary: string | null;
   landPriceSummary: string | null;
   facilitySummary: string | null;
@@ -152,6 +163,11 @@ function serializeRecord(raw: unknown): InvestigationRecord | null {
     geocodePrecision: r.geocodePrecision,
     firePreventionArea: r.firePreventionArea,
     heightDistrict: r.heightDistrict,
+    floodRiskLevel: r.floodRiskLevel,
+    stormSurgeRiskLevel: r.stormSurgeRiskLevel,
+    tsunamiRiskLevel: r.tsunamiRiskLevel,
+    sedimentRiskCategory: r.sedimentRiskCategory,
+    liquefactionRiskLevel: r.liquefactionRiskLevel,
     nearbyPriceSummary: r.nearbyPriceSummary,
     landPriceSummary: r.landPriceSummary,
     facilitySummary: r.facilitySummary,
@@ -316,14 +332,15 @@ export async function runAndUpsertInvestigation(
   if (data.frontageDirection) roadParts.push(`方角: ${data.frontageDirection}`);
   const roadSummary = roadParts.length > 0 ? roadParts.join(" / ") : null;
 
-  // Build hazard summary
+  // Build hazard summary (防火 / 洪水 / 高潮 / 津波 / 土砂 / 液状化 の順)
   const hazardParts: string[] = [];
-  if (data.firePreventionZone)   hazardParts.push(`防火: ${data.firePreventionZone}`);
-  if (data.floodRiskLevel)       hazardParts.push(`洪水: ${data.floodRiskLevel}`);
-  if (data.sedimentRiskCategory) hazardParts.push(`土砂: ${data.sedimentRiskCategory}`);
-  if (data.tsunamiRiskLevel)     hazardParts.push(`津波: ${data.tsunamiRiskLevel}`);
-  if (data.stormSurgeRiskLevel)  hazardParts.push(`高潮: ${data.stormSurgeRiskLevel}`);
-  if (data.scenicRestriction)    hazardParts.push(`景観: ${data.scenicRestriction}`);
+  if (data.firePreventionZone)    hazardParts.push(`防火: ${data.firePreventionZone}`);
+  if (data.floodRiskLevel)        hazardParts.push(`洪水: ${data.floodRiskLevel}`);
+  if (data.stormSurgeRiskLevel)   hazardParts.push(`高潮: ${data.stormSurgeRiskLevel}`);
+  if (data.tsunamiRiskLevel)      hazardParts.push(`津波: ${data.tsunamiRiskLevel}`);
+  if (data.sedimentRiskCategory)  hazardParts.push(`土砂: ${data.sedimentRiskCategory}`);
+  if (data.liquefactionRiskLevel) hazardParts.push(`液状化: ${data.liquefactionRiskLevel}`);
+  if (data.scenicRestriction)     hazardParts.push(`景観: ${data.scenicRestriction}`);
   const hazardSummary = hazardParts.length > 0 ? hazardParts.join(" / ") : null;
 
   // Build field sources map (field→source)
@@ -364,6 +381,11 @@ export async function runAndUpsertInvestigation(
         floorAreaRatio: toDecimal(data.floorAreaRatio),
         firePreventionArea: (data.firePreventionZone as string) ?? null,
         heightDistrict: (data.heightDistrict as string) ?? null,
+        floodRiskLevel: (data.floodRiskLevel as string) ?? null,
+        stormSurgeRiskLevel: (data.stormSurgeRiskLevel as string) ?? null,
+        tsunamiRiskLevel: (data.tsunamiRiskLevel as string) ?? null,
+        sedimentRiskCategory: (data.sedimentRiskCategory as string) ?? null,
+        liquefactionRiskLevel: (data.liquefactionRiskLevel as string) ?? null,
         hazardSummary,
         roadSummary,
         autoFetchSummary,
@@ -422,6 +444,11 @@ export async function patchInvestigation(
     geocodePrecision: string | null;
     firePreventionArea: string | null;
     heightDistrict: string | null;
+    floodRiskLevel: string | null;
+    stormSurgeRiskLevel: string | null;
+    tsunamiRiskLevel: string | null;
+    sedimentRiskCategory: string | null;
+    liquefactionRiskLevel: string | null;
     nearbyPriceSummary: string | null;
     landPriceSummary: string | null;
     facilitySummary: string | null;
