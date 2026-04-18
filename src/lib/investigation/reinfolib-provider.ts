@@ -76,10 +76,11 @@ const GSI_GEOCODE_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
 
 /**
  * タイルズームレベル。
- * 用途地域ポリゴンは z=14 以上で十分な解像度が得られる。
- * 細かすぎると 1 タイルに収まらない場合があるため 16 を基準とする。
+ * z=16 で HTTP 400 が発生したため z=15 に変更。
+ * REINFOLIB タイル系 API (XKT002 等) は z=15 が推奨される解像度。
+ * 変更する場合はここだけ修正すればよい。
  */
-const ZOOM = 16;
+const ZOOM = 15;
 
 /** XKT002 用途地域コード → 日本語ラベル */
 const ZONE_LABELS: Record<string, string> = {
@@ -346,7 +347,9 @@ export class ReinfilibProvider implements InvestigationProvider {
       `${REINFOLIB_BASE}/${endpoint}` +
       `?response_format=geojson&z=${ZOOM}&x=${x}&y=${y}`;
 
-    console.debug(`[reinfolib] ${endpoint} → ${url}`);
+    console.debug(
+      `[reinfolib] ${endpoint} z=${ZOOM} x=${x} y=${y} → ${url}`,
+    );
 
     const res = await fetch(url, {
       headers: this.authHeaders(),
@@ -356,7 +359,7 @@ export class ReinfilibProvider implements InvestigationProvider {
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       console.error(
-        `[reinfolib] ${endpoint} HTTP ${res.status} | URL: ${url} | body: ${body.slice(0, 500)}`,
+        `[reinfolib] ${endpoint} HTTP ${res.status} | z=${ZOOM} x=${x} y=${y} | URL: ${url} | body: ${body.slice(0, 500)}`,
       );
       throw new Error(
         `不動産情報ライブラリ ${endpoint} エラー: HTTP ${res.status} ${res.statusText}` +
@@ -366,7 +369,7 @@ export class ReinfilibProvider implements InvestigationProvider {
 
     const json = await res.json() as GeoJsonFC;
     console.debug(
-      `[reinfolib] ${endpoint} HTTP ${res.status} | features: ${(json.features ?? []).length}`,
+      `[reinfolib] ${endpoint} HTTP ${res.status} | z=${ZOOM} x=${x} y=${y} | features: ${(json.features ?? []).length}`,
     );
     return json;
   }
