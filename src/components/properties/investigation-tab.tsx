@@ -65,45 +65,38 @@ const STATUS_CONFIG: Record<
 interface FieldDef {
   key: keyof Omit<
     PropertyInvestigationData,
-    "id" | "propertyId" | "status" | "fetchedAt" | "confirmedAt" | "confirmedBy" | "version" | "createdAt" | "updatedAt" | "auditLogs" | "sourceAddress"
+    | "id" | "propertyId" | "status" | "fetchedAt" | "confirmedAt" | "confirmedBy"
+    | "version" | "createdAt" | "updatedAt" | "auditLogs" | "sourceAddress"
+    | "autoFetchSummary" | "fieldSourcesJson" | "rawPayloadJson"
+    | "lastFetchError" | "fetchVersion"
+    | "postalCode" | "municipalityCode" | "geocodePrecision"
+    | "firePreventionArea" | "heightDistrict" | "facilitySummary"
   >;
   label: string;
   type: "text" | "number" | "textarea";
   format?: (v: string | number | null | undefined) => string;
+  /** セクション区切り見出し。このフィールドの直前に見出し行を挿入する */
+  sectionLabel?: string;
 }
 
 const FIELDS: FieldDef[] = [
-  { key: "zoningDistrict", label: "用途地域", type: "text" },
-  {
-    key: "buildingCoverageRatio",
-    label: "建蔽率",
-    type: "number",
-    format: (v) => (v != null ? `${v}%` : "-"),
-  },
-  {
-    key: "floorAreaRatio",
-    label: "容積率",
-    type: "number",
-    format: (v) => (v != null ? `${v}%` : "-"),
-  },
-  { key: "hazardSummary", label: "ハザード概要", type: "textarea" },
-  { key: "roadSummary", label: "道路概要", type: "textarea" },
-  { key: "infrastructureSummary", label: "インフラ概要", type: "textarea" },
-  { key: "sourceSummary", label: "出典", type: "text" },
-  { key: "normalizedAddress", label: "正規化住所", type: "text" },
-  { key: "landLotNumber", label: "地番", type: "text" },
-  {
-    key: "latitude",
-    label: "緯度",
-    type: "number",
-    format: (v) => (v != null ? String(v) : "-"),
-  },
-  {
-    key: "longitude",
-    label: "経度",
-    type: "number",
-    format: (v) => (v != null ? String(v) : "-"),
-  },
+  // ── 法規制情報 ─────────────────────────────────────────────────────
+  { key: "zoningDistrict",        label: "用途地域", type: "text",     sectionLabel: "法規制情報" },
+  { key: "buildingCoverageRatio", label: "建蔽率",   type: "number",   format: (v) => (v != null ? `${v}%` : "-") },
+  { key: "floorAreaRatio",        label: "容積率",   type: "number",   format: (v) => (v != null ? `${v}%` : "-") },
+  // ── ハザード・道路・インフラ ─────────────────────────────────────────
+  { key: "hazardSummary",         label: "ハザード概要",  type: "textarea", sectionLabel: "ハザード・道路・インフラ" },
+  { key: "roadSummary",           label: "道路概要",      type: "textarea" },
+  { key: "infrastructureSummary", label: "インフラ概要",  type: "textarea" },
+  // ── 価格参考情報 ──────────────────────────────────────────────────
+  { key: "nearbyPriceSummary",    label: "近隣価格参考",  type: "textarea", sectionLabel: "価格参考情報" },
+  { key: "landPriceSummary",      label: "路線価参考",    type: "textarea" },
+  // ── 位置・出典 ───────────────────────────────────────────────────
+  { key: "normalizedAddress",     label: "正規化住所", type: "text",   sectionLabel: "位置・出典" },
+  { key: "landLotNumber",         label: "地番",       type: "text" },
+  { key: "latitude",              label: "緯度",       type: "number", format: (v) => (v != null ? String(v) : "-") },
+  { key: "longitude",             label: "経度",       type: "number", format: (v) => (v != null ? String(v) : "-") },
+  { key: "sourceSummary",         label: "出典",       type: "text" },
 ];
 
 const ACTION_LABELS: Record<string, string> = {
@@ -321,13 +314,26 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
         </div>
       )}
 
+      {/* --- Server-side fetch error (lastFetchError from DB) --- */}
+      {investigation?.lastFetchError && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-amber-800">前回の取得エラー</p>
+            <p className="mt-0.5 break-all font-mono text-xs text-amber-700">
+              {investigation.lastFetchError}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* --- Data table --- */}
       {investigation && (
         <div className="overflow-x-auto rounded-md border border-gray-200">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr className="border-b border-gray-200">
-                <th className="w-36 px-3 py-2 text-left text-xs font-medium text-gray-500">
+                <th className="w-40 px-3 py-2 text-left text-xs font-medium text-gray-500">
                   項目
                 </th>
                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">
@@ -350,48 +356,61 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
                   : "-";
 
                 return (
-                  <tr key={f.key}>
-                    <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-gray-600">
-                      {f.label}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-gray-700">
-                      {f.type === "textarea" ? (
-                        <span className="whitespace-pre-wrap">{display}</span>
-                      ) : (
-                        display
-                      )}
-                    </td>
-                    {editMode && (
-                      <td className="px-3 py-2">
+                  <React.Fragment key={f.key}>
+                    {/* セクション見出し行 */}
+                    {f.sectionLabel && (
+                      <tr className="border-t-2 border-gray-200 bg-gray-50">
+                        <td
+                          colSpan={editMode ? 3 : 2}
+                          className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                        >
+                          {f.sectionLabel}
+                        </td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-gray-600">
+                        {f.label}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-700">
                         {f.type === "textarea" ? (
-                          <textarea
-                            value={editValues[f.key] ?? ""}
-                            onChange={(e) =>
-                              setEditValues((prev) => ({
-                                ...prev,
-                                [f.key]: e.target.value,
-                              }))
-                            }
-                            rows={3}
-                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
-                          />
+                          <span className="whitespace-pre-wrap">{display}</span>
                         ) : (
-                          <input
-                            type={f.type}
-                            step={f.type === "number" ? "any" : undefined}
-                            value={editValues[f.key] ?? ""}
-                            onChange={(e) =>
-                              setEditValues((prev) => ({
-                                ...prev,
-                                [f.key]: e.target.value,
-                              }))
-                            }
-                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
+                          display
                         )}
                       </td>
-                    )}
-                  </tr>
+                      {editMode && (
+                        <td className="px-3 py-2">
+                          {f.type === "textarea" ? (
+                            <textarea
+                              value={editValues[f.key] ?? ""}
+                              onChange={(e) =>
+                                setEditValues((prev) => ({
+                                  ...prev,
+                                  [f.key]: e.target.value,
+                                }))
+                              }
+                              rows={3}
+                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
+                            />
+                          ) : (
+                            <input
+                              type={f.type}
+                              step={f.type === "number" ? "any" : undefined}
+                              value={editValues[f.key] ?? ""}
+                              onChange={(e) =>
+                                setEditValues((prev) => ({
+                                  ...prev,
+                                  [f.key]: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  </React.Fragment>
                 );
               })}
             </tbody>
