@@ -165,11 +165,39 @@ export class ReinfilibProvider implements InvestigationProvider {
 
     const { x, y } = lngLatToTile(lat, lng, ZOOM);
 
-    // 2. XKT002 — 用途地域・建蔽率・容積率・高度地区
-    const zoningResult = await this.callTileApi("XKT002", x, y);
+    // meta はタイルAPIの成否に関わらず常に設定する。
+    // GSI ジオコーディングが成功している限り、タイルAPIが失敗しても
+    // normalized_address / latitude / longitude は service 層で保存される。
+    const baseMeta: Record<string, unknown> = {
+      normalizedAddress: geo?.title ?? null,
+      geocodedLat: lat,
+      geocodedLng: lng,
+      geocodeSource: query.gpsLat != null ? "property-db" : "gsi",
+      zoom: ZOOM,
+      tileX: x,
+      tileY: y,
+    };
+
+    // 2. XKT002 — 用途地域・建蔽率・容積率
+    //    タイルAPIエラーは個別に catch して tileErrors に記録する。
+    //    throw せずに空 FeatureCollection として扱うことで、
+    //    プロバイダ全体の fetch は成功扱いになり meta が service 層に渡る。
+    let zoningResult: GeoJsonFC = { type: "FeatureCollection", features: [] };
+    let fireResult:   GeoJsonFC = { type: "FeatureCollection", features: [] };
+    const tileErrors: string[] = [];
+
+    try {
+      zoningResult = await this.callTileApi("XKT002", x, y);
+    } catch (err) {
+      tileErrors.push(err instanceof Error ? err.message : String(err));
+    }
 
     // 3. XKT014 — 防火・準防火地域
-    const fireResult = await this.callTileApi("XKT014", x, y);
+    try {
+      fireResult = await this.callTileApi("XKT014", x, y);
+    } catch (err) {
+      tileErrors.push(err instanceof Error ? err.message : String(err));
+    }
 
     // 4. マージ
     const data: InvestigationResult = {
@@ -185,15 +213,11 @@ export class ReinfilibProvider implements InvestigationProvider {
       source: "国土交通省 不動産情報ライブラリ",
       data,
       meta: {
-        normalizedAddress: geo?.title ?? null,
-        geocodedLat: lat,
-        geocodedLng: lng,
-        geocodeSource: query.gpsLat != null ? "property-db" : "gsi",
-        zoom: ZOOM,
-        tileX: x,
-        tileY: y,
+        ...baseMeta,
         // 200 OK だが features 空だったエンドポイント（指定なし地域では正常）
         emptyEndpoints,
+        // タイルAPIがエラーを返した場合のみ存在するキー
+        ...(tileErrors.length > 0 && { tileErrors }),
       },
     };
   }
@@ -239,13 +263,16 @@ export class ReinfilibProvider implements InvestigationProvider {
 
   /**
    * REINFOLIB タイル API を呼び出す。
+   * URL 形式: /{endpoint}/{z}/{x}/{y}?response_format=geojson&epsg=4326
+   * z/x/y はパスセグメント（クエリパラメータではない）。
+   *
    * 200 OK でも features が空配列の場合がある（指定なし地域では正常）。
    * HTTP エラー時のみ throw する。
    */
   private async callTileApi(endpoint: string, x: number, y: number): Promise<GeoJsonFC> {
     const url =
-      `${REINFOLIB_BASE}/${endpoint}` +
-      `?response_format=geojson&epsg=4326&z=${ZOOM}&x=${x}&y=${y}`;
+      `${REINFOLIB_BASE}/${endpoint}/${ZOOM}/${x}/${y}` +
+      `?response_format=geojson&epsg=4326`;
 
     const res = await fetch(url, {
       headers: this.authHeaders(),
@@ -253,8 +280,13 @@ export class ReinfilibProvider implements InvestigationProvider {
     });
 
     if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(
+        `[reinfolib] ${endpoint} HTTP ${res.status} | URL: ${url} | body: ${body.slice(0, 500)}`,
+      );
       throw new Error(
-        `不動産情報ライブラリ ${endpoint} エラー: HTTP ${res.status} ${res.statusText}`,
+        `不動産情報ライブラリ ${endpoint} エラー: HTTP ${res.status} ${res.statusText}` +
+          (body ? ` — ${body.slice(0, 200)}` : ""),
       );
     }
 
