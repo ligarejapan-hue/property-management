@@ -161,11 +161,16 @@ export default function PropertiesPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4">
         <h2 className="text-2xl font-bold text-gray-800">物件一覧</h2>
+      </div>
+
+      {/* Action row */}
+      <div className="mb-4 flex justify-end">
         <button
+          type="button"
           onClick={() => setShowNewModal(true)}
-          className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
         >
           <Plus className="h-4 w-4" />
           新規物件登録
