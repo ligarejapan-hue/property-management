@@ -84,6 +84,17 @@ const FIRE_LABELS: Record<string, string> = {
   "3": "法22条区域",
 };
 
+// ── ユーティリティ ───────────────────────────────────────────────────────────
+
+/**
+ * "60%" や "60" のような文字列を数値に変換する。
+ * パース不能な場合は null を返す。
+ */
+function parseRatioPercent(raw: string): number | null {
+  const n = Number(raw.replace("%", "").trim());
+  return isNaN(n) ? null : n;
+}
+
 // ── タイル座標変換 ───────────────────────────────────────────────────────────
 
 function lngLatToTile(lat: number, lng: number, z: number): { x: number; y: number } {
@@ -123,8 +134,8 @@ export class ReinfilibProvider implements InvestigationProvider {
     "zoningDistrict",
     "buildingCoverageRatio",
     "floorAreaRatio",
-    "heightDistrict",
     "firePreventionZone",
+    // heightDistrict: 公式確認済みAPIなし。XKT024 等の仕様が確定次第追加する
   ];
 
   private readonly apiKey: string;
@@ -255,11 +266,13 @@ export class ReinfilibProvider implements InvestigationProvider {
    *
    * features が空配列の場合は {} を返す（市街化調整区域・白地地域では正常）。
    *
-   * 属性名候補（API仕様変更時はここを修正）:
-   *   用途地域コード : youto / youto_cd / 用途地域
-   *   建蔽率(%)     : kenpei / kenpei_ritsu / 建蔽率
-   *   容積率(%)     : yoseki / yoseki_ritsu / 容積率
-   *   高度地区      : kodo / kodo_chiku / 高度地区
+   * 公式確認済み属性名:
+   *   use_area_ja                  : 用途地域（日本語ラベル）
+   *   u_building_coverage_ratio_ja : 建蔽率（"60%" 等の文字列）
+   *   u_floor_area_ratio_ja        : 容積率（"200%" 等の文字列）
+   *
+   * heightDistrict は XKT002 からは取得しない。
+   * 対応 API（XKT024 等）の仕様が公式確認できた時点で別メソッドを追加すること。
    */
   private parseZoning(fc: GeoJsonFC): InvestigationResult {
     const props = fc.features?.[0]?.properties;
@@ -267,24 +280,27 @@ export class ReinfilibProvider implements InvestigationProvider {
 
     const result: InvestigationResult = {};
 
-    // 用途地域
-    const zoneRaw = this.pick(props, ["youto", "youto_cd", "用途地域", "youto_chiiki"]);
+    // 用途地域（日本語ラベルをそのまま使う）
+    const zoneRaw = this.pick(props, ["use_area_ja", "youto", "youto_cd"]);
     if (zoneRaw !== null) {
-      const code = String(zoneRaw).trim();
-      result.zoningDistrict = ZONE_LABELS[code] ?? code;
+      const label = String(zoneRaw).trim();
+      // 値がコード番号ならラベルに変換、すでに日本語ならそのまま
+      result.zoningDistrict = ZONE_LABELS[label] ?? label;
     }
 
-    // 建蔽率
-    const bcr = this.pickNum(props, ["kenpei", "kenpei_ritsu", "建蔽率"]);
-    if (bcr !== null && bcr > 0) result.buildingCoverageRatio = bcr;
+    // 建蔽率（"60%" → 60 に変換）
+    const bcrRaw = this.pick(props, ["u_building_coverage_ratio_ja", "kenpei", "kenpei_ritsu"]);
+    if (bcrRaw !== null) {
+      const n = parseRatioPercent(String(bcrRaw));
+      if (n !== null && n > 0) result.buildingCoverageRatio = n;
+    }
 
-    // 容積率
-    const far = this.pickNum(props, ["yoseki", "yoseki_ritsu", "容積率"]);
-    if (far !== null && far > 0) result.floorAreaRatio = far;
-
-    // 高度地区
-    const hd = this.pick(props, ["kodo", "kodo_chiku", "高度地区"]);
-    if (hd !== null && String(hd).trim() !== "") result.heightDistrict = String(hd).trim();
+    // 容積率（"200%" → 200 に変換）
+    const farRaw = this.pick(props, ["u_floor_area_ratio_ja", "yoseki", "yoseki_ritsu"]);
+    if (farRaw !== null) {
+      const n = parseRatioPercent(String(farRaw));
+      if (n !== null && n > 0) result.floorAreaRatio = n;
+    }
 
     return result;
   }
