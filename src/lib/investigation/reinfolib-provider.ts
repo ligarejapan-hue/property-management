@@ -1,31 +1,44 @@
 /**
  * ReinfilibProvider
  *
- * 国土交通省 不動産情報ライブラリ API を使って、住所から
- * 都市計画情報（用途地域・建蔽率・容積率・防火地域・高度地区）を取得する。
+ * 国土交通省 不動産情報ライブラリ タイル API を使って
+ * 住所から都市計画情報を取得する。
  *
  * ── 必要な環境変数 ──────────────────────────────────────────────────────────
  *   REINFOLIB_API_KEY=<サブスクリプションキー>
  *   ヘッダー Ocp-Apim-Subscription-Key に自動セットされる。
+ *   未設定時は InvestigationProvider のコンストラクタで throw し、
+ *   オーケストレーターが fetch_failed として記録する。
  *
- * ── 利用 API ───────────────────────────────────────────────────────────────
- *   1. 国土地理院 住所検索 API (無料・認証不要)
- *      https://msearch.gsi.go.jp/address-search/AddressSearch?q=...
- *      → 住所を緯度経度に変換する
+ * ── 利用エンドポイント ────────────────────────────────────────────────────
+ *   いずれも GeoJSON タイル API。共通パラメータ:
+ *     response_format=geojson  epsg=4326  z={z}  x={x}  y={y}
  *
- *   2. 不動産情報ライブラリ 都市計画情報 (XPT001)
- *      GET https://www.reinfolib.mlit.go.jp/ex-api/external/XPT001
- *        ?response_format=geojson&epsg=4326&z={z}&x={x}&y={y}
- *      → 用途地域・建蔽率・容積率・高度地区・防火地域を取得する
+ *   1. 国土地理院 住所検索 API（無料・認証不要）
+ *      GET https://msearch.gsi.go.jp/address-search/AddressSearch?q={住所}
+ *      → 住所を緯度経度・正規化住所に変換する
  *
- * ── レスポンス属性名について ──────────────────────────────────────────────
- *   REINFOLIB は KSJ A29 の属性コードをそのまま使う。
- *   万一 API のバージョンアップで属性名が変わった場合は
- *   parseZoningFeature() 内の FIELD_CANDIDATES を修正すること。
+ *   2. XKT002 — 用途地域
+ *      GET {BASE}/XKT002?response_format=geojson&epsg=4326&z=&x=&y=
+ *      → 用途地域 / 建蔽率 / 容積率 / 高度地区
+ *      ※ 200 でも features が空配列の場合がある（市街化調整区域・白地等）
  *
- * ── 出典表示 ──────────────────────────────────────────────────────────────
- *   source に "国土交通省 不動産情報ライブラリ" を返す。
- *   UI 側で「参考情報」として表示すること（investigation-tab.tsx 参照）。
+ *   3. XKT014 — 防火・準防火地域
+ *      GET {BASE}/XKT014?response_format=geojson&epsg=4326&z=&x=&y=
+ *      → 防火地域 / 準防火地域 / 法22条区域
+ *      ※ 200 でも features が空配列の場合がある（指定なしの地域）
+ *
+ *   ※ XPT001 は「不動産取引価格情報のポイントデータ」であり、
+ *     用途地域・防火地域の取得には使用しない。
+ *
+ * ── 空データの扱い ────────────────────────────────────────────────────────
+ *   - features が空配列 → そのフィールドは取得なし（エラーにしない）
+ *   - 取得できなかったフィールドは InvestigationResult に含まれない
+ *   - source には "国土交通省 不動産情報ライブラリ" を返す
+ *
+ * ── 属性名について ────────────────────────────────────────────────────────
+ *   各 parseXxx() メソッドで複数の候補名を列挙している。
+ *   API 仕様変更でフィールド名が変わった場合はそこを修正すること。
  */
 
 import type {
@@ -40,40 +53,40 @@ import type {
 const REINFOLIB_BASE = "https://www.reinfolib.mlit.go.jp/ex-api/external";
 const GSI_GEOCODE_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch";
 
-/** XPT001 クエリに使うズームレベル（16 が用途地域タイル解像度として適切） */
+/**
+ * タイルズームレベル。
+ * 用途地域ポリゴンは z=14 以上で十分な解像度が得られる。
+ * 細かすぎると 1 タイルに収まらない場合があるため 16 を基準とする。
+ */
 const ZOOM = 16;
 
-/** 用途地域コード → 日本語ラベル（KSJ A29_002 準拠） */
+/** XKT002 用途地域コード → 日本語ラベル */
 const ZONE_LABELS: Record<string, string> = {
-  "1": "第一種低層住居専用地域",
-  "2": "第二種低層住居専用地域",
-  "3": "第一種中高層住居専用地域",
-  "4": "第二種中高層住居専用地域",
-  "5": "第一種住居地域",
-  "6": "第二種住居地域",
-  "7": "準住居地域",
-  "8": "田園住居地域",
-  "9": "近隣商業地域",
+  "1":  "第一種低層住居専用地域",
+  "2":  "第二種低層住居専用地域",
+  "3":  "第一種中高層住居専用地域",
+  "4":  "第二種中高層住居専用地域",
+  "5":  "第一種住居地域",
+  "6":  "第二種住居地域",
+  "7":  "準住居地域",
+  "8":  "田園住居地域",
+  "9":  "近隣商業地域",
   "10": "商業地域",
   "11": "準工業地域",
   "12": "工業地域",
   "13": "工業専用地域",
 };
 
-/** 防火地域コード → 日本語ラベル（KSJ A29_007 準拠） */
-const FIRE_ZONE_LABELS: Record<string, string> = {
+/** XKT014 防火地域コード → 日本語ラベル */
+const FIRE_LABELS: Record<string, string> = {
   "1": "防火地域",
   "2": "準防火地域",
   "3": "法22条区域",
 };
 
-// ── タイル変換 ───────────────────────────────────────────────────────────────
+// ── タイル座標変換 ───────────────────────────────────────────────────────────
 
-function lngLatToTile(
-  lat: number,
-  lng: number,
-  z: number,
-): { x: number; y: number } {
+function lngLatToTile(lat: number, lng: number, z: number): { x: number; y: number } {
   const n = 2 ** z;
   const x = Math.floor(((lng + 180) / 360) * n);
   const latRad = (lat * Math.PI) / 180;
@@ -105,13 +118,13 @@ interface GeoJsonFC {
 export class ReinfilibProvider implements InvestigationProvider {
   readonly name = "reinfolib";
   readonly description =
-    "国土交通省 不動産情報ライブラリ API — 用途地域・建蔽率・容積率・防火地域・高度地区";
+    "国土交通省 不動産情報ライブラリ — XKT002(用途地域) / XKT014(防火地域)";
   readonly fields: (keyof InvestigationResult)[] = [
     "zoningDistrict",
     "buildingCoverageRatio",
     "floorAreaRatio",
-    "firePreventionZone",
     "heightDistrict",
+    "firePreventionZone",
   ];
 
   private readonly apiKey: string;
@@ -121,7 +134,7 @@ export class ReinfilibProvider implements InvestigationProvider {
     if (!key) {
       throw new Error(
         "REINFOLIB_API_KEY が設定されていません。" +
-          "/etc/property-management/app.env を確認してください。",
+        "/etc/property-management/app.env を確認してください。",
       );
     }
     this.apiKey = key;
@@ -136,32 +149,48 @@ export class ReinfilibProvider implements InvestigationProvider {
     const lng = query.gpsLng ?? geo?.lng ?? null;
 
     if (lat === null || lng === null) {
-      throw new Error(
-        `住所のジオコーディングに失敗しました: "${query.address}"`,
-      );
+      throw new Error(`住所のジオコーディングに失敗しました: "${query.address}"`);
     }
 
-    // 2. REINFOLIB 都市計画情報 (XPT001)
-    const zoningData = await this.fetchZoning(lat, lng);
+    const { x, y } = lngLatToTile(lat, lng, ZOOM);
+
+    // 2. XKT002 — 用途地域・建蔽率・容積率・高度地区
+    const zoningResult = await this.callTileApi("XKT002", x, y);
+
+    // 3. XKT014 — 防火・準防火地域
+    const fireResult = await this.callTileApi("XKT014", x, y);
+
+    // 4. マージ
+    const data: InvestigationResult = {
+      ...this.parseZoning(zoningResult),
+      ...this.parseFireZone(fireResult),
+    };
+
+    const emptyEndpoints: string[] = [];
+    if ((zoningResult.features ?? []).length === 0) emptyEndpoints.push("XKT002(用途地域)");
+    if ((fireResult.features ?? []).length === 0)   emptyEndpoints.push("XKT014(防火地域)");
 
     return {
       source: "国土交通省 不動産情報ライブラリ",
-      data: zoningData,
+      data,
       meta: {
         normalizedAddress: geo?.title ?? null,
         geocodedLat: lat,
         geocodedLng: lng,
         geocodeSource: query.gpsLat != null ? "property-db" : "gsi",
         zoom: ZOOM,
+        tileX: x,
+        tileY: y,
+        // 200 OK だが features 空だったエンドポイント（指定なし地域では正常）
+        emptyEndpoints,
       },
     };
   }
 
   async healthCheck(): Promise<boolean> {
     try {
-      // キー疎通確認: タイル (0,0,0) は常に存在する
       const res = await fetch(
-        `${REINFOLIB_BASE}/XPT001?response_format=geojson&epsg=4326&z=0&x=0&y=0`,
+        `${REINFOLIB_BASE}/XKT002?response_format=geojson&epsg=4326&z=0&x=0&y=0`,
         {
           method: "HEAD",
           headers: this.authHeaders(),
@@ -180,10 +209,7 @@ export class ReinfilibProvider implements InvestigationProvider {
     return { "Ocp-Apim-Subscription-Key": this.apiKey };
   }
 
-  /**
-   * 国土地理院 住所検索 API でジオコーディング（無料・認証不要）。
-   * 失敗時は null を返す（プロバイダ内で上位エラーに変換する）。
-   */
+  /** 国土地理院 住所検索 API。失敗時は null を返す（例外を投げない）。 */
   private async geocode(
     address: string,
   ): Promise<{ lat: number; lng: number; title: string } | null> {
@@ -191,12 +217,9 @@ export class ReinfilibProvider implements InvestigationProvider {
       const url = `${GSI_GEOCODE_URL}?q=${encodeURIComponent(address)}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
       if (!res.ok) return null;
-
       const results: GsiFeature[] = await res.json();
       if (!Array.isArray(results) || results.length === 0) return null;
-
-      // GeoJSON coordinates は [lng, lat]
-      const [lng, lat] = results[0].geometry.coordinates;
+      const [lng, lat] = results[0].geometry.coordinates; // GeoJSON: [lng, lat]
       return { lat, lng, title: results[0].properties.title };
     } catch {
       return null;
@@ -204,16 +227,13 @@ export class ReinfilibProvider implements InvestigationProvider {
   }
 
   /**
-   * REINFOLIB XPT001 (都市計画情報) を呼び出す。
-   * タイル座標へ変換して GeoJSON を取得し、含まれる用途地域フィーチャをパースする。
+   * REINFOLIB タイル API を呼び出す。
+   * 200 OK でも features が空配列の場合がある（指定なし地域では正常）。
+   * HTTP エラー時のみ throw する。
    */
-  private async fetchZoning(
-    lat: number,
-    lng: number,
-  ): Promise<InvestigationResult> {
-    const { x, y } = lngLatToTile(lat, lng, ZOOM);
+  private async callTileApi(endpoint: string, x: number, y: number): Promise<GeoJsonFC> {
     const url =
-      `${REINFOLIB_BASE}/XPT001` +
+      `${REINFOLIB_BASE}/${endpoint}` +
       `?response_format=geojson&epsg=4326&z=${ZOOM}&x=${x}&y=${y}`;
 
     const res = await fetch(url, {
@@ -223,77 +243,87 @@ export class ReinfilibProvider implements InvestigationProvider {
 
     if (!res.ok) {
       throw new Error(
-        `不動産情報ライブラリ API エラー: HTTP ${res.status} ${res.statusText}`,
+        `不動産情報ライブラリ ${endpoint} エラー: HTTP ${res.status} ${res.statusText}`,
       );
     }
 
-    const json: GeoJsonFC = await res.json();
-    return this.parseZoningFeature(json);
+    return res.json() as Promise<GeoJsonFC>;
   }
 
   /**
-   * GeoJSON フィーチャから InvestigationResult へ変換する。
+   * XKT002 (用途地域) GeoJSON → InvestigationResult
    *
-   * REINFOLIB は KSJ A29 の属性コードを使用する。
-   * 各属性に複数の候補名を列挙し、最初にヒットした値を採用する。
+   * features が空配列の場合は {} を返す（市街化調整区域・白地地域では正常）。
+   *
+   * 属性名候補（API仕様変更時はここを修正）:
+   *   用途地域コード : youto / youto_cd / 用途地域
+   *   建蔽率(%)     : kenpei / kenpei_ritsu / 建蔽率
+   *   容積率(%)     : yoseki / yoseki_ritsu / 容積率
+   *   高度地区      : kodo / kodo_chiku / 高度地区
    */
-  private parseZoningFeature(fc: GeoJsonFC): InvestigationResult {
-    const props = fc?.features?.[0]?.properties;
-    if (!props) return {};
+  private parseZoning(fc: GeoJsonFC): InvestigationResult {
+    const props = fc.features?.[0]?.properties;
+    if (!props) return {}; // features 空 = 指定なし。エラーではない
 
     const result: InvestigationResult = {};
 
-    // 用途地域コード (A29_002)
-    const zoneCode = this.pick(props, ["A29_002", "youto_chiiki_cd", "youto"]);
-    if (zoneCode !== null) {
-      const code = String(zoneCode);
-      result.zoningDistrict =
-        ZONE_LABELS[code] ?? `用途地域コード: ${code}`;
+    // 用途地域
+    const zoneRaw = this.pick(props, ["youto", "youto_cd", "用途地域", "youto_chiiki"]);
+    if (zoneRaw !== null) {
+      const code = String(zoneRaw).trim();
+      result.zoningDistrict = ZONE_LABELS[code] ?? code;
     }
 
-    // 建蔽率 % (A29_003)
-    const bcr = this.pickNumber(props, ["A29_003", "kenpei_ritsu", "bcr"]);
+    // 建蔽率
+    const bcr = this.pickNum(props, ["kenpei", "kenpei_ritsu", "建蔽率"]);
     if (bcr !== null && bcr > 0) result.buildingCoverageRatio = bcr;
 
-    // 容積率 % (A29_004)
-    const far = this.pickNumber(props, ["A29_004", "yoseki_ritsu", "far"]);
+    // 容積率
+    const far = this.pickNum(props, ["yoseki", "yoseki_ritsu", "容積率"]);
     if (far !== null && far > 0) result.floorAreaRatio = far;
 
-    // 高度地区 (A29_005)
-    const hd = this.pick(props, ["A29_005", "kodo_chiku", "height_district"]);
-    if (hd !== null && hd !== "") result.heightDistrict = String(hd);
+    // 高度地区
+    const hd = this.pick(props, ["kodo", "kodo_chiku", "高度地区"]);
+    if (hd !== null && String(hd).trim() !== "") result.heightDistrict = String(hd).trim();
 
-    // 防火地域コード (A29_007)
-    const fireCode = this.pick(props, ["A29_007", "bouka_chiiki_cd", "bouka"]);
-    if (fireCode !== null) {
-      const code = String(fireCode);
+    return result;
+  }
+
+  /**
+   * XKT014 (防火・準防火地域) GeoJSON → InvestigationResult
+   *
+   * features が空配列の場合は {} を返す（防火指定なしの地域では正常）。
+   *
+   * 属性名候補:
+   *   防火種別コード: bouka / bouka_cd / 防火地域 / 防火種別
+   */
+  private parseFireZone(fc: GeoJsonFC): InvestigationResult {
+    const props = fc.features?.[0]?.properties;
+    if (!props) return {}; // features 空 = 防火指定なし。エラーではない
+
+    const result: InvestigationResult = {};
+
+    const fireRaw = this.pick(props, ["bouka", "bouka_cd", "防火地域", "防火種別"]);
+    if (fireRaw !== null) {
+      const code = String(fireRaw).trim();
       if (code !== "0" && code !== "") {
-        result.firePreventionZone =
-          FIRE_ZONE_LABELS[code] ?? `防火地域コード: ${code}`;
+        result.firePreventionZone = FIRE_LABELS[code] ?? code;
       }
     }
 
     return result;
   }
 
-  /** 複数の属性名候補から最初に存在する値を返す。存在しなければ null。 */
-  private pick(
-    props: Record<string, unknown>,
-    keys: string[],
-  ): unknown | null {
+  /** 複数の属性名候補から最初に存在する値を返す。なければ null。 */
+  private pick(props: Record<string, unknown>, keys: string[]): unknown | null {
     for (const k of keys) {
-      if (k in props && props[k] !== null && props[k] !== undefined) {
-        return props[k];
-      }
+      if (k in props && props[k] !== null && props[k] !== undefined) return props[k];
     }
     return null;
   }
 
-  /** pick の数値版。NaN/null は null。 */
-  private pickNumber(
-    props: Record<string, unknown>,
-    keys: string[],
-  ): number | null {
+  /** pick の数値版。NaN は null。 */
+  private pickNum(props: Record<string, unknown>, keys: string[]): number | null {
     const v = this.pick(props, keys);
     if (v === null) return null;
     const n = Number(v);
