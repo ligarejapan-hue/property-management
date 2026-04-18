@@ -310,8 +310,9 @@ export class ReinfilibProvider implements InvestigationProvider {
    *
    * features が空配列の場合は {} を返す（防火指定なしの地域では正常）。
    *
-   * 属性名候補:
-   *   防火種別コード: bouka / bouka_cd / 防火地域 / 防火種別
+   * 公式確認済み属性名:
+   *   fire_prevention_ja : 防火地域区分（日本語ラベル）← 最優先
+   *   kubun_id           : 区分ID（コード値のフォールバック）
    */
   private parseFireZone(fc: GeoJsonFC): InvestigationResult {
     const props = fc.features?.[0]?.properties;
@@ -319,11 +320,13 @@ export class ReinfilibProvider implements InvestigationProvider {
 
     const result: InvestigationResult = {};
 
-    const fireRaw = this.pick(props, ["bouka", "bouka_cd", "防火地域", "防火種別"]);
+    const fireRaw = this.pick(props, ["fire_prevention_ja", "kubun_id"]);
     if (fireRaw !== null) {
-      const code = String(fireRaw).trim();
-      if (code !== "0" && code !== "") {
-        result.firePreventionZone = FIRE_LABELS[code] ?? code;
+      const label = String(fireRaw).trim();
+      if (label !== "0" && label !== "") {
+        // fire_prevention_ja はすでに日本語ラベルのためそのまま使う。
+        // kubun_id がコード値の場合は FIRE_LABELS で変換し、未知なら値をそのまま残す。
+        result.firePreventionZone = FIRE_LABELS[label] ?? label;
       }
     }
 
