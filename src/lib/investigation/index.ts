@@ -32,6 +32,7 @@ import type {
 } from "./types";
 import { StubProvider } from "./stub-provider";
 import { KsjZoningProvider } from "./ksj-zoning-provider";
+import { ReinfilibProvider } from "./reinfolib-provider";
 
 // Re-export types for convenience
 export type {
@@ -70,6 +71,12 @@ function getProviders(): InvestigationProvider[] {
   // 用途地域・建蔽率・容積率・防火地域 (国土数値情報 A29)
   if (process.env.KSJ_API_URL) {
     providers.push(new KsjZoningProvider());
+  }
+
+  // 不動産情報ライブラリ (国土交通省) — 用途地域・建蔽率・容積率・防火地域・高度地区
+  // KSJ より優先度が高いため後ろに配置（last-write-wins）
+  if (process.env.REINFOLIB_API_KEY) {
+    providers.push(new ReinfilibProvider());
   }
   //
   // 路線価 (国税庁):

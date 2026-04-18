@@ -332,6 +332,18 @@ export async function runAndUpsertInvestigation(
     }
   }
 
+  // Geocoding 結果をプロバイダの meta から取得（reinfolib 等がセットする）
+  let geocodedLat: number | null = null;
+  let geocodedLng: number | null = null;
+  let geocodedAddress: string | null = null;
+  for (const p of result.providers) {
+    if (p.status === "success" && p.meta) {
+      if (typeof p.meta.geocodedLat === "number") geocodedLat = p.meta.geocodedLat;
+      if (typeof p.meta.geocodedLng === "number") geocodedLng = p.meta.geocodedLng;
+      if (typeof p.meta.normalizedAddress === "string") geocodedAddress = p.meta.normalizedAddress;
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const rawPayloadJson = JSON.parse(JSON.stringify(result));
 
@@ -340,8 +352,9 @@ export async function runAndUpsertInvestigation(
       where: { propertyId },
       data: {
         status: "needs_review",
-        latitude: context.gpsLat ?? null,
-        longitude: context.gpsLng ?? null,
+        latitude: context.gpsLat ?? geocodedLat ?? null,
+        longitude: context.gpsLng ?? geocodedLng ?? null,
+        normalizedAddress: geocodedAddress ?? undefined,
         zoningDistrict: (data.zoningDistrict as string) ?? null,
         buildingCoverageRatio: toDecimal(data.buildingCoverageRatio),
         floorAreaRatio: toDecimal(data.floorAreaRatio),

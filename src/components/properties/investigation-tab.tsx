@@ -453,6 +453,26 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
         </div>
       )}
 
+      {/* --- 参考情報・出典表示 --- */}
+      {investigation && !editMode && (
+        <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700">
+          <p className="font-medium">※ 参考情報</p>
+          <p className="mt-0.5 text-blue-600">
+            この調査情報は自動取得した参考情報です。実際の規制内容は各自治体・法務局等でご確認ください。
+          </p>
+          {investigation.sourceSummary && (
+            <p className="mt-1 text-blue-500">
+              出典: {investigation.sourceSummary}（加工して表示）
+            </p>
+          )}
+          {!investigation.sourceSummary && (
+            <p className="mt-1 text-blue-500">
+              出典: 国土交通省 不動産情報ライブラリ（加工して表示）
+            </p>
+          )}
+        </div>
+      )}
+
       {/* --- Source summary + auto fetch info (display mode) --- */}
       {investigation?.autoFetchSummary && !editMode && (
         <div className="rounded-md bg-gray-50 p-3 text-xs text-gray-500">
