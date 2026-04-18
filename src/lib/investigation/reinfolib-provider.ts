@@ -11,34 +11,52 @@
  *   オーケストレーターが fetch_failed として記録する。
  *
  * ── 利用エンドポイント ────────────────────────────────────────────────────
- *   いずれも GeoJSON タイル API。共通パラメータ:
- *     response_format=geojson  epsg=4326  z={z}  x={x}  y={y}
+ *   URL 形式（公式マニュアル準拠）:
+ *     GET {BASE}/{endpoint}?response_format=geojson&z={z}&x={x}&y={y}
+ *   z/x/y はクエリパラメータ（パスセグメントではない）。
+ *
+ *   curl 再現例（z=16, x=58192, y=25816 は東京都心付近）:
+ *     curl -H "Ocp-Apim-Subscription-Key: <KEY>" \
+ *       "https://www.reinfolib.mlit.go.jp/ex-api/external/XKT002?response_format=geojson&z=16&x=58192&y=25816"
  *
  *   1. 国土地理院 住所検索 API（無料・認証不要）
  *      GET https://msearch.gsi.go.jp/address-search/AddressSearch?q={住所}
  *      → 住所を緯度経度・正規化住所に変換する
  *
  *   2. XKT002 — 用途地域
- *      GET {BASE}/XKT002?response_format=geojson&epsg=4326&z=&x=&y=
- *      → 用途地域 / 建蔽率 / 容積率 / 高度地区
- *      ※ 200 でも features が空配列の場合がある（市街化調整区域・白地等）
+ *      → 用途地域 / 建蔽率 / 容積率
+ *      ※ 200 でも features 空配列あり（市街化調整区域・白地等）
  *
  *   3. XKT014 — 防火・準防火地域
- *      GET {BASE}/XKT014?response_format=geojson&epsg=4326&z=&x=&y=
  *      → 防火地域 / 準防火地域 / 法22条区域
- *      ※ 200 でも features が空配列の場合がある（指定なしの地域）
+ *      ※ 200 でも features 空配列あり（指定なし地域）
  *
- *   ※ XPT001 は「不動産取引価格情報のポイントデータ」であり、
- *     用途地域・防火地域の取得には使用しない。
+ *   4. XKT025 — 洪水浸水想定区域
+ *      → floodRiskLevel（深さスケール or "指定あり"）
+ *
+ *   5. XKT016 — 土砂災害警戒区域
+ *      → sedimentRiskCategory（区分ラベル or "指定あり"）
+ *
+ *   6. XKT026 — 津波浸水想定区域
+ *      → tsunamiRiskLevel（深さスケール or "指定あり"）
+ *
+ *   7. XKT027 — 高潮浸水想定区域
+ *      → stormSurgeRiskLevel（深さスケール or "指定あり"）
+ *
+ *   8. XKT030 — 道路情報
+ *      → roadType / roadWidth（道路種別・幅員）
  *
  * ── 空データの扱い ────────────────────────────────────────────────────────
  *   - features が空配列 → そのフィールドは取得なし（エラーにしない）
- *   - 取得できなかったフィールドは InvestigationResult に含まれない
+ *   - タイルAPI エラーは個別 catch → tileErrors に記録し provider は success 扱い
+ *     （GSI ジオコーディング成功時は座標を常に保存するため）
  *   - source には "国土交通省 不動産情報ライブラリ" を返す
  *
  * ── 属性名について ────────────────────────────────────────────────────────
+ *   ハザード系 API (XKT025/016/026/027/030) の正式属性名は未確定のため
  *   各 parseXxx() メソッドで複数の候補名を列挙している。
- *   API 仕様変更でフィールド名が変わった場合はそこを修正すること。
+ *   candidates に一致しない場合は "指定あり" を返す（フィールド存在は確認済み）。
+ *   API 仕様変更・属性名確定時はそこを修正すること。
  */
 
 import type {
@@ -135,6 +153,12 @@ export class ReinfilibProvider implements InvestigationProvider {
     "buildingCoverageRatio",
     "floorAreaRatio",
     "firePreventionZone",
+    "floodRiskLevel",
+    "sedimentRiskCategory",
+    "tsunamiRiskLevel",
+    "stormSurgeRiskLevel",
+    "roadType",
+    "roadWidth",
     // heightDistrict: 公式確認済みAPIなし。XKT024 等の仕様が確定次第追加する
   ];
 
@@ -178,45 +202,71 @@ export class ReinfilibProvider implements InvestigationProvider {
       tileY: y,
     };
 
-    // 2. XKT002 — 用途地域・建蔽率・容積率
-    //    タイルAPIエラーは個別に catch して tileErrors に記録する。
-    //    throw せずに空 FeatureCollection として扱うことで、
-    //    プロバイダ全体の fetch は成功扱いになり meta が service 層に渡る。
-    let zoningResult: GeoJsonFC = { type: "FeatureCollection", features: [] };
-    let fireResult:   GeoJsonFC = { type: "FeatureCollection", features: [] };
+    // 2. 全タイルAPIを並列呼び出し
+    //    タイルAPIエラーは tryCall 内で catch → tileErrors に記録し空 FC を返す。
+    //    throw しないことで fetch() 全体は成功扱いになり meta が service 層に渡る。
+    const EMPTY: GeoJsonFC = { type: "FeatureCollection", features: [] };
     const tileErrors: string[] = [];
 
-    try {
-      zoningResult = await this.callTileApi("XKT002", x, y);
-    } catch (err) {
-      tileErrors.push(err instanceof Error ? err.message : String(err));
-    }
+    const tryCall = async (ep: string): Promise<GeoJsonFC> => {
+      try {
+        return await this.callTileApi(ep, x, y);
+      } catch (err) {
+        tileErrors.push(err instanceof Error ? err.message : String(err));
+        return EMPTY;
+      }
+    };
 
-    // 3. XKT014 — 防火・準防火地域
-    try {
-      fireResult = await this.callTileApi("XKT014", x, y);
-    } catch (err) {
-      tileErrors.push(err instanceof Error ? err.message : String(err));
-    }
+    const [
+      zoningResult,   // XKT002 用途地域
+      fireResult,     // XKT014 防火地域
+      floodResult,    // XKT025 洪水浸水想定
+      sedimentResult, // XKT016 土砂災害警戒
+      tsunamiResult,  // XKT026 津波浸水想定
+      stormResult,    // XKT027 高潮浸水想定
+      roadResult,     // XKT030 道路情報
+    ] = await Promise.all([
+      tryCall("XKT002"),
+      tryCall("XKT014"),
+      tryCall("XKT025"),
+      tryCall("XKT016"),
+      tryCall("XKT026"),
+      tryCall("XKT027"),
+      tryCall("XKT030"),
+    ]);
 
-    // 4. マージ
+    // 3. マージ
     const data: InvestigationResult = {
       ...this.parseZoning(zoningResult),
       ...this.parseFireZone(fireResult),
+      ...this.parseFlood(floodResult),
+      ...this.parseSediment(sedimentResult),
+      ...this.parseTsunami(tsunamiResult),
+      ...this.parseStormSurge(stormResult),
+      ...this.parseRoad(roadResult),
     };
 
-    const emptyEndpoints: string[] = [];
-    if ((zoningResult.features ?? []).length === 0) emptyEndpoints.push("XKT002(用途地域)");
-    if ((fireResult.features ?? []).length === 0)   emptyEndpoints.push("XKT014(防火地域)");
+    // 200 OK だが features 空だったエンドポイント（指定なし地域では正常）
+    const emptyEndpoints = (
+      [
+        ["XKT002(用途地域)",   zoningResult],
+        ["XKT014(防火地域)",   fireResult],
+        ["XKT025(洪水浸水)",   floodResult],
+        ["XKT016(土砂災害)",   sedimentResult],
+        ["XKT026(津波浸水)",   tsunamiResult],
+        ["XKT027(高潮浸水)",   stormResult],
+        ["XKT030(道路情報)",   roadResult],
+      ] as [string, GeoJsonFC][]
+    )
+      .filter(([, fc]) => (fc.features ?? []).length === 0)
+      .map(([name]) => name);
 
     return {
       source: "国土交通省 不動産情報ライブラリ",
       data,
       meta: {
         ...baseMeta,
-        // 200 OK だが features 空だったエンドポイント（指定なし地域では正常）
         emptyEndpoints,
-        // タイルAPIがエラーを返した場合のみ存在するキー
         ...(tileErrors.length > 0 && { tileErrors }),
       },
     };
@@ -372,6 +422,68 @@ export class ReinfilibProvider implements InvestigationProvider {
       }
     }
 
+    return result;
+  }
+
+  /**
+   * XKT025 (洪水浸水想定区域) → floodRiskLevel
+   * features 空 = 区域外。属性名未確定のため candidates で試行し、
+   * 一致しない場合は "指定あり" を返す。
+   */
+  private parseFlood(fc: GeoJsonFC): InvestigationResult {
+    if ((fc.features ?? []).length === 0) return {};
+    const props = fc.features![0].properties;
+    const raw = this.pick(props, ["scale", "shinsui_scale", "depth_scale", "class_ja", "rank_ja", "description"]);
+    return { floodRiskLevel: raw != null ? String(raw) : "指定あり" };
+  }
+
+  /**
+   * XKT016 (土砂災害警戒区域) → sedimentRiskCategory
+   * kubun_id: 1=警戒区域 / 2=特別警戒区域
+   */
+  private parseSediment(fc: GeoJsonFC): InvestigationResult {
+    if ((fc.features ?? []).length === 0) return {};
+    const props = fc.features![0].properties;
+    const raw = this.pick(props, ["kubun_ja", "kubun_id", "category_ja", "type_ja", "saigai_kubun"]);
+    if (raw === null) return { sedimentRiskCategory: "指定あり" };
+    const s = String(raw);
+    if (s === "1") return { sedimentRiskCategory: "土砂災害警戒区域" };
+    if (s === "2") return { sedimentRiskCategory: "土砂災害特別警戒区域" };
+    return { sedimentRiskCategory: s };
+  }
+
+  /**
+   * XKT026 (津波浸水想定区域) → tsunamiRiskLevel
+   */
+  private parseTsunami(fc: GeoJsonFC): InvestigationResult {
+    if ((fc.features ?? []).length === 0) return {};
+    const props = fc.features![0].properties;
+    const raw = this.pick(props, ["scale", "depth_scale", "tsunami_scale", "class_ja", "rank_ja"]);
+    return { tsunamiRiskLevel: raw != null ? String(raw) : "指定あり" };
+  }
+
+  /**
+   * XKT027 (高潮浸水想定区域) → stormSurgeRiskLevel
+   */
+  private parseStormSurge(fc: GeoJsonFC): InvestigationResult {
+    if ((fc.features ?? []).length === 0) return {};
+    const props = fc.features![0].properties;
+    const raw = this.pick(props, ["scale", "depth_scale", "takashio_scale", "class_ja", "rank_ja"]);
+    return { stormSurgeRiskLevel: raw != null ? String(raw) : "指定あり" };
+  }
+
+  /**
+   * XKT030 (道路情報) → roadType / roadWidth
+   * 属性名未確定のため candidates で試行する。
+   */
+  private parseRoad(fc: GeoJsonFC): InvestigationResult {
+    if ((fc.features ?? []).length === 0) return {};
+    const props = fc.features![0].properties;
+    const result: InvestigationResult = {};
+    const typeRaw = this.pick(props, ["road_type_ja", "road_type", "douro_kubun_ja", "douro_kubun"]);
+    if (typeRaw != null) result.roadType = String(typeRaw);
+    const widthRaw = this.pickNum(props, ["width_m", "road_width", "douro_width", "width"]);
+    if (widthRaw != null && widthRaw > 0) result.roadWidth = widthRaw;
     return result;
   }
 

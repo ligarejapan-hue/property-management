@@ -318,8 +318,12 @@ export async function runAndUpsertInvestigation(
 
   // Build hazard summary
   const hazardParts: string[] = [];
-  if (data.firePreventionZone) hazardParts.push(`防火: ${data.firePreventionZone}`);
-  if (data.scenicRestriction) hazardParts.push(`景観: ${data.scenicRestriction}`);
+  if (data.firePreventionZone)   hazardParts.push(`防火: ${data.firePreventionZone}`);
+  if (data.floodRiskLevel)       hazardParts.push(`洪水: ${data.floodRiskLevel}`);
+  if (data.sedimentRiskCategory) hazardParts.push(`土砂: ${data.sedimentRiskCategory}`);
+  if (data.tsunamiRiskLevel)     hazardParts.push(`津波: ${data.tsunamiRiskLevel}`);
+  if (data.stormSurgeRiskLevel)  hazardParts.push(`高潮: ${data.stormSurgeRiskLevel}`);
+  if (data.scenicRestriction)    hazardParts.push(`景観: ${data.scenicRestriction}`);
   const hazardSummary = hazardParts.length > 0 ? hazardParts.join(" / ") : null;
 
   // Build field sources map (field→source)
