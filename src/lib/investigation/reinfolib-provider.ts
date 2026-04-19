@@ -137,13 +137,98 @@ interface GsiFeature {
   properties: { addressCode: string; title: string };
 }
 
+type Ring = [number, number][];
+
+interface GeoJsonPolygon {
+  type: "Polygon";
+  coordinates: Ring[];
+}
+
+interface GeoJsonMultiPolygon {
+  type: "MultiPolygon";
+  coordinates: Ring[][];
+}
+
+type GeoJsonGeometry =
+  | GeoJsonPolygon
+  | GeoJsonMultiPolygon
+  | { type: string; coordinates: unknown };
+
+interface GeoJsonFeature {
+  type: string;
+  properties: Record<string, unknown>;
+  geometry?: GeoJsonGeometry | null;
+}
+
 interface GeoJsonFC {
   type: string;
-  features?: Array<{
-    type: string;
-    properties: Record<string, unknown>;
-    geometry?: unknown;
-  }>;
+  features?: GeoJsonFeature[];
+}
+
+/** parseZoning が返す空間選択の詳細。raw_payload_json.providers[reinfolib].meta.zoning に格納される。 */
+interface ZoningMeta {
+  returnedFeatureCount: number;
+  spatialMatchCount: number;
+  matchedFeatureIndex: number | null;
+  matchedUseAreaJa: string | null;
+  selectionReason: string;
+}
+
+// ── 空間ユーティリティ ────────────────────────────────────────────────────────
+
+/** Ray-casting: 点 (lng, lat) がリング内にあるか判定する。 */
+function pointInRing(lng: number, lat: number, ring: Ring): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersect =
+      (yi > lat) !== (yj > lat) &&
+      lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** 点 (lng, lat) が Polygon の外周リング内にあるか判定する（ホール無視）。 */
+function pointInPolygon(lng: number, lat: number, coords: Ring[]): boolean {
+  return coords.length > 0 && pointInRing(lng, lat, coords[0]);
+}
+
+/** 点 (lng, lat) が GeoJSON ジオメトリに含まれるか判定する。 */
+function pointInGeometry(lng: number, lat: number, geom: GeoJsonGeometry): boolean {
+  if (geom.type === "Polygon") {
+    return pointInPolygon(lng, lat, (geom as GeoJsonPolygon).coordinates);
+  }
+  if (geom.type === "MultiPolygon") {
+    return (geom as GeoJsonMultiPolygon).coordinates.some((poly) =>
+      pointInPolygon(lng, lat, poly),
+    );
+  }
+  return false;
+}
+
+/** Shoelace 公式でリングの近似面積（lng/lat 二乗単位）を返す。 */
+function ringArea(ring: Ring): number {
+  let area = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    area += (ring[j][0] + ring[i][0]) * (ring[j][1] - ring[i][1]);
+  }
+  return Math.abs(area / 2);
+}
+
+/** ジオメトリの近似面積を返す（小さいほど絞り込み済みの polygon）。 */
+function geometryApproxArea(geom: GeoJsonGeometry): number {
+  if (geom.type === "Polygon") {
+    return ringArea((geom as GeoJsonPolygon).coordinates[0] ?? []);
+  }
+  if (geom.type === "MultiPolygon") {
+    return (geom as GeoJsonMultiPolygon).coordinates.reduce(
+      (sum, poly) => sum + ringArea(poly[0] ?? []),
+      0,
+    );
+  }
+  return Infinity;
 }
 
 // ── Provider ─────────────────────────────────────────────────────────────────
@@ -246,8 +331,9 @@ export class ReinfilibProvider implements InvestigationProvider {
     ]);
 
     // 3. マージ
+    const zoningParsed = this.parseZoning(zoningResult, lng, lat);
     const data: InvestigationResult = {
-      ...this.parseZoning(zoningResult),
+      ...zoningParsed.data,
       ...this.parseFireZone(fireResult),
       ...this.parseLiquefaction(liquefactionResult),
       ...this.parseFlood(floodResult),
@@ -278,6 +364,7 @@ export class ReinfilibProvider implements InvestigationProvider {
       data,
       meta: {
         ...baseMeta,
+        zoning: zoningParsed.meta,
         emptyEndpoints,
         ...(tileErrors.length > 0 && { tileErrors }),
       },
@@ -377,38 +464,118 @@ export class ReinfilibProvider implements InvestigationProvider {
   // ── Parse methods ─────────────────────────────────────────────────────────
 
   /**
-   * XKT002 (用途地域) GeoJSON → InvestigationResult
+   * XKT002 (用途地域) GeoJSON → { data, meta }
+   *
+   * features に含まれる polygon のうち点 (lng, lat) を含むものだけを候補にし、
+   * 空間的に一致する feature の属性を採用する。
+   *
+   * 選択ロジック:
+   *   - 一致 0 件 → zoningDistrict 等は保存しない
+   *   - 一致 1 件 → そのまま採用
+   *   - 一致複数:
+   *       - 全候補で use_area_ja が同一 → 最小面積 polygon を採用
+   *       - use_area_ja が異なる → 保存しない（確信が持てない）
    *
    * 公式確認済み属性名:
    *   use_area_ja                  : 用途地域（日本語ラベル）
    *   u_building_coverage_ratio_ja : 建蔽率（"60%" 等の文字列）
    *   u_floor_area_ratio_ja        : 容積率（"200%" 等の文字列）
    */
-  private parseZoning(fc: GeoJsonFC): InvestigationResult {
-    const props = fc.features?.[0]?.properties;
-    if (!props) return {};
+  private parseZoning(
+    fc: GeoJsonFC,
+    lng: number,
+    lat: number,
+  ): { data: InvestigationResult; meta: ZoningMeta } {
+    const features = fc.features ?? [];
+    const returnedFeatureCount = features.length;
 
-    const result: InvestigationResult = {};
+    // 空間フィルタ: 点を含む feature のみ候補に
+    const spatialMatches = features
+      .map((feature, index) => ({ feature, index }))
+      .filter(({ feature }) =>
+        !!feature.geometry && pointInGeometry(lng, lat, feature.geometry),
+      );
 
-    const zoneRaw = this.pick(props, ["use_area_ja", "youto", "youto_cd"]);
-    if (zoneRaw !== null) {
-      const label = String(zoneRaw).trim();
-      result.zoningDistrict = ZONE_LABELS[label] ?? label;
+    const spatialMatchCount = spatialMatches.length;
+    let matchedFeatureIndex: number | null = null;
+    let matchedUseAreaJa: string | null = null;
+    let selectionReason: string;
+    const data: InvestigationResult = {};
+
+    const extractFields = (props: Record<string, unknown>): void => {
+      const zoneRaw = this.pick(props, ["use_area_ja", "youto", "youto_cd"]);
+      if (zoneRaw !== null) {
+        const label = String(zoneRaw).trim();
+        data.zoningDistrict = ZONE_LABELS[label] ?? label;
+      }
+      const bcrRaw = this.pick(props, ["u_building_coverage_ratio_ja", "kenpei", "kenpei_ritsu"]);
+      if (bcrRaw !== null) {
+        const n = parseRatioPercent(String(bcrRaw));
+        if (n !== null && n > 0) data.buildingCoverageRatio = n;
+      }
+      const farRaw = this.pick(props, ["u_floor_area_ratio_ja", "yoseki", "yoseki_ritsu"]);
+      if (farRaw !== null) {
+        const n = parseRatioPercent(String(farRaw));
+        if (n !== null && n > 0) data.floorAreaRatio = n;
+      }
+    };
+
+    if (spatialMatchCount === 0) {
+      selectionReason =
+        returnedFeatureCount === 0 ? "no features returned" : "no spatial match";
+    } else if (spatialMatchCount === 1) {
+      const { feature, index } = spatialMatches[0];
+      matchedFeatureIndex = index;
+      matchedUseAreaJa =
+        (this.pick(feature.properties, ["use_area_ja"]) as string | null) ?? null;
+      selectionReason = "unique spatial match";
+      extractFields(feature.properties);
+    } else {
+      // 複数候補: 面積昇順でソート
+      const sorted = spatialMatches.slice().sort((a, b) => {
+        const aArea = a.feature.geometry
+          ? geometryApproxArea(a.feature.geometry)
+          : Infinity;
+        const bArea = b.feature.geometry
+          ? geometryApproxArea(b.feature.geometry)
+          : Infinity;
+        return aArea - bArea;
+      });
+
+      const smallest = sorted[0];
+      // 全候補の use_area_ja が同じか確認
+      const zones = sorted.map(
+        ({ feature }) =>
+          (this.pick(feature.properties, ["use_area_ja", "youto", "youto_cd"]) as string | null) ??
+          null,
+      );
+      const allSameZone = zones.every((z) => z === zones[0]);
+
+      if (allSameZone) {
+        matchedFeatureIndex = smallest.index;
+        matchedUseAreaJa =
+          (this.pick(smallest.feature.properties, ["use_area_ja"]) as string | null) ?? null;
+        selectionReason = `multiple matches (${spatialMatchCount}), same zone, picked smallest area`;
+        extractFields(smallest.feature.properties);
+      } else {
+        // ゾーンが異なる → 保存しない
+        matchedFeatureIndex = smallest.index;
+        matchedUseAreaJa =
+          (this.pick(smallest.feature.properties, ["use_area_ja"]) as string | null) ?? null;
+        selectionReason = `multiple matches (${spatialMatchCount}), different zones, zoning not saved`;
+      }
     }
 
-    const bcrRaw = this.pick(props, ["u_building_coverage_ratio_ja", "kenpei", "kenpei_ritsu"]);
-    if (bcrRaw !== null) {
-      const n = parseRatioPercent(String(bcrRaw));
-      if (n !== null && n > 0) result.buildingCoverageRatio = n;
-    }
-
-    const farRaw = this.pick(props, ["u_floor_area_ratio_ja", "yoseki", "yoseki_ritsu"]);
-    if (farRaw !== null) {
-      const n = parseRatioPercent(String(farRaw));
-      if (n !== null && n > 0) result.floorAreaRatio = n;
-    }
-
-    return result;
+    return {
+      data,
+      meta: {
+        returnedFeatureCount,
+        spatialMatchCount,
+        matchedFeatureIndex,
+        matchedUseAreaJa,
+        selectionReason,
+      },
+    };
   }
 
   /**
