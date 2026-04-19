@@ -154,23 +154,53 @@ type GeoJsonGeometry =
   | GeoJsonMultiPolygon
   | { type: string; coordinates: unknown };
 
-interface GeoJsonFeature {
+export interface GeoJsonFeature {
   type: string;
   properties: Record<string, unknown>;
   geometry?: GeoJsonGeometry | null;
 }
 
-interface GeoJsonFC {
+export interface GeoJsonFC {
   type: string;
   features?: GeoJsonFeature[];
 }
 
-/** parseZoning が返す空間選択の詳細。raw_payload_json.providers[reinfolib].meta.zoning に格納される。 */
-interface ZoningMeta {
+/** 空間一致した各 feature の属性サマリ。ZoningMeta.candidateSummaries の要素。 */
+export interface ZoningCandidateInfo {
+  featureIndex: number;
+  useAreaJa: string | null;
+  buildingCoverageRatioJa: string | null;
+  floorAreaRatioJa: string | null;
+  geometryType: string;
+  approxArea: number;
+}
+
+/**
+ * parseZoningFC が返す空間選択の詳細。
+ * raw_payload_json.providers[reinfolib].meta.zoning に格納される。
+ */
+export interface ZoningMeta {
+  /** XKT002 が返した features の総数。 */
   returnedFeatureCount: number;
+  /** 点を含む feature の数（空間フィルタ後）。 */
   spatialMatchCount: number;
-  matchedFeatureIndex: number | null;
-  matchedUseAreaJa: string | null;
+  /** 空間一致した全候補の属性サマリ（選択ロジック監査用）。 */
+  candidateSummaries: ZoningCandidateInfo[];
+  /** 空間一致した feature の index 一覧（features 配列基準）。 */
+  matchedFeatureIndexes: number[];
+  /** 採用した feature の use_area_ja 生値。保存しなかった場合は null。 */
+  selectedUseAreaJa: string | null;
+  /** 採用した建蔽率（数値）。保存しなかった場合は null。 */
+  selectedBuildingCoverageRatio: number | null;
+  /** 採用した容積率（数値）。保存しなかった場合は null。 */
+  selectedFloorAreaRatio: number | null;
+  /**
+   * 選択結果の理由。保留になった場合も必ず記録する。
+   * 値例: "unique spatial match" / "multiple matches but same zoning values" /
+   *       "no spatial match" / "no features returned" /
+   *       "conflicting zoning candidates" / "conflicting ratio candidates" /
+   *       "insufficient candidate attributes"
+   */
   selectionReason: string;
 }
 
@@ -229,6 +259,166 @@ function geometryApproxArea(geom: GeoJsonGeometry): number {
     );
   }
   return Infinity;
+}
+
+// ── module-level attribute helpers ─────────────────────────────────────────
+
+/**
+ * 複数の属性名候補から最初に存在する値を文字列で返す。
+ * 値が null / undefined の場合は次のキーを試し、なければ null。
+ */
+function pickStr(props: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = props[k];
+    if (v !== null && v !== undefined) return String(v);
+  }
+  return null;
+}
+
+// ── XKT002 用途地域判定（テスト可能な純粋関数として export）──────────────────────
+
+/**
+ * XKT002 (用途地域) FeatureCollection を受け取り、点 (lng, lat) を含む
+ * polygon から用途地域・建蔽率・容積率を安全に抽出する。
+ *
+ * ── 保存条件（安全側優先）───────────────────────────────────────────────────────
+ *   空間一致 1 件:
+ *     → 属性があれば保存。欠損項目は null のまま。
+ *   空間一致 複数件:
+ *     → use_area_ja / BCR / FAR が全候補で完全一致する場合のみ保存。
+ *       いずれか 1 つでも欠損 or 食い違いがあれば保存しない。
+ *   空間一致 0 件 / features 空:
+ *     → 保存しない。
+ *
+ * ── selectionReason の意味 ────────────────────────────────────────────────────
+ *   "unique spatial match"               — 1 件一致、採用
+ *   "multiple matches but same zoning values" — 複数一致・全値同一、採用
+ *   "no spatial match"                   — features はあるが点を含まない
+ *   "no features returned"               — features 空（指定なし地域）
+ *   "conflicting zoning candidates"      — 複数一致・用途地域が異なる
+ *   "conflicting ratio candidates"       — 複数一致・BCR または FAR が異なる
+ *   "insufficient candidate attributes"  — 複数一致・属性欠損で比較不能
+ *
+ * @internal exported for unit tests
+ */
+export function parseZoningFC(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+): { data: InvestigationResult; meta: ZoningMeta } {
+  const features = fc.features ?? [];
+  const returnedFeatureCount = features.length;
+
+  // 1. 空間フィルタ: 点を含む feature のみ
+  const spatialMatches = features
+    .map((feature, index) => ({ feature, index }))
+    .filter(({ feature }) =>
+      feature.geometry != null && pointInGeometry(lng, lat, feature.geometry),
+    );
+
+  const spatialMatchCount = spatialMatches.length;
+  const matchedFeatureIndexes = spatialMatches.map((m) => m.index);
+
+  // 2. candidateSummaries を生成（全候補を監査用に保存）
+  const candidateSummaries: ZoningCandidateInfo[] = spatialMatches.map(
+    ({ feature, index }) => ({
+      featureIndex: index,
+      useAreaJa: pickStr(feature.properties, ["use_area_ja"]),
+      buildingCoverageRatioJa: pickStr(feature.properties, [
+        "u_building_coverage_ratio_ja", "kenpei", "kenpei_ritsu",
+      ]),
+      floorAreaRatioJa: pickStr(feature.properties, [
+        "u_floor_area_ratio_ja", "yoseki", "yoseki_ritsu",
+      ]),
+      geometryType: feature.geometry?.type ?? "unknown",
+      approxArea: feature.geometry ? geometryApproxArea(feature.geometry) : Infinity,
+    }),
+  );
+
+  // 3. 選択ロジック
+  const data: InvestigationResult = {};
+  let selectedUseAreaJa: string | null = null;
+  let selectedBuildingCoverageRatio: number | null = null;
+  let selectedFloorAreaRatio: number | null = null;
+  let selectionReason: string;
+
+  /** 採用した properties から data / selected* を埋める。 */
+  const commit = (props: Record<string, unknown>): void => {
+    const zoneRaw = pickStr(props, ["use_area_ja", "youto", "youto_cd"]);
+    if (zoneRaw !== null) {
+      selectedUseAreaJa = zoneRaw;
+      data.zoningDistrict = ZONE_LABELS[zoneRaw.trim()] ?? zoneRaw.trim();
+    }
+    const bcrRaw = pickStr(props, ["u_building_coverage_ratio_ja", "kenpei", "kenpei_ritsu"]);
+    if (bcrRaw !== null) {
+      const n = parseRatioPercent(bcrRaw);
+      if (n !== null && n > 0) { selectedBuildingCoverageRatio = n; data.buildingCoverageRatio = n; }
+    }
+    const farRaw = pickStr(props, ["u_floor_area_ratio_ja", "yoseki", "yoseki_ritsu"]);
+    if (farRaw !== null) {
+      const n = parseRatioPercent(farRaw);
+      if (n !== null && n > 0) { selectedFloorAreaRatio = n; data.floorAreaRatio = n; }
+    }
+  };
+
+  if (spatialMatchCount === 0) {
+    selectionReason =
+      returnedFeatureCount === 0 ? "no features returned" : "no spatial match";
+
+  } else if (spatialMatchCount === 1) {
+    selectionReason = "unique spatial match";
+    commit(spatialMatches[0].feature.properties);
+
+  } else {
+    // 複数候補 — 全フィールドが全候補で完全一致する場合のみ採用。
+    // null が混在する場合も「比較不能」として保存しない。
+    const zones = candidateSummaries.map((c) => c.useAreaJa);
+    const bcrs  = candidateSummaries.map((c) => c.buildingCoverageRatioJa);
+    const fars  = candidateSummaries.map((c) => c.floorAreaRatioJa);
+
+    /**
+     * 全値が非 null かつ全て同一なら true。
+     * null 混在・null 一致・値不一致はすべて false。
+     */
+    const allSameNonNull = (vals: (string | null)[]): boolean =>
+      vals.every((v) => v !== null) && vals.every((v) => v === vals[0]);
+
+    /**
+     * conflict / insufficient を区別する reason を返す。
+     * - 全て非 null だが異なる値 → "conflicting {label} candidates"
+     * - それ以外（null 混在、全 null）→ "insufficient candidate attributes"
+     */
+    const conflictReason = (vals: (string | null)[], label: string): string =>
+      vals.every((v) => v !== null) ? `conflicting ${label} candidates` : "insufficient candidate attributes";
+
+    if (!allSameNonNull(zones)) {
+      selectionReason = conflictReason(zones, "zoning");
+    } else if (!allSameNonNull(bcrs)) {
+      selectionReason = conflictReason(bcrs, "ratio");
+    } else if (!allSameNonNull(fars)) {
+      selectionReason = conflictReason(fars, "ratio");
+    } else {
+      // 全フィールド一致 → 最小面積の候補を採用
+      const best = candidateSummaries.slice().sort((a, b) => a.approxArea - b.approxArea)[0];
+      const bestFeature = spatialMatches.find((m) => m.index === best.featureIndex)!;
+      selectionReason = "multiple matches but same zoning values";
+      commit(bestFeature.feature.properties);
+    }
+  }
+
+  return {
+    data,
+    meta: {
+      returnedFeatureCount,
+      spatialMatchCount,
+      candidateSummaries,
+      matchedFeatureIndexes,
+      selectedUseAreaJa,
+      selectedBuildingCoverageRatio,
+      selectedFloorAreaRatio,
+      selectionReason,
+    },
+  };
 }
 
 // ── Provider ─────────────────────────────────────────────────────────────────
@@ -463,119 +653,13 @@ export class ReinfilibProvider implements InvestigationProvider {
 
   // ── Parse methods ─────────────────────────────────────────────────────────
 
-  /**
-   * XKT002 (用途地域) GeoJSON → { data, meta }
-   *
-   * features に含まれる polygon のうち点 (lng, lat) を含むものだけを候補にし、
-   * 空間的に一致する feature の属性を採用する。
-   *
-   * 選択ロジック:
-   *   - 一致 0 件 → zoningDistrict 等は保存しない
-   *   - 一致 1 件 → そのまま採用
-   *   - 一致複数:
-   *       - 全候補で use_area_ja が同一 → 最小面積 polygon を採用
-   *       - use_area_ja が異なる → 保存しない（確信が持てない）
-   *
-   * 公式確認済み属性名:
-   *   use_area_ja                  : 用途地域（日本語ラベル）
-   *   u_building_coverage_ratio_ja : 建蔽率（"60%" 等の文字列）
-   *   u_floor_area_ratio_ja        : 容積率（"200%" 等の文字列）
-   */
+  /** XKT002 判定を module-level の parseZoningFC に委譲する。 */
   private parseZoning(
     fc: GeoJsonFC,
     lng: number,
     lat: number,
-  ): { data: InvestigationResult; meta: ZoningMeta } {
-    const features = fc.features ?? [];
-    const returnedFeatureCount = features.length;
-
-    // 空間フィルタ: 点を含む feature のみ候補に
-    const spatialMatches = features
-      .map((feature, index) => ({ feature, index }))
-      .filter(({ feature }) =>
-        !!feature.geometry && pointInGeometry(lng, lat, feature.geometry),
-      );
-
-    const spatialMatchCount = spatialMatches.length;
-    let matchedFeatureIndex: number | null = null;
-    let matchedUseAreaJa: string | null = null;
-    let selectionReason: string;
-    const data: InvestigationResult = {};
-
-    const extractFields = (props: Record<string, unknown>): void => {
-      const zoneRaw = this.pick(props, ["use_area_ja", "youto", "youto_cd"]);
-      if (zoneRaw !== null) {
-        const label = String(zoneRaw).trim();
-        data.zoningDistrict = ZONE_LABELS[label] ?? label;
-      }
-      const bcrRaw = this.pick(props, ["u_building_coverage_ratio_ja", "kenpei", "kenpei_ritsu"]);
-      if (bcrRaw !== null) {
-        const n = parseRatioPercent(String(bcrRaw));
-        if (n !== null && n > 0) data.buildingCoverageRatio = n;
-      }
-      const farRaw = this.pick(props, ["u_floor_area_ratio_ja", "yoseki", "yoseki_ritsu"]);
-      if (farRaw !== null) {
-        const n = parseRatioPercent(String(farRaw));
-        if (n !== null && n > 0) data.floorAreaRatio = n;
-      }
-    };
-
-    if (spatialMatchCount === 0) {
-      selectionReason =
-        returnedFeatureCount === 0 ? "no features returned" : "no spatial match";
-    } else if (spatialMatchCount === 1) {
-      const { feature, index } = spatialMatches[0];
-      matchedFeatureIndex = index;
-      matchedUseAreaJa =
-        (this.pick(feature.properties, ["use_area_ja"]) as string | null) ?? null;
-      selectionReason = "unique spatial match";
-      extractFields(feature.properties);
-    } else {
-      // 複数候補: 面積昇順でソート
-      const sorted = spatialMatches.slice().sort((a, b) => {
-        const aArea = a.feature.geometry
-          ? geometryApproxArea(a.feature.geometry)
-          : Infinity;
-        const bArea = b.feature.geometry
-          ? geometryApproxArea(b.feature.geometry)
-          : Infinity;
-        return aArea - bArea;
-      });
-
-      const smallest = sorted[0];
-      // 全候補の use_area_ja が同じか確認
-      const zones = sorted.map(
-        ({ feature }) =>
-          (this.pick(feature.properties, ["use_area_ja", "youto", "youto_cd"]) as string | null) ??
-          null,
-      );
-      const allSameZone = zones.every((z) => z === zones[0]);
-
-      if (allSameZone) {
-        matchedFeatureIndex = smallest.index;
-        matchedUseAreaJa =
-          (this.pick(smallest.feature.properties, ["use_area_ja"]) as string | null) ?? null;
-        selectionReason = `multiple matches (${spatialMatchCount}), same zone, picked smallest area`;
-        extractFields(smallest.feature.properties);
-      } else {
-        // ゾーンが異なる → 保存しない
-        matchedFeatureIndex = smallest.index;
-        matchedUseAreaJa =
-          (this.pick(smallest.feature.properties, ["use_area_ja"]) as string | null) ?? null;
-        selectionReason = `multiple matches (${spatialMatchCount}), different zones, zoning not saved`;
-      }
-    }
-
-    return {
-      data,
-      meta: {
-        returnedFeatureCount,
-        spatialMatchCount,
-        matchedFeatureIndex,
-        matchedUseAreaJa,
-        selectionReason,
-      },
-    };
+  ): ReturnType<typeof parseZoningFC> {
+    return parseZoningFC(fc, lng, lat);
   }
 
   /**

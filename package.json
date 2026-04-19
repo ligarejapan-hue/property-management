@@ -15,7 +15,8 @@
     "db:studio": "prisma studio",
     "ksj:mock": "node scripts/mock-ksj-server.mjs",
     "storage:mock": "node scripts/mock-storage-server.mjs",
-    "storage:migrate": "node scripts/migrate-storage.mjs"
+    "storage:migrate": "node scripts/migrate-storage.mjs",
+    "test": "vitest run"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
@@ -52,6 +53,7 @@
     "eslint-config-next": "16.2.1",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.4"
   }
 }
