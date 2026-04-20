@@ -275,6 +275,93 @@ function pickStr(props: Record<string, unknown>, keys: string[]): string | null 
   return null;
 }
 
+// ── 汎用 endpoint メタ型 ─────────────────────────────────────────────────────
+
+/**
+ * XKT014/025~030 各 endpoint が返す空間選択の詳細。
+ * raw_payload_json.providers[reinfolib].meta.<endpoint> に格納される。
+ *
+ * selectionReason の値:
+ *   "unique spatial match"               — 1 件一致、採用
+ *   "multiple matches, same value"       — 複数一致・全値同一、採用
+ *   "no spatial match"                   — features はあるが点を含まない
+ *   "no features returned"               — features 空（指定なし地域）
+ *   "conflicting candidates"             — 複数一致・意味値が異なる
+ *   "insufficient candidate attributes"  — 属性欠損で比較不能 / 有効値なし
+ */
+export interface EndpointSpatialMeta {
+  returnedFeatureCount: number;
+  spatialMatchCount: number;
+  /** 採用した feature の元 features[] 上の index。採用なしの場合 null。 */
+  matchedFeatureIndex: number | null;
+  selectionReason: string;
+}
+
+/**
+ * XKT014/025~029 に共通の「空間一致 1 点選択」ヘルパー（内部用）。
+ *
+ * extractRaw: props → 意味値文字列。属性なし / 指定なし → null。
+ *   - null を返した場合は「有効値なし」として保存しない。
+ *   - ハザード系は "指定あり" を返すことで "区域内だが詳細不明" を表現できる。
+ */
+function resolveByPoint(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+  extractRaw: (props: Record<string, unknown>) => string | null,
+): { value: string | null; meta: EndpointSpatialMeta } {
+  const features = fc.features ?? [];
+  const returnedFeatureCount = features.length;
+
+  const matches = features
+    .map((feature, index) => ({ feature, index }))
+    .filter(({ feature }) =>
+      feature.geometry != null && pointInGeometry(lng, lat, feature.geometry),
+    );
+
+  const spatialMatchCount = matches.length;
+  let value: string | null = null;
+  let matchedFeatureIndex: number | null = null;
+  let selectionReason: string;
+
+  if (spatialMatchCount === 0) {
+    selectionReason =
+      returnedFeatureCount === 0 ? "no features returned" : "no spatial match";
+
+  } else if (spatialMatchCount === 1) {
+    matchedFeatureIndex = matches[0].index;
+    value = extractRaw(matches[0].feature.properties);
+    selectionReason =
+      value !== null ? "unique spatial match" : "insufficient candidate attributes";
+
+  } else {
+    // 複数候補: 全候補の意味値が非 null かつ同一のみ採用
+    const values = matches.map((m) => extractRaw(m.feature.properties));
+    const allNonNull = values.every((v) => v !== null);
+    const allSame = allNonNull && values.every((v) => v === values[0]);
+
+    if (allSame) {
+      const sorted = matches.slice().sort((a, b) => {
+        const aArea = a.feature.geometry ? geometryApproxArea(a.feature.geometry) : Infinity;
+        const bArea = b.feature.geometry ? geometryApproxArea(b.feature.geometry) : Infinity;
+        return aArea - bArea;
+      });
+      matchedFeatureIndex = sorted[0].index;
+      value = values[0]!;
+      selectionReason = "multiple matches, same value";
+    } else {
+      selectionReason = allNonNull
+        ? "conflicting candidates"
+        : "insufficient candidate attributes";
+    }
+  }
+
+  return {
+    value,
+    meta: { returnedFeatureCount, spatialMatchCount, matchedFeatureIndex, selectionReason },
+  };
+}
+
 // ── XKT002 用途地域判定（テスト可能な純粋関数として export）──────────────────────
 
 /**
@@ -421,6 +508,239 @@ export function parseZoningFC(
   };
 }
 
+// ── XKT014/025~030 endpoint 純粋関数（export・ユニットテスト可能）────────────────
+
+/**
+ * XKT014 (防火・準防火地域) → firePreventionZone
+ *
+ * 公式確認済み属性名:
+ *   fire_prevention_ja : 防火地域区分（日本語ラベル）← 最優先
+ *   kubun_id           : 区分 ID (1=防火 / 2=準防火 / 3=法22条) コード値
+ *
+ * kubun_id=0 / 空文字 は「防火地域指定なし」を表すため null 扱いにして保存しない。
+ *
+ * @internal exported for unit tests
+ */
+export function parseFireZoneFC(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+): { data: InvestigationResult; meta: EndpointSpatialMeta } {
+  const { value, meta } = resolveByPoint(fc, lng, lat, (props) => {
+    const raw = pickStr(props, ["fire_prevention_ja", "kubun_id"]);
+    if (raw === null || raw === "0" || raw === "") return null; // 指定なし
+    return FIRE_LABELS[raw] ?? raw;
+  });
+  return { data: value !== null ? { firePreventionZone: value } : {}, meta };
+}
+
+/**
+ * XKT025 (液状化危険度) → liquefactionRiskLevel
+ *
+ * 属性名未確定。複数候補を順に試し、一致しなければ "指定あり" を返す
+ * （area に入っていること自体は確認済みのため "指定あり" は有効情報）。
+ *
+ * @internal exported for unit tests
+ */
+export function parseLiquefactionFC(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+): { data: InvestigationResult; meta: EndpointSpatialMeta } {
+  const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
+    pickStr(props, [
+      "rank_ja", "rank", "class_ja", "class",
+      "ekijoka_rank", "liquefaction_rank", "description",
+    ]) ?? "指定あり",
+  );
+  return { data: value !== null ? { liquefactionRiskLevel: value } : {}, meta };
+}
+
+/**
+ * XKT026 (洪水浸水想定区域) → floodRiskLevel
+ * 属性名未確定。area 内にいれば "指定あり" を最低保証値として返す。
+ *
+ * @internal exported for unit tests
+ */
+export function parseFloodFC(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+): { data: InvestigationResult; meta: EndpointSpatialMeta } {
+  const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
+    pickStr(props, [
+      "scale", "shinsui_scale", "depth_scale",
+      "class_ja", "rank_ja", "description",
+    ]) ?? "指定あり",
+  );
+  return { data: value !== null ? { floodRiskLevel: value } : {}, meta };
+}
+
+/**
+ * XKT027 (高潮浸水想定区域) → stormSurgeRiskLevel
+ * @internal exported for unit tests
+ */
+export function parseStormSurgeFC(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+): { data: InvestigationResult; meta: EndpointSpatialMeta } {
+  const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
+    pickStr(props, [
+      "scale", "depth_scale", "takashio_scale",
+      "class_ja", "rank_ja",
+    ]) ?? "指定あり",
+  );
+  return { data: value !== null ? { stormSurgeRiskLevel: value } : {}, meta };
+}
+
+/**
+ * XKT028 (津波浸水想定区域) → tsunamiRiskLevel
+ * @internal exported for unit tests
+ */
+export function parseTsunamiFC(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+): { data: InvestigationResult; meta: EndpointSpatialMeta } {
+  const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
+    pickStr(props, [
+      "scale", "depth_scale", "tsunami_scale",
+      "class_ja", "rank_ja",
+    ]) ?? "指定あり",
+  );
+  return { data: value !== null ? { tsunamiRiskLevel: value } : {}, meta };
+}
+
+/**
+ * XKT029 (土砂災害警戒区域) → sedimentRiskCategory
+ *
+ * kubun_id: 1=土砂災害警戒区域 / 2=土砂災害特別警戒区域
+ * ※ XKT016 は「災害危険区域」であり土砂災害警戒区域ではない。使用しないこと。
+ *
+ * @internal exported for unit tests
+ */
+export function parseSedimentFC(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+): { data: InvestigationResult; meta: EndpointSpatialMeta } {
+  const { value, meta } = resolveByPoint(fc, lng, lat, (props) => {
+    const raw = pickStr(props, [
+      "kubun_ja", "kubun_id", "category_ja", "type_ja",
+      "saigai_kubun", "dosya_kubun",
+    ]);
+    if (raw === null) return "指定あり";
+    if (raw === "1") return "土砂災害警戒区域";
+    if (raw === "2") return "土砂災害特別警戒区域";
+    return raw;
+  });
+  return { data: value !== null ? { sedimentRiskCategory: value } : {}, meta };
+}
+
+/**
+ * XKT030 (道路情報) → roadType / roadWidth
+ *
+ * roadType と roadWidth は独立した属性として扱う。
+ * 複数候補が競合する場合は属性ごとに独立して保存可否を判定し、
+ * 競合する属性のみ保存しない（一方が一致していれば保存する）。
+ *
+ * @internal exported for unit tests
+ */
+export function parseRoadFC(
+  fc: GeoJsonFC,
+  lng: number,
+  lat: number,
+): { data: InvestigationResult; meta: EndpointSpatialMeta } {
+  const features = fc.features ?? [];
+  const returnedFeatureCount = features.length;
+
+  const matches = features
+    .map((feature, index) => ({ feature, index }))
+    .filter(({ feature }) =>
+      feature.geometry != null && pointInGeometry(lng, lat, feature.geometry),
+    );
+
+  const spatialMatchCount = matches.length;
+  const data: InvestigationResult = {};
+  let matchedFeatureIndex: number | null = null;
+  let selectionReason: string;
+
+  if (spatialMatchCount === 0) {
+    selectionReason =
+      returnedFeatureCount === 0 ? "no features returned" : "no spatial match";
+
+  } else if (spatialMatchCount === 1) {
+    const { feature, index } = matches[0];
+    matchedFeatureIndex = index;
+    const props = feature.properties;
+    const typeRaw = pickStr(props, [
+      "road_type_ja", "road_type", "douro_kubun_ja", "douro_kubun",
+    ]);
+    if (typeRaw !== null) data.roadType = typeRaw;
+    const widthRaw = pickStr(props, ["width_m", "road_width", "douro_width", "width"]);
+    if (widthRaw !== null) {
+      const n = Number(widthRaw);
+      if (!isNaN(n) && n > 0) data.roadWidth = n;
+    }
+    selectionReason = "unique spatial match";
+
+  } else {
+    // 複数候補: 属性ごとに独立してチェック
+    const types = matches.map((m) =>
+      pickStr(m.feature.properties, [
+        "road_type_ja", "road_type", "douro_kubun_ja", "douro_kubun",
+      ]),
+    );
+    const widthStrs = matches.map((m) => {
+      const raw = pickStr(m.feature.properties, [
+        "width_m", "road_width", "douro_width", "width",
+      ]);
+      if (raw === null) return null;
+      const n = Number(raw);
+      return isNaN(n) || n <= 0 ? null : String(n);
+    });
+
+    const typeOk =
+      types.every((t) => t !== null) && types.every((t) => t === types[0]);
+    const widthOk =
+      widthStrs.every((w) => w !== null) && widthStrs.every((w) => w === widthStrs[0]);
+
+    // 最小面積を matchedFeatureIndex として記録
+    const sorted = matches.slice().sort((a, b) => {
+      const aArea = a.feature.geometry ? geometryApproxArea(a.feature.geometry) : Infinity;
+      const bArea = b.feature.geometry ? geometryApproxArea(b.feature.geometry) : Infinity;
+      return aArea - bArea;
+    });
+    matchedFeatureIndex = sorted[0].index;
+
+    // 一致している属性だけ保存（「誤値を保存しない」原則を属性単位で適用）
+    if (typeOk)  data.roadType  = types[0]!;
+    if (widthOk) {
+      const n = Number(widthStrs[0]);
+      if (!isNaN(n) && n > 0) data.roadWidth = n;
+    }
+
+    if (typeOk && widthOk) {
+      selectionReason = "multiple matches, same value";
+    } else if (typeOk) {
+      selectionReason = "multiple matches, road width conflicted (type saved)";
+    } else if (widthOk) {
+      selectionReason = "multiple matches, road type conflicted (width saved)";
+    } else {
+      selectionReason =
+        types.every((t) => t !== null) && widthStrs.every((w) => w !== null)
+          ? "conflicting candidates"
+          : "insufficient candidate attributes";
+    }
+  }
+
+  return {
+    data,
+    meta: { returnedFeatureCount, spatialMatchCount, matchedFeatureIndex, selectionReason },
+  };
+}
+
 // ── Provider ─────────────────────────────────────────────────────────────────
 
 export class ReinfilibProvider implements InvestigationProvider {
@@ -520,17 +840,25 @@ export class ReinfilibProvider implements InvestigationProvider {
       tryCall("XKT030"),
     ]);
 
-    // 3. マージ
-    const zoningParsed = this.parseZoning(zoningResult, lng, lat);
+    // 3. 各 endpoint を空間フィルタ付きで解析
+    const zoningParsed      = parseZoningFC(zoningResult,       lng, lat);
+    const fireParsed        = parseFireZoneFC(fireResult,       lng, lat);
+    const liquefactionParsed = parseLiquefactionFC(liquefactionResult, lng, lat);
+    const floodParsed       = parseFloodFC(floodResult,         lng, lat);
+    const stormParsed       = parseStormSurgeFC(stormResult,    lng, lat);
+    const tsunamiParsed     = parseTsunamiFC(tsunamiResult,     lng, lat);
+    const sedimentParsed    = parseSedimentFC(sedimentResult,   lng, lat);
+    const roadParsed        = parseRoadFC(roadResult,           lng, lat);
+
     const data: InvestigationResult = {
       ...zoningParsed.data,
-      ...this.parseFireZone(fireResult),
-      ...this.parseLiquefaction(liquefactionResult),
-      ...this.parseFlood(floodResult),
-      ...this.parseStormSurge(stormResult),
-      ...this.parseTsunami(tsunamiResult),
-      ...this.parseSediment(sedimentResult),
-      ...this.parseRoad(roadResult),
+      ...fireParsed.data,
+      ...liquefactionParsed.data,
+      ...floodParsed.data,
+      ...stormParsed.data,
+      ...tsunamiParsed.data,
+      ...sedimentParsed.data,
+      ...roadParsed.data,
     };
 
     // 200 OK だが features 空だったエンドポイント（指定なし地域では正常）
@@ -554,7 +882,14 @@ export class ReinfilibProvider implements InvestigationProvider {
       data,
       meta: {
         ...baseMeta,
-        zoning: zoningParsed.meta,
+        zoning:       zoningParsed.meta,
+        firezone:     fireParsed.meta,
+        liquefaction: liquefactionParsed.meta,
+        flood:        floodParsed.meta,
+        stormSurge:   stormParsed.meta,
+        tsunami:      tsunamiParsed.meta,
+        sediment:     sedimentParsed.meta,
+        road:         roadParsed.meta,
         emptyEndpoints,
         ...(tileErrors.length > 0 && { tileErrors }),
       },
@@ -607,15 +942,6 @@ export class ReinfilibProvider implements InvestigationProvider {
    *   GET {BASE}/{endpoint}?response_format=geojson&z={z}&x={x}&y={y}
    *   z/x/y はクエリパラメータ（パスセグメントではない）。
    *
-   * curl 再現例:
-   *   curl -H "Ocp-Apim-Subscription-Key: <KEY>" \
-   *     "https://www.reinfolib.mlit.go.jp/ex-api/external/XKT026?response_format=geojson&z=16&x=58192&y=25816"
-   *
-   * ログ出力:
-   *   [reinfolib] {endpoint} → {url}           ← リクエスト前（debug）
-   *   [reinfolib] {endpoint} HTTP {status} | features: {N}  ← 成功時（debug）
-   *   [reinfolib] {endpoint} HTTP {status} | URL: {url} | body: {body}  ← エラー時（error）
-   *
    * 200 OK でも features が空配列の場合がある（指定なし地域では正常）。
    * HTTP 4xx/5xx は URL 形式 / エンドポイント誤りの可能性が高いため throw する。
    */
@@ -624,9 +950,7 @@ export class ReinfilibProvider implements InvestigationProvider {
       `${REINFOLIB_BASE}/${endpoint}` +
       `?response_format=geojson&z=${ZOOM}&x=${x}&y=${y}`;
 
-    console.debug(
-      `[reinfolib] ${endpoint} z=${ZOOM} x=${x} y=${y} → ${url}`,
-    );
+    console.debug(`[reinfolib] ${endpoint} z=${ZOOM} x=${x} y=${y} → ${url}`);
 
     const res = await fetch(url, {
       headers: this.authHeaders(),
@@ -649,144 +973,5 @@ export class ReinfilibProvider implements InvestigationProvider {
       `[reinfolib] ${endpoint} HTTP ${res.status} | z=${ZOOM} x=${x} y=${y} | features: ${(json.features ?? []).length}`,
     );
     return json;
-  }
-
-  // ── Parse methods ─────────────────────────────────────────────────────────
-
-  /** XKT002 判定を module-level の parseZoningFC に委譲する。 */
-  private parseZoning(
-    fc: GeoJsonFC,
-    lng: number,
-    lat: number,
-  ): ReturnType<typeof parseZoningFC> {
-    return parseZoningFC(fc, lng, lat);
-  }
-
-  /**
-   * XKT014 (防火・準防火地域) GeoJSON → InvestigationResult
-   *
-   * 公式確認済み属性名:
-   *   fire_prevention_ja : 防火地域区分（日本語ラベル）← 最優先
-   *   kubun_id           : 区分ID（コード値のフォールバック）
-   */
-  private parseFireZone(fc: GeoJsonFC): InvestigationResult {
-    const props = fc.features?.[0]?.properties;
-    if (!props) return {};
-
-    const fireRaw = this.pick(props, ["fire_prevention_ja", "kubun_id"]);
-    if (fireRaw === null) return {};
-    const label = String(fireRaw).trim();
-    if (label === "0" || label === "") return {};
-    return { firePreventionZone: FIRE_LABELS[label] ?? label };
-  }
-
-  /**
-   * XKT025 (液状化危険度) → liquefactionRiskLevel
-   * features 空 = 指定なし。属性名未確定のため candidates で試行する。
-   */
-  private parseLiquefaction(fc: GeoJsonFC): InvestigationResult {
-    if ((fc.features ?? []).length === 0) return {};
-    const props = fc.features![0].properties;
-    const raw = this.pick(props, [
-      "rank_ja", "rank", "class_ja", "class",
-      "ekijoka_rank", "liquefaction_rank", "description",
-    ]);
-    return { liquefactionRiskLevel: raw != null ? String(raw) : "指定あり" };
-  }
-
-  /**
-   * XKT026 (洪水浸水想定区域) → floodRiskLevel
-   * features 空 = 区域外。属性名未確定のため candidates で試行する。
-   */
-  private parseFlood(fc: GeoJsonFC): InvestigationResult {
-    if ((fc.features ?? []).length === 0) return {};
-    const props = fc.features![0].properties;
-    const raw = this.pick(props, [
-      "scale", "shinsui_scale", "depth_scale",
-      "class_ja", "rank_ja", "description",
-    ]);
-    return { floodRiskLevel: raw != null ? String(raw) : "指定あり" };
-  }
-
-  /**
-   * XKT027 (高潮浸水想定区域) → stormSurgeRiskLevel
-   */
-  private parseStormSurge(fc: GeoJsonFC): InvestigationResult {
-    if ((fc.features ?? []).length === 0) return {};
-    const props = fc.features![0].properties;
-    const raw = this.pick(props, [
-      "scale", "depth_scale", "takashio_scale",
-      "class_ja", "rank_ja",
-    ]);
-    return { stormSurgeRiskLevel: raw != null ? String(raw) : "指定あり" };
-  }
-
-  /**
-   * XKT028 (津波浸水想定区域) → tsunamiRiskLevel
-   */
-  private parseTsunami(fc: GeoJsonFC): InvestigationResult {
-    if ((fc.features ?? []).length === 0) return {};
-    const props = fc.features![0].properties;
-    const raw = this.pick(props, [
-      "scale", "depth_scale", "tsunami_scale",
-      "class_ja", "rank_ja",
-    ]);
-    return { tsunamiRiskLevel: raw != null ? String(raw) : "指定あり" };
-  }
-
-  /**
-   * XKT029 (土砂災害警戒区域) → sedimentRiskCategory
-   * ※ XKT016 は「災害危険区域」であり土砂災害警戒区域ではない。使用しないこと。
-   * kubun_id 候補: 1=土砂災害警戒区域 / 2=土砂災害特別警戒区域
-   */
-  private parseSediment(fc: GeoJsonFC): InvestigationResult {
-    if ((fc.features ?? []).length === 0) return {};
-    const props = fc.features![0].properties;
-    const raw = this.pick(props, [
-      "kubun_ja", "kubun_id", "category_ja", "type_ja",
-      "saigai_kubun", "dosya_kubun",
-    ]);
-    if (raw === null) return { sedimentRiskCategory: "指定あり" };
-    const s = String(raw);
-    if (s === "1") return { sedimentRiskCategory: "土砂災害警戒区域" };
-    if (s === "2") return { sedimentRiskCategory: "土砂災害特別警戒区域" };
-    return { sedimentRiskCategory: s };
-  }
-
-  /**
-   * XKT030 (道路情報) → roadType / roadWidth
-   * 属性名未確定のため candidates で試行する。
-   */
-  private parseRoad(fc: GeoJsonFC): InvestigationResult {
-    if ((fc.features ?? []).length === 0) return {};
-    const props = fc.features![0].properties;
-    const result: InvestigationResult = {};
-    const typeRaw = this.pick(props, [
-      "road_type_ja", "road_type", "douro_kubun_ja", "douro_kubun",
-    ]);
-    if (typeRaw != null) result.roadType = String(typeRaw);
-    const widthRaw = this.pickNum(props, [
-      "width_m", "road_width", "douro_width", "width",
-    ]);
-    if (widthRaw != null && widthRaw > 0) result.roadWidth = widthRaw;
-    return result;
-  }
-
-  // ── Utilities ─────────────────────────────────────────────────────────────
-
-  /** 複数の属性名候補から最初に存在する値を返す。なければ null。 */
-  private pick(props: Record<string, unknown>, keys: string[]): unknown | null {
-    for (const k of keys) {
-      if (k in props && props[k] !== null && props[k] !== undefined) return props[k];
-    }
-    return null;
-  }
-
-  /** pick の数値版。NaN は null。 */
-  private pickNum(props: Record<string, unknown>, keys: string[]): number | null {
-    const v = this.pick(props, keys);
-    if (v === null) return null;
-    const n = Number(v);
-    return isNaN(n) ? null : n;
   }
 }
