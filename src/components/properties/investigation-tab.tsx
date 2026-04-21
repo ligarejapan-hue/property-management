@@ -60,6 +60,89 @@ const STATUS_CONFIG: Record<
   },
 };
 
+// ---------- reinfolib meta helpers ----------
+
+/**
+ * rawPayloadJson.providers[] から name === "reinfolib" のプロバイダ meta を安全に取得する。
+ * 存在しない場合は null を返す。
+ */
+function getReinfolibProviderMeta(
+  rawPayloadJson: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!rawPayloadJson) return null;
+  const providers = rawPayloadJson.providers;
+  if (!Array.isArray(providers)) return null;
+  const reinfolib = providers.find(
+    (p): p is Record<string, unknown> =>
+      typeof p === "object" && p !== null && (p as Record<string, unknown>).name === "reinfolib",
+  );
+  if (!reinfolib) return null;
+  const meta = reinfolib.meta;
+  if (typeof meta !== "object" || meta === null) return null;
+  return meta as Record<string, unknown>;
+}
+
+/**
+ * エンドポイント別メタから selectionReason 文字列を安全に取得する。
+ * endpointKey 例: "flood" | "stormSurge" | "tsunami" | "sediment" | "liquefaction"
+ *              | "firezone" | "zoning" | "road"
+ */
+function getEndpointSelectionReason(
+  providerMeta: Record<string, unknown> | null,
+  endpointKey: string,
+): string | null {
+  if (!providerMeta) return null;
+  const endpoint = providerMeta[endpointKey];
+  if (typeof endpoint !== "object" || endpoint === null) return null;
+  const reason = (endpoint as Record<string, unknown>).selectionReason;
+  return typeof reason === "string" ? reason : null;
+}
+
+/** selectionReason が「判定競合」系かどうかを判定するセット */
+const CONFLICTING_REASONS = new Set([
+  "conflicting candidates",
+  "conflicting zoning candidates",
+  "conflicting ratio candidates",
+  "insufficient candidate attributes",
+]);
+
+type FieldDisplayVariant = "value" | "absent" | "caution" | "default";
+
+/**
+ * フィールド値 + selectionReason から表示文字列とスタイル種別を決定する。
+ *
+ * | value    | selectionReason                    | 表示                    | variant  |
+ * |----------|------------------------------------|-------------------------|----------|
+ * | 非 null  | any                                | 値をそのまま表示         | value    |
+ * | null     | "no features returned"             | 該当なし                 | absent   |
+ * | null     | "no spatial match"                 | 該当なし                 | absent   |
+ * | null     | "explicit value not resolved"      | 要確認（属性未解決）     | caution  |
+ * | null     | 競合系いずれか                     | 要確認（判定競合）       | caution  |
+ * | null     | その他 / meta なし                 | format(null) or "-"      | default  |
+ */
+function resolveFieldDisplay(
+  value: unknown,
+  selectionReason: string | null,
+  format?: (v: string | number | null | undefined) => string,
+): { text: string; variant: FieldDisplayVariant } {
+  if (value != null) {
+    return {
+      text: format ? format(value as string | number) : String(value),
+      variant: "value",
+    };
+  }
+  if (selectionReason === "no features returned" || selectionReason === "no spatial match") {
+    return { text: "該当なし", variant: "absent" };
+  }
+  if (selectionReason === "explicit value not resolved") {
+    return { text: "要確認（属性未解決）", variant: "caution" };
+  }
+  if (selectionReason !== null && CONFLICTING_REASONS.has(selectionReason)) {
+    return { text: "要確認（判定競合）", variant: "caution" };
+  }
+  return { text: format ? format(null) : "-", variant: "default" };
+}
+
 // ---------- Field definitions ----------
 
 interface FieldDef {
@@ -77,33 +160,40 @@ interface FieldDef {
   format?: (v: string | number | null | undefined) => string;
   /** セクション区切り見出し。このフィールドの直前に見出し行を挿入する */
   sectionLabel?: string;
+  /**
+   * reinfolib エンドポイント meta キー。
+   * 設定されている場合、値が null のときに selectionReason に応じた表示に切り替える。
+   * 例: "flood" | "stormSurge" | "tsunami" | "sediment" | "liquefaction"
+   *   | "firezone" | "zoning" | "road"
+   */
+  endpointMetaKey?: string;
 }
 
 const FIELDS: FieldDef[] = [
   // ── 法規制情報 ─────────────────────────────────────────────────────
-  { key: "zoningDistrict",        label: "用途地域",           type: "text",     sectionLabel: "法規制情報" },
-  { key: "buildingCoverageRatio", label: "建蔽率",             type: "number",   format: (v) => (v != null ? `${v}%` : "-") },
-  { key: "floorAreaRatio",        label: "容積率",             type: "number",   format: (v) => (v != null ? `${v}%` : "-") },
-  { key: "firePreventionArea",    label: "防火地域/準防火地域", type: "text" },
+  { key: "zoningDistrict",        label: "用途地域",            type: "text",     sectionLabel: "法規制情報", endpointMetaKey: "zoning" },
+  { key: "buildingCoverageRatio", label: "建蔽率",              type: "number",   format: (v) => (v != null ? `${v}%` : "-"), endpointMetaKey: "zoning" },
+  { key: "floorAreaRatio",        label: "容積率",              type: "number",   format: (v) => (v != null ? `${v}%` : "-"), endpointMetaKey: "zoning" },
+  { key: "firePreventionArea",    label: "防火地域/準防火地域", type: "text",     endpointMetaKey: "firezone" },
   // ── ハザード詳細 ──────────────────────────────────────────────────
   { key: "hazardSummary",         label: "ハザード概要（自動）", type: "textarea", sectionLabel: "ハザード詳細" },
-  { key: "floodRiskLevel",        label: "洪水",               type: "text" },
-  { key: "stormSurgeRiskLevel",   label: "高潮",               type: "text" },
-  { key: "tsunamiRiskLevel",      label: "津波",               type: "text" },
-  { key: "sedimentRiskCategory",  label: "土砂災害",           type: "text" },
-  { key: "liquefactionRiskLevel", label: "液状化",             type: "text" },
+  { key: "floodRiskLevel",        label: "洪水",                type: "text",     endpointMetaKey: "flood" },
+  { key: "stormSurgeRiskLevel",   label: "高潮",                type: "text",     endpointMetaKey: "stormSurge" },
+  { key: "tsunamiRiskLevel",      label: "津波",                type: "text",     endpointMetaKey: "tsunami" },
+  { key: "sedimentRiskCategory",  label: "土砂災害",            type: "text",     endpointMetaKey: "sediment" },
+  { key: "liquefactionRiskLevel", label: "液状化",              type: "text",     endpointMetaKey: "liquefaction" },
   // ── 道路・インフラ ─────────────────────────────────────────────────
-  { key: "roadSummary",           label: "道路概要",           type: "textarea", sectionLabel: "道路・インフラ" },
-  { key: "infrastructureSummary", label: "インフラ概要",       type: "textarea" },
+  { key: "roadSummary",           label: "道路概要",            type: "textarea", sectionLabel: "道路・インフラ", endpointMetaKey: "road" },
+  { key: "infrastructureSummary", label: "インフラ概要",        type: "textarea" },
   // ── 価格参考情報 ──────────────────────────────────────────────────
-  { key: "nearbyPriceSummary",    label: "近隣価格参考",       type: "textarea", sectionLabel: "価格参考情報" },
+  { key: "nearbyPriceSummary",    label: "近隣価格参考",        type: "textarea", sectionLabel: "価格参考情報" },
   { key: "landPriceSummary",      label: "公示地価/地価調査参考", type: "textarea" },
   // ── 位置・出典 ───────────────────────────────────────────────────
-  { key: "normalizedAddress",     label: "正規化住所",         type: "text",     sectionLabel: "位置・出典" },
-  { key: "landLotNumber",         label: "地番",               type: "text" },
-  { key: "latitude",              label: "緯度",               type: "number",   format: (v) => (v != null ? String(v) : "-") },
-  { key: "longitude",             label: "経度",               type: "number",   format: (v) => (v != null ? String(v) : "-") },
-  { key: "sourceSummary",         label: "出典",               type: "text" },
+  { key: "normalizedAddress",     label: "正規化住所",          type: "text",     sectionLabel: "位置・出典" },
+  { key: "landLotNumber",         label: "地番",                type: "text" },
+  { key: "latitude",              label: "緯度",                type: "number",   format: (v) => (v != null ? String(v) : "-") },
+  { key: "longitude",             label: "経度",                type: "number",   format: (v) => (v != null ? String(v) : "-") },
+  { key: "sourceSummary",         label: "出典",                type: "text" },
 ];
 
 const ACTION_LABELS: Record<string, string> = {
@@ -227,6 +317,9 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
   const statusCfg = STATUS_CONFIG[status] ?? STATUS_CONFIG["draft"]!;
   const StatusIcon = statusCfg.icon;
   const isConfirmed = status === "confirmed";
+
+  // reinfolib エンドポイント別 meta（selectionReason ベースの表示分岐に使用）
+  const reinfolibMeta = getReinfolibProviderMeta(investigation?.rawPayloadJson ?? null);
 
   return (
     <div className="space-y-5">
@@ -356,11 +449,30 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
             <tbody className="divide-y divide-gray-100">
               {FIELDS.map((f) => {
                 const val = investigation[f.key];
-                const display = f.format
-                  ? f.format(val as string | number | null)
-                  : val != null
-                  ? String(val)
-                  : "-";
+
+                // endpointMetaKey が設定されているフィールドは selectionReason ベースの表示に切り替える
+                const { text: display, variant } = f.endpointMetaKey
+                  ? resolveFieldDisplay(
+                      val,
+                      getEndpointSelectionReason(reinfolibMeta, f.endpointMetaKey),
+                      f.format,
+                    )
+                  : {
+                      text: f.format
+                        ? f.format(val as string | number | null)
+                        : val != null
+                        ? String(val)
+                        : "-",
+                      variant: "default" as FieldDisplayVariant,
+                    };
+
+                // variant に応じてセル文字色を変える
+                const cellTextClass =
+                  variant === "absent"
+                    ? "text-gray-400 italic"         // 該当なし → 薄いグレー
+                    : variant === "caution"
+                    ? "text-amber-600 font-medium"   // 要確認 → アンバー
+                    : "text-gray-700";               // 通常 / default
 
                 return (
                   <React.Fragment key={f.key}>
@@ -379,7 +491,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
                       <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-gray-600">
                         {f.label}
                       </td>
-                      <td className="px-3 py-2 text-xs text-gray-700">
+                      <td className={`px-3 py-2 text-xs ${cellTextClass}`}>
                         {f.type === "textarea" ? (
                           <span className="whitespace-pre-wrap">{display}</span>
                         ) : (
