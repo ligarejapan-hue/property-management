@@ -312,6 +312,34 @@ describe("parseLiquefactionFC", () => {
     expect(data.liquefactionRiskLevel).toBe("低い");
     expect(meta.selectionReason).toBe("unique spatial match");
   });
+
+  // ── 実観測キー (2026-04-21) ───────────────────────────────────────────────
+
+  it("実観測キー liquefaction_tendency_level で値解決 → 保存", () => {
+    const { data, meta } = parseLiquefactionFC(
+      fc(feat({ liquefaction_tendency_level: "高い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.liquefactionRiskLevel).toBe("高い");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("実観測の非候補キー（topographic_classification_name_ja 等）のみ → 未解決のまま", () => {
+    // _id/_index/topographic_*/mesh_code/note は値候補に含めない
+    const { data, meta } = parseLiquefactionFC(
+      fc(feat({
+        _id: "abc",
+        _index: "0",
+        topographic_classification_name_ja: "低地",
+        mesh_code: "12345",
+        note: "",
+        topographic_classification_code: "1",
+      }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.liquefactionRiskLevel).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -456,6 +484,45 @@ describe("parseFloodFC", () => {
     );
     expect(data.floodRiskLevel).toBe("3m以上5m未満");
     expect(meta.selectionReason).toBe("multiple matches, same value");
+  });
+
+  // ── 実観測キー (2026-04-21) ───────────────────────────────────────────────
+
+  it("実観測キー A31a_201 で値解決 → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ A31a_201: "0.5m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("0.5m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("実観測キー A31a_202 で値解決 → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ A31a_202: "1m以上3m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("1m以上3m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("A31a_201 と A31a_202 が同時存在 → A31a_201 を採用（先頭優先）", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ A31a_201: "0.5m未満", A31a_202: "1m以上3m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("0.5m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("実観測の非候補キー（_id/_index のみ）→ 未解決のまま", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ _id: "abc", _index: "0" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.unresolvedKeys).toEqual(["_id", "_index"]);
   });
 });
 

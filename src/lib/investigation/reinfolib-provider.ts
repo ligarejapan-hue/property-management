@@ -582,6 +582,8 @@ export function parseLiquefactionFC(
       // 確認済み候補（公式仕様書 / 実 API ログ由来）
       "rank_ja", "rank", "class_ja", "class",
       "ekijoka_rank", "liquefaction_rank",
+      // 実観測キー (2026-04-21): unresolvedKeys で確認
+      "liquefaction_tendency_level",
       // 拡張候補 A: API 応答キー名の揺れに対応
       "liq_rank_ja", "liq_class", "liq_rank", "liq_kubun", "liq_risk",
       "level", "level_ja", "risk_level", "risk_level_ja",
@@ -629,6 +631,8 @@ export function parseFloodFC(
       "kubun", "kubun_ja",
       "area_class", "flood_rank", "flood_depth",
       "shinsui_class", "inundation_depth",
+      // 実観測キー (2026-04-21): unresolvedKeys で確認 (A31a 洪水浸水想定区域)
+      "A31a_201", "A31a_202", "A31a_203", "A31a_204", "A31a_205",
       // 拡張候補 B: 国土数値情報形式コード (A31 洪水浸水想定区域)
       "A31_001", "A31_002",
       // 拡張候補 C: 日本語属性名
