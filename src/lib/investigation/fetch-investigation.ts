@@ -365,20 +365,16 @@ export async function runAndUpsertInvestigation(
     }
   }
 
-  // 診断ログ: unresolvedKeyValues が DB に到達する直前の状態を記録する。
-  // selectionReason が "explicit value not resolved" のエンドポイントのみ出力。
+  // 診断ログ: reinfolib の liquefaction/flood が unresolved のとき JSON.stringify 直前の状態を出力。
   for (const p of result.providers) {
-    if (!p.meta) continue;
+    if (p.name !== "reinfolib" || !p.meta) continue;
     const m = p.meta as Record<string, unknown>;
-    for (const [key, label] of [["liquefaction", "XKT025"], ["flood", "XKT026"]] as const) {
+    for (const key of ["liquefaction", "flood"]) {
       const ep = m[key] as Record<string, unknown> | undefined;
-      if (ep?.selectionReason === "explicit value not resolved") {
-        console.error(
-          `[fetch-investigation] pre-save ${p.name}.${label}` +
-          ` | unresolvedKeyValues=${JSON.stringify(ep.unresolvedKeyValues ?? null)}` +
-          ` | hasOwn=${Object.prototype.hasOwnProperty.call(ep, "unresolvedKeyValues")}`,
-        );
-      }
+      if (!ep || ep.selectionReason !== "explicit value not resolved") continue;
+      console.error(
+        `[fi] ${key} hasKV=${Object.prototype.hasOwnProperty.call(ep, "unresolvedKeyValues")} kv=${JSON.stringify(ep.unresolvedKeyValues ?? null)}`,
+      );
     }
   }
 

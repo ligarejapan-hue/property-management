@@ -979,6 +979,32 @@ export class ReinfilibProvider implements InvestigationProvider {
     const sedimentParsed    = parseSedimentFC(sedimentResult,   lng, lat);
     const roadParsed        = parseRoadFC(roadResult,           lng, lat);
 
+    // XKT025/026 が "explicit value not resolved" のとき unresolvedKeyValues を
+    // オブジェクトリテラルスプレッドで組み立て直す。
+    // parseLiquefactionFC/parseFloodFC 内の代入に頼らず、ここで新オブジェクトを
+    // 作ることで確実に own enumerable property として JSON.stringify に渡る。
+    const liqMeta = (() => {
+      const m = liquefactionParsed.meta;
+      if (m.selectionReason !== "explicit value not resolved" || m.matchedFeatureIndex === null) {
+        return m;
+      }
+      const props = (liquefactionResult.features ?? [])[m.matchedFeatureIndex]?.properties ?? {};
+      const kv = toPrimitiveProps(props);
+      console.error(`[rl] XKT025 idx=${m.matchedFeatureIndex} kv=${JSON.stringify(kv)}`);
+      return { ...m, unresolvedKeyValues: kv };
+    })();
+
+    const floodMeta = (() => {
+      const m = floodParsed.meta;
+      if (m.selectionReason !== "explicit value not resolved" || m.matchedFeatureIndex === null) {
+        return m;
+      }
+      const props = (floodResult.features ?? [])[m.matchedFeatureIndex]?.properties ?? {};
+      const kv = toPrimitiveProps(props);
+      console.error(`[rl] XKT026 idx=${m.matchedFeatureIndex} kv=${JSON.stringify(kv)}`);
+      return { ...m, unresolvedKeyValues: kv };
+    })();
+
     const data: InvestigationResult = {
       ...zoningParsed.data,
       ...fireParsed.data,
@@ -1013,8 +1039,8 @@ export class ReinfilibProvider implements InvestigationProvider {
         ...baseMeta,
         zoning:       zoningParsed.meta,
         firezone:     fireParsed.meta,
-        liquefaction: liquefactionParsed.meta,
-        flood:        floodParsed.meta,
+        liquefaction: liqMeta,
+        flood:        floodMeta,
         stormSurge:   stormParsed.meta,
         tsunami:      tsunamiParsed.meta,
         sediment:     sedimentParsed.meta,
