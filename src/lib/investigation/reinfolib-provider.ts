@@ -57,9 +57,10 @@
  * ── 属性名について ────────────────────────────────────────────────────────
  *   XKT002/XKT014 は公式確認済み属性名を使用。
  *   ハザード系 (XKT025〜030) の正式属性名は未確定のため各 parseXxx() で
- *   複数候補を列挙し、一致しない場合は "指定あり" を返す。
+ *   複数候補を列挙する。候補に一致しない場合は null（保存しない）とする。
  *   本番ログ raw_payload_json.providers[reinfolib].meta で実属性名を確認し
  *   candidates を修正すること。
+ *   ※ 属性不明時に "指定あり" を保存する挙動は廃止済み（誤値防止）。
  */
 
 import type {
@@ -282,12 +283,13 @@ function pickStr(props: Record<string, unknown>, keys: string[]): string | null 
  * raw_payload_json.providers[reinfolib].meta.<endpoint> に格納される。
  *
  * selectionReason の値:
- *   "unique spatial match"               — 1 件一致、採用
+ *   "unique spatial match"               — 1 件一致、明示的な属性値を採用
  *   "multiple matches, same value"       — 複数一致・全値同一、採用
  *   "no spatial match"                   — features はあるが点を含まない
  *   "no features returned"               — features 空（指定なし地域）
  *   "conflicting candidates"             — 複数一致・意味値が異なる
- *   "insufficient candidate attributes"  — 属性欠損で比較不能 / 有効値なし
+ *   "insufficient candidate attributes"  — 複数一致・属性欠損で比較不能
+ *   "explicit value not resolved"        — 1 件一致・属性が取得できず保存しない
  */
 export interface EndpointSpatialMeta {
   returnedFeatureCount: number;
@@ -300,9 +302,9 @@ export interface EndpointSpatialMeta {
 /**
  * XKT014/025~029 に共通の「空間一致 1 点選択」ヘルパー（内部用）。
  *
- * extractRaw: props → 意味値文字列。属性なし / 指定なし → null。
- *   - null を返した場合は「有効値なし」として保存しない。
- *   - ハザード系は "指定あり" を返すことで "区域内だが詳細不明" を表現できる。
+ * extractRaw: props → 確定した意味値文字列。属性不明・対象外 → null。
+ *   - null を返した場合は保存しない（selectionReason: "explicit value not resolved"）。
+ *   - 確定できた明示的な値だけを保存する。推測値・曖昧値は返さない。
  */
 function resolveByPoint(
   fc: GeoJsonFC,
@@ -332,7 +334,7 @@ function resolveByPoint(
     matchedFeatureIndex = matches[0].index;
     value = extractRaw(matches[0].feature.properties);
     selectionReason =
-      value !== null ? "unique spatial match" : "insufficient candidate attributes";
+      value !== null ? "unique spatial match" : "explicit value not resolved";
 
   } else {
     // 複数候補: 全候補の意味値が非 null かつ同一のみ採用
@@ -537,8 +539,9 @@ export function parseFireZoneFC(
 /**
  * XKT025 (液状化危険度) → liquefactionRiskLevel
  *
- * 属性名未確定。複数候補を順に試し、一致しなければ "指定あり" を返す
- * （area に入っていること自体は確認済みのため "指定あり" は有効情報）。
+ * 属性名未確定のため複数候補を順に試す。
+ * 属性が取得できなかった場合は保存しない（null）。
+ * 属性が取得できた場合のみ、その明示的な値を保存する。
  *
  * @internal exported for unit tests
  */
@@ -551,14 +554,14 @@ export function parseLiquefactionFC(
     pickStr(props, [
       "rank_ja", "rank", "class_ja", "class",
       "ekijoka_rank", "liquefaction_rank", "description",
-    ]) ?? "指定あり",
+    ]),
   );
   return { data: value !== null ? { liquefactionRiskLevel: value } : {}, meta };
 }
 
 /**
  * XKT026 (洪水浸水想定区域) → floodRiskLevel
- * 属性名未確定。area 内にいれば "指定あり" を最低保証値として返す。
+ * 属性名未確定のため複数候補を順に試す。属性不明なら保存しない。
  *
  * @internal exported for unit tests
  */
@@ -571,13 +574,15 @@ export function parseFloodFC(
     pickStr(props, [
       "scale", "shinsui_scale", "depth_scale",
       "class_ja", "rank_ja", "description",
-    ]) ?? "指定あり",
+    ]),
   );
   return { data: value !== null ? { floodRiskLevel: value } : {}, meta };
 }
 
 /**
  * XKT027 (高潮浸水想定区域) → stormSurgeRiskLevel
+ * 属性不明なら保存しない。
+ *
  * @internal exported for unit tests
  */
 export function parseStormSurgeFC(
@@ -589,13 +594,15 @@ export function parseStormSurgeFC(
     pickStr(props, [
       "scale", "depth_scale", "takashio_scale",
       "class_ja", "rank_ja",
-    ]) ?? "指定あり",
+    ]),
   );
   return { data: value !== null ? { stormSurgeRiskLevel: value } : {}, meta };
 }
 
 /**
  * XKT028 (津波浸水想定区域) → tsunamiRiskLevel
+ * 属性不明なら保存しない。
+ *
  * @internal exported for unit tests
  */
 export function parseTsunamiFC(
@@ -607,7 +614,7 @@ export function parseTsunamiFC(
     pickStr(props, [
       "scale", "depth_scale", "tsunami_scale",
       "class_ja", "rank_ja",
-    ]) ?? "指定あり",
+    ]),
   );
   return { data: value !== null ? { tsunamiRiskLevel: value } : {}, meta };
 }
@@ -616,6 +623,7 @@ export function parseTsunamiFC(
  * XKT029 (土砂災害警戒区域) → sedimentRiskCategory
  *
  * kubun_id: 1=土砂災害警戒区域 / 2=土砂災害特別警戒区域
+ * 属性が取れない場合は null を返して保存しない。
  * ※ XKT016 は「災害危険区域」であり土砂災害警戒区域ではない。使用しないこと。
  *
  * @internal exported for unit tests
@@ -630,7 +638,7 @@ export function parseSedimentFC(
       "kubun_ja", "kubun_id", "category_ja", "type_ja",
       "saigai_kubun", "dosya_kubun",
     ]);
-    if (raw === null) return "指定あり";
+    if (raw === null) return null; // 属性不明 → 保存しない
     if (raw === "1") return "土砂災害警戒区域";
     if (raw === "2") return "土砂災害特別警戒区域";
     return raw;

@@ -114,7 +114,25 @@ describe("parseFireZoneFC", () => {
       LNG, LAT,
     );
     expect(data.firePreventionZone).toBeUndefined();
-    expect(meta.selectionReason).toBe("insufficient candidate attributes");
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+  });
+
+  it("1 件一致・kubun_id=空文字 → 保存しない", () => {
+    const { data, meta } = parseFireZoneFC(
+      fc(feat({ kubun_id: "" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.firePreventionZone).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+  });
+
+  it("1 件一致・属性なし（fire_prevention_ja も kubun_id もない）→ 保存しない", () => {
+    const { data, meta } = parseFireZoneFC(
+      fc(feat({}, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.firePreventionZone).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
   });
 
   it("複数一致・同一ラベル → 保存 / multiple matches, same value", () => {
@@ -175,13 +193,14 @@ describe("parseLiquefactionFC", () => {
     expect(meta.selectionReason).toBe("unique spatial match");
   });
 
-  it("1 件一致・属性名なし → '指定あり' を保存", () => {
+  it("1 件一致・属性名なし → 保存しない / explicit value not resolved", () => {
     const { data, meta } = parseLiquefactionFC(
-      fc(feat({}, IN_BOX)), // 既知の属性名なし
+      fc(feat({}, IN_BOX)), // 候補属性名がどれも存在しない
       LNG, LAT,
     );
-    expect(data.liquefactionRiskLevel).toBe("指定あり");
-    expect(meta.selectionReason).toBe("unique spatial match");
+    expect(data.liquefactionRiskLevel).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.spatialMatchCount).toBe(1);
   });
 
   it("複数一致・同一値 → 保存", () => {
@@ -231,12 +250,13 @@ describe("parseFloodFC", () => {
     expect(meta.selectionReason).toBe("unique spatial match");
   });
 
-  it("1 件一致・属性なし → '指定あり'", () => {
-    const { data } = parseFloodFC(
+  it("1 件一致・属性なし → 保存しない / explicit value not resolved", () => {
+    const { data, meta } = parseFloodFC(
       fc(feat({}, IN_BOX)),
       LNG, LAT,
     );
-    expect(data.floodRiskLevel).toBe("指定あり");
+    expect(data.floodRiskLevel).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
   });
 
   it("複数一致・異なる scale → 保存しない", () => {
@@ -328,12 +348,14 @@ describe("parseSedimentFC", () => {
     expect(data.sedimentRiskCategory).toBe("土砂災害特別警戒区域");
   });
 
-  it("1 件一致・属性名なし → '指定あり'", () => {
-    const { data } = parseSedimentFC(
+  it("1 件一致・属性名なし → 保存しない / explicit value not resolved", () => {
+    const { data, meta } = parseSedimentFC(
       fc(feat({}, IN_BOX)),
       LNG, LAT,
     );
-    expect(data.sedimentRiskCategory).toBe("指定あり");
+    expect(data.sedimentRiskCategory).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.spatialMatchCount).toBe(1);
   });
 
   it("複数一致・kubun_id が 1 と 2 で競合 → 保存しない", () => {
