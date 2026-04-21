@@ -226,6 +226,37 @@ describe("parseLiquefactionFC", () => {
     expect(data.liquefactionRiskLevel).toBeUndefined();
     expect(meta.selectionReason).toBe("conflicting candidates");
   });
+
+  // ── 拡張候補キーのカバレッジ ────────────────────────────────────────────
+
+  it("旧候補キーが存在せず新候補キーもない → explicit value not resolved", () => {
+    // 実 API でありうる「未知のキー名」を使ったケース
+    const { data, meta } = parseLiquefactionFC(
+      fc(feat({ unknown_liq_field: "高い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.liquefactionRiskLevel).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.spatialMatchCount).toBe(1);
+  });
+
+  it("拡張候補キー liq_rank_ja で値解決 → 保存", () => {
+    const { data, meta } = parseLiquefactionFC(
+      fc(feat({ liq_rank_ja: "高い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.liquefactionRiskLevel).toBe("高い");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("拡張候補キー level_ja で値解決 → 保存", () => {
+    const { data, meta } = parseLiquefactionFC(
+      fc(feat({ level_ja: "やや高い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.liquefactionRiskLevel).toBe("やや高い");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -269,6 +300,46 @@ describe("parseFloodFC", () => {
     );
     expect(data.floodRiskLevel).toBeUndefined();
     expect(meta.selectionReason).toBe("conflicting candidates");
+  });
+
+  // ── 拡張候補キーのカバレッジ ────────────────────────────────────────────
+
+  it("旧候補キーが存在せず新候補キーもない → explicit value not resolved", () => {
+    // 実 API でありうる「未知のキー名」を使ったケース
+    const { data, meta } = parseFloodFC(
+      fc(feat({ flood_depth_unknown: "3m以上5m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.spatialMatchCount).toBe(1);
+  });
+
+  it("拡張候補キー depth_ja で値解決 → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ depth_ja: "3m以上5m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("3m以上5m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("拡張候補キー shinsui_class で値解決 → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ shinsui_class: "0.5m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("0.5m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("拡張候補キー kubun_ja で値解決 → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ kubun_ja: "浸水想定区域" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("浸水想定区域");
+    expect(meta.selectionReason).toBe("unique spatial match");
   });
 });
 

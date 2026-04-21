@@ -552,10 +552,29 @@ export function parseLiquefactionFC(
 ): { data: InvestigationResult; meta: EndpointSpatialMeta } {
   const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
     pickStr(props, [
+      // 旧候補
       "rank_ja", "rank", "class_ja", "class",
       "ekijoka_rank", "liquefaction_rank", "description",
+      // 拡張候補（実 API 応答キー名の揺れに対応）
+      "liq_rank_ja", "liq_class", "liq_rank",
+      "level", "level_ja", "risk_level", "risk_level_ja",
+      "category", "category_ja",
+      "area_type", "susceptibility",
     ]),
   );
+  if (meta.selectionReason === "explicit value not resolved" && meta.matchedFeatureIndex !== null) {
+    const matched = (fc.features ?? [])[meta.matchedFeatureIndex];
+    if (matched) {
+      console.warn(
+        `[reinfolib] XKT025(液状化) explicit value not resolved` +
+        ` | idx=${meta.matchedFeatureIndex}` +
+        ` | spatialMatch=${meta.spatialMatchCount}` +
+        ` | total=${meta.returnedFeatureCount}` +
+        ` | keys=${Object.keys(matched.properties ?? {}).join(",")}` +
+        ` | props=${JSON.stringify(matched.properties)}`,
+      );
+    }
+  }
   return { data: value !== null ? { liquefactionRiskLevel: value } : {}, meta };
 }
 
@@ -572,10 +591,30 @@ export function parseFloodFC(
 ): { data: InvestigationResult; meta: EndpointSpatialMeta } {
   const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
     pickStr(props, [
+      // 旧候補
       "scale", "shinsui_scale", "depth_scale",
       "class_ja", "rank_ja", "description",
+      // 拡張候補（実 API 応答キー名の揺れに対応）
+      "depth", "depth_ja", "depth_m",
+      "type", "type_ja",
+      "kubun", "kubun_ja",
+      "area_class", "flood_rank",
+      "shinsui_class", "inundation_depth",
     ]),
   );
+  if (meta.selectionReason === "explicit value not resolved" && meta.matchedFeatureIndex !== null) {
+    const matched = (fc.features ?? [])[meta.matchedFeatureIndex];
+    if (matched) {
+      console.warn(
+        `[reinfolib] XKT026(洪水) explicit value not resolved` +
+        ` | idx=${meta.matchedFeatureIndex}` +
+        ` | spatialMatch=${meta.spatialMatchCount}` +
+        ` | total=${meta.returnedFeatureCount}` +
+        ` | keys=${Object.keys(matched.properties ?? {}).join(",")}` +
+        ` | props=${JSON.stringify(matched.properties)}`,
+      );
+    }
+  }
   return { data: value !== null ? { floodRiskLevel: value } : {}, meta };
 }
 
