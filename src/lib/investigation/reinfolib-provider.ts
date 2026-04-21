@@ -633,10 +633,14 @@ export function parseLiquefactionFC(
       "description", "name", "hazard_class",
     ]),
   );
-  // unresolvedKeys / unresolvedKeyValues は meta に記録済み（DB で確認可能）。
-  // VPS の即時確認用としてキーと実値を両方ログ出力する。
   if (meta.selectionReason === "explicit value not resolved") {
-    console.warn(
+    // resolveByPoint 経由の代入が本番ビルドで落ちる可能性を排除するため
+    // fc を直接参照して unresolvedKeyValues を再代入する（belt-and-suspenders）。
+    if (meta.matchedFeatureIndex !== null) {
+      const props = (fc.features ?? [])[meta.matchedFeatureIndex]?.properties ?? {};
+      meta.unresolvedKeyValues = toPrimitiveProps(props);
+    }
+    console.error(
       `[reinfolib] XKT025(液状化) 属性未解決` +
       ` | idx=${meta.matchedFeatureIndex}` +
       ` | keys=[${(meta.unresolvedKeys ?? []).join(",")}]` +
@@ -679,7 +683,11 @@ export function parseFloodFC(
     ]),
   );
   if (meta.selectionReason === "explicit value not resolved") {
-    console.warn(
+    if (meta.matchedFeatureIndex !== null) {
+      const props = (fc.features ?? [])[meta.matchedFeatureIndex]?.properties ?? {};
+      meta.unresolvedKeyValues = toPrimitiveProps(props);
+    }
+    console.error(
       `[reinfolib] XKT026(洪水) 属性未解決` +
       ` | idx=${meta.matchedFeatureIndex}` +
       ` | keys=[${(meta.unresolvedKeys ?? []).join(",")}]` +

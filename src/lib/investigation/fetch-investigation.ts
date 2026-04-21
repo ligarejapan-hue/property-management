@@ -365,6 +365,23 @@ export async function runAndUpsertInvestigation(
     }
   }
 
+  // 診断ログ: unresolvedKeyValues が DB に到達する直前の状態を記録する。
+  // selectionReason が "explicit value not resolved" のエンドポイントのみ出力。
+  for (const p of result.providers) {
+    if (!p.meta) continue;
+    const m = p.meta as Record<string, unknown>;
+    for (const [key, label] of [["liquefaction", "XKT025"], ["flood", "XKT026"]] as const) {
+      const ep = m[key] as Record<string, unknown> | undefined;
+      if (ep?.selectionReason === "explicit value not resolved") {
+        console.error(
+          `[fetch-investigation] pre-save ${p.name}.${label}` +
+          ` | unresolvedKeyValues=${JSON.stringify(ep.unresolvedKeyValues ?? null)}` +
+          ` | hasOwn=${Object.prototype.hasOwnProperty.call(ep, "unresolvedKeyValues")}`,
+        );
+      }
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const rawPayloadJson = JSON.parse(JSON.stringify(result));
 

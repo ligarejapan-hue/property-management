@@ -850,3 +850,102 @@ describe("parseRoadFC", () => {
     expect(meta.matchedFeatureIndex).toBe(1);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// provider meta pipeline 回帰テスト
+// parse 関数 → ProviderResponse.meta → index.ts providerDetails →
+// fetch-investigation.ts JSON.parse(JSON.stringify(result)) の全経路で
+// unresolvedKeyValues が保持されることを保証する。
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("provider meta pipeline 回帰テスト (unresolvedKeyValues DB保存経路)", () => {
+  it("XKT025 未解決 → providerMeta.liquefaction → JSON 往復後も unresolvedKeyValues が消えない", () => {
+    // 候補キーに一致しない fixture。liquefaction_tendency_level は null → pickStr がスキップ。
+    const { meta: liqMeta } = parseLiquefactionFC(
+      fc(feat({
+        topographic_classification_name_ja: "沖積低地",
+        topographic_classification_code: "1",
+        mesh_code: "53395611",
+        note: null,
+        liquefaction_tendency_level: null,
+      }, IN_BOX)),
+      LNG, LAT,
+    );
+
+    expect(liqMeta.selectionReason).toBe("explicit value not resolved");
+    expect(liqMeta.unresolvedKeyValues).toBeDefined();
+
+    // ReinfilibProvider.fetch() が組み立てる ProviderResponse.meta を再現
+    const providerMeta: Record<string, unknown> = {
+      normalizedAddress: "東京都テスト市",
+      geocodedLat: LAT,
+      geocodedLng: LNG,
+      geocodeSource: "gsi",
+      zoom: 15,
+      tileX: 58176,
+      tileY: 25792,
+      liquefaction: liqMeta,
+    };
+
+    // index.ts が組み立てる MergedInvestigationResult.providers[] を再現
+    const providerDetail = {
+      name: "reinfolib",
+      status: "success" as const,
+      source: "国土交通省 不動産情報ライブラリ",
+      fields: [] as string[],
+      meta: providerMeta,
+    };
+
+    // fetch-investigation.ts の JSON.parse(JSON.stringify(result)) を再現
+    const result = {
+      status: "success" as const,
+      data: {},
+      providers: [providerDetail],
+      fetchedAt: new Date().toISOString(),
+    };
+    const rawPayloadJson = JSON.parse(JSON.stringify(result)) as typeof result;
+
+    const savedMeta = rawPayloadJson.providers[0].meta as Record<string, unknown>;
+    const savedLiq = savedMeta.liquefaction as typeof liqMeta;
+
+    expect(savedLiq.selectionReason).toBe("explicit value not resolved");
+    expect(Object.prototype.hasOwnProperty.call(savedLiq, "unresolvedKeyValues")).toBe(true);
+    expect(savedLiq.unresolvedKeyValues).toBeDefined();
+    expect(Object.keys(savedLiq.unresolvedKeyValues!).length).toBeGreaterThan(0);
+    expect(savedLiq.unresolvedKeyValues).toHaveProperty("note", null);
+    expect(savedLiq.unresolvedKeyValues).toHaveProperty(
+      "topographic_classification_name_ja",
+      "沖積低地",
+    );
+  });
+
+  it("XKT026 未解決 → providerMeta.flood → JSON 往復後も unresolvedKeyValues が消えない", () => {
+    const { meta: floodMeta } = parseFloodFC(
+      fc(feat({
+        _id: "abc123",
+        _index: "0",
+        unknown_flood_attr: "some_value",
+      }, IN_BOX)),
+      LNG, LAT,
+    );
+
+    expect(floodMeta.selectionReason).toBe("explicit value not resolved");
+    expect(floodMeta.unresolvedKeyValues).toBeDefined();
+
+    const providerMeta: Record<string, unknown> = { flood: floodMeta };
+    const result = {
+      status: "success" as const,
+      data: {},
+      providers: [{ name: "reinfolib", status: "success" as const, source: "", fields: [] as string[], meta: providerMeta }],
+      fetchedAt: "",
+    };
+    const rawPayloadJson = JSON.parse(JSON.stringify(result)) as typeof result;
+
+    const savedMeta = rawPayloadJson.providers[0].meta as Record<string, unknown>;
+    const savedFlood = savedMeta.flood as typeof floodMeta;
+
+    expect(Object.prototype.hasOwnProperty.call(savedFlood, "unresolvedKeyValues")).toBe(true);
+    expect(savedFlood.unresolvedKeyValues).toHaveProperty("_id", "abc123");
+    expect(savedFlood.unresolvedKeyValues).toHaveProperty("unknown_flood_attr", "some_value");
+  });
+});
