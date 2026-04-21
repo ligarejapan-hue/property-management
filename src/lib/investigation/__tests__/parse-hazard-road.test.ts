@@ -340,6 +340,59 @@ describe("parseLiquefactionFC", () => {
     expect(data.liquefactionRiskLevel).toBeUndefined();
     expect(meta.selectionReason).toBe("explicit value not resolved");
   });
+
+  // ── unresolvedKeyValues 記録（observability 強化） ────────────────────────
+
+  it("未解決時 meta.unresolvedKeyValues に primitive key→value が入る", () => {
+    const { meta } = parseLiquefactionFC(
+      fc(feat({
+        _id: "abc",
+        topographic_classification_name_ja: "低地",
+        mesh_code: "12345",
+      }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.unresolvedKeyValues).toEqual({
+      _id: "abc",
+      topographic_classification_name_ja: "低地",
+      mesh_code: "12345",
+    });
+  });
+
+  it("未解決時 非 primitive 値（object/array）は unresolvedKeyValues に含まれない", () => {
+    const { meta } = parseLiquefactionFC(
+      fc(feat({
+        some_str: "値",
+        nested_obj: { foo: "bar" },
+        arr: [1, 2, 3],
+      }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(meta.unresolvedKeyValues).toEqual({ some_str: "値" });
+    expect(meta.unresolvedKeyValues).not.toHaveProperty("nested_obj");
+    expect(meta.unresolvedKeyValues).not.toHaveProperty("arr");
+  });
+
+  it("未解決時 長い文字列は 200 文字で打ち切り", () => {
+    const longValue = "あ".repeat(250);
+    const { meta } = parseLiquefactionFC(
+      fc(feat({ long_field: longValue }, IN_BOX)),
+      LNG, LAT,
+    );
+    const stored = meta.unresolvedKeyValues?.long_field as string;
+    expect(stored.length).toBeLessThan(longValue.length);
+    expect(stored.endsWith("…")).toBe(true);
+  });
+
+  it("解決済みのとき meta.unresolvedKeyValues は undefined", () => {
+    const { meta } = parseLiquefactionFC(
+      fc(feat({ rank_ja: "高い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(meta.selectionReason).toBe("unique spatial match");
+    expect(meta.unresolvedKeyValues).toBeUndefined();
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -523,6 +576,27 @@ describe("parseFloodFC", () => {
     expect(data.floodRiskLevel).toBeUndefined();
     expect(meta.selectionReason).toBe("explicit value not resolved");
     expect(meta.unresolvedKeys).toEqual(["_id", "_index"]);
+  });
+
+  // ── unresolvedKeyValues 記録（observability 強化） ────────────────────────
+
+  it("未解決時 meta.unresolvedKeyValues に実値が入る（XKT026 洪水）", () => {
+    const { meta } = parseFloodFC(
+      fc(feat({ A31a_201: "0.5m未満", _id: "xyz", _index: "1" }, IN_BOX)),
+      LNG, LAT,
+    );
+    // A31a_201 は候補キーなので解決されるはずだが、もし未知キーのみなら観測できる
+    // このテストは「未知キーのみの場合」を確認する
+    const { meta: metaUnresolved } = parseFloodFC(
+      fc(feat({ _id: "xyz", _index: "1", unknown_flood: "some_value" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(metaUnresolved.selectionReason).toBe("explicit value not resolved");
+    expect(metaUnresolved.unresolvedKeyValues).toEqual({
+      _id: "xyz",
+      _index: "1",
+      unknown_flood: "some_value",
+    });
   });
 });
 

@@ -312,6 +312,37 @@ export interface EndpointSpatialMeta {
    * raw_payload_json に保存されるため VPS ログなしで DB から実属性名を確認できる。
    */
   unresolvedKeys?: string[];
+  /**
+   * selectionReason が "explicit value not resolved" のとき、マッチした feature の
+   * key→value を記録する（primitive 値のみ。文字列は 200 文字で打ち切り）。
+   * unresolvedKeys と合わせて実値を DB から直接確認するために使う。
+   * 候補キー追加の判断材料にのみ使用し、値の推測保存には使わない。
+   */
+  unresolvedKeyValues?: Record<string, string | number | boolean | null>;
+}
+
+/**
+ * feature.properties から primitive 値（string/number/boolean/null）だけを抽出する。
+ * object/array/undefined は除外。文字列は MAX_UNRESOLVED_VALUE_LEN 文字で打ち切る。
+ * unresolvedKeyValues の肥大化防止のみが目的。値を解釈・正規化しない。
+ */
+const MAX_UNRESOLVED_VALUE_LEN = 200;
+
+function toPrimitiveProps(
+  props: Record<string, unknown>,
+): Record<string, string | number | boolean | null> {
+  const result: Record<string, string | number | boolean | null> = {};
+  for (const [k, v] of Object.entries(props)) {
+    if (v === null || typeof v === "boolean" || typeof v === "number") {
+      result[k] = v;
+    } else if (typeof v === "string") {
+      result[k] = v.length <= MAX_UNRESOLVED_VALUE_LEN
+        ? v
+        : v.slice(0, MAX_UNRESOLVED_VALUE_LEN) + "…";
+    }
+    // object / array / undefined は除外
+  }
+  return result;
 }
 
 /**
@@ -341,6 +372,7 @@ function resolveByPoint(
   let matchedFeatureIndex: number | null = null;
   let selectionReason: string;
   let unresolvedKeys: string[] | undefined;
+  let unresolvedKeyValues: Record<string, string | number | boolean | null> | undefined;
 
   if (spatialMatchCount === 0) {
     selectionReason =
@@ -353,8 +385,10 @@ function resolveByPoint(
       selectionReason = "unique spatial match";
     } else {
       selectionReason = "explicit value not resolved";
-      // 実 API の属性キーを記録。raw_payload_json に保存されるため DB から確認可能。
-      unresolvedKeys = Object.keys(matches[0].feature.properties ?? {});
+      const props = matches[0].feature.properties ?? {};
+      // キー一覧と実値を両方記録。DB から候補キー追加の判断に使う。
+      unresolvedKeys = Object.keys(props);
+      unresolvedKeyValues = toPrimitiveProps(props);
     }
 
   } else {
@@ -387,6 +421,7 @@ function resolveByPoint(
       matchedFeatureIndex,
       selectionReason,
       ...(unresolvedKeys !== undefined && { unresolvedKeys }),
+      ...(unresolvedKeyValues !== undefined && { unresolvedKeyValues }),
     },
   };
 }
