@@ -257,6 +257,61 @@ describe("parseLiquefactionFC", () => {
     expect(data.liquefactionRiskLevel).toBe("やや高い");
     expect(meta.selectionReason).toBe("unique spatial match");
   });
+
+  // ── unresolvedKeys 記録 ─────────────────────────────────────────────────
+
+  it("属性未解決のとき meta.unresolvedKeys に実キー一覧が入る", () => {
+    const { meta } = parseLiquefactionFC(
+      fc(feat({ unknown_field_1: "値A", unknown_field_2: "値B" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.unresolvedKeys).toEqual(["unknown_field_1", "unknown_field_2"]);
+  });
+
+  it("属性解決済みのとき meta.unresolvedKeys は undefined", () => {
+    const { meta } = parseLiquefactionFC(
+      fc(feat({ rank_ja: "高い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(meta.selectionReason).toBe("unique spatial match");
+    expect(meta.unresolvedKeys).toBeUndefined();
+  });
+
+  it("features 空のとき meta.unresolvedKeys は undefined", () => {
+    const { meta } = parseLiquefactionFC(fc(), LNG, LAT);
+    expect(meta.selectionReason).toBe("no features returned");
+    expect(meta.unresolvedKeys).toBeUndefined();
+  });
+
+  // ── 拡張候補 B/C/D キー ────────────────────────────────────────────────
+
+  it("国土数値情報キー A30a_001 で値解決 → 保存", () => {
+    const { data, meta } = parseLiquefactionFC(
+      fc(feat({ A30a_001: "高い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.liquefactionRiskLevel).toBe("高い");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("日本語属性キー 危険度区分 で値解決 → 保存", () => {
+    const { data, meta } = parseLiquefactionFC(
+      fc(feat({ 危険度区分: "やや高い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.liquefactionRiskLevel).toBe("やや高い");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("liq_kubun で値解決 → 保存", () => {
+    const { data, meta } = parseLiquefactionFC(
+      fc(feat({ liq_kubun: "低い" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.liquefactionRiskLevel).toBe("低い");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -340,6 +395,67 @@ describe("parseFloodFC", () => {
     );
     expect(data.floodRiskLevel).toBe("浸水想定区域");
     expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  // ── unresolvedKeys 記録 ─────────────────────────────────────────────────
+
+  it("属性未解決のとき meta.unresolvedKeys に実キー一覧が入る", () => {
+    const { meta } = parseFloodFC(
+      fc(feat({ unknown_flood_key: "3m", another_key: "x" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.unresolvedKeys).toEqual(["unknown_flood_key", "another_key"]);
+  });
+
+  it("属性解決済みのとき meta.unresolvedKeys は undefined", () => {
+    const { meta } = parseFloodFC(
+      fc(feat({ scale: "0.5m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(meta.selectionReason).toBe("unique spatial match");
+    expect(meta.unresolvedKeys).toBeUndefined();
+  });
+
+  // ── 拡張候補 B/C/D キー ────────────────────────────────────────────────
+
+  it("国土数値情報キー A31_001 で値解決 → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ A31_001: "0.5m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("0.5m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("日本語属性キー 浸水深区分 で値解決 → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ 浸水深区分: "3m以上5m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("3m以上5m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("depth_rank で値解決 → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ depth_rank: "1m以上3m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("1m以上3m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("複数一致・同一属性 depth_ja → 保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(
+        feat({ depth_ja: "3m以上5m未満" }, IN_BOX),
+        feat({ depth_ja: "3m以上5m未満" }, IN_SMALL),
+      ),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("3m以上5m未満");
+    expect(meta.selectionReason).toBe("multiple matches, same value");
   });
 });
 

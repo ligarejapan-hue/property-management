@@ -83,6 +83,15 @@ const GSI_GEOCODE_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
  */
 const ZOOM = 15;
 
+/**
+ * タイル API のリトライ上限（最大試行回数 = MAX_TILE_RETRIES + 1）。
+ * 対象: ネットワーク失敗・タイムアウト・HTTP 5xx（一時失敗）のみ。
+ * 対象外: HTTP 4xx（恒久失敗 — URL 形式 / 認証エラー）。
+ */
+const MAX_TILE_RETRIES = 2;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 /** XKT002 用途地域コード → 日本語ラベル */
 const ZONE_LABELS: Record<string, string> = {
   "1":  "第一種低層住居専用地域",
@@ -297,6 +306,12 @@ export interface EndpointSpatialMeta {
   /** 採用した feature の元 features[] 上の index。採用なしの場合 null。 */
   matchedFeatureIndex: number | null;
   selectionReason: string;
+  /**
+   * selectionReason が "explicit value not resolved" のとき、マッチした feature が
+   * 持っていた全プロパティキーを記録する。
+   * raw_payload_json に保存されるため VPS ログなしで DB から実属性名を確認できる。
+   */
+  unresolvedKeys?: string[];
 }
 
 /**
@@ -325,6 +340,7 @@ function resolveByPoint(
   let value: string | null = null;
   let matchedFeatureIndex: number | null = null;
   let selectionReason: string;
+  let unresolvedKeys: string[] | undefined;
 
   if (spatialMatchCount === 0) {
     selectionReason =
@@ -333,8 +349,13 @@ function resolveByPoint(
   } else if (spatialMatchCount === 1) {
     matchedFeatureIndex = matches[0].index;
     value = extractRaw(matches[0].feature.properties);
-    selectionReason =
-      value !== null ? "unique spatial match" : "explicit value not resolved";
+    if (value !== null) {
+      selectionReason = "unique spatial match";
+    } else {
+      selectionReason = "explicit value not resolved";
+      // 実 API の属性キーを記録。raw_payload_json に保存されるため DB から確認可能。
+      unresolvedKeys = Object.keys(matches[0].feature.properties ?? {});
+    }
 
   } else {
     // 複数候補: 全候補の意味値が非 null かつ同一のみ採用
@@ -360,7 +381,13 @@ function resolveByPoint(
 
   return {
     value,
-    meta: { returnedFeatureCount, spatialMatchCount, matchedFeatureIndex, selectionReason },
+    meta: {
+      returnedFeatureCount,
+      spatialMatchCount,
+      matchedFeatureIndex,
+      selectionReason,
+      ...(unresolvedKeys !== undefined && { unresolvedKeys }),
+    },
   };
 }
 
@@ -552,28 +579,30 @@ export function parseLiquefactionFC(
 ): { data: InvestigationResult; meta: EndpointSpatialMeta } {
   const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
     pickStr(props, [
-      // 旧候補
+      // 確認済み候補（公式仕様書 / 実 API ログ由来）
       "rank_ja", "rank", "class_ja", "class",
-      "ekijoka_rank", "liquefaction_rank", "description",
-      // 拡張候補（実 API 応答キー名の揺れに対応）
-      "liq_rank_ja", "liq_class", "liq_rank",
+      "ekijoka_rank", "liquefaction_rank",
+      // 拡張候補 A: API 応答キー名の揺れに対応
+      "liq_rank_ja", "liq_class", "liq_rank", "liq_kubun", "liq_risk",
       "level", "level_ja", "risk_level", "risk_level_ja",
       "category", "category_ja",
       "area_type", "susceptibility",
+      // 拡張候補 B: 国土数値情報形式コード (A30a 液状化危険地盤)
+      "A30a_001", "A30a_002",
+      // 拡張候補 C: 日本語属性名
+      "危険度区分", "区分", "液状化危険度区分",
+      // 拡張候補 D: その他パターン
+      "description", "name", "hazard_class",
     ]),
   );
-  if (meta.selectionReason === "explicit value not resolved" && meta.matchedFeatureIndex !== null) {
-    const matched = (fc.features ?? [])[meta.matchedFeatureIndex];
-    if (matched) {
-      console.warn(
-        `[reinfolib] XKT025(液状化) explicit value not resolved` +
-        ` | idx=${meta.matchedFeatureIndex}` +
-        ` | spatialMatch=${meta.spatialMatchCount}` +
-        ` | total=${meta.returnedFeatureCount}` +
-        ` | keys=${Object.keys(matched.properties ?? {}).join(",")}` +
-        ` | props=${JSON.stringify(matched.properties)}`,
-      );
-    }
+  // unresolvedKeys は meta に記録済み（raw_payload_json → DB で確認可能）。
+  // VPS の即時確認用としてもログを出力する。
+  if (meta.selectionReason === "explicit value not resolved" && meta.unresolvedKeys) {
+    console.warn(
+      `[reinfolib] XKT025(液状化) 属性未解決` +
+      ` | idx=${meta.matchedFeatureIndex}` +
+      ` | keys=[${meta.unresolvedKeys.join(",")}]`,
+    );
   }
   return { data: value !== null ? { liquefactionRiskLevel: value } : {}, meta };
 }
@@ -591,29 +620,29 @@ export function parseFloodFC(
 ): { data: InvestigationResult; meta: EndpointSpatialMeta } {
   const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
     pickStr(props, [
-      // 旧候補
+      // 確認済み候補（公式仕様書 / 実 API ログ由来）
       "scale", "shinsui_scale", "depth_scale",
-      "class_ja", "rank_ja", "description",
-      // 拡張候補（実 API 応答キー名の揺れに対応）
-      "depth", "depth_ja", "depth_m",
+      "class_ja", "rank_ja",
+      // 拡張候補 A: API 応答キー名の揺れに対応
+      "depth", "depth_ja", "depth_m", "depth_rank",
       "type", "type_ja",
       "kubun", "kubun_ja",
-      "area_class", "flood_rank",
+      "area_class", "flood_rank", "flood_depth",
       "shinsui_class", "inundation_depth",
+      // 拡張候補 B: 国土数値情報形式コード (A31 洪水浸水想定区域)
+      "A31_001", "A31_002",
+      // 拡張候補 C: 日本語属性名
+      "浸水深区分", "浸水ランク", "浸水想定深",
+      // 拡張候補 D: その他パターン
+      "description", "name", "flood_class", "shinsui_depth",
     ]),
   );
-  if (meta.selectionReason === "explicit value not resolved" && meta.matchedFeatureIndex !== null) {
-    const matched = (fc.features ?? [])[meta.matchedFeatureIndex];
-    if (matched) {
-      console.warn(
-        `[reinfolib] XKT026(洪水) explicit value not resolved` +
-        ` | idx=${meta.matchedFeatureIndex}` +
-        ` | spatialMatch=${meta.spatialMatchCount}` +
-        ` | total=${meta.returnedFeatureCount}` +
-        ` | keys=${Object.keys(matched.properties ?? {}).join(",")}` +
-        ` | props=${JSON.stringify(matched.properties)}`,
-      );
-    }
+  if (meta.selectionReason === "explicit value not resolved" && meta.unresolvedKeys) {
+    console.warn(
+      `[reinfolib] XKT026(洪水) 属性未解決` +
+      ` | idx=${meta.matchedFeatureIndex}` +
+      ` | keys=[${meta.unresolvedKeys.join(",")}]`,
+    );
   }
   return { data: value !== null ? { floodRiskLevel: value } : {}, meta };
 }
@@ -854,13 +883,16 @@ export class ReinfilibProvider implements InvestigationProvider {
     // 2. 全タイルAPIを並列呼び出し
     //    タイルAPIエラーは tryCall 内で catch → tileErrors に記録し空 FC を返す。
     //    throw しないことで fetch() 全体は成功扱いになり meta が service 層に渡る。
-    //    HTTP 404/400 は URL 形式誤りの可能性が高いため throw（error 扱い）。
+    //    HTTP 4xx は恒久失敗（throw）。HTTP 5xx / ネットワーク失敗は MAX_TILE_RETRIES 回リトライ後に throw。
     const EMPTY: GeoJsonFC = { type: "FeatureCollection", features: [] };
     const tileErrors: string[] = [];
+    const tileRetries: Record<string, number> = {};
 
     const tryCall = async (ep: string): Promise<GeoJsonFC> => {
       try {
-        return await this.callTileApi(ep, x, y);
+        const { fc, attempts } = await this.callTileApi(ep, x, y);
+        if (attempts > 1) tileRetries[ep] = attempts;
+        return fc;
       } catch (err) {
         tileErrors.push(err instanceof Error ? err.message : String(err));
         return EMPTY;
@@ -939,6 +971,7 @@ export class ReinfilibProvider implements InvestigationProvider {
         road:         roadParsed.meta,
         emptyEndpoints,
         ...(tileErrors.length > 0 && { tileErrors }),
+        ...(Object.keys(tileRetries).length > 0 && { tileRetries }),
       },
     };
   }
@@ -983,31 +1016,78 @@ export class ReinfilibProvider implements InvestigationProvider {
   }
 
   /**
-   * REINFOLIB タイル API を呼び出す。
+   * REINFOLIB タイル API を呼び出す。失敗時は attempt 引数でリトライを管理する。
    *
    * URL 形式（公式マニュアル準拠）:
    *   GET {BASE}/{endpoint}?response_format=geojson&z={z}&x={x}&y={y}
    *   z/x/y はクエリパラメータ（パスセグメントではない）。
    *
-   * 200 OK でも features が空配列の場合がある（指定なし地域では正常）。
-   * HTTP 4xx/5xx は URL 形式 / エンドポイント誤りの可能性が高いため throw する。
+   * リトライ戦略:
+   *   - 一時失敗（ネットワーク/タイムアウト/HTTP 5xx）: 最大 MAX_TILE_RETRIES 回リトライ。
+   *     バックオフ: 1秒 × attempt 番号（1回目なら1秒待ち、2回目なら2秒待ち）。
+   *   - 恒久失敗（HTTP 4xx）: リトライなし、即 throw。
+   *
+   * @returns { fc, attempts } fc = GeoJSONFC, attempts = 実際の試行回数
    */
-  private async callTileApi(endpoint: string, x: number, y: number): Promise<GeoJsonFC> {
+  private async callTileApi(
+    endpoint: string,
+    x: number,
+    y: number,
+    attempt = 1,
+  ): Promise<{ fc: GeoJsonFC; attempts: number }> {
     const url =
       `${REINFOLIB_BASE}/${endpoint}` +
       `?response_format=geojson&z=${ZOOM}&x=${x}&y=${y}`;
 
-    console.debug(`[reinfolib] ${endpoint} z=${ZOOM} x=${x} y=${y} → ${url}`);
+    if (attempt === 1) {
+      console.debug(`[reinfolib] ${endpoint} z=${ZOOM} x=${x} y=${y} → ${url}`);
+    } else {
+      console.warn(`[reinfolib] ${endpoint} retry attempt=${attempt} z=${ZOOM} x=${x} y=${y}`);
+    }
 
-    const res = await fetch(url, {
-      headers: this.authHeaders(),
-      signal: AbortSignal.timeout(15_000),
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: this.authHeaders(),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      // ネットワーク失敗 / タイムアウト → 一時失敗
+      if (attempt <= MAX_TILE_RETRIES) {
+        console.warn(
+          `[reinfolib] ${endpoint} 一時失敗（ネットワーク/タイムアウト）attempt=${attempt}: ${String(err)}`,
+        );
+        await sleep(1_000 * attempt);
+        return this.callTileApi(endpoint, x, y, attempt + 1);
+      }
+      throw err;
+    }
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+
+      // 4xx → 恒久失敗（URL形式 / 認証エラー）、リトライしない
+      if (res.status < 500) {
+        console.error(
+          `[reinfolib] ${endpoint} HTTP ${res.status} (恒久失敗) | URL: ${url} | body: ${body.slice(0, 500)}`,
+        );
+        throw new Error(
+          `不動産情報ライブラリ ${endpoint} エラー: HTTP ${res.status} ${res.statusText}` +
+            (body ? ` — ${body.slice(0, 200)}` : ""),
+        );
+      }
+
+      // 5xx → 一時失敗、リトライ対象
+      if (attempt <= MAX_TILE_RETRIES) {
+        console.warn(
+          `[reinfolib] ${endpoint} HTTP ${res.status} (一時失敗) attempt=${attempt}, retrying...`,
+        );
+        await sleep(1_000 * attempt);
+        return this.callTileApi(endpoint, x, y, attempt + 1);
+      }
+
       console.error(
-        `[reinfolib] ${endpoint} HTTP ${res.status} | z=${ZOOM} x=${x} y=${y} | URL: ${url} | body: ${body.slice(0, 500)}`,
+        `[reinfolib] ${endpoint} HTTP ${res.status} (${attempt}回試行後) | URL: ${url} | body: ${body.slice(0, 500)}`,
       );
       throw new Error(
         `不動産情報ライブラリ ${endpoint} エラー: HTTP ${res.status} ${res.statusText}` +
@@ -1015,10 +1095,10 @@ export class ReinfilibProvider implements InvestigationProvider {
       );
     }
 
-    const json = await res.json() as GeoJsonFC;
+    const fc = await res.json() as GeoJsonFC;
     console.debug(
-      `[reinfolib] ${endpoint} HTTP ${res.status} | z=${ZOOM} x=${x} y=${y} | features: ${(json.features ?? []).length}`,
+      `[reinfolib] ${endpoint} HTTP ${res.status} | attempt=${attempt} | features: ${(fc.features ?? []).length}`,
     );
-    return json;
+    return { fc, attempts: attempt };
   }
 }
