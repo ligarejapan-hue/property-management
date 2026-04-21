@@ -393,6 +393,29 @@ describe("parseLiquefactionFC", () => {
     expect(meta.selectionReason).toBe("unique spatial match");
     expect(meta.unresolvedKeyValues).toBeUndefined();
   });
+
+  // ── production 経路回帰: JSON 往復後も unresolvedKeyValues が残る ────────────
+  it("JSON.stringify → JSON.parse 後も unresolvedKeyValues が保持される（DB 保存経路の再現）", () => {
+    // 候補キーに一致しない実観測のメタ項目のみ使用（解決されないことを確認）
+    const { meta } = parseLiquefactionFC(
+      fc(feat({
+        topographic_classification_name_ja: "低地",
+        topographic_classification_code: "1",
+        mesh_code: "12345",
+      }, IN_BOX)),
+      LNG, LAT,
+    );
+    // まず meta に値があること
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+    expect(meta.unresolvedKeyValues).toBeDefined();
+
+    // JSON 往復（fetch-investigation.ts の JSON.parse(JSON.stringify(result)) 相当）
+    const roundTripped = JSON.parse(JSON.stringify({ meta })) as { meta: typeof meta };
+    expect(roundTripped.meta.unresolvedKeyValues).toBeDefined();
+    expect(roundTripped.meta.unresolvedKeyValues).toEqual(meta.unresolvedKeyValues);
+    // meta オブジェクトの own property として存在すること（スプレッド経由でも direct 代入でも同じ）
+    expect(Object.prototype.hasOwnProperty.call(roundTripped.meta, "unresolvedKeyValues")).toBe(true);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════

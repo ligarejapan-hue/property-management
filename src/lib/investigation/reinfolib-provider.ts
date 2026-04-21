@@ -413,17 +413,18 @@ function resolveByPoint(
     }
   }
 
-  return {
-    value,
-    meta: {
-      returnedFeatureCount,
-      spatialMatchCount,
-      matchedFeatureIndex,
-      selectionReason,
-      ...(unresolvedKeys !== undefined && { unresolvedKeys }),
-      ...(unresolvedKeyValues !== undefined && { unresolvedKeyValues }),
-    },
+  // 条件スプレッドを避け、明示的代入で optional フィールドをセットする。
+  // ...(cond && { key }) パターンはコンパイラ最適化で落ちる可能性があるため使わない。
+  const meta: EndpointSpatialMeta = {
+    returnedFeatureCount,
+    spatialMatchCount,
+    matchedFeatureIndex,
+    selectionReason,
   };
+  if (unresolvedKeys !== undefined)      meta.unresolvedKeys      = unresolvedKeys;
+  if (unresolvedKeyValues !== undefined) meta.unresolvedKeyValues = unresolvedKeyValues;
+
+  return { value, meta };
 }
 
 // ── XKT002 用途地域判定（テスト可能な純粋関数として export）──────────────────────
@@ -632,13 +633,14 @@ export function parseLiquefactionFC(
       "description", "name", "hazard_class",
     ]),
   );
-  // unresolvedKeys は meta に記録済み（raw_payload_json → DB で確認可能）。
-  // VPS の即時確認用としてもログを出力する。
-  if (meta.selectionReason === "explicit value not resolved" && meta.unresolvedKeys) {
+  // unresolvedKeys / unresolvedKeyValues は meta に記録済み（DB で確認可能）。
+  // VPS の即時確認用としてキーと実値を両方ログ出力する。
+  if (meta.selectionReason === "explicit value not resolved") {
     console.warn(
       `[reinfolib] XKT025(液状化) 属性未解決` +
       ` | idx=${meta.matchedFeatureIndex}` +
-      ` | keys=[${meta.unresolvedKeys.join(",")}]`,
+      ` | keys=[${(meta.unresolvedKeys ?? []).join(",")}]` +
+      ` | values=${JSON.stringify(meta.unresolvedKeyValues ?? {})}`,
     );
   }
   return { data: value !== null ? { liquefactionRiskLevel: value } : {}, meta };
@@ -676,11 +678,12 @@ export function parseFloodFC(
       "description", "name", "flood_class", "shinsui_depth",
     ]),
   );
-  if (meta.selectionReason === "explicit value not resolved" && meta.unresolvedKeys) {
+  if (meta.selectionReason === "explicit value not resolved") {
     console.warn(
       `[reinfolib] XKT026(洪水) 属性未解決` +
       ` | idx=${meta.matchedFeatureIndex}` +
-      ` | keys=[${meta.unresolvedKeys.join(",")}]`,
+      ` | keys=[${(meta.unresolvedKeys ?? []).join(",")}]` +
+      ` | values=${JSON.stringify(meta.unresolvedKeyValues ?? {})}`,
     );
   }
   return { data: value !== null ? { floodRiskLevel: value } : {}, meta };
