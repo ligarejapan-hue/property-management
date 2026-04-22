@@ -51,7 +51,6 @@ export interface InvestigationRecord {
   stormSurgeRiskLevel: string | null;
   tsunamiRiskLevel: string | null;
   sedimentRiskCategory: string | null;
-  liquefactionRiskLevel: string | null;
   // 価格・周辺情報
   nearbyPriceSummary: string | null;
   landPriceSummary: string | null;
@@ -114,7 +113,6 @@ type RawInvestigation = {
   stormSurgeRiskLevel: string | null;
   tsunamiRiskLevel: string | null;
   sedimentRiskCategory: string | null;
-  liquefactionRiskLevel: string | null;
   nearbyPriceSummary: string | null;
   landPriceSummary: string | null;
   facilitySummary: string | null;
@@ -167,7 +165,6 @@ function serializeRecord(raw: unknown): InvestigationRecord | null {
     stormSurgeRiskLevel: r.stormSurgeRiskLevel,
     tsunamiRiskLevel: r.tsunamiRiskLevel,
     sedimentRiskCategory: r.sedimentRiskCategory,
-    liquefactionRiskLevel: r.liquefactionRiskLevel,
     nearbyPriceSummary: r.nearbyPriceSummary,
     landPriceSummary: r.landPriceSummary,
     facilitySummary: r.facilitySummary,
@@ -339,7 +336,6 @@ export async function runAndUpsertInvestigation(
   if (data.stormSurgeRiskLevel)   hazardParts.push(`高潮: ${data.stormSurgeRiskLevel}`);
   if (data.tsunamiRiskLevel)      hazardParts.push(`津波: ${data.tsunamiRiskLevel}`);
   if (data.sedimentRiskCategory)  hazardParts.push(`土砂: ${data.sedimentRiskCategory}`);
-  if (data.liquefactionRiskLevel) hazardParts.push(`液状化: ${data.liquefactionRiskLevel}`);
   if (data.scenicRestriction)     hazardParts.push(`景観: ${data.scenicRestriction}`);
   const hazardSummary = hazardParts.length > 0 ? hazardParts.join(" / ") : null;
 
@@ -369,7 +365,7 @@ export async function runAndUpsertInvestigation(
   for (const p of result.providers) {
     if (p.name !== "reinfolib" || !p.meta) continue;
     const m = p.meta as Record<string, unknown>;
-    for (const key of ["liquefaction", "flood"]) {
+    for (const key of ["flood"]) {
       const ep = m[key] as Record<string, unknown> | undefined;
       if (!ep || ep.selectionReason !== "explicit value not resolved") continue;
       console.error(
@@ -398,7 +394,6 @@ export async function runAndUpsertInvestigation(
         stormSurgeRiskLevel: (data.stormSurgeRiskLevel as string) ?? null,
         tsunamiRiskLevel: (data.tsunamiRiskLevel as string) ?? null,
         sedimentRiskCategory: (data.sedimentRiskCategory as string) ?? null,
-        liquefactionRiskLevel: (data.liquefactionRiskLevel as string) ?? null,
         hazardSummary,
         roadSummary,
         autoFetchSummary,
@@ -461,7 +456,6 @@ export async function patchInvestigation(
     stormSurgeRiskLevel: string | null;
     tsunamiRiskLevel: string | null;
     sedimentRiskCategory: string | null;
-    liquefactionRiskLevel: string | null;
     nearbyPriceSummary: string | null;
     landPriceSummary: string | null;
     facilitySummary: string | null;

@@ -1,5 +1,5 @@
 /**
- * XKT014/025~030 各 endpoint の空間フィルタ判定ユニットテスト
+ * XKT014/026~030 各 endpoint の空間フィルタ判定ユニットテスト
  *
  * 実 API 依存なし・GeoJSON fixture のみで動作する。
  * 「誤値を保存しない」を最優先した実装の正当性を検証する。
@@ -8,12 +8,12 @@
 import { describe, it, expect } from "vitest";
 import {
   parseFireZoneFC,
-  parseLiquefactionFC,
   parseFloodFC,
   parseStormSurgeFC,
   parseTsunamiFC,
   parseSedimentFC,
   parseRoadFC,
+  ReinfilibProvider,
   type GeoJsonFC,
   type GeoJsonFeature,
 } from "../reinfolib-provider";
@@ -170,251 +170,6 @@ describe("parseFireZoneFC", () => {
     );
     expect(data.firePreventionZone).toBeUndefined();
     expect(meta.selectionReason).toBe("insufficient candidate attributes");
-  });
-});
-
-// ════════════════════════════════════════════════════════════════════════════
-// XKT025 parseLiquefactionFC
-// ════════════════════════════════════════════════════════════════════════════
-
-describe("parseLiquefactionFC", () => {
-  it("features 空 → 保存しない", () => {
-    const { data, meta } = parseLiquefactionFC(fc(), LNG, LAT);
-    expect(data.liquefactionRiskLevel).toBeUndefined();
-    expect(meta.selectionReason).toBe("no features returned");
-  });
-
-  it("1 件一致・rank_ja あり → その値を保存", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({ rank_ja: "高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBe("高い");
-    expect(meta.selectionReason).toBe("unique spatial match");
-  });
-
-  it("1 件一致・属性名なし → 保存しない / explicit value not resolved", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({}, IN_BOX)), // 候補属性名がどれも存在しない
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBeUndefined();
-    expect(meta.selectionReason).toBe("explicit value not resolved");
-    expect(meta.spatialMatchCount).toBe(1);
-  });
-
-  it("複数一致・同一値 → 保存", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(
-        feat({ rank_ja: "やや高い" }, IN_BOX),
-        feat({ rank_ja: "やや高い" }, IN_SMALL),
-      ),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBe("やや高い");
-    expect(meta.selectionReason).toBe("multiple matches, same value");
-  });
-
-  it("複数一致・値が競合 → 保存しない / conflicting candidates", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(
-        feat({ rank_ja: "高い" },     IN_BOX),
-        feat({ rank_ja: "やや高い" }, IN_SMALL),
-      ),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBeUndefined();
-    expect(meta.selectionReason).toBe("conflicting candidates");
-  });
-
-  // ── 拡張候補キーのカバレッジ ────────────────────────────────────────────
-
-  it("旧候補キーが存在せず新候補キーもない → explicit value not resolved", () => {
-    // 実 API でありうる「未知のキー名」を使ったケース
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({ unknown_liq_field: "高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBeUndefined();
-    expect(meta.selectionReason).toBe("explicit value not resolved");
-    expect(meta.spatialMatchCount).toBe(1);
-  });
-
-  it("拡張候補キー liq_rank_ja で値解決 → 保存", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({ liq_rank_ja: "高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBe("高い");
-    expect(meta.selectionReason).toBe("unique spatial match");
-  });
-
-  it("拡張候補キー level_ja で値解決 → 保存", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({ level_ja: "やや高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBe("やや高い");
-    expect(meta.selectionReason).toBe("unique spatial match");
-  });
-
-  // ── unresolvedKeys 記録 ─────────────────────────────────────────────────
-
-  it("属性未解決のとき meta.unresolvedKeys に実キー一覧が入る", () => {
-    const { meta } = parseLiquefactionFC(
-      fc(feat({ unknown_field_1: "値A", unknown_field_2: "値B" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(meta.selectionReason).toBe("explicit value not resolved");
-    expect(meta.unresolvedKeys).toEqual(["unknown_field_1", "unknown_field_2"]);
-  });
-
-  it("属性解決済みのとき meta.unresolvedKeys は undefined", () => {
-    const { meta } = parseLiquefactionFC(
-      fc(feat({ rank_ja: "高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(meta.selectionReason).toBe("unique spatial match");
-    expect(meta.unresolvedKeys).toBeUndefined();
-  });
-
-  it("features 空のとき meta.unresolvedKeys は undefined", () => {
-    const { meta } = parseLiquefactionFC(fc(), LNG, LAT);
-    expect(meta.selectionReason).toBe("no features returned");
-    expect(meta.unresolvedKeys).toBeUndefined();
-  });
-
-  // ── 拡張候補 B/C/D キー ────────────────────────────────────────────────
-
-  it("国土数値情報キー A30a_001 で値解決 → 保存", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({ A30a_001: "高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBe("高い");
-    expect(meta.selectionReason).toBe("unique spatial match");
-  });
-
-  it("日本語属性キー 危険度区分 で値解決 → 保存", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({ 危険度区分: "やや高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBe("やや高い");
-    expect(meta.selectionReason).toBe("unique spatial match");
-  });
-
-  it("liq_kubun で値解決 → 保存", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({ liq_kubun: "低い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBe("低い");
-    expect(meta.selectionReason).toBe("unique spatial match");
-  });
-
-  // ── 実観測キー (2026-04-21) ───────────────────────────────────────────────
-
-  it("実観測キー liquefaction_tendency_level で値解決 → 保存", () => {
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({ liquefaction_tendency_level: "高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBe("高い");
-    expect(meta.selectionReason).toBe("unique spatial match");
-  });
-
-  it("実観測の非候補キー（topographic_classification_name_ja 等）のみ → 未解決のまま", () => {
-    // _id/_index/topographic_*/mesh_code/note は値候補に含めない
-    const { data, meta } = parseLiquefactionFC(
-      fc(feat({
-        _id: "abc",
-        _index: "0",
-        topographic_classification_name_ja: "低地",
-        mesh_code: "12345",
-        note: "",
-        topographic_classification_code: "1",
-      }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(data.liquefactionRiskLevel).toBeUndefined();
-    expect(meta.selectionReason).toBe("explicit value not resolved");
-  });
-
-  // ── unresolvedKeyValues 記録（observability 強化） ────────────────────────
-
-  it("未解決時 meta.unresolvedKeyValues に primitive key→value が入る", () => {
-    const { meta } = parseLiquefactionFC(
-      fc(feat({
-        _id: "abc",
-        topographic_classification_name_ja: "低地",
-        mesh_code: "12345",
-      }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(meta.selectionReason).toBe("explicit value not resolved");
-    expect(meta.unresolvedKeyValues).toEqual({
-      _id: "abc",
-      topographic_classification_name_ja: "低地",
-      mesh_code: "12345",
-    });
-  });
-
-  it("未解決時 非 primitive 値（object/array）は unresolvedKeyValues に含まれない", () => {
-    const { meta } = parseLiquefactionFC(
-      fc(feat({
-        some_str: "値",
-        nested_obj: { foo: "bar" },
-        arr: [1, 2, 3],
-      }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(meta.unresolvedKeyValues).toEqual({ some_str: "値" });
-    expect(meta.unresolvedKeyValues).not.toHaveProperty("nested_obj");
-    expect(meta.unresolvedKeyValues).not.toHaveProperty("arr");
-  });
-
-  it("未解決時 長い文字列は 200 文字で打ち切り", () => {
-    const longValue = "あ".repeat(250);
-    const { meta } = parseLiquefactionFC(
-      fc(feat({ long_field: longValue }, IN_BOX)),
-      LNG, LAT,
-    );
-    const stored = meta.unresolvedKeyValues?.long_field as string;
-    expect(stored.length).toBeLessThan(longValue.length);
-    expect(stored.endsWith("…")).toBe(true);
-  });
-
-  it("解決済みのとき meta.unresolvedKeyValues は undefined", () => {
-    const { meta } = parseLiquefactionFC(
-      fc(feat({ rank_ja: "高い" }, IN_BOX)),
-      LNG, LAT,
-    );
-    expect(meta.selectionReason).toBe("unique spatial match");
-    expect(meta.unresolvedKeyValues).toBeUndefined();
-  });
-
-  // ── production 経路回帰: JSON 往復後も unresolvedKeyValues が残る ────────────
-  it("JSON.stringify → JSON.parse 後も unresolvedKeyValues が保持される（DB 保存経路の再現）", () => {
-    // 候補キーに一致しない実観測のメタ項目のみ使用（解決されないことを確認）
-    const { meta } = parseLiquefactionFC(
-      fc(feat({
-        topographic_classification_name_ja: "低地",
-        topographic_classification_code: "1",
-        mesh_code: "12345",
-      }, IN_BOX)),
-      LNG, LAT,
-    );
-    // まず meta に値があること
-    expect(meta.selectionReason).toBe("explicit value not resolved");
-    expect(meta.unresolvedKeyValues).toBeDefined();
-
-    // JSON 往復（fetch-investigation.ts の JSON.parse(JSON.stringify(result)) 相当）
-    const roundTripped = JSON.parse(JSON.stringify({ meta })) as { meta: typeof meta };
-    expect(roundTripped.meta.unresolvedKeyValues).toBeDefined();
-    expect(roundTripped.meta.unresolvedKeyValues).toEqual(meta.unresolvedKeyValues);
-    // meta オブジェクトの own property として存在すること（スプレッド経由でも direct 代入でも同じ）
-    expect(Object.prototype.hasOwnProperty.call(roundTripped.meta, "unresolvedKeyValues")).toBe(true);
   });
 });
 
@@ -859,64 +614,14 @@ describe("parseRoadFC", () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("provider meta pipeline 回帰テスト (unresolvedKeyValues DB保存経路)", () => {
-  it("XKT025 未解決 → providerMeta.liquefaction → JSON 往復後も unresolvedKeyValues が消えない", () => {
-    // 候補キーに一致しない fixture。liquefaction_tendency_level は null → pickStr がスキップ。
-    const { meta: liqMeta } = parseLiquefactionFC(
-      fc(feat({
-        topographic_classification_name_ja: "沖積低地",
-        topographic_classification_code: "1",
-        mesh_code: "53395611",
-        note: null,
-        liquefaction_tendency_level: null,
-      }, IN_BOX)),
-      LNG, LAT,
-    );
-
-    expect(liqMeta.selectionReason).toBe("explicit value not resolved");
-    expect(liqMeta.unresolvedKeyValues).toBeDefined();
-
-    // ReinfilibProvider.fetch() が組み立てる ProviderResponse.meta を再現
-    const providerMeta: Record<string, unknown> = {
-      normalizedAddress: "東京都テスト市",
-      geocodedLat: LAT,
-      geocodedLng: LNG,
-      geocodeSource: "gsi",
-      zoom: 15,
-      tileX: 58176,
-      tileY: 25792,
-      liquefaction: liqMeta,
-    };
-
-    // index.ts が組み立てる MergedInvestigationResult.providers[] を再現
-    const providerDetail = {
-      name: "reinfolib",
-      status: "success" as const,
-      source: "国土交通省 不動産情報ライブラリ",
-      fields: [] as string[],
-      meta: providerMeta,
-    };
-
-    // fetch-investigation.ts の JSON.parse(JSON.stringify(result)) を再現
-    const result = {
-      status: "success" as const,
-      data: {},
-      providers: [providerDetail],
-      fetchedAt: new Date().toISOString(),
-    };
-    const rawPayloadJson = JSON.parse(JSON.stringify(result)) as typeof result;
-
-    const savedMeta = rawPayloadJson.providers[0].meta as Record<string, unknown>;
-    const savedLiq = savedMeta.liquefaction as typeof liqMeta;
-
-    expect(savedLiq.selectionReason).toBe("explicit value not resolved");
-    expect(Object.prototype.hasOwnProperty.call(savedLiq, "unresolvedKeyValues")).toBe(true);
-    expect(savedLiq.unresolvedKeyValues).toBeDefined();
-    expect(Object.keys(savedLiq.unresolvedKeyValues!).length).toBeGreaterThan(0);
-    expect(savedLiq.unresolvedKeyValues).toHaveProperty("note", null);
-    expect(savedLiq.unresolvedKeyValues).toHaveProperty(
-      "topographic_classification_name_ja",
-      "沖積低地",
-    );
+  it("ReinfilibProvider の fields に liquefactionRiskLevel が含まれない（XKT025 除去回帰）", () => {
+    process.env.REINFOLIB_API_KEY = "test-stub";
+    try {
+      const provider = new ReinfilibProvider();
+      expect(provider.fields).not.toContain("liquefactionRiskLevel");
+    } finally {
+      delete process.env.REINFOLIB_API_KEY;
+    }
   });
 
   it("XKT026 未解決 → providerMeta.flood → JSON 往復後も unresolvedKeyValues が消えない", () => {

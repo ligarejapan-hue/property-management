@@ -37,7 +37,6 @@ export interface InvestigationResult {
   stormSurgeRiskLevel?: string;    // XKT027 高潮浸水想定区域
   tsunamiRiskLevel?: string;       // XKT028 津波浸水想定区域
   sedimentRiskCategory?: string;   // XKT029 土砂災害警戒区域（XKT016 は災害危険区域のため不使用）
-  liquefactionRiskLevel?: string;  // XKT025 液状化危険度
 
   // 景観規制
   scenicRestriction?: string;

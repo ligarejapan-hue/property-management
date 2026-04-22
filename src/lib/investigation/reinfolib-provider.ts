@@ -600,57 +600,6 @@ export function parseFireZoneFC(
 }
 
 /**
- * XKT025 (液状化危険度) → liquefactionRiskLevel
- *
- * 属性名未確定のため複数候補を順に試す。
- * 属性が取得できなかった場合は保存しない（null）。
- * 属性が取得できた場合のみ、その明示的な値を保存する。
- *
- * @internal exported for unit tests
- */
-export function parseLiquefactionFC(
-  fc: GeoJsonFC,
-  lng: number,
-  lat: number,
-): { data: InvestigationResult; meta: EndpointSpatialMeta } {
-  const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
-    pickStr(props, [
-      // 確認済み候補（公式仕様書 / 実 API ログ由来）
-      "rank_ja", "rank", "class_ja", "class",
-      "ekijoka_rank", "liquefaction_rank",
-      // 実観測キー (2026-04-21): unresolvedKeys で確認
-      "liquefaction_tendency_level",
-      // 拡張候補 A: API 応答キー名の揺れに対応
-      "liq_rank_ja", "liq_class", "liq_rank", "liq_kubun", "liq_risk",
-      "level", "level_ja", "risk_level", "risk_level_ja",
-      "category", "category_ja",
-      "area_type", "susceptibility",
-      // 拡張候補 B: 国土数値情報形式コード (A30a 液状化危険地盤)
-      "A30a_001", "A30a_002",
-      // 拡張候補 C: 日本語属性名
-      "危険度区分", "区分", "液状化危険度区分",
-      // 拡張候補 D: その他パターン
-      "description", "name", "hazard_class",
-    ]),
-  );
-  if (meta.selectionReason === "explicit value not resolved") {
-    // resolveByPoint 経由の代入が本番ビルドで落ちる可能性を排除するため
-    // fc を直接参照して unresolvedKeyValues を再代入する（belt-and-suspenders）。
-    if (meta.matchedFeatureIndex !== null) {
-      const props = (fc.features ?? [])[meta.matchedFeatureIndex]?.properties ?? {};
-      meta.unresolvedKeyValues = toPrimitiveProps(props);
-    }
-    console.error(
-      `[reinfolib] XKT025(液状化) 属性未解決` +
-      ` | idx=${meta.matchedFeatureIndex}` +
-      ` | keys=[${(meta.unresolvedKeys ?? []).join(",")}]` +
-      ` | values=${JSON.stringify(meta.unresolvedKeyValues ?? {})}`,
-    );
-  }
-  return { data: value !== null ? { liquefactionRiskLevel: value } : {}, meta };
-}
-
-/**
  * XKT026 (洪水浸水想定区域) → floodRiskLevel
  * 属性名未確定のため複数候補を順に試す。属性不明なら保存しない。
  *
@@ -873,14 +822,13 @@ export class ReinfilibProvider implements InvestigationProvider {
   readonly name = "reinfolib";
   readonly description =
     "国土交通省 不動産情報ライブラリ — " +
-    "XKT002(用途地域) / XKT014(防火) / XKT025(液状化) / " +
+    "XKT002(用途地域) / XKT014(防火) / " +
     "XKT026(洪水) / XKT027(高潮) / XKT028(津波) / XKT029(土砂) / XKT030(道路)";
   readonly fields: (keyof InvestigationResult)[] = [
     "zoningDistrict",
     "buildingCoverageRatio",
     "floorAreaRatio",
     "firePreventionZone",
-    "liquefactionRiskLevel",
     "floodRiskLevel",
     "stormSurgeRiskLevel",
     "tsunamiRiskLevel",
@@ -950,18 +898,16 @@ export class ReinfilibProvider implements InvestigationProvider {
     };
 
     const [
-      zoningResult,       // XKT002 用途地域
-      fireResult,         // XKT014 防火地域
-      liquefactionResult, // XKT025 液状化危険度
-      floodResult,        // XKT026 洪水浸水想定
-      stormResult,        // XKT027 高潮浸水想定
-      tsunamiResult,      // XKT028 津波浸水想定
-      sedimentResult,     // XKT029 土砂災害警戒
-      roadResult,         // XKT030 道路情報
+      zoningResult,   // XKT002 用途地域
+      fireResult,     // XKT014 防火地域
+      floodResult,    // XKT026 洪水浸水想定
+      stormResult,    // XKT027 高潮浸水想定
+      tsunamiResult,  // XKT028 津波浸水想定
+      sedimentResult, // XKT029 土砂災害警戒
+      roadResult,     // XKT030 道路情報
     ] = await Promise.all([
       tryCall("XKT002"),
       tryCall("XKT014"),
-      tryCall("XKT025"),
       tryCall("XKT026"),
       tryCall("XKT027"),
       tryCall("XKT028"),
@@ -970,30 +916,18 @@ export class ReinfilibProvider implements InvestigationProvider {
     ]);
 
     // 3. 各 endpoint を空間フィルタ付きで解析
-    const zoningParsed      = parseZoningFC(zoningResult,       lng, lat);
-    const fireParsed        = parseFireZoneFC(fireResult,       lng, lat);
-    const liquefactionParsed = parseLiquefactionFC(liquefactionResult, lng, lat);
-    const floodParsed       = parseFloodFC(floodResult,         lng, lat);
-    const stormParsed       = parseStormSurgeFC(stormResult,    lng, lat);
-    const tsunamiParsed     = parseTsunamiFC(tsunamiResult,     lng, lat);
-    const sedimentParsed    = parseSedimentFC(sedimentResult,   lng, lat);
-    const roadParsed        = parseRoadFC(roadResult,           lng, lat);
+    const zoningParsed   = parseZoningFC(zoningResult,  lng, lat);
+    const fireParsed     = parseFireZoneFC(fireResult,  lng, lat);
+    const floodParsed    = parseFloodFC(floodResult,    lng, lat);
+    const stormParsed    = parseStormSurgeFC(stormResult,   lng, lat);
+    const tsunamiParsed  = parseTsunamiFC(tsunamiResult,    lng, lat);
+    const sedimentParsed = parseSedimentFC(sedimentResult,  lng, lat);
+    const roadParsed     = parseRoadFC(roadResult,          lng, lat);
 
-    // XKT025/026 が "explicit value not resolved" のとき unresolvedKeyValues を
+    // XKT026 が "explicit value not resolved" のとき unresolvedKeyValues を
     // オブジェクトリテラルスプレッドで組み立て直す。
-    // parseLiquefactionFC/parseFloodFC 内の代入に頼らず、ここで新オブジェクトを
+    // parseFloodFC 内の代入に頼らず、ここで新オブジェクトを
     // 作ることで確実に own enumerable property として JSON.stringify に渡る。
-    const liqMeta = (() => {
-      const m = liquefactionParsed.meta;
-      if (m.selectionReason !== "explicit value not resolved" || m.matchedFeatureIndex === null) {
-        return m;
-      }
-      const props = (liquefactionResult.features ?? [])[m.matchedFeatureIndex]?.properties ?? {};
-      const kv = toPrimitiveProps(props);
-      console.error(`[rl] XKT025 idx=${m.matchedFeatureIndex} kv=${JSON.stringify(kv)}`);
-      return { ...m, unresolvedKeyValues: kv };
-    })();
-
     const floodMeta = (() => {
       const m = floodParsed.meta;
       if (m.selectionReason !== "explicit value not resolved" || m.matchedFeatureIndex === null) {
@@ -1008,7 +942,6 @@ export class ReinfilibProvider implements InvestigationProvider {
     const data: InvestigationResult = {
       ...zoningParsed.data,
       ...fireParsed.data,
-      ...liquefactionParsed.data,
       ...floodParsed.data,
       ...stormParsed.data,
       ...tsunamiParsed.data,
@@ -1019,14 +952,13 @@ export class ReinfilibProvider implements InvestigationProvider {
     // 200 OK だが features 空だったエンドポイント（指定なし地域では正常）
     const emptyEndpoints = (
       [
-        ["XKT002(用途地域)",   zoningResult],
-        ["XKT014(防火地域)",   fireResult],
-        ["XKT025(液状化)",     liquefactionResult],
-        ["XKT026(洪水浸水)",   floodResult],
-        ["XKT027(高潮浸水)",   stormResult],
-        ["XKT028(津波浸水)",   tsunamiResult],
-        ["XKT029(土砂災害)",   sedimentResult],
-        ["XKT030(道路情報)",   roadResult],
+        ["XKT002(用途地域)", zoningResult],
+        ["XKT014(防火地域)", fireResult],
+        ["XKT026(洪水浸水)", floodResult],
+        ["XKT027(高潮浸水)", stormResult],
+        ["XKT028(津波浸水)", tsunamiResult],
+        ["XKT029(土砂災害)", sedimentResult],
+        ["XKT030(道路情報)", roadResult],
       ] as [string, GeoJsonFC][]
     )
       .filter(([, fc]) => (fc.features ?? []).length === 0)
@@ -1037,14 +969,13 @@ export class ReinfilibProvider implements InvestigationProvider {
       data,
       meta: {
         ...baseMeta,
-        zoning:       zoningParsed.meta,
-        firezone:     fireParsed.meta,
-        liquefaction: liqMeta,
-        flood:        floodMeta,
-        stormSurge:   stormParsed.meta,
-        tsunami:      tsunamiParsed.meta,
-        sediment:     sedimentParsed.meta,
-        road:         roadParsed.meta,
+        zoning:     zoningParsed.meta,
+        firezone:   fireParsed.meta,
+        flood:      floodMeta,
+        stormSurge: stormParsed.meta,
+        tsunami:    tsunamiParsed.meta,
+        sediment:   sedimentParsed.meta,
+        road:       roadParsed.meta,
         emptyEndpoints,
         ...(tileErrors.length > 0 && { tileErrors }),
         ...(Object.keys(tileRetries).length > 0 && { tileRetries }),

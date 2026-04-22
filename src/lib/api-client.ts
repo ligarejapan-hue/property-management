@@ -765,7 +765,6 @@ export interface PropertyInvestigationData {
   stormSurgeRiskLevel: string | null;
   tsunamiRiskLevel: string | null;
   sedimentRiskCategory: string | null;
-  liquefactionRiskLevel: string | null;
   // 価格・周辺情報
   nearbyPriceSummary: string | null;
   landPriceSummary: string | null;
@@ -836,7 +835,6 @@ export async function triggerPropertyInvestigation(
       stormSurgeRiskLevel: null,
       tsunamiRiskLevel: null,
       sedimentRiskCategory: null,
-      liquefactionRiskLevel: null,
       nearbyPriceSummary: null,
       landPriceSummary: null,
       facilitySummary: null,
@@ -877,7 +875,7 @@ export async function patchPropertyInvestigation(
       postalCode: null, municipalityCode: null, geocodePrecision: null,
       firePreventionArea: null, heightDistrict: null,
       floodRiskLevel: null, stormSurgeRiskLevel: null, tsunamiRiskLevel: null,
-      sedimentRiskCategory: null, liquefactionRiskLevel: null,
+      sedimentRiskCategory: null,
       nearbyPriceSummary: null, landPriceSummary: null, facilitySummary: null,
       fieldSourcesJson: null, rawPayloadJson: null, lastFetchError: null, fetchVersion: 1,
       fetchedAt: null, confirmedAt: null, confirmedBy: null,
@@ -913,7 +911,7 @@ export async function confirmPropertyInvestigation(
       postalCode: null, municipalityCode: null, geocodePrecision: null,
       firePreventionArea: null, heightDistrict: null,
       floodRiskLevel: null, stormSurgeRiskLevel: null, tsunamiRiskLevel: null,
-      sedimentRiskCategory: null, liquefactionRiskLevel: null,
+      sedimentRiskCategory: null,
       nearbyPriceSummary: null, landPriceSummary: null, facilitySummary: null,
       fieldSourcesJson: null, rawPayloadJson: null, lastFetchError: null, fetchVersion: 1,
       fetchedAt: new Date().toISOString(),

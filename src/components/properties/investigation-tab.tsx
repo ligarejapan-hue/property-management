@@ -84,7 +84,7 @@ function getReinfolibProviderMeta(
 
 /**
  * エンドポイント別メタから selectionReason 文字列を安全に取得する。
- * endpointKey 例: "flood" | "stormSurge" | "tsunami" | "sediment" | "liquefaction"
+ * endpointKey 例: "flood" | "stormSurge" | "tsunami" | "sediment"
  *              | "firezone" | "zoning" | "road"
  */
 function getEndpointSelectionReason(
@@ -163,7 +163,7 @@ interface FieldDef {
   /**
    * reinfolib エンドポイント meta キー。
    * 設定されている場合、値が null のときに selectionReason に応じた表示に切り替える。
-   * 例: "flood" | "stormSurge" | "tsunami" | "sediment" | "liquefaction"
+   * 例: "flood" | "stormSurge" | "tsunami" | "sediment"
    *   | "firezone" | "zoning" | "road"
    */
   endpointMetaKey?: string;
@@ -181,7 +181,6 @@ const FIELDS: FieldDef[] = [
   { key: "stormSurgeRiskLevel",   label: "高潮",                type: "text",     endpointMetaKey: "stormSurge" },
   { key: "tsunamiRiskLevel",      label: "津波",                type: "text",     endpointMetaKey: "tsunami" },
   { key: "sedimentRiskCategory",  label: "土砂災害",            type: "text",     endpointMetaKey: "sediment" },
-  { key: "liquefactionRiskLevel", label: "液状化",              type: "text",     endpointMetaKey: "liquefaction" },
   // ── 道路・インフラ ─────────────────────────────────────────────────
   { key: "roadSummary",           label: "道路概要",            type: "textarea", sectionLabel: "道路・インフラ", endpointMetaKey: "road" },
   { key: "infrastructureSummary", label: "インフラ概要",        type: "textarea" },
