@@ -112,6 +112,36 @@ const FIRE_LABELS: Record<string, string> = {
   "3": "法22条区域",
 };
 
+/**
+ * XKT026 浸水ランクコード → 人向けラベル (国土数値情報 A31 仕様)。
+ * API が数値コードを返した場合の人向け表示変換に使う。
+ */
+const FLOOD_RANK_LABELS: Record<string, string> = {
+  "1": "0.5m未満",
+  "2": "0.5m以上3m未満",
+  "3": "3m以上5m未満",
+  "4": "5m以上10m未満",
+  "5": "10m以上20m未満",
+  "6": "20m以上",
+};
+
+/**
+ * 洪水の生値を人向け表示に正規化する。正規化できない場合は null（保存しない）。
+ * - 浸水ランクコード (1〜6) → 日本語ラベル
+ * - 既に人向け文字列（「未満」「以上」「m」を含む等）→ そのまま
+ * - 上記以外の純数字（河川コードなど生コード）→ null（UI に出さない）
+ */
+function normalizeFloodValue(raw: string | null): string | null {
+  if (raw === null) return null;
+  const v = raw.trim();
+  if (v === "") return null;
+  if (FLOOD_RANK_LABELS[v]) return FLOOD_RANK_LABELS[v];
+  if (/未満|以上|浸水|区域/.test(v)) return v;
+  if (/\d\s*m/i.test(v)) return v;
+  if (/^\d+$/.test(v)) return null;
+  return v;
+}
+
 // ── ユーティリティ ───────────────────────────────────────────────────────────
 
 /**
@@ -607,7 +637,7 @@ export function parseFloodFC(
   lat: number,
 ): { data: InvestigationResult; meta: EndpointSpatialMeta } {
   const { value, meta } = resolveByPoint(fc, lng, lat, (props) =>
-    pickStr(props, [
+    normalizeFloodValue(pickStr(props, [
       // 確認済み候補（公式仕様書 / 実 API ログ由来）
       "scale", "shinsui_scale", "depth_scale",
       "class_ja", "rank_ja",
@@ -625,7 +655,7 @@ export function parseFloodFC(
       "浸水深区分", "浸水ランク", "浸水想定深",
       // 拡張候補 D: その他パターン
       "description", "name", "flood_class", "shinsui_depth",
-    ]),
+    ])),
   );
   if (meta.selectionReason === "explicit value not resolved") {
     if (meta.matchedFeatureIndex !== null) {

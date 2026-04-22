@@ -376,6 +376,61 @@ describe("parseFloodFC", () => {
       unknown_flood: "some_value",
     });
   });
+
+  // ── 洪水生コード正規化（UI に raw code を出さない） ────────────────────────
+
+  it("生コード (10桁数字 1300020001) は保存しない / explicit value not resolved", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ A31a_201: "1300020001" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+  });
+
+  it("浸水ランクコード '2' → '0.5m以上3m未満' に正規化して保存", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ A31a_201: "2" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("0.5m以上3m未満");
+    expect(meta.selectionReason).toBe("unique spatial match");
+  });
+
+  it("浸水ランクコード '1'〜'6' すべて日本語ラベルに正規化", () => {
+    const expected: Record<string, string> = {
+      "1": "0.5m未満",
+      "2": "0.5m以上3m未満",
+      "3": "3m以上5m未満",
+      "4": "5m以上10m未満",
+      "5": "10m以上20m未満",
+      "6": "20m以上",
+    };
+    for (const [code, label] of Object.entries(expected)) {
+      const { data } = parseFloodFC(
+        fc(feat({ A31a_201: code }, IN_BOX)),
+        LNG, LAT,
+      );
+      expect(data.floodRiskLevel).toBe(label);
+    }
+  });
+
+  it("既に人向け表示 '3m以上5m未満' はそのまま保存", () => {
+    const { data } = parseFloodFC(
+      fc(feat({ scale: "3m以上5m未満" }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBe("3m以上5m未満");
+  });
+
+  it("空文字 → 保存しない", () => {
+    const { data, meta } = parseFloodFC(
+      fc(feat({ A31a_201: "   " }, IN_BOX)),
+      LNG, LAT,
+    );
+    expect(data.floodRiskLevel).toBeUndefined();
+    expect(meta.selectionReason).toBe("explicit value not resolved");
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
