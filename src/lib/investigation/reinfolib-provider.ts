@@ -1038,6 +1038,14 @@ export class ReinfilibProvider implements InvestigationProvider {
     y: number,
     attempt = 1,
   ): Promise<{ fc: GeoJsonFC; attempts: number }> {
+    // 誤値保存防止: XKT025(液状化) は仕様上 runtime 呼び出し禁止。
+    // 万一呼び出された場合はデプロイ事故(stale build 等)なので即時 throw。
+    if (endpoint === "XKT025") {
+      throw new Error(
+        `[reinfolib] XKT025 is removed from runtime. ` +
+        `Stale build detected — rebuild required.`,
+      );
+    }
     const url =
       `${REINFOLIB_BASE}/${endpoint}` +
       `?response_format=geojson&z=${ZOOM}&x=${x}&y=${y}`;
