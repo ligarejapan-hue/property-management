@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   Upload,
+  KeyRound,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -83,6 +84,11 @@ const adminNavItems: NavItem[] = [
     label: "権限変更履歴",
     href: "/admin/permission-logs",
     icon: <History className="h-5 w-5" />,
+  },
+  {
+    label: "パスワード変更",
+    href: "/admin/change-password",
+    icon: <KeyRound className="h-5 w-5" />,
   },
 ];
 

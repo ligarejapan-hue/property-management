@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import {
   Search,
   Plus,
@@ -12,6 +13,7 @@ import {
   KeyRound,
   LockOpen,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 
 interface UserItem {
@@ -46,8 +48,10 @@ export default function UsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [actionUser, setActionUser] = useState<UserItem | null>(null);
   const [actionType, setActionType] = useState<
-    "deactivate" | "activate" | "resetPw" | "unlock" | null
+    "deactivate" | "activate" | "resetPw" | "unlock" | "delete" | null
   >(null);
+  const { data: sessionData } = useSession();
+  const selfId = (sessionData?.user as { id?: string } | undefined)?.id ?? null;
   const [message, setMessage] = useState<{
     type: "ok" | "err";
     text: string;
@@ -103,6 +107,15 @@ export default function UsersPage() {
         });
         if (!res.ok) throw new Error("失敗");
         flash("ok", "ロック解除しました");
+      } else if (actionType === "delete") {
+        const res = await fetch(`/api/admin/users/${actionUser.id}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.message ?? "削除に失敗しました");
+        }
+        flash("ok", "ユーザーを削除しました");
       } else if (actionType === "resetPw") {
         const pw = prompt("新しいパスワードを入力 (8文字以上):");
         if (!pw || pw.length < 8) {
@@ -310,6 +323,27 @@ export default function UsersPage() {
                             <span className="text-xs">解除</span>
                           </button>
                         )}
+                        {selfId === u.id ? (
+                          <span
+                            className="flex items-center gap-0.5 text-gray-300"
+                            title="自分自身は削除できません"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span className="text-xs">削除不可</span>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setActionUser(u);
+                              setActionType("delete");
+                            }}
+                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800"
+                            title="削除"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span className="text-xs">削除</span>
+                          </button>
+                        )}
                         <Link
                           href={`/admin/users/${u.id}/permissions`}
                           className="text-gray-400 hover:text-gray-600"
@@ -348,6 +382,8 @@ export default function UsersPage() {
                 `${actionUser.name} を有効化しますか？`}
               {actionType === "unlock" &&
                 `${actionUser.name} のアカウントロックを解除しますか？`}
+              {actionType === "delete" &&
+                `${actionUser.name} を削除しますか？この操作は取り消せません。参照中のデータがある場合は削除できません。`}
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -362,9 +398,11 @@ export default function UsersPage() {
               <button
                 onClick={handleAction}
                 className={`rounded-md px-4 py-2 text-sm font-medium text-white ${
-                  actionType === "deactivate"
-                    ? "bg-amber-600 hover:bg-amber-700"
-                    : "bg-blue-600 hover:bg-blue-700"
+                  actionType === "delete"
+                    ? "bg-red-600 hover:bg-red-700"
+                    : actionType === "deactivate"
+                      ? "bg-amber-600 hover:bg-amber-700"
+                      : "bg-blue-600 hover:bg-blue-700"
                 }`}
               >
                 実行

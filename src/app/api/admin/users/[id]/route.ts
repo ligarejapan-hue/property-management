@@ -171,3 +171,72 @@ export async function PATCH(
     return handleApiError(error);
   }
 }
+
+// ---------- DELETE /api/admin/users/:id ----------
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const session = await getApiSession();
+    const perms = await getUserPermissions(session.id);
+
+    if (!hasPermission(perms, "user_management", "write")) {
+      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
+
+    if (id === session.id) {
+      throw new ApiError(400, "自分自身を削除できません", "SELF_DELETE");
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, name: true, role: true, isActive: true },
+    });
+
+    if (!target) {
+      throw new ApiError(404, "ユーザーが見つかりません", "NOT_FOUND");
+    }
+
+    if (target.role === "admin") {
+      const remainingAdmins = await prisma.user.count({
+        where: { role: "admin", isActive: true, id: { not: id } },
+      });
+      if (remainingAdmins === 0) {
+        throw new ApiError(
+          400,
+          "最後の管理者は削除できません",
+          "LAST_ADMIN",
+        );
+      }
+    }
+
+    try {
+      await prisma.user.delete({ where: { id } });
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === "P2003" || code === "P2014") {
+        throw new ApiError(
+          409,
+          "このユーザーは他のデータから参照されているため削除できません。無効化をご利用ください。",
+          "FK_CONSTRAINT",
+        );
+      }
+      throw err;
+    }
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "user_delete",
+      targetTable: "users",
+      targetId: id,
+      detail: { email: target.email, role: target.role },
+    });
+
+    return apiResponse({ message: "ユーザーを削除しました" });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
