@@ -28,10 +28,6 @@
  *   XKT014 — 防火・準防火地域
  *     → firePreventionZone（防火 / 準防火 / 法22条区域）
  *
- *   XKT025 — 液状化危険度
- *     → liquefactionRiskLevel
- *     ※ XKT025 は液状化。洪水浸水想定とは別エンドポイント。
- *
  *   XKT026 — 洪水浸水想定区域
  *     → floodRiskLevel
  *
@@ -56,7 +52,7 @@
  *
  * ── 属性名について ────────────────────────────────────────────────────────
  *   XKT002/XKT014 は公式確認済み属性名を使用。
- *   ハザード系 (XKT025〜030) の正式属性名は未確定のため各 parseXxx() で
+ *   ハザード系 (XKT026〜030) の正式属性名は未確定のため各 parseXxx() で
  *   複数候補を列挙する。候補に一致しない場合は null（保存しない）とする。
  *   本番ログ raw_payload_json.providers[reinfolib].meta で実属性名を確認し
  *   candidates を修正すること。
@@ -288,7 +284,7 @@ function pickStr(props: Record<string, unknown>, keys: string[]): string | null 
 // ── 汎用 endpoint メタ型 ─────────────────────────────────────────────────────
 
 /**
- * XKT014/025~030 各 endpoint が返す空間選択の詳細。
+ * XKT014/026~030 各 endpoint が返す空間選択の詳細。
  * raw_payload_json.providers[reinfolib].meta.<endpoint> に格納される。
  *
  * selectionReason の値:
@@ -346,7 +342,7 @@ function toPrimitiveProps(
 }
 
 /**
- * XKT014/025~029 に共通の「空間一致 1 点選択」ヘルパー（内部用）。
+ * XKT014/026~029 に共通の「空間一致 1 点選択」ヘルパー（内部用）。
  *
  * extractRaw: props → 確定した意味値文字列。属性不明・対象外 → null。
  *   - null を返した場合は保存しない（selectionReason: "explicit value not resolved"）。

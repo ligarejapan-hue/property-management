@@ -329,7 +329,7 @@ export async function runAndUpsertInvestigation(
   if (data.frontageDirection) roadParts.push(`方角: ${data.frontageDirection}`);
   const roadSummary = roadParts.length > 0 ? roadParts.join(" / ") : null;
 
-  // Build hazard summary (防火 / 洪水 / 高潮 / 津波 / 土砂 / 液状化 の順)
+  // Build hazard summary (防火 / 洪水 / 高潮 / 津波 / 土砂 の順)
   const hazardParts: string[] = [];
   if (data.firePreventionZone)    hazardParts.push(`防火: ${data.firePreventionZone}`);
   if (data.floodRiskLevel)        hazardParts.push(`洪水: ${data.floodRiskLevel}`);
@@ -361,7 +361,7 @@ export async function runAndUpsertInvestigation(
     }
   }
 
-  // 診断ログ: reinfolib の liquefaction/flood が unresolved のとき JSON.stringify 直前の状態を出力。
+  // 診断ログ: reinfolib の flood が unresolved のとき JSON.stringify 直前の状態を出力。
   for (const p of result.providers) {
     if (p.name !== "reinfolib" || !p.meta) continue;
     const m = p.meta as Record<string, unknown>;

@@ -62,7 +62,6 @@ const patchSchema = z.object({
   stormSurgeRiskLevel: z.string().optional().nullable(),
   tsunamiRiskLevel: z.string().optional().nullable(),
   sedimentRiskCategory: z.string().optional().nullable(),
-  liquefactionRiskLevel: z.string().optional().nullable(),
   nearbyPriceSummary: z.string().optional().nullable(),
   landPriceSummary: z.string().optional().nullable(),
   facilitySummary: z.string().optional().nullable(),
