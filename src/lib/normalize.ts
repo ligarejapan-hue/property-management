@@ -60,13 +60,14 @@ export function normalizeAddress(input: string | null | undefined): string {
 /**
  * 建物名の比較用正規化値。
  *
- * - 基礎正規化のみ。カタカナ長音は保持（アパート名の一部として意味があるため）
+ * - 基礎正規化に加え、内部空白をすべて除去（「ABC マンション」「ABCマンション」を同値扱い）
  * - ハイフン統一は建物名では悪影響が出やすいため適用しない
+ * - カタカナ長音は保持
  */
 export function normalizeBuildingName(
   input: string | null | undefined,
 ): string {
-  return baseNormalize(input);
+  return baseNormalize(input).replace(/\s+/g, "");
 }
 
 /**

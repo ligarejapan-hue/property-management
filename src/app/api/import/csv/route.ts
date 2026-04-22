@@ -18,6 +18,13 @@ import {
   PROPERTY_TYPE_VALUES,
   PROPERTY_TYPE_JP_TO_VALUE,
 } from "@/lib/property-types";
+import {
+  buildDedupeIndex,
+  addToDedupeIndex,
+  findPropertyDuplicate,
+  findBuildingByNormalizedName,
+} from "@/lib/import-dedupe";
+import { normalizeBuildingName } from "@/lib/normalize";
 
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
@@ -110,11 +117,31 @@ async function resolveBuildingId(
   }
 
   // 1. Try exact name match
-  const candidates = await prisma.building.findMany({
+  let candidates = await prisma.building.findMany({
     where: { name: buildingName },
     select: { id: true, name: true, address: true },
     take: 10,
   });
+
+  // 1b. If raw exact miss, try normalized-name match (全角半角・空白・大小文字ゆれ吸収)
+  if (candidates.length === 0) {
+    const normTarget = normalizeBuildingName(buildingName);
+    if (normTarget) {
+      const pool = await prisma.building.findMany({
+        select: { id: true, name: true, address: true },
+        take: 2000,
+      });
+      const hit = findBuildingByNormalizedName(pool, buildingName);
+      if (hit) {
+        cache.set(cacheKey, hit.id);
+        return { buildingId: hit.id, autoCreated: false };
+      }
+      // Promote normalized-equal pool members as candidates so address narrowing can run next
+      candidates = pool.filter(
+        (b) => normalizeBuildingName(b.name) === normTarget,
+      );
+    }
+  }
 
   if (candidates.length === 1) {
     cache.set(cacheKey, candidates[0].id);
@@ -284,6 +311,19 @@ export async function POST(request: NextRequest) {
     // Building name lookup cache for unit imports
     const buildingCache: BuildingLookupCache = new Map();
 
+    // Build normalized dedupe index once (address / unit roomNo / identifier fallback)
+    const existingPropsForDedupe = await prisma.property.findMany({
+      select: {
+        id: true,
+        address: true,
+        roomNo: true,
+        buildingId: true,
+        realEstateNumber: true,
+        externalLinkKey: true,
+      },
+    });
+    const dedupeIndex = buildDedupeIndex(existingPropsForDedupe);
+
     for (let i = 0; i < rows.length; i++) {
       const rawRow = rows[i];
       const rowNumber = i + 2; // 1-indexed, header is row 1
@@ -389,57 +429,27 @@ export async function POST(request: NextRequest) {
         }
 
         // -----------------------------------------------------------
-        // Duplicate check
+        // Duplicate check (比較用値ベース / 正規化比較)
         // -----------------------------------------------------------
-        const duplicateWhere: Record<string, unknown>[] = [];
-
-        // For units: check buildingId + roomNo combination first
-        if (resolvedBuildingId && mapped.roomNo) {
-          const existingUnit = await prisma.property.findFirst({
-            where: {
-              buildingId: resolvedBuildingId,
-              roomNo: mapped.roomNo.trim(),
-            },
-            select: { id: true, address: true, roomNo: true },
-          });
-          if (existingUnit) {
-            jobRows.push({
-              jobId: job.id,
-              rowNumber,
-              status: "needs_review",
-              rawData: rawRow,
-              errorMessage: `重複: 同じ棟の${existingUnit.roomNo}号室が既に存在します (ID=${existingUnit.id})`,
-              createdId: null,
-            });
-            continue;
-          }
-        }
-
-        // Standard duplicate check: address, realEstateNumber, externalLinkKey
-        duplicateWhere.push({ address: mapped.address });
-        if (mapped.realEstateNumber) {
-          duplicateWhere.push({
+        const dupHit = findPropertyDuplicate(
+          dedupeIndex,
+          {
+            address: mapped.address,
+            roomNo: mapped.roomNo,
+            buildingId: resolvedBuildingId,
             realEstateNumber: mapped.realEstateNumber,
-          });
-        }
-        if (mapped.externalLinkKey) {
-          duplicateWhere.push({
             externalLinkKey: mapped.externalLinkKey,
-          });
-        }
+          },
+          existingPropsForDedupe,
+        );
 
-        const existing = await prisma.property.findFirst({
-          where: { OR: duplicateWhere },
-          select: { id: true, address: true, realEstateNumber: true },
-        });
-
-        if (existing) {
+        if (dupHit) {
           jobRows.push({
             jobId: job.id,
             rowNumber,
             status: "needs_review",
             rawData: rawRow,
-            errorMessage: `重複の可能性: 既存物件ID=${existing.id} (${existing.address})`,
+            errorMessage: `重複の可能性[${dupHit.reason}]: 既存物件ID=${dupHit.matchedId} (${dupHit.matchedAddress})`,
             createdId: null,
           });
           continue;
@@ -508,6 +518,18 @@ export async function POST(request: NextRequest) {
         const property = await prisma.property.create({
           data: createData as Parameters<typeof prisma.property.create>[0]["data"],
         });
+
+        // Reflect newly-created row into dedupe index so later CSV rows catch it
+        const newRecord = {
+          id: property.id,
+          address: property.address,
+          roomNo: property.roomNo ?? null,
+          buildingId: property.buildingId ?? null,
+          realEstateNumber: property.realEstateNumber ?? null,
+          externalLinkKey: property.externalLinkKey ?? null,
+        };
+        addToDedupeIndex(dedupeIndex, newRecord);
+        existingPropsForDedupe.push(newRecord);
 
         jobRows.push({
           jobId: job.id,

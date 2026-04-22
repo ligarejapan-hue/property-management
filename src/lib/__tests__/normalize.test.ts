@@ -82,8 +82,9 @@ describe("normalizeBuildingName", () => {
     expect(normalizeBuildingName("パークタワー")).toBe("パークタワー");
   });
 
-  it("連続空白の圧縮", () => {
-    expect(normalizeBuildingName("パーク  タワー")).toBe("パーク タワー");
+  it("内部空白を全て除去する（重複判定のため）", () => {
+    expect(normalizeBuildingName("パーク  タワー")).toBe("パークタワー");
+    expect(normalizeBuildingName("ABC マンション")).toBe("abcマンション");
   });
 
   it("建物名ではハイフン統一は行わない (en dash などはそのまま)", () => {

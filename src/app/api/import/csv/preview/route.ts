@@ -9,6 +9,10 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { parseCsv, PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
+import {
+  buildDedupeIndex,
+  findPropertyDuplicate,
+} from "@/lib/import-dedupe";
 
 const JAPANESE_FIELD_MAP: Record<string, string> = {
   "住所": "address",
@@ -76,6 +80,19 @@ export async function POST(request: NextRequest) {
     let validRows = 0;
     let errorRows = 0;
 
+    // Build normalized dedupe index once across existing properties
+    const existingProps = await prisma.property.findMany({
+      select: {
+        id: true,
+        address: true,
+        roomNo: true,
+        buildingId: true,
+        realEstateNumber: true,
+        externalLinkKey: true,
+      },
+    });
+    const dedupeIndex = buildDedupeIndex(existingProps);
+
     for (let i = 0; i < rows.length; i++) {
       const rawRow = rows[i];
       const mapped: Record<string, string> = {};
@@ -89,36 +106,23 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // Check duplicates
-      const orConditions: Record<string, unknown>[] = [
-        { address: mapped.address },
-      ];
-      if (mapped.realEstateNumber) {
-        orConditions.push({ realEstateNumber: mapped.realEstateNumber });
-      }
-      if (mapped.externalLinkKey) {
-        orConditions.push({ externalLinkKey: mapped.externalLinkKey });
-      }
+      const hit = findPropertyDuplicate(
+        dedupeIndex,
+        {
+          address: mapped.address,
+          realEstateNumber: mapped.realEstateNumber,
+          externalLinkKey: mapped.externalLinkKey,
+        },
+        existingProps,
+      );
 
-      const existing = await prisma.property.findFirst({
-        where: { OR: orConditions },
-        select: { id: true, address: true, realEstateNumber: true, externalLinkKey: true },
-      });
-
-      if (existing) {
-        let reason = "住所一致";
-        if (mapped.realEstateNumber && existing.realEstateNumber === mapped.realEstateNumber) {
-          reason = "不動産番号一致";
-        }
-        if (mapped.externalLinkKey && existing.externalLinkKey === mapped.externalLinkKey) {
-          reason = "リンクキー一致";
-        }
+      if (hit) {
         duplicates.push({
           rowNumber: i + 2,
           address: mapped.address,
-          matchedPropertyId: existing.id,
-          matchedAddress: existing.address,
-          matchReason: reason,
+          matchedPropertyId: hit.matchedId,
+          matchedAddress: hit.matchedAddress,
+          matchReason: hit.reason,
         });
       } else {
         validRows++;
