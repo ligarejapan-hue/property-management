@@ -1331,6 +1331,7 @@ export default function ImportPage() {
                       <tr>
                         <th className="px-2 py-1">行</th>
                         <th className="px-2 py-1">理由</th>
+                        <th className="px-2 py-1">物件状態</th>
                         <th className="px-2 py-1">F列</th>
                         <th className="px-2 py-1">K列</th>
                         <th className="px-2 py-1">候補数</th>
@@ -1342,6 +1343,14 @@ export default function ImportPage() {
                         <tr key={s.rowNumber}>
                           <td className="px-2 py-1 text-gray-600">{s.rowNumber}</td>
                           <td className="px-2 py-1 text-amber-700">{s.reasonLabel}</td>
+                          <td className="px-2 py-1 text-gray-600">
+                            {{
+                              matched: "既存あり",
+                              not_found: "未特定",
+                              multiple: "複数候補",
+                              no_key: "キー不足",
+                            }[s.propertyStatus]}
+                          </td>
                           <td className="px-2 py-1 text-gray-600">{s.fColumn}</td>
                           <td className="px-2 py-1 text-gray-600">{s.kColumn}</td>
                           <td className="px-2 py-1 text-gray-600">{s.candidateCount}</td>

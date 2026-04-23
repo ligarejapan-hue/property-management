@@ -469,6 +469,7 @@ export interface ReceptionOwnerPreviewResponse {
     reasonLabel: string;
     candidateCount: number;
     ownerCount: number;
+    propertyStatus: "matched" | "not_found" | "multiple" | "no_key";
   }>;
   receptionFileType: { type: string; label: string | null; error: string | null };
   ownerFileType: { type: string; label: string | null; error: string | null };

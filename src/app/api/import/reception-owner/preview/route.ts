@@ -136,6 +136,7 @@ export async function POST(request: NextRequest) {
       reasonLabel: string;
       candidateCount: number;
       ownerCount: number;
+      propertyStatus: "matched" | "not_found" | "multiple" | "no_key";
     }> = [];
 
     for (const c of combined) {
@@ -165,6 +166,7 @@ export async function POST(request: NextRequest) {
                 ? c.propertyMatch.candidates?.length ?? 0
                 : 0,
             ownerCount: c.owners.length,
+            propertyStatus: c.propertyMatch.status,
           });
         }
       }
