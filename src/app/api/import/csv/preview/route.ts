@@ -12,6 +12,7 @@ import { parseCsv, PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import {
   buildDedupeIndex,
   findPropertyDuplicate,
+  isUpdateEligibleReason,
 } from "@/lib/import-dedupe";
 
 const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -77,6 +78,13 @@ export async function POST(request: NextRequest) {
       matchedAddress: string;
       matchReason: string;
     }> = [];
+    const updates: Array<{
+      rowNumber: number;
+      address: string;
+      matchedPropertyId: string;
+      matchedAddress: string;
+      matchReason: string;
+    }> = [];
     let validRows = 0;
     let errorRows = 0;
 
@@ -117,13 +125,18 @@ export async function POST(request: NextRequest) {
       );
 
       if (hit) {
-        duplicates.push({
+        const entry = {
           rowNumber: i + 2,
           address: mapped.address,
           matchedPropertyId: hit.matchedId,
           matchedAddress: hit.matchedAddress,
           matchReason: hit.reason,
-        });
+        };
+        if (isUpdateEligibleReason(hit.reason)) {
+          updates.push(entry);
+        } else {
+          duplicates.push(entry);
+        }
       } else {
         validRows++;
       }
@@ -135,6 +148,8 @@ export async function POST(request: NextRequest) {
       errorRows,
       duplicateCount: duplicates.length,
       duplicates: duplicates.slice(0, 20), // Show max 20
+      updateCount: updates.length,
+      updates: updates.slice(0, 20),
     });
   } catch (error) {
     return handleApiError(error);

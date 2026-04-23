@@ -28,6 +28,9 @@ import {
 import {
   isDuplicateMessage,
   extractDuplicateReason,
+  isUpdateMessage,
+  extractUpdateReason,
+  extractUpdatedFields,
 } from "@/lib/import-row-display";
 
 // ---------------------------------------------------------------------------
@@ -210,6 +213,10 @@ export default function ImportJobDetailPage() {
           (r.status === "needs_review" || r.status === "skipped") &&
           isDuplicateMessage(r.errorMessage),
       ).length ?? 0,
+    updated:
+      job?.rows.filter(
+        (r) => r.status === "success" && isUpdateMessage(r.errorMessage),
+      ).length ?? 0,
   };
 
   // Handle row actions
@@ -338,7 +345,7 @@ export default function ImportJobDetailPage() {
 
       {/* Job summary */}
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
-        <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4 lg:grid-cols-8">
           <div>
             <span className="text-gray-500">ステータス</span>
             <div className="mt-0.5 font-medium text-gray-800">
@@ -366,6 +373,12 @@ export default function ImportJobDetailPage() {
             <span className="text-gray-500">成功</span>
             <div className="mt-0.5 font-medium text-green-600">
               {job.successCount ?? 0}
+            </div>
+          </div>
+          <div>
+            <span className="text-gray-500">うち更新</span>
+            <div className="mt-0.5 font-medium text-blue-600">
+              {counts.updated}
             </div>
           </div>
           <div>
@@ -415,6 +428,12 @@ export default function ImportJobDetailPage() {
             <>（うち <strong>{counts.duplicate} 件</strong>は重複検知によるスキップ候補）</>
           )}
           。 各行を展開して「新規作成」「既存に紐付け」「スキップ」のいずれかを選択してください。
+        </div>
+      )}
+      {counts.updated > 0 && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          <RefreshCw className="mr-1.5 inline h-4 w-4" />
+          <strong>{counts.updated} 件</strong>の行が既存レコードを更新しました（識別子/棟内部屋番号の強い一致のみ）。空欄の値は上書きしていません。
         </div>
       )}
 
@@ -510,6 +529,18 @@ export default function ImportJobDetailPage() {
                       重複{extractDuplicateReason(row.errorMessage) ? `・${extractDuplicateReason(row.errorMessage)}` : ""}
                     </span>
                   )}
+                  {isUpdateMessage(row.errorMessage) && (
+                    <span
+                      className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-800"
+                      title={row.errorMessage ?? ""}
+                    >
+                      更新{extractUpdateReason(row.errorMessage) ? `・${extractUpdateReason(row.errorMessage)}` : ""}
+                      {(() => {
+                        const fields = extractUpdatedFields(row.errorMessage);
+                        return fields.length > 0 ? `（${fields.length}項目）` : "";
+                      })()}
+                    </span>
+                  )}
                   <span className="flex-1 truncate text-sm text-gray-600">
                     {rawData["住所"] ||
                       rawData["address"] ||
@@ -517,11 +548,13 @@ export default function ImportJobDetailPage() {
                       rawData["name"] ||
                       ""}
                   </span>
-                  {row.errorMessage && !isDuplicateMessage(row.errorMessage) && (
-                    <span className="hidden max-w-[200px] truncate text-xs text-red-500 sm:inline">
-                      {row.errorMessage}
-                    </span>
-                  )}
+                  {row.errorMessage &&
+                    !isDuplicateMessage(row.errorMessage) &&
+                    !isUpdateMessage(row.errorMessage) && (
+                      <span className="hidden max-w-[200px] truncate text-xs text-red-500 sm:inline">
+                        {row.errorMessage}
+                      </span>
+                    )}
                   {isExpanded ? (
                     <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />
                   ) : (
@@ -532,8 +565,26 @@ export default function ImportJobDetailPage() {
                 {/* Expanded detail */}
                 {isExpanded && (
                   <div className="border-t border-gray-200 bg-white px-4 py-4">
+                    {/* Update summary (success + update) */}
+                    {row.status === "success" && isUpdateMessage(row.errorMessage) && (
+                      <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                        <strong>更新:</strong>{" "}
+                        {extractUpdateReason(row.errorMessage) ?? "既存レコード更新"}
+                        {(() => {
+                          const fields = extractUpdatedFields(row.errorMessage);
+                          if (fields.length === 0) {
+                            return <span className="ml-2 text-blue-600">（差分なし）</span>;
+                          }
+                          return (
+                            <span className="ml-2 text-blue-700">
+                              更新項目: {fields.join(", ")}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    )}
                     {/* Error / review reason */}
-                    {row.errorMessage && (
+                    {row.errorMessage && !(row.status === "success" && isUpdateMessage(row.errorMessage)) && (
                       <div className={`mb-4 rounded-md border px-3 py-2 text-sm ${
                         row.status === "needs_review"
                           ? "border-amber-200 bg-amber-50 text-amber-800"

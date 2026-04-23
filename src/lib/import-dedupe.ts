@@ -45,6 +45,47 @@ export type DuplicateReason =
   | "住所一致（正規化比較）"
   | "棟内部屋番号一致（正規化比較）";
 
+/**
+ * 重複一致理由が「既存更新の対象にしてよい」強度を持つかを返す。
+ *
+ * 住所一致のみでは他物件と取り違える危険があるため更新不可。
+ * 識別子一致 / 棟内部屋番号一致は安全に更新可能。
+ */
+export function isUpdateEligibleReason(reason: DuplicateReason): boolean {
+  return reason !== "住所一致（正規化比較）";
+}
+
+/**
+ * CSV 取込で安全に update してよい Property フィールドの allowlist。
+ *
+ * 含めないもの:
+ * - id / createdAt / createdBy / updatedAt (システム管理)
+ * - propertyType / registryStatus / dmStatus / caseStatus (業務ステータス)
+ * - realEstateNumber / externalLinkKey (識別子: マッチキー自身)
+ * - buildingId / assignedTo (関連)
+ * - roomNo (unit マッチキー自身)
+ */
+export const UPDATABLE_PROPERTY_FIELDS = [
+  "address",
+  "lotNumber",
+  "buildingNumber",
+  "zoningDistrict",
+  "rosenkaValue",
+  "gpsLat",
+  "gpsLng",
+  "note",
+  "floorNo",
+  "exclusiveArea",
+  "balconyArea",
+  "layoutType",
+  "orientation",
+  "managementFee",
+  "repairReserveFee",
+  "ownershipShareNote",
+] as const;
+
+export type UpdatablePropertyField = (typeof UPDATABLE_PROPERTY_FIELDS)[number];
+
 export interface DuplicateHit {
   matchedId: string;
   matchedAddress: string;

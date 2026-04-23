@@ -4,6 +4,8 @@ import {
   addToDedupeIndex,
   findPropertyDuplicate,
   findBuildingByNormalizedName,
+  isUpdateEligibleReason,
+  UPDATABLE_PROPERTY_FIELDS,
   type PropertyRecord,
 } from "../import-dedupe";
 
@@ -203,5 +205,40 @@ describe("findBuildingByNormalizedName", () => {
 
   it("ヒットなしは null", () => {
     expect(findBuildingByNormalizedName(pool, "存在しない棟")).toBeNull();
+  });
+});
+
+describe("isUpdateEligibleReason", () => {
+  it("識別子一致 / 棟内部屋番号一致は更新可", () => {
+    expect(isUpdateEligibleReason("realEstateNumber一致")).toBe(true);
+    expect(isUpdateEligibleReason("externalLinkKey一致")).toBe(true);
+    expect(isUpdateEligibleReason("棟内部屋番号一致（正規化比較）")).toBe(true);
+  });
+
+  it("住所一致のみは更新不可（取り違えリスク）", () => {
+    expect(isUpdateEligibleReason("住所一致（正規化比較）")).toBe(false);
+  });
+});
+
+describe("UPDATABLE_PROPERTY_FIELDS", () => {
+  it("識別子/ステータス/システム列を含まない", () => {
+    const fields = UPDATABLE_PROPERTY_FIELDS as readonly string[];
+    for (const forbidden of [
+      "id",
+      "createdAt",
+      "createdBy",
+      "updatedAt",
+      "propertyType",
+      "registryStatus",
+      "dmStatus",
+      "caseStatus",
+      "realEstateNumber",
+      "externalLinkKey",
+      "buildingId",
+      "assignedTo",
+      "roomNo",
+    ]) {
+      expect(fields).not.toContain(forbidden);
+    }
   });
 });

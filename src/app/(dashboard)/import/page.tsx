@@ -43,6 +43,7 @@ interface ImportResult {
   jobId: string;
   totalRows: number;
   successCount: number;
+  updateCount?: number;
   errorCount: number;
   needsReviewCount: number;
   parseErrors: Array<{ row: number; message: string }>;
@@ -283,6 +284,8 @@ export default function ImportPage() {
     errorRows: number;
     duplicateCount: number;
     duplicates: Array<{ rowNumber: number; address: string; matchedAddress: string; matchReason: string }>;
+    updateCount?: number;
+    updates?: Array<{ rowNumber: number; address: string; matchedAddress: string; matchReason: string }>;
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -798,7 +801,7 @@ export default function ImportPage() {
 
           {duplicatePreview && !previewLoading && (
             <div className="mt-4">
-              <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-center">
                   <div className="text-lg font-bold text-gray-800">{duplicatePreview.totalRows}</div>
                   <div className="text-xs text-gray-500">総行数(サーバー)</div>
@@ -807,9 +810,13 @@ export default function ImportPage() {
                   <div className="text-lg font-bold text-green-700">{duplicatePreview.validRows}</div>
                   <div className="text-xs text-green-600">新規登録予定</div>
                 </div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-center">
+                  <div className="text-lg font-bold text-blue-700">{duplicatePreview.updateCount ?? 0}</div>
+                  <div className="text-xs text-blue-600">更新候補</div>
+                </div>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-center">
                   <div className="text-lg font-bold text-amber-700">{duplicatePreview.duplicateCount}</div>
-                  <div className="text-xs text-amber-600">重複候補</div>
+                  <div className="text-xs text-amber-600">重複スキップ</div>
                 </div>
                 <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-center">
                   <div className="text-lg font-bold text-red-700">{duplicatePreview.errorRows}</div>
@@ -817,14 +824,55 @@ export default function ImportPage() {
                 </div>
               </div>
 
+              {duplicatePreview.updates && duplicatePreview.updates.length > 0 && (
+                <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-800">
+                    <RefreshCw className="h-4 w-4" />
+                    更新候補 ({duplicatePreview.updateCount ?? 0}件)
+                  </div>
+                  <p className="mb-3 text-xs text-blue-600">
+                    以下の行は既存物件に一致する識別子/棟内部屋番号があるため、取込実行時に既存レコードを更新します（空欄の値は上書きしません）。
+                  </p>
+                  <div className="overflow-x-auto rounded border border-blue-200 bg-white">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-blue-100 bg-blue-50">
+                        <tr>
+                          <th className="px-2 py-1.5 font-medium text-blue-700">行番号</th>
+                          <th className="px-2 py-1.5 font-medium text-blue-700">CSV住所</th>
+                          <th className="px-2 py-1.5 font-medium text-blue-700">既存物件住所</th>
+                          <th className="px-2 py-1.5 font-medium text-blue-700">一致理由</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-blue-50">
+                        {duplicatePreview.updates.map((d, i) => (
+                          <tr key={i} className="hover:bg-blue-50/50">
+                            <td className="px-2 py-1.5 text-gray-600">{d.rowNumber}</td>
+                            <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.address}>{d.address}</td>
+                            <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
+                            <td className="px-2 py-1.5">
+                              <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-700">{d.matchReason}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {(duplicatePreview.updateCount ?? 0) > 20 && (
+                    <p className="mt-2 text-xs text-blue-500">
+                      ※ 上位20件のみ表示（全{duplicatePreview.updateCount}件）
+                    </p>
+                  )}
+                </div>
+              )}
+
               {duplicatePreview.duplicates.length > 0 && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-800">
                     <AlertTriangle className="h-4 w-4" />
-                    重複候補 ({duplicatePreview.duplicateCount}件)
+                    重複スキップ候補 ({duplicatePreview.duplicateCount}件)
                   </div>
                   <p className="mb-3 text-xs text-amber-600">
-                    以下の行は既存物件と重複する可能性があります。取込実行時は「要レビュー」として記録されます。
+                    以下の行は住所一致のみなど取り違えリスクがあるため、取込実行時は「要レビュー」として記録し、既存レコードを更新しません。
                   </p>
                   <div className="overflow-x-auto rounded border border-amber-200 bg-white">
                     <table className="w-full text-left text-xs">
@@ -913,7 +961,7 @@ export default function ImportPage() {
               <CheckCircle2 className="h-5 w-5" />
               <span className="font-semibold">取込が完了しました</span>
             </div>
-            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
               <div>
                 <span className="text-gray-600">総行数:</span>{" "}
                 <strong>{result.totalRows}</strong>
@@ -925,14 +973,20 @@ export default function ImportPage() {
                 </strong>
               </div>
               <div>
-                <span className="text-red-600">エラー:</span>{" "}
-                <strong className="text-red-700">{result.errorCount}</strong>
+                <span className="text-blue-600">うち更新:</span>{" "}
+                <strong className="text-blue-700">
+                  {result.updateCount ?? 0}
+                </strong>
               </div>
               <div>
                 <span className="text-amber-600">要レビュー:</span>{" "}
                 <strong className="text-amber-700">
                   {result.needsReviewCount}
                 </strong>
+              </div>
+              <div>
+                <span className="text-red-600">エラー:</span>{" "}
+                <strong className="text-red-700">{result.errorCount}</strong>
               </div>
             </div>
             {result.parseErrors.length > 0 && (

@@ -23,6 +23,9 @@ import {
   addToDedupeIndex,
   findPropertyDuplicate,
   findBuildingByNormalizedName,
+  isUpdateEligibleReason,
+  UPDATABLE_PROPERTY_FIELDS,
+  type UpdatablePropertyField,
 } from "@/lib/import-dedupe";
 import { normalizeBuildingName } from "@/lib/normalize";
 
@@ -298,6 +301,7 @@ export async function POST(request: NextRequest) {
     });
 
     let successCount = 0;
+    let updateCount = 0;
     let errorCount = 0;
     const jobRows: Array<{
       jobId: string;
@@ -444,14 +448,131 @@ export async function POST(request: NextRequest) {
         );
 
         if (dupHit) {
+          // 住所のみ一致など取り違えリスクのある理由はレビューへ
+          if (!isUpdateEligibleReason(dupHit.reason)) {
+            jobRows.push({
+              jobId: job.id,
+              rowNumber,
+              status: "needs_review",
+              rawData: rawRow,
+              errorMessage: `重複の可能性[${dupHit.reason}]: 既存物件ID=${dupHit.matchedId} (${dupHit.matchedAddress})`,
+              createdId: null,
+            });
+            continue;
+          }
+
+          // UPDATABLE_PROPERTY_FIELDS ∩ (CSV に非空で入っている項目) のみ更新
+          // 空の値でマスター側を潰さないよう、空・undefined は含めない
+          const updateData: Record<string, unknown> = {};
+          const numericFields = new Set<UpdatablePropertyField>([
+            "rosenkaValue",
+            "gpsLat",
+            "gpsLng",
+            "exclusiveArea",
+            "balconyArea",
+          ]);
+          const intFields = new Set<UpdatablePropertyField>([
+            "floorNo",
+            "managementFee",
+            "repairReserveFee",
+          ]);
+          const trimFields = new Set<UpdatablePropertyField>([
+            "layoutType",
+            "orientation",
+          ]);
+
+          for (const field of UPDATABLE_PROPERTY_FIELDS) {
+            const raw = mapped[field];
+            if (raw === undefined || raw === null || raw === "") continue;
+            if (numericFields.has(field)) {
+              const n = parseFloat(raw);
+              if (!Number.isNaN(n)) updateData[field] = n;
+            } else if (intFields.has(field)) {
+              const n = parseInt(raw);
+              if (!Number.isNaN(n)) updateData[field] = n;
+            } else if (trimFields.has(field)) {
+              const v = raw.trim();
+              if (v) updateData[field] = v;
+            } else {
+              updateData[field] = raw;
+            }
+          }
+
+          // 実際に値が変わる項目だけに絞る
+          const existing = await prisma.property.findUnique({
+            where: { id: dupHit.matchedId },
+          });
+          const changedFields: string[] = [];
+          const finalUpdateData: Record<string, unknown> = {};
+          if (existing) {
+            for (const [k, v] of Object.entries(updateData)) {
+              const prev = (existing as unknown as Record<string, unknown>)[k];
+              const prevStr = prev == null ? null : String(prev);
+              const nextStr = v == null ? null : String(v);
+              if (prevStr !== nextStr) {
+                finalUpdateData[k] = v;
+                changedFields.push(k);
+              }
+            }
+          }
+
+          if (!existing || changedFields.length === 0) {
+            // 既存値と完全一致 → 変更なし。success 扱いで「更新なし」を伝える
+            jobRows.push({
+              jobId: job.id,
+              rowNumber,
+              status: "success",
+              rawData: rawRow,
+              errorMessage: `更新[${dupHit.reason}]: 既存物件ID=${dupHit.matchedId} (更新項目: なし)`,
+              createdId: dupHit.matchedId,
+            });
+            updateCount++;
+            successCount++;
+            continue;
+          }
+
+          const updated = await prisma.property.update({
+            where: { id: dupHit.matchedId },
+            data: finalUpdateData as Parameters<
+              typeof prisma.property.update
+            >[0]["data"],
+          });
+
+          await recordChanges({
+            targetTable: "properties",
+            targetId: updated.id,
+            changedBy: session.id,
+            oldValues: existing as unknown as Record<string, unknown>,
+            newValues: finalUpdateData,
+            trackedFields: PROPERTY_TRACKED_FIELDS,
+            source: "csv_import",
+          });
+
+          // dedupe index も住所変更などに備えて反映
+          const updatedRecord = {
+            id: updated.id,
+            address: updated.address,
+            roomNo: updated.roomNo ?? null,
+            buildingId: updated.buildingId ?? null,
+            realEstateNumber: updated.realEstateNumber ?? null,
+            externalLinkKey: updated.externalLinkKey ?? null,
+          };
+          addToDedupeIndex(dedupeIndex, updatedRecord);
+          const idxInAll = existingPropsForDedupe.findIndex(
+            (p) => p.id === updated.id,
+          );
+          if (idxInAll >= 0) existingPropsForDedupe[idxInAll] = updatedRecord;
+
           jobRows.push({
             jobId: job.id,
             rowNumber,
-            status: "needs_review",
+            status: "success",
             rawData: rawRow,
-            errorMessage: `重複の可能性[${dupHit.reason}]: 既存物件ID=${dupHit.matchedId} (${dupHit.matchedAddress})`,
-            createdId: null,
+            errorMessage: `更新[${dupHit.reason}]: 既存物件ID=${updated.id} (更新項目: ${changedFields.join(", ")})`,
+            createdId: updated.id,
           });
+          updateCount++;
+          successCount++;
           continue;
         }
 
@@ -592,6 +713,7 @@ export async function POST(request: NextRequest) {
         fileName: fileName ?? "import.csv",
         totalRows: rows.length,
         successCount,
+        updateCount,
         errorCount,
         needsReviewCount,
       },
@@ -602,6 +724,7 @@ export async function POST(request: NextRequest) {
         jobId: job.id,
         totalRows: rows.length,
         successCount,
+        updateCount,
         errorCount,
         needsReviewCount,
         parseErrors,
