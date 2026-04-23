@@ -25,6 +25,10 @@ import {
   searchProperties,
   searchOwners,
 } from "@/lib/api-client";
+import {
+  isDuplicateMessage,
+  extractDuplicateReason,
+} from "@/lib/import-row-display";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -200,6 +204,12 @@ export default function ImportJobDetailPage() {
     error: job?.rows.filter((r) => r.status === "error").length ?? 0,
     success: job?.rows.filter((r) => r.status === "success").length ?? 0,
     skipped: job?.rows.filter((r) => r.status === "skipped").length ?? 0,
+    duplicate:
+      job?.rows.filter(
+        (r) =>
+          (r.status === "needs_review" || r.status === "skipped") &&
+          isDuplicateMessage(r.errorMessage),
+      ).length ?? 0,
   };
 
   // Handle row actions
@@ -328,7 +338,7 @@ export default function ImportJobDetailPage() {
 
       {/* Job summary */}
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
-        <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4 lg:grid-cols-7">
           <div>
             <span className="text-gray-500">ステータス</span>
             <div className="mt-0.5 font-medium text-gray-800">
@@ -356,6 +366,12 @@ export default function ImportJobDetailPage() {
             <span className="text-gray-500">成功</span>
             <div className="mt-0.5 font-medium text-green-600">
               {job.successCount ?? 0}
+            </div>
+          </div>
+          <div>
+            <span className="text-gray-500">重複スキップ候補</span>
+            <div className="mt-0.5 font-medium text-amber-600">
+              {counts.duplicate}
             </div>
           </div>
           <div>
@@ -394,8 +410,11 @@ export default function ImportJobDetailPage() {
       {counts.needs_review > 0 && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <AlertTriangle className="mr-1.5 inline h-4 w-4" />
-          <strong>{counts.needs_review} 件</strong>の行がレビュー待ちです。
-          各行を展開して「新規作成」「既存に紐付け」「スキップ」のいずれかを選択してください。
+          <strong>{counts.needs_review} 件</strong>の行がレビュー待ちです
+          {counts.duplicate > 0 && (
+            <>（うち <strong>{counts.duplicate} 件</strong>は重複検知によるスキップ候補）</>
+          )}
+          。 各行を展開して「新規作成」「既存に紐付け」「スキップ」のいずれかを選択してください。
         </div>
       )}
 
@@ -483,6 +502,14 @@ export default function ImportJobDetailPage() {
                   <span className={`text-sm font-medium ${config.color}`}>
                     {config.label}
                   </span>
+                  {isDuplicateMessage(row.errorMessage) && (
+                    <span
+                      className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800"
+                      title={row.errorMessage ?? ""}
+                    >
+                      重複{extractDuplicateReason(row.errorMessage) ? `・${extractDuplicateReason(row.errorMessage)}` : ""}
+                    </span>
+                  )}
                   <span className="flex-1 truncate text-sm text-gray-600">
                     {rawData["住所"] ||
                       rawData["address"] ||
@@ -490,7 +517,7 @@ export default function ImportJobDetailPage() {
                       rawData["name"] ||
                       ""}
                   </span>
-                  {row.errorMessage && (
+                  {row.errorMessage && !isDuplicateMessage(row.errorMessage) && (
                     <span className="hidden max-w-[200px] truncate text-xs text-red-500 sm:inline">
                       {row.errorMessage}
                     </span>
