@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { importCsv, fetchImportJobs, previewCsvDuplicates } from "@/lib/api-client";
+import { detectImportFileType } from "@/lib/import-file-type";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -286,6 +287,9 @@ export default function ImportPage() {
     duplicates: Array<{ rowNumber: number; address: string; matchedAddress: string; matchReason: string }>;
     updateCount?: number;
     updates?: Array<{ rowNumber: number; address: string; matchedAddress: string; matchReason: string }>;
+    fileType?: "reception" | "owner" | "ambiguous" | "unknown";
+    fileTypeLabel?: string | null;
+    fileTypeError?: string | null;
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -555,12 +559,34 @@ export default function ImportPage() {
           </div>
 
           {fileName && (
-            <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
-              <FileText className="h-4 w-4" />
-              <span>{fileName}</span>
-              <span className="text-gray-400">
-                ({rows.length} 行)
-              </span>
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <FileText className="h-4 w-4" />
+                <span>{fileName}</span>
+                <span className="text-gray-400">
+                  ({rows.length} 行)
+                </span>
+              </div>
+              {(() => {
+                const det = detectImportFileType(fileName);
+                if (det.label) {
+                  return (
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {det.label}
+                    </div>
+                  );
+                }
+                if (det.error) {
+                  return (
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {det.error}
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           )}
         </div>
@@ -678,7 +704,7 @@ export default function ImportPage() {
                 setPreviewLoading(true);
                 setDuplicatePreview(null);
                 try {
-                  const res = await previewCsvDuplicates(csvText, columnMapping);
+                  const res = await previewCsvDuplicates(csvText, columnMapping, fileName);
                   setDuplicatePreview(res as typeof duplicatePreview);
                 } catch {
                   // preview is best-effort
@@ -801,6 +827,27 @@ export default function ImportPage() {
 
           {duplicatePreview && !previewLoading && (
             <div className="mt-4">
+              {/* ファイル種別判定結果 */}
+              {duplicatePreview.fileTypeLabel && (
+                <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <strong>{duplicatePreview.fileTypeLabel}</strong>
+                  <span className="text-xs text-emerald-600">
+                    （ファイル名: {fileName || "未設定"}）
+                  </span>
+                </div>
+              )}
+              {duplicatePreview.fileTypeError && (
+                <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="font-medium">{duplicatePreview.fileTypeError}</div>
+                    <div className="text-xs text-amber-600 mt-0.5">
+                      （ファイル名: {fileName || "未設定"}）
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-center">
                   <div className="text-lg font-bold text-gray-800">{duplicatePreview.totalRows}</div>

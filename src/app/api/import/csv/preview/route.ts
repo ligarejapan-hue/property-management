@@ -14,6 +14,7 @@ import {
   findPropertyDuplicate,
   isUpdateEligibleReason,
 } from "@/lib/import-dedupe";
+import { detectImportFileType } from "@/lib/import-file-type";
 
 const JAPANESE_FIELD_MAP: Record<string, string> = {
   "住所": "address",
@@ -45,14 +46,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { csvText, columnMapping } = body as {
+    const { csvText, columnMapping, fileName } = body as {
       csvText?: string;
       columnMapping?: Record<string, string>;
+      fileName?: string;
     };
 
     if (!csvText) {
       throw new ApiError(422, "csvText は必須です", "VALIDATION_ERROR");
     }
+
+    const fileTypeDetection = detectImportFileType(fileName);
 
     const { headers, rows } = parseCsv(csvText);
 
@@ -150,6 +154,9 @@ export async function POST(request: NextRequest) {
       duplicates: duplicates.slice(0, 20), // Show max 20
       updateCount: updates.length,
       updates: updates.slice(0, 20),
+      fileType: fileTypeDetection.type,
+      fileTypeLabel: fileTypeDetection.label,
+      fileTypeError: fileTypeDetection.error,
     });
   } catch (error) {
     return handleApiError(error);

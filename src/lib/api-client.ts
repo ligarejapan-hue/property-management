@@ -401,6 +401,7 @@ export async function importCsv(fileName: string, csvText: string, columnMapping
 export async function previewCsvDuplicates(
   csvText: string,
   columnMapping?: Record<string, string>,
+  fileName?: string,
 ) {
   if (USE_MOCK) {
     await mockDelay();
@@ -409,7 +410,7 @@ export async function previewCsvDuplicates(
   return apiFetch("/api/import/csv/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ csvText, columnMapping }),
+    body: JSON.stringify({ csvText, columnMapping, fileName }),
   });
 }
 
