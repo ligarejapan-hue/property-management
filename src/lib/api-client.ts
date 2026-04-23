@@ -439,6 +439,119 @@ export async function importOwnerCsv(
   });
 }
 
+// ---------- Reception × Owner (2-file) ----------
+
+export interface ReceptionOwnerPreviewResponse {
+  summary: {
+    receptionCount: number;
+    ownerCount: number;
+    ownerMatchedCount: number;
+    ownerUnmatchedCount: number;
+    propertyMatchedCount: number;
+    propertyNotFoundCount: number;
+    propertyMultipleCount: number;
+    propertyNoKeyCount: number;
+  };
+  matchedSamples: Array<{
+    rowNumber: number;
+    matchKey: string;
+    propertyId: string;
+    propertyAddress: string;
+    ownerCount: number;
+    ownerNames: string[];
+  }>;
+  reviewSamples: Array<{
+    rowNumber: number;
+    matchKey: string;
+    fColumn: string;
+    kColumn: string;
+    reason: "owner_unmatched" | "property_not_found" | "property_multiple" | "property_no_key";
+    reasonLabel: string;
+    candidateCount: number;
+    ownerCount: number;
+  }>;
+  receptionFileType: { type: string; label: string | null; error: string | null };
+  ownerFileType: { type: string; label: string | null; error: string | null };
+}
+
+export async function previewReceptionOwnerCsv(input: {
+  receptionFileName: string;
+  ownerFileName: string;
+  receptionCsv: string;
+  ownerCsv: string;
+}): Promise<ReceptionOwnerPreviewResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      summary: {
+        receptionCount: 0,
+        ownerCount: 0,
+        ownerMatchedCount: 0,
+        ownerUnmatchedCount: 0,
+        propertyMatchedCount: 0,
+        propertyNotFoundCount: 0,
+        propertyMultipleCount: 0,
+        propertyNoKeyCount: 0,
+      },
+      matchedSamples: [],
+      reviewSamples: [],
+      receptionFileType: { type: "reception", label: "受付帳として認識", error: null },
+      ownerFileType: { type: "owner", label: "所有者として認識", error: null },
+    };
+  }
+  return apiFetch<ReceptionOwnerPreviewResponse>("/api/import/reception-owner/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export interface ReceptionOwnerImportResponse {
+  jobId: string;
+  summary: ReceptionOwnerPreviewResponse["summary"];
+  successCount: number;
+  needsReviewCount: number;
+  errorCount: number;
+  propertyUpdatedCount: number;
+  ownerCreatedCount: number;
+  ownerLinkedCount: number;
+}
+
+export async function importReceptionOwnerCsv(input: {
+  receptionFileName: string;
+  ownerFileName: string;
+  receptionCsv: string;
+  ownerCsv: string;
+}): Promise<ReceptionOwnerImportResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      jobId: "ij-mock-" + Date.now(),
+      summary: {
+        receptionCount: 0,
+        ownerCount: 0,
+        ownerMatchedCount: 0,
+        ownerUnmatchedCount: 0,
+        propertyMatchedCount: 0,
+        propertyNotFoundCount: 0,
+        propertyMultipleCount: 0,
+        propertyNoKeyCount: 0,
+      },
+      successCount: 0,
+      needsReviewCount: 0,
+      errorCount: 0,
+      propertyUpdatedCount: 0,
+      ownerCreatedCount: 0,
+      ownerLinkedCount: 0,
+    };
+  }
+  return apiFetch<ReceptionOwnerImportResponse>("/api/import/reception-owner", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
 /** テキスト貼り付けモード (後方互換) */
 export async function importRegistryPdf(
   text: string,

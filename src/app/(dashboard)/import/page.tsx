@@ -21,7 +21,15 @@ import {
   DownloadCloud,
 } from "lucide-react";
 import Link from "next/link";
-import { importCsv, fetchImportJobs, previewCsvDuplicates } from "@/lib/api-client";
+import {
+  importCsv,
+  fetchImportJobs,
+  previewCsvDuplicates,
+  previewReceptionOwnerCsv,
+  importReceptionOwnerCsv,
+  type ReceptionOwnerPreviewResponse,
+  type ReceptionOwnerImportResponse,
+} from "@/lib/api-client";
 import { detectImportFileType } from "@/lib/import-file-type";
 
 // ---------------------------------------------------------------------------
@@ -252,6 +260,29 @@ function validateRow(
 // Component
 // ---------------------------------------------------------------------------
 
+function RoStat({
+  label,
+  value,
+  tone = "blue",
+}: {
+  label: string;
+  value: number;
+  tone?: "blue" | "green" | "amber" | "gray";
+}) {
+  const toneClass = {
+    blue: "text-blue-700",
+    green: "text-green-700",
+    amber: "text-amber-700",
+    gray: "text-gray-600",
+  }[tone];
+  return (
+    <div className="rounded bg-white px-3 py-2 shadow-sm">
+      <div className="text-[11px] text-gray-500">{label}</div>
+      <div className={`text-lg font-semibold ${toneClass}`}>{value}</div>
+    </div>
+  );
+}
+
 export default function ImportPage() {
   // Step state
   const [step, setStep] = useState<Step>(1);
@@ -296,6 +327,14 @@ export default function ImportPage() {
   // Job history
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
+
+  // Reception × Owner (2-file) state
+  const [receptionFile, setReceptionFile] = useState<{ name: string; text: string } | null>(null);
+  const [ownerFile, setOwnerFile] = useState<{ name: string; text: string } | null>(null);
+  const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>(null);
+  const [roResult, setRoResult] = useState<ReceptionOwnerImportResponse | null>(null);
+  const [roLoading, setRoLoading] = useState(false);
+  const [roError, setRoError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -437,6 +476,87 @@ export default function ImportPage() {
     setDuplicatePreview(null);
     setPreviewLoading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // ------ Reception × Owner ------
+  const readFileText = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve(ev.target?.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+
+  const handleRoFile = async (which: "reception" | "owner", file: File | null) => {
+    setRoError(null);
+    setRoPreview(null);
+    setRoResult(null);
+    if (!file) {
+      if (which === "reception") setReceptionFile(null);
+      else setOwnerFile(null);
+      return;
+    }
+    const detect = detectImportFileType(file.name);
+    if (which === "reception" && detect.type !== "reception") {
+      setRoError(`受付帳として認識できません: ${detect.error ?? "ファイル名に『受付帳』を含めてください"}`);
+      return;
+    }
+    if (which === "owner" && detect.type !== "owner") {
+      setRoError(`所有者として認識できません: ${detect.error ?? "ファイル名に『所有者』を含めてください"}`);
+      return;
+    }
+    const text = await readFileText(file);
+    if (which === "reception") setReceptionFile({ name: file.name, text });
+    else setOwnerFile({ name: file.name, text });
+  };
+
+  const handleRoPreview = async () => {
+    if (!receptionFile || !ownerFile) return;
+    setRoLoading(true);
+    setRoError(null);
+    setRoResult(null);
+    try {
+      const res = await previewReceptionOwnerCsv({
+        receptionFileName: receptionFile.name,
+        ownerFileName: ownerFile.name,
+        receptionCsv: receptionFile.text,
+        ownerCsv: ownerFile.text,
+      });
+      setRoPreview(res);
+    } catch (e) {
+      setRoError(e instanceof Error ? e.message : "プレビューに失敗しました");
+    } finally {
+      setRoLoading(false);
+    }
+  };
+
+  const handleRoImport = async () => {
+    if (!receptionFile || !ownerFile) return;
+    if (!window.confirm("一意特定できた行だけを既存物件に反映します。よろしいですか？")) return;
+    setRoLoading(true);
+    setRoError(null);
+    try {
+      const res = await importReceptionOwnerCsv({
+        receptionFileName: receptionFile.name,
+        ownerFileName: ownerFile.name,
+        receptionCsv: receptionFile.text,
+        ownerCsv: ownerFile.text,
+      });
+      setRoResult(res);
+      fetchJobs();
+    } catch (e) {
+      setRoError(e instanceof Error ? e.message : "取込に失敗しました");
+    } finally {
+      setRoLoading(false);
+    }
+  };
+
+  const handleRoReset = () => {
+    setReceptionFile(null);
+    setOwnerFile(null);
+    setRoPreview(null);
+    setRoResult(null);
+    setRoError(null);
   };
 
   // ------ Render helpers ------
@@ -1068,6 +1188,191 @@ export default function ImportPage() {
           </div>
         </div>
       )}
+
+      {/* ============ 受付帳 × 所有者 2ファイル突合 ============ */}
+      <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <FileUp className="h-5 w-5 text-blue-600" />
+          <h3 className="text-lg font-semibold text-gray-700">
+            受付帳 × 所有者 2ファイル突合
+          </h3>
+          <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+            既存物件に反映
+          </span>
+        </div>
+        <p className="mb-4 text-sm text-gray-500">
+          受付帳CSV（H/I/J/K列）と所有者CSV（C列）をキーに突合し、一意特定できた行だけを既存物件に反映します。
+          共有名義人は複数行のまま残します。空値では上書きしません。
+        </p>
+
+        <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              受付帳CSV <span className="text-xs text-gray-400">（ファイル名に「受付帳」を含める）</span>
+            </label>
+            <input
+              type="file"
+              accept=".csv,.tsv,.txt"
+              onChange={(e) => handleRoFile("reception", e.target.files?.[0] ?? null)}
+              className="block w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
+            />
+            {receptionFile && (
+              <div className="mt-1 text-xs text-green-700">
+                <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
+                {receptionFile.name}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              所有者CSV <span className="text-xs text-gray-400">（ファイル名に「所有者」を含める）</span>
+            </label>
+            <input
+              type="file"
+              accept=".csv,.tsv,.txt"
+              onChange={(e) => handleRoFile("owner", e.target.files?.[0] ?? null)}
+              className="block w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
+            />
+            {ownerFile && (
+              <div className="mt-1 text-xs text-green-700">
+                <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
+                {ownerFile.name}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleRoPreview}
+            disabled={!receptionFile || !ownerFile || roLoading}
+            className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+            プレビュー
+          </button>
+          <button
+            onClick={handleRoImport}
+            disabled={!roPreview || roLoading}
+            className="flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+            取り込み実行
+          </button>
+          <button
+            onClick={handleRoReset}
+            disabled={roLoading}
+            className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <RefreshCw className="h-4 w-4" />
+            クリア
+          </button>
+        </div>
+
+        {roError && (
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <AlertTriangle className="mr-1 inline h-4 w-4" />
+            {roError}
+          </div>
+        )}
+
+        {roPreview && (
+          <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-4">
+            <div className="mb-3 text-sm font-semibold text-gray-700">突合結果サマリ</div>
+            <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+              <RoStat label="受付帳件数" value={roPreview.summary.receptionCount} />
+              <RoStat label="所有者件数" value={roPreview.summary.ownerCount} />
+              <RoStat label="所有者突合成功" value={roPreview.summary.ownerMatchedCount} tone="green" />
+              <RoStat label="所有者未突合" value={roPreview.summary.ownerUnmatchedCount} tone="amber" />
+              <RoStat label="物件一意特定" value={roPreview.summary.propertyMatchedCount} tone="green" />
+              <RoStat label="物件未特定" value={roPreview.summary.propertyNotFoundCount} tone="amber" />
+              <RoStat label="複数候補" value={roPreview.summary.propertyMultipleCount} tone="amber" />
+              <RoStat label="キー不足" value={roPreview.summary.propertyNoKeyCount} tone="gray" />
+            </div>
+
+            {roPreview.matchedSamples.length > 0 && (
+              <div className="mt-4">
+                <div className="mb-1 text-xs font-semibold text-gray-600">
+                  反映対象サンプル（最大20件）
+                </div>
+                <div className="max-h-52 overflow-auto rounded border border-gray-200 bg-white">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="px-2 py-1">行</th>
+                        <th className="px-2 py-1">物件住所</th>
+                        <th className="px-2 py-1">所有者数</th>
+                        <th className="px-2 py-1">所有者名</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {roPreview.matchedSamples.map((s) => (
+                        <tr key={s.rowNumber}>
+                          <td className="px-2 py-1 text-gray-600">{s.rowNumber}</td>
+                          <td className="px-2 py-1 text-gray-800">{s.propertyAddress}</td>
+                          <td className="px-2 py-1 text-gray-600">{s.ownerCount}</td>
+                          <td className="px-2 py-1 text-gray-600">{s.ownerNames.join(", ")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {roPreview.reviewSamples.length > 0 && (
+              <div className="mt-4">
+                <div className="mb-1 text-xs font-semibold text-amber-700">
+                  要レビューサンプル（最大20件）
+                </div>
+                <div className="max-h-52 overflow-auto rounded border border-amber-200 bg-white">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-amber-50 text-amber-700">
+                      <tr>
+                        <th className="px-2 py-1">行</th>
+                        <th className="px-2 py-1">理由</th>
+                        <th className="px-2 py-1">F列</th>
+                        <th className="px-2 py-1">K列</th>
+                        <th className="px-2 py-1">候補数</th>
+                        <th className="px-2 py-1">所有者数</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {roPreview.reviewSamples.map((s) => (
+                        <tr key={s.rowNumber}>
+                          <td className="px-2 py-1 text-gray-600">{s.rowNumber}</td>
+                          <td className="px-2 py-1 text-amber-700">{s.reasonLabel}</td>
+                          <td className="px-2 py-1 text-gray-600">{s.fColumn}</td>
+                          <td className="px-2 py-1 text-gray-600">{s.kColumn}</td>
+                          <td className="px-2 py-1 text-gray-600">{s.candidateCount}</td>
+                          <td className="px-2 py-1 text-gray-600">{s.ownerCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {roResult && (
+          <div className="rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+            <div className="mb-2 flex items-center gap-2 font-semibold">
+              <CheckCircle2 className="h-4 w-4" />
+              取込完了（ジョブID: {roResult.jobId}）
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <div>反映: <b>{roResult.successCount}</b></div>
+              <div>要レビュー: <b>{roResult.needsReviewCount}</b></div>
+              <div>エラー: <b>{roResult.errorCount}</b></div>
+              <div>物件更新: <b>{roResult.propertyUpdatedCount}</b></div>
+              <div>所有者作成: <b>{roResult.ownerCreatedCount}</b></div>
+              <div>所有者紐付: <b>{roResult.ownerLinkedCount}</b></div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ============ Job History ============ */}
       <div className="rounded-lg border border-gray-200 bg-white p-6">

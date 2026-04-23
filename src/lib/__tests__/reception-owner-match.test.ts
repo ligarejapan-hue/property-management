@@ -1,0 +1,367 @@
+import { describe, it, expect } from "vitest";
+import {
+  parseReceptionRows,
+  parseOwnerRows,
+  matchReceptionToOwners,
+  matchPropertyByReception,
+  buildCombinedMatches,
+  summarizeMatches,
+  getReviewReason,
+  type ParsedReceptionRow,
+  type ParsedOwnerRow,
+  type PropertyCandidate,
+  type CombinedMatch,
+} from "../reception-owner-match";
+
+// ---------- parseReceptionRows ----------
+
+describe("parseReceptionRows", () => {
+  it("H/I/J/K 位置から matchKey を組み立てる", () => {
+    const rows = [
+      [
+        "A", "B", "C", "D", "E",
+        "土地",     // F(5)
+        "G",
+        "東京都",   // H(7)
+        "港区",     // I(8)
+        "1-2-3",    // J(9)
+        "100",      // K(10)
+      ],
+    ];
+    const parsed = parseReceptionRows(rows);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].matchKey).toBe("東京都港区1-2-3100");
+    expect(parsed[0].rowNumber).toBe(2);
+    expect(parsed[0].fColumn).toBe("土地");
+    expect(parsed[0].kColumn).toBe("100");
+    expect(parsed[0].lotNumber).toBe("100");
+    expect(parsed[0].buildingNumber).toBeNull();
+  });
+
+  it("F=建物 → K は buildingNumber に振り分け", () => {
+    const rows = [
+      ["", "", "", "", "", "建物", "", "東京都", "港区", "1-2-3", "A-101"],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.lotNumber).toBeNull();
+    expect(row.buildingNumber).toBe("A-101");
+  });
+
+  it("F が ambiguous なら lot/building 両方 null", () => {
+    const rows = [
+      ["", "", "", "", "", "未定", "", "東京都", "港区", "1-2-3", "100"],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.lotNumber).toBeNull();
+    expect(row.buildingNumber).toBeNull();
+    expect(row.matchKey).toBe("東京都港区1-2-3100");
+  });
+
+  it("全角英数・ハイフン・空白を含んでも正規化で揃う", () => {
+    const rows = [
+      ["", "", "", "", "", "土地", "", "東京都", "港区", "１－２－３", "１００"],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.matchKey).toBe("東京都港区1-2-3100");
+  });
+
+  it("足りない列は空扱い", () => {
+    const rows = [["only", "two"]];
+    const [row] = parseReceptionRows(rows);
+    expect(row.matchKey).toBe("");
+    expect(row.lotNumber).toBeNull();
+    expect(row.buildingNumber).toBeNull();
+  });
+});
+
+// ---------- parseOwnerRows ----------
+
+describe("parseOwnerRows", () => {
+  it("ヘッダ名で氏名/住所/建物名/部屋番号を拾い、C=2 を固定キーにする", () => {
+    const headers = ["A", "B", "所在地", "氏名", "住所", "建物名", "部屋番号"];
+    const rows = [
+      ["", "", "東京都港区1-2-3 100", "山田太郎", "東京都港区1-2-3", "XXマンション", "101"],
+    ];
+    const [o] = parseOwnerRows(headers, rows);
+    expect(o.cColumn).toBe("東京都港区1-2-3 100");
+    expect(o.matchKey).toBe("東京都港区1-2-3100");
+    expect(o.name).toBe("山田太郎");
+    expect(o.address).toBe("東京都港区1-2-3");
+    expect(o.buildingName).toBe("XXマンション");
+    expect(o.roomNo).toBe("101");
+  });
+
+  it("別名ヘッダ（所有者氏名/マンション名/号室）も拾う", () => {
+    const headers = ["X", "Y", "Z", "所有者氏名", "所有者住所", "マンション名", "号室"];
+    const rows = [["", "", "東京都港区1-2-3", "A", "東京都", "YY", "202"]];
+    const [o] = parseOwnerRows(headers, rows);
+    expect(o.name).toBe("A");
+    expect(o.address).toBe("東京都");
+    expect(o.buildingName).toBe("YY");
+    expect(o.roomNo).toBe("202");
+  });
+
+  it("空白の値は null", () => {
+    const headers = ["", "", "", "氏名", "住所", "建物名", "部屋番号"];
+    const rows = [["", "", "東京都港区1-2-3", "  ", "", "", ""]];
+    const [o] = parseOwnerRows(headers, rows);
+    expect(o.name).toBeNull();
+    expect(o.address).toBeNull();
+    expect(o.buildingName).toBeNull();
+    expect(o.roomNo).toBeNull();
+  });
+});
+
+// ---------- matchReceptionToOwners ----------
+
+describe("matchReceptionToOwners", () => {
+  const r = (rowNumber: number, matchKey: string): ParsedReceptionRow => ({
+    rowNumber,
+    matchKey,
+    fColumn: "土地",
+    kColumn: "",
+    lotNumber: null,
+    buildingNumber: null,
+  });
+  const o = (rowNumber: number, matchKey: string, name = "X"): ParsedOwnerRow => ({
+    rowNumber,
+    matchKey,
+    cColumn: "",
+    name,
+    address: null,
+    buildingName: null,
+    roomNo: null,
+  });
+
+  it("同一キーは複数所有者も落とさない（共有名義）", () => {
+    const map = matchReceptionToOwners(
+      [r(2, "K1")],
+      [o(2, "K1", "A"), o(3, "K1", "B"), o(4, "K2", "C")],
+    );
+    expect(map.get(2)?.map((x) => x.name)).toEqual(["A", "B"]);
+  });
+
+  it("空キーの受付帳は常に 0 件", () => {
+    const map = matchReceptionToOwners([r(2, "")], [o(2, "")]);
+    expect(map.get(2)).toEqual([]);
+  });
+
+  it("一致なしは 0 件", () => {
+    const map = matchReceptionToOwners([r(2, "K1")], [o(2, "K2")]);
+    expect(map.get(2)).toEqual([]);
+  });
+});
+
+// ---------- matchPropertyByReception ----------
+
+describe("matchPropertyByReception", () => {
+  const prop = (
+    id: string,
+    overrides: Partial<PropertyCandidate> = {},
+  ): PropertyCandidate => ({
+    id,
+    address: "",
+    lotNumber: null,
+    buildingNumber: null,
+    buildingName: null,
+    roomNo: null,
+    ...overrides,
+  });
+
+  it("地番で一意に一致 → matched", () => {
+    const out = matchPropertyByReception(
+      {
+        rowNumber: 2,
+        matchKey: "K",
+        fColumn: "土地",
+        kColumn: "100-1",
+        lotNumber: "100-1",
+        buildingNumber: null,
+      },
+      [prop("p1", { lotNumber: "100-1" }), prop("p2", { lotNumber: "100-2" })],
+    );
+    expect(out.status).toBe("matched");
+    expect(out.property?.id).toBe("p1");
+  });
+
+  it("家屋番号で一意に一致 → matched（正規化も効く）", () => {
+    const out = matchPropertyByReception(
+      {
+        rowNumber: 2,
+        matchKey: "K",
+        fColumn: "建物",
+        kColumn: "Ａ－１０１",
+        lotNumber: null,
+        buildingNumber: "Ａ－１０１",
+      },
+      [prop("p1", { buildingNumber: "A-101" })],
+    );
+    expect(out.status).toBe("matched");
+    expect(out.property?.id).toBe("p1");
+  });
+
+  it("複数ヒット → multiple + candidates", () => {
+    const out = matchPropertyByReception(
+      {
+        rowNumber: 2,
+        matchKey: "K",
+        fColumn: "土地",
+        kColumn: "100",
+        lotNumber: "100",
+        buildingNumber: null,
+      },
+      [prop("p1", { lotNumber: "100" }), prop("p2", { lotNumber: "100" })],
+    );
+    expect(out.status).toBe("multiple");
+    expect(out.candidates?.map((c) => c.id)).toEqual(["p1", "p2"]);
+  });
+
+  it("該当なし → not_found", () => {
+    const out = matchPropertyByReception(
+      {
+        rowNumber: 2,
+        matchKey: "K",
+        fColumn: "土地",
+        kColumn: "999",
+        lotNumber: "999",
+        buildingNumber: null,
+      },
+      [prop("p1", { lotNumber: "100" })],
+    );
+    expect(out.status).toBe("not_found");
+  });
+
+  it("lot/building いずれも null → no_key", () => {
+    const out = matchPropertyByReception(
+      {
+        rowNumber: 2,
+        matchKey: "K",
+        fColumn: "未定",
+        kColumn: "100",
+        lotNumber: null,
+        buildingNumber: null,
+      },
+      [prop("p1", { lotNumber: "100" })],
+    );
+    expect(out.status).toBe("no_key");
+  });
+});
+
+// ---------- buildCombinedMatches / summarizeMatches / getReviewReason ----------
+
+describe("buildCombinedMatches + summarizeMatches", () => {
+  it("reception の順序を保ちつつ owner/property を束ねる、サマリが正しい", () => {
+    const reception = parseReceptionRows([
+      // row1: matched + owner あり
+      ["", "", "", "", "", "土地", "", "東京都", "港区", "1-2-3", "100"],
+      // row2: owner なし + property not_found
+      ["", "", "", "", "", "土地", "", "大阪府", "北区", "2-3", "999"],
+      // row3: multiple
+      ["", "", "", "", "", "土地", "", "名古屋", "中区", "3", "50"],
+      // row4: no_key (F ambiguous)
+      ["", "", "", "", "", "未定", "", "札幌", "北", "1", "77"],
+    ]);
+    const owners = parseOwnerRows(
+      ["", "", "", "氏名"],
+      [
+        ["", "", "東京都港区1-2-3 100", "山田"],
+        ["", "", "東京都港区1-2-3 100", "鈴木"], // 共有名義
+        ["", "", "名古屋中区3 50", "田中"],
+      ],
+    );
+    const properties: PropertyCandidate[] = [
+      { id: "p1", address: "", lotNumber: "100", buildingNumber: null, buildingName: null, roomNo: null },
+      { id: "p2", address: "", lotNumber: "50", buildingNumber: null, buildingName: null, roomNo: null },
+      { id: "p3", address: "", lotNumber: "50", buildingNumber: null, buildingName: null, roomNo: null },
+    ];
+
+    const combined = buildCombinedMatches(reception, owners, properties);
+    expect(combined).toHaveLength(4);
+
+    // row1: matched + 2 owner
+    expect(combined[0].owners.map((x) => x.name)).toEqual(["山田", "鈴木"]);
+    expect(combined[0].propertyMatch.status).toBe("matched");
+    expect(getReviewReason(combined[0])).toBeNull();
+
+    // row2: 所有者0 + property 該当なし → review=owner_unmatched (最優先)
+    expect(combined[1].owners).toEqual([]);
+    expect(combined[1].propertyMatch.status).toBe("not_found");
+    expect(getReviewReason(combined[1])).toBe("owner_unmatched");
+
+    // row3: owner 1 + multiple
+    expect(combined[2].owners.map((x) => x.name)).toEqual(["田中"]);
+    expect(combined[2].propertyMatch.status).toBe("multiple");
+    expect(getReviewReason(combined[2])).toBe("property_multiple");
+
+    // row4: owner 0 + no_key → owner_unmatched 優先
+    expect(combined[3].owners).toEqual([]);
+    expect(combined[3].propertyMatch.status).toBe("no_key");
+    expect(getReviewReason(combined[3])).toBe("owner_unmatched");
+
+    const summary = summarizeMatches(reception, owners.length, combined);
+    expect(summary).toEqual({
+      receptionCount: 4,
+      ownerCount: 3,
+      ownerMatchedCount: 2,
+      ownerUnmatchedCount: 2,
+      propertyMatchedCount: 1,
+      propertyNotFoundCount: 1,
+      propertyMultipleCount: 1,
+      propertyNoKeyCount: 1,
+    });
+  });
+});
+
+describe("getReviewReason 優先順位", () => {
+  const base = (): CombinedMatch => ({
+    reception: {
+      rowNumber: 2,
+      matchKey: "K",
+      fColumn: "土地",
+      kColumn: "100",
+      lotNumber: "100",
+      buildingNumber: null,
+    },
+    owners: [
+      {
+        rowNumber: 2,
+        matchKey: "K",
+        cColumn: "",
+        name: "A",
+        address: null,
+        buildingName: null,
+        roomNo: null,
+      },
+    ],
+    propertyMatch: { status: "matched" },
+  });
+
+  it("owner あり + matched → null", () => {
+    expect(getReviewReason(base())).toBeNull();
+  });
+
+  it("owner 0 → owner_unmatched が最優先", () => {
+    const m = base();
+    m.owners = [];
+    m.propertyMatch = { status: "multiple", candidates: [] };
+    expect(getReviewReason(m)).toBe("owner_unmatched");
+  });
+
+  it("owner あり + not_found → property_not_found", () => {
+    const m = base();
+    m.propertyMatch = { status: "not_found" };
+    expect(getReviewReason(m)).toBe("property_not_found");
+  });
+
+  it("owner あり + multiple → property_multiple", () => {
+    const m = base();
+    m.propertyMatch = { status: "multiple", candidates: [] };
+    expect(getReviewReason(m)).toBe("property_multiple");
+  });
+
+  it("owner あり + no_key → property_no_key", () => {
+    const m = base();
+    m.propertyMatch = { status: "no_key" };
+    expect(getReviewReason(m)).toBe("property_no_key");
+  });
+});
