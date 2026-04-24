@@ -1346,7 +1346,16 @@ export default function ImportPage() {
               <RoStat label="物件未特定" value={roPreview.summary.propertyNotFoundCount} tone="amber" />
               <RoStat label="複数候補" value={roPreview.summary.propertyMultipleCount} tone="amber" />
               <RoStat label="キー不足" value={roPreview.summary.propertyNoKeyCount} tone="gray" />
+              <RoStat label="除外（非データ行）" value={roPreview.summary.excludedCount} tone="gray" />
             </div>
+            {roPreview.summary.excludedCount > 0 && (
+              <div className="mt-2 text-[11px] text-gray-500">
+                内訳: 空行 {roPreview.summary.excludedEmptyCount} / ヘッダ反復{" "}
+                {roPreview.summary.excludedHeaderRepeatCount} / 集計行{" "}
+                {roPreview.summary.excludedAggregateCount}
+                <span className="ml-2">※突合・レビューの対象外にしています</span>
+              </div>
+            )}
 
             {roPreview.matchedSamples.length > 0 && (
               <div className="mt-4">

@@ -547,6 +547,10 @@ export interface ReceptionOwnerPreviewResponse {
     propertyNotFoundCount: number;
     propertyMultipleCount: number;
     propertyNoKeyCount: number;
+    excludedCount: number;
+    excludedEmptyCount: number;
+    excludedHeaderRepeatCount: number;
+    excludedAggregateCount: number;
   };
   matchedSamples: Array<{
     rowNumber: number;
@@ -591,6 +595,10 @@ export async function previewReceptionOwnerCsv(input: {
         propertyNotFoundCount: 0,
         propertyMultipleCount: 0,
         propertyNoKeyCount: 0,
+        excludedCount: 0,
+        excludedEmptyCount: 0,
+        excludedHeaderRepeatCount: 0,
+        excludedAggregateCount: 0,
       },
       matchedSamples: [],
       reviewSamples: [],
@@ -637,6 +645,10 @@ export async function importReceptionOwnerCsv(input: {
         propertyNotFoundCount: 0,
         propertyMultipleCount: 0,
         propertyNoKeyCount: 0,
+        excludedCount: 0,
+        excludedEmptyCount: 0,
+        excludedHeaderRepeatCount: 0,
+        excludedAggregateCount: 0,
       },
       successCount: 0,
       needsReviewCount: 0,

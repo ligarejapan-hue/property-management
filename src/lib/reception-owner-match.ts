@@ -21,7 +21,17 @@ export interface ParsedReceptionRow {
   kColumn: string;
   lotNumber: string | null;
   buildingNumber: string | null;
+  /**
+   * 明らかな非データ行は突合/レビューの対象から外す。
+   * - "empty": F/H/I/J/K（物件関連列）が全て空
+   * - "header_repeat": 受付帳ヘッダの反復
+   * - "aggregate": 合計/小計/総計/件数/total 等の集計行
+   * undefined のときは通常のデータ行として扱う。
+   */
+  excluded?: ExcludedReason;
 }
+
+export type ExcludedReason = "empty" | "header_repeat" | "aggregate";
 
 export interface ParsedOwnerRow {
   rowNumber: number;
@@ -61,14 +71,17 @@ export interface CombinedMatch {
 /**
  * 受付帳の行配列（positional string[]）から ParsedReceptionRow[] を作る。
  * rows[i] は index=0 の A列から始まる。
+ *
+ * 明らかな非データ行（物件列が全て空 / ヘッダ反復 / 集計キーワード）は
+ * `excluded` フラグを立てる。突合/レビュー側で対象外扱いする。
  */
 export function parseReceptionRows(rows: string[][]): ParsedReceptionRow[] {
   return rows.map((row, i) => {
-    const f = row[5] ?? "";
-    const h = row[7] ?? "";
-    const iCol = row[8] ?? "";
-    const j = row[9] ?? "";
-    const k = row[10] ?? "";
+    const f = (row[5] ?? "").trim();
+    const h = (row[7] ?? "").trim();
+    const iCol = (row[8] ?? "").trim();
+    const j = (row[9] ?? "").trim();
+    const k = (row[10] ?? "").trim();
     const matchKey = buildReceptionMatchKey({ h, i: iCol, j, k });
     const { lotNumber, buildingNumber } = splitReceptionK(f, k);
     return {
@@ -78,8 +91,45 @@ export function parseReceptionRows(rows: string[][]): ParsedReceptionRow[] {
       kColumn: k,
       lotNumber,
       buildingNumber,
+      excluded: detectExcludedReason(row, { f, h, iCol, j, k }),
     };
   });
+}
+
+/**
+ * 受付帳1行を「明らかな非データ行」として除外すべきか判定する。
+ *
+ * 安全側運用のため、除外ルールは限定的・明示的に定義する：
+ *  - empty: F/H/I/J/K（区分 + 都道府県/区/住所/番地）が全て空
+ *    → 物件識別子が一切無く、突合キーも作れないため本来の取込対象外。
+ *  - header_repeat: H列=「都道府県」「都道府県名」かつ I列=「区」「市区町村」
+ *    → 受付帳ヘッダの反復（シート内に再掲されるケース）。
+ *  - aggregate: 先頭14列のどこかに「合計/小計/総計/件数/total」等が単独値として入る
+ *    → 集計/小計行。
+ *
+ * これ以外のノイズ（masked 行・共同担保通知等）は人判断が必要なので
+ * 勝手に除外しない。
+ */
+function detectExcludedReason(
+  row: readonly string[],
+  p: { f: string; h: string; iCol: string; j: string; k: string },
+): ExcludedReason | undefined {
+  // header_repeat: 都道府県/区 列にヘッダ文字列が再出現
+  if ((p.h === "都道府県" || p.h === "都道府県名") &&
+      (p.iCol === "区" || p.iCol === "市区町村")) {
+    return "header_repeat";
+  }
+  // aggregate: 先頭14列に集計キーワードが単独値で出現
+  // （empty 判定より先に評価する：「合計」のみ入った小計行を empty と誤認しないため）
+  const AGG_RE = /^(合計|小計|総計|件数|total)$/i;
+  const upper = Math.min(row.length, 14);
+  for (let idx = 0; idx < upper; idx++) {
+    const v = (row[idx] ?? "").trim();
+    if (v && AGG_RE.test(v)) return "aggregate";
+  }
+  // empty: 物件関連列（F/H/I/J/K）がすべて空
+  if (!p.f && !p.h && !p.iCol && !p.j && !p.k) return "empty";
+  return undefined;
 }
 
 // ---------- 所有者 ----------
@@ -205,6 +255,11 @@ export interface MatchSummary {
   propertyNotFoundCount: number;
   propertyMultipleCount: number;
   propertyNoKeyCount: number;
+  /** 非データ行として除外した合計（empty+header_repeat+aggregate） */
+  excludedCount: number;
+  excludedEmptyCount: number;
+  excludedHeaderRepeatCount: number;
+  excludedAggregateCount: number;
 }
 
 export function summarizeMatches(
@@ -236,6 +291,14 @@ export function summarizeMatches(
         break;
     }
   }
+  let excEmpty = 0;
+  let excHeader = 0;
+  let excAgg = 0;
+  for (const r of reception) {
+    if (r.excluded === "empty") excEmpty++;
+    else if (r.excluded === "header_repeat") excHeader++;
+    else if (r.excluded === "aggregate") excAgg++;
+  }
   return {
     receptionCount: reception.length,
     ownerCount: ownersCount,
@@ -245,6 +308,10 @@ export function summarizeMatches(
     propertyNotFoundCount: propNotFound,
     propertyMultipleCount: propMultiple,
     propertyNoKeyCount: propNoKey,
+    excludedCount: excEmpty + excHeader + excAgg,
+    excludedEmptyCount: excEmpty,
+    excludedHeaderRepeatCount: excHeader,
+    excludedAggregateCount: excAgg,
   };
 }
 
@@ -257,8 +324,10 @@ export function buildCombinedMatches(
   owners: readonly ParsedOwnerRow[],
   properties: readonly PropertyCandidate[],
 ): CombinedMatch[] {
-  const ownerMap = matchReceptionToOwners(reception, owners);
-  return reception.map((r) => ({
+  // 除外行は突合・レビュー対象から外す（受付帳の excludedCount は summary に別集計）
+  const active = reception.filter((r) => !r.excluded);
+  const ownerMap = matchReceptionToOwners(active, owners);
+  return active.map((r) => ({
     reception: r,
     owners: ownerMap.get(r.rowNumber) ?? [],
     propertyMatch: matchPropertyByReception(r, properties),

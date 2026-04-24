@@ -72,6 +72,44 @@ describe("parseReceptionRows", () => {
     expect(row.lotNumber).toBeNull();
     expect(row.buildingNumber).toBeNull();
   });
+
+  it("F/H/I/J/K が全て空なら excluded=empty", () => {
+    const rows = [["1", "DL", "番号", "日付", "新既", "", "原因", "", "", "", "", "他"]];
+    const [row] = parseReceptionRows(rows);
+    expect(row.excluded).toBe("empty");
+  });
+
+  it("通常のデータ行は excluded=undefined", () => {
+    const rows = [
+      ["1", "", "", "", "", "土地", "", "東京都", "港区", "六本木", "1-2-3", ""],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.excluded).toBeUndefined();
+  });
+
+  it("H=都道府県 かつ I=区 はヘッダ反復として excluded=header_repeat", () => {
+    const rows = [
+      ["No", "DL", "番号", "受付日", "新既", "区分", "原因", "都道府県", "区", "住所", "番地", "他"],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.excluded).toBe("header_repeat");
+  });
+
+  it("先頭14列に「合計」が単独で入れば excluded=aggregate", () => {
+    const rows = [
+      ["", "", "合計", "", "", "", "", "", "", "", "", ""],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.excluded).toBe("aggregate");
+  });
+
+  it("「合計金額」など部分一致は除外しない（単独値のみ対象）", () => {
+    const rows = [
+      ["", "", "合計金額", "", "", "土地", "", "東京都", "港区", "六本木", "1-2-3", ""],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.excluded).toBeUndefined();
+  });
 });
 
 // ---------- parseOwnerRows ----------
@@ -308,7 +346,43 @@ describe("buildCombinedMatches + summarizeMatches", () => {
       propertyNotFoundCount: 1,
       propertyMultipleCount: 1,
       propertyNoKeyCount: 1,
+      excludedCount: 0,
+      excludedEmptyCount: 0,
+      excludedHeaderRepeatCount: 0,
+      excludedAggregateCount: 0,
     });
+  });
+
+  it("excluded 行は combined から除外され、summary.excludedCount に集計される", () => {
+    const reception = parseReceptionRows([
+      // data row
+      ["", "", "", "", "", "土地", "", "東京都", "港区", "1-2-3", "100"],
+      // empty (property cols 全空)
+      ["1", "DL", "番号", "日付", "", "", "原因", "", "", "", "", "他"],
+      // header_repeat
+      ["No", "DL", "番号", "受付日", "新既", "区分", "原因", "都道府県", "区", "住所", "番地", "他"],
+      // aggregate
+      ["", "", "合計", "", "", "", "", "", "", "", "", ""],
+    ]);
+    expect(reception).toHaveLength(4);
+    expect(reception[0].excluded).toBeUndefined();
+    expect(reception[1].excluded).toBe("empty");
+    expect(reception[2].excluded).toBe("header_repeat");
+    expect(reception[3].excluded).toBe("aggregate");
+
+    const combined = buildCombinedMatches(reception, [], []);
+    // excluded 3 行は combined に入らない
+    expect(combined).toHaveLength(1);
+    expect(combined[0].reception.rowNumber).toBe(2); // 1行目=行2
+
+    const summary = summarizeMatches(reception, 0, combined);
+    expect(summary.receptionCount).toBe(4);
+    expect(summary.excludedCount).toBe(3);
+    expect(summary.excludedEmptyCount).toBe(1);
+    expect(summary.excludedHeaderRepeatCount).toBe(1);
+    expect(summary.excludedAggregateCount).toBe(1);
+    // review 対象は 1 行のみ → ownerUnmatchedCount=1
+    expect(summary.ownerUnmatchedCount).toBe(1);
   });
 });
 
