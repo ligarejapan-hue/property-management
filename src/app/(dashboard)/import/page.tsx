@@ -27,6 +27,8 @@ import {
   previewCsvDuplicates,
   previewReceptionOwnerCsv,
   importReceptionOwnerCsv,
+  parseFileForPreview,
+  readFileForImport,
   type ReceptionOwnerPreviewResponse,
   type ReceptionOwnerImportResponse,
 } from "@/lib/api-client";
@@ -289,6 +291,7 @@ export default function ImportPage() {
 
   // File state
   const [csvText, setCsvText] = useState("");
+  const [xlsxBase64, setXlsxBase64] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
   const [dragActive, setDragActive] = useState(false);
 
@@ -329,8 +332,17 @@ export default function ImportPage() {
   const [jobsLoading, setJobsLoading] = useState(true);
 
   // Reception × Owner (2-file) state
-  const [receptionFile, setReceptionFile] = useState<{ name: string; text: string } | null>(null);
-  const [ownerFile, setOwnerFile] = useState<{ name: string; text: string } | null>(null);
+  // csvText または xlsxBase64 のどちらかが入る
+  const [receptionFile, setReceptionFile] = useState<{
+    name: string;
+    csvText?: string;
+    xlsxBase64?: string;
+  } | null>(null);
+  const [ownerFile, setOwnerFile] = useState<{
+    name: string;
+    csvText?: string;
+    xlsxBase64?: string;
+  } | null>(null);
   const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>(null);
   const [roResult, setRoResult] = useState<ReceptionOwnerImportResponse | null>(null);
   const [roLoading, setRoLoading] = useState(false);
@@ -356,19 +368,48 @@ export default function ImportPage() {
   }, []);
 
   // ------ File handling ------
-  const processFile = useCallback((file: File) => {
+  const processFile = useCallback(async (file: File) => {
     setFileName(file.name);
     setError(null);
     setResult(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
+    const isXlsx = file.name.toLowerCase().endsWith(".xlsx");
+    try {
+      if (isXlsx) {
+        // xlsx: headers + rows(Record) + base64 を取得
+        const [{ headers: h, rows: r }, buf] = await Promise.all([
+          parseFileForPreview(file),
+          readFileForImport(file),
+        ]);
+        setCsvText("");
+        setXlsxBase64(buf.xlsxBase64 ?? null);
+        setHeaders(h);
+        // rows(Record) → string[][] にそろえる
+        setRows(r.map((row) => h.map((col) => row[col] ?? "")));
+
+        const mapping: Record<string, string> = {};
+        h.forEach((header) => {
+          const normalized = header.trim();
+          if (AUTO_MAP[normalized]) {
+            mapping[normalized] = AUTO_MAP[normalized];
+          }
+        });
+        setColumnMapping(mapping);
+        setStep(2);
+        return;
+      }
+      // csv: 既存どおり FileReader
+      const text = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target?.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(file, "UTF-8");
+      });
       setCsvText(text);
+      setXlsxBase64(null);
       const { headers: h, rows: r } = parseCsv(text);
       setHeaders(h);
       setRows(r);
 
-      // Auto-map
       const mapping: Record<string, string> = {};
       h.forEach((header) => {
         const normalized = header.trim();
@@ -378,14 +419,15 @@ export default function ImportPage() {
       });
       setColumnMapping(mapping);
       setStep(2);
-    };
-    reader.readAsText(file, "UTF-8");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
+    }
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    processFile(file);
+    void processFile(file);
   };
 
   // ------ Drag & Drop ------
@@ -405,7 +447,7 @@ export default function ImportPage() {
       e.stopPropagation();
       setDragActive(false);
       const file = e.dataTransfer.files?.[0];
-      if (file) processFile(file);
+      if (file) void processFile(file);
     },
     [processFile]
   );
@@ -446,13 +488,18 @@ export default function ImportPage() {
 
   // ------ Import ------
   const handleImport = async () => {
-    if (!csvText.trim()) return;
+    if (!csvText.trim() && !xlsxBase64) return;
     setUploading(true);
     setError(null);
     setResult(null);
 
     try {
-      const json = await importCsv(fileName || "import.csv", csvText, columnMapping);
+      const json = await importCsv(
+        fileName || "import.csv",
+        csvText || null,
+        columnMapping,
+        xlsxBase64 ?? undefined,
+      );
       setResult(json as ImportResult);
       setStep(4);
       fetchJobs();
@@ -467,6 +514,7 @@ export default function ImportPage() {
   const handleReset = () => {
     setStep(1);
     setCsvText("");
+    setXlsxBase64(null);
     setFileName("");
     setHeaders([]);
     setRows([]);
@@ -479,14 +527,6 @@ export default function ImportPage() {
   };
 
   // ------ Reception × Owner ------
-  const readFileText = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => resolve(ev.target?.result as string);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsText(file);
-    });
-
   const handleRoFile = async (which: "reception" | "owner", file: File | null) => {
     setRoError(null);
     setRoPreview(null);
@@ -505,9 +545,18 @@ export default function ImportPage() {
       setRoError(`所有者として認識できません: ${detect.error ?? "ファイル名に『所有者』を含めてください"}`);
       return;
     }
-    const text = await readFileText(file);
-    if (which === "reception") setReceptionFile({ name: file.name, text });
-    else setOwnerFile({ name: file.name, text });
+    try {
+      const buf = await readFileForImport(file);
+      const entry = {
+        name: file.name,
+        csvText: buf.csvText,
+        xlsxBase64: buf.xlsxBase64,
+      };
+      if (which === "reception") setReceptionFile(entry);
+      else setOwnerFile(entry);
+    } catch (e) {
+      setRoError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
+    }
   };
 
   const handleRoPreview = async () => {
@@ -519,8 +568,10 @@ export default function ImportPage() {
       const res = await previewReceptionOwnerCsv({
         receptionFileName: receptionFile.name,
         ownerFileName: ownerFile.name,
-        receptionCsv: receptionFile.text,
-        ownerCsv: ownerFile.text,
+        receptionCsv: receptionFile.csvText,
+        ownerCsv: ownerFile.csvText,
+        receptionXlsxBase64: receptionFile.xlsxBase64,
+        ownerXlsxBase64: ownerFile.xlsxBase64,
       });
       setRoPreview(res);
     } catch (e) {
@@ -539,8 +590,10 @@ export default function ImportPage() {
       const res = await importReceptionOwnerCsv({
         receptionFileName: receptionFile.name,
         ownerFileName: ownerFile.name,
-        receptionCsv: receptionFile.text,
-        ownerCsv: ownerFile.text,
+        receptionCsv: receptionFile.csvText,
+        ownerCsv: ownerFile.csvText,
+        receptionXlsxBase64: receptionFile.xlsxBase64,
+        ownerXlsxBase64: ownerFile.xlsxBase64,
       });
       setRoResult(res);
       fetchJobs();
@@ -570,7 +623,7 @@ export default function ImportPage() {
 
   return (
     <div>
-      <h2 className="mb-6 text-2xl font-bold text-gray-800">CSV取込</h2>
+      <h2 className="mb-6 text-2xl font-bold text-gray-800">CSV / Excel(.xlsx) 取込</h2>
 
       {/* ============ Step Indicator ============ */}
       <div className="mb-8 flex items-center justify-center gap-0">
@@ -664,7 +717,7 @@ export default function ImportPage() {
               }`}
             />
             <p className="mb-1 text-sm font-medium text-gray-700">
-              CSVファイルをここにドラッグ＆ドロップ
+              CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ
             </p>
             <p className="text-xs text-gray-400">
               またはクリックしてファイルを選択
@@ -672,7 +725,7 @@ export default function ImportPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.tsv,.txt"
+              accept=".csv,.tsv,.txt,.xlsx"
               onChange={handleFileSelect}
               className="hidden"
             />
@@ -824,7 +877,12 @@ export default function ImportPage() {
                 setPreviewLoading(true);
                 setDuplicatePreview(null);
                 try {
-                  const res = await previewCsvDuplicates(csvText, columnMapping, fileName);
+                  const res = await previewCsvDuplicates(
+                    csvText || null,
+                    columnMapping,
+                    fileName,
+                    xlsxBase64 ?? undefined,
+                  );
                   setDuplicatePreview(res as typeof duplicatePreview);
                 } catch {
                   // preview is best-effort
@@ -1194,7 +1252,7 @@ export default function ImportPage() {
         <div className="mb-4 flex items-center gap-2">
           <FileUp className="h-5 w-5 text-blue-600" />
           <h3 className="text-lg font-semibold text-gray-700">
-            受付帳 × 所有者 2ファイル突合
+            受付帳 × 所有者 2ファイル突合（CSV / Excel(.xlsx) 対応）
           </h3>
           <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
             既存物件に反映
@@ -1208,11 +1266,11 @@ export default function ImportPage() {
         <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              受付帳CSV <span className="text-xs text-gray-400">（ファイル名に「受付帳」を含める）</span>
+              受付帳CSV / Excel(.xlsx) <span className="text-xs text-gray-400">（ファイル名に「受付帳」を含める）</span>
             </label>
             <input
               type="file"
-              accept=".csv,.tsv,.txt"
+              accept=".csv,.tsv,.txt,.xlsx"
               onChange={(e) => handleRoFile("reception", e.target.files?.[0] ?? null)}
               className="block w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
             />
@@ -1225,11 +1283,11 @@ export default function ImportPage() {
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              所有者CSV <span className="text-xs text-gray-400">（ファイル名に「所有者」を含める）</span>
+              所有者CSV / Excel(.xlsx) <span className="text-xs text-gray-400">（ファイル名に「所有者」を含める）</span>
             </label>
             <input
               type="file"
-              accept=".csv,.tsv,.txt"
+              accept=".csv,.tsv,.txt,.xlsx"
               onChange={(e) => handleRoFile("owner", e.target.files?.[0] ?? null)}
               className="block w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
             />

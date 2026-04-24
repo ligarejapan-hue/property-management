@@ -378,10 +378,99 @@ export async function retryImportRow(
   });
 }
 
-export async function importCsv(fileName: string, csvText: string, columnMapping?: Record<string, string>) {
+/**
+ * ブラウザ側で csv/xlsx をプレビュー用の {headers, rows} に変換する。
+ * API 送信時の整合性のため、サーバ側 sheet-parser と同じ粒度で文字列化する。
+ * xlsx ライブラリは動的 import でチャンク分離する。
+ */
+export async function parseFileForPreview(
+  file: File,
+): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
+  const name = file.name.toLowerCase();
+  const toStr = (v: unknown): string => {
+    if (v == null) return "";
+    if (typeof v === "string") return v;
+    if (typeof v === "number") {
+      if (!Number.isFinite(v)) return "";
+      if (Number.isInteger(v)) return String(v);
+      const s = String(v);
+      if (/e/i.test(s)) return v.toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+      return s;
+    }
+    if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    return String(v);
+  };
+  if (name.endsWith(".xlsx")) {
+    const XLSX = await import("xlsx");
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) return { headers: [], rows: [] };
+    const sheet = wb.Sheets[sheetName];
+    const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+      raw: true,
+    });
+    if (!aoa || aoa.length === 0) return { headers: [], rows: [] };
+    const headers = (aoa[0] ?? []).map((v) => toStr(v).trim());
+    const rows: Record<string, string>[] = [];
+    for (let i = 1; i < aoa.length; i++) {
+      const row = aoa[i] ?? [];
+      const values = headers.map((_, j) => toStr(row[j]).trim());
+      if (values.every((v) => v === "")) continue;
+      const record: Record<string, string> = {};
+      headers.forEach((h, j) => (record[h] = values[j]));
+      rows.push(record);
+    }
+    return { headers, rows };
+  }
+  // csv
+  const text = await file.text();
+  const { parseCsv } = await import("./csv-parser");
+  const { headers, rows } = parseCsv(text);
+  return { headers, rows };
+}
+
+/**
+ * ブラウザの File を取込APIに渡せる形（csvText / xlsxBase64）に変換する。
+ * 拡張子に応じて dispatch 先を決める。
+ */
+export async function readFileForImport(
+  file: File,
+): Promise<{ fileName: string; csvText?: string; xlsxBase64?: string }> {
+  const name = file.name.toLowerCase();
+  const isXlsx = name.endsWith(".xlsx");
+  if (isXlsx) {
+    const buf = await file.arrayBuffer();
+    // ブラウザ環境で ArrayBuffer → base64
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    const xlsxBase64 =
+      typeof btoa !== "undefined"
+        ? btoa(binary)
+        : Buffer.from(binary, "binary").toString("base64");
+    return { fileName: file.name, xlsxBase64 };
+  }
+  const text = await file.text();
+  return { fileName: file.name, csvText: text };
+}
+
+export async function importCsv(
+  fileName: string,
+  csvText: string | null,
+  columnMapping?: Record<string, string>,
+  xlsxBase64?: string,
+) {
   if (USE_MOCK) {
     await mockDelay();
-    const rows = csvText.split("\n").length - 1;
+    const rows = (csvText ?? "").split("\n").length - 1;
     return {
       jobId: "ij-mock-" + Date.now(),
       totalRows: rows,
@@ -391,26 +480,33 @@ export async function importCsv(fileName: string, csvText: string, columnMapping
       parseErrors: [],
     };
   }
+  const body: Record<string, unknown> = { fileName, columnMapping };
+  if (csvText) body.csvText = csvText;
+  if (xlsxBase64) body.xlsxBase64 = xlsxBase64;
   return apiFetch("/api/import/csv", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName, csvText, columnMapping }),
+    body: JSON.stringify(body),
   });
 }
 
 export async function previewCsvDuplicates(
-  csvText: string,
+  csvText: string | null,
   columnMapping?: Record<string, string>,
   fileName?: string,
+  xlsxBase64?: string,
 ) {
   if (USE_MOCK) {
     await mockDelay();
     return { totalRows: 0, validRows: 0, errorRows: 0, duplicateCount: 0, duplicates: [] };
   }
+  const body: Record<string, unknown> = { columnMapping, fileName };
+  if (csvText) body.csvText = csvText;
+  if (xlsxBase64) body.xlsxBase64 = xlsxBase64;
   return apiFetch("/api/import/csv/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ csvText, columnMapping, fileName }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -478,8 +574,10 @@ export interface ReceptionOwnerPreviewResponse {
 export async function previewReceptionOwnerCsv(input: {
   receptionFileName: string;
   ownerFileName: string;
-  receptionCsv: string;
-  ownerCsv: string;
+  receptionCsv?: string;
+  ownerCsv?: string;
+  receptionXlsxBase64?: string;
+  ownerXlsxBase64?: string;
 }): Promise<ReceptionOwnerPreviewResponse> {
   if (USE_MOCK) {
     await mockDelay();
@@ -521,8 +619,10 @@ export interface ReceptionOwnerImportResponse {
 export async function importReceptionOwnerCsv(input: {
   receptionFileName: string;
   ownerFileName: string;
-  receptionCsv: string;
-  ownerCsv: string;
+  receptionCsv?: string;
+  ownerCsv?: string;
+  receptionXlsxBase64?: string;
+  ownerXlsxBase64?: string;
 }): Promise<ReceptionOwnerImportResponse> {
   if (USE_MOCK) {
     await mockDelay();

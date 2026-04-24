@@ -8,13 +8,14 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { parseCsv, PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
+import { PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import {
   buildDedupeIndex,
   findPropertyDuplicate,
   isUpdateEligibleReason,
 } from "@/lib/import-dedupe";
 import { detectImportFileType } from "@/lib/import-file-type";
+import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
 
 const JAPANESE_FIELD_MAP: Record<string, string> = {
   "住所": "address",
@@ -46,19 +47,34 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { csvText, columnMapping, fileName } = body as {
+    const { csvText, xlsxBase64, columnMapping, fileName } = body as {
       csvText?: string;
+      xlsxBase64?: string;
       columnMapping?: Record<string, string>;
       fileName?: string;
     };
 
-    if (!csvText) {
-      throw new ApiError(422, "csvText は必須です", "VALIDATION_ERROR");
+    if (!fileName) {
+      throw new ApiError(422, "fileName は必須です", "VALIDATION_ERROR");
+    }
+    if (!csvText && !xlsxBase64) {
+      throw new ApiError(422, "csvText または xlsxBase64 は必須です", "VALIDATION_ERROR");
     }
 
     const fileTypeDetection = detectImportFileType(fileName);
 
-    const { headers, rows } = parseCsv(csvText);
+    let headers: string[];
+    let rows: Record<string, string>[];
+    try {
+      const parsed = parseSheet({ fileName, csvText, xlsxBase64 });
+      headers = parsed.headers;
+      rows = parsed.rows;
+    } catch (e) {
+      if (e instanceof SheetParseError) {
+        throw new ApiError(422, e.message, e.code);
+      }
+      throw e;
+    }
 
     // Build header → field mapping
     const headerToField: Record<string, string> = {};

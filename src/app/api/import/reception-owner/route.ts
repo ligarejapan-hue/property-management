@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import { parseCsv } from "@/lib/csv-parser";
+import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
 import { detectImportFileType } from "@/lib/import-file-type";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import {
@@ -56,19 +56,30 @@ export async function POST(request: NextRequest) {
     const {
       receptionCsv,
       ownerCsv,
+      receptionXlsxBase64,
+      ownerXlsxBase64,
       receptionFileName,
       ownerFileName,
     } = body as {
       receptionCsv?: string;
       ownerCsv?: string;
+      receptionXlsxBase64?: string;
+      ownerXlsxBase64?: string;
       receptionFileName?: string;
       ownerFileName?: string;
     };
 
-    if (!receptionCsv || !ownerCsv) {
+    if (!receptionFileName || !ownerFileName) {
       throw new ApiError(
         422,
-        "receptionCsv と ownerCsv は必須です",
+        "receptionFileName と ownerFileName は必須です",
+        "VALIDATION_ERROR",
+      );
+    }
+    if ((!receptionCsv && !receptionXlsxBase64) || (!ownerCsv && !ownerXlsxBase64)) {
+      throw new ApiError(
+        422,
+        "受付帳・所有者それぞれ csv または xlsx のいずれかを指定してください",
         "VALIDATION_ERROR",
       );
     }
@@ -90,9 +101,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // パース
-    const receptionParsed = parseCsv(receptionCsv);
-    const ownerParsed = parseCsv(ownerCsv);
+    // パース（csv / xlsx 共通）
+    let receptionParsed: ReturnType<typeof parseSheet>;
+    let ownerParsed: ReturnType<typeof parseSheet>;
+    try {
+      receptionParsed = parseSheet({
+        fileName: receptionFileName,
+        csvText: receptionCsv,
+        xlsxBase64: receptionXlsxBase64,
+      });
+      ownerParsed = parseSheet({
+        fileName: ownerFileName,
+        csvText: ownerCsv,
+        xlsxBase64: ownerXlsxBase64,
+      });
+    } catch (e) {
+      if (e instanceof SheetParseError) {
+        throw new ApiError(422, e.message, e.code);
+      }
+      throw e;
+    }
     const receptionRows = parseReceptionRows(
       toPositionalRows(receptionParsed.headers, receptionParsed.rows),
     );

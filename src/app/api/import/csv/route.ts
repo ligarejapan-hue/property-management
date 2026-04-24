@@ -9,10 +9,8 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import {
-  parseCsv,
-  PROPERTY_CSV_COLUMN_MAP,
-} from "@/lib/csv-parser";
+import { PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
+import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import {
   PROPERTY_TYPE_VALUES,
@@ -241,21 +239,38 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { fileName, csvText, columnMapping } = body as {
+    const { fileName, csvText, xlsxBase64, columnMapping } = body as {
       fileName?: string;
       csvText?: string;
+      xlsxBase64?: string;
       columnMapping?: Record<string, string>;
     };
 
-    if (!csvText || typeof csvText !== "string") {
-      throw new ApiError(422, "csvText は必須です", "VALIDATION_ERROR");
+    if (!fileName) {
+      throw new ApiError(422, "fileName は必須です", "VALIDATION_ERROR");
+    }
+    if (!csvText && !xlsxBase64) {
+      throw new ApiError(422, "csvText または xlsxBase64 は必須です", "VALIDATION_ERROR");
     }
 
-    // Parse CSV
-    const { headers, rows, errors: parseErrors } = parseCsv(csvText);
+    // Parse CSV or XLSX (unified)
+    let headers: string[];
+    let rows: Record<string, string>[];
+    let parseErrors: Array<{ row: number; message: string }>;
+    try {
+      const parsed = parseSheet({ fileName, csvText, xlsxBase64 });
+      headers = parsed.headers;
+      rows = parsed.rows;
+      parseErrors = parsed.errors;
+    } catch (e) {
+      if (e instanceof SheetParseError) {
+        throw new ApiError(422, e.message, e.code);
+      }
+      throw e;
+    }
 
     if (rows.length === 0 && parseErrors.length > 0) {
-      throw new ApiError(422, "CSVのパースに失敗しました", "VALIDATION_ERROR");
+      throw new ApiError(422, "ファイルのパースに失敗しました", "VALIDATION_ERROR");
     }
 
     // Build a lookup: csvHeader → property field name.
