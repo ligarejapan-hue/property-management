@@ -117,6 +117,14 @@ describe("classifyReceptionKColumn / splitReceptionK", () => {
     });
   });
 
+  it("F列=区建（区分建物の略記）→ K列は家屋番号", () => {
+    expect(classifyReceptionKColumn("区建")).toBe("buildingNumber");
+    expect(splitReceptionK("区建", "1088-1-7")).toEqual({
+      lotNumber: null,
+      buildingNumber: "1088-1-7",
+    });
+  });
+
   it("F列が想定外は ambiguous、両方 null", () => {
     expect(classifyReceptionKColumn("未定")).toBe("ambiguous");
     expect(splitReceptionK("未定", "100")).toEqual({

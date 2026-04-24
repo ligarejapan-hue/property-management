@@ -120,15 +120,17 @@ export type KColumnMeaning = "lotNumber" | "buildingNumber" | "ambiguous";
  * F 列の値から K 列の意味を決める。
  *
  * - "土地" → lotNumber（地番）
- * - "建物" / "区分" → buildingNumber（家屋番号）
+ * - "建物" / "区分" / "区建"（区分建物の略記） → buildingNumber（家屋番号）
  * - それ以外 → ambiguous（呼び出し側で安全側に扱う）
+ *
+ * 実データで "区建" 表記が確認されたため、"区分" と同義として扱う。
  */
 export function classifyReceptionKColumn(
   fValue: string | null | undefined,
 ): KColumnMeaning {
   const f = (fValue ?? "").trim();
   if (f === "土地") return "lotNumber";
-  if (f === "建物" || f === "区分") return "buildingNumber";
+  if (f === "建物" || f === "区分" || f === "区建") return "buildingNumber";
   return "ambiguous";
 }
 
