@@ -1352,7 +1352,8 @@ export default function ImportPage() {
               <div className="mt-2 text-[11px] text-gray-500">
                 内訳: 空行 {roPreview.summary.excludedEmptyCount} / ヘッダ反復{" "}
                 {roPreview.summary.excludedHeaderRepeatCount} / 集計行{" "}
-                {roPreview.summary.excludedAggregateCount}
+                {roPreview.summary.excludedAggregateCount} / 共担{" "}
+                {roPreview.summary.excludedCoCollateralCount}
                 <span className="ml-2">※突合・レビューの対象外にしています</span>
               </div>
             )}

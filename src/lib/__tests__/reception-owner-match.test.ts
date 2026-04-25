@@ -110,6 +110,14 @@ describe("parseReceptionRows", () => {
     const [row] = parseReceptionRows(rows);
     expect(row.excluded).toBeUndefined();
   });
+
+  it("F=共担（共同担保付随行）は excluded=co_collateral", () => {
+    const rows = [
+      ["1", "DL", "番号", "日付", "新既", "共担", "原因", "", "", "", "", "他"],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.excluded).toBe("co_collateral");
+  });
 });
 
 // ---------- parseOwnerRows ----------
@@ -350,6 +358,7 @@ describe("buildCombinedMatches + summarizeMatches", () => {
       excludedEmptyCount: 0,
       excludedHeaderRepeatCount: 0,
       excludedAggregateCount: 0,
+      excludedCoCollateralCount: 0,
     });
   });
 

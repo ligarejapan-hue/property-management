@@ -31,7 +31,11 @@ export interface ParsedReceptionRow {
   excluded?: ExcludedReason;
 }
 
-export type ExcludedReason = "empty" | "header_repeat" | "aggregate";
+export type ExcludedReason =
+  | "empty"
+  | "header_repeat"
+  | "aggregate"
+  | "co_collateral";
 
 export interface ParsedOwnerRow {
   rowNumber: number;
@@ -127,6 +131,9 @@ function detectExcludedReason(
     const v = (row[idx] ?? "").trim();
     if (v && AGG_RE.test(v)) return "aggregate";
   }
+  // co_collateral: F列="共担"（共同担保の付随行、地番/家屋番号を持たない）
+  // empty より先に評価する：共担行は H/I/J/K が空なので empty と被るため
+  if (p.f === "共担") return "co_collateral";
   // empty: 物件関連列（F/H/I/J/K）がすべて空
   if (!p.f && !p.h && !p.iCol && !p.j && !p.k) return "empty";
   return undefined;
@@ -260,6 +267,7 @@ export interface MatchSummary {
   excludedEmptyCount: number;
   excludedHeaderRepeatCount: number;
   excludedAggregateCount: number;
+  excludedCoCollateralCount: number;
 }
 
 export function summarizeMatches(
@@ -294,10 +302,12 @@ export function summarizeMatches(
   let excEmpty = 0;
   let excHeader = 0;
   let excAgg = 0;
+  let excCo = 0;
   for (const r of reception) {
     if (r.excluded === "empty") excEmpty++;
     else if (r.excluded === "header_repeat") excHeader++;
     else if (r.excluded === "aggregate") excAgg++;
+    else if (r.excluded === "co_collateral") excCo++;
   }
   return {
     receptionCount: reception.length,
@@ -308,10 +318,11 @@ export function summarizeMatches(
     propertyNotFoundCount: propNotFound,
     propertyMultipleCount: propMultiple,
     propertyNoKeyCount: propNoKey,
-    excludedCount: excEmpty + excHeader + excAgg,
+    excludedCount: excEmpty + excHeader + excAgg + excCo,
     excludedEmptyCount: excEmpty,
     excludedHeaderRepeatCount: excHeader,
     excludedAggregateCount: excAgg,
+    excludedCoCollateralCount: excCo,
   };
 }
 

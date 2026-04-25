@@ -551,6 +551,7 @@ export interface ReceptionOwnerPreviewResponse {
     excludedEmptyCount: number;
     excludedHeaderRepeatCount: number;
     excludedAggregateCount: number;
+    excludedCoCollateralCount: number;
   };
   matchedSamples: Array<{
     rowNumber: number;
@@ -599,6 +600,7 @@ export async function previewReceptionOwnerCsv(input: {
         excludedEmptyCount: 0,
         excludedHeaderRepeatCount: 0,
         excludedAggregateCount: 0,
+        excludedCoCollateralCount: 0,
       },
       matchedSamples: [],
       reviewSamples: [],
@@ -649,6 +651,7 @@ export async function importReceptionOwnerCsv(input: {
         excludedEmptyCount: 0,
         excludedHeaderRepeatCount: 0,
         excludedAggregateCount: 0,
+        excludedCoCollateralCount: 0,
       },
       successCount: 0,
       needsReviewCount: 0,
