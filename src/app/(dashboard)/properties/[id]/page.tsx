@@ -335,7 +335,10 @@ export default function PropertyDetailPage({
 // ---------- Basic info tab ----------
 
 function BasicTab({ property }: { property: ApiProperty }) {
-  const isUnit = property.propertyType === "unit";
+  // 旧値 "unit" と新値 "apartment_unit" の両方を区分扱いにする
+  const isUnit =
+    property.propertyType === "apartment_unit" ||
+    property.propertyType === "unit";
   const OCCUPANCY_LABELS: Record<string, string> = {
     vacant: "空室",
     occupied: "入居中",

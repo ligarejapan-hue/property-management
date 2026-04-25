@@ -74,22 +74,31 @@ export const PROPERTY_TYPE_OPTIONS: { value: string; label: string }[] = [
 
 // ── CSV 日本語ラベル → enum 値マッピング ──────────────────────────────────────
 // CSV の「種別」列に日本語が入っている場合に正規化する。
+// 重要: 新規取込では旧値（building / unit）を出力しない。曖昧な日本語ラベルは
+// active な enum 値にだけ寄せる。「建物」は単独だと apartment_unit/building/house の
+// 区別がつかないので "unknown" にフォールバックして人手判断に委ねる。
 
 export const PROPERTY_TYPE_JP_TO_VALUE: Record<string, string> = {
   "土地":         "land",
   "戸建":         "house",
   "戸建て":       "house",
+  "一戸建":       "house",
+  "一戸建て":     "house",
   "区分マンション": "apartment_unit",
-  "区分":         "apartment_unit",   // 新規 CSV は apartment_unit へ
+  "区分":         "apartment_unit",
+  "区分所有":     "apartment_unit",
   "一棟マンション": "apartment_building",
+  "マンション":   "apartment_building",
   "一棟アパート":  "apartment_block",
+  "アパート":     "apartment_block",
   "店舗":         "store",
   "事務所":       "office",
+  "オフィス":     "office",
   "倉庫":         "warehouse",
   "工場":         "factory",
   "駐車場":       "parking",
   "その他":       "other",
   "不明":         "unknown",
-  // 旧ラベルは後方互換として保持
-  "建物":         "building",
+  // 「建物」単独は曖昧 → unknown（旧 importer は "building" にマップしていた）
+  "建物":         "unknown",
 };

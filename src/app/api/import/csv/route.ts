@@ -407,12 +407,16 @@ export async function POST(request: NextRequest) {
         // -----------------------------------------------------------
         // Unit / building name resolution
         // -----------------------------------------------------------
-        const isUnit = mapped.propertyType === "unit" || !!mapped.buildingName;
+        // 旧値 "unit" / 新値 "apartment_unit" / buildingName あり をすべて区分扱い
+        const isUnit =
+          mapped.propertyType === "apartment_unit" ||
+          mapped.propertyType === "unit" ||
+          !!mapped.buildingName;
         let resolvedBuildingId: string | null = null;
 
         if (isUnit && mapped.buildingName) {
-          // Force propertyType to unit when buildingName is provided
-          mapped.propertyType = "unit";
+          // 新規取込は正式値 apartment_unit に統一（旧 unit は出力しない）
+          mapped.propertyType = "apartment_unit";
 
           const resolution = await resolveBuildingId(
             mapped.buildingName.trim(),
