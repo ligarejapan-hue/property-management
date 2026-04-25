@@ -545,6 +545,33 @@ export async function importOwnerCsv(
   });
 }
 
+// ---------- Relink owners (rescue existing unlinked owners) ----------
+
+export interface RelinkOwnersResponse {
+  candidateOwnerCount: number;
+  linkedCount: number;
+  linkedByLinkKeyCount: number;
+  linkedByAddressCount: number;
+  addressLinkAmbiguousCount: number;
+}
+
+export async function relinkOwners(): Promise<RelinkOwnersResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      candidateOwnerCount: 0,
+      linkedCount: 0,
+      linkedByLinkKeyCount: 0,
+      linkedByAddressCount: 0,
+      addressLinkAmbiguousCount: 0,
+    };
+  }
+  return apiFetch<RelinkOwnersResponse>("/api/owners/relink", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 // ---------- Reception × Owner (2-file) ----------
 
 export interface ReceptionOwnerPreviewResponse {

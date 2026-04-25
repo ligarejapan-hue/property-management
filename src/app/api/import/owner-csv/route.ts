@@ -11,6 +11,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import { normalizeAddress } from "@/lib/address-normalizer";
+import { relinkOwnersToProperties } from "@/lib/owner-property-linker";
 
 // Japanese field name → Owner model property mapping
 const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
@@ -322,6 +323,30 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // (3) 既存未リンク Owner の救済パス。
+    // 過去に取込済みだが PropertyOwner を 1 件も持たない Owner を、
+    // 上記 (1)(2) と同じロジックで自動リンクする。重複検出で needs_review に
+    // なって createdOwnerIds に入らなかったケースもここで救われる。
+    let rescuedLinkedCount = 0;
+    let rescuedLinkedByLinkKeyCount = 0;
+    let rescuedLinkedByAddressCount = 0;
+    let rescuedAddressLinkAmbiguousCount = 0;
+    let rescueCandidateCount = 0;
+    try {
+      const rescue = await relinkOwnersToProperties();
+      rescuedLinkedCount = rescue.linkedCount;
+      rescuedLinkedByLinkKeyCount = rescue.linkedByLinkKeyCount;
+      rescuedLinkedByAddressCount = rescue.linkedByAddressCount;
+      rescuedAddressLinkAmbiguousCount = rescue.addressLinkAmbiguousCount;
+      rescueCandidateCount = rescue.candidateOwnerCount;
+      linkedCount += rescue.linkedCount;
+      linkedByLinkKeyCount += rescue.linkedByLinkKeyCount;
+      linkedByAddressCount += rescue.linkedByAddressCount;
+      addressLinkAmbiguousCount += rescue.addressLinkAmbiguousCount;
+    } catch {
+      // 救済処理は best-effort: 失敗しても本体の取込結果は返す
+    }
+
     // Finalize job
     await prisma.importJob.update({
       where: { id: job.id },
@@ -348,6 +373,11 @@ export async function POST(request: NextRequest) {
         linkedByAddressCount,
         addressLinkAmbiguousCount,
         linkedCount,
+        rescueCandidateCount,
+        rescuedLinkedCount,
+        rescuedLinkedByLinkKeyCount,
+        rescuedLinkedByAddressCount,
+        rescuedAddressLinkAmbiguousCount,
       },
     });
 
@@ -362,6 +392,11 @@ export async function POST(request: NextRequest) {
         linkedByLinkKeyCount,
         linkedByAddressCount,
         addressLinkAmbiguousCount,
+        rescueCandidateCount,
+        rescuedLinkedCount,
+        rescuedLinkedByLinkKeyCount,
+        rescuedLinkedByAddressCount,
+        rescuedAddressLinkAmbiguousCount,
       },
       201,
     );

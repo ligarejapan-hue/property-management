@@ -21,7 +21,8 @@ import {
   DownloadCloud,
   Link2,
 } from "lucide-react";
-import { importOwnerCsv } from "@/lib/api-client";
+import { importOwnerCsv, relinkOwners } from "@/lib/api-client";
+import type { RelinkOwnersResponse } from "@/lib/api-client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -200,6 +201,29 @@ export default function OwnerImportPage() {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 既存未リンク所有者の救済 (CSV 取込とは独立で実行できる)
+  const [relinking, setRelinking] = useState(false);
+  const [relinkResult, setRelinkResult] = useState<RelinkOwnersResponse | null>(null);
+  const [relinkError, setRelinkError] = useState<string | null>(null);
+
+  const handleRelink = async () => {
+    if (relinking) return;
+    if (!confirm("PropertyOwner を 1 件も持たない既存所有者を、リンクキー / 住所で物件に再リンクします。実行しますか？")) {
+      return;
+    }
+    setRelinking(true);
+    setRelinkError(null);
+    setRelinkResult(null);
+    try {
+      const res = await relinkOwners();
+      setRelinkResult(res);
+    } catch (err) {
+      setRelinkError(err instanceof Error ? err.message : "再リンクに失敗しました");
+    } finally {
+      setRelinking(false);
+    }
+  };
+
   // ------ File handling ------
   const processFile = useCallback((file: File) => {
     setFileName(file.name);
@@ -332,6 +356,69 @@ export default function OwnerImportPage() {
   return (
     <div>
       <h2 className="mb-6 text-2xl font-bold text-gray-800">所有者CSV取込</h2>
+
+      {/* ============ 既存未リンク所有者の救済 ============ */}
+      <div className="mb-6 rounded-md border border-gray-200 bg-white p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="text-sm text-gray-700">
+            <div className="mb-1 flex items-center gap-2 font-semibold text-gray-800">
+              <Link2 className="h-4 w-4 text-blue-600" />
+              既存未リンク所有者の再リンク
+            </div>
+            <div className="text-xs text-gray-600">
+              過去の取込で物件に紐付かなかった所有者を、リンクキーまたは住所一致 (1物件に絞れる場合のみ) で自動リンクします。共有名義は壊しません。
+            </div>
+          </div>
+          <button
+            onClick={handleRelink}
+            disabled={relinking}
+            className="flex items-center gap-2 self-start whitespace-nowrap rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {relinking ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            未リンク所有者を再リンク
+          </button>
+        </div>
+        {relinkError && (
+          <div className="mt-3 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{relinkError}</span>
+          </div>
+        )}
+        {relinkResult && (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                対象 <strong>{relinkResult.candidateOwnerCount}</strong> 件のうち
+                {" "}
+                <strong>{relinkResult.linkedCount}</strong> 件をリンクしました。
+                {relinkResult.linkedByLinkKeyCount > 0 && (
+                  <span className="ml-2 text-xs">
+                    （リンクキー一致: {relinkResult.linkedByLinkKeyCount}）
+                  </span>
+                )}
+                {relinkResult.linkedByAddressCount > 0 && (
+                  <span className="ml-2 text-xs">
+                    （住所一致: {relinkResult.linkedByAddressCount}）
+                  </span>
+                )}
+              </div>
+            </div>
+            {relinkResult.addressLinkAmbiguousCount > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  {relinkResult.addressLinkAmbiguousCount} 件の所有者は同じ住所に複数物件があり自動紐付けを保留しました。物件詳細から手動で紐付けてください。
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ============ Step Indicator ============ */}
       <div className="mb-8 flex items-center justify-center gap-0">
