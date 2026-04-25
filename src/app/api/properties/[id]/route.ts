@@ -249,3 +249,54 @@ export async function PATCH(
     return handleApiError(error);
   }
 }
+
+// ---------- DELETE /api/properties/[id] ----------
+// 物件を物理削除する。子レコード（PropertyOwner / PropertyPhoto / Comment 等）は
+// schema 側の onDelete: Cascade により自動で消える。ChangeLog / AuditLog は
+// targetTable+targetId の弱参照なのでそのまま残る（監査履歴を保持するため）。
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
+
+    if (!hasPermission(permissions, "property", "write")) {
+      throw new ApiError(403, "物件削除の権限がありません", "FORBIDDEN");
+    }
+
+    const property = await prisma.property.findUnique({
+      where: { id },
+      select: { id: true, address: true, createdBy: true, assignedTo: true },
+    });
+
+    if (!property) {
+      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+
+    if (
+      session.role === "field_staff" &&
+      property.createdBy !== session.id &&
+      property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この物件を削除する権限がありません", "FORBIDDEN");
+    }
+
+    await prisma.property.delete({ where: { id } });
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "delete",
+      targetTable: "properties",
+      targetId: id,
+      detail: { address: property.address },
+    });
+
+    return apiResponse({ id, deleted: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

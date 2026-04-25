@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useCallback, use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   AlertTriangle,
   Building2,
   Edit,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import CommentTab from "@/components/properties/comment-tab";
 import NextActionTab from "@/components/properties/next-action-tab";
@@ -18,7 +20,7 @@ import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty } from "@/lib/api-client";
 
 // ---------- Label maps ----------
 
@@ -171,11 +173,30 @@ export default function PropertyDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("basic");
   const [property, setProperty] = useState<ApiProperty | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!property) return;
+    const ok = window.confirm(
+      `物件「${property.address}」を削除します。この操作は取り消せません。よろしいですか？`,
+    );
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await deleteProperty(property.id);
+      router.push("/properties");
+      router.refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "削除に失敗しました");
+      setDeleting(false);
+    }
+  };
 
   const fetchProperty = useCallback(async () => {
     setLoading(true);
@@ -245,6 +266,18 @@ export default function PropertyDetailPage({
           >
             <Edit className="h-4 w-4" />
             編集
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            {deleting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+            削除
           </button>
         </div>
       </div>

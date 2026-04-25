@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Building,
@@ -13,10 +14,12 @@ import {
   X,
   Home,
   Users,
+  Trash2,
 } from "lucide-react";
 import {
   fetchBuildingDetail,
   updateBuilding,
+  deleteBuilding,
   fetchBuildingProperties,
   createBuildingUnit,
 } from "@/lib/api-client";
@@ -91,6 +94,7 @@ export default function BuildingDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const [building, setBuilding] = useState<BuildingData | null>(null);
   const [units, setUnits] = useState<UnitProperty[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +102,7 @@ export default function BuildingDetailPage({
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [showAddUnit, setShowAddUnit] = useState(false);
 
   const load = useCallback(async () => {
@@ -134,6 +139,29 @@ export default function BuildingDetailPage({
       note: building.note ?? "",
     });
     setEditing(true);
+  };
+
+  const handleDelete = async () => {
+    if (!building) return;
+    if (building._count.properties > 0) {
+      alert(
+        `この棟には ${building._count.properties} 件の物件が紐づいているため削除できません。先に部屋を削除してください。`,
+      );
+      return;
+    }
+    const ok = window.confirm(
+      `棟「${building.name}」を削除します。この操作は取り消せません。よろしいですか？`,
+    );
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await deleteBuilding(building.id);
+      router.push("/buildings");
+      router.refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "削除に失敗しました");
+      setDeleting(false);
+    }
   };
 
   const handleSave = async () => {
@@ -195,13 +223,32 @@ export default function BuildingDetailPage({
         <h2 className="text-xl font-bold text-gray-800">{building.name}</h2>
         <div className="ml-auto flex items-center gap-2">
           {!editing && (
-            <button
-              onClick={startEdit}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <Edit className="h-4 w-4" />
-              編集
-            </button>
+            <>
+              <button
+                onClick={startEdit}
+                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <Edit className="h-4 w-4" />
+                編集
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting || building._count.properties > 0}
+                title={
+                  building._count.properties > 0
+                    ? "紐づく部屋があるため削除できません"
+                    : undefined
+                }
+                className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deleting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                削除
+              </button>
+            </>
           )}
         </div>
       </div>

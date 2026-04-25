@@ -86,6 +86,16 @@ export async function fetchPropertyDetail(id: string) {
   return apiFetch<(typeof MOCK_PROPERTIES)[0]>(`/api/properties/${id}`);
 }
 
+export async function deleteProperty(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id, deleted: true };
+  }
+  return apiFetch<{ id: string; deleted: true }>(`/api/properties/${id}`, {
+    method: "DELETE",
+  });
+}
+
 // ---------- Comments ----------
 
 export async function fetchComments(propertyId: string) {
@@ -1231,6 +1241,16 @@ export async function updateBuilding(id: string, data: Record<string, unknown>) 
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
+  });
+}
+
+export async function deleteBuilding(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id, deleted: true };
+  }
+  return apiFetch<{ id: string; deleted: true }>(`/api/buildings/${id}`, {
+    method: "DELETE",
   });
 }
 

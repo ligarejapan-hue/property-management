@@ -160,3 +160,59 @@ export async function PATCH(
     return handleApiError(error);
   }
 }
+
+// ---------- DELETE /api/buildings/:id ----------
+// 棟を物理削除する。Property→Building は onDelete 未指定（Restrict）なので、
+// 紐づく物件が1件でも残っているとDB側で失敗する。事前に件数チェックして
+// 409 で安全に失敗させる（DBエラーをそのまま 500 にしないため）。
+// BuildingPhoto は onDelete: Cascade なので自動削除される。
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const session = await getApiSession();
+    const perms = await getUserPermissions(session.id);
+
+    if (!hasPermission(perms, "property", "write")) {
+      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
+
+    const building = await prisma.building.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        _count: { select: { properties: true } },
+      },
+    });
+
+    if (!building) {
+      throw new ApiError(404, "棟が見つかりません", "NOT_FOUND");
+    }
+
+    if (building._count.properties > 0) {
+      throw new ApiError(
+        409,
+        `この棟には ${building._count.properties} 件の物件が紐づいているため削除できません。先に物件を削除または別棟へ移動してください。`,
+        "BUILDING_HAS_PROPERTIES",
+      );
+    }
+
+    await prisma.building.delete({ where: { id } });
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "delete",
+      targetTable: "buildings",
+      targetId: id,
+      detail: { name: building.name },
+    });
+
+    return apiResponse({ id, deleted: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
