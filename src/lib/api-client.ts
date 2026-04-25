@@ -1303,6 +1303,26 @@ export async function searchProperties(query: string) {
   }>(`/api/properties/search?q=${encodeURIComponent(query)}`);
 }
 
+export async function updateOwner(
+  id: string,
+  data: { note?: string | null; version: number } & Record<string, unknown>,
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id, ...data };
+  }
+  return apiFetch<{
+    id: string;
+    name: string;
+    note: string | null;
+    version: number;
+  }>(`/api/owners/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
 export async function searchOwners(query: string) {
   if (USE_MOCK) {
     await mockDelay();

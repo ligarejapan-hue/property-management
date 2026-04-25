@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Search, ChevronLeft, ChevronRight, Loader2, Plus } from "lucide-react";
-import { fetchProperties as apiFetchProperties, bulkUpdateProperties } from "@/lib/api-client";
+import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2 } from "lucide-react";
+import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty } from "@/lib/api-client";
 import NewPropertyModal from "@/components/properties/new-property-modal";
 
 // ---------- Label maps ----------
@@ -93,6 +93,7 @@ export default function PropertiesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -142,6 +143,35 @@ export default function PropertiesPage() {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(properties.map((p) => p.id)));
+    }
+  };
+
+  // 物件を一覧から削除する。誤操作防止のため confirm を必須にし、
+  // サーバ側の権限制御 + Cascade を踏襲（詳細ページの削除と同じ deleteProperty を再利用）。
+  const handleDelete = async (id: string, address: string) => {
+    if (deletingId) return;
+    if (
+      !window.confirm(
+        `物件「${address}」を削除します。\nこの操作は取り消せません。よろしいですか？`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(id);
+    setError(null);
+    try {
+      await deleteProperty(id);
+      setSelectedIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      await fetchProperties();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "削除に失敗しました");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -341,6 +371,9 @@ export default function PropertiesPage() {
                 <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
                   更新日
                 </th>
+                <th className="whitespace-nowrap px-2 py-3 font-medium text-gray-600">
+                  操作
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -412,12 +445,27 @@ export default function PropertiesPage() {
                   <td className="whitespace-nowrap px-4 py-3 text-gray-500">
                     {new Date(property.updatedAt).toLocaleDateString("ja-JP")}
                   </td>
+                  <td className="whitespace-nowrap px-2 py-3">
+                    <button
+                      type="button"
+                      title="この物件を削除"
+                      disabled={deletingId === property.id}
+                      onClick={() => handleDelete(property.id, property.address)}
+                      className="inline-flex items-center justify-center rounded-md p-1.5 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deletingId === property.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  </td>
                 </tr>
               ))}
               {properties.length === 0 && !loading && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={11}
                     className="px-4 py-8 text-center text-gray-500"
                   >
                     該当する物件が見つかりません

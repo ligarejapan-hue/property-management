@@ -20,7 +20,7 @@ import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updateOwner } from "@/lib/api-client";
 
 // ---------- Label maps ----------
 
@@ -85,6 +85,7 @@ interface ApiOwner {
   zip: string | null;
   address: string | null;
   note: string | null;
+  version: number;
 }
 
 interface ApiPropertyOwner {
@@ -529,11 +530,81 @@ function OwnerTab({ owners }: { owners: ApiPropertyOwner[] }) {
               <OwnerField label="現住所" value={po.owner.address} />
             </div>
             <div className="md:col-span-2">
-              <OwnerField label="備考" value={po.owner.note} />
+              <OwnerNoteEditor owner={po.owner} />
             </div>
           </dl>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------- Owner note editor ----------
+// 各所有者ごとにメモを保存・編集・削除できる。共有名義でも所有者(Owner)単位で別メモを保持。
+function OwnerNoteEditor({ owner }: { owner: ApiOwner }) {
+  const [value, setValue] = useState(owner.note ?? "");
+  const [version, setVersion] = useState(owner.version);
+  const [savedValue, setSavedValue] = useState(owner.note ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  const dirty = value !== savedValue;
+
+  const persist = async (next: string | null) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = (await updateOwner(owner.id, {
+        note: next,
+        version,
+      })) as { version: number; note: string | null };
+      setSavedValue(next ?? "");
+      setValue(next ?? "");
+      setVersion(updated.version);
+      setSavedAt(Date.now());
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "保存に失敗しました";
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+        備考（所有者ごとのメモ）
+      </dt>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        rows={3}
+        placeholder="この所有者についてのメモ（自由入力）"
+        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          disabled={!dirty || saving}
+          onClick={() => persist(value.trim() === "" ? null : value)}
+          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+        >
+          {saving ? "保存中..." : "保存"}
+        </button>
+        <button
+          type="button"
+          disabled={saving || (savedValue === "" && value === "")}
+          onClick={() => persist(null)}
+          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          削除
+        </button>
+        {error && <span className="text-xs text-red-600">{error}</span>}
+        {!error && savedAt && !dirty && !saving && (
+          <span className="text-xs text-green-600">保存しました</span>
+        )}
+      </div>
     </div>
   );
 }

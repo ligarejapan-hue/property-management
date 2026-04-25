@@ -362,22 +362,30 @@ async function upsertOwnerAndLink(
   const name = nullIfBlank(o.name);
   if (!name) return null; // 氏名がない行は所有者レコードを作れないのでスキップ
   const address = nullIfBlank(o.address);
+  const zip = nullIfBlank(o.zip);
 
   // 既存 Owner 検索: name + address → name のみ
   let ownerId: string | null = null;
+  let existingZip: string | null = null;
   if (address) {
     const hit = await prisma.owner.findFirst({
       where: { name, address },
-      select: { id: true },
+      select: { id: true, zip: true },
     });
-    if (hit) ownerId = hit.id;
+    if (hit) {
+      ownerId = hit.id;
+      existingZip = hit.zip;
+    }
   }
   if (!ownerId) {
     const hit = await prisma.owner.findFirst({
       where: { name, address: null },
-      select: { id: true },
+      select: { id: true, zip: true },
     });
-    if (hit) ownerId = hit.id;
+    if (hit) {
+      ownerId = hit.id;
+      existingZip = hit.zip;
+    }
   }
 
   if (!ownerId) {
@@ -385,6 +393,7 @@ async function upsertOwnerAndLink(
       data: {
         name,
         ...(address ? { address } : {}),
+        ...(zip ? { zip } : {}),
       },
       select: { id: true },
     });
@@ -395,7 +404,13 @@ async function upsertOwnerAndLink(
       action: "owner_created_from_reception",
       targetTable: "owners",
       targetId: ownerId,
-      detail: { name, address: address ?? null },
+      detail: { name, address: address ?? null, zip: zip ?? null },
+    });
+  } else if (zip && !existingZip) {
+    // 既存所有者で郵便番号が未設定の場合のみ補完（既存値は破壊しない）
+    await prisma.owner.update({
+      where: { id: ownerId },
+      data: { zip, version: { increment: 1 } },
     });
   }
 

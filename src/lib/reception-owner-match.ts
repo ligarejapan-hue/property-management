@@ -45,6 +45,7 @@ export interface ParsedOwnerRow {
   address: string | null;
   buildingName: string | null;
   roomNo: string | null;
+  zip: string | null;
 }
 
 export interface PropertyCandidate {
@@ -145,7 +146,9 @@ function detectExcludedReason(
  * 所有者CSV ヘッダ名 → 論理フィールド のマップ（固定）。
  * 既存 owner-csv ルートと揃える。
  */
-const OWNER_HEADER_TO_FIELD: Record<string, "name" | "address" | "buildingName" | "roomNo"> = {
+type OwnerField = "name" | "address" | "buildingName" | "roomNo" | "zip";
+
+const OWNER_HEADER_TO_FIELD: Record<string, OwnerField> = {
   "氏名": "name",
   "所有者氏名": "name",
   "住所": "address",
@@ -154,6 +157,8 @@ const OWNER_HEADER_TO_FIELD: Record<string, "name" | "address" | "buildingName" 
   "マンション名": "buildingName",
   "部屋番号": "roomNo",
   "号室": "roomNo",
+  "郵便番号": "zip",
+  "〒": "zip",
 };
 
 /**
@@ -165,7 +170,7 @@ export function parseOwnerRows(
   rows: string[][],
 ): ParsedOwnerRow[] {
   // header → column index 逆引き
-  const headerIndex: Partial<Record<"name" | "address" | "buildingName" | "roomNo", number>> = {};
+  const headerIndex: Partial<Record<OwnerField, number>> = {};
   headers.forEach((h, idx) => {
     const key = OWNER_HEADER_TO_FIELD[h.trim()];
     if (key && headerIndex[key] === undefined) {
@@ -175,7 +180,7 @@ export function parseOwnerRows(
 
   return rows.map((row, i) => {
     const cColumn = row[2] ?? "";
-    const pick = (k: "name" | "address" | "buildingName" | "roomNo") => {
+    const pick = (k: OwnerField) => {
       const idx = headerIndex[k];
       if (idx === undefined) return null;
       const v = (row[idx] ?? "").trim();
@@ -189,6 +194,7 @@ export function parseOwnerRows(
       address: pick("address"),
       buildingName: pick("buildingName"),
       roomNo: pick("roomNo"),
+      zip: pick("zip"),
     };
   });
 }

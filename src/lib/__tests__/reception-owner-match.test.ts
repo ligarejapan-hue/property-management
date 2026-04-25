@@ -123,10 +123,10 @@ describe("parseReceptionRows", () => {
 // ---------- parseOwnerRows ----------
 
 describe("parseOwnerRows", () => {
-  it("ヘッダ名で氏名/住所/建物名/部屋番号を拾い、C=2 を固定キーにする", () => {
-    const headers = ["A", "B", "所在地", "氏名", "住所", "建物名", "部屋番号"];
+  it("ヘッダ名で氏名/住所/建物名/部屋番号/郵便番号を拾い、C=2 を固定キーにする", () => {
+    const headers = ["A", "B", "所在地", "氏名", "住所", "建物名", "部屋番号", "郵便番号"];
     const rows = [
-      ["", "", "東京都港区1-2-3 100", "山田太郎", "東京都港区1-2-3", "XXマンション", "101"],
+      ["", "", "東京都港区1-2-3 100", "山田太郎", "東京都港区1-2-3", "XXマンション", "101", "105-0001"],
     ];
     const [o] = parseOwnerRows(headers, rows);
     expect(o.cColumn).toBe("東京都港区1-2-3 100");
@@ -135,26 +135,29 @@ describe("parseOwnerRows", () => {
     expect(o.address).toBe("東京都港区1-2-3");
     expect(o.buildingName).toBe("XXマンション");
     expect(o.roomNo).toBe("101");
+    expect(o.zip).toBe("105-0001");
   });
 
-  it("別名ヘッダ（所有者氏名/マンション名/号室）も拾う", () => {
-    const headers = ["X", "Y", "Z", "所有者氏名", "所有者住所", "マンション名", "号室"];
-    const rows = [["", "", "東京都港区1-2-3", "A", "東京都", "YY", "202"]];
+  it("別名ヘッダ（所有者氏名/マンション名/号室/〒）も拾う", () => {
+    const headers = ["X", "Y", "Z", "所有者氏名", "所有者住所", "マンション名", "号室", "〒"];
+    const rows = [["", "", "東京都港区1-2-3", "A", "東京都", "YY", "202", "100-0001"]];
     const [o] = parseOwnerRows(headers, rows);
     expect(o.name).toBe("A");
     expect(o.address).toBe("東京都");
     expect(o.buildingName).toBe("YY");
     expect(o.roomNo).toBe("202");
+    expect(o.zip).toBe("100-0001");
   });
 
   it("空白の値は null", () => {
-    const headers = ["", "", "", "氏名", "住所", "建物名", "部屋番号"];
-    const rows = [["", "", "東京都港区1-2-3", "  ", "", "", ""]];
+    const headers = ["", "", "", "氏名", "住所", "建物名", "部屋番号", "郵便番号"];
+    const rows = [["", "", "東京都港区1-2-3", "  ", "", "", "", ""]];
     const [o] = parseOwnerRows(headers, rows);
     expect(o.name).toBeNull();
     expect(o.address).toBeNull();
     expect(o.buildingName).toBeNull();
     expect(o.roomNo).toBeNull();
+    expect(o.zip).toBeNull();
   });
 });
 
@@ -177,6 +180,7 @@ describe("matchReceptionToOwners", () => {
     address: null,
     buildingName: null,
     roomNo: null,
+    zip: null,
   });
 
   it("同一キーは複数所有者も落とさない（共有名義）", () => {
