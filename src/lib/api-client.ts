@@ -581,6 +581,10 @@ export interface ReceptionOwnerPreviewResponse {
     candidateCount: number;
     ownerCount: number;
     propertyStatus: "matched" | "not_found" | "multiple" | "no_key";
+    propertyId: string | null;
+    candidatePropertyIds: string[];
+    lotNumber: string | null;
+    buildingNumber: string | null;
   }>;
   receptionFileType: { type: string; label: string | null; error: string | null };
   ownerFileType: { type: string; label: string | null; error: string | null };
@@ -1317,6 +1321,31 @@ export async function updateOwner(
     note: string | null;
     version: number;
   }>(`/api/owners/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+// 物件×所有者単位のメモなどを更新する（PropertyOwner.note）。
+// Owner.note (所有者本体のメモ) とは別軸なので updateOwner と混同しない。
+export async function updatePropertyOwner(
+  propertyId: string,
+  ownerId: string,
+  data: { note?: string | null; relationship?: string | null; isPrimary?: boolean },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { propertyId, ownerId, ...data };
+  }
+  return apiFetch<{
+    id: string;
+    propertyId: string;
+    ownerId: string;
+    note: string | null;
+    relationship: string | null;
+    isPrimary: boolean;
+  }>(`/api/properties/${propertyId}/owners/${ownerId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),

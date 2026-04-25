@@ -165,6 +165,14 @@ export async function POST(request: NextRequest) {
       candidateCount: number;
       ownerCount: number;
       propertyStatus: "matched" | "not_found" | "multiple" | "no_key";
+      /** matched 物件があれば物件詳細へ飛べるよう ID を渡す（owner_unmatched 等で使用）。 */
+      propertyId: string | null;
+      /** multiple 候補のときに直接遷移できる候補物件 ID（最大10件まで）。 */
+      candidatePropertyIds: string[];
+      /** 受付帳から拾った地番（K列の正規化結果）。 */
+      lotNumber: string | null;
+      /** 受付帳から拾った家屋番号（K列の正規化結果）。 */
+      buildingNumber: string | null;
     }> = [];
 
     for (const c of combined) {
@@ -182,6 +190,14 @@ export async function POST(request: NextRequest) {
         }
       } else if (reason) {
         if (reviewSamples.length < MAX_SAMPLE) {
+          const matchedId =
+            c.propertyMatch.status === "matched"
+              ? c.propertyMatch.property?.id ?? null
+              : null;
+          const candidates =
+            c.propertyMatch.status === "multiple"
+              ? c.propertyMatch.candidates ?? []
+              : [];
           reviewSamples.push({
             rowNumber: c.reception.rowNumber,
             matchKey: c.reception.matchKey,
@@ -189,12 +205,13 @@ export async function POST(request: NextRequest) {
             kColumn: c.reception.kColumn,
             reason,
             reasonLabel: REVIEW_REASON_LABEL[reason],
-            candidateCount:
-              c.propertyMatch.status === "multiple"
-                ? c.propertyMatch.candidates?.length ?? 0
-                : 0,
+            candidateCount: candidates.length,
             ownerCount: c.owners.length,
             propertyStatus: c.propertyMatch.status,
+            propertyId: matchedId,
+            candidatePropertyIds: candidates.slice(0, 10).map((p) => p.id),
+            lotNumber: c.reception.lotNumber,
+            buildingNumber: c.reception.buildingNumber,
           });
         }
       }

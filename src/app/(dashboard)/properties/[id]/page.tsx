@@ -20,7 +20,7 @@ import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updateOwner } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner } from "@/lib/api-client";
 
 // ---------- Label maps ----------
 
@@ -94,6 +94,8 @@ interface ApiPropertyOwner {
   ownerId: string;
   relationship: string | null;
   isPrimary: boolean;
+  /** 物件×所有者単位のメモ（PropertyOwner.note）。Owner.note とは別軸。 */
+  note: string | null;
   owner: ApiOwner;
 }
 
@@ -502,49 +504,68 @@ function OwnerTab({ owners }: { owners: ApiPropertyOwner[] }) {
     );
   }
 
+  const isShared = owners.length > 1;
+
   return (
     <div className="space-y-4">
-      {owners.map((po) => (
+      {isShared && (
+        <p className="text-xs text-gray-500">
+          共有名義: {owners.length} 名（メモは所有者ごと・物件単位で保持されます）
+        </p>
+      )}
+      {owners.map((po, idx) => (
         <div
           key={po.id}
-          className="rounded-lg border border-gray-200 bg-gray-50 p-5"
+          className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
         >
-          <div className="mb-3 flex items-center gap-2">
+          {/* 見出し: 番号 + 氏名 + バッジ */}
+          <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-100 pb-3">
+            <span className="text-xs font-medium text-gray-500">
+              所有者 {idx + 1}
+              {isShared ? ` / ${owners.length}` : ""}
+            </span>
+            <h3 className="text-base font-semibold text-gray-900">
+              {po.owner.name ?? "（氏名未登録）"}
+            </h3>
             {po.isPrimary && (
               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
                 主所有者
               </span>
             )}
             {po.relationship && (
-              <span className="text-xs text-gray-500">
-                関係: {po.relationship}
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700">
+                {po.relationship}
               </span>
             )}
           </div>
+
+          {/* 連絡先・住所ブロック */}
           <dl className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <OwnerField label="氏名" value={po.owner.name} />
             <OwnerField label="氏名カナ" value={po.owner.nameKana} />
-            <OwnerField label="電話番号" value={po.owner.phone} />
-            <OwnerField label="郵便番号" value={po.owner.zip} />
+            <OwnerField label="電話番号" value={po.owner.phone} mono />
+            <OwnerField label="郵便番号" value={po.owner.zip} mono />
+            <div />
             <div className="md:col-span-2">
               <OwnerField label="現住所" value={po.owner.address} />
             </div>
-            <div className="md:col-span-2">
-              <OwnerNoteEditor owner={po.owner} />
-            </div>
           </dl>
+
+          {/* メモ: PropertyOwner 単位 */}
+          <div className="mt-5 border-t border-gray-100 pt-4">
+            <PropertyOwnerNoteEditor po={po} />
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-// ---------- Owner note editor ----------
-// 各所有者ごとにメモを保存・編集・削除できる。共有名義でも所有者(Owner)単位で別メモを保持。
-function OwnerNoteEditor({ owner }: { owner: ApiOwner }) {
-  const [value, setValue] = useState(owner.note ?? "");
-  const [version, setVersion] = useState(owner.version);
-  const [savedValue, setSavedValue] = useState(owner.note ?? "");
+// ---------- Property-Owner note editor ----------
+// 物件×所有者単位のメモ（PropertyOwner.note）。
+// 共有名義でも所有者ごと、同じ Owner が別物件にいても物件ごとに別メモを保持する。
+function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
+  const [value, setValue] = useState(po.note ?? "");
+  const [savedValue, setSavedValue] = useState(po.note ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -555,13 +576,9 @@ function OwnerNoteEditor({ owner }: { owner: ApiOwner }) {
     setSaving(true);
     setError(null);
     try {
-      const updated = (await updateOwner(owner.id, {
-        note: next,
-        version,
-      })) as { version: number; note: string | null };
+      await updatePropertyOwner(po.propertyId, po.ownerId, { note: next });
       setSavedValue(next ?? "");
       setValue(next ?? "");
-      setVersion(updated.version);
       setSavedAt(Date.now());
     } catch (e) {
       const msg = e instanceof Error ? e.message : "保存に失敗しました";
@@ -574,13 +591,13 @@ function OwnerNoteEditor({ owner }: { owner: ApiOwner }) {
   return (
     <div>
       <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
-        備考（所有者ごとのメモ）
+        メモ（この物件における所有者メモ）
       </dt>
       <textarea
         value={value}
         onChange={(e) => setValue(e.target.value)}
         rows={3}
-        placeholder="この所有者についてのメモ（自由入力）"
+        placeholder="例: 連絡時間帯、相続関係、現地でのやり取りなど"
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
       <div className="mt-2 flex items-center gap-2">
@@ -647,16 +664,25 @@ function Field({
 function OwnerField({
   label,
   value,
+  mono,
 }: {
   label: string;
   value: string | null | undefined;
+  mono?: boolean;
 }) {
+  const hasValue = value != null && String(value).trim() !== "";
   return (
     <div>
       <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
         {label}
       </dt>
-      <dd className="text-sm text-gray-900">{value ?? "-"}</dd>
+      <dd
+        className={`text-sm ${hasValue ? "text-gray-900" : "text-gray-400"} ${
+          mono ? "font-mono" : ""
+        }`}
+      >
+        {hasValue ? value : "未登録"}
+      </dd>
     </div>
   );
 }

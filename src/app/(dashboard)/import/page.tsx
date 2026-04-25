@@ -285,6 +285,119 @@ function RoStat({
   );
 }
 
+// 要レビュー行に対して、レビュー担当が「次にどこを直せば取り込めるか」が一目で分かるよう
+// 理由ごとに具体的な修正先 / 確認先を示す。propertyId / 候補ID は preview API が
+// 返してくる範囲のみで判定し、無理に推測しない。
+function ReviewActionHint({
+  sample,
+}: {
+  sample: ReceptionOwnerPreviewResponse["reviewSamples"][number];
+}) {
+  switch (sample.reason) {
+    case "owner_unmatched":
+      // 物件は特定できているが、所有者CSV側に同キーの行が無い → 所有者CSVのC列を確認
+      return (
+        <div className="space-y-1">
+          <div className="text-gray-700">
+            所有者CSV C列のキー
+            <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+              {sample.matchKey || "(空)"}
+            </code>
+            と一致する行を確認
+          </div>
+          {sample.propertyId && (
+            <Link
+              href={`/properties/${sample.propertyId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+            >
+              対象物件を開く <ArrowRight className="h-3 w-3" />
+            </Link>
+          )}
+        </div>
+      );
+    case "property_not_found":
+      // 物件未特定: DBに該当物件なし。新規登録 or 既存物件側を修正
+      return (
+        <div className="space-y-1">
+          <div className="text-gray-700">
+            該当物件が未登録
+            {sample.lotNumber && (
+              <>
+                （地番:
+                <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+                  {sample.lotNumber}
+                </code>
+                ）
+              </>
+            )}
+            {sample.buildingNumber && (
+              <>
+                （家屋番号:
+                <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+                  {sample.buildingNumber}
+                </code>
+                ）
+              </>
+            )}
+          </div>
+          <Link
+            href="/properties"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+          >
+            物件一覧で確認 / 新規登録 <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+      );
+    case "property_multiple":
+      // 候補複数: いずれかを正として確定する必要がある
+      return (
+        <div className="space-y-1">
+          <div className="text-gray-700">
+            候補が {sample.candidateCount} 件あります。正しい物件を選んで直接更新してください。
+          </div>
+          {sample.candidatePropertyIds.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {sample.candidatePropertyIds.map((pid, i) => (
+                <Link
+                  key={pid}
+                  href={`/properties/${pid}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-blue-700 hover:bg-blue-100"
+                >
+                  候補{i + 1} <ArrowRight className="h-3 w-3" />
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    case "property_no_key":
+      // 受付帳側に地番/家屋番号が抽出できていない → F列(区分)とK列を確認
+      return (
+        <div className="space-y-1">
+          <div className="text-gray-700">
+            受付帳の地番/家屋番号が空。F列(区分=
+            <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+              {sample.fColumn || "(空)"}
+            </code>
+            )とK列(=
+            <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+              {sample.kColumn || "(空)"}
+            </code>
+            )を確認してください。
+          </div>
+        </div>
+      );
+    default:
+      return <span className="text-gray-400">-</span>;
+  }
+}
+
 export default function ImportPage() {
   // Step state
   const [step, setStep] = useState<Step>(1);
@@ -1390,12 +1503,17 @@ export default function ImportPage() {
 
             {roPreview.reviewSamples.length > 0 && (
               <div className="mt-4">
-                <div className="mb-1 text-xs font-semibold text-amber-700">
-                  要レビューサンプル（最大20件）
+                <div className="mb-1 flex items-center justify-between">
+                  <div className="text-xs font-semibold text-amber-700">
+                    要レビューサンプル（最大20件）
+                  </div>
+                  <div className="text-[10px] text-gray-500">
+                    理由ごとに「次にどこを直せばよいか」を右端に表示します
+                  </div>
                 </div>
-                <div className="max-h-52 overflow-auto rounded border border-amber-200 bg-white">
+                <div className="max-h-72 overflow-auto rounded border border-amber-200 bg-white">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-amber-50 text-amber-700">
+                    <thead className="sticky top-0 bg-amber-50 text-amber-700">
                       <tr>
                         <th className="px-2 py-1">行</th>
                         <th className="px-2 py-1">理由</th>
@@ -1404,11 +1522,12 @@ export default function ImportPage() {
                         <th className="px-2 py-1">K列</th>
                         <th className="px-2 py-1">候補数</th>
                         <th className="px-2 py-1">所有者数</th>
+                        <th className="px-2 py-1">次のアクション</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {roPreview.reviewSamples.map((s) => (
-                        <tr key={s.rowNumber}>
+                        <tr key={s.rowNumber} className="align-top">
                           <td className="px-2 py-1 text-gray-600">{s.rowNumber}</td>
                           <td className="px-2 py-1 text-amber-700">{s.reasonLabel}</td>
                           <td className="px-2 py-1 text-gray-600">
@@ -1423,6 +1542,9 @@ export default function ImportPage() {
                           <td className="px-2 py-1 text-gray-600">{s.kColumn}</td>
                           <td className="px-2 py-1 text-gray-600">{s.candidateCount}</td>
                           <td className="px-2 py-1 text-gray-600">{s.ownerCount}</td>
+                          <td className="px-2 py-1">
+                            <ReviewActionHint sample={s} />
+                          </td>
                         </tr>
                       ))}
                     </tbody>

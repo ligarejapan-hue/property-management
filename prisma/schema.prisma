@@ -384,7 +384,11 @@ model PropertyOwner {
   isPrimary    Boolean   @default(false) @map("is_primary")
   startDate    DateTime? @map("start_date") @db.Date
   endDate      DateTime? @map("end_date") @db.Date
+  /// 物件×所有者単位のメモ。Owner.note (所有者本体のメモ) とは別物。
+  /// 共有名義でも所有者ごと、同一Ownerが別物件にいてもメモが混ざらない。
+  note         String?
   createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   owner    Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
