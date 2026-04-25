@@ -94,6 +94,13 @@ export default function PropertiesPage() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  // 一括削除の結果サマリ。null のときは表示しない。
+  const [bulkDeleteResult, setBulkDeleteResult] = useState<{
+    successCount: number;
+    failureCount: number;
+    failures: Array<{ id: string; address: string; reason: string }>;
+  } | null>(null);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -173,6 +180,56 @@ export default function PropertiesPage() {
     } finally {
       setDeletingId(null);
     }
+  };
+
+  // 選択中の物件を一括削除する。既存の単体 deleteProperty を直列ループで再利用し、
+  // サーバ側の権限制御 / Cascade をそのまま踏襲する。
+  // - 0件選択時はボタン無効
+  // - confirm 必須（誤操作防止）
+  // - 失敗は ID と住所と日本語メッセージで集計表示
+  // - 成功・失敗どちらでも最後に一覧再取得
+  const handleBulkDelete = async () => {
+    if (bulkDeleting || selectedIds.size === 0) return;
+    const targets = properties.filter((p) => selectedIds.has(p.id));
+    if (targets.length === 0) return;
+    if (
+      !window.confirm(
+        `選択した ${targets.length} 件の物件を削除します。\nこの操作は取り消せません。よろしいですか？`,
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    setError(null);
+    setBulkDeleteResult(null);
+
+    let successCount = 0;
+    const failures: Array<{ id: string; address: string; reason: string }> = [];
+
+    // 1件ずつ直列で実行（権限・Cascade を個別に評価し、片方の失敗で残りを止めない）
+    for (const p of targets) {
+      try {
+        await deleteProperty(p.id);
+        successCount++;
+      } catch (err) {
+        failures.push({
+          id: p.id,
+          address: p.address,
+          reason: err instanceof Error ? err.message : "削除に失敗しました",
+        });
+      }
+    }
+
+    // 成功した分は選択から外す（失敗したIDだけ残す）
+    setSelectedIds(new Set(failures.map((f) => f.id)));
+    setBulkDeleteResult({
+      successCount,
+      failureCount: failures.length,
+      failures,
+    });
+
+    await fetchProperties();
+    setBulkDeleting(false);
   };
 
   const handleBulkUpdate = async (updates: Record<string, unknown>) => {
@@ -314,11 +371,59 @@ export default function PropertiesPage() {
             <option value="hold">未判断</option>
           </select>
           <button
+            type="button"
+            disabled={bulkDeleting || bulkUpdating}
+            onClick={handleBulkDelete}
+            className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {bulkDeleting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+            選択した物件を削除
+          </button>
+          <button
             onClick={() => setSelectedIds(new Set())}
-            className="ml-auto text-xs text-gray-500 hover:text-gray-700"
+            disabled={bulkDeleting}
+            className="ml-auto text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
           >
             選択解除
           </button>
+        </div>
+      )}
+
+      {/* Bulk delete result */}
+      {bulkDeleteResult && (
+        <div
+          className={`mb-4 rounded-lg border p-3 text-sm ${
+            bulkDeleteResult.failureCount === 0
+              ? "border-green-200 bg-green-50 text-green-800"
+              : "border-amber-200 bg-amber-50 text-amber-800"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              一括削除結果: 成功 <b>{bulkDeleteResult.successCount}</b> 件 / 失敗{" "}
+              <b>{bulkDeleteResult.failureCount}</b> 件
+            </div>
+            <button
+              onClick={() => setBulkDeleteResult(null)}
+              className="text-xs underline hover:no-underline"
+            >
+              閉じる
+            </button>
+          </div>
+          {bulkDeleteResult.failures.length > 0 && (
+            <ul className="mt-2 max-h-40 list-disc space-y-0.5 overflow-auto pl-5 text-xs">
+              {bulkDeleteResult.failures.map((f) => (
+                <li key={f.id}>
+                  <span className="font-medium">{f.address}</span>
+                  <span className="ml-2 text-amber-700">{f.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

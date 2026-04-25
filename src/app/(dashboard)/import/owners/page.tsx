@@ -34,6 +34,9 @@ interface ImportResult {
   errorCount: number;
   needsReviewCount: number;
   linkedCount: number;
+  linkedByLinkKeyCount?: number;
+  linkedByAddressCount?: number;
+  addressLinkAmbiguousCount?: number;
 }
 
 type Step = 1 | 2 | 3 | 4;
@@ -692,9 +695,29 @@ export default function OwnerImportPage() {
           </div>
 
           {result.linkedCount > 0 && (
-            <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700 flex items-center gap-2">
-              <Link2 className="h-4 w-4" />
-              リンクキーにより {result.linkedCount} 件の物件-所有者紐付けが作成されました。
+            <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700 flex items-start gap-2">
+              <Link2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                {result.linkedCount} 件の物件-所有者紐付けが作成されました。
+                {(result.linkedByLinkKeyCount ?? 0) > 0 && (
+                  <span className="ml-2 text-xs text-blue-600">
+                    （リンクキー一致: {result.linkedByLinkKeyCount}）
+                  </span>
+                )}
+                {(result.linkedByAddressCount ?? 0) > 0 && (
+                  <span className="ml-2 text-xs text-blue-600">
+                    （住所一致: {result.linkedByAddressCount}）
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+          {(result.addressLinkAmbiguousCount ?? 0) > 0 && (
+            <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700 flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                {result.addressLinkAmbiguousCount} 件の所有者は同じ住所に複数物件があり自動紐付けを保留しました。物件詳細から手動で紐付けてください。
+              </div>
             </div>
           )}
 

@@ -10,6 +10,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
+import { normalizeAddress } from "@/lib/address-normalizer";
 
 // Japanese field name → Owner model property mapping
 const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
@@ -209,10 +210,39 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Auto-link owners to properties via externalLinkKey
+    // Auto-link owners to properties.
+    // 1) externalLinkKey 完全一致 (従来動作)
+    // 2) Owner.address (正規化) と Property.address (正規化) の完全一致
+    //    → 候補が 1 件に絞れる場合のみ自動リンク。複数物件にヒットする住所は
+    //      安全側で自動リンクしない（手動で紐付ける運用）。
+    // 既存の externalLinkKey フローを壊さず、リンクキー未設定 CSV でも
+    // 物件詳細「所有者」タブに反映されるようにする最小拡張。
     let linkedCount = 0;
+    let linkedByLinkKeyCount = 0;
+    let linkedByAddressCount = 0;
+    let addressLinkAmbiguousCount = 0;
+
+    const linkOwnerToProperty = async (
+      propertyId: string,
+      ownerId: string,
+    ): Promise<boolean> => {
+      const existingLink = await prisma.propertyOwner.findUnique({
+        where: { propertyId_ownerId: { propertyId, ownerId } },
+      });
+      if (existingLink) return false;
+      await prisma.propertyOwner.create({
+        data: {
+          propertyId,
+          ownerId,
+          relationship: "所有者",
+          isPrimary: false,
+        },
+      });
+      return true;
+    };
 
     if (createdOwnerIds.length > 0) {
+      // (1) externalLinkKey 経由
       const ownersWithLinkKey = await prisma.owner.findMany({
         where: {
           id: { in: createdOwnerIds },
@@ -221,6 +251,7 @@ export async function POST(request: NextRequest) {
         select: { id: true, externalLinkKey: true },
       });
 
+      const linkedOwnerIds = new Set<string>();
       for (const owner of ownersWithLinkKey) {
         if (!owner.externalLinkKey) continue;
 
@@ -230,27 +261,63 @@ export async function POST(request: NextRequest) {
         });
 
         for (const property of matchingProperties) {
-          // Skip if link already exists
-          const existingLink = await prisma.propertyOwner.findUnique({
-            where: {
-              propertyId_ownerId: {
-                propertyId: property.id,
-                ownerId: owner.id,
-              },
-            },
-          });
-
-          if (!existingLink) {
-            await prisma.propertyOwner.create({
-              data: {
-                propertyId: property.id,
-                ownerId: owner.id,
-                relationship: "所有者",
-                isPrimary: false,
-              },
-            });
+          const created = await linkOwnerToProperty(property.id, owner.id);
+          if (created) {
             linkedCount++;
+            linkedByLinkKeyCount++;
+            linkedOwnerIds.add(owner.id);
           }
+        }
+      }
+
+      // (2) address 経由のフォールバック
+      // 取込で作った Owner のうち、まだ未リンク かつ address を持つものを対象に
+      // 正規化住所で Property を引く。1件に絞れる場合のみリンク。
+      const addressTargets = await prisma.owner.findMany({
+        where: {
+          id: { in: createdOwnerIds },
+          address: { not: null },
+        },
+        select: { id: true, address: true },
+      });
+
+      // 正規化住所 → propertyId[] を一度キャッシュする（同住所が連続する想定）。
+      const propertyByNormAddr = new Map<string, string[]>();
+      const ensureCandidates = async (
+        normAddr: string,
+        rawAddr: string,
+      ): Promise<string[]> => {
+        const cached = propertyByNormAddr.get(normAddr);
+        if (cached) return cached;
+        // DB側に正規化関数は無いので、生 address で完全一致 + contains で広めに引いて
+        // アプリ側で正規化比較する。同住所表記揺れは normalizeAddress に寄せる。
+        const candidates = await prisma.property.findMany({
+          where: { address: { contains: rawAddr.slice(0, 8) } },
+          select: { id: true, address: true },
+        });
+        const matched = candidates
+          .filter((p) => normalizeAddress(p.address) === normAddr)
+          .map((p) => p.id);
+        propertyByNormAddr.set(normAddr, matched);
+        return matched;
+      };
+
+      for (const owner of addressTargets) {
+        if (linkedOwnerIds.has(owner.id)) continue;
+        if (!owner.address) continue;
+        const norm = normalizeAddress(owner.address);
+        if (!norm) continue;
+        const candidates = await ensureCandidates(norm, owner.address);
+        if (candidates.length === 0) continue;
+        if (candidates.length > 1) {
+          addressLinkAmbiguousCount++;
+          continue; // 安全側: 自動リンクしない
+        }
+        const created = await linkOwnerToProperty(candidates[0], owner.id);
+        if (created) {
+          linkedCount++;
+          linkedByAddressCount++;
+          linkedOwnerIds.add(owner.id);
         }
       }
     }
@@ -277,6 +344,9 @@ export async function POST(request: NextRequest) {
         successCount,
         errorCount,
         needsReviewCount,
+        linkedByLinkKeyCount,
+        linkedByAddressCount,
+        addressLinkAmbiguousCount,
         linkedCount,
       },
     });
@@ -289,6 +359,9 @@ export async function POST(request: NextRequest) {
         errorCount,
         needsReviewCount,
         linkedCount,
+        linkedByLinkKeyCount,
+        linkedByAddressCount,
+        addressLinkAmbiguousCount,
       },
       201,
     );
