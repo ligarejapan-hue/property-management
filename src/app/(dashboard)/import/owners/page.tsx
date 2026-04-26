@@ -231,10 +231,28 @@ export default function OwnerImportPage() {
     setError(null);
     setResult(null);
     try {
-      // UTF-8 BOM / UTF-8 / Shift-JIS(CP932) を自動判定して decode する。
-      // 実務 CSV は Excel 出力の Shift-JIS が多いため、UTF-8 固定読み込みだと
-      // 文字化けする → 共通デコーダ経由に変更。
-      const text = await readCsvFileAsText(file);
+      const lowerName = file.name.toLowerCase();
+      const isXlsx = lowerName.endsWith(".xlsx");
+
+      let text: string;
+      if (isXlsx) {
+        // xlsx: SheetJS で 1 シート目を CSV 文字列化してから既存パイプラインに合流。
+        // バイナリを readCsvFileAsText (テキスト用) に通すとヘッダーが
+        // "PK..docProps/app.xml.." のように文字化けして見えるため分岐させる。
+        const XLSX = await import("xlsx");
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+        const sheetName = wb.SheetNames[0];
+        if (!sheetName) {
+          setError("xlsx にシートが見つかりません");
+          return;
+        }
+        text = XLSX.utils.sheet_to_csv(wb.Sheets[sheetName]);
+      } else {
+        // csv: UTF-8 BOM / UTF-8 / Shift-JIS(CP932) を自動判定して decode する。
+        text = await readCsvFileAsText(file);
+      }
+
       setCsvText(text);
       const { headers: h, rows: r } = parseCsv(text);
       setHeaders(h);
@@ -510,13 +528,13 @@ export default function OwnerImportPage() {
           >
             <Upload className={`mx-auto mb-3 h-10 w-10 ${dragActive ? "text-blue-500" : "text-gray-400"}`} />
             <p className="mb-1 text-sm font-medium text-gray-700">
-              所有者CSVファイルをここにドラッグ＆ドロップ
+              所有者ファイル (CSV / xlsx) をここにドラッグ＆ドロップ
             </p>
             <p className="text-xs text-gray-400">またはクリックしてファイルを選択</p>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.tsv,.txt"
+              accept=".csv,.tsv,.txt,.xlsx"
               onChange={handleFileSelect}
               className="hidden"
             />
