@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { importOwnerCsv, relinkOwners } from "@/lib/api-client";
 import type { RelinkOwnersResponse } from "@/lib/api-client";
+import { readCsvFileAsText } from "@/lib/csv-decode";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -225,13 +226,15 @@ export default function OwnerImportPage() {
   };
 
   // ------ File handling ------
-  const processFile = useCallback((file: File) => {
+  const processFile = useCallback(async (file: File) => {
     setFileName(file.name);
     setError(null);
     setResult(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
+    try {
+      // UTF-8 BOM / UTF-8 / Shift-JIS(CP932) を自動判定して decode する。
+      // 実務 CSV は Excel 出力の Shift-JIS が多いため、UTF-8 固定読み込みだと
+      // 文字化けする → 共通デコーダ経由に変更。
+      const text = await readCsvFileAsText(file);
       setCsvText(text);
       const { headers: h, rows: r } = parseCsv(text);
       setHeaders(h);
@@ -245,8 +248,9 @@ export default function OwnerImportPage() {
       });
       setColumnMapping(mapping);
       setStep(2);
-    };
-    reader.readAsText(file, "UTF-8");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
+    }
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

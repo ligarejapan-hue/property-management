@@ -437,8 +437,11 @@ export async function parseFileForPreview(
     }
     return { headers, rows };
   }
-  // csv
-  const text = await file.text();
+  // csv: UTF-8 BOM / UTF-8 / Shift-JIS(CP932) を自動判定。
+  // file.text() 固定 (= UTF-8) だと Excel 出力の Shift-JIS が文字化けするため
+  // 共通デコーダ経由に変更。
+  const { readCsvFileAsText } = await import("./csv-decode");
+  const text = await readCsvFileAsText(file);
   const { parseCsv } = await import("./csv-parser");
   const { headers, rows } = parseCsv(text);
   return { headers, rows };
@@ -468,7 +471,9 @@ export async function readFileForImport(
         : Buffer.from(binary, "binary").toString("base64");
     return { fileName: file.name, xlsxBase64 };
   }
-  const text = await file.text();
+  // CSV は UTF-8 BOM / UTF-8 / Shift-JIS(CP932) を自動判定して decode する。
+  const { readCsvFileAsText } = await import("./csv-decode");
+  const text = await readCsvFileAsText(file);
   return { fileName: file.name, csvText: text };
 }
 

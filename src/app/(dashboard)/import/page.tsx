@@ -33,6 +33,7 @@ import {
   type ReceptionOwnerImportResponse,
 } from "@/lib/api-client";
 import { detectImportFileType } from "@/lib/import-file-type";
+import { readCsvFileAsText } from "@/lib/csv-decode";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -510,13 +511,10 @@ export default function ImportPage() {
         setStep(2);
         return;
       }
-      // csv: 既存どおり FileReader
-      const text = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => resolve(ev.target?.result as string);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsText(file, "UTF-8");
-      });
+      // csv: UTF-8 BOM / UTF-8 / Shift-JIS(CP932) を自動判定して decode する。
+      // 旧実装は UTF-8 固定で読んでおり、Excel 出力 (Shift-JIS / CP932) の
+      // 日本語CSVが文字化けしていたため共通デコーダ経由に変更。
+      const text = await readCsvFileAsText(file);
       setCsvText(text);
       setXlsxBase64(null);
       const { headers: h, rows: r } = parseCsv(text);
