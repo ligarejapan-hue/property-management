@@ -86,6 +86,26 @@ const TARGET_FIELDS = [
 
 type TargetField = (typeof TARGET_FIELDS)[number];
 
+// 表示専用ラベル: サーバへ送る値 (TARGET_FIELDS) は変えず、UI でだけ
+// 「住所」が物件住所であることを明示。必須項目は「(必須)」を付与。
+// 値変更するとサーバ側 JAPANESE_FIELD_MAP と整合しなくなるため値は変えない。
+const TARGET_FIELD_LABELS: Record<TargetField, string> = {
+  "住所": "物件住所 (必須)",
+  "地番": "地番",
+  "家屋番号": "家屋番号",
+  "不動産番号": "不動産番号",
+  "種別": "種別",
+  "登記状況": "登記状況",
+  "DM判断": "DM判断",
+  "案件ステータス": "案件ステータス",
+  "用途地域": "用途地域",
+  "路線価": "路線価",
+  "緯度": "緯度",
+  "経度": "経度",
+  "備考": "物件メモ",
+  "リンクキー": "リンクキー (所有者と紐付け)",
+};
+
 const TEMPLATES: Record<
   string,
   { label: string; columns: string[] }
@@ -938,7 +958,7 @@ export default function ImportPage() {
                                   mappedFields.has(f) && mapped !== f
                                 }
                               >
-                                {f}
+                                {TARGET_FIELD_LABELS[f]}
                                 {mappedFields.has(f) && mapped !== f
                                   ? " (使用済)"
                                   : ""}

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2 } from "lucide-react";
-import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty } from "@/lib/api-client";
+import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck } from "@/lib/api-client";
 import NewPropertyModal from "@/components/properties/new-property-modal";
 
 // ---------- Label maps ----------
@@ -87,7 +87,15 @@ export default function PropertiesPage() {
   const [typeFilter, setTypeFilter] = useState("");
   const [registryFilter, setRegistryFilter] = useState("");
   const [dmFilter, setDmFilter] = useState("");
+  const [warningOnly, setWarningOnly] = useState(false);
   const [page, setPage] = useState(1);
+
+  // 警告 (quality-check) を propertyId 単位で集計。
+  // 既存の /api/properties/quality-check を流用するので新 API は追加しない。
+  // severity = "info" は粒度が細かいため一覧ではバッジ対象外 (error / warning のみ)。
+  const [warningsByProperty, setWarningsByProperty] = useState<
+    Map<string, { severity: "error" | "warning"; messages: string[] }>
+  >(new Map());
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -128,6 +136,49 @@ export default function PropertiesPage() {
     fetchProperties();
   }, [fetchProperties]);
 
+  // 警告サマリは初回 / 一覧再取得時に best-effort で更新する。
+  // 失敗してもバッジが出ないだけで一覧本体は表示できる設計。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const json = await fetchQualityCheck();
+        if (cancelled) return;
+        const data = (json as {
+          data?: Array<{
+            propertyId: string;
+            severity: "error" | "warning" | "info";
+            message: string;
+          }>;
+        }).data ?? [];
+        const next = new Map<
+          string,
+          { severity: "error" | "warning"; messages: string[] }
+        >();
+        for (const issue of data) {
+          if (issue.severity === "info") continue;
+          const cur = next.get(issue.propertyId);
+          if (cur) {
+            cur.messages.push(issue.message);
+            // error が混ざれば error に昇格
+            if (issue.severity === "error") cur.severity = "error";
+          } else {
+            next.set(issue.propertyId, {
+              severity: issue.severity,
+              messages: [issue.message],
+            });
+          }
+        }
+        setWarningsByProperty(next);
+      } catch {
+        // best-effort: 失敗しても無視
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Debounce search: reset page on filter change
   const handleFilterChange = (setter: (v: string) => void) => (
     e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>,
@@ -145,11 +196,17 @@ export default function PropertiesPage() {
     });
   };
 
+  // 警告フィルタは現在ページ内で client-side 適用 (最小差分)。
+  // 全件 (現在 50/page) を跨ぐ警告フィルタは将来 API 拡張で対応。
+  const visibleProperties = warningOnly
+    ? properties.filter((p) => warningsByProperty.has(p.id))
+    : properties;
+
   const toggleSelectAll = () => {
-    if (selectedIds.size === properties.length) {
+    if (selectedIds.size === visibleProperties.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(properties.map((p) => p.id)));
+      setSelectedIds(new Set(visibleProperties.map((p) => p.id)));
     }
   };
 
@@ -309,12 +366,28 @@ export default function PropertiesPage() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="住所・地番・不動産番号で検索"
+            placeholder="物件住所・地番・不動産番号で検索"
             value={searchText}
             onChange={handleFilterChange(setSearchText)}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
           />
         </div>
+
+        <label className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <input
+            type="checkbox"
+            checked={warningOnly}
+            onChange={(e) => setWarningOnly(e.target.checked)}
+            className="rounded border-amber-300"
+          />
+          <AlertTriangle className="h-3.5 w-3.5" />
+          警告ありのみ
+          {warningsByProperty.size > 0 && (
+            <span className="rounded-full bg-amber-200 px-1.5 text-xs font-semibold">
+              {warningsByProperty.size}
+            </span>
+          )}
+        </label>
       </div>
 
       {/* Error */}
@@ -482,7 +555,9 @@ export default function PropertiesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {properties.map((property) => (
+              {visibleProperties.map((property) => {
+                const warning = warningsByProperty.get(property.id);
+                return (
                 <tr
                   key={property.id}
                   className="transition-colors hover:bg-gray-50"
@@ -505,6 +580,22 @@ export default function PropertiesPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3">
+                    {warning && (
+                      <span
+                        title={warning.messages.join("\n")}
+                        className={`mr-2 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold align-middle ${
+                          warning.severity === "error"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        <AlertTriangle className="h-3 w-3" />
+                        {warning.severity === "error" ? "要対応" : "警告"}
+                        {warning.messages.length > 1 && (
+                          <span>×{warning.messages.length}</span>
+                        )}
+                      </span>
+                    )}
                     <Link
                       href={`/properties/${property.id}`}
                       className="hover:text-blue-600"
@@ -566,14 +657,17 @@ export default function PropertiesPage() {
                     </button>
                   </td>
                 </tr>
-              ))}
-              {properties.length === 0 && !loading && (
+                );
+              })}
+              {visibleProperties.length === 0 && !loading && (
                 <tr>
                   <td
                     colSpan={11}
                     className="px-4 py-8 text-center text-gray-500"
                   >
-                    該当する物件が見つかりません
+                    {warningOnly && properties.length > 0
+                      ? "このページに警告ありの物件はありません"
+                      : "該当する物件が見つかりません"}
                   </td>
                 </tr>
               )}

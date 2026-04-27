@@ -59,6 +59,20 @@ const OWNER_TARGET_FIELDS = [
 
 type OwnerTargetField = (typeof OWNER_TARGET_FIELDS)[number];
 
+// 表示専用ラベル: サーバへ送る値 (OWNER_TARGET_FIELDS) は変えず、UI でだけ
+// 物件住所と区別しやすい言い回しにする。必須項目は「(必須)」を付与。
+// 値変更すると owner-csv ルートの JAPANESE_FIELD_TO_PROPERTY と整合しなくなるため、
+// 値そのものは絶対に変えない。
+const OWNER_FIELD_LABELS: Record<OwnerTargetField, string> = {
+  "氏名": "氏名 (必須)",
+  "氏名カナ": "氏名カナ",
+  "電話番号": "電話番号",
+  "郵便番号": "郵便番号",
+  "住所": "所有者住所",
+  "備考": "所有者メモ",
+  "リンクキー": "リンクキー (物件と紐付け)",
+};
+
 const OWNER_TEMPLATES: Record<string, { label: string; columns: string[] }> = {
   standard: {
     label: "標準所有者CSV",
@@ -639,7 +653,7 @@ export default function OwnerImportPage() {
                             <option value="">-- 未設定 --</option>
                             {OWNER_TARGET_FIELDS.map((f) => (
                               <option key={f} value={f} disabled={mappedFields.has(f) && mapped !== f}>
-                                {f}
+                                {OWNER_FIELD_LABELS[f]}
                                 {mappedFields.has(f) && mapped !== f ? " (使用済)" : ""}
                               </option>
                             ))}

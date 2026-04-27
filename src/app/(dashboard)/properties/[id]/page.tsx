@@ -407,7 +407,7 @@ function BasicTab({ property }: { property: ApiProperty }) {
         </div>
       )}
 
-      <Field label="住所" value={property.address} />
+      <Field label="物件住所" value={property.address} />
       <Field label="地番" value={property.lotNumber} />
       <Field label="家屋番号" value={property.buildingNumber} />
       <Field label="不動産番号" value={property.realEstateNumber} mono />
