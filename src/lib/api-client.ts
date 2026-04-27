@@ -920,6 +920,25 @@ export async function deletePhoto(propertyId: string, photoId: string) {
   });
 }
 
+export async function updatePhoto(
+  propertyId: string,
+  photoId: string,
+  data: { caption?: string | null; isPrimary?: boolean; sortOrder?: number },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data };
+  }
+  return apiFetch(
+    `/api/properties/${propertyId}/photos/${photoId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    },
+  );
+}
+
 // ---------- Building Photos ----------
 
 export async function fetchBuildingPhotos(buildingId: string) {

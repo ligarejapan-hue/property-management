@@ -405,11 +405,13 @@ model PropertyPhoto {
   fileName     String    @map("file_name")
   fileSize     Int       @map("file_size")
   mimeType     String    @map("mime_type")
+  caption      String?
   gpsLat       Decimal?  @map("gps_lat") @db.Decimal(10, 7)
   gpsLng       Decimal?  @map("gps_lng") @db.Decimal(10, 7)
   takenAt      DateTime? @map("taken_at")
   takenBy      String    @map("taken_by") @db.Uuid
   sortOrder    Int       @default(0) @map("sort_order")
+  isPrimary    Boolean   @default(false) @map("is_primary")
   createdAt    DateTime  @default(now()) @map("created_at")
 
   property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)

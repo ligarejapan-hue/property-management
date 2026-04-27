@@ -9,14 +9,24 @@ import {
   GripVertical,
   Image,
   Loader2,
+  Star,
+  Pencil,
+  Check,
 } from "lucide-react";
-import { fetchPhotos, uploadPhoto, deletePhoto } from "@/lib/api-client";
+import {
+  fetchPhotos,
+  uploadPhoto,
+  deletePhoto,
+  updatePhoto,
+} from "@/lib/api-client";
 
 interface Photo {
   id: string;
-  url: string;
+  url?: string;
+  fileUrl?: string;
   caption: string | null;
   sortOrder: number;
+  isPrimary?: boolean;
   createdAt: string;
 }
 
@@ -44,6 +54,10 @@ function formatDate(dateStr: string): string {
   });
 }
 
+function getPhotoUrl(photo: Photo): string | null {
+  return photo.fileUrl ?? photo.url ?? null;
+}
+
 export default function PhotoTab({ propertyId }: { propertyId: string }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +66,8 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
   const [reorderMode, setReorderMode] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
+  const [editingCaptionId, setEditingCaptionId] = useState<string | null>(null);
+  const [captionDraft, setCaptionDraft] = useState("");
 
   const fetchPhotosData = useCallback(async () => {
     setLoading(true);
@@ -76,7 +92,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
   const handleUpload = async () => {
     setUploading(true);
     try {
-      const mockPhoto: Omit<Photo, "id"> = {
+      const mockPhoto = {
         url: `/mock/photo-${Date.now()}.jpg`,
         caption: `写真 ${photos.length + 1}`,
         sortOrder: photos.length,
@@ -103,22 +119,63 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
     }
   };
 
-  const handleMoveUp = (index: number) => {
-    if (index === 0) return;
-    setPhotos((prev) => {
-      const next = [...prev];
-      [next[index - 1], next[index]] = [next[index], next[index - 1]];
-      return next.map((p, i) => ({ ...p, sortOrder: i }));
-    });
+  const handleMove = async (index: number, direction: "up" | "down") => {
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= photos.length) return;
+    const next = [...photos];
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+    const reordered = next.map((p, i) => ({ ...p, sortOrder: i }));
+    setPhotos(reordered);
+    try {
+      await Promise.all([
+        updatePhoto(propertyId, reordered[index].id, {
+          sortOrder: reordered[index].sortOrder,
+        }),
+        updatePhoto(propertyId, reordered[swapIndex].id, {
+          sortOrder: reordered[swapIndex].sortOrder,
+        }),
+      ]);
+    } catch {
+      fetchPhotosData();
+    }
   };
 
-  const handleMoveDown = (index: number) => {
-    if (index === photos.length - 1) return;
-    setPhotos((prev) => {
-      const next = [...prev];
-      [next[index], next[index + 1]] = [next[index + 1], next[index]];
-      return next.map((p, i) => ({ ...p, sortOrder: i }));
-    });
+  const startCaptionEdit = (photo: Photo) => {
+    setEditingCaptionId(photo.id);
+    setCaptionDraft(photo.caption ?? "");
+  };
+
+  const saveCaptionEdit = async (photoId: string) => {
+    const trimmed = captionDraft.trim();
+    try {
+      await updatePhoto(propertyId, photoId, {
+        caption: trimmed || null,
+      });
+      setPhotos((prev) =>
+        prev.map((p) =>
+          p.id === photoId ? { ...p, caption: trimmed || null } : p,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存に失敗しました");
+    } finally {
+      setEditingCaptionId(null);
+    }
+  };
+
+  const handleTogglePrimary = async (photo: Photo) => {
+    const newVal = !photo.isPrimary;
+    try {
+      await updatePhoto(propertyId, photo.id, { isPrimary: newVal });
+      setPhotos((prev) =>
+        prev.map((p) => ({
+          ...p,
+          isPrimary: p.id === photo.id ? newVal : newVal ? false : p.isPrimary,
+        })),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新に失敗しました");
+    }
   };
 
   // --- Loading state ---
@@ -150,15 +207,20 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
-          <Image className="h-5 w-5" />
-          写真
-          {photos.length > 0 && (
-            <span className="text-sm font-normal text-gray-500">
-              ({photos.length})
-            </span>
-          )}
-        </h3>
+        <div>
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+            <Image className="h-5 w-5" />
+            物件写真
+            {photos.length > 0 && (
+              <span className="text-sm font-normal text-gray-500">
+                ({photos.length})
+              </span>
+            )}
+          </h3>
+          <p className="mt-0.5 text-xs text-gray-500">
+            この物件単体の写真です。共用部・外観などの棟全体写真は棟詳細「棟写真」をご利用ください。
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           {photos.length > 1 && (
             <button
@@ -170,7 +232,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
               }`}
             >
               <GripVertical className="h-4 w-4" />
-              並び替えモード
+              並び替え
             </button>
           )}
           <button
@@ -192,73 +254,146 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
       {photos.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 py-16 text-gray-400">
           <Camera className="mb-3 h-12 w-12" />
-          <p className="text-sm">写真はありません</p>
+          <p className="text-sm">物件写真はありません</p>
         </div>
       )}
 
       {/* Photo grid */}
       {photos.length > 0 && (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-          {photos.map((photo, index) => (
-            <div
-              key={photo.id}
-              className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md"
-            >
-              {/* Thumbnail placeholder */}
-              <button
-                type="button"
-                onClick={() => {
-                  if (!reorderMode) setLightboxPhoto(photo);
-                }}
-                className={`flex aspect-square w-full items-center justify-center ${getPlaceholderColor(index)} cursor-pointer`}
+          {photos.map((photo, index) => {
+            const url = getPhotoUrl(photo);
+            return (
+              <div
+                key={photo.id}
+                className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md"
               >
-                <Camera className="h-10 w-10 text-gray-500/40" />
-              </button>
-
-              {/* Caption & date */}
-              <div className="p-2">
-                <p className="truncate text-sm font-medium text-gray-800">
-                  {photo.caption ?? "無題"}
-                </p>
-                <p className="mt-0.5 text-xs text-gray-400">
-                  {formatDate(photo.createdAt)}
-                </p>
-              </div>
-
-              {/* Reorder controls */}
-              {reorderMode && (
-                <div className="absolute left-1 top-1 flex flex-col gap-1">
-                  <button
-                    onClick={() => handleMoveUp(index)}
-                    disabled={index === 0}
-                    className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30"
-                    title="上へ"
-                  >
-                    ▲
-                  </button>
-                  <button
-                    onClick={() => handleMoveDown(index)}
-                    disabled={index === photos.length - 1}
-                    className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30"
-                    title="下へ"
-                  >
-                    ▼
-                  </button>
-                </div>
-              )}
-
-              {/* Delete button */}
-              {!reorderMode && (
+                {/* Thumbnail */}
                 <button
-                  onClick={() => setDeleteTargetId(photo.id)}
-                  className="absolute right-1 top-1 rounded-full bg-white/80 p-1 text-gray-500 opacity-0 shadow backdrop-blur transition-opacity hover:bg-white hover:text-red-600 group-hover:opacity-100"
-                  title="削除"
+                  type="button"
+                  onClick={() => {
+                    if (!reorderMode) setLightboxPhoto(photo);
+                  }}
+                  className={`flex aspect-square w-full items-center justify-center overflow-hidden ${url ? "bg-gray-100" : getPlaceholderColor(index)} cursor-pointer`}
                 >
-                  <Trash2 className="h-4 w-4" />
+                  {url && url.startsWith("/mock/") === false ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={url}
+                      alt={photo.caption ?? "写真"}
+                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <Camera className="h-10 w-10 text-gray-500/40" />
+                  )}
                 </button>
-              )}
-            </div>
-          ))}
+
+                {/* Primary badge */}
+                {photo.isPrimary && (
+                  <span className="absolute left-1.5 top-1.5 flex items-center gap-0.5 rounded-full bg-yellow-400 px-1.5 py-0.5 text-xs font-bold text-yellow-900">
+                    <Star className="h-3 w-3 fill-current" />
+                    代表
+                  </span>
+                )}
+
+                {/* Caption & date */}
+                <div className="p-2">
+                  {editingCaptionId === photo.id ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        autoFocus
+                        value={captionDraft}
+                        onChange={(e) => setCaptionDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveCaptionEdit(photo.id);
+                          if (e.key === "Escape") setEditingCaptionId(null);
+                        }}
+                        className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-xs focus:outline-none"
+                        placeholder="キャプション"
+                      />
+                      <button
+                        onClick={() => saveCaptionEdit(photo.id)}
+                        className="rounded bg-blue-600 p-0.5 text-white"
+                        title="保存"
+                      >
+                        <Check className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-1">
+                      <p
+                        className="truncate text-sm font-medium text-gray-800"
+                        title={photo.caption ?? "無題"}
+                      >
+                        {photo.caption ?? (
+                          <span className="text-gray-400">無題</span>
+                        )}
+                      </p>
+                      {!reorderMode && (
+                        <button
+                          onClick={() => startCaptionEdit(photo)}
+                          className="shrink-0 text-gray-300 hover:text-gray-600"
+                          title="キャプション編集"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <p className="mt-0.5 text-xs text-gray-400">
+                    {formatDate(photo.createdAt)}
+                  </p>
+                </div>
+
+                {/* Reorder controls */}
+                {reorderMode && (
+                  <div className="absolute left-1 top-1 flex flex-col gap-1">
+                    <button
+                      onClick={() => handleMove(index, "up")}
+                      disabled={index === 0}
+                      className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30"
+                      title="上へ"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      onClick={() => handleMove(index, "down")}
+                      disabled={index === photos.length - 1}
+                      className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30"
+                      title="下へ"
+                    >
+                      ▼
+                    </button>
+                  </div>
+                )}
+
+                {/* Action buttons (not in reorder mode) */}
+                {!reorderMode && (
+                  <div className="absolute right-1 top-1 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button
+                      onClick={() => handleTogglePrimary(photo)}
+                      className={`rounded-full p-1 shadow backdrop-blur transition-colors ${
+                        photo.isPrimary
+                          ? "bg-yellow-400 text-yellow-900"
+                          : "bg-white/80 text-gray-400 hover:bg-white hover:text-yellow-500"
+                      }`}
+                      title={photo.isPrimary ? "代表解除" : "代表に設定"}
+                    >
+                      <Star className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteTargetId(photo.id)}
+                      className="rounded-full bg-white/80 p-1 text-gray-400 shadow backdrop-blur hover:bg-white hover:text-red-600"
+                      title="削除"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -307,14 +442,26 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
               <X className="h-5 w-5" />
             </button>
             <div className="overflow-hidden rounded-lg bg-white shadow-2xl">
-              {/* Large placeholder */}
-              <div
-                className={`flex aspect-video w-full items-center justify-center ${getPlaceholderColor(
-                  photos.findIndex((p) => p.id === lightboxPhoto.id),
-                )}`}
-              >
-                <Camera className="h-20 w-20 text-gray-500/30" />
-              </div>
+              {(() => {
+                const url = getPhotoUrl(lightboxPhoto);
+                const isReal = url && !url.startsWith("/mock/");
+                return isReal ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={url}
+                    alt={lightboxPhoto.caption ?? "写真"}
+                    className="max-h-[80vh] w-full object-contain"
+                  />
+                ) : (
+                  <div
+                    className={`flex aspect-video w-full items-center justify-center ${getPlaceholderColor(
+                      photos.findIndex((p) => p.id === lightboxPhoto.id),
+                    )}`}
+                  >
+                    <Camera className="h-20 w-20 text-gray-500/30" />
+                  </div>
+                );
+              })()}
               <div className="p-4">
                 <p className="text-base font-medium text-gray-900">
                   {lightboxPhoto.caption ?? "無題"}
