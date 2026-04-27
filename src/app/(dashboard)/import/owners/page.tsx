@@ -21,7 +21,7 @@ import {
   DownloadCloud,
   Link2,
 } from "lucide-react";
-import { importOwnerCsv, relinkOwners } from "@/lib/api-client";
+import { importOwnerCsv, relinkOwners, fetchImportJobDetail } from "@/lib/api-client";
 import type { RelinkOwnersResponse } from "@/lib/api-client";
 import { readCsvFileAsText } from "@/lib/csv-decode";
 
@@ -185,6 +185,26 @@ function validateOwnerRow(
 }
 
 // ---------------------------------------------------------------------------
+// Reason aggregation (取込結果に出す代表的な失敗・要確認理由)
+// ---------------------------------------------------------------------------
+
+function aggregateReasons(
+  rows: { errorMessage: string | null }[],
+): { reason: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    let key = (r.errorMessage ?? "(理由なし)").trim();
+    // 重複検出メッセージは ID 部分が毎行違うので集計しやすいよう正規化する
+    key = key.replace(/既存所有者ID=[^\s]+/, "既存所有者ID=…");
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([reason, count]) => ({ reason, count }));
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -224,6 +244,14 @@ export default function OwnerImportPage() {
       setRelinking(false);
     }
   };
+
+  // 取込結果の代表的な失敗・要確認理由 (best-effort で job detail から集計)
+  const [topErrorReasons, setTopErrorReasons] = useState<
+    { reason: string; count: number }[]
+  >([]);
+  const [topReviewReasons, setTopReviewReasons] = useState<
+    { reason: string; count: number }[]
+  >([]);
 
   // ------ File handling ------
   const processFile = useCallback(async (file: File) => {
@@ -344,8 +372,23 @@ export default function OwnerImportPage() {
 
     try {
       const json = await importOwnerCsv(fileName || "owner-import.csv", csvText, columnMapping);
-      setResult(json as ImportResult);
+      const importResult = json as ImportResult;
+      setResult(importResult);
       setStep(4);
+
+      // 代表的な失敗・要確認理由を集計 (best-effort: 失敗しても結果表示は続行)
+      setTopErrorReasons([]);
+      setTopReviewReasons([]);
+      try {
+        const detail = (await fetchImportJobDetail(importResult.jobId)) as {
+          rows?: Array<{ status: string; errorMessage: string | null }>;
+        };
+        const rows = Array.isArray(detail.rows) ? detail.rows : [];
+        setTopErrorReasons(aggregateReasons(rows.filter((r) => r.status === "error")));
+        setTopReviewReasons(aggregateReasons(rows.filter((r) => r.status === "needs_review")));
+      } catch {
+        // ignore
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "取込に失敗しました");
     } finally {
@@ -363,6 +406,8 @@ export default function OwnerImportPage() {
     setColumnMapping({});
     setResult(null);
     setError(null);
+    setTopErrorReasons([]);
+    setTopReviewReasons([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -779,26 +824,38 @@ export default function OwnerImportPage() {
               <CheckCircle2 className="h-5 w-5" />
               <span className="font-semibold">取込が完了しました</span>
             </div>
-            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
               <div>
-                <span className="text-gray-600">総行数:</span>{" "}
+                <span className="text-gray-600">取込件数:</span>{" "}
                 <strong>{result.totalRows}</strong>
               </div>
               <div>
-                <span className="text-green-600">成功:</span>{" "}
+                <span className="text-green-700">新規作成:</span>{" "}
                 <strong className="text-green-700">{result.successCount}</strong>
               </div>
               <div>
-                <span className="text-red-600">エラー:</span>{" "}
-                <strong className="text-red-700">{result.errorCount}</strong>
-              </div>
-              <div>
-                <span className="text-amber-600">要レビュー:</span>{" "}
+                <span className="text-amber-700">既存重複(要確認):</span>{" "}
                 <strong className="text-amber-700">{result.needsReviewCount}</strong>
               </div>
               <div>
-                <span className="text-blue-600">物件紐付:</span>{" "}
+                <span className="text-red-700">エラー:</span>{" "}
+                <strong className="text-red-700">{result.errorCount}</strong>
+              </div>
+              <div>
+                <span className="text-blue-700">自動リンク成功:</span>{" "}
                 <strong className="text-blue-700">{result.linkedCount}</strong>
+              </div>
+              <div>
+                <span className="text-blue-600">└ リンクキー一致:</span>{" "}
+                <strong className="text-blue-700">{result.linkedByLinkKeyCount ?? 0}</strong>
+              </div>
+              <div>
+                <span className="text-blue-600">└ 住所一致:</span>{" "}
+                <strong className="text-blue-700">{result.linkedByAddressCount ?? 0}</strong>
+              </div>
+              <div>
+                <span className="text-amber-700">曖昧で保留:</span>{" "}
+                <strong className="text-amber-700">{result.addressLinkAmbiguousCount ?? 0}</strong>
               </div>
             </div>
           </div>
@@ -821,11 +878,52 @@ export default function OwnerImportPage() {
               </div>
             </div>
           )}
+
           {(result.addressLinkAmbiguousCount ?? 0) > 0 && (
-            <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700 flex items-start gap-2">
+            <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
-                {result.addressLinkAmbiguousCount} 件の所有者は同じ住所に複数物件があり自動紐付けを保留しました。物件詳細から手動で紐付けてください。
+                <div className="font-medium">
+                  {result.addressLinkAmbiguousCount} 件は同じ住所に複数物件がヒットしたため自動リンクを保留しました。
+                </div>
+                <div className="mt-1 text-xs text-amber-700">
+                  次にやること: 該当物件の詳細画面 →「所有者」タブ →「所有者を追加」から手動で紐付けてください。
+                </div>
+              </div>
+            </div>
+          )}
+
+          {topErrorReasons.length > 0 && (
+            <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <div className="mb-1 flex items-center gap-2 font-medium">
+                <XCircle className="h-4 w-4" />
+                エラー理由 (上位 {topErrorReasons.length} 件)
+              </div>
+              <ul className="ml-6 list-disc space-y-0.5 text-xs">
+                {topErrorReasons.map((r) => (
+                  <li key={r.reason}>
+                    <span className="font-semibold">{r.count}件</span>: {r.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {topReviewReasons.length > 0 && (
+            <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <div className="mb-1 flex items-center gap-2 font-medium">
+                <AlertTriangle className="h-4 w-4" />
+                既存重複(要確認) の代表例
+              </div>
+              <ul className="ml-6 list-disc space-y-0.5 text-xs">
+                {topReviewReasons.map((r) => (
+                  <li key={r.reason}>
+                    <span className="font-semibold">{r.count}件</span>: {r.reason}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 text-xs text-amber-700">
+                重複は新規作成されません。既存所有者を物件に紐付けたい場合は、上部の「未リンク所有者を再リンク」ボタンを実行してください。
               </div>
             </div>
           )}
