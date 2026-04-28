@@ -34,6 +34,7 @@ import {
 } from "@/lib/api-client";
 import { detectImportFileType } from "@/lib/import-file-type";
 import { readCsvFileAsText } from "@/lib/csv-decode";
+import ImportSwitcher from "@/components/import/import-switcher";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -754,7 +755,8 @@ export default function ImportPage() {
 
   return (
     <div>
-      <h2 className="mb-6 text-2xl font-bold text-gray-800">CSV / Excel(.xlsx) 取込</h2>
+      <ImportSwitcher />
+      <h2 className="mb-6 text-2xl font-bold text-gray-800">物件CSV / Excel(.xlsx) 取込</h2>
 
       {/* ============ Step Indicator ============ */}
       <div className="mb-8 flex items-center justify-center gap-0">

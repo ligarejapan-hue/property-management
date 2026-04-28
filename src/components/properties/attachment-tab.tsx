@@ -10,6 +10,8 @@ import {
   Download,
   Upload,
   AlertTriangle,
+  Eye,
+  X,
 } from "lucide-react";
 import {
   fetchAttachments as apiFetchAttachments,
@@ -50,6 +52,16 @@ function isPdfFile(file: File): boolean {
   );
 }
 
+/** ブラウザ内プレビュー可能なものだけ true。Excel/Word/CSV はダウンロード扱い。 */
+function getPreviewKind(att: { mimeType: string; fileName: string }): "image" | "pdf" | null {
+  const name = att.fileName.toLowerCase();
+  if (att.mimeType.startsWith("image/")) return "image";
+  if (att.mimeType === "application/pdf" || name.endsWith(".pdf")) return "pdf";
+  // 一部ブラウザで MIME が image/* でなくても拡張子で判定可能なケース
+  if (/\.(jpe?g|png|gif|webp|bmp|svg)$/.test(name)) return "image";
+  return null;
+}
+
 export default function AttachmentTab({
   propertyId,
 }: {
@@ -66,6 +78,7 @@ export default function AttachmentTab({
   const [dragOverGeneral, setDragOverGeneral] = useState(false);
   const [dragOverRegistry, setDragOverRegistry] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<AttachmentData | null>(null);
   const fileInputRefGeneral = useRef<HTMLInputElement>(null);
   const fileInputRefRegistry = useRef<HTMLInputElement>(null);
 
@@ -223,6 +236,7 @@ export default function AttachmentTab({
               <AttachmentRow
                 key={att.id}
                 att={att}
+                onPreviewClick={() => setPreviewTarget(att)}
                 onDeleteClick={() => setDeleteTargetId(att.id)}
               />
             ))}
@@ -289,6 +303,7 @@ export default function AttachmentTab({
               <AttachmentRow
                 key={att.id}
                 att={att}
+                onPreviewClick={() => setPreviewTarget(att)}
                 onDeleteClick={() => setDeleteTargetId(att.id)}
               />
             ))}
@@ -300,6 +315,11 @@ export default function AttachmentTab({
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
         </div>
+      )}
+
+      {/* Preview modal */}
+      {previewTarget && (
+        <PreviewModal att={previewTarget} onClose={() => setPreviewTarget(null)} />
       )}
 
       {/* Delete confirmation dialog */}
@@ -336,25 +356,48 @@ export default function AttachmentTab({
 // 一覧行（通常添付・謄本PDF で共有）
 function AttachmentRow({
   att,
+  onPreviewClick,
   onDeleteClick,
 }: {
   att: AttachmentData;
+  onPreviewClick: () => void;
   onDeleteClick: () => void;
 }) {
   const Icon = getFileIcon(att.mimeType);
+  const previewable = getPreviewKind(att) !== null;
   return (
     <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-white p-3">
       <Icon className="h-5 w-5 shrink-0 text-gray-500" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-gray-800">
-          {att.fileName}
-        </p>
+        {previewable ? (
+          <button
+            type="button"
+            onClick={onPreviewClick}
+            className="block w-full truncate text-left text-sm font-medium text-blue-600 hover:underline"
+            title="プレビュー"
+          >
+            {att.fileName}
+          </button>
+        ) : (
+          <p className="truncate text-sm font-medium text-gray-800">
+            {att.fileName}
+          </p>
+        )}
         <p className="text-xs text-gray-500">
           {formatFileSize(att.fileSize)} ·{" "}
           {att.uploader.name} ·{" "}
           {new Date(att.createdAt).toLocaleDateString("ja-JP")}
         </p>
       </div>
+      {previewable && (
+        <button
+          onClick={onPreviewClick}
+          className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
+          title="プレビュー"
+        >
+          <Eye className="h-4 w-4" />
+        </button>
+      )}
       <a
         href={att.fileUrl}
         target="_blank"
@@ -372,6 +415,90 @@ function AttachmentRow({
       >
         <Trash2 className="h-4 w-4" />
       </button>
+    </div>
+  );
+}
+
+// プレビュー用モーダル。画像 / PDF のみ画面内表示、それ以外はダウンロード誘導。
+function PreviewModal({
+  att,
+  onClose,
+}: {
+  att: AttachmentData;
+  onClose: () => void;
+}) {
+  const kind = getPreviewKind(att);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2">
+          <p className="truncate text-sm font-medium text-gray-800" title={att.fileName}>
+            {att.fileName}
+          </p>
+          <div className="flex shrink-0 items-center gap-1">
+            <a
+              href={att.fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              download={att.fileName}
+              className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
+              title="ダウンロード"
+            >
+              <Download className="h-4 w-4" />
+            </a>
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-gray-500 hover:bg-gray-200"
+              title="閉じる"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+        {/* Body */}
+        <div className="min-h-0 flex-1 overflow-auto bg-gray-100">
+          {kind === "image" && (
+            <div className="flex h-full w-full items-center justify-center p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={att.fileUrl}
+                alt={att.fileName}
+                className="max-h-full max-w-full object-contain"
+              />
+            </div>
+          )}
+          {kind === "pdf" && (
+            <iframe
+              src={att.fileUrl}
+              title={att.fileName}
+              className="h-full w-full"
+            />
+          )}
+          {kind === null && (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-gray-600">
+              <FileText className="h-12 w-12 text-gray-400" />
+              <p>このファイル形式はブラウザ内プレビュー非対応です。</p>
+              <a
+                href={att.fileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={att.fileName}
+                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                <Download className="h-4 w-4" />
+                ダウンロード
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

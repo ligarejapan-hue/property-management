@@ -25,6 +25,7 @@ import {
   parseRegistryPdfText,
   searchProperties,
 } from "@/lib/api-client";
+import ImportSwitcher from "@/components/import/import-switcher";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -480,6 +481,7 @@ export default function RegistryPdfPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
+      <ImportSwitcher />
       <h2 className="mb-2 text-2xl font-bold text-gray-800">謄本PDF取込</h2>
       <p className="mb-6 text-sm text-gray-500">
         登記簿謄本のPDFまたはテキストから物件情報を抽出・登録します

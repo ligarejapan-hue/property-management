@@ -24,6 +24,7 @@ import {
 import { importOwnerCsv, relinkOwners, fetchImportJobDetail } from "@/lib/api-client";
 import type { RelinkOwnersResponse } from "@/lib/api-client";
 import { readCsvFileAsText } from "@/lib/csv-decode";
+import ImportSwitcher from "@/components/import/import-switcher";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -436,6 +437,7 @@ export default function OwnerImportPage() {
 
   return (
     <div>
+      <ImportSwitcher />
       <h2 className="mb-6 text-2xl font-bold text-gray-800">所有者CSV取込</h2>
 
       {/* ============ 既存未リンク所有者の救済 ============ */}
