@@ -16,12 +16,23 @@ import {
   ALLOWED_ATTACHMENT_MIMES,
 } from "@/lib/storage";
 
+const ATTACHMENT_TYPES = ["general", "registry"] as const;
+type AttachmentType = (typeof ATTACHMENT_TYPES)[number];
+
 const registerAttachmentSchema = z.object({
   fileName: z.string().min(1, "ファイル名は必須です"),
   fileUrl: z.string().min(1, "ファイルURLは必須です"),
   fileSize: z.number().int().min(0, "ファイルサイズは0以上です"),
   mimeType: z.string().min(1, "MIMEタイプは必須です"),
+  type: z.enum(ATTACHMENT_TYPES).optional(),
 });
+
+function normalizeAttachmentType(raw: unknown): AttachmentType {
+  if (typeof raw === "string" && (ATTACHMENT_TYPES as readonly string[]).includes(raw)) {
+    return raw as AttachmentType;
+  }
+  return "general";
+}
 
 // ---------- GET /api/properties/:id/attachments ----------
 
@@ -109,6 +120,7 @@ export async function POST(
     let fileUrl: string;
     let fileSize: number;
     let mimeType: string;
+    let attachmentType: AttachmentType = "general";
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
@@ -116,6 +128,8 @@ export async function POST(
       if (!file || !(file instanceof Blob)) {
         throw new ApiError(422, "ファイルが必要です", "VALIDATION_ERROR");
       }
+
+      attachmentType = normalizeAttachmentType(formData.get("type"));
 
       fileName = (file as File).name ?? "file";
       fileSize = file.size;
@@ -126,6 +140,23 @@ export async function POST(
         throw new ApiError(422, "空ファイルはアップロードできません", "VALIDATION_ERROR");
       }
 
+      // 謄本PDFは PDF のみ許可（MIME or 拡張子フォールバック）
+      if (attachmentType === "registry") {
+        const isPdfMime = mimeType === "application/pdf";
+        const isPdfExt = fileName.toLowerCase().endsWith(".pdf");
+        if (!isPdfMime && !isPdfExt) {
+          throw new ApiError(
+            422,
+            "謄本PDFは PDF ファイルのみアップロードできます",
+            "VALIDATION_ERROR",
+          );
+        }
+        // MIME が空/octet-stream で来ても拡張子で PDF と判定された場合は補正
+        if (!isPdfMime && isPdfExt) {
+          mimeType = "application/pdf";
+        }
+      }
+
       const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
       if (validationError) {
         throw new ApiError(422, validationError, "VALIDATION_ERROR");
@@ -133,7 +164,8 @@ export async function POST(
 
       const buffer = Buffer.from(await file.arrayBuffer());
       const ext = fileName.split(".").pop() ?? "bin";
-      const key = `properties/${propertyId}/attachments/${Date.now()}.${ext}`;
+      const subdir = attachmentType === "registry" ? "registry" : "attachments";
+      const key = `properties/${propertyId}/${subdir}/${Date.now()}.${ext}`;
 
       const storage = getStorage();
       const result = await storage.upload(buffer, { key, mimeType, fileName });
@@ -145,6 +177,15 @@ export async function POST(
       fileUrl = data.fileUrl;
       fileSize = data.fileSize;
       mimeType = data.mimeType;
+      attachmentType = normalizeAttachmentType(data.type);
+
+      if (attachmentType === "registry" && mimeType !== "application/pdf") {
+        throw new ApiError(
+          422,
+          "謄本PDFは PDF ファイルのみアップロードできます",
+          "VALIDATION_ERROR",
+        );
+      }
 
       const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
       if (validationError) {
@@ -157,6 +198,7 @@ export async function POST(
         targetType: "property",
         targetId: propertyId,
         propertyId,
+        type: attachmentType,
         fileName,
         fileUrl,
         fileSize,

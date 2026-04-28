@@ -17,8 +17,11 @@ import {
   uploadFile,
 } from "@/lib/api-client";
 
+type AttachmentType = "general" | "registry";
+
 interface AttachmentData {
   id: string;
+  type?: AttachmentType;
   fileName: string;
   fileUrl: string;
   fileSize: number;
@@ -40,6 +43,13 @@ function getFileIcon(mimeType: string) {
   return FileText;
 }
 
+function isPdfFile(file: File): boolean {
+  return (
+    file.type === "application/pdf" ||
+    file.name.toLowerCase().endsWith(".pdf")
+  );
+}
+
 export default function AttachmentTab({
   propertyId,
 }: {
@@ -48,11 +58,16 @@ export default function AttachmentTab({
   const [attachments, setAttachments] = useState<AttachmentData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
+  // 通常添付 と 謄本PDF で個別の uploading / error 状態を持つ
+  const [uploadingGeneral, setUploadingGeneral] = useState(false);
+  const [uploadingRegistry, setUploadingRegistry] = useState(false);
+  const [uploadErrorGeneral, setUploadErrorGeneral] = useState<string | null>(null);
+  const [uploadErrorRegistry, setUploadErrorRegistry] = useState<string | null>(null);
+  const [dragOverGeneral, setDragOverGeneral] = useState(false);
+  const [dragOverRegistry, setDragOverRegistry] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRefGeneral = useRef<HTMLInputElement>(null);
+  const fileInputRefRegistry = useRef<HTMLInputElement>(null);
 
   const fetchAttachmentsData = useCallback(async () => {
     setLoading(true);
@@ -73,7 +88,11 @@ export default function AttachmentTab({
     fetchAttachmentsData();
   }, [fetchAttachmentsData]);
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = async (file: File, type: AttachmentType) => {
+    const setUploading = type === "registry" ? setUploadingRegistry : setUploadingGeneral;
+    const setUploadError =
+      type === "registry" ? setUploadErrorRegistry : setUploadErrorGeneral;
+
     setUploadError(null);
     if (file.size <= 0) {
       setUploadError("空ファイルはアップロードできません");
@@ -83,9 +102,14 @@ export default function AttachmentTab({
       setUploadError(`ファイルサイズが上限 (${MAX_SIZE_MB}MB) を超えています`);
       return;
     }
+    // 謄本PDF はクライアント側でも PDF のみ受け付け（サーバ側でも 422 で再チェック）
+    if (type === "registry" && !isPdfFile(file)) {
+      setUploadError("謄本PDFは PDF ファイルのみアップロードできます");
+      return;
+    }
     setUploading(true);
     try {
-      await uploadFile(propertyId, file, "attachment");
+      await uploadFile(propertyId, file, "attachment", { attachmentType: type });
       await fetchAttachmentsData();
     } catch (err) {
       setUploadError(
@@ -96,16 +120,20 @@ export default function AttachmentTab({
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent, type: AttachmentType) => {
     e.preventDefault();
-    setDragOver(false);
+    if (type === "registry") setDragOverRegistry(false);
+    else setDragOverGeneral(false);
     const file = e.dataTransfer.files[0];
-    if (file) handleUpload(file);
+    if (file) handleUpload(file, type);
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    type: AttachmentType,
+  ) => {
     const file = e.target.files?.[0];
-    if (file) handleUpload(file);
+    if (file) handleUpload(file, type);
     e.target.value = "";
   };
 
@@ -131,103 +159,146 @@ export default function AttachmentTab({
     );
   }
 
+  const registryAttachments = attachments.filter((a) => a.type === "registry");
+  const generalAttachments = attachments.filter((a) => a.type !== "registry");
+
   return (
-    <div>
-      {/* Upload area */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={`mb-4 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
-          dragOver
-            ? "border-blue-400 bg-blue-50"
-            : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
-        }`}
-      >
-        {uploading ? (
-          <div className="flex items-center justify-center gap-2">
-            <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-            <span className="text-sm text-gray-600">アップロード中...</span>
+    <div className="space-y-8">
+      {/* ============================== 通常添付 ============================== */}
+      <section>
+        <h3 className="mb-2 text-sm font-semibold text-gray-700">添付ファイル</h3>
+
+        {/* Upload area: general */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOverGeneral(true); }}
+          onDragLeave={() => setDragOverGeneral(false)}
+          onDrop={(e) => handleDrop(e, "general")}
+          onClick={() => fileInputRefGeneral.current?.click()}
+          className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
+            dragOverGeneral
+              ? "border-blue-400 bg-blue-50"
+              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+          }`}
+        >
+          {uploadingGeneral ? (
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+              <span className="text-sm text-gray-600">アップロード中...</span>
+            </div>
+          ) : (
+            <>
+              <Upload className="mx-auto mb-2 h-8 w-8 text-gray-400" />
+              <p className="text-sm text-gray-600">
+                ファイルをドラッグ＆ドロップ、またはクリックして選択
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                上限 {MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像
+              </p>
+            </>
+          )}
+          <input
+            ref={fileInputRefGeneral}
+            type="file"
+            className="hidden"
+            onChange={(e) => handleFileSelect(e, "general")}
+            accept=".pdf,.xlsx,.xls,.csv,.docx,.jpg,.jpeg,.png,.webp,.heic"
+          />
+        </div>
+
+        {uploadErrorGeneral && (
+          <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {uploadErrorGeneral}
+          </div>
+        )}
+
+        {generalAttachments.length === 0 ? (
+          <div className="flex flex-col items-center py-6 text-gray-400">
+            <Paperclip className="mb-2 h-8 w-8" />
+            <p className="text-sm">添付ファイルはまだありません</p>
           </div>
         ) : (
-          <>
-            <Upload className="mx-auto mb-2 h-8 w-8 text-gray-400" />
-            <p className="text-sm text-gray-600">
-              ファイルをドラッグ＆ドロップ、またはクリックして選択
-            </p>
-            <p className="mt-1 text-xs text-gray-400">
-              上限 {MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像
-            </p>
-          </>
+          <div className="space-y-2">
+            {generalAttachments.map((att) => (
+              <AttachmentRow
+                key={att.id}
+                att={att}
+                onDeleteClick={() => setDeleteTargetId(att.id)}
+              />
+            ))}
+          </div>
         )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          onChange={handleFileSelect}
-          accept=".pdf,.xlsx,.xls,.csv,.docx,.jpg,.jpeg,.png,.webp,.heic"
-        />
-      </div>
+      </section>
 
-      {uploadError && (
-        <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          {uploadError}
+      {/* ============================== 謄本PDF ============================== */}
+      <section>
+        <h3 className="mb-2 text-sm font-semibold text-gray-700">謄本PDF</h3>
+
+        {/* Upload area: registry */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOverRegistry(true); }}
+          onDragLeave={() => setDragOverRegistry(false)}
+          onDrop={(e) => handleDrop(e, "registry")}
+          onClick={() => fileInputRefRegistry.current?.click()}
+          className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
+            dragOverRegistry
+              ? "border-amber-400 bg-amber-50"
+              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+          }`}
+        >
+          {uploadingRegistry ? (
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
+              <span className="text-sm text-gray-600">アップロード中...</span>
+            </div>
+          ) : (
+            <>
+              <FileText className="mx-auto mb-2 h-8 w-8 text-amber-500" />
+              <p className="text-sm text-gray-600">
+                謄本PDFをドラッグ＆ドロップ、またはクリックして選択
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                PDF のみ / 上限 {MAX_SIZE_MB}MB
+              </p>
+            </>
+          )}
+          <input
+            ref={fileInputRefRegistry}
+            type="file"
+            className="hidden"
+            onChange={(e) => handleFileSelect(e, "registry")}
+            accept="application/pdf,.pdf"
+          />
         </div>
-      )}
+
+        {uploadErrorRegistry && (
+          <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {uploadErrorRegistry}
+          </div>
+        )}
+
+        {registryAttachments.length === 0 ? (
+          <div className="flex flex-col items-center py-6 text-gray-400">
+            <FileText className="mb-2 h-8 w-8" />
+            <p className="text-sm">謄本PDFはまだありません</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {registryAttachments.map((att) => (
+              <AttachmentRow
+                key={att.id}
+                att={att}
+                onDeleteClick={() => setDeleteTargetId(att.id)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
-        </div>
-      )}
-
-      {attachments.length === 0 ? (
-        <div className="flex flex-col items-center py-8 text-gray-400">
-          <Paperclip className="mb-2 h-8 w-8" />
-          <p className="text-sm">添付ファイルはまだありません</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {attachments.map((att) => {
-            const Icon = getFileIcon(att.mimeType);
-            return (
-              <div
-                key={att.id}
-                className="flex items-center gap-3 rounded-md border border-gray-200 bg-white p-3"
-              >
-                <Icon className="h-5 w-5 shrink-0 text-gray-500" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-gray-800">
-                    {att.fileName}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {formatFileSize(att.fileSize)} ·{" "}
-                    {att.uploader.name} ·{" "}
-                    {new Date(att.createdAt).toLocaleDateString("ja-JP")}
-                  </p>
-                </div>
-                <a
-                  href={att.fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download={att.fileName}
-                  className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
-                  title="ダウンロード"
-                >
-                  <Download className="h-4 w-4" />
-                </a>
-                <button
-                  onClick={() => setDeleteTargetId(att.id)}
-                  className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                  title="削除"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            );
-          })}
         </div>
       )}
 
@@ -236,7 +307,7 @@ export default function AttachmentTab({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="mx-4 w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
             <h4 className="text-base font-semibold text-gray-900">
-              添付ファイルを削除しますか？
+              ファイルを削除しますか？
             </h4>
             <p className="mt-2 text-sm text-gray-500">
               この操作は取り消せません。
@@ -258,6 +329,49 @@ export default function AttachmentTab({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// 一覧行（通常添付・謄本PDF で共有）
+function AttachmentRow({
+  att,
+  onDeleteClick,
+}: {
+  att: AttachmentData;
+  onDeleteClick: () => void;
+}) {
+  const Icon = getFileIcon(att.mimeType);
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-white p-3">
+      <Icon className="h-5 w-5 shrink-0 text-gray-500" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-gray-800">
+          {att.fileName}
+        </p>
+        <p className="text-xs text-gray-500">
+          {formatFileSize(att.fileSize)} ·{" "}
+          {att.uploader.name} ·{" "}
+          {new Date(att.createdAt).toLocaleDateString("ja-JP")}
+        </p>
+      </div>
+      <a
+        href={att.fileUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        download={att.fileName}
+        className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
+        title="ダウンロード"
+      >
+        <Download className="h-4 w-4" />
+      </a>
+      <button
+        onClick={onDeleteClick}
+        className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+        title="削除"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
     </div>
   );
 }

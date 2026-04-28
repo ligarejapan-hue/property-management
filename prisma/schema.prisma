@@ -575,6 +575,7 @@ model Attachment {
   id         String   @id @default(uuid()) @db.Uuid
   targetType String   @map("target_type") // "property" | "owner" | "comment"
   targetId   String   @map("target_id") @db.Uuid
+  type       String   @default("general") // "general" | "registry"
   fileName   String   @map("file_name")
   fileUrl    String   @map("file_url")
   fileSize   Int      @map("file_size") // bytes

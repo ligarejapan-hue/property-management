@@ -1426,6 +1426,7 @@ export async function uploadFile(
   propertyId: string,
   file: File,
   type: "photo" | "attachment",
+  options?: { attachmentType?: "general" | "registry" },
 ) {
   if (USE_MOCK) {
     await mockDelay();
@@ -1436,11 +1437,15 @@ export async function uploadFile(
         fileUrl: URL.createObjectURL(file),
         fileSize: file.size,
         mimeType: file.type,
+        type: options?.attachmentType ?? "general",
       },
     };
   }
   const formData = new FormData();
   formData.append("file", file);
+  if (type === "attachment" && options?.attachmentType) {
+    formData.append("type", options.attachmentType);
+  }
   const endpoint =
     type === "photo"
       ? `/api/properties/${propertyId}/photos`
