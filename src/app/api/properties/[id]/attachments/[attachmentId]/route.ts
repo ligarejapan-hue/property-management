@@ -30,6 +30,9 @@ export async function DELETE(
 
     const attachment = await prisma.attachment.findUnique({
       where: { id: attachmentId },
+      include: {
+        property: { select: { createdBy: true, assignedTo: true } },
+      },
     });
     if (
       !attachment ||
@@ -37,6 +40,16 @@ export async function DELETE(
       attachment.isDeleted
     ) {
       throw new ApiError(404, "添付ファイルが見つかりません", "NOT_FOUND");
+    }
+
+    // field_staff スコープ: 担当外の物件の添付ファイルは削除不可
+    if (
+      session.role === "field_staff" &&
+      attachment.property &&
+      attachment.property.createdBy !== session.id &&
+      attachment.property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この添付ファイルを削除する権限がありません", "FORBIDDEN");
     }
 
     await prisma.attachment.update({

@@ -38,6 +38,22 @@ export async function GET(
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
+    // field_staff スコープ: 担当外の物件は閲覧不可（photos と同じ振る舞い）
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { id: true, createdBy: true, assignedTo: true },
+    });
+    if (!property) {
+      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+    if (
+      session.role === "field_staff" &&
+      property.createdBy !== session.id &&
+      property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この物件を閲覧する権限がありません", "FORBIDDEN");
+    }
+
     const attachments = await prisma.attachment.findMany({
       where: {
         targetType: "property",
@@ -74,10 +90,17 @@ export async function POST(
 
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
-      select: { id: true },
+      select: { id: true, createdBy: true, assignedTo: true },
     });
     if (!property) {
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+    if (
+      session.role === "field_staff" &&
+      property.createdBy !== session.id &&
+      property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この物件を編集する権限がありません", "FORBIDDEN");
     }
 
     const contentType = request.headers.get("content-type") ?? "";
@@ -97,6 +120,11 @@ export async function POST(
       fileName = (file as File).name ?? "file";
       fileSize = file.size;
       mimeType = file.type || "application/octet-stream";
+
+      // 空ファイル拒否（拡張子だけのプレースホルダ等を防ぐ）
+      if (fileSize <= 0) {
+        throw new ApiError(422, "空ファイルはアップロードできません", "VALIDATION_ERROR");
+      }
 
       const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
       if (validationError) {

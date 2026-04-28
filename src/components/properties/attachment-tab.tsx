@@ -51,6 +51,7 @@ export default function AttachmentTab({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchAttachmentsData = useCallback(async () => {
@@ -74,6 +75,10 @@ export default function AttachmentTab({
 
   const handleUpload = async (file: File) => {
     setUploadError(null);
+    if (file.size <= 0) {
+      setUploadError("空ファイルはアップロードできません");
+      return;
+    }
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
       setUploadError(`ファイルサイズが上限 (${MAX_SIZE_MB}MB) を超えています`);
       return;
@@ -107,11 +112,13 @@ export default function AttachmentTab({
   const handleDelete = async (id: string) => {
     try {
       await deleteAttachment(propertyId, id);
-      fetchAttachmentsData();
+      await fetchAttachmentsData();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "削除に失敗しました",
       );
+    } finally {
+      setDeleteTargetId(null);
     }
   };
 
@@ -205,13 +212,14 @@ export default function AttachmentTab({
                   href={att.fileUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  download={att.fileName}
                   className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
                   title="ダウンロード"
                 >
                   <Download className="h-4 w-4" />
                 </a>
                 <button
-                  onClick={() => handleDelete(att.id)}
+                  onClick={() => setDeleteTargetId(att.id)}
                   className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
                   title="削除"
                 >
@@ -220,6 +228,34 @@ export default function AttachmentTab({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Delete confirmation dialog */}
+      {deleteTargetId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="mx-4 w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
+            <h4 className="text-base font-semibold text-gray-900">
+              添付ファイルを削除しますか？
+            </h4>
+            <p className="mt-2 text-sm text-gray-500">
+              この操作は取り消せません。
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteTargetId(null)}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => handleDelete(deleteTargetId)}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                削除
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
