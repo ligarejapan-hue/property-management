@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
       updatedFrom,
       updatedTo,
       includeArchived,
+      hasWarning,
       sortBy,
       sortOrder,
     } = query;
@@ -86,6 +87,27 @@ export async function GET(request: NextRequest) {
         { createdBy: session.id },
         { assignedTo: session.id },
         ...(where.OR || []),
+      ];
+    }
+
+    // hasWarning: quality-check の "error" / "warning" 条件を OR で表現し、
+    // 既存 where と AND する。"info" (NO_LOT_NUMBER 等) は粒度が細かいため除外。
+    if (hasWarning === true) {
+      where.AND = [
+        ...(where.AND ?? []),
+        {
+          OR: [
+            { propertyOwners: { none: {} } }, // NO_OWNER
+            {
+              AND: [
+                { registryStatus: "unconfirmed" },
+                { dmStatus: "send" },
+              ],
+            }, // REGISTRY_DM_MISMATCH
+            { investigationConfirmedAt: null }, // INVESTIGATION_NOT_CONFIRMED
+            { assignedTo: null }, // NO_ASSIGNEE
+          ],
+        },
       ];
     }
 

@@ -87,7 +87,10 @@ export default function PropertiesPage() {
   const [typeFilter, setTypeFilter] = useState("");
   const [registryFilter, setRegistryFilter] = useState("");
   const [dmFilter, setDmFilter] = useState("");
+  const [caseFilter, setCaseFilter] = useState("");
   const [warningOnly, setWarningOnly] = useState(false);
+  // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
+  const [sort, setSort] = useState<string>("updatedAt:desc");
   const [page, setPage] = useState(1);
 
   // 警告 (quality-check) を propertyId 単位で集計。
@@ -119,6 +122,11 @@ export default function PropertiesPage() {
     if (typeFilter) params.propertyType = typeFilter;
     if (registryFilter) params.registryStatus = registryFilter;
     if (dmFilter) params.dmStatus = dmFilter;
+    if (caseFilter) params.caseStatus = caseFilter;
+    if (warningOnly) params.hasWarning = "true";
+    const [sortBy, sortOrder] = sort.split(":");
+    if (sortBy) params.sortBy = sortBy;
+    if (sortOrder) params.sortOrder = sortOrder;
 
     try {
       const json = await apiFetchProperties(params);
@@ -130,7 +138,7 @@ export default function PropertiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchText, typeFilter, registryFilter, dmFilter]);
+  }, [page, searchText, typeFilter, registryFilter, dmFilter, caseFilter, warningOnly, sort]);
 
   useEffect(() => {
     fetchProperties();
@@ -196,11 +204,9 @@ export default function PropertiesPage() {
     });
   };
 
-  // 警告フィルタは現在ページ内で client-side 適用 (最小差分)。
-  // 全件 (現在 50/page) を跨ぐ警告フィルタは将来 API 拡張で対応。
-  const visibleProperties = warningOnly
-    ? properties.filter((p) => warningsByProperty.has(p.id))
-    : properties;
+  // 警告フィルタはサーバ側 (hasWarning=true) で適用する。
+  // ここではバッジ表示用に warningsByProperty を併用するだけで、行は filter しない。
+  const visibleProperties = properties;
 
   const toggleSelectAll = () => {
     if (selectedIds.size === visibleProperties.length) {
@@ -377,7 +383,10 @@ export default function PropertiesPage() {
           <input
             type="checkbox"
             checked={warningOnly}
-            onChange={(e) => setWarningOnly(e.target.checked)}
+            onChange={(e) => {
+              setWarningOnly(e.target.checked);
+              setPage(1);
+            }}
             className="rounded border-amber-300"
           />
           <AlertTriangle className="h-3.5 w-3.5" />
@@ -388,6 +397,34 @@ export default function PropertiesPage() {
             </span>
           )}
         </label>
+
+        <select
+          value={caseFilter}
+          onChange={handleFilterChange(setCaseFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+        >
+          <option value="">案件ステータス: すべて</option>
+          {Object.entries(CASE_STATUS_LABELS).map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value);
+            setPage(1);
+          }}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          title="並び替え"
+        >
+          <option value="updatedAt:desc">更新日 新しい順</option>
+          <option value="updatedAt:asc">更新日 古い順</option>
+          <option value="caseStatus:asc">案件ステータス順</option>
+          <option value="address:asc">住所昇順</option>
+        </select>
       </div>
 
       {/* Error */}
@@ -665,8 +702,8 @@ export default function PropertiesPage() {
                     colSpan={11}
                     className="px-4 py-8 text-center text-gray-500"
                   >
-                    {warningOnly && properties.length > 0
-                      ? "このページに警告ありの物件はありません"
+                    {warningOnly
+                      ? "警告ありの物件はありません"
                       : "該当する物件が見つかりません"}
                   </td>
                 </tr>

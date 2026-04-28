@@ -28,6 +28,12 @@ export const propertyListQuerySchema = z.object({
     .string()
     .default("false")
     .transform((v) => v === "true"),
+  // 警告 (quality-check の error / warning) があるものだけに絞り込む。
+  // 互換: 未指定時は従来通り全件。"true" 文字列のときのみ true 扱い。
+  hasWarning: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true")),
   sortBy: z.enum(["updatedAt", "createdAt", "address", "caseStatus"]).default("updatedAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
 });
