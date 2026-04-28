@@ -149,6 +149,27 @@ describe("parseOwnerRows", () => {
     expect(o.zip).toBe("100-0001");
   });
 
+  it("実データ準拠ヘッダ（所有者名/〒/所有者住所/建物名）も拾う", () => {
+    // tmp/reception-owner-samples の所有者ファイルで実際に出現するヘッダ並び：
+    // ['No','DM','物件住所','〒','都道府県','所有者市区郡','所有者住所','建物名','所有者名',...]
+    const headers = [
+      "No", "DM", "物件住所", "〒", "都道府県",
+      "所有者市区郡", "所有者住所", "建物名", "所有者名",
+    ];
+    const rows = [[
+      "1", "DM", "東京都世田谷区1-2-3 100",
+      "154-0001", "東京都",
+      "世田谷区", "東京都世田谷区1-2-3", "サンプル荘", "山田 花子",
+    ]];
+    const [o] = parseOwnerRows(headers, rows);
+    expect(o.name).toBe("山田 花子");
+    expect(o.address).toBe("東京都世田谷区1-2-3");
+    expect(o.buildingName).toBe("サンプル荘");
+    expect(o.zip).toBe("154-0001");
+    // C列(=index 2)が固定キー
+    expect(o.cColumn).toBe("東京都世田谷区1-2-3 100");
+  });
+
   it("空白の値は null", () => {
     const headers = ["", "", "", "氏名", "住所", "建物名", "部屋番号", "郵便番号"];
     const rows = [["", "", "東京都港区1-2-3", "  ", "", "", "", ""]];

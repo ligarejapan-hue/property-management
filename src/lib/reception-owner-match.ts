@@ -151,6 +151,7 @@ type OwnerField = "name" | "address" | "buildingName" | "roomNo" | "zip";
 const OWNER_HEADER_TO_FIELD: Record<string, OwnerField> = {
   "氏名": "name",
   "所有者氏名": "name",
+  "所有者名": "name",
   "住所": "address",
   "所有者住所": "address",
   "建物名": "buildingName",
