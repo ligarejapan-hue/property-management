@@ -9,6 +9,7 @@ import {
   XCircle,
   AlertTriangle,
   RefreshCw,
+  ChevronLeft,
   ChevronRight,
   GripVertical,
   Eye,
@@ -499,6 +500,15 @@ export default function ImportPage() {
     from: "",
     to: "",
   });
+  // ページネーション state（page=1始まり）
+  const [jobPage, setJobPage] = useState(1);
+  const [jobLimit, setJobLimit] = useState<20 | 50 | 100>(50);
+  const [jobPagination, setJobPagination] = useState<{
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  } | null>(null);
 
   // Reception × Owner (2-file) state
   // csvText または xlsxBase64 のどちらかが入る
@@ -520,8 +530,8 @@ export default function ImportPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ------ Jobs ------
-  // jobFilters はクライアント State なので最新値をクロージャに焼き込むため
-  // useCallback の deps に含める。
+  // jobFilters / jobPage / jobLimit はクライアント State なので
+  // 最新値をクロージャに焼き込むため useCallback の deps に含める。
   const fetchJobs = useCallback(async () => {
     setJobsLoading(true);
     try {
@@ -540,21 +550,39 @@ export default function ImportPage() {
         executedBy: jobFilters.executedBy || undefined,
         from: fromIso,
         to: toIso,
-        // 段階AではページングUIは入れない（先頭50件まで）。
-        page: 1,
-        limit: 50,
+        page: jobPage,
+        limit: jobLimit,
       });
       setJobs((json.data ?? []) as ImportJob[]);
+      setJobPagination(json.pagination ?? null);
     } catch {
       // ignore
     } finally {
       setJobsLoading(false);
     }
-  }, [jobFilters]);
+  }, [jobFilters, jobPage, jobLimit]);
 
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
+
+  /**
+   * フィルタ変更時のヘルパ。値の更新と同時に「常に 1 ページ目に戻す」。
+   * ページ送り中にフィルタを変えると意味のないオフセットになるため、
+   * 必ずページを 1 に戻してから refetch する。
+   */
+  const updateJobFilter = <K extends keyof ImportJobFilters>(
+    key: K,
+    value: ImportJobFilters[K],
+  ) => {
+    setJobFilters((prev) => ({ ...prev, [key]: value }));
+    setJobPage(1);
+  };
+
+  const updateJobLimit = (next: 20 | 50 | 100) => {
+    setJobLimit(next);
+    setJobPage(1);
+  };
 
   // 実行者ドロップダウンの選択肢は「現在ロード済の jobs に出てくる実行者」
   // から動的に組み立てる。ユーザマスタを別途取得しないため、フィルタ前の
@@ -569,8 +597,10 @@ export default function ImportPage() {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [jobs]);
 
-  const handleResetJobFilters = () =>
+  const handleResetJobFilters = () => {
     setJobFilters({ jobType: "", executedBy: "", from: "", to: "" });
+    setJobPage(1);
+  };
 
   // ------ File handling ------
   const processFile = useCallback(async (file: File) => {
@@ -1684,9 +1714,7 @@ export default function ImportPage() {
             </label>
             <select
               value={jobFilters.jobType}
-              onChange={(e) =>
-                setJobFilters((prev) => ({ ...prev, jobType: e.target.value }))
-              }
+              onChange={(e) => updateJobFilter("jobType", e.target.value)}
               className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               {JOB_TYPE_OPTIONS.map((opt) => (
@@ -1702,12 +1730,7 @@ export default function ImportPage() {
             </label>
             <select
               value={jobFilters.executedBy}
-              onChange={(e) =>
-                setJobFilters((prev) => ({
-                  ...prev,
-                  executedBy: e.target.value,
-                }))
-              }
+              onChange={(e) => updateJobFilter("executedBy", e.target.value)}
               className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="">すべての実行者</option>
@@ -1725,9 +1748,7 @@ export default function ImportPage() {
             <input
               type="date"
               value={jobFilters.from}
-              onChange={(e) =>
-                setJobFilters((prev) => ({ ...prev, from: e.target.value }))
-              }
+              onChange={(e) => updateJobFilter("from", e.target.value)}
               className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -1738,9 +1759,7 @@ export default function ImportPage() {
             <input
               type="date"
               value={jobFilters.to}
-              onChange={(e) =>
-                setJobFilters((prev) => ({ ...prev, to: e.target.value }))
-              }
+              onChange={(e) => updateJobFilter("to", e.target.value)}
               className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -1753,6 +1772,78 @@ export default function ImportPage() {
             </button>
           </div>
         </div>
+
+        {/* ---- ページネーション バー（テーブル上部）----
+            APIから返る pagination をそのまま信頼し、件数表示・limit 切替・
+            前後ページ操作を提供する。pagination が未取得 (= 初回ロード中)
+            または total=0 でもレイアウトが崩れないようガードする。 */}
+        {(() => {
+          const total = jobPagination?.total ?? 0;
+          const totalPages = jobPagination?.totalPages ?? 1;
+          const currentPage = jobPagination?.page ?? jobPage;
+          const currentLimit = jobPagination?.limit ?? jobLimit;
+          // 「全N件中 X〜Y件を表示」の数値計算
+          // 0 件時は X / Y を出さず「全 0 件」のみ表示する
+          const rangeStart = total === 0 ? 0 : (currentPage - 1) * currentLimit + 1;
+          const rangeEnd = total === 0 ? 0 : Math.min(currentPage * currentLimit, total);
+          const canPrev = currentPage > 1 && !jobsLoading;
+          const canNext = currentPage < totalPages && !jobsLoading;
+          return (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+              <div>
+                {total === 0 ? (
+                  <span>全 0 件</span>
+                ) : (
+                  <span>
+                    全 <strong>{total}</strong> 件中{" "}
+                    <strong>{rangeStart}</strong>〜<strong>{rangeEnd}</strong> 件を表示
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1">
+                  <span className="text-gray-500">1ページあたり</span>
+                  <select
+                    value={jobLimit}
+                    onChange={(e) =>
+                      updateJobLimit(Number(e.target.value) as 20 | 50 | 100)
+                    }
+                    className="rounded border border-gray-300 bg-white py-0.5 px-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value={20}>20件</option>
+                    <option value={50}>50件</option>
+                    <option value={100}>100件</option>
+                  </select>
+                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setJobPage((p) => Math.max(1, p - 1))}
+                    disabled={!canPrev}
+                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    前へ
+                  </button>
+                  <span className="px-2 tabular-nums">
+                    <strong>{currentPage}</strong> / {totalPages}
+                  </span>
+                  <button
+                    onClick={() =>
+                      setJobPage((p) =>
+                        jobPagination ? Math.min(jobPagination.totalPages, p + 1) : p + 1,
+                      )
+                    }
+                    disabled={!canNext}
+                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    次へ
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {jobsLoading ? (
           <div className="flex items-center justify-center py-8">
