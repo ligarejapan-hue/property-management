@@ -32,6 +32,7 @@ import {
   extractUpdateReason,
   extractUpdatedFields,
 } from "@/lib/import-row-display";
+import { calcImportSummary } from "@/lib/import-summary";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -199,24 +200,28 @@ export default function ImportJobDetailPage() {
   const filteredRows =
     job?.rows.filter((r) => filter === "all" || r.status === filter) ?? [];
 
-  // Count by status
+  // 段階A: 5区分の集計を共有ヘルパで算出。
+  // duplicate / updated は表示上の補助情報なので別途数えるが、
+  // メイン指標 (新規 / 更新 / スキップ / 要レビュー / エラー) は calcImportSummary
+  // を一意の真実とする。
+  const summary = calcImportSummary(job?.rows ?? []);
   const counts = {
     all: job?.rows.length ?? 0,
-    needs_review:
-      job?.rows.filter((r) => r.status === "needs_review").length ?? 0,
-    error: job?.rows.filter((r) => r.status === "error").length ?? 0,
-    success: job?.rows.filter((r) => r.status === "success").length ?? 0,
-    skipped: job?.rows.filter((r) => r.status === "skipped").length ?? 0,
+    needs_review: summary.needsReviewCount,
+    error: summary.errorCount,
+    success: summary.createdCount + summary.updatedCount,
+    skipped: summary.skippedCount,
+    // 重複候補（表示上のヒント。要レビュー or スキップに含まれる「重複」由来の行）
     duplicate:
       job?.rows.filter(
         (r) =>
           (r.status === "needs_review" || r.status === "skipped") &&
           isDuplicateMessage(r.errorMessage),
       ).length ?? 0,
-    updated:
-      job?.rows.filter(
-        (r) => r.status === "success" && isUpdateMessage(r.errorMessage),
-      ).length ?? 0,
+    // 更新件数 (= summary.updatedCount のエイリアス。既存表示との互換のため残す)
+    updated: summary.updatedCount,
+    // 新規件数 (派生表示用)
+    created: summary.createdCount,
   };
 
   // Handle row actions
@@ -343,9 +348,12 @@ export default function ImportJobDetailPage() {
         </div>
       </div>
 
-      {/* Job summary */}
+      {/* Job summary
+          段階A: 既存の job.successCount / job.errorCount は使用せず、
+          ImportJobRow から動的に再計算した 5 区分 (新規/更新/スキップ/要レビュー/エラー)
+          を表示する。これは行単位 resolve 後の最新状態と整合させるため。 */}
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
-        <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4 lg:grid-cols-8">
+        <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4 lg:grid-cols-9">
           <div>
             <span className="text-gray-500">ステータス</span>
             <div className="mt-0.5 font-medium text-gray-800">
@@ -366,31 +374,53 @@ export default function ImportJobDetailPage() {
           <div>
             <span className="text-gray-500">総行数</span>
             <div className="mt-0.5 font-medium text-gray-800">
-              {job.totalRows ?? "-"}
+              {job.totalRows ?? job.rows.length ?? "-"}
             </div>
           </div>
           <div>
-            <span className="text-gray-500">成功</span>
+            <span className="text-gray-500" title="success かつ「更新」プレフィックス無し">
+              新規
+            </span>
             <div className="mt-0.5 font-medium text-green-600">
-              {job.successCount ?? 0}
+              {summary.createdCount}
             </div>
           </div>
           <div>
-            <span className="text-gray-500">うち更新</span>
+            <span
+              className="text-gray-500"
+              title="success かつ errorMessage が「更新...」"
+            >
+              更新
+            </span>
             <div className="mt-0.5 font-medium text-blue-600">
-              {counts.updated}
+              {summary.updatedCount}
             </div>
           </div>
           <div>
-            <span className="text-gray-500">重複スキップ候補</span>
+            <span className="text-gray-500" title="status === skipped">
+              スキップ
+            </span>
+            <div className="mt-0.5 font-medium text-gray-700">
+              {summary.skippedCount}
+            </div>
+          </div>
+          <div>
+            <span className="text-gray-500" title="status === needs_review">
+              要レビュー
+            </span>
             <div className="mt-0.5 font-medium text-amber-600">
-              {counts.duplicate}
+              {summary.needsReviewCount}
             </div>
           </div>
           <div>
-            <span className="text-gray-500">エラー/要レビュー</span>
+            <span
+              className="text-gray-500"
+              title="status === error（要レビューを含まない純エラー）"
+            >
+              エラー
+            </span>
             <div className="mt-0.5 font-medium text-red-600">
-              {job.errorCount ?? 0}
+              {summary.errorCount}
             </div>
           </div>
           <div>
@@ -408,6 +438,14 @@ export default function ImportJobDetailPage() {
             </div>
           </div>
         </div>
+        {/* 補助情報: 重複候補（表示ヒント。要レビュー/スキップ件数の内数） */}
+        {counts.duplicate > 0 && (
+          <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-amber-700">
+            <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
+            上記のうち <strong>{counts.duplicate} 件</strong>{" "}
+            は重複検知（要レビュー / スキップ の内数）です
+          </div>
+        )}
       </div>
 
       {/* Completion guidance */}

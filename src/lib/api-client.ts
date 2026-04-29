@@ -302,12 +302,54 @@ export async function fetchUsers() {
 
 // ---------- Import Jobs ----------
 
-export async function fetchImportJobs() {
+export interface FetchImportJobsParams {
+  jobType?: string;
+  executedBy?: string;
+  from?: string; // ISO 8601 (createdAt 下限)
+  to?: string;   // ISO 8601 (createdAt 上限)
+  page?: number;
+  limit?: number;
+}
+
+export interface FetchImportJobsResponse {
+  data: Array<
+    (typeof MOCK_IMPORT_JOBS)[number] & {
+      summary?: {
+        createdCount: number;
+        updatedCount: number;
+        skippedCount: number;
+        needsReviewCount: number;
+        errorCount: number;
+        totalCount: number;
+      };
+    }
+  >;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export async function fetchImportJobs(
+  params: FetchImportJobsParams = {},
+): Promise<FetchImportJobsResponse> {
   if (USE_MOCK) {
     await mockDelay();
     return { data: MOCK_IMPORT_JOBS };
   }
-  return apiFetch<{ data: typeof MOCK_IMPORT_JOBS }>("/api/import/jobs");
+  const qs = new URLSearchParams();
+  if (params.jobType) qs.set("jobType", params.jobType);
+  if (params.executedBy) qs.set("executedBy", params.executedBy);
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.page != null) qs.set("page", String(params.page));
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  const query = qs.toString();
+  return apiFetch<FetchImportJobsResponse>(
+    query ? `/api/import/jobs?${query}` : "/api/import/jobs",
+  );
 }
 
 export async function fetchImportJobDetail(jobId: string) {

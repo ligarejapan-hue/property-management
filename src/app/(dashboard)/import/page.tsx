@@ -40,6 +40,15 @@ import ImportSwitcher from "@/components/import/import-switcher";
 // Types
 // ---------------------------------------------------------------------------
 
+interface ImportJobSummary {
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  needsReviewCount: number;
+  errorCount: number;
+  totalCount: number;
+}
+
 interface ImportJob {
   id: string;
   jobType: string;
@@ -50,7 +59,26 @@ interface ImportJob {
   errorCount: number | null;
   createdAt: string;
   executor: { id: string; name: string };
+  // 段階A: API 側で動的計算した 5 区分の集計を含む。旧データや
+  // フォールバック時は undefined になる可能性があるため optional。
+  summary?: ImportJobSummary;
 }
+
+interface ImportJobFilters {
+  jobType: string; // "" = すべて
+  executedBy: string; // "" = すべて
+  from: string; // YYYY-MM-DD
+  to: string; // YYYY-MM-DD
+}
+
+const JOB_TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "", label: "すべての種別" },
+  { value: "property_csv", label: "物件CSV" },
+  { value: "owner_csv", label: "所有者CSV" },
+  { value: "property_pdf", label: "謄本PDF" },
+  { value: "dm_history_csv", label: "DM履歴CSV" },
+  { value: "investigation_csv", label: "調査CSV" },
+];
 
 interface ImportResult {
   jobId: string;
@@ -465,6 +493,12 @@ export default function ImportPage() {
   // Job history
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobFilters, setJobFilters] = useState<ImportJobFilters>({
+    jobType: "",
+    executedBy: "",
+    from: "",
+    to: "",
+  });
 
   // Reception × Owner (2-file) state
   // csvText または xlsxBase64 のどちらかが入る
@@ -486,21 +520,57 @@ export default function ImportPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ------ Jobs ------
-  const fetchJobs = async () => {
+  // jobFilters はクライアント State なので最新値をクロージャに焼き込むため
+  // useCallback の deps に含める。
+  const fetchJobs = useCallback(async () => {
     setJobsLoading(true);
     try {
-      const json = await fetchImportJobs();
+      // 日付フィルタは「YYYY-MM-DD」を受け取り、ISO 文字列に変換して渡す。
+      // from は 00:00:00、to は 23:59:59 として丸める（同日入力で 0 件にならないように）。
+      const fromIso =
+        jobFilters.from !== ""
+          ? new Date(`${jobFilters.from}T00:00:00`).toISOString()
+          : undefined;
+      const toIso =
+        jobFilters.to !== ""
+          ? new Date(`${jobFilters.to}T23:59:59.999`).toISOString()
+          : undefined;
+      const json = await fetchImportJobs({
+        jobType: jobFilters.jobType || undefined,
+        executedBy: jobFilters.executedBy || undefined,
+        from: fromIso,
+        to: toIso,
+        // 段階AではページングUIは入れない（先頭50件まで）。
+        page: 1,
+        limit: 50,
+      });
       setJobs((json.data ?? []) as ImportJob[]);
     } catch {
       // ignore
     } finally {
       setJobsLoading(false);
     }
-  };
+  }, [jobFilters]);
 
   useEffect(() => {
     fetchJobs();
-  }, []);
+  }, [fetchJobs]);
+
+  // 実行者ドロップダウンの選択肢は「現在ロード済の jobs に出てくる実行者」
+  // から動的に組み立てる。ユーザマスタを別途取得しないため、フィルタ前の
+  // 一覧に含まれていない実行者は選べないが、段階A では妥協する。
+  const executorOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const job of jobs) {
+      if (job.executor && !map.has(job.executor.id)) {
+        map.set(job.executor.id, job.executor.name);
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [jobs]);
+
+  const handleResetJobFilters = () =>
+    setJobFilters({ jobType: "", executedBy: "", from: "", to: "" });
 
   // ------ File handling ------
   const processFile = useCallback(async (file: File) => {
@@ -1600,9 +1670,88 @@ export default function ImportPage() {
           <button
             onClick={fetchJobs}
             className="rounded p-1 text-gray-400 hover:text-gray-600"
+            title="再読み込み"
           >
             <RefreshCw className="h-4 w-4" />
           </button>
+        </div>
+
+        {/* ---- フィルタ UI（段階A: 取込種別 / 実行者 / 日付範囲） ---- */}
+        <div className="mb-4 grid grid-cols-1 gap-3 rounded-md border border-gray-200 bg-gray-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              種別
+            </label>
+            <select
+              value={jobFilters.jobType}
+              onChange={(e) =>
+                setJobFilters((prev) => ({ ...prev, jobType: e.target.value }))
+              }
+              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {JOB_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              実行者
+            </label>
+            <select
+              value={jobFilters.executedBy}
+              onChange={(e) =>
+                setJobFilters((prev) => ({
+                  ...prev,
+                  executedBy: e.target.value,
+                }))
+              }
+              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">すべての実行者</option>
+              {executorOptions.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              日付（開始）
+            </label>
+            <input
+              type="date"
+              value={jobFilters.from}
+              onChange={(e) =>
+                setJobFilters((prev) => ({ ...prev, from: e.target.value }))
+              }
+              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              日付（終了）
+            </label>
+            <input
+              type="date"
+              value={jobFilters.to}
+              onChange={(e) =>
+                setJobFilters((prev) => ({ ...prev, to: e.target.value }))
+              }
+              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={handleResetJobFilters}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-sm text-gray-600 hover:bg-gray-50"
+            >
+              フィルタをクリア
+            </button>
+          </div>
         </div>
 
         {jobsLoading ? (
@@ -1611,7 +1760,7 @@ export default function ImportPage() {
           </div>
         ) : jobs.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-400">
-            取込履歴はありません
+            条件に合う取込履歴はありません
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -1624,8 +1773,37 @@ export default function ImportPage() {
                   </th>
                   <th className="px-3 py-2 font-medium text-gray-600">種別</th>
                   <th className="px-3 py-2 font-medium text-gray-600">行数</th>
-                  <th className="px-3 py-2 font-medium text-gray-600">
-                    成功/エラー
+                  {/* 段階A: ImportJobRow から動的に算出した 5 区分。
+                      旧データや行が空のジョブでは summary が無いので "-" 表示。 */}
+                  <th
+                    className="px-3 py-2 font-medium text-green-700"
+                    title="新規作成（success かつ「更新」プレフィックス無し）"
+                  >
+                    新規
+                  </th>
+                  <th
+                    className="px-3 py-2 font-medium text-blue-700"
+                    title="既存レコード更新（success かつ errorMessage が「更新...」）"
+                  >
+                    更新
+                  </th>
+                  <th
+                    className="px-3 py-2 font-medium text-gray-600"
+                    title="スキップ（status === skipped）"
+                  >
+                    スキップ
+                  </th>
+                  <th
+                    className="px-3 py-2 font-medium text-amber-700"
+                    title="要レビュー（status === needs_review）"
+                  >
+                    要レビュー
+                  </th>
+                  <th
+                    className="px-3 py-2 font-medium text-red-700"
+                    title="純エラー（status === error。要レビューを含まない）"
+                  >
+                    エラー
                   </th>
                   <th className="px-3 py-2 font-medium text-gray-600">
                     実行者
@@ -1638,8 +1816,23 @@ export default function ImportPage() {
                   const config =
                     STATUS_CONFIG[job.status] ?? STATUS_CONFIG.pending;
                   const Icon = config.icon;
+                  const summary = job.summary;
+                  const cell = (n: number | undefined, color: string) =>
+                    summary ? (
+                      <span className={n && n > 0 ? color : "text-gray-300"}>
+                        {n ?? 0}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">-</span>
+                    );
                   return (
-                    <tr key={job.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => window.location.href = `/import/jobs/${job.id}`}>
+                    <tr
+                      key={job.id}
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() =>
+                        (window.location.href = `/import/jobs/${job.id}`)
+                      }
+                    >
                       <td className="px-3 py-2">
                         <span
                           className={`flex items-center gap-1 text-xs ${config.color}`}
@@ -1657,14 +1850,20 @@ export default function ImportPage() {
                       <td className="px-3 py-2 text-gray-600">
                         {job.totalRows ?? "-"}
                       </td>
-                      <td className="px-3 py-2">
-                        <span className="text-green-600">
-                          {job.successCount ?? 0}
-                        </span>
-                        {" / "}
-                        <span className="text-red-600">
-                          {job.errorCount ?? 0}
-                        </span>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {cell(summary?.createdCount, "text-green-700 font-medium")}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {cell(summary?.updatedCount, "text-blue-700 font-medium")}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {cell(summary?.skippedCount, "text-gray-700")}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {cell(summary?.needsReviewCount, "text-amber-700 font-medium")}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {cell(summary?.errorCount, "text-red-700 font-medium")}
                       </td>
                       <td className="px-3 py-2 text-gray-500">
                         {job.executor.name}
