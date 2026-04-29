@@ -396,6 +396,50 @@ export async function fetchImportJobDetail(jobId: string) {
   return apiFetch(`/api/import/jobs/${jobId}`);
 }
 
+// この取込で作成・更新された物件一覧（物件CSVジョブのみ）。
+// 物件CSV以外 (owner_csv 等) のジョブでは applicable=false で返ってくる。
+export interface AffectedProperty {
+  rowNumber: number;
+  propertyId: string;
+  isUpdate: boolean;
+  found: boolean;
+  address: string | null;
+  lotNumber: string | null;
+  buildingNumber: string | null;
+  roomNo: string | null;
+  propertyType: string | null;
+  buildingId: string | null;
+  buildingName: string | null;
+}
+
+export interface AffectedPropertiesResponse {
+  applicable: boolean;
+  jobType: string;
+  affected: AffectedProperty[];
+  createdCount: number;
+  updatedCount: number;
+  missingCount: number;
+}
+
+export async function fetchAffectedProperties(
+  jobId: string,
+): Promise<AffectedPropertiesResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      applicable: false,
+      jobType: "property_csv",
+      affected: [],
+      createdCount: 0,
+      updatedCount: 0,
+      missingCount: 0,
+    };
+  }
+  return apiFetch<AffectedPropertiesResponse>(
+    `/api/import/jobs/${jobId}/affected-properties`,
+  );
+}
+
 export async function resolveImportRow(
   jobId: string,
   rowId: string,

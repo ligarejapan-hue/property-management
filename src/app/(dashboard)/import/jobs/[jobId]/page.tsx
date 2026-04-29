@@ -20,10 +20,12 @@ import {
 } from "lucide-react";
 import {
   fetchImportJobDetail,
+  fetchAffectedProperties,
   resolveImportRow,
   retryImportRow,
   searchProperties,
   searchOwners,
+  type AffectedPropertiesResponse,
 } from "@/lib/api-client";
 import {
   isDuplicateMessage,
@@ -135,6 +137,12 @@ export default function ImportJobDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterStatus>("all");
 
+  // この取込で作成・更新された物件一覧（物件CSVジョブのみ）。
+  // 主の job fetch と並列に取得する。失敗時は null のまま縮退表示。
+  const [affected, setAffected] = useState<AffectedPropertiesResponse | null>(
+    null,
+  );
+
   // Row action state
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -162,9 +170,23 @@ export default function ImportJobDetailPage() {
     }
   }, [jobId]);
 
+  // この取込で作成・更新された物件一覧。job 本体とは別 API。
+  // 行解決で createdId が増えた後にも最新化したいので、resolve / retry の
+  // 完了直後にも呼べるよう関数化しておく。
+  const fetchAffected = useCallback(async () => {
+    try {
+      const res = await fetchAffectedProperties(jobId);
+      setAffected(res);
+    } catch {
+      // 取得失敗は致命ではない（メイン UI は動作継続）
+      setAffected(null);
+    }
+  }, [jobId]);
+
   useEffect(() => {
     fetchJob();
-  }, [fetchJob]);
+    fetchAffected();
+  }, [fetchJob, fetchAffected]);
 
   // Debounced search
   const doSearch = useCallback(
@@ -238,7 +260,7 @@ export default function ImportJobDetailPage() {
           ? editedData
           : undefined;
       await resolveImportRow(jobId, rowId, action, targetId, edited);
-      await fetchJob();
+      await Promise.all([fetchJob(), fetchAffected()]);
       setExpandedRow(null);
       setEditingRow(null);
       setEditedData({});
@@ -260,7 +282,7 @@ export default function ImportJobDetailPage() {
         rowId,
         editingRow === rowId ? editedData : undefined,
       );
-      await fetchJob();
+      await Promise.all([fetchJob(), fetchAffected()]);
       setExpandedRow(null);
       setEditingRow(null);
       setEditedData({});
@@ -298,7 +320,7 @@ export default function ImportJobDetailPage() {
       for (const row of targetRows) {
         await resolveImportRow(jobId, row.id, action);
       }
-      await fetchJob();
+      await Promise.all([fetchJob(), fetchAffected()]);
     } catch (err) {
       alert(err instanceof Error ? err.message : "操作に失敗しました");
     } finally {
@@ -447,6 +469,134 @@ export default function ImportJobDetailPage() {
           </div>
         )}
       </div>
+
+      {/* ============================================================
+          この取込で作成・更新された物件 (将来のロールバック準備のための表示)
+          ============================================================
+          - jobType !== "property_csv" は applicable=false で対象外表示
+          - applicable=true で件数 0 のときは「対象なし」
+          - 一覧表示では isUpdate でバッジを切替（新規/更新）
+          - 物件が削除済みの場合は found=false で「削除済み」バッジ */}
+      {affected && (
+        <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-base font-semibold text-gray-700">
+              この取込で作成・更新された物件
+            </h3>
+            {affected.applicable && affected.affected.length > 0 && (
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-gray-500">
+                  全 <strong>{affected.affected.length}</strong> 件
+                </span>
+                <span className="text-green-700">
+                  新規 <strong>{affected.createdCount}</strong>
+                </span>
+                <span className="text-blue-700">
+                  更新 <strong>{affected.updatedCount}</strong>
+                </span>
+                {affected.missingCount > 0 && (
+                  <span className="text-gray-400">
+                    削除済み <strong>{affected.missingCount}</strong>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {!affected.applicable ? (
+            <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              このジョブ種別 (<code className="font-mono">{affected.jobType}</code>) は物件の作成・更新一覧表示に対応していません。物件CSV取込ジョブで確認できます。
+            </p>
+          ) : affected.affected.length === 0 ? (
+            <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              この取込で作成・更新された物件はありません（成功行に createdId が無いか、対象が見つかりません）。
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded border border-gray-200">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-gray-200 bg-gray-50">
+                  <tr>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 w-12">行</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 w-16">区分</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600">住所</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600">識別</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600">棟</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 w-20">詳細</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {affected.affected.map((p) => (
+                    <tr
+                      key={`${p.rowNumber}-${p.propertyId}`}
+                      className="hover:bg-gray-50"
+                    >
+                      <td className="px-2 py-1.5 font-mono text-gray-500">
+                        #{p.rowNumber}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        {!p.found ? (
+                          <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                            削除済み
+                          </span>
+                        ) : p.isUpdate ? (
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-800">
+                            更新
+                          </span>
+                        ) : (
+                          <span className="rounded bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-800">
+                            新規
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-gray-700">
+                        {p.address ?? (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-gray-600">
+                        {[
+                          p.lotNumber && `地番 ${p.lotNumber}`,
+                          p.buildingNumber && `家屋 ${p.buildingNumber}`,
+                          p.roomNo && `${p.roomNo}号`,
+                        ]
+                          .filter(Boolean)
+                          .join(" / ") || (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-gray-600">
+                        {p.buildingName ? (
+                          <Link
+                            href={`/buildings/${p.buildingId}`}
+                            className="text-blue-600 hover:underline"
+                          >
+                            {p.buildingName}
+                          </Link>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        {p.found ? (
+                          <Link
+                            href={`/properties/${p.propertyId}`}
+                            className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"
+                          >
+                            開く
+                            <ChevronRight className="h-3 w-3" />
+                          </Link>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Completion guidance */}
       {job.status === "completed" && counts.needs_review === 0 && counts.error === 0 && (
