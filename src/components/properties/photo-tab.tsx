@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Camera,
   Upload,
@@ -15,10 +15,11 @@ import {
 } from "lucide-react";
 import {
   fetchPhotos,
-  uploadPhoto,
   deletePhoto,
   updatePhoto,
+  uploadFile,
 } from "@/lib/api-client";
+import { normalizeFileUrl } from "@/lib/url-normalize";
 
 interface Photo {
   id: string;
@@ -55,8 +56,12 @@ function formatDate(dateStr: string): string {
 }
 
 function getPhotoUrl(photo: Photo): string | null {
-  return photo.fileUrl ?? photo.url ?? null;
+  const raw = photo.fileUrl ?? photo.url ?? null;
+  return raw ? normalizeFileUrl(raw) : null;
 }
+
+const ACCEPTED_PHOTO_TYPES = ".jpg,.jpeg,.png,.webp,.heic,.heif";
+const MAX_PHOTO_SIZE_MB = 8;
 
 export default function PhotoTab({ propertyId }: { propertyId: string }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -68,6 +73,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
   const [editingCaptionId, setEditingCaptionId] = useState<string | null>(null);
   const [captionDraft, setCaptionDraft] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchPhotosData = useCallback(async () => {
     setLoading(true);
@@ -89,16 +95,32 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
     fetchPhotosData();
   }, [fetchPhotosData]);
 
-  const handleUpload = async () => {
+  // ボタンクリック → 隠しファイル入力を開く
+  const handleUploadClick = () => {
+    setError(null);
+    fileInputRef.current?.click();
+  };
+
+  // ファイル選択時の実アップロード（multipart/form-data）
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // 同じファイルを連続選択できるように毎回リセット
+    e.target.value = "";
+    if (!file) return;
+
+    if (file.size <= 0) {
+      setError("空ファイルはアップロードできません");
+      return;
+    }
+    if (file.size > MAX_PHOTO_SIZE_MB * 1024 * 1024) {
+      setError(`ファイルサイズが上限 (${MAX_PHOTO_SIZE_MB}MB) を超えています`);
+      return;
+    }
+
     setUploading(true);
+    setError(null);
     try {
-      const mockPhoto = {
-        url: `/mock/photo-${Date.now()}.jpg`,
-        caption: `写真 ${photos.length + 1}`,
-        sortOrder: photos.length,
-        createdAt: new Date().toISOString(),
-      };
-      const json = (await uploadPhoto(propertyId, mockPhoto)) as { data: Photo };
+      const json = (await uploadFile(propertyId, file, "photo")) as { data: Photo };
       const newPhoto = json.data;
       setPhotos((prev) => [...prev, newPhoto]);
     } catch (err) {
@@ -188,23 +210,29 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
     );
   }
 
-  // --- Error state ---
-  if (error) {
-    return (
-      <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        {error}
-        <button
-          onClick={fetchPhotosData}
-          className="ml-3 underline hover:no-underline"
-        >
-          再読み込み
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4">
+      {/* Inline error (アップロード失敗等) — 全画面置換しないことで再試行可能 */}
+      {error && (
+        <div className="flex items-start justify-between gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <span>{error}</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={fetchPhotosData}
+              className="underline hover:no-underline"
+            >
+              再読み込み
+            </button>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-500 hover:text-red-700"
+              title="閉じる"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -235,8 +263,15 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
               並び替え
             </button>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPTED_PHOTO_TYPES}
+            className="hidden"
+            onChange={handleFileChange}
+          />
           <button
-            onClick={handleUpload}
+            onClick={handleUploadClick}
             disabled={uploading}
             className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
           >

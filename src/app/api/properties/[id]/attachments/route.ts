@@ -15,6 +15,7 @@ import {
   validateFile,
   ALLOWED_ATTACHMENT_MIMES,
 } from "@/lib/storage";
+import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
 
 const ATTACHMENT_TYPES = ["general", "registry"] as const;
 type AttachmentType = (typeof ATTACHMENT_TYPES)[number];
@@ -77,7 +78,8 @@ export async function GET(
       orderBy: { createdAt: "desc" },
     });
 
-    return apiResponse({ data: attachments });
+    // 過去保存の絶対URL（http://host:3000/uploads/...）を相対パスに正規化
+    return apiResponse({ data: attachments.map(normalizeFileUrlsInRecord) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -218,7 +220,7 @@ export async function POST(
       detail: { propertyId, fileName },
     });
 
-    return apiResponse(attachment, 201);
+    return apiResponse(normalizeFileUrlsInRecord(attachment), 201);
   } catch (error) {
     return handleApiError(error);
   }

@@ -19,6 +19,7 @@ import {
   updateBuildingPhoto,
   type BuildingPhotoData,
 } from "@/lib/api-client";
+import { normalizeFileUrl } from "@/lib/url-normalize";
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("ja-JP", {
@@ -281,7 +282,7 @@ export default function BuildingPhotoTab({
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={photo.fileUrl}
+                  src={normalizeFileUrl(photo.fileUrl)}
                   alt={photo.caption ?? photo.fileName}
                   className="h-full w-full object-cover transition-transform group-hover:scale-105"
                   loading="lazy"
@@ -439,7 +440,7 @@ export default function BuildingPhotoTab({
             <div className="overflow-hidden rounded-lg bg-black shadow-2xl">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={lightboxPhoto.fileUrl}
+                src={normalizeFileUrl(lightboxPhoto.fileUrl)}
                 alt={lightboxPhoto.caption ?? lightboxPhoto.fileName}
                 className="max-h-[80vh] w-full object-contain"
               />

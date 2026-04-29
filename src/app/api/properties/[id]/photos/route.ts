@@ -14,6 +14,7 @@ import {
   validateFile,
   ALLOWED_PHOTO_MIMES,
 } from "@/lib/storage";
+import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
 
 // ---------- GET /api/properties/[id]/photos ----------
 
@@ -55,7 +56,7 @@ export async function GET(
       },
     });
 
-    return apiResponse({ data: photos });
+    return apiResponse({ data: photos.map(normalizeFileUrlsInRecord) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -176,7 +177,7 @@ export async function POST(
       detail: { propertyId: id, fileName: photo.fileName },
     });
 
-    return apiResponse({ data: photo }, 201);
+    return apiResponse({ data: normalizeFileUrlsInRecord(photo) }, 201);
   } catch (error) {
     return handleApiError(error);
   }

@@ -18,6 +18,7 @@ import {
   deleteAttachment,
   uploadFile,
 } from "@/lib/api-client";
+import { normalizeFileUrl } from "@/lib/url-normalize";
 
 type AttachmentType = "general" | "registry";
 
@@ -399,7 +400,7 @@ function AttachmentRow({
         </button>
       )}
       <a
-        href={att.fileUrl}
+        href={normalizeFileUrl(att.fileUrl)}
         target="_blank"
         rel="noopener noreferrer"
         download={att.fileName}
@@ -428,6 +429,9 @@ function PreviewModal({
   onClose: () => void;
 }) {
   const kind = getPreviewKind(att);
+  // 過去保存の絶対URL（http://host:3000/uploads/...）を相対パスに正規化。
+  // 表示中のオリジン（nginx 経由）から `/uploads/...` を引けば 200 で返るため。
+  const safeUrl = normalizeFileUrl(att.fileUrl);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -444,7 +448,7 @@ function PreviewModal({
           </p>
           <div className="flex shrink-0 items-center gap-1">
             <a
-              href={att.fileUrl}
+              href={safeUrl}
               target="_blank"
               rel="noopener noreferrer"
               download={att.fileName}
@@ -468,7 +472,7 @@ function PreviewModal({
             <div className="flex h-full w-full items-center justify-center p-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={att.fileUrl}
+                src={safeUrl}
                 alt={att.fileName}
                 className="max-h-full max-w-full object-contain"
               />
@@ -476,7 +480,7 @@ function PreviewModal({
           )}
           {kind === "pdf" && (
             <iframe
-              src={att.fileUrl}
+              src={safeUrl}
               title={att.fileName}
               className="h-full w-full"
             />
@@ -486,7 +490,7 @@ function PreviewModal({
               <FileText className="h-12 w-12 text-gray-400" />
               <p>このファイル形式はブラウザ内プレビュー非対応です。</p>
               <a
-                href={att.fileUrl}
+                href={safeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 download={att.fileName}
