@@ -25,6 +25,7 @@ import Link from "next/link";
 import {
   importCsv,
   fetchImportJobs,
+  fetchUsers,
   previewCsvDuplicates,
   previewReceptionOwnerCsv,
   importReceptionOwnerCsv,
@@ -510,6 +511,15 @@ export default function ImportPage() {
     totalPages: number;
   } | null>(null);
 
+  // 実行者フィルタ用の全ユーザー一覧。
+  // 履歴の current page に登場する executor だけだとフィルタ対象が
+  // 不十分なため、起動時に /api/users から全アクティブユーザーを取得して
+  // dropdown のソースにする。/api/users は assignee dropdown などで
+  // 既に全ロール共通で利用されており、追加の権限調整は不要。
+  const [allUsers, setAllUsers] = useState<Array<{ id: string; name: string }>>(
+    [],
+  );
+
   // Reception × Owner (2-file) state
   // csvText または xlsxBase64 のどちらかが入る
   const [receptionFile, setReceptionFile] = useState<{
@@ -584,18 +594,41 @@ export default function ImportPage() {
     setJobPage(1);
   };
 
-  // 実行者ドロップダウンの選択肢は「現在ロード済の jobs に出てくる実行者」
-  // から動的に組み立てる。ユーザマスタを別途取得しないため、フィルタ前の
-  // 一覧に含まれていない実行者は選べないが、段階A では妥協する。
-  const executorOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const job of jobs) {
-      if (job.executor && !map.has(job.executor.id)) {
-        map.set(job.executor.id, job.executor.name);
+  // 実行者ドロップダウンの選択肢は /api/users から取得した全アクティブ
+  // ユーザー一覧を使う。これにより「現在表示中のページに含まれていない
+  // 実行者」も絞り込み対象として選べるようになる。
+  // フェッチは初回マウント時のみ（ユーザーマスタは滅多に変わらないため）。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const json = await fetchUsers();
+        if (cancelled) return;
+        // /api/users は { id, name, role } を返す。表示には id / name のみ使う。
+        const list = ((json.data ?? []) as Array<{ id: string; name: string }>)
+          .map((u) => ({ id: u.id, name: u.name ?? "" }))
+          // name 昇順（API側でも sort 済みだがクライアント側でも安定化）
+          .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+        setAllUsers(list);
+      } catch {
+        // 失敗時は dropdown は空のまま運用継続（フィルタ機能のみ縮退）
+        if (!cancelled) setAllUsers([]);
       }
-    }
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [jobs]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // dropdown 表示用。name が空なら短縮 id をフォールバックに表示する。
+  const executorOptions = useMemo(
+    () =>
+      allUsers.map((u) => ({
+        id: u.id,
+        label: u.name && u.name.trim() !== "" ? u.name : `(名前未設定 ${u.id.slice(0, 8)})`,
+      })),
+    [allUsers],
+  );
 
   const handleResetJobFilters = () => {
     setJobFilters({ jobType: "", executedBy: "", from: "", to: "" });
@@ -1736,7 +1769,7 @@ export default function ImportPage() {
               <option value="">すべての実行者</option>
               {executorOptions.map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.name}
+                  {u.label}
                 </option>
               ))}
             </select>
