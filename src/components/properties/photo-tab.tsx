@@ -23,8 +23,11 @@ import { normalizeFileUrl } from "@/lib/url-normalize";
 
 interface Photo {
   id: string;
-  url?: string;
-  fileUrl?: string;
+  // 互換目的で url / fileUrl の両方を許容（実APIは fileUrl、旧モックは url）
+  url?: string | null;
+  fileUrl?: string | null;
+  thumbnailUrl?: string | null;
+  fileName?: string | null;
   caption: string | null;
   sortOrder: number;
   isPrimary?: boolean;
@@ -55,12 +58,23 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function getPhotoUrl(photo: Photo): string | null {
-  const raw = photo.fileUrl ?? photo.url ?? null;
-  return raw ? normalizeFileUrl(raw) : null;
+/**
+ * 表示用に画像URLを取り出す。
+ * - 実API は fileUrl（Prisma `PropertyPhoto.fileUrl` フィールド）
+ * - 旧モックは url
+ * - DB に絶対URL (http://133.117.72.225:3000/uploads/...) が残っているケースは
+ *   normalizeFileUrl で同一オリジン相対 (/uploads/...) に変換する
+ * - 値が無い場合は空文字を返す（呼び出し側で truthy 判定する）
+ */
+function getPhotoUrl(photo: Photo): string {
+  const raw = photo.fileUrl ?? photo.url ?? "";
+  return raw ? normalizeFileUrl(raw) : "";
 }
 
-const ACCEPTED_PHOTO_TYPES = ".jpg,.jpeg,.png,.webp,.heic,.heif";
+// PCブラウザがファイル選択ダイアログで対応MIMEを正しくフィルタするため、
+// 拡張子ではなくMIMEタイプで指定する（棟写真側と同じ書式に揃える）。
+const ACCEPTED_PHOTO_TYPES =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif";
 const MAX_PHOTO_SIZE_MB = 8;
 
 export default function PhotoTab({ propertyId }: { propertyId: string }) {
@@ -120,9 +134,14 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
     setUploading(true);
     setError(null);
     try {
-      const json = (await uploadFile(propertyId, file, "photo")) as { data: Photo };
-      const newPhoto = json.data;
-      setPhotos((prev) => [...prev, newPhoto]);
+      // 実アップロード（multipart/form-data）。サーバ側で正規化済みの fileUrl が返る。
+      await uploadFile(propertyId, file, "photo");
+      // 部分的な append ではなく一覧再取得に切り替えることで、
+      // - 新規写真の photographer リレーション欠落
+      // - 並び順の不整合（sortOrder = max+1 の二重登録など）
+      // - 既存写真URLの正規化反映漏れ
+      // を一括で解消する（棟写真側と同じく "サーバ truth" を信頼する）。
+      await fetchPhotosData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "アップロードに失敗しました");
     } finally {
@@ -298,6 +317,11 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
           {photos.map((photo, index) => {
             const url = getPhotoUrl(photo);
+            // /mock/ で始まるレガシーモックURLだけプレースホルダ扱いにし、
+            // 実URL (/uploads/... または http(s)://) は normalize 済みの値で <img> を出す。
+            // 棟写真と異なり物件写真は過去にモックURLが混ざっているため、
+            // /mock/ のみ除外する（=完全に既存写真も表示する）。
+            const isPlaceholder = !url || url.startsWith("/mock/");
             return (
               <div
                 key={photo.id}
@@ -309,18 +333,20 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                   onClick={() => {
                     if (!reorderMode) setLightboxPhoto(photo);
                   }}
-                  className={`flex aspect-square w-full items-center justify-center overflow-hidden ${url ? "bg-gray-100" : getPlaceholderColor(index)} cursor-pointer`}
+                  className={`block aspect-square w-full overflow-hidden ${isPlaceholder ? getPlaceholderColor(index) : "bg-gray-100"} cursor-pointer`}
                 >
-                  {url && url.startsWith("/mock/") === false ? (
+                  {!isPlaceholder ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={url}
-                      alt={photo.caption ?? "写真"}
+                      alt={photo.caption ?? photo.fileName ?? "写真"}
                       className="h-full w-full object-cover transition-transform group-hover:scale-105"
                       loading="lazy"
                     />
                   ) : (
-                    <Camera className="h-10 w-10 text-gray-500/40" />
+                    <div className="flex h-full w-full items-center justify-center">
+                      <Camera className="h-10 w-10 text-gray-500/40" />
+                    </div>
                   )}
                 </button>
 
@@ -479,12 +505,12 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
             <div className="overflow-hidden rounded-lg bg-white shadow-2xl">
               {(() => {
                 const url = getPhotoUrl(lightboxPhoto);
-                const isReal = url && !url.startsWith("/mock/");
+                const isReal = !!url && !url.startsWith("/mock/");
                 return isReal ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={url}
-                    alt={lightboxPhoto.caption ?? "写真"}
+                    alt={lightboxPhoto.caption ?? lightboxPhoto.fileName ?? "写真"}
                     className="max-h-[80vh] w-full object-contain"
                   />
                 ) : (

@@ -167,6 +167,11 @@ export async function POST(
         takenBy: session.id,
         sortOrder: nextSort,
       },
+      // GET と同じ shape で返すために photographer を include する
+      // （フロントが「全件再取得」する場合のためにも、レスポンス互換性が大事）
+      include: {
+        photographer: { select: { id: true, name: true } },
+      },
     });
 
     await writeAuditLog({
