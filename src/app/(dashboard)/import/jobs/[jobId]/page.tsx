@@ -35,6 +35,7 @@ import {
   extractUpdatedFields,
 } from "@/lib/import-row-display";
 import { calcImportSummary } from "@/lib/import-summary";
+import { classifyImportError } from "@/lib/import-error-display";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -689,6 +690,12 @@ export default function ImportJobDetailPage() {
             const isEditing = editingRow === row.id;
             const isLoading = actionLoading === row.id;
             const rawData = row.rawData ?? {};
+            // 段階A: error / needs_review 行のみ分類器を通す。
+            // success 行は従来の「Update summary」表示を残すため null。
+            const classified =
+              row.status === "error" || row.status === "needs_review"
+                ? classifyImportError(row.errorMessage, rawData)
+                : null;
 
             return (
               <div
@@ -771,20 +778,86 @@ export default function ImportJobDetailPage() {
                         })()}
                       </div>
                     )}
-                    {/* Error / review reason */}
-                    {row.errorMessage && !(row.status === "success" && isUpdateMessage(row.errorMessage)) && (
-                      <div className={`mb-4 rounded-md border px-3 py-2 text-sm ${
-                        row.status === "needs_review"
-                          ? "border-amber-200 bg-amber-50 text-amber-800"
-                          : "border-red-200 bg-red-50 text-red-700"
-                      }`}>
-                        <strong>{row.status === "needs_review" ? "レビュー理由:" : "エラー内容:"}</strong>{" "}
-                        {row.errorMessage}
-                      </div>
-                    )}
-                    {row.status === "needs_review" && !row.errorMessage && (
-                      <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                        <strong>レビュー理由:</strong> 重複の可能性があるデータです。既存レコードとの紐付けまたは新規作成を選択してください。
+                    {/* 段階A: エラー / 要レビュー 行の 3ブロック表示
+                        ① 大きいラベル ② 対象列ヒント ③ 修正方法
+                        対象列ハイライトは下の rawData テーブル側で行う。 */}
+                    {classified && (
+                      <div
+                        className={`mb-4 overflow-hidden rounded-md border ${
+                          row.status === "needs_review"
+                            ? "border-amber-300 bg-amber-50"
+                            : "border-red-300 bg-red-50"
+                        }`}
+                      >
+                        {/* ① エラー内容（大きく） */}
+                        <div
+                          className={`flex items-center gap-2 px-4 py-2.5 text-base font-semibold ${
+                            row.status === "needs_review"
+                              ? "bg-amber-100 text-amber-900"
+                              : "bg-red-100 text-red-900"
+                          }`}
+                        >
+                          {row.status === "needs_review" ? (
+                            <AlertTriangle className="h-5 w-5 shrink-0" />
+                          ) : (
+                            <XCircle className="h-5 w-5 shrink-0" />
+                          )}
+                          <span>
+                            [{row.status === "needs_review" ? "要レビュー" : "エラー"}]{" "}
+                            {classified.label}
+                          </span>
+                        </div>
+
+                        {/* ② 対象列（ある場合のみ。テーブル側で赤背景になる） */}
+                        {classified.field && (
+                          <div
+                            className={`px-4 py-1.5 text-xs ${
+                              row.status === "needs_review"
+                                ? "text-amber-800"
+                                : "text-red-800"
+                            }`}
+                          >
+                            <span className="font-medium">対象列:</span>{" "}
+                            <code className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px]">
+                              {classified.field}
+                            </code>
+                            <span className="ml-1 text-[11px] opacity-75">
+                              （下の元データテーブルで赤くハイライト）
+                            </span>
+                          </div>
+                        )}
+
+                        {/* ③ 修正方法 */}
+                        <div
+                          className={`flex items-start gap-2 px-4 py-2 text-sm ${
+                            row.status === "needs_review"
+                              ? "border-t border-amber-200 text-amber-900"
+                              : "border-t border-red-200 text-red-900"
+                          }`}
+                        >
+                          <span className="mt-0.5 shrink-0 font-semibold">
+                            修正:
+                          </span>
+                          <span>{classified.hint}</span>
+                        </div>
+
+                        {/* 元のメッセージは折りたたみで残す（管理者・調査用） */}
+                        {row.errorMessage && (
+                          <details
+                            className={`border-t px-4 py-1.5 text-[11px] ${
+                              row.status === "needs_review"
+                                ? "border-amber-200 text-amber-700"
+                                : "border-red-200 text-red-700"
+                            }`}
+                          >
+                            <summary className="cursor-pointer select-none">
+                              元のメッセージを表示
+                            </summary>
+                            <code className="mt-1 block break-all font-mono text-[11px] opacity-80">
+                              {row.errorMessage}
+                            </code>
+                          </details>
+                        )}
                       </div>
                     )}
 
@@ -854,12 +927,40 @@ export default function ImportJobDetailPage() {
                           <tbody className="divide-y divide-gray-100">
                             {Object.entries(
                               isEditing ? editedData : rawData,
-                            ).filter(([key]) => !key.startsWith("__")).map(([key, value]) => (
-                              <tr key={key} className="hover:bg-gray-50">
-                                <td className="w-[120px] whitespace-nowrap px-3 py-1.5 font-medium text-gray-600">
+                            ).filter(([key]) => !key.startsWith("__")).map(([key, value]) => {
+                              // 段階A: 分類器が特定した「対象列」と一致するキーは
+                                // 赤背景で強調。tooltip で「この列でエラー」も表示。
+                              const isErrorField =
+                                !!classified && classified.field === key;
+                              return (
+                              <tr
+                                key={key}
+                                className={
+                                  isErrorField
+                                    ? "bg-red-50/70 hover:bg-red-100"
+                                    : "hover:bg-gray-50"
+                                }
+                                title={isErrorField ? "この列でエラー" : undefined}
+                              >
+                                <td
+                                  className={`w-[120px] whitespace-nowrap px-3 py-1.5 font-medium ${
+                                    isErrorField
+                                      ? "text-red-800"
+                                      : "text-gray-600"
+                                  }`}
+                                >
+                                  {isErrorField && (
+                                    <XCircle className="mr-1 inline h-3.5 w-3.5 -translate-y-px text-red-500" />
+                                  )}
                                   {key}
                                 </td>
-                                <td className="px-3 py-1.5 text-gray-800">
+                                <td
+                                  className={`px-3 py-1.5 ${
+                                    isErrorField
+                                      ? "bg-red-100 text-red-900 ring-1 ring-inset ring-red-300"
+                                      : "text-gray-800"
+                                  }`}
+                                >
                                   {isEditing ? (
                                     <input
                                       type="text"
@@ -870,14 +971,28 @@ export default function ImportJobDetailPage() {
                                           [key]: e.target.value,
                                         }))
                                       }
-                                      className="w-full rounded border border-gray-300 px-2 py-0.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                      className={`w-full rounded border px-2 py-0.5 text-xs focus:outline-none focus:ring-1 ${
+                                        isErrorField
+                                          ? "border-red-400 bg-white focus:border-red-500 focus:ring-red-500"
+                                          : "border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                      }`}
+                                      autoFocus={isErrorField}
                                     />
                                   ) : (
-                                    <span>{value}</span>
+                                    <span>
+                                      {value === "" || value == null ? (
+                                        <span className="text-gray-400">
+                                          (未入力)
+                                        </span>
+                                      ) : (
+                                        String(value)
+                                      )}
+                                    </span>
                                   )}
                                 </td>
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
