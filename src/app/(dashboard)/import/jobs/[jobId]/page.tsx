@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   Search,
+  Download,
 } from "lucide-react";
 import {
   fetchImportJobDetail,
@@ -651,28 +652,51 @@ export default function ImportJobDetailPage() {
           </button>
         ))}
 
-        {/* Batch actions */}
-        {(filter === "needs_review" || filter === "error") &&
-          counts[filter] > 0 && (
-            <div className="ml-auto flex gap-2">
-              <button
-                onClick={() => handleBatchResolve("skip")}
-                disabled={actionLoading === "batch"}
-                className="flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+        {/* 右側: 一括操作 + CSVエクスポート */}
+        {((filter === "needs_review" || filter === "error") &&
+          counts[filter] > 0) ||
+        counts.error > 0 ||
+        counts.needs_review > 0 ? (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {/* Batch actions: 現在のフィルタが needs_review / error のときのみ */}
+            {(filter === "needs_review" || filter === "error") &&
+              counts[filter] > 0 && (
+                <>
+                  <button
+                    onClick={() => handleBatchResolve("skip")}
+                    disabled={actionLoading === "batch"}
+                    className="flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <SkipForward className="h-3 w-3" />
+                    全件スキップ
+                  </button>
+                  <button
+                    onClick={() => handleBatchResolve("mark_error")}
+                    disabled={actionLoading === "batch"}
+                    className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    <Ban className="h-3 w-3" />
+                    全件エラー確定
+                  </button>
+                </>
+              )}
+
+            {/* CSV エクスポート: error / needs_review が1件以上あるときに表示
+                サーバ側 Content-Disposition で attachment 指定済み。
+                download 属性はファイル名のクライアント側ヒント。 */}
+            {(counts.error > 0 || counts.needs_review > 0) && (
+              <a
+                href={`/api/import/jobs/${jobId}/export-errors`}
+                download={`import-errors-${jobId}.csv`}
+                className="flex items-center gap-1 rounded-md border border-blue-300 bg-white px-3 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                title="error / needs_review 行を CSV でダウンロード（Excel 互換 / UTF-8 BOM 付き）"
               >
-                <SkipForward className="h-3 w-3" />
-                全件スキップ
-              </button>
-              <button
-                onClick={() => handleBatchResolve("mark_error")}
-                disabled={actionLoading === "batch"}
-                className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                <Ban className="h-3 w-3" />
-                全件エラー確定
-              </button>
-            </div>
-          )}
+                <Download className="h-3 w-3" />
+                エラー行をCSVダウンロード
+              </a>
+            )}
+          </div>
+        ) : null}
       </div>
 
       {/* Rows list */}
