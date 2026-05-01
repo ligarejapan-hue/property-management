@@ -396,6 +396,42 @@ export async function fetchImportJobDetail(jobId: string) {
   return apiFetch(`/api/import/jobs/${jobId}`);
 }
 
+// processing のまま残っているスタックジョブの一覧。
+export interface StuckImportJob {
+  jobId: string;
+  jobType: string;
+  fileName: string;
+  executor: { id: string; name: string };
+  createdAt: string;
+  startedAt: string | null;
+  elapsedMinutes: number;
+  rowCount: number;
+}
+
+export interface StuckImportJobsResponse {
+  thresholdMinutes: number;
+  data: StuckImportJob[];
+}
+
+export async function fetchStuckImportJobs(): Promise<StuckImportJobsResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { thresholdMinutes: 10, data: [] };
+  }
+  return apiFetch<StuckImportJobsResponse>("/api/import/jobs/stuck");
+}
+
+export async function markImportJobFailed(jobId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { id: jobId, status: "failed" } };
+  }
+  return apiFetch<{ data: unknown }>(
+    `/api/import/jobs/${jobId}/mark-failed`,
+    { method: "PATCH" },
+  );
+}
+
 // この取込で作成・更新された物件一覧（物件CSVジョブのみ）。
 // 物件CSV以外 (owner_csv 等) のジョブでは applicable=false で返ってくる。
 export interface AffectedProperty {

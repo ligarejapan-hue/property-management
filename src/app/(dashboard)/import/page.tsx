@@ -26,6 +26,8 @@ import {
   importCsv,
   fetchImportJobs,
   fetchUsers,
+  fetchStuckImportJobs,
+  markImportJobFailed,
   previewCsvDuplicates,
   previewReceptionOwnerCsv,
   importReceptionOwnerCsv,
@@ -33,6 +35,7 @@ import {
   readFileForImport,
   type ReceptionOwnerPreviewResponse,
   type ReceptionOwnerImportResponse,
+  type StuckImportJob,
 } from "@/lib/api-client";
 import { detectImportFileType } from "@/lib/import-file-type";
 import { readCsvFileAsText } from "@/lib/csv-decode";
@@ -511,6 +514,13 @@ export default function ImportPage() {
     totalPages: number;
   } | null>(null);
 
+  // 異常ジョブ（processing のまま指定時間以上経過）。マウント時に
+  // 取得して件数 0 でなければ警告セクションを表示する。
+  const [stuckJobs, setStuckJobs] = useState<StuckImportJob[]>([]);
+  const [stuckThresholdMin, setStuckThresholdMin] = useState<number>(10);
+  const [stuckLoading, setStuckLoading] = useState(false);
+  const [markingJobId, setMarkingJobId] = useState<string | null>(null);
+
   // 実行者フィルタ用の全ユーザー一覧。
   // 履歴の current page に登場する executor だけだとフィルタ対象が
   // 不十分なため、起動時に /api/users から全アクティブユーザーを取得して
@@ -575,6 +585,50 @@ export default function ImportPage() {
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
+
+  // 異常ジョブの取得。履歴一覧と独立してマウント時に1度引く。
+  // マーク失敗操作後にも再取得するため useCallback にしておく。
+  const fetchStuck = useCallback(async () => {
+    setStuckLoading(true);
+    try {
+      const res = await fetchStuckImportJobs();
+      setStuckJobs(res.data);
+      setStuckThresholdMin(res.thresholdMinutes);
+    } catch {
+      // 異常ジョブ取得は致命ではない（メイン履歴 UI は動作継続）
+      setStuckJobs([]);
+    } finally {
+      setStuckLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStuck();
+  }, [fetchStuck]);
+
+  // 異常ジョブを「失敗にする」操作。確認ダイアログ → API 呼び出し →
+  // 異常ジョブ一覧と履歴一覧の両方を refetch（履歴側に failed として反映する）。
+  const handleMarkStuckFailed = async (jobId: string) => {
+    if (
+      !window.confirm(
+        "このジョブを「失敗」として確定します。元には戻せません。よろしいですか？",
+      )
+    ) {
+      return;
+    }
+    setMarkingJobId(jobId);
+    try {
+      await markImportJobFailed(jobId);
+      // 異常ジョブ一覧から消し、履歴側で failed として表示されるよう両方更新
+      await Promise.all([fetchStuck(), fetchJobs()]);
+    } catch (err) {
+      window.alert(
+        err instanceof Error ? err.message : "失敗化に失敗しました",
+      );
+    } finally {
+      setMarkingJobId(null);
+    }
+  };
 
   /**
    * フィルタ変更時のヘルパ。値の更新と同時に「常に 1 ページ目に戻す」。
@@ -1725,6 +1779,95 @@ export default function ImportPage() {
           </div>
         )}
       </div>
+
+      {/* ============ 異常ジョブ（processing のまま放置） ============
+          過去の不具合で残ったスタックジョブを可視化する運用セクション。
+          件数 0 のときは丸ごと非表示。1 件以上あるときだけ警告色の枠で表示する。 */}
+      {stuckJobs.length > 0 && (
+        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-5">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="flex items-center gap-2 text-base font-semibold text-amber-900">
+                <AlertTriangle className="h-4 w-4" />
+                異常ジョブ（{stuckJobs.length} 件）
+              </h3>
+              <p className="mt-0.5 text-xs text-amber-800">
+                {stuckThresholdMin} 分以上 <code className="rounded bg-white/70 px-1 font-mono text-[11px]">processing</code>{" "}
+                のまま残っているジョブです。「失敗にする」を押して整理してください（自動修復はされません）。
+              </p>
+            </div>
+            <button
+              onClick={fetchStuck}
+              disabled={stuckLoading}
+              className="rounded p-1 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+              title="再読み込み"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${stuckLoading ? "animate-spin" : ""}`}
+              />
+            </button>
+          </div>
+
+          <div className="overflow-x-auto rounded border border-amber-200 bg-white">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-amber-200 bg-amber-100/50 text-amber-900">
+                <tr>
+                  <th className="px-2 py-1.5 font-medium">種別</th>
+                  <th className="px-2 py-1.5 font-medium">ファイル名</th>
+                  <th className="px-2 py-1.5 font-medium">実行者</th>
+                  <th className="px-2 py-1.5 font-medium">作成日時</th>
+                  <th className="px-2 py-1.5 font-medium text-right">経過</th>
+                  <th className="px-2 py-1.5 font-medium text-right">行数</th>
+                  <th className="px-2 py-1.5 font-medium text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-amber-100">
+                {stuckJobs.map((job) => (
+                  <tr key={job.jobId} className="hover:bg-amber-50/50">
+                    <td className="px-2 py-1.5 text-gray-700 font-mono text-[11px]">
+                      {job.jobType}
+                    </td>
+                    <td className="px-2 py-1.5 text-gray-800">
+                      <Link
+                        href={`/import/jobs/${job.jobId}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {job.fileName}
+                      </Link>
+                    </td>
+                    <td className="px-2 py-1.5 text-gray-600">
+                      {job.executor.name}
+                    </td>
+                    <td className="px-2 py-1.5 text-gray-500">
+                      {new Date(job.createdAt).toLocaleString("ja-JP")}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-amber-800">
+                      {job.elapsedMinutes}分
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">
+                      {job.rowCount}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <button
+                        onClick={() => handleMarkStuckFailed(job.jobId)}
+                        disabled={markingJobId === job.jobId}
+                        className="inline-flex items-center gap-1 rounded border border-red-300 bg-white px-2 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {markingJobId === job.jobId ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <XCircle className="h-3 w-3" />
+                        )}
+                        失敗にする
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ============ Job History ============ */}
       <div className="rounded-lg border border-gray-200 bg-white p-6">
