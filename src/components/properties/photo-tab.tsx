@@ -88,6 +88,8 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
   const [editingCaptionId, setEditingCaptionId] = useState<string | null>(null);
   const [captionDraft, setCaptionDraft] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
 
   const fetchPhotosData = useCallback(async () => {
     setLoading(true);
@@ -115,38 +117,62 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
     fileInputRef.current?.click();
   };
 
-  // ファイル選択時の実アップロード（multipart/form-data）
+  const uploadFiles = useCallback(
+    async (files: File[]) => {
+      const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+      if (imageFiles.length === 0) return;
+      setUploading(true);
+      setError(null);
+      try {
+        for (const file of imageFiles) {
+          if (file.size <= 0) {
+            setError("空ファイルはアップロードできません");
+            continue;
+          }
+          if (file.size > MAX_PHOTO_SIZE_MB * 1024 * 1024) {
+            setError(
+              `${file.name}: ファイルサイズが上限 (${MAX_PHOTO_SIZE_MB}MB) を超えています`,
+            );
+            continue;
+          }
+          await uploadFile(propertyId, file, "photo");
+        }
+        await fetchPhotosData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "アップロードに失敗しました");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [propertyId, fetchPhotosData],
+  );
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    // 同じファイルを連続選択できるように毎回リセット
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
+    await uploadFiles(files);
+  };
 
-    if (file.size <= 0) {
-      setError("空ファイルはアップロードできません");
-      return;
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current++;
+    setIsDragging(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (--dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragging(false);
     }
-    if (file.size > MAX_PHOTO_SIZE_MB * 1024 * 1024) {
-      setError(`ファイルサイズが上限 (${MAX_PHOTO_SIZE_MB}MB) を超えています`);
-      return;
-    }
-
-    setUploading(true);
-    setError(null);
-    try {
-      // 実アップロード（multipart/form-data）。サーバ側で正規化済みの fileUrl が返る。
-      await uploadFile(propertyId, file, "photo");
-      // 部分的な append ではなく一覧再取得に切り替えることで、
-      // - 新規写真の photographer リレーション欠落
-      // - 並び順の不整合（sortOrder = max+1 の二重登録など）
-      // - 既存写真URLの正規化反映漏れ
-      // を一括で解消する（棟写真側と同じく "サーバ truth" を信頼する）。
-      await fetchPhotosData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "アップロードに失敗しました");
-    } finally {
-      setUploading(false);
-    }
+  };
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDragging(false);
+    if (!uploading) await uploadFiles(Array.from(e.dataTransfer.files));
   };
 
   const handleDelete = async (id: string) => {
@@ -286,6 +312,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
             ref={fileInputRef}
             type="file"
             accept={ACCEPTED_PHOTO_TYPES}
+            multiple
             className="hidden"
             onChange={handleFileChange}
           />
@@ -304,13 +331,46 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
         </div>
       </div>
 
-      {/* Empty state */}
-      {photos.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 py-16 text-gray-400">
-          <Camera className="mb-3 h-12 w-12" />
-          <p className="text-sm">物件写真はありません</p>
-        </div>
-      )}
+      {/* Drop zone */}
+      <div
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onClick={handleUploadClick}
+        className={`flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
+          isDragging
+            ? "border-blue-400 bg-blue-50"
+            : "border-gray-300 hover:border-gray-400"
+        } ${photos.length === 0 ? "flex-col py-16" : "gap-2 py-3"}`}
+      >
+        {photos.length === 0 ? (
+          <>
+            <Camera
+              className={`mb-3 h-12 w-12 ${isDragging ? "text-blue-400" : "text-gray-400"}`}
+            />
+            <p
+              className={`text-sm ${isDragging ? "text-blue-500" : "text-gray-400"}`}
+            >
+              写真をドラッグ＆ドロップ、またはクリックして選択
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
+              JPEG / PNG / WebP / HEIC（最大 {MAX_PHOTO_SIZE_MB}MB）
+            </p>
+          </>
+        ) : (
+          <>
+            <Upload
+              className={`h-4 w-4 ${isDragging ? "text-blue-400" : "text-gray-400"}`}
+            />
+            <span
+              className={`text-sm ${isDragging ? "text-blue-500" : "text-gray-400"}`}
+            >
+              ここに写真をドロップして追加
+            </span>
+          </>
+        )}
+      </div>
 
       {/* Photo grid */}
       {photos.length > 0 && (
