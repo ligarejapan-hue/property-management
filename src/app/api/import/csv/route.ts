@@ -26,6 +26,10 @@ import {
   type UpdatablePropertyField,
 } from "@/lib/import-dedupe";
 import { normalizeBuildingName } from "@/lib/normalize";
+import {
+  REIMPORT_IGNORED_HEADERS,
+  buildErrorRawDataExtras,
+} from "@/lib/import-error-display";
 
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
@@ -280,6 +284,10 @@ export async function POST(request: NextRequest) {
     const headerToField: Record<string, string> = {};
     if (columnMapping && Object.keys(columnMapping).length > 0) {
       for (const [csvHeader, japaneseName] of Object.entries(columnMapping)) {
+        // 再取込時に export-errors の固定列が混ざっていても完全に無視する
+        // （warning も出さない）。__error_field 等は __ プレフィックスなので
+        // 既存の rawData ループで自然に除外されるため別途対処不要。
+        if (REIMPORT_IGNORED_HEADERS.has(csvHeader)) continue;
         const field = JAPANESE_FIELD_MAP[japaneseName];
         if (field) {
           headerToField[csvHeader] = field;
@@ -287,6 +295,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       for (const h of headers) {
+        if (REIMPORT_IGNORED_HEADERS.has(h)) continue;
         if (PROPERTY_CSV_COLUMN_MAP[h]) {
           headerToField[h] = PROPERTY_CSV_COLUMN_MAP[h];
         }
@@ -696,12 +705,21 @@ export async function POST(request: NextRequest) {
 
     // Save job rows
     for (const row of jobRows) {
+      // error / needs_review 行のみ rawData にエラー構造化キー
+      // (__error_field / __error_code) を追記する。success 行は不要。
+      const enrichedRawData =
+        row.status === "error" || row.status === "needs_review"
+          ? {
+              ...(row.rawData as Record<string, unknown>),
+              ...buildErrorRawDataExtras(row.errorMessage, row.rawData),
+            }
+          : row.rawData;
       await prisma.importJobRow.create({
         data: {
           jobId: row.jobId,
           rowNumber: row.rowNumber,
           status: row.status,
-          rawData: row.rawData,
+          rawData: enrichedRawData,
           errorMessage: row.errorMessage,
           createdId: row.createdId,
         },

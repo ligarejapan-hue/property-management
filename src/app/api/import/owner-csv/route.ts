@@ -12,6 +12,10 @@ import { hasPermission } from "@/lib/permissions";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import { normalizeAddress } from "@/lib/address-normalizer";
 import { relinkOwnersToProperties } from "@/lib/owner-property-linker";
+import {
+  REIMPORT_IGNORED_HEADERS,
+  buildErrorRawDataExtras,
+} from "@/lib/import-error-display";
 
 // Japanese field name → Owner model property mapping
 const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
@@ -61,6 +65,8 @@ export async function POST(request: NextRequest) {
 
     if (userColumnMapping && Object.keys(userColumnMapping).length > 0) {
       for (const [csvHeader, japaneseField] of Object.entries(userColumnMapping)) {
+        // 再取込時の export-errors 固定列は完全スルー（warningも出さない）
+        if (REIMPORT_IGNORED_HEADERS.has(csvHeader)) continue;
         const modelProp = JAPANESE_FIELD_TO_PROPERTY[japaneseField];
         if (modelProp) {
           effectiveMapping[csvHeader] = modelProp;
@@ -68,6 +74,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       for (const h of headers) {
+        if (REIMPORT_IGNORED_HEADERS.has(h)) continue;
         if (OWNER_CSV_COLUMN_MAP[h]) {
           effectiveMapping[h] = OWNER_CSV_COLUMN_MAP[h];
         }
@@ -199,12 +206,20 @@ export async function POST(request: NextRequest) {
 
     // Save job rows
     for (const row of jobRows) {
+      // error / needs_review 行のみ __error_field / __error_code を rawData に追記
+      const enrichedRawData =
+        row.status === "error" || row.status === "needs_review"
+          ? {
+              ...(row.rawData as Record<string, unknown>),
+              ...buildErrorRawDataExtras(row.errorMessage, row.rawData),
+            }
+          : row.rawData;
       await prisma.importJobRow.create({
         data: {
           jobId: row.jobId,
           rowNumber: row.rowNumber,
           status: row.status,
-          rawData: row.rawData,
+          rawData: enrichedRawData,
           errorMessage: row.errorMessage,
           createdId: row.createdId,
         },

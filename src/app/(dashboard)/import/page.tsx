@@ -67,6 +67,8 @@ interface ImportJob {
   // 段階A: API 側で動的計算した 5 区分の集計を含む。旧データや
   // フォールバック時は undefined になる可能性があるため optional。
   summary?: ImportJobSummary;
+  // 手動で failed 化されたジョブ（AuditLog 由来）。UI バッジ表示に使う。
+  isManuallyFailed?: boolean;
 }
 
 interface ImportJobFilters {
@@ -2107,6 +2109,17 @@ export default function ImportPage() {
                           <Icon className="h-3.5 w-3.5" />
                           {config.label}
                         </span>
+                        {/* 手動で failed 化されたジョブの目印。
+                            通常の取込失敗 (status=failed) と運用上区別したい
+                            ケース向け。AuditLog 由来なので確実性が高い。 */}
+                        {job.isManuallyFailed && (
+                          <span
+                            className="mt-0.5 inline-flex items-center gap-0.5 rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-800"
+                            title="processing 残留ジョブを手動で failed に確定したジョブ"
+                          >
+                            手動失敗
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-blue-600 hover:underline">
                         {job.fileName}

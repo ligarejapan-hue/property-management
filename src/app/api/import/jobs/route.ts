@@ -132,9 +132,33 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // 「手動で failed 化されたジョブ」を AuditLog から逆引きする。
+    // mark-failed エンドポイントが action="import_job_mark_failed" /
+    // targetTable="import_jobs" / targetId=jobId で書き込んでいるので、
+    // 現ページの jobIds に対する存在チェックだけ行えば十分。
+    // 1件でもログがあれば true。
+    const manualFailedSet = new Set<string>();
+    if (jobIds.length > 0) {
+      const manualFailedLogs = await prisma.auditLog.findMany({
+        where: {
+          action: "import_job_mark_failed",
+          targetTable: "import_jobs",
+          targetId: { in: jobIds },
+        },
+        select: { targetId: true },
+      });
+      for (const log of manualFailedLogs) {
+        if (log.targetId) manualFailedSet.add(log.targetId);
+      }
+    }
+
     const data = jobs.map((job) => ({
       ...job,
       summary: calcImportSummary(rowsByJob.get(job.id) ?? []),
+      // status === "failed" でかつ AuditLog に該当ログがあれば手動失敗。
+      // failed 以外で true になることは原則無いが、API 側で status と
+      // 連動させる責務はクライアントへ持たせず、boolean だけ返す。
+      isManuallyFailed: manualFailedSet.has(job.id),
     }));
 
     return apiResponse({

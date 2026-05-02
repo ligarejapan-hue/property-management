@@ -322,6 +322,8 @@ export interface FetchImportJobsResponse {
         errorCount: number;
         totalCount: number;
       };
+      // 手動で failed 化されたジョブかどうか（AuditLog 由来）
+      isManuallyFailed?: boolean;
     }
   >;
   pagination?: {

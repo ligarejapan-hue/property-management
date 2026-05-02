@@ -18,6 +18,101 @@ import {
   extractUpdateReason,
 } from "./import-row-display";
 
+/**
+ * `/api/import/jobs/:jobId/export-errors` で出力する固定列のヘッダ名。
+ * これらの列は「エラーCSVをそのまま再取込する」ワークフローで邪魔に
+ * なるため、再取込時の CSV ヘッダマッピングで完全に無視する
+ * （warning も出さない）。
+ *
+ * Set にしておくことで csv/route.ts と owner-csv/route.ts の両方から
+ * O(1) でメンバーシップ判定できる。`__error_field` / `__error_code` は
+ * 既に `__` プレフィックス除外で落ちるため対象外。
+ */
+export const REIMPORT_IGNORED_HEADERS: ReadonlySet<string> = new Set([
+  "rowNumber",
+  "status",
+  "errorType",
+  "errorLabel",
+  "errorField",
+  "errorHint",
+  "errorMessage",
+]);
+
+/**
+ * ImportJobRow.rawData に追加で詰める「エラー構造」キー名。
+ * `__` プレフィックスにすることで、export-errors / 行展開UI / 再取込時
+ * のマッピングなど、既存の `__` 除外規約とそろう。
+ */
+export const ERROR_FIELD_KEY = "__error_field" as const;
+export const ERROR_CODE_KEY = "__error_code" as const;
+
+/**
+ * `classifyImportError().type` を ImportJobRow.rawData に書き込む
+ * 大文字スネークコードに変換する。
+ * - empty             → EMPTY
+ * - duplicate         → DUPLICATE
+ * - review            → REVIEW
+ * - building_not_found → BUILDING_NOT_FOUND
+ * - update / unknown  → UNKNOWN  (update は通常 success 行で UI 対象外、
+ *                                  unknown は文字通り未分類)
+ */
+export type ImportErrorCode =
+  | "EMPTY"
+  | "DUPLICATE"
+  | "REVIEW"
+  | "BUILDING_NOT_FOUND"
+  | "UNKNOWN";
+
+/**
+ * 既存の `errorMessage` と `rawData` から、ImportJobRow.rawData に
+ * 詰める `{ __error_field, __error_code }` を返す補助。
+ *
+ * 取込ルート (csv / owner-csv / reception-owner / registry-pdf) で
+ * 行を作る直前に呼んで、保存する rawData に spread する想定:
+ *
+ *   await prisma.importJobRow.create({
+ *     data: {
+ *       ...,
+ *       rawData: {
+ *         ...rawRow,
+ *         ...buildErrorRawDataExtras(errorMessage, rawRow),
+ *       },
+ *     },
+ *   });
+ *
+ * 既存の `__building_candidates` 規約と整合させるため、戻り値も
+ * `__` プレフィックス付きキーを返す。
+ */
+export function buildErrorRawDataExtras(
+  errorMessage: string | null | undefined,
+  rawData: Record<string, unknown> | null | undefined,
+): { [ERROR_FIELD_KEY]: string | null; [ERROR_CODE_KEY]: ImportErrorCode } {
+  const classified = classifyImportError(errorMessage, rawData);
+  let code: ImportErrorCode;
+  switch (classified.type) {
+    case "empty":
+      code = "EMPTY";
+      break;
+    case "duplicate":
+      code = "DUPLICATE";
+      break;
+    case "review":
+      code = "REVIEW";
+      break;
+    case "building_not_found":
+      code = "BUILDING_NOT_FOUND";
+      break;
+    // update / unknown は UNKNOWN にまとめる
+    default:
+      code = "UNKNOWN";
+      break;
+  }
+  return {
+    [ERROR_FIELD_KEY]: classified.field,
+    [ERROR_CODE_KEY]: code,
+  };
+}
+
 export type ImportErrorType =
   // 必須項目が空（住所空、氏名空 など）
   | "empty"

@@ -22,6 +22,7 @@ import {
   type PropertyCandidate,
   type ParsedOwnerRow,
 } from "@/lib/reception-owner-match";
+import { buildErrorRawDataExtras } from "@/lib/import-error-display";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の本実行。
 // - 一意特定できた行だけ反映。それ以外は needs_review で記録。
@@ -184,13 +185,14 @@ export async function POST(request: NextRequest) {
       };
 
       if (reason) {
+        const reviewMsg = REVIEW_REASON_LABEL[reason];
         await prisma.importJobRow.create({
           data: {
             jobId: job.id,
             rowNumber,
             status: "needs_review",
-            rawData,
-            errorMessage: REVIEW_REASON_LABEL[reason],
+            rawData: { ...rawData, ...buildErrorRawDataExtras(reviewMsg, rawData) },
+            errorMessage: reviewMsg,
             createdId: null,
           },
         });
@@ -205,13 +207,14 @@ export async function POST(request: NextRequest) {
         c.owners.length === 0
       ) {
         // 安全側：想定外は skip 扱い
+        const fallbackMsg = "想定外の状態";
         await prisma.importJobRow.create({
           data: {
             jobId: job.id,
             rowNumber,
             status: "needs_review",
-            rawData,
-            errorMessage: "想定外の状態",
+            rawData: { ...rawData, ...buildErrorRawDataExtras(fallbackMsg, rawData) },
+            errorMessage: fallbackMsg,
             createdId: null,
           },
         });
@@ -290,13 +293,14 @@ export async function POST(request: NextRequest) {
         });
         successCount++;
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : "不明なエラー";
         await prisma.importJobRow.create({
           data: {
             jobId: job.id,
             rowNumber,
             status: "error",
-            rawData,
-            errorMessage: err instanceof Error ? err.message : "不明なエラー",
+            rawData: { ...rawData, ...buildErrorRawDataExtras(errMsg, rawData) },
+            errorMessage: errMsg,
             createdId: null,
           },
         });

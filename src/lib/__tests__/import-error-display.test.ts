@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { classifyImportError } from "../import-error-display";
+import {
+  classifyImportError,
+  buildErrorRawDataExtras,
+  REIMPORT_IGNORED_HEADERS,
+} from "../import-error-display";
 
 describe("classifyImportError", () => {
   // ---------- empty ----------
@@ -119,6 +123,86 @@ describe("classifyImportError", () => {
     expect(r.hint).toBeTruthy();
   });
 
+  // ---------- buildErrorRawDataExtras ----------
+});
+
+describe("buildErrorRawDataExtras", () => {
+  it("住所空 → __error_code=EMPTY / __error_field=住所", () => {
+    const r = buildErrorRawDataExtras("住所が空です", { 住所: "" });
+    expect(r.__error_code).toBe("EMPTY");
+    expect(r.__error_field).toBe("住所");
+  });
+
+  it("氏名空 → EMPTY / 氏名", () => {
+    const r = buildErrorRawDataExtras("氏名が空です", { 氏名: "" });
+    expect(r.__error_code).toBe("EMPTY");
+    expect(r.__error_field).toBe("氏名");
+  });
+
+  it("重複検知 → DUPLICATE / field=null", () => {
+    const r = buildErrorRawDataExtras(
+      "重複の可能性[住所一致]: 既存物件ID=abc (xxx)",
+      { 住所: "xxx" },
+    );
+    expect(r.__error_code).toBe("DUPLICATE");
+    expect(r.__error_field).toBeNull();
+  });
+
+  it("受付帳レビュー理由 → REVIEW", () => {
+    const r = buildErrorRawDataExtras("要レビュー（所有者未突合）", {});
+    expect(r.__error_code).toBe("REVIEW");
+    expect(r.__error_field).toBeNull();
+  });
+
+  it("棟未解決 → BUILDING_NOT_FOUND / 棟名", () => {
+    const r = buildErrorRawDataExtras(
+      "棟名が見つかりません",
+      { 棟名: "X" },
+    );
+    expect(r.__error_code).toBe("BUILDING_NOT_FOUND");
+    expect(r.__error_field).toBe("棟名");
+  });
+
+  it("更新メッセージ (success系) は UNKNOWN にフォールバック", () => {
+    // 通常 update は success 行なのでこのヘルパが呼ばれることは少ないが、
+    // 「未知 / 集計対象外」として UNKNOWN を返す挙動の保証。
+    const r = buildErrorRawDataExtras("更新[住所一致]: ...", null);
+    expect(r.__error_code).toBe("UNKNOWN");
+  });
+
+  it("不明文言 → UNKNOWN / null", () => {
+    const r = buildErrorRawDataExtras("Argument is invalid", null);
+    expect(r.__error_code).toBe("UNKNOWN");
+    expect(r.__error_field).toBeNull();
+  });
+
+  it("null / 空 → UNKNOWN", () => {
+    expect(buildErrorRawDataExtras(null, null).__error_code).toBe("UNKNOWN");
+    expect(buildErrorRawDataExtras("", {}).__error_code).toBe("UNKNOWN");
+  });
+});
+
+describe("REIMPORT_IGNORED_HEADERS", () => {
+  it("export-errors の 7 つの固定列ヘッダを含む", () => {
+    expect(REIMPORT_IGNORED_HEADERS.has("rowNumber")).toBe(true);
+    expect(REIMPORT_IGNORED_HEADERS.has("status")).toBe(true);
+    expect(REIMPORT_IGNORED_HEADERS.has("errorType")).toBe(true);
+    expect(REIMPORT_IGNORED_HEADERS.has("errorLabel")).toBe(true);
+    expect(REIMPORT_IGNORED_HEADERS.has("errorField")).toBe(true);
+    expect(REIMPORT_IGNORED_HEADERS.has("errorHint")).toBe(true);
+    expect(REIMPORT_IGNORED_HEADERS.has("errorMessage")).toBe(true);
+    expect(REIMPORT_IGNORED_HEADERS.size).toBe(7);
+  });
+
+  it("通常の取込列 (住所 / 氏名 / 棟名) は含まない", () => {
+    expect(REIMPORT_IGNORED_HEADERS.has("住所")).toBe(false);
+    expect(REIMPORT_IGNORED_HEADERS.has("氏名")).toBe(false);
+    expect(REIMPORT_IGNORED_HEADERS.has("棟名")).toBe(false);
+    expect(REIMPORT_IGNORED_HEADERS.has("address")).toBe(false);
+  });
+});
+
+describe("classifyImportError - hint contract", () => {
   // ---------- hint は常に空でない ----------
   it("どのケースでも hint は非空文字列で返る", () => {
     const cases = [

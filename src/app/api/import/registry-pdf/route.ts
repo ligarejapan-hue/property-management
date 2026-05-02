@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
+import { buildErrorRawDataExtras } from "@/lib/import-error-display";
 
 const registryPdfJsonSchema = z.object({
   /** Extracted text from the PDF (テキスト貼り付けモード) */
@@ -274,6 +275,7 @@ export async function POST(request: NextRequest) {
               extractedAddress: parsed.address ?? null,
               extractedRealEstateNumber: parsed.realEstateNumber ?? null,
               targetPropertyId,
+              ...buildErrorRawDataExtras(failureReason, null),
             },
             errorMessage: failureReason,
             createdId: null,
@@ -311,6 +313,7 @@ export async function POST(request: NextRequest) {
             extractedAddress: parsed.address ?? null,
             extractedRealEstateNumber: parsed.realEstateNumber ?? null,
             targetPropertyId: null,
+            ...buildErrorRawDataExtras(failureReason, null),
           },
           errorMessage: failureReason,
           createdId: null,
