@@ -98,6 +98,8 @@ export async function POST(request: NextRequest) {
     let needsReviewCount = 0;
     const createdOwnerIds: string[] = [];
 
+    // 行ごとに「紐づけ判定に必要な元データを持っていたか」を覚えておく。
+    // 行書き込みは linking 後に1回行うので、そこで status / errorMessage を最終決定する。
     const jobRows: Array<{
       jobId: string;
       rowNumber: number;
@@ -105,6 +107,8 @@ export async function POST(request: NextRequest) {
       rawData: Record<string, string>;
       errorMessage: string | null;
       createdId: string | null;
+      hasLinkKey: boolean;
+      hasAddress: boolean;
     }> = [];
 
     for (let i = 0; i < rows.length; i++) {
@@ -130,6 +134,8 @@ export async function POST(request: NextRequest) {
             rawData: rawRow,
             errorMessage: "氏名が空です",
             createdId: null,
+            hasLinkKey: false,
+            hasAddress: false,
           });
           errorCount++;
           continue;
@@ -161,6 +167,8 @@ export async function POST(request: NextRequest) {
             rawData: rawRow,
             errorMessage: `重複の可能性: 既存所有者ID=${existing.id} (${existing.name})`,
             createdId: null,
+            hasLinkKey: !!mapped.externalLinkKey,
+            hasAddress: !!mapped.address,
           });
           needsReviewCount++;
           continue;
@@ -188,6 +196,8 @@ export async function POST(request: NextRequest) {
           rawData: rawRow,
           errorMessage: null,
           createdId: owner.id,
+          hasLinkKey: !!mapped.externalLinkKey,
+          hasAddress: !!mapped.address,
         });
         createdOwnerIds.push(owner.id);
         successCount++;
@@ -199,32 +209,13 @@ export async function POST(request: NextRequest) {
           rawData: rawRow,
           errorMessage: err instanceof Error ? err.message : "不明なエラー",
           createdId: null,
+          hasLinkKey: false,
+          hasAddress: false,
         });
         errorCount++;
       }
     }
-
-    // Save job rows
-    for (const row of jobRows) {
-      // error / needs_review 行のみ __error_field / __error_code を rawData に追記
-      const enrichedRawData =
-        row.status === "error" || row.status === "needs_review"
-          ? {
-              ...(row.rawData as Record<string, unknown>),
-              ...buildErrorRawDataExtras(row.errorMessage, row.rawData),
-            }
-          : row.rawData;
-      await prisma.importJobRow.create({
-        data: {
-          jobId: row.jobId,
-          rowNumber: row.rowNumber,
-          status: row.status,
-          rawData: enrichedRawData,
-          errorMessage: row.errorMessage,
-          createdId: row.createdId,
-        },
-      });
-    }
+    // 行のDB書き込みは linking 完了後にまとめて行う（紐づけ結果を反映するため）。
 
     // Auto-link owners to properties.
     // 1) externalLinkKey 完全一致 (従来動作)
@@ -237,6 +228,14 @@ export async function POST(request: NextRequest) {
     let linkedByLinkKeyCount = 0;
     let linkedByAddressCount = 0;
     let addressLinkAmbiguousCount = 0;
+    // 行ごとの紐づけ結果を id でひける Map にする（行書き込み時にメッセージ生成に使用）
+    const linkResultByOwnerId = new Map<
+      string,
+      { linked: boolean; via: "linkKey" | "address" | null; ambiguous: boolean }
+    >();
+    for (const id of createdOwnerIds) {
+      linkResultByOwnerId.set(id, { linked: false, via: null, ambiguous: false });
+    }
 
     const linkOwnerToProperty = async (
       propertyId: string,
@@ -282,6 +281,11 @@ export async function POST(request: NextRequest) {
             linkedCount++;
             linkedByLinkKeyCount++;
             linkedOwnerIds.add(owner.id);
+            const r = linkResultByOwnerId.get(owner.id);
+            if (r) {
+              r.linked = true;
+              r.via = "linkKey";
+            }
           }
         }
       }
@@ -327,6 +331,8 @@ export async function POST(request: NextRequest) {
         if (candidates.length === 0) continue;
         if (candidates.length > 1) {
           addressLinkAmbiguousCount++;
+          const r = linkResultByOwnerId.get(owner.id);
+          if (r) r.ambiguous = true;
           continue; // 安全側: 自動リンクしない
         }
         const created = await linkOwnerToProperty(candidates[0], owner.id);
@@ -334,6 +340,11 @@ export async function POST(request: NextRequest) {
           linkedCount++;
           linkedByAddressCount++;
           linkedOwnerIds.add(owner.id);
+          const r = linkResultByOwnerId.get(owner.id);
+          if (r) {
+            r.linked = true;
+            r.via = "address";
+          }
         }
       }
     }
@@ -362,6 +373,66 @@ export async function POST(request: NextRequest) {
       // 救済処理は best-effort: 失敗しても本体の取込結果は返す
     }
 
+    // === 行ごとに紐づけ結果を反映してから DB に書き込む ===
+    // - 紐づけ成功 → status=success のまま、errorMessage に「紐づけ完了[...]」を残す
+    // - 紐づけ不可 → status=needs_review に降格、errorMessage に理由を残す
+    // 紐づけ判定材料が CSV に無かった行（リンクキー・住所どちらも未指定）も
+    // 黙って成功にせず needs_review に落として利用者にレビューを促す。
+    let linkSuccessRowCount = 0;
+    let linkFailedRowCount = 0;
+    for (const row of jobRows) {
+      if (row.status === "success" && row.createdId) {
+        const r = linkResultByOwnerId.get(row.createdId);
+        if (r?.linked) {
+          row.errorMessage =
+            r.via === "linkKey"
+              ? "紐づけ完了[リンクキー一致]"
+              : "紐づけ完了[住所一致（正規化比較）]";
+          linkSuccessRowCount++;
+        } else {
+          // 降格: success → needs_review
+          if (r?.ambiguous) {
+            row.errorMessage =
+              "紐づけ不可: 同一住所に複数物件が存在するため要手動紐づけ";
+          } else if (row.hasLinkKey) {
+            row.errorMessage =
+              "紐づけ不可: リンクキーに一致する物件がありません";
+          } else if (row.hasAddress) {
+            row.errorMessage =
+              "紐づけ不可: 住所に一致する物件がありません";
+          } else {
+            row.errorMessage =
+              "紐づけ不可: 物件特定キー（リンクキー/住所）が指定されていません";
+          }
+          row.status = "needs_review";
+          successCount--;
+          needsReviewCount++;
+          linkFailedRowCount++;
+        }
+      }
+    }
+
+    // Save job rows
+    for (const row of jobRows) {
+      const enrichedRawData =
+        row.status === "error" || row.status === "needs_review"
+          ? {
+              ...(row.rawData as Record<string, unknown>),
+              ...buildErrorRawDataExtras(row.errorMessage, row.rawData),
+            }
+          : row.rawData;
+      await prisma.importJobRow.create({
+        data: {
+          jobId: row.jobId,
+          rowNumber: row.rowNumber,
+          status: row.status,
+          rawData: enrichedRawData,
+          errorMessage: row.errorMessage,
+          createdId: row.createdId,
+        },
+      });
+    }
+
     // Finalize job
     await prisma.importJob.update({
       where: { id: job.id },
@@ -388,6 +459,8 @@ export async function POST(request: NextRequest) {
         linkedByAddressCount,
         addressLinkAmbiguousCount,
         linkedCount,
+        linkSuccessRowCount,
+        linkFailedRowCount,
         rescueCandidateCount,
         rescuedLinkedCount,
         rescuedLinkedByLinkKeyCount,
@@ -407,6 +480,8 @@ export async function POST(request: NextRequest) {
         linkedByLinkKeyCount,
         linkedByAddressCount,
         addressLinkAmbiguousCount,
+        linkSuccessRowCount,
+        linkFailedRowCount,
         rescueCandidateCount,
         rescuedLinkedCount,
         rescuedLinkedByLinkKeyCount,

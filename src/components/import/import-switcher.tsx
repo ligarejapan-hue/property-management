@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Upload, Users2, FileText } from "lucide-react";
+import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
 
 /**
  * 取込画面の入口統合コンポーネント。
@@ -16,9 +17,9 @@ import { Upload, Users2, FileText } from "lucide-react";
  */
 
 const ITEMS: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { href: "/import", label: "物件CSV", icon: Upload },
-  { href: "/import/owners", label: "所有者CSV", icon: Users2 },
-  { href: "/import/registry-pdf", label: "謄本PDF", icon: FileText },
+  { href: "/import", label: IMPORT_TYPE_LABELS.property_csv, icon: Upload },
+  { href: "/import/owners", label: IMPORT_TYPE_LABELS.owner_csv, icon: Users2 },
+  { href: "/import/registry-pdf", label: IMPORT_TYPE_LABELS.registry_pdf, icon: FileText },
 ];
 
 export default function ImportSwitcher() {

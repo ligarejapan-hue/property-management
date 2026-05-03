@@ -40,6 +40,10 @@ import {
 import { detectImportFileType } from "@/lib/import-file-type";
 import { readCsvFileAsText } from "@/lib/csv-decode";
 import ImportSwitcher from "@/components/import/import-switcher";
+import {
+  IMPORT_TYPE_FILTER_OPTIONS,
+  getImportTypeLabel,
+} from "@/lib/import-labels";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,14 +82,7 @@ interface ImportJobFilters {
   to: string; // YYYY-MM-DD
 }
 
-const JOB_TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "", label: "すべての種別" },
-  { value: "property_csv", label: "物件CSV" },
-  { value: "owner_csv", label: "所有者CSV" },
-  { value: "property_pdf", label: "謄本PDF" },
-  { value: "dm_history_csv", label: "DM履歴CSV" },
-  { value: "investigation_csv", label: "調査CSV" },
-];
+const JOB_TYPE_OPTIONS = IMPORT_TYPE_FILTER_OPTIONS;
 
 interface ImportResult {
   jobId: string;
@@ -945,6 +942,27 @@ export default function ImportPage() {
   return (
     <div>
       <ImportSwitcher />
+
+      {/* 利用者向け操作ガイド: 取込の順番と各CSVの役割を説明 */}
+      <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm">
+        <p className="mb-2 font-semibold text-blue-900">取込の順番</p>
+        <ol className="ml-4 list-decimal space-y-1 text-blue-900">
+          <li>
+            <span className="font-medium">物件CSV</span> を取り込み、物件・所在地・建物情報を登録/更新します（このページ）
+          </li>
+          <li>
+            <span className="font-medium">所有者CSV</span> を取り込み、所有者情報を登録し、物件CSVで登録済みの物件と紐づけます
+            <span className="ml-1 text-blue-700">— 紐づけにはリンクキーまたは正規化住所が必要</span>
+          </li>
+          <li>
+            <span className="font-medium">謄本PDF</span> は物件詳細または専用ページから登録します
+          </li>
+        </ol>
+        <p className="mt-2 text-xs text-blue-700">
+          紐づけキーが不足している所有者行は「要レビュー」になります。取込詳細から理由が確認できます。
+        </p>
+      </div>
+
       <h2 className="mb-6 text-2xl font-bold text-gray-800">物件CSV / Excel(.xlsx) 取込</h2>
 
       {/* ============ Step Indicator ============ */}
@@ -1826,8 +1844,8 @@ export default function ImportPage() {
               <tbody className="divide-y divide-amber-100">
                 {stuckJobs.map((job) => (
                   <tr key={job.jobId} className="hover:bg-amber-50/50">
-                    <td className="px-2 py-1.5 text-gray-700 font-mono text-[11px]">
-                      {job.jobType}
+                    <td className="px-2 py-1.5 text-gray-700 text-[11px]">
+                      {getImportTypeLabel(job.jobType)}
                     </td>
                     <td className="px-2 py-1.5 text-gray-800">
                       <Link
@@ -2125,7 +2143,7 @@ export default function ImportPage() {
                         {job.fileName}
                       </td>
                       <td className="px-3 py-2 text-xs text-gray-500">
-                        {job.jobType}
+                        {getImportTypeLabel(job.jobType)}
                       </td>
                       <td className="px-3 py-2 text-gray-600">
                         {job.totalRows ?? "-"}

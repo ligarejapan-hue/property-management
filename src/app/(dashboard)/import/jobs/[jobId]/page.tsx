@@ -40,6 +40,7 @@ import {
 } from "@/lib/import-row-display";
 import { calcImportSummary } from "@/lib/import-summary";
 import { classifyImportError } from "@/lib/import-error-display";
+import { getImportTypeLabel } from "@/lib/import-labels";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -120,13 +121,7 @@ const ROW_STATUS_CONFIG: Record<
   },
 };
 
-const JOB_TYPE_LABELS: Record<string, string> = {
-  property_csv: "物件CSV",
-  owner_csv: "所有者CSV",
-  property_pdf: "謄本PDF",
-  dm_history_csv: "DM履歴CSV",
-  investigation_csv: "調査CSV",
-};
+// 取込種別ラベルは共通定義 (src/lib/import-labels.ts) を使用
 
 // ---------------------------------------------------------------------------
 // Component
@@ -417,7 +412,7 @@ export default function ImportJobDetailPage() {
         <div className="flex-1">
           <h2 className="text-2xl font-bold text-gray-800">取込ジョブ詳細</h2>
           <p className="text-sm text-gray-500">
-            {JOB_TYPE_LABELS[job.jobType] ?? job.jobType} - {job.fileName}
+            {getImportTypeLabel(job.jobType)} - {job.fileName}
           </p>
         </div>
         {/* ロールバックボタン: 物件CSV かつ完了状態のみ。ロールバック済みはバッジ表示のみ */}
