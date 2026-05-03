@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
 
@@ -42,6 +42,9 @@ const ACTION_LABELS: Record<string, string> = {
   template_delete: "テンプレート削除",
   investigation_trigger: "調査実行",
   investigation_confirm: "調査確定",
+  import_job_mark_failed: "取込を手動失敗化",
+  import_job_rollback: "取込ロールバック",
+  import_row_resolve: "取込行解決",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {
@@ -63,6 +66,8 @@ export default function AuditLogsPage() {
   const [loading, setLoading] = useState(true);
   const [actions, setActions] = useState<string[]>([]);
   const [targetTables, setTargetTables] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Filters
   const [dateFrom, setDateFrom] = useState("");
@@ -74,6 +79,7 @@ export default function AuditLogsPage() {
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (actionFilter) params.set("action", actionFilter);
@@ -83,14 +89,17 @@ export default function AuditLogsPage() {
       if (dateTo) params.set("to", dateTo);
 
       const res = await fetch(`/api/admin/audit-logs?${params}`);
-      if (!res.ok) throw new Error("Failed to fetch");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error?.message ?? `取得に失敗しました (${res.status})`);
+      }
       const json = await res.json();
       setLogs(json.data);
       setTotal(json.total);
       if (json.actions) setActions(json.actions);
       if (json.targetTables) setTargetTables(json.targetTables);
-    } catch {
-      console.error("Failed to fetch audit logs");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "監査ログの取得に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -127,6 +136,12 @@ export default function AuditLogsPage() {
       <p className="text-sm text-gray-500 mb-6">
         監査ログは閲覧のみです。編集・削除はできません。
       </p>
+
+      {error && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       {/* Filter bar */}
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
@@ -239,34 +254,60 @@ export default function AuditLogsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
-              {logs.map((log) => (
-                <tr key={log.id} className="hover:bg-gray-50">
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 font-mono">
-                    {new Date(log.createdAt).toLocaleString("ja-JP")}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
-                    {log.user?.name ?? "不明"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm">
-                    <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                      {ACTION_LABELS[log.action] ?? log.action}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
-                    {log.targetTable && (
-                      <span>
-                        {TARGET_TABLE_LABELS[log.targetTable] ?? log.targetTable}
-                        {log.targetId && (
-                          <span className="text-gray-400 ml-1">#{log.targetId.slice(0, 8)}</span>
+              {logs.map((log) => {
+                const expanded = expandedId === log.id;
+                const hasDetail = log.detail != null;
+                return (
+                  <Fragment key={log.id}>
+                    <tr
+                      className={`hover:bg-gray-50 ${hasDetail ? "cursor-pointer" : ""}`}
+                      onClick={() =>
+                        hasDetail && setExpandedId(expanded ? null : log.id)
+                      }
+                    >
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 font-mono">
+                        {new Date(log.createdAt).toLocaleString("ja-JP")}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
+                        {log.user?.name ?? "不明"}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm">
+                        <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                          {ACTION_LABELS[log.action] ?? log.action}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
+                        {log.targetTable && (
+                          <span>
+                            {TARGET_TABLE_LABELS[log.targetTable] ?? log.targetTable}
+                            {log.targetId && (
+                              <span className="text-gray-400 ml-1">#{log.targetId.slice(0, 8)}</span>
+                            )}
+                          </span>
                         )}
-                      </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate">
+                        {hasDetail ? (
+                          <span className="text-indigo-600">
+                            {expanded ? "▼ 折りたたむ" : "▶ 展開"}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                    {expanded && hasDetail && (
+                      <tr className="bg-gray-50">
+                        <td colSpan={5} className="px-4 py-3">
+                          <pre className="max-h-80 overflow-auto rounded border border-gray-200 bg-white p-3 text-xs text-gray-700">
+                            {JSON.stringify(log.detail, null, 2)}
+                          </pre>
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate">
-                    {log.detail ? JSON.stringify(log.detail) : "—"}
-                  </td>
-                </tr>
-              ))}
+                  </Fragment>
+                );
+              })}
               {logs.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400">
