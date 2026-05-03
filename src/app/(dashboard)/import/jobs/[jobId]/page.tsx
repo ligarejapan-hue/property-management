@@ -18,15 +18,18 @@ import {
   ChevronRight,
   Search,
   Download,
+  RotateCcw,
 } from "lucide-react";
 import {
   fetchImportJobDetail,
   fetchAffectedProperties,
   resolveImportRow,
   retryImportRow,
+  rollbackImportJob,
   searchProperties,
   searchOwners,
   type AffectedPropertiesResponse,
+  type RollbackResponse,
 } from "@/lib/api-client";
 import {
   isDuplicateMessage,
@@ -151,6 +154,13 @@ export default function ImportJobDetailPage() {
   const [editingRow, setEditingRow] = useState<string | null>(null);
   const [editedData, setEditedData] = useState<Record<string, string>>({});
 
+  // Rollback dialog state
+  const [rollbackOpen, setRollbackOpen] = useState(false);
+  const [rollbackLoading, setRollbackLoading] = useState(false);
+  const [rollbackPreview, setRollbackPreview] = useState<RollbackResponse | null>(null);
+  const [rollbackResult, setRollbackResult] = useState<RollbackResponse | null>(null);
+  const [rollbackError, setRollbackError] = useState<string | null>(null);
+
   // Search-and-link state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -189,6 +199,46 @@ export default function ImportJobDetailPage() {
     fetchJob();
     fetchAffected();
   }, [fetchJob, fetchAffected]);
+
+  // ロールバック確認ダイアログ起動 → dry-run で対象件数を取得
+  const openRollbackDialog = useCallback(async () => {
+    setRollbackOpen(true);
+    setRollbackPreview(null);
+    setRollbackResult(null);
+    setRollbackError(null);
+    setRollbackLoading(true);
+    try {
+      const res = await rollbackImportJob(jobId, true);
+      setRollbackPreview(res);
+    } catch (err) {
+      setRollbackError(err instanceof Error ? err.message : "プレビュー取得に失敗しました");
+    } finally {
+      setRollbackLoading(false);
+    }
+  }, [jobId]);
+
+  // 実行（二重送信は rollbackLoading で防止）
+  const executeRollback = useCallback(async () => {
+    if (rollbackLoading) return;
+    setRollbackLoading(true);
+    setRollbackError(null);
+    try {
+      const res = await rollbackImportJob(jobId, false);
+      setRollbackResult(res);
+      // 実行後はジョブ状態を最新化
+      await fetchJob();
+      await fetchAffected();
+    } catch (err) {
+      setRollbackError(err instanceof Error ? err.message : "ロールバックに失敗しました");
+    } finally {
+      setRollbackLoading(false);
+    }
+  }, [jobId, rollbackLoading, fetchJob, fetchAffected]);
+
+  const closeRollbackDialog = () => {
+    if (rollbackLoading) return;
+    setRollbackOpen(false);
+  };
 
   // Debounced search
   const doSearch = useCallback(
@@ -364,12 +414,29 @@ export default function ImportJobDetailPage() {
         >
           <ArrowLeft className="h-5 w-5" />
         </Link>
-        <div>
+        <div className="flex-1">
           <h2 className="text-2xl font-bold text-gray-800">取込ジョブ詳細</h2>
           <p className="text-sm text-gray-500">
             {JOB_TYPE_LABELS[job.jobType] ?? job.jobType} - {job.fileName}
           </p>
         </div>
+        {/* ロールバックボタン: 物件CSV かつ完了状態のみ。ロールバック済みはバッジ表示のみ */}
+        {job.jobType === "property_csv" && job.status === "completed" && (
+          <button
+            onClick={openRollbackDialog}
+            className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
+            title="この取込で作成された物件を削除します"
+          >
+            <RotateCcw className="h-4 w-4" />
+            ロールバック
+          </button>
+        )}
+        {job.status === "rolled_back" && (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-purple-300 bg-purple-50 px-3 py-1.5 text-sm font-medium text-purple-700">
+            <RotateCcw className="h-4 w-4" />
+            ロールバック済み
+          </span>
+        )}
       </div>
 
       {/* Job summary
@@ -392,6 +459,9 @@ export default function ImportJobDetailPage() {
               )}
               {job.status === "pending" && (
                 <span className="text-amber-600">待機中</span>
+              )}
+              {job.status === "rolled_back" && (
+                <span className="text-purple-700">ロールバック済み</span>
               )}
             </div>
           </div>
@@ -1200,6 +1270,124 @@ export default function ImportJobDetailPage() {
           })
         )}
       </div>
+
+      {/* Rollback dialog */}
+      {rollbackOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
+            <div className="border-b border-gray-200 px-5 py-3">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-gray-800">
+                <RotateCcw className="h-4 w-4 text-red-600" />
+                取込ロールバック
+              </h3>
+            </div>
+            <div className="space-y-3 px-5 py-4 text-sm">
+              {rollbackLoading && !rollbackPreview && !rollbackResult && (
+                <div className="flex items-center gap-2 text-gray-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  対象を確認中...
+                </div>
+              )}
+              {rollbackError && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-700">
+                  {rollbackError}
+                </div>
+              )}
+              {rollbackResult ? (
+                <div className="space-y-2">
+                  <div className="rounded-md border border-green-200 bg-green-50 p-3 text-green-800">
+                    ロールバック完了: {rollbackResult.deletedCount ?? 0} 件削除しました
+                  </div>
+                  {rollbackResult.blockedDetails.length > 0 && (
+                    <div>
+                      <p className="font-medium text-gray-700">対応できなかった行 ({rollbackResult.blockedDetails.length}):</p>
+                      <ul className="mt-1 max-h-48 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600">
+                        {rollbackResult.blockedDetails.map((b) => (
+                          <li key={`${b.rowNumber}-${b.action}`}>
+                            行 {b.rowNumber} ({b.action === "delete" ? "削除" : "復元"}): {b.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : rollbackPreview && rollbackPreview.eligible ? (
+                <>
+                  <p className="text-gray-700">
+                    この取込で作成された物件を削除します。この操作は取り消せません。
+                  </p>
+                  <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <div className="text-gray-500">削除対象 (新規)</div>
+                        <div className="text-base font-semibold text-red-600">
+                          {rollbackPreview.summary.deletable}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">ロールバック不可</div>
+                        <div className="text-base font-semibold text-amber-600">
+                          {rollbackPreview.summary.blocked}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">対象外 (skip/error 等)</div>
+                        <div className="text-base font-semibold text-gray-700">
+                          {rollbackPreview.summary.skipped}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {rollbackPreview.blockedDetails.length > 0 && (
+                    <details className="text-xs text-gray-600">
+                      <summary className="cursor-pointer text-gray-700">
+                        ロールバック不可の内訳を表示
+                      </summary>
+                      <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2">
+                        {rollbackPreview.blockedDetails.map((b) => (
+                          <li key={`${b.rowNumber}-${b.action}`}>
+                            行 {b.rowNumber} ({b.action === "delete" ? "削除" : "復元"}): {b.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </>
+              ) : rollbackPreview && !rollbackPreview.eligible ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                  {rollbackPreview.ineligibleReason ?? "ロールバックできません"}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-3">
+              <button
+                onClick={closeRollbackDialog}
+                disabled={rollbackLoading}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {rollbackResult ? "閉じる" : "キャンセル"}
+              </button>
+              {!rollbackResult &&
+                rollbackPreview &&
+                rollbackPreview.eligible &&
+                rollbackPreview.summary.deletable > 0 && (
+                  <button
+                    onClick={executeRollback}
+                    disabled={rollbackLoading}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {rollbackLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="h-4 w-4" />
+                    )}
+                    実行する
+                  </button>
+                )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

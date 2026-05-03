@@ -478,6 +478,49 @@ export async function fetchAffectedProperties(
   );
 }
 
+export interface RollbackBlockedDetail {
+  rowNumber: number;
+  action: "delete" | "restore";
+  reason: string;
+}
+
+export interface RollbackResponse {
+  alreadyRolledBack: boolean;
+  eligible: boolean;
+  ineligibleReason?: string;
+  summary: {
+    deletable: number;
+    restorable: number;
+    blocked: number;
+    skipped: number;
+  };
+  blockedDetails: RollbackBlockedDetail[];
+  executed: boolean;
+  deletedCount?: number;
+}
+
+export async function rollbackImportJob(
+  jobId: string,
+  dryRun: boolean,
+): Promise<RollbackResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      alreadyRolledBack: false,
+      eligible: false,
+      ineligibleReason: "モックモードではロールバック未対応",
+      summary: { deletable: 0, restorable: 0, blocked: 0, skipped: 0 },
+      blockedDetails: [],
+      executed: false,
+    };
+  }
+  return apiFetch<RollbackResponse>(`/api/import/jobs/${jobId}/rollback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dryRun }),
+  });
+}
+
 export async function resolveImportRow(
   jobId: string,
   rowId: string,
