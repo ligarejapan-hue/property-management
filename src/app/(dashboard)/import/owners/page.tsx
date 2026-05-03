@@ -570,7 +570,7 @@ export default function OwnerImportPage() {
             </div>
             <p className="mt-1 text-xs text-blue-600">
               CSVに「リンクキー」列を含めると、同じリンクキーを持つ物件と所有者が自動的に紐付けられます。
-              物件CSVにも同じリンクキーを設定してください。
+              受付CSVにも同じリンクキーを設定してください。
             </p>
           </div>
 
@@ -679,7 +679,7 @@ export default function OwnerImportPage() {
 
           <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
             <span>
-              {Object.keys(columnMapping).length} / {headers.length} カラム対応済
+              {Object.keys(columnMapping).length} 項目を割当済み
             </span>
             <div className="flex gap-3">
               {!mappedFields.has("氏名") && (

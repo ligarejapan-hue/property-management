@@ -9,7 +9,7 @@ import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
  * 取込画面の入口統合コンポーネント。
  *
  * `/import`、`/import/owners`、`/import/registry-pdf` の各ページ先頭に表示し、
- * 「物件CSV」「所有者CSV」「謄本PDF」の3モードを横タブとして並べる。
+ * 「受付CSV」「所有者CSV」「謄本PDF」の3モードを横タブとして並べる。
  *
  * - 内部ロジック・APIは既存ページ側そのまま（このコンポーネントは導線のみ）
  * - 既存URLは温存（既存リンク・ブックマーク互換）

@@ -144,7 +144,7 @@ const TEMPLATES: Record<
   { label: string; columns: string[] }
 > = {
   standard: {
-    label: "標準物件CSV",
+    label: "標準受付CSV",
     columns: [
       "住所(必須)",
       "地番",
@@ -945,13 +945,13 @@ export default function ImportPage() {
 
       {/* 利用者向け操作ガイド: 取込の順番と各CSVの役割を説明 */}
       <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm">
-        <p className="mb-2 font-semibold text-blue-900">取込の順番</p>
+        <p className="mb-2 font-semibold text-blue-900">取込の進め方</p>
         <ol className="ml-4 list-decimal space-y-1 text-blue-900">
           <li>
-            <span className="font-medium">物件CSV</span> を取り込み、物件・所在地・建物情報を登録/更新します（このページ）
+            <span className="font-medium">受付CSV</span> を取り込み、受付帳の情報から物件を登録/更新します（このページ）
           </li>
           <li>
-            <span className="font-medium">所有者CSV</span> を取り込み、所有者情報を登録し、物件CSVで登録済みの物件と紐づけます
+            <span className="font-medium">所有者CSV</span> を取り込み、所有者を登録し、受付CSVで登録済みの物件と紐づけます
             <span className="ml-1 text-blue-700">— 紐づけにはリンクキーまたは正規化住所が必要</span>
           </li>
           <li>
@@ -959,11 +959,11 @@ export default function ImportPage() {
           </li>
         </ol>
         <p className="mt-2 text-xs text-blue-700">
-          紐づけキーが不足している所有者行は「要レビュー」になります。取込詳細から理由が確認できます。
+          物件が未登録の状態で所有者CSVを取り込むと、所有者は物件に紐づきません。先に受付CSVを取り込んでください。紐づけキーが不足している行は「要レビュー」として残ります。
         </p>
       </div>
 
-      <h2 className="mb-6 text-2xl font-bold text-gray-800">物件CSV / Excel(.xlsx) 取込</h2>
+      <h2 className="mb-6 text-2xl font-bold text-gray-800">受付CSV / Excel(.xlsx) 取込</h2>
 
       {/* ============ Step Indicator ============ */}
       <div className="mb-8 flex items-center justify-center gap-0">
@@ -1192,10 +1192,9 @@ export default function ImportPage() {
           </div>
 
           <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
-            <span>
-              {Object.keys(columnMapping).length} / {headers.length}{" "}
-              カラム対応済
-            </span>
+            {/* Excel の使用範囲が 1024 列まで広がっているケースで「N / 1024 カラム対応済」と
+                出るのが利用者には意味不明だったため、分母を撤去して割当数のみ表示する。 */}
+            <span>{Object.keys(columnMapping).length} 項目を割当済み</span>
             {!mappedFields.has("住所") && (
               <span className="text-amber-600 font-medium">
                 <AlertTriangle className="mr-1 inline h-4 w-4" />
@@ -1598,10 +1597,16 @@ export default function ImportPage() {
             既存物件に反映
           </span>
         </div>
-        <p className="mb-4 text-sm text-gray-500">
-          受付帳CSV（H/I/J/K列）と所有者CSV（C列）をキーに突合し、一意特定できた行だけを既存物件に反映します。
-          共有名義人は複数行のまま残します。空値では上書きしません。
+        <p className="mb-3 text-sm text-gray-500">
+          受付CSVと所有者CSVをキーで突合し、一意に特定できた行だけを既存物件に反映します。
+          共有名義人は複数行のまま残します。空値では既存データを上書きしません。
         </p>
+        <ol className="mb-4 ml-5 list-decimal space-y-0.5 text-xs text-gray-600">
+          <li>受付CSV を選択（受付帳の情報を読み込みます）</li>
+          <li>所有者CSV を選択（所有者名・住所などを読み込みます）</li>
+          <li>「突合結果をプレビュー」で突合成功・未突合・要レビューを確認</li>
+          <li>「確認済みデータを取り込む」で一意に特定できた行だけを反映</li>
+        </ol>
 
         <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
@@ -1647,7 +1652,7 @@ export default function ImportPage() {
             className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
-            プレビュー
+            突合結果をプレビュー
           </button>
           <button
             onClick={handleRoImport}
@@ -1655,7 +1660,7 @@ export default function ImportPage() {
             className="flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-            取り込み実行
+            確認済みデータを取り込む
           </button>
           <button
             onClick={handleRoReset}
@@ -1663,7 +1668,7 @@ export default function ImportPage() {
             className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
           >
             <RefreshCw className="h-4 w-4" />
-            クリア
+            選択をクリア
           </button>
         </div>
 
