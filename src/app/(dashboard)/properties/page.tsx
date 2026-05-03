@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle } from "lucide-react";
-import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck } from "@/lib/api-client";
+import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw } from "lucide-react";
+import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers } from "@/lib/api-client";
 import NewPropertyModal from "@/components/properties/new-property-modal";
 
 // ---------- Label maps ----------
@@ -71,7 +72,17 @@ interface Pagination {
 
 // ---------- Component ----------
 
+// Next.js 16 では useSearchParams を使うクライアントコンポーネントを Suspense で
+// 包む必要がある。インナーに本体を置き、default export 側で Suspense ラップする。
 export default function PropertiesPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">読み込み中...</div>}>
+      <PropertiesPageInner />
+    </Suspense>
+  );
+}
+
+function PropertiesPageInner() {
   const [properties, setProperties] = useState<ApiProperty[]>([]);
   const [pagination, setPagination] = useState<Pagination>({
     page: 1,
@@ -82,16 +93,27 @@ export default function PropertiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
-  const [searchText, setSearchText] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [registryFilter, setRegistryFilter] = useState("");
-  const [dmFilter, setDmFilter] = useState("");
-  const [caseFilter, setCaseFilter] = useState("");
-  const [warningOnly, setWarningOnly] = useState(false);
+  // URL query params (state の初期値とブラウザ更新後の復元に使う)
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Filters — URL から初期化することでブックマーク・更新・共有が可能
+  const [searchText, setSearchText] = useState(() => sp.get("keyword") ?? "");
+  const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
+  const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
+  const [dmFilter, setDmFilter] = useState(() => sp.get("dmStatus") ?? "");
+  const [caseFilter, setCaseFilter] = useState(() => sp.get("caseStatus") ?? "");
+  const [assigneeFilter, setAssigneeFilter] = useState(() => sp.get("assignedTo") ?? "");
+  const [updatedFromFilter, setUpdatedFromFilter] = useState(() => sp.get("updatedFrom") ?? "");
+  const [updatedToFilter, setUpdatedToFilter] = useState(() => sp.get("updatedTo") ?? "");
+  const [warningOnly, setWarningOnly] = useState(() => sp.get("hasWarning") === "true");
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
-  const [sort, setSort] = useState<string>("updatedAt:desc");
-  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
+  const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
+
+  // 担当者プルダウン用ユーザー一覧
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
 
   // 警告 (quality-check) を propertyId 単位で集計。
   // 既存の /api/properties/quality-check を流用するので新 API は追加しない。
@@ -123,6 +145,9 @@ export default function PropertiesPage() {
     if (registryFilter) params.registryStatus = registryFilter;
     if (dmFilter) params.dmStatus = dmFilter;
     if (caseFilter) params.caseStatus = caseFilter;
+    if (assigneeFilter) params.assignedTo = assigneeFilter;
+    if (updatedFromFilter) params.updatedFrom = updatedFromFilter;
+    if (updatedToFilter) params.updatedTo = updatedToFilter;
     if (warningOnly) params.hasWarning = "true";
     const [sortBy, sortOrder] = sort.split(":");
     if (sortBy) params.sortBy = sortBy;
@@ -138,11 +163,39 @@ export default function PropertiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchText, typeFilter, registryFilter, dmFilter, caseFilter, warningOnly, sort]);
+  }, [page, searchText, typeFilter, registryFilter, dmFilter, caseFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
 
   useEffect(() => {
     fetchProperties();
   }, [fetchProperties]);
+
+  // 担当者プルダウン用にユーザー一覧を初回のみ取得（失敗時はサイレントに無視）
+  useEffect(() => {
+    fetchUsers()
+      .then((res) => {
+        const data = (res as { data?: { id: string; name: string }[] }).data ?? [];
+        setUsers(data);
+      })
+      .catch(() => {});
+  }, []);
+
+  // state を URL query params に同期（router.replace なのでページ遷移なし）
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchText) params.set("keyword", searchText);
+    if (typeFilter) params.set("propertyType", typeFilter);
+    if (registryFilter) params.set("registryStatus", registryFilter);
+    if (dmFilter) params.set("dmStatus", dmFilter);
+    if (caseFilter) params.set("caseStatus", caseFilter);
+    if (assigneeFilter) params.set("assignedTo", assigneeFilter);
+    if (updatedFromFilter) params.set("updatedFrom", updatedFromFilter);
+    if (updatedToFilter) params.set("updatedTo", updatedToFilter);
+    if (warningOnly) params.set("hasWarning", "true");
+    if (sort !== "updatedAt:desc") params.set("sort", sort);
+    if (page > 1) params.set("page", String(page));
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [searchText, typeFilter, registryFilter, dmFilter, caseFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort, page, pathname, router]);
 
   // 警告サマリは初回 / 一覧再取得時に best-effort で更新する。
   // 失敗してもバッジが出ないだけで一覧本体は表示できる設計。
@@ -194,6 +247,27 @@ export default function PropertiesPage() {
     setter(e.target.value);
     setPage(1);
   };
+
+  // 全フィルタを一括リセット（並び順は既定に戻し、page=1）
+  const handleResetFilters = () => {
+    setSearchText("");
+    setTypeFilter("");
+    setRegistryFilter("");
+    setDmFilter("");
+    setCaseFilter("");
+    setAssigneeFilter("");
+    setUpdatedFromFilter("");
+    setUpdatedToFilter("");
+    setWarningOnly(false);
+    setSort("updatedAt:desc");
+    setPage(1);
+  };
+
+  // 何らかのフィルタが効いているか（リセットボタン活性化用）
+  const hasActiveFilter =
+    !!searchText || !!typeFilter || !!registryFilter || !!dmFilter ||
+    !!caseFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
+    warningOnly || sort !== "updatedAt:desc";
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -425,6 +499,50 @@ export default function PropertiesPage() {
           <option value="caseStatus:asc">案件ステータス順</option>
           <option value="address:asc">住所昇順</option>
         </select>
+
+        <select
+          value={assigneeFilter}
+          onChange={handleFilterChange(setAssigneeFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          title="担当者"
+        >
+          <option value="">担当者: すべて</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+
+        <label className="flex items-center gap-1 text-sm text-gray-600">
+          更新日:
+          <input
+            type="date"
+            value={updatedFromFilter}
+            onChange={handleFilterChange(setUpdatedFromFilter)}
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            title="更新日（開始）"
+          />
+          <span className="text-gray-400">〜</span>
+          <input
+            type="date"
+            value={updatedToFilter}
+            onChange={handleFilterChange(setUpdatedToFilter)}
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            title="更新日（終了）"
+          />
+        </label>
+
+        <button
+          type="button"
+          onClick={handleResetFilters}
+          disabled={!hasActiveFilter}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          title="全フィルタをリセット"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          リセット
+        </button>
       </div>
 
       {/* Error */}
