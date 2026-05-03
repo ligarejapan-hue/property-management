@@ -9,15 +9,15 @@
 import fs from "fs/promises";
 import path from "path";
 import type { StorageAdapter, StorageUploadResult } from "./types";
-
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
+import { resolveSafeUploadPath } from "./local-paths";
 
 export class LocalStorageAdapter implements StorageAdapter {
   async upload(
     file: Buffer,
     options: { key: string; mimeType: string; fileName: string },
   ): Promise<StorageUploadResult> {
-    const dest = path.join(UPLOAD_DIR, options.key);
+    // path traversal チェック付きで dest を解決（root 外への書き込みを防止）
+    const dest = resolveSafeUploadPath(options.key);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.writeFile(dest, file);
 
@@ -26,7 +26,13 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async delete(key: string): Promise<void> {
-    const filePath = path.join(UPLOAD_DIR, key);
+    let filePath: string;
+    try {
+      filePath = resolveSafeUploadPath(key);
+    } catch {
+      // 不正な key は「既に存在しない」と同等に扱う（ハードエラーにはしない）
+      return;
+    }
     try {
       await fs.unlink(filePath);
     } catch {

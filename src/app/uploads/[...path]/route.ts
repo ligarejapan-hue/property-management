@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server";
 import fs from "fs/promises";
 import path from "path";
-
-const UPLOAD_ROOT = path.join(process.cwd(), "public", "uploads");
+import { getLocalUploadRoot } from "@/lib/storage/local-paths";
 
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -25,10 +24,13 @@ export async function GET(
   }
 
   const rel = parts.join("/");
-  const target = path.normalize(path.join(UPLOAD_ROOT, rel));
+  // ローカル保存先ルートは LOCAL_UPLOAD_ROOT env で上書き可能（既定は public/uploads）。
+  // local-adapter.ts と同じ getLocalUploadRoot を使い両者を必ず一致させる。
+  const uploadRoot = getLocalUploadRoot();
+  const target = path.normalize(path.join(uploadRoot, rel));
 
   // パストラバーサル防御: 解決後パスが UPLOAD_ROOT 配下に収まっていること
-  if (!target.startsWith(UPLOAD_ROOT + path.sep) && target !== UPLOAD_ROOT) {
+  if (!target.startsWith(uploadRoot + path.sep) && target !== uploadRoot) {
     return new Response("Forbidden", { status: 403 });
   }
 
