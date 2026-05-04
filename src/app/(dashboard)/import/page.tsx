@@ -1661,6 +1661,9 @@ export default function ImportPage() {
           <p className="mt-2 text-xs text-gray-500">
             条件はプレビュー・取り込み実行の両方に同じものが適用されます。物件住所は「都道府県＋区＋住所＋番地」から作成されます。受付番号は取り込まず、「他」列は共有名義人の有無として扱います。
           </p>
+          <p className="mt-1 text-xs text-gray-500">
+            所有者CSVの「物件住所」が、受付帳CSVの物件住所と一致した場合のみ紐づけます。所有者住所は「都道府県＋所有者市区郡＋所有者住所＋建物名」を連結し、〒は別フィールドとして郵便番号に保存します。No / DL / 受付番号 / 「他」は紐づけキーに使いません。
+          </p>
         </div>
 
         <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">

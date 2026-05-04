@@ -78,13 +78,32 @@ function normalizeShinki(value: string | null | undefined): string {
 
 export interface ParsedOwnerRow {
   rowNumber: number;
+  /**
+   * 受付帳CSVの「物件住所」と突合する正規化キー。
+   * 優先順:
+   *   1. ヘッダ「物件住所」列の値
+   *   2. なければ C列(=index 2) を後方互換のフォールバックとして使う
+   */
   matchKey: string;
+  /** 後方互換: C列(=index 2) の生値。matchKey の派生元として残す */
   cColumn: string;
+  /** ヘッダ「物件住所」列の値（なければ null） */
+  propertyAddress: string | null;
   name: string | null;
+  /**
+   * 表示用の所有者住所。
+   * 都道府県 + 所有者市区郡 + 所有者住所(町名番地) + 建物名 を連結。
+   * 〒 / 物件住所 は混ぜない。連結時に区切り文字は入れず、空欄は空文字扱い。
+   */
   address: string | null;
+  prefecture: string | null;
+  city: string | null;
+  streetAddress: string | null;
   buildingName: string | null;
   roomNo: string | null;
   zip: string | null;
+  /** ヘッダ「DM」列の生値。DM対象フラグの判定材料として保持（Property.dmStatus は自動更新しない） */
+  dm: string | null;
 }
 
 export interface PropertyCandidate {
@@ -221,20 +240,43 @@ function detectExcludedReason(
  * 所有者CSV ヘッダ名 → 論理フィールド のマップ（固定）。
  * 既存 owner-csv ルートと揃える。
  */
-type OwnerField = "name" | "address" | "buildingName" | "roomNo" | "zip";
+type OwnerField =
+  | "name"
+  | "propertyAddress"
+  | "prefecture"
+  | "city"
+  | "streetAddress"
+  | "buildingName"
+  | "roomNo"
+  | "zip"
+  | "dm";
 
+/**
+ * 所有者CSV ヘッダ名 → 論理フィールドのマップ（固定）。
+ *
+ * - 「物件住所」: 受付帳CSVと突合する紐づけキー（最優先）
+ * - 「都道府県」/「所有者市区郡」/「所有者住所」/「建物名」: 連結して所有者住所(表示用)を組み立てる
+ * - 「〒」/「郵便番号」: 所有者郵便番号
+ * - 「No」: 取り込まない（紐づけキーにも使わない） → このマップに含めない
+ *
+ * 「住所」(無印) は後方互換のため streetAddress として扱う（旧CSVが該当列を持つケース）。
+ */
 const OWNER_HEADER_TO_FIELD: Record<string, OwnerField> = {
   "氏名": "name",
   "所有者氏名": "name",
   "所有者名": "name",
-  "住所": "address",
-  "所有者住所": "address",
+  "物件住所": "propertyAddress",
+  "都道府県": "prefecture",
+  "所有者市区郡": "city",
+  "所有者住所": "streetAddress",
+  "住所": "streetAddress",
   "建物名": "buildingName",
   "マンション名": "buildingName",
   "部屋番号": "roomNo",
   "号室": "roomNo",
   "郵便番号": "zip",
   "〒": "zip",
+  "DM": "dm",
 };
 
 /**
@@ -262,15 +304,35 @@ export function parseOwnerRows(
       const v = (row[idx] ?? "").trim();
       return v || null;
     };
+
+    // 紐づけキー: 「物件住所」ヘッダがあればそれを優先。無ければ C列の生値で後方互換。
+    const propertyAddress = pick("propertyAddress");
+    const matchSource = propertyAddress ?? cColumn;
+
+    const prefecture = pick("prefecture");
+    const city = pick("city");
+    const streetAddress = pick("streetAddress");
+    const buildingName = pick("buildingName");
+    // 表示用の所有者住所を組み立て: 区切りなし連結、空欄は空文字扱い
+    const combinedParts = [prefecture, city, streetAddress, buildingName]
+      .map((v) => (v ?? "").trim())
+      .filter((v) => v !== "");
+    const combinedAddress = combinedParts.length > 0 ? combinedParts.join("") : null;
+
     return {
       rowNumber: i + 2,
-      matchKey: buildOwnerMatchKey(cColumn),
+      matchKey: buildOwnerMatchKey(matchSource),
       cColumn,
+      propertyAddress,
       name: pick("name"),
-      address: pick("address"),
-      buildingName: pick("buildingName"),
+      address: combinedAddress,
+      prefecture,
+      city,
+      streetAddress,
+      buildingName,
       roomNo: pick("roomNo"),
       zip: pick("zip"),
+      dm: pick("dm"),
     };
   });
 }

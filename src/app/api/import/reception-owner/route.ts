@@ -190,6 +190,13 @@ export async function POST(request: NextRequest) {
     for (const c of combined) {
       const reason = getReviewReason(c);
       const rowNumber = c.reception.rowNumber;
+      // 所有者側の DM フラグ・物件住所も rawData に集約（複数件の場合はカンマ区切り）
+      const ownerDmList = c.owners
+        .map((o) => (o.dm ?? "").trim())
+        .filter((v) => v !== "");
+      const ownerPropAddrList = c.owners
+        .map((o) => (o.propertyAddress ?? "").trim())
+        .filter((v) => v !== "");
       const rawData: Record<string, string> = {
         matchKey: c.reception.matchKey,
         fColumn: c.reception.fColumn,
@@ -201,6 +208,10 @@ export async function POST(request: NextRequest) {
         共有名義人の有無: c.reception.coOwnersNote,
         新既: c.reception.shinkiValue,
         DL: c.reception.dlMarked ? "〇" : "",
+        // 所有者CSV側の DM フラグは Property.dmStatus を自動上書きしない方針。
+        // ImportJobRow.rawData に集約して可視化のみ行う。
+        所有者DM: ownerDmList.join(","),
+        所有者CSV物件住所: ownerPropAddrList.join(" / "),
       };
 
       if (reason) {

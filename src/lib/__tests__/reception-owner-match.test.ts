@@ -123,62 +123,81 @@ describe("parseReceptionRows", () => {
 // ---------- parseOwnerRows ----------
 
 describe("parseOwnerRows", () => {
-  it("ヘッダ名で氏名/住所/建物名/部屋番号/郵便番号を拾い、C=2 を固定キーにする", () => {
-    const headers = ["A", "B", "所在地", "氏名", "住所", "建物名", "部屋番号", "郵便番号"];
-    const rows = [
-      ["", "", "東京都港区1-2-3 100", "山田太郎", "東京都港区1-2-3", "XXマンション", "101", "105-0001"],
-    ];
-    const [o] = parseOwnerRows(headers, rows);
-    expect(o.cColumn).toBe("東京都港区1-2-3 100");
-    expect(o.matchKey).toBe("東京都港区1-2-3100");
-    expect(o.name).toBe("山田太郎");
-    expect(o.address).toBe("東京都港区1-2-3");
-    expect(o.buildingName).toBe("XXマンション");
-    expect(o.roomNo).toBe("101");
-    expect(o.zip).toBe("105-0001");
-  });
-
-  it("別名ヘッダ（所有者氏名/マンション名/号室/〒）も拾う", () => {
-    const headers = ["X", "Y", "Z", "所有者氏名", "所有者住所", "マンション名", "号室", "〒"];
-    const rows = [["", "", "東京都港区1-2-3", "A", "東京都", "YY", "202", "100-0001"]];
-    const [o] = parseOwnerRows(headers, rows);
-    expect(o.name).toBe("A");
-    expect(o.address).toBe("東京都");
-    expect(o.buildingName).toBe("YY");
-    expect(o.roomNo).toBe("202");
-    expect(o.zip).toBe("100-0001");
-  });
-
-  it("実データ準拠ヘッダ（所有者名/〒/所有者住所/建物名）も拾う", () => {
-    // tmp/reception-owner-samples の所有者ファイルで実際に出現するヘッダ並び：
-    // ['No','DM','物件住所','〒','都道府県','所有者市区郡','所有者住所','建物名','所有者名',...]
+  it("「物件住所」ヘッダがあれば紐づけキーに使い、所有者住所は4列連結で組み立てる", () => {
+    // 実データ準拠: ['No','DM','物件住所','〒','都道府県','所有者市区郡','所有者住所','建物名','所有者名']
     const headers = [
       "No", "DM", "物件住所", "〒", "都道府県",
       "所有者市区郡", "所有者住所", "建物名", "所有者名",
     ];
     const rows = [[
-      "1", "DM", "東京都世田谷区1-2-3 100",
-      "154-0001", "東京都",
-      "世田谷区", "東京都世田谷区1-2-3", "サンプル荘", "山田 花子",
+      "1", "〇", "東京都世田谷区1-2-3", "154-0001", "東京都",
+      "世田谷区", "1-2-3", "サンプル荘", "山田 花子",
     ]];
     const [o] = parseOwnerRows(headers, rows);
     expect(o.name).toBe("山田 花子");
-    expect(o.address).toBe("東京都世田谷区1-2-3");
+    expect(o.propertyAddress).toBe("東京都世田谷区1-2-3");
+    // matchKey は 物件住所 列の値を正規化したもの（C列ではない）
+    expect(o.matchKey).toBe("東京都世田谷区1-2-3");
+    // 表示用住所は 都道府県+市区郡+所有者住所+建物名 の連結
+    expect(o.address).toBe("東京都世田谷区1-2-3サンプル荘");
+    expect(o.prefecture).toBe("東京都");
+    expect(o.city).toBe("世田谷区");
+    expect(o.streetAddress).toBe("1-2-3");
     expect(o.buildingName).toBe("サンプル荘");
     expect(o.zip).toBe("154-0001");
-    // C列(=index 2)が固定キー
-    expect(o.cColumn).toBe("東京都世田谷区1-2-3 100");
+    expect(o.dm).toBe("〇");
   });
 
-  it("空白の値は null", () => {
+  it("「物件住所」ヘッダが無い場合は C列 (index 2) で後方互換", () => {
+    const headers = ["A", "B", "所在地", "氏名", "住所", "建物名", "部屋番号", "郵便番号"];
+    const rows = [
+      ["", "", "東京都港区1-2-3 100", "山田太郎", "1-2-3", "XXマンション", "101", "105-0001"],
+    ];
+    const [o] = parseOwnerRows(headers, rows);
+    expect(o.cColumn).toBe("東京都港区1-2-3 100");
+    expect(o.propertyAddress).toBeNull();
+    // C列フォールバック
+    expect(o.matchKey).toBe("東京都港区1-2-3100");
+    expect(o.name).toBe("山田太郎");
+    // 連結: prefecture/city 無い場合は streetAddress + buildingName
+    expect(o.address).toBe("1-2-3XXマンション");
+    expect(o.streetAddress).toBe("1-2-3");
+    expect(o.buildingName).toBe("XXマンション");
+    expect(o.roomNo).toBe("101");
+    expect(o.zip).toBe("105-0001");
+    expect(o.dm).toBeNull();
+  });
+
+  it("別名ヘッダ（所有者氏名/マンション名/号室/〒）も拾う", () => {
+    const headers = ["X", "Y", "Z", "所有者氏名", "所有者住所", "マンション名", "号室", "〒"];
+    const rows = [["", "", "東京都港区1-2-3", "A", "東京都港区1-2-3", "YY", "202", "100-0001"]];
+    const [o] = parseOwnerRows(headers, rows);
+    expect(o.name).toBe("A");
+    expect(o.buildingName).toBe("YY");
+    expect(o.roomNo).toBe("202");
+    expect(o.zip).toBe("100-0001");
+  });
+
+  it("空白の値は null。連結対象が全て空なら address も null", () => {
     const headers = ["", "", "", "氏名", "住所", "建物名", "部屋番号", "郵便番号"];
-    const rows = [["", "", "東京都港区1-2-3", "  ", "", "", "", ""]];
+    const rows = [["", "", "", "  ", "", "", "", ""]];
     const [o] = parseOwnerRows(headers, rows);
     expect(o.name).toBeNull();
     expect(o.address).toBeNull();
+    expect(o.streetAddress).toBeNull();
     expect(o.buildingName).toBeNull();
     expect(o.roomNo).toBeNull();
     expect(o.zip).toBeNull();
+    expect(o.dm).toBeNull();
+  });
+
+  it("No 列はマッピング対象外（紐づけキーにも使われない）", () => {
+    const headers = ["No", "物件住所", "所有者名"];
+    const rows = [["999", "東京都中央区1-1", "佐藤 太郎"]];
+    const [o] = parseOwnerRows(headers, rows);
+    // matchKey は 物件住所 から作る（No=999 は無視）
+    expect(o.matchKey).toBe("東京都中央区1-1");
+    expect(o.name).toBe("佐藤 太郎");
   });
 });
 
