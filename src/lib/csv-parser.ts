@@ -12,6 +12,24 @@ export interface CsvParseResult {
   errors: Array<{ row: number; message: string }>;
 }
 
+/**
+ * 1行目ヘッダーが「実質空」（空文字 / 半角スペース / 全角スペース / 改行 / タブのみ）
+ * かどうかを判定する。マッピングUIから候補を除外する用途。
+ */
+export function isBlankHeader(h: string | null | undefined): boolean {
+  if (h == null) return true;
+  // 全空白（半角/全角/タブ/改行）を除去して空ならブランク扱い
+  return String(h).replace(/[\s　]/g, "") === "";
+}
+
+/**
+ * ヘッダー配列から実質空のヘッダーを除いた配列を返す。
+ * 元配列は変更しない。
+ */
+export function filterNonBlankHeaders(headers: string[]): string[] {
+  return headers.filter((h) => !isBlankHeader(h));
+}
+
 export function parseCsv(text: string): CsvParseResult {
   // Remove BOM
   const cleaned = text.replace(/^\uFEFF/, "");

@@ -43,7 +43,7 @@ const mainNavItems: NavItem[] = [
     icon: <Building className="h-5 w-5" />,
   },
   {
-    label: "受付CSV取込",
+    label: "受付帳CSV取込",
     href: "/import",
     icon: <Upload className="h-5 w-5" />,
   },

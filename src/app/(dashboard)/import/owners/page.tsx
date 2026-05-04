@@ -298,10 +298,17 @@ export default function OwnerImportPage() {
 
       setCsvText(text);
       const { headers: h, rows: r } = parseCsv(text);
-      setHeaders(h);
-      setRows(r);
+      // ヘッダーが実質空の列は候補から除外。位置(index)対応の rows も同じ列だけ残す。
+      const keepIdx: number[] = [];
+      h.forEach((header, idx) => {
+        if (header && header.replace(/[\s　]/g, "") !== "") keepIdx.push(idx);
+      });
+      const visibleH = keepIdx.map((i) => h[i]);
+      const visibleR = r.map((row) => keepIdx.map((i) => row[i] ?? ""));
+      setHeaders(visibleH);
+      setRows(visibleR);
       const mapping: Record<string, string> = {};
-      h.forEach((header) => {
+      visibleH.forEach((header) => {
         const normalized = header.trim();
         if (AUTO_MAP[normalized]) {
           mapping[normalized] = AUTO_MAP[normalized];

@@ -7,8 +7,8 @@ import {
 
 describe("getImportTypeLabel", () => {
   it("既知の内部値は日本語ラベルを返す", () => {
-    // property_csv は受付帳取込なので「受付CSV」表示
-    expect(getImportTypeLabel("property_csv")).toBe("受付CSV");
+    // property_csv は受付帳取込なので「受付帳CSV」表示
+    expect(getImportTypeLabel("property_csv")).toBe("受付帳CSV");
     expect(getImportTypeLabel("owner_csv")).toBe("所有者CSV");
     expect(getImportTypeLabel("property_pdf")).toBe("謄本PDF");
     expect(getImportTypeLabel("registry_pdf")).toBe("謄本PDF");
@@ -36,9 +36,9 @@ describe("IMPORT_TYPE_FILTER_OPTIONS", () => {
     expect(IMPORT_TYPE_FILTER_OPTIONS[0]).toEqual({ value: "", label: "すべての種別" });
   });
 
-  it("各オプションの value は内部値、label は日本語（property_csv は受付CSV）", () => {
+  it("各オプションの value は内部値、label は日本語（property_csv は受付帳CSV）", () => {
     const property = IMPORT_TYPE_FILTER_OPTIONS.find((o) => o.value === "property_csv");
-    expect(property?.label).toBe("受付CSV");
+    expect(property?.label).toBe("受付帳CSV");
     const owner = IMPORT_TYPE_FILTER_OPTIONS.find((o) => o.value === "owner_csv");
     expect(owner?.label).toBe("所有者CSV");
   });

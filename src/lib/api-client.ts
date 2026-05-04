@@ -761,6 +761,8 @@ export interface ReceptionOwnerPreviewResponse {
     excludedHeaderRepeatCount: number;
     excludedAggregateCount: number;
     excludedCoCollateralCount: number;
+    filteredByDlCount: number;
+    filteredByShinkiCount: number;
   };
   matchedSamples: Array<{
     rowNumber: number;
@@ -789,6 +791,9 @@ export interface ReceptionOwnerPreviewResponse {
   ownerFileType: { type: string; label: string | null; error: string | null };
 }
 
+export type ReceptionDlFilter = "marked" | "unmarked" | "all";
+export type ReceptionShinkiFilter = "existing" | "new" | "all";
+
 export async function previewReceptionOwnerCsv(input: {
   receptionFileName: string;
   ownerFileName: string;
@@ -796,6 +801,8 @@ export async function previewReceptionOwnerCsv(input: {
   ownerCsv?: string;
   receptionXlsxBase64?: string;
   ownerXlsxBase64?: string;
+  dlFilter?: ReceptionDlFilter;
+  shinkiFilter?: ReceptionShinkiFilter;
 }): Promise<ReceptionOwnerPreviewResponse> {
   if (USE_MOCK) {
     await mockDelay();
@@ -814,6 +821,8 @@ export async function previewReceptionOwnerCsv(input: {
         excludedHeaderRepeatCount: 0,
         excludedAggregateCount: 0,
         excludedCoCollateralCount: 0,
+        filteredByDlCount: 0,
+        filteredByShinkiCount: 0,
       },
       matchedSamples: [],
       reviewSamples: [],
@@ -846,6 +855,8 @@ export async function importReceptionOwnerCsv(input: {
   ownerCsv?: string;
   receptionXlsxBase64?: string;
   ownerXlsxBase64?: string;
+  dlFilter?: ReceptionDlFilter;
+  shinkiFilter?: ReceptionShinkiFilter;
 }): Promise<ReceptionOwnerImportResponse> {
   if (USE_MOCK) {
     await mockDelay();
@@ -865,6 +876,8 @@ export async function importReceptionOwnerCsv(input: {
         excludedHeaderRepeatCount: 0,
         excludedAggregateCount: 0,
         excludedCoCollateralCount: 0,
+        filteredByDlCount: 0,
+        filteredByShinkiCount: 0,
       },
       successCount: 0,
       needsReviewCount: 0,

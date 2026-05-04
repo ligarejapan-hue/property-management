@@ -39,6 +39,7 @@ import {
 } from "@/lib/api-client";
 import { detectImportFileType } from "@/lib/import-file-type";
 import { readCsvFileAsText } from "@/lib/csv-decode";
+import { filterNonBlankHeaders } from "@/lib/csv-parser";
 import ImportSwitcher from "@/components/import/import-switcher";
 import {
   IMPORT_TYPE_FILTER_OPTIONS,
@@ -144,7 +145,7 @@ const TEMPLATES: Record<
   { label: string; columns: string[] }
 > = {
   standard: {
-    label: "標準受付CSV",
+    label: "標準受付帳CSV",
     columns: [
       "住所(必須)",
       "地番",
@@ -545,6 +546,9 @@ export default function ImportPage() {
   const [roResult, setRoResult] = useState<ReceptionOwnerImportResponse | null>(null);
   const [roLoading, setRoLoading] = useState(false);
   const [roError, setRoError] = useState<string | null>(null);
+  // 取込条件: 既定は「DLに〇がついている物件のみ」かつ「既存のみ」
+  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">("marked");
+  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">("existing");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -703,12 +707,14 @@ export default function ImportPage() {
         ]);
         setCsvText("");
         setXlsxBase64(buf.xlsxBase64 ?? null);
-        setHeaders(h);
+        // 1行目ヘッダーが実質空の列はマッピング候補から除外する
+        const visibleH = filterNonBlankHeaders(h);
+        setHeaders(visibleH);
         // rows(Record) → string[][] にそろえる
-        setRows(r.map((row) => h.map((col) => row[col] ?? "")));
+        setRows(r.map((row) => visibleH.map((col) => row[col] ?? "")));
 
         const mapping: Record<string, string> = {};
-        h.forEach((header) => {
+        visibleH.forEach((header) => {
           const normalized = header.trim();
           if (AUTO_MAP[normalized]) {
             mapping[normalized] = AUTO_MAP[normalized];
@@ -725,11 +731,18 @@ export default function ImportPage() {
       setCsvText(text);
       setXlsxBase64(null);
       const { headers: h, rows: r } = parseCsv(text);
-      setHeaders(h);
-      setRows(r);
+      // ヘッダーが実質空の列は候補から除外。位置(index)対応の rows も同じ列だけ残す。
+      const keepIdx: number[] = [];
+      h.forEach((header, idx) => {
+        if (header && header.replace(/[\s　]/g, "") !== "") keepIdx.push(idx);
+      });
+      const visibleH = keepIdx.map((i) => h[i]);
+      const visibleR = r.map((row) => keepIdx.map((i) => row[i] ?? ""));
+      setHeaders(visibleH);
+      setRows(visibleR);
 
       const mapping: Record<string, string> = {};
-      h.forEach((header) => {
+      visibleH.forEach((header) => {
         const normalized = header.trim();
         if (AUTO_MAP[normalized]) {
           mapping[normalized] = AUTO_MAP[normalized];
@@ -890,6 +903,8 @@ export default function ImportPage() {
         ownerCsv: ownerFile.csvText,
         receptionXlsxBase64: receptionFile.xlsxBase64,
         ownerXlsxBase64: ownerFile.xlsxBase64,
+        dlFilter,
+        shinkiFilter,
       });
       setRoPreview(res);
     } catch (e) {
@@ -912,6 +927,8 @@ export default function ImportPage() {
         ownerCsv: ownerFile.csvText,
         receptionXlsxBase64: receptionFile.xlsxBase64,
         ownerXlsxBase64: ownerFile.xlsxBase64,
+        dlFilter,
+        shinkiFilter,
       });
       setRoResult(res);
       fetchJobs();
@@ -928,6 +945,8 @@ export default function ImportPage() {
     setRoPreview(null);
     setRoResult(null);
     setRoError(null);
+    setDlFilter("marked");
+    setShinkiFilter("existing");
   };
 
   // ------ Render helpers ------
@@ -948,10 +967,10 @@ export default function ImportPage() {
         <p className="mb-2 font-semibold text-blue-900">取込の進め方</p>
         <ol className="ml-4 list-decimal space-y-1 text-blue-900">
           <li>
-            <span className="font-medium">受付CSV</span> を取り込み、受付帳の情報から物件を登録/更新します（このページ）
+            <span className="font-medium">受付帳CSV</span> を取り込み、受付帳の情報から物件を登録/更新します（このページ）
           </li>
           <li>
-            <span className="font-medium">所有者CSV</span> を取り込み、所有者を登録し、受付CSVで登録済みの物件と紐づけます
+            <span className="font-medium">所有者CSV</span> を取り込み、所有者を登録し、受付帳CSVで登録済みの物件と紐づけます
             <span className="ml-1 text-blue-700">— 紐づけにはリンクキーまたは正規化住所が必要</span>
           </li>
           <li>
@@ -959,11 +978,11 @@ export default function ImportPage() {
           </li>
         </ol>
         <p className="mt-2 text-xs text-blue-700">
-          物件が未登録の状態で所有者CSVを取り込むと、所有者は物件に紐づきません。先に受付CSVを取り込んでください。紐づけキーが不足している行は「要レビュー」として残ります。
+          初期状態は「DLに〇がついている物件のみ」かつ「既存のみ」です。必要に応じて受付帳×所有者の突合セクションで条件を変更できます。物件が未登録の状態で所有者CSVを取り込むと、所有者は物件に紐づきません。
         </p>
       </div>
 
-      <h2 className="mb-6 text-2xl font-bold text-gray-800">受付CSV / Excel(.xlsx) 取込</h2>
+      <h2 className="mb-6 text-2xl font-bold text-gray-800">受付帳CSV / Excel(.xlsx) 取込</h2>
 
       {/* ============ Step Indicator ============ */}
       <div className="mb-8 flex items-center justify-center gap-0">
@@ -1601,12 +1620,48 @@ export default function ImportPage() {
           受付CSVと所有者CSVをキーで突合し、一意に特定できた行だけを既存物件に反映します。
           共有名義人は複数行のまま残します。空値では既存データを上書きしません。
         </p>
-        <ol className="mb-4 ml-5 list-decimal space-y-0.5 text-xs text-gray-600">
-          <li>受付CSV を選択（受付帳の情報を読み込みます）</li>
+        <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600">
+          <li>受付帳CSV を選択（受付帳の情報を読み込みます）</li>
           <li>所有者CSV を選択（所有者名・住所などを読み込みます）</li>
           <li>「突合結果をプレビュー」で突合成功・未突合・要レビューを確認</li>
           <li>「確認済みデータを取り込む」で一意に特定できた行だけを反映</li>
         </ol>
+
+        {/* 取込条件: DL / 新既 のフィルタ。プレビュー・取込の両方に同じ条件が適用される */}
+        <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+          <div className="mb-2 text-xs font-semibold text-gray-700">取込条件</div>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <span className="text-xs text-gray-500">取込物件選択（DL）</span>
+              <select
+                value={dlFilter}
+                onChange={(e) => setDlFilter(e.target.value as typeof dlFilter)}
+                disabled={roLoading}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+              >
+                <option value="marked">DLに〇がついている物件のみ</option>
+                <option value="unmarked">DLに〇がついていない物件のみ</option>
+                <option value="all">両方</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <span className="text-xs text-gray-500">新既</span>
+              <select
+                value={shinkiFilter}
+                onChange={(e) => setShinkiFilter(e.target.value as typeof shinkiFilter)}
+                disabled={roLoading}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+              >
+                <option value="existing">既存のみ</option>
+                <option value="new">新規のみ</option>
+                <option value="all">両方</option>
+              </select>
+            </label>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            条件はプレビュー・取り込み実行の両方に同じものが適用されます。物件住所は「都道府県＋区＋住所＋番地」から作成されます。受付番号は取り込まず、「他」列は共有名義人の有無として扱います。
+          </p>
+        </div>
 
         <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
@@ -1691,7 +1746,9 @@ export default function ImportPage() {
               <RoStat label="物件未特定" value={roPreview.summary.propertyNotFoundCount} tone="amber" />
               <RoStat label="複数候補" value={roPreview.summary.propertyMultipleCount} tone="amber" />
               <RoStat label="キー不足" value={roPreview.summary.propertyNoKeyCount} tone="gray" />
-              <RoStat label="除外（非データ行）" value={roPreview.summary.excludedCount} tone="gray" />
+              <RoStat label="除外（非データ行）" value={roPreview.summary.excludedCount - roPreview.summary.filteredByDlCount - roPreview.summary.filteredByShinkiCount} tone="gray" />
+              <RoStat label="DL条件で除外" value={roPreview.summary.filteredByDlCount} tone="gray" />
+              <RoStat label="新既条件で除外" value={roPreview.summary.filteredByShinkiCount} tone="gray" />
             </div>
             {roPreview.summary.excludedCount > 0 && (
               <div className="mt-2 text-[11px] text-gray-500">

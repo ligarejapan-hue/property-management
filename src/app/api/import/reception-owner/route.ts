@@ -18,9 +18,13 @@ import {
   buildCombinedMatches,
   summarizeMatches,
   getReviewReason,
+  applyReceptionFilters,
+  DEFAULT_RECEPTION_FILTER_OPTIONS,
   REVIEW_REASON_LABEL,
   type PropertyCandidate,
   type ParsedOwnerRow,
+  type DlFilterMode,
+  type ShinkiFilterMode,
 } from "@/lib/reception-owner-match";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
 
@@ -61,6 +65,8 @@ export async function POST(request: NextRequest) {
       ownerXlsxBase64,
       receptionFileName,
       ownerFileName,
+      dlFilter,
+      shinkiFilter,
     } = body as {
       receptionCsv?: string;
       ownerCsv?: string;
@@ -68,6 +74,12 @@ export async function POST(request: NextRequest) {
       ownerXlsxBase64?: string;
       receptionFileName?: string;
       ownerFileName?: string;
+      dlFilter?: DlFilterMode;
+      shinkiFilter?: ShinkiFilterMode;
+    };
+    const filterOptions = {
+      dl: dlFilter ?? DEFAULT_RECEPTION_FILTER_OPTIONS.dl,
+      shinki: shinkiFilter ?? DEFAULT_RECEPTION_FILTER_OPTIONS.shinki,
     };
 
     if (!receptionFileName || !ownerFileName) {
@@ -122,8 +134,11 @@ export async function POST(request: NextRequest) {
       }
       throw e;
     }
-    const receptionRows = parseReceptionRows(
-      toPositionalRows(receptionParsed.headers, receptionParsed.rows),
+    const receptionRows = applyReceptionFilters(
+      parseReceptionRows(
+        toPositionalRows(receptionParsed.headers, receptionParsed.rows),
+      ),
+      filterOptions,
     );
     const ownerRows = parseOwnerRows(
       ownerParsed.headers,
@@ -182,6 +197,10 @@ export async function POST(request: NextRequest) {
         lotNumber: c.reception.lotNumber ?? "",
         buildingNumber: c.reception.buildingNumber ?? "",
         ownerCount: String(c.owners.length),
+        // L列(他) は補助情報として保存。物件住所や主突合キーには含めない。
+        共有名義人の有無: c.reception.coOwnersNote,
+        新既: c.reception.shinkiValue,
+        DL: c.reception.dlMarked ? "〇" : "",
       };
 
       if (reason) {

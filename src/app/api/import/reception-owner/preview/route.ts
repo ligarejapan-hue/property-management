@@ -16,8 +16,12 @@ import {
   buildCombinedMatches,
   summarizeMatches,
   getReviewReason,
+  applyReceptionFilters,
+  DEFAULT_RECEPTION_FILTER_OPTIONS,
   REVIEW_REASON_LABEL,
   type PropertyCandidate,
+  type DlFilterMode,
+  type ShinkiFilterMode,
 } from "@/lib/reception-owner-match";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の突合プレビュー。
@@ -51,6 +55,8 @@ export async function POST(request: NextRequest) {
       ownerXlsxBase64,
       receptionFileName,
       ownerFileName,
+      dlFilter,
+      shinkiFilter,
     } = body as {
       receptionCsv?: string;
       ownerCsv?: string;
@@ -58,6 +64,12 @@ export async function POST(request: NextRequest) {
       ownerXlsxBase64?: string;
       receptionFileName?: string;
       ownerFileName?: string;
+      dlFilter?: DlFilterMode;
+      shinkiFilter?: ShinkiFilterMode;
+    };
+    const filterOptions = {
+      dl: dlFilter ?? DEFAULT_RECEPTION_FILTER_OPTIONS.dl,
+      shinki: shinkiFilter ?? DEFAULT_RECEPTION_FILTER_OPTIONS.shinki,
     };
 
     if (!receptionFileName || !ownerFileName) {
@@ -113,8 +125,11 @@ export async function POST(request: NextRequest) {
       }
       throw e;
     }
-    const receptionRows = parseReceptionRows(
-      toPositionalRows(receptionParsed.headers, receptionParsed.rows),
+    const receptionRows = applyReceptionFilters(
+      parseReceptionRows(
+        toPositionalRows(receptionParsed.headers, receptionParsed.rows),
+      ),
+      filterOptions,
     );
     const ownerRows = parseOwnerRows(
       ownerParsed.headers,

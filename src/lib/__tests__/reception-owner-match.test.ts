@@ -384,6 +384,8 @@ describe("buildCombinedMatches + summarizeMatches", () => {
       excludedHeaderRepeatCount: 0,
       excludedAggregateCount: 0,
       excludedCoCollateralCount: 0,
+      filteredByDlCount: 0,
+      filteredByShinkiCount: 0,
     });
   });
 

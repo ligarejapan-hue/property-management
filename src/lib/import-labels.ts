@@ -5,8 +5,8 @@
  */
 
 export const IMPORT_TYPE_LABELS: Record<string, string> = {
-  // property_csv は内部値だが、利用者向けには受付帳ベースの取込のため「受付CSV」と表示する
-  property_csv: "受付CSV",
+  // property_csv は内部値だが、利用者向けには受付帳ベースの取込のため「受付帳CSV」と表示する
+  property_csv: "受付帳CSV",
   owner_csv: "所有者CSV",
   // 同一の謄本PDFを指す内部値が2系統存在するため両方をラベリング
   property_pdf: "謄本PDF",

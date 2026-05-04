@@ -21,11 +21,19 @@ export interface ParsedReceptionRow {
   kColumn: string;
   lotNumber: string | null;
   buildingNumber: string | null;
+  /** B列(=index 1) の DL マーク。〇 / ○ / 前後空白付き 〇 / 前後空白付き ○ を検出 */
+  dlMarked: boolean;
+  /** E列(=index 4) の新既値（"新規" / "既存" / "" / その他） */
+  shinkiValue: string;
+  /** L列(=index 11) の「他」値。共有名義人の有無を示す補助情報 */
+  coOwnersNote: string;
   /**
    * 明らかな非データ行は突合/レビューの対象から外す。
    * - "empty": F/H/I/J/K（物件関連列）が全て空
    * - "header_repeat": 受付帳ヘッダの反復
    * - "aggregate": 合計/小計/総計/件数/total 等の集計行
+   * - "filter_dl": 取込物件選択（DL）の条件で除外
+   * - "filter_shinki": 新既条件で除外
    * undefined のときは通常のデータ行として扱う。
    */
   excluded?: ExcludedReason;
@@ -35,7 +43,38 @@ export type ExcludedReason =
   | "empty"
   | "header_repeat"
   | "aggregate"
-  | "co_collateral";
+  | "co_collateral"
+  | "filter_dl"
+  | "filter_shinki";
+
+// ---------- 取込条件フィルタ ----------
+
+export type DlFilterMode = "marked" | "unmarked" | "all";
+export type ShinkiFilterMode = "existing" | "new" | "all";
+
+export interface ReceptionFilterOptions {
+  dl: DlFilterMode;
+  shinki: ShinkiFilterMode;
+}
+
+/** 既定値: DLに〇がついている物件のみ × 既存のみ */
+export const DEFAULT_RECEPTION_FILTER_OPTIONS: ReceptionFilterOptions = {
+  dl: "marked",
+  shinki: "existing",
+};
+
+/** B列(DL)の値が「〇あり」と判定されるか。〇/○ + 前後空白を許容 */
+export function isReceptionDlMarked(value: string | null | undefined): boolean {
+  if (value == null) return false;
+  const t = String(value).trim();
+  return t === "〇" || t === "○";
+}
+
+/** E列(新既)の正規化値を返す。空白除去のみで値はそのまま */
+function normalizeShinki(value: string | null | undefined): string {
+  if (value == null) return "";
+  return String(value).trim();
+}
 
 export interface ParsedOwnerRow {
   rowNumber: number;
@@ -82,11 +121,14 @@ export interface CombinedMatch {
  */
 export function parseReceptionRows(rows: string[][]): ParsedReceptionRow[] {
   return rows.map((row, i) => {
+    const dlRaw = row[1] ?? "";
+    const shinkiRaw = row[4] ?? "";
     const f = (row[5] ?? "").trim();
     const h = (row[7] ?? "").trim();
     const iCol = (row[8] ?? "").trim();
     const j = (row[9] ?? "").trim();
     const k = (row[10] ?? "").trim();
+    const otherRaw = (row[11] ?? "").trim();
     const matchKey = buildReceptionMatchKey({ h, i: iCol, j, k });
     const { lotNumber, buildingNumber } = splitReceptionK(f, k);
     return {
@@ -96,8 +138,41 @@ export function parseReceptionRows(rows: string[][]): ParsedReceptionRow[] {
       kColumn: k,
       lotNumber,
       buildingNumber,
+      dlMarked: isReceptionDlMarked(dlRaw),
+      shinkiValue: normalizeShinki(shinkiRaw),
+      coOwnersNote: otherRaw,
       excluded: detectExcludedReason(row, { f, h, iCol, j, k }),
     };
+  });
+}
+
+/**
+ * 受付帳行に対し、DL/新既のフィルタ条件を適用して `excluded` を再設定して返す。
+ * - 既存の excluded（empty/header_repeat/aggregate/co_collateral）は最優先で残す
+ * - フィルタにマッチしない行は filter_dl / filter_shinki として excluded に立てる
+ *   （DL を先に評価して、両方該当する場合は filter_dl が記録される）
+ * - 受付帳パース→フィルタ適用→buildCombinedMatches の順で呼ぶことで、
+ *   プレビューと取込実行で対象が必ず一致する。
+ */
+export function applyReceptionFilters(
+  rows: readonly ParsedReceptionRow[],
+  options: ReceptionFilterOptions,
+): ParsedReceptionRow[] {
+  return rows.map((r) => {
+    if (r.excluded) return r;
+    if (options.dl === "marked" && !r.dlMarked) {
+      return { ...r, excluded: "filter_dl" as const };
+    }
+    if (options.dl === "unmarked" && r.dlMarked) {
+      return { ...r, excluded: "filter_dl" as const };
+    }
+    if (options.shinki !== "all") {
+      const want = options.shinki === "existing" ? "既存" : "新規";
+      if (r.shinkiValue !== want) {
+        return { ...r, excluded: "filter_shinki" as const };
+      }
+    }
+    return r;
   });
 }
 
@@ -269,12 +344,16 @@ export interface MatchSummary {
   propertyNotFoundCount: number;
   propertyMultipleCount: number;
   propertyNoKeyCount: number;
-  /** 非データ行として除外した合計（empty+header_repeat+aggregate） */
+  /** 非データ行 + フィルタ除外の合計 */
   excludedCount: number;
   excludedEmptyCount: number;
   excludedHeaderRepeatCount: number;
   excludedAggregateCount: number;
   excludedCoCollateralCount: number;
+  /** 取込物件選択（DL）条件で除外された行数 */
+  filteredByDlCount: number;
+  /** 新既条件で除外された行数 */
+  filteredByShinkiCount: number;
 }
 
 export function summarizeMatches(
@@ -310,11 +389,15 @@ export function summarizeMatches(
   let excHeader = 0;
   let excAgg = 0;
   let excCo = 0;
+  let excDl = 0;
+  let excShinki = 0;
   for (const r of reception) {
     if (r.excluded === "empty") excEmpty++;
     else if (r.excluded === "header_repeat") excHeader++;
     else if (r.excluded === "aggregate") excAgg++;
     else if (r.excluded === "co_collateral") excCo++;
+    else if (r.excluded === "filter_dl") excDl++;
+    else if (r.excluded === "filter_shinki") excShinki++;
   }
   return {
     receptionCount: reception.length,
@@ -325,11 +408,13 @@ export function summarizeMatches(
     propertyNotFoundCount: propNotFound,
     propertyMultipleCount: propMultiple,
     propertyNoKeyCount: propNoKey,
-    excludedCount: excEmpty + excHeader + excAgg + excCo,
+    excludedCount: excEmpty + excHeader + excAgg + excCo + excDl + excShinki,
     excludedEmptyCount: excEmpty,
     excludedHeaderRepeatCount: excHeader,
     excludedAggregateCount: excAgg,
     excludedCoCollateralCount: excCo,
+    filteredByDlCount: excDl,
+    filteredByShinkiCount: excShinki,
   };
 }
 
