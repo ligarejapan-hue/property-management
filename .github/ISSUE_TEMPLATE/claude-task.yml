@@ -1,0 +1,128 @@
+name: Claude Code タスク
+description: ChatGPT / Claude Code 向け作業指示テンプレート
+title: "[Task] "
+labels: ["claude-task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **注意**
+        > - 重要タスクでは、Claude Code は **Plan 提示後に停止**すること
+        > - 承認なしに Implement へ進まないこと
+        > - main へ直接 push しないこと
+        > - 不明点を推測で埋めないこと
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+      description: このタスクで達成したいこと
+    validations:
+      required: true
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: なぜこのタスクが必要か、関連する経緯
+    validations:
+      required: false
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 対象範囲
+      description: 変更・調査対象のファイル / 機能 / API
+    validations:
+      required: true
+
+  - type: textarea
+    id: allowed
+    attributes:
+      label: 変更してよい範囲
+      description: 編集・追加を許可するファイル・ディレクトリ
+    validations:
+      required: true
+
+  - type: textarea
+    id: forbidden
+    attributes:
+      label: 変更してはいけない範囲
+      description: 触れてはいけないファイル・DB・API・テスト等
+      value: |
+        - src/ 以外のアプリ本体コード（特に指定がない限り）
+        - prisma/schema.prisma（明示指示がない限り migration 禁止）
+        - 既存テストファイル（修正指示がない限り）
+        - .env* ファイル
+    validations:
+      required: true
+
+  - type: textarea
+    id: explore
+    attributes:
+      label: Explore で確認すること
+      description: 実装前に調査・確認すべき事項
+    validations:
+      required: false
+
+  - type: textarea
+    id: plan
+    attributes:
+      label: Plan で提示すること
+      description: Explore 結果をもとに提示すべき設計・方針の内容
+      value: |
+        1. 新規作成するファイル
+        2. 編集する既存ファイル
+        3. 変更しない範囲
+        4. migration 有無
+        5. リスク
+    validations:
+      required: false
+
+  - type: textarea
+    id: implement_condition
+    attributes:
+      label: Implement 条件
+      description: 実装を開始してよい条件（Plan 承認後 など）
+      value: Plan 提示後、ユーザーの承認を受けてから実装を開始すること
+    validations:
+      required: false
+
+  - type: textarea
+    id: test_condition
+    attributes:
+      label: テスト条件
+      description: 実装後に実行するテスト・確認コマンド
+      value: |
+        - npm run build
+        - npx vitest run
+    validations:
+      required: false
+
+  - type: textarea
+    id: report_format
+    attributes:
+      label: 完了報告形式
+      description: 完了時に報告すべき項目
+      value: |
+        1. 対応目的
+        2. 変更ファイル一覧
+        3. 変更内容
+        4. migration 有無
+        5. テスト結果
+        6. commit hash
+        7. push 結果
+        8. VPS 反映状況
+    validations:
+      required: false
+
+  - type: dropdown
+    id: vps_deploy
+    attributes:
+      label: VPS 反映要否
+      options:
+        - "不要（ローカル確認のみ）"
+        - "必要（ユーザーが別途指示する）"
+      default: 0
+    validations:
+      required: true
