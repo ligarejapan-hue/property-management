@@ -359,3 +359,7 @@ docker compose up -d geoserver
 # WFS 疎通確認
 curl "http://localhost:8080/geoserver/ksj/ows?service=WFS&request=GetFeature&typeName=ksj:A29&outputFormat=application/json&CQL_FILTER=CONTAINS(the_geom,POINT(139.767%2035.681))&maxFeatures=1"
 ```
+
+## 運用メモ
+
+GitHub workflow check: PRs to main are validated by CI (build + test) before merge.
