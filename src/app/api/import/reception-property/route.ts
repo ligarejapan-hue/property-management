@@ -196,6 +196,8 @@ export async function POST(request: NextRequest) {
         let createdPropertyId: string | null = null;
         let concurrentDupId: string | null = null;
 
+        // advisory lock / 重複再チェック / Property.create / ImportJobRow.create を
+        // 同一 transaction に入れる。ImportJobRow 書き込み失敗時に Property も rollback される。
         await prisma.$transaction(async (tx) => {
           // 同一正規化住所への並行作成を防ぐ advisory lock。
           // xact lock はトランザクション終了時に自動解放される。
@@ -210,6 +212,16 @@ export async function POST(request: NextRequest) {
           );
           if (dup) {
             concurrentDupId = dup.id;
+            await tx.importJobRow.create({
+              data: {
+                jobId: job.id,
+                rowNumber,
+                status: "needs_review",
+                rawData: { ...rawData, duplicatePropertyId: dup.id },
+                errorMessage: `住所が既存物件と重複（ID: ${dup.id}）`,
+                createdId: null,
+              },
+            });
             return;
           }
 
@@ -226,35 +238,26 @@ export async function POST(request: NextRequest) {
             select: { id: true },
           });
           createdPropertyId = property.id;
-        });
 
-        if (concurrentDupId) {
-          // 並行リクエストによる重複（lock後に発覚）
-          if (norm) existingNorm.set(norm, concurrentDupId);
-          await prisma.importJobRow.create({
-            data: {
-              jobId: job.id,
-              rowNumber,
-              status: "needs_review",
-              rawData: { ...rawData, duplicatePropertyId: concurrentDupId },
-              errorMessage: `住所が既存物件と重複（ID: ${concurrentDupId}）`,
-              createdId: null,
-            },
-          });
-          needsReviewCount++;
-        } else if (createdPropertyId) {
-          // 今回作成した住所を同一CSV内の重複判定に反映
-          if (norm) existingNorm.set(norm, createdPropertyId);
-          await prisma.importJobRow.create({
+          // Property.create と同一 transaction: 失敗時は Property も rollback される
+          await tx.importJobRow.create({
             data: {
               jobId: job.id,
               rowNumber,
               status: "success",
               rawData,
               errorMessage: null,
-              createdId: createdPropertyId,
+              createdId: property.id,
             },
           });
+        });
+
+        // transaction commit 後: existingNorm とカウンタを更新
+        if (concurrentDupId) {
+          if (norm) existingNorm.set(norm, concurrentDupId);
+          needsReviewCount++;
+        } else if (createdPropertyId) {
+          if (norm) existingNorm.set(norm, createdPropertyId);
           successCount++;
         }
       } catch (err) {
