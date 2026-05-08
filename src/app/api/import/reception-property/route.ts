@@ -149,6 +149,7 @@ export async function POST(request: NextRequest) {
         propertyAddress: row.propertyAddress ?? "",
         DL: row.dlMarked ? "〇" : "",
         新既: row.shinkiValue,
+        __reception_property_data: "true",
       };
 
       if (!row.propertyAddress) {
@@ -158,7 +159,7 @@ export async function POST(request: NextRequest) {
             rowNumber,
             status: "needs_review",
             rawData,
-            errorMessage: "住所なし（H/I/J 列が全て空）",
+            errorMessage: "住所なし（H/I/J/K 列が全て空）",
             createdId: null,
           },
         });
@@ -174,9 +175,9 @@ export async function POST(request: NextRequest) {
             jobId: job.id,
             rowNumber,
             status: "needs_review",
-            rawData,
+            rawData: { ...rawData, duplicatePropertyId: existingId },
             errorMessage: `住所が既存物件と重複（ID: ${existingId}）`,
-            createdId: existingId,
+            createdId: null,
           },
         });
         needsReviewCount++;

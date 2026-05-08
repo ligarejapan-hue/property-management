@@ -73,17 +73,17 @@ describe("parseReceptionRows", () => {
     expect(row.buildingNumber).toBeNull();
   });
 
-  it("propertyAddress = H+I+J 連結（K は含まない）", () => {
+  it("propertyAddress = H+I+J+K 連結（都道府県+区+住所+番地）", () => {
     const rows = [
       ["", "", "", "", "", "土地", "", "東京都", "港区", "六本木1-2-3", "100番1", ""],
     ];
     const [row] = parseReceptionRows(rows);
-    expect(row.propertyAddress).toBe("東京都港区六本木1-2-3");
+    expect(row.propertyAddress).toBe("東京都港区六本木1-2-3100番1");
   });
 
-  it("H/I/J が全て空なら propertyAddress=null", () => {
+  it("H/I/J/K が全て空なら propertyAddress=null", () => {
     const rows = [
-      ["", "", "", "", "", "土地", "", "", "", "", "100番1", ""],
+      ["", "", "", "", "", "土地", "", "", "", "", "", ""],
     ];
     const [row] = parseReceptionRows(rows);
     expect(row.propertyAddress).toBeNull();
@@ -91,7 +91,7 @@ describe("parseReceptionRows", () => {
 
   it("H のみ存在するとき propertyAddress=H の値", () => {
     const rows = [
-      ["", "", "", "", "", "土地", "", "東京都", "", "", "100番1", ""],
+      ["", "", "", "", "", "土地", "", "東京都", "", "", "", ""],
     ];
     const [row] = parseReceptionRows(rows);
     expect(row.propertyAddress).toBe("東京都");

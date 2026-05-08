@@ -27,7 +27,7 @@ export interface ParsedReceptionRow {
   shinkiValue: string;
   /** L列(=index 11) の「他」値。共有名義人の有無を示す補助情報 */
   coOwnersNote: string;
-  /** H+I+J の連結（都道府県+区+住所）。Property.address 候補。すべて空の場合は null */
+  /** H+I+J+K の連結（都道府県+区+住所+番地）。Property.address 候補。すべて空の場合は null */
   propertyAddress: string | null;
   /**
    * 明らかな非データ行は突合/レビューの対象から外す。
@@ -170,7 +170,7 @@ export function parseReceptionRows(rows: string[][]): ParsedReceptionRow[] {
     const otherRaw = (row[11] ?? "").trim();
     const matchKey = buildReceptionMatchKey({ h, i: iCol, j, k });
     const { lotNumber, buildingNumber } = splitReceptionK(f, k);
-    const addrParts = [h, iCol, j].filter((v) => v !== "");
+    const addrParts = [h, iCol, j, k].filter((v) => v !== "");
     return {
       rowNumber: i + 2,
       matchKey,
