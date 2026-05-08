@@ -3,6 +3,7 @@ import {
   parseReceptionRows,
   applyReceptionFilters,
   isReceptionDlMarked,
+  classifyShinki,
   DEFAULT_RECEPTION_FILTER_OPTIONS,
 } from "../reception-owner-match";
 import { isBlankHeader, filterNonBlankHeaders } from "../csv-parser";
@@ -47,6 +48,30 @@ describe("isReceptionDlMarked", () => {
     expect(isReceptionDlMarked("")).toBe(false);
     expect(isReceptionDlMarked("×")).toBe(false);
     expect(isReceptionDlMarked("o")).toBe(false);
+  });
+});
+
+describe("classifyShinki", () => {
+  it("既 / 既存 / 前後空白付きを existing と判定する", () => {
+    expect(classifyShinki("既")).toBe("existing");
+    expect(classifyShinki("既存")).toBe("existing");
+    expect(classifyShinki(" 既 ")).toBe("existing");
+    expect(classifyShinki("\t既存\n")).toBe("existing");
+  });
+  it("新 / 新規 / 前後空白付きを new と判定する", () => {
+    expect(classifyShinki("新")).toBe("new");
+    expect(classifyShinki("新規")).toBe("new");
+    expect(classifyShinki(" 新 ")).toBe("new");
+    expect(classifyShinki("\t新規\n")).toBe("new");
+  });
+  it("null / undefined / 空欄 / 不明値は unknown", () => {
+    expect(classifyShinki(null)).toBe("unknown");
+    expect(classifyShinki(undefined)).toBe("unknown");
+    expect(classifyShinki("")).toBe("unknown");
+    expect(classifyShinki("   ")).toBe("unknown");
+    expect(classifyShinki("既知")).toBe("unknown");
+    expect(classifyShinki("新築")).toBe("unknown");
+    expect(classifyShinki("その他")).toBe("unknown");
   });
 });
 
@@ -117,6 +142,54 @@ describe("applyReceptionFilters", () => {
     const out = applyReceptionFilters(rows, { dl: "all", shinki: "existing" });
     // 不明値の行 (index 4) は filter_shinki で除外される
     expect(out[4].excluded).toBe("filter_shinki");
+  });
+
+  it("既 / 新 の1文字表記が existing / new として通る", () => {
+    const compactRows = parseReceptionRows([
+      makeRow({ dl: "〇", shinki: "既" }),    // 0: 〇 + 既
+      makeRow({ dl: "〇", shinki: "新" }),    // 1: 〇 + 新
+      makeRow({ dl: "〇", shinki: " 既 " }),  // 2: 〇 + 前後空白付き既
+      makeRow({ dl: "〇", shinki: "既知" }),  // 3: 〇 + 不明値
+    ]);
+    const existingOut = applyReceptionFilters(compactRows, {
+      dl: "marked",
+      shinki: "existing",
+    });
+    expect(existingOut.map((r) => r.excluded)).toEqual([
+      undefined,        // 既 → existing OK
+      "filter_shinki",  // 新 → not existing
+      undefined,        // " 既 " → existing OK
+      "filter_shinki",  // 既知 → unknown
+    ]);
+    const newOut = applyReceptionFilters(compactRows, {
+      dl: "marked",
+      shinki: "new",
+    });
+    expect(newOut.map((r) => r.excluded)).toEqual([
+      "filter_shinki",
+      undefined,
+      "filter_shinki",
+      "filter_shinki",
+    ]);
+  });
+
+  it("既存 / 新規 の従来表記も引き続き existing / new として通る", () => {
+    const fullRows = parseReceptionRows([
+      makeRow({ dl: "〇", shinki: "既存" }),
+      makeRow({ dl: "〇", shinki: "新規" }),
+    ]);
+    const existingOut = applyReceptionFilters(fullRows, {
+      dl: "marked",
+      shinki: "existing",
+    });
+    expect(existingOut[0].excluded).toBeUndefined();
+    expect(existingOut[1].excluded).toBe("filter_shinki");
+    const newOut = applyReceptionFilters(fullRows, {
+      dl: "marked",
+      shinki: "new",
+    });
+    expect(newOut[0].excluded).toBe("filter_shinki");
+    expect(newOut[1].excluded).toBeUndefined();
   });
 });
 
