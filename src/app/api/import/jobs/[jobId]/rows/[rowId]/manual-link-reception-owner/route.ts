@@ -26,7 +26,7 @@ import {
 //
 // 適用条件 (厳格):
 //   - jobType === "owner_csv"
-//   - rawData に受付帳×所有者固有マーカ（所有者CSV物件住所 / matchKey / ownerCount）
+//   - rawData に受付帳×所有者固有マーカ（所有者CSV物件住所 / ownerCount / __owner_link_data）
 //   - row.status === "needs_review"
 //   - rawData["__owner_link_data"] から所有者氏名を 1件以上復元可能
 //
