@@ -11,6 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { createOwnerSchema } from "@/lib/validators";
 import { hasPermission, maskValue } from "@/lib/permissions";
+import { normalizeName, normalizeAddress } from "@/lib/normalize";
 
 // ---------- GET /api/owners ----------
 
@@ -118,6 +119,27 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const data = createOwnerSchema.parse(body);
+
+    if (data.address) {
+      const normName = normalizeName(data.name);
+      const normAddr = normalizeAddress(data.address);
+      const candidates = await prisma.owner.findMany({
+        where: { address: { not: null } },
+        select: { id: true, name: true, address: true },
+      });
+      const dup = candidates.find(
+        (c) =>
+          normalizeName(c.name) === normName &&
+          normalizeAddress(c.address!) === normAddr,
+      );
+      if (dup) {
+        throw new ApiError(
+          409,
+          `同じ氏名・住所の所有者が既に存在します (ID: ${dup.id})`,
+          "DUPLICATE_OWNER",
+        );
+      }
+    }
 
     const owner = await prisma.owner.create({
       data: {

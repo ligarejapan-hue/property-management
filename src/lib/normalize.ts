@@ -82,6 +82,16 @@ export function normalizeRoomNo(input: string | null | undefined): string {
 }
 
 /**
+ * 氏名の比較用正規化値。保存値は変えず重複判定にのみ使う。
+ *
+ * - NFKC（全角英数→半角）
+ * - 全角・半角スペースをすべて除去（「田中　太郎」「田中 太郎」「田中太郎」を同値扱い）
+ */
+export function normalizeName(input: string): string {
+  return input.normalize("NFKC").replace(/[\s　]+/g, "");
+}
+
+/**
  * 物件単位の重複判定キー。CSV 取込側から再利用する想定。
  *
  * 呼び出し側で null/undefined を気にせず渡せるよう、各フィールドは任意。
