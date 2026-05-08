@@ -933,6 +933,82 @@ export async function importReceptionOwnerCsv(input: {
   });
 }
 
+// ---------- Reception → Property (1-file) ----------
+
+export interface ReceptionPropertyPreviewResponse {
+  summary: {
+    totalRows: number;
+    filteredCount: number;
+    noAddressCount: number;
+    duplicateCount: number;
+    toCreateCount: number;
+  };
+  toCreateSamples: Array<{
+    rowNumber: number;
+    fColumn: string;
+    propertyAddress: string;
+    lotNumber: string | null;
+    buildingNumber: string | null;
+  }>;
+  duplicateSamples: Array<{
+    rowNumber: number;
+    propertyAddress: string;
+    existingPropertyId: string;
+  }>;
+  receptionFileType: { type: string; label: string | null; error: string | null };
+}
+
+export interface ReceptionPropertyImportResponse {
+  jobId: string;
+  successCount: number;
+  needsReviewCount: number;
+  errorCount: number;
+}
+
+export async function previewReceptionPropertyCsv(input: {
+  receptionFileName: string;
+  receptionCsv?: string;
+  receptionXlsxBase64?: string;
+  dlFilter?: ReceptionDlFilter;
+  shinkiFilter?: ReceptionShinkiFilter;
+}): Promise<ReceptionPropertyPreviewResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      summary: { totalRows: 0, filteredCount: 0, noAddressCount: 0, duplicateCount: 0, toCreateCount: 0 },
+      toCreateSamples: [],
+      duplicateSamples: [],
+      receptionFileType: { type: "reception", label: "受付帳として認識", error: null },
+    };
+  }
+  return apiFetch<ReceptionPropertyPreviewResponse>(
+    "/api/import/reception-property/preview",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function importReceptionPropertyCsv(input: {
+  receptionFileName: string;
+  receptionCsv?: string;
+  receptionXlsxBase64?: string;
+  dlFilter?: ReceptionDlFilter;
+  shinkiFilter?: ReceptionShinkiFilter;
+}): Promise<ReceptionPropertyImportResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { jobId: "ij-mock-" + Date.now(), successCount: 0, needsReviewCount: 0, errorCount: 0 };
+  }
+  return apiFetch<ReceptionPropertyImportResponse>("/api/import/reception-property", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
 /** テキスト貼り付けモード (後方互換) */
 export async function importRegistryPdf(
   text: string,

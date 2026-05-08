@@ -73,6 +73,30 @@ describe("parseReceptionRows", () => {
     expect(row.buildingNumber).toBeNull();
   });
 
+  it("propertyAddress = H+I+J 連結（K は含まない）", () => {
+    const rows = [
+      ["", "", "", "", "", "土地", "", "東京都", "港区", "六本木1-2-3", "100番1", ""],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.propertyAddress).toBe("東京都港区六本木1-2-3");
+  });
+
+  it("H/I/J が全て空なら propertyAddress=null", () => {
+    const rows = [
+      ["", "", "", "", "", "土地", "", "", "", "", "100番1", ""],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.propertyAddress).toBeNull();
+  });
+
+  it("H のみ存在するとき propertyAddress=H の値", () => {
+    const rows = [
+      ["", "", "", "", "", "土地", "", "東京都", "", "", "100番1", ""],
+    ];
+    const [row] = parseReceptionRows(rows);
+    expect(row.propertyAddress).toBe("東京都");
+  });
+
   it("F/H/I/J/K が全て空なら excluded=empty", () => {
     const rows = [["1", "DL", "番号", "日付", "新既", "", "原因", "", "", "", "", "他"]];
     const [row] = parseReceptionRows(rows);
