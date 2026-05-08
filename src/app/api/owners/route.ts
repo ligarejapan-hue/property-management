@@ -123,9 +123,8 @@ export async function POST(request: NextRequest) {
     if (data.address) {
       const normName = normalizeName(data.name);
       const normAddr = normalizeAddress(data.address);
-      const namePrefix = data.name.trim().slice(0, 2);
       const candidates = await prisma.owner.findMany({
-        where: { name: { contains: namePrefix }, address: { not: null } },
+        where: { address: { not: null } },
         select: { id: true, name: true, address: true },
       });
       const dup = candidates.find(
