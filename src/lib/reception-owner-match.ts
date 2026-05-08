@@ -76,6 +76,24 @@ function normalizeShinki(value: string | null | undefined): string {
   return String(value).trim();
 }
 
+/**
+ * 受付帳の新既値を分類する。
+ * 実データには `既` / `新` の1文字表記と、`既存` / `新規` の表記が混在する。
+ * 前後空白は trim で吸収し、いずれの表記も同じ意味として扱う。
+ *
+ * - existing: 既 / 既存
+ * - new:      新 / 新規
+ * - unknown:  null / undefined / 空 / 上記以外（曖昧寄せはしない）
+ */
+export function classifyShinki(
+  value: string | null | undefined,
+): "existing" | "new" | "unknown" {
+  const t = normalizeShinki(value);
+  if (t === "既" || t === "既存") return "existing";
+  if (t === "新" || t === "新規") return "new";
+  return "unknown";
+}
+
 export interface ParsedOwnerRow {
   rowNumber: number;
   /**
@@ -186,8 +204,7 @@ export function applyReceptionFilters(
       return { ...r, excluded: "filter_dl" as const };
     }
     if (options.shinki !== "all") {
-      const want = options.shinki === "existing" ? "既存" : "新規";
-      if (r.shinkiValue !== want) {
+      if (classifyShinki(r.shinkiValue) !== options.shinki) {
         return { ...r, excluded: "filter_shinki" as const };
       }
     }
