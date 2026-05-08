@@ -191,33 +191,72 @@ export async function POST(request: NextRequest) {
           | "apartment_unit"
           | "unknown";
 
-        const property = await prisma.property.create({
-          data: {
-            propertyType,
-            address: row.propertyAddress,
-            lotNumber: row.lotNumber ?? undefined,
-            buildingNumber: row.buildingNumber ?? undefined,
-            registryStatus: "unconfirmed",
-            dmStatus: "hold",
-            createdBy: session.id,
-          },
-          select: { id: true },
+        // 上位の !row.propertyAddress チェックで非 null が保証されている
+        const address = row.propertyAddress as string;
+        let createdPropertyId: string | null = null;
+        let concurrentDupId: string | null = null;
+
+        await prisma.$transaction(async (tx) => {
+          // 同一正規化住所への並行作成を防ぐ advisory lock。
+          // xact lock はトランザクション終了時に自動解放される。
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${norm})::bigint)`;
+
+          // lock取得後に既存物件を再検索（snapshotより後の並行createを検出）
+          const candidates = await tx.property.findMany({
+            select: { id: true, address: true },
+          });
+          const dup = candidates.find(
+            (c) => normalizeAddress(c.address) === norm,
+          );
+          if (dup) {
+            concurrentDupId = dup.id;
+            return;
+          }
+
+          const property = await tx.property.create({
+            data: {
+              propertyType,
+              address,
+              lotNumber: row.lotNumber ?? undefined,
+              buildingNumber: row.buildingNumber ?? undefined,
+              registryStatus: "unconfirmed",
+              dmStatus: "hold",
+              createdBy: session.id,
+            },
+            select: { id: true },
+          });
+          createdPropertyId = property.id;
         });
 
-        // 今回作成した住所を重複判定に反映（同一 CSV 内重複を防止）
-        if (norm) existingNorm.set(norm, property.id);
-
-        await prisma.importJobRow.create({
-          data: {
-            jobId: job.id,
-            rowNumber,
-            status: "success",
-            rawData,
-            errorMessage: null,
-            createdId: property.id,
-          },
-        });
-        successCount++;
+        if (concurrentDupId) {
+          // 並行リクエストによる重複（lock後に発覚）
+          if (norm) existingNorm.set(norm, concurrentDupId);
+          await prisma.importJobRow.create({
+            data: {
+              jobId: job.id,
+              rowNumber,
+              status: "needs_review",
+              rawData: { ...rawData, duplicatePropertyId: concurrentDupId },
+              errorMessage: `住所が既存物件と重複（ID: ${concurrentDupId}）`,
+              createdId: null,
+            },
+          });
+          needsReviewCount++;
+        } else if (createdPropertyId) {
+          // 今回作成した住所を同一CSV内の重複判定に反映
+          if (norm) existingNorm.set(norm, createdPropertyId);
+          await prisma.importJobRow.create({
+            data: {
+              jobId: job.id,
+              rowNumber,
+              status: "success",
+              rawData,
+              errorMessage: null,
+              createdId: createdPropertyId,
+            },
+          });
+          successCount++;
+        }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : "不明なエラー";
         await prisma.importJobRow.create({
