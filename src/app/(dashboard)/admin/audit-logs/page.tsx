@@ -46,6 +46,8 @@ const ACTION_LABELS: Record<string, string> = {
   import_job_rollback: "取込ロールバック",
   import_row_resolve: "取込行解決",
   reception_owner_manual_link: "受付帳×所有者の手動紐づけ",
+  reception_owner_csv_import: "受付帳×所有者の取込",
+  reception_property_csv_import: "受付帳から物件作成",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {

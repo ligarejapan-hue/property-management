@@ -31,10 +31,14 @@ import {
   previewCsvDuplicates,
   previewReceptionOwnerCsv,
   importReceptionOwnerCsv,
+  previewReceptionPropertyCsv,
+  importReceptionPropertyCsv,
   parseFileForPreview,
   readFileForImport,
   type ReceptionOwnerPreviewResponse,
   type ReceptionOwnerImportResponse,
+  type ReceptionPropertyPreviewResponse,
+  type ReceptionPropertyImportResponse,
   type StuckImportJob,
 } from "@/lib/api-client";
 import { detectImportFileType } from "@/lib/import-file-type";
@@ -550,6 +554,19 @@ export default function ImportPage() {
   const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">("marked");
   const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">("existing");
 
+  // Reception → Property (1-file) state
+  const [rpFile, setRpFile] = useState<{
+    name: string;
+    csvText?: string;
+    xlsxBase64?: string;
+  } | null>(null);
+  const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>(null);
+  const [rpResult, setRpResult] = useState<ReceptionPropertyImportResponse | null>(null);
+  const [rpLoading, setRpLoading] = useState(false);
+  const [rpError, setRpError] = useState<string | null>(null);
+  const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">("marked");
+  const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">("existing");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ------ Jobs ------
@@ -949,6 +966,77 @@ export default function ImportPage() {
     setShinkiFilter("existing");
   };
 
+  // ------ Reception → Property ------
+  const handleRpFile = async (file: File | null) => {
+    setRpError(null);
+    setRpPreview(null);
+    setRpResult(null);
+    if (!file) { setRpFile(null); return; }
+    const detect = detectImportFileType(file.name);
+    if (detect.type !== "reception") {
+      setRpError(`受付帳として認識できません: ${detect.error ?? "ファイル名に『受付帳』を含めてください"}`);
+      return;
+    }
+    try {
+      const buf = await readFileForImport(file);
+      setRpFile({ name: file.name, csvText: buf.csvText, xlsxBase64: buf.xlsxBase64 });
+    } catch (e) {
+      setRpError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
+    }
+  };
+
+  const handleRpPreview = async () => {
+    if (!rpFile) return;
+    setRpLoading(true);
+    setRpError(null);
+    setRpResult(null);
+    try {
+      const res = await previewReceptionPropertyCsv({
+        receptionFileName: rpFile.name,
+        receptionCsv: rpFile.csvText,
+        receptionXlsxBase64: rpFile.xlsxBase64,
+        dlFilter: rpDlFilter,
+        shinkiFilter: rpShinkiFilter,
+      });
+      setRpPreview(res);
+    } catch (e) {
+      setRpError(e instanceof Error ? e.message : "プレビューに失敗しました");
+    } finally {
+      setRpLoading(false);
+    }
+  };
+
+  const handleRpImport = async () => {
+    if (!rpFile) return;
+    if (!window.confirm("住所が既存物件と重複しない行を物件として新規作成します。よろしいですか？")) return;
+    setRpLoading(true);
+    setRpError(null);
+    try {
+      const res = await importReceptionPropertyCsv({
+        receptionFileName: rpFile.name,
+        receptionCsv: rpFile.csvText,
+        receptionXlsxBase64: rpFile.xlsxBase64,
+        dlFilter: rpDlFilter,
+        shinkiFilter: rpShinkiFilter,
+      });
+      setRpResult(res);
+      fetchJobs();
+    } catch (e) {
+      setRpError(e instanceof Error ? e.message : "取込に失敗しました");
+    } finally {
+      setRpLoading(false);
+    }
+  };
+
+  const handleRpReset = () => {
+    setRpFile(null);
+    setRpPreview(null);
+    setRpResult(null);
+    setRpError(null);
+    setRpDlFilter("marked");
+    setRpShinkiFilter("existing");
+  };
+
   // ------ Render helpers ------
   const statusIcon = (status: RowStatus) => {
     if (status === "valid")
@@ -967,18 +1055,19 @@ export default function ImportPage() {
         <p className="mb-2 font-semibold text-blue-900">取込の進め方</p>
         <ol className="ml-4 list-decimal space-y-1 text-blue-900">
           <li>
-            <span className="font-medium">受付帳CSV</span> を取り込み、受付帳の情報から物件を登録/更新します（このページ）
+            <span className="font-medium">① 受付帳CSVから物件を新規作成</span>
+            <span className="ml-1 text-blue-700">— DL〇かつ既存の受付帳行から住所・地番・区分で物件レコードを作成します</span>
           </li>
           <li>
-            <span className="font-medium">所有者CSV</span> を取り込み、所有者を登録し、受付帳CSVで登録済みの物件と紐づけます
-            <span className="ml-1 text-blue-700">— 紐づけにはリンクキーまたは正規化住所が必要</span>
+            <span className="font-medium">② 受付帳×所有者CSVで既存物件に所有者を紐づける</span>
+            <span className="ml-1 text-blue-700">— ①で作成した物件に所有者情報を紐づけます</span>
           </li>
           <li>
-            <span className="font-medium">謄本PDF</span> は物件詳細または専用ページから登録します
+            <span className="font-medium">③ 謄本PDF</span> は物件詳細または専用ページから登録します
           </li>
         </ol>
         <p className="mt-2 text-xs text-blue-700">
-          初期状態は「DLに〇がついている物件のみ」かつ「既存のみ」です。必要に応じて受付帳×所有者の突合セクションで条件を変更できます。物件が未登録の状態で所有者CSVを取り込むと、所有者は物件に紐づきません。
+          物件が未登録の状態で所有者CSVを取り込んでも、所有者は物件に紐づきません。①を先に実行してください。
         </p>
       </div>
 
@@ -1605,12 +1694,197 @@ export default function ImportPage() {
         </div>
       )}
 
-      {/* ============ 受付帳 × 所有者 2ファイル突合 ============ */}
+      {/* ============ ① 受付帳CSVから物件を新規作成 ============ */}
+      <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <FileUp className="h-5 w-5 text-green-600" />
+          <h3 className="text-lg font-semibold text-gray-700">
+            ① 受付帳CSVから物件を新規作成（CSV / Excel(.xlsx) 対応）
+          </h3>
+          <span className="ml-2 rounded bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
+            物件を新規作成
+          </span>
+        </div>
+        <p className="mb-3 text-sm text-gray-500">
+          受付帳CSVを読み込み、住所が既存物件と重複しない行だけ物件レコードを新規作成します。
+          地番・家屋番号・区分も自動で設定します。所有者の紐づけは②で行います。
+        </p>
+        <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600">
+          <li>受付帳CSV を選択</li>
+          <li>「プレビュー」で新規作成予定・重複・住所なし件数を確認</li>
+          <li>「取り込む」で物件を作成</li>
+        </ol>
+
+        {/* 取込条件 */}
+        <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+          <div className="mb-2 text-xs font-semibold text-gray-700">取込条件</div>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <span className="text-xs text-gray-500">取込物件選択（DL）</span>
+              <select
+                value={rpDlFilter}
+                onChange={(e) => { setRpDlFilter(e.target.value as typeof rpDlFilter); setRpPreview(null); }}
+                disabled={rpLoading}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+              >
+                <option value="marked">DLに〇がついている物件のみ</option>
+                <option value="unmarked">DLに〇がついていない物件のみ</option>
+                <option value="all">両方</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <span className="text-xs text-gray-500">新既</span>
+              <select
+                value={rpShinkiFilter}
+                onChange={(e) => { setRpShinkiFilter(e.target.value as typeof rpShinkiFilter); setRpPreview(null); }}
+                disabled={rpLoading}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+              >
+                <option value="existing">既存のみ</option>
+                <option value="new">新規のみ</option>
+                <option value="all">両方</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        {/* ファイル選択 */}
+        <div className="mb-4">
+          <label className="mb-1 block text-sm font-medium text-gray-700">
+            受付帳CSV / Excel(.xlsx) <span className="text-xs text-gray-400">（ファイル名に「受付帳」を含める）</span>
+          </label>
+          <input
+            type="file"
+            accept=".csv,.tsv,.txt,.xlsx"
+            onChange={(e) => handleRpFile(e.target.files?.[0] ?? null)}
+            className="block w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
+          />
+          {rpFile && (
+            <div className="mt-1 text-xs text-green-700">
+              <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
+              {rpFile.name}
+            </div>
+          )}
+        </div>
+
+        {/* ボタン */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleRpPreview}
+            disabled={!rpFile || rpLoading}
+            className="flex items-center gap-1.5 rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+          >
+            {rpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+            プレビュー
+          </button>
+          <button
+            onClick={handleRpImport}
+            disabled={!rpPreview || rpPreview.summary.toCreateCount === 0 || rpLoading}
+            className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            {rpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
+            取り込む（{rpPreview?.summary.toCreateCount ?? 0}件作成）
+          </button>
+          {(rpFile || rpPreview || rpResult) && (
+            <button
+              onClick={handleRpReset}
+              disabled={rpLoading}
+              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              リセット
+            </button>
+          )}
+        </div>
+
+        {/* エラー */}
+        {rpError && (
+          <div className="mb-4 flex items-start gap-2 rounded-md bg-red-50 p-3 text-sm text-red-700">
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            {rpError}
+          </div>
+        )}
+
+        {/* プレビュー結果 */}
+        {rpPreview && !rpResult && (
+          <div className="rounded-md border border-gray-200 p-4">
+            <p className="mb-2 text-sm font-semibold text-gray-700">プレビュー結果</p>
+            <div className="mb-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+              <div className="rounded bg-green-50 p-2 text-center">
+                <div className="text-xl font-bold text-green-700">{rpPreview.summary.toCreateCount}</div>
+                <div className="text-xs text-green-600">新規作成</div>
+              </div>
+              <div className="rounded bg-yellow-50 p-2 text-center">
+                <div className="text-xl font-bold text-yellow-700">{rpPreview.summary.duplicateCount}</div>
+                <div className="text-xs text-yellow-600">既存と重複</div>
+              </div>
+              <div className="rounded bg-gray-50 p-2 text-center">
+                <div className="text-xl font-bold text-gray-600">{rpPreview.summary.noAddressCount}</div>
+                <div className="text-xs text-gray-500">住所なし</div>
+              </div>
+              <div className="rounded bg-gray-50 p-2 text-center">
+                <div className="text-xl font-bold text-gray-600">{rpPreview.summary.filteredCount}</div>
+                <div className="text-xs text-gray-500">フィルタ除外</div>
+              </div>
+            </div>
+            {rpPreview.toCreateSamples.length > 0 && (
+              <div className="mb-2">
+                <p className="mb-1 text-xs font-medium text-gray-600">新規作成サンプル（最大5件）</p>
+                <div className="overflow-auto rounded border border-gray-100">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-1 text-left font-medium text-gray-500">行</th>
+                        <th className="px-2 py-1 text-left font-medium text-gray-500">区分</th>
+                        <th className="px-2 py-1 text-left font-medium text-gray-500">住所</th>
+                        <th className="px-2 py-1 text-left font-medium text-gray-500">地番</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {rpPreview.toCreateSamples.map((s) => (
+                        <tr key={s.rowNumber}>
+                          <td className="px-2 py-1 text-gray-500">{s.rowNumber}</td>
+                          <td className="px-2 py-1">{s.fColumn || "—"}</td>
+                          <td className="px-2 py-1">{s.propertyAddress}</td>
+                          <td className="px-2 py-1 text-gray-500">{s.lotNumber ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 取込結果 */}
+        {rpResult && (
+          <div className="rounded-md border border-green-200 bg-green-50 p-4">
+            <p className="mb-2 text-sm font-semibold text-green-800">取込完了</p>
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div className="text-center">
+                <div className="text-xl font-bold text-green-700">{rpResult.successCount}</div>
+                <div className="text-xs text-green-600">作成成功</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xl font-bold text-yellow-700">{rpResult.needsReviewCount}</div>
+                <div className="text-xs text-yellow-600">要レビュー</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xl font-bold text-red-700">{rpResult.errorCount}</div>
+                <div className="text-xs text-red-600">エラー</div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ============ ② 受付帳 × 所有者 2ファイル突合 ============ */}
       <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
         <div className="mb-4 flex items-center gap-2">
           <FileUp className="h-5 w-5 text-blue-600" />
           <h3 className="text-lg font-semibold text-gray-700">
-            受付帳 × 所有者 2ファイル突合（CSV / Excel(.xlsx) 対応）
+            ② 受付帳 × 所有者 2ファイル突合（CSV / Excel(.xlsx) 対応）
           </h3>
           <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
             既存物件に反映
