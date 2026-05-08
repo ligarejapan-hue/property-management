@@ -45,6 +45,7 @@ const ACTION_LABELS: Record<string, string> = {
   import_job_mark_failed: "取込を手動失敗化",
   import_job_rollback: "取込ロールバック",
   import_row_resolve: "取込行解決",
+  reception_owner_manual_link: "受付帳×所有者の手動紐づけ",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {

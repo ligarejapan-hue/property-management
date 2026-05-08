@@ -28,9 +28,11 @@ import {
   rollbackImportJob,
   searchProperties,
   searchOwners,
+  manualLinkReceptionOwnerRow,
   type AffectedPropertiesResponse,
   type RollbackResponse,
 } from "@/lib/api-client";
+import { isReceptionOwnerJobRow } from "@/lib/reception-owner-link";
 import {
   isDuplicateMessage,
   extractDuplicateReason,
@@ -235,6 +237,15 @@ export default function ImportJobDetailPage() {
     setRollbackOpen(false);
   };
 
+  // 受付帳×所有者ジョブを行ベースで検出する。
+  // jobType === "owner_csv" だが rawData に受付帳×所有者固有マーカがある場合は、
+  // 検索対象を Owner ではなく Property に切り替え、紐づけ API も新パスを使う。
+  const isReceptionOwnerJob =
+    job?.rows.some((r) => isReceptionOwnerJobRow(job.jobType, r.rawData)) ??
+    false;
+  // 既存の owner_csv 単独取込のときだけ Owner 検索モード。
+  const useOwnerSearch = job?.jobType === "owner_csv" && !isReceptionOwnerJob;
+
   // Debounced search
   const doSearch = useCallback(
     async (query: string) => {
@@ -244,8 +255,7 @@ export default function ImportJobDetailPage() {
       }
       setSearchLoading(true);
       try {
-        const isOwner = job.jobType === "owner_csv";
-        const result = isOwner
+        const result = useOwnerSearch
           ? await searchOwners(query)
           : await searchProperties(query);
         setSearchResults(result.data as SearchResult[]);
@@ -255,7 +265,7 @@ export default function ImportJobDetailPage() {
         setSearchLoading(false);
       }
     },
-    [job],
+    [job, useOwnerSearch],
   );
 
   const handleSearchInput = (value: string) => {
@@ -306,7 +316,13 @@ export default function ImportJobDetailPage() {
         action === "create_new" && editingRow === rowId
           ? editedData
           : undefined;
-      await resolveImportRow(jobId, rowId, action, targetId, edited);
+      // 受付帳×所有者ジョブの link_existing は新 API を呼び、Property 補完 +
+      // Owner upsert + PropertyOwner link を transaction でまとめて実行する。
+      if (action === "link_existing" && isReceptionOwnerJob && targetId) {
+        await manualLinkReceptionOwnerRow(jobId, rowId, targetId);
+      } else {
+        await resolveImportRow(jobId, rowId, action, targetId, edited);
+      }
       await Promise.all([fetchJob(), fetchAffected()]);
       setExpandedRow(null);
       setEditingRow(null);
@@ -397,7 +413,9 @@ export default function ImportJobDetailPage() {
     );
   }
 
-  const isOwnerJob = job.jobType === "owner_csv";
+  // 受付帳×所有者ジョブは jobType=owner_csv を流用しているため、
+  // 純粋な所有者CSV取込のときだけ「Owner として扱う」UI を出す。
+  const isOwnerJob = useOwnerSearch;
 
   return (
     <div>

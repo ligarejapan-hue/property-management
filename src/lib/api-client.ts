@@ -555,6 +555,45 @@ export async function retryImportRow(
   });
 }
 
+export interface ManualLinkReceptionOwnerResponse {
+  ok: true;
+  rowId: string;
+  propertyId: string;
+  ownerCreatedCount: number;
+  ownerLinkedCount: number;
+  propertyUpdatedFields: string[];
+}
+
+/**
+ * 受付帳×所有者ジョブの needs_review 行を、ユーザが選んだ Property に手動で紐づける。
+ * 既存 PATCH /rows/:rowId の link_existing は変更せず、別パスの新 API を呼ぶ。
+ */
+export async function manualLinkReceptionOwnerRow(
+  jobId: string,
+  rowId: string,
+  propertyId: string,
+): Promise<ManualLinkReceptionOwnerResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      ok: true,
+      rowId,
+      propertyId,
+      ownerCreatedCount: 0,
+      ownerLinkedCount: 0,
+      propertyUpdatedFields: [],
+    };
+  }
+  return apiFetch<ManualLinkReceptionOwnerResponse>(
+    `/api/import/jobs/${jobId}/rows/${rowId}/manual-link-reception-owner`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ propertyId }),
+    },
+  );
+}
+
 /**
  * ブラウザ側で csv/xlsx をプレビュー用の {headers, rows} に変換する。
  * API 送信時の整合性のため、サーバ側 sheet-parser と同じ粒度で文字列化する。
