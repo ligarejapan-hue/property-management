@@ -4,6 +4,7 @@ import {
   normalizeBuildingName,
   normalizeRoomNo,
   buildPropertyDedupeKey,
+  normalizeName,
 } from "../normalize";
 
 describe("normalizeAddress", () => {
@@ -129,6 +130,52 @@ describe("normalizeRoomNo", () => {
     ];
     const normalized = variants.map(normalizeRoomNo);
     expect(new Set(normalized).size).toBe(1);
+  });
+});
+
+describe("normalizeName", () => {
+  it("全角スペースを除去する", () => {
+    expect(normalizeName("田中　太郎")).toBe("田中太郎");
+  });
+
+  it("半角スペースを除去する", () => {
+    expect(normalizeName("田中 太郎")).toBe("田中太郎");
+  });
+
+  it("スペースなしはそのまま", () => {
+    expect(normalizeName("田中太郎")).toBe("田中太郎");
+  });
+
+  it("全角英字を半角に変換する (NFKC)", () => {
+    expect(normalizeName("ＴＡＮＡＫＡ")).toBe("TANAKA");
+  });
+
+  it("前後空白を除去する", () => {
+    expect(normalizeName("  田中太郎  ")).toBe("田中太郎");
+  });
+
+  it("表記ゆれのある氏名が同値になる", () => {
+    expect(normalizeName("田中　太郎")).toBe(normalizeName("田中太郎"));
+    expect(normalizeName("田中 太郎")).toBe(normalizeName("田中　太郎"));
+  });
+});
+
+describe("Owner重複判定: normalizeName + normalizeAddress の比較", () => {
+  it("同じ name/address の表記ゆれは両方が一致する（→ 409 相当）", () => {
+    const normName = normalizeName("田中　太郎");
+    const normAddr = normalizeAddress("東京都千代田区１－１－１");
+    const candidate = { name: "田中 太郎", address: "東京都千代田区1-1-1" };
+    expect(normalizeName(candidate.name)).toBe(normName);
+    expect(normalizeAddress(candidate.address)).toBe(normAddr);
+  });
+
+  it("同じ name でも address が異なれば一致しない（→ 作成許可）", () => {
+    const normName = normalizeName("田中太郎");
+    const normAddrA = normalizeAddress("東京都千代田区1-1-1");
+    const normAddrB = normalizeAddress("大阪府大阪市北区2-2-2");
+    // name は同値だが address が違うため pair は一致しない
+    expect(normName).toBe(normalizeName("田中太郎"));
+    expect(normAddrA).not.toBe(normAddrB);
   });
 });
 
