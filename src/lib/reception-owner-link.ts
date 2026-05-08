@@ -15,17 +15,20 @@ export interface RecoveredOwner {
   zip: string | null;
 }
 
+export const RECEPTION_OWNER_LINK_DATA_KEY = "__owner_link_data";
+
 /**
  * 受付帳×所有者ジョブを判定するための rawData 固有キー。
  * 取込ロジック (src/app/api/import/reception-owner/route.ts) で必ず付与される。
+ *
+ * 注意: `matchKey` は別の取込種別でも汎用キーとして使われ得るため marker に含めない。
+ * 受付帳×所有者ジョブに固有なキーのみで判定する。
  */
 const RECEPTION_OWNER_MARKER_KEYS = [
   "所有者CSV物件住所",
-  "matchKey",
   "ownerCount",
+  RECEPTION_OWNER_LINK_DATA_KEY,
 ] as const;
-
-export const RECEPTION_OWNER_LINK_DATA_KEY = "__owner_link_data";
 
 /**
  * 行が「受付帳×所有者ジョブの行」であるかを厳格に判定する。

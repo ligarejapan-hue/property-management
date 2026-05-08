@@ -12,8 +12,16 @@ describe("isReceptionOwnerJobRow", () => {
     expect(
       isReceptionOwnerJobRow("owner_csv", { 所有者CSV物件住所: "東京都..." }),
     ).toBe(true);
-    expect(isReceptionOwnerJobRow("owner_csv", { matchKey: "key" })).toBe(true);
     expect(isReceptionOwnerJobRow("owner_csv", { ownerCount: "2" })).toBe(true);
+    expect(
+      isReceptionOwnerJobRow("owner_csv", {
+        [RECEPTION_OWNER_LINK_DATA_KEY]: "[]",
+      }),
+    ).toBe(true);
+  });
+
+  it("matchKey 単独では false（汎用キーのため受付帳×所有者と断定しない）", () => {
+    expect(isReceptionOwnerJobRow("owner_csv", { matchKey: "key" })).toBe(false);
   });
 
   it("jobType=owner_csv だが マーカ無し → false（純粋な所有者CSV取込）", () => {
@@ -27,10 +35,12 @@ describe("isReceptionOwnerJobRow", () => {
       isReceptionOwnerJobRow("property_csv", { 所有者CSV物件住所: "x" }),
     ).toBe(false);
     expect(
-      isReceptionOwnerJobRow("dm_history_csv", { matchKey: "k" }),
+      isReceptionOwnerJobRow("dm_history_csv", { ownerCount: "1" }),
     ).toBe(false);
     expect(
-      isReceptionOwnerJobRow("registry_pdf", { ownerCount: "1" }),
+      isReceptionOwnerJobRow("registry_pdf", {
+        [RECEPTION_OWNER_LINK_DATA_KEY]: "[]",
+      }),
     ).toBe(false);
   });
 

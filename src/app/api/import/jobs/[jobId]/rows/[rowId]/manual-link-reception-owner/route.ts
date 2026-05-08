@@ -81,6 +81,16 @@ export async function POST(
       );
     }
 
+    // Phase 1 安全条件: 既に createdId を持つ行は手動紐づけ対象外。
+    // 二重紐づけや状態不整合（needs_review なのに createdId が残っている等）を防ぐ。
+    if (row.createdId) {
+      throw new ApiError(
+        422,
+        "この行は既に紐づけ済みです",
+        "VALIDATION_ERROR",
+      );
+    }
+
     const rawData = (row.rawData ?? null) as Record<string, unknown> | null;
     if (!isReceptionOwnerJobRow(row.job.jobType, rawData)) {
       throw new ApiError(
@@ -245,32 +255,47 @@ export async function POST(
     });
 
     // ---- transaction commit 後 (best-effort、失敗しても主処理は成功) ----
+    // recordChanges / writeAuditLog 失敗は API 全体の失敗にはしない（log は補助情報）。
     if (Object.keys(propertyUpdates).length > 0) {
-      await recordChanges({
-        targetTable: "properties",
-        targetId: propertyId,
-        changedBy: session.id,
-        oldValues: beforeForChangeLog,
-        newValues: { ...beforeForChangeLog, ...propertyUpdates },
-        trackedFields: PROPERTY_TRACKED_FIELDS,
-        source: "csv_import",
-      });
+      try {
+        await recordChanges({
+          targetTable: "properties",
+          targetId: propertyId,
+          changedBy: session.id,
+          oldValues: beforeForChangeLog,
+          newValues: { ...beforeForChangeLog, ...propertyUpdates },
+          trackedFields: PROPERTY_TRACKED_FIELDS,
+          source: "csv_import",
+        });
+      } catch (logErr) {
+        console.error(
+          "manual-link-reception-owner: recordChanges failed (non-fatal):",
+          logErr,
+        );
+      }
     }
 
-    await writeAuditLog({
-      userId: session.id,
-      action: "reception_owner_manual_link",
-      targetTable: "import_job_rows",
-      targetId: rowId,
-      detail: {
-        jobId,
-        rowNumber: row.rowNumber,
-        propertyId,
-        ownerCreatedCount,
-        ownerLinkedCount,
-        propertyUpdatedFields: Object.keys(propertyUpdates),
-      },
-    });
+    try {
+      await writeAuditLog({
+        userId: session.id,
+        action: "reception_owner_manual_link",
+        targetTable: "import_job_rows",
+        targetId: rowId,
+        detail: {
+          jobId,
+          rowNumber: row.rowNumber,
+          propertyId,
+          ownerCreatedCount,
+          ownerLinkedCount,
+          propertyUpdatedFields: Object.keys(propertyUpdates),
+        },
+      });
+    } catch (logErr) {
+      console.error(
+        "manual-link-reception-owner: writeAuditLog failed (non-fatal):",
+        logErr,
+      );
+    }
 
     return apiResponse({
       ok: true,
