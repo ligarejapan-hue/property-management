@@ -127,3 +127,19 @@ export function calcPropertyUpdates(
 export function hasUsableOwnerInfo(owners: RecoveredOwner[]): boolean {
   return owners.some((o) => o.name && o.name.trim() !== "");
 }
+
+/**
+ * 受付帳×所有者ジョブの行が「手動紐づけ対象」として適格かを判定する。
+ *
+ * route の transaction 内で行う atomic claim (updateMany) と同じ条件:
+ *   - status === "needs_review"
+ *   - createdId === null
+ *
+ * pre-check 用。並行リクエストの最終解消は updateMany 側の count で保証する。
+ */
+export function isRowEligibleForManualLink(row: {
+  status: string;
+  createdId: string | null;
+}): boolean {
+  return row.status === "needs_review" && row.createdId === null;
+}

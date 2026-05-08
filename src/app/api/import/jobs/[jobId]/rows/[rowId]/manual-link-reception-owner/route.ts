@@ -15,6 +15,7 @@ import {
   parseRecoveredOwners,
   hasUsableOwnerInfo,
   calcPropertyUpdates,
+  isRowEligibleForManualLink,
 } from "@/lib/reception-owner-link";
 
 // ============================================================
@@ -72,21 +73,21 @@ export async function POST(
       throw new ApiError(404, "行が見つかりません", "NOT_FOUND");
     }
 
-    // Phase 1: needs_review のみ対象。error 行は弾く（CSV形式エラー等を success にしないため）。
-    if (row.status !== "needs_review") {
+    // Phase 1: pre-check で早期失敗させる（status / createdId 両方を判定）。
+    // ただし最終的な競合解消は transaction 内の atomic claim (updateMany) で行うため、
+    // ここを通過しても並行リクエストでは claim 段階で 409 になり得る。
+    if (
+      !isRowEligibleForManualLink({
+        status: row.status,
+        createdId: row.createdId,
+      })
+    ) {
+      if (row.createdId) {
+        throw new ApiError(422, "この行は既に紐づけ済みです", "VALIDATION_ERROR");
+      }
       throw new ApiError(
         422,
         `この行は手動紐づけ対象ではありません（ステータス: ${row.status}）`,
-        "VALIDATION_ERROR",
-      );
-    }
-
-    // Phase 1 安全条件: 既に createdId を持つ行は手動紐づけ対象外。
-    // 二重紐づけや状態不整合（needs_review なのに createdId が残っている等）を防ぐ。
-    if (row.createdId) {
-      throw new ApiError(
-        422,
-        "この行は既に紐づけ済みです",
         "VALIDATION_ERROR",
       );
     }
@@ -150,8 +151,30 @@ export async function POST(
     let ownerCreatedCount = 0;
     let ownerLinkedCount = 0;
 
-    // ---- transaction: 5 つの DB 操作を原子的にまとめる ----
+    // ---- transaction: atomic claim + DB 操作を原子的にまとめる ----
     await prisma.$transaction(async (tx) => {
+      // 0. ATOMIC CLAIM: 同一 row への並行リクエスト時、最初の 1 本だけが count=1 で
+      //    通過する。残りは count=0 で 409。後続失敗時は transaction rollback で
+      //    createdId のセットも戻る（claim 自体も巻き戻る）。
+      const claim = await tx.importJobRow.updateMany({
+        where: {
+          id: rowId,
+          jobId,
+          status: "needs_review",
+          createdId: null,
+        },
+        data: {
+          createdId: propertyId,
+        },
+      });
+      if (claim.count !== 1) {
+        throw new ApiError(
+          409,
+          "別の操作で既に紐づけ済みか、対象行が変更されました",
+          "CONFLICT",
+        );
+      }
+
       // 1. Property 補完
       if (Object.keys(propertyUpdates).length > 0) {
         await tx.property.update({
@@ -160,7 +183,12 @@ export async function POST(
         });
       }
 
-      // 2-3. Owner upsert + PropertyOwner link （所有者ごと）
+      // 2. Owner upsert（所有者ごと）。
+      //    NOTE: Owner にスキーマ unique 制約がないため、極めて高い並行性下では
+      //    重複 Owner レコード生成の可能性が残る（Codex 指摘）。今回 migration は
+      //    追加しないため完全には解消していない。同一 row 二重実行は上記 atomic
+      //    claim で防止済み。
+      const ownerIds: string[] = [];
       for (const o of recoveredOwners) {
         const name = o.name.trim();
         if (!name) continue;
@@ -207,30 +235,31 @@ export async function POST(
             data: { zip, version: { increment: 1 } },
           });
         }
-
-        const existingLink = await tx.propertyOwner.findUnique({
-          where: { propertyId_ownerId: { propertyId, ownerId } },
-          select: { propertyId: true },
-        });
-        if (!existingLink) {
-          await tx.propertyOwner.create({
-            data: {
-              propertyId,
-              ownerId,
-              relationship: "所有者",
-              isPrimary: false,
-            },
-          });
-          ownerLinkedCount++;
-        }
+        ownerIds.push(ownerId);
       }
 
-      // 4. ImportJobRow 更新
+      // 3. PropertyOwner link （冪等）。
+      //    createMany + skipDuplicates により、既存 link がある場合は素通りし、
+      //    並行リクエストで unique constraint error にならない。
+      //    count は今回 INSERT された行数 → ownerLinkedCount として反映。
+      if (ownerIds.length > 0) {
+        const linkResult = await tx.propertyOwner.createMany({
+          data: ownerIds.map((ownerId) => ({
+            propertyId,
+            ownerId,
+            relationship: "所有者",
+            isPrimary: false,
+          })),
+          skipDuplicates: true,
+        });
+        ownerLinkedCount = linkResult.count;
+      }
+
+      // 4. ImportJobRow を最終 status に確定（createdId は claim 時点でセット済み）
       await tx.importJobRow.update({
         where: { id: rowId },
         data: {
           status: "success",
-          createdId: propertyId,
           errorMessage: "手動紐づけ",
         },
       });

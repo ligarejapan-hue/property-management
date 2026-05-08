@@ -4,6 +4,7 @@ import {
   parseRecoveredOwners,
   hasUsableOwnerInfo,
   calcPropertyUpdates,
+  isRowEligibleForManualLink,
   RECEPTION_OWNER_LINK_DATA_KEY,
 } from "../reception-owner-link";
 
@@ -132,6 +133,41 @@ describe("hasUsableOwnerInfo", () => {
     ).toBe(false);
     expect(
       hasUsableOwnerInfo([{ name: "   ", address: null, zip: null }]),
+    ).toBe(false);
+  });
+});
+
+describe("isRowEligibleForManualLink (atomic claim 条件と一致)", () => {
+  it("status=needs_review かつ createdId=null → true", () => {
+    expect(
+      isRowEligibleForManualLink({ status: "needs_review", createdId: null }),
+    ).toBe(true);
+  });
+
+  it("createdId が既にある行 → false（二重紐づけ防止）", () => {
+    expect(
+      isRowEligibleForManualLink({
+        status: "needs_review",
+        createdId: "11111111-2222-3333-4444-555555555555",
+      }),
+    ).toBe(false);
+  });
+
+  it("status が needs_review 以外 → false（success/error/skipped 全部）", () => {
+    expect(
+      isRowEligibleForManualLink({ status: "success", createdId: null }),
+    ).toBe(false);
+    expect(
+      isRowEligibleForManualLink({ status: "error", createdId: null }),
+    ).toBe(false);
+    expect(
+      isRowEligibleForManualLink({ status: "skipped", createdId: null }),
+    ).toBe(false);
+  });
+
+  it("status と createdId 両方ダメな組合せ → false", () => {
+    expect(
+      isRowEligibleForManualLink({ status: "success", createdId: "any" }),
     ).toBe(false);
   });
 });
