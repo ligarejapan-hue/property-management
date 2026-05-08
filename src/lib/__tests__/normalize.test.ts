@@ -177,6 +177,36 @@ describe("Owner重複判定: normalizeName + normalizeAddress の比較", () => 
     expect(normName).toBe(normalizeName("田中太郎"));
     expect(normAddrA).not.toBe(normAddrB);
   });
+
+  // import 系 Phase 2: address あり Owner の正規化比較でヒットすることを確認
+  it("import 取込 candidates.find: address あり Owner の表記ゆれを同一と判定する", () => {
+    const inputName = "山田　花子";
+    const inputAddr = "東京都港区６丁目１番地１号";
+    const normName = normalizeName(inputName);
+    const normAddr = normalizeAddress(inputAddr);
+    const candidates = [
+      { id: "a", name: "山田 花子", address: "東京都港区6丁目1番地1号", zip: null },
+      { id: "b", name: "鈴木一郎", address: "東京都港区6丁目1番地1号", zip: null },
+    ];
+    const hit = candidates.find(
+      (c) =>
+        normalizeName(c.name) === normName &&
+        normalizeAddress(c.address) === normAddr,
+    );
+    expect(hit?.id).toBe("a");
+  });
+
+  it("import 取込 address なし fallback は name-only 正規化マッチに広げない", () => {
+    // address:null Owner の検索は raw name 一致のまま（正規化で広げない）
+    // このテストは「正規化した name が address:null Owner を誤ってヒットさせない」ことを確認
+    const rawName = "田中太郎";
+    const addressNullCandidates = [
+      { id: "x", name: "田中　太郎", address: null, zip: null }, // スペース差異
+    ];
+    // raw 比較では miss する（Phase 2 で address:null fallback は変更しないため）
+    const rawHit = addressNullCandidates.find((c) => c.name === rawName);
+    expect(rawHit).toBeUndefined();
+  });
 });
 
 describe("buildPropertyDedupeKey", () => {

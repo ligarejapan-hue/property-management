@@ -17,6 +17,7 @@ import {
   calcPropertyUpdates,
   isRowEligibleForManualLink,
 } from "@/lib/reception-owner-link";
+import { normalizeName, normalizeAddress } from "@/lib/normalize";
 
 // ============================================================
 // POST /api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner
@@ -201,10 +202,18 @@ export async function POST(
         let ownerId: string | null = null;
         let existingZip: string | null = null;
         if (address) {
-          const hit = await tx.owner.findFirst({
-            where: { name, address },
-            select: { id: true, zip: true },
+          const normName = normalizeName(name);
+          const normAddr = normalizeAddress(address);
+          const candidates = await tx.owner.findMany({
+            where: { address: { not: null } },
+            select: { id: true, zip: true, name: true, address: true },
           });
+          const hit =
+            candidates.find(
+              (c) =>
+                normalizeName(c.name) === normName &&
+                normalizeAddress(c.address!) === normAddr,
+            ) ?? null;
           if (hit) {
             ownerId = hit.id;
             existingZip = hit.zip;
