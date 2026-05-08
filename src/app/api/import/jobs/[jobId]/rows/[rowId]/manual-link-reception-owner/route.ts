@@ -110,46 +110,23 @@ export async function POST(
       );
     }
 
-    const property = await prisma.property.findUnique({
-      where: { id: propertyId },
-      select: {
-        id: true,
-        lotNumber: true,
-        buildingNumber: true,
-        roomNo: true,
-      },
-    });
-    if (!property) {
-      throw new ApiError(404, "指定された物件が見つかりません", "NOT_FOUND");
-    }
-
     // 受付帳行の rawData から地番/家屋番号を復元（取込時に保存済み）
     const reception = {
       lotNumber: stringOrNull(rawData?.lotNumber),
       buildingNumber: stringOrNull(rawData?.buildingNumber),
     };
 
-    // owner upsert は name+address で検索 → 無ければ create
-    // 補完用の roomNo は所有者群に部屋番号が含まれているかで判定
-    // （ParsedOwnerRow.roomNo 由来。手動紐づけ時は rawData に保存していないため null）
-    const propertyUpdates = calcPropertyUpdates(
-      {
-        lotNumber: property.lotNumber,
-        buildingNumber: property.buildingNumber,
-        roomNo: property.roomNo,
-      },
-      reception,
-      null,
-    );
-
-    const beforeForChangeLog = {
-      lotNumber: property.lotNumber ?? null,
-      buildingNumber: property.buildingNumber ?? null,
-      roomNo: property.roomNo ?? null,
-    };
-
     let ownerCreatedCount = 0;
     let ownerLinkedCount = 0;
+    // Property の最新値は transaction 内 (atomic claim 成功後) に読み直して
+    // 「空欄のみ補完」の保証を担保する。別 row が並行で同じ Property を更新しても、
+    // claim 成功後の readback で最新値を見て updates を再計算する。
+    let propertyUpdates: ReturnType<typeof calcPropertyUpdates> = {};
+    let beforeForChangeLog: {
+      lotNumber: string | null;
+      buildingNumber: string | null;
+      roomNo: string | null;
+    } = { lotNumber: null, buildingNumber: null, roomNo: null };
 
     // ---- transaction: atomic claim + DB 操作を原子的にまとめる ----
     await prisma.$transaction(async (tx) => {
@@ -175,7 +152,33 @@ export async function POST(
         );
       }
 
-      // 1. Property 補完
+      // 1. Property 最新読み直し → updates 再計算 → 補完。
+      //    transaction 外の読取結果を使うと、別 row が同じ Property に並行で
+      //    補完済みでも上書きしてしまう恐れがあるため、claim 成功後にここで
+      //    最新値を確定させる。
+      //    手動紐づけ時 roomNo の補完源 (ParsedOwnerRow.roomNo) は rawData に
+      //    保存していないため null 固定。
+      const fresh = await tx.property.findUnique({
+        where: { id: propertyId },
+        select: { lotNumber: true, buildingNumber: true, roomNo: true },
+      });
+      if (!fresh) {
+        throw new ApiError(404, "指定された物件が見つかりません", "NOT_FOUND");
+      }
+      beforeForChangeLog = {
+        lotNumber: fresh.lotNumber ?? null,
+        buildingNumber: fresh.buildingNumber ?? null,
+        roomNo: fresh.roomNo ?? null,
+      };
+      propertyUpdates = calcPropertyUpdates(
+        {
+          lotNumber: fresh.lotNumber,
+          buildingNumber: fresh.buildingNumber,
+          roomNo: fresh.roomNo,
+        },
+        reception,
+        null,
+      );
       if (Object.keys(propertyUpdates).length > 0) {
         await tx.property.update({
           where: { id: propertyId },
