@@ -27,6 +27,7 @@ import {
   type ShinkiFilterMode,
 } from "@/lib/reception-owner-match";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
+import { RECEPTION_OWNER_LINK_DATA_KEY } from "@/lib/reception-owner-link";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の本実行。
 // - 一意特定できた行だけ反映。それ以外は needs_review で記録。
@@ -197,6 +198,11 @@ export async function POST(request: NextRequest) {
       const ownerPropAddrList = c.owners
         .map((o) => (o.propertyAddress ?? "").trim())
         .filter((v) => v !== "");
+      // 手動紐づけ (manual-link-reception-owner) で Owner upsert に使う構造化情報。
+      // __ プレフィックスは UI / export から除外される内部用フィールド。
+      const ownerLinkData = c.owners
+        .filter((o) => o.name && o.name.trim() !== "")
+        .map((o) => ({ name: o.name, address: o.address, zip: o.zip }));
       const rawData: Record<string, string> = {
         matchKey: c.reception.matchKey,
         fColumn: c.reception.fColumn,
@@ -212,6 +218,7 @@ export async function POST(request: NextRequest) {
         // ImportJobRow.rawData に集約して可視化のみ行う。
         所有者DM: ownerDmList.join(","),
         所有者CSV物件住所: ownerPropAddrList.join(" / "),
+        [RECEPTION_OWNER_LINK_DATA_KEY]: JSON.stringify(ownerLinkData),
       };
 
       if (reason) {
