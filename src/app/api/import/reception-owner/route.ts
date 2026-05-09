@@ -321,21 +321,26 @@ export async function POST(request: NextRequest) {
         }
 
         // DM〇 → Property.dmStatus を hold から send に昇格（no_send は絶対上書きしない）
+        // snapshot 判定ではなく DB 条件付き updateMany で競合を防ぐ。
+        // count=1: 実際に hold→send に変わった → recordChanges。
+        // count=0: 別ユーザーが変更済み（no_send/send 等）→ 何もしない。
         const hasDmMark = c.owners.some((o) => isDmMarked(o.dm));
-        if (hasDmMark && current?.dmStatus === "hold") {
-          await prisma.property.update({
-            where: { id: propertyId },
+        if (hasDmMark) {
+          const dmUpdate = await prisma.property.updateMany({
+            where: { id: propertyId, dmStatus: "hold" },
             data: { dmStatus: "send" },
           });
-          await recordChanges({
-            targetTable: "properties",
-            targetId: propertyId,
-            changedBy: session.id,
-            oldValues: { dmStatus: "hold" },
-            newValues: { dmStatus: "send" },
-            trackedFields: PROPERTY_TRACKED_FIELDS,
-            source: "csv_import",
-          });
+          if (dmUpdate.count === 1) {
+            await recordChanges({
+              targetTable: "properties",
+              targetId: propertyId,
+              changedBy: session.id,
+              oldValues: { dmStatus: "hold" },
+              newValues: { dmStatus: "send" },
+              trackedFields: PROPERTY_TRACKED_FIELDS,
+              source: "csv_import",
+            });
+          }
         }
 
         await prisma.importJobRow.create({
