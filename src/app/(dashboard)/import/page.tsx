@@ -467,6 +467,11 @@ export default function ImportPage() {
   const [fileName, setFileName] = useState("");
   const [dragActive, setDragActive] = useState(false);
 
+  // D&D state for ① and ②
+  const [rpDragActive, setRpDragActive] = useState(false);
+  const [roDragActiveReception, setRoDragActiveReception] = useState(false);
+  const [roDragActiveOwner, setRoDragActiveOwner] = useState(false);
+
   // Template
   const [template, setTemplate] = useState<string>("standard");
 
@@ -568,6 +573,9 @@ export default function ImportPage() {
   const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">("existing");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rpFileInputRef = useRef<HTMLInputElement>(null);
+  const roReceptionInputRef = useRef<HTMLInputElement>(null);
+  const roOwnerInputRef = useRef<HTMLInputElement>(null);
 
   // ------ Jobs ------
   // jobFilters / jobPage / jobLimit はクライアント State なので
@@ -1071,6 +1079,8 @@ export default function ImportPage() {
         </p>
       </div>
 
+      {/* ===== legacy 汎用取込UI: 利用者には非表示（削除せず保持） ===== */}
+      <div className="hidden">
       <h2 className="mb-6 text-2xl font-bold text-gray-800">受付帳CSV / Excel(.xlsx) 取込</h2>
 
       {/* ============ Step Indicator ============ */}
@@ -1693,6 +1703,7 @@ export default function ImportPage() {
           </div>
         </div>
       )}
+      </div>{/* /legacy 汎用取込UI */}
 
       {/* ============ ① 受付帳CSVから物件を新規作成 ============ */}
       <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
@@ -1748,17 +1759,34 @@ export default function ImportPage() {
           </div>
         </div>
 
-        {/* ファイル選択 */}
+        {/* ファイル選択 (D&D) */}
         <div className="mb-4">
-          <label className="mb-1 block text-sm font-medium text-gray-700">
-            受付帳CSV / Excel(.xlsx) <span className="text-xs text-gray-400">（ファイル名に「受付帳」を含める）</span>
-          </label>
-          <input
-            type="file"
-            accept=".csv,.tsv,.txt,.xlsx"
-            onChange={(e) => handleRpFile(e.target.files?.[0] ?? null)}
-            className="block w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
-          />
+          <div
+            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setRpDragActive(true); }}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setRpDragActive(true); }}
+            onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setRpDragActive(false); }}
+            onDrop={(e) => {
+              e.preventDefault(); e.stopPropagation(); setRpDragActive(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) void handleRpFile(file);
+            }}
+            onClick={() => rpFileInputRef.current?.click()}
+            className={`cursor-pointer rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
+              rpDragActive ? "border-blue-400 bg-blue-50" : "border-gray-300 bg-white hover:border-gray-400"
+            }`}
+          >
+            <Upload className="mx-auto mb-2 h-7 w-7 text-gray-400" />
+            <p className="text-sm text-gray-600">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
+            <p className="mt-1 text-xs text-gray-400">またはクリックしてファイルを選択</p>
+            <p className="mt-0.5 text-xs text-gray-400">（ファイル名に「受付帳」を含める）</p>
+            <input
+              ref={rpFileInputRef}
+              type="file"
+              accept=".csv,.tsv,.txt,.xlsx"
+              className="hidden"
+              onChange={(e) => handleRpFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
           {rpFile && (
             <div className="mt-1 text-xs text-green-700">
               <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
@@ -1941,16 +1969,34 @@ export default function ImportPage() {
         </div>
 
         <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+          {/* 受付帳 D&D */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              受付帳CSV / Excel(.xlsx) <span className="text-xs text-gray-400">（ファイル名に「受付帳」を含める）</span>
-            </label>
-            <input
-              type="file"
-              accept=".csv,.tsv,.txt,.xlsx"
-              onChange={(e) => handleRoFile("reception", e.target.files?.[0] ?? null)}
-              className="block w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
-            />
+            <div
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveReception(true); }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveReception(true); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveReception(false); }}
+              onDrop={(e) => {
+                e.preventDefault(); e.stopPropagation(); setRoDragActiveReception(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) void handleRoFile("reception", file);
+              }}
+              onClick={() => roReceptionInputRef.current?.click()}
+              className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
+                roDragActiveReception ? "border-blue-400 bg-blue-50" : "border-gray-300 bg-white hover:border-gray-400"
+              }`}
+            >
+              <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400" />
+              <p className="text-sm text-gray-600">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
+              <p className="mt-0.5 text-xs text-gray-400">またはクリックしてファイルを選択</p>
+              <p className="mt-0.5 text-xs text-gray-400">（受付帳 — ファイル名に「受付帳」を含める）</p>
+              <input
+                ref={roReceptionInputRef}
+                type="file"
+                accept=".csv,.tsv,.txt,.xlsx"
+                className="hidden"
+                onChange={(e) => handleRoFile("reception", e.target.files?.[0] ?? null)}
+              />
+            </div>
             {receptionFile && (
               <div className="mt-1 text-xs text-green-700">
                 <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
@@ -1958,16 +2004,34 @@ export default function ImportPage() {
               </div>
             )}
           </div>
+          {/* 所有者 D&D */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              所有者CSV / Excel(.xlsx) <span className="text-xs text-gray-400">（ファイル名に「所有者」を含める）</span>
-            </label>
-            <input
-              type="file"
-              accept=".csv,.tsv,.txt,.xlsx"
-              onChange={(e) => handleRoFile("owner", e.target.files?.[0] ?? null)}
-              className="block w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
-            />
+            <div
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveOwner(true); }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveOwner(true); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveOwner(false); }}
+              onDrop={(e) => {
+                e.preventDefault(); e.stopPropagation(); setRoDragActiveOwner(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) void handleRoFile("owner", file);
+              }}
+              onClick={() => roOwnerInputRef.current?.click()}
+              className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
+                roDragActiveOwner ? "border-blue-400 bg-blue-50" : "border-gray-300 bg-white hover:border-gray-400"
+              }`}
+            >
+              <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400" />
+              <p className="text-sm text-gray-600">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
+              <p className="mt-0.5 text-xs text-gray-400">またはクリックしてファイルを選択</p>
+              <p className="mt-0.5 text-xs text-gray-400">（所有者 — ファイル名に「所有者」を含める）</p>
+              <input
+                ref={roOwnerInputRef}
+                type="file"
+                accept=".csv,.tsv,.txt,.xlsx"
+                className="hidden"
+                onChange={(e) => handleRoFile("owner", e.target.files?.[0] ?? null)}
+              />
+            </div>
             {ownerFile && (
               <div className="mt-1 text-xs text-green-700">
                 <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />

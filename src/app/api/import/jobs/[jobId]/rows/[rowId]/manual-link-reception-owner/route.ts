@@ -201,12 +201,13 @@ export async function POST(
 
         let ownerId: string | null = null;
         let existingZip: string | null = null;
+        let existingAddress: string | null = null;
         if (address) {
           const normName = normalizeName(name);
           const normAddr = normalizeAddress(address);
           const candidates = await tx.owner.findMany({
             where: { address: { not: null } },
-            select: { id: true, zip: true, name: true, address: true },
+            select: { id: true, zip: true, address: true, name: true },
           });
           const hit =
             candidates.find(
@@ -217,16 +218,18 @@ export async function POST(
           if (hit) {
             ownerId = hit.id;
             existingZip = hit.zip;
+            existingAddress = hit.address;
           }
         }
         if (!ownerId) {
           const hit = await tx.owner.findFirst({
             where: { name, address: null },
-            select: { id: true, zip: true },
+            select: { id: true, zip: true, address: true },
           });
           if (hit) {
             ownerId = hit.id;
             existingZip = hit.zip;
+            existingAddress = hit.address;
           }
         }
 
@@ -241,11 +244,17 @@ export async function POST(
           });
           ownerId = created.id;
           ownerCreatedCount++;
-        } else if (zip && !existingZip) {
-          await tx.owner.update({
-            where: { id: ownerId },
-            data: { zip, version: { increment: 1 } },
-          });
+        } else {
+          // 既存所有者: 空欄の zip / address のみ補完（既存値は破壊しない）
+          const zipUpdate = zip && !existingZip ? { zip } : {};
+          const addressUpdate = address && !existingAddress ? { address } : {};
+          const patch = { ...zipUpdate, ...addressUpdate };
+          if (Object.keys(patch).length > 0) {
+            await tx.owner.update({
+              where: { id: ownerId },
+              data: { ...patch, version: { increment: 1 } },
+            });
+          }
         }
         ownerIds.push(ownerId);
       }
