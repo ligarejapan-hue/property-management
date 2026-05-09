@@ -364,3 +364,4 @@ curl "http://localhost:8080/geoserver/ksj/ows?service=WFS&request=GetFeature&typ
 
 GitHub workflow check: PRs to main are validated by CI (build + test) before merge.
 Codex review check: PR comments may request `@codex review` after CI passes.
+Codex auto-review check: new PRs opened by the repository owner are reviewed automatically when enabled.
