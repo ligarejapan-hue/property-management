@@ -84,7 +84,22 @@ export async function GET(
       targetId: property.id,
     });
 
-    return apiResponse(property);
+    // 最初の取込行を取得して取込元情報を付与する
+    const importRow = await prisma.importJobRow.findFirst({
+      where: { createdId: id, status: "success" },
+      select: {
+        rowNumber: true,
+        rawData: true,
+        job: { select: { fileName: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const importSource = importRow
+      ? ((importRow.rawData as Record<string, string>)?.__sourceRef ??
+          `${importRow.job.fileName}:${importRow.rowNumber}行`)
+      : null;
+
+    return apiResponse({ ...property, importSource });
   } catch (error) {
     return handleApiError(error);
   }

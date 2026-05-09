@@ -157,6 +157,7 @@ interface ApiProperty {
   repairReserveFee: number | null;
   occupancyStatus: string | null;
   ownershipShareNote: string | null;
+  importSource: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -384,6 +385,7 @@ function BasicTab({ property }: { property: ApiProperty }) {
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
       <Field label="物件ID" value={property.id} mono />
+      <Field label="管理ID" value={property.importSource ?? "—"} mono />
       <Field
         label="種別"
         value={PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
