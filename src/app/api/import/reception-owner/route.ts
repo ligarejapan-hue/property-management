@@ -155,6 +155,7 @@ export async function POST(request: NextRequest) {
         lotNumber: true,
         buildingNumber: true,
         roomNo: true,
+        dmStatus: true,
         building: { select: { name: true } },
       },
     });
@@ -215,11 +216,11 @@ export async function POST(request: NextRequest) {
         共有名義人の有無: c.reception.coOwnersNote,
         新既: c.reception.shinkiValue,
         DL: c.reception.dlMarked ? "〇" : "",
-        // 所有者CSV側の DM フラグは Property.dmStatus を自動上書きしない方針。
-        // ImportJobRow.rawData に集約して可視化のみ行う。
+        // 所有者CSV の DM フラグ: rawData に保持し、Property.dmStatus への反映もここで行う。
         所有者DM: ownerDmList.join(","),
         所有者CSV物件住所: ownerPropAddrList.join(" / "),
         [RECEPTION_OWNER_LINK_DATA_KEY]: JSON.stringify(ownerLinkData),
+        __sourceRef: `${receptionFileName ?? ""}:${c.reception.rowNumber}行`,
       };
 
       if (reason) {
@@ -319,6 +320,29 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // DM〇 → Property.dmStatus を hold から send に昇格（no_send は絶対上書きしない）
+        // snapshot 判定ではなく DB 条件付き updateMany で競合を防ぐ。
+        // count=1: 実際に hold→send に変わった → recordChanges。
+        // count=0: 別ユーザーが変更済み（no_send/send 等）→ 何もしない。
+        const hasDmMark = c.owners.some((o) => isDmMarked(o.dm));
+        if (hasDmMark) {
+          const dmUpdate = await prisma.property.updateMany({
+            where: { id: propertyId, dmStatus: "hold" },
+            data: { dmStatus: "send" },
+          });
+          if (dmUpdate.count === 1) {
+            await recordChanges({
+              targetTable: "properties",
+              targetId: propertyId,
+              changedBy: session.id,
+              oldValues: { dmStatus: "hold" },
+              newValues: { dmStatus: "send" },
+              trackedFields: PROPERTY_TRACKED_FIELDS,
+              source: "csv_import",
+            });
+          }
+        }
+
         await prisma.importJobRow.create({
           data: {
             jobId: job.id,
@@ -409,12 +433,13 @@ async function upsertOwnerAndLink(
   // 既存 Owner 検索: name + address → name のみ
   let ownerId: string | null = null;
   let existingZip: string | null = null;
+  let existingAddress: string | null = null;
   if (address) {
     const normName = normalizeName(name);
     const normAddr = normalizeAddress(address);
     const candidates = await prisma.owner.findMany({
       where: { address: { not: null } },
-      select: { id: true, zip: true, name: true, address: true },
+      select: { id: true, zip: true, address: true, name: true },
     });
     const hit =
       candidates.find(
@@ -425,16 +450,18 @@ async function upsertOwnerAndLink(
     if (hit) {
       ownerId = hit.id;
       existingZip = hit.zip;
+      existingAddress = hit.address;
     }
   }
   if (!ownerId) {
     const hit = await prisma.owner.findFirst({
       where: { name, address: null },
-      select: { id: true, zip: true },
+      select: { id: true, zip: true, address: true },
     });
     if (hit) {
       ownerId = hit.id;
       existingZip = hit.zip;
+      existingAddress = hit.address;
     }
   }
 
@@ -456,12 +483,17 @@ async function upsertOwnerAndLink(
       targetId: ownerId,
       detail: { name, address: address ?? null, zip: zip ?? null },
     });
-  } else if (zip && !existingZip) {
-    // 既存所有者で郵便番号が未設定の場合のみ補完（既存値は破壊しない）
-    await prisma.owner.update({
-      where: { id: ownerId },
-      data: { zip, version: { increment: 1 } },
-    });
+  } else {
+    // 既存所有者: 空欄の zip / address のみ補完（既存値は破壊しない）
+    const zipUpdate = zip && !existingZip ? { zip } : {};
+    const addressUpdate = address && !existingAddress ? { address } : {};
+    const patch = { ...zipUpdate, ...addressUpdate };
+    if (Object.keys(patch).length > 0) {
+      await prisma.owner.update({
+        where: { id: ownerId },
+        data: { ...patch, version: { increment: 1 } },
+      });
+    }
   }
 
   // PropertyOwner: 存在しなければリンク
@@ -484,4 +516,11 @@ async function upsertOwnerAndLink(
   }
 
   return ownerId;
+}
+
+// DM 列の値が「送付可」を示すか判定。NFKC 正規化後に ○/〇 で判断。
+function isDmMarked(dm: string | null | undefined): boolean {
+  if (!dm) return false;
+  const n = dm.trim().normalize("NFKC");
+  return n === "○" || n === "〇";
 }

@@ -150,6 +150,7 @@ export async function POST(request: NextRequest) {
         DL: row.dlMarked ? "〇" : "",
         新既: row.shinkiValue,
         __reception_property_data: "true",
+        __sourceRef: `${receptionFileName}:${rowNumber}行`,
       };
 
       if (!row.propertyAddress) {
