@@ -42,6 +42,7 @@ const BLOCK_REASON_LABELS: Record<string, string> = {
   external_link_key_exists: "外部キーあり",
   note_exists: "メモあり",
   import_source_unknown: "取込元不明",
+  import_row_not_success: "取込行未解決",
 };
 
 export default function OwnerCorrectionPage() {

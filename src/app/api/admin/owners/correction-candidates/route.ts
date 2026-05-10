@@ -109,21 +109,31 @@ export async function GET(request: NextRequest) {
             select: {
               createdId: true,
               rowNumber: true,
+              status: true,
               job: { select: { fileName: true } },
             },
             orderBy: { createdAt: "asc" },
           })
         : [];
-    // 同一 Owner に複数行あれば最初の1行のみ使用
+    // 同一 Owner に複数行あれば最初の success 行を優先し、なければ最初の行を使用
     const importRowMap = new Map<
       string,
-      { fileName: string; rowNumber: number }
+      { fileName: string; rowNumber: number; status: string }
     >();
     for (const r of importRows) {
-      if (!importRowMap.has(r.createdId!)) {
+      const existing = importRowMap.get(r.createdId!);
+      if (!existing) {
         importRowMap.set(r.createdId!, {
           fileName: r.job.fileName,
           rowNumber: r.rowNumber,
+          status: r.status,
+        });
+      } else if (existing.status !== "success" && r.status === "success") {
+        // success 行があればそちらに上書き
+        importRowMap.set(r.createdId!, {
+          fileName: r.job.fileName,
+          rowNumber: r.rowNumber,
+          status: r.status,
         });
       }
     }
@@ -141,6 +151,8 @@ export async function GET(request: NextRequest) {
       if (owner.externalLinkKey) blockReasons.push("external_link_key_exists");
       if (owner.note) blockReasons.push("note_exists");
       if (!importInfo) blockReasons.push("import_source_unknown");
+      if (importInfo && importInfo.status !== "success")
+        blockReasons.push("import_row_not_success");
 
       const isOrphan = propertyOwnerCount === 0;
       const isAddressNull =
@@ -164,7 +176,7 @@ export async function GET(request: NextRequest) {
       let recommendedAction: RecommendedAction;
       if (hasSafeguard) {
         recommendedAction = "hold";
-      } else if (isOrphan && !isAddressNull && importInfo) {
+      } else if (isOrphan && !isAddressNull && importInfo?.status === "success") {
         recommendedAction = "delete_candidate";
       } else {
         recommendedAction = "review";
