@@ -605,6 +605,7 @@ export default function ImportJobDetailPage() {
                     <th className="px-2 py-1.5 font-medium text-gray-600 w-16">区分</th>
                     <th className="px-2 py-1.5 font-medium text-gray-600">住所</th>
                     <th className="px-2 py-1.5 font-medium text-gray-600">識別</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600">管理ID</th>
                     <th className="px-2 py-1.5 font-medium text-gray-600">棟</th>
                     <th className="px-2 py-1.5 font-medium text-gray-600 w-20">詳細</th>
                   </tr>
@@ -648,6 +649,9 @@ export default function ImportJobDetailPage() {
                           .join(" / ") || (
                           <span className="text-gray-400">-</span>
                         )}
+                      </td>
+                      <td className="px-2 py-1.5 font-mono text-[11px] text-gray-500">
+                        {p.importSource ?? "—"}
                       </td>
                       <td className="px-2 py-1.5 text-gray-600">
                         {p.buildingName ? (

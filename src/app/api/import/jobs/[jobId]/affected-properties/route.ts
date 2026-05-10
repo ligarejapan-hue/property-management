@@ -39,10 +39,10 @@ export async function GET(
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    // ジョブ存在確認 + jobType の取得（rows まで一気に load しない）
+    // ジョブ存在確認 + jobType / fileName の取得（rows まで一気に load しない）
     const job = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true, jobType: true },
+      select: { id: true, jobType: true, fileName: true },
     });
 
     if (!job) {
@@ -74,6 +74,7 @@ export async function GET(
         rowNumber: true,
         errorMessage: true,
         createdId: true,
+        rawData: true,
       },
       orderBy: { rowNumber: "asc" },
     });
@@ -124,11 +125,16 @@ export async function GET(
         createdCount++;
       }
 
+      const rd = (row.rawData as Record<string, string>) ?? {};
+      const importSource =
+        rd.__sourceRef ?? `${job!.fileName}:${row.rowNumber}行`;
+
       return {
         rowNumber: row.rowNumber,
         propertyId,
         isUpdate,
         found,
+        importSource,
         // UI 側でのラベル組み立てを楽にするため、引いた property を
         // 平らに展開して返す。見つからなかった場合は null。
         address: property?.address ?? null,
