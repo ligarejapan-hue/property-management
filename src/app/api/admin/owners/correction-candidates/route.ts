@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
+import { writeAuditLog } from "@/lib/audit";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
@@ -234,19 +235,32 @@ export async function GET(request: NextRequest) {
       phone: maskValue(c.phone, displayConfig.phone),
     }));
 
+    const summary = {
+      orphanCount: candidates.filter((c) => c.types.includes("orphan")).length,
+      addressNullCount: candidates.filter((c) =>
+        c.types.includes("address_null"),
+      ).length,
+      duplicateCount: candidates.filter((c) => c.types.includes("duplicate"))
+        .length,
+      allCount: candidates.filter((c) => c.types.length > 0).length,
+    };
+
+    // 8. 監査ログ（PII は含めない — type・件数・内訳のみ）
+    await writeAuditLog({
+      userId: session.id,
+      action: "owner_correction_candidates_list",
+      detail: {
+        type,
+        resultCount: maskedResult.length,
+        summary,
+      },
+    });
+
     return apiResponse({
       total: maskedResult.length,
       type,
       candidates: maskedResult,
-      summary: {
-        orphanCount: candidates.filter((c) => c.types.includes("orphan")).length,
-        addressNullCount: candidates.filter((c) =>
-          c.types.includes("address_null"),
-        ).length,
-        duplicateCount: candidates.filter((c) => c.types.includes("duplicate"))
-          .length,
-        allCount: candidates.filter((c) => c.types.length > 0).length,
-      },
+      summary,
     });
   } catch (error) {
     return handleApiError(error);
