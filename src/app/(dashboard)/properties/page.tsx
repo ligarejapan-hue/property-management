@@ -61,6 +61,7 @@ interface ApiProperty {
   updatedAt: string;
   assignedTo: string | null;
   assignee: { id: string; name: string } | null;
+  importSource?: string | null;
 }
 
 interface Pagination {
@@ -687,6 +688,9 @@ function PropertiesPageInner() {
                   地番
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                  管理ID
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
                   不動産番号
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
@@ -760,6 +764,9 @@ function PropertiesPageInner() {
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     {property.lotNumber ?? "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-500">
+                    {property.importSource ?? "—"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
                     {property.realEstateNumber ?? "-"}

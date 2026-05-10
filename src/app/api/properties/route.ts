@@ -139,6 +139,39 @@ export async function GET(request: NextRequest) {
       prisma.property.count({ where }),
     ]);
 
+    // 取込元情報を一括逆引きして各物件に付与する（N+1 回避）
+    const propertyIds = properties.map((p) => p.id);
+    const importRows =
+      propertyIds.length > 0
+        ? await prisma.importJobRow.findMany({
+            where: { createdId: { in: propertyIds }, status: "success" },
+            select: {
+              createdId: true,
+              rowNumber: true,
+              rawData: true,
+              job: { select: { fileName: true } },
+            },
+            orderBy: { createdAt: "asc" },
+          })
+        : [];
+
+    // createdId ごとに最初の行だけ残す
+    const importSourceMap = new Map<string, string>();
+    for (const row of importRows) {
+      if (!importSourceMap.has(row.createdId!)) {
+        const rd = (row.rawData as Record<string, string>) ?? {};
+        importSourceMap.set(
+          row.createdId!,
+          rd.__sourceRef ?? `${row.job.fileName}:${row.rowNumber}行`,
+        );
+      }
+    }
+
+    const data = properties.map((p) => ({
+      ...p,
+      importSource: importSourceMap.get(p.id) ?? null,
+    }));
+
     // Record audit log for list view
     await writeAuditLog({
       userId: session.id,
@@ -147,7 +180,7 @@ export async function GET(request: NextRequest) {
     });
 
     return apiResponse({
-      data: properties,
+      data,
       pagination: {
         page,
         limit,

@@ -729,6 +729,7 @@ model ImportJobRow {
   job ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId, rowNumber])
+  @@index([createdId, status, createdAt])
   @@map("import_job_rows")
 }
 
