@@ -441,6 +441,7 @@ export interface AffectedProperty {
   propertyId: string;
   isUpdate: boolean;
   found: boolean;
+  importSource: string;
   address: string | null;
   lotNumber: string | null;
   buildingNumber: string | null;
