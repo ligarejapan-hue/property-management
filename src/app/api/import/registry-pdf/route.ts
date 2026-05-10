@@ -11,6 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
+import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
@@ -161,25 +162,41 @@ export async function POST(request: NextRequest) {
       for (const ownerInfo of parsed.owners) {
         if (!ownerInfo.name) continue;
 
-        // Try to find existing owner by name
-        let owner = await prisma.owner.findFirst({
-          where: { name: ownerInfo.name },
-        });
+        // address あり → normalizeName + normalizeAddress で既存 Owner 検索
+        // address なし → name のみでの自動統合はしない（同姓同名の別人を誤統合しないため）
+        let ownerId: string | null = null;
 
-        if (!owner) {
-          owner = await prisma.owner.create({
+        if (ownerInfo.address) {
+          const normName = normalizeName(ownerInfo.name);
+          const normAddr = normalizeAddress(ownerInfo.address);
+          const candidates = await prisma.owner.findMany({
+            where: { address: { not: null } },
+            select: { id: true, name: true, address: true },
+          });
+          const hit = candidates.find(
+            (c) =>
+              normalizeName(c.name) === normName &&
+              normalizeAddress(c.address!) === normAddr,
+          );
+          ownerId = hit?.id ?? null;
+        }
+
+        if (!ownerId) {
+          const created = await prisma.owner.create({
             data: {
               name: ownerInfo.name,
-              address: ownerInfo.address,
+              ...(ownerInfo.address ? { address: ownerInfo.address } : {}),
             },
+            select: { id: true },
           });
+          ownerId = created.id;
         }
 
         // Link to property if not already linked
         const existingLink = await prisma.propertyOwner.findFirst({
           where: {
             propertyId: propertyId,
-            ownerId: owner.id,
+            ownerId,
           },
         });
 
@@ -187,7 +204,7 @@ export async function POST(request: NextRequest) {
           await prisma.propertyOwner.create({
             data: {
               propertyId: propertyId,
-              ownerId: owner.id,
+              ownerId,
               relationship: ownerInfo.share ? "共有者" : "所有者",
             },
           });
