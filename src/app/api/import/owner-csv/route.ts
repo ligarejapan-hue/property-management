@@ -146,11 +146,12 @@ export async function POST(request: NextRequest) {
         // address あり: normalizeName + normalizeAddress で既存Owner全件と比較（表記ゆれ吸収）
         // address なし・phone あり: name + phone 生値比較（現状維持）
         // address なし・phone なし: name 単独では検索しない（誤統合防止）
+        const ownerAddress = mapped.address?.trim() ?? "";
         let existing: { id: string; name: string } | null = null;
 
-        if (mapped.address) {
+        if (ownerAddress !== "") {
           const normCsvName = normalizeName(mapped.name.trim());
-          const normCsvAddr = normalizeAddress(mapped.address.trim());
+          const normCsvAddr = normalizeAddress(ownerAddress);
           const candidates = await prisma.owner.findMany({
             where: { address: { not: null } },
             select: { id: true, name: true, address: true },
