@@ -6,7 +6,6 @@ import {
   Building2,
   Building,
   Users,
-  Users2,
   Shield,
   FileText,
   HelpCircle,
@@ -46,11 +45,6 @@ const mainNavItems: NavItem[] = [
     label: "受付帳CSV取込",
     href: "/import",
     icon: <Upload className="h-5 w-5" />,
-  },
-  {
-    label: "所有者CSV取込",
-    href: "/import/owners",
-    icon: <Users2 className="h-5 w-5" />,
   },
   {
     label: "謄本PDF取込",
