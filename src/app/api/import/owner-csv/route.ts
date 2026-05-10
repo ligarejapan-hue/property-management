@@ -10,7 +10,8 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
-import { normalizeAddress } from "@/lib/address-normalizer";
+import { normalizeAddress as normalizeAddressForLink } from "@/lib/address-normalizer";
+import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { relinkOwnersToProperties } from "@/lib/owner-property-linker";
 import {
   REIMPORT_IGNORED_HEADERS,
@@ -141,23 +142,33 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Duplicate check: by name + (phone or address)
-        const duplicateConditions: Record<string, unknown>[] = [];
-        if (mapped.phone) {
-          duplicateConditions.push({ name: mapped.name, phone: mapped.phone });
-        }
-        if (mapped.address) {
-          duplicateConditions.push({ name: mapped.name, address: mapped.address });
-        }
-        // If neither phone nor address, check by name only
-        if (duplicateConditions.length === 0) {
-          duplicateConditions.push({ name: mapped.name });
-        }
+        // Duplicate check
+        // address あり: normalizeName + normalizeAddress で既存Owner全件と比較（表記ゆれ吸収）
+        // address なし・phone あり: name + phone 生値比較（現状維持）
+        // address なし・phone なし: name 単独では検索しない（誤統合防止）
+        let existing: { id: string; name: string } | null = null;
 
-        const existing = await prisma.owner.findFirst({
-          where: { OR: duplicateConditions },
-          select: { id: true, name: true },
-        });
+        if (mapped.address) {
+          const normCsvName = normalizeName(mapped.name.trim());
+          const normCsvAddr = normalizeAddress(mapped.address.trim());
+          const candidates = await prisma.owner.findMany({
+            where: { address: { not: null } },
+            select: { id: true, name: true, address: true },
+          });
+          const dup = candidates.find(
+            (c) =>
+              normalizeName(c.name) === normCsvName &&
+              normalizeAddress(c.address!) === normCsvAddr,
+          );
+          if (dup) {
+            existing = { id: dup.id, name: dup.name };
+          }
+        } else if (mapped.phone) {
+          existing = await prisma.owner.findFirst({
+            where: { name: mapped.name, phone: mapped.phone },
+            select: { id: true, name: true },
+          });
+        }
 
         if (existing) {
           jobRows.push({
@@ -316,7 +327,7 @@ export async function POST(request: NextRequest) {
           select: { id: true, address: true },
         });
         const matched = candidates
-          .filter((p) => normalizeAddress(p.address) === normAddr)
+          .filter((p) => normalizeAddressForLink(p.address) === normAddr)
           .map((p) => p.id);
         propertyByNormAddr.set(normAddr, matched);
         return matched;
@@ -325,7 +336,7 @@ export async function POST(request: NextRequest) {
       for (const owner of addressTargets) {
         if (linkedOwnerIds.has(owner.id)) continue;
         if (!owner.address) continue;
-        const norm = normalizeAddress(owner.address);
+        const norm = normalizeAddressForLink(owner.address);
         if (!norm) continue;
         const candidates = await ensureCandidates(norm, owner.address);
         if (candidates.length === 0) continue;
