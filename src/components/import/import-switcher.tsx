@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Upload, Users2, FileText } from "lucide-react";
+import { Upload, FileText } from "lucide-react";
 import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
 
 /**
@@ -18,7 +18,6 @@ import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
 
 const ITEMS: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { href: "/import", label: IMPORT_TYPE_LABELS.property_csv, icon: Upload },
-  { href: "/import/owners", label: IMPORT_TYPE_LABELS.owner_csv, icon: Users2 },
   { href: "/import/registry-pdf", label: IMPORT_TYPE_LABELS.registry_pdf, icon: FileText },
 ];
 
