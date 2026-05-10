@@ -1787,7 +1787,7 @@ export async function fetchAuditLogs() {
 
 export interface OwnerCorrectionCandidate {
   id: string;
-  name: string;
+  name: string | null;
   address: string | null;
   zip: string | null;
   phone: string | null;

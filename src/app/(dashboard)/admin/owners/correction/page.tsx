@@ -167,7 +167,9 @@ export default function OwnerCorrectionPage() {
                   {data.candidates.map((c: OwnerCorrectionCandidate) => (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-3 py-2 font-medium text-gray-900">
-                        {c.name}
+                        {c.name ?? (
+                          <span className="text-gray-400">***</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-gray-600">
                         {c.address ?? (

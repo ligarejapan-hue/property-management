@@ -3,11 +3,12 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, maskValue } from "@/lib/permissions";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
@@ -40,7 +41,8 @@ type Candidate = {
 //   duplicate    — normalizeName+normalizeAddress が一致する Owner が複数
 //   all (default)— 上記いずれかに該当するもの全て
 //
-// 権限: user_management:read（管理者専用）
+// 権限: user_management:read（管理者エリア） + owner:read（PII閲覧）の両方必須。
+//   既存 /api/owners と同じ getOwnerDisplayConfig / maskValue を適用する。
 
 export async function GET(request: NextRequest) {
   try {
@@ -50,6 +52,12 @@ export async function GET(request: NextRequest) {
     if (!hasPermission(perms, "user_management", "read")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
+    if (!hasPermission(perms, "owner", "read")) {
+      throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
+    }
+
+    // PII フィールドの表示レベルを取得（/api/owners と同じ制御）
+    const displayConfig = await getOwnerDisplayConfig(session.id);
 
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") ?? "all";
@@ -217,10 +225,19 @@ export async function GET(request: NextRequest) {
       result = candidates.filter((c) => c.types.length > 0);
     }
 
+    // 7. PII フィールドにマスキングを適用（重複検出は生値で完了済み）
+    const maskedResult = result.map((c) => ({
+      ...c,
+      name: maskValue(c.name, displayConfig.name),
+      address: maskValue(c.address, displayConfig.address),
+      zip: maskValue(c.zip, displayConfig.zip),
+      phone: maskValue(c.phone, displayConfig.phone),
+    }));
+
     return apiResponse({
-      total: result.length,
+      total: maskedResult.length,
       type,
-      candidates: result,
+      candidates: maskedResult,
       summary: {
         orphanCount: candidates.filter((c) => c.types.includes("orphan")).length,
         addressNullCount: candidates.filter((c) =>
