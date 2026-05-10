@@ -1782,3 +1782,52 @@ export async function fetchAuditLogs() {
   }
   return apiFetch<{ data: typeof MOCK_AUDIT_LOGS }>("/api/admin/audit-logs");
 }
+
+// ---------- Owner Correction Candidates (dry-run) ----------
+
+export interface OwnerCorrectionCandidate {
+  id: string;
+  name: string;
+  address: string | null;
+  zip: string | null;
+  phone: string | null;
+  hasNote: boolean;
+  hasExternalLinkKey: boolean;
+  version: number;
+  propertyOwnerCount: number;
+  changeLogCount: number;
+  importFileName: string | null;
+  importRowNumber: number | null;
+  blockReasons: string[];
+  recommendedAction: "hold" | "review" | "delete_candidate" | "merge_candidate";
+  types: string[];
+}
+
+export interface OwnerCorrectionCandidatesResponse {
+  total: number;
+  type: string;
+  candidates: OwnerCorrectionCandidate[];
+  summary: {
+    orphanCount: number;
+    addressNullCount: number;
+    duplicateCount: number;
+    allCount: number;
+  };
+}
+
+export async function fetchOwnerCorrectionCandidates(
+  type: "all" | "orphan" | "address_null" | "duplicate" = "all",
+): Promise<OwnerCorrectionCandidatesResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      total: 0,
+      type,
+      candidates: [],
+      summary: { orphanCount: 0, addressNullCount: 0, duplicateCount: 0, allCount: 0 },
+    };
+  }
+  return apiFetch<OwnerCorrectionCandidatesResponse>(
+    `/api/admin/owners/correction-candidates?type=${type}`,
+  );
+}
