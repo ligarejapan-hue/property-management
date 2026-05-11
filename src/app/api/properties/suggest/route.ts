@@ -13,7 +13,8 @@ import { writeAuditLog } from "@/lib/audit";
 
 // ---------- GET /api/properties/suggest?q=... ----------
 // 物件一覧の入力中候補表示用。property:read 必須。
-// Owner PII は getOwnerDisplayConfig + maskValue で権限に応じてマスキング。
+// owner:read を持たないユーザーには Owner 検索条件・PII 表示を一切付与しない
+// （field-level grant が残っていてもここで遮断する）。
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,30 +33,38 @@ export async function GET(request: NextRequest) {
     // 数字のみ抽出（DB・入力双方のハイフン有無を吸収するため）
     const qDigits = q.replace(/[^0-9]/g, "");
 
-    // Owner PII 表示権限を事前に取得し、生値表示できるフィールドだけ検索条件に含める。
+    // owner:read が無いユーザーには Owner PII を返さない・検索にも使わない。
+    // field-level の owner_name:full などが残っていても owner:read で一括遮断する。
+    const hasOwnerRead = hasPermission(perms, "owner", "read");
+
+    // Owner PII 表示権限。owner:read が無ければ全フィールド hidden 扱い。
     // partial / masked / hidden は検索ヒット有無から PII を推測できるため検索対象外。
-    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const displayConfig = hasOwnerRead
+      ? await getOwnerDisplayConfig(session.id)
+      : null;
     const SEARCHABLE_LEVELS = new Set(["edit", "full", "read"]);
 
     const ownerSearchConditions: object[] = [];
-    if (SEARCHABLE_LEVELS.has(displayConfig.name)) {
-      ownerSearchConditions.push({ name: { contains: q, mode: "insensitive" } });
-    }
-    if (SEARCHABLE_LEVELS.has(displayConfig.address)) {
-      ownerSearchConditions.push({ address: { contains: q, mode: "insensitive" } });
-    }
-    if (SEARCHABLE_LEVELS.has(displayConfig.zip)) {
-      ownerSearchConditions.push({ zip: { contains: q } });
-    }
-    // Phone: DB側・入力側両方のハイフン有無を吸収するため regexp_replace で正規化して比較。
-    // qDigits が3桁未満は電話番号として非現実的なため実行しない。
-    if (SEARCHABLE_LEVELS.has(displayConfig.phone) && qDigits.length >= 3) {
-      const phoneOwners = await prisma.$queryRaw<{ id: string }[]>`
-        SELECT id FROM "owners"
-        WHERE regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') LIKE ${"%" + qDigits + "%"}
-      `;
-      if (phoneOwners.length > 0) {
-        ownerSearchConditions.push({ id: { in: phoneOwners.map((r) => r.id) } });
+    if (hasOwnerRead && displayConfig) {
+      if (SEARCHABLE_LEVELS.has(displayConfig.name)) {
+        ownerSearchConditions.push({ name: { contains: q, mode: "insensitive" } });
+      }
+      if (SEARCHABLE_LEVELS.has(displayConfig.address)) {
+        ownerSearchConditions.push({ address: { contains: q, mode: "insensitive" } });
+      }
+      if (SEARCHABLE_LEVELS.has(displayConfig.zip)) {
+        ownerSearchConditions.push({ zip: { contains: q } });
+      }
+      // Phone: DB側・入力側両方のハイフン有無を吸収するため regexp_replace で正規化して比較。
+      // qDigits が3桁未満は電話番号として非現実的なため実行しない。
+      if (SEARCHABLE_LEVELS.has(displayConfig.phone) && qDigits.length >= 3) {
+        const phoneOwners = await prisma.$queryRaw<{ id: string }[]>`
+          SELECT id FROM "owners"
+          WHERE regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') LIKE ${"%" + qDigits + "%"}
+        `;
+        if (phoneOwners.length > 0) {
+          ownerSearchConditions.push({ id: { in: phoneOwners.map((r) => r.id) } });
+        }
       }
     }
 
@@ -140,12 +149,16 @@ export async function GET(request: NextRequest) {
       address: p.address,
       dmStatus: p.dmStatus,
       importSource: importSourceMap.get(p.id) ?? null,
-      owners: p.propertyOwners.map(({ owner: o }) => ({
-        name: maskValue(o.name, displayConfig.name),
-        address: maskValue(o.address, displayConfig.address),
-        phone: maskValue(o.phone, displayConfig.phone),
-        zip: maskValue(o.zip, displayConfig.zip),
-      })),
+      owners: p.propertyOwners.map(({ owner: o }) =>
+        hasOwnerRead && displayConfig
+          ? {
+              name: maskValue(o.name, displayConfig.name),
+              address: maskValue(o.address, displayConfig.address),
+              phone: maskValue(o.phone, displayConfig.phone),
+              zip: maskValue(o.zip, displayConfig.zip),
+            }
+          : { name: null, address: null, phone: null, zip: null },
+      ),
     }));
 
     // PII をログに含めない（qLen と件数のみ）

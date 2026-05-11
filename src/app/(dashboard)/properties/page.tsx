@@ -112,7 +112,11 @@ function PropertiesPageInner() {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Filters — URL から初期化することでブックマーク・更新・共有が可能
+  // Filters — URL から初期化することでブックマーク・更新・共有が可能。
+  // searchInput: 検索ボックスに入力中の文字列（suggest API のみに送る）。
+  // searchText: 確定検索語（/api/properties の keyword と URL query に流す）。
+  // 入力中の所有者名・電話番号が property_list audit の raw keyword に残らないよう分離する。
+  const [searchInput, setSearchInput] = useState(() => sp.get("keyword") ?? "");
   const [searchText, setSearchText] = useState(() => sp.get("keyword") ?? "");
   const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
@@ -259,17 +263,19 @@ function PropertiesPageInner() {
     };
   }, []);
 
-  // 入力中候補: searchText に 300ms debounce をかけて suggest API を呼ぶ
+  // 入力中候補: searchInput に 300ms debounce をかけて suggest API を呼ぶ。
+  // searchInput は確定検索（/api/properties keyword）には流れないため、
+  // 入力中の Owner PII が property_list audit に残らない。
   useEffect(() => {
     if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
-    if (searchText.length < 2) {
+    if (searchInput.length < 2) {
       setSuggestResults([]);
       setSuggestOpen(false);
       return;
     }
     suggestTimerRef.current = setTimeout(async () => {
       try {
-        const res = await fetchPropertySuggestions(searchText);
+        const res = await fetchPropertySuggestions(searchInput);
         setSuggestResults(res.data);
         setSuggestOpen(res.data.length > 0);
       } catch {
@@ -280,7 +286,7 @@ function PropertiesPageInner() {
     return () => {
       if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
     };
-  }, [searchText]);
+  }, [searchInput]);
 
   // Debounce search: reset page on filter change
   const handleFilterChange = (setter: (v: string) => void) => (
@@ -294,6 +300,7 @@ function PropertiesPageInner() {
   const handleResetFilters = () => {
     setSuggestOpen(false);
     setSuggestResults([]);
+    setSearchInput("");
     setSearchText("");
     setTypeFilter("");
     setRegistryFilter("");
@@ -309,7 +316,7 @@ function PropertiesPageInner() {
 
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
-    !!searchText || !!typeFilter || !!registryFilter || !!dmFilter ||
+    !!searchInput || !!searchText || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || sort !== "updatedAt:desc";
 
@@ -490,9 +497,17 @@ function PropertiesPageInner() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="住所・地番・所有者名・電話番号で検索"
-            value={searchText}
-            onChange={handleFilterChange(setSearchText)}
+            placeholder="住所・地番・所有者名・電話番号で検索（Enterで確定）"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                setSuggestOpen(false);
+                setSearchText(searchInput.trim());
+                setPage(1);
+              }
+            }}
             onBlur={() => setSuggestOpen(false)}
             onFocus={() => { if (suggestResults.length > 0) setSuggestOpen(true); }}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
