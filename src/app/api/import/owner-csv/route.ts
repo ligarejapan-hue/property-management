@@ -94,22 +94,30 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // address あり既存 Owner を事前に1回だけ取得して Map 化（N行×M件の全件読込を防ぐ）
+    // address あり既存 Owner Map（lazy load）
+    // CSV に address あり行が無ければ findMany は走らせない。
+    // address あり行が出現した最初の1回だけ全件取得して Map 化する。
     const buildOwnerDedupKey = (name: string, address: string) =>
       `${normalizeName(name)}::${normalizeAddress(address)}`;
-    const existingOwnersByAddress = new Map<string, { id: string; name: string }>();
-    {
+    let existingOwnersByAddress: Map<string, { id: string; name: string }> | null = null;
+    const getExistingOwnersByAddressMap = async (): Promise<
+      Map<string, { id: string; name: string }>
+    > => {
+      if (existingOwnersByAddress) return existingOwnersByAddress;
+      const map = new Map<string, { id: string; name: string }>();
       const ownersWithAddress = await prisma.owner.findMany({
         where: { address: { not: null } },
         select: { id: true, name: true, address: true },
       });
       for (const o of ownersWithAddress) {
         const key = buildOwnerDedupKey(o.name, o.address!);
-        if (!existingOwnersByAddress.has(key)) {
-          existingOwnersByAddress.set(key, { id: o.id, name: o.name });
+        if (!map.has(key)) {
+          map.set(key, { id: o.id, name: o.name });
         }
       }
-    }
+      existingOwnersByAddress = map;
+      return map;
+    };
 
     let successCount = 0;
     let errorCount = 0;
@@ -167,8 +175,9 @@ export async function POST(request: NextRequest) {
         let existing: { id: string; name: string } | null = null;
 
         if (ownerAddress !== "") {
+          const map = await getExistingOwnersByAddressMap();
           const key = buildOwnerDedupKey(mapped.name.trim(), ownerAddress);
-          const hit = existingOwnersByAddress.get(key);
+          const hit = map.get(key);
           if (hit) {
             existing = hit;
           }
@@ -212,10 +221,12 @@ export async function POST(request: NextRequest) {
         });
 
         // 同一CSV内の後続行が同じ name/address で重複作成しないよう Map に追加
+        // Map 未初期化の場合は初期化してから set する（lazy load を維持）
         if (ownerAddress !== "") {
+          const map = await getExistingOwnersByAddressMap();
           const key = buildOwnerDedupKey(mapped.name.trim(), ownerAddress);
-          if (!existingOwnersByAddress.has(key)) {
-            existingOwnersByAddress.set(key, { id: owner.id, name: owner.name });
+          if (!map.has(key)) {
+            map.set(key, { id: owner.id, name: owner.name });
           }
         }
 
