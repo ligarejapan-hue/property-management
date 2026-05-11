@@ -36,27 +36,50 @@ export async function GET(request: NextRequest) {
       ...(qNoHyphen !== q ? [{ phone: { contains: qNoHyphen } }] : []),
     ];
 
+    // Owner PII 表示権限を事前に取得し、生値表示できるフィールドだけ検索条件に含める。
+    // partial / masked / hidden は検索ヒット有無から PII を推測できるため検索対象外。
+    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const SEARCHABLE_LEVELS = new Set(["edit", "full", "read"]);
+
+    const ownerSearchConditions: object[] = [];
+    if (SEARCHABLE_LEVELS.has(displayConfig.name)) {
+      ownerSearchConditions.push({ name: { contains: q, mode: "insensitive" } });
+    }
+    if (SEARCHABLE_LEVELS.has(displayConfig.address)) {
+      ownerSearchConditions.push({ address: { contains: q, mode: "insensitive" } });
+    }
+    if (SEARCHABLE_LEVELS.has(displayConfig.zip)) {
+      ownerSearchConditions.push({ zip: { contains: q } });
+    }
+    if (SEARCHABLE_LEVELS.has(displayConfig.phone)) {
+      ownerSearchConditions.push(...phoneConditions);
+    }
+
+    // 検索可能な Owner フィールドがある場合のみ propertyOwners.some 条件を追加
+    const ownerOrCondition =
+      ownerSearchConditions.length > 0
+        ? [{ propertyOwners: { some: { owner: { OR: ownerSearchConditions } } } }]
+        : [];
+
+    // field_staff は自分が作成/担当する物件のみ検索対象にする（AND で scope を強制）
+    const fieldStaffScope =
+      session.role === "field_staff"
+        ? [{ OR: [{ createdBy: session.id }, { assignedTo: session.id }] }]
+        : [];
+
     const properties = await prisma.property.findMany({
       where: {
         isArchived: false,
-        OR: [
-          { address: { contains: q, mode: "insensitive" } },
-          { lotNumber: { contains: q, mode: "insensitive" } },
-          { realEstateNumber: { contains: q, mode: "insensitive" } },
-          { buildingNumber: { contains: q, mode: "insensitive" } },
+        AND: [
+          ...fieldStaffScope,
           {
-            propertyOwners: {
-              some: {
-                owner: {
-                  OR: [
-                    { name: { contains: q, mode: "insensitive" } },
-                    { address: { contains: q, mode: "insensitive" } },
-                    { zip: { contains: q } },
-                    ...phoneConditions,
-                  ],
-                },
-              },
-            },
+            OR: [
+              { address: { contains: q, mode: "insensitive" } },
+              { lotNumber: { contains: q, mode: "insensitive" } },
+              { realEstateNumber: { contains: q, mode: "insensitive" } },
+              { buildingNumber: { contains: q, mode: "insensitive" } },
+              ...ownerOrCondition,
+            ],
           },
         ],
       },
@@ -107,9 +130,6 @@ export async function GET(request: NextRequest) {
         );
       }
     }
-
-    // Owner PII をフィールド別に権限マスキング
-    const displayConfig = await getOwnerDisplayConfig(session.id);
 
     const data = properties.map((p) => ({
       id: p.id,
