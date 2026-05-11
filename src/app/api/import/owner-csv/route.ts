@@ -94,6 +94,23 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // address あり既存 Owner を事前に1回だけ取得して Map 化（N行×M件の全件読込を防ぐ）
+    const buildOwnerDedupKey = (name: string, address: string) =>
+      `${normalizeName(name)}::${normalizeAddress(address)}`;
+    const existingOwnersByAddress = new Map<string, { id: string; name: string }>();
+    {
+      const ownersWithAddress = await prisma.owner.findMany({
+        where: { address: { not: null } },
+        select: { id: true, name: true, address: true },
+      });
+      for (const o of ownersWithAddress) {
+        const key = buildOwnerDedupKey(o.name, o.address!);
+        if (!existingOwnersByAddress.has(key)) {
+          existingOwnersByAddress.set(key, { id: o.id, name: o.name });
+        }
+      }
+    }
+
     let successCount = 0;
     let errorCount = 0;
     let needsReviewCount = 0;
@@ -150,19 +167,10 @@ export async function POST(request: NextRequest) {
         let existing: { id: string; name: string } | null = null;
 
         if (ownerAddress !== "") {
-          const normCsvName = normalizeName(mapped.name.trim());
-          const normCsvAddr = normalizeAddress(ownerAddress);
-          const candidates = await prisma.owner.findMany({
-            where: { address: { not: null } },
-            select: { id: true, name: true, address: true },
-          });
-          const dup = candidates.find(
-            (c) =>
-              normalizeName(c.name) === normCsvName &&
-              normalizeAddress(c.address!) === normCsvAddr,
-          );
-          if (dup) {
-            existing = { id: dup.id, name: dup.name };
+          const key = buildOwnerDedupKey(mapped.name.trim(), ownerAddress);
+          const hit = existingOwnersByAddress.get(key);
+          if (hit) {
+            existing = hit;
           }
         }
 
