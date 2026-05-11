@@ -137,6 +137,8 @@ function PropertiesPageInner() {
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 最後に発行した suggest query を記録する。in-flight の古いレスポンスを弾くために使う。
+  const suggestQueryRef = useRef<string>("");
 
   // 警告 (quality-check) を propertyId 単位で集計。
   // 既存の /api/properties/quality-check を流用するので新 API は追加しない。
@@ -266,19 +268,26 @@ function PropertiesPageInner() {
   // 入力中候補: searchInput に 300ms debounce をかけて suggest API を呼ぶ。
   // searchInput は確定検索（/api/properties keyword）には流れないため、
   // 入力中の Owner PII が property_list audit に残らない。
+  // stale 対策: レスポンス反映前に query が最新と一致するか確認する。
+  // debounce 後に複数リクエストが in-flight になった場合、古いレスポンスで
+  // dropdown を上書きしないようにする。
   useEffect(() => {
     if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
+    suggestQueryRef.current = searchInput;
     if (searchInput.length < 2) {
       setSuggestResults([]);
       setSuggestOpen(false);
       return;
     }
+    const query = searchInput;
     suggestTimerRef.current = setTimeout(async () => {
       try {
-        const res = await fetchPropertySuggestions(searchInput);
+        const res = await fetchPropertySuggestions(query);
+        if (query !== suggestQueryRef.current) return;
         setSuggestResults(res.data);
         setSuggestOpen(res.data.length > 0);
       } catch {
+        if (query !== suggestQueryRef.current) return;
         setSuggestResults([]);
         setSuggestOpen(false);
       }
