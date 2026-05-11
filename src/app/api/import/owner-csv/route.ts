@@ -211,6 +211,14 @@ export async function POST(request: NextRequest) {
           data: createData as Parameters<typeof prisma.owner.create>[0]["data"],
         });
 
+        // 同一CSV内の後続行が同じ name/address で重複作成しないよう Map に追加
+        if (ownerAddress !== "") {
+          const key = buildOwnerDedupKey(mapped.name.trim(), ownerAddress);
+          if (!existingOwnersByAddress.has(key)) {
+            existingOwnersByAddress.set(key, { id: owner.id, name: owner.name });
+          }
+        }
+
         jobRows.push({
           jobId: job.id,
           rowNumber,
