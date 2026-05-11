@@ -10,7 +10,8 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
-import { normalizeAddress } from "@/lib/address-normalizer";
+import { normalizeAddress as normalizeAddressForLink } from "@/lib/address-normalizer";
+import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { relinkOwnersToProperties } from "@/lib/owner-property-linker";
 import {
   REIMPORT_IGNORED_HEADERS,
@@ -93,6 +94,31 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // address あり既存 Owner Map（lazy load）
+    // CSV に address あり行が無ければ findMany は走らせない。
+    // address あり行が出現した最初の1回だけ全件取得して Map 化する。
+    const buildOwnerDedupKey = (name: string, address: string) =>
+      `${normalizeName(name)}::${normalizeAddress(address)}`;
+    let existingOwnersByAddress: Map<string, { id: string; name: string }> | null = null;
+    const getExistingOwnersByAddressMap = async (): Promise<
+      Map<string, { id: string; name: string }>
+    > => {
+      if (existingOwnersByAddress) return existingOwnersByAddress;
+      const map = new Map<string, { id: string; name: string }>();
+      const ownersWithAddress = await prisma.owner.findMany({
+        where: { address: { not: null } },
+        select: { id: true, name: true, address: true },
+      });
+      for (const o of ownersWithAddress) {
+        const key = buildOwnerDedupKey(o.name, o.address!);
+        if (!map.has(key)) {
+          map.set(key, { id: o.id, name: o.name });
+        }
+      }
+      existingOwnersByAddress = map;
+      return map;
+    };
+
     let successCount = 0;
     let errorCount = 0;
     let needsReviewCount = 0;
@@ -141,23 +167,28 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Duplicate check: by name + (phone or address)
-        const duplicateConditions: Record<string, unknown>[] = [];
-        if (mapped.phone) {
-          duplicateConditions.push({ name: mapped.name, phone: mapped.phone });
-        }
-        if (mapped.address) {
-          duplicateConditions.push({ name: mapped.name, address: mapped.address });
-        }
-        // If neither phone nor address, check by name only
-        if (duplicateConditions.length === 0) {
-          duplicateConditions.push({ name: mapped.name });
+        // Duplicate check（優先順位）
+        // 第一: address あり → normalizeName + normalizeAddress で比較（表記ゆれ吸収）
+        // 第二: 上記で見つからず phone あり → name + phone 生値比較（address誤記ゆれの救済）
+        // 第三: address なし・phone なし → name 単独検索しない（誤統合防止）
+        const ownerAddress = mapped.address?.trim() ?? "";
+        let existing: { id: string; name: string } | null = null;
+
+        if (ownerAddress !== "") {
+          const map = await getExistingOwnersByAddressMap();
+          const key = buildOwnerDedupKey(mapped.name.trim(), ownerAddress);
+          const hit = map.get(key);
+          if (hit) {
+            existing = hit;
+          }
         }
 
-        const existing = await prisma.owner.findFirst({
-          where: { OR: duplicateConditions },
-          select: { id: true, name: true },
-        });
+        if (!existing && mapped.phone) {
+          existing = await prisma.owner.findFirst({
+            where: { name: mapped.name, phone: mapped.phone },
+            select: { id: true, name: true },
+          });
+        }
 
         if (existing) {
           jobRows.push({
@@ -188,6 +219,16 @@ export async function POST(request: NextRequest) {
         const owner = await prisma.owner.create({
           data: createData as Parameters<typeof prisma.owner.create>[0]["data"],
         });
+
+        // 同一CSV内の後続行が同じ name/address で重複作成しないよう Map に追加
+        // Map 未初期化の場合は初期化してから set する（lazy load を維持）
+        if (ownerAddress !== "") {
+          const map = await getExistingOwnersByAddressMap();
+          const key = buildOwnerDedupKey(mapped.name.trim(), ownerAddress);
+          if (!map.has(key)) {
+            map.set(key, { id: owner.id, name: owner.name });
+          }
+        }
 
         jobRows.push({
           jobId: job.id,
@@ -316,7 +357,7 @@ export async function POST(request: NextRequest) {
           select: { id: true, address: true },
         });
         const matched = candidates
-          .filter((p) => normalizeAddress(p.address) === normAddr)
+          .filter((p) => normalizeAddressForLink(p.address) === normAddr)
           .map((p) => p.id);
         propertyByNormAddr.set(normAddr, matched);
         return matched;
@@ -325,7 +366,7 @@ export async function POST(request: NextRequest) {
       for (const owner of addressTargets) {
         if (linkedOwnerIds.has(owner.id)) continue;
         if (!owner.address) continue;
-        const norm = normalizeAddress(owner.address);
+        const norm = normalizeAddressForLink(owner.address);
         if (!norm) continue;
         const candidates = await ensureCandidates(norm, owner.address);
         if (candidates.length === 0) continue;
