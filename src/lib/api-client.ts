@@ -1628,6 +1628,48 @@ export async function createBuildingUnit(
   });
 }
 
+// ---------- Suggest (autocomplete for property list) ----------
+
+export async function fetchPropertySuggestions(q: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    if (q.length < 2) return { data: [] };
+    const ql = q.toLowerCase();
+    return {
+      data: MOCK_PROPERTIES.filter((p) =>
+        p.address.toLowerCase().includes(ql),
+      )
+        .slice(0, 10)
+        .map((p) => ({
+          id: p.id,
+          address: p.address,
+          dmStatus: p.dmStatus,
+          importSource: null as string | null,
+          owners: [] as Array<{
+            name: string | null;
+            address: string | null;
+            phone: string | null;
+            zip: string | null;
+          }>,
+        })),
+    };
+  }
+  return apiFetch<{
+    data: Array<{
+      id: string;
+      address: string;
+      dmStatus: string;
+      importSource: string | null;
+      owners: Array<{
+        name: string | null;
+        address: string | null;
+        phone: string | null;
+        zip: string | null;
+      }>;
+    }>;
+  }>(`/api/properties/suggest?q=${encodeURIComponent(q)}`);
+}
+
 // ---------- Search (for import linkage) ----------
 
 export async function searchProperties(query: string) {
