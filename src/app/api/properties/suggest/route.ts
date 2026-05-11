@@ -29,12 +29,8 @@ export async function GET(request: NextRequest) {
       return apiResponse({ data: [] });
     }
 
-    // ハイフン除去版でも phone を検索（入力側のハイフン有無を吸収）
-    const qNoHyphen = q.replace(/-/g, "");
-    const phoneConditions: { phone: { contains: string } }[] = [
-      { phone: { contains: q } },
-      ...(qNoHyphen !== q ? [{ phone: { contains: qNoHyphen } }] : []),
-    ];
+    // 数字のみ抽出（DB・入力双方のハイフン有無を吸収するため）
+    const qDigits = q.replace(/[^0-9]/g, "");
 
     // Owner PII 表示権限を事前に取得し、生値表示できるフィールドだけ検索条件に含める。
     // partial / masked / hidden は検索ヒット有無から PII を推測できるため検索対象外。
@@ -51,8 +47,16 @@ export async function GET(request: NextRequest) {
     if (SEARCHABLE_LEVELS.has(displayConfig.zip)) {
       ownerSearchConditions.push({ zip: { contains: q } });
     }
-    if (SEARCHABLE_LEVELS.has(displayConfig.phone)) {
-      ownerSearchConditions.push(...phoneConditions);
+    // Phone: DB側・入力側両方のハイフン有無を吸収するため regexp_replace で正規化して比較。
+    // qDigits が3桁未満は電話番号として非現実的なため実行しない。
+    if (SEARCHABLE_LEVELS.has(displayConfig.phone) && qDigits.length >= 3) {
+      const phoneOwners = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "owners"
+        WHERE regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') LIKE ${"%" + qDigits + "%"}
+      `;
+      if (phoneOwners.length > 0) {
+        ownerSearchConditions.push({ id: { in: phoneOwners.map((r) => r.id) } });
+      }
     }
 
     // 検索可能な Owner フィールドがある場合のみ propertyOwners.some 条件を追加
