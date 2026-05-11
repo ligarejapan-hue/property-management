@@ -142,10 +142,10 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Duplicate check
-        // address あり: normalizeName + normalizeAddress で既存Owner全件と比較（表記ゆれ吸収）
-        // address なし・phone あり: name + phone 生値比較（現状維持）
-        // address なし・phone なし: name 単独では検索しない（誤統合防止）
+        // Duplicate check（優先順位）
+        // 第一: address あり → normalizeName + normalizeAddress で比較（表記ゆれ吸収）
+        // 第二: 上記で見つからず phone あり → name + phone 生値比較（address誤記ゆれの救済）
+        // 第三: address なし・phone なし → name 単独検索しない（誤統合防止）
         const ownerAddress = mapped.address?.trim() ?? "";
         let existing: { id: string; name: string } | null = null;
 
@@ -164,7 +164,9 @@ export async function POST(request: NextRequest) {
           if (dup) {
             existing = { id: dup.id, name: dup.name };
           }
-        } else if (mapped.phone) {
+        }
+
+        if (!existing && mapped.phone) {
           existing = await prisma.owner.findFirst({
             where: { name: mapped.name, phone: mapped.phone },
             select: { id: true, name: true },
