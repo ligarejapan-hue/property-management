@@ -56,11 +56,15 @@ export async function GET(request: NextRequest) {
         ownerSearchConditions.push({ zip: { contains: q } });
       }
       // Phone: DB側・入力側両方のハイフン有無を吸収するため regexp_replace で正規化して比較。
-      // qDigits が3桁未満は電話番号として非現実的なため実行しない。
-      if (SEARCHABLE_LEVELS.has(displayConfig.phone) && qDigits.length >= 3) {
+      // regexp_replace は index が効かないため短すぎる入力では実行しない（090/03/0120 等を除外）。
+      // owner id の IN 肥大化を防ぐため結果を LIMIT で抑える。
+      const MIN_PHONE_DIGITS = 7;
+      const PHONE_OWNER_LIMIT = 100;
+      if (SEARCHABLE_LEVELS.has(displayConfig.phone) && qDigits.length >= MIN_PHONE_DIGITS) {
         const phoneOwners = await prisma.$queryRaw<{ id: string }[]>`
           SELECT id FROM "owners"
           WHERE regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') LIKE ${"%" + qDigits + "%"}
+          LIMIT ${PHONE_OWNER_LIMIT}
         `;
         if (phoneOwners.length > 0) {
           ownerSearchConditions.push({ id: { in: phoneOwners.map((r) => r.id) } });
