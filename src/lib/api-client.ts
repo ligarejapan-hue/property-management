@@ -1654,6 +1654,7 @@ export async function fetchPropertySuggestions(q: string) {
         })),
     };
   }
+  // Owner PII を URL に載せないため POST + body で送る（GETは廃止）
   return apiFetch<{
     data: Array<{
       id: string;
@@ -1667,7 +1668,11 @@ export async function fetchPropertySuggestions(q: string) {
         zip: string | null;
       }>;
     }>;
-  }>(`/api/properties/suggest?q=${encodeURIComponent(q)}`);
+  }>(`/api/properties/suggest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ q }),
+  });
 }
 
 // ---------- Search (for import linkage) ----------

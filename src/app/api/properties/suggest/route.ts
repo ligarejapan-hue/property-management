@@ -11,12 +11,14 @@ import {
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 
-// ---------- GET /api/properties/suggest?q=... ----------
+// ---------- POST /api/properties/suggest ----------
 // 物件一覧の入力中候補表示用。property:read 必須。
 // owner:read を持たないユーザーには Owner 検索条件・PII 表示を一切付与しない
 // （field-level grant が残っていてもここで遮断する）。
+// 所有者名・電話番号などの Owner PII が URL に載らないよう POST + body で受ける
+// （URL はブラウザ履歴・proxy/server access log に残るため）。
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -25,7 +27,8 @@ export async function GET(request: NextRequest) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    const q = request.nextUrl.searchParams.get("q")?.trim() ?? "";
+    const body = (await request.json().catch(() => ({}))) as { q?: unknown };
+    const q = typeof body.q === "string" ? body.q.trim() : "";
     if (q.length < 2) {
       return apiResponse({ data: [] });
     }
