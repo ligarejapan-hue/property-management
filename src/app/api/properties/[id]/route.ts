@@ -140,6 +140,7 @@ export async function PATCH(
         registryStatus: true,
         dmStatus: true,
         caseStatus: true,
+        introductionRoute: true,
         gpsLat: true,
         gpsLng: true,
         zoningDistrict: true,

@@ -197,10 +197,10 @@ export const INTRODUCTION_ROUTE_VALUES = [
 export type IntroductionRouteValue = (typeof INTRODUCTION_ROUTE_VALUES)[number];
 
 export const INTRODUCTION_ROUTE_LABELS: Record<string, string> = {
-  reception_csv:  "受付帳CSV",
+  reception_csv:  "受付帳取込",
   dm_response:    "DM反響",
-  phone_inquiry:  "電話問合",
-  web_inquiry:    "WEB問合",
+  phone_inquiry:  "電話問い合わせ",
+  web_inquiry:    "Web問い合わせ",
   referral:       "紹介",
   field_survey:   "現地調査",
   manual_entry:   "手入力",
