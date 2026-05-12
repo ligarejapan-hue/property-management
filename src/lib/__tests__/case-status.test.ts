@@ -204,4 +204,38 @@ describe("migration ファイル分割の確認", () => {
     // migration 2 に ADD VALUE がない
     expect(sql2).not.toMatch(/ADD VALUE/i);
   });
+
+  it("20260512000000 の ADD VALUE に BEFORE / AFTER 順序指定が含まれる", () => {
+    const sql = fs.readFileSync(
+      path.join(migDir, "20260512000000_add_case_status_values", "migration.sql"),
+      "utf8",
+    );
+    expect(sql).toMatch(/ADD VALUE.*BEFORE/i);
+    expect(sql).toMatch(/ADD VALUE.*AFTER/i);
+  });
+
+  it("contacting_owner が site_checked の前に来る順序指定になっている", () => {
+    const sql = fs.readFileSync(
+      path.join(migDir, "20260512000000_add_case_status_values", "migration.sql"),
+      "utf8",
+    );
+    expect(sql).toMatch(/ADD VALUE IF NOT EXISTS 'contacting_owner' BEFORE 'site_checked'/i);
+    expect(sql).toMatch(/ADD VALUE IF NOT EXISTS 'owner_contacted' BEFORE 'site_checked'/i);
+  });
+
+  it("confirming_owner が site_checked の後に来る順序指定になっている", () => {
+    const sql = fs.readFileSync(
+      path.join(migDir, "20260512000000_add_case_status_values", "migration.sql"),
+      "utf8",
+    );
+    expect(sql).toMatch(/ADD VALUE IF NOT EXISTS 'confirming_owner' AFTER 'site_checked'/i);
+  });
+
+  it("closed が done の前に来る順序指定になっている", () => {
+    const sql = fs.readFileSync(
+      path.join(migDir, "20260512000000_add_case_status_values", "migration.sql"),
+      "utf8",
+    );
+    expect(sql).toMatch(/ADD VALUE IF NOT EXISTS 'closed' BEFORE 'done'/i);
+  });
 });
