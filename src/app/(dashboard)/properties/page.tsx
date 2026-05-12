@@ -113,11 +113,12 @@ function PropertiesPageInner() {
   const pathname = usePathname();
 
   // Filters — URL から初期化することでブックマーク・更新・共有が可能。
-  // searchInput: 検索ボックスに入力中の文字列（suggest API のみに送る）。
-  // searchText: 確定検索語（/api/properties の keyword と URL query に流す）。
-  // 入力中の所有者名・電話番号が property_list audit の raw keyword に残らないよう分離する。
-  const [searchInput, setSearchInput] = useState(() => sp.get("keyword") ?? "");
+  // searchText: 一覧検索語（/api/properties keyword・URL query に流す）。URL keyword から復元する。
+  // searchInput: 候補検索専用の入力中文字列（/api/properties/suggest のみに送る）。
+  //   URL keyword は /api/properties 用の確定語なので searchInput には入れない。
+  //   入力中の所有者名・電話番号が property_list audit の raw keyword に残らないよう分離する。
   const [searchText, setSearchText] = useState(() => sp.get("keyword") ?? "");
+  const [searchInput, setSearchInput] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
   const [dmFilter, setDmFilter] = useState(() => sp.get("dmStatus") ?? "");
@@ -502,11 +503,22 @@ function PropertiesPageInner() {
           <option value="hold">未判断</option>
         </select>
 
+        <div className="relative min-w-[220px]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="物件住所・地番・家屋番号で一覧検索"
+            value={searchText}
+            onChange={handleFilterChange(setSearchText)}
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          />
+        </div>
+
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="住所・所有者名・電話番号で候補表示"
+            placeholder="所有者名・電話番号で候補を選択して物件を開く"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => {
