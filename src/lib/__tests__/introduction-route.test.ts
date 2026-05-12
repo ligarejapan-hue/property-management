@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   INTRODUCTION_ROUTE_VALUES,
+  INTRODUCTION_ROUTE_LABELS,
   normalizeIntroductionRouteInput,
 } from "../property-types";
 import {
@@ -8,6 +9,7 @@ import {
   updatePropertySchema,
   propertyListQuerySchema,
 } from "../validators";
+import { PROPERTY_CSV_COLUMN_MAP } from "../csv-parser";
 
 // ── 1. バリデータが8値を accept する ─────────────────────────────────────────
 
@@ -253,6 +255,35 @@ describe("CSV 既存物件更新パス — introductionRoute", () => {
     const updateData = buildUpdateData(mapped);
     expect(updateData).not.toHaveProperty("introductionRoute");
   });
+});
+
+// ── 6. PROPERTY_CSV_COLUMN_MAP — introductionRoute 列名 ──────────────────────
+
+describe("PROPERTY_CSV_COLUMN_MAP — introductionRoute 列名", () => {
+  it.each([
+    "導入ルート", "流入経路", "獲得経路",
+    "introductionRoute", "introduction_route",
+    "acquisitionRoute", "acquisition_route",
+    "leadSource", "lead_source",
+  ])("列名 %s が introductionRoute にマップされる", (col) => {
+    expect(PROPERTY_CSV_COLUMN_MAP[col]).toBe("introductionRoute");
+  });
+});
+
+describe("normalizeIntroductionRouteInput — 表示ラベルの round-trip", () => {
+  it.each(Object.entries(INTRODUCTION_ROUTE_LABELS))(
+    "表示ラベル '%s' → %s",
+    (value, label) => {
+      expect(normalizeIntroductionRouteInput(label)).toBe(value);
+    },
+  );
+});
+
+describe("normalizeIntroductionRouteInput — 既存エイリアス互換", () => {
+  it("受付帳CSV → reception_csv", () => expect(normalizeIntroductionRouteInput("受付帳CSV")).toBe("reception_csv"));
+  it("電話問合 → phone_inquiry", () => expect(normalizeIntroductionRouteInput("電話問合")).toBe("phone_inquiry"));
+  it("WEB問合 → web_inquiry", () => expect(normalizeIntroductionRouteInput("WEB問合")).toBe("web_inquiry"));
+  it("Web問合 → web_inquiry", () => expect(normalizeIntroductionRouteInput("Web問合")).toBe("web_inquiry"));
 });
 
 // ── 7. migration ファイルの確認 ───────────────────────────────────────────────

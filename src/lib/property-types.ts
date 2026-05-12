@@ -210,23 +210,25 @@ export const INTRODUCTION_ROUTE_LABELS: Record<string, string> = {
 export const INTRODUCTION_ROUTE_OPTIONS: { value: string; label: string }[] =
   INTRODUCTION_ROUTE_VALUES.map((v) => ({ value: v, label: INTRODUCTION_ROUTE_LABELS[v] }));
 
+// 表示ラベル → enum 値のリバースマップ（INTRODUCTION_ROUTE_LABELS から自動生成）。
+// これにより表示ラベルが常に round-trip できる。
+const _labelToValue = Object.fromEntries(
+  Object.entries(INTRODUCTION_ROUTE_LABELS).map(([v, l]) => [l, v]),
+);
+
 export const INTRODUCTION_ROUTE_JP_TO_VALUE: Record<string, string> = {
-  "受付帳CSV":    "reception_csv",
-  "受付帳":       "reception_csv",
-  "DM反響":       "dm_response",
-  "DM":           "dm_response",
-  "電話問合":     "phone_inquiry",
-  "電話問い合わせ": "phone_inquiry",
-  "電話":         "phone_inquiry",
-  "WEB問合":      "web_inquiry",
-  "Web問合":      "web_inquiry",
-  "WEB":          "web_inquiry",
-  "紹介":         "referral",
-  "現地調査":     "field_survey",
-  "現地":         "field_survey",
-  "手入力":       "manual_entry",
-  "手動":         "manual_entry",
-  "その他":       "other",
+  ..._labelToValue,
+  // 追加エイリアス（CSV互換・旧ラベル）
+  "受付帳CSV":      "reception_csv",
+  "受付帳":         "reception_csv",
+  "DM":             "dm_response",
+  "電話問合":       "phone_inquiry",
+  "電話":           "phone_inquiry",
+  "WEB問合":        "web_inquiry",
+  "Web問合":        "web_inquiry",
+  "WEB":            "web_inquiry",
+  "現地":           "field_survey",
+  "手動":           "manual_entry",
 };
 
 const INTRODUCTION_ROUTE_VALUE_SET = new Set<string>(INTRODUCTION_ROUTE_VALUES);
