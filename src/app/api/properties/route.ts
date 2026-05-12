@@ -177,15 +177,18 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const data = properties.map((p) => ({
-      ...p,
-      importSource: importSourceMap.get(p.id) ?? null,
-      ownerNames: hasOwnerRead && ownerDisplayConfig
-        ? p.propertyOwners
-            .map(({ owner }) => maskValue(owner.name, ownerDisplayConfig.name))
-            .filter((n): n is string => n !== null)
-        : [],
-    }));
+    const data = properties.map((p) => {
+      const { propertyOwners, ...property } = p;
+      return {
+        ...property,
+        importSource: importSourceMap.get(p.id) ?? null,
+        ownerNames: hasOwnerRead && ownerDisplayConfig
+          ? propertyOwners
+              .map(({ owner }) => maskValue(owner.name, ownerDisplayConfig.name))
+              .filter((n): n is string => n !== null)
+          : [],
+      };
+    });
 
     // Record audit log for list view
     await writeAuditLog({
