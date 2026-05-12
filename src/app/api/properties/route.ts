@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
       registryStatus,
       dmStatus,
       caseStatus,
+      introductionRoute,
       assignedTo,
       updatedFrom,
       updatedTo,
@@ -70,6 +71,7 @@ export async function GET(request: NextRequest) {
     if (registryStatus) where.registryStatus = registryStatus;
     if (dmStatus) where.dmStatus = dmStatus;
     if (caseStatus) where.caseStatus = caseStatus;
+    if (introductionRoute) where.introductionRoute = introductionRoute;
     if (assignedTo) where.assignedTo = assignedTo;
 
     if (keyword) {
@@ -131,6 +133,7 @@ export async function GET(request: NextRequest) {
           registryStatus: true,
           dmStatus: true,
           caseStatus: true,
+          introductionRoute: true,
           isArchived: true,
           updatedAt: true,
           assignedTo: true,

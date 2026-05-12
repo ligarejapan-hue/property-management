@@ -17,6 +17,7 @@ import {
   PROPERTY_TYPE_JP_TO_VALUE,
   CASE_STATUS_VALUES,
   normalizeCaseStatusInput,
+  normalizeIntroductionRouteInput,
 } from "@/lib/property-types";
 import {
   buildDedupeIndex,
@@ -48,6 +49,9 @@ const JAPANESE_FIELD_MAP: Record<string, string> = {
   "登記状況": "registryStatus",
   "DM判断": "dmStatus",
   "案件ステータス": "caseStatus",
+  "導入ルート": "introductionRoute",
+  "流入経路": "introductionRoute",
+  "獲得経路": "introductionRoute",
   "用途地域": "zoningDistrict",
   "路線価": "rosenkaValue",
   "緯度": "gpsLat",
@@ -401,6 +405,14 @@ export async function POST(request: NextRequest) {
             delete mapped.caseStatus;
           }
         }
+        if (mapped.introductionRoute) {
+          const normalized = normalizeIntroductionRouteInput(mapped.introductionRoute);
+          if (normalized) {
+            mapped.introductionRoute = normalized;
+          } else {
+            delete mapped.introductionRoute;
+          }
+        }
         if (
           mapped.occupancyStatus &&
           !VALID_OCCUPANCY_STATUS.includes(mapped.occupancyStatus)
@@ -628,6 +640,7 @@ export async function POST(request: NextRequest) {
         if (mapped.gpsLng)
           createData.gpsLng = parseFloat(mapped.gpsLng) || null;
         if (mapped.note) createData.note = mapped.note;
+        if (mapped.introductionRoute) createData.introductionRoute = mapped.introductionRoute;
 
         // Unit-specific fields
         if (resolvedBuildingId) createData.buildingId = resolvedBuildingId;

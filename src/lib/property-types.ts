@@ -180,6 +180,71 @@ export function normalizeCaseStatusInput(value: unknown): CaseStatusValue | null
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// 導入ルート (introductionRoute)
+// ════════════════════════════════════════════════════════════════════════════
+
+export const INTRODUCTION_ROUTE_VALUES = [
+  "reception_csv",
+  "dm_response",
+  "phone_inquiry",
+  "web_inquiry",
+  "referral",
+  "field_survey",
+  "manual_entry",
+  "other",
+] as const;
+
+export type IntroductionRouteValue = (typeof INTRODUCTION_ROUTE_VALUES)[number];
+
+export const INTRODUCTION_ROUTE_LABELS: Record<string, string> = {
+  reception_csv:  "受付帳CSV",
+  dm_response:    "DM反響",
+  phone_inquiry:  "電話問合",
+  web_inquiry:    "WEB問合",
+  referral:       "紹介",
+  field_survey:   "現地調査",
+  manual_entry:   "手入力",
+  other:          "その他",
+};
+
+export const INTRODUCTION_ROUTE_OPTIONS: { value: string; label: string }[] =
+  INTRODUCTION_ROUTE_VALUES.map((v) => ({ value: v, label: INTRODUCTION_ROUTE_LABELS[v] }));
+
+export const INTRODUCTION_ROUTE_JP_TO_VALUE: Record<string, string> = {
+  "受付帳CSV":    "reception_csv",
+  "受付帳":       "reception_csv",
+  "DM反響":       "dm_response",
+  "DM":           "dm_response",
+  "電話問合":     "phone_inquiry",
+  "電話問い合わせ": "phone_inquiry",
+  "電話":         "phone_inquiry",
+  "WEB問合":      "web_inquiry",
+  "Web問合":      "web_inquiry",
+  "WEB":          "web_inquiry",
+  "紹介":         "referral",
+  "現地調査":     "field_survey",
+  "現地":         "field_survey",
+  "手入力":       "manual_entry",
+  "手動":         "manual_entry",
+  "その他":       "other",
+};
+
+const INTRODUCTION_ROUTE_VALUE_SET = new Set<string>(INTRODUCTION_ROUTE_VALUES);
+
+/**
+ * CSV・API 入力値（日本語ラベル / enum 値）を IntroductionRouteValue に正規化する。
+ * 不明な値は null を返す。
+ */
+export function normalizeIntroductionRouteInput(value: unknown): IntroductionRouteValue | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const v = value.trim();
+  if (INTRODUCTION_ROUTE_VALUE_SET.has(v)) return v as IntroductionRouteValue;
+  const fromJp = INTRODUCTION_ROUTE_JP_TO_VALUE[v];
+  if (fromJp && INTRODUCTION_ROUTE_VALUE_SET.has(fromJp)) return fromJp as IntroductionRouteValue;
+  return null;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 
 export const PROPERTY_TYPE_JP_TO_VALUE: Record<string, string> = {
   "土地":         "land",

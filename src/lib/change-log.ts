@@ -9,6 +9,7 @@ export const PROPERTY_TRACKED_FIELDS = [
   "registryStatus",
   "dmStatus",
   "caseStatus",
+  "introductionRoute",
   "gpsLat",
   "gpsLng",
   "zoningDistrict",

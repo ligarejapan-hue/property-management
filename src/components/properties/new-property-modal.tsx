@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Loader2, AlertTriangle } from "lucide-react";
-import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import { PROPERTY_TYPE_OPTIONS, INTRODUCTION_ROUTE_OPTIONS } from "@/lib/property-types";
 import { createProperty } from "@/lib/api-client";
 
 interface Props {
@@ -16,6 +16,7 @@ export default function NewPropertyModal({ onClose }: Props) {
   const [propertyType, setPropertyType] = useState("");
   const [address, setAddress] = useState("");
   const [lotNumber, setLotNumber] = useState("");
+  const [introductionRoute, setIntroductionRoute] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +40,7 @@ export default function NewPropertyModal({ onClose }: Props) {
         propertyType,
         address: address.trim(),
         lotNumber: lotNumber.trim() || null,
+        introductionRoute: introductionRoute || null,
         note: note.trim() || null,
       });
       router.push(`/properties/${result.id}`);
@@ -122,6 +124,26 @@ export default function NewPropertyModal({ onClose }: Props) {
               placeholder="例: 1番1"
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50"
             />
+          </div>
+
+          {/* 導入ルート */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              導入ルート <span className="text-xs text-gray-400">任意</span>
+            </label>
+            <select
+              value={introductionRoute}
+              onChange={(e) => setIntroductionRoute(e.target.value)}
+              disabled={submitting}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50"
+            >
+              <option value="">未設定</option>
+              {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* メモ */}

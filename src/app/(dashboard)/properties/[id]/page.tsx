@@ -28,6 +28,8 @@ import {
   PROPERTY_TYPE_LABELS,
   CASE_STATUS_LABELS,
   CASE_STATUS_OPTIONS,
+  INTRODUCTION_ROUTE_LABELS,
+  INTRODUCTION_ROUTE_OPTIONS,
 } from "@/lib/property-types";
 
 const REGISTRY_STATUS_LABELS: Record<string, string> = {
@@ -151,6 +153,7 @@ interface ApiProperty {
   repairReserveFee: number | null;
   occupancyStatus: string | null;
   ownershipShareNote: string | null;
+  introductionRoute: string | null;
   importSource: string | null;
   version: number;
   createdAt: string;
@@ -472,6 +475,7 @@ function BasicTab({
         badgeLabel={DM_STATUS_LABELS[property.dmStatus]}
       />
       <CaseStatusField property={property} onRefresh={onRefresh} canWrite={canWrite} />
+      <IntroductionRouteField property={property} onRefresh={onRefresh} canWrite={canWrite} />
       <Field label="担当者" value={property.assignee?.name ?? null} />
       <Field label="登録者" value={property.creator?.name ?? null} />
       <Field
@@ -708,6 +712,82 @@ function CaseStatusField({
           className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-blue-500 focus:outline-none disabled:opacity-50"
         >
           {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {saving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-gray-400" />}
+        {error && <span className="ml-2 text-xs text-red-600">{error}</span>}
+      </dd>
+    </div>
+  );
+}
+
+// ---------- Introduction route inline dropdown ----------
+
+function IntroductionRouteField({
+  property,
+  onRefresh,
+  canWrite,
+}: {
+  property: ApiProperty;
+  onRefresh: () => void;
+  canWrite: boolean;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = async (value: string) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/properties/${property.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ introductionRoute: value || null, version: property.version }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error?.message ?? `エラー: ${res.status}`);
+      }
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存に失敗しました");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const label = property.introductionRoute
+    ? (INTRODUCTION_ROUTE_LABELS[property.introductionRoute] ?? property.introductionRoute)
+    : "—";
+
+  if (!canWrite) {
+    return (
+      <div>
+        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+          導入ルート
+        </dt>
+        <dd className="text-sm text-gray-900">{label}</dd>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+        導入ルート
+      </dt>
+      <dd>
+        <select
+          value={property.introductionRoute ?? ""}
+          onChange={(e) => handleChange(e.target.value)}
+          disabled={saving}
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+        >
+          <option value="">未設定</option>
+          {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>

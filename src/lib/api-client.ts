@@ -1807,6 +1807,7 @@ export async function createProperty(data: {
   propertyType: string;
   address: string;
   lotNumber?: string | null;
+  introductionRoute?: string | null;
   note?: string | null;
 }): Promise<{ id: string }> {
   if (USE_MOCK) {
