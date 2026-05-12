@@ -1,6 +1,30 @@
 import { describe, it, expect } from "vitest";
 import { maskValue } from "../permissions";
 
+// field_staff スコープを where に適用するロジック（route.ts の実装を再現）
+function buildWhereWithFieldStaffScope(
+  role: string,
+  userId: string,
+  keyword?: string,
+): Record<string, unknown> {
+  const where: Record<string, unknown> = {};
+  if (keyword) {
+    where.OR = [
+      { address: { contains: keyword, mode: "insensitive" } },
+      { lotNumber: { contains: keyword, mode: "insensitive" } },
+      { realEstateNumber: { contains: keyword, mode: "insensitive" } },
+      { buildingNumber: { contains: keyword, mode: "insensitive" } },
+    ];
+  }
+  if (role === "field_staff") {
+    where.AND = [
+      ...((where.AND as unknown[]) ?? []),
+      { OR: [{ createdBy: userId }, { assignedTo: userId }] },
+    ];
+  }
+  return where;
+}
+
 // /api/properties のデータマッピングで propertyOwners が raw のままレスポンスに
 // 混入しないことを確認するためのユニットテスト。
 // route.ts の実際の mapping 処理と同じロジックを再現する。
@@ -74,5 +98,55 @@ describe("property list owner names mapping", () => {
   it("importSource が正しく渡される", () => {
     const result = mapPropertyForResponse(base, true, { name: "full" }, "file.csv:1行");
     expect(result.importSource).toBe("file.csv:1行");
+  });
+});
+
+describe("field_staff scope — where 条件構築", () => {
+  const ME = "user-me";
+  const OTHER = "user-other";
+
+  it("admin はスコープ制限なし: AND に field_staff 条件が入らない", () => {
+    const where = buildWhereWithFieldStaffScope("admin", ME);
+    expect(where).not.toHaveProperty("AND");
+  });
+
+  it("field_staff: AND に createdBy/assignedTo 条件が入る", () => {
+    const where = buildWhereWithFieldStaffScope("field_staff", ME);
+    const andClauses = where.AND as unknown[];
+    expect(andClauses).toBeDefined();
+    expect(andClauses.length).toBeGreaterThanOrEqual(1);
+    const scopeClause = andClauses[andClauses.length - 1] as {
+      OR: { createdBy?: string; assignedTo?: string }[];
+    };
+    expect(scopeClause.OR).toContainEqual({ createdBy: ME });
+    expect(scopeClause.OR).toContainEqual({ assignedTo: ME });
+  });
+
+  it("field_staff + keyword: OR は keyword 条件のみ、AND でスコープを強制", () => {
+    const where = buildWhereWithFieldStaffScope("field_staff", ME, "東京");
+    // keyword 条件は where.OR に残る
+    const orClauses = where.OR as { address?: unknown }[];
+    expect(orClauses).toBeDefined();
+    expect(orClauses.some((c) => "address" in c)).toBe(true);
+    // createdBy/assignedTo は OR に混ざっていない
+    expect(orClauses.every((c) => !("createdBy" in c) && !("assignedTo" in c))).toBe(true);
+    // field_staff スコープは AND に入っている
+    const andClauses = where.AND as unknown[];
+    expect(andClauses).toBeDefined();
+    const scopeClause = andClauses[andClauses.length - 1] as {
+      OR: { createdBy?: string; assignedTo?: string }[];
+    };
+    expect(scopeClause.OR).toContainEqual({ createdBy: ME });
+    expect(scopeClause.OR).toContainEqual({ assignedTo: ME });
+  });
+
+  it("field_staff + keyword: 他ユーザーの createdBy/assignedTo は AND 条件に入らない", () => {
+    const where = buildWhereWithFieldStaffScope("field_staff", ME, "東京");
+    const andClauses = where.AND as unknown[];
+    const scopeClause = andClauses[andClauses.length - 1] as {
+      OR: { createdBy?: string; assignedTo?: string }[];
+    };
+    expect(scopeClause.OR).not.toContainEqual({ createdBy: OTHER });
+    expect(scopeClause.OR).not.toContainEqual({ assignedTo: OTHER });
   });
 });

@@ -87,12 +87,13 @@ export async function GET(request: NextRequest) {
       if (updatedTo) where.updatedAt.lte = new Date(updatedTo);
     }
 
-    // For field_staff, only show assigned or self-created properties
+    // field_staff は自分が作成/担当する物件のみ閲覧可能。
+    // where.OR (keyword 条件) と混ぜると「担当外でも keyword に一致すれば返る」に
+    // なるため AND に追加してスコープを強制する。
     if (session.role === "field_staff") {
-      where.OR = [
-        { createdBy: session.id },
-        { assignedTo: session.id },
-        ...(where.OR || []),
+      where.AND = [
+        ...(where.AND ?? []),
+        { OR: [{ createdBy: session.id }, { assignedTo: session.id }] },
       ];
     }
 
