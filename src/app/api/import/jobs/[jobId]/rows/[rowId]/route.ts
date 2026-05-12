@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { normalizeCaseStatusInput } from "@/lib/property-types";
 
 /** Map Japanese CSV header names to property model field names. */
 const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -89,7 +90,7 @@ function buildPropertyCreateData(
     propertyType: mapped.propertyType || "unknown",
     registryStatus: mapped.registryStatus || "unconfirmed",
     dmStatus: mapped.dmStatus || "hold",
-    caseStatus: mapped.caseStatus || "new_case",
+    caseStatus: normalizeCaseStatusInput(mapped.caseStatus) ?? "new_case",
     createdBy,
   };
   if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;

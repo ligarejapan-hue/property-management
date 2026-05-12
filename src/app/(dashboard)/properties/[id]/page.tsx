@@ -178,6 +178,7 @@ export default function PropertyDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [canWriteProperty, setCanWriteProperty] = useState(false);
 
   const handleDelete = async () => {
     if (!property) return;
@@ -214,6 +215,18 @@ export default function PropertyDetailPage({
   useEffect(() => {
     fetchProperty();
   }, [fetchProperty]);
+
+  useEffect(() => {
+    fetch("/api/me/permissions")
+      .then((r) => r.json())
+      .then((json: { permissions?: { resource: string; action: string; granted: boolean }[] }) => {
+        const perms = json.permissions ?? [];
+        setCanWriteProperty(
+          perms.some((p) => p.resource === "property" && p.action === "write" && p.granted),
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   if (loading) {
     return (
@@ -325,7 +338,7 @@ export default function PropertyDetailPage({
 
       {/* Tab content */}
       <div className="rounded-lg border border-gray-200 bg-white p-6">
-        {activeTab === "basic" && <BasicTab property={property} onRefresh={fetchProperty} />}
+        {activeTab === "basic" && <BasicTab property={property} onRefresh={fetchProperty} canWrite={canWriteProperty} />}
         {activeTab === "owner" && (
           <OwnerTab owners={property.propertyOwners} />
         )}
@@ -367,9 +380,11 @@ export default function PropertyDetailPage({
 function BasicTab({
   property,
   onRefresh,
+  canWrite,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
+  canWrite: boolean;
 }) {
   // 旧値 "unit" と新値 "apartment_unit" の両方を区分扱いにする
   const isUnit =
@@ -456,7 +471,7 @@ function BasicTab({
         badgeStyle={dmBadgeStyles[property.dmStatus]}
         badgeLabel={DM_STATUS_LABELS[property.dmStatus]}
       />
-      <CaseStatusField property={property} onRefresh={onRefresh} />
+      <CaseStatusField property={property} onRefresh={onRefresh} canWrite={canWrite} />
       <Field label="担当者" value={property.assignee?.name ?? null} />
       <Field label="登録者" value={property.creator?.name ?? null} />
       <Field
@@ -629,9 +644,11 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
 function CaseStatusField({
   property,
   onRefresh,
+  canWrite,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
+  canWrite: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -657,15 +674,25 @@ function CaseStatusField({
     }
   };
 
+  const label = CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus;
+
+  if (!canWrite) {
+    return (
+      <div>
+        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+          案件ステータス
+        </dt>
+        <dd className="text-sm text-gray-900">{label}</dd>
+      </div>
+    );
+  }
+
   // deprecated 値を持つ既存レコードでも選択肢に表示する
   const options = CASE_STATUS_OPTIONS.some((o) => o.value === property.caseStatus)
     ? CASE_STATUS_OPTIONS
     : [
         ...CASE_STATUS_OPTIONS,
-        {
-          value: property.caseStatus,
-          label: CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus,
-        },
+        { value: property.caseStatus, label },
       ];
 
   return (

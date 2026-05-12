@@ -16,7 +16,7 @@ import {
   PROPERTY_TYPE_VALUES,
   PROPERTY_TYPE_JP_TO_VALUE,
   CASE_STATUS_VALUES,
-  CASE_STATUS_JP_TO_VALUE,
+  normalizeCaseStatusInput,
 } from "@/lib/property-types";
 import {
   buildDedupeIndex,
@@ -36,7 +36,6 @@ import {
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
 const VALID_DM_STATUS = ["send", "hold", "no_send"];
-const VALID_CASE_STATUS: readonly string[] = CASE_STATUS_VALUES;
 const VALID_OCCUPANCY_STATUS = ["vacant", "occupied", "unknown"];
 
 /** Map Japanese target field names to property field names. */
@@ -395,10 +394,10 @@ export async function POST(request: NextRequest) {
           delete mapped.dmStatus;
         }
         if (mapped.caseStatus) {
-          const jpMapped = CASE_STATUS_JP_TO_VALUE[mapped.caseStatus];
-          if (jpMapped) {
-            mapped.caseStatus = jpMapped;
-          } else if (!VALID_CASE_STATUS.includes(mapped.caseStatus)) {
+          const normalized = normalizeCaseStatusInput(mapped.caseStatus);
+          if (normalized) {
+            mapped.caseStatus = normalized;
+          } else {
             delete mapped.caseStatus;
           }
         }
