@@ -286,6 +286,62 @@ describe("normalizeIntroductionRouteInput — 既存エイリアス互換", () =
   it("Web問合 → web_inquiry", () => expect(normalizeIntroductionRouteInput("Web問合")).toBe("web_inquiry"));
 });
 
+// ── 8. resolvePropertyField 相当ロジック — 英語エイリアス ─────────────────────
+// row/retry route の JAPANESE_FIELD_MAP + directFields と同等のロジックを
+// 純粋関数として再現してテストする（ファイルローカル関数なので直接 import 不可）。
+
+describe("resolvePropertyField 相当 — introductionRoute 英語エイリアス", () => {
+  const JAPANESE_FIELD_MAP: Record<string, string> = {
+    "導入ルート": "introductionRoute",
+    "流入経路": "introductionRoute",
+    "獲得経路": "introductionRoute",
+    "introduction_route": "introductionRoute",
+    "acquisitionRoute": "introductionRoute",
+    "acquisition_route": "introductionRoute",
+    "leadSource": "introductionRoute",
+    "lead_source": "introductionRoute",
+  };
+  const directFields = new Set([
+    "address", "lotNumber", "buildingNumber", "realEstateNumber",
+    "propertyType", "registryStatus", "dmStatus", "caseStatus",
+    "introductionRoute", "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
+    "note", "externalLinkKey",
+  ]);
+  function resolvePropertyField(key: string): string | undefined {
+    if (directFields.has(key)) return key;
+    return JAPANESE_FIELD_MAP[key];
+  }
+
+  it.each([
+    "introduction_route",
+    "acquisitionRoute",
+    "acquisition_route",
+    "leadSource",
+    "lead_source",
+  ])("英語alias %s → introductionRoute", (alias) => {
+    expect(resolvePropertyField(alias)).toBe("introductionRoute");
+  });
+
+  it.each(["導入ルート", "流入経路", "獲得経路"])(
+    "日本語alias %s → introductionRoute",
+    (alias) => {
+      expect(resolvePropertyField(alias)).toBe("introductionRoute");
+    },
+  );
+
+  it("introductionRoute (direct) → introductionRoute", () => {
+    expect(resolvePropertyField("introductionRoute")).toBe("introductionRoute");
+  });
+
+  it("source 単独は introductionRoute にならない", () => {
+    expect(resolvePropertyField("source")).toBeUndefined();
+  });
+
+  it("route 単独は introductionRoute にならない", () => {
+    expect(resolvePropertyField("route")).toBeUndefined();
+  });
+});
+
 // ── 7. migration ファイルの確認 ───────────────────────────────────────────────
 
 import * as fs from "fs";
