@@ -3,12 +3,13 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   handleApiError,
   apiResponse,
   ApiError,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, maskValue } from "@/lib/permissions";
 import {
   propertyListQuerySchema,
   createPropertySchema,
@@ -28,6 +29,11 @@ export async function GET(request: NextRequest) {
         "FORBIDDEN",
       );
     }
+
+    const hasOwnerRead = hasPermission(permissions, "owner", "read");
+    const ownerDisplayConfig = hasOwnerRead
+      ? await getOwnerDisplayConfig(session.id)
+      : null;
 
     const { searchParams } = new URL(request.url);
     const queryObj: Record<string, string> = {};
@@ -81,12 +87,13 @@ export async function GET(request: NextRequest) {
       if (updatedTo) where.updatedAt.lte = new Date(updatedTo);
     }
 
-    // For field_staff, only show assigned or self-created properties
+    // field_staff は自分が作成/担当する物件のみ閲覧可能。
+    // where.OR (keyword 条件) と混ぜると「担当外でも keyword に一致すれば返る」に
+    // なるため AND に追加してスコープを強制する。
     if (session.role === "field_staff") {
-      where.OR = [
-        { createdBy: session.id },
-        { assignedTo: session.id },
-        ...(where.OR || []),
+      where.AND = [
+        ...(where.AND ?? []),
+        { OR: [{ createdBy: session.id }, { assignedTo: session.id }] },
       ];
     }
 
@@ -131,6 +138,10 @@ export async function GET(request: NextRequest) {
           gpsLng: true,
           investigationConfirmedAt: true,
           assignee: { select: { id: true, name: true } },
+          propertyOwners: {
+            select: { owner: { select: { name: true } } },
+            orderBy: { createdAt: "asc" },
+          },
         },
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
@@ -167,10 +178,18 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const data = properties.map((p) => ({
-      ...p,
-      importSource: importSourceMap.get(p.id) ?? null,
-    }));
+    const data = properties.map((p) => {
+      const { propertyOwners, ...property } = p;
+      return {
+        ...property,
+        importSource: importSourceMap.get(p.id) ?? null,
+        ownerNames: hasOwnerRead && ownerDisplayConfig
+          ? propertyOwners
+              .map(({ owner }) => maskValue(owner.name, ownerDisplayConfig.name))
+              .filter((n): n is string => n !== null)
+          : [],
+      };
+    });
 
     // Record audit log for list view
     await writeAuditLog({

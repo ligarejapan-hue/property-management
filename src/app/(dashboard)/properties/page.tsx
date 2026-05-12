@@ -62,6 +62,7 @@ interface ApiProperty {
   assignedTo: string | null;
   assignee: { id: string; name: string } | null;
   importSource?: string | null;
+  ownerNames?: string[];
 }
 
 interface SuggestResult {
@@ -800,16 +801,13 @@ function PropertiesPageInner() {
                   種別
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                  所有者
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
                   住所
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
                   地番
-                </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
-                  管理ID
-                </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
-                  不動産番号
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
                   登記状況
@@ -856,6 +854,11 @@ function PropertiesPageInner() {
                         property.propertyType}
                     </Link>
                   </td>
+                  <td className="px-4 py-3 text-sm text-gray-700">
+                    {(property.ownerNames ?? []).length > 0
+                      ? (property.ownerNames ?? []).join("、")
+                      : "—"}
+                  </td>
                   <td className="px-4 py-3">
                     {warning && (
                       <span
@@ -882,12 +885,6 @@ function PropertiesPageInner() {
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     {property.lotNumber ?? "-"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-500">
-                    {property.importSource ?? "—"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
-                    {property.realEstateNumber ?? "-"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span
