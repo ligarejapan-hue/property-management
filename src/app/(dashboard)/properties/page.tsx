@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw } from "lucide-react";
-import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers } from "@/lib/api-client";
+import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
 import NewPropertyModal from "@/components/properties/new-property-modal";
 
 // ---------- Label maps ----------
@@ -64,6 +64,19 @@ interface ApiProperty {
   importSource?: string | null;
 }
 
+interface SuggestResult {
+  id: string;
+  address: string;
+  dmStatus: string;
+  importSource: string | null;
+  owners: Array<{
+    name: string | null;
+    address: string | null;
+    phone: string | null;
+    zip: string | null;
+  }>;
+}
+
 interface Pagination {
   page: number;
   limit: number;
@@ -99,8 +112,13 @@ function PropertiesPageInner() {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Filters — URL から初期化することでブックマーク・更新・共有が可能
+  // Filters — URL から初期化することでブックマーク・更新・共有が可能。
+  // searchText: 一覧検索語（/api/properties keyword・URL query に流す）。URL keyword から復元する。
+  // searchInput: 候補検索専用の入力中文字列（/api/properties/suggest のみに送る）。
+  //   URL keyword は /api/properties 用の確定語なので searchInput には入れない。
+  //   入力中の所有者名・電話番号が property_list audit の raw keyword に残らないよう分離する。
   const [searchText, setSearchText] = useState(() => sp.get("keyword") ?? "");
+  const [searchInput, setSearchInput] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
   const [dmFilter, setDmFilter] = useState(() => sp.get("dmStatus") ?? "");
@@ -115,6 +133,13 @@ function PropertiesPageInner() {
 
   // 担当者プルダウン用ユーザー一覧
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+
+  // 入力中候補表示
+  const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 最後に発行した suggest query を記録する。in-flight の古いレスポンスを弾くために使う。
+  const suggestQueryRef = useRef<string>("");
 
   // 警告 (quality-check) を propertyId 単位で集計。
   // 既存の /api/properties/quality-check を流用するので新 API は追加しない。
@@ -241,6 +266,38 @@ function PropertiesPageInner() {
     };
   }, []);
 
+  // 入力中候補: searchInput に 300ms debounce をかけて suggest API を呼ぶ。
+  // searchInput は確定検索（/api/properties keyword）には流れないため、
+  // 入力中の Owner PII が property_list audit に残らない。
+  // stale 対策: レスポンス反映前に query が最新と一致するか確認する。
+  // debounce 後に複数リクエストが in-flight になった場合、古いレスポンスで
+  // dropdown を上書きしないようにする。
+  useEffect(() => {
+    if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
+    suggestQueryRef.current = searchInput;
+    if (searchInput.length < 2) {
+      setSuggestResults([]);
+      setSuggestOpen(false);
+      return;
+    }
+    const query = searchInput;
+    suggestTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetchPropertySuggestions(query);
+        if (query !== suggestQueryRef.current) return;
+        setSuggestResults(res.data);
+        setSuggestOpen(res.data.length > 0);
+      } catch {
+        if (query !== suggestQueryRef.current) return;
+        setSuggestResults([]);
+        setSuggestOpen(false);
+      }
+    }, 300);
+    return () => {
+      if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
+    };
+  }, [searchInput]);
+
   // Debounce search: reset page on filter change
   const handleFilterChange = (setter: (v: string) => void) => (
     e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>,
@@ -251,6 +308,9 @@ function PropertiesPageInner() {
 
   // 全フィルタを一括リセット（並び順は既定に戻し、page=1）
   const handleResetFilters = () => {
+    setSuggestOpen(false);
+    setSuggestResults([]);
+    setSearchInput("");
     setSearchText("");
     setTypeFilter("");
     setRegistryFilter("");
@@ -266,7 +326,7 @@ function PropertiesPageInner() {
 
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
-    !!searchText || !!typeFilter || !!registryFilter || !!dmFilter ||
+    !!searchInput || !!searchText || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || sort !== "updatedAt:desc";
 
@@ -443,15 +503,73 @@ function PropertiesPageInner() {
           <option value="hold">未判断</option>
         </select>
 
-        <div className="relative flex-1 min-w-[200px]">
+        <div className="relative min-w-[220px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="物件住所・地番・不動産番号で検索"
+            placeholder="物件住所・地番・家屋番号で一覧検索"
             value={searchText}
             onChange={handleFilterChange(setSearchText)}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
           />
+        </div>
+
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="所有者名・電話番号で候補を選択して物件を開く"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (suggestOpen && suggestResults.length > 0) {
+                  setSuggestOpen(false);
+                  router.push(`/properties/${suggestResults[0].id}`);
+                } else {
+                  setSuggestOpen(false);
+                }
+              }
+            }}
+            onBlur={() => setSuggestOpen(false)}
+            onFocus={() => { if (suggestResults.length > 0) setSuggestOpen(true); }}
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          />
+          {suggestOpen && suggestResults.length > 0 && (
+            <ul className="absolute left-0 top-full z-50 mt-1 w-full min-w-[320px] rounded-md border border-gray-200 bg-white shadow-lg">
+              {suggestResults.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setSuggestOpen(false);
+                      router.push(`/properties/${item.id}`);
+                    }}
+                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-blue-50"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 font-medium text-gray-800 truncate">{item.address}</span>
+                      <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${dmStatusStyles[item.dmStatus] ?? "bg-gray-100 text-gray-600"}`}>
+                        {DM_STATUS_LABELS[item.dmStatus] ?? item.dmStatus}
+                      </span>
+                    </div>
+                    {item.importSource && (
+                      <span className="font-mono text-[11px] text-gray-400">{item.importSource}</span>
+                    )}
+                    {item.owners.filter((o) => o.name || o.phone || o.address).map((o, i) => (
+                      <div key={i} className="flex flex-wrap gap-x-2 text-[11px] text-gray-500">
+                        {o.name && <span>{o.name}</span>}
+                        {o.phone && <span>{o.phone}</span>}
+                        {o.address && <span className="truncate">{o.address}</span>}
+                      </div>
+                    ))}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <label className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
