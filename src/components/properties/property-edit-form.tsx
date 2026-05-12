@@ -14,7 +14,6 @@ interface PropertyData {
   realEstateNumber: string | null;
   registryStatus: string;
   dmStatus: string;
-  caseStatus: string;
   gpsLat: number | null;
   gpsLng: number | null;
   zoningDistrict: string | null;
@@ -67,15 +66,6 @@ const FORM_FIELDS: FormField[] = [
     { value: "send", label: "送付可" },
     { value: "hold", label: "未判断" },
     { value: "no_send", label: "送付不可" },
-  ]},
-  { key: "caseStatus", label: "案件ステータス", type: "select", section: "基本", options: [
-    { value: "new_case", label: "新規" },
-    { value: "site_checked", label: "現地確認済" },
-    { value: "waiting_registry", label: "登記待ち" },
-    { value: "dm_target", label: "DM対象" },
-    { value: "dm_sent", label: "DM送付済" },
-    { value: "hold", label: "保留" },
-    { value: "done", label: "完了" },
   ]},
   { key: "gpsLat", label: "緯度", type: "number", section: "基本" },
   { key: "gpsLng", label: "経度", type: "number", section: "基本" },

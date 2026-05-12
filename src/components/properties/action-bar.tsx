@@ -6,7 +6,6 @@ import {
   Send,
   Ban,
   Pause,
-  ChevronRight,
   FileCheck,
   UserCheck,
   Loader2,
@@ -17,7 +16,6 @@ interface ActionBarProps {
   propertyId: string;
   registryStatus: string;
   dmStatus: string;
-  caseStatus: string;
   investigationConfirmedAt: string | null;
   onActionComplete: () => void;
 }
@@ -66,13 +64,6 @@ const ACTIONS: ActionConfig[] = [
     icon: Pause,
     color: "bg-amber-600 hover:bg-amber-700",
     condition: (p) => p.dmStatus !== "hold",
-  },
-  {
-    key: "advance_case_status",
-    label: "ステータス進行",
-    icon: ChevronRight,
-    color: "bg-teal-600 hover:bg-teal-700",
-    condition: (p) => p.caseStatus !== "done",
   },
   {
     key: "assign_to_me",

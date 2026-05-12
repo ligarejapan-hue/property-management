@@ -24,7 +24,11 @@ import { fetchPropertyDetail, deleteProperty, updatePropertyOwner } from "@/lib/
 
 // ---------- Label maps ----------
 
-import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
+import {
+  PROPERTY_TYPE_LABELS,
+  CASE_STATUS_LABELS,
+  CASE_STATUS_OPTIONS,
+} from "@/lib/property-types";
 
 const REGISTRY_STATUS_LABELS: Record<string, string> = {
   unconfirmed: "未取得",
@@ -36,16 +40,6 @@ const DM_STATUS_LABELS: Record<string, string> = {
   send: "送付可",
   hold: "未判断",
   no_send: "送付不可",
-};
-
-const CASE_STATUS_LABELS: Record<string, string> = {
-  new_case: "新規",
-  site_checked: "現地確認済",
-  waiting_registry: "登記待ち",
-  dm_target: "DM対象",
-  dm_sent: "DM送付済",
-  hold: "保留",
-  done: "完了",
 };
 
 const registryBadgeStyles: Record<string, string> = {
@@ -184,6 +178,7 @@ export default function PropertyDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [canWriteProperty, setCanWriteProperty] = useState(false);
 
   const handleDelete = async () => {
     if (!property) return;
@@ -220,6 +215,18 @@ export default function PropertyDetailPage({
   useEffect(() => {
     fetchProperty();
   }, [fetchProperty]);
+
+  useEffect(() => {
+    fetch("/api/me/permissions")
+      .then((r) => r.json())
+      .then((json: { permissions?: { resource: string; action: string; granted: boolean }[] }) => {
+        const perms = json.permissions ?? [];
+        setCanWriteProperty(
+          perms.some((p) => p.resource === "property" && p.action === "write" && p.granted),
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   if (loading) {
     return (
@@ -291,7 +298,6 @@ export default function PropertyDetailPage({
         propertyId={property.id}
         registryStatus={property.registryStatus}
         dmStatus={property.dmStatus}
-        caseStatus={property.caseStatus}
         investigationConfirmedAt={property.investigationConfirmedAt}
         onActionComplete={fetchProperty}
       />
@@ -332,7 +338,7 @@ export default function PropertyDetailPage({
 
       {/* Tab content */}
       <div className="rounded-lg border border-gray-200 bg-white p-6">
-        {activeTab === "basic" && <BasicTab property={property} />}
+        {activeTab === "basic" && <BasicTab property={property} onRefresh={fetchProperty} canWrite={canWriteProperty} />}
         {activeTab === "owner" && (
           <OwnerTab owners={property.propertyOwners} />
         )}
@@ -371,7 +377,15 @@ export default function PropertyDetailPage({
 
 // ---------- Basic info tab ----------
 
-function BasicTab({ property }: { property: ApiProperty }) {
+function BasicTab({
+  property,
+  onRefresh,
+  canWrite,
+}: {
+  property: ApiProperty;
+  onRefresh: () => void;
+  canWrite: boolean;
+}) {
   // 旧値 "unit" と新値 "apartment_unit" の両方を区分扱いにする
   const isUnit =
     property.propertyType === "apartment_unit" ||
@@ -457,10 +471,7 @@ function BasicTab({ property }: { property: ApiProperty }) {
         badgeStyle={dmBadgeStyles[property.dmStatus]}
         badgeLabel={DM_STATUS_LABELS[property.dmStatus]}
       />
-      <Field
-        label="案件ステータス"
-        value={CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus}
-      />
+      <CaseStatusField property={property} onRefresh={onRefresh} canWrite={canWrite} />
       <Field label="担当者" value={property.assignee?.name ?? null} />
       <Field label="登録者" value={property.creator?.name ?? null} />
       <Field
@@ -624,6 +635,87 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
           <span className="text-xs text-green-600">保存しました</span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------- Case status inline dropdown ----------
+
+function CaseStatusField({
+  property,
+  onRefresh,
+  canWrite,
+}: {
+  property: ApiProperty;
+  onRefresh: () => void;
+  canWrite: boolean;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = async (value: string) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/properties/${property.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseStatus: value, version: property.version }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error?.message ?? `エラー: ${res.status}`);
+      }
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存に失敗しました");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const label = CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus;
+
+  if (!canWrite) {
+    return (
+      <div>
+        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+          案件ステータス
+        </dt>
+        <dd className="text-sm text-gray-900">{label}</dd>
+      </div>
+    );
+  }
+
+  // deprecated 値を持つ既存レコードでも選択肢に表示する
+  const options = CASE_STATUS_OPTIONS.some((o) => o.value === property.caseStatus)
+    ? CASE_STATUS_OPTIONS
+    : [
+        ...CASE_STATUS_OPTIONS,
+        { value: property.caseStatus, label },
+      ];
+
+  return (
+    <div>
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+        案件ステータス
+      </dt>
+      <dd>
+        <select
+          value={property.caseStatus}
+          onChange={(e) => handleChange(e.target.value)}
+          disabled={saving}
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {saving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-gray-400" />}
+        {error && <span className="ml-2 text-xs text-red-600">{error}</span>}
+      </dd>
     </div>
   );
 }

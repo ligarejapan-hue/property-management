@@ -28,7 +28,6 @@ const actionSchema = z.object({
     "set_dm_send",
     "set_dm_no_send",
     "set_dm_hold",
-    "advance_case_status",
     "mark_registry_obtained",
     "assign_to_me",
   ]),
@@ -43,16 +42,6 @@ interface ActionDef {
     note?: string;
   }) => Promise<{ updatedFields: Record<string, unknown>; message: string }>;
 }
-
-const CASE_STATUS_ORDER = [
-  "new_case",
-  "site_checked",
-  "waiting_registry",
-  "dm_target",
-  "dm_sent",
-  "hold",
-  "done",
-];
 
 const ACTIONS: Record<string, ActionDef> = {
   confirm_investigation: {
@@ -87,28 +76,6 @@ const ACTIONS: Record<string, ActionDef> = {
       updatedFields: { dmStatus: "hold" },
       message: "DM未判断に設定しました",
     }),
-  },
-
-  advance_case_status: {
-    requiredPermission: { resource: "property", action: "write" },
-    execute: async ({ propertyId }) => {
-      const property = await prisma.property.findUnique({
-        where: { id: propertyId },
-        select: { caseStatus: true },
-      });
-      if (!property) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
-
-      const idx = CASE_STATUS_ORDER.indexOf(property.caseStatus);
-      if (idx >= CASE_STATUS_ORDER.length - 1) {
-        throw new ApiError(422, "これ以上ステータスを進められません", "VALIDATION_ERROR");
-      }
-      const nextStatus = CASE_STATUS_ORDER[idx + 1];
-
-      return {
-        updatedFields: { caseStatus: nextStatus },
-        message: `案件ステータスを「${nextStatus}」に進めました`,
-      };
-    },
   },
 
   mark_registry_obtained: {

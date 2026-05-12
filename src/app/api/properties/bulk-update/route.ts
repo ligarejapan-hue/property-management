@@ -11,6 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
+import { CASE_STATUS_VALUES } from "@/lib/property-types";
 
 const bulkUpdateSchema = z.object({
   propertyIds: z
@@ -18,17 +19,7 @@ const bulkUpdateSchema = z.object({
     .min(1, "物件IDを1つ以上指定してください")
     .max(100, "一度に更新できるのは100件までです"),
   updates: z.object({
-    caseStatus: z
-      .enum([
-        "new_case",
-        "site_checked",
-        "waiting_registry",
-        "dm_target",
-        "dm_sent",
-        "hold",
-        "done",
-      ])
-      .optional(),
+    caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
     registryStatus: z
       .enum(["unconfirmed", "scheduled", "obtained"])
       .optional(),

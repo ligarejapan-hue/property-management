@@ -78,6 +78,109 @@ export const PROPERTY_TYPE_OPTIONS: { value: string; label: string }[] = [
 // active な enum 値にだけ寄せる。「建物」は単独だと apartment_unit/building/house の
 // 区別がつかないので "unknown" にフォールバックして人手判断に委ねる。
 
+// ════════════════════════════════════════════════════════════════════════════
+// 案件状況 (CaseStatus)
+// ════════════════════════════════════════════════════════════════════════════
+
+// アクティブな16値。deprecated (waiting_registry / done) はここに含めない。
+export const CASE_STATUS_VALUES = [
+  "new_case",
+  "contacting_owner",
+  "owner_contacted",
+  "site_checked",
+  "confirming_owner",
+  "dm_target",
+  "dm_sent",
+  "response_received",
+  "appraisal",
+  "negotiating",
+  "brokerage_obtained",
+  "on_sale",
+  "hold",
+  "other_brokerage",
+  "sold",
+  "closed",
+] as const;
+
+export type CaseStatusValue = (typeof CASE_STATUS_VALUES)[number];
+
+export const CASE_STATUS_LABELS: Record<string, string> = {
+  new_case:           "新規",
+  contacting_owner:   "所有者連絡中",
+  owner_contacted:    "所有者連絡済",
+  site_checked:       "現地確認済",
+  confirming_owner:   "所有者確認中",
+  dm_target:          "DM対象",
+  dm_sent:            "DM送付済",
+  response_received:  "反響あり",
+  appraisal:          "査定中",
+  negotiating:        "商談中",
+  brokerage_obtained: "媒介取得済",
+  on_sale:            "販売中",
+  hold:               "保留",
+  other_brokerage:    "他社媒介",
+  sold:               "売却完了",
+  closed:             "終了",
+  // deprecated — 既存データ表示のみ
+  waiting_registry:   "登記待ち（旧）",
+  done:               "完了（旧）",
+};
+
+export const CASE_STATUS_OPTIONS: { value: string; label: string }[] = CASE_STATUS_VALUES.map(
+  (v) => ({ value: v, label: CASE_STATUS_LABELS[v] }),
+);
+
+export const CASE_STATUS_JP_TO_VALUE: Record<string, string> = {
+  "新規":         "new_case",
+  "所有者連絡中": "contacting_owner",
+  "所有者連絡済": "owner_contacted",
+  "現地確認済":   "site_checked",
+  "所有者確認中": "confirming_owner",
+  "DM対象":       "dm_target",
+  "DM送付済":     "dm_sent",
+  "反響あり":     "response_received",
+  "査定中":       "appraisal",
+  "商談中":       "negotiating",
+  "媒介取得済":   "brokerage_obtained",
+  "販売中":       "on_sale",
+  "保留":         "hold",
+  "他社媒介":     "other_brokerage",
+  "売却完了":     "sold",
+  "終了":         "closed",
+  // 旧ラベル → 新値（deprecated 値を DB に新規投入しないための正規化）
+  "登記待ち":     "confirming_owner",
+  "謄本待ち":     "confirming_owner",
+  "完了":         "closed",
+};
+
+// deprecated 旧 enum 値 → 新値
+const CASE_STATUS_DEPRECATED_MAP: Record<string, CaseStatusValue> = {
+  waiting_registry: "confirming_owner",
+  done:             "closed",
+};
+
+const CASE_STATUS_VALUE_SET = new Set<string>(CASE_STATUS_VALUES);
+
+/**
+ * CSV・API 入力値（日本語ラベル / 旧 enum 値 / 新 enum 値）を
+ * アクティブな CaseStatusValue に正規化する。
+ * 不明な値は null を返す（呼び出し側で new_case フォールバックまたは除去）。
+ */
+export function normalizeCaseStatusInput(value: unknown): CaseStatusValue | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const v = value.trim();
+  // already a valid active value
+  if (CASE_STATUS_VALUE_SET.has(v)) return v as CaseStatusValue;
+  // deprecated enum value → new value
+  if (CASE_STATUS_DEPRECATED_MAP[v]) return CASE_STATUS_DEPRECATED_MAP[v];
+  // Japanese label → new value
+  const fromJp = CASE_STATUS_JP_TO_VALUE[v];
+  if (fromJp && CASE_STATUS_VALUE_SET.has(fromJp)) return fromJp as CaseStatusValue;
+  return null;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+
 export const PROPERTY_TYPE_JP_TO_VALUE: Record<string, string> = {
   "土地":         "land",
   "戸建":         "house",
