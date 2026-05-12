@@ -9,7 +9,12 @@ import NewPropertyModal from "@/components/properties/new-property-modal";
 
 // ---------- Label maps ----------
 
-import { PROPERTY_TYPE_LABELS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import {
+  PROPERTY_TYPE_LABELS,
+  PROPERTY_TYPE_OPTIONS,
+  CASE_STATUS_LABELS,
+  CASE_STATUS_OPTIONS,
+} from "@/lib/property-types";
 
 const REGISTRY_STATUS_LABELS: Record<string, string> = {
   unconfirmed: "未取得",
@@ -21,16 +26,6 @@ const DM_STATUS_LABELS: Record<string, string> = {
   send: "送付可",
   hold: "未判断",
   no_send: "送付不可",
-};
-
-const CASE_STATUS_LABELS: Record<string, string> = {
-  new_case: "新規",
-  site_checked: "現地確認済",
-  waiting_registry: "登記待ち",
-  dm_target: "DM対象",
-  dm_sent: "DM送付済",
-  hold: "保留",
-  done: "完了",
 };
 
 const registryStatusStyles: Record<string, string> = {
@@ -598,7 +593,7 @@ function PropertiesPageInner() {
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
         >
           <option value="">案件ステータス: すべて</option>
-          {Object.entries(CASE_STATUS_LABELS).map(([v, label]) => (
+          {CASE_STATUS_OPTIONS.map(({ value: v, label }) => (
             <option key={v} value={v}>
               {label}
             </option>
@@ -695,13 +690,9 @@ function PropertiesPageInner() {
             className="rounded-md border border-gray-300 px-2 py-1 text-xs"
           >
             <option value="">案件ステータス変更...</option>
-            <option value="new_case">新規</option>
-            <option value="site_checked">現地確認済</option>
-            <option value="waiting_registry">登記待ち</option>
-            <option value="dm_target">DM対象</option>
-            <option value="dm_sent">DM送付済</option>
-            <option value="hold">保留</option>
-            <option value="done">完了</option>
+            {CASE_STATUS_OPTIONS.map(({ value: v, label }) => (
+              <option key={v} value={v}>{label}</option>
+            ))}
           </select>
           <select
             disabled={bulkUpdating}

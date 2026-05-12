@@ -24,6 +24,7 @@ import {
   createBuildingUnit,
 } from "@/lib/api-client";
 import BuildingPhotoTab from "@/components/buildings/building-photo-tab";
+import { CASE_STATUS_LABELS as CASE_LABELS } from "@/lib/property-types";
 
 // ---------- Types ----------
 
@@ -63,16 +64,6 @@ interface UnitProperty {
     owner: { id: string; name: string };
   }>;
 }
-
-const CASE_LABELS: Record<string, string> = {
-  new_case: "新規",
-  site_checked: "現地確認済",
-  waiting_registry: "登記待ち",
-  dm_target: "DM対象",
-  dm_sent: "DM送付済",
-  hold: "保留",
-  done: "完了",
-};
 
 const OCCUPANCY_LABELS: Record<string, string> = {
   vacant: "空室",

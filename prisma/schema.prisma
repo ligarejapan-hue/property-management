@@ -61,11 +61,23 @@ enum DmStatus {
 
 enum CaseStatus {
   new_case
+  contacting_owner
+  owner_contacted
   site_checked
-  waiting_registry
+  confirming_owner
   dm_target
   dm_sent
+  response_received
+  appraisal
+  negotiating
+  brokerage_obtained
+  on_sale
   hold
+  other_brokerage
+  sold
+  closed
+  // deprecated — DB のみ保持、新規設定不可
+  waiting_registry
   done
 }
 
