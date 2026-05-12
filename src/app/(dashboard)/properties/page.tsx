@@ -506,15 +506,18 @@ function PropertiesPageInner() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="住所・地番・所有者名・電話番号で検索（Enterで確定）"
+            placeholder="住所・所有者名・電話番号で候補表示"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                setSuggestOpen(false);
-                setSearchText(searchInput.trim());
-                setPage(1);
+                if (suggestOpen && suggestResults.length > 0) {
+                  setSuggestOpen(false);
+                  router.push(`/properties/${suggestResults[0].id}`);
+                } else {
+                  setSuggestOpen(false);
+                }
               }
             }}
             onBlur={() => setSuggestOpen(false)}
