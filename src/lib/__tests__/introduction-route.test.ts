@@ -181,7 +181,81 @@ describe("buildPropertyCreateData — introductionRoute 正規化（純粋関数
   });
 });
 
-// ── 4. migration ファイルの確認 ───────────────────────────────────────────────
+// ── 4. UPDATABLE_PROPERTY_FIELDS / PROPERTY_TRACKED_FIELDS ───────────────────
+
+import { UPDATABLE_PROPERTY_FIELDS } from "../import-dedupe";
+import { PROPERTY_TRACKED_FIELDS } from "../change-log";
+
+describe("UPDATABLE_PROPERTY_FIELDS", () => {
+  it("introductionRoute が含まれる", () => {
+    expect(UPDATABLE_PROPERTY_FIELDS).toContain("introductionRoute");
+  });
+});
+
+describe("PROPERTY_TRACKED_FIELDS", () => {
+  it("introductionRoute が含まれる", () => {
+    expect(PROPERTY_TRACKED_FIELDS).toContain("introductionRoute");
+  });
+});
+
+// ── 5. CSV 既存物件更新パス — introductionRoute の純粋関数テスト ─────────────
+
+describe("CSV 既存物件更新パス — introductionRoute", () => {
+  /**
+   * csv/route.ts の更新データ構築ロジックを再現する純粋関数。
+   * numericFields / intFields / trimFields に入らない文字列フィールドは raw 値をそのまま入れる。
+   */
+  function buildUpdateData(mapped: Record<string, string>): Record<string, unknown> {
+    const numericFields = new Set(["rosenkaValue", "gpsLat", "gpsLng", "exclusiveArea", "balconyArea"]);
+    const intFields = new Set(["floorNo", "managementFee", "repairReserveFee"]);
+    const trimFields = new Set(["layoutType", "orientation"]);
+    const updateData: Record<string, unknown> = {};
+    for (const field of UPDATABLE_PROPERTY_FIELDS) {
+      const raw = mapped[field];
+      if (raw === undefined || raw === null || raw === "") continue;
+      if (numericFields.has(field)) {
+        const n = parseFloat(raw);
+        if (!Number.isNaN(n)) updateData[field] = n;
+      } else if (intFields.has(field)) {
+        const n = parseInt(raw);
+        if (!Number.isNaN(n)) updateData[field] = n;
+      } else if (trimFields.has(field)) {
+        const v = raw.trim();
+        if (v) updateData[field] = v;
+      } else {
+        updateData[field] = raw;
+      }
+    }
+    return updateData;
+  }
+
+  it("正規化済み値 reception_csv は updateData に入る", () => {
+    const mapped = { address: "東京都千代田区1-1", introductionRoute: "reception_csv" };
+    const updateData = buildUpdateData(mapped);
+    expect(updateData.introductionRoute).toBe("reception_csv");
+  });
+
+  it("正規化済み値 dm_response は updateData に入る", () => {
+    const mapped = { address: "東京都千代田区1-1", introductionRoute: "dm_response" };
+    const updateData = buildUpdateData(mapped);
+    expect(updateData.introductionRoute).toBe("dm_response");
+  });
+
+  it("normalize 後に削除された不明値は mapped にないので updateData に入らない", () => {
+    // csv/route.ts の正規化ブロックで delete mapped.introductionRoute される相当
+    const mapped = { address: "東京都千代田区1-1" }; // introductionRoute absent
+    const updateData = buildUpdateData(mapped);
+    expect(updateData).not.toHaveProperty("introductionRoute");
+  });
+
+  it("空文字は updateData に入らない", () => {
+    const mapped = { address: "東京都千代田区1-1", introductionRoute: "" };
+    const updateData = buildUpdateData(mapped);
+    expect(updateData).not.toHaveProperty("introductionRoute");
+  });
+});
+
+// ── 7. migration ファイルの確認 ───────────────────────────────────────────────
 
 import * as fs from "fs";
 import * as path from "path";
