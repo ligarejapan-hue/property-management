@@ -14,6 +14,8 @@ import {
   PROPERTY_TYPE_OPTIONS,
   CASE_STATUS_LABELS,
   CASE_STATUS_OPTIONS,
+  INTRODUCTION_ROUTE_LABELS,
+  INTRODUCTION_ROUTE_OPTIONS,
 } from "@/lib/property-types";
 
 const REGISTRY_STATUS_LABELS: Record<string, string> = {
@@ -52,6 +54,7 @@ interface ApiProperty {
   registryStatus: string;
   dmStatus: string;
   caseStatus: string;
+  introductionRoute?: string | null;
   isArchived: boolean;
   updatedAt: string;
   assignedTo: string | null;
@@ -119,6 +122,7 @@ function PropertiesPageInner() {
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
   const [dmFilter, setDmFilter] = useState(() => sp.get("dmStatus") ?? "");
   const [caseFilter, setCaseFilter] = useState(() => sp.get("caseStatus") ?? "");
+  const [introductionRouteFilter, setIntroductionRouteFilter] = useState(() => sp.get("introductionRoute") ?? "");
   const [assigneeFilter, setAssigneeFilter] = useState(() => sp.get("assignedTo") ?? "");
   const [updatedFromFilter, setUpdatedFromFilter] = useState(() => sp.get("updatedFrom") ?? "");
   const [updatedToFilter, setUpdatedToFilter] = useState(() => sp.get("updatedTo") ?? "");
@@ -167,6 +171,7 @@ function PropertiesPageInner() {
     if (registryFilter) params.registryStatus = registryFilter;
     if (dmFilter) params.dmStatus = dmFilter;
     if (caseFilter) params.caseStatus = caseFilter;
+    if (introductionRouteFilter) params.introductionRoute = introductionRouteFilter;
     if (assigneeFilter) params.assignedTo = assigneeFilter;
     if (updatedFromFilter) params.updatedFrom = updatedFromFilter;
     if (updatedToFilter) params.updatedTo = updatedToFilter;
@@ -185,7 +190,7 @@ function PropertiesPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchText, typeFilter, registryFilter, dmFilter, caseFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
+  }, [page, searchText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
 
   useEffect(() => {
     fetchProperties();
@@ -209,6 +214,7 @@ function PropertiesPageInner() {
     if (registryFilter) params.set("registryStatus", registryFilter);
     if (dmFilter) params.set("dmStatus", dmFilter);
     if (caseFilter) params.set("caseStatus", caseFilter);
+    if (introductionRouteFilter) params.set("introductionRoute", introductionRouteFilter);
     if (assigneeFilter) params.set("assignedTo", assigneeFilter);
     if (updatedFromFilter) params.set("updatedFrom", updatedFromFilter);
     if (updatedToFilter) params.set("updatedTo", updatedToFilter);
@@ -217,7 +223,7 @@ function PropertiesPageInner() {
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchText, typeFilter, registryFilter, dmFilter, caseFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort, page, pathname, router]);
+  }, [searchText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort, page, pathname, router]);
 
   // 警告サマリは初回 / 一覧再取得時に best-effort で更新する。
   // 失敗してもバッジが出ないだけで一覧本体は表示できる設計。
@@ -312,6 +318,7 @@ function PropertiesPageInner() {
     setRegistryFilter("");
     setDmFilter("");
     setCaseFilter("");
+    setIntroductionRouteFilter("");
     setAssigneeFilter("");
     setUpdatedFromFilter("");
     setUpdatedToFilter("");
@@ -323,7 +330,7 @@ function PropertiesPageInner() {
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
     !!searchInput || !!searchText || !!typeFilter || !!registryFilter || !!dmFilter ||
-    !!caseFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
+    !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || sort !== "updatedAt:desc";
 
   const toggleSelect = (id: string) => {
@@ -596,6 +603,19 @@ function PropertiesPageInner() {
           {CASE_STATUS_OPTIONS.map(({ value: v, label }) => (
             <option key={v} value={v}>
               {label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={introductionRouteFilter}
+          onChange={handleFilterChange(setIntroductionRouteFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+        >
+          <option value="">導入ルート: すべて</option>
+          {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
             </option>
           ))}
         </select>

@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
-import { normalizeCaseStatusInput } from "@/lib/property-types";
+import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
 
 /** Map Japanese CSV header names to property model field names. */
 const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -21,6 +21,14 @@ const JAPANESE_FIELD_MAP: Record<string, string> = {
   "登記状況": "registryStatus",
   "DM判断": "dmStatus",
   "案件ステータス": "caseStatus",
+  "導入ルート": "introductionRoute",
+  "流入経路": "introductionRoute",
+  "獲得経路": "introductionRoute",
+  "introduction_route": "introductionRoute",
+  "acquisitionRoute": "introductionRoute",
+  "acquisition_route": "introductionRoute",
+  "leadSource": "introductionRoute",
+  "lead_source": "introductionRoute",
   "用途地域": "zoningDistrict",
   "路線価": "rosenkaValue",
   "緯度": "gpsLat",
@@ -48,7 +56,7 @@ function resolvePropertyField(key: string): string | undefined {
   const directFields = new Set([
     "address", "lotNumber", "buildingNumber", "realEstateNumber",
     "propertyType", "registryStatus", "dmStatus", "caseStatus",
-    "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
+    "introductionRoute", "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
     "note", "externalLinkKey",
   ]);
   if (directFields.has(key)) return key;
@@ -93,6 +101,8 @@ function buildPropertyCreateData(
     caseStatus: normalizeCaseStatusInput(mapped.caseStatus) ?? "new_case",
     createdBy,
   };
+  const normalizedRoute = normalizeIntroductionRouteInput(mapped.introductionRoute);
+  if (normalizedRoute) createData.introductionRoute = normalizedRoute;
   if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;
   if (mapped.buildingNumber) createData.buildingNumber = mapped.buildingNumber;
   if (mapped.realEstateNumber) createData.realEstateNumber = mapped.realEstateNumber;

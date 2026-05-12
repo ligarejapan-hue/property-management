@@ -234,6 +234,7 @@ export async function POST(request: NextRequest) {
               buildingNumber: row.buildingNumber ?? undefined,
               registryStatus: "unconfirmed",
               dmStatus: "hold",
+              introductionRoute: "reception_csv",
               createdBy: session.id,
             },
             select: { id: true },

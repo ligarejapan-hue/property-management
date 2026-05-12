@@ -303,6 +303,7 @@ model Property {
   registryStatus           RegistryStatus    @map("registry_status")
   dmStatus                 DmStatus          @map("dm_status")
   caseStatus               CaseStatus        @default(new_case) @map("case_status")
+  introductionRoute        String?           @map("introduction_route")
   gpsLat                   Decimal?          @map("gps_lat") @db.Decimal(10, 7)
   gpsLng                   Decimal?          @map("gps_lng") @db.Decimal(10, 7)
 
@@ -355,6 +356,7 @@ model Property {
   attachments        Attachment[]
 
   @@index([caseStatus])
+  @@index([introductionRoute])
   @@index([dmStatus])
   @@index([registryStatus])
   @@index([assignedTo])

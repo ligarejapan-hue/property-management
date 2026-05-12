@@ -69,6 +69,7 @@ export const UPDATABLE_PROPERTY_FIELDS = [
   "address",
   "lotNumber",
   "buildingNumber",
+  "introductionRoute",
   "zoningDistrict",
   "rosenkaValue",
   "gpsLat",

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PROPERTY_TYPE_VALUES, CASE_STATUS_VALUES } from "@/lib/property-types";
+import { PROPERTY_TYPE_VALUES, CASE_STATUS_VALUES, INTRODUCTION_ROUTE_VALUES } from "@/lib/property-types";
 
 // ---------- Property list query ----------
 
@@ -11,6 +11,7 @@ export const propertyListQuerySchema = z.object({
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
+  introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional(),
   assignedTo: z.string().uuid().optional(),
   updatedFrom: z.string().optional(),
   updatedTo: z.string().optional(),
@@ -39,6 +40,7 @@ export const createPropertySchema = z.object({
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).default("unconfirmed"),
   dmStatus: z.enum(["send", "hold", "no_send"]).default("hold"),
   caseStatus: z.enum(CASE_STATUS_VALUES).default("new_case"),
+  introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
   gpsLat: z.number().optional().nullable(),
   gpsLng: z.number().optional().nullable(),
   note: z.string().optional().nullable(),
@@ -56,6 +58,7 @@ export const updatePropertySchema = z.object({
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
+  introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
   gpsLat: z.number().optional().nullable(),
   gpsLng: z.number().optional().nullable(),
   zoningDistrict: z.string().optional().nullable(),
