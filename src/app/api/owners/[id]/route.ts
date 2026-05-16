@@ -11,9 +11,8 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { updateOwnerSchema } from "@/lib/validators";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { applyDisplayToOwner } from "@/lib/display-level";
-import type { OwnerDisplayConfig } from "@/lib/display-level";
 
 // ---------------------------------------------------------------------------
 // GET /api/owners/:id
@@ -90,23 +89,20 @@ export async function PATCH(
     const body = await request.json();
     const { version, ...updateFields } = updateOwnerSchema.parse(body);
 
-    // Field-level write permission check: 各 PII フィールドは display-level full/edit が必要。
-    // DB 書き込み前にチェックし、拒否時は AuditLog / ChangeLog に生値を残さない。
-    const displayConfig = await getOwnerDisplayConfig(session.id);
-    const fieldPermChecks: Array<{ requestKey: string; configKey: keyof typeof displayConfig }> = [
-      { requestKey: "name", configKey: "name" },
-      { requestKey: "nameKana", configKey: "nameKana" },
-      { requestKey: "phone", configKey: "phone" },
-      { requestKey: "zip", configKey: "zip" },
-      { requestKey: "address", configKey: "address" },
-      { requestKey: "email", configKey: "email" },
+    // Field-level write permission check: 各フィールドごとに明示的な full/edit 権限を要求する。
+    // getOwnerDisplayConfig の owner_email fallback（表示用）は使わない。
+    // 拒否時は recordChanges / writeAuditLog に到達しないため生値はログに残らない。
+    const fieldWriteChecks: Array<{ requestKey: string; resource: string }> = [
+      { requestKey: "name", resource: "owner_name" },
+      { requestKey: "nameKana", resource: "owner_name_kana" },
+      { requestKey: "phone", resource: "owner_phone" },
+      { requestKey: "zip", resource: "owner_zip" },
+      { requestKey: "address", resource: "owner_address" },
+      { requestKey: "email", resource: "owner_email" },
     ];
-    for (const { requestKey, configKey } of fieldPermChecks) {
-      if (requestKey in updateFields) {
-        const level = displayConfig[configKey];
-        if (level !== "full" && level !== "edit") {
-          throw new ApiError(403, `${requestKey} を更新する権限がありません`, "FORBIDDEN");
-        }
+    for (const { requestKey, resource } of fieldWriteChecks) {
+      if (requestKey in updateFields && !hasExplicitWritePerm(perms, resource)) {
+        throw new ApiError(403, `${requestKey} を更新する権限がありません`, "FORBIDDEN");
       }
     }
 
@@ -148,6 +144,7 @@ export async function PATCH(
     });
 
     // Fetch updated owner and apply display level
+    // displayConfig は表示用。owner_email fallback を含む（書込判定には使っていない）。
     const updatedOwner = await prisma.owner.findUniqueOrThrow({
       where: { id },
       include: {
@@ -166,6 +163,7 @@ export async function PATCH(
       },
     });
 
+    const displayConfig = await getOwnerDisplayConfig(session.id);
     const filtered = applyDisplayToOwner(updatedOwner, displayConfig);
 
     return apiResponse(filtered);

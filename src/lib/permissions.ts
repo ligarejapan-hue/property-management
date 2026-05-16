@@ -21,6 +21,17 @@ export function hasPermission(
 }
 
 /**
+ * Returns true if the user has an **explicit** full or edit permission for the given resource.
+ * Unlike getOwnerDisplayConfig (which has an owner_email → owner_phone fallback for display),
+ * this function does NOT fall back. Use this for write permission gates only.
+ */
+export function hasExplicitWritePerm(permissions: PermissionEntry[], resource: string): boolean {
+  return permissions.some(
+    (p) => p.resource === resource && p.granted && (p.action === "full" || p.action === "edit"),
+  );
+}
+
+/**
  * Get the highest-level display permission for an owner field.
  * Returns: "full" | "read" | "partial" | "masked" | "hidden"
  */

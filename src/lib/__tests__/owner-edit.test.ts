@@ -679,8 +679,9 @@ describe("buildOwnerUpdatePayload — field-level full guard", () => {
   });
 });
 
-// ── 13. PATCH サーバー側 field-level ガード ───────────────────────────────────
-// PATCH /api/owners/[id] の権限チェックロジックを純粋関数として再現してテストする。
+// ── 13. PATCH サーバー側 field-level ガード（displayConfig ベース版）────────────
+// ※ 実装は section 14 の hasExplicitWritePerm ベースに移行済み。
+// ここでは display-level を経由したチェックの概念的なテストとして残す。
 
 type DisplayLevel13 = "hidden" | "masked" | "partial" | "full" | "read" | "edit";
 type DisplayConfig13 = Record<string, DisplayLevel13>;
@@ -762,5 +763,177 @@ describe("PATCH field-level permission guard — server side", () => {
 
   it("owner_name_kana:masked なら nameKana 更新を拒否", () => {
     expect(checkOwnerFieldPermissions({ nameKana: "ヤマダ" }, { nameKana: "masked" })).toBe("nameKana");
+  });
+});
+
+// ── 14. hasExplicitWritePerm — 書込権限の明示判定（fallback なし）─────────────
+// api-helpers.ts に追加した hasExplicitWritePerm をテストする。
+// owner_email fallback の影響を受けないことを確認する（P1 対応）。
+
+import { hasExplicitWritePerm } from "../permissions";
+import type { PermissionEntry } from "../api-helpers";
+
+describe("hasExplicitWritePerm — explicit write permission (no fallback)", () => {
+  const p = (resource: string, action: string, granted = true): PermissionEntry =>
+    ({ resource, action, granted });
+
+  it("owner_email:full があれば true", () => {
+    expect(hasExplicitWritePerm([p("owner_email", "full")], "owner_email")).toBe(true);
+  });
+
+  it("owner_email:edit があれば true", () => {
+    expect(hasExplicitWritePerm([p("owner_email", "edit")], "owner_email")).toBe(true);
+  });
+
+  it("owner_email:masked では false", () => {
+    expect(hasExplicitWritePerm([p("owner_email", "masked")], "owner_email")).toBe(false);
+  });
+
+  it("owner_email:hidden では false", () => {
+    expect(hasExplicitWritePerm([p("owner_email", "hidden")], "owner_email")).toBe(false);
+  });
+
+  it("owner_email エントリなし + owner_phone:full でも false（fallback しない）", () => {
+    // 表示では owner_phone → owner_email fallback があるが、書込判定には使わない
+    const perms = [p("owner_phone", "full")];
+    expect(hasExplicitWritePerm(perms, "owner_email")).toBe(false);
+  });
+
+  it("granted=false のエントリは true にならない", () => {
+    expect(hasExplicitWritePerm([p("owner_email", "full", false)], "owner_email")).toBe(false);
+  });
+
+  it("owner_phone:full なら phone 書込を許可", () => {
+    expect(hasExplicitWritePerm([p("owner_phone", "full")], "owner_phone")).toBe(true);
+  });
+
+  it("owner_phone:masked なら phone 書込を拒否", () => {
+    expect(hasExplicitWritePerm([p("owner_phone", "masked")], "owner_phone")).toBe(false);
+  });
+
+  it("owner_zip:full なら zip 書込を許可", () => {
+    expect(hasExplicitWritePerm([p("owner_zip", "full")], "owner_zip")).toBe(true);
+  });
+
+  it("owner_address:partial なら address 書込を拒否", () => {
+    expect(hasExplicitWritePerm([p("owner_address", "partial")], "owner_address")).toBe(false);
+  });
+
+  it("owner_name:full なら name 書込を許可", () => {
+    expect(hasExplicitWritePerm([p("owner_name", "full")], "owner_name")).toBe(true);
+  });
+
+  it("owner_name_kana:full なら nameKana 書込を許可", () => {
+    expect(hasExplicitWritePerm([p("owner_name_kana", "full")], "owner_name_kana")).toBe(true);
+  });
+
+  it("owner_name_kana:masked なら nameKana 書込を拒否", () => {
+    expect(hasExplicitWritePerm([p("owner_name_kana", "masked")], "owner_name_kana")).toBe(false);
+  });
+
+  it("field_staff: owner_phone:full だが owner_email 未設定 → email 更新不可", () => {
+    const fieldStaffPerms = [
+      p("owner_name", "full"),
+      p("owner_name_kana", "full"),
+      p("owner_phone", "full"),
+      p("owner_zip", "full"),
+      p("owner_address", "full"),
+      // owner_email エントリなし
+    ];
+    expect(hasExplicitWritePerm(fieldStaffPerms, "owner_email")).toBe(false);
+    // 一方 phone は書込可
+    expect(hasExplicitWritePerm(fieldStaffPerms, "owner_phone")).toBe(true);
+  });
+});
+
+// ── 15. maskText + applyDisplayToOwner デフォルトマスク ───────────────────────
+// display-level.ts に追加した maskText とデフォルトマスク適用をテストする（P2 対応）。
+
+import { maskText } from "../display-level";
+import type { OwnerDisplayConfig } from "../display-level";
+
+describe("maskText — default text masker", () => {
+  it("通常文字列: 先頭1文字 + ***", () => {
+    expect(maskText("山田太郎")).toBe("山***");
+  });
+
+  it("カナ: 先頭1文字 + ***", () => {
+    expect(maskText("ヤマダタロウ")).toBe("ヤ***");
+  });
+
+  it("空文字: ***", () => {
+    expect(maskText("")).toBe("***");
+  });
+
+  it("1文字: 先頭1文字 + ***", () => {
+    expect(maskText("A")).toBe("A***");
+  });
+});
+
+describe("applyDisplayToOwner — default mask for name/nameKana/note", () => {
+  const makeConfig = (overrides: Partial<OwnerDisplayConfig>): OwnerDisplayConfig => ({
+    name: "full", nameKana: "full", phone: "full",
+    zip: "full", address: "full", note: "full", email: "full",
+    ...overrides,
+  });
+
+  const owner = {
+    id: "1", name: "山田太郎", nameKana: "ヤマダタロウ",
+    phone: "090-1234-5678", zip: "100-0001", address: "東京都千代田区1-1",
+    note: "備考メモ", email: "yamada@example.com",
+  };
+
+  it("owner_name:masked の場合、name が平文で返らない（maskText 適用）", () => {
+    const config = makeConfig({ name: "masked" });
+    const result = applyDisplayToOwner(owner, config);
+    expect(result.name).toBe("山***");
+    expect(result.name).not.toBe("山田太郎");
+  });
+
+  it("owner_name_kana:masked の場合、nameKana が平文で返らない", () => {
+    const config = makeConfig({ nameKana: "masked" });
+    const result = applyDisplayToOwner(owner, config);
+    expect(result.nameKana).toBe("ヤ***");
+    expect(result.nameKana).not.toBe("ヤマダタロウ");
+  });
+
+  it("owner_note:masked の場合、note が平文で返らない", () => {
+    const config = makeConfig({ note: "masked" });
+    const result = applyDisplayToOwner(owner, config);
+    expect(result.note).toBe("備***");
+    expect(result.note).not.toBe("備考メモ");
+  });
+
+  it("owner_phone:masked は専用maskFn（maskPhone）で マスクされる", () => {
+    const config = makeConfig({ phone: "masked" });
+    const result = applyDisplayToOwner(owner, config);
+    expect(result.phone).toBe("***-****-5678");
+  });
+
+  it("owner_email:masked は専用maskFn（maskEmail）で マスクされる", () => {
+    const config = makeConfig({ email: "masked" });
+    const result = applyDisplayToOwner(owner, config);
+    expect(result.email).toBe("yam***@example.com");
+  });
+
+  it("hidden フィールドはキーごと削除される", () => {
+    const config = makeConfig({ name: "hidden", email: "hidden" });
+    const result = applyDisplayToOwner(owner, config);
+    expect(result).not.toHaveProperty("name");
+    expect(result).not.toHaveProperty("email");
+  });
+
+  it("full フィールドは平文のまま", () => {
+    const config = makeConfig({});
+    const result = applyDisplayToOwner(owner, config);
+    expect(result.name).toBe("山田太郎");
+    expect(result.phone).toBe("090-1234-5678");
+  });
+
+  it("null / undefined 値はマスクされず null のまま", () => {
+    const ownerWithNull = { ...owner, nameKana: null, note: undefined as unknown as null };
+    const config = makeConfig({ nameKana: "masked", note: "masked" });
+    const result = applyDisplayToOwner(ownerWithNull, config);
+    expect(result.nameKana).toBeNull();
   });
 });

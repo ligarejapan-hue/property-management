@@ -79,6 +79,16 @@ export function maskEmail(email: string): string {
 }
 
 /**
+ * Default text masker for fields without a dedicated mask function (name, nameKana, note).
+ * Shows the first character followed by "***".
+ * Example: "山田太郎" → "山***",  "" → "***"
+ */
+export function maskText(value: string): string {
+  if (value.length === 0) return "***";
+  return value.slice(0, 1) + "***";
+}
+
+/**
  * Show only the prefecture + city portion of a Japanese address.
  * Splits on common city suffixes (市, 区, 町, 村, 郡).
  * Example: "東京都千代田区丸の内1-1-1" -> "東京都千代田区"
@@ -231,8 +241,9 @@ export function applyDisplayToOwner(
 
     if (level === "hidden") {
       delete result[key];
-    } else if ((level === "masked" || level === "partial") && typeof value === "string" && maskFn) {
-      result[key] = maskFn(value);
+    } else if ((level === "masked" || level === "partial") && typeof value === "string") {
+      // maskFn がない場合（name/nameKana/note）はデフォルトマスクを使う
+      result[key] = maskFn ? maskFn(value) : maskText(value);
     }
     // "full", "read", "edit" -> keep as-is
   }
