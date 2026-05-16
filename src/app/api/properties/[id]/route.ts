@@ -102,13 +102,16 @@ export async function GET(
           `${importRow.job.fileName}:${importRow.rowNumber}行`)
       : null;
 
-    // owner の PII フィールドに display-level マスキングを適用する。
-    // getOwnerDisplayConfig でフィールドレベルの config を取得し、
-    // applyDisplayToOwner で /api/owners/[id] と同じマスク処理を行う。
-    const ownerDisplayConfig = await getOwnerDisplayConfig(session.id);
+    // owner:read がない場合は owner PII を返さない。
+    // owner_email:full など field-level 権限が残っていても owner:read denied が優先する。
+    // owner:read がある場合のみ getOwnerDisplayConfig で field-level マスキングを適用する。
+    const canReadOwner = hasPermission(permissions, "owner", "read");
+    const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id) : null;
     const maskedPropertyOwners = property.propertyOwners.map((po) => ({
       ...po,
-      owner: applyDisplayToOwner(po.owner, ownerDisplayConfig),
+      owner: canReadOwner && ownerDisplayConfig
+        ? applyDisplayToOwner(po.owner, ownerDisplayConfig)
+        : { id: po.owner.id },
     }));
 
     return apiResponse({ ...property, propertyOwners: maskedPropertyOwners, importSource });
@@ -275,11 +278,14 @@ export async function PATCH(
       detail: { updatedFields: changeLogs.map((c) => c.fieldName) },
     });
 
-    // owner の PII フィールドに display-level マスキングを適用する（GET と同方針）。
-    const ownerDisplayConfig = await getOwnerDisplayConfig(session.id);
+    // owner:read gate — GET と同方針（owner:read なしでは owner PII を返さない）
+    const canReadOwner = hasPermission(permissions, "owner", "read");
+    const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id) : null;
     const maskedUpdatedPropertyOwners = updated.propertyOwners.map((po) => ({
       ...po,
-      owner: applyDisplayToOwner(po.owner, ownerDisplayConfig),
+      owner: canReadOwner && ownerDisplayConfig
+        ? applyDisplayToOwner(po.owner, ownerDisplayConfig)
+        : { id: po.owner.id },
     }));
 
     return apiResponse({ ...updated, propertyOwners: maskedUpdatedPropertyOwners });

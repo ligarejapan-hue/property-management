@@ -937,3 +937,153 @@ describe("applyDisplayToOwner — default mask for name/nameKana/note", () => {
     expect(result.nameKana).toBeNull();
   });
 });
+
+// ── 16. /api/properties/[id] owner:read gate ──────────────────────────────────
+// owner:read がない場合は owner PII を返さない（field-level 権限に関係なく）。
+// ロジックは properties/[id]/route.ts と同等の純粋関数で再現してテストする。
+
+import { hasPermission } from "../permissions";
+
+/** route.ts の owner:read gate ロジックと同等 */
+function resolveOwnerInPropertyResponse(
+  owner: { id: string; name: string; email?: string | null; phone?: string | null },
+  canReadOwner: boolean,
+  maskedOwner: Record<string, unknown>,
+): Record<string, unknown> {
+  return canReadOwner ? maskedOwner : { id: owner.id };
+}
+
+const sampleOwner = { id: "owner-1", name: "山田太郎", email: "yamada@example.com", phone: "090-1234-5678" };
+
+describe("/api/properties/[id] owner:read gate", () => {
+  it("owner:read=false なら owner は id のみ返る", () => {
+    const result = resolveOwnerInPropertyResponse(sampleOwner, false, { ...sampleOwner });
+    expect(result).toEqual({ id: "owner-1" });
+    expect(result).not.toHaveProperty("email");
+    expect(result).not.toHaveProperty("phone");
+    expect(result).not.toHaveProperty("name");
+  });
+
+  it("owner:read=false なら owner_email:full が残っていても email は返らない", () => {
+    const perms = [
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      // owner:read エントリなし
+    ];
+    const canReadOwner = hasPermission(perms, "owner", "read");
+    expect(canReadOwner).toBe(false);
+    const result = resolveOwnerInPropertyResponse(sampleOwner, canReadOwner, { ...sampleOwner });
+    expect(result).not.toHaveProperty("email");
+  });
+
+  it("owner:read=false なら phone / zip / address / note も返らない", () => {
+    const result = resolveOwnerInPropertyResponse(sampleOwner, false, { ...sampleOwner });
+    expect(result).not.toHaveProperty("phone");
+    expect(result).not.toHaveProperty("zip");
+    expect(result).not.toHaveProperty("address");
+    expect(result).not.toHaveProperty("note");
+  });
+
+  it("owner:read=true なら maskedOwner をそのまま返す（display-level 適用済み）", () => {
+    const masked = { id: "owner-1", name: "山田太郎", email: "yam***@example.com" };
+    const result = resolveOwnerInPropertyResponse(sampleOwner, true, masked);
+    expect(result).toEqual(masked);
+    expect(result.email).toBe("yam***@example.com");
+  });
+
+  it("hasPermission で owner:read=true を判定できる", () => {
+    const perms = [{ resource: "owner", action: "read", granted: true }];
+    expect(hasPermission(perms, "owner", "read")).toBe(true);
+  });
+
+  it("hasPermission で owner:read=false を判定できる", () => {
+    const perms = [{ resource: "owner", action: "read", granted: false }];
+    expect(hasPermission(perms, "owner", "read")).toBe(false);
+  });
+
+  it("owner:read エントリなしは false", () => {
+    const perms = [{ resource: "property", action: "read", granted: true }];
+    expect(hasPermission(perms, "owner", "read")).toBe(false);
+  });
+});
+
+// ── 17. POST /api/owners create field-level write check ───────────────────────
+// POST /api/owners の field-level write check ロジックを純粋関数として再現する。
+// hasExplicitWritePerm を使い、email を含む create が拒否されるケースを確認する。
+
+/** POST create 時の field-level write check と同等のロジック */
+function checkCreateFieldPermissions(
+  data: Record<string, unknown>,
+  perms: { resource: string; action: string; granted: boolean }[],
+): string | null {
+  const checks = [
+    { key: "name", resource: "owner_name" },
+    { key: "nameKana", resource: "owner_name_kana" },
+    { key: "phone", resource: "owner_phone" },
+    { key: "zip", resource: "owner_zip" },
+    { key: "address", resource: "owner_address" },
+    { key: "email", resource: "owner_email" },
+  ];
+  for (const { key, resource } of checks) {
+    if (data[key] != null && !hasExplicitWritePerm(perms, resource)) {
+      return key; // 拒否フィールド名を返す
+    }
+  }
+  return null; // 全許可
+}
+
+describe("POST /api/owners create field-level write check", () => {
+  const p = (resource: string, action: string, granted = true) => ({ resource, action, granted });
+
+  it("owner_email:full なら email 付き create を許可", () => {
+    const perms = [p("owner_name", "full"), p("owner_email", "full")];
+    expect(checkCreateFieldPermissions({ name: "山田", email: "a@b.com" }, perms)).toBeNull();
+  });
+
+  it("owner_email:edit なら email 付き create を許可", () => {
+    const perms = [p("owner_name", "full"), p("owner_email", "edit")];
+    expect(checkCreateFieldPermissions({ name: "山田", email: "a@b.com" }, perms)).toBeNull();
+  });
+
+  it("owner_email:masked なら email 付き create を拒否", () => {
+    const perms = [p("owner_name", "full"), p("owner_email", "masked")];
+    expect(checkCreateFieldPermissions({ name: "山田", email: "a@b.com" }, perms)).toBe("email");
+  });
+
+  it("owner_email:hidden なら email 付き create を拒否", () => {
+    const perms = [p("owner_name", "full"), p("owner_email", "hidden")];
+    expect(checkCreateFieldPermissions({ name: "山田", email: "a@b.com" }, perms)).toBe("email");
+  });
+
+  it("owner_email 未設定（fallback なし）なら email 付き create を拒否", () => {
+    // owner_phone:full があっても owner_email が未設定なら拒否
+    const perms = [p("owner_name", "full"), p("owner_phone", "full")];
+    expect(checkCreateFieldPermissions({ name: "山田", email: "a@b.com" }, perms)).toBe("email");
+  });
+
+  it("email を送らない create は email チェックをスキップ", () => {
+    const perms = [p("owner_name", "full")]; // owner_email なし
+    // email が null の場合はチェックしない
+    expect(checkCreateFieldPermissions({ name: "山田", email: null }, perms)).toBeNull();
+  });
+
+  it("email を含まない create は既存どおり許可", () => {
+    const perms = [p("owner_name", "full")];
+    expect(checkCreateFieldPermissions({ name: "山田" }, perms)).toBeNull();
+  });
+
+  it("owner_phone:masked なら phone 付き create を拒否", () => {
+    const perms = [p("owner_name", "full"), p("owner_phone", "masked")];
+    expect(checkCreateFieldPermissions({ name: "山田", phone: "090-0000" }, perms)).toBe("phone");
+  });
+
+  it("owner_phone:full なら phone 付き create を許可", () => {
+    const perms = [p("owner_name", "full"), p("owner_phone", "full")];
+    expect(checkCreateFieldPermissions({ name: "山田", phone: "090-0000" }, perms)).toBeNull();
+  });
+
+  it("owner_name:full なしでは name 必須の create を拒否", () => {
+    const perms = [p("owner_email", "full")]; // owner_name なし
+    expect(checkCreateFieldPermissions({ name: "山田", email: "a@b.com" }, perms)).toBe("name");
+  });
+});

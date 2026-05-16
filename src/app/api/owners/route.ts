@@ -10,7 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { createOwnerSchema } from "@/lib/validators";
-import { hasPermission, maskValue } from "@/lib/permissions";
+import { hasPermission, maskValue, hasExplicitWritePerm } from "@/lib/permissions";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 
 // ---------- GET /api/owners ----------
@@ -119,6 +119,24 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const data = createOwnerSchema.parse(body);
+
+    // Field-level write permission check（PATCH /api/owners/[id] と同方針）。
+    // null/undefined のフィールドはスキップ（省略は許可）。
+    // owner_email fallback は使わない（表示用 fallback と分離）。
+    // 拒否時は DB アクセスおよび AuditLog 生成の前なので生値はログに残らない。
+    const createFieldWriteChecks: Array<{ value: unknown; resource: string; label: string }> = [
+      { value: data.name, resource: "owner_name", label: "name" },
+      { value: data.nameKana, resource: "owner_name_kana", label: "nameKana" },
+      { value: data.phone, resource: "owner_phone", label: "phone" },
+      { value: data.zip, resource: "owner_zip", label: "zip" },
+      { value: data.address, resource: "owner_address", label: "address" },
+      { value: data.email, resource: "owner_email", label: "email" },
+    ];
+    for (const { value, resource, label } of createFieldWriteChecks) {
+      if (value != null && !hasExplicitWritePerm(perms, resource)) {
+        throw new ApiError(403, `${label} を書き込む権限がありません`, "FORBIDDEN");
+      }
+    }
 
     if (data.address) {
       const normName = normalizeName(data.name);
