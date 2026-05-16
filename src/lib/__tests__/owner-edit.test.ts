@@ -555,3 +555,103 @@ describe("frontend payload — hidden email null 上書き防止", () => {
     expect(payload).toHaveProperty("email", null);
   });
 });
+
+// ── 12. field-level full 判定 — buildOwnerUpdatePayload ──────────────────────
+// owner-edit-utils.ts の buildOwnerUpdatePayload をテストする。
+// masked/hidden 項目が payload に含まれないことを確認する。
+
+import { buildOwnerUpdatePayload, OwnerEditableFields } from "../owner-edit-utils";
+
+const allEditable: OwnerEditableFields = {
+  name: true, phone: true, zip: true, address: true, email: true,
+};
+const noneEditable: OwnerEditableFields = {
+  name: false, phone: false, zip: false, address: false, email: false,
+};
+const fullForm = {
+  name: "山田太郎",
+  nameKana: "ヤマダタロウ",
+  phone: "090-1234-5678",
+  zip: "123-4567",
+  address: "東京都渋谷区1-1",
+  email: "yamada@example.com",
+};
+
+describe("buildOwnerUpdatePayload — field-level full guard", () => {
+  it("全フィールド full の場合はすべて payload に含まれる", () => {
+    const payload = buildOwnerUpdatePayload(fullForm, allEditable, 3);
+    expect(payload.name).toBe("山田太郎");
+    expect(payload.nameKana).toBe("ヤマダタロウ");
+    expect(payload.phone).toBe("090-1234-5678");
+    expect(payload.zip).toBe("123-4567");
+    expect(payload.address).toBe("東京都渋谷区1-1");
+    expect(payload.email).toBe("yamada@example.com");
+    expect(payload.version).toBe(3);
+  });
+
+  it("owner_phone:masked の場合、phone が payload に含まれない", () => {
+    const fields = { ...allEditable, phone: false };
+    const payload = buildOwnerUpdatePayload(fullForm, fields, 1);
+    expect(payload).not.toHaveProperty("phone");
+  });
+
+  it("owner_zip:masked または hidden の場合、zip が payload に含まれない", () => {
+    const fields = { ...allEditable, zip: false };
+    const payload = buildOwnerUpdatePayload(fullForm, fields, 1);
+    expect(payload).not.toHaveProperty("zip");
+  });
+
+  it("owner_address:partial または hidden の場合、address が payload に含まれない", () => {
+    const fields = { ...allEditable, address: false };
+    const payload = buildOwnerUpdatePayload(fullForm, fields, 1);
+    expect(payload).not.toHaveProperty("address");
+  });
+
+  it("owner_email:masked または hidden の場合、email が payload に含まれない", () => {
+    const fields = { ...allEditable, email: false };
+    const payload = buildOwnerUpdatePayload(fullForm, fields, 1);
+    expect(payload).not.toHaveProperty("email");
+  });
+
+  it("owner_email:full の場合のみ email が payload に含まれる", () => {
+    const withEmail = buildOwnerUpdatePayload(fullForm, { ...noneEditable, email: true }, 1);
+    expect(withEmail).toHaveProperty("email", "yamada@example.com");
+    const withoutEmail = buildOwnerUpdatePayload(fullForm, noneEditable, 1);
+    expect(withoutEmail).not.toHaveProperty("email");
+  });
+
+  it("owner_phone:full の場合のみ phone が payload に含まれる", () => {
+    const withPhone = buildOwnerUpdatePayload(fullForm, { ...noneEditable, phone: true }, 1);
+    expect(withPhone).toHaveProperty("phone", "090-1234-5678");
+    const withoutPhone = buildOwnerUpdatePayload(fullForm, noneEditable, 1);
+    expect(withoutPhone).not.toHaveProperty("phone");
+  });
+
+  it("名前だけ編集しても、masked phone / hidden address / hidden email が null や masked文字列で送信されない", () => {
+    const fields = { ...noneEditable, name: true }; // name だけ full
+    const payload = buildOwnerUpdatePayload(fullForm, fields, 1);
+    expect(payload).toHaveProperty("name", "山田太郎");
+    expect(payload).not.toHaveProperty("phone");
+    expect(payload).not.toHaveProperty("zip");
+    expect(payload).not.toHaveProperty("address");
+    expect(payload).not.toHaveProperty("email");
+  });
+
+  it("編集可能項目が全くない場合は version のみ", () => {
+    const payload = buildOwnerUpdatePayload(fullForm, noneEditable, 5);
+    expect(Object.keys(payload)).toEqual(["version"]);
+    expect(payload.version).toBe(5);
+  });
+
+  it("hasAnyEditable ロジック — 全 false のとき false", () => {
+    const fields = noneEditable;
+    const hasAny = fields.name || fields.phone || fields.zip || fields.address || fields.email;
+    expect(hasAny).toBe(false);
+  });
+
+  it("hasAnyEditable ロジック — phone だけ true のとき true", () => {
+    const fields = { ...noneEditable, phone: true };
+    const hasAny = fields.name || fields.phone || fields.zip || fields.address || fields.email;
+    expect(hasAny).toBe(true);
+  });
+});

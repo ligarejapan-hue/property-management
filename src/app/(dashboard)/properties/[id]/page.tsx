@@ -21,6 +21,7 @@ import ActionBar from "@/components/properties/action-bar";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
+import { OwnerEditableFields, buildOwnerUpdatePayload } from "@/lib/owner-edit-utils";
 
 // ---------- Label maps ----------
 
@@ -185,6 +186,13 @@ export default function PropertyDetailPage({
   const [deleting, setDeleting] = useState(false);
   const [canWriteProperty, setCanWriteProperty] = useState(false);
   const [canWriteOwner, setCanWriteOwner] = useState(false);
+  const [ownerEditableFields, setOwnerEditableFields] = useState<OwnerEditableFields>({
+    name: false,
+    phone: false,
+    zip: false,
+    address: false,
+    email: false,
+  });
 
   const handleDelete = async () => {
     if (!property) return;
@@ -233,6 +241,15 @@ export default function PropertyDetailPage({
         setCanWriteOwner(
           perms.some((p) => p.resource === "owner" && p.action === "write" && p.granted),
         );
+        const hasFullPerm = (resource: string) =>
+          perms.some((p) => p.resource === resource && p.action === "full" && p.granted);
+        setOwnerEditableFields({
+          name: hasFullPerm("owner_name"),
+          phone: hasFullPerm("owner_phone"),
+          zip: hasFullPerm("owner_zip"),
+          address: hasFullPerm("owner_address"),
+          email: hasFullPerm("owner_email"),
+        });
       })
       .catch(() => {});
   }, []);
@@ -352,6 +369,7 @@ export default function PropertyDetailPage({
           <OwnerTab
             owners={property.propertyOwners}
             canWrite={canWriteOwner}
+            editableFields={ownerEditableFields}
             onRefresh={fetchProperty}
           />
         )}
@@ -525,10 +543,12 @@ function BasicTab({
 function OwnerTab({
   owners,
   canWrite,
+  editableFields,
   onRefresh,
 }: {
   owners: ApiPropertyOwner[];
   canWrite: boolean;
+  editableFields: OwnerEditableFields;
   onRefresh: () => Promise<void>;
 }) {
   if (owners.length === 0) {
@@ -555,6 +575,7 @@ function OwnerTab({
           idx={idx}
           total={owners.length}
           canWrite={canWrite}
+          editableFields={editableFields}
           onRefresh={onRefresh}
         />
       ))}
@@ -569,12 +590,14 @@ function OwnerCard({
   idx,
   total,
   canWrite,
+  editableFields,
   onRefresh,
 }: {
   po: ApiPropertyOwner;
   idx: number;
   total: number;
   canWrite: boolean;
+  editableFields: OwnerEditableFields;
   onRefresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -583,6 +606,14 @@ function OwnerCard({
 
   // email が API レスポンスに含まれているか（hidden の場合キーが存在しない）
   const emailReturned = "email" in po.owner;
+
+  // 少なくとも1項目でも full 編集可能かどうか（編集ボタン表示条件）
+  const hasAnyEditable =
+    editableFields.name ||
+    editableFields.phone ||
+    editableFields.zip ||
+    editableFields.address ||
+    editableFields.email;
 
   const [form, setForm] = useState({
     name: po.owner.name ?? "",
@@ -615,18 +646,8 @@ function OwnerCard({
     setSaving(true);
     setSaveError(null);
     try {
-      // email が hidden（キー未返却）の場合は payload に含めず、既存値を上書きしない
-      const payload: Record<string, unknown> = {
-        name: form.name.trim() || undefined,
-        nameKana: form.nameKana.trim() || null,
-        phone: form.phone.trim() || null,
-        zip: form.zip.trim() || null,
-        address: form.address.trim() || null,
-        version: po.owner.version,
-      };
-      if (emailReturned) {
-        payload.email = form.email.trim() || null;
-      }
+      // full 権限のある項目だけ payload に含める。masked/hidden 項目は送信しない。
+      const payload = buildOwnerUpdatePayload(form, editableFields, po.owner.version);
       await updateOwner(po.ownerId, payload as Parameters<typeof updateOwner>[1]);
       setEditing(false);
       await onRefresh();
@@ -659,7 +680,8 @@ function OwnerCard({
             {po.relationship}
           </span>
         )}
-        {canWrite && !editing && (
+        {/* owner:write かつ編集可能項目が1つ以上ある場合のみ編集ボタンを表示 */}
+        {canWrite && !editing && hasAnyEditable && (
           <button
             type="button"
             onClick={handleEdit}
@@ -672,7 +694,7 @@ function OwnerCard({
       </div>
 
       {editing ? (
-        /* ── 編集フォーム ── */
+        /* ── 編集フォーム（full 権限のある項目のみ input を表示） ── */
         <div className="space-y-4">
           {/* 複数物件紐づき警告 */}
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -683,56 +705,67 @@ function OwnerCard({
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-700">
-                所有者名 <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-700">
-                氏名カナ（任意）
-              </label>
-              <input
-                type="text"
-                value={form.nameKana}
-                onChange={(e) => setForm((f) => ({ ...f, nameKana: e.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-700">電話番号</label>
-              <input
-                type="tel"
-                value={form.phone}
-                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-700">郵便番号</label>
-              <input
-                type="text"
-                value={form.zip}
-                onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-gray-700">現住所</label>
-              <input
-                type="text"
-                value={form.address}
-                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            {emailReturned && (
+            {editableFields.name ? (
+              <>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-700">
+                    所有者名 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-700">
+                    氏名カナ（任意）
+                  </label>
+                  <input
+                    type="text"
+                    value={form.nameKana}
+                    onChange={(e) => setForm((f) => ({ ...f, nameKana: e.target.value }))}
+                    className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </>
+            ) : null}
+            {editableFields.phone && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-700">電話番号</label>
+                <input
+                  type="tel"
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            )}
+            {editableFields.zip && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-700">郵便番号</label>
+                <input
+                  type="text"
+                  value={form.zip}
+                  onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            )}
+            {editableFields.address && (
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-medium text-gray-700">現住所</label>
+                <input
+                  type="text"
+                  value={form.address}
+                  onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            )}
+            {/* email は full 権限かつ API レスポンスに含まれる場合のみ入力フィールドを表示 */}
+            {editableFields.email && emailReturned && (
               <div className="space-y-1 md:col-span-2">
                 <label className="text-xs font-medium text-gray-700">メールアドレス</label>
                 <input
@@ -753,7 +786,7 @@ function OwnerCard({
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !form.name.trim()}
+              disabled={saving || (editableFields.name && !form.name.trim())}
               className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {saving ? "保存中..." : "保存"}
