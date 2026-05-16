@@ -12,6 +12,7 @@ const RESOURCES = [
   { key: "owner_phone", label: "オーナー電話番号", actions: ["hidden", "masked", "full"] },
   { key: "owner_zip", label: "オーナー郵便番号", actions: ["hidden", "masked", "full"] },
   { key: "owner_address", label: "オーナー住所", actions: ["hidden", "masked", "full"] },
+  { key: "owner_email", label: "オーナーメールアドレス", actions: ["hidden", "masked", "full"] },
   { key: "owner_note", label: "オーナー備考", actions: ["hidden", "masked", "full"] },
   { key: "csv_export", label: "CSVエクスポート", actions: ["read"] },
   { key: "csv_export_personal", label: "CSV個人情報エクスポート", actions: ["read"] },
