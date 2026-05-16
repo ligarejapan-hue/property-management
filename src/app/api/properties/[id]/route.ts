@@ -10,6 +10,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { updatePropertySchema } from "@/lib/validators";
+import { applyOwnerDisplayLevel } from "@/lib/display-level";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -43,6 +44,7 @@ export async function GET(
                 zip: true,
                 address: true,
                 note: true,
+                email: true,
                 version: true,
               },
             },
@@ -99,7 +101,15 @@ export async function GET(
           `${importRow.job.fileName}:${importRow.rowNumber}行`)
       : null;
 
-    return apiResponse({ ...property, importSource });
+    // owner の PII フィールドに display-level マスキングを適用する。
+    // propertyOwners.owner はそのまま返すと phone/zip/address/email が平文になるため、
+    // /api/owners/[id] と同じ権限判定・マスク方針で処理する。
+    const maskedPropertyOwners = property.propertyOwners.map((po) => ({
+      ...po,
+      owner: applyOwnerDisplayLevel(po.owner, permissions),
+    }));
+
+    return apiResponse({ ...property, propertyOwners: maskedPropertyOwners, importSource });
   } catch (error) {
     return handleApiError(error);
   }
@@ -233,6 +243,7 @@ export async function PATCH(
                 zip: true,
                 address: true,
                 note: true,
+                email: true,
                 version: true,
               },
             },
@@ -262,7 +273,13 @@ export async function PATCH(
       detail: { updatedFields: changeLogs.map((c) => c.fieldName) },
     });
 
-    return apiResponse(updated);
+    // owner の PII フィールドに display-level マスキングを適用する（GET と同方針）。
+    const maskedUpdatedPropertyOwners = updated.propertyOwners.map((po) => ({
+      ...po,
+      owner: applyOwnerDisplayLevel(po.owner, permissions),
+    }));
+
+    return apiResponse({ ...updated, propertyOwners: maskedUpdatedPropertyOwners });
   } catch (error) {
     return handleApiError(error);
   }

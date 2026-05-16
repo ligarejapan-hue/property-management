@@ -176,3 +176,77 @@ describe("20260516000000_add_owner_email migration", () => {
     expect(sql()).not.toMatch(/^\s*UPDATE/im);
   });
 });
+
+// ── 6. property detail API — owner display-level 適用後の email 挙動 ──────────
+// GET /api/properties/[id] が applyOwnerDisplayLevel を経由して email を返すことを
+// 純粋関数レベルで確認する（API ルートは DB 依存のため直接テスト不可）。
+
+describe("applyOwnerDisplayLevel — property detail API 相当の email 挙動", () => {
+  const ownerWithEmail = {
+    id: "owner-1",
+    name: "山田太郎",
+    nameKana: null,
+    phone: "090-1234-5678",
+    zip: "100-0001",
+    address: "東京都千代田区丸の内1-1-1",
+    note: null,
+    email: "yamada@example.com",
+  };
+
+  const fullPerms = [
+    { resource: "owner", action: "full", granted: true },
+  ] as import("../permissions").PermissionMap;
+
+  const maskedPerms = [
+    { resource: "owner", action: "masked", granted: true },
+  ] as import("../permissions").PermissionMap;
+
+  const noPerms = [] as import("../permissions").PermissionMap;
+
+  it("owner:full — fetchProperty 再取得後に email 平文が得られる", () => {
+    const result = applyOwnerDisplayLevel(ownerWithEmail, fullPerms);
+    expect(result.email).toBe("yamada@example.com");
+  });
+
+  it("owner:masked — email がマスクされて返る（平文露出なし）", () => {
+    const result = applyOwnerDisplayLevel(ownerWithEmail, maskedPerms);
+    expect(result.email).toBe("yam***@example.com");
+    // phone / zip / address も同時にマスクされること
+    expect(result.phone).toMatch(/\*\*\*/);
+    expect(result.zip).toMatch(/\*\*\*\*/);
+  });
+
+  it("権限なし — email / phone / zip / address が hidden（null）になる", () => {
+    const result = applyOwnerDisplayLevel(ownerWithEmail, noPerms);
+    expect(result.email).toBeNull();
+    expect(result.phone).toBeNull();
+    expect(result.zip).toBeNull();
+    expect(result.address).toBeNull();
+  });
+
+  it("email が null の owner は null のまま返る", () => {
+    const result = applyOwnerDisplayLevel({ ...ownerWithEmail, email: null }, fullPerms);
+    expect(result.email).toBeNull();
+  });
+
+  it("propertyOwners 配列への適用（map パターン）", () => {
+    // property detail API の maskedPropertyOwners = property.propertyOwners.map(po => ({
+    //   ...po, owner: applyOwnerDisplayLevel(po.owner, permissions)
+    // })) のパターンを再現
+    const propertyOwners = [
+      { id: "po-1", propertyId: "p-1", ownerId: "owner-1", isPrimary: true,
+        relationship: null, note: null, owner: ownerWithEmail },
+      { id: "po-2", propertyId: "p-1", ownerId: "owner-2", isPrimary: false,
+        relationship: null, note: null,
+        owner: { ...ownerWithEmail, id: "owner-2", email: "tanaka@example.com" } },
+    ];
+    const masked = propertyOwners.map((po) => ({
+      ...po,
+      owner: applyOwnerDisplayLevel(po.owner, maskedPerms),
+    }));
+    expect(masked[0].owner.email).toBe("yam***@example.com");
+    expect(masked[1].owner.email).toBe("tan***@example.com");
+    // propertyOwners 以外のフィールドは維持
+    expect(masked[0].isPrimary).toBe(true);
+  });
+});
