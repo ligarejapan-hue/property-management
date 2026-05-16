@@ -81,7 +81,8 @@ interface ApiOwner {
   zip: string | null;
   address: string | null;
   note: string | null;
-  email: string | null;
+  /** hidden 時は API レスポンスにキーが存在しない（undefined）。null は「空値」と区別する。 */
+  email?: string | null;
   version: number;
 }
 
@@ -580,6 +581,9 @@ function OwnerCard({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // email が API レスポンスに含まれているか（hidden の場合キーが存在しない）
+  const emailReturned = "email" in po.owner;
+
   const [form, setForm] = useState({
     name: po.owner.name ?? "",
     nameKana: po.owner.nameKana ?? "",
@@ -611,15 +615,19 @@ function OwnerCard({
     setSaving(true);
     setSaveError(null);
     try {
-      await updateOwner(po.ownerId, {
+      // email が hidden（キー未返却）の場合は payload に含めず、既存値を上書きしない
+      const payload: Record<string, unknown> = {
         name: form.name.trim() || undefined,
         nameKana: form.nameKana.trim() || null,
         phone: form.phone.trim() || null,
         zip: form.zip.trim() || null,
         address: form.address.trim() || null,
-        email: form.email.trim() || null,
         version: po.owner.version,
-      });
+      };
+      if (emailReturned) {
+        payload.email = form.email.trim() || null;
+      }
+      await updateOwner(po.ownerId, payload as Parameters<typeof updateOwner>[1]);
       setEditing(false);
       await onRefresh();
     } catch (err) {
@@ -724,15 +732,17 @@ function OwnerCard({
                 className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-gray-700">メールアドレス</label>
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
+            {emailReturned && (
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-medium text-gray-700">メールアドレス</label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            )}
           </div>
 
           {saveError && (
@@ -764,7 +774,9 @@ function OwnerCard({
           <OwnerField label="氏名カナ" value={po.owner.nameKana} />
           <OwnerField label="電話番号" value={po.owner.phone} mono />
           <OwnerField label="郵便番号" value={po.owner.zip} mono />
-          <OwnerField label="メールアドレス" value={po.owner.email} />
+          {emailReturned && (
+            <OwnerField label="メールアドレス" value={po.owner.email} />
+          )}
           <div className="md:col-span-2">
             <OwnerField label="現住所" value={po.owner.address} />
           </div>

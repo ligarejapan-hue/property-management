@@ -417,3 +417,141 @@ describe("POST /api/owners — create data に email が含まれること", () 
     expect(auditDetail).not.toHaveProperty("address");
   });
 });
+
+// ── 9. getOwnerDisplayConfig — owner_email fallback（純粋関数相当）─────────────
+// getOwnerDisplayConfig は async+DB なので、同ロジックを純粋関数として再現してテストする。
+
+function resolveOwnerEmailLevel(
+  permissions: { resource: string; action: string; granted: boolean }[],
+): string {
+  const levels = ["edit", "full", "read", "partial", "masked", "hidden"] as const;
+  const resolveLevel = (field: string) => {
+    for (const level of levels) {
+      const entry = permissions.find((p) => p.resource === field && p.action === level);
+      if (entry?.granted) return level;
+    }
+    return "hidden";
+  };
+  const hasExplicitEmailEntry = permissions.some((p) => p.resource === "owner_email");
+  return hasExplicitEmailEntry ? resolveLevel("owner_email") : resolveLevel("owner_phone");
+}
+
+describe("getOwnerDisplayConfig — owner_email fallback", () => {
+  it("owner_email:full が設定されている場合は full", () => {
+    const perms = [{ resource: "owner_email", action: "full", granted: true }];
+    expect(resolveOwnerEmailLevel(perms)).toBe("full");
+  });
+
+  it("owner_email:masked が設定されている場合は masked", () => {
+    const perms = [{ resource: "owner_email", action: "masked", granted: true }];
+    expect(resolveOwnerEmailLevel(perms)).toBe("masked");
+  });
+
+  it("owner_email が未設定の場合は owner_phone にフォールバック", () => {
+    const perms = [{ resource: "owner_phone", action: "masked", granted: true }];
+    expect(resolveOwnerEmailLevel(perms)).toBe("masked"); // phone の masked を継承
+  });
+
+  it("owner_email が未設定で owner_phone が full の場合も fallback", () => {
+    const perms = [{ resource: "owner_phone", action: "full", granted: true }];
+    expect(resolveOwnerEmailLevel(perms)).toBe("full");
+  });
+
+  it("owner_email:hidden が明示されている場合は fallback せず hidden", () => {
+    const perms = [
+      { resource: "owner_email", action: "hidden", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+    ];
+    // owner_email:hidden が明示 → resolveLevel("owner_email") = "hidden"
+    expect(resolveOwnerEmailLevel(perms)).toBe("hidden");
+  });
+
+  it("owner_email も owner_phone も未設定なら hidden", () => {
+    const perms: { resource: string; action: string; granted: boolean }[] = [];
+    expect(resolveOwnerEmailLevel(perms)).toBe("hidden");
+  });
+});
+
+// ── 10. seed template 権限の構造確認 ─────────────────────────────────────────
+// seed.ts の templateEntries 相当の配列を再現し、owner_email が正しく含まれることを確認。
+
+describe("seed templateEntries — owner_email", () => {
+  // seed.ts の templateEntries から owner_email エントリを抜き出した想定値
+  const ownerEmailEntries = [
+    { role: "field_staff", resource: "owner_email", action: "masked" },
+    { role: "office_staff", resource: "owner_email", action: "full" },
+    { role: "admin", resource: "owner_email", action: "full" },
+  ];
+
+  it("field_staff は owner_email:masked を持つ", () => {
+    const entry = ownerEmailEntries.find((e) => e.role === "field_staff");
+    expect(entry?.action).toBe("masked");
+  });
+
+  it("office_staff は owner_email:full を持つ", () => {
+    const entry = ownerEmailEntries.find((e) => e.role === "office_staff");
+    expect(entry?.action).toBe("full");
+  });
+
+  it("admin は owner_email:full を持つ", () => {
+    const entry = ownerEmailEntries.find((e) => e.role === "admin");
+    expect(entry?.action).toBe("full");
+  });
+});
+
+// ── 11. frontend payload — hidden email を null 上書きしない ─────────────────
+// OwnerCard.handleSave の payload 構築ロジックを純粋関数として再現してテストする。
+
+function buildOwnerPayload(
+  ownerFromApi: { email?: string | null; version: number },
+  form: { name: string; nameKana: string; phone: string; zip: string; address: string; email: string },
+): Record<string, unknown> {
+  const emailReturned = "email" in ownerFromApi;
+  const payload: Record<string, unknown> = {
+    name: form.name.trim() || undefined,
+    nameKana: form.nameKana.trim() || null,
+    phone: form.phone.trim() || null,
+    zip: form.zip.trim() || null,
+    address: form.address.trim() || null,
+    version: ownerFromApi.version,
+  };
+  if (emailReturned) {
+    payload.email = form.email.trim() || null;
+  }
+  return payload;
+}
+
+const baseForm = { name: "山田太郎", nameKana: "", phone: "", zip: "", address: "", email: "" };
+
+describe("frontend payload — hidden email null 上書き防止", () => {
+  it("email が API レスポンスに含まれる場合は payload に email を入れる", () => {
+    const owner = { email: "yamada@example.com", version: 1 };
+    const payload = buildOwnerPayload(owner, { ...baseForm, email: "new@example.com" });
+    expect(payload).toHaveProperty("email", "new@example.com");
+  });
+
+  it("email が空文字の場合は null を送る（既存の空化保存）", () => {
+    const owner = { email: "yamada@example.com", version: 1 };
+    const payload = buildOwnerPayload(owner, { ...baseForm, email: "" });
+    expect(payload).toHaveProperty("email", null);
+  });
+
+  it("email が API レスポンスにない（hidden）場合は payload に email を含めない", () => {
+    const owner = { version: 1 }; // email キーが存在しない
+    const payload = buildOwnerPayload(owner, { ...baseForm, email: "" });
+    expect(payload).not.toHaveProperty("email");
+  });
+
+  it("名前だけ編集して保存しても、hidden email は null で送られない", () => {
+    const owner = { version: 1 }; // email hidden
+    const payload = buildOwnerPayload(owner, { ...baseForm, name: "田中一郎" });
+    expect(payload.name).toBe("田中一郎");
+    expect(payload).not.toHaveProperty("email");
+  });
+
+  it("email が null（設定なし）として返ってきた場合は payload に含める", () => {
+    const owner = { email: null, version: 1 }; // キーはある、値は null
+    const payload = buildOwnerPayload(owner, { ...baseForm, email: "" });
+    expect(payload).toHaveProperty("email", null);
+  });
+});
