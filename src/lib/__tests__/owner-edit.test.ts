@@ -1087,3 +1087,88 @@ describe("POST /api/owners create field-level write check", () => {
     expect(checkCreateFieldPermissions({ name: "山田", email: "a@b.com" }, perms)).toBe("name");
   });
 });
+
+// ── 18. migration backfill — owner_email 権限の本番反映 ───────────────────────
+// 本番では seed を再実行しないため、20260516000000_add_owner_email/migration.sql に
+// owner_email permission の backfill SQL が含まれていることを確認する。
+
+describe("migration backfill — owner_email", () => {
+  const migrationPath = path.join(
+    __dirname,
+    "../../../prisma/migrations/20260516000000_add_owner_email/migration.sql",
+  );
+  const migrationSql = fs.readFileSync(migrationPath, "utf-8");
+
+  it("owners テーブルへ email カラム追加が含まれる", () => {
+    expect(migrationSql).toMatch(/ALTER TABLE "owners" ADD COLUMN "email"/);
+  });
+
+  it("現地担当用テンプレートへ owner_email:masked backfill が含まれる", () => {
+    expect(migrationSql).toMatch(/'現地担当用'/);
+    expect(migrationSql).toMatch(/'owner_email', 'masked'/);
+  });
+
+  it("事務担当用テンプレートへ owner_email:full backfill が含まれる", () => {
+    expect(migrationSql).toMatch(/'事務担当用'/);
+  });
+
+  it("管理者用テンプレートへ owner_email:full backfill が含まれる", () => {
+    expect(migrationSql).toMatch(/'管理者用'/);
+  });
+
+  it("ON CONFLICT DO NOTHING でべき等になっている", () => {
+    expect(migrationSql).toMatch(/ON CONFLICT.*DO NOTHING/i);
+  });
+
+  it("template_permissions テーブルへ INSERT している", () => {
+    expect(migrationSql).toMatch(/INSERT INTO "template_permissions"/);
+  });
+});
+
+// ── 19. 管理画面 RESOURCES — owner_email / owner_name_kana 表示 ───────────────
+// テンプレート編集 UI と ユーザー個別権限 UI の RESOURCES が
+// owner_email / owner_name_kana を含むことを文字列マッチで確認する。
+
+describe("admin templates page — RESOURCES contains owner_email / owner_name_kana", () => {
+  const filePath = path.join(
+    __dirname,
+    "../../../src/app/(dashboard)/admin/templates/[id]/page.tsx",
+  );
+  const source = fs.readFileSync(filePath, "utf-8");
+
+  it("RESOURCES に owner_email が含まれる", () => {
+    expect(source).toMatch(/key:\s*"owner_email"/);
+  });
+
+  it("RESOURCES に owner_name_kana が含まれる", () => {
+    expect(source).toMatch(/key:\s*"owner_name_kana"/);
+  });
+
+  it("owner_email の actions は hidden/masked/full", () => {
+    expect(source).toMatch(
+      /key:\s*"owner_email"[^}]*actions:\s*\["hidden",\s*"masked",\s*"full"\]/,
+    );
+  });
+
+  it("owner_name_kana の actions は hidden/masked/full", () => {
+    expect(source).toMatch(
+      /key:\s*"owner_name_kana"[^}]*actions:\s*\["hidden",\s*"masked",\s*"full"\]/,
+    );
+  });
+});
+
+describe("admin user permissions page — RESOURCES contains owner_email / owner_name_kana", () => {
+  const filePath = path.join(
+    __dirname,
+    "../../../src/app/(dashboard)/admin/users/[id]/permissions/page.tsx",
+  );
+  const source = fs.readFileSync(filePath, "utf-8");
+
+  it("RESOURCES に owner_email が含まれる", () => {
+    expect(source).toMatch(/key:\s*"owner_email"/);
+  });
+
+  it("RESOURCES に owner_name_kana が含まれる", () => {
+    expect(source).toMatch(/key:\s*"owner_name_kana"/);
+  });
+});
