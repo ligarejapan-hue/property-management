@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   handleApiError,
   apiResponse,
   ApiError,
@@ -10,7 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { updatePropertySchema } from "@/lib/validators";
-import { applyOwnerDisplayLevel } from "@/lib/display-level";
+import { applyDisplayToOwner } from "@/lib/display-level";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -102,11 +103,12 @@ export async function GET(
       : null;
 
     // owner の PII フィールドに display-level マスキングを適用する。
-    // propertyOwners.owner はそのまま返すと phone/zip/address/email が平文になるため、
-    // /api/owners/[id] と同じ権限判定・マスク方針で処理する。
+    // getOwnerDisplayConfig でフィールドレベルの config を取得し、
+    // applyDisplayToOwner で /api/owners/[id] と同じマスク処理を行う。
+    const ownerDisplayConfig = await getOwnerDisplayConfig(session.id);
     const maskedPropertyOwners = property.propertyOwners.map((po) => ({
       ...po,
-      owner: applyOwnerDisplayLevel(po.owner, permissions),
+      owner: applyDisplayToOwner(po.owner, ownerDisplayConfig),
     }));
 
     return apiResponse({ ...property, propertyOwners: maskedPropertyOwners, importSource });
@@ -274,9 +276,10 @@ export async function PATCH(
     });
 
     // owner の PII フィールドに display-level マスキングを適用する（GET と同方針）。
+    const ownerDisplayConfig = await getOwnerDisplayConfig(session.id);
     const maskedUpdatedPropertyOwners = updated.propertyOwners.map((po) => ({
       ...po,
-      owner: applyOwnerDisplayLevel(po.owner, permissions),
+      owner: applyDisplayToOwner(po.owner, ownerDisplayConfig),
     }));
 
     return apiResponse({ ...updated, propertyOwners: maskedUpdatedPropertyOwners });

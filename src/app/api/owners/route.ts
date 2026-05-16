@@ -149,10 +149,12 @@ export async function POST(request: NextRequest) {
         zip: data.zip,
         address: data.address,
         note: data.note,
+        email: data.email,
         externalLinkKey: data.externalLinkKey,
       },
     });
 
+    // AuditLog detail には氏名のみ。email 等の PII 生値は含めない。
     await writeAuditLog({
       userId: session.id,
       action: "create",

@@ -186,3 +186,56 @@ export function applyOwnerDisplayLevel(
     email: applyLevel(owner.email, config.email, maskEmail),
   };
 }
+
+/**
+ * Apply a pre-resolved OwnerDisplayConfig to a single owner record.
+ * Used by both /api/owners/[id] and /api/properties/[id] so that
+ * field-level masking (owner_phone, owner_address, owner_email, …)
+ * is applied consistently regardless of which endpoint is called.
+ *
+ * Unlike applyOwnerDisplayLevel (which resolves config from raw PermissionMap),
+ * this function takes an already-resolved config from getOwnerDisplayConfig().
+ */
+export function applyDisplayToOwner(
+  owner: {
+    name: string;
+    nameKana?: string | null;
+    phone?: string | null;
+    zip?: string | null;
+    address?: string | null;
+    note?: string | null;
+    email?: string | null;
+    [key: string]: unknown;
+  },
+  config: OwnerDisplayConfig,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...owner };
+
+  const fieldMap: Array<{
+    key: string;
+    configKey: keyof OwnerDisplayConfig;
+    maskFn?: (v: string) => string;
+  }> = [
+    { key: "name", configKey: "name" },
+    { key: "nameKana", configKey: "nameKana" },
+    { key: "phone", configKey: "phone", maskFn: maskPhone },
+    { key: "zip", configKey: "zip", maskFn: maskZip },
+    { key: "address", configKey: "address", maskFn: partialAddress },
+    { key: "note", configKey: "note" },
+    { key: "email", configKey: "email", maskFn: maskEmail },
+  ];
+
+  for (const { key, configKey, maskFn } of fieldMap) {
+    const level = config[configKey];
+    const value = owner[key];
+
+    if (level === "hidden") {
+      delete result[key];
+    } else if ((level === "masked" || level === "partial") && typeof value === "string" && maskFn) {
+      result[key] = maskFn(value);
+    }
+    // "full", "read", "edit" -> keep as-is
+  }
+
+  return result;
+}

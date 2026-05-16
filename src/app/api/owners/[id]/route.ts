@@ -12,63 +12,8 @@ import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { updateOwnerSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
-import {
-  maskPhone,
-  maskZip,
-  partialAddress,
-  maskEmail,
-} from "@/lib/display-level";
+import { applyDisplayToOwner } from "@/lib/display-level";
 import type { OwnerDisplayConfig } from "@/lib/display-level";
-
-// ---------------------------------------------------------------------------
-// Display-level helper
-// ---------------------------------------------------------------------------
-
-function applyDisplayToOwner(
-  owner: {
-    name: string;
-    nameKana: string | null;
-    phone: string | null;
-    zip: string | null;
-    address: string | null;
-    note: string | null;
-    email: string | null;
-    [key: string]: unknown;
-  },
-  config: OwnerDisplayConfig,
-) {
-  const result: Record<string, unknown> = { ...owner };
-
-  const fieldMap: Array<{
-    key: string;
-    configKey: keyof OwnerDisplayConfig;
-    maskFn?: (v: string) => string;
-  }> = [
-    { key: "name", configKey: "name" },
-    { key: "nameKana", configKey: "nameKana" },
-    { key: "phone", configKey: "phone", maskFn: maskPhone },
-    { key: "zip", configKey: "zip", maskFn: maskZip },
-    { key: "address", configKey: "address", maskFn: partialAddress },
-    { key: "note", configKey: "note" },
-    { key: "email", configKey: "email", maskFn: maskEmail },
-  ];
-
-  for (const { key, configKey, maskFn } of fieldMap) {
-    const level = config[configKey];
-    const value = owner[key as keyof typeof owner];
-
-    if (level === "hidden") {
-      delete result[key];
-    } else if (level === "masked" && typeof value === "string" && maskFn) {
-      result[key] = maskFn(value);
-    } else if (level === "partial" && typeof value === "string" && maskFn) {
-      result[key] = maskFn(value);
-    }
-    // "full", "read", "edit" -> keep as-is
-  }
-
-  return result;
-}
 
 // ---------------------------------------------------------------------------
 // GET /api/owners/:id
