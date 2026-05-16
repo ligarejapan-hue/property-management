@@ -99,6 +99,7 @@ export async function PATCH(
       { requestKey: "zip", resource: "owner_zip" },
       { requestKey: "address", resource: "owner_address" },
       { requestKey: "email", resource: "owner_email" },
+      { requestKey: "note", resource: "owner_note" },
     ];
     for (const { requestKey, resource } of fieldWriteChecks) {
       if (requestKey in updateFields && !hasExplicitWritePerm(perms, resource)) {

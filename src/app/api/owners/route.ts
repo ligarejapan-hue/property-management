@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
       { value: data.zip, resource: "owner_zip", label: "zip" },
       { value: data.address, resource: "owner_address", label: "address" },
       { value: data.email, resource: "owner_email", label: "email" },
+      { value: data.note, resource: "owner_note", label: "note" },
     ];
     for (const { value, resource, label } of createFieldWriteChecks) {
       if (value != null && !hasExplicitWritePerm(perms, resource)) {

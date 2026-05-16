@@ -1023,6 +1023,7 @@ function checkCreateFieldPermissions(
     { key: "zip", resource: "owner_zip" },
     { key: "address", resource: "owner_address" },
     { key: "email", resource: "owner_email" },
+    { key: "note", resource: "owner_note" },
   ];
   for (const { key, resource } of checks) {
     if (data[key] != null && !hasExplicitWritePerm(perms, resource)) {
@@ -1170,5 +1171,171 @@ describe("admin user permissions page — RESOURCES contains owner_email / owner
 
   it("RESOURCES に owner_name_kana が含まれる", () => {
     expect(source).toMatch(/key:\s*"owner_name_kana"/);
+  });
+});
+
+// ── 20. owner_note field-level write check (PATCH / POST) ────────────────────
+// PATCH/POST の field-level write check に note が含まれることを確認する。
+// PATCH の check は hasExplicitWritePerm(perms, "owner_note") と同等。
+// POST の check は section 17 で再現済みの checkCreateFieldPermissions を使う。
+
+const np = (resource: string, action: string, granted = true) => ({ resource, action, granted });
+
+describe("PATCH /api/owners/[id] — owner_note write check", () => {
+  it("owner_note:full なら note 更新 OK", () => {
+    expect(hasExplicitWritePerm([np("owner_note", "full")], "owner_note")).toBe(true);
+  });
+
+  it("owner_note:edit なら note 更新 OK", () => {
+    expect(hasExplicitWritePerm([np("owner_note", "edit")], "owner_note")).toBe(true);
+  });
+
+  it("owner_note:hidden なら note 更新拒否", () => {
+    expect(hasExplicitWritePerm([np("owner_note", "hidden")], "owner_note")).toBe(false);
+  });
+
+  it("owner_note:masked なら note 更新拒否", () => {
+    expect(hasExplicitWritePerm([np("owner_note", "masked")], "owner_note")).toBe(false);
+  });
+
+  it("owner_note:read なら note 更新拒否（read は書込権限ではない）", () => {
+    expect(hasExplicitWritePerm([np("owner_note", "read")], "owner_note")).toBe(false);
+  });
+
+  it("owner_note 未設定なら note 更新拒否", () => {
+    expect(hasExplicitWritePerm([np("owner_name", "full")], "owner_note")).toBe(false);
+  });
+
+  it("office_staff (owner_note:read) は note を更新できない", () => {
+    // seed.ts: office_staff template has owner_note:read (not full/edit)
+    const officeStaff = [
+      np("owner", "write"),
+      np("owner_note", "read"),
+    ];
+    expect(hasExplicitWritePerm(officeStaff, "owner_note")).toBe(false);
+  });
+
+  it("admin (owner_note:edit) は note を更新できる", () => {
+    // seed.ts: admin template has owner_note:edit
+    const admin = [np("owner", "write"), np("owner_note", "edit")];
+    expect(hasExplicitWritePerm(admin, "owner_note")).toBe(true);
+  });
+});
+
+describe("POST /api/owners — owner_note create check", () => {
+  const baseFullPerms = [
+    np("owner_name", "full"),
+    np("owner_name_kana", "full"),
+    np("owner_phone", "full"),
+    np("owner_zip", "full"),
+    np("owner_address", "full"),
+    np("owner_email", "full"),
+  ];
+
+  it("owner_note:full なら note 付き作成 OK", () => {
+    const perms = [...baseFullPerms, np("owner_note", "full")];
+    expect(checkCreateFieldPermissions({ name: "山田", note: "メモ" }, perms)).toBeNull();
+  });
+
+  it("owner_note:edit なら note 付き作成 OK", () => {
+    const perms = [...baseFullPerms, np("owner_note", "edit")];
+    expect(checkCreateFieldPermissions({ name: "山田", note: "メモ" }, perms)).toBeNull();
+  });
+
+  it("owner_note:hidden なら note 付き作成拒否", () => {
+    const perms = [...baseFullPerms, np("owner_note", "hidden")];
+    expect(checkCreateFieldPermissions({ name: "山田", note: "メモ" }, perms)).toBe("note");
+  });
+
+  it("owner_note:masked なら note 付き作成拒否", () => {
+    const perms = [...baseFullPerms, np("owner_note", "masked")];
+    expect(checkCreateFieldPermissions({ name: "山田", note: "メモ" }, perms)).toBe("note");
+  });
+
+  it("owner_note:read なら note 付き作成拒否", () => {
+    const perms = [...baseFullPerms, np("owner_note", "read")];
+    expect(checkCreateFieldPermissions({ name: "山田", note: "メモ" }, perms)).toBe("note");
+  });
+
+  it("owner_note 未設定なら note 付き作成拒否", () => {
+    expect(checkCreateFieldPermissions({ name: "山田", note: "メモ" }, baseFullPerms)).toBe("note");
+  });
+
+  it("note なし作成は owner_note 未設定でも OK", () => {
+    expect(checkCreateFieldPermissions({ name: "山田" }, baseFullPerms)).toBeNull();
+  });
+
+  it("note=null は チェックをスキップ（既存どおり許可）", () => {
+    expect(checkCreateFieldPermissions({ name: "山田", note: null }, baseFullPerms)).toBeNull();
+  });
+});
+
+// ── 21. note 拒否時に AuditLog/ChangeLog に生値が残らない構造確認 ─────────────
+// route.ts のソースを文字列ベースで読み、fieldWriteChecks 配列が
+// recordChanges / writeAuditLog / prisma.owner.updateMany より前に出現することを確認する。
+
+describe("route source — note check happens before logging/DB write", () => {
+  it("PATCH /api/owners/[id]: fieldWriteChecks が recordChanges より前に出現", () => {
+    const routePath = path.join(__dirname, "../../../src/app/api/owners/[id]/route.ts");
+    const fullSource = fs.readFileSync(routePath, "utf-8");
+    // PATCH ハンドラ内に絞る（GET の writeAuditLog/recordChanges を拾わないため）
+    const patchStart = fullSource.indexOf("export async function PATCH");
+    const source = fullSource.slice(patchStart);
+    const checkIdx = source.indexOf("fieldWriteChecks");
+    const recordChangesIdx = source.indexOf("recordChanges({");
+    const writeAuditIdx = source.indexOf("writeAuditLog({");
+    const updateManyIdx = source.indexOf("prisma.owner.updateMany");
+    expect(checkIdx).toBeGreaterThan(-1);
+    expect(recordChangesIdx).toBeGreaterThan(checkIdx);
+    expect(writeAuditIdx).toBeGreaterThan(checkIdx);
+    expect(updateManyIdx).toBeGreaterThan(checkIdx);
+  });
+
+  it("PATCH route: owner_note が fieldWriteChecks に含まれる", () => {
+    const routePath = path.join(__dirname, "../../../src/app/api/owners/[id]/route.ts");
+    const source = fs.readFileSync(routePath, "utf-8");
+    expect(source).toMatch(/requestKey:\s*"note"[\s,]+resource:\s*"owner_note"/);
+  });
+
+  it("PATCH route: name/nameKana/phone/zip/address/email の既存 check が維持されている", () => {
+    const routePath = path.join(__dirname, "../../../src/app/api/owners/[id]/route.ts");
+    const source = fs.readFileSync(routePath, "utf-8");
+    expect(source).toMatch(/resource:\s*"owner_name"[^_]/); // owner_name (not owner_name_kana)
+    expect(source).toMatch(/resource:\s*"owner_name_kana"/);
+    expect(source).toMatch(/resource:\s*"owner_phone"/);
+    expect(source).toMatch(/resource:\s*"owner_zip"/);
+    expect(source).toMatch(/resource:\s*"owner_address"/);
+    expect(source).toMatch(/resource:\s*"owner_email"/);
+  });
+
+  it("POST /api/owners: createFieldWriteChecks が prisma.owner.create より前に出現", () => {
+    const routePath = path.join(__dirname, "../../../src/app/api/owners/route.ts");
+    const fullSource = fs.readFileSync(routePath, "utf-8");
+    // POST ハンドラ内に絞る（GET の writeAuditLog を拾わないため）
+    const postStart = fullSource.indexOf("export async function POST");
+    const source = fullSource.slice(postStart);
+    const checkIdx = source.indexOf("createFieldWriteChecks");
+    const createIdx = source.indexOf("prisma.owner.create");
+    const writeAuditIdx = source.indexOf("writeAuditLog({");
+    expect(checkIdx).toBeGreaterThan(-1);
+    expect(createIdx).toBeGreaterThan(checkIdx);
+    expect(writeAuditIdx).toBeGreaterThan(checkIdx);
+  });
+
+  it("POST route: owner_note が createFieldWriteChecks に含まれる", () => {
+    const routePath = path.join(__dirname, "../../../src/app/api/owners/route.ts");
+    const source = fs.readFileSync(routePath, "utf-8");
+    expect(source).toMatch(/value:\s*data\.note[\s,]+resource:\s*"owner_note"/);
+  });
+
+  it("POST route: name/nameKana/phone/zip/address/email の既存 check が維持されている", () => {
+    const routePath = path.join(__dirname, "../../../src/app/api/owners/route.ts");
+    const source = fs.readFileSync(routePath, "utf-8");
+    expect(source).toMatch(/value:\s*data\.name[\s,]+resource:\s*"owner_name"[^_]/);
+    expect(source).toMatch(/value:\s*data\.nameKana[\s,]+resource:\s*"owner_name_kana"/);
+    expect(source).toMatch(/value:\s*data\.phone[\s,]+resource:\s*"owner_phone"/);
+    expect(source).toMatch(/value:\s*data\.zip[\s,]+resource:\s*"owner_zip"/);
+    expect(source).toMatch(/value:\s*data\.address[\s,]+resource:\s*"owner_address"/);
+    expect(source).toMatch(/value:\s*data\.email[\s,]+resource:\s*"owner_email"/);
   });
 });
