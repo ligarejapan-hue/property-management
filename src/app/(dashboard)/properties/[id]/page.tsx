@@ -20,7 +20,7 @@ import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updatePropertyOwner } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
 
 // ---------- Label maps ----------
 
@@ -81,6 +81,7 @@ interface ApiOwner {
   zip: string | null;
   address: string | null;
   note: string | null;
+  email: string | null;
   version: number;
 }
 
@@ -182,6 +183,7 @@ export default function PropertyDetailPage({
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [canWriteProperty, setCanWriteProperty] = useState(false);
+  const [canWriteOwner, setCanWriteOwner] = useState(false);
 
   const handleDelete = async () => {
     if (!property) return;
@@ -226,6 +228,9 @@ export default function PropertyDetailPage({
         const perms = json.permissions ?? [];
         setCanWriteProperty(
           perms.some((p) => p.resource === "property" && p.action === "write" && p.granted),
+        );
+        setCanWriteOwner(
+          perms.some((p) => p.resource === "owner" && p.action === "write" && p.granted),
         );
       })
       .catch(() => {});
@@ -343,7 +348,11 @@ export default function PropertyDetailPage({
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         {activeTab === "basic" && <BasicTab property={property} onRefresh={fetchProperty} canWrite={canWriteProperty} />}
         {activeTab === "owner" && (
-          <OwnerTab owners={property.propertyOwners} />
+          <OwnerTab
+            owners={property.propertyOwners}
+            canWrite={canWriteOwner}
+            onRefresh={fetchProperty}
+          />
         )}
         {activeTab === "photos" && <PhotoTab propertyId={property.id} />}
         {activeTab === "investigation" && (
@@ -512,7 +521,15 @@ function BasicTab({
 
 // ---------- Owner tab ----------
 
-function OwnerTab({ owners }: { owners: ApiPropertyOwner[] }) {
+function OwnerTab({
+  owners,
+  canWrite,
+  onRefresh,
+}: {
+  owners: ApiPropertyOwner[];
+  canWrite: boolean;
+  onRefresh: () => Promise<void>;
+}) {
   if (owners.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-gray-500">
@@ -531,48 +548,233 @@ function OwnerTab({ owners }: { owners: ApiPropertyOwner[] }) {
         </p>
       )}
       {owners.map((po, idx) => (
-        <div
+        <OwnerCard
           key={po.id}
-          className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
-        >
-          {/* 見出し: 番号 + 氏名 + バッジ */}
-          <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-100 pb-3">
-            <span className="text-xs font-medium text-gray-500">
-              所有者 {idx + 1}
-              {isShared ? ` / ${owners.length}` : ""}
+          po={po}
+          idx={idx}
+          total={owners.length}
+          canWrite={canWrite}
+          onRefresh={onRefresh}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ---------- Owner card (表示 + インライン編集) ----------
+
+function OwnerCard({
+  po,
+  idx,
+  total,
+  canWrite,
+  onRefresh,
+}: {
+  po: ApiPropertyOwner;
+  idx: number;
+  total: number;
+  canWrite: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [form, setForm] = useState({
+    name: po.owner.name ?? "",
+    nameKana: po.owner.nameKana ?? "",
+    phone: po.owner.phone ?? "",
+    zip: po.owner.zip ?? "",
+    address: po.owner.address ?? "",
+    email: po.owner.email ?? "",
+  });
+
+  const handleEdit = () => {
+    setForm({
+      name: po.owner.name ?? "",
+      nameKana: po.owner.nameKana ?? "",
+      phone: po.owner.phone ?? "",
+      zip: po.owner.zip ?? "",
+      address: po.owner.address ?? "",
+      email: po.owner.email ?? "",
+    });
+    setSaveError(null);
+    setEditing(true);
+  };
+
+  const handleCancel = () => {
+    setEditing(false);
+    setSaveError(null);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await updateOwner(po.ownerId, {
+        name: form.name.trim() || undefined,
+        nameKana: form.nameKana.trim() || null,
+        phone: form.phone.trim() || null,
+        zip: form.zip.trim() || null,
+        address: form.address.trim() || null,
+        email: form.email.trim() || null,
+        version: po.owner.version,
+      });
+      setEditing(false);
+      await onRefresh();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "保存に失敗しました";
+      setSaveError(msg.includes("CONFLICT") ? "他のユーザーが先に更新しました。画面を再読み込みしてください。" : msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      {/* 見出し: 番号 + 氏名 + バッジ */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-100 pb-3">
+        <span className="text-xs font-medium text-gray-500">
+          所有者 {idx + 1}
+          {total > 1 ? ` / ${total}` : ""}
+        </span>
+        <h3 className="text-base font-semibold text-gray-900">
+          {po.owner.name ?? "（氏名未登録）"}
+        </h3>
+        {po.isPrimary && (
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+            主所有者
+          </span>
+        )}
+        {po.relationship && (
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700">
+            {po.relationship}
+          </span>
+        )}
+        {canWrite && !editing && (
+          <button
+            type="button"
+            onClick={handleEdit}
+            className="ml-auto flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          >
+            <Edit className="h-3 w-3" />
+            編集
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        /* ── 編集フォーム ── */
+        <div className="space-y-4">
+          {/* 複数物件紐づき警告 */}
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+            <span>
+              所有者情報の変更は、この所有者が紐付けられているすべての物件に反映されます。
             </span>
-            <h3 className="text-base font-semibold text-gray-900">
-              {po.owner.name ?? "（氏名未登録）"}
-            </h3>
-            {po.isPrimary && (
-              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                主所有者
-              </span>
-            )}
-            {po.relationship && (
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700">
-                {po.relationship}
-              </span>
-            )}
           </div>
 
-          {/* 連絡先・住所ブロック */}
-          <dl className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <OwnerField label="氏名カナ" value={po.owner.nameKana} />
-            <OwnerField label="電話番号" value={po.owner.phone} mono />
-            <OwnerField label="郵便番号" value={po.owner.zip} mono />
-            <div />
-            <div className="md:col-span-2">
-              <OwnerField label="現住所" value={po.owner.address} />
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-700">
+                所有者名 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
             </div>
-          </dl>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-700">
+                氏名カナ（任意）
+              </label>
+              <input
+                type="text"
+                value={form.nameKana}
+                onChange={(e) => setForm((f) => ({ ...f, nameKana: e.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-700">電話番号</label>
+              <input
+                type="tel"
+                value={form.phone}
+                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-700">郵便番号</label>
+              <input
+                type="text"
+                value={form.zip}
+                onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-xs font-medium text-gray-700">現住所</label>
+              <input
+                type="text"
+                value={form.address}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-xs font-medium text-gray-700">メールアドレス</label>
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
 
-          {/* メモ: PropertyOwner 単位 */}
-          <div className="mt-5 border-t border-gray-100 pt-4">
-            <PropertyOwnerNoteEditor po={po} />
+          {saveError && (
+            <p className="text-xs text-red-600">{saveError}</p>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !form.name.trim()}
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {saving ? "保存中..." : "保存"}
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={saving}
+              className="rounded-md border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed"
+            >
+              キャンセル
+            </button>
           </div>
         </div>
-      ))}
+      ) : (
+        /* ── 表示ビュー ── */
+        <dl className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <OwnerField label="氏名カナ" value={po.owner.nameKana} />
+          <OwnerField label="電話番号" value={po.owner.phone} mono />
+          <OwnerField label="郵便番号" value={po.owner.zip} mono />
+          <OwnerField label="メールアドレス" value={po.owner.email} />
+          <div className="md:col-span-2">
+            <OwnerField label="現住所" value={po.owner.address} />
+          </div>
+        </dl>
+      )}
+
+      {/* メモ: PropertyOwner 単位（常時表示） */}
+      <div className="mt-5 border-t border-gray-100 pt-4">
+        <PropertyOwnerNoteEditor po={po} />
+      </div>
     </div>
   );
 }

@@ -12,6 +12,7 @@ export interface OwnerDisplayConfig {
   zip: DisplayLevel;
   address: DisplayLevel;
   note: DisplayLevel;
+  email: DisplayLevel;
 }
 
 /** Shape of an owner record coming from the database */
@@ -23,6 +24,7 @@ interface OwnerRecord {
   zip?: string | null;
   address?: string | null;
   note?: string | null;
+  email?: string | null;
   [key: string]: unknown;
 }
 
@@ -35,6 +37,7 @@ export const FIELD_STAFF_OWNER_DISPLAY: OwnerDisplayConfig = {
   zip: "masked",
   address: "partial",
   note: "hidden",
+  email: "masked",
 };
 
 // ----- Masking helpers -----
@@ -59,6 +62,20 @@ export function maskZip(zip: string): string {
   if (digits.length < 3) return "***-****";
   const first3 = digits.slice(0, 3);
   return `${first3}-****`;
+}
+
+/**
+ * Mask an email address, keeping the first 3 characters of the local part.
+ * Example: "yamada@example.com" -> "yam***@example.com"
+ * Short local parts (< 3 chars) are fully masked: "ab@example.com" -> "***@example.com"
+ */
+export function maskEmail(email: string): string {
+  const atIdx = email.indexOf("@");
+  if (atIdx < 0) return "***";
+  const local = email.slice(0, atIdx);
+  const domain = email.slice(atIdx); // includes "@"
+  const visible = local.length >= 3 ? local.slice(0, 3) : "";
+  return `${visible}***${domain}`;
 }
 
 /**
@@ -112,6 +129,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
       zip: "full",
       address: "full",
       note: "full",
+      email: "full",
     };
   }
 
@@ -124,6 +142,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
       zip: "full",
       address: "full",
       note: "read",
+      email: "full",
     };
   }
 
@@ -140,6 +159,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
     zip: "hidden",
     address: "hidden",
     note: "hidden",
+    email: "hidden",
   };
 }
 
@@ -163,5 +183,6 @@ export function applyOwnerDisplayLevel(
     zip: applyLevel(owner.zip, config.zip, maskZip),
     address: applyLevel(owner.address, config.address, partialAddress),
     note: applyLevel(owner.note, config.note),
+    email: applyLevel(owner.email, config.email, maskEmail),
   };
 }

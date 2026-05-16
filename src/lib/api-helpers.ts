@@ -140,6 +140,7 @@ export interface OwnerDisplayConfig {
   zip: DisplayLevel;
   address: DisplayLevel;
   note: DisplayLevel;
+  email: DisplayLevel;
 }
 
 export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDisplayConfig> {
@@ -163,6 +164,7 @@ export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDispla
     zip: resolveLevel("owner_zip"),
     address: resolveLevel("owner_address"),
     note: resolveLevel("owner_note"),
+    email: resolveLevel("owner_email"),
   };
 }
 

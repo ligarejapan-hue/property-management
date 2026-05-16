@@ -16,6 +16,7 @@ import {
   maskPhone,
   maskZip,
   partialAddress,
+  maskEmail,
 } from "@/lib/display-level";
 import type { OwnerDisplayConfig } from "@/lib/display-level";
 
@@ -31,6 +32,7 @@ function applyDisplayToOwner(
     zip: string | null;
     address: string | null;
     note: string | null;
+    email: string | null;
     [key: string]: unknown;
   },
   config: OwnerDisplayConfig,
@@ -48,6 +50,7 @@ function applyDisplayToOwner(
     { key: "zip", configKey: "zip", maskFn: maskZip },
     { key: "address", configKey: "address", maskFn: partialAddress },
     { key: "note", configKey: "note" },
+    { key: "email", configKey: "email", maskFn: maskEmail },
   ];
 
   for (const { key, configKey, maskFn } of fieldMap) {
