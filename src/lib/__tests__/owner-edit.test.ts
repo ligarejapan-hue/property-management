@@ -558,15 +558,15 @@ describe("frontend payload — hidden email null 上書き防止", () => {
 
 // ── 12. field-level full 判定 — buildOwnerUpdatePayload ──────────────────────
 // owner-edit-utils.ts の buildOwnerUpdatePayload をテストする。
-// masked/hidden 項目が payload に含まれないことを確認する。
+// masked/hidden 項目が payload に含まれないこと、nameKana が name と独立していることを確認。
 
 import { buildOwnerUpdatePayload, OwnerEditableFields } from "../owner-edit-utils";
 
 const allEditable: OwnerEditableFields = {
-  name: true, phone: true, zip: true, address: true, email: true,
+  name: true, nameKana: true, phone: true, zip: true, address: true, email: true,
 };
 const noneEditable: OwnerEditableFields = {
-  name: false, phone: false, zip: false, address: false, email: false,
+  name: false, nameKana: false, phone: false, zip: false, address: false, email: false,
 };
 const fullForm = {
   name: "山田太郎",
@@ -631,6 +631,7 @@ describe("buildOwnerUpdatePayload — field-level full guard", () => {
     const fields = { ...noneEditable, name: true }; // name だけ full
     const payload = buildOwnerUpdatePayload(fullForm, fields, 1);
     expect(payload).toHaveProperty("name", "山田太郎");
+    expect(payload).not.toHaveProperty("nameKana");
     expect(payload).not.toHaveProperty("phone");
     expect(payload).not.toHaveProperty("zip");
     expect(payload).not.toHaveProperty("address");
@@ -643,15 +644,123 @@ describe("buildOwnerUpdatePayload — field-level full guard", () => {
     expect(payload.version).toBe(5);
   });
 
+  // nameKana と name の独立判定テスト（P2 対応）
+  it("fields.name=true, fields.nameKana=false の場合、nameKana が payload に含まれない", () => {
+    const fields = { ...noneEditable, name: true, nameKana: false };
+    const payload = buildOwnerUpdatePayload(fullForm, fields, 1);
+    expect(payload).toHaveProperty("name", "山田太郎");
+    expect(payload).not.toHaveProperty("nameKana");
+  });
+
+  it("fields.name=false, fields.nameKana=true の場合、name は含まれず nameKana だけ含まれる", () => {
+    const fields = { ...noneEditable, name: false, nameKana: true };
+    const payload = buildOwnerUpdatePayload(fullForm, fields, 1);
+    expect(payload).not.toHaveProperty("name");
+    expect(payload).toHaveProperty("nameKana", "ヤマダタロウ");
+  });
+
+  it("nameKana hidden/未返却相当（nameKana=false）で null 上書きされない", () => {
+    // nameKana が hidden の場合、form.nameKana="" でも payload に含めない
+    const fields = { ...allEditable, nameKana: false };
+    const payload = buildOwnerUpdatePayload({ ...fullForm, nameKana: "" }, fields, 1);
+    expect(payload).not.toHaveProperty("nameKana");
+  });
+
   it("hasAnyEditable ロジック — 全 false のとき false", () => {
-    const fields = noneEditable;
-    const hasAny = fields.name || fields.phone || fields.zip || fields.address || fields.email;
+    const f = noneEditable;
+    const hasAny = f.name || f.nameKana || f.phone || f.zip || f.address || f.email;
     expect(hasAny).toBe(false);
   });
 
-  it("hasAnyEditable ロジック — phone だけ true のとき true", () => {
-    const fields = { ...noneEditable, phone: true };
-    const hasAny = fields.name || fields.phone || fields.zip || fields.address || fields.email;
+  it("hasAnyEditable ロジック — nameKana だけ true のとき true", () => {
+    const f = { ...noneEditable, nameKana: true };
+    const hasAny = f.name || f.nameKana || f.phone || f.zip || f.address || f.email;
     expect(hasAny).toBe(true);
+  });
+});
+
+// ── 13. PATCH サーバー側 field-level ガード ───────────────────────────────────
+// PATCH /api/owners/[id] の権限チェックロジックを純粋関数として再現してテストする。
+
+type DisplayLevel13 = "hidden" | "masked" | "partial" | "full" | "read" | "edit";
+type DisplayConfig13 = Record<string, DisplayLevel13>;
+
+/** route.ts のフィールド権限チェックと同等のロジック */
+function checkOwnerFieldPermissions(
+  updateFields: Record<string, unknown>,
+  displayConfig: DisplayConfig13,
+): string | null {
+  const checks = [
+    { requestKey: "name", configKey: "name" },
+    { requestKey: "nameKana", configKey: "nameKana" },
+    { requestKey: "phone", configKey: "phone" },
+    { requestKey: "zip", configKey: "zip" },
+    { requestKey: "address", configKey: "address" },
+    { requestKey: "email", configKey: "email" },
+  ];
+  for (const { requestKey, configKey } of checks) {
+    if (requestKey in updateFields) {
+      const level = displayConfig[configKey] ?? "hidden";
+      if (level !== "full" && level !== "edit") return requestKey;
+    }
+  }
+  return null; // 全フィールド許可
+}
+
+describe("PATCH field-level permission guard — server side", () => {
+  it("owner_email:full なら email 更新を許可", () => {
+    expect(checkOwnerFieldPermissions({ email: "a@b.com" }, { email: "full" })).toBeNull();
+  });
+
+  it("owner_email:masked で email 更新を拒否", () => {
+    expect(checkOwnerFieldPermissions({ email: "a@b.com" }, { email: "masked" })).toBe("email");
+  });
+
+  it("owner_email:hidden で email 更新を拒否", () => {
+    expect(checkOwnerFieldPermissions({ email: "a@b.com" }, { email: "hidden" })).toBe("email");
+  });
+
+  it("owner_phone:masked で phone 更新を拒否", () => {
+    expect(checkOwnerFieldPermissions({ phone: "090-0000-0000" }, { phone: "masked" })).toBe("phone");
+  });
+
+  it("owner_phone:full なら phone 更新を許可", () => {
+    expect(checkOwnerFieldPermissions({ phone: "090-0000-0000" }, { phone: "full" })).toBeNull();
+  });
+
+  it("owner_address:partial で address 更新を拒否", () => {
+    expect(checkOwnerFieldPermissions({ address: "東京都" }, { address: "partial" })).toBe("address");
+  });
+
+  it("owner_address:hidden で address 更新を拒否", () => {
+    expect(checkOwnerFieldPermissions({ address: "東京都" }, { address: "hidden" })).toBe("address");
+  });
+
+  it("owner_email:full ユーザーが email のみ更新 → 許可", () => {
+    const config: DisplayConfig13 = {
+      name: "full", nameKana: "full", phone: "masked",
+      zip: "masked", address: "partial", email: "full",
+    };
+    expect(checkOwnerFieldPermissions({ email: "new@example.com" }, config)).toBeNull();
+  });
+
+  it("owner_phone:masked ユーザーが phone を含む payload → 拒否", () => {
+    const config: DisplayConfig13 = {
+      name: "full", nameKana: "full", phone: "masked",
+      zip: "masked", address: "partial", email: "masked",
+    };
+    expect(checkOwnerFieldPermissions({ name: "田中", phone: "090-0000" }, config)).toBe("phone");
+  });
+
+  it("payload に PII フィールドが含まれない場合は全許可（owner:write のみで version/note は更新可）", () => {
+    expect(checkOwnerFieldPermissions({ version: 1 }, {})).toBeNull();
+  });
+
+  it("owner_name_kana:full なら nameKana 更新を許可", () => {
+    expect(checkOwnerFieldPermissions({ nameKana: "ヤマダ" }, { nameKana: "full" })).toBeNull();
+  });
+
+  it("owner_name_kana:masked なら nameKana 更新を拒否", () => {
+    expect(checkOwnerFieldPermissions({ nameKana: "ヤマダ" }, { nameKana: "masked" })).toBe("nameKana");
   });
 });

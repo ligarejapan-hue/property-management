@@ -90,6 +90,26 @@ export async function PATCH(
     const body = await request.json();
     const { version, ...updateFields } = updateOwnerSchema.parse(body);
 
+    // Field-level write permission check: 各 PII フィールドは display-level full/edit が必要。
+    // DB 書き込み前にチェックし、拒否時は AuditLog / ChangeLog に生値を残さない。
+    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const fieldPermChecks: Array<{ requestKey: string; configKey: keyof typeof displayConfig }> = [
+      { requestKey: "name", configKey: "name" },
+      { requestKey: "nameKana", configKey: "nameKana" },
+      { requestKey: "phone", configKey: "phone" },
+      { requestKey: "zip", configKey: "zip" },
+      { requestKey: "address", configKey: "address" },
+      { requestKey: "email", configKey: "email" },
+    ];
+    for (const { requestKey, configKey } of fieldPermChecks) {
+      if (requestKey in updateFields) {
+        const level = displayConfig[configKey];
+        if (level !== "full" && level !== "edit") {
+          throw new ApiError(403, `${requestKey} を更新する権限がありません`, "FORBIDDEN");
+        }
+      }
+    }
+
     // Get current owner for change tracking
     const currentOwner = await prisma.owner.findUnique({ where: { id } });
     if (!currentOwner) {
@@ -146,7 +166,6 @@ export async function PATCH(
       },
     });
 
-    const displayConfig = await getOwnerDisplayConfig(session.id);
     const filtered = applyDisplayToOwner(updatedOwner, displayConfig);
 
     return apiResponse(filtered);

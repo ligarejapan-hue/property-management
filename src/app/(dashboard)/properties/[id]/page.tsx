@@ -188,6 +188,7 @@ export default function PropertyDetailPage({
   const [canWriteOwner, setCanWriteOwner] = useState(false);
   const [ownerEditableFields, setOwnerEditableFields] = useState<OwnerEditableFields>({
     name: false,
+    nameKana: false,
     phone: false,
     zip: false,
     address: false,
@@ -245,6 +246,7 @@ export default function PropertyDetailPage({
           perms.some((p) => p.resource === resource && p.action === "full" && p.granted);
         setOwnerEditableFields({
           name: hasFullPerm("owner_name"),
+          nameKana: hasFullPerm("owner_name_kana"),
           phone: hasFullPerm("owner_phone"),
           zip: hasFullPerm("owner_zip"),
           address: hasFullPerm("owner_address"),
@@ -610,6 +612,7 @@ function OwnerCard({
   // 少なくとも1項目でも full 編集可能かどうか（編集ボタン表示条件）
   const hasAnyEditable =
     editableFields.name ||
+    editableFields.nameKana ||
     editableFields.phone ||
     editableFields.zip ||
     editableFields.address ||
@@ -705,32 +708,32 @@ function OwnerCard({
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {editableFields.name ? (
-              <>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-700">
-                    所有者名 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.name}
-                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                    className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-700">
-                    氏名カナ（任意）
-                  </label>
-                  <input
-                    type="text"
-                    value={form.nameKana}
-                    onChange={(e) => setForm((f) => ({ ...f, nameKana: e.target.value }))}
-                    className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              </>
-            ) : null}
+            {editableFields.name && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-700">
+                  所有者名 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            )}
+            {editableFields.nameKana && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-700">
+                  氏名カナ（任意）
+                </label>
+                <input
+                  type="text"
+                  value={form.nameKana}
+                  onChange={(e) => setForm((f) => ({ ...f, nameKana: e.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            )}
             {editableFields.phone && (
               <div className="space-y-1">
                 <label className="text-xs font-medium text-gray-700">電話番号</label>
