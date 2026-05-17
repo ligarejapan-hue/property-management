@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   handleApiError,
   apiResponse,
   ApiError,
@@ -10,6 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { updatePropertySchema } from "@/lib/validators";
+import { applyDisplayToOwner } from "@/lib/display-level";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -43,6 +45,7 @@ export async function GET(
                 zip: true,
                 address: true,
                 note: true,
+                email: true,
                 version: true,
               },
             },
@@ -99,7 +102,19 @@ export async function GET(
           `${importRow.job.fileName}:${importRow.rowNumber}行`)
       : null;
 
-    return apiResponse({ ...property, importSource });
+    // owner:read がない場合は owner PII を返さない。
+    // owner_email:full など field-level 権限が残っていても owner:read denied が優先する。
+    // owner:read がある場合のみ getOwnerDisplayConfig で field-level マスキングを適用する。
+    const canReadOwner = hasPermission(permissions, "owner", "read");
+    const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id) : null;
+    const maskedPropertyOwners = property.propertyOwners.map((po) => ({
+      ...po,
+      owner: canReadOwner && ownerDisplayConfig
+        ? applyDisplayToOwner(po.owner, ownerDisplayConfig)
+        : { id: po.owner.id },
+    }));
+
+    return apiResponse({ ...property, propertyOwners: maskedPropertyOwners, importSource });
   } catch (error) {
     return handleApiError(error);
   }
@@ -233,6 +248,7 @@ export async function PATCH(
                 zip: true,
                 address: true,
                 note: true,
+                email: true,
                 version: true,
               },
             },
@@ -262,7 +278,17 @@ export async function PATCH(
       detail: { updatedFields: changeLogs.map((c) => c.fieldName) },
     });
 
-    return apiResponse(updated);
+    // owner:read gate — GET と同方針（owner:read なしでは owner PII を返さない）
+    const canReadOwner = hasPermission(permissions, "owner", "read");
+    const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id) : null;
+    const maskedUpdatedPropertyOwners = updated.propertyOwners.map((po) => ({
+      ...po,
+      owner: canReadOwner && ownerDisplayConfig
+        ? applyDisplayToOwner(po.owner, ownerDisplayConfig)
+        : { id: po.owner.id },
+    }));
+
+    return apiResponse({ ...updated, propertyOwners: maskedUpdatedPropertyOwners });
   } catch (error) {
     return handleApiError(error);
   }

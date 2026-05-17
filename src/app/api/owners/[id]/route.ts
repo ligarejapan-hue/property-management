@@ -11,61 +11,8 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { updateOwnerSchema } from "@/lib/validators";
-import { hasPermission } from "@/lib/permissions";
-import {
-  maskPhone,
-  maskZip,
-  partialAddress,
-} from "@/lib/display-level";
-import type { OwnerDisplayConfig } from "@/lib/display-level";
-
-// ---------------------------------------------------------------------------
-// Display-level helper
-// ---------------------------------------------------------------------------
-
-function applyDisplayToOwner(
-  owner: {
-    name: string;
-    nameKana: string | null;
-    phone: string | null;
-    zip: string | null;
-    address: string | null;
-    note: string | null;
-    [key: string]: unknown;
-  },
-  config: OwnerDisplayConfig,
-) {
-  const result: Record<string, unknown> = { ...owner };
-
-  const fieldMap: Array<{
-    key: string;
-    configKey: keyof OwnerDisplayConfig;
-    maskFn?: (v: string) => string;
-  }> = [
-    { key: "name", configKey: "name" },
-    { key: "nameKana", configKey: "nameKana" },
-    { key: "phone", configKey: "phone", maskFn: maskPhone },
-    { key: "zip", configKey: "zip", maskFn: maskZip },
-    { key: "address", configKey: "address", maskFn: partialAddress },
-    { key: "note", configKey: "note" },
-  ];
-
-  for (const { key, configKey, maskFn } of fieldMap) {
-    const level = config[configKey];
-    const value = owner[key as keyof typeof owner];
-
-    if (level === "hidden") {
-      delete result[key];
-    } else if (level === "masked" && typeof value === "string" && maskFn) {
-      result[key] = maskFn(value);
-    } else if (level === "partial" && typeof value === "string" && maskFn) {
-      result[key] = maskFn(value);
-    }
-    // "full", "read", "edit" -> keep as-is
-  }
-
-  return result;
-}
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
+import { applyDisplayToOwner } from "@/lib/display-level";
 
 // ---------------------------------------------------------------------------
 // GET /api/owners/:id
@@ -142,6 +89,24 @@ export async function PATCH(
     const body = await request.json();
     const { version, ...updateFields } = updateOwnerSchema.parse(body);
 
+    // Field-level write permission check: 各フィールドごとに明示的な full/edit 権限を要求する。
+    // getOwnerDisplayConfig の owner_email fallback（表示用）は使わない。
+    // 拒否時は recordChanges / writeAuditLog に到達しないため生値はログに残らない。
+    const fieldWriteChecks: Array<{ requestKey: string; resource: string }> = [
+      { requestKey: "name", resource: "owner_name" },
+      { requestKey: "nameKana", resource: "owner_name_kana" },
+      { requestKey: "phone", resource: "owner_phone" },
+      { requestKey: "zip", resource: "owner_zip" },
+      { requestKey: "address", resource: "owner_address" },
+      { requestKey: "email", resource: "owner_email" },
+      { requestKey: "note", resource: "owner_note" },
+    ];
+    for (const { requestKey, resource } of fieldWriteChecks) {
+      if (requestKey in updateFields && !hasExplicitWritePerm(perms, resource)) {
+        throw new ApiError(403, `${requestKey} を更新する権限がありません`, "FORBIDDEN");
+      }
+    }
+
     // Get current owner for change tracking
     const currentOwner = await prisma.owner.findUnique({ where: { id } });
     if (!currentOwner) {
@@ -179,7 +144,7 @@ export async function PATCH(
       detail: { updatedFields: Object.keys(updateFields) },
     });
 
-    // Fetch updated owner and apply display level
+    // Fetch updated owner
     const updatedOwner = await prisma.owner.findUniqueOrThrow({
       where: { id },
       include: {
@@ -198,6 +163,15 @@ export async function PATCH(
       },
     });
 
+    // Response owner:read gate:
+    // owner:write はあるが owner:read がない構成では、更新自体は許可するが、
+    // レスポンスから PII を返さない（/api/properties/[id] と同方針）。
+    // owner_email:full 等の field-level 権限が残っていても owner:read denied が優先する。
+    if (!hasPermission(perms, "owner", "read")) {
+      return apiResponse({ id: updatedOwner.id });
+    }
+
+    // displayConfig は表示用。owner_email fallback を含む（書込判定には使っていない）。
     const displayConfig = await getOwnerDisplayConfig(session.id);
     const filtered = applyDisplayToOwner(updatedOwner, displayConfig);
 

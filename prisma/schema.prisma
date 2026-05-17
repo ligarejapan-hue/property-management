@@ -376,6 +376,7 @@ model Owner {
   zip             String?
   address         String?
   note            String?
+  email           String?
   externalLinkKey String?  @map("external_link_key")
   version         Int      @default(1)
   isArchived      Boolean  @default(false) @map("is_archived")

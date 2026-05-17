@@ -12,6 +12,7 @@ export interface OwnerDisplayConfig {
   zip: DisplayLevel;
   address: DisplayLevel;
   note: DisplayLevel;
+  email: DisplayLevel;
 }
 
 /** Shape of an owner record coming from the database */
@@ -23,6 +24,7 @@ interface OwnerRecord {
   zip?: string | null;
   address?: string | null;
   note?: string | null;
+  email?: string | null;
   [key: string]: unknown;
 }
 
@@ -35,6 +37,7 @@ export const FIELD_STAFF_OWNER_DISPLAY: OwnerDisplayConfig = {
   zip: "masked",
   address: "partial",
   note: "hidden",
+  email: "masked",
 };
 
 // ----- Masking helpers -----
@@ -59,6 +62,30 @@ export function maskZip(zip: string): string {
   if (digits.length < 3) return "***-****";
   const first3 = digits.slice(0, 3);
   return `${first3}-****`;
+}
+
+/**
+ * Mask an email address, keeping the first 3 characters of the local part.
+ * Example: "yamada@example.com" -> "yam***@example.com"
+ * Short local parts (< 3 chars) are fully masked: "ab@example.com" -> "***@example.com"
+ */
+export function maskEmail(email: string): string {
+  const atIdx = email.indexOf("@");
+  if (atIdx < 0) return "***";
+  const local = email.slice(0, atIdx);
+  const domain = email.slice(atIdx); // includes "@"
+  const visible = local.length >= 3 ? local.slice(0, 3) : "";
+  return `${visible}***${domain}`;
+}
+
+/**
+ * Default text masker for fields without a dedicated mask function (name, nameKana, note).
+ * Shows the first character followed by "***".
+ * Example: "山田太郎" → "山***",  "" → "***"
+ */
+export function maskText(value: string): string {
+  if (value.length === 0) return "***";
+  return value.slice(0, 1) + "***";
 }
 
 /**
@@ -112,6 +139,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
       zip: "full",
       address: "full",
       note: "full",
+      email: "full",
     };
   }
 
@@ -124,6 +152,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
       zip: "full",
       address: "full",
       note: "read",
+      email: "full",
     };
   }
 
@@ -140,6 +169,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
     zip: "hidden",
     address: "hidden",
     note: "hidden",
+    email: "hidden",
   };
 }
 
@@ -163,5 +193,60 @@ export function applyOwnerDisplayLevel(
     zip: applyLevel(owner.zip, config.zip, maskZip),
     address: applyLevel(owner.address, config.address, partialAddress),
     note: applyLevel(owner.note, config.note),
+    email: applyLevel(owner.email, config.email, maskEmail),
   };
+}
+
+/**
+ * Apply a pre-resolved OwnerDisplayConfig to a single owner record.
+ * Used by both /api/owners/[id] and /api/properties/[id] so that
+ * field-level masking (owner_phone, owner_address, owner_email, …)
+ * is applied consistently regardless of which endpoint is called.
+ *
+ * Unlike applyOwnerDisplayLevel (which resolves config from raw PermissionMap),
+ * this function takes an already-resolved config from getOwnerDisplayConfig().
+ */
+export function applyDisplayToOwner(
+  owner: {
+    name: string;
+    nameKana?: string | null;
+    phone?: string | null;
+    zip?: string | null;
+    address?: string | null;
+    note?: string | null;
+    email?: string | null;
+    [key: string]: unknown;
+  },
+  config: OwnerDisplayConfig,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...owner };
+
+  const fieldMap: Array<{
+    key: string;
+    configKey: keyof OwnerDisplayConfig;
+    maskFn?: (v: string) => string;
+  }> = [
+    { key: "name", configKey: "name" },
+    { key: "nameKana", configKey: "nameKana" },
+    { key: "phone", configKey: "phone", maskFn: maskPhone },
+    { key: "zip", configKey: "zip", maskFn: maskZip },
+    { key: "address", configKey: "address", maskFn: partialAddress },
+    { key: "note", configKey: "note" },
+    { key: "email", configKey: "email", maskFn: maskEmail },
+  ];
+
+  for (const { key, configKey, maskFn } of fieldMap) {
+    const level = config[configKey];
+    const value = owner[key];
+
+    if (level === "hidden") {
+      delete result[key];
+    } else if ((level === "masked" || level === "partial") && typeof value === "string") {
+      // maskFn がない場合（name/nameKana/note）はデフォルトマスクを使う
+      result[key] = maskFn ? maskFn(value) : maskText(value);
+    }
+    // "full", "read", "edit" -> keep as-is
+  }
+
+  return result;
 }

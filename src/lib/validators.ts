@@ -92,6 +92,7 @@ export const createOwnerSchema = z.object({
   zip: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   note: z.string().optional().nullable(),
+  email: z.string().email("メールアドレスの形式が正しくありません").optional().nullable(),
   externalLinkKey: z.string().optional().nullable(),
 });
 
@@ -102,6 +103,7 @@ export const updateOwnerSchema = z.object({
   zip: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   note: z.string().optional().nullable(),
+  email: z.string().email("メールアドレスの形式が正しくありません").optional().nullable(),
   version: z.number().int(),
 });
 

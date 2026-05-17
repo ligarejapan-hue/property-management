@@ -62,7 +62,7 @@ export interface PermissionEntry {
 }
 
 export async function getUserPermissions(userId: string): Promise<PermissionEntry[]> {
-  // Mock mode: return admin-level permissions
+  // Mock mode: return admin-level permissions (including owner field-level)
   if (process.env.NEXT_PUBLIC_USE_MOCK === "true") {
     return [
       { resource: "property", action: "read", granted: true },
@@ -71,6 +71,13 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       { resource: "owner", action: "read", granted: true },
       { resource: "owner", action: "write", granted: true },
       { resource: "owner", action: "delete", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
       { resource: "csv_export", action: "read", granted: true },
       { resource: "import", action: "write", granted: true },
       { resource: "user_management", action: "read", granted: true },
@@ -140,6 +147,7 @@ export interface OwnerDisplayConfig {
   zip: DisplayLevel;
   address: DisplayLevel;
   note: DisplayLevel;
+  email: DisplayLevel;
 }
 
 export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDisplayConfig> {
@@ -156,6 +164,14 @@ export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDispla
     return "hidden";
   };
 
+  // owner_email が権限テンプレートに明示設定されていない場合は owner_phone にフォールバック。
+  // これにより seed 実行前の既存本番テンプレートでも email が意図せず hidden にならない。
+  // 「owner_email エントリが存在する（=明示設定済み）」と「存在しない（=未設定）」を区別する。
+  const hasExplicitEmailEntry = permissions.some((p) => p.resource === "owner_email");
+  const emailLevel = hasExplicitEmailEntry
+    ? resolveLevel("owner_email")
+    : resolveLevel("owner_phone"); // 未設定時は owner_phone の設定を継承
+
   return {
     name: resolveLevel("owner_name"),
     nameKana: resolveLevel("owner_name_kana"),
@@ -163,6 +179,7 @@ export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDispla
     zip: resolveLevel("owner_zip"),
     address: resolveLevel("owner_address"),
     note: resolveLevel("owner_note"),
+    email: emailLevel,
   };
 }
 
