@@ -1380,3 +1380,84 @@ describe("route source — note check happens before logging/DB write", () => {
     expect(source).toMatch(/value:\s*data\.email[\s,]+resource:\s*"owner_email"/);
   });
 });
+
+// ── 22. canEditOwner — 編集ボタン表示判定（owner:read 必須）─────────────────
+// owner-edit-utils.ts の canEditOwner pure helper をテストする。
+// owner:read がない場合、API レスポンスは { id } のみで version も undefined になるため
+// 編集ボタンを出さない・保存もしない設計。
+
+import { canEditOwner } from "../owner-edit-utils";
+
+describe("canEditOwner — owner:read 必須 + version 取得確認", () => {
+  it("全条件満たす → 編集可", () => {
+    expect(canEditOwner(true, true, true, 1)).toBe(true);
+  });
+
+  it("owner:read=false なら owner:write=true / hasEditable=true / version=number でも編集不可", () => {
+    expect(canEditOwner(false, true, true, 1)).toBe(false);
+  });
+
+  it("owner:write=false なら編集不可", () => {
+    expect(canEditOwner(true, false, true, 1)).toBe(false);
+  });
+
+  it("hasAnyEditable=false なら編集不可（全フィールド masked 等）", () => {
+    expect(canEditOwner(true, true, false, 1)).toBe(false);
+  });
+
+  it("version=undefined なら編集不可（API が { id } のみ返した場合）", () => {
+    expect(canEditOwner(true, true, true, undefined)).toBe(false);
+  });
+
+  it("version が文字列など number 以外なら編集不可", () => {
+    expect(canEditOwner(true, true, true, "1")).toBe(false);
+    expect(canEditOwner(true, true, true, null)).toBe(false);
+  });
+
+  it("version=0 でも number なら編集可（楽観ロック初期値も number として正常）", () => {
+    expect(canEditOwner(true, true, true, 0)).toBe(true);
+  });
+
+  it("owner:read=true + owner:write=true + editableFields あり + versionあり → 編集可", () => {
+    // Codex 仕様の代表ケース
+    expect(canEditOwner(true, true, true, 3)).toBe(true);
+  });
+});
+
+// ── 23. page.tsx 構造確認 — OwnerTab/OwnerCard が canRead を経由 ───────────────
+// page.tsx ソースを文字列レベルで確認し、owner:read gate が UI 側にも反映されている
+// ことを検証する。
+
+describe("properties/[id]/page.tsx — owner:read gate in UI", () => {
+  const filePath = path.join(
+    __dirname,
+    "../../../src/app/(dashboard)/properties/[id]/page.tsx",
+  );
+  const source = fs.readFileSync(filePath, "utf-8");
+
+  it("canReadOwner state を派生している", () => {
+    expect(source).toMatch(/setCanReadOwner\(/);
+    expect(source).toMatch(/p\.resource\s*===\s*"owner"\s*&&\s*p\.action\s*===\s*"read"/);
+  });
+
+  it("OwnerTab に canRead プロップを渡している", () => {
+    expect(source).toMatch(/canRead\s*=\s*\{canReadOwner\}/);
+  });
+
+  it("OwnerTab が canRead=false で「閲覧する権限がありません」メッセージを返す", () => {
+    expect(source).toMatch(/!canRead/);
+    expect(source).toMatch(/閲覧する権限がありません/);
+  });
+
+  it("OwnerCard が canEditOwner helper を使用している", () => {
+    expect(source).toMatch(/canEditOwner\(canRead,\s*canWrite,\s*hasAnyEditable/);
+  });
+
+  it("handleSave に version 型ガードがある", () => {
+    expect(source).toMatch(/typeof po\.owner\.version !== "number"/);
+  });
+
+  it("ApiOwner.version は optional", () => {
+    expect(source).toMatch(/version\?\:\s*number;/);
+  });
+});

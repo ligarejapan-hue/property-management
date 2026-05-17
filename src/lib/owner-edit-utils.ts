@@ -28,6 +28,27 @@ export type OwnerFormValues = {
 };
 
 /**
+ * 所有者編集ボタンを表示してよいかを判定する純粋関数。
+ *
+ * すべての条件を満たす場合のみ true:
+ * - canReadOwner: owner:read 権限あり（API レスポンスに owner PII が含まれる）
+ * - canWrite: owner:write 権限あり
+ * - hasAnyEditable: 1項目以上 full 編集可能（owner_xxx:full）
+ * - version: 楽観的ロック用の version が number として API レスポンスに含まれている
+ *
+ * owner:read がない場合、API は owner を `{ id }` のみで返すため version も undefined になる。
+ * その状態で編集ボタンを出すと保存時に validation error になるので UI 側でも閉じる。
+ */
+export function canEditOwner(
+  canReadOwner: boolean,
+  canWrite: boolean,
+  hasAnyEditable: boolean,
+  version: unknown,
+): boolean {
+  return canReadOwner && canWrite && hasAnyEditable && typeof version === "number";
+}
+
+/**
  * PATCH /api/owners/[id] 用の payload を構築する。
  * field-level full 権限がない項目は payload に含めず、DB の既存値を上書きしない。
  * name と nameKana はそれぞれ独立した権限で判定する。

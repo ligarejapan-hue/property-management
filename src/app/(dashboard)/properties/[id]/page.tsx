@@ -21,7 +21,7 @@ import ActionBar from "@/components/properties/action-bar";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
-import { OwnerEditableFields, buildOwnerUpdatePayload } from "@/lib/owner-edit-utils";
+import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 
 // ---------- Label maps ----------
 
@@ -84,7 +84,8 @@ interface ApiOwner {
   note: string | null;
   /** hidden 時は API レスポンスにキーが存在しない（undefined）。null は「空値」と区別する。 */
   email?: string | null;
-  version: number;
+  /** owner:read がない場合は API レスポンスが { id } のみになるため optional。 */
+  version?: number;
 }
 
 interface ApiPropertyOwner {
@@ -186,6 +187,7 @@ export default function PropertyDetailPage({
   const [deleting, setDeleting] = useState(false);
   const [canWriteProperty, setCanWriteProperty] = useState(false);
   const [canWriteOwner, setCanWriteOwner] = useState(false);
+  const [canReadOwner, setCanReadOwner] = useState(false);
   const [ownerEditableFields, setOwnerEditableFields] = useState<OwnerEditableFields>({
     name: false,
     nameKana: false,
@@ -241,6 +243,9 @@ export default function PropertyDetailPage({
         );
         setCanWriteOwner(
           perms.some((p) => p.resource === "owner" && p.action === "write" && p.granted),
+        );
+        setCanReadOwner(
+          perms.some((p) => p.resource === "owner" && p.action === "read" && p.granted),
         );
         const hasFullPerm = (resource: string) =>
           perms.some((p) => p.resource === resource && p.action === "full" && p.granted);
@@ -370,6 +375,7 @@ export default function PropertyDetailPage({
         {activeTab === "owner" && (
           <OwnerTab
             owners={property.propertyOwners}
+            canRead={canReadOwner}
             canWrite={canWriteOwner}
             editableFields={ownerEditableFields}
             onRefresh={fetchProperty}
@@ -544,15 +550,27 @@ function BasicTab({
 
 function OwnerTab({
   owners,
+  canRead,
   canWrite,
   editableFields,
   onRefresh,
 }: {
   owners: ApiPropertyOwner[];
+  canRead: boolean;
   canWrite: boolean;
   editableFields: OwnerEditableFields;
   onRefresh: () => Promise<void>;
 }) {
+  // owner:read がない場合、API は owner を { id } のみで返すため詳細表示・編集は不可。
+  // 編集ボタンも出さない（OwnerCard 側の canEditOwner でも防御するが、ここで早期に閉じる）。
+  if (!canRead) {
+    return (
+      <p className="py-8 text-center text-sm text-gray-500">
+        所有者情報を閲覧する権限がありません
+      </p>
+    );
+  }
+
   if (owners.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-gray-500">
@@ -576,6 +594,7 @@ function OwnerTab({
           po={po}
           idx={idx}
           total={owners.length}
+          canRead={canRead}
           canWrite={canWrite}
           editableFields={editableFields}
           onRefresh={onRefresh}
@@ -591,6 +610,7 @@ function OwnerCard({
   po,
   idx,
   total,
+  canRead,
   canWrite,
   editableFields,
   onRefresh,
@@ -598,6 +618,7 @@ function OwnerCard({
   po: ApiPropertyOwner;
   idx: number;
   total: number;
+  canRead: boolean;
   canWrite: boolean;
   editableFields: OwnerEditableFields;
   onRefresh: () => Promise<void>;
@@ -609,7 +630,7 @@ function OwnerCard({
   // email が API レスポンスに含まれているか（hidden の場合キーが存在しない）
   const emailReturned = "email" in po.owner;
 
-  // 少なくとも1項目でも full 編集可能かどうか（編集ボタン表示条件）
+  // 少なくとも1項目でも full 編集可能かどうか
   const hasAnyEditable =
     editableFields.name ||
     editableFields.nameKana ||
@@ -617,6 +638,10 @@ function OwnerCard({
     editableFields.zip ||
     editableFields.address ||
     editableFields.email;
+
+  // 編集ボタン表示条件: canEditOwner pure helper を使用。
+  // owner:read がない場合は API レスポンスが { id } のみで version も undefined になるため編集不可。
+  const editAllowed = canEditOwner(canRead, canWrite, hasAnyEditable, po.owner.version);
 
   const [form, setForm] = useState({
     name: po.owner.name ?? "",
@@ -646,11 +671,18 @@ function OwnerCard({
   };
 
   const handleSave = async () => {
+    // 編集ボタン非表示時の異常呼び出しガード:
+    // owner:read がない・version 未返却の場合は保存不可。
+    if (typeof po.owner.version !== "number") {
+      setSaveError("保存に必要な情報が取得できていません。画面を再読み込みしてください。");
+      return;
+    }
+    const version = po.owner.version;
     setSaving(true);
     setSaveError(null);
     try {
       // full 権限のある項目だけ payload に含める。masked/hidden 項目は送信しない。
-      const payload = buildOwnerUpdatePayload(form, editableFields, po.owner.version);
+      const payload = buildOwnerUpdatePayload(form, editableFields, version);
       await updateOwner(po.ownerId, payload as Parameters<typeof updateOwner>[1]);
       setEditing(false);
       await onRefresh();
@@ -683,8 +715,8 @@ function OwnerCard({
             {po.relationship}
           </span>
         )}
-        {/* owner:write かつ編集可能項目が1つ以上ある場合のみ編集ボタンを表示 */}
-        {canWrite && !editing && hasAnyEditable && (
+        {/* 編集ボタンは canEditOwner (owner:read + owner:write + 編集可能項目あり + version 取得済み) のみ表示 */}
+        {editAllowed && !editing && (
           <button
             type="button"
             onClick={handleEdit}
