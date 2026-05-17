@@ -22,6 +22,7 @@ import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
+import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 
 // ---------- Label maps ----------
 
@@ -188,6 +189,7 @@ export default function PropertyDetailPage({
   const [canWriteProperty, setCanWriteProperty] = useState(false);
   const [canWriteOwner, setCanWriteOwner] = useState(false);
   const [canReadOwner, setCanReadOwner] = useState(false);
+  const [canCreateOwnerMemo, setCanCreateOwnerMemo] = useState(false);
   const [ownerEditableFields, setOwnerEditableFields] = useState<OwnerEditableFields>({
     name: false,
     nameKana: false,
@@ -249,6 +251,8 @@ export default function PropertyDetailPage({
         );
         const hasFullPerm = (resource: string) =>
           perms.some((p) => p.resource === resource && p.action === "full" && p.granted);
+        const hasEditPerm = (resource: string) =>
+          perms.some((p) => p.resource === resource && p.action === "edit" && p.granted);
         setOwnerEditableFields({
           name: hasFullPerm("owner_name"),
           nameKana: hasFullPerm("owner_name_kana"),
@@ -257,6 +261,13 @@ export default function PropertyDetailPage({
           address: hasFullPerm("owner_address"),
           email: hasFullPerm("owner_email"),
         });
+        // OwnerMemo 作成可否: owner:write かつ owner_note の full/edit を要求（API 側の canCreateOwnerMemo と整合）
+        const ownerWrite = perms.some(
+          (p) => p.resource === "owner" && p.action === "write" && p.granted,
+        );
+        setCanCreateOwnerMemo(
+          ownerWrite && (hasFullPerm("owner_note") || hasEditPerm("owner_note")),
+        );
       })
       .catch(() => {});
   }, []);
@@ -378,6 +389,7 @@ export default function PropertyDetailPage({
             canRead={canReadOwner}
             canWrite={canWriteOwner}
             editableFields={ownerEditableFields}
+            canCreateMemo={canCreateOwnerMemo}
             onRefresh={fetchProperty}
           />
         )}
@@ -553,12 +565,14 @@ function OwnerTab({
   canRead,
   canWrite,
   editableFields,
+  canCreateMemo,
   onRefresh,
 }: {
   owners: ApiPropertyOwner[];
   canRead: boolean;
   canWrite: boolean;
   editableFields: OwnerEditableFields;
+  canCreateMemo: boolean;
   onRefresh: () => Promise<void>;
 }) {
   // owner:read がない場合、API は owner を { id } のみで返すため詳細表示・編集は不可。
@@ -597,6 +611,7 @@ function OwnerTab({
           canRead={canRead}
           canWrite={canWrite}
           editableFields={editableFields}
+          canCreateMemo={canCreateMemo}
           onRefresh={onRefresh}
         />
       ))}
@@ -613,6 +628,7 @@ function OwnerCard({
   canRead,
   canWrite,
   editableFields,
+  canCreateMemo,
   onRefresh,
 }: {
   po: ApiPropertyOwner;
@@ -621,6 +637,7 @@ function OwnerCard({
   canRead: boolean;
   canWrite: boolean;
   editableFields: OwnerEditableFields;
+  canCreateMemo: boolean;
   onRefresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -855,6 +872,16 @@ function OwnerCard({
       <div className="mt-5 border-t border-gray-100 pt-4">
         <PropertyOwnerNoteEditor po={po} />
       </div>
+
+      {/* メモ履歴: Owner 単位（追記のみ） */}
+      {canRead && (
+        <div className="mt-5 border-t border-gray-100 pt-4">
+          <OwnerMemoHistory
+            ownerId={po.ownerId}
+            canCreate={canCreateMemo}
+          />
+        </div>
+      )}
     </div>
   );
 }

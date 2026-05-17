@@ -185,6 +185,7 @@ model User {
   permissionChangesBy     PermissionChangeLog[]    @relation("PermissionChangedBy")
   permissionChangesFor    PermissionChangeLog[]    @relation("PermissionChangedFor")
   buildings               Building[]
+  ownerMemos              OwnerMemo[]              @relation("OwnerMemoCreatedBy")
 
   @@map("users")
 }
@@ -385,6 +386,7 @@ model Owner {
 
   propertyOwners PropertyOwner[]
   attachments    Attachment[]
+  memos          OwnerMemo[]
 
   @@index([nameKana])
   @@index([externalLinkKey])
@@ -410,6 +412,22 @@ model PropertyOwner {
 
   @@unique([propertyId, ownerId])
   @@map("property_owners")
+}
+
+/// 所有者ごとに追記するメモ履歴。ownerId 単位で時系列に積み上げる追記専用テーブル。
+/// 既存の Owner.note / PropertyOwner.note とは別系統で、編集/削除は今回スコープ外。
+model OwnerMemo {
+  id        String   @id @default(uuid()) @db.Uuid
+  ownerId   String   @map("owner_id") @db.Uuid
+  body      String
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  owner   Owner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  creator User  @relation("OwnerMemoCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([ownerId, createdAt])
+  @@map("owner_memos")
 }
 
 model PropertyPhoto {
