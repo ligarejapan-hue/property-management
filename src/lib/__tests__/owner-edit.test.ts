@@ -1104,57 +1104,65 @@ describe("migration backfill — owner_email", () => {
     expect(migrationSql).toMatch(/ALTER TABLE "owners" ADD COLUMN "email"/);
   });
 
-  it("現地担当用テンプレートへ owner_email:masked backfill が含まれる", () => {
-    expect(migrationSql).toMatch(/'現地担当用'/);
-    expect(migrationSql).toMatch(/'owner_email', 'masked'/);
-  });
-
-  it("事務担当用テンプレートへ owner_email:full backfill が含まれる", () => {
-    expect(migrationSql).toMatch(/'事務担当用'/);
-  });
-
-  it("管理者用テンプレートへ owner_email:full backfill が含まれる", () => {
-    expect(migrationSql).toMatch(/'管理者用'/);
-  });
-
-  it("ON CONFLICT DO NOTHING でべき等になっている", () => {
-    expect(migrationSql).toMatch(/ON CONFLICT.*DO NOTHING/i);
-  });
+  // ── template_permissions: owner_phone → owner_email コピー方式 ─────────────
+  // テンプレート名固定の full/masked 付与をやめ、既存 owner_phone 設定を
+  // 引き継ぐ方式に変更。これでカスタムテンプレートでも整合が取れる。
 
   it("template_permissions テーブルへ INSERT している", () => {
     expect(migrationSql).toMatch(/INSERT INTO "template_permissions"/);
   });
 
+  it("既存 template_permissions の owner_phone を owner_email にコピーしている", () => {
+    expect(migrationSql).toMatch(/FROM\s+"template_permissions"\s+tp/);
+    expect(migrationSql).toMatch(/tp\."resource"\s*=\s*'owner_phone'/);
+    expect(migrationSql).toMatch(/'owner_email',\s*tp\."action",\s*tp\."granted"/);
+  });
+
+  it("template_permissions の ON CONFLICT が (template_id, resource, action) でべき等", () => {
+    expect(migrationSql).toMatch(
+      /ON CONFLICT\s*\(\s*"template_id",\s*"resource",\s*"action"\s*\)\s*DO NOTHING/i,
+    );
+  });
+
+  it("テンプレート名固定の owner_email 付与は残っていない", () => {
+    // WHERE t.name = '事務担当用' / '管理者用' で owner_email を固定付与しないこと。
+    // 過去版では '事務担当用'/'管理者用'/'現地担当用' を直書きしていたが、本番カスタムを
+    // 壊すため owner_phone コピー方式に置き換えた。
+    expect(migrationSql).not.toMatch(/'事務担当用'/);
+    expect(migrationSql).not.toMatch(/'管理者用'/);
+    // 現地担当用も同様に固定付与しない（owner_phone から継承する）
+    expect(migrationSql).not.toMatch(/WHERE\s+t\.name\s*=\s*'現地担当用'/);
+    // 固定アクション ('owner_email', 'full' / 'owner_email', 'masked') が
+    // テンプレート名分岐で書かれていないこと
+    expect(migrationSql).not.toMatch(/'owner_email',\s*'full'/);
+    expect(migrationSql).not.toMatch(/'owner_email',\s*'masked'/);
+  });
+
   // ── user_permissions override の引き継ぎ ────────────────────────────────────
-  // 既存ユーザーの owner_phone override を owner_email にコピーする backfill
-  // が含まれることを確認する。
 
   it("user_permissions テーブルへ owner_email override の backfill が含まれる", () => {
     expect(migrationSql).toMatch(/INSERT INTO "user_permissions"/);
   });
 
-  it("backfill のソースが owner_phone override である", () => {
-    // FROM "user_permissions" up WHERE up."resource" = 'owner_phone'
+  it("user_permissions のソースが owner_phone override である", () => {
     expect(migrationSql).toMatch(/FROM\s+"user_permissions"\s+up/);
     expect(migrationSql).toMatch(/up\."resource"\s*=\s*'owner_phone'/);
   });
 
-  it("owner_email を resource 名としてコピーしている", () => {
-    // SELECT ... , 'owner_email', up."action", up."granted"
+  it("user_permissions も owner_email を resource 名としてコピーしている", () => {
     expect(migrationSql).toMatch(/'owner_email',\s*up\."action",\s*up\."granted"/);
   });
 
-  it("user_permissions の ON CONFLICT が (user_id, resource, action) でべき等になっている", () => {
+  it("user_permissions の ON CONFLICT が (user_id, resource, action) でべき等", () => {
     expect(migrationSql).toMatch(
       /ON CONFLICT\s*\(\s*"user_id",\s*"resource",\s*"action"\s*\)\s*DO NOTHING/i,
     );
   });
 
-  it("既存 template_permissions backfill は維持されている（owner_email 3テンプレート分）", () => {
-    // template_permissions と user_permissions の INSERT が両方含まれること
+  it("template_permissions と user_permissions の両 backfill が含まれる", () => {
     const templateInserts = (migrationSql.match(/INSERT INTO "template_permissions"/g) ?? []).length;
     const userInserts = (migrationSql.match(/INSERT INTO "user_permissions"/g) ?? []).length;
-    expect(templateInserts).toBeGreaterThanOrEqual(3); // 現地担当用/事務担当用/管理者用
+    expect(templateInserts).toBeGreaterThanOrEqual(1);
     expect(userInserts).toBeGreaterThanOrEqual(1);
   });
 });
