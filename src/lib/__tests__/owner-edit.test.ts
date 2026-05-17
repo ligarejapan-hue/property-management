@@ -1124,6 +1124,39 @@ describe("migration backfill — owner_email", () => {
   it("template_permissions テーブルへ INSERT している", () => {
     expect(migrationSql).toMatch(/INSERT INTO "template_permissions"/);
   });
+
+  // ── user_permissions override の引き継ぎ ────────────────────────────────────
+  // 既存ユーザーの owner_phone override を owner_email にコピーする backfill
+  // が含まれることを確認する。
+
+  it("user_permissions テーブルへ owner_email override の backfill が含まれる", () => {
+    expect(migrationSql).toMatch(/INSERT INTO "user_permissions"/);
+  });
+
+  it("backfill のソースが owner_phone override である", () => {
+    // FROM "user_permissions" up WHERE up."resource" = 'owner_phone'
+    expect(migrationSql).toMatch(/FROM\s+"user_permissions"\s+up/);
+    expect(migrationSql).toMatch(/up\."resource"\s*=\s*'owner_phone'/);
+  });
+
+  it("owner_email を resource 名としてコピーしている", () => {
+    // SELECT ... , 'owner_email', up."action", up."granted"
+    expect(migrationSql).toMatch(/'owner_email',\s*up\."action",\s*up\."granted"/);
+  });
+
+  it("user_permissions の ON CONFLICT が (user_id, resource, action) でべき等になっている", () => {
+    expect(migrationSql).toMatch(
+      /ON CONFLICT\s*\(\s*"user_id",\s*"resource",\s*"action"\s*\)\s*DO NOTHING/i,
+    );
+  });
+
+  it("既存 template_permissions backfill は維持されている（owner_email 3テンプレート分）", () => {
+    // template_permissions と user_permissions の INSERT が両方含まれること
+    const templateInserts = (migrationSql.match(/INSERT INTO "template_permissions"/g) ?? []).length;
+    const userInserts = (migrationSql.match(/INSERT INTO "user_permissions"/g) ?? []).length;
+    expect(templateInserts).toBeGreaterThanOrEqual(3); // 現地担当用/事務担当用/管理者用
+    expect(userInserts).toBeGreaterThanOrEqual(1);
+  });
 });
 
 // ── 19. 管理画面 RESOURCES — owner_email / owner_name_kana 表示 ───────────────
