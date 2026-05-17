@@ -1461,3 +1461,101 @@ describe("properties/[id]/page.tsx — owner:read gate in UI", () => {
     expect(source).toMatch(/version\?\:\s*number;/);
   });
 });
+
+// ── 24. PATCH /api/owners/[id] response owner:read gate ──────────────────────
+// owner:write はあるが owner:read がない構成では、更新は許可するが PATCH レスポンス
+// から owner PII を返さない（/api/properties/[id] と同方針）。
+
+/** route.ts の PATCH response owner:read gate ロジックと同等の純粋関数 */
+function resolveOwnerInPatchResponse(
+  updatedOwner: { id: string; name: string; email?: string | null; phone?: string | null },
+  canReadOwner: boolean,
+  maskedOwner: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!canReadOwner) return { id: updatedOwner.id };
+  return maskedOwner;
+}
+
+const sampleUpdated = {
+  id: "owner-1",
+  name: "山田太郎",
+  email: "yamada@example.com",
+  phone: "090-1234-5678",
+};
+
+describe("PATCH /api/owners/[id] — response owner:read gate", () => {
+  it("owner:read=false なら response は { id } のみ", () => {
+    const result = resolveOwnerInPatchResponse(sampleUpdated, false, { ...sampleUpdated });
+    expect(result).toEqual({ id: "owner-1" });
+    expect(result).not.toHaveProperty("name");
+    expect(result).not.toHaveProperty("email");
+    expect(result).not.toHaveProperty("phone");
+  });
+
+  it("owner:read=false なら owner_email:full があっても email は返らない", () => {
+    const perms = [
+      { resource: "owner", action: "write", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      // owner:read エントリなし
+    ];
+    const canReadOwner = hasPermission(perms, "owner", "read");
+    expect(canReadOwner).toBe(false);
+    const result = resolveOwnerInPatchResponse(sampleUpdated, canReadOwner, { ...sampleUpdated });
+    expect(result).not.toHaveProperty("email");
+  });
+
+  it("owner:read=true なら maskedOwner をそのまま返す（display-level 適用済み）", () => {
+    const masked = { id: "owner-1", name: "山田太郎", email: "yam***@example.com" };
+    const result = resolveOwnerInPatchResponse(sampleUpdated, true, masked);
+    expect(result).toEqual(masked);
+    expect(result.email).toBe("yam***@example.com");
+  });
+
+  it("owner:write + owner:read 両方ありなら full な display-level 適用", () => {
+    const perms = [
+      { resource: "owner", action: "write", granted: true },
+      { resource: "owner", action: "read", granted: true },
+    ];
+    expect(hasPermission(perms, "owner", "read")).toBe(true);
+  });
+});
+
+describe("PATCH route source — response owner:read gate", () => {
+  const routePath = path.join(__dirname, "../../../src/app/api/owners/[id]/route.ts");
+  const fullSource = fs.readFileSync(routePath, "utf-8");
+  const patchStart = fullSource.indexOf("export async function PATCH");
+  const patchSource = fullSource.slice(patchStart);
+
+  it("PATCH ハンドラに owner:read チェックがある", () => {
+    expect(patchSource).toMatch(/hasPermission\(perms,\s*"owner",\s*"read"\)/);
+  });
+
+  it("PATCH ハンドラで canRead=false 時に { id } のみ返す分岐がある", () => {
+    expect(patchSource).toMatch(/apiResponse\(\{\s*id:\s*updatedOwner\.id\s*\}\)/);
+  });
+
+  it("PATCH response gate は updateMany より後ろ（更新自体は許可される）", () => {
+    const updateManyIdx = patchSource.indexOf("prisma.owner.updateMany");
+    const gateIdx = patchSource.indexOf('hasPermission(perms, "owner", "read")');
+    expect(updateManyIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeGreaterThan(updateManyIdx);
+  });
+
+  it("PATCH response gate は recordChanges / writeAuditLog より後ろ（更新ログは残る）", () => {
+    const recordIdx = patchSource.indexOf("recordChanges({");
+    const auditIdx = patchSource.indexOf("writeAuditLog({");
+    const gateIdx = patchSource.indexOf('hasPermission(perms, "owner", "read")');
+    expect(gateIdx).toBeGreaterThan(recordIdx);
+    expect(gateIdx).toBeGreaterThan(auditIdx);
+  });
+
+  it("既存の field-level write check (fieldWriteChecks) は維持されている", () => {
+    expect(patchSource).toMatch(/fieldWriteChecks/);
+    expect(patchSource).toMatch(/hasExplicitWritePerm\(perms,\s*resource\)/);
+  });
+
+  it("既存の owner_email / owner_note の field-level write check も維持されている", () => {
+    expect(patchSource).toMatch(/resource:\s*"owner_email"/);
+    expect(patchSource).toMatch(/resource:\s*"owner_note"/);
+  });
+});

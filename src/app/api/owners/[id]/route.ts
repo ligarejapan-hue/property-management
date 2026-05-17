@@ -144,8 +144,7 @@ export async function PATCH(
       detail: { updatedFields: Object.keys(updateFields) },
     });
 
-    // Fetch updated owner and apply display level
-    // displayConfig は表示用。owner_email fallback を含む（書込判定には使っていない）。
+    // Fetch updated owner
     const updatedOwner = await prisma.owner.findUniqueOrThrow({
       where: { id },
       include: {
@@ -164,6 +163,15 @@ export async function PATCH(
       },
     });
 
+    // Response owner:read gate:
+    // owner:write はあるが owner:read がない構成では、更新自体は許可するが、
+    // レスポンスから PII を返さない（/api/properties/[id] と同方針）。
+    // owner_email:full 等の field-level 権限が残っていても owner:read denied が優先する。
+    if (!hasPermission(perms, "owner", "read")) {
+      return apiResponse({ id: updatedOwner.id });
+    }
+
+    // displayConfig は表示用。owner_email fallback を含む（書込判定には使っていない）。
     const displayConfig = await getOwnerDisplayConfig(session.id);
     const filtered = applyDisplayToOwner(updatedOwner, displayConfig);
 
