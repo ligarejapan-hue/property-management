@@ -6,6 +6,7 @@ import {
   type OwnerCorrectionCandidate,
   type OwnerCorrectionCandidatesResponse,
 } from "@/lib/api-client";
+import { AddressFillButton } from "@/components/owners/AddressFillButton";
 
 type FilterType = "all" | "orphan" | "address_null" | "duplicate";
 
@@ -93,7 +94,7 @@ export default function OwnerCorrectionPage() {
         </h1>
       </div>
       <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-        確認専用画面です。この画面からデータベースを変更することはできません。
+        「住所なし」タブの候補には住所補完を個別実行できます。削除・統合・再リンクは実装していません。
       </p>
 
       {/* Filter tabs */}
@@ -162,6 +163,7 @@ export default function OwnerCorrectionPage() {
                     </th>
                     <th className="px-3 py-2 text-left font-medium">推奨</th>
                     <th className="px-3 py-2 text-left font-medium">ID</th>
+                    <th className="px-3 py-2 text-left font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -247,6 +249,16 @@ export default function OwnerCorrectionPage() {
                       <td className="px-3 py-2 font-mono text-[10px] text-gray-400">
                         {c.id.slice(0, 8)}…
                       </td>
+                      <td className="px-3 py-2">
+                        {c.types.includes("address_null") && (
+                          <AddressFillButton
+                            ownerId={c.id}
+                            ownerVersion={c.version}
+                            previewAddress={null}
+                            onSuccess={() => load(filterType)}
+                          />
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -255,7 +267,7 @@ export default function OwnerCorrectionPage() {
           )}
 
           <p className="mt-4 text-xs text-gray-400">
-            ※ 削除・統合・再リンクの実行機能はこの画面には実装していません。
+            ※ 削除・統合・再リンクの実行機能は Phase 2 以降で対応予定です。
           </p>
         </>
       )}
