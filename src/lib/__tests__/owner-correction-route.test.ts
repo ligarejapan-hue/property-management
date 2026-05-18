@@ -146,11 +146,12 @@ describe("POST /api/admin/owners/[ownerId]/correction/address-fill", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // デフォルト: 管理者権限フル
+    // デフォルト: 管理者権限フル（owner_address:full を含む）
     vi.mocked(getUserPermissions).mockResolvedValue([
       { resource: "user_management", action: "read", granted: true },
       { resource: "owner", action: "read", granted: true },
       { resource: "owner", action: "write", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
     ]);
 
     // $transaction はデフォルトで _tx コールバックを実行
@@ -230,6 +231,80 @@ describe("POST /api/admin/owners/[ownerId]/correction/address-fill", () => {
     ]);
     const res = await POST(makeRequest({ version: 1 }), makeParams());
     expect(res.status).toBe(403);
+  });
+
+  // ── owner_address フィールドレベル書込権 403 ──────────────────────────────
+
+  const basePerms = [
+    { resource: "user_management", action: "read", granted: true },
+    { resource: "owner", action: "read", granted: true },
+    { resource: "owner", action: "write", granted: true },
+  ];
+
+  it("owner_address:edit → 正常系が通る（edit は full と同等）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      ...basePerms,
+      { resource: "owner_address", action: "edit", granted: true },
+    ]);
+    setupHappyPath();
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(201);
+  });
+
+  it("owner_address:masked → 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      ...basePerms,
+      { resource: "owner_address", action: "masked", granted: true },
+    ]);
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(403);
+  });
+
+  it("owner_address:partial → 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      ...basePerms,
+      { resource: "owner_address", action: "partial", granted: true },
+    ]);
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(403);
+  });
+
+  it("owner_address:hidden → 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      ...basePerms,
+      { resource: "owner_address", action: "hidden", granted: true },
+    ]);
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(403);
+  });
+
+  it("owner_address:read のみ → 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      ...basePerms,
+      { resource: "owner_address", action: "read", granted: true },
+    ]);
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(403);
+  });
+
+  it("owner_address 権限なし → 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(basePerms);
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(403);
+  });
+
+  it("owner_address 権限不足時は request.json が呼ばれず prisma/AuditLog に到達しない", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      ...basePerms,
+      { resource: "owner_address", action: "masked", granted: true },
+    ]);
+    // prisma は一切呼ばれないこと
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(403);
+    expect(pm.owner.findUnique).not.toHaveBeenCalled();
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+    expect(pm.$transaction).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   // ── 入力不正 400 ──────────────────────────────────────────────────────────

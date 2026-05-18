@@ -7,7 +7,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import {
   extractAddressFromRawData,
@@ -21,6 +21,7 @@ import {
 //   - user_management:read（管理者エリア）
 //   - owner:read（所有者閲覧権）
 //   - owner:write（所有者更新権）
+//   - owner_address full または edit（フィールドレベル書込権）
 //
 // 安全条件（すべて API 側で再検証）:
 //   - Owner.address が null または空文字
@@ -62,6 +63,9 @@ export async function POST(
     }
     if (!hasPermission(perms, "owner", "write")) {
       throw new ApiError(403, "所有者更新の権限がありません", "FORBIDDEN");
+    }
+    if (!hasExplicitWritePerm(perms, "owner_address")) {
+      throw new ApiError(403, "所有者住所を更新する権限がありません", "FORBIDDEN");
     }
 
     // リクエストボディ
