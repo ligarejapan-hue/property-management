@@ -4,7 +4,13 @@
  * Phase 1: address_null Owner への住所補完に関するヘルパー。
  * - rawData からの住所抽出
  * - 住所補完の安全条件チェック（address_null 専用）
+ * - 受付帳×所有者 ImportJobRow からの owner entry 解決（reception-owner source）
  */
+import {
+  type RecoveredOwner,
+  RECEPTION_OWNER_LINK_DATA_KEY,
+} from "./reception-owner-link";
+import { normalizeName } from "./normalize";
 
 // rawData の住所フィールド候補（直接値として使えるキー名）。
 // owner-csv ルートの OWNER_CSV_COLUMN_MAP と整合させた優先順序。
@@ -109,6 +115,12 @@ export interface AddressFillSafetyCheckInput {
   addressChangeLogExists: boolean;
   /** rawData から抽出した住所候補（null なら抽出失敗）。 */
   extractedAddress: string | null;
+  /**
+   * 受付帳×所有者 row が一意だが、内部の owner link entry が複数一致した場合 true。
+   * importRowCount === 1 かつこのフラグが true の場合は reception_owner_source_ambiguous。
+   * 省略時は false 扱い。
+   */
+  receptionOwnerEntryAmbiguous?: boolean;
 }
 
 export type AddressFillSafetyResult =
@@ -116,12 +128,13 @@ export type AddressFillSafetyResult =
   | { ok: false; reason: AddressFillBlockReason };
 
 export type AddressFillBlockReason =
-  | "address_already_set"        // すでに住所が入っている（上書き防止）
-  | "import_source_unknown"      // ImportJobRow が 0件
-  | "import_source_ambiguous"    // ImportJobRow が 2件以上（一意に特定できない）
-  | "import_row_not_success"     // ImportJobRow.status !== "success"
-  | "address_changelog_exists"   // address フィールドの ChangeLog あり（手動編集済み）
-  | "no_address_in_rawdata";     // rawData から住所を抽出できなかった
+  | "address_already_set"              // すでに住所が入っている（上書き防止）
+  | "import_source_unknown"            // ImportJobRow が 0件
+  | "import_source_ambiguous"          // ImportJobRow が 2件以上（一意に特定できない）
+  | "import_row_not_success"           // ImportJobRow.status !== "success"
+  | "address_changelog_exists"         // address フィールドの ChangeLog あり（手動編集済み）
+  | "no_address_in_rawdata"            // rawData から住所を抽出できなかった
+  | "reception_owner_source_ambiguous"; // reception-owner row の owner entry が複数一致
 
 /**
  * 住所補完が安全に実行できるかを判定する。
@@ -146,6 +159,10 @@ export function checkAddressFillSafety(
     return { ok: false, reason: "import_source_ambiguous" };
   }
   // importRowCount === 1 ここから
+  // reception-owner row が一意でも owner link entry が複数一致した場合
+  if (input.receptionOwnerEntryAmbiguous) {
+    return { ok: false, reason: "reception_owner_source_ambiguous" };
+  }
   if (!input.importRowSuccess) {
     return { ok: false, reason: "import_row_not_success" };
   }
@@ -156,4 +173,74 @@ export function checkAddressFillSafety(
     return { ok: false, reason: "no_address_in_rawdata" };
   }
   return { ok: true, address: input.extractedAddress };
+}
+
+// ---------------------------------------------------------------------------
+// Reception-owner source helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * 受付帳×所有者 ImportJobRow の __owner_link_data から、対象 Owner に対応する
+ * RecoveredOwner エントリを一意に特定する。
+ *
+ * マッチング方針:
+ *   1. normalizeName で氏名を正規化して完全一致する entry を抽出
+ *   2. 複数一致かつ ownerZip が双方に存在する場合、zip で絞り込みを試みる
+ *   3. 最終的に 0件 → no_address_in_rawdata / 複数 → reception_owner_source_ambiguous
+ *   4. entry.address が空の場合も no_address_in_rawdata
+ *
+ * ownerName が null/空の場合はマッチング不能として no_address_in_rawdata を返す。
+ */
+export function resolveReceptionOwnerEntry(
+  entries: RecoveredOwner[],
+  ownerName: string | null | undefined,
+  ownerZip: string | null | undefined,
+): { ok: true; entry: RecoveredOwner } | { ok: false; reason: "reception_owner_source_ambiguous" | "no_address_in_rawdata" } {
+  const targetName = normalizeName(ownerName ?? "");
+  if (!targetName) {
+    return { ok: false, reason: "no_address_in_rawdata" };
+  }
+
+  const nameMatches = entries.filter(
+    (e) => normalizeName(e.name) === targetName,
+  );
+
+  if (nameMatches.length === 0) {
+    return { ok: false, reason: "no_address_in_rawdata" };
+  }
+
+  if (nameMatches.length > 1) {
+    // zip で絞り込みを試みる（両方に zip がある場合のみ）
+    const targetZip = ownerZip ? ownerZip.trim() : null;
+    if (targetZip) {
+      const zipMatches = nameMatches.filter(
+        (e) => e.zip && e.zip.trim() === targetZip,
+      );
+      if (zipMatches.length === 1) {
+        const entry = zipMatches[0];
+        if (!entry.address) return { ok: false, reason: "no_address_in_rawdata" };
+        return { ok: true, entry };
+      }
+    }
+    return { ok: false, reason: "reception_owner_source_ambiguous" };
+  }
+
+  // name match が 1件
+  const entry = nameMatches[0];
+  if (!entry.address) return { ok: false, reason: "no_address_in_rawdata" };
+  return { ok: true, entry };
+}
+
+/**
+ * RecoveredOwner エントリから住所抽出結果を生成する。
+ * sourceFieldNames は値を含まないフィールドパス名のみにする（AuditLog PII 要件）。
+ */
+export function extractAddressFromRecoveredOwner(
+  entry: RecoveredOwner,
+): ExtractAddressResult | null {
+  if (!entry.address || entry.address.trim() === "") return null;
+  return {
+    address: entry.address.trim(),
+    sourceFieldNames: [`${RECEPTION_OWNER_LINK_DATA_KEY}.address`],
+  };
 }

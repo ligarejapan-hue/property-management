@@ -12,7 +12,14 @@ import { writeAuditLog } from "@/lib/audit";
 import {
   extractAddressFromRawData,
   checkAddressFillSafety,
+  resolveReceptionOwnerEntry,
+  extractAddressFromRecoveredOwner,
+  type ExtractAddressResult,
 } from "@/lib/owner-correction";
+import {
+  isReceptionOwnerJobRow,
+  parseRecoveredOwners,
+} from "@/lib/reception-owner-link";
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/owners/:ownerId/correction/address-fill
@@ -25,11 +32,15 @@ import {
 //
 // 安全条件（すべて API 側で再検証）:
 //   - Owner.address が null または空文字
-//   - ImportJobRow (owner_csv) が ownerId から一意（1件）に特定できる
-//     0件 → import_source_unknown / 2件以上 → import_source_ambiguous
+//   - source row が一意に特定できること（2パスで解決）
+//     Pass A: ImportJobRow.createdId === ownerId の owner_csv 行
+//       0件 → Pass B へ / 1件 → direct source / 2件以上 → import_source_ambiguous
+//     Pass B: PropertyOwner.propertyId 経由の受付帳×所有者行（受付帳マーカあり）
+//       0件 → import_source_unknown / 1件 → owner entry を解決 / 2件以上 → import_source_ambiguous
+//       owner entry 複数一致 → reception_owner_source_ambiguous
 //   - ImportJobRow.status が success
 //   - address フィールドの ChangeLog が存在しない
-//   - ImportJobRow.rawData から住所を抽出できる
+//   - source から住所を抽出できる
 //
 // Request body:
 //   { version: number }  — 楽観ロック用
@@ -75,18 +86,22 @@ export async function POST(
       throw new ApiError(400, "version は正の整数で指定してください", "INVALID_INPUT");
     }
 
-    // Owner 取得（address の現在値を含む）
+    // Owner 取得（name / zip は reception-owner matching に使用）
     const owner = await prisma.owner.findUnique({
       where: { id: ownerId },
-      select: { id: true, address: true, version: true, isArchived: true },
+      select: { id: true, name: true, address: true, zip: true, version: true, isArchived: true },
     });
     if (!owner || owner.isArchived) {
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
 
-    // ImportJobRow 取得。一意性を確認するため全件取得して件数を判定する。
-    // 複数件の中から success を勝手に選ばない。
-    const importRows = await prisma.importJobRow.findMany({
+    // ── Source resolution（2パス） ──────────────────────────────────────────
+    // Pass A: direct owner_csv rows (createdId === ownerId)
+    // Pass B: 受付帳×所有者 rows (direct=0 時のみ。createdId === propertyId)
+    //
+    // 複数候補から success を勝手に選ばない。一意確定した場合のみ実行。
+
+    const directRows = await prisma.importJobRow.findMany({
       where: {
         createdId: ownerId,
         job: { jobType: "owner_csv" },
@@ -100,8 +115,86 @@ export async function POST(
       },
       orderBy: { createdAt: "asc" },
     });
-    // importRowCount が 0 / 2以上 の場合は safety check で弾く。1件のときのみ参照。
-    const importRow = importRows.length === 1 ? importRows[0] : null;
+
+    let resolvedImportRow: (typeof directRows)[number] | null = null;
+    let resolvedExtract: ExtractAddressResult | null = null;
+    let resolvedSourceType: "direct" | "reception_owner" = "direct";
+    let importRowCount: number;
+    let receptionOwnerEntryAmbiguous = false;
+
+    if (directRows.length === 1) {
+      // Pass A: 一意確定
+      resolvedImportRow = directRows[0];
+      resolvedExtract = extractAddressFromRawData(
+        directRows[0].rawData as Record<string, unknown> | null,
+      );
+      importRowCount = 1;
+    } else if (directRows.length > 1) {
+      // Pass A: 複数 → ambiguous
+      importRowCount = directRows.length;
+    } else {
+      // Pass A: 0件 → Pass B を試みる
+      importRowCount = 0;
+
+      const propertyOwners = await prisma.propertyOwner.findMany({
+        where: { ownerId },
+        select: { propertyId: true },
+      });
+      const propertyIds = propertyOwners.map((po) => po.propertyId);
+
+      if (propertyIds.length > 0) {
+        const receptionCandidates = await prisma.importJobRow.findMany({
+          where: {
+            createdId: { in: propertyIds },
+            job: { jobType: "owner_csv" },
+          },
+          select: {
+            id: true,
+            rowNumber: true,
+            status: true,
+            rawData: true,
+            job: { select: { id: true, fileName: true } },
+          },
+          orderBy: { createdAt: "asc" },
+        });
+
+        // 受付帳×所有者マーカが付いている行のみを対象にする
+        const markerRows = receptionCandidates.filter((r) =>
+          isReceptionOwnerJobRow(
+            "owner_csv",
+            r.rawData as Record<string, unknown> | null,
+          ),
+        );
+
+        if (markerRows.length >= 2) {
+          // 複数受付帳行 → ambiguous
+          importRowCount = markerRows.length;
+        } else if (markerRows.length === 1) {
+          const row = markerRows[0];
+          const entries = parseRecoveredOwners(
+            row.rawData as Record<string, unknown> | null,
+          );
+          const entryResult = resolveReceptionOwnerEntry(
+            entries,
+            owner.name,
+            owner.zip,
+          );
+
+          if (entryResult.ok) {
+            resolvedImportRow = row;
+            resolvedExtract = extractAddressFromRecoveredOwner(entryResult.entry);
+            resolvedSourceType = "reception_owner";
+            importRowCount = 1;
+          } else if (entryResult.reason === "reception_owner_source_ambiguous") {
+            // 行は一意だが owner entry が複数一致 → receptionOwnerEntryAmbiguous で通知
+            receptionOwnerEntryAmbiguous = true;
+            importRowCount = 1;
+          }
+          // else no_address_in_rawdata: importRowCount は 0 のまま → import_source_unknown
+        }
+        // markerRows.length === 0: importRowCount は 0 のまま
+      }
+    }
 
     // address フィールドの ChangeLog 存在チェック
     const addressChangeLog = await prisma.changeLog.findFirst({
@@ -113,17 +206,15 @@ export async function POST(
       select: { id: true },
     });
 
-    // rawData から住所を抽出（importRow が null の場合は extractedAddress も null になる）
-    const rawData = importRow?.rawData as Record<string, unknown> | null;
-    const extracted = extractAddressFromRawData(rawData);
-
     // 安全条件チェック
     const safety = checkAddressFillSafety({
       currentAddress: owner.address,
-      importRowCount: importRows.length,
-      importRowSuccess: importRow?.status === "success",
+      importRowCount,
+      importRowSuccess:
+        resolvedImportRow !== null && resolvedImportRow.status === "success",
       addressChangeLogExists: addressChangeLog !== null,
-      extractedAddress: extracted?.address ?? null,
+      extractedAddress: resolvedExtract?.address ?? null,
+      receptionOwnerEntryAmbiguous,
     });
 
     if (!safety.ok) {
@@ -134,6 +225,7 @@ export async function POST(
         import_row_not_success: 422,
         address_changelog_exists: 422,
         no_address_in_rawdata: 422,
+        reception_owner_source_ambiguous: 422,
       };
       const msgMap: Record<string, string> = {
         address_already_set: "住所はすでに設定されています",
@@ -142,6 +234,7 @@ export async function POST(
         import_row_not_success: "取込行が success 状態ではありません",
         address_changelog_exists: "住所フィールドの変更履歴があるため補完できません",
         no_address_in_rawdata: "取込データから住所を抽出できませんでした",
+        reception_owner_source_ambiguous: "取込元の受付帳×所有者情報が複数候補に該当するため一意に特定できません",
       };
       throw new ApiError(
         statusMap[safety.reason] ?? 422,
@@ -211,11 +304,14 @@ export async function POST(
       targetId: ownerId,
       detail: {
         correctionType: "address_fill",
-        sourceType: "import_job_row",
-        sourceRowId: importRow!.id,
-        sourceJobId: importRow!.job.id,
+        sourceType:
+          resolvedSourceType === "reception_owner"
+            ? "reception_owner_import_job_row"
+            : "import_job_row",
+        sourceRowId: resolvedImportRow!.id,
+        sourceJobId: resolvedImportRow!.job.id,
         updatedFields: ["address"],
-        sourceFieldNames: extracted!.sourceFieldNames,
+        sourceFieldNames: resolvedExtract!.sourceFieldNames,
       },
     });
 

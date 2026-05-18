@@ -69,6 +69,7 @@ vi.mock("@/lib/prisma", () => {
     default: {
       owner: { findUnique: vi.fn() },
       importJobRow: { findMany: vi.fn() },
+      propertyOwner: { findMany: vi.fn() },
       changeLog: { findFirst: vi.fn() },
       $transaction: vi
         .fn()
@@ -92,7 +93,11 @@ import { POST } from "../../app/api/admin/owners/[ownerId]/correction/address-fi
 const OWNER_ID = "aaaaaaaa-0000-0000-0000-000000000001";
 const JOB_ID = "bbbbbbbb-0000-0000-0000-000000000001";
 const ROW_ID = "cccccccc-0000-0000-0000-000000000001";
+const PROPERTY_ID = "dddddddd-0000-0000-0000-000000000001";
+const RECEPTION_ROW_ID = "eeeeeeee-0000-0000-0000-000000000001";
 const ADDRESS = "東京都千代田区1-1";
+const OWNER_NAME = "田中太郎";
+const OWNER_ZIP = "1000001";
 
 function makeRequest(body: unknown) {
   return new Request(
@@ -111,6 +116,7 @@ const makeParams = () => ({ params: Promise.resolve({ ownerId: OWNER_ID }) });
 const pm = prisma as unknown as {
   owner: { findUnique: Mock };
   importJobRow: { findMany: Mock };
+  propertyOwner: { findMany: Mock };
   changeLog: { findFirst: Mock };
   $transaction: Mock;
   _tx: {
@@ -127,14 +133,46 @@ const successRow = {
   job: { id: JOB_ID, fileName: "owners.csv" },
 };
 
+const ownerBase = {
+  id: OWNER_ID,
+  name: OWNER_NAME,
+  address: null,
+  zip: OWNER_ZIP,
+  version: 1,
+  isArchived: false,
+};
+
+// reception-owner row: createdId=propertyId、__owner_link_data あり
+const receptionSuccessRow = {
+  id: RECEPTION_ROW_ID,
+  rowNumber: 1,
+  status: "success",
+  rawData: {
+    ownerCount: "1",
+    所有者CSV物件住所: ADDRESS,
+    __owner_link_data: JSON.stringify([
+      { name: OWNER_NAME, address: ADDRESS, zip: OWNER_ZIP },
+    ]),
+  },
+  job: { id: JOB_ID, fileName: "reception.csv" },
+};
+
 function setupHappyPath() {
-  pm.owner.findUnique.mockResolvedValue({
-    id: OWNER_ID,
-    address: null,
-    version: 1,
-    isArchived: false,
-  });
+  pm.owner.findUnique.mockResolvedValue(ownerBase);
   pm.importJobRow.findMany.mockResolvedValue([successRow]);
+  pm.propertyOwner.findMany.mockResolvedValue([]);
+  pm.changeLog.findFirst.mockResolvedValue(null);
+  pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+  pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
+}
+
+function setupReceptionHappyPath() {
+  pm.owner.findUnique.mockResolvedValue(ownerBase);
+  // direct=0, then reception=1
+  pm.importJobRow.findMany
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([receptionSuccessRow]);
+  pm.propertyOwner.findMany.mockResolvedValue([{ propertyId: PROPERTY_ID }]);
   pm.changeLog.findFirst.mockResolvedValue(null);
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
   pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
@@ -153,6 +191,9 @@ describe("POST /api/admin/owners/[ownerId]/correction/address-fill", () => {
       { resource: "owner", action: "write", granted: true },
       { resource: "owner_address", action: "full", granted: true },
     ]);
+
+    // propertyOwner はデフォルト空（direct 解決が成功するテストでは呼ばれない）
+    pm.propertyOwner.findMany.mockResolvedValue([]);
 
     // $transaction はデフォルトで _tx コールバックを実行
     pm.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
@@ -495,5 +536,148 @@ describe("POST /api/admin/owners/[ownerId]/correction/address-fill", () => {
     expect(res.status).toBe(409);
     const j = await res.json();
     expect(j.error.code).toBe("ADDRESS_ALREADY_SET");
+  });
+
+  // ── P2: reception-owner source 解決 ──────────────────────────────────────
+
+  it("P2: direct 0件 + reception row 1件 + owner entry 一意一致 → 201", async () => {
+    setupReceptionHappyPath();
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(201);
+
+    const json = await res.json();
+    expect(json).toMatchObject({
+      id: OWNER_ID,
+      version: 2,
+      updatedFields: ["address"],
+    });
+    // レスポンスに住所値が含まれないこと
+    expect(JSON.stringify(json)).not.toContain(ADDRESS);
+  });
+
+  it("P2: reception-owner → AuditLog に住所値・rawData全文が入らず sourceType が正しい", async () => {
+    setupReceptionHappyPath();
+
+    await POST(makeRequest({ version: 1 }), makeParams());
+
+    expect(writeAuditLog).toHaveBeenCalledOnce();
+    const call = vi.mocked(writeAuditLog).mock.calls[0][0];
+    const detailStr = JSON.stringify(call.detail);
+    // 住所値・rawData全文を含まないこと
+    expect(detailStr).not.toContain(ADDRESS);
+    expect(detailStr).not.toContain("rawData");
+    // sourceType が reception_owner であること
+    expect(call.detail.sourceType).toBe("reception_owner_import_job_row");
+    // sourceFieldNames には値でなくフィールドパス名のみ
+    expect(call.detail.sourceFieldNames).toEqual(["__owner_link_data.address"]);
+    expect(call.detail.sourceRowId).toBe(RECEPTION_ROW_ID);
+  });
+
+  it("P2: reception row が複数 → 422 (import_source_ambiguous)", async () => {
+    pm.owner.findUnique.mockResolvedValue(ownerBase);
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([])  // direct=0
+      .mockResolvedValueOnce([   // reception 2件
+        receptionSuccessRow,
+        { ...receptionSuccessRow, id: "eeeeeeee-0000-0000-0000-000000000002", rowNumber: 2 },
+      ]);
+    pm.propertyOwner.findMany.mockResolvedValue([{ propertyId: PROPERTY_ID }]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(422);
+    const j = await res.json();
+    expect(j.error.code).toBe("ADDRESS_FILL_BLOCKED");
+  });
+
+  it("P2: reception row 1件だが owner entry が複数一致 → 422 (reception_owner_source_ambiguous)", async () => {
+    pm.owner.findUnique.mockResolvedValue(ownerBase);
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([])  // direct=0
+      .mockResolvedValueOnce([{  // reception 1件: __owner_link_data に同名2エントリ
+        ...receptionSuccessRow,
+        rawData: {
+          ownerCount: "2",
+          所有者CSV物件住所: ADDRESS,
+          __owner_link_data: JSON.stringify([
+            { name: OWNER_NAME, address: "東京都千代田区1-1", zip: null },
+            { name: OWNER_NAME, address: "神奈川県横浜市2-2", zip: null },
+          ]),
+        },
+      }]);
+    pm.propertyOwner.findMany.mockResolvedValue([{ propertyId: PROPERTY_ID }]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(422);
+    expect(pm.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("P2: zip で絞り込み成功 → 201（同名2エントリも zip で一意化）", async () => {
+    pm.owner.findUnique.mockResolvedValue(ownerBase); // OWNER_ZIP = "1000001"
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([])  // direct=0
+      .mockResolvedValueOnce([{
+        ...receptionSuccessRow,
+        rawData: {
+          ownerCount: "2",
+          所有者CSV物件住所: ADDRESS,
+          __owner_link_data: JSON.stringify([
+            { name: OWNER_NAME, address: ADDRESS, zip: OWNER_ZIP },        // zip 一致
+            { name: OWNER_NAME, address: "神奈川県横浜市2-2", zip: "2200001" }, // zip 不一致
+          ]),
+        },
+      }]);
+    pm.propertyOwner.findMany.mockResolvedValue([{ propertyId: PROPERTY_ID }]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+    pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+    pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(201);
+  });
+
+  it("P2: 別ownerの住所は使わない（田中太郎のみ一致させる）", async () => {
+    const OTHER_ADDRESS = "大阪府大阪市9-9";
+    pm.owner.findUnique.mockResolvedValue(ownerBase);
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        ...receptionSuccessRow,
+        rawData: {
+          ownerCount: "2",
+          所有者CSV物件住所: ADDRESS,
+          __owner_link_data: JSON.stringify([
+            { name: OWNER_NAME, address: ADDRESS, zip: OWNER_ZIP },
+            { name: "佐藤花子", address: OTHER_ADDRESS, zip: null },
+          ]),
+        },
+      }]);
+    pm.propertyOwner.findMany.mockResolvedValue([{ propertyId: PROPERTY_ID }]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+    pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+    pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(201);
+
+    // AuditLog の sourceFieldNames に他owner の住所が含まれないこと
+    const call = vi.mocked(writeAuditLog).mock.calls[0][0];
+    expect(JSON.stringify(call.detail)).not.toContain(OTHER_ADDRESS);
+  });
+
+  it("P2: direct 0件 + reception 0件 → 422 (import_source_unknown)", async () => {
+    pm.owner.findUnique.mockResolvedValue(ownerBase);
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([])   // direct=0
+      .mockResolvedValueOnce([]);  // reception=0
+    pm.propertyOwner.findMany.mockResolvedValue([{ propertyId: PROPERTY_ID }]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(422);
+    const j = await res.json();
+    expect(j.error.code).toBe("ADDRESS_FILL_BLOCKED");
   });
 });

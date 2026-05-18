@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   extractAddressFromRawData,
   checkAddressFillSafety,
+  resolveReceptionOwnerEntry,
+  extractAddressFromRecoveredOwner,
 } from "../owner-correction";
 
 // ── extractAddressFromRawData ──────────────────────────────────────────────
@@ -173,5 +175,121 @@ describe("checkAddressFillSafety", () => {
         importRowCount: 0,
       }),
     ).toEqual({ ok: false, reason: "address_already_set" });
+  });
+
+  it("receptionOwnerEntryAmbiguous=true → reception_owner_source_ambiguous", () => {
+    expect(
+      checkAddressFillSafety({ ...base, receptionOwnerEntryAmbiguous: true }),
+    ).toEqual({ ok: false, reason: "reception_owner_source_ambiguous" });
+  });
+
+  it("address_already_set は receptionOwnerEntryAmbiguous より優先される", () => {
+    expect(
+      checkAddressFillSafety({
+        ...base,
+        currentAddress: "既存住所",
+        receptionOwnerEntryAmbiguous: true,
+      }),
+    ).toEqual({ ok: false, reason: "address_already_set" });
+  });
+});
+
+// ── resolveReceptionOwnerEntry ────────────────────────────────────────────
+
+describe("resolveReceptionOwnerEntry", () => {
+  const entry1 = { name: "田中太郎", address: "東京都千代田区1-1", zip: "1000001" };
+  const entry2 = { name: "佐藤花子", address: "大阪府大阪市1-1", zip: "5300001" };
+
+  it("名前が一致する entry が 1件 → ok=true で entry を返す", () => {
+    const r = resolveReceptionOwnerEntry([entry1, entry2], "田中太郎", null);
+    expect(r).toEqual({ ok: true, entry: entry1 });
+  });
+
+  it("全角/半角スペース混在の名前も正規化して一致する", () => {
+    const r = resolveReceptionOwnerEntry(
+      [{ name: "田中　太郎", address: "東京都千代田区1-1", zip: null }],
+      "田中 太郎",
+      null,
+    );
+    expect(r).toEqual({ ok: true, entry: { name: "田中　太郎", address: "東京都千代田区1-1", zip: null } });
+  });
+
+  it("名前一致 0件 → no_address_in_rawdata", () => {
+    const r = resolveReceptionOwnerEntry([entry2], "田中太郎", null);
+    expect(r).toEqual({ ok: false, reason: "no_address_in_rawdata" });
+  });
+
+  it("ownerName が null → no_address_in_rawdata", () => {
+    const r = resolveReceptionOwnerEntry([entry1], null, null);
+    expect(r).toEqual({ ok: false, reason: "no_address_in_rawdata" });
+  });
+
+  it("名前一致が複数で zip なし → reception_owner_source_ambiguous", () => {
+    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: null };
+    const r = resolveReceptionOwnerEntry([entry1, dup], "田中太郎", null);
+    expect(r).toEqual({ ok: false, reason: "reception_owner_source_ambiguous" });
+  });
+
+  it("名前一致が複数で zip で絞り込み成功 → ok=true", () => {
+    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: "2200001" };
+    const r = resolveReceptionOwnerEntry([entry1, dup], "田中太郎", "1000001");
+    expect(r).toEqual({ ok: true, entry: entry1 });
+  });
+
+  it("名前一致が複数で zip でも絞り込めない → reception_owner_source_ambiguous", () => {
+    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: "1000001" };
+    const r = resolveReceptionOwnerEntry([entry1, dup], "田中太郎", "1000001");
+    expect(r).toEqual({ ok: false, reason: "reception_owner_source_ambiguous" });
+  });
+
+  it("名前一致 1件で address が null → no_address_in_rawdata", () => {
+    const r = resolveReceptionOwnerEntry(
+      [{ name: "田中太郎", address: null, zip: null }],
+      "田中太郎",
+      null,
+    );
+    expect(r).toEqual({ ok: false, reason: "no_address_in_rawdata" });
+  });
+
+  it("別ownerの address は使わない（佐藤花子の住所を田中太郎に割り当てない）", () => {
+    const r = resolveReceptionOwnerEntry([entry1, entry2], "田中太郎", null);
+    if (r.ok) {
+      expect(r.entry.address).toBe("東京都千代田区1-1");
+      expect(r.entry.address).not.toBe("大阪府大阪市1-1");
+    }
+  });
+});
+
+// ── extractAddressFromRecoveredOwner ──────────────────────────────────────
+
+describe("extractAddressFromRecoveredOwner", () => {
+  it("address が有効 → ExtractAddressResult を返す", () => {
+    const r = extractAddressFromRecoveredOwner({
+      name: "田中太郎",
+      address: "東京都千代田区1-1",
+      zip: null,
+    });
+    expect(r?.address).toBe("東京都千代田区1-1");
+    // sourceFieldNames には値を含まないフィールドパス名のみ
+    expect(r?.sourceFieldNames).toEqual(["__owner_link_data.address"]);
+    expect(r?.sourceFieldNames.join("")).not.toContain("東京都");
+  });
+
+  it("address が null → null", () => {
+    const r = extractAddressFromRecoveredOwner({
+      name: "田中太郎",
+      address: null,
+      zip: null,
+    });
+    expect(r).toBeNull();
+  });
+
+  it("address が空文字 → null", () => {
+    const r = extractAddressFromRecoveredOwner({
+      name: "田中太郎",
+      address: "",
+      zip: null,
+    });
+    expect(r).toBeNull();
   });
 });
