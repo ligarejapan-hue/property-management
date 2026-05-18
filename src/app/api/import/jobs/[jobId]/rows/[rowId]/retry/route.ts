@@ -10,6 +10,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
+import { findDuplicateOwner } from "@/lib/owner-dedup";
 
 /** Map Japanese CSV header names to property model field names. */
 const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -212,6 +213,24 @@ export async function POST(
         });
       } else if (row.job.jobType === "owner_csv") {
         const createData = buildOwnerCreateData(mergedData);
+        const dup = await findDuplicateOwner({
+          name: createData.name as string,
+          address: createData.address as string | undefined,
+          phone: createData.phone as string | undefined,
+        });
+        if (dup) {
+          // PII（name/address/phone/rawData）はレスポンスに含めない。existingOwnerId のみ返す。
+          return apiResponse(
+            {
+              error: {
+                message: "既存所有者候補が存在します",
+                code: "DUPLICATE_OWNER",
+                existingOwnerId: dup.id,
+              },
+            },
+            409,
+          );
+        }
         createdRecord = await prisma.owner.create({
           data: createData as Parameters<typeof prisma.owner.create>[0]["data"],
         });
