@@ -11,7 +11,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import { normalizeAddress as normalizeAddressForLink } from "@/lib/address-normalizer";
-import { normalizeName, normalizeAddress } from "@/lib/normalize";
+import { buildOwnerDedupKey } from "@/lib/owner-dedup";
 import { relinkOwnersToProperties } from "@/lib/owner-property-linker";
 import {
   REIMPORT_IGNORED_HEADERS,
@@ -97,8 +97,6 @@ export async function POST(request: NextRequest) {
     // address あり既存 Owner Map（lazy load）
     // CSV に address あり行が無ければ findMany は走らせない。
     // address あり行が出現した最初の1回だけ全件取得して Map 化する。
-    const buildOwnerDedupKey = (name: string, address: string) =>
-      `${normalizeName(name)}::${normalizeAddress(address)}`;
     let existingOwnersByAddress: Map<string, { id: string; name: string }> | null = null;
     const getExistingOwnersByAddressMap = async (): Promise<
       Map<string, { id: string; name: string }>
