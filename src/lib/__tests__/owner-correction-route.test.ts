@@ -281,6 +281,44 @@ describe("POST /api/admin/owners/[ownerId]/correction/address-fill", () => {
     expect(j.error.code).toBe("ADDRESS_FILL_BLOCKED");
   });
 
+  it("ImportJobRow が複数件 → 422 (import_source_ambiguous)", async () => {
+    pm.owner.findUnique.mockResolvedValue({
+      id: OWNER_ID,
+      address: null,
+      version: 1,
+      isArchived: false,
+    });
+    pm.importJobRow.findMany.mockResolvedValue([
+      successRow,
+      { ...successRow, id: "cccccccc-0000-0000-0000-000000000002", rowNumber: 2 },
+    ]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(422);
+    const j = await res.json();
+    expect(j.error.code).toBe("ADDRESS_FILL_BLOCKED");
+  });
+
+  it("ImportJobRow が複数件かつ success があっても実行しない → 422", async () => {
+    pm.owner.findUnique.mockResolvedValue({
+      id: OWNER_ID,
+      address: null,
+      version: 1,
+      isArchived: false,
+    });
+    pm.importJobRow.findMany.mockResolvedValue([
+      successRow,
+      { ...successRow, id: "cccccccc-0000-0000-0000-000000000003", rowNumber: 3, status: "needs_review" },
+    ]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(422);
+    // transaction が呼ばれていないこと
+    expect(pm.$transaction).not.toHaveBeenCalled();
+  });
+
   it("ImportJobRow.status が success でない → 422 (import_row_not_success)", async () => {
     pm.owner.findUnique.mockResolvedValue({
       id: OWNER_ID,

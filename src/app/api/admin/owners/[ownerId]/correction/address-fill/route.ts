@@ -24,7 +24,9 @@ import {
 //
 // 安全条件（すべて API 側で再検証）:
 //   - Owner.address が null または空文字
-//   - ImportJobRow (owner_csv) が存在し status=success
+//   - ImportJobRow (owner_csv) が ownerId から一意（1件）に特定できる
+//     0件 → import_source_unknown / 2件以上 → import_source_ambiguous
+//   - ImportJobRow.status が success
 //   - address フィールドの ChangeLog が存在しない
 //   - ImportJobRow.rawData から住所を抽出できる
 //
@@ -78,7 +80,8 @@ export async function POST(
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
 
-    // ImportJobRow 取得（owner_csv の success 行を優先）
+    // ImportJobRow 取得。一意性を確認するため全件取得して件数を判定する。
+    // 複数件の中から success を勝手に選ばない。
     const importRows = await prisma.importJobRow.findMany({
       where: {
         createdId: ownerId,
@@ -93,8 +96,8 @@ export async function POST(
       },
       orderBy: { createdAt: "asc" },
     });
-    const importRow =
-      importRows.find((r) => r.status === "success") ?? importRows[0] ?? null;
+    // importRowCount が 0 / 2以上 の場合は safety check で弾く。1件のときのみ参照。
+    const importRow = importRows.length === 1 ? importRows[0] : null;
 
     // address フィールドの ChangeLog 存在チェック
     const addressChangeLog = await prisma.changeLog.findFirst({
@@ -106,14 +109,14 @@ export async function POST(
       select: { id: true },
     });
 
-    // rawData から住所を抽出
+    // rawData から住所を抽出（importRow が null の場合は extractedAddress も null になる）
     const rawData = importRow?.rawData as Record<string, unknown> | null;
     const extracted = extractAddressFromRawData(rawData);
 
     // 安全条件チェック
     const safety = checkAddressFillSafety({
       currentAddress: owner.address,
-      importRowExists: importRow !== null,
+      importRowCount: importRows.length,
       importRowSuccess: importRow?.status === "success",
       addressChangeLogExists: addressChangeLog !== null,
       extractedAddress: extracted?.address ?? null,
@@ -123,6 +126,7 @@ export async function POST(
       const statusMap: Record<string, number> = {
         address_already_set: 409,
         import_source_unknown: 422,
+        import_source_ambiguous: 422,
         import_row_not_success: 422,
         address_changelog_exists: 422,
         no_address_in_rawdata: 422,
@@ -130,6 +134,7 @@ export async function POST(
       const msgMap: Record<string, string> = {
         address_already_set: "住所はすでに設定されています",
         import_source_unknown: "取込元の ImportJobRow が見つかりません",
+        import_source_ambiguous: "取込元の ImportJobRow が複数存在するため一意に特定できません",
         import_row_not_success: "取込行が success 状態ではありません",
         address_changelog_exists: "住所フィールドの変更履歴があるため補完できません",
         no_address_in_rawdata: "取込データから住所を抽出できませんでした",
@@ -146,6 +151,12 @@ export async function POST(
     // transaction: Owner update + ChangeLog
     // updateMany の where に address 条件を含め、既存住所への上書きを防止する。
     // version + 1 を先に計算。transaction が throw すれば newVersion は使われない。
+    //
+    // 【制限】where 条件は null / "" のみ。空白のみ住所（例: "   "）は事前チェックで
+    // trim().length === 0 として補完対象とするが、Prisma の updateMany では
+    // DB 側の TRIM() を where に組み込めないため、空白のみ住所が来ると
+    // count=0 → CONFLICT になる。空白のみ住所は通常データとして稀なため
+    // Phase 1 ではコメントで限界を明記し、対応は Phase 2 以降とする。
     const newVersion = version + 1;
     await prisma.$transaction(async (tx) => {
       const result = await tx.owner.updateMany({

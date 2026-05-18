@@ -96,9 +96,14 @@ export function extractAddressFromRawData(
 export interface AddressFillSafetyCheckInput {
   /** Owner の現在の住所（null または空文字なら補完対象）。 */
   currentAddress: string | null | undefined;
-  /** ImportJobRow が存在するか。 */
-  importRowExists: boolean;
-  /** ImportJobRow.status が "success" か。 */
+  /**
+   * ownerId に紐づく owner_csv ImportJobRow の件数。
+   * - 0   → import_source_unknown
+   * - 1   → 唯一に特定できた → status を確認
+   * - 2以上 → import_source_ambiguous（複数候補から勝手に選ばない）
+   */
+  importRowCount: number;
+  /** ImportJobRow.status が "success" か（importRowCount === 1 の場合のみ参照）。 */
   importRowSuccess: boolean;
   /** address フィールドの既存 ChangeLog が存在するか。 */
   addressChangeLogExists: boolean;
@@ -111,18 +116,21 @@ export type AddressFillSafetyResult =
   | { ok: false; reason: AddressFillBlockReason };
 
 export type AddressFillBlockReason =
-  | "address_already_set"       // すでに住所が入っている（上書き防止）
-  | "import_source_unknown"     // ImportJobRow が見つからない
-  | "import_row_not_success"    // ImportJobRow.status !== "success"
-  | "address_changelog_exists"  // address フィールドの ChangeLog あり（手動編集済み）
-  | "no_address_in_rawdata";    // rawData から住所を抽出できなかった
+  | "address_already_set"        // すでに住所が入っている（上書き防止）
+  | "import_source_unknown"      // ImportJobRow が 0件
+  | "import_source_ambiguous"    // ImportJobRow が 2件以上（一意に特定できない）
+  | "import_row_not_success"     // ImportJobRow.status !== "success"
+  | "address_changelog_exists"   // address フィールドの ChangeLog あり（手動編集済み）
+  | "no_address_in_rawdata";     // rawData から住所を抽出できなかった
 
 /**
  * 住所補完が安全に実行できるかを判定する。
  *
- * property_owner_exists（物件紐づきあり）は Phase 1 ではブロック理由にしない。
- * version_gt_1 / changelog_exists（address 以外）も許容する。
- * address フィールドの ChangeLog が存在する場合のみ拒否する。
+ * - ImportJobRow は ownerId から一意（1件）に特定できることが必須条件。
+ *   0件 → import_source_unknown、2件以上 → import_source_ambiguous で拒否。
+ * - property_owner_exists（物件紐づきあり）は Phase 1 ではブロック理由にしない。
+ * - version_gt_1 / changelog_exists（address 以外）も許容する。
+ * - address フィールドの ChangeLog が存在する場合のみ拒否する。
  */
 export function checkAddressFillSafety(
   input: AddressFillSafetyCheckInput,
@@ -131,9 +139,13 @@ export function checkAddressFillSafety(
   if (addr !== null && addr !== undefined && addr.trim().length > 0) {
     return { ok: false, reason: "address_already_set" };
   }
-  if (!input.importRowExists) {
+  if (input.importRowCount === 0) {
     return { ok: false, reason: "import_source_unknown" };
   }
+  if (input.importRowCount > 1) {
+    return { ok: false, reason: "import_source_ambiguous" };
+  }
+  // importRowCount === 1 ここから
   if (!input.importRowSuccess) {
     return { ok: false, reason: "import_row_not_success" };
   }

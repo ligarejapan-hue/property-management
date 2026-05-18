@@ -94,7 +94,7 @@ describe("extractAddressFromRawData", () => {
 
 const base = {
   currentAddress: null,
-  importRowExists: true,
+  importRowCount: 1,
   importRowSuccess: true,
   addressChangeLogExists: false,
   extractedAddress: "東京都千代田区1-1",
@@ -123,10 +123,22 @@ describe("checkAddressFillSafety", () => {
     expect(r.ok).toBe(true);
   });
 
-  it("importRowExists=false → import_source_unknown", () => {
+  it("importRowCount=0 → import_source_unknown", () => {
     expect(
-      checkAddressFillSafety({ ...base, importRowExists: false }),
+      checkAddressFillSafety({ ...base, importRowCount: 0 }),
     ).toEqual({ ok: false, reason: "import_source_unknown" });
+  });
+
+  it("importRowCount=2 → import_source_ambiguous", () => {
+    expect(
+      checkAddressFillSafety({ ...base, importRowCount: 2 }),
+    ).toEqual({ ok: false, reason: "import_source_ambiguous" });
+  });
+
+  it("importRowCount=2 かつ importRowSuccess=true でも import_source_ambiguous（複数件から選ばない）", () => {
+    expect(
+      checkAddressFillSafety({ ...base, importRowCount: 2, importRowSuccess: true }),
+    ).toEqual({ ok: false, reason: "import_source_ambiguous" });
   });
 
   it("importRowSuccess=false → import_row_not_success", () => {
@@ -158,7 +170,7 @@ describe("checkAddressFillSafety", () => {
       checkAddressFillSafety({
         ...base,
         currentAddress: "既存住所",
-        importRowExists: false,
+        importRowCount: 0,
       }),
     ).toEqual({ ok: false, reason: "address_already_set" });
   });
