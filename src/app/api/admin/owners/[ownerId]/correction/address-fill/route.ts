@@ -8,7 +8,6 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { writeAuditLog } from "@/lib/audit";
 import {
   extractAddressFromRawData,
@@ -20,6 +19,7 @@ import {
 // ---------------------------------------------------------------------------
 // 権限:
 //   - user_management:read（管理者エリア）
+//   - owner:read（所有者閲覧権）
 //   - owner:write（所有者更新権）
 //
 // 安全条件（すべて API 側で再検証）:
@@ -54,6 +54,9 @@ export async function POST(
     // 権限チェック（admin ゲートを先に）
     if (!hasPermission(perms, "user_management", "read")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
+    if (!hasPermission(perms, "owner", "read")) {
+      throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
     }
     if (!hasPermission(perms, "owner", "write")) {
       throw new ApiError(403, "所有者更新の権限がありません", "FORBIDDEN");
@@ -142,7 +145,8 @@ export async function POST(
 
     // transaction: Owner update + ChangeLog
     // updateMany の where に address 条件を含め、既存住所への上書きを防止する。
-    let newVersion: number;
+    // version + 1 を先に計算。transaction が throw すれば newVersion は使われない。
+    const newVersion = version + 1;
     await prisma.$transaction(async (tx) => {
       const result = await tx.owner.updateMany({
         where: {
@@ -167,8 +171,6 @@ export async function POST(
         }
         throw new ApiError(409, "他のユーザーが先に更新しました", "CONFLICT");
       }
-
-      newVersion = version + 1;
 
       await tx.changeLog.createMany({
         data: [
@@ -205,7 +207,7 @@ export async function POST(
     return apiResponse(
       {
         id: ownerId,
-        version: newVersion!,
+        version: newVersion,
         updatedFields: ["address"],
       },
       201,
