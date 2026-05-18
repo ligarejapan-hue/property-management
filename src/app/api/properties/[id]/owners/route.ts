@@ -36,12 +36,12 @@ export async function POST(
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
     }
 
-    // Verify owner exists
+    // Verify owner exists（archived は紐付け対象外）
     const owner = await prisma.owner.findUnique({
       where: { id: data.ownerId },
-      select: { id: true },
+      select: { id: true, isArchived: true },
     });
-    if (!owner) {
+    if (!owner || owner.isArchived) {
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
 

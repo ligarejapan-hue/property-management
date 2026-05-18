@@ -4,6 +4,7 @@ import {
   checkAddressFillSafety,
   resolveReceptionOwnerEntry,
   extractAddressFromRecoveredOwner,
+  checkOwnerArchiveSafety,
 } from "../owner-correction";
 
 // ── extractAddressFromRawData ──────────────────────────────────────────────
@@ -291,5 +292,104 @@ describe("extractAddressFromRecoveredOwner", () => {
       zip: null,
     });
     expect(r).toBeNull();
+  });
+});
+
+// ── checkOwnerArchiveSafety（Phase 2-A） ───────────────────────────────────
+
+describe("checkOwnerArchiveSafety", () => {
+  const baseOk = {
+    isArchived: false,
+    versionMatches: true,
+    propertyOwnerCount: 0,
+    changeLogCount: 0,
+    hasNote: false,
+    hasExternalLinkKey: false,
+    version: 1,
+    importRowCount: 1,
+    importRowSuccess: true,
+  };
+
+  it("全条件を満たすと ok", () => {
+    expect(checkOwnerArchiveSafety(baseOk)).toEqual({ ok: true });
+  });
+
+  it("isArchived=true → owner_archived", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, isArchived: true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("owner_archived");
+  });
+
+  it("versionMatches=false → version_mismatch", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, versionMatches: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("version_mismatch");
+  });
+
+  it("propertyOwnerCount>0 → property_owner_exists", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, propertyOwnerCount: 1 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("property_owner_exists");
+  });
+
+  it("hasNote=true → note_exists", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, hasNote: true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("note_exists");
+  });
+
+  it("hasExternalLinkKey=true → external_link_key_exists", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, hasExternalLinkKey: true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("external_link_key_exists");
+  });
+
+  it("changeLogCount>0 → not_delete_candidate", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, changeLogCount: 1 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("not_delete_candidate");
+  });
+
+  it("version>1 → not_delete_candidate", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, version: 2 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("not_delete_candidate");
+  });
+
+  it("importRowCount=0 → import_source_unsafe", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, importRowCount: 0 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("import_source_unsafe");
+  });
+
+  it("importRowCount>1 → import_source_unsafe", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, importRowCount: 2 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("import_source_unsafe");
+  });
+
+  it("importRowSuccess=false → import_source_unsafe", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, importRowSuccess: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("import_source_unsafe");
+  });
+
+  it("複数違反は全件返す", () => {
+    const r = checkOwnerArchiveSafety({
+      ...baseOk,
+      propertyOwnerCount: 2,
+      hasNote: true,
+      versionMatches: false,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reasons).toEqual(
+        expect.arrayContaining([
+          "version_mismatch",
+          "property_owner_exists",
+          "note_exists",
+        ]),
+      );
+    }
   });
 });

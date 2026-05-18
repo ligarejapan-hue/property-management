@@ -25,7 +25,7 @@ export async function findDuplicateOwner(input: {
   if (address) {
     const key = buildOwnerDedupKey(name, address);
     const candidates = await prisma.owner.findMany({
-      where: { address: { not: null } },
+      where: { address: { not: null }, isArchived: false },
       select: { id: true, name: true, address: true },
     });
     for (const c of candidates) {
@@ -37,7 +37,7 @@ export async function findDuplicateOwner(input: {
 
   if (phone) {
     const hit = await prisma.owner.findFirst({
-      where: { name, phone },
+      where: { name, phone, isArchived: false },
       select: { id: true, name: true },
     });
     if (hit) return hit;

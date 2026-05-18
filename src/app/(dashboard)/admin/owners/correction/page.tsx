@@ -7,6 +7,7 @@ import {
   type OwnerCorrectionCandidatesResponse,
 } from "@/lib/api-client";
 import { AddressFillButton } from "@/components/owners/AddressFillButton";
+import { OwnerArchiveButton } from "@/components/owners/OwnerArchiveButton";
 
 type FilterType = "all" | "orphan" | "address_null" | "duplicate";
 
@@ -94,7 +95,7 @@ export default function OwnerCorrectionPage() {
         </h1>
       </div>
       <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-        「住所なし」タブの候補には住所補完を個別実行できます。削除・統合・再リンクは実装していません。
+        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（soft-delete）を個別実行できます。統合・再リンクは未実装です。
       </p>
 
       {/* Filter tabs */}
@@ -258,6 +259,14 @@ export default function OwnerCorrectionPage() {
                             onSuccess={() => load(filterType)}
                           />
                         )}
+                        {filterType === "orphan" &&
+                          c.recommendedAction === "delete_candidate" && (
+                            <OwnerArchiveButton
+                              ownerId={c.id}
+                              ownerVersion={c.version}
+                              onSuccess={() => load(filterType)}
+                            />
+                          )}
                       </td>
                     </tr>
                   ))}
@@ -267,7 +276,7 @@ export default function OwnerCorrectionPage() {
           )}
 
           <p className="mt-4 text-xs text-gray-400">
-            ※ 削除・統合・再リンクの実行機能は Phase 2 以降で対応予定です。
+            ※ 統合・再リンクの実行機能は Phase 2 以降で対応予定です。
           </p>
         </>
       )}

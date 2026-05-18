@@ -215,7 +215,7 @@ describe("PATCH …/rows/[rowId] create_new owner_csv dedup", () => {
     expect(body.error.code).toBe("DUPLICATE_OWNER");
     expect(body.error.existingOwnerId).toBe("owner-phone-match");
     expect(pm.owner.findFirst).toHaveBeenCalledWith({
-      where: { name: "佐藤花子", phone: "090-1111-2222" },
+      where: { name: "佐藤花子", phone: "090-1111-2222", isArchived: false },
       select: { id: true, name: true },
     });
     expect(pm.owner.create).not.toHaveBeenCalled();
