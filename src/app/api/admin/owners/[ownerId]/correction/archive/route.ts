@@ -71,12 +71,17 @@ async function loadOwnerArchiveState(ownerId: string) {
     select: { id: true, status: true },
   });
 
+  // OwnerMemo はメモ履歴がある owner を archive で隠さないためのガード。
+  // PII (memo 本文) は count のみ取得し、本文は読まない。
+  const ownerMemoCount = await prisma.ownerMemo.count({ where: { ownerId } });
+
   return {
     owner,
     changeLogCount,
     importRowCount: importRows.length,
     importRowSuccess:
       importRows.length === 1 && importRows[0].status === "success",
+    ownerMemoCount,
   };
 }
 
@@ -140,6 +145,7 @@ export async function POST(
       importRowSuccess: state.importRowSuccess,
       addressMissing:
         !state.owner.address || state.owner.address.trim().length === 0,
+      ownerMemoCount: state.ownerMemoCount,
     });
 
     // ── dryRun: DB 変更も AuditLog も書かない ───────────────────────────────
@@ -190,15 +196,17 @@ export async function POST(
           txNotFound = true;
           throw new Error(TX_BLOCKED_SENTINEL);
         }
-        const [recheckChangeLogCount, recheckImportRows] = await Promise.all([
-          tx.changeLog.count({
-            where: { targetTable: "owners", targetId: ownerId },
-          }),
-          tx.importJobRow.findMany({
-            where: { createdId: ownerId, job: { jobType: "owner_csv" } },
-            select: { status: true },
-          }),
-        ]);
+        const [recheckChangeLogCount, recheckImportRows, recheckMemoCount] =
+          await Promise.all([
+            tx.changeLog.count({
+              where: { targetTable: "owners", targetId: ownerId },
+            }),
+            tx.importJobRow.findMany({
+              where: { createdId: ownerId, job: { jobType: "owner_csv" } },
+              select: { status: true },
+            }),
+            tx.ownerMemo.count({ where: { ownerId } }),
+          ]);
         const recheckSafety = checkOwnerArchiveSafety({
           isArchived: recheck.isArchived,
           versionMatches: recheck.version === version,
@@ -215,6 +223,7 @@ export async function POST(
             recheckImportRows[0].status === "success",
           addressMissing:
             !recheck.address || recheck.address.trim().length === 0,
+          ownerMemoCount: recheckMemoCount,
         });
         if (!recheckSafety.ok) {
           txBlockedReasons = recheckSafety.reasons;

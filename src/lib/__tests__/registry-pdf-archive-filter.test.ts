@@ -75,29 +75,25 @@ vi.mock("@/lib/pdf-extract", () => ({
   isPdfBuffer: vi.fn().mockReturnValue(true),
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
-    property: {
-      findUnique: vi.fn(),
-      updateMany: vi.fn(),
+vi.mock("@/lib/prisma", () => {
+  const tx = {
+    owner: { updateMany: vi.fn() },
+    propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
+  };
+  return {
+    default: {
+      property: { findUnique: vi.fn(), updateMany: vi.fn() },
+      owner: { findMany: vi.fn(), create: vi.fn() },
+      propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
+      importJob: { create: vi.fn(), update: vi.fn() },
+      importJobRow: { create: vi.fn() },
+      $transaction: vi
+        .fn()
+        .mockImplementation((fn: (tx: unknown) => unknown) => fn(tx)),
+      _tx: tx,
     },
-    owner: {
-      findMany: vi.fn(),
-      create: vi.fn(),
-    },
-    propertyOwner: {
-      findFirst: vi.fn(),
-      create: vi.fn(),
-    },
-    importJob: {
-      create: vi.fn(),
-      update: vi.fn(),
-    },
-    importJobRow: {
-      create: vi.fn(),
-    },
-  },
-}));
+  };
+});
 
 import prisma from "@/lib/prisma";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
@@ -113,6 +109,11 @@ const pm = prisma as unknown as {
   propertyOwner: { findFirst: Mock; create: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
+  $transaction: Mock;
+  _tx: {
+    owner: { updateMany: Mock };
+    propertyOwner: { findFirst: Mock; create: Mock };
+  };
 };
 
 function makeRequest() {
@@ -156,6 +157,14 @@ beforeEach(() => {
   pm.owner.create.mockImplementation(({ data }: { data: { name: string } }) =>
     Promise.resolve({ id: `owner-${data.name}` }),
   );
+  // transaction proxy + デフォルト: 既存 owner branch で lock 成功 (count=1) と
+  // PropertyOwner 未 link を返す。レーステストで個別 override する。
+  pm.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
+    fn(pm._tx),
+  );
+  pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+  pm._tx.propertyOwner.findFirst.mockResolvedValue(null);
+  pm._tx.propertyOwner.create.mockResolvedValue({});
 });
 
 describe("POST /api/import/registry-pdf: archived owner を既存候補にしない", () => {
@@ -196,18 +205,47 @@ describe("POST /api/import/registry-pdf: archived owner を既存候補にしな
     expect(linkArgs.data.ownerId).toBe(`owner-${OWNER_NAME}`);
   });
 
-  it("active owner と name/address が一致した場合は再利用（新規 Owner を作らず PropertyOwner だけ作る）", async () => {
+  it("active owner と name/address が一致した場合は再利用（新規 Owner を作らず tx 内で PropertyOwner を作る）", async () => {
     pm.owner.findMany.mockResolvedValue([
       { id: "existing-active", name: OWNER_NAME, address: OWNER_ADDRESS },
     ]);
+    // tx 内 lock+verify 成功
+    pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
 
     await REGISTRY_PDF_POST(makeRequest());
 
     // 新規 Owner は作らない
     expect(pm.owner.create).not.toHaveBeenCalled();
-    // PropertyOwner は既存 active owner と link
+    // PropertyOwner は tx 内で既存 active owner と link
+    expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);
+    const linkArgs = pm._tx.propertyOwner.create.mock.calls[0][0];
+    expect(linkArgs.data.ownerId).toBe("existing-active");
+    // tx 内 updateMany は { id, isArchived: false } で行ロック取得
+    const lockArgs = pm._tx.owner.updateMany.mock.calls[0][0];
+    expect(lockArgs.where).toEqual({
+      id: "existing-active",
+      isArchived: false,
+    });
+  });
+
+  it("レース: lookup 後 concurrent archive で lock count=0 → archived owner には link せず新規 active Owner で fallback", async () => {
+    // dedup find は active owner を返す
+    pm.owner.findMany.mockResolvedValue([
+      { id: "owner-raced", name: OWNER_NAME, address: OWNER_ADDRESS },
+    ]);
+    // しかし tx 内 lock は count=0（同時 archive で isArchived=true になった）
+    pm._tx.owner.updateMany.mockResolvedValue({ count: 0 });
+
+    await REGISTRY_PDF_POST(makeRequest());
+
+    // archived owner には PropertyOwner を作らない（tx 内 createは呼ばれない）
+    expect(pm._tx.propertyOwner.create).not.toHaveBeenCalled();
+    // fallback で新規 active Owner を作成
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    // PropertyOwner は新規 owner と link（fallback パスは prisma 直叩き）
     expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
     const linkArgs = pm.propertyOwner.create.mock.calls[0][0];
-    expect(linkArgs.data.ownerId).toBe("existing-active");
+    expect(linkArgs.data.ownerId).toBe(`owner-${OWNER_NAME}`);
+    expect(linkArgs.data.ownerId).not.toBe("owner-raced");
   });
 });

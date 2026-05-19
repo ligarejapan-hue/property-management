@@ -62,12 +62,14 @@ vi.mock("@/lib/prisma", () => {
     owner: { findUnique: vi.fn(), updateMany: vi.fn() },
     changeLog: { count: vi.fn(), createMany: vi.fn() },
     importJobRow: { findMany: vi.fn() },
+    ownerMemo: { count: vi.fn() },
   };
   return {
     default: {
       owner: { findUnique: vi.fn() },
       changeLog: { count: vi.fn() },
       importJobRow: { findMany: vi.fn() },
+      ownerMemo: { count: vi.fn() },
       $transaction: vi
         .fn()
         .mockImplementation((fn: (tx: unknown) => unknown) => fn(tx)),
@@ -89,11 +91,13 @@ const pm = prisma as unknown as {
   owner: { findUnique: Mock };
   changeLog: { count: Mock };
   importJobRow: { findMany: Mock };
+  ownerMemo: { count: Mock };
   $transaction: Mock;
   _tx: {
     owner: { findUnique: Mock; updateMany: Mock };
     changeLog: { count: Mock; createMany: Mock };
     importJobRow: { findMany: Mock };
+    ownerMemo: { count: Mock };
   };
 };
 
@@ -139,12 +143,14 @@ function setupEligible() {
   pm.importJobRow.findMany.mockResolvedValue([
     { id: "row-1", status: "success" },
   ]);
+  pm.ownerMemo.count.mockResolvedValue(0);
   // transaction recheck reuses tx mocks
   pm._tx.owner.findUnique.mockResolvedValue(eligibleOwner);
   pm._tx.changeLog.count.mockResolvedValue(0);
   pm._tx.importJobRow.findMany.mockResolvedValue([
     { id: "row-1", status: "success" },
   ]);
+  pm._tx.ownerMemo.count.mockResolvedValue(0);
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
   pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
 }
@@ -155,6 +161,9 @@ beforeEach(() => {
   pm.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
     fn(pm._tx),
   );
+  // ownerMemo.count はデフォルト 0（メモなし）。個別 test で override する。
+  pm.ownerMemo.count.mockResolvedValue(0);
+  pm._tx.ownerMemo.count.mockResolvedValue(0);
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────
@@ -487,6 +496,76 @@ describe("POST /api/admin/owners/[ownerId]/correction/archive", () => {
     expect(pm._tx.owner.updateMany).not.toHaveBeenCalled();
     expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  // ── owner_memo_exists（OwnerMemo 履歴ある owner を隠さない） ────────────────
+
+  it("OwnerMemo が 1件以上ある orphan owner → dryRun=true で blocked + owner_memo_exists", async () => {
+    pm.owner.findUnique.mockResolvedValue(eligibleOwner);
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+    pm.ownerMemo.count.mockResolvedValue(1);
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: true }),
+      makeParams(),
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.executed).toBe(false);
+    expect(body.eligible).toBe(false);
+    expect(body.blockReasons).toContain("owner_memo_exists");
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("OwnerMemo がある owner に dryRun=false → 422 + owner_memo_exists / archive されない", async () => {
+    pm.owner.findUnique.mockResolvedValue(eligibleOwner);
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+    pm.ownerMemo.count.mockResolvedValue(3);
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: false }),
+      makeParams(),
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("ARCHIVE_BLOCKED");
+    expect(body.error.blockReasons).toContain("owner_memo_exists");
+    // 実行は走らない
+    expect(pm._tx.owner.updateMany).not.toHaveBeenCalled();
+    expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("OwnerMemo blocked response の shape は最小限（メモ本文を載せない）", async () => {
+    pm.owner.findUnique.mockResolvedValue(eligibleOwner);
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+    pm.ownerMemo.count.mockResolvedValue(1);
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: false }),
+      makeParams(),
+    );
+    const body = await res.json();
+
+    // route は ownerMemo.count のみを呼びメモ本文を読まない設計。
+    // レスポンスは { error: { message, code, blockReasons } } の固定 shape。
+    expect(Object.keys(body)).toEqual(["error"]);
+    expect(Object.keys(body.error).sort()).toEqual(
+      ["blockReasons", "code", "message"].sort(),
+    );
+    expect(body.error.message).toBe("アーカイブ条件を満たしていません");
+    expect(body.error.code).toBe("ARCHIVE_BLOCKED");
   });
 
   it("dryRun=false で複数 ImportJobRow → 422 + import_source_unsafe", async () => {

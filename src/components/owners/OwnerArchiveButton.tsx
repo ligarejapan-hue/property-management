@@ -26,6 +26,7 @@ const BLOCK_REASON_LABELS: Record<string, string> = {
   import_source_unsafe: "取込元が不明または複数候補があります",
   not_delete_candidate: "削除候補の条件を満たしていません",
   address_missing: "住所が未入力のためアーカイブできません",
+  owner_memo_exists: "所有者メモの履歴があります",
 };
 
 function reasonLabel(r: string): string {

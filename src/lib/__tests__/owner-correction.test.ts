@@ -309,6 +309,7 @@ describe("checkOwnerArchiveSafety", () => {
     importRowCount: 1,
     importRowSuccess: true,
     addressMissing: false,
+    ownerMemoCount: 0,
   };
 
   it("全条件を満たすと ok", () => {
@@ -402,6 +403,17 @@ describe("checkOwnerArchiveSafety", () => {
 
   it("addressMissing=false → address_missing は返さない", () => {
     const r = checkOwnerArchiveSafety({ ...baseOk, addressMissing: false });
+    expect(r).toEqual({ ok: true });
+  });
+
+  it("ownerMemoCount>0 → owner_memo_exists", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, ownerMemoCount: 1 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("owner_memo_exists");
+  });
+
+  it("ownerMemoCount=0 → owner_memo_exists は返さない", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, ownerMemoCount: 0 });
     expect(r).toEqual({ ok: true });
   });
 });

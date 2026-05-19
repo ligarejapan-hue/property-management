@@ -164,13 +164,12 @@ export async function POST(request: NextRequest) {
 
         // address あり → normalizeName + normalizeAddress で既存 Owner 検索
         // address なし → name のみでの自動統合はしない（同姓同名の別人を誤統合しないため）
-        let ownerId: string | null = null;
+        // archived owner は通常の取込候補から除外（Phase 2-A）。
+        let candidateOwnerId: string | null = null;
 
         if (ownerInfo.address) {
           const normName = normalizeName(ownerInfo.name);
           const normAddr = normalizeAddress(ownerInfo.address);
-          // archived owner は通常の取込候補から除外（Phase 2-A）。
-          // 同名・同住所の archived owner があっても、新規 Owner を作成して紐づける。
           const candidates = await prisma.owner.findMany({
             where: { address: { not: null }, isArchived: false },
             select: { id: true, name: true, address: true },
@@ -180,10 +179,48 @@ export async function POST(request: NextRequest) {
               normalizeName(c.name) === normName &&
               normalizeAddress(c.address!) === normAddr,
           );
-          ownerId = hit?.id ?? null;
+          candidateOwnerId = hit?.id ?? null;
         }
 
-        if (!ownerId) {
+        // 既存 owner を使うパス: lookup と PropertyOwner.create の間に concurrent
+        // archive が走った場合に archived owner に link してしまうのを防ぐ。
+        // transaction 内で owner 行を updateMany でロック + isArchived=false 再確認 →
+        // PropertyOwner 作成までを 1 つの tx に閉じる。count=0 ならフォールバックで
+        // 新規 active Owner を作成する。
+        let resolvedOwnerId: string | null = null;
+        if (candidateOwnerId) {
+          const reuseLinked = await prisma.$transaction(async (tx) => {
+            const lock = await tx.owner.updateMany({
+              where: { id: candidateOwnerId!, isArchived: false },
+              data: { updatedAt: new Date() },
+            });
+            if (lock.count === 0) {
+              return false;
+            }
+            const existingLink = await tx.propertyOwner.findFirst({
+              where: { propertyId, ownerId: candidateOwnerId! },
+              select: { propertyId: true },
+            });
+            if (!existingLink) {
+              await tx.propertyOwner.create({
+                data: {
+                  propertyId,
+                  ownerId: candidateOwnerId!,
+                  relationship: ownerInfo.share ? "共有者" : "所有者",
+                },
+              });
+            }
+            return true;
+          });
+          if (reuseLinked) {
+            resolvedOwnerId = candidateOwnerId;
+          }
+          // 競合検出時は resolvedOwnerId=null のまま下のフォールバックへ
+        }
+
+        if (!resolvedOwnerId) {
+          // 新規 Owner 作成 + link（dedup ヒットなし、または archive race で fallback）。
+          // 新規 owner は他 tx から見えないため archive 競合はない。
           const created = await prisma.owner.create({
             data: {
               name: ownerInfo.name,
@@ -191,25 +228,20 @@ export async function POST(request: NextRequest) {
             },
             select: { id: true },
           });
-          ownerId = created.id;
-        }
+          resolvedOwnerId = created.id;
 
-        // Link to property if not already linked
-        const existingLink = await prisma.propertyOwner.findFirst({
-          where: {
-            propertyId: propertyId,
-            ownerId,
-          },
-        });
-
-        if (!existingLink) {
-          await prisma.propertyOwner.create({
-            data: {
-              propertyId: propertyId,
-              ownerId,
-              relationship: ownerInfo.share ? "共有者" : "所有者",
-            },
+          const existingLink = await prisma.propertyOwner.findFirst({
+            where: { propertyId, ownerId: resolvedOwnerId },
           });
+          if (!existingLink) {
+            await prisma.propertyOwner.create({
+              data: {
+                propertyId,
+                ownerId: resolvedOwnerId,
+                relationship: ownerInfo.share ? "共有者" : "所有者",
+              },
+            });
+          }
         }
       }
     } else {
