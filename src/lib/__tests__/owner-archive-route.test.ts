@@ -212,7 +212,12 @@ describe("POST /api/admin/owners/[ownerId]/correction/archive", () => {
     expect(body.updatedFields).toEqual(["isArchived"]);
 
     expect(pm._tx.owner.updateMany).toHaveBeenCalledWith({
-      where: { id: OWNER_ID, version: 1, isArchived: false },
+      where: {
+        id: OWNER_ID,
+        version: 1,
+        isArchived: false,
+        propertyOwners: { none: {} },
+      },
       data: { isArchived: true, version: { increment: 1 } },
     });
     expect(pm._tx.changeLog.createMany).toHaveBeenCalledWith({
@@ -241,9 +246,17 @@ describe("POST /api/admin/owners/[ownerId]/correction/archive", () => {
     });
   });
 
-  it("dryRun=false, version mismatch（tx 内 updateMany count=0）→ 409", async () => {
+  it("dryRun=false, version mismatch（tx 内 updateMany count=0 + 再読込が version 差異）→ 409", async () => {
     setupEligible();
     pm._tx.owner.updateMany.mockResolvedValue({ count: 0 });
+    // updateMany 失敗後の再読込: version が変わっている
+    pm._tx.owner.findUnique
+      .mockResolvedValueOnce(eligibleOwner) // safety recheck
+      .mockResolvedValueOnce({
+        version: 2,
+        isArchived: false,
+        _count: { propertyOwners: 0 },
+      });
 
     const res = await POST(
       makeRequest({ version: 1, dryRun: false }),
@@ -256,6 +269,51 @@ describe("POST /api/admin/owners/[ownerId]/correction/archive", () => {
     expect(body.error.blockReasons).toEqual(["version_mismatch"]);
     expect(writeAuditLog).not.toHaveBeenCalled();
     expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
+  });
+
+  it("レース: safety check 後に PropertyOwner が作られた場合は 422 + property_owner_exists（linked owner を archive しない）", async () => {
+    // 外側 load も tx 内 recheck も 0 件で eligible。
+    // updateMany は count=0（直前に PropertyOwner が作られたため）。
+    // updateMany 失敗後の再読込で propertyOwners=1 を発見 → property_owner_exists を返す。
+    pm.owner.findUnique.mockResolvedValue(eligibleOwner);
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+    pm._tx.owner.findUnique
+      .mockResolvedValueOnce(eligibleOwner) // safety recheck (eligible)
+      .mockResolvedValueOnce({
+        version: 1,
+        isArchived: false,
+        _count: { propertyOwners: 1 }, // ← updateMany 後に発見
+      });
+    pm._tx.changeLog.count.mockResolvedValue(0);
+    pm._tx.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+    pm._tx.owner.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: false }),
+      makeParams(),
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("ARCHIVE_BLOCKED");
+    expect(body.error.blockReasons).toContain("property_owner_exists");
+    // isArchived=true を書き込まない
+    expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("archive updateMany の where に propertyOwners: { none: {} } が含まれる", async () => {
+    setupEligible();
+    await POST(makeRequest({ version: 1, dryRun: false }), makeParams());
+    const call = pm._tx.owner.updateMany.mock.calls[0][0];
+    expect(call.where).toMatchObject({
+      propertyOwners: { none: {} },
+    });
   });
 
   it("dryRun=false, PropertyOwner あり → 422 + blockReasons", async () => {

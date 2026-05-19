@@ -80,6 +80,9 @@ async function loadOwnerArchiveState(ownerId: string) {
 }
 
 function statusFromReasons(reasons: OwnerArchiveBlockReason[]): number {
+  // PropertyOwner が存在する場合は linked-owner 隠蔽リスクの方が重要なので
+  // version_mismatch より優先して 422 を返す。
+  if (reasons.includes("property_owner_exists")) return 422;
   if (reasons.includes("version_mismatch")) return 409;
   return 422;
 }
@@ -212,12 +215,45 @@ export async function POST(
           throw new Error(TX_BLOCKED_SENTINEL);
         }
 
+        // 最終 updateMany の where に propertyOwners none を含める。
+        // safety check 後〜updateMany 前に PropertyOwner が作成された場合でも、
+        // archive を絶対に成立させない（linked owner を隠さない）。
+        // count=0 になった場合は、現在状態を再読込して reason を分類する。
         const result = await tx.owner.updateMany({
-          where: { id: ownerId, version, isArchived: false },
+          where: {
+            id: ownerId,
+            version,
+            isArchived: false,
+            propertyOwners: { none: {} },
+          },
           data: { isArchived: true, version: { increment: 1 } },
         });
         if (result.count === 0) {
-          txBlockedReasons = ["version_mismatch"];
+          // 何が変わって失敗したかを PII なしで確認する
+          const cur = await tx.owner.findUnique({
+            where: { id: ownerId },
+            select: {
+              version: true,
+              isArchived: true,
+              _count: { select: { propertyOwners: true } },
+            },
+          });
+          const reasons: OwnerArchiveBlockReason[] = [];
+          if (!cur || cur.isArchived) {
+            reasons.push("owner_archived");
+          }
+          if (cur && cur.version !== version) {
+            reasons.push("version_mismatch");
+          }
+          if (cur && cur._count.propertyOwners > 0) {
+            reasons.push("property_owner_exists");
+          }
+          if (reasons.length === 0) {
+            // owner 行は存在し isArchived=false version 一致 PropertyOwner 0 なのに
+            // 更新できなかった稀少ケース。安全側で version_mismatch として返す。
+            reasons.push("version_mismatch");
+          }
+          txBlockedReasons = reasons;
           throw new Error(TX_BLOCKED_SENTINEL);
         }
 
