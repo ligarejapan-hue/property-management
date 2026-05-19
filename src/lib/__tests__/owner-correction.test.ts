@@ -308,6 +308,7 @@ describe("checkOwnerArchiveSafety", () => {
     version: 1,
     importRowCount: 1,
     importRowSuccess: true,
+    addressMissing: false,
   };
 
   it("全条件を満たすと ok", () => {
@@ -391,5 +392,16 @@ describe("checkOwnerArchiveSafety", () => {
         ]),
       );
     }
+  });
+
+  it("addressMissing=true → address_missing", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, addressMissing: true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("address_missing");
+  });
+
+  it("addressMissing=false → address_missing は返さない", () => {
+    const r = checkOwnerArchiveSafety({ ...baseOk, addressMissing: false });
+    expect(r).toEqual({ ok: true });
   });
 });

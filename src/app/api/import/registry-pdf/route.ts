@@ -169,8 +169,10 @@ export async function POST(request: NextRequest) {
         if (ownerInfo.address) {
           const normName = normalizeName(ownerInfo.name);
           const normAddr = normalizeAddress(ownerInfo.address);
+          // archived owner は通常の取込候補から除外（Phase 2-A）。
+          // 同名・同住所の archived owner があっても、新規 Owner を作成して紐づける。
           const candidates = await prisma.owner.findMany({
-            where: { address: { not: null } },
+            where: { address: { not: null }, isArchived: false },
             select: { id: true, name: true, address: true },
           });
           const hit = candidates.find(

@@ -56,6 +56,7 @@ async function loadOwnerArchiveState(ownerId: string) {
       isArchived: true,
       note: true,
       externalLinkKey: true,
+      address: true,
       _count: { select: { propertyOwners: true } },
     },
   });
@@ -137,6 +138,8 @@ export async function POST(
       version: state.owner.version,
       importRowCount: state.importRowCount,
       importRowSuccess: state.importRowSuccess,
+      addressMissing:
+        !state.owner.address || state.owner.address.trim().length === 0,
     });
 
     // ── dryRun: DB 変更も AuditLog も書かない ───────────────────────────────
@@ -179,6 +182,7 @@ export async function POST(
             isArchived: true,
             note: true,
             externalLinkKey: true,
+            address: true,
             _count: { select: { propertyOwners: true } },
           },
         });
@@ -209,6 +213,8 @@ export async function POST(
           importRowSuccess:
             recheckImportRows.length === 1 &&
             recheckImportRows[0].status === "success",
+          addressMissing:
+            !recheck.address || recheck.address.trim().length === 0,
         });
         if (!recheckSafety.ok) {
           txBlockedReasons = recheckSafety.reasons;

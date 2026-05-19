@@ -25,6 +25,7 @@ const BLOCK_REASON_LABELS: Record<string, string> = {
   external_link_key_exists: "外部リンクキーが設定されています",
   import_source_unsafe: "取込元が不明または複数候補があります",
   not_delete_candidate: "削除候補の条件を満たしていません",
+  address_missing: "住所が未入力のためアーカイブできません",
 };
 
 function reasonLabel(r: string): string {

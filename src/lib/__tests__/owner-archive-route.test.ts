@@ -255,6 +255,7 @@ describe("POST /api/admin/owners/[ownerId]/correction/archive", () => {
       .mockResolvedValueOnce({
         version: 2,
         isArchived: false,
+        address: OWNER_ADDRESS,
         _count: { propertyOwners: 0 },
       });
 
@@ -285,6 +286,7 @@ describe("POST /api/admin/owners/[ownerId]/correction/archive", () => {
       .mockResolvedValueOnce({
         version: 1,
         isArchived: false,
+        address: OWNER_ADDRESS,
         _count: { propertyOwners: 1 }, // ← updateMany 後に発見
       });
     pm._tx.changeLog.count.mockResolvedValue(0);
@@ -409,6 +411,82 @@ describe("POST /api/admin/owners/[ownerId]/correction/archive", () => {
     const serialized = JSON.stringify(call.detail);
     expect(serialized).not.toContain(OWNER_NAME);
     expect(serialized).not.toContain(OWNER_ADDRESS);
+  });
+
+  // ── address_missing（address-fill 候補を archive で消さない） ──────────────
+
+  it("address=null の orphan owner → dryRun=true で blocked + address_missing", async () => {
+    pm.owner.findUnique.mockResolvedValue({ ...eligibleOwner, address: null });
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: true }),
+      makeParams(),
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.executed).toBe(false);
+    expect(body.eligible).toBe(false);
+    expect(body.blockReasons).toContain("address_missing");
+  });
+
+  it("address=空文字 → dryRun=true で blocked + address_missing", async () => {
+    pm.owner.findUnique.mockResolvedValue({ ...eligibleOwner, address: "" });
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: true }),
+      makeParams(),
+    );
+    const body = await res.json();
+    expect(body.eligible).toBe(false);
+    expect(body.blockReasons).toContain("address_missing");
+  });
+
+  it("address=空白のみ → dryRun=true で blocked + address_missing", async () => {
+    pm.owner.findUnique.mockResolvedValue({
+      ...eligibleOwner,
+      address: "   ",
+    });
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: true }),
+      makeParams(),
+    );
+    const body = await res.json();
+    expect(body.eligible).toBe(false);
+    expect(body.blockReasons).toContain("address_missing");
+  });
+
+  it("address=null で dryRun=false → 422 + address_missing / 実行されない", async () => {
+    pm.owner.findUnique.mockResolvedValue({ ...eligibleOwner, address: null });
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { id: "row-1", status: "success" },
+    ]);
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: false }),
+      makeParams(),
+    );
+    const body = await res.json();
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("ARCHIVE_BLOCKED");
+    expect(body.error.blockReasons).toContain("address_missing");
+    // 実際の archive 更新 / ChangeLog / AuditLog は一切走らない
+    expect(pm._tx.owner.updateMany).not.toHaveBeenCalled();
+    expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("dryRun=false で複数 ImportJobRow → 422 + import_source_unsafe", async () => {

@@ -256,7 +256,8 @@ export type OwnerArchiveBlockReason =
   | "note_exists"              // Owner.note あり
   | "external_link_key_exists" // externalLinkKey あり
   | "import_source_unsafe"    // ImportJobRow が無い / 複数 / status != success
-  | "not_delete_candidate";   // それ以外の理由で delete_candidate 相当でない（changelog 等）
+  | "not_delete_candidate"    // それ以外の理由で delete_candidate 相当でない（changelog 等）
+  | "address_missing";        // address が未入力（address-fill 対象を archive で消さない）
 
 export interface OwnerArchiveSafetyInput {
   /** Owner 現状（DB から取得後の値）。 */
@@ -277,6 +278,12 @@ export interface OwnerArchiveSafetyInput {
   importRowCount: number;
   /** importRowCount===1 のときの status が "success" か。 */
   importRowSuccess: boolean;
+  /**
+   * address が null / "" / 空白のみなら true。
+   * correction-candidates の delete_candidate 条件 (!isAddressNull) と整合させる。
+   * address-fill 対象の owner を archive で消さない。
+   */
+  addressMissing: boolean;
 }
 
 export type OwnerArchiveSafetyResult =
@@ -302,6 +309,7 @@ export function checkOwnerArchiveSafety(
   if (input.propertyOwnerCount > 0) reasons.push("property_owner_exists");
   if (input.hasNote) reasons.push("note_exists");
   if (input.hasExternalLinkKey) reasons.push("external_link_key_exists");
+  if (input.addressMissing) reasons.push("address_missing");
 
   // candidate 側で version_gt_1 / changelog_exists は hold 扱い → not_delete_candidate に集約
   if (input.changeLogCount > 0 || input.version > 1) {
