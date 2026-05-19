@@ -430,15 +430,16 @@ async function upsertOwnerAndLink(
   const address = nullIfBlank(o.address);
   const zip = nullIfBlank(o.zip);
 
-  // 既存 Owner 検索: name + address → name のみ
-  let ownerId: string | null = null;
+  // 既存 Owner 検索: name + address → name のみ。
+  // archived owner は既存候補として扱わない（Phase 2-A）。
+  let candidateOwnerId: string | null = null;
   let existingZip: string | null = null;
   let existingAddress: string | null = null;
   if (address) {
     const normName = normalizeName(name);
     const normAddr = normalizeAddress(address);
     const candidates = await prisma.owner.findMany({
-      where: { address: { not: null } },
+      where: { address: { not: null }, isArchived: false },
       select: { id: true, zip: true, address: true, name: true },
     });
     const hit =
@@ -448,55 +449,94 @@ async function upsertOwnerAndLink(
           normalizeAddress(c.address!) === normAddr,
       ) ?? null;
     if (hit) {
-      ownerId = hit.id;
+      candidateOwnerId = hit.id;
       existingZip = hit.zip;
       existingAddress = hit.address;
     }
   }
-  if (!ownerId) {
+  if (!candidateOwnerId) {
     const hit = await prisma.owner.findFirst({
-      where: { name, address: null },
+      where: { name, address: null, isArchived: false },
       select: { id: true, zip: true, address: true },
     });
     if (hit) {
-      ownerId = hit.id;
+      candidateOwnerId = hit.id;
       existingZip = hit.zip;
       existingAddress = hit.address;
     }
   }
 
-  if (!ownerId) {
-    const created = await prisma.owner.create({
-      data: {
-        name,
-        ...(address ? { address } : {}),
-        ...(zip ? { zip } : {}),
-      },
-      select: { id: true },
-    });
-    ownerId = created.id;
-    onOwnerCreated();
-    await writeAuditLog({
-      userId,
-      action: "owner_created_from_reception",
-      targetTable: "owners",
-      targetId: ownerId,
-      detail: { name, address: address ?? null, zip: zip ?? null },
-    });
-  } else {
-    // 既存所有者: 空欄の zip / address のみ補完（既存値は破壊しない）
+  // 既存 owner を使うパス。lookup と PropertyOwner.create の間に concurrent
+  // archive が走るとアーカイブ済み owner に link してしまうため、transaction 内で
+  // owner 行を updateMany でロック + isArchived=false を再確認してから link する。
+  // count=0 ならアーカイブされたので false を返し、外側で新規 active Owner 作成に
+  // フォールバックする。
+  if (candidateOwnerId) {
     const zipUpdate = zip && !existingZip ? { zip } : {};
     const addressUpdate = address && !existingAddress ? { address } : {};
-    const patch = { ...zipUpdate, ...addressUpdate };
-    if (Object.keys(patch).length > 0) {
-      await prisma.owner.update({
-        where: { id: ownerId },
-        data: { ...patch, version: { increment: 1 } },
+    const fieldPatch = { ...zipUpdate, ...addressUpdate };
+    const hasFieldPatch = Object.keys(fieldPatch).length > 0;
+    const reuseResult = await prisma.$transaction(async (tx) => {
+      const lock = await tx.owner.updateMany({
+        where: { id: candidateOwnerId!, isArchived: false },
+        data: hasFieldPatch
+          ? {
+              ...fieldPatch,
+              version: { increment: 1 },
+              updatedAt: new Date(),
+            }
+          : { updatedAt: new Date() },
       });
+      if (lock.count === 0) {
+        return { linked: false as const, newLinkCreated: false };
+      }
+      const existingLink = await tx.propertyOwner.findUnique({
+        where: {
+          propertyId_ownerId: { propertyId, ownerId: candidateOwnerId! },
+        },
+        select: { propertyId: true },
+      });
+      let newLinkCreated = false;
+      if (!existingLink) {
+        await tx.propertyOwner.create({
+          data: {
+            propertyId,
+            ownerId: candidateOwnerId!,
+            relationship: "所有者",
+            isPrimary: false,
+          },
+        });
+        newLinkCreated = true;
+      }
+      return { linked: true as const, newLinkCreated };
+    });
+    if (reuseResult.linked) {
+      if (reuseResult.newLinkCreated) onPropertyLinked();
+      return candidateOwnerId;
     }
+    // 競合: archived race を検出。candidateOwnerId をクリアして新規作成にフォールバック。
   }
 
-  // PropertyOwner: 存在しなければリンク
+  // 新規 Owner 作成 + link（dedup ヒットなし、または上記レースで fallback）
+  const created = await prisma.owner.create({
+    data: {
+      name,
+      ...(address ? { address } : {}),
+      ...(zip ? { zip } : {}),
+    },
+    select: { id: true },
+  });
+  const ownerId = created.id;
+  onOwnerCreated();
+  await writeAuditLog({
+    userId,
+    action: "owner_created_from_reception",
+    targetTable: "owners",
+    targetId: ownerId,
+    detail: { name, address: address ?? null, zip: zip ?? null },
+  });
+
+  // 新規 owner は他 tx から見えないため archive 競合はない。通常の link 処理。
   const existingLink = await prisma.propertyOwner.findUnique({
     where: {
       propertyId_ownerId: { propertyId, ownerId },

@@ -36,30 +36,49 @@ export async function POST(
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
     }
 
-    // Verify owner exists
+    // Verify owner exists（archived は紐付け対象外）。早期 404 のための事前確認。
+    // 実際のレース対策は下の transaction 内 updateMany で行う。
     const owner = await prisma.owner.findUnique({
       where: { id: data.ownerId },
-      select: { id: true },
+      select: { id: true, isArchived: true },
     });
-    if (!owner) {
+    if (!owner || owner.isArchived) {
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
 
-    // If isPrimary, unset existing primary owner for this property
-    if (data.isPrimary) {
-      await prisma.propertyOwner.updateMany({
-        where: { propertyId, isPrimary: true },
-        data: { isPrimary: false },
+    // archive route との直列化:
+    //   transaction 内で owner 行に updateMany を発行し isArchived=false を再確認しつつ
+    //   PostgreSQL の行ロックを取得する。これにより archive 側の updateMany と
+    //   競合した場合は片方が必ず後続のロック待ちで blocked → 後勝ち側が条件不一致で
+    //   失敗する。link 成功時に archive 側の where: { propertyOwners: { none: {} } }
+    //   が次回以降の archive を 422 にする。
+    //   updatedAt の touch のみで version は変更しない（owner 自体のデータ変更ではないため）。
+    const propertyOwner = await prisma.$transaction(async (tx) => {
+      const lockRes = await tx.owner.updateMany({
+        where: { id: data.ownerId, isArchived: false },
+        data: { updatedAt: new Date() },
       });
-    }
+      if (lockRes.count === 0) {
+        // owner が同時にアーカイブされた、または削除された
+        throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
+      }
 
-    const propertyOwner = await prisma.propertyOwner.create({
-      data: {
-        propertyId,
-        ownerId: data.ownerId,
-        relationship: data.relationship,
-        isPrimary: data.isPrimary,
-      },
+      // If isPrimary, unset existing primary owner for this property
+      if (data.isPrimary) {
+        await tx.propertyOwner.updateMany({
+          where: { propertyId, isPrimary: true },
+          data: { isPrimary: false },
+        });
+      }
+
+      return tx.propertyOwner.create({
+        data: {
+          propertyId,
+          ownerId: data.ownerId,
+          relationship: data.relationship,
+          isPrimary: data.isPrimary,
+        },
+      });
     });
 
     await writeAuditLog({

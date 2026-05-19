@@ -205,8 +205,10 @@ export async function POST(
         if (address) {
           const normName = normalizeName(name);
           const normAddr = normalizeAddress(address);
+          // archived owner は手動リンクでも既存候補として扱わない（Phase 2-A）。
+          // 同名・同住所の archived owner があっても再利用せず、新規 Owner を作成する。
           const candidates = await tx.owner.findMany({
-            where: { address: { not: null } },
+            where: { address: { not: null }, isArchived: false },
             select: { id: true, zip: true, address: true, name: true },
           });
           const hit =
@@ -222,8 +224,9 @@ export async function POST(
           }
         }
         if (!ownerId) {
+          // name のみフォールバック検索も archived owner を除外する。
           const hit = await tx.owner.findFirst({
-            where: { name, address: null },
+            where: { name, address: null, isArchived: false },
             select: { id: true, zip: true, address: true },
           });
           if (hit) {
@@ -245,15 +248,33 @@ export async function POST(
           ownerId = created.id;
           ownerCreatedCount++;
         } else {
-          // 既存所有者: 空欄の zip / address のみ補完（既存値は破壊しない）
+          // 既存所有者: 空欄の zip / address のみ補完（既存値は破壊しない）。
+          // archive route との直列化のため、patch が空でも必ず updateMany を発行し
+          // owner 行のロックを取得 + isArchived=false を再確認する。
+          // dedup find と PropertyOwner.create の間に concurrent archive が走った場合は
+          // count=0 で検出してロールバックする（archived owner には PropertyOwner を作らない）。
           const zipUpdate = zip && !existingZip ? { zip } : {};
           const addressUpdate = address && !existingAddress ? { address } : {};
-          const patch = { ...zipUpdate, ...addressUpdate };
-          if (Object.keys(patch).length > 0) {
-            await tx.owner.update({
-              where: { id: ownerId },
-              data: { ...patch, version: { increment: 1 } },
-            });
+          const fieldPatch = { ...zipUpdate, ...addressUpdate };
+          const hasFieldPatch = Object.keys(fieldPatch).length > 0;
+          const lockResult = await tx.owner.updateMany({
+            where: { id: ownerId, isArchived: false },
+            data: hasFieldPatch
+              ? {
+                  ...fieldPatch,
+                  version: { increment: 1 },
+                  updatedAt: new Date(),
+                }
+              : { updatedAt: new Date() },
+          });
+          if (lockResult.count === 0) {
+            // dedup find 時点では active だったが、その後 concurrent archive で
+            // isArchived=true になった。archived owner に PropertyOwner を作らない。
+            throw new ApiError(
+              422,
+              "対象所有者がアーカイブされています",
+              "OWNER_ARCHIVED",
+            );
           }
         }
         ownerIds.push(ownerId);

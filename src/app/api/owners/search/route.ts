@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
 
     const owners = await prisma.owner.findMany({
       where: {
+        isArchived: false,
         OR: [
           { name: { contains: q, mode: "insensitive" } },
           { nameKana: { contains: q, mode: "insensitive" } },

@@ -244,3 +244,93 @@ export function extractAddressFromRecoveredOwner(
     sourceFieldNames: [`${RECEPTION_OWNER_LINK_DATA_KEY}.address`],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2-A: Owner archive (soft-delete) safety check
+// ---------------------------------------------------------------------------
+
+export type OwnerArchiveBlockReason =
+  | "owner_archived"          // 既に isArchived=true
+  | "version_mismatch"         // optimistic lock 失敗
+  | "property_owner_exists"   // PropertyOwner.count > 0
+  | "note_exists"              // Owner.note あり
+  | "external_link_key_exists" // externalLinkKey あり
+  | "import_source_unsafe"    // ImportJobRow が無い / 複数 / status != success
+  | "not_delete_candidate"    // それ以外の理由で delete_candidate 相当でない（changelog 等）
+  | "address_missing"         // address が未入力（address-fill 対象を archive で消さない）
+  | "owner_memo_exists";      // OwnerMemo が 1件以上ある（メモ履歴がある owner を archive で隠さない）
+
+export interface OwnerArchiveSafetyInput {
+  /** Owner 現状（DB から取得後の値）。 */
+  isArchived: boolean;
+  /** クライアント送信 version と DB version の一致確認用。一致なら true。 */
+  versionMatches: boolean;
+  /** Owner に紐づく PropertyOwner 件数。 */
+  propertyOwnerCount: number;
+  /** owners テーブルへの ChangeLog 件数（targetTable="owners"）。 */
+  changeLogCount: number;
+  /** Owner.note が非空なら true。 */
+  hasNote: boolean;
+  /** Owner.externalLinkKey が非空なら true。 */
+  hasExternalLinkKey: boolean;
+  /** Owner.version 値（>1 なら手動編集履歴があるため not_delete_candidate 扱い）。 */
+  version: number;
+  /** owner_csv ImportJobRow 件数（createdId=ownerId）。 */
+  importRowCount: number;
+  /** importRowCount===1 のときの status が "success" か。 */
+  importRowSuccess: boolean;
+  /**
+   * address が null / "" / 空白のみなら true。
+   * correction-candidates の delete_candidate 条件 (!isAddressNull) と整合させる。
+   * address-fill 対象の owner を archive で消さない。
+   */
+  addressMissing: boolean;
+  /**
+   * OwnerMemo の件数。1以上で archive を拒否する。
+   * OwnerMemo は owner.version も ChangeLog も上げないため、ここで明示的に守る。
+   */
+  ownerMemoCount: number;
+}
+
+export type OwnerArchiveSafetyResult =
+  | { ok: true }
+  | { ok: false; reasons: OwnerArchiveBlockReason[] };
+
+/**
+ * Owner archive (soft-delete) の安全条件チェック。
+ *
+ * correction-candidates の recommendedAction === "delete_candidate" と
+ * 同等の条件を強制する（追加で version / archive 状態を見る）。
+ *
+ * 複数違反は全件返す（UI が一括表示できるように）。
+ * 値（PII）は含めず enum コードのみ返す。
+ */
+export function checkOwnerArchiveSafety(
+  input: OwnerArchiveSafetyInput,
+): OwnerArchiveSafetyResult {
+  const reasons: OwnerArchiveBlockReason[] = [];
+
+  if (input.isArchived) reasons.push("owner_archived");
+  if (!input.versionMatches) reasons.push("version_mismatch");
+  if (input.propertyOwnerCount > 0) reasons.push("property_owner_exists");
+  if (input.hasNote) reasons.push("note_exists");
+  if (input.hasExternalLinkKey) reasons.push("external_link_key_exists");
+  if (input.addressMissing) reasons.push("address_missing");
+  if (input.ownerMemoCount > 0) reasons.push("owner_memo_exists");
+
+  // candidate 側で version_gt_1 / changelog_exists は hold 扱い → not_delete_candidate に集約
+  if (input.changeLogCount > 0 || input.version > 1) {
+    reasons.push("not_delete_candidate");
+  }
+
+  // ImportJobRow 由来の安全条件
+  if (
+    input.importRowCount !== 1 ||
+    (input.importRowCount === 1 && !input.importRowSuccess)
+  ) {
+    reasons.push("import_source_unsafe");
+  }
+
+  if (reasons.length > 0) return { ok: false, reasons };
+  return { ok: true };
+}

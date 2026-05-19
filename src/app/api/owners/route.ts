@@ -31,8 +31,9 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit;
 
     // Build where clause
+    // archived owner は通常リスト・検索に出さない（Phase 2-A）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = {};
+    const where: any = { isArchived: false };
     if (keyword) {
       where.OR = [
         { name: { contains: keyword, mode: "insensitive" } },
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest) {
       const normName = normalizeName(data.name);
       const normAddr = normalizeAddress(data.address);
       const candidates = await prisma.owner.findMany({
-        where: { address: { not: null } },
+        where: { address: { not: null }, isArchived: false },
         select: { id: true, name: true, address: true },
       });
       const dup = candidates.find(
