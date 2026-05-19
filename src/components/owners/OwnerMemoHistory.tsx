@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { OWNER_MEMO_BODY_MAX_LENGTH, formatMemoCreatorName } from "@/lib/owner-memo";
 
@@ -10,9 +11,16 @@ interface MemoCreator {
   email: string | null;
 }
 
+interface MemoProperty {
+  id: string;
+  address: string;
+}
+
 interface OwnerMemo {
   id: string;
   ownerId: string;
+  propertyId: string | null;
+  property: MemoProperty | null;
   body: string;
   createdAt: string;
   creator: MemoCreator | null;
@@ -20,6 +28,11 @@ interface OwnerMemo {
 
 interface OwnerMemoHistoryProps {
   ownerId: string;
+  /**
+   * 物件詳細→所有者タブから書く場合の関連物件 id。
+   * 所有者詳細から書く場合は省略（propertyId=null で保存）。
+   */
+  propertyId?: string;
   /** owner:write + owner_note full/edit を満たすときのみ true。入力欄を出すか判定。 */
   canCreate: boolean;
 }
@@ -31,7 +44,11 @@ function formatTimestamp(iso: string): string {
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function OwnerMemoHistory({ ownerId, canCreate }: OwnerMemoHistoryProps) {
+export function OwnerMemoHistory({
+  ownerId,
+  propertyId,
+  canCreate,
+}: OwnerMemoHistoryProps) {
   const [memos, setMemos] = useState<OwnerMemo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -74,7 +91,12 @@ export function OwnerMemoHistory({ ownerId, canCreate }: OwnerMemoHistoryProps) 
       const res = await fetch(`/api/owners/${ownerId}/memos`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: trimmed }),
+        body: JSON.stringify({
+          body: trimmed,
+          // 物件詳細→所有者タブから書く場合のみ propertyId を自動添付。
+          // 所有者詳細から書く場合は省略（API 側で null として保存される）。
+          ...(propertyId ? { propertyId } : {}),
+        }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -149,6 +171,19 @@ export function OwnerMemoHistory({ ownerId, canCreate }: OwnerMemoHistoryProps) 
                   {formatMemoCreatorName(m.creator)}
                 </span>
               </div>
+              {/* 関連物件（あれば表示）。propertyId だけある場合（property:read なしで
+                  property オブジェクトが null）は無印 propertyId を表示しない。 */}
+              {m.property && (
+                <div className="mb-1 text-xs text-gray-600">
+                  <span className="mr-1 text-gray-500">関連物件:</span>
+                  <Link
+                    href={`/properties/${m.property.id}`}
+                    className="text-blue-600 hover:underline break-all"
+                  >
+                    {m.property.address}
+                  </Link>
+                </div>
+              )}
               {m.body ? (
                 <p className="whitespace-pre-wrap break-words text-sm text-gray-800">
                   {m.body}

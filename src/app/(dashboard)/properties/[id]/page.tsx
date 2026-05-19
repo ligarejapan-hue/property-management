@@ -386,6 +386,7 @@ export default function PropertyDetailPage({
         {activeTab === "owner" && (
           <OwnerTab
             owners={property.propertyOwners}
+            propertyId={property.id}
             canRead={canReadOwner}
             canWrite={canWriteOwner}
             editableFields={ownerEditableFields}
@@ -562,6 +563,7 @@ function BasicTab({
 
 function OwnerTab({
   owners,
+  propertyId,
   canRead,
   canWrite,
   editableFields,
@@ -569,6 +571,7 @@ function OwnerTab({
   onRefresh,
 }: {
   owners: ApiPropertyOwner[];
+  propertyId: string;
   canRead: boolean;
   canWrite: boolean;
   editableFields: OwnerEditableFields;
@@ -606,6 +609,7 @@ function OwnerTab({
         <OwnerCard
           key={po.id}
           po={po}
+          propertyId={propertyId}
           idx={idx}
           total={owners.length}
           canRead={canRead}
@@ -623,6 +627,7 @@ function OwnerTab({
 
 function OwnerCard({
   po,
+  propertyId,
   idx,
   total,
   canRead,
@@ -632,6 +637,7 @@ function OwnerCard({
   onRefresh,
 }: {
   po: ApiPropertyOwner;
+  propertyId: string;
   idx: number;
   total: number;
   canRead: boolean;
@@ -878,6 +884,7 @@ function OwnerCard({
         <div className="mt-5 border-t border-gray-100 pt-4">
           <OwnerMemoHistory
             ownerId={po.ownerId}
+            propertyId={propertyId}
             canCreate={canCreateMemo}
           />
         </div>
