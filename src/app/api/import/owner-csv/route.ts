@@ -103,8 +103,10 @@ export async function POST(request: NextRequest) {
     > => {
       if (existingOwnersByAddress) return existingOwnersByAddress;
       const map = new Map<string, { id: string; name: string }>();
+      // archived owner は通常の重複判定対象から除外（Phase 2-A）。
+      // 同名・同住所の archived owner を理由に新規行を needs_review 化しない。
       const ownersWithAddress = await prisma.owner.findMany({
-        where: { address: { not: null } },
+        where: { address: { not: null }, isArchived: false },
         select: { id: true, name: true, address: true },
       });
       for (const o of ownersWithAddress) {
@@ -183,7 +185,7 @@ export async function POST(request: NextRequest) {
 
         if (!existing && mapped.phone) {
           existing = await prisma.owner.findFirst({
-            where: { name: mapped.name, phone: mapped.phone },
+            where: { name: mapped.name, phone: mapped.phone, isArchived: false },
             select: { id: true, name: true },
           });
         }

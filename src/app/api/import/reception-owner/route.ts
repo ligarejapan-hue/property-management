@@ -437,8 +437,10 @@ async function upsertOwnerAndLink(
   if (address) {
     const normName = normalizeName(name);
     const normAddr = normalizeAddress(address);
+    // archived owner は既存候補として扱わない（Phase 2-A）。
+    // 同名・同住所の archived owner があっても新規 Owner を作成する。
     const candidates = await prisma.owner.findMany({
-      where: { address: { not: null } },
+      where: { address: { not: null }, isArchived: false },
       select: { id: true, zip: true, address: true, name: true },
     });
     const hit =
@@ -455,7 +457,7 @@ async function upsertOwnerAndLink(
   }
   if (!ownerId) {
     const hit = await prisma.owner.findFirst({
-      where: { name, address: null },
+      where: { name, address: null, isArchived: false },
       select: { id: true, zip: true, address: true },
     });
     if (hit) {
