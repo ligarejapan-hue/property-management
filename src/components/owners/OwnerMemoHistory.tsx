@@ -171,9 +171,14 @@ export function OwnerMemoHistory({
                   {formatMemoCreatorName(m.creator)}
                 </span>
               </div>
-              {/* 関連物件（あれば表示）。propertyId だけある場合（property:read なしで
-                  property オブジェクトが null）は無印 propertyId を表示しない。 */}
-              {m.property && (
+              {/* 関連物件:
+                  - m.property あり: 物件詳細リンク表示。
+                  - propertyId あり / m.property null:
+                      property:read 権限なし、または field_staff の
+                      レコード単位スコープ外で物件にアクセス不可。
+                      address 等 PII は持たず「表示権限なし」だけを表示する。
+                  - propertyId なし: 何も表示しない（所有者単体メモ）。 */}
+              {m.property ? (
                 <div className="mb-1 text-xs text-gray-600">
                   <span className="mr-1 text-gray-500">関連物件:</span>
                   <Link
@@ -183,7 +188,12 @@ export function OwnerMemoHistory({
                     {m.property.address}
                   </Link>
                 </div>
-              )}
+              ) : m.propertyId ? (
+                <div className="mb-1 text-xs text-gray-400">
+                  <span className="mr-1 text-gray-500">関連物件:</span>
+                  <span className="italic">表示権限なし</span>
+                </div>
+              ) : null}
               {m.body ? (
                 <p className="whitespace-pre-wrap break-words text-sm text-gray-800">
                   {m.body}

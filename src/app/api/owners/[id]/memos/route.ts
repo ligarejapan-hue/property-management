@@ -15,6 +15,7 @@ import {
   validateOwnerMemoBody,
   OWNER_MEMO_BODY_MAX_LENGTH,
 } from "@/lib/owner-memo";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 // ---------------------------------------------------------------------------
 // GET /api/owners/:id/memos
@@ -65,24 +66,42 @@ export async function GET(
       orderBy: { createdAt: "desc" },
       include: {
         creator: { select: { id: true, name: true, email: true } },
-        property: { select: { id: true, address: true } },
+        // createdBy / assignedTo はレコード単位アクセス判定用。
+        // 判定通らなければレスポンスから除外する。
+        property: {
+          select: {
+            id: true,
+            address: true,
+            createdBy: true,
+            assignedTo: true,
+          },
+        },
       },
     });
 
-    const result = memos.map((m) => ({
-      id: m.id,
-      ownerId: m.ownerId,
-      propertyId: m.propertyId,
-      property:
-        canReadProperty && m.property
-          ? { id: m.property.id, address: m.property.address }
+    const result = memos.map((m) => {
+      // 物件詳細 API と同じレコード単位スコープ判定。
+      // field_staff は createdBy / assignedTo のみアクセス可。
+      // 判定通らなければ property を null にし、address 等の物件 PII を返さない。
+      const propertyAccessible =
+        canReadProperty &&
+        m.property !== null &&
+        canAccessPropertyRecord(session, m.property);
+      return {
+        id: m.id,
+        ownerId: m.ownerId,
+        propertyId: m.propertyId,
+        property:
+          propertyAccessible && m.property
+            ? { id: m.property.id, address: m.property.address }
+            : null,
+        body: visibility === "visible" ? m.body : "",
+        createdAt: m.createdAt,
+        creator: m.creator
+          ? { id: m.creator.id, name: m.creator.name, email: m.creator.email }
           : null,
-      body: visibility === "visible" ? m.body : "",
-      createdAt: m.createdAt,
-      creator: m.creator
-        ? { id: m.creator.id, name: m.creator.name, email: m.creator.email }
-        : null,
-    }));
+      };
+    });
 
     return apiResponse({ memos: result });
   } catch (error) {
@@ -176,10 +195,27 @@ export async function POST(
     if (rawPropertyId != null && rawPropertyId !== "") {
       const property = await prisma.property.findUnique({
         where: { id: rawPropertyId as string },
-        select: { id: true, isArchived: true },
+        select: {
+          id: true,
+          isArchived: true,
+          createdBy: true,
+          assignedTo: true,
+        },
       });
       if (!property || property.isArchived) {
         throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+      }
+
+      // 物件詳細 API と同じレコード単位スコープ判定。
+      // field_staff は createdBy / assignedTo のみアクセス可。
+      // property:read 自体は持っていても、個別物件への閲覧権が無いケースで
+      // OwnerMemo 経由で物件住所が漏れることを防ぐ。
+      if (!canAccessPropertyRecord(session, property)) {
+        throw new ApiError(
+          403,
+          "この物件を閲覧する権限がありません",
+          "FORBIDDEN",
+        );
       }
 
       // owner ↔ property の紐づき確認。紐づきがない propertyId をメモに

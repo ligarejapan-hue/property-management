@@ -29,12 +29,7 @@ vi.mock("@/lib/api-helpers", () => {
   }
   return {
     ApiError: MockApiError,
-    getApiSession: vi.fn().mockResolvedValue({
-      id: "user-1",
-      email: "admin@test.com",
-      name: "Admin",
-      role: "admin",
-    }),
+    getApiSession: vi.fn(),
     getUserPermissions: vi.fn(),
     handleApiError: vi.fn((error: unknown) => {
       if (error instanceof MockApiError) {
@@ -66,7 +61,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import prisma from "@/lib/prisma";
-import { getUserPermissions } from "@/lib/api-helpers";
+import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import {
   GET,
@@ -111,11 +106,20 @@ const PERMS_WITHOUT_PROPERTY_READ = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getApiSession).mockResolvedValue({
+    id: "user-1",
+    email: "admin@test.com",
+    name: "Admin",
+    role: "admin",
+  });
   vi.mocked(getUserPermissions).mockResolvedValue(FULL_PERMS);
   pm.owner.findUnique.mockResolvedValue({ id: OWNER_ID });
+  // デフォルト: admin / property の createdBy/assignedTo はテスト側で意識しない
   pm.property.findUnique.mockResolvedValue({
     id: PROPERTY_ID,
     isArchived: false,
+    createdBy: "creator-1",
+    assignedTo: "assignee-1",
   });
   // デフォルト: owner と property が紐づいている状態
   pm.propertyOwner.findFirst.mockResolvedValue({ id: "po-1" });
@@ -175,10 +179,15 @@ describe("POST /api/owners/[id]/memos: propertyId 任意受付", () => {
       id: PROPERTY_ID,
       address: PROPERTY_ADDRESS,
     });
-    // Property の存在・未 archived 確認
+    // Property の存在・未 archived 確認 + scope 判定用フィールド取得
     expect(pm.property.findUnique).toHaveBeenCalledWith({
       where: { id: PROPERTY_ID },
-      select: { id: true, isArchived: true },
+      select: {
+        id: true,
+        isArchived: true,
+        createdBy: true,
+        assignedTo: true,
+      },
     });
     // owner ↔ property の link 確認
     expect(pm.propertyOwner.findFirst).toHaveBeenCalledWith({
@@ -307,7 +316,12 @@ describe("GET /api/owners/[id]/memos: propertyId / property 返却", () => {
         body: MEMO_BODY,
         createdAt: new Date(),
         creator: { id: "user-1", name: "Admin", email: "a@test.com" },
-        property: { id: PROPERTY_ID, address: PROPERTY_ADDRESS },
+        property: {
+          id: PROPERTY_ID,
+          address: PROPERTY_ADDRESS,
+          createdBy: "creator-1",
+          assignedTo: "assignee-1",
+        },
       },
     ]);
 
@@ -355,7 +369,12 @@ describe("GET /api/owners/[id]/memos: propertyId / property 返却", () => {
         createdAt: new Date(),
         creator: null,
         // route 内で常に include するが、レスポンス時に property:read で分岐する
-        property: { id: PROPERTY_ID, address: PROPERTY_ADDRESS },
+        property: {
+          id: PROPERTY_ID,
+          address: PROPERTY_ADDRESS,
+          createdBy: "creator-1",
+          assignedTo: "assignee-1",
+        },
       },
     ]);
 
@@ -367,6 +386,217 @@ describe("GET /api/owners/[id]/memos: propertyId / property 返却", () => {
     // PII 漏れ防止: レスポンス全体に address が含まれない
     const text = JSON.stringify(json);
     expect(text).not.toContain(PROPERTY_ADDRESS);
+  });
+});
+
+// ── field_staff レコードスコープ判定 ────────────────────────────────────────
+// 物件詳細 API と同じスコープ: field_staff は createdBy / assignedTo のみアクセス可。
+// property:read 権限だけでは個別物件を見られないユーザーに、OwnerMemo 経由で
+// 物件 PII (address) を漏らさない。
+
+describe("POST /api/owners/[id]/memos: field_staff レコードスコープ", () => {
+  beforeEach(() => {
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "field-staff-1",
+      email: "field@test.com",
+      name: "Field",
+      role: "field_staff",
+    });
+  });
+
+  it("field_staff + 自身が createdBy の物件 → 成功（propertyId 保存）", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      id: PROPERTY_ID,
+      isArchived: false,
+      createdBy: "field-staff-1",
+      assignedTo: null,
+    });
+    pm.ownerMemo.create.mockResolvedValue({
+      id: "memo-scoped-ok",
+      ownerId: OWNER_ID,
+      propertyId: PROPERTY_ID,
+      body: MEMO_BODY,
+      createdAt: new Date(),
+      creator: null,
+      property: { id: PROPERTY_ID, address: PROPERTY_ADDRESS },
+    });
+
+    const res = await POST(
+      makeRequest({ body: MEMO_BODY, propertyId: PROPERTY_ID }),
+      makeParams(),
+    );
+    expect(res.status).toBe(201);
+    expect(pm.ownerMemo.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("field_staff + 自身が assignedTo の物件 → 成功", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      id: PROPERTY_ID,
+      isArchived: false,
+      createdBy: "other-creator",
+      assignedTo: "field-staff-1",
+    });
+    pm.ownerMemo.create.mockResolvedValue({
+      id: "memo-assigned-ok",
+      ownerId: OWNER_ID,
+      propertyId: PROPERTY_ID,
+      body: MEMO_BODY,
+      createdAt: new Date(),
+      creator: null,
+      property: { id: PROPERTY_ID, address: PROPERTY_ADDRESS },
+    });
+
+    const res = await POST(
+      makeRequest({ body: MEMO_BODY, propertyId: PROPERTY_ID }),
+      makeParams(),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("field_staff + 担当外/作成者外の物件 → 403 / OwnerMemo.create 呼ばれない", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      id: PROPERTY_ID,
+      isArchived: false,
+      createdBy: "other-creator",
+      assignedTo: "other-assignee",
+    });
+
+    const res = await POST(
+      makeRequest({ body: MEMO_BODY, propertyId: PROPERTY_ID }),
+      makeParams(),
+    );
+    expect(res.status).toBe(403);
+    // PropertyOwner link チェックも走らず、create も走らない
+    expect(pm.propertyOwner.findFirst).not.toHaveBeenCalled();
+    expect(pm.ownerMemo.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    // レスポンスに address が漏れない
+    const text = await res.text();
+    expect(text).not.toContain(PROPERTY_ADDRESS);
+  });
+
+  it("field_staff + propertyId=null（所有者単体メモ） → 従来どおり成功 / property scope は走らない", async () => {
+    pm.ownerMemo.create.mockResolvedValue({
+      id: "memo-null",
+      ownerId: OWNER_ID,
+      propertyId: null,
+      body: MEMO_BODY,
+      createdAt: new Date(),
+      creator: null,
+      property: null,
+    });
+
+    const res = await POST(makeRequest({ body: MEMO_BODY }), makeParams());
+    expect(res.status).toBe(201);
+    expect(pm.property.findUnique).not.toHaveBeenCalled();
+    expect(pm.ownerMemo.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("GET /api/owners/[id]/memos: field_staff レコードスコープ", () => {
+  beforeEach(() => {
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "field-staff-1",
+      email: "field@test.com",
+      name: "Field",
+      role: "field_staff",
+    });
+  });
+
+  it("field_staff + 自身が createdBy → memo.property が返る", async () => {
+    pm.ownerMemo.findMany.mockResolvedValue([
+      {
+        id: "memo-own",
+        ownerId: OWNER_ID,
+        propertyId: PROPERTY_ID,
+        body: MEMO_BODY,
+        createdAt: new Date(),
+        creator: null,
+        property: {
+          id: PROPERTY_ID,
+          address: PROPERTY_ADDRESS,
+          createdBy: "field-staff-1",
+          assignedTo: null,
+        },
+      },
+    ]);
+
+    const res = await GET(makeRequest({}, "GET"), makeParams());
+    const json = await res.json();
+    expect(json.memos[0].property).toEqual({
+      id: PROPERTY_ID,
+      address: PROPERTY_ADDRESS,
+    });
+  });
+
+  it("field_staff + 担当外/作成者外 → propertyId は返るが property=null（address 漏れない）", async () => {
+    pm.ownerMemo.findMany.mockResolvedValue([
+      {
+        id: "memo-out-of-scope",
+        ownerId: OWNER_ID,
+        propertyId: PROPERTY_ID,
+        body: MEMO_BODY,
+        createdAt: new Date(),
+        creator: null,
+        property: {
+          id: PROPERTY_ID,
+          address: PROPERTY_ADDRESS,
+          createdBy: "other-creator",
+          assignedTo: "other-assignee",
+        },
+      },
+    ]);
+
+    const res = await GET(makeRequest({}, "GET"), makeParams());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.memos[0].propertyId).toBe(PROPERTY_ID);
+    expect(json.memos[0].property).toBeNull();
+    // PII 漏れ防止: レスポンス全体に address が含まれない
+    const text = JSON.stringify(json);
+    expect(text).not.toContain(PROPERTY_ADDRESS);
+  });
+
+  it("field_staff: 自身が assignedTo のメモは property 返す、担当外のメモは property=null（混在）", async () => {
+    pm.ownerMemo.findMany.mockResolvedValue([
+      {
+        id: "memo-assigned",
+        ownerId: OWNER_ID,
+        propertyId: PROPERTY_ID,
+        body: MEMO_BODY,
+        createdAt: new Date(),
+        creator: null,
+        property: {
+          id: PROPERTY_ID,
+          address: PROPERTY_ADDRESS,
+          createdBy: "other",
+          assignedTo: "field-staff-1",
+        },
+      },
+      {
+        id: "memo-out",
+        ownerId: OWNER_ID,
+        propertyId: "cccccccc-0000-4000-8000-000000000003",
+        body: MEMO_BODY,
+        createdAt: new Date(),
+        creator: null,
+        property: {
+          id: "cccccccc-0000-4000-8000-000000000003",
+          address: "別物件の住所",
+          createdBy: "other",
+          assignedTo: "other",
+        },
+      },
+    ]);
+
+    const res = await GET(makeRequest({}, "GET"), makeParams());
+    const json = await res.json();
+    expect(json.memos).toHaveLength(2);
+    expect(json.memos[0].property).not.toBeNull();
+    expect(json.memos[1].property).toBeNull();
+    // 担当外メモの address はレスポンスに含まれない
+    const text = JSON.stringify(json);
+    expect(text).not.toContain("別物件の住所");
   });
 });
 
