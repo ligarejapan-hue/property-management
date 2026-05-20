@@ -10,7 +10,46 @@ import {
   type RecoveredOwner,
   RECEPTION_OWNER_LINK_DATA_KEY,
 } from "./reception-owner-link";
-import { normalizeName } from "./normalize";
+import { normalizeName, normalizeAddress } from "./normalize";
+
+// ---------------------------------------------------------------------------
+// Phase 2-B: 重複候補グルーピングキー（correction-candidates と merge-preview で共有）
+// ---------------------------------------------------------------------------
+//
+// candidate key の役割:
+//   - correction-candidates API が duplicate グループを検出するキー
+//   - merge-preview API が master / source のキー一致を再検証するキー
+//
+// 仕様:
+//   - address あり → `normalizeName(name) + "|||" + normalizeAddress(address)`
+//   - address なし → `normalizeName(name) + "|||" + "__noaddr__" + zip + "__" + phone`
+//     （いずれも空文字許容のフォールバック。既存仕様）
+//
+// PII について:
+//   - キー文字列自体は normalize 済みではあるが、元の name/address/zip/phone を
+//     部分的に復元可能。**API レスポンスや AuditLog には絶対に出さない。**
+//   - クライアントには別途 opaque な duplicateGroupId（例: dup-1）を割り当てる。
+//
+// 既存仕様を勝手に広げない:
+//   - 「addressなしで zip も phone も両方無い」owner も "__noaddr____" でキー化される
+//     が、これは複数 owner で衝突する可能性があるため candidate API 側のグルーピング
+//     対象に含まれる（既存仕様どおり）。
+export interface OwnerDuplicateCandidateKeyInput {
+  name: string;
+  address: string | null;
+  zip: string | null;
+  phone: string | null;
+}
+
+export function buildOwnerDuplicateCandidateKey(
+  input: OwnerDuplicateCandidateKeyInput,
+): string {
+  const n = normalizeName(input.name);
+  const a = input.address
+    ? normalizeAddress(input.address)
+    : `__noaddr__${input.zip ?? ""}__${input.phone ?? ""}`;
+  return `${n}|||${a}`;
+}
 
 // rawData の住所フィールド候補（直接値として使えるキー名）。
 // owner-csv ルートの OWNER_CSV_COLUMN_MAP と整合させた優先順序。

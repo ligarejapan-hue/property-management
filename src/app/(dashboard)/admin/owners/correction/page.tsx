@@ -311,19 +311,23 @@ interface DuplicateGroupSummaryProps {
 }
 
 function DuplicateGroupSummary({ candidates }: DuplicateGroupSummaryProps) {
-  // duplicate 種別のみ対象
-  const dups = candidates.filter((c) => c.types.includes("duplicate"));
+  // duplicate グループは API 側で server-side の正規化キーで判定済み。
+  // UI は duplicateGroupId（opaque）で再構築するだけ。raw display value で
+  // grouping すると masking / 表記揺れで正しい重複が分断される。
+  const dups = candidates.filter(
+    (c): c is OwnerCorrectionCandidate & { duplicateGroupId: string } =>
+      c.duplicateGroupId !== null && c.duplicateGroupId !== undefined,
+  );
   if (dups.length === 0) return null;
 
-  // (name + address) でグループ化。masked 結果でも同値ならまとめる。
   const groups = new Map<string, OwnerCorrectionCandidate[]>();
   for (const c of dups) {
-    const key = `${c.name ?? "(unknown)"}|||${c.address ?? "(unknown)"}`;
-    const arr = groups.get(key) ?? [];
+    const arr = groups.get(c.duplicateGroupId!) ?? [];
     arr.push(c);
-    groups.set(key, arr);
+    groups.set(c.duplicateGroupId!, arr);
   }
 
+  // duplicateGroupSize が >= 2 のグループのみ表示（API 側でも同条件）。
   const groupList = Array.from(groups.entries()).filter(
     ([, arr]) => arr.length >= 2,
   );

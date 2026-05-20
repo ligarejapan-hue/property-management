@@ -13,7 +13,7 @@ import {
   checkOwnerMergeSafety,
   type OwnerMergeBlockReason,
 } from "@/lib/owner-merge";
-import { buildOwnerDedupKey } from "@/lib/owner-dedup";
+import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/owners/correction/merge-preview
@@ -64,6 +64,8 @@ interface OwnerState {
   id: string;
   name: string;
   address: string | null;
+  zip: string | null;
+  phone: string | null;
   version: number;
   isArchived: boolean;
   note: string | null;
@@ -77,6 +79,8 @@ async function loadOwnerForMerge(id: string): Promise<OwnerState | null> {
       id: true,
       name: true,
       address: true,
+      zip: true,
+      phone: true,
       version: true,
       isArchived: true,
       note: true,
@@ -199,16 +203,26 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 正規化キー一致確認: candidate API は normalizeName+normalizeAddress で
-    // グループ化しているが、本ルートで再検証する。address が null の場合は
-    // 「address なし」を表す sentinel と比較するため厳密一致しない（false）。
+    // 候補キー一致確認: correction-candidates API と同じ buildOwnerDuplicateCandidateKey
+    // を使う。address あり → normalizeName + normalizeAddress、address なし →
+    // normalizeName + __noaddr__zip__phone のフォールバック。これにより
+    // candidate API が duplicate として並べているペアは preview でも一致扱いになる。
+    // レスポンスのフィールド名は互換のため normalizeKeyMatches を維持。
     const normalizeKeyMatches = Boolean(
       master &&
         source &&
-        master.address &&
-        source.address &&
-        buildOwnerDedupKey(master.name, master.address) ===
-          buildOwnerDedupKey(source.name, source.address),
+        buildOwnerDuplicateCandidateKey({
+          name: master.name,
+          address: master.address,
+          zip: master.zip,
+          phone: master.phone,
+        }) ===
+          buildOwnerDuplicateCandidateKey({
+            name: source.name,
+            address: source.address,
+            zip: source.zip,
+            phone: source.phone,
+          }),
     );
 
     // safety check

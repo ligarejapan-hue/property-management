@@ -105,6 +105,8 @@ function makeOwner(overrides: Partial<{
   id: string;
   name: string;
   address: string | null;
+  zip: string | null;
+  phone: string | null;
   version: number;
   isArchived: boolean;
   note: string | null;
@@ -113,7 +115,9 @@ function makeOwner(overrides: Partial<{
   return {
     id: overrides.id ?? SOURCE_ID,
     name: overrides.name ?? SOURCE_NAME,
-    address: overrides.address ?? SOURCE_ADDRESS,
+    address: overrides.address !== undefined ? overrides.address : SOURCE_ADDRESS,
+    zip: overrides.zip !== undefined ? overrides.zip : null,
+    phone: overrides.phone !== undefined ? overrides.phone : null,
     version: overrides.version ?? 1,
     isArchived: overrides.isArchived ?? false,
     note: overrides.note ?? null,
@@ -385,6 +389,135 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
       eligible: true,
       blockReasons: [],
     });
+  });
+
+  it("addressなし fallback: 同じ zip + phone のペアは normalizeKeyMatches=true / eligible", async () => {
+    pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
+      if (where.id === MASTER_ID) {
+        return Promise.resolve(
+          makeOwner({
+            id: MASTER_ID,
+            name: "田中太郎",
+            address: null,
+            zip: "100-0001",
+            phone: "090-1234-5678",
+          }),
+        );
+      }
+      return Promise.resolve(
+        makeOwner({
+          id: SOURCE_ID,
+          name: "田中 太郎", // 全角空白を含む別表記
+          address: null,
+          zip: "100-0001",
+          phone: "090-1234-5678",
+        }),
+      );
+    });
+
+    const res = await POST(
+      makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }),
+    );
+    const json = await res.json();
+    expect(json.summary.normalizeKeyMatches).toBe(true);
+    expect(json.eligible).toBe(true);
+    expect(json.blockReasons).not.toContain("name_address_normalize_mismatch");
+  });
+
+  it("addressなし fallback: zip が違うペアは normalizeKeyMatches=false / blockReason", async () => {
+    pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
+      if (where.id === MASTER_ID) {
+        return Promise.resolve(
+          makeOwner({
+            id: MASTER_ID,
+            name: "田中太郎",
+            address: null,
+            zip: "100-0001",
+            phone: "090-1234-5678",
+          }),
+        );
+      }
+      return Promise.resolve(
+        makeOwner({
+          id: SOURCE_ID,
+          name: "田中太郎",
+          address: null,
+          zip: "200-0002", // zip が違う → fallback key 不一致
+          phone: "090-1234-5678",
+        }),
+      );
+    });
+
+    const res = await POST(
+      makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }),
+    );
+    const json = await res.json();
+    expect(json.summary.normalizeKeyMatches).toBe(false);
+    expect(json.eligible).toBe(false);
+    expect(json.blockReasons).toContain("name_address_normalize_mismatch");
+  });
+
+  it("addressなし fallback: name 不一致は normalizeKeyMatches=false / blockReason", async () => {
+    pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
+      if (where.id === MASTER_ID) {
+        return Promise.resolve(
+          makeOwner({
+            id: MASTER_ID,
+            name: "田中太郎",
+            address: null,
+            zip: "100-0001",
+            phone: "090-1234-5678",
+          }),
+        );
+      }
+      return Promise.resolve(
+        makeOwner({
+          id: SOURCE_ID,
+          name: "鈴木次郎", // name が違う
+          address: null,
+          zip: "100-0001",
+          phone: "090-1234-5678",
+        }),
+      );
+    });
+
+    const res = await POST(
+      makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }),
+    );
+    const json = await res.json();
+    expect(json.summary.normalizeKeyMatches).toBe(false);
+    expect(json.blockReasons).toContain("name_address_normalize_mismatch");
+  });
+
+  it("片方だけ address あり / 片方 null → normalizeKeyMatches=false", async () => {
+    pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
+      if (where.id === MASTER_ID) {
+        return Promise.resolve(
+          makeOwner({
+            id: MASTER_ID,
+            name: "田中太郎",
+            address: "東京都港区1-1",
+            zip: null,
+            phone: null,
+          }),
+        );
+      }
+      return Promise.resolve(
+        makeOwner({
+          id: SOURCE_ID,
+          name: "田中太郎",
+          address: null, // address なし → fallback key になり、address あり master と不一致
+          zip: null,
+          phone: null,
+        }),
+      );
+    });
+
+    const res = await POST(
+      makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }),
+    );
+    const json = await res.json();
+    expect(json.summary.normalizeKeyMatches).toBe(false);
   });
 
   it("複数違反は全件返す", async () => {
