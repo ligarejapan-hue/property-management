@@ -124,6 +124,16 @@ describe("checkOwnerMergeSafety", () => {
     }
   });
 
+  it("version_mismatch は OwnerMergeBlockReason の有効な値", () => {
+    // execute API が tx 内で version 不一致を検出した場合に push する。
+    // lib は値を受け取って push する側ではなく、route が直接 push する想定だが、
+    // enum union として通ること（型エラーにならないこと）を担保する。
+    const reasons: import("../owner-merge").OwnerMergeBlockReason[] = [
+      "version_mismatch",
+    ];
+    expect(reasons[0]).toBe("version_mismatch");
+  });
+
   it("複数違反でも not_found と normalize mismatch は混在しない（source 不存在 + 他違反）", () => {
     const r = checkOwnerMergeSafety({
       ...baseOk,

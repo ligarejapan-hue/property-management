@@ -145,7 +145,10 @@ export default function OwnerCorrectionPage() {
               グルーピングし、各グループ内の owner ペアに対して preview を取得できる。
               既存のフラットリストは下にそのまま残す（破壊的変更なし）。 */}
           {filterType === "duplicate" && (
-            <DuplicateGroupSummary candidates={data.candidates} />
+            <DuplicateGroupSummary
+              candidates={data.candidates}
+              onExecuted={() => load(filterType)}
+            />
           )}
 
           {data.candidates.length === 0 ? (
@@ -312,9 +315,13 @@ export default function OwnerCorrectionPage() {
 
 interface DuplicateGroupSummaryProps {
   candidates: OwnerCorrectionCandidate[];
+  onExecuted?: () => void;
 }
 
-function DuplicateGroupSummary({ candidates }: DuplicateGroupSummaryProps) {
+function DuplicateGroupSummary({
+  candidates,
+  onExecuted,
+}: DuplicateGroupSummaryProps) {
   // duplicate グループは API 側で server-side の正規化キーで判定済み。
   // UI は duplicateGroupId（opaque）で再構築するだけ。raw display value で
   // grouping すると masking / 表記揺れで正しい重複が分断される。
@@ -351,6 +358,7 @@ function DuplicateGroupSummary({ candidates }: DuplicateGroupSummaryProps) {
             key={key}
             groupIndex={idx + 1}
             members={members}
+            onExecuted={onExecuted}
           />
         ))}
       </div>
@@ -361,9 +369,14 @@ function DuplicateGroupSummary({ candidates }: DuplicateGroupSummaryProps) {
 interface DuplicateGroupCardProps {
   groupIndex: number;
   members: OwnerCorrectionCandidate[];
+  onExecuted?: () => void;
 }
 
-function DuplicateGroupCard({ groupIndex, members }: DuplicateGroupCardProps) {
+function DuplicateGroupCard({
+  groupIndex,
+  members,
+  onExecuted,
+}: DuplicateGroupCardProps) {
   // master / source の選択（明示・operator まかせ）
   const [masterId, setMasterId] = useState<string | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
@@ -471,6 +484,7 @@ function DuplicateGroupCard({ groupIndex, members }: DuplicateGroupCardProps) {
           sourceId={sourceId}
           masterLabel={`${masterId.slice(0, 8)}…`}
           sourceLabel={`${sourceId.slice(0, 8)}…`}
+          onExecuted={onExecuted}
         />
       ) : (
         <p className="text-xs text-gray-400">

@@ -22,14 +22,18 @@ const src = fs.readFileSync(
 );
 
 describe("OwnerMergePreviewButton: transport-level エラー表示", () => {
-  it("catch ブロックで result を null に保つ（変造された JSON body を持たない）", () => {
-    // catch (e) { ... } 内に setResult(null) が含まれる
-    const catchMatch = src.match(/catch\s*\([\s\S]*?\)\s*\{([\s\S]*?)\}\s*\};?\s*\n/);
-    expect(catchMatch).not.toBeNull();
-    if (catchMatch) {
-      expect(catchMatch[1]).toMatch(/setResult\(null\)/);
-      expect(catchMatch[1]).toMatch(/setErrorMsg\(/);
-      expect(catchMatch[1]).toMatch(/setState\(["']error["']\)/);
+  it("preview の catch ブロックで result を null に保つ（setResult / setErrorMsg / setState=error）", () => {
+    // handleClick (preview) の catch を特定して内容を検査する。
+    // Phase 2-B-β で handleExecute（別 try/catch）が追加されたため、
+    // 単純な「最初の catch」マッチでは preview と execute を区別できない。
+    // setResult(null) を含む catch ブロックのみを対象にする。
+    const blocks = [...src.matchAll(/catch\s*\([^)]*\)\s*\{([\s\S]*?)\n\s*\}/g)];
+    const previewCatch = blocks.find((m) => /setResult\(null\)/.test(m[1]));
+    expect(previewCatch).toBeDefined();
+    if (previewCatch) {
+      expect(previewCatch[1]).toMatch(/setResult\(null\)/);
+      expect(previewCatch[1]).toMatch(/setErrorMsg\(/);
+      expect(previewCatch[1]).toMatch(/setState\(["']error["']\)/);
     }
   });
 

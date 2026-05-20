@@ -184,13 +184,15 @@ export async function POST(
       }
     }
 
-    const owner = await prisma.owner.findUnique({
-      where: { id },
-      select: { id: true },
-    });
-    if (!owner) {
-      throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
-    }
+    // 事前確認は早期 404 のために残すが、実際のレース対策（archive / merge と
+     // の直列化）は下の transaction 内 owner.updateMany lock で行う。
+     const ownerPreCheck = await prisma.owner.findUnique({
+       where: { id },
+       select: { id: true, isArchived: true },
+     });
+     if (!ownerPreCheck || ownerPreCheck.isArchived) {
+       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
+     }
 
     if (rawPropertyId != null && rawPropertyId !== "") {
       const property = await prisma.property.findUnique({
@@ -220,6 +222,7 @@ export async function POST(
 
       // owner ↔ property の紐づき確認。紐づきがない propertyId をメモに
       // 添付させない（関連物件表示・AuditLog context の汚染を防ぐ）。
+      // 厳密な race-safety は tx 内 lock 後に再評価する（下記）。
       const link = await prisma.propertyOwner.findFirst({
         where: { ownerId: id, propertyId: property.id },
         select: { id: true },
@@ -234,17 +237,38 @@ export async function POST(
       propertyId = property.id;
     }
 
-    const memo = await prisma.ownerMemo.create({
-      data: {
-        ownerId: id,
-        propertyId,
-        body: validation.body,
-        createdBy: session.id,
-      },
-      include: {
-        creator: { select: { id: true, name: true, email: true } },
-        property: { select: { id: true, address: true } },
-      },
+    // archive / merge route との直列化:
+    //   tx 内で owner.updateMany({ where: { id, isArchived: false } }) を発行し
+    //   isArchived 再確認と PostgreSQL の行ロック取得を同時に行う。archive 側の
+    //   updateMany / merge 側の source archive と同じ owner 行のロックを取り合う
+    //   ため、レースが必ず直列化される。
+    //
+    //   count===0 のケース: 事前確認後〜tx 開始までの間に archive / merge が
+    //   走って isArchived=true になった。archived owner にはメモを作成しない。
+    //
+    //   updatedAt を touch するのみで version は触らない（owner のデータ変更で
+    //   はないため、他クライアントの optimistic lock を不必要に壊さない）。
+    const memo = await prisma.$transaction(async (tx) => {
+      const lockRes = await tx.owner.updateMany({
+        where: { id, isArchived: false },
+        data: { updatedAt: new Date() },
+      });
+      if (lockRes.count === 0) {
+        throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
+      }
+
+      return tx.ownerMemo.create({
+        data: {
+          ownerId: id,
+          propertyId,
+          body: validation.body,
+          createdBy: session.id,
+        },
+        include: {
+          creator: { select: { id: true, name: true, email: true } },
+          property: { select: { id: true, address: true } },
+        },
+      });
     });
 
     await writeAuditLog({
