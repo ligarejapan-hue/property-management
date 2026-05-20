@@ -27,7 +27,8 @@ export type OwnerMergeBlockReason =
   | "source_has_note"                // source.note 入力済み
   | "source_has_external_link_key"   // source.externalLinkKey 入力済み
   | "source_version_gt_1"            // source.version > 1（編集履歴あり）
-  | "name_address_normalize_mismatch"; // 正規化キーが master と一致しない（別人の可能性）
+  | "name_address_normalize_mismatch" // 正規化キーが master と一致しない（別人の可能性）
+  | "version_mismatch";              // execute 時: client 送信 version と DB version が一致しない
 
 export interface OwnerMergeSafetyInput {
   /** master と source が同一 owner ならば true。 */

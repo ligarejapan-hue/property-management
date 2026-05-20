@@ -15,6 +15,8 @@ const MERGE_BLOCK_REASON_LABELS: Record<string, string> = {
   source_version_gt_1: "source に編集履歴があります（version > 1）",
   name_address_normalize_mismatch:
     "氏名・住所の正規化結果が一致しません（別人の可能性）",
+  version_mismatch:
+    "他のユーザーが先に更新しました（version が変わっています）",
 };
 
 function reasonLabel(r: string): string {
@@ -41,39 +43,120 @@ interface MergePreviewResponse {
   summary: MergePreviewSummary;
 }
 
+interface MergeExecuteResult {
+  propertyOwnersMoved: number;
+  propertyOwnersDeduplicated: number;
+  ownerMemosMoved: number;
+  sourceArchived: boolean;
+}
+
 interface OwnerMergePreviewButtonProps {
   masterId: string;
   sourceId: string;
   /** 表示専用ラベル（master / source の識別子）。PII は出さない。 */
   masterLabel: string;
   sourceLabel: string;
+  /** execute 成功後に候補一覧を再取得するための callback。 */
+  onExecuted?: () => void;
 }
 
 type State = "idle" | "loading" | "done" | "error";
+
+// execute UI の状態。2 段階確認: idle → confirm1 → confirm2 → executing → executed | execute_error
+type ExecuteState =
+  | "idle"
+  | "confirm1"
+  | "confirm2"
+  | "executing"
+  | "executed"
+  | "execute_error";
 
 export function OwnerMergePreviewButton({
   masterId,
   sourceId,
   masterLabel,
   sourceLabel,
+  onExecuted,
 }: OwnerMergePreviewButtonProps) {
   const [state, setState] = useState<State>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<MergePreviewResponse | null>(null);
 
-  // masterId / sourceId が変わったら古い preview 結果を破棄する。
+  // execute 用の独立 state（preview state と切り分け）
+  const [executeState, setExecuteState] = useState<ExecuteState>("idle");
+  const [executeErrorMsg, setExecuteErrorMsg] = useState<string | null>(null);
+  const [executeBlockReasons, setExecuteBlockReasons] = useState<string[]>([]);
+  const [executeResult, setExecuteResult] = useState<MergeExecuteResult | null>(
+    null,
+  );
+
+  // masterId / sourceId が変わったら古い preview / execute 結果を破棄する。
   // 別ペア（例: A/B → A/C）の結果が、変更後のラベル A/C と乖離したまま
   // 表示され続けて operator の判断を誤らせるのを防ぐ。
   useEffect(() => {
     setState("idle");
     setErrorMsg(null);
     setResult(null);
+    setExecuteState("idle");
+    setExecuteErrorMsg(null);
+    setExecuteBlockReasons([]);
+    setExecuteResult(null);
   }, [masterId, sourceId]);
 
   const reset = () => {
     setState("idle");
     setErrorMsg(null);
     setResult(null);
+    setExecuteState("idle");
+    setExecuteErrorMsg(null);
+    setExecuteBlockReasons([]);
+    setExecuteResult(null);
+  };
+
+  const resetExecute = () => {
+    setExecuteState("idle");
+    setExecuteErrorMsg(null);
+    setExecuteBlockReasons([]);
+  };
+
+  const handleExecute = async () => {
+    if (!result || !result.eligible) return;
+    setExecuteState("executing");
+    setExecuteErrorMsg(null);
+    setExecuteBlockReasons([]);
+    try {
+      const res = await fetch("/api/admin/owners/correction/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          masterId,
+          sourceId,
+          masterVersion: result.summary.masterVersion,
+          sourceVersion: result.summary.sourceVersion,
+          dryRun: false,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const reasons = Array.isArray(j?.error?.blockReasons)
+          ? (j.error.blockReasons as string[])
+          : [];
+        setExecuteBlockReasons(reasons);
+        setExecuteErrorMsg(j?.error?.message ?? "統合に失敗しました");
+        setExecuteState("execute_error");
+        return;
+      }
+      setExecuteResult((j?.result ?? null) as MergeExecuteResult | null);
+      setExecuteState("executed");
+      // 成功後に候補一覧を再取得（archived source が一覧から消える）
+      onExecuted?.();
+    } catch (e) {
+      setExecuteResult(null);
+      setExecuteErrorMsg(
+        e instanceof Error ? e.message : "統合に失敗しました",
+      );
+      setExecuteState("execute_error");
+    }
   };
 
   const handleClick = async () => {
@@ -248,9 +331,138 @@ export function OwnerMergePreviewButton({
             </dd>
           </dl>
 
-          <p className="mt-2 text-[11px] text-gray-500">
-            ※ 統合実行は Phase 2-B-β（別 PR）で対応予定です。
-          </p>
+          {/* execute UI: eligible=true かつ result が現在の master/source pair に
+              対応している場合のみ表示。useEffect で pair 変更時に result が
+              リセットされるので、暗黙的に「現在の pair に対する preview 結果」
+              であることが保証される。 */}
+          {result.eligible &&
+            result.masterId === masterId &&
+            result.sourceId === sourceId &&
+            executeState !== "executed" && (
+              <div className="mt-3 rounded-md border border-red-300 bg-red-50 p-2">
+                <p className="mb-1 text-xs font-semibold text-red-800">
+                  ⚠ 統合実行はこの操作は元に戻せません
+                </p>
+
+                {executeState === "idle" && (
+                  <button
+                    type="button"
+                    onClick={() => setExecuteState("confirm1")}
+                    className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+                  >
+                    統合を実行
+                  </button>
+                )}
+
+                {executeState === "confirm1" && (
+                  <div className="flex flex-col gap-1 text-xs text-red-800">
+                    <p>
+                      master <span className="font-mono">{masterLabel}</span> に
+                      source <span className="font-mono">{sourceLabel}</span> を
+                      統合します。
+                    </p>
+                    <p>
+                      PropertyOwner 移動 {result.summary.propertyOwnersToMove}件 /
+                      重複削除 {result.summary.propertyOwnersToDeduplicate}件 /
+                      OwnerMemo 移行 {result.summary.sourceOwnerMemoCount}件
+                    </p>
+                    <p className="text-red-700">
+                      source はアーカイブされ通常検索から除外されます。
+                    </p>
+                    <div className="mt-1 flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setExecuteState("confirm2")}
+                        className="rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700"
+                      >
+                        次へ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetExecute}
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50"
+                      >
+                        キャンセル
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {executeState === "confirm2" && (
+                  <div className="flex flex-col gap-1 text-xs text-red-800">
+                    <p className="font-semibold">
+                      ⚠ この操作は元に戻せません。本当に統合しますか？
+                    </p>
+                    <div className="mt-1 flex gap-1">
+                      <button
+                        type="button"
+                        onClick={handleExecute}
+                        className="rounded bg-red-700 px-2 py-1 font-medium text-white hover:bg-red-800"
+                      >
+                        実行する
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetExecute}
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50"
+                      >
+                        キャンセル
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {executeState === "executing" && (
+                  <p className="text-xs text-gray-600">統合中...</p>
+                )}
+
+                {executeState === "execute_error" && (
+                  <div className="flex flex-col gap-0.5 text-xs text-red-700">
+                    {executeErrorMsg && <p>{executeErrorMsg}</p>}
+                    {executeBlockReasons.length > 0 && (
+                      <ul className="list-disc pl-4">
+                        {executeBlockReasons.map((r) => (
+                          <li key={r}>{reasonLabel(r)}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <button
+                      type="button"
+                      onClick={resetExecute}
+                      className="mt-1 self-start text-[11px] text-red-600 underline"
+                    >
+                      閉じる
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+          {/* 成功表示（実行完了後の result サマリ）。
+              PII を含まず件数のみ表示。 */}
+          {executeState === "executed" && executeResult && (
+            <div className="mt-3 rounded-md border border-green-300 bg-green-50 p-2 text-xs text-green-800">
+              <p className="mb-1 font-semibold">
+                ✓ 統合が完了しました
+              </p>
+              <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                <dt>PropertyOwner 移動</dt>
+                <dd className="font-mono">
+                  {executeResult.propertyOwnersMoved}
+                </dd>
+                <dt>PropertyOwner 重複削除</dt>
+                <dd className="font-mono">
+                  {executeResult.propertyOwnersDeduplicated}
+                </dd>
+                <dt>OwnerMemo 移行</dt>
+                <dd className="font-mono">{executeResult.ownerMemosMoved}</dd>
+                <dt>source archive</dt>
+                <dd className="font-mono">
+                  {executeResult.sourceArchived ? "yes" : "no"}
+                </dd>
+              </dl>
+            </div>
+          )}
         </div>
       )}
     </div>
