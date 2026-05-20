@@ -118,6 +118,11 @@ export function OwnerMergePreviewButton({
       setResult(j as MergePreviewResponse);
       setState("done");
     } catch (e) {
+      // transport-level failure (network / timeout / CORS / offline)。
+      // この経路では JSON body が無いので result は null のまま、
+      // errorMsg だけ立てる。UI 側は result の有無に依存しない
+      // 独立した通信エラーバナーで表示する。
+      setResult(null);
       setErrorMsg(
         e instanceof Error ? e.message : "プレビューの取得に失敗しました",
       );
@@ -149,6 +154,20 @@ export function OwnerMergePreviewButton({
 
       {state === "loading" && (
         <p className="text-xs text-gray-500">判定中...</p>
+      )}
+
+      {/* 通信失敗（fetch throw / network / offline 等）用の独立エラーバナー。
+          result が null のままでもユーザーに失敗が伝わるようにする。
+          API が JSON エラーボディを返した HTTP 4xx/5xx ケースは下の result
+          ブロックで blockReasons と共に表示する。 */}
+      {state === "error" && !result && errorMsg && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+          <p className="font-medium">プレビューの取得に失敗しました</p>
+          <p className="mt-0.5 break-words">{errorMsg}</p>
+          <p className="mt-1 text-[11px] text-red-500">
+            通信状況を確認してもう一度お試しください。
+          </p>
+        </div>
       )}
 
       {result && (
