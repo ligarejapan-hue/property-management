@@ -88,7 +88,17 @@ export function checkOwnerMergeSafety(
 
   // candidate API が出した duplicate ペアでも、preview 直前に再検証する。
   // master / source の正規化キーが揃わなければ別人の可能性 → blocker。
-  if (!input.normalizeKeyMatches) reasons.push("name_address_normalize_mismatch");
+  //
+  // ただし master または source が存在しない場合は key 比較自体が行われていない
+  // ため、name_address_normalize_mismatch は出さない（master_not_found /
+  // source_not_found と同時に出ると原因診断として誤解を招くため）。
+  if (
+    input.masterExists &&
+    input.sourceExists &&
+    !input.normalizeKeyMatches
+  ) {
+    reasons.push("name_address_normalize_mismatch");
+  }
 
   if (reasons.length > 0) return { ok: false, reasons };
   return { ok: true };

@@ -240,7 +240,7 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     expect(res.status).toBe(404);
   });
 
-  it("source のみ存在しない → 200 + blockReasons=[source_not_found]", async () => {
+  it("source のみ存在しない → 200 + blockReasons=[source_not_found] / name_address_normalize_mismatch は含めない", async () => {
     pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
       if (where.id === MASTER_ID) {
         return Promise.resolve(
@@ -256,6 +256,27 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     const json = await res.json();
     expect(json.eligible).toBe(false);
     expect(json.blockReasons).toContain("source_not_found");
+    // key 比較は不能なので mismatch は出さない（原因診断の誤解防止）
+    expect(json.blockReasons).not.toContain("name_address_normalize_mismatch");
+  });
+
+  it("master のみ存在しない → 200 + blockReasons=[master_not_found] / name_address_normalize_mismatch は含めない", async () => {
+    pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
+      if (where.id === SOURCE_ID) {
+        return Promise.resolve(
+          makeOwner({ id: SOURCE_ID, name: SOURCE_NAME, address: SOURCE_ADDRESS }),
+        );
+      }
+      return Promise.resolve(null);
+    });
+    const res = await POST(
+      makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.eligible).toBe(false);
+    expect(json.blockReasons).toContain("master_not_found");
+    expect(json.blockReasons).not.toContain("name_address_normalize_mismatch");
   });
 
   it("source が archived → 200 + blockReasons=[source_archived]", async () => {

@@ -76,10 +76,68 @@ describe("checkOwnerMergeSafety", () => {
     if (!r.ok) expect(r.reasons).toContain("source_version_gt_1");
   });
 
-  it("normalizeKeyMatches=false → name_address_normalize_mismatch", () => {
+  it("normalizeKeyMatches=false（両者存在） → name_address_normalize_mismatch", () => {
     const r = checkOwnerMergeSafety({ ...baseOk, normalizeKeyMatches: false });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reasons).toContain("name_address_normalize_mismatch");
+  });
+
+  it("master_not_found のとき name_address_normalize_mismatch は含めない", () => {
+    const r = checkOwnerMergeSafety({
+      ...baseOk,
+      masterExists: false,
+      normalizeKeyMatches: false, // key 比較は不能だが mismatch とは扱わない
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reasons).toContain("master_not_found");
+      expect(r.reasons).not.toContain("name_address_normalize_mismatch");
+    }
+  });
+
+  it("source_not_found のとき name_address_normalize_mismatch は含めない", () => {
+    const r = checkOwnerMergeSafety({
+      ...baseOk,
+      sourceExists: false,
+      normalizeKeyMatches: false,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reasons).toContain("source_not_found");
+      expect(r.reasons).not.toContain("name_address_normalize_mismatch");
+    }
+  });
+
+  it("master/source 両方とも存在しないときも name_address_normalize_mismatch は含めない", () => {
+    const r = checkOwnerMergeSafety({
+      ...baseOk,
+      masterExists: false,
+      sourceExists: false,
+      normalizeKeyMatches: false,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reasons).toEqual(
+        expect.arrayContaining(["master_not_found", "source_not_found"]),
+      );
+      expect(r.reasons).not.toContain("name_address_normalize_mismatch");
+    }
+  });
+
+  it("複数違反でも not_found と normalize mismatch は混在しない（source 不存在 + 他違反）", () => {
+    const r = checkOwnerMergeSafety({
+      ...baseOk,
+      sourceExists: false,
+      sourceIsArchived: true, // sourceExists=false なので無視される
+      normalizeKeyMatches: false,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reasons).toContain("source_not_found");
+      expect(r.reasons).not.toContain("name_address_normalize_mismatch");
+      // sourceIsArchived は sourceExists=true の時のみ反映するため、ここでは出ない
+      expect(r.reasons).not.toContain("source_archived");
+    }
   });
 
   it("複数違反は全件返す", () => {
