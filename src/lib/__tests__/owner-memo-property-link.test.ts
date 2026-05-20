@@ -60,6 +60,7 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     owner: { findUnique: vi.fn() },
     property: { findUnique: vi.fn() },
+    propertyOwner: { findFirst: vi.fn() },
     ownerMemo: { create: vi.fn(), findMany: vi.fn() },
   },
 }));
@@ -81,6 +82,7 @@ const MEMO_BODY = "電話応対メモ。次回再連絡。";
 const pm = prisma as unknown as {
   owner: { findUnique: Mock };
   property: { findUnique: Mock };
+  propertyOwner: { findFirst: Mock };
   ownerMemo: { create: Mock; findMany: Mock };
 };
 
@@ -115,6 +117,8 @@ beforeEach(() => {
     id: PROPERTY_ID,
     isArchived: false,
   });
+  // デフォルト: owner と property が紐づいている状態
+  pm.propertyOwner.findFirst.mockResolvedValue({ id: "po-1" });
 });
 
 // ── POST tests ─────────────────────────────────────────────────────────────
@@ -137,6 +141,8 @@ describe("POST /api/owners/[id]/memos: propertyId 任意受付", () => {
     expect(json.propertyId).toBeNull();
     expect(json.property).toBeNull();
     expect(pm.property.findUnique).not.toHaveBeenCalled();
+    // propertyId なしなら link check も走らない
+    expect(pm.propertyOwner.findFirst).not.toHaveBeenCalled();
     // AuditLog: propertyId=null が detail に含まれる
     const auditCall = vi.mocked(writeAuditLog).mock.calls[0][0];
     expect(auditCall.detail).toMatchObject({
@@ -147,7 +153,7 @@ describe("POST /api/owners/[id]/memos: propertyId 任意受付", () => {
     });
   });
 
-  it("propertyId 指定で作成成功", async () => {
+  it("propertyId 指定 + owner と紐づきあり → 作成成功", async () => {
     pm.ownerMemo.create.mockResolvedValue({
       id: "memo-2",
       ownerId: OWNER_ID,
@@ -169,14 +175,45 @@ describe("POST /api/owners/[id]/memos: propertyId 任意受付", () => {
       id: PROPERTY_ID,
       address: PROPERTY_ADDRESS,
     });
-    // 検証順序: property:read 確認 → property.findUnique
+    // Property の存在・未 archived 確認
     expect(pm.property.findUnique).toHaveBeenCalledWith({
       where: { id: PROPERTY_ID },
       select: { id: true, isArchived: true },
     });
+    // owner ↔ property の link 確認
+    expect(pm.propertyOwner.findFirst).toHaveBeenCalledWith({
+      where: { ownerId: OWNER_ID, propertyId: PROPERTY_ID },
+      select: { id: true },
+    });
     // ownerMemo.create に propertyId が渡る
     const createArgs = pm.ownerMemo.create.mock.calls[0][0];
     expect(createArgs.data.propertyId).toBe(PROPERTY_ID);
+  });
+
+  it("owner と property が紐づいていない → 422 INVALID_OWNER_PROPERTY_LINK / OwnerMemo.create 呼ばれない", async () => {
+    // owner も property も存在するが PropertyOwner link がない
+    pm.propertyOwner.findFirst.mockResolvedValue(null);
+
+    const res = await POST(
+      makeRequest({ body: MEMO_BODY, propertyId: PROPERTY_ID }),
+      makeParams(),
+    );
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error.code).toBe("INVALID_OWNER_PROPERTY_LINK");
+    // PropertyOwner check は走った
+    expect(pm.propertyOwner.findFirst).toHaveBeenCalledWith({
+      where: { ownerId: OWNER_ID, propertyId: PROPERTY_ID },
+      select: { id: true },
+    });
+    // OwnerMemo は作られない
+    expect(pm.ownerMemo.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    // PII 漏れ防止: response に PROPERTY_ADDRESS / OWNER_NAME / MEMO_BODY が含まれない
+    const text = JSON.stringify(json);
+    expect(text).not.toContain(PROPERTY_ADDRESS);
+    expect(text).not.toContain(OWNER_NAME);
+    expect(text).not.toContain(MEMO_BODY);
   });
 
   it("存在しない propertyId → 404", async () => {

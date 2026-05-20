@@ -133,7 +133,19 @@ export async function POST(
     }
 
     // propertyId は任意。指定された場合のみ検証・権限・存在確認を行う。
-    // null / undefined / "" は all「未指定」として扱う。
+    // null / undefined / "" は「未指定」として扱う。
+    //
+    // 検証順:
+    //   1. UUID 形式
+    //   2. property:read 権限
+    //   3. owner 存在確認（propertyId なし経路と共通）
+    //   4. property 存在 + isArchived=false
+    //   5. owner ↔ property の PropertyOwner link 存在
+    //  すべて OK なら ownerMemo.create
+    //
+    // PropertyOwner link を必須にする理由: property:read 権限があれば
+    // 任意の property.id を渡せてしまうため、紐づきのない物件をメモに
+    // 添付できると履歴・関連表示・AuditLog context が汚染される。
     const rawPropertyId = body?.propertyId;
     let propertyId: string | null = null;
     if (rawPropertyId != null && rawPropertyId !== "") {
@@ -151,14 +163,6 @@ export async function POST(
           "FORBIDDEN",
         );
       }
-      const property = await prisma.property.findUnique({
-        where: { id: rawPropertyId },
-        select: { id: true, isArchived: true },
-      });
-      if (!property || property.isArchived) {
-        throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
-      }
-      propertyId = property.id;
     }
 
     const owner = await prisma.owner.findUnique({
@@ -167,6 +171,31 @@ export async function POST(
     });
     if (!owner) {
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
+    }
+
+    if (rawPropertyId != null && rawPropertyId !== "") {
+      const property = await prisma.property.findUnique({
+        where: { id: rawPropertyId as string },
+        select: { id: true, isArchived: true },
+      });
+      if (!property || property.isArchived) {
+        throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+      }
+
+      // owner ↔ property の紐づき確認。紐づきがない propertyId をメモに
+      // 添付させない（関連物件表示・AuditLog context の汚染を防ぐ）。
+      const link = await prisma.propertyOwner.findFirst({
+        where: { ownerId: id, propertyId: property.id },
+        select: { id: true },
+      });
+      if (!link) {
+        throw new ApiError(
+          422,
+          "指定された物件はこの所有者に紐づいていません",
+          "INVALID_OWNER_PROPERTY_LINK",
+        );
+      }
+      propertyId = property.id;
     }
 
     const memo = await prisma.ownerMemo.create({
