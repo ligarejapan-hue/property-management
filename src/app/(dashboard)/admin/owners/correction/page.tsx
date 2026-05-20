@@ -9,6 +9,10 @@ import {
 import { AddressFillButton } from "@/components/owners/AddressFillButton";
 import { OwnerArchiveButton } from "@/components/owners/OwnerArchiveButton";
 import { OwnerMergePreviewButton } from "@/components/owners/OwnerMergePreviewButton";
+import {
+  applyMasterSelection,
+  applySourceSelection,
+} from "@/lib/owner-merge-pair";
 
 type FilterType = "all" | "orphan" | "address_null" | "duplicate";
 
@@ -377,6 +381,23 @@ function DuplicateGroupCard({ groupIndex, members }: DuplicateGroupCardProps) {
   const canPreview = masterId && sourceId && masterId !== sourceId;
   const sample = members[0];
 
+  // master / source は disabled にしない（disabled だと一度選んだ後に役割を
+  // 入れ替えられない）。代わりに、既に相手側に選ばれている owner を選んだら
+  // pure 関数 (applyMasterSelection / applySourceSelection) で自動 swap する。
+  // これにより 2 人グループでの「入れ替え」も、3 人以上のグループでの選び直しも
+  // 自然に動く。
+  const handleSelectMaster = (id: string) => {
+    const next = applyMasterSelection({ masterId, sourceId }, id);
+    setMasterId(next.masterId);
+    setSourceId(next.sourceId);
+  };
+
+  const handleSelectSource = (id: string) => {
+    const next = applySourceSelection({ masterId, sourceId }, id);
+    setMasterId(next.masterId);
+    setSourceId(next.sourceId);
+  };
+
   return (
     <div className="rounded-md border border-purple-200 bg-white p-3">
       <div className="mb-2 flex items-baseline gap-2">
@@ -410,8 +431,7 @@ function DuplicateGroupCard({ groupIndex, members }: DuplicateGroupCardProps) {
                   type="radio"
                   name={`master-${groupIndex}`}
                   checked={masterId === m.id}
-                  onChange={() => setMasterId(m.id)}
-                  disabled={sourceId === m.id}
+                  onChange={() => handleSelectMaster(m.id)}
                 />
               </td>
               <td className="px-2 py-1">
@@ -419,8 +439,7 @@ function DuplicateGroupCard({ groupIndex, members }: DuplicateGroupCardProps) {
                   type="radio"
                   name={`source-${groupIndex}`}
                   checked={sourceId === m.id}
-                  onChange={() => setSourceId(m.id)}
-                  disabled={masterId === m.id}
+                  onChange={() => handleSelectSource(m.id)}
                 />
               </td>
               <td className="px-2 py-1 text-purple-700">
