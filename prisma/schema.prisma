@@ -355,6 +355,7 @@ model Property {
   comments           Comment[]
   nextActions        NextAction[]
   attachments        Attachment[]
+  ownerMemos         OwnerMemo[]               @relation("OwnerMemoProperty")
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -416,17 +417,25 @@ model PropertyOwner {
 
 /// 所有者ごとに追記するメモ履歴。ownerId 単位で時系列に積み上げる追記専用テーブル。
 /// 既存の Owner.note / PropertyOwner.note とは別系統で、編集/削除は今回スコープ外。
+///
+/// propertyId は任意の関連物件リンク（営業履歴用途）。
+///   - 物件詳細→所有者タブから書いたメモ → 該当物件 id を自動添付
+///   - 所有者単体から書いたメモ → null
+/// 物件が物理削除された場合は SetNull でメモ本体を残す（営業履歴を失わない）。
 model OwnerMemo {
-  id        String   @id @default(uuid()) @db.Uuid
-  ownerId   String   @map("owner_id") @db.Uuid
-  body      String
-  createdBy String   @map("created_by") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid()) @db.Uuid
+  ownerId    String   @map("owner_id") @db.Uuid
+  propertyId String?  @map("property_id") @db.Uuid
+  body       String
+  createdBy  String   @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  owner   Owner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  creator User  @relation("OwnerMemoCreatedBy", fields: [createdBy], references: [id])
+  owner    Owner     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  property Property? @relation("OwnerMemoProperty", fields: [propertyId], references: [id], onDelete: SetNull)
+  creator  User      @relation("OwnerMemoCreatedBy", fields: [createdBy], references: [id])
 
   @@index([ownerId, createdAt])
+  @@index([propertyId, createdAt])
   @@map("owner_memos")
 }
 
