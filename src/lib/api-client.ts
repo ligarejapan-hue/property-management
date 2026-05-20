@@ -1849,6 +1849,10 @@ export interface OwnerCorrectionCandidate {
   blockReasons: string[];
   recommendedAction: "hold" | "review" | "delete_candidate" | "merge_candidate";
   types: string[];
+  /** duplicate グループに属する candidate のみ非 null（opaque ID、PII 復元不可）。 */
+  duplicateGroupId: string | null;
+  /** duplicate グループ内候補件数。duplicateGroupId が null なら null。 */
+  duplicateGroupSize: number | null;
 }
 
 export interface OwnerCorrectionCandidatesResponse {

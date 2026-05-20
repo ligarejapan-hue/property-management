@@ -9,8 +9,8 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
-import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { writeAuditLog } from "@/lib/audit";
+import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
@@ -30,6 +30,16 @@ type Candidate = {
   blockReasons: string[];
   recommendedAction: RecommendedAction;
   types: string[];
+  /**
+   * duplicate グループの opaque な ID（例: "dup-1"）。
+   * グループサイズ >= 2 のグループに属する candidate のみ非 null。
+   * **raw name/address/normalized key を含まない**（PII 復元防止）。
+   */
+  duplicateGroupId: string | null;
+  /**
+   * duplicate グループ内の候補件数。groupId が null なら null。
+   */
+  duplicateGroupSize: number | null;
 };
 
 // ---------- GET /api/admin/owners/correction-candidates ----------
@@ -195,26 +205,36 @@ export async function GET(request: NextRequest) {
         changeLogCount,
         importFileName: importInfo?.fileName ?? null,
         importRowNumber: importInfo?.rowNumber ?? null,
+        duplicateGroupId: null,
+        duplicateGroupSize: null,
         blockReasons,
         recommendedAction,
         types,
       };
     });
 
-    // 5. 重複検出: normalizeName + normalizeAddress でグループ化
+    // 5. 重複検出: buildOwnerDuplicateCandidateKey で共通グループ化。
+    //    merge-preview とキー定義を完全に共有する（lib に集約）。
     const groups = new Map<string, (typeof candidates)[0][]>();
     for (const c of candidates) {
-      const n = normalizeName(c.name);
-      const a = c.address
-        ? normalizeAddress(c.address)
-        : `__noaddr__${c.zip ?? ""}__${c.phone ?? ""}`;
-      const key = `${n}|||${a}`;
+      const key = buildOwnerDuplicateCandidateKey({
+        name: c.name,
+        address: c.address,
+        zip: c.zip,
+        phone: c.phone,
+      });
       const arr = groups.get(key) ?? [];
       arr.push(c);
       groups.set(key, arr);
     }
+    // duplicate グループ（size >= 2）に opaque ID を割り当てる。
+    // ID は raw / normalized key を含まない（PII 復元防止）。
+    // Map の挿入順で安定した連番（dup-1, dup-2, ...）にする。
+    let groupCounter = 0;
     for (const group of groups.values()) {
       if (group.length < 2) continue;
+      groupCounter++;
+      const opaqueId = `dup-${groupCounter}`;
       for (const c of group) {
         if (!c.types.includes("duplicate")) c.types.push("duplicate");
         if (
@@ -223,6 +243,8 @@ export async function GET(request: NextRequest) {
         ) {
           c.recommendedAction = "merge_candidate";
         }
+        c.duplicateGroupId = opaqueId;
+        c.duplicateGroupSize = group.length;
       }
     }
 

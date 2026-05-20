@@ -8,6 +8,11 @@ import {
 } from "@/lib/api-client";
 import { AddressFillButton } from "@/components/owners/AddressFillButton";
 import { OwnerArchiveButton } from "@/components/owners/OwnerArchiveButton";
+import { OwnerMergePreviewButton } from "@/components/owners/OwnerMergePreviewButton";
+import {
+  applyMasterSelection,
+  applySourceSelection,
+} from "@/lib/owner-merge-pair";
 
 type FilterType = "all" | "orphan" | "address_null" | "duplicate";
 
@@ -95,7 +100,7 @@ export default function OwnerCorrectionPage() {
         </h1>
       </div>
       <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（soft-delete）を個別実行できます。統合・再リンクは未実装です。
+        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（soft-delete）、「重複候補」タブの同一キーグループには統合プレビュー（dryRun のみ）を個別実行できます。統合実行・再リンクは未実装です。
       </p>
 
       {/* Filter tabs */}
@@ -134,6 +139,14 @@ export default function OwnerCorrectionPage() {
           <p className="mb-3 text-sm text-gray-500">
             {data.total} 件の確認候補
           </p>
+
+          {/* duplicate タブでは「重複グループサマリー」を上部に追加表示。
+              client-side で types.includes("duplicate") の候補を name+address で
+              グルーピングし、各グループ内の owner ペアに対して preview を取得できる。
+              既存のフラットリストは下にそのまま残す（破壊的変更なし）。 */}
+          {filterType === "duplicate" && (
+            <DuplicateGroupSummary candidates={data.candidates} />
+          )}
 
           {data.candidates.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-400">
@@ -276,9 +289,193 @@ export default function OwnerCorrectionPage() {
           )}
 
           <p className="mt-4 text-xs text-gray-400">
-            ※ 統合・再リンクの実行機能は Phase 2 以降で対応予定です。
+            ※ 統合実行・再リンクの実行機能は Phase 2-B-β 以降で対応予定です。
+            （重複候補の dryRun preview のみ Phase 2-B-α で利用可能）
           </p>
         </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 重複候補のグループサマリー
+// ---------------------------------------------------------------------------
+// 同一 (name + address) の候補を client-side でグループ化し、各グループに
+// owner 一覧 + master/source ペア選択 + 統合プレビューボタンを表示する。
+//
+// 注意:
+//   - master/source の選択は operator に明示させる（自動推奨はヒントのみ）。
+//   - PII は API レスポンスの maskValue 済みの値をそのまま表示する。
+//   - 推奨ハイライト: ChangeLog 件数 / PropertyOwner 件数 / version が多い方を
+//     「master 推奨」表示する（強制せず注記のみ）。
+
+interface DuplicateGroupSummaryProps {
+  candidates: OwnerCorrectionCandidate[];
+}
+
+function DuplicateGroupSummary({ candidates }: DuplicateGroupSummaryProps) {
+  // duplicate グループは API 側で server-side の正規化キーで判定済み。
+  // UI は duplicateGroupId（opaque）で再構築するだけ。raw display value で
+  // grouping すると masking / 表記揺れで正しい重複が分断される。
+  const dups = candidates.filter(
+    (c): c is OwnerCorrectionCandidate & { duplicateGroupId: string } =>
+      c.duplicateGroupId !== null && c.duplicateGroupId !== undefined,
+  );
+  if (dups.length === 0) return null;
+
+  const groups = new Map<string, OwnerCorrectionCandidate[]>();
+  for (const c of dups) {
+    const arr = groups.get(c.duplicateGroupId!) ?? [];
+    arr.push(c);
+    groups.set(c.duplicateGroupId!, arr);
+  }
+
+  // duplicateGroupSize が >= 2 のグループのみ表示（API 側でも同条件）。
+  const groupList = Array.from(groups.entries()).filter(
+    ([, arr]) => arr.length >= 2,
+  );
+  if (groupList.length === 0) return null;
+
+  return (
+    <div className="mb-6 rounded-md border border-purple-200 bg-purple-50 p-3">
+      <h2 className="mb-2 text-sm font-semibold text-purple-900">
+        重複グループ ({groupList.length} 件)
+      </h2>
+      <p className="mb-3 text-xs text-purple-700">
+        同一 (氏名 + 住所) の所有者をまとめて表示しています。各グループ内で master / source を選び、統合プレビュー（dryRun）を取得できます。
+      </p>
+      <div className="space-y-3">
+        {groupList.map(([key, members], idx) => (
+          <DuplicateGroupCard
+            key={key}
+            groupIndex={idx + 1}
+            members={members}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface DuplicateGroupCardProps {
+  groupIndex: number;
+  members: OwnerCorrectionCandidate[];
+}
+
+function DuplicateGroupCard({ groupIndex, members }: DuplicateGroupCardProps) {
+  // master / source の選択（明示・operator まかせ）
+  const [masterId, setMasterId] = useState<string | null>(null);
+  const [sourceId, setSourceId] = useState<string | null>(null);
+
+  // 推奨ロジック: ChangeLog 件数 → PropertyOwner 件数 → version の降順で master 推奨。
+  // 同値時は最初に現れた owner を推奨。強制しない（ヒントのみ）。
+  const recommendedMaster = [...members].sort((a, b) => {
+    if (b.changeLogCount !== a.changeLogCount)
+      return b.changeLogCount - a.changeLogCount;
+    if (b.propertyOwnerCount !== a.propertyOwnerCount)
+      return b.propertyOwnerCount - a.propertyOwnerCount;
+    return b.version - a.version;
+  })[0];
+
+  const canPreview = masterId && sourceId && masterId !== sourceId;
+  const sample = members[0];
+
+  // master / source は disabled にしない（disabled だと一度選んだ後に役割を
+  // 入れ替えられない）。代わりに、既に相手側に選ばれている owner を選んだら
+  // pure 関数 (applyMasterSelection / applySourceSelection) で自動 swap する。
+  // これにより 2 人グループでの「入れ替え」も、3 人以上のグループでの選び直しも
+  // 自然に動く。
+  const handleSelectMaster = (id: string) => {
+    const next = applyMasterSelection({ masterId, sourceId }, id);
+    setMasterId(next.masterId);
+    setSourceId(next.sourceId);
+  };
+
+  const handleSelectSource = (id: string) => {
+    const next = applySourceSelection({ masterId, sourceId }, id);
+    setMasterId(next.masterId);
+    setSourceId(next.sourceId);
+  };
+
+  return (
+    <div className="rounded-md border border-purple-200 bg-white p-3">
+      <div className="mb-2 flex items-baseline gap-2">
+        <span className="text-xs font-medium text-purple-700">
+          グループ {groupIndex}
+        </span>
+        <span className="text-xs text-gray-500">
+          氏名: {sample.name ?? "***"} / 住所: {sample.address ?? "—"} （
+          {members.length} 件）
+        </span>
+      </div>
+
+      <table className="mb-3 w-full text-xs">
+        <thead className="bg-gray-50 text-gray-500">
+          <tr>
+            <th className="px-2 py-1 text-left">master</th>
+            <th className="px-2 py-1 text-left">source</th>
+            <th className="px-2 py-1 text-left">推奨</th>
+            <th className="px-2 py-1 text-left">ID</th>
+            <th className="px-2 py-1 text-center">物件</th>
+            <th className="px-2 py-1 text-center">変更履歴</th>
+            <th className="px-2 py-1 text-center">ver</th>
+            <th className="px-2 py-1 text-left">取込元</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {members.map((m) => (
+            <tr key={m.id} className="hover:bg-gray-50">
+              <td className="px-2 py-1">
+                <input
+                  type="radio"
+                  name={`master-${groupIndex}`}
+                  checked={masterId === m.id}
+                  onChange={() => handleSelectMaster(m.id)}
+                />
+              </td>
+              <td className="px-2 py-1">
+                <input
+                  type="radio"
+                  name={`source-${groupIndex}`}
+                  checked={sourceId === m.id}
+                  onChange={() => handleSelectSource(m.id)}
+                />
+              </td>
+              <td className="px-2 py-1 text-purple-700">
+                {m.id === recommendedMaster.id ? "master 推奨" : ""}
+              </td>
+              <td className="px-2 py-1 font-mono text-[10px] text-gray-400">
+                {m.id.slice(0, 8)}…
+              </td>
+              <td className="px-2 py-1 text-center">{m.propertyOwnerCount}</td>
+              <td className="px-2 py-1 text-center">{m.changeLogCount}</td>
+              <td className="px-2 py-1 text-center">{m.version}</td>
+              <td className="px-2 py-1 font-mono text-[10px] text-gray-500">
+                {m.importFileName
+                  ? `${m.importFileName}:${m.importRowNumber}行`
+                  : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {canPreview && masterId && sourceId ? (
+        // key を pair ID にして、選択ペア変更時にコンポーネントを remount し
+        // 古い preview 結果が残らないことを保証する（OwnerMergePreviewButton
+        // 内の useEffect と併せた多重防御）。
+        <OwnerMergePreviewButton
+          key={`${masterId}:${sourceId}`}
+          masterId={masterId}
+          sourceId={sourceId}
+          masterLabel={`${masterId.slice(0, 8)}…`}
+          sourceLabel={`${sourceId.slice(0, 8)}…`}
+        />
+      ) : (
+        <p className="text-xs text-gray-400">
+          master と source をそれぞれ選択してください
+        </p>
       )}
     </div>
   );
