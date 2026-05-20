@@ -443,7 +443,11 @@ function DuplicateGroupCard({ groupIndex, members }: DuplicateGroupCardProps) {
       </table>
 
       {canPreview && masterId && sourceId ? (
+        // key を pair ID にして、選択ペア変更時にコンポーネントを remount し
+        // 古い preview 結果が残らないことを保証する（OwnerMergePreviewButton
+        // 内の useEffect と併せた多重防御）。
         <OwnerMergePreviewButton
+          key={`${masterId}:${sourceId}`}
           masterId={masterId}
           sourceId={sourceId}
           masterLabel={`${masterId.slice(0, 8)}…`}

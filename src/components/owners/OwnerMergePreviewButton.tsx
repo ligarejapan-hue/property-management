@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // blockReason enum → 日本語ラベル（owner-merge.ts の OwnerMergeBlockReason と一致）
 const MERGE_BLOCK_REASON_LABELS: Record<string, string> = {
@@ -60,6 +60,15 @@ export function OwnerMergePreviewButton({
   const [state, setState] = useState<State>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<MergePreviewResponse | null>(null);
+
+  // masterId / sourceId が変わったら古い preview 結果を破棄する。
+  // 別ペア（例: A/B → A/C）の結果が、変更後のラベル A/C と乖離したまま
+  // 表示され続けて operator の判断を誤らせるのを防ぐ。
+  useEffect(() => {
+    setState("idle");
+    setErrorMsg(null);
+    setResult(null);
+  }, [masterId, sourceId]);
 
   const reset = () => {
     setState("idle");
