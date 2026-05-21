@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { resolveMgmtIdToPropertyIds } from "@/lib/property-mgmt-id-search";
 
 // ---------- POST /api/properties/suggest ----------
 // 物件一覧の入力中候補表示用。property:read 必須。
@@ -81,6 +82,12 @@ export async function POST(request: NextRequest) {
         ? [{ propertyOwners: { some: { owner: { OR: ownerSearchConditions } } } }]
         : [];
 
+    // 管理ID（取込元 fileName / rowNumber / __sourceRef）でも候補に hit させる。
+    // helper で候補 propertyId[] を解決し、既存 OR 条件と合算する。
+    const mgmtPropertyIds = await resolveMgmtIdToPropertyIds(prisma, q);
+    const mgmtOrCondition =
+      mgmtPropertyIds.length > 0 ? [{ id: { in: mgmtPropertyIds } }] : [];
+
     // field_staff は自分が作成/担当する物件のみ検索対象にする（AND で scope を強制）
     const fieldStaffScope =
       session.role === "field_staff"
@@ -99,6 +106,7 @@ export async function POST(request: NextRequest) {
               { realEstateNumber: { contains: q, mode: "insensitive" } },
               { buildingNumber: { contains: q, mode: "insensitive" } },
               ...ownerOrCondition,
+              ...mgmtOrCondition,
             ],
           },
         ],
