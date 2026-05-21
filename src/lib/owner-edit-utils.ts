@@ -16,6 +16,8 @@ export interface OwnerEditableFields {
   address: boolean;
   /** owner_email:full */
   email: boolean;
+  /** owner_corporate_number:full / edit */
+  corporateNumber: boolean;
 }
 
 export type OwnerFormValues = {
@@ -25,6 +27,7 @@ export type OwnerFormValues = {
   zip: string;
   address: string;
   email: string;
+  corporateNumber: string;
 };
 
 /**
@@ -65,5 +68,10 @@ export function buildOwnerUpdatePayload(
   if (fields.zip) payload.zip = form.zip.trim() || null;
   if (fields.address) payload.address = form.address.trim() || null;
   if (fields.email) payload.email = form.email.trim() || null;
+  // 法人番号は input としては空文字許容 / 正規化はサーバ側 (validators.corporateNumberInputSchema)。
+  // 空文字をクライアントから送れば null として扱われる。
+  if (fields.corporateNumber) {
+    payload.corporateNumber = form.corporateNumber.trim() || null;
+  }
   return payload;
 }

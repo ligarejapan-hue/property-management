@@ -22,6 +22,7 @@ import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
+import { normalizeCorporateNumber, detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
 
@@ -86,6 +87,8 @@ interface ApiOwner {
   note: string | null;
   /** hidden 時は API レスポンスにキーが存在しない（undefined）。null は「空値」と区別する。 */
   email?: string | null;
+  /** 法人番号（13桁数字、display-level に応じて masked/hidden される）。 */
+  corporateNumber?: string | null;
   /** owner:read がない場合は API レスポンスが { id } のみになるため optional。 */
   version?: number;
 }
@@ -198,6 +201,7 @@ export default function PropertyDetailPage({
     zip: false,
     address: false,
     email: false,
+    corporateNumber: false,
   });
 
   const handleDelete = async () => {
@@ -261,6 +265,9 @@ export default function PropertyDetailPage({
           zip: hasFullPerm("owner_zip"),
           address: hasFullPerm("owner_address"),
           email: hasFullPerm("owner_email"),
+          corporateNumber:
+            hasFullPerm("owner_corporate_number") ||
+            hasEditPerm("owner_corporate_number"),
         });
         // OwnerMemo 作成可否: owner:write かつ owner_note の full/edit を要求（API 側の canCreateOwnerMemo と整合）
         const ownerWrite = perms.some(
@@ -663,7 +670,8 @@ function OwnerCard({
     editableFields.phone ||
     editableFields.zip ||
     editableFields.address ||
-    editableFields.email;
+    editableFields.email ||
+    editableFields.corporateNumber;
 
   // 編集ボタン表示条件: canEditOwner pure helper を使用。
   // owner:read がない場合は API レスポンスが { id } のみで version も undefined になるため編集不可。
@@ -676,6 +684,7 @@ function OwnerCard({
     zip: po.owner.zip ?? "",
     address: po.owner.address ?? "",
     email: po.owner.email ?? "",
+    corporateNumber: po.owner.corporateNumber ?? "",
   });
 
   const handleEdit = () => {
@@ -686,6 +695,7 @@ function OwnerCard({
       zip: po.owner.zip ?? "",
       address: po.owner.address ?? "",
       email: po.owner.email ?? "",
+      corporateNumber: po.owner.corporateNumber ?? "",
     });
     setSaveError(null);
     setEditing(true);
@@ -863,6 +873,33 @@ function OwnerCard({
                 />
               </div>
             )}
+            {/* 法人番号（任意）。13桁数字のみ。クライアント検証: 空 or 13桁数字以外で送信不可。
+                サーバ側でも updateOwnerSchema が再度検証する。 */}
+            {editableFields.corporateNumber && (
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-medium text-gray-700">
+                  法人番号（任意 / 13桁）
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{13}"
+                  maxLength={13}
+                  value={form.corporateNumber}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, corporateNumber: e.target.value }))
+                  }
+                  placeholder="例: 1234567890123"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {form.corporateNumber.trim() !== "" &&
+                  normalizeCorporateNumber(form.corporateNumber) === null && (
+                    <p className="text-xs text-red-600">
+                      法人番号は13桁の数字で入力してください（ハイフン・空白・全角数字は自動で除去されます）
+                    </p>
+                  )}
+              </div>
+            )}
           </div>
 
           {saveError && (
@@ -873,7 +910,13 @@ function OwnerCard({
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || (editableFields.name && !form.name.trim())}
+              disabled={
+                saving ||
+                (editableFields.name && !form.name.trim()) ||
+                (editableFields.corporateNumber &&
+                  form.corporateNumber.trim() !== "" &&
+                  normalizeCorporateNumber(form.corporateNumber) === null)
+              }
               className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {saving ? "保存中..." : "保存"}
@@ -900,6 +943,18 @@ function OwnerCard({
           <div className="md:col-span-2">
             <OwnerField label="現住所" value={po.owner.address} />
           </div>
+          {/* 法人番号: display-level に応じて null（hidden）/ masked / full のいずれかが返る。
+              将来 (Phase B) に検索ボタンを置く場所として「現住所」直下に固定配置。 */}
+          {po.owner.corporateNumber !== undefined && (
+            <div className="md:col-span-2">
+              <OwnerField label="法人番号" value={po.owner.corporateNumber ?? null} mono />
+            </div>
+          )}
+          {/* 候補検出: corporateNumber 未設定 + name/address に法人番号らしき文字列が含まれる場合のみ表示。
+              候補値そのものは表示せず「含まれている」事実のみ伝える（自動上書きはしない）。
+              注: po.owner.name / address はマスク済の値が来る可能性があるが、本ヘルパーは
+              13桁数字の完全一致パターンを見るのでマスク済値では誤検出しにくい。 */}
+          <CorporateNumberSuspectBanner owner={po.owner} />
         </dl>
       )}
 
@@ -1202,6 +1257,29 @@ function OwnerField({
       >
         {hasValue ? value : "未登録"}
       </dd>
+    </div>
+  );
+}
+
+function CorporateNumberSuspectBanner({ owner }: { owner: ApiOwner }) {
+  // 法人番号が未設定 + name/address に法人番号らしき文字列が含まれる場合のみ警告表示。
+  // 候補値そのものは表示しない（自動上書きしないユーザー確定方針に従う）。
+  if (owner.corporateNumber) return null;
+  const detection = detectCorporateNumberInOwnerLike({
+    name: owner.name,
+    address: owner.address,
+    note: owner.note,
+  });
+  if (detection.candidates.length === 0) return null;
+  return (
+    <div className="md:col-span-2">
+      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <div>
+          氏名・現住所・備考欄に法人番号らしき文字列が含まれています。
+          編集モードで「法人番号」欄に転記してください（自動上書きはしません）。
+        </div>
+      </div>
     </div>
   );
 }

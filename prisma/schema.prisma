@@ -371,19 +371,23 @@ model Property {
 }
 
 model Owner {
-  id              String   @id @default(uuid()) @db.Uuid
-  name            String
-  nameKana        String?  @map("name_kana")
-  phone           String?
-  zip             String?
-  address         String?
-  note            String?
-  email           String?
-  externalLinkKey String?  @map("external_link_key")
-  version         Int      @default(1)
-  isArchived      Boolean  @default(false) @map("is_archived")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(uuid()) @db.Uuid
+  name             String
+  nameKana         String?  @map("name_kana")
+  phone            String?
+  zip              String?
+  address          String?
+  note             String?
+  email            String?
+  externalLinkKey  String?  @map("external_link_key")
+  /// 法人番号（国税庁マイナンバー法人番号、13桁）。
+  /// nullable: 個人所有者には設定しない。表記揺れ吸収のため取込・編集時に
+  /// 13桁数字へ正規化してから保存する（ハイフン・空白・全角数字を除去）。
+  corporateNumber  String?  @map("corporate_number") @db.VarChar(13)
+  version          Int      @default(1)
+  isArchived       Boolean  @default(false) @map("is_archived")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   propertyOwners PropertyOwner[]
   attachments    Attachment[]
@@ -391,6 +395,7 @@ model Owner {
 
   @@index([nameKana])
   @@index([externalLinkKey])
+  @@index([corporateNumber])
   @@map("owners")
 }
 

@@ -1,5 +1,30 @@
 import { z } from "zod";
 import { PROPERTY_TYPE_VALUES, CASE_STATUS_VALUES, INTRODUCTION_ROUTE_VALUES } from "@/lib/property-types";
+import { normalizeCorporateNumber } from "@/lib/corporate-number";
+
+// 法人番号入力フィールド共通スキーマ:
+// - 空文字 / null / undefined → null（保存しない）
+// - 13桁数字に正規化できる入力（全角・ハイフン・空白混じり許容）→ 正規化済 13桁
+// - それ以外（12桁 / 14桁 / 数字以外混入）→ validation error
+const corporateNumberInputSchema = z
+  .union([z.string(), z.null(), z.undefined()])
+  .transform((v) => {
+    if (v == null) return null;
+    const trimmed = v.trim();
+    if (trimmed === "") return null;
+    return v;
+  })
+  .superRefine((v, ctx) => {
+    if (v === null) return;
+    const normalized = normalizeCorporateNumber(v);
+    if (normalized === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "法人番号は13桁の数字で入力してください",
+      });
+    }
+  })
+  .transform((v) => (v === null ? null : normalizeCorporateNumber(v)));
 
 // ---------- Property list query ----------
 
@@ -95,6 +120,7 @@ export const createOwnerSchema = z.object({
   note: z.string().optional().nullable(),
   email: z.string().email("メールアドレスの形式が正しくありません").optional().nullable(),
   externalLinkKey: z.string().optional().nullable(),
+  corporateNumber: corporateNumberInputSchema.optional(),
 });
 
 export const updateOwnerSchema = z.object({
@@ -105,6 +131,7 @@ export const updateOwnerSchema = z.object({
   address: z.string().optional().nullable(),
   note: z.string().optional().nullable(),
   email: z.string().email("メールアドレスの形式が正しくありません").optional().nullable(),
+  corporateNumber: corporateNumberInputSchema.optional(),
   version: z.number().int(),
 });
 

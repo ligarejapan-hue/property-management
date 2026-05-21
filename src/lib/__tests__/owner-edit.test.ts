@@ -278,6 +278,7 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
       name: "full" as const, nameKana: "full" as const,
       phone: "full" as const, zip: "full" as const,
       address: "full" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "full" as const,
     };
     const result = applyDisplayToOwner(owner, config);
     expect(result.phone).toBe("090-1234-5678");
@@ -290,6 +291,7 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
       name: "full" as const, nameKana: "full" as const,
       phone: "masked" as const, zip: "full" as const,
       address: "full" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "full" as const,
     };
     const result = applyDisplayToOwner(owner, config);
     expect(result.phone).toMatch(/\*\*\*/);
@@ -302,6 +304,7 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
       name: "full" as const, nameKana: "full" as const,
       phone: "full" as const, zip: "full" as const,
       address: "full" as const, note: "full" as const, email: "masked" as const,
+      corporateNumber: "full" as const,
     };
     const result = applyDisplayToOwner(owner, config);
     expect(result.email).toBe("yam***@example.com");
@@ -313,6 +316,7 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
       name: "full" as const, nameKana: "full" as const,
       phone: "full" as const, zip: "full" as const,
       address: "partial" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "full" as const,
     };
     const result = applyDisplayToOwner(owner, config);
     expect(result.address).toMatch(/^東京都千代田区/);
@@ -324,6 +328,7 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
       name: "full" as const, nameKana: "full" as const,
       phone: "full" as const, zip: "full" as const,
       address: "full" as const, note: "full" as const, email: "hidden" as const,
+      corporateNumber: "full" as const,
     };
     const result = applyDisplayToOwner(owner, config);
     expect("email" in result).toBe(false);
@@ -334,6 +339,7 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
       name: "full" as const, nameKana: "full" as const,
       phone: "masked" as const, zip: "masked" as const,
       address: "partial" as const, note: "hidden" as const, email: "masked" as const,
+      corporateNumber: "full" as const,
     };
     const result = applyDisplayToOwner(owner, config);
     expect(result.phone).toMatch(/\*\*\*/);     // masked
@@ -355,6 +361,7 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
       address: "partial" as const, // owner_address:partial
       note: "read" as const,
       email: "masked" as const, // owner_email:masked
+      corporateNumber: "full" as const,
     };
     const result = applyDisplayToOwner(owner, fieldLevelConfig);
     // owner:read があっても phone/email は平文にならない
@@ -369,6 +376,7 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
       name: "full" as const, nameKana: "full" as const,
       phone: "masked" as const, zip: "masked" as const,
       address: "partial" as const, note: "hidden" as const, email: "masked" as const,
+      corporateNumber: "full" as const,
     };
     const propertyOwners = [
       { id: "po-1", isPrimary: true, owner },
@@ -563,10 +571,10 @@ describe("frontend payload — hidden email null 上書き防止", () => {
 import { buildOwnerUpdatePayload, OwnerEditableFields } from "../owner-edit-utils";
 
 const allEditable: OwnerEditableFields = {
-  name: true, nameKana: true, phone: true, zip: true, address: true, email: true,
+  name: true, nameKana: true, phone: true, zip: true, address: true, email: true, corporateNumber: true,
 };
 const noneEditable: OwnerEditableFields = {
-  name: false, nameKana: false, phone: false, zip: false, address: false, email: false,
+  name: false, nameKana: false, phone: false, zip: false, address: false, email: false, corporateNumber: false,
 };
 const fullForm = {
   name: "山田太郎",
@@ -575,6 +583,7 @@ const fullForm = {
   zip: "123-4567",
   address: "東京都渋谷区1-1",
   email: "yamada@example.com",
+  corporateNumber: "",
 };
 
 describe("buildOwnerUpdatePayload — field-level full guard", () => {
@@ -874,6 +883,7 @@ describe("applyDisplayToOwner — default mask for name/nameKana/note", () => {
   const makeConfig = (overrides: Partial<OwnerDisplayConfig>): OwnerDisplayConfig => ({
     name: "full", nameKana: "full", phone: "full",
     zip: "full", address: "full", note: "full", email: "full",
+    corporateNumber: "full",
     ...overrides,
   });
 

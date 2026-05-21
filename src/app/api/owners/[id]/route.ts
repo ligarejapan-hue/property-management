@@ -100,6 +100,7 @@ export async function PATCH(
       { requestKey: "address", resource: "owner_address" },
       { requestKey: "email", resource: "owner_email" },
       { requestKey: "note", resource: "owner_note" },
+      { requestKey: "corporateNumber", resource: "owner_corporate_number" },
     ];
     for (const { requestKey, resource } of fieldWriteChecks) {
       if (requestKey in updateFields && !hasExplicitWritePerm(perms, resource)) {
