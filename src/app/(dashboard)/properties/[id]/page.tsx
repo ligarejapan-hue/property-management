@@ -23,6 +23,7 @@ import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
+import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
 
 // ---------- Label maps ----------
 
@@ -649,6 +650,8 @@ function OwnerCard({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 誤紐づき修正モーダル（Phase 2-C）。owner:write 権限がない場合は出さない。
+  const [mislinkOpen, setMislinkOpen] = useState(false);
 
   // email が API レスポンスに含まれているか（hidden の場合キーが存在しない）
   const emailReturned = "email" in po.owner;
@@ -749,7 +752,33 @@ function OwnerCard({
             編集
           </button>
         )}
+        {/* 誤紐づき修正ボタン (Phase 2-C): owner:write がある場合のみ表示。
+            execute 側で property:write も再検証するため UI 表示条件はゆるく
+            owner:write のみ。 */}
+        {canWrite && !editing && (
+          <button
+            type="button"
+            onClick={() => setMislinkOpen(true)}
+            className={`${editAllowed ? "" : "ml-auto"} flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100`}
+          >
+            誤紐づき修正
+          </button>
+        )}
       </div>
+
+      {mislinkOpen && (
+        <OwnerMislinkModal
+          propertyId={propertyId}
+          propertyOwnerId={po.id}
+          currentOwnerId={po.ownerId}
+          currentOwnerLabel={po.owner.name ?? po.ownerId.slice(0, 8) + "…"}
+          onClose={() => setMislinkOpen(false)}
+          onExecuted={() => {
+            setMislinkOpen(false);
+            void onRefresh();
+          }}
+        />
+      )}
 
       {editing ? (
         /* ── 編集フォーム（full 権限のある項目のみ input を表示） ── */
