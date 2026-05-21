@@ -300,6 +300,102 @@ describe("GET /api/properties mgmtId 統合", () => {
     expect(JSON.stringify(call.detail)).not.toContain(rawMgmtId);
   });
 
+  it("非Property createdId が大量に混入しても、後続ページで実在Propertyを返す", async () => {
+    // ImportJobRow page 1: 500件すべて Owner.id（非Property）
+    const ownerPage = Array.from({ length: 500 }, (_, i) => ({
+      id: `r1-${i}`,
+      createdId: `o${i}`,
+    }));
+    // ImportJobRow page 2: 5件 Property.id
+    const propPage = Array.from({ length: 5 }, (_, i) => ({
+      id: `r2-${i}`,
+      createdId: `p${i}`,
+    }));
+    let importCallIdx = 0;
+    pm.importJobRow.findMany.mockImplementation(async ({ where }: any) => {
+      // helper の branch (c) fileName-only -> page1, page2, [] ; then (d) fallback []
+      if (!where?.rawData) {
+        importCallIdx++;
+        if (importCallIdx === 1) return ownerPage;
+        if (importCallIdx === 2) return propPage;
+        return [];
+      }
+      return [];
+    });
+    pm.property.findMany.mockImplementation(async ({ where, take }: any) => {
+      // take=50 は本体 list クエリ（route の limit=50 default）。それ以外は helper の Property 実在チェック。
+      if (take === 50) {
+        return propPage.map((r) => ({
+          id: r.createdId,
+          propertyType: "land",
+          address: "addr-" + r.createdId,
+          lotNumber: null,
+          buildingNumber: null,
+          realEstateNumber: null,
+          registryStatus: "unconfirmed",
+          dmStatus: "hold",
+          caseStatus: "new_case",
+          introductionRoute: null,
+          isArchived: false,
+          updatedAt: new Date(),
+          assignedTo: null,
+          gpsLat: null,
+          gpsLng: null,
+          investigationConfirmedAt: null,
+          assignee: null,
+          propertyOwners: [],
+        }));
+      }
+      // helper の Property 実在チェック
+      if (where?.id?.in) {
+        const validSet = new Set(propPage.map((r) => r.createdId));
+        return (where.id.in as string[])
+          .filter((id) => validSet.has(id))
+          .map((id) => ({ id }));
+      }
+      return [];
+    });
+    pm.property.count.mockResolvedValue(5);
+
+    const res = await GET(makeRequest("?mgmtId=" + encodeURIComponent("受付帳")));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    // 5件すべて実在 Property
+    expect(body.data.length).toBe(5);
+    // AuditLog mgmtHitCount == 5
+    const audit = lastWriteAuditLogCall();
+    expect(audit.detail.mgmtHitCount).toBe(5);
+  });
+
+  it("範囲外 rowNumber (9999999999) で 500 にならず空結果", async () => {
+    // helper は invalidRowNumber で早期 return [] → DB を叩かない
+    pm.importJobRow.findMany.mockResolvedValue([]);
+    pm.property.findMany.mockResolvedValue([]);
+    pm.property.count.mockResolvedValue(0);
+
+    const res = await GET(makeRequest("?mgmtId=" + encodeURIComponent("9999999999")));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toEqual([]);
+    // 範囲外なら ImportJobRow も叩かない
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+    const audit = lastWriteAuditLogCall();
+    expect(audit.detail.mgmtHitCount).toBe(0);
+    expect(JSON.stringify(audit.detail)).not.toContain("9999999999");
+  });
+
+  it("範囲外 rowNumber (受付帳.xlsx:9999999999) も 500 にならず空結果", async () => {
+    pm.importJobRow.findMany.mockResolvedValue([]);
+    pm.property.findMany.mockResolvedValue([]);
+    pm.property.count.mockResolvedValue(0);
+
+    const res = await GET(makeRequest("?mgmtId=" + encodeURIComponent("受付帳.xlsx:9999999999")));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toEqual([]);
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+  });
+
   it("isArchived=false が where に必ず入る（mgmtId hit 時も）", async () => {
     pm.importJobRow.findMany.mockImplementation(async ({ where }: any) => {
       if (where?.rowNumber === 120) return [{ createdId: "p1" }];

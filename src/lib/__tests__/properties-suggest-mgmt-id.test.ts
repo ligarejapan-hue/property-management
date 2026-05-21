@@ -185,6 +185,96 @@ describe("POST /api/properties/suggest 管理ID組込", () => {
     expect(scopeClause.OR).toContainEqual({ assignedTo: "fs-1" });
   });
 
+  it("非Property createdId が大量に混入しても、suggest で実在Property候補が返る", async () => {
+    // helper の branch (c) fileName-only page 1: 500件 Owner.id, page 2: 1件 Property.id
+    const ownerPage = Array.from({ length: 500 }, (_, i) => ({
+      id: `r1-${i}`,
+      createdId: `o${i}`,
+    }));
+    const propPage = [{ id: "r2-0", createdId: "p1" }];
+
+    let importCallIdx = 0;
+    pm.importJobRow.findMany.mockImplementation(async ({ where }: any) => {
+      // helper の fileName-only branch ページング
+      if (where?.job?.fileName?.contains === "受付帳" && !where?.rawData) {
+        importCallIdx++;
+        if (importCallIdx === 1) return ownerPage;
+        if (importCallIdx === 2) return propPage;
+        return [];
+      }
+      // suggest 側 importSource 取得
+      if (where?.createdId?.in) {
+        return [
+          {
+            createdId: "p1",
+            rowNumber: 120,
+            rawData: { __sourceRef: "受付帳.xlsx:120行" },
+            job: { fileName: "受付帳.xlsx" },
+          },
+        ];
+      }
+      return [];
+    });
+    pm.property.findMany.mockImplementation(async ({ where, take }: any) => {
+      if (take === 10) {
+        // suggest 本体 list
+        return [
+          {
+            id: "p1",
+            address: "東京都千代田区1-1",
+            dmStatus: "hold",
+            propertyOwners: [],
+          },
+        ];
+      }
+      // helper の Property 実在チェック
+      if (where?.id?.in) {
+        const ids = where.id.in as string[];
+        return ids.filter((id) => id === "p1").map((id) => ({ id }));
+      }
+      return [];
+    });
+
+    const res = await POST(makeRequest({ q: "受付帳" }));
+    expect(res.status).toBe(200);
+
+    const call = listCall();
+    const or = (call as any)[0].where.AND?.[0]?.OR ?? [];
+    const mgmtClause = or.find((c: any) => c?.id?.in);
+    expect(mgmtClause).toBeDefined();
+    expect(mgmtClause.id.in).toEqual(["p1"]);
+  });
+
+  it("範囲外 rowNumber (9999999999) で 500 にならず、qLen/resultCount のみ", async () => {
+    pm.importJobRow.findMany.mockResolvedValue([]);
+    pm.property.findMany.mockResolvedValue([]);
+
+    const Q = "9999999999";
+    const res = await POST(makeRequest({ q: Q }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toEqual([]);
+
+    // 範囲外なら helper が早期 return → ImportJobRow は本体 importSource 用も含めて呼ばれない
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+
+    const detail: any = (vi.mocked(writeAuditLog).mock.calls.at(-1) as any)[0].detail;
+    expect(detail.qLen).toBe(Q.length);
+    expect(detail.resultCount).toBe(0);
+    expect(detail.q).toBeUndefined();
+  });
+
+  it("範囲外 rowNumber (受付帳.xlsx:9999999999) で 500 にならない", async () => {
+    pm.importJobRow.findMany.mockResolvedValue([]);
+    pm.property.findMany.mockResolvedValue([]);
+
+    const Q = "受付帳.xlsx:9999999999";
+    const res = await POST(makeRequest({ q: Q }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toEqual([]);
+  });
+
   it("rawData 全文がレスポンスに混入しない（既存の importSource 文字列のみ）", async () => {
     pm.property.findMany.mockImplementation(async ({ where, take }: any) => {
       if (take === 10) {
