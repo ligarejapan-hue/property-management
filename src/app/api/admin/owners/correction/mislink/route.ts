@@ -390,11 +390,13 @@ export async function POST(request: NextRequest) {
               select: { id: true, version: true, isArchived: true },
             });
             if (!cur) {
+              // not_found 系は 404 を返すために txNotFound=true を立てる
               if (spec.id === currentOwner.id) {
                 txBlockedReasons = ["current_owner_not_found"];
               } else {
                 txBlockedReasons = ["target_owner_not_found"];
               }
+              txNotFound = true;
             } else if (spec.requireActive && cur.isArchived) {
               txBlockedReasons = ["target_owner_archived"];
             } else {
@@ -419,7 +421,9 @@ export async function POST(request: NextRequest) {
             select: { id: true, version: true, isArchived: true },
           });
           if (!cur) {
+            // not_found 系は 404 を返すために txNotFound=true を立てる
             txBlockedReasons = ["property_not_found"];
+            txNotFound = true;
           } else if (cur.isArchived) {
             txBlockedReasons = ["property_archived"];
           } else {
@@ -434,9 +438,12 @@ export async function POST(request: NextRequest) {
           select: { id: true, propertyId: true, ownerId: true },
         });
         if (!freshPO) {
+          // not_found 系は 404 を返すために txNotFound=true を立てる
           txBlockedReasons = ["property_owner_not_found"];
+          txNotFound = true;
           throw new Error(TX_BLOCKED_SENTINEL);
         }
+        // state_mismatch / id_mismatch は 422（並行更新で内容が変わった）
         if (freshPO.propertyId !== propertyId) {
           txBlockedReasons = ["property_owner_state_mismatch"];
           throw new Error(TX_BLOCKED_SENTINEL);

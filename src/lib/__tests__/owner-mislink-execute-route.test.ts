@@ -552,10 +552,121 @@ describe("POST mislink: race / version mismatch", () => {
     expect(res.status).toBe(409);
   });
 
-  it("tx 内で PropertyOwner が消えていた場合 → property_owner_not_found / 404", async () => {
+  it("tx 内で PropertyOwner が消えていた場合 → 404 / PropertyOwner.delete 呼ばれない", async () => {
+    // not_found 系は 404 (PropertyOwner row が並行 race で消失したケース)
     setupHappyPath();
-    // tx 内 PropertyOwner.findUnique は null
     pm._tx.propertyOwner.findUnique.mockResolvedValue(null);
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(404);
+    expect(pm._tx.propertyOwner.delete).not.toHaveBeenCalled();
+  });
+
+  it("tx 内で Property が消えていた場合 → 404", async () => {
+    setupHappyPath();
+    // property の updateMany lock が count=0
+    pm._tx.property.updateMany.mockResolvedValue({ count: 0 });
+    // 再読込でも null → property_not_found
+    pm._tx.property.findUnique.mockResolvedValue(null);
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("tx 内で currentOwner が消えていた場合 → 404", async () => {
+    setupHappyPath();
+    // currentOwner の updateMany lock が count=0
+    pm._tx.owner.updateMany.mockImplementation(
+      ({ where }: { where: { id: string } }) => {
+        if (where.id === CURRENT_OWNER_ID) return Promise.resolve({ count: 0 });
+        return Promise.resolve({ count: 1 });
+      },
+    );
+    // 再読込で null → current_owner_not_found
+    pm._tx.owner.findUnique.mockImplementation(
+      ({ where }: { where: { id: string } }) => {
+        if (where.id === CURRENT_OWNER_ID) return Promise.resolve(null);
+        return Promise.resolve({ id: where.id, version: 1, isArchived: false });
+      },
+    );
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("relink で tx 内 targetOwner が消えていた場合 → 404", async () => {
+    setupHappyPath();
+    // targetOwner の updateMany lock が count=0
+    pm._tx.owner.updateMany.mockImplementation(
+      ({ where }: { where: { id: string } }) => {
+        if (where.id === TARGET_OWNER_ID) return Promise.resolve({ count: 0 });
+        return Promise.resolve({ count: 1 });
+      },
+    );
+    pm._tx.owner.findUnique.mockImplementation(
+      ({ where }: { where: { id: string } }) => {
+        if (where.id === TARGET_OWNER_ID) return Promise.resolve(null);
+        return Promise.resolve({ id: where.id, version: 1, isArchived: false });
+      },
+    );
+    const res = await POST(
+      makeRequest({
+        operation: "relink",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        targetOwnerId: TARGET_OWNER_ID,
+        currentOwnerVersion: 1,
+        targetOwnerVersion: 2,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(404);
+    expect(pm._tx.propertyOwner.update).not.toHaveBeenCalled();
+  });
+
+  it("tx 内 property_owner_state_mismatch は引き続き 422", async () => {
+    setupHappyPath();
+    pm._tx.propertyOwner.findUnique.mockImplementation(
+      ({ where }: { where: { id?: string; propertyId_ownerId?: unknown } }) => {
+        if (where.id === PROPERTY_OWNER_ID) {
+          return Promise.resolve({
+            id: PROPERTY_OWNER_ID,
+            propertyId: "different-prop-now",
+            ownerId: CURRENT_OWNER_ID,
+          });
+        }
+        return Promise.resolve(null);
+      },
+    );
     const res = await POST(
       makeRequest({
         operation: "remove",
@@ -569,11 +680,10 @@ describe("POST mislink: race / version mismatch", () => {
     );
     expect(res.status).toBe(422);
     const json = await res.json();
-    expect(json.error.blockReasons).toContain("property_owner_not_found");
-    expect(pm._tx.propertyOwner.delete).not.toHaveBeenCalled();
+    expect(json.error.blockReasons).toContain("property_owner_state_mismatch");
   });
 
-  it("tx 内で PropertyOwner.ownerId が currentOwnerId とズレ → current_owner_id_mismatch", async () => {
+  it("tx 内で PropertyOwner.ownerId が currentOwnerId とズレ → 422 / current_owner_id_mismatch", async () => {
     setupHappyPath();
     pm._tx.propertyOwner.findUnique.mockImplementation(
       ({ where }: { where: { id?: string; propertyId_ownerId?: unknown } }) => {
@@ -598,6 +708,8 @@ describe("POST mislink: race / version mismatch", () => {
         dryRun: false,
       }),
     );
+    // not_found ではなく 422 (並行更新で内容が変わったケース)
+    expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.error.blockReasons).toContain("current_owner_id_mismatch");
   });
