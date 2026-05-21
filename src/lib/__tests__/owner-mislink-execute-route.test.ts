@@ -130,14 +130,30 @@ function setupHappyPath(opts: {
   targetLinked?: boolean;
   memoCount?: number;
   currentArchived?: boolean;
+  propertyCreatedBy?: string;
+  propertyAssignedTo?: string | null;
+  propertyArchived?: boolean;
+  poExists?: boolean;
+  poPropertyMatch?: boolean;
 } = {}) {
+  const actualPropertyId =
+    opts.poPropertyMatch === false ? "different-prop" : PROPERTY_ID;
   pm.propertyOwner.findUnique.mockImplementation(
     ({ where }: { where: { id?: string; propertyId_ownerId?: { propertyId: string; ownerId: string } } }) => {
       if (where.id === PROPERTY_OWNER_ID) {
+        if (opts.poExists === false) return Promise.resolve(null);
         return Promise.resolve({
           id: PROPERTY_OWNER_ID,
-          propertyId: PROPERTY_ID,
+          propertyId: actualPropertyId,
           ownerId: CURRENT_OWNER_ID,
+          // Phase 2-C fix: PropertyOwner.include({ property }) で scope 判定
+          property: {
+            id: actualPropertyId,
+            version: 1,
+            isArchived: opts.propertyArchived ?? false,
+            createdBy: opts.propertyCreatedBy ?? "admin-1",
+            assignedTo: opts.propertyAssignedTo ?? null,
+          },
         });
       }
       if (where.propertyId_ownerId) {
@@ -284,6 +300,109 @@ describe("POST mislink: 権限・入力", () => {
       }),
     );
     expect(res.status).toBe(422);
+  });
+});
+
+// ── Scope leak 防止（Codex P1） ─────────────────────────────────────────
+
+describe("POST mislink: object-scope precheck（scope leak 防止）", () => {
+  it("dryRun=true で field_staff + スコープ外 PropertyOwner → 404 / 詳細reason漏れない / DB更新なし", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "field-1",
+      email: "field@test.com",
+      name: "Field",
+      role: "field_staff",
+    });
+    // PropertyOwner.property が field-1 のスコープ外
+    setupHappyPath({
+      propertyCreatedBy: "other-1",
+      propertyAssignedTo: "other-2",
+    });
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: true,
+      }),
+    );
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    // 詳細 reason が漏れていない
+    expect(text).not.toContain("current_owner_id_mismatch");
+    expect(text).not.toContain("version_mismatch");
+    expect(text).not.toContain("target_owner_archived");
+    // DB 更新なし
+    expect(pm.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("dryRun=false で field_staff + スコープ外 PropertyOwner → 404 / 詳細reason漏れない / DB更新なし / AuditLog なし", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "field-1",
+      email: "field@test.com",
+      name: "Field",
+      role: "field_staff",
+    });
+    setupHappyPath({
+      propertyCreatedBy: "other-1",
+      propertyAssignedTo: "other-2",
+    });
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(404);
+    expect(pm.$transaction).not.toHaveBeenCalled();
+    expect(pm._tx.propertyOwner.delete).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("PropertyOwner 不存在 → 404 (どちらも generic)", async () => {
+    setupHappyPath({ poExists: false });
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("admin はスコープ外でも詳細 reason を受け取れる（既存挙動維持）", async () => {
+    // admin / office_staff は canAccessPropertyRecord が常に true
+    setupHappyPath({
+      propertyCreatedBy: "other-1",
+      propertyAssignedTo: "other-2",
+    });
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: true,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.eligible).toBe(true);
   });
 });
 

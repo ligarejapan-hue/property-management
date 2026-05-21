@@ -206,14 +206,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const [propertyOwner, property, currentOwner, targetOwner] =
-      await Promise.all([
-        prisma.propertyOwner.findUnique({
-          where: { id: propertyOwnerId },
-          select: { id: true, propertyId: true, ownerId: true },
-        }),
-        prisma.property.findUnique({
-          where: { id: propertyId },
+    // Step A: object-scope precheck
+    //   client-supplied propertyId に対して scope 判定すると、field_staff が
+    //   自分のアクセス可能な propertyId を渡して、スコープ外の propertyOwnerId
+    //   / currentOwnerId / targetOwnerId に対する詳細 reason を引き出す情報漏洩
+    //   経路が生まれる（Codex P1 指摘）。
+    //   実際の PropertyOwner 行が指している property を基準に scope を判定し、
+    //   通過しなければ generic 404 を返す。dryRun=true / dryRun=false どちらも
+    //   同じ防御を通す。
+    const propertyOwner = await prisma.propertyOwner.findUnique({
+      where: { id: propertyOwnerId },
+      select: {
+        id: true,
+        propertyId: true,
+        ownerId: true,
+        property: {
           select: {
             id: true,
             version: true,
@@ -221,38 +228,39 @@ export async function POST(request: NextRequest) {
             createdBy: true,
             assignedTo: true,
           },
-        }),
-        prisma.owner.findUnique({
-          where: { id: currentOwnerId },
-          select: { id: true, version: true, isArchived: true },
-        }),
-        targetOwnerId
-          ? prisma.owner.findUnique({
-              where: { id: targetOwnerId },
-              select: { id: true, version: true, isArchived: true },
-            })
-          : Promise.resolve(null),
-      ]);
-
-    if (!propertyOwner && !property && !currentOwner) {
+        },
+      },
+    });
+    if (!propertyOwner) {
+      throw new ApiError(404, "対象が見つかりません", "NOT_FOUND");
+    }
+    if (!canAccessPropertyRecord(session, propertyOwner.property)) {
+      // diagnostics を返さず generic 404（存在推測 oracle を遮断）
       throw new ApiError(404, "対象が見つかりません", "NOT_FOUND");
     }
 
-    if (property && !canAccessPropertyRecord(session, property)) {
-      throw new ApiError(
-        403,
-        "この物件を閲覧する権限がありません",
-        "FORBIDDEN",
-      );
-    }
+    // Step B: scope を通過したので詳細検証へ
+    const actualProperty = propertyOwner.property;
+    const [currentOwner, targetOwner] = await Promise.all([
+      prisma.owner.findUnique({
+        where: { id: currentOwnerId },
+        select: { id: true, version: true, isArchived: true },
+      }),
+      targetOwnerId
+        ? prisma.owner.findUnique({
+            where: { id: targetOwnerId },
+            select: { id: true, version: true, isArchived: true },
+          })
+        : Promise.resolve(null),
+    ]);
 
-    // target が同 property に既に紐付き?
+    // target が同 property に既に紐付き?（actual property 基準）
     let targetAlreadyLinked = false;
-    if (op === "relink" && targetOwnerId && property) {
+    if (op === "relink" && targetOwnerId) {
       const existing = await prisma.propertyOwner.findUnique({
         where: {
           propertyId_ownerId: {
-            propertyId: property.id,
+            propertyId: actualProperty.id,
             ownerId: targetOwnerId,
           },
         },
@@ -263,7 +271,7 @@ export async function POST(request: NextRequest) {
 
     const ownerMemoCountOnThisProperty = currentOwner
       ? await prisma.ownerMemo.count({
-          where: { ownerId: currentOwner.id, propertyId },
+          where: { ownerId: currentOwner.id, propertyId: actualProperty.id },
         })
       : 0;
 
@@ -271,15 +279,12 @@ export async function POST(request: NextRequest) {
       operation: op,
       hasTargetForRelink: op === "relink" ? hasTarget : true,
       sameOwnerId: op === "relink" && targetOwnerId === currentOwnerId,
-      propertyOwnerExists: propertyOwner !== null,
-      propertyOwnerPropertyIdMatches:
-        propertyOwner !== null && propertyOwner.propertyId === propertyId,
-      propertyOwnerOwnerIdMatches:
-        propertyOwner !== null && propertyOwner.ownerId === currentOwnerId,
-      propertyExists: property !== null,
-      propertyIsArchived: property?.isArchived ?? false,
-      propertyVersionMatches:
-        property !== null && property.version === propertyVersion,
+      propertyOwnerExists: true,
+      propertyOwnerPropertyIdMatches: propertyOwner.propertyId === propertyId,
+      propertyOwnerOwnerIdMatches: propertyOwner.ownerId === currentOwnerId,
+      propertyExists: true,
+      propertyIsArchived: actualProperty.isArchived,
+      propertyVersionMatches: actualProperty.version === propertyVersion,
       currentOwnerExists: currentOwner !== null,
       currentOwnerVersionMatches:
         currentOwner !== null && currentOwner.version === currentOwnerVersion,
@@ -298,11 +303,11 @@ export async function POST(request: NextRequest) {
       targetOwnerId,
       targetOwnerArchived: targetOwner?.isArchived ?? false,
       targetAlreadyLinked,
-      propertyArchived: property?.isArchived ?? false,
+      propertyArchived: actualProperty.isArchived,
       ownerMemoCountOnThisProperty,
       currentOwnerVersion: currentOwner?.version ?? null,
       targetOwnerVersion: targetOwner?.version ?? null,
-      propertyVersion: property?.version ?? null,
+      propertyVersion: actualProperty.version,
     };
 
     const eligible = safety.ok;
@@ -333,8 +338,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 必ず eligible=true なら property/propertyOwner/currentOwner は存在
-    if (!propertyOwner || !property || !currentOwner) {
+    // 必ず eligible=true なら currentOwner は存在
+    // propertyOwner / actualProperty は scope precheck 段階で存在保証済み
+    if (!currentOwner) {
       throw new ApiError(404, "対象が見つかりません", "NOT_FOUND");
     }
 
@@ -409,7 +415,7 @@ export async function POST(request: NextRequest) {
         // 2. property を lock + version 確認
         const propLock = await tx.property.updateMany({
           where: {
-            id: property.id,
+            id: actualProperty.id,
             version: propertyVersion,
             isArchived: false,
           },
@@ -417,7 +423,7 @@ export async function POST(request: NextRequest) {
         });
         if (propLock.count === 0) {
           const cur = await tx.property.findUnique({
-            where: { id: property.id },
+            where: { id: actualProperty.id },
             select: { id: true, version: true, isArchived: true },
           });
           if (!cur) {
@@ -458,7 +464,7 @@ export async function POST(request: NextRequest) {
           const conflict = await tx.propertyOwner.findUnique({
             where: {
               propertyId_ownerId: {
-                propertyId: property.id,
+                propertyId: actualProperty.id,
                 ownerId: targetOwnerId,
               },
             },
@@ -517,7 +523,7 @@ export async function POST(request: NextRequest) {
 
         const propBump = await tx.property.updateMany({
           where: {
-            id: property.id,
+            id: actualProperty.id,
             version: propertyVersion,
             isArchived: false,
           },

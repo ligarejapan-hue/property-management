@@ -100,20 +100,34 @@ function setupValidState(opts: {
   targetArchived?: boolean;
   targetExists?: boolean;
   poExists?: boolean;
-  propertyExists?: boolean;
   poPropertyMatch?: boolean;
   poOwnerMatch?: boolean;
   memoCount?: number;
   targetLinked?: boolean;
+  propertyCreatedBy?: string;
+  propertyAssignedTo?: string | null;
+  propertyArchived?: boolean;
+  propertyVersion?: number;
 } = {}) {
+  // 注: route は propertyOwner.findUnique({ include: property }) で
+  //     scope 判定するため、PropertyOwner mock に property フィールドを含める。
+  const actualPropertyId =
+    opts.poPropertyMatch === false ? "different-prop" : PROPERTY_ID;
   pm.propertyOwner.findUnique.mockImplementation(
     ({ where }: { where: { id?: string; propertyId_ownerId?: { propertyId: string; ownerId: string } } }) => {
       if (where.id === PROPERTY_OWNER_ID) {
         if (opts.poExists === false) return Promise.resolve(null);
         return Promise.resolve({
           id: PROPERTY_OWNER_ID,
-          propertyId: opts.poPropertyMatch === false ? "different-prop" : PROPERTY_ID,
+          propertyId: actualPropertyId,
           ownerId: opts.poOwnerMatch === false ? "different-owner" : CURRENT_OWNER_ID,
+          property: {
+            id: actualPropertyId,
+            version: opts.propertyVersion ?? 1,
+            isArchived: opts.propertyArchived ?? false,
+            createdBy: opts.propertyCreatedBy ?? "admin-1",
+            assignedTo: opts.propertyAssignedTo ?? null,
+          },
         });
       }
       // propertyId_ownerId 経由（target already linked のチェック）
@@ -123,17 +137,15 @@ function setupValidState(opts: {
       return Promise.resolve(null);
     },
   );
-  pm.property.findUnique.mockResolvedValue(
-    opts.propertyExists === false
-      ? null
-      : {
-          id: PROPERTY_ID,
-          version: 1,
-          isArchived: false,
-          createdBy: "admin-1",
-          assignedTo: null,
-        },
-  );
+  // pm.property.findUnique は scope precheck では使われない（PropertyOwner.include
+  // 経由）。execute route の tx 内 lock 失敗後の再読込でのみ使用される。
+  pm.property.findUnique.mockResolvedValue({
+    id: PROPERTY_ID,
+    version: opts.propertyVersion ?? 1,
+    isArchived: opts.propertyArchived ?? false,
+    createdBy: opts.propertyCreatedBy ?? "admin-1",
+    assignedTo: opts.propertyAssignedTo ?? null,
+  });
   pm.owner.findUnique.mockImplementation(
     ({ where }: { where: { id: string } }) => {
       if (where.id === CURRENT_OWNER_ID) {
@@ -228,20 +240,17 @@ describe("POST mislink-preview: 権限・入力検証", () => {
     expect(json.error.blockReasons).toContain("same_owner_id");
   });
 
-  it("field_staff + 担当外 property → 403", async () => {
+  it("field_staff + 担当外 property → 404 (generic, scope leak 防止)", async () => {
     vi.mocked(getApiSession).mockResolvedValue({
       id: "field-1",
       email: "field@test.com",
       name: "Field",
       role: "field_staff",
     });
-    setupValidState();
-    pm.property.findUnique.mockResolvedValue({
-      id: PROPERTY_ID,
-      version: 1,
-      isArchived: false,
-      createdBy: "other-1",
-      assignedTo: "other-2",
+    // PropertyOwner の所属 property が field-1 のスコープ外
+    setupValidState({
+      propertyCreatedBy: "other-1",
+      propertyAssignedTo: "other-2",
     });
     const res = await POST(
       makeRequest({
@@ -251,7 +260,62 @@ describe("POST mislink-preview: 権限・入力検証", () => {
         currentOwnerId: CURRENT_OWNER_ID,
       }),
     );
-    expect(res.status).toBe(403);
+    // 詳細 reason を返さず generic 404（存在推測 oracle 防止）
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.eligible).toBeUndefined();
+    expect(json.blockReasons).toBeUndefined();
+  });
+
+  it("field_staff: PropertyOwner 不存在 → 404", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "field-1",
+      email: "field@test.com",
+      name: "Field",
+      role: "field_staff",
+    });
+    setupValidState({ poExists: false });
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("scope 外 PropertyOwner で詳細 reason を返さない（target archived も漏れない）", async () => {
+    // field_staff が「アクセス可能な propertyId」+「スコープ外 propertyOwnerId」
+    // を投げても、target_owner_archived 等の詳細診断が漏れないこと。
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "field-1",
+      email: "field@test.com",
+      name: "Field",
+      role: "field_staff",
+    });
+    setupValidState({
+      propertyCreatedBy: "other-1",
+      propertyAssignedTo: "other-2",
+      targetArchived: true,
+      poOwnerMatch: false,
+    });
+    const res = await POST(
+      makeRequest({
+        operation: "relink",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        targetOwnerId: TARGET_OWNER_ID,
+      }),
+    );
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    // 詳細 blockReason が漏れていない
+    expect(text).not.toContain("target_owner_archived");
+    expect(text).not.toContain("current_owner_id_mismatch");
+    expect(text).not.toContain("version_mismatch");
   });
 });
 
