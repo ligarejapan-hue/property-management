@@ -7,6 +7,7 @@ export const propertyListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   keyword: z.string().optional(),
+  mgmtId: z.string().optional(),
   propertyType: z.enum(PROPERTY_TYPE_VALUES).optional(),
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),

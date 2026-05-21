@@ -117,6 +117,7 @@ function PropertiesPageInner() {
   //   URL keyword は /api/properties 用の確定語なので searchInput には入れない。
   //   入力中の所有者名・電話番号が property_list audit の raw keyword に残らないよう分離する。
   const [searchText, setSearchText] = useState(() => sp.get("keyword") ?? "");
+  const [mgmtIdText, setMgmtIdText] = useState(() => sp.get("mgmtId") ?? "");
   const [searchInput, setSearchInput] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
@@ -167,6 +168,7 @@ function PropertiesPageInner() {
 
     const params: Record<string, string> = { page: String(page), limit: "50" };
     if (searchText) params.keyword = searchText;
+    if (mgmtIdText) params.mgmtId = mgmtIdText;
     if (typeFilter) params.propertyType = typeFilter;
     if (registryFilter) params.registryStatus = registryFilter;
     if (dmFilter) params.dmStatus = dmFilter;
@@ -190,7 +192,7 @@ function PropertiesPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
+  }, [page, searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
 
   useEffect(() => {
     fetchProperties();
@@ -210,6 +212,7 @@ function PropertiesPageInner() {
   useEffect(() => {
     const params = new URLSearchParams();
     if (searchText) params.set("keyword", searchText);
+    if (mgmtIdText) params.set("mgmtId", mgmtIdText);
     if (typeFilter) params.set("propertyType", typeFilter);
     if (registryFilter) params.set("registryStatus", registryFilter);
     if (dmFilter) params.set("dmStatus", dmFilter);
@@ -223,7 +226,7 @@ function PropertiesPageInner() {
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort, page, pathname, router]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort, page, pathname, router]);
 
   // 警告サマリは初回 / 一覧再取得時に best-effort で更新する。
   // 失敗してもバッジが出ないだけで一覧本体は表示できる設計。
@@ -314,6 +317,7 @@ function PropertiesPageInner() {
     setSuggestResults([]);
     setSearchInput("");
     setSearchText("");
+    setMgmtIdText("");
     setTypeFilter("");
     setRegistryFilter("");
     setDmFilter("");
@@ -329,7 +333,7 @@ function PropertiesPageInner() {
 
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
-    !!searchInput || !!searchText || !!typeFilter || !!registryFilter || !!dmFilter ||
+    !!searchInput || !!searchText || !!mgmtIdText || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || sort !== "updatedAt:desc";
 
@@ -513,6 +517,17 @@ function PropertiesPageInner() {
             placeholder="物件住所・地番・家屋番号で一覧検索"
             value={searchText}
             onChange={handleFilterChange(setSearchText)}
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          />
+        </div>
+
+        <div className="relative min-w-[240px]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="管理IDで検索（例: 受付帳.xlsx:120行 / 120行）"
+            value={mgmtIdText}
+            onChange={handleFilterChange(setMgmtIdText)}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
           />
         </div>

@@ -14,6 +14,7 @@ import {
   propertyListQuerySchema,
   createPropertySchema,
 } from "@/lib/validators";
+import { resolveMgmtIdToPropertyIds } from "@/lib/property-mgmt-id-search";
 
 // ---------- GET /api/properties ----------
 
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
       page,
       limit,
       keyword,
+      mgmtId,
       propertyType,
       registryStatus,
       dmStatus,
@@ -89,6 +91,28 @@ export async function GET(request: NextRequest) {
       if (updatedTo) where.updatedAt.lte = new Date(updatedTo);
     }
 
+    // 管理ID（取込元 fileName / rowNumber / __sourceRef）検索。
+    // helper で候補 propertyId[] を解決し AND で絞り込む。0件なら即空結果。
+    // 既存 keyword 検索とは独立した AND 条件として扱う。
+    const mgmtIdTrimmed = (mgmtId ?? "").trim();
+    let mgmtHitCount: number | null = null;
+    let mgmtShortCircuitEmpty = false;
+    if (mgmtIdTrimmed) {
+      const mgmtPropertyIds = await resolveMgmtIdToPropertyIds(
+        prisma,
+        mgmtIdTrimmed,
+      );
+      mgmtHitCount = mgmtPropertyIds.length;
+      if (mgmtPropertyIds.length === 0) {
+        mgmtShortCircuitEmpty = true;
+      } else {
+        where.AND = [
+          ...(where.AND ?? []),
+          { id: { in: mgmtPropertyIds } },
+        ];
+      }
+    }
+
     // field_staff は自分が作成/担当する物件のみ閲覧可能。
     // where.OR (keyword 条件) と混ぜると「担当外でも keyword に一致すれば返る」に
     // なるため AND に追加してスコープを強制する。
@@ -120,38 +144,44 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    const [properties, total] = await Promise.all([
-      prisma.property.findMany({
-        where,
-        select: {
-          id: true,
-          propertyType: true,
-          address: true,
-          lotNumber: true,
-          buildingNumber: true,
-          realEstateNumber: true,
-          registryStatus: true,
-          dmStatus: true,
-          caseStatus: true,
-          introductionRoute: true,
-          isArchived: true,
-          updatedAt: true,
-          assignedTo: true,
-          gpsLat: true,
-          gpsLng: true,
-          investigationConfirmedAt: true,
-          assignee: { select: { id: true, name: true } },
-          propertyOwners: {
-            select: { owner: { select: { name: true } } },
-            orderBy: { createdAt: "asc" },
+    const fetchListAndCount = () =>
+      Promise.all([
+        prisma.property.findMany({
+          where,
+          select: {
+            id: true,
+            propertyType: true,
+            address: true,
+            lotNumber: true,
+            buildingNumber: true,
+            realEstateNumber: true,
+            registryStatus: true,
+            dmStatus: true,
+            caseStatus: true,
+            introductionRoute: true,
+            isArchived: true,
+            updatedAt: true,
+            assignedTo: true,
+            gpsLat: true,
+            gpsLng: true,
+            investigationConfirmedAt: true,
+            assignee: { select: { id: true, name: true } },
+            propertyOwners: {
+              select: { owner: { select: { name: true } } },
+              orderBy: { createdAt: "asc" },
+            },
           },
-        },
-        orderBy: { [sortBy]: sortOrder },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.property.count({ where }),
-    ]);
+          orderBy: { [sortBy]: sortOrder },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.property.count({ where }),
+      ]);
+
+    type FetchResult = Awaited<ReturnType<typeof fetchListAndCount>>;
+    const [properties, total]: FetchResult = mgmtShortCircuitEmpty
+      ? [[], 0]
+      : await fetchListAndCount();
 
     // 取込元情報を一括逆引きして各物件に付与する（N+1 回避）
     const propertyIds = properties.map((p) => p.id);
@@ -194,11 +224,20 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Record audit log for list view
+    // Record audit log for list view.
+    // mgmtId 値そのものはログに残さず、長さと hit 件数のみを記録する
+    // （管理ID 検索語は外部由来のファイル名・行番号を含むため）。
+    const { mgmtId: _omitMgmtId, ...filtersForLog } = queryObj;
     await writeAuditLog({
       userId: session.id,
       action: "property_list",
-      detail: { filters: queryObj, resultCount: total },
+      detail: {
+        filters: filtersForLog,
+        resultCount: total,
+        ...(mgmtIdTrimmed
+          ? { mgmtIdLen: mgmtIdTrimmed.length, mgmtHitCount }
+          : {}),
+      },
     });
 
     return apiResponse({
