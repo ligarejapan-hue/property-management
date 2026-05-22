@@ -78,6 +78,7 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       { resource: "owner_address", action: "full", granted: true },
       { resource: "owner_note", action: "full", granted: true },
       { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_corporate_number", action: "full", granted: true },
       { resource: "csv_export", action: "read", granted: true },
       { resource: "import", action: "write", granted: true },
       { resource: "user_management", action: "read", granted: true },
