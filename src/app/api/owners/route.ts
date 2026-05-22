@@ -173,6 +173,9 @@ export async function POST(request: NextRequest) {
         note: data.note,
         email: data.email,
         externalLinkKey: data.externalLinkKey,
+        // corporateNumber は createOwnerSchema (corporateNumberInputSchema) で
+        // 13桁正規化済 or null。生値は AuditLog detail に含めない（既存方針通り）。
+        corporateNumber: data.corporateNumber ?? null,
       },
     });
 
