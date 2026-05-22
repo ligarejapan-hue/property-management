@@ -78,6 +78,7 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       { resource: "owner_address", action: "full", granted: true },
       { resource: "owner_note", action: "full", granted: true },
       { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_corporate_number", action: "full", granted: true },
       { resource: "csv_export", action: "read", granted: true },
       { resource: "import", action: "write", granted: true },
       { resource: "user_management", action: "read", granted: true },
@@ -148,6 +149,7 @@ export interface OwnerDisplayConfig {
   address: DisplayLevel;
   note: DisplayLevel;
   email: DisplayLevel;
+  corporateNumber: DisplayLevel;
 }
 
 export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDisplayConfig> {
@@ -172,6 +174,16 @@ export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDispla
     ? resolveLevel("owner_email")
     : resolveLevel("owner_phone"); // 未設定時は owner_phone の設定を継承
 
+  // owner_corporate_number が seed されていない既存テンプレートでも安全に動くよう、
+  // owner_email と同様に「明示エントリの有無」で挙動を分ける。
+  // 未設定時は owner_name の設定を継承（migration backfill と整合）。
+  const hasExplicitCorporateNumberEntry = permissions.some(
+    (p) => p.resource === "owner_corporate_number",
+  );
+  const corporateNumberLevel = hasExplicitCorporateNumberEntry
+    ? resolveLevel("owner_corporate_number")
+    : resolveLevel("owner_name");
+
   return {
     name: resolveLevel("owner_name"),
     nameKana: resolveLevel("owner_name_kana"),
@@ -180,6 +192,7 @@ export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDispla
     address: resolveLevel("owner_address"),
     note: resolveLevel("owner_note"),
     email: emailLevel,
+    corporateNumber: corporateNumberLevel,
   };
 }
 

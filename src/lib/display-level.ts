@@ -13,6 +13,7 @@ export interface OwnerDisplayConfig {
   address: DisplayLevel;
   note: DisplayLevel;
   email: DisplayLevel;
+  corporateNumber: DisplayLevel;
 }
 
 /** Shape of an owner record coming from the database */
@@ -25,6 +26,7 @@ interface OwnerRecord {
   address?: string | null;
   note?: string | null;
   email?: string | null;
+  corporateNumber?: string | null;
   [key: string]: unknown;
 }
 
@@ -38,6 +40,7 @@ export const FIELD_STAFF_OWNER_DISPLAY: OwnerDisplayConfig = {
   address: "partial",
   note: "hidden",
   email: "masked",
+  corporateNumber: "masked",
 };
 
 // ----- Masking helpers -----
@@ -86,6 +89,18 @@ export function maskEmail(email: string): string {
 export function maskText(value: string): string {
   if (value.length === 0) return "***";
   return value.slice(0, 1) + "***";
+}
+
+/**
+ * Mask a 13-digit corporate number, keeping only the first 4 digits.
+ * Example: "1234567890123" -> "1234*********"
+ * 13桁未満の異常値は全マスク。
+ */
+export function maskCorporateNumber(value: string): string {
+  const digits = value.replace(/[^0-9]/g, "");
+  if (digits.length < 4) return "*************";
+  const first4 = digits.slice(0, 4);
+  return `${first4}*********`;
 }
 
 /**
@@ -140,6 +155,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
       address: "full",
       note: "full",
       email: "full",
+      corporateNumber: "full",
     };
   }
 
@@ -153,6 +169,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
       address: "full",
       note: "read",
       email: "full",
+      corporateNumber: "full",
     };
   }
 
@@ -170,6 +187,7 @@ function resolveOwnerDisplayConfig(permissions: PermissionMap): OwnerDisplayConf
     address: "hidden",
     note: "hidden",
     email: "hidden",
+    corporateNumber: "hidden",
   };
 }
 
@@ -194,6 +212,11 @@ export function applyOwnerDisplayLevel(
     address: applyLevel(owner.address, config.address, partialAddress),
     note: applyLevel(owner.note, config.note),
     email: applyLevel(owner.email, config.email, maskEmail),
+    corporateNumber: applyLevel(
+      owner.corporateNumber ?? null,
+      config.corporateNumber,
+      maskCorporateNumber,
+    ),
   };
 }
 
@@ -215,6 +238,7 @@ export function applyDisplayToOwner(
     address?: string | null;
     note?: string | null;
     email?: string | null;
+    corporateNumber?: string | null;
     [key: string]: unknown;
   },
   config: OwnerDisplayConfig,
@@ -233,6 +257,7 @@ export function applyDisplayToOwner(
     { key: "address", configKey: "address", maskFn: partialAddress },
     { key: "note", configKey: "note" },
     { key: "email", configKey: "email", maskFn: maskEmail },
+    { key: "corporateNumber", configKey: "corporateNumber", maskFn: maskCorporateNumber },
   ];
 
   for (const { key, configKey, maskFn } of fieldMap) {

@@ -39,6 +39,7 @@ export const OWNER_TRACKED_FIELDS = [
   "address",
   "note",
   "email",
+  "corporateNumber",
 ];
 
 export const BUILDING_TRACKED_FIELDS = [

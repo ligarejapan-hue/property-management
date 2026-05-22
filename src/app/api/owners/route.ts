@@ -73,6 +73,7 @@ export async function GET(request: NextRequest) {
       zip: maskValue(owner.zip, displayConfig.zip),
       address: maskValue(owner.address, displayConfig.address),
       note: maskValue(owner.note, displayConfig.note),
+      corporateNumber: maskValue(owner.corporateNumber, displayConfig.corporateNumber),
       externalLinkKey: owner.externalLinkKey,
       createdAt: owner.createdAt,
       updatedAt: owner.updatedAt,
@@ -133,6 +134,7 @@ export async function POST(request: NextRequest) {
       { value: data.address, resource: "owner_address", label: "address" },
       { value: data.email, resource: "owner_email", label: "email" },
       { value: data.note, resource: "owner_note", label: "note" },
+      { value: data.corporateNumber, resource: "owner_corporate_number", label: "corporateNumber" },
     ];
     for (const { value, resource, label } of createFieldWriteChecks) {
       if (value != null && !hasExplicitWritePerm(perms, resource)) {
@@ -171,6 +173,9 @@ export async function POST(request: NextRequest) {
         note: data.note,
         email: data.email,
         externalLinkKey: data.externalLinkKey,
+        // corporateNumber は createOwnerSchema (corporateNumberInputSchema) で
+        // 13桁正規化済 or null。生値は AuditLog detail に含めない（既存方針通り）。
+        corporateNumber: data.corporateNumber ?? null,
       },
     });
 

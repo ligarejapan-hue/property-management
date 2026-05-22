@@ -102,6 +102,7 @@ async function main() {
         owner_address: { partial: true },
         owner_note: { hidden: true },
         owner_email: { masked: true },
+        owner_corporate_number: { full: true },
         csv_export: { read: false },
         csv_export_personal: { read: false },
         import: { read: false, write: false },
@@ -128,6 +129,7 @@ async function main() {
         owner_address: { full: true },
         owner_note: { read: true },
         owner_email: { full: true },
+        owner_corporate_number: { full: true },
         csv_export: { read: true },
         csv_export_personal: { read: false },
         import: { read: true, write: true },
@@ -154,6 +156,7 @@ async function main() {
         owner_address: { full: true },
         owner_note: { edit: true },
         owner_email: { full: true },
+        owner_corporate_number: { full: true },
         csv_export: { read: true },
         csv_export_personal: { read: true },
         import: { read: true, write: true },
@@ -179,6 +182,7 @@ async function main() {
     { templateId: fieldStaffTemplate.id, resource: "owner_zip", action: "masked", granted: true },
     { templateId: fieldStaffTemplate.id, resource: "owner_address", action: "partial", granted: true },
     { templateId: fieldStaffTemplate.id, resource: "owner_email", action: "masked", granted: true },
+    { templateId: fieldStaffTemplate.id, resource: "owner_corporate_number", action: "full", granted: true },
     // owner_note: not granted → hidden
     // 事務担当
     { templateId: officeStaffTemplate.id, resource: "property", action: "read", granted: true },
@@ -192,6 +196,7 @@ async function main() {
     { templateId: officeStaffTemplate.id, resource: "owner_address", action: "full", granted: true },
     { templateId: officeStaffTemplate.id, resource: "owner_note", action: "read", granted: true },
     { templateId: officeStaffTemplate.id, resource: "owner_email", action: "full", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "owner_corporate_number", action: "full", granted: true },
     { templateId: officeStaffTemplate.id, resource: "csv_export", action: "read", granted: true },
     { templateId: officeStaffTemplate.id, resource: "import", action: "write", granted: true },
     // 管理者
@@ -208,6 +213,7 @@ async function main() {
     { templateId: adminTemplate.id, resource: "owner_address", action: "full", granted: true },
     { templateId: adminTemplate.id, resource: "owner_note", action: "edit", granted: true },
     { templateId: adminTemplate.id, resource: "owner_email", action: "full", granted: true },
+    { templateId: adminTemplate.id, resource: "owner_corporate_number", action: "full", granted: true },
     { templateId: adminTemplate.id, resource: "csv_export", action: "read", granted: true },
     { templateId: adminTemplate.id, resource: "csv_export_personal", action: "read", granted: true },
     { templateId: adminTemplate.id, resource: "import", action: "write", granted: true },
