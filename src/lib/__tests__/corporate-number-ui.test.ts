@@ -29,6 +29,11 @@ const ownerDetailPanelSrc = fs.readFileSync(
   "utf8",
 );
 
+const seedSrc = fs.readFileSync(
+  path.resolve(process.cwd(), "prisma/seed.ts"),
+  "utf8",
+);
+
 describe("Property detail page — 法人番号欄", () => {
   it("editableFields に corporateNumber がある", () => {
     expect(pageSrc).toMatch(/corporateNumber:\s*hasFullPerm\("owner_corporate_number"\)/);
@@ -41,7 +46,16 @@ describe("Property detail page — 法人番号欄", () => {
   it("編集フォーム input が法人番号用に追加されている", () => {
     expect(pageSrc).toMatch(/法人番号（任意 \/ 13桁）/);
     expect(pageSrc).toMatch(/inputMode="numeric"/);
-    expect(pageSrc).toMatch(/maxLength=\{13\}/);
+  });
+
+  it("法人番号 input に maxLength={13} を付けない（ハイフン・空白・全角数字を含む入力を許容するため）", () => {
+    // 正規化前の文字列（1234-5678-9012-3 / 全角数字 / 空白混じり）が13文字を超えても
+    // UI 上で truncate されないこと。送信時に normalizeCorporateNumber が13桁へ正規化する。
+    const corporateInputSection = pageSrc.match(
+      /editableFields\.corporateNumber[\s\S]*?placeholder="例: 1234567890123"[\s\S]*?\/>/,
+    );
+    expect(corporateInputSection).not.toBeNull();
+    expect(corporateInputSection?.[0]).not.toMatch(/maxLength=/);
   });
 
   it("13桁検証エラーが表示される", () => {
@@ -86,6 +100,73 @@ describe("owner-edit-utils — corporateNumber", () => {
   it("buildOwnerUpdatePayload が fields.corporateNumber を見る", () => {
     expect(editUtilsSrc).toMatch(
       /if \(fields\.corporateNumber\)[\s\S]{0,150}payload\.corporateNumber/,
+    );
+  });
+});
+
+describe("seed.ts — owner_corporate_number デフォルト権限", () => {
+  // owner_name と同等の扱いで全テンプレートに owner_corporate_number が含まれること。
+  // fresh seed 環境でも admin / office / field_staff が法人番号を扱えるよう、
+  // permissions JSON / templateEntries 配列の両方に追加されている必要がある。
+
+  it("field_staff テンプレート permissions JSON に owner_corporate_number がある", () => {
+    // owner_name と同等（full）。permissions: { ... } ブロック全体を抽出して検査。
+    const fieldStaffSection = seedSrc.match(
+      /name:\s*"現地担当用"[\s\S]*?audit_log:[\s\S]*?\},/,
+    );
+    expect(fieldStaffSection).not.toBeNull();
+    expect(fieldStaffSection?.[0]).toMatch(
+      /owner_corporate_number:\s*\{\s*full:\s*true\s*\}/,
+    );
+  });
+
+  it("office_staff テンプレート permissions JSON に owner_corporate_number がある", () => {
+    const officeStaffSection = seedSrc.match(
+      /name:\s*"事務担当用"[\s\S]*?audit_log:[\s\S]*?\},/,
+    );
+    expect(officeStaffSection).not.toBeNull();
+    expect(officeStaffSection?.[0]).toMatch(
+      /owner_corporate_number:\s*\{\s*full:\s*true\s*\}/,
+    );
+  });
+
+  it("admin テンプレート permissions JSON に owner_corporate_number がある", () => {
+    const adminSection = seedSrc.match(
+      /name:\s*"管理者用"[\s\S]*?audit_log:[\s\S]*?\},/,
+    );
+    expect(adminSection).not.toBeNull();
+    expect(adminSection?.[0]).toMatch(
+      /owner_corporate_number:\s*\{\s*full:\s*true\s*\}/,
+    );
+  });
+
+  it("templateEntries 配列に field_staff の owner_corporate_number:full がある", () => {
+    expect(seedSrc).toMatch(
+      /templateId:\s*fieldStaffTemplate\.id,\s*resource:\s*"owner_corporate_number",\s*action:\s*"full",\s*granted:\s*true/,
+    );
+  });
+
+  it("templateEntries 配列に office_staff の owner_corporate_number:full がある", () => {
+    expect(seedSrc).toMatch(
+      /templateId:\s*officeStaffTemplate\.id,\s*resource:\s*"owner_corporate_number",\s*action:\s*"full",\s*granted:\s*true/,
+    );
+  });
+
+  it("templateEntries 配列に admin の owner_corporate_number:full がある", () => {
+    expect(seedSrc).toMatch(
+      /templateId:\s*adminTemplate\.id,\s*resource:\s*"owner_corporate_number",\s*action:\s*"full",\s*granted:\s*true/,
+    );
+  });
+
+  it("既存の owner_name / owner_address 権限を壊していない", () => {
+    expect(seedSrc).toMatch(
+      /templateId:\s*fieldStaffTemplate\.id,\s*resource:\s*"owner_name",\s*action:\s*"full"/,
+    );
+    expect(seedSrc).toMatch(
+      /templateId:\s*officeStaffTemplate\.id,\s*resource:\s*"owner_address",\s*action:\s*"full"/,
+    );
+    expect(seedSrc).toMatch(
+      /templateId:\s*adminTemplate\.id,\s*resource:\s*"owner_address",\s*action:\s*"full"/,
     );
   });
 });

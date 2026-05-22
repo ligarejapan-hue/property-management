@@ -874,7 +874,9 @@ function OwnerCard({
               </div>
             )}
             {/* 法人番号（任意）。13桁数字のみ。クライアント検証: 空 or 13桁数字以外で送信不可。
-                サーバ側でも updateOwnerSchema が再度検証する。 */}
+                サーバ側でも updateOwnerSchema が再度検証する。
+                ハイフン・空白・全角数字を含めた入力を許容するため maxLength は付けない
+                （送信時に normalizeCorporateNumber が 13桁へ正規化する）。 */}
             {editableFields.corporateNumber && (
               <div className="space-y-1 md:col-span-2">
                 <label className="text-xs font-medium text-gray-700">
@@ -883,8 +885,6 @@ function OwnerCard({
                 <input
                   type="text"
                   inputMode="numeric"
-                  pattern="\d{13}"
-                  maxLength={13}
                   value={form.corporateNumber}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, corporateNumber: e.target.value }))
