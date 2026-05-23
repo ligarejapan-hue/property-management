@@ -340,6 +340,76 @@ describe("GET /corporate-number-candidates — display-level マスキング", (
     expect(row.existingCorporateNumberMasked).not.toBe(CN_OTHER);
   });
 
+  it("owner_corporate_number=edit → 法人番号はマスク（事前確定方針: full のみ生値）", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      corporateNumber: "edit",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "o-1",
+        name: `株式会社 ${CN}`,
+        address: null,
+        note: null,
+        corporateNumber: CN_OTHER,
+        version: 1,
+      },
+    ]);
+    const res = await GET(url("?type=conflict"));
+    const json = await res.json();
+    const row = json.candidates[0];
+    expect(row.candidateCorporateNumberMasked).not.toBe(CN);
+    expect(row.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(row.existingCorporateNumberMasked).not.toBe(CN_OTHER);
+    expect(row.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+  });
+
+  it("owner_corporate_number=read → 法人番号はマスク（事前確定方針: full のみ生値）", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      corporateNumber: "read",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "o-1",
+        name: `株式会社 ${CN}`,
+        address: null,
+        note: null,
+        corporateNumber: CN_OTHER,
+        version: 1,
+      },
+    ]);
+    const res = await GET(url("?type=conflict"));
+    const json = await res.json();
+    const row = json.candidates[0];
+    expect(row.candidateCorporateNumberMasked).not.toBe(CN);
+    expect(row.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(row.existingCorporateNumberMasked).not.toBe(CN_OTHER);
+    expect(row.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+  });
+
+  it("owner_corporate_number=partial → 法人番号はマスク", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      corporateNumber: "partial",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "o-1",
+        name: `株式会社 ${CN}`,
+        address: null,
+        note: null,
+        corporateNumber: CN_OTHER,
+        version: 1,
+      },
+    ]);
+    const res = await GET(url("?type=conflict"));
+    const json = await res.json();
+    const row = json.candidates[0];
+    expect(row.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(row.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+  });
+
   it("owner_corporate_number=hidden → 法人番号フィールドは null", async () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
       ...DISPLAY_FULL,

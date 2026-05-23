@@ -135,6 +135,8 @@ describe("classifyOwnerCorporateCandidate", () => {
 });
 
 describe("classifyOwnerCorporateCandidate — display-level マスキング", () => {
+  // 事前確定方針: full のみ生値、edit/read/masked/partial はマスク、hidden は null。
+
   it("full → 法人番号は生値で返る", () => {
     const result = classifyOwnerCorporateCandidate(
       owner({ name: `株式会社 ${CN}`, corporateNumber: CN_OTHER }),
@@ -142,6 +144,28 @@ describe("classifyOwnerCorporateCandidate — display-level マスキング", ()
     );
     expect(result?.candidateCorporateNumberMasked).toBe(CN);
     expect(result?.existingCorporateNumberMasked).toBe(CN_OTHER);
+  });
+
+  it("edit → 法人番号はマスクされる（事前確定方針）", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 ${CN}`, corporateNumber: CN_OTHER }),
+      { ...FULL, corporateNumber: "edit" },
+    );
+    expect(result?.candidateCorporateNumberMasked).not.toBe(CN);
+    expect(result?.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(result?.existingCorporateNumberMasked).not.toBe(CN_OTHER);
+    expect(result?.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+  });
+
+  it("read → 法人番号はマスクされる（事前確定方針）", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 ${CN}`, corporateNumber: CN_OTHER }),
+      { ...FULL, corporateNumber: "read" },
+    );
+    expect(result?.candidateCorporateNumberMasked).not.toBe(CN);
+    expect(result?.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(result?.existingCorporateNumberMasked).not.toBe(CN_OTHER);
+    expect(result?.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
   });
 
   it("masked → 法人番号は先頭4桁マスク（生 13桁は出ない）", () => {
@@ -155,6 +179,17 @@ describe("classifyOwnerCorporateCandidate — display-level マスキング", ()
     // 生 13桁が出ていないこと
     expect(result?.candidateCorporateNumberMasked).not.toBe(CN);
     expect(result?.existingCorporateNumberMasked).not.toBe(CN_OTHER);
+  });
+
+  it("partial → 法人番号はマスクされる（事前確定方針）", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 ${CN}`, corporateNumber: CN_OTHER }),
+      { ...FULL, corporateNumber: "partial" },
+    );
+    expect(result?.candidateCorporateNumberMasked).not.toBe(CN);
+    expect(result?.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(result?.existingCorporateNumberMasked).not.toBe(CN_OTHER);
+    expect(result?.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
   });
 
   it("hidden → 法人番号フィールドは null", () => {

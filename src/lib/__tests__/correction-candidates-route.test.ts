@@ -309,6 +309,84 @@ describe("GET correction-candidates: Phase E corporate_number マスキング", 
     expect(json.candidates[0].corporateNumberMasked).toMatch(/^\d{4}\*+$/);
   });
 
+  it("owner_corporate_number=edit → マスク（事前確定方針: full のみ生値）", async () => {
+    const { getOwnerDisplayConfig } = await import("@/lib/api-helpers");
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      name: "full",
+      nameKana: "full",
+      phone: "full",
+      zip: "full",
+      address: "full",
+      note: "full",
+      email: "full",
+      corporateNumber: "edit",
+    } as unknown as Awaited<ReturnType<typeof getOwnerDisplayConfig>>);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "法人太郎",
+        propertyOwnerCount: 0,
+        corporateNumber: CN,
+      }),
+    ]);
+    const res = await GET(makeRequest("orphan"));
+    const json = await res.json();
+    expect(json.candidates[0].corporateNumberMasked).not.toBe(CN);
+    expect(json.candidates[0].corporateNumberMasked).toMatch(/^\d{4}\*+$/);
+  });
+
+  it("owner_corporate_number=read → マスク（事前確定方針: full のみ生値）", async () => {
+    const { getOwnerDisplayConfig } = await import("@/lib/api-helpers");
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      name: "full",
+      nameKana: "full",
+      phone: "full",
+      zip: "full",
+      address: "full",
+      note: "full",
+      email: "full",
+      corporateNumber: "read",
+    } as unknown as Awaited<ReturnType<typeof getOwnerDisplayConfig>>);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "法人太郎",
+        propertyOwnerCount: 0,
+        corporateNumber: CN,
+      }),
+    ]);
+    const res = await GET(makeRequest("orphan"));
+    const json = await res.json();
+    expect(json.candidates[0].corporateNumberMasked).not.toBe(CN);
+    expect(json.candidates[0].corporateNumberMasked).toMatch(/^\d{4}\*+$/);
+  });
+
+  it("owner_corporate_number=partial → マスク", async () => {
+    const { getOwnerDisplayConfig } = await import("@/lib/api-helpers");
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      name: "full",
+      nameKana: "full",
+      phone: "full",
+      zip: "full",
+      address: "full",
+      note: "full",
+      email: "full",
+      corporateNumber: "partial",
+    } as unknown as Awaited<ReturnType<typeof getOwnerDisplayConfig>>);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "法人太郎",
+        propertyOwnerCount: 0,
+        corporateNumber: CN,
+      }),
+    ]);
+    const res = await GET(makeRequest("orphan"));
+    const json = await res.json();
+    expect(json.candidates[0].corporateNumberMasked).not.toBe(CN);
+    expect(json.candidates[0].corporateNumberMasked).toMatch(/^\d{4}\*+$/);
+  });
+
   it("owner_corporate_number=hidden → null", async () => {
     const { getOwnerDisplayConfig } = await import("@/lib/api-helpers");
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({

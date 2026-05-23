@@ -23,8 +23,9 @@ type Candidate = {
   phone: string | null;
   /**
    * Phase E: 既存 Owner.corporateNumber を display-level に従ってマスクして返す。
+   * 事前確定方針:
    * - owner_corporate_number=full → 生値
-   * - masked/partial → 先頭4桁＋***
+   * - edit/read/masked/partial → 先頭4桁＋***
    * - hidden または列が null → null
    * 法人番号生値は AuditLog detail に絶対に入れない。
    */
@@ -205,15 +206,17 @@ export async function GET(request: NextRequest) {
 
       // Phase E: corporateNumber は display-level に応じてマスクして保持。
       // 重複検出は raw name/address/zip/phone のみで行うため、ここでマスクしても影響なし。
+      // 事前確定方針: full のみ生値、edit/read/masked/partial はマスク、hidden は null。
       let corporateNumberMasked: string | null = null;
       if (owner.corporateNumber != null) {
         const cnLevel = displayConfig.corporateNumber;
-        if (cnLevel === "full" || cnLevel === "read" || cnLevel === "edit") {
+        if (cnLevel === "full") {
           corporateNumberMasked = owner.corporateNumber;
-        } else if (cnLevel === "masked" || cnLevel === "partial") {
-          corporateNumberMasked = maskCorporateNumber(owner.corporateNumber);
-        } else {
+        } else if (cnLevel === "hidden") {
           corporateNumberMasked = null;
+        } else {
+          // edit / read / masked / partial → 全てマスク
+          corporateNumberMasked = maskCorporateNumber(owner.corporateNumber);
         }
       }
 

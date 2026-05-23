@@ -1988,8 +1988,9 @@ export interface OwnerCorrectionCandidate {
   phone: string | null;
   /**
    * Phase E: owner_corporate_number の display-level に従ったマスク済法人番号。
+   * 事前確定方針:
    * - full → 生値
-   * - masked/partial → 先頭4桁+マスク
+   * - edit/read/masked/partial → 先頭4桁+マスク
    * - hidden または Owner.corporateNumber が null → null
    */
   corporateNumberMasked: string | null;

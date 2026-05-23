@@ -27,8 +27,9 @@ export interface CorporateCandidateRow {
   ownerAddressMasked: string | null;
   /**
    * owner_corporate_number の display-level に従ってマスクした既存法人番号。
-   * - full/edit/read → 生値
-   * - masked/partial → maskCorporateNumber（先頭4桁＋***）
+   * 事前確定方針 (Phase E):
+   * - full → 生値
+   * - edit / read / masked / partial → maskCorporateNumber（先頭4桁＋***）
    * - hidden → null
    * - そもそも Owner.corporateNumber が null → null
    */
@@ -65,10 +66,13 @@ export interface CandidateDisplayConfig {
 }
 
 /**
- * 法人番号を display-level に応じてマスクする。
+ * 法人番号を display-level に応じてマスクする。事前確定方針 (Phase E):
  * - hidden → null（owner 不在の場合は呼び出し側で null を渡す）
- * - masked / partial → maskCorporateNumber（先頭4桁＋***）
- * - full / read / edit → 生値
+ * - edit / read / masked / partial → maskCorporateNumber（先頭4桁＋***）
+ * - full → 生値
+ *
+ * 注意: owner_corporate_number は他フィールド（name/address 等）と異なり、
+ * edit / read であってもマスクする方針。full 権限のときだけ完全な 13桁を返す。
  */
 function maskCorporateField(
   value: string | null,
@@ -78,14 +82,14 @@ function maskCorporateField(
   switch (level) {
     case "hidden":
       return null;
+    case "full":
+      return value;
+    case "edit":
+    case "read":
     case "masked":
     case "partial":
-      return maskCorporateNumber(value);
-    case "full":
-    case "read":
-    case "edit":
     default:
-      return value;
+      return maskCorporateNumber(value);
   }
 }
 
