@@ -1318,7 +1318,9 @@ function CorporateNumberSuspectBanner({ owner }: { owner: ApiOwner }) {
  * 編集モード内で、Owner の name/address/note から検出した法人番号候補を
  * ユーザー操作で input に転記するためのバナー。
  *
- * - 候補が無い / 既に input に値がある / candidate と現在の input が同じ → 描画しない
+ * - 候補が無い → 描画しない
+ * - owner 本体に法人番号がある → 描画しない（display 側と同方針）
+ * - 入力欄に既に何らかの値がある → 描画しない（手入力した別法人番号を誤って上書きしないため）
  * - 候補は最大 3 件まで（dedup 済 / 13桁数字）。
  * - 押下時に form.corporateNumber を上書きするだけで、lookup は自動実行しない（明示性確保）。
  * - 自動保存もしない（保存はユーザーの「保存」操作）。
@@ -1334,17 +1336,16 @@ function CorporateNumberCandidateBanner({
 }) {
   // 既に owner 本体に法人番号があるなら検出バナーは出さない（display 側と同方針）。
   if (owner.corporateNumber) return null;
-  const trimmed = currentInput.trim();
-  // 既に同じ値を入力済みなら出さない。
-  const normalizedInput = normalizeCorporateNumber(trimmed);
+  // 入力欄に何らかの値が入っている時点で候補バナーを完全に隠す。
+  // 候補と一致しない別の13桁を手入力済みのケースで、誤って上書きする導線を残さないため
+  // (Codex P3 / "Suppress candidate banner once any corporate number is typed")。
+  if (currentInput.trim() !== "") return null;
   const detection = detectCorporateNumberInOwnerLike({
     name: owner.name,
     address: owner.address,
     note: owner.note,
   });
-  const candidates = detection.candidates
-    .filter((c) => c !== normalizedInput)
-    .slice(0, 3);
+  const candidates = detection.candidates.slice(0, 3);
   if (candidates.length === 0) return null;
   return (
     <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800">

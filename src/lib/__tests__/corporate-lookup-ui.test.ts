@@ -137,6 +137,41 @@ describe("properties/[id]/page.tsx — CorporateLookupPanel 統合", () => {
   it("候補バナーが「自動 lookup・自動保存しない」旨を明示している", () => {
     expect(pageSrc).toMatch(/自動上書き・自動保存・自動検索はしません/);
   });
+
+  it("候補バナーは currentInput が非空なら early return する（手入力した別法人番号を保護）", () => {
+    // 関数本体を抽出して、currentInput.trim() !== "" の early return が
+    // 「candidates 計算より前」に置かれていることを確認する。
+    // 関数末端の判定は「次の function 宣言まで」または EOF。
+    const bannerFn = pageSrc.match(
+      /function CorporateNumberCandidateBanner[\s\S]*?(?=\nfunction |\nexport default function |\n\/\/ ----|$)/,
+    );
+    expect(bannerFn).not.toBeNull();
+    const body = bannerFn?.[0] ?? "";
+    // currentInput.trim() !== "" による early return がある
+    expect(body).toMatch(/currentInput\.trim\(\)\s*!==\s*""\s*\)\s*return\s+null/);
+    // candidates 算出より前で return している（順序保証）
+    const earlyReturnIdx = body.search(/currentInput\.trim\(\)\s*!==\s*""\s*\)\s*return\s+null/);
+    const candidatesIdx = body.search(/detection\.candidates/);
+    expect(earlyReturnIdx).toBeGreaterThan(-1);
+    expect(candidatesIdx).toBeGreaterThan(-1);
+    expect(earlyReturnIdx).toBeLessThan(candidatesIdx);
+  });
+
+  it("候補バナーは「入力値と異なる候補だけを除外」する旧ロジックを持たない", () => {
+    // 古い実装: detection.candidates.filter((c) => c !== normalizedInput) が無いこと。
+    // P3 で「入力欄に値があれば一律バナー非表示」方針に変更したため。
+    const bannerFn = pageSrc.match(
+      /function CorporateNumberCandidateBanner[\s\S]*?(?=\nfunction |\nexport default function |\n\/\/ ----|$)/,
+    );
+    expect(bannerFn).not.toBeNull();
+    const body = bannerFn?.[0] ?? "";
+    expect(body).not.toMatch(/\.filter\(\s*\(c\)\s*=>\s*c\s*!==\s*normalizedInput\s*\)/);
+  });
+
+  it("候補バナーの docstring が「入力欄に値があるなら描画しない」方針を明示", () => {
+    // 仕様の食い違いで Codex P3 が再発しないよう doc を assert する。
+    expect(pageSrc).toMatch(/入力欄に既に何らかの値がある\s*→\s*描画しない/);
+  });
 });
 
 describe("api-client.ts — lookupOwnerCorporateNumber", () => {
