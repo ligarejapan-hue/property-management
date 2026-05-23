@@ -164,4 +164,24 @@ describe("appendImportMessage", () => {
     expect(appendImportMessage("", "追加")).toBe("追加");
     expect(appendImportMessage("既存", "")).toBe("既存");
   });
+
+  it("owner_csv finalization: link メッセージ + corporate message 両方残る（Codex P2 回帰）", () => {
+    // 紐づけ完了 + 複数候補スキップが併存する典型ケース
+    const linkMsg = "紐づけ完了[住所一致（正規化比較）]";
+    const cnMsg = corporateImportMessage({ action: "multi", corporateNumber: null });
+    const merged = appendImportMessage(linkMsg, cnMsg);
+    expect(merged).toContain("紐づけ完了");
+    expect(merged).toContain("corporate_number: 複数候補のためスキップ");
+    // 法人番号生値 (13桁数字) を含まない
+    expect(merged).not.toMatch(/\d{13}/);
+  });
+
+  it("owner_csv finalization: 紐づけ不可 + 競合スキップ両方残る", () => {
+    const linkMsg = "紐づけ不可: リンクキーに一致する物件がありません";
+    const cnMsg = corporateImportMessage({ action: "conflict", corporateNumber: null });
+    const merged = appendImportMessage(linkMsg, cnMsg);
+    expect(merged).toContain("紐づけ不可");
+    expect(merged).toContain("既存値と競合");
+    expect(merged).not.toMatch(/\d{13}/);
+  });
 });

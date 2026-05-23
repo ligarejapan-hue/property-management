@@ -63,8 +63,34 @@ describe("owner-csv route Phase D 統合", () => {
     expect(ownerCsvSrc).not.toMatch(/corporateRecord:/);
   });
 
-  it("errorMessage 追記は appendImportMessage 経由で非PIIメッセージのみ", () => {
-    expect(ownerCsvSrc).toMatch(/appendImportMessage\(null,\s*cnMessage\)/);
+  it("行レコードに corporateMessage 保持フィールドがある（finalization で消えない）", () => {
+    // jobRows 要素型に corporateMessage が定義されている
+    expect(ownerCsvSrc).toMatch(/corporateMessage:\s*string\s*\|\s*null/);
+    // 成功 push 時に cnMessage を corporateMessage に格納している
+    expect(ownerCsvSrc).toMatch(/corporateMessage:\s*cnMessage/);
+    // row.corporateMessage が finalization で参照される
+    expect(ownerCsvSrc).toMatch(/row\.corporateMessage/);
+  });
+
+  it("finalization は link メッセージに corporateMessage を append する（Codex P2 修正）", () => {
+    // row.errorMessage への最終代入が appendImportMessage(linkMessage, row.corporateMessage) であること
+    expect(ownerCsvSrc).toMatch(
+      /row\.errorMessage\s*=\s*appendImportMessage\(\s*linkMessage\s*,\s*row\.corporateMessage\s*\)/,
+    );
+    // 旧バージョンの直接代入「row.errorMessage = "紐づけ完了..."」が残っていないこと
+    expect(ownerCsvSrc).not.toMatch(
+      /row\.errorMessage\s*=\s*"紐づけ完了\[/,
+    );
+    expect(ownerCsvSrc).not.toMatch(
+      /row\.errorMessage\s*=\s*\n?\s*"紐づけ不可:/,
+    );
+  });
+
+  it("成功行初期 push で errorMessage は null（finalization で組み立てる）", () => {
+    // 旧実装 (errorMessage: appendImportMessage(null, cnMessage)) が残っていないこと
+    expect(ownerCsvSrc).not.toMatch(
+      /errorMessage:\s*appendImportMessage\(null,\s*cnMessage\)/,
+    );
   });
 });
 
