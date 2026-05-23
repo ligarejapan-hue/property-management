@@ -239,17 +239,26 @@ export async function POST(request: NextRequest) {
           // 競合検出時は resolvedOwnerId=null のまま下のフォールバックへ
         }
 
-        // Phase D: 法人番号 decision を計算（reuse / create を意識して existing を渡す）。
-        // ヒット reuse 成功時は既存値と比較、それ以外（fallback / 新規）は existing=null として計算。
+        // Phase D: reuse 成功判定。
+        // `resolvedOwnerId === candidateOwnerId` だけだと両方 null のとき true になり、
+        // (a) updateMany が id:null で実行されてしまう
+        // (b) recordCorporateDecision が reuse 側と create 側の二重で呼ばれてしまう
+        // 上記 2 件の Codex P1/P2 を防ぐため、両方 non-null かつ等しいことを要求する。
+        const reusedExistingOwner =
+          resolvedOwnerId !== null &&
+          candidateOwnerId !== null &&
+          resolvedOwnerId === candidateOwnerId;
+
+        // reuse 成功時のみ既存 corporateNumber と比較、それ以外は existing=null として計算。
         const cnDecision = decideCorporateImport(
           { name: ownerInfo.name, address: ownerInfo.address ?? null },
-          resolvedOwnerId === candidateOwnerId ? candidateCorporateNumber : null,
+          reusedExistingOwner ? candidateCorporateNumber : null,
         );
 
         // reuse 成功時: 既存 owner が corporateNumber 空ならここで埋める。
         // where 条件で corporateNumber: null を要求し、race 時は count=0 で自動上書きを防ぐ。
         if (
-          resolvedOwnerId === candidateOwnerId &&
+          reusedExistingOwner &&
           cnDecision.action === "save" &&
           cnDecision.corporateNumber
         ) {
@@ -262,7 +271,7 @@ export async function POST(request: NextRequest) {
               ? { action: "noop", corporateNumber: null }
               : cnDecision,
           );
-        } else if (resolvedOwnerId === candidateOwnerId) {
+        } else if (reusedExistingOwner) {
           // reuse 成功 + save 以外（noop / multi / conflict / none） → そのまま集計
           recordCorporateDecision(cnDecision);
         }
@@ -270,19 +279,27 @@ export async function POST(request: NextRequest) {
         if (!resolvedOwnerId) {
           // 新規 Owner 作成 + link（dedup ヒットなし、または archive race で fallback）。
           // 新規 owner は他 tx から見えないため archive 競合はない。
+          // archive race fallback の場合も「新規 owner なので existing=null」で再評価する。
+          const cnDecisionForCreate =
+            candidateOwnerId === null
+              ? cnDecision
+              : decideCorporateImport(
+                  { name: ownerInfo.name, address: ownerInfo.address ?? null },
+                  null,
+                );
           const created = await prisma.owner.create({
             data: {
               name: ownerInfo.name,
               ...(ownerInfo.address ? { address: ownerInfo.address } : {}),
               // Phase D: 候補 1 件のみ採用、複数 / 競合は乗せない
-              ...(cnDecision.action === "save" && cnDecision.corporateNumber
-                ? { corporateNumber: cnDecision.corporateNumber }
+              ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
+                ? { corporateNumber: cnDecisionForCreate.corporateNumber }
                 : {}),
             },
             select: { id: true },
           });
           resolvedOwnerId = created.id;
-          recordCorporateDecision(cnDecision);
+          recordCorporateDecision(cnDecisionForCreate);
 
           const existingLink = await prisma.propertyOwner.findFirst({
             where: { propertyId, ownerId: resolvedOwnerId },

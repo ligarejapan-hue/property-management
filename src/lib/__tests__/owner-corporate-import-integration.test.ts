@@ -146,8 +146,9 @@ describe("registry-pdf route Phase D 統合", () => {
   });
 
   it("create パスで data.corporateNumber を save action のみ乗せる", () => {
+    // Codex P1/P2 修正後: 新規作成は cnDecisionForCreate を使う
     expect(registryPdfSrc).toMatch(
-      /cnDecision\.action\s*===\s*"save"[\s\S]{0,80}corporateNumber:\s*cnDecision\.corporateNumber/,
+      /cnDecisionForCreate\.action\s*===\s*"save"[\s\S]{0,80}corporateNumber:\s*cnDecisionForCreate\.corporateNumber/,
     );
   });
 
@@ -167,6 +168,54 @@ describe("registry-pdf route Phase D 統合", () => {
 
   it("pdf_import の AuditLog action 名を変更していない", () => {
     expect(registryPdfSrc).toMatch(/action:\s*"pdf_import"/);
+  });
+
+  // ---- Codex P1/P2 回帰 ----
+  it("Codex P1/P2: reuse 判定は reusedExistingOwner (両方 non-null) で行う", () => {
+    expect(registryPdfSrc).toMatch(
+      /const\s+reusedExistingOwner\s*=\s*resolvedOwnerId\s*!==\s*null\s*&&\s*candidateOwnerId\s*!==\s*null\s*&&\s*resolvedOwnerId\s*===\s*candidateOwnerId/,
+    );
+  });
+
+  it("Codex P1: reuse 用 updateMany は reusedExistingOwner 条件下でのみ実行（id:null 防止）", () => {
+    // updateMany(where: { id: candidateOwnerId!, corporateNumber: null }) は
+    // reusedExistingOwner && cnDecision.action === "save" ガードの内側にある
+    expect(registryPdfSrc).toMatch(
+      /if\s*\(\s*\n?\s*reusedExistingOwner\s*&&[\s\S]{0,150}cnDecision\.action\s*===\s*"save"[\s\S]{0,200}updateMany/,
+    );
+  });
+
+  it("Codex P2: reuse 側 recordCorporateDecision は reusedExistingOwner ガード内のみ", () => {
+    // 「else if (resolvedOwnerId === candidateOwnerId)」型の旧コードが残っていない
+    expect(registryPdfSrc).not.toMatch(
+      /else\s+if\s*\(\s*resolvedOwnerId\s*===\s*candidateOwnerId\s*\)/,
+    );
+    expect(registryPdfSrc).toMatch(
+      /else\s+if\s*\(\s*reusedExistingOwner\s*\)/,
+    );
+  });
+
+  it("Codex P2: 未一致 owner の create path では新規 decision で一度だけ集計", () => {
+    // candidateOwnerId === null のときは cnDecisionForCreate = cnDecision
+    // race fallback (candidateOwnerId !== null かつ reuse 失敗) のときは existing=null で再計算
+    expect(registryPdfSrc).toMatch(
+      /cnDecisionForCreate\s*=\s*\n?\s*candidateOwnerId\s*===\s*null\s*\?\s*cnDecision\s*:\s*decideCorporateImport\(\s*\{\s*name:\s*ownerInfo\.name,\s*address:\s*ownerInfo\.address\s*\?\?\s*null\s*\},\s*null/,
+    );
+    // create path で recordCorporateDecision は cnDecisionForCreate を使う（cnDecision ではない）
+    expect(registryPdfSrc).toMatch(
+      /resolvedOwnerId\s*=\s*created\.id;[\s\S]{0,80}recordCorporateDecision\(cnDecisionForCreate\)/,
+    );
+  });
+
+  it("Codex P1/P2: cnDecision の existing 引数も reusedExistingOwner で分岐（旧 ===比較なし）", () => {
+    // 旧コード: resolvedOwnerId === candidateOwnerId ? candidateCorporateNumber : null
+    // 新コード: reusedExistingOwner ? candidateCorporateNumber : null
+    expect(registryPdfSrc).toMatch(
+      /reusedExistingOwner\s*\?\s*candidateCorporateNumber\s*:\s*null/,
+    );
+    expect(registryPdfSrc).not.toMatch(
+      /resolvedOwnerId\s*===\s*candidateOwnerId\s*\?\s*candidateCorporateNumber/,
+    );
   });
 });
 
