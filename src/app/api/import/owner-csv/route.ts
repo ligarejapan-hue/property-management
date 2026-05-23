@@ -17,6 +17,13 @@ import {
   REIMPORT_IGNORED_HEADERS,
   buildErrorRawDataExtras,
 } from "@/lib/import-error-display";
+import {
+  decideCorporateImport,
+  emptyCorporateImportSummary,
+  tallyCorporateDecision,
+  corporateImportMessage,
+  appendImportMessage,
+} from "@/lib/owner-corporate-import";
 
 // Japanese field name → Owner model property mapping
 const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
@@ -123,6 +130,8 @@ export async function POST(request: NextRequest) {
     let errorCount = 0;
     let needsReviewCount = 0;
     const createdOwnerIds: string[] = [];
+    // Phase D: 法人番号自動検出のサマリ（AuditLog detail に非PIIで残す）
+    const corporateSummary = emptyCorporateImportSummary();
 
     // 行ごとに「紐づけ判定に必要な元データを持っていたか」を覚えておく。
     // 行書き込みは linking 後に1回行うので、そこで status / errorMessage を最終決定する。
@@ -216,6 +225,22 @@ export async function POST(request: NextRequest) {
         if (mapped.note) createData.note = mapped.note.trim();
         if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey.trim();
 
+        // Phase D: name/address/note から法人番号候補を検出し、1 件かつ 13桁正規化 OK のときだけ採用。
+        // 既存 owner 既値との競合はここでは発生しない（新規作成パスのため existing=null 固定）。
+        const cnDecision = decideCorporateImport(
+          {
+            name: mapped.name,
+            address: mapped.address ?? null,
+            note: mapped.note ?? null,
+          },
+          null,
+        );
+        tallyCorporateDecision(corporateSummary, cnDecision);
+        if (cnDecision.action === "save" && cnDecision.corporateNumber) {
+          createData.corporateNumber = cnDecision.corporateNumber;
+        }
+        const cnMessage = corporateImportMessage(cnDecision);
+
         const owner = await prisma.owner.create({
           data: createData as Parameters<typeof prisma.owner.create>[0]["data"],
         });
@@ -235,7 +260,9 @@ export async function POST(request: NextRequest) {
           rowNumber,
           status: "success",
           rawData: rawRow,
-          errorMessage: null,
+          // Phase D: 複数候補・競合のスキップ情報を非PIIメッセージで残す。
+          // 成功行でも errorMessage を補足情報として使う既存方針に合わせる。
+          errorMessage: appendImportMessage(null, cnMessage),
           createdId: owner.id,
           hasLinkKey: !!mapped.externalLinkKey,
           hasAddress: !!mapped.address,
@@ -507,6 +534,8 @@ export async function POST(request: NextRequest) {
         rescuedLinkedByLinkKeyCount,
         rescuedLinkedByAddressCount,
         rescuedAddressLinkAmbiguousCount,
+        // Phase D: 法人番号自動検出のサマリ。生値・会社名・住所・候補リストは含めない。
+        corporateNumber: corporateSummary,
       },
     });
 
