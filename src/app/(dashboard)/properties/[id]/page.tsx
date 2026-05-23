@@ -927,6 +927,18 @@ function OwnerCard({
                   ownerId={po.ownerId}
                   rawCorporateNumber={form.corporateNumber}
                   configured={corporateLookupConfigured}
+                  ownerVersion={po.owner.version}
+                  fieldEditable={{
+                    name: editableFields.name,
+                    address: editableFields.address,
+                    zip: editableFields.zip,
+                    corporateNumber: editableFields.corporateNumber,
+                  }}
+                  onApplied={async () => {
+                    // 反映成功 → 親側で owner を再フェッチし、最新値・version を反映する
+                    await onRefresh();
+                    setEditing(false);
+                  }}
                 />
               </div>
             )}

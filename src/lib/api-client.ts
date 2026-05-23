@@ -1820,6 +1820,54 @@ export async function lookupOwnerCorporateNumber(
   );
 }
 
+// 法人番号 lookup 結果の Owner への反映実行（Phase C）。
+// サーバ側で再 lookup → expectedRecord と一致するときのみ apply フィールドを更新する。
+// rawData / PII は detail に残さない（AuditLog 仕様）。
+export interface CorporateApplyRequest {
+  corporateNumber: string;
+  version: number;
+  apply: {
+    name: boolean;
+    address: boolean;
+    zip: boolean;
+    corporateNumber: boolean;
+  };
+  expectedRecord: {
+    corporateNumber: string;
+    name: string;
+    address: string;
+    postCode: string | null;
+    updateDate: string | null;
+  };
+  allowClosed?: boolean;
+}
+
+export interface CorporateApplyResponse {
+  ok: true;
+  owner: { id: string; version: number };
+}
+
+export async function applyOwnerCorporate(
+  ownerId: string,
+  payload: CorporateApplyRequest,
+): Promise<CorporateApplyResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      ok: true,
+      owner: { id: ownerId, version: payload.version + 1 },
+    };
+  }
+  return apiFetch<CorporateApplyResponse>(
+    `/api/owners/${ownerId}/corporate-apply`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 // 物件×所有者単位のメモなどを更新する（PropertyOwner.note）。
 // Owner.note (所有者本体のメモ) とは別軸なので updateOwner と混同しない。
 export async function updatePropertyOwner(
