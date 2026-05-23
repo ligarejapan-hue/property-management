@@ -13,11 +13,35 @@ const XML_ENTITY_MAP: Record<string, string> = {
   "&apos;": "'",
 };
 
+/**
+ * Unicode code point の有効範囲。
+ * 0 〜 0x10FFFF が許容範囲（サロゲート U+D800〜U+DFFF も含めて Unicode 定義上は有効）。
+ * NaN / 範囲外 / 不正値は U+FFFD (replacement character) に置換する。
+ * これにより不正 numeric entity でも RangeError を投げず、上位は raw XML 全文を露出しない。
+ */
+const REPLACEMENT_CHAR = "�";
+const MAX_CODE_POINT = 0x10ffff;
+
+function safeFromCodePoint(n: number): string {
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return REPLACEMENT_CHAR;
+  if (n < 0 || n > MAX_CODE_POINT) return REPLACEMENT_CHAR;
+  try {
+    return String.fromCodePoint(n);
+  } catch {
+    // 防御的（理論上ここには到達しない）。RangeError を絶対に外へ漏らさない。
+    return REPLACEMENT_CHAR;
+  }
+}
+
 function decodeXmlEntities(input: string): string {
   let out = input.replace(/&(?:amp|lt|gt|quot|apos);/g, (m) => XML_ENTITY_MAP[m] ?? m);
-  // numeric entity (&#1234; / &#x4e2d;) — 国税庁データに通常含まれないが防御的に対応
-  out = out.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)));
-  out = out.replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+  // numeric entity (&#1234; / &#x4e2d;) — 国税庁データに通常含まれないが防御的に対応。
+  // parseInt が NaN を返す / 0x10FFFF を超える / 負の値などは
+  // safeFromCodePoint が replacement character に置換する。
+  out = out.replace(/&#(\d+);/g, (_, n: string) => safeFromCodePoint(parseInt(n, 10)));
+  out = out.replace(/&#x([0-9a-fA-F]+);/g, (_, n: string) =>
+    safeFromCodePoint(parseInt(n, 16)),
+  );
   return out;
 }
 

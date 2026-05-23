@@ -193,6 +193,43 @@ describe("NtaProvider — エラー系", () => {
       code: "PARSE_ERROR",
     });
   });
+
+  it("不正 numeric entity 含む XML でも RangeError ではなく正常 parse か CorporateLookupError に寄る", async () => {
+    // name 内に malformed numeric entity を埋める。
+    // String.fromCodePoint への直接渡しでは RangeError(500) になっていたケース。
+    // 期待: replacement char に置換されつつ provider は CorporateLookupResult を返す
+    // （PARSE_ERROR でも OK だが、いずれにせよ RangeError は throw しない）。
+    const xml = makeXml({ name: "X&#99999999;Y&#xFFFFFFFF;Z" });
+    const provider = new NtaProvider({ appId: APP_ID, fetchImpl: makeFetch(200, xml) });
+    await expect(async () => {
+      try {
+        await provider.lookup("1234567890123");
+      } catch (e) {
+        // CorporateLookupError は許容、RangeError は NG。
+        if (e instanceof Error && e.name === "RangeError") throw e;
+        throw new CorporateLookupError("PARSE_ERROR", "正常終了 or 想定エラー");
+      }
+    }).not.toThrow(/RangeError/);
+
+    // 実際に呼んで結果 / エラー型を確認: RangeError ではないこと、
+    // record.name は raw XML 全体ではないこと。
+    let caught: unknown = null;
+    let result: Awaited<ReturnType<typeof provider.lookup>> | null = null;
+    try {
+      result = await provider.lookup("1234567890123");
+    } catch (e) {
+      caught = e;
+    }
+    if (caught) {
+      expect((caught as Error).name).not.toBe("RangeError");
+      expect(caught).toBeInstanceOf(CorporateLookupError);
+    } else {
+      expect(result).not.toBeNull();
+      // raw XML 全文（<corporation>…）が leak していないこと
+      expect(result!.record!.name).not.toContain("<corporation>");
+      expect(result!.record!.name).not.toContain("&#99999999;");
+    }
+  });
 });
 
 describe("NtaProvider — リクエスト URL", () => {

@@ -76,6 +76,35 @@ describe("corporate-lookup-panel.tsx", () => {
     expect(panelSrc).not.toMatch(/PATCH/);
     expect(panelSrc).not.toMatch(/updateOwner/);
   });
+
+  it("検索結果に searchedFor を紐づけ、現在入力と一致しないと preview / error を出さない", () => {
+    // 検索開始時に searchedFor を確定する
+    expect(panelSrc).toMatch(/setSearchedFor\(/);
+    // showResult / showError ガードがあり、normalized と searchedFor の一致を要求する
+    expect(panelSrc).toMatch(/const\s+showResult\s*=[\s\S]{0,200}searchedFor\s*===\s*normalized/);
+    expect(panelSrc).toMatch(/const\s+showError\s*=[\s\S]{0,200}searchedFor\s*===\s*normalized/);
+    // 描画側で showResult / showError を使っている（生 result / error を直接条件にしない）
+    const previewRender = panelSrc.match(/\{showResult\s*&&\s*result[\s\S]*?data-testid="corporate-lookup-preview"/);
+    expect(previewRender).not.toBeNull();
+    const errorRender = panelSrc.match(/\{showError\s*&&/);
+    expect(errorRender).not.toBeNull();
+  });
+
+  it("rawCorporateNumber が変わる = normalized が変わると古い preview が見えなくなる（ガード経由）", () => {
+    // 「searchedFor !== normalized なら showResult が false」になる構造
+    expect(panelSrc).toMatch(
+      /showResult\s*=\s*result\s*!==\s*null\s*&&\s*searchedFor\s*!==\s*null\s*&&\s*searchedFor\s*===\s*normalized/,
+    );
+  });
+
+  it("反映ボタンが disabled で DB 書込導線が無いことを維持", () => {
+    const applyButtonBlock = panelSrc.match(
+      /<button\b[\s\S]*?所有者名・現住所に反映[\s\S]*?<\/button>/,
+    );
+    expect(applyButtonBlock).not.toBeNull();
+    expect(applyButtonBlock?.[0]).toMatch(/disabled/);
+    expect(panelSrc).not.toMatch(/corporate-apply/);
+  });
 });
 
 describe("properties/[id]/page.tsx — CorporateLookupPanel 統合", () => {

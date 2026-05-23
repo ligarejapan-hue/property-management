@@ -38,20 +38,35 @@ export default function CorporateLookupPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CorporateLookupApiResponse["lookup"] | null>(null);
+  // この result / error が「どの 13桁正規化値」に対するものか。
+  // 現在の入力値と一致しなくなったら preview / error を出さない（古い検索結果が
+  // 別の入力値に対して表示されないことを保証）。
+  const [searchedFor, setSearchedFor] = useState<string | null>(null);
 
   const normalized = normalizeCorporateNumber(rawCorporateNumber);
   const canSearch = !!normalized && !loading && configured && !disabledReason;
 
+  // 検索結果と現在の入力が一致している場合のみ表示する。
+  // 入力が変わった瞬間に「古い preview / 古いエラー」を隠す。
+  // setState を useEffect で呼ぶより安全（無限ループ・stale state 防止）。
+  const showResult = result !== null && searchedFor !== null && searchedFor === normalized;
+  const showError = error !== null && searchedFor !== null && searchedFor === normalized;
+
   const handleSearch = async () => {
     if (!normalized) {
       setError("法人番号は13桁の数字で入力してください");
+      setSearchedFor(normalized);
+      setResult(null);
       return;
     }
     setLoading(true);
     setError(null);
     setResult(null);
+    // 開始時点で「この検索はどの番号に紐づくか」を確定させる。
+    const searchTarget = normalized;
+    setSearchedFor(searchTarget);
     try {
-      const res = await lookupOwnerCorporateNumber(ownerId, normalized);
+      const res = await lookupOwnerCorporateNumber(ownerId, searchTarget);
       setResult(res.lookup);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "検索に失敗しました";
@@ -93,20 +108,20 @@ export default function CorporateLookupPanel({
         )}
       </div>
 
-      {error && (
+      {showError && (
         <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div>{error}</div>
         </div>
       )}
 
-      {result && !result.found && (
+      {showResult && result && !result.found && (
         <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-          該当する法人が見つかりませんでした（法人番号: {normalized}）
+          該当する法人が見つかりませんでした（法人番号: {searchedFor}）
         </div>
       )}
 
-      {result && result.found && result.record && (
+      {showResult && result && result.found && result.record && (
         <div
           data-testid="corporate-lookup-preview"
           className="space-y-2 rounded-md border border-blue-200 bg-blue-50/40 px-3 py-3 text-xs text-gray-800"
