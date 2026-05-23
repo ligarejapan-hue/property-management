@@ -17,6 +17,13 @@ import {
   REIMPORT_IGNORED_HEADERS,
   buildErrorRawDataExtras,
 } from "@/lib/import-error-display";
+import {
+  decideCorporateImport,
+  emptyCorporateImportSummary,
+  tallyCorporateDecision,
+  corporateImportMessage,
+  appendImportMessage,
+} from "@/lib/owner-corporate-import";
 
 // Japanese field name → Owner model property mapping
 const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
@@ -123,6 +130,8 @@ export async function POST(request: NextRequest) {
     let errorCount = 0;
     let needsReviewCount = 0;
     const createdOwnerIds: string[] = [];
+    // Phase D: 法人番号自動検出のサマリ（AuditLog detail に非PIIで残す）
+    const corporateSummary = emptyCorporateImportSummary();
 
     // 行ごとに「紐づけ判定に必要な元データを持っていたか」を覚えておく。
     // 行書き込みは linking 後に1回行うので、そこで status / errorMessage を最終決定する。
@@ -135,6 +144,9 @@ export async function POST(request: NextRequest) {
       createdId: string | null;
       hasLinkKey: boolean;
       hasAddress: boolean;
+      // Phase D: 法人番号スキップ等の非PII補足。finalization で link 結果を errorMessage に
+      // 再代入する際に消えないよう、別フィールドで保持し、最終代入時に append する。
+      corporateMessage: string | null;
     }> = [];
 
     for (let i = 0; i < rows.length; i++) {
@@ -162,6 +174,7 @@ export async function POST(request: NextRequest) {
             createdId: null,
             hasLinkKey: false,
             hasAddress: false,
+            corporateMessage: null,
           });
           errorCount++;
           continue;
@@ -200,6 +213,7 @@ export async function POST(request: NextRequest) {
             createdId: null,
             hasLinkKey: !!mapped.externalLinkKey,
             hasAddress: !!mapped.address,
+            corporateMessage: null,
           });
           needsReviewCount++;
           continue;
@@ -215,6 +229,22 @@ export async function POST(request: NextRequest) {
         if (mapped.address) createData.address = mapped.address.trim();
         if (mapped.note) createData.note = mapped.note.trim();
         if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey.trim();
+
+        // Phase D: name/address/note から法人番号候補を検出し、1 件かつ 13桁正規化 OK のときだけ採用。
+        // 既存 owner 既値との競合はここでは発生しない（新規作成パスのため existing=null 固定）。
+        const cnDecision = decideCorporateImport(
+          {
+            name: mapped.name,
+            address: mapped.address ?? null,
+            note: mapped.note ?? null,
+          },
+          null,
+        );
+        tallyCorporateDecision(corporateSummary, cnDecision);
+        if (cnDecision.action === "save" && cnDecision.corporateNumber) {
+          createData.corporateNumber = cnDecision.corporateNumber;
+        }
+        const cnMessage = corporateImportMessage(cnDecision);
 
         const owner = await prisma.owner.create({
           data: createData as Parameters<typeof prisma.owner.create>[0]["data"],
@@ -235,10 +265,14 @@ export async function POST(request: NextRequest) {
           rowNumber,
           status: "success",
           rawData: rawRow,
+          // Phase D: 法人番号スキップ補足は corporateMessage に保持し、
+          // 最終代入（link 結果反映）の段階で appendImportMessage する。
+          // errorMessage には初期では入れない（finalization で消えるため）。
           errorMessage: null,
           createdId: owner.id,
           hasLinkKey: !!mapped.externalLinkKey,
           hasAddress: !!mapped.address,
+          corporateMessage: cnMessage,
         });
         createdOwnerIds.push(owner.id);
         successCount++;
@@ -252,6 +286,7 @@ export async function POST(request: NextRequest) {
           createdId: null,
           hasLinkKey: false,
           hasAddress: false,
+          corporateMessage: null,
         });
         errorCount++;
       }
@@ -424,8 +459,9 @@ export async function POST(request: NextRequest) {
     for (const row of jobRows) {
       if (row.status === "success" && row.createdId) {
         const r = linkResultByOwnerId.get(row.createdId);
+        let linkMessage: string;
         if (r?.linked) {
-          row.errorMessage =
+          linkMessage =
             r.via === "linkKey"
               ? "紐づけ完了[リンクキー一致]"
               : "紐づけ完了[住所一致（正規化比較）]";
@@ -433,16 +469,14 @@ export async function POST(request: NextRequest) {
         } else {
           // 降格: success → needs_review
           if (r?.ambiguous) {
-            row.errorMessage =
+            linkMessage =
               "紐づけ不可: 同一住所に複数物件が存在するため要手動紐づけ";
           } else if (row.hasLinkKey) {
-            row.errorMessage =
-              "紐づけ不可: リンクキーに一致する物件がありません";
+            linkMessage = "紐づけ不可: リンクキーに一致する物件がありません";
           } else if (row.hasAddress) {
-            row.errorMessage =
-              "紐づけ不可: 住所に一致する物件がありません";
+            linkMessage = "紐づけ不可: 住所に一致する物件がありません";
           } else {
-            row.errorMessage =
+            linkMessage =
               "紐づけ不可: 物件特定キー（リンクキー/住所）が指定されていません";
           }
           row.status = "needs_review";
@@ -450,6 +484,9 @@ export async function POST(request: NextRequest) {
           needsReviewCount++;
           linkFailedRowCount++;
         }
+        // Phase D: link 結果メッセージに法人番号スキップ補足を append する。
+        // 法人番号スキップ単独では status は降格しない（link 結果のみが status を左右する）。
+        row.errorMessage = appendImportMessage(linkMessage, row.corporateMessage);
       }
     }
 
@@ -507,6 +544,8 @@ export async function POST(request: NextRequest) {
         rescuedLinkedByLinkKeyCount,
         rescuedLinkedByAddressCount,
         rescuedAddressLinkAmbiguousCount,
+        // Phase D: 法人番号自動検出のサマリ。生値・会社名・住所・候補リストは含めない。
+        corporateNumber: corporateSummary,
       },
     });
 

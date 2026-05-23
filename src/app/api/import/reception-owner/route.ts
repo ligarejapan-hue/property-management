@@ -29,6 +29,14 @@ import {
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
 import { RECEPTION_OWNER_LINK_DATA_KEY } from "@/lib/reception-owner-link";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
+import {
+  decideCorporateImport,
+  emptyCorporateImportSummary,
+  tallyCorporateDecision,
+  corporateImportMessage,
+  appendImportMessage,
+  type CorporateImportDecision,
+} from "@/lib/owner-corporate-import";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の本実行。
 // - 一意特定できた行だけ反映。それ以外は needs_review で記録。
@@ -189,6 +197,8 @@ export async function POST(request: NextRequest) {
     let propertyUpdatedCount = 0;
     let ownerCreatedCount = 0;
     let ownerLinkedCount = 0;
+    // Phase D: 法人番号自動検出のサマリ（AuditLog detail に非PIIで残す）
+    const corporateSummary = emptyCorporateImportSummary();
 
     for (const c of combined) {
       const reason = getReviewReason(c);
@@ -306,6 +316,8 @@ export async function POST(request: NextRequest) {
         }
 
         // Owner: name + address で upsert、無ければ name のみで探す
+        // Phase D: 行内 owner 単位の法人番号 decision を集約し、行 errorMessage に追記する。
+        let rowCorporateMessage: string | null = null;
         for (const o of c.owners) {
           const ownerId = await upsertOwnerAndLink(
             propertyId,
@@ -313,6 +325,13 @@ export async function POST(request: NextRequest) {
             session.id,
             () => ownerCreatedCount++,
             () => ownerLinkedCount++,
+            (decision) => {
+              tallyCorporateDecision(corporateSummary, decision);
+              const msg = corporateImportMessage(decision);
+              if (msg) {
+                rowCorporateMessage = appendImportMessage(rowCorporateMessage, msg);
+              }
+            },
           );
           if (!ownerId) {
             // name が無ければスキップ（owner 側要件）
@@ -349,7 +368,9 @@ export async function POST(request: NextRequest) {
             rowNumber,
             status: "success",
             rawData,
-            errorMessage: null,
+            // Phase D: 法人番号スキップ情報のみ追記（生値は含めない）。
+            // 複数候補・競合スキップ単独では needs_review に格上げしない。
+            errorMessage: appendImportMessage(null, rowCorporateMessage),
             createdId: propertyId,
           },
         });
@@ -395,6 +416,8 @@ export async function POST(request: NextRequest) {
         propertyUpdatedCount,
         ownerCreatedCount,
         ownerLinkedCount,
+        // Phase D: 法人番号自動検出のサマリ。生値・会社名・住所・候補リストは含めない。
+        corporateNumber: corporateSummary,
       },
     });
 
@@ -424,6 +447,7 @@ async function upsertOwnerAndLink(
   userId: string,
   onOwnerCreated: () => void,
   onPropertyLinked: () => void,
+  onCorporateDecision?: (decision: CorporateImportDecision) => void, // Phase D
 ): Promise<string | null> {
   const name = nullIfBlank(o.name);
   if (!name) return null; // 氏名がない行は所有者レコードを作れないのでスキップ
@@ -435,12 +459,20 @@ async function upsertOwnerAndLink(
   let candidateOwnerId: string | null = null;
   let existingZip: string | null = null;
   let existingAddress: string | null = null;
+  // Phase D: 既存 Owner ヒット時の corporateNumber 競合判定に使う
+  let existingCorporateNumber: string | null = null;
   if (address) {
     const normName = normalizeName(name);
     const normAddr = normalizeAddress(address);
     const candidates = await prisma.owner.findMany({
       where: { address: { not: null }, isArchived: false },
-      select: { id: true, zip: true, address: true, name: true },
+      select: {
+        id: true,
+        zip: true,
+        address: true,
+        name: true,
+        corporateNumber: true,
+      },
     });
     const hit =
       candidates.find(
@@ -452,19 +484,28 @@ async function upsertOwnerAndLink(
       candidateOwnerId = hit.id;
       existingZip = hit.zip;
       existingAddress = hit.address;
+      existingCorporateNumber = hit.corporateNumber;
     }
   }
   if (!candidateOwnerId) {
     const hit = await prisma.owner.findFirst({
       where: { name, address: null, isArchived: false },
-      select: { id: true, zip: true, address: true },
+      select: { id: true, zip: true, address: true, corporateNumber: true },
     });
     if (hit) {
       candidateOwnerId = hit.id;
       existingZip = hit.zip;
       existingAddress = hit.address;
+      existingCorporateNumber = hit.corporateNumber;
     }
   }
+
+  // Phase D: name/address から法人番号候補を検出（既存値との競合判定込み）。
+  // 純関数なので DB 競合に左右されない。reuse パス・create パス両方で参照する。
+  const cnDecision = decideCorporateImport(
+    { name, address },
+    candidateOwnerId ? existingCorporateNumber : null,
+  );
 
   // 既存 owner を使うパス。lookup と PropertyOwner.create の間に concurrent
   // archive が走るとアーカイブ済み owner に link してしまうため、transaction 内で
@@ -512,20 +553,45 @@ async function upsertOwnerAndLink(
     });
     if (reuseResult.linked) {
       if (reuseResult.newLinkCreated) onPropertyLinked();
+      // Phase D: 既存 owner で corporateNumber が空欄なら埋める。
+      // updateMany の where に corporateNumber: null を入れることでレース時に自動上書きを防ぐ。
+      // count=0 のときは既に他者が書き込んでいるため saved にしない（決定は noop 相当）。
+      let effectiveDecision: CorporateImportDecision = cnDecision;
+      if (cnDecision.action === "save" && cnDecision.corporateNumber) {
+        const cnUpdate = await prisma.owner.updateMany({
+          where: { id: candidateOwnerId!, corporateNumber: null },
+          data: { corporateNumber: cnDecision.corporateNumber },
+        });
+        if (cnUpdate.count === 0) {
+          effectiveDecision = { action: "noop", corporateNumber: null };
+        }
+      }
+      if (onCorporateDecision) onCorporateDecision(effectiveDecision);
       return candidateOwnerId;
     }
     // 競合: archived race を検出。candidateOwnerId をクリアして新規作成にフォールバック。
   }
 
   // 新規 Owner 作成 + link（dedup ヒットなし、または上記レースで fallback）
+  // Phase D: 候補 1 件のみ採用。新規作成パスは existing=null として再評価する
+  // （ヒットありで race fallback してきたケースでは元の cnDecision が conflict/noop だった
+  //  可能性があるが、新 owner なので空欄埋め扱いで再計算）。
+  const cnDecisionForCreate =
+    candidateOwnerId === null
+      ? cnDecision
+      : decideCorporateImport({ name, address }, null);
   const created = await prisma.owner.create({
     data: {
       name,
       ...(address ? { address } : {}),
       ...(zip ? { zip } : {}),
+      ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
+        ? { corporateNumber: cnDecisionForCreate.corporateNumber }
+        : {}),
     },
     select: { id: true },
   });
+  if (onCorporateDecision) onCorporateDecision(cnDecisionForCreate);
   const ownerId = created.id;
   onOwnerCreated();
   await writeAuditLog({

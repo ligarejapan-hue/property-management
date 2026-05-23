@@ -15,6 +15,14 @@ import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
+import {
+  decideCorporateImport,
+  emptyCorporateImportSummary,
+  tallyCorporateDecision,
+  corporateImportMessage,
+  appendImportMessage,
+  type CorporateImportDecision,
+} from "@/lib/owner-corporate-import";
 
 const registryPdfJsonSchema = z.object({
   /** Extracted text from the PDF (テキスト貼り付けモード) */
@@ -104,6 +112,16 @@ export async function POST(request: NextRequest) {
 
     let resultAction: "created" | "updated" | "matched" = "matched";
     let targetPropertyId: string | null = null;
+    // Phase D: 法人番号自動検出のサマリ + 行 errorMessage 集約
+    const corporateSummary = emptyCorporateImportSummary();
+    let rowCorporateMessage: string | null = null;
+    const recordCorporateDecision = (decision: CorporateImportDecision) => {
+      tallyCorporateDecision(corporateSummary, decision);
+      const msg = corporateImportMessage(decision);
+      if (msg) {
+        rowCorporateMessage = appendImportMessage(rowCorporateMessage, msg);
+      }
+    };
     // 失敗理由（silent fail-through 用と、catch ブロックでの recovery 用）。
     // null のままなら成功扱い。
     let failureReason: string | null = null;
@@ -166,13 +184,15 @@ export async function POST(request: NextRequest) {
         // address なし → name のみでの自動統合はしない（同姓同名の別人を誤統合しないため）
         // archived owner は通常の取込候補から除外（Phase 2-A）。
         let candidateOwnerId: string | null = null;
+        // Phase D: 既存 Owner ヒット時の corporateNumber 競合判定に使う
+        let candidateCorporateNumber: string | null = null;
 
         if (ownerInfo.address) {
           const normName = normalizeName(ownerInfo.name);
           const normAddr = normalizeAddress(ownerInfo.address);
           const candidates = await prisma.owner.findMany({
             where: { address: { not: null }, isArchived: false },
-            select: { id: true, name: true, address: true },
+            select: { id: true, name: true, address: true, corporateNumber: true },
           });
           const hit = candidates.find(
             (c) =>
@@ -180,6 +200,7 @@ export async function POST(request: NextRequest) {
               normalizeAddress(c.address!) === normAddr,
           );
           candidateOwnerId = hit?.id ?? null;
+          candidateCorporateNumber = hit?.corporateNumber ?? null;
         }
 
         // 既存 owner を使うパス: lookup と PropertyOwner.create の間に concurrent
@@ -218,17 +239,67 @@ export async function POST(request: NextRequest) {
           // 競合検出時は resolvedOwnerId=null のまま下のフォールバックへ
         }
 
+        // Phase D: reuse 成功判定。
+        // `resolvedOwnerId === candidateOwnerId` だけだと両方 null のとき true になり、
+        // (a) updateMany が id:null で実行されてしまう
+        // (b) recordCorporateDecision が reuse 側と create 側の二重で呼ばれてしまう
+        // 上記 2 件の Codex P1/P2 を防ぐため、両方 non-null かつ等しいことを要求する。
+        const reusedExistingOwner =
+          resolvedOwnerId !== null &&
+          candidateOwnerId !== null &&
+          resolvedOwnerId === candidateOwnerId;
+
+        // reuse 成功時のみ既存 corporateNumber と比較、それ以外は existing=null として計算。
+        const cnDecision = decideCorporateImport(
+          { name: ownerInfo.name, address: ownerInfo.address ?? null },
+          reusedExistingOwner ? candidateCorporateNumber : null,
+        );
+
+        // reuse 成功時: 既存 owner が corporateNumber 空ならここで埋める。
+        // where 条件で corporateNumber: null を要求し、race 時は count=0 で自動上書きを防ぐ。
+        if (
+          reusedExistingOwner &&
+          cnDecision.action === "save" &&
+          cnDecision.corporateNumber
+        ) {
+          const cnUpdate = await prisma.owner.updateMany({
+            where: { id: candidateOwnerId!, corporateNumber: null },
+            data: { corporateNumber: cnDecision.corporateNumber },
+          });
+          recordCorporateDecision(
+            cnUpdate.count === 0
+              ? { action: "noop", corporateNumber: null }
+              : cnDecision,
+          );
+        } else if (reusedExistingOwner) {
+          // reuse 成功 + save 以外（noop / multi / conflict / none） → そのまま集計
+          recordCorporateDecision(cnDecision);
+        }
+
         if (!resolvedOwnerId) {
           // 新規 Owner 作成 + link（dedup ヒットなし、または archive race で fallback）。
           // 新規 owner は他 tx から見えないため archive 競合はない。
+          // archive race fallback の場合も「新規 owner なので existing=null」で再評価する。
+          const cnDecisionForCreate =
+            candidateOwnerId === null
+              ? cnDecision
+              : decideCorporateImport(
+                  { name: ownerInfo.name, address: ownerInfo.address ?? null },
+                  null,
+                );
           const created = await prisma.owner.create({
             data: {
               name: ownerInfo.name,
               ...(ownerInfo.address ? { address: ownerInfo.address } : {}),
+              // Phase D: 候補 1 件のみ採用、複数 / 競合は乗せない
+              ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
+                ? { corporateNumber: cnDecisionForCreate.corporateNumber }
+                : {}),
             },
             select: { id: true },
           });
           resolvedOwnerId = created.id;
+          recordCorporateDecision(cnDecisionForCreate);
 
           const existingLink = await prisma.propertyOwner.findFirst({
             where: { propertyId, ownerId: resolvedOwnerId },
@@ -419,6 +490,8 @@ export async function POST(request: NextRequest) {
           buildingNumber: parsed.buildingNumber,
           owners: parsed.owners.map((o) => o.name),
         },
+        // Phase D: 法人番号スキップ情報のみ追記（生値・会社名・住所は含めない）。
+        errorMessage: appendImportMessage(null, rowCorporateMessage),
         createdId: targetPropertyId,
       },
     });
@@ -433,6 +506,8 @@ export async function POST(request: NextRequest) {
         action: resultAction,
         confidence: parsed.confidence,
         fileName: fileName,
+        // Phase D: 法人番号自動検出のサマリ。生値・会社名・住所・候補リストは含めない。
+        corporateNumber: corporateSummary,
       },
     });
 
