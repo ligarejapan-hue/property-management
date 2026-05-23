@@ -1721,6 +1721,105 @@ export async function updateOwner(
   });
 }
 
+// 法人番号 lookup preview（Phase B）。Owner 行は更新しない。
+// mock モードでは MockCorporateLookupProvider 相当のレスポンスを返す。
+export interface CorporateLookupApiResponse {
+  lookup: {
+    found: boolean;
+    isClosed: boolean;
+    closeDate: string | null;
+    closeCause: string | null;
+    record: {
+      corporateNumber: string;
+      name: string;
+      furigana: string | null;
+      address: string;
+      prefectureName: string | null;
+      cityName: string | null;
+      streetNumber: string | null;
+      postCode: string | null;
+      updateDate: string | null;
+    } | null;
+    fetchedAt: string;
+    source: string;
+  };
+}
+
+export async function lookupOwnerCorporateNumber(
+  ownerId: string,
+  corporateNumber: string,
+): Promise<CorporateLookupApiResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    const fetchedAt = new Date().toISOString();
+    if (corporateNumber === "9999999999999") {
+      return {
+        lookup: {
+          found: false,
+          isClosed: false,
+          closeDate: null,
+          closeCause: null,
+          record: null,
+          fetchedAt,
+          source: "mock-corporate-lookup",
+        },
+      };
+    }
+    if (corporateNumber === "8888888888888") {
+      return {
+        lookup: {
+          found: true,
+          isClosed: true,
+          closeDate: "2024-12-31",
+          closeCause: "01",
+          record: {
+            corporateNumber,
+            name: "廃止モック株式会社",
+            furigana: "ハイシモックカブシキガイシャ",
+            address: "東京都港区六本木1-1-1",
+            prefectureName: "東京都",
+            cityName: "港区",
+            streetNumber: "六本木1-1-1",
+            postCode: "1060032",
+            updateDate: "2024-12-31",
+          },
+          fetchedAt,
+          source: "mock-corporate-lookup",
+        },
+      };
+    }
+    return {
+      lookup: {
+        found: true,
+        isClosed: false,
+        closeDate: null,
+        closeCause: null,
+        record: {
+          corporateNumber,
+          name: "モック株式会社",
+          furigana: "モックカブシキガイシャ",
+          address: "東京都千代田区丸の内1-1-1",
+          prefectureName: "東京都",
+          cityName: "千代田区",
+          streetNumber: "丸の内1-1-1",
+          postCode: "1000005",
+          updateDate: "2025-04-01",
+        },
+        fetchedAt,
+        source: "mock-corporate-lookup",
+      },
+    };
+  }
+  return apiFetch<CorporateLookupApiResponse>(
+    `/api/owners/${ownerId}/corporate-lookup`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ corporateNumber }),
+    },
+  );
+}
+
 // 物件×所有者単位のメモなどを更新する（PropertyOwner.note）。
 // Owner.note (所有者本体のメモ) とは別軸なので updateOwner と混同しない。
 export async function updatePropertyOwner(

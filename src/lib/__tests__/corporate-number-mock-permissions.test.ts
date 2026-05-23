@@ -52,9 +52,23 @@ describe("api-helpers.ts — mock permission payload", () => {
 });
 
 // ── runtime: getUserPermissions(NEXT_PUBLIC_USE_MOCK=true) ──────────────────
+//
+// 注: vi.mock("@/lib/prisma", ...) は本ファイルで「1 回だけ」定義する。
+// vitest は vi.mock() をファイル先頭にホイストするので、同一モジュールに対する
+// 複数 vi.mock() は順序が未定義になり CI で再現性のない失敗を起こす
+// (ローカルでは後勝ち / CI では先勝ちなど)。
+// 後段の integration test で必要な owner.* / user.* / permissionTemplate.* /
+// userPermission.* を全部この 1 ブロックに含めておく。
 
 vi.mock("@/lib/prisma", () => ({
   default: {
+    owner: {
+      findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
+      updateMany: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+    },
     user: { findUnique: vi.fn() },
     permissionTemplate: { findUnique: vi.fn() },
     userPermission: { findMany: vi.fn() },
@@ -200,20 +214,7 @@ vi.mock("@/lib/change-log", async (importOriginal) => {
   return { ...actual, recordChanges: vi.fn() };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
-    owner: {
-      findUnique: vi.fn(),
-      findUniqueOrThrow: vi.fn(),
-      updateMany: vi.fn(),
-      findMany: vi.fn(),
-      create: vi.fn(),
-    },
-    user: { findUnique: vi.fn() },
-    permissionTemplate: { findUnique: vi.fn() },
-    userPermission: { findMany: vi.fn() },
-  },
-}));
+// vi.mock("@/lib/prisma", ...) はファイル冒頭に1回だけ定義済み（重複定義しない）。
 
 import prisma from "@/lib/prisma";
 import { POST as OWNERS_POST } from "../../app/api/owners/route";

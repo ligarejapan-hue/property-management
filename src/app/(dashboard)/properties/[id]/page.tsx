@@ -25,6 +25,7 @@ import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/li
 import { normalizeCorporateNumber, detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
+import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
 
 // ---------- Label maps ----------
 
@@ -194,6 +195,10 @@ export default function PropertyDetailPage({
   const [canWriteOwner, setCanWriteOwner] = useState(false);
   const [canReadOwner, setCanReadOwner] = useState(false);
   const [canCreateOwnerMemo, setCanCreateOwnerMemo] = useState(false);
+  // 法人番号API（国税庁 Web-API）が env で有効になっているか。
+  // /api/me/permissions の capabilities.corporateLookup から取得し、UI 上は
+  // 検索ボタンの disabled 判定だけに使う（lookup 自体は常にサーバー側で再判定）。
+  const [corporateLookupConfigured, setCorporateLookupConfigured] = useState(false);
   const [ownerEditableFields, setOwnerEditableFields] = useState<OwnerEditableFields>({
     name: false,
     nameKana: false,
@@ -243,8 +248,12 @@ export default function PropertyDetailPage({
   useEffect(() => {
     fetch("/api/me/permissions")
       .then((r) => r.json())
-      .then((json: { permissions?: { resource: string; action: string; granted: boolean }[] }) => {
+      .then((json: {
+        permissions?: { resource: string; action: string; granted: boolean }[];
+        capabilities?: { corporateLookup?: boolean };
+      }) => {
         const perms = json.permissions ?? [];
+        setCorporateLookupConfigured(json.capabilities?.corporateLookup ?? false);
         setCanWriteProperty(
           perms.some((p) => p.resource === "property" && p.action === "write" && p.granted),
         );
@@ -399,6 +408,7 @@ export default function PropertyDetailPage({
             canWrite={canWriteOwner}
             editableFields={ownerEditableFields}
             canCreateMemo={canCreateOwnerMemo}
+            corporateLookupConfigured={corporateLookupConfigured}
             onRefresh={fetchProperty}
           />
         )}
@@ -576,6 +586,7 @@ function OwnerTab({
   canWrite,
   editableFields,
   canCreateMemo,
+  corporateLookupConfigured,
   onRefresh,
 }: {
   owners: ApiPropertyOwner[];
@@ -584,6 +595,7 @@ function OwnerTab({
   canWrite: boolean;
   editableFields: OwnerEditableFields;
   canCreateMemo: boolean;
+  corporateLookupConfigured: boolean;
   onRefresh: () => Promise<void>;
 }) {
   // owner:read がない場合、API は owner を { id } のみで返すため詳細表示・編集は不可。
@@ -624,6 +636,7 @@ function OwnerTab({
           canWrite={canWrite}
           editableFields={editableFields}
           canCreateMemo={canCreateMemo}
+          corporateLookupConfigured={corporateLookupConfigured}
           onRefresh={onRefresh}
         />
       ))}
@@ -642,6 +655,7 @@ function OwnerCard({
   canWrite,
   editableFields,
   canCreateMemo,
+  corporateLookupConfigured,
   onRefresh,
 }: {
   po: ApiPropertyOwner;
@@ -652,6 +666,7 @@ function OwnerCard({
   canWrite: boolean;
   editableFields: OwnerEditableFields;
   canCreateMemo: boolean;
+  corporateLookupConfigured: boolean;
   onRefresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -879,6 +894,13 @@ function OwnerCard({
                 （送信時に normalizeCorporateNumber が 13桁へ正規化する）。 */}
             {editableFields.corporateNumber && (
               <div className="space-y-1 md:col-span-2">
+                <CorporateNumberCandidateBanner
+                  owner={po.owner}
+                  currentInput={form.corporateNumber}
+                  onTransfer={(candidate) =>
+                    setForm((f) => ({ ...f, corporateNumber: candidate }))
+                  }
+                />
                 <label className="text-xs font-medium text-gray-700">
                   法人番号（任意 / 13桁）
                 </label>
@@ -898,6 +920,14 @@ function OwnerCard({
                       法人番号は13桁の数字で入力してください（ハイフン・空白・全角数字は自動で除去されます）
                     </p>
                   )}
+                {/* 法人情報を検索（国税庁 法人番号 Web-API / preview のみ）。
+                    Owner.name / Owner.address への自動反映はしない（Phase B のスコープ）。
+                    13桁正規化できない場合・lookup capability 無効時はボタンが disabled。 */}
+                <CorporateLookupPanel
+                  ownerId={po.ownerId}
+                  rawCorporateNumber={form.corporateNumber}
+                  configured={corporateLookupConfigured}
+                />
               </div>
             )}
           </div>
@@ -1279,6 +1309,64 @@ function CorporateNumberSuspectBanner({ owner }: { owner: ApiOwner }) {
           氏名・現住所・備考欄に法人番号らしき文字列が含まれています。
           編集モードで「法人番号」欄に転記してください（自動上書きはしません）。
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 編集モード内で、Owner の name/address/note から検出した法人番号候補を
+ * ユーザー操作で input に転記するためのバナー。
+ *
+ * - 候補が無い → 描画しない
+ * - owner 本体に法人番号がある → 描画しない（display 側と同方針）
+ * - 入力欄に既に何らかの値がある → 描画しない（手入力した別法人番号を誤って上書きしないため）
+ * - 候補は最大 3 件まで（dedup 済 / 13桁数字）。
+ * - 押下時に form.corporateNumber を上書きするだけで、lookup は自動実行しない（明示性確保）。
+ * - 自動保存もしない（保存はユーザーの「保存」操作）。
+ */
+function CorporateNumberCandidateBanner({
+  owner,
+  currentInput,
+  onTransfer,
+}: {
+  owner: ApiOwner;
+  currentInput: string;
+  onTransfer: (candidate: string) => void;
+}) {
+  // 既に owner 本体に法人番号があるなら検出バナーは出さない（display 側と同方針）。
+  if (owner.corporateNumber) return null;
+  // 入力欄に何らかの値が入っている時点で候補バナーを完全に隠す。
+  // 候補と一致しない別の13桁を手入力済みのケースで、誤って上書きする導線を残さないため
+  // (Codex P3 / "Suppress candidate banner once any corporate number is typed")。
+  if (currentInput.trim() !== "") return null;
+  const detection = detectCorporateNumberInOwnerLike({
+    name: owner.name,
+    address: owner.address,
+    note: owner.note,
+  });
+  const candidates = detection.candidates.slice(0, 3);
+  if (candidates.length === 0) return null;
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800">
+      <div className="mb-1 flex items-start gap-1.5">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          氏名・現住所・備考欄から法人番号らしき値を検出しました。
+          下のボタンを押すと「法人番号」欄に転記します（自動上書き・自動保存・自動検索はしません）。
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {candidates.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onTransfer(c)}
+            className="rounded-md border border-amber-300 bg-white px-2 py-0.5 font-mono text-[11px] text-amber-900 hover:bg-amber-100"
+          >
+            {c} を法人番号欄に転記
+          </button>
+        ))}
       </div>
     </div>
   );
