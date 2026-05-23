@@ -5,8 +5,9 @@
  * - 検索中表示（"検索中..."）がある
  * - preview パネル（data-testid="corporate-lookup-preview"）がある
  * - 廃止法人警告（"廃止法人" バッジ）がある
- * - Phase B では「反映実行ボタン」が disabled or "Phase C で実装予定" 表示
- * - 自動 lookup / 自動保存しない（即 lookup 呼び出しなし）
+ * - Phase C: 反映チェックボックスと apply ボタンが存在し、applyOwnerCorporate を呼ぶ
+ * - Phase C: ownerVersion / fieldEditable / onApplied props を受け取る
+ * - 自動 lookup / 自動保存しない（mount 時 lookup 呼び出しなし）
  * - 候補バナーから法人番号欄へ転記する導線がある
  * - page.tsx 内に CorporateLookupPanel がマウントされている
  */
@@ -42,18 +43,16 @@ describe("corporate-lookup-panel.tsx", () => {
     expect(panelSrc).toMatch(/廃止法人/);
   });
 
-  it("Phase B では反映実行ボタンが disabled で、DB 書込 API を呼ばない", () => {
-    // disabled 属性が付いていること
-    expect(panelSrc).toMatch(/Phase C[^<]*実装予定/);
-    // 「所有者名・現住所に反映」を含む button 要素全体（開きタグから閉じタグまで）を捕捉。
-    const applyButtonBlock = panelSrc.match(
-      /<button\b[\s\S]*?所有者名・現住所に反映[\s\S]*?<\/button>/,
-    );
-    expect(applyButtonBlock).not.toBeNull();
-    expect(applyButtonBlock?.[0]).toMatch(/disabled/);
-    // apply / update / save / patch を直接呼ぶ口がない
+  it("Phase C: 反映チェックボックスと apply ボタンが存在する", () => {
+    // 反映対象選択チェックボックスが描画されている
+    expect(panelSrc).toMatch(/会社名 → 所有者名/);
+    expect(panelSrc).toMatch(/所在地 → 現住所/);
+    expect(panelSrc).toMatch(/郵便番号/);
+    // 反映ボタンと applyOwnerCorporate API 呼び出し
+    expect(panelSrc).toMatch(/applyOwnerCorporate/);
+    expect(panelSrc).toMatch(/選択した項目を所有者に反映/);
+    // PATCH 経由の Owner 更新導線は持たない（apply API 経由のみ）
     expect(panelSrc).not.toMatch(/updateOwner\(/);
-    expect(panelSrc).not.toMatch(/corporate-apply/);
     expect(panelSrc).not.toMatch(/fetch\(.*PATCH/);
   });
 
@@ -97,13 +96,22 @@ describe("corporate-lookup-panel.tsx", () => {
     );
   });
 
-  it("反映ボタンが disabled で DB 書込導線が無いことを維持", () => {
-    const applyButtonBlock = panelSrc.match(
-      /<button\b[\s\S]*?所有者名・現住所に反映[\s\S]*?<\/button>/,
-    );
-    expect(applyButtonBlock).not.toBeNull();
-    expect(applyButtonBlock?.[0]).toMatch(/disabled/);
-    expect(panelSrc).not.toMatch(/corporate-apply/);
+  it("Phase C: ownerVersion / fieldEditable / onApplied props を受け取る", () => {
+    expect(panelSrc).toMatch(/ownerVersion\??:\s*number/);
+    expect(panelSrc).toMatch(/fieldEditable\??:\s*\{/);
+    expect(panelSrc).toMatch(/onApplied\??:/);
+  });
+
+  it("Phase C: 廃止法人は confirm を出してから apply する", () => {
+    expect(panelSrc).toMatch(/window\.confirm/);
+    expect(panelSrc).toMatch(/廃止/);
+  });
+
+  it("Phase C: apply は再 lookup 結果を信用するため expectedRecord を送る", () => {
+    expect(panelSrc).toMatch(/expectedRecord/);
+    // postCode / updateDate を比較スナップショットとして送る
+    expect(panelSrc).toMatch(/postCode:\s*result\.record\.postCode/);
+    expect(panelSrc).toMatch(/updateDate:\s*result\.record\.updateDate/);
   });
 });
 
