@@ -26,18 +26,22 @@ const FULL: CandidateDisplayConfig = {
   name: "full",
   address: "full",
   corporateNumber: "full",
+  note: "full",
 };
 
 const MASKED: CandidateDisplayConfig = {
   name: "masked",
   address: "masked",
   corporateNumber: "masked",
+  // note も masked: note 由来の検出は行わない（Codex P1 仕様）
+  note: "masked",
 };
 
 const HIDDEN: CandidateDisplayConfig = {
   name: "hidden",
   address: "hidden",
   corporateNumber: "hidden",
+  note: "hidden",
 };
 
 function owner(o: Partial<OwnerForCandidate>): OwnerForCandidate {
@@ -224,6 +228,97 @@ describe("classifyOwnerCorporateCandidate — display-level マスキング", ()
     );
     expect(result?.ownerNameMasked).toBeNull();
     expect(result?.ownerAddressMasked).toBeNull();
+  });
+});
+
+// ---- Codex P1: note 検出の field-level permission ガード ----
+describe("classifyOwnerCorporateCandidate — Codex P1: owner_note 権限", () => {
+  it("owner_note=hidden で note のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: "山田太郎", note: `法人番号:${CN}` }),
+      { ...FULL, note: "hidden" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_note=masked で note のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: "山田太郎", note: `法人番号:${CN}` }),
+      { ...FULL, note: "masked" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_note=partial で note のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: "山田太郎", note: `法人番号:${CN}` }),
+      { ...FULL, note: "partial" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_note=full で note のみに法人番号がある owner は missing 候補化", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: "山田太郎", note: `法人番号:${CN}` }),
+      { ...FULL, note: "full" },
+    );
+    expect(result?.type).toBe("missing");
+    expect(result?.detectedIn).toEqual(["note"]);
+  });
+
+  it("owner_note=read で note のみに法人番号がある owner は候補化される（raw-visible）", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: "山田太郎", note: `法人番号:${CN}` }),
+      { ...FULL, note: "read" },
+    );
+    expect(result?.type).toBe("missing");
+    expect(result?.detectedIn).toEqual(["note"]);
+  });
+
+  it("owner_note=edit で note のみに法人番号がある owner は候補化される（raw-visible）", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: "山田太郎", note: `法人番号:${CN}` }),
+      { ...FULL, note: "edit" },
+    );
+    expect(result?.type).toBe("missing");
+    expect(result?.detectedIn).toEqual(["note"]);
+  });
+
+  it("owner_note=hidden でも name に法人番号があれば候補化、detectedIn に note を含めない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 法人番号:${CN}`, note: `別の番号 ${CN_OTHER}` }),
+      { ...FULL, note: "hidden" },
+    );
+    expect(result?.type).toBe("missing");
+    expect(result?.detectedIn).toEqual(["name"]);
+    expect(result?.detectedIn).not.toContain("note");
+  });
+
+  it("owner_note=hidden で hidden note のせいで multi にならない（bypass 防止）", () => {
+    // name に CN、hidden note に CN_OTHER。owner_note=full なら multi だが、
+    // hidden note を検出から除外するため missing に分類される。
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 ${CN}`, note: `別法人 ${CN_OTHER}` }),
+      { ...FULL, note: "hidden" },
+    );
+    expect(result?.type).toBe("missing");
+    expect(result?.detectedIn).toEqual(["name"]);
+  });
+
+  it("owner_note=hidden で hidden note のせいで conflict にならない", () => {
+    // existing corporateNumber が CN、name に CN、hidden note に CN_OTHER。
+    // hidden note を入れたら multi になり「複数候補のため上書きせず conflict 化」しかねない。
+    // → hidden note を除外することで same に分類される。
+    const result = classifyOwnerCorporateCandidate(
+      owner({
+        name: `株式会社 ${CN}`,
+        note: `別法人 ${CN_OTHER}`,
+        corporateNumber: CN,
+      }),
+      { ...FULL, note: "hidden" },
+    );
+    expect(result?.type).toBe("same");
+    expect(result?.detectedIn).toEqual(["name"]);
   });
 });
 

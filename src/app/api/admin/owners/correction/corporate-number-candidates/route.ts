@@ -124,6 +124,8 @@ export async function GET(request: NextRequest) {
           name: displayConfig.name,
           address: displayConfig.address,
           corporateNumber: displayConfig.corporateNumber,
+          // Codex P1: owner_note の display-level に従って note 由来の検出を制限する
+          note: displayConfig.note,
         },
       );
       if (!row) continue;

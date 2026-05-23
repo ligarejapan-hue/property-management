@@ -63,6 +63,22 @@ export interface CandidateDisplayConfig {
   name: "hidden" | "masked" | "partial" | "full" | "read" | "edit";
   address: "hidden" | "masked" | "partial" | "full" | "read" | "edit";
   corporateNumber: "hidden" | "masked" | "partial" | "full" | "read" | "edit";
+  /**
+   * owner_note の display-level。
+   * Codex P1 対応:
+   *   raw-visible (full / read / edit) のときだけ note を法人番号検出対象に含める。
+   *   hidden / masked / partial のユーザーには note 由来の候補・detectedIn を一切返さない
+   *   （field-level permission bypass 防止）。
+   */
+  note: "hidden" | "masked" | "partial" | "full" | "read" | "edit";
+}
+
+/**
+ * owner_note を法人番号検出の入力に渡してよいかを判定する。
+ * raw-visible = full / read / edit のみ true。
+ */
+function isNoteRawVisible(level: CandidateDisplayConfig["note"]): boolean {
+  return level === "full" || level === "read" || level === "edit";
 }
 
 /**
@@ -101,11 +117,18 @@ export function classifyOwnerCorporateCandidate(
   owner: OwnerForCandidate,
   displayConfig: CandidateDisplayConfig,
 ): CorporateCandidateRow | null {
+  // Codex P1 対応: owner_note が hidden / masked / partial のユーザーには
+  // note を検出入力から除外する。これにより:
+  //  - detectedIn に "note" が漏れない
+  //  - hidden note のみに 13桁が含まれる Owner は候補化されない
+  //  - hidden note 由来の競合・複数候補にもならない（multi/conflict 経由の bypass 防止）
+  const noteForDetect = isNoteRawVisible(displayConfig.note) ? owner.note : null;
+
   // detect は内部で normalize 済み 13桁 dedup 配列を返す
   const detect = detectCorporateNumberInOwnerLike({
     name: owner.name,
     address: owner.address,
-    note: owner.note,
+    note: noteForDetect,
   });
 
   // 0 件 → 候補なし。呼び出し側で除外できるよう null を返す。
@@ -113,8 +136,9 @@ export function classifyOwnerCorporateCandidate(
 
   // decideCorporateImport の action から Phase E 種別へ写像。
   // PR #34 helper の action を再利用するため挙動は単一の source of truth。
+  // ここでも noteForDetect を渡し、note 権限がなければ note 由来の候補が出ないようにする。
   const decision: CorporateImportDecision = decideCorporateImport(
-    { name: owner.name, address: owner.address, note: owner.note },
+    { name: owner.name, address: owner.address, note: noteForDetect },
     owner.corporateNumber,
   );
 

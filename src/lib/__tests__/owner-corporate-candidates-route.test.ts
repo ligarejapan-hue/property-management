@@ -465,6 +465,117 @@ describe("GET /corporate-number-candidates — AuditLog PII 漏洩防止", () =>
   });
 });
 
+describe("GET /corporate-number-candidates — Codex P1: note 検出 gate", () => {
+  it("owner_note=hidden で note のみに法人番号がある owner は結果に出ない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      note: "hidden",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "o-1",
+        name: "山田太郎",
+        address: null,
+        note: `法人番号:${CN}`,
+        corporateNumber: null,
+        version: 1,
+      },
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(0);
+    expect(json.summary.totalCandidates).toBe(0);
+  });
+
+  it("owner_note=masked で note のみに法人番号がある owner は結果に出ない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      note: "masked",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "o-1",
+        name: "山田太郎",
+        address: null,
+        note: `法人番号:${CN}`,
+        corporateNumber: null,
+        version: 1,
+      },
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(0);
+  });
+
+  it("owner_note=full なら note のみの法人番号でも候補化される", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      note: "full",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "o-1",
+        name: "山田太郎",
+        address: null,
+        note: `法人番号:${CN}`,
+        corporateNumber: null,
+        version: 1,
+      },
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].detectedIn).toEqual(["note"]);
+  });
+
+  it("owner_note=hidden でも name に法人番号があれば候補化、detectedIn に note を含めない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      note: "hidden",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "o-1",
+        name: `株式会社 法人番号:${CN}`,
+        address: null,
+        note: `別の番号 ${CN_OTHER}`,
+        corporateNumber: null,
+        version: 1,
+      },
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].detectedIn).toEqual(["name"]);
+    expect(json.candidates[0].detectedIn).not.toContain("note");
+    // hidden note 由来の CN_OTHER で multi/conflict 化していないこと
+    expect(json.candidates[0].type).toBe("missing");
+  });
+
+  it("owner_note=hidden で AuditLog detail に note 生値・法人番号生値が含まれない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      note: "hidden",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "o-1",
+        name: `株式会社 法人番号:${CN}`,
+        address: null,
+        note: `他の重要 memo ${CN_OTHER}`,
+        corporateNumber: null,
+        version: 1,
+      },
+    ]);
+    await GET(url());
+    const call = vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0];
+    const detailJson = JSON.stringify(call?.detail ?? {});
+    expect(detailJson).not.toContain(CN);
+    expect(detailJson).not.toContain(CN_OTHER);
+    expect(detailJson).not.toContain("他の重要 memo");
+  });
+});
+
 describe("GET /corporate-number-candidates — detailUrl", () => {
   it("detailUrl は /admin/owners/{ownerId}", async () => {
     pm.owner.findMany.mockResolvedValue([
