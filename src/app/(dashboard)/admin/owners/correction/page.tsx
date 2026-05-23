@@ -1,10 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import {
   fetchOwnerCorrectionCandidates,
+  fetchCorporateCandidates,
   type OwnerCorrectionCandidate,
   type OwnerCorrectionCandidatesResponse,
+  type CorporateCandidateFilterType,
+  type CorporateCandidateRowDTO,
+  type CorporateCandidatesResponse,
 } from "@/lib/api-client";
 import { AddressFillButton } from "@/components/owners/AddressFillButton";
 import { OwnerArchiveButton } from "@/components/owners/OwnerArchiveButton";
@@ -14,7 +19,12 @@ import {
   applySourceSelection,
 } from "@/lib/owner-merge-pair";
 
-type FilterType = "all" | "orphan" | "address_null" | "duplicate";
+type FilterType =
+  | "all"
+  | "orphan"
+  | "address_null"
+  | "duplicate"
+  | "corporate_number";
 
 const TYPE_LABELS: Record<string, string> = {
   orphan: "孤立",
@@ -61,10 +71,19 @@ export default function OwnerCorrectionPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (type: FilterType) => {
+    // Phase E: 法人番号タブは別 API なので、ここでは何もしない
+    // （CorporateNumberCandidatesPanel が自前で fetch する）。
+    if (type === "corporate_number") {
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchOwnerCorrectionCandidates(type);
+      const res = await fetchOwnerCorrectionCandidates(
+        type as "all" | "orphan" | "address_null" | "duplicate",
+      );
       setData(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "エラーが発生しました");
@@ -90,6 +109,8 @@ export default function OwnerCorrectionPage() {
       label: "重複候補",
       count: data?.summary.duplicateCount,
     },
+    // Phase E: 法人番号タブ。件数は子コンポーネント側 fetch のため上位では表示しない。
+    { key: "corporate_number", label: "法人番号" },
   ];
 
   return (
@@ -125,16 +146,18 @@ export default function OwnerCorrectionPage() {
         ))}
       </div>
 
-      {loading && (
+      {loading && filterType !== "corporate_number" && (
         <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
       )}
-      {error && (
+      {error && filterType !== "corporate_number" && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
 
-      {data && !loading && (
+      {filterType === "corporate_number" && <CorporateNumberCandidatesPanel />}
+
+      {filterType !== "corporate_number" && data && !loading && (
         <>
           <p className="mb-3 text-sm text-gray-500">
             {data.total} 件の確認候補
@@ -490,6 +513,253 @@ function DuplicateGroupCard({
         <p className="text-xs text-gray-400">
           master と source をそれぞれ選択してください
         </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phase E: 法人番号 dry-run 候補パネル
+// ---------------------------------------------------------------------------
+// /api/admin/owners/correction/corporate-number-candidates から取得して
+// type サブフィルタ + cursor pagination で表示する。実反映は Phase C の
+// 詳細画面 lookup/apply UI に誘導する（このパネル内ではバルク操作を持たない）。
+
+type CorporateSubFilter = "default" | "missing" | "conflict" | "multi" | "same";
+
+const CORPORATE_TYPE_LABEL: Record<
+  CorporateCandidateRowDTO["type"],
+  string
+> = {
+  missing: "未登録",
+  conflict: "競合",
+  multi: "複数候補",
+  same: "一致",
+};
+
+const CORPORATE_TYPE_BADGE: Record<
+  CorporateCandidateRowDTO["type"],
+  string
+> = {
+  missing: "bg-yellow-100 text-yellow-800",
+  conflict: "bg-red-100 text-red-700",
+  multi: "bg-gray-100 text-gray-700",
+  same: "bg-green-100 text-green-700",
+};
+
+const DETECTED_IN_LABEL: Record<"name" | "address" | "note", string> = {
+  name: "氏名",
+  address: "住所",
+  note: "メモ",
+};
+
+function CorporateNumberCandidatesPanel() {
+  const [subFilter, setSubFilter] = useState<CorporateSubFilter>("default");
+  const [data, setData] = useState<CorporateCandidatesResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
+
+  // subFilter -> API query type への変換（"default" = "all"）
+  const apiType: CorporateCandidateFilterType =
+    subFilter === "default" ? "all" : subFilter;
+
+  const load = useCallback(
+    async (type: CorporateCandidateFilterType, cur: string | null) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetchCorporateCandidates(type, {
+          cursor: cur ?? undefined,
+        });
+        setData(res);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "エラーが発生しました");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    // サブフィルタ変更時は cursor をリセット
+    setCursor(null);
+    setCursorStack([]);
+    load(apiType, null);
+  }, [apiType, load]);
+
+  const subTabs: { key: CorporateSubFilter; label: string }[] = [
+    { key: "default", label: "未登録+競合+複数候補" },
+    { key: "missing", label: "未登録のみ" },
+    { key: "conflict", label: "競合のみ" },
+    { key: "multi", label: "複数候補のみ" },
+    { key: "same", label: "一致（参考）" },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+        所有者の氏名・住所・メモから法人番号候補を検出して dry-run で表示します。
+        反映は各 Owner 詳細画面（Phase B/C UI）から手動で確認のうえ実行してください。
+        この画面では一括操作は提供しません。
+      </p>
+
+      <div className="flex flex-wrap gap-1">
+        {subTabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setSubFilter(tab.key)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              subFilter === tab.key
+                ? "border-blue-500 bg-blue-100 text-blue-800"
+                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {loading && (
+        <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
+      )}
+      {error && (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
+      {data && !loading && (
+        <>
+          <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+            <span>合計 {data.summary.totalCandidates} 件</span>
+            <span>/ 未登録 {data.summary.missing}</span>
+            <span>/ 競合 {data.summary.conflict}</span>
+            <span>/ 複数候補 {data.summary.multi}</span>
+            <span>/ 一致 {data.summary.same}</span>
+            {data.truncated && (
+              <span className="rounded-full bg-orange-100 px-2 py-0.5 text-orange-700">
+                スキャン上限到達（一部のみ表示）
+              </span>
+            )}
+          </div>
+
+          {data.candidates.length === 0 ? (
+            <p className="py-8 text-center text-sm text-gray-400">
+              該当する候補はありません
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-gray-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">氏名</th>
+                    <th className="px-3 py-2 text-left font-medium">住所</th>
+                    <th className="px-3 py-2 text-left font-medium">
+                      既存法人番号
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium">
+                      検出候補
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium">種別</th>
+                    <th className="px-3 py-2 text-left font-medium">
+                      検出箇所
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {data.candidates.map((c) => (
+                    <tr key={c.ownerId} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium text-gray-900">
+                        {c.ownerNameMasked ?? (
+                          <span className="text-gray-400">***</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">
+                        {c.ownerAddressMasked ?? (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700">
+                        {c.existingCorporateNumberMasked ?? (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700">
+                        {c.candidateCorporateNumberMasked ?? (
+                          <span className="text-gray-400">
+                            {c.candidateCount === "many" ? "複数" : "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${CORPORATE_TYPE_BADGE[c.type]}`}
+                        >
+                          {CORPORATE_TYPE_LABEL[c.type]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {c.detectedIn.map((f) => (
+                            <span
+                              key={f}
+                              className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600"
+                            >
+                              {DETECTED_IN_LABEL[f]}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Link
+                          href={c.detailUrl}
+                          className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                        >
+                          Owner 詳細を開く
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                if (cursorStack.length === 0) return;
+                const prev = cursorStack[cursorStack.length - 1] ?? null;
+                setCursorStack((s) => s.slice(0, -1));
+                setCursor(prev);
+                load(apiType, prev);
+              }}
+              disabled={cursorStack.length === 0}
+              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+            >
+              前へ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!data.hasNextPage || !data.nextCursor) return;
+                setCursorStack((s) => [...s, cursor]);
+                setCursor(data.nextCursor);
+                load(apiType, data.nextCursor);
+              }}
+              disabled={!data.hasNextPage || !data.nextCursor}
+              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+            >
+              次へ
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

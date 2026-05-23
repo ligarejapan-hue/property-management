@@ -11,6 +11,7 @@ import {
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
+import { maskCorporateNumber } from "@/lib/display-level";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
@@ -20,6 +21,14 @@ type Candidate = {
   address: string | null;
   zip: string | null;
   phone: string | null;
+  /**
+   * Phase E: 既存 Owner.corporateNumber を display-level に従ってマスクして返す。
+   * - owner_corporate_number=full → 生値
+   * - masked/partial → 先頭4桁＋***
+   * - hidden または列が null → null
+   * 法人番号生値は AuditLog detail に絶対に入れない。
+   */
+  corporateNumberMasked: string | null;
   hasNote: boolean;
   hasExternalLinkKey: boolean;
   version: number;
@@ -74,6 +83,7 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get("type") ?? "all";
 
     // 1. 全アクティブ Owner を PropertyOwner 件数付きで取得
+    // Phase E: corporateNumber も取得し、display-level に従ってマスクして返す。
     const owners = await prisma.owner.findMany({
       where: { isArchived: false },
       select: {
@@ -83,6 +93,7 @@ export async function GET(request: NextRequest) {
         zip: true,
         phone: true,
         note: true,
+        corporateNumber: true,
         externalLinkKey: true,
         version: true,
         _count: { select: { propertyOwners: true } },
@@ -192,12 +203,27 @@ export async function GET(request: NextRequest) {
         recommendedAction = "review";
       }
 
+      // Phase E: corporateNumber は display-level に応じてマスクして保持。
+      // 重複検出は raw name/address/zip/phone のみで行うため、ここでマスクしても影響なし。
+      let corporateNumberMasked: string | null = null;
+      if (owner.corporateNumber != null) {
+        const cnLevel = displayConfig.corporateNumber;
+        if (cnLevel === "full" || cnLevel === "read" || cnLevel === "edit") {
+          corporateNumberMasked = owner.corporateNumber;
+        } else if (cnLevel === "masked" || cnLevel === "partial") {
+          corporateNumberMasked = maskCorporateNumber(owner.corporateNumber);
+        } else {
+          corporateNumberMasked = null;
+        }
+      }
+
       return {
         id: owner.id,
         name: owner.name,
         address: owner.address ?? null,
         zip: owner.zip ?? null,
         phone: owner.phone ?? null,
+        corporateNumberMasked,
         hasNote: !!owner.note,
         hasExternalLinkKey: !!owner.externalLinkKey,
         version: owner.version,

@@ -1986,6 +1986,13 @@ export interface OwnerCorrectionCandidate {
   address: string | null;
   zip: string | null;
   phone: string | null;
+  /**
+   * Phase E: owner_corporate_number の display-level に従ったマスク済法人番号。
+   * - full → 生値
+   * - masked/partial → 先頭4桁+マスク
+   * - hidden または Owner.corporateNumber が null → null
+   */
+  corporateNumberMasked: string | null;
   hasNote: boolean;
   hasExternalLinkKey: boolean;
   version: number;
@@ -2028,5 +2035,71 @@ export async function fetchOwnerCorrectionCandidates(
   }
   return apiFetch<OwnerCorrectionCandidatesResponse>(
     `/api/admin/owners/correction-candidates?type=${type}`,
+  );
+}
+
+// ---------- Phase E: 法人番号混入 candidate (dry-run) ----------
+
+export type CorporateCandidateFilterType =
+  | "all"
+  | "missing"
+  | "conflict"
+  | "multi"
+  | "same";
+
+export interface CorporateCandidateRowDTO {
+  ownerId: string;
+  ownerNameMasked: string | null;
+  ownerAddressMasked: string | null;
+  existingCorporateNumberMasked: string | null;
+  candidateCorporateNumberMasked: string | null;
+  candidateCount: 1 | "many";
+  detectedIn: Array<"name" | "address" | "note">;
+  type: "missing" | "same" | "conflict" | "multi";
+  version: number;
+  detailUrl: string;
+}
+
+export interface CorporateCandidatesResponse {
+  type: CorporateCandidateFilterType;
+  candidates: CorporateCandidateRowDTO[];
+  summary: {
+    missing: number;
+    conflict: number;
+    multi: number;
+    same: number;
+    totalCandidates: number;
+  };
+  hasNextPage: boolean;
+  nextCursor: string | null;
+  truncated: boolean;
+}
+
+export async function fetchCorporateCandidates(
+  type: CorporateCandidateFilterType = "all",
+  options?: { limit?: number; cursor?: string | null },
+): Promise<CorporateCandidatesResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      type,
+      candidates: [],
+      summary: {
+        missing: 0,
+        conflict: 0,
+        multi: 0,
+        same: 0,
+        totalCandidates: 0,
+      },
+      hasNextPage: false,
+      nextCursor: null,
+      truncated: false,
+    };
+  }
+  const params = new URLSearchParams({ type });
+  if (options?.limit != null) params.set("limit", String(options.limit));
+  if (options?.cursor) params.set("cursor", options.cursor);
+  return apiFetch<CorporateCandidatesResponse>(
+    `/api/admin/owners/correction/corporate-number-candidates?${params.toString()}`,
   );
 }
