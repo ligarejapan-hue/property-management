@@ -8,8 +8,13 @@
 
 import fs from "fs/promises";
 import path from "path";
-import type { StorageAdapter, StorageUploadResult } from "./types";
+import type {
+  StorageAdapter,
+  StorageReadResult,
+  StorageUploadResult,
+} from "./types";
 import { resolveSafeUploadPath } from "./local-paths";
+import { getMimeFromExtension } from "./mime";
 
 export class LocalStorageAdapter implements StorageAdapter {
   async upload(
@@ -42,5 +47,28 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getUrl(key: string): Promise<string> {
     return `/uploads/${key.replace(/\\/g, "/")}`;
+  }
+
+  /**
+   * Phase 2: 実体取得。
+   * - 不正な key（path traversal 等）は resolveSafeUploadPath が throw
+   * - 存在しない / ディレクトリの場合は null
+   * - Content-Type は拡張子から推定（local は実体に MIME 情報を持たない）
+   */
+  async read(key: string): Promise<StorageReadResult | null> {
+    const filePath = resolveSafeUploadPath(key);
+    let stat;
+    try {
+      stat = await fs.stat(filePath);
+    } catch {
+      return null;
+    }
+    if (!stat.isFile()) return null;
+    const body = await fs.readFile(filePath);
+    return {
+      body,
+      contentType: getMimeFromExtension(key),
+      size: stat.size,
+    };
   }
 }

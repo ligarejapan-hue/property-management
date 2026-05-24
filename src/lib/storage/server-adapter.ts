@@ -10,7 +10,12 @@
  *   STORAGE_SERVER_BUCKET   - Optional bucket / namespace (default: "property-management")
  */
 
-import type { StorageAdapter, StorageUploadResult } from "./types";
+import type {
+  StorageAdapter,
+  StorageReadResult,
+  StorageUploadResult,
+} from "./types";
+import { DEFAULT_BINARY_MIME } from "./mime";
 
 export class ServerStorageAdapter implements StorageAdapter {
   private serverUrl: string;
@@ -116,5 +121,33 @@ export class ServerStorageAdapter implements StorageAdapter {
 
     const data = (await res.json()) as { url: string };
     return data.url;
+  }
+
+  /**
+   * Phase 2: 実体取得。mock-storage-server.mjs の `GET /:bucket/:key` と整合。
+   * - 404 → null
+   * - 非 2xx → throw
+   * - 2xx → Buffer + Content-Type ヘッダ
+   */
+  async read(key: string): Promise<StorageReadResult | null> {
+    const url = `${this.serverUrl}/${encodeURIComponent(this.bucket)}/${key
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "Unknown error");
+      throw new Error(
+        `Storage read failed (HTTP ${res.status}): ${errorText}`,
+      );
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    const body = Buffer.from(arrayBuffer);
+    const contentType =
+      res.headers.get("content-type") ?? DEFAULT_BINARY_MIME;
+    return { body, contentType, size: body.length };
   }
 }
