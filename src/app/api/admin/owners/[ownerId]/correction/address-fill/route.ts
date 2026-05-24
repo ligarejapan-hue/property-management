@@ -14,6 +14,7 @@ import {
   checkAddressFillSafety,
   resolveReceptionOwnerEntry,
   extractAddressFromRecoveredOwner,
+  isOwnerAddressEffectivelyEmpty,
   type ExtractAddressResult,
 } from "@/lib/owner-correction";
 import {
@@ -246,21 +247,38 @@ export async function POST(
     const newAddress = safety.address;
 
     // transaction: Owner update + ChangeLog
-    // updateMany の where に address 条件を含め、既存住所への上書きを防止する。
-    // version + 1 を先に計算。transaction が throw すれば newVersion は使われない。
-    //
-    // 【制限】where 条件は null / "" のみ。空白のみ住所（例: "   "）は事前チェックで
-    // trim().length === 0 として補完対象とするが、Prisma の updateMany では
-    // DB 側の TRIM() を where に組み込めないため、空白のみ住所が来ると
-    // count=0 → CONFLICT になる。空白のみ住所は通常データとして稀なため
-    // Phase 1 ではコメントで限界を明記し、対応は Phase 2 以降とする。
+    // Phase 2-B: 既存の where 条件は `address: null / ""` のみで、半角/全角空白や
+    // タブのみの address を取りこぼしていた。tx 内で `findUnique` → helper による
+    // 「実質空欄」判定 → 現値そのものを where に組み込んだ updateMany で race-safe に
+    // 補完できるよう変更する。
+    //   - id + version + address(現値) の完全一致を要求するため、別 tx で先に
+    //     address が書き換わっていた場合は count=0 → CONFLICT になる
+    //   - "住所あり" 拒否は helper の事前判定で前段の 409 ADDRESS_ALREADY_SET 経路
+    //     に倒す（updateMany の race 後段でも同じ理由を判別する）
     const newVersion = version + 1;
     await prisma.$transaction(async (tx) => {
+      const before = await tx.owner.findUnique({
+        where: { id: ownerId },
+        select: { version: true, address: true },
+      });
+
+      if (!before) {
+        throw new ApiError(404, "所有者が見つかりません", "OWNER_NOT_FOUND");
+      }
+      if (before.version !== version) {
+        throw new ApiError(409, "他のユーザーが先に更新しました", "CONFLICT");
+      }
+      if (!isOwnerAddressEffectivelyEmpty(before.address)) {
+        throw new ApiError(409, "住所はすでに設定されています", "ADDRESS_ALREADY_SET");
+      }
+
       const result = await tx.owner.updateMany({
         where: {
           id: ownerId,
           version,
-          OR: [{ address: null }, { address: "" }],
+          // 現値そのものを where に入れることで他 tx の差し替えを検出する。
+          // null / "" / 空白文字列いずれも、findUnique で取得した値と完全一致を要求。
+          address: before.address,
         },
         data: {
           address: newAddress,
@@ -269,12 +287,12 @@ export async function POST(
       });
 
       if (result.count === 0) {
-        // version mismatch または address がすでに入っている
+        // version 一致だが address が race で変わったケースのみここに到達。
         const current = await tx.owner.findUnique({
           where: { id: ownerId },
           select: { version: true, address: true },
         });
-        if (current && current.address && current.address.trim().length > 0) {
+        if (current && !isOwnerAddressEffectivelyEmpty(current.address)) {
           throw new ApiError(409, "住所はすでに設定されています", "ADDRESS_ALREADY_SET");
         }
         throw new ApiError(409, "他のユーザーが先に更新しました", "CONFLICT");

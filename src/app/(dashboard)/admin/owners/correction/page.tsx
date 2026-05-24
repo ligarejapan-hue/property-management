@@ -450,6 +450,16 @@ function OwnerCorrectionPageInner() {
                               {TYPE_LABELS[t] ?? t}
                             </span>
                           ))}
+                          {/* Phase 2-B: address が DB 上 null ではないが trim 後 0 文字の場合のみ
+                              「空白のみ」バッジを追加表示。生の address 値は出さない。 */}
+                          {c.addressIsWhitespaceOnly && (
+                            <span
+                              data-testid="whitespace-only-address-badge"
+                              className="rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700"
+                            >
+                              空白のみ
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-3 py-2">

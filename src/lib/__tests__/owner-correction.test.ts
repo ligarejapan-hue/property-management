@@ -7,7 +7,46 @@ import {
   checkOwnerArchiveSafety,
   buildOwnerCorporateNumberDuplicateKey,
   buildOwnerExternalLinkKeyDuplicateKey,
+  isOwnerAddressEffectivelyEmpty,
 } from "../owner-correction";
+
+// ── Phase 2-B: isOwnerAddressEffectivelyEmpty ───────────────────────────────
+
+describe("isOwnerAddressEffectivelyEmpty (Phase 2-B)", () => {
+  it("null は true", () => {
+    expect(isOwnerAddressEffectivelyEmpty(null)).toBe(true);
+  });
+  it("undefined は true", () => {
+    expect(isOwnerAddressEffectivelyEmpty(undefined)).toBe(true);
+  });
+  it("空文字は true", () => {
+    expect(isOwnerAddressEffectivelyEmpty("")).toBe(true);
+  });
+  it("半角空白のみは true", () => {
+    expect(isOwnerAddressEffectivelyEmpty("  ")).toBe(true);
+  });
+  it("全角空白のみは true（ECMAScript 仕様で trim 除去対象）", () => {
+    expect(isOwnerAddressEffectivelyEmpty("　")).toBe(true);
+    expect(isOwnerAddressEffectivelyEmpty("　　")).toBe(true);
+  });
+  it("タブのみは true", () => {
+    expect(isOwnerAddressEffectivelyEmpty("\t")).toBe(true);
+  });
+  it("改行のみは true", () => {
+    expect(isOwnerAddressEffectivelyEmpty("\n")).toBe(true);
+    expect(isOwnerAddressEffectivelyEmpty("\r\n")).toBe(true);
+  });
+  it("混合空白（半角・全角・タブ・改行）のみは true", () => {
+    expect(isOwnerAddressEffectivelyEmpty(" 　 \t\n")).toBe(true);
+  });
+  it("通常住所は false", () => {
+    expect(isOwnerAddressEffectivelyEmpty("東京都千代田区")).toBe(false);
+  });
+  it("前後に空白がある通常住所は false", () => {
+    expect(isOwnerAddressEffectivelyEmpty("  東京都千代田区  ")).toBe(false);
+    expect(isOwnerAddressEffectivelyEmpty("　東京都千代田区　")).toBe(false);
+  });
+});
 
 // ── Phase 2-A: buildOwnerCorporateNumberDuplicateKey ─────────────────────────
 

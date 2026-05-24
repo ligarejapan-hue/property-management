@@ -14,6 +14,26 @@ import { normalizeName, normalizeAddress } from "./normalize";
 import { normalizeCorporateNumber } from "./corporate-number";
 
 // ---------------------------------------------------------------------------
+// Phase 2-B: Owner.address「実質空欄」判定 helper
+// ---------------------------------------------------------------------------
+//
+// 既存の判定 (`addr == null || addr.trim().length === 0` 系) を 1 箇所に集約する。
+// String.prototype.trim() は ECMAScript 仕様で全角空白 　・タブ・改行・
+// 各種制御文字を除去対象に含むため、追加の正規化は不要。
+//
+// 用途:
+//   - correction-candidates の address_null タブ判定
+//   - address-fill の補完可否判定 (race-safe な current.address exact match と併用)
+//   - archive の addressMissing フラグ
+// 戻り値は boolean のみで Owner PII は含まない。
+export function isOwnerAddressEffectivelyEmpty(
+  addr: string | null | undefined,
+): boolean {
+  if (addr == null) return true;
+  return addr.trim().length === 0;
+}
+
+// ---------------------------------------------------------------------------
 // Phase 2-B: 重複候補グルーピングキー（correction-candidates と merge-preview で共有）
 // ---------------------------------------------------------------------------
 //
@@ -243,8 +263,8 @@ export type AddressFillBlockReason =
 export function checkAddressFillSafety(
   input: AddressFillSafetyCheckInput,
 ): AddressFillSafetyResult {
-  const addr = input.currentAddress;
-  if (addr !== null && addr !== undefined && addr.trim().length > 0) {
+  // Phase 2-B: 全角空白などを含めた「実質空欄」判定を helper に統一
+  if (!isOwnerAddressEffectivelyEmpty(input.currentAddress)) {
     return { ok: false, reason: "address_already_set" };
   }
   if (input.importRowCount === 0) {

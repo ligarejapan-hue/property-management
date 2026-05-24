@@ -14,6 +14,7 @@ import {
   buildOwnerDuplicateCandidateKey,
   buildOwnerCorporateNumberDuplicateKey,
   buildOwnerExternalLinkKeyDuplicateKey,
+  isOwnerAddressEffectivelyEmpty,
 } from "@/lib/owner-correction";
 import { maskCorporateNumber } from "@/lib/display-level";
 
@@ -72,6 +73,12 @@ type Candidate = {
    * > external_link_key）。groupId が null なら null。
    */
   duplicateMatchedBy: DuplicateMatchedBy | null;
+  /**
+   * Phase 2-B: address が DB 上 null ではないが trim 後に空（半角/全角空白・タブ等のみ）
+   * の場合に true。既存 types/address_null は維持しつつ「実質空欄」を区別したい
+   * UI 用フラグ。PII は含まない (boolean のみ)。
+   */
+  addressIsWhitespaceOnly: boolean;
 };
 
 // ---------- GET /api/admin/owners/correction-candidates ----------
@@ -199,8 +206,13 @@ export async function GET(request: NextRequest) {
         blockReasons.push("import_row_not_success");
 
       const isOrphan = propertyOwnerCount === 0;
-      const isAddressNull =
-        owner.address === null || owner.address.trim() === "";
+      // Phase 2-B: 全角空白 / タブ等のみの address も「実質空欄」として扱う。
+      // 既存 address_null 判定の意図と整合（trim 後 0 文字 = 空欄）。
+      const isAddressNull = isOwnerAddressEffectivelyEmpty(owner.address);
+      // address は DB 上は非 null だが trim 後 0 文字、というケースのみ true。
+      // UI バッジで「空白のみ」と「null」を区別するために返す。
+      const addressIsWhitespaceOnly =
+        owner.address !== null && owner.address.trim() === "";
 
       const types: string[] = [];
       if (isOrphan) types.push("orphan");
@@ -259,6 +271,7 @@ export async function GET(request: NextRequest) {
         duplicateGroupId: null,
         duplicateGroupSize: null,
         duplicateMatchedBy: null,
+        addressIsWhitespaceOnly,
         blockReasons,
         recommendedAction,
         types,

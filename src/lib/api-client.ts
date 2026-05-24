@@ -2052,6 +2052,11 @@ export interface OwnerCorrectionCandidate {
     | "corporate_number"
     | "external_link_key"
     | null;
+  /**
+   * Phase 2-B: address が DB 上 null ではないが trim 後に空欄
+   * （半角/全角空白・タブ等のみ）の場合 true。boolean のみで PII を含まない。
+   */
+  addressIsWhitespaceOnly?: boolean;
 }
 
 export interface OwnerCorrectionCandidatesResponse {

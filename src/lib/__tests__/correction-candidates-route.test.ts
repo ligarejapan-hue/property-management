@@ -1874,3 +1874,72 @@ describe("GET correction-candidates: Codex P1 (round 3) non-name duplicate demot
     }
   });
 });
+
+// ── Phase 2-B: addressIsWhitespaceOnly ─────────────────────────────────────
+
+describe("GET correction-candidates: Phase 2-B 空白のみ address", () => {
+  it("address が半角空白のみの owner は address_null に出る + addressIsWhitespaceOnly=true", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "山田太郎",
+        address: "   ",
+        propertyOwnerCount: 0,
+      }),
+    ]);
+    const res = await GET(makeRequest("address_null"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].types).toContain("address_null");
+    expect(json.candidates[0].addressIsWhitespaceOnly).toBe(true);
+  });
+
+  it("address が全角空白のみの owner も address_null + addressIsWhitespaceOnly=true", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "山田太郎",
+        address: "　　",
+        propertyOwnerCount: 0,
+      }),
+    ]);
+    const res = await GET(makeRequest("address_null"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].addressIsWhitespaceOnly).toBe(true);
+  });
+
+  it("address が null の owner は address_null だが addressIsWhitespaceOnly=false", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "山田太郎",
+        address: null,
+        propertyOwnerCount: 0,
+      }),
+    ]);
+    const res = await GET(makeRequest("address_null"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].types).toContain("address_null");
+    expect(json.candidates[0].addressIsWhitespaceOnly).toBe(false);
+  });
+
+  it("通常住所の owner は addressIsWhitespaceOnly=false かつ address_null に出ない", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "山田太郎",
+        address: "東京都港区1-1",
+        propertyOwnerCount: 0,
+      }),
+    ]);
+    const resAll = await GET(makeRequest("all"));
+    const jsonAll = await resAll.json();
+    // orphan で拾われる
+    expect(jsonAll.candidates).toHaveLength(1);
+    const c = jsonAll.candidates[0];
+    expect(c.types).not.toContain("address_null");
+    expect(c.addressIsWhitespaceOnly).toBe(false);
+  });
+});
