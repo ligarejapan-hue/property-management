@@ -39,17 +39,9 @@ import type {
   StorageUploadResult,
 } from "./types";
 import { DEFAULT_BINARY_MIME } from "./mime";
-
-function isValidStorageKey(key: string): boolean {
-  if (key === "" || key === "." || key === "..") return false;
-  const normalized = key.replace(/\\/g, "/");
-  if (normalized.startsWith("/")) return false;
-  // 連続スラッシュ / . / .. のいずれかの segment が含まれる key を拒否
-  for (const seg of normalized.split("/")) {
-    if (seg === "" || seg === "." || seg === "..") return false;
-  }
-  return true;
-}
+// Codex P1: traversal validation を全 adapter 共通 helper に統一。
+// 個別 helper を抱えると挙動が分岐するため import に置換。
+import { assertValidStorageKey, isValidStorageKey } from "./key-validation";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -86,11 +78,7 @@ export class S3Adapter implements StorageAdapter {
     file: Buffer,
     options: { key: string; mimeType: string; fileName: string },
   ): Promise<StorageUploadResult> {
-    if (!isValidStorageKey(options.key)) {
-      throw new Error(
-        `Invalid storage key (path traversal blocked): ${options.key}`,
-      );
-    }
+    assertValidStorageKey(options.key);
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
@@ -129,9 +117,7 @@ export class S3Adapter implements StorageAdapter {
   }
 
   async read(key: string): Promise<StorageReadResult | null> {
-    if (!isValidStorageKey(key)) {
-      throw new Error(`Invalid storage key (path traversal blocked): ${key}`);
-    }
+    assertValidStorageKey(key);
     let res;
     try {
       res = await this.client.send(
