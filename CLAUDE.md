@@ -19,6 +19,14 @@
 - 重要タスクでは Plan 提示後に停止し、承認を待ってから Implement に進む
 - DB schema 変更 / migration は明示指示がある場合のみ実行する
 
+## 並列作業
+- 複数 Claude を同じ作業ディレクトリで動かさない
+- 各 Claude に専用 worktree を割り当てる
+- 各 worktree は 1 ブランチ専用にする
+- Claude に勝手な `git switch` をさせない
+- 作業完了後は commit / push / `git status` clean を確認する
+- PR マージ後に不要 worktree を削除する
+
 ## ビルド・テスト
 - 実装後は必ず `npm run build` と `npx vitest run` を実行する
 - ビルド・テストが通らない状態で commit / push しない
