@@ -9,6 +9,8 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { getStorage } from "@/lib/storage";
+import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 
 // ---------- DELETE /api/buildings/[id]/photos/[photoId] ----------
 
@@ -33,7 +35,24 @@ export async function DELETE(
       throw new ApiError(404, "写真が見つかりません", "NOT_FOUND");
     }
 
+    const fileUrlBeforeDelete = photo.fileUrl;
     await prisma.buildingPhoto.delete({ where: { id: photoId } });
+
+    // best-effort: DB 削除成功後に実体ファイルも消す。失敗は orphan を残すだけで
+    // ユーザ向け成功レスポンスは維持する（DB が source of truth）。
+    const storageKey = extractStorageKeyFromUrl(fileUrlBeforeDelete);
+    if (storageKey != null) {
+      try {
+        await getStorage().delete(storageKey);
+      } catch (err) {
+        console.error("[photo_delete] storage.delete failed", {
+          route: "DELETE /api/buildings/[id]/photos/[photoId]",
+          photoId,
+          buildingId: id,
+          errorName: err instanceof Error ? err.name : "Unknown",
+        });
+      }
+    }
 
     await writeAuditLog({
       userId: session.id,
