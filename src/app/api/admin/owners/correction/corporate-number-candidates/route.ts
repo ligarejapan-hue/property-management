@@ -83,12 +83,14 @@ export async function GET(request: NextRequest) {
 
     const displayConfig = await getOwnerDisplayConfig(session.id);
 
-    // Codex P1 対応: owner_corporate_number=full を必須にする。
-    // missing / same / conflict の分類は「raw Owner.corporateNumber と検出候補の exact match」
-    // を漏らすため、full 未満の権限ユーザーには候補一覧自体を返さない。
-    // - full → 通過、生 corporateNumber を decideCorporateImport に渡してよい
-    // - それ以外（edit/read/masked/partial/hidden） → 403
-    if (displayConfig.corporateNumber !== "full") {
+    // Codex 再修正 P2 対応:
+    //   - owner_corporate_number=hidden → 403（一覧そのものを見せない）
+    //   - full → 通過、候補・既存法人番号は生値返却
+    //   - edit / read / masked / partial → 通過、ただし候補値は maskCorporateNumber で常にマスク
+    // missing / same / conflict 分類は raw との exact match を比較するため、
+    // edit/read/masked/partial ユーザーには分類結果（type）から exact match が
+    // 推測される運用上のトレードオフを受け入れる（事前合意）。
+    if (displayConfig.corporateNumber === "hidden") {
       throw new ApiError(
         403,
         "法人番号の閲覧権限がありません",

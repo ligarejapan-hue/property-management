@@ -74,10 +74,16 @@ export interface CandidateDisplayConfig {
 }
 
 /**
- * owner_note を法人番号検出の入力に渡してよいかを判定する。
+ * フィールド値を法人番号検出の入力に渡してよいかを判定する。
  * raw-visible = full / read / edit のみ true。
+ * masked / partial / hidden は raw 値からの候補抽出を行わない
+ * （マスク済みの値から推測可能な情報を漏らさないため）。
+ *
+ * Codex P1/P2 対応で note / name / address いずれにも適用する。
  */
-function isNoteRawVisible(level: CandidateDisplayConfig["note"]): boolean {
+function isRawVisible(
+  level: CandidateDisplayConfig[keyof CandidateDisplayConfig],
+): boolean {
   return level === "full" || level === "read" || level === "edit";
 }
 
@@ -117,17 +123,23 @@ export function classifyOwnerCorporateCandidate(
   owner: OwnerForCandidate,
   displayConfig: CandidateDisplayConfig,
 ): CorporateCandidateRow | null {
-  // Codex P1 対応: owner_note が hidden / masked / partial のユーザーには
-  // note を検出入力から除外する。これにより:
-  //  - detectedIn に "note" が漏れない
-  //  - hidden note のみに 13桁が含まれる Owner は候補化されない
-  //  - hidden note 由来の競合・複数候補にもならない（multi/conflict 経由の bypass 防止）
-  const noteForDetect = isNoteRawVisible(displayConfig.note) ? owner.note : null;
+  // Codex P1/P2 対応: name / address / note いずれも、display-level が
+  // raw-visible (full/read/edit) のときのみ検出入力に渡す。
+  // hidden/masked/partial のフィールドから 13桁を抽出すると、マスク表示と
+  // 矛盾して raw 値の中身を推測できてしまうため。
+  //   - detectedIn に該当フィールド名が漏れない
+  //   - そのフィールドのみに 13桁が含まれる Owner は候補化されない
+  //   - そのフィールド由来の競合・複数候補にもならない（multi/conflict 経由の bypass 防止）
+  const nameForDetect = isRawVisible(displayConfig.name) ? owner.name : null;
+  const addressForDetect = isRawVisible(displayConfig.address)
+    ? owner.address
+    : null;
+  const noteForDetect = isRawVisible(displayConfig.note) ? owner.note : null;
 
   // detect は内部で normalize 済み 13桁 dedup 配列を返す
   const detect = detectCorporateNumberInOwnerLike({
-    name: owner.name,
-    address: owner.address,
+    name: nameForDetect,
+    address: addressForDetect,
     note: noteForDetect,
   });
 
@@ -136,9 +148,10 @@ export function classifyOwnerCorporateCandidate(
 
   // decideCorporateImport の action から Phase E 種別へ写像。
   // PR #34 helper の action を再利用するため挙動は単一の source of truth。
-  // ここでも noteForDetect を渡し、note 権限がなければ note 由来の候補が出ないようにする。
+  // raw-visible でないフィールドを除外して渡すことで、note 権限などに依存しない
+  // 安定した分類になる。
   const decision: CorporateImportDecision = decideCorporateImport(
-    { name: owner.name, address: owner.address, note: noteForDetect },
+    { name: nameForDetect, address: addressForDetect, note: noteForDetect },
     owner.corporateNumber,
   );
 

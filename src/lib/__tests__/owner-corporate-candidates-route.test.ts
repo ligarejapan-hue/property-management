@@ -300,9 +300,32 @@ describe("GET /corporate-number-candidates — pagination", () => {
   });
 });
 
-describe("GET /corporate-number-candidates — Codex P1: owner_corporate_number full ガード", () => {
-  // missing/same/conflict の exact match を漏らさないため full 必須。
-  // full のみ 200、それ以外は 403 を返す。
+describe("GET /corporate-number-candidates — Codex 再修正 P2: hidden のみ 403、それ以外はマスク返却", () => {
+  // hidden → 403、full → 生値、edit/read/masked/partial → 200 でマスク返却。
+  // missing/same/conflict 分類は raw との exact match を比較するため、
+  // 非 full ユーザーには分類結果から match 情報が漏れる運用上のトレードオフを受容。
+
+  function ownerForType(): Parameters<typeof pm.owner.findMany>[0] extends never
+    ? never
+    : Array<{
+        id: string;
+        name: string;
+        address: string | null;
+        note: string | null;
+        corporateNumber: string | null;
+        version: number;
+      }> {
+    return [
+      {
+        id: "o-1",
+        name: `株式会社 ${CN}`,
+        address: null,
+        note: null,
+        corporateNumber: CN_OTHER,
+        version: 1,
+      },
+    ] as never;
+  }
 
   it("owner_corporate_number=full → 200 + 法人番号生値返却", async () => {
     pm.owner.findMany.mockResolvedValue([
@@ -321,74 +344,72 @@ describe("GET /corporate-number-candidates — Codex P1: owner_corporate_number 
     expect(json.candidates[0].candidateCorporateNumberMasked).toBe(CN);
   });
 
-  it("owner_corporate_number=edit → 403", async () => {
+  it("owner_corporate_number=edit → 200 + マスク済み候補返却", async () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
       ...DISPLAY_FULL,
       corporateNumber: "edit",
     });
-    const res = await GET(url());
-    expect(res.status).toBe(403);
-    // 403 後は分類処理に到達しないことを確認（owner.findMany が呼ばれない）
-    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    pm.owner.findMany.mockResolvedValue(ownerForType());
+    const res = await GET(url("?type=conflict"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    const row = json.candidates[0];
+    expect(row.candidateCorporateNumberMasked).not.toBe(CN);
+    expect(row.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(row.existingCorporateNumberMasked).not.toBe(CN_OTHER);
+    expect(row.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
   });
 
-  it("owner_corporate_number=read → 403", async () => {
+  it("owner_corporate_number=read → 200 + マスク済み候補返却", async () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
       ...DISPLAY_FULL,
       corporateNumber: "read",
     });
-    const res = await GET(url());
-    expect(res.status).toBe(403);
-    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    pm.owner.findMany.mockResolvedValue(ownerForType());
+    const res = await GET(url("?type=conflict"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    const row = json.candidates[0];
+    expect(row.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(row.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
   });
 
-  it("owner_corporate_number=masked → 403", async () => {
+  it("owner_corporate_number=masked → 200 + マスク済み候補返却", async () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
       ...DISPLAY_FULL,
       corporateNumber: "masked",
     });
-    const res = await GET(url());
-    expect(res.status).toBe(403);
-    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    pm.owner.findMany.mockResolvedValue(ownerForType());
+    const res = await GET(url("?type=conflict"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    const row = json.candidates[0];
+    expect(row.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(row.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
   });
 
-  it("owner_corporate_number=partial → 403", async () => {
+  it("owner_corporate_number=partial → 200 + マスク済み候補返却", async () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
       ...DISPLAY_FULL,
       corporateNumber: "partial",
     });
-    const res = await GET(url());
-    expect(res.status).toBe(403);
-    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    pm.owner.findMany.mockResolvedValue(ownerForType());
+    const res = await GET(url("?type=conflict"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    const row = json.candidates[0];
+    expect(row.candidateCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
+    expect(row.existingCorporateNumberMasked).toMatch(/^\d{4}\*+$/);
   });
 
-  it("owner_corporate_number=hidden → 403", async () => {
+  it("owner_corporate_number=hidden → 403（一覧そのものを返さない）", async () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
       ...DISPLAY_FULL,
       corporateNumber: "hidden",
     });
     const res = await GET(url());
     expect(res.status).toBe(403);
-    expect(pm.owner.findMany).not.toHaveBeenCalled();
-  });
-
-  it("403 のとき raw owner.corporateNumber を decideCorporateImport に渡さない（findMany 不発で間接担保）", async () => {
-    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
-      ...DISPLAY_FULL,
-      corporateNumber: "read",
-    });
-    pm.owner.findMany.mockResolvedValue([
-      {
-        id: "o-1",
-        name: `株式会社 ${CN}`,
-        address: null,
-        note: null,
-        corporateNumber: CN_OTHER,
-        version: 1,
-      },
-    ]);
-    const res = await GET(url());
-    expect(res.status).toBe(403);
+    // hidden は分類処理にも到達しない（findMany 不発）
     expect(pm.owner.findMany).not.toHaveBeenCalled();
   });
 });

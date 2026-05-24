@@ -29,19 +29,22 @@ const FULL: CandidateDisplayConfig = {
   note: "full",
 };
 
+// MASKED: corporateNumber のみ masked、name/address/note は raw-visible に保つ
+// （raw-visible でないと検出自体が走らないため、corporateNumber マスキング検証ができない）。
+// name/address/note 自身の raw-visible ガードは別 describe で扱う。
 const MASKED: CandidateDisplayConfig = {
-  name: "masked",
-  address: "masked",
+  name: "full",
+  address: "full",
   corporateNumber: "masked",
-  // note も masked: note 由来の検出は行わない（Codex P1 仕様）
-  note: "masked",
+  note: "full",
 };
 
+// HIDDEN: corporateNumber のみ hidden、それ以外の確認用は別途
 const HIDDEN: CandidateDisplayConfig = {
-  name: "hidden",
-  address: "hidden",
+  name: "full",
+  address: "full",
   corporateNumber: "hidden",
-  note: "hidden",
+  note: "full",
 };
 
 function owner(o: Partial<OwnerForCandidate>): OwnerForCandidate {
@@ -206,12 +209,14 @@ describe("classifyOwnerCorporateCandidate — display-level マスキング", ()
   });
 
   it("name/address も display-level に従いマスクされる", () => {
+    // note (raw-visible=full) で検出を駆動し、name/address は masked で表示マスク確認
     const result = classifyOwnerCorporateCandidate(
       owner({
-        name: `株式会社 法人番号:${CN}`,
+        name: "株式会社サンプル",
         address: "東京都千代田区丸の内1-1-1",
+        note: `法人番号:${CN}`,
       }),
-      MASKED,
+      { ...FULL, name: "masked", address: "masked" },
     );
     // maskValue(value, "masked") は末尾4桁残し → "***" + last4
     expect(result?.ownerNameMasked).toMatch(/^\*+/);
@@ -221,13 +226,114 @@ describe("classifyOwnerCorporateCandidate — display-level マスキング", ()
   it("hidden → name/address も null", () => {
     const result = classifyOwnerCorporateCandidate(
       owner({
-        name: `株式会社 ${CN}`,
+        name: "株式会社サンプル",
         address: "東京都千代田区",
+        note: `法人番号:${CN}`,
       }),
-      HIDDEN,
+      { ...FULL, name: "hidden", address: "hidden" },
     );
     expect(result?.ownerNameMasked).toBeNull();
     expect(result?.ownerAddressMasked).toBeNull();
+  });
+});
+
+// ---- Codex 再修正 P2: name/address にも raw-visible ガード ----
+describe("classifyOwnerCorporateCandidate — Codex P2: owner_name/address 権限", () => {
+  it("owner_name=hidden で name のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 法人番号:${CN}`, address: null, note: null }),
+      { ...FULL, name: "hidden" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_name=masked で name のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 ${CN}`, address: null, note: null }),
+      { ...FULL, name: "masked" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_name=partial で name のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 ${CN}` }),
+      { ...FULL, name: "partial" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_name=read で name のみに法人番号がある owner は候補化される", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({ name: `株式会社 ${CN}` }),
+      { ...FULL, name: "read" },
+    );
+    expect(result?.type).toBe("missing");
+    expect(result?.detectedIn).toEqual(["name"]);
+  });
+
+  it("owner_address=hidden で address のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({
+        name: "山田太郎",
+        address: `東京都 法人番号:${CN}`,
+        note: null,
+      }),
+      { ...FULL, address: "hidden" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_address=masked で address のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({
+        name: "山田太郎",
+        address: `東京都 ${CN}`,
+        note: null,
+      }),
+      { ...FULL, address: "masked" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_address=partial で address のみに法人番号がある owner は候補化しない", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({
+        name: "山田太郎",
+        address: `東京都 ${CN}`,
+        note: null,
+      }),
+      { ...FULL, address: "partial" },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("owner_address=hidden でも note に法人番号があれば候補化、detectedIn から address を除外", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({
+        name: "山田太郎",
+        address: `東京都 ${CN_OTHER}`,
+        note: `法人番号:${CN}`,
+      }),
+      { ...FULL, address: "hidden" },
+    );
+    expect(result?.type).toBe("missing");
+    expect(result?.detectedIn).toEqual(["note"]);
+    expect(result?.detectedIn).not.toContain("address");
+  });
+
+  it("複数フィールド非 raw-visible でも raw-visible なフィールドに候補があれば候補化", () => {
+    const result = classifyOwnerCorporateCandidate(
+      owner({
+        name: `株式会社 ${CN}`,
+        address: `東京都 ${CN_OTHER}`,
+        note: `note ${CN_OTHER}`,
+      }),
+      { ...FULL, address: "masked", note: "hidden" },
+    );
+    // name から CN のみ検出される
+    expect(result?.type).toBe("missing");
+    expect(result?.detectedIn).toEqual(["name"]);
   });
 });
 
