@@ -50,3 +50,6 @@ next-env.d.ts
 
 # mock storage / tmp
 /tmp/mock-storage/
+
+# claude worktrees (do not commit; .claude/ 全体は ignore しない)
+.claude/worktrees/
