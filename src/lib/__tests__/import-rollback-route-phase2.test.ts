@@ -201,4 +201,82 @@ describe("rollback route Phase 2 — source-assertion", () => {
       /tx\.property\.update\(\{\s*where:\s*\{\s*id:\s*row\./,
     );
   });
+
+  // ---- Codex round 3 P2: execute summary を実適用件数ベースにする ----
+  it("Codex P2 (round 3): execute response の summary.restorable は restoredPropertyCount を使う", () => {
+    // 2 つの apiResponse がある。後者が execute 用 (executed: true)。
+    // executed: true を含む方の summary.restorable が事前計画の restorePlans.length を
+    // 使っていないことを確認する。
+    const responses = routeSrc.match(/apiResponse\(\{[\s\S]*?\}\);/g);
+    expect(responses).not.toBeNull();
+    const executedResponse = responses!.find((r) => /executed:\s*true/.test(r));
+    expect(executedResponse).toBeDefined();
+    expect(executedResponse!).toMatch(/restorable:\s*restoredPropertyCount/);
+    expect(executedResponse!).toMatch(
+      /restorableFieldCount:\s*restoredFieldCount/,
+    );
+    // 実適用ベースなので、事前計画の restorePlans.length / restorableFieldCount を
+    // executed: true ブロックで使っていない
+    expect(executedResponse!).not.toMatch(/restorable:\s*restorePlans\.length/);
+  });
+
+  it("Codex P2 (round 3): dryRun response の summary は事前計画ベース (restorePlans.length)", () => {
+    // ineligible (baseSummary) 系の早期 return も executed: false なので、
+    // 事前計画 summary を持つ dryRun response は「restorable: restorePlans.length」を
+    // 含む方を特定する。
+    const responses = routeSrc.match(/apiResponse\(\{[\s\S]*?\}\);/g);
+    expect(responses).not.toBeNull();
+    const dryRunPrePlanned = responses!.find(
+      (r) =>
+        /executed:\s*false/.test(r) &&
+        /restorable:\s*restorePlans\.length/.test(r),
+    );
+    expect(dryRunPrePlanned).toBeDefined();
+    // 同じ block 内に事前計画用の restorableFieldCount 変数も使われる
+    expect(dryRunPrePlanned!).toMatch(/restorableFieldCount,/);
+  });
+
+  it("Codex P2 (round 3): execute 内で currentValues null の plan は blockedDetails に property_missing_at_execute で追加される", () => {
+    // if (!currentValues) ブロック直後に blockedDetails.push があり、
+    // reason に property_missing_at_execute が含まれる
+    expect(routeSrc).toMatch(
+      /if\s*\(!currentValues\)\s*\{[\s\S]{0,400}blockedDetails\.push\(\{[\s\S]{0,200}property_missing_at_execute/,
+    );
+    // 旧実装の `if (!currentValues) continue;` 単独形が残っていない
+    expect(routeSrc).not.toMatch(/if\s*\(!currentValues\)\s*continue\s*;/);
+  });
+
+  it("Codex P2 (round 3): execute response の restoreDetails は restoreRecordPayloads ベース (実適用)", () => {
+    // restoreDetailsApplied は restoreRecordPayloads.map で構築される
+    expect(routeSrc).toMatch(/restoreDetailsApplied[\s\S]{0,200}restoreRecordPayloads\.map/);
+    // executed: true の response 内で restoreDetails: restoreDetailsApplied
+    const responses = routeSrc.match(/apiResponse\(\{[\s\S]*?\}\);/g);
+    const executedResponse = responses!.find((r) => /executed:\s*true/.test(r));
+    expect(executedResponse!).toMatch(/restoreDetails:\s*restoreDetailsApplied/);
+  });
+
+  it("Codex P2 (round 3): property_missing_at_execute の reason に PII 値が含まれない", () => {
+    const reasonMatch = routeSrc.match(
+      /property_missing_at_execute[\s\S]{0,200}/,
+    );
+    expect(reasonMatch).not.toBeNull();
+    expect(reasonMatch![0]).not.toMatch(/\boldValue\b/);
+    expect(reasonMatch![0]).not.toMatch(/\bnewValue\b/);
+    expect(reasonMatch![0]).not.toMatch(/currentValue/);
+    expect(reasonMatch![0]).not.toMatch(/restoreValue/);
+  });
+
+  it("Codex P2 (round 3): AuditLog の restoredPropertyCount / restoredFieldCount は実適用カウント変数を使う", () => {
+    const detailMatch = routeSrc.match(
+      /writeAuditLog\(\{[\s\S]*?detail:\s*\{([\s\S]*?)\n\s*\},/,
+    );
+    expect(detailMatch).not.toBeNull();
+    const detailBody = detailMatch![1];
+    // restoredPropertyCount, restoredFieldCount を変数として参照（事前計画ベースの
+    // restorePlans.length / restorableFieldCount を直接使っていない）
+    expect(detailBody).toMatch(/restoredPropertyCount/);
+    expect(detailBody).toMatch(/restoredFieldCount/);
+    expect(detailBody).not.toMatch(/restorePlans\.length/);
+    expect(detailBody).not.toMatch(/\brestorableFieldCount\b/);
+  });
 });

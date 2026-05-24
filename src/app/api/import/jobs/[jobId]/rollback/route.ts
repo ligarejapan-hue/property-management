@@ -367,7 +367,19 @@ export async function POST(
             {},
           ),
         });
-        if (!currentValues) continue;
+        if (!currentValues) {
+          // P2 (round 3) 修正: dryRun では存在していた Property が execute 時点で
+          // 消えているケース（並行削除や直前の rollback 同時実行など）。
+          // 実適用集計から外し、blockedDetails に property_missing_at_execute を追加して
+          // summary.restorable と restoredPropertyCount が乖離しないようにする。
+          blockedDetails.push({
+            rowNumber: plan.rowNumbers[0],
+            action: "restore",
+            reason:
+              "実行時点で物件が存在しないため復元しません (property_missing_at_execute)",
+          });
+          continue;
+        }
         await tx.property.update({
           where: { id: plan.propertyId },
           data: restoreData,
@@ -424,18 +436,30 @@ export async function POST(
       },
     });
 
+    // P2 (round 3) 修正: execute 時の summary / restoreDetails は **実適用件数** ベース。
+    // transaction 中に property_missing_at_execute で skip された plan は除外され、
+    // summary.restorable と restoredPropertyCount が常に一致するようにする。
+    // (dryRun の summary は事前計画ベースのまま — 上の return apiResponse で対応済み)
+    const restoreDetailsApplied: RestoreFieldDetail[] = restoreRecordPayloads.map(
+      (p) => ({
+        rowNumber: p.rowNumbers[0],
+        rowNumbers: p.rowNumbers,
+        propertyId: p.propertyId,
+        fieldNames: p.fieldNames,
+      }),
+    );
     return apiResponse({
       alreadyRolledBack: false,
       eligible: true,
       summary: {
         deletable: deletable.length,
-        restorable: restorePlans.length,
-        restorableFieldCount,
+        restorable: restoredPropertyCount,
+        restorableFieldCount: restoredFieldCount,
         blocked: blockedDetails.length,
         skipped: skipCount,
       },
       blockedDetails,
-      restoreDetails,
+      restoreDetails: restoreDetailsApplied,
       executed: true,
       deletedCount,
       restoredPropertyCount,
