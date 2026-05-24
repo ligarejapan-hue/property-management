@@ -10,7 +10,13 @@
  *   STORAGE_SERVER_BUCKET   - Optional bucket / namespace (default: "property-management")
  */
 
-import type { StorageAdapter, StorageUploadResult } from "./types";
+import type {
+  StorageAdapter,
+  StorageReadResult,
+  StorageUploadResult,
+} from "./types";
+import { DEFAULT_BINARY_MIME } from "./mime";
+import { assertValidStorageKey, isValidStorageKey } from "./key-validation";
 
 export class ServerStorageAdapter implements StorageAdapter {
   private serverUrl: string;
@@ -40,6 +46,10 @@ export class ServerStorageAdapter implements StorageAdapter {
     file: Buffer,
     options: { key: string; mimeType: string; fileName: string },
   ): Promise<StorageUploadResult> {
+    // Codex P1: backend に key を渡す前に必ず traversal validation。
+    // encodeURIComponent("..") は ".." のままなので URL prefix の外へ抜ける
+    // 可能性があり、入力時点で reject する必要がある。
+    assertValidStorageKey(options.key);
     // Build multipart/form-data manually using the web FormData API
     const formData = new FormData();
     formData.append(
@@ -79,6 +89,9 @@ export class ServerStorageAdapter implements StorageAdapter {
   }
 
   async delete(key: string): Promise<void> {
+    // Codex P1: 不正な key は「既に存在しない」と同等に扱い、API を呼ばない
+    // （他 adapter と整合: LocalStorageAdapter / S3Adapter も同方針）。
+    if (!isValidStorageKey(key)) return;
     const res = await fetch(`${this.serverUrl}/delete`, {
       method: "DELETE",
       headers: {
@@ -98,6 +111,8 @@ export class ServerStorageAdapter implements StorageAdapter {
   }
 
   async getUrl(key: string): Promise<string> {
+    // Codex P1: 同上 — URL 組み立て前に traversal を reject。
+    assertValidStorageKey(key);
     // For public buckets: construct the URL directly
     // For private buckets: request a pre-signed URL from the server
     const res = await fetch(
@@ -116,5 +131,40 @@ export class ServerStorageAdapter implements StorageAdapter {
 
     const data = (await res.json()) as { url: string };
     return data.url;
+  }
+
+  /**
+   * Phase 2: 実体取得。mock-storage-server.mjs の `GET /:bucket/:key` と整合。
+   * - 404 → null
+   * - 非 2xx → throw
+   * - 2xx → Buffer + Content-Type ヘッダ
+   *
+   * Codex P1 (read 起因の指摘):
+   *   旧実装は key を encodeURIComponent して URL 末尾に連結していたが、
+   *   encodeURIComponent("..") は ".." のままなので server backend 側で
+   *   path normalize されると "/{bucket}" prefix の外へ抜ける可能性があった。
+   *   URL を組み立てる前に必ず traversal validation を行う。
+   */
+  async read(key: string): Promise<StorageReadResult | null> {
+    assertValidStorageKey(key);
+    const url = `${this.serverUrl}/${encodeURIComponent(this.bucket)}/${key
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "Unknown error");
+      throw new Error(
+        `Storage read failed (HTTP ${res.status}): ${errorText}`,
+      );
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    const body = Buffer.from(arrayBuffer);
+    const contentType =
+      res.headers.get("content-type") ?? DEFAULT_BINARY_MIME;
+    return { body, contentType, size: body.length };
   }
 }
