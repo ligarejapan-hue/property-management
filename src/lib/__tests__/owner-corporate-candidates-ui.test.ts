@@ -179,4 +179,33 @@ describe("admin/owners/correction page Phase E 法人番号タブ", () => {
     expect(pageSrc).not.toMatch(/sp\.set\("name"/);
     expect(pageSrc).not.toMatch(/sp\.set\("address"/);
   });
+
+  // ---- Codex P2 追加: 初回 mount で URL cursor を尊重 ----
+  it("Codex P2 追加: 初回マウントでは URL cursor を保持して load を呼ぶ", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // hasInitializedRef による初回判定がある
+    expect(body).toMatch(/hasInitializedRef\s*=\s*useRef\(false\)/);
+    // 初回: load(apiType, cursor) を呼ぶ（URL cursor をそのまま使う）
+    expect(body).toMatch(
+      /hasInitializedRef\.current\s*=\s*true;[\s\S]{0,200}load\(apiType,\s*cursor\)/,
+    );
+    // 2回目以降: setCursor(null) + setCursorStack([]) + load(apiType, null)
+    expect(body).toMatch(
+      /setCursor\(null\);[\s\S]{0,80}setCursorStack\(\[\]\);[\s\S]{0,80}load\(apiType,\s*null\)/,
+    );
+  });
+
+  it("Codex P2 追加: 初期 effect で load(apiType, null) に無条件上書きしない（旧バグ防止）", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // useEffect 内に hasInitializedRef のガードがあり、初回は load(apiType, cursor) を呼ぶ
+    expect(body).toMatch(
+      /useEffect\(\(\)\s*=>\s*\{[\s\S]{0,500}!hasInitializedRef\.current[\s\S]{0,200}load\(apiType,\s*cursor\)/,
+    );
+  });
 });

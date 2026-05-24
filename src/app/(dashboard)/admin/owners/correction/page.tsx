@@ -715,11 +715,27 @@ function CorporateNumberCandidatesPanel() {
     [],
   );
 
+  // Codex P2 追加修正: 初回マウント時は URL query の cursor を尊重して fetch する。
+  // 旧実装は無条件に setCursor(null) + load(apiType, null) していたため、
+  // `?tab=corporate_number&cursor=...` で戻ってきても 1 ページ目に戻ってしまっていた。
+  //
+  // hasInitializedRef で「初回 vs subFilter 切替」を区別する:
+  //   - 初回: URL から復元済の cursor (state) のまま load → 保存ページが復元される
+  //   - 2 回目以降の apiType 変更: cursor / cursorStack をリセットして 1 ページ目から
+  //
+  // cursorStack は URL から完全復元できないため空のままで OK（前へボタンは disabled）。
+  const hasInitializedRef = useRef(false);
   useEffect(() => {
-    // サブフィルタ変更時は cursor をリセット
+    if (!hasInitializedRef.current) {
+      hasInitializedRef.current = true;
+      load(apiType, cursor);
+      return;
+    }
     setCursor(null);
     setCursorStack([]);
     load(apiType, null);
+    // cursor は依存に入れない（次/前ボタンで明示的に load を呼ぶため）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiType, load]);
 
   const subTabs: { key: CorporateSubFilter; label: string }[] = [
