@@ -11,6 +11,7 @@ import {
   RECEPTION_OWNER_LINK_DATA_KEY,
 } from "./reception-owner-link";
 import { normalizeName, normalizeAddress } from "./normalize";
+import { normalizeCorporateNumber } from "./corporate-number";
 
 // ---------------------------------------------------------------------------
 // Phase 2-B: 重複候補グルーピングキー（correction-candidates と merge-preview で共有）
@@ -70,20 +71,21 @@ export function buildOwnerDuplicateCandidateKey(
 /**
  * Owner.corporateNumber から「重複検出に使えるキー」を返す。
  *
- * - null / undefined → null
- * - digits 抽出後 13 桁以外（短い/長い/数字なし） → null
- * - 上記以外 → 13 桁数字文字列をキーとする
+ * Codex P2 (round 3): プロジェクト共通の canonical normalizer
+ * `normalizeCorporateNumber` を再利用する。これにより:
+ *   - 全角数字（０-９）→ 半角数字に正規化される
+ *   - 各種ハイフン類（- ‐ ‑ ‒ – — ― ー － − ─ など）と空白を除去する
+ *   - 上記正規化後 13 桁の数字のみなら採用、それ以外は null
+ * 旧実装の `replace(/\D/g, "")` だと英字混在を誤って採用したり、
+ * 全角数字を取り逃したりして他の corporate-number 機能と整合しなかった。
  *
- * ハイフン等の表記揺れに耐性を持たせるため digits 抽出して比較するが、
- * 形式不正（13 桁以外）は **重複候補化しない**（誤マッチ防止）。
+ * 戻り値はそのまま **重複グルーピングの Map key** として使うが、
+ * **API レスポンス / AuditLog / URL には絶対に出さない**（opaque ID 経由のみ）。
  */
 export function buildOwnerCorporateNumberDuplicateKey(
   corporateNumber: string | null | undefined,
 ): string | null {
-  if (corporateNumber == null) return null;
-  const digits = corporateNumber.replace(/\D/g, "");
-  if (digits.length !== 13) return null;
-  return digits;
+  return normalizeCorporateNumber(corporateNumber);
 }
 
 /**

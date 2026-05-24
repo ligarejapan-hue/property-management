@@ -54,8 +54,58 @@ describe("buildOwnerCorporateNumberDuplicateKey", () => {
     expect(buildOwnerCorporateNumberDuplicateKey("abcdefghijklm")).toBeNull();
   });
 
-  it("英数字混じりで digits が 13桁ぴったり → 採用", () => {
-    expect(buildOwnerCorporateNumberDuplicateKey("abc1234567890123def")).toBe(
+  // Codex P2 (round 3): canonical normalizer に統一したため
+  // 英字混じりは「不正データ」として null 扱いに変更（旧実装は誤採用していた）。
+  it("英数字混じり → null（canonical normalization 経由で不正データを排除）", () => {
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("abc1234567890123def"),
+    ).toBeNull();
+  });
+
+  // Codex P2 (round 3): 全角数字を半角に揃えてから 13桁判定する
+  it("全角数字 13桁 → ASCII に正規化された 13桁", () => {
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("１２３４５６７８９０１２３"),
+    ).toBe("1234567890123");
+  });
+
+  it("全角数字 + 全角ハイフン混じり → 正規化して 13桁", () => {
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("１－２３４５－６７８９０－１２３"),
+    ).toBe("1234567890123");
+  });
+
+  it("全角数字 + 半角ハイフン混じり → 正規化して 13桁", () => {
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("１-２３４５-６７８９０-１２３"),
+    ).toBe("1234567890123");
+  });
+
+  it("全角長音 / em-dash / en-dash 混じり → 正規化して 13桁（normalizeCorporateNumber 委譲）", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("1ー2345ー67890ー123")).toBe(
+      "1234567890123",
+    );
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("1—2345—67890—123"),
+    ).toBe("1234567890123");
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("1–2345–67890–123"),
+    ).toBe("1234567890123");
+  });
+
+  it("ASCII / 全角 / ハイフン入り は同じ duplicate key にまとまる", () => {
+    const a = buildOwnerCorporateNumberDuplicateKey("1234567890123");
+    const b = buildOwnerCorporateNumberDuplicateKey("１２３４５６７８９０１２３");
+    const c = buildOwnerCorporateNumberDuplicateKey("1-2345-67890-123");
+    const d = buildOwnerCorporateNumberDuplicateKey("１－２３４５－６７８９０－１２３");
+    expect(a).toBe("1234567890123");
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+    expect(d).toBe(a);
+  });
+
+  it("前後空白を trim する（normalizeCorporateNumber 委譲）", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("  1234567890123  ")).toBe(
       "1234567890123",
     );
   });

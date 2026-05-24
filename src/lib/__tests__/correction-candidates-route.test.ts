@@ -1347,3 +1347,215 @@ describe("GET correction-candidates: Codex P1 (round 2) corporate_number 権限 
     expect(bodyText).not.toContain(ELK);
   });
 });
+
+// ---- Codex P2 (round 3): canonical normalizeCorporateNumber 共有 ----
+//
+// buildOwnerCorporateNumberDuplicateKey が normalizeCorporateNumber 経由に
+// 統一されたことで、Owner.corporateNumber の表記ゆれ（ASCII / 全角 / ハイフン /
+// 空白混じり）が同じグループに集約されることを route レベルで担保する。
+// duplicateGroupId / response / AuditLog に raw 値 / normalized 値が混入しない
+// 既存方針も併せて確認する。
+describe("GET correction-candidates: Codex P2 (round 3) canonical CN normalization", () => {
+  const CN_ASCII = "1234567890123";
+  const CN_FULLWIDTH = "１２３４５６７８９０１２３";
+  const CN_FULLWIDTH_HYPHEN = "１－２３４５－６７８９０－１２３";
+  const CN_ASCII_HYPHEN = "1-2345-67890-123";
+
+  it("ASCII / 全角 / ASCII ハイフン / 全角ハイフン が同じ corporate_number group になる", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "A_ascii",
+        address: "addr1",
+        corporateNumber: CN_ASCII,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "B_fullwidth",
+        address: "addr2",
+        corporateNumber: CN_FULLWIDTH,
+      }),
+      makeOwner({
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "C_ascii_hyphen",
+        address: "addr3",
+        corporateNumber: CN_ASCII_HYPHEN,
+      }),
+      makeOwner({
+        id: "44444444-4444-4444-8444-444444444444",
+        name: "D_fullwidth_hyphen",
+        address: "addr4",
+        corporateNumber: CN_FULLWIDTH_HYPHEN,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(4);
+    const ids = new Set(
+      (json.candidates as { duplicateGroupId: string }[]).map(
+        (c) => c.duplicateGroupId,
+      ),
+    );
+    // 4 件とも同じ group ID（表記ゆれが canonical 化されている）
+    expect(ids.size).toBe(1);
+    for (const c of json.candidates as {
+      duplicateGroupId: string;
+      duplicateMatchedBy: string;
+      duplicateGroupSize: number;
+    }[]) {
+      expect(c.duplicateGroupId).toMatch(/^dup-cn-\d+$/);
+      expect(c.duplicateMatchedBy).toBe("corporate_number");
+      expect(c.duplicateGroupSize).toBe(4);
+    }
+    expect(json.summary.duplicateMatchedByCounts.corporate_number).toBe(4);
+  });
+
+  it("opaque duplicateGroupId に raw / normalized 法人番号が含まれない（全角入力でも漏れない）", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "FW1",
+        address: "addr",
+        corporateNumber: CN_FULLWIDTH,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "FW2",
+        address: "addr2",
+        corporateNumber: CN_FULLWIDTH_HYPHEN,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    for (const c of json.candidates as { duplicateGroupId: string }[]) {
+      expect(c.duplicateGroupId).not.toContain(CN_ASCII);
+      expect(c.duplicateGroupId).not.toContain(CN_FULLWIDTH);
+      expect(c.duplicateGroupId).not.toContain(CN_FULLWIDTH_HYPHEN);
+      // opaque ID は dup-cn-N のみ
+      expect(c.duplicateGroupId).toMatch(/^dup-cn-\d+$/);
+    }
+  });
+
+  it("AuditLog detail に raw / normalized 法人番号 / PII が含まれない（全角入力でも）", async () => {
+    const PII_NAME = "P2R3_PII_NAME";
+    const PII_ADDR = "P2R3_PII_ADDR";
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: PII_NAME,
+        address: PII_ADDR,
+        corporateNumber: CN_FULLWIDTH,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: PII_NAME,
+        address: PII_ADDR,
+        corporateNumber: CN_ASCII_HYPHEN,
+      }),
+    ]);
+    const { writeAuditLog } = await import("@/lib/audit");
+    await GET(makeRequest("duplicate"));
+    const auditCall = vi.mocked(writeAuditLog).mock.calls[0]?.[0];
+    expect(auditCall).toBeDefined();
+    const serialized = JSON.stringify(auditCall!.detail);
+    // raw 表記ゆれ全種
+    expect(serialized).not.toContain(CN_ASCII);
+    expect(serialized).not.toContain(CN_FULLWIDTH);
+    expect(serialized).not.toContain(CN_FULLWIDTH_HYPHEN);
+    expect(serialized).not.toContain(CN_ASCII_HYPHEN);
+    // PII
+    expect(serialized).not.toContain(PII_NAME);
+    expect(serialized).not.toContain(PII_ADDR);
+  });
+
+  it("invalid（英字混じり / 12桁 / 14桁）は corporate_number group を作らない", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "X1",
+        corporateNumber: "abc1234567890123def", // 英字混じり = invalid
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "X2",
+        corporateNumber: "abc1234567890123def",
+      }),
+      makeOwner({
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "Y1",
+        corporateNumber: "123456789012", // 12桁
+      }),
+      makeOwner({
+        id: "44444444-4444-4444-8444-444444444444",
+        name: "Y2",
+        corporateNumber: "123456789012",
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    // どれも duplicate group に入らない
+    expect(json.candidates).toHaveLength(0);
+    expect(json.summary.duplicateMatchedByCounts.corporate_number).toBe(0);
+  });
+
+  it("full 権限 + 全角表記ゆれ → グループ化される（P1 round 2 と整合）", async () => {
+    // デフォルト mock の corporateNumber: "full" のまま
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "FullA",
+        address: "AddrA",
+        corporateNumber: CN_FULLWIDTH,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "FullB",
+        address: "AddrB",
+        corporateNumber: CN_ASCII,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.summary.corporateNumberDuplicateAvailable).toBe(true);
+    expect(json.candidates).toHaveLength(2);
+    expect(json.candidates[0].duplicateGroupId).toBe(
+      json.candidates[1].duplicateGroupId,
+    );
+  });
+
+  it("hidden 権限 + 全角表記ゆれでも group は作らない（P1 round 2 維持）", async () => {
+    const { getOwnerDisplayConfig } = await import("@/lib/api-helpers");
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      name: "full",
+      nameKana: "full",
+      phone: "full",
+      zip: "full",
+      address: "full",
+      note: "full",
+      email: "full",
+      corporateNumber: "hidden",
+    } as unknown as Awaited<ReturnType<typeof getOwnerDisplayConfig>>);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "Hidden1",
+        address: "addr",
+        corporateNumber: CN_FULLWIDTH,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "Hidden2",
+        address: "addr2",
+        corporateNumber: CN_ASCII,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.summary.corporateNumberDuplicateAvailable).toBe(false);
+    expect(json.summary.duplicateMatchedByCounts.corporate_number).toBe(0);
+    // どの候補にも corporate_number matchedBy が付かない
+    for (const c of json.candidates as { duplicateMatchedBy: string | null }[]) {
+      expect(c.duplicateMatchedBy).not.toBe("corporate_number");
+    }
+  });
+});
