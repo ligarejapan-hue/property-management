@@ -91,8 +91,15 @@ export default function AdminOwnerDetailPage() {
       const res = await fetchAdminOwnerCorporateCandidate(ownerId);
       if (!mountedRef.current || myReqId !== requestIdRef.current) return;
       setData(res);
+      // Codex P1: 別 Owner 詳細へ遷移したり reload した際に、前 Owner の
+      // corporateInput が残って CorporateLookupPanel で誤適用されるのを防ぐ。
+      // 最新リクエストでない場合は上の return で抜けているため、ここでの
+      // 初期化は常に「現 Owner の load 結果」に対してのみ行われる。
+      //
       // 入力欄初期値: existing が full 権限で生値返ってきた場合のみ採用。
-      // マスク値 (XXXX*** 形式) は normalizeCorporateNumber で 13桁化できないので入れない。
+      // マスク値 (XXXX*** 形式) や null は normalizeCorporateNumber で 13桁化
+      // できないので絶対に入れない。candidate の missing も同様。
+      setCorporateInput("");
       const existing = res.owner.existingCorporateNumberMasked;
       if (existing && /^\d{13}$/.test(existing)) {
         setCorporateInput(existing);

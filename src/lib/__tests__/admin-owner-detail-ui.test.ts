@@ -117,4 +117,62 @@ describe("/admin/owners/[id] page (Phase F)", () => {
     // existing がマスクパターン (XXXX*********) の場合は corporateInput に入れない
     expect(pageSrc).toMatch(/\/\^\\d\{13\}\$\/\.test\(existing\)/);
   });
+
+  // ---- Codex P1: 別 Owner 遷移時の corporateInput 残留防止 ----
+  it("Codex P1: load 毎に setCorporateInput(\"\") で初期化してから条件付きで採用", () => {
+    // try 内、setData(res) の後に setCorporateInput("") が来る（stale guard 通過後）
+    expect(pageSrc).toMatch(
+      /setData\(res\);[\s\S]{0,500}setCorporateInput\(""\);/,
+    );
+    // その後の if/else if で setCorporateInput(existing) または
+    // setCorporateInput(candidate...) が呼ばれる
+    expect(pageSrc).toMatch(/setCorporateInput\(existing\)/);
+    expect(pageSrc).toMatch(
+      /setCorporateInput\(res\.candidate\.candidateCorporateNumberMasked\)/,
+    );
+  });
+
+  it("Codex P1: setCorporateInput(\"\") は stale guard return の後にある（最新リクエストのみ反映）", () => {
+    // myReqId !== requestIdRef.current で return された後にだけ setCorporateInput("") が走る
+    expect(pageSrc).toMatch(
+      /myReqId\s*!==\s*requestIdRef\.current[\s\S]{0,80}return;[\s\S]{0,500}setCorporateInput\(""\);/,
+    );
+  });
+
+  it("Codex P1: setCorporateInput への流し込みは raw 13桁検証ガード経由", () => {
+    // existing 流し込みは /^\d{13}$/.test(existing) ガード内
+    expect(pageSrc).toMatch(
+      /\/\^\\d\{13\}\$\/\.test\(existing\)[\s\S]{0,80}setCorporateInput\(existing\)/,
+    );
+    // candidate 流し込みも /^\d{13}$/.test ガード内 + type === "missing" 条件
+    expect(pageSrc).toMatch(
+      /res\.candidate\?\.type\s*===\s*"missing"[\s\S]{0,200}\/\^\\d\{13\}\$\/\.test\(res\.candidate\.candidateCorporateNumberMasked\)[\s\S]{0,200}setCorporateInput\(res\.candidate\.candidateCorporateNumberMasked\)/,
+    );
+  });
+
+  it("Codex P1: candidate なし & existing がマスク／null の場合、setCorporateInput(\"\") の後に追加採用が無い", () => {
+    // setCorporateInput("") の後に出現する setCorporateInput 呼び出しは全てガード経由
+    // → unconditional な setCorporateInput(...) が他に存在しないことを担保
+    const matches = pageSrc.match(/setCorporateInput\([^)]+\)/g) ?? [];
+    // 期待: setCorporateInput("") / setCorporateInput(existing) /
+    //       setCorporateInput(res.candidate.candidateCorporateNumberMasked) /
+    //       setCorporateInput(e.target.value) (input onChange) /
+    //       setCorporateInput(candidate.candidateCorporateNumberMasked ?? "") (banner 「法人番号欄に転記」)
+    // 上記以外の unconditional 呼び出しがないことを確認
+    const allowed = new Set([
+      'setCorporateInput("")',
+      "setCorporateInput(existing)",
+      "setCorporateInput(res.candidate.candidateCorporateNumberMasked)",
+      "setCorporateInput(e.target.value)",
+      'setCorporateInput(\n                            candidate.candidateCorporateNumberMasked ?? "",\n                          )',
+    ]);
+    for (const m of matches) {
+      // 「allowed のいずれかを含む」または「candidate.candidateCorporateNumberMasked ?? \"\"」を含む
+      const ok =
+        allowed.has(m) ||
+        m.includes("candidate.candidateCorporateNumberMasked ?? \"\"") ||
+        m === "setCorporateInput(e.target.value)";
+      expect(ok, `unexpected setCorporateInput call: ${m}`).toBe(true);
+    }
+  });
 });
