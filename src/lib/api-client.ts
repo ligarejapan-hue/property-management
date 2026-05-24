@@ -1084,6 +1084,10 @@ export async function parseRegistryPdfFile(file: File) {
     return {
       fileName: file.name,
       extractedTextLength: 500,
+      extractionSource: "embedded_text" as const,
+      isLikelyScanned: false,
+      // Phase F-2a: 非破壊追加。文字数のみで raw text は含めない。
+      extraction: { source: "embedded_text" as const, embeddedTextLength: 500 },
       parsed: {
         realEstateNumber: "1300012345678",
         address: "東京都千代田区丸の内一丁目",
@@ -1112,6 +1116,13 @@ export async function parseRegistryPdfText(text: string, fileName?: string) {
     return {
       fileName: fileName ?? "paste.txt",
       extractedTextLength: text.length,
+      extractionSource: "embedded_text" as const,
+      isLikelyScanned: false,
+      // Phase F-2a: 非破壊追加
+      extraction: {
+        source: "embedded_text" as const,
+        embeddedTextLength: text.length,
+      },
       parsed: {
         realEstateNumber: "1300012345678",
         address: "東京都千代田区丸の内一丁目",
