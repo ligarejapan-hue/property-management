@@ -5,7 +5,147 @@ import {
   resolveReceptionOwnerEntry,
   extractAddressFromRecoveredOwner,
   checkOwnerArchiveSafety,
+  buildOwnerCorporateNumberDuplicateKey,
+  buildOwnerExternalLinkKeyDuplicateKey,
 } from "../owner-correction";
+
+// ── Phase 2-A: buildOwnerCorporateNumberDuplicateKey ─────────────────────────
+
+describe("buildOwnerCorporateNumberDuplicateKey", () => {
+  it("13桁の数字 → そのまま digits", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("1234567890123")).toBe(
+      "1234567890123",
+    );
+  });
+
+  it("ハイフン混じり 13桁 → digits 抽出して 13桁", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("1-2345-67890-123")).toBe(
+      "1234567890123",
+    );
+  });
+
+  it("空白混じり 13桁 → digits 抽出して 13桁", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("1234 5678 90123")).toBe(
+      "1234567890123",
+    );
+  });
+
+  it("12桁 → null（形式不正）", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("123456789012")).toBeNull();
+  });
+
+  it("14桁 → null（形式不正）", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("12345678901234")).toBeNull();
+  });
+
+  it("null → null", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey(null)).toBeNull();
+  });
+
+  it("undefined → null", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey(undefined)).toBeNull();
+  });
+
+  it("空文字 → null", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("")).toBeNull();
+  });
+
+  it("数字を含まない文字列 → null", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("abcdefghijklm")).toBeNull();
+  });
+
+  // Codex P2 (round 3): canonical normalizer に統一したため
+  // 英字混じりは「不正データ」として null 扱いに変更（旧実装は誤採用していた）。
+  it("英数字混じり → null（canonical normalization 経由で不正データを排除）", () => {
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("abc1234567890123def"),
+    ).toBeNull();
+  });
+
+  // Codex P2 (round 3): 全角数字を半角に揃えてから 13桁判定する
+  it("全角数字 13桁 → ASCII に正規化された 13桁", () => {
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("１２３４５６７８９０１２３"),
+    ).toBe("1234567890123");
+  });
+
+  it("全角数字 + 全角ハイフン混じり → 正規化して 13桁", () => {
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("１－２３４５－６７８９０－１２３"),
+    ).toBe("1234567890123");
+  });
+
+  it("全角数字 + 半角ハイフン混じり → 正規化して 13桁", () => {
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("１-２３４５-６７８９０-１２３"),
+    ).toBe("1234567890123");
+  });
+
+  it("全角長音 / em-dash / en-dash 混じり → 正規化して 13桁（normalizeCorporateNumber 委譲）", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("1ー2345ー67890ー123")).toBe(
+      "1234567890123",
+    );
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("1—2345—67890—123"),
+    ).toBe("1234567890123");
+    expect(
+      buildOwnerCorporateNumberDuplicateKey("1–2345–67890–123"),
+    ).toBe("1234567890123");
+  });
+
+  it("ASCII / 全角 / ハイフン入り は同じ duplicate key にまとまる", () => {
+    const a = buildOwnerCorporateNumberDuplicateKey("1234567890123");
+    const b = buildOwnerCorporateNumberDuplicateKey("１２３４５６７８９０１２３");
+    const c = buildOwnerCorporateNumberDuplicateKey("1-2345-67890-123");
+    const d = buildOwnerCorporateNumberDuplicateKey("１－２３４５－６７８９０－１２３");
+    expect(a).toBe("1234567890123");
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+    expect(d).toBe(a);
+  });
+
+  it("前後空白を trim する（normalizeCorporateNumber 委譲）", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("  1234567890123  ")).toBe(
+      "1234567890123",
+    );
+  });
+});
+
+// ── Phase 2-A: buildOwnerExternalLinkKeyDuplicateKey ─────────────────────────
+
+describe("buildOwnerExternalLinkKeyDuplicateKey", () => {
+  it("非空文字列 → そのまま", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("LINK-001")).toBe("LINK-001");
+  });
+
+  it("前後空白 → trim", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("  LINK-001  ")).toBe(
+      "LINK-001",
+    );
+  });
+
+  it("null → null", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey(null)).toBeNull();
+  });
+
+  it("undefined → null", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey(undefined)).toBeNull();
+  });
+
+  it("空文字 → null", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("")).toBeNull();
+  });
+
+  it("空白のみ → null", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("   ")).toBeNull();
+  });
+
+  it("大小区別する（normalize しない）", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("Link-001")).not.toBe(
+      buildOwnerExternalLinkKeyDuplicateKey("LINK-001"),
+    );
+  });
+});
 
 // ── extractAddressFromRawData ──────────────────────────────────────────────
 

@@ -27,6 +27,44 @@ type FilterType =
   | "duplicate"
   | "corporate_number";
 
+// Phase 2-A: duplicate タブ内のサブフィルタ。matchedBy で絞り込む。
+// "all" は経路を問わず duplicate 全件、各 matchedBy はそれぞれの経路のみ。
+type DuplicateSubFilter =
+  | "all"
+  | "name_address"
+  | "corporate_number"
+  | "external_link_key";
+
+const DUPLICATE_SUB_FILTER_LABELS: Record<DuplicateSubFilter, string> = {
+  all: "すべて",
+  name_address: "氏名住所一致",
+  corporate_number: "法人番号一致",
+  external_link_key: "リンクキー一致",
+};
+
+const DUPLICATE_MATCHED_BY_LABEL: Record<
+  "name_address" | "corporate_number" | "external_link_key",
+  string
+> = {
+  name_address: "氏名住所一致",
+  corporate_number: "法人番号一致",
+  external_link_key: "リンクキー一致",
+};
+
+function parseDuplicateSubFilterFromQuery(
+  value: string | null,
+): DuplicateSubFilter {
+  switch (value) {
+    case "name_address":
+    case "corporate_number":
+    case "external_link_key":
+    case "all":
+      return value;
+    default:
+      return "all";
+  }
+}
+
 const TYPE_LABELS: Record<string, string> = {
   orphan: "孤立",
   address_null: "住所なし",
@@ -61,6 +99,11 @@ const BLOCK_REASON_LABELS: Record<string, string> = {
   note_exists: "メモあり",
   import_source_unknown: "取込元不明",
   import_row_not_success: "取込行未解決",
+  // Codex P1 (round 3): non-name duplicate （法人番号 / 外部キー一致）に
+  // 付与される「削除させず確認に回す」reason。raw 法人番号 / externalLinkKey は
+  // 含まない非 PII enum。
+  corporate_number_duplicate_requires_review: "法人番号重複（要確認）",
+  external_link_key_duplicate_requires_review: "外部キー重複（要確認）",
 };
 
 // Phase F: タブ状態を URL query で永続化するためのヘルパ。
@@ -97,6 +140,13 @@ function OwnerCorrectionPageInner() {
   // Owner 詳細ページから「補正候補に戻る」で遷移してきたときにタブを保持。
   const initialTab = parseFilterTypeFromQuery(searchParams?.get("tab") ?? null);
   const [filterType, setFilterTypeState] = useState<FilterType>(initialTab);
+  // Phase 2-A: duplicate タブ内のサブフィルタ。?dup= で永続化する。
+  // 値は enum のみで PII / 法人番号 / externalLinkKey 生値は URL に絶対に載せない。
+  const initialDupSub = parseDuplicateSubFilterFromQuery(
+    searchParams?.get("dup") ?? null,
+  );
+  const [duplicateSubFilter, setDuplicateSubFilterState] =
+    useState<DuplicateSubFilter>(initialDupSub);
   const [data, setData] = useState<OwnerCorrectionCandidatesResponse | null>(
     null,
   );
@@ -105,6 +155,15 @@ function OwnerCorrectionPageInner() {
 
   // タブ変更時は URL の ?tab=... も更新する（PII を含まない）。
   // 法人番号タブ以外への遷移時は法人番号タブ側 query (sub/cursor) を削除する。
+  // duplicate タブ以外への遷移時は dup query も削除する。
+  //
+  // Codex P2: URL ↔ duplicateSubFilter state の同期を厳格化する。
+  //   - duplicate タブから別タブへ移動 → URL から ?dup= を削除 +
+  //     in-memory state も "all" にリセット（残ったまま再進入すると URL=all なのに
+  //     画面が前回値で絞り込まれ、URL と画面表示が不一致になる）。
+  //   - 別タブから duplicate タブへ戻る → URL の現在の ?dup= を尊重して state に
+  //     反映する（無 / 不正値は parseDuplicateSubFilterFromQuery で "all" に
+  //     フォールバック）。
   const setFilterType = useCallback(
     (next: FilterType) => {
       setFilterTypeState(next);
@@ -120,6 +179,39 @@ function OwnerCorrectionPageInner() {
         sp.delete("sub");
         sp.delete("cursor");
       }
+      if (next !== "duplicate") {
+        sp.delete("dup");
+        // Codex P2: duplicate タブ離脱時に in-memory state もリセット。
+        // これがないと URL=all なのに画面は前回 filter のまま残る不一致が起きる。
+        setDuplicateSubFilterState("all");
+      } else {
+        // Codex P2: 別タブから duplicate へ戻る時は URL の現在値を state に反映。
+        // 無 / 不正値は "all" にフォールバック（parseDuplicateSubFilterFromQuery）。
+        setDuplicateSubFilterState(
+          parseDuplicateSubFilterFromQuery(sp.get("dup")),
+        );
+      }
+      const qs = sp.toString();
+      router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    },
+    [router, searchParams],
+  );
+
+  // Phase 2-A: duplicate サブフィルタ変更時の URL 同期。
+  // PII を URL に載せないため値は enum のみ。"all" のときは query を消す。
+  const setDuplicateSubFilter = useCallback(
+    (next: DuplicateSubFilter) => {
+      setDuplicateSubFilterState(next);
+      const sp = new URLSearchParams(
+        Array.from(searchParams?.entries() ?? []),
+      );
+      if (next === "all") {
+        sp.delete("dup");
+      } else {
+        sp.set("dup", next);
+      }
+      // dup は duplicate タブ専用 query なので tab=duplicate を維持。
+      sp.set("tab", "duplicate");
       const qs = sp.toString();
       router.replace(qs ? `?${qs}` : "?", { scroll: false });
     },
@@ -215,55 +307,96 @@ function OwnerCorrectionPageInner() {
 
       {filterType !== "corporate_number" && data && !loading && (
         <>
-          <p className="mb-3 text-sm text-gray-500">
-            {data.total} 件の確認候補
-          </p>
-
-          {/* duplicate タブでは「重複グループサマリー」を上部に追加表示。
-              client-side で types.includes("duplicate") の候補を name+address で
-              グルーピングし、各グループ内の owner ペアに対して preview を取得できる。
-              既存のフラットリストは下にそのまま残す（破壊的変更なし）。 */}
+          {/* Phase 2-A: duplicate タブ専用のサブフィルタ。matchedBy で絞り込む。
+              client-side フィルタ（API 再 fetch なし、PII / 法人番号生値を URL に載せない）。 */}
           {filterType === "duplicate" && (
-            <DuplicateGroupSummary
-              candidates={data.candidates}
-              onExecuted={() => load(filterType)}
+            <DuplicateSubFilterBar
+              value={duplicateSubFilter}
+              onChange={setDuplicateSubFilter}
+              counts={data.summary.duplicateMatchedByCounts}
+              totalDuplicateCount={data.summary.duplicateCount}
             />
           )}
 
-          {data.candidates.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-400">
-              該当する候補はありません
-            </p>
-          ) : (
-            <div className="overflow-x-auto rounded-md border border-gray-200">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-xs text-gray-500">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">氏名</th>
-                    <th className="px-3 py-2 text-left font-medium">住所</th>
-                    <th className="px-3 py-2 text-left font-medium">
-                      郵便番号
-                    </th>
-                    <th className="px-3 py-2 text-left font-medium">電話</th>
-                    <th className="px-3 py-2 text-center font-medium">
-                      紐づき数
-                    </th>
-                    <th className="px-3 py-2 text-center font-medium">
-                      変更履歴
-                    </th>
-                    <th className="px-3 py-2 text-center font-medium">ver</th>
-                    <th className="px-3 py-2 text-left font-medium">取込元</th>
-                    <th className="px-3 py-2 text-left font-medium">種別</th>
-                    <th className="px-3 py-2 text-left font-medium">
-                      ブロック理由
-                    </th>
-                    <th className="px-3 py-2 text-left font-medium">推奨</th>
-                    <th className="px-3 py-2 text-left font-medium">ID</th>
-                    <th className="px-3 py-2 text-left font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {data.candidates.map((c: OwnerCorrectionCandidate) => (
+          {/* Codex P1 (round 2): corporate_number サブフィルタは
+              displayConfig.corporateNumber === "full" のオペレーターのみ
+              利用可能。権限不足時は API レスポンス側で候補が空になっているので、
+              「該当なし」ではなく「権限不足」を明示して operator の誤解を防ぐ。
+              flag 値は boolean のみで PII / 法人番号生値は含まない。 */}
+          {filterType === "duplicate" &&
+            duplicateSubFilter === "corporate_number" &&
+            data.summary.corporateNumberDuplicateAvailable === false && (
+              <p
+                data-testid="corporate-number-duplicate-permission-denied"
+                className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+              >
+                法人番号重複候補を表示する権限がありません（必要な権限: owner_corporate_number=full）。
+              </p>
+            )}
+
+          {(() => {
+            // Phase 2-A: duplicate タブのみサブフィルタを適用する。
+            // 他タブでは duplicateSubFilter を無視（フィルタ範囲を広げないため）。
+            const visibleCandidates =
+              filterType === "duplicate" && duplicateSubFilter !== "all"
+                ? data.candidates.filter(
+                    (c) => c.duplicateMatchedBy === duplicateSubFilter,
+                  )
+                : data.candidates;
+
+            return (
+              <>
+                <p className="mb-3 text-sm text-gray-500">
+                  {visibleCandidates.length} 件の確認候補
+                  {filterType === "duplicate" &&
+                    duplicateSubFilter !== "all" &&
+                    `（${DUPLICATE_SUB_FILTER_LABELS[duplicateSubFilter]} のみ）`}
+                </p>
+
+                {/* duplicate タブでは「重複グループサマリー」を上部に追加表示。
+                    client-side で duplicateGroupId（opaque）でグルーピング。
+                    Phase 2-A: visibleCandidates をそのまま渡してサブフィルタを反映する。 */}
+                {filterType === "duplicate" && (
+                  <DuplicateGroupSummary
+                    candidates={visibleCandidates}
+                    onExecuted={() => load(filterType)}
+                  />
+                )}
+
+                {visibleCandidates.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-gray-400">
+                    該当する候補はありません
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border border-gray-200">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50 text-xs text-gray-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">氏名</th>
+                          <th className="px-3 py-2 text-left font-medium">住所</th>
+                          <th className="px-3 py-2 text-left font-medium">
+                            郵便番号
+                          </th>
+                          <th className="px-3 py-2 text-left font-medium">電話</th>
+                          <th className="px-3 py-2 text-center font-medium">
+                            紐づき数
+                          </th>
+                          <th className="px-3 py-2 text-center font-medium">
+                            変更履歴
+                          </th>
+                          <th className="px-3 py-2 text-center font-medium">ver</th>
+                          <th className="px-3 py-2 text-left font-medium">取込元</th>
+                          <th className="px-3 py-2 text-left font-medium">種別</th>
+                          <th className="px-3 py-2 text-left font-medium">
+                            ブロック理由
+                          </th>
+                          <th className="px-3 py-2 text-left font-medium">推奨</th>
+                          <th className="px-3 py-2 text-left font-medium">ID</th>
+                          <th className="px-3 py-2 text-left font-medium">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {visibleCandidates.map((c: OwnerCorrectionCandidate) => (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-3 py-2 font-medium text-gray-900">
                         {c.name ?? (
@@ -355,7 +488,15 @@ function OwnerCorrectionPageInner() {
                           />
                         )}
                         {filterType === "orphan" &&
-                          c.recommendedAction === "delete_candidate" && (
+                          c.recommendedAction === "delete_candidate" &&
+                          // Codex P1 (round 3): non-name duplicate
+                          // (corporate_number / external_link_key) と判定された
+                          // 候補は route 側で recommendedAction を review に
+                          // 落としているはずだが、Defense in Depth で UI でも
+                          // archive button を出さない（万が一サーバが旧形式の
+                          // レスポンスを返してもデータ損失を防ぐ）。
+                          c.duplicateMatchedBy !== "corporate_number" &&
+                          c.duplicateMatchedBy !== "external_link_key" && (
                             <OwnerArchiveButton
                               ownerId={c.id}
                               ownerVersion={c.version}
@@ -365,10 +506,13 @@ function OwnerCorrectionPageInner() {
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
           <p className="mt-4 text-xs text-gray-400">
             ※ 統合実行・再リンクの実行機能は Phase 2-B-β 以降で対応予定です。
@@ -391,6 +535,73 @@ function OwnerCorrectionPageInner() {
 //   - PII は API レスポンスの maskValue 済みの値をそのまま表示する。
 //   - 推奨ハイライト: ChangeLog 件数 / PropertyOwner 件数 / version が多い方を
 //     「master 推奨」表示する（強制せず注記のみ）。
+
+// ---------------------------------------------------------------------------
+// Phase 2-A: duplicate タブのサブフィルタバー
+// ---------------------------------------------------------------------------
+// duplicate タブ内で matchedBy 経路を切り替えるためのボタン群。
+// 件数は API の summary.duplicateMatchedByCounts から取得（PII を含まない件数）。
+
+interface DuplicateSubFilterBarProps {
+  value: DuplicateSubFilter;
+  onChange: (next: DuplicateSubFilter) => void;
+  counts:
+    | {
+        name_address: number;
+        corporate_number: number;
+        external_link_key: number;
+      }
+    | undefined;
+  totalDuplicateCount: number;
+}
+
+function DuplicateSubFilterBar({
+  value,
+  onChange,
+  counts,
+  totalDuplicateCount,
+}: DuplicateSubFilterBarProps) {
+  const subTabs: { key: DuplicateSubFilter; label: string; count: number }[] = [
+    { key: "all", label: DUPLICATE_SUB_FILTER_LABELS.all, count: totalDuplicateCount },
+    {
+      key: "name_address",
+      label: DUPLICATE_SUB_FILTER_LABELS.name_address,
+      count: counts?.name_address ?? 0,
+    },
+    {
+      key: "corporate_number",
+      label: DUPLICATE_SUB_FILTER_LABELS.corporate_number,
+      count: counts?.corporate_number ?? 0,
+    },
+    {
+      key: "external_link_key",
+      label: DUPLICATE_SUB_FILTER_LABELS.external_link_key,
+      count: counts?.external_link_key ?? 0,
+    },
+  ];
+
+  return (
+    <div className="mb-3 flex flex-wrap gap-1">
+      {subTabs.map((tab) => (
+        <button
+          key={tab.key}
+          type="button"
+          onClick={() => onChange(tab.key)}
+          className={`rounded-full border px-3 py-1 text-xs font-medium ${
+            value === tab.key
+              ? "border-purple-500 bg-purple-100 text-purple-800"
+              : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+          }`}
+        >
+          {tab.label}
+          <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
+            {tab.count}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 interface DuplicateGroupSummaryProps {
   candidates: OwnerCorrectionCandidate[];
@@ -429,7 +640,7 @@ function DuplicateGroupSummary({
         重複グループ ({groupList.length} 件)
       </h2>
       <p className="mb-3 text-xs text-purple-700">
-        同一 (氏名 + 住所) の所有者をまとめて表示しています。各グループ内で master / source を選び、統合プレビュー（dryRun）を取得できます。
+        重複候補をグループごとに表示しています。<strong>氏名住所一致</strong>グループのみ master / source を選んで統合プレビュー（dryRun）を取得できます。<strong>法人番号一致 / リンクキー一致</strong>は表示のみで、統合プレビュー / 実行は別 phase で対応予定です。
       </p>
       <div className="space-y-3">
         {groupList.map(([key, members], idx) => (
@@ -472,6 +683,14 @@ function DuplicateGroupCard({
 
   const canPreview = masterId && sourceId && masterId !== sourceId;
   const sample = members[0];
+  // Phase 2-A: グループの一致経路（全 member 同一なので最初の 1 件を使う）。
+  // raw 法人番号 / externalLinkKey は含まずラベル文字列のみ。
+  const matchedBy = sample.duplicateMatchedBy;
+  // Codex P2-round-2: merge preview / execute は name_address 経路のみ対応。
+  // corporate_number / external_link_key 経路では master/source 選択列も
+  // プレビューボタンも表示しない（API 側 merge-preview が name+address 検証
+  // しかしないので UI で merge できそうに見せると誤解を招く）。
+  const supportsMerge = matchedBy === "name_address";
 
   // master / source は disabled にしない（disabled だと一度選んだ後に役割を
   // 入れ替えられない）。代わりに、既に相手側に選ばれている owner を選んだら
@@ -496,6 +715,11 @@ function DuplicateGroupCard({
         <span className="text-xs font-medium text-purple-700">
           グループ {groupIndex}
         </span>
+        {matchedBy && (
+          <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
+            {DUPLICATE_MATCHED_BY_LABEL[matchedBy]}
+          </span>
+        )}
         <span className="text-xs text-gray-500">
           氏名: {sample.name ?? "***"} / 住所: {sample.address ?? "—"} （
           {members.length} 件）
@@ -505,9 +729,12 @@ function DuplicateGroupCard({
       <table className="mb-3 w-full text-xs">
         <thead className="bg-gray-50 text-gray-500">
           <tr>
-            <th className="px-2 py-1 text-left">master</th>
-            <th className="px-2 py-1 text-left">source</th>
-            <th className="px-2 py-1 text-left">推奨</th>
+            {/* Codex P2-round-2: master/source/推奨 列は merge 可能な
+                name_address group のみ表示。corporate_number / external_link_key
+                では merge 経路がないため列ごと出さない。 */}
+            {supportsMerge && <th className="px-2 py-1 text-left">master</th>}
+            {supportsMerge && <th className="px-2 py-1 text-left">source</th>}
+            {supportsMerge && <th className="px-2 py-1 text-left">推奨</th>}
             <th className="px-2 py-1 text-left">ID</th>
             <th className="px-2 py-1 text-center">物件</th>
             <th className="px-2 py-1 text-center">変更履歴</th>
@@ -518,25 +745,31 @@ function DuplicateGroupCard({
         <tbody className="divide-y divide-gray-100">
           {members.map((m) => (
             <tr key={m.id} className="hover:bg-gray-50">
-              <td className="px-2 py-1">
-                <input
-                  type="radio"
-                  name={`master-${groupIndex}`}
-                  checked={masterId === m.id}
-                  onChange={() => handleSelectMaster(m.id)}
-                />
-              </td>
-              <td className="px-2 py-1">
-                <input
-                  type="radio"
-                  name={`source-${groupIndex}`}
-                  checked={sourceId === m.id}
-                  onChange={() => handleSelectSource(m.id)}
-                />
-              </td>
-              <td className="px-2 py-1 text-purple-700">
-                {m.id === recommendedMaster.id ? "master 推奨" : ""}
-              </td>
+              {supportsMerge && (
+                <td className="px-2 py-1">
+                  <input
+                    type="radio"
+                    name={`master-${groupIndex}`}
+                    checked={masterId === m.id}
+                    onChange={() => handleSelectMaster(m.id)}
+                  />
+                </td>
+              )}
+              {supportsMerge && (
+                <td className="px-2 py-1">
+                  <input
+                    type="radio"
+                    name={`source-${groupIndex}`}
+                    checked={sourceId === m.id}
+                    onChange={() => handleSelectSource(m.id)}
+                  />
+                </td>
+              )}
+              {supportsMerge && (
+                <td className="px-2 py-1 text-purple-700">
+                  {m.id === recommendedMaster.id ? "master 推奨" : ""}
+                </td>
+              )}
               <td className="px-2 py-1 font-mono text-[10px] text-gray-400">
                 {m.id.slice(0, 8)}…
               </td>
@@ -553,21 +786,37 @@ function DuplicateGroupCard({
         </tbody>
       </table>
 
-      {canPreview && masterId && sourceId ? (
-        // key を pair ID にして、選択ペア変更時にコンポーネントを remount し
-        // 古い preview 結果が残らないことを保証する（OwnerMergePreviewButton
-        // 内の useEffect と併せた多重防御）。
-        <OwnerMergePreviewButton
-          key={`${masterId}:${sourceId}`}
-          masterId={masterId}
-          sourceId={sourceId}
-          masterLabel={`${masterId.slice(0, 8)}…`}
-          sourceLabel={`${sourceId.slice(0, 8)}…`}
-          onExecuted={onExecuted}
-        />
+      {supportsMerge ? (
+        canPreview && masterId && sourceId ? (
+          // key を pair ID にして、選択ペア変更時にコンポーネントを remount し
+          // 古い preview 結果が残らないことを保証する（OwnerMergePreviewButton
+          // 内の useEffect と併せた多重防御）。
+          <OwnerMergePreviewButton
+            key={`${masterId}:${sourceId}`}
+            masterId={masterId}
+            sourceId={sourceId}
+            masterLabel={`${masterId.slice(0, 8)}…`}
+            sourceLabel={`${sourceId.slice(0, 8)}…`}
+            onExecuted={onExecuted}
+          />
+        ) : (
+          <p className="text-xs text-gray-400">
+            master と source をそれぞれ選択してください
+          </p>
+        )
       ) : (
-        <p className="text-xs text-gray-400">
-          master と source をそれぞれ選択してください
+        // Codex P2-round-2: corporate_number / external_link_key 経路は
+        // merge-preview API 未対応。merge ボタンを出さず「要確認」注記のみ。
+        <p
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          data-testid="duplicate-group-merge-unsupported-notice"
+        >
+          {matchedBy === "corporate_number"
+            ? "法人番号一致のため要確認。"
+            : matchedBy === "external_link_key"
+              ? "リンクキー一致のため要確認。"
+              : "要確認。"}
+          Phase 2-A では統合プレビュー / 実行は氏名住所一致グループのみ対応しています。法人番号 / リンクキー一致グループは候補表示のみで、merge は別 phase で対応予定です。
         </p>
       )}
     </div>

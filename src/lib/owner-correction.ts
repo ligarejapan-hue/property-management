@@ -11,6 +11,7 @@ import {
   RECEPTION_OWNER_LINK_DATA_KEY,
 } from "./reception-owner-link";
 import { normalizeName, normalizeAddress } from "./normalize";
+import { normalizeCorporateNumber } from "./corporate-number";
 
 // ---------------------------------------------------------------------------
 // Phase 2-B: 重複候補グルーピングキー（correction-candidates と merge-preview で共有）
@@ -49,6 +50,61 @@ export function buildOwnerDuplicateCandidateKey(
     ? normalizeAddress(input.address)
     : `__noaddr__${input.zip ?? ""}__${input.phone ?? ""}`;
   return `${n}|||${a}`;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2-A: corporateNumber / externalLinkKey による重複検出キー
+// ---------------------------------------------------------------------------
+//
+// name_address ベースの buildOwnerDuplicateCandidateKey とは独立した追加キー。
+// correction-candidates API は 3 系統（name_address / corporate_number /
+// external_link_key）で並行に重複グループ化を行い、各グループに opaque な
+// duplicateGroupId を割り当てる（dup-N / dup-cn-N / dup-elk-N）。
+//
+// PII について（重要）:
+//   - 返却される key 文字列は **法人番号生値 / externalLinkKey 生値そのもの**。
+//   - **API レスポンス / AuditLog detail には絶対に含めない**（opaque ID 経由で
+//     のみクライアントに渡す）。
+//
+// 既存 buildOwnerDuplicateCandidateKey は無改変。
+
+/**
+ * Owner.corporateNumber から「重複検出に使えるキー」を返す。
+ *
+ * Codex P2 (round 3): プロジェクト共通の canonical normalizer
+ * `normalizeCorporateNumber` を再利用する。これにより:
+ *   - 全角数字（０-９）→ 半角数字に正規化される
+ *   - 各種ハイフン類（- ‐ ‑ ‒ – — ― ー － − ─ など）と空白を除去する
+ *   - 上記正規化後 13 桁の数字のみなら採用、それ以外は null
+ * 旧実装の `replace(/\D/g, "")` だと英字混在を誤って採用したり、
+ * 全角数字を取り逃したりして他の corporate-number 機能と整合しなかった。
+ *
+ * 戻り値はそのまま **重複グルーピングの Map key** として使うが、
+ * **API レスポンス / AuditLog / URL には絶対に出さない**（opaque ID 経由のみ）。
+ */
+export function buildOwnerCorporateNumberDuplicateKey(
+  corporateNumber: string | null | undefined,
+): string | null {
+  return normalizeCorporateNumber(corporateNumber);
+}
+
+/**
+ * Owner.externalLinkKey から「重複検出に使えるキー」を返す。
+ *
+ * - null / undefined → null
+ * - trim 後の空文字 → null
+ * - 上記以外 → trim 後の文字列をキーとする
+ *
+ * externalLinkKey は外部システム由来の任意文字列のため、normalize は行わず
+ * trim のみ（大小区別・全半角区別を含めて完全一致を要求する）。
+ */
+export function buildOwnerExternalLinkKeyDuplicateKey(
+  externalLinkKey: string | null | undefined,
+): string | null {
+  if (externalLinkKey == null) return null;
+  const trimmed = externalLinkKey.trim();
+  if (trimmed === "") return null;
+  return trimmed;
 }
 
 // rawData の住所フィールド候補（直接値として使えるキー名）。

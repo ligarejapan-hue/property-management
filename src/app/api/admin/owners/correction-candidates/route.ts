@@ -10,10 +10,22 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
-import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
+import {
+  buildOwnerDuplicateCandidateKey,
+  buildOwnerCorporateNumberDuplicateKey,
+  buildOwnerExternalLinkKeyDuplicateKey,
+} from "@/lib/owner-correction";
 import { maskCorporateNumber } from "@/lib/display-level";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
+
+// Phase 2-A: 重複グループの一致経路。1 候補が複数経路で同時にヒットする場合、
+// 既存挙動を優先するため name_address > corporate_number > external_link_key の順で
+// 1 つだけ採用する（duplicateGroupId / duplicateGroupSize と同じグループに紐づく）。
+type DuplicateMatchedBy =
+  | "name_address"
+  | "corporate_number"
+  | "external_link_key";
 
 type Candidate = {
   id: string;
@@ -41,15 +53,25 @@ type Candidate = {
   recommendedAction: RecommendedAction;
   types: string[];
   /**
-   * duplicate グループの opaque な ID（例: "dup-1"）。
+   * duplicate グループの opaque な ID。
+   *   - name_address 一致         : "dup-N"
+   *   - corporate_number 一致     : "dup-cn-N"
+   *   - external_link_key 一致    : "dup-elk-N"
    * グループサイズ >= 2 のグループに属する candidate のみ非 null。
-   * **raw name/address/normalized key を含まない**（PII 復元防止）。
+   * **raw name/address/corporateNumber/externalLinkKey/normalized key を
+   * 含まない**（PII / 法人番号 / 外部キー復元防止）。
    */
   duplicateGroupId: string | null;
   /**
    * duplicate グループ内の候補件数。groupId が null なら null。
    */
   duplicateGroupSize: number | null;
+  /**
+   * Phase 2-A: duplicate グループへ採用された経路。複数経路でヒットした
+   * candidate にも 1 つだけ付与する（優先順: name_address > corporate_number
+   * > external_link_key）。groupId が null なら null。
+   */
+  duplicateMatchedBy: DuplicateMatchedBy | null;
 };
 
 // ---------- GET /api/admin/owners/correction-candidates ----------
@@ -236,15 +258,34 @@ export async function GET(request: NextRequest) {
         importRowNumber: importInfo?.rowNumber ?? null,
         duplicateGroupId: null,
         duplicateGroupSize: null,
+        duplicateMatchedBy: null,
         blockReasons,
         recommendedAction,
         types,
       };
     });
 
-    // 5. 重複検出: buildOwnerDuplicateCandidateKey で共通グループ化。
-    //    merge-preview とキー定義を完全に共有する（lib に集約）。
-    const groups = new Map<string, (typeof candidates)[0][]>();
+    // 5. 重複検出: 3 系統で並行にグループ化する。
+    //    - name_address: buildOwnerDuplicateCandidateKey（既存 / merge-preview と共有）
+    //    - corporate_number: buildOwnerCorporateNumberDuplicateKey（13 桁 digits）
+    //    - external_link_key: buildOwnerExternalLinkKeyDuplicateKey（trim 後非空）
+    //
+    //    1 owner が複数経路で同時にヒットした場合、duplicateGroupId は **1 つ**だけ
+    //    保持する（型上単一フィールド）。優先順位は既存挙動を維持するため
+    //    name_address > corporate_number > external_link_key。先に当たった経路で
+    //    duplicateGroupId / duplicateGroupSize / duplicateMatchedBy が確定したら
+    //    以降の経路では上書きしない。
+    //
+    //    types["duplicate"] は経路に関わらず実際に group に組まれた候補へ一度だけ
+    //    付与する。一方 recommendedAction="merge_candidate" への昇格は
+    //    **name_address 限定**（merge-preview が name+address 検証しか持たないため、
+    //    corporate_number / external_link_key 由来候補を merge_candidate にすると
+    //    UI 上 merge できそうに見えて preview/execute では block されてしまう）。
+    const candidateById = new Map<string, Candidate>();
+    for (const c of candidates) candidateById.set(c.id, c);
+
+    // 5-a. name_address グループ
+    const nameAddrGroups = new Map<string, string[]>();
     for (const c of candidates) {
       const key = buildOwnerDuplicateCandidateKey({
         name: c.name,
@@ -252,28 +293,154 @@ export async function GET(request: NextRequest) {
         zip: c.zip,
         phone: c.phone,
       });
-      const arr = groups.get(key) ?? [];
-      arr.push(c);
-      groups.set(key, arr);
+      const arr = nameAddrGroups.get(key) ?? [];
+      arr.push(c.id);
+      nameAddrGroups.set(key, arr);
     }
-    // duplicate グループ（size >= 2）に opaque ID を割り当てる。
-    // ID は raw / normalized key を含まない（PII 復元防止）。
-    // Map の挿入順で安定した連番（dup-1, dup-2, ...）にする。
-    let groupCounter = 0;
-    for (const group of groups.values()) {
-      if (group.length < 2) continue;
-      groupCounter++;
-      const opaqueId = `dup-${groupCounter}`;
-      for (const c of group) {
+
+    // 5-b. corporate_number グループ（owner の raw 値を直接参照。candidate 側の
+    //      corporateNumberMasked は display-level に依存するため使わない）
+    //
+    // Codex P1: 法人番号の重複検出は、displayConfig.corporateNumber === "full"
+    // のオペレーターのみに開放する。masked / hidden / partial / read / edit などの
+    // 制限付きユーザーでも duplicateMatchedBy="corporate_number" や opaque
+    // ID dup-cn-* / duplicateMatchedByCounts.corporate_number > 0 が見えると
+    // 「同一法人番号を持つ Owner が存在する」という raw equality を推測でき、
+    // 法人番号の表示権限を迂回する情報漏えいになる。安全側でグループ化自体を
+    // スキップする（=候補も件数も外に出ない）。
+    const corporateNumberDuplicateAvailable =
+      displayConfig.corporateNumber === "full";
+    const cnGroups = new Map<string, string[]>();
+    if (corporateNumberDuplicateAvailable) {
+      for (const o of owners) {
+        const key = buildOwnerCorporateNumberDuplicateKey(o.corporateNumber);
+        if (key === null) continue;
+        const arr = cnGroups.get(key) ?? [];
+        arr.push(o.id);
+        cnGroups.set(key, arr);
+      }
+    }
+
+    // 5-c. external_link_key グループ
+    const elkGroups = new Map<string, string[]>();
+    for (const o of owners) {
+      const key = buildOwnerExternalLinkKeyDuplicateKey(o.externalLinkKey);
+      if (key === null) continue;
+      const arr = elkGroups.get(key) ?? [];
+      arr.push(o.id);
+      elkGroups.set(key, arr);
+    }
+
+    // Codex P1: グループ割当は atomic に行う。
+    //
+    // 旧実装は memberIds の全件サイズを duplicateGroupSize にしていたため、
+    // 低優先グループのメンバーの一部が既に高優先グループへ割り当て済みの場合、
+    //   - 「未割当の 1 人だけ」に dup-cn-N / size=2 を付けてしまう
+    //   - その 1 人と同じ groupId を持つ仲間が存在せず、UI 側の
+    //     `arr.length >= 2` で落ちて duplicate サマリーから消える
+    // という不整合（孤立 group）が発生していた。
+    //
+    // 修正:
+    //   1. 既に割り当て済み（duplicateGroupId !== null）のメンバーは触らない
+    //   2. 未割当メンバーだけで実グループを組む
+    //   3. 未割当が < 2 ならグループ自体を作らない
+    //      （types["duplicate"] / merge_candidate も付与しない）
+    //   4. 未割当 >= 2 のときだけ opaque ID を割り当て、size は **未割当数**
+    //   5. counter は実際にグループが組まれたときのみ進めて連番の飛びを防ぐ
+    function assignGroup(
+      memberIds: string[],
+      opaqueId: string,
+      matchedBy: DuplicateMatchedBy,
+    ): boolean {
+      const unassigned: Candidate[] = [];
+      for (const id of memberIds) {
+        const c = candidateById.get(id);
+        if (!c) continue;
+        if (c.duplicateGroupId === null) unassigned.push(c);
+      }
+      // 未割当が 1 人以下なら group を作らない（孤立 group 防止）。
+      if (unassigned.length < 2) return false;
+      const size = unassigned.length;
+      // Codex P2-round-2: merge_candidate への昇格は name_address group 限定。
+      // merge-preview API は buildOwnerDuplicateCandidateKey (name+address) でしか
+      // ペア検証していないため、corporate_number / external_link_key 由来の候補に
+      // merge_candidate を付けると UI 上 merge できそうに見えて preview/execute で
+      // name_address_normalize_mismatch によりブロックされ、operator に誤解を
+      // 与える機能不整合になる。
+      //
+      // Codex P1 (round 3): non-name 経路 (corporate_number / external_link_key)
+      // で duplicate と判定された候補は **delete_candidate を維持しない**。
+      // orphan + import success + safeguards なしの owner が「未解決の重複候補」
+      // のまま delete_candidate として残ると、orphan タブの archive ボタンから
+      // 削除されてデータ損失する。データ損失防止を優先し、non-name duplicate は
+      // 少なくとも review に落として人間の確認に回す（hold はそのまま維持）。
+      const promoteToMergeCandidate = matchedBy === "name_address";
+      const nonNameMatchedBy =
+        matchedBy === "corporate_number" ||
+        matchedBy === "external_link_key";
+      const nonNameReviewReason =
+        matchedBy === "corporate_number"
+          ? "corporate_number_duplicate_requires_review"
+          : matchedBy === "external_link_key"
+            ? "external_link_key_duplicate_requires_review"
+            : null;
+      for (const c of unassigned) {
         if (!c.types.includes("duplicate")) c.types.push("duplicate");
         if (
-          c.recommendedAction === "delete_candidate" ||
-          c.recommendedAction === "review"
+          promoteToMergeCandidate &&
+          (c.recommendedAction === "delete_candidate" ||
+            c.recommendedAction === "review")
         ) {
           c.recommendedAction = "merge_candidate";
+        } else if (nonNameMatchedBy) {
+          // delete_candidate を必ず review に落とす（データ損失防止）。
+          // merge_candidate は本来 non-name で付かないが防御的に review へ。
+          // hold / review はそのまま維持（hold は safeguards 由来で重要、
+          // review は既にデフォルト確認状態）。
+          if (
+            c.recommendedAction === "delete_candidate" ||
+            c.recommendedAction === "merge_candidate"
+          ) {
+            c.recommendedAction = "review";
+          }
+          // 非 PII の reason を blockReasons に追加（重複出さない）。
+          if (
+            nonNameReviewReason &&
+            !c.blockReasons.includes(nonNameReviewReason)
+          ) {
+            c.blockReasons.push(nonNameReviewReason);
+          }
         }
         c.duplicateGroupId = opaqueId;
-        c.duplicateGroupSize = group.length;
+        c.duplicateGroupSize = size;
+        c.duplicateMatchedBy = matchedBy;
+      }
+      return true;
+    }
+
+    // 5-d. opaque ID 割当（Map 挿入順で安定した連番）
+    //      counter は assignGroup 成功時のみ進める（飛び番号を作らない）。
+    let naCounter = 0;
+    for (const group of nameAddrGroups.values()) {
+      if (group.length < 2) continue;
+      if (assignGroup(group, `dup-${naCounter + 1}`, "name_address")) {
+        naCounter++;
+      }
+    }
+    let cnCounter = 0;
+    for (const group of cnGroups.values()) {
+      if (group.length < 2) continue;
+      if (assignGroup(group, `dup-cn-${cnCounter + 1}`, "corporate_number")) {
+        cnCounter++;
+      }
+    }
+    let elkCounter = 0;
+    for (const group of elkGroups.values()) {
+      if (group.length < 2) continue;
+      if (
+        assignGroup(group, `dup-elk-${elkCounter + 1}`, "external_link_key")
+      ) {
+        elkCounter++;
       }
     }
 
@@ -298,6 +465,21 @@ export async function GET(request: NextRequest) {
       phone: maskValue(c.phone, displayConfig.phone),
     }));
 
+    // Phase 2-A: duplicate 経路別件数も集計する。1 candidate は単一の
+    // duplicateMatchedBy を持つので合計しても duplicateCount を超えない。
+    // 件数のみで PII / 法人番号生値 / externalLinkKey 生値は一切含まない。
+    const duplicateMatchedByCounts = {
+      name_address: candidates.filter(
+        (c) => c.duplicateMatchedBy === "name_address",
+      ).length,
+      corporate_number: candidates.filter(
+        (c) => c.duplicateMatchedBy === "corporate_number",
+      ).length,
+      external_link_key: candidates.filter(
+        (c) => c.duplicateMatchedBy === "external_link_key",
+      ).length,
+    };
+
     const summary = {
       orphanCount: candidates.filter((c) => c.types.includes("orphan")).length,
       addressNullCount: candidates.filter((c) =>
@@ -305,6 +487,13 @@ export async function GET(request: NextRequest) {
       ).length,
       duplicateCount: candidates.filter((c) => c.types.includes("duplicate"))
         .length,
+      duplicateMatchedByCounts,
+      // Codex P1: 法人番号重複検出が現セッション権限で利用可能かを示す。
+      // false の場合、duplicateMatchedBy="corporate_number" の候補は API
+      // レスポンスに含まれない（matchedByCounts.corporate_number=0 になる）。
+      // 値自体は boolean のみで PII は含まない。UI は権限不足メッセージの
+      // 表示判断に使う。
+      corporateNumberDuplicateAvailable,
       allCount: candidates.filter((c) => c.types.length > 0).length,
     };
 
