@@ -97,6 +97,14 @@ export async function POST(request: NextRequest) {
       extractedTextLength: text.length,
       extractionSource,
       isLikelyScanned,
+      // Phase F-2a: scanned 検知時の UI 強化（テキスト貼り付け導線）用に、
+      // 抽出ソース判定と埋込テキスト文字数をまとめて非破壊で返す。
+      // 既存 isLikelyScanned / extractionSource は維持。
+      // 文字数（length）のみで本文・raw text は含めない（PII / AuditLog 方針と整合）。
+      extraction: {
+        source: extractionSource,
+        embeddedTextLength: text.length,
+      },
       // 開発デバッグ用: 抽出テキスト先頭 600 文字 (本番では除去)
       _rawTextPreview: process.env.NODE_ENV !== "production" ? text.slice(0, 600) : undefined,
       parsed,

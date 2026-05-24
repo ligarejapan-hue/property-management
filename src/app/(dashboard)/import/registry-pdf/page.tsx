@@ -73,6 +73,14 @@ interface ParseResponse {
   parsed: ParsedResult;
   extractionSource?: ExtractionSource;
   isLikelyScanned?: boolean;
+  /**
+   * Phase F-2a: parse route から非破壊で追加された抽出ソース情報。
+   * source / embeddedTextLength のみで、raw text 本文は絶対に含まない。
+   */
+  extraction?: {
+    source: ExtractionSource;
+    embeddedTextLength: number;
+  };
 }
 
 type Step = "upload" | "extract" | "confirm" | "result";
@@ -294,6 +302,11 @@ export default function RegistryPdfPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
   const [isLikelyScanned, setIsLikelyScanned] = useState(false);
+  // Phase F-2a: parse response の extraction.embeddedTextLength を保持する。
+  // raw text 本文は持たない（文字数のみ）。UI 上で「ほぼ取れていない」目安として表示する。
+  const [embeddedTextLength, setEmbeddedTextLength] = useState<number | null>(
+    null,
+  );
 
   // Target selection
   const [target, setTarget] = useState<RegistrationTarget>("auto");
@@ -361,9 +374,17 @@ export default function RegistryPdfPage() {
       }
 
       const parsed = result.parsed;
-      setIsLikelyScanned(
-        result.isLikelyScanned ?? result.extractionSource === "likely_scanned",
-      );
+      // Phase F-2a: scanned 判定は以下の優先順で読む（後方互換）
+      //   1) 新 extraction.source === "likely_scanned"
+      //   2) 旧 isLikelyScanned
+      //   3) 旧 extractionSource === "likely_scanned"
+      const scannedFlag =
+        result.extraction?.source === "likely_scanned" ||
+        result.isLikelyScanned === true ||
+        result.extractionSource === "likely_scanned";
+      setIsLikelyScanned(scannedFlag);
+      // Phase F-2a: 文字数のみ取得（raw text は受け取らない / 保存しない）
+      setEmbeddedTextLength(result.extraction?.embeddedTextLength ?? null);
       // フィールドを EditableField 形式に変換
       const toField = (v: string | null) => ({
         value: v ?? "",
@@ -642,7 +663,7 @@ export default function RegistryPdfPage() {
       {/* ================================================================= */}
       {step === "extract" && (
         <div className="space-y-6">
-          {/* Scanned PDF banner (OCR is not implemented) */}
+          {/* Scanned PDF banner (Phase F-2a: OCR 未対応のため貼り付け導線を強化) */}
           {isLikelyScanned && (
             <div
               role="alert"
@@ -651,12 +672,41 @@ export default function RegistryPdfPage() {
             >
               <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-red-700">
                 <AlertTriangle className="h-4 w-4" />
-                画像化された謄本PDFの可能性があります
+                画像化された謄本PDFの可能性があります（OCR未対応）
               </h4>
               <p className="text-sm text-red-700">
-                PDF本文を十分に抽出できませんでした。本システムはOCR未対応のため、抽出結果は不完全な可能性があります。
-                以下の項目を必ず手動で確認・修正してください。テキストが取れない場合は「テキスト貼り付け」モードへ切り替えてください。
+                PDF本文をほとんど抽出できませんでした
+                {embeddedTextLength !== null && (
+                  <>（抽出文字数: {embeddedTextLength} 文字）</>
+                )}
+                。本システムはOCR未対応のため、画像化PDFのテキストは取得できません。
+                外部のOCRツールやテキストエディタで本文をテキスト化し、下のボタンから「テキスト貼り付け」へ切り替えて手動で投入してください。
               </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  data-testid="scanned-pdf-switch-to-paste"
+                  onClick={() => {
+                    // Phase F-2a: paste タブへ切替。textarea は空のままにする（不完全な
+                    // embedded_text を自動投入すると、ユーザが OCR 結果で上書きする前提が
+                    // 崩れるため）。step は upload に戻して再入力を促す。
+                    setUploadTab("text");
+                    setText("");
+                    setSelectedFile(null);
+                    setFileName(null);
+                    setIsLikelyScanned(false);
+                    setEmbeddedTextLength(null);
+                    setStep("upload");
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-red-400 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                >
+                  <ClipboardPaste className="h-3.5 w-3.5" />
+                  テキストを貼り付けるモードに切り替える
+                </button>
+                <span className="text-[11px] text-red-700">
+                  ※ OCRは未実装です。自動テキスト化は行われません。
+                </span>
+              </div>
             </div>
           )}
 
