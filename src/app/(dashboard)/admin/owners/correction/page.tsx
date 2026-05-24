@@ -313,6 +313,22 @@ function OwnerCorrectionPageInner() {
             />
           )}
 
+          {/* Codex P1 (round 2): corporate_number サブフィルタは
+              displayConfig.corporateNumber === "full" のオペレーターのみ
+              利用可能。権限不足時は API レスポンス側で候補が空になっているので、
+              「該当なし」ではなく「権限不足」を明示して operator の誤解を防ぐ。
+              flag 値は boolean のみで PII / 法人番号生値は含まない。 */}
+          {filterType === "duplicate" &&
+            duplicateSubFilter === "corporate_number" &&
+            data.summary.corporateNumberDuplicateAvailable === false && (
+              <p
+                data-testid="corporate-number-duplicate-permission-denied"
+                className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+              >
+                法人番号重複候補を表示する権限がありません（必要な権限: owner_corporate_number=full）。
+              </p>
+            )}
+
           {(() => {
             // Phase 2-A: duplicate タブのみサブフィルタを適用する。
             // 他タブでは duplicateSubFilter を無視（フィルタ範囲を広げないため）。

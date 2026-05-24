@@ -2045,6 +2045,14 @@ export interface OwnerCorrectionCandidatesResponse {
       corporate_number: number;
       external_link_key: number;
     };
+    /**
+     * Phase 2-A Codex P1: 法人番号重複検出が現セッションの表示権限で
+     * 利用可能か（owner_corporate_number === "full" のみ true）。
+     * false の場合、duplicateMatchedBy="corporate_number" の候補は
+     * 一切 API レスポンスに含まれず matchedByCounts.corporate_number=0 となる。
+     * UI は権限不足メッセージの表示判断に使う。値は boolean のみで PII を含まない。
+     */
+    corporateNumberDuplicateAvailable?: boolean;
     allCount: number;
   };
 }

@@ -55,6 +55,12 @@ vi.mock("@/lib/api-helpers", () => {
       address: "full",
       note: "full",
       email: "full",
+      // Codex P1 (round 2): corporate_number duplicate grouping は
+      // displayConfig.corporateNumber === "full" の場合のみ動作する。
+      // 既存テスト群（name_address / external_link_key / Phase E）は
+      // 法人番号権限ありを前提にしているのでデフォルトを full にする。
+      // 個別テストで他レベルを試すときは mockResolvedValueOnce で上書きする。
+      corporateNumber: "full",
     }),
     handleApiError: vi.fn((error: unknown) => {
       if (error instanceof MockApiError) {
@@ -1140,5 +1146,204 @@ describe("GET correction-candidates: Codex P2 (round 2) merge_candidate scoping"
     expect(byId.get(ID_D)?.recommendedAction).toBe("review");
     expect(byId.get(ID_B)?.duplicateMatchedBy).toBe("corporate_number");
     expect(byId.get(ID_D)?.duplicateMatchedBy).toBe("corporate_number");
+  });
+});
+
+// ---- Codex P1 (round 2): corporate_number 重複検出は full 権限限定 ----
+//
+// owner_corporate_number の表示権限が full 未満のユーザーに対して
+// corporate_number duplicate group を作ると、duplicateMatchedBy /
+// dup-cn-* / duplicateMatchedByCounts から「同一法人番号を持つ Owner が
+// 存在する」を推測でき、表示権限を迂回した情報漏えいになるため、
+// グループ化自体を full 限定にする。
+describe("GET correction-candidates: Codex P1 (round 2) corporate_number 権限 gating", () => {
+  const CN_VALID = "1234567890123";
+  const ELK = "EXT-LINK-001";
+
+  function mockCnDisplayLevel(
+    level: "full" | "hidden" | "masked" | "partial" | "read" | "edit",
+  ) {
+    return async () => {
+      const { getOwnerDisplayConfig } = await import("@/lib/api-helpers");
+      vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+        name: "full",
+        nameKana: "full",
+        phone: "full",
+        zip: "full",
+        address: "full",
+        note: "full",
+        email: "full",
+        corporateNumber: level,
+      } as unknown as Awaited<ReturnType<typeof getOwnerDisplayConfig>>);
+    };
+  }
+
+  function makeTwoCnPair() {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "CN_PAIR_A",
+        address: "AddrA",
+        corporateNumber: CN_VALID,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "CN_PAIR_B",
+        address: "AddrB",
+        corporateNumber: CN_VALID,
+      }),
+    ]);
+  }
+
+  it("full 権限 → corporate_number duplicate group が作られる + summary.corporateNumberDuplicateAvailable=true", async () => {
+    await mockCnDisplayLevel("full")();
+    makeTwoCnPair();
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.summary.corporateNumberDuplicateAvailable).toBe(true);
+    expect(json.candidates).toHaveLength(2);
+    for (const c of json.candidates as { duplicateMatchedBy: string; duplicateGroupId: string }[]) {
+      expect(c.duplicateMatchedBy).toBe("corporate_number");
+      expect(c.duplicateGroupId).toMatch(/^dup-cn-\d+$/);
+    }
+    expect(json.summary.duplicateMatchedByCounts.corporate_number).toBe(2);
+  });
+
+  it.each([
+    ["hidden" as const],
+    ["masked" as const],
+    ["partial" as const],
+    ["read" as const],
+    ["edit" as const],
+  ])(
+    "%s 権限 → corporate_number duplicate group が作られず candidate も件数も 0",
+    async (level) => {
+      await mockCnDisplayLevel(level)();
+      makeTwoCnPair();
+      const res = await GET(makeRequest("duplicate"));
+      const json = await res.json();
+
+      // flag は false
+      expect(json.summary.corporateNumberDuplicateAvailable).toBe(false);
+      // matchedBy="corporate_number" の候補が一切含まれない
+      for (const c of json.candidates as { duplicateMatchedBy: string | null; duplicateGroupId: string | null }[]) {
+        expect(c.duplicateMatchedBy).not.toBe("corporate_number");
+        if (c.duplicateGroupId) {
+          expect(c.duplicateGroupId).not.toMatch(/^dup-cn-/);
+        }
+      }
+      // 件数も 0
+      expect(json.summary.duplicateMatchedByCounts.corporate_number).toBe(0);
+      // duplicate タブで返るのは name_address / external_link_key のみなので、
+      // CN だけで重複していた今回は duplicateCount=0
+      expect(json.summary.duplicateCount).toBe(0);
+    },
+  );
+
+  it("hidden 権限でも name_address duplicate は従来どおり表示される", async () => {
+    await mockCnDisplayLevel("hidden")();
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "同名NA",
+        address: "同住所NA",
+        corporateNumber: CN_VALID,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "同名NA",
+        address: "同住所NA",
+        corporateNumber: CN_VALID,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(2);
+    for (const c of json.candidates as { duplicateMatchedBy: string }[]) {
+      expect(c.duplicateMatchedBy).toBe("name_address");
+    }
+    // 同時に corporate_number は出さない
+    expect(json.summary.duplicateMatchedByCounts.corporate_number).toBe(0);
+    expect(json.summary.corporateNumberDuplicateAvailable).toBe(false);
+  });
+
+  it("hidden 権限でも external_link_key duplicate は従来どおり表示される", async () => {
+    await mockCnDisplayLevel("hidden")();
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "L_ALPHA",
+        address: "AddrLA",
+        externalLinkKey: ELK,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "L_BETA",
+        address: "AddrLB",
+        externalLinkKey: ELK,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(2);
+    for (const c of json.candidates as { duplicateMatchedBy: string; duplicateGroupId: string }[]) {
+      expect(c.duplicateMatchedBy).toBe("external_link_key");
+      expect(c.duplicateGroupId).toMatch(/^dup-elk-\d+$/);
+    }
+    expect(json.summary.duplicateMatchedByCounts.external_link_key).toBe(2);
+    expect(json.summary.duplicateMatchedByCounts.corporate_number).toBe(0);
+  });
+
+  it("hidden 権限の AuditLog detail に法人番号生値 / externalLinkKey 生値 / 氏名 / 住所が含まれない", async () => {
+    await mockCnDisplayLevel("hidden")();
+    const PII_NAME = "P1R2_PII_NAME";
+    const PII_ADDR = "P1R2_PII_ADDR";
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: PII_NAME,
+        address: PII_ADDR,
+        corporateNumber: CN_VALID,
+        externalLinkKey: ELK,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: PII_NAME,
+        address: PII_ADDR,
+        corporateNumber: CN_VALID,
+      }),
+    ]);
+    const { writeAuditLog } = await import("@/lib/audit");
+    await GET(makeRequest("duplicate"));
+    const auditCall = vi.mocked(writeAuditLog).mock.calls[0]?.[0];
+    expect(auditCall).toBeDefined();
+    const serialized = JSON.stringify(auditCall!.detail);
+    expect(serialized).not.toContain(CN_VALID);
+    expect(serialized).not.toContain(ELK);
+    expect(serialized).not.toContain(PII_NAME);
+    expect(serialized).not.toContain(PII_ADDR);
+  });
+
+  it("hidden 権限の opaque group ID / レスポンスに法人番号生値 / externalLinkKey 生値が含まれない", async () => {
+    await mockCnDisplayLevel("hidden")();
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "同名Z",
+        address: "同住所Z",
+        corporateNumber: CN_VALID,
+        externalLinkKey: ELK,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "同名Z",
+        address: "同住所Z",
+        corporateNumber: CN_VALID,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const bodyText = await res.text();
+    expect(bodyText).not.toContain(CN_VALID);
+    expect(bodyText).not.toContain(ELK);
   });
 });

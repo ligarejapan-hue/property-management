@@ -167,3 +167,48 @@ describe("correction page: Codex P2 (round 2) merge UI scoping", () => {
     expect(src).toMatch(/氏名住所一致[\s\S]{0,80}master\s*\/\s*source[\s\S]{0,80}統合プレビュー/);
   });
 });
+
+// Codex P1 (round 2): corporate_number 重複検出の権限不足メッセージ
+//
+// page.tsx は API レスポンスの `summary.corporateNumberDuplicateAvailable`
+// が false のとき、duplicate タブ + corporate_number サブフィルタで
+// 「権限がありません」メッセージを表示する。raw 法人番号は含めず enum/flag のみ。
+describe("correction page: Codex P1 (round 2) corporate_number 権限不足メッセージ", () => {
+  it("corporateNumberDuplicateAvailable === false の分岐で notice を表示する", () => {
+    expect(src).toMatch(
+      /data\.summary\.corporateNumberDuplicateAvailable\s*===\s*false/,
+    );
+  });
+
+  it("duplicate タブ + corporate_number サブフィルタ条件で表示する", () => {
+    // 同じ JSX ブロック内で filterType === "duplicate" / duplicateSubFilter === "corporate_number" /
+    // corporateNumberDuplicateAvailable === false の 3 条件を AND している。
+    expect(src).toMatch(
+      /filterType\s*===\s*"duplicate"[\s\S]{0,400}duplicateSubFilter\s*===\s*"corporate_number"[\s\S]{0,400}corporateNumberDuplicateAvailable\s*===\s*false/,
+    );
+  });
+
+  it("notice 要素に data-testid が付いている", () => {
+    expect(src).toMatch(
+      /data-testid="corporate-number-duplicate-permission-denied"/,
+    );
+  });
+
+  it("notice 文言に「権限がありません」と必要権限を含む", () => {
+    expect(src).toMatch(/権限がありません/);
+    expect(src).toMatch(/owner_corporate_number=full/);
+  });
+
+  it("notice 文言に PII / 法人番号生値を埋め込んでいない", () => {
+    // 注記文中に owner.corporateNumber や c.name 等を直接埋め込む箇所がない。
+    const denialBlockMatch = src.match(
+      /data-testid="corporate-number-duplicate-permission-denied"[\s\S]{0,400}<\/p>/,
+    );
+    expect(denialBlockMatch).not.toBeNull();
+    const denialBlock = denialBlockMatch?.[0] ?? "";
+    expect(denialBlock).not.toMatch(/\{[^}]*corporateNumber[^}]*\}/);
+    expect(denialBlock).not.toMatch(/\{[^}]*c\.name[^}]*\}/);
+    expect(denialBlock).not.toMatch(/\{[^}]*c\.address[^}]*\}/);
+    expect(denialBlock).not.toMatch(/\{[^}]*externalLinkKey[^}]*\}/);
+  });
+});

@@ -300,13 +300,25 @@ export async function GET(request: NextRequest) {
 
     // 5-b. corporate_number グループ（owner の raw 値を直接参照。candidate 側の
     //      corporateNumberMasked は display-level に依存するため使わない）
+    //
+    // Codex P1: 法人番号の重複検出は、displayConfig.corporateNumber === "full"
+    // のオペレーターのみに開放する。masked / hidden / partial / read / edit などの
+    // 制限付きユーザーでも duplicateMatchedBy="corporate_number" や opaque
+    // ID dup-cn-* / duplicateMatchedByCounts.corporate_number > 0 が見えると
+    // 「同一法人番号を持つ Owner が存在する」という raw equality を推測でき、
+    // 法人番号の表示権限を迂回する情報漏えいになる。安全側でグループ化自体を
+    // スキップする（=候補も件数も外に出ない）。
+    const corporateNumberDuplicateAvailable =
+      displayConfig.corporateNumber === "full";
     const cnGroups = new Map<string, string[]>();
-    for (const o of owners) {
-      const key = buildOwnerCorporateNumberDuplicateKey(o.corporateNumber);
-      if (key === null) continue;
-      const arr = cnGroups.get(key) ?? [];
-      arr.push(o.id);
-      cnGroups.set(key, arr);
+    if (corporateNumberDuplicateAvailable) {
+      for (const o of owners) {
+        const key = buildOwnerCorporateNumberDuplicateKey(o.corporateNumber);
+        if (key === null) continue;
+        const arr = cnGroups.get(key) ?? [];
+        arr.push(o.id);
+        cnGroups.set(key, arr);
+      }
     }
 
     // 5-c. external_link_key グループ
@@ -443,6 +455,12 @@ export async function GET(request: NextRequest) {
       duplicateCount: candidates.filter((c) => c.types.includes("duplicate"))
         .length,
       duplicateMatchedByCounts,
+      // Codex P1: 法人番号重複検出が現セッション権限で利用可能かを示す。
+      // false の場合、duplicateMatchedBy="corporate_number" の候補は API
+      // レスポンスに含まれない（matchedByCounts.corporate_number=0 になる）。
+      // 値自体は boolean のみで PII は含まない。UI は権限不足メッセージの
+      // 表示判断に使う。
+      corporateNumberDuplicateAvailable,
       allCount: candidates.filter((c) => c.types.length > 0).length,
     };
 
