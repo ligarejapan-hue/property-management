@@ -748,3 +748,254 @@ describe("GET correction-candidates: Phase E corporate_number マスキング", 
     expect(detailJson).not.toContain(CN);
   });
 });
+
+// ---- Codex P1: グループ割当 atomicity（孤立 group を作らない） ----
+//
+// 低優先グループのメンバーが高優先グループに既に割り当て済みの場合、
+// 未割当が < 2 なら低優先 group を作らない。
+// 未割当 >= 2 なら未割当だけで group を組み、size も未割当数に一致させる。
+//
+// これにより:
+//   - 1 人だけの孤立 group が duplicate サマリーに混入しない
+//   - duplicateGroupId を持つ候補は必ず同 ID 仲間 >= 2 が存在する
+//   - duplicateGroupSize が実件数と完全一致する
+//   - duplicateMatchedByCounts が実割当数と一致する
+describe("GET correction-candidates: Codex P1 グループ割当 atomicity", () => {
+  const CN_AB = "1234567890123";
+  const CN_ABD = "9876543210987";
+  const ELK_AB = "ELK-LINK-AB";
+
+  it("ケース1: A-C name_address + A-B corporate_number → B だけの孤立 group は作られない", async () => {
+    const ID_A = "11111111-1111-4111-8111-111111111111";
+    const ID_B = "22222222-2222-4222-8222-222222222222";
+    const ID_C = "33333333-3333-4333-8333-333333333333";
+    pm.owner.findMany.mockResolvedValue([
+      // A-C は name_address で重複
+      makeOwner({ id: ID_A, name: "同名", address: "同住所", corporateNumber: CN_AB }),
+      makeOwner({ id: ID_C, name: "同名", address: "同住所" }),
+      // B は A と corporateNumber 共有だが name/address 違い
+      makeOwner({ id: ID_B, name: "別名", address: "別住所", corporateNumber: CN_AB }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    const byId = new Map<string, { duplicateGroupId: string | null; duplicateGroupSize: number | null; duplicateMatchedBy: string | null; types: string[] }>(
+      (json.candidates as { id: string; duplicateGroupId: string | null; duplicateGroupSize: number | null; duplicateMatchedBy: string | null; types: string[] }[]).map((c) => [c.id, c]),
+    );
+
+    // A / C は name_address で同 group
+    expect(byId.get(ID_A)?.duplicateGroupId).toBe(byId.get(ID_C)?.duplicateGroupId);
+    expect(byId.get(ID_A)?.duplicateMatchedBy).toBe("name_address");
+    expect(byId.get(ID_A)?.duplicateGroupSize).toBe(2);
+
+    // B は孤立 group を作られない（duplicateGroupId=null / types に "duplicate" なし）
+    expect(byId.get(ID_B)?.duplicateGroupId).toBeNull();
+    expect(byId.get(ID_B)?.duplicateGroupSize).toBeNull();
+    expect(byId.get(ID_B)?.duplicateMatchedBy).toBeNull();
+    expect(byId.get(ID_B)?.types).not.toContain("duplicate");
+  });
+
+  it("ケース2: A-C name_address + A-B-D corporate_number → B-D だけで dup-cn-1 / size=2", async () => {
+    const ID_A = "11111111-1111-4111-8111-111111111111";
+    const ID_B = "22222222-2222-4222-8222-222222222222";
+    const ID_C = "33333333-3333-4333-8333-333333333333";
+    const ID_D = "44444444-4444-4444-8444-444444444444";
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({ id: ID_A, name: "同名", address: "同住所", corporateNumber: CN_ABD }),
+      makeOwner({ id: ID_C, name: "同名", address: "同住所" }),
+      makeOwner({ id: ID_B, name: "B別名", address: "B別住所", corporateNumber: CN_ABD }),
+      makeOwner({ id: ID_D, name: "D別名", address: "D別住所", corporateNumber: CN_ABD }),
+    ]);
+
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    const byId = new Map<string, { duplicateGroupId: string | null; duplicateGroupSize: number | null; duplicateMatchedBy: string | null }>(
+      (json.candidates as { id: string; duplicateGroupId: string | null; duplicateGroupSize: number | null; duplicateMatchedBy: string | null }[]).map((c) => [c.id, c]),
+    );
+
+    // A-C は name_address で同 group
+    expect(byId.get(ID_A)?.duplicateMatchedBy).toBe("name_address");
+    expect(byId.get(ID_C)?.duplicateMatchedBy).toBe("name_address");
+    expect(byId.get(ID_A)?.duplicateGroupId).toBe(byId.get(ID_C)?.duplicateGroupId);
+
+    // B-D は未割当だったので corporate_number で同 group / size=2
+    expect(byId.get(ID_B)?.duplicateMatchedBy).toBe("corporate_number");
+    expect(byId.get(ID_D)?.duplicateMatchedBy).toBe("corporate_number");
+    expect(byId.get(ID_B)?.duplicateGroupId).toBe(byId.get(ID_D)?.duplicateGroupId);
+    expect(byId.get(ID_B)?.duplicateGroupId).toMatch(/^dup-cn-\d+$/);
+    expect(byId.get(ID_B)?.duplicateGroupSize).toBe(2);
+    expect(byId.get(ID_D)?.duplicateGroupSize).toBe(2);
+  });
+
+  it("ケース3: external_link_key でも同様に未割当 < 2 なら group 化しない", async () => {
+    const ID_A = "11111111-1111-4111-8111-111111111111";
+    const ID_B = "22222222-2222-4222-8222-222222222222";
+    const ID_C = "33333333-3333-4333-8333-333333333333";
+    pm.owner.findMany.mockResolvedValue([
+      // A-C name_address
+      makeOwner({ id: ID_A, name: "同名", address: "同住所", externalLinkKey: ELK_AB }),
+      makeOwner({ id: ID_C, name: "同名", address: "同住所" }),
+      // B は A と externalLinkKey 共有
+      makeOwner({ id: ID_B, name: "B別名", address: "B別住所", externalLinkKey: ELK_AB }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    const byId = new Map<string, { duplicateGroupId: string | null; types: string[] }>(
+      (json.candidates as { id: string; duplicateGroupId: string | null; types: string[] }[]).map((c) => [c.id, c]),
+    );
+
+    // B は外部キー単独の孤立 group になっていない
+    expect(byId.get(ID_B)?.duplicateGroupId).toBeNull();
+    expect(byId.get(ID_B)?.types).not.toContain("duplicate");
+  });
+
+  it("整合性: duplicateGroupId を持つ全候補について、同 ID の仲間が必ず 2 件以上存在する", async () => {
+    const ID_A = "11111111-1111-4111-8111-111111111111";
+    const ID_B = "22222222-2222-4222-8222-222222222222";
+    const ID_C = "33333333-3333-4333-8333-333333333333";
+    const ID_D = "44444444-4444-4444-8444-444444444444";
+    const ID_E = "55555555-5555-4555-8555-555555555555";
+    pm.owner.findMany.mockResolvedValue([
+      // name_address ペア
+      makeOwner({ id: ID_A, name: "同名NA", address: "同住所NA" }),
+      makeOwner({ id: ID_B, name: "同名NA", address: "同住所NA" }),
+      // corporate_number ペア
+      makeOwner({ id: ID_C, name: "CN1", corporateNumber: CN_AB }),
+      makeOwner({ id: ID_D, name: "CN2", corporateNumber: CN_AB }),
+      // 単独
+      makeOwner({ id: ID_E, name: "孤独" }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+
+    const grouped = new Map<string, number>();
+    for (const c of json.candidates as { duplicateGroupId: string | null }[]) {
+      if (c.duplicateGroupId === null) continue;
+      grouped.set(
+        c.duplicateGroupId,
+        (grouped.get(c.duplicateGroupId) ?? 0) + 1,
+      );
+    }
+    for (const [id, count] of grouped.entries()) {
+      expect(count).toBeGreaterThanOrEqual(2);
+      // raw 値が opaque ID に混入していないこと
+      expect(id).not.toContain(CN_AB);
+      expect(id).not.toContain("同名NA");
+      expect(id).not.toContain("同住所NA");
+    }
+  });
+
+  it("整合性: duplicateGroupSize が同 groupId の実件数と一致する", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "X",
+        address: "Y",
+        corporateNumber: CN_AB,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "X",
+        address: "Y",
+      }),
+      // A-X-Y で name_address 重複（C は外）
+      makeOwner({
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "別",
+        address: "別",
+        corporateNumber: CN_AB,
+      }),
+      // B-C で corporate_number 共有だが、A は name_address で先取り、
+      // 残り C 1 人のため corporate_number group は作られない想定
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    const groupSizeMap = new Map<string, number>();
+    for (const c of json.candidates as { duplicateGroupId: string | null }[]) {
+      if (c.duplicateGroupId === null) continue;
+      groupSizeMap.set(
+        c.duplicateGroupId,
+        (groupSizeMap.get(c.duplicateGroupId) ?? 0) + 1,
+      );
+    }
+    for (const c of json.candidates as { duplicateGroupId: string | null; duplicateGroupSize: number | null }[]) {
+      if (c.duplicateGroupId === null) continue;
+      expect(c.duplicateGroupSize).toBe(
+        groupSizeMap.get(c.duplicateGroupId),
+      );
+    }
+  });
+
+  it("整合性: summary.duplicateMatchedByCounts が実割当数と一致する", async () => {
+    const ID_A = "11111111-1111-4111-8111-111111111111";
+    const ID_B = "22222222-2222-4222-8222-222222222222";
+    const ID_C = "33333333-3333-4333-8333-333333333333";
+    const ID_D = "44444444-4444-4444-8444-444444444444";
+    pm.owner.findMany.mockResolvedValue([
+      // A-C name_address（CN AB 共有）
+      makeOwner({ id: ID_A, name: "AC同名", address: "AC同住所", corporateNumber: CN_AB }),
+      makeOwner({ id: ID_C, name: "AC同名", address: "AC同住所" }),
+      // B は A と CN_AB 共有だが name/address 違い → 孤立 → group 化しない
+      makeOwner({ id: ID_B, name: "B独自", address: "B独自", corporateNumber: CN_AB }),
+      // D は単独
+      makeOwner({ id: ID_D, name: "D独自", address: "D独自" }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+
+    // 実割当: name_address で A, C の 2 件のみ。corporate_number は孤立で 0。
+    expect(json.summary.duplicateMatchedByCounts).toEqual({
+      name_address: 2,
+      corporate_number: 0,
+      external_link_key: 0,
+    });
+    // duplicateCount も 2（types["duplicate"] 持ち）
+    expect(json.summary.duplicateCount).toBe(2);
+    // count 合計 = duplicateCount
+    const counts = json.summary.duplicateMatchedByCounts;
+    expect(counts.name_address + counts.corporate_number + counts.external_link_key).toBe(
+      json.summary.duplicateCount,
+    );
+  });
+
+  it("AuditLog detail に法人番号生値 / externalLinkKey 生値 / 氏名 / 住所が含まれない（孤立ケース含む）", async () => {
+    const ID_A = "11111111-1111-4111-8111-111111111111";
+    const ID_B = "22222222-2222-4222-8222-222222222222";
+    const ID_C = "33333333-3333-4333-8333-333333333333";
+    const PII_NAME = "PII氏名X";
+    const PII_ADDR = "PII住所Y";
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: ID_A,
+        name: PII_NAME,
+        address: PII_ADDR,
+        corporateNumber: CN_AB,
+        externalLinkKey: ELK_AB,
+      }),
+      makeOwner({
+        id: ID_C,
+        name: PII_NAME,
+        address: PII_ADDR,
+      }),
+      // 孤立になる B
+      makeOwner({
+        id: ID_B,
+        name: "B別",
+        address: "B別",
+        corporateNumber: CN_AB,
+        externalLinkKey: ELK_AB,
+      }),
+    ]);
+
+    const { writeAuditLog } = await import("@/lib/audit");
+    await GET(makeRequest("duplicate"));
+    const auditCall = vi.mocked(writeAuditLog).mock.calls[0]?.[0];
+    expect(auditCall).toBeDefined();
+    const serialized = JSON.stringify(auditCall!.detail);
+    expect(serialized).not.toContain(CN_AB);
+    expect(serialized).not.toContain(ELK_AB);
+    expect(serialized).not.toContain(PII_NAME);
+    expect(serialized).not.toContain(PII_ADDR);
+  });
+});

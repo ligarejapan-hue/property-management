@@ -316,15 +316,37 @@ export async function GET(request: NextRequest) {
       elkGroups.set(key, arr);
     }
 
+    // Codex P1: グループ割当は atomic に行う。
+    //
+    // 旧実装は memberIds の全件サイズを duplicateGroupSize にしていたため、
+    // 低優先グループのメンバーの一部が既に高優先グループへ割り当て済みの場合、
+    //   - 「未割当の 1 人だけ」に dup-cn-N / size=2 を付けてしまう
+    //   - その 1 人と同じ groupId を持つ仲間が存在せず、UI 側の
+    //     `arr.length >= 2` で落ちて duplicate サマリーから消える
+    // という不整合（孤立 group）が発生していた。
+    //
+    // 修正:
+    //   1. 既に割り当て済み（duplicateGroupId !== null）のメンバーは触らない
+    //   2. 未割当メンバーだけで実グループを組む
+    //   3. 未割当が < 2 ならグループ自体を作らない
+    //      （types["duplicate"] / merge_candidate も付与しない）
+    //   4. 未割当 >= 2 のときだけ opaque ID を割り当て、size は **未割当数**
+    //   5. counter は実際にグループが組まれたときのみ進めて連番の飛びを防ぐ
     function assignGroup(
       memberIds: string[],
       opaqueId: string,
       matchedBy: DuplicateMatchedBy,
-    ) {
-      const size = memberIds.length;
+    ): boolean {
+      const unassigned: Candidate[] = [];
       for (const id of memberIds) {
         const c = candidateById.get(id);
         if (!c) continue;
+        if (c.duplicateGroupId === null) unassigned.push(c);
+      }
+      // 未割当が 1 人以下なら group を作らない（孤立 group 防止）。
+      if (unassigned.length < 2) return false;
+      const size = unassigned.length;
+      for (const c of unassigned) {
         if (!c.types.includes("duplicate")) c.types.push("duplicate");
         if (
           c.recommendedAction === "delete_candidate" ||
@@ -332,33 +354,37 @@ export async function GET(request: NextRequest) {
         ) {
           c.recommendedAction = "merge_candidate";
         }
-        // 既存挙動を優先するため、先に確定した duplicateGroupId は上書きしない。
-        if (c.duplicateGroupId === null) {
-          c.duplicateGroupId = opaqueId;
-          c.duplicateGroupSize = size;
-          c.duplicateMatchedBy = matchedBy;
-        }
+        c.duplicateGroupId = opaqueId;
+        c.duplicateGroupSize = size;
+        c.duplicateMatchedBy = matchedBy;
       }
+      return true;
     }
 
     // 5-d. opaque ID 割当（Map 挿入順で安定した連番）
+    //      counter は assignGroup 成功時のみ進める（飛び番号を作らない）。
     let naCounter = 0;
     for (const group of nameAddrGroups.values()) {
       if (group.length < 2) continue;
-      naCounter++;
-      assignGroup(group, `dup-${naCounter}`, "name_address");
+      if (assignGroup(group, `dup-${naCounter + 1}`, "name_address")) {
+        naCounter++;
+      }
     }
     let cnCounter = 0;
     for (const group of cnGroups.values()) {
       if (group.length < 2) continue;
-      cnCounter++;
-      assignGroup(group, `dup-cn-${cnCounter}`, "corporate_number");
+      if (assignGroup(group, `dup-cn-${cnCounter + 1}`, "corporate_number")) {
+        cnCounter++;
+      }
     }
     let elkCounter = 0;
     for (const group of elkGroups.values()) {
       if (group.length < 2) continue;
-      elkCounter++;
-      assignGroup(group, `dup-elk-${elkCounter}`, "external_link_key");
+      if (
+        assignGroup(group, `dup-elk-${elkCounter + 1}`, "external_link_key")
+      ) {
+        elkCounter++;
+      }
     }
 
     // 6. type フィルタ
