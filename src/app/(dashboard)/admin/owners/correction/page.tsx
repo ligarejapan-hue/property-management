@@ -611,7 +611,7 @@ function DuplicateGroupSummary({
         重複グループ ({groupList.length} 件)
       </h2>
       <p className="mb-3 text-xs text-purple-700">
-        同一 (氏名 + 住所) の所有者をまとめて表示しています。各グループ内で master / source を選び、統合プレビュー（dryRun）を取得できます。
+        重複候補をグループごとに表示しています。<strong>氏名住所一致</strong>グループのみ master / source を選んで統合プレビュー（dryRun）を取得できます。<strong>法人番号一致 / リンクキー一致</strong>は表示のみで、統合プレビュー / 実行は別 phase で対応予定です。
       </p>
       <div className="space-y-3">
         {groupList.map(([key, members], idx) => (
@@ -657,6 +657,11 @@ function DuplicateGroupCard({
   // Phase 2-A: グループの一致経路（全 member 同一なので最初の 1 件を使う）。
   // raw 法人番号 / externalLinkKey は含まずラベル文字列のみ。
   const matchedBy = sample.duplicateMatchedBy;
+  // Codex P2-round-2: merge preview / execute は name_address 経路のみ対応。
+  // corporate_number / external_link_key 経路では master/source 選択列も
+  // プレビューボタンも表示しない（API 側 merge-preview が name+address 検証
+  // しかしないので UI で merge できそうに見せると誤解を招く）。
+  const supportsMerge = matchedBy === "name_address";
 
   // master / source は disabled にしない（disabled だと一度選んだ後に役割を
   // 入れ替えられない）。代わりに、既に相手側に選ばれている owner を選んだら
@@ -695,9 +700,12 @@ function DuplicateGroupCard({
       <table className="mb-3 w-full text-xs">
         <thead className="bg-gray-50 text-gray-500">
           <tr>
-            <th className="px-2 py-1 text-left">master</th>
-            <th className="px-2 py-1 text-left">source</th>
-            <th className="px-2 py-1 text-left">推奨</th>
+            {/* Codex P2-round-2: master/source/推奨 列は merge 可能な
+                name_address group のみ表示。corporate_number / external_link_key
+                では merge 経路がないため列ごと出さない。 */}
+            {supportsMerge && <th className="px-2 py-1 text-left">master</th>}
+            {supportsMerge && <th className="px-2 py-1 text-left">source</th>}
+            {supportsMerge && <th className="px-2 py-1 text-left">推奨</th>}
             <th className="px-2 py-1 text-left">ID</th>
             <th className="px-2 py-1 text-center">物件</th>
             <th className="px-2 py-1 text-center">変更履歴</th>
@@ -708,25 +716,31 @@ function DuplicateGroupCard({
         <tbody className="divide-y divide-gray-100">
           {members.map((m) => (
             <tr key={m.id} className="hover:bg-gray-50">
-              <td className="px-2 py-1">
-                <input
-                  type="radio"
-                  name={`master-${groupIndex}`}
-                  checked={masterId === m.id}
-                  onChange={() => handleSelectMaster(m.id)}
-                />
-              </td>
-              <td className="px-2 py-1">
-                <input
-                  type="radio"
-                  name={`source-${groupIndex}`}
-                  checked={sourceId === m.id}
-                  onChange={() => handleSelectSource(m.id)}
-                />
-              </td>
-              <td className="px-2 py-1 text-purple-700">
-                {m.id === recommendedMaster.id ? "master 推奨" : ""}
-              </td>
+              {supportsMerge && (
+                <td className="px-2 py-1">
+                  <input
+                    type="radio"
+                    name={`master-${groupIndex}`}
+                    checked={masterId === m.id}
+                    onChange={() => handleSelectMaster(m.id)}
+                  />
+                </td>
+              )}
+              {supportsMerge && (
+                <td className="px-2 py-1">
+                  <input
+                    type="radio"
+                    name={`source-${groupIndex}`}
+                    checked={sourceId === m.id}
+                    onChange={() => handleSelectSource(m.id)}
+                  />
+                </td>
+              )}
+              {supportsMerge && (
+                <td className="px-2 py-1 text-purple-700">
+                  {m.id === recommendedMaster.id ? "master 推奨" : ""}
+                </td>
+              )}
               <td className="px-2 py-1 font-mono text-[10px] text-gray-400">
                 {m.id.slice(0, 8)}…
               </td>
@@ -743,21 +757,37 @@ function DuplicateGroupCard({
         </tbody>
       </table>
 
-      {canPreview && masterId && sourceId ? (
-        // key を pair ID にして、選択ペア変更時にコンポーネントを remount し
-        // 古い preview 結果が残らないことを保証する（OwnerMergePreviewButton
-        // 内の useEffect と併せた多重防御）。
-        <OwnerMergePreviewButton
-          key={`${masterId}:${sourceId}`}
-          masterId={masterId}
-          sourceId={sourceId}
-          masterLabel={`${masterId.slice(0, 8)}…`}
-          sourceLabel={`${sourceId.slice(0, 8)}…`}
-          onExecuted={onExecuted}
-        />
+      {supportsMerge ? (
+        canPreview && masterId && sourceId ? (
+          // key を pair ID にして、選択ペア変更時にコンポーネントを remount し
+          // 古い preview 結果が残らないことを保証する（OwnerMergePreviewButton
+          // 内の useEffect と併せた多重防御）。
+          <OwnerMergePreviewButton
+            key={`${masterId}:${sourceId}`}
+            masterId={masterId}
+            sourceId={sourceId}
+            masterLabel={`${masterId.slice(0, 8)}…`}
+            sourceLabel={`${sourceId.slice(0, 8)}…`}
+            onExecuted={onExecuted}
+          />
+        ) : (
+          <p className="text-xs text-gray-400">
+            master と source をそれぞれ選択してください
+          </p>
+        )
       ) : (
-        <p className="text-xs text-gray-400">
-          master と source をそれぞれ選択してください
+        // Codex P2-round-2: corporate_number / external_link_key 経路は
+        // merge-preview API 未対応。merge ボタンを出さず「要確認」注記のみ。
+        <p
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          data-testid="duplicate-group-merge-unsupported-notice"
+        >
+          {matchedBy === "corporate_number"
+            ? "法人番号一致のため要確認。"
+            : matchedBy === "external_link_key"
+              ? "リンクキー一致のため要確認。"
+              : "要確認。"}
+          Phase 2-A では統合プレビュー / 実行は氏名住所一致グループのみ対応しています。法人番号 / リンクキー一致グループは候補表示のみで、merge は別 phase で対応予定です。
         </p>
       )}
     </div>

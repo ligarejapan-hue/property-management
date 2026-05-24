@@ -276,8 +276,11 @@ export async function GET(request: NextRequest) {
     //    duplicateGroupId / duplicateGroupSize / duplicateMatchedBy が確定したら
     //    以降の経路では上書きしない。
     //
-    //    types["duplicate"] / recommendedAction="merge_candidate" は経路に関わらず
-    //    duplicate グループ（size>=2）所属で一度だけ付与する。
+    //    types["duplicate"] は経路に関わらず実際に group に組まれた候補へ一度だけ
+    //    付与する。一方 recommendedAction="merge_candidate" への昇格は
+    //    **name_address 限定**（merge-preview が name+address 検証しか持たないため、
+    //    corporate_number / external_link_key 由来候補を merge_candidate にすると
+    //    UI 上 merge できそうに見えて preview/execute では block されてしまう）。
     const candidateById = new Map<string, Candidate>();
     for (const c of candidates) candidateById.set(c.id, c);
 
@@ -346,11 +349,20 @@ export async function GET(request: NextRequest) {
       // 未割当が 1 人以下なら group を作らない（孤立 group 防止）。
       if (unassigned.length < 2) return false;
       const size = unassigned.length;
+      // Codex P2-round-2: merge_candidate への昇格は name_address group 限定。
+      // merge-preview API は buildOwnerDuplicateCandidateKey (name+address) でしか
+      // ペア検証していないため、corporate_number / external_link_key 由来の候補に
+      // merge_candidate を付けると UI 上 merge できそうに見えて preview/execute で
+      // name_address_normalize_mismatch によりブロックされ、operator に誤解を
+      // 与える機能不整合になる。corporate_number / external_link_key 由来の候補は
+      // 既存の recommendedAction（hold / review / delete_candidate）を維持する。
+      const promoteToMergeCandidate = matchedBy === "name_address";
       for (const c of unassigned) {
         if (!c.types.includes("duplicate")) c.types.push("duplicate");
         if (
-          c.recommendedAction === "delete_candidate" ||
-          c.recommendedAction === "review"
+          promoteToMergeCandidate &&
+          (c.recommendedAction === "delete_candidate" ||
+            c.recommendedAction === "review")
         ) {
           c.recommendedAction = "merge_candidate";
         }

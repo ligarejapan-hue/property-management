@@ -124,3 +124,46 @@ describe("correction page: Codex P2 URL↔state 同期", () => {
     expect(src).toMatch(/sp\.set\(\s*"dup"\s*,\s*next\s*\)/);
   });
 });
+
+// Codex P2 (round 2): merge UI scoping
+//
+// DuplicateGroupCard は matchedBy === "name_address" のときのみ merge 関連 UI
+// (master/source 列 + OwnerMergePreviewButton) を表示する。corporate_number /
+// external_link_key 経路ではメッセージのみで merge ボタンを出さない。
+describe("correction page: Codex P2 (round 2) merge UI scoping", () => {
+  it("supportsMerge は matchedBy === 'name_address' と紐づけている", () => {
+    expect(src).toMatch(
+      /const\s+supportsMerge\s*=\s*matchedBy\s*===\s*"name_address"/,
+    );
+  });
+
+  it("OwnerMergePreviewButton は supportsMerge=true の分岐内でのみ render される", () => {
+    // supportsMerge ? (...OwnerMergePreviewButton...) : (...) という構造を
+    // 担保する（OwnerMergePreviewButton の前に supportsMerge ? が出ること）。
+    expect(src).toMatch(
+      /supportsMerge\s*\?\s*\([\s\S]*?OwnerMergePreviewButton[\s\S]*?\)\s*:\s*\(/,
+    );
+  });
+
+  it("master/source ヘッダー列は supportsMerge 条件付きで render される", () => {
+    expect(src).toMatch(
+      /\{supportsMerge\s*&&\s*<th[^>]*>\s*master\s*<\/th>\}/,
+    );
+    expect(src).toMatch(
+      /\{supportsMerge\s*&&\s*<th[^>]*>\s*source\s*<\/th>\}/,
+    );
+  });
+
+  it("merge 非対応 group 用の注記要素が存在する（data-testid 付き）", () => {
+    expect(src).toMatch(/data-testid="duplicate-group-merge-unsupported-notice"/);
+  });
+
+  it("merge 非対応 group の注記文言に「要確認」を含む", () => {
+    expect(src).toMatch(/法人番号一致のため要確認/);
+    expect(src).toMatch(/リンクキー一致のため要確認/);
+  });
+
+  it("DuplicateGroupSummary の説明文が氏名住所一致限定の merge 制限を明示している", () => {
+    expect(src).toMatch(/氏名住所一致[\s\S]{0,80}master\s*\/\s*source[\s\S]{0,80}統合プレビュー/);
+  });
+});

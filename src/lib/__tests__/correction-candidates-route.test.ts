@@ -999,3 +999,146 @@ describe("GET correction-candidates: Codex P1 グループ割当 atomicity", () 
     expect(serialized).not.toContain(PII_ADDR);
   });
 });
+
+// ---- Codex P2 (round 2): merge_candidate 昇格は name_address 限定 ----
+//
+// merge-preview API は buildOwnerDuplicateCandidateKey による name+address
+// 検証しか持たないため、corporate_number / external_link_key 由来の duplicate
+// 候補に recommendedAction="merge_candidate" を付けると UI で merge できそうに
+// 見えて preview/execute が name_address_normalize_mismatch でブロックされる
+// 機能不整合になる。route 側で merge_candidate 昇格を name_address 限定にする。
+describe("GET correction-candidates: Codex P2 (round 2) merge_candidate scoping", () => {
+  const CN_VALID = "1234567890123";
+  const ELK = "EXT-LINK-001";
+
+  it("name_address group の review 候補は merge_candidate に昇格する", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "同名",
+        address: "同住所",
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "同名",
+        address: "同住所",
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(2);
+    for (const c of json.candidates as { duplicateMatchedBy: string; recommendedAction: string }[]) {
+      expect(c.duplicateMatchedBy).toBe("name_address");
+      expect(c.recommendedAction).toBe("merge_candidate");
+    }
+  });
+
+  it("corporate_number group の候補は merge_candidate に昇格しない（review のまま）", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "CN社A",
+        address: "住所A",
+        corporateNumber: CN_VALID,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "CN社B",
+        address: "住所B",
+        corporateNumber: CN_VALID,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(2);
+    for (const c of json.candidates as { duplicateMatchedBy: string; recommendedAction: string }[]) {
+      expect(c.duplicateMatchedBy).toBe("corporate_number");
+      // duplicate group には属するが、merge_candidate には昇格しない
+      expect(c.recommendedAction).not.toBe("merge_candidate");
+      // 既存の review / hold / delete_candidate のいずれか（このケースでは review）
+      expect(c.recommendedAction).toBe("review");
+    }
+  });
+
+  it("external_link_key group の候補は merge_candidate に昇格しない", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "L1",
+        address: "住所L1",
+        externalLinkKey: ELK,
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "L2",
+        address: "住所L2",
+        externalLinkKey: ELK,
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(2);
+    for (const c of json.candidates as { duplicateMatchedBy: string; recommendedAction: string; blockReasons: string[] }[]) {
+      expect(c.duplicateMatchedBy).toBe("external_link_key");
+      expect(c.recommendedAction).not.toBe("merge_candidate");
+      // external_link_key が入っていると blockReasons に "external_link_key_exists" が
+      // 入って hasSafeguard=true → recommendedAction="hold"
+      expect(c.recommendedAction).toBe("hold");
+      expect(c.blockReasons).toContain("external_link_key_exists");
+    }
+  });
+
+  it("hasSafeguard 由来の hold は経路を問わず維持される（昇格対象外）", async () => {
+    // note を持つ owner（hold 維持） + 同名同住所のもう 1 件。
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "メモ持ち",
+        address: "同住所",
+        note: "important note",
+      }),
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "メモ持ち",
+        address: "同住所",
+      }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    const byId = new Map<string, { recommendedAction: string; duplicateMatchedBy: string }>(
+      (json.candidates as { id: string; recommendedAction: string; duplicateMatchedBy: string }[]).map((c) => [c.id, c]),
+    );
+    // note 持ちは hasSafeguard=true → hold のまま（name_address group でも昇格しない）
+    expect(byId.get("11111111-1111-4111-8111-111111111111")?.recommendedAction).toBe("hold");
+    // メモなしの相方は review → merge_candidate に昇格
+    expect(byId.get("22222222-2222-4222-8222-222222222222")?.recommendedAction).toBe("merge_candidate");
+  });
+
+  it("name_address の優先で corporate_number 経路を抑制されたケースでも、name_address 側だけ merge_candidate になる", async () => {
+    const ID_A = "11111111-1111-4111-8111-111111111111";
+    const ID_B = "22222222-2222-4222-8222-222222222222";
+    const ID_C = "33333333-3333-4333-8333-333333333333";
+    const ID_D = "44444444-4444-4444-8444-444444444444";
+    pm.owner.findMany.mockResolvedValue([
+      // A-C: name_address
+      makeOwner({ id: ID_A, name: "AC同名", address: "AC同住所", corporateNumber: CN_VALID }),
+      makeOwner({ id: ID_C, name: "AC同名", address: "AC同住所" }),
+      // B-D: corporate_number のみ（name/address 違い）
+      makeOwner({ id: ID_B, name: "B独自", address: "B独自", corporateNumber: CN_VALID }),
+      makeOwner({ id: ID_D, name: "D独自", address: "D独自", corporateNumber: CN_VALID }),
+    ]);
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    const byId = new Map<string, { recommendedAction: string; duplicateMatchedBy: string }>(
+      (json.candidates as { id: string; recommendedAction: string; duplicateMatchedBy: string }[]).map((c) => [c.id, c]),
+    );
+    // A-C は name_address → merge_candidate
+    expect(byId.get(ID_A)?.recommendedAction).toBe("merge_candidate");
+    expect(byId.get(ID_C)?.recommendedAction).toBe("merge_candidate");
+    // B-D は corporate_number → review のまま（昇格しない）
+    expect(byId.get(ID_B)?.recommendedAction).toBe("review");
+    expect(byId.get(ID_D)?.recommendedAction).toBe("review");
+    expect(byId.get(ID_B)?.duplicateMatchedBy).toBe("corporate_number");
+    expect(byId.get(ID_D)?.duplicateMatchedBy).toBe("corporate_number");
+  });
+});
