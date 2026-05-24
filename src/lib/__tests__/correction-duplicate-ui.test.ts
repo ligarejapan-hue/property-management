@@ -212,3 +212,43 @@ describe("correction page: Codex P1 (round 2) corporate_number 権限不足メ�
     expect(denialBlock).not.toMatch(/\{[^}]*externalLinkKey[^}]*\}/);
   });
 });
+
+// Codex P1 (round 3): non-name duplicate の archive ガード + reason ラベル
+//
+// route 側で recommendedAction を review に落としている前提だが、UI でも
+// 多重防御として「matchedBy が corporate_number / external_link_key の場合
+// orphan タブで archive button を出さない」を担保する。また新規 blockReason
+// （非 PII enum）のラベルが BLOCK_REASON_LABELS に登録されていることも担保。
+describe("correction page: Codex P1 (round 3) non-name duplicate ガード + ラベル", () => {
+  it("orphan archive button の表示条件に duplicateMatchedBy ガードがある（corporate_number 除外）", () => {
+    expect(src).toMatch(
+      /c\.duplicateMatchedBy\s*!==?\s*"corporate_number"/,
+    );
+  });
+
+  it("orphan archive button の表示条件に duplicateMatchedBy ガードがある（external_link_key 除外）", () => {
+    expect(src).toMatch(
+      /c\.duplicateMatchedBy\s*!==?\s*"external_link_key"/,
+    );
+  });
+
+  it("orphan archive button の前段で recommendedAction === 'delete_candidate' チェックも維持されている", () => {
+    // recommendedAction チェック → matchedBy ガード の順で AND 連結している
+    // ことを確認する。Defense in Depth のコメントが間に挟まるので幅を広めに取る。
+    expect(src).toMatch(
+      /recommendedAction\s*===\s*"delete_candidate"[\s\S]{0,800}duplicateMatchedBy\s*!==?\s*"corporate_number"[\s\S]{0,400}duplicateMatchedBy\s*!==?\s*"external_link_key"[\s\S]{0,400}<OwnerArchiveButton/,
+    );
+  });
+
+  it("BLOCK_REASON_LABELS に corporate_number_duplicate_requires_review のラベルがある", () => {
+    expect(src).toMatch(
+      /corporate_number_duplicate_requires_review\s*:\s*"法人番号重複（要確認）"/,
+    );
+  });
+
+  it("BLOCK_REASON_LABELS に external_link_key_duplicate_requires_review のラベルがある", () => {
+    expect(src).toMatch(
+      /external_link_key_duplicate_requires_review\s*:\s*"外部キー重複（要確認）"/,
+    );
+  });
+});

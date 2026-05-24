@@ -366,9 +366,24 @@ export async function GET(request: NextRequest) {
       // ペア検証していないため、corporate_number / external_link_key 由来の候補に
       // merge_candidate を付けると UI 上 merge できそうに見えて preview/execute で
       // name_address_normalize_mismatch によりブロックされ、operator に誤解を
-      // 与える機能不整合になる。corporate_number / external_link_key 由来の候補は
-      // 既存の recommendedAction（hold / review / delete_candidate）を維持する。
+      // 与える機能不整合になる。
+      //
+      // Codex P1 (round 3): non-name 経路 (corporate_number / external_link_key)
+      // で duplicate と判定された候補は **delete_candidate を維持しない**。
+      // orphan + import success + safeguards なしの owner が「未解決の重複候補」
+      // のまま delete_candidate として残ると、orphan タブの archive ボタンから
+      // 削除されてデータ損失する。データ損失防止を優先し、non-name duplicate は
+      // 少なくとも review に落として人間の確認に回す（hold はそのまま維持）。
       const promoteToMergeCandidate = matchedBy === "name_address";
+      const nonNameMatchedBy =
+        matchedBy === "corporate_number" ||
+        matchedBy === "external_link_key";
+      const nonNameReviewReason =
+        matchedBy === "corporate_number"
+          ? "corporate_number_duplicate_requires_review"
+          : matchedBy === "external_link_key"
+            ? "external_link_key_duplicate_requires_review"
+            : null;
       for (const c of unassigned) {
         if (!c.types.includes("duplicate")) c.types.push("duplicate");
         if (
@@ -377,6 +392,24 @@ export async function GET(request: NextRequest) {
             c.recommendedAction === "review")
         ) {
           c.recommendedAction = "merge_candidate";
+        } else if (nonNameMatchedBy) {
+          // delete_candidate を必ず review に落とす（データ損失防止）。
+          // merge_candidate は本来 non-name で付かないが防御的に review へ。
+          // hold / review はそのまま維持（hold は safeguards 由来で重要、
+          // review は既にデフォルト確認状態）。
+          if (
+            c.recommendedAction === "delete_candidate" ||
+            c.recommendedAction === "merge_candidate"
+          ) {
+            c.recommendedAction = "review";
+          }
+          // 非 PII の reason を blockReasons に追加（重複出さない）。
+          if (
+            nonNameReviewReason &&
+            !c.blockReasons.includes(nonNameReviewReason)
+          ) {
+            c.blockReasons.push(nonNameReviewReason);
+          }
         }
         c.duplicateGroupId = opaqueId;
         c.duplicateGroupSize = size;

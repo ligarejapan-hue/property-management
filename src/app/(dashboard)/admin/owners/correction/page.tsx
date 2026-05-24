@@ -99,6 +99,11 @@ const BLOCK_REASON_LABELS: Record<string, string> = {
   note_exists: "メモあり",
   import_source_unknown: "取込元不明",
   import_row_not_success: "取込行未解決",
+  // Codex P1 (round 3): non-name duplicate （法人番号 / 外部キー一致）に
+  // 付与される「削除させず確認に回す」reason。raw 法人番号 / externalLinkKey は
+  // 含まない非 PII enum。
+  corporate_number_duplicate_requires_review: "法人番号重複（要確認）",
+  external_link_key_duplicate_requires_review: "外部キー重複（要確認）",
 };
 
 // Phase F: タブ状態を URL query で永続化するためのヘルパ。
@@ -483,7 +488,15 @@ function OwnerCorrectionPageInner() {
                           />
                         )}
                         {filterType === "orphan" &&
-                          c.recommendedAction === "delete_candidate" && (
+                          c.recommendedAction === "delete_candidate" &&
+                          // Codex P1 (round 3): non-name duplicate
+                          // (corporate_number / external_link_key) と判定された
+                          // 候補は route 側で recommendedAction を review に
+                          // 落としているはずだが、Defense in Depth で UI でも
+                          // archive button を出さない（万が一サーバが旧形式の
+                          // レスポンスを返してもデータ損失を防ぐ）。
+                          c.duplicateMatchedBy !== "corporate_number" &&
+                          c.duplicateMatchedBy !== "external_link_key" && (
                             <OwnerArchiveButton
                               ownerId={c.id}
                               ownerVersion={c.version}
