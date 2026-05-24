@@ -84,6 +84,7 @@ export type FieldRestoreStatus =
   | "skip_not_restorable_field"
   | "skip_subsequent_edit"
   | "skip_ambiguous_changelog"
+  | "skip_no_row_field_evidence"
   | "skip_type_conversion_failed";
 
 export interface FieldRestoreDecision {
@@ -151,6 +152,8 @@ export const ROLLBACK_WINDOW_UPPER_TOLERANCE_MS = 5000;
  *
  * 復元可能条件（per field）:
  *  - field が RESTORABLE_PROPERTY_FIELDS に含まれる
+ *  - **allowedFields に含まれる** (P1 round 4 追加: rollback 対象 Job の ImportJobRow が
+ *    実際にその field を更新したという row-level evidence)
  *  - JobWindow 内 (startMs ≦ changedAt ≦ endMs) に source=csv_import の ChangeLog が **ちょうど 1 件** 存在する
  *    （複数あれば skip_ambiguous_changelog: ChangeLog に importJobId がないため、
  *     別ジョブの csv_import を確実に区別できず推測復元はしない）
@@ -160,12 +163,18 @@ export const ROLLBACK_WINDOW_UPPER_TOLERANCE_MS = 5000;
  *
  * PII を返さないため、UI/AuditLog 側で「field 名」のみを利用する想定。
  *
- * @param changeLogs 対象 Property の ChangeLog（target_table=properties, target_id=propertyId）
- * @param window     rollback 対象 Job の実行時間窓と executedBy
+ * @param changeLogs    対象 Property の ChangeLog（target_table=properties, target_id=propertyId）
+ * @param window        rollback 対象 Job の実行時間窓と executedBy
+ * @param allowedFields rollback 対象 Job の ImportJobRow から抽出した「この Job で
+ *                      確実に更新した field」の集合。undefined の場合は evidence が
+ *                      存在しないとみなし、対象 field をすべて skip_no_row_field_evidence
+ *                      にする (Codex P1 round 4: 別 Job の csv_import ChangeLog が
+ *                      time window 内に紛れ込んだ場合の誤 restore を防ぐ)。
  */
 export function classifyUpdateFieldsForRestore(
   changeLogs: ChangeLogInput[],
   window: JobWindow,
+  allowedFields?: ReadonlySet<string>,
 ): FieldRestoreDecision[] {
   const byField = new Map<string, ChangeLogInput[]>();
   for (const log of changeLogs) {
@@ -188,6 +197,20 @@ export function classifyUpdateFieldsForRestore(
         status: "skip_not_restorable_field",
         restoreValue: null,
         reason: "復元対象外フィールド",
+      });
+      continue;
+    }
+
+    // P1 round 4: rollback 対象 Job の ImportJobRow が実際に更新した field か。
+    // allowedFields に含まれない場合は別 Job 由来の ChangeLog の可能性があるため復元しない。
+    // allowedFields が undefined の場合は「evidence 無し」とみなし全 field skip。
+    if (!allowedFields || !allowedFields.has(fieldName)) {
+      decisions.push({
+        fieldName,
+        status: "skip_no_row_field_evidence",
+        restoreValue: null,
+        reason:
+          "rollback対象ジョブがこのフィールドを更新した証拠がありません (missing_row_field_evidence)",
       });
       continue;
     }

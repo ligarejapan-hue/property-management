@@ -18,6 +18,7 @@ import {
   type FieldRestoreDecision,
   type JobWindow,
 } from "@/lib/import-rollback";
+import { extractUpdatedFields } from "@/lib/import-row-display";
 
 interface BlockedDetail {
   rowNumber: number;
@@ -222,6 +223,12 @@ export async function POST(
       rowsByProperty.set(row.createdId!, arr);
     }
 
+    // P1 round 4: rollback 対象 Job の ImportJobRow が「実際に更新した field」を
+    // errorMessage の "更新項目: ..." から抽出して row-level evidence にする。
+    // ChangeLog に importJobId がないため、別 Job 由来の csv_import が time window 内に
+    // 紛れ込んだ場合に誤って restore してしまうのを防ぐ二段目のガード。
+    const rowById = new Map(job.rows.map((r) => [r.id, r]));
+
     const restorePlans: RestorePlan[] = [];
     let restorableFieldCount = 0;
 
@@ -256,8 +263,35 @@ export async function POST(
         continue;
       }
 
+      // P1 round 4: rollback 対象 Job の row が更新したと証明できる field を union。
+      // 同 propertyId に複数 row があっても fieldSet に統合される（重複は自動排除）。
+      const allowedFieldsForProp = new Set<string>();
+      for (const r of rowsForProp) {
+        const fullRow = rowById.get(r.rowId);
+        if (!fullRow) continue;
+        for (const f of extractUpdatedFields(fullRow.errorMessage)) {
+          allowedFieldsForProp.add(f);
+        }
+      }
+      // evidence ゼロの場合は、この Property の restore 全体を安全側で block する。
+      // (row が success+isUpdateMessage で classifyRowsForRollback に restore と判定されたが、
+      //  errorMessage に "更新項目: ..." が無い等の理由で確証が取れないケース)
+      if (allowedFieldsForProp.size === 0) {
+        blockedDetails.push({
+          rowNumber: representativeRowNumber,
+          action: "restore",
+          reason:
+            "rollback対象ジョブがこのPropertyのフィールドを更新した証拠がありません (missing_row_field_evidence)",
+        });
+        continue;
+      }
+
       const logs = logsByProperty.get(propertyId) ?? [];
-      const decisions = classifyUpdateFieldsForRestore(logs, jobWindow);
+      const decisions = classifyUpdateFieldsForRestore(
+        logs,
+        jobWindow,
+        allowedFieldsForProp,
+      );
       const restorableFields = decisions.filter(
         (d) => d.status === "restorable",
       );

@@ -16,7 +16,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  classifyUpdateFieldsForRestore,
+  classifyUpdateFieldsForRestore as _classifyImpl,
   RESTORABLE_PROPERTY_FIELDS,
   RESTORABLE_PROPERTY_FIELD_TYPES,
   ROLLBACK_WINDOW_UPPER_TOLERANCE_MS,
@@ -33,6 +33,17 @@ const WINDOW: JobWindow = {
   endMs: COMPLETED_AT + ROLLBACK_WINDOW_UPPER_TOLERANCE_MS,
   executedBy: EXECUTED_BY,
 };
+
+// P1 round 4: 第 3 引数 allowedFields を受け取るようになった。
+// 既存テストは「Job の row-level evidence が全 RESTORABLE field を許可している」
+// 状況下での挙動を検証するため、デフォルトで ALL_FIELDS を渡すラッパーを使う。
+// allowedFields 自体の挙動は別 describe ブロックで個別検証する。
+const ALL_FIELDS: ReadonlySet<string> = new Set(RESTORABLE_PROPERTY_FIELDS);
+const classifyUpdateFieldsForRestore = (
+  logs: Parameters<typeof _classifyImpl>[0],
+  window: JobWindow,
+  allowed?: ReadonlySet<string>,
+) => _classifyImpl(logs, window, allowed ?? ALL_FIELDS);
 
 function csvLog(
   fieldName: string,
@@ -343,5 +354,66 @@ describe("classifyUpdateFieldsForRestore — 混合シナリオ", () => {
         expect(d.reason).not.toContain("after");
       }
     }
+  });
+});
+
+describe("classifyUpdateFieldsForRestore — allowedFields (P1 round 4)", () => {
+  it("allowedFields=undefined は対象 field を全て skip_no_row_field_evidence にする", () => {
+    // 直接 _classifyImpl を呼んで allowedFields 省略の挙動を検証する
+    const out = _classifyImpl(
+      [csvLog("address", "東京都", COMPLETED_AT - 1000)],
+      WINDOW,
+    );
+    expect(out[0].status).toBe("skip_no_row_field_evidence");
+    expect(out[0].restoreValue).toBeNull();
+  });
+
+  it("allowedFields=空 Set でも skip_no_row_field_evidence", () => {
+    const out = _classifyImpl(
+      [csvLog("address", "東京都", COMPLETED_AT - 1000)],
+      WINDOW,
+      new Set<string>(),
+    );
+    expect(out[0].status).toBe("skip_no_row_field_evidence");
+  });
+
+  it("allowedFields に含まれない field は skip_no_row_field_evidence になる (別 Job 由来 ChangeLog の流入防止)", () => {
+    // 想定: Job A は address だけ更新 (allowedFields = {address})。
+    //       同じ user・同じ window 内に Job B が note を更新した ChangeLog がある。
+    //       現在ロジックは window+changedBy だけだと note も復元候補にしてしまうが、
+    //       allowedFields でブロックする。
+    const out = _classifyImpl(
+      [
+        csvLog("address", "東京都", COMPLETED_AT - 2000),
+        csvLog("note", "old-note-from-job-b", COMPLETED_AT - 1000),
+      ],
+      WINDOW,
+      new Set(["address"]),
+    );
+    const byField = Object.fromEntries(out.map((d) => [d.fieldName, d.status]));
+    expect(byField.address).toBe("restorable");
+    expect(byField.note).toBe("skip_no_row_field_evidence");
+  });
+
+  it("allowedFields に含まれる field でも、その後の通常チェック (subsequent_edit 等) は走る", () => {
+    const out = _classifyImpl(
+      [
+        csvLog("address", "東京都", COMPLETED_AT - 2000),
+        nonCsvLog("address", "manual", COMPLETED_AT + 30_000),
+      ],
+      WINDOW,
+      new Set(["address"]),
+    );
+    expect(out[0].status).toBe("skip_subsequent_edit");
+  });
+
+  it("allowedFields 判定の reason に値そのもの (PII) を含めない", () => {
+    const out = _classifyImpl(
+      [csvLog("note", "極秘メモ本文", COMPLETED_AT - 1000)],
+      WINDOW,
+      new Set<string>(),
+    );
+    expect(out[0].reason).toBeDefined();
+    expect(out[0].reason!).not.toContain("極秘メモ");
   });
 });

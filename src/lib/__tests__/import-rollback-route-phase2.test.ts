@@ -102,16 +102,16 @@ describe("rollback route Phase 2 — source-assertion", () => {
     // startMs は job.startedAt または createdAt から取る
     expect(routeSrc).toMatch(/job\.startedAt[\s\S]{0,80}job\.createdAt/);
     expect(routeSrc).toMatch(/ROLLBACK_WINDOW_UPPER_TOLERANCE_MS/);
-    // classifyUpdateFieldsForRestore は window 形式で呼ばれる
+    // classifyUpdateFieldsForRestore は window 形式で呼ばれる (3rd 引数 allowedFields 追加後も jobWindow を含む)
     expect(routeSrc).toMatch(
-      /classifyUpdateFieldsForRestore\([^,]+,\s*jobWindow\)/,
+      /classifyUpdateFieldsForRestore\([\s\S]{0,200}jobWindow/,
     );
   });
 
   it("Codex P1#2: completedAt ±5s を ChangeLog の絞り込みに使っていない", () => {
     // 旧実装の hint: 関数引数として completedAtMs を渡す呼び出しは無いはず
     expect(routeSrc).not.toMatch(
-      /classifyUpdateFieldsForRestore\([^,]+,\s*completedAtMs\)/,
+      /classifyUpdateFieldsForRestore\([\s\S]{0,200}completedAtMs\s*[,)]/,
     );
   });
 
@@ -278,5 +278,54 @@ describe("rollback route Phase 2 — source-assertion", () => {
     expect(detailBody).toMatch(/restoredFieldCount/);
     expect(detailBody).not.toMatch(/restorePlans\.length/);
     expect(detailBody).not.toMatch(/\brestorableFieldCount\b/);
+  });
+
+  // ---- Codex round 4 P1: row-level field evidence (allowedFields) ----
+  it("Codex P1 (round 4): import-row-display の extractUpdatedFields を import している", () => {
+    expect(routeSrc).toMatch(
+      /import\s*\{\s*extractUpdatedFields\s*\}\s*from\s+("|')@\/lib\/import-row-display\1/,
+    );
+  });
+
+  it("Codex P1 (round 4): job.rows を rowId Map に索引化している", () => {
+    expect(routeSrc).toMatch(/rowById\s*=\s*new Map\(job\.rows\.map/);
+  });
+
+  it("Codex P1 (round 4): rowsForProp から extractUpdatedFields で allowedFieldsForProp を Set に union している", () => {
+    expect(routeSrc).toMatch(
+      /allowedFieldsForProp\s*=\s*new Set<string>\(\)/,
+    );
+    // 各 row の errorMessage から fields を抽出して add している
+    expect(routeSrc).toMatch(
+      /extractUpdatedFields\(\s*fullRow\.errorMessage\s*\)[\s\S]{0,200}allowedFieldsForProp\.add/,
+    );
+  });
+
+  it("Codex P1 (round 4): allowedFieldsForProp が空なら property 全体を block (missing_row_field_evidence)", () => {
+    expect(routeSrc).toMatch(
+      /allowedFieldsForProp\.size\s*===\s*0[\s\S]{0,400}missing_row_field_evidence/,
+    );
+    // そのブロックは action:"restore" の blockedDetails に行く
+    const evidenceBlock = routeSrc.match(
+      /allowedFieldsForProp\.size\s*===\s*0[\s\S]{0,400}action:\s*"restore"/,
+    );
+    expect(evidenceBlock).not.toBeNull();
+  });
+
+  it("Codex P1 (round 4): classifyUpdateFieldsForRestore に allowedFieldsForProp を渡す", () => {
+    expect(routeSrc).toMatch(
+      /classifyUpdateFieldsForRestore\([\s\S]{0,200}jobWindow,\s*allowedFieldsForProp/,
+    );
+  });
+
+  it("Codex P1 (round 4): missing_row_field_evidence の reason に PII 値が含まれない", () => {
+    const reasonMatch = routeSrc.match(
+      /missing_row_field_evidence[\s\S]{0,200}/,
+    );
+    expect(reasonMatch).not.toBeNull();
+    expect(reasonMatch![0]).not.toMatch(/\boldValue\b/);
+    expect(reasonMatch![0]).not.toMatch(/\bnewValue\b/);
+    expect(reasonMatch![0]).not.toMatch(/currentValue/);
+    expect(reasonMatch![0]).not.toMatch(/restoreValue/);
   });
 });
