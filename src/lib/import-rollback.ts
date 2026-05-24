@@ -77,6 +77,7 @@ export type FieldRestoreStatus =
   | "skip_no_changelog"
   | "skip_not_restorable_field"
   | "skip_subsequent_edit"
+  | "skip_ambiguous_changelog"
   | "skip_type_conversion_failed";
 
 export interface FieldRestoreDecision {
@@ -94,6 +95,24 @@ interface ChangeLogInput {
   newValue: string | null;
   source: "manual" | "api" | "csv_import" | "pdf_import";
   changedAt: Date;
+  /** 任意。指定があれば JobWindow.executedBy と一致するもののみ候補にする */
+  changedBy?: string;
+}
+
+/**
+ * rollback 対象 Job の「実行範囲」を表す時間窓 + 実行者。
+ *
+ * ChangeLog に importJobId がないため、Job 内で書かれた csv_import ChangeLog を
+ * job.startedAt (or createdAt) 〜 job.completedAt + 小さな許容 で絞り込む。
+ * executedBy が分かれば changedBy 一致でさらに絞り込み、別ジョブの混入を防ぐ。
+ */
+export interface JobWindow {
+  /** 包含。通常 job.startedAt?.getTime() ?? job.createdAt.getTime() */
+  startMs: number;
+  /** 包含。通常 (job.completedAt ?? job.createdAt).getTime() + TOLERANCE_MS */
+  endMs: number;
+  /** changedBy 絞り込み（一致しない ChangeLog は候補から除外） */
+  executedBy?: string;
 }
 
 /** ChangeLog の文字列値を Prisma に渡す型に変換。失敗時は throw。 */
@@ -118,25 +137,29 @@ function convertOldValueToFieldType(
   return rawOldValue;
 }
 
-const TOLERANCE_MS = 5000;
+/** rollback 実行範囲の upper 側に付ける小さな許容（completedAt 後の同 tick の書き込み吸収） */
+export const ROLLBACK_WINDOW_UPPER_TOLERANCE_MS = 5000;
 
 /**
  * 1 Property の更新行に対し、復元可能な field の集合を判定する。
  *
  * 復元可能条件（per field）:
  *  - field が RESTORABLE_PROPERTY_FIELDS に含まれる
- *  - job 完了時刻の近傍 (±TOLERANCE_MS) に source=csv_import の ChangeLog が存在する
- *  - その ChangeLog 以降に同 field の手動編集 (source ≠ csv_import) がない
+ *  - JobWindow 内 (startMs ≦ changedAt ≦ endMs) に source=csv_import の ChangeLog が **ちょうど 1 件** 存在する
+ *    （複数あれば skip_ambiguous_changelog: ChangeLog に importJobId がないため、
+ *     別ジョブの csv_import を確実に区別できず推測復元はしない）
+ *  - その csv_import 以降に同 field の **任意 source の編集** がない
+ *    （後続の csv_import / manual / api / pdf_import いずれも復元しない安全側ルール）
  *  - oldValue を Prisma 型に変換できる
  *
  * PII を返さないため、UI/AuditLog 側で「field 名」のみを利用する想定。
  *
  * @param changeLogs 対象 Property の ChangeLog（target_table=properties, target_id=propertyId）
- * @param completedAtMs ImportJob.completedAt の epoch ms
+ * @param window     rollback 対象 Job の実行時間窓と executedBy
  */
 export function classifyUpdateFieldsForRestore(
   changeLogs: ChangeLogInput[],
-  completedAtMs: number,
+  window: JobWindow,
 ): FieldRestoreDecision[] {
   const byField = new Map<string, ChangeLogInput[]>();
   for (const log of changeLogs) {
@@ -163,13 +186,19 @@ export function classifyUpdateFieldsForRestore(
       continue;
     }
 
-    // job 完了時刻の近傍にある csv_import ログを探す
-    const csvLog = logs.find(
-      (l) =>
-        l.source === "csv_import" &&
-        Math.abs(l.changedAt.getTime() - completedAtMs) <= TOLERANCE_MS,
-    );
-    if (!csvLog) {
+    // job window 内に source=csv_import の ChangeLog を抽出。
+    // executedBy が指定されていれば changedBy 一致のみ採用。
+    const candidates = logs.filter((l) => {
+      if (l.source !== "csv_import") return false;
+      const at = l.changedAt.getTime();
+      if (at < window.startMs || at > window.endMs) return false;
+      if (window.executedBy && l.changedBy && l.changedBy !== window.executedBy) {
+        return false;
+      }
+      return true;
+    });
+
+    if (candidates.length === 0) {
       decisions.push({
         fieldName,
         status: "skip_no_changelog",
@@ -178,19 +207,31 @@ export function classifyUpdateFieldsForRestore(
       });
       continue;
     }
+    if (candidates.length > 1) {
+      // 同 propertyId / field で window 内に複数の csv_import 候補。
+      // ChangeLog に importJobId が無いため、どれが当ジョブかを確定できない → 推測復元しない。
+      decisions.push({
+        fieldName,
+        status: "skip_ambiguous_changelog",
+        restoreValue: null,
+        reason: "復元対象の変更ログが特定できないため復元しません",
+      });
+      continue;
+    }
 
-    // その csv_import より後の同 field の編集（manual / api / pdf_import）があるか
+    const csvLog = candidates[0];
+
+    // P1#1 修正: csv_import より後の任意 source の編集をすべて後続更新としてブロックする。
+    // 別ジョブの csv_import で上書きされたケースを Job A の oldValue で戻してしまう事故を防ぐ。
     const subsequent = logs.find(
-      (l) =>
-        l.changedAt.getTime() > csvLog.changedAt.getTime() &&
-        l.source !== "csv_import",
+      (l) => l.changedAt.getTime() > csvLog.changedAt.getTime(),
     );
     if (subsequent) {
       decisions.push({
         fieldName,
         status: "skip_subsequent_edit",
         restoreValue: null,
-        reason: "取込後に手動編集されているため復元しません",
+        reason: "取込後に別の更新があるため復元しません",
       });
       continue;
     }

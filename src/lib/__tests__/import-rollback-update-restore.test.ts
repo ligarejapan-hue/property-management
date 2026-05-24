@@ -1,39 +1,67 @@
 /**
- * Phase 2: classifyUpdateFieldsForRestore — 純関数の単体テスト
+ * Phase 2 + Codex P1 修正: classifyUpdateFieldsForRestore — 純関数の単体テスト
  *
  * 復元可能性ルール:
  *  - field が RESTORABLE_PROPERTY_FIELDS に含まれる
- *  - job 完了時刻 ±5000ms に source=csv_import の ChangeLog がある
- *  - その csv_import より後に同 field の手動編集 (manual/api/pdf_import) がない
+ *  - JobWindow 内 (startMs ≦ changedAt ≦ endMs) に source=csv_import が **ちょうど 1 件**
+ *  - 複数あれば skip_ambiguous_changelog (importJobId が ChangeLog にないため推測しない)
+ *  - csv_import より後の **任意 source** の編集があれば skip_subsequent_edit
+ *    (Codex P1#1: 後続 csv_import / manual / api / pdf_import いずれもブロック)
  *  - oldValue を Prisma 型に変換できる
+ *  - JobWindow.executedBy が指定されていれば changedBy 一致のみ候補
+ *
+ * Codex P1#2: window は (job.startedAt ?? createdAt) 〜 (job.completedAt + 小許容) で渡し、
+ * completedAt ±5s ではない。長時間 import で completedAt より大きく前に書かれた
+ * csv_import 行も拾える。
  */
 import { describe, it, expect } from "vitest";
 import {
   classifyUpdateFieldsForRestore,
   RESTORABLE_PROPERTY_FIELDS,
   RESTORABLE_PROPERTY_FIELD_TYPES,
+  ROLLBACK_WINDOW_UPPER_TOLERANCE_MS,
+  type JobWindow,
 } from "@/lib/import-rollback";
 
-const completedAt = new Date("2026-05-24T10:00:00.000Z");
-const completedAtMs = completedAt.getTime();
+// 想定 Job: startedAt = T0, completedAt = T0+10min（長時間 import）
+const T0 = new Date("2026-05-24T10:00:00.000Z").getTime();
+const COMPLETED_AT = T0 + 10 * 60 * 1000; // +10min
+const EXECUTED_BY = "user-1";
+
+const WINDOW: JobWindow = {
+  startMs: T0,
+  endMs: COMPLETED_AT + ROLLBACK_WINDOW_UPPER_TOLERANCE_MS,
+  executedBy: EXECUTED_BY,
+};
 
 function csvLog(
   fieldName: string,
   oldValue: string | null,
-  offsetMs = 0,
-): {
-  fieldName: string;
-  oldValue: string | null;
-  newValue: string | null;
-  source: "csv_import";
-  changedAt: Date;
-} {
+  changedAtMs: number,
+  overrides: { changedBy?: string } = {},
+) {
   return {
     fieldName,
     oldValue,
     newValue: "new",
-    source: "csv_import",
-    changedAt: new Date(completedAtMs + offsetMs),
+    source: "csv_import" as const,
+    changedAt: new Date(changedAtMs),
+    changedBy: overrides.changedBy ?? EXECUTED_BY,
+  };
+}
+
+function nonCsvLog(
+  fieldName: string,
+  source: "manual" | "api" | "pdf_import",
+  changedAtMs: number,
+) {
+  return {
+    fieldName,
+    oldValue: "before",
+    newValue: "after",
+    source,
+    changedAt: new Date(changedAtMs),
+    changedBy: "user-2",
   };
 }
 
@@ -68,16 +96,16 @@ describe("RESTORABLE_PROPERTY_FIELDS", () => {
   });
 });
 
-describe("classifyUpdateFieldsForRestore", () => {
+describe("classifyUpdateFieldsForRestore — Window 形式 (P1#2)", () => {
   it("ChangeLog がない field は判定対象に含まれない（空配列）", () => {
-    const out = classifyUpdateFieldsForRestore([], completedAtMs);
+    const out = classifyUpdateFieldsForRestore([], WINDOW);
     expect(out).toEqual([]);
   });
 
   it("対象外 field は skip_not_restorable_field を返す", () => {
     const out = classifyUpdateFieldsForRestore(
-      [csvLog("propertyType", "land")],
-      completedAtMs,
+      [csvLog("propertyType", "land", COMPLETED_AT - 1000)],
+      WINDOW,
     );
     expect(out).toHaveLength(1);
     expect(out[0].status).toBe("skip_not_restorable_field");
@@ -86,81 +114,149 @@ describe("classifyUpdateFieldsForRestore", () => {
 
   it("ChangeLog source が csv_import 以外のみなら skip_no_changelog", () => {
     const out = classifyUpdateFieldsForRestore(
-      [
-        {
-          fieldName: "address",
-          oldValue: "東京都",
-          newValue: "大阪府",
-          source: "manual",
-          changedAt: completedAt,
-        },
-      ],
-      completedAtMs,
+      [nonCsvLog("address", "manual", COMPLETED_AT - 1000)],
+      WINDOW,
     );
     expect(out[0].status).toBe("skip_no_changelog");
   });
 
-  it("csv_import が完了時刻から ±5000ms 外なら skip_no_changelog", () => {
+  it("長時間 import: completedAt より 5 分前の csv_import も拾える (P1#2)", () => {
+    // job: startedAt=T0, completedAt=T0+10min
+    // csv_import は T0+5min (completedAt - 5min) に書かれた
     const out = classifyUpdateFieldsForRestore(
-      [csvLog("address", "東京都", 10_000)],
-      completedAtMs,
+      [csvLog("address", "東京都", T0 + 5 * 60 * 1000)],
+      WINDOW,
+    );
+    expect(out[0].status).toBe("restorable");
+    expect(out[0].restoreValue).toBe("東京都");
+  });
+
+  it("job 開始前の古い csv_import (window 外) は対象にならない (P1#2)", () => {
+    const out = classifyUpdateFieldsForRestore(
+      [csvLog("address", "東京都", T0 - 1)],
+      WINDOW,
     );
     expect(out[0].status).toBe("skip_no_changelog");
   });
 
-  it("csv_import 後に manual 編集があれば skip_subsequent_edit", () => {
+  it("completedAt + 許容 を超えた csv_import (window 外) は対象にならない", () => {
     const out = classifyUpdateFieldsForRestore(
       [
-        csvLog("address", "東京都", 0),
-        {
-          fieldName: "address",
-          oldValue: "new",
-          newValue: "manual-edit",
-          source: "manual",
-          changedAt: new Date(completedAtMs + 60_000),
-        },
+        csvLog(
+          "address",
+          "東京都",
+          COMPLETED_AT + ROLLBACK_WINDOW_UPPER_TOLERANCE_MS + 1,
+        ),
       ],
-      completedAtMs,
+      WINDOW,
+    );
+    expect(out[0].status).toBe("skip_no_changelog");
+  });
+
+  it("changedBy が executedBy と一致しない csv_import は候補から除外", () => {
+    const out = classifyUpdateFieldsForRestore(
+      [csvLog("address", "東京都", COMPLETED_AT - 1000, { changedBy: "other" })],
+      WINDOW,
+    );
+    expect(out[0].status).toBe("skip_no_changelog");
+  });
+});
+
+describe("classifyUpdateFieldsForRestore — 後続更新は source 不問でブロック (P1#1)", () => {
+  it("後続 manual 編集があれば skip_subsequent_edit", () => {
+    const out = classifyUpdateFieldsForRestore(
+      [
+        csvLog("address", "東京都", COMPLETED_AT - 1000),
+        nonCsvLog("address", "manual", COMPLETED_AT + 60_000),
+      ],
+      WINDOW,
     );
     expect(out[0].status).toBe("skip_subsequent_edit");
     expect(out[0].restoreValue).toBeNull();
   });
 
-  it("csv_import 後に api 編集があれば skip_subsequent_edit", () => {
+  it("後続 api 編集があれば skip_subsequent_edit", () => {
     const out = classifyUpdateFieldsForRestore(
       [
-        csvLog("address", "東京都"),
-        {
-          fieldName: "address",
-          oldValue: "new",
-          newValue: "api-edit",
-          source: "api",
-          changedAt: new Date(completedAtMs + 60_000),
-        },
+        csvLog("address", "東京都", COMPLETED_AT - 1000),
+        nonCsvLog("address", "api", COMPLETED_AT + 60_000),
       ],
-      completedAtMs,
+      WINDOW,
     );
     expect(out[0].status).toBe("skip_subsequent_edit");
   });
 
-  it("csv_import 後に別の csv_import がある場合は subsequent edit ではない (同じ取込形態)", () => {
-    // 別 job の再取込のケース。同 field を最新で更新しているため
-    // 本来は subsequent edit としても良いが、ここでは仕様優先で
-    // "csv_import 以外" のみを subsequent とみなす
+  it("後続 pdf_import があれば skip_subsequent_edit", () => {
     const out = classifyUpdateFieldsForRestore(
       [
-        csvLog("address", "東京都", 0),
-        csvLog("address", "new", 60_000),
+        csvLog("address", "東京都", COMPLETED_AT - 1000),
+        nonCsvLog("address", "pdf_import", COMPLETED_AT + 60_000),
       ],
-      completedAtMs,
+      WINDOW,
     );
-    expect(out[0].status).toBe("restorable");
+    expect(out[0].status).toBe("skip_subsequent_edit");
   });
 
+  it("後続 csv_import (別 Job B) があれば skip_subsequent_edit — Job B の値を上書きしない (P1#1)", () => {
+    // Job A: T0 に csv_import で address を更新（rollback 対象）
+    // Job B: COMPLETED_AT + 10min に同 address を別 csv_import で更新
+    // Job A を rollback しても Job B の値を Job A の oldValue で上書きしてはいけない
+    const out = classifyUpdateFieldsForRestore(
+      [
+        csvLog("address", "東京都", T0),
+        // Job B の changedBy は別ユーザでも同ユーザでもどちらでも検証する
+        {
+          fieldName: "address",
+          oldValue: "new", // Job A が書いた値
+          newValue: "from-job-b",
+          source: "csv_import",
+          changedAt: new Date(COMPLETED_AT + 10 * 60 * 1000),
+          changedBy: EXECUTED_BY,
+        },
+      ],
+      WINDOW,
+    );
+    expect(out[0].status).toBe("skip_subsequent_edit");
+    expect(out[0].restoreValue).toBeNull();
+  });
+});
+
+describe("classifyUpdateFieldsForRestore — 同 field 複数候補は ambiguous (P1#2 補強)", () => {
+  it("同 propertyId/field で window 内に csv_import が複数あれば skip_ambiguous_changelog", () => {
+    // 同 job の途中で同 field が 2 回更新されたケース、または
+    // window 内に別 job の csv_import が紛れ込んだケース。
+    // ChangeLog に importJobId がないため、どれが当ジョブかを確定できず復元しない。
+    const out = classifyUpdateFieldsForRestore(
+      [
+        csvLog("address", "東京都", T0 + 1000),
+        csvLog("address", "中間値", T0 + 2000),
+      ],
+      WINDOW,
+    );
+    expect(out[0].status).toBe("skip_ambiguous_changelog");
+    expect(out[0].restoreValue).toBeNull();
+  });
+
+  it("ambiguous 時の reason に値そのもの (PII) を含めない", () => {
+    const out = classifyUpdateFieldsForRestore(
+      [
+        csvLog("address", "東京都千代田区丸の内1-1-1", T0 + 1000),
+        csvLog("address", "別の住所値", T0 + 2000),
+      ],
+      WINDOW,
+    );
+    expect(out[0].reason).toBeDefined();
+    expect(out[0].reason!).not.toContain("東京都");
+    expect(out[0].reason!).not.toContain("丸の内");
+    expect(out[0].reason!).not.toContain("別の住所");
+  });
+});
+
+describe("classifyUpdateFieldsForRestore — 型変換", () => {
   it("string field は oldValue をそのまま restoreValue にする", () => {
     const out = classifyUpdateFieldsForRestore(
-      [csvLog("address", "東京都千代田区")],
-      completedAtMs,
+      [csvLog("address", "東京都千代田区", COMPLETED_AT - 1000)],
+      WINDOW,
     );
     expect(out[0].status).toBe("restorable");
     expect(out[0].restoreValue).toBe("東京都千代田区");
@@ -168,91 +264,83 @@ describe("classifyUpdateFieldsForRestore", () => {
 
   it("int field は数値変換される / 失敗時は skip_type_conversion_failed", () => {
     const ok = classifyUpdateFieldsForRestore(
-      [csvLog("rosenkaValue", "120000")],
-      completedAtMs,
+      [csvLog("rosenkaValue", "120000", COMPLETED_AT - 1000)],
+      WINDOW,
     );
     expect(ok[0].status).toBe("restorable");
     expect(ok[0].restoreValue).toBe(120000);
 
     const ng = classifyUpdateFieldsForRestore(
-      [csvLog("rosenkaValue", "abc")],
-      completedAtMs,
+      [csvLog("rosenkaValue", "abc", COMPLETED_AT - 1000)],
+      WINDOW,
     );
     expect(ng[0].status).toBe("skip_type_conversion_failed");
   });
 
   it("decimal field は文字列のまま restoreValue にする / 数値として無効ならエラー", () => {
     const ok = classifyUpdateFieldsForRestore(
-      [csvLog("gpsLat", "35.6895")],
-      completedAtMs,
+      [csvLog("gpsLat", "35.6895", COMPLETED_AT - 1000)],
+      WINDOW,
     );
     expect(ok[0].status).toBe("restorable");
     expect(ok[0].restoreValue).toBe("35.6895");
 
     const ng = classifyUpdateFieldsForRestore(
-      [csvLog("gpsLat", "not-a-number")],
-      completedAtMs,
+      [csvLog("gpsLat", "not-a-number", COMPLETED_AT - 1000)],
+      WINDOW,
     );
     expect(ng[0].status).toBe("skip_type_conversion_failed");
   });
 
   it("oldValue が null なら restoreValue=null で復元可能", () => {
     const out = classifyUpdateFieldsForRestore(
-      [csvLog("note", null)],
-      completedAtMs,
+      [csvLog("note", null, COMPLETED_AT - 1000)],
+      WINDOW,
     );
     expect(out[0].status).toBe("restorable");
     expect(out[0].restoreValue).toBeNull();
   });
+});
 
-  it("複数 field を一度に判定できる（混合シナリオ）", () => {
+describe("classifyUpdateFieldsForRestore — 混合シナリオ", () => {
+  it("複数 field を一度に判定できる", () => {
     const out = classifyUpdateFieldsForRestore(
       [
-        csvLog("address", "東京都"),
-        csvLog("propertyType", "land"),
-        {
-          fieldName: "note",
-          oldValue: "memo",
-          newValue: "new",
-          source: "csv_import",
-          changedAt: completedAt,
-        },
-        {
-          fieldName: "note",
-          oldValue: "new",
-          newValue: "user-edit",
-          source: "manual",
-          changedAt: new Date(completedAtMs + 30_000),
-        },
-        csvLog("rosenkaValue", "120000"),
+        csvLog("address", "東京都", COMPLETED_AT - 1000),
+        csvLog("propertyType", "land", COMPLETED_AT - 1000),
+        csvLog("note", "memo", COMPLETED_AT - 1000),
+        nonCsvLog("note", "manual", COMPLETED_AT + 30_000),
+        csvLog("rosenkaValue", "120000", COMPLETED_AT - 1000),
+        // window 外（古い）
+        csvLog("buildingNumber", "old-bn", T0 - 1000),
+        // ambiguous
+        csvLog("lotNumber", "lot-1", T0 + 1000),
+        csvLog("lotNumber", "lot-2", T0 + 2000),
       ],
-      completedAtMs,
+      WINDOW,
     );
     const byField = Object.fromEntries(out.map((d) => [d.fieldName, d.status]));
     expect(byField.address).toBe("restorable");
     expect(byField.propertyType).toBe("skip_not_restorable_field");
     expect(byField.note).toBe("skip_subsequent_edit");
     expect(byField.rosenkaValue).toBe("restorable");
+    expect(byField.buildingNumber).toBe("skip_no_changelog");
+    expect(byField.lotNumber).toBe("skip_ambiguous_changelog");
   });
 
-  it("reason 文字列に PII (具体値) を含めない", () => {
+  it("reason 文字列に PII (具体値) を含めない (全 skip 種別)", () => {
     const out = classifyUpdateFieldsForRestore(
       [
-        csvLog("address", "東京都千代田区丸の内1-1-1"),
-        {
-          fieldName: "address",
-          oldValue: "new",
-          newValue: "user-edit-with-pii",
-          source: "manual",
-          changedAt: new Date(completedAtMs + 30_000),
-        },
+        csvLog("address", "東京都千代田区丸の内1-1-1", COMPLETED_AT - 1000),
+        nonCsvLog("address", "manual", COMPLETED_AT + 30_000),
       ],
-      completedAtMs,
+      WINDOW,
     );
     for (const d of out) {
       if (d.reason) {
         expect(d.reason).not.toContain("東京都");
-        expect(d.reason).not.toContain("user-edit");
+        expect(d.reason).not.toContain("before");
+        expect(d.reason).not.toContain("after");
       }
     }
   });

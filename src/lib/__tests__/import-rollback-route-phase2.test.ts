@@ -92,4 +92,34 @@ describe("rollback route Phase 2 — source-assertion", () => {
     expect(body).toMatch(/restorableFieldCount/);
     expect(body).toMatch(/restorable:/);
   });
+
+  // ---- Codex P1#2: JobWindow 形式 (job 開始〜完了 + 小許容) ----
+  it("Codex P1#2: JobWindow を構築 (startMs/endMs/executedBy) して helper に渡す", () => {
+    expect(routeSrc).toMatch(/JobWindow/);
+    expect(routeSrc).toMatch(/startMs\s*:/);
+    expect(routeSrc).toMatch(/endMs\s*:/);
+    expect(routeSrc).toMatch(/executedBy\s*:/);
+    // startMs は job.startedAt または createdAt から取る
+    expect(routeSrc).toMatch(/job\.startedAt[\s\S]{0,80}job\.createdAt/);
+    expect(routeSrc).toMatch(/ROLLBACK_WINDOW_UPPER_TOLERANCE_MS/);
+    // classifyUpdateFieldsForRestore は window 形式で呼ばれる
+    expect(routeSrc).toMatch(
+      /classifyUpdateFieldsForRestore\([^,]+,\s*jobWindow\)/,
+    );
+  });
+
+  it("Codex P1#2: completedAt ±5s を ChangeLog の絞り込みに使っていない", () => {
+    // 旧実装の hint: 関数引数として completedAtMs を渡す呼び出しは無いはず
+    expect(routeSrc).not.toMatch(
+      /classifyUpdateFieldsForRestore\([^,]+,\s*completedAtMs\)/,
+    );
+  });
+
+  it("Codex P1#2: ChangeLog 取得で changedBy を select に含める (executedBy 絞り込み用)", () => {
+    const findManyMatch = routeSrc.match(
+      /prisma\.changeLog\.findMany\(\{[\s\S]*?select:\s*\{([\s\S]*?)\n\s*\},/,
+    );
+    expect(findManyMatch).not.toBeNull();
+    expect(findManyMatch![1]).toMatch(/changedBy/);
+  });
 });

@@ -13,8 +13,10 @@ import { hasPermission } from "@/lib/permissions";
 import {
   classifyRowsForRollback,
   classifyUpdateFieldsForRestore,
+  ROLLBACK_WINDOW_UPPER_TOLERANCE_MS,
   type ClassifiedRow,
   type FieldRestoreDecision,
+  type JobWindow,
 } from "@/lib/import-rollback";
 
 interface BlockedDetail {
@@ -160,8 +162,22 @@ export async function POST(
       deletable.push(row);
     }
 
-    // Phase 2: 更新行は ChangeLog を per-field に評価して復元可能 field を決定
+    // Phase 2: 更新行は ChangeLog を per-field に評価して復元可能 field を決定。
+    //
+    // P1#2 修正: completedAt ±5s ではなく Job の実行期間 [startedAt(or createdAt), completedAt+小許容] で
+    // ChangeLog を絞り込む。長時間 import で completedAt より大きく前に書かれた csv_import 行も拾えるように。
+    // P1#1 修正: 後続更新は source を問わず一律ブロック（classifyUpdateFieldsForRestore 側で実装）。
+    // changedBy も Job.executedBy で絞り込むことで別ジョブの csv_import 混入を最小化する。
+    const jobWindow: JobWindow = {
+      startMs: (job.startedAt ?? job.createdAt).getTime(),
+      endMs:
+        (job.completedAt ?? job.createdAt).getTime() +
+        ROLLBACK_WINDOW_UPPER_TOLERANCE_MS,
+      executedBy: job.executedBy,
+    };
     const restoreTargetIds = restoreRows.map((c) => c.createdId!);
+    // 候補は window 内 + executedBy 一致を優先的に取るが、後続更新検知 (P1#1) のために
+    // 同 propertyId の全 ChangeLog を取得し、helper 側で window フィルタする。
     const changeLogs =
       restoreTargetIds.length > 0
         ? await prisma.changeLog.findMany({
@@ -176,6 +192,7 @@ export async function POST(
               newValue: true,
               source: true,
               changedAt: true,
+              changedBy: true,
             },
           })
         : [];
@@ -207,20 +224,33 @@ export async function POST(
         continue;
       }
       const logs = logsByProperty.get(propertyId) ?? [];
-      const decisions = classifyUpdateFieldsForRestore(logs, completedAtMs);
+      const decisions = classifyUpdateFieldsForRestore(logs, jobWindow);
       const restorableFields = decisions.filter(
         (d) => d.status === "restorable",
       );
       // 個別 field の skip 理由は blockedDetails に細かく出さず restoreDetails 側で per-property に表示。
       // ただし「全 field 復元不可」なら 1 件 blocked として出して件数を増やす。
       if (restorableFields.length === 0) {
+        // ambiguous_changelog / subsequent_edit が混在している可能性を考慮し、
+        // どの理由でブロックされたかを reason に集約（PII を含まない status 値のみ）。
+        const blockedReasonCounts = decisions.reduce<Record<string, number>>(
+          (acc, d) => {
+            if (d.status === "restorable") return acc;
+            acc[d.status] = (acc[d.status] ?? 0) + 1;
+            return acc;
+          },
+          {},
+        );
+        const reasonParts = Object.entries(blockedReasonCounts).map(
+          ([s, n]) => `${s}=${n}`,
+        );
         blockedDetails.push({
           rowNumber: row.rowNumber,
           action: "restore",
           reason:
             decisions.length === 0
               ? "復元できる変更ログがありません"
-              : "復元可能なフィールドがありません",
+              : `復元可能なフィールドがありません (${reasonParts.join(", ")})`,
         });
         continue;
       }
