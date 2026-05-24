@@ -1,10 +1,16 @@
 /**
  * CSV取込ロールバックの行分類ロジック。
  * Prisma 非依存でテスト可能な純関数のみを置く。
+ *
+ * 重要: 依存は Prisma-free モジュールに限る。
+ *  - ./import-row-display       (純関数)
+ *  - ./property-field-constants (Prisma-free 定数)
+ *  - ./import-dedupe            (純関数)
+ * change-log.ts (Prisma を import) には直接依存しないこと。
  */
 
 import { isUpdateMessage } from "./import-row-display";
-import { PROPERTY_TRACKED_FIELDS } from "./change-log";
+import { PROPERTY_TRACKED_FIELDS } from "./property-field-constants";
 import { UPDATABLE_PROPERTY_FIELDS } from "./import-dedupe";
 
 export type RollbackCategory = "delete" | "restore" | "skip";
