@@ -151,6 +151,14 @@ function OwnerCorrectionPageInner() {
   // タブ変更時は URL の ?tab=... も更新する（PII を含まない）。
   // 法人番号タブ以外への遷移時は法人番号タブ側 query (sub/cursor) を削除する。
   // duplicate タブ以外への遷移時は dup query も削除する。
+  //
+  // Codex P2: URL ↔ duplicateSubFilter state の同期を厳格化する。
+  //   - duplicate タブから別タブへ移動 → URL から ?dup= を削除 +
+  //     in-memory state も "all" にリセット（残ったまま再進入すると URL=all なのに
+  //     画面が前回値で絞り込まれ、URL と画面表示が不一致になる）。
+  //   - 別タブから duplicate タブへ戻る → URL の現在の ?dup= を尊重して state に
+  //     反映する（無 / 不正値は parseDuplicateSubFilterFromQuery で "all" に
+  //     フォールバック）。
   const setFilterType = useCallback(
     (next: FilterType) => {
       setFilterTypeState(next);
@@ -168,6 +176,15 @@ function OwnerCorrectionPageInner() {
       }
       if (next !== "duplicate") {
         sp.delete("dup");
+        // Codex P2: duplicate タブ離脱時に in-memory state もリセット。
+        // これがないと URL=all なのに画面は前回 filter のまま残る不一致が起きる。
+        setDuplicateSubFilterState("all");
+      } else {
+        // Codex P2: 別タブから duplicate へ戻る時は URL の現在値を state に反映。
+        // 無 / 不正値は "all" にフォールバック（parseDuplicateSubFilterFromQuery）。
+        setDuplicateSubFilterState(
+          parseDuplicateSubFilterFromQuery(sp.get("dup")),
+        );
       }
       const qs = sp.toString();
       router.replace(qs ? `?${qs}` : "?", { scroll: false });

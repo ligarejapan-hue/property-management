@@ -72,3 +72,55 @@ describe("correction page: Phase 2-A duplicate サブフィルタ", () => {
     expect(src).toMatch(/setDuplicateSubFilter/);
   });
 });
+
+// Codex P2: URL ↔ duplicateSubFilter state の同期
+//
+// 振る舞いそのものは jsdom + RTL がない環境では直接検証できないので、
+// setFilterType の実装の以下 3 点を source assertion で担保する:
+//
+//   1. duplicate 以外へ移動するとき、URL から ?dup= を削除する既存処理は維持
+//   2. 同じタイミングで in-memory state も "all" にリセットする
+//   3. duplicate へ戻るとき、URL の現在の ?dup= を parse して state に反映する
+//      （不正値 / 無は parseDuplicateSubFilterFromQuery 経由で "all" フォールバック）
+describe("correction page: Codex P2 URL↔state 同期", () => {
+  it("duplicate 以外へ遷移時に ?dup= を URL から削除する処理が残っている", () => {
+    // 既存挙動の保護（Codex P2 修正で誤って消さないこと）。
+    expect(src).toMatch(/if\s*\(\s*next\s*!==?\s*"duplicate"\s*\)\s*\{[\s\S]*?sp\.delete\("dup"\)/);
+  });
+
+  it("duplicate 以外へ遷移時に duplicateSubFilter state を 'all' にリセットする", () => {
+    // setFilterType の `next !== "duplicate"` 分岐内で
+    // setDuplicateSubFilterState("all") を呼んでいることを担保する。
+    expect(src).toMatch(
+      /if\s*\(\s*next\s*!==?\s*"duplicate"\s*\)\s*\{[\s\S]*?setDuplicateSubFilterState\(\s*"all"\s*\)/,
+    );
+  });
+
+  it("duplicate タブへ戻る時、URL の ?dup= を parse して state に反映する", () => {
+    // `next === "duplicate"` 側で parseDuplicateSubFilterFromQuery を呼んでいる
+    // ことを確認する。これにより別タブから戻った時 URL=都度尊重される。
+    // multi-line + trailing comma の整形にも耐えるよう [\s,]* を許容。
+    expect(src).toMatch(
+      /setDuplicateSubFilterState\(\s*parseDuplicateSubFilterFromQuery\(\s*sp\.get\("dup"\)\s*\)[\s,]*\)/,
+    );
+  });
+
+  it("parseDuplicateSubFilterFromQuery は不正値を 'all' にフォールバックする", () => {
+    // switch default 経由で "all" を返している実装を担保する。
+    expect(src).toMatch(
+      /function parseDuplicateSubFilterFromQuery[\s\S]*?default:[\s\S]*?return\s*"all"/,
+    );
+  });
+
+  it("dup query は enum 値のみで PII / 法人番号生値 / externalLinkKey 生値を URL に載せない", () => {
+    // setDuplicateSubFilter は受け取った enum 値そのものを sp.set("dup", next) で
+    // セットするのみ。corporateNumber / externalLinkKey / name / address を
+    // 直接 sp.set する箇所が無いことを確認する。
+    expect(src).not.toMatch(/sp\.set\(\s*"dup"\s*,\s*[^)]*corporateNumber/);
+    expect(src).not.toMatch(/sp\.set\(\s*"dup"\s*,\s*[^)]*externalLinkKey/);
+    expect(src).not.toMatch(/sp\.set\(\s*"dup"\s*,\s*[^)]*c\.name/);
+    expect(src).not.toMatch(/sp\.set\(\s*"dup"\s*,\s*[^)]*c\.address/);
+    // 唯一の sp.set("dup", ...) は enum string の `next` であること。
+    expect(src).toMatch(/sp\.set\(\s*"dup"\s*,\s*next\s*\)/);
+  });
+});
