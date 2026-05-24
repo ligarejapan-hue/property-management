@@ -215,6 +215,13 @@ export async function POST(
       rowNumbers: number[]; // 同 propertyId を指す全 row（非 PII の rowNumber のみ）
       decisions: FieldRestoreDecision[];
       restorableFields: FieldRestoreDecision[];
+      /**
+       * P1 round 5: preflight 時の Property.updatedAt。
+       * transaction 内の tx.property.updateMany の where に積んで、
+       * preflight 後に他リクエストが Property を更新していたら count=0 で
+       * 検出し、stale な状態への上書きを防ぐ。
+       */
+      expectedUpdatedAt: Date;
     }
     const rowsByProperty = new Map<string, ClassifiedRow[]>();
     for (const row of restoreRows) {
@@ -326,6 +333,8 @@ export async function POST(
         rowNumbers,
         decisions,
         restorableFields,
+        // P1 round 5: preflight で読んだ Property.updatedAt を tx の where 条件に使う
+        expectedUpdatedAt: prop.updatedAt,
       });
       restorableFieldCount += restorableFields.length;
     }
@@ -414,10 +423,26 @@ export async function POST(
           });
           continue;
         }
-        await tx.property.update({
-          where: { id: plan.propertyId },
+        // P1 round 5: preflight 後〜tx.property.update の間に別リクエストが同 Property を
+        // 更新していた場合、新しい値を Job A の oldValue で上書きしてしまう競合があった。
+        // 無条件 update ではなく updateMany + where に updatedAt=expectedUpdatedAt を積み、
+        // count=0 (= 他リクエストの commit で updatedAt が変わった) のときは skip する。
+        const stalenessCheck = await tx.property.updateMany({
+          where: {
+            id: plan.propertyId,
+            updatedAt: plan.expectedUpdatedAt,
+          },
           data: restoreData,
         });
+        if (stalenessCheck.count === 0) {
+          blockedDetails.push({
+            rowNumber: plan.rowNumbers[0],
+            action: "restore",
+            reason:
+              "実行時点で物件が更新済みのため復元しません (property_stale_at_execute)",
+          });
+          continue;
+        }
         restoredPropertyCount++;
         restoredFieldCount += plan.restorableFields.length;
         restoreRecordPayloads.push({

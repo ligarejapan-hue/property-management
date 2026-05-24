@@ -186,19 +186,21 @@ describe("rollback route Phase 2 — source-assertion", () => {
     expect(detailBody).not.toMatch(/restoreValue/);
   });
 
-  it("Codex P2: execute は propertyId 単位で property.update を呼ぶ (row 単位ではない)", () => {
-    // tx.property.update の where.id が plan.propertyId (= 集約後の id)
-    expect(routeSrc).toMatch(
-      /tx\.property\.update\(\{\s*where:\s*\{\s*id:\s*plan\.propertyId\s*\}/,
-    );
-    // 集約前の row.createdId をそのまま restore update に渡していない
-    // (delete 側は row.createdId を使うため、restoreData 文脈に限定して検査)
+  it("Codex P2: execute は propertyId 単位で property.update(Many) を呼ぶ (row 単位ではない)", () => {
+    // P1 round 5 で update → updateMany に変わったので、どちらの呼び出しでも
+    // plan.propertyId を使っていることを許容する。
     const restoreUpdateBlock = routeSrc.match(
       /for\s*\(\s*const\s+plan\s+of\s+restorePlans\s*\)[\s\S]*?await\s+tx\.importJob\.update/,
     );
     expect(restoreUpdateBlock).not.toBeNull();
+    // restore loop 内に plan.propertyId を where.id に使う update / updateMany がある
+    expect(restoreUpdateBlock![0]).toMatch(
+      /tx\.property\.(update|updateMany)\(\{\s*where:\s*\{[\s\S]{0,200}id:\s*plan\.propertyId/,
+    );
+    // 集約前の row.createdId をそのまま restore update に渡していない
+    // (delete 側は row.createdId を使うため、restoreData 文脈に限定して検査)
     expect(restoreUpdateBlock![0]).not.toMatch(
-      /tx\.property\.update\(\{\s*where:\s*\{\s*id:\s*row\./,
+      /tx\.property\.(update|updateMany)\(\{\s*where:\s*\{\s*id:\s*row\./,
     );
   });
 
@@ -327,5 +329,58 @@ describe("rollback route Phase 2 — source-assertion", () => {
     expect(reasonMatch![0]).not.toMatch(/\bnewValue\b/);
     expect(reasonMatch![0]).not.toMatch(/currentValue/);
     expect(reasonMatch![0]).not.toMatch(/restoreValue/);
+  });
+
+  // ---- Codex round 5 P1: tx 内 stale guard (updateMany + updatedAt where) ----
+  it("Codex P1 (round 5): RestorePlan に expectedUpdatedAt: Date が含まれる", () => {
+    expect(routeSrc).toMatch(
+      /interface\s+RestorePlan\s*\{[\s\S]{0,1000}expectedUpdatedAt:\s*Date/,
+    );
+    // restorePlans.push で prop.updatedAt を expectedUpdatedAt に渡している
+    expect(routeSrc).toMatch(
+      /restorePlans\.push\(\{[\s\S]{0,400}expectedUpdatedAt:\s*prop\.updatedAt/,
+    );
+  });
+
+  it("Codex P1 (round 5): tx 内では tx.property.update ではなく tx.property.updateMany を使う", () => {
+    // restorePlans loop 内の更新は updateMany
+    const restoreBlock = routeSrc.match(
+      /for\s*\(\s*const\s+plan\s+of\s+restorePlans\s*\)[\s\S]*?await\s+tx\.importJob\.update/,
+    );
+    expect(restoreBlock).not.toBeNull();
+    expect(restoreBlock![0]).toMatch(
+      /tx\.property\.updateMany\(\{\s*where:\s*\{[\s\S]{0,200}updatedAt:\s*plan\.expectedUpdatedAt/,
+    );
+    // 旧 unconditional update は restore loop 内に残っていない
+    expect(restoreBlock![0]).not.toMatch(
+      /tx\.property\.update\(\{\s*where:\s*\{\s*id:\s*plan\.propertyId\s*\}\s*,\s*data:/,
+    );
+  });
+
+  it("Codex P1 (round 5): updateMany.count === 0 で stale 検出し property_stale_at_execute で skip する", () => {
+    expect(routeSrc).toMatch(/property_stale_at_execute/);
+    // stale check の構造: const ... = updateMany(...); if (count === 0) { blockedDetails.push }
+    expect(routeSrc).toMatch(
+      /tx\.property\.updateMany[\s\S]{0,400}\.count\s*===\s*0[\s\S]{0,300}property_stale_at_execute/,
+    );
+  });
+
+  it("Codex P1 (round 5): property_stale_at_execute の reason に PII 値を含めない", () => {
+    const reasonMatch = routeSrc.match(
+      /property_stale_at_execute[\s\S]{0,200}/,
+    );
+    expect(reasonMatch).not.toBeNull();
+    expect(reasonMatch![0]).not.toMatch(/\boldValue\b/);
+    expect(reasonMatch![0]).not.toMatch(/\bnewValue\b/);
+    expect(reasonMatch![0]).not.toMatch(/currentValue/);
+    expect(reasonMatch![0]).not.toMatch(/restoreValue/);
+  });
+
+  it("Codex P1 (round 5): stale 検出 → continue (restoredPropertyCount/restoredFieldCount に計上しない)", () => {
+    // property_stale_at_execute push 直後に continue があり、restoredPropertyCount++ までいかない
+    const staleBlockToCounter = routeSrc.match(
+      /property_stale_at_execute[\s\S]{0,300}continue;[\s\S]{0,200}restoredPropertyCount\+\+/,
+    );
+    expect(staleBlockToCounter).not.toBeNull();
   });
 });
