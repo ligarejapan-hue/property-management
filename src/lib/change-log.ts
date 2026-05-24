@@ -1,61 +1,14 @@
 import prisma from "@/lib/prisma";
 
-export const PROPERTY_TRACKED_FIELDS = [
-  "propertyType",
-  "address",
-  "lotNumber",
-  "buildingNumber",
-  "realEstateNumber",
-  "registryStatus",
-  "dmStatus",
-  "caseStatus",
-  "introductionRoute",
-  "gpsLat",
-  "gpsLng",
-  "zoningDistrict",
-  "buildingCoverageRatio",
-  "floorAreaRatio",
-  "heightDistrict",
-  "firePreventionZone",
-  "scenicRestriction",
-  "roadType",
-  "roadWidth",
-  "frontageWidth",
-  "frontageDirection",
-  "setbackRequired",
-  "rosenkaValue",
-  "rosenkaYear",
-  "rebuildPermission",
-  "architectureNote",
-  "note",
-  "assignedTo",
-];
-
-export const OWNER_TRACKED_FIELDS = [
-  "name",
-  "nameKana",
-  "phone",
-  "zip",
-  "address",
-  "note",
-  "email",
-  "corporateNumber",
-];
-
-export const BUILDING_TRACKED_FIELDS = [
-  "name",
-  "address",
-  "lotNumber",
-  "realEstateNumber",
-  "totalFloors",
-  "totalUnits",
-  "builtYear",
-  "structureType",
-  "managementCompany",
-  "gpsLat",
-  "gpsLng",
-  "note",
-];
+// Tracked-fields 定数は Prisma-free な src/lib/property-field-constants.ts に置き、
+// ここでは後方互換のため re-export する。これにより
+// src/lib/import-rollback.ts のような Prisma-free helper が
+// PROPERTY_TRACKED_FIELDS だけ取りたいときに change-log → prisma を巻き込まない。
+export {
+  PROPERTY_TRACKED_FIELDS,
+  OWNER_TRACKED_FIELDS,
+  BUILDING_TRACKED_FIELDS,
+} from "./property-field-constants";
 
 interface RecordChangesInput {
   targetTable: string;

@@ -485,6 +485,15 @@ export interface RollbackBlockedDetail {
   reason: string;
 }
 
+export interface RollbackRestoreDetail {
+  /** P2 修正: 同 propertyId を指す複数 row がある場合の代表値 (rowNumbers の最小値)。 */
+  rowNumber: number;
+  /** P2 修正: 同 propertyId を指す全 row の rowNumber 配列。非 PII。 */
+  rowNumbers?: number[];
+  propertyId: string;
+  fieldNames: string[];
+}
+
 export interface RollbackResponse {
   alreadyRolledBack: boolean;
   eligible: boolean;
@@ -492,12 +501,19 @@ export interface RollbackResponse {
   summary: {
     deletable: number;
     restorable: number;
+    /** Phase 2: 復元可能 field の合計（property をまたいで合算）。未対応 API は undefined。 */
+    restorableFieldCount?: number;
     blocked: number;
     skipped: number;
   };
   blockedDetails: RollbackBlockedDetail[];
+  /** Phase 2: dryRun / execute 両方で返る per-property 復元 field 詳細（PII を含まない）。 */
+  restoreDetails?: RollbackRestoreDetail[];
   executed: boolean;
   deletedCount?: number;
+  /** Phase 2: 実 execute 時に復元した property 数 / field 数。 */
+  restoredPropertyCount?: number;
+  restoredFieldCount?: number;
 }
 
 export async function rollbackImportJob(

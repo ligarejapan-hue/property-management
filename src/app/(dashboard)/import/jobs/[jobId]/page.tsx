@@ -1313,8 +1313,35 @@ export default function ImportJobDetailPage() {
               {rollbackResult ? (
                 <div className="space-y-2">
                   <div className="rounded-md border border-green-200 bg-green-50 p-3 text-green-800">
-                    ロールバック完了: {rollbackResult.deletedCount ?? 0} 件削除しました
+                    ロールバック完了: {rollbackResult.deletedCount ?? 0} 件削除 /
+                    {" "}
+                    {rollbackResult.restoredPropertyCount ?? 0} 件復元
+                    {(rollbackResult.restoredFieldCount ?? 0) > 0 && (
+                      <span className="ml-1 text-xs text-green-700">
+                        （{rollbackResult.restoredFieldCount} 項目）
+                      </span>
+                    )}
                   </div>
+                  {rollbackResult.restoreDetails &&
+                    rollbackResult.restoreDetails.length > 0 && (
+                      <details className="text-xs text-gray-600">
+                        <summary className="cursor-pointer text-gray-700">
+                          復元したフィールドの内訳を表示
+                        </summary>
+                        <ul
+                          data-testid="rollback-restore-result-list"
+                          className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2"
+                        >
+                          {rollbackResult.restoreDetails.map((r) => (
+                            <li key={`${r.rowNumber}-${r.propertyId}`}>
+                              行 {r.rowNumber} (物件 {r.propertyId.slice(0, 8)}…):
+                              {" "}
+                              {r.fieldNames.join(", ")}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
                   {rollbackResult.blockedDetails.length > 0 && (
                     <div>
                       <p className="font-medium text-gray-700">対応できなかった行 ({rollbackResult.blockedDetails.length}):</p>
@@ -1331,14 +1358,26 @@ export default function ImportJobDetailPage() {
               ) : rollbackPreview && rollbackPreview.eligible ? (
                 <>
                   <p className="text-gray-700">
-                    この取込で作成された物件を削除します。この操作は取り消せません。
+                    この取込で作成された物件を削除し、更新された物件は変更ログに基づいて復元します。
+                    この操作は取り消せません。
                   </p>
                   <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                    <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="grid grid-cols-4 gap-2 text-xs">
                       <div>
                         <div className="text-gray-500">削除対象 (新規)</div>
                         <div className="text-base font-semibold text-red-600">
                           {rollbackPreview.summary.deletable}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">復元対象 (更新)</div>
+                        <div className="text-base font-semibold text-blue-600">
+                          {rollbackPreview.summary.restorable}
+                          {(rollbackPreview.summary.restorableFieldCount ?? 0) > 0 && (
+                            <span className="ml-1 text-xs text-blue-500">
+                              ({rollbackPreview.summary.restorableFieldCount}項目)
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div>
@@ -1355,6 +1394,26 @@ export default function ImportJobDetailPage() {
                       </div>
                     </div>
                   </div>
+                  {rollbackPreview.restoreDetails &&
+                    rollbackPreview.restoreDetails.length > 0 && (
+                      <details className="text-xs text-gray-600">
+                        <summary className="cursor-pointer text-gray-700">
+                          復元するフィールドの内訳を表示
+                        </summary>
+                        <ul
+                          data-testid="rollback-restore-preview-list"
+                          className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2"
+                        >
+                          {rollbackPreview.restoreDetails.map((r) => (
+                            <li key={`${r.rowNumber}-${r.propertyId}`}>
+                              行 {r.rowNumber} (物件 {r.propertyId.slice(0, 8)}…):
+                              {" "}
+                              {r.fieldNames.join(", ")}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
                   {rollbackPreview.blockedDetails.length > 0 && (
                     <details className="text-xs text-gray-600">
                       <summary className="cursor-pointer text-gray-700">
@@ -1387,7 +1446,8 @@ export default function ImportJobDetailPage() {
               {!rollbackResult &&
                 rollbackPreview &&
                 rollbackPreview.eligible &&
-                rollbackPreview.summary.deletable > 0 && (
+                (rollbackPreview.summary.deletable > 0 ||
+                  rollbackPreview.summary.restorable > 0) && (
                   <button
                     onClick={executeRollback}
                     disabled={rollbackLoading}
