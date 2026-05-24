@@ -8,7 +8,15 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
-import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
+import {
+  extractTextFromPdf,
+  getPdfExtractionSource,
+  isPdfBuffer,
+  type PdfExtractionSource,
+} from "@/lib/pdf-extract";
+
+const SCANNED_PDF_WARNING =
+  "PDF本文を十分に抽出できませんでした。画像化された謄本PDFの可能性があります。OCRは未対応のため、抽出結果を手動で確認してください。";
 
 // ---------- POST /api/import/registry-pdf/parse ----------
 // プレビュー専用: PDF または テキストを受け取り、解析結果だけを返す。
@@ -30,8 +38,10 @@ export async function POST(request: NextRequest) {
     const contentType = request.headers.get("content-type") ?? "";
     let text = "";
     let fileName = "registry.pdf";
+    let isPdfUpload = false;
 
     if (contentType.includes("multipart/form-data")) {
+      isPdfUpload = true;
       // --- PDF バイナリ受信 ---
       const formData = await request.formData();
       const file = formData.get("file");
@@ -71,11 +81,22 @@ export async function POST(request: NextRequest) {
       fileName = body.fileName ?? "registry.txt";
     }
 
+    // PDF アップロード経路のみ判定。テキスト貼り付けは利用者が意図的に投入しているため embedded_text 固定
+    const extractionSource: PdfExtractionSource = isPdfUpload
+      ? getPdfExtractionSource(text)
+      : "embedded_text";
+    const isLikelyScanned = extractionSource === "likely_scanned";
+
     const parsed = parseRegistryText(text);
+    if (isLikelyScanned && !parsed.warnings.includes(SCANNED_PDF_WARNING)) {
+      parsed.warnings = [SCANNED_PDF_WARNING, ...parsed.warnings];
+    }
 
     return apiResponse({
       fileName,
       extractedTextLength: text.length,
+      extractionSource,
+      isLikelyScanned,
       // 開発デバッグ用: 抽出テキスト先頭 600 文字 (本番では除去)
       _rawTextPreview: process.env.NODE_ENV !== "production" ? text.slice(0, 600) : undefined,
       parsed,
