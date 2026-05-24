@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// @ts-check
+// Codex P1 修正でテストから本ファイルを import するようにしたため、
+// TypeScript checker が scripts/ も型解析対象に含めるようになった。
+// このスクリプトは ESM の Node ランタイム専用ワンショット用途であり、
+// 厳密な型チェックは vitest 側の動作確認で担保するため、@ts-check は付けない。
 /**
  * scripts/migrate-local-to-s3.mjs
  *
@@ -35,11 +38,42 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { config as dotenvConfig } from "dotenv";
 import {
   S3Client,
   HeadObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
+
+/**
+ * Codex P1: `.env` を `requireEnv("STORAGE_S3_*")` の前に読み込む。
+ *
+ * 仕様:
+ *   - 既に shell で export 済みの env は **上書きしない** (override:false)。
+ *   - `.env` が存在しない場合 (ENOENT) は silent。shell env だけで動かす運用を許容。
+ *   - 読み込み失敗時のログにファイルパスと errno コードのみを出し、
+ *     **値（credentials 等の secret）は絶対に出さない**。
+ *
+ * テスト容易性のため export する。
+ *
+ * @param {string} envPath 絶対パス推奨
+ * @returns {{ parsed?: Record<string, string>, error?: NodeJS.ErrnoException }}
+ */
+export function loadEnvFromFile(envPath) {
+  const result = dotenvConfig({ path: envPath, override: false });
+  if (result.error) {
+    const code = result.error.code ?? "UNKNOWN";
+    // ENOENT (ファイル不在) は silent: docs は `.env` を案内するが、
+    // shell env だけでも動かす運用を許容する。それ以外のエラー
+    // (dotenv パースエラー / EISDIR 等) はコードとパスのみログに出し、
+    // 値 (credentials) は絶対に出さない。
+    if (code !== "ENOENT") {
+      console.warn(`[warn] failed to load env file (${code}): ${envPath}`);
+    }
+  }
+  return result;
+}
 
 const EXT_MIME = {
   ".jpg": "image/jpeg",
@@ -154,6 +188,9 @@ async function runConcurrently(items, concurrency, worker) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // Codex P1: requireEnv より前に .env を読み込み、docs の運用案内
+  // ("`.env` に設定する") と script 挙動を一致させる。
+  loadEnvFromFile(path.resolve(process.cwd(), ".env"));
   const root = localUploadRoot();
   const bucket = requireEnv("STORAGE_S3_BUCKET");
   const region = requireEnv("STORAGE_S3_REGION");
@@ -259,7 +296,15 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(`[fatal] ${err?.message ?? err}`);
-  process.exit(1);
-});
+// Codex P1 (テスト容易性): test から import したときに main() が即走るのを
+// 防ぐため、本ファイルが直接 node で実行されたときだけ起動する。
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error(`[fatal] ${err?.message ?? err}`);
+    process.exit(1);
+  });
+}
