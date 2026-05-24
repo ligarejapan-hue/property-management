@@ -5,7 +5,97 @@ import {
   resolveReceptionOwnerEntry,
   extractAddressFromRecoveredOwner,
   checkOwnerArchiveSafety,
+  buildOwnerCorporateNumberDuplicateKey,
+  buildOwnerExternalLinkKeyDuplicateKey,
 } from "../owner-correction";
+
+// ── Phase 2-A: buildOwnerCorporateNumberDuplicateKey ─────────────────────────
+
+describe("buildOwnerCorporateNumberDuplicateKey", () => {
+  it("13桁の数字 → そのまま digits", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("1234567890123")).toBe(
+      "1234567890123",
+    );
+  });
+
+  it("ハイフン混じり 13桁 → digits 抽出して 13桁", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("1-2345-67890-123")).toBe(
+      "1234567890123",
+    );
+  });
+
+  it("空白混じり 13桁 → digits 抽出して 13桁", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("1234 5678 90123")).toBe(
+      "1234567890123",
+    );
+  });
+
+  it("12桁 → null（形式不正）", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("123456789012")).toBeNull();
+  });
+
+  it("14桁 → null（形式不正）", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("12345678901234")).toBeNull();
+  });
+
+  it("null → null", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey(null)).toBeNull();
+  });
+
+  it("undefined → null", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey(undefined)).toBeNull();
+  });
+
+  it("空文字 → null", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("")).toBeNull();
+  });
+
+  it("数字を含まない文字列 → null", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("abcdefghijklm")).toBeNull();
+  });
+
+  it("英数字混じりで digits が 13桁ぴったり → 採用", () => {
+    expect(buildOwnerCorporateNumberDuplicateKey("abc1234567890123def")).toBe(
+      "1234567890123",
+    );
+  });
+});
+
+// ── Phase 2-A: buildOwnerExternalLinkKeyDuplicateKey ─────────────────────────
+
+describe("buildOwnerExternalLinkKeyDuplicateKey", () => {
+  it("非空文字列 → そのまま", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("LINK-001")).toBe("LINK-001");
+  });
+
+  it("前後空白 → trim", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("  LINK-001  ")).toBe(
+      "LINK-001",
+    );
+  });
+
+  it("null → null", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey(null)).toBeNull();
+  });
+
+  it("undefined → null", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey(undefined)).toBeNull();
+  });
+
+  it("空文字 → null", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("")).toBeNull();
+  });
+
+  it("空白のみ → null", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("   ")).toBeNull();
+  });
+
+  it("大小区別する（normalize しない）", () => {
+    expect(buildOwnerExternalLinkKeyDuplicateKey("Link-001")).not.toBe(
+      buildOwnerExternalLinkKeyDuplicateKey("LINK-001"),
+    );
+  });
+});
 
 // ── extractAddressFromRawData ──────────────────────────────────────────────
 

@@ -51,6 +51,60 @@ export function buildOwnerDuplicateCandidateKey(
   return `${n}|||${a}`;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2-A: corporateNumber / externalLinkKey による重複検出キー
+// ---------------------------------------------------------------------------
+//
+// name_address ベースの buildOwnerDuplicateCandidateKey とは独立した追加キー。
+// correction-candidates API は 3 系統（name_address / corporate_number /
+// external_link_key）で並行に重複グループ化を行い、各グループに opaque な
+// duplicateGroupId を割り当てる（dup-N / dup-cn-N / dup-elk-N）。
+//
+// PII について（重要）:
+//   - 返却される key 文字列は **法人番号生値 / externalLinkKey 生値そのもの**。
+//   - **API レスポンス / AuditLog detail には絶対に含めない**（opaque ID 経由で
+//     のみクライアントに渡す）。
+//
+// 既存 buildOwnerDuplicateCandidateKey は無改変。
+
+/**
+ * Owner.corporateNumber から「重複検出に使えるキー」を返す。
+ *
+ * - null / undefined → null
+ * - digits 抽出後 13 桁以外（短い/長い/数字なし） → null
+ * - 上記以外 → 13 桁数字文字列をキーとする
+ *
+ * ハイフン等の表記揺れに耐性を持たせるため digits 抽出して比較するが、
+ * 形式不正（13 桁以外）は **重複候補化しない**（誤マッチ防止）。
+ */
+export function buildOwnerCorporateNumberDuplicateKey(
+  corporateNumber: string | null | undefined,
+): string | null {
+  if (corporateNumber == null) return null;
+  const digits = corporateNumber.replace(/\D/g, "");
+  if (digits.length !== 13) return null;
+  return digits;
+}
+
+/**
+ * Owner.externalLinkKey から「重複検出に使えるキー」を返す。
+ *
+ * - null / undefined → null
+ * - trim 後の空文字 → null
+ * - 上記以外 → trim 後の文字列をキーとする
+ *
+ * externalLinkKey は外部システム由来の任意文字列のため、normalize は行わず
+ * trim のみ（大小区別・全半角区別を含めて完全一致を要求する）。
+ */
+export function buildOwnerExternalLinkKeyDuplicateKey(
+  externalLinkKey: string | null | undefined,
+): string | null {
+  if (externalLinkKey == null) return null;
+  const trimmed = externalLinkKey.trim();
+  if (trimmed === "") return null;
+  return trimmed;
+}
+
 // rawData の住所フィールド候補（直接値として使えるキー名）。
 // owner-csv ルートの OWNER_CSV_COLUMN_MAP と整合させた優先順序。
 const DIRECT_ADDRESS_KEYS_PRIMARY = [

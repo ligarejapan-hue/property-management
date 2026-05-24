@@ -2004,10 +2004,27 @@ export interface OwnerCorrectionCandidate {
   blockReasons: string[];
   recommendedAction: "hold" | "review" | "delete_candidate" | "merge_candidate";
   types: string[];
-  /** duplicate グループに属する candidate のみ非 null（opaque ID、PII 復元不可）。 */
+  /**
+   * duplicate グループに属する candidate のみ非 null（opaque ID、PII 復元不可）。
+   * 経路ごとに prefix が異なる:
+   *   - name_address      : "dup-N"
+   *   - corporate_number  : "dup-cn-N"
+   *   - external_link_key : "dup-elk-N"
+   */
   duplicateGroupId: string | null;
   /** duplicate グループ内候補件数。duplicateGroupId が null なら null。 */
   duplicateGroupSize: number | null;
+  /**
+   * Phase 2-A: duplicate グループの一致経路。
+   * 1 candidate が複数経路で同時にヒットしても 1 つだけ採用される
+   * （優先順: name_address > corporate_number > external_link_key）。
+   * duplicateGroupId が null なら null。
+   */
+  duplicateMatchedBy:
+    | "name_address"
+    | "corporate_number"
+    | "external_link_key"
+    | null;
 }
 
 export interface OwnerCorrectionCandidatesResponse {
@@ -2018,6 +2035,16 @@ export interface OwnerCorrectionCandidatesResponse {
     orphanCount: number;
     addressNullCount: number;
     duplicateCount: number;
+    /**
+     * Phase 2-A: duplicate 経路別の件数（PII を含まない）。
+     * candidate は単一の duplicateMatchedBy を持つので、合計値は
+     * duplicateCount と一致する。
+     */
+    duplicateMatchedByCounts?: {
+      name_address: number;
+      corporate_number: number;
+      external_link_key: number;
+    };
     allCount: number;
   };
 }

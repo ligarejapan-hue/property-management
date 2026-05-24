@@ -42,3 +42,33 @@ describe("correction page: duplicate グループ化キー", () => {
     expect(src).toMatch(/\.length\s*>=\s*2/);
   });
 });
+
+// Phase 2-A: duplicate サブフィルタ
+describe("correction page: Phase 2-A duplicate サブフィルタ", () => {
+  it("DuplicateSubFilterBar コンポーネントが存在する", () => {
+    expect(src).toMatch(/function DuplicateSubFilterBar/);
+  });
+
+  it("サブフィルタ enum (all / name_address / corporate_number / external_link_key) が定義されている", () => {
+    expect(src).toMatch(/type DuplicateSubFilter/);
+    expect(src).toMatch(/"name_address"/);
+    expect(src).toMatch(/"corporate_number"/);
+    expect(src).toMatch(/"external_link_key"/);
+  });
+
+  it("4 つのサブフィルタラベル（すべて / 氏名住所一致 / 法人番号一致 / リンクキー一致）が存在する", () => {
+    expect(src).toMatch(/すべて/);
+    expect(src).toMatch(/氏名住所一致/);
+    expect(src).toMatch(/法人番号一致/);
+    expect(src).toMatch(/リンクキー一致/);
+  });
+
+  it("duplicateMatchedBy で client-side フィルタしている", () => {
+    expect(src).toMatch(/duplicateMatchedBy\s*===\s*duplicateSubFilter/);
+  });
+
+  it("サブフィルタ state とハンドラが定義されている", () => {
+    expect(src).toMatch(/duplicateSubFilter/);
+    expect(src).toMatch(/setDuplicateSubFilter/);
+  });
+});
