@@ -67,6 +67,14 @@ interface ImportResult {
   parsed: ParsedResult;
 }
 
+type ExtractionSource = "embedded_text" | "likely_scanned";
+
+interface ParseResponse {
+  parsed: ParsedResult;
+  extractionSource?: ExtractionSource;
+  isLikelyScanned?: boolean;
+}
+
 type Step = "upload" | "extract" | "confirm" | "result";
 type UploadTab = "file" | "text";
 type RegistrationTarget = "new" | "existing" | "auto";
@@ -285,6 +293,7 @@ export default function RegistryPdfPage() {
   const [owners, setOwners] = useState<ExtractedOwner[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [isLikelyScanned, setIsLikelyScanned] = useState(false);
 
   // Target selection
   const [target, setTarget] = useState<RegistrationTarget>("auto");
@@ -334,21 +343,27 @@ export default function RegistryPdfPage() {
     setParsing(true);
     setError(null);
     try {
-      let result: { parsed: ParsedResult };
+      let result: ParseResponse;
 
       if (uploadTab === "file" && selectedFile) {
         // PDF ファイル → サーバー側テキスト抽出 + 解析
-        result = await parseRegistryPdfFile(selectedFile) as { parsed: ParsedResult };
+        result = (await parseRegistryPdfFile(selectedFile)) as ParseResponse;
       } else {
         // テキスト貼り付け → サーバー側解析 (JSON 送信)
         if (!text.trim()) {
           setError("テキストを入力してください");
           return;
         }
-        result = await parseRegistryPdfText(text, fileName ?? "paste.txt") as { parsed: ParsedResult };
+        result = (await parseRegistryPdfText(
+          text,
+          fileName ?? "paste.txt",
+        )) as ParseResponse;
       }
 
       const parsed = result.parsed;
+      setIsLikelyScanned(
+        result.isLikelyScanned ?? result.extractionSource === "likely_scanned",
+      );
       // フィールドを EditableField 形式に変換
       const toField = (v: string | null) => ({
         value: v ?? "",
@@ -469,6 +484,7 @@ export default function RegistryPdfPage() {
     setFields({});
     setOwners([]);
     setWarnings([]);
+    setIsLikelyScanned(false);
     setTarget("auto");
     setExistingPropertyId("");
     setResult(null);
@@ -626,6 +642,24 @@ export default function RegistryPdfPage() {
       {/* ================================================================= */}
       {step === "extract" && (
         <div className="space-y-6">
+          {/* Scanned PDF banner (OCR is not implemented) */}
+          {isLikelyScanned && (
+            <div
+              role="alert"
+              data-testid="scanned-pdf-banner"
+              className="rounded-md border border-red-300 bg-red-50 p-4"
+            >
+              <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-red-700">
+                <AlertTriangle className="h-4 w-4" />
+                画像化された謄本PDFの可能性があります
+              </h4>
+              <p className="text-sm text-red-700">
+                PDF本文を十分に抽出できませんでした。本システムはOCR未対応のため、抽出結果は不完全な可能性があります。
+                以下の項目を必ず手動で確認・修正してください。テキストが取れない場合は「テキスト貼り付け」モードへ切り替えてください。
+              </p>
+            </div>
+          )}
+
           {/* Extracted fields */}
           <div className="rounded-lg border border-gray-200 bg-white p-6">
             <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-800">
