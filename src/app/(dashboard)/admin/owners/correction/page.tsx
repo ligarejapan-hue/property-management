@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   fetchOwnerCorrectionCandidates,
@@ -561,23 +561,42 @@ function CorporateNumberCandidatesPanel() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
 
+  // Codex P2 対応: stale response ガード。
+  // ユーザーがサブフィルタ/ページ切替を素早く操作した際に、古い遅いレスポンスで
+  // 現在表示を上書きしないよう、リクエスト ID 単調増加 ref で「最新のみ反映」を保証する。
+  // unmount 時の state 更新も mountedRef で抑止する。
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // subFilter -> API query type への変換（"default" = "all"）
   const apiType: CorporateCandidateFilterType =
     subFilter === "default" ? "all" : subFilter;
 
   const load = useCallback(
     async (type: CorporateCandidateFilterType, cur: string | null) => {
+      const myReqId = ++requestIdRef.current;
       setLoading(true);
       setError(null);
       try {
         const res = await fetchCorporateCandidates(type, {
           cursor: cur ?? undefined,
         });
+        // stale: 自分より新しいリクエストが既に開始されているなら無視。unmount でも無視。
+        if (!mountedRef.current || myReqId !== requestIdRef.current) return;
         setData(res);
       } catch (e) {
+        if (!mountedRef.current || myReqId !== requestIdRef.current) return;
         setError(e instanceof Error ? e.message : "エラーが発生しました");
       } finally {
-        setLoading(false);
+        if (mountedRef.current && myReqId === requestIdRef.current) {
+          setLoading(false);
+        }
       }
     },
     [],

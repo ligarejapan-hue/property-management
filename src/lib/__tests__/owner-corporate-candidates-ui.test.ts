@@ -86,4 +86,35 @@ describe("admin/owners/correction page Phase E 法人番号タブ", () => {
     expect(pageSrc).toMatch(/次へ/);
     expect(pageSrc).toMatch(/nextCursor/);
   });
+
+  // ---- Codex P2: stale response ガード ----
+  it("Codex P2: requestIdRef による stale guard が実装されている", () => {
+    // requestId 単調増加で「最新リクエストのみ反映」を保証
+    expect(pageSrc).toMatch(/requestIdRef\s*=\s*useRef\(0\)/);
+    expect(pageSrc).toMatch(/const\s+myReqId\s*=\s*\+\+requestIdRef\.current/);
+    // 各 set* 呼び出し前に「自分が最新リクエスト」を確認するガードがある
+    expect(pageSrc).toMatch(
+      /myReqId\s*!==\s*requestIdRef\.current[\s\S]{0,80}return/,
+    );
+  });
+
+  it("Codex P2: mountedRef による unmount ガードがある", () => {
+    expect(pageSrc).toMatch(/mountedRef\s*=\s*useRef\(true\)/);
+    expect(pageSrc).toMatch(/mountedRef\.current\s*=\s*false/);
+    // load 内で mountedRef.current チェックを行う
+    expect(pageSrc).toMatch(/!mountedRef\.current\s*\|\|\s*myReqId\s*!==\s*requestIdRef\.current/);
+  });
+
+  it("Codex P2: setData/setError/setLoading は最新リクエストにだけ反映する構造", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // setData は条件分岐の後（gate 通過後）にだけ実行される
+    expect(body).toMatch(/return;\s*\n\s*setData\(res\)/);
+    // setLoading(false) は finally で myReqId === current のときだけ
+    expect(body).toMatch(
+      /myReqId\s*===\s*requestIdRef\.current\s*\)\s*\{\s*\n?\s*setLoading\(false\)/,
+    );
+  });
 });
