@@ -583,6 +583,10 @@ function CorporateNumberCandidatesPanel() {
       const myReqId = ++requestIdRef.current;
       setLoading(true);
       setError(null);
+      // Codex P2: subfilter/cursor 切替時に古い rows を即座に画面から消す。
+      // 古いフィルタの行が新フィルタ下に表示されてオペレーターが誤った候補を
+      // 開くリスクを排除する。
+      setData(null);
       try {
         const res = await fetchCorporateCandidates(type, {
           cursor: cur ?? undefined,
@@ -592,7 +596,9 @@ function CorporateNumberCandidatesPanel() {
         setData(res);
       } catch (e) {
         if (!mountedRef.current || myReqId !== requestIdRef.current) return;
+        // Codex P2: 失敗時にも data を明示的に null 化し、stale rows の残留を防ぐ。
         setError(e instanceof Error ? e.message : "エラーが発生しました");
+        setData(null);
       } finally {
         if (mountedRef.current && myReqId === requestIdRef.current) {
           setLoading(false);
@@ -651,7 +657,10 @@ function CorporateNumberCandidatesPanel() {
         </p>
       )}
 
-      {data && !loading && (
+      {/* Codex P2: error 時は古いデータ表を一切描画しない。
+          requestId guard と組み合わせて、失敗フィルタ・失敗ページ切替後に
+          stale rows が画面に残らないことを保証する。 */}
+      {data && !loading && !error && (
         <>
           <div className="flex flex-wrap gap-2 text-xs text-gray-600">
             <span>合計 {data.summary.totalCandidates} 件</span>

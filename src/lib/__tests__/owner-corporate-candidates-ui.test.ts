@@ -117,4 +117,48 @@ describe("admin/owners/correction page Phase E 法人番号タブ", () => {
       /myReqId\s*===\s*requestIdRef\.current\s*\)\s*\{\s*\n?\s*setLoading\(false\)/,
     );
   });
+
+  // ---- Codex P2 追加修正: stale rows 残留防止 ----
+  it("Codex P2: load 開始時に setData(null) して古い rows を即座に消す", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // load 開始ブロックで「setLoading(true) → setError(null) → setData(null)」が
+    // try ブロックよりも前に出現することを担保する。
+    expect(body).toMatch(
+      /\+\+requestIdRef\.current;[\s\S]{0,400}setLoading\(true\);[\s\S]{0,400}setError\(null\);[\s\S]{0,400}setData\(null\);[\s\S]{0,200}try\s*\{/,
+    );
+  });
+
+  it("Codex P2: fetch 失敗時 catch で setData(null) して stale rows を残さない", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // catch 内で setError 後に setData(null) を呼ぶ
+    expect(body).toMatch(
+      /catch\s*\([^)]*\)\s*\{[\s\S]{0,300}setError\([^)]*\);[\s\S]{0,80}setData\(null\);/,
+    );
+  });
+
+  it("Codex P2: render 条件に !error を含めて error 時に table を描画しない", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // data && !loading && !error の render 条件がある
+    expect(body).toMatch(/data\s*&&\s*!loading\s*&&\s*!error\s*&&/);
+  });
+
+  it("Codex P2: catch 内の setData(null) は最新リクエストガードの後に置かれる", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // catch 内で「stale guard return → setError → setData(null)」の順
+    expect(body).toMatch(
+      /catch\s*\([^)]*\)\s*\{[\s\S]{0,200}myReqId\s*!==\s*requestIdRef\.current[\s\S]{0,40}return;[\s\S]{0,200}setData\(null\)/,
+    );
+  });
 });
