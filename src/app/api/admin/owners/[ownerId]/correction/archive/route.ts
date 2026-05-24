@@ -11,6 +11,7 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import {
   checkOwnerArchiveSafety,
+  isOwnerAddressEffectivelyEmpty,
   type OwnerArchiveBlockReason,
 } from "@/lib/owner-correction";
 
@@ -143,8 +144,7 @@ export async function POST(
       version: state.owner.version,
       importRowCount: state.importRowCount,
       importRowSuccess: state.importRowSuccess,
-      addressMissing:
-        !state.owner.address || state.owner.address.trim().length === 0,
+      addressMissing: isOwnerAddressEffectivelyEmpty(state.owner.address),
       ownerMemoCount: state.ownerMemoCount,
     });
 

@@ -162,6 +162,13 @@ function setupHappyPath() {
   pm.importJobRow.findMany.mockResolvedValue([successRow]);
   pm.propertyOwner.findMany.mockResolvedValue([]);
   pm.changeLog.findFirst.mockResolvedValue(null);
+  // Phase 2-B: route が tx.owner.findUnique で現値（version + address）を取得して
+  // 「実質空欄」検証 + race-safe な where 条件に使うため、tx の findUnique も
+  // 用意する必要がある。
+  pm._tx.owner.findUnique.mockResolvedValue({
+    version: ownerBase.version,
+    address: ownerBase.address,
+  });
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
   pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
 }
@@ -174,6 +181,10 @@ function setupReceptionHappyPath() {
     .mockResolvedValueOnce([receptionSuccessRow]);
   pm.propertyOwner.findMany.mockResolvedValue([{ propertyId: PROPERTY_ID }]);
   pm.changeLog.findFirst.mockResolvedValue(null);
+  pm._tx.owner.findUnique.mockResolvedValue({
+    version: ownerBase.version,
+    address: ownerBase.address,
+  });
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
   pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
 }
@@ -679,5 +690,86 @@ describe("POST /api/admin/owners/[ownerId]/correction/address-fill", () => {
     expect(res.status).toBe(422);
     const j = await res.json();
     expect(j.error.code).toBe("ADDRESS_FILL_BLOCKED");
+  });
+
+  // ── Phase 2-B: 空白のみ address 補完 / race-safe updateMany ────────────────
+
+  it("Phase 2-B: 空白のみ address の owner も補完 execute 成功 (201)", async () => {
+    // 上位 safety check 用の owner.address は空白のみ
+    pm.owner.findUnique.mockResolvedValue({
+      ...ownerBase,
+      address: "   ", // 半角空白のみ
+    });
+    pm.importJobRow.findMany.mockResolvedValue([successRow]);
+    pm.propertyOwner.findMany.mockResolvedValue([]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+    // tx 内 findUnique も同じ「空白のみ」を返す。route は isOwnerAddressEffectivelyEmpty
+    // で空欄判定 + updateMany where: address=current.address で race-safe に補完する。
+    pm._tx.owner.findUnique.mockResolvedValue({
+      version: 1,
+      address: "   ",
+    });
+    pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+    pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(201);
+    // updateMany が「address: current.address (= '   ')」の where で呼ばれている
+    const calls = pm._tx.owner.updateMany.mock.calls;
+    expect(calls.length).toBe(1);
+    expect(calls[0][0].where).toMatchObject({
+      id: OWNER_ID,
+      version: 1,
+      address: "   ",
+    });
+  });
+
+  it("Phase 2-B: 全角空白のみ address の owner も補完 execute 成功", async () => {
+    pm.owner.findUnique.mockResolvedValue({
+      ...ownerBase,
+      address: "　　",
+    });
+    pm.importJobRow.findMany.mockResolvedValue([successRow]);
+    pm.propertyOwner.findMany.mockResolvedValue([]);
+    pm.changeLog.findFirst.mockResolvedValue(null);
+    pm._tx.owner.findUnique.mockResolvedValue({
+      version: 1,
+      address: "　　",
+    });
+    pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+    pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(201);
+    expect(pm._tx.owner.updateMany.mock.calls[0][0].where.address).toBe("　　");
+  });
+
+  it("Phase 2-B: tx 内 version 不一致 → 409 (CONFLICT) で updateMany を呼ばない", async () => {
+    setupHappyPath();
+    // tx 内 findUnique で version mismatch を返す
+    pm._tx.owner.findUnique.mockResolvedValue({
+      version: 2, // request version=1 と不一致
+      address: null,
+    });
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(409);
+    const j = await res.json();
+    expect(j.error.code).toBe("CONFLICT");
+    expect(pm._tx.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("Phase 2-B: tx 内 address が race で埋まっていた → 409 (ADDRESS_ALREADY_SET)", async () => {
+    setupHappyPath();
+    pm._tx.owner.findUnique.mockResolvedValue({
+      version: 1,
+      address: "他 tx が先に入れた値",
+    });
+
+    const res = await POST(makeRequest({ version: 1 }), makeParams());
+    expect(res.status).toBe(409);
+    const j = await res.json();
+    expect(j.error.code).toBe("ADDRESS_ALREADY_SET");
+    expect(pm._tx.owner.updateMany).not.toHaveBeenCalled();
   });
 });
