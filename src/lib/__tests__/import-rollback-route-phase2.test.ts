@@ -122,4 +122,83 @@ describe("rollback route Phase 2 — source-assertion", () => {
     expect(findManyMatch).not.toBeNull();
     expect(findManyMatch![1]).toMatch(/changedBy/);
   });
+
+  // ---- Codex round 2 P1: Property.updatedAt post-import guard for restore ----
+  it("Codex P1: restore 側にも prop.updatedAt > completedAt+TOLERANCE のガードがある (post_import_update_detected)", () => {
+    expect(routeSrc).toMatch(/post_import_update_detected/);
+    // ガードは action:"restore" の blockedDetails として記録される
+    const guardBlock = routeSrc.match(
+      /prop\.updatedAt\.getTime\(\)\s*>\s*completedAtMs\s*\+\s*TOLERANCE_MS[\s\S]{0,400}action:\s*"restore"/,
+    );
+    expect(guardBlock).not.toBeNull();
+  });
+
+  it("Codex P1: post-import guard の reason に値そのもの (PII) を含めない", () => {
+    const reasonMatch = routeSrc.match(
+      /post_import_update_detected[\s\S]{0,200}/,
+    );
+    expect(reasonMatch).not.toBeNull();
+    expect(reasonMatch![0]).not.toMatch(/oldValue/);
+    expect(reasonMatch![0]).not.toMatch(/newValue/);
+    expect(reasonMatch![0]).not.toMatch(/currentValue/);
+  });
+
+  // ---- Codex round 2 P2: propertyId 単位への集約 + 重複排除 ----
+  it("Codex P2: restoreRows を propertyId 単位に集約してから判定する", () => {
+    // Map<propertyId, ClassifiedRow[]> 形式の集約コードが存在する
+    expect(routeSrc).toMatch(/rowsByProperty\s*=\s*new Map<string,\s*ClassifiedRow\[\]>/);
+    // 集約ループは for...of で propertyId をキーに回す
+    expect(routeSrc).toMatch(
+      /for\s*\(\s*const\s*\[\s*propertyId\s*,\s*rowsForProp\s*\]\s*of\s+rowsByProperty\s*\)/,
+    );
+  });
+
+  it("Codex P2: RestorePlan は row ではなく rowNumbers を保持する", () => {
+    expect(routeSrc).toMatch(
+      /interface\s+RestorePlan\s*\{[\s\S]{0,200}rowNumbers:\s*number\[\]/,
+    );
+    // 旧形 (row: ClassifiedRow) を残していない
+    expect(routeSrc).not.toMatch(
+      /interface\s+RestorePlan\s*\{[\s\S]{0,200}row:\s*ClassifiedRow/,
+    );
+  });
+
+  it("Codex P2: restoreDetails にも rowNumbers が含まれる", () => {
+    expect(routeSrc).toMatch(
+      /interface\s+RestoreFieldDetail\s*\{[\s\S]{0,300}rowNumbers:\s*number\[\]/,
+    );
+    // restoreDetails の map で rowNumbers を渡している
+    expect(routeSrc).toMatch(
+      /restoreDetails[\s\S]{0,300}rowNumbers:\s*p\.rowNumbers/,
+    );
+  });
+
+  it("Codex P2: AuditLog detail の restoredFields に rowNumbers が入り、PII 値は無い", () => {
+    const detailMatch = routeSrc.match(
+      /writeAuditLog\(\{[\s\S]*?detail:\s*\{([\s\S]*?)\n\s*\},/,
+    );
+    expect(detailMatch).not.toBeNull();
+    const detailBody = detailMatch![1];
+    expect(detailBody).toMatch(/restoredFields/);
+    expect(detailBody).toMatch(/rowNumbers/);
+    expect(detailBody).not.toMatch(/\boldValue\b/);
+    expect(detailBody).not.toMatch(/\bnewValue\b/);
+    expect(detailBody).not.toMatch(/restoreValue/);
+  });
+
+  it("Codex P2: execute は propertyId 単位で property.update を呼ぶ (row 単位ではない)", () => {
+    // tx.property.update の where.id が plan.propertyId (= 集約後の id)
+    expect(routeSrc).toMatch(
+      /tx\.property\.update\(\{\s*where:\s*\{\s*id:\s*plan\.propertyId\s*\}/,
+    );
+    // 集約前の row.createdId をそのまま restore update に渡していない
+    // (delete 側は row.createdId を使うため、restoreData 文脈に限定して検査)
+    const restoreUpdateBlock = routeSrc.match(
+      /for\s*\(\s*const\s+plan\s+of\s+restorePlans\s*\)[\s\S]*?await\s+tx\.importJob\.update/,
+    );
+    expect(restoreUpdateBlock).not.toBeNull();
+    expect(restoreUpdateBlock![0]).not.toMatch(
+      /tx\.property\.update\(\{\s*where:\s*\{\s*id:\s*row\./,
+    );
+  });
 });

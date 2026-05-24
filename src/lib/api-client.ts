@@ -486,7 +486,10 @@ export interface RollbackBlockedDetail {
 }
 
 export interface RollbackRestoreDetail {
+  /** P2 修正: 同 propertyId を指す複数 row がある場合の代表値 (rowNumbers の最小値)。 */
   rowNumber: number;
+  /** P2 修正: 同 propertyId を指す全 row の rowNumber 配列。非 PII。 */
+  rowNumbers?: number[];
   propertyId: string;
   fieldNames: string[];
 }

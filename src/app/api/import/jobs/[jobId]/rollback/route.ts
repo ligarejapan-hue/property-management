@@ -26,7 +26,10 @@ interface BlockedDetail {
 }
 
 interface RestoreFieldDetail {
+  /** P2 修正: 同 propertyId を指す複数 row がある場合の代表値 (rowNumbers の最小値) */
   rowNumber: number;
+  /** P2 修正: 同 propertyId を指す全 row の rowNumber 配列（非 PII） */
+  rowNumbers: number[];
   propertyId: string;
   fieldNames: string[];
 }
@@ -203,26 +206,56 @@ export async function POST(
       logsByProperty.set(log.targetId, arr);
     }
 
+    // P2 修正: 複数 row が同じ Property を指すケース（property_csv は updatable な
+    // マッチキー (realEstateNumber / externalLinkKey / buildingId+roomNo 等) で
+    // 同 Property に紐づき得る）を考慮し、propertyId 単位に集約してから復元判定する。
     interface RestorePlan {
-      row: ClassifiedRow;
       propertyId: string;
+      rowNumbers: number[]; // 同 propertyId を指す全 row（非 PII の rowNumber のみ）
       decisions: FieldRestoreDecision[];
       restorableFields: FieldRestoreDecision[];
     }
+    const rowsByProperty = new Map<string, ClassifiedRow[]>();
+    for (const row of restoreRows) {
+      const arr = rowsByProperty.get(row.createdId!) ?? [];
+      arr.push(row);
+      rowsByProperty.set(row.createdId!, arr);
+    }
+
     const restorePlans: RestorePlan[] = [];
     let restorableFieldCount = 0;
 
-    for (const row of restoreRows) {
-      const propertyId = row.createdId!;
+    for (const [propertyId, rowsForProp] of rowsByProperty) {
+      const rowNumbers = rowsForProp
+        .map((r) => r.rowNumber)
+        .sort((a, b) => a - b);
+      const representativeRowNumber = rowNumbers[0];
+
       const prop = propMap.get(propertyId);
       if (!prop) {
         blockedDetails.push({
-          rowNumber: row.rowNumber,
+          rowNumber: representativeRowNumber,
           action: "restore",
           reason: "物件が既に存在しません（既に削除済み）",
         });
         continue;
       }
+
+      // P1 修正: Property.updatedAt による post-import guard。
+      // ChangeLog だけでは検出できない更新（例: confirmInvestigationRecord が
+      // prisma.property.update を直接呼ぶケース、bulk-update の一部経路など）が
+      // import 完了後にあった場合、新しい値を古い値で上書きしてしまう事故を防ぐ。
+      // delete 側 (Phase 1) と同じ閾値・許容で判定する。
+      if (prop.updatedAt.getTime() > completedAtMs + TOLERANCE_MS) {
+        blockedDetails.push({
+          rowNumber: representativeRowNumber,
+          action: "restore",
+          reason:
+            "取込後に Property が更新されているため復元しません (post_import_update_detected)",
+        });
+        continue;
+      }
+
       const logs = logsByProperty.get(propertyId) ?? [];
       const decisions = classifyUpdateFieldsForRestore(logs, jobWindow);
       const restorableFields = decisions.filter(
@@ -245,7 +278,7 @@ export async function POST(
           ([s, n]) => `${s}=${n}`,
         );
         blockedDetails.push({
-          rowNumber: row.rowNumber,
+          rowNumber: representativeRowNumber,
           action: "restore",
           reason:
             decisions.length === 0
@@ -254,12 +287,18 @@ export async function POST(
         });
         continue;
       }
-      restorePlans.push({ row, propertyId, decisions, restorableFields });
+      restorePlans.push({
+        propertyId,
+        rowNumbers,
+        decisions,
+        restorableFields,
+      });
       restorableFieldCount += restorableFields.length;
     }
 
     const restoreDetails: RestoreFieldDetail[] = restorePlans.map((p) => ({
-      rowNumber: p.row.rowNumber,
+      rowNumber: p.rowNumbers[0],
+      rowNumbers: p.rowNumbers,
       propertyId: p.propertyId,
       fieldNames: p.restorableFields.map((d) => d.fieldName),
     }));
@@ -287,6 +326,7 @@ export async function POST(
     // recordChanges を tx 外でまとめて呼ぶための退避（recordChanges は prisma 直接利用のため）
     const restoreRecordPayloads: Array<{
       propertyId: string;
+      rowNumbers: number[];
       oldValues: Record<string, unknown>;
       newValues: Record<string, unknown>;
       fieldNames: string[];
@@ -336,6 +376,7 @@ export async function POST(
         restoredFieldCount += plan.restorableFields.length;
         restoreRecordPayloads.push({
           propertyId: plan.propertyId,
+          rowNumbers: plan.rowNumbers,
           oldValues: currentValues as Record<string, unknown>,
           newValues: restoreData,
           fieldNames: plan.restorableFields.map((d) => d.fieldName),
@@ -370,10 +411,12 @@ export async function POST(
         deletedCount,
         restoredPropertyCount,
         restoredFieldCount,
-        // PII を含まないため propertyId / rowNumber / fieldNames のみ含める。
-        // old/new/current の値は一切入れない。
+        // PII を含まないため propertyId / rowNumbers / fieldNames のみ含める。
+        // old/new/current の値は一切入れない。P2 修正で propertyId 単位に集約済みのため
+        // 同 propertyId が複数回出る重複カウントは発生しない。
         restoredFields: restoreRecordPayloads.map((p) => ({
           propertyId: p.propertyId,
+          rowNumbers: p.rowNumbers,
           fieldNames: p.fieldNames,
         })),
         blocked: blockedDetails.length,
