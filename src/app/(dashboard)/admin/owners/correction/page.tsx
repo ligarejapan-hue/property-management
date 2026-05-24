@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   fetchOwnerCorrectionCandidates,
   fetchCorporateCandidates,
@@ -62,13 +63,68 @@ const BLOCK_REASON_LABELS: Record<string, string> = {
   import_row_not_success: "取込行未解決",
 };
 
+// Phase F: タブ状態を URL query で永続化するためのヘルパ。
+// 候補法人番号などの PII は URL に絶対に載せない。
+function parseFilterTypeFromQuery(value: string | null): FilterType {
+  switch (value) {
+    case "orphan":
+    case "address_null":
+    case "duplicate":
+    case "corporate_number":
+    case "all":
+      return value;
+    default:
+      return "all";
+  }
+}
+
+// Phase F: Next.js 16 では useSearchParams を使うクライアントコンポーネントを
+// Suspense で包む必要がある。インナーに本体を置き、default export 側で Suspense ラップする。
 export default function OwnerCorrectionPage() {
-  const [filterType, setFilterType] = useState<FilterType>("all");
+  return (
+    <Suspense
+      fallback={<div className="p-6 text-sm text-gray-500">読み込み中...</div>}
+    >
+      <OwnerCorrectionPageInner />
+    </Suspense>
+  );
+}
+
+function OwnerCorrectionPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Phase F: tab を URL query (?tab=corporate_number 等) から復元する。
+  // Owner 詳細ページから「補正候補に戻る」で遷移してきたときにタブを保持。
+  const initialTab = parseFilterTypeFromQuery(searchParams?.get("tab") ?? null);
+  const [filterType, setFilterTypeState] = useState<FilterType>(initialTab);
   const [data, setData] = useState<OwnerCorrectionCandidatesResponse | null>(
     null,
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // タブ変更時は URL の ?tab=... も更新する（PII を含まない）。
+  // 法人番号タブ以外への遷移時は法人番号タブ側 query (sub/cursor) を削除する。
+  const setFilterType = useCallback(
+    (next: FilterType) => {
+      setFilterTypeState(next);
+      const sp = new URLSearchParams(
+        Array.from(searchParams?.entries() ?? []),
+      );
+      if (next === "all") {
+        sp.delete("tab");
+      } else {
+        sp.set("tab", next);
+      }
+      if (next !== "corporate_number") {
+        sp.delete("sub");
+        sp.delete("cursor");
+      }
+      const qs = sp.toString();
+      router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    },
+    [router, searchParams],
+  );
 
   const load = useCallback(async (type: FilterType) => {
     // Phase E: 法人番号タブは別 API なので、ここでは何もしない
@@ -553,13 +609,64 @@ const DETECTED_IN_LABEL: Record<"name" | "address" | "note", string> = {
   note: "メモ",
 };
 
+function parseCorporateSubFilter(value: string | null): CorporateSubFilter {
+  switch (value) {
+    case "missing":
+    case "conflict":
+    case "multi":
+    case "same":
+    case "default":
+      return value;
+    default:
+      return "default";
+  }
+}
+
 function CorporateNumberCandidatesPanel() {
-  const [subFilter, setSubFilter] = useState<CorporateSubFilter>("default");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Phase F: sub / cursor を URL query に保存し、Owner 詳細から戻ったとき位置を保つ。
+  // PII（候補法人番号など）は URL に絶対に載せない。cursor は ownerId(uuid) なので非 PII。
+  const initialSub = parseCorporateSubFilter(searchParams?.get("sub") ?? null);
+  const initialCursor = searchParams?.get("cursor") ?? null;
+  const [subFilter, setSubFilterState] =
+    useState<CorporateSubFilter>(initialSub);
   const [data, setData] = useState<CorporateCandidatesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(initialCursor);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
+
+  const updateUrlQuery = useCallback(
+    (nextSub: CorporateSubFilter, nextCursor: string | null) => {
+      const sp = new URLSearchParams(
+        Array.from(searchParams?.entries() ?? []),
+      );
+      sp.set("tab", "corporate_number");
+      if (nextSub === "default") {
+        sp.delete("sub");
+      } else {
+        sp.set("sub", nextSub);
+      }
+      if (nextCursor) {
+        sp.set("cursor", nextCursor);
+      } else {
+        sp.delete("cursor");
+      }
+      const qs = sp.toString();
+      router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    },
+    [router, searchParams],
+  );
+
+  const setSubFilter = useCallback(
+    (next: CorporateSubFilter) => {
+      setSubFilterState(next);
+      // サブフィルタ変更時は cursor リセットを含めて URL を更新
+      updateUrlQuery(next, null);
+    },
+    [updateUrlQuery],
+  );
 
   // Codex P2 対応: stale response ガード。
   // ユーザーがサブフィルタ/ページ切替を素早く操作した際に、古い遅いレスポンスで
@@ -766,6 +873,9 @@ function CorporateNumberCandidatesPanel() {
                 const prev = cursorStack[cursorStack.length - 1] ?? null;
                 setCursorStack((s) => s.slice(0, -1));
                 setCursor(prev);
+                // Phase F: cursor を URL query (?cursor=...) にも反映。
+                // cursor は ownerId(uuid) なので非 PII。
+                updateUrlQuery(subFilter, prev);
                 load(apiType, prev);
               }}
               disabled={cursorStack.length === 0}
@@ -779,6 +889,7 @@ function CorporateNumberCandidatesPanel() {
                 if (!data.hasNextPage || !data.nextCursor) return;
                 setCursorStack((s) => [...s, cursor]);
                 setCursor(data.nextCursor);
+                updateUrlQuery(subFilter, data.nextCursor);
                 load(apiType, data.nextCursor);
               }}
               disabled={!data.hasNextPage || !data.nextCursor}

@@ -2076,6 +2076,42 @@ export interface CorporateCandidatesResponse {
   truncated: boolean;
 }
 
+// Phase F: 単一 Owner の法人番号候補（Phase E と同じ分類）+ Owner 概要を返す。
+// レスポンス内で「候補値」「既存法人番号」は display-level に従いマスク済み。
+export interface AdminOwnerCorporateCandidateResponse {
+  owner: {
+    ownerId: string;
+    ownerNameMasked: string | null;
+    ownerAddressMasked: string | null;
+    existingCorporateNumberMasked: string | null;
+    version: number;
+    propertyOwnerCount: number;
+  };
+  candidate: CorporateCandidateRowDTO | null;
+}
+
+export async function fetchAdminOwnerCorporateCandidate(
+  ownerId: string,
+): Promise<AdminOwnerCorporateCandidateResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      owner: {
+        ownerId,
+        ownerNameMasked: null,
+        ownerAddressMasked: null,
+        existingCorporateNumberMasked: null,
+        version: 1,
+        propertyOwnerCount: 0,
+      },
+      candidate: null,
+    };
+  }
+  return apiFetch<AdminOwnerCorporateCandidateResponse>(
+    `/api/admin/owners/${ownerId}/corporate-candidate`,
+  );
+}
+
 export async function fetchCorporateCandidates(
   type: CorporateCandidateFilterType = "all",
   options?: { limit?: number; cursor?: string | null },

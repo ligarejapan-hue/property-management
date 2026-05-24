@@ -161,4 +161,22 @@ describe("admin/owners/correction page Phase E 法人番号タブ", () => {
       /catch\s*\([^)]*\)\s*\{[\s\S]{0,200}myReqId\s*!==\s*requestIdRef\.current[\s\S]{0,40}return;[\s\S]{0,200}setData\(null\)/,
     );
   });
+
+  // ---- Phase F: URL query persistence ----
+  it("Phase F: tab/sub/cursor を URL query で保持する（useSearchParams / router.replace）", () => {
+    expect(pageSrc).toMatch(/useRouter/);
+    expect(pageSrc).toMatch(/useSearchParams/);
+    expect(pageSrc).toMatch(/router\.replace\(/);
+    // initial state を query から復元
+    expect(pageSrc).toMatch(/parseFilterTypeFromQuery/);
+    expect(pageSrc).toMatch(/parseCorporateSubFilter/);
+    expect(pageSrc).toMatch(/searchParams\?\.get\("cursor"\)/);
+  });
+
+  it("Phase F: 候補法人番号や PII を URL に載せていない", () => {
+    expect(pageSrc).not.toMatch(/sp\.set\("candidate"/);
+    expect(pageSrc).not.toMatch(/sp\.set\("corporateNumber"/);
+    expect(pageSrc).not.toMatch(/sp\.set\("name"/);
+    expect(pageSrc).not.toMatch(/sp\.set\("address"/);
+  });
 });
