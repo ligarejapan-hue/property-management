@@ -1,5 +1,5 @@
 /**
- * POST /api/admin/owners/[ownerId]/correction/archive route tests.
+ * POST /api/admin/owners/[id]/correction/archive route tests.
  *
  * - dryRun の default は true
  * - dryRun=true は DB 更新・AuditLog・ChangeLog を書かない
@@ -81,7 +81,7 @@ vi.mock("@/lib/prisma", () => {
 import prisma from "@/lib/prisma";
 import { getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { POST } from "../../app/api/admin/owners/[ownerId]/correction/archive/route";
+import { POST } from "../../app/api/admin/owners/[id]/correction/archive/route";
 
 const OWNER_ID = "aaaaaaaa-0000-0000-0000-000000000001";
 const OWNER_NAME = "田中太郎";
@@ -112,7 +112,7 @@ function makeRequest(body: unknown) {
   ) as unknown as import("next/server").NextRequest;
 }
 
-const makeParams = () => ({ params: Promise.resolve({ ownerId: OWNER_ID }) });
+const makeParams = () => ({ params: Promise.resolve({ id: OWNER_ID }) });
 
 const PERMS_FULL = [
   { resource: "user_management", action: "read", granted: true },
@@ -168,7 +168,7 @@ beforeEach(() => {
 
 // ── tests ─────────────────────────────────────────────────────────────────
 
-describe("POST /api/admin/owners/[ownerId]/correction/archive", () => {
+describe("POST /api/admin/owners/[id]/correction/archive", () => {
   it("dryRun=true (default), eligible → executed=false, blockReasons=[]", async () => {
     setupEligible();
     const res = await POST(makeRequest({ version: 1 }), makeParams());

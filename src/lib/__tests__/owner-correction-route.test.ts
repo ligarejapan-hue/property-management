@@ -1,5 +1,5 @@
 /**
- * POST /api/admin/owners/[ownerId]/correction/address-fill route tests.
+ * POST /api/admin/owners/[id]/correction/address-fill route tests.
  *
  * next/server および @/lib/api-helpers（→ next-auth）を完全モックして
  * DB 接続・Next.js ランタイムなしでルートハンドラを単体テストする。
@@ -86,7 +86,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 import prisma from "@/lib/prisma";
 import { getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { POST } from "../../app/api/admin/owners/[ownerId]/correction/address-fill/route";
+import { POST } from "../../app/api/admin/owners/[id]/correction/address-fill/route";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -110,7 +110,7 @@ function makeRequest(body: unknown) {
   ) as unknown as import("next/server").NextRequest;
 }
 
-const makeParams = () => ({ params: Promise.resolve({ ownerId: OWNER_ID }) });
+const makeParams = () => ({ params: Promise.resolve({ id: OWNER_ID }) });
 
 // prisma モックのキャスト
 const pm = prisma as unknown as {
@@ -191,7 +191,7 @@ function setupReceptionHappyPath() {
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
-describe("POST /api/admin/owners/[ownerId]/correction/address-fill", () => {
+describe("POST /api/admin/owners/[id]/correction/address-fill", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
