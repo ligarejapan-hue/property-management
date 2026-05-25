@@ -8,7 +8,7 @@
  * 設計上の核心を route レベルで検証する位置づけ。
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -21,6 +21,16 @@ import {
 
 import { __resetStorageForTest } from "@/lib/storage";
 import { GET } from "@/app/uploads/[...path]/route";
+import { getApiSession } from "@/lib/api-helpers";
+
+vi.mock("@/lib/api-helpers", () => ({
+  getApiSession: vi.fn().mockResolvedValue({
+    id: "u1",
+    email: "a@a",
+    name: "A",
+    role: "admin",
+  }),
+}));
 
 const s3Mock = mockClient(S3Client);
 const ORIGINAL_ENV = { ...process.env };
@@ -155,5 +165,45 @@ describe("/uploads/[...path] with S3Adapter (mocked)", () => {
     expect(res.status).toBe(403);
     // S3 にコマンドを送っていない
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
+  });
+});
+
+describe("Phase A: authentication", () => {
+  beforeEach(() => {
+    process.env.STORAGE_BACKEND = "local";
+    process.env.LOCAL_UPLOAD_ROOT = tmpRoot;
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "u1",
+      email: "a@a",
+      name: "A",
+      role: "admin",
+    });
+  });
+
+  it("未ログインの場合は 401 を返す", async () => {
+    vi.mocked(getApiSession).mockRejectedValueOnce(
+      Object.assign(new Error("Unauthorized"), { status: 401 }),
+    );
+    const res = await callGet(["properties", "abc", "photos", "x.png"]);
+    expect(res.status).toBe(401);
+  });
+
+  it("ログイン済みの場合は storage.read へ進み 200 を返す", async () => {
+    const rel = "properties/abc/photos/auth.png";
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const res = await callGet(["properties", "abc", "photos", "auth.png"]);
+    expect(res.status).toBe(200);
+  });
+
+  it("ログイン済み + path traversal は 403", async () => {
+    const res = await callGet(["..", "etc", "passwd"]);
+    expect(res.status).toBe(403);
+  });
+
+  it("ログイン済み + 不存在ファイルは 404", async () => {
+    const res = await callGet(["missing", "auth-nofile.png"]);
+    expect(res.status).toBe(404);
   });
 });

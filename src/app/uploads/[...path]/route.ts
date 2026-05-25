@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getStorage } from "@/lib/storage";
+import { getApiSession } from "@/lib/api-helpers";
 
 /**
  * /uploads/[...path] 配信 proxy。
@@ -9,10 +10,10 @@ import { getStorage } from "@/lib/storage";
  * 切り替えても既存 DB レコードの `/uploads/...` URL を変えずに配信できる。
  *
  * セキュリティ:
+ *  - Phase A: 未ログインは 401 を返す。ログイン済みなら続行。
  *  - path traversal (`..`, 絶対パス) は adapter 側で reject される。
  *    本ハンドラでは 403 に変換する。
- *  - 注: attachment / photo 単位の権限チェックは Phase 2 では未対応
- *    （別 PR）。本ハンドラは URL を知っている誰でもアクセス可能。
+ *  - 注: attachment / photo 単位の権限チェックは Phase B 以降。
  */
 
 function isPathTraversalError(err: unknown): boolean {
@@ -27,6 +28,12 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
+  try {
+    await getApiSession();
+  } catch {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   const { path: parts } = await params;
   if (!parts || parts.length === 0) {
     return new Response("Not Found", { status: 404 });
