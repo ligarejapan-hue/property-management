@@ -9,6 +9,8 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { getStorage } from "@/lib/storage";
+import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 
 // ---------- DELETE /api/properties/[id]/photos/[photoId] ----------
 
@@ -46,7 +48,24 @@ export async function DELETE(
       throw new ApiError(403, "この写真を削除する権限がありません", "FORBIDDEN");
     }
 
+    const fileUrlBeforeDelete = photo.fileUrl;
     await prisma.propertyPhoto.delete({ where: { id: photoId } });
+
+    // best-effort: DB 削除成功後に実体ファイルも消す。失敗は orphan を残すだけで
+    // ユーザ向け成功レスポンスは維持する（DB が source of truth）。
+    const storageKey = extractStorageKeyFromUrl(fileUrlBeforeDelete);
+    if (storageKey != null) {
+      try {
+        await getStorage().delete(storageKey);
+      } catch (err) {
+        console.error("[photo_delete] storage.delete failed", {
+          route: "DELETE /api/properties/[id]/photos/[photoId]",
+          photoId,
+          propertyId: id,
+          errorName: err instanceof Error ? err.name : "Unknown",
+        });
+      }
+    }
 
     await writeAuditLog({
       userId: session.id,

@@ -12,6 +12,8 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { updatePropertySchema } from "@/lib/validators";
 import { applyDisplayToOwner } from "@/lib/display-level";
+import { getStorage } from "@/lib/storage";
+import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -331,7 +333,50 @@ export async function DELETE(
       throw new ApiError(403, "この物件を削除する権限がありません", "FORBIDDEN");
     }
 
-    await prisma.property.delete({ where: { id } });
+    // 子 PropertyPhoto は schema 側 onDelete: Cascade で消えるため、
+    // cascade 前に fileUrl を捕捉しないと storage 側だけ orphan になる。
+    // 取得と Property 削除は同一 transaction で atomic に行う。
+    const photoFileUrls: string[] = [];
+    await prisma.$transaction(async (tx) => {
+      const photos = await tx.propertyPhoto.findMany({
+        where: { propertyId: id },
+        select: { fileUrl: true },
+      });
+      for (const p of photos) {
+        if (typeof p.fileUrl === "string" && p.fileUrl.length > 0) {
+          photoFileUrls.push(p.fileUrl);
+        }
+      }
+      await tx.property.delete({ where: { id } });
+    });
+
+    // best-effort: transaction 外で実体ファイル削除。失敗は orphan を残すだけで
+    // 既存成功レスポンスは維持する（DB が source of truth）。
+    let storageDeleteAttempted = 0;
+    let storageDeleteFailed = 0;
+    for (const fileUrl of photoFileUrls) {
+      const key = extractStorageKeyFromUrl(fileUrl);
+      if (key == null) continue;
+      storageDeleteAttempted++;
+      try {
+        await getStorage().delete(key);
+      } catch (err) {
+        storageDeleteFailed++;
+        console.error("[property_delete] photo storage.delete failed", {
+          route: "DELETE /api/properties/[id]",
+          propertyId: id,
+          errorName: err instanceof Error ? err.name : "Unknown",
+        });
+      }
+    }
+    if (storageDeleteFailed > 0) {
+      console.error("[property_delete] photo storage cleanup partial failure", {
+        route: "DELETE /api/properties/[id]",
+        propertyId: id,
+        attempted: storageDeleteAttempted,
+        failed: storageDeleteFailed,
+      });
+    }
 
     await writeAuditLog({
       userId: session.id,
