@@ -22,6 +22,7 @@ import {
 import { __resetStorageForTest } from "@/lib/storage";
 import { GET } from "@/app/uploads/[...path]/route";
 import { getApiSession, ApiError } from "@/lib/api-helpers";
+import { authorizeUploadAccess } from "@/lib/uploads-authorization";
 
 vi.mock("@/lib/api-helpers", () => {
   class ApiError extends Error {
@@ -41,8 +42,18 @@ vi.mock("@/lib/api-helpers", () => {
       name: "A",
       role: "admin",
     }),
+    getUserPermissions: vi.fn().mockResolvedValue([
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+    ]),
   };
 });
+
+// 既存テストは Phase A + storage 配信の整合確認が目的。Phase B 判定は別 unit test
+// で担保するため、本 mock では既定で "ok" を返し、配信パスをそのまま通す。
+vi.mock("@/lib/uploads-authorization", () => ({
+  authorizeUploadAccess: vi.fn().mockResolvedValue("ok"),
+}));
 
 const s3Mock = mockClient(S3Client);
 const ORIGINAL_ENV = { ...process.env };
@@ -233,5 +244,40 @@ describe("Phase A: authentication", () => {
   it("ログイン済み + 不存在ファイルは 404", async () => {
     const res = await callGet(["missing", "auth-nofile.png"]);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("Phase B: authorization decision wiring", () => {
+  beforeEach(() => {
+    process.env.STORAGE_BACKEND = "local";
+    process.env.LOCAL_UPLOAD_ROOT = tmpRoot;
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "u1",
+      email: "a@a",
+      name: "A",
+      role: "admin",
+    });
+    vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
+  });
+
+  it("authorize が forbidden を返したら 403 で storage.read は呼ばない", async () => {
+    vi.mocked(authorizeUploadAccess).mockResolvedValueOnce("forbidden");
+    const res = await callGet(["properties", "p1", "photos", "x.png"]);
+    expect(res.status).toBe(403);
+  });
+
+  it("authorize が not_found を返したら 404 で storage.read は呼ばない", async () => {
+    vi.mocked(authorizeUploadAccess).mockResolvedValueOnce("not_found");
+    const res = await callGet(["properties", "p1", "photos", "x.png"]);
+    expect(res.status).toBe(404);
+  });
+
+  it("authorize が ok なら storage.read が呼ばれ 200", async () => {
+    const rel = "properties/p1/photos/ok.png";
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const res = await callGet(["properties", "p1", "photos", "ok.png"]);
+    expect(res.status).toBe(200);
   });
 });
