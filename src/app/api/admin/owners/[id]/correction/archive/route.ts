@@ -96,10 +96,10 @@ function statusFromReasons(reasons: OwnerArchiveBlockReason[]): number {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ ownerId: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { ownerId } = await params;
+    const { id: ownerId } = await params;
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
 
