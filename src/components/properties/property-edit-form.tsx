@@ -2,8 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
-import { USE_MOCK } from "@/lib/api-client";
+import { USE_MOCK, fetchUsers } from "@/lib/api-client";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+
+interface AssigneeOption {
+  id: string;
+  name: string;
+}
 
 interface PropertyData {
   id: string;
@@ -67,6 +72,9 @@ const FORM_FIELDS: FormField[] = [
     { value: "hold", label: "未判断" },
     { value: "no_send", label: "送付不可" },
   ]},
+  // assignedTo: options は users state から実行時に組み立てるため空のまま。
+  // 詳細は JSX 内 select レンダリング特例 (field.key === "assignedTo") を参照。
+  { key: "assignedTo", label: "担当者", type: "select", section: "基本", options: [] },
   { key: "gpsLat", label: "緯度", type: "number", section: "基本" },
   { key: "gpsLng", label: "経度", type: "number", section: "基本" },
   { key: "note", label: "備考", type: "textarea", section: "基本" },
@@ -93,6 +101,8 @@ export default function PropertyEditForm({
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<AssigneeOption[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
 
   useEffect(() => {
     const initial: Record<string, string> = {};
@@ -102,6 +112,28 @@ export default function PropertyEditForm({
     }
     setValues(initial);
   }, [property]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUsersLoading(true);
+    fetchUsers()
+      .then((res) => {
+        if (cancelled) return;
+        setUsers(res.data.map((u) => ({ id: u.id, name: u.name })));
+      })
+      .catch(() => {
+        // 失敗時は「(未設定)」のみ。フォーム全体は落とさない。
+        if (cancelled) return;
+        setUsers([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setUsersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleChange = (key: string, value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -202,13 +234,27 @@ export default function PropertyEditForm({
                           onChange={(e) =>
                             handleChange(field.key, e.target.value)
                           }
-                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                          disabled={
+                            field.key === "assignedTo" && usersLoading
+                          }
+                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none disabled:bg-gray-100"
                         >
-                          {field.options?.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
+                          {field.key === "assignedTo" ? (
+                            <>
+                              <option value="">(未設定)</option>
+                              {users.map((u) => (
+                                <option key={u.id} value={u.id}>
+                                  {u.name}
+                                </option>
+                              ))}
+                            </>
+                          ) : (
+                            field.options?.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))
+                          )}
                         </select>
                       ) : field.type === "textarea" ? (
                         <textarea
