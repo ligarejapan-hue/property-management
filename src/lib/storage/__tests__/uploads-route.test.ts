@@ -21,16 +21,28 @@ import {
 
 import { __resetStorageForTest } from "@/lib/storage";
 import { GET } from "@/app/uploads/[...path]/route";
-import { getApiSession } from "@/lib/api-helpers";
+import { getApiSession, ApiError } from "@/lib/api-helpers";
 
-vi.mock("@/lib/api-helpers", () => ({
-  getApiSession: vi.fn().mockResolvedValue({
-    id: "u1",
-    email: "a@a",
-    name: "A",
-    role: "admin",
-  }),
-}));
+vi.mock("@/lib/api-helpers", () => {
+  class ApiError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, message: string, code = "ERROR") {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  }
+  return {
+    ApiError,
+    getApiSession: vi.fn().mockResolvedValue({
+      id: "u1",
+      email: "a@a",
+      name: "A",
+      role: "admin",
+    }),
+  };
+});
 
 const s3Mock = mockClient(S3Client);
 const ORIGINAL_ENV = { ...process.env };
@@ -180,12 +192,28 @@ describe("Phase A: authentication", () => {
     });
   });
 
-  it("未ログインの場合は 401 を返す", async () => {
+  it("ApiError(401) は 401 を返す", async () => {
     vi.mocked(getApiSession).mockRejectedValueOnce(
-      Object.assign(new Error("Unauthorized"), { status: 401 }),
+      new ApiError(401, "認証が必要です", "UNAUTHORIZED"),
     );
     const res = await callGet(["properties", "abc", "photos", "x.png"]);
     expect(res.status).toBe(401);
+  });
+
+  it("通常 Error は 401 に変換せず rethrow する", async () => {
+    vi.mocked(getApiSession).mockRejectedValueOnce(new Error("DB connection error"));
+    await expect(
+      callGet(["properties", "abc", "photos", "x.png"]),
+    ).rejects.toThrow("DB connection error");
+  });
+
+  it("ApiError(500) は 401 に変換せず rethrow する", async () => {
+    vi.mocked(getApiSession).mockRejectedValueOnce(
+      new ApiError(500, "internal error", "INTERNAL_ERROR"),
+    );
+    await expect(
+      callGet(["properties", "abc", "photos", "x.png"]),
+    ).rejects.toThrow("internal error");
   });
 
   it("ログイン済みの場合は storage.read へ進み 200 を返す", async () => {

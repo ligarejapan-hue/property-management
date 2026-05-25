@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getStorage } from "@/lib/storage";
-import { getApiSession } from "@/lib/api-helpers";
+import { getApiSession, ApiError } from "@/lib/api-helpers";
 
 /**
  * /uploads/[...path] 配信 proxy。
@@ -30,8 +30,11 @@ export async function GET(
 ) {
   try {
     await getApiSession();
-  } catch {
-    return new Response("Unauthorized", { status: 401 });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    throw err;
   }
 
   const { path: parts } = await params;
