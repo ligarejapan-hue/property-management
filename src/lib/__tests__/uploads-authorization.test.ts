@@ -31,19 +31,24 @@ function makeDb(opts: {
   const attachments = opts.attachments ?? [];
   const properties = opts.properties ?? [];
 
-  // 必要なメソッドのみ用意した最小 prisma 互換 stub。
+  // 最小 prisma 互換 stub。Phase B は findMany + JS フィルタで legacy URL /
+  // duplicate collision を取りこぼさない設計のため、findMany の contains を再現する。
+  type ContainsWhere = { fileUrl: { contains: string } };
+  const matchContains = (url: string, where: ContainsWhere) =>
+    typeof url === "string" && url.includes(where.fileUrl.contains);
+
   return {
     propertyPhoto: {
-      findFirst: async ({ where }: { where: { fileUrl: string } }) =>
-        photos.find((p) => p.fileUrl === where.fileUrl) ?? null,
+      findMany: async ({ where }: { where: ContainsWhere }) =>
+        photos.filter((p) => matchContains(p.fileUrl, where)),
     },
     buildingPhoto: {
-      findFirst: async ({ where }: { where: { fileUrl: string } }) =>
-        bPhotos.find((p) => p.fileUrl === where.fileUrl) ?? null,
+      findMany: async ({ where }: { where: ContainsWhere }) =>
+        bPhotos.filter((p) => matchContains(p.fileUrl, where)),
     },
     attachment: {
-      findFirst: async ({ where }: { where: { fileUrl: string } }) =>
-        attachments.find((a) => a.fileUrl === where.fileUrl) ?? null,
+      findMany: async ({ where }: { where: ContainsWhere }) =>
+        attachments.filter((a) => matchContains(a.fileUrl, where)),
     },
     property: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -371,5 +376,260 @@ describe("authorizeUploadAccess", () => {
       prisma,
     });
     expect(decision).toBe("forbidden");
+  });
+
+  // -------------------------------------------------------------------
+  // Codex P1-1: legacy absolute fileUrl / query 付きの取りこぼし防止
+  // -------------------------------------------------------------------
+  describe("legacy fileUrl 形式", () => {
+    const key = "properties/p1/photos/legacy.jpg";
+
+    it("http:// 絶対URL でも認可される", async () => {
+      const prisma = makeDb({
+        photos: [
+          {
+            fileUrl: `http://example.com/uploads/${key}`,
+            propertyId: "p1",
+          },
+        ],
+        properties: [{ id: "p1", createdBy: "u-x", assignedTo: null }],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("ok");
+    });
+
+    it("https:// 絶対URL + query suffix でも認可される", async () => {
+      const prisma = makeDb({
+        photos: [
+          {
+            fileUrl: `https://example.com/uploads/${key}?v=1`,
+            propertyId: "p1",
+          },
+        ],
+        properties: [{ id: "p1", createdBy: "u-x", assignedTo: null }],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("ok");
+    });
+
+    it("相対 + query suffix でも認可される", async () => {
+      const prisma = makeDb({
+        photos: [
+          { fileUrl: `/uploads/${key}?v=1`, propertyId: "p1" },
+        ],
+        properties: [{ id: "p1", createdBy: "u-x", assignedTo: null }],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("ok");
+    });
+
+    it("data: / blob: / file: / /api/ は候補から除外され not_found", async () => {
+      const prisma = makeDb({
+        photos: [
+          { fileUrl: `data:image/png;base64,xxx`, propertyId: "p1" },
+          { fileUrl: `blob:http://example.com/abc`, propertyId: "p1" },
+          { fileUrl: `file:///etc/passwd`, propertyId: "p1" },
+          { fileUrl: `/api/properties/p1/photos/legacy.jpg`, propertyId: "p1" },
+        ],
+        properties: [{ id: "p1", createdBy: "u-x", assignedTo: null }],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("not_found");
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Codex P1-2: duplicate collision で bypass しない
+  // -------------------------------------------------------------------
+  describe("duplicate collision", () => {
+    const key = "properties/p1/photos/dup.jpg";
+    const fileUrl = `/uploads/${key}`;
+
+    it("PropertyPhoto 同 key 複数 + 片方 forbidden → 全体 forbidden", async () => {
+      const prisma = makeDb({
+        photos: [
+          { fileUrl, propertyId: "p-allowed" },
+          { fileUrl, propertyId: "p-forbidden" },
+        ],
+        properties: [
+          { id: "p-allowed", createdBy: fieldStaff.id, assignedTo: null },
+          { id: "p-forbidden", createdBy: "u-x", assignedTo: "u-y" },
+        ],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: fieldStaff,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("forbidden");
+    });
+
+    it("PropertyPhoto 同 key 複数 + 全て allowed → ok", async () => {
+      const prisma = makeDb({
+        photos: [
+          { fileUrl, propertyId: "p1" },
+          { fileUrl, propertyId: "p2" },
+        ],
+        properties: [
+          { id: "p1", createdBy: fieldStaff.id, assignedTo: null },
+          { id: "p2", createdBy: "u-x", assignedTo: fieldStaff.id },
+        ],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: fieldStaff,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("ok");
+    });
+
+    it("Attachment 同 key で allowed + forbidden が混在 → forbidden", async () => {
+      const prisma = makeDb({
+        attachments: [
+          {
+            fileUrl,
+            isDeleted: false,
+            targetType: "property",
+            targetId: "p-allowed",
+            propertyId: "p-allowed",
+          },
+          {
+            fileUrl,
+            isDeleted: false,
+            targetType: "property",
+            targetId: "p-forbidden",
+            propertyId: "p-forbidden",
+          },
+        ],
+        properties: [
+          { id: "p-allowed", createdBy: fieldStaff.id, assignedTo: null },
+          { id: "p-forbidden", createdBy: "u-x", assignedTo: "u-y" },
+        ],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: fieldStaff,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("forbidden");
+    });
+
+    it("Attachment 同 key で deleted のみ → not_found", async () => {
+      const prisma = makeDb({
+        attachments: [
+          {
+            fileUrl,
+            isDeleted: true,
+            targetType: "property",
+            targetId: "p1",
+            propertyId: "p1",
+          },
+          {
+            fileUrl,
+            isDeleted: true,
+            targetType: "property",
+            targetId: "p2",
+            propertyId: "p2",
+          },
+        ],
+        properties: [
+          { id: "p1", createdBy: fieldStaff.id, assignedTo: null },
+          { id: "p2", createdBy: fieldStaff.id, assignedTo: null },
+        ],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("not_found");
+    });
+
+    it("Attachment 同 key で deleted と active allowed が混在 → active 側で ok", async () => {
+      const prisma = makeDb({
+        attachments: [
+          {
+            fileUrl,
+            isDeleted: true,
+            targetType: "property",
+            targetId: "p1",
+            propertyId: "p1",
+          },
+          {
+            fileUrl,
+            isDeleted: false,
+            targetType: "property",
+            targetId: "p1",
+            propertyId: "p1",
+          },
+        ],
+        properties: [
+          { id: "p1", createdBy: fieldStaff.id, assignedTo: null },
+        ],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: fieldStaff,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("ok");
+    });
+
+    it("Attachment 同 key で deleted + active forbidden が混在 → forbidden", async () => {
+      const prisma = makeDb({
+        attachments: [
+          {
+            fileUrl,
+            isDeleted: true,
+            targetType: "property",
+            targetId: "p1",
+            propertyId: "p1",
+          },
+          {
+            fileUrl,
+            isDeleted: false,
+            targetType: "property",
+            targetId: "p2",
+            propertyId: "p2",
+          },
+        ],
+        properties: [
+          { id: "p1", createdBy: fieldStaff.id, assignedTo: null },
+          { id: "p2", createdBy: "u-x", assignedTo: "u-y" },
+        ],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: fieldStaff,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("forbidden");
+    });
   });
 });

@@ -1,14 +1,20 @@
 /**
  * /uploads/[...path] Phase B: entity-level 権限判定。
  *
- * key を fileUrl 完全一致で DB 逆引きし、Photo / Attachment / Property の
- * スコープに基づいて 200 / 403 / 404 のいずれを返すべきかを決定する。
+ * 要求 key を fileUrl の正規化結果と完全一致で DB 逆引きし、
+ * Photo / Attachment / Property のスコープに基づいて 200 / 403 / 404 のいずれを
+ * 返すべきかを決定する。
  *
- * 注:
+ * 重要:
  *  - key 形式から propertyId / buildingId を推定しない。逆引き結果のみを使う。
- *  - 不明 prefix / 逆引き 0 件は 404（安全側）。
- *  - isDeleted の Attachment は 404（存在しないものとして扱う）。
+ *  - 既存データに残る legacy 絶対 URL や query 付きを取りこぼさないため、
+ *    DB 検索は `contains: key` で候補を絞り、JS 側で fileUrl を正規化して
+ *    storage key を抽出し直してから完全一致を判定する。
+ *  - duplicate fileUrl collision (caller-supplied fileUrl で同じ key が
+ *    別物件にも登録されたケース) を bypass にしないため、findFirst を使わず
+ *    全候補を評価する: forbidden > ok > not_found の優先順で決着する。
  *  - 既存 Property API のスコープ (field_staff = createdBy or assignedTo) に揃える。
+ *  - isDeleted の Attachment は not_found 扱い（active 候補があれば active 側で決まる）。
  */
 
 import prismaDefault from "@/lib/prisma";
@@ -27,6 +33,53 @@ export interface AuthorizeUploadAccessArgs {
   prisma?: PrismaLike;
 }
 
+const UPLOADS_PREFIX = "/uploads/";
+
+/**
+ * DB 保存された fileUrl から storage key を取り出す。
+ *
+ * 受理する例:
+ *   "/uploads/foo/bar.jpg"                          → "foo/bar.jpg"
+ *   "/uploads/foo/bar.jpg?v=1"                      → "foo/bar.jpg"
+ *   "/uploads/foo/bar.jpg#hash"                     → "foo/bar.jpg"
+ *   "http://host/uploads/foo/bar.jpg"               → "foo/bar.jpg"
+ *   "https://host/uploads/foo/bar.jpg?v=1"          → "foo/bar.jpg"
+ *
+ * 拒否 (null) する例:
+ *   data: / blob: / file: スキーマ
+ *   /api/... など /uploads/ 以外のパス
+ *   traversal を含むなど isValidStorageKey 不合格
+ */
+export function extractStorageKeyFromFileUrl(
+  fileUrl: string | null | undefined,
+): string | null {
+  if (typeof fileUrl !== "string") return null;
+  const s = fileUrl.trim();
+  if (s === "") return null;
+
+  // data: / blob: / file: は対象外（自前 storage に存在しない参照）
+  if (/^(data|blob|file):/i.test(s)) return null;
+
+  let pathPart: string;
+  if (s.startsWith("/")) {
+    pathPart = s.split(/[?#]/)[0];
+  } else {
+    try {
+      const u = new URL(s);
+      pathPart = u.pathname;
+    } catch {
+      return null;
+    }
+  }
+
+  if (!pathPart.startsWith(UPLOADS_PREFIX)) return null;
+
+  const key = pathPart.slice(UPLOADS_PREFIX.length);
+  if (key === "") return null;
+  if (!isValidStorageKey(key)) return null;
+  return key;
+}
+
 export async function authorizeUploadAccess(
   args: AuthorizeUploadAccessArgs,
 ): Promise<UploadAuthDecision> {
@@ -35,45 +88,66 @@ export async function authorizeUploadAccess(
 
   if (!isValidStorageKey(key)) return "forbidden";
 
-  const fileUrl = `/uploads/${key}`;
+  const decisions: UploadAuthDecision[] = [];
 
-  const photo = await db.propertyPhoto.findFirst({
-    where: { fileUrl },
-    select: { propertyId: true },
+  const photos = await db.propertyPhoto.findMany({
+    where: { fileUrl: { contains: key } },
+    select: { propertyId: true, fileUrl: true },
   });
-  if (photo) {
-    return authorizePropertyAccess(photo.propertyId, session, permissions, db);
+  for (const p of photos) {
+    if (extractStorageKeyFromFileUrl(p.fileUrl) !== key) continue;
+    decisions.push(
+      await authorizePropertyAccess(p.propertyId, session, permissions, db),
+    );
   }
 
-  const buildingPhoto = await db.buildingPhoto.findFirst({
-    where: { fileUrl },
-    select: { buildingId: true },
+  const buildingPhotos = await db.buildingPhoto.findMany({
+    where: { fileUrl: { contains: key } },
+    select: { buildingId: true, fileUrl: true },
   });
-  if (buildingPhoto) {
-    return hasPermission(permissions, "property", "read") ? "ok" : "forbidden";
+  for (const b of buildingPhotos) {
+    if (extractStorageKeyFromFileUrl(b.fileUrl) !== key) continue;
+    decisions.push(
+      hasPermission(permissions, "property", "read") ? "ok" : "forbidden",
+    );
   }
 
-  const attachment = await db.attachment.findFirst({
-    where: { fileUrl },
+  const attachments = await db.attachment.findMany({
+    where: { fileUrl: { contains: key } },
     select: {
       isDeleted: true,
       targetType: true,
       targetId: true,
       propertyId: true,
+      fileUrl: true,
     },
   });
-  if (attachment) {
-    if (attachment.isDeleted) return "not_found";
-    if (attachment.targetType === "property") {
-      const propertyId = attachment.propertyId ?? attachment.targetId;
-      return authorizePropertyAccess(propertyId, session, permissions, db);
+  for (const a of attachments) {
+    if (extractStorageKeyFromFileUrl(a.fileUrl) !== key) continue;
+    if (a.isDeleted) {
+      decisions.push("not_found");
+      continue;
     }
-    if (attachment.targetType === "owner") {
-      return hasPermission(permissions, "owner", "read") ? "ok" : "forbidden";
+    if (a.targetType === "property") {
+      const propertyId = a.propertyId ?? a.targetId;
+      decisions.push(
+        await authorizePropertyAccess(propertyId, session, permissions, db),
+      );
+      continue;
     }
-    return "forbidden";
+    if (a.targetType === "owner") {
+      decisions.push(
+        hasPermission(permissions, "owner", "read") ? "ok" : "forbidden",
+      );
+      continue;
+    }
+    // 未知 targetType は安全側で forbidden（bypass 防止）
+    decisions.push("forbidden");
   }
 
+  // 優先順: forbidden > ok > not_found
+  if (decisions.some((d) => d === "forbidden")) return "forbidden";
+  if (decisions.some((d) => d === "ok")) return "ok";
   return "not_found";
 }
 
