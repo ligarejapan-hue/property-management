@@ -1,0 +1,233 @@
+import { NextRequest } from "next/server";
+import prisma from "@/lib/prisma";
+import {
+  getApiSession,
+  getUserPermissions,
+  apiResponse,
+  handleApiError,
+  parseJsonBody,
+  ApiError,
+} from "@/lib/api-helpers";
+import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
+import {
+  fieldSurveyTrackPointBatchSchema,
+  fieldSurveyTrackPointListQuerySchema,
+} from "@/lib/validators";
+
+// ---------- POST /api/field-survey/sessions/[id]/track-points ----------
+//
+// Phase 1-B: 巡回 session の GPS track 点を batch で append する。
+// - field_survey:write 必須。manage 不所持時は own session のみ。
+// - active session 以外には保存しない (409 INVALID_STATE)。
+// - recordedAt は session.startedAt - 5min 〜 now + 1min の範囲のみ許可
+//   (端末の時計ずれ・改ざんに対する clock-skew 上限)。
+// - (sessionId, sequence) unique と skipDuplicates で retry 冪等化。
+//   実 insert 件数だけ session.pointCount を増やす。
+// - transaction 内で全工程を行い、increment 時に status='active' を where に
+//   含めて atomic に判定する。終了直後の race で 0 行更新なら全 rollback。
+// - AuditLog は書かない (高頻度 append。session start/end と pointCount で監査)。
+
+const CLOCK_SKEW_PAST_MS = 5 * 60 * 1000;
+const CLOCK_SKEW_FUTURE_MS = 1 * 60 * 1000;
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
+
+    if (!hasPermission(permissions, "field_survey", "write")) {
+      throw new ApiError(403, "track point の保存権限がありません", "FORBIDDEN");
+    }
+
+    const body = await parseJsonBody(request);
+    const { points } = fieldSurveyTrackPointBatchSchema.parse(body);
+
+    const hasManage = hasPermission(permissions, "field_survey", "manage");
+
+    const result = await prisma.$transaction(async (tx) => {
+      const sess = await tx.fieldSurveySession.findUnique({
+        where: { id },
+        select: { id: true, staffUserId: true, status: true, startedAt: true },
+      });
+      if (!sess) {
+        throw new ApiError(404, "session が見つかりません", "NOT_FOUND");
+      }
+      if (!hasManage && sess.staffUserId !== session.id) {
+        throw new ApiError(
+          403,
+          "他スタッフの session には保存できません",
+          "FORBIDDEN",
+        );
+      }
+      if (sess.status !== "active") {
+        throw new ApiError(
+          409,
+          "active 状態でない session には保存できません",
+          "INVALID_STATE",
+        );
+      }
+
+      // recordedAt clock-skew 検証。startedAt より過去すぎ / now より未来すぎは
+      // クライアント側の時計改ざん / バグの可能性。エラー応答に座標は含めない。
+      const now = Date.now();
+      const minTs = sess.startedAt.getTime() - CLOCK_SKEW_PAST_MS;
+      const maxTs = now + CLOCK_SKEW_FUTURE_MS;
+      for (let i = 0; i < points.length; i++) {
+        const ts = new Date(points[i].recordedAt).getTime();
+        if (ts < minTs || ts > maxTs) {
+          throw new ApiError(
+            422,
+            `points[${i}].recordedAt が許容範囲外です`,
+            "RECORDED_AT_OUT_OF_RANGE",
+          );
+        }
+      }
+
+      const inserted = await tx.fieldSurveyTrackPoint.createMany({
+        data: points.map((p) => ({
+          sessionId: id,
+          sequence: p.sequence,
+          lat: p.lat,
+          lng: p.lng,
+          accuracy: p.accuracy ?? null,
+          recordedAt: new Date(p.recordedAt),
+        })),
+        skipDuplicates: true,
+      });
+
+      if (inserted.count > 0) {
+        // 実 insert 件数のみ加算。session が終了済になっていたら 0 行更新 →
+        // throw して transaction を rollback。
+        const upd = await tx.fieldSurveySession.updateMany({
+          where: { id, status: "active" },
+          data: { pointCount: { increment: inserted.count } },
+        });
+        if (upd.count === 0) {
+          throw new ApiError(
+            409,
+            "session の状態が変わりました",
+            "INVALID_STATE",
+          );
+        }
+      }
+
+      return {
+        acceptedCount: inserted.count,
+        skippedCount: points.length - inserted.count,
+      };
+    });
+
+    return apiResponse({ data: result });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+// ---------- GET /api/field-survey/sessions/[id]/track-points ----------
+//
+// ルート再描画用。field_survey:read 必須。
+// 自分の session は read のみで可。他人 session は read_all または manage 必須。
+// 他人 session 取得時のみ AuditLog を書く (detail に座標を含めない)。
+
+const SELECT_POINT = {
+  sequence: true,
+  lat: true,
+  lng: true,
+  accuracy: true,
+  recordedAt: true,
+} as const;
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
+
+    if (!hasPermission(permissions, "field_survey", "read")) {
+      throw new ApiError(403, "閲覧権限がありません", "FORBIDDEN");
+    }
+
+    const sess = await prisma.fieldSurveySession.findUnique({
+      where: { id },
+      select: { id: true, staffUserId: true },
+    });
+    if (!sess) {
+      throw new ApiError(404, "session が見つかりません", "NOT_FOUND");
+    }
+
+    const isOwn = sess.staffUserId === session.id;
+    const hasReadAll = hasPermission(permissions, "field_survey", "read_all");
+    const hasManage = hasPermission(permissions, "field_survey", "manage");
+    if (!isOwn && !hasReadAll && !hasManage) {
+      throw new ApiError(
+        403,
+        "他スタッフの session は閲覧できません",
+        "FORBIDDEN",
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const queryObj: Record<string, string> = {};
+    searchParams.forEach((v, k) => {
+      queryObj[k] = v;
+    });
+    const { from, to, cursorSequence, limit } =
+      fieldSurveyTrackPointListQuerySchema.parse(queryObj);
+
+    const where: {
+      sessionId: string;
+      recordedAt?: { gte?: Date; lte?: Date };
+      sequence?: { gt: number };
+    } = { sessionId: id };
+    if (from || to) {
+      where.recordedAt = {};
+      if (from) where.recordedAt.gte = new Date(from);
+      if (to) where.recordedAt.lte = new Date(to);
+    }
+    if (cursorSequence !== undefined) {
+      where.sequence = { gt: cursorSequence };
+    }
+
+    // take limit + 1 で「次ページの有無」を判定する。
+    const rows = await prisma.fieldSurveyTrackPoint.findMany({
+      where,
+      orderBy: { sequence: "asc" },
+      take: limit + 1,
+      select: SELECT_POINT,
+    });
+
+    const hasNext = rows.length > limit;
+    const data = hasNext ? rows.slice(0, limit) : rows;
+    const nextCursor =
+      hasNext && data.length > 0 ? data[data.length - 1].sequence : null;
+
+    if (!isOwn) {
+      // 他スタッフのルート閲覧のみ監査対象。detail には座標を含めない。
+      await writeAuditLog({
+        userId: session.id,
+        action: "field_survey_track_view",
+        targetTable: "field_survey_track_points",
+        targetId: id,
+        detail: {
+          sessionId: id,
+          viewedStaffUserId: sess.staffUserId,
+          pointsReturned: data.length,
+          hasFrom: from !== undefined,
+          hasTo: to !== undefined,
+        },
+      });
+    }
+
+    return apiResponse({ data, nextCursor });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

@@ -167,3 +167,45 @@ export const fieldSurveySessionListQuerySchema = z.object({
   staffUserId: z.string().uuid().optional(),
   status: z.enum(["active", "ended", "cancelled"]).optional(),
 });
+
+// ---------- Field survey track points (Phase 1-B) ----------
+
+export const fieldSurveyTrackPointSchema = z.object({
+  // sequence は session 内の連番 (再送 / dedup 用)。32bit int の余裕を残し
+  // 2_000_000_000 で頭打ち。負数は許さない。
+  sequence: z.number().int().min(0).max(2_000_000_000),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  // accuracy はメートル単位。実機 GPS の現実的範囲を超える 10km 以上は弾く。
+  accuracy: z.number().min(0).max(10_000).optional().nullable(),
+  recordedAt: z.string().datetime(),
+});
+
+export const fieldSurveyTrackPointBatchSchema = z
+  .object({
+    points: z.array(fieldSurveyTrackPointSchema).min(1).max(200),
+  })
+  .superRefine((v, ctx) => {
+    // 同一 payload 内の sequence 重複はクライアントバグとして 422。
+    // (retry / 再送による DB 重複は skipDuplicates で吸収する)
+    const seen = new Set<number>();
+    for (let i = 0; i < v.points.length; i++) {
+      const s = v.points[i].sequence;
+      if (seen.has(s)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `同一 payload 内で sequence=${s} が重複しています`,
+          path: ["points", i, "sequence"],
+        });
+        return;
+      }
+      seen.add(s);
+    }
+  });
+
+export const fieldSurveyTrackPointListQuerySchema = z.object({
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  cursorSequence: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(500),
+});
