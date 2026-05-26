@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { PROPERTY_TYPE_VALUES, CASE_STATUS_VALUES, INTRODUCTION_ROUTE_VALUES } from "@/lib/property-types";
 import { normalizeCorporateNumber } from "@/lib/corporate-number";
-import { FIELD_SURVEY_MEMO_MAX_LEN } from "@/lib/field-survey-constants";
+import {
+  FIELD_SURVEY_MEMO_MAX_LEN,
+  FIELD_SURVEY_PIN_TYPES,
+} from "@/lib/field-survey-constants";
 
 // 法人番号入力フィールド共通スキーマ:
 // - 空文字 / null / undefined → null（保存しない）
@@ -208,4 +211,58 @@ export const fieldSurveyTrackPointListQuerySchema = z.object({
   to: z.string().datetime().optional(),
   cursorSequence: z.coerce.number().int().min(0).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(500),
+});
+
+// ---------- Field survey pin (Phase 1-C) ----------
+
+const PIN_STATUSES = ["open", "closed", "archived"] as const;
+
+// staffUserId は body から受け取らず session.id 固定にするため、schema からも
+// 除外し .strict() で送信を拒否する。同様に lat/lng は PATCH で禁止する。
+export const createFieldSurveyPinSchema = z
+  .object({
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+    accuracy: z.number().min(0).max(10_000).optional().nullable(),
+    pinType: z.enum(FIELD_SURVEY_PIN_TYPES),
+    memo: z.string().max(FIELD_SURVEY_MEMO_MAX_LEN).optional().nullable(),
+    sessionId: z.string().uuid().optional().nullable(),
+    propertyId: z.string().uuid().optional().nullable(),
+  })
+  .strict();
+
+export const patchFieldSurveyPinSchema = z
+  .object({
+    pinType: z.enum(FIELD_SURVEY_PIN_TYPES).optional(),
+    status: z.enum(PIN_STATUSES).optional(),
+    memo: z.string().max(FIELD_SURVEY_MEMO_MAX_LEN).optional().nullable(),
+    propertyId: z.string().uuid().nullable().optional(),
+    sessionId: z.string().uuid().nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (v) =>
+      v.pinType !== undefined ||
+      v.status !== undefined ||
+      v.memo !== undefined ||
+      v.propertyId !== undefined ||
+      v.sessionId !== undefined,
+    { message: "更新フィールドを指定してください" },
+  );
+
+export const fieldSurveyPinListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  status: z.enum(PIN_STATUSES).optional(),
+  pinType: z.enum(FIELD_SURVEY_PIN_TYPES).optional(),
+  sessionId: z.string().uuid().optional(),
+  propertyId: z.string().uuid().optional(),
+  staffUserId: z.string().uuid().optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  cursor: z.string().uuid().optional(),
+  includeArchived: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true"),
 });
