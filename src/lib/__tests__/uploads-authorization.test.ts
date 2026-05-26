@@ -5,8 +5,11 @@
  * 既存 Property API のスコープと整合していることを確認する。
  */
 
-import { describe, it, expect } from "vitest";
-import { authorizeUploadAccess } from "@/lib/uploads-authorization";
+import { describe, it, expect, vi } from "vitest";
+import {
+  authorizeUploadAccess,
+  escapePrismaLikePattern,
+} from "@/lib/uploads-authorization";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
 
 type Photo = { fileUrl: string; propertyId: string };
@@ -33,9 +36,18 @@ function makeDb(opts: {
 
   // 最小 prisma 互換 stub。Phase B は findMany + JS フィルタで legacy URL /
   // duplicate collision を取りこぼさない設計のため、findMany の contains を再現する。
+  // 本番は Prisma → SQL LIKE に展開される。authorize 側で `\` `%` `_` を
+  // escape して渡すため、mock 側では default escape char `\` を踏まえて
+  // de-escape してから literal substring 一致を見る (PostgreSQL の LIKE escape を簡易に模す)。
   type ContainsWhere = { fileUrl: { contains: string } };
+  const unescapeLike = (pattern: string): string =>
+    pattern
+      .replace(/\\\\/g, "\x00BS\x00")
+      .replace(/\\%/g, "%")
+      .replace(/\\_/g, "_")
+      .replace(/\x00BS\x00/g, "\\");
   const matchContains = (url: string, where: ContainsWhere) =>
-    typeof url === "string" && url.includes(where.fileUrl.contains);
+    typeof url === "string" && url.includes(unescapeLike(where.fileUrl.contains));
 
   return {
     propertyPhoto: {
@@ -630,6 +642,168 @@ describe("authorizeUploadAccess", () => {
         prisma,
       });
       expect(decision).toBe("forbidden");
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Codex P1: LIKE wildcard escape (`%` / `_` / `\`)
+  // -------------------------------------------------------------------
+  describe("escapePrismaLikePattern", () => {
+    it("% は literal として escape される", () => {
+      expect(escapePrismaLikePattern("foo%bar")).toBe("foo\\%bar");
+    });
+
+    it("_ は literal として escape される", () => {
+      expect(escapePrismaLikePattern("foo_bar")).toBe("foo\\_bar");
+    });
+
+    it("\\ は二重化される", () => {
+      expect(escapePrismaLikePattern("foo\\bar")).toBe("foo\\\\bar");
+    });
+
+    it("通常の key は変更されない", () => {
+      expect(escapePrismaLikePattern("properties/p1/photos/1.jpg")).toBe(
+        "properties/p1/photos/1.jpg",
+      );
+    });
+
+    it("複合 (`\\`, `%`, `_` 同時) でも順序依存しない", () => {
+      // `\` を最初に二重化 → `%`/`_` を escape: `a\\b\%c\_d`
+      expect(escapePrismaLikePattern("a\\b%c_d")).toBe("a\\\\b\\%c\\_d");
+    });
+  });
+
+  describe("DB lookup 引数 (wildcard escape)", () => {
+    it("% を含む key は contains に literal escape された値が渡る (3 テーブル全て)", async () => {
+      const calls: { table: string; contains: string }[] = [];
+      const recorder = (table: string) =>
+        vi.fn(async ({ where }: { where: { fileUrl: { contains: string } } }) => {
+          calls.push({ table, contains: where.fileUrl.contains });
+          return [];
+        });
+      const prisma = {
+        propertyPhoto: { findMany: recorder("propertyPhoto") },
+        buildingPhoto: { findMany: recorder("buildingPhoto") },
+        attachment: { findMany: recorder("attachment") },
+        property: { findUnique: async () => null },
+      } as unknown as Parameters<typeof authorizeUploadAccess>[0]["prisma"];
+
+      await authorizeUploadAccess({
+        key: "weird%key_test",
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+
+      expect(calls.map((c) => c.table)).toEqual([
+        "propertyPhoto",
+        "buildingPhoto",
+        "attachment",
+      ]);
+      for (const c of calls) {
+        expect(c.contains).toBe("weird\\%key\\_test");
+      }
+    });
+
+    it("`%` 単独 key でも contains に escape された値が渡る", async () => {
+      const containsValues: string[] = [];
+      const recorder = vi.fn(
+        async ({ where }: { where: { fileUrl: { contains: string } } }) => {
+          containsValues.push(where.fileUrl.contains);
+          return [];
+        },
+      );
+      const prisma = {
+        propertyPhoto: { findMany: recorder },
+        buildingPhoto: { findMany: recorder },
+        attachment: { findMany: recorder },
+        property: { findUnique: async () => null },
+      } as unknown as Parameters<typeof authorizeUploadAccess>[0]["prisma"];
+
+      await authorizeUploadAccess({
+        key: "%",
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+
+      for (const v of containsValues) {
+        expect(v).toBe("\\%");
+      }
+    });
+  });
+
+  describe("wildcard scan 防御 (挙動)", () => {
+    it("% を含む実 fileUrl は正規化 key 完全一致なら ok", async () => {
+      const key = "properties/p1/photos/has%pct.jpg";
+      const prisma = makeDb({
+        photos: [{ fileUrl: `/uploads/${key}`, propertyId: "p1" }],
+        properties: [{ id: "p1", createdBy: "u-x", assignedTo: null }],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("ok");
+    });
+
+    it("_ を含む実 fileUrl は正規化 key 完全一致なら ok", async () => {
+      const key = "properties/p1/photos/has_us.jpg";
+      const prisma = makeDb({
+        photos: [{ fileUrl: `/uploads/${key}`, propertyId: "p1" }],
+        properties: [{ id: "p1", createdBy: "u-x", assignedTo: null }],
+      });
+      const decision = await authorizeUploadAccess({
+        key,
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("ok");
+    });
+
+    it("key=`%` で別レコードを wildcard マッチして認可しない (not_found)", async () => {
+      const prisma = makeDb({
+        photos: [
+          { fileUrl: "/uploads/properties/p1/photos/a.jpg", propertyId: "p1" },
+          { fileUrl: "/uploads/properties/p2/photos/b.jpg", propertyId: "p2" },
+        ],
+        properties: [
+          { id: "p1", createdBy: "u-x", assignedTo: null },
+          { id: "p2", createdBy: "u-y", assignedTo: null },
+        ],
+      });
+      const decision = await authorizeUploadAccess({
+        key: "%",
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("not_found");
+    });
+
+    it("key=`_` (単独) で別レコードを wildcard マッチして認可しない (not_found)", async () => {
+      const prisma = makeDb({
+        attachments: [
+          {
+            fileUrl: "/uploads/properties/p1/attachments/a.pdf",
+            isDeleted: false,
+            targetType: "property",
+            targetId: "p1",
+            propertyId: "p1",
+          },
+        ],
+        properties: [{ id: "p1", createdBy: "u-x", assignedTo: null }],
+      });
+      const decision = await authorizeUploadAccess({
+        key: "_",
+        session: admin,
+        permissions: permsWithPropertyRead,
+        prisma,
+      });
+      expect(decision).toBe("not_found");
     });
   });
 });

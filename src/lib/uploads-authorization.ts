@@ -36,6 +36,26 @@ export interface AuthorizeUploadAccessArgs {
 const UPLOADS_PREFIX = "/uploads/";
 
 /**
+ * Prisma `contains` は SQL LIKE / ILIKE に変換される。`%` / `_` が wildcard
+ * として解釈されると、authenticated user が `key` に `%` / `_` を仕込んで
+ * 広範囲スキャンを誘発し DoS / latency 悪化を引き起こせる。
+ *
+ * 既存 `isValidStorageKey` は `%` / `_` を許可（traversal / `\` のみ拒否）
+ * しているため、DB 側に渡す値は escape して LIKE-literal にする。
+ *
+ * PostgreSQL の LIKE のデフォルト escape は `\`。順序重要:
+ *   1. `\`  → `\\`   （後段の `\%` / `\_` を二重 escape しないため最初に処理）
+ *   2. `%`  → `\%`
+ *   3. `_`  → `\_`
+ */
+export function escapePrismaLikePattern(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_");
+}
+
+/**
  * DB 保存された fileUrl から storage key を取り出す。
  *
  * 受理する例:
@@ -88,10 +108,14 @@ export async function authorizeUploadAccess(
 
   if (!isValidStorageKey(key)) return "forbidden";
 
+  // DB 候補絞り込みは LIKE-literal で。最終判定は下の JS 側で正規化 key の
+  // 完全一致を要求するため、escape 漏れがあっても認可 bypass にはならないが、
+  // wildcard を含む key で広範囲スキャンが起きる経路自体を塞ぐ。
+  const escapedKey = escapePrismaLikePattern(key);
   const decisions: UploadAuthDecision[] = [];
 
   const photos = await db.propertyPhoto.findMany({
-    where: { fileUrl: { contains: key } },
+    where: { fileUrl: { contains: escapedKey } },
     select: { propertyId: true, fileUrl: true },
   });
   for (const p of photos) {
@@ -102,7 +126,7 @@ export async function authorizeUploadAccess(
   }
 
   const buildingPhotos = await db.buildingPhoto.findMany({
-    where: { fileUrl: { contains: key } },
+    where: { fileUrl: { contains: escapedKey } },
     select: { buildingId: true, fileUrl: true },
   });
   for (const b of buildingPhotos) {
@@ -113,7 +137,7 @@ export async function authorizeUploadAccess(
   }
 
   const attachments = await db.attachment.findMany({
-    where: { fileUrl: { contains: key } },
+    where: { fileUrl: { contains: escapedKey } },
     select: {
       isDeleted: true,
       targetType: true,
