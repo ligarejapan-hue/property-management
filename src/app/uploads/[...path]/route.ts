@@ -25,6 +25,13 @@ function isPathTraversalError(err: unknown): boolean {
   );
 }
 
+// stale session / user row deleted などで getApiSession / getUserPermissions が
+// 投げる auth エラー（明示的 ApiError(401)）だけを 401 に変換する。
+// 非 401 の ApiError / 通常 Error は 401 に潰さず rethrow。
+function isUnauthorizedError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
@@ -33,7 +40,7 @@ export async function GET(
   try {
     session = await getApiSession();
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
+    if (isUnauthorizedError(err)) {
       return new Response("Unauthorized", { status: 401 });
     }
     throw err;
@@ -46,7 +53,16 @@ export async function GET(
 
   const key = parts.join("/");
 
-  const permissions = await getUserPermissions(session.id);
+  let permissions;
+  try {
+    permissions = await getUserPermissions(session.id);
+  } catch (err) {
+    if (isUnauthorizedError(err)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    throw err;
+  }
+
   const decision = await authorizeUploadAccess({ key, session, permissions });
   if (decision === "forbidden") {
     return new Response("Forbidden", { status: 403 });

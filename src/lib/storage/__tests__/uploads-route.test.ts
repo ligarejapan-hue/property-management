@@ -21,7 +21,7 @@ import {
 
 import { __resetStorageForTest } from "@/lib/storage";
 import { GET } from "@/app/uploads/[...path]/route";
-import { getApiSession, ApiError } from "@/lib/api-helpers";
+import { getApiSession, getUserPermissions, ApiError } from "@/lib/api-helpers";
 import { authorizeUploadAccess } from "@/lib/uploads-authorization";
 
 vi.mock("@/lib/api-helpers", () => {
@@ -279,5 +279,48 @@ describe("Phase B: authorization decision wiring", () => {
     await fs.writeFile(abs, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     const res = await callGet(["properties", "p1", "photos", "ok.png"]);
     expect(res.status).toBe(200);
+  });
+});
+
+// stale session / user row deleted で getUserPermissions が ApiError(401) を
+// 投げるケースは Phase A の auth error と同じく 401 に変換する。それ以外の
+// ApiError / 通常 Error は 500 のまま rethrow される（401 へ潰さない）。
+describe("Phase B: getUserPermissions auth error handling", () => {
+  beforeEach(() => {
+    process.env.STORAGE_BACKEND = "local";
+    process.env.LOCAL_UPLOAD_ROOT = tmpRoot;
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "u1",
+      email: "a@a",
+      name: "A",
+      role: "admin",
+    });
+    vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
+  });
+
+  it("getUserPermissions が ApiError(401) を投げたら 401", async () => {
+    vi.mocked(getUserPermissions).mockRejectedValueOnce(
+      new ApiError(401, "ユーザーが見つかりません", "UNAUTHORIZED"),
+    );
+    const res = await callGet(["properties", "p1", "photos", "x.png"]);
+    expect(res.status).toBe(401);
+  });
+
+  it("getUserPermissions が ApiError(500) を投げたら 401 に変換せず rethrow", async () => {
+    vi.mocked(getUserPermissions).mockRejectedValueOnce(
+      new ApiError(500, "internal error", "INTERNAL_ERROR"),
+    );
+    await expect(
+      callGet(["properties", "p1", "photos", "x.png"]),
+    ).rejects.toThrow("internal error");
+  });
+
+  it("getUserPermissions が通常 Error を投げたら 401 に変換せず rethrow", async () => {
+    vi.mocked(getUserPermissions).mockRejectedValueOnce(
+      new Error("DB connection error"),
+    );
+    await expect(
+      callGet(["properties", "p1", "photos", "x.png"]),
+    ).rejects.toThrow("DB connection error");
   });
 });
