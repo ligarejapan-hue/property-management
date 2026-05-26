@@ -120,6 +120,7 @@ export async function PATCH(
         propertyId: true,
         pinType: true,
         status: true,
+        memo: true,
       },
     });
     if (!existing) {
@@ -136,7 +137,11 @@ export async function PATCH(
       );
     }
 
-    // sessionId 変更時の認可: active session のみ、non-manage は own session
+    // sessionId 変更時の認可。
+    // pin owner と session owner の一致を必須にする (Codex P1-2)。
+    // manage で他人 pin を更新するケースでも、pin 所有者と一致する session
+    // にのみ紐付け可能。pin と session の所有者が食い違うデータを作らない。
+    // 解除 (patch.sessionId === null) は許可。
     if (patch.sessionId !== undefined && patch.sessionId !== null) {
       const sess = await prisma.fieldSurveySession.findUnique({
         where: { id: patch.sessionId },
@@ -145,11 +150,11 @@ export async function PATCH(
       if (!sess) {
         throw new ApiError(404, "session が見つかりません", "SESSION_NOT_FOUND");
       }
-      if (!hasManage && sess.staffUserId !== session.id) {
+      if (sess.staffUserId !== existing.staffUserId) {
         throw new ApiError(
-          403,
-          "他スタッフの session には紐付けられません",
-          "FORBIDDEN",
+          409,
+          "pin 所有者と session 所有者が一致しません",
+          "SESSION_OWNER_MISMATCH",
         );
       }
       if (sess.status !== "active") {
@@ -185,7 +190,11 @@ export async function PATCH(
     if (patch.status !== undefined && patch.status !== existing.status) {
       changedFields.push("status");
     }
-    if (patch.memo !== undefined) changedFields.push("memo");
+    // memo は指定があっても既存値と同一なら no-op (AuditLog の信頼性確保 / Codex P2)。
+    // null / 空文字 / 通常文字列は strict equality でそのまま比較する。
+    if (patch.memo !== undefined && patch.memo !== existing.memo) {
+      changedFields.push("memo");
+    }
     if (
       patch.propertyId !== undefined &&
       patch.propertyId !== existing.propertyId

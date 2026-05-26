@@ -53,9 +53,11 @@ export async function POST(request: NextRequest) {
     const body = await parseJsonBody(request);
     const input = createFieldSurveyPinSchema.parse(body);
 
-    const hasManage = hasPermission(permissions, "field_survey", "manage");
-
     // sessionId 検証
+    // POST 時は pin.staffUserId = session.id 固定のため、pin owner と session owner
+    // を一致させるには session.staffUserId === session.id を必須にする。
+    // manage を持つユーザーであっても、他スタッフ所有の session に自分の pin を
+    // 紐付けることは own/read_all/manage 境界を崩すため禁止 (Codex P1-1)。
     if (input.sessionId) {
       const sess = await prisma.fieldSurveySession.findUnique({
         where: { id: input.sessionId },
@@ -64,7 +66,7 @@ export async function POST(request: NextRequest) {
       if (!sess) {
         throw new ApiError(404, "session が見つかりません", "SESSION_NOT_FOUND");
       }
-      if (!hasManage && sess.staffUserId !== session.id) {
+      if (sess.staffUserId !== session.id) {
         throw new ApiError(
           403,
           "他スタッフの session には紐付けられません",
