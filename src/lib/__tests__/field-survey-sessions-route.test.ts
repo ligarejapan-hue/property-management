@@ -74,6 +74,7 @@ vi.mock("@/lib/prisma", () => ({
       count: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
 }));
@@ -145,7 +146,7 @@ describe("POST /api/field-survey/sessions", () => {
     expect(res.status).toBe(403);
   });
 
-  it("active session 重複時は 409", async () => {
+  it("active session 重複 (事前チェックでヒット) は 409", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue({
@@ -159,6 +160,42 @@ describe("POST /api/field-survey/sessions", () => {
     );
     expect(res.status).toBe(409);
     expect(prisma.fieldSurveySession.create).not.toHaveBeenCalled();
+  });
+
+  it("race: 事前チェック通過後 create で P2002 が出ても 409 ACTIVE_SESSION_EXISTS", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue(null);
+    const p2002 = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    (prisma.fieldSurveySession.create as Mock).mockRejectedValueOnce(p2002);
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("ACTIVE_SESSION_EXISTS");
+  });
+
+  it("create が P2002 以外の Prisma error を投げたら 500", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue(null);
+    const other = Object.assign(new Error("connection lost"), {
+      code: "P1001",
+    });
+    (prisma.fieldSurveySession.create as Mock).mockRejectedValueOnce(other);
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(res.status).toBe(500);
   });
 
   it("正常時 201 + AuditLog 書き込み (detail に座標を含まない)", async () => {
@@ -319,28 +356,32 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(prisma.fieldSurveySession.update).not.toHaveBeenCalled();
   });
 
-  it("admin (manage) は他人 session を終了できる", async () => {
+  it("admin (manage) は他人 session を終了できる (atomic updateMany)", async () => {
     (getApiSession as Mock).mockResolvedValue(adminUser);
     (getUserPermissions as Mock).mockResolvedValue(adminPerms);
     const startedAt = new Date(Date.now() - 60_000);
-    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
-      id: "s-1",
-      staffUserId: "other-user",
-      startedAt,
-      endedAt: null,
-      status: "active",
-      pointCount: 42,
-    });
-    (prisma.fieldSurveySession.update as Mock).mockResolvedValue({
-      id: "s-1",
-      staffUserId: "other-user",
-      startedAt,
-      endedAt: new Date(),
-      status: "ended",
-      memo: null,
-      pointCount: 42,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    const endedAt = new Date();
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: "other-user",
+        startedAt,
+        status: "active",
+        pointCount: 42,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: "other-user",
+        startedAt,
+        endedAt,
+        status: "ended",
+        memo: null,
+        pointCount: 42,
+        createdAt: new Date(),
+        updatedAt: endedAt,
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
     });
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
@@ -350,27 +391,34 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
       { params },
     );
     expect(res.status).toBe(200);
+    // updateMany は status="active" 条件付きで呼ばれる (atomicity)
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(umArgs.where).toEqual({ id: "s-1", status: "active" });
+    expect(umArgs.data.status).toBe("ended");
+    // AuditLog
     const call = writeAuditLog.mock.calls[0][0];
     expect(call.action).toBe("field_survey_session_end");
     expect(call.detail.sessionId).toBe("s-1");
     expect(call.detail.pointCount).toBe(42);
     expect(typeof call.detail.durationSec).toBe("number");
-    // 位置情報を含めない
     const s = JSON.stringify(call.detail);
     expect(s).not.toMatch(/lat/i);
     expect(s).not.toMatch(/lng/i);
   });
 
-  it("active でない session への終了要求は 409", async () => {
+  it("active でない session への終了要求は 409 (updateMany が 0 行)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
       id: "s-1",
       staffUserId: fieldUser.id,
       startedAt: new Date(),
-      endedAt: new Date(),
-      status: "ended",
+      status: "ended", // 既に終了済
       pointCount: 0,
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 0,
     });
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
@@ -380,29 +428,60 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
       { params },
     );
     expect(res.status).toBe(409);
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("cancel 時の AuditLog detail に位置情報を含まない", async () => {
+  it("race: 2 並行 end のうち後発は updateMany 0 行で 409 (audit 重複なし)", async () => {
+    // findUnique は active を返すが、updateMany 直前に他リクエストが先行して
+    // ended にしているケース。後発は 0 行更新 → 409 を返し audit を書かない。
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
       id: "s-1",
       staffUserId: fieldUser.id,
       startedAt: new Date(),
-      endedAt: null,
       status: "active",
       pointCount: 0,
     });
-    (prisma.fieldSurveySession.update as Mock).mockResolvedValue({
-      id: "s-1",
-      staffUserId: fieldUser.id,
-      startedAt: new Date(),
-      endedAt: new Date(),
-      status: "cancelled",
-      memo: null,
-      pointCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 0,
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({ status: "ended" }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(409);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("cancel 時の AuditLog detail に位置情報を含まない (updateMany 経由)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date();
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        status: "active",
+        pointCount: 0,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: new Date(),
+        status: "cancelled",
+        memo: null,
+        pointCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
     });
     await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
@@ -416,28 +495,30 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(call.detail).toEqual({ sessionId: "s-1" });
   });
 
-  it("memo のみ更新は AuditLog を書かない", async () => {
+  it("memo のみ更新は updateMany ではなく update を使う / AuditLog を書かない", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
-    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
-      id: "s-1",
-      staffUserId: fieldUser.id,
-      startedAt: new Date(),
-      endedAt: null,
-      status: "active",
-      pointCount: 0,
-    });
-    (prisma.fieldSurveySession.update as Mock).mockResolvedValue({
-      id: "s-1",
-      staffUserId: fieldUser.id,
-      startedAt: new Date(),
-      endedAt: null,
-      status: "active",
-      memo: "updated",
-      pointCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    const startedAt = new Date();
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        status: "active",
+        pointCount: 0,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: null,
+        status: "active",
+        memo: "updated",
+        pointCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.update as Mock).mockResolvedValue({});
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
@@ -446,6 +527,8 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
       { params },
     );
     expect(res.status).toBe(200);
+    expect(prisma.fieldSurveySession.update).toHaveBeenCalledTimes(1);
+    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 

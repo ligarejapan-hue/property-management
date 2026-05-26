@@ -34,6 +34,14 @@ CREATE INDEX "field_survey_sessions_staff_user_id_started_at_idx"
 CREATE INDEX "field_survey_sessions_status_idx"
     ON "field_survey_sessions"("status");
 
+-- 「1 staff につき active session は同時に 1 件まで」を DB レベルで保証する
+-- 部分 unique index。double-submit / retry での重複生成 (POST race) を防ぐ。
+-- アプリ側は P2002 を ACTIVE_SESSION_EXISTS (409) にマップする。
+-- Prisma schema は partial unique を表現できないため、本 SQL でのみ管理する。
+CREATE UNIQUE INDEX "field_survey_sessions_one_active_per_staff_uniq"
+    ON "field_survey_sessions"("staff_user_id")
+    WHERE "status" = 'active';
+
 ALTER TABLE "field_survey_sessions" ADD CONSTRAINT "field_survey_sessions_staff_user_id_fkey"
     FOREIGN KEY ("staff_user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 

@@ -846,6 +846,9 @@ model FieldSurveySession {
   trackPoints FieldSurveyTrackPoint[]
   pins        FieldSurveyPin[]
 
+  // 「1 staff につき active session は同時に 1 件まで」を保証する partial unique
+  // index は migration で別途定義済み (`one_active_per_staff_uniq`)。Prisma schema
+  // は partial unique を表現できないため、ここでは @@index/@@unique を増やさない。
   @@index([staffUserId, startedAt])
   @@index([status])
   @@map("field_survey_sessions")
