@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { PROPERTY_TYPE_VALUES, CASE_STATUS_VALUES, INTRODUCTION_ROUTE_VALUES } from "@/lib/property-types";
 import { normalizeCorporateNumber } from "@/lib/corporate-number";
+import { FIELD_SURVEY_MEMO_MAX_LEN } from "@/lib/field-survey-constants";
 
 // 法人番号入力フィールド共通スキーマ:
 // - 空文字 / null / undefined → null（保存しない）
@@ -141,4 +142,28 @@ export const linkOwnerSchema = z.object({
   ownerId: z.string().uuid(),
   relationship: z.string().optional().nullable(),
   isPrimary: z.boolean().default(false),
+});
+
+// ---------- Field survey session ----------
+
+export const createFieldSurveySessionSchema = z.object({
+  // クライアント時計でなく server now を使うため受け取らない。
+  // memo のみ受け付ける。
+  memo: z.string().max(FIELD_SURVEY_MEMO_MAX_LEN).optional().nullable(),
+});
+
+export const patchFieldSurveySessionSchema = z
+  .object({
+    status: z.enum(["ended", "cancelled"]).optional(),
+    memo: z.string().max(FIELD_SURVEY_MEMO_MAX_LEN).optional().nullable(),
+  })
+  .refine((v) => v.status !== undefined || v.memo !== undefined, {
+    message: "status または memo のいずれかを指定してください",
+  });
+
+export const fieldSurveySessionListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  staffUserId: z.string().uuid().optional(),
+  status: z.enum(["active", "ended", "cancelled"]).optional(),
 });

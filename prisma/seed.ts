@@ -183,6 +183,8 @@ async function main() {
     { templateId: fieldStaffTemplate.id, resource: "owner_address", action: "partial", granted: true },
     { templateId: fieldStaffTemplate.id, resource: "owner_email", action: "masked", granted: true },
     { templateId: fieldStaffTemplate.id, resource: "owner_corporate_number", action: "full", granted: true },
+    { templateId: fieldStaffTemplate.id, resource: "field_survey", action: "read", granted: true },
+    { templateId: fieldStaffTemplate.id, resource: "field_survey", action: "write", granted: true },
     // owner_note: not granted → hidden
     // 事務担当
     { templateId: officeStaffTemplate.id, resource: "property", action: "read", granted: true },
@@ -199,6 +201,8 @@ async function main() {
     { templateId: officeStaffTemplate.id, resource: "owner_corporate_number", action: "full", granted: true },
     { templateId: officeStaffTemplate.id, resource: "csv_export", action: "read", granted: true },
     { templateId: officeStaffTemplate.id, resource: "import", action: "write", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "field_survey", action: "read", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "field_survey", action: "read_all", granted: true },
     // 管理者
     { templateId: adminTemplate.id, resource: "property", action: "read", granted: true },
     { templateId: adminTemplate.id, resource: "property", action: "write", granted: true },
@@ -220,6 +224,10 @@ async function main() {
     { templateId: adminTemplate.id, resource: "user_management", action: "read", granted: true },
     { templateId: adminTemplate.id, resource: "user_management", action: "write", granted: true },
     { templateId: adminTemplate.id, resource: "audit_log", action: "read", granted: true },
+    { templateId: adminTemplate.id, resource: "field_survey", action: "read", granted: true },
+    { templateId: adminTemplate.id, resource: "field_survey", action: "write", granted: true },
+    { templateId: adminTemplate.id, resource: "field_survey", action: "read_all", granted: true },
+    { templateId: adminTemplate.id, resource: "field_survey", action: "manage", granted: true },
   ];
 
   for (const entry of templateEntries) {
