@@ -186,6 +186,8 @@ model User {
   permissionChangesFor    PermissionChangeLog[]    @relation("PermissionChangedFor")
   buildings               Building[]
   ownerMemos              OwnerMemo[]              @relation("OwnerMemoCreatedBy")
+  fieldSurveySessions     FieldSurveySession[]
+  fieldSurveyPins         FieldSurveyPin[]
 
   @@map("users")
 }
@@ -356,6 +358,7 @@ model Property {
   nextActions        NextAction[]
   attachments        Attachment[]
   ownerMemos         OwnerMemo[]               @relation("OwnerMemoProperty")
+  fieldSurveyPins    FieldSurveyPin[]
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -810,4 +813,84 @@ model SystemSetting {
   label String?
 
   @@map("system_settings")
+}
+
+// ============================================================
+// 現地調査マップ (Phase 1-A)
+// ============================================================
+
+enum FieldSurveySessionStatus {
+  active
+  ended
+  cancelled
+}
+
+enum FieldSurveyPinStatus {
+  open
+  closed
+  archived
+}
+
+model FieldSurveySession {
+  id          String                  @id @default(uuid()) @db.Uuid
+  staffUserId String                  @map("staff_user_id") @db.Uuid
+  startedAt   DateTime                @map("started_at")
+  endedAt     DateTime?               @map("ended_at")
+  status      FieldSurveySessionStatus @default(active)
+  memo        String?
+  pointCount  Int                     @default(0) @map("point_count")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+
+  staff       User                    @relation(fields: [staffUserId], references: [id])
+  trackPoints FieldSurveyTrackPoint[]
+  pins        FieldSurveyPin[]
+
+  @@index([staffUserId, startedAt])
+  @@index([status])
+  @@map("field_survey_sessions")
+}
+
+model FieldSurveyTrackPoint {
+  id         BigInt   @id @default(autoincrement())
+  sessionId  String   @map("session_id") @db.Uuid
+  sequence   Int
+  lat        Decimal  @db.Decimal(10, 7)
+  lng        Decimal  @db.Decimal(10, 7)
+  accuracy   Decimal? @db.Decimal(6, 2)
+  recordedAt DateTime @map("recorded_at")
+
+  session    FieldSurveySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, sequence])
+  @@index([sessionId, recordedAt])
+  @@map("field_survey_track_points")
+}
+
+// pinType は migration リスク回避のため String + app 側 allowlist で運用
+// (src/lib/field-survey-constants.ts の FIELD_SURVEY_PIN_TYPES 参照)
+model FieldSurveyPin {
+  id          String               @id @default(uuid()) @db.Uuid
+  sessionId   String?              @map("session_id") @db.Uuid
+  staffUserId String               @map("staff_user_id") @db.Uuid
+  propertyId  String?              @map("property_id") @db.Uuid
+  lat         Decimal              @db.Decimal(10, 7)
+  lng         Decimal              @db.Decimal(10, 7)
+  accuracy    Decimal?             @db.Decimal(6, 2)
+  pinType     String               @map("pin_type")
+  status      FieldSurveyPinStatus @default(open)
+  memo        String?
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  session  FieldSurveySession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  staff    User                @relation(fields: [staffUserId], references: [id])
+  property Property?           @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  @@index([staffUserId])
+  @@index([sessionId])
+  @@index([propertyId])
+  @@index([status])
+  @@index([lat, lng])
+  @@map("field_survey_pins")
 }
