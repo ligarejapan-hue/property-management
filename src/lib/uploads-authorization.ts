@@ -1,0 +1,200 @@
+/**
+ * /uploads/[...path] Phase B: entity-level 権限判定。
+ *
+ * 要求 key を fileUrl の正規化結果と完全一致で DB 逆引きし、
+ * Photo / Attachment / Property のスコープに基づいて 200 / 403 / 404 のいずれを
+ * 返すべきかを決定する。
+ *
+ * 重要:
+ *  - key 形式から propertyId / buildingId を推定しない。逆引き結果のみを使う。
+ *  - 既存データに残る legacy 絶対 URL や query 付きを取りこぼさないため、
+ *    DB 検索は `contains: key` で候補を絞り、JS 側で fileUrl を正規化して
+ *    storage key を抽出し直してから完全一致を判定する。
+ *  - duplicate fileUrl collision (caller-supplied fileUrl で同じ key が
+ *    別物件にも登録されたケース) を bypass にしないため、findFirst を使わず
+ *    全候補を評価する: forbidden > ok > not_found の優先順で決着する。
+ *  - 既存 Property API のスコープ (field_staff = createdBy or assignedTo) に揃える。
+ *  - isDeleted の Attachment は not_found 扱い（active 候補があれば active 側で決まる）。
+ */
+
+import prismaDefault from "@/lib/prisma";
+import { hasPermission } from "@/lib/permissions";
+import { isValidStorageKey } from "@/lib/storage/key-validation";
+import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
+
+type PrismaLike = typeof prismaDefault;
+
+export type UploadAuthDecision = "ok" | "forbidden" | "not_found";
+
+export interface AuthorizeUploadAccessArgs {
+  key: string;
+  session: ApiSession;
+  permissions: PermissionEntry[];
+  prisma?: PrismaLike;
+}
+
+const UPLOADS_PREFIX = "/uploads/";
+
+/**
+ * Prisma `contains` は SQL LIKE / ILIKE に変換される。`%` / `_` が wildcard
+ * として解釈されると、authenticated user が `key` に `%` / `_` を仕込んで
+ * 広範囲スキャンを誘発し DoS / latency 悪化を引き起こせる。
+ *
+ * 既存 `isValidStorageKey` は `%` / `_` を許可（traversal / `\` のみ拒否）
+ * しているため、DB 側に渡す値は escape して LIKE-literal にする。
+ *
+ * PostgreSQL の LIKE のデフォルト escape は `\`。順序重要:
+ *   1. `\`  → `\\`   （後段の `\%` / `\_` を二重 escape しないため最初に処理）
+ *   2. `%`  → `\%`
+ *   3. `_`  → `\_`
+ */
+export function escapePrismaLikePattern(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_");
+}
+
+/**
+ * DB 保存された fileUrl から storage key を取り出す。
+ *
+ * 受理する例:
+ *   "/uploads/foo/bar.jpg"                          → "foo/bar.jpg"
+ *   "/uploads/foo/bar.jpg?v=1"                      → "foo/bar.jpg"
+ *   "/uploads/foo/bar.jpg#hash"                     → "foo/bar.jpg"
+ *   "http://host/uploads/foo/bar.jpg"               → "foo/bar.jpg"
+ *   "https://host/uploads/foo/bar.jpg?v=1"          → "foo/bar.jpg"
+ *
+ * 拒否 (null) する例:
+ *   data: / blob: / file: スキーマ
+ *   /api/... など /uploads/ 以外のパス
+ *   traversal を含むなど isValidStorageKey 不合格
+ */
+export function extractStorageKeyFromFileUrl(
+  fileUrl: string | null | undefined,
+): string | null {
+  if (typeof fileUrl !== "string") return null;
+  const s = fileUrl.trim();
+  if (s === "") return null;
+
+  // data: / blob: / file: は対象外（自前 storage に存在しない参照）
+  if (/^(data|blob|file):/i.test(s)) return null;
+
+  let pathPart: string;
+  if (s.startsWith("/")) {
+    pathPart = s.split(/[?#]/)[0];
+  } else {
+    try {
+      const u = new URL(s);
+      pathPart = u.pathname;
+    } catch {
+      return null;
+    }
+  }
+
+  if (!pathPart.startsWith(UPLOADS_PREFIX)) return null;
+
+  const key = pathPart.slice(UPLOADS_PREFIX.length);
+  if (key === "") return null;
+  if (!isValidStorageKey(key)) return null;
+  return key;
+}
+
+export async function authorizeUploadAccess(
+  args: AuthorizeUploadAccessArgs,
+): Promise<UploadAuthDecision> {
+  const { key, session, permissions } = args;
+  const db: PrismaLike = args.prisma ?? prismaDefault;
+
+  if (!isValidStorageKey(key)) return "forbidden";
+
+  // DB 候補絞り込みは LIKE-literal で。最終判定は下の JS 側で正規化 key の
+  // 完全一致を要求するため、escape 漏れがあっても認可 bypass にはならないが、
+  // wildcard を含む key で広範囲スキャンが起きる経路自体を塞ぐ。
+  const escapedKey = escapePrismaLikePattern(key);
+  const decisions: UploadAuthDecision[] = [];
+
+  const photos = await db.propertyPhoto.findMany({
+    where: { fileUrl: { contains: escapedKey } },
+    select: { propertyId: true, fileUrl: true },
+  });
+  for (const p of photos) {
+    if (extractStorageKeyFromFileUrl(p.fileUrl) !== key) continue;
+    decisions.push(
+      await authorizePropertyAccess(p.propertyId, session, permissions, db),
+    );
+  }
+
+  const buildingPhotos = await db.buildingPhoto.findMany({
+    where: { fileUrl: { contains: escapedKey } },
+    select: { buildingId: true, fileUrl: true },
+  });
+  for (const b of buildingPhotos) {
+    if (extractStorageKeyFromFileUrl(b.fileUrl) !== key) continue;
+    decisions.push(
+      hasPermission(permissions, "property", "read") ? "ok" : "forbidden",
+    );
+  }
+
+  const attachments = await db.attachment.findMany({
+    where: { fileUrl: { contains: escapedKey } },
+    select: {
+      isDeleted: true,
+      targetType: true,
+      targetId: true,
+      propertyId: true,
+      fileUrl: true,
+    },
+  });
+  for (const a of attachments) {
+    if (extractStorageKeyFromFileUrl(a.fileUrl) !== key) continue;
+    if (a.isDeleted) {
+      decisions.push("not_found");
+      continue;
+    }
+    if (a.targetType === "property") {
+      const propertyId = a.propertyId ?? a.targetId;
+      decisions.push(
+        await authorizePropertyAccess(propertyId, session, permissions, db),
+      );
+      continue;
+    }
+    if (a.targetType === "owner") {
+      decisions.push(
+        hasPermission(permissions, "owner", "read") ? "ok" : "forbidden",
+      );
+      continue;
+    }
+    // 未知 targetType は安全側で forbidden（bypass 防止）
+    decisions.push("forbidden");
+  }
+
+  // 優先順: forbidden > ok > not_found
+  if (decisions.some((d) => d === "forbidden")) return "forbidden";
+  if (decisions.some((d) => d === "ok")) return "ok";
+  return "not_found";
+}
+
+async function authorizePropertyAccess(
+  propertyId: string,
+  session: ApiSession,
+  permissions: PermissionEntry[],
+  db: PrismaLike,
+): Promise<UploadAuthDecision> {
+  if (!hasPermission(permissions, "property", "read")) return "forbidden";
+
+  const property = await db.property.findUnique({
+    where: { id: propertyId },
+    select: { createdBy: true, assignedTo: true },
+  });
+  if (!property) return "not_found";
+
+  if (
+    session.role === "field_staff" &&
+    property.createdBy !== session.id &&
+    property.assignedTo !== session.id
+  ) {
+    return "forbidden";
+  }
+  return "ok";
+}

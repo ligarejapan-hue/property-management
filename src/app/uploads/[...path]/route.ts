@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getStorage } from "@/lib/storage";
-import { getApiSession, ApiError } from "@/lib/api-helpers";
+import { getApiSession, getUserPermissions, ApiError } from "@/lib/api-helpers";
+import { authorizeUploadAccess } from "@/lib/uploads-authorization";
 
 /**
  * /uploads/[...path] 配信 proxy。
@@ -10,10 +11,10 @@ import { getApiSession, ApiError } from "@/lib/api-helpers";
  * 切り替えても既存 DB レコードの `/uploads/...` URL を変えずに配信できる。
  *
  * セキュリティ:
- *  - Phase A: 未ログインは 401 を返す。ログイン済みなら続行。
- *  - path traversal (`..`, 絶対パス) は adapter 側で reject される。
- *    本ハンドラでは 403 に変換する。
- *  - 注: attachment / photo 単位の権限チェックは Phase B 以降。
+ *  - Phase A: 未ログインは 401 を返す。
+ *  - Phase B: key を DB 逆引きし entity 単位で 403 / 404 を返す。
+ *  - path traversal (`..`, 絶対パス) は authorizeUploadAccess / adapter 側で
+ *    reject される。本ハンドラでは 403 に変換する。
  */
 
 function isPathTraversalError(err: unknown): boolean {
@@ -24,14 +25,22 @@ function isPathTraversalError(err: unknown): boolean {
   );
 }
 
+// stale session / user row deleted などで getApiSession / getUserPermissions が
+// 投げる auth エラー（明示的 ApiError(401)）だけを 401 に変換する。
+// 非 401 の ApiError / 通常 Error は 401 に潰さず rethrow。
+function isUnauthorizedError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
+  let session;
   try {
-    await getApiSession();
+    session = await getApiSession();
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
+    if (isUnauthorizedError(err)) {
       return new Response("Unauthorized", { status: 401 });
     }
     throw err;
@@ -43,6 +52,24 @@ export async function GET(
   }
 
   const key = parts.join("/");
+
+  let permissions;
+  try {
+    permissions = await getUserPermissions(session.id);
+  } catch (err) {
+    if (isUnauthorizedError(err)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    throw err;
+  }
+
+  const decision = await authorizeUploadAccess({ key, session, permissions });
+  if (decision === "forbidden") {
+    return new Response("Forbidden", { status: 403 });
+  }
+  if (decision === "not_found") {
+    return new Response("Not Found", { status: 404 });
+  }
 
   let result;
   try {
