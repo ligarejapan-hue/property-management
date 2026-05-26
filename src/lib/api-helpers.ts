@@ -84,6 +84,10 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       { resource: "user_management", action: "read", granted: true },
       { resource: "user_management", action: "write", granted: true },
       { resource: "audit_log", action: "read", granted: true },
+      { resource: "field_survey", action: "read", granted: true },
+      { resource: "field_survey", action: "write", granted: true },
+      { resource: "field_survey", action: "read_all", granted: true },
+      { resource: "field_survey", action: "manage", granted: true },
     ];
   }
 
@@ -194,6 +198,30 @@ export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDispla
     email: emailLevel,
     corporateNumber: corporateNumberLevel,
   };
+}
+
+// ---------- Request body helpers ----------
+
+/**
+ * リクエスト本文を JSON として読む。
+ *  - 空ボディは `{}` として扱う（オプションキーのみの POST/PATCH を許容）
+ *  - malformed JSON は ApiError(400, INVALID_JSON) を投げる（state mutation 前に reject）
+ *
+ * 既存の `request.json().catch(() => ({}))` パターンは malformed と空を
+ * 区別できず、不正 body でも処理が進んでしまうため本 helper で置き換える。
+ */
+export async function parseJsonBody(request: Request): Promise<unknown> {
+  const text = await request.text();
+  if (text.trim() === "") return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ApiError(
+      400,
+      "リクエストボディが不正な JSON です",
+      "INVALID_JSON",
+    );
+  }
 }
 
 // ---------- Response helpers ----------

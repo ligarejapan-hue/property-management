@@ -59,6 +59,20 @@ vi.mock("@/lib/api-helpers", () => {
     apiResponse: vi.fn((data: unknown, status = 200) =>
       Response.json(data, { status }),
     ),
+    // 実装と同じ挙動: 空ボディは `{}`、malformed JSON は ApiError(400, INVALID_JSON)
+    parseJsonBody: vi.fn(async (request: Request) => {
+      const text = await request.text();
+      if (text.trim() === "") return {};
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new MockApiError(
+          400,
+          "リクエストボディが不正な JSON です",
+          "INVALID_JSON",
+        );
+      }
+    }),
   };
 });
 
@@ -242,6 +256,47 @@ describe("POST /api/field-survey/sessions", () => {
       }),
     );
     expect(res.status).toBe(422);
+  });
+
+  it("malformed JSON は 400 INVALID_JSON / DB と AuditLog に到達しない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "{ broken json",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_JSON");
+    expect(prisma.fieldSurveySession.findFirst).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveySession.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("空ボディ (memo なし) は通常通り 201", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue(null);
+    (prisma.fieldSurveySession.create as Mock).mockResolvedValue({
+      id: "s-empty",
+      staffUserId: fieldUser.id,
+      startedAt: new Date(),
+      endedAt: null,
+      status: "active",
+      memo: null,
+      pointCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "",
+      }),
+    );
+    expect(res.status).toBe(201);
   });
 });
 
@@ -543,5 +598,24 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
       { params },
     );
     expect(res.status).toBe(422);
+  });
+
+  it("malformed JSON は 400 INVALID_JSON / DB と AuditLog に到達しない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: "{ broken",
+      }),
+      { params },
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_JSON");
+    expect(prisma.fieldSurveySession.findUnique).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveySession.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 });

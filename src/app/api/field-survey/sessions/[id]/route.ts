@@ -5,6 +5,7 @@ import {
   getUserPermissions,
   apiResponse,
   handleApiError,
+  parseJsonBody,
   ApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
@@ -44,7 +45,7 @@ export async function PATCH(
       throw new ApiError(403, "更新権限がありません", "FORBIDDEN");
     }
 
-    const body = await request.json().catch(() => ({}));
+    const body = await parseJsonBody(request);
     const patch = patchFieldSurveySessionSchema.parse(body);
 
     const existing = await prisma.fieldSurveySession.findUnique({

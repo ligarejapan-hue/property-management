@@ -5,6 +5,7 @@ import {
   getUserPermissions,
   apiResponse,
   handleApiError,
+  parseJsonBody,
   ApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
       throw new ApiError(403, "巡回開始の権限がありません", "FORBIDDEN");
     }
 
-    const body = await request.json().catch(() => ({}));
+    const body = await parseJsonBody(request);
     const { memo } = createFieldSurveySessionSchema.parse(body);
 
     // 事前チェック (happy path のレイテンシ短縮と分かりやすいエラー応答用)。
