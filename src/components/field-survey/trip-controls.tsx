@@ -39,6 +39,12 @@ interface TripControlsProps {
    * 未指定なら呼ばれない (Phase 1-F-1 互換)。
    */
   onActiveSessionChange?: (session: ActiveSessionLike | null) => void;
+  /**
+   * Phase 1-F-2: 巡回終了 API を叩く直前に await される hook。
+   * 親側で位置記録 (watchPosition / flush timer) を確実に止めるために使う。
+   * throw されても巡回終了処理は継続する (catch して握り潰す)。
+   */
+  onBeforeSessionEnd?: () => Promise<void> | void;
 }
 
 type Phase =
@@ -53,6 +59,7 @@ type Phase =
 export default function TripControls({
   currentUserId,
   onActiveSessionChange,
+  onBeforeSessionEnd,
 }: TripControlsProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<ActiveSessionLike | null>(null);
@@ -188,6 +195,17 @@ export default function TripControls({
     async (target: ActiveSessionLike) => {
       setPhase("ending");
       setError(null);
+      // Phase 1-F-2: session PATCH の前に位置記録 (watchPosition / flush
+      // timer / 残 buffer flush) を停止する。throw は握り潰し、巡回終了
+      // 自体は継続する (録音は終わらせるが session も確実に閉じる)。
+      if (onBeforeSessionEnd) {
+        try {
+          await onBeforeSessionEnd();
+        } catch {
+          // 終了前 stop の失敗で巡回終了を阻まない
+        }
+        if (!mountedRef.current) return;
+      }
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
       mutationAbortRef.current = ac;
@@ -230,7 +248,7 @@ export default function TripControls({
         setPhase("active");
       }
     },
-    [fetchActiveSession],
+    [fetchActiveSession, onBeforeSessionEnd],
   );
 
   if (phase === "loading") {

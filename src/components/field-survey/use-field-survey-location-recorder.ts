@@ -48,6 +48,12 @@ export interface UseLocationRecorderResult {
   status: RecorderStatus;
   /** start 後の累積。flush 成功で buffer から savedPoints に移動する。 */
   savedPoints: RecorderPoint[];
+  /**
+   * 未送信 (memory buffer) の点を polyline 表示に使うための snapshot。
+   * sequence は savedPoints と重複しない (flush 成功で savedPoints に移ると同時に
+   * この配列から消える)。lat/lng のみ保持 (accuracy / recordedAt は polyline 不要)。
+   */
+  pendingPoints: RecorderPoint[];
   /** 未送信 (memory buffer) の件数。値そのものは UI には数字としてのみ出す。 */
   bufferedCount: number;
   /** 直近 flush 成功時刻 (UI で「最終送信時刻」に使う)。null = 未送信。 */
@@ -62,6 +68,12 @@ export interface UseLocationRecorderResult {
   start: () => void;
   /** 位置記録停止。可能なら残 buffer を flush してから idle に戻す。 */
   stop: () => Promise<void>;
+  /**
+   * 巡回終了直前の連動フック。watch を即時 clearWatch + timer 停止し、
+   * その後 1 回 flush を試みる。session API への PATCH 前に await されること
+   * を想定。flush 失敗時も buffer は memory に残るだけで再 throw しない。
+   */
+  stopBeforeSessionEnd: () => Promise<void>;
 }
 
 interface UseLocationRecorderOptions {
@@ -92,6 +104,7 @@ export function useFieldSurveyLocationRecorder(
   const { sessionId } = options;
   const [status, setStatus] = useState<RecorderStatus>("idle");
   const [savedPoints, setSavedPoints] = useState<RecorderPoint[]>([]);
+  const [pendingPoints, setPendingPoints] = useState<RecorderPoint[]>([]);
   const [bufferedCount, setBufferedCount] = useState(0);
   const [lastFlushAt, setLastFlushAt] = useState<Date | null>(null);
   const [isFlushing, setIsFlushing] = useState(false);
@@ -162,6 +175,9 @@ export function useFieldSurveyLocationRecorder(
         (p) => !sent.has(p.sequence),
       );
       safeSetState(setBufferedCount, bufferRef.current.length);
+      // pendingPoints (polyline 用) も同様に同期。座標値は state 化されるが
+      // 表示用 (Polyline path) であって console / error には流出しない。
+      safeSetState(setPendingPoints, snapshotPending(bufferRef.current));
       // savedPoints は polyline 用に lat/lng/sequence のみ保持
       const accepted: RecorderPoint[] = snapshot.map((p) => ({
         sequence: p.sequence,
@@ -274,6 +290,7 @@ export function useFieldSurveyLocationRecorder(
     };
     bufferRef.current.push(candidate);
     setBufferedCount(bufferRef.current.length);
+    setPendingPoints(snapshotPending(bufferRef.current));
     if (bufferRef.current.length >= FIELD_SURVEY_FLUSH_BATCH_SIZE) {
       void flushBuffer();
     }
@@ -379,6 +396,29 @@ export function useFieldSurveyLocationRecorder(
     setStatus("idle");
   }, [flushBuffer, status, stopWatchingInternal]);
 
+  /**
+   * 巡回終了直前の連動。idle 中は no-op。recording / preparing / stopping
+   * いずれでも:
+   *  1) watch を clearWatch + flush timer 停止 (副作用の即時遮断)
+   *  2) memory buffer を 1 回 flush 試行 (失敗しても throw しない)
+   *  3) status を idle に倒し UI を巡回終了後と整合
+   * session API PATCH の前に await されることを想定。
+   */
+  const stopBeforeSessionEnd = useCallback(async () => {
+    if (status === "idle") return;
+    setStatus("stopping");
+    stopWatchingInternal();
+    if (bufferRef.current.length > 0) {
+      try {
+        await flushBuffer();
+      } catch {
+        // 終了前 flush の失敗は巡回終了自体を阻まない (未送信点は失われる)
+      }
+    }
+    if (!mountedRef.current) return;
+    setStatus("idle");
+  }, [flushBuffer, status, stopWatchingInternal]);
+
   // ---- session change / unmount cleanup ---------------------------------
 
   useEffect(() => {
@@ -393,6 +433,7 @@ export function useFieldSurveyLocationRecorder(
         setStatus("idle");
         setBufferedCount(0);
         setSavedPoints([]);
+        setPendingPoints([]);
         setLastFlushAt(null);
         setIsLowAccuracyNow(false);
       }
@@ -412,6 +453,7 @@ export function useFieldSurveyLocationRecorder(
   return {
     status,
     savedPoints,
+    pendingPoints,
     bufferedCount,
     lastFlushAt,
     isFlushing,
@@ -419,7 +461,16 @@ export function useFieldSurveyLocationRecorder(
     error,
     start,
     stop,
+    stopBeforeSessionEnd,
   };
+}
+
+function snapshotPending(buffer: TrackPointInput[]): RecorderPoint[] {
+  return buffer.map((p) => ({
+    sequence: p.sequence,
+    lat: p.lat,
+    lng: p.lng,
+  }));
 }
 
 function safeGeolocation(): Geolocation | null {

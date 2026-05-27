@@ -26,6 +26,7 @@ const POLYLINE_SRC = readSrc(
   "src/components/field-survey/route-polyline.tsx",
 );
 const MAP_SRC = readSrc("src/components/field-survey/field-survey-map.tsx");
+const TRIP_SRC = readSrc("src/components/field-survey/trip-controls.tsx");
 
 describe("use-field-survey-location-recorder — geolocation lifecycle", () => {
   it("'use client' で始まる", () => {
@@ -191,5 +192,98 @@ describe("field-survey-map.tsx — Phase 1-F-2 統合", () => {
 
   it("TripControls に onActiveSessionChange を渡す", () => {
     expect(MAP_SRC).toMatch(/onActiveSessionChange=\{handleActiveSessionChange\}/);
+  });
+
+  // ---- 巡回終了 → 位置記録停止の明示連動 (修正1) -------------------------
+
+  it("TripControls に onBeforeSessionEnd を渡す", () => {
+    expect(MAP_SRC).toMatch(/onBeforeSessionEnd=\{handleBeforeSessionEnd\}/);
+  });
+
+  it("handleBeforeSessionEnd は recorder.stopBeforeSessionEnd を呼ぶ", () => {
+    expect(MAP_SRC).toMatch(/recorder\.stopBeforeSessionEnd\(\)/);
+    expect(MAP_SRC).toMatch(/const handleBeforeSessionEnd/);
+  });
+
+  // ---- pending memory points を polyline に反映 (修正2) ----------------
+
+  it("polyline path に savedPoints + pendingPoints を結合する", () => {
+    expect(MAP_SRC).toMatch(/mergePolylinePoints/);
+    expect(MAP_SRC).toMatch(/recorder\.savedPoints,\s*recorder\.pendingPoints/);
+  });
+
+  it("mergePolylinePoints は sequence 重複を dedup し sequence 順に並べる", () => {
+    const fn = MAP_SRC.match(/function mergePolylinePoints[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    expect(fn?.[0]).toMatch(/seen\s*=\s*new\s+Set/);
+    expect(fn?.[0]).toMatch(/sort/);
+  });
+
+  it("mergePolylinePoints / polyline 経路で console / lat / lng を出さない", () => {
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*pending/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*polyline/i);
+  });
+});
+
+describe("trip-controls.tsx — Phase 1-F-2 巡回終了の明示連動 (修正1)", () => {
+  it("onBeforeSessionEnd prop を受け取る", () => {
+    expect(TRIP_SRC).toMatch(/onBeforeSessionEnd\?:\s*\(\)\s*=>\s*Promise<void>\s*\|\s*void/);
+  });
+
+  it("endSession 内で onBeforeSessionEnd を await してから PATCH を打つ", () => {
+    // endSession 関数の冒頭 (PATCH fetch より前) で onBeforeSessionEnd を await している
+    const endBlock = TRIP_SRC.match(
+      /const endSession[\s\S]*?method:\s*"PATCH"/,
+    );
+    expect(endBlock).not.toBeNull();
+    expect(endBlock?.[0]).toMatch(/await\s+onBeforeSessionEnd\(\)/);
+  });
+
+  it("onBeforeSessionEnd の throw は握り潰して PATCH を継続する", () => {
+    // try { await onBeforeSessionEnd() } catch { ... } のパターン
+    expect(TRIP_SRC).toMatch(/await\s+onBeforeSessionEnd\(\)[\s\S]{0,40}\}\s*catch/);
+  });
+});
+
+describe("use-field-survey-location-recorder — pending + stopBeforeSessionEnd (修正)", () => {
+  it("戻り値に pendingPoints を含める", () => {
+    expect(HOOK_SRC).toMatch(/pendingPoints,/);
+    expect(HOOK_SRC).toMatch(/setPendingPoints/);
+  });
+
+  it("buffer push / flush 成功で pendingPoints が同期される", () => {
+    // handlePosition の push 後 / flushBuffer の success 後に setPendingPoints
+    // を呼ぶ箇所がそれぞれある
+    const positionBlock = HOOK_SRC.match(
+      /bufferRef\.current\.push\(candidate\)[\s\S]*?\}\,\s*\[flushBuffer\]/,
+    );
+    expect(positionBlock).not.toBeNull();
+    expect(positionBlock?.[0]).toMatch(/setPendingPoints/);
+    const flushBlock = HOOK_SRC.match(
+      /bufferRef\.current\s*=\s*bufferRef\.current\.filter[\s\S]*?safeSetState\(setBufferedCount[\s\S]*?safeSetState\(setPendingPoints/,
+    );
+    expect(flushBlock).not.toBeNull();
+  });
+
+  it("session 切替時に pendingPoints も reset する", () => {
+    const resetBlock = HOOK_SRC.match(
+      /setSavedPoints\(\[\]\)[\s\S]*?setPendingPoints\(\[\]\)/,
+    );
+    expect(resetBlock).not.toBeNull();
+  });
+
+  it("stopBeforeSessionEnd を export し watch 停止 + flush 試行を行う", () => {
+    expect(HOOK_SRC).toMatch(/const stopBeforeSessionEnd/);
+    expect(HOOK_SRC).toMatch(
+      /stopBeforeSessionEnd[\s\S]{0,500}stopWatchingInternal\(\)[\s\S]*?flushBuffer\(\)/,
+    );
+    expect(HOOK_SRC).toMatch(/return\s*\{[\s\S]*?stopBeforeSessionEnd,[\s\S]*?\}/);
+  });
+
+  it("stopBeforeSessionEnd の flush 失敗は throw しない (try/catch で握り潰し)", () => {
+    const block = HOOK_SRC.match(
+      /stopBeforeSessionEnd[\s\S]*?await\s+flushBuffer\(\)[\s\S]{0,80}\}\s*catch/,
+    );
+    expect(block).not.toBeNull();
   });
 });

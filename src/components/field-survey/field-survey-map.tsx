@@ -106,10 +106,19 @@ export default function FieldSurveyMap({
   const recorder = useFieldSurveyLocationRecorder({
     sessionId: activeSession?.id ?? null,
   });
+  // 巡回終了ボタン押下 → recorder を確実に停止してから session PATCH を打つ。
+  // recorder.stopBeforeSessionEnd は idle 中なら no-op で安全。
+  const handleBeforeSessionEnd = useCallback(
+    () => recorder.stopBeforeSessionEnd(),
+    [recorder],
+  );
   // active session が消えたら parent 経由で polyline 表示も自然に空になる。
-  const polylinePoints: RoutePolylinePoint[] = activeSession
-    ? recorder.savedPoints
-    : [];
+  // 表示する点は「保存済 + memory 上の未送信」を sequence 順で結合
+  // (sequence 重複は flush 直後の race のみ。useMemo 内で saved 優先で dedup)。
+  const polylinePoints: RoutePolylinePoint[] = useMemo(() => {
+    if (!activeSession) return [];
+    return mergePolylinePoints(recorder.savedPoints, recorder.pendingPoints);
+  }, [activeSession, recorder.savedPoints, recorder.pendingPoints]);
 
   return (
     <APIProvider apiKey={apiKey}>
@@ -133,6 +142,7 @@ export default function FieldSurveyMap({
           }
           currentUserId={currentUserId}
           onActiveSessionChange={handleActiveSessionChange}
+          onBeforeSessionEnd={handleBeforeSessionEnd}
           recorder={recorder}
           hasActiveSession={!!activeSession}
         />
@@ -155,6 +165,7 @@ function ControlPanel({
   onToggle,
   currentUserId,
   onActiveSessionChange,
+  onBeforeSessionEnd,
   recorder,
   hasActiveSession,
 }: {
@@ -162,6 +173,7 @@ function ControlPanel({
   onToggle: (key: Layer) => void;
   currentUserId: string;
   onActiveSessionChange: (s: ActiveSessionLike | null) => void;
+  onBeforeSessionEnd: () => Promise<void>;
   recorder: ReturnType<typeof useFieldSurveyLocationRecorder>;
   hasActiveSession: boolean;
 }) {
@@ -185,10 +197,13 @@ function ControlPanel({
         <span>調査ピン</span>
       </label>
 
-      {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。 */}
+      {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
+          Phase 1-F-2: 終了前に位置記録 (watchPosition / flush timer / buffer)
+          を確実に停止するため onBeforeSessionEnd を渡す。 */}
       <TripControls
         currentUserId={currentUserId}
         onActiveSessionChange={onActiveSessionChange}
+        onBeforeSessionEnd={onBeforeSessionEnd}
       />
 
       {/* Phase 1-F-2: 位置記録 UI。active session がある時のみ表示。
@@ -506,3 +521,31 @@ function filterValidPinGps(rows: PinRow[]): PinRow[] {
 
 // memo 本文の client side strip は廃止。view=map projection で API 側が
 // memo 本文を一切返さないため、Map UI が memo 文字列を扱う経路がない。
+
+// saved + memory 未送信 (pending) を sequence 順に結合する。
+// flush 直後の race で sequence 重複があった場合は saved を優先して dedup する。
+// console / error には何も流さない (戻り値のみ polyline path に渡る)。
+function mergePolylinePoints(
+  saved: { sequence: number; lat: number; lng: number }[],
+  pending: { sequence: number; lat: number; lng: number }[],
+): RoutePolylinePoint[] {
+  if (pending.length === 0) {
+    return saved.map((p) => ({ lat: p.lat, lng: p.lng }));
+  }
+  const seen = new Set<number>();
+  const merged: { sequence: number; lat: number; lng: number }[] = [];
+  for (const p of saved) {
+    if (!seen.has(p.sequence)) {
+      merged.push(p);
+      seen.add(p.sequence);
+    }
+  }
+  for (const p of pending) {
+    if (!seen.has(p.sequence)) {
+      merged.push(p);
+      seen.add(p.sequence);
+    }
+  }
+  merged.sort((a, b) => a.sequence - b.sequence);
+  return merged.map((p) => ({ lat: p.lat, lng: p.lng }));
+}
