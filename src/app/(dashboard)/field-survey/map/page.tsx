@@ -15,10 +15,12 @@ export default async function FieldSurveyMapPage() {
   // 401 / 想定外の失敗はすべて「閲覧不可」扱いに倒し、Maps loader を起動しない。
   // env 値・APIキー・session 詳細は出力しない。
   let canRead = false;
+  let currentUserId: string | null = null;
   try {
     const session = await getApiSession();
     const permissions = await getUserPermissions(session.id);
     canRead = hasPermission(permissions, "field_survey", "read");
+    if (canRead) currentUserId = session.id;
   } catch {
     canRead = false;
   }
@@ -32,13 +34,18 @@ export default async function FieldSurveyMapPage() {
           </h1>
           <p className="text-xs text-gray-500">
             既存物件と調査ピンを地図上で確認します。
-            巡回開始 / 終了は次フェーズで実装予定。
+            巡回開始 / 終了は本フェーズ (Phase 1-F-1) で UI のみ追加されます。
+            位置情報の記録は次フェーズで追加予定。
           </p>
         </div>
       </header>
 
       <div className="flex-1 overflow-hidden">
-        {canRead ? <FieldSurveyMapClient /> : <PermissionDeniedNotice />}
+        {canRead && currentUserId ? (
+          <FieldSurveyMapClient currentUserId={currentUserId} />
+        ) : (
+          <PermissionDeniedNotice />
+        )}
       </div>
     </div>
   );

@@ -31,6 +31,7 @@ import {
   debounce,
   validateBbox,
 } from "@/lib/field-survey-map-util";
+import TripControls from "@/components/field-survey/trip-controls";
 
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
@@ -45,6 +46,9 @@ interface FieldSurveyMapProps {
   // 未設定での mount は呼び出し側 (page.tsx) で MissingMapIdFallback に
   // 切替済。本コンポーネントには必ず非空文字列が渡る前提。
   mapId: string;
+  // Phase 1-F-1: 巡回 session の own/active 復元用に server-side で確定した
+  // ログインユーザー ID を受け取る (client 側で再 fetch しないため漏洩面を絞る)。
+  currentUserId: string;
 }
 
 interface PropertyRow {
@@ -74,7 +78,11 @@ interface PinRow {
 
 type Layer = "properties" | "pins";
 
-export default function FieldSurveyMap({ apiKey, mapId }: FieldSurveyMapProps) {
+export default function FieldSurveyMap({
+  apiKey,
+  mapId,
+  currentUserId,
+}: FieldSurveyMapProps) {
   const [layers, setLayers] = useState<Record<Layer, boolean>>({
     properties: true,
     pins: true,
@@ -100,6 +108,7 @@ export default function FieldSurveyMap({ apiKey, mapId }: FieldSurveyMapProps) {
           onToggle={(key) =>
             setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
           }
+          currentUserId={currentUserId}
         />
 
         {error && (
@@ -118,9 +127,11 @@ export default function FieldSurveyMap({ apiKey, mapId }: FieldSurveyMapProps) {
 function ControlPanel({
   layers,
   onToggle,
+  currentUserId,
 }: {
   layers: Record<Layer, boolean>;
   onToggle: (key: Layer) => void;
+  currentUserId: string;
 }) {
   return (
     <div className="absolute right-3 top-3 w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow">
@@ -142,33 +153,18 @@ function ControlPanel({
         <span>調査ピン</span>
       </label>
 
-      <div className="mb-1 text-xs font-semibold text-gray-600">巡回操作</div>
-      <p className="mb-2 text-[11px] leading-snug text-gray-500">
-        次フェーズで実装予定 (Phase 1-F)
-      </p>
+      {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
+          位置情報の取得・送信は次フェーズ (Phase 1-F-2) で追加予定。 */}
+      <TripControls currentUserId={currentUserId} />
+
+      {/* 現在位置ボタンは Phase 1-F-2 (geolocation) で実装予定の placeholder。 */}
       <button
         type="button"
         disabled
         aria-disabled="true"
-        className="mb-1 w-full cursor-not-allowed rounded border border-gray-200 bg-gray-100 px-2 py-1 text-xs text-gray-400"
+        className="mt-2 w-full cursor-not-allowed rounded border border-gray-200 bg-gray-100 px-2 py-1 text-xs text-gray-400"
       >
-        巡回開始
-      </button>
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        className="mb-1 w-full cursor-not-allowed rounded border border-gray-200 bg-gray-100 px-2 py-1 text-xs text-gray-400"
-      >
-        巡回終了
-      </button>
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        className="w-full cursor-not-allowed rounded border border-gray-200 bg-gray-100 px-2 py-1 text-xs text-gray-400"
-      >
-        現在位置
+        現在位置 (準備中)
       </button>
     </div>
   );

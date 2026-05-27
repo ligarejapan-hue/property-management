@@ -13,7 +13,11 @@ import {
 // 保証されている前提で、env (APIキー / billing / MAP_ID) ベースの 3 段 gating を
 // 行い、すべて揃った時のみ FieldSurveyMap (= Maps JS API loader) を mount する。
 
-export default function FieldSurveyMapClient() {
+export default function FieldSurveyMapClient({
+  currentUserId,
+}: {
+  currentUserId: string;
+}) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
   const billingAckFlag =
@@ -29,7 +33,13 @@ export default function FieldSurveyMapClient() {
   // Codex (Phase 1-E 追加): MAP_ID 未設定では AdvancedMarker が出ない壊れた
   // 地図 UI になるため、Maps JS API を読み込まず fallback に切り替える。
   if (!hasMapId) return <MissingMapIdFallback />;
-  return <FieldSurveyMap apiKey={apiKey as string} mapId={mapId as string} />;
+  return (
+    <FieldSurveyMap
+      apiKey={apiKey as string}
+      mapId={mapId as string}
+      currentUserId={currentUserId}
+    />
+  );
 }
 
 function MissingMapIdFallback() {

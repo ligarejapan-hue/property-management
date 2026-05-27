@@ -124,8 +124,11 @@ describe("page.tsx — server-side permission gate (Codex Phase 1-E)", () => {
 
   it("権限不足時は FieldSurveyMapClient を render しない", () => {
     expect(PAGE_SRC).toMatch(/PermissionDeniedNotice/);
+    // Phase 1-F-1 で currentUserId guard が追加されたため、
+    // canRead && currentUserId ? <FieldSurveyMapClient ...> : <PermissionDeniedNotice>
+    // のパターンも許容する。
     expect(PAGE_SRC).toMatch(
-      /canRead\s*\?\s*<FieldSurveyMapClient\s*\/>\s*:\s*<PermissionDeniedNotice/,
+      /canRead\s*(?:&&\s*currentUserId\s*)?\?\s*\(?\s*<FieldSurveyMapClient[\s\S]*?\/>\s*\)?\s*:\s*\(?\s*<PermissionDeniedNotice/,
     );
   });
 
