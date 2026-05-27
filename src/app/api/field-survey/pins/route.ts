@@ -16,6 +16,11 @@ import {
   createFieldSurveyPinSchema,
   fieldSurveyPinListQuerySchema,
 } from "@/lib/validators";
+import {
+  coerceAccuracy,
+  coerceLat,
+  coerceLng,
+} from "@/lib/field-survey-map-util";
 
 // ============================================================
 // POST /api/field-survey/pins
@@ -163,6 +168,8 @@ export async function GET(request: NextRequest) {
       sessionId?: string;
       propertyId?: string;
       createdAt?: { gte?: Date; lte?: Date };
+      lat?: { gte: number; lte: number };
+      lng?: { gte: number; lte: number };
     } = {};
 
     if (canSeeOthers) {
@@ -185,7 +192,22 @@ export async function GET(request: NextRequest) {
       if (query.from) where.createdAt.gte = new Date(query.from);
       if (query.to) where.createdAt.lte = new Date(query.to);
     }
+    // bbox は 4 値同時指定が validator で保証されている。Map UI の現在
+    // viewport の pin だけ取るため、read_all/manage を持つ閲覧者でも
+    // viewport 外の pin は返さない (Codex P2: pin fetch を bbox スコープに)。
+    if (
+      query.north !== undefined &&
+      query.south !== undefined &&
+      query.east !== undefined &&
+      query.west !== undefined
+    ) {
+      where.lat = { gte: query.south, lte: query.north };
+      where.lng = { gte: query.west, lte: query.east };
+    }
 
+    // view=map は Map UI 用の projection。memo 本文を response から完全除外し、
+    // 内部で hasMemo: boolean のみ算出して返す。それ以外は既存 generic projection。
+    // Codex Phase 1-E: Map UI の Network レスポンスに memo 本文を載せない。
     const rows = await prisma.fieldSurveyPin.findMany({
       where,
       cursor: query.cursor ? { id: query.cursor } : undefined,
@@ -196,9 +218,27 @@ export async function GET(request: NextRequest) {
     });
 
     const hasNext = rows.length > query.limit;
-    const data = hasNext ? rows.slice(0, query.limit) : rows;
+    const sliced = hasNext ? rows.slice(0, query.limit) : rows;
+    const data =
+      query.view === "map"
+        ? sliced.map((r) => {
+            // destructuring で memo を server side で剥がしてから response に渡す。
+            // hasMemo は trim 後の長さで判定 (null / 空文字 / 空白のみは false)。
+            // lat/lng/accuracy は Prisma Decimal なので number に正規化する
+            // (Codex P1: 本番 marker が表示されない事故防止)。
+            const { memo, ...rest } = r;
+            return {
+              ...rest,
+              lat: coerceLat(rest.lat),
+              lng: coerceLng(rest.lng),
+              accuracy: coerceAccuracy(rest.accuracy),
+              hasMemo:
+                typeof memo === "string" && memo.trim().length > 0,
+            };
+          })
+        : sliced;
     const nextCursor =
-      hasNext && data.length > 0 ? data[data.length - 1].id : null;
+      hasNext && sliced.length > 0 ? sliced[sliced.length - 1].id : null;
 
     // 明示的に他スタッフの pin を絞り込んだ list 取得のみ監査対象。
     if (canSeeOthers && query.staffUserId && query.staffUserId !== session.id) {

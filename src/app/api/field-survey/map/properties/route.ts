@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { fieldSurveyMapPropertyListQuerySchema } from "@/lib/validators";
+import { coerceLat, coerceLng } from "@/lib/field-survey-map-util";
 
 // ---------- GET /api/field-survey/map/properties ----------
 //
@@ -102,9 +103,17 @@ export async function GET(request: NextRequest) {
     });
 
     const hasNext = rows.length > limit;
-    const data = hasNext ? rows.slice(0, limit) : rows;
+    const sliced = hasNext ? rows.slice(0, limit) : rows;
+    // Prisma Decimal は JSON 上 string になるため、map 用 response では
+    // gpsLat/gpsLng を number に正規化して返す (Codex P1)。範囲外 / 非数値は
+    // null に倒し、UI 側 marker filter で除外される。
+    const data = sliced.map((r) => ({
+      ...r,
+      gpsLat: coerceLat(r.gpsLat),
+      gpsLng: coerceLng(r.gpsLng),
+    }));
     const nextCursor =
-      hasNext && data.length > 0 ? data[data.length - 1].id : null;
+      hasNext && sliced.length > 0 ? sliced[sliced.length - 1].id : null;
 
     return apiResponse({ data, nextCursor });
   } catch (error) {

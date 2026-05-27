@@ -1,0 +1,204 @@
+/**
+ * 現地調査マップ (Phase 1-E) の UI から使う純粋 helper。
+ *
+ * UI 側で
+ *  - bbox の API クエリ文字列を作る
+ *  - bbox 面積が API 上限 (緯度差・経度差 0.5 度) を超えていないか先行判定
+ *  - debounce で連続 pan/zoom 時の過剰リクエストを抑制
+ * 等に使う。
+ *
+ * APIキー / lat / lng / bbox を console や AuditLog に**漏らさない**ことを
+ * 呼び出し側で徹底すること。本ファイルは数値計算と文字列組み立てのみで、
+ * 副作用を一切持たない。
+ */
+
+import { FIELD_SURVEY_MAP_BBOX_MAX_DEG } from "@/lib/validators";
+
+export interface Bbox {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+}
+
+export interface BboxValidation {
+  ok: boolean;
+  reason?:
+    | "out_of_range"
+    | "inverted_lat"
+    | "inverted_lng"
+    | "too_large_lat"
+    | "too_large_lng";
+}
+
+export function isFiniteNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+export function validateBbox(b: Bbox): BboxValidation {
+  if (
+    !isFiniteNumber(b.north) ||
+    !isFiniteNumber(b.south) ||
+    !isFiniteNumber(b.east) ||
+    !isFiniteNumber(b.west)
+  ) {
+    return { ok: false, reason: "out_of_range" };
+  }
+  if (b.north < -90 || b.north > 90 || b.south < -90 || b.south > 90) {
+    return { ok: false, reason: "out_of_range" };
+  }
+  if (b.east < -180 || b.east > 180 || b.west < -180 || b.west > 180) {
+    return { ok: false, reason: "out_of_range" };
+  }
+  if (b.north < b.south) return { ok: false, reason: "inverted_lat" };
+  if (b.east < b.west) return { ok: false, reason: "inverted_lng" };
+  if (b.north - b.south > FIELD_SURVEY_MAP_BBOX_MAX_DEG) {
+    return { ok: false, reason: "too_large_lat" };
+  }
+  if (b.east - b.west > FIELD_SURVEY_MAP_BBOX_MAX_DEG) {
+    return { ok: false, reason: "too_large_lng" };
+  }
+  return { ok: true };
+}
+
+/**
+ * GET /api/field-survey/map/properties?... 用の query string を組み立てる。
+ * bbox は既に validateBbox を通している前提だが、ここでも数値以外を弾く。
+ */
+export function buildMapPropertiesQuery(
+  b: Bbox,
+  options?: { limit?: number; includeArchived?: boolean },
+): string {
+  const sp = new URLSearchParams();
+  sp.set("north", String(b.north));
+  sp.set("south", String(b.south));
+  sp.set("east", String(b.east));
+  sp.set("west", String(b.west));
+  if (options?.limit !== undefined) sp.set("limit", String(options.limit));
+  if (options?.includeArchived) sp.set("includeArchived", "true");
+  return sp.toString();
+}
+
+/**
+ * 標準的な leading=false / trailing=true の debounce。
+ * 連続 pan/zoom で同じ bbox 取得を多重発火させないために使う。
+ * cancel() で pending を取り消せる。
+ */
+export function debounce<TArgs extends unknown[]>(
+  fn: (...args: TArgs) => void,
+  waitMs: number,
+): ((...args: TArgs) => void) & { cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const wrapped = (...args: TArgs) => {
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      fn(...args);
+    }, waitMs);
+  };
+  wrapped.cancel = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  return wrapped;
+}
+
+/**
+ * Google Maps APIキーが設定されているか。空文字 / undefined を未設定扱い。
+ */
+export function isGoogleMapsKeyConfigured(
+  key: string | undefined | null,
+): boolean {
+  return typeof key === "string" && key.trim().length > 0;
+}
+
+/**
+ * Google Maps の本番課金リスク (Cloud Billing / quota / referrer / API 制限 /
+ * 管理者承認) を管理者が確認済みかどうかの opt-in フラグ。
+ *
+ * このフラグが明示的に "true" 文字列でない限り UI 側で警告を出し続け、
+ * 「APIキーを入れただけで本番有効化された」という事故を避ける。
+ * 本フラグは課金停止や制限を行うものではなく、警告 UI の dismiss にのみ使う。
+ *
+ * 料金の固定値 (無料枠 / 単価) は本コードベース全体で扱わない。
+ * 必要なら Google 公式料金ページを参照すること。
+ */
+export function isGoogleMapsBillingAcknowledged(
+  flag: string | undefined | null,
+): boolean {
+  return typeof flag === "string" && flag.trim().toLowerCase() === "true";
+}
+
+/**
+ * Google Maps Map ID が設定されているか。Phase 1-E では AdvancedMarker を使う
+ * ため、未設定で地図を描画すると marker が出ない壊れた UI になる。
+ * これを防ぐため、未設定時は地図を描画しない gating の判定に使う。
+ */
+export function isGoogleMapsMapIdConfigured(
+  mapId: string | undefined | null,
+): boolean {
+  return typeof mapId === "string" && mapId.trim().length > 0;
+}
+
+/**
+ * 不定型の値を有限 number に正規化する (Codex P1 対応)。
+ *
+ * Prisma の Decimal カラム (Property.gpsLat/gpsLng, FieldSurveyPin.lat/lng,
+ * accuracy) は JSON シリアライズ時に値 が string になりうる。Map UI 側で
+ * `typeof === "number"` だけで filtering すると本番データの marker が
+ * 一切表示されない事故を防ぐため、API / UI の両側で共通利用する。
+ *
+ * 受理:
+ *  - number で Number.isFinite
+ *  - 数値 string (trim 後 Number に変換できる)
+ *  - Decimal-like object (toString() で数値 string を返す)
+ *
+ * 棄却 (null):
+ *  - null / undefined / 空 / whitespace
+ *  - NaN / Infinity / -Infinity
+ *  - 非数値 string ("abc" 等)
+ */
+export function coerceFiniteNumber(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") {
+    return Number.isFinite(v) ? v : null;
+  }
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (typeof v === "object") {
+    // Prisma Decimal は toString() で数値 string を返す。
+    // 通常 object は "[object Object]" を返し Number 化で NaN になる安全側挙動。
+    const s = String(v);
+    if (s === "" || s === "[object Object]") return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** 緯度 (-90..90) に正規化。範囲外 / 非数値 / null は null。 */
+export function coerceLat(v: unknown): number | null {
+  const n = coerceFiniteNumber(v);
+  if (n === null) return null;
+  return n >= -90 && n <= 90 ? n : null;
+}
+
+/** 経度 (-180..180) に正規化。範囲外 / 非数値 / null は null。 */
+export function coerceLng(v: unknown): number | null {
+  const n = coerceFiniteNumber(v);
+  if (n === null) return null;
+  return n >= -180 && n <= 180 ? n : null;
+}
+
+/** GPS accuracy (0 以上 / meter) に正規化。負値 / 非数値 / null は null。 */
+export function coerceAccuracy(v: unknown): number | null {
+  const n = coerceFiniteNumber(v);
+  if (n === null) return null;
+  return n >= 0 ? n : null;
+}

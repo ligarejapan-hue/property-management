@@ -18,6 +18,7 @@ import {
   Upload,
   KeyRound,
   UserCog,
+  Map as MapIcon,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -41,6 +42,11 @@ const mainNavItems: NavItem[] = [
     label: "マンション棟",
     href: "/buildings",
     icon: <Building className="h-5 w-5" />,
+  },
+  {
+    label: "現地調査マップ",
+    href: "/field-survey/map",
+    icon: <MapIcon className="h-5 w-5" />,
   },
   {
     label: "受付帳CSV取込",
