@@ -38,6 +38,14 @@ import RoutePolyline, {
 } from "@/components/field-survey/route-polyline";
 import { useFieldSurveyLocationRecorder } from "@/components/field-survey/use-field-survey-location-recorder";
 import type { ActiveSessionLike } from "@/lib/field-survey-trip-util";
+import PinAddModeToggle from "@/components/field-survey/pin-add-mode-toggle";
+import PinCreateModal from "@/components/field-survey/pin-create-modal";
+import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
+import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
+import {
+  formatPinStatus,
+  formatPinType,
+} from "@/lib/field-survey-pin-util";
 
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
@@ -120,6 +128,212 @@ export default function FieldSurveyMap({
     return mergePolylinePoints(recorder.savedPoints, recorder.pendingPoints);
   }, [activeSession, recorder.savedPoints, recorder.pendingPoints]);
 
+  // Phase 1-G: pin 追加モード / 詳細パネル / write 権限。
+  // canWrite は /api/me/permissions で 1 回取得して memoize する。
+  // 判定できない場合 (fetch 失敗) は null のまま、UI は API 403 を汎用化する。
+  //
+  // Codex P2 (本 fix): permission entry の `granted: boolean` を必ず見る。
+  // resource + action だけで判定すると、明示 deny (granted: false) も
+  // 「許可」として扱ってしまうため、`granted === true` を必須にする。
+  // malformed / 欠損 entry は安全側で false。response 全文は console に出さない。
+  const [canWritePin, setCanWritePin] = useState<boolean | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch("/api/me/permissions", {
+          credentials: "same-origin",
+          signal: ac.signal,
+        });
+        if (!res.ok) return;
+        const body = (await res.json().catch(() => null)) as
+          | {
+              permissions?: {
+                resource?: string;
+                action?: string;
+                granted?: boolean;
+              }[];
+            }
+          | null;
+        if (!Array.isArray(body?.permissions)) {
+          setCanWritePin(false);
+          return;
+        }
+        const has = body!.permissions!.some(
+          (p) =>
+            p !== null &&
+            typeof p === "object" &&
+            p.resource === "field_survey" &&
+            p.action === "write" &&
+            p.granted === true,
+        );
+        setCanWritePin(has);
+      } catch {
+        // 判定不能。null のまま (API 403 で汎用化)。
+      }
+    })();
+    return () => ac.abort();
+  }, []);
+
+  const [pinAddMode, setPinAddMode] = useState(false);
+  // 地図 click / 「現在地を使う」で確定した作成候補座標。
+  const [createCandidate, setCreateCandidate] = useState<
+    | { lat: number; lng: number; accuracy?: number }
+    | null
+  >(null);
+  const [detailPinId, setDetailPinId] = useState<string | null>(null);
+  // marker 再 fetch をトリガするためのバンプ値。pin 作成 / 編集成功で increment。
+  const [refetchNonce, setRefetchNonce] = useState(0);
+  const bumpRefetch = useCallback(() => {
+    setRefetchNonce((n) => n + 1);
+  }, []);
+  // 「現在地を使う」用の単発取得 state (RouteRecorder hook は流用しない)。
+  const [currentLocationLoading, setCurrentLocationLoading] = useState(false);
+  const [currentLocationError, setCurrentLocationError] = useState<string | null>(
+    null,
+  );
+  // Codex P2: getCurrentPosition は API 上キャンセル不能のため、late callback を
+  // 無視する token 方式で防御する。modal cancel / session 終了 / session 切替 /
+  // unmount で必ず token を進めて pending callback を無効化する。
+  const currentLocationRequestIdRef = useRef(0);
+  // activeSession.id を ref 同期して closure 内で最新値を読めるようにする
+  // (useCallback の stale closure 回避)。null = active session 無し。
+  const activeSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSession?.id ?? null;
+  }, [activeSession]);
+  const fsMapMountedRef = useRef(true);
+  const invalidateCurrentLocationRequest = useCallback(() => {
+    currentLocationRequestIdRef.current += 1;
+    if (fsMapMountedRef.current) {
+      setCurrentLocationLoading(false);
+    }
+  }, []);
+  // unmount cleanup: late callback の state 更新を確実に止める
+  useEffect(() => {
+    fsMapMountedRef.current = true;
+    return () => {
+      fsMapMountedRef.current = false;
+      currentLocationRequestIdRef.current += 1;
+    };
+  }, []);
+  // active session が変わったら (null 化 / id 切替) pending request を無効化
+  useEffect(() => {
+    invalidateCurrentLocationRequest();
+  }, [activeSession, invalidateCurrentLocationRequest]);
+
+  const useCurrentLocationForCreate = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setCurrentLocationError(
+        "この端末では位置情報の利用ができません。",
+      );
+      return;
+    }
+    // active session が無ければ「現在地」自体不要 (modal も mount されない前提)
+    const requestSessionId = activeSessionIdRef.current;
+    if (!requestSessionId) {
+      setCurrentLocationError(
+        "巡回 session が無いため現在地を取得できません。",
+      );
+      return;
+    }
+    // 新 token を発行 (= 進行中の旧 callback を無効化)
+    currentLocationRequestIdRef.current += 1;
+    const requestId = currentLocationRequestIdRef.current;
+    setCurrentLocationLoading(true);
+    setCurrentLocationError(null);
+    // 単発取得のみ。watchPosition は使わない。
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        // late callback ガード: unmount / token 不一致 / session 終了 or 切替
+        if (!fsMapMountedRef.current) return;
+        if (currentLocationRequestIdRef.current !== requestId) return;
+        if (activeSessionIdRef.current !== requestSessionId) return;
+        setCurrentLocationLoading(false);
+        // raw position を console / error に出さない
+        const lat = pos?.coords?.latitude;
+        const lng = pos?.coords?.longitude;
+        if (
+          typeof lat !== "number" ||
+          typeof lng !== "number" ||
+          !Number.isFinite(lat) ||
+          !Number.isFinite(lng)
+        ) {
+          setCurrentLocationError("現在地を取得できませんでした。");
+          return;
+        }
+        const acc = pos?.coords?.accuracy;
+        setCreateCandidate({
+          lat,
+          lng,
+          accuracy:
+            typeof acc === "number" && Number.isFinite(acc) ? acc : undefined,
+        });
+      },
+      (err) => {
+        if (!fsMapMountedRef.current) return;
+        if (currentLocationRequestIdRef.current !== requestId) return;
+        if (activeSessionIdRef.current !== requestSessionId) return;
+        setCurrentLocationLoading(false);
+        const code = (err as { code?: number })?.code;
+        if (code === 1) {
+          setCurrentLocationError(
+            "位置情報の利用が拒否されています。ブラウザ設定で許可してください。",
+          );
+        } else if (code === 3) {
+          setCurrentLocationError(
+            "現在地の取得がタイムアウトしました。",
+          );
+        } else {
+          setCurrentLocationError("現在地を取得できませんでした。");
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 5_000, timeout: 30_000 },
+    );
+  }, []);
+
+  const pinMutations = useFieldSurveyPinMutations();
+  const handlePinCreateSubmit = useCallback(
+    async (input: {
+      lat: number;
+      lng: number;
+      pinType: string;
+      memo: string;
+      accuracy?: number;
+    }) => {
+      if (!activeSession) return;
+      const r = await pinMutations.createPin({
+        lat: input.lat,
+        lng: input.lng,
+        accuracy: input.accuracy,
+        pinType: input.pinType,
+        memo: input.memo === "" ? null : input.memo,
+        sessionId: activeSession.id,
+      });
+      if (r.ok) {
+        // Codex P2: pending な「現在地を使う」callback を無効化
+        invalidateCurrentLocationRequest();
+        setCreateCandidate(null);
+        // 誤タップ防止: 作成成功で pin 追加モードを OFF にする (Plan 承認)
+        setPinAddMode(false);
+        bumpRefetch();
+      }
+    },
+    [activeSession, pinMutations, bumpRefetch, invalidateCurrentLocationRequest],
+  );
+
+  const handleMapClick = useCallback(
+    (latLng: { lat: number; lng: number }) => {
+      // mode OFF / active session 無し / 既に modal 表示中はスルー (誤操作防止)
+      if (!pinAddMode) return;
+      if (!activeSession) return;
+      if (createCandidate) return;
+      setCreateCandidate({ lat: latLng.lat, lng: latLng.lng });
+      setCurrentLocationError(null);
+    },
+    [pinAddMode, activeSession, createCandidate],
+  );
+
   return (
     <APIProvider apiKey={apiKey}>
       <div className="relative h-full w-full">
@@ -131,7 +345,14 @@ export default function FieldSurveyMap({
           disableDefaultUI={false}
           style={{ width: "100%", height: "100%" }}
         >
-          <MapDataLayer layers={layers} onError={setError} />
+          <MapDataLayer
+            layers={layers}
+            onError={setError}
+            refetchNonce={refetchNonce}
+            pinAddMode={pinAddMode}
+            onMapClick={handleMapClick}
+            onOpenPinDetail={setDetailPinId}
+          />
           {activeSession && <RoutePolyline points={polylinePoints} />}
         </Map>
 
@@ -145,7 +366,45 @@ export default function FieldSurveyMap({
           onBeforeSessionEnd={handleBeforeSessionEnd}
           recorder={recorder}
           hasActiveSession={!!activeSession}
+          pinAddMode={pinAddMode}
+          onTogglePinAddMode={() => setPinAddMode((v) => !v)}
+          canWritePin={canWritePin}
         />
+
+        {createCandidate && activeSession && (
+          <PinCreateModal
+            initialLat={createCandidate.lat}
+            initialLng={createCandidate.lng}
+            sessionId={activeSession.id}
+            saving={pinMutations.createLoading}
+            serverError={pinMutations.createError}
+            onCancel={() => {
+              // Codex P2: pending geolocation callback を無効化してから modal を閉じる
+              invalidateCurrentLocationRequest();
+              setCreateCandidate(null);
+              setCurrentLocationError(null);
+            }}
+            onSubmit={(payload) => {
+              void handlePinCreateSubmit({
+                ...payload,
+                accuracy:
+                  payload.accuracy ?? createCandidate.accuracy ?? undefined,
+              });
+            }}
+            onUseCurrentLocation={useCurrentLocationForCreate}
+            currentLocationLoading={currentLocationLoading}
+            currentLocationError={currentLocationError}
+          />
+        )}
+
+        {detailPinId && (
+          <PinDetailPanel
+            pinId={detailPinId}
+            currentUserId={currentUserId}
+            onClose={() => setDetailPinId(null)}
+            onUpdated={() => bumpRefetch()}
+          />
+        )}
 
         {error && (
           <div
@@ -168,6 +427,9 @@ function ControlPanel({
   onBeforeSessionEnd,
   recorder,
   hasActiveSession,
+  pinAddMode,
+  onTogglePinAddMode,
+  canWritePin,
 }: {
   layers: Record<Layer, boolean>;
   onToggle: (key: Layer) => void;
@@ -176,6 +438,9 @@ function ControlPanel({
   onBeforeSessionEnd: () => Promise<boolean>;
   recorder: ReturnType<typeof useFieldSurveyLocationRecorder>;
   hasActiveSession: boolean;
+  pinAddMode: boolean;
+  onTogglePinAddMode: () => void;
+  canWritePin: boolean | null;
 }) {
   return (
     <div className="absolute right-3 top-3 w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow">
@@ -223,6 +488,17 @@ function ControlPanel({
           }}
         />
       )}
+
+      {/* Phase 1-G: active session 中のみ ピン追加 toggle を出す。
+          field_survey:write 不所持と既知なら disable、判定不能なら API 403 を
+          汎用エラーで処理する。 */}
+      {hasActiveSession && (
+        <PinAddModeToggle
+          active={pinAddMode}
+          onToggle={onTogglePinAddMode}
+          canWrite={canWritePin}
+        />
+      )}
     </div>
   );
 }
@@ -230,9 +506,17 @@ function ControlPanel({
 function MapDataLayer({
   layers,
   onError,
+  refetchNonce,
+  pinAddMode,
+  onMapClick,
+  onOpenPinDetail,
 }: {
   layers: Record<Layer, boolean>;
   onError: (msg: string | null) => void;
+  refetchNonce: number;
+  pinAddMode: boolean;
+  onMapClick: (latLng: { lat: number; lng: number }) => void;
+  onOpenPinDetail: (pinId: string) => void;
 }) {
   const map = useMap();
   const [properties, setProperties] = useState<PropertyRow[]>([]);
@@ -365,7 +649,7 @@ function MapDataLayer({
     };
   }, [map, fetchForBbox]);
 
-  // layer toggle 時にも一回取り直す (現在 bbox で)
+  // layer toggle / pin 作成 / 編集成功時に現在 bbox で再 fetch する。
   useEffect(() => {
     if (!map) return;
     const bounds = map.getBounds();
@@ -379,7 +663,27 @@ function MapDataLayer({
       west: sw.lng(),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layers.properties, layers.pins]);
+  }, [layers.properties, layers.pins, refetchNonce]);
+
+  // Phase 1-G: pin 追加モード中のみ map click を pin 作成候補に転送する。
+  // mode OFF のときは marker click (AdvancedMarker onClick) のみが動く。
+  // raw click 座標は console に出さない。
+  useEffect(() => {
+    if (!map) return;
+    if (!pinAddMode) return;
+    const listener = map.addListener(
+      "click",
+      (e: { latLng?: { lat: () => number; lng: () => number } }) => {
+        const ll = e?.latLng;
+        if (!ll) return;
+        const lat = ll.lat();
+        const lng = ll.lng();
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        onMapClick({ lat, lng });
+      },
+    );
+    return () => listener.remove();
+  }, [map, pinAddMode, onMapClick]);
 
   return (
     <>
@@ -415,7 +719,14 @@ function MapDataLayer({
           position={{ lat: selected.row.lat, lng: selected.row.lng }}
           onCloseClick={() => setSelected(null)}
         >
-          <PinInfo row={selected.row} />
+          <PinInfo
+            row={selected.row}
+            onOpenDetail={() => {
+              const id = selected.row.id;
+              setSelected(null);
+              onOpenPinDetail(id);
+            }}
+          />
         </InfoWindow>
       )}
 
@@ -454,15 +765,15 @@ function PropertyInfo({ row }: { row: PropertyRow }) {
   );
 }
 
-function PinInfo({ row }: { row: PinRow }) {
+function PinInfo({ row, onOpenDetail }: { row: PinRow; onOpenDetail: () => void }) {
   return (
     <div className="min-w-[200px] max-w-[280px] text-xs">
       <div className="mb-1 font-semibold text-gray-800">調査ピン</div>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700">
         <dt>種類</dt>
-        <dd>{row.pinType}</dd>
+        <dd>{formatPinType(row.pinType)}</dd>
         <dt>状態</dt>
-        <dd>{row.status}</dd>
+        <dd>{formatPinStatus(row.status)}</dd>
         <dt>session</dt>
         <dd>{row.sessionId ? "あり" : "—"}</dd>
         <dt>物件</dt>
@@ -479,8 +790,16 @@ function PinInfo({ row }: { row: PinRow }) {
           )}
         </dd>
         <dt>メモ</dt>
-        <dd>{row.hasMemo ? "あり (詳細は pin 編集画面で確認)" : "—"}</dd>
+        <dd>{row.hasMemo ? "あり (詳細パネルで確認)" : "—"}</dd>
       </dl>
+      <button
+        type="button"
+        onClick={onOpenDetail}
+        data-testid="pin-info-open-detail"
+        className="mt-2 text-blue-600 hover:underline"
+      >
+        詳細を見る →
+      </button>
     </div>
   );
 }

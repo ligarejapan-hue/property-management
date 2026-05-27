@@ -204,11 +204,11 @@ describe("field-survey-map.tsx — TripControls 統合", () => {
     expect(propsDecl?.[0]).not.toMatch(/\bcurrentUserId\?:/);
   });
 
-  it("MAP_SRC は navigator.geolocation / Wake Lock を直接呼ばない (hook 経由)", () => {
-    // 直接呼び出しはしない (副作用は hook に閉じる)。
-    expect(MAP_SRC).not.toMatch(/navigator\s*\.\s*geolocation/);
+  it("MAP_SRC は watchPosition / Wake Lock を呼ばない (連続追跡は hook 経由のみ)", () => {
+    // Phase 1-F-2: 連続位置追跡 (watchPosition) は hook 側に閉じる。
+    // Phase 1-G: 「現在地を使う」での単発 getCurrentPosition のみ map から
+    // 呼ばれてよい (RouteRecorder hook は流用しない方針)。
     expect(MAP_SRC).not.toMatch(/watchPosition\s*\(/);
-    expect(MAP_SRC).not.toMatch(/getCurrentPosition\s*\(/);
     expect(MAP_SRC).not.toMatch(/wakeLock/);
   });
 
