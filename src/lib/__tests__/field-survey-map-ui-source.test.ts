@@ -41,6 +41,34 @@ describe(".env.example — Google Maps key", () => {
   it("実 API キー値 (AIza...) をコミットしていない", () => {
     expect(ENV_EXAMPLE_SRC).not.toMatch(/AIza[0-9A-Za-z-_]{20,}/);
   });
+
+  it("本番運用前チェックリスト 5 項目が明記されている", () => {
+    expect(ENV_EXAMPLE_SRC).toMatch(/Cloud Billing/);
+    expect(ENV_EXAMPLE_SRC).toMatch(/quota/i);
+    expect(ENV_EXAMPLE_SRC).toMatch(/HTTP referrer/);
+    expect(ENV_EXAMPLE_SRC).toMatch(/Maps JavaScript API/);
+    expect(ENV_EXAMPLE_SRC).toMatch(/管理者|承認/);
+  });
+
+  it("Budget alert は通知のみ・quota で実停止する旨が明記されている", () => {
+    expect(ENV_EXAMPLE_SRC).toMatch(/Budget alert.*停止しない|通知のみ/);
+    expect(ENV_EXAMPLE_SRC).toMatch(/quota.*上限|quota.*制限/);
+  });
+
+  it("NEXT_PUBLIC_GOOGLE_MAPS_BILLING_ACKNOWLEDGED の opt-in 行がある", () => {
+    expect(ENV_EXAMPLE_SRC).toMatch(
+      /^NEXT_PUBLIC_GOOGLE_MAPS_BILLING_ACKNOWLEDGED=/m,
+    );
+  });
+
+  it("固定料金 (無料枠 / 単価) を env コメントにハードコードしていない", () => {
+    expect(ENV_EXAMPLE_SRC).not.toMatch(/\$\s*\d/);
+    expect(ENV_EXAMPLE_SRC).not.toMatch(/28[,\s]?500/);
+    expect(ENV_EXAMPLE_SRC).not.toMatch(/\b\d{2,3}\s*円\b/);
+    expect(ENV_EXAMPLE_SRC).not.toMatch(/\bper\s*1[,\s]?000\b/i);
+    // 「公式ページで確認」の方針宣言があること
+    expect(ENV_EXAMPLE_SRC).toMatch(/公式.*料金|料金.*公式/);
+  });
 });
 
 describe("sidebar.tsx — nav entry", () => {
@@ -73,6 +101,33 @@ describe("page.tsx — fallback / structure", () => {
   it("APIキーをそのまま画面 body に表示していない (露出防止)", () => {
     // page.tsx に apiKey をそのまま {apiKey} として描画する箇所が無いこと
     expect(PAGE_SRC).not.toMatch(/\{apiKey\}/);
+  });
+
+  it("APIキーが入っていても billing 未確認なら警告 UI を出す", () => {
+    // 警告バナーの存在とトリガ条件 (hasKey && !billingAcknowledged) を確認
+    expect(PAGE_SRC).toMatch(/isGoogleMapsBillingAcknowledged/);
+    expect(PAGE_SRC).toMatch(/BillingNotAcknowledgedBanner/);
+    expect(PAGE_SRC).toMatch(/hasKey\s*&&\s*!billingAcknowledged/);
+  });
+
+  it("警告 UI に 5 項目チェックリストが含まれる", () => {
+    expect(PAGE_SRC).toMatch(/Cloud Billing/);
+    expect(PAGE_SRC).toMatch(/quota/i);
+    expect(PAGE_SRC).toMatch(/referrer/i);
+    expect(PAGE_SRC).toMatch(/Maps JavaScript API/);
+    expect(PAGE_SRC).toMatch(/管理者承認/);
+  });
+
+  it("警告 UI で Budget alert ≠ 課金停止 を明記している", () => {
+    expect(PAGE_SRC).toMatch(/通知のみで課金を停止しません|Budget alert.*通知/);
+    expect(PAGE_SRC).toMatch(/quota.*必要/);
+  });
+
+  it("page.tsx に固定料金 (無料枠 / 単価) をハードコードしていない", () => {
+    expect(PAGE_SRC).not.toMatch(/\$\s*\d/);
+    expect(PAGE_SRC).not.toMatch(/28[,\s]?500/);
+    expect(PAGE_SRC).not.toMatch(/\b\d{2,3}\s*円\b/);
+    expect(PAGE_SRC).not.toMatch(/\bper\s*1[,\s]?000\b/i);
   });
 });
 
@@ -136,5 +191,22 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*lat/i);
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*lng/i);
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*bbox/i);
+  });
+
+  it("map component にも固定料金をハードコードしていない", () => {
+    expect(MAP_SRC).not.toMatch(/\$\s*\d/);
+    expect(MAP_SRC).not.toMatch(/28[,\s]?500/);
+    expect(MAP_SRC).not.toMatch(/\b\d{2,3}\s*円\b/);
+    expect(MAP_SRC).not.toMatch(/\bper\s*1[,\s]?000\b/i);
+  });
+
+  it("map component / page から料金関連内部設定値を console / error に流さない", () => {
+    // billing / budget / quota の内部値を出力に混ぜないこと
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*billing/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*quota/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*budget/i);
+    expect(PAGE_SRC).not.toMatch(/console\.\w+\([^)]*billing/i);
+    expect(PAGE_SRC).not.toMatch(/console\.\w+\([^)]*quota/i);
+    expect(PAGE_SRC).not.toMatch(/console\.\w+\([^)]*budget/i);
   });
 });

@@ -11,6 +11,7 @@ import {
   buildMapPropertiesQuery,
   debounce,
   isGoogleMapsKeyConfigured,
+  isGoogleMapsBillingAcknowledged,
 } from "@/lib/field-survey-map-util";
 
 describe("validateBbox", () => {
@@ -154,5 +155,28 @@ describe("isGoogleMapsKeyConfigured", () => {
 
   it("有効な文字列は true", () => {
     expect(isGoogleMapsKeyConfigured("AIza-xxx")).toBe(true);
+  });
+});
+
+describe("isGoogleMapsBillingAcknowledged", () => {
+  it("未設定 / null / 空文字は false (デフォルトは未確認)", () => {
+    expect(isGoogleMapsBillingAcknowledged(undefined)).toBe(false);
+    expect(isGoogleMapsBillingAcknowledged(null)).toBe(false);
+    expect(isGoogleMapsBillingAcknowledged("")).toBe(false);
+    expect(isGoogleMapsBillingAcknowledged("   ")).toBe(false);
+  });
+
+  it("'true' (大文字小文字・前後空白含む) のみ true 扱い", () => {
+    expect(isGoogleMapsBillingAcknowledged("true")).toBe(true);
+    expect(isGoogleMapsBillingAcknowledged("True")).toBe(true);
+    expect(isGoogleMapsBillingAcknowledged("TRUE")).toBe(true);
+    expect(isGoogleMapsBillingAcknowledged("  true  ")).toBe(true);
+  });
+
+  it("'1' / 'yes' / 'on' などは安全側で false", () => {
+    expect(isGoogleMapsBillingAcknowledged("1")).toBe(false);
+    expect(isGoogleMapsBillingAcknowledged("yes")).toBe(false);
+    expect(isGoogleMapsBillingAcknowledged("on")).toBe(false);
+    expect(isGoogleMapsBillingAcknowledged("false")).toBe(false);
   });
 });

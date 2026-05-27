@@ -113,3 +113,20 @@ export function isGoogleMapsKeyConfigured(
 ): boolean {
   return typeof key === "string" && key.trim().length > 0;
 }
+
+/**
+ * Google Maps の本番課金リスク (Cloud Billing / quota / referrer / API 制限 /
+ * 管理者承認) を管理者が確認済みかどうかの opt-in フラグ。
+ *
+ * このフラグが明示的に "true" 文字列でない限り UI 側で警告を出し続け、
+ * 「APIキーを入れただけで本番有効化された」という事故を避ける。
+ * 本フラグは課金停止や制限を行うものではなく、警告 UI の dismiss にのみ使う。
+ *
+ * 料金の固定値 (無料枠 / 単価) は本コードベース全体で扱わない。
+ * 必要なら Google 公式料金ページを参照すること。
+ */
+export function isGoogleMapsBillingAcknowledged(
+  flag: string | undefined | null,
+): boolean {
+  return typeof flag === "string" && flag.trim().toLowerCase() === "true";
+}

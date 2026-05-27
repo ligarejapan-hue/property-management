@@ -1,18 +1,26 @@
 "use client";
 
 import FieldSurveyMap from "@/components/field-survey/field-survey-map";
-import { isGoogleMapsKeyConfigured } from "@/lib/field-survey-map-util";
+import {
+  isGoogleMapsBillingAcknowledged,
+  isGoogleMapsKeyConfigured,
+} from "@/lib/field-survey-map-util";
 
 // Phase 1-E: 現地調査マップの画面骨格。
 // - Google Maps の表示と既存 Property / Pin の marker 表示まで。
 // - 巡回開始/終了, navigator.geolocation, TrackPoint 送信, Pin 作成・編集は
 //   別 PR で実装する (本ページではプレースホルダ UI のみ)。
 // - APIキー未設定でも画面はクラッシュさせず案内を表示する。
+// - APIキー設定済でも、Cloud Billing / quota / referrer / API 制限 /
+//   管理者承認が未確認なら警告バナーを常時表示する (本番事故防止)。
 
 export default function FieldSurveyMapPage() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
+  const billingAckFlag =
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_BILLING_ACKNOWLEDGED;
   const hasKey = isGoogleMapsKeyConfigured(apiKey);
+  const billingAcknowledged = isGoogleMapsBillingAcknowledged(billingAckFlag);
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
@@ -28,6 +36,8 @@ export default function FieldSurveyMapPage() {
         </div>
       </header>
 
+      {hasKey && !billingAcknowledged && <BillingNotAcknowledgedBanner />}
+
       <div className="flex-1 overflow-hidden">
         {hasKey ? (
           <FieldSurveyMap apiKey={apiKey as string} mapId={mapId} />
@@ -35,6 +45,33 @@ export default function FieldSurveyMapPage() {
           <MissingKeyNotice />
         )}
       </div>
+    </div>
+  );
+}
+
+function BillingNotAcknowledgedBanner() {
+  // APIキーが入っているが、Cloud Billing / quota / referrer / API 制限 /
+  // 管理者承認の確認が完了していない状態。本番有効化の事故を防ぐため、
+  // 「使えてしまうけれど常時警告を出す」設計にする。
+  // 料金の固定数値はここでも記載しない (公式料金ページを参照)。
+  return (
+    <div
+      role="alert"
+      data-testid="gmaps-billing-warning"
+      className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-900"
+    >
+      <strong className="mr-2 font-semibold">本番運用前チェック未完了:</strong>
+      <span>
+        Cloud Billing budget / quota 上限 / HTTP referrer 制限 / API
+        制限 (Maps JavaScript API のみ) / 管理者承認 を確認した上で、
+      </span>{" "}
+      <code className="rounded bg-white px-1">
+        NEXT_PUBLIC_GOOGLE_MAPS_BILLING_ACKNOWLEDGED=true
+      </code>{" "}
+      <span>
+        を設定してください。Budget alert は通知のみで課金を停止しません。
+        実際に上限で止めるには quota 制限が別途必要です。
+      </span>
     </div>
   );
 }
