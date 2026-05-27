@@ -604,6 +604,10 @@ export function useFieldSurveyLocationRecorder(
     await flushAllBufferedChunks();
     if (!mountedRef.current) return;
     setStatus("idle");
+    // Codex P2 (Phase 1-F-3): 停止後に「現在地」セクションが古い fix を「最後の取得値」
+    // として表示 / pan ボタンが有効に残らないよう、表示用 state も明示クリアする。
+    setLatestPositionForDisplay(null);
+    setLastLocationErrorForDisplay(null);
   }, [flushAllBufferedChunks, status, stopWatchingInternal]);
 
   /**
@@ -649,6 +653,11 @@ export function useFieldSurveyLocationRecorder(
       );
     }
     setStatus("idle");
+    // Codex P2 (Phase 1-F-3): 巡回終了直前の停止でも表示用 state を明示クリア。
+    // session 切替 effect で reset されるとはいえ、PATCH 失敗時に session が
+    // active のまま残るケースで stale fix を表示しないよう保険として倒す。
+    setLatestPositionForDisplay(null);
+    setLastLocationErrorForDisplay(null);
     return drained;
   }, [
     flushAllBufferedChunks,

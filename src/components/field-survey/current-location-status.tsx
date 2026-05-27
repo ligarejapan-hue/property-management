@@ -44,10 +44,12 @@ export default function CurrentLocationStatus({
   const accuracy = latestPositionForDisplay?.accuracy ?? null;
   const lowAccuracy = isLowAccuracyForDisplay(accuracy);
 
+  // Codex P2 (Phase 1-F-3): hook 側 stop / stopBeforeSessionEnd で
+  // latestPositionForDisplay を null に倒すため、停止中は常に「停止中」のみ表示し、
+  // 「最後の取得値」を流用しない。pan ボタンも hasPosition が false で disabled。
   const statusText = (() => {
     if (recording && !hasPosition) return "取得待ち…";
     if (recording && hasPosition) return "取得済";
-    if (!recording && hasPosition) return "停止中 (最後の取得値)";
     return "停止中";
   })();
 

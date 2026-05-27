@@ -96,6 +96,30 @@ describe("use-field-survey-location-recorder — Phase 1-F-3 拡張", () => {
     );
   });
 
+  it("stop() で latestPositionForDisplay / lastLocationErrorForDisplay を null に戻す (Codex P2)", () => {
+    // 「位置記録停止」後に「最後の取得値」を表示し続けず、pan ボタンも disable させるため
+    const stopFn = HOOK_SRC.match(
+      /const stop\s*=\s*useCallback\(async[\s\S]*?\}\,\s*\[flushAllBufferedChunks,\s*status,\s*stopWatchingInternal\]\s*\);/,
+    );
+    expect(stopFn).not.toBeNull();
+    const m = stopFn?.[0] ?? "";
+    // setStatus("idle") の後に明示クリア
+    expect(m).toMatch(
+      /setStatus\("idle"\)[\s\S]*?setLatestPositionForDisplay\(null\)[\s\S]*?setLastLocationErrorForDisplay\(null\)/,
+    );
+  });
+
+  it("stopBeforeSessionEnd で latestPositionForDisplay / lastLocationErrorForDisplay を null に戻す (Codex P2)", () => {
+    const fn = HOOK_SRC.match(
+      /const stopBeforeSessionEnd\s*=\s*useCallback[\s\S]*?\}\,\s*\[[\s\S]*?\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(
+      /setStatus\("idle"\)[\s\S]*?setLatestPositionForDisplay\(null\)[\s\S]*?setLastLocationErrorForDisplay\(null\)/,
+    );
+  });
+
   it("session 切替の reset effect で latestPositionForDisplay / lastLocationErrorForDisplay を null に戻す", () => {
     const m = HOOK_SRC.match(
       /\/\/\s*Codex P2 fix 4:[\s\S]*?useEffect\(\(\)\s*=>\s*\{([\s\S]*?)\}\,\s*\[sessionId,\s*stopWatchingInternal\]\s*\);/,
@@ -211,6 +235,12 @@ describe("current-location-status.tsx — UI / pan button", () => {
     // useEffect 自体を使わない (純 component) ことで自動 pan を構造的に禁止
     expect(STATUS_CODE).not.toMatch(/useEffect/);
     expect(STATUS_CODE).not.toMatch(/panTo/);
+  });
+
+  it("停止中で「最後の取得値」を表示する分岐を持たない (Codex P2)", () => {
+    // hook 側で stop / stopBeforeSessionEnd が latestPositionForDisplay を null
+    // に倒すため、UI 側の stale fix 流用文言が混入していないこと
+    expect(STATUS_CODE).not.toMatch(/最後の取得値/);
   });
 
   it("最終取得時刻は formatLocationTime 経由で表示する", () => {
