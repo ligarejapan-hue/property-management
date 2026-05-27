@@ -86,9 +86,10 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
     expect(TRIP_SRC).toMatch(/trip-confirm-end-modal/);
   });
 
-  it("注意文言に「常時監視ではない」旨と「位置情報は次フェーズ」旨がある", () => {
+  it("注意文言に「常時監視ではない」「位置記録は別操作」旨がある", () => {
     expect(TRIP_SRC).toMatch(/常時監視ではありません/);
-    expect(TRIP_SRC).toMatch(/Phase 1-F-2|次フェーズ/);
+    // Phase 1-F-2 以降: 巡回開始 ≠ 位置記録開始 を明示
+    expect(TRIP_SRC).toMatch(/位置記録開始/);
   });
 
   it("active session 取得 / 開始 / 終了の各 API path を呼ぶ", () => {
@@ -203,15 +204,20 @@ describe("field-survey-map.tsx — TripControls 統合", () => {
     expect(propsDecl?.[0]).not.toMatch(/\bcurrentUserId\?:/);
   });
 
-  it("MAP_SRC で navigator.geolocation 等を引き続き使っていない (Phase 1-F-1 スコープ)", () => {
-    expect(MAP_SRC).not.toMatch(/navigator\.geolocation/);
-    expect(MAP_SRC).not.toMatch(/watchPosition/);
-    expect(MAP_SRC).not.toMatch(/getCurrentPosition/);
+  it("MAP_SRC は navigator.geolocation / Wake Lock を直接呼ばない (hook 経由)", () => {
+    // 直接呼び出しはしない (副作用は hook に閉じる)。
+    expect(MAP_SRC).not.toMatch(/navigator\s*\.\s*geolocation/);
+    expect(MAP_SRC).not.toMatch(/watchPosition\s*\(/);
+    expect(MAP_SRC).not.toMatch(/getCurrentPosition\s*\(/);
     expect(MAP_SRC).not.toMatch(/wakeLock/);
   });
 
-  it("現在位置ボタンは引き続き disabled placeholder のまま", () => {
-    expect(MAP_SRC).toMatch(/現在位置\s*\(準備中\)/);
+  it("Phase 1-F-2: 位置記録 UI + polyline を組み込む", () => {
+    expect(MAP_SRC).toMatch(/LocationRecorderControls/);
+    expect(MAP_SRC).toMatch(/RoutePolyline/);
+    expect(MAP_SRC).toMatch(/useFieldSurveyLocationRecorder/);
+    // 現在位置の disabled placeholder は撤去済 (実機能に置換)
+    expect(MAP_SRC).not.toMatch(/現在位置\s*\(準備中\)/);
   });
 });
 

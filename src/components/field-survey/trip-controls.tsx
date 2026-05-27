@@ -33,6 +33,22 @@ import {
 
 interface TripControlsProps {
   currentUserId: string;
+  /**
+   * Phase 1-F-2: 親 (FieldSurveyMap) が active session の有無を知るための
+   * 通知 callback。session 詳細 (lat/lng/memo) は持たない最小情報のみ。
+   * 未指定なら呼ばれない (Phase 1-F-1 互換)。
+   */
+  onActiveSessionChange?: (session: ActiveSessionLike | null) => void;
+  /**
+   * Phase 1-F-2: 巡回終了 API を叩く直前に await される hook。
+   * 親側で位置記録 (watchPosition / flush timer / 残 buffer chunk flush) を
+   * 確実に止めるために使う。throw されても巡回終了処理は継続する (catch 握り潰し)。
+   *
+   * Codex P1: 戻り値 false の場合、未送信 buffer が残っているため
+   * session end PATCH を呼ばずに active 状態へ戻し、ユーザーに再送信を促す。
+   * void / true / undefined / 例外時は従来どおり PATCH に進む。
+   */
+  onBeforeSessionEnd?: () => Promise<boolean | void> | boolean | void;
 }
 
 type Phase =
@@ -44,7 +60,11 @@ type Phase =
   | "confirmEnd" // 終了確認 modal 表示中
   | "ending"; // PATCH sessions 中
 
-export default function TripControls({ currentUserId }: TripControlsProps) {
+export default function TripControls({
+  currentUserId,
+  onActiveSessionChange,
+  onBeforeSessionEnd,
+}: TripControlsProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<ActiveSessionLike | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +144,13 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
     return () => clearInterval(t);
   }, [phase]);
 
+  // Phase 1-F-2: active session の有無を親に通知。
+  // session detail (memo / lat / lng) は持たないが、親側でも PII を扱わない前提。
+  useEffect(() => {
+    if (!onActiveSessionChange) return;
+    onActiveSessionChange(session);
+  }, [session, onActiveSessionChange]);
+
   const startSession = useCallback(async () => {
     setPhase("starting");
     setError(null);
@@ -172,6 +199,26 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
     async (target: ActiveSessionLike) => {
       setPhase("ending");
       setError(null);
+      // Phase 1-F-2: session PATCH の前に位置記録 (watchPosition / flush
+      // timer / 残 buffer chunk flush) を停止する。throw は握り潰す。
+      // Codex P1: 戻り値が明示的に false の場合 = 未送信 buffer が残っている。
+      // session end PATCH を呼ばず active 状態へ戻し、ユーザーに再送信を促す。
+      if (onBeforeSessionEnd) {
+        let beforeOk: boolean | void = undefined;
+        try {
+          beforeOk = await onBeforeSessionEnd();
+        } catch {
+          // 終了前 stop の失敗で巡回終了を阻まない (従来挙動)
+        }
+        if (!mountedRef.current) return;
+        if (beforeOk === false) {
+          setError(
+            "未送信の位置情報が残っているため、巡回終了前に再度送信してください。",
+          );
+          setPhase("active");
+          return;
+        }
+      }
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
       mutationAbortRef.current = ac;
@@ -214,7 +261,7 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
         setPhase("active");
       }
     },
-    [fetchActiveSession],
+    [fetchActiveSession, onBeforeSessionEnd],
   );
 
   if (phase === "loading") {
@@ -296,8 +343,8 @@ function IdleView({
         巡回開始
       </button>
       <p className="text-[10px] leading-tight text-gray-400">
-        ※ 現フェーズ (Phase 1-F-1) では位置情報の取得・記録は行いません。
-        次フェーズで GPS 記録機能が追加されます。
+        ※ 位置情報の記録は別途「位置記録開始」を押した時のみ行われます。
+        巡回開始だけでは GPS は使われません。
       </p>
     </>
   );
@@ -337,7 +384,7 @@ function ActiveSessionView({
         巡回終了
       </button>
       <p className="mt-1 text-[10px] leading-tight text-gray-400">
-        ※ 本フェーズではまだ位置情報を記録していません。
+        ※ 巡回終了時に位置記録は自動停止します。未送信点は失われる場合があります。
       </p>
     </>
   );
@@ -363,8 +410,8 @@ function ConfirmStartModal({
           再ログイン時に「巡回終了」を押してください。
         </li>
         <li>
-          現フェーズ (Phase 1-F-1) では位置情報の取得・記録・送信は
-          まだ行いません。次フェーズで GPS 記録機能が追加される予定です。
+          位置情報の記録は、別途「位置記録開始」を押した時のみ開始されます。
+          巡回開始だけでは GPS は使われません。
         </li>
       </ul>
       <ModalActions
