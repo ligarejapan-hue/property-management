@@ -266,3 +266,58 @@ export const fieldSurveyPinListQuerySchema = z.object({
     .default("false")
     .transform((v) => v === "true"),
 });
+
+// ---------- Field survey property map (Phase 1-D) ----------
+
+// 地図 pan/zoom で頻繁に叩かれるため、bbox は必須で面積上限を設ける。
+// 0.5 度 ≒ 55km。緯度差・経度差ともに 0.5 度を上限とする (国内利用想定の市レベル+α)。
+export const FIELD_SURVEY_MAP_BBOX_MAX_DEG = 0.5;
+
+export const fieldSurveyMapPropertyListQuerySchema = z
+  .object({
+    north: z.coerce.number().min(-90).max(90),
+    south: z.coerce.number().min(-90).max(90),
+    east: z.coerce.number().min(-180).max(180),
+    west: z.coerce.number().min(-180).max(180),
+    limit: z.coerce.number().int().min(1).max(500).default(200),
+    cursor: z.string().uuid().optional(),
+    includeArchived: z
+      .string()
+      .default("false")
+      .transform((v) => v === "true"),
+  })
+  .superRefine((v, ctx) => {
+    if (v.north < v.south) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "north は south 以上である必要があります",
+        path: ["north"],
+      });
+      return;
+    }
+    // 日付変更線跨ぎは Phase 1-D では非対応
+    if (v.east < v.west) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "east は west 以上である必要があります",
+        path: ["east"],
+      });
+      return;
+    }
+    if (v.north - v.south > FIELD_SURVEY_MAP_BBOX_MAX_DEG) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `緯度差は ${FIELD_SURVEY_MAP_BBOX_MAX_DEG} 度以下にしてください`,
+        path: ["north"],
+      });
+      return;
+    }
+    if (v.east - v.west > FIELD_SURVEY_MAP_BBOX_MAX_DEG) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `経度差は ${FIELD_SURVEY_MAP_BBOX_MAX_DEG} 度以下にしてください`,
+        path: ["east"],
+      });
+      return;
+    }
+  });
