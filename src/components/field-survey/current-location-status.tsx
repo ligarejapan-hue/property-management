@@ -43,6 +43,10 @@ export default function CurrentLocationStatus({
   const hasPosition = latestPositionForDisplay !== null;
   const accuracy = latestPositionForDisplay?.accuracy ?? null;
   const lowAccuracy = isLowAccuracyForDisplay(accuracy);
+  // Codex P2 (Phase 1-F-3 follow-up): hook 側で error / stop 時に
+  // latestPositionForDisplay を null にクリアするが、recording 中以外は
+  // pan ボタンを構造的にも有効にしない (古い座標への panTo を防ぐ二重ガード)。
+  const canPanToCurrent = recording && hasPosition;
 
   // Codex P2 (Phase 1-F-3): hook 側 stop / stopBeforeSessionEnd で
   // latestPositionForDisplay を null に倒すため、停止中は常に「停止中」のみ表示し、
@@ -105,7 +109,7 @@ export default function CurrentLocationStatus({
       <button
         type="button"
         onClick={() => onPanToCurrent()}
-        disabled={!hasPosition}
+        disabled={!canPanToCurrent}
         className="mt-2 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
         data-testid="current-location-pan-button"
       >

@@ -135,6 +135,11 @@ export default function FieldSurveyMap({
   // state に上げる (<MapInstanceCapture>)。クリック時のみ panTo を呼ぶ。
   const [mapInstance, setMapInstance] = useState<unknown>(null);
   const handlePanToCurrent = useCallback(() => {
+    // Codex P2 (Phase 1-F-3 follow-up): recording 中以外 (idle / error / stopping /
+    // preparing) では古い座標への panTo を許可しない。CurrentLocationStatus 側でも
+    // disabled をかけているが、外部から直接呼ばれた場合 (将来の hotkey 等) に
+    // 備えた server-side ガード相当の二重防御。
+    if (recorder.status !== "recording") return;
     const pos = recorder.latestPositionForDisplay;
     if (!pos) return;
     const m = mapInstance as
@@ -143,7 +148,7 @@ export default function FieldSurveyMap({
     if (m && typeof m.panTo === "function") {
       m.panTo({ lat: pos.lat, lng: pos.lng });
     }
-  }, [mapInstance, recorder.latestPositionForDisplay]);
+  }, [mapInstance, recorder.status, recorder.latestPositionForDisplay]);
   // 位置記録中かつ最新位置が取得済の時のみ現在地マーカーを描画する。
   const showCurrentLocationMarker =
     !!activeSession &&

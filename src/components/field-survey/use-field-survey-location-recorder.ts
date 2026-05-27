@@ -418,6 +418,19 @@ export function useFieldSurveyLocationRecorder(
     }
   }, [flushBuffer]);
 
+  // Codex P2 (Phase 1-F-3 follow-up): 位置取得エラー / 停止 / session 切替 /
+  // unmount 時に「現在地」snapshot を一括クリアする internal helper。
+  // - latestPositionForDisplay を null に倒し、stale fix を「現在地として利用可能」
+  //   扱いしない
+  // - isWaitingForFirstLocation は status & latestPositionForDisplay の derive 値の
+  //   ため、recording 中でなければ自動的に false になる
+  // - 副作用は state set のみ (座標や raw payload を console / 監査経路へ流さない)
+  const clearCurrentLocationDisplay = useCallback(() => {
+    if (!mountedRef.current) return;
+    setLatestPositionForDisplay(null);
+    setIsLowAccuracyNow(false);
+  }, []);
+
   const handlePositionError = useCallback(
     (err: GeolocationPositionError) => {
       if (!mountedRef.current) return;
@@ -425,13 +438,18 @@ export function useFieldSurveyLocationRecorder(
       setError(msg);
       // Phase 1-F-3: 位置「取得」失敗のみを別 state にも反映 (送信失敗とは分離)。
       setLastLocationErrorForDisplay(msg);
+      // Codex P2 (本 fix): error 発生時点で「現在地として利用可能な位置」は無い扱い
+      // にする。古い snapshot を残すと CurrentLocationStatus が stale fix を「最終
+      // 取得」として表示し、pan ボタンも有効に残ってしまう (古い座標への panTo を
+      // 許してしまう)。
+      clearCurrentLocationDisplay();
       // permission denied は明確な fatal。停止して idle に戻す。
       if (err.code === 1) {
         stopWatchingInternal();
         setStatus("error");
       }
     },
-    [],
+    [clearCurrentLocationDisplay],
   );
 
   const stopWatchingInternal = useCallback(() => {

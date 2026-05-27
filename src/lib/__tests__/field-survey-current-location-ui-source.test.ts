@@ -96,6 +96,46 @@ describe("use-field-survey-location-recorder — Phase 1-F-3 拡張", () => {
     );
   });
 
+  it("clearCurrentLocationDisplay helper が定義され、setLatestPositionForDisplay(null) を含む (Codex P2)", () => {
+    // 内部 helper の useCallback 形式で定義され、latestPositionForDisplay を null に倒す
+    expect(HOOK_SRC).toMatch(/const\s+clearCurrentLocationDisplay\s*=\s*useCallback/);
+    const fn = HOOK_SRC.match(
+      /const\s+clearCurrentLocationDisplay\s*=\s*useCallback[\s\S]*?\}\,\s*\[\s*\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/setLatestPositionForDisplay\(null\)/);
+    expect(m).toMatch(/setIsLowAccuracyNow\(false\)/);
+    // 副作用は state set のみ (console / fetch / storage を含めない)
+    expect(m).not.toMatch(/console\./);
+    expect(m).not.toMatch(/fetch\(/);
+    expect(m).not.toMatch(/localStorage|sessionStorage|indexedDB/i);
+  });
+
+  it("handlePositionError は clearCurrentLocationDisplay() を呼び stale snapshot を消す (Codex P2)", () => {
+    // describeGeolocationError → setLastLocationErrorForDisplay → clearCurrentLocationDisplay の順
+    expect(HOOK_SRC).toMatch(
+      /handlePositionError[\s\S]*?setLastLocationErrorForDisplay\([\s\S]*?clearCurrentLocationDisplay\(\)/,
+    );
+    // permission denied (code === 1) 分岐の前後どちらでもクリアが起きるよう、
+    // clearCurrentLocationDisplay() が err.code === 1 ブロックの外で呼ばれていること
+    expect(HOOK_SRC).toMatch(
+      /clearCurrentLocationDisplay\(\)[\s\S]{0,200}if\s*\(\s*err\.code\s*===\s*1\s*\)/,
+    );
+  });
+
+  it("permission denied (err.code === 1) でも stale snapshot を残さない (Codex P2)", () => {
+    // err.code === 1 ブロック内に setStatus("error") はあるが、その前に
+    // clearCurrentLocationDisplay が必ず呼ばれている構造
+    const block = HOOK_SRC.match(
+      /handlePositionError[\s\S]*?if\s*\(\s*err\.code\s*===\s*1\s*\)\s*\{[\s\S]*?\}/,
+    );
+    expect(block).not.toBeNull();
+    const m = block?.[0] ?? "";
+    expect(m).toMatch(/clearCurrentLocationDisplay\(\)/);
+    expect(m).toMatch(/setStatus\("error"\)/);
+  });
+
   it("stop() で latestPositionForDisplay / lastLocationErrorForDisplay を null に戻す (Codex P2)", () => {
     // 「位置記録停止」後に「最後の取得値」を表示し続けず、pan ボタンも disable させるため
     const stopFn = HOOK_SRC.match(
@@ -223,8 +263,14 @@ describe("current-location-status.tsx — UI / pan button", () => {
     expect(STATUS_SRC).toMatch(/onClick=\{\s*\(\)\s*=>\s*onPanToCurrent\(\)\s*\}/);
   });
 
-  it("latestPositionForDisplay が null なら pan ボタンは disabled", () => {
-    expect(STATUS_SRC).toMatch(/disabled=\{!hasPosition\}/);
+  it("recording 中かつ latestPositionForDisplay がある時のみ pan ボタンが有効 (Codex P2)", () => {
+    // canPanToCurrent = recording && hasPosition の derive
+    expect(STATUS_SRC).toMatch(
+      /canPanToCurrent\s*=\s*recording\s*&&\s*hasPosition/,
+    );
+    // disabled は canPanToCurrent ベース (hasPosition 単独依存に戻っていない)
+    expect(STATUS_SRC).toMatch(/disabled=\{!canPanToCurrent\}/);
+    expect(STATUS_SRC).not.toMatch(/disabled=\{!hasPosition\}/);
     // 早期に hasPosition を計算
     expect(STATUS_SRC).toMatch(
       /hasPosition\s*=\s*latestPositionForDisplay\s*!==\s*null/,
@@ -355,6 +401,20 @@ describe("field-survey-map.tsx — Phase 1-F-3 統合", () => {
     expect(handler?.[0]).toMatch(/panTo\(\{\s*lat:\s*pos\.lat,\s*lng:\s*pos\.lng\s*\}/);
     // panTo を useEffect の中で呼ぶ自動 pan パターンが無いことを構造ガード
     expect(MAP_SRC).not.toMatch(/useEffect\([\s\S]{0,200}panTo\(/);
+  });
+
+  it("handlePanToCurrent は recording 中以外では早期 return する (Codex P2)", () => {
+    const handler = MAP_SRC.match(
+      /const handlePanToCurrent\s*=\s*useCallback\(\(\)\s*=>\s*\{[\s\S]*?\}\,\s*\[[\s\S]*?\]\s*\);/,
+    );
+    expect(handler).not.toBeNull();
+    const m = handler?.[0] ?? "";
+    // status !== "recording" で早期 return している
+    expect(m).toMatch(
+      /recorder\.status\s*!==\s*"recording"[\s\S]{0,40}return/,
+    );
+    // dep に recorder.status が含まれている (stale closure 回避)
+    expect(m).toMatch(/recorder\.status/);
   });
 
   it("Phase 1-G の pin 追加 map click は維持されている (handleMapClick 経路)", () => {
