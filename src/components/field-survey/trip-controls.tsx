@@ -33,6 +33,12 @@ import {
 
 interface TripControlsProps {
   currentUserId: string;
+  /**
+   * Phase 1-F-2: 親 (FieldSurveyMap) が active session の有無を知るための
+   * 通知 callback。session 詳細 (lat/lng/memo) は持たない最小情報のみ。
+   * 未指定なら呼ばれない (Phase 1-F-1 互換)。
+   */
+  onActiveSessionChange?: (session: ActiveSessionLike | null) => void;
 }
 
 type Phase =
@@ -44,7 +50,10 @@ type Phase =
   | "confirmEnd" // 終了確認 modal 表示中
   | "ending"; // PATCH sessions 中
 
-export default function TripControls({ currentUserId }: TripControlsProps) {
+export default function TripControls({
+  currentUserId,
+  onActiveSessionChange,
+}: TripControlsProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<ActiveSessionLike | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -123,6 +132,13 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, [phase]);
+
+  // Phase 1-F-2: active session の有無を親に通知。
+  // session detail (memo / lat / lng) は持たないが、親側でも PII を扱わない前提。
+  useEffect(() => {
+    if (!onActiveSessionChange) return;
+    onActiveSessionChange(session);
+  }, [session, onActiveSessionChange]);
 
   const startSession = useCallback(async () => {
     setPhase("starting");
@@ -296,8 +312,8 @@ function IdleView({
         巡回開始
       </button>
       <p className="text-[10px] leading-tight text-gray-400">
-        ※ 現フェーズ (Phase 1-F-1) では位置情報の取得・記録は行いません。
-        次フェーズで GPS 記録機能が追加されます。
+        ※ 位置情報の記録は別途「位置記録開始」を押した時のみ行われます。
+        巡回開始だけでは GPS は使われません。
       </p>
     </>
   );
@@ -337,7 +353,7 @@ function ActiveSessionView({
         巡回終了
       </button>
       <p className="mt-1 text-[10px] leading-tight text-gray-400">
-        ※ 本フェーズではまだ位置情報を記録していません。
+        ※ 巡回終了時に位置記録は自動停止します。未送信点は失われる場合があります。
       </p>
     </>
   );
@@ -363,8 +379,8 @@ function ConfirmStartModal({
           再ログイン時に「巡回終了」を押してください。
         </li>
         <li>
-          現フェーズ (Phase 1-F-1) では位置情報の取得・記録・送信は
-          まだ行いません。次フェーズで GPS 記録機能が追加される予定です。
+          位置情報の記録は、別途「位置記録開始」を押した時のみ開始されます。
+          巡回開始だけでは GPS は使われません。
         </li>
       </ul>
       <ModalActions

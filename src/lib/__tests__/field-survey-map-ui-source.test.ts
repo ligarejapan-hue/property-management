@@ -338,13 +338,12 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     );
   });
 
-  it("巡回開始/終了/現在位置ボタンは disabled (Phase 1-F 予定)", () => {
-    // それぞれのボタンが disabled / aria-disabled を持つ
-    const tripStartRegion = MAP_SRC.match(
-      /巡回開始[\s\S]{0,200}/,
-    );
-    expect(tripStartRegion).not.toBeNull();
-    expect(MAP_SRC).toMatch(/aria-disabled="true"/);
+  it("Phase 1-F-2 で位置記録 UI + polyline を統合 (現在位置 placeholder は撤去)", () => {
+    // Phase 1-F-1 までの disabled placeholder は撤去済。
+    expect(MAP_SRC).not.toMatch(/現在位置\s*\(準備中\)/);
+    expect(MAP_SRC).toMatch(/LocationRecorderControls/);
+    expect(MAP_SRC).toMatch(/RoutePolyline/);
+    expect(MAP_SRC).toMatch(/useFieldSurveyLocationRecorder/);
   });
 
   it("API キーを fetch URL / query / log に流していない", () => {

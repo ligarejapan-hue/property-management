@@ -32,6 +32,12 @@ import {
   validateBbox,
 } from "@/lib/field-survey-map-util";
 import TripControls from "@/components/field-survey/trip-controls";
+import LocationRecorderControls from "@/components/field-survey/location-recorder-controls";
+import RoutePolyline, {
+  type RoutePolylinePoint,
+} from "@/components/field-survey/route-polyline";
+import { useFieldSurveyLocationRecorder } from "@/components/field-survey/use-field-survey-location-recorder";
+import type { ActiveSessionLike } from "@/lib/field-survey-trip-util";
 
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
@@ -88,6 +94,22 @@ export default function FieldSurveyMap({
     pins: true,
   });
   const [error, setError] = useState<string | null>(null);
+  // Phase 1-F-2: TripControls から active session (own のみ) の通知を受け、
+  // location recorder hook を駆動する。session が無い間 hook は何もしない。
+  const [activeSession, setActiveSession] = useState<ActiveSessionLike | null>(
+    null,
+  );
+  const handleActiveSessionChange = useCallback(
+    (s: ActiveSessionLike | null) => setActiveSession(s),
+    [],
+  );
+  const recorder = useFieldSurveyLocationRecorder({
+    sessionId: activeSession?.id ?? null,
+  });
+  // active session が消えたら parent 経由で polyline 表示も自然に空になる。
+  const polylinePoints: RoutePolylinePoint[] = activeSession
+    ? recorder.savedPoints
+    : [];
 
   return (
     <APIProvider apiKey={apiKey}>
@@ -101,6 +123,7 @@ export default function FieldSurveyMap({
           style={{ width: "100%", height: "100%" }}
         >
           <MapDataLayer layers={layers} onError={setError} />
+          {activeSession && <RoutePolyline points={polylinePoints} />}
         </Map>
 
         <ControlPanel
@@ -109,6 +132,9 @@ export default function FieldSurveyMap({
             setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
           }
           currentUserId={currentUserId}
+          onActiveSessionChange={handleActiveSessionChange}
+          recorder={recorder}
+          hasActiveSession={!!activeSession}
         />
 
         {error && (
@@ -128,10 +154,16 @@ function ControlPanel({
   layers,
   onToggle,
   currentUserId,
+  onActiveSessionChange,
+  recorder,
+  hasActiveSession,
 }: {
   layers: Record<Layer, boolean>;
   onToggle: (key: Layer) => void;
   currentUserId: string;
+  onActiveSessionChange: (s: ActiveSessionLike | null) => void;
+  recorder: ReturnType<typeof useFieldSurveyLocationRecorder>;
+  hasActiveSession: boolean;
 }) {
   return (
     <div className="absolute right-3 top-3 w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow">
@@ -153,19 +185,29 @@ function ControlPanel({
         <span>調査ピン</span>
       </label>
 
-      {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
-          位置情報の取得・送信は次フェーズ (Phase 1-F-2) で追加予定。 */}
-      <TripControls currentUserId={currentUserId} />
+      {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。 */}
+      <TripControls
+        currentUserId={currentUserId}
+        onActiveSessionChange={onActiveSessionChange}
+      />
 
-      {/* 現在位置ボタンは Phase 1-F-2 (geolocation) で実装予定の placeholder。 */}
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        className="mt-2 w-full cursor-not-allowed rounded border border-gray-200 bg-gray-100 px-2 py-1 text-xs text-gray-400"
-      >
-        現在位置 (準備中)
-      </button>
+      {/* Phase 1-F-2: 位置記録 UI。active session がある時のみ表示。
+          active 復元時に自動 start しない (ユーザー操作で start)。 */}
+      {hasActiveSession && (
+        <LocationRecorderControls
+          status={recorder.status}
+          savedCount={recorder.savedPoints.length}
+          bufferedCount={recorder.bufferedCount}
+          lastFlushAt={recorder.lastFlushAt}
+          isFlushing={recorder.isFlushing}
+          isLowAccuracyNow={recorder.isLowAccuracyNow}
+          error={recorder.error}
+          onStart={recorder.start}
+          onStop={() => {
+            void recorder.stop();
+          }}
+        />
+      )}
     </div>
   );
 }
