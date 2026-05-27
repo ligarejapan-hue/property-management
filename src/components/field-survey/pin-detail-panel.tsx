@@ -14,7 +14,7 @@
  * - optimistic update しない。保存中は read-only + disable。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FIELD_SURVEY_PIN_STATUSES,
   FIELD_SURVEY_PIN_TYPES,
@@ -52,6 +52,14 @@ export default function PinDetailPanel({
   const [draftPinType, setDraftPinType] = useState<FieldSurveyPinType>("candidate");
   const [draftStatus, setDraftStatus] = useState<FieldSurveyPinStatus>("open");
   const [draftMemo, setDraftMemo] = useState<string>("");
+
+  // Codex P2 (本 fix): props.pinId は handleSave 内で stale closure になりうる。
+  // PATCH レスポンス到達時に「現在表示中の pinId」と一致するかを ref で再確認
+  // するため、毎 render で同期する最新値 ref を保持する。
+  const latestPinIdRef = useRef(pinId);
+  useEffect(() => {
+    latestPinIdRef.current = pinId;
+  }, [pinId]);
 
   const loadDetail = useCallback(async () => {
     const r = await mutations.fetchPinDetail(pinId);
@@ -97,8 +105,10 @@ export default function PinDetailPanel({
 
   const handleSave = async () => {
     if (!detail) return;
-    // Codex P2: PATCH 直前にも stale / 他人 pin への送信を再確認する。
-    if (detail.id !== pinId) return;
+    // Codex P2: PATCH 直前に stale / 他人 pin への送信を再確認する。
+    // saveTargetPinId は PATCH に投げる対象を確定するための snapshot。
+    const saveTargetPinId = pinId;
+    if (detail.id !== saveTargetPinId) return;
     if (detail.staffUserId !== currentUserId) return;
     const patch = buildPinPatch(
       { pinType: detail.pinType, status: detail.status, memo: detail.memo },
@@ -109,10 +119,19 @@ export default function PinDetailPanel({
       setEditing(false);
       return;
     }
-    const r = await mutations.updatePin(pinId, patch);
+    const r = await mutations.updatePin(saveTargetPinId, patch);
     if (!r.ok || !r.data) return;
-    // PATCH のレスポンス時にも pinId 切替が起きていないか再確認。
-    if (r.data.id !== pinId) return;
+    // Codex P2 (本 fix): PATCH レスポンス到達時に、stale closure の pinId では
+    // なく「最新の」props.pinId と比較する。
+    // 旧実装は r.data.id === (closure 内の) pinId だけ見ていたため、
+    // pin A 保存中に pin B へ切替えるとレスポンスが現在表示中の B パネルに
+    // 流入していた。3 段ガード:
+    //   1) ref が捕捉した saveTargetPinId のままか (= 切替されていない)
+    //   2) サーバ応答 id が ref と一致するか
+    //   3) サーバ応答 id が捕捉 target と一致するか (念のため二重)
+    if (latestPinIdRef.current !== saveTargetPinId) return;
+    if (r.data.id !== latestPinIdRef.current) return;
+    if (r.data.id !== saveTargetPinId) return;
     setDetail(r.data);
     setEditing(false);
     onUpdated?.(r.data);

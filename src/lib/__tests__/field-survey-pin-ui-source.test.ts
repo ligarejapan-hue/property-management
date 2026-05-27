@@ -429,14 +429,16 @@ describe("Codex P2 fix 2 — reset stale pin detail when switching pins", () => 
     expect(DETAIL_SRC).toMatch(/r\.data\.id\s*!==\s*pinId/);
   });
 
-  it("handleSave は PATCH 直前に pinId / own を再確認する", () => {
+  it("handleSave は PATCH 直前に saveTargetPinId / own を再確認する", () => {
     const fn = DETAIL_SRC.match(/const handleSave\s*=[\s\S]*?\}\;/);
     expect(fn).not.toBeNull();
     const m = fn?.[0] ?? "";
-    expect(m).toMatch(/detail\.id\s*!==\s*pinId/);
+    // saveTargetPinId を snapshot (= 開始時点の props.pinId) し、detail と再照合
+    expect(m).toMatch(/const\s+saveTargetPinId\s*=\s*pinId/);
+    expect(m).toMatch(/detail\.id\s*!==\s*saveTargetPinId/);
     expect(m).toMatch(/detail\.staffUserId\s*!==\s*currentUserId/);
-    // updatePin 呼び出し後、PATCH response でも pinId 不一致なら state 反映しない
-    expect(m).toMatch(/r\.data\.id\s*!==\s*pinId/);
+    // PATCH 引数も saveTargetPinId を使う (stale closure ガード)
+    expect(m).toMatch(/mutations\.updatePin\(saveTargetPinId,\s*patch\)/);
   });
 
   it("manage 権限でも他人 pin 編集 UI を出さない方針を維持 (isOwn 単独 gate)", () => {
@@ -455,6 +457,96 @@ describe("Codex P2 fix 2 — reset stale pin detail when switching pins", () => 
     expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*lng/i);
     expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*response/i);
     expect(DETAIL_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
+  });
+});
+
+// =======================================================================
+// Codex P2: recheck latest pin before applying save results
+// =======================================================================
+describe("Codex P2 — recheck latest pin before applying save results", () => {
+  it("latestPinIdRef を持ち、毎 render で pinId を同期する", () => {
+    expect(DETAIL_SRC).toMatch(
+      /const\s+latestPinIdRef\s*=\s*useRef\(pinId\)/,
+    );
+    expect(DETAIL_SRC).toMatch(
+      /useEffect\(\(\)\s*=>\s*\{\s*latestPinIdRef\.current\s*=\s*pinId;[\s\S]*?\}\,\s*\[pinId\]/,
+    );
+  });
+
+  it("handleSave 開始時に saveTargetPinId を snapshot する", () => {
+    const fn = DETAIL_SRC.match(/const handleSave\s*=[\s\S]*?\}\;/);
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/const\s+saveTargetPinId\s*=\s*pinId/);
+  });
+
+  it("PATCH レスポンス適用前に latestPinIdRef との 3 段ガードを行う", () => {
+    const fn = DETAIL_SRC.match(/const handleSave\s*=[\s\S]*?\}\;/);
+    const m = fn?.[0] ?? "";
+    // 1) ref が捕捉 target のまま
+    expect(m).toMatch(
+      /latestPinIdRef\.current\s*!==\s*saveTargetPinId/,
+    );
+    // 2) サーバ応答 id が ref と一致
+    expect(m).toMatch(
+      /r\.data\.id\s*!==\s*latestPinIdRef\.current/,
+    );
+    // 3) サーバ応答 id が捕捉 target と一致
+    expect(m).toMatch(/r\.data\.id\s*!==\s*saveTargetPinId/);
+  });
+
+  it("stale 判定時は setDetail / setEditing(false) / onUpdated を呼ばずに return する", () => {
+    const fn = DETAIL_SRC.match(/const handleSave\s*=[\s\S]*?\}\;/);
+    const m = fn?.[0] ?? "";
+    // 3 段ガードの直後に setDetail / setEditing / onUpdated がある構造
+    expect(m).toMatch(
+      /latestPinIdRef\.current\s*!==\s*saveTargetPinId[\s\S]*?return[\s\S]*?setDetail\(r\.data\)/,
+    );
+    expect(m).toMatch(
+      /r\.data\.id\s*!==\s*latestPinIdRef\.current[\s\S]*?return[\s\S]*?setDetail\(r\.data\)/,
+    );
+    // setDetail / setEditing(false) / onUpdated が並んで呼ばれる
+    expect(m).toMatch(/setDetail\(r\.data\)[\s\S]*?setEditing\(false\)[\s\S]*?onUpdated/);
+  });
+
+  it("古い `r.data.id === pinId` 単独パターン (stale closure) が残っていない", () => {
+    // props.pinId を直接 PATCH レスポンス判定に使う形は撤去済
+    const fn = DETAIL_SRC.match(/const handleSave\s*=[\s\S]*?\}\;/);
+    const m = fn?.[0] ?? "";
+    // saveTargetPinId / latestPinIdRef のいずれも経由しない裸の `pinId` 直比較が無い
+    // (PATCH 完了後の比較で `=== pinId` または `!== pinId` が裸で残らない)
+    const afterUpdate = m.match(/mutations\.updatePin[\s\S]*$/);
+    expect(afterUpdate).not.toBeNull();
+    expect(afterUpdate?.[0]).not.toMatch(/r\.data\.id\s*!==\s*pinId\b/);
+    expect(afterUpdate?.[0]).not.toMatch(/r\.data\.id\s*===\s*pinId\b/);
+  });
+
+  it("他人 pin 編集 UI を出さない方針を維持 (manage 持ちでも非表示)", () => {
+    // 既存テストと重複するが本 fix で挙動が変わっていないことを再確認
+    expect(DETAIL_SRC).not.toMatch(/canManage/);
+    expect(DETAIL_SRC).not.toMatch(/hasManage/);
+    expect(DETAIL_SRC).toMatch(
+      /isOwn\s*=\s*isFresh\s*&&\s*detail!\.staffUserId\s*===\s*currentUserId/,
+    );
+  });
+
+  it("pinId 切替時の reset (detail / editing / draft) は維持されている", () => {
+    const resetBlock = DETAIL_SRC.match(
+      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?setDetail\(null\)[\s\S]*?setEditing\(false\)[\s\S]*?setDraftMemo\(""\)[\s\S]*?loadDetail\(\)[\s\S]*?\}\,\s*\[pinId\]/,
+    );
+    expect(resetBlock).not.toBeNull();
+  });
+
+  it("memo / lat / lng / API response 全文 / env / API key を console に出さない (継続)", () => {
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*memo/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*lat/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*lng/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*response/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*apiKey/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
+  });
+
+  it("dangerouslySetInnerHTML 不使用 (継続)", () => {
+    expect(DETAIL_SRC).not.toMatch(/dangerouslySetInnerHTML/);
   });
 });
 
