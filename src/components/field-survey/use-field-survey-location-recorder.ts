@@ -24,6 +24,7 @@ import {
   FIELD_SURVEY_FLUSH_INTERVAL_MS,
   describeGeolocationError,
   isLowAccuracy,
+  maxSequenceFromBuffer,
   nextSequence,
   normalizePosition,
   shouldAcceptCandidate,
@@ -305,10 +306,17 @@ export function useFieldSurveyLocationRecorder(
           }
         }
         const next = body?.nextCursor;
-        if (typeof next !== "number") break;
+        if (typeof next !== "number") {
+          // 全ページ取得完了。lastSeq は信頼できる。
+          return { ok: true, lastSequence: lastSeq, points: all };
+        }
         cursor = next;
       }
-      return { ok: true, lastSequence: lastSeq, points: all };
+      // Codex P2 fix 2: page cap (FIELD_SURVEY_FETCH_PAGE_MAX) に到達した時点で
+      // nextCursor がまだ残っている = truncated。lastSeq は DB の真の最大値より
+      // 古い可能性があり、これで採番すると既存行と sequence 衝突 (skipDuplicates) して
+      // client buffer が消えて保存漏れになる。確実に hard failure として扱う。
+      return { ok: false, lastSequence: null, points: [] };
     } catch (err) {
       if (isAbortError(err) || !mountedRef.current) {
         return { ok: false, lastSequence: null, points: [] };
@@ -424,7 +432,14 @@ export function useFieldSurveyLocationRecorder(
       }
       // ok=true で初めて saved 反映 + sequence 採番。
       setSavedPoints(r.points);
-      nextSequenceRef.current = nextSequence(r.lastSequence);
+      // Codex P2 fix 1: 前回 flush 失敗で bufferRef.current に未送信 sequence が
+      // 残っている可能性がある。server lastSequence だけで採番すると buffer 内
+      // sequence と衝突 → POST 時 skipDuplicates で消滅し保存漏れ。
+      // max(serverNext, bufferNext) で「server 既存 + memory 未送信」両方を
+      // 越える値から再開する。
+      const serverNext = nextSequence(r.lastSequence);
+      const bufferNext = nextSequence(maxSequenceFromBuffer(bufferRef.current));
+      nextSequenceRef.current = Math.max(serverNext, bufferNext);
       let id: number;
       try {
         id = geo.watchPosition(handlePosition, handlePositionError, {

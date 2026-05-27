@@ -17,6 +17,7 @@ import {
   describeGeolocationError,
   haversineMeters,
   isLowAccuracy,
+  maxSequenceFromBuffer,
   nextSequence,
   normalizePosition,
   shouldAcceptCandidate,
@@ -159,6 +160,58 @@ describe("shouldFlushNow", () => {
     expect(shouldFlushNow({ length: 50 }, null, NOW, undefined, true)).toBe(
       false,
     );
+  });
+});
+
+describe("maxSequenceFromBuffer (Codex P2 fix 1)", () => {
+  it("空配列は null", () => {
+    expect(maxSequenceFromBuffer([])).toBeNull();
+  });
+
+  it("単一 entry はその sequence", () => {
+    expect(maxSequenceFromBuffer([{ sequence: 7 }])).toBe(7);
+  });
+
+  it("複数 entry は最大値", () => {
+    expect(
+      maxSequenceFromBuffer([
+        { sequence: 3 },
+        { sequence: 10 },
+        { sequence: 5 },
+      ]),
+    ).toBe(10);
+  });
+
+  it("非有限 / 負 / 非 number は無視", () => {
+    const buf: { sequence: number }[] = [
+      { sequence: NaN },
+      { sequence: Infinity },
+      { sequence: -1 },
+      { sequence: 0 },
+      { sequence: 4 },
+    ];
+    expect(maxSequenceFromBuffer(buf)).toBe(4);
+  });
+
+  it("全て無効値なら null", () => {
+    expect(
+      maxSequenceFromBuffer([{ sequence: NaN }, { sequence: -1 }]),
+    ).toBeNull();
+  });
+
+  it("nextSequence と組み合わせて max(serverNext, bufferNext) を組める", () => {
+    const buf = [{ sequence: 12 }];
+    const serverLast = 10;
+    const serverNext = nextSequence(serverLast); // 11
+    const bufferNext = nextSequence(maxSequenceFromBuffer(buf)); // 13
+    expect(Math.max(serverNext, bufferNext)).toBe(13);
+  });
+
+  it("buffer 空 + server lastSequence のみでも 0 から壊れない", () => {
+    const bufferMax = maxSequenceFromBuffer([]);
+    const bufferNext = nextSequence(bufferMax); // 0
+    const serverNext = nextSequence(null); // 0
+    expect(Math.max(serverNext, bufferNext)).toBe(0);
   });
 });
 

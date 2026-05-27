@@ -175,6 +175,28 @@ export function shouldFlushNow(
   return nowMs - lastFlushAtMs >= intervalMs;
 }
 
+/**
+ * memory buffer 内の最大 sequence を返す。空 / 無効値しか無い場合は null。
+ *
+ * Codex P2: failed flush 後の再開時に server lastSequence だけを基準に採番すると
+ * buffer 内の未送信 sequence と衝突する。max(serverLast, bufferMax) を取るために
+ * 呼び出し側でこの helper を使う。
+ *
+ * 入力: TrackPointInput 互換 (sequence: number) の配列。
+ * 副作用なし。lat/lng/accuracy は読まない。
+ */
+export function maxSequenceFromBuffer(
+  buffer: ReadonlyArray<{ sequence: number }>,
+): number | null {
+  let max: number | null = null;
+  for (const p of buffer) {
+    const s = p?.sequence;
+    if (typeof s !== "number" || !Number.isFinite(s) || s < 0) continue;
+    if (max === null || s > max) max = s;
+  }
+  return max;
+}
+
 /** sequence の次値。最後の sequence が null/未確定なら 0 から開始。 */
 export function nextSequence(lastSequence: number | null | undefined): number {
   if (

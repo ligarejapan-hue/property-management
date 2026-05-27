@@ -400,9 +400,10 @@ describe("Codex P1 fix 3 — do not start with sequence 0 after fetch failure", 
       /if\s*\(\s*!r\.ok\s*\)[\s\S]*?setError\([\s\S]*?既存の巡回ルート[\s\S]*?setStatus\("idle"\)[\s\S]*?return/,
     );
     // ok===false 分岐より前に nextSequenceRef.current を 0 にリセットしていないこと
-    // (i.e. nextSequenceRef.current = nextSequence(r.lastSequence) は ok===true 後でのみ)
+    // (Codex P2 fix 1 で Math.max(serverNext, bufferNext) に変更されたので、
+    //  ok===true 後でのみ Math.max(...) 採番をしていることをガード)
     expect(m).toMatch(
-      /if\s*\(\s*!r\.ok\s*\)[\s\S]*?\}\s*[\s\S]*?nextSequenceRef\.current\s*=\s*nextSequence\(r\.lastSequence\)/,
+      /if\s*\(\s*!r\.ok\s*\)[\s\S]*?\}\s*[\s\S]*?nextSequenceRef\.current\s*=\s*Math\.max/,
     );
   });
 
@@ -447,6 +448,73 @@ describe("Codex P2 fix 4 — reset on any sessionId change", () => {
     expect(body).not.toMatch(/watchPosition\(/);
     expect(body).not.toMatch(/\bgeo\.\w+\(/);
     expect(body).not.toMatch(/setStatus\("recording"\)/);
+  });
+});
+
+describe("Codex P2 fix 1 — preserve sequence numbers when restarting after failed flush", () => {
+  it("start() で maxSequenceFromBuffer を使い buffer 内最大も考慮する", () => {
+    expect(HOOK_SRC).toMatch(/maxSequenceFromBuffer/);
+    // import に含まれていること
+    expect(HOOK_SRC).toMatch(
+      /import\s*\{[^}]*maxSequenceFromBuffer[^}]*\}\s*from\s*["']@\/lib\/field-survey-geolocation-util["']/,
+    );
+  });
+
+  it("nextSequenceRef は Math.max(serverNext, bufferNext) で採番される", () => {
+    const startBody = HOOK_SRC.match(/const start\s*=\s*useCallback[\s\S]*?\}\)\(\);/);
+    expect(startBody).not.toBeNull();
+    const m = startBody?.[0] ?? "";
+    expect(m).toMatch(/const serverNext\s*=\s*nextSequence\(r\.lastSequence\)/);
+    expect(m).toMatch(
+      /const bufferNext\s*=\s*nextSequence\(maxSequenceFromBuffer\(bufferRef\.current\)\)/,
+    );
+    expect(m).toMatch(
+      /nextSequenceRef\.current\s*=\s*Math\.max\(serverNext,\s*bufferNext\)/,
+    );
+  });
+
+  it("ok:true 直後に bufferRef.current を勝手に空にしていない (未送信を保持)", () => {
+    const startBody = HOOK_SRC.match(/const start\s*=\s*useCallback[\s\S]*?\}\)\(\);/);
+    const m = startBody?.[0] ?? "";
+    // ok 後の body 内で bufferRef.current = [] していないこと
+    const okBranch = m.match(/setSavedPoints\(r\.points\)[\s\S]*?setStatus\("recording"\)/);
+    expect(okBranch).not.toBeNull();
+    expect(okBranch?.[0]).not.toMatch(/bufferRef\.current\s*=\s*\[\]/);
+    expect(okBranch?.[0]).not.toMatch(/setPendingPoints\(\[\]\)/);
+  });
+});
+
+describe("Codex P2 fix 2 — do not start from truncated route history", () => {
+  it("fetch loop は page cap 到達かつ nextCursor 残存で ok:false を返す", () => {
+    const fn = HOOK_SRC.match(
+      /const fetchExistingTrackPoints[\s\S]*?\}\,\s*\[options\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    // for ループ脱出後に ok:true ではなく ok:false の return がある
+    expect(m).toMatch(
+      /for\s*\(let\s+i\s*=\s*0[\s\S]*?\}\s*[\s\S]*?return\s*\{\s*ok:\s*false[\s\S]*?lastSequence:\s*null[\s\S]*?points:\s*\[\]/,
+    );
+    // ループ内: nextCursor が無い時のみ ok:true を返す pattern
+    expect(m).toMatch(
+      /if\s*\(typeof\s+next\s*!==\s*"number"\)\s*\{[\s\S]*?return\s*\{\s*ok:\s*true,\s*lastSequence:\s*lastSeq,\s*points:\s*all/,
+    );
+  });
+
+  it("truncated 時の理由がコメントで明示されている (skipDuplicates / 保存漏れ)", () => {
+    expect(HOOK_SRC).toMatch(/Codex P2 fix 2/);
+    expect(HOOK_SRC).toMatch(/truncated|page cap/i);
+  });
+
+  it("ok:false なら start() は watchPosition を呼ばない (既存仕様の継続)", () => {
+    const startBody = HOOK_SRC.match(/const start\s*=\s*useCallback[\s\S]*?\}\)\(\);/);
+    const m = startBody?.[0] ?? "";
+    const okFalseBranch = m.match(/if\s*\(\s*!r\.ok\s*\)\s*\{[\s\S]*?return;\s*\}/);
+    expect(okFalseBranch).not.toBeNull();
+    expect(okFalseBranch?.[0]).not.toMatch(/watchPosition/);
+    // 汎用エラー文言で sequence/座標を含めない
+    expect(okFalseBranch?.[0]).not.toMatch(/sequence/);
+    expect(okFalseBranch?.[0]).not.toMatch(/lat|lng/i);
   });
 });
 
