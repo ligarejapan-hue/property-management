@@ -60,8 +60,11 @@ describe("use-field-survey-location-recorder — geolocation lifecycle", () => {
     expect(all.length).toBe(1);
   });
 
-  it("session が消えたら強制停止する", () => {
-    expect(HOOK_SRC).toMatch(/if\s*\(\s*!sessionId\s*\)/);
+  it("sessionId 変化時に常に reset する (null / non-null 直接切替に対応)", () => {
+    // 旧 gating パターン if (!sessionId) { ... } は除去されていること。
+    expect(HOOK_SRC).not.toMatch(/if\s*\(\s*!sessionId\s*\)\s*\{/);
+    // Codex P2 fix 4: reset effect が存在し、世代 bump + stopWatch + 各 ref/state を reset
+    expect(HOOK_SRC).toMatch(/Codex P2 fix 4/);
   });
 
   it("AbortController を fetch / flush 別に持つ", () => {
@@ -285,5 +288,184 @@ describe("use-field-survey-location-recorder — pending + stopBeforeSessionEnd 
       /stopBeforeSessionEnd[\s\S]*?await\s+flushBuffer\(\)[\s\S]{0,80}\}\s*catch/,
     );
     expect(block).not.toBeNull();
+  });
+});
+
+// =======================================================================
+// Codex hardening (P1/P2 — 4 fixes)
+// =======================================================================
+
+describe("Codex P1 fix 1 — wait for in-flight flush before ending", () => {
+  it("flush は Promise として inFlightFlushPromiseRef で追跡される", () => {
+    expect(HOOK_SRC).toMatch(/inFlightFlushPromiseRef/);
+    // flushBuffer 内で work IIFE を ref に代入する pattern
+    expect(HOOK_SRC).toMatch(
+      /inFlightFlushPromiseRef\.current\s*=\s*work/,
+    );
+    // finally で null に戻す pattern (自分が登録した promise のみ)
+    expect(HOOK_SRC).toMatch(
+      /inFlightFlushPromiseRef\.current\s*===\s*work[\s\S]*?inFlightFlushPromiseRef\.current\s*=\s*null/,
+    );
+  });
+
+  it("stopBeforeSessionEnd は in-flight flush の Promise を await してから final flush", () => {
+    // 順序: clearWatch (= stopWatchingInternal) → inflight await → final flushBuffer
+    const block = HOOK_SRC.match(
+      /stopBeforeSessionEnd[\s\S]*?stopWatchingInternal\(\)[\s\S]*?inFlightFlushPromiseRef\.current[\s\S]*?await\s+inflight[\s\S]*?bufferRef\.current\.length\s*>\s*0[\s\S]*?await\s+flushBuffer\(\)/,
+    );
+    expect(block).not.toBeNull();
+  });
+
+  it("stop() (通常停止) も in-flight flush を await してから final flush する", () => {
+    const block = HOOK_SRC.match(
+      /const stop\s*=\s*useCallback[\s\S]*?stopWatchingInternal\(\)[\s\S]*?inFlightFlushPromiseRef\.current[\s\S]*?await\s+inflight[\s\S]*?await\s+flushBuffer\(\)/,
+    );
+    expect(block).not.toBeNull();
+  });
+
+  it("inflight await の raw error は console / setError に流さない", () => {
+    // try { await inflight } catch { /* swallow */ } の pattern (汎用文言のみ)
+    expect(HOOK_SRC).toMatch(
+      /await\s+inflight[\s\S]{0,80}\}\s*catch/,
+    );
+    expect(HOOK_SRC).not.toMatch(/console\.\w+\([^)]*inflight/i);
+  });
+});
+
+describe("Codex P1 fix 2 — recheck session before starting watcher", () => {
+  it("start() で startSessionId / startGeneration を捕捉する", () => {
+    expect(HOOK_SRC).toMatch(/const startSessionId\s*=\s*sessionIdRef\.current/);
+    expect(HOOK_SRC).toMatch(
+      /const startGeneration\s*=\s*recorderGenerationRef\.current/,
+    );
+  });
+
+  it("fetch 完了後、watchPosition 開始前に session / generation を再確認する", () => {
+    // start 関数本体: fetch 後の guard
+    const startBody = HOOK_SRC.match(/const start\s*=\s*useCallback[\s\S]*?\}\)\(\);/);
+    expect(startBody).not.toBeNull();
+    const m = startBody?.[0] ?? "";
+    expect(m).toMatch(/await\s+fetchExistingTrackPoints/);
+    expect(m).toMatch(
+      /sessionIdRef\.current\s*!==\s*startSessionId[\s\S]*?recorderGenerationRef\.current\s*!==\s*startGeneration/,
+    );
+  });
+
+  it("watchPosition 取得後にも generation を再確認し、不一致なら clearWatch する", () => {
+    // watchPosition の戻り値取得後 / watchIdRef 代入前のチェック
+    const block = HOOK_SRC.match(
+      /id\s*=\s*geo\.watchPosition[\s\S]*?recorderGenerationRef\.current\s*!==\s*startGeneration[\s\S]*?geo\.clearWatch\(id\)/,
+    );
+    expect(block).not.toBeNull();
+  });
+
+  it("stop / stopBeforeSessionEnd / sessionId effect で generation を進めて continuation を無効化", () => {
+    // stop
+    expect(HOOK_SRC).toMatch(
+      /const stop\s*=\s*useCallback[\s\S]*?recorderGenerationRef\.current\s*\+=\s*1/,
+    );
+    // stopBeforeSessionEnd
+    expect(HOOK_SRC).toMatch(
+      /const stopBeforeSessionEnd\s*=\s*useCallback[\s\S]*?recorderGenerationRef\.current\s*\+=\s*1/,
+    );
+    // sessionId useEffect
+    expect(HOOK_SRC).toMatch(
+      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?recorderGenerationRef\.current\s*\+=\s*1[\s\S]*?\}\,\s*\[sessionId/,
+    );
+  });
+});
+
+describe("Codex P1 fix 3 — do not start with sequence 0 after fetch failure", () => {
+  it("fetchExistingTrackPoints は ok / lastSequence / points を返し、state を直接触らない", () => {
+    // 戻り値 type に points が含まれる
+    expect(HOOK_SRC).toMatch(
+      /Promise<\{\s*ok:\s*boolean;\s*lastSequence:[\s\S]*?points:\s*RecorderPoint\[\];/,
+    );
+    // 関数本体で setSavedPoints / setError を呼ばないこと
+    const fn = HOOK_SRC.match(
+      /const fetchExistingTrackPoints[\s\S]*?\}\,\s*\[options\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    expect(fn?.[0]).not.toMatch(/setSavedPoints\(/);
+    expect(fn?.[0]).not.toMatch(/setError\(/);
+    expect(fn?.[0]).not.toMatch(/safeSetState\(setError/);
+  });
+
+  it("start() は r.ok===false なら watchPosition を呼ばず、汎用エラーで idle に倒す", () => {
+    const startBody = HOOK_SRC.match(/const start\s*=\s*useCallback[\s\S]*?\}\)\(\);/);
+    expect(startBody).not.toBeNull();
+    const m = startBody?.[0] ?? "";
+    // ok===false 分岐で setError + setStatus("idle") + return
+    expect(m).toMatch(
+      /if\s*\(\s*!r\.ok\s*\)[\s\S]*?setError\([\s\S]*?既存の巡回ルート[\s\S]*?setStatus\("idle"\)[\s\S]*?return/,
+    );
+    // ok===false 分岐より前に nextSequenceRef.current を 0 にリセットしていないこと
+    // (i.e. nextSequenceRef.current = nextSequence(r.lastSequence) は ok===true 後でのみ)
+    expect(m).toMatch(
+      /if\s*\(\s*!r\.ok\s*\)[\s\S]*?\}\s*[\s\S]*?nextSequenceRef\.current\s*=\s*nextSequence\(r\.lastSequence\)/,
+    );
+  });
+
+  it("既存 track points fetch が失敗した経路では watchPosition を呼ばない (構造ガード)", () => {
+    // fetch 結果の ok===false → watchPosition() に到達しないように return している
+    const startBody = HOOK_SRC.match(/const start\s*=\s*useCallback[\s\S]*?\}\)\(\);/);
+    const m = startBody?.[0] ?? "";
+    // !r.ok ブロックの中で geo.watchPosition を呼ばない
+    const okFalseBranch = m.match(
+      /if\s*\(\s*!r\.ok\s*\)\s*\{[\s\S]*?return;\s*\}/,
+    );
+    expect(okFalseBranch).not.toBeNull();
+    expect(okFalseBranch?.[0]).not.toMatch(/watchPosition/);
+  });
+});
+
+describe("Codex P2 fix 4 — reset on any sessionId change", () => {
+  // reset useEffect は `// Codex P2 fix 4:` コメントで一意に識別する。
+  function extractResetEffect(): string {
+    const m = HOOK_SRC.match(
+      /\/\/\s*Codex P2 fix 4:[\s\S]*?useEffect\(\(\)\s*=>\s*\{([\s\S]*?)\}\,\s*\[sessionId,\s*stopWatchingInternal\]\s*\);/,
+    );
+    expect(m).not.toBeNull();
+    return m?.[1] ?? "";
+  }
+
+  it("sessionId effect で session に関わらず watch / buffer / pending / saved / sequence を reset", () => {
+    const body = extractResetEffect();
+    expect(body).toMatch(/recorderGenerationRef\.current\s*\+=\s*1/);
+    expect(body).toMatch(/stopWatchingInternal\(\)/);
+    expect(body).toMatch(/bufferRef\.current\s*=\s*\[\]/);
+    expect(body).toMatch(/lastAcceptedRef\.current\s*=\s*null/);
+    expect(body).toMatch(/nextSequenceRef\.current\s*=\s*0/);
+    expect(body).toMatch(/setSavedPoints\(\[\]\)/);
+    expect(body).toMatch(/setPendingPoints\(\[\]\)/);
+    expect(body).toMatch(/setBufferedCount\(0\)/);
+    expect(body).toMatch(/setStatus\("idle"\)/);
+  });
+
+  it("session 切替で自動 recording 開始しない (effect 内で watch を起動しない)", () => {
+    const body = extractResetEffect();
+    expect(body).not.toMatch(/watchPosition\(/);
+    expect(body).not.toMatch(/\bgeo\.\w+\(/);
+    expect(body).not.toMatch(/setStatus\("recording"\)/);
+  });
+});
+
+describe("Codex hardening — privacy preservation (regression guard)", () => {
+  it("inflight / generation の追加で console に lat/lng/raw response/api key を出していない", () => {
+    expect(HOOK_SRC).not.toMatch(/console\.\w+\([^)]*lat/i);
+    expect(HOOK_SRC).not.toMatch(/console\.\w+\([^)]*lng/i);
+    expect(HOOK_SRC).not.toMatch(/console\.\w+\([^)]*apiKey/i);
+    expect(HOOK_SRC).not.toMatch(/console\.\w+\([^)]*response/i);
+    expect(HOOK_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
+  });
+
+  it("localStorage / sessionStorage / IndexedDB を使わない (継続)", () => {
+    expect(HOOK_SRC).not.toMatch(/localStorage\s*\.\s*(setItem|getItem|removeItem)/);
+    expect(HOOK_SRC).not.toMatch(/sessionStorage\s*\.\s*(setItem|getItem|removeItem)/);
+    expect(HOOK_SRC).not.toMatch(/\bindexedDB\s*\.\s*open/);
+  });
+
+  it("Wake Lock を使わない (継続)", () => {
+    expect(HOOK_SRC).not.toMatch(/wakeLock/);
   });
 });

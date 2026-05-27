@@ -122,11 +122,19 @@ export function useFieldSurveyLocationRecorder(
   const watchIdRef = useRef<number | null>(null);
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlightFlushRef = useRef<boolean>(false);
+  // Codex P1 (fix 1): in-flight flush を Promise として追跡し、巡回終了時に
+  // 「実 POST の完了」を await できるようにする。flushBuffer 入口で代入、
+  // finally で null に戻す。
+  const inFlightFlushPromiseRef = useRef<Promise<boolean> | null>(null);
   const lastFlushAtMsRef = useRef<number | null>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const flushAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const sessionIdRef = useRef<string | null>(sessionId);
+  // Codex P1 (fix 2 / fix 4) + P2 (fix 4): start() の async continuation や
+  // 進行中 flush を、session 切替 / stopBeforeSessionEnd / unmount で確実に
+  // 無効化するための世代カウンタ。session 切替 / stop で必ず +1 する。
+  const recorderGenerationRef = useRef<number>(0);
 
   // sessionId が変わったら ref に同期 (effect cleanup ロジック用)
   useEffect(() => {
@@ -140,76 +148,114 @@ export function useFieldSurveyLocationRecorder(
 
   // ---- buffer flush ------------------------------------------------------
 
-  const flushBuffer = useCallback(async (): Promise<boolean> => {
+  const flushBuffer = useCallback((): Promise<boolean> => {
     const sid = sessionIdRef.current;
-    if (!sid) return false;
-    if (inFlightFlushRef.current) return false;
-    if (bufferRef.current.length === 0) return false;
+    if (!sid) return Promise.resolve(false);
+    if (inFlightFlushRef.current) {
+      // 既存 in-flight が走っている場合、新規 flush は開始しない。
+      // 呼び出し側が「完了まで待ちたい」場合は inFlightFlushPromiseRef を await する。
+      return Promise.resolve(false);
+    }
+    if (bufferRef.current.length === 0) return Promise.resolve(false);
     inFlightFlushRef.current = true;
     safeSetState(setIsFlushing, true);
+    // Codex P1 (fix 1 / fix 4): flush 開始時の sid と世代を捕捉し、レスポンス
+    // 反映時に session 切替 / stop が起きていないか再確認する。
+    const startSid = sid;
+    const startGeneration = recorderGenerationRef.current;
     // snapshot して in-flight 中の追加点は次回 flush に回す
     const snapshot = bufferRef.current.slice();
     const ac = new AbortController();
     flushAbortRef.current = ac;
-    try {
-      const f = options.fetcher ?? fetch;
-      const res = await f(
-        `/api/field-survey/sessions/${encodeURIComponent(sid)}/track-points`,
-        {
-          method: "POST",
-          credentials: "same-origin",
-          headers: POST_HEADERS,
-          body: JSON.stringify({ points: snapshot }),
-          signal: ac.signal,
-        },
-      );
-      if (!mountedRef.current) return false;
-      if (!res.ok) {
-        // status のみで汎用文言に変換 (本文は読まない / console に出さない)
-        safeSetState(setError, mapHttpErrorToMessage(res.status));
+    const work = (async (): Promise<boolean> => {
+      try {
+        const f = options.fetcher ?? fetch;
+        const res = await f(
+          `/api/field-survey/sessions/${encodeURIComponent(startSid)}/track-points`,
+          {
+            method: "POST",
+            credentials: "same-origin",
+            headers: POST_HEADERS,
+            body: JSON.stringify({ points: snapshot }),
+            signal: ac.signal,
+          },
+        );
+        if (!mountedRef.current) return false;
+        // session 切替 / stop が起きていたら新セッションの state を汚染しない。
+        if (
+          sessionIdRef.current !== startSid ||
+          recorderGenerationRef.current !== startGeneration
+        ) {
+          return false;
+        }
+        if (!res.ok) {
+          // status のみで汎用文言に変換 (本文は読まない / console に出さない)
+          safeSetState(setError, mapHttpErrorToMessage(res.status));
+          return false;
+        }
+        // 成功した snapshot を buffer から取り除く (途中で push された分は残す)
+        const sent = new Set(snapshot.map((p) => p.sequence));
+        bufferRef.current = bufferRef.current.filter(
+          (p) => !sent.has(p.sequence),
+        );
+        safeSetState(setBufferedCount, bufferRef.current.length);
+        // pendingPoints (polyline 用) も同様に同期。座標値は state 化されるが
+        // 表示用 (Polyline path) であって console / error には流出しない。
+        safeSetState(setPendingPoints, snapshotPending(bufferRef.current));
+        const accepted: RecorderPoint[] = snapshot.map((p) => ({
+          sequence: p.sequence,
+          lat: p.lat,
+          lng: p.lng,
+        }));
+        if (mountedRef.current) {
+          setSavedPoints((prev) => mergeBySequence(prev, accepted));
+        }
+        const now = new Date();
+        lastFlushAtMsRef.current = now.getTime();
+        safeSetState(setLastFlushAt, now);
+        safeSetState(setError, null);
+        return true;
+      } catch (err) {
+        if (isAbortError(err) || !mountedRef.current) return false;
+        if (
+          sessionIdRef.current !== startSid ||
+          recorderGenerationRef.current !== startGeneration
+        ) {
+          return false;
+        }
+        // raw error / response 全文は出さず汎用文言のみ。
+        safeSetState(setError, "位置情報の送信に失敗しました。");
         return false;
+      } finally {
+        inFlightFlushRef.current = false;
+        safeSetState(setIsFlushing, false);
+        // 自分が登録した promise だけを片付ける (世代越えで上書きされた場合は触らない)
+        if (inFlightFlushPromiseRef.current === work) {
+          inFlightFlushPromiseRef.current = null;
+        }
       }
-      // 成功した snapshot を buffer から取り除く (途中で push された分は残す)
-      const sent = new Set(snapshot.map((p) => p.sequence));
-      bufferRef.current = bufferRef.current.filter(
-        (p) => !sent.has(p.sequence),
-      );
-      safeSetState(setBufferedCount, bufferRef.current.length);
-      // pendingPoints (polyline 用) も同様に同期。座標値は state 化されるが
-      // 表示用 (Polyline path) であって console / error には流出しない。
-      safeSetState(setPendingPoints, snapshotPending(bufferRef.current));
-      // savedPoints は polyline 用に lat/lng/sequence のみ保持
-      const accepted: RecorderPoint[] = snapshot.map((p) => ({
-        sequence: p.sequence,
-        lat: p.lat,
-        lng: p.lng,
-      }));
-      if (mountedRef.current) {
-        setSavedPoints((prev) => mergeBySequence(prev, accepted));
-      }
-      const now = new Date();
-      lastFlushAtMsRef.current = now.getTime();
-      safeSetState(setLastFlushAt, now);
-      safeSetState(setError, null);
-      return true;
-    } catch (err) {
-      if (isAbortError(err) || !mountedRef.current) return false;
-      safeSetState(setError, "位置情報の送信に失敗しました。");
-      return false;
-    } finally {
-      inFlightFlushRef.current = false;
-      safeSetState(setIsFlushing, false);
-    }
+    })();
+    inFlightFlushPromiseRef.current = work;
+    return work;
   }, [options, safeSetState]);
 
   // ---- fetch existing route ---------------------------------------------
 
+  /**
+   * 既存 track points を全ページ取得する pure 寄り版。
+   *  - state は触らない (setSavedPoints / setError しない)。
+   *  - 呼び出し側 (start) が ok / session 不変を再確認してから state 反映する。
+   *    fetch 中に session 切替 / 終了が起きると buffer / sequence が新セッションへ
+   *    漏れる事故を防ぐ (Codex P1 fix 2)。
+   */
   const fetchExistingTrackPoints = useCallback(async (): Promise<{
     ok: boolean;
     lastSequence: number | null;
+    points: RecorderPoint[];
+    httpStatus?: number;
   }> => {
     const sid = sessionIdRef.current;
-    if (!sid) return { ok: false, lastSequence: null };
+    if (!sid) return { ok: false, lastSequence: null, points: [] };
     if (fetchAbortRef.current) fetchAbortRef.current.abort();
     const ac = new AbortController();
     fetchAbortRef.current = ac;
@@ -227,15 +273,23 @@ export function useFieldSurveyLocationRecorder(
           `/api/field-survey/sessions/${encodeURIComponent(sid)}/track-points?${params.toString()}`,
           { credentials: "same-origin", signal: ac.signal },
         );
-        if (!mountedRef.current) return { ok: false, lastSequence: null };
+        if (!mountedRef.current) {
+          return { ok: false, lastSequence: null, points: [] };
+        }
         if (!res.ok) {
-          safeSetState(setError, mapHttpErrorToMessage(res.status));
-          return { ok: false, lastSequence: null };
+          return {
+            ok: false,
+            lastSequence: null,
+            points: [],
+            httpStatus: res.status,
+          };
         }
         const body = (await res.json().catch(() => null)) as
           | { data?: ApiTrackPointRow[]; nextCursor?: number | null }
           | null;
-        if (!mountedRef.current) return { ok: false, lastSequence: null };
+        if (!mountedRef.current) {
+          return { ok: false, lastSequence: null, points: [] };
+        }
         const rows = Array.isArray(body?.data) ? body!.data : [];
         for (const r of rows) {
           if (
@@ -251,17 +305,14 @@ export function useFieldSurveyLocationRecorder(
         if (typeof next !== "number") break;
         cursor = next;
       }
-      if (mountedRef.current) setSavedPoints(all);
-      safeSetState(setError, null);
-      return { ok: true, lastSequence: lastSeq };
+      return { ok: true, lastSequence: lastSeq, points: all };
     } catch (err) {
       if (isAbortError(err) || !mountedRef.current) {
-        return { ok: false, lastSequence: null };
+        return { ok: false, lastSequence: null, points: [] };
       }
-      safeSetState(setError, "保存済ルートの取得に失敗しました。");
-      return { ok: false, lastSequence: null };
+      return { ok: false, lastSequence: null, points: [] };
     }
-  }, [options, safeSetState]);
+  }, [options]);
 
   // ---- watchPosition lifecycle ------------------------------------------
 
@@ -341,23 +392,63 @@ export function useFieldSurveyLocationRecorder(
     }
     setStatus("preparing");
     setError(null);
+    // Codex P1 fix 2: start 時点の session / 世代を捕捉。fetch 完了後に session
+    // が切り替わっている / stop が呼ばれている / unmount されている場合は
+    // watchPosition を開始しない。
+    const startSessionId = sessionIdRef.current;
+    const startGeneration = recorderGenerationRef.current;
     void (async () => {
       const r = await fetchExistingTrackPoints();
       if (!mountedRef.current) return;
-      // 既存 sequence の次から採番 (server side は (sessionId, sequence) unique)
+      // session / 世代の不変条件を再確認
+      if (
+        sessionIdRef.current !== startSessionId ||
+        recorderGenerationRef.current !== startGeneration ||
+        !startSessionId
+      ) {
+        // status は session-change 効果側で既に idle に戻されているはず。
+        return;
+      }
+      // Codex P1 fix 3: fetch 失敗時は sequence 不明のまま記録開始しない。
+      // (既存 track points がある状態で sequence=0 から再開すると
+      //  skipDuplicates により client buffer が消えて保存漏れになる)。
+      if (!r.ok) {
+        setError(
+          "既存の巡回ルートを確認できなかったため、位置記録を開始できませんでした。再度お試しください。",
+        );
+        setStatus("idle");
+        return;
+      }
+      // ok=true で初めて saved 反映 + sequence 採番。
+      setSavedPoints(r.points);
       nextSequenceRef.current = nextSequence(r.lastSequence);
+      let id: number;
       try {
-        const id = geo.watchPosition(handlePosition, handlePositionError, {
+        id = geo.watchPosition(handlePosition, handlePositionError, {
           enableHighAccuracy: true,
           maximumAge: 5_000,
           timeout: 30_000,
         });
-        watchIdRef.current = id;
       } catch {
         setError("位置情報の取得を開始できませんでした。");
         setStatus("error");
         return;
       }
+      // watchPosition 取得直後にも再確認 (await 直後の同期窓は短いが、
+      // geo.watchPosition の同期処理中に他 effect が走るケースに備える)。
+      if (
+        !mountedRef.current ||
+        sessionIdRef.current !== startSessionId ||
+        recorderGenerationRef.current !== startGeneration
+      ) {
+        try {
+          geo.clearWatch(id);
+        } catch {
+          // 流出回避: 詳細は出さない
+        }
+        return;
+      }
+      watchIdRef.current = id;
       // flush 周期タイマー
       if (flushTimerRef.current !== null) clearInterval(flushTimerRef.current);
       flushTimerRef.current = setInterval(() => {
@@ -388,55 +479,97 @@ export function useFieldSurveyLocationRecorder(
   const stop = useCallback(async () => {
     if (status === "idle") return;
     setStatus("stopping");
+    // start() の async continuation を無効化 + watch / timer 即時遮断
+    recorderGenerationRef.current += 1;
     stopWatchingInternal();
-    if (bufferRef.current.length > 0) {
-      await flushBuffer();
+    // 既存 in-flight flush を await (snapshot 内を確実に送ってから final)
+    const inflight = inFlightFlushPromiseRef.current;
+    if (inflight) {
+      try {
+        await inflight;
+      } catch {
+        // raw error / response は出さない
+      }
+      if (!mountedRef.current) return;
     }
-    if (!mountedRef.current) return;
-    setStatus("idle");
-  }, [flushBuffer, status, stopWatchingInternal]);
-
-  /**
-   * 巡回終了直前の連動。idle 中は no-op。recording / preparing / stopping
-   * いずれでも:
-   *  1) watch を clearWatch + flush timer 停止 (副作用の即時遮断)
-   *  2) memory buffer を 1 回 flush 試行 (失敗しても throw しない)
-   *  3) status を idle に倒し UI を巡回終了後と整合
-   * session API PATCH の前に await されることを想定。
-   */
-  const stopBeforeSessionEnd = useCallback(async () => {
-    if (status === "idle") return;
-    setStatus("stopping");
-    stopWatchingInternal();
     if (bufferRef.current.length > 0) {
       try {
         await flushBuffer();
       } catch {
-        // 終了前 flush の失敗は巡回終了自体を阻まない (未送信点は失われる)
+        // final flush 失敗は無視 (未送信点は失われる)
       }
+      if (!mountedRef.current) return;
     }
-    if (!mountedRef.current) return;
+    setStatus("idle");
+  }, [flushBuffer, status, stopWatchingInternal]);
+
+  /**
+   * 巡回終了直前の連動。idle 中は no-op。
+   *
+   * Codex P1 fix 1: in-flight flush を Promise として追跡し、確実に完了を
+   * 待ってから final flush を 1 回行う。古い flush の snapshot 後に追加された
+   * 点も、final flush で拾われる。
+   *
+   * 順序:
+   *  1) status を stopping にして UI を遷移
+   *  2) 世代カウンタを進めて start() の async continuation を無効化
+   *  3) clearWatch + flush timer 停止 (新規 callback の遮断)
+   *  4) 既存 in-flight flush があれば完了まで await (raw error は出さない)
+   *  5) 残った buffer を final flush 試行 (失敗時も汎用文言のみ)
+   *  6) status を idle に倒す
+   */
+  const stopBeforeSessionEnd = useCallback(async () => {
+    if (status === "idle") return;
+    setStatus("stopping");
+    // 古い start() の continuation を無効化 (fetch 中なら watch 開始させない)
+    recorderGenerationRef.current += 1;
+    stopWatchingInternal();
+    // 既存 in-flight flush の完了を await (snapshot 内の点を server に届かせる)
+    const inflight = inFlightFlushPromiseRef.current;
+    if (inflight) {
+      try {
+        await inflight;
+      } catch {
+        // raw error / response は出さない
+      }
+      if (!mountedRef.current) return;
+    }
+    // in-flight が完了した時点で buffer に残っているのは「snapshot 後に
+    // 追加された / 失敗で残った」点。final flush でこれらを送る。
+    if (bufferRef.current.length > 0) {
+      try {
+        await flushBuffer();
+      } catch {
+        // 終了前 final flush の失敗は巡回終了自体を阻まない
+      }
+      if (!mountedRef.current) return;
+    }
     setStatus("idle");
   }, [flushBuffer, status, stopWatchingInternal]);
 
   // ---- session change / unmount cleanup ---------------------------------
 
+  // Codex P2 fix 4: sessionId が変わったら null / non-null を問わず必ず reset
+  // する。A → B のような non-null 直接切替で A の watch / buffer / sequence が
+  // B へ持ち越されるのを防ぐ。active session 復元や切替時に自動 recording を
+  // 開始しない方針は維持 (status は idle に倒し、ユーザーが明示的に「位置記録
+  // 開始」を押すまで watchPosition は起動しない)。
   useEffect(() => {
-    // session が消えた / 切り替わったら強制停止。
-    if (!sessionId) {
-      stopWatchingInternal();
-      bufferRef.current = [];
-      lastAcceptedRef.current = null;
-      nextSequenceRef.current = 0;
-      lastFlushAtMsRef.current = null;
-      if (mountedRef.current) {
-        setStatus("idle");
-        setBufferedCount(0);
-        setSavedPoints([]);
-        setPendingPoints([]);
-        setLastFlushAt(null);
-        setIsLowAccuracyNow(false);
-      }
+    // 古い start() continuation / in-flight flush の state 反映を無効化
+    recorderGenerationRef.current += 1;
+    stopWatchingInternal();
+    bufferRef.current = [];
+    lastAcceptedRef.current = null;
+    nextSequenceRef.current = 0;
+    lastFlushAtMsRef.current = null;
+    if (mountedRef.current) {
+      setStatus("idle");
+      setBufferedCount(0);
+      setSavedPoints([]);
+      setPendingPoints([]);
+      setLastFlushAt(null);
+      setIsLowAccuracyNow(false);
+      setError(null);
     }
   }, [sessionId, stopWatchingInternal]);
 
