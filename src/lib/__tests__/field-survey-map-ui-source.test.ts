@@ -255,17 +255,21 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(pinRowDecl?.[0]).toMatch(/hasMemo/);
   });
 
-  it("API レスポンス受け取りで memo を捨てる stripPinMemo を経由", () => {
-    expect(MAP_SRC).toMatch(/stripPinMemo/);
+  it("API レスポンス受け取りに client side strip (stripPinMemo) を使わない", () => {
+    // view=map projection で API 側が memo を返さなくなったため、client strip は不要。
+    // 過去 helper の再混入で「生 memo が一度 client メモリに乗る」状態に
+    // 退行しないことを構造的にガード。
+    expect(MAP_SRC).not.toMatch(/stripPinMemo/);
   });
 
-  it("Pin fetch URL に bbox (north/south/east/west) が含まれる (Codex P2)", () => {
-    // pin fetch 経路で URLSearchParams に bbox 4 値が積まれる
+  it("Pin fetch URL に bbox (north/south/east/west) + view=map が含まれる (Codex Phase 1-E)", () => {
+    // pin fetch 経路で URLSearchParams に bbox 4 値 + view=map が積まれる
     const pinFetchRegion = MAP_SRC.match(
       /api\/field-survey\/pins[\s\S]{0,400}/,
     );
     expect(pinFetchRegion).not.toBeNull();
     // URLSearchParams object literal shorthand の key を検出
+    expect(MAP_SRC).toMatch(/\bview:\s*["']map["']/);
     expect(MAP_SRC).toMatch(/\bnorth:\s*String\(/);
     expect(MAP_SRC).toMatch(/\bsouth:\s*String\(/);
     expect(MAP_SRC).toMatch(/\beast:\s*String\(/);

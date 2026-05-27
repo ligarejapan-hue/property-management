@@ -277,6 +277,10 @@ export const fieldSurveyPinListQuerySchema = z
     south: z.coerce.number().min(-90).max(90).optional(),
     east: z.coerce.number().min(-180).max(180).optional(),
     west: z.coerce.number().min(-180).max(180).optional(),
+    // map-safe projection。view=map のとき response から memo 本文を完全に除外し
+    // hasMemo: boolean のみ返す (Codex Phase 1-E: Map UI の Network レスポンス
+    // に memo 本文を載せない)。指定なしは既存 generic projection。
+    view: z.enum(["map"]).optional(),
   })
   .superRefine((v, ctx) => {
     const present = [v.north, v.south, v.east, v.west].filter(

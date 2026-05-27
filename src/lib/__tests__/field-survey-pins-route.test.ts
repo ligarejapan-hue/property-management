@@ -674,6 +674,154 @@ describe("GET /api/field-survey/pins (list)", () => {
     expect(args.where.staffUserId).toBe("99999999-9999-4999-8999-999999999999");
     expect(args.where.lat).toEqual({ gte: 35.6, lte: 35.7 });
   });
+
+  // --- Codex Phase 1-E: view=map projection (memo を response に載せない) ---
+
+  it("view=map 指定時、response の各 row に memo key が含まれず hasMemo:boolean を返す", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([
+      {
+        id: "pin-1",
+        sessionId: null,
+        staffUserId: fieldUser.id,
+        propertyId: null,
+        lat: 35.68,
+        lng: 139.75,
+        accuracy: 5,
+        pinType: "candidate",
+        status: "open",
+        memo: "non-empty memo body",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: "pin-2",
+        sessionId: null,
+        staffUserId: fieldUser.id,
+        propertyId: null,
+        lat: 35.68,
+        lng: 139.75,
+        accuracy: 5,
+        pinType: "interesting",
+        status: "open",
+        memo: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: "pin-3",
+        sessionId: null,
+        staffUserId: fieldUser.id,
+        propertyId: null,
+        lat: 35.68,
+        lng: 139.75,
+        accuracy: 5,
+        pinType: "blocked",
+        status: "open",
+        memo: "   ", // whitespace のみは false 扱い
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?view=map&north=35.7&south=35.6&east=139.8&west=139.7",
+      ),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    for (const row of body.data) {
+      expect(row).not.toHaveProperty("memo");
+      expect(typeof row.hasMemo).toBe("boolean");
+    }
+    expect(body.data[0].hasMemo).toBe(true); // 通常 memo
+    expect(body.data[1].hasMemo).toBe(false); // null
+    expect(body.data[2].hasMemo).toBe(false); // whitespace only
+  });
+
+  it("view=map の response 全体に memo 本文文字列が一切含まれない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const secret = "TOP_SECRET_MEMO_BODY_42";
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([
+      {
+        id: "pin-x",
+        sessionId: null,
+        staffUserId: fieldUser.id,
+        propertyId: null,
+        lat: 35.68,
+        lng: 139.75,
+        accuracy: null,
+        pinType: "candidate",
+        status: "open",
+        memo: secret,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?view=map&north=35.7&south=35.6&east=139.8&west=139.7",
+      ),
+    );
+    const text = await res.text();
+    expect(text).not.toContain(secret);
+    expect(text).not.toMatch(/"memo"/);
+  });
+
+  it("view 未指定 (generic) は既存どおり memo を返す (後方互換)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([
+      {
+        id: "pin-1",
+        sessionId: null,
+        staffUserId: fieldUser.id,
+        propertyId: null,
+        lat: 35.68,
+        lng: 139.75,
+        accuracy: 5,
+        pinType: "candidate",
+        status: "open",
+        memo: "kept",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await LIST(makeReq("http://x/api/field-survey/pins"));
+    const body = await res.json();
+    expect(body.data[0]).toHaveProperty("memo", "kept");
+    expect(body.data[0]).not.toHaveProperty("hasMemo");
+  });
+
+  it("view=map でも bbox / own / read_all / archived 既存ガードが効く", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([]);
+    await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?view=map&north=35.7&south=35.6&east=139.8&west=139.7",
+      ),
+    );
+    const args = (prisma.fieldSurveyPin.findMany as Mock).mock.calls[0][0];
+    // own only 強制
+    expect(args.where.staffUserId).toBe(fieldUser.id);
+    // bbox
+    expect(args.where.lat).toEqual({ gte: 35.6, lte: 35.7 });
+    expect(args.where.lng).toEqual({ gte: 139.7, lte: 139.8 });
+    // archived default 除外
+    expect(args.where.status).toEqual({ not: "archived" });
+  });
+
+  it("view=invalid は 422 で reject", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await LIST(
+      makeReq("http://x/api/field-survey/pins?view=detail"),
+    );
+    expect(res.status).toBe(422);
+  });
 });
 
 // ============================================================

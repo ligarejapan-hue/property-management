@@ -226,7 +226,10 @@ function MapDataLayer({
         if (layers.pins) {
           // Codex P2: pin fetch も bbox スコープに絞り、viewport 外の他人 pin
           // を取らない。bbox は Property と同じ map bounds を使う。
+          // view=map は memo 本文を Network レスポンスに載せない map-safe
+          // projection (Codex Phase 1-E pin memo projection fix)。
           const pinQs = new URLSearchParams({
+            view: "map",
             north: String(b.north),
             south: String(b.south),
             east: String(b.east),
@@ -257,12 +260,12 @@ function MapDataLayer({
         if (layers.pins) {
           const r = results[idx++];
           if (r.ok) {
-            // API は memo を返すが UI では本文を持ち回らない。
-            // 「メモあり」boolean のみ derive して以後 raw memo は捨てる。
-            const j = (await r.json()) as {
-              data?: (PinRow & { memo?: string | null })[];
-            };
-            setPins(filterValidPinGps(stripPinMemo(j.data ?? [])));
+            // view=map projection で API 側が memo を返さず hasMemo: boolean
+            // のみを返すため、クライアント側 strip は不要。防御として
+            // 万一 memo key が残っていた場合に備えた追加 strip は行わない
+            // (生 memo を一度でも client メモリに乗せないため)。
+            const j = (await r.json()) as { data?: PinRow[] };
+            setPins(filterValidPinGps(j.data ?? []));
           } else {
             handleHttpError(r.status, onError);
           }
@@ -455,15 +458,5 @@ function filterValidPinGps(rows: PinRow[]): PinRow[] {
   );
 }
 
-// API レスポンス上の memo 本文を Map UI の state に持ち込まない (Codex P2)。
-// 「メモあり」boolean のみ derive して raw memo は捨てる。
-// これにより React DevTools / 後段の console / 派生 state に memo 本文が
-// 残らないことを構造的に保証する。
-function stripPinMemo(
-  rows: (PinRow & { memo?: string | null })[],
-): PinRow[] {
-  return rows.map(({ memo, ...rest }) => ({
-    ...rest,
-    hasMemo: typeof memo === "string" && memo.trim().length > 0,
-  }));
-}
+// memo 本文の client side strip は廃止。view=map projection で API 側が
+// memo 本文を一切返さないため、Map UI が memo 文字列を扱う経路がない。
