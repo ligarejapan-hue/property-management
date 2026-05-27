@@ -332,8 +332,10 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     );
     expect(useCurrentBlock).not.toBeNull();
     expect(useCurrentBlock?.[0]).not.toMatch(/recorder\./);
+    // handlePinCreateSubmit の useCallback 本体内で recorder.* を呼ばない
+    // (deps list は revision で変化しうるので body のみ捕捉)。
     const submitBlock = MAP_SRC.match(
-      /handlePinCreateSubmit[\s\S]*?\}\,\s*\[activeSession,\s*pinMutations,\s*bumpRefetch\]/,
+      /handlePinCreateSubmit\s*=\s*useCallback\(\s*async[\s\S]*?\}\,\s*\[/,
     );
     expect(submitBlock).not.toBeNull();
     expect(submitBlock?.[0]).not.toMatch(/recorder\./);
@@ -453,6 +455,123 @@ describe("Codex P2 fix 2 — reset stale pin detail when switching pins", () => 
     expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*lng/i);
     expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*response/i);
     expect(DETAIL_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
+  });
+});
+
+// =======================================================================
+// Codex P2: guard late geolocation callbacks after cancel / session change
+// =======================================================================
+describe("Codex P2 — ignore stale geolocation callbacks", () => {
+  it("currentLocationRequestIdRef / activeSessionIdRef / fsMapMountedRef を持つ", () => {
+    expect(MAP_SRC).toMatch(/currentLocationRequestIdRef/);
+    expect(MAP_SRC).toMatch(/activeSessionIdRef/);
+    expect(MAP_SRC).toMatch(/fsMapMountedRef/);
+  });
+
+  it("invalidateCurrentLocationRequest が token を bump する helper として存在", () => {
+    expect(MAP_SRC).toMatch(/const\s+invalidateCurrentLocationRequest\s*=\s*useCallback/);
+    expect(MAP_SRC).toMatch(
+      /invalidateCurrentLocationRequest[\s\S]*?currentLocationRequestIdRef\.current\s*\+=\s*1/,
+    );
+  });
+
+  it("useCurrentLocationForCreate 実行時に新 token を発行し、requestSessionId を捕捉", () => {
+    const fn = MAP_SRC.match(
+      /const useCurrentLocationForCreate\s*=\s*useCallback\([\s\S]*?\}\,\s*\[\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/currentLocationRequestIdRef\.current\s*\+=\s*1/);
+    expect(m).toMatch(/const requestId\s*=\s*currentLocationRequestIdRef\.current/);
+    expect(m).toMatch(
+      /const requestSessionId\s*=\s*activeSessionIdRef\.current/,
+    );
+  });
+
+  it("success / error callback の冒頭で 3 段ガード (mounted / requestId / sessionId) を確認", () => {
+    const fn = MAP_SRC.match(
+      /const useCurrentLocationForCreate\s*=\s*useCallback\([\s\S]*?\}\,\s*\[\]\s*\);/,
+    );
+    const m = fn?.[0] ?? "";
+    // success callback
+    const successBlock = m.match(/\(pos\)\s*=>\s*\{[\s\S]*?\}\,\s*\(err\)/);
+    expect(successBlock).not.toBeNull();
+    const sb = successBlock?.[0] ?? "";
+    expect(sb).toMatch(/if\s*\(!fsMapMountedRef\.current\)\s*return/);
+    expect(sb).toMatch(
+      /if\s*\(currentLocationRequestIdRef\.current\s*!==\s*requestId\)\s*return/,
+    );
+    expect(sb).toMatch(
+      /if\s*\(activeSessionIdRef\.current\s*!==\s*requestSessionId\)\s*return/,
+    );
+    // error callback
+    const errBlock = m.match(/\(err\)\s*=>\s*\{[\s\S]*?\}\,\s*\{[\s\S]*?enableHighAccuracy/);
+    expect(errBlock).not.toBeNull();
+    const eb = errBlock?.[0] ?? "";
+    expect(eb).toMatch(/if\s*\(!fsMapMountedRef\.current\)\s*return/);
+    expect(eb).toMatch(
+      /if\s*\(currentLocationRequestIdRef\.current\s*!==\s*requestId\)\s*return/,
+    );
+    expect(eb).toMatch(
+      /if\s*\(activeSessionIdRef\.current\s*!==\s*requestSessionId\)\s*return/,
+    );
+  });
+
+  it("modal cancel で invalidateCurrentLocationRequest を呼ぶ", () => {
+    expect(MAP_SRC).toMatch(
+      /onCancel=\{\s*\(\)\s*=>\s*\{[\s\S]*?invalidateCurrentLocationRequest\(\)/,
+    );
+  });
+
+  it("active session 変更で useEffect が invalidateCurrentLocationRequest を呼ぶ", () => {
+    expect(MAP_SRC).toMatch(
+      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?invalidateCurrentLocationRequest\(\)[\s\S]*?\}\,\s*\[activeSession,\s*invalidateCurrentLocationRequest\]/,
+    );
+  });
+
+  it("unmount 時に fsMapMountedRef=false + token を bump する", () => {
+    expect(MAP_SRC).toMatch(
+      /return\s*\(\)\s*=>\s*\{[\s\S]*?fsMapMountedRef\.current\s*=\s*false[\s\S]*?currentLocationRequestIdRef\.current\s*\+=\s*1/,
+    );
+  });
+
+  it("activeSessionIdRef は activeSession 変化時に同期される (stale closure 回避)", () => {
+    expect(MAP_SRC).toMatch(
+      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?activeSessionIdRef\.current\s*=\s*activeSession\?\.id\s*\?\?\s*null[\s\S]*?\}\,\s*\[activeSession\]/,
+    );
+  });
+
+  it("単発取得のままで watchPosition を使わない / RouteRecorder hook を流用しない (継続)", () => {
+    expect(MAP_SRC).toMatch(/navigator\.geolocation\.getCurrentPosition/);
+    expect(MAP_SRC).not.toMatch(/navigator\.geolocation\.watchPosition/);
+    // useCurrentLocationForCreate 経路で recorder を呼ばない
+    const fn = MAP_SRC.match(
+      /const useCurrentLocationForCreate\s*=\s*useCallback\([\s\S]*?\}\,\s*\[\]\s*\);/,
+    );
+    expect(fn?.[0]).not.toMatch(/recorder\./);
+  });
+
+  it("active session 無しで「現在地を使う」を押した場合は早期 return (汎用文言)", () => {
+    expect(MAP_SRC).toMatch(/巡回 session が無いため現在地を取得できません/);
+  });
+
+  it("pin 作成成功時にも pending callback を invalidate する", () => {
+    expect(MAP_SRC).toMatch(
+      /handlePinCreateSubmit[\s\S]*?r\.ok[\s\S]*?invalidateCurrentLocationRequest\(\)[\s\S]*?setCreateCandidate\(null\)/,
+    );
+  });
+
+  it("token / session id / position を console に出さない (継続ガード)", () => {
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*requestId/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*requestSessionId/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*position/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
+  });
+
+  it("localStorage / sessionStorage / IndexedDB を使わない (継続)", () => {
+    expect(MAP_SRC).not.toMatch(/localStorage\s*\.\s*(setItem|getItem|removeItem)/);
+    expect(MAP_SRC).not.toMatch(/sessionStorage\s*\.\s*(setItem|getItem|removeItem)/);
+    expect(MAP_SRC).not.toMatch(/\bindexedDB\s*\.\s*open/);
   });
 });
 

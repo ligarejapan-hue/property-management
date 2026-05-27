@@ -192,6 +192,36 @@ export default function FieldSurveyMap({
   const [currentLocationError, setCurrentLocationError] = useState<string | null>(
     null,
   );
+  // Codex P2: getCurrentPosition は API 上キャンセル不能のため、late callback を
+  // 無視する token 方式で防御する。modal cancel / session 終了 / session 切替 /
+  // unmount で必ず token を進めて pending callback を無効化する。
+  const currentLocationRequestIdRef = useRef(0);
+  // activeSession.id を ref 同期して closure 内で最新値を読めるようにする
+  // (useCallback の stale closure 回避)。null = active session 無し。
+  const activeSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSession?.id ?? null;
+  }, [activeSession]);
+  const fsMapMountedRef = useRef(true);
+  const invalidateCurrentLocationRequest = useCallback(() => {
+    currentLocationRequestIdRef.current += 1;
+    if (fsMapMountedRef.current) {
+      setCurrentLocationLoading(false);
+    }
+  }, []);
+  // unmount cleanup: late callback の state 更新を確実に止める
+  useEffect(() => {
+    fsMapMountedRef.current = true;
+    return () => {
+      fsMapMountedRef.current = false;
+      currentLocationRequestIdRef.current += 1;
+    };
+  }, []);
+  // active session が変わったら (null 化 / id 切替) pending request を無効化
+  useEffect(() => {
+    invalidateCurrentLocationRequest();
+  }, [activeSession, invalidateCurrentLocationRequest]);
+
   const useCurrentLocationForCreate = useCallback(() => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setCurrentLocationError(
@@ -199,11 +229,26 @@ export default function FieldSurveyMap({
       );
       return;
     }
+    // active session が無ければ「現在地」自体不要 (modal も mount されない前提)
+    const requestSessionId = activeSessionIdRef.current;
+    if (!requestSessionId) {
+      setCurrentLocationError(
+        "巡回 session が無いため現在地を取得できません。",
+      );
+      return;
+    }
+    // 新 token を発行 (= 進行中の旧 callback を無効化)
+    currentLocationRequestIdRef.current += 1;
+    const requestId = currentLocationRequestIdRef.current;
     setCurrentLocationLoading(true);
     setCurrentLocationError(null);
     // 単発取得のみ。watchPosition は使わない。
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        // late callback ガード: unmount / token 不一致 / session 終了 or 切替
+        if (!fsMapMountedRef.current) return;
+        if (currentLocationRequestIdRef.current !== requestId) return;
+        if (activeSessionIdRef.current !== requestSessionId) return;
         setCurrentLocationLoading(false);
         // raw position を console / error に出さない
         const lat = pos?.coords?.latitude;
@@ -226,6 +271,9 @@ export default function FieldSurveyMap({
         });
       },
       (err) => {
+        if (!fsMapMountedRef.current) return;
+        if (currentLocationRequestIdRef.current !== requestId) return;
+        if (activeSessionIdRef.current !== requestSessionId) return;
         setCurrentLocationLoading(false);
         const code = (err as { code?: number })?.code;
         if (code === 1) {
@@ -263,13 +311,15 @@ export default function FieldSurveyMap({
         sessionId: activeSession.id,
       });
       if (r.ok) {
+        // Codex P2: pending な「現在地を使う」callback を無効化
+        invalidateCurrentLocationRequest();
         setCreateCandidate(null);
         // 誤タップ防止: 作成成功で pin 追加モードを OFF にする (Plan 承認)
         setPinAddMode(false);
         bumpRefetch();
       }
     },
-    [activeSession, pinMutations, bumpRefetch],
+    [activeSession, pinMutations, bumpRefetch, invalidateCurrentLocationRequest],
   );
 
   const handleMapClick = useCallback(
@@ -329,6 +379,8 @@ export default function FieldSurveyMap({
             saving={pinMutations.createLoading}
             serverError={pinMutations.createError}
             onCancel={() => {
+              // Codex P2: pending geolocation callback を無効化してから modal を閉じる
+              invalidateCurrentLocationRequest();
               setCreateCandidate(null);
               setCurrentLocationError(null);
             }}
