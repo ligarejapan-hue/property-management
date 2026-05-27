@@ -370,6 +370,10 @@ model Property {
   @@index([realEstateNumber])
   @@index([externalLinkKey])
   @@index([buildingId])
+  // 現地調査マップの bbox 検索 (Phase 1-D) 用の複合 index。
+  // GET /api/field-survey/map/properties は通常 isArchived=false + gpsLat/gpsLng
+  // の range 検索なので、equality (isArchived) を先頭に置く構成にする。
+  @@index([isArchived, gpsLat, gpsLng])
   @@map("properties")
 }
 
