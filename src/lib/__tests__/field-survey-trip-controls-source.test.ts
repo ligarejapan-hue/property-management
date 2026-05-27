@@ -100,6 +100,67 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
     expect(TRIP_SRC).toMatch(/encodeURIComponent/);
   });
 
+  // --- Codex P2: active session refetch を currentUserId で絞る -------------
+
+  it("active session 取得 URL に staffUserId=currentUserId と limit=1 を含む", () => {
+    expect(TRIP_SRC).toMatch(
+      /\/api\/field-survey\/sessions\?status=active[\s\S]*?staffUserId=\$\{encodeURIComponent\(currentUserId\)\}/,
+    );
+    expect(TRIP_SRC).toMatch(/limit=1\b/);
+  });
+
+  it("staffUserId 無しの古い limit=10 取得 URL が残っていない (退行防止)", () => {
+    // 「status=active と limit=10 を同じ URL 文字列に含む」古い pattern が無いこと
+    const hasOld = /status=active[\s\S]{0,80}limit=10/.test(TRIP_SRC) ||
+      /limit=10[\s\S]{0,80}status=active/.test(TRIP_SRC);
+    expect(hasOld).toBe(false);
+  });
+
+  // --- Codex P2: mutation の AbortController + mounted guard ----------------
+
+  it("POST sessions / PATCH sessions に signal が渡される", () => {
+    // POST 経路: method: "POST" を含む fetch 呼び出し block 内に signal がある
+    const postRegion = TRIP_SRC.match(
+      /method:\s*"POST"[\s\S]*?\)\s*;/,
+    );
+    expect(postRegion).not.toBeNull();
+    expect(postRegion?.[0]).toMatch(/signal:\s*\w+\.signal/);
+    // PATCH 経路: 同様
+    const patchRegion = TRIP_SRC.match(
+      /method:\s*"PATCH"[\s\S]*?\)\s*;/,
+    );
+    expect(patchRegion).not.toBeNull();
+    expect(patchRegion?.[0]).toMatch(/signal:\s*\w+\.signal/);
+  });
+
+  it("active fetch と mutation で AbortController を分離している", () => {
+    expect(TRIP_SRC).toMatch(/activeFetchAbortRef/);
+    expect(TRIP_SRC).toMatch(/mutationAbortRef/);
+  });
+
+  it("unmount cleanup で active fetch と mutation の両方を abort する", () => {
+    const cleanupRegion = TRIP_SRC.match(
+      /return\s*\(\)\s*=>\s*\{[\s\S]*?mountedRef\.current\s*=\s*false[\s\S]*?\}/,
+    );
+    expect(cleanupRegion).not.toBeNull();
+    expect(cleanupRegion?.[0]).toMatch(/activeFetchAbortRef[\s\S]*?abort\(\)/);
+    expect(cleanupRegion?.[0]).toMatch(/mutationAbortRef[\s\S]*?abort\(\)/);
+  });
+
+  it("mountedRef による unmount 後 setState 抑止がある", () => {
+    expect(TRIP_SRC).toMatch(/mountedRef/);
+    // handler 内で mountedRef.current チェックが複数回現れる
+    const checks = TRIP_SRC.match(/!mountedRef\.current/g) ?? [];
+    expect(checks.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("AbortError はユーザー向けエラー文言に変換しない", () => {
+    // isAbortError(err) で握って return している
+    expect(TRIP_SRC).toMatch(/isAbortError\(err\)/);
+    // 「AbortError」を error UI に直接出さない
+    expect(TRIP_SRC).not.toMatch(/setError\([^)]*AbortError/);
+  });
+
   it("409 系の outcome を経由して active を再取得する設計", () => {
     expect(TRIP_SRC).toMatch(/conflict_active/);
     expect(TRIP_SRC).toMatch(/conflict_state/);

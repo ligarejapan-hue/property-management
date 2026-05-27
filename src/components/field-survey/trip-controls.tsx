@@ -49,20 +49,40 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
   const [session, setSession] = useState<ActiveSessionLike | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
-  const abortRef = useRef<AbortController | null>(null);
+  // GET (active 再取得) と mutation (POST/PATCH) で AbortController を分離。
+  // 同時並行の retry や connect 時に互いを誤って中断させない。
+  const activeFetchAbortRef = useRef<AbortController | null>(null);
+  const mutationAbortRef = useRef<AbortController | null>(null);
+  // Codex P2 (unmount safety): unmount 後の setState を抑止する。
+  // useEffect cleanup で false に倒し、各 handler の state 更新前に確認する。
+  const mountedRef = useRef(true);
+
+  const isAbortError = (err: unknown): boolean =>
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: string }).name === "AbortError";
 
   const fetchActiveSession = useCallback(async (): Promise<void> => {
-    if (abortRef.current) abortRef.current.abort();
+    if (activeFetchAbortRef.current) activeFetchAbortRef.current.abort();
     const ac = new AbortController();
-    abortRef.current = ac;
+    activeFetchAbortRef.current = ac;
     try {
-      const res = await fetch(
-        "/api/field-survey/sessions?status=active&limit=10",
-        { signal: ac.signal, credentials: "same-origin" },
-      );
+      // Codex P2: read_all/manage 持ちのユーザーが他人 session を多数引いて
+      // 自分の active が limit 切れに落ちる事故を防ぐため、staffUserId で
+      // 自分に絞る。non-read_all ユーザーは API 側で own 強制されるが、
+      // 全 role で URL レベルでも自分のみを要求する。limit=1 で十分。
+      const url =
+        `/api/field-survey/sessions?status=active` +
+        `&staffUserId=${encodeURIComponent(currentUserId)}&limit=1`;
+      const res = await fetch(url, {
+        signal: ac.signal,
+        credentials: "same-origin",
+      });
+      if (!mountedRef.current) return;
       const body = (await res.json().catch(() => null)) as
         | { data?: ActiveSessionLike[] }
         | null;
+      if (!mountedRef.current) return;
       const outcome = classifyTripApiResponse(
         res.status,
         extractApiErrorCode(body),
@@ -73,12 +93,13 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
         setPhase("idle");
         return;
       }
+      // pickOwnActiveSession は server filter 漏れに対する防御として残す。
       const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
       setSession(own);
       setPhase(own ? "active" : "idle");
       setError(null);
     } catch (err) {
-      if ((err as { name?: string }).name === "AbortError") return;
+      if (isAbortError(err) || !mountedRef.current) return;
       setError("巡回 session の取得に失敗しました。");
       setSession(null);
       setPhase("idle");
@@ -86,9 +107,13 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
   }, [currentUserId]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void fetchActiveSession();
     return () => {
-      if (abortRef.current) abortRef.current.abort();
+      mountedRef.current = false;
+      if (activeFetchAbortRef.current) activeFetchAbortRef.current.abort();
+      // Codex P2: start/end mutation も unmount で abort する。
+      if (mutationAbortRef.current) mutationAbortRef.current.abort();
     };
   }, [fetchActiveSession]);
 
@@ -102,16 +127,23 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
   const startSession = useCallback(async () => {
     setPhase("starting");
     setError(null);
+    // 並行起動の mutation を中断し、AbortController を新規発行。
+    if (mutationAbortRef.current) mutationAbortRef.current.abort();
+    const ac = new AbortController();
+    mutationAbortRef.current = ac;
     try {
       const res = await fetch("/api/field-survey/sessions", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: "{}",
+        signal: ac.signal,
       });
+      if (!mountedRef.current) return;
       const body = (await res.json().catch(() => null)) as
         | { data?: ActiveSessionLike }
         | null;
+      if (!mountedRef.current) return;
       const outcome = classifyTripApiResponse(
         res.status,
         extractApiErrorCode(body),
@@ -121,7 +153,7 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
         setPhase("active");
         return;
       }
-      // 409 ACTIVE_SESSION_EXISTS は active 再取得で UI 整合
+      // 409 ACTIVE_SESSION_EXISTS は active 再取得 (currentUserId filter 付き) で UI 整合
       if (outcome.kind === "conflict_active") {
         setError(tripOutcomeMessage(outcome));
         await fetchActiveSession();
@@ -129,7 +161,8 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
       }
       setError(tripOutcomeMessage(outcome));
       setPhase("idle");
-    } catch {
+    } catch (err) {
+      if (isAbortError(err) || !mountedRef.current) return;
       setError("巡回開始に失敗しました。");
       setPhase("idle");
     }
@@ -139,6 +172,9 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
     async (target: ActiveSessionLike) => {
       setPhase("ending");
       setError(null);
+      if (mutationAbortRef.current) mutationAbortRef.current.abort();
+      const ac = new AbortController();
+      mutationAbortRef.current = ac;
       try {
         const res = await fetch(
           `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
@@ -147,11 +183,14 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: "ended" }),
+            signal: ac.signal,
           },
         );
+        if (!mountedRef.current) return;
         const body = (await res.json().catch(() => null)) as
           | { data?: ActiveSessionLike }
           | null;
+        if (!mountedRef.current) return;
         const outcome = classifyTripApiResponse(
           res.status,
           extractApiErrorCode(body),
@@ -169,7 +208,8 @@ export default function TripControls({ currentUserId }: TripControlsProps) {
         setError(tripOutcomeMessage(outcome));
         // active state に復帰して再試行可能にする
         setPhase("active");
-      } catch {
+      } catch (err) {
+        if (isAbortError(err) || !mountedRef.current) return;
         setError("巡回終了に失敗しました。");
         setPhase("active");
       }
