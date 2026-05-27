@@ -16,6 +16,11 @@ import {
   createFieldSurveyPinSchema,
   fieldSurveyPinListQuerySchema,
 } from "@/lib/validators";
+import {
+  coerceAccuracy,
+  coerceLat,
+  coerceLng,
+} from "@/lib/field-survey-map-util";
 
 // ============================================================
 // POST /api/field-survey/pins
@@ -219,9 +224,14 @@ export async function GET(request: NextRequest) {
         ? sliced.map((r) => {
             // destructuring で memo を server side で剥がしてから response に渡す。
             // hasMemo は trim 後の長さで判定 (null / 空文字 / 空白のみは false)。
+            // lat/lng/accuracy は Prisma Decimal なので number に正規化する
+            // (Codex P1: 本番 marker が表示されない事故防止)。
             const { memo, ...rest } = r;
             return {
               ...rest,
+              lat: coerceLat(rest.lat),
+              lng: coerceLng(rest.lng),
+              accuracy: coerceAccuracy(rest.accuracy),
               hasMemo:
                 typeof memo === "string" && memo.trim().length > 0,
             };

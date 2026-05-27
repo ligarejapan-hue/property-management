@@ -822,6 +822,105 @@ describe("GET /api/field-survey/pins (list)", () => {
     );
     expect(res.status).toBe(422);
   });
+
+  // --- Codex P1: Decimal coordinate normalization in view=map ---
+
+  it("view=map で Decimal-like lat/lng/accuracy を number に正規化", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([
+      {
+        id: "pin-dec",
+        sessionId: null,
+        staffUserId: fieldUser.id,
+        propertyId: null,
+        lat: { toString: () => "35.6812000" },
+        lng: { toString: () => "139.7671000" },
+        accuracy: { toString: () => "8.50" },
+        pinType: "candidate",
+        status: "open",
+        memo: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?view=map&north=35.7&south=35.6&east=139.8&west=139.7",
+      ),
+    );
+    const body = await res.json();
+    const row = body.data[0];
+    expect(typeof row.lat).toBe("number");
+    expect(typeof row.lng).toBe("number");
+    expect(typeof row.accuracy).toBe("number");
+    expect(row.lat).toBeCloseTo(35.6812);
+    expect(row.lng).toBeCloseTo(139.7671);
+    expect(row.accuracy).toBeCloseTo(8.5);
+    // memo 本文は依然として含まれない
+    expect(row).not.toHaveProperty("memo");
+    expect(typeof row.hasMemo).toBe("boolean");
+  });
+
+  it("view=map で numeric string lat/lng を number に変換", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([
+      {
+        id: "pin-str",
+        sessionId: null,
+        staffUserId: fieldUser.id,
+        propertyId: null,
+        lat: "35.65",
+        lng: "139.75",
+        accuracy: null,
+        pinType: "candidate",
+        status: "open",
+        memo: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?view=map&north=35.7&south=35.6&east=139.8&west=139.7",
+      ),
+    );
+    const body = await res.json();
+    expect(typeof body.data[0].lat).toBe("number");
+    expect(typeof body.data[0].lng).toBe("number");
+    expect(body.data[0].accuracy).toBeNull();
+  });
+
+  it("view=map で範囲外 / 非数値 lat/lng は null になる", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([
+      {
+        id: "pin-bad",
+        sessionId: null,
+        staffUserId: fieldUser.id,
+        propertyId: null,
+        lat: "abc",
+        lng: 999,
+        accuracy: -1,
+        pinType: "candidate",
+        status: "open",
+        memo: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?view=map&north=35.7&south=35.6&east=139.8&west=139.7",
+      ),
+    );
+    const body = await res.json();
+    expect(body.data[0].lat).toBeNull();
+    expect(body.data[0].lng).toBeNull();
+    expect(body.data[0].accuracy).toBeNull();
+  });
 });
 
 // ============================================================

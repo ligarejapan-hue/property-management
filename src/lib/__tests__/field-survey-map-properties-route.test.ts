@@ -413,4 +413,74 @@ describe("GET /api/field-survey/map/properties", () => {
     const args = (prisma.property.findMany as Mock).mock.calls[0][0];
     expect(args.orderBy).toEqual([{ updatedAt: "desc" }, { id: "desc" }]);
   });
+
+  // --- Codex P1: Decimal coordinate normalization ---------------------
+
+  it("Decimal-like gpsLat/gpsLng を number に正規化して返す", async () => {
+    (getApiSession as Mock).mockResolvedValue(adminUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldSurveyAndPropRead);
+    (prisma.property.findMany as Mock).mockResolvedValue([
+      {
+        id: "p-decimal",
+        address: "東京都...",
+        gpsLat: { toString: () => "35.6812000" },
+        gpsLng: { toString: () => "139.7671000" },
+        propertyType: "land",
+        registryStatus: "unconfirmed",
+        dmStatus: "hold",
+        caseStatus: "new_case",
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await GET(makeReq(BASE_BBOX));
+    const body = await res.json();
+    expect(typeof body.data[0].gpsLat).toBe("number");
+    expect(typeof body.data[0].gpsLng).toBe("number");
+    expect(body.data[0].gpsLat).toBeCloseTo(35.6812);
+    expect(body.data[0].gpsLng).toBeCloseTo(139.7671);
+  });
+
+  it("numeric string gpsLat/gpsLng も number に変換", async () => {
+    (getApiSession as Mock).mockResolvedValue(adminUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldSurveyAndPropRead);
+    (prisma.property.findMany as Mock).mockResolvedValue([
+      {
+        id: "p-str",
+        address: "...",
+        gpsLat: "35.65",
+        gpsLng: "139.75",
+        propertyType: "land",
+        registryStatus: "unconfirmed",
+        dmStatus: "hold",
+        caseStatus: "new_case",
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await GET(makeReq(BASE_BBOX));
+    const body = await res.json();
+    expect(typeof body.data[0].gpsLat).toBe("number");
+    expect(typeof body.data[0].gpsLng).toBe("number");
+  });
+
+  it("範囲外 / 非数値の gpsLat/gpsLng は null になり UI 側で除外される想定", async () => {
+    (getApiSession as Mock).mockResolvedValue(adminUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldSurveyAndPropRead);
+    (prisma.property.findMany as Mock).mockResolvedValue([
+      {
+        id: "p-bad",
+        address: "...",
+        gpsLat: "abc",
+        gpsLng: 500,
+        propertyType: "land",
+        registryStatus: "unconfirmed",
+        dmStatus: "hold",
+        caseStatus: "new_case",
+        updatedAt: new Date(),
+      },
+    ]);
+    const res = await GET(makeReq(BASE_BBOX));
+    const body = await res.json();
+    expect(body.data[0].gpsLat).toBeNull();
+    expect(body.data[0].gpsLng).toBeNull();
+  });
 });

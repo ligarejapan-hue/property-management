@@ -141,3 +141,64 @@ export function isGoogleMapsMapIdConfigured(
 ): boolean {
   return typeof mapId === "string" && mapId.trim().length > 0;
 }
+
+/**
+ * 不定型の値を有限 number に正規化する (Codex P1 対応)。
+ *
+ * Prisma の Decimal カラム (Property.gpsLat/gpsLng, FieldSurveyPin.lat/lng,
+ * accuracy) は JSON シリアライズ時に値 が string になりうる。Map UI 側で
+ * `typeof === "number"` だけで filtering すると本番データの marker が
+ * 一切表示されない事故を防ぐため、API / UI の両側で共通利用する。
+ *
+ * 受理:
+ *  - number で Number.isFinite
+ *  - 数値 string (trim 後 Number に変換できる)
+ *  - Decimal-like object (toString() で数値 string を返す)
+ *
+ * 棄却 (null):
+ *  - null / undefined / 空 / whitespace
+ *  - NaN / Infinity / -Infinity
+ *  - 非数値 string ("abc" 等)
+ */
+export function coerceFiniteNumber(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") {
+    return Number.isFinite(v) ? v : null;
+  }
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (typeof v === "object") {
+    // Prisma Decimal は toString() で数値 string を返す。
+    // 通常 object は "[object Object]" を返し Number 化で NaN になる安全側挙動。
+    const s = String(v);
+    if (s === "" || s === "[object Object]") return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** 緯度 (-90..90) に正規化。範囲外 / 非数値 / null は null。 */
+export function coerceLat(v: unknown): number | null {
+  const n = coerceFiniteNumber(v);
+  if (n === null) return null;
+  return n >= -90 && n <= 90 ? n : null;
+}
+
+/** 経度 (-180..180) に正規化。範囲外 / 非数値 / null は null。 */
+export function coerceLng(v: unknown): number | null {
+  const n = coerceFiniteNumber(v);
+  if (n === null) return null;
+  return n >= -180 && n <= 180 ? n : null;
+}
+
+/** GPS accuracy (0 以上 / meter) に正規化。負値 / 非数値 / null は null。 */
+export function coerceAccuracy(v: unknown): number | null {
+  const n = coerceFiniteNumber(v);
+  if (n === null) return null;
+  return n >= 0 ? n : null;
+}

@@ -26,6 +26,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bbox,
   buildMapPropertiesQuery,
+  coerceLat,
+  coerceLng,
   debounce,
   validateBbox,
 } from "@/lib/field-survey-map-util";
@@ -437,25 +439,31 @@ function handleHttpError(status: number, onError: (m: string) => void) {
   else onError("地図データの取得に失敗しました。");
 }
 
-// 念のため数値の lat/lng のみ残す。string や null/undefined は marker に出さない。
+// API 側で number 正規化済 (Codex P1) だが、防御として coerceLat/Lng/Accuracy を
+// 再適用する。numeric string が万一残っていても marker 表示でき、NaN /
+// Infinity / 範囲外 / null は確実に除外する。座標を console には出さない。
 function filterValidGps(rows: PropertyRow[]): PropertyRow[] {
-  return rows.filter(
-    (r) =>
-      typeof r.gpsLat === "number" &&
-      typeof r.gpsLng === "number" &&
-      Number.isFinite(r.gpsLat) &&
-      Number.isFinite(r.gpsLng),
-  );
+  const out: PropertyRow[] = [];
+  for (const r of rows) {
+    const lat = coerceLat(r.gpsLat);
+    const lng = coerceLng(r.gpsLng);
+    if (lat === null || lng === null) continue;
+    out.push({ ...r, gpsLat: lat, gpsLng: lng });
+  }
+  return out;
 }
 
 function filterValidPinGps(rows: PinRow[]): PinRow[] {
-  return rows.filter(
-    (r) =>
-      typeof r.lat === "number" &&
-      typeof r.lng === "number" &&
-      Number.isFinite(r.lat) &&
-      Number.isFinite(r.lng),
-  );
+  const out: PinRow[] = [];
+  for (const r of rows) {
+    const lat = coerceLat(r.lat);
+    const lng = coerceLng(r.lng);
+    if (lat === null || lng === null) continue;
+    // accuracy は UI で marker 表示に使わない (API 側で正規化済)。型に含めず
+    // 素通しする。PinRow には載せないが Object.assign で残しても弊害なし。
+    out.push({ ...r, lat, lng });
+  }
+  return out;
 }
 
 // memo 本文の client side strip は廃止。view=map projection で API 側が

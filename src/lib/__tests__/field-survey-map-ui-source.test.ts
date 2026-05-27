@@ -363,6 +363,20 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(MAP_SRC).not.toMatch(/\bper\s*1[,\s]?000\b/i);
   });
 
+  it("marker filter で coerceLat / coerceLng を使い numeric string も拾える (Codex P1)", () => {
+    // typeof === "number" 単独依存の filter が再混入しないように構造ガード
+    expect(MAP_SRC).toMatch(/coerceLat/);
+    expect(MAP_SRC).toMatch(/coerceLng/);
+    // filterValidGps / filterValidPinGps 関数で typeof === "number" だけに
+    // 依存していた旧 pattern を捨てて、coerce 経由で number 化していること
+    const filterRegion = MAP_SRC.match(
+      /function filterValidGps[\s\S]*?function filterValidPinGps[\s\S]*?\n\}/,
+    );
+    expect(filterRegion).not.toBeNull();
+    expect(filterRegion?.[0]).not.toMatch(/typeof\s+\w+\.gpsLat\s*===\s*"number"/);
+    expect(filterRegion?.[0]).not.toMatch(/typeof\s+\w+\.lat\s*===\s*"number"/);
+  });
+
   it("map component / page から料金関連内部設定値を console / error に流さない", () => {
     // billing / budget / quota の内部値を出力に混ぜないこと
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*billing/i);
