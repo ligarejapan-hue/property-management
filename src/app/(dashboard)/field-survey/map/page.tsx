@@ -36,42 +36,61 @@ export default function FieldSurveyMapPage() {
         </div>
       </header>
 
-      {hasKey && !billingAcknowledged && <BillingNotAcknowledgedBanner />}
-
       <div className="flex-1 overflow-hidden">
-        {hasKey ? (
-          <FieldSurveyMap apiKey={apiKey as string} mapId={mapId} />
-        ) : (
+        {!hasKey ? (
           <MissingKeyNotice />
+        ) : !billingAcknowledged ? (
+          // Codex P1: APIキーが入っていても billing 未確認なら
+          // FieldSurveyMap (= Maps JavaScript API loader) を mount しない。
+          // 警告 banner だけだと地図が読み込まれて課金経路に乗ってしまうため、
+          // 「地図そのものを描画しない」fallback に切り替える。
+          <BillingNotAcknowledgedFallback />
+        ) : (
+          <FieldSurveyMap apiKey={apiKey as string} mapId={mapId} />
         )}
       </div>
     </div>
   );
 }
 
-function BillingNotAcknowledgedBanner() {
+function BillingNotAcknowledgedFallback() {
   // APIキーが入っているが、Cloud Billing / quota / referrer / API 制限 /
-  // 管理者承認の確認が完了していない状態。本番有効化の事故を防ぐため、
-  // 「使えてしまうけれど常時警告を出す」設計にする。
-  // 料金の固定数値はここでも記載しない (公式料金ページを参照)。
+  // 管理者承認 の確認が完了していない状態。Maps JavaScript API の
+  // loader を起動しないことで Google 側課金リクエスト自体を防ぐ。
+  // 料金の固定数値はここに書かない (公式料金ページを参照)。
   return (
     <div
       role="alert"
-      data-testid="gmaps-billing-warning"
-      className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-900"
+      data-testid="gmaps-billing-fallback"
+      className="flex h-full items-center justify-center bg-gray-50 p-6"
     >
-      <strong className="mr-2 font-semibold">本番運用前チェック未完了:</strong>
-      <span>
-        Cloud Billing budget / quota 上限 / HTTP referrer 制限 / API
-        制限 (Maps JavaScript API のみ) / 管理者承認 を確認した上で、
-      </span>{" "}
-      <code className="rounded bg-white px-1">
-        NEXT_PUBLIC_GOOGLE_MAPS_BILLING_ACKNOWLEDGED=true
-      </code>{" "}
-      <span>
-        を設定してください。Budget alert は通知のみで課金を停止しません。
-        実際に上限で止めるには quota 制限が別途必要です。
-      </span>
+      <div className="max-w-2xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900">
+        <h2 className="mb-2 text-base font-semibold">
+          地図の読み込みを停止しています
+        </h2>
+        <p className="mb-2">
+          Google Maps APIキーは設定されていますが、本番運用前チェックが
+          未完了のため、Maps JavaScript API の読み込みを行いません。
+        </p>
+        <ul className="mb-3 ml-4 list-disc space-y-1 text-xs">
+          <li>Cloud Billing budget / alert</li>
+          <li>quota / usage cap (Maps JavaScript API)</li>
+          <li>HTTP referrer 制限</li>
+          <li>API 制限を Maps JavaScript API のみに限定</li>
+          <li>管理者による本番利用承認</li>
+        </ul>
+        <p className="mb-2 text-xs">
+          上記を全て確認した上で{" "}
+          <code className="rounded bg-white px-1">
+            NEXT_PUBLIC_GOOGLE_MAPS_BILLING_ACKNOWLEDGED=true
+          </code>{" "}
+          を設定し、build / restart してください。
+        </p>
+        <p className="text-xs text-amber-800">
+          Budget alert は通知のみで課金を停止しません。
+          実際に上限で止めるには quota 制限が別途必要です。
+        </p>
+      </div>
     </div>
   );
 }

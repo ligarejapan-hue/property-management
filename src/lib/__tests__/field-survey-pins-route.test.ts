@@ -579,6 +579,101 @@ describe("GET /api/field-survey/pins (list)", () => {
     expect(body.data).toHaveLength(2);
     expect(body.nextCursor).toBe("next");
   });
+
+  // --- Codex P2: bbox scope (Phase 1-E) -------------------------------------
+
+  it("bbox 4 値指定で where に lat/lng range が積まれる", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([]);
+    await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?north=35.7&south=35.6&east=139.8&west=139.7",
+      ),
+    );
+    const args = (prisma.fieldSurveyPin.findMany as Mock).mock.calls[0][0];
+    expect(args.where.lat).toEqual({ gte: 35.6, lte: 35.7 });
+    expect(args.where.lng).toEqual({ gte: 139.7, lte: 139.8 });
+  });
+
+  it("bbox 部分指定 (north のみ) は 422 / DB 未到達", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await LIST(
+      makeReq("http://x/api/field-survey/pins?north=35.7"),
+    );
+    expect(res.status).toBe(422);
+    expect(prisma.fieldSurveyPin.findMany).not.toHaveBeenCalled();
+  });
+
+  it("north < south は 422", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?north=35.5&south=35.7&east=139.8&west=139.7",
+      ),
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("east < west は 422", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?north=35.7&south=35.6&east=139.7&west=139.8",
+      ),
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("緯度差 > 0.5 度は 422", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?north=36.5&south=35.6&east=139.8&west=139.7",
+      ),
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("経度差 > 0.5 度は 422", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?north=35.7&south=35.6&east=140.5&west=139.7",
+      ),
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("bbox 無指定なら where に lat/lng 条件は積まれない (既存挙動維持)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([]);
+    await LIST(makeReq("http://x/api/field-survey/pins"));
+    const args = (prisma.fieldSurveyPin.findMany as Mock).mock.calls[0][0];
+    expect(args.where.lat).toBeUndefined();
+    expect(args.where.lng).toBeUndefined();
+  });
+
+  it("read_all + bbox 指定でも 他人 pin filter は API 側 own/read_all 境界に従う", async () => {
+    // bbox 追加が既存の権限境界を壊していないこと
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    (prisma.fieldSurveyPin.findMany as Mock).mockResolvedValue([]);
+    await LIST(
+      makeReq(
+        "http://x/api/field-survey/pins?north=35.7&south=35.6&east=139.8&west=139.7&staffUserId=99999999-9999-4999-8999-999999999999",
+      ),
+    );
+    const args = (prisma.fieldSurveyPin.findMany as Mock).mock.calls[0][0];
+    expect(args.where.staffUserId).toBe("99999999-9999-4999-8999-999999999999");
+    expect(args.where.lat).toEqual({ gte: 35.6, lte: 35.7 });
+  });
 });
 
 // ============================================================

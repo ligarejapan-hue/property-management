@@ -163,6 +163,8 @@ export async function GET(request: NextRequest) {
       sessionId?: string;
       propertyId?: string;
       createdAt?: { gte?: Date; lte?: Date };
+      lat?: { gte: number; lte: number };
+      lng?: { gte: number; lte: number };
     } = {};
 
     if (canSeeOthers) {
@@ -184,6 +186,18 @@ export async function GET(request: NextRequest) {
       where.createdAt = {};
       if (query.from) where.createdAt.gte = new Date(query.from);
       if (query.to) where.createdAt.lte = new Date(query.to);
+    }
+    // bbox は 4 値同時指定が validator で保証されている。Map UI の現在
+    // viewport の pin だけ取るため、read_all/manage を持つ閲覧者でも
+    // viewport 外の pin は返さない (Codex P2: pin fetch を bbox スコープに)。
+    if (
+      query.north !== undefined &&
+      query.south !== undefined &&
+      query.east !== undefined &&
+      query.west !== undefined
+    ) {
+      where.lat = { gte: query.south, lte: query.north };
+      where.lng = { gte: query.west, lte: query.east };
     }
 
     const rows = await prisma.fieldSurveyPin.findMany({

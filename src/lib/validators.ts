@@ -250,28 +250,88 @@ export const patchFieldSurveyPinSchema = z
     { message: "更新フィールドを指定してください" },
   );
 
-export const fieldSurveyPinListQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-  status: z.enum(PIN_STATUSES).optional(),
-  pinType: z.enum(FIELD_SURVEY_PIN_TYPES).optional(),
-  sessionId: z.string().uuid().optional(),
-  propertyId: z.string().uuid().optional(),
-  staffUserId: z.string().uuid().optional(),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
-  cursor: z.string().uuid().optional(),
-  includeArchived: z
-    .string()
-    .default("false")
-    .transform((v) => v === "true"),
-});
-
-// ---------- Field survey property map (Phase 1-D) ----------
-
 // 地図 pan/zoom で頻繁に叩かれるため、bbox は必須で面積上限を設ける。
 // 0.5 度 ≒ 55km。緯度差・経度差ともに 0.5 度を上限とする (国内利用想定の市レベル+α)。
+// pin / property map で共通利用するため、pin schema より先に export する。
 export const FIELD_SURVEY_MAP_BBOX_MAX_DEG = 0.5;
+
+export const fieldSurveyPinListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    status: z.enum(PIN_STATUSES).optional(),
+    pinType: z.enum(FIELD_SURVEY_PIN_TYPES).optional(),
+    sessionId: z.string().uuid().optional(),
+    propertyId: z.string().uuid().optional(),
+    staffUserId: z.string().uuid().optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    cursor: z.string().uuid().optional(),
+    includeArchived: z
+      .string()
+      .default("false")
+      .transform((v) => v === "true"),
+    // optional bbox。Map UI が現在 viewport の pin だけ取得するため Phase 1-E
+    // で追加。4 値同時指定が必須で、部分指定 / 反転 / 面積超過は 422。
+    north: z.coerce.number().min(-90).max(90).optional(),
+    south: z.coerce.number().min(-90).max(90).optional(),
+    east: z.coerce.number().min(-180).max(180).optional(),
+    west: z.coerce.number().min(-180).max(180).optional(),
+  })
+  .superRefine((v, ctx) => {
+    const present = [v.north, v.south, v.east, v.west].filter(
+      (x) => x !== undefined,
+    );
+    if (present.length === 0) return;
+    if (present.length !== 4) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "bbox は north / south / east / west 4 値同時指定が必要です",
+        path: ["north"],
+      });
+      return;
+    }
+    const { north, south, east, west } = v as {
+      north: number;
+      south: number;
+      east: number;
+      west: number;
+    };
+    if (north < south) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "north は south 以上である必要があります",
+        path: ["north"],
+      });
+      return;
+    }
+    if (east < west) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "east は west 以上である必要があります",
+        path: ["east"],
+      });
+      return;
+    }
+    if (north - south > FIELD_SURVEY_MAP_BBOX_MAX_DEG) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `緯度差は ${FIELD_SURVEY_MAP_BBOX_MAX_DEG} 度以下にしてください`,
+        path: ["north"],
+      });
+      return;
+    }
+    if (east - west > FIELD_SURVEY_MAP_BBOX_MAX_DEG) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `経度差は ${FIELD_SURVEY_MAP_BBOX_MAX_DEG} 度以下にしてください`,
+        path: ["east"],
+      });
+      return;
+    }
+  });
+
+// ---------- Field survey property map (Phase 1-D) ----------
 
 export const fieldSurveyMapPropertyListQuerySchema = z
   .object({

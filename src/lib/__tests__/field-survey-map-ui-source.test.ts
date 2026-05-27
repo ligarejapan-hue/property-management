@@ -103,24 +103,36 @@ describe("page.tsx — fallback / structure", () => {
     expect(PAGE_SRC).not.toMatch(/\{apiKey\}/);
   });
 
-  it("APIキーが入っていても billing 未確認なら警告 UI を出す", () => {
-    // 警告バナーの存在とトリガ条件 (hasKey && !billingAcknowledged) を確認
+  it("APIキーが入っていても billing 未確認なら FieldSurveyMap を mount しない (Codex P1)", () => {
+    // gating: ack 未確認時は fallback (= FieldSurveyMap を mount しない)
     expect(PAGE_SRC).toMatch(/isGoogleMapsBillingAcknowledged/);
-    expect(PAGE_SRC).toMatch(/BillingNotAcknowledgedBanner/);
-    expect(PAGE_SRC).toMatch(/hasKey\s*&&\s*!billingAcknowledged/);
+    expect(PAGE_SRC).toMatch(/BillingNotAcknowledgedFallback/);
+    // FieldSurveyMap の render は ternary の false 分岐 (= ack 済) でのみ。
+    // !billingAcknowledged ? (...Fallback...) : (<FieldSurveyMap ...) の構造を要求。
+    expect(PAGE_SRC).toMatch(
+      /!billingAcknowledged\s*\?\s*\([\s\S]*?BillingNotAcknowledgedFallback[\s\S]*?\)\s*:\s*\(\s*<FieldSurveyMap/,
+    );
+    // FieldSurveyMap の render は 1 箇所のみ (重複 mount 経路がない)
+    const matches = PAGE_SRC.match(/<FieldSurveyMap\b/g) ?? [];
+    expect(matches.length).toBe(1);
   });
 
-  it("警告 UI に 5 項目チェックリストが含まれる", () => {
+  it("fallback UI に 5 項目チェックリストが含まれる", () => {
     expect(PAGE_SRC).toMatch(/Cloud Billing/);
     expect(PAGE_SRC).toMatch(/quota/i);
     expect(PAGE_SRC).toMatch(/referrer/i);
     expect(PAGE_SRC).toMatch(/Maps JavaScript API/);
-    expect(PAGE_SRC).toMatch(/管理者承認/);
+    expect(PAGE_SRC).toMatch(/管理者.*承認|本番利用承認/);
   });
 
-  it("警告 UI で Budget alert ≠ 課金停止 を明記している", () => {
+  it("fallback UI で Budget alert ≠ 課金停止 を明記している", () => {
     expect(PAGE_SRC).toMatch(/通知のみで課金を停止しません|Budget alert.*通知/);
     expect(PAGE_SRC).toMatch(/quota.*必要/);
+  });
+
+  it("fallback UI で APIキーの値を表示しない", () => {
+    // APIキー string を直接 render に渡す箇所がないこと
+    expect(PAGE_SRC).not.toMatch(/\{apiKey\}/);
   });
 
   it("page.tsx に固定料金 (無料枠 / 単価) をハードコードしていない", () => {
@@ -170,6 +182,46 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
 
   it("debounce を fetch に挟んでいる", () => {
     expect(MAP_SRC).toMatch(/debounce\(/);
+  });
+
+  it("Pin InfoWindow に memo 本文を表示しない (Codex P2)", () => {
+    // PinInfo 関数内で row.memo を直接 render しない
+    const pinInfo = MAP_SRC.match(/function PinInfo[\s\S]*?^\}/m);
+    expect(pinInfo).not.toBeNull();
+    expect(pinInfo?.[0]).not.toMatch(/row\.memo/);
+    expect(pinInfo?.[0]).not.toMatch(/\{[^}]*memo[^}]*\}/);
+    // hasMemo の boolean のみで「あり」「—」を切り替える
+    expect(pinInfo?.[0]).toMatch(/hasMemo/);
+  });
+
+  it("PinRow 型 / state に memo 本文を持ち回らない", () => {
+    // PinRow interface に memo 本文 field を含めない (hasMemo のみ)
+    const pinRowDecl = MAP_SRC.match(/interface PinRow[\s\S]*?^\}/m);
+    expect(pinRowDecl).not.toBeNull();
+    // "memo:" 単独 field がない (hasMemo は別語)
+    expect(pinRowDecl?.[0]).not.toMatch(/\bmemo:\s*string/);
+    expect(pinRowDecl?.[0]).toMatch(/hasMemo/);
+  });
+
+  it("API レスポンス受け取りで memo を捨てる stripPinMemo を経由", () => {
+    expect(MAP_SRC).toMatch(/stripPinMemo/);
+  });
+
+  it("Pin fetch URL に bbox (north/south/east/west) が含まれる (Codex P2)", () => {
+    // pin fetch 経路で URLSearchParams に bbox 4 値が積まれる
+    const pinFetchRegion = MAP_SRC.match(
+      /api\/field-survey\/pins[\s\S]{0,400}/,
+    );
+    expect(pinFetchRegion).not.toBeNull();
+    // URLSearchParams object literal shorthand の key を検出
+    expect(MAP_SRC).toMatch(/\bnorth:\s*String\(/);
+    expect(MAP_SRC).toMatch(/\bsouth:\s*String\(/);
+    expect(MAP_SRC).toMatch(/\beast:\s*String\(/);
+    expect(MAP_SRC).toMatch(/\bwest:\s*String\(/);
+    // 単純な ?limit のみのリクエストになっていないこと
+    expect(MAP_SRC).not.toMatch(
+      /\/api\/field-survey\/pins\?limit=\$\{[^}]+\}["'`]/,
+    );
   });
 
   it("巡回開始/終了/現在位置ボタンは disabled (Phase 1-F 予定)", () => {

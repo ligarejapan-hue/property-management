@@ -63,7 +63,8 @@ interface PinRow {
   lng: number;
   pinType: string;
   status: string;
-  memo: string | null;
+  // memo 本文は Map UI に出さない (Codex P2)。「メモあり」boolean のみ別途 derive。
+  hasMemo?: boolean;
 }
 
 type Layer = "properties" | "pins";
@@ -220,8 +221,17 @@ function MapDataLayer({
           );
         }
         if (layers.pins) {
+          // Codex P2: pin fetch も bbox スコープに絞り、viewport 外の他人 pin
+          // を取らない。bbox は Property と同じ map bounds を使う。
+          const pinQs = new URLSearchParams({
+            north: String(b.north),
+            south: String(b.south),
+            east: String(b.east),
+            west: String(b.west),
+            limit: String(PIN_LIMIT),
+          });
           tasks.push(
-            fetch(`/api/field-survey/pins?limit=${PIN_LIMIT}`, {
+            fetch(`/api/field-survey/pins?${pinQs.toString()}`, {
               signal: ac.signal,
               credentials: "same-origin",
             }),
@@ -244,8 +254,12 @@ function MapDataLayer({
         if (layers.pins) {
           const r = results[idx++];
           if (r.ok) {
-            const j = (await r.json()) as { data?: PinRow[] };
-            setPins(filterValidPinGps(j.data ?? []));
+            // API は memo を返すが UI では本文を持ち回らない。
+            // 「メモあり」boolean のみ derive して以後 raw memo は捨てる。
+            const j = (await r.json()) as {
+              data?: (PinRow & { memo?: string | null })[];
+            };
+            setPins(filterValidPinGps(stripPinMemo(j.data ?? [])));
           } else {
             handleHttpError(r.status, onError);
           }
@@ -403,12 +417,9 @@ function PinInfo({ row }: { row: PinRow }) {
             "—"
           )}
         </dd>
+        <dt>メモ</dt>
+        <dd>{row.hasMemo ? "あり (詳細は pin 編集画面で確認)" : "—"}</dd>
       </dl>
-      {row.memo && (
-        <p className="mt-1 whitespace-pre-wrap text-[11px] text-gray-600">
-          {row.memo}
-        </p>
-      )}
     </div>
   );
 }
@@ -439,4 +450,17 @@ function filterValidPinGps(rows: PinRow[]): PinRow[] {
       Number.isFinite(r.lat) &&
       Number.isFinite(r.lng),
   );
+}
+
+// API レスポンス上の memo 本文を Map UI の state に持ち込まない (Codex P2)。
+// 「メモあり」boolean のみ derive して raw memo は捨てる。
+// これにより React DevTools / 後段の console / 派生 state に memo 本文が
+// 残らないことを構造的に保証する。
+function stripPinMemo(
+  rows: (PinRow & { memo?: string | null })[],
+): PinRow[] {
+  return rows.map(({ memo, ...rest }) => ({
+    ...rest,
+    hasMemo: typeof memo === "string" && memo.trim().length > 0,
+  }));
 }
