@@ -173,7 +173,7 @@ function ControlPanel({
   onToggle: (key: Layer) => void;
   currentUserId: string;
   onActiveSessionChange: (s: ActiveSessionLike | null) => void;
-  onBeforeSessionEnd: () => Promise<void>;
+  onBeforeSessionEnd: () => Promise<boolean>;
   recorder: ReturnType<typeof useFieldSurveyLocationRecorder>;
   hasActiveSession: boolean;
 }) {

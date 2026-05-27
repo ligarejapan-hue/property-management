@@ -229,8 +229,12 @@ describe("field-survey-map.tsx — Phase 1-F-2 統合", () => {
 });
 
 describe("trip-controls.tsx — Phase 1-F-2 巡回終了の明示連動 (修正1)", () => {
-  it("onBeforeSessionEnd prop を受け取る", () => {
-    expect(TRIP_SRC).toMatch(/onBeforeSessionEnd\?:\s*\(\)\s*=>\s*Promise<void>\s*\|\s*void/);
+  it("onBeforeSessionEnd prop を受け取る (boolean | void 戻り値)", () => {
+    // Codex P1 (chunk flush): 戻り値 false で session end PATCH を抑止できるよう
+    // boolean | void を返せる signature にする。
+    expect(TRIP_SRC).toMatch(
+      /onBeforeSessionEnd\?:\s*\(\)\s*=>\s*Promise<boolean\s*\|\s*void>\s*\|\s*boolean\s*\|\s*void/,
+    );
   });
 
   it("endSession 内で onBeforeSessionEnd を await してから PATCH を打つ", () => {
@@ -243,8 +247,22 @@ describe("trip-controls.tsx — Phase 1-F-2 巡回終了の明示連動 (修正1
   });
 
   it("onBeforeSessionEnd の throw は握り潰して PATCH を継続する", () => {
-    // try { await onBeforeSessionEnd() } catch { ... } のパターン
-    expect(TRIP_SRC).toMatch(/await\s+onBeforeSessionEnd\(\)[\s\S]{0,40}\}\s*catch/);
+    // try { ... = await onBeforeSessionEnd() } catch { ... } のパターン
+    expect(TRIP_SRC).toMatch(/await\s+onBeforeSessionEnd\(\)[\s\S]{0,80}\}\s*catch/);
+  });
+
+  it("onBeforeSessionEnd が false を返したら PATCH を打たず active に戻す", () => {
+    // Codex P1: 未送信 buffer が残っている場合の data loss を抑止
+    expect(TRIP_SRC).toMatch(
+      /beforeOk\s*===\s*false[\s\S]*?未送信の位置情報が残っている[\s\S]*?setPhase\("active"\)[\s\S]*?return/,
+    );
+    // false 分岐から PATCH に到達しない構造 (return がある)
+    const endBlock = TRIP_SRC.match(
+      /const endSession[\s\S]*?method:\s*"PATCH"/,
+    );
+    const m = endBlock?.[0] ?? "";
+    expect(m).toMatch(/beforeOk\s*===\s*false/);
+    expect(m).toMatch(/setPhase\("active"\)/);
   });
 });
 
@@ -275,19 +293,25 @@ describe("use-field-survey-location-recorder — pending + stopBeforeSessionEnd 
     expect(resetBlock).not.toBeNull();
   });
 
-  it("stopBeforeSessionEnd を export し watch 停止 + flush 試行を行う", () => {
+  it("stopBeforeSessionEnd を export し watch 停止 + chunk drain を行う", () => {
     expect(HOOK_SRC).toMatch(/const stopBeforeSessionEnd/);
+    // Codex P1 (chunk flush): 単発 flushBuffer ではなく flushAllBufferedChunks 経由
     expect(HOOK_SRC).toMatch(
-      /stopBeforeSessionEnd[\s\S]{0,500}stopWatchingInternal\(\)[\s\S]*?flushBuffer\(\)/,
+      /stopBeforeSessionEnd[\s\S]{0,600}stopWatchingInternal\(\)[\s\S]*?flushAllBufferedChunks\(\)/,
     );
     expect(HOOK_SRC).toMatch(/return\s*\{[\s\S]*?stopBeforeSessionEnd,[\s\S]*?\}/);
   });
 
-  it("stopBeforeSessionEnd の flush 失敗は throw しない (try/catch で握り潰し)", () => {
-    const block = HOOK_SRC.match(
-      /stopBeforeSessionEnd[\s\S]*?await\s+flushBuffer\(\)[\s\S]{0,80}\}\s*catch/,
+  it("stopBeforeSessionEnd は boolean を返し、false 時に汎用エラー文言を出す", () => {
+    // Promise<boolean> の戻り値
+    expect(HOOK_SRC).toMatch(
+      /const stopBeforeSessionEnd\s*=\s*useCallback\(async\s*\(\)\s*:\s*Promise<boolean>/,
     );
-    expect(block).not.toBeNull();
+    // 残 buffer 時: 座標を含めない汎用文言を setError、その後 idle に倒し false を返す
+    expect(HOOK_SRC).toMatch(
+      /!drained[\s\S]*?未送信の位置情報が残っている/,
+    );
+    expect(HOOK_SRC).toMatch(/return\s+drained/);
   });
 });
 
@@ -308,19 +332,30 @@ describe("Codex P1 fix 1 — wait for in-flight flush before ending", () => {
     );
   });
 
-  it("stopBeforeSessionEnd は in-flight flush の Promise を await してから final flush", () => {
-    // 順序: clearWatch (= stopWatchingInternal) → inflight await → final flushBuffer
+  it("stopBeforeSessionEnd は flushAllBufferedChunks() 経由で in-flight 待機 + chunk drain", () => {
+    // 順序: clearWatch (= stopWatchingInternal) → flushAllBufferedChunks
+    // (flushAllBufferedChunks の中で in-flight await → chunk drain)
     const block = HOOK_SRC.match(
-      /stopBeforeSessionEnd[\s\S]*?stopWatchingInternal\(\)[\s\S]*?inFlightFlushPromiseRef\.current[\s\S]*?await\s+inflight[\s\S]*?bufferRef\.current\.length\s*>\s*0[\s\S]*?await\s+flushBuffer\(\)/,
+      /stopBeforeSessionEnd[\s\S]*?stopWatchingInternal\(\)[\s\S]*?await\s+flushAllBufferedChunks\(\)/,
     );
     expect(block).not.toBeNull();
   });
 
-  it("stop() (通常停止) も in-flight flush を await してから final flush する", () => {
+  it("stop() (通常停止) も flushAllBufferedChunks() 経由で in-flight + chunk drain", () => {
     const block = HOOK_SRC.match(
-      /const stop\s*=\s*useCallback[\s\S]*?stopWatchingInternal\(\)[\s\S]*?inFlightFlushPromiseRef\.current[\s\S]*?await\s+inflight[\s\S]*?await\s+flushBuffer\(\)/,
+      /const stop\s*=\s*useCallback[\s\S]*?stopWatchingInternal\(\)[\s\S]*?await\s+flushAllBufferedChunks\(\)/,
     );
     expect(block).not.toBeNull();
+  });
+
+  it("flushAllBufferedChunks 内部で in-flight Promise を await する", () => {
+    const fn = HOOK_SRC.match(
+      /const flushAllBufferedChunks\s*=\s*useCallback[\s\S]*?\}\,\s*\[flushBuffer\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/inFlightFlushPromiseRef\.current/);
+    expect(m).toMatch(/await\s+inflight/);
   });
 
   it("inflight await の raw error は console / setError に流さない", () => {
@@ -515,6 +550,74 @@ describe("Codex P2 fix 2 — do not start from truncated route history", () => {
     // 汎用エラー文言で sequence/座標を含めない
     expect(okFalseBranch?.[0]).not.toMatch(/sequence/);
     expect(okFalseBranch?.[0]).not.toMatch(/lat|lng/i);
+  });
+});
+
+describe("Codex P1 — cap each flush at API batch limit (200)", () => {
+  it("FIELD_SURVEY_FLUSH_API_BATCH_LIMIT を import している", () => {
+    expect(HOOK_SRC).toMatch(
+      /import\s*\{[^}]*FIELD_SURVEY_FLUSH_API_BATCH_LIMIT[^}]*\}\s*from\s*["']@\/lib\/field-survey-geolocation-util["']/,
+    );
+  });
+
+  it("flushBuffer の snapshot が batch limit で slice されている", () => {
+    // bufferRef.current.slice() で全件取らず、(0, FIELD_SURVEY_FLUSH_API_BATCH_LIMIT) で chunk 化
+    // (引数が改行されていても trailing comma 有無に関わらず一致するよう許容)
+    expect(HOOK_SRC).toMatch(
+      /const\s+snapshot\s*=\s*bufferRef\.current\.slice\(\s*0\s*,\s*FIELD_SURVEY_FLUSH_API_BATCH_LIMIT\s*,?\s*\)/,
+    );
+    // 全件 slice() への regression を防ぐ (no-arg slice が残らない)
+    expect(HOOK_SRC).not.toMatch(/bufferRef\.current\.slice\(\)/);
+  });
+
+  it("flushAllBufferedChunks helper が定義されている", () => {
+    expect(HOOK_SRC).toMatch(/const\s+flushAllBufferedChunks\s*=\s*useCallback/);
+    // Promise<boolean> を返す
+    expect(HOOK_SRC).toMatch(
+      /flushAllBufferedChunks\s*=\s*useCallback\(async\s*\(\)\s*:\s*Promise<boolean>/,
+    );
+  });
+
+  it("flushAllBufferedChunks は進捗が無い場合 break して無限ループしない", () => {
+    const fn = HOOK_SRC.match(
+      /const flushAllBufferedChunks\s*=\s*useCallback[\s\S]*?\}\,\s*\[flushBuffer\]\s*\);/,
+    );
+    const m = fn?.[0] ?? "";
+    // while ループ内で before / after を取り、進捗なしなら break
+    expect(m).toMatch(/while\s*\(\s*bufferRef\.current\.length\s*>\s*0\s*\)/);
+    expect(m).toMatch(/const\s+before\s*=\s*bufferRef\.current\.length/);
+    expect(m).toMatch(/const\s+after\s*=\s*bufferRef\.current\.length/);
+    expect(m).toMatch(/if\s*\(\s*!ok\s*\)\s*break/);
+    expect(m).toMatch(/if\s*\(\s*after\s*>=\s*before\s*\)\s*break/);
+  });
+
+  it("flushAllBufferedChunks は完全排出時 true / 残あり時 false", () => {
+    const fn = HOOK_SRC.match(
+      /const flushAllBufferedChunks\s*=\s*useCallback[\s\S]*?\}\,\s*\[flushBuffer\]\s*\);/,
+    );
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/return\s+bufferRef\.current\.length\s*===\s*0/);
+  });
+
+  it("FIELD_SURVEY_FLUSH_API_BATCH_LIMIT は 200 (server schema の .max(200) と一致)", () => {
+    // util ファイル側でも検証する (実値は util test で固められるが、構造ガード)
+    expect(HOOK_SRC).toMatch(/FIELD_SURVEY_FLUSH_API_BATCH_LIMIT/);
+  });
+
+  it("座標を含めない汎用エラー文言で session end PATCH を抑止する", () => {
+    // 未送信 buffer が残った場合の文言
+    expect(HOOK_SRC).toMatch(/未送信の位置情報が残っている/);
+    // 文言そのものに lat / lng / 数値 / API status を含めないこと
+    // (setError(...) の引数文字列だけを抜き出して検査)
+    const errCall = HOOK_SRC.match(
+      /!drained[\s\S]*?setError\(\s*"([^"]+)"/,
+    );
+    expect(errCall).not.toBeNull();
+    const msg = errCall?.[1] ?? "";
+    expect(msg).not.toMatch(/lat|lng/i);
+    expect(msg).not.toMatch(/sequence/i);
+    expect(msg).not.toMatch(/422|HTTP/i);
+    expect(msg).not.toMatch(/\d/); // 数値 (件数 / status code 等) を含めない
   });
 });
 

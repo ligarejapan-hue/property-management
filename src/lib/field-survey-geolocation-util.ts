@@ -28,6 +28,13 @@ export const FIELD_SURVEY_FLUSH_BATCH_SIZE = 10;
 export const FIELD_SURVEY_FLUSH_INTERVAL_MS = 10 * 1000;
 /** GET track-points で 1 ページに取る件数 (API の上限は 1000)。 */
 export const FIELD_SURVEY_FETCH_PAGE_LIMIT = 500;
+/**
+ * POST track-points の 1 batch あたりの最大件数。
+ * server 側 `fieldSurveyTrackPointBatchSchema` の `.max(200)` と必ず一致させる。
+ * Codex P1: 失敗 retry / final flush で buffer が 200 超に膨らむと、全件 snapshot
+ * では永久に 422 になり buffer を排出できなくなるため、必ず本上限以内で chunk 化する。
+ */
+export const FIELD_SURVEY_FLUSH_API_BATCH_LIMIT = 200;
 /** GET track-points で辿る最大ページ数 (5000 点 = ~14h @ 10s)。 */
 export const FIELD_SURVEY_FETCH_PAGE_MAX = 10;
 

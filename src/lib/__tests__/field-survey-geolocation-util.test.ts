@@ -9,6 +9,7 @@
 import { describe, it, expect } from "vitest";
 import {
   FIELD_SURVEY_ACCURACY_WARN_M,
+  FIELD_SURVEY_FLUSH_API_BATCH_LIMIT,
   FIELD_SURVEY_FLUSH_BATCH_SIZE,
   FIELD_SURVEY_FLUSH_INTERVAL_MS,
   FIELD_SURVEY_MAX_ACCURACY_M,
@@ -160,6 +161,39 @@ describe("shouldFlushNow", () => {
     expect(shouldFlushNow({ length: 50 }, null, NOW, undefined, true)).toBe(
       false,
     );
+  });
+});
+
+describe("FIELD_SURVEY_FLUSH_API_BATCH_LIMIT (Codex P1 — match server schema)", () => {
+  it("server schema (fieldSurveyTrackPointBatchSchema.points .max(200)) と同じ 200", () => {
+    expect(FIELD_SURVEY_FLUSH_API_BATCH_LIMIT).toBe(200);
+  });
+
+  it("400 件の buffer を 200 件にだけ slice しても残りが保持される", () => {
+    // flushBuffer の snapshot 動作を仕様レベルで固定する: 全件 slice() ではなく
+    // (0, FIELD_SURVEY_FLUSH_API_BATCH_LIMIT) で chunk 化される必要がある。
+    const big = Array.from({ length: 400 }, (_, i) => ({
+      sequence: i,
+      lat: 35,
+      lng: 139,
+      recordedAt: "2026-05-28T00:00:00.000Z",
+    }));
+    const snapshot = big.slice(0, FIELD_SURVEY_FLUSH_API_BATCH_LIMIT);
+    expect(snapshot.length).toBe(200);
+    expect(snapshot[0].sequence).toBe(0);
+    expect(snapshot[snapshot.length - 1].sequence).toBe(199);
+    // 残り 200 件は次回 chunk で処理する想定。原配列は変更しない。
+    expect(big.length).toBe(400);
+  });
+
+  it("limit 未満の buffer はそのまま全件 snapshot される", () => {
+    const small = Array.from({ length: 5 }, (_, i) => ({
+      sequence: i,
+      lat: 0,
+      lng: 0,
+      recordedAt: "2026-05-28T00:00:00.000Z",
+    }));
+    expect(small.slice(0, FIELD_SURVEY_FLUSH_API_BATCH_LIMIT).length).toBe(5);
   });
 });
 

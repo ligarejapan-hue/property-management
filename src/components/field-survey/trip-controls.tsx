@@ -41,10 +41,14 @@ interface TripControlsProps {
   onActiveSessionChange?: (session: ActiveSessionLike | null) => void;
   /**
    * Phase 1-F-2: 巡回終了 API を叩く直前に await される hook。
-   * 親側で位置記録 (watchPosition / flush timer) を確実に止めるために使う。
-   * throw されても巡回終了処理は継続する (catch して握り潰す)。
+   * 親側で位置記録 (watchPosition / flush timer / 残 buffer chunk flush) を
+   * 確実に止めるために使う。throw されても巡回終了処理は継続する (catch 握り潰し)。
+   *
+   * Codex P1: 戻り値 false の場合、未送信 buffer が残っているため
+   * session end PATCH を呼ばずに active 状態へ戻し、ユーザーに再送信を促す。
+   * void / true / undefined / 例外時は従来どおり PATCH に進む。
    */
-  onBeforeSessionEnd?: () => Promise<void> | void;
+  onBeforeSessionEnd?: () => Promise<boolean | void> | boolean | void;
 }
 
 type Phase =
@@ -196,15 +200,24 @@ export default function TripControls({
       setPhase("ending");
       setError(null);
       // Phase 1-F-2: session PATCH の前に位置記録 (watchPosition / flush
-      // timer / 残 buffer flush) を停止する。throw は握り潰し、巡回終了
-      // 自体は継続する (録音は終わらせるが session も確実に閉じる)。
+      // timer / 残 buffer chunk flush) を停止する。throw は握り潰す。
+      // Codex P1: 戻り値が明示的に false の場合 = 未送信 buffer が残っている。
+      // session end PATCH を呼ばず active 状態へ戻し、ユーザーに再送信を促す。
       if (onBeforeSessionEnd) {
+        let beforeOk: boolean | void = undefined;
         try {
-          await onBeforeSessionEnd();
+          beforeOk = await onBeforeSessionEnd();
         } catch {
-          // 終了前 stop の失敗で巡回終了を阻まない
+          // 終了前 stop の失敗で巡回終了を阻まない (従来挙動)
         }
         if (!mountedRef.current) return;
+        if (beforeOk === false) {
+          setError(
+            "未送信の位置情報が残っているため、巡回終了前に再度送信してください。",
+          );
+          setPhase("active");
+          return;
+        }
       }
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();

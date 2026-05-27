@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FIELD_SURVEY_FETCH_PAGE_LIMIT,
   FIELD_SURVEY_FETCH_PAGE_MAX,
+  FIELD_SURVEY_FLUSH_API_BATCH_LIMIT,
   FIELD_SURVEY_FLUSH_BATCH_SIZE,
   FIELD_SURVEY_FLUSH_INTERVAL_MS,
   describeGeolocationError,
@@ -71,10 +72,15 @@ export interface UseLocationRecorderResult {
   stop: () => Promise<void>;
   /**
    * 巡回終了直前の連動フック。watch を即時 clearWatch + timer 停止し、
-   * その後 1 回 flush を試みる。session API への PATCH 前に await されること
-   * を想定。flush 失敗時も buffer は memory に残るだけで再 throw しない。
+   * その後 buffer が空になるまで chunk (= 200 件以下 / 回) で flush を試みる。
+   * session API への PATCH 前に await されることを想定。
+   *
+   * 戻り値:
+   *  - true: buffer 完全排出 (session end に進んで良い)
+   *  - false: HTTP/network 等で送れず残 buffer あり (session end PATCH を
+   *    呼ばないことで未送信データを保持し、次回再試行できる)
    */
-  stopBeforeSessionEnd: () => Promise<void>;
+  stopBeforeSessionEnd: () => Promise<boolean>;
 }
 
 interface UseLocationRecorderOptions {
@@ -164,8 +170,13 @@ export function useFieldSurveyLocationRecorder(
     // 反映時に session 切替 / stop が起きていないか再確認する。
     const startSid = sid;
     const startGeneration = recorderGenerationRef.current;
-    // snapshot して in-flight 中の追加点は次回 flush に回す
-    const snapshot = bufferRef.current.slice();
+    // Codex P1: snapshot は server API の batch 上限 (= 200) 以内に必ず chunk 化する。
+    // 全件投入すると、200 超で永続 422 になり buffer を排出できなくなる。
+    // 残った点は次回 flush / final flush で送る。
+    const snapshot = bufferRef.current.slice(
+      0,
+      FIELD_SURVEY_FLUSH_API_BATCH_LIMIT,
+    );
     const ac = new AbortController();
     flushAbortRef.current = ac;
     const work = (async (): Promise<boolean> => {
@@ -494,76 +505,87 @@ export function useFieldSurveyLocationRecorder(
     status,
   ]);
 
+  /**
+   * Codex P1: stop / stopBeforeSessionEnd の final flush は単発ではなく
+   * bufferRef.current が空になるまで chunk (= 最大 200 件) ずつ送る。
+   *
+   * - 進捗 (buffer 件数の減少) が無くなったら break (無限ループ防止)
+   * - flushBuffer が false を返した時も break (HTTP error / abort / 0件など)
+   * - 戻り値: true = 完全に排出 / false = 残バッファあり
+   * - lat/lng / raw response を console / error に流さない
+   */
+  const flushAllBufferedChunks = useCallback(async (): Promise<boolean> => {
+    // 既存 in-flight flush の完了を先に待つ
+    const inflight = inFlightFlushPromiseRef.current;
+    if (inflight) {
+      try {
+        await inflight;
+      } catch {
+        // raw error / response は出さない
+      }
+      if (!mountedRef.current) return false;
+    }
+    // 進捗のあるうちは chunk を送り続ける
+    while (bufferRef.current.length > 0) {
+      const before = bufferRef.current.length;
+      let ok = false;
+      try {
+        ok = await flushBuffer();
+      } catch {
+        ok = false;
+      }
+      if (!mountedRef.current) return false;
+      const after = bufferRef.current.length;
+      if (!ok) break;
+      if (after >= before) break;
+    }
+    return bufferRef.current.length === 0;
+  }, [flushBuffer]);
+
   const stop = useCallback(async () => {
     if (status === "idle") return;
     setStatus("stopping");
     // start() の async continuation を無効化 + watch / timer 即時遮断
     recorderGenerationRef.current += 1;
     stopWatchingInternal();
-    // 既存 in-flight flush を await (snapshot 内を確実に送ってから final)
-    const inflight = inFlightFlushPromiseRef.current;
-    if (inflight) {
-      try {
-        await inflight;
-      } catch {
-        // raw error / response は出さない
-      }
-      if (!mountedRef.current) return;
-    }
-    if (bufferRef.current.length > 0) {
-      try {
-        await flushBuffer();
-      } catch {
-        // final flush 失敗は無視 (未送信点は失われる)
-      }
-      if (!mountedRef.current) return;
-    }
+    // Codex P1: 残 buffer を 200 件 chunk で空になるまで排出 (in-flight も内部で await)
+    await flushAllBufferedChunks();
+    if (!mountedRef.current) return;
     setStatus("idle");
-  }, [flushBuffer, status, stopWatchingInternal]);
+  }, [flushAllBufferedChunks, status, stopWatchingInternal]);
 
   /**
-   * 巡回終了直前の連動。idle 中は no-op。
+   * 巡回終了直前の連動。idle 中は no-op で true を返す。
    *
-   * Codex P1 fix 1: in-flight flush を Promise として追跡し、確実に完了を
-   * 待ってから final flush を 1 回行う。古い flush の snapshot 後に追加された
-   * 点も、final flush で拾われる。
+   * Codex P1 fix 1 + 本 fix: in-flight flush を await した上で、残 buffer が
+   * 空になるまで 200 件 chunk で送り切る。
    *
    * 順序:
    *  1) status を stopping にして UI を遷移
    *  2) 世代カウンタを進めて start() の async continuation を無効化
-   *  3) clearWatch + flush timer 停止 (新規 callback の遮断)
-   *  4) 既存 in-flight flush があれば完了まで await (raw error は出さない)
-   *  5) 残った buffer を final flush 試行 (失敗時も汎用文言のみ)
-   *  6) status を idle に倒す
+   *  3) clearWatch + flush timer 停止
+   *  4) flushAllBufferedChunks() で in-flight 完了 + 残 chunk を排出
+   *  5) status を idle に倒す
+   *  6) 残 buffer が消えた場合は true、HTTP / network 等で送れず残った場合は
+   *     false を返す。呼び出し側 (TripControls) は false なら session end PATCH を
+   *     呼ばないことで、データロスを抑止する。
    */
-  const stopBeforeSessionEnd = useCallback(async () => {
-    if (status === "idle") return;
+  const stopBeforeSessionEnd = useCallback(async (): Promise<boolean> => {
+    if (status === "idle") return true;
     setStatus("stopping");
-    // 古い start() の continuation を無効化 (fetch 中なら watch 開始させない)
     recorderGenerationRef.current += 1;
     stopWatchingInternal();
-    // 既存 in-flight flush の完了を await (snapshot 内の点を server に届かせる)
-    const inflight = inFlightFlushPromiseRef.current;
-    if (inflight) {
-      try {
-        await inflight;
-      } catch {
-        // raw error / response は出さない
-      }
-      if (!mountedRef.current) return;
-    }
-    // in-flight が完了した時点で buffer に残っているのは「snapshot 後に
-    // 追加された / 失敗で残った」点。final flush でこれらを送る。
-    if (bufferRef.current.length > 0) {
-      try {
-        await flushBuffer();
-      } catch {
-        // 終了前 final flush の失敗は巡回終了自体を阻まない
-      }
-      if (!mountedRef.current) return;
+    const drained = await flushAllBufferedChunks();
+    if (!mountedRef.current) return drained;
+    if (!drained) {
+      // 座標を含めない汎用文言。具体的な API status / 件数 / sequence は出さない。
+      setError(
+        "未送信の位置情報が残っているため、巡回終了前に再度送信してください。",
+      );
     }
     setStatus("idle");
-  }, [flushBuffer, status, stopWatchingInternal]);
+    return drained;
+  }, [flushAllBufferedChunks, status, stopWatchingInternal]);
 
   // ---- session change / unmount cleanup ---------------------------------
 
