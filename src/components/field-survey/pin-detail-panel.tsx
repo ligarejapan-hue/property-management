@@ -55,34 +55,51 @@ export default function PinDetailPanel({
 
   const loadDetail = useCallback(async () => {
     const r = await mutations.fetchPinDetail(pinId);
-    if (r.ok && r.data) {
-      setDetail(r.data);
-      // edit state も同期 (キャンセル時に戻すため毎回 reset)
-      const t = r.data.pinType;
-      const s = r.data.status;
-      setDraftPinType(
-        (FIELD_SURVEY_PIN_TYPES as readonly string[]).includes(t)
-          ? (t as FieldSurveyPinType)
-          : "candidate",
-      );
-      setDraftStatus(
-        (FIELD_SURVEY_PIN_STATUSES as readonly string[]).includes(s)
-          ? (s as FieldSurveyPinStatus)
-          : "open",
-      );
-      setDraftMemo(r.data.memo ?? "");
-    }
+    if (!r.ok || !r.data) return;
+    // Codex P2: GET 完了時に pinId が他の pin に切り替わっていたら state を
+    // 汚さない。pinId と data.id を再照合する。
+    if (r.data.id !== pinId) return;
+    setDetail(r.data);
+    const t = r.data.pinType;
+    const s = r.data.status;
+    setDraftPinType(
+      (FIELD_SURVEY_PIN_TYPES as readonly string[]).includes(t)
+        ? (t as FieldSurveyPinType)
+        : "candidate",
+    );
+    setDraftStatus(
+      (FIELD_SURVEY_PIN_STATUSES as readonly string[]).includes(s)
+        ? (s as FieldSurveyPinStatus)
+        : "open",
+    );
+    setDraftMemo(r.data.memo ?? "");
   }, [mutations, pinId]);
 
+  // Codex P2: pinId が変わった瞬間に古い detail / editing / form / error を
+  // 同期 reset する。新しい GET が完了するまで旧 own pin の編集 UI が残らない
+  // ようにするため、loadDetail 前にこの reset を必ず実行する。
   useEffect(() => {
+    setDetail(null);
+    setEditing(false);
+    setDraftPinType("candidate");
+    setDraftStatus("open");
+    setDraftMemo("");
     void loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinId]);
 
-  const isOwn = detail?.staffUserId === currentUserId;
+  // Codex P2: 編集 UI 表示条件は (detail が存在 && detail.id === pinId &&
+  // detail.staffUserId === currentUserId)。pin 切替直後の race で旧 own pin
+  // の編集 UI が新 pinId に対して残らないことを保証する。
+  // manage 権限を持っていても、Phase 1-G では他人 pin の編集 UI を出さない。
+  const isFresh = !!detail && detail.id === pinId;
+  const isOwn = isFresh && detail!.staffUserId === currentUserId;
 
   const handleSave = async () => {
     if (!detail) return;
+    // Codex P2: PATCH 直前にも stale / 他人 pin への送信を再確認する。
+    if (detail.id !== pinId) return;
+    if (detail.staffUserId !== currentUserId) return;
     const patch = buildPinPatch(
       { pinType: detail.pinType, status: detail.status, memo: detail.memo },
       { pinType: draftPinType, status: draftStatus, memo: draftMemo },
@@ -93,11 +110,12 @@ export default function PinDetailPanel({
       return;
     }
     const r = await mutations.updatePin(pinId, patch);
-    if (r.ok && r.data) {
-      setDetail(r.data);
-      setEditing(false);
-      onUpdated?.(r.data);
-    }
+    if (!r.ok || !r.data) return;
+    // PATCH のレスポンス時にも pinId 切替が起きていないか再確認。
+    if (r.data.id !== pinId) return;
+    setDetail(r.data);
+    setEditing(false);
+    onUpdated?.(r.data);
   };
 
   return (
@@ -138,17 +156,17 @@ export default function PinDetailPanel({
           </p>
         )}
 
-        {detail && !editing && (
+        {isFresh && !editing && (
           <ReadOnlyView
-            detail={detail}
+            detail={detail!}
             isOwn={isOwn}
             onEdit={() => setEditing(true)}
           />
         )}
 
-        {detail && editing && isOwn && (
+        {isFresh && editing && isOwn && (
           <EditView
-            detail={detail}
+            detail={detail!}
             draftPinType={draftPinType}
             draftStatus={draftStatus}
             draftMemo={draftMemo}

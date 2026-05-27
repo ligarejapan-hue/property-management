@@ -131,6 +131,11 @@ export default function FieldSurveyMap({
   // Phase 1-G: pin 追加モード / 詳細パネル / write 権限。
   // canWrite は /api/me/permissions で 1 回取得して memoize する。
   // 判定できない場合 (fetch 失敗) は null のまま、UI は API 403 を汎用化する。
+  //
+  // Codex P2 (本 fix): permission entry の `granted: boolean` を必ず見る。
+  // resource + action だけで判定すると、明示 deny (granted: false) も
+  // 「許可」として扱ってしまうため、`granted === true` を必須にする。
+  // malformed / 欠損 entry は安全側で false。response 全文は console に出さない。
   const [canWritePin, setCanWritePin] = useState<boolean | null>(null);
   useEffect(() => {
     const ac = new AbortController();
@@ -142,13 +147,26 @@ export default function FieldSurveyMap({
         });
         if (!res.ok) return;
         const body = (await res.json().catch(() => null)) as
-          | { permissions?: { resource?: string; action?: string }[] }
+          | {
+              permissions?: {
+                resource?: string;
+                action?: string;
+                granted?: boolean;
+              }[];
+            }
           | null;
-        const has =
-          Array.isArray(body?.permissions) &&
-          body!.permissions!.some(
-            (p) => p?.resource === "field_survey" && p?.action === "write",
-          );
+        if (!Array.isArray(body?.permissions)) {
+          setCanWritePin(false);
+          return;
+        }
+        const has = body!.permissions!.some(
+          (p) =>
+            p !== null &&
+            typeof p === "object" &&
+            p.resource === "field_survey" &&
+            p.action === "write" &&
+            p.granted === true,
+        );
         setCanWritePin(has);
       } catch {
         // 判定不能。null のまま (API 403 で汎用化)。

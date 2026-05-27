@@ -154,8 +154,11 @@ describe("pin-detail-panel.tsx", () => {
     expect(DETAIL_SRC).toMatch(/whitespace-pre-wrap/);
   });
 
-  it("own pin のみ編集 UI を出す (isOwn ゲート)", () => {
-    expect(DETAIL_SRC).toMatch(/isOwn\s*=\s*detail\?\.staffUserId\s*===\s*currentUserId/);
+  it("own pin のみ編集 UI を出す (isOwn ゲート + isFresh)", () => {
+    // Codex P2 fix 2: isOwn は isFresh かつ own staff のみ true。
+    expect(DETAIL_SRC).toMatch(
+      /isOwn\s*=\s*isFresh\s*&&\s*detail!\.staffUserId\s*===\s*currentUserId/,
+    );
     // ReadOnlyView の編集ボタンと EditView render が isOwn 条件付き
     expect(DETAIL_SRC).toMatch(/\{isOwn\s*&&\s*\(/);
     expect(DETAIL_SRC).toMatch(/editing\s*&&\s*isOwn/);
@@ -353,6 +356,103 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     expect(MAP_SRC).not.toMatch(/sessionStorage\s*\.\s*(setItem|getItem|removeItem)/);
     expect(MAP_SRC).not.toMatch(/\bindexedDB\s*\.\s*open/);
     expect(MAP_SRC).not.toMatch(/wakeLock/);
+  });
+});
+
+// =======================================================================
+// Codex P2 fix 1: granted===true を要求
+// =======================================================================
+describe("Codex P2 fix 1 — honor granted entries in /api/me/permissions", () => {
+  it("permissions の判定で p.granted === true を必須にしている", () => {
+    // resource + action だけでなく granted の検査を含むこと
+    expect(MAP_SRC).toMatch(
+      /resource\s*===\s*"field_survey"[\s\S]{0,80}action\s*===\s*"write"[\s\S]{0,80}granted\s*===\s*true/,
+    );
+  });
+
+  it("旧パターン (granted を見ない some(...)) が残っていないこと", () => {
+    // resource/action のみで判定する古い形が無いこと
+    expect(MAP_SRC).not.toMatch(
+      /\.some\(\s*\(p\)\s*=>\s*p\?\.resource\s*===\s*"field_survey"\s*&&\s*p\?\.action\s*===\s*"write"\s*\)/,
+    );
+  });
+
+  it("permissions が配列で無い / 空 / malformed なら canWritePin=false (安全側)", () => {
+    expect(MAP_SRC).toMatch(/setCanWritePin\(false\)/);
+    // permissions 配列 typeguard
+    expect(MAP_SRC).toMatch(/Array\.isArray\(body\?\.permissions\)/);
+  });
+
+  it("permissions response 全文 / granted 値を console に出さない", () => {
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*permissions/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*granted/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
+  });
+});
+
+// =======================================================================
+// Codex P2 fix 2: pinId 切替時に stale detail / editing を reset
+// =======================================================================
+describe("Codex P2 fix 2 — reset stale pin detail when switching pins", () => {
+  it("pinId effect で detail / editing / draft を同期 reset する", () => {
+    // useEffect の dep に pinId、本体で setDetail(null) + setEditing(false) +
+    // setDraftMemo("") + loadDetail() の順を含む
+    const resetBlock = DETAIL_SRC.match(
+      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?setDetail\(null\)[\s\S]*?setEditing\(false\)[\s\S]*?setDraftMemo\(""\)[\s\S]*?loadDetail\(\)[\s\S]*?\}\,\s*\[pinId\]/,
+    );
+    expect(resetBlock).not.toBeNull();
+  });
+
+  it("isFresh = detail && detail.id === pinId を gate に使う", () => {
+    expect(DETAIL_SRC).toMatch(
+      /const\s+isFresh\s*=\s*!!detail\s*&&\s*detail\.id\s*===\s*pinId/,
+    );
+  });
+
+  it("isOwn は isFresh かつ staffUserId === currentUserId のみ true", () => {
+    expect(DETAIL_SRC).toMatch(
+      /const\s+isOwn\s*=\s*isFresh\s*&&\s*detail!\.staffUserId\s*===\s*currentUserId/,
+    );
+  });
+
+  it("ReadOnlyView / EditView は isFresh で gate される", () => {
+    expect(DETAIL_SRC).toMatch(/\{isFresh\s*&&\s*!editing\s*&&\s*\(?\s*<ReadOnlyView/);
+    expect(DETAIL_SRC).toMatch(
+      /\{isFresh\s*&&\s*editing\s*&&\s*isOwn\s*&&\s*\(?\s*<EditView/,
+    );
+  });
+
+  it("loadDetail 完了時に pinId 不一致なら state を汚さない", () => {
+    // r.data.id !== pinId なら return
+    expect(DETAIL_SRC).toMatch(/r\.data\.id\s*!==\s*pinId/);
+  });
+
+  it("handleSave は PATCH 直前に pinId / own を再確認する", () => {
+    const fn = DETAIL_SRC.match(/const handleSave\s*=[\s\S]*?\}\;/);
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/detail\.id\s*!==\s*pinId/);
+    expect(m).toMatch(/detail\.staffUserId\s*!==\s*currentUserId/);
+    // updatePin 呼び出し後、PATCH response でも pinId 不一致なら state 反映しない
+    expect(m).toMatch(/r\.data\.id\s*!==\s*pinId/);
+  });
+
+  it("manage 権限でも他人 pin 編集 UI を出さない方針を維持 (isOwn 単独 gate)", () => {
+    // EditView は isOwn === true のみ render。manage 等の追加 prop が無いこと
+    expect(DETAIL_SRC).not.toMatch(/canManage/);
+    expect(DETAIL_SRC).not.toMatch(/hasManage/);
+  });
+
+  it("dangerouslySetInnerHTML 不使用を継続", () => {
+    expect(DETAIL_SRC).not.toMatch(/dangerouslySetInnerHTML/);
+  });
+
+  it("memo / lat / lng / response を console に出さない (継続)", () => {
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*memo/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*lat/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*lng/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\([^)]*response/i);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
   });
 });
 
