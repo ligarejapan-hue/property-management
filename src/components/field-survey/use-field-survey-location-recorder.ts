@@ -229,13 +229,16 @@ export function useFieldSurveyLocationRecorder(
       } finally {
         inFlightFlushRef.current = false;
         safeSetState(setIsFlushing, false);
-        // 自分が登録した promise だけを片付ける (世代越えで上書きされた場合は触らない)
-        if (inFlightFlushPromiseRef.current === work) {
-          inFlightFlushPromiseRef.current = null;
-        }
       }
     })();
     inFlightFlushPromiseRef.current = work;
+    // 自分が登録した promise だけを片付ける (世代越えで上書きされた場合は触らない)。
+    // 自己参照 TDZ を避けるため、後段の .finally() で work を参照する。
+    void work.finally(() => {
+      if (inFlightFlushPromiseRef.current === work) {
+        inFlightFlushPromiseRef.current = null;
+      }
+    });
     return work;
   }, [options, safeSetState]);
 
