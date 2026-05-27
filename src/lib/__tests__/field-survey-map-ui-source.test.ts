@@ -13,6 +13,13 @@ const PAGE_SRC = fs.readFileSync(
   path.resolve(process.cwd(), "src/app/(dashboard)/field-survey/map/page.tsx"),
   "utf8",
 );
+const CLIENT_SRC = fs.readFileSync(
+  path.resolve(
+    process.cwd(),
+    "src/components/field-survey/field-survey-map-client.tsx",
+  ),
+  "utf8",
+);
 const MAP_SRC = fs.readFileSync(
   path.resolve(
     process.cwd(),
@@ -97,83 +104,133 @@ describe("sidebar.tsx — nav entry", () => {
   });
 });
 
-describe("page.tsx — fallback / structure", () => {
+describe("page.tsx — server-side permission gate (Codex Phase 1-E)", () => {
+  it("server component である ('use client' を持たない)", () => {
+    // permission gate を server side で行うため client directive を持たない
+    expect(PAGE_SRC.trim().startsWith('"use client"')).toBe(false);
+  });
+
+  it("async server component (await getApiSession / getUserPermissions) である", () => {
+    expect(PAGE_SRC).toMatch(/export default async function/);
+    expect(PAGE_SRC).toMatch(/await\s+getApiSession\(\)/);
+    expect(PAGE_SRC).toMatch(/await\s+getUserPermissions\(/);
+  });
+
+  it("field_survey:read を hasPermission で確認している", () => {
+    expect(PAGE_SRC).toMatch(
+      /hasPermission\([^)]*,\s*["']field_survey["']\s*,\s*["']read["']/,
+    );
+  });
+
+  it("権限不足時は FieldSurveyMapClient を render しない", () => {
+    expect(PAGE_SRC).toMatch(/PermissionDeniedNotice/);
+    expect(PAGE_SRC).toMatch(
+      /canRead\s*\?\s*<FieldSurveyMapClient\s*\/>\s*:\s*<PermissionDeniedNotice/,
+    );
+  });
+
+  it("FieldSurveyMapClient の render 経路は page.tsx 内で 1 箇所のみ", () => {
+    const matches = PAGE_SRC.match(/<FieldSurveyMapClient\b/g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+
+  it("page.tsx は Maps JS API loader を直接 import しない", () => {
+    expect(PAGE_SRC).not.toMatch(/from\s+["']@vis\.gl\/react-google-maps["']/);
+    expect(PAGE_SRC).not.toMatch(
+      /from\s+["']@\/components\/field-survey\/field-survey-map["']/,
+    );
+  });
+
+  it("PermissionDeniedNotice に APIキー / mapId / env 値を含まない", () => {
+    const denialRegion = PAGE_SRC.match(
+      /function PermissionDeniedNotice[\s\S]*?^\}/m,
+    );
+    expect(denialRegion).not.toBeNull();
+    expect(denialRegion?.[0]).not.toMatch(/apiKey/);
+    expect(denialRegion?.[0]).not.toMatch(/mapId/);
+    expect(denialRegion?.[0]).not.toMatch(/NEXT_PUBLIC_GOOGLE_MAPS/);
+  });
+
+  it("permission check の失敗を catch して canRead=false に倒している", () => {
+    expect(PAGE_SRC).toMatch(/try\s*\{/);
+    expect(PAGE_SRC).toMatch(/catch\b/);
+  });
+
+  it("page.tsx に固定料金 (無料枠 / 単価) をハードコードしていない (継続ガード)", () => {
+    expect(PAGE_SRC).not.toMatch(/\$\s*\d/);
+    expect(PAGE_SRC).not.toMatch(/28[,\s]?500/);
+    expect(PAGE_SRC).not.toMatch(/\b\d{2,3}\s*円\b/);
+    expect(PAGE_SRC).not.toMatch(/\bper\s*1[,\s]?000\b/i);
+  });
+});
+
+describe("field-survey-map-client.tsx — env-based gating", () => {
   it("'use client' で始まる", () => {
-    expect(PAGE_SRC.trim().startsWith('"use client"')).toBe(true);
+    expect(CLIENT_SRC.trim().startsWith('"use client"')).toBe(true);
   });
 
   it("APIキー未設定時の案内文を持つ", () => {
-    expect(PAGE_SRC).toMatch(/Google Maps APIキーが未設定/);
+    expect(CLIENT_SRC).toMatch(/Google Maps APIキーが未設定/);
   });
 
   it("NEXT_PUBLIC_GOOGLE_MAPS_API_KEY を直接参照する", () => {
-    expect(PAGE_SRC).toMatch(/process\.env\.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY/);
+    expect(CLIENT_SRC).toMatch(/process\.env\.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY/);
   });
 
   it("isGoogleMapsKeyConfigured を介してクラッシュ防御している", () => {
-    expect(PAGE_SRC).toMatch(/isGoogleMapsKeyConfigured/);
+    expect(CLIENT_SRC).toMatch(/isGoogleMapsKeyConfigured/);
   });
 
   it("APIキーをそのまま画面 body に表示していない (露出防止)", () => {
-    // page.tsx に apiKey をそのまま {apiKey} として描画する箇所が無いこと
-    expect(PAGE_SRC).not.toMatch(/\{apiKey\}/);
+    expect(CLIENT_SRC).not.toMatch(/\{apiKey\}/);
   });
 
   it("APIキーが入っていても billing 未確認なら FieldSurveyMap を mount しない (Codex P1)", () => {
-    // gating: ack 未確認時は fallback (= FieldSurveyMap を mount しない)
-    expect(PAGE_SRC).toMatch(/isGoogleMapsBillingAcknowledged/);
-    expect(PAGE_SRC).toMatch(/BillingNotAcknowledgedFallback/);
-    // FieldSurveyMap の render は ternary の false 分岐 (= ack 済) でのみ。
-    // !billingAcknowledged ? (...Fallback...) : (<FieldSurveyMap ...) の構造を要求。
-    expect(PAGE_SRC).toMatch(
-      /!billingAcknowledged\s*\?\s*\([\s\S]*?BillingNotAcknowledgedFallback[\s\S]*?\)\s*:\s*\(\s*<FieldSurveyMap/,
+    expect(CLIENT_SRC).toMatch(/isGoogleMapsBillingAcknowledged/);
+    expect(CLIENT_SRC).toMatch(/BillingNotAcknowledgedFallback/);
+    // 早期 return: if (!billingAcknowledged) return <BillingNotAcknowledgedFallback />
+    expect(CLIENT_SRC).toMatch(
+      /if\s*\(\s*!billingAcknowledged\s*\)\s*return\s*<BillingNotAcknowledgedFallback/,
     );
     // FieldSurveyMap の render は 1 箇所のみ (重複 mount 経路がない)
-    const matches = PAGE_SRC.match(/<FieldSurveyMap\b/g) ?? [];
+    const matches = CLIENT_SRC.match(/<FieldSurveyMap\b/g) ?? [];
     expect(matches.length).toBe(1);
   });
 
   it("fallback UI に 5 項目チェックリストが含まれる", () => {
-    expect(PAGE_SRC).toMatch(/Cloud Billing/);
-    expect(PAGE_SRC).toMatch(/quota/i);
-    expect(PAGE_SRC).toMatch(/referrer/i);
-    expect(PAGE_SRC).toMatch(/Maps JavaScript API/);
-    expect(PAGE_SRC).toMatch(/管理者.*承認|本番利用承認/);
+    expect(CLIENT_SRC).toMatch(/Cloud Billing/);
+    expect(CLIENT_SRC).toMatch(/quota/i);
+    expect(CLIENT_SRC).toMatch(/referrer/i);
+    expect(CLIENT_SRC).toMatch(/Maps JavaScript API/);
+    expect(CLIENT_SRC).toMatch(/管理者.*承認|本番利用承認/);
   });
 
   it("fallback UI で Budget alert ≠ 課金停止 を明記している", () => {
-    expect(PAGE_SRC).toMatch(/通知のみで課金を停止しません|Budget alert.*通知/);
-    expect(PAGE_SRC).toMatch(/quota.*必要/);
-  });
-
-  it("fallback UI で APIキーの値を表示しない", () => {
-    // APIキー string を直接 render に渡す箇所がないこと
-    expect(PAGE_SRC).not.toMatch(/\{apiKey\}/);
+    expect(CLIENT_SRC).toMatch(
+      /通知のみで課金を停止しません|Budget alert.*通知/,
+    );
+    expect(CLIENT_SRC).toMatch(/quota.*必要/);
   });
 
   it("APIキー + 課金承認済でも MAP_ID 未設定なら FieldSurveyMap を mount しない (Codex Phase 1-E)", () => {
-    // 4 段 ternary: !hasKey → MissingKeyNotice / !billingAcknowledged →
-    // BillingNotAcknowledgedFallback / !hasMapId → MissingMapIdFallback /
-    // else → FieldSurveyMap
-    expect(PAGE_SRC).toMatch(/isGoogleMapsMapIdConfigured/);
-    expect(PAGE_SRC).toMatch(/MissingMapIdFallback/);
-    expect(PAGE_SRC).toMatch(
-      /!hasMapId\s*\?\s*\([\s\S]*?MissingMapIdFallback[\s\S]*?\)\s*:\s*\(\s*<FieldSurveyMap/,
+    expect(CLIENT_SRC).toMatch(/isGoogleMapsMapIdConfigured/);
+    expect(CLIENT_SRC).toMatch(/MissingMapIdFallback/);
+    expect(CLIENT_SRC).toMatch(
+      /if\s*\(\s*!hasMapId\s*\)\s*return\s*<MissingMapIdFallback/,
     );
-    // <FieldSurveyMap> の render 経路は 1 箇所のみ
-    const matches = PAGE_SRC.match(/<FieldSurveyMap\b/g) ?? [];
+    const matches = CLIENT_SRC.match(/<FieldSurveyMap\b/g) ?? [];
     expect(matches.length).toBe(1);
   });
 
   it("MissingMapIdFallback に MAP_ID 設定指示と壊れた UI 注意がある", () => {
-    expect(PAGE_SRC).toMatch(/NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID/);
-    expect(PAGE_SRC).toMatch(/AdvancedMarker/);
-    expect(PAGE_SRC).toMatch(/壊れた\s*UI|表示されない/);
-    expect(PAGE_SRC).toMatch(/build\s*\/\s*restart|build.*restart/i);
+    expect(CLIENT_SRC).toMatch(/NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID/);
+    expect(CLIENT_SRC).toMatch(/AdvancedMarker/);
+    expect(CLIENT_SRC).toMatch(/壊れた\s*UI|表示されない/);
+    expect(CLIENT_SRC).toMatch(/build\s*\/\s*restart|build.*restart/i);
   });
 
   it("FieldSurveyMap の mapId prop に as string を明示 (mapId 必須宣言)", () => {
-    expect(PAGE_SRC).toMatch(/mapId=\{mapId\s+as\s+string\}/);
+    expect(CLIENT_SRC).toMatch(/mapId=\{mapId\s+as\s+string\}/);
   });
 
   it("FieldSurveyMapProps の mapId は optional ではない (必須)", () => {
@@ -181,17 +238,15 @@ describe("page.tsx — fallback / structure", () => {
       /interface FieldSurveyMapProps[\s\S]*?^\}/m,
     );
     expect(propsDecl).not.toBeNull();
-    // "mapId?" optional 構文が無いこと
     expect(propsDecl?.[0]).not.toMatch(/\bmapId\?:/);
-    // "mapId:" (非 optional) があること
     expect(propsDecl?.[0]).toMatch(/\bmapId:\s*string/);
   });
 
-  it("page.tsx に固定料金 (無料枠 / 単価) をハードコードしていない", () => {
-    expect(PAGE_SRC).not.toMatch(/\$\s*\d/);
-    expect(PAGE_SRC).not.toMatch(/28[,\s]?500/);
-    expect(PAGE_SRC).not.toMatch(/\b\d{2,3}\s*円\b/);
-    expect(PAGE_SRC).not.toMatch(/\bper\s*1[,\s]?000\b/i);
+  it("client component に固定料金 (無料枠 / 単価) をハードコードしていない", () => {
+    expect(CLIENT_SRC).not.toMatch(/\$\s*\d/);
+    expect(CLIENT_SRC).not.toMatch(/28[,\s]?500/);
+    expect(CLIENT_SRC).not.toMatch(/\b\d{2,3}\s*円\b/);
+    expect(CLIENT_SRC).not.toMatch(/\bper\s*1[,\s]?000\b/i);
   });
 });
 
