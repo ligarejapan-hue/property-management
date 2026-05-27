@@ -4,6 +4,7 @@ import FieldSurveyMap from "@/components/field-survey/field-survey-map";
 import {
   isGoogleMapsBillingAcknowledged,
   isGoogleMapsKeyConfigured,
+  isGoogleMapsMapIdConfigured,
 } from "@/lib/field-survey-map-util";
 
 // Phase 1-E: 現地調査マップの画面骨格。
@@ -13,6 +14,8 @@ import {
 // - APIキー未設定でも画面はクラッシュさせず案内を表示する。
 // - APIキー設定済でも、Cloud Billing / quota / referrer / API 制限 /
 //   管理者承認が未確認なら警告バナーを常時表示する (本番事故防止)。
+// - Map ID 未設定では AdvancedMarker が render されない壊れた UI になるため、
+//   billing 承認後でも MAP_ID 必須で gating する (Codex 指摘 / Phase 1-E)。
 
 export default function FieldSurveyMapPage() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -21,6 +24,7 @@ export default function FieldSurveyMapPage() {
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_BILLING_ACKNOWLEDGED;
   const hasKey = isGoogleMapsKeyConfigured(apiKey);
   const billingAcknowledged = isGoogleMapsBillingAcknowledged(billingAckFlag);
+  const hasMapId = isGoogleMapsMapIdConfigured(mapId);
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
@@ -45,9 +49,49 @@ export default function FieldSurveyMapPage() {
           // 警告 banner だけだと地図が読み込まれて課金経路に乗ってしまうため、
           // 「地図そのものを描画しない」fallback に切り替える。
           <BillingNotAcknowledgedFallback />
+        ) : !hasMapId ? (
+          // Codex (Phase 1-E 追加): MAP_ID 未設定で AdvancedMarker を render
+          // すると marker が一切出ない壊れた地図 UI になる。billing 承認後でも
+          // MAP_ID 未設定なら Maps JavaScript API を読み込まず fallback に切替。
+          <MissingMapIdFallback />
         ) : (
-          <FieldSurveyMap apiKey={apiKey as string} mapId={mapId} />
+          <FieldSurveyMap apiKey={apiKey as string} mapId={mapId as string} />
         )}
+      </div>
+    </div>
+  );
+}
+
+function MissingMapIdFallback() {
+  // APIキー + billing 承認は揃っているが、AdvancedMarker 描画に必須の
+  // Map ID が未設定。Maps JavaScript API を起動しないことで「marker が
+  // 出ない壊れた地図」を出さない。固定料金はここに書かない。
+  return (
+    <div
+      role="alert"
+      data-testid="gmaps-mapid-fallback"
+      className="flex h-full items-center justify-center bg-gray-50 p-6"
+    >
+      <div className="max-w-2xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900">
+        <h2 className="mb-2 text-base font-semibold">
+          地図の Map ID が未設定です
+        </h2>
+        <p className="mb-2">
+          Google Maps APIキーと本番運用前チェックは完了していますが、
+          AdvancedMarker (marker 描画) に必須の Map ID が未設定のため、
+          地図の読み込みを行いません。
+        </p>
+        <p className="mb-2 text-xs">
+          Google Cloud Console の「Map Management」で Map ID を作成し、{" "}
+          <code className="rounded bg-white px-1">
+            NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID
+          </code>{" "}
+          に設定して build / restart してください。
+        </p>
+        <p className="text-xs text-amber-800">
+          Map ID 未設定で地図を描画すると、マーカーが一切表示されない
+          壊れた UI になります。
+        </p>
       </div>
     </div>
   );

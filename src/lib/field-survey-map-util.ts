@@ -130,3 +130,14 @@ export function isGoogleMapsBillingAcknowledged(
 ): boolean {
   return typeof flag === "string" && flag.trim().toLowerCase() === "true";
 }
+
+/**
+ * Google Maps Map ID が設定されているか。Phase 1-E では AdvancedMarker を使う
+ * ため、未設定で地図を描画すると marker が出ない壊れた UI になる。
+ * これを防ぐため、未設定時は地図を描画しない gating の判定に使う。
+ */
+export function isGoogleMapsMapIdConfigured(
+  mapId: string | undefined | null,
+): boolean {
+  return typeof mapId === "string" && mapId.trim().length > 0;
+}

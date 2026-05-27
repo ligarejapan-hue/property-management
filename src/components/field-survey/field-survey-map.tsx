@@ -39,7 +39,10 @@ const PIN_LIMIT = 100;
 
 interface FieldSurveyMapProps {
   apiKey: string;
-  mapId?: string;
+  // AdvancedMarker を使うため Map ID は必須 (Codex Phase 1-E)。
+  // 未設定での mount は呼び出し側 (page.tsx) で MissingMapIdFallback に
+  // 切替済。本コンポーネントには必ず非空文字列が渡る前提。
+  mapId: string;
 }
 
 interface PropertyRow {

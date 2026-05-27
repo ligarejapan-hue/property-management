@@ -12,6 +12,7 @@ import {
   debounce,
   isGoogleMapsKeyConfigured,
   isGoogleMapsBillingAcknowledged,
+  isGoogleMapsMapIdConfigured,
 } from "@/lib/field-survey-map-util";
 
 describe("validateBbox", () => {
@@ -178,5 +179,19 @@ describe("isGoogleMapsBillingAcknowledged", () => {
     expect(isGoogleMapsBillingAcknowledged("yes")).toBe(false);
     expect(isGoogleMapsBillingAcknowledged("on")).toBe(false);
     expect(isGoogleMapsBillingAcknowledged("false")).toBe(false);
+  });
+});
+
+describe("isGoogleMapsMapIdConfigured", () => {
+  it("未設定 / null / 空文字 / whitespace は false", () => {
+    expect(isGoogleMapsMapIdConfigured(undefined)).toBe(false);
+    expect(isGoogleMapsMapIdConfigured(null)).toBe(false);
+    expect(isGoogleMapsMapIdConfigured("")).toBe(false);
+    expect(isGoogleMapsMapIdConfigured("   ")).toBe(false);
+  });
+
+  it("有効な文字列 (Map ID) は true", () => {
+    expect(isGoogleMapsMapIdConfigured("abcd1234")).toBe(true);
+    expect(isGoogleMapsMapIdConfigured("  abcd1234  ")).toBe(true);
   });
 });

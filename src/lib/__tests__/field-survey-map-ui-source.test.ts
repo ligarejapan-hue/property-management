@@ -69,6 +69,22 @@ describe(".env.example — Google Maps key", () => {
     // 「公式ページで確認」の方針宣言があること
     expect(ENV_EXAMPLE_SRC).toMatch(/公式.*料金|料金.*公式/);
   });
+
+  it("NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID を optional / 任意 と書いていない", () => {
+    // 行頭の env テンプレ自体は残るが、その上の説明 block 内で "(任意)" /
+    // "optional" と記載しない (AdvancedMarker のため必須)。
+    const mapIdBlock = ENV_EXAMPLE_SRC.match(
+      /[\s\S]{0,400}NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=/,
+    );
+    expect(mapIdBlock).not.toBeNull();
+    expect(mapIdBlock?.[0]).not.toMatch(/\(任意\)/);
+    expect(mapIdBlock?.[0]).not.toMatch(/optional/i);
+  });
+
+  it("MAP_ID が AdvancedMarker に必須である旨が明記されている", () => {
+    expect(ENV_EXAMPLE_SRC).toMatch(/AdvancedMarker.*必須|必須.*AdvancedMarker/);
+    expect(ENV_EXAMPLE_SRC).toMatch(/壊れた\s*UI|マーカー.*表示されない/);
+  });
 });
 
 describe("sidebar.tsx — nav entry", () => {
@@ -133,6 +149,42 @@ describe("page.tsx — fallback / structure", () => {
   it("fallback UI で APIキーの値を表示しない", () => {
     // APIキー string を直接 render に渡す箇所がないこと
     expect(PAGE_SRC).not.toMatch(/\{apiKey\}/);
+  });
+
+  it("APIキー + 課金承認済でも MAP_ID 未設定なら FieldSurveyMap を mount しない (Codex Phase 1-E)", () => {
+    // 4 段 ternary: !hasKey → MissingKeyNotice / !billingAcknowledged →
+    // BillingNotAcknowledgedFallback / !hasMapId → MissingMapIdFallback /
+    // else → FieldSurveyMap
+    expect(PAGE_SRC).toMatch(/isGoogleMapsMapIdConfigured/);
+    expect(PAGE_SRC).toMatch(/MissingMapIdFallback/);
+    expect(PAGE_SRC).toMatch(
+      /!hasMapId\s*\?\s*\([\s\S]*?MissingMapIdFallback[\s\S]*?\)\s*:\s*\(\s*<FieldSurveyMap/,
+    );
+    // <FieldSurveyMap> の render 経路は 1 箇所のみ
+    const matches = PAGE_SRC.match(/<FieldSurveyMap\b/g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+
+  it("MissingMapIdFallback に MAP_ID 設定指示と壊れた UI 注意がある", () => {
+    expect(PAGE_SRC).toMatch(/NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID/);
+    expect(PAGE_SRC).toMatch(/AdvancedMarker/);
+    expect(PAGE_SRC).toMatch(/壊れた\s*UI|表示されない/);
+    expect(PAGE_SRC).toMatch(/build\s*\/\s*restart|build.*restart/i);
+  });
+
+  it("FieldSurveyMap の mapId prop に as string を明示 (mapId 必須宣言)", () => {
+    expect(PAGE_SRC).toMatch(/mapId=\{mapId\s+as\s+string\}/);
+  });
+
+  it("FieldSurveyMapProps の mapId は optional ではない (必須)", () => {
+    const propsDecl = MAP_SRC.match(
+      /interface FieldSurveyMapProps[\s\S]*?^\}/m,
+    );
+    expect(propsDecl).not.toBeNull();
+    // "mapId?" optional 構文が無いこと
+    expect(propsDecl?.[0]).not.toMatch(/\bmapId\?:/);
+    // "mapId:" (非 optional) があること
+    expect(propsDecl?.[0]).toMatch(/\bmapId:\s*string/);
   });
 
   it("page.tsx に固定料金 (無料枠 / 単価) をハードコードしていない", () => {
