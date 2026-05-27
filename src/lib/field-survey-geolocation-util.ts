@@ -62,12 +62,17 @@ export interface RawPositionLike {
 /**
  * GeolocationPosition から API 送信用 TrackPointInput に正規化する。
  *
- * - lat / lng は coerceLat / coerceLng で範囲チェック
- * - accuracy は有限 & 0 以上 & MAX 以内のみ採用 (それ以外は undefined)
+ * - lat / lng は coerceLat / coerceLng で範囲チェック (null は reject)
+ * - accuracy:
+ *    - 有限 & 0..FIELD_SURVEY_MAX_ACCURACY_M なら値を保持
+ *    - 提供されない / NaN / Infinity / 負数 → undefined (保存可)
+ *    - Codex P2: FIELD_SURVEY_MAX_ACCURACY_M 超 → position 全体を null reject
+ *      (undefined に潰すと「accuracy 不明」として保存され、極端に不正確な点が
+ *       route polyline / 監査対象に混入するため)
  * - timestamp は number でなければ now() を使う
  * - sequence は呼び出し側で採番して渡す
  *
- * 不正座標は null を返し、呼び出し側は捨てる。
+ * 不正座標 / over-limit accuracy は null を返し、呼び出し側は捨てる。
  */
 export function normalizePosition(
   position: RawPositionLike,
@@ -81,8 +86,9 @@ export function normalizePosition(
   const lng = coerceLng(coords.longitude);
   if (lat === null || lng === null) return null;
   const acc = coerceAccuracy(coords.accuracy);
-  const accuracy =
-    acc !== null && acc <= FIELD_SURVEY_MAX_ACCURACY_M ? acc : undefined;
+  // Codex P2: 上限超過は undefined 化ではなく position 全体を reject。
+  if (acc !== null && acc > FIELD_SURVEY_MAX_ACCURACY_M) return null;
+  const accuracy = acc !== null ? acc : undefined;
   const tsRaw = position.timestamp;
   const ts =
     typeof tsRaw === "number" && Number.isFinite(tsRaw) && tsRaw > 0

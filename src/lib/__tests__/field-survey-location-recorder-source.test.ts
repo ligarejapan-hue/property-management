@@ -621,6 +621,89 @@ describe("Codex P1 — cap each flush at API batch limit (200)", () => {
   });
 });
 
+describe("Codex P1 — drain buffered points before ending idle recorder", () => {
+  it("hasBufferedWork helper が buffer / inFlightFlushRef / inFlightFlushPromiseRef を見ている", () => {
+    expect(HOOK_SRC).toMatch(/const\s+hasBufferedWork\s*=\s*useCallback/);
+    const fn = HOOK_SRC.match(
+      /const\s+hasBufferedWork\s*=\s*useCallback[\s\S]*?\}\,\s*\[\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/bufferRef\.current\.length\s*>\s*0/);
+    expect(m).toMatch(/inFlightFlushRef\.current/);
+    expect(m).toMatch(/inFlightFlushPromiseRef\.current\s*!==\s*null/);
+  });
+
+  it("stopBeforeSessionEnd は idle + !hasBufferedWork() のみ早期 true を返す", () => {
+    expect(HOOK_SRC).toMatch(
+      /if\s*\(\s*status\s*===\s*"idle"\s*&&\s*!hasBufferedWork\(\)\s*\)\s*return\s+true/,
+    );
+    // 旧 pattern `if (status === "idle") return true;` (buffer 無視) が残っていないこと
+    expect(HOOK_SRC).not.toMatch(
+      /if\s*\(\s*status\s*===\s*"idle"\s*\)\s*return\s+true/,
+    );
+  });
+
+  it("idle + buffer 残あり経路でも flushAllBufferedChunks を呼ぶ", () => {
+    // stopBeforeSessionEnd body 全体で、idle 早期 return 後に
+    // flushAllBufferedChunks() が呼ばれる構造であること
+    const fn = HOOK_SRC.match(
+      /const\s+stopBeforeSessionEnd\s*=\s*useCallback[\s\S]*?\}\,\s*\[[\s\S]*?\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/hasBufferedWork\(\)/);
+    expect(m).toMatch(/await\s+flushAllBufferedChunks\(\)/);
+    // drained === false → setError + idle で false を返す
+    expect(m).toMatch(/if\s*\(\s*!drained\s*\)/);
+    expect(m).toMatch(/return\s+drained/);
+  });
+
+  it("idle 早期 return 時に flushAllBufferedChunks を呼ばない (no-op path)", () => {
+    // 「idle + buffer 無し」のときに setError も発火しないこと
+    // (位置記録停止直後で正常状態なら何も起こらない)
+    const fn = HOOK_SRC.match(
+      /const\s+stopBeforeSessionEnd\s*=\s*useCallback[\s\S]*?\}\,\s*\[[\s\S]*?\]\s*\);/,
+    );
+    const m = fn?.[0] ?? "";
+    // 早期 return が flushAllBufferedChunks 呼び出しより前に書かれている
+    const earlyReturnIdx = m.search(
+      /status\s*===\s*"idle"\s*&&\s*!hasBufferedWork\(\)/,
+    );
+    const flushIdx = m.search(/await\s+flushAllBufferedChunks/);
+    expect(earlyReturnIdx).toBeGreaterThanOrEqual(0);
+    expect(flushIdx).toBeGreaterThan(earlyReturnIdx);
+  });
+
+  it("座標 / 内部詳細を含めない汎用エラー文言で false を返す (再ガード)", () => {
+    // !drained → setError(...) → return drained
+    const block = HOOK_SRC.match(
+      /!drained[\s\S]*?setError\(\s*"([^"]+)"/,
+    );
+    expect(block).not.toBeNull();
+    const msg = block?.[1] ?? "";
+    expect(msg).toMatch(/未送信の位置情報が残っている/);
+    expect(msg).not.toMatch(/lat|lng/i);
+    expect(msg).not.toMatch(/\d/);
+  });
+});
+
+describe("Codex P2 — reject over-limit GPS accuracy in normalizePosition", () => {
+  it("normalizePosition は MAX 超 accuracy で undefined 化せず null を返す", () => {
+    // util の挙動は別 test ファイルで担保するが、構造ガードとして hook がこの
+    // 結果 (= null) を「無効な candidate として捨てる」設計を維持しているか確認。
+    expect(HOOK_SRC).toMatch(/if\s*\(\s*!candidate\s*\)\s*return/);
+  });
+
+  it("hook は accuracy 不明な点だけを単独で捨てる旧パターンを使っていない", () => {
+    // 旧パターン: `if (acc !== null && acc <= MAX) ? acc : undefined`
+    // が hook 側に紛れ込んでいないこと (util へ集約済)
+    expect(HOOK_SRC).not.toMatch(
+      /FIELD_SURVEY_MAX_ACCURACY_M[\s\S]{0,40}\?\s*acc[\s\S]{0,40}:\s*undefined/,
+    );
+  });
+});
+
 describe("Codex hardening — privacy preservation (regression guard)", () => {
   it("inflight / generation の追加で console に lat/lng/raw response/api key を出していない", () => {
     expect(HOOK_SRC).not.toMatch(/console\.\w+\([^)]*lat/i);

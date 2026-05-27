@@ -555,37 +555,55 @@ export function useFieldSurveyLocationRecorder(
   }, [flushAllBufferedChunks, status, stopWatchingInternal]);
 
   /**
-   * 巡回終了直前の連動。idle 中は no-op で true を返す。
+   * 巡回終了直前の連動。
    *
-   * Codex P1 fix 1 + 本 fix: in-flight flush を await した上で、残 buffer が
-   * 空になるまで 200 件 chunk で送り切る。
+   * Codex P1 (本 fix): status === "idle" でも、bufferRef / in-flight flush /
+   * inFlightFlushRef のいずれかに未送信 work が残っていれば drain を試みる。
+   * 「位置記録停止」後に final flush が失敗して buffer が残った状態を idle で
+   * 早期 true してしまうと、session end PATCH 後に track-points API が active
+   * のみを受け付けるため未送信点が完全に失われる。
    *
    * 順序:
-   *  1) status を stopping にして UI を遷移
-   *  2) 世代カウンタを進めて start() の async continuation を無効化
-   *  3) clearWatch + flush timer 停止
-   *  4) flushAllBufferedChunks() で in-flight 完了 + 残 chunk を排出
-   *  5) status を idle に倒す
-   *  6) 残 buffer が消えた場合は true、HTTP / network 等で送れず残った場合は
-   *     false を返す。呼び出し側 (TripControls) は false なら session end PATCH を
-   *     呼ばないことで、データロスを抑止する。
+   *  1) idle かつ未送信 work が無い場合のみ true 早期 return (no-op)
+   *  2) status が idle 以外なら stopping に遷移
+   *  3) 世代カウンタを進めて start() の async continuation を無効化
+   *  4) clearWatch + flush timer 停止
+   *  5) flushAllBufferedChunks() で in-flight 完了 + 残 chunk を排出
+   *  6) status を idle に倒す
+   *  7) drained === true で true / false で残 buffer ありの旨を返す。
+   *     呼び出し側 (TripControls) は false で session end PATCH を抑止する。
    */
+  const hasBufferedWork = useCallback((): boolean => {
+    if (bufferRef.current.length > 0) return true;
+    if (inFlightFlushRef.current) return true;
+    if (inFlightFlushPromiseRef.current !== null) return true;
+    return false;
+  }, []);
+
   const stopBeforeSessionEnd = useCallback(async (): Promise<boolean> => {
-    if (status === "idle") return true;
-    setStatus("stopping");
+    // Codex P1: idle でも未送信 work があれば drain に進む。
+    if (status === "idle" && !hasBufferedWork()) return true;
+    if (status !== "idle" && status !== "stopping") {
+      setStatus("stopping");
+    }
     recorderGenerationRef.current += 1;
     stopWatchingInternal();
     const drained = await flushAllBufferedChunks();
     if (!mountedRef.current) return drained;
     if (!drained) {
-      // 座標を含めない汎用文言。具体的な API status / 件数 / sequence は出さない。
+      // 座標を含めない汎用文言。API status / 件数 / 内部詳細は出さない。
       setError(
         "未送信の位置情報が残っているため、巡回終了前に再度送信してください。",
       );
     }
     setStatus("idle");
     return drained;
-  }, [flushAllBufferedChunks, status, stopWatchingInternal]);
+  }, [
+    flushAllBufferedChunks,
+    hasBufferedWork,
+    status,
+    stopWatchingInternal,
+  ]);
 
   // ---- session change / unmount cleanup ---------------------------------
 

@@ -64,17 +64,36 @@ describe("normalizePosition", () => {
     expect(r!.accuracy).toBeCloseTo(8.0);
   });
 
-  it("accuracy が MAX 超なら undefined にする (棄却しない)", () => {
+  it("Codex P2: accuracy が MAX 超なら position 全体を null reject (undefined 化しない)", () => {
     const r = normalizePosition(
       pos(35.0, 139.0, FIELD_SURVEY_MAX_ACCURACY_M + 1),
       1,
       NOW,
     );
-    expect(r).not.toBeNull();
-    expect(r!.accuracy).toBeUndefined();
+    expect(r).toBeNull();
   });
 
-  it("accuracy 負値 / NaN は undefined", () => {
+  it("accuracy ちょうど MAX なら受理 (= 境界値)", () => {
+    const r = normalizePosition(
+      pos(35.0, 139.0, FIELD_SURVEY_MAX_ACCURACY_M),
+      1,
+      NOW,
+    );
+    expect(r).not.toBeNull();
+    expect(r!.accuracy).toBe(FIELD_SURVEY_MAX_ACCURACY_M);
+  });
+
+  it("ACCURACY_WARN 超 / MAX 以下は値を保持 (低精度警告対象、保存は可)", () => {
+    const r = normalizePosition(
+      pos(35.0, 139.0, FIELD_SURVEY_ACCURACY_WARN_M + 1),
+      1,
+      NOW,
+    );
+    expect(r).not.toBeNull();
+    expect(r!.accuracy).toBe(FIELD_SURVEY_ACCURACY_WARN_M + 1);
+  });
+
+  it("accuracy 負値 / NaN は undefined (位置自体は受理: 既存方針)", () => {
     expect(normalizePosition(pos(0, 0, -1), 0, NOW)!.accuracy).toBeUndefined();
     expect(normalizePosition(pos(0, 0, NaN), 0, NOW)!.accuracy).toBeUndefined();
   });
