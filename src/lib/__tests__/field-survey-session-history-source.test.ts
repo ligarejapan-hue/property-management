@@ -362,3 +362,51 @@ describe("history map — fail closed on page fetch errors (Codex P2)", () => {
     expect(HISTORY_SRC).not.toMatch(/setError\([^)]*(?:lat|lng|fileUrl|storageKey|fileName)/i);
   });
 });
+
+// =======================================================================
+// Phase 1-J Codex P2: track route 上限超過は fail closed
+// =======================================================================
+describe("history map — fail closed on over-cap track routes (Codex P2)", () => {
+  it("TRACK_PAGE_MAX 到達後も nextCursor が残れば over-cap を検出する", () => {
+    expect(HISTORY_SRC).toMatch(/routeOverCap/);
+    expect(HISTORY_SRC).toMatch(
+      /i\s*===\s*TRACK_PAGE_MAX\s*-\s*1\)\s*routeOverCap\s*=\s*true/,
+    );
+  });
+
+  it("over-cap 時は setRoutePoints せず throw する (incomplete route を表示しない)", () => {
+    // routeOverCap が true なら setRoutePoints の前に throw する
+    expect(HISTORY_SRC).toMatch(
+      /if\s*\(routeOverCap\)\s*throw\s+new\s+Error\("history_route_over_cap"\)/,
+    );
+    // throw は setRoutePoints(points) より前
+    expect(HISTORY_SRC).toMatch(
+      /if\s*\(routeOverCap\)\s*throw[\s\S]*?setRoutePoints\(points\)/,
+    );
+  });
+
+  it("over-cap は pins の truncated warning と区別される (route は専用エラー文言)", () => {
+    expect(HISTORY_SRC).toMatch(/history_route_over_cap/);
+    expect(HISTORY_SRC).toMatch(/点数が多すぎるため/);
+    // route over-cap で setPinsTruncated を使わない
+    expect(HISTORY_SRC).not.toMatch(/routeOverCap[\s\S]{0,80}setPinsTruncated/);
+  });
+
+  it("catch は over-cap と一般 failure を message で区別する", () => {
+    const fn = HISTORY_SRC.match(/catch\s*\(err\)\s*\{[\s\S]*?\}\s*finally/);
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/err\.message\s*===\s*"history_route_over_cap"/);
+    // over-cap でない場合は汎用 load failure 文言
+    expect(m).toMatch(/読み込みに失敗しました。時間をおいて/);
+    // clear してから setError (incomplete route を残さない)
+    expect(m).toMatch(/clearHistorySessionState\(\)[\s\S]*?setError\(/);
+  });
+
+  it("pins 上限到達は引き続き warning (truncated)、route と混同しない", () => {
+    // pins は truncated 警告 (成功表示) を維持
+    expect(HISTORY_SRC).toMatch(/i\s*===\s*PIN_PAGE_MAX\s*-\s*1\)\s*truncated\s*=\s*true/);
+    expect(HISTORY_SRC).toMatch(/data-testid="history-pins-truncated"/);
+    // pins 側は throw しない (warning 表示のまま setPins する)
+    expect(HISTORY_SRC).not.toMatch(/truncated\)\s*throw/);
+  });
+});

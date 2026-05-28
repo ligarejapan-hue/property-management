@@ -179,6 +179,7 @@ export default function FieldSurveyHistoryMap({
       // 2) track points を cursor pagination で全件取得 → polyline
       const points: RoutePolylinePoint[] = [];
       let cursor: number | null = null;
+      let routeOverCap = false;
       for (let i = 0; i < TRACK_PAGE_MAX; i++) {
         const qs = new URLSearchParams({ limit: String(TRACK_PAGE_LIMIT) });
         if (cursor !== null) qs.set("cursorSequence", String(cursor));
@@ -202,8 +203,14 @@ export default function FieldSurveyHistoryMap({
         const next = tpBody?.nextCursor;
         if (typeof next !== "number") break;
         cursor = next;
+        // 最終反復でも nextCursor が残る = 上限超過。route は途中切れを完全な
+        // 履歴として見せると巡回済/未巡回の判断を誤るため fail closed にする。
+        if (i === TRACK_PAGE_MAX - 1) routeOverCap = true;
       }
       if (stale()) return;
+      // 上限超過時は incomplete route を表示せず読み込み失敗として扱う (pin の
+      // truncated 警告とは区別し、route は警告表示にしない)。
+      if (routeOverCap) throw new Error("history_route_over_cap");
       setRoutePoints(points);
 
       // 3) session に紐づく pin (archived 除外) を nextCursor で全件ページング取得。
@@ -262,8 +269,12 @@ export default function FieldSurveyHistoryMap({
       // 不完全な route / pin / meta を残さず安全側にクリアしてからエラー表示する。
       // raw response / 座標 / PII は出さず汎用文言のみ。
       clearHistorySessionState();
+      const overCap =
+        err instanceof Error && err.message === "history_route_over_cap";
       setError(
-        "巡回履歴の読み込みに失敗しました。時間をおいて再度お試しください。",
+        overCap
+          ? "巡回ルートの点数が多すぎるため、履歴を表示できません。管理者に確認してください。"
+          : "巡回履歴の読み込みに失敗しました。時間をおいて再度お試しください。",
       );
     } finally {
       // 最新 load かつ mount 中のときのみ loading を解除する (古い load が新 load
