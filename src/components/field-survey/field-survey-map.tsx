@@ -42,6 +42,7 @@ import PinAddModeToggle from "@/components/field-survey/pin-add-mode-toggle";
 import PinCreateModal from "@/components/field-survey/pin-create-modal";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
 import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
+import { useFieldSurveyPinPhotoMutations } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
 import {
   formatPinStatus,
   formatPinType,
@@ -209,6 +210,12 @@ export default function FieldSurveyMap({
     | null
   >(null);
   const [detailPinId, setDetailPinId] = useState<string | null>(null);
+  // Phase 1-H: pin 作成済みだが写真アップロードだけ失敗した状態。modal を閉じず
+  // 「写真だけ再試行 / 写真なしで完了」に誘導し、pin を作り直させない。
+  const [photoUploadFailed, setPhotoUploadFailed] = useState(false);
+  // 作成済み pin id と再試行用の file を保持する (state 更新の非同期性を避け ref で持つ)。
+  const createdPinIdRef = useRef<string | null>(null);
+  const pendingPhotoFileRef = useRef<File | null>(null);
   // marker 再 fetch をトリガするためのバンプ値。pin 作成 / 編集成功で increment。
   const [refetchNonce, setRefetchNonce] = useState(0);
   const bumpRefetch = useCallback(() => {
@@ -320,14 +327,35 @@ export default function FieldSurveyMap({
   }, []);
 
   const pinMutations = useFieldSurveyPinMutations();
+  const photoMutations = useFieldSurveyPinPhotoMutations();
+
+  // pin 作成 (+写真) が完結した時の共通後処理。modal を閉じ、誤タップ防止に
+  // pin 追加モードを OFF にし、作成した pin の detail panel を開く。
+  const finalizePinCreate = useCallback(
+    (pinId: string) => {
+      invalidateCurrentLocationRequest();
+      setCreateCandidate(null);
+      setPinAddMode(false);
+      setPhotoUploadFailed(false);
+      createdPinIdRef.current = null;
+      pendingPhotoFileRef.current = null;
+      // Phase 1-H: 作成後は detail panel を開く。
+      setDetailPinId(pinId);
+    },
+    [invalidateCurrentLocationRequest],
+  );
+
   const handlePinCreateSubmit = useCallback(
-    async (input: {
-      lat: number;
-      lng: number;
-      pinType: string;
-      memo: string;
-      accuracy?: number;
-    }) => {
+    async (
+      input: {
+        lat: number;
+        lng: number;
+        pinType: string;
+        memo: string;
+        accuracy?: number;
+      },
+      file: File | null,
+    ) => {
       if (!activeSession) return;
       const r = await pinMutations.createPin({
         lat: input.lat,
@@ -337,17 +365,52 @@ export default function FieldSurveyMap({
         memo: input.memo === "" ? null : input.memo,
         sessionId: activeSession.id,
       });
-      if (r.ok) {
-        // Codex P2: pending な「現在地を使う」callback を無効化
-        invalidateCurrentLocationRequest();
+      if (!r.ok || !r.data) return;
+      // pin 作成成功。pending な「現在地を使う」callback を無効化し marker を再取得。
+      invalidateCurrentLocationRequest();
+      bumpRefetch();
+      const newPinId = r.data.id;
+      createdPinIdRef.current = newPinId;
+      if (!file) {
         setCreateCandidate(null);
-        // 誤タップ防止: 作成成功で pin 追加モードを OFF にする (Plan 承認)
         setPinAddMode(false);
-        bumpRefetch();
+        finalizePinCreate(newPinId);
+        return;
+      }
+      // 二段階目: 作成済み pin に写真を添付。失敗時は pin を残したまま再試行 UI へ。
+      pendingPhotoFileRef.current = file;
+      const up = await photoMutations.uploadPhoto(newPinId, file);
+      if (up.ok) {
+        finalizePinCreate(newPinId);
+      } else {
+        setPhotoUploadFailed(true);
       }
     },
-    [activeSession, pinMutations, bumpRefetch, invalidateCurrentLocationRequest],
+    [
+      activeSession,
+      pinMutations,
+      photoMutations,
+      bumpRefetch,
+      invalidateCurrentLocationRequest,
+      finalizePinCreate,
+    ],
   );
+
+  const handleRetryPhoto = useCallback(async () => {
+    const pinId = createdPinIdRef.current;
+    const file = pendingPhotoFileRef.current;
+    if (!pinId || !file) return;
+    const up = await photoMutations.uploadPhoto(pinId, file);
+    if (up.ok) {
+      finalizePinCreate(pinId);
+    }
+  }, [photoMutations, finalizePinCreate]);
+
+  const handleFinishWithoutPhoto = useCallback(() => {
+    const pinId = createdPinIdRef.current;
+    if (!pinId) return;
+    finalizePinCreate(pinId);
+  }, [finalizePinCreate]);
 
   const handleMapClick = useCallback(
     (latLng: { lat: number; lng: number }) => {
@@ -413,19 +476,31 @@ export default function FieldSurveyMap({
             sessionId={activeSession.id}
             saving={pinMutations.createLoading}
             serverError={pinMutations.createError}
+            photoUploading={photoMutations.uploadLoading}
+            photoUploadFailed={photoUploadFailed}
             onCancel={() => {
               // Codex P2: pending geolocation callback を無効化してから modal を閉じる
               invalidateCurrentLocationRequest();
               setCreateCandidate(null);
               setCurrentLocationError(null);
+              setPhotoUploadFailed(false);
+              createdPinIdRef.current = null;
+              pendingPhotoFileRef.current = null;
             }}
-            onSubmit={(payload) => {
-              void handlePinCreateSubmit({
-                ...payload,
-                accuracy:
-                  payload.accuracy ?? createCandidate.accuracy ?? undefined,
-              });
+            onSubmit={(payload, file) => {
+              void handlePinCreateSubmit(
+                {
+                  ...payload,
+                  accuracy:
+                    payload.accuracy ?? createCandidate.accuracy ?? undefined,
+                },
+                file,
+              );
             }}
+            onRetryPhoto={() => {
+              void handleRetryPhoto();
+            }}
+            onFinishWithoutPhoto={handleFinishWithoutPhoto}
             onUseCurrentLocation={useCurrentLocationForCreate}
             currentLocationLoading={currentLocationLoading}
             currentLocationError={currentLocationError}

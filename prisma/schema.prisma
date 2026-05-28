@@ -188,6 +188,7 @@ model User {
   ownerMemos              OwnerMemo[]              @relation("OwnerMemoCreatedBy")
   fieldSurveySessions     FieldSurveySession[]
   fieldSurveyPins         FieldSurveyPin[]
+  fieldSurveyPinPhotos    FieldSurveyPinPhoto[]
 
   @@map("users")
 }
@@ -893,6 +894,7 @@ model FieldSurveyPin {
   session  FieldSurveySession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   staff    User                @relation(fields: [staffUserId], references: [id])
   property Property?           @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  photos   FieldSurveyPinPhoto[]
 
   @@index([staffUserId])
   @@index([sessionId])
@@ -900,4 +902,26 @@ model FieldSurveyPin {
   @@index([status])
   @@index([lat, lng])
   @@map("field_survey_pins")
+}
+
+// 物件化前の候補地点を含む pin の写真。PropertyPhoto には入れず専用テーブルにする。
+// EXIF / GPS 列は作らない (PII 蓄積回避)。fileUrl は `/uploads/...` 相対パスのみ保持し、
+// public URL / storageKey 列は持たない。soft delete 列も持たない (hard delete 方針)。
+model FieldSurveyPinPhoto {
+  id               String   @id @default(uuid()) @db.Uuid
+  pinId            String   @map("pin_id") @db.Uuid
+  fileUrl          String   @map("file_url")
+  thumbnailUrl     String?  @map("thumbnail_url")
+  fileName         String   @map("file_name")
+  fileSize         Int      @map("file_size")
+  mimeType         String   @map("mime_type")
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  sortOrder        Int      @default(0) @map("sort_order")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  pin      FieldSurveyPin @relation(fields: [pinId], references: [id], onDelete: Cascade)
+  uploader User           @relation(fields: [uploadedByUserId], references: [id])
+
+  @@index([pinId])
+  @@map("field_survey_pin_photos")
 }

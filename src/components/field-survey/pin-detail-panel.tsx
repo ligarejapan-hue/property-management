@@ -30,6 +30,10 @@ import {
   useFieldSurveyPinMutations,
   type PinDetail,
 } from "@/components/field-survey/use-field-survey-pin-mutations";
+import {
+  useFieldSurveyPinPhotoMutations,
+  type PinPhoto,
+} from "@/components/field-survey/use-field-survey-pin-photo-mutations";
 
 interface PinDetailPanelProps {
   pinId: string;
@@ -218,8 +222,228 @@ export default function PinDetailPanel({
             }}
           />
         )}
+
+        {isFresh && !editing && (
+          <PinPhotoSection
+            pinId={pinId}
+            canEdit={isOwn && detail!.status !== "archived"}
+          />
+        )}
       </div>
     </aside>
+  );
+}
+
+// Phase 1-H: pin 写真セクション (一覧 / 追加 / プレビュー)。
+// - own pin かつ非アーカイブのみ編集 UI を出す (canEdit)。他人 pin は閲覧のみ。
+// - thumbnail / preview は fileUrl (/uploads/...) を使う (内部 key は保持しない)。
+// - HEIC 等でブラウザが表示できない場合は代替表示を出す (onError)。
+// - 画像情報 / fileUrl / fileName を console に出さない。
+function PinPhotoSection({
+  pinId,
+  canEdit,
+}: {
+  pinId: string;
+  canEdit: boolean;
+}) {
+  const photoMutations = useFieldSurveyPinPhotoMutations();
+  const [photos, setPhotos] = useState<PinPhoto[]>([]);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [brokenIds, setBrokenIds] = useState<Set<string>>(new Set());
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const latestPinIdRef = useRef(pinId);
+  useEffect(() => {
+    latestPinIdRef.current = pinId;
+  }, [pinId]);
+
+  const reload = useCallback(async () => {
+    const r = await photoMutations.listPhotos(pinId);
+    if (!r.ok || !r.data) return;
+    if (latestPinIdRef.current !== pinId) return;
+    setPhotos(r.data);
+    setBrokenIds(new Set());
+  }, [photoMutations, pinId]);
+
+  useEffect(() => {
+    setPhotos([]);
+    setPreviewId(null);
+    setBrokenIds(new Set());
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinId]);
+
+  const handleFilePicked = async (file: File | null) => {
+    if (!file) return;
+    const r = await photoMutations.uploadPhoto(pinId, file);
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+    if (r.ok) await reload();
+  };
+
+  const handleDelete = async (photoId: string) => {
+    const r = await photoMutations.deletePhoto(pinId, photoId);
+    if (r.ok) {
+      if (previewId === photoId) setPreviewId(null);
+      await reload();
+    }
+  };
+
+  const markBroken = (photoId: string) => {
+    setBrokenIds((prev) => {
+      const next = new Set(prev);
+      next.add(photoId);
+      return next;
+    });
+  };
+
+  const preview = photos.find((p) => p.id === previewId) ?? null;
+
+  return (
+    <section data-testid="pin-detail-photos" className="mt-4">
+      <div className="mb-1 text-[11px] text-gray-500">写真</div>
+
+      {photoMutations.listLoading && (
+        <p className="text-[11px] text-gray-500">読み込み中…</p>
+      )}
+      {photoMutations.listError && (
+        <p
+          role="status"
+          className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+        >
+          {photoMutations.listError}
+        </p>
+      )}
+
+      {photos.length === 0 && !photoMutations.listLoading ? (
+        <p className="text-[12px] text-gray-500">(写真なし)</p>
+      ) : (
+        <ul className="grid grid-cols-3 gap-2">
+          {photos.map((p) => (
+            <li key={p.id} className="relative">
+              <button
+                type="button"
+                onClick={() => setPreviewId(p.id)}
+                data-testid="pin-photo-thumb"
+                className="block h-20 w-full overflow-hidden rounded border border-gray-200"
+              >
+                {brokenIds.has(p.id) ? (
+                  <span className="flex h-full w-full items-center justify-center bg-gray-50 text-center text-[10px] text-gray-500">
+                    プレビューを表示できません
+                  </span>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={p.thumbnailUrl ?? p.fileUrl}
+                    alt="調査ピンの写真"
+                    onError={() => markBroken(p.id)}
+                    className="h-full w-full object-cover"
+                  />
+                )}
+              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleDelete(p.id);
+                  }}
+                  disabled={photoMutations.deleteLoading}
+                  data-testid="pin-photo-delete"
+                  className="absolute right-0 top-0 rounded-bl bg-black/60 px-1 text-[10px] text-white disabled:opacity-60"
+                  aria-label="写真を削除"
+                >
+                  写真を削除
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {preview && !brokenIds.has(preview.id) && (
+        <div
+          data-testid="pin-photo-preview"
+          className="mt-2 rounded border border-gray-200 p-1"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={preview.fileUrl}
+            alt="調査ピンの写真 (プレビュー)"
+            onError={() => markBroken(preview.id)}
+            className="max-h-64 w-full object-contain"
+          />
+          <button
+            type="button"
+            onClick={() => setPreviewId(null)}
+            className="mt-1 text-[11px] text-gray-500 underline hover:text-gray-800"
+          >
+            閉じる
+          </button>
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="mt-2">
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            data-testid="pin-photo-camera-input"
+            onChange={(e) => {
+              void handleFilePicked(e.target.files?.[0] ?? null);
+            }}
+          />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            data-testid="pin-photo-file-input"
+            onChange={(e) => {
+              void handleFilePicked(e.target.files?.[0] ?? null);
+            }}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={photoMutations.uploadLoading}
+              data-testid="pin-photo-camera"
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              写真を撮る
+            </button>
+            <button
+              type="button"
+              onClick={() => galleryInputRef.current?.click()}
+              disabled={photoMutations.uploadLoading}
+              data-testid="pin-photo-add"
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              写真を追加
+            </button>
+          </div>
+          {photoMutations.uploadError && (
+            <p
+              role="status"
+              className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+            >
+              {photoMutations.uploadError}
+            </p>
+          )}
+          {photoMutations.deleteError && (
+            <p
+              role="status"
+              className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+            >
+              {photoMutations.deleteError}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

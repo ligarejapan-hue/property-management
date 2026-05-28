@@ -184,8 +184,12 @@ describe("pin-detail-panel.tsx", () => {
     expect(DETAIL_SRC).toMatch(/if\s*\(!patch\)/);
   });
 
-  it("archived を「削除」と表記しない", () => {
-    expect(DETAIL_SRC).not.toMatch(/削除/);
+  it("pin status の archived を「削除」と表記しない (写真削除ボタンとは別物)", () => {
+    // Phase 1-H: 写真削除ボタン (「写真を削除」) は許可。pin status の archived を
+    // 「削除」とラベルしないことだけを担保する。status 表示は formatPinStatus 経由。
+    expect(DETAIL_SRC).toMatch(/formatPinStatus\(/);
+    expect(DETAIL_SRC).not.toMatch(/archived[\s\S]{0,40}削除/);
+    expect(DETAIL_SRC).not.toMatch(/削除[\s\S]{0,40}archived/);
   });
 
   it("localStorage / sessionStorage / IndexedDB / wakeLock を使わない", () => {
@@ -674,5 +678,137 @@ describe("field-survey-pin-util.ts — archived を「削除」と表記しな�
   it("util ファイル全体で archived ラベルに「削除」を含めない", () => {
     expect(UTIL_SRC).not.toMatch(/archived[\s\S]{0,40}削除/);
     expect(UTIL_SRC).not.toMatch(/削除[\s\S]{0,40}archived/);
+  });
+});
+
+// =======================================================================
+// Phase 1-H: 調査ピン写真追加 (create modal / detail panel / map 統合)
+// =======================================================================
+const PHOTO_HOOK_SRC = readSrc(
+  "src/components/field-survey/use-field-survey-pin-photo-mutations.ts",
+);
+
+describe("Phase 1-H — pin-create-modal 写真 UI", () => {
+  it("「写真を撮る」「写真を追加」ボタンがあり「撮影開始」は使わない", () => {
+    expect(CREATE_SRC).toMatch(/写真を撮る/);
+    expect(CREATE_SRC).toMatch(/写真を追加/);
+    expect(CREATE_SRC).not.toMatch(/撮影開始/);
+  });
+
+  it("capture=environment と accept=image/* を使う", () => {
+    expect(CREATE_SRC).toMatch(/capture="environment"/);
+    expect(CREATE_SRC).toMatch(/accept="image\/\*"/);
+  });
+
+  it("選択後のサムネイル表示がある", () => {
+    expect(CREATE_SRC).toMatch(/data-testid="pin-create-photo-thumb"/);
+  });
+
+  it("objectURL を createObjectURL し revokeObjectURL する導線がある", () => {
+    expect(CREATE_SRC).toMatch(/URL\.createObjectURL/);
+    expect(CREATE_SRC).toMatch(/URL\.revokeObjectURL/);
+  });
+
+  it("保存ボタンは 1 つ (pin-create-submit) のまま一体 UX", () => {
+    expect(CREATE_SRC).toMatch(/data-testid="pin-create-submit"/);
+    // onSubmit に file を渡す (pin create → photo upload 一体)
+    expect(CREATE_SRC).toMatch(/onSubmit\(\s*\{[\s\S]*?\},\s*photoFile/);
+  });
+
+  it("写真アップロード失敗時の 4 文言 / ボタンを出す", () => {
+    expect(CREATE_SRC).toMatch(/ピンは保存されました/);
+    expect(CREATE_SRC).toMatch(/写真の保存に失敗しました/);
+    expect(CREATE_SRC).toMatch(/写真だけ再試行/);
+    expect(CREATE_SRC).toMatch(/写真なしで完了/);
+  });
+
+  it("storageKey を UI に出さない / base64 を持たない / console に画像情報を出さない", () => {
+    expect(CREATE_SRC).not.toMatch(/storageKey/);
+    expect(CREATE_SRC).not.toMatch(/toDataURL|base64/);
+    expect(CREATE_SRC).not.toMatch(/console\.\w+\(/);
+  });
+});
+
+describe("Phase 1-H — pin-detail-panel 写真 UI", () => {
+  it("写真一覧 / サムネイル / プレビューがある", () => {
+    expect(DETAIL_SRC).toMatch(/data-testid="pin-detail-photos"/);
+    expect(DETAIL_SRC).toMatch(/data-testid="pin-photo-thumb"/);
+    expect(DETAIL_SRC).toMatch(/data-testid="pin-photo-preview"/);
+  });
+
+  it("own + archived 以外でのみ追加/削除 UI を出す (canEdit)", () => {
+    expect(DETAIL_SRC).toMatch(
+      /canEdit=\{isOwn\s*&&\s*detail!\.status\s*!==\s*"archived"\}/,
+    );
+    expect(DETAIL_SRC).toMatch(/\{canEdit\s*&&\s*\(/);
+  });
+
+  it("「写真を撮る」「写真を追加」「写真を削除」がある", () => {
+    expect(DETAIL_SRC).toMatch(/写真を撮る/);
+    expect(DETAIL_SRC).toMatch(/写真を追加/);
+    expect(DETAIL_SRC).toMatch(/写真を削除/);
+    expect(DETAIL_SRC).not.toMatch(/撮影開始/);
+  });
+
+  it("HEIC 等で表示できない場合の代替表示がある (onError fallback)", () => {
+    expect(DETAIL_SRC).toMatch(/onError=/);
+    expect(DETAIL_SRC).toMatch(/プレビューを表示できません/);
+  });
+
+  it("storageKey を UI に出さない / console に画像情報を出さない / dangerouslySetInnerHTML 不使用", () => {
+    expect(DETAIL_SRC).not.toMatch(/storageKey/);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\(/);
+    expect(DETAIL_SRC).not.toMatch(/dangerouslySetInnerHTML/);
+  });
+});
+
+describe("Phase 1-H — field-survey-map create 後の挙動", () => {
+  it("pin 作成成功後に detail panel を開く (setDetailPinId)", () => {
+    expect(MAP_SRC).toMatch(/setDetailPinId\(/);
+    // finalizePinCreate 内で detail を開く
+    expect(MAP_SRC).toMatch(/finalizePinCreate/);
+  });
+
+  it("写真 upload は二段階 (pin create → uploadPhoto) で marker refetch を維持", () => {
+    expect(MAP_SRC).toMatch(/useFieldSurveyPinPhotoMutations/);
+    expect(MAP_SRC).toMatch(/photoMutations\.uploadPhoto/);
+    expect(MAP_SRC).toMatch(/bumpRefetch\(\)/);
+  });
+
+  it("写真失敗時に再試行 / 写真なし完了の handler を渡す", () => {
+    expect(MAP_SRC).toMatch(/onRetryPhoto=/);
+    expect(MAP_SRC).toMatch(/onFinishWithoutPhoto=/);
+    expect(MAP_SRC).toMatch(/setPhotoUploadFailed\(true\)/);
+  });
+});
+
+describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
+  it("'use client' で始まる", () => {
+    expect(PHOTO_HOOK_SRC.trim().startsWith('"use client"')).toBe(true);
+  });
+
+  it("photos API path を使う (GET/POST list+upload, DELETE)", () => {
+    expect(PHOTO_HOOK_SRC).toMatch(
+      /\/api\/field-survey\/pins\/\$\{encodeURIComponent\(pinId\)\}\/photos/,
+    );
+    expect(PHOTO_HOOK_SRC).toMatch(/method:\s*"POST"/);
+    expect(PHOTO_HOOK_SRC).toMatch(/method:\s*"DELETE"/);
+    expect(PHOTO_HOOK_SRC).toMatch(/FormData/);
+  });
+
+  it("AbortController を list/upload/delete 別に持ち unmount で abort", () => {
+    expect(PHOTO_HOOK_SRC).toMatch(/listAbortRef/);
+    expect(PHOTO_HOOK_SRC).toMatch(/uploadAbortRef/);
+    expect(PHOTO_HOOK_SRC).toMatch(/deleteAbortRef/);
+    expect(PHOTO_HOOK_SRC).toMatch(
+      /return\s*\(\)\s*=>\s*\{[\s\S]*?mountedRef\.current\s*=\s*false[\s\S]*?abort\(\)/,
+    );
+  });
+
+  it("console に画像情報 / response 全文を出さない / Storage を使わない", () => {
+    expect(PHOTO_HOOK_SRC).not.toMatch(/console\.\w+\(/);
+    expect(PHOTO_HOOK_SRC).not.toMatch(/localStorage\s*\.\s*(setItem|getItem)/);
+    expect(PHOTO_HOOK_SRC).not.toMatch(/sessionStorage\s*\.\s*(setItem|getItem)/);
+    expect(PHOTO_HOOK_SRC).not.toMatch(/\bindexedDB\s*\.\s*open/);
   });
 });

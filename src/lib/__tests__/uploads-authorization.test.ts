@@ -23,16 +23,20 @@ type Att = {
 };
 type Prop = { id: string; createdBy: string; assignedTo: string | null };
 
+type PinPhoto = { fileUrl: string; pin: { staffUserId: string } | null };
+
 function makeDb(opts: {
   photos?: Photo[];
   bPhotos?: BPhoto[];
   attachments?: Att[];
   properties?: Prop[];
+  pinPhotos?: PinPhoto[];
 }) {
   const photos = opts.photos ?? [];
   const bPhotos = opts.bPhotos ?? [];
   const attachments = opts.attachments ?? [];
   const properties = opts.properties ?? [];
+  const pinPhotos = opts.pinPhotos ?? [];
 
   // 最小 prisma 互換 stub。Phase B は findMany + JS フィルタで legacy URL /
   // duplicate collision を取りこぼさない設計のため、findMany の contains を再現する。
@@ -61,6 +65,10 @@ function makeDb(opts: {
     attachment: {
       findMany: async ({ where }: { where: ContainsWhere }) =>
         attachments.filter((a) => matchContains(a.fileUrl, where)),
+    },
+    fieldSurveyPinPhoto: {
+      findMany: async ({ where }: { where: ContainsWhere }) =>
+        pinPhotos.filter((p) => matchContains(p.fileUrl, where)),
     },
     property: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -684,6 +692,7 @@ describe("authorizeUploadAccess", () => {
       const prisma = {
         propertyPhoto: { findMany: recorder("propertyPhoto") },
         buildingPhoto: { findMany: recorder("buildingPhoto") },
+        fieldSurveyPinPhoto: { findMany: recorder("fieldSurveyPinPhoto") },
         attachment: { findMany: recorder("attachment") },
         property: { findUnique: async () => null },
       } as unknown as Parameters<typeof authorizeUploadAccess>[0]["prisma"];
@@ -698,6 +707,7 @@ describe("authorizeUploadAccess", () => {
       expect(calls.map((c) => c.table)).toEqual([
         "propertyPhoto",
         "buildingPhoto",
+        "fieldSurveyPinPhoto",
         "attachment",
       ]);
       for (const c of calls) {
@@ -716,6 +726,7 @@ describe("authorizeUploadAccess", () => {
       const prisma = {
         propertyPhoto: { findMany: recorder },
         buildingPhoto: { findMany: recorder },
+        fieldSurveyPinPhoto: { findMany: recorder },
         attachment: { findMany: recorder },
         property: { findUnique: async () => null },
       } as unknown as Parameters<typeof authorizeUploadAccess>[0]["prisma"];
