@@ -1,0 +1,80 @@
+name: ドキュメント変更 (@claude)
+description: README / docs / 運用ルール等のドキュメント変更（docs-only）
+title: "[Docs] "
+labels: ["claude-task", "docs"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > 作業前に CLAUDE.md / AGENTS.md の運用ルールを確認すること。
+        > docs-only のため build / test は原則不要。git diff --check は実行すること。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: どのドキュメントを変更するか
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+      description: なぜ変更するか
+    validations:
+      required: true
+
+  - type: textarea
+    id: changes
+    attributes:
+      label: 変更内容
+      description: 追加・修正・削除する記述（対象ファイルを明記）
+    validations:
+      required: true
+
+  - type: textarea
+    id: forbidden
+    attributes:
+      label: 禁止事項
+      value: |
+        - main 直 push / force-push
+        - merge / VPS 反映 / GitHub 認証・設定変更
+        - アプリ本体コード・schema・テストの変更（docs 以外への波及）
+        - 大規模リライト
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build_test
+    attributes:
+      label: build / test 要否
+      options:
+        - "不要（docs-only。git diff --check のみ）"
+        - "必要"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: codex_review
+    attributes:
+      label: Codex review 要否
+      options:
+        - "不要"
+        - "推奨"
+      default: 0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: 運用ルール確認
+      options:
+        - label: 作業前に CLAUDE.md / AGENTS.md を確認する
+          required: true
+        - label: main 直 push / force-push をしない
+          required: true
+        - label: VPS 操作はユーザー明示指示時のみ
+          required: true

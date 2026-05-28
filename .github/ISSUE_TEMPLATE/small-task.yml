@@ -1,0 +1,42 @@
+name: 小タスク (@claude / スマホ可)
+description: docs-only・小規模修正を @claude に依頼（短文でOK）
+title: "[Small] "
+labels: ["claude-task", "small-task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > @claude 実装前提の小タスク（docs-only / 小規模修正向け）。
+        > **作業前に CLAUDE.md / AGENTS.md を確認すること。**
+        > **禁止**: main 直 push / force-push / merge / VPS 反映 / GitHub 認証・設定変更 / migration / build 破壊
+        > **要求**: 新規 branch 作成 → commit → push → compare URL 返却（PR 作成はユーザー側）
+
+  - type: textarea
+    id: task
+    attributes:
+      label: やってほしいこと
+      description: 1〜3行でOK（対象ファイルと変更内容を簡潔に）
+      placeholder: "例) README.md の typo を修正"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build_test
+    attributes:
+      label: build / test
+      options:
+        - "不要（docs/config-only。git diff --check のみ）"
+        - "必要"
+      default: 0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: 確認
+      options:
+        - label: CLAUDE.md / AGENTS.md を確認し、禁止事項（main直push / force-push / merge / VPS / migration）を守る
+          required: true
+        - label: branch 作成 → commit → push → compare URL 返却まで行う（PR 作成はユーザー側）
+          required: true
