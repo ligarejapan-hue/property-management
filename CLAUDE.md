@@ -186,6 +186,7 @@ docs-only の場合:
 ## 12. Issue / PR / GitHub Actions での参照方針
 
 - CLAUDE.md を AI 運用ルールの基準文書として扱う
+- GitHub Actions / @claude で動く場合も、作業前に CLAUDE.md と AGENTS.md を確認してから作業する
 - Issue / PR / GitHub Actions でも、このルールと矛盾しない前提で作業する
 - GitHub Actions / CI が失敗した場合は、ログを確認し、推測で修正しない
 - CI失敗の原因が不明な場合は、不明点として報告する
