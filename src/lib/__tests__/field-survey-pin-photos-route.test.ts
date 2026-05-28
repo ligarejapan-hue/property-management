@@ -141,9 +141,11 @@ function jpeg(bytes = 16): Blob {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // server adapter を模し、result.url は storage server 直の絶対 URL を返す。
+  // route はこれを保存せず /uploads/{key} を組み立てることを各テストで検証する。
   storageStub.upload.mockResolvedValue({
-    url: `/uploads/field-survey/pins/${PIN_ID}/photos/1.jpg`,
-    key: `field-survey/pins/${PIN_ID}/photos/1.jpg`,
+    url: "http://storage.internal:9000/files/server-direct.jpg",
+    key: `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
   });
   storageStub.delete.mockResolvedValue(undefined);
   (prisma.fieldSurveyPinPhoto.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -357,6 +359,83 @@ describe("POST photos — MIME / key hardening (Codex P2)", () => {
   });
 });
 
+describe("POST photos — app proxy url (Codex P1)", () => {
+  function setupOwnOpenPinEcho() {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: PHOTO_ID,
+        pinId: PIN_ID,
+        fileUrl: data.fileUrl,
+        thumbnailUrl: data.thumbnailUrl,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        mimeType: data.mimeType,
+        sortOrder: 0,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  }
+  const createdData = (): Record<string, unknown> =>
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]
+      .data;
+
+  function typedReq(type: string, name = "photo.jpg") {
+    const fd = new FormData();
+    fd.append("file", new Blob([new Uint8Array(16)], { type }), name);
+    return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+      method: "POST",
+      body: fd,
+    });
+  }
+
+  it("result.url が絶対URLでも fileUrl は /uploads/{key} で保存され http(s) で始まらない", async () => {
+    setupOwnOpenPinEcho();
+    const res = await POST(typedReq("image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const data = createdData();
+    expect(String(data.fileUrl)).toMatch(/^\/uploads\/field-survey\/pins\//);
+    expect(String(data.fileUrl)).not.toMatch(/^https?:/);
+    // adapter が返した result.key (= 実際に格納された key) を proxy 化したもの。
+    // result.url (絶対URL) ではなく result.key を使うことを確認する。
+    expect(data.fileUrl).toBe(
+      `/uploads/field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+    );
+  });
+
+  it("thumbnailUrl が絶対URLなら保存しない (null)", async () => {
+    setupOwnOpenPinEcho();
+    storageStub.upload.mockResolvedValueOnce({
+      url: "http://storage.internal:9000/files/x.jpg",
+      thumbnailUrl: "http://storage.internal:9000/files/x-thumb.jpg",
+      key: `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+    });
+    const res = await POST(typedReq("image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    expect(createdData().thumbnailUrl).toBeNull();
+  });
+
+  it("thumbnailUrl が /uploads 相対なら proxy URL として保持する", async () => {
+    setupOwnOpenPinEcho();
+    storageStub.upload.mockResolvedValueOnce({
+      url: "http://storage.internal:9000/files/x.jpg",
+      thumbnailUrl: `/uploads/field-survey/pins/${PIN_ID}/photos/abc-thumb.jpg`,
+      key: `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+    });
+    const res = await POST(typedReq("image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    expect(createdData().thumbnailUrl).toBe(
+      `/uploads/field-survey/pins/${PIN_ID}/photos/abc-thumb.jpg`,
+    );
+  });
+});
+
 describe("GET photos", () => {
   it("own pin を read で取得し storageKey を返さない", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
@@ -383,6 +462,7 @@ describe("GET photos", () => {
     const body = await res.json();
     expect(JSON.stringify(body)).not.toMatch(/storageKey/);
     expect(body.data[0].fileUrl).toMatch(/^\/uploads\//);
+    expect(body.data[0].fileUrl).not.toMatch(/^https?:/);
   });
 
   it("他人 pin は read_all で閲覧可", async () => {
@@ -417,17 +497,22 @@ describe("GET photos", () => {
 });
 
 describe("DELETE photo", () => {
-  function mockPhoto(staffUserId: string, status = "open") {
+  function mockPhoto(
+    staffUserId: string,
+    status = "open",
+    thumbnailUrl: string | null = null,
+  ) {
     (prisma.fieldSurveyPinPhoto.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: PHOTO_ID,
       pinId: PIN_ID,
       fileUrl: `/uploads/field-survey/pins/${PIN_ID}/photos/1.jpg`,
+      thumbnailUrl,
       pin: { staffUserId, status },
     });
     (prisma.fieldSurveyPinPhoto.delete as ReturnType<typeof vi.fn>).mockResolvedValue({});
   }
 
-  it("own pin 写真を削除し storage.delete も呼ぶ", async () => {
+  it("own pin 写真を削除し fileUrl から復元した key で storage.delete を呼ぶ", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
     (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
     mockPhoto(OWNER.id);
@@ -435,8 +520,30 @@ describe("DELETE photo", () => {
     expect(res.status).toBe(200);
     expect(prisma.fieldSurveyPinPhoto.delete).toHaveBeenCalledTimes(1);
     expect(storageStub.delete).toHaveBeenCalledTimes(1);
+    expect(storageStub.delete).toHaveBeenCalledWith(
+      `field-survey/pins/${PIN_ID}/photos/1.jpg`,
+    );
     const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
     expect(detail).toEqual({ pinId: PIN_ID, photoId: PHOTO_ID });
+  });
+
+  it("thumbnailUrl がある場合は本体 + thumbnail の両方を storage.delete する", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    mockPhoto(
+      OWNER.id,
+      "open",
+      `/uploads/field-survey/pins/${PIN_ID}/photos/1-thumb.jpg`,
+    );
+    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    expect(res.status).toBe(200);
+    expect(storageStub.delete).toHaveBeenCalledTimes(2);
+    expect(storageStub.delete).toHaveBeenCalledWith(
+      `field-survey/pins/${PIN_ID}/photos/1.jpg`,
+    );
+    expect(storageStub.delete).toHaveBeenCalledWith(
+      `field-survey/pins/${PIN_ID}/photos/1-thumb.jpg`,
+    );
   });
 
   it("他人 pin の写真削除は 403", async () => {

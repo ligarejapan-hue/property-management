@@ -138,12 +138,25 @@ export async function authorizeUploadAccess(
 
   // 現地調査ピン写真 (Phase 1-H)。property / attachment 認可とは独立に判定する。
   // own pin = field_survey:read で閲覧可。他人 pin = read_all または manage で閲覧可。
+  // fileUrl / thumbnailUrl のどちらの /uploads key でも認可する。
   const pinPhotos = await db.fieldSurveyPinPhoto.findMany({
-    where: { fileUrl: { contains: escapedKey } },
-    select: { fileUrl: true, pin: { select: { staffUserId: true } } },
+    where: {
+      OR: [
+        { fileUrl: { contains: escapedKey } },
+        { thumbnailUrl: { contains: escapedKey } },
+      ],
+    },
+    select: {
+      fileUrl: true,
+      thumbnailUrl: true,
+      pin: { select: { staffUserId: true } },
+    },
   });
   for (const pp of pinPhotos) {
-    if (extractStorageKeyFromFileUrl(pp.fileUrl) !== key) continue;
+    const matches =
+      extractStorageKeyFromFileUrl(pp.fileUrl) === key ||
+      extractStorageKeyFromFileUrl(pp.thumbnailUrl) === key;
+    if (!matches) continue;
     decisions.push(authorizeFieldSurveyPinPhoto(pp.pin, session, permissions));
   }
 

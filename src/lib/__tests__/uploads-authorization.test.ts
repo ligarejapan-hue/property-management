@@ -67,8 +67,16 @@ function makeDb(opts: {
         attachments.filter((a) => matchContains(a.fileUrl, where)),
     },
     fieldSurveyPinPhoto: {
-      findMany: async ({ where }: { where: ContainsWhere }) =>
-        pinPhotos.filter((p) => matchContains(p.fileUrl, where)),
+      findMany: async ({
+        where,
+      }: {
+        where: { OR?: ContainsWhere[] };
+      }) => {
+        const contains = where.OR?.[0]?.fileUrl?.contains ?? "";
+        return pinPhotos.filter(
+          (p) => typeof p.fileUrl === "string" && p.fileUrl.includes(contains),
+        );
+      },
     },
     property: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -684,9 +692,16 @@ describe("authorizeUploadAccess", () => {
   describe("DB lookup 引数 (wildcard escape)", () => {
     it("% を含む key は contains に literal escape された値が渡る (3 テーブル全て)", async () => {
       const calls: { table: string; contains: string }[] = [];
+      // pin photo は fileUrl/thumbnailUrl の OR で問い合わせるため where 形が異なる。
+      // どちらの形でも escape 済み contains 値を取り出す。
+      const containsOf = (where: {
+        fileUrl?: { contains: string };
+        OR?: { fileUrl?: { contains: string } }[];
+      }): string =>
+        where.fileUrl?.contains ?? where.OR?.[0]?.fileUrl?.contains ?? "";
       const recorder = (table: string) =>
-        vi.fn(async ({ where }: { where: { fileUrl: { contains: string } } }) => {
-          calls.push({ table, contains: where.fileUrl.contains });
+        vi.fn(async ({ where }: { where: Parameters<typeof containsOf>[0] }) => {
+          calls.push({ table, contains: containsOf(where) });
           return [];
         });
       const prisma = {
@@ -718,8 +733,17 @@ describe("authorizeUploadAccess", () => {
     it("`%` 単独 key でも contains に escape された値が渡る", async () => {
       const containsValues: string[] = [];
       const recorder = vi.fn(
-        async ({ where }: { where: { fileUrl: { contains: string } } }) => {
-          containsValues.push(where.fileUrl.contains);
+        async ({
+          where,
+        }: {
+          where: {
+            fileUrl?: { contains: string };
+            OR?: { fileUrl?: { contains: string } }[];
+          };
+        }) => {
+          containsValues.push(
+            where.fileUrl?.contains ?? where.OR?.[0]?.fileUrl?.contains ?? "",
+          );
           return [];
         },
       );

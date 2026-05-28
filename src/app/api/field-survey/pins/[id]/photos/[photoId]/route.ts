@@ -39,6 +39,7 @@ export async function DELETE(
         id: true,
         pinId: true,
         fileUrl: true,
+        thumbnailUrl: true,
         pin: { select: { staffUserId: true, status: true } },
       },
     });
@@ -58,12 +59,18 @@ export async function DELETE(
     }
 
     const fileUrlBeforeDelete = photo.fileUrl;
+    const thumbnailUrlBeforeDelete = photo.thumbnailUrl;
     await prisma.fieldSurveyPinPhoto.delete({ where: { id: photoId } });
 
-    const storageKey = extractStorageKeyFromUrl(fileUrlBeforeDelete);
-    if (storageKey != null) {
+    // best-effort: 本体 + (あれば) thumbnail の実体を消す。fileUrl は /uploads/...
+    // proxy 相対なので extractStorageKeyFromUrl で key を復元できる。
+    // storage.delete 失敗は orphan を残すだけで API は成功扱い (DB が source of truth)。
+    const storage = getStorage();
+    for (const url of [fileUrlBeforeDelete, thumbnailUrlBeforeDelete]) {
+      const storageKey = extractStorageKeyFromUrl(url);
+      if (storageKey == null) continue;
       try {
-        await getStorage().delete(storageKey);
+        await storage.delete(storageKey);
       } catch (err) {
         console.error("[field_survey_pin_photo_delete] storage.delete failed", {
           route: "DELETE /api/field-survey/pins/[id]/photos/[photoId]",

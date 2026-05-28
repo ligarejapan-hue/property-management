@@ -11,7 +11,11 @@ import { describe, it, expect } from "vitest";
 import { authorizeUploadAccess } from "@/lib/uploads-authorization";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
 
-type PinPhoto = { fileUrl: string; pin: { staffUserId: string } | null };
+type PinPhoto = {
+  fileUrl: string;
+  thumbnailUrl?: string | null;
+  pin: { staffUserId: string } | null;
+};
 type Photo = { fileUrl: string; propertyId: string };
 type Prop = { id: string; createdBy: string; assignedTo: string | null };
 
@@ -34,8 +38,15 @@ function makeDb(opts: {
     buildingPhoto: { findMany: async () => [] },
     attachment: { findMany: async () => [] },
     fieldSurveyPinPhoto: {
-      findMany: async ({ where }: { where: ContainsWhere }) =>
-        pinPhotos.filter((p) => matchContains(p.fileUrl, where)),
+      findMany: async ({ where }: { where: { OR?: ContainsWhere[] } }) => {
+        const contains = where.OR?.[0]?.fileUrl?.contains ?? "";
+        return pinPhotos.filter(
+          (p) =>
+            (typeof p.fileUrl === "string" && p.fileUrl.includes(contains)) ||
+            (typeof p.thumbnailUrl === "string" &&
+              p.thumbnailUrl.includes(contains)),
+        );
+      },
     },
     property: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -68,6 +79,27 @@ describe("authorizeUploadAccess — FieldSurveyPinPhoto", () => {
     const prisma = makeDb({ pinPhotos: [{ fileUrl: URL, pin: { staffUserId: owner.id } }] });
     expect(
       await authorizeUploadAccess({ key: KEY, session: owner, permissions: fsRead, prisma }),
+    ).toBe("ok");
+  });
+
+  it("thumbnail key (/uploads/...) も own pin で認可される", async () => {
+    const thumbKey = "field-survey/pins/p1/photos/thumb-1.jpg";
+    const prisma = makeDb({
+      pinPhotos: [
+        {
+          fileUrl: URL,
+          thumbnailUrl: `/uploads/${thumbKey}`,
+          pin: { staffUserId: owner.id },
+        },
+      ],
+    });
+    expect(
+      await authorizeUploadAccess({
+        key: thumbKey,
+        session: owner,
+        permissions: fsRead,
+        prisma,
+      }),
     ).toBe("ok");
   });
 

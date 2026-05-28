@@ -11,7 +11,25 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage, validateFile, ALLOWED_PHOTO_MIMES } from "@/lib/storage";
-import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
+import { normalizeFileUrl, normalizeFileUrlsInRecord } from "@/lib/url-normalize";
+
+// storage key を app proxy 経由の相対 URL にする。絶対 URL / public URL は保存しない。
+// leading slash / duplicate slash / backslash を正規化する (空 key は呼び出し側で来ない)。
+function toUploadProxyUrl(key: string): string {
+  const clean = String(key)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/{2,}/g, "/");
+  return `/uploads/${clean}`;
+}
+
+// thumbnail は専用 key を持たないため、proxy 相対 (/uploads/...) に正規化できる場合のみ
+// 保持する。storage server 直 URL 等は保存せず null に倒す (絶対 URL を DB に残さない)。
+function toProxyThumbnailUrl(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const normalized = normalizeFileUrl(raw);
+  return normalized.startsWith("/uploads/") ? normalized : null;
+}
 
 // ---------- /api/field-survey/pins/[id]/photos ----------
 //
@@ -120,6 +138,13 @@ export async function POST(
     const storage = getStorage();
     const result = await storage.upload(buffer, { key, mimeType, fileName });
 
+    // Codex P1: backend (例 server adapter) は絶対 URL を result.url で返しうる。
+    // 絶対 URL を DB に保存すると /uploads 認可 proxy を迂回し、DELETE 時の
+    // key 復元 (extractStorageKeyFromUrl) も絶対 URL を弾く。常に proxy 相対 URL
+    // (= /uploads/{key}) を保存し、thumbnail も proxy 相対化できる場合のみ保持する。
+    const proxyFileUrl = toUploadProxyUrl(result.key);
+    const proxyThumbnailUrl = toProxyThumbnailUrl(result.thumbnailUrl);
+
     const maxSort = await prisma.fieldSurveyPinPhoto.aggregate({
       where: { pinId: id },
       _max: { sortOrder: true },
@@ -129,8 +154,8 @@ export async function POST(
     const photo = await prisma.fieldSurveyPinPhoto.create({
       data: {
         pinId: id,
-        fileUrl: result.url,
-        thumbnailUrl: result.thumbnailUrl ?? null,
+        fileUrl: proxyFileUrl,
+        thumbnailUrl: proxyThumbnailUrl,
         fileName,
         fileSize,
         mimeType,
