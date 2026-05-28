@@ -1,76 +1,241 @@
 @AGENTS.md
 
 <!-- BEGIN:claude-code-rules -->
-# Claude Code 運用ルール
+# CLAUDE.md
 
-## ブランチ・PR
-- main へ直接 push しない
-- 1タスク1ブランチ、作業単位で PR を作成する
-- 大規模リファクタ・無関係な整理を同一 PR に混入しない
+## 1. この文書の目的
 
-## 実装方針
-- 最小差分で実装する。既存ロジック・型・API を破壊しない
-- 不明点は推測しない。既存 DB / API / 型 / ロジックを確認してから実装する
-- 追加エラーハンドリング・バリデーション・抽象化は要求されていない限り行わない
-- コメントは WHY が非自明な場合のみ。WHAT の説明コメントは書かない
+- ChatGPT / Claude Code / Codex / GitHub Actions / Issue / PR で共通参照する AI運用ルールである
+- 古いチャットや古い保存メモリと矛盾する場合は、恒久ルールとして整理された最新の CLAUDE.md を優先する
+- ただし、ユーザーの明示指示がある場合はその指示を優先する
 
-## ワークフロー
-- **Explore → Plan → Implement** を分けて進める
-- 重要タスクでは Plan 提示後に停止し、承認を待ってから Implement に進む
-- DB schema 変更 / migration は明示指示がある場合のみ実行する
+## 2. 共通運用ルール
 
-## 並列作業
-- 複数 Claude を同じ作業ディレクトリで動かさない
-- 各 Claude に専用 worktree を割り当てる
-- 各 worktree は 1 ブランチ専用にする
-- Claude に勝手な `git switch` をさせない
-- 作業完了後は commit / push / `git status` clean を確認する
-- PR マージ後に不要 worktree を削除する
+- main 直push禁止
+- 1タスク1branch
+- 1ブランチに複数の大きな目的を混ぜない
+- 推測禁止
+- 不明点は推測で埋めず、前提・未確認事項として報告する
+- 最小差分で対応する
+- 大規模リファクタ禁止
+- 既存仕様・既存UI・既存API・既存テストを優先する
+- 勝手にスコープ拡大しない
+- 長いコード全文を出さず、差分・要点中心に報告する
+- VPS反映はユーザーが明示した場合のみ
+- VPS反映が明示されていない場合、VPSログイン・git pull・build・restart・migrate deploy などを行わない
 
-## ビルド・テスト
-- 実装後は必ず `npm run build` と `npx vitest run` を実行する
-- ビルド・テストが通らない状態で commit / push しない
+## 3. 並列作業 / worktree 運用
 
-## VPS
-- VPS 反映はユーザーの明示指示がある場合のみ実行する
-- repo: `/opt/property-management`
-- systemd service: `property-management`（pm2 は使わない）
-- app env: `/etc/property-management/app.env`
-- build / test は `www-data` で実行する
-- npm cache: `/var/www/.npm`
-- VPS コマンドは `/var/www/property-management` 前提にしない
+- 複数タスクを並行する場合は、1タスク1branchに加えて、作業ディレクトリまたは git worktree を分離する
+- 複数の Claude Code セッションで同じ workdir を同時に編集しない
+- Claude Code は勝手に `git switch` / `git checkout` で作業ブランチを切り替えない
+- 作業完了後は `git status --short` を確認し、意図しない差分がないことを報告する
+- 無制限の並列実行は禁止
+- 並列作業は原則 2〜3本までを目安にし、リソース不足や作業衝突がある場合は停止して報告する
+- worktree / branch / stash / cleanup / 削除操作は、対象を明示して慎重に行う
+- 不要な cleanup や branch 削除、stash 操作はユーザーの明示指示がある場合のみ行う
 
-## 出力制約
-- コード全文の出力禁止。差分・要点・対象箇所のみを提示する
-- 調査範囲を必要最小限に絞り、重複説明・長文引用・全体再読込を避ける
-- 広範囲探索を避け、対象ファイルを絞ってから読む
-- テストログ全文を出さない。失敗時のみ末尾 20 行以内を出す
-- 既知の前提を長文で繰り返さない
+## 4. Claude Code の作業フロー
 
-## トークン消費モード（条件付き）
-- 既定 (Max 利用中): 通常運用。トークン削減を最優先にしない。必要な調査・検証は省略しない
-- Pro 利用中（ユーザーが Pro モードを明示した場合のみ適用）:
-  - 「出力の精度を落とさずにトークン消費を半減させる方法でこのセッションは任務を実行する」を最優先とする
-  - Explore 不要な自明な小修正は最小パッチモードで直接実装する
-  - 完了報告は簡易形式（変更ファイル・変更要点・テスト結果・commit hash・push 結果）に短縮する
-- 共通（モード問わず）:
-  - 精度・安全性・検証品質を落とさない
-  - 不明点を推測で埋めない
-  - 長いコード全文は出さない。差分・要点・短い確認コマンド中心
+原則:
 
-## 完了報告形式
-1. 対応目的
-2. 変更ファイル一覧
-3. 変更内容
-4. migration 有無
-5. テスト結果
-6. commit hash
-7. push 結果
-8. VPS 反映状況
+1. Explore
+2. Plan
+3. ユーザーまたはChatGPT確認
+4. approved Implement
+5. test / build / diff-check
+6. commit
+7. push
+8. compare URL を返す
 
-（Pro モード適用時のみ「トークン消費モード」セクションの簡易形式に切り替える）
+補足:
 
-## 実装済み（再実装しない）
+- 実装前に既存実装を確認する
+- 既存の類似実装・API・テスト・権限・AuditLog パターンを優先する
+- 不明点を勝手に決めない
+- 実装が必要最小限を超えそうな場合は、まず計画として報告する
+- 高リスク変更では ChatGPTレビュー推奨
+- 軽微変更ではユーザー判断で直接 Implement 可
+- DB / migration / PII / 権限 / GPS / AuditLog 系は ChatGPT確認推奨
+- ユーザーが明確に実装を依頼した場合は、その範囲内で実装する
+
+## 5. ChatGPT / Claude Code / Codex の役割
+
+ChatGPT:
+
+- 要件整理
+- 優先順位付け
+- 実装方針レビュー
+- 高リスク変更前の事前確認
+- Claude Code への指示文作成
+- 実装結果の妥当性確認
+
+Claude Code:
+
+- 具体的な実装
+- 既存実装の確認
+- 必要最小限の差分作成
+- test / build / diff-check
+- commit
+- push
+- compare URL の返却
+
+Codex:
+
+- PRレビュー
+- バグ回帰、セキュリティ、権限、DB破壊、PII、AuditLog、migration、rollback、storage、GPS/location などのリスク確認
+
+## 6. gh CLI / GitHub 操作ルール
+
+- gh CLI が使える環境では利用してよい
+- ただし gh CLI 必須の運用にはしない
+- PR作成は原則ユーザー側
+- ただし、ユーザーが明示許可した場合は gh CLI / GitHub API を使って PR作成してよい
+- merge は常にユーザー側
+- Claude Code は branch push と compare URL を返す
+- Claude Code は勝手に merge / force-push / GitHub認証変更 / GitHub設定変更をしない
+- CI が失敗した場合は、ログを確認し、推測で修正しない
+- CI失敗の原因が不明な場合は、不明点として報告する
+
+## 7. 実装ルール
+
+- 既存仕様を壊さない
+- 既存UI文言・業務用語を尊重する
+- DB / schema / migration は必要な場合のみ変更する
+- migration がある場合は報告に必ず明記する
+- permission / role / auth の既存設計を確認してから変更する
+- import / rollback / correction / owner / property / storage / upload / GPS / location privacy に関わる変更は特に慎重に扱う
+- console.log 等に PII、住所、所有者名、緯度経度、API key、raw response、env値を出さない
+- エラー表示に生の個人情報や緯度経度を出さない
+- dangerouslySetInnerHTML は原則使用しない
+- セキュリティ・権限・PII に関わる変更では、既存テストまたは追加テストを優先する
+
+## 8. PII / AuditLog ルール
+
+PII:
+
+- 所有者名、住所、電話番号、メールアドレス、法人番号、緯度経度、写真位置情報、rawData、raw response は慎重に扱う
+- UI、ログ、console、AuditLog、エラー文に不用意に出さない
+- 必要な画面にのみ、権限に応じて表示する
+
+AuditLog:
+
+- AuditLog は操作事実、対象ID、件数、処理結果、権限上必要な最小情報を中心に記録する
+- 生の個人情報を記録しない
+- rawData / raw response / 大量の緯度経度 / API key / token / env値 を記録しない
+- location / GPS / tracking 系では、監査ログに大量の座標を保存しない
+- 監査に必要な場合も、sessionId / count / action / result など最小限にする
+
+## 9. migration 運用
+
+- migration は必要な場合のみ作成する
+- schema 変更がない作業では migration を作らない
+- migration がある PR は報告に明記する
+- migration がある PR は Codex review 推奨
+- VPS反映時は、migration がある場合のみ prisma migrate deploy / prisma generate を行う
+- 開発中に勝手に production DB を変更しない
+- rollback や data correction を伴う場合は、必ず安全側の設計にする
+
+## 10. build / test / diff-check 運用
+
+通常の実装後:
+
+- 関連テストを実行
+- 可能な限り全体テストを実行
+- npm run build を実行
+- git diff --check を実行
+
+docs-only の場合:
+
+- build/test は原則不要
+- git diff --check は実行する
+- 実行しない確認がある場合は理由を明記する
+
+報告時:
+
+- 実施したコマンド
+- 成功/失敗
+- 失敗した場合の原因
+- 未実施の場合の理由
+
+を簡潔に書く
+
+## 11. Codex review 推奨条件
+
+以下の変更は Codex review 推奨:
+
+- DB / schema / migration
+- 権限 / role / permission
+- PII
+- AuditLog
+- import
+- rollback
+- correction
+- owner / property の重要データ変更
+- storage / upload / file access
+- GPS / location / tracking / field survey
+- security-sensitive な変更
+- race condition / idempotency / batch processing
+- production data に影響し得る変更
+
+注意:
+
+- Codexへの返信文案は標準報告に含めない
+- Codex review が必要な理由だけ簡潔に報告する
+
+## 12. Issue / PR / GitHub Actions での参照方針
+
+- CLAUDE.md を AI 運用ルールの基準文書として扱う
+- GitHub Actions / @claude で動く場合も、作業前に CLAUDE.md と AGENTS.md を確認してから作業する
+- Issue / PR / GitHub Actions でも、このルールと矛盾しない前提で作業する
+- GitHub Actions / CI が失敗した場合は、ログを確認し、推測で修正しない
+- CI失敗の原因が不明な場合は、不明点として報告する
+- main への直接 push、force push、勝手な merge は禁止
+
+## 13. VPS / production ルール
+
+- VPS反映はユーザーの明示指示がある場合のみ
+- 明示指示がない限り、VPSへログインしない
+- 明示指示がない限り、production の git pull / npm ci / build / restart / migrate deploy を行わない
+- VPSパスは /opt/property-management
+- systemd service は property-management
+- env は /etc/property-management/app.env
+- npm cache は /var/www/.npm
+- pm2 は使わない
+- build/test は原則 www-data
+- VPS反映時は HOME=/var/www と npm_config_cache=/var/www/.npm を使う
+- migration がある場合のみ prisma migrate deploy / prisma generate を行う
+- ドキュメント更新のみの PR は VPS反映不要
+
+## 14. 実装後の報告フォーマット
+
+標準報告フォーマット:
+
+1. 変更ファイル一覧
+2. 変更内容
+3. 削除・整理した古い運用、または影響範囲
+4. 実施した確認
+5. テスト結果 / build結果 / diff-check結果
+6. migration 有無
+7. Codex review 推奨有無と理由
+8. commit hash
+9. push結果
+10. compare URL
+11. 注意点・未対応
+
+docs-only 作業の最低限報告フォーマット:
+
+1. 変更ファイル一覧
+2. 変更内容
+3. 削除・整理した古い運用
+4. 実施した確認
+5. commit hash
+6. push結果
+7. compare URL
+8. 注意点・未対応
+
+## 15. 実装済み（再実装しない）
+
 - `/uploads` 404 修正済み
 - property photo drag-and-drop upload 実装済み
 - CSV rollback Phase 1 実装済み
