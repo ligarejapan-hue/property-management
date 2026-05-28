@@ -445,10 +445,12 @@ describe("Codex P2 fix 2 — reset stale pin detail when switching pins", () => 
     expect(m).toMatch(/mutations\.updatePin\(saveTargetPinId,\s*patch\)/);
   });
 
-  it("manage 権限でも他人 pin 編集 UI を出さない方針を維持 (isOwn 単独 gate)", () => {
-    // EditView は isOwn === true のみ render。manage 等の追加 prop が無いこと
-    expect(DETAIL_SRC).not.toMatch(/canManage/);
+  it("manage 権限でも他人 pin 編集 UI を出さない方針を維持 (EditView は isOwn gate)", () => {
+    // Phase 1-I: canManage は削除ボタン用に追加されたが、EditView は依然 isOwn gate。
+    // 編集 UI に manage を絡めない (EditView の render 条件に canManage を含めない)。
+    expect(DETAIL_SRC).toMatch(/\{isFresh\s*&&\s*editing\s*&&\s*isOwn\s*&&\s*\(?\s*<EditView/);
     expect(DETAIL_SRC).not.toMatch(/hasManage/);
+    expect(DETAIL_SRC).not.toMatch(/editing\s*&&\s*\(isOwn\s*\|\|\s*canManage\)/);
   });
 
   it("dangerouslySetInnerHTML 不使用を継続", () => {
@@ -524,13 +526,13 @@ describe("Codex P2 — recheck latest pin before applying save results", () => {
     expect(afterUpdate?.[0]).not.toMatch(/r\.data\.id\s*===\s*pinId\b/);
   });
 
-  it("他人 pin 編集 UI を出さない方針を維持 (manage 持ちでも非表示)", () => {
-    // 既存テストと重複するが本 fix で挙動が変わっていないことを再確認
-    expect(DETAIL_SRC).not.toMatch(/canManage/);
+  it("他人 pin 編集 UI を出さない方針を維持 (manage 持ちでも編集は非表示)", () => {
+    // Phase 1-I: canManage は削除専用。編集 (EditView) は isOwn gate のまま。
     expect(DETAIL_SRC).not.toMatch(/hasManage/);
     expect(DETAIL_SRC).toMatch(
       /isOwn\s*=\s*isFresh\s*&&\s*detail!\.staffUserId\s*===\s*currentUserId/,
     );
+    expect(DETAIL_SRC).toMatch(/\{isFresh\s*&&\s*editing\s*&&\s*isOwn\s*&&\s*\(?\s*<EditView/);
   });
 
   it("pinId 切替時の reset (detail / editing / draft) は維持されている", () => {
@@ -810,5 +812,88 @@ describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
     expect(PHOTO_HOOK_SRC).not.toMatch(/localStorage\s*\.\s*(setItem|getItem)/);
     expect(PHOTO_HOOK_SRC).not.toMatch(/sessionStorage\s*\.\s*(setItem|getItem)/);
     expect(PHOTO_HOOK_SRC).not.toMatch(/\bindexedDB\s*\.\s*open/);
+  });
+});
+
+// =======================================================================
+// Phase 1-I: 調査ピン削除 (論理削除 / archived)
+// =======================================================================
+describe("Phase 1-I — pin-detail-panel 削除UI", () => {
+  it("削除ボタン (pin-detail-delete-button) がある", () => {
+    expect(DETAIL_SRC).toMatch(/data-testid="pin-detail-delete-button"/);
+  });
+
+  it("own または manage、かつ archived 以外でのみ削除ボタンを出す (canDelete)", () => {
+    expect(DETAIL_SRC).toMatch(
+      /canDelete\s*=\s*[\s\S]*?\(isOwn\s*\|\|\s*canManage\)\s*&&\s*detail!\.status\s*!==\s*"archived"/,
+    );
+    expect(DETAIL_SRC).toMatch(/\{canDelete\s*&&/);
+  });
+
+  it("read_all だけでは削除ボタンが出ない (canManage prop 経由のみ)", () => {
+    // 他人 pin 削除可否は親が算出した canManage prop のみで判断する。
+    // パネル内で permission 文字列 ("read_all" 等) を直接判定しない。
+    expect(DETAIL_SRC).toMatch(/canDelete\s*=[\s\S]*?canManage/);
+    expect(DETAIL_SRC).not.toMatch(/"read_all"/);
+  });
+
+  it("削除前に確認ダイアログを出す (確認文言 + 確認ボタン)", () => {
+    expect(DETAIL_SRC).toMatch(/data-testid="pin-detail-delete-confirm"/);
+    expect(DETAIL_SRC).toMatch(/data-testid="pin-detail-delete-confirm-button"/);
+    expect(DETAIL_SRC).toMatch(/この調査ピンを削除しますか/);
+    expect(DETAIL_SRC).toMatch(/地図上の通常表示から非表示になります/);
+    expect(DETAIL_SRC).toMatch(/削除する/);
+    expect(DETAIL_SRC).toMatch(/キャンセル/);
+  });
+
+  it("削除は deletePin を呼び、成功後に onDeleted を呼ぶ (panel を閉じる導線)", () => {
+    expect(DETAIL_SRC).toMatch(/mutations\.deletePin\(/);
+    expect(DETAIL_SRC).toMatch(/onDeleted\?\.\(/);
+  });
+
+  it("権限エラー時は「このピンを削除する権限がありません」を出す", () => {
+    expect(DETAIL_SRC).toMatch(/このピンを削除する権限がありません/);
+  });
+
+  it("dangerouslySetInnerHTML 不使用 / console に情報を出さない / Storage を使わない", () => {
+    expect(DETAIL_SRC).not.toMatch(/dangerouslySetInnerHTML/);
+    expect(DETAIL_SRC).not.toMatch(/console\.\w+\(/);
+    expect(DETAIL_SRC).not.toMatch(/localStorage\s*\.\s*(setItem|getItem)/);
+    expect(DETAIL_SRC).not.toMatch(/sessionStorage\s*\.\s*(setItem|getItem)/);
+    expect(DETAIL_SRC).not.toMatch(/\bindexedDB\s*\.\s*open/);
+  });
+});
+
+describe("Phase 1-I — use-field-survey-pin-mutations deletePin", () => {
+  it("deletePin が DELETE /api/field-survey/pins/[id] を呼ぶ", () => {
+    expect(HOOK_SRC).toMatch(/const deletePin\s*=\s*useCallback/);
+    expect(HOOK_SRC).toMatch(/method:\s*"DELETE"/);
+    expect(HOOK_SRC).toMatch(
+      /\/api\/field-survey\/pins\/\$\{encodeURIComponent\(pinId\)\}/,
+    );
+  });
+
+  it("console に情報を出さない (継続)", () => {
+    expect(HOOK_SRC).not.toMatch(/console\.\w+\(/);
+  });
+});
+
+describe("Phase 1-I — field-survey-map 削除連携", () => {
+  it("PinDetailPanel に canManage と onDeleted を渡す", () => {
+    expect(MAP_SRC).toMatch(/canManage=\{canManagePin\s*===\s*true\}/);
+    expect(MAP_SRC).toMatch(/onDeleted=\{/);
+  });
+
+  it("onDeleted で detail panel を閉じ marker refetch する", () => {
+    expect(MAP_SRC).toMatch(
+      /onDeleted=\{[\s\S]*?setDetailPinId\(null\)[\s\S]*?bumpRefetch\(\)/,
+    );
+  });
+
+  it("canManagePin は field_survey:manage の granted===true で判定する", () => {
+    expect(MAP_SRC).toMatch(/setCanManagePin/);
+    expect(MAP_SRC).toMatch(
+      /action\s*===\s*"manage"[\s\S]{0,80}granted\s*===\s*true/,
+    );
   });
 });

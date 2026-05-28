@@ -64,10 +64,15 @@ export function useFieldSurveyPinMutations() {
     loading: boolean;
     error: string | null;
   }>({ loading: false, error: null });
+  const [deleteState, setDeleteState] = useState<{
+    loading: boolean;
+    error: string | null;
+  }>({ loading: false, error: null });
 
   const createAbortRef = useRef<AbortController | null>(null);
   const updateAbortRef = useRef<AbortController | null>(null);
   const detailAbortRef = useRef<AbortController | null>(null);
+  const deleteAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -77,6 +82,7 @@ export function useFieldSurveyPinMutations() {
       if (createAbortRef.current) createAbortRef.current.abort();
       if (updateAbortRef.current) updateAbortRef.current.abort();
       if (detailAbortRef.current) detailAbortRef.current.abort();
+      if (deleteAbortRef.current) deleteAbortRef.current.abort();
     };
   }, []);
 
@@ -207,16 +213,53 @@ export function useFieldSurveyPinMutations() {
     [],
   );
 
+  // Phase 1-I: 論理削除 (status=archived)。DELETE /api/field-survey/pins/[id]。
+  // 成功レスポンスに座標 / memo / 写真 / PII は含まれない (id / status のみ)。
+  const deletePin = useCallback(
+    async (pinId: string): Promise<PinMutationResult<{ id: string }>> => {
+      if (deleteAbortRef.current) deleteAbortRef.current.abort();
+      const ac = new AbortController();
+      deleteAbortRef.current = ac;
+      if (mountedRef.current) setDeleteState({ loading: true, error: null });
+      try {
+        const res = await fetch(
+          `/api/field-survey/pins/${encodeURIComponent(pinId)}`,
+          { method: "DELETE", credentials: "same-origin", signal: ac.signal },
+        );
+        if (!mountedRef.current) return { ok: false };
+        if (!res.ok) {
+          const msg = pinApiErrorMessage(res.status);
+          setDeleteState({ loading: false, error: msg });
+          return { ok: false, error: msg };
+        }
+        if (!mountedRef.current) return { ok: false };
+        setDeleteState({ loading: false, error: null });
+        return { ok: true, data: { id: pinId } };
+      } catch (err) {
+        if (isAbortError(err) || !mountedRef.current) {
+          return { ok: false };
+        }
+        const msg = pinApiErrorMessage(0);
+        setDeleteState({ loading: false, error: msg });
+        return { ok: false, error: msg };
+      }
+    },
+    [],
+  );
+
   return {
     createPin,
     fetchPinDetail,
     updatePin,
+    deletePin,
     createLoading: createState.loading,
     createError: createState.error,
     updateLoading: updateState.loading,
     updateError: updateState.error,
     detailLoading: detailState.loading,
     detailError: detailState.error,
+    deleteLoading: deleteState.loading,
+    deleteError: deleteState.error,
   };
 }
 
