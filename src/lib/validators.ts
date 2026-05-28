@@ -169,6 +169,9 @@ export const fieldSurveySessionListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   staffUserId: z.string().uuid().optional(),
   status: z.enum(["active", "ended", "cancelled"]).optional(),
+  // Phase 1-J: scope=all は read_all/manage のみ全スタッフ分を閲覧可。
+  // mine (既定) は自分の session のみ。
+  scope: z.enum(["mine", "all"]).default("mine"),
 });
 
 // ---------- Field survey track points (Phase 1-B) ----------

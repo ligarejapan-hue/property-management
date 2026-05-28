@@ -123,20 +123,32 @@ export async function GET(request: NextRequest) {
     searchParams.forEach((v, k) => {
       queryObj[k] = v;
     });
-    const { page, limit, staffUserId, status } =
+    const { page, limit, staffUserId, status, scope } =
       fieldSurveySessionListQuerySchema.parse(queryObj);
 
     const hasReadAll = hasPermission(permissions, "field_survey", "read_all");
+    const hasManage = hasPermission(permissions, "field_survey", "manage");
+    const canSeeAll = hasReadAll || hasManage;
+
+    // scope=all は read_all / manage のみ。一般スタッフは自分の session のみ。
+    if (scope === "all" && !canSeeAll) {
+      throw new ApiError(
+        403,
+        "全スタッフの巡回を閲覧する権限がありません",
+        "FORBIDDEN",
+      );
+    }
 
     const where: {
       staffUserId?: string;
       status?: "active" | "ended" | "cancelled";
     } = {};
 
-    if (hasReadAll) {
+    if (scope === "all" && canSeeAll) {
+      // 任意で staffUserId による絞り込みを許可 (read_all/manage のみ到達)。
       if (staffUserId) where.staffUserId = staffUserId;
     } else {
-      // own only: 他人 staffUserId 指定は無視して session.id 強制
+      // mine: 他人 staffUserId 指定は無視して session.id 強制 (own only)。
       where.staffUserId = session.id;
     }
     if (status) where.status = status;
@@ -154,16 +166,43 @@ export async function GET(request: NextRequest) {
           startedAt: true,
           endedAt: true,
           status: true,
-          memo: true,
           pointCount: true,
           createdAt: true,
           updatedAt: true,
+          staff: { select: { name: true } },
         },
       }),
     ]);
 
+    // pinCount は archived を除いた紐付け pin 数。ページ分の session id をまとめて
+    // groupBy で集計し N+1 を避ける (座標・memo 等は取得しない)。
+    const ids = sessions.map((s) => s.id);
+    const pinCounts = ids.length
+      ? await prisma.fieldSurveyPin.groupBy({
+          by: ["sessionId"],
+          where: { sessionId: { in: ids }, status: { not: "archived" } },
+          _count: { _all: true },
+        })
+      : [];
+    const pinCountMap = new Map(
+      pinCounts.map((p) => [p.sessionId, p._count._all]),
+    );
+
+    const data = sessions.map((s) => ({
+      id: s.id,
+      staffUserId: s.staffUserId,
+      staffName: s.staff?.name ?? null,
+      startedAt: s.startedAt,
+      endedAt: s.endedAt,
+      status: s.status,
+      pointCount: s.pointCount,
+      pinCount: pinCountMap.get(s.id) ?? 0,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    }));
+
     return apiResponse({
-      data: sessions,
+      data,
       pagination: {
         page,
         limit,

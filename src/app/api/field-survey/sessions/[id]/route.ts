@@ -32,6 +32,86 @@ const SELECT_SESSION = {
   updatedAt: true,
 } as const;
 
+// ---------- GET /api/field-survey/sessions/[id] ----------
+// Phase 1-J: 過去ルート閲覧の session メタ取得。
+// - field_survey:read 必須。own は read のみ、他人は read_all または manage 必須。
+// - 他人 session の閲覧時のみ AuditLog (field_survey_session_view)。
+//   detail は sessionId / viewedStaffUserId / scope のみ (座標・memo・PII は入れない)。
+// - 返却は id/staffUserId/staffName/startedAt/endedAt/status/pointCount/pinCount。
+//   memo / 座標 / 写真情報は返さない。pinCount は archived を除く紐付け pin 数。
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
+
+    if (!hasPermission(permissions, "field_survey", "read")) {
+      throw new ApiError(403, "閲覧権限がありません", "FORBIDDEN");
+    }
+
+    const sess = await prisma.fieldSurveySession.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        staffUserId: true,
+        startedAt: true,
+        endedAt: true,
+        status: true,
+        pointCount: true,
+        staff: { select: { name: true } },
+      },
+    });
+    if (!sess) {
+      throw new ApiError(404, "session が見つかりません", "NOT_FOUND");
+    }
+
+    const isOwn = sess.staffUserId === session.id;
+    const hasReadAll = hasPermission(permissions, "field_survey", "read_all");
+    const hasManage = hasPermission(permissions, "field_survey", "manage");
+    if (!isOwn && !hasReadAll && !hasManage) {
+      throw new ApiError(403, "他スタッフの session は閲覧できません", "FORBIDDEN");
+    }
+
+    const pinCount = await prisma.fieldSurveyPin.count({
+      where: { sessionId: id, status: { not: "archived" } },
+    });
+
+    if (!isOwn) {
+      // 他人 session メタ閲覧のみ監査。detail に座標・memo・PII を入れない。
+      await writeAuditLog({
+        userId: session.id,
+        action: "field_survey_session_view",
+        targetTable: "field_survey_sessions",
+        targetId: id,
+        detail: {
+          sessionId: id,
+          viewedStaffUserId: sess.staffUserId,
+          scope: hasManage ? "manage" : "read_all",
+        },
+      });
+    }
+
+    return apiResponse({
+      data: {
+        id: sess.id,
+        staffUserId: sess.staffUserId,
+        staffName: sess.staff?.name ?? null,
+        startedAt: sess.startedAt,
+        endedAt: sess.endedAt,
+        status: sess.status,
+        pointCount: sess.pointCount,
+        pinCount,
+      },
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
