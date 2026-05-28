@@ -198,8 +198,11 @@ describe("history map — auto fit bounds after load (Codex P2)", () => {
 
   it("sessionId 変更で自動 fit 状態 (hasFitRef) が reset される", () => {
     expect(HISTORY_SRC).toMatch(/hasFitRef/);
+    // hasFitRef の reset は clearHistorySessionState 内で行い、sessionId effect が
+    // それを呼ぶ。
+    expect(HISTORY_SRC).toMatch(/hasFitRef\.current\s*=\s*false/);
     expect(HISTORY_SRC).toMatch(
-      /hasFitRef\.current\s*=\s*false[\s\S]*?\}\,\s*\[sessionId\]/,
+      /clearHistorySessionState\(\)[\s\S]*?\}\,\s*\[sessionId,\s*clearHistorySessionState\]/,
     );
   });
 
@@ -246,5 +249,59 @@ describe("history map — paginate all session pins (Codex P2)", () => {
 
   it("pins pagination でも console / raw response を出さない", () => {
     expect(HISTORY_SRC).not.toMatch(/console\.\w+\(/);
+  });
+});
+
+// =======================================================================
+// Phase 1-J Codex P2: stale history data をクリアする
+// =======================================================================
+describe("history map — clear stale session data (Codex P2)", () => {
+  it("clearHistorySessionState で meta/route/pins/truncated/error/選択を全消去する", () => {
+    const fn = HISTORY_SRC.match(
+      /const clearHistorySessionState\s*=\s*useCallback\([\s\S]*?\}\,\s*\[\]\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/setMeta\(null\)/);
+    expect(m).toMatch(/setRoutePoints\(\[\]\)/);
+    expect(m).toMatch(/setPins\(\[\]\)/);
+    expect(m).toMatch(/setPinsTruncated\(false\)/);
+    expect(m).toMatch(/setSelectedPinId\(null\)/);
+    expect(m).toMatch(/setDetailPinId\(null\)/);
+    expect(m).toMatch(/setError\(null\)/);
+    expect(m).toMatch(/hasFitRef\.current\s*=\s*false/);
+  });
+
+  it("loadAll 開始時に clearHistorySessionState を呼ぶ (metadata 失敗前に clear)", () => {
+    // metadata fetch より前で clear している
+    expect(HISTORY_SRC).toMatch(
+      /clearHistorySessionState\(\);[\s\S]*?setLoading\(true\)[\s\S]*?\/api\/field-survey\/sessions\//,
+    );
+  });
+
+  it("sessionId 変更時にも clearHistorySessionState を呼ぶ", () => {
+    expect(HISTORY_SRC).toMatch(
+      /useEffect\(\(\)\s*=>\s*\{\s*clearHistorySessionState\(\);\s*\}\,\s*\[sessionId,\s*clearHistorySessionState\]\)/,
+    );
+  });
+
+  it("load 世代 (loadGenerationRef) で古い fetch 結果の上書きを防ぐ", () => {
+    expect(HISTORY_SRC).toMatch(/loadGenerationRef/);
+    expect(HISTORY_SRC).toMatch(/const gen\s*=\s*\+\+loadGenerationRef\.current/);
+    expect(HISTORY_SRC).toMatch(
+      /const stale\s*=\s*\(\)\s*=>\s*!mountedRef\.current\s*\|\|\s*loadGenerationRef\.current\s*!==\s*gen/,
+    );
+  });
+
+  it("metadata 403/404/malformed 後は setMeta/setRoutePoints/setPins へ進まず return する", () => {
+    // metadata !ok と malformed 双方で early return (setMeta 前)
+    expect(HISTORY_SRC).toMatch(/if\s*\(!metaRes\.ok\)\s*\{[\s\S]*?return;/);
+    expect(HISTORY_SRC).toMatch(/if\s*\(!metaBody\?\.data\)\s*\{[\s\S]*?return;/);
+  });
+
+  it("各 await 後の guard は stale() を使う (mounted + 世代)", () => {
+    // track-points / pins ループ内で stale() guard を使用
+    expect(HISTORY_SRC).toMatch(/if\s*\(stale\(\)\)\s*return/);
+    expect(HISTORY_SRC).not.toMatch(/if\s*\(!mountedRef\.current\)\s*return/);
   });
 });

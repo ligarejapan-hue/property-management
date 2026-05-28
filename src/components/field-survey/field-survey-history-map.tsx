@@ -106,6 +106,9 @@ export default function FieldSurveyHistoryMap({
   const abortRef = useRef<AbortController | null>(null);
   // セッションごとに初回のみ自動で表示範囲へ移動する (以後ユーザー操作を尊重)。
   const hasFitRef = useRef(false);
+  // 読み込み世代。新しい load が始まったら古い load の遅延継続を無効化し、
+  // 古い fetch 結果が新 session の state を上書きしないようにする。
+  const loadGenerationRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -115,27 +118,43 @@ export default function FieldSurveyHistoryMap({
     };
   }, []);
 
-  // sessionId が変われば自動 fit をやり直せるよう reset する。
-  useEffect(() => {
+  // session 固有の表示 state を全消去する。読み込み開始時 / session 切替時に呼ぶ。
+  // 座標・PII は state に残さず確実にクリアする (mountedRef に依存せず実行)。
+  const clearHistorySessionState = useCallback(() => {
+    setMeta(null);
+    setRoutePoints([]);
+    setPins([]);
+    setPinsTruncated(false);
+    setSelectedPinId(null);
+    setDetailPinId(null);
+    setError(null);
     hasFitRef.current = false;
-  }, [sessionId]);
+  }, []);
+
+  // sessionId が変われば前 session の route / pin / meta を即時クリアし、
+  // 自動 fit もやり直せるよう reset する (新 load が失敗しても stale を残さない)。
+  useEffect(() => {
+    clearHistorySessionState();
+  }, [sessionId, clearHistorySessionState]);
 
   const loadAll = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
     const ac = new AbortController();
     abortRef.current = ac;
-    if (mountedRef.current) {
-      setLoading(true);
-      setError(null);
-      setPinsTruncated(false);
-    }
+    const gen = ++loadGenerationRef.current;
+    // この load が最新でない / unmount 済みなら以降の state 反映を止める。
+    const stale = () => !mountedRef.current || loadGenerationRef.current !== gen;
+    // 開始時点で前 session の表示データを必ずクリアする。これにより metadata が
+    // 403 / 404 / malformed で早期 return しても古い route / pin / meta が残らない。
+    clearHistorySessionState();
+    setLoading(true);
     try {
       // 1) session メタ
       const metaRes = await fetch(
         `/api/field-survey/sessions/${encodeURIComponent(sessionId)}`,
         { credentials: "same-origin", signal: ac.signal },
       );
-      if (!mountedRef.current) return;
+      if (stale()) return;
       if (!metaRes.ok) {
         setError(
           metaRes.status === 403
@@ -149,7 +168,11 @@ export default function FieldSurveyHistoryMap({
       const metaBody = (await metaRes.json().catch(() => null)) as
         | { data?: SessionMeta }
         | null;
-      if (!mountedRef.current || !metaBody?.data) return;
+      if (stale()) return;
+      if (!metaBody?.data) {
+        setError("巡回履歴の取得に失敗しました。");
+        return;
+      }
       const m = metaBody.data;
       setMeta(m);
 
@@ -163,12 +186,12 @@ export default function FieldSurveyHistoryMap({
           `/api/field-survey/sessions/${encodeURIComponent(sessionId)}/track-points?${qs.toString()}`,
           { credentials: "same-origin", signal: ac.signal },
         );
-        if (!mountedRef.current) return;
+        if (stale()) return;
         if (!tpRes.ok) break;
         const tpBody = (await tpRes.json().catch(() => null)) as
           | { data?: TrackPointApiRow[]; nextCursor?: number | null }
           | null;
-        if (!mountedRef.current) return;
+        if (stale()) return;
         const rows = Array.isArray(tpBody?.data) ? tpBody!.data! : [];
         for (const r of rows) {
           const lat = coerceLat(r.lat);
@@ -179,7 +202,7 @@ export default function FieldSurveyHistoryMap({
         if (typeof next !== "number") break;
         cursor = next;
       }
-      if (!mountedRef.current) return;
+      if (stale()) return;
       setRoutePoints(points);
 
       // 3) session に紐づく pin (archived 除外) を nextCursor で全件ページング取得。
@@ -200,12 +223,12 @@ export default function FieldSurveyHistoryMap({
           `/api/field-survey/pins?${pinQs.toString()}`,
           { credentials: "same-origin", signal: ac.signal },
         );
-        if (!mountedRef.current) return;
+        if (stale()) return;
         if (!pinRes.ok) break;
         const pinBody = (await pinRes.json().catch(() => null)) as
           | { data?: Array<Record<string, unknown>>; nextCursor?: string | null }
           | null;
-        if (!mountedRef.current) return;
+        if (stale()) return;
         const list = Array.isArray(pinBody?.data) ? pinBody!.data! : [];
         for (const raw of list) {
           const lat = coerceLat(raw.lat);
@@ -227,17 +250,19 @@ export default function FieldSurveyHistoryMap({
         // 次ループが無い (最終反復) のに nextCursor が残っていれば truncated。
         if (i === PIN_PAGE_MAX - 1) truncated = true;
       }
-      if (!mountedRef.current) return;
+      if (stale()) return;
       setPins(normalized);
       setPinsTruncated(truncated);
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
-      if (!mountedRef.current) return;
+      if (stale()) return;
       setError("巡回履歴の取得に失敗しました。");
     } finally {
-      if (mountedRef.current) setLoading(false);
+      // 最新 load かつ mount 中のときのみ loading を解除する (古い load が新 load
+      // の spinner を消さないように世代で判定)。
+      if (!stale()) setLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, clearHistorySessionState]);
 
   useEffect(() => {
     void loadAll();
