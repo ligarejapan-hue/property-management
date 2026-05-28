@@ -187,7 +187,8 @@ export default function FieldSurveyHistoryMap({
           { credentials: "same-origin", signal: ac.signal },
         );
         if (stale()) return;
-        if (!tpRes.ok) break;
+        // non-2xx は「途中まで表示」にせず読み込み失敗として扱う (fail closed)。
+        if (!tpRes.ok) throw new Error("history_load_failed");
         const tpBody = (await tpRes.json().catch(() => null)) as
           | { data?: TrackPointApiRow[]; nextCursor?: number | null }
           | null;
@@ -224,7 +225,9 @@ export default function FieldSurveyHistoryMap({
           { credentials: "same-origin", signal: ac.signal },
         );
         if (stale()) return;
-        if (!pinRes.ok) break;
+        // non-2xx は「一部 pin のみ表示」にせず読み込み失敗として扱う (fail closed)。
+        // truncated 警告は page 上限到達専用であり、HTTP failure を隠さない。
+        if (!pinRes.ok) throw new Error("history_load_failed");
         const pinBody = (await pinRes.json().catch(() => null)) as
           | { data?: Array<Record<string, unknown>>; nextCursor?: string | null }
           | null;
@@ -256,7 +259,12 @@ export default function FieldSurveyHistoryMap({
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (stale()) return;
-      setError("巡回履歴の取得に失敗しました。");
+      // 不完全な route / pin / meta を残さず安全側にクリアしてからエラー表示する。
+      // raw response / 座標 / PII は出さず汎用文言のみ。
+      clearHistorySessionState();
+      setError(
+        "巡回履歴の読み込みに失敗しました。時間をおいて再度お試しください。",
+      );
     } finally {
       // 最新 load かつ mount 中のときのみ loading を解除する (古い load が新 load
       // の spinner を消さないように世代で判定)。

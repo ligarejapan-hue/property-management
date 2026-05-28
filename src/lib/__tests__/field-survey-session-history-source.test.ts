@@ -305,3 +305,60 @@ describe("history map — clear stale session data (Codex P2)", () => {
     expect(HISTORY_SRC).not.toMatch(/if\s*\(!mountedRef\.current\)\s*return/);
   });
 });
+
+// =======================================================================
+// Phase 1-J Codex P2: page fetch 失敗を fail closed にする
+// =======================================================================
+describe("history map — fail closed on page fetch errors (Codex P2)", () => {
+  it("track-points page が non-OK なら break せず throw する", () => {
+    expect(HISTORY_SRC).toMatch(/if\s*\(!tpRes\.ok\)\s*throw\s+new\s+Error/);
+    expect(HISTORY_SRC).not.toMatch(/if\s*\(!tpRes\.ok\)\s*break/);
+  });
+
+  it("pins page が non-OK なら break せず throw する", () => {
+    expect(HISTORY_SRC).toMatch(/if\s*\(!pinRes\.ok\)\s*throw\s+new\s+Error/);
+    expect(HISTORY_SRC).not.toMatch(/if\s*\(!pinRes\.ok\)\s*break/);
+  });
+
+  it("catch は incomplete state を clear してから汎用エラーを setError する", () => {
+    const fn = HISTORY_SRC.match(/catch\s*\(err\)\s*\{[\s\S]*?\}\s*finally/);
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    // abort / stale は早期 return
+    expect(m).toMatch(/AbortError/);
+    expect(m).toMatch(/if\s*\(stale\(\)\)\s*return/);
+    // clear → setError の順
+    expect(m).toMatch(
+      /clearHistorySessionState\(\)[\s\S]*?setError\(/,
+    );
+    // 汎用文言 (座標/PII/raw response を含めない)
+    expect(m).toMatch(/読み込みに失敗しました。時間をおいて/);
+  });
+
+  it("incomplete route/pins を成功表示しない (setRoutePoints/setPins はループ完了後)", () => {
+    // 失敗時は throw → catch へ。setRoutePoints / setPins には到達しない。
+    // ループ内に setRoutePoints / setPins を置いていないこと (途中 commit 防止)。
+    const trackLoop = HISTORY_SRC.match(
+      /for\s*\([\s\S]*?i\s*<\s*TRACK_PAGE_MAX[\s\S]*?\n      \}/,
+    );
+    expect(trackLoop?.[0]).not.toMatch(/setRoutePoints/);
+    const pinLoop = HISTORY_SRC.match(
+      /for\s*\([\s\S]*?i\s*<\s*PIN_PAGE_MAX[\s\S]*?\n      \}/,
+    );
+    expect(pinLoop?.[0]).not.toMatch(/setPins\(/);
+  });
+
+  it("truncated 警告は page 上限到達専用で HTTP failure を隠さない", () => {
+    // truncated は i === PIN_PAGE_MAX - 1 でのみ true。HTTP failure は throw 経路。
+    expect(HISTORY_SRC).toMatch(/i\s*===\s*PIN_PAGE_MAX\s*-\s*1\)\s*truncated\s*=\s*true/);
+    // truncated が catch / error 経路で立てられていないこと
+    const fn = HISTORY_SRC.match(/catch\s*\(err\)\s*\{[\s\S]*?\}\s*finally/);
+    expect(fn?.[0]).not.toMatch(/setPinsTruncated\(true\)/);
+  });
+
+  it("失敗経路でも raw response / 座標 / PII / console を出さない", () => {
+    expect(HISTORY_SRC).not.toMatch(/console\.\w+\(/);
+    // error 文言に座標/URL/storageKey/fileName を含めない
+    expect(HISTORY_SRC).not.toMatch(/setError\([^)]*(?:lat|lng|fileUrl|storageKey|fileName)/i);
+  });
+});
