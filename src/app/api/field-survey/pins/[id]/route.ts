@@ -230,3 +230,69 @@ export async function PATCH(
     return handleApiError(error);
   }
 }
+
+// ============================================================
+// DELETE /api/field-survey/pins/[id]
+// ============================================================
+// Phase 1-I: 調査ピンの論理削除。物理削除はせず status=archived にする。
+// - own pin は field_survey:write で削除可。他人 pin は field_survey:manage 必須。
+// - read_all だけでは削除不可。
+// - FieldSurveyPinPhoto は消さない / storage.delete もしない。
+// - archived 済を再削除しても安全 (updateMany の冪等な status 遷移で 0 行 = 既に archived)。
+// - AuditLog: action=field_survey_pin_delete。detail に座標 / memo / 写真 / PII を含めない。
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
+
+    const hasWrite = hasPermission(permissions, "field_survey", "write");
+    const hasManage = hasPermission(permissions, "field_survey", "manage");
+    if (!hasWrite && !hasManage) {
+      throw new ApiError(403, "このピンを削除する権限がありません", "FORBIDDEN");
+    }
+
+    const existing = await prisma.fieldSurveyPin.findUnique({
+      where: { id },
+      select: { id: true, staffUserId: true, status: true },
+    });
+    if (!existing) {
+      throw new ApiError(404, "pin が見つかりません", "NOT_FOUND");
+    }
+
+    const isOwn = existing.staffUserId === session.id;
+    // own は write、他人は manage 必須 (read_all だけでは不可)。
+    if (!hasManage && !(isOwn && hasWrite)) {
+      throw new ApiError(403, "このピンを削除する権限がありません", "FORBIDDEN");
+    }
+
+    // 冪等な status 遷移。既に archived なら 0 行更新 = 再削除でも安全に成功扱い。
+    const result = await prisma.fieldSurveyPin.updateMany({
+      where: { id, status: { not: "archived" } },
+      data: { status: "archived" },
+    });
+
+    // 実際に open/closed → archived へ遷移したときのみ監査ログを残す。
+    if (result.count > 0) {
+      await writeAuditLog({
+        userId: session.id,
+        action: "field_survey_pin_delete",
+        targetTable: "field_survey_pins",
+        targetId: id,
+        detail: {
+          pinId: id,
+          targetOwner: isOwn ? "own" : "other",
+          viaManage: !isOwn && hasManage,
+        },
+      });
+    }
+
+    return apiResponse({ data: { id, status: "archived" } });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

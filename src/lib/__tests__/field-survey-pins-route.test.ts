@@ -87,6 +87,14 @@ vi.mock("@/lib/prisma", () => ({
       findMany: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
+      delete: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    fieldSurveyPinPhoto: {
+      delete: vi.fn(),
+      deleteMany: vi.fn(),
+      findMany: vi.fn(),
     },
     fieldSurveySession: {
       findUnique: vi.fn(),
@@ -103,6 +111,7 @@ import { POST, GET as LIST } from "@/app/api/field-survey/pins/route";
 import {
   GET as DETAIL,
   PATCH,
+  DELETE,
 } from "@/app/api/field-survey/pins/[id]/route";
 
 const fieldUser = { id: "u-field", email: "f@x", name: "F", role: "field_staff" };
@@ -1563,5 +1572,140 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     );
     expect(res.status).toBe(200);
     expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// DELETE /api/field-survey/pins/[id] (Phase 1-I 論理削除)
+// ============================================================
+describe("DELETE /api/field-survey/pins/[id]", () => {
+  const params = Promise.resolve({ id: PIN_ID });
+
+  function deleteReq() {
+    return makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+      method: "DELETE",
+    });
+  }
+
+  it("own pin を archived 化できる (物理削除しない / 写真も消さない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValue({ count: 1 });
+
+    const res = await DELETE(deleteReq(), { params });
+    expect(res.status).toBe(200);
+    const updArgs = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls[0][0];
+    expect(updArgs.data.status).toBe("archived");
+    expect(updArgs.where).toMatchObject({ id: PIN_ID, status: { not: "archived" } });
+    // 物理削除されない / 写真は消さない
+    expect(prisma.fieldSurveyPin.delete).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPin.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPinPhoto.delete).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPinPhoto.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("成功レスポンスは id / status のみ (座標・memo・写真を含めない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValue({ count: 1 });
+    const res = await DELETE(deleteReq(), { params });
+    const body = await res.json();
+    expect(body.data).toEqual({ id: PIN_ID, status: "archived" });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toMatch(/lat|lng|memo|fileUrl|storageKey|fileName/i);
+  });
+
+  it("一般スタッフは他人 pin を削除できない (manage なし → 403)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: "other-user",
+      status: "open",
+    });
+    const res = await DELETE(deleteReq(), { params });
+    expect(res.status).toBe(403);
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("read_all だけでは削除できない (write/manage なし → 403)", async () => {
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    const res = await DELETE(deleteReq(), { params });
+    expect(res.status).toBe(403);
+    expect(prisma.fieldSurveyPin.findUnique).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("manage なら他人 pin を削除できる", async () => {
+    (getApiSession as Mock).mockResolvedValue(adminUser);
+    (getUserPermissions as Mock).mockResolvedValue(adminPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: "other-user",
+      status: "open",
+    });
+    (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValue({ count: 1 });
+    const res = await DELETE(deleteReq(), { params });
+    expect(res.status).toBe(200);
+    expect(prisma.fieldSurveyPin.updateMany).toHaveBeenCalledTimes(1);
+    const call = writeAuditLog.mock.calls[0][0];
+    expect(call.detail).toEqual({
+      pinId: PIN_ID,
+      targetOwner: "other",
+      viaManage: true,
+    });
+  });
+
+  it("存在しない pin は 404", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue(null);
+    const res = await DELETE(deleteReq(), { params });
+    expect(res.status).toBe(404);
+  });
+
+  it("archived 済の再削除は安全 (200 / 0 行更新 / AuditLog なし)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      status: "archived",
+    });
+    (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValue({ count: 0 });
+    const res = await DELETE(deleteReq(), { params });
+    expect(res.status).toBe(200);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("AuditLog detail に lat/lng/memo/photoUrl/storageKey/fileName/PII が入らない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValue({ count: 1 });
+    await DELETE(deleteReq(), { params });
+    const call = writeAuditLog.mock.calls[0][0];
+    expect(call.detail).toEqual({
+      pinId: PIN_ID,
+      targetOwner: "own",
+      viaManage: false,
+    });
+    const serialized = JSON.stringify(call);
+    expect(serialized).not.toMatch(/lat|lng|memo|fileUrl|storageKey|fileName/i);
   });
 });

@@ -39,16 +39,22 @@ interface PinDetailPanelProps {
   pinId: string;
   /** 親 (FieldSurveyMap) が server-side で確定したログインユーザー id。 */
   currentUserId: string;
+  /** field_survey:manage を granted で持つか。他人 pin の削除ボタン表示に使う。 */
+  canManage?: boolean;
   onClose: () => void;
   /** 保存成功 → marker 再 fetch を親側でトリガするためのコールバック。 */
   onUpdated?: (updated: PinDetail) => void;
+  /** 論理削除の成功通知 → 親側で panel を閉じ marker 再 fetch する。 */
+  onDeleted?: (pinId: string) => void;
 }
 
 export default function PinDetailPanel({
   pinId,
   currentUserId,
+  canManage = false,
   onClose,
   onUpdated,
+  onDeleted,
 }: PinDetailPanelProps) {
   const mutations = useFieldSurveyPinMutations();
   const [detail, setDetail] = useState<PinDetail | null>(null);
@@ -56,6 +62,7 @@ export default function PinDetailPanel({
   const [draftPinType, setDraftPinType] = useState<FieldSurveyPinType>("candidate");
   const [draftStatus, setDraftStatus] = useState<FieldSurveyPinStatus>("open");
   const [draftMemo, setDraftMemo] = useState<string>("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // Codex P2 (本 fix): props.pinId は handleSave 内で stale closure になりうる。
   // PATCH レスポンス到達時に「現在表示中の pinId」と一致するかを ref で再確認
@@ -93,6 +100,7 @@ export default function PinDetailPanel({
   useEffect(() => {
     setDetail(null);
     setEditing(false);
+    setConfirmingDelete(false);
     setDraftPinType("candidate");
     setDraftStatus("open");
     setDraftMemo("");
@@ -106,6 +114,22 @@ export default function PinDetailPanel({
   // manage 権限を持っていても、Phase 1-G では他人 pin の編集 UI を出さない。
   const isFresh = !!detail && detail.id === pinId;
   const isOwn = isFresh && detail!.staffUserId === currentUserId;
+  // Phase 1-I: 論理削除ボタンの表示可否。own または canManage、かつ未アーカイブのみ。
+  // canManage は親が field_survey:manage の granted で算出した値だけを使う
+  // (閲覧専用の上位権限では false になり、他人 pin に削除ボタンは出ない)。
+  const canDelete =
+    isFresh && (isOwn || canManage) && detail!.status !== "archived";
+
+  const handleDelete = async () => {
+    if (!detail) return;
+    const targetPinId = pinId;
+    if (detail.id !== targetPinId) return;
+    const r = await mutations.deletePin(targetPinId);
+    if (!r.ok) return; // 失敗は mutations.deleteError 経由で汎用表示
+    if (latestPinIdRef.current !== targetPinId) return;
+    setConfirmingDelete(false);
+    onDeleted?.(targetPinId);
+  };
 
   const handleSave = async () => {
     if (!detail) return;
@@ -229,9 +253,73 @@ export default function PinDetailPanel({
             canEdit={isOwn && detail!.status !== "archived"}
           />
         )}
+
+        {canDelete && !editing && (
+          <div className="mt-4 border-t border-gray-200 pt-3">
+            {!confirmingDelete ? (
+              <button
+                type="button"
+                data-testid="pin-detail-delete-button"
+                onClick={() => setConfirmingDelete(true)}
+                className="w-full rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+              >
+                削除
+              </button>
+            ) : (
+              <div
+                role="alertdialog"
+                aria-modal="true"
+                data-testid="pin-detail-delete-confirm"
+                className="rounded border border-red-300 bg-red-50 p-2 text-[12px] text-red-900"
+              >
+                <p className="font-semibold">この調査ピンを削除しますか？</p>
+                <p className="mt-1 text-[11px]">
+                  削除すると地図上の通常表示から非表示になります。
+                </p>
+                {deleteErrorMessage(mutations.deleteError) && (
+                  <p
+                    role="status"
+                    className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+                  >
+                    {deleteErrorMessage(mutations.deleteError)}
+                  </p>
+                )}
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(false)}
+                    disabled={mutations.deleteLoading}
+                    className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleDelete();
+                    }}
+                    disabled={mutations.deleteLoading}
+                    data-testid="pin-detail-delete-confirm-button"
+                    className="rounded border border-red-600 bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {mutations.deleteLoading ? "削除中…" : "削除する"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </aside>
   );
+}
+
+// 削除失敗の汎用文言。権限エラー (403) は削除文脈の文言に差し替える。
+// 座標 / memo / 内部情報は出さない。
+function deleteErrorMessage(raw: string | null): string | null {
+  if (!raw) return null;
+  if (raw === "権限がありません。") return "このピンを削除する権限がありません";
+  return raw;
 }
 
 // Phase 1-H: pin 写真セクション (一覧 / 追加 / プレビュー)。

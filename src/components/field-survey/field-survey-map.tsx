@@ -165,6 +165,9 @@ export default function FieldSurveyMap({
   // 「許可」として扱ってしまうため、`granted === true` を必須にする。
   // malformed / 欠損 entry は安全側で false。response 全文は console に出さない。
   const [canWritePin, setCanWritePin] = useState<boolean | null>(null);
+  // Phase 1-I: 他人 pin 削除可否は field_survey:manage の granted===true で判定。
+  // read_all だけでは削除不可。判定不能時は false 寄りに倒す (API 403 で最終ガード)。
+  const [canManagePin, setCanManagePin] = useState<boolean | null>(null);
   useEffect(() => {
     const ac = new AbortController();
     (async () => {
@@ -185,6 +188,7 @@ export default function FieldSurveyMap({
           | null;
         if (!Array.isArray(body?.permissions)) {
           setCanWritePin(false);
+          setCanManagePin(false);
           return;
         }
         const has = body!.permissions!.some(
@@ -196,6 +200,16 @@ export default function FieldSurveyMap({
             p.granted === true,
         );
         setCanWritePin(has);
+        // Phase 1-I: 他人 pin 削除可否は manage の granted===true のみで判定。
+        const hasManage = body!.permissions!.some(
+          (p) =>
+            p !== null &&
+            typeof p === "object" &&
+            p.resource === "field_survey" &&
+            p.action === "manage" &&
+            p.granted === true,
+        );
+        setCanManagePin(hasManage);
       } catch {
         // 判定不能。null のまま (API 403 で汎用化)。
       }
@@ -511,8 +525,13 @@ export default function FieldSurveyMap({
           <PinDetailPanel
             pinId={detailPinId}
             currentUserId={currentUserId}
+            canManage={canManagePin === true}
             onClose={() => setDetailPinId(null)}
             onUpdated={() => bumpRefetch()}
+            onDeleted={() => {
+              setDetailPinId(null);
+              bumpRefetch();
+            }}
           />
         )}
 
