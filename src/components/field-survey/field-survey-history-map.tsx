@@ -20,6 +20,7 @@ import {
   Map,
   AdvancedMarker,
   InfoWindow,
+  useMap,
 } from "@vis.gl/react-google-maps";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -35,9 +36,25 @@ import { formatPinStatus, formatPinType } from "@/lib/field-survey-pin-util";
 
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
 const DEFAULT_ZOOM = 15;
+const SINGLE_POINT_ZOOM = 17;
 const TRACK_PAGE_LIMIT = 500;
 const TRACK_PAGE_MAX = 50; // 最大 25,000 点まで取得 (decimation は今回しない)
 const PIN_LIMIT = 100;
+const PIN_PAGE_MAX = 20; // 最大 2,000 件まで取得。超過時は truncated 警告。
+
+// fitBounds / panTo / setZoom のみ使う最小 map interface (SSR / 型依存回避)。
+interface MapLike {
+  fitBounds: (bounds: unknown, padding?: number) => void;
+  panTo: (latLng: { lat: number; lng: number }) => void;
+  setZoom: (zoom: number) => void;
+}
+
+interface LatLngBoundsLike {
+  extend: (latLng: { lat: number; lng: number }) => void;
+}
+interface GoogleMapsNs {
+  LatLngBounds: new () => LatLngBoundsLike;
+}
 
 interface SessionMeta {
   id: string;
@@ -79,12 +96,16 @@ export default function FieldSurveyHistoryMap({
   const [meta, setMeta] = useState<SessionMeta | null>(null);
   const [routePoints, setRoutePoints] = useState<RoutePolylinePoint[]>([]);
   const [pins, setPins] = useState<HistoryPinRow[]>([]);
+  const [pinsTruncated, setPinsTruncated] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [detailPinId, setDetailPinId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mapInstance, setMapInstance] = useState<MapLike | null>(null);
   const mountedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
+  // セッションごとに初回のみ自動で表示範囲へ移動する (以後ユーザー操作を尊重)。
+  const hasFitRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -94,6 +115,11 @@ export default function FieldSurveyHistoryMap({
     };
   }, []);
 
+  // sessionId が変われば自動 fit をやり直せるよう reset する。
+  useEffect(() => {
+    hasFitRef.current = false;
+  }, [sessionId]);
+
   const loadAll = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
     const ac = new AbortController();
@@ -101,6 +127,7 @@ export default function FieldSurveyHistoryMap({
     if (mountedRef.current) {
       setLoading(true);
       setError(null);
+      setPinsTruncated(false);
     }
     try {
       // 1) session メタ
@@ -155,26 +182,31 @@ export default function FieldSurveyHistoryMap({
       if (!mountedRef.current) return;
       setRoutePoints(points);
 
-      // 3) session に紐づく pin (archived 除外)。他人 session は staffUserId を
-      //    付与して既存 pin_list_others 監査を発火させる。view=map で memo を載せない。
-      const pinQs = new URLSearchParams({
-        view: "map",
-        sessionId,
-        staffUserId: m.staffUserId,
-        limit: String(PIN_LIMIT),
-      });
-      const pinRes = await fetch(
-        `/api/field-survey/pins?${pinQs.toString()}`,
-        { credentials: "same-origin", signal: ac.signal },
-      );
-      if (!mountedRef.current) return;
-      if (pinRes.ok) {
+      // 3) session に紐づく pin (archived 除外) を nextCursor で全件ページング取得。
+      //    他人 session は staffUserId を付与して既存 pin_list_others 監査を発火させる。
+      //    view=map で memo を載せない。上限ページ到達時は truncated 警告を出す。
+      const normalized: HistoryPinRow[] = [];
+      let pinCursor: string | null = null;
+      let truncated = false;
+      for (let i = 0; i < PIN_PAGE_MAX; i++) {
+        const pinQs = new URLSearchParams({
+          view: "map",
+          sessionId,
+          staffUserId: m.staffUserId,
+          limit: String(PIN_LIMIT),
+        });
+        if (pinCursor) pinQs.set("cursor", pinCursor);
+        const pinRes = await fetch(
+          `/api/field-survey/pins?${pinQs.toString()}`,
+          { credentials: "same-origin", signal: ac.signal },
+        );
+        if (!mountedRef.current) return;
+        if (!pinRes.ok) break;
         const pinBody = (await pinRes.json().catch(() => null)) as
-          | { data?: Array<Record<string, unknown>> }
+          | { data?: Array<Record<string, unknown>>; nextCursor?: string | null }
           | null;
         if (!mountedRef.current) return;
         const list = Array.isArray(pinBody?.data) ? pinBody!.data! : [];
-        const normalized: HistoryPinRow[] = [];
         for (const raw of list) {
           const lat = coerceLat(raw.lat);
           const lng = coerceLng(raw.lng);
@@ -189,8 +221,15 @@ export default function FieldSurveyHistoryMap({
               typeof raw.propertyId === "string" ? raw.propertyId : null,
           });
         }
-        setPins(normalized);
+        const nextCursor = pinBody?.nextCursor;
+        if (typeof nextCursor !== "string") break;
+        pinCursor = nextCursor;
+        // 次ループが無い (最終反復) のに nextCursor が残っていれば truncated。
+        if (i === PIN_PAGE_MAX - 1) truncated = true;
       }
+      if (!mountedRef.current) return;
+      setPins(normalized);
+      setPinsTruncated(truncated);
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (!mountedRef.current) return;
@@ -203,6 +242,34 @@ export default function FieldSurveyHistoryMap({
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  // 読み込み後に表示範囲へ自動移動 (route 優先、無ければ pins)。session ごと初回のみ。
+  // map instance / google 未取得時は安全に何もしない。lat/lng は console に出さない。
+  useEffect(() => {
+    if (hasFitRef.current) return;
+    if (!mapInstance) return;
+    const pts = routePoints.length > 0 ? routePoints : pins;
+    if (pts.length === 0) return;
+    const g =
+      typeof window !== "undefined"
+        ? (window as unknown as { google?: { maps?: GoogleMapsNs } }).google
+            ?.maps
+        : undefined;
+    if (!g || typeof g.LatLngBounds !== "function") return;
+    try {
+      if (pts.length === 1) {
+        mapInstance.panTo({ lat: pts[0].lat, lng: pts[0].lng });
+        mapInstance.setZoom(SINGLE_POINT_ZOOM);
+      } else {
+        const bounds = new g.LatLngBounds();
+        for (const p of pts) bounds.extend({ lat: p.lat, lng: p.lng });
+        mapInstance.fitBounds(bounds, 48);
+      }
+      hasFitRef.current = true;
+    } catch {
+      // fitBounds / panTo 失敗時も座標や内部詳細は出さない。
+    }
+  }, [mapInstance, routePoints, pins]);
 
   const center = routePoints[0] ?? pins[0] ?? DEFAULT_CENTER;
 
@@ -239,6 +306,15 @@ export default function FieldSurveyHistoryMap({
           読み込み中…
         </div>
       )}
+      {pinsTruncated && (
+        <div
+          role="status"
+          data-testid="history-pins-truncated"
+          className="absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-900 shadow"
+        >
+          ピンが多いため一部のみ表示されています。
+        </div>
+      )}
 
       <div className="h-[calc(100%-2.25rem)] w-full">
         <APIProvider apiKey={apiKey}>
@@ -250,6 +326,7 @@ export default function FieldSurveyHistoryMap({
             disableDefaultUI={false}
             style={{ width: "100%", height: "100%" }}
           >
+            <MapInstanceCapture onMap={setMapInstance} />
             <RoutePolyline points={routePoints} />
             {pins.map((pin) => (
               <AdvancedMarker
@@ -292,6 +369,19 @@ export default function FieldSurveyHistoryMap({
       )}
     </div>
   );
+}
+
+// <Map> 内で useMap() した instance を親へ伝搬する (fitBounds 用)。
+// google.maps へ直接アクセスせず vis.gl の hook 経由で取得 / cleanup する。
+function MapInstanceCapture({ onMap }: { onMap: (m: MapLike | null) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    onMap((map as unknown as MapLike) ?? null);
+    return () => {
+      onMap(null);
+    };
+  }, [map, onMap]);
+  return null;
 }
 
 function HistoryPinInfo({

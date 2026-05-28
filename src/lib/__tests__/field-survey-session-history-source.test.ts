@@ -176,3 +176,75 @@ describe("PinDetailPanel readOnly", () => {
     );
   });
 });
+
+// =======================================================================
+// Phase 1-J Codex P2: 自動 fitBounds / pins pagination
+// =======================================================================
+describe("history map — auto fit bounds after load (Codex P2)", () => {
+  it("map instance を useMap で取得し保持する (MapInstanceCapture)", () => {
+    expect(HISTORY_SRC).toMatch(/useMap/);
+    expect(HISTORY_SRC).toMatch(/MapInstanceCapture/);
+    expect(HISTORY_SRC).toMatch(/setMapInstance/);
+  });
+
+  it("load 後に fitBounds / panTo で表示範囲へ移動する (defaultCenter 依存のみではない)", () => {
+    expect(HISTORY_SRC).toMatch(/fitBounds/);
+    expect(HISTORY_SRC).toMatch(/panTo/);
+    // routePoints 優先、無ければ pins を bounds に含める
+    expect(HISTORY_SRC).toMatch(
+      /routePoints\.length\s*>\s*0\s*\?\s*routePoints\s*:\s*pins/,
+    );
+  });
+
+  it("sessionId 変更で自動 fit 状態 (hasFitRef) が reset される", () => {
+    expect(HISTORY_SRC).toMatch(/hasFitRef/);
+    expect(HISTORY_SRC).toMatch(
+      /hasFitRef\.current\s*=\s*false[\s\S]*?\}\,\s*\[sessionId\]/,
+    );
+  });
+
+  it("map instance / google 未取得時は安全に return する (SSR 安全)", () => {
+    expect(HISTORY_SRC).toMatch(/if\s*\(!mapInstance\)\s*return/);
+    expect(HISTORY_SRC).toMatch(/typeof\s+window\s*!==\s*"undefined"/);
+    expect(HISTORY_SRC).toMatch(/LatLngBounds/);
+  });
+
+  it("自動 fit useEffect の依存に routePoints / pins / mapInstance を含む", () => {
+    expect(HISTORY_SRC).toMatch(/\}\,\s*\[mapInstance,\s*routePoints,\s*pins\]/);
+  });
+});
+
+describe("history map — paginate all session pins (Codex P2)", () => {
+  it("pins を nextCursor で全件ページングする (cursor を追う)", () => {
+    expect(HISTORY_SRC).toMatch(/pinCursor/);
+    expect(HISTORY_SRC).toMatch(/nextCursor/);
+    expect(HISTORY_SRC).toMatch(/pinQs\.set\("cursor",\s*pinCursor\)/);
+  });
+
+  it("pagination 上限 (PIN_PAGE_MAX) を持つ", () => {
+    expect(HISTORY_SRC).toMatch(/PIN_PAGE_MAX/);
+    expect(HISTORY_SRC).toMatch(/for\s*\([\s\S]*?i\s*<\s*PIN_PAGE_MAX/);
+  });
+
+  it("上限到達かつ nextCursor 残存時に truncated 警告を出す (座標なし)", () => {
+    expect(HISTORY_SRC).toMatch(/pinsTruncated/);
+    expect(HISTORY_SRC).toMatch(/data-testid="history-pins-truncated"/);
+    expect(HISTORY_SRC).toMatch(/一部のみ表示されています/);
+  });
+
+  it("limit=100 1 回だけで終わらない (ループ内で fetch)", () => {
+    // for ループ内で pins API を fetch している (単発 fetch ではない)
+    const loop = HISTORY_SRC.match(
+      /for\s*\([\s\S]*?i\s*<\s*PIN_PAGE_MAX[\s\S]*?\/api\/field-survey\/pins/,
+    );
+    expect(loop).not.toBeNull();
+  });
+
+  it("archived pin は引き続き初期表示しない (includeArchived を付けない)", () => {
+    expect(HISTORY_SRC).not.toMatch(/includeArchived/);
+  });
+
+  it("pins pagination でも console / raw response を出さない", () => {
+    expect(HISTORY_SRC).not.toMatch(/console\.\w+\(/);
+  });
+});
