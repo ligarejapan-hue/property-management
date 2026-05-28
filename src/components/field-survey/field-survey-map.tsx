@@ -46,6 +46,8 @@ import {
   formatPinStatus,
   formatPinType,
 } from "@/lib/field-survey-pin-util";
+import CurrentLocationMarker from "@/components/field-survey/current-location-marker";
+import CurrentLocationStatus from "@/components/field-survey/current-location-status";
 
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
@@ -127,6 +129,31 @@ export default function FieldSurveyMap({
     if (!activeSession) return [];
     return mergePolylinePoints(recorder.savedPoints, recorder.pendingPoints);
   }, [activeSession, recorder.savedPoints, recorder.pendingPoints]);
+
+  // Phase 1-F-3: 「現在地へ移動」ボタン用に Map インスタンスを保持する。
+  // ControlPanel は <Map> の外にあるため、Map 内で useMap() で捕捉した値を
+  // state に上げる (<MapInstanceCapture>)。クリック時のみ panTo を呼ぶ。
+  const [mapInstance, setMapInstance] = useState<unknown>(null);
+  const handlePanToCurrent = useCallback(() => {
+    // Codex P2 (Phase 1-F-3 follow-up): recording 中以外 (idle / error / stopping /
+    // preparing) では古い座標への panTo を許可しない。CurrentLocationStatus 側でも
+    // disabled をかけているが、外部から直接呼ばれた場合 (将来の hotkey 等) に
+    // 備えた server-side ガード相当の二重防御。
+    if (recorder.status !== "recording") return;
+    const pos = recorder.latestPositionForDisplay;
+    if (!pos) return;
+    const m = mapInstance as
+      | { panTo?: (p: { lat: number; lng: number }) => void }
+      | null;
+    if (m && typeof m.panTo === "function") {
+      m.panTo({ lat: pos.lat, lng: pos.lng });
+    }
+  }, [mapInstance, recorder.status, recorder.latestPositionForDisplay]);
+  // 位置記録中かつ最新位置が取得済の時のみ現在地マーカーを描画する。
+  const showCurrentLocationMarker =
+    !!activeSession &&
+    recorder.status === "recording" &&
+    !!recorder.latestPositionForDisplay;
 
   // Phase 1-G: pin 追加モード / 詳細パネル / write 権限。
   // canWrite は /api/me/permissions で 1 回取得して memoize する。
@@ -353,7 +380,14 @@ export default function FieldSurveyMap({
             onMapClick={handleMapClick}
             onOpenPinDetail={setDetailPinId}
           />
+          <MapInstanceCapture onMap={setMapInstance} />
           {activeSession && <RoutePolyline points={polylinePoints} />}
+          {showCurrentLocationMarker && recorder.latestPositionForDisplay && (
+            <CurrentLocationMarker
+              lat={recorder.latestPositionForDisplay.lat}
+              lng={recorder.latestPositionForDisplay.lng}
+            />
+          )}
         </Map>
 
         <ControlPanel
@@ -369,6 +403,7 @@ export default function FieldSurveyMap({
           pinAddMode={pinAddMode}
           onTogglePinAddMode={() => setPinAddMode((v) => !v)}
           canWritePin={canWritePin}
+          onPanToCurrent={handlePanToCurrent}
         />
 
         {createCandidate && activeSession && (
@@ -430,6 +465,7 @@ function ControlPanel({
   pinAddMode,
   onTogglePinAddMode,
   canWritePin,
+  onPanToCurrent,
 }: {
   layers: Record<Layer, boolean>;
   onToggle: (key: Layer) => void;
@@ -441,6 +477,7 @@ function ControlPanel({
   pinAddMode: boolean;
   onTogglePinAddMode: () => void;
   canWritePin: boolean | null;
+  onPanToCurrent: () => void;
 }) {
   return (
     <div className="absolute right-3 top-3 w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow">
@@ -489,6 +526,18 @@ function ControlPanel({
         />
       )}
 
+      {/* Phase 1-F-3: 現在地ステータス + 現在地へ移動。active session 中のみ表示。
+          地図クリック (pin 追加モード) と干渉しないよう、marker は clickable:false。 */}
+      {hasActiveSession && (
+        <CurrentLocationStatus
+          latestPositionForDisplay={recorder.latestPositionForDisplay}
+          isWaitingForFirstLocation={recorder.isWaitingForFirstLocation}
+          lastLocationErrorForDisplay={recorder.lastLocationErrorForDisplay}
+          recording={recorder.status === "recording"}
+          onPanToCurrent={onPanToCurrent}
+        />
+      )}
+
       {/* Phase 1-G: active session 中のみ ピン追加 toggle を出す。
           field_survey:write 不所持と既知なら disable、判定不能なら API 403 を
           汎用エラーで処理する。 */}
@@ -501,6 +550,24 @@ function ControlPanel({
       )}
     </div>
   );
+}
+
+// Phase 1-F-3: <Map> の外にある ControlPanel から「現在地へ移動」用に map.panTo を
+// 呼ぶため、Map 内部で useMap() した instance を state へ伝搬する。直接 google.maps
+// にアクセスせず、vis.gl の hook 経由で取得 / cleanup する。
+function MapInstanceCapture({
+  onMap,
+}: {
+  onMap: (m: unknown | null) => void;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    onMap(map ?? null);
+    return () => {
+      onMap(null);
+    };
+  }, [map, onMap]);
+  return null;
 }
 
 function MapDataLayer({

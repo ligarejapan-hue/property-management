@@ -46,6 +46,21 @@ export interface RecorderPoint {
   lng: number;
 }
 
+/**
+ * Phase 1-F-3: 現在地表示 UI 用 snapshot。
+ * TrackPoint 保存判定 (shouldAcceptCandidate / sequence / batch flush) とは独立し、
+ * watchPosition の成功コールバックで都度更新される。
+ * - lat / lng は marker / panTo 用にのみ使い、UI に数値表示しない。
+ * - accuracy は表示用に round 表記 (helper 経由)。number | null。
+ * - capturedAt は最終取得時刻表示用 (HH:MM:SS)。
+ */
+export interface LatestPositionForDisplay {
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+  capturedAt: Date;
+}
+
 export interface UseLocationRecorderResult {
   status: RecorderStatus;
   /** start 後の累積。flush 成功で buffer から savedPoints に移動する。 */
@@ -64,6 +79,24 @@ export interface UseLocationRecorderResult {
   isFlushing: boolean;
   /** 直近で受け取った accuracy が低精度判定だったか (lat/lng は保持しない)。 */
   isLowAccuracyNow: boolean;
+  /**
+   * Phase 1-F-3: 現在地表示 UI 用の最新位置 snapshot。
+   * watchPosition 成功時 (採用/不採用に関わらず) に更新される。
+   * 不正座標 / over-limit accuracy で normalizePosition が null を返した場合は更新しない。
+   * lat / lng は marker / panTo に渡るが、UI に数値表示しない。
+   */
+  latestPositionForDisplay: LatestPositionForDisplay | null;
+  /**
+   * Phase 1-F-3: 位置「取得」失敗の表示用文言 (lat/lng/PII を含まない)。
+   * 既存 error (送信失敗 / fetch 失敗等を含む) とは分離する。
+   * handlePositionError でのみ set / 採用成功時に null に戻す。
+   */
+  lastLocationErrorForDisplay: string | null;
+  /**
+   * Phase 1-F-3: 「位置記録中だがまだ 1 度も位置を取得できていない」表示用フラグ。
+   * (status === "preparing" || "recording") && latestPositionForDisplay === null。
+   */
+  isWaitingForFirstLocation: boolean;
   /** ユーザー向け汎用エラー文言 (lat/lng/PII を含まない)。 */
   error: string | null;
   /** 位置記録開始。すでに recording の場合は何もしない。 */
@@ -116,6 +149,11 @@ export function useFieldSurveyLocationRecorder(
   const [lastFlushAt, setLastFlushAt] = useState<Date | null>(null);
   const [isFlushing, setIsFlushing] = useState(false);
   const [isLowAccuracyNow, setIsLowAccuracyNow] = useState(false);
+  // Phase 1-F-3: 現在地表示 UI 用 state。TrackPoint 採用判定とは独立。
+  const [latestPositionForDisplay, setLatestPositionForDisplay] =
+    useState<LatestPositionForDisplay | null>(null);
+  const [lastLocationErrorForDisplay, setLastLocationErrorForDisplay] =
+    useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // refs (state 更新が遅延する非同期周りで参照する)
@@ -348,6 +386,17 @@ export function useFieldSurveyLocationRecorder(
     if (!candidate) return;
     const recordedAtMs = new Date(candidate.recordedAt).getTime();
     setIsLowAccuracyNow(isLowAccuracy(candidate.accuracy));
+    // Phase 1-F-3: TrackPoint 採用判定 (shouldAcceptCandidate) とは独立に、
+    // 表示用「最新位置」は watchPosition の有効な成功 callback ごとに更新する。
+    // normalizePosition が候補を返した時点で lat/lng は有限値・accuracy も
+    // 上限以下が確定しているため、表示用 snapshot として安全。
+    setLatestPositionForDisplay({
+      lat: candidate.lat,
+      lng: candidate.lng,
+      accuracy: candidate.accuracy ?? null,
+      capturedAt: new Date(recordedAtMs),
+    });
+    setLastLocationErrorForDisplay(null);
     const accept = shouldAcceptCandidate(lastAcceptedRef.current, {
       lat: candidate.lat,
       lng: candidate.lng,
@@ -369,17 +418,38 @@ export function useFieldSurveyLocationRecorder(
     }
   }, [flushBuffer]);
 
+  // Codex P2 (Phase 1-F-3 follow-up): 位置取得エラー / 停止 / session 切替 /
+  // unmount 時に「現在地」snapshot を一括クリアする internal helper。
+  // - latestPositionForDisplay を null に倒し、stale fix を「現在地として利用可能」
+  //   扱いしない
+  // - isWaitingForFirstLocation は status & latestPositionForDisplay の derive 値の
+  //   ため、recording 中でなければ自動的に false になる
+  // - 副作用は state set のみ (座標や raw payload を console / 監査経路へ流さない)
+  const clearCurrentLocationDisplay = useCallback(() => {
+    if (!mountedRef.current) return;
+    setLatestPositionForDisplay(null);
+    setIsLowAccuracyNow(false);
+  }, []);
+
   const handlePositionError = useCallback(
     (err: GeolocationPositionError) => {
       if (!mountedRef.current) return;
-      setError(describeGeolocationError(err));
+      const msg = describeGeolocationError(err);
+      setError(msg);
+      // Phase 1-F-3: 位置「取得」失敗のみを別 state にも反映 (送信失敗とは分離)。
+      setLastLocationErrorForDisplay(msg);
+      // Codex P2 (本 fix): error 発生時点で「現在地として利用可能な位置」は無い扱い
+      // にする。古い snapshot を残すと CurrentLocationStatus が stale fix を「最終
+      // 取得」として表示し、pan ボタンも有効に残ってしまう (古い座標への panTo を
+      // 許してしまう)。
+      clearCurrentLocationDisplay();
       // permission denied は明確な fatal。停止して idle に戻す。
       if (err.code === 1) {
         stopWatchingInternal();
         setStatus("error");
       }
     },
-    [],
+    [clearCurrentLocationDisplay],
   );
 
   const stopWatchingInternal = useCallback(() => {
@@ -552,6 +622,10 @@ export function useFieldSurveyLocationRecorder(
     await flushAllBufferedChunks();
     if (!mountedRef.current) return;
     setStatus("idle");
+    // Codex P2 (Phase 1-F-3): 停止後に「現在地」セクションが古い fix を「最後の取得値」
+    // として表示 / pan ボタンが有効に残らないよう、表示用 state も明示クリアする。
+    setLatestPositionForDisplay(null);
+    setLastLocationErrorForDisplay(null);
   }, [flushAllBufferedChunks, status, stopWatchingInternal]);
 
   /**
@@ -597,6 +671,11 @@ export function useFieldSurveyLocationRecorder(
       );
     }
     setStatus("idle");
+    // Codex P2 (Phase 1-F-3): 巡回終了直前の停止でも表示用 state を明示クリア。
+    // session 切替 effect で reset されるとはいえ、PATCH 失敗時に session が
+    // active のまま残るケースで stale fix を表示しないよう保険として倒す。
+    setLatestPositionForDisplay(null);
+    setLastLocationErrorForDisplay(null);
     return drained;
   }, [
     flushAllBufferedChunks,
@@ -628,6 +707,9 @@ export function useFieldSurveyLocationRecorder(
       setLastFlushAt(null);
       setIsLowAccuracyNow(false);
       setError(null);
+      // Phase 1-F-3: 現在地表示 state も session 切替で必ず reset。
+      setLatestPositionForDisplay(null);
+      setLastLocationErrorForDisplay(null);
     }
   }, [sessionId, stopWatchingInternal]);
 
@@ -641,6 +723,10 @@ export function useFieldSurveyLocationRecorder(
     };
   }, [stopWatchingInternal]);
 
+  const isWaitingForFirstLocation =
+    (status === "preparing" || status === "recording") &&
+    latestPositionForDisplay === null;
+
   return {
     status,
     savedPoints,
@@ -649,6 +735,9 @@ export function useFieldSurveyLocationRecorder(
     lastFlushAt,
     isFlushing,
     isLowAccuracyNow,
+    latestPositionForDisplay,
+    lastLocationErrorForDisplay,
+    isWaitingForFirstLocation,
     error,
     start,
     stop,
