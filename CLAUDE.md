@@ -24,7 +24,18 @@
 - VPS反映はユーザーが明示した場合のみ
 - VPS反映が明示されていない場合、VPSログイン・git pull・build・restart・migrate deploy などを行わない
 
-## 3. Claude Code の作業フロー
+## 3. 並列作業 / worktree 運用
+
+- 複数タスクを並行する場合は、1タスク1branchに加えて、作業ディレクトリまたは git worktree を分離する
+- 複数の Claude Code セッションで同じ workdir を同時に編集しない
+- Claude Code は勝手に `git switch` / `git checkout` で作業ブランチを切り替えない
+- 作業完了後は `git status --short` を確認し、意図しない差分がないことを報告する
+- 無制限の並列実行は禁止
+- 並列作業は原則 2〜3本までを目安にし、リソース不足や作業衝突がある場合は停止して報告する
+- worktree / branch / stash / cleanup / 削除操作は、対象を明示して慎重に行う
+- 不要な cleanup や branch 削除、stash 操作はユーザーの明示指示がある場合のみ行う
+
+## 4. Claude Code の作業フロー
 
 原則:
 
@@ -48,7 +59,7 @@
 - DB / migration / PII / 権限 / GPS / AuditLog 系は ChatGPT確認推奨
 - ユーザーが明確に実装を依頼した場合は、その範囲内で実装する
 
-## 4. ChatGPT / Claude Code / Codex の役割
+## 5. ChatGPT / Claude Code / Codex の役割
 
 ChatGPT:
 
@@ -74,7 +85,7 @@ Codex:
 - PRレビュー
 - バグ回帰、セキュリティ、権限、DB破壊、PII、AuditLog、migration、rollback、storage、GPS/location などのリスク確認
 
-## 5. gh CLI / GitHub 操作ルール
+## 6. gh CLI / GitHub 操作ルール
 
 - gh CLI が使える環境では利用してよい
 - ただし gh CLI 必須の運用にはしない
@@ -86,7 +97,7 @@ Codex:
 - CI が失敗した場合は、ログを確認し、推測で修正しない
 - CI失敗の原因が不明な場合は、不明点として報告する
 
-## 6. 実装ルール
+## 7. 実装ルール
 
 - 既存仕様を壊さない
 - 既存UI文言・業務用語を尊重する
@@ -99,7 +110,7 @@ Codex:
 - dangerouslySetInnerHTML は原則使用しない
 - セキュリティ・権限・PII に関わる変更では、既存テストまたは追加テストを優先する
 
-## 7. PII / AuditLog ルール
+## 8. PII / AuditLog ルール
 
 PII:
 
@@ -115,7 +126,7 @@ AuditLog:
 - location / GPS / tracking 系では、監査ログに大量の座標を保存しない
 - 監査に必要な場合も、sessionId / count / action / result など最小限にする
 
-## 8. migration 運用
+## 9. migration 運用
 
 - migration は必要な場合のみ作成する
 - schema 変更がない作業では migration を作らない
@@ -125,7 +136,7 @@ AuditLog:
 - 開発中に勝手に production DB を変更しない
 - rollback や data correction を伴う場合は、必ず安全側の設計にする
 
-## 9. build / test / diff-check 運用
+## 10. build / test / diff-check 運用
 
 通常の実装後:
 
@@ -149,7 +160,7 @@ docs-only の場合:
 
 を簡潔に書く
 
-## 10. Codex review 推奨条件
+## 11. Codex review 推奨条件
 
 以下の変更は Codex review 推奨:
 
@@ -172,7 +183,7 @@ docs-only の場合:
 - Codexへの返信文案は標準報告に含めない
 - Codex review が必要な理由だけ簡潔に報告する
 
-## 11. Issue / PR / GitHub Actions での参照方針
+## 12. Issue / PR / GitHub Actions での参照方針
 
 - CLAUDE.md を AI 運用ルールの基準文書として扱う
 - Issue / PR / GitHub Actions でも、このルールと矛盾しない前提で作業する
@@ -180,7 +191,7 @@ docs-only の場合:
 - CI失敗の原因が不明な場合は、不明点として報告する
 - main への直接 push、force push、勝手な merge は禁止
 
-## 12. VPS / production ルール
+## 13. VPS / production ルール
 
 - VPS反映はユーザーの明示指示がある場合のみ
 - 明示指示がない限り、VPSへログインしない
@@ -195,7 +206,7 @@ docs-only の場合:
 - migration がある場合のみ prisma migrate deploy / prisma generate を行う
 - ドキュメント更新のみの PR は VPS反映不要
 
-## 13. 実装後の報告フォーマット
+## 14. 実装後の報告フォーマット
 
 標準報告フォーマット:
 
@@ -222,7 +233,7 @@ docs-only 作業の最低限報告フォーマット:
 7. compare URL
 8. 注意点・未対応
 
-## 14. 実装済み（再実装しない）
+## 15. 実装済み（再実装しない）
 
 - `/uploads` 404 修正済み
 - property photo drag-and-drop upload 実装済み
