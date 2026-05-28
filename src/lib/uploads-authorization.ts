@@ -136,6 +136,30 @@ export async function authorizeUploadAccess(
     );
   }
 
+  // 現地調査ピン写真 (Phase 1-H)。property / attachment 認可とは独立に判定する。
+  // own pin = field_survey:read で閲覧可。他人 pin = read_all または manage で閲覧可。
+  // fileUrl / thumbnailUrl のどちらの /uploads key でも認可する。
+  const pinPhotos = await db.fieldSurveyPinPhoto.findMany({
+    where: {
+      OR: [
+        { fileUrl: { contains: escapedKey } },
+        { thumbnailUrl: { contains: escapedKey } },
+      ],
+    },
+    select: {
+      fileUrl: true,
+      thumbnailUrl: true,
+      pin: { select: { staffUserId: true } },
+    },
+  });
+  for (const pp of pinPhotos) {
+    const matches =
+      extractStorageKeyFromFileUrl(pp.fileUrl) === key ||
+      extractStorageKeyFromFileUrl(pp.thumbnailUrl) === key;
+    if (!matches) continue;
+    decisions.push(authorizeFieldSurveyPinPhoto(pp.pin, session, permissions));
+  }
+
   const attachments = await db.attachment.findMany({
     where: { fileUrl: { contains: escapedKey } },
     select: {
@@ -173,6 +197,24 @@ export async function authorizeUploadAccess(
   if (decisions.some((d) => d === "forbidden")) return "forbidden";
   if (decisions.some((d) => d === "ok")) return "ok";
   return "not_found";
+}
+
+function authorizeFieldSurveyPinPhoto(
+  pin: { staffUserId: string } | null,
+  session: ApiSession,
+  permissions: PermissionEntry[],
+): UploadAuthDecision {
+  // pin 行が消えている (cascade 前の orphan 等) は not_found 扱い。
+  if (!pin) return "not_found";
+  if (!hasPermission(permissions, "field_survey", "read")) return "forbidden";
+  if (pin.staffUserId === session.id) return "ok";
+  if (
+    hasPermission(permissions, "field_survey", "read_all") ||
+    hasPermission(permissions, "field_survey", "manage")
+  ) {
+    return "ok";
+  }
+  return "forbidden";
 }
 
 async function authorizePropertyAccess(

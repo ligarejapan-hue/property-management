@@ -1,0 +1,582 @@
+/**
+ * /api/field-survey/pins/[id]/photos route tests (Phase 1-H).
+ *
+ * 検証ポイント:
+ *  - POST: 成功 / MIME 不正 / サイズ超過 / 権限なし / 他人 pin 禁止 / archived 禁止 /
+ *    multipart 以外 422 / AuditLog 座標・URL・storageKey・fileName 非含有
+ *  - GET: own / read_all / manage で他人 pin 閲覧 / 権限なし / storageKey 非返却
+ *  - DELETE: own 成功 / 他人 pin 禁止 / archived 禁止 / storage.delete 失敗でも DB 削除後に成功
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("next/server", () => {
+  class MockNextRequest extends Request {
+    constructor(input: string | URL | Request, init?: RequestInit) {
+      super(input, init);
+    }
+  }
+  return { NextRequest: MockNextRequest };
+});
+
+vi.mock("@/lib/api-helpers", () => {
+  class MockApiError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, message: string, code = "ERROR") {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  }
+  return {
+    ApiError: MockApiError,
+    getApiSession: vi.fn(),
+    getUserPermissions: vi.fn(),
+    handleApiError: vi.fn((error: unknown) => {
+      if (error instanceof MockApiError) {
+        return Response.json(
+          { error: { message: error.message, code: error.code } },
+          { status: error.status },
+        );
+      }
+      return Response.json(
+        { error: { message: "Server error", code: "INTERNAL_ERROR" } },
+        { status: 500 },
+      );
+    }),
+    apiResponse: vi.fn((data: unknown, status = 200) =>
+      Response.json(data, { status }),
+    ),
+  };
+});
+
+const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
+vi.mock("@/lib/audit", () => ({ writeAuditLog }));
+
+const { storageStub } = vi.hoisted(() => ({
+  storageStub: {
+    upload: vi.fn(),
+    delete: vi.fn(),
+    getUrl: vi.fn(),
+    read: vi.fn(),
+  },
+}));
+vi.mock("@/lib/storage", () => {
+  const MAX = 8 * 1024 * 1024;
+  const ALLOWED = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+  ]);
+  return {
+    getStorage: () => storageStub,
+    MAX_FILE_SIZE: MAX,
+    ALLOWED_PHOTO_MIMES: ALLOWED,
+    validateFile: (size: number, mime: string, allowed: Set<string>) => {
+      if (size > MAX) return "ファイルサイズが上限を超えています";
+      if (!allowed.has(mime)) return `許可されていないファイル形式です: ${mime}`;
+      return null;
+    },
+  };
+});
+
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    fieldSurveyPin: { findUnique: vi.fn() },
+    fieldSurveyPinPhoto: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      aggregate: vi.fn(),
+      create: vi.fn(),
+      delete: vi.fn(),
+    },
+  },
+}));
+
+import prisma from "@/lib/prisma";
+import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { POST, GET } from "@/app/api/field-survey/pins/[id]/photos/route";
+import { DELETE } from "@/app/api/field-survey/pins/[id]/photos/[photoId]/route";
+
+const OWNER = { id: "u-own", email: "o@x", name: "O", role: "field_staff" };
+const OTHER = { id: "u-other", email: "x@x", name: "X", role: "field_staff" };
+
+const writePerms = [
+  { resource: "field_survey", action: "read", granted: true },
+  { resource: "field_survey", action: "write", granted: true },
+];
+const readOnlyPerms = [
+  { resource: "field_survey", action: "read", granted: true },
+];
+const readAllPerms = [
+  { resource: "field_survey", action: "read", granted: true },
+  { resource: "field_survey", action: "read_all", granted: true },
+];
+const noPerms: { resource: string; action: string; granted: boolean }[] = [];
+
+const PIN_ID = "11111111-1111-1111-1111-111111111111";
+const PHOTO_ID = "22222222-2222-2222-2222-222222222222";
+
+function paramsP(id: string) {
+  return { params: Promise.resolve({ id }) };
+}
+function paramsDel(id: string, photoId: string) {
+  return { params: Promise.resolve({ id, photoId }) };
+}
+
+function multipartReq(file: Blob | null) {
+  const fd = new FormData();
+  if (file) fd.append("file", file, "photo.jpg");
+  return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+    method: "POST",
+    body: fd,
+  });
+}
+
+function jpeg(bytes = 16): Blob {
+  return new Blob([new Uint8Array(bytes)], { type: "image/jpeg" });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // server adapter を模し、result.url は storage server 直の絶対 URL を返す。
+  // route はこれを保存せず /uploads/{key} を組み立てることを各テストで検証する。
+  storageStub.upload.mockResolvedValue({
+    url: "http://storage.internal:9000/files/server-direct.jpg",
+    key: `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+  });
+  storageStub.delete.mockResolvedValue(undefined);
+  (prisma.fieldSurveyPinPhoto.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
+    _max: { sortOrder: null },
+  });
+});
+
+describe("POST photos", () => {
+  it("own pin + write で成功し、AuditLog に URL/storageKey/fileName を含めない", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PHOTO_ID,
+      pinId: PIN_ID,
+      fileUrl: `/uploads/field-survey/pins/${PIN_ID}/photos/1.jpg`,
+      thumbnailUrl: null,
+      fileName: "photo.jpg",
+      fileSize: 16,
+      mimeType: "image/jpeg",
+      sortOrder: 0,
+      createdAt: new Date().toISOString(),
+    });
+
+    const res = await POST(multipartReq(jpeg()), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    expect(storageStub.upload).toHaveBeenCalledTimes(1);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail).toEqual({ pinId: PIN_ID, photoId: PHOTO_ID });
+    const serialized = JSON.stringify(
+      (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0],
+    );
+    expect(serialized).not.toMatch(/uploads|\.jpg|photo\.jpg|lat|lng/);
+  });
+
+  it("MIME 不正は 422 で upload しない", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    const res = await POST(
+      multipartReq(new Blob([new Uint8Array(8)], { type: "application/pdf" })),
+      paramsP(PIN_ID),
+    );
+    expect(res.status).toBe(422);
+    expect(storageStub.upload).not.toHaveBeenCalled();
+  });
+
+  it("サイズ超過は 422 で upload しない", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    const res = await POST(
+      multipartReq(jpeg(8 * 1024 * 1024 + 1)),
+      paramsP(PIN_ID),
+    );
+    expect(res.status).toBe(422);
+    expect(storageStub.upload).not.toHaveBeenCalled();
+  });
+
+  it("write 権限なしは 403", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(readOnlyPerms);
+    const res = await POST(multipartReq(jpeg()), paramsP(PIN_ID));
+    expect(res.status).toBe(403);
+  });
+
+  it("他人 pin への追加は 403 (read_all/manage でも不可)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      ...writePerms,
+      { resource: "field_survey", action: "manage", granted: true },
+    ]);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OTHER.id,
+      status: "open",
+    });
+    const res = await POST(multipartReq(jpeg()), paramsP(PIN_ID));
+    expect(res.status).toBe(403);
+    expect(storageStub.upload).not.toHaveBeenCalled();
+  });
+
+  it("archived pin への追加は 409", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "archived",
+    });
+    const res = await POST(multipartReq(jpeg()), paramsP(PIN_ID));
+    expect(res.status).toBe(409);
+  });
+
+  it("multipart 以外は 422", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    const req = new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const res = await POST(req, paramsP(PIN_ID));
+    expect(res.status).toBe(422);
+  });
+});
+
+describe("POST photos — MIME / key hardening (Codex P2)", () => {
+  function setupOwnOpenPin() {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: PHOTO_ID,
+        pinId: PIN_ID,
+        fileUrl: data.fileUrl,
+        thumbnailUrl: null,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        mimeType: data.mimeType,
+        sortOrder: 0,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  const lastUploadKey = (): string =>
+    (storageStub.upload as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1].key;
+
+  // Content-Type を持たせず multipart part を送る (file.type === "")。
+  function noTypeReq() {
+    const fd = new FormData();
+    fd.append("file", new Blob([new Uint8Array(16)]), "evil.jpg");
+    return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+      method: "POST",
+      body: fd,
+    });
+  }
+
+  function typedReq(type: string, name: string) {
+    const fd = new FormData();
+    fd.append("file", new Blob([new Uint8Array(16)], { type }), name);
+    return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+      method: "POST",
+      body: fd,
+    });
+  }
+
+  it("Content-Type 空の file は 422 で拒否され image/jpeg に fallback しない", async () => {
+    setupOwnOpenPin();
+    const res = await POST(noTypeReq(), paramsP(PIN_ID));
+    expect(res.status).toBe(422);
+    expect(storageStub.upload).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPinPhoto.create).not.toHaveBeenCalled();
+  });
+
+  it("実際の file.type を使い、fileName 拡張子に依存しない (ext は MIME 由来)", async () => {
+    setupOwnOpenPin();
+    const res = await POST(typedReq("image/png", "looks-like.jpg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const arg = (storageStub.upload as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1];
+    expect(arg.mimeType).toBe("image/png");
+    expect(lastUploadKey()).toMatch(/\.png$/);
+    expect(lastUploadKey()).not.toMatch(/looks-like|\.jpg/);
+  });
+
+  it("key は randomUUID を含み、元 fileName を含まず path traversal しない", async () => {
+    setupOwnOpenPin();
+    const res = await POST(typedReq("image/jpeg", "../../etc/passwd.jpg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const key = lastUploadKey();
+    expect(key).toMatch(
+      new RegExp(
+        `^field-survey/pins/${PIN_ID}/photos/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.jpg$`,
+      ),
+    );
+    expect(key).not.toContain("..");
+    expect(key).not.toContain("passwd");
+  });
+
+  it("同一 pin / 同一拡張子の連続 upload でも key が衝突しない", async () => {
+    setupOwnOpenPin();
+    await POST(typedReq("image/jpeg", "a.jpg"), paramsP(PIN_ID));
+    await POST(typedReq("image/jpeg", "a.jpg"), paramsP(PIN_ID));
+    const calls = (storageStub.upload as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(2);
+    expect(calls[0][1].key).not.toBe(calls[1][1].key);
+  });
+});
+
+describe("POST photos — app proxy url (Codex P1)", () => {
+  function setupOwnOpenPinEcho() {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: PHOTO_ID,
+        pinId: PIN_ID,
+        fileUrl: data.fileUrl,
+        thumbnailUrl: data.thumbnailUrl,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        mimeType: data.mimeType,
+        sortOrder: 0,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  }
+  const createdData = (): Record<string, unknown> =>
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]
+      .data;
+
+  function typedReq(type: string, name = "photo.jpg") {
+    const fd = new FormData();
+    fd.append("file", new Blob([new Uint8Array(16)], { type }), name);
+    return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+      method: "POST",
+      body: fd,
+    });
+  }
+
+  it("result.url が絶対URLでも fileUrl は /uploads/{key} で保存され http(s) で始まらない", async () => {
+    setupOwnOpenPinEcho();
+    const res = await POST(typedReq("image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const data = createdData();
+    expect(String(data.fileUrl)).toMatch(/^\/uploads\/field-survey\/pins\//);
+    expect(String(data.fileUrl)).not.toMatch(/^https?:/);
+    // adapter が返した result.key (= 実際に格納された key) を proxy 化したもの。
+    // result.url (絶対URL) ではなく result.key を使うことを確認する。
+    expect(data.fileUrl).toBe(
+      `/uploads/field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+    );
+  });
+
+  it("thumbnailUrl が絶対URLなら保存しない (null)", async () => {
+    setupOwnOpenPinEcho();
+    storageStub.upload.mockResolvedValueOnce({
+      url: "http://storage.internal:9000/files/x.jpg",
+      thumbnailUrl: "http://storage.internal:9000/files/x-thumb.jpg",
+      key: `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+    });
+    const res = await POST(typedReq("image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    expect(createdData().thumbnailUrl).toBeNull();
+  });
+
+  it("thumbnailUrl が /uploads 相対なら proxy URL として保持する", async () => {
+    setupOwnOpenPinEcho();
+    storageStub.upload.mockResolvedValueOnce({
+      url: "http://storage.internal:9000/files/x.jpg",
+      thumbnailUrl: `/uploads/field-survey/pins/${PIN_ID}/photos/abc-thumb.jpg`,
+      key: `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+    });
+    const res = await POST(typedReq("image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    expect(createdData().thumbnailUrl).toBe(
+      `/uploads/field-survey/pins/${PIN_ID}/photos/abc-thumb.jpg`,
+    );
+  });
+});
+
+describe("GET photos", () => {
+  it("own pin を read で取得し storageKey を返さない", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(readOnlyPerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+    });
+    (prisma.fieldSurveyPinPhoto.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: PHOTO_ID,
+        pinId: PIN_ID,
+        fileUrl: `/uploads/field-survey/pins/${PIN_ID}/photos/1.jpg`,
+        thumbnailUrl: null,
+        fileName: "photo.jpg",
+        fileSize: 16,
+        mimeType: "image/jpeg",
+        sortOrder: 0,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    const res = await GET(new Request("http://t"), paramsP(PIN_ID));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(JSON.stringify(body)).not.toMatch(/storageKey/);
+    expect(body.data[0].fileUrl).toMatch(/^\/uploads\//);
+    expect(body.data[0].fileUrl).not.toMatch(/^https?:/);
+  });
+
+  it("他人 pin は read_all で閲覧可", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(readAllPerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OTHER.id,
+    });
+    (prisma.fieldSurveyPinPhoto.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const res = await GET(new Request("http://t"), paramsP(PIN_ID));
+    expect(res.status).toBe(200);
+  });
+
+  it("他人 pin を read のみで閲覧は 403", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(readOnlyPerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OTHER.id,
+    });
+    const res = await GET(new Request("http://t"), paramsP(PIN_ID));
+    expect(res.status).toBe(403);
+  });
+
+  it("read 権限なしは 403", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(noPerms);
+    const res = await GET(new Request("http://t"), paramsP(PIN_ID));
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("DELETE photo", () => {
+  function mockPhoto(
+    staffUserId: string,
+    status = "open",
+    thumbnailUrl: string | null = null,
+  ) {
+    (prisma.fieldSurveyPinPhoto.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PHOTO_ID,
+      pinId: PIN_ID,
+      fileUrl: `/uploads/field-survey/pins/${PIN_ID}/photos/1.jpg`,
+      thumbnailUrl,
+      pin: { staffUserId, status },
+    });
+    (prisma.fieldSurveyPinPhoto.delete as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  }
+
+  it("own pin 写真を削除し fileUrl から復元した key で storage.delete を呼ぶ", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    mockPhoto(OWNER.id);
+    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    expect(res.status).toBe(200);
+    expect(prisma.fieldSurveyPinPhoto.delete).toHaveBeenCalledTimes(1);
+    expect(storageStub.delete).toHaveBeenCalledTimes(1);
+    expect(storageStub.delete).toHaveBeenCalledWith(
+      `field-survey/pins/${PIN_ID}/photos/1.jpg`,
+    );
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail).toEqual({ pinId: PIN_ID, photoId: PHOTO_ID });
+  });
+
+  it("thumbnailUrl がある場合は本体 + thumbnail の両方を storage.delete する", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    mockPhoto(
+      OWNER.id,
+      "open",
+      `/uploads/field-survey/pins/${PIN_ID}/photos/1-thumb.jpg`,
+    );
+    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    expect(res.status).toBe(200);
+    expect(storageStub.delete).toHaveBeenCalledTimes(2);
+    expect(storageStub.delete).toHaveBeenCalledWith(
+      `field-survey/pins/${PIN_ID}/photos/1.jpg`,
+    );
+    expect(storageStub.delete).toHaveBeenCalledWith(
+      `field-survey/pins/${PIN_ID}/photos/1-thumb.jpg`,
+    );
+  });
+
+  it("他人 pin の写真削除は 403", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      ...writePerms,
+      { resource: "field_survey", action: "manage", granted: true },
+    ]);
+    mockPhoto(OTHER.id);
+    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    expect(res.status).toBe(403);
+    expect(prisma.fieldSurveyPinPhoto.delete).not.toHaveBeenCalled();
+  });
+
+  it("archived pin の写真削除は 409", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    mockPhoto(OWNER.id, "archived");
+    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    expect(res.status).toBe(409);
+    expect(prisma.fieldSurveyPinPhoto.delete).not.toHaveBeenCalled();
+  });
+
+  it("storage.delete 失敗でも DB 削除後に API は成功する", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    mockPhoto(OWNER.id);
+    storageStub.delete.mockRejectedValueOnce(new Error("network"));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    expect(res.status).toBe(200);
+    expect(prisma.fieldSurveyPinPhoto.delete).toHaveBeenCalledTimes(1);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    errSpy.mockRestore();
+  });
+});

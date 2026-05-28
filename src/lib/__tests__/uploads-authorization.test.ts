@@ -23,16 +23,20 @@ type Att = {
 };
 type Prop = { id: string; createdBy: string; assignedTo: string | null };
 
+type PinPhoto = { fileUrl: string; pin: { staffUserId: string } | null };
+
 function makeDb(opts: {
   photos?: Photo[];
   bPhotos?: BPhoto[];
   attachments?: Att[];
   properties?: Prop[];
+  pinPhotos?: PinPhoto[];
 }) {
   const photos = opts.photos ?? [];
   const bPhotos = opts.bPhotos ?? [];
   const attachments = opts.attachments ?? [];
   const properties = opts.properties ?? [];
+  const pinPhotos = opts.pinPhotos ?? [];
 
   // 最小 prisma 互換 stub。Phase B は findMany + JS フィルタで legacy URL /
   // duplicate collision を取りこぼさない設計のため、findMany の contains を再現する。
@@ -61,6 +65,18 @@ function makeDb(opts: {
     attachment: {
       findMany: async ({ where }: { where: ContainsWhere }) =>
         attachments.filter((a) => matchContains(a.fileUrl, where)),
+    },
+    fieldSurveyPinPhoto: {
+      findMany: async ({
+        where,
+      }: {
+        where: { OR?: ContainsWhere[] };
+      }) => {
+        const contains = where.OR?.[0]?.fileUrl?.contains ?? "";
+        return pinPhotos.filter(
+          (p) => typeof p.fileUrl === "string" && p.fileUrl.includes(contains),
+        );
+      },
     },
     property: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -676,14 +692,22 @@ describe("authorizeUploadAccess", () => {
   describe("DB lookup 引数 (wildcard escape)", () => {
     it("% を含む key は contains に literal escape された値が渡る (3 テーブル全て)", async () => {
       const calls: { table: string; contains: string }[] = [];
+      // pin photo は fileUrl/thumbnailUrl の OR で問い合わせるため where 形が異なる。
+      // どちらの形でも escape 済み contains 値を取り出す。
+      const containsOf = (where: {
+        fileUrl?: { contains: string };
+        OR?: { fileUrl?: { contains: string } }[];
+      }): string =>
+        where.fileUrl?.contains ?? where.OR?.[0]?.fileUrl?.contains ?? "";
       const recorder = (table: string) =>
-        vi.fn(async ({ where }: { where: { fileUrl: { contains: string } } }) => {
-          calls.push({ table, contains: where.fileUrl.contains });
+        vi.fn(async ({ where }: { where: Parameters<typeof containsOf>[0] }) => {
+          calls.push({ table, contains: containsOf(where) });
           return [];
         });
       const prisma = {
         propertyPhoto: { findMany: recorder("propertyPhoto") },
         buildingPhoto: { findMany: recorder("buildingPhoto") },
+        fieldSurveyPinPhoto: { findMany: recorder("fieldSurveyPinPhoto") },
         attachment: { findMany: recorder("attachment") },
         property: { findUnique: async () => null },
       } as unknown as Parameters<typeof authorizeUploadAccess>[0]["prisma"];
@@ -698,6 +722,7 @@ describe("authorizeUploadAccess", () => {
       expect(calls.map((c) => c.table)).toEqual([
         "propertyPhoto",
         "buildingPhoto",
+        "fieldSurveyPinPhoto",
         "attachment",
       ]);
       for (const c of calls) {
@@ -708,14 +733,24 @@ describe("authorizeUploadAccess", () => {
     it("`%` 単独 key でも contains に escape された値が渡る", async () => {
       const containsValues: string[] = [];
       const recorder = vi.fn(
-        async ({ where }: { where: { fileUrl: { contains: string } } }) => {
-          containsValues.push(where.fileUrl.contains);
+        async ({
+          where,
+        }: {
+          where: {
+            fileUrl?: { contains: string };
+            OR?: { fileUrl?: { contains: string } }[];
+          };
+        }) => {
+          containsValues.push(
+            where.fileUrl?.contains ?? where.OR?.[0]?.fileUrl?.contains ?? "",
+          );
           return [];
         },
       );
       const prisma = {
         propertyPhoto: { findMany: recorder },
         buildingPhoto: { findMany: recorder },
+        fieldSurveyPinPhoto: { findMany: recorder },
         attachment: { findMany: recorder },
         property: { findUnique: async () => null },
       } as unknown as Parameters<typeof authorizeUploadAccess>[0]["prisma"];
