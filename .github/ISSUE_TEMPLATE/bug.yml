@@ -1,0 +1,89 @@
+name: バグ報告・修正 (@claude)
+description: 不具合の報告と修正依頼
+title: "[Bug] "
+labels: ["claude-task", "bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > 作業前に CLAUDE.md / AGENTS.md の運用ルールを確認すること。
+        > 原因不明な点は推測で埋めず、前提・未確認事項として報告すること。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: どんな不具合かを一言で
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順
+      description: 発生条件・操作手順
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 期待動作 / 実際の動作
+      description: 本来どうあるべきか、実際はどうなるか
+    validations:
+      required: true
+
+  - type: textarea
+    id: changes
+    attributes:
+      label: 想定する変更内容・対象範囲
+      description: 関連ファイル / 機能 / API（分かる範囲で）
+    validations:
+      required: false
+
+  - type: textarea
+    id: forbidden
+    attributes:
+      label: 禁止事項
+      value: |
+        - main 直 push / force-push
+        - merge / VPS 反映 / GitHub 認証・設定変更
+        - 指定外ファイルの変更・大規模リファクタ
+        - migration はユーザー明示指示がない限り作成しない
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build_test
+    attributes:
+      label: build / test 要否
+      options:
+        - "必要（npm run build + npx vitest run）"
+        - "不要（docs/config-only）"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: codex_review
+    attributes:
+      label: Codex review 要否
+      description: DB / migration / 権限 / PII / AuditLog / import / rollback / storage / GPS 等は推奨
+      options:
+        - "推奨"
+        - "不要"
+      default: 0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: 運用ルール確認
+      options:
+        - label: 作業前に CLAUDE.md / AGENTS.md を確認する
+          required: true
+        - label: main 直 push / force-push をしない
+          required: true
+        - label: VPS 操作・migration はユーザー明示指示時のみ
+          required: true

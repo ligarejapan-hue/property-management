@@ -1,0 +1,81 @@
+name: 機能追加 (@claude)
+description: 新機能・機能改善の実装依頼（Explore → Plan → 承認 → Implement）
+title: "[Feature] "
+labels: ["claude-task", "feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > 作業前に CLAUDE.md / AGENTS.md の運用ルールを確認すること。
+        > 重要・高リスク変更は Plan 提示後に停止し、承認を待ってから Implement すること。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何を追加・改善するかを一言で
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+      description: なぜ必要か / 達成したいこと
+    validations:
+      required: true
+
+  - type: textarea
+    id: changes
+    attributes:
+      label: 変更内容
+      description: 想定する変更点・対象ファイル / 機能 / API
+    validations:
+      required: true
+
+  - type: textarea
+    id: forbidden
+    attributes:
+      label: 禁止事項
+      value: |
+        - main 直 push / force-push
+        - merge / VPS 反映 / GitHub 認証・設定変更
+        - 指定外ファイルの変更・大規模リファクタ
+        - migration はユーザー明示指示がない限り作成しない
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build_test
+    attributes:
+      label: build / test 要否
+      options:
+        - "必要（npm run build + npx vitest run）"
+        - "不要（docs/config-only）"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: codex_review
+    attributes:
+      label: Codex review 要否
+      description: DB / migration / 権限 / PII / AuditLog / import / rollback / storage / GPS 等は推奨
+      options:
+        - "推奨"
+        - "不要"
+      default: 0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: 運用ルール確認
+      options:
+        - label: 作業前に CLAUDE.md / AGENTS.md を確認する
+          required: true
+        - label: main 直 push / force-push をしない
+          required: true
+        - label: VPS 操作・migration はユーザー明示指示時のみ
+          required: true
