@@ -349,6 +349,22 @@ describe("GET /api/field-survey/sessions", () => {
     expect(where.staffUserId).toBe(target);
   });
 
+  it("Codex P2: read_all 所持は scope 未指定でも staffUserId を尊重する", async () => {
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    (prisma.fieldSurveySession.count as Mock).mockResolvedValue(0);
+    (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([]);
+    const target = "22222222-2222-4222-8222-222222222222";
+    // scope=all を付けなくても、認可済み caller の staffUserId は own に倒さない。
+    await GET(
+      makeReq(`http://x/api/field-survey/sessions?staffUserId=${target}`),
+    );
+    const where = (prisma.fieldSurveySession.findMany as Mock).mock.calls[0][0]
+      .where;
+    expect(where.staffUserId).toBe(target);
+    expect(where.staffUserId).not.toBe(officeUser.id);
+  });
+
   it("pagination が反映される (skip/take)", async () => {
     (getApiSession as Mock).mockResolvedValue(adminUser);
     (getUserPermissions as Mock).mockResolvedValue(adminPerms);

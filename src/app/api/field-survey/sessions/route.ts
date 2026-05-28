@@ -144,11 +144,15 @@ export async function GET(request: NextRequest) {
       status?: "active" | "ended" | "cancelled";
     } = {};
 
-    if (scope === "all" && canSeeAll) {
-      // 任意で staffUserId による絞り込みを許可 (read_all/manage のみ到達)。
-      if (staffUserId) where.staffUserId = staffUserId;
+    if (canSeeAll && staffUserId) {
+      // 認可済み caller の明示 staffUserId フィルタは scope に依らず尊重する。
+      // (Codex P2: scope 未指定でも staffUserId を黙って own に倒して別人の
+      //  session を返さない。pre-1-J の staffUserId フィルタ互換も維持。)
+      where.staffUserId = staffUserId;
+    } else if (scope === "all" && canSeeAll) {
+      // staffUserId 未指定の全スタッフ閲覧 (read_all/manage のみ到達)。
     } else {
-      // mine: 他人 staffUserId 指定は無視して session.id 強制 (own only)。
+      // mine: 非 canSeeAll の他人 staffUserId 指定は無視して session.id 強制。
       where.staffUserId = session.id;
     }
     if (status) where.status = status;
