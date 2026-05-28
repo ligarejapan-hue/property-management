@@ -16,6 +16,8 @@ Codex はこのプロジェクトにおいて原則として**実装者ではな
 - 権限チェック漏れ・不正アクセスリスク
 - DB / データ破壊リスク（重複取込、ロールバック不能な変更等）
 - CSV import・owner/property linkage・rollback・audit log・upload/storage・permission の各機能
+- PII / GPS / 位置情報 / raw response / API key / token / env 値が UI・console・ログ・AuditLog・エラー文に漏洩していないか
+- AuditLog に生の個人情報・大量の緯度経度・rawData・認証情報（API key / token / env）を記録していないか
 
 ## migration がある場合
 - 後方互換性の確認
@@ -35,7 +37,7 @@ Codex はこのプロジェクトにおいて原則として**実装者ではな
 
 Pro 利用中（ユーザーが Pro モードを明示した場合のみ適用）:
 - Explore 不要な小修正は最小パッチモードで実行する
-- 完了報告は短く：変更ファイル・変更要点・テスト結果・commit hash・push 結果に絞る
+- 完了報告は要点を簡潔にまとめる（報告項目の詳細は CLAUDE.md の標準報告形式に従う）
 - 「出力の精度を落とさずにトークン消費を半減させる方法でこのセッションは任務を実行する」を最優先とする
 
 Max 利用中（既定）:
