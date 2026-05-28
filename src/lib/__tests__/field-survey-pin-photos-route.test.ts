@@ -269,6 +269,94 @@ describe("POST photos", () => {
   });
 });
 
+describe("POST photos — MIME / key hardening (Codex P2)", () => {
+  function setupOwnOpenPin() {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: PHOTO_ID,
+        pinId: PIN_ID,
+        fileUrl: data.fileUrl,
+        thumbnailUrl: null,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        mimeType: data.mimeType,
+        sortOrder: 0,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  const lastUploadKey = (): string =>
+    (storageStub.upload as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1].key;
+
+  // Content-Type を持たせず multipart part を送る (file.type === "")。
+  function noTypeReq() {
+    const fd = new FormData();
+    fd.append("file", new Blob([new Uint8Array(16)]), "evil.jpg");
+    return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+      method: "POST",
+      body: fd,
+    });
+  }
+
+  function typedReq(type: string, name: string) {
+    const fd = new FormData();
+    fd.append("file", new Blob([new Uint8Array(16)], { type }), name);
+    return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+      method: "POST",
+      body: fd,
+    });
+  }
+
+  it("Content-Type 空の file は 422 で拒否され image/jpeg に fallback しない", async () => {
+    setupOwnOpenPin();
+    const res = await POST(noTypeReq(), paramsP(PIN_ID));
+    expect(res.status).toBe(422);
+    expect(storageStub.upload).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPinPhoto.create).not.toHaveBeenCalled();
+  });
+
+  it("実際の file.type を使い、fileName 拡張子に依存しない (ext は MIME 由来)", async () => {
+    setupOwnOpenPin();
+    const res = await POST(typedReq("image/png", "looks-like.jpg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const arg = (storageStub.upload as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1];
+    expect(arg.mimeType).toBe("image/png");
+    expect(lastUploadKey()).toMatch(/\.png$/);
+    expect(lastUploadKey()).not.toMatch(/looks-like|\.jpg/);
+  });
+
+  it("key は randomUUID を含み、元 fileName を含まず path traversal しない", async () => {
+    setupOwnOpenPin();
+    const res = await POST(typedReq("image/jpeg", "../../etc/passwd.jpg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const key = lastUploadKey();
+    expect(key).toMatch(
+      new RegExp(
+        `^field-survey/pins/${PIN_ID}/photos/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.jpg$`,
+      ),
+    );
+    expect(key).not.toContain("..");
+    expect(key).not.toContain("passwd");
+  });
+
+  it("同一 pin / 同一拡張子の連続 upload でも key が衝突しない", async () => {
+    setupOwnOpenPin();
+    await POST(typedReq("image/jpeg", "a.jpg"), paramsP(PIN_ID));
+    await POST(typedReq("image/jpeg", "a.jpg"), paramsP(PIN_ID));
+    const calls = (storageStub.upload as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(2);
+    expect(calls[0][1].key).not.toBe(calls[1][1].key);
+  });
+});
+
 describe("GET photos", () => {
   it("own pin を read で取得し storageKey を返さない", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);

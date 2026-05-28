@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -19,6 +20,16 @@ import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
 // - 座標 / memo / EXIF は本テーブルに無い。レスポンスにも含めない。
 // - AuditLog は pin_photo_create / pin_photo_delete の操作事実 + ID のみ。
 //   URL / storageKey / fileName / 座標 / memo / PII は detail に書かない。
+
+// storage key の拡張子は元 fileName ではなく MIME type から決める。
+// 許可 MIME 以外は validateFile で 422 になるため、ここに来るのは下記のみ。
+const MIME_TO_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
 
 const SELECT_PHOTO = {
   id: true,
@@ -84,7 +95,16 @@ export async function POST(
 
     const fileName = (file as File).name || "photo.jpg";
     const fileSize = file.size;
-    const mimeType = file.type || "image/jpeg";
+    // MIME type の fallback は禁止。Content-Type が空 / 未指定の part は拒否する
+    // (拡張子だけで画像と信用しない)。実際の file.type を validateFile に渡す。
+    const mimeType = file.type;
+    if (!mimeType) {
+      throw new ApiError(
+        422,
+        "ファイル形式 (Content-Type) が指定されていません",
+        "VALIDATION_ERROR",
+      );
+    }
 
     const validationError = validateFile(fileSize, mimeType, ALLOWED_PHOTO_MIMES);
     if (validationError) {
@@ -92,10 +112,10 @@ export async function POST(
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const ext = fileName.includes(".")
-      ? (fileName.split(".").pop() as string)
-      : "jpg";
-    const key = `field-survey/pins/${id}/photos/${Date.now()}.${ext}`;
+    // 拡張子は MIME type から決定 (元 fileName の拡張子は信用しない)。
+    // key には randomUUID を含め、同一 pin / 同一ミリ秒 upload でも衝突しない。
+    const ext = MIME_TO_EXT[mimeType] ?? "bin";
+    const key = `field-survey/pins/${id}/photos/${randomUUID()}.${ext}`;
 
     const storage = getStorage();
     const result = await storage.upload(buffer, { key, mimeType, fileName });
