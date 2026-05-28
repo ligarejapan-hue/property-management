@@ -49,6 +49,11 @@ const mainNavItems: NavItem[] = [
     icon: <MapIcon className="h-5 w-5" />,
   },
   {
+    label: "巡回履歴",
+    href: "/field-survey/sessions",
+    icon: <History className="h-5 w-5" />,
+  },
+  {
     label: "受付帳CSV取込",
     href: "/import",
     icon: <Upload className="h-5 w-5" />,

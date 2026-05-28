@@ -90,6 +90,10 @@ vi.mock("@/lib/prisma", () => ({
       update: vi.fn(),
       updateMany: vi.fn(),
     },
+    fieldSurveyPin: {
+      groupBy: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
+    },
   },
 }));
 
@@ -100,7 +104,10 @@ import {
   ApiError,
 } from "@/lib/api-helpers";
 import { POST, GET } from "@/app/api/field-survey/sessions/route";
-import { PATCH } from "@/app/api/field-survey/sessions/[id]/route";
+import {
+  PATCH,
+  GET as GET_DETAIL,
+} from "@/app/api/field-survey/sessions/[id]/route";
 
 const fieldUser = { id: "u-field", email: "f@x", name: "F", role: "field_staff" };
 const officeUser = { id: "u-office", email: "o@x", name: "O", role: "office_staff" };
@@ -326,18 +333,36 @@ describe("GET /api/field-survey/sessions", () => {
     expect(where.staffUserId).toBe(fieldUser.id);
   });
 
-  it("read_all 所持は staffUserId 指定を採用", async () => {
+  it("read_all 所持は scope=all + staffUserId 指定を採用", async () => {
     (getApiSession as Mock).mockResolvedValue(officeUser);
     (getUserPermissions as Mock).mockResolvedValue(officePerms);
     (prisma.fieldSurveySession.count as Mock).mockResolvedValue(0);
     (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([]);
     const target = "22222222-2222-4222-8222-222222222222";
     await GET(
+      makeReq(
+        `http://x/api/field-survey/sessions?scope=all&staffUserId=${target}`,
+      ),
+    );
+    const where = (prisma.fieldSurveySession.findMany as Mock).mock.calls[0][0]
+      .where;
+    expect(where.staffUserId).toBe(target);
+  });
+
+  it("Codex P2: read_all 所持は scope 未指定でも staffUserId を尊重する", async () => {
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    (prisma.fieldSurveySession.count as Mock).mockResolvedValue(0);
+    (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([]);
+    const target = "22222222-2222-4222-8222-222222222222";
+    // scope=all を付けなくても、認可済み caller の staffUserId は own に倒さない。
+    await GET(
       makeReq(`http://x/api/field-survey/sessions?staffUserId=${target}`),
     );
     const where = (prisma.fieldSurveySession.findMany as Mock).mock.calls[0][0]
       .where;
     expect(where.staffUserId).toBe(target);
+    expect(where.staffUserId).not.toBe(officeUser.id);
   });
 
   it("pagination が反映される (skip/take)", async () => {
@@ -351,6 +376,72 @@ describe("GET /api/field-survey/sessions", () => {
     const args = (prisma.fieldSurveySession.findMany as Mock).mock.calls[0][0];
     expect(args.skip).toBe(20);
     expect(args.take).toBe(20);
+  });
+
+  // ---------- Phase 1-J: scope / staffName / pinCount ----------
+
+  it("scope=all は一般スタッフ (read_all/manage なし) では 403", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await GET(
+      makeReq("http://x/api/field-survey/sessions?scope=all"),
+    );
+    expect(res.status).toBe(403);
+    expect(prisma.fieldSurveySession.findMany).not.toHaveBeenCalled();
+  });
+
+  it("scope=all は read_all で全スタッフ分 (staffUserId 強制しない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    (prisma.fieldSurveySession.count as Mock).mockResolvedValue(0);
+    (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([]);
+    await GET(makeReq("http://x/api/field-survey/sessions?scope=all"));
+    const where = (prisma.fieldSurveySession.findMany as Mock).mock.calls[0][0]
+      .where;
+    expect(where.staffUserId).toBeUndefined();
+  });
+
+  it("scope 未指定 (mine) は read_all 所持でも own 強制", async () => {
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    (prisma.fieldSurveySession.count as Mock).mockResolvedValue(0);
+    (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([]);
+    await GET(makeReq("http://x/api/field-survey/sessions"));
+    const where = (prisma.fieldSurveySession.findMany as Mock).mock.calls[0][0]
+      .where;
+    expect(where.staffUserId).toBe(officeUser.id);
+  });
+
+  it("レスポンスに staffName / pinCount を含み、座標/memo/写真/PII を含まない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.count as Mock).mockResolvedValue(1);
+    (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([
+      {
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt: new Date("2026-05-01T00:00:00Z"),
+        endedAt: new Date("2026-05-01T01:00:00Z"),
+        status: "ended",
+        pointCount: 12,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        staff: { name: "巡回太郎" },
+      },
+    ]);
+    (prisma.fieldSurveyPin.groupBy as Mock).mockResolvedValue([
+      { sessionId: "s-1", _count: { _all: 3 } },
+    ]);
+    const res = await GET(makeReq("http://x/api/field-survey/sessions"));
+    const body = await res.json();
+    expect(body.data[0].staffName).toBe("巡回太郎");
+    expect(body.data[0].pinCount).toBe(3);
+    expect(body.data[0].pointCount).toBe(12);
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toMatch(/memo|fileUrl|storageKey|fileName|"lat"|"lng"/i);
+    // pinCount 集計は archived を除外
+    const gbWhere = (prisma.fieldSurveyPin.groupBy as Mock).mock.calls[0][0].where;
+    expect(gbWhere.status).toEqual({ not: "archived" });
   });
 });
 
@@ -617,5 +708,96 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
     expect(prisma.fieldSurveySession.update).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// GET /api/field-survey/sessions/[id] (Phase 1-J)
+// ============================================================
+describe("GET /api/field-survey/sessions/[id]", () => {
+  const params = Promise.resolve({ id: "s-1" });
+
+  function mockSession(staffUserId: string) {
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      id: "s-1",
+      staffUserId,
+      startedAt: new Date("2026-05-01T00:00:00Z"),
+      endedAt: new Date("2026-05-01T01:00:00Z"),
+      status: "ended",
+      pointCount: 7,
+      staff: { name: "巡回花子" },
+    });
+    (prisma.fieldSurveyPin.count as Mock).mockResolvedValue(2);
+  }
+
+  it("own session を取得でき staffName / pinCount を含む / PII を含まない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    mockSession(fieldUser.id);
+    const res = await GET_DETAIL(makeReq("http://x"), { params });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.staffName).toBe("巡回花子");
+    expect(body.data.pinCount).toBe(2);
+    expect(body.data.pointCount).toBe(7);
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toMatch(/memo|fileUrl|storageKey|fileName|"lat"|"lng"/i);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    // pinCount は archived を除外
+    const cWhere = (prisma.fieldSurveyPin.count as Mock).mock.calls[0][0].where;
+    expect(cWhere.status).toEqual({ not: "archived" });
+  });
+
+  it("他人 session は read のみでは 403", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue([
+      { resource: "field_survey", action: "read", granted: true },
+    ]);
+    mockSession("other-user");
+    const res = await GET_DETAIL(makeReq("http://x"), { params });
+    expect(res.status).toBe(403);
+  });
+
+  it("他人 session は read_all で取得でき AuditLog を残す (PII なし)", async () => {
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    mockSession("other-user");
+    const res = await GET_DETAIL(makeReq("http://x"), { params });
+    expect(res.status).toBe(200);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const call = (writeAuditLog as Mock).mock.calls[0][0];
+    expect(call.action).toBe("field_survey_session_view");
+    expect(call.detail).toEqual({
+      sessionId: "s-1",
+      viewedStaffUserId: "other-user",
+      scope: "read_all",
+    });
+    const serialized = JSON.stringify(call);
+    expect(serialized).not.toMatch(/memo|fileUrl|storageKey|fileName|"lat"|"lng"/i);
+  });
+
+  it("他人 session は manage でも取得でき scope=manage で監査", async () => {
+    (getApiSession as Mock).mockResolvedValue(adminUser);
+    (getUserPermissions as Mock).mockResolvedValue(adminPerms);
+    mockSession("other-user");
+    const res = await GET_DETAIL(makeReq("http://x"), { params });
+    expect(res.status).toBe(200);
+    const call = (writeAuditLog as Mock).mock.calls[0][0];
+    expect(call.detail.scope).toBe("manage");
+  });
+
+  it("存在しない session は 404", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue(null);
+    const res = await GET_DETAIL(makeReq("http://x"), { params });
+    expect(res.status).toBe(404);
+  });
+
+  it("read 権限なしは 403", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue([]);
+    const res = await GET_DETAIL(makeReq("http://x"), { params });
+    expect(res.status).toBe(403);
   });
 });

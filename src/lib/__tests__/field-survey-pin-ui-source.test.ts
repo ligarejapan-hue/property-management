@@ -154,14 +154,16 @@ describe("pin-detail-panel.tsx", () => {
     expect(DETAIL_SRC).toMatch(/whitespace-pre-wrap/);
   });
 
-  it("own pin のみ編集 UI を出す (isOwn ゲート + isFresh)", () => {
+  it("own pin のみ編集 UI を出す (canEditOwn ゲート + isFresh)", () => {
     // Codex P2 fix 2: isOwn は isFresh かつ own staff のみ true。
     expect(DETAIL_SRC).toMatch(
       /isOwn\s*=\s*isFresh\s*&&\s*detail!\.staffUserId\s*===\s*currentUserId/,
     );
-    // ReadOnlyView の編集ボタンと EditView render が isOwn 条件付き
-    expect(DETAIL_SRC).toMatch(/\{isOwn\s*&&\s*\(/);
-    expect(DETAIL_SRC).toMatch(/editing\s*&&\s*isOwn/);
+    // Phase 1-J: 編集 UI は canEditOwn (= !readOnly && isOwn) で gate する。
+    expect(DETAIL_SRC).toMatch(/canEditOwn\s*=\s*!readOnly\s*&&\s*isOwn/);
+    // ReadOnlyView の編集ボタンと EditView render が canEditOwn 条件付き
+    expect(DETAIL_SRC).toMatch(/\{canEdit\s*&&\s*\(/);
+    expect(DETAIL_SRC).toMatch(/editing\s*&&\s*canEditOwn/);
   });
 
   it("作成者は own=「あなた」 / 他人=「他スタッフ」を出し、staffUserId 生値を出さない", () => {
@@ -424,7 +426,7 @@ describe("Codex P2 fix 2 — reset stale pin detail when switching pins", () => 
   it("ReadOnlyView / EditView は isFresh で gate される", () => {
     expect(DETAIL_SRC).toMatch(/\{isFresh\s*&&\s*!editing\s*&&\s*\(?\s*<ReadOnlyView/);
     expect(DETAIL_SRC).toMatch(
-      /\{isFresh\s*&&\s*editing\s*&&\s*isOwn\s*&&\s*\(?\s*<EditView/,
+      /\{isFresh\s*&&\s*editing\s*&&\s*canEditOwn\s*&&\s*\(?\s*<EditView/,
     );
   });
 
@@ -448,7 +450,7 @@ describe("Codex P2 fix 2 — reset stale pin detail when switching pins", () => 
   it("manage 権限でも他人 pin 編集 UI を出さない方針を維持 (EditView は isOwn gate)", () => {
     // Phase 1-I: canManage は削除ボタン用に追加されたが、EditView は依然 isOwn gate。
     // 編集 UI に manage を絡めない (EditView の render 条件に canManage を含めない)。
-    expect(DETAIL_SRC).toMatch(/\{isFresh\s*&&\s*editing\s*&&\s*isOwn\s*&&\s*\(?\s*<EditView/);
+    expect(DETAIL_SRC).toMatch(/\{isFresh\s*&&\s*editing\s*&&\s*canEditOwn\s*&&\s*\(?\s*<EditView/);
     expect(DETAIL_SRC).not.toMatch(/hasManage/);
     expect(DETAIL_SRC).not.toMatch(/editing\s*&&\s*\(isOwn\s*\|\|\s*canManage\)/);
   });
@@ -527,12 +529,12 @@ describe("Codex P2 — recheck latest pin before applying save results", () => {
   });
 
   it("他人 pin 編集 UI を出さない方針を維持 (manage 持ちでも編集は非表示)", () => {
-    // Phase 1-I: canManage は削除専用。編集 (EditView) は isOwn gate のまま。
+    // Phase 1-I/1-J: canManage は削除専用。編集 (EditView) は canEditOwn gate。
     expect(DETAIL_SRC).not.toMatch(/hasManage/);
     expect(DETAIL_SRC).toMatch(
       /isOwn\s*=\s*isFresh\s*&&\s*detail!\.staffUserId\s*===\s*currentUserId/,
     );
-    expect(DETAIL_SRC).toMatch(/\{isFresh\s*&&\s*editing\s*&&\s*isOwn\s*&&\s*\(?\s*<EditView/);
+    expect(DETAIL_SRC).toMatch(/\{isFresh\s*&&\s*editing\s*&&\s*canEditOwn\s*&&\s*\(?\s*<EditView/);
   });
 
   it("pinId 切替時の reset (detail / editing / draft) は維持されている", () => {
@@ -740,7 +742,7 @@ describe("Phase 1-H — pin-detail-panel 写真 UI", () => {
 
   it("own + archived 以外でのみ追加/削除 UI を出す (canEdit)", () => {
     expect(DETAIL_SRC).toMatch(
-      /canEdit=\{isOwn\s*&&\s*detail!\.status\s*!==\s*"archived"\}/,
+      /canEdit=\{canEditOwn\s*&&\s*detail!\.status\s*!==\s*"archived"\}/,
     );
     expect(DETAIL_SRC).toMatch(/\{canEdit\s*&&\s*\(/);
   });

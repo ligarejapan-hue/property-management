@@ -1,6 +1,8 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import FieldSurveyMap from "@/components/field-survey/field-survey-map";
+import FieldSurveyHistoryMap from "@/components/field-survey/field-survey-history-map";
 import {
   isGoogleMapsBillingAcknowledged,
   isGoogleMapsKeyConfigured,
@@ -26,6 +28,11 @@ export default function FieldSurveyMapClient({
   const billingAcknowledged = isGoogleMapsBillingAcknowledged(billingAckFlag);
   const hasMapId = isGoogleMapsMapIdConfigured(mapId);
 
+  // Phase 1-J: ?sessionId=xxx があれば過去ルートの履歴閲覧モード (完全 read-only)。
+  const searchParams = useSearchParams();
+  const rawSessionId = searchParams?.get("sessionId") ?? null;
+  const historySessionId = isValidUuid(rawSessionId) ? rawSessionId : null;
+
   if (!hasKey) return <MissingKeyNotice />;
   // Codex P1: APIキーが入っていても billing 未確認なら Maps JS API loader を
   // 起動しない fallback に切り替える。
@@ -33,6 +40,18 @@ export default function FieldSurveyMapClient({
   // Codex (Phase 1-E 追加): MAP_ID 未設定では AdvancedMarker が出ない壊れた
   // 地図 UI になるため、Maps JS API を読み込まず fallback に切り替える。
   if (!hasMapId) return <MissingMapIdFallback />;
+  // 履歴閲覧モードは完全 read-only の専用コンポーネントへ分岐する。
+  // (通常マップの記録 / pin 作成・編集経路を一切 mount しない)。
+  if (historySessionId) {
+    return (
+      <FieldSurveyHistoryMap
+        apiKey={apiKey as string}
+        mapId={mapId as string}
+        currentUserId={currentUserId}
+        sessionId={historySessionId}
+      />
+    );
+  }
   return (
     <FieldSurveyMap
       apiKey={apiKey as string}
@@ -40,6 +59,12 @@ export default function FieldSurveyMapClient({
       currentUserId={currentUserId}
     />
   );
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUuid(v: string | null): v is string {
+  return typeof v === "string" && UUID_RE.test(v);
 }
 
 function MissingMapIdFallback() {

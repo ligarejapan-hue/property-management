@@ -41,6 +41,8 @@ interface PinDetailPanelProps {
   currentUserId: string;
   /** field_survey:manage を granted で持つか。他人 pin の削除ボタン表示に使う。 */
   canManage?: boolean;
+  /** Phase 1-J: 履歴閲覧など完全 read-only 表示。編集/削除/写真追加削除を出さない。 */
+  readOnly?: boolean;
   onClose: () => void;
   /** 保存成功 → marker 再 fetch を親側でトリガするためのコールバック。 */
   onUpdated?: (updated: PinDetail) => void;
@@ -52,6 +54,7 @@ export default function PinDetailPanel({
   pinId,
   currentUserId,
   canManage = false,
+  readOnly = false,
   onClose,
   onUpdated,
   onDeleted,
@@ -113,12 +116,18 @@ export default function PinDetailPanel({
   // の編集 UI が新 pinId に対して残らないことを保証する。
   // manage 権限を持っていても、Phase 1-G では他人 pin の編集 UI を出さない。
   const isFresh = !!detail && detail.id === pinId;
+  // readOnly 時は編集系をすべて抑止する。canEditOwn は編集 UI (EditView / 写真) 用。
   const isOwn = isFresh && detail!.staffUserId === currentUserId;
+  const canEditOwn = !readOnly && isOwn;
   // Phase 1-I: 論理削除ボタンの表示可否。own または canManage、かつ未アーカイブのみ。
   // canManage は親が field_survey:manage の granted で算出した値だけを使う
   // (閲覧専用の上位権限では false になり、他人 pin に削除ボタンは出ない)。
+  // readOnly (履歴閲覧) では削除ボタンも出さない。
   const canDelete =
-    isFresh && (isOwn || canManage) && detail!.status !== "archived";
+    !readOnly &&
+    isFresh &&
+    (isOwn || canManage) &&
+    detail!.status !== "archived";
 
   const handleDelete = async () => {
     if (!detail) return;
@@ -207,11 +216,12 @@ export default function PinDetailPanel({
           <ReadOnlyView
             detail={detail!}
             isOwn={isOwn}
+            canEdit={canEditOwn}
             onEdit={() => setEditing(true)}
           />
         )}
 
-        {isFresh && editing && isOwn && (
+        {isFresh && editing && canEditOwn && (
           <EditView
             detail={detail!}
             draftPinType={draftPinType}
@@ -250,7 +260,7 @@ export default function PinDetailPanel({
         {isFresh && !editing && (
           <PinPhotoSection
             pinId={pinId}
-            canEdit={isOwn && detail!.status !== "archived"}
+            canEdit={canEditOwn && detail!.status !== "archived"}
           />
         )}
 
@@ -538,10 +548,12 @@ function PinPhotoSection({
 function ReadOnlyView({
   detail,
   isOwn,
+  canEdit,
   onEdit,
 }: {
   detail: PinDetail;
   isOwn: boolean;
+  canEdit: boolean;
   onEdit: () => void;
 }) {
   return (
@@ -579,7 +591,7 @@ function ReadOnlyView({
           {detail.memo && detail.memo.length > 0 ? detail.memo : "(なし)"}
         </div>
       </div>
-      {isOwn && (
+      {canEdit && (
         <button
           type="button"
           onClick={onEdit}
