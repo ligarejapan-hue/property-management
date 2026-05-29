@@ -89,7 +89,7 @@ property-management の開発全体を回すための **運用設計ドキュメ
 **運用方針**
 
 - **目標運用**：`PR作成 → CI green → GitHub Actions が自動で `@codex review` コメントを投稿 → Codex review 開始` の方式とする。
-- **初期版（実装済み・検証中）**：`.github/workflows/codex-review-auto.yml` が、CI（name: `CI`）成功後に **`needs-codex-review` ラベル付きの非 draft PR にだけ** `@codex review` を自動投稿する（opt-in）。`skip-codex-review` ラベルがあれば投稿しない。`github-actions[bot]` のコメントに **Codex が反応するかを、この初期版で検証**する段階である。
+- **初期版（実装済み・検証中）**：`.github/workflows/codex-review-auto.yml` が、CI（name: `CI`）成功後に **`needs-codex-review` ラベル付きの非 draft PR にだけ** `@codex review` を自動投稿する（opt-in）。`skip-codex-review` ラベルがあれば投稿しない。CI green 後に **ラベル追加（`needs-codex-review`）・`skip-codex-review` 解除・draft 解除（Ready for review）・reopen** をした場合も、**現在の head SHA に対する CI 成功を確認**してから自動依頼する。`github-actions[bot]` のコメントに **Codex が反応するかを、この初期版で検証**する段階である。
 - 反応が確認できたら、**default-on + `skip-codex-review`（opt-out）方式へ拡張**する。
 - Codex automatic reviews が ON かは引き続き未確認であり、**前提にしない**。
 - **暫定運用**：上記の対象外（ラベル未付与など）で必要なPRでは、**ユーザーが手動で `@codex review` を実行**する。
