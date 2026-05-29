@@ -64,8 +64,8 @@ property-management の開発全体を回すための **運用設計ドキュメ
 [9]  Codex review    @codex（必要時・手動）  ：§5基準で要否判断
 [10] 指摘対応        Codex指摘 → ChatGPT    ：修正指示文を作る → [3]or[6]へ戻る
 [11] merge           ユーザー               ：指摘なし＋CI greenが条件
-[12] cleanup         標準フロー（§9）       ：remote自動削除 + ローカル整理
-[13] VPS反映         ユーザー明示時のみ     ：§8基準。migration/env注意
+[12] cleanup         標準フロー（§8）       ：remote自動削除 + ローカル整理
+[13] VPS反映         ユーザー明示時のみ     ：§7基準。migration/env注意
 [14] 進捗報告        ユーザー/ChatGPT       ：進捗管理チャットへ結果記録
 ```
 
