@@ -263,7 +263,13 @@ docs-only 作業の最低限報告フォーマット:
   - 無料または低コストの代替案
   - 実行してよいかの明示確認
 - ユーザーの明示承認なしに、従量課金サービスを有効化・利用・自動化しない。
-- 特に Claude GitHub Code Review / `@claude review` は usage based billing のため、標準フローには組み込まない。
-- 標準レビューは既存の Codex review opt-in 運用（`docs/ai-workflow.md` §5）を使う。
 - 既に本番運用上必要なサービスでも、課金条件・自動実行条件を変更する場合は事前に報告する。
+
+### Claude GitHub Code Review / `@claude review` は原則禁止
+
+- Claude GitHub Code Review / `@claude review` は usage based billing のため **原則禁止**とする。
+- 標準開発フロー・PRレビュー・自動化・workflow・bot 連携には**組み込まない**。
+- Claude GitHub Code Review / `@claude review` を**利用する提案も標準では行わない**。
+- 例外は、ユーザーが **対象PR・目的・想定費用・課金トリガー・代替案** を確認したうえで、その都度明示的に「このPRで使う」と指示した場合のみ。
+- 標準レビューは既存の **Codex review opt-in** 運用（`docs/ai-workflow.md` §5）を使う。
 <!-- END:claude-code-rules -->
