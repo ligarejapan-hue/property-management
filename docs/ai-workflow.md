@@ -273,3 +273,4 @@ VPS：未反映/反映済み(hash)
 - （default-on + `skip-codex-review` への拡張は、bot コメントへの反応確認後に行う。）
 - （GitHub の Automatically delete head branches は ON 済みのため未確認事項に含めない。）
 - （`docs/deploy.md` の PM2 / Node版数の矛盾は PR #69 で整理済みのため未確認事項から外した。）
+- A-6 opt-in 自動 Codex review workflow は、`needs-codex-review` ラベル付きテストPRで動作確認する。
