@@ -203,6 +203,9 @@ Codex出力 → 分類確認（Blocker / Important / Nice to have）
 
 PR本文は既存の `.github/PULL_REQUEST_TEMPLATE.md` を使う（本書では再定義しない）。
 
+**使い分け**：各テンプレは長文版（標準・PC向け）。スマホからは「スマホ短縮版テンプレ」を使ってよい。
+ただし短縮版でも、**変更してよい範囲／変更してはいけない範囲／禁止事項／`.claude/settings.local.json` を触らないこと／VPS反映の有無**は省略しない。指示が曖昧な場合、Claude Code は Plan で停止する。
+
 ### Claude Code Plan依頼テンプレート
 
 ```
@@ -274,6 +277,30 @@ cleanup結果：未/完了（削除branch・worktree）
 VPS反映要否：不要/必要（明示時のみ・反映済みなら hash）
 残課題：
 次にやること：
+```
+
+### 緊急停止・確認のみテンプレート
+
+```
+モード：確認のみ（read-only） / 即時停止（いずれか明示）
+許可：git status --short / git show / git log 等の確認コマンドと、その報告のみ
+禁止：編集 / staging / commit / push / PR作成 / merge / VPS操作 /
+      reset / clean / stash apply・pop・drop / .claude/settings.local.json 変更
+即時停止の場合：現在の状態・実行予定だった操作・停止理由を報告し、承認まで進めない（§4 停止点・§11#8）
+返すもの：確認結果と、次アクションの可否
+```
+
+### スマホ短縮版テンプレート
+
+```
+（スマホから短く出す用。詳細は §10 の各長文テンプレに従う）
+タスク：（1行）
+モード：Plan のみ / 実装 / 確認のみ / cleanup（いずれか明示）
+触ってよい範囲：
+触ってはいけない範囲：
+禁止：main直push / force-push / merge / VPS / .claude/settings.local.json 変更
+VPS反映：なし（短縮版は原則なし。必要時は「VPS反映依頼テンプレート」を使う）
+※ 指示が曖昧なら Claude Code は Plan で停止する
 ```
 
 ---
