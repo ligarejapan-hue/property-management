@@ -11,7 +11,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { patchFieldSurveyPinSchema } from "@/lib/validators";
-import { assertPropertyAccessible } from "@/app/api/field-survey/pins/route";
+import { assertPropertyAccessible } from "@/lib/field-survey-property-access";
 
 const SELECT_PIN = {
   id: true,
