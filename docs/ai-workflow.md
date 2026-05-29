@@ -61,7 +61,7 @@ property-management の開発全体を回すための **運用設計ドキュメ
 [6]  実装一式        Claude Code            ：実装→test→build→diff-check→commit→push→compare URL
 [7]  PR作成          ユーザー（原則）       ：PRテンプレに沿って起票
 [8]  CI確認          GitHub Actions         ：build+test、green/red
-[9]  Codex review    @codex（必要時）       ：§6基準で要否判断
+[9]  Codex review    @codex（必要時・手動）  ：§5基準で要否判断
 [10] 指摘対応        Codex指摘 → ChatGPT    ：修正指示文を作る → [3]or[6]へ戻る
 [11] merge           ユーザー               ：指摘なし＋CI greenが条件
 [12] cleanup         標準フロー（§9）       ：remote自動削除 + ローカル整理
@@ -86,6 +86,16 @@ property-management の開発全体を回すための **運用設計ドキュメ
 
 ## 5. Codex review の判断基準
 
+**運用方針（現時点）**
+
+- Codex review は **手動 `@codex review`** で依頼する運用とする。
+- Codex automatic reviews が ON かは未確認のため、**自動実行は前提にしない**。
+- 重要PRでは、**ユーザーが明示的に `@codex review` を実行**する。
+- DB / migration / PII / GPS / AuditLog / 権限 / import / rollback / upload-storage / security 系は Codex review **必須級または強く推奨**。
+- docs-only / typo / UI文言などは Codex review **不要でもよい**。
+- ただし docs でも、**VPS手順・開発フロー・セキュリティ運用に関わる変更は Codex review 推奨**。
+- Codex 指摘が出た場合は、**ChatGPT が妥当性を判断し、Claude Code への修正指示に変換**する。
+
 | レベル | 対象（`CLAUDE.md` §11 / `AGENTS.md` 準拠） |
 |--------|------|
 | 必須級 | DB/schema/migration、権限/role、PII、AuditLog、import、rollback/correction、storage/upload(path traversal)、GPS/location、production data影響、認証バイパス懸念 |
@@ -96,11 +106,12 @@ property-management の開発全体を回すための **運用設計ドキュメ
 
 ```
 Codex出力 → 分類確認（Blocker / Important / Nice to have）
-  Blocker     : merge前に必ず修正。ChatGPTが修正指示文化 → Claude Code修正 → 再push → CI → 再review
-  Important   : 原則修正。見送るなら理由をPR/チャットに記録（ユーザー判断）
-  Nice to have: 任意。別Issue化も可
+  Blocker      : merge前に必ず修正。ChatGPTが修正指示文化 → Claude Code修正 → 再push → CI → 再review
+  Important    : （P1 / P2 相当）原則 merge 前に対応。見送るなら理由をPR/チャットに記録（ユーザー判断）
+  Nice to have : （P3 相当）任意。必要に応じて見送り、または別Issue化も可
 ```
 
+- 主分類は `AGENTS.md` に合わせ **Blocker / Important / Nice to have** を維持する。P1 / P2 / P3 は補助的な対応付けとして併記したものであり、用語の置き換えではない。
 - 修正は新規commit（amendしない）。
 - Codexへの返信文案は標準報告に含めない（`AGENTS.md`）。
 
@@ -254,6 +265,7 @@ VPS：未反映/反映済み(hash)
 
 ## 11. 未確認事項
 
-- Codex review が自動で走る設定か、毎回 `@codex review` が必要かは未確認。
-- `docs/deploy.md` の PM2 / Node版数の記述に矛盾があり、別タスクで確認・修正する。
+- Codex review の運用は、当面「**必要なPRでは手動 `@codex review` を使う**」運用に決定済み（§5 参照）。
+  Codex automatic reviews が ON かは未確認だが、**自動実行は前提にしない**。
 - （GitHub の Automatically delete head branches は ON 済みのため未確認事項に含めない。）
+- （`docs/deploy.md` の PM2 / Node版数の矛盾は PR #69 で整理済みのため未確認事項から外した。）
