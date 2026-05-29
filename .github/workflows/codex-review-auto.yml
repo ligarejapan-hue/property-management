@@ -1,0 +1,102 @@
+name: Codex Review Auto Request
+
+# CI（name: "CI"）が成功したあと、opt-in ラベル付き PR にだけ
+# `@codex review` を自動投稿する初期検証版。
+# github-actions[bot] のコメントに Codex が反応するかを検証する目的。
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  request-codex-review:
+    # CI が success かつ pull_request 由来の実行のときだけ動く
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Codex review on opt-in PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // 1. PR 番号を取得（第一候補: workflow_run.pull_requests）
+            let prNumber = null;
+            if (run.pull_requests && run.pull_requests.length > 0) {
+              prNumber = run.pull_requests[0].number;
+            }
+            // フォールバック: head_sha から関連 PR を検索
+            if (!prNumber) {
+              const assoc = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner,
+                repo,
+                commit_sha: run.head_sha,
+              });
+              const openPr = assoc.data.find((p) => p.state === 'open');
+              if (openPr) prNumber = openPr.number;
+            }
+            if (!prNumber) {
+              core.info('関連する PR が特定できないため何もしない。');
+              return;
+            }
+
+            // 2. PR を取得して draft / label を判定
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+            if (pr.draft) {
+              core.info(`PR #${prNumber} は draft のため skip。`);
+              return;
+            }
+            const labels = (pr.labels || []).map((l) =>
+              typeof l === 'string' ? l : l.name
+            );
+            if (labels.includes('skip-codex-review')) {
+              core.info(`PR #${prNumber} は skip-codex-review ラベル付きのため skip。`);
+              return;
+            }
+            // opt-in: needs-codex-review ラベルが無ければ対象外
+            if (!labels.includes('needs-codex-review')) {
+              core.info(`PR #${prNumber} は needs-codex-review ラベル無しのため skip（opt-in）。`);
+              return;
+            }
+
+            // 3. 重複防止: hidden marker 付きコメントが既にあれば投稿しない
+            const MARKER = '<!-- auto-codex-review -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const already = comments.some(
+              (c) =>
+                c.user &&
+                c.user.login === 'github-actions[bot]' &&
+                (c.body || '').includes(MARKER)
+            );
+            if (already) {
+              core.info(`PR #${prNumber} には既に自動依頼コメントがあるため skip。`);
+              return;
+            }
+
+            // 4. コメント投稿
+            const body = `${MARKER}\n@codex review`;
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: prNumber,
+              body,
+            });
+            core.info(`PR #${prNumber} に @codex review を投稿した。`);

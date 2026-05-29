@@ -89,8 +89,10 @@ property-management の開発全体を回すための **運用設計ドキュメ
 **運用方針**
 
 - **目標運用**：`PR作成 → CI green → GitHub Actions が自動で `@codex review` コメントを投稿 → Codex review 開始` の方式とする。
-- ただし **CI green 後に `@codex review` を自動投稿する GitHub Actions workflow は未実装**であり、Codex automatic reviews が ON かも未確認のため、**自動実行は当面の前提にしない**。
-- **暫定運用（自動化が実装されるまで）**：必要なPRでは **ユーザーが手動で `@codex review` を実行**する。
+- **初期版（実装済み・検証中）**：`.github/workflows/codex-review-auto.yml` が、CI（name: `CI`）成功後に **`needs-codex-review` ラベル付きの非 draft PR にだけ** `@codex review` を自動投稿する（opt-in）。`skip-codex-review` ラベルがあれば投稿しない。`github-actions[bot]` のコメントに **Codex が反応するかを、この初期版で検証**する段階である。
+- 反応が確認できたら、**default-on + `skip-codex-review`（opt-out）方式へ拡張**する。
+- Codex automatic reviews が ON かは引き続き未確認であり、**前提にしない**。
+- **暫定運用**：上記の対象外（ラベル未付与など）で必要なPRでは、**ユーザーが手動で `@codex review` を実行**する。
 - DB / migration / PII / GPS / AuditLog / 権限 / import / rollback / upload-storage / security 系は Codex review **必須級または強く推奨**。
 - docs-only / typo / UI文言などは Codex review **不要でもよい**。
 - ただし docs でも、**VPS手順・開発フロー・セキュリティ運用に関わる変更は Codex review 推奨**。
@@ -265,8 +267,9 @@ VPS：未反映/反映済み(hash)
 
 ## 11. 未確認事項
 
-- Codex automatic reviews が ON かは未確認。
-- **CI green 後に `@codex review` を自動投稿する GitHub Actions workflow は未実装**（目標運用は §5 参照）。
-- そのため自動化が実装されるまでは、**必要なPRでは手動 `@codex review` を暫定運用**とする（自動実行は前提にしない）。
+- **`github-actions[bot]` が投稿した `@codex review` コメントに Codex が反応するかは未確認**。これを検証するため、初期版の自動投稿 workflow（`.github/workflows/codex-review-auto.yml`）は **opt-in（`needs-codex-review` ラベル）** に限定している（§5 参照）。
+- Codex automatic reviews が ON かは未確認であり、**前提にしない**。
+- 反応未確認の段階では、対象外の必要なPRは **手動 `@codex review` を併用**する。
+- （default-on + `skip-codex-review` への拡張は、bot コメントへの反応確認後に行う。）
 - （GitHub の Automatically delete head branches は ON 済みのため未確認事項に含めない。）
 - （`docs/deploy.md` の PM2 / Node版数の矛盾は PR #69 で整理済みのため未確認事項から外した。）
