@@ -221,6 +221,10 @@ sudo git clone <repository-url> /opt/property-management
 cd /opt/property-management
 sudo chown -R www-data:www-data /opt/property-management
 
+# www-data の npm キャッシュディレクトリを作成（初回のみ・未作成の場合）
+sudo mkdir -p /var/www/.npm
+sudo chown www-data:www-data /var/www/.npm
+
 # 依存インストール
 # ⚠ @tailwindcss/postcss・tailwindcss はビルド時に必要なため dependencies に入っている
 #   NODE_ENV=production 環境下でも --omit=dev で除外されない（devDependencies ではないため）
