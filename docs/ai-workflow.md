@@ -88,14 +88,15 @@ property-management の開発全体を回すための **運用設計ドキュメ
 
 **運用方針**
 
-- **目標運用**：`PR作成 → CI green → GitHub Actions が自動で `@codex review` コメントを投稿 → Codex review 開始` の方式とする。
-- **初期版（実装済み・検証中）**：`.github/workflows/codex-review-auto.yml` が、CI（name: `CI`）成功後に **`needs-codex-review` ラベル付きの非 draft PR にだけ** `@codex review` を自動投稿する（opt-in）。`skip-codex-review` ラベルがあれば投稿しない。CI green 後に **ラベル追加（`needs-codex-review`）・`skip-codex-review` 解除・draft 解除（Ready for review）・reopen** をした場合も、**現在の head SHA に対する CI 成功を確認**してから自動依頼する。`github-actions[bot]` のコメントに **Codex が反応するかを、この初期版で検証**する段階である。
-- 反応が確認できたら、**default-on + `skip-codex-review`（opt-out）方式へ拡張**する。
-- Codex automatic reviews が ON かは引き続き未確認であり、**前提にしない**。
-- **暫定運用**：上記の対象外（ラベル未付与など）で必要なPRでは、**ユーザーが手動で `@codex review` を実行**する。
-- DB / migration / PII / GPS / AuditLog / 権限 / import / rollback / upload-storage / security 系は Codex review **必須級または強く推奨**。
+- **正式運用（opt-in）**：`.github/workflows/codex-review-auto.yml` が、CI（name: `CI`）成功後に **`needs-codex-review` ラベル付きの非 draft PR にだけ** `@codex review` を自動投稿する。`skip-codex-review` ラベルがあれば投稿しない。CI green 後に **ラベル追加（`needs-codex-review`）・`skip-codex-review` 解除・draft 解除（Ready for review）・reopen** をした場合も、**現在の head SHA に対する CI 成功を確認**してから自動依頼する。
+- `github-actions[bot]` の `@codex review` コメントに **Codex が反応することは PR #72 で確認済み**。
+- `skip-codex-review` は、自動依頼から**明示的に除外したいPR用**として維持する。
+- **default-on + `skip-codex-review`（opt-out）方式は将来候補**であり、**現時点では採用しない**。
+- Codex automatic reviews が ON かは未確認であり、**前提にしない**（自前の opt-in workflow を正式運用とする）。
+- **opt-in 対象外で必要なPR**では、**ユーザーが手動で `@codex review` を補完的に実行**してよい。
+- DB / migration / PII / GPS / AuditLog / 権限 / import / rollback / upload-storage / security 系は **`needs-codex-review` ラベルを付ける運用を推奨**（Codex review 必須級または強く推奨）。
 - docs-only / typo / UI文言などは Codex review **不要でもよい**。
-- ただし docs でも、**VPS手順・開発フロー・セキュリティ運用に関わる変更は Codex review 推奨**。
+- ただし docs でも、**VPS手順・開発フロー・セキュリティ運用に関わるPRでは `needs-codex-review` ラベル付与を推奨**。
 - Codex 指摘が出た場合は、**ChatGPT が妥当性を判断し、Claude Code への修正指示に変換**する。
 
 | レベル | 対象（`CLAUDE.md` §11 / `AGENTS.md` 準拠） |
@@ -267,10 +268,8 @@ VPS：未反映/反映済み(hash)
 
 ## 11. 未確認事項
 
-- **`github-actions[bot]` が投稿した `@codex review` コメントに Codex が反応するかは未確認**。これを検証するため、初期版の自動投稿 workflow（`.github/workflows/codex-review-auto.yml`）は **opt-in（`needs-codex-review` ラベル）** に限定している（§5 参照）。
-- Codex automatic reviews が ON かは未確認であり、**前提にしない**。
-- 反応未確認の段階では、対象外の必要なPRは **手動 `@codex review` を併用**する。
-- （default-on + `skip-codex-review` への拡張は、bot コメントへの反応確認後に行う。）
+- Codex automatic reviews が ON かは未確認。ただし現在は**自前の GitHub Actions opt-in 運用を正式運用とする**ため、Codex automatic reviews は**前提にしない**。
+- （`github-actions[bot]` の `@codex review` コメントに Codex が反応すること、および opt-in workflow の基本動作は **PR #72 で確認済み**のため未確認事項から外した。詳細は §5 参照。）
+- （default-on + `skip-codex-review`（opt-out）方式は将来候補であり、現時点では採用しない。）
 - （GitHub の Automatically delete head branches は ON 済みのため未確認事項に含めない。）
 - （`docs/deploy.md` の PM2 / Node版数の矛盾は PR #69 で整理済みのため未確認事項から外した。）
-- A-6 opt-in 自動 Codex review workflow は、`needs-codex-review` ラベル付きテストPRで動作確認する。

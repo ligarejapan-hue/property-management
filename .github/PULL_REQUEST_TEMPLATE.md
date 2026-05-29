@@ -62,7 +62,7 @@ migration がある場合：
 ## Codex review
 - Codex review：[ ] 推奨 / [ ] 不要
 - 推奨理由（DB / migration / 権限 / PII / AuditLog / import / rollback / storage / GPS / security 等）：
-- `needs-codex-review` ラベルを付けると、CI green 後に `@codex review` 自動依頼の対象になります（初期版 opt-in）。
+- `needs-codex-review` ラベルを付けると、CI green 後に `@codex review` 自動依頼の対象になります（opt-in 運用）。
 
 ---
 
