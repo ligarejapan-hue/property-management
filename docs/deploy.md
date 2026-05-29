@@ -1,6 +1,6 @@
 # 本番デプロイガイド
 
-対象: Node.js 18+ / PostgreSQL 15+ / Linux サーバー（または同等の PaaS）
+対象: Node.js（CI では Node.js 24 で検証） / PostgreSQL 15+ / Linux サーバー（または同等の PaaS）
 
 ---
 
@@ -8,10 +8,10 @@
 
 ### 実行環境
 
-- [ ] Node.js **v18 以上**であること
+- [ ] Node.js のバージョンが CI と揃っていること（CI では **Node.js 24** で検証。本番・検証環境は CI の Node 版数に合わせることを推奨。Next.js 16 の正確な最小要件は本ガイドでは断定しない）
   ```bash
-  node --version   # v18.x 以上
-  npm --version    # 9.x 以上
+  node --version   # CI 検証版数（Node.js 24）に合わせることを推奨
+  npm --version
   ```
 - [ ] PostgreSQL **15 以上**であること
 
@@ -168,21 +168,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now property-management
 ```
 
-### PM2 を使う場合
-
-`ecosystem.config.js`（git 管理外）に全 env を記述する:
-```js
-module.exports = {
-  apps: [{
-    name: "property-management",
-    script: "node_modules/.bin/next",
-    args: "start",
-    env_file: "/etc/property-management/app.env",  // ファイル参照
-  }]
-};
-```
-
-> ⚠ `ecosystem.config.js` が存在する場合は `.gitignore` に追加すること。
+> **本プロジェクトは systemd service `property-management` で運用し、PM2 は使用しない（CLAUDE.md §13）。**
+> env は systemd の `EnvironmentFile`（`/etc/property-management/app.env`）から読み込む。
 
 ### NG パターン
 
@@ -201,10 +188,10 @@ module.exports = {
 ### ステップ 0: 実行環境を確認
 
 ```bash
-node --version   # v18.x 以上であること
-npm --version    # 9.x 以上であること
+node --version   # CI 検証版数（Node.js 24）に合わせることを推奨
+npm --version
 psql --version   # PostgreSQL 15 以上であること
-systemctl --version 2>/dev/null | head -1 || pm2 --version | head -1
+systemctl --version | head -1
 ```
 
 ### ステップ 1: app.env を配置
@@ -223,6 +210,10 @@ sudo vim /etc/property-management/app.env
 ```
 
 ### ステップ 2: リポジトリを取得・依存インストール
+
+> 本ガイドで `www-data` として `npm` / `npx` を実行する際は、`HOME=/var/www` と
+> `npm_config_cache=/var/www/.npm` を指定する（npm キャッシュは `/var/www/.npm`）。CLAUDE.md §13。
+> 例: `sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm ci --omit=dev`
 
 ```bash
 sudo git clone <repository-url> /opt/property-management
@@ -405,15 +396,6 @@ sudo systemctl status property-management --no-pager
 sudo journalctl -u property-management -n 10 --no-pager
 # 期待: ✓ Ready in Xms
 ```
-
-> **PM2 の場合（代替）:**
-> ```bash
-> cd /opt/property-management
-> set -a && source /etc/property-management/app.env && set +a
-> pm2 start node --name property-management \
->   -- /opt/property-management/node_modules/.bin/next start
-> pm2 save && pm2 startup
-> ```
 
 ### ステップ 8: ストレージ移行（既存 local データがある場合のみ）
 
