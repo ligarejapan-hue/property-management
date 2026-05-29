@@ -55,6 +55,17 @@ jobs:
               repo,
               pull_number: prNumber,
             });
+
+            // 2.5 stale run 対策: 古い workflow_run が遅れて success した場合、
+            //     その head_sha は現在の PR head と異なる。一致しない場合は何もしない
+            //     （誤った依頼投稿・marker の先打ちによる以後の抑制を防ぐ）。
+            if (pr.head.sha !== run.head_sha) {
+              core.info(
+                `Skip stale workflow_run: PR head ${pr.head.sha} does not match workflow_run head ${run.head_sha}`
+              );
+              return;
+            }
+
             if (pr.draft) {
               core.info(`PR #${prNumber} は draft のため skip。`);
               return;
