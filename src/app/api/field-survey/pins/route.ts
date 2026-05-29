@@ -7,8 +7,6 @@ import {
   handleApiError,
   parseJsonBody,
   ApiError,
-  type ApiSession,
-  type PermissionEntry,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
@@ -21,6 +19,7 @@ import {
   coerceLat,
   coerceLng,
 } from "@/lib/field-survey-map-util";
+import { assertPropertyAccessible } from "@/lib/field-survey-property-access";
 
 // ============================================================
 // POST /api/field-survey/pins
@@ -258,41 +257,5 @@ export async function GET(request: NextRequest) {
     return apiResponse({ data, nextCursor });
   } catch (error) {
     return handleApiError(error);
-  }
-}
-
-// ============================================================
-// helper: property 認可 (既存 properties API の field_staff scope と整合)
-// ============================================================
-
-export async function assertPropertyAccessible(
-  propertyId: string,
-  session: ApiSession,
-  permissions: PermissionEntry[],
-): Promise<void> {
-  if (!hasPermission(permissions, "property", "read")) {
-    throw new ApiError(
-      403,
-      "property の閲覧権限がありません",
-      "FORBIDDEN",
-    );
-  }
-  const property = await prisma.property.findUnique({
-    where: { id: propertyId },
-    select: { id: true, createdBy: true, assignedTo: true },
-  });
-  if (!property) {
-    throw new ApiError(404, "property が見つかりません", "PROPERTY_NOT_FOUND");
-  }
-  if (
-    session.role === "field_staff" &&
-    property.createdBy !== session.id &&
-    property.assignedTo !== session.id
-  ) {
-    throw new ApiError(
-      403,
-      "この property を pin に紐付ける権限がありません",
-      "FORBIDDEN",
-    );
   }
 }
