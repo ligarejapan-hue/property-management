@@ -98,6 +98,7 @@ property-management の開発全体を回すための **運用設計ドキュメ
 - docs-only / typo / UI文言などは Codex review **不要でもよい**。
 - ただし docs でも、**VPS手順・開発フロー・セキュリティ運用に関わるPRでは `needs-codex-review` ラベル付与を推奨**。
 - Codex 指摘が出た場合は、**ChatGPT が妥当性を判断し、Claude Code への修正指示に変換**する。
+- 標準のコードレビューは **Codex review opt-in（`needs-codex-review`）** を使う。GitHub 上の **Claude GitHub Code Review / `@claude review` は原則禁止**で、標準開発フロー・PRレビュー・自動化・workflow・bot 連携には組み込まない。**詳細・例外条件は `CLAUDE.md` §17 を正とする。**
 
 | レベル | 対象（`CLAUDE.md` §11 / `AGENTS.md` 準拠） |
 |--------|------|
