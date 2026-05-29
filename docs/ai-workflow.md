@@ -64,8 +64,8 @@ property-management の開発全体を回すための **運用設計ドキュメ
 [9]  Codex review    @codex（必要時・手動）  ：§5基準で要否判断
 [10] 指摘対応        Codex指摘 → ChatGPT    ：修正指示文を作る → [3]or[6]へ戻る
 [11] merge           ユーザー               ：指摘なし＋CI greenが条件
-[12] cleanup         標準フロー（§9）       ：remote自動削除 + ローカル整理
-[13] VPS反映         ユーザー明示時のみ     ：§8基準。migration/env注意
+[12] cleanup         標準フロー（§8）       ：remote自動削除 + ローカル整理
+[13] VPS反映         ユーザー明示時のみ     ：§7基準。migration/env注意
 [14] 進捗報告        ユーザー/ChatGPT       ：進捗管理チャットへ結果記録
 ```
 
@@ -179,17 +179,23 @@ Codex出力 → 分類確認（Blocker / Important / Nice to have）
 
 | 区分 | 内容 |
 |------|------|
-| スマホでできる | Issue起票（テンプレ利用）、`@claude`/`@codex`コメント、PR/diff/compare閲覧、CI結果(green/red)確認、進捗チャット報告 |
+| スマホでできる | Issue起票（テンプレ利用）、`@claude`/`@codex`コメント、PR/diff/compare閲覧、CI結果(green/red)確認、**`needs-codex-review` ラベル付与**、**CI green 後の自動 `@codex review` 依頼・Codex review 結果の確認**、進捗チャット報告 |
 | やってよい軽作業 | docs/typo/文言修正の `@claude` 依頼、Plan内容の承認/差し戻し、Codex指摘の確認 |
-| 避けること | merge最終確定（差分を精査できない時）、VPS操作全般、migration含むPRのmerge、env変更を伴う反映、複数並列タスクの起動 |
+| merge判断 | **CI green ＋ Codex review 結果確認 ＋ 差分を十分に精査できる場合のみ**スマホで確定してよい。スマホ画面で差分確認が不十分なら、**merge 判断は帰宅後PCへ回す** |
+| 避けること | 差分を精査できないままの merge 確定、VPS操作全般、migration含むPRのmerge、env変更を伴う反映、複雑な conflict 対応、複数並列タスクの起動 |
 | 帰宅後PCでやる | 差分の精読、本体コードレビュー、migration/env絡みのmerge、VPS反映、ビルド再現確認、cleanup |
 
 `@claude` / `@codex` を使う時の注意
 
 1. 作業前に `CLAUDE.md` / `AGENTS.md` 参照前提を必ず添える。
 2. `@claude` はpush可能だが merge/VPS はしない前提を明記する。
-3. スマホ起票でも「禁止事項」「変更してよい範囲」を省略しない。
-4. CI red のまま放置merge依頼をしない。
+3. CI red のまま放置merge依頼をしない。
+4. Claude Code への指示は短くても、次は**省略しない**：
+   - 変更してよい範囲
+   - 変更してはいけない範囲
+   - 禁止事項
+   - `.claude/settings.local.json` を触らないこと
+   - VPS反映の有無
 
 ---
 
@@ -255,18 +261,48 @@ env変更：あり/なし（あれば app.env 更新内容）
 ### 進捗管理チャット報告テンプレート
 
 ```
-タスク：
+完了Phase / タスク名：
 状態：Plan待ち/実装中/PR作成済み/CI green/Codex待ち/merge済み/cleanup済み/VPS反映済み
-PR・compare URL：
-CI：green/red（redなら原因）
-Codex：未/指摘なし/Blocker有(対応中)
-VPS：未反映/反映済み(hash)
-残課題・次アクション：
+PR番号 / compare URL：
+branch：
+merge commit hash：
+変更ファイル：
+実装内容：
+CI結果：green/red（redなら原因）
+Codex review結果：未/指摘なし/Blocker有(対応中)/対応済み
+cleanup結果：未/完了（削除branch・worktree）
+VPS反映要否：不要/必要（明示時のみ・反映済みなら hash）
+残課題：
+次にやること：
 ```
 
 ---
 
-## 11. 未確認事項
+## 11. トラブル時の復旧ルール
+
+**共通原則**
+
+- 推測で修正しない。原因が不明なときは安全側で止める。
+- 対象（PR番号・branch・ファイル）を明示する。
+- 不明点は報告して停止する（承認・指示なく先へ進めない）。
+- `git reset` / `git clean` / `force push` / `stash apply`・`pop`・`drop` / VPS操作 / env変更 には踏み込まない。
+- 既存の正を参照する：CI失敗・推測禁止は `CLAUDE.md` §6、VPS は `CLAUDE.md` §13 と `docs/deploy.md`、cleanup は本書 §8。
+
+| 症状 | 一次対応 | 担当 | やってはいけないこと |
+|------|---------|------|------------------|
+| 1. CI failed | Actions ログで失敗ジョブ/テストを特定し報告。修正は最小差分で新規 commit → 再 push → CI 再確認 | Claude Code（修正）/ ChatGPT（指示）/ ユーザー（判断） | 推測修正・main 直 push・CI red のまま merge |
+| 2. Codex 指摘あり | 分類（Blocker / Important(P1·P2) / Nice to have(P3)）を確認し §5 の対応フローへ。Blocker・P1・P2 は原則 merge 前に対応 | ChatGPT（妥当性判断・指示）→ Claude Code（修正） | commit の amend・Blocker 未解消での merge |
+| 3. PR conflict | main を最新化し PR branch で内容を確認して解決 → CI 再 green 確認。複雑なものは帰宅後PCで精査 | ユーザー / Claude Code（指示時） | force push・スマホでの複雑 conflict 即解決・reset / clean |
+| 4. 自動 `@codex review` が動かない | workflow ログで PR特定 / CI success / label / draft / dedup を切り分け。当面は手動 `@codex review` で補完 | ユーザー（確認）/ ChatGPT（切り分け） | workflow の推測改変・repository settings の勝手な変更 |
+| 5. `needs-codex-review` 付与漏れ | ラベルを付与すれば CI green 後でも §5 の状態変更トリガーで再判定される。緊急時は手動 `@codex review` | ユーザー | 必須級変更を無確認で merge |
+| 6. merge後 cleanup 失敗 | 本書 §8 の安全範囲のみ再試行。未 merge / 差分あり / 不明 worktree は削除しない。判断不能は報告して停止 | Claude Code（指示時）/ ユーザー | reset / clean / stash / force・未 merge branch 削除 |
+| 7. VPS反映失敗 | `docs/deploy.md` のロールバック/手順を正として対応（ユーザー明示時のみ）。ログ確認 → 安全側 | ユーザー | AI 自律 VPS ログイン・推測での migrate/restart・secret/env 露出 |
+| 8. Claude Code が禁止操作をしそう | 直ちに停止し、該当操作と理由を報告して指示を仰ぐ（停止点は §4） | Claude Code（停止）/ ユーザー（判断） | 承認前の実行・スコープ拡大 |
+| 9. `.claude/settings.local.json` が混入しそう | 原則「最初から stage しない」（`git add` は対象ファイルを明示）。万一 stage された場合も**対象を明示して unstage のみ**。ファイル自体は編集しない | Claude Code | settings.local.json の編集・`git reset`/`clean`・全体 `add` |
+
+---
+
+## 12. 未確認事項
 
 - Codex automatic reviews が ON かは未確認。ただし現在は**自前の GitHub Actions opt-in 運用を正式運用とする**ため、Codex automatic reviews は**前提にしない**。
 - （`github-actions[bot]` の `@codex review` コメントに Codex が反応すること、および opt-in workflow の基本動作は **PR #72 で確認済み**のため未確認事項から外した。詳細は §5 参照。）
