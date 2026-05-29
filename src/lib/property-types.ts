@@ -272,3 +272,21 @@ export const PROPERTY_TYPE_JP_TO_VALUE: Record<string, string> = {
   // 「建物」単独は曖昧 → unknown（旧 importer は "building" にマップしていた）
   "建物":         "unknown",
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// 登記状況 (registryStatus) / DM判断 (dmStatus) 表示ラベル
+//   一覧画面（src/app/(dashboard)/properties/page.tsx）と CSV export で共有する。
+//   値の集合は validators.ts の propertyListQuerySchema / 各 schema を正とする。
+// ════════════════════════════════════════════════════════════════════════════
+
+export const REGISTRY_STATUS_LABELS: Record<string, string> = {
+  unconfirmed: "未取得",
+  scheduled: "取得中",
+  obtained: "取得済",
+};
+
+export const DM_STATUS_LABELS: Record<string, string> = {
+  send: "送付可",
+  hold: "未判断",
+  no_send: "送付不可",
+};

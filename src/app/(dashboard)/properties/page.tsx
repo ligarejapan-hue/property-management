@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
 import NewPropertyModal from "@/components/properties/new-property-modal";
 
@@ -16,19 +16,9 @@ import {
   CASE_STATUS_OPTIONS,
   INTRODUCTION_ROUTE_LABELS,
   INTRODUCTION_ROUTE_OPTIONS,
+  REGISTRY_STATUS_LABELS,
+  DM_STATUS_LABELS,
 } from "@/lib/property-types";
-
-const REGISTRY_STATUS_LABELS: Record<string, string> = {
-  unconfirmed: "未取得",
-  scheduled: "取得中",
-  obtained: "取得済",
-};
-
-const DM_STATUS_LABELS: Record<string, string> = {
-  send: "送付可",
-  hold: "未判断",
-  no_send: "送付不可",
-};
 
 const registryStatusStyles: Record<string, string> = {
   obtained: "bg-green-100 text-green-800",
@@ -162,11 +152,11 @@ function PropertiesPageInner() {
     failures: Array<{ id: string; address: string; reason: string }>;
   } | null>(null);
 
-  const fetchProperties = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    const params: Record<string, string> = { page: String(page), limit: "50" };
+  // 一覧 API / CSV export に渡す検索条件パラメータ（page/limit を除く）。
+  // 一覧と export で条件ズレが起きないよう、組み立てを単一関数に集約する。
+  // sort ("<sortBy>:<sortOrder>") は API 形式の sortBy / sortOrder に展開する。
+  const buildFilterParams = useCallback(() => {
+    const params: Record<string, string> = {};
     if (searchText) params.keyword = searchText;
     if (mgmtIdText) params.mgmtId = mgmtIdText;
     if (typeFilter) params.propertyType = typeFilter;
@@ -181,6 +171,18 @@ function PropertiesPageInner() {
     const [sortBy, sortOrder] = sort.split(":");
     if (sortBy) params.sortBy = sortBy;
     if (sortOrder) params.sortOrder = sortOrder;
+    return params;
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
+
+  const fetchProperties = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    const params: Record<string, string> = {
+      page: String(page),
+      limit: "50",
+      ...buildFilterParams(),
+    };
 
     try {
       const json = await apiFetchProperties(params);
@@ -192,7 +194,14 @@ function PropertiesPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
+  }, [page, buildFilterParams]);
+
+  // CSV 出力: 現在の検索条件（buildFilterParams）を引き継いで export API を開く。
+  // page/limit は付けないため、条件一致の全件が対象になる。
+  const handleExportCsv = () => {
+    const qs = new URLSearchParams(buildFilterParams()).toString();
+    window.location.href = `/api/properties/export${qs ? `?${qs}` : ""}`;
+  };
 
   useEffect(() => {
     fetchProperties();
@@ -458,7 +467,16 @@ function PropertiesPageInner() {
       </div>
 
       {/* Action row */}
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={handleExportCsv}
+          className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          title="現在の検索条件で全件をCSV出力"
+        >
+          <Download className="h-4 w-4" />
+          CSV出力
+        </button>
         <button
           type="button"
           onClick={() => setShowNewModal(true)}

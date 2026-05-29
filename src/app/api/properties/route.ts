@@ -14,7 +14,11 @@ import {
   propertyListQuerySchema,
   createPropertySchema,
 } from "@/lib/validators";
-import { resolveMgmtIdToPropertyIds } from "@/lib/property-mgmt-id-search";
+import {
+  buildPropertyListWhere,
+  buildPropertyListOrderBy,
+  loadImportSourceMap,
+} from "@/lib/property-list-query";
 
 // ---------- GET /api/properties ----------
 
@@ -43,106 +47,13 @@ export async function GET(request: NextRequest) {
     });
 
     const query = propertyListQuerySchema.parse(queryObj);
-    const {
-      page,
-      limit,
-      keyword,
-      mgmtId,
-      propertyType,
-      registryStatus,
-      dmStatus,
-      caseStatus,
-      introductionRoute,
-      assignedTo,
-      updatedFrom,
-      updatedTo,
-      includeArchived,
-      hasWarning,
-      sortBy,
-      sortOrder,
-    } = query;
+    const { page, limit } = query;
 
-    // Build where clause
-    const where: any = {};
-
-    if (!includeArchived) {
-      where.isArchived = false;
-    }
-
-    if (propertyType) where.propertyType = propertyType;
-    if (registryStatus) where.registryStatus = registryStatus;
-    if (dmStatus) where.dmStatus = dmStatus;
-    if (caseStatus) where.caseStatus = caseStatus;
-    if (introductionRoute) where.introductionRoute = introductionRoute;
-    if (assignedTo) where.assignedTo = assignedTo;
-
-    if (keyword) {
-      where.OR = [
-        { address: { contains: keyword, mode: "insensitive" } },
-        { lotNumber: { contains: keyword, mode: "insensitive" } },
-        { realEstateNumber: { contains: keyword, mode: "insensitive" } },
-        { buildingNumber: { contains: keyword, mode: "insensitive" } },
-      ];
-    }
-
-    if (updatedFrom || updatedTo) {
-      where.updatedAt = {};
-      if (updatedFrom) where.updatedAt.gte = new Date(updatedFrom);
-      if (updatedTo) where.updatedAt.lte = new Date(updatedTo);
-    }
-
-    // 管理ID（取込元 fileName / rowNumber / __sourceRef）検索。
-    // helper で候補 propertyId[] を解決し AND で絞り込む。0件なら即空結果。
-    // 既存 keyword 検索とは独立した AND 条件として扱う。
-    const mgmtIdTrimmed = (mgmtId ?? "").trim();
-    let mgmtHitCount: number | null = null;
-    let mgmtShortCircuitEmpty = false;
-    if (mgmtIdTrimmed) {
-      const mgmtPropertyIds = await resolveMgmtIdToPropertyIds(
-        prisma,
-        mgmtIdTrimmed,
-      );
-      mgmtHitCount = mgmtPropertyIds.length;
-      if (mgmtPropertyIds.length === 0) {
-        mgmtShortCircuitEmpty = true;
-      } else {
-        where.AND = [
-          ...(where.AND ?? []),
-          { id: { in: mgmtPropertyIds } },
-        ];
-      }
-    }
-
-    // field_staff は自分が作成/担当する物件のみ閲覧可能。
-    // where.OR (keyword 条件) と混ぜると「担当外でも keyword に一致すれば返る」に
-    // なるため AND に追加してスコープを強制する。
-    if (session.role === "field_staff") {
-      where.AND = [
-        ...(where.AND ?? []),
-        { OR: [{ createdBy: session.id }, { assignedTo: session.id }] },
-      ];
-    }
-
-    // hasWarning: quality-check の "error" / "warning" 条件を OR で表現し、
-    // 既存 where と AND する。"info" (NO_LOT_NUMBER 等) は粒度が細かいため除外。
-    if (hasWarning === true) {
-      where.AND = [
-        ...(where.AND ?? []),
-        {
-          OR: [
-            { propertyOwners: { none: {} } }, // NO_OWNER
-            {
-              AND: [
-                { registryStatus: "unconfirmed" },
-                { dmStatus: "send" },
-              ],
-            }, // REGISTRY_DM_MISMATCH
-            { investigationConfirmedAt: null }, // INVESTIGATION_NOT_CONFIRMED
-            { assignedTo: null }, // NO_ASSIGNEE
-          ],
-        },
-      ];
-    }
+    // 検索条件（where / sort）は CSV export と共有する単一ロジックで組み立てる
+    // （src/lib/property-list-query.ts）。条件ズレ防止のためここでは直接構築しない。
+    const { where, mgmtShortCircuitEmpty, mgmtHitCount, mgmtIdTrimmed } =
+      await buildPropertyListWhere(query, session);
+    const orderBy = buildPropertyListOrderBy(query);
 
     const fetchListAndCount = () =>
       Promise.all([
@@ -171,7 +82,7 @@ export async function GET(request: NextRequest) {
               orderBy: { createdAt: "asc" },
             },
           },
-          orderBy: { [sortBy]: sortOrder },
+          orderBy,
           skip: (page - 1) * limit,
           take: limit,
         }),
@@ -183,33 +94,12 @@ export async function GET(request: NextRequest) {
       ? [[], 0]
       : await fetchListAndCount();
 
-    // 取込元情報を一括逆引きして各物件に付与する（N+1 回避）
-    const propertyIds = properties.map((p) => p.id);
-    const importRows =
-      propertyIds.length > 0
-        ? await prisma.importJobRow.findMany({
-            where: { createdId: { in: propertyIds }, status: "success" },
-            select: {
-              createdId: true,
-              rowNumber: true,
-              rawData: true,
-              job: { select: { fileName: true } },
-            },
-            orderBy: { createdAt: "asc" },
-          })
-        : [];
-
-    // createdId ごとに最初の行だけ残す
-    const importSourceMap = new Map<string, string>();
-    for (const row of importRows) {
-      if (!importSourceMap.has(row.createdId!)) {
-        const rd = (row.rawData as Record<string, string>) ?? {};
-        importSourceMap.set(
-          row.createdId!,
-          rd.__sourceRef ?? `${row.job.fileName}:${row.rowNumber}行`,
-        );
-      }
-    }
+    // 取込元情報を一括逆引きして各物件に付与する（N+1 回避）。
+    // CSV export と共有する loadImportSourceMap を再利用する。
+    const importSourceMap = await loadImportSourceMap(
+      prisma,
+      properties.map((p) => p.id),
+    );
 
     const data = properties.map((p) => {
       const { propertyOwners, ...property } = p;
