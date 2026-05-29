@@ -487,6 +487,9 @@ cd /opt/property-management
 sudo -u www-data git pull origin main
 
 # 2. 依存を再インストール（package-lock.json が更新されている場合）
+# www-data の npm キャッシュディレクトリを作成（未作成の場合）
+sudo mkdir -p /var/www/.npm
+sudo chown www-data:www-data /var/www/.npm
 sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci --omit=dev
 
 # 3. Prisma クライアント再生成（スキーマ変更がある場合）
