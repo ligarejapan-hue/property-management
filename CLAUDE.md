@@ -251,4 +251,19 @@ docs-only 作業の最低限報告フォーマット:
 - AI開発ツール（ChatGPT / Claude Code / Codex / GitHub / GitHub Actions / VPS）を使った標準開発フローは `docs/ai-workflow.md` を参照する
 - このdocsは §4 作業フロー、§5 役割分担、§11 Codexレビュー、§13 VPS運用を運用観点で補足する索引である
 - 矛盾時は CLAUDE.md / AGENTS.md を正とし、`docs/ai-workflow.md` はそれを補足する
+
+## 17. 従量課金サービスの事前報告・承認ルール
+
+- Claude Code / Codex / GitHub Actions / 外部API / クラウド機能 / review bot / usage credits など、従量課金・API課金・usage based billing・有料review・有料runner 等が発生し得るサービスや機能を、利用・追加・有効化・自動化・設定変更する場合は、実行前に必ずユーザーへ報告する。
+- 報告には次を含める：
+  - どのサービスを使うのか
+  - 従量課金が発生し得る理由
+  - 何をトリガーに課金されるのか
+  - 想定される費用（不明な場合は「不明」と明記）
+  - 無料または低コストの代替案
+  - 実行してよいかの明示確認
+- ユーザーの明示承認なしに、従量課金サービスを有効化・利用・自動化しない。
+- 特に Claude GitHub Code Review / `@claude review` は usage based billing のため、標準フローには組み込まない。
+- 標準レビューは既存の Codex review opt-in 運用（`docs/ai-workflow.md` §5）を使う。
+- 既に本番運用上必要なサービスでも、課金条件・自動実行条件を変更する場合は事前に報告する。
 <!-- END:claude-code-rules -->
