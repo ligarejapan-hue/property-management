@@ -1,0 +1,185 @@
+name: Codex Review Auto Request
+
+# CI（name: "CI"）が成功した後、または opt-in 状態が変わった後に、
+# `needs-codex-review` ラベル付きの非 draft PR にだけ `@codex review` を自動投稿する初期検証版。
+# github-actions[bot] のコメントに Codex が反応するかを検証する目的。
+#
+# セキュリティ: pull_request_target を使うが、PR head のコードを checkout / 実行しない。
+#               GitHub API で PR 情報・ラベル・CI 状態・コメントのみを扱う。
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  pull_request_target:
+    types: [labeled, unlabeled, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  actions: read
+
+jobs:
+  request-codex-review:
+    # workflow_run は CI success かつ pull_request 由来のときのみ。
+    # pull_request_target は対象 types のみ trigger される（詳細判定は script 内）。
+    if: >
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Codex review on opt-in PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const eventName = context.eventName;
+            const CI_WORKFLOW_NAME = 'CI';
+            const NEEDS = 'needs-codex-review';
+            const SKIP = 'skip-codex-review';
+
+            // 1. イベント別に対象 PR を決める
+            let prNumber = null;
+            let runHeadSha = null; // workflow_run の対象 commit
+
+            if (eventName === 'workflow_run') {
+              const run = context.payload.workflow_run;
+              // job if で担保済みだが二重に確認
+              if (run.conclusion !== 'success' || run.event !== 'pull_request') {
+                core.info('workflow_run が success/pull_request ではないため skip。');
+                return;
+              }
+              runHeadSha = run.head_sha;
+              if (run.pull_requests && run.pull_requests.length > 0) {
+                prNumber = run.pull_requests[0].number;
+              }
+              // フォールバック: head_sha から関連 PR を検索
+              if (!prNumber) {
+                const assoc = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner,
+                  repo,
+                  commit_sha: run.head_sha,
+                });
+                const openPr = assoc.data.find((p) => p.state === 'open');
+                if (openPr) prNumber = openPr.number;
+              }
+            } else if (eventName === 'pull_request_target') {
+              const action = context.payload.action;
+              const labelName = context.payload.label && context.payload.label.name;
+              // 対象 action だけ再判定へ進む（不要な label 変更では動かさない）
+              if (action === 'labeled' && labelName !== NEEDS) {
+                core.info(`labeled(${labelName}) は ${NEEDS} ではないため skip。`);
+                return;
+              }
+              if (action === 'unlabeled' && labelName !== SKIP) {
+                core.info(`unlabeled(${labelName}) は ${SKIP} ではないため skip。`);
+                return;
+              }
+              // ready_for_review / reopened はそのまま再判定
+              prNumber = context.payload.pull_request.number;
+            } else {
+              core.info(`未対応イベント ${eventName} のため skip。`);
+              return;
+            }
+
+            if (!prNumber) {
+              core.info('関連する PR が特定できないため何もしない。');
+              return;
+            }
+
+            // 2. PR を取得
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            // 2a. stale run 対策（workflow_run のみ）: PR head と run head が違えば古い run
+            if (eventName === 'workflow_run' && pr.head.sha !== runHeadSha) {
+              core.info(
+                `Skip stale workflow_run: PR head ${pr.head.sha} does not match workflow_run head ${runHeadSha}`
+              );
+              return;
+            }
+
+            // 2b. PR は open のみ
+            if (pr.state !== 'open') {
+              core.info(`PR #${prNumber} は open ではないため skip。`);
+              return;
+            }
+
+            // 3. draft / label 判定
+            if (pr.draft) {
+              core.info(`PR #${prNumber} は draft のため skip。`);
+              return;
+            }
+            const labels = (pr.labels || []).map((l) =>
+              typeof l === 'string' ? l : l.name
+            );
+            if (labels.includes(SKIP)) {
+              core.info(`PR #${prNumber} は ${SKIP} ラベル付きのため skip。`);
+              return;
+            }
+            if (!labels.includes(NEEDS)) {
+              core.info(`PR #${prNumber} は ${NEEDS} ラベル無しのため skip（opt-in）。`);
+              return;
+            }
+
+            // 4. 現在の head SHA に対して CI（name: "CI"）が success 済みかを確認
+            const headSha = pr.head.sha;
+            const runsResp = await github.rest.actions.listWorkflowRunsForRepo({
+              owner,
+              repo,
+              head_sha: headSha,
+              event: 'pull_request',
+              per_page: 100,
+            });
+            const ciRuns = (runsResp.data.workflow_runs || []).filter(
+              (r) => r.name === CI_WORKFLOW_NAME
+            );
+            if (ciRuns.length === 0) {
+              core.info(`head ${headSha} に対する CI run が見つからないため skip。`);
+              return;
+            }
+            const ciSuccess = ciRuns.some(
+              (r) => r.status === 'completed' && r.conclusion === 'success'
+            );
+            if (!ciSuccess) {
+              core.info(
+                `head ${headSha} の CI は success ではない（pending/failure/cancelled 等）ため skip。`
+              );
+              return;
+            }
+
+            // 5. 重複防止: head SHA 単位の hidden marker
+            //    （新 commit で CI green になった際、古い commit 向け marker で抑制されない）
+            const MARKER = `<!-- auto-codex-review:${headSha} -->`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const already = comments.some(
+              (c) =>
+                c.user &&
+                c.user.login === 'github-actions[bot]' &&
+                (c.body || '').includes(MARKER)
+            );
+            if (already) {
+              core.info(`PR #${prNumber} の head ${headSha} には既に自動依頼があるため skip。`);
+              return;
+            }
+
+            // 6. コメント投稿
+            const body = `${MARKER}\n@codex review`;
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: prNumber,
+              body,
+            });
+            core.info(`PR #${prNumber}（head ${headSha}）に @codex review を投稿した。`);
