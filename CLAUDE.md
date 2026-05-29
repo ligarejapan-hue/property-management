@@ -245,4 +245,10 @@ docs-only 作業の最低限報告フォーマット:
 - Import UX / owner_csv linkage visibility 修正済み
 - 受付帳 CSV フィルタ / 列扱い / 表記改善済み
 - 所有者 CSV フィールド対応済み
+
+## 16. 関連ドキュメント（AI開発ツール統合フロー）
+
+- AI開発ツール（ChatGPT / Claude Code / Codex / GitHub / GitHub Actions / VPS）を使った標準開発フローは `docs/ai-workflow.md` を参照する
+- このdocsは §4 作業フロー、§5 役割分担、§11 Codexレビュー、§13 VPS運用を運用観点で補足する索引である
+- 矛盾時は CLAUDE.md / AGENTS.md を正とし、`docs/ai-workflow.md` はそれを補足する
 <!-- END:claude-code-rules -->
