@@ -1930,7 +1930,7 @@ export default function ImportPage() {
           </span>
         </div>
         <p className="mb-3 text-sm text-gray-500">
-          受付CSVと所有者CSVをキーで突合し、一意に特定できた行だけを既存物件に反映します。
+          受付帳CSVと所有者CSVをキーで突合し、一意に特定できた行だけを既存物件に反映します。
           共有名義人は複数行のまま残します。空値では既存データを上書きしません。
         </p>
         <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600">

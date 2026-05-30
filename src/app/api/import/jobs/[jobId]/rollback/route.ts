@@ -74,7 +74,7 @@ export async function POST(
       return apiResponse({
         alreadyRolledBack: false,
         eligible: false,
-        ineligibleReason: "現在ロールバック対応は物件CSVのみです",
+        ineligibleReason: "現在ロールバック対応は受付帳CSVのみです",
         summary: baseSummary,
         blockedDetails: [],
         executed: false,
