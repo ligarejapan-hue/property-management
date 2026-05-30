@@ -15,7 +15,7 @@ import {
   buildPropertyListOrderBy,
   loadImportSourceMap,
 } from "@/lib/property-list-query";
-import { encodeCsv } from "@/lib/csv-encode";
+import { encodeCsv, sanitizeCsvCellForExcel } from "@/lib/csv-encode";
 import {
   PROPERTY_TYPE_LABELS,
   CASE_STATUS_LABELS,
@@ -164,20 +164,45 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    // CSV formula injection 対策: 外部入力・DB 由来の全セル値を encodeCsv に渡す前に
+    // 無害化する（先頭が = + - @ tab CR のセルに ' を付与）。RFC quoting は encodeCsv 側。
+    const sanitizedRows = rows.map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+          key,
+          sanitizeCsvCellForExcel(value),
+        ]),
+      ),
+    );
+
     // UTF-8 BOM + CRLF（既存 encodeCsv の既定挙動）で Excel 互換に出力。
-    const csv = encodeCsv([...CSV_HEADERS], rows, { bom: true });
+    const csv = encodeCsv([...CSV_HEADERS], sanitizedRows, { bom: true });
 
     // AuditLog は操作事実のみ。CSV 本文・所有者名などの PII は残さない。
+    // filters は raw query の rest ではなく、parse 済み query からの明示 allowlist で組む。
+    // これにより token / apiKey / password / secret 等の任意 query が混入しない。
     //  - mgmtId : 取込元ファイル名・行番号を含む生値のため除外（長さと hit 件数のみ記録）
     //  - keyword: address / lotNumber 等を検索する語で住所等 PII を含み得るため除外
     //  - page / limit: 全件出力では無意味なページング値のため除外
-    const {
-      mgmtId: _omitMgmtId,
-      keyword: _omitKeyword,
-      page: _omitPage,
-      limit: _omitLimit,
-      ...filtersForLog
-    } = queryObj;
+    const AUDIT_FILTER_KEYS = [
+      "propertyType",
+      "registryStatus",
+      "dmStatus",
+      "caseStatus",
+      "introductionRoute",
+      "assignedTo",
+      "updatedFrom",
+      "updatedTo",
+      "includeArchived",
+      "hasWarning",
+      "sortBy",
+      "sortOrder",
+    ] as const;
+    const filtersForLog: Record<string, unknown> = {};
+    for (const key of AUDIT_FILTER_KEYS) {
+      const value = query[key];
+      if (value !== undefined) filtersForLog[key] = value;
+    }
     await writeAuditLog({
       userId: session.id,
       action: "property_csv_export",

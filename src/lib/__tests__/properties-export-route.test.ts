@@ -75,6 +75,7 @@ import {
   buildPropertyListWhere,
   buildPropertyListOrderBy,
 } from "@/lib/property-list-query";
+import { sanitizeCsvCellForExcel } from "@/lib/csv-encode";
 
 const pm = prisma as unknown as {
   property: { findMany: Mock };
@@ -350,6 +351,65 @@ describe("GET /api/properties/export", () => {
     expect(audit.detail.filters.propertyType).toBe("land");
   });
 
+  it("AuditLog: filters は allowlist。unknown / token / apiKey / password / secret / env を残さない", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+
+    await GET(
+      makeRequest(
+        "?propertyType=land&dmStatus=send" +
+          "&token=tok-abc&apiKey=key-xyz&password=pw-123&secret=sec-456&env=production&foo=bar",
+      ),
+    );
+
+    const audit = lastAudit();
+    const filters = audit.detail.filters;
+    // 任意 / 機微 query は一切残らない
+    expect(filters.token).toBeUndefined();
+    expect(filters.apiKey).toBeUndefined();
+    expect(filters.password).toBeUndefined();
+    expect(filters.secret).toBeUndefined();
+    expect(filters.env).toBeUndefined();
+    expect(filters.foo).toBeUndefined();
+    // allowlist の正規 filter は残る
+    expect(filters.propertyType).toBe("land");
+    expect(filters.dmStatus).toBe("send");
+    // 監査ログ全体にも生値が混入しない
+    const detailStr = JSON.stringify(audit.detail);
+    for (const leak of ["tok-abc", "key-xyz", "pw-123", "sec-456"]) {
+      expect(detailStr).not.toContain(leak);
+    }
+  });
+
+  it("CSV formula injection: 先頭が = + - @ のセル値は ' を付けて無害化して出力する", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        address: "=1+1",
+        lotNumber: "+SUM(A1:A2)",
+        realEstateNumber: "-10",
+        propertyOwners: [{ owner: { name: "@cmd" } }],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    expect(csv).toContain("'=1+1");
+    expect(csv).toContain("'+SUM(A1:A2)");
+    expect(csv).toContain("'-10");
+    expect(csv).toContain("'@cmd");
+  });
+
+  it("CSV formula injection: 通常文字列・日本語ラベルは無害化で変化しない", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ address: "東京都千代田区1-1" }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    // 先頭が無害なので ' は付かない
+    expect(csv).toContain("東京都千代田区1-1");
+    expect(csv).not.toContain("'東京都千代田区1-1");
+  });
+
   it("所有者名にカンマ・ダブルクオートを含む場合 RFC4180 で CSV エスケープされる", async () => {
     pm.property.findMany.mockResolvedValue([
       makeProp({ propertyOwners: [{ owner: { name: '所有者,"太郎"' } }] }),
@@ -485,5 +545,29 @@ describe("buildPropertyListWhere（一覧 API と共有・従来挙動の固定�
         sortOrder: "asc",
       }),
     ).toEqual({ createdAt: "asc" });
+  });
+});
+
+describe("sanitizeCsvCellForExcel（CSV formula injection 対策）", () => {
+  it("数式起動文字（= + - @ tab CR）で始まるセルは先頭に ' を付ける", () => {
+    expect(sanitizeCsvCellForExcel("=1+1")).toBe("'=1+1");
+    expect(sanitizeCsvCellForExcel("+SUM(A1:A2)")).toBe("'+SUM(A1:A2)");
+    expect(sanitizeCsvCellForExcel("-10")).toBe("'-10");
+    expect(sanitizeCsvCellForExcel("@cmd")).toBe("'@cmd");
+    expect(sanitizeCsvCellForExcel("\tfoo")).toBe("'\tfoo"); // タブ開始
+    expect(sanitizeCsvCellForExcel("\rfoo")).toBe("'\rfoo"); // CR 開始
+  });
+
+  it("通常文字列はそのまま（数式起動文字が先頭でなければ変えない）", () => {
+    expect(sanitizeCsvCellForExcel("東京都千代田区1-1")).toBe("東京都千代田区1-1");
+    expect(sanitizeCsvCellForExcel("RE-1")).toBe("RE-1");
+    expect(sanitizeCsvCellForExcel("12-3")).toBe("12-3");
+    expect(sanitizeCsvCellForExcel("abc=1")).toBe("abc=1"); // 途中の = は対象外
+  });
+
+  it("null / undefined / 空文字は空文字を返す（既存挙動を壊さない）", () => {
+    expect(sanitizeCsvCellForExcel(null)).toBe("");
+    expect(sanitizeCsvCellForExcel(undefined)).toBe("");
+    expect(sanitizeCsvCellForExcel("")).toBe("");
   });
 });
