@@ -612,6 +612,15 @@ describe("sanitizeCsvCellForExcel（CSV formula injection 対策）", () => {
     ); // LF 始まりの数式（OWASP CSV Injection）
   });
 
+  it("全角の数式起動文字（＝ ＋ － ＠）で始まるセルも先頭に ' を付ける", () => {
+    expect(sanitizeCsvCellForExcel("＝HYPERLINK(\"http://evil\")")).toBe(
+      "'＝HYPERLINK(\"http://evil\")",
+    );
+    expect(sanitizeCsvCellForExcel("＋SUM(A1:A2)")).toBe("'＋SUM(A1:A2)");
+    expect(sanitizeCsvCellForExcel("－10")).toBe("'－10");
+    expect(sanitizeCsvCellForExcel("＠cmd")).toBe("'＠cmd");
+  });
+
   it("通常文字列はそのまま（数式起動文字が先頭でなければ変えない）", () => {
     expect(sanitizeCsvCellForExcel("東京都千代田区1-1")).toBe("東京都千代田区1-1");
     expect(sanitizeCsvCellForExcel("RE-1")).toBe("RE-1");
