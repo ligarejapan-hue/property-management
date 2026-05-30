@@ -85,12 +85,29 @@ const pm = prisma as unknown as {
 const PERMS_FULL = [
   { resource: "property", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
+  { resource: "csv_export", action: "read", granted: true },
+  { resource: "csv_export_personal", action: "read", granted: true },
 ];
 const PERMS_NO_OWNER = [
   { resource: "property", action: "read", granted: true },
+  { resource: "csv_export", action: "read", granted: true },
+  { resource: "csv_export_personal", action: "read", granted: true },
 ];
 const PERMS_NO_PROPERTY = [
   { resource: "owner", action: "read", granted: true },
+  { resource: "csv_export", action: "read", granted: true },
+  { resource: "csv_export_personal", action: "read", granted: true },
+];
+// property:read はあるが CSV export 専用権限を欠く（field_staff 相当）
+const PERMS_NO_CSV_EXPORT = [
+  { resource: "property", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+];
+// csv_export はあるが個人情報 CSV 権限を欠く（office_staff 相当）
+const PERMS_NO_CSV_PERSONAL = [
+  { resource: "property", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+  { resource: "csv_export", action: "read", granted: true },
 ];
 
 const FULL_DISPLAY = {
@@ -212,6 +229,39 @@ describe("GET /api/properties/export", () => {
     expect(res.status).toBe(403);
     expect(pm.property.findMany).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("property:read はあっても csv_export:read が無ければ 403（DB/AuditLog なし）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_CSV_EXPORT as any);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(403);
+    // CSV 生成・DB 取得・AuditLog 書き込みのいずれも行わない
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(res.headers.get("Content-Type")).not.toBe("text/csv; charset=utf-8");
+  });
+
+  it("csv_export:read はあっても csv_export_personal:read が無ければ 403（DB/AuditLog なし）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_NO_CSV_PERSONAL as any,
+    );
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(403);
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(res.headers.get("Content-Type")).not.toBe("text/csv; charset=utf-8");
+  });
+
+  it("property:read + csv_export:read + csv_export_personal:read の3権限が揃って初めて CSV 出力できる", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL as any);
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
   });
 
   it("field_staff スコープが where.AND に積まれる", async () => {

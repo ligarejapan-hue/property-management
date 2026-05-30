@@ -73,6 +73,22 @@ export async function GET(request: NextRequest) {
       throw new ApiError(403, "物件一覧の閲覧権限がありません", "FORBIDDEN");
     }
 
+    // CSV 出力は property:read とは別の専用権限を必須にする。
+    //  - csv_export:read         : CSV エクスポート自体の許可（field_staff は不可）
+    //  - csv_export_personal:read: 本 CSV は所有者名（個人情報）列を含むため必須（office_staff は不可）
+    // owner:read は所有者名の表示/マスキング判断にのみ使い、出力権限の代替にはしない。
+    // 権限不足時はここで 403 とし、DB 取得・CSV 生成・AuditLog 書き込みは一切行わない。
+    if (!hasPermission(permissions, "csv_export", "read")) {
+      throw new ApiError(403, "CSV エクスポートの権限がありません", "FORBIDDEN");
+    }
+    if (!hasPermission(permissions, "csv_export_personal", "read")) {
+      throw new ApiError(
+        403,
+        "個人情報を含む CSV エクスポートの権限がありません",
+        "FORBIDDEN",
+      );
+    }
+
     const hasOwnerRead = hasPermission(permissions, "owner", "read");
     const ownerDisplayConfig = hasOwnerRead
       ? await getOwnerDisplayConfig(session.id)
