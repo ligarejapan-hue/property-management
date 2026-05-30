@@ -125,6 +125,10 @@ function PropertiesPageInner() {
   // 担当者プルダウン用ユーザー一覧
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
 
+  // CSV 出力可否。export API が csv_export:read と csv_export_personal:read の
+  // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
+  const [canExportCsv, setCanExportCsv] = useState(false);
+
   // 入力中候補表示
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
   const [suggestOpen, setSuggestOpen] = useState(false);
@@ -206,6 +210,25 @@ function PropertiesPageInner() {
   useEffect(() => {
     fetchProperties();
   }, [fetchProperties]);
+
+  // CSV 出力権限を初回のみ取得。csv_export:read かつ csv_export_personal:read の
+  // 両方が granted のときだけ CSV 出力ボタンを表示する（export API と同条件）。
+  // 取得失敗時は false のままにし、ボタンを出さない（誤って JSON エラー画面に飛ばさない）。
+  useEffect(() => {
+    fetch("/api/me/permissions")
+      .then((r) => r.json())
+      .then((json: {
+        permissions?: { resource: string; action: string; granted: boolean }[];
+      }) => {
+        const perms = json.permissions ?? [];
+        const has = (resource: string) =>
+          perms.some(
+            (p) => p.resource === resource && p.action === "read" && p.granted,
+          );
+        setCanExportCsv(has("csv_export") && has("csv_export_personal"));
+      })
+      .catch(() => setCanExportCsv(false));
+  }, []);
 
   // 担当者プルダウン用にユーザー一覧を初回のみ取得（失敗時はサイレントに無視）
   useEffect(() => {
@@ -468,15 +491,17 @@ function PropertiesPageInner() {
 
       {/* Action row */}
       <div className="mb-4 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={handleExportCsv}
-          className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          title="現在の検索条件で全件をCSV出力"
-        >
-          <Download className="h-4 w-4" />
-          CSV出力
-        </button>
+        {canExportCsv && (
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            title="現在の検索条件で全件をCSV出力"
+          >
+            <Download className="h-4 w-4" />
+            CSV出力
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowNewModal(true)}
