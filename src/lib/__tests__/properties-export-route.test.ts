@@ -599,13 +599,17 @@ describe("buildPropertyListWhere（一覧 API と共有・従来挙動の固定�
 });
 
 describe("sanitizeCsvCellForExcel（CSV formula injection 対策）", () => {
-  it("数式起動文字（= + - @ tab CR）で始まるセルは先頭に ' を付ける", () => {
+  it("数式起動文字（= + - @ tab CR LF）で始まるセルは先頭に ' を付ける", () => {
     expect(sanitizeCsvCellForExcel("=1+1")).toBe("'=1+1");
     expect(sanitizeCsvCellForExcel("+SUM(A1:A2)")).toBe("'+SUM(A1:A2)");
     expect(sanitizeCsvCellForExcel("-10")).toBe("'-10");
     expect(sanitizeCsvCellForExcel("@cmd")).toBe("'@cmd");
     expect(sanitizeCsvCellForExcel("\tfoo")).toBe("'\tfoo"); // タブ開始
     expect(sanitizeCsvCellForExcel("\rfoo")).toBe("'\rfoo"); // CR 開始
+    expect(sanitizeCsvCellForExcel("\nfoo")).toBe("'\nfoo"); // LF 開始
+    expect(sanitizeCsvCellForExcel("\n=HYPERLINK(\"http://evil\")")).toBe(
+      "'\n=HYPERLINK(\"http://evil\")",
+    ); // LF 始まりの数式（OWASP CSV Injection）
   });
 
   it("通常文字列はそのまま（数式起動文字が先頭でなければ変えない）", () => {

@@ -38,8 +38,9 @@ export function valueToCsvString(v: unknown): string {
  * CSV formula injection（Excel / Sheets が先頭文字でセルを数式扱いする問題）対策。
  *
  * Excel 互換 CSV として開かれる前提で、セル値が数式起動文字
- * （`=` `+` `-` `@` / タブ 0x09 / CR 0x0d）で始まる場合は先頭に `'` を付けて
- * 文字列として扱わせる。外部入力・DB 由来の値（住所・所有者名・管理ID 等）を
+ * （`=` `+` `-` `@` / タブ 0x09 / CR 0x0d / LF 0x0a）で始まる場合は先頭に `'` を付けて
+ * 文字列として扱わせる。LF は OWASP CSV Injection guidance でも危険な先頭文字として
+ * 扱われるため対象に含める。外部入力・DB 由来の値（住所・所有者名・管理ID 等）を
  * CSV に出す前段で無害化する用途。
  *
  * - null / undefined / 空文字は無害化せず空文字を返す（既存挙動を壊さない）
@@ -49,7 +50,7 @@ export function sanitizeCsvCellForExcel(
   value: string | null | undefined,
 ): string {
   if (value == null || value === "") return "";
-  if (/^[=+\-@\t\r]/.test(value)) {
+  if (/^[=+\-@\t\r\n]/.test(value)) {
     return `'${value}`;
   }
   return value;
