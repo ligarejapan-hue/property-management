@@ -34,6 +34,30 @@ export function valueToCsvString(v: unknown): string {
   }
 }
 
+/**
+ * CSV formula injection（Excel / Sheets が先頭文字でセルを数式扱いする問題）対策。
+ *
+ * Excel 互換 CSV として開かれる前提で、セル値が数式起動文字
+ * （ASCII の `=` `+` `-` `@` / タブ 0x09 / CR 0x0d / LF 0x0a、および全角の
+ * `＝` `＋` `－` `＠`）で始まる場合は先頭に `'` を付けて文字列として扱わせる。
+ * LF は OWASP CSV Injection guidance でも危険な先頭文字として扱われるため対象に含める。
+ * 全角の数式起動文字は日本語 Excel/Sheets 環境で数式と解釈され得るため対象に含める。
+ * 外部入力・DB 由来の値（住所・所有者名・管理ID 等）を CSV に出す前段で無害化する用途。
+ *
+ * - null / undefined / 空文字は無害化せず空文字を返す（既存挙動を壊さない）
+ * - 先頭に `'` を付けるだけで、文字の正規化・変換は行わない
+ * - RFC quoting は別途 `escapeCsvField` が担うため、ここでは行わない
+ */
+export function sanitizeCsvCellForExcel(
+  value: string | null | undefined,
+): string {
+  if (value == null || value === "") return "";
+  if (/^[=+\-@\t\r\n＝＋－＠]/.test(value)) {
+    return `'${value}`;
+  }
+  return value;
+}
+
 export interface EncodeCsvOptions {
   /** UTF-8 BOM を先頭に付与する（Excel での文字化け回避） */
   bom?: boolean;
