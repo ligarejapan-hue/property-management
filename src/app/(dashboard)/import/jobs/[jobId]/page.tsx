@@ -590,7 +590,7 @@ export default function ImportJobDetailPage() {
 
           {!affected.applicable ? (
             <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-              このジョブ種別 ({getImportTypeLabel(affected.jobType)}) は物件の作成・更新一覧表示に対応していません。受付CSV取込ジョブで確認できます。
+              このジョブ種別 ({getImportTypeLabel(affected.jobType)}) は物件の作成・更新一覧表示に対応していません。受付帳CSV取込ジョブで確認できます。
             </p>
           ) : affected.affected.length === 0 ? (
             <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
