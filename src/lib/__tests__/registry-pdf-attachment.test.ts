@@ -1,0 +1,434 @@
+/**
+ * A-2b: 謄本PDF確定取込で PDF 本体を Attachment(type="registry") として保存する
+ *       ことを検証する。
+ *
+ *  - multipart(PDF binary) → targetPropertyId 確定後に保存（Mode A/B 共通）。
+ *  - text 貼り付けモード → PDF が無いため保存しない。
+ *  - 保存先 key は properties/{propertyId}/registry/{timestamp}.pdf。
+ *  - 保存失敗は取込本体を成功扱いのまま warning として返す（部分成功）。
+ *  - AuditLog detail / レスポンスに載せるのは attachmentId のみ
+ *    （fileUrl 全文 / PDF 本文 / rawText / 所有者名 / 住所は載せない）。
+ *
+ * 既存 registry-pdf 系テスト（field-scope / import-edited）と同じ mock 方式。
+ * storage は本テストで新規にモックする（route が getStorage/upload を使うため）。
+ */
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+
+vi.mock("next/server", () => {
+  class MockNextRequest extends Request {
+    constructor(input: string | URL | Request, init?: RequestInit) {
+      super(input, init);
+    }
+  }
+  return { NextRequest: MockNextRequest };
+});
+
+vi.mock("@/lib/api-helpers", () => {
+  class MockApiError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, message: string, code = "ERROR") {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  }
+  return {
+    ApiError: MockApiError,
+    getApiSession: vi.fn(),
+    getUserPermissions: vi.fn().mockResolvedValue([]),
+    handleApiError: vi.fn((error: unknown) => {
+      const e = error as { status?: number; message?: string; code?: string };
+      if (typeof e?.status === "number") {
+        return Response.json(
+          { error: { message: e.message, code: e.code } },
+          { status: e.status },
+        );
+      }
+      return Response.json(
+        { error: { message: "Server error", code: "INTERNAL_ERROR" } },
+        { status: 500 },
+      );
+    }),
+    apiResponse: vi.fn((data: unknown, status = 200) =>
+      Response.json(data, { status }),
+    ),
+  };
+});
+
+vi.mock("@/lib/permissions", () => ({ hasPermission: vi.fn() }));
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+vi.mock("@/lib/change-log", () => ({
+  recordChanges: vi.fn(),
+  PROPERTY_TRACKED_FIELDS: [],
+}));
+vi.mock("@/lib/pdf-registry-parser", () => ({
+  parseRegistryText: vi.fn(),
+}));
+vi.mock("@/lib/pdf-extract", () => ({
+  extractTextFromPdf: vi.fn().mockResolvedValue("dummy registry text"),
+  isPdfBuffer: vi.fn().mockReturnValue(true),
+}));
+
+// storage はモジュール内 closure で安定した upload mock を保持し、
+// getStorage() が常に同じ { upload } を返すようにする（テストから参照/制御可能）。
+vi.mock("@/lib/storage", () => {
+  const upload = vi.fn();
+  return {
+    getStorage: vi.fn(() => ({ upload })),
+    validateFile: vi.fn(() => null),
+    ALLOWED_ATTACHMENT_MIMES: new Set(["application/pdf"]),
+  };
+});
+
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    property: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    importJob: { create: vi.fn(), update: vi.fn() },
+    importJobRow: { create: vi.fn() },
+    attachment: { create: vi.fn() },
+    $transaction: vi.fn(),
+  },
+}));
+
+import prisma from "@/lib/prisma";
+import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
+import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { getStorage } from "@/lib/storage";
+import { POST as REGISTRY_PDF_POST } from "../../app/api/import/registry-pdf/route";
+
+const SESSION_ID = "user-1";
+const EXISTING_PROP_ID = "11111111-1111-4111-8111-111111111111";
+const NEW_PROP_ID = "22222222-2222-4222-8222-222222222222";
+const PDF_BYTES = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); // length 10
+
+const pm = prisma as unknown as {
+  property: {
+    findUnique: Mock;
+    findFirst: Mock;
+    create: Mock;
+    update: Mock;
+    updateMany: Mock;
+  };
+  importJob: { create: Mock; update: Mock };
+  importJobRow: { create: Mock };
+  attachment: { create: Mock };
+};
+
+// getStorage() の factory は常に同じ closure { upload } を返すため、
+// 毎回 getStorage().upload で安定した upload mock を取得できる。
+function uploadMock(): Mock {
+  return (getStorage() as unknown as { upload: Mock }).upload;
+}
+
+function setSession(role = "admin") {
+  (getApiSession as Mock).mockResolvedValue({
+    id: SESSION_ID,
+    role,
+    email: "u@test",
+    name: "U",
+  });
+}
+
+function multipartReq(opts: { propertyId?: string } = {}) {
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([PDF_BYTES], { type: "application/pdf" }),
+    "謄本.pdf",
+  );
+  if (opts.propertyId) form.append("propertyId", opts.propertyId);
+  return new Request("http://test/api/import/registry-pdf", {
+    method: "POST",
+    body: form,
+  }) as never;
+}
+
+function jsonReq(body: unknown) {
+  return new Request("http://test/api/import/registry-pdf", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }) as never;
+}
+
+const MODE_B_PARSED = () => ({
+  realEstateNumber: null,
+  address: "東京都千代田区一番町1",
+  lotNumber: null,
+  buildingNumber: null,
+  landCategory: null,
+  area: null,
+  owners: [],
+  warnings: [],
+  confidence: 0.9,
+});
+
+const MODE_A_PARSED = () => ({
+  realEstateNumber: null,
+  address: null,
+  lotNumber: null,
+  buildingNumber: null,
+  landCategory: null,
+  area: null,
+  owners: [],
+  warnings: [],
+  confidence: 0.9,
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  setSession("admin");
+  (hasPermission as Mock).mockReturnValue(true);
+  (getUserPermissions as Mock).mockResolvedValue([
+    { resource: "import", action: "write", granted: true },
+  ]);
+  pm.importJob.create.mockResolvedValue({ id: "job-1" });
+  pm.importJob.update.mockResolvedValue({});
+  pm.importJobRow.create.mockResolvedValue({});
+  pm.property.create.mockResolvedValue({ id: NEW_PROP_ID });
+  pm.property.findFirst.mockResolvedValue(null);
+  pm.attachment.create.mockResolvedValue({ id: "att-1" });
+  uploadMock().mockResolvedValue({ url: "/uploads/x.pdf", key: "x.pdf" });
+  (parseRegistryText as Mock).mockReturnValue(MODE_B_PARSED());
+});
+
+function attachmentData() {
+  return pm.attachment.create.mock.calls[0]?.[0]?.data as
+    | Record<string, unknown>
+    | undefined;
+}
+
+// ── multipart Mode B（新規 Property 作成）→ Attachment 保存 ──────────────────
+describe("A-2b: multipart Mode B (新規Property) で Attachment 保存", () => {
+  it("1. multipart PDF 取込で prisma.attachment.create が呼ばれる", async () => {
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    expect(res.status).toBe(201);
+    expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("2. 作成される Attachment が type:'registry'", async () => {
+    await REGISTRY_PDF_POST(multipartReq());
+    expect(attachmentData()?.type).toBe("registry");
+  });
+
+  it("3+9. targetType/targetId/propertyId が新規 propertyId と一致", async () => {
+    await REGISTRY_PDF_POST(multipartReq());
+    const d = attachmentData();
+    expect(d?.targetType).toBe("property");
+    expect(d?.targetId).toBe(NEW_PROP_ID);
+    expect(d?.propertyId).toBe(NEW_PROP_ID);
+  });
+
+  it("4. key が properties/{propertyId}/registry/ 配下 (timestamp.pdf)", async () => {
+    await REGISTRY_PDF_POST(multipartReq());
+    const opts = uploadMock().mock.calls[0]?.[1] as { key: string };
+    expect(opts.key).toMatch(
+      new RegExp(`^properties/${NEW_PROP_ID}/registry/\\d+\\.pdf$`),
+    );
+  });
+
+  it("5. mimeType が application/pdf（attachment + upload 両方）", async () => {
+    await REGISTRY_PDF_POST(multipartReq());
+    expect(attachmentData()?.mimeType).toBe("application/pdf");
+    const opts = uploadMock().mock.calls[0]?.[1] as { mimeType: string };
+    expect(opts.mimeType).toBe("application/pdf");
+  });
+
+  it("6. fileSize が buffer.length(=10) と一致", async () => {
+    await REGISTRY_PDF_POST(multipartReq());
+    expect(attachmentData()?.fileSize).toBe(PDF_BYTES.length);
+  });
+
+  it("7. uploadedBy が session.id", async () => {
+    await REGISTRY_PDF_POST(multipartReq());
+    expect(attachmentData()?.uploadedBy).toBe(SESSION_ID);
+  });
+
+  it("fileName は元ファイル名、レスポンスに attachmentId を返す", async () => {
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    const body = await res.json();
+    expect(attachmentData()?.fileName).toBe("謄本.pdf");
+    expect(body.attachmentId).toBe("att-1");
+    expect(body.propertyId).toBe(NEW_PROP_ID);
+    expect(body.warning).toBeUndefined();
+  });
+});
+
+// ── multipart Mode A（既存 Property 指定）→ Attachment 保存 ──────────────────
+describe("A-2b: multipart Mode A (既存Property) でも Attachment 保存", () => {
+  beforeEach(() => {
+    (parseRegistryText as Mock).mockReturnValue(MODE_A_PARSED());
+    pm.property.findUnique.mockResolvedValue({
+      id: EXISTING_PROP_ID,
+      createdBy: "someone-else",
+      assignedTo: "another",
+      registryStatus: "obtained",
+      version: 0,
+      realEstateNumber: "REN",
+      lotNumber: "1",
+      buildingNumber: "1",
+    });
+  });
+
+  it("既存 propertyId 指定で Attachment(type=registry) が作成される", async () => {
+    const res = await REGISTRY_PDF_POST(
+      multipartReq({ propertyId: EXISTING_PROP_ID }),
+    );
+    expect(res.status).toBe(201);
+    expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+    const d = attachmentData();
+    expect(d?.type).toBe("registry");
+    expect(d?.targetId).toBe(EXISTING_PROP_ID);
+    expect(d?.propertyId).toBe(EXISTING_PROP_ID);
+  });
+});
+
+// ── text 貼り付けモード → Attachment 作成しない ──────────────────────────────
+describe("A-2b: text 貼り付けモードでは Attachment を作成しない", () => {
+  it("8. JSON(text) 取込では attachment.create が呼ばれず warning も無い", async () => {
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "registry text" }));
+    expect(res.status).toBe(201);
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+    expect(uploadMock()).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.attachmentId).toBeUndefined();
+    expect(body.warning).toBeUndefined();
+  });
+});
+
+// ── 保存失敗 → 取込本体は成功 + warning ─────────────────────────────────────
+describe("A-2b: storage upload 失敗時は取込本体成功 + warning", () => {
+  it("10. upload が失敗しても取込本体は 201 成功（property は作成済み）", async () => {
+    uploadMock().mockRejectedValueOnce(new Error("disk full"));
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.propertyId).toBe(NEW_PROP_ID);
+    // import job は completed で finalize（failed にしない）
+    expect(pm.importJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "completed" }),
+      }),
+    );
+    // upload で失敗しているため attachment.create には到達しない
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+  });
+
+  it("11. upload 失敗時は warning を返し attachmentId は付かない", async () => {
+    uploadMock().mockRejectedValueOnce(new Error("disk full"));
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    const body = await res.json();
+    expect(typeof body.warning).toBe("string");
+    expect(body.warning).toContain("保存");
+    expect(body.attachmentId).toBeUndefined();
+  });
+});
+
+// ── AuditLog detail は attachmentId のみ（PII を載せない）────────────────────
+describe("A-2b: AuditLog detail に attachmentId は載るが PII は載せない", () => {
+  it("12. detail に attachmentId が入り fileUrl/rawText/所有者名/住所は入らない", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      ...MODE_B_PARSED(),
+      // PII が detail に漏れないことの確認用に所有者・住所を持たせる
+      owners: [{ name: "山田太郎", address: "東京都港区2", share: null }],
+    });
+    await REGISTRY_PDF_POST(multipartReq());
+
+    const call = (writeAuditLog as Mock).mock.calls.find(
+      (c) => c[0]?.targetTable === "properties",
+    );
+    expect(call).toBeTruthy();
+    const detail = call![0].detail as Record<string, unknown>;
+    expect(detail.attachmentId).toBe("att-1");
+
+    const keys = Object.keys(detail);
+    expect(keys).not.toContain("fileUrl");
+    expect(keys).not.toContain("rawText");
+    expect(keys).not.toContain("text");
+    expect(keys).not.toContain("owners");
+    expect(keys).not.toContain("ownerNames");
+    expect(keys).not.toContain("address");
+
+    // detail 全体を文字列化しても所有者名・住所・URL が含まれない
+    const json = JSON.stringify(detail);
+    expect(json).not.toContain("山田太郎");
+    expect(json).not.toContain("東京都港区2");
+    expect(json).not.toContain("/uploads/");
+  });
+});
+
+// ── 既存挙動（A-2d スコープ / import:write）を壊さない ───────────────────────
+describe("A-2b: 既存アクセス制御を壊さない（保存はアクセス許可後のみ）", () => {
+  it("13a. import:write 無しは 403 で attachment 保存に到達しない", async () => {
+    (hasPermission as Mock).mockReturnValue(false);
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    expect(res.status).toBe(403);
+    expect(uploadMock()).not.toHaveBeenCalled();
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+  });
+
+  it("13b. field_staff がアクセス不可物件を指定すると 403 で保存しない", async () => {
+    setSession("field_staff");
+    (parseRegistryText as Mock).mockReturnValue(MODE_A_PARSED());
+    pm.property.findUnique.mockResolvedValue({
+      id: EXISTING_PROP_ID,
+      createdBy: "someone-else",
+      assignedTo: "another",
+      registryStatus: "unconfirmed",
+      version: 0,
+      realEstateNumber: null,
+      lotNumber: null,
+      buildingNumber: null,
+    });
+    const res = await REGISTRY_PDF_POST(
+      multipartReq({ propertyId: EXISTING_PROP_ID }),
+    );
+    expect(res.status).toBe(403);
+    expect(uploadMock()).not.toHaveBeenCalled();
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+  });
+});
+
+// ── source-assertion: 実装の固定化 ─────────────────────────────────────────
+const read = (p: string) =>
+  fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
+const routeSrc = read("src/app/api/import/registry-pdf/route.ts");
+
+describe("A-2b: registry-pdf route source-assertion", () => {
+  it("14. route.ts は POST handler のみ export している", () => {
+    const exports =
+      routeSrc.match(/^export (async function|function|const) \w+/gm) || [];
+    expect(exports.join("\n")).toMatch(/export async function POST/);
+    expect(exports.length).toBe(1);
+  });
+
+  it("storage(getStorage/validateFile/ALLOWED_ATTACHMENT_MIMES) を利用する", () => {
+    expect(routeSrc).toMatch(
+      /import \{[\s\S]*?getStorage,[\s\S]*?\} from "@\/lib\/storage"/,
+    );
+    expect(routeSrc).toMatch(/getStorage\(\)\.upload\(/);
+    expect(routeSrc).toMatch(/validateFile\(/);
+  });
+
+  it("type:'registry' / key は properties/{id}/registry 配下", () => {
+    expect(routeSrc).toMatch(/type: "registry"/);
+    expect(routeSrc).toMatch(
+      /properties\/\$\{targetPropertyId\}\/registry\/\$\{Date\.now\(\)\}\.pdf/,
+    );
+  });
+
+  it("AuditLog/本文に rawText を増やしていない", () => {
+    expect(routeSrc).not.toMatch(/rawText/);
+  });
+});
