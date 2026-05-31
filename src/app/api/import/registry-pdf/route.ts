@@ -74,12 +74,21 @@ function applyEditedToParsed(
     return t === "" ? null : t;
   };
   if (edited.fields) {
-    parsed.realEstateNumber = nz(edited.fields.realEstateNumber);
-    parsed.address = nz(edited.fields.address);
-    parsed.lotNumber = nz(edited.fields.lotNumber);
-    parsed.buildingNumber = nz(edited.fields.buildingNumber);
-    parsed.landCategory = nz(edited.fields.landCategory);
-    parsed.area = nz(edited.fields.area);
+    // 部分編集を許容: 実際に送信されたキーだけ parsed に反映し、未送信キーは
+    // parser の元値を保持する（hasOwnProperty で送信有無を判定）。空文字を明示
+    // 送信したキーは nz("") → null として既存方針どおり上書きする。
+    const f = edited.fields;
+    const sent = (k: keyof typeof f) =>
+      Object.prototype.hasOwnProperty.call(f, k);
+    if (sent("realEstateNumber"))
+      parsed.realEstateNumber = nz(edited.fields.realEstateNumber);
+    if (sent("address")) parsed.address = nz(edited.fields.address);
+    if (sent("lotNumber")) parsed.lotNumber = nz(edited.fields.lotNumber);
+    if (sent("buildingNumber"))
+      parsed.buildingNumber = nz(edited.fields.buildingNumber);
+    if (sent("landCategory"))
+      parsed.landCategory = nz(edited.fields.landCategory);
+    if (sent("area")) parsed.area = nz(edited.fields.area);
   }
   if (edited.owners) {
     parsed.owners = edited.owners
