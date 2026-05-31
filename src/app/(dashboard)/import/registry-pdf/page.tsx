@@ -65,6 +65,12 @@ interface ImportResult {
   action: "created" | "updated" | "matched";
   propertyId: string | null;
   parsed: ParsedResult;
+  /**
+   * サーバーが返す top-level 警告（A-2b/P1）。取込本体は成功している一方で、
+   * 謄本PDF本体の保存に失敗した / アクセス権が無く保存しなかった等の注意喚起。
+   * 抽出時の警告（parsed.warnings）とは別物で、両方が同時に出ることがある。
+   */
+  warning?: string;
 }
 
 type ExtractionSource = "embedded_text" | "likely_scanned";
@@ -1167,6 +1173,23 @@ export default function RegistryPdfPage() {
                 </p>
               </div>
             </div>
+
+            {/* Top-level warning (A-2b/P1): 取込本体は成功したが謄本PDFの保存に
+                注意がある場合（保存失敗 / アクセス権なしで未保存 等）。
+                抽出時の parsed.warnings とは別に必ず表示する。成功表示は消さない。 */}
+            {result.warning && (
+              <div
+                role="alert"
+                data-testid="import-attachment-warning"
+                className="mb-6 rounded-md border border-amber-300 bg-amber-50 p-4"
+              >
+                <h4 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-amber-800">
+                  <AlertTriangle className="h-4 w-4" />
+                  謄本PDFについてのご注意
+                </h4>
+                <p className="text-sm text-amber-700">{result.warning}</p>
+              </div>
+            )}
 
             {/* Action badge */}
             <div className="mb-6">
