@@ -627,6 +627,9 @@ export async function POST(request: NextRequest) {
         attachmentWarning =
           "対象物件へのアクセス権が無いため、謄本PDFは保存されませんでした。";
       } else {
+        // upload 成功後に attachment.create が失敗した場合、storage 上に孤児 PDF が
+        // 残らないよう uploaded.key を保持し、catch で best-effort 削除する。
+        let uploadedKey: string | null = null;
         try {
           const validationError = validateFile(
             pdfBuffer.length,
@@ -645,6 +648,7 @@ export async function POST(request: NextRequest) {
             mimeType: "application/pdf",
             fileName,
           });
+          uploadedKey = uploaded.key;
           const attachment = await prisma.attachment.create({
             data: {
               targetType: "property",
@@ -663,6 +667,21 @@ export async function POST(request: NextRequest) {
         } catch (err) {
           // 取込本体は成功扱いのまま継続し、保存失敗のみ warning として返す。
           console.error("Failed to save registry PDF attachment:", err);
+          // upload は成功したが attachment.create 等で失敗した場合、謄本=機微ファイルが
+          // Attachment row 無しで storage に残ると通常の削除/cleanup から到達できない
+          // 孤児ファイルになる。best-effort で削除する（upload 自体が失敗した場合は
+          // uploadedKey=null のため削除対象なし）。
+          if (uploadedKey) {
+            try {
+              await getStorage().delete(uploadedKey);
+            } catch (delErr) {
+              // 削除失敗でも取込本体は失敗させない（記録のみ）。
+              console.error(
+                "Failed to delete orphaned registry PDF after attachment error:",
+                delErr,
+              );
+            }
+          }
           attachmentWarning =
             "謄本は取込されましたが、PDF本体の保存に失敗しました。";
         }

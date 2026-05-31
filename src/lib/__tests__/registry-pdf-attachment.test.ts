@@ -76,8 +76,9 @@ vi.mock("@/lib/pdf-extract", () => ({
 // getStorage() が常に同じ { upload } を返すようにする（テストから参照/制御可能）。
 vi.mock("@/lib/storage", () => {
   const upload = vi.fn();
+  const del = vi.fn();
   return {
-    getStorage: vi.fn(() => ({ upload })),
+    getStorage: vi.fn(() => ({ upload, delete: del })),
     validateFile: vi.fn(() => null),
     ALLOWED_ATTACHMENT_MIMES: new Set(["application/pdf"]),
   };
@@ -137,6 +138,10 @@ const pm = prisma as unknown as {
 // 毎回 getStorage().upload で安定した upload mock を取得できる。
 function uploadMock(): Mock {
   return (getStorage() as unknown as { upload: Mock }).upload;
+}
+
+function deleteMock(): Mock {
+  return (getStorage() as unknown as { delete: Mock }).delete;
 }
 
 function setSession(role = "admin") {
@@ -213,6 +218,7 @@ beforeEach(() => {
   });
   pm.attachment.create.mockResolvedValue({ id: "att-1" });
   uploadMock().mockResolvedValue({ url: "/uploads/x.pdf", key: "x.pdf" });
+  deleteMock().mockResolvedValue(undefined);
   (randomUUID as Mock).mockReturnValue("00000000-0000-4000-8000-000000000000");
   (parseRegistryText as Mock).mockReturnValue(MODE_B_PARSED());
 });
@@ -380,6 +386,59 @@ describe("A-2b: storage upload 失敗時は取込本体成功 + warning", () => 
     expect(typeof body.warning).toBe("string");
     expect(body.warning).toContain("保存");
     expect(body.attachmentId).toBeUndefined();
+  });
+});
+
+// ── 孤児ファイル防止: attachment.create 失敗時に uploaded PDF を best-effort 削除 ──
+describe("A-2b/orphan: attachment.create 失敗時に uploaded PDF を best-effort 削除", () => {
+  it("upload 成功後 attachment.create 失敗で getStorage().delete(uploaded.key) を呼ぶ", async () => {
+    const KEY = "properties/p/registry/123-uuid.pdf";
+    uploadMock().mockResolvedValue({ url: "/uploads/k.pdf", key: KEY });
+    pm.attachment.create.mockRejectedValueOnce(new Error("db down"));
+
+    const res = await REGISTRY_PDF_POST(multipartReq());
+
+    // 取込本体は成功扱いのまま
+    expect(res.status).toBe(201);
+    // uploaded.key で best-effort 削除されている
+    expect(deleteMock()).toHaveBeenCalledTimes(1);
+    expect(deleteMock()).toHaveBeenCalledWith(KEY);
+    const body = await res.json();
+    expect(typeof body.warning).toBe("string");
+    expect(body.attachmentId).toBeUndefined();
+  });
+
+  it("delete が失敗しても取込本体は成功し warning が返る", async () => {
+    pm.attachment.create.mockRejectedValueOnce(new Error("db down"));
+    deleteMock().mockRejectedValueOnce(new Error("delete failed"));
+
+    const res = await REGISTRY_PDF_POST(multipartReq());
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.propertyId).toBe(NEW_PROP_ID);
+    expect(typeof body.warning).toBe("string");
+    expect(body.warning).toContain("保存");
+    expect(body.attachmentId).toBeUndefined();
+  });
+
+  it("upload 自体が失敗した場合は delete を呼ばない（削除対象なし）", async () => {
+    uploadMock().mockRejectedValueOnce(new Error("disk full"));
+
+    const res = await REGISTRY_PDF_POST(multipartReq());
+
+    expect(res.status).toBe(201);
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+    expect(deleteMock()).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(typeof body.warning).toBe("string");
+  });
+
+  it("正常時（create 成功）は delete を呼ばない", async () => {
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    expect(res.status).toBe(201);
+    expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+    expect(deleteMock()).not.toHaveBeenCalled();
   });
 });
 
@@ -565,6 +624,14 @@ describe("A-2b: registry-pdf route source-assertion", () => {
     expect(routeSrc).toMatch(/canAccessPropertyRecord\(session, target\)/);
     expect(routeSrc).toMatch(
       /findUnique\(\{[\s\S]*?id: targetPropertyId[\s\S]*?createdBy: true[\s\S]*?assignedTo: true/,
+    );
+  });
+
+  it("孤児防止: uploaded.key を保持し catch で getStorage().delete を best-effort 実行", () => {
+    expect(routeSrc).toMatch(/uploadedKey = uploaded\.key/);
+    // upload 成功時のみ（uploadedKey 非 null）削除する
+    expect(routeSrc).toMatch(
+      /if \(uploadedKey\) \{[\s\S]*?getStorage\(\)\.delete\(uploadedKey\)/,
     );
   });
 });
