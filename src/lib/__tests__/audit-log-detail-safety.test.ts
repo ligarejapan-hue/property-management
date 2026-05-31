@@ -203,6 +203,50 @@ describe("sanitizeAuditDetail: import_job_rollback の rollback metadata 保持"
     expect(rf.status).toBe("rolled_back");
   });
 
+  it("rollback の非PII件数メタdata deletedCount/restoredPropertyCount/restoredFieldCount/blocked を保持する", () => {
+    const out = sanitizeAuditDetail("import_job_rollback", {
+      deletedCount: 5,
+      restoredPropertyCount: 3,
+      restoredFieldCount: 12,
+      blocked: false,
+      restoredFields: [{ propertyId: "p1", fieldNames: ["address"] }],
+    }) as Record<string, unknown>;
+    expect(out.deletedCount).toBe(5);
+    expect(out.restoredPropertyCount).toBe(3);
+    expect(out.restoredFieldCount).toBe(12);
+    expect(out.blocked).toBe(false);
+    expect(
+      (out.restoredFields as Array<Record<string, unknown>>)[0].fieldNames,
+    ).toEqual(["address"]);
+  });
+
+  it("count メタデータと同階層に PII が混入しても PII は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("import_job_rollback", {
+      deletedCount: 5,
+      blocked: true,
+      ownerName: "山田太郎",
+      ownerAddress: "東京都港区1-2-3",
+      email: "a@b.com",
+      phone: "09000000000",
+      token: "abc.def",
+      rawText: "謄本本文",
+      lat: 35.6,
+      lng: 139.7,
+      mgmtId: "M-123",
+    }) as Record<string, unknown>;
+    expect(out.deletedCount).toBe(5);
+    expect(out.blocked).toBe(true);
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.ownerAddress).toBe(REDACTED);
+    expect(out.email).toBe(REDACTED);
+    expect(out.phone).toBe(REDACTED);
+    expect(out.token).toBe(REDACTED);
+    expect(out.rawText).toBe(REDACTED);
+    expect(out.lat).toBe(REDACTED);
+    expect(out.lng).toBe(REDACTED);
+    expect(out.mgmtId).toBe(REDACTED);
+  });
+
   it("4. restoredFields 内に混入した ownerName/ownerAddress/email/phone は [REDACTED]", () => {
     const out = sanitizeAuditDetail("import_job_rollback", {
       restoredFields: [
@@ -224,13 +268,21 @@ describe("sanitizeAuditDetail: import_job_rollback の rollback metadata 保持"
     expect(rf.phone).toBe(REDACTED);
   });
 
-  it("5. unknown action では fieldNames / restoredFields を保持しない", () => {
+  it("5. unknown action では rollback専用の count/fieldNames/restoredFields を保持しない", () => {
     const out = sanitizeAuditDetail("totally_unknown_action", {
       restoredFields: [{ fieldNames: ["address"] }],
       fieldNames: ["address"],
+      deletedCount: 5,
+      restoredPropertyCount: 3,
+      restoredFieldCount: 12,
+      blocked: false,
     }) as Record<string, unknown>;
     expect(out.restoredFields).toBe(REDACTED);
     expect(out.fieldNames).toBe(REDACTED);
+    expect(out.deletedCount).toBe(REDACTED);
+    expect(out.restoredPropertyCount).toBe(REDACTED);
+    expect(out.restoredFieldCount).toBe(REDACTED);
+    expect(out.blocked).toBe(REDACTED);
   });
 
   it("他 action（csv_export 等）でも fieldNames は危険キーとしてマスクされる", () => {
