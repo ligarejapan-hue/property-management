@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
@@ -218,6 +219,16 @@ export async function POST(request: NextRequest) {
 
       if (!existing) {
         throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+      }
+
+      // field_staff スコープ: 担当外/未作成の物件を propertyId 直指定で更新させない。
+      // admin / office_staff は全件可。UI だけでなく API 直アクセスもここで遮断する。
+      if (!canAccessPropertyRecord(session, existing)) {
+        throw new ApiError(
+          403,
+          "この物件にアクセスする権限がありません",
+          "FORBIDDEN",
+        );
       }
 
       // Build update fields (only fill empty/null fields, don't overwrite)
