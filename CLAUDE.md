@@ -272,4 +272,105 @@ docs-only 作業の最低限報告フォーマット:
 - Claude GitHub Code Review / `@claude review` を**利用する提案も標準では行わない**。
 - 例外は、ユーザーが **対象PR・目的・想定費用・課金トリガー・代替案** を確認したうえで、その都度明示的に「このPRで使う」と指示した場合のみ。
 - 標準レビューは既存の **Codex review opt-in** 運用（`docs/ai-workflow.md` §5）を使う。
+
+## 18. Claude Code のコマンド実行許可ルール
+
+- 本章は §3（worktree）・§4（作業フロー）・§6（GitHub操作）・§9（migration）・§10（build/test/diff）・§13（VPS）・§17（従量課金）を、**コマンド実行許可の観点**で具体化したものである。
+- 目的は、毎回の許可確認で止まらないようにしつつ、危険操作だけは必ず事前確認させることにある。
+- 矛盾する場合は各章の本文を正とする。本章は既存ルールを弱めない。
+- 緊急停止・確認のみの運用テンプレートは `docs/ai-workflow.md` §10 も参照する。
+
+### 18.1 事前確認なしで実行してよい安全コマンド
+
+対象worktree内であれば、以下は毎回の許可確認なしで実行してよい。
+
+読み取り・確認:
+
+- `pwd` / `ls` / `dir`
+- `git status --short`
+- `git branch --show-current` / `git branch -vv`
+- `git log --oneline -n 5`
+- `git diff` / `git diff --check`
+- `git show`（必要な対象 commit / file に絞って実行する）
+- `git worktree list`
+- `rg` / `cat` / `sed` / `head` / `tail`
+
+検証（コードを変更するタスクで必要な場合）:
+
+- `npx vitest run`
+- `npm run build`
+- `npx prisma generate`
+
+依存復元:
+
+- `npm ci --no-audit --no-fund` — ただし以下を**すべて**満たす場合のみ許可:
+  - 対象worktree内で実行する
+  - 依存追加・依存更新を目的にしない
+  - package.json / package-lock.json を変更しない
+  - node_modules を commit 対象にしない
+  - docs-only 作業では原則実行しない
+  - npm ci 後に package.json / package-lock.json に差分が出た場合は停止して報告する
+
+docs-only 作業では、以下は原則不要（§10 と整合）:
+
+- `npm ci --no-audit --no-fund` / `npx prisma generate` / `npm run build` / `npx vitest run`
+- docs-only でこれらを実行する必要がある場合は、理由を報告してから実行する。
+
+### 18.2 必ず事前確認を取る操作
+
+以下は安全コマンドに含めず、必ずユーザー確認を取る。
+
+Git履歴・削除系:
+
+- `git reset` / `git clean` / `git rebase`
+- `git push --force`
+- `git stash apply` / `git stash pop` / `git stash drop`
+- branch削除 / worktree削除 / remote branch削除
+
+補足（§3「cleanup はユーザー明示時のみ」を具体化）:
+
+- branch削除 / worktree削除は原則ユーザー確認を取る。
+- ユーザーが「merge後cleanup」を明示した場合に限り、その対象PRに紐づく merged local branch / worktree の安全削除のみ実行してよい。cleanup時も main に取り込まれていることを ancestry 等で確認してから削除する。
+- 未merge branch、対象不明branch、remote branch削除は必ず事前確認を取る。
+
+DB / schema（詳細は §9）:
+
+- `prisma migrate dev` / `prisma migrate deploy` / `prisma db push`
+- `schema.prisma` 変更 / migration作成
+
+環境・本番（詳細は §13）:
+
+- VPS操作 / `systemctl` / nginx変更 / env変更 / GitHub Settings変更 / secrets変更
+
+外部・課金（詳細は §17。**このルールは弱めない**）:
+
+- 外部API接続 / OCR導入 / Playwright導入 / 謄本自動取得の実アクセス
+- paid service / usage credits / API課金が発生し得る操作
+- Claude GitHub Code Review / `@claude review` は §17 のとおり**原則禁止**（このルールは維持する）。
+
+依存関係変更:
+
+- `npm install <package>` / `npm update`
+- package.json変更 / package-lock.json変更
+
+### 18.3 commit / push 時の追加チェック
+
+§4・§10・§14 の作業フローに加え、コマンド実行の観点で次を守る。
+
+- 実装タスクは、対象テスト / `npx vitest run` / `npm run build` / `git diff --check` が green の場合のみ commit / push する。
+- docs-only は `git diff --check` と `git status --short` が問題なければ commit / push してよい（build/test は §10 のとおり省略可。省略理由を報告する）。
+- commit 対象は対象タスクの変更ファイルに限定する（`git add` は対象ファイルを明示し、全体 add をしない）。
+- `.claude/settings.local.json` は絶対に commit しない。
+- node_modules / generated files / package差分 / migration差分が混入していないことを `git status --short` で確認する。
+- merge は常にユーザー側で行う（§6）。
+
+### 18.4 worktree でのコマンド実行
+
+§3（並列作業 / worktree 運用）を前提に、次を守る。
+
+- 1 worktree = 1 Claude Code セッションを原則とする。
+- 同じファイルを触る実装タスクは同時並列にしない。
+- main worktree では原則として実装しない（実装は作業用 branch / worktree で行う）。
+- 既存 worktree に未コミット差分がある場合は、停止して報告する。
+- 同一 workdir の同時編集禁止・作業前後の `git status --short` 確認など、§3 の運用も併せて守る。
 <!-- END:claude-code-rules -->
