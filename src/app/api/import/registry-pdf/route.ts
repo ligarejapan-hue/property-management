@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -16,6 +17,11 @@ import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
+import {
+  getStorage,
+  validateFile,
+  ALLOWED_ATTACHMENT_MIMES,
+} from "@/lib/storage";
 import {
   decideCorporateImport,
   emptyCorporateImportSummary,
@@ -122,6 +128,10 @@ export async function POST(request: NextRequest) {
     let propertyId: string | null = null;
     let fileName = "registry.pdf";
     let edited: EditedImport | undefined;
+    // A-2b: multipart(PDF binary) のときのみ本体を保持し、取込成功後に
+    // Attachment(type="registry") として保存する。text 貼り付けは null のまま
+    // （PDF が存在しないため Attachment を作成しない）。
+    let pdfBuffer: Buffer | null = null;
 
     if (contentType.includes("multipart/form-data")) {
       // --- PDF バイナリ受信 ---
@@ -159,6 +169,9 @@ export async function POST(request: NextRequest) {
           "INVALID_PDF",
         );
       }
+
+      // A-2b: 検証済み PDF バイナリを取込成功後の Attachment 保存用に保持する。
+      pdfBuffer = buffer;
 
       try {
         text = await extractTextFromPdf(buffer);
@@ -590,6 +603,91 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // A-2b: 謄本PDF本体を Attachment(type="registry") として保存する。
+    //  - multipart(PDF binary) のみ。text 貼り付けは pdfBuffer=null でスキップ。
+    //  - Mode A/B 問わず targetPropertyId 確定後（このパスでは必ず非 null）に保存。
+    //  - 保存失敗は取込本体を失敗扱いにせず warning として返す（部分成功）。
+    //  - audit/レスポンスに載せるのは attachmentId（UUID）のみ。
+    //    fileUrl 全文・PDF 本文・抽出テキスト・所有者名・住所は載せない。
+    let attachmentId: string | null = null;
+    let attachmentWarning: string | null = null;
+    if (pdfBuffer && targetPropertyId) {
+      // P1: Attachment を書き込む直前に、対象 property へのアクセス権を必ず確認する。
+      // Mode B は地番/住所マッチで既存物件に targetPropertyId が決まり得るため、
+      // Mode A と同じ field_staff スコープ（canAccessPropertyRecord）をここでも適用し、
+      // 担当外/作成外の物件に PDF を添付させない（attachments endpoint と同等の制御）。
+      // admin / office_staff は従来どおり全件許可。
+      const target = await prisma.property.findUnique({
+        where: { id: targetPropertyId },
+        select: { createdBy: true, assignedTo: true },
+      });
+      if (!target || !canAccessPropertyRecord(session, target)) {
+        // 権限が無い対象には upload も attachment.create も実行しない（最優先要件）。
+        // 取込本体（matched/created）は既存仕様どおり成功扱いのまま warning を返す。
+        attachmentWarning =
+          "対象物件へのアクセス権が無いため、謄本PDFは保存されませんでした。";
+      } else {
+        // upload 成功後に attachment.create が失敗した場合、storage 上に孤児 PDF が
+        // 残らないよう uploaded.key を保持し、catch で best-effort 削除する。
+        let uploadedKey: string | null = null;
+        try {
+          const validationError = validateFile(
+            pdfBuffer.length,
+            "application/pdf",
+            ALLOWED_ATTACHMENT_MIMES,
+          );
+          if (validationError) {
+            throw new Error(validationError);
+          }
+          // key を一意化する（Codex P2）。Date.now() だけだと同一ミリ秒の
+          // 並行取込で衝突し、後続 PDF が同一 key を上書きして複数 Attachment が
+          // 同じ実体を指す恐れがあるため、randomUUID を suffix に付与する。
+          const key = `properties/${targetPropertyId}/registry/${Date.now()}-${randomUUID()}.pdf`;
+          const uploaded = await getStorage().upload(pdfBuffer, {
+            key,
+            mimeType: "application/pdf",
+            fileName,
+          });
+          uploadedKey = uploaded.key;
+          const attachment = await prisma.attachment.create({
+            data: {
+              targetType: "property",
+              targetId: targetPropertyId,
+              propertyId: targetPropertyId,
+              type: "registry",
+              fileName,
+              fileUrl: uploaded.url,
+              fileSize: pdfBuffer.length,
+              mimeType: "application/pdf",
+              uploadedBy: session.id,
+            },
+            select: { id: true },
+          });
+          attachmentId = attachment.id;
+        } catch (err) {
+          // 取込本体は成功扱いのまま継続し、保存失敗のみ warning として返す。
+          console.error("Failed to save registry PDF attachment:", err);
+          // upload は成功したが attachment.create 等で失敗した場合、謄本=機微ファイルが
+          // Attachment row 無しで storage に残ると通常の削除/cleanup から到達できない
+          // 孤児ファイルになる。best-effort で削除する（upload 自体が失敗した場合は
+          // uploadedKey=null のため削除対象なし）。
+          if (uploadedKey) {
+            try {
+              await getStorage().delete(uploadedKey);
+            } catch (delErr) {
+              // 削除失敗でも取込本体は失敗させない（記録のみ）。
+              console.error(
+                "Failed to delete orphaned registry PDF after attachment error:",
+                delErr,
+              );
+            }
+          }
+          attachmentWarning =
+            "謄本は取込されましたが、PDF本体の保存に失敗しました。";
+        }
+      }
+    }
+
     await writeAuditLog({
       userId: session.id,
       action: "pdf_import",
@@ -602,6 +700,8 @@ export async function POST(request: NextRequest) {
         fileName: fileName,
         // Phase D: 法人番号自動検出のサマリ。生値・会社名・住所・候補リストは含めない。
         corporateNumber: corporateSummary,
+        // A-2b: 保存できた場合のみ attachmentId（UUID）を載せる。
+        ...(attachmentId ? { attachmentId } : {}),
       },
     });
 
@@ -611,6 +711,9 @@ export async function POST(request: NextRequest) {
         action: resultAction,
         propertyId: targetPropertyId,
         parsed,
+        // A-2b: 保存成功時は attachmentId、失敗時は warning を返す（部分成功）。
+        ...(attachmentId ? { attachmentId } : {}),
+        ...(attachmentWarning ? { warning: attachmentWarning } : {}),
       },
       201,
     );
