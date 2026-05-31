@@ -351,6 +351,53 @@ describe("sanitizeAuditDetail: corporateNumber 生値はマスク / summary は�
   });
 });
 
+describe("sanitizeAuditDetail: update監査 updatedFields / CSV import counters 保持", () => {
+  it("1/2. updatedFields(フィールド名配列)は保持し、oldValue/newValue/value/PII はマスク", () => {
+    const out = sanitizeAuditDetail("property_update", {
+      updatedFields: ["address", "dmStatus", "registryStatus"],
+      oldValue: "旧住所の値",
+      newValue: "新住所の値",
+      value: "東京都港区1-2-3",
+      ownerName: "山田太郎",
+      address: "東京都港区1-2-3",
+      email: "a@b.com",
+      phone: "09000000000",
+    }) as Record<string, unknown>;
+    expect(out.updatedFields).toEqual(["address", "dmStatus", "registryStatus"]);
+    expect(out.oldValue).toBe(REDACTED);
+    expect(out.newValue).toBe(REDACTED);
+    expect(out.value).toBe(REDACTED);
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.address).toBe(REDACTED);
+    expect(out.email).toBe(REDACTED);
+    expect(out.phone).toBe(REDACTED);
+  });
+
+  it("3/4/5. CSV import summary counters (totalRows/successCount/updateCount/errorCount/needsReviewCount) を保持", () => {
+    const out = sanitizeAuditDetail("csv_import", {
+      totalRows: 100,
+      successCount: 90,
+      updateCount: 40,
+      errorCount: 5,
+      needsReviewCount: 5,
+    }) as Record<string, unknown>;
+    expect(out.totalRows).toBe(100);
+    expect(out.successCount).toBe(90);
+    expect(out.updateCount).toBe(40);
+    expect(out.errorCount).toBe(5);
+    expect(out.needsReviewCount).toBe(5);
+  });
+
+  it("updatedFields の値が object でも内部の PII キーはマスクされる", () => {
+    const out = sanitizeAuditDetail("property_update", {
+      updatedFields: { ownerName: "山田太郎", dmStatus: "send" },
+    }) as Record<string, unknown>;
+    const uf = out.updatedFields as Record<string, unknown>;
+    expect(uf.ownerName).toBe(REDACTED);
+    expect(uf.dmStatus).toBe("send");
+  });
+});
+
 describe("admin/audit-logs route 配線（source-assertion）", () => {
   const routeSrc = read("src/app/api/admin/audit-logs/route.ts");
 

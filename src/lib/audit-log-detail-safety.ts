@@ -58,6 +58,10 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "createdCount",
   "updated",
   "updatedCount",
+  // CSV import summary counters（実在キー: csv/route.ts の writeAuditLog detail）。
+  // 非PIIの件数のみ。*Count を無条件許可せず実在キーに限定する。
+  "updateCount",
+  "needsReviewCount",
   "matched",
   "matchedCount",
   "detected",
@@ -69,6 +73,11 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "results",
   "changes",
   "fields",
+  // 更新監査の非PIIメタデータ（更新したフィールド名の配列。値ではない）。
+  // 実在: properties/[id], bulk-update, actions, owners/[id], buildings/[id] 等の
+  // detail.updatedFields は Object.keys(...) / fieldName 配列。oldValue/newValue/value は
+  // allowlist 外なので引き続きマスクされる。
+  "updatedFields",
   // 状態・種別・結果（enum / boolean / コード）
   "status",
   "action",
