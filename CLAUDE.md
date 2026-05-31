@@ -168,7 +168,7 @@ docs-only の場合:
 - 権限 / role / permission
 - PII
 - AuditLog
-- import
+- import / export
 - rollback
 - correction
 - owner / property の重要データ変更
@@ -177,6 +177,10 @@ docs-only の場合:
 - security-sensitive な変更
 - race condition / idempotency / batch processing
 - production data に影響し得る変更
+- VPS / deployment
+- GitHub Actions / 開発運用フロー
+- DM出力（宛名・送付対象データ）
+- 謄本PDF / 謄本自動取得
 
 注意:
 
@@ -272,4 +276,153 @@ docs-only 作業の最低限報告フォーマット:
 - Claude GitHub Code Review / `@claude review` を**利用する提案も標準では行わない**。
 - 例外は、ユーザーが **対象PR・目的・想定費用・課金トリガー・代替案** を確認したうえで、その都度明示的に「このPRで使う」と指示した場合のみ。
 - 標準レビューは既存の **Codex review opt-in** 運用（`docs/ai-workflow.md` §5）を使う。
+
+## 18. Claude Code コマンド実行 / worktree / commit ルール
+
+- 本章は §3（worktree）・§4（作業フロー）・§6（GitHub操作）・§9（migration）・§10（build/test/diff）・§13（VPS）・§17（従量課金）を、コマンド実行・並列作業・commit の観点で具体化したものである。
+- 目的は、毎回の許可確認で止まらないようにしつつ、危険操作だけは必ず事前確認させ、並列 worktree 作業を安全にすることにある。
+- 矛盾する場合は各章の本文を正とする。本章は既存ルールを弱めない。
+
+### 18.1 事前確認なしで実行してよい安全コマンド
+
+対象worktree内であれば、以下は毎回の許可確認なしで実行してよい。
+
+読み取り・確認:
+
+- `pwd` / `ls` / `dir`
+- `git status --short`
+- `git branch --show-current` / `git branch -vv`
+- `git log --oneline -n 5`
+- `git diff` / `git diff --check`
+- `git show`（必要な対象 commit / file に絞って実行する）
+- `git worktree list`
+- `rg` / `cat` / `sed` / `head` / `tail`
+
+検証（コードを変更するタスクで必要な場合）:
+
+- `npx vitest run`
+- `npm run build`
+- `npx prisma generate`
+
+依存復元:
+
+- `npm ci --no-audit --no-fund` — ただし以下を**すべて**満たす場合のみ許可:
+  - 対象worktree内で実行する
+  - 依存追加・依存更新を目的にしない
+  - package.json / package-lock.json を変更しない
+  - node_modules を commit 対象にしない
+  - docs-only 作業では原則実行しない
+  - npm ci 後に package.json / package-lock.json に差分が出た場合は停止して報告する
+
+docs-only 作業では、`npm ci` / `npx prisma generate` / `npm run build` / `npx vitest run` は原則不要（§10 と整合）。docs-only では `git diff --check` と `git status --short` を必須とし、build/test 等を省略した場合は省略理由を報告する。
+
+### 18.2 必ず事前確認を取る操作
+
+以下は安全コマンドに含めず、必ずユーザー確認を取る。
+
+Git履歴・削除系:
+
+- `git reset` / `git clean` / `git rebase`
+- `git push --force`
+- `git stash apply` / `git stash pop` / `git stash drop`
+- branch削除 / worktree削除 / remote branch削除
+
+補足:
+
+- ユーザーが「merge後cleanup」を明示した場合に限り、その対象PRに紐づく merged local branch / worktree の安全削除のみ実行してよい。cleanup時も main に取り込まれていることを ancestry 等で確認してから削除する。
+- 未merge branch、対象不明branch、remote branch削除は必ず事前確認を取る。
+
+DB / schema（詳細は §9）:
+
+- `prisma migrate dev` / `prisma migrate deploy` / `prisma db push`
+- `schema.prisma` 変更 / migration作成
+
+環境・本番（詳細は §13）:
+
+- VPS操作 / `systemctl` / nginx変更 / env変更 / GitHub Settings変更 / secrets変更
+
+外部・課金（詳細は §17。**このルールは弱めない**）:
+
+- 外部API接続 / OCR導入 / Playwright導入 / 謄本自動取得の実アクセス
+- paid service / usage credits / API課金が発生し得る操作
+- Claude GitHub Code Review / `@claude review` は §17 のとおり**原則禁止**（標準フローでは使用しない）。
+
+依存関係変更:
+
+- `npm install <package>` / `npm update`
+- package.json変更 / package-lock.json変更
+
+### 18.3 worktree 並列作業ルール
+
+§3（並列作業 / worktree 運用）を前提に、次を守る。
+
+- 1 worktree = 1 Claude Code セッション。
+- 1 task = 1 branch = 1 worktree。
+- 同じ worktree を複数セッションで同時に触らない。
+- 同じファイルを触る実装タスクは同時並列にしない。
+- main worktree では原則として実装しない（実装は作業用 branch / worktree で行う）。
+- 既存 worktree に未コミット差分がある場合は、停止して報告する。
+- 作業前後に `git status --short` を確認する。
+- merge後cleanup（§18.2 補足）以外で branch / worktree を削除しない。
+- remote branch は手動削除せず、GitHub の auto delete + `git fetch --prune` に任せる。
+
+### 18.4 commit / push ルール
+
+§4・§10・§14 の作業フローに加え、次を守る。
+
+- 実装タスクは、対象テスト / `npx vitest run` / `npm run build` / `git diff --check` が green の場合のみ commit / push する。
+- docs-only は `git diff --check` と `git status --short` が問題なければ commit / push してよい（build/test は §10 のとおり省略可。省略理由を報告する）。
+- commit 対象は対象タスクの変更ファイルに限定する（`git add` は対象ファイルを明示し、全体 add をしない）。
+- `.claude/settings.local.json` は絶対に commit しない。
+- node_modules / generated files / package差分 / migration差分を commit しない（`git status --short` で混入がないことを確認する）。
+- merge は常にユーザー側で行う（§6）。
+
+## 19. 高リスク領域の共通ルール
+
+- Codex review 必須または強く推奨の対象は §11 を参照する（本章追加に合わせ、§11 に import/export・VPS/deployment・GitHub Actions/開発運用・DM出力・謄本PDF/謄本自動取得 を追記済み）。
+- 以下は領域横断の共通禁止・必須確認とする（§7・§8・§17 を具体化し、弱めない）:
+  - AuditLog に、所有者名 / 住所 / PDF本文 / rawText / fileUrl全文 / token / apiKey / secret / env値 / GPS座標 を増やさない（§8 を具体化）。
+  - PII を扱う CSV は、CSV formula injection 対策（先頭の `=` `+` `-` `@` 等の無害化）を必ず行う。
+  - 権限は UI だけでなく **API 側で必ず確認する**（§7 を具体化）。
+  - `owner:read` は表示可否であり、export 権限の代替にしない。
+  - `csv_export` / `csv_export_personal` が必要な出力では、両方の権限を確認する。
+  - paid service / usage credits / API課金 が発生し得る機能は、§17 のとおり事前承認なしに有効化・利用しない。
+  - Claude GitHub Code Review / `@claude review` は §17 のとおり原則禁止（標準フローで使用しない）。
+
+## 20. 謄本PDF系タスク共通ルール
+
+- `registry-pdf/route.ts` を触るタスクは同時並列にしない。
+- A-2b / A-2c / A-2d など謄本PDF系は、順次 merge 後に次へ進める。
+- PDF本文 / rawText / 所有者名 / 住所を AuditLog に追加しない（§8・§19）。
+- Attachment 保存では fileUrl 全文を AuditLog に入れない。
+- text 貼り付けモードでは PDF が無いため Attachment を作成しない。
+- Mode B 所有者反映 / Attachment 保存 / field_staff スコープ / rollback 拡張は混ぜず、別PRにする。
+- 外部サービス連携 / OCR / 謄本自動取得の実アクセスは、別途明示承認があるまで禁止（§17・§18.2）。
+- schema / migration が必要になりそうなら、実装前に停止して報告する（§9）。
+
+## 21. DM出力系タスク共通ルール
+
+- 初版は CSV のみを基本とする。
+- `dmStatus = send` のみ出力する。`no_send` は除外、`hold` は初版では含めない。
+- owner ごと複数行を基本とする。
+- 権限は `csv_export` + `csv_export_personal` + `owner:read` を確認する（§19）。
+- AuditLog には件数・条件・executor のみ記録し、CSV内容 / 所有者名 / 住所は残さない（§8・§19）。
+- 出力 CSV は UTF-8 BOM 付きとする。
+- CSV formula injection 対策を必ず行う（§19）。
+- `dm_export` など新権限が必要と判断した場合は、実装前に停止して報告する。
+
+## 22. 短縮プロンプト運用ルール
+
+- 今後のユーザー指示では、共通ルールを毎回長く書かない。Claude Code は本 CLAUDE.md（特に §1〜§21）の共通ルールを常に前提として作業する。
+- ユーザーからは、原則として次のタスク固有情報だけを受け取れば作業できるものとする:
+  - タスク名
+  - 対象 branch / worktree
+  - 実装範囲
+  - 今回やらないこと
+  - 停止条件
+  - 必要テスト
+  - 報告項目
+- 短縮プロンプト例:
+  > 「A-2b Attachment(type=registry) 保存を実装してください。共通ルールは CLAUDE.md に従ってください。今回やることは PDF アップロード時の Attachment 作成のみ。Mode B 所有者反映、rollback 拡張、OCR、外部連携、schema/migration はしない。」
+- 指示が曖昧・共通ルールと矛盾する場合は、推測せず Plan 段階で停止して報告する（§2・§4）。
 <!-- END:claude-code-rules -->
