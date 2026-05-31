@@ -24,6 +24,32 @@ import {
   type CorporateImportDecision,
 } from "@/lib/owner-corporate-import";
 
+// 確定取込で UI が編集した結果（A-2a）。サーバ再 parse より優先する。
+// クライアント送信値は無検証で信用せず zod で型・件数を検証する。
+const editedImportSchema = z.object({
+  fields: z
+    .object({
+      realEstateNumber: z.string().nullish(),
+      address: z.string().nullish(),
+      lotNumber: z.string().nullish(),
+      buildingNumber: z.string().nullish(),
+      landCategory: z.string().nullish(),
+      area: z.string().nullish(),
+    })
+    .optional(),
+  owners: z
+    .array(
+      z.object({
+        name: z.string(),
+        address: z.string().nullish(),
+        share: z.string().nullish(),
+      }),
+    )
+    .max(100, "所有者が多すぎます")
+    .optional(),
+});
+type EditedImport = z.infer<typeof editedImportSchema>;
+
 const registryPdfJsonSchema = z.object({
   /** Extracted text from the PDF (テキスト貼り付けモード) */
   text: z.string().min(1, "テキストは必須です"),
@@ -31,7 +57,50 @@ const registryPdfJsonSchema = z.object({
   propertyId: z.string().uuid().optional().nullable(),
   /** File name for audit purposes */
   fileName: z.string().optional(),
+  /** UI で編集した確定データ（任意）。再 parse 結果より優先して反映する。 */
+  edited: editedImportSchema.optional(),
 });
+
+// parse 結果に UI 編集値をマージ（編集優先）。下流の Mode A/B は
+// マージ後の parsed をそのまま使うため、所有者反映・物件更新ロジックは不変。
+function applyEditedToParsed(
+  parsed: ReturnType<typeof parseRegistryText>,
+  edited: EditedImport | undefined,
+): ReturnType<typeof parseRegistryText> {
+  if (!edited) return parsed;
+  const nz = (v: string | null | undefined): string | null => {
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    return t === "" ? null : t;
+  };
+  if (edited.fields) {
+    // 部分編集を許容: 実際に送信されたキーだけ parsed に反映し、未送信キーは
+    // parser の元値を保持する（hasOwnProperty で送信有無を判定）。空文字を明示
+    // 送信したキーは nz("") → null として既存方針どおり上書きする。
+    const f = edited.fields;
+    const sent = (k: keyof typeof f) =>
+      Object.prototype.hasOwnProperty.call(f, k);
+    if (sent("realEstateNumber"))
+      parsed.realEstateNumber = nz(edited.fields.realEstateNumber);
+    if (sent("address")) parsed.address = nz(edited.fields.address);
+    if (sent("lotNumber")) parsed.lotNumber = nz(edited.fields.lotNumber);
+    if (sent("buildingNumber"))
+      parsed.buildingNumber = nz(edited.fields.buildingNumber);
+    if (sent("landCategory"))
+      parsed.landCategory = nz(edited.fields.landCategory);
+    if (sent("area")) parsed.area = nz(edited.fields.area);
+  }
+  if (edited.owners) {
+    parsed.owners = edited.owners
+      .map((o) => ({
+        name: (o.name ?? "").trim(),
+        address: nz(o.address),
+        share: nz(o.share),
+      }))
+      .filter((o) => o.name.length > 0);
+  }
+  return parsed;
+}
 
 // ---------- POST /api/import/registry-pdf ----------
 // リクエスト形式:
@@ -51,6 +120,7 @@ export async function POST(request: NextRequest) {
     let text = "";
     let propertyId: string | null = null;
     let fileName = "registry.pdf";
+    let edited: EditedImport | undefined;
 
     if (contentType.includes("multipart/form-data")) {
       // --- PDF バイナリ受信 ---
@@ -65,6 +135,18 @@ export async function POST(request: NextRequest) {
       const propIdValue = formData.get("propertyId");
       propertyId =
         propIdValue && typeof propIdValue === "string" ? propIdValue : null;
+
+      // UI 編集データ（任意）。multipart では JSON 文字列で受け取り zod 検証する。
+      const editedRaw = formData.get("edited");
+      if (typeof editedRaw === "string" && editedRaw.trim() !== "") {
+        let editedJson: unknown;
+        try {
+          editedJson = JSON.parse(editedRaw);
+        } catch {
+          throw new ApiError(400, "edited が不正な JSON です", "INVALID_EDITED");
+        }
+        edited = editedImportSchema.parse(editedJson);
+      }
 
       const arrayBuffer = await (file as File).arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
@@ -93,10 +175,11 @@ export async function POST(request: NextRequest) {
       text = data.text;
       propertyId = data.propertyId ?? null;
       fileName = data.fileName ?? "registry.pdf";
+      edited = data.edited;
     }
 
-    // Parse the registry text
-    const parsed = parseRegistryText(text);
+    // Parse the registry text（UI 編集値があれば再 parse より優先してマージ）
+    const parsed = applyEditedToParsed(parseRegistryText(text), edited);
 
     // Create import job record
     const job = await prisma.importJob.create({

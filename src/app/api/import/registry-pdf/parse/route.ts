@@ -105,8 +105,6 @@ export async function POST(request: NextRequest) {
         source: extractionSource,
         embeddedTextLength: text.length,
       },
-      // 開発デバッグ用: 抽出テキスト先頭 600 文字 (本番では除去)
-      _rawTextPreview: process.env.NODE_ENV !== "production" ? text.slice(0, 600) : undefined,
       parsed,
     });
   } catch (error) {
