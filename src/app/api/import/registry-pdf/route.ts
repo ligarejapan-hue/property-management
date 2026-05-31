@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -620,7 +621,10 @@ export async function POST(request: NextRequest) {
         if (validationError) {
           throw new Error(validationError);
         }
-        const key = `properties/${targetPropertyId}/registry/${Date.now()}.pdf`;
+        // key を一意化する（Codex P2）。Date.now() だけだと同一ミリ秒の
+        // 並行取込で衝突し、後続 PDF が同一 key を上書きして複数 Attachment が
+        // 同じ実体を指す恐れがあるため、randomUUID を suffix に付与する。
+        const key = `properties/${targetPropertyId}/registry/${Date.now()}-${randomUUID()}.pdf`;
         const uploaded = await getStorage().upload(pdfBuffer, {
           key,
           mimeType: "application/pdf",

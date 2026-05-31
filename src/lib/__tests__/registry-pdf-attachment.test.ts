@@ -83,6 +83,13 @@ vi.mock("@/lib/storage", () => {
   };
 });
 
+// P2: registry PDF の storage key 一意化検証用に randomUUID を deterministic 化。
+// 他の crypto API は実物を維持する。
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return { ...actual, randomUUID: vi.fn() };
+});
+
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: {
@@ -105,6 +112,7 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { getStorage } from "@/lib/storage";
+import { randomUUID } from "node:crypto";
 import { POST as REGISTRY_PDF_POST } from "../../app/api/import/registry-pdf/route";
 
 const SESSION_ID = "user-1";
@@ -200,6 +208,7 @@ beforeEach(() => {
   pm.property.findFirst.mockResolvedValue(null);
   pm.attachment.create.mockResolvedValue({ id: "att-1" });
   uploadMock().mockResolvedValue({ url: "/uploads/x.pdf", key: "x.pdf" });
+  (randomUUID as Mock).mockReturnValue("00000000-0000-4000-8000-000000000000");
   (parseRegistryText as Mock).mockReturnValue(MODE_B_PARSED());
 });
 
@@ -230,11 +239,14 @@ describe("A-2b: multipart Mode B (新規Property) で Attachment 保存", () => 
     expect(d?.propertyId).toBe(NEW_PROP_ID);
   });
 
-  it("4. key が properties/{propertyId}/registry/ 配下 (timestamp.pdf)", async () => {
+  it("4. key が properties/{propertyId}/registry/ 配下 (timestamp-uuid.pdf)", async () => {
     await REGISTRY_PDF_POST(multipartReq());
     const opts = uploadMock().mock.calls[0]?.[1] as { key: string };
+    // prefix 維持 + {Date.now()}-{randomUUID()}.pdf 形式（P2: 一意化）
     expect(opts.key).toMatch(
-      new RegExp(`^properties/${NEW_PROP_ID}/registry/\\d+\\.pdf$`),
+      new RegExp(
+        `^properties/${NEW_PROP_ID}/registry/\\d+-[0-9a-fA-F-]{36}\\.pdf$`,
+      ),
     );
   });
 
@@ -262,6 +274,37 @@ describe("A-2b: multipart Mode B (新規Property) で Attachment 保存", () => 
     expect(body.attachmentId).toBe("att-1");
     expect(body.propertyId).toBe(NEW_PROP_ID);
     expect(body.warning).toBeUndefined();
+  });
+});
+
+// ── P2: storage key の一意化（同一 timestamp でも衝突しない）─────────────────
+describe("A-2b/P2: registry PDF の storage key を一意化する", () => {
+  it("同一 Date.now() でも 2 回の保存で key が異なる（randomUUID 由来）", async () => {
+    const fixedTs = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(fixedTs);
+    (randomUUID as Mock)
+      .mockReturnValueOnce("11111111-1111-4111-8111-111111111111")
+      .mockReturnValueOnce("22222222-2222-4222-8222-222222222222");
+
+    await REGISTRY_PDF_POST(multipartReq());
+    await REGISTRY_PDF_POST(multipartReq());
+
+    const key1 = (uploadMock().mock.calls[0]?.[1] as { key: string }).key;
+    const key2 = (uploadMock().mock.calls[1]?.[1] as { key: string }).key;
+
+    // 同一 timestamp prefix だが key は衝突しない
+    expect(key1).not.toBe(key2);
+    expect(key1).toBe(
+      `properties/${NEW_PROP_ID}/registry/${fixedTs}-11111111-1111-4111-8111-111111111111.pdf`,
+    );
+    expect(key2).toBe(
+      `properties/${NEW_PROP_ID}/registry/${fixedTs}-22222222-2222-4222-8222-222222222222.pdf`,
+    );
+    // prefix は維持されている
+    expect(key1.startsWith(`properties/${NEW_PROP_ID}/registry/`)).toBe(true);
+    expect(key2.startsWith(`properties/${NEW_PROP_ID}/registry/`)).toBe(true);
+
+    nowSpy.mockRestore();
   });
 });
 
@@ -421,10 +464,14 @@ describe("A-2b: registry-pdf route source-assertion", () => {
     expect(routeSrc).toMatch(/validateFile\(/);
   });
 
-  it("type:'registry' / key は properties/{id}/registry 配下", () => {
+  it("type:'registry' / key は properties/{id}/registry 配下で一意化(P2)", () => {
     expect(routeSrc).toMatch(/type: "registry"/);
+    // P2: prefix 維持 + {Date.now()}-{randomUUID()}.pdf で一意化
     expect(routeSrc).toMatch(
-      /properties\/\$\{targetPropertyId\}\/registry\/\$\{Date\.now\(\)\}\.pdf/,
+      /properties\/\$\{targetPropertyId\}\/registry\/\$\{Date\.now\(\)\}-\$\{randomUUID\(\)\}\.pdf/,
+    );
+    expect(routeSrc).toMatch(
+      /import \{ randomUUID \} from "node:crypto"/,
     );
   });
 
