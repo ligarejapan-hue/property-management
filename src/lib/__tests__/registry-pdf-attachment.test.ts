@@ -206,6 +206,11 @@ beforeEach(() => {
   pm.importJobRow.create.mockResolvedValue({});
   pm.property.create.mockResolvedValue({ id: NEW_PROP_ID });
   pm.property.findFirst.mockResolvedValue(null);
+  // P1: Attachment 保存前のスコープ確認用 findUnique 既定（admin はどの値でも許可）。
+  pm.property.findUnique.mockResolvedValue({
+    createdBy: SESSION_ID,
+    assignedTo: null,
+  });
   pm.attachment.create.mockResolvedValue({ id: "att-1" });
   uploadMock().mockResolvedValue({ url: "/uploads/x.pdf", key: "x.pdf" });
   (randomUUID as Mock).mockReturnValue("00000000-0000-4000-8000-000000000000");
@@ -443,6 +448,82 @@ describe("A-2b: 既存アクセス制御を壊さない（保存はアクセス�
   });
 });
 
+// ── P1: Mode B でも対象 property のスコープを確認してから保存 ────────────────
+describe("A-2b/P1: Mode B で targetPropertyId のスコープ確認後に Attachment 保存", () => {
+  const MATCHED_ID = "33333333-3333-4333-8333-333333333333";
+
+  it("1+2. Mode B match で field_staff がアクセス不可なら upload も create も実行しない", async () => {
+    setSession("field_staff");
+    // 地番/住所マッチで既存物件に targetPropertyId が決まる
+    pm.property.findFirst.mockResolvedValue({ id: MATCHED_ID });
+    // 対象 property は担当外/作成外 → field_staff はアクセス不可
+    pm.property.findUnique.mockResolvedValue({
+      createdBy: "someone-else",
+      assignedTo: "another",
+    });
+
+    const res = await REGISTRY_PDF_POST(multipartReq());
+
+    // 取込本体（matched）は既存仕様どおり成功
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.propertyId).toBe(MATCHED_ID);
+    // Attachment は作成されず、upload も実行されない（最優先要件）
+    expect(uploadMock()).not.toHaveBeenCalled();
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+    expect(body.attachmentId).toBeUndefined();
+    expect(typeof body.warning).toBe("string");
+    expect(body.warning).toContain("アクセス");
+  });
+
+  it("3. Mode B で field_staff が作成者(アクセス可)なら Attachment 作成", async () => {
+    setSession("field_staff");
+    pm.property.findFirst.mockResolvedValue({ id: MATCHED_ID });
+    pm.property.findUnique.mockResolvedValue({
+      createdBy: SESSION_ID, // 本人作成 → アクセス可
+      assignedTo: null,
+    });
+
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    expect(res.status).toBe(201);
+    expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+    const d = attachmentData();
+    expect(d?.type).toBe("registry");
+    expect(d?.targetId).toBe(MATCHED_ID);
+    const body = await res.json();
+    expect(body.attachmentId).toBe("att-1");
+    expect(body.warning).toBeUndefined();
+  });
+
+  it("3b. Mode B で field_staff が担当(assignedTo)物件ならアクセス可で作成", async () => {
+    setSession("field_staff");
+    pm.property.findFirst.mockResolvedValue({ id: MATCHED_ID });
+    pm.property.findUnique.mockResolvedValue({
+      createdBy: "someone-else",
+      assignedTo: SESSION_ID, // 担当者 → アクセス可
+    });
+
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    expect(res.status).toBe(201);
+    expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+    expect(attachmentData()?.targetId).toBe(MATCHED_ID);
+  });
+
+  it("4. office_staff は担当外物件でも従来どおり Attachment 作成（既存挙動維持）", async () => {
+    setSession("office_staff");
+    pm.property.findFirst.mockResolvedValue({ id: MATCHED_ID });
+    pm.property.findUnique.mockResolvedValue({
+      createdBy: "someone-else",
+      assignedTo: "another",
+    });
+
+    const res = await REGISTRY_PDF_POST(multipartReq());
+    expect(res.status).toBe(201);
+    expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+    expect(attachmentData()?.targetId).toBe(MATCHED_ID);
+  });
+});
+
 // ── source-assertion: 実装の固定化 ─────────────────────────────────────────
 const read = (p: string) =>
   fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
@@ -477,5 +558,13 @@ describe("A-2b: registry-pdf route source-assertion", () => {
 
   it("AuditLog/本文に rawText を増やしていない", () => {
     expect(routeSrc).not.toMatch(/rawText/);
+  });
+
+  it("P1: Attachment 書き込み前に canAccessPropertyRecord でスコープ確認する", () => {
+    // 保存前に対象 property の createdBy/assignedTo を取得しスコープ判定している
+    expect(routeSrc).toMatch(/canAccessPropertyRecord\(session, target\)/);
+    expect(routeSrc).toMatch(
+      /findUnique\(\{[\s\S]*?id: targetPropertyId[\s\S]*?createdBy: true[\s\S]*?assignedTo: true/,
+    );
   });
 });

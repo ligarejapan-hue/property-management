@@ -612,44 +612,60 @@ export async function POST(request: NextRequest) {
     let attachmentId: string | null = null;
     let attachmentWarning: string | null = null;
     if (pdfBuffer && targetPropertyId) {
-      try {
-        const validationError = validateFile(
-          pdfBuffer.length,
-          "application/pdf",
-          ALLOWED_ATTACHMENT_MIMES,
-        );
-        if (validationError) {
-          throw new Error(validationError);
-        }
-        // key を一意化する（Codex P2）。Date.now() だけだと同一ミリ秒の
-        // 並行取込で衝突し、後続 PDF が同一 key を上書きして複数 Attachment が
-        // 同じ実体を指す恐れがあるため、randomUUID を suffix に付与する。
-        const key = `properties/${targetPropertyId}/registry/${Date.now()}-${randomUUID()}.pdf`;
-        const uploaded = await getStorage().upload(pdfBuffer, {
-          key,
-          mimeType: "application/pdf",
-          fileName,
-        });
-        const attachment = await prisma.attachment.create({
-          data: {
-            targetType: "property",
-            targetId: targetPropertyId,
-            propertyId: targetPropertyId,
-            type: "registry",
-            fileName,
-            fileUrl: uploaded.url,
-            fileSize: pdfBuffer.length,
-            mimeType: "application/pdf",
-            uploadedBy: session.id,
-          },
-          select: { id: true },
-        });
-        attachmentId = attachment.id;
-      } catch (err) {
-        // 取込本体は成功扱いのまま継続し、保存失敗のみ warning として返す。
-        console.error("Failed to save registry PDF attachment:", err);
+      // P1: Attachment を書き込む直前に、対象 property へのアクセス権を必ず確認する。
+      // Mode B は地番/住所マッチで既存物件に targetPropertyId が決まり得るため、
+      // Mode A と同じ field_staff スコープ（canAccessPropertyRecord）をここでも適用し、
+      // 担当外/作成外の物件に PDF を添付させない（attachments endpoint と同等の制御）。
+      // admin / office_staff は従来どおり全件許可。
+      const target = await prisma.property.findUnique({
+        where: { id: targetPropertyId },
+        select: { createdBy: true, assignedTo: true },
+      });
+      if (!target || !canAccessPropertyRecord(session, target)) {
+        // 権限が無い対象には upload も attachment.create も実行しない（最優先要件）。
+        // 取込本体（matched/created）は既存仕様どおり成功扱いのまま warning を返す。
         attachmentWarning =
-          "謄本は取込されましたが、PDF本体の保存に失敗しました。";
+          "対象物件へのアクセス権が無いため、謄本PDFは保存されませんでした。";
+      } else {
+        try {
+          const validationError = validateFile(
+            pdfBuffer.length,
+            "application/pdf",
+            ALLOWED_ATTACHMENT_MIMES,
+          );
+          if (validationError) {
+            throw new Error(validationError);
+          }
+          // key を一意化する（Codex P2）。Date.now() だけだと同一ミリ秒の
+          // 並行取込で衝突し、後続 PDF が同一 key を上書きして複数 Attachment が
+          // 同じ実体を指す恐れがあるため、randomUUID を suffix に付与する。
+          const key = `properties/${targetPropertyId}/registry/${Date.now()}-${randomUUID()}.pdf`;
+          const uploaded = await getStorage().upload(pdfBuffer, {
+            key,
+            mimeType: "application/pdf",
+            fileName,
+          });
+          const attachment = await prisma.attachment.create({
+            data: {
+              targetType: "property",
+              targetId: targetPropertyId,
+              propertyId: targetPropertyId,
+              type: "registry",
+              fileName,
+              fileUrl: uploaded.url,
+              fileSize: pdfBuffer.length,
+              mimeType: "application/pdf",
+              uploadedBy: session.id,
+            },
+            select: { id: true },
+          });
+          attachmentId = attachment.id;
+        } catch (err) {
+          // 取込本体は成功扱いのまま継続し、保存失敗のみ warning として返す。
+          console.error("Failed to save registry PDF attachment:", err);
+          attachmentWarning =
+            "謄本は取込されましたが、PDF本体の保存に失敗しました。";
+        }
       }
     }
 
