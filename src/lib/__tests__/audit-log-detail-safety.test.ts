@@ -295,6 +295,62 @@ describe("sanitizeAuditDetail: import_job_rollback の rollback metadata 保持"
   });
 });
 
+describe("sanitizeAuditDetail: corporateNumber 生値はマスク / summary は保持", () => {
+  it("1. corporateNumber（生値）は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("owner_corporate_apply", {
+      corporateNumber: "1234567890123",
+    }) as Record<string, unknown>;
+    expect(out.corporateNumber).toBe(REDACTED);
+  });
+
+  it("2. corporateNumberCount / *MatchedCount / *HitCount / *AppliedCount / hasCorporateNumber は保持", () => {
+    const out = sanitizeAuditDetail("owner_corporate_lookup", {
+      corporateNumberCount: 3,
+      corporateNumberMatchedCount: 2,
+      corporateNumberHitCount: 5,
+      corporateNumberAppliedCount: 1,
+      hasCorporateNumber: true,
+    }) as Record<string, unknown>;
+    expect(out.corporateNumberCount).toBe(3);
+    expect(out.corporateNumberMatchedCount).toBe(2);
+    expect(out.corporateNumberHitCount).toBe(5);
+    expect(out.corporateNumberAppliedCount).toBe(1);
+    expect(out.hasCorporateNumber).toBe(true);
+  });
+
+  it("3. nested object / array 内の corporateNumber 生値も [REDACTED]", () => {
+    const out = sanitizeAuditDetail("import_job_rollback", {
+      summary: { corporateNumber: "9876543210987" },
+      restoredFields: [{ propertyId: "p1", corporateNumber: "1112223334445" }],
+    }) as Record<string, unknown>;
+    expect((out.summary as Record<string, unknown>).corporateNumber).toBe(
+      REDACTED,
+    );
+    const rf = (out.restoredFields as Array<Record<string, unknown>>)[0];
+    expect(rf.propertyId).toBe("p1");
+    expect(rf.corporateNumber).toBe(REDACTED);
+  });
+
+  it("4. corporateNumber 削除後も rollback metadata は保持される", () => {
+    const out = sanitizeAuditDetail("import_job_rollback", {
+      deletedCount: 5,
+      restoredPropertyCount: 3,
+      restoredFieldCount: 12,
+      blocked: false,
+      restoredFields: [
+        { propertyId: "p1", fieldNames: ["address"], rowNumbers: [1] },
+      ],
+    }) as Record<string, unknown>;
+    expect(out.deletedCount).toBe(5);
+    expect(out.restoredPropertyCount).toBe(3);
+    expect(out.restoredFieldCount).toBe(12);
+    expect(out.blocked).toBe(false);
+    const rf = (out.restoredFields as Array<Record<string, unknown>>)[0];
+    expect(rf.fieldNames).toEqual(["address"]);
+    expect(rf.rowNumbers).toEqual([1]);
+  });
+});
+
 describe("admin/audit-logs route 配線（source-assertion）", () => {
   const routeSrc = read("src/app/api/admin/audit-logs/route.ts");
 

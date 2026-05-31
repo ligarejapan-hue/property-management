@@ -100,8 +100,13 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "dateFrom",
   "dateTo",
   "exportedAt",
-  // 法人番号サマリ（公開情報の件数・集計。生の氏名/住所ではない）
-  "corporateNumber",
+  // 法人番号サマリ系（件数・boolean のみ許可）。
+  // 生値 corporateNumber は許可しない（audit_log:read で生の法人番号を返さない）。
+  "corporateNumberCount",
+  "corporateNumberMatchedCount",
+  "corporateNumberHitCount",
+  "corporateNumberAppliedCount",
+  "hasCorporateNumber",
   // 派生長・ヒット数（生値ではなく長さ/件数のみ）
   "mgmtIdLen",
   "mgmtHitCount",
