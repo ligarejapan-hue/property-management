@@ -108,10 +108,27 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * action 固有で追加許可するキー（現状は不要だが拡張余地のため用意）。
+ * action 固有で追加許可するキー（allowlist へ合算）。
  * unknown action にはこれを付与せず ALWAYS_SAFE_KEYS のみで最も厳しく扱う。
  */
-const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {};
+const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  // 取込ロールバックの監査メタデータ（PIIではなく復元対象の構造情報）。
+  import_job_rollback: new Set(["restoredFields", "fieldNames"]),
+};
+
+/**
+ * action 固有で「危険キー判定を上書きして必ず保持する」キー（完全一致）。
+ * 例: import_job_rollback の fieldNames は所有者名等のPIIではなく復元対象の
+ * 「フィールド名」なので保持する。/name/i の一律判定をこのキーだけ上書きする。
+ * ownerName / userName / fileName / name / address / email / phone 等は
+ * ここに含めないため、rollback でも引き続き [REDACTED] になる。
+ * unknown action には付与しないため fieldNames は安易に残らない。
+ */
+const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  import_job_rollback: new Set(["fieldNames"]),
+};
+
+const EMPTY_KEY_SET: ReadonlySet<string> = new Set();
 
 /**
  * allowlist より優先して必ず `[REDACTED]` にする危険キーの「完全一致」集合
@@ -218,6 +235,15 @@ function allowlistForAction(action: string | null | undefined): ReadonlySet<stri
   return new Set([...ALWAYS_SAFE_KEYS, ...extra]);
 }
 
+// action 固有で危険キー判定を上書きして保持するキー集合。
+// unknown / 未登録 action では空集合（上書きなし）。
+function forceSafeForAction(
+  action: string | null | undefined,
+): ReadonlySet<string> {
+  if (!action) return EMPTY_KEY_SET;
+  return ACTION_FORCE_SAFE_KEYS[action] ?? EMPTY_KEY_SET;
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return (
     typeof v === "object" &&
@@ -230,21 +256,25 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function sanitizeValue(
   value: unknown,
   allow: ReadonlySet<string>,
+  forceSafe: ReadonlySet<string>,
   depth: number,
 ): unknown {
   if (depth > MAX_DEPTH) return REDACTED;
 
   if (Array.isArray(value)) {
-    return value.map((el) => sanitizeValue(el, allow, depth + 1));
+    return value.map((el) => sanitizeValue(el, allow, forceSafe, depth + 1));
   }
 
   if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      if (isDangerousKey(k)) {
+      if (forceSafe.has(k)) {
+        // action 固有で危険キー判定を上書きして保持（例: rollback の fieldNames）。
+        out[k] = sanitizeValue(v, allow, forceSafe, depth + 1);
+      } else if (isDangerousKey(k)) {
         out[k] = REDACTED;
       } else if (allow.has(k)) {
-        out[k] = sanitizeValue(v, allow, depth + 1);
+        out[k] = sanitizeValue(v, allow, forceSafe, depth + 1);
       } else {
         out[k] = REDACTED;
       }
@@ -273,9 +303,10 @@ export function sanitizeAuditDetail(
   if (detail === null || detail === undefined) return detail;
 
   const allow = allowlistForAction(action);
+  const forceSafe = forceSafeForAction(action);
 
   if (Array.isArray(detail) || isPlainObject(detail)) {
-    return sanitizeValue(detail, allow, 0);
+    return sanitizeValue(detail, allow, forceSafe, 0);
   }
 
   // detail 自体がプリミティブのケース（通常は object だが念のため）。

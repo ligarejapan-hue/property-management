@@ -175,6 +175,74 @@ describe("sanitizeAuditDetail: ネスト / 配列 / unknown action", () => {
   });
 });
 
+describe("sanitizeAuditDetail: import_job_rollback の rollback metadata 保持", () => {
+  it("1/2/3. restoredFields と fieldNames/propertyId/rowNumbers/rowNumber/rowId/count/targetTable/status を保持する", () => {
+    const out = sanitizeAuditDetail("import_job_rollback", {
+      restoredFields: [
+        {
+          propertyId: "prop-1",
+          fieldNames: ["address", "dmStatus"],
+          rowNumbers: [1, 2],
+          rowNumber: 1,
+          rowId: "row-1",
+          count: 2,
+          targetTable: "properties",
+          status: "rolled_back",
+        },
+      ],
+    }) as Record<string, unknown>;
+    expect(Array.isArray(out.restoredFields)).toBe(true);
+    const rf = (out.restoredFields as Array<Record<string, unknown>>)[0];
+    expect(rf.propertyId).toBe("prop-1");
+    expect(rf.fieldNames).toEqual(["address", "dmStatus"]);
+    expect(rf.rowNumbers).toEqual([1, 2]);
+    expect(rf.rowNumber).toBe(1);
+    expect(rf.rowId).toBe("row-1");
+    expect(rf.count).toBe(2);
+    expect(rf.targetTable).toBe("properties");
+    expect(rf.status).toBe("rolled_back");
+  });
+
+  it("4. restoredFields 内に混入した ownerName/ownerAddress/email/phone は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("import_job_rollback", {
+      restoredFields: [
+        {
+          propertyId: "prop-1",
+          fieldNames: ["address"],
+          ownerName: "山田太郎",
+          ownerAddress: "東京都港区1-2-3",
+          email: "a@b.com",
+          phone: "09000000000",
+        },
+      ],
+    }) as Record<string, unknown>;
+    const rf = (out.restoredFields as Array<Record<string, unknown>>)[0];
+    expect(rf.fieldNames).toEqual(["address"]);
+    expect(rf.ownerName).toBe(REDACTED);
+    expect(rf.ownerAddress).toBe(REDACTED);
+    expect(rf.email).toBe(REDACTED);
+    expect(rf.phone).toBe(REDACTED);
+  });
+
+  it("5. unknown action では fieldNames / restoredFields を保持しない", () => {
+    const out = sanitizeAuditDetail("totally_unknown_action", {
+      restoredFields: [{ fieldNames: ["address"] }],
+      fieldNames: ["address"],
+    }) as Record<string, unknown>;
+    expect(out.restoredFields).toBe(REDACTED);
+    expect(out.fieldNames).toBe(REDACTED);
+  });
+
+  it("他 action（csv_export 等）でも fieldNames は危険キーとしてマスクされる", () => {
+    const out = sanitizeAuditDetail("csv_export", {
+      fieldNames: ["address"],
+      resultCount: 3,
+    }) as Record<string, unknown>;
+    expect(out.fieldNames).toBe(REDACTED);
+    expect(out.resultCount).toBe(3);
+  });
+});
+
 describe("admin/audit-logs route 配線（source-assertion）", () => {
   const routeSrc = read("src/app/api/admin/audit-logs/route.ts");
 
