@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { sanitizeAuditDetail } from "@/lib/audit-log-detail-safety";
 
 // ---------- GET /api/admin/audit-logs ----------
 
@@ -73,8 +74,16 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
+    // detail を返却側で安全化（保存値は変更しない）。所有者名/住所/電話/メール/
+    // GPS/token/secret/本文 等の過剰露出を action 別 allowlist + 危険キー denylist
+    // + 再帰マスクで防ぐ。
+    const safeLogs = logs.map((log) => ({
+      ...log,
+      detail: sanitizeAuditDetail(log.action, log.detail),
+    }));
+
     return apiResponse({
-      data: logs,
+      data: safeLogs,
       total,
       page,
       limit,
