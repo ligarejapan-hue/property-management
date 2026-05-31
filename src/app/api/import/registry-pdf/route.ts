@@ -78,6 +78,8 @@ function applyEditedToParsed(
     parsed.address = nz(edited.fields.address);
     parsed.lotNumber = nz(edited.fields.lotNumber);
     parsed.buildingNumber = nz(edited.fields.buildingNumber);
+    parsed.landCategory = nz(edited.fields.landCategory);
+    parsed.area = nz(edited.fields.area);
   }
   if (edited.owners) {
     parsed.owners = edited.owners

@@ -25,6 +25,8 @@ describe("A-2a-1 (UI): confirm の編集 fields/owners を確定APIへ送る", (
     expect(pageSrc).toMatch(/const edited = \{/);
     expect(pageSrc).toMatch(/realEstateNumber: fields\.realEstateNumber\.value/);
     expect(pageSrc).toMatch(/address: fields\.address\.value/);
+    expect(pageSrc).toMatch(/landCategory: fields\.landCategory\.value/);
+    expect(pageSrc).toMatch(/area: fields\.area\.value/);
     expect(pageSrc).toMatch(/owners: owners\.map\(/);
   });
 
@@ -77,6 +79,25 @@ describe("A-2a-1 (server): 受領値を zod 検証し、再parseより優先", (
 
   it("不正 JSON の edited は 400 で拒否する（multipart）", () => {
     expect(routeSrc).toMatch(/INVALID_EDITED/);
+  });
+});
+
+// ── Codex対応: 地目 / 地積 も編集値を再parseより優先反映する ─────────────────
+
+describe("A-2a-1 (Codex): landCategory / area も編集値を再parseより優先反映", () => {
+  it("editedImportSchema.fields が landCategory / area を受け付ける", () => {
+    expect(routeSrc).toMatch(/landCategory: z\.string\(\)\.nullish\(\)/);
+    expect(routeSrc).toMatch(/area: z\.string\(\)\.nullish\(\)/);
+  });
+
+  it("applyEditedToParsed が landCategory を編集値（nz 正規化）で上書きする", () => {
+    expect(routeSrc).toMatch(
+      /parsed\.landCategory = nz\(edited\.fields\.landCategory\)/,
+    );
+  });
+
+  it("applyEditedToParsed が area を編集値（nz 正規化）で上書きする", () => {
+    expect(routeSrc).toMatch(/parsed\.area = nz\(edited\.fields\.area\)/);
   });
 });
 
