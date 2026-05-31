@@ -374,7 +374,9 @@ DB / schema（詳細は §9）:
 - docs-only は `git diff --check` と `git status --short` が問題なければ commit / push してよい（build/test は §10 のとおり省略可。省略理由を報告する）。
 - commit 対象は対象タスクの変更ファイルに限定する（`git add` は対象ファイルを明示し、全体 add をしない）。
 - `.claude/settings.local.json` は絶対に commit しない。
-- node_modules / generated files / package差分 / migration差分を commit しない（`git status --short` で混入がないことを確認する）。
+- node_modules / generated files は commit しない（`git status --short` で混入がないことを確認する）。
+- package.json / package-lock.json / schema.prisma / prisma/migrations の差分は、ユーザーが明示承認した依存追加・schema変更・migration作成タスクで、かつ対象タスクに含まれる場合のみ commit してよい（§18.2 / §9 参照。commit する場合は必ず報告する）。
+- それ以外の意図しない / 対象外の package差分・migration差分は commit せず、停止して報告する。
 - merge は常にユーザー側で行う（§6）。
 
 ## 19. 高リスク領域の共通ルール
