@@ -4,6 +4,15 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+<!-- BEGIN:claude-dev-rules-pointer -->
+# 開発ルールの参照先（詳細は CLAUDE.md）
+
+- このリポジトリの AI 開発・並列作業（worktree）・コマンド実行許可・commit/push の詳細ルールは **CLAUDE.md** を参照する（ここには重複記載しない）。
+- Claude GitHub Code Review / `@claude review` は使用禁止（CLAUDE.md §17）。
+- PII / AuditLog / 権限 / import・export / upload・storage / GitHub Actions / DM出力 / 謄本PDF に関わる変更は Codex review 推奨（CLAUDE.md §11・§19）。
+- paid service / usage credits / API課金 が発生し得る機能の有効化・利用は事前承認必須（CLAUDE.md §17）。
+<!-- END:claude-dev-rules-pointer -->
+
 <!-- BEGIN:codex-review-rules -->
 # Codex レビュー基準
 
