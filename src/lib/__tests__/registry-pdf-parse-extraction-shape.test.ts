@@ -25,10 +25,9 @@ describe("registry-pdf parse route Phase F-2a response shape", () => {
     );
   });
 
-  it("F-2a: raw text 本文を非デバッグレスポンスに含めない", () => {
-    expect(routeSrc).toMatch(
-      /_rawTextPreview:\s*process\.env\.NODE_ENV\s*!==\s*"production"\s*\?\s*text\.slice\(0,\s*600\)/,
-    );
+  it("A-2a-2/F-2a: raw text 本文を非デバッグレスポンスに含めない", () => {
+    // A-2a-2: _rawTextPreview（dev限定の本文先頭600字=PII断片）は廃止済み。不在を固定する。
+    expect(routeSrc).not.toMatch(/_rawTextPreview/);
     expect(routeSrc).not.toMatch(/text:\s*text,/);
     expect(routeSrc).not.toMatch(/rawText:\s*text/);
   });

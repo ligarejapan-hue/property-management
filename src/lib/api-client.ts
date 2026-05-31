@@ -1031,6 +1031,7 @@ export async function importRegistryPdf(
   text: string,
   propertyId?: string | null,
   fileName?: string,
+  edited?: unknown,
 ) {
   if (USE_MOCK) {
     await mockDelay();
@@ -1054,7 +1055,7 @@ export async function importRegistryPdf(
   return apiFetch("/api/import/registry-pdf", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, propertyId, fileName }),
+    body: JSON.stringify({ text, propertyId, fileName, edited }),
   });
 }
 
@@ -1063,6 +1064,7 @@ export async function importRegistryPdfFile(
   file: File,
   propertyId?: string | null,
   fileName?: string,
+  edited?: unknown,
 ) {
   if (USE_MOCK) {
     await mockDelay();
@@ -1086,6 +1088,7 @@ export async function importRegistryPdfFile(
   const form = new FormData();
   form.append("file", file, fileName ?? file.name);
   if (propertyId) form.append("propertyId", propertyId);
+  if (edited !== undefined) form.append("edited", JSON.stringify(edited));
   // Content-Type は FormData 自動設定 (boundary 付き)
   return apiFetch("/api/import/registry-pdf", {
     method: "POST",

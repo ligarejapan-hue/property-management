@@ -449,6 +449,24 @@ export default function RegistryPdfPage() {
     const propId =
       target === "existing" ? existingPropertyId.trim() || null : null;
 
+    // A-2a: confirm 画面で編集した fields / owners を確定 API に送り、サーバ再 parse
+    // より優先させる（「確認・修正してから取込」が無視される不具合の修正）。
+    const edited = {
+      fields: {
+        realEstateNumber: fields.realEstateNumber.value,
+        address: fields.address.value,
+        lotNumber: fields.lotNumber.value,
+        buildingNumber: fields.buildingNumber.value,
+        landCategory: fields.landCategory.value,
+        area: fields.area.value,
+      },
+      owners: owners.map((o) => ({
+        name: o.name,
+        address: o.address,
+        share: o.share,
+      })),
+    };
+
     try {
       let json;
       if (uploadTab === "file" && selectedFile) {
@@ -457,6 +475,7 @@ export default function RegistryPdfPage() {
           selectedFile,
           propId,
           fileName ?? selectedFile.name,
+          edited,
         );
       } else {
         // テキスト貼り付けモード
@@ -464,6 +483,7 @@ export default function RegistryPdfPage() {
           text.trim(),
           propId,
           fileName ?? "registry-paste.txt",
+          edited,
         );
       }
       setResult(json as ImportResult);
