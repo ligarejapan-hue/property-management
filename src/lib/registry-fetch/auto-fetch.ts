@@ -16,7 +16,9 @@
  * そのまま再利用し、新しい PII 保存先は増やさない。
  *
  * 今回は **mock provider のみ**。実 provider（外部サービス接続・Playwright・認証情報・課金・
- * env 追加）は一切実装しない。provider は引数で注入でき、既定は MockRegistryFetchProvider。
+ * env 追加）は一切実装しない。CodexP1: provider は呼び出し側が必ず明示注入する（既定値なし）。
+ * live route は実 provider 未実装のため getRegistryFetchProvider() が null を返し、route が
+ * 501 で安全停止する（mock は本番では使わず、テストでのみ runRegistryAutoFetch に注入する）。
  */
 import type { RegistryStatus } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
@@ -29,7 +31,6 @@ import {
   type RegistryPdfSession,
 } from "@/lib/registry-pdf/process";
 import {
-  MockRegistryFetchProvider,
   RegistryFetchError,
   type RegistryFetchProvider,
   type RegistryFetchErrorCode,
@@ -74,14 +75,28 @@ async function releaseSchedulingLock(
 }
 
 /**
+ * 本番で使用する謄本取得 provider を解決する。
+ *
+ * CodexP1: 現時点では実 provider が未実装のため null を返す。これにより live API route は
+ * 501（REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED）で安全停止し、mock provider で本番 DB
+ * （registryStatus / Attachment / ImportJob）を更新してしまう事故を防ぐ。mock は本番では
+ * 決して使わず、テストでのみ runRegistryAutoFetch に明示注入する。将来 PR で実 provider を
+ * 実装したら、ここでそれを返す（env フラグでの切替はしない）。
+ */
+export function getRegistryFetchProvider(): RegistryFetchProvider | null {
+  return null;
+}
+
+/**
  * 自動取得の中核。route から呼ばれ、戻り値がそのまま API レスポンス body になる。
  * ハードエラーは ApiError を throw し、route 側 catch → handleApiError で HTTP 化する。
  *
- * provider は注入可能（既定は外部接続しない MockRegistryFetchProvider）。
+ * CodexP1: provider は呼び出し側が必ず明示注入する（既定値なし）。これにより live route が
+ * provider を渡さずに mock を暗黙利用して本番 DB を壊すことを型レベルで防ぐ。
  */
 export async function runRegistryAutoFetch(
   args: RunRegistryAutoFetchArgs,
-  provider: RegistryFetchProvider = new MockRegistryFetchProvider(),
+  provider: RegistryFetchProvider,
 ): Promise<Record<string, unknown>> {
   const { session, propertyId, confirmed } = args;
 

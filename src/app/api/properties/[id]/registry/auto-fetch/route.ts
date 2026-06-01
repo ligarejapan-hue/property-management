@@ -8,7 +8,10 @@ import {
   parseJsonBody,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
+import {
+  runRegistryAutoFetch,
+  getRegistryFetchProvider,
+} from "@/lib/registry-fetch/auto-fetch";
 
 // ---------- POST /api/properties/[id]/registry/auto-fetch ----------
 // 謄本自動取得（PR4・mock provider のみ）。本番外部接続・Playwright・課金・env 追加・
@@ -16,7 +19,11 @@ import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
 // （confirmed）だけを担当し、取得・取込・registryStatus 遷移・AuditLog は
 // runRegistryAutoFetch（@/lib/registry-fetch/auto-fetch）へ委譲する。
 //
-// body: { confirmed: true }  // 課金確認。true 以外は実行されない（400）。
+// body: { confirmed: true }  // 課金確認。true 以外は 400。
+//
+// CodexP1: 本番 provider 未実装の現状は provider 未設定として 501
+// （REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED）で安全停止し、registryStatus / ImportJob /
+// Attachment を一切変更しない（route は mock provider を new しない）。
 //
 // 本 route は POST handler のみを export する。
 
@@ -41,12 +48,35 @@ export async function POST(
     // 課金確認フラグ。空ボディ / JSON 不正は parseJsonBody が安全に処理する。
     const body = await parseJsonBody(request);
     const confirmed = (body as { confirmed?: unknown }).confirmed === true;
+    if (!confirmed) {
+      throw new ApiError(
+        400,
+        "謄本自動取得には確認（confirmed:true）が必要です",
+        "REGISTRY_AUTO_FETCH_CONFIRMATION_REQUIRED",
+      );
+    }
 
-    const result = await runRegistryAutoFetch({
-      session: { id: session.id, role: session.role },
-      propertyId: id,
-      confirmed,
-    });
+    // CodexP1: 本番 provider は未実装。route は mock provider を直接 new せず、解決した
+    // provider が無ければ 501 で安全停止する。これにより mock 固定PDFで本番 DB
+    // （registryStatus / ImportJob / Attachment）を更新する事故を防ぐ（mock 呼び出し・
+    // DB 副作用は一切発生しない）。将来 PR で実 provider 実装後にこの経路が有効化される。
+    const provider = getRegistryFetchProvider();
+    if (!provider) {
+      throw new ApiError(
+        501,
+        "謄本自動取得プロバイダは未設定です",
+        "REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED",
+      );
+    }
+
+    const result = await runRegistryAutoFetch(
+      {
+        session: { id: session.id, role: session.role },
+        propertyId: id,
+        confirmed,
+      },
+      provider,
+    );
 
     return apiResponse(result, 200);
   } catch (error) {

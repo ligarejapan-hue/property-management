@@ -204,7 +204,9 @@ function runLib(opts: {
   session?: { id: string; role: string };
   provider?: RegistryFetchProvider;
 } = {}) {
-  const { confirmed = true, session = SESSION, provider } = opts;
+  const { confirmed = true, session = SESSION } = opts;
+  // CodexP1: provider は必須引数。テストで未指定なら明示の mock を注入する。
+  const provider = opts.provider ?? new MockRegistryFetchProvider();
   return runRegistryAutoFetch({ session, propertyId: PROP_ID, confirmed }, provider);
 }
 
@@ -327,6 +329,22 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(body.providerRequestId).toBe("req-1");
   });
 
+  it("6b. new MockRegistryFetchProvider() を明示注入した成功フロー（obtained・Attachment作成・PII非露出）", async () => {
+    const provider = new MockRegistryFetchProvider({
+      providerRequestId: "req-mock",
+      now: new Date(0),
+    });
+    const body = await runLib({ provider });
+    expect(body.registryStatus).toBe("obtained");
+    expect(body.status).toBe("success");
+    expect(body.source).toBe("mock");
+    expect(body.providerRequestId).toBe("req-mock");
+    expect(pm.importJob.create).toHaveBeenCalledTimes(1);
+    expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+    // owner PII レスポンス除去は維持（parsed を返さない）
+    expect(body.parsed).toBeUndefined();
+  });
+
   it("7a. 進行中（scheduled）は早期 409・provider/ロック未到達", async () => {
     const provider = successProvider();
     setProperty({ registryStatus: "scheduled" });
@@ -427,7 +445,7 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
   });
 });
 
-describe("PR4: POST route（権限ゲート + 正常系）", () => {
+describe("PR4/CodexP1: live route は provider 未設定で安全停止（mock で本番DBを更新しない）", () => {
   it("2. registry:auto_fetch 権限が無ければ 403・取込未実行", async () => {
     (getUserPermissions as Mock).mockResolvedValue(PERMS_NO_REGISTRY);
     const res = await callRoute({ confirmed: true });
@@ -436,21 +454,40 @@ describe("PR4: POST route（権限ゲート + 正常系）", () => {
     expect(pm.importJob.create).not.toHaveBeenCalled();
   });
 
-  it("正常系: 200 で source=mock / registryStatus=obtained を返し Attachment が作られる", async () => {
+  it("3+4+5. confirmed:true でも provider 未設定なら 501・registryStatus/ImportJob/Attachment/Audit 無し", async () => {
     const res = await callRoute({ confirmed: true });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(501);
     const body = await res.json();
-    expect(body.source).toBe("mock");
-    expect(body.registryStatus).toBe("obtained");
-    expect(body.fileName).toBe("registry-mock.pdf");
-    expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+    expect(body.error.code).toBe("REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED");
+    // DB 副作用ゼロ（registryStatus 変更なし・ImportJob/Attachment/AuditLog 作成なし）
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    // エラーレスポンスに PII を含まない
+    const json = JSON.stringify(body);
+    expect(json).not.toMatch(/owner|所有者|住所|郵便/);
   });
 
-  it("confirmed 無しは route 経由でも 400（CONFIRMATION_REQUIRED）", async () => {
+  it("confirmed 無しは route で 400（入力検証スケルトン維持）・DB副作用なし", async () => {
     const res = await callRoute({});
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error.code).toBe("REGISTRY_AUTO_FETCH_CONFIRMATION_REQUIRED");
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("owner:read なしでも provider 未設定で 501（route に owner PII 露出経路なし）", async () => {
+    (getUserPermissions as Mock).mockResolvedValue([
+      { resource: "registry", action: "auto_fetch", granted: true },
+      { resource: "property", action: "read", granted: true },
+    ]);
+    const res = await callRoute({ confirmed: true });
+    expect(res.status).toBe(501);
+    const body = await res.json();
+    expect(body.error.code).toBe("REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED");
     expect(pm.importJob.create).not.toHaveBeenCalled();
   });
 });
@@ -495,19 +532,13 @@ describe("PR4/CodexP2: レスポンスから owner PII を除去", () => {
     expect(json).not.toContain("/uploads/");
   });
 
-  it("3. owner:read なし(registry:auto_fetch+property:read あり)でも response に owner PII が漏れない", async () => {
-    (getUserPermissions as Mock).mockResolvedValue([
-      { resource: "registry", action: "auto_fetch", granted: true },
-      { resource: "property", action: "read", granted: true },
-      // owner:read は付与しない
-    ]);
+  it("3. lib は owner:read を見ずに owner PII を除去する（owner 閲覧権限に依存しない）", async () => {
+    const provider = successProvider();
     (parseRegistryText as Mock).mockReturnValue({
       ...EMPTY_PARSED(),
       owners: [{ name: "漏洩花子", address: "大阪府PII市1-1", share: null }],
     });
-    const res = await callRoute({ confirmed: true });
-    expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await runLib({ provider });
     expect(body.parsed).toBeUndefined();
     const json = JSON.stringify(body);
     expect(json).not.toContain("漏洩花子");
@@ -560,11 +591,28 @@ describe("PR4: source-assertion（スコープ固定）", () => {
     expect(exports[0]).toMatch(/export async function POST/);
   });
 
-  it("mock provider のみ利用（実 provider / cron / queue / 一括取得 / UI を含まない）", () => {
-    expect(libSrc).toMatch(/MockRegistryFetchProvider/);
+  it("実 provider / cron / queue / 一括取得 を含まない（lib も route も）", () => {
     for (const src of [routeSrc, libSrc]) {
       expect(src).not.toMatch(/cron|queue|bull|agenda/i);
       expect(src).not.toMatch(/bulk|batch/i);
     }
+  });
+
+  it("CodexP1-1. runRegistryAutoFetch は provider 必須・lib は mock を参照しない（暗黙利用なし）", () => {
+    // 既定値 new MockRegistryFetchProvider() を削除し provider を必須引数にした
+    expect(libSrc).toMatch(/provider: RegistryFetchProvider/);
+    expect(libSrc).not.toMatch(/provider\s*=\s*new MockRegistryFetchProvider/);
+    expect(libSrc).not.toMatch(/MockRegistryFetchProvider/);
+    // 本番 provider 解決は未設定（null）。env フラグでの切替もしない
+    expect(libSrc).toMatch(/getRegistryFetchProvider/);
+    expect(libSrc).not.toMatch(/ENABLE_MOCK_REGISTRY_FETCH/);
+    expect(libSrc).not.toMatch(/process\.env/);
+  });
+
+  it("CodexP1-2. route は mock provider を直接 new せず provider 未設定で 501 を返す", () => {
+    expect(routeSrc).not.toMatch(/MockRegistryFetchProvider/);
+    expect(routeSrc).not.toMatch(/new\s+\w*Provider/);
+    expect(routeSrc).toMatch(/REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED/);
+    expect(routeSrc).toMatch(/501/);
   });
 });
