@@ -129,6 +129,10 @@ function PropertiesPageInner() {
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
   const [canExportCsv, setCanExportCsv] = useState(false);
 
+  // DM差込CSV の出力可否。dm-export API は csv_export:read / csv_export_personal:read に
+  // 加えて owner:read（所有者個人情報を含むため）を必須にする。UI も同条件で判定する。
+  const [canExportDm, setCanExportDm] = useState(false);
+
   // 入力中候補表示
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
   const [suggestOpen, setSuggestOpen] = useState(false);
@@ -207,6 +211,14 @@ function PropertiesPageInner() {
     window.location.href = `/api/properties/export${qs ? `?${qs}` : ""}`;
   };
 
+  // DM差込CSV の出力: 現在の検索条件を引き継いで dm-export API を開く。
+  // サーバ側で dmStatus=send / isArchived=false を強制するため、
+  // 画面の dmStatus フィルタが hold/no_send でもそのまま渡してよい。
+  const handleExportDm = () => {
+    const qs = new URLSearchParams(buildFilterParams()).toString();
+    window.location.href = `/api/properties/dm-export${qs ? `?${qs}` : ""}`;
+  };
+
   useEffect(() => {
     fetchProperties();
   }, [fetchProperties]);
@@ -226,8 +238,15 @@ function PropertiesPageInner() {
             (p) => p.resource === resource && p.action === "read" && p.granted,
           );
         setCanExportCsv(has("csv_export") && has("csv_export_personal"));
+        // DM差込CSV の出力は所有者個人情報を含むため owner:read も併せて要求する。
+        setCanExportDm(
+          has("csv_export") && has("csv_export_personal") && has("owner"),
+        );
       })
-      .catch(() => setCanExportCsv(false));
+      .catch(() => {
+        setCanExportCsv(false);
+        setCanExportDm(false);
+      });
   }, []);
 
   // 担当者プルダウン用にユーザー一覧を初回のみ取得（失敗時はサイレントに無視）
@@ -500,6 +519,17 @@ function PropertiesPageInner() {
           >
             <Download className="h-4 w-4" />
             CSV出力
+          </button>
+        )}
+        {canExportDm && (
+          <button
+            type="button"
+            onClick={handleExportDm}
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            title="現在の検索条件で送付可の物件をDM差込CSV出力"
+          >
+            <Download className="h-4 w-4" />
+            DM差込CSV出力
           </button>
         )}
         <button
