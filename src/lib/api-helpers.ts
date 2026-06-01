@@ -89,6 +89,8 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       { resource: "field_survey", action: "write", granted: true },
       { resource: "field_survey", action: "read_all", granted: true },
       { resource: "field_survey", action: "manage", granted: true },
+      // PR2: 謄本自動取得（registry:auto_fetch）。mock は admin 相当の全権限のため付与。
+      { resource: "registry", action: "auto_fetch", granted: true },
     ];
   }
 
