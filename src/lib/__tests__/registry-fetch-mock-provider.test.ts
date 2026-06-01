@@ -18,6 +18,9 @@ import {
   type RegistryFetchProvider,
   type RegistryFetchErrorCode,
 } from "@/lib/registry-fetch";
+import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
+
+const MOCK_PDF_TEXT = "REGISTRY AUTO FETCH MOCK PDF";
 
 const read = (p: string) =>
   fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
@@ -72,6 +75,36 @@ describe("PR3: MockRegistryFetchProvider の戻り値", () => {
     expect(res.fileName).toBe("custom.pdf");
     expect(res.fetchedAt.getTime()).toBe(0);
     expect(res.providerRequestId).toBe("req-123");
+  });
+});
+
+describe("PR3/CodexP2: default mock PDF が有効な PDF で parse できる", () => {
+  it("1. default pdfBuffer は %PDF- magic を満たす Buffer", async () => {
+    const res = await new MockRegistryFetchProvider().fetchRegistryPdf({ ref: "p" });
+    expect(Buffer.isBuffer(res.pdfBuffer)).toBe(true);
+    expect(isPdfBuffer(res.pdfBuffer)).toBe(true);
+  });
+
+  it("2+3. default pdfBuffer は extractTextFromPdf で parse でき固定文を含む（InvalidPDFException にならない）", async () => {
+    const res = await new MockRegistryFetchProvider().fetchRegistryPdf({ ref: "p" });
+    const text = await extractTextFromPdf(res.pdfBuffer);
+    expect(typeof text).toBe("string");
+    expect(text).toContain(MOCK_PDF_TEXT);
+  });
+
+  it("4. custom pdfBuffer 注入は維持される（default を上書き）", async () => {
+    const buf = Buffer.from("%PDF-custom-injected");
+    const res = await new MockRegistryFetchProvider({ pdfBuffer: buf }).fetchRegistryPdf({ ref: "p" });
+    expect(res.pdfBuffer).toBe(buf);
+  });
+
+  it("6. mock PDF に owner/address/postal/apiKey/token/credential 等の PII/secret を含まない", async () => {
+    const res = await new MockRegistryFetchProvider().fetchRegistryPdf({ ref: "p" });
+    const asText = res.pdfBuffer.toString("latin1");
+    expect(asText).not.toMatch(FORBIDDEN);
+    expect(asText).not.toMatch(/postal|zip|郵便番号/i);
+    // 固定の本文以外に人名/住所らしき文字列を含まない（本文は MOCK_PDF_TEXT のみ）
+    expect(asText).toContain(MOCK_PDF_TEXT);
   });
 });
 

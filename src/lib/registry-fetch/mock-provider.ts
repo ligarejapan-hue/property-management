@@ -14,8 +14,31 @@ import type {
 } from "./types";
 import { RegistryFetchError } from "./errors";
 
-/** mock が返す既定の最小 PDF バイト列（外部アクセスなし・固定値）。 */
-const DEFAULT_MOCK_PDF = Buffer.from("%PDF-1.4\n%mock registry pdf\n%%EOF\n", "utf8");
+/**
+ * mock が返す既定の最小 PDF（外部アクセスなし・ソース内完結の固定 base64）。
+ *
+ * Codex P2: 旧実装は "%PDF-" の magic は満たすが PDF 構造として無効で、
+ * extractTextFromPdf(pdf-parse) が InvalidPDFException で失敗していた。本 fixture は
+ * 1ページ・テキストのみの最小の「有効な」PDF で、pdf-parse が parse でき本文
+ * "REGISTRY AUTO FETCH MOCK PDF" を抽出できる。
+ *
+ * 外部ファイル/HTTP/FS は使わず base64 文字列としてソース内に固定する。実際の謄本
+ * サンプルや著作物ではなく、所有者名/住所/郵便番号/APIキー/認証情報など PII・secret は
+ * 一切含まない。
+ */
+const DEFAULT_MOCK_PDF_BASE64 =
+  "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq" +
+  "CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq" +
+  "CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIg" +
+  "NzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNCAw" +
+  "IFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA2MCA+PgpzdHJlYW0KQlQgL0YxIDI0IFRm" +
+  "IDcyIDcwMCBUZCAoUkVHSVNUUlkgQVVUTyBGRVRDSCBNT0NLIFBERikgVGogRVQKZW5kc3RyZWFt" +
+  "CmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQg" +
+  "L0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAw" +
+  "MDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAw" +
+  "MDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzNTAgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9S" +
+  "b290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MjAKJSVFT0YK";
+const DEFAULT_MOCK_PDF = Buffer.from(DEFAULT_MOCK_PDF_BASE64, "base64");
 
 export interface MockRegistryFetchOptions {
   /** 返す PDF バイト列を注入できる（未指定なら固定の最小バッファ）。 */
