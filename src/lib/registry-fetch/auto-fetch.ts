@@ -88,6 +88,15 @@ export function getRegistryFetchProvider(): RegistryFetchProvider | null {
 }
 
 /**
+ * UI の capability 表示用 read-only ヘルパ。本番 provider が解決できるか（= 設定済みか）を
+ * boolean だけで返す。secret・設定値そのもの・PII は一切返さない。副作用・外部接続・env 追加なし。
+ * 現状は getRegistryFetchProvider() が null のため false（PR6 で実 provider 実装時に true）。
+ */
+export function isRegistryAutoFetchProviderConfigured(): boolean {
+  return getRegistryFetchProvider() != null;
+}
+
+/**
  * 自動取得の中核。route から呼ばれ、戻り値がそのまま API レスポンス body になる。
  * ハードエラーは ApiError を throw し、route 側 catch → handleApiError で HTTP 化する。
  *

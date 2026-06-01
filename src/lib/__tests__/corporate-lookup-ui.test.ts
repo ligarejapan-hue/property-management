@@ -129,7 +129,9 @@ describe("properties/[id]/page.tsx — CorporateLookupPanel 統合", () => {
   });
 
   it("corporateLookupConfigured を /api/me/permissions の capabilities から取得", () => {
-    expect(pageSrc).toMatch(/capabilities\?:\s*\{\s*corporateLookup\?:\s*boolean\s*\}/);
+    // capabilities 型には他の機能フラグ（例: registryAutoFetch）が追加され得るため、
+    // corporateLookup?: boolean を含むことだけを確認する（兄弟フィールドを許容）。
+    expect(pageSrc).toMatch(/capabilities\?:\s*\{[^}]*corporateLookup\?:\s*boolean[^}]*\}/);
     expect(pageSrc).toMatch(/setCorporateLookupConfigured/);
   });
 
