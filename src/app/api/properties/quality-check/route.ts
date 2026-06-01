@@ -21,13 +21,20 @@ interface QualityIssue {
 //
 // 物件一覧ロード時に毎回呼ばれる。全非アーカイブ物件を無制限に取得して JS で全件判定する
 // のではなく（物件総数が多くても使えるように）、各品質ルールを Prisma の where 条件へ
-// 落とし込んで「その問題を持つ物件だけ」を DB 側で絞り込んで取得する。
-//  - 全非アーカイブ件数は count で取得し summary.propertiesChecked に返す。
-//  - 1ルールあたりの列挙件数は QUALITY_CHECK_ISSUE_LIMIT を上限とし、超過時は当該ルールの
-//    リストを丸めて summary.issuesLimited=true を立てる（hard fail / 409 はしない・常に 200）。
-//  - 取得列は id / address のみ。所有者は relation filter のみで Owner PII 列は取得しない。
+// 落とし込んで「その問題を持つ物件だけ」を DB 側で扱う。
+//
+// summary と data の意味を分離する:
+//  - summary.errors / warnings / info / total: 各ルールの「全体実件数(count)」を severity ごとに
+//    合算した値。表示用 issues の truncate には影響されない（operator が実件数を誤認しない）。
+//  - data(issues): 表示用サンプル。各ルール最大 QUALITY_CHECK_ISSUE_LIMIT 件まで（id/address のみ）。
+//  - summary.issuesReturned: data に実際に含まれる issue 行数（サンプル件数）。
+//  - summary.issuesLimited: いずれかのルールで全体件数 > issueLimit となり data を丸めたか（非PII）。
+//    hard fail / 不完全スキャンではなく「表示が一部」を示すだけ。常に 200。
+//  - summary.propertiesChecked: 全非アーカイブ物件数(count)。
+//
+// 取得列は id / address のみ。所有者は relation filter のみで Owner PII 列は取得しない。
 
-// 1ルールあたりに列挙する問題物件数の上限（issue リスト肥大化の防止。スキャン上限ではない）。
+// 1ルールあたりに data へ列挙する問題物件数の上限（表示用サンプルの上限。スキャン上限ではない）。
 const QUALITY_CHECK_ISSUE_LIMIT = 1000;
 
 const NOT_ARCHIVED: Prisma.PropertyWhereInput = { isArchived: false };
@@ -93,32 +100,48 @@ export async function GET() {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    // 全非アーカイブ件数（count）と、各ルールに該当する問題物件（id/address のみ）を並列取得。
-    const [propertiesChecked, ruleMatches] = await Promise.all([
+    // 全非アーカイブ件数(count) と、各ルールの「全体件数(count)」＋「表示用サンプル(findMany)」を
+    // 並列取得する。count は全体実件数、findMany は最大 QUALITY_CHECK_ISSUE_LIMIT 件の表示用。
+    const [propertiesChecked, ruleResults] = await Promise.all([
       prisma.property.count({ where: NOT_ARCHIVED }),
       Promise.all(
-        QUALITY_RULES.map((rule) =>
-          prisma.property.findMany({
-            where: { ...NOT_ARCHIVED, ...rule.where },
-            select: { id: true, address: true },
-            take: QUALITY_CHECK_ISSUE_LIMIT + 1,
-          }),
-        ),
+        QUALITY_RULES.map(async (rule) => {
+          const where: Prisma.PropertyWhereInput = {
+            ...NOT_ARCHIVED,
+            ...rule.where,
+          };
+          const [count, sample] = await Promise.all([
+            prisma.property.count({ where }),
+            prisma.property.findMany({
+              where,
+              select: { id: true, address: true },
+              take: QUALITY_CHECK_ISSUE_LIMIT,
+            }),
+          ]);
+          return { rule, count, sample };
+        }),
       ),
     ]);
 
-    // propertyId 単位で issue をマージ（同一物件が複数ルールに該当しても取りこぼさない）。
-    const byProperty = new Map<string, QualityIssue[]>();
+    // summary は「全体実件数(count)」を severity ごとに合算する（truncate 後 issues からは数えない）。
+    // 旧仕様どおり 1 物件が複数ルールに該当すれば issue 件数も複数として数える。
+    const severityTotals: Record<QualityIssue["severity"], number> = {
+      error: 0,
+      warning: 0,
+      info: 0,
+    };
     let issuesLimited = false;
 
-    QUALITY_RULES.forEach((rule, i) => {
-      const matched = ruleMatches[i];
-      if (matched.length > QUALITY_CHECK_ISSUE_LIMIT) {
-        // 当該ルールの該当件数が上限超。リストは丸めるが hard fail はしない（常に 200）。
+    // data(表示用) は propertyId 単位でマージ（同一物件が複数ルールに該当しても取りこぼさない）。
+    const byProperty = new Map<string, QualityIssue[]>();
+
+    for (const { rule, count, sample } of ruleResults) {
+      severityTotals[rule.severity] += count;
+      if (count > QUALITY_CHECK_ISSUE_LIMIT) {
+        // 全体件数が表示上限超。data は丸めるが hard fail はしない（常に 200）。
         issuesLimited = true;
       }
-      const rows = matched.slice(0, QUALITY_CHECK_ISSUE_LIMIT);
-      for (const p of rows) {
+      for (const p of sample) {
         const issue: QualityIssue = {
           propertyId: p.id,
           address: p.address,
@@ -133,9 +156,9 @@ export async function GET() {
           byProperty.set(p.id, [issue]);
         }
       }
-    });
+    }
 
-    // フラットな issue 配列に展開し、error > warning > info の順に並べる（従来レスポンス互換）。
+    // 表示用 issues をフラット化し、error > warning > info の順に並べる（従来レスポンス互換）。
     const severityOrder = { error: 0, warning: 1, info: 2 };
     const issues: QualityIssue[] = [];
     for (const list of byProperty.values()) {
@@ -143,18 +166,25 @@ export async function GET() {
     }
     issues.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
 
+    const total =
+      severityTotals.error + severityTotals.warning + severityTotals.info;
+
     return apiResponse({
       data: issues,
       summary: {
-        total: issues.length,
-        errors: issues.filter((i) => i.severity === "error").length,
-        warnings: issues.filter((i) => i.severity === "warning").length,
-        info: issues.filter((i) => i.severity === "info").length,
-        // 全非アーカイブ物件数（count）。問題のない物件も含む「チェック対象」総数。
+        // 全体実件数（count ベース）。表示用 issues の truncate には影響されない。
+        total,
+        errors: severityTotals.error,
+        warnings: severityTotals.warning,
+        info: severityTotals.info,
+        // 全非アーカイブ物件数（問題のない物件も含む「チェック対象」総数）。
         propertiesChecked,
-        // いずれかのルールの issue リストが上限で丸められたか（非PII）。
-        // スキャン不完全 / hard fail ではなく、列挙件数の上限到達のみを示す。常に 200。
+        // data に実際に含まれる issue 行数（サンプル件数）。truncate 時は total > issuesReturned。
+        issuesReturned: issues.length,
+        // いずれかのルールで全体件数 > issueLimit となり data を丸めたか（非PII・常に 200）。
         issuesLimited,
+        // 1ルールあたりの表示上限（非PII）。UI が「表示は一部」を出す判断材料。
+        issueLimit: QUALITY_CHECK_ISSUE_LIMIT,
       },
     });
   } catch (error) {
