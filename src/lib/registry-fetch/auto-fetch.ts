@@ -218,11 +218,23 @@ export async function runRegistryAutoFetch(
       },
     });
 
-    // レスポンス body。processRegistryPdf 結果に provider メタ（非PII）と確定 status を付与。
-    // result には parsed（手動取込と同じく呼び出し元へ返す）も含まれるが、AuditLog には
-    // 載せていない（監査の非PII方針は上の writeAuditLog で担保）。
+    // レスポンス body（非PII の allowlist）。
+    // CodexP2: processRegistryPdf の戻り値 result には parsed（謄本由来の owner 名・住所・
+    // realEstateNumber 等の PII）が含まれる。本 API は registry:auto_fetch + property:read で
+    // 実行でき owner:read を要求しないため、result を spread して parsed を返すと既存の
+    // owner:read 制御（物件詳細 API の owner PII マスキング）を迂回して owner PII を漏らす。
+    // よって result は spread せず、非PII の項目だけを明示的に拾って返す。所有者名/住所/
+    // 郵便番号/抽出テキスト/PDF本文/fileUrl 全文は返さない（手動取込APIのレスポンスは不変）。
     return {
-      ...result,
+      jobId: result.jobId,
+      action: result.action,
+      status: "success",
+      propertyId: result.propertyId,
+      ownersMatched: result.ownersMatched,
+      ownersCreated: result.ownersCreated,
+      ownersLinked: result.ownersLinked,
+      ...(result.attachmentId ? { attachmentId: result.attachmentId } : {}),
+      ...(result.warning ? { warning: result.warning } : {}),
       source: fetchResult.source,
       fileName: fetchResult.fileName,
       providerRequestId: fetchResult.providerRequestId,

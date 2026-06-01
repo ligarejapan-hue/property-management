@@ -455,6 +455,66 @@ describe("PR4: POST route（権限ゲート + 正常系）", () => {
   });
 });
 
+describe("PR4/CodexP2: レスポンスから owner PII を除去", () => {
+  const PARSED_WITH_PII = () => ({
+    ...EMPTY_PARSED(),
+    realEstateNumber: "9999999999999",
+    address: "東京都港区PII住所1-2-3",
+    owners: [
+      { name: "謄本太郎", address: "東京都港区PII住所1-2-3", share: "1/2" },
+    ],
+  });
+
+  it("1. processRegistryPdf が parsed.owners を返しても response に parsed/owners が含まれない", async () => {
+    const provider = successProvider();
+    (parseRegistryText as Mock).mockReturnValue(PARSED_WITH_PII());
+    const body = await runLib({ provider });
+    // parsed 自体を返さない（最優先）。owners も含まれない。
+    expect(body.parsed).toBeUndefined();
+    expect(Object.keys(body)).not.toContain("parsed");
+    expect(Object.keys(body)).not.toContain("owners");
+    // 非PII の allowlist は残る
+    expect(body.jobId).toBe("job-1");
+    expect(body.propertyId).toBe(PROP_ID);
+    expect(body.registryStatus).toBe("obtained");
+    expect(body.status).toBe("success");
+    expect(body.source).toBe("mock");
+    expect(body.providerRequestId).toBe("req-1");
+    expect(typeof body.ownersCreated).toBe("number");
+  });
+
+  it("2. response に所有者名・所有者住所・郵便番号・realEstateNumber・fileUrl が含まれない", async () => {
+    const provider = successProvider();
+    (parseRegistryText as Mock).mockReturnValue(PARSED_WITH_PII());
+    const body = await runLib({ provider });
+    const json = JSON.stringify(body);
+    expect(json).not.toContain("謄本太郎");
+    expect(json).not.toContain("東京都港区PII住所1-2-3");
+    expect(json).not.toContain("9999999999999");
+    expect(json).not.toMatch(/zip|郵便番号/);
+    expect(json).not.toContain("/uploads/");
+  });
+
+  it("3. owner:read なし(registry:auto_fetch+property:read あり)でも response に owner PII が漏れない", async () => {
+    (getUserPermissions as Mock).mockResolvedValue([
+      { resource: "registry", action: "auto_fetch", granted: true },
+      { resource: "property", action: "read", granted: true },
+      // owner:read は付与しない
+    ]);
+    (parseRegistryText as Mock).mockReturnValue({
+      ...EMPTY_PARSED(),
+      owners: [{ name: "漏洩花子", address: "大阪府PII市1-1", share: null }],
+    });
+    const res = await callRoute({ confirmed: true });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.parsed).toBeUndefined();
+    const json = JSON.stringify(body);
+    expect(json).not.toContain("漏洩花子");
+    expect(json).not.toContain("大阪府PII市1-1");
+  });
+});
+
 describe("PR4: source-assertion（スコープ固定）", () => {
   const read = (p: string) =>
     fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
