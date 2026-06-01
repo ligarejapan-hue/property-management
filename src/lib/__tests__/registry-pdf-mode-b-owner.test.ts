@@ -219,10 +219,17 @@ beforeEach(() => {
 });
 
 // ── Mode B: 既存物件 match → owner 反映 ──────────────────────────────────────
-describe("A-2c: Mode B matched で owner を反映", () => {
+describe("A-2c: Mode B matched(強い一致) で owner を反映", () => {
   beforeEach(() => {
-    setParsed([{ name: "山田太郎", address: "東京都港区1丁目1", share: null }]);
-    pm.property.findFirst.mockResolvedValue({ id: MATCHED_ID });
+    // realEstateNumber 一致 = 決定的な強い一致（canReflectOwners=true）
+    setParsed([{ name: "山田太郎", address: "東京都港区1丁目1", share: null }], {
+      realEstateNumber: "1234",
+    });
+    pm.property.findFirst.mockResolvedValue({
+      id: MATCHED_ID,
+      address: "東京都千代田区一番町1",
+      realEstateNumber: "1234",
+    });
   });
 
   it("1+2. 既存 active owner を再利用し PropertyOwner link を作成する", async () => {
@@ -363,6 +370,113 @@ describe("A-2c: Mode B created で owner を反映", () => {
   });
 });
 
+// ── PR#88: owner reflection を「強い/決定的な物件一致」に限定 ────────────────
+describe("A-2c/PR#88: owner reflection は決定的な物件一致のときのみ実行", () => {
+  it("1. realEstateNumber 一致(強い)なら owner reflection を実行する", async () => {
+    setParsed([{ name: "山田太郎", address: "東京都港区1", share: null }], {
+      realEstateNumber: "1234",
+    });
+    // realEstateNumber 一致（address は別でも強い一致）
+    pm.property.findFirst.mockResolvedValue({
+      id: MATCHED_ID,
+      address: "全く別の住所",
+      realEstateNumber: "1234",
+    });
+    pm.owner.findMany.mockResolvedValue([]);
+
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.action).toBe("matched");
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(body.ownersCreated).toBe(1);
+    expect(body.warning).toBeUndefined();
+  });
+
+  it("2. 正規化住所の完全一致(強い)なら owner reflection を実行する", async () => {
+    // realEstateNumber 無し → address で一致。matched.address が parsed.address と正規化完全一致
+    setParsed([{ name: "佐藤花子", address: "大阪市北区2", share: null }]); // parsed.address = 既定 "東京都千代田区一番町1"
+    pm.property.findFirst.mockResolvedValue({
+      id: MATCHED_ID,
+      address: "東京都千代田区一番町1",
+      realEstateNumber: null,
+    });
+    pm.owner.findMany.mockResolvedValue([]);
+
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.action).toBe("matched");
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(body.ownersCreated).toBe(1);
+  });
+
+  it("3. 新規 Property 作成なら owner reflection を実行する（既存 #3 と同方針）", async () => {
+    setParsed([{ name: "田中三郎", address: "札幌市4", share: null }]);
+    pm.property.findFirst.mockResolvedValue(null); // 新規作成
+    pm.owner.findMany.mockResolvedValue([]);
+
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    const body = await res.json();
+    expect(body.action).toBe("created");
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(body.ownersCreated).toBe(1);
+  });
+
+  it("4+5+6. address 部分一致(弱い fallback)では targetPropertyId があっても skip + warning", async () => {
+    // parsed.address は matched.address の部分文字列だが正規化完全一致ではない
+    setParsed([{ name: "鈴木次郎", address: "京都市3", share: null }], {
+      address: "東京都",
+    });
+    pm.property.findFirst.mockResolvedValue({
+      id: MATCHED_ID,
+      address: "東京都千代田区一番町1",
+      realEstateNumber: null,
+    });
+
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    const body = await res.json();
+    // 取込本体 matched は成功維持
+    expect(res.status).toBe(201);
+    expect(body.action).toBe("matched");
+    expect(body.propertyId).toBe(MATCHED_ID);
+    // owner reflection は実行されない（Owner/PropertyOwner を作らない）
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    expect(pm.propertyOwner.create).not.toHaveBeenCalled();
+    expect(body.ownersMatched).toBe(0);
+    expect(body.ownersCreated).toBe(0);
+    expect(body.ownersLinked).toBe(0);
+    // 非PII warning
+    expect(typeof body.warning).toBe("string");
+    expect(body.warning).toContain("部分一致");
+  });
+
+  it("7. field_staff scope は強い一致でも適用される（弱い一致は scope check に到達しない）", async () => {
+    // 強い一致(realEstateNumber) + field_staff アクセス不可 → scope skip（弱一致skipではない）
+    setSession("field_staff");
+    setParsed([{ name: "山田太郎", address: "東京都港区1", share: null }], {
+      realEstateNumber: "1234",
+    });
+    pm.property.findFirst.mockResolvedValue({
+      id: MATCHED_ID,
+      address: "東京都千代田区一番町1",
+      realEstateNumber: "1234",
+    });
+    pm.property.findUnique.mockResolvedValue({
+      createdBy: "someone-else",
+      assignedTo: "another",
+    });
+
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    expect(typeof body.warning).toBe("string");
+    expect(body.warning).toContain("アクセス権");
+  });
+});
+
 // ── Codex P2: PropertyOwner link 作成の同時実行冪等性 ────────────────────────
 describe("A-2c/P2: PropertyOwner link 作成を unique 競合に対して冪等化", () => {
   const P2002 = Object.assign(new Error("Unique constraint failed"), {
@@ -370,8 +484,14 @@ describe("A-2c/P2: PropertyOwner link 作成を unique 競合に対して冪等�
   });
 
   it("1+2+3. reuse パスで link 作成が P2002 → job は失敗せず既存リンク扱い・linkedCount 増えない", async () => {
-    setParsed([{ name: "山田太郎", address: "東京都港区1丁目1", share: null }]);
-    pm.property.findFirst.mockResolvedValue({ id: MATCHED_ID });
+    setParsed([{ name: "山田太郎", address: "東京都港区1丁目1", share: null }], {
+      realEstateNumber: "1234",
+    });
+    pm.property.findFirst.mockResolvedValue({
+      id: MATCHED_ID,
+      address: "東京都千代田区一番町1",
+      realEstateNumber: "1234",
+    });
     pm.owner.findMany.mockResolvedValue([
       {
         id: "owner-1",
@@ -433,11 +553,18 @@ describe("A-2c/P2: PropertyOwner link 作成を unique 競合に対して冪等�
 });
 
 // ── field_staff scope（Mode B matched）───────────────────────────────────────
-describe("A-2c: field_staff スコープ（Mode B matched）", () => {
+describe("A-2c: field_staff スコープ（Mode B 強い一致）", () => {
   beforeEach(() => {
     setSession("field_staff");
-    setParsed([{ name: "山田太郎", address: "東京都港区1", share: null }]);
-    pm.property.findFirst.mockResolvedValue({ id: MATCHED_ID });
+    // 強い一致(realEstateNumber)で canReflectOwners=true → scope check に到達する
+    setParsed([{ name: "山田太郎", address: "東京都港区1", share: null }], {
+      realEstateNumber: "1234",
+    });
+    pm.property.findFirst.mockResolvedValue({
+      id: MATCHED_ID,
+      address: "東京都千代田区一番町1",
+      realEstateNumber: "1234",
+    });
   });
 
   it("9. アクセス不可物件では owner 反映を skip し warning を返す", async () => {
@@ -561,6 +688,17 @@ describe("A-2c: ownersMatched/Created/Linked を response/rawData/audit に載�
     });
   });
 
+  it("11. ImportJobRow.rawData に owner名(PII)が残らず件数のみ保持する", async () => {
+    setParsed([{ name: "個人情報太郎", address: "秘密住所5", share: null }]);
+    await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    const raw = successRowData()!;
+    // owner 名配列キー(owners)は廃止し、非PII の件数(ownerCount)のみ
+    expect(raw).not.toHaveProperty("owners");
+    expect(raw).toHaveProperty("ownerCount");
+    expect(JSON.stringify(raw)).not.toContain("個人情報太郎");
+    expect(JSON.stringify(raw)).not.toContain("秘密住所5");
+  });
+
   it("15. AuditLog detail に owner名/住所/郵便番号/rawText/PDF本文が入らない", async () => {
     setParsed([{ name: "個人情報太郎", address: "秘密住所5", share: null }]);
     await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
@@ -605,6 +743,17 @@ describe("A-2c: audit-log-detail-safety の force-safe（pdf_import）", () => {
       ownersMatched: 1,
     }) as Record<string, unknown>;
     expect(sanitized.ownersMatched).toBe(REDACTED);
+  });
+
+  it("12+13. owner件数は有限数値のときだけ可視化され、非数値なら [REDACTED]", () => {
+    const sanitized = sanitizeAuditDetail("pdf_import", {
+      ownersMatched: "山田太郎", // 非数値（PII 混入想定）→ REDACTED
+      ownersCreated: { secret: "x" }, // 非数値 → REDACTED
+      ownersLinked: 3, // 有限数値 → 可視化
+    }) as Record<string, unknown>;
+    expect(sanitized.ownersMatched).toBe(REDACTED);
+    expect(sanitized.ownersCreated).toBe(REDACTED);
+    expect(sanitized.ownersLinked).toBe(3);
   });
 });
 

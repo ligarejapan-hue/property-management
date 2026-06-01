@@ -149,10 +149,20 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
  */
 const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   import_job_rollback: new Set(["fieldNames"]),
-  // A-2c: 謄本PDF取込(pdf_import)の owner 反映件数。キー名に "owner" を含み
-  // /owner/i denylist に一致するため、件数キーだけ force-safe で保持する
-  // （値は number の集計のみ。owner 名/住所/郵便番号等の PII は allowlist 外 +
-  // denylist のままで引き続き [REDACTED]）。unknown / 他 action では保持しない。
+};
+
+/**
+ * action 固有で「危険キー判定を上書きするが、値が有限数値のときに限り保持する」
+ * キー（完全一致）。非数値が来た場合は PII 流入の恐れがあるため [REDACTED] にする。
+ *
+ * 例: pdf_import(謄本PDF取込) の owner 反映件数 ownersMatched/Created/Linked。
+ * キー名に "owner" を含み /owner/i denylist に一致するが、有限数値(件数)のときだけ
+ * 可視化する。owner 名/住所/郵便番号等の PII は依然 allowlist 外 + denylist で
+ * [REDACTED]。unknown / 他 action では保持しない。
+ */
+const ACTION_NUMERIC_FORCE_SAFE_KEYS: Readonly<
+  Record<string, ReadonlySet<string>>
+> = {
   pdf_import: new Set(["ownersMatched", "ownersCreated", "ownersLinked"]),
 };
 
@@ -272,6 +282,15 @@ function forceSafeForAction(
   return ACTION_FORCE_SAFE_KEYS[action] ?? EMPTY_KEY_SET;
 }
 
+// action 固有で「有限数値のときに限り危険キー判定を上書きして保持する」キー集合。
+// unknown / 未登録 action では空集合（上書きなし）。
+function numericForceSafeForAction(
+  action: string | null | undefined,
+): ReadonlySet<string> {
+  if (!action) return EMPTY_KEY_SET;
+  return ACTION_NUMERIC_FORCE_SAFE_KEYS[action] ?? EMPTY_KEY_SET;
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return (
     typeof v === "object" &&
@@ -285,24 +304,31 @@ function sanitizeValue(
   value: unknown,
   allow: ReadonlySet<string>,
   forceSafe: ReadonlySet<string>,
+  numericSafe: ReadonlySet<string>,
   depth: number,
 ): unknown {
   if (depth > MAX_DEPTH) return REDACTED;
 
   if (Array.isArray(value)) {
-    return value.map((el) => sanitizeValue(el, allow, forceSafe, depth + 1));
+    return value.map((el) =>
+      sanitizeValue(el, allow, forceSafe, numericSafe, depth + 1),
+    );
   }
 
   if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      if (forceSafe.has(k)) {
+      if (numericSafe.has(k)) {
+        // action 固有で危険キー判定を上書きするが、有限数値のときに限り可視化する
+        // （非数値は PII 流入の恐れがあるため [REDACTED]）。例: pdf_import の owner 件数。
+        out[k] = typeof v === "number" && Number.isFinite(v) ? v : REDACTED;
+      } else if (forceSafe.has(k)) {
         // action 固有で危険キー判定を上書きして保持（例: rollback の fieldNames）。
-        out[k] = sanitizeValue(v, allow, forceSafe, depth + 1);
+        out[k] = sanitizeValue(v, allow, forceSafe, numericSafe, depth + 1);
       } else if (isDangerousKey(k)) {
         out[k] = REDACTED;
       } else if (allow.has(k)) {
-        out[k] = sanitizeValue(v, allow, forceSafe, depth + 1);
+        out[k] = sanitizeValue(v, allow, forceSafe, numericSafe, depth + 1);
       } else {
         out[k] = REDACTED;
       }
@@ -332,9 +358,10 @@ export function sanitizeAuditDetail(
 
   const allow = allowlistForAction(action);
   const forceSafe = forceSafeForAction(action);
+  const numericSafe = numericForceSafeForAction(action);
 
   if (Array.isArray(detail) || isPlainObject(detail)) {
-    return sanitizeValue(detail, allow, forceSafe, 0);
+    return sanitizeValue(detail, allow, forceSafe, numericSafe, 0);
   }
 
   // detail 自体がプリミティブのケース（通常は object だが念のため）。

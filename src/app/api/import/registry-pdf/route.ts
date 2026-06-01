@@ -420,6 +420,8 @@ export async function POST(request: NextRequest) {
     let ownersLinked = 0;
     // A-2c: Mode B で field_staff スコープにより owner 反映をスキップしたフラグ。
     let ownerScopeSkipped = false;
+    // PR#88: Mode B で弱い住所一致のため owner 反映をスキップしたフラグ。
+    let ownerWeakMatchSkipped = false;
     // 失敗理由（silent fail-through 用と、catch ブロックでの recovery 用）。
     // null のままなら成功扱い。
     let failureReason: string | null = null;
@@ -498,12 +500,24 @@ export async function POST(request: NextRequest) {
     } else {
       // ---- Mode B: Try to match or create new ----
       let matchedProperty = null;
+      // PR#88: owner 反映は「強い/決定的な物件一致」のときのみ許可する。
+      //  - realEstateNumber 一致（一意性が高い）
+      //  - 正規化住所の完全一致
+      //  - 新規 Property 作成
+      // address contains の部分一致 fallback は弱い一致のため owner を反映しない
+      // （誤った物件に Owner/PropertyOwner を恒久紐づけしないため）。取込本体の物件
+      // match 挙動自体は従来どおり維持し、owner 反映だけを skip する。
+      let canReflectOwners = false;
 
       if (parsed.realEstateNumber) {
         matchedProperty = await prisma.property.findFirst({
           where: { realEstateNumber: parsed.realEstateNumber },
           select: { id: true, address: true, realEstateNumber: true },
         });
+        if (matchedProperty) {
+          // realEstateNumber 一致は決定的とみなす。
+          canReflectOwners = true;
+        }
       }
 
       if (!matchedProperty && parsed.address) {
@@ -511,6 +525,14 @@ export async function POST(request: NextRequest) {
           where: { address: { contains: parsed.address } },
           select: { id: true, address: true, realEstateNumber: true },
         });
+        if (matchedProperty) {
+          // 正規化住所が完全一致する場合のみ決定的とみなす。contains による部分一致
+          // （完全一致でない）は弱い fallback なので owner 反映を許可しない。
+          canReflectOwners =
+            matchedProperty.address != null &&
+            normalizeAddress(matchedProperty.address) ===
+              normalizeAddress(parsed.address);
+        }
       }
 
       if (matchedProperty) {
@@ -534,31 +556,39 @@ export async function POST(request: NextRequest) {
         });
         targetPropertyId = newProp.id;
         resultAction = "created";
+        // 新規作成した物件は自分が createdBy なので owner 反映可。
+        canReflectOwners = true;
       }
 
       // A-2c: Mode B でも owner を反映する（targetPropertyId 確定後）。
-      // field_staff スコープ: matched で既存物件に当たった場合、担当外/作成外の
-      // 物件には owner を反映しない（A-2b Attachment と同じく skip + warning。
-      // 取込本体 matched は既存どおり成功扱い）。created は createdBy=session.id の
+      // PR#88: ただし強い/決定的な物件一致(canReflectOwners)のときのみ。弱い住所部分
+      // 一致は誤紐づけ防止のため反映せず skip + warning（取込本体 matched は成功維持）。
+      // field_staff スコープ: 反映する場合は担当外/作成外の物件には反映しない
+      // （A-2b Attachment と同じく skip + warning）。created は createdBy=session.id の
       // ため常にアクセス可。owner 反映が例外を投げた場合は Mode A と同じく innerErr
       // catch に伝播し job failed になる（ハード失敗。best-effort warning ではない）。
-      // owners が無ければ書き込み対象が無いためスコープ確認 / 反映ともにスキップする。
+      // owners が無ければ書き込み対象が無いため反映関連はすべてスキップする。
       if (targetPropertyId && parsed.owners.length > 0) {
-        const targetProp = await prisma.property.findUnique({
-          where: { id: targetPropertyId },
-          select: { createdBy: true, assignedTo: true },
-        });
-        if (!targetProp || !canAccessPropertyRecord(session, targetProp)) {
-          ownerScopeSkipped = true;
+        if (!canReflectOwners) {
+          // 弱い住所 fallback で物件を特定 → owner 反映しない（取込本体は維持）。
+          ownerWeakMatchSkipped = true;
         } else {
-          const modeBOwners = await reflectParsedOwners({
-            propertyId: targetPropertyId,
-            owners: parsed.owners,
-            recordCorporateDecision,
+          const targetProp = await prisma.property.findUnique({
+            where: { id: targetPropertyId },
+            select: { createdBy: true, assignedTo: true },
           });
-          ownersMatched = modeBOwners.matched;
-          ownersCreated = modeBOwners.created;
-          ownersLinked = modeBOwners.linked;
+          if (!targetProp || !canAccessPropertyRecord(session, targetProp)) {
+            ownerScopeSkipped = true;
+          } else {
+            const modeBOwners = await reflectParsedOwners({
+              propertyId: targetPropertyId,
+              owners: parsed.owners,
+              recordCorporateDecision,
+            });
+            ownersMatched = modeBOwners.matched;
+            ownersCreated = modeBOwners.created;
+            ownersLinked = modeBOwners.linked;
+          }
         }
       }
     }
@@ -694,7 +724,8 @@ export async function POST(request: NextRequest) {
           address: parsed.address,
           lotNumber: parsed.lotNumber,
           buildingNumber: parsed.buildingNumber,
-          owners: parsed.owners.map((o) => o.name),
+          // PR#88: owner 名(PII)は rawData に残さない。件数のみ保持する。
+          ownerCount: parsed.owners.length,
           // A-2c: owner 反映の非PII件数（名前・住所は載せない）。
           ownersMatched,
           ownersCreated,
@@ -795,6 +826,11 @@ export async function POST(request: NextRequest) {
     // A-2b の attachment warning と合わせて 1 つの warning 文字列にまとめて返す
     // （両方発生し得るため。取込本体は成功扱いのまま）。
     const warningParts: string[] = [];
+    if (ownerWeakMatchSkipped) {
+      warningParts.push(
+        "住所の部分一致で物件を特定したため、所有者情報は反映されませんでした。",
+      );
+    }
     if (ownerScopeSkipped) {
       warningParts.push(
         "対象物件へのアクセス権が無いため、所有者情報は反映されませんでした。",
