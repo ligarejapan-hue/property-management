@@ -149,6 +149,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
  */
 const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   import_job_rollback: new Set(["fieldNames"]),
+  // A-2c: 謄本PDF取込(pdf_import)の owner 反映件数。キー名に "owner" を含み
+  // /owner/i denylist に一致するため、件数キーだけ force-safe で保持する
+  // （値は number の集計のみ。owner 名/住所/郵便番号等の PII は allowlist 外 +
+  // denylist のままで引き続き [REDACTED]）。unknown / 他 action では保持しない。
+  pdf_import: new Set(["ownersMatched", "ownersCreated", "ownersLinked"]),
 };
 
 const EMPTY_KEY_SET: ReadonlySet<string> = new Set();

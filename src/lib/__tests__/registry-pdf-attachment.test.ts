@@ -100,6 +100,10 @@ vi.mock("@/lib/prisma", () => ({
       update: vi.fn(),
       updateMany: vi.fn(),
     },
+    // A-2c: Mode B でも owner 反映が走るため、owner 反映ケース(#12)用に owner/
+    // propertyOwner/$transaction を mock する（既定は新規 owner 作成パス）。
+    owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+    propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn() },
@@ -129,9 +133,12 @@ const pm = prisma as unknown as {
     update: Mock;
     updateMany: Mock;
   };
+  owner: { findMany: Mock; create: Mock; updateMany: Mock };
+  propertyOwner: { findFirst: Mock; create: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock };
+  $transaction: Mock;
 };
 
 // getStorage() の factory は常に同じ closure { upload } を返すため、
@@ -217,6 +224,15 @@ beforeEach(() => {
     assignedTo: null,
   });
   pm.attachment.create.mockResolvedValue({ id: "att-1" });
+  // A-2c: owner 反映の既定（候補なし→新規作成パス。owner を持つ #12 用）。
+  pm.owner.findMany.mockResolvedValue([]);
+  pm.owner.create.mockResolvedValue({ id: "owner-x" });
+  pm.owner.updateMany.mockResolvedValue({ count: 1 });
+  pm.propertyOwner.findFirst.mockResolvedValue(null);
+  pm.propertyOwner.create.mockResolvedValue({});
+  pm.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) =>
+    cb(prisma),
+  );
   uploadMock().mockResolvedValue({ url: "/uploads/x.pdf", key: "x.pdf" });
   deleteMock().mockResolvedValue(undefined);
   (randomUUID as Mock).mockReturnValue("00000000-0000-4000-8000-000000000000");
