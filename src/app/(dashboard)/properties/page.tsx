@@ -146,6 +146,18 @@ function PropertiesPageInner() {
   const [warningsByProperty, setWarningsByProperty] = useState<
     Map<string, { severity: "error" | "warning"; messages: string[] }>
   >(new Map());
+  // 警告(quality-check)が上限で一部のみか。true のとき「残りの警告を読み込む」で追加取得できる。
+  const [warningsTruncated, setWarningsTruncated] = useState(false);
+  const [loadingMoreWarnings, setLoadingMoreWarnings] = useState(false);
+  // 直近の quality-check ルールメタ。hasMore の error/warning ルールを後追い取得するために保持。
+  const warningRulesRef = useRef<
+    Array<{
+      rule: string;
+      severity: "error" | "warning" | "info";
+      hasMore: boolean;
+      nextOffset: number | null;
+    }>
+  >([]);
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -313,6 +325,25 @@ function PropertiesPageInner() {
           }
         }
         setWarningsByProperty(next);
+        // ルールメタを保持。error/warning ルールに続きがあればバッジは「一部のみ」。
+        const rules =
+          (
+            json as {
+              rules?: Array<{
+                rule: string;
+                severity: "error" | "warning" | "info";
+                hasMore: boolean;
+                nextOffset: number | null;
+              }>;
+            }
+          ).rules ?? [];
+        warningRulesRef.current = rules;
+        setWarningsTruncated(
+          rules.some(
+            (r) =>
+              (r.severity === "error" || r.severity === "warning") && r.hasMore,
+          ),
+        );
       } catch {
         // best-effort: 失敗しても無視
       }
@@ -321,6 +352,68 @@ function PropertiesPageInner() {
       cancelled = true;
     };
   }, []);
+
+  // hasMore の error/warning ルールについて続きの issue を後追い取得し、
+  // warningsByProperty を補完してバッジを実件数に近づける。Owner PII は取得しない。
+  const loadRemainingWarnings = async () => {
+    setLoadingMoreWarnings(true);
+    try {
+      const merged = new Map(
+        Array.from(
+          warningsByProperty,
+          ([k, v]) =>
+            [k, { severity: v.severity, messages: [...v.messages] }] as [
+              string,
+              { severity: "error" | "warning"; messages: string[] },
+            ],
+        ),
+      );
+      for (const meta of warningRulesRef.current) {
+        if (meta.severity === "info") continue;
+        let offset = meta.hasMore ? meta.nextOffset : null;
+        let guard = 0;
+        while (offset != null && guard < 100) {
+          guard += 1;
+          const json = await fetchQualityCheck({ rule: meta.rule, offset });
+          const data =
+            (
+              json as {
+                data?: Array<{
+                  propertyId: string;
+                  severity: "error" | "warning" | "info";
+                  message: string;
+                }>;
+              }
+            ).data ?? [];
+          for (const issue of data) {
+            if (issue.severity === "info") continue;
+            const cur = merged.get(issue.propertyId);
+            if (cur) {
+              cur.messages.push(issue.message);
+              if (issue.severity === "error") cur.severity = "error";
+            } else {
+              merged.set(issue.propertyId, {
+                severity: issue.severity,
+                messages: [issue.message],
+              });
+            }
+          }
+          const nextMeta = (
+            json as {
+              rules?: Array<{ hasMore: boolean; nextOffset: number | null }>;
+            }
+          ).rules?.[0];
+          offset = nextMeta?.hasMore ? nextMeta.nextOffset : null;
+        }
+      }
+      setWarningsByProperty(merged);
+      setWarningsTruncated(false);
+    } catch {
+      // best-effort: 失敗してもバッジは部分表示のまま
+    } finally {
+      setLoadingMoreWarnings(false);
+    }
+  };
 
   // 入力中候補: searchInput に 300ms debounce をかけて suggest API を呼ぶ。
   // searchInput は確定検索（/api/properties keyword）には流れないため、
@@ -681,6 +774,18 @@ function PropertiesPageInner() {
             </span>
           )}
         </label>
+
+        {warningsTruncated && (
+          <button
+            type="button"
+            onClick={loadRemainingWarnings}
+            disabled={loadingMoreWarnings}
+            className="rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+            title="表示中の警告バッジは一部です。残りの警告を読み込んでバッジを補完します。"
+          >
+            {loadingMoreWarnings ? "読み込み中…" : "残りの警告を読み込む"}
+          </button>
+        )}
 
         <select
           value={caseFilter}

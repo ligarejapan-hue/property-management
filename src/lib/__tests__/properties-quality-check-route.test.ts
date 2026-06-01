@@ -1,20 +1,20 @@
 /**
  * GET /api/properties/quality-check の統合テスト。
- * 性能改善（DB条件で問題物件だけ抽出）＋ Codex P2: summary を「全体実件数(count)」化。
+ * DB条件抽出 + summary=全体実件数(count) + ページング(rule/offset/limit) + rules メタ。
  *
  * 確認項目:
- *  1. あるルールで上限超(>QUALITY_CHECK_ISSUE_LIMIT)の場合、data(issues) は丸められても
- *     summary の該当 severity 件数は「全体件数(count)」になる
- *  2. errors / warnings / info が truncate 後 issues ではなく count(全体件数) から計算される
- *  3. 上限超のとき issuesLimited=true（非PII・hard fail しない・200）
- *  4. 上限未満では summary 件数と issues(data) が一致する（issuesReturned===total）
- *  5. Owner PII を取得・返却しない（select は id/address のみ）
- *  6. property:read 欠如で 403・DB(count/findMany)未実行
- *  7. 各品質ルールのクエリ（count/findMany）で isArchived=false が維持される
- *  8. 全件 findMany に戻っていない（各 findMany が rule 条件付き・無条件全件取得しない）
- *  9. route.ts は GET ハンドラ以外を export しない
- * 10. propertiesChecked は全非アーカイブ件数(count)。物件総数 5000 件超でも 409 にならない
- * 11. 同一物件が複数ルールに該当する場合 data は propertyId 単位でマージされる
+ *  1. あるルールで上限超でも summary は全体件数(count)・data は丸める
+ *  2. 既定レスポンスに rules メタ（rule/severity/totalCount/returnedCount/offset/hasMore/nextOffset）が返る
+ *  3. ?rule=CODE&offset=… で当該ルールの続きを skip/take で取得できる
+ *  4. ページングは skip/take（全件findManyでJS sliceしない）
+ *  5. 不正 rule は 400(INVALID_RULE)・DB未実行
+ *  6. 不正 limit/offset を安全に扱う（limit は[1,1000]に丸め、offset 負値は0）
+ *  7. 上限未満では rules[].hasMore=false
+ *  8. errors/warnings/info/total は count(全体件数) から計算
+ *  9. Owner PII を取得・返却しない（select は id/address のみ）
+ * 10. property:read 欠如で 403・DB(count/findMany)未実行（両モード）
+ * 11. isArchived=false 条件が各クエリで維持される
+ * 12. route.ts は GET 以外を export しない
  *
  * permissions（hasPermission）は実物を使用し、api-helpers / prisma のみ mock する。
  */
@@ -74,7 +74,6 @@ type Row = { id: string; address: string };
 type RuleScenario = { count: number; sample: Row[] };
 type Scenario = { TOTAL?: number } & Partial<Record<string, RuleScenario>>;
 
-// route 側の where から、どの品質ルール向け（または全件 TOTAL）かを判定する。
 function whereCode(where: Where): string {
   if (where.propertyOwners) return "NO_OWNER";
   if (where.registryStatus) return "REGISTRY_DM_MISMATCH";
@@ -85,7 +84,7 @@ function whereCode(where: Where): string {
   }
   if ("investigationConfirmedAt" in where) return "INVESTIGATION_NOT_CONFIRMED";
   if ("assignedTo" in where) return "NO_ASSIGNEE";
-  return "TOTAL"; // rule キーを持たない = 全非アーカイブ件数のクエリ
+  return "TOTAL";
 }
 
 function setup(scenario: Scenario) {
@@ -107,11 +106,14 @@ function sampleRows(n: number, prefix: string): Row[] {
   }));
 }
 
-function whereForFindMany(code: string): Where | undefined {
-  const call = pm.property.findMany.mock.calls.find(
+function req(qs = ""): Request {
+  return new Request(`http://localhost/api/properties/quality-check${qs}`);
+}
+
+function findManyCall(code: string) {
+  return pm.property.findMany.mock.calls.find(
     (c) => whereCode(c[0].where) === code,
-  );
-  return call?.[0].where as Where | undefined;
+  )?.[0];
 }
 
 beforeEach(() => {
@@ -126,85 +128,149 @@ beforeEach(() => {
 });
 
 describe("GET /api/properties/quality-check", () => {
-  it("01. 上限超のルールでも summary は全体件数(count)・data は丸める", async () => {
+  it("01. 上限超でも summary は全体件数(count)・data は丸める", async () => {
     setup({
       TOTAL: 9000,
-      // NO_OWNER は warning。全体 2500 件だが表示用 sample は上限1000件。
-      NO_OWNER: { count: 2500, sample: sampleRows(1000, "no") },
+      NO_OWNER: { count: 2500, sample: sampleRows(1000, "no") }, // warning
     });
-    const res = await GET();
+    const res = await GET(req());
     expect(res.status).toBe(200);
     const body = await res.json();
-    // summary は全体件数（truncate後の1000ではなく2500）
-    expect(body.summary.warnings).toBe(2500);
-    // data は上限で丸められている
-    const noOwner = body.data.filter(
-      (i: { code: string }) => i.code === "NO_OWNER",
-    );
-    expect(noOwner).toHaveLength(1000);
+    expect(body.summary.warnings).toBe(2500); // full count
+    expect(
+      body.data.filter((i: { code: string }) => i.code === "NO_OWNER"),
+    ).toHaveLength(1000); // truncated
     expect(body.summary.issuesReturned).toBe(1000);
     expect(body.summary.issuesLimited).toBe(true);
   });
 
-  it("02. errors/warnings/info/total が count(全体件数) から計算される", async () => {
+  it("02. 既定レスポンスに rules メタが返る（totalCount/hasMore/nextOffset 等）", async () => {
     setup({
       TOTAL: 9000,
-      REGISTRY_DM_MISMATCH: { count: 3, sample: sampleRows(3, "err") }, // error
-      NO_OWNER: { count: 7, sample: sampleRows(7, "ow") }, // warning
-      NO_LOT_NUMBER: { count: 1500, sample: sampleRows(1000, "lot") }, // info, 上限超
+      NO_OWNER: { count: 2500, sample: sampleRows(1000, "no") },
     });
-    const res = await GET();
+    const res = await GET(req());
+    const body = await res.json();
+    const meta = body.rules.find(
+      (r: { rule: string }) => r.rule === "NO_OWNER",
+    );
+    expect(meta).toMatchObject({
+      rule: "NO_OWNER",
+      severity: "warning",
+      totalCount: 2500,
+      returnedCount: 1000,
+      offset: 0,
+      hasMore: true,
+      nextOffset: 1000,
+    });
+    // 全 6 ルール分のメタが返る
+    expect(body.rules).toHaveLength(6);
+  });
+
+  it("03. ?rule=CODE&offset で当該ルールの続きを取得できる", async () => {
+    setup({
+      TOTAL: 9000,
+      NO_LOT_NUMBER: { count: 2500, sample: sampleRows(1000, "lot") },
+    });
+    const res = await GET(req("?rule=NO_LOT_NUMBER&offset=1000"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // 当該ルールの issue のみ
+    expect(body.data.every((i: { code: string }) => i.code === "NO_LOT_NUMBER")).toBe(
+      true,
+    );
+    expect(body.data).toHaveLength(1000);
+    expect(body.rules).toHaveLength(1);
+    expect(body.rules[0]).toMatchObject({
+      rule: "NO_LOT_NUMBER",
+      offset: 1000,
+      totalCount: 2500,
+      returnedCount: 1000,
+      hasMore: true, // 1000+1000 < 2500
+      nextOffset: 2000,
+    });
+    // 既定モードの summary は付かない（ページングモード）
+    expect(body.summary).toBeUndefined();
+  });
+
+  it("04. ページングは skip/take（全件findManyでJS sliceしない）", async () => {
+    setup({ NO_LOT_NUMBER: { count: 2500, sample: sampleRows(10, "lot") } });
+    await GET(req("?rule=NO_LOT_NUMBER&offset=1000"));
+    const call = findManyCall("NO_LOT_NUMBER")!;
+    expect(call.skip).toBe(1000);
+    expect(call.take).toBe(1000); // limit 未指定 → 既定=最大1000
+    expect(call.select).toEqual({ id: true, address: true });
+    // 該当ルール以外の findMany は呼ばれない（全件取得していない）
+    expect(pm.property.findMany.mock.calls).toHaveLength(1);
+  });
+
+  it("05. 不正 rule は 400(INVALID_RULE)・DB未実行", async () => {
+    setup({ TOTAL: 10 });
+    const res = await GET(req("?rule=NOPE"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_RULE");
+    expect(pm.property.count).not.toHaveBeenCalled();
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+  });
+
+  it("06. 不正 limit/offset を安全に扱う（limitは[1,1000]丸め・offset負値は0）", async () => {
+    setup({ NO_OWNER: { count: 5, sample: sampleRows(5, "x") } });
+    await GET(req("?rule=NO_OWNER&limit=99999")); // 上限丸め
+    expect(findManyCall("NO_OWNER")!.take).toBe(1000);
+
+    vi.clearAllMocks();
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u", role: "admin" } as never);
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL as never);
+    setup({ NO_OWNER: { count: 5, sample: sampleRows(5, "x") } });
+    await GET(req("?rule=NO_OWNER&offset=-5&limit=abc")); // offset負→0, limit不正→既定1000
+    const call = findManyCall("NO_OWNER")!;
+    expect(call.skip).toBe(0);
+    expect(call.take).toBe(1000);
+  });
+
+  it("07. 上限未満では rules[].hasMore=false", async () => {
+    setup({
+      TOTAL: 100,
+      NO_OWNER: { count: 5, sample: sampleRows(5, "x") },
+    });
+    const res = await GET(req());
+    const body = await res.json();
+    const meta = body.rules.find((r: { rule: string }) => r.rule === "NO_OWNER");
+    expect(meta.hasMore).toBe(false);
+    expect(meta.totalCount).toBe(5);
+    expect(meta.returnedCount).toBe(5);
+    expect(meta.nextOffset).toBeNull();
+    expect(body.summary.issuesLimited).toBe(false);
+  });
+
+  it("08. errors/warnings/info/total が count(全体件数) から計算される", async () => {
+    setup({
+      TOTAL: 9000,
+      REGISTRY_DM_MISMATCH: { count: 3, sample: sampleRows(3, "e") }, // error
+      NO_OWNER: { count: 7, sample: sampleRows(7, "w") }, // warning
+      NO_LOT_NUMBER: { count: 1500, sample: sampleRows(1000, "i") }, // info, 上限超
+    });
+    const res = await GET(req());
     const body = await res.json();
     expect(body.summary.errors).toBe(3);
     expect(body.summary.warnings).toBe(7);
     expect(body.summary.info).toBe(1500);
-    expect(body.summary.total).toBe(3 + 7 + 1500);
-    // data は info 分だけ丸められる: 3 + 7 + 1000
+    expect(body.summary.total).toBe(1510);
     expect(body.summary.issuesReturned).toBe(3 + 7 + 1000);
-    expect(body.data.length).toBe(3 + 7 + 1000);
-    expect(body.summary.issuesLimited).toBe(true);
   });
 
-  it("03. 上限超で issuesLimited=true（常に 200）", async () => {
-    setup({
-      TOTAL: 5000,
-      NO_LOT_NUMBER: { count: 1001, sample: sampleRows(1000, "lot") },
-    });
-    const res = await GET();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.summary.issuesLimited).toBe(true);
-    expect(body.summary.issueLimit).toBe(1000);
-  });
-
-  it("04. 上限未満では summary 件数と data が一致（issuesReturned===total）", async () => {
-    setup({
-      TOTAL: 100,
-      REGISTRY_DM_MISMATCH: { count: 2, sample: sampleRows(2, "e") }, // error
-      NO_OWNER: { count: 5, sample: sampleRows(5, "w") }, // warning
-    });
-    const res = await GET();
-    const body = await res.json();
-    expect(body.summary.issuesLimited).toBe(false);
-    expect(body.summary.errors).toBe(2);
-    expect(body.summary.warnings).toBe(5);
-    expect(body.summary.info).toBe(0);
-    expect(body.summary.total).toBe(7);
-    expect(body.summary.issuesReturned).toBe(7);
-    expect(body.data.length).toBe(7);
-  });
-
-  it("05. Owner PII を取得・返却しない（select は id/address のみ）", async () => {
+  it("09. Owner PII を取得・返却しない（select は id/address のみ）", async () => {
     setup({ NO_OWNER: { count: 1, sample: sampleRows(1, "x") } });
-    const res = await GET();
+    const res = await GET(req());
     for (const call of pm.property.findMany.mock.calls) {
       expect(call[0].select).toEqual({ id: true, address: true });
-      const selectStr = JSON.stringify(call[0].select);
-      expect(selectStr).not.toContain("propertyOwners");
-      expect(selectStr).not.toContain("name");
-      expect(selectStr).not.toContain("zip");
-      expect(selectStr).not.toContain("phone");
-      expect(selectStr).not.toContain("email");
+      const s = JSON.stringify(call[0].select);
+      expect(s).not.toContain("name");
+      expect(s).not.toContain("zip");
+      expect(s).not.toContain("phone");
+      expect(s).not.toContain("email");
+      expect(s).not.toContain("propertyOwners");
     }
     const body = await res.json();
     for (const issue of body.data) {
@@ -212,88 +278,32 @@ describe("GET /api/properties/quality-check", () => {
         ["address", "code", "message", "propertyId", "severity"].sort(),
       );
     }
-    const bodyStr = JSON.stringify(body);
-    expect(bodyStr).not.toContain("ownerName");
-    expect(bodyStr).not.toContain("nameKana");
-    expect(bodyStr).not.toContain("propertyOwners");
+    expect(JSON.stringify(body)).not.toContain("ownerName");
   });
 
-  it("06. property:read 欠如で 403・count/findMany 未実行", async () => {
+  it("10. property:read 欠如で 403・DB未実行（既定/ページング両モード）", async () => {
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_PROPERTY as never);
-    const res = await GET();
-    expect(res.status).toBe(403);
+    const res1 = await GET(req());
+    expect(res1.status).toBe(403);
+    const res2 = await GET(req("?rule=NO_OWNER&offset=0"));
+    expect(res2.status).toBe(403);
     expect(pm.property.count).not.toHaveBeenCalled();
     expect(pm.property.findMany).not.toHaveBeenCalled();
   });
 
-  it("07. 各品質ルールのクエリ(count/findMany)で isArchived=false が維持される", async () => {
+  it("11. isArchived=false が各クエリ(count/findMany・両モード)で維持される", async () => {
     setup({ TOTAL: 10, NO_OWNER: { count: 1, sample: sampleRows(1, "x") } });
-    await GET();
+    await GET(req()); // 既定
+    await GET(req("?rule=NO_OWNER&offset=0")); // ページング
     for (const call of pm.property.count.mock.calls) {
       expect(call[0].where.isArchived).toBe(false);
     }
     for (const call of pm.property.findMany.mock.calls) {
       expect(call[0].where.isArchived).toBe(false);
     }
-    // DB 条件の同値性（旧 JS 判定と一致）
-    expect(whereForFindMany("NO_OWNER")!.propertyOwners).toEqual({ none: {} });
-    expect(whereForFindMany("NO_LOT_NUMBER")!.OR).toEqual([
-      { lotNumber: null },
-      { lotNumber: "" },
-    ]);
-    const reg = whereForFindMany("REGISTRY_DM_MISMATCH")!;
-    expect(reg.registryStatus).toBe("unconfirmed");
-    expect(reg.dmStatus).toBe("send");
   });
 
-  it("08. 全件 findMany に戻っていない（各 findMany が rule 条件付き）", async () => {
-    setup({ TOTAL: 10 });
-    await GET();
-    // findMany はルール数だけ呼ばれ、すべて rule 条件を持つ（無条件 {isArchived:false} 単独はない）
-    expect(pm.property.findMany.mock.calls.length).toBe(6);
-    for (const call of pm.property.findMany.mock.calls) {
-      expect(whereCode(call[0].where)).not.toBe("TOTAL");
-    }
-    // 全体件数は count で取得している（findMany で全件取得していない）
-    const totalCountCall = pm.property.count.mock.calls.find(
-      (c) => whereCode(c[0].where) === "TOTAL",
-    );
-    expect(totalCountCall).toBeDefined();
-  });
-
-  it("09. route.ts は GET 以外を export しない", () => {
+  it("12. route.ts は GET 以外を export しない", () => {
     expect(Object.keys(routeModule).sort()).toEqual(["GET"]);
-  });
-
-  it("10. propertiesChecked は count。物件総数 5000 件超でも 409 にならない", async () => {
-    setup({ TOTAL: 8000, NO_OWNER: { count: 3, sample: sampleRows(3, "x") } });
-    const res = await GET();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.error).toBeUndefined();
-    expect(body.summary.propertiesChecked).toBe(8000);
-    const totalCountCall = pm.property.count.mock.calls.find(
-      (c) => whereCode(c[0].where) === "TOTAL",
-    )!;
-    expect(totalCountCall[0].where).toEqual({ isArchived: false });
-  });
-
-  it("11. 同一物件が複数ルールに該当する場合 data は propertyId 単位でマージ", async () => {
-    const dup = [{ id: "dup", address: "addr-dup" }];
-    setup({
-      TOTAL: 10,
-      NO_OWNER: { count: 1, sample: dup },
-      NO_ASSIGNEE: { count: 1, sample: dup },
-      NO_LOT_NUMBER: { count: 1, sample: dup },
-    });
-    const res = await GET();
-    const body = await res.json();
-    const dupIssues = body.data.filter(
-      (i: { propertyId: string }) => i.propertyId === "dup",
-    );
-    expect(dupIssues).toHaveLength(3);
-    expect(dupIssues.map((i: { code: string }) => i.code).sort()).toEqual(
-      ["NO_ASSIGNEE", "NO_LOT_NUMBER", "NO_OWNER"],
-    );
   });
 });

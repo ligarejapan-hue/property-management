@@ -17,24 +17,32 @@ interface QualityIssue {
   message: string;
 }
 
+interface RuleMeta {
+  rule: string;
+  severity: QualityIssue["severity"];
+  totalCount: number; // そのルールに該当する全体件数（DB count）
+  returnedCount: number; // 今回 data に含めた件数
+  offset: number; // 今回の取得開始位置
+  hasMore: boolean; // offset+returnedCount < totalCount
+  nextOffset: number | null; // 続きを取得する際の offset（無ければ null）
+}
+
 // ---------- GET /api/properties/quality-check ----------
 //
-// 物件一覧ロード時に毎回呼ばれる。全非アーカイブ物件を無制限に取得して JS で全件判定する
-// のではなく（物件総数が多くても使えるように）、各品質ルールを Prisma の where 条件へ
-// 落とし込んで「その問題を持つ物件だけ」を DB 側で扱う。
+// 物件一覧ロード時に毎回呼ばれる。全件 findMany + JS 全件判定はせず、各品質ルールを Prisma の
+// where 条件に落とし込み「その問題を持つ物件だけ」を DB 側で扱う。
 //
-// summary と data の意味を分離する:
-//  - summary.errors / warnings / info / total: 各ルールの「全体実件数(count)」を severity ごとに
-//    合算した値。表示用 issues の truncate には影響されない（operator が実件数を誤認しない）。
-//  - data(issues): 表示用サンプル。各ルール最大 QUALITY_CHECK_ISSUE_LIMIT 件まで（id/address のみ）。
-//  - summary.issuesReturned: data に実際に含まれる issue 行数（サンプル件数）。
-//  - summary.issuesLimited: いずれかのルールで全体件数 > issueLimit となり data を丸めたか（非PII）。
-//    hard fail / 不完全スキャンではなく「表示が一部」を示すだけ。常に 200。
-//  - summary.propertiesChecked: 全非アーカイブ物件数(count)。
+// 2 モード:
+//  (1) 既定（rule 未指定）: summary(全体実件数=count) + 各ルール先頭 QUALITY_CHECK_ISSUE_LIMIT 件の
+//      data(表示用・propertyId 単位マージ) + rules(各ルールの totalCount/hasMore/nextOffset 等)。
+//  (2) ページング（?rule=CODE&offset=&limit=）: 当該ルールのみ skip/take で DB から1ページ取得。
+//      これにより上限を超えた残り issue を UI から追加取得できる（到達不能を解消）。
 //
-// 取得列は id / address のみ。所有者は relation filter のみで Owner PII 列は取得しない。
+//  - summary.errors/warnings/info/total は count(全体件数) を severity 合算（truncate 後 data からは数えない）。
+//  - data 取得列は id/address のみ。所有者は relation filter のみで Owner PII 列は取得しない。
+//  - 全件 findMany には戻さない / 5000件超でも hard fail しない（常に 200。rule 不正のみ 400）。
 
-// 1ルールあたりに data へ列挙する問題物件数の上限（表示用サンプルの上限。スキャン上限ではない）。
+// 1ルールあたりに data へ載せる issue 件数の既定値かつ最大値（表示用ページサイズ）。
 const QUALITY_CHECK_ISSUE_LIMIT = 1000;
 
 const NOT_ARCHIVED: Prisma.PropertyWhereInput = { isArchived: false };
@@ -51,47 +59,73 @@ const QUALITY_RULES: ReadonlyArray<{
     code: "NO_OWNER",
     severity: "warning",
     message: "所有者が紐付けられていません",
-    // 旧: p.propertyOwners.length === 0 → relation filter（所有者データ自体は取得しない）
     where: { propertyOwners: { none: {} } },
   },
   {
     code: "REGISTRY_DM_MISMATCH",
     severity: "error",
     message: "登記未取得なのにDM送付可になっています",
-    // 旧: registryStatus === "unconfirmed" && dmStatus === "send"
     where: { registryStatus: "unconfirmed", dmStatus: "send" },
   },
   {
     code: "NO_LOT_NUMBER",
     severity: "info",
     message: "地番が未入力です",
-    // 旧: !p.lotNumber（null または空文字）
     where: { OR: [{ lotNumber: null }, { lotNumber: "" }] },
   },
   {
     code: "NO_REAL_ESTATE_NUMBER",
     severity: "info",
     message: "不動産番号が未入力です",
-    // 旧: !p.realEstateNumber（null または空文字）
     where: { OR: [{ realEstateNumber: null }, { realEstateNumber: "" }] },
   },
   {
     code: "INVESTIGATION_NOT_CONFIRMED",
     severity: "warning",
     message: "調査情報が未確認です",
-    // 旧: !p.investigationConfirmedAt（DateTime のため null のみ）
     where: { investigationConfirmedAt: null },
   },
   {
     code: "NO_ASSIGNEE",
     severity: "warning",
     message: "担当者が未設定です",
-    // 旧: !p.assignedTo（uuid 列のため null のみ）
     where: { assignedTo: null },
   },
 ];
 
-export async function GET() {
+type QualityRule = (typeof QUALITY_RULES)[number];
+
+function findRule(code: string): QualityRule | undefined {
+  return QUALITY_RULES.find((r) => r.code === code);
+}
+
+function buildIssue(
+  rule: QualityRule,
+  p: { id: string; address: string },
+): QualityIssue {
+  return {
+    propertyId: p.id,
+    address: p.address,
+    severity: rule.severity,
+    code: rule.code,
+    message: rule.message,
+  };
+}
+
+// offset は 0 以上の整数に正規化（不正・負値は 0）。
+function parseOffset(raw: string | null): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+// limit は [1, QUALITY_CHECK_ISSUE_LIMIT] に丸める（不正は既定値、超過は最大値）。
+function parseLimit(raw: string | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return QUALITY_CHECK_ISSUE_LIMIT;
+  return Math.min(Math.floor(n), QUALITY_CHECK_ISSUE_LIMIT);
+}
+
+export async function GET(request: Request) {
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -100,8 +134,47 @@ export async function GET() {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    // 全非アーカイブ件数(count) と、各ルールの「全体件数(count)」＋「表示用サンプル(findMany)」を
-    // 並列取得する。count は全体実件数、findMany は最大 QUALITY_CHECK_ISSUE_LIMIT 件の表示用。
+    const { searchParams } = new URL(request.url);
+    const ruleParam = searchParams.get("rule");
+
+    // ---- (2) ページングモード: 指定ルールのみ skip/take で1ページ取得 ----
+    if (ruleParam !== null) {
+      const rule = findRule(ruleParam);
+      if (!rule) {
+        throw new ApiError(400, "不明な品質チェックルールです", "INVALID_RULE");
+      }
+      const offset = parseOffset(searchParams.get("offset"));
+      const limit = parseLimit(searchParams.get("limit"));
+      const where: Prisma.PropertyWhereInput = {
+        ...NOT_ARCHIVED,
+        ...rule.where,
+      };
+      const [totalCount, page] = await Promise.all([
+        prisma.property.count({ where }),
+        prisma.property.findMany({
+          where,
+          select: { id: true, address: true },
+          orderBy: { id: "asc" }, // 安定ページング（PK 昇順）
+          skip: offset,
+          take: limit,
+        }),
+      ]);
+      const data = page.map((p) => buildIssue(rule, p));
+      const returnedCount = data.length;
+      const hasMore = offset + returnedCount < totalCount;
+      const meta: RuleMeta = {
+        rule: rule.code,
+        severity: rule.severity,
+        totalCount,
+        returnedCount,
+        offset,
+        hasMore,
+        nextOffset: hasMore ? offset + returnedCount : null,
+      };
+      return apiResponse({ data, rules: [meta] });
+    }
+
+    // ---- (1) 既定モード: 全非アーカイブ件数(count) と 各ルールの count + 先頭ページ ----
     const [propertiesChecked, ruleResults] = await Promise.all([
       prisma.property.count({ where: NOT_ARCHIVED }),
       Promise.all(
@@ -115,6 +188,7 @@ export async function GET() {
             prisma.property.findMany({
               where,
               select: { id: true, address: true },
+              orderBy: { id: "asc" },
               take: QUALITY_CHECK_ISSUE_LIMIT,
             }),
           ]);
@@ -123,32 +197,34 @@ export async function GET() {
       ),
     ]);
 
-    // summary は「全体実件数(count)」を severity ごとに合算する（truncate 後 issues からは数えない）。
-    // 旧仕様どおり 1 物件が複数ルールに該当すれば issue 件数も複数として数える。
+    // summary は count(全体実件数) を severity ごとに合算（truncate 後 data からは数えない）。
     const severityTotals: Record<QualityIssue["severity"], number> = {
       error: 0,
       warning: 0,
       info: 0,
     };
     let issuesLimited = false;
+    const rules: RuleMeta[] = [];
 
     // data(表示用) は propertyId 単位でマージ（同一物件が複数ルールに該当しても取りこぼさない）。
     const byProperty = new Map<string, QualityIssue[]>();
 
     for (const { rule, count, sample } of ruleResults) {
       severityTotals[rule.severity] += count;
-      if (count > QUALITY_CHECK_ISSUE_LIMIT) {
-        // 全体件数が表示上限超。data は丸めるが hard fail はしない（常に 200）。
-        issuesLimited = true;
-      }
+      const returnedCount = sample.length;
+      const hasMore = count > returnedCount;
+      if (hasMore) issuesLimited = true;
+      rules.push({
+        rule: rule.code,
+        severity: rule.severity,
+        totalCount: count,
+        returnedCount,
+        offset: 0,
+        hasMore,
+        nextOffset: hasMore ? returnedCount : null,
+      });
       for (const p of sample) {
-        const issue: QualityIssue = {
-          propertyId: p.id,
-          address: p.address,
-          severity: rule.severity,
-          code: rule.code,
-          message: rule.message,
-        };
+        const issue = buildIssue(rule, p);
         const existing = byProperty.get(p.id);
         if (existing) {
           existing.push(issue);
@@ -172,20 +248,21 @@ export async function GET() {
     return apiResponse({
       data: issues,
       summary: {
-        // 全体実件数（count ベース）。表示用 issues の truncate には影響されない。
+        // 全体実件数（count ベース）。表示用 data の truncate には影響されない。
         total,
         errors: severityTotals.error,
         warnings: severityTotals.warning,
         info: severityTotals.info,
-        // 全非アーカイブ物件数（問題のない物件も含む「チェック対象」総数）。
         propertiesChecked,
-        // data に実際に含まれる issue 行数（サンプル件数）。truncate 時は total > issuesReturned。
+        // data に実際に含まれる issue 行数。truncate 時は total > issuesReturned。
         issuesReturned: issues.length,
-        // いずれかのルールで全体件数 > issueLimit となり data を丸めたか（非PII・常に 200）。
+        // いずれかのルールで data を丸めたか（非PII・常に 200）。詳細は rules[].hasMore 参照。
         issuesLimited,
-        // 1ルールあたりの表示上限（非PII）。UI が「表示は一部」を出す判断材料。
+        // 1ルールあたりの表示ページサイズ（非PII）。
         issueLimit: QUALITY_CHECK_ISSUE_LIMIT,
       },
+      // 各ルールの全体件数・続き取得情報（非PII）。hasMore のルールは ?rule=CODE&offset=nextOffset で追加取得可。
+      rules,
     });
   } catch (error) {
     return handleApiError(error);

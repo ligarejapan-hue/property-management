@@ -9,7 +9,7 @@ import {
   Info,
   RefreshCw,
 } from "lucide-react";
-import { fetchQualityCheck } from "@/lib/api-client";
+import { fetchQualityCheck, type QualityRuleMeta } from "@/lib/api-client";
 
 interface QualityIssue {
   propertyId: string;
@@ -57,6 +57,9 @@ export default function QualityCheckPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterSeverity, setFilterSeverity] = useState<string>("");
+  // 各ルールの続き取得情報。hasMore のルールは「さらに読み込む」で追加取得する。
+  const [rules, setRules] = useState<QualityRuleMeta[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const runCheck = async () => {
     setLoading(true);
@@ -65,6 +68,7 @@ export default function QualityCheckPage() {
       const json = await fetchQualityCheck();
       setIssues(json.data as QualityIssue[]);
       setSummary(json.summary as Summary);
+      setRules((json.rules ?? []) as QualityRuleMeta[]);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "品質チェックに失敗しました",
@@ -77,6 +81,43 @@ export default function QualityCheckPage() {
   useEffect(() => {
     runCheck();
   }, []);
+
+  // いずれかのルールに続き(上限超で未取得の issue)があるか。
+  const hasMore = rules.some((r) => r.hasMore);
+
+  // hasMore のルールについて残り issue を順次取得し、一覧へ追記する。
+  // 各ページは DB の skip/take で取得（全件 findMany はしない）。Owner PII は扱わない。
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const additional: QualityIssue[] = [];
+      const updated = [...rules];
+      for (let i = 0; i < updated.length; i += 1) {
+        let offset = updated[i].hasMore ? updated[i].nextOffset : null;
+        let guard = 0;
+        while (offset != null && guard < 100) {
+          guard += 1;
+          const json = await fetchQualityCheck({
+            rule: updated[i].rule,
+            offset,
+          });
+          additional.push(...((json.data ?? []) as QualityIssue[]));
+          const m = (json.rules ?? [])[0] as QualityRuleMeta | undefined;
+          if (!m) break;
+          updated[i] = m;
+          offset = m.hasMore ? m.nextOffset : null;
+        }
+      }
+      setIssues((prev) => [...prev, ...additional]);
+      setRules(updated);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "追加の読み込みに失敗しました",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const filteredIssues = filterSeverity
     ? issues.filter((i) => i.severity === filterSeverity)
@@ -186,6 +227,24 @@ export default function QualityCheckPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {!loading && hasMore && (
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <span className="text-xs text-gray-500">
+            {summary
+              ? `全 ${summary.total} 件中 ${issues.length} 件を表示（上限のため一部のみ）`
+              : ""}
+          </span>
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {loadingMore ? "読み込み中…" : "さらに読み込む"}
+          </button>
         </div>
       )}
     </div>
