@@ -602,12 +602,19 @@ describe("A-2b/P1: Mode B で targetPropertyId のスコープ確認後に Attac
 // ── source-assertion: 実装の固定化 ─────────────────────────────────────────
 const read = (p: string) =>
   fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
-const routeSrc = read("src/app/api/import/registry-pdf/route.ts");
+// PR1: 取込コアは @/lib/registry-pdf/process へ移動。実装の所在に依存しないよう
+// route.ts + process.ts の連結に対して source-assertion を行う。
+const routeSrc =
+  read("src/app/api/import/registry-pdf/route.ts") +
+  "\n" +
+  read("src/lib/registry-pdf/process.ts");
 
 describe("A-2b: registry-pdf route source-assertion", () => {
   it("14. route.ts は POST handler のみ export している", () => {
+    // export 検証だけは route.ts 単独で行う（handler 以外を export しないことの確認）。
+    const routeOnlySrc = read("src/app/api/import/registry-pdf/route.ts");
     const exports =
-      routeSrc.match(/^export (async function|function|const) \w+/gm) || [];
+      routeOnlySrc.match(/^export (async function|function|const) \w+/gm) || [];
     expect(exports.join("\n")).toMatch(/export async function POST/);
     expect(exports.length).toBe(1);
   });

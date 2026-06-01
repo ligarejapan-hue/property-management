@@ -25,10 +25,18 @@ const receptionOwnerSrc = fs.readFileSync(
   path.resolve(process.cwd(), "src/app/api/import/reception-owner/route.ts"),
   "utf8",
 );
-const registryPdfSrc = fs.readFileSync(
-  path.resolve(process.cwd(), "src/app/api/import/registry-pdf/route.ts"),
-  "utf8",
-);
+// PR1: 取込コアは @/lib/registry-pdf/process へ移動したため、route.ts 単独ではなく
+// route.ts + process.ts の連結に対して source-assertion を行う（実装の所在に依存しない）。
+const registryPdfSrc =
+  fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/api/import/registry-pdf/route.ts"),
+    "utf8",
+  ) +
+  "\n" +
+  fs.readFileSync(
+    path.resolve(process.cwd(), "src/lib/registry-pdf/process.ts"),
+    "utf8",
+  );
 
 function expectCommonImport(src: string) {
   expect(src).toMatch(/from\s+"@\/lib\/owner-corporate-import"/);

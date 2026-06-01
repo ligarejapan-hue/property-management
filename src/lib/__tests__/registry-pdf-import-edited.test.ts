@@ -103,7 +103,12 @@ const read = (p: string) =>
 
 const pageSrc = read("src/app/(dashboard)/import/registry-pdf/page.tsx");
 const apiClientSrc = read("src/lib/api-client.ts");
-const routeSrc = read("src/app/api/import/registry-pdf/route.ts");
+// PR1: 取込コアは @/lib/registry-pdf/process へ移動したため、route.ts 単独ではなく
+// route.ts + process.ts の連結に対して source-assertion を行う（実装の所在に依存しない）。
+const routeSrc =
+  read("src/app/api/import/registry-pdf/route.ts") +
+  "\n" +
+  read("src/lib/registry-pdf/process.ts");
 const parseRouteSrc = read("src/app/api/import/registry-pdf/parse/route.ts");
 
 // ── A-2a-1: 編集結果を確定APIへ送る ───────────────────────────────────────
