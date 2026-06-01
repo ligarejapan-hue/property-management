@@ -199,7 +199,13 @@ describe("A-2d: registry-pdf Mode A field_staff スコープ (挙動)", () => {
 // ── source-assertion: 実装の固定化 ──────────────────────────────────────────
 const read = (p: string) =>
   fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
-const routeSrc = read("src/app/api/import/registry-pdf/route.ts");
+// PR1: 取込コアは @/lib/registry-pdf/process へ移動。実装の所在に依存しないよう
+// route.ts + process.ts の連結に対して source-assertion を行う。
+// （route.ts が handler のみ export であることは export 検証で別途 route 単独で確認）
+const routeSrc =
+  read("src/app/api/import/registry-pdf/route.ts") +
+  "\n" +
+  read("src/lib/registry-pdf/process.ts");
 
 describe("A-2d: registry-pdf route source-assertion", () => {
   it("canAccessPropertyRecord を import し Mode A で session+existing に適用", () => {
@@ -225,7 +231,10 @@ describe("A-2d: registry-pdf route source-assertion", () => {
   });
 
   it("8. route.ts は POST handler のみ export している", () => {
-    const exports = routeSrc.match(/^export (async function|function|const) \w+/gm) || [];
+    // export 検証だけは route.ts 単独で行う（handler 以外を export しないことの確認）。
+    const routeOnlySrc = read("src/app/api/import/registry-pdf/route.ts");
+    const exports =
+      routeOnlySrc.match(/^export (async function|function|const) \w+/gm) || [];
     expect(exports.join("\n")).toMatch(/export async function POST/);
     expect(exports.length).toBe(1);
   });
