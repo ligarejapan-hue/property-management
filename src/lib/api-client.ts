@@ -270,7 +270,24 @@ export async function fetchCandidates(propertyId: string) {
 
 // ---------- Quality Check ----------
 
-export async function fetchQualityCheck() {
+// 各ルールの全体件数・続き取得情報（非PII）。route の RuleMeta と対応。
+export interface QualityRuleMeta {
+  rule: string;
+  severity: "error" | "warning" | "info";
+  totalCount: number;
+  returnedCount: number;
+  offset: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+}
+
+// params 省略時は既定モード（summary + 各ルール先頭ページ + rules メタ）。
+// rule/offset/limit 指定時はそのルールの1ページ分のみ（data + rules[1件]）を取得（残り issue の追加取得用）。
+export async function fetchQualityCheck(params?: {
+  rule?: string;
+  offset?: number;
+  limit?: number;
+}) {
   if (USE_MOCK) {
     await mockDelay();
     const issues = MOCK_QUALITY_ISSUES;
@@ -282,12 +299,23 @@ export async function fetchQualityCheck() {
         warnings: issues.filter((i) => i.severity === "warning").length,
         info: issues.filter((i) => i.severity === "info").length,
         propertiesChecked: MOCK_PROPERTIES.length,
+        issuesReturned: issues.length,
+        issuesLimited: false,
+        issueLimit: issues.length,
       },
+      rules: [] as QualityRuleMeta[],
     };
   }
-  return apiFetch<{ data: typeof MOCK_QUALITY_ISSUES; summary: unknown }>(
-    "/api/properties/quality-check",
-  );
+  const qs = new URLSearchParams();
+  if (params?.rule) qs.set("rule", params.rule);
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<{
+    data: typeof MOCK_QUALITY_ISSUES;
+    summary?: unknown;
+    rules?: QualityRuleMeta[];
+  }>(`/api/properties/quality-check${suffix}`);
 }
 
 // ---------- Users ----------
