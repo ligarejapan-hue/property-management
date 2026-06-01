@@ -26,6 +26,10 @@ const usersPermPageSrc = read(
 const templatesPageSrc = read(
   "src/app/(dashboard)/admin/templates/[id]/page.tsx",
 );
+// CodexP2: 既存本番DB向けの idempotent backfill migration。
+const migrationSrc = read(
+  "prisma/migrations/20260601000000_add_registry_auto_fetch_permission/migration.sql",
+);
 
 describe("PR2: registry:auto_fetch の権限定義", () => {
   it("1. resource=registry / action=auto_fetch が定義されている", () => {
@@ -99,6 +103,44 @@ describe("PR2: hasPermission で自然に判定できる", () => {
         "auto_fetch",
       ),
     ).toBe(false);
+  });
+});
+
+describe("PR2/CodexP2: 既存DB向け idempotent backfill migration", () => {
+  it("1. 管理者用テンプレートに registry/auto_fetch/granted=true を投入する", () => {
+    expect(migrationSrc).toMatch(/'registry', 'auto_fetch', true/);
+    expect(migrationSrc).toMatch(/pt\."name" = '管理者用'/);
+    expect(migrationSrc).toMatch(/INSERT INTO "template_permissions"/);
+  });
+
+  it("2. office_staff(事務担当用) / field_staff(現地担当用) には投入しない", () => {
+    expect(migrationSrc).not.toMatch(/事務担当用/);
+    expect(migrationSrc).not.toMatch(/現地担当用/);
+  });
+
+  it("3. ON CONFLICT DO NOTHING で idempotent（重複作成しない）", () => {
+    expect(migrationSrc).toMatch(
+      /ON CONFLICT \("template_id", "resource", "action"\) DO NOTHING/,
+    );
+  });
+
+  it("4. seed.ts と migration が矛盾しない（どちらも admin に registry:auto_fetch=true）", () => {
+    expect(seedSrc).toMatch(
+      /templateId: adminTemplate\.id, resource: "registry", action: "auto_fetch", granted: true/,
+    );
+    expect(migrationSrc).toMatch(/'registry', 'auto_fetch', true/);
+  });
+
+  it("正規化 template_permissions のみ対象（permission_templates 本体/JSON blob は更新しない）", () => {
+    expect(migrationSrc).not.toMatch(/UPDATE "permission_templates"/);
+    expect(migrationSrc).not.toMatch(/INSERT INTO "permission_templates"/);
+  });
+
+  it("DDL/外部接続/PII/env が混入していない（データのみの migration）", () => {
+    expect(migrationSrc).not.toMatch(/CREATE TABLE|ALTER TABLE|DROP TABLE/i);
+    expect(migrationSrc).not.toMatch(
+      /RegistryFetchProvider|REGISTRY_API_KEY|playwright/i,
+    );
   });
 });
 
