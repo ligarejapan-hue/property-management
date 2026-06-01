@@ -11,6 +11,7 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
 import { findDuplicateOwner } from "@/lib/owner-dedup";
+import { recalculateJobCounts } from "@/lib/import-job-counts";
 
 /** Map Japanese CSV header names to property model field names. */
 const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -133,28 +134,6 @@ function buildOwnerCreateData(
   if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey.trim();
 
   return createData;
-}
-
-async function recalculateJobCounts(jobId: string): Promise<void> {
-  const rows = await prisma.importJobRow.findMany({
-    where: { jobId },
-    select: { status: true },
-  });
-
-  const successCount = rows.filter((r) => r.status === "success").length;
-  const errorCount = rows.filter((r) => r.status === "error").length;
-  const needsReviewCount = rows.filter((r) => r.status === "needs_review").length;
-
-  const hasUnresolved = errorCount > 0 || needsReviewCount > 0;
-
-  await prisma.importJob.update({
-    where: { id: jobId },
-    data: {
-      successCount,
-      errorCount: errorCount + needsReviewCount,
-      ...(hasUnresolved ? {} : { status: "completed", completedAt: new Date() }),
-    },
-  });
 }
 
 // ---------- POST /api/import/jobs/:jobId/rows/:rowId/retry ----------

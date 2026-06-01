@@ -78,7 +78,7 @@ vi.mock("@/lib/prisma", () => {
       },
       importJobRow: {
         findUnique: vi.fn(),
-        findMany: vi.fn(),
+        groupBy: vi.fn(),
         update: vi.fn(),
       },
       importJob: {
@@ -103,7 +103,7 @@ const pm = prisma as unknown as {
     create: Mock;
   };
   property: { findUnique: Mock; create: Mock };
-  importJobRow: { findUnique: Mock; findMany: Mock; update: Mock };
+  importJobRow: { findUnique: Mock; groupBy: Mock; update: Mock };
   importJob: { update: Mock };
 };
 
@@ -157,7 +157,7 @@ function propertyRow(rawData: Record<string, string>, status = "needs_review") {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  pm.importJobRow.findMany.mockResolvedValue([]); // recalculateJobCounts
+  pm.importJobRow.groupBy.mockResolvedValue([]); // recalculateJobCounts
   pm.importJob.update.mockResolvedValue({});
   pm.importJobRow.update.mockImplementation(({ data }: { data: unknown }) =>
     Promise.resolve({ id: ROW_ID, ...(data as object) }),
