@@ -19,8 +19,9 @@ interface QualityIssue {
 // ---------- GET /api/properties/quality-check ----------
 
 // 物件一覧ロード時に毎回呼ばれるため、全非アーカイブ物件の無制限スキャンを避けて
-// 上限を設ける。上限 +1 件まで取得し、超過時はエラーにせず取得範囲で従来どおり
-// 判定したうえで summary.scanLimited を立てる（全件チェックでない旨を UI が示せる余地）。
+// 上限を設ける。上限 +1 件まで取得して超過を検出し、超過時は不完全な結果を 200 で
+// 返さず明示的なエラー(409 / QUALITY_CHECK_SCAN_LIMIT_EXCEEDED)にする。
+// （部分結果を成功で返すと、省略された物件の error/warning が「問題なし」と誤解されるため）
 const QUALITY_CHECK_SCAN_LIMIT = 5000;
 
 export async function GET() {
@@ -52,11 +53,17 @@ export async function GET() {
       take: QUALITY_CHECK_SCAN_LIMIT + 1,
     });
 
-    // 上限超過時はエラーにせず、先頭 SCAN_LIMIT 件のみで従来どおり判定する。
-    const scanLimited = scannedRows.length > QUALITY_CHECK_SCAN_LIMIT;
-    const properties = scanLimited
-      ? scannedRows.slice(0, QUALITY_CHECK_SCAN_LIMIT)
-      : scannedRows;
+    // 上限超過時は部分結果を 200 で返さない（省略された物件の error/warning が見えず
+    // 「問題なし」と誤解されるのを防ぐ）。明示的なエラーにして UI のエラー導線に乗せる。
+    if (scannedRows.length > QUALITY_CHECK_SCAN_LIMIT) {
+      throw new ApiError(
+        409,
+        "品質チェック対象の物件数が上限を超えています。条件を絞り込むか、管理者に相談してください。",
+        "QUALITY_CHECK_SCAN_LIMIT_EXCEEDED",
+      );
+    }
+
+    const properties = scannedRows;
 
     const issues: QualityIssue[] = [];
 
@@ -143,10 +150,6 @@ export async function GET() {
         warnings: issues.filter((i) => i.severity === "warning").length,
         info: issues.filter((i) => i.severity === "info").length,
         propertiesChecked: properties.length,
-        // 上限到達フラグ（非PII）。true の場合は全件ではなく先頭 scanLimit 件のみ判定済み。
-        // 既存UIは未使用でも壊れない（追加フィールドのみ・後方互換）。
-        scanLimited,
-        scanLimit: QUALITY_CHECK_SCAN_LIMIT,
       },
     });
   } catch (error) {
