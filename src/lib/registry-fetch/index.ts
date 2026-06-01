@@ -1,0 +1,20 @@
+/**
+ * 謄本自動取得 provider 抽象のエントリポイント（PR3）。
+ *
+ * 将来の自動取得 API はここから provider 型と mock を import する。
+ * 実 provider（外部接続）は別ファイルで本 interface を実装して追加する想定。
+ */
+export type {
+  RegistryFetchRequest,
+  RegistryFetchResult,
+  RegistryFetchErrorCode,
+  RegistryFetchProvider,
+} from "./types";
+export {
+  RegistryFetchError,
+  REGISTRY_FETCH_ERROR_MESSAGES,
+} from "./errors";
+export {
+  MockRegistryFetchProvider,
+  type MockRegistryFetchOptions,
+} from "./mock-provider";
