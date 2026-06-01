@@ -109,6 +109,17 @@ function applyEditedToParsed(
   return parsed;
 }
 
+// Prisma の unique constraint 違反 (P2002) を duck-type で判定する（Prisma namespace を
+// import せずに判定）。@@unique([propertyId, ownerId]) への同時 insert 競合のみ握って
+// PropertyOwner link 作成を冪等化するために使う（Codex P2）。
+function isUniqueConstraintError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === "P2002"
+  );
+}
+
 // A-2c: 謄本PDF取込の所有者反映（Owner 突合/作成 + PropertyOwner link）を
 // Mode A/B 共通の private 関数に括り出す。中身は従来の Mode A ループを propertyId
 // 引数化しただけで挙動は不変（突合/正規化/archive race/法人番号の各方針を維持）。
@@ -159,31 +170,43 @@ async function reflectParsedOwners(args: {
     // 新規 active Owner を作成する。
     let resolvedOwnerId: string | null = null;
     if (candidateOwnerId) {
-      const reuseResult = await prisma.$transaction(async (tx) => {
-        const lock = await tx.owner.updateMany({
-          where: { id: candidateOwnerId!, isArchived: false },
-          data: { updatedAt: new Date() },
-        });
-        if (lock.count === 0) {
-          return { reused: false, linkCreated: false };
-        }
-        const existingLink = await tx.propertyOwner.findFirst({
-          where: { propertyId, ownerId: candidateOwnerId! },
-          select: { propertyId: true },
-        });
-        let linkCreated = false;
-        if (!existingLink) {
-          await tx.propertyOwner.create({
-            data: {
-              propertyId,
-              ownerId: candidateOwnerId!,
-              relationship: ownerInfo.share ? "共有者" : "所有者",
-            },
+      // Codex P2: 同時実行で別 tx が先に同じ (propertyId, ownerId) を link 済みだと、
+      // tx 内 create が @@unique([propertyId, ownerId]) 違反(P2002)で reject する。
+      // その場合は「既にリンク済み」として扱い job 全体は失敗させない（reused 扱い・
+      // linkCreated=false で linkedCount を二重に増やさない）。P2002 以外のエラーは
+      // 従来どおり throw して失敗させる。
+      let reuseResult: { reused: boolean; linkCreated: boolean };
+      try {
+        reuseResult = await prisma.$transaction(async (tx) => {
+          const lock = await tx.owner.updateMany({
+            where: { id: candidateOwnerId!, isArchived: false },
+            data: { updatedAt: new Date() },
           });
-          linkCreated = true;
-        }
-        return { reused: true, linkCreated };
-      });
+          if (lock.count === 0) {
+            return { reused: false, linkCreated: false };
+          }
+          const existingLink = await tx.propertyOwner.findFirst({
+            where: { propertyId, ownerId: candidateOwnerId! },
+            select: { propertyId: true },
+          });
+          let linkCreated = false;
+          if (!existingLink) {
+            await tx.propertyOwner.create({
+              data: {
+                propertyId,
+                ownerId: candidateOwnerId!,
+                relationship: ownerInfo.share ? "共有者" : "所有者",
+              },
+            });
+            linkCreated = true;
+          }
+          return { reused: true, linkCreated };
+        });
+      } catch (err) {
+        if (!isUniqueConstraintError(err)) throw err;
+        // 同時実行で相手が先に link 済み → 既にリンク済み扱い（linkedCount は増やさない）。
+        reuseResult = { reused: true, linkCreated: false };
+      }
       if (reuseResult.reused) {
         resolvedOwnerId = candidateOwnerId;
         matchedCount++;
@@ -259,14 +282,21 @@ async function reflectParsedOwners(args: {
         where: { propertyId, ownerId: resolvedOwnerId },
       });
       if (!existingLink) {
-        await prisma.propertyOwner.create({
-          data: {
-            propertyId,
-            ownerId: resolvedOwnerId,
-            relationship: ownerInfo.share ? "共有者" : "所有者",
-          },
-        });
-        linkedCount++;
+        // Codex P2: 新規 owner は一意な ID のため通常 link 衝突しないが、防御的に
+        // P2002 を握って冪等化する（同時実行で相手が先に link 済みなら既存扱い・
+        // linkedCount は増やさない）。P2002 以外は従来どおり throw して失敗させる。
+        try {
+          await prisma.propertyOwner.create({
+            data: {
+              propertyId,
+              ownerId: resolvedOwnerId,
+              relationship: ownerInfo.share ? "共有者" : "所有者",
+            },
+          });
+          linkedCount++;
+        } catch (err) {
+          if (!isUniqueConstraintError(err)) throw err;
+        }
       }
     }
   }

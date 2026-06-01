@@ -363,6 +363,75 @@ describe("A-2c: Mode B created で owner を反映", () => {
   });
 });
 
+// ── Codex P2: PropertyOwner link 作成の同時実行冪等性 ────────────────────────
+describe("A-2c/P2: PropertyOwner link 作成を unique 競合に対して冪等化", () => {
+  const P2002 = Object.assign(new Error("Unique constraint failed"), {
+    code: "P2002",
+  });
+
+  it("1+2+3. reuse パスで link 作成が P2002 → job は失敗せず既存リンク扱い・linkedCount 増えない", async () => {
+    setParsed([{ name: "山田太郎", address: "東京都港区1丁目1", share: null }]);
+    pm.property.findFirst.mockResolvedValue({ id: MATCHED_ID });
+    pm.owner.findMany.mockResolvedValue([
+      {
+        id: "owner-1",
+        name: "山田太郎",
+        address: "東京都港区1丁目1",
+        corporateNumber: null,
+      },
+    ]);
+    pm.owner.updateMany.mockResolvedValue({ count: 1 }); // tx lock 成功
+    pm.propertyOwner.findFirst.mockResolvedValue(null); // findFirst では未link
+    // しかし create 時点で別 tx が先に link 済み → unique 制約違反
+    pm.propertyOwner.create.mockRejectedValueOnce(P2002);
+
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    expect(res.status).toBe(201); // job 全体は失敗しない
+    const body = await res.json();
+    expect(body.propertyId).toBe(MATCHED_ID);
+    // 既存リンク扱い: 再利用としてカウント、新規 owner は作らない
+    expect(body.ownersMatched).toBe(1);
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    // linkedCount は二重に増えない
+    expect(body.ownersLinked).toBe(0);
+  });
+
+  it("新規 owner パスで link 作成が P2002 → job は失敗せず linkedCount 増えない", async () => {
+    setParsed([{ name: "佐藤花子", address: "大阪市北区2", share: null }]);
+    pm.property.findFirst.mockResolvedValue(null); // 新規 Property
+    pm.owner.findMany.mockResolvedValue([]); // 候補なし → 新規 owner
+    pm.owner.create.mockResolvedValue({ id: "owner-new" });
+    pm.propertyOwner.findFirst.mockResolvedValue(null);
+    pm.propertyOwner.create.mockRejectedValueOnce(P2002);
+
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.ownersCreated).toBe(1);
+    expect(body.ownersLinked).toBe(0); // 重複で増やさない
+  });
+
+  it("4. P2002 以外の DB エラーは従来どおり job failed になる", async () => {
+    setParsed([{ name: "佐藤花子", address: "大阪市北区2", share: null }]);
+    pm.property.findFirst.mockResolvedValue(null);
+    pm.owner.findMany.mockResolvedValue([]);
+    pm.owner.create.mockResolvedValue({ id: "owner-new" });
+    pm.propertyOwner.findFirst.mockResolvedValue(null);
+    // 一般的な DB エラー（P2002 ではない）→ 握りつぶさず伝播
+    pm.propertyOwner.create.mockRejectedValueOnce(new Error("connection lost"));
+
+    const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
+    // 取込本体が失敗（handleApiError 経由で非201）
+    expect(res.status).not.toBe(201);
+    // import job は failed で finalize される
+    expect(pm.importJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "failed" }),
+      }),
+    );
+  });
+});
+
 // ── field_staff scope（Mode B matched）───────────────────────────────────────
 describe("A-2c: field_staff スコープ（Mode B matched）", () => {
   beforeEach(() => {
