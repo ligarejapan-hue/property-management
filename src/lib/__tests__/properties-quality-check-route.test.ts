@@ -1,20 +1,20 @@
 /**
  * GET /api/properties/quality-check の統合テスト。
- * 性能改善（上限付きスキャン + _count）＋ Codex P2 対応（上限超過は 200 ではなく 409）。
+ * 性能改善（DB条件で「問題のある物件だけ」を取得）＋ Codex 追加P2対応
+ * （物件総数 5000 件超でも 409 にせず 200 で完全な品質チェックを返す。全件 findMany には戻さない）。
  *
  * 確認項目:
- *  1. take: QUALITY_CHECK_SCAN_LIMIT + 1 相当の上限付き findMany を行う
- *  2. propertyOwners の id 配列ではなく _count.propertyOwners を使う（所有者PII列を取得しない）
- *  3. _count.propertyOwners === 0 の物件が NO_OWNER 警告対象になる
- *  4. 所有者ありの物件は NO_OWNER 警告対象にならない
- *  5. 上限超過時は 200 ではなく 409 を返す（不完全な結果を成功扱いしない）
- *  6. 上限超過時の code は QUALITY_CHECK_SCAN_LIMIT_EXCEEDED
- *  7. 上限超過時は issues（品質チェック結果）を返さない（error のみ・data/summary なし）
- *  8. 上限未満では従来どおり 200 で warnings/errors/info を返す
- *  9. where.isArchived === false が維持される
- * 10. property:read 欠如で 403・findMany 未実行（DB取得前ゲート）
- * 11. レスポンスに所有者PII（氏名・所有者住所・郵便番号等）が入らない
- * 12. route.ts は GET ハンドラ以外を export しない
+ *  1. 非アーカイブ物件数が 5000 件超の想定でも 409 にならない（200）
+ *  2. 全非アーカイブ物件数は count で取得され summary.propertiesChecked に反映される
+ *  3. 所有者なし判定が relation filter propertyOwners:{none:{}} で行われる
+ *  4. Owner の id 配列・所有者PII列を select しない（取得列は id/address のみ）
+ *  5. 地番/不動産番号未入力など既存 issue 判定が従来と同じ DB 条件（null/空文字 等）になる
+ *  6. 複数 issue が同じ物件にある場合、propertyId 単位でマージされる
+ *  7. property:read 欠如で 403・DB 取得（count/findMany）未実行
+ *  8. すべての品質チェッククエリで isArchived=false が維持される
+ *  9. レスポンスに所有者名・所有者住所・郵便番号など Owner PII が入らない
+ * 10. route.ts は GET ハンドラ以外を export しない
+ * 11. ルール該当が上限超のとき issuesLimited=true（hard fail せず 200・該当ルールは丸める）
  *
  * permissions（hasPermission）は実物を使用し、api-helpers / prisma のみ mock する。
  */
@@ -34,7 +34,6 @@ vi.mock("@/lib/api-helpers", () => {
     ApiError: MockApiError,
     getApiSession: vi.fn(),
     getUserPermissions: vi.fn(),
-    // 実 api-helpers と同じく apiResponse(data, status=200) / handleApiError(error)。
     apiResponse: vi.fn((data: unknown, status = 200) =>
       Response.json(data as Record<string, unknown>, { status }),
     ),
@@ -54,7 +53,7 @@ vi.mock("@/lib/api-helpers", () => {
 });
 
 vi.mock("@/lib/prisma", () => ({
-  default: { property: { findMany: vi.fn() } },
+  default: { property: { findMany: vi.fn(), count: vi.fn() } },
 }));
 
 import prisma from "@/lib/prisma";
@@ -63,27 +62,49 @@ import * as routeModule from "../../app/api/properties/quality-check/route";
 
 const { GET } = routeModule;
 
-const pm = prisma as unknown as { property: { findMany: Mock } };
+const pm = prisma as unknown as {
+  property: { findMany: Mock; count: Mock };
+};
 
 const PERMS_FULL = [{ resource: "property", action: "read", granted: true }];
 const PERMS_NO_PROPERTY = [{ resource: "owner", action: "read", granted: true }];
 
-// route の select に対応した非PIIの最小行。所有者は _count のみ。
-function makeProp(over: Record<string, unknown> = {}) {
-  const { _count, ...rest } = over as { _count?: { propertyOwners: number } };
-  return {
-    id: "p1",
-    address: "東京都千代田区1-1",
-    lotNumber: "1番1",
-    realEstateNumber: "1234567890123",
-    registryStatus: "obtained",
-    dmStatus: "hold",
-    caseStatus: "new_case",
-    assignedTo: "user-1",
-    investigationConfirmedAt: new Date("2026-01-01T00:00:00Z"),
-    _count: { propertyOwners: _count?.propertyOwners ?? 1 },
-    ...rest,
-  };
+type Where = Record<string, unknown>;
+
+// route 側の where から、どの品質ルール向けのクエリかを判定する（呼び出し順に依存しない）。
+function whereCode(where: Where): string {
+  if (where.propertyOwners) return "NO_OWNER";
+  if (where.registryStatus) return "REGISTRY_DM_MISMATCH";
+  if (Array.isArray(where.OR)) {
+    const firstKey = Object.keys(where.OR[0] as object)[0];
+    if (firstKey === "lotNumber") return "NO_LOT_NUMBER";
+    if (firstKey === "realEstateNumber") return "NO_REAL_ESTATE_NUMBER";
+  }
+  if ("investigationConfirmedAt" in where) return "INVESTIGATION_NOT_CONFIRMED";
+  if ("assignedTo" in where) return "NO_ASSIGNEE";
+  return "UNKNOWN";
+}
+
+// code -> 該当物件 {id,address}[] のシナリオで findMany を mock する。
+function setupFindMany(scenario: Record<string, { id: string; address: string }[]>) {
+  pm.property.findMany.mockImplementation(async (args: { where: Where }) => {
+    const code = whereCode(args.where);
+    return scenario[code] ?? [];
+  });
+}
+
+function rows(n: number, prefix = "p"): { id: string; address: string }[] {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `${prefix}${i}`,
+    address: `addr-${prefix}${i}`,
+  }));
+}
+
+function whereFor(code: string): Where | undefined {
+  const call = pm.property.findMany.mock.calls.find(
+    (c) => whereCode(c[0].where) === code,
+  );
+  return call?.[0].where as Where | undefined;
 }
 
 beforeEach(() => {
@@ -93,139 +114,114 @@ beforeEach(() => {
     role: "admin",
   } as never);
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL as never);
+  pm.property.count.mockResolvedValue(0);
   pm.property.findMany.mockResolvedValue([]);
 });
 
 describe("GET /api/properties/quality-check", () => {
-  it("01. take: QUALITY_CHECK_SCAN_LIMIT + 1 の上限付き findMany を行う", async () => {
-    pm.property.findMany.mockResolvedValue([makeProp()]);
-    await GET();
-    const args = pm.property.findMany.mock.calls[0][0];
-    expect(typeof args.take).toBe("number");
-    // SCAN_LIMIT(5000) + 1 のセンチネル方式（+1 で超過検出）
-    expect(args.take).toBe(5001);
+  it("01. 非アーカイブ物件数が 5000 件超でも 409 にならず 200 を返す", async () => {
+    pm.property.count.mockResolvedValue(8000);
+    setupFindMany({ NO_OWNER: rows(3, "no") });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.error).toBeUndefined();
+    expect(body.data.length).toBe(3);
   });
 
-  it("02. propertyOwners は _count を使い、id 配列(所有者PII列)を取得しない", async () => {
-    pm.property.findMany.mockResolvedValue([makeProp()]);
-    await GET();
-    const args = pm.property.findMany.mock.calls[0][0];
-    expect(args.select._count).toEqual({ select: { propertyOwners: true } });
-    expect(args.select.propertyOwners).toBeUndefined();
-    const selectStr = JSON.stringify(args.select);
-    expect(selectStr).not.toContain("name");
-    expect(selectStr).not.toContain("zip");
-    expect(selectStr).not.toContain("phone");
-    expect(selectStr).not.toContain("email");
-    expect(selectStr).not.toContain("nameKana");
+  it("02. 全非アーカイブ件数は count で取得し summary.propertiesChecked に入る", async () => {
+    pm.property.count.mockResolvedValue(8000);
+    const res = await GET();
+    const body = await res.json();
+    expect(pm.property.count).toHaveBeenCalledTimes(1);
+    expect(pm.property.count.mock.calls[0][0].where).toEqual({
+      isArchived: false,
+    });
+    expect(body.summary.propertiesChecked).toBe(8000);
   });
 
-  it("03. _count.propertyOwners === 0 の物件が NO_OWNER 警告対象になる", async () => {
-    pm.property.findMany.mockResolvedValue([
-      makeProp({ id: "p-noowner", _count: { propertyOwners: 0 } }),
+  it("03. 所有者なし判定は propertyOwners:{none:{}} の relation filter で行う", async () => {
+    setupFindMany({ NO_OWNER: rows(1, "x") });
+    await GET();
+    const w = whereFor("NO_OWNER")!;
+    expect(w.propertyOwners).toEqual({ none: {} });
+    expect(w.isArchived).toBe(false);
+  });
+
+  it("04. 取得列は id/address のみ。Owner の id 配列・PII 列を select しない", async () => {
+    setupFindMany({ NO_OWNER: rows(1) });
+    await GET();
+    for (const call of pm.property.findMany.mock.calls) {
+      expect(call[0].select).toEqual({ id: true, address: true });
+      const selectStr = JSON.stringify(call[0].select);
+      expect(selectStr).not.toContain("propertyOwners");
+      expect(selectStr).not.toContain("name");
+      expect(selectStr).not.toContain("zip");
+      expect(selectStr).not.toContain("phone");
+      expect(selectStr).not.toContain("email");
+    }
+  });
+
+  it("05. 各 issue の DB 条件が旧 JS 判定と同値（null/空文字・enum 比較）", async () => {
+    setupFindMany({});
+    await GET();
+    // 地番・不動産番号未入力 = null または空文字（旧 !field と同値）
+    expect(whereFor("NO_LOT_NUMBER")!.OR).toEqual([
+      { lotNumber: null },
+      { lotNumber: "" },
     ]);
-    const res = await GET();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    const noOwner = body.data.filter(
-      (i: { code: string; propertyId: string }) => i.code === "NO_OWNER",
-    );
-    expect(noOwner).toHaveLength(1);
-    expect(noOwner[0].propertyId).toBe("p-noowner");
-  });
-
-  it("04. 所有者ありの物件は NO_OWNER 警告対象にならない", async () => {
-    pm.property.findMany.mockResolvedValue([
-      makeProp({ id: "p-hasowner", _count: { propertyOwners: 2 } }),
+    expect(whereFor("NO_REAL_ESTATE_NUMBER")!.OR).toEqual([
+      { realEstateNumber: null },
+      { realEstateNumber: "" },
     ]);
+    // 登記未取得 かつ DM送付可
+    const reg = whereFor("REGISTRY_DM_MISMATCH")!;
+    expect(reg.registryStatus).toBe("unconfirmed");
+    expect(reg.dmStatus).toBe("send");
+    // 調査未確認 / 担当者未設定 = null
+    expect(whereFor("INVESTIGATION_NOT_CONFIRMED")!.investigationConfirmedAt).toBe(
+      null,
+    );
+    expect(whereFor("NO_ASSIGNEE")!.assignedTo).toBe(null);
+  });
+
+  it("06. 複数 issue が同じ物件にある場合 propertyId 単位でマージされる", async () => {
+    // 同一物件 dup が NO_OWNER / NO_ASSIGNEE / NO_LOT_NUMBER の3条件に該当
+    const dup = [{ id: "dup", address: "addr-dup" }];
+    setupFindMany({
+      NO_OWNER: dup,
+      NO_ASSIGNEE: dup,
+      NO_LOT_NUMBER: dup,
+    });
     const res = await GET();
     const body = await res.json();
-    const noOwner = body.data.filter(
-      (i: { code: string }) => i.code === "NO_OWNER",
+    const dupIssues = body.data.filter(
+      (i: { propertyId: string }) => i.propertyId === "dup",
     );
-    expect(noOwner).toHaveLength(0);
+    expect(dupIssues).toHaveLength(3);
+    const codes = dupIssues.map((i: { code: string }) => i.code).sort();
+    expect(codes).toEqual(["NO_ASSIGNEE", "NO_LOT_NUMBER", "NO_OWNER"]);
   });
 
-  it("05. 上限超過時は 200 ではなく 409 を返す（不完全な結果を成功扱いしない）", async () => {
-    // take(=limit+1) 件返す → 超過。limit を直接ハードコードせず take から生成。
-    pm.property.findMany.mockImplementation(async (args: { take: number }) =>
-      Array.from({ length: args.take }, (_, i) =>
-        makeProp({ id: `p${i}`, _count: { propertyOwners: 0 } }),
-      ),
-    );
-    const res = await GET();
-    expect(res.status).toBe(409);
-  });
-
-  it("06. 上限超過時の code は QUALITY_CHECK_SCAN_LIMIT_EXCEEDED", async () => {
-    pm.property.findMany.mockImplementation(async (args: { take: number }) =>
-      Array.from({ length: args.take }, (_, i) => makeProp({ id: `p${i}` })),
-    );
-    const res = await GET();
-    const body = await res.json();
-    expect(body.error.code).toBe("QUALITY_CHECK_SCAN_LIMIT_EXCEEDED");
-    expect(typeof body.error.message).toBe("string");
-  });
-
-  it("07. 上限超過時は issues（品質チェック結果）を成功として返さない", async () => {
-    pm.property.findMany.mockImplementation(async (args: { take: number }) =>
-      // 全件 NO_OWNER でも、超過時は「問題なし/結果あり」として返してはいけない
-      Array.from({ length: args.take }, (_, i) =>
-        makeProp({ id: `p${i}`, _count: { propertyOwners: 0 } }),
-      ),
-    );
-    const res = await GET();
-    const body = await res.json();
-    expect(body.data).toBeUndefined();
-    expect(body.summary).toBeUndefined();
-    expect(body.error).toBeDefined();
-  });
-
-  it("08. 上限未満では従来どおり 200 で warnings/errors/info を返す", async () => {
-    pm.property.findMany.mockImplementation(async (args: { take: number }) =>
-      // ちょうど上限(= take - 1)件 → 超過ではない → 200
-      Array.from({ length: args.take - 1 }, (_, i) =>
-        makeProp({ id: `p${i}`, _count: { propertyOwners: 0 } }),
-      ),
-    );
-    const res = await GET();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.summary.propertiesChecked).toBe(5000);
-    // 5000件すべて NO_OWNER → warnings に計上
-    expect(body.summary.warnings).toBeGreaterThanOrEqual(5000);
-    // 後方互換: summary は従来キーのみ（scanLimited/scanLimit は持たない）
-    expect(Object.keys(body.summary).sort()).toEqual(
-      ["errors", "info", "propertiesChecked", "total", "warnings"].sort(),
-    );
-  });
-
-  it("08b. 少数件では 200 かつ propertiesChecked が実件数", async () => {
-    pm.property.findMany.mockResolvedValue([makeProp(), makeProp({ id: "p2" })]);
-    const res = await GET();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.summary.propertiesChecked).toBe(2);
-  });
-
-  it("09. where.isArchived === false が維持される", async () => {
-    pm.property.findMany.mockResolvedValue([makeProp()]);
-    await GET();
-    const args = pm.property.findMany.mock.calls[0][0];
-    expect(args.where).toEqual({ isArchived: false });
-  });
-
-  it("10. property:read 欠如で 403・findMany 未実行（DB取得前ゲート）", async () => {
+  it("07. property:read 欠如で 403・count/findMany 未実行", async () => {
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_PROPERTY as never);
     const res = await GET();
     expect(res.status).toBe(403);
+    expect(pm.property.count).not.toHaveBeenCalled();
     expect(pm.property.findMany).not.toHaveBeenCalled();
   });
 
-  it("11. レスポンスに所有者PII（氏名・所有者住所・郵便番号等）が入らない", async () => {
-    pm.property.findMany.mockResolvedValue([
-      makeProp({ id: "p1", _count: { propertyOwners: 0 } }),
-    ]);
+  it("08. すべての品質チェッククエリで isArchived=false が維持される", async () => {
+    setupFindMany({ NO_OWNER: rows(1) });
+    await GET();
+    expect(pm.property.count.mock.calls[0][0].where.isArchived).toBe(false);
+    for (const call of pm.property.findMany.mock.calls) {
+      expect(call[0].where.isArchived).toBe(false);
+    }
+  });
+
+  it("09. レスポンスに Owner PII（氏名・所有者住所・郵便番号等）が入らない", async () => {
+    setupFindMany({ NO_OWNER: [{ id: "p1", address: "東京都千代田区1-1" }] });
     const res = await GET();
     const body = await res.json();
     for (const issue of body.data) {
@@ -237,9 +233,49 @@ describe("GET /api/properties/quality-check", () => {
     expect(bodyStr).not.toContain("ownerName");
     expect(bodyStr).not.toContain("nameKana");
     expect(bodyStr).not.toContain("propertyOwners");
+    // summary は非PIIキーのみ
+    expect(Object.keys(body.summary).sort()).toEqual(
+      [
+        "errors",
+        "info",
+        "issuesLimited",
+        "propertiesChecked",
+        "total",
+        "warnings",
+      ].sort(),
+    );
   });
 
-  it("12. route.ts は GET 以外を export しない", () => {
+  it("10. route.ts は GET 以外を export しない", () => {
     expect(Object.keys(routeModule).sort()).toEqual(["GET"]);
+  });
+
+  it("11. ルール該当が上限超なら issuesLimited=true（200・該当ルールは丸める）", async () => {
+    // findMany は take: LIMIT+1 で呼ばれる。take から1001件返して上限超を再現。
+    pm.property.findMany.mockImplementation(async (args: { where: Where; take: number }) => {
+      if (whereCode(args.where) === "NO_LOT_NUMBER") {
+        return rows(args.take, "lot"); // = LIMIT + 1 件
+      }
+      return [];
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.summary.issuesLimited).toBe(true);
+    // 丸められて LIMIT 件だけ issue 化される（take - 1）
+    const lotIssues = body.data.filter(
+      (i: { code: string }) => i.code === "NO_LOT_NUMBER",
+    );
+    const takeArg = pm.property.findMany.mock.calls.find(
+      (c) => whereCode(c[0].where) === "NO_LOT_NUMBER",
+    )![0].take;
+    expect(lotIssues.length).toBe(takeArg - 1);
+  });
+
+  it("11b. 上限未満では issuesLimited=false", async () => {
+    setupFindMany({ NO_OWNER: rows(5, "ok") });
+    const res = await GET();
+    const body = await res.json();
+    expect(body.summary.issuesLimited).toBe(false);
   });
 });
