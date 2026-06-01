@@ -228,6 +228,10 @@ async function main() {
     { templateId: adminTemplate.id, resource: "field_survey", action: "write", granted: true },
     { templateId: adminTemplate.id, resource: "field_survey", action: "read_all", granted: true },
     { templateId: adminTemplate.id, resource: "field_survey", action: "manage", granted: true },
+    // PR2: 謄本自動取得（registry:auto_fetch）の権限土台。外部サービスへの課金を伴う
+    // 高リスク操作のため、安全側で admin のみに付与する（office_staff / field_staff には
+    // 付与しない）。実際の自動取得 API / UI / provider は後続 PR（外部規約・課金確認後）。
+    { templateId: adminTemplate.id, resource: "registry", action: "auto_fetch", granted: true },
   ];
 
   for (const entry of templateEntries) {
