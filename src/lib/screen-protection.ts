@@ -30,24 +30,30 @@ export interface WatermarkParts {
 /**
  * 透かし表示文字列を組み立てる。
  * 例: "山田太郎 <yamada@example.com> [admin] 2026-06-03 14:30"
+ *
+ * Codex P2-2: traceability の無い汎用透かしを出さない。
+ * - name / email / role の識別情報が 1 つも無い場合は **null** を返す
+ *   （= 呼び出し側は透かしを描画しない。汎用の代替文言にフォールバックしない）。
+ * - 取得できた識別情報のみを連結する（name 欠損でも email / role があれば生成する）。
  * 表示するのは「閲覧者自身の身元」であり、所有者等の第三者 PII ではない。
- * email / role が欠損している場合は該当部分を省く。name 欠損時は "ユーザー"。
  */
 export function buildWatermarkText({
   name,
   email,
   role,
   now,
-}: WatermarkParts): string {
-  const parts: string[] = [];
-  parts.push((name ?? "").trim() || "ユーザー");
-
+}: WatermarkParts): string | null {
+  const safeName = (name ?? "").trim();
   const safeEmail = (email ?? "").trim();
-  if (safeEmail) parts.push(`<${safeEmail}>`);
-
   const safeRole = (role ?? "").trim();
-  if (safeRole) parts.push(`[${safeRole}]`);
 
+  // 識別情報が一切無ければ汎用透かしを出さない（fail-safe より traceability を優先）。
+  if (!safeName && !safeEmail && !safeRole) return null;
+
+  const parts: string[] = [];
+  if (safeName) parts.push(safeName);
+  if (safeEmail) parts.push(`<${safeEmail}>`);
+  if (safeRole) parts.push(`[${safeRole}]`);
   parts.push(formatTimestamp(now));
   return parts.join(" ");
 }
@@ -58,4 +64,35 @@ function formatTimestamp(now: Date): string {
     `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
     `${pad(now.getHours())}:${pad(now.getMinutes())}`
   );
+}
+
+/**
+ * Codex P2-1: viewport 全体を覆う透かし背景を生成する。
+ *
+ * 固定個数のタイル要素ではなく、回転した透かしテキストを 1 タイルに描いた SVG を
+ * `background-repeat: repeat` で敷き詰める。これにより wide / tall / 4K でも
+ * 下端・右端に無透かし領域を残さず全面を覆える（DOM ノード数も一定）。
+ *
+ * テキストは XML エスケープしてから encodeURIComponent するため、
+ * "<email>" の山括弧が SVG タグとして解釈される（インジェクション）ことはない。
+ *
+ * 戻り値は CSS `background-image` にそのまま渡せる `url("data:image/svg+xml,...")`。
+ */
+export function watermarkSvgDataUri(text: string): string {
+  const safe = xmlEscape(text);
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='340' height='180'>` +
+    `<text x='12' y='96' fill='#111827' font-family='sans-serif' font-size='13' ` +
+    `font-weight='600' transform='rotate(-30 170 96)'>${safe}</text>` +
+    `</svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+function xmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
