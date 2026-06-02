@@ -382,7 +382,19 @@ export async function fetchImportJobs(
   );
 }
 
-export async function fetchImportJobDetail(jobId: string) {
+// PR-B(B1): rows サーバーサイドページング用の任意 query。
+// 省略時は従来どおり全件取得（後方互換）。page / limit / status を渡すと
+// detail API がページ分だけ rows を返す。
+export interface FetchImportJobDetailParams {
+  page?: number;
+  limit?: number;
+  status?: string;
+}
+
+export async function fetchImportJobDetail(
+  jobId: string,
+  params: FetchImportJobDetailParams = {},
+) {
   if (USE_MOCK) {
     await mockDelay();
     return {
@@ -403,6 +415,18 @@ export async function fetchImportJobDetail(jobId: string) {
         needsReviewCount: 1,
         errorCount: 1,
         totalCount: 3,
+      },
+      // PR-B(B1): server-side で確定する additive フィールド。
+      isReceptionOwnerJob: false,
+      duplicateCount: 0,
+      pagination: {
+        page: 1,
+        limit: 3,
+        totalRows: 3,
+        totalPages: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+        status: null as string | null,
       },
       rows: [
         {
@@ -433,7 +457,12 @@ export async function fetchImportJobDetail(jobId: string) {
       ],
     };
   }
-  return apiFetch(`/api/import/jobs/${jobId}`);
+  const query = new URLSearchParams();
+  if (params.page != null) query.set("page", String(params.page));
+  if (params.limit != null) query.set("limit", String(params.limit));
+  if (params.status) query.set("status", params.status);
+  const qs = query.toString();
+  return apiFetch(`/api/import/jobs/${jobId}${qs ? `?${qs}` : ""}`);
 }
 
 // processing のまま残っているスタックジョブの一覧。

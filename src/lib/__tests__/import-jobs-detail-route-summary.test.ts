@@ -61,7 +61,14 @@ vi.mock("@/lib/permissions", () => ({
 vi.mock("@/lib/prisma", () => ({
   default: {
     importJob: { findUnique: vi.fn() },
-    importJobRow: { groupBy: vi.fn() },
+    importJobRow: {
+      groupBy: vi.fn(),
+      // PR-B(B1): route が rows を findMany + count(母数/重複) で取得するようになったため、
+      // PR-A の summary 検証でもこれらを mock しておく（既存アサーションは不変）。
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      count: vi.fn(),
+    },
   },
 }));
 
@@ -76,7 +83,12 @@ import {
 
 const pm = prisma as unknown as {
   importJob: { findUnique: Mock };
-  importJobRow: { groupBy: Mock };
+  importJobRow: {
+    groupBy: Mock;
+    findMany: Mock;
+    findFirst: Mock;
+    count: Mock;
+  };
 };
 
 const JOB_ID = "job-1";
@@ -96,6 +108,13 @@ function setup(
   pm.importJobRow.groupBy.mockImplementation((args: { by: string[] }) =>
     Promise.resolve(args.by.includes("status") ? statusGroups : updatedGroups),
   );
+  // rows は findMany 経由（route 改修後）。body.rows 検証用に job.rows を返す。
+  pm.importJobRow.findMany.mockResolvedValue(
+    (job as { rows?: unknown[] } | null)?.rows ?? [],
+  );
+  // count(母数/重複) は本スイートでは値を検証しないため 0 で十分。
+  pm.importJobRow.count.mockResolvedValue(0);
+  pm.importJobRow.findFirst.mockResolvedValue(null);
 }
 
 async function callGet(jobId = JOB_ID) {
