@@ -394,6 +394,16 @@ export async function fetchImportJobDetail(jobId: string) {
       errorCount: 1,
       needsReviewCount: 1,
       createdAt: "2025-06-01T10:00:00Z",
+      // 段階A(PR-A): 詳細画面は job.summary を一意の真実として使うため、
+      // mock 分岐でも summary を付与する（下の 3 行: 成功1 / 要レビュー1 / エラー1）。
+      summary: {
+        createdCount: 1,
+        updatedCount: 0,
+        skippedCount: 0,
+        needsReviewCount: 1,
+        errorCount: 1,
+        totalCount: 3,
+      },
       rows: [
         {
           id: "row-1",

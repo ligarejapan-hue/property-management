@@ -40,7 +40,7 @@ import {
   extractUpdateReason,
   extractUpdatedFields,
 } from "@/lib/import-row-display";
-import { calcImportSummary } from "@/lib/import-summary";
+import { calcImportSummary, type ImportSummary } from "@/lib/import-summary";
 import { classifyImportError } from "@/lib/import-error-display";
 import { getImportTypeLabel } from "@/lib/import-labels";
 
@@ -73,6 +73,9 @@ interface ImportJob {
   createdAt: string;
   executor: { id: string; name: string };
   rows: ImportJobRow[];
+  // 段階A(PR-A): 詳細API がサーバ側 groupBy で算出した 5 区分サマリ。
+  // 旧形状/モックでは未提供のこともあるため optional。
+  summary?: ImportSummary;
 }
 
 interface SearchResult {
@@ -279,13 +282,15 @@ export default function ImportJobDetailPage() {
   const filteredRows =
     job?.rows.filter((r) => filter === "all" || r.status === filter) ?? [];
 
-  // 段階A: 5区分の集計を共有ヘルパで算出。
-  // duplicate / updated は表示上の補助情報なので別途数えるが、
-  // メイン指標 (新規 / 更新 / スキップ / 要レビュー / エラー) は calcImportSummary
-  // を一意の真実とする。
-  const summary = calcImportSummary(job?.rows ?? []);
+  // 段階A(PR-A): 5区分の集計は **サーバ側 summary (job.summary)** を一意の真実とする。
+  // job.summary は詳細API が groupBy で算出して additive に返す値。旧形状/モックや
+  // 取得前 (job=null) でも壊れないよう、未提供時のみ calcImportSummary(job.rows) に
+  // フォールバックする。これにより後続の rows ページング(PR-B)でも件数が現ページに
+  // 引きずられない。
+  // duplicate は表示補助で別途 job.rows から数える（PR-A範囲外・rows全件前提を維持）。
+  const summary = job?.summary ?? calcImportSummary(job?.rows ?? []);
   const counts = {
-    all: job?.rows.length ?? 0,
+    all: summary.totalCount,
     needs_review: summary.needsReviewCount,
     error: summary.errorCount,
     success: summary.createdCount + summary.updatedCount,
