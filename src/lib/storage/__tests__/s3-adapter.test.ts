@@ -19,8 +19,8 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   NoSuchKey,
+  type GetObjectCommandOutput,
 } from "@aws-sdk/client-s3";
-import { Readable } from "stream";
 
 import { S3Adapter } from "../s3-adapter";
 
@@ -134,7 +134,7 @@ describe("S3Adapter.read", () => {
   it("成功時は Buffer + Content-Type + size を返す", async () => {
     const bytes = new Uint8Array([10, 20, 30, 40]);
     s3Mock.on(GetObjectCommand).resolves({
-      Body: makeStreamLike(bytes) as unknown as Readable,
+      Body: makeStreamLike(bytes) as unknown as GetObjectCommandOutput["Body"],
       ContentType: "image/png",
       ContentLength: bytes.length,
     });
@@ -148,7 +148,7 @@ describe("S3Adapter.read", () => {
 
   it("ContentType が無い場合は application/octet-stream にフォールバック", async () => {
     s3Mock.on(GetObjectCommand).resolves({
-      Body: makeStreamLike(new Uint8Array([1])) as unknown as Readable,
+      Body: makeStreamLike(new Uint8Array([1])) as unknown as GetObjectCommandOutput["Body"],
       // ContentType 未指定
     });
     const adapter = new S3Adapter();

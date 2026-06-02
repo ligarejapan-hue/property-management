@@ -72,9 +72,19 @@ const PERMS_NO_PROPERTY = [{ resource: "owner", action: "read", granted: true }]
 type Where = Record<string, unknown>;
 type Row = { id: string; address: string };
 type RuleScenario = { count: number; sample: Row[] };
-type Scenario = { TOTAL?: number } & Partial<Record<string, RuleScenario>>;
+type RuleCode =
+  | "NO_OWNER"
+  | "REGISTRY_DM_MISMATCH"
+  | "NO_LOT_NUMBER"
+  | "NO_REAL_ESTATE_NUMBER"
+  | "INVESTIGATION_NOT_CONFIRMED"
+  | "NO_ASSIGNEE";
+// TOTAL を rule code の index と分離する。
+// 旧定義 `Partial<Record<string, RuleScenario>>` は string index が "TOTAL" キーまで
+// RuleScenario に巻き込み、`TOTAL?: number` と矛盾して never 化していた（型を緩めず正す）。
+type Scenario = { TOTAL?: number } & Partial<Record<RuleCode, RuleScenario>>;
 
-function whereCode(where: Where): string {
+function whereCode(where: Where): RuleCode | "TOTAL" {
   if (where.propertyOwners) return "NO_OWNER";
   if (where.registryStatus) return "REGISTRY_DM_MISMATCH";
   if (Array.isArray(where.OR)) {
@@ -95,6 +105,7 @@ function setup(scenario: Scenario) {
   });
   pm.property.findMany.mockImplementation(async (args: { where: Where }) => {
     const code = whereCode(args.where);
+    if (code === "TOTAL") return [];
     return scenario[code]?.sample ?? [];
   });
 }

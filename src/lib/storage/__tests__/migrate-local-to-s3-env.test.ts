@@ -12,7 +12,8 @@ import os from "node:os";
 
 // .mjs を ESM で import (vitest 4 は ESM サポート)。
 // 型は無いが script は ESM export を持つので default ではなく named import が使える。
-// @ts-expect-error -- JS の .mjs を TS から型なしで import
+// 型定義のない .mjs スクリプトを named import（TS は解決可。旧 @ts-expect-error は
+// unused のため削除）。
 import { loadEnvFromFile } from "../../../../scripts/migrate-local-to-s3.mjs";
 
 const TARGET_KEYS = [
