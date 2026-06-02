@@ -9,7 +9,10 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { calcImportSummary } from "@/lib/import-summary";
+import {
+  summaryFromStatusCounts,
+  type StatusCounts,
+} from "@/lib/import-summary";
 
 // ---------- GET /api/import/jobs ----------
 //
@@ -102,33 +105,49 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
-    // 各 job の summary を ImportJobRow から動的計算する。
-    // 行件数次第でレスポンスが膨らむのを避けるため select を最小化し、
-    // 「status / errorMessage」の 2 列だけを引いてくる。
+    // 各 job の 5 区分サマリを ImportJobRow から集約する。
+    // 旧実装は全行を findMany して JS で Map 集計していたが、行数が増えると
+    // 行の取得・転送コストが線形に膨らむため、Prisma groupBy 2 本に置き換える。
+    //   ① jobId × status の件数（success 総数 / skipped / needs_review / error）
+    //   ② jobId ごとの「更新」success 件数
+    //      （success かつ errorMessage が「更新」始まり = isUpdateMessage 規約）
+    // createdCount は ① の success 総数 − ② の更新件数で導出する。
     const jobIds = jobs.map((j) => j.id);
-    const rows =
-      jobIds.length > 0
-        ? await prisma.importJobRow.findMany({
-            where: { jobId: { in: jobIds } },
-            select: { jobId: true, status: true, errorMessage: true },
-          })
-        : [];
 
-    const rowsByJob = new Map<
-      string,
-      Array<{
-        status: "success" | "error" | "skipped" | "needs_review";
-        errorMessage: string | null;
-      }>
-    >();
-    for (const r of rows) {
-      const list = rowsByJob.get(r.jobId);
-      if (list) {
-        list.push({ status: r.status, errorMessage: r.errorMessage });
-      } else {
-        rowsByJob.set(r.jobId, [
-          { status: r.status, errorMessage: r.errorMessage },
-        ]);
+    // jobId → status 別件数。groupBy は 0 件 status を返さないため未指定キーは
+    // summaryFromStatusCounts 側で 0 埋めされる。
+    const statusCountsByJob = new Map<string, StatusCounts>();
+    // jobId → 更新件数（②に現れない job は更新 0 件）。
+    const updatedCountByJob = new Map<string, number>();
+
+    // 現ページに job が無ければ集計クエリ自体を打たない（空 in を避ける）。
+    if (jobIds.length > 0) {
+      const [statusGroups, updatedGroups] = await Promise.all([
+        prisma.importJobRow.groupBy({
+          by: ["jobId", "status"],
+          where: { jobId: { in: jobIds } },
+          _count: { _all: true },
+        }),
+        prisma.importJobRow.groupBy({
+          by: ["jobId"],
+          where: {
+            jobId: { in: jobIds },
+            status: "success",
+            // isUpdateMessage 規約と一致: errorMessage が「更新」始まりの行のみ。
+            // null は startsWith にマッチしないため更新扱いされない。
+            errorMessage: { startsWith: "更新" },
+          },
+          _count: { _all: true },
+        }),
+      ]);
+
+      for (const g of statusGroups) {
+        const entry = statusCountsByJob.get(g.jobId) ?? {};
+        entry[g.status] = g._count._all;
+        statusCountsByJob.set(g.jobId, entry);
+      }
+      for (const g of updatedGroups) {
+        updatedCountByJob.set(g.jobId, g._count._all);
       }
     }
 
@@ -154,7 +173,10 @@ export async function GET(request: NextRequest) {
 
     const data = jobs.map((job) => ({
       ...job,
-      summary: calcImportSummary(rowsByJob.get(job.id) ?? []),
+      summary: summaryFromStatusCounts(
+        statusCountsByJob.get(job.id) ?? {},
+        updatedCountByJob.get(job.id) ?? 0,
+      ),
       // status === "failed" でかつ AuditLog に該当ログがあれば手動失敗。
       // failed 以外で true になることは原則無いが、API 側で status と
       // 連動させる責務はクライアントへ持たせず、boolean だけ返す。
