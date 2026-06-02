@@ -18,6 +18,7 @@ import HistoryTab from "@/components/properties/history-tab";
 import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
+import RegistryAutoFetchButton from "@/components/properties/registry-auto-fetch-button";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
@@ -199,6 +200,11 @@ export default function PropertyDetailPage({
   // /api/me/permissions の capabilities.corporateLookup から取得し、UI 上は
   // 検索ボタンの disabled 判定だけに使う（lookup 自体は常にサーバー側で再判定）。
   const [corporateLookupConfigured, setCorporateLookupConfigured] = useState(false);
+  // 謄本自動取得（registry:auto_fetch）。admin のみ付与の高リスク権限。無ければボタン非表示。
+  const [canAutoFetchRegistry, setCanAutoFetchRegistry] = useState(false);
+  // 本番 provider が設定済みか（/api/me/permissions の capabilities.registryAutoFetch）。
+  // UI 上は実行ボタンの disabled 判定だけに使い、実行可否は常にサーバー側で再判定する。
+  const [registryAutoFetchConfigured, setRegistryAutoFetchConfigured] = useState(false);
   const [ownerEditableFields, setOwnerEditableFields] = useState<OwnerEditableFields>({
     name: false,
     nameKana: false,
@@ -250,10 +256,14 @@ export default function PropertyDetailPage({
       .then((r) => r.json())
       .then((json: {
         permissions?: { resource: string; action: string; granted: boolean }[];
-        capabilities?: { corporateLookup?: boolean };
+        capabilities?: { corporateLookup?: boolean; registryAutoFetch?: boolean };
       }) => {
         const perms = json.permissions ?? [];
         setCorporateLookupConfigured(json.capabilities?.corporateLookup ?? false);
+        setRegistryAutoFetchConfigured(json.capabilities?.registryAutoFetch ?? false);
+        setCanAutoFetchRegistry(
+          perms.some((p) => p.resource === "registry" && p.action === "auto_fetch" && p.granted),
+        );
         setCanWriteProperty(
           perms.some((p) => p.resource === "property" && p.action === "write" && p.granted),
         );
@@ -361,6 +371,15 @@ export default function PropertyDetailPage({
         dmStatus={property.dmStatus}
         investigationConfirmedAt={property.investigationConfirmedAt}
         onActionComplete={fetchProperty}
+      />
+
+      {/* 謄本を自動取得（PR5・registry:auto_fetch / admin のみ。provider 未設定中は disabled 表示） */}
+      <RegistryAutoFetchButton
+        propertyId={property.id}
+        registryStatus={property.registryStatus}
+        canAutoFetch={canAutoFetchRegistry}
+        providerConfigured={registryAutoFetchConfigured}
+        onComplete={fetchProperty}
       />
 
       {/* Warning badge */}
