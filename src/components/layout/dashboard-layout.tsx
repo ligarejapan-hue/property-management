@@ -5,6 +5,7 @@ import { signOut, useSession } from "next-auth/react";
 import Sidebar from "./sidebar";
 import Header from "./header";
 import { USE_MOCK } from "@/lib/api-client";
+import ScreenProtectionProvider from "@/components/screen-protection/screen-protection-provider";
 
 export default function DashboardLayout({
   children,
@@ -23,12 +24,14 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar userRole={userRole} currentPath={pathname} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header userName={userName} userRole={userRole} onLogout={handleLogout} />
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
+    <ScreenProtectionProvider>
+      <div className="flex h-screen overflow-hidden bg-gray-50">
+        <Sidebar userRole={userRole} currentPath={pathname} />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Header userName={userName} userRole={userRole} onLogout={handleLogout} />
+          <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </ScreenProtectionProvider>
   );
 }
