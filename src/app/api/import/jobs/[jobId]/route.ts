@@ -42,6 +42,23 @@ const VALID_ROW_STATUSES = [
 const DEFAULT_ROW_LIMIT = 50;
 const MAX_ROW_LIMIT = 100;
 
+/**
+ * query 文字列を **安全な正の整数** に正規化する。
+ * - 小数は切り捨て（Math.floor）
+ * - NaN / Infinity / -Infinity / 数値でない文字列 / 0 以下 → fallback
+ * 返り値は常に整数（fallback も整数を渡す前提）。
+ *
+ * Prisma の skip/take は小数を受け付けず実行時エラーになるため、
+ * `page=1.5` のような入力でも skip/take が必ず整数になるようにする（Codex #101 P2）。
+ */
+function toPositiveInt(value: string | null, fallback: number): number {
+  if (value === null) return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback; // NaN / Infinity / -Infinity
+  const floored = Math.floor(n);
+  return floored >= 1 ? floored : fallback; // 0 / 負数 → fallback
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> },
@@ -69,14 +86,12 @@ export async function GET(
         : null;
 
     // page / limit のいずれかが来たときだけページング。来なければ全件（後方互換）。
+    // skip/take に渡る値は必ず安全な整数にする（小数/負数/0/NaN/Infinity/不正文字列対策）。
     const paginate = pageParam !== null || limitParam !== null;
     const limit = paginate
-      ? Math.min(
-          MAX_ROW_LIMIT,
-          Math.max(1, Number(limitParam ?? DEFAULT_ROW_LIMIT) || DEFAULT_ROW_LIMIT),
-        )
+      ? Math.min(MAX_ROW_LIMIT, toPositiveInt(limitParam, DEFAULT_ROW_LIMIT))
       : null;
-    const page = paginate ? Math.max(1, Number(pageParam ?? "1") || 1) : 1;
+    const page = paginate ? toPositiveInt(pageParam, 1) : 1;
 
     // ページングの母数は「現在の status フィルタ後」の行集合。
     const rowWhere: Prisma.ImportJobRowWhereInput = {

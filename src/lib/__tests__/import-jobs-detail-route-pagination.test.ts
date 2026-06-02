@@ -278,6 +278,55 @@ describe("GET /api/import/jobs/[jobId] — rows pagination (PR-B / B1)", () => {
     expect(args.skip).toBe(0);
   });
 
+  // ---- Codex #101 P2: 小数/Infinity の整数正規化 ----
+  it("小数 page/limit は切り捨てで整数化され skip/take が整数になる", async () => {
+    setup({ filteredTotal: 100 });
+
+    await callGet("?page=1.5&limit=10");
+
+    const args = findManyArgs();
+    expect(args.skip).toBe(0); // floor(1.5)=1 → (1-1)*10
+    expect(args.take).toBe(10);
+    expect(Number.isInteger(args.skip)).toBe(true);
+    expect(Number.isInteger(args.take)).toBe(true);
+  });
+
+  it("小数 page=2.9 / limit=10.9 でも skip/take は整数（切り捨て）", async () => {
+    setup({ filteredTotal: 100 });
+
+    await callGet("?page=2.9&limit=10.9");
+
+    const args = findManyArgs();
+    // floor(2.9)=2, floor(10.9)=10 → skip=(2-1)*10
+    expect(args.skip).toBe(10);
+    expect(args.take).toBe(10);
+    expect(Number.isInteger(args.skip)).toBe(true);
+    expect(Number.isInteger(args.take)).toBe(true);
+  });
+
+  it("1 未満に切り捨てられる小数 page（0.4）は fallback で page=1", async () => {
+    setup({ filteredTotal: 100 });
+
+    await callGet("?page=0.4&limit=10");
+
+    const args = findManyArgs();
+    expect(args.skip).toBe(0); // floor(0.4)=0 (<1) → fallback page=1 → skip 0
+    expect(args.take).toBe(10);
+    expect(Number.isInteger(args.skip)).toBe(true);
+  });
+
+  it("Infinity / 非有限値は安全に fallback（page=1, limit=DEFAULT・skip/take 整数）", async () => {
+    setup({ filteredTotal: 100 });
+
+    await callGet("?page=Infinity&limit=Infinity");
+
+    const args = findManyArgs();
+    expect(args.skip).toBe(0); // page → 1
+    expect(args.take).toBe(50); // limit → DEFAULT_ROW_LIMIT
+    expect(Number.isInteger(args.skip)).toBe(true);
+    expect(Number.isInteger(args.take)).toBe(true);
+  });
+
   it("isReceptionOwnerJob: owner_csv + マーカ付き先頭行 → true（findFirst 利用）", async () => {
     setup({
       job: { id: JOB_ID, jobType: "owner_csv", fileName: "owner.csv" },
