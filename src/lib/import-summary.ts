@@ -84,3 +84,61 @@ export function calcImportSummary(rows: ImportRowLike[]): ImportSummary {
       createdCount + updatedCount + skippedCount + needsReviewCount + errorCount,
   };
 }
+
+/**
+ * status 別件数のマップ。ImportRowStatus（success / error / skipped /
+ * needs_review）と一致するキーを持つ。Prisma 依存を避けるため enum を
+ * import せず、リテラルキーの optional interface として定義する。
+ *
+ * groupBy は該当 0 件の status を行として返さないため、未指定キーは
+ * `undefined`（= 0 件）として扱う。
+ */
+export interface StatusCounts {
+  success?: number;
+  error?: number;
+  skipped?: number;
+  needs_review?: number;
+}
+
+/**
+ * 一覧画面向けサマリ算出。全行を取得して JS で集計する calcImportSummary とは
+ * 異なり、DB 側の groupBy 集約結果（status 別件数 + 更新件数）から ImportSummary
+ * を組み立てる。返す形は calcImportSummary と完全一致する。
+ *
+ * @param counts        ① groupBy(by:["jobId","status"]) 由来の status 別件数。
+ *                      未指定 status は 0 件として扱う。
+ * @param updatedCount  ② groupBy(by:["jobId"], where:{status:"success",
+ *                      errorMessage:{startsWith:"更新"}}) 由来の「更新」success 件数。
+ *
+ * createdCount は successTotal − updatedCount で導出する。updatedCount は定義上
+ * success の部分集合（success かつ errorMessage が「更新」始まり）なので
+ * updatedCount <= successTotal が常に成り立つが、2 本の groupBy がわずかに
+ * 異なるスナップショットを見る競合に備え、createdCount が負にならないよう
+ * updatedCount を [0, successTotal] にクランプする。
+ */
+export function summaryFromStatusCounts(
+  counts: StatusCounts,
+  updatedCount: number,
+): ImportSummary {
+  const successTotal = counts.success ?? 0;
+  const skippedCount = counts.skipped ?? 0;
+  const needsReviewCount = counts.needs_review ?? 0;
+  const errorCount = counts.error ?? 0;
+
+  const safeUpdated = Math.min(Math.max(updatedCount, 0), successTotal);
+  const createdCount = successTotal - safeUpdated;
+
+  return {
+    createdCount,
+    updatedCount: safeUpdated,
+    skippedCount,
+    needsReviewCount,
+    errorCount,
+    totalCount:
+      createdCount +
+      safeUpdated +
+      skippedCount +
+      needsReviewCount +
+      errorCount,
+  };
+}
