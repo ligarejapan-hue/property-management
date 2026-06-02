@@ -11,6 +11,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Claude GitHub Code Review / `@claude review` は使用禁止（CLAUDE.md §17）。
 - PII / AuditLog / 権限 / import・export / upload・storage / GitHub Actions / DM出力 / 謄本PDF に関わる変更は Codex review 推奨（CLAUDE.md §11・§19）。
 - paid service / usage credits / API課金 が発生し得る機能の有効化・利用は事前承認必須（CLAUDE.md §17）。
+- Claude Code / Agent の実行報告・ツール呼び出しの真正性（疑似ツール呼び出し・疑似コマンドを本文に出さない／実行証跡なしに成功扱いしない）は CLAUDE.md §23 を参照する。
 <!-- END:claude-dev-rules-pointer -->
 
 <!-- BEGIN:codex-review-rules -->
