@@ -213,7 +213,7 @@ sudo vim /etc/property-management/app.env
 
 > 本ガイドで `www-data` として `npm` / `npx` を実行する際は、`HOME=/var/www` と
 > `npm_config_cache=/var/www/.npm` を指定する（npm キャッシュは `/var/www/.npm`）。CLAUDE.md §13。
-> 例: `sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci --omit=dev`
+> 例: `sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci`
 > （DB 接続が必要な `npx prisma` / `npm run build` 等は `-E` を残して `sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm ...` とする）
 
 ```bash
@@ -225,10 +225,13 @@ sudo chown -R www-data:www-data /opt/property-management
 sudo mkdir -p /var/www/.npm
 sudo chown www-data:www-data /var/www/.npm
 
-# 依存インストール
-# ⚠ @tailwindcss/postcss・tailwindcss はビルド時に必要なため dependencies に入っている
-#   NODE_ENV=production 環境下でも --omit=dev で除外されない（devDependencies ではないため）
-sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci --omit=dev
+# 依存インストール（build に devDependencies が必要なため full install。起動前に prune する → ステップ 6）
+# ⚠ next build は TypeScript 型チェックを行い、typescript / @types/* や
+#   ルートの vitest.config.ts（`import "vitest/config"`）の解決に devDependencies を必要とする。
+#   このため `npm ci --omit=dev` のままだと `Cannot find module 'vitest/config'` 等で build が失敗する。
+#   → build 時は full `npm ci`、build 成功後に `npm prune --omit=dev` で本番依存へ戻す（ステップ 6）。
+# ⚠ @tailwindcss/postcss・tailwindcss はビルド時に必要なため dependencies に入っており、prune 後も残る。
+sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci
 
 # Prisma クライアント生成（src/generated/prisma/ に出力）
 # ⚠ postinstall では自動実行されないため必須
@@ -362,6 +365,12 @@ sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm run bui
 #   ✓ Compiled successfully
 #   警告ゼロ
 #   ƒ Proxy (Middleware) が表示されること
+
+# build 成功後: devDependencies を落として本番依存へ戻す
+# next / @prisma/client は dependencies のため prune 後も残る（起動に必要なものは消えない）
+sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm prune --omit=dev
+# 確認: next / @prisma/client が残っていること
+sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ls next @prisma/client --omit=dev --depth=0
 ```
 
 ### ステップ 7: systemd サービス起動
@@ -486,11 +495,11 @@ cd /opt/property-management
 # 1. 最新コードを取得
 sudo -u www-data git pull origin main
 
-# 2. 依存を再インストール（package-lock.json が更新されている場合）
+# 2. 依存を再インストール（build に devDependencies が必要なため full install）
 # www-data の npm キャッシュディレクトリを作成（未作成の場合）
 sudo mkdir -p /var/www/.npm
 sudo chown www-data:www-data /var/www/.npm
-sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci --omit=dev
+sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci
 
 # 3. Prisma クライアント再生成（スキーマ変更がある場合）
 set -a && source /etc/property-management/app.env && set +a
@@ -502,14 +511,19 @@ sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npx prisma 
 # 5. 再ビルド
 sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm run build
 
-# 6. サービス再起動
+# 6. devDependencies を落として本番依存へ戻す（next / @prisma/client は dependencies のため残る）
+sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm prune --omit=dev
+
+# 7. サービス再起動
 sudo systemctl restart property-management
 sudo systemctl status property-management --no-pager
 ```
 
-> **注意**: `@tailwindcss/postcss` と `tailwindcss` を `devDependencies` から `dependencies` に移動した
-> コミット以降を反映する場合は、必ず `npm ci --omit=dev` を再実行してください。
-> 旧バージョンのまま `npm run build` すると `Cannot find module '@tailwindcss/postcss'` が発生します。
+> **注意（build と devDependencies）**: `next build` は TypeScript 型チェックを行い、`typescript` / `@types/*`
+> やルートの `vitest.config.ts`（`import "vitest/config"`）の解決に **devDependencies を必要とする**。
+> このため build 時は **full `npm ci`**（`--omit=dev` を付けない）で入れ、**build 成功後に `npm prune --omit=dev`**
+> で本番依存へ戻す。`next` / `@prisma/client` は `dependencies` のため prune 後も残る。
+> （`@tailwindcss/postcss` / `tailwindcss` も build 時必須だが `dependencies` 側にあるため prune の影響を受けない。）
 
 ---
 
@@ -521,10 +535,9 @@ set -a && source /etc/property-management/app.env && set +a
 
 # 1. 旧バージョンに戻す
 git checkout <previous-tag>
-# ⚠ ロールバック先が @tailwindcss/postcss を devDependencies に置いていたコミット以前の場合は
-#   npm ci --omit=dev だと tailwindcss 系がインストールされず build が失敗する。
-#   その場合は npm ci（--omit=dev なし）で全パッケージをインストールする。
-npm ci --omit=dev
+# build には devDependencies が必要（typescript / @types/* / vitest.config.ts の型解決）。
+# full `npm ci` で入れ、build 成功後に `npm prune --omit=dev` で本番依存へ戻す（手順 3-4）。
+npm ci
 npx prisma generate
 
 # 2. DB マイグレーションを巻き戻す（スキーマ変更があった場合のみ）
@@ -533,7 +546,10 @@ npx prisma migrate resolve --rolled-back <migration-name>
 # 3. ビルド
 npm run build
 
-# 4. サービス再起動
+# 4. devDependencies を落として本番依存へ戻す
+npm prune --omit=dev
+
+# 5. サービス再起動
 sudo systemctl restart property-management
 sudo systemctl status property-management --no-pager
 ```
