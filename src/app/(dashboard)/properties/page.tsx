@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
+import { debounce } from "@/lib/debounce";
 import NewPropertyModal from "@/components/properties/new-property-modal";
 
 // ---------- Label maps ----------
@@ -108,6 +109,12 @@ function PropertiesPageInner() {
   //   入力中の所有者名・電話番号が property_list audit の raw keyword に残らないよう分離する。
   const [searchText, setSearchText] = useState(() => sp.get("keyword") ?? "");
   const [mgmtIdText, setMgmtIdText] = useState(() => sp.get("mgmtId") ?? "");
+  // 一覧検索の入力中文字列（即時反映で入力レスポンスを維持）。300ms debounce 後に
+  // 確定値 searchText / mgmtIdText へコミットし、/api/properties 再取得・URL同期は
+  // その確定値だけで動く（毎キーストロークの再取得＝property_list audit 量産を防ぐ）。
+  // URL からの復元値で初期化する。
+  const [searchDraft, setSearchDraft] = useState(() => sp.get("keyword") ?? "");
+  const [mgmtIdDraft, setMgmtIdDraft] = useState(() => sp.get("mgmtId") ?? "");
   const [searchInput, setSearchInput] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
@@ -447,6 +454,34 @@ function PropertiesPageInner() {
     };
   }, [searchInput]);
 
+  // 一覧検索 (keyword / 管理ID) の確定コミットを 300ms debounce する。
+  // 入力ドラフト (searchDraft / mgmtIdDraft) は即時更新し、確定値への反映と
+  // page リセットだけを遅延させる。suggest (searchInput) の debounce とは別インスタンス
+  // なので互いに干渉しない。setState の identity は安定なので deps は空でよい。
+  const commitKeyword = useMemo(
+    () =>
+      debounce((value: string) => {
+        setSearchText(value);
+        setPage(1);
+      }, 300),
+    [],
+  );
+  const commitMgmtId = useMemo(
+    () =>
+      debounce((value: string) => {
+        setMgmtIdText(value);
+        setPage(1);
+      }, 300),
+    [],
+  );
+  // アンマウント時に保留中の確定コミットを破棄する。
+  useEffect(() => {
+    return () => {
+      commitKeyword.cancel();
+      commitMgmtId.cancel();
+    };
+  }, [commitKeyword, commitMgmtId]);
+
   // Debounce search: reset page on filter change
   const handleFilterChange = (setter: (v: string) => void) => (
     e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>,
@@ -457,9 +492,15 @@ function PropertiesPageInner() {
 
   // 全フィルタを一括リセット（並び順は既定に戻し、page=1）
   const handleResetFilters = () => {
+    // 保留中の検索 debounce を破棄してからリセットする
+    // （後から確定コミットが走って検索語が復活しないように）。
+    commitKeyword.cancel();
+    commitMgmtId.cancel();
     setSuggestOpen(false);
     setSuggestResults([]);
     setSearchInput("");
+    setSearchDraft("");
+    setMgmtIdDraft("");
     setSearchText("");
     setMgmtIdText("");
     setTypeFilter("");
@@ -477,7 +518,7 @@ function PropertiesPageInner() {
 
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
-    !!searchInput || !!searchText || !!mgmtIdText || !!typeFilter || !!registryFilter || !!dmFilter ||
+    !!searchInput || !!searchText || !!searchDraft || !!mgmtIdText || !!mgmtIdDraft || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || sort !== "updatedAt:desc";
 
@@ -681,8 +722,12 @@ function PropertiesPageInner() {
           <input
             type="text"
             placeholder="物件住所・地番・家屋番号で一覧検索"
-            value={searchText}
-            onChange={handleFilterChange(setSearchText)}
+            value={searchDraft}
+            onChange={(e) => {
+              const value = e.target.value;
+              setSearchDraft(value);
+              commitKeyword(value);
+            }}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
           />
         </div>
@@ -692,8 +737,12 @@ function PropertiesPageInner() {
           <input
             type="text"
             placeholder="管理IDで検索（例: 受付帳.xlsx:120行 / 120行）"
-            value={mgmtIdText}
-            onChange={handleFilterChange(setMgmtIdText)}
+            value={mgmtIdDraft}
+            onChange={(e) => {
+              const value = e.target.value;
+              setMgmtIdDraft(value);
+              commitMgmtId(value);
+            }}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
           />
         </div>
