@@ -574,15 +574,21 @@ describe("POST /api/admin/owners/[id]/correction/address-fill", () => {
 
     expect(writeAuditLog).toHaveBeenCalledOnce();
     const call = vi.mocked(writeAuditLog).mock.calls[0][0];
+    // writeAuditLog の detail は unknown のため、参照前に検証用の形へ明示キャスト。
+    const detail = call.detail as {
+      sourceType: string;
+      sourceFieldNames: string[];
+      sourceRowId: string;
+    };
     const detailStr = JSON.stringify(call.detail);
     // 住所値・rawData全文を含まないこと
     expect(detailStr).not.toContain(ADDRESS);
     expect(detailStr).not.toContain("rawData");
     // sourceType が reception_owner であること
-    expect(call.detail.sourceType).toBe("reception_owner_import_job_row");
+    expect(detail.sourceType).toBe("reception_owner_import_job_row");
     // sourceFieldNames には値でなくフィールドパス名のみ
-    expect(call.detail.sourceFieldNames).toEqual(["__owner_link_data.address"]);
-    expect(call.detail.sourceRowId).toBe(RECEPTION_ROW_ID);
+    expect(detail.sourceFieldNames).toEqual(["__owner_link_data.address"]);
+    expect(detail.sourceRowId).toBe(RECEPTION_ROW_ID);
   });
 
   it("P2: reception row が複数 → 422 (import_source_ambiguous)", async () => {

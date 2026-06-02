@@ -8,6 +8,10 @@
  *  - DELETE: own 成功 / 他人 pin 禁止 / archived 禁止 / storage.delete 失敗でも DB 削除後に成功
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+// route ハンドラの引数型は NextRequest。テストは Request を渡すため（runtime は
+// 下の next/server mock で NextRequest=Request サブクラス）、builder/呼び出し側で
+// NextRequest 相当へキャストして型を合わせる。
+import type { NextRequest } from "next/server";
 
 vi.mock("next/server", () => {
   class MockNextRequest extends Request {
@@ -132,7 +136,7 @@ function multipartReq(file: Blob | null) {
   return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
     method: "POST",
     body: fd,
-  });
+  }) as unknown as NextRequest;
 }
 
 function jpeg(bytes = 16): Blob {
@@ -265,7 +269,7 @@ describe("POST photos", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
-    });
+    }) as unknown as NextRequest;
     const res = await POST(req, paramsP(PIN_ID));
     expect(res.status).toBe(422);
   });
@@ -305,7 +309,7 @@ describe("POST photos — MIME / key hardening (Codex P2)", () => {
     return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
       method: "POST",
       body: fd,
-    });
+    }) as unknown as NextRequest;
   }
 
   function typedReq(type: string, name: string) {
@@ -314,7 +318,7 @@ describe("POST photos — MIME / key hardening (Codex P2)", () => {
     return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
       method: "POST",
       body: fd,
-    });
+    }) as unknown as NextRequest;
   }
 
   it("Content-Type 空の file は 422 で拒否され image/jpeg に fallback しない", async () => {
@@ -392,7 +396,7 @@ describe("POST photos — app proxy url (Codex P1)", () => {
     return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
       method: "POST",
       body: fd,
-    });
+    }) as unknown as NextRequest;
   }
 
   it("result.url が絶対URLでも fileUrl は /uploads/{key} で保存され http(s) で始まらない", async () => {
@@ -457,7 +461,7 @@ describe("GET photos", () => {
         createdAt: new Date().toISOString(),
       },
     ]);
-    const res = await GET(new Request("http://t"), paramsP(PIN_ID));
+    const res = await GET(new Request("http://t") as unknown as NextRequest, paramsP(PIN_ID));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(JSON.stringify(body)).not.toMatch(/storageKey/);
@@ -473,7 +477,7 @@ describe("GET photos", () => {
       staffUserId: OTHER.id,
     });
     (prisma.fieldSurveyPinPhoto.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    const res = await GET(new Request("http://t"), paramsP(PIN_ID));
+    const res = await GET(new Request("http://t") as unknown as NextRequest, paramsP(PIN_ID));
     expect(res.status).toBe(200);
   });
 
@@ -484,14 +488,14 @@ describe("GET photos", () => {
       id: PIN_ID,
       staffUserId: OTHER.id,
     });
-    const res = await GET(new Request("http://t"), paramsP(PIN_ID));
+    const res = await GET(new Request("http://t") as unknown as NextRequest, paramsP(PIN_ID));
     expect(res.status).toBe(403);
   });
 
   it("read 権限なしは 403", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
     (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(noPerms);
-    const res = await GET(new Request("http://t"), paramsP(PIN_ID));
+    const res = await GET(new Request("http://t") as unknown as NextRequest, paramsP(PIN_ID));
     expect(res.status).toBe(403);
   });
 });
@@ -516,7 +520,7 @@ describe("DELETE photo", () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
     (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
     mockPhoto(OWNER.id);
-    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    const res = await DELETE(new Request("http://t") as unknown as NextRequest, paramsDel(PIN_ID, PHOTO_ID));
     expect(res.status).toBe(200);
     expect(prisma.fieldSurveyPinPhoto.delete).toHaveBeenCalledTimes(1);
     expect(storageStub.delete).toHaveBeenCalledTimes(1);
@@ -535,7 +539,7 @@ describe("DELETE photo", () => {
       "open",
       `/uploads/field-survey/pins/${PIN_ID}/photos/1-thumb.jpg`,
     );
-    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    const res = await DELETE(new Request("http://t") as unknown as NextRequest, paramsDel(PIN_ID, PHOTO_ID));
     expect(res.status).toBe(200);
     expect(storageStub.delete).toHaveBeenCalledTimes(2);
     expect(storageStub.delete).toHaveBeenCalledWith(
@@ -553,7 +557,7 @@ describe("DELETE photo", () => {
       { resource: "field_survey", action: "manage", granted: true },
     ]);
     mockPhoto(OTHER.id);
-    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    const res = await DELETE(new Request("http://t") as unknown as NextRequest, paramsDel(PIN_ID, PHOTO_ID));
     expect(res.status).toBe(403);
     expect(prisma.fieldSurveyPinPhoto.delete).not.toHaveBeenCalled();
   });
@@ -562,7 +566,7 @@ describe("DELETE photo", () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
     (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
     mockPhoto(OWNER.id, "archived");
-    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    const res = await DELETE(new Request("http://t") as unknown as NextRequest, paramsDel(PIN_ID, PHOTO_ID));
     expect(res.status).toBe(409);
     expect(prisma.fieldSurveyPinPhoto.delete).not.toHaveBeenCalled();
   });
@@ -573,7 +577,7 @@ describe("DELETE photo", () => {
     mockPhoto(OWNER.id);
     storageStub.delete.mockRejectedValueOnce(new Error("network"));
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const res = await DELETE(new Request("http://t"), paramsDel(PIN_ID, PHOTO_ID));
+    const res = await DELETE(new Request("http://t") as unknown as NextRequest, paramsDel(PIN_ID, PHOTO_ID));
     expect(res.status).toBe(200);
     expect(prisma.fieldSurveyPinPhoto.delete).toHaveBeenCalledTimes(1);
     expect(writeAuditLog).toHaveBeenCalledTimes(1);

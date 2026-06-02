@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyMasterSelection,
   applySourceSelection,
+  type MergePair,
 } from "../owner-merge-pair";
 
 describe("applyMasterSelection", () => {
@@ -90,7 +91,7 @@ describe("ペア入れ替えシナリオ (2 人グループ)", () => {
   });
 
   it("連続 swap で元に戻せる", () => {
-    let pair = { masterId: "A", sourceId: "B" };
+    let pair: MergePair = { masterId: "A", sourceId: "B" };
     pair = applyMasterSelection(pair, "B");
     expect(pair).toEqual({ masterId: "B", sourceId: "A" });
     pair = applyMasterSelection(pair, "A");
@@ -100,7 +101,7 @@ describe("ペア入れ替えシナリオ (2 人グループ)", () => {
 
 describe("3 人グループでのペア選び直し", () => {
   it("A/B 選択後に master=C / source=A に変更できる", () => {
-    let pair = { masterId: "A", sourceId: "B" };
+    let pair: MergePair = { masterId: "A", sourceId: "B" };
     pair = applyMasterSelection(pair, "C"); // master を C に
     expect(pair).toEqual({ masterId: "C", sourceId: "B" });
     pair = applySourceSelection(pair, "A"); // source を A に
@@ -109,7 +110,7 @@ describe("3 人グループでのペア選び直し", () => {
 
   it("3 人グループで master / source を完全に入れ替えられる", () => {
     // A/B 選択後に B/C へ
-    let pair = { masterId: "A", sourceId: "B" };
+    let pair: MergePair = { masterId: "A", sourceId: "B" };
     pair = applyMasterSelection(pair, "B"); // master を B (source と swap)
     expect(pair).toEqual({ masterId: "B", sourceId: "A" });
     pair = applySourceSelection(pair, "C"); // source を C

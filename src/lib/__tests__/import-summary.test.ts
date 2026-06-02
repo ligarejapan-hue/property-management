@@ -103,7 +103,8 @@ describe("calcImportSummary", () => {
   it("未知のステータスは集計対象外でサイレントに無視される", () => {
     const rows = [
       { status: "success", errorMessage: null },
-      // @ts-expect-error - 旧データ互換テスト用に意図的に不正値
+      // 旧データ互換: enum 外の status。配列を ImportRowLike[] にアサートしているため
+      // 個々の literal は型エラーにならない（旧 @ts-expect-error は unused のため削除）。
       { status: "unknown_legacy", errorMessage: null },
     ] as ImportRowLike[];
     const s = calcImportSummary(rows);
@@ -239,7 +240,7 @@ describe("summaryFromStatusCounts — calcImportSummary との parity", () => {
     const rows = [
       { status: "success", errorMessage: null },
       { status: "success", errorMessage: "更新[住所一致]" },
-      // @ts-expect-error - 旧データ互換テスト用に意図的に不正値
+      // 旧データ互換: enum 外の status。配列アサートにより literal は型エラーにならない。
       { status: "unknown_legacy", errorMessage: null },
     ] as ImportRowLike[];
     expectParity(rows);
