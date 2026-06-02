@@ -21,6 +21,9 @@ const RESOURCES = [
   { key: "audit_log", label: "監査ログ", actions: ["read"] },
   // PR2: 謄本自動取得（admin のみ既定付与。実 API/UIボタンは後続 PR）。
   { key: "registry", label: "謄本自動取得", actions: ["auto_fetch"] },
+  // S1b-1: 画面保護・謄本PDF権限の土台（enforcement は後続 PR）。
+  { key: "screen_protection", label: "画面保護", actions: ["bypass"] },
+  { key: "registry_pdf", label: "謄本PDF", actions: ["preview", "download"] },
 ];
 
 const ACTION_LABELS: Record<string, string> = {
@@ -30,6 +33,10 @@ const ACTION_LABELS: Record<string, string> = {
   hidden: "非表示",
   masked: "マスク",
   full: "全表示",
+  // S1b-1: 画面保護・謄本PDF権限の土台
+  bypass: "保護免除",
+  preview: "プレビュー",
+  download: "ダウンロード",
 };
 
 interface Override {

@@ -232,6 +232,18 @@ async function main() {
     // 高リスク操作のため、安全側で admin のみに付与する（office_staff / field_staff には
     // 付与しない）。実際の自動取得 API / UI / provider は後続 PR（外部規約・課金確認後）。
     { templateId: adminTemplate.id, resource: "registry", action: "auto_fetch", granted: true },
+    // S1b-1: 画面保護・謄本PDF権限の土台。実際の透かし/コピー・印刷抑止/PDF preview・download
+    // enforcement は後続 PR（本 PR は権限の定義・付与のみ）。
+    // screen_protection:bypass は admin のみ付与（未付与=保護対象、fail-safe）。
+    { templateId: adminTemplate.id, resource: "screen_protection", action: "bypass", granted: true },
+    // registry_pdf:preview/download は既存の閲覧/ダウンロード挙動を壊さないため全3テンプレに
+    // 現行相当を付与する。将来 admin がテンプレ編集UIで現地担当の download を外せる状態にしておく。
+    { templateId: fieldStaffTemplate.id, resource: "registry_pdf", action: "preview", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "registry_pdf", action: "preview", granted: true },
+    { templateId: adminTemplate.id, resource: "registry_pdf", action: "preview", granted: true },
+    { templateId: fieldStaffTemplate.id, resource: "registry_pdf", action: "download", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "registry_pdf", action: "download", granted: true },
+    { templateId: adminTemplate.id, resource: "registry_pdf", action: "download", granted: true },
   ];
 
   for (const entry of templateEntries) {
