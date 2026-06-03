@@ -162,10 +162,13 @@ describe("S1b-3: PII マーカ付与（実レンダリング面）", () => {
     );
   });
 
-  it("registry PDF preview の外側コンテナに registry surface を付与（17-A）", () => {
+  // 17-A / Codex P1: registry PDF preview は iframe 内 PDF viewer の copy/contextmenu を
+  // 親 document の listener で捕捉できないため、外側 wrapper に registry marker は付けない
+  // （byte access は S1b-4 server-side gate で保護済み・viewer 化は別 PR で検討）。
+  it("registry preview の外側 wrapper には registry marker を付けない（iframe 捕捉不可・別PR）", () => {
     const attach = read("src/components/properties/attachment-tab.tsx");
-    expect(attach).toMatch(/data-pii-protected=\{isRegistry/);
-    expect(attach).toMatch(/data-pii-surface=\{isRegistry \? "registry"/);
+    expect(attach).not.toMatch(/data-pii-surface=\{isRegistry/);
+    expect(attach).not.toMatch(/data-pii-surface="registry"/);
   });
 
   it("再利用候補 owner-detail-panel.tsx は marker を保持するが未配線（dead code）であることを明示", () => {
