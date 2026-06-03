@@ -72,7 +72,11 @@ function withDownloadIntent(url: string): string {
   return `${url}${url.includes("?") ? "&" : "?"}download=1`;
 }
 
-/** registry download 時の保存名は generic 固定（att.fileName=PII の恐れを避ける）。 */
+/**
+ * registry 添付の client 表示名・保存名は generic 固定。
+ * 元の att.fileName（所有者名・住所等 PII を含む恐れ）を画面表示・title/alt・iframe title・
+ * download 属性のいずれにも出さない（server も Content-Disposition を registry.pdf に伏せている）。
+ */
 const REGISTRY_DOWNLOAD_NAME = "registry.pdf";
 
 export default function AttachmentTab({
@@ -381,7 +385,8 @@ function AttachmentRow({
   const isRegistry = att.type === "registry";
   const normalizedUrl = normalizeFileUrl(att.fileUrl);
   const downloadHref = isRegistry ? withDownloadIntent(normalizedUrl) : normalizedUrl;
-  const downloadName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
+  // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
+  const displayName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
   return (
     <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-white p-3">
       <Icon className="h-5 w-5 shrink-0 text-gray-500" />
@@ -393,11 +398,11 @@ function AttachmentRow({
             className="block w-full truncate text-left text-sm font-medium text-blue-600 hover:underline"
             title="プレビュー"
           >
-            {att.fileName}
+            {displayName}
           </button>
         ) : (
           <p className="truncate text-sm font-medium text-gray-800">
-            {att.fileName}
+            {displayName}
           </p>
         )}
         <p className="text-xs text-gray-500">
@@ -419,7 +424,7 @@ function AttachmentRow({
         href={downloadHref}
         target="_blank"
         rel="noopener noreferrer"
-        download={downloadName}
+        download={displayName}
         className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
         title="ダウンロード"
       >
@@ -451,7 +456,8 @@ function PreviewModal({
   const isRegistry = att.type === "registry";
   // preview(iframe) は無 param のまま。download リンクのみ download intent を付ける。
   const downloadHref = isRegistry ? withDownloadIntent(safeUrl) : safeUrl;
-  const downloadName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
+  // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
+  const displayName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -463,15 +469,15 @@ function PreviewModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2">
-          <p className="truncate text-sm font-medium text-gray-800" title={att.fileName}>
-            {att.fileName}
+          <p className="truncate text-sm font-medium text-gray-800" title={displayName}>
+            {displayName}
           </p>
           <div className="flex shrink-0 items-center gap-1">
             <a
               href={downloadHref}
               target="_blank"
               rel="noopener noreferrer"
-              download={downloadName}
+              download={displayName}
               className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
               title="ダウンロード"
             >
@@ -493,15 +499,21 @@ function PreviewModal({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={safeUrl}
-                alt={att.fileName}
+                alt={displayName}
                 className="max-h-full max-w-full object-contain"
               />
             </div>
           )}
           {kind === "pdf" && (
+            // registry PDF は native browser viewer（iframe）で表示する。本 PR では viewer を置換しない。
+            // 限界: iframe 内 PDF viewer の copy / contextmenu / selection / 印刷 / 「PDF として保存」は
+            // 別 document のため、親 document の ScreenProtectionGuard では捕捉できない。
+            // registry PDF bytes は S1b-4 の server-side permission gate（registry_pdf:preview/download）・
+            // no-store・generic filename・server-side 監査で保護する（＝主防御）。OS スクリーンショット・
+            // 画面録画・外部カメラは Web からは防止も検知もできない。prevention ではなく抑止＋事後追跡。
             <iframe
               src={safeUrl}
-              title={att.fileName}
+              title={displayName}
               className="h-full w-full"
             />
           )}
@@ -513,7 +525,7 @@ function PreviewModal({
                 href={safeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                download={att.fileName}
+                download={displayName}
                 className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
               >
                 <Download className="h-4 w-4" />

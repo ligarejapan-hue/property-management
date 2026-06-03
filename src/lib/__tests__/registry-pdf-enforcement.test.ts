@@ -103,3 +103,39 @@ describe("S1b-4: attachment-tab の download intent", () => {
     expect(attachSrc).toMatch(/<iframe[\s\S]*src=\{safeUrl\}/);
   });
 });
+
+describe("S1b-registry-preview: client 表示名の PII 限定（17-A Phase 1）", () => {
+  it("registry は表示名・保存名を generic に統一（displayName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName）", () => {
+    expect(attachSrc).toMatch(
+      /const displayName = isRegistry \? REGISTRY_DOWNLOAD_NAME : att\.fileName/,
+    );
+    // registry 以外は従来どおり att.fileName（ternary の else 分岐）。
+    expect(attachSrc).toMatch(/REGISTRY_DOWNLOAD_NAME : att\.fileName/);
+    // generic 名は registry.pdf 固定。
+    expect(attachSrc).toMatch(/REGISTRY_DOWNLOAD_NAME\s*=\s*"registry\.pdf"/);
+  });
+
+  it("preview modal / row の表示テキスト・title・alt・iframe title・download に att.fileName を直接バインドしない", () => {
+    // JSX 表示/属性に {att.fileName} を一切残さない（registry の原ファイル名 PII を client に出さない）。
+    expect(attachSrc).not.toMatch(/\{att\.fileName\}/);
+    // 表示は displayName を使う。
+    expect(attachSrc).toMatch(/title=\{displayName\}/);
+    expect(attachSrc).toMatch(/alt=\{displayName\}/);
+    expect(attachSrc).toMatch(/download=\{displayName\}/);
+  });
+
+  it("getPreviewKind の拡張子判定は実 att.fileName を維持（表示と分離してロジックは壊さない）", () => {
+    expect(attachSrc).toMatch(/att\.fileName\.toLowerCase\(\)/);
+  });
+
+  it("iframe preview 自体は維持（src={safeUrl}・viewer は置換しない）", () => {
+    expect(attachSrc).toMatch(/<iframe[\s\S]*src=\{safeUrl\}/);
+  });
+
+  it("iframe 内操作の限界を honest に明記（親 document で捕捉できない・主防御は server gate・prevention とは書かない）", () => {
+    expect(attachSrc).toMatch(/ScreenProtectionGuard では捕捉できない/);
+    expect(attachSrc).toMatch(/server-side permission gate/);
+    // 「完全（に）防止」と読める過剰文言を入れない（prevention ではなく抑止＋事後追跡）。
+    expect(attachSrc).not.toMatch(/完全に防止|完全防止/);
+  });
+});
