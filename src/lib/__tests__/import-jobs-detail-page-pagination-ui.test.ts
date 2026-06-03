@@ -125,23 +125,38 @@ describe("import job detail page — B4 重複候補のみスキップ (source-a
     );
   });
 
-  it("件数 N は job.duplicateCount（counts.duplicate）由来・現ページ件数ではない", () => {
-    expect(pageSrc).toMatch(/const total = counts\.duplicate;/);
+  it("件数 N は job.duplicateActionableCount（counts.duplicateActionable）由来・現ページ件数ではない", () => {
+    // Codex P2: actionable 件数を使う（skipped 重複を含む duplicateCount ではない）。
+    expect(pageSrc).toMatch(/const total = counts\.duplicateActionable;/);
+    expect(pageSrc).not.toMatch(/const total = counts\.duplicate;/);
+    // counts.duplicateActionable は job.duplicateActionableCount 由来（安全側 ?? 0）。
+    expect(pageSrc).toMatch(
+      /duplicateActionable:\s*job\?\.duplicateActionableCount \?\? 0/,
+    );
     // 確認文言は「重複候補 全 N 件」
     expect(pageSrc).toMatch(/重複候補 全 \$\{total\} 件を/);
     // 実行後に affectedCount を表示（既存方針を維持）
     expect(pageSrc).toMatch(/res\.affectedCount/);
   });
 
-  it("ボタンは needs_review かつ counts.duplicate>0 のときのみ表示", () => {
+  it("ボタンは needs_review かつ counts.duplicateActionable>0 のときのみ表示（skipped済み重複だけなら出さない）", () => {
     expect(pageSrc).toMatch(
-      /filter === "needs_review" && counts\.duplicate > 0/,
+      /filter === "needs_review" &&\s*counts\.duplicateActionable > 0/,
     );
-    expect(pageSrc).toMatch(/重複候補のみスキップ（\{counts\.duplicate\}件）/);
+    expect(pageSrc).toMatch(
+      /重複候補のみスキップ（\{counts\.duplicateActionable\}件）/,
+    );
     // ハンドラ側も needs_review ガード
     expect(pageSrc).toMatch(
       /handleBulkResolveDuplicates = async \(\) => \{\s*if \(filter !== "needs_review"\) return;/,
     );
+  });
+
+  it("確認件数は duplicateCount（needs_review+skipped）を使わない＝過大表示にならない（Codex P2）", () => {
+    // B4 の確認/ボタンは duplicateActionable のみを参照する。
+    expect(pageSrc).toMatch(/counts\.duplicateActionable/);
+    // 表示ヒント（内数）は従来どおり duplicateCount を残す（互換）。
+    expect(pageSrc).toMatch(/\{counts\.duplicate\} 件/);
   });
 
   it("「全件スキップ」と「重複候補のみスキップ」を取り違えない（別操作・別 scope）", () => {

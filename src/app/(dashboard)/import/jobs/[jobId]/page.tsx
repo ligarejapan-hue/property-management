@@ -87,6 +87,8 @@ interface ImportJob {
   // B2: B1 で server が additive 返却する全体判定 / ページングメタ。
   isReceptionOwnerJob?: boolean;
   duplicateCount?: number;
+  // B4(Codex P2): bulk-resolve scope="duplicate" の対象件数（needs_review のみ・「重複」始まり）。
+  duplicateActionableCount?: number;
   pagination?: {
     page: number;
     limit: number;
@@ -356,7 +358,11 @@ export default function ImportJobDetailPage() {
     success: summary.createdCount + summary.updatedCount,
     skipped: summary.skippedCount,
     // 重複候補（B2: サーバ確定の duplicateCount=ジョブ全体・ページ分に化けない）。
+    // 表示ヒント用（needs_review + skipped の内数・従来表示/互換）。
     duplicate: job?.duplicateCount ?? 0,
+    // B4(Codex P2): bulk-resolve scope="duplicate" の actionable 件数（needs_review のみ）。
+    // 「重複候補のみスキップ」ボタンの N と確認件数はこちらを使う（endpoint と一致・過大防止）。
+    duplicateActionable: job?.duplicateActionableCount ?? 0,
     // 更新件数 (= summary.updatedCount のエイリアス。既存表示との互換のため残す)
     updated: summary.updatedCount,
     // 新規件数 (派生表示用)
@@ -453,10 +459,12 @@ export default function ImportJobDetailPage() {
 
   // B4: 重複候補（needs_review かつ errorMessage「重複」始まり）**だけ**を一括スキップする。
   // 「全件スキップ」(= needs_review 全件) とは別操作で、非重複の要レビュー行は残す。
-  // 件数 N は server の job.duplicateCount（= counts.duplicate）由来で、現ページ件数ではない。
+  // 件数 N は server の job.duplicateActionableCount（= bulk endpoint scope="duplicate" の
+  // where と完全一致＝needs_review のみ）由来。skipped 済み重複を含む duplicateCount は使わない
+  // （確認件数が実処理件数より過大になるのを防ぐ・Codex P2）。現ページ件数でもない。
   const handleBulkResolveDuplicates = async () => {
     if (filter !== "needs_review") return;
-    const total = counts.duplicate; // job.duplicateCount 由来（内数 hint と同一値）
+    const total = counts.duplicateActionable; // job.duplicateActionableCount 由来
     if (total === 0) return;
     if (!confirm(`重複候補 全 ${total} 件を「スキップ」にしますか？`)) return;
 
@@ -851,17 +859,18 @@ export default function ImportJobDetailPage() {
                   </button>
                   {/* B4: 重複候補のみスキップ（needs_review の重複サブセット限定）。
                       「全件スキップ」と取り違えないよう amber 色＋件数を明示。 */}
-                  {filter === "needs_review" && counts.duplicate > 0 && (
-                    <button
-                      onClick={handleBulkResolveDuplicates}
-                      disabled={actionLoading === "batch"}
-                      title="取込時に検出された重複候補（要レビューの内数）だけをスキップします。非重複の要レビュー行は残ります。"
-                      className="flex items-center gap-1 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-                    >
-                      <AlertTriangle className="h-3 w-3" />
-                      重複候補のみスキップ（{counts.duplicate}件）
-                    </button>
-                  )}
+                  {filter === "needs_review" &&
+                    counts.duplicateActionable > 0 && (
+                      <button
+                        onClick={handleBulkResolveDuplicates}
+                        disabled={actionLoading === "batch"}
+                        title="取込時に検出された重複候補（要レビューの内数）だけをスキップします。非重複の要レビュー行は残ります。"
+                        className="flex items-center gap-1 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                      >
+                        <AlertTriangle className="h-3 w-3" />
+                        重複候補のみスキップ（{counts.duplicateActionable}件）
+                      </button>
+                    )}
                 </>
               )}
 

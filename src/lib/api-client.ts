@@ -419,6 +419,8 @@ export async function fetchImportJobDetail(
       // PR-B(B1): server-side で確定する additive フィールド。
       isReceptionOwnerJob: false,
       duplicateCount: 0,
+      // B4(Codex P2): bulk-resolve scope="duplicate" の対象件数（needs_review のみ・「重複」始まり）。
+      duplicateActionableCount: 0,
       pagination: {
         page: 1,
         limit: 3,

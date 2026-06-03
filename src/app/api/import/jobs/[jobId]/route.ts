@@ -28,8 +28,9 @@ import { isReceptionOwnerJobRow } from "@/lib/reception-owner-link";
 //   - summary は **ジョブ全体**（status フィルタ非依存）の 5 区分集計を維持。
 //   - pagination メタ（page/limit/totalRows/totalPages/hasNextPage/hasPrevPage/status）を additive に返す。
 //     totalRows は「現在の status フィルタ後の総行数」（= ページングの母数）。
-//   - isReceptionOwnerJob / duplicateCount を additive に返し、client が
-//     ページ分の rows を走査して誤判定/誤集計しないで済むようにする。
+//   - isReceptionOwnerJob / duplicateCount / duplicateActionableCount を additive に返し、
+//     client がページ分の rows を走査して誤判定/誤集計しないで済むようにする。
+//     duplicateActionableCount(B4) は bulk-resolve scope="duplicate" の対象件数と一致。
 //   - レスポンス root の rows は維持し、{ data: ... } 形状変更はしない。
 
 const VALID_ROW_STATUSES = [
@@ -103,44 +104,63 @@ export async function GET(
     //   ① groupBy(by:["status"]) で status 別件数
     //   ② groupBy(by:["jobId"]) で「更新」success 件数
     //      （success かつ errorMessage が「更新」始まり = isUpdateMessage 規約）
-    // duplicateCount は「重複」由来の要レビュー/スキップ件数（ジョブ全体・additive）。
+    // duplicateCount は「重複」由来の要レビュー/スキップ件数（ジョブ全体・additive・定義不変）。
+    // duplicateActionableCount(B4 Codex P2) は bulk-resolve scope="duplicate" が実際に更新する
+    // 集合（needs_review のみ・「重複」始まり）と完全一致する件数（additive）。
     // rows は status フィルタ後・指定ページ分のみ skip/take で取得する。
     // 存在しない jobId 系クエリは空/0 を返すだけで、404 は下で送出する。
-    const [job, rows, statusGroups, updatedGroups, filteredTotal, duplicateCount] =
-      await Promise.all([
-        prisma.importJob.findUnique({
-          where: { id: jobId },
-          include: { executor: { select: { id: true, name: true } } },
-        }),
-        prisma.importJobRow.findMany({
-          where: rowWhere,
-          orderBy: { rowNumber: "asc" },
-          ...(limit !== null ? { skip: (page - 1) * limit, take: limit } : {}),
-        }),
-        prisma.importJobRow.groupBy({
-          by: ["status"],
-          where: { jobId },
-          _count: { _all: true },
-        }),
-        prisma.importJobRow.groupBy({
-          by: ["jobId"],
-          where: {
-            jobId,
-            status: "success",
-            // null は startsWith にマッチしないため更新扱いされない。
-            errorMessage: { startsWith: "更新" },
-          },
-          _count: { _all: true },
-        }),
-        prisma.importJobRow.count({ where: rowWhere }),
-        prisma.importJobRow.count({
-          where: {
-            jobId,
-            status: { in: ["needs_review", "skipped"] },
-            errorMessage: { startsWith: "重複" },
-          },
-        }),
-      ]);
+    const [
+      job,
+      rows,
+      statusGroups,
+      updatedGroups,
+      filteredTotal,
+      duplicateCount,
+      duplicateActionableCount,
+    ] = await Promise.all([
+      prisma.importJob.findUnique({
+        where: { id: jobId },
+        include: { executor: { select: { id: true, name: true } } },
+      }),
+      prisma.importJobRow.findMany({
+        where: rowWhere,
+        orderBy: { rowNumber: "asc" },
+        ...(limit !== null ? { skip: (page - 1) * limit, take: limit } : {}),
+      }),
+      prisma.importJobRow.groupBy({
+        by: ["status"],
+        where: { jobId },
+        _count: { _all: true },
+      }),
+      prisma.importJobRow.groupBy({
+        by: ["jobId"],
+        where: {
+          jobId,
+          status: "success",
+          // null は startsWith にマッチしないため更新扱いされない。
+          errorMessage: { startsWith: "更新" },
+        },
+        _count: { _all: true },
+      }),
+      prisma.importJobRow.count({ where: rowWhere }),
+      // duplicateCount（既存・表示/互換用・定義不変）: needs_review + skipped × 「重複」始まり。
+      prisma.importJobRow.count({
+        where: {
+          jobId,
+          status: { in: ["needs_review", "skipped"] },
+          errorMessage: { startsWith: "重複" },
+        },
+      }),
+      // duplicateActionableCount（B4 Codex P2）: bulk-resolve scope="duplicate" の where と
+      // 完全一致＝needs_review のみ × 「重複」始まり。skipped 済み重複は含めない。
+      prisma.importJobRow.count({
+        where: {
+          jobId,
+          status: "needs_review",
+          errorMessage: { startsWith: "重複" },
+        },
+      }),
+    ]);
 
     if (!job) {
       throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
@@ -190,6 +210,7 @@ export async function GET(
       summary,
       isReceptionOwnerJob,
       duplicateCount,
+      duplicateActionableCount,
       pagination,
     });
   } catch (error) {
