@@ -305,7 +305,9 @@ export function resolveProtectedSurfaceForNode(
  *  - P2(Codex): start/end/commonAncestor がすべて保護領域外でも、選択が protected panel を
  *    またぐ場合は range.intersectsNode(protectedElement) で交差を検知する
  *    （panel 内の PII が選択に含まれるため）。protectedElements は呼び出し側が
- *    document.querySelectorAll([data-pii-protected]) 相当で渡す。
+ *    document.querySelectorAll([data-pii-protected]) 相当で渡す。ただし選択全体が button / a 内に
+ *    閉じている場合は、その button / a 内の明示的 PII fragment との交差のみ抑止し、外側の broad
+ *    container との交差では抑止しない（broad container 内の通常 button/link ラベルの copy を壊さない）。
  */
 export function resolveProtectedSurfaceForRanges(
   ranges: readonly DomRangeLike[],
@@ -329,8 +331,22 @@ export function resolveProtectedSurfaceForRanges(
     }
 
     // P2: protected panel をまたぐ mixed selection を intersectsNode で検知。
+    // ただし選択全体が button / a 内に閉じている（commonAncestor が interactive 配下）場合は、
+    // その button / a 内にある明示的 PII fragment との交差のみ抑止し、外側の broad container との
+    // 交差では抑止しない（broad container 内の通常 button/link ラベルの copy を壊さない）。
     if (typeof range.intersectsNode === "function") {
+      const interactiveEl = commonEl
+        ? commonEl.closest(opts.interactiveSelector)
+        : null;
       for (const el of protectedElements) {
+        // 選択が button / a 内に閉じているなら、最近接 interactive 祖先が同じ button / a である
+        // 明示的 PII fragment 以外（= 外側 broad container）は無視する。
+        if (
+          interactiveEl &&
+          el.closest(opts.interactiveSelector) !== interactiveEl
+        ) {
+          continue;
+        }
         let hit = false;
         try {
           hit = range.intersectsNode(el as unknown as DomNodeLike);

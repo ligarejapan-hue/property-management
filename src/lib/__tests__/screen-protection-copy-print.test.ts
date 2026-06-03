@@ -460,11 +460,32 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     );
   });
 
-  it("17-A(Codex P2): 選択が広い container 内の通常 button 内なら抑止しない（null）", () => {
-    const b = controlInBroadContainer(region("property"));
+  it("17-A(Codex P2): 選択が広い container 内の通常 button label なら broad container と intersect しても抑止しない（null）", () => {
+    const panel = region("property");
+    const b = controlInBroadContainer(panel);
+    // selection は button label 内に閉じ、broad container(panel)と intersect する。
+    const r = range(b, b, b, [panel]);
     expect(
-      resolveProtectedSurfaceForRanges([range(b, b, b)], [], OPTS),
+      resolveProtectedSurfaceForRanges([r], [asEl(panel)], OPTS),
     ).toBeNull();
+  });
+
+  it("17-A(Codex P2): 選択が広い container 内の通常 a/link label でも抑止しない（null・button,a 共通扱い）", () => {
+    const panel = region("history");
+    const a = controlInBroadContainer(panel);
+    const r = range(a, a, a, [panel]);
+    expect(
+      resolveProtectedSurfaceForRanges([r], [asEl(panel)], OPTS),
+    ).toBeNull();
+  });
+
+  it("17-A(Codex P2): 広い container 内の非 interactive text selection は抑止する（surface）", () => {
+    const panel = region("property");
+    const t = child(panel); // button/a の外にある通常 PII text
+    const r = range(t, t, t, [panel]);
+    expect(resolveProtectedSurfaceForRanges([r], [asEl(panel)], OPTS)).toBe(
+      "property",
+    );
   });
 
   // ---- Codex P2: panel をまたぐ mixed selection を intersectsNode で検知 ----
