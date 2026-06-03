@@ -129,12 +129,14 @@ describe("S1b-2: スコープ限定（透かしのみ・enforcement / 監査な�
     }
   });
 
-  it("クライアント監査 / Content-Disposition / uploads を含まない", () => {
+  it("透かし overlay/provider は Content-Disposition / uploads(enforcement) を含まない", () => {
+    // 注: screen-protection.ts(helper) は S1b-3 で copy/print 監査の純ヘルパを持つため
+    // /audit/ は許容する。透かし描画専用の overlay は監査を含まないことを確認する。
     for (const src of [helperSrc, providerSrc, overlaySrc]) {
-      expect(src).not.toMatch(/audit/i);
       expect(src).not.toMatch(/Content-Disposition/);
       expect(src).not.toMatch(/\/uploads/);
     }
+    expect(overlaySrc).not.toMatch(/audit/i);
   });
 
   it("visibilitychange / blur リスナを使わない（S1b-2 範囲外）", () => {

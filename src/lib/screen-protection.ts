@@ -96,3 +96,112 @@ function xmlEscape(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+// ============================================================
+// S1b-3: copy / cut / contextmenu / print 抑止＋client 監査の純ロジック。
+// detail は非PII enum のみ。URL / path / 選択テキスト / 所有者名は一切扱わない。
+// ============================================================
+
+/** client が送る操作イベント種別（厳格 enum）。 */
+export const SCREEN_PROTECTION_EVENT_TYPES = [
+  "copy",
+  "cut",
+  "contextmenu",
+  "print",
+  "print_shortcut",
+] as const;
+export type ScreenProtectionEventType =
+  (typeof SCREEN_PROTECTION_EVENT_TYPES)[number];
+
+/** PII 画面の粗いラベル（ID を含まない非PII enum）。 */
+export const SCREEN_PROTECTION_SURFACES = [
+  "owner",
+  "property",
+  "history",
+  "import",
+  "registry",
+  "dashboard",
+] as const;
+export type ScreenProtectionSurface =
+  (typeof SCREEN_PROTECTION_SURFACES)[number];
+
+export type ScreenProtectionAuditAction =
+  | "pii_copy_attempt"
+  | "pii_cut_attempt"
+  | "pii_contextmenu_attempt"
+  | "pii_print_attempt";
+
+/** detail.trigger（操作の発生源。非PII enum）。 */
+export type ScreenProtectionTrigger =
+  | "clipboard"
+  | "menu"
+  | "print_dialog"
+  | "keyboard";
+
+export function isScreenProtectionEventType(
+  v: unknown,
+): v is ScreenProtectionEventType {
+  return (
+    typeof v === "string" &&
+    (SCREEN_PROTECTION_EVENT_TYPES as readonly string[]).includes(v)
+  );
+}
+
+export function isScreenProtectionSurface(
+  v: unknown,
+): v is ScreenProtectionSurface {
+  return (
+    typeof v === "string" &&
+    (SCREEN_PROTECTION_SURFACES as readonly string[]).includes(v)
+  );
+}
+
+/**
+ * eventType → AuditLog action。
+ * print と print_shortcut は同一 action(pii_print_attempt) に統合し、trigger で区別する。
+ */
+export function eventTypeToAuditAction(
+  eventType: ScreenProtectionEventType,
+): ScreenProtectionAuditAction {
+  switch (eventType) {
+    case "copy":
+      return "pii_copy_attempt";
+    case "cut":
+      return "pii_cut_attempt";
+    case "contextmenu":
+      return "pii_contextmenu_attempt";
+    case "print":
+    case "print_shortcut":
+      return "pii_print_attempt";
+  }
+}
+
+/** eventType → detail.trigger（非PII enum、サーバ側で決定し client を信用しない）。 */
+export function eventTypeToTrigger(
+  eventType: ScreenProtectionEventType,
+): ScreenProtectionTrigger {
+  switch (eventType) {
+    case "copy":
+    case "cut":
+      return "clipboard";
+    case "contextmenu":
+      return "menu";
+    case "print":
+      return "print_dialog";
+    case "print_shortcut":
+      return "keyboard";
+  }
+}
+
+export interface ScreenProtectionAuditDetail {
+  surface: ScreenProtectionSurface;
+  trigger: ScreenProtectionTrigger;
+}
+
+/** 監査 detail を非PII enum のみで構築する（PII は構造的に混入できない）。 */
+export function buildScreenProtectionAuditDetail(
+  eventType: ScreenProtectionEventType,
+  surface: ScreenProtectionSurface,
+): ScreenProtectionAuditDetail {
+  return { surface, trigger: eventTypeToTrigger(eventType) };
+}

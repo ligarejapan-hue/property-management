@@ -414,3 +414,49 @@ describe("admin/audit-logs route 配線（source-assertion）", () => {
     expect(routeSrc).toMatch(/throw new ApiError\(403/);
   });
 });
+
+describe("S1b-3: copy/print 監査 action の detail 安全化", () => {
+  const S1B3_ACTIONS = [
+    "pii_copy_attempt",
+    "pii_cut_attempt",
+    "pii_contextmenu_attempt",
+    "pii_print_attempt",
+  ];
+
+  it("surface / trigger は許可キーとして残る", () => {
+    for (const action of S1B3_ACTIONS) {
+      const out = sanitizeAuditDetail(action, {
+        surface: "owner",
+        trigger: "clipboard",
+      }) as Record<string, unknown>;
+      expect(out.surface).toBe("owner");
+      expect(out.trigger).toBe("clipboard");
+    }
+  });
+
+  it("万一 PII / URL / path / 選択テキストが混入しても [REDACTED]", () => {
+    const out = sanitizeAuditDetail("pii_copy_attempt", {
+      surface: "property",
+      trigger: "menu",
+      url: "/properties/abc-123",
+      path: "/properties/abc-123",
+      ownerName: "山田太郎",
+      selectedText: "東京都港区1-2-3",
+    }) as Record<string, unknown>;
+    expect(out.surface).toBe("property");
+    expect(out.trigger).toBe("menu");
+    expect(out.url).toBe(REDACTED);
+    expect(out.path).toBe(REDACTED);
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.selectedText).toBe(REDACTED);
+  });
+
+  it("surface / trigger は未登録 action では保持しない", () => {
+    const out = sanitizeAuditDetail("some_other_action", {
+      surface: "owner",
+      trigger: "clipboard",
+    }) as Record<string, unknown>;
+    expect(out.surface).toBe(REDACTED);
+    expect(out.trigger).toBe(REDACTED);
+  });
+});

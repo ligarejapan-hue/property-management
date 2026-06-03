@@ -1,0 +1,143 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useScreenProtection } from "./screen-protection-provider";
+import type {
+  ScreenProtectionEventType,
+  ScreenProtectionSurface,
+} from "@/lib/screen-protection";
+
+/**
+ * S1b-3: copy / cut / contextmenu / print の抑止＋client 監査。
+ *
+ * - useScreenProtection().bypass=true（screen_protection:bypass 保持者）なら抑止も監査もしない。
+ *   bypass は fail-safe（判定確定まで false = 抑止側）。
+ * - copy / cut / contextmenu は [data-pii-protected] 領域の中だけ抑止する。
+ *   input / textarea / select / button / a / contenteditable は除外し通常操作・a11y を壊さない。
+ * - 印刷はページ単位（beforeprint / Ctrl+Cmd+P）を監査し、@media print の警告バナーを出す。
+ * - 監査送信は throttle 済の直接 fetch("/api/me/audit-events")（api-client は使わない）。
+ *
+ * できないこと（deterrent であって防止ではない）: OS スクリーンショット・画面録画・外部カメラ撮影は
+ * Web から検知も禁止もできない。DevTools / 拡張 /「PDF として保存」等で本抑止は回避可能。
+ */
+
+const PII_REGION_SELECTOR = "[data-pii-protected]";
+const SURFACE_ATTR = "data-pii-surface";
+// 通常操作・アクセシビリティを壊さないため、操作系要素の中は抑止しない。
+const EXEMPT_SELECTOR =
+  "input, textarea, select, button, a, [contenteditable], [contenteditable='true']";
+const NOTICE_MS = 2500;
+// 同一 eventType の連打を間引く（クライアント側 throttle）。サーバ側 rate-limit と二段防御。
+const SEND_THROTTLE_MS = 800;
+
+/** イベント対象が PII 保護領域内（かつ操作系要素でない）なら surface を返す。 */
+function resolveProtectedSurface(
+  target: EventTarget | null,
+): ScreenProtectionSurface | null {
+  if (!(target instanceof Element)) return null;
+  const region = target.closest(PII_REGION_SELECTOR);
+  if (!region) return null;
+  if (target.closest(EXEMPT_SELECTOR)) return null;
+  const s = region.getAttribute(SURFACE_ATTR);
+  return (s as ScreenProtectionSurface | null) ?? "dashboard";
+}
+
+export default function ScreenProtectionGuard() {
+  const { bypass } = useScreenProtection();
+  const [notice, setNotice] = useState<string | null>(null);
+  const lastSentRef = useRef<Record<string, number>>({});
+
+  const sendAudit = useCallback(
+    (eventType: ScreenProtectionEventType, surface: ScreenProtectionSurface) => {
+      const now = Date.now();
+      const last = lastSentRef.current[eventType] ?? 0;
+      if (now - last < SEND_THROTTLE_MS) return;
+      lastSentRef.current[eventType] = now;
+      // 直接 fetch（api-client 不使用）。失敗してもユーザー操作は妨げない。
+      void fetch("/api/me/audit-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventType, surface }),
+        keepalive: true,
+      }).catch(() => {});
+    },
+    [],
+  );
+
+  // 一時通知（aria-live）。
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  useEffect(() => {
+    if (bypass) return; // bypass は抑止・監査なし
+
+    const handleClipboard =
+      (eventType: "copy" | "cut") => (e: Event) => {
+        const surface = resolveProtectedSurface(e.target);
+        if (!surface) return;
+        e.preventDefault();
+        sendAudit(eventType, surface);
+        setNotice("この情報のコピーは制限されています（操作は記録されます）");
+      };
+    const onCopy = handleClipboard("copy");
+    const onCut = handleClipboard("cut");
+    const onContextMenu = (e: Event) => {
+      const surface = resolveProtectedSurface(e.target);
+      if (!surface) return;
+      e.preventDefault();
+      sendAudit("contextmenu", surface);
+      setNotice("この情報の操作は制限されています（操作は記録されます）");
+    };
+    const onBeforePrint = () => {
+      // ページ単位。印刷ダイアログ起動を記録（完全ブロックは不可）。
+      sendAudit("print", "dashboard");
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      const isPrint =
+        (e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P");
+      if (!isPrint) return;
+      sendAudit("print_shortcut", "dashboard");
+      setNotice("印刷は記録されます");
+      e.preventDefault(); // best-effort（確実には止まらない）
+    };
+
+    document.addEventListener("copy", onCopy, true);
+    document.addEventListener("cut", onCut, true);
+    document.addEventListener("contextmenu", onContextMenu, true);
+    window.addEventListener("beforeprint", onBeforePrint);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("copy", onCopy, true);
+      document.removeEventListener("cut", onCut, true);
+      document.removeEventListener("contextmenu", onContextMenu, true);
+      window.removeEventListener("beforeprint", onBeforePrint);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [bypass, sendAudit]);
+
+  if (bypass) return null;
+
+  return (
+    <>
+      {/* 印刷時のみ表示する保護バナー（screen では display:none、globals.css で制御）。 */}
+      <div
+        data-screen-protection-print-notice
+        className="screen-protection-print-notice"
+      >
+        この文書には個人情報が含まれます。印刷・複製は記録され、無断持ち出しは禁止されています。
+      </div>
+      {notice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed bottom-4 left-1/2 z-[70] -translate-x-1/2 rounded-md bg-gray-900/90 px-4 py-2 text-sm text-white shadow-lg"
+        >
+          {notice}
+        </div>
+      )}
+    </>
+  );
+}

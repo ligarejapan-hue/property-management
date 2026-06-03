@@ -14,6 +14,7 @@ import {
   buildWatermarkText,
 } from "@/lib/screen-protection";
 import WatermarkOverlay from "./watermark-overlay";
+import ScreenProtectionGuard from "./screen-protection-guard";
 
 /**
  * S1b-2: dashboard 全体を覆う画面保護 Provider（透かし表示のみ）。
@@ -100,6 +101,8 @@ export default function ScreenProtectionProvider({
       {!bypass && watermarkText !== null && (
         <WatermarkOverlay text={watermarkText} />
       )}
+      {/* S1b-3: copy/cut/contextmenu/print 抑止＋client 監査（bypass は内部で no-op）。 */}
+      <ScreenProtectionGuard />
     </ScreenProtectionContext.Provider>
   );
 }
