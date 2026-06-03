@@ -1,0 +1,105 @@
+/**
+ * S1b-4: registry PDF preview/download server-side enforcement の配線を
+ * source-assertion で検証する（route handler / client は jsdom 無しでは render 不可のため）。
+ * enforcement の判定本体は uploads-authorization.test.ts の unit test で担保する。
+ */
+import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+
+const read = (p: string) =>
+  fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
+
+const routeSrc = read("src/app/uploads/[...path]/route.ts");
+const authSrc = read("src/lib/uploads-authorization.ts");
+const attachSrc = read("src/components/properties/attachment-tab.tsx");
+
+describe("S1b-4: uploads-authorization の registry gating", () => {
+  it("AuthorizeUploadAccessArgs に downloadIntent を追加", () => {
+    expect(authSrc).toMatch(/downloadIntent\??:\s*boolean/);
+  });
+
+  it("attachment select に type を追加", () => {
+    expect(authSrc).toMatch(/type:\s*true/);
+  });
+
+  it("registry のとき registry_pdf:preview / download を gate する", () => {
+    expect(authSrc).toMatch(/a\.type === "registry"/);
+    expect(authSrc).toMatch(/"registry_pdf",\s*"preview"/);
+    expect(authSrc).toMatch(/"registry_pdf",\s*"download"/);
+  });
+
+  it("UploadAuthDecision の戻り値型は変えない（string enum のまま）", () => {
+    expect(authSrc).toMatch(
+      /UploadAuthDecision = "ok" \| "forbidden" \| "not_found"/,
+    );
+  });
+
+  it("serve 用 resolveRegistryServeMeta を export する", () => {
+    expect(authSrc).toMatch(/export async function resolveRegistryServeMeta/);
+  });
+});
+
+describe("S1b-4: /uploads route の header / 監査", () => {
+  it("?download=1 を downloadIntent として読み、authorize に渡す", () => {
+    expect(routeSrc).toMatch(
+      /searchParams\.get\("download"\)\s*===\s*"1"/,
+    );
+    expect(routeSrc).toMatch(/authorizeUploadAccess\(\{[\s\S]*downloadIntent[\s\S]*\}\)/);
+  });
+
+  it("serve 時に resolveRegistryServeMeta を引く", () => {
+    expect(routeSrc).toMatch(/resolveRegistryServeMeta\(key\)/);
+  });
+
+  it("registry のみ Cache-Control: no-store", () => {
+    expect(routeSrc).toMatch(/no-store/);
+  });
+
+  it("registry の Content-Disposition は download=attachment;filename=registry.pdf / preview=inline", () => {
+    expect(routeSrc).toMatch(/attachment; filename="registry\.pdf"/);
+    expect(routeSrc).toMatch(/"inline"/);
+  });
+
+  it("X-Content-Type-Options: nosniff を付与", () => {
+    expect(routeSrc).toMatch(/X-Content-Type-Options/);
+    expect(routeSrc).toMatch(/nosniff/);
+  });
+
+  it("Content-Disposition filename に att.fileName を使わない（route は att.fileName を参照しない）", () => {
+    expect(routeSrc).not.toMatch(/att\.fileName/);
+    expect(routeSrc).not.toMatch(/\.fileName/);
+  });
+
+  it("registry preview / download を server-side で監査する（非PII）", () => {
+    expect(routeSrc).toMatch(/registry_pdf_preview/);
+    expect(routeSrc).toMatch(/registry_pdf_download/);
+    expect(routeSrc).toMatch(/targetTable:\s*"attachments"/);
+    expect(routeSrc).toMatch(/writeAuditLog/);
+    // detail は propertyId 程度に留め、fileName / 所有者情報は入れない
+    expect(routeSrc).not.toMatch(/detail:\s*\{[^}]*fileName/);
+  });
+
+  it("未認証 401 / not_found 404 / denied 403 の既存方針は維持", () => {
+    expect(routeSrc).toMatch(/status:\s*401/);
+    expect(routeSrc).toMatch(/status:\s*404/);
+    expect(routeSrc).toMatch(/status:\s*403/);
+  });
+});
+
+describe("S1b-4: attachment-tab の download intent", () => {
+  it("registry の download のみ download intent param を付ける", () => {
+    expect(attachSrc).toMatch(/function withDownloadIntent/);
+    expect(attachSrc).toMatch(/download=1/);
+    expect(attachSrc).toMatch(/att\.type === "registry"/);
+    expect(attachSrc).toMatch(/isRegistry \? withDownloadIntent/);
+  });
+
+  it("registry の保存名は generic（att.fileName を使わない）", () => {
+    expect(attachSrc).toMatch(/REGISTRY_DOWNLOAD_NAME\s*=\s*"registry\.pdf"/);
+  });
+
+  it("preview iframe は無 param のまま（src は safeUrl）", () => {
+    expect(attachSrc).toMatch(/<iframe[\s\S]*src=\{safeUrl\}/);
+  });
+});

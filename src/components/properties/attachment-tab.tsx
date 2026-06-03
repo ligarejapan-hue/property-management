@@ -63,6 +63,18 @@ function getPreviewKind(att: { mimeType: string; fileName: string }): "image" | 
   return null;
 }
 
+/**
+ * S1b-4: 謄本PDF(registry) の download は server-side で registry_pdf:download を
+ * gate するため download intent param を付ける。既存 query があれば & で連結する。
+ * preview iframe には付けない（preview は registry_pdf:preview で別 gate）。
+ */
+function withDownloadIntent(url: string): string {
+  return `${url}${url.includes("?") ? "&" : "?"}download=1`;
+}
+
+/** registry download 時の保存名は generic 固定（att.fileName=PII の恐れを避ける）。 */
+const REGISTRY_DOWNLOAD_NAME = "registry.pdf";
+
 export default function AttachmentTab({
   propertyId,
 }: {
@@ -366,6 +378,10 @@ function AttachmentRow({
 }) {
   const Icon = getFileIcon(att.mimeType);
   const previewable = getPreviewKind(att) !== null;
+  const isRegistry = att.type === "registry";
+  const normalizedUrl = normalizeFileUrl(att.fileUrl);
+  const downloadHref = isRegistry ? withDownloadIntent(normalizedUrl) : normalizedUrl;
+  const downloadName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
   return (
     <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-white p-3">
       <Icon className="h-5 w-5 shrink-0 text-gray-500" />
@@ -400,10 +416,10 @@ function AttachmentRow({
         </button>
       )}
       <a
-        href={normalizeFileUrl(att.fileUrl)}
+        href={downloadHref}
         target="_blank"
         rel="noopener noreferrer"
-        download={att.fileName}
+        download={downloadName}
         className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
         title="ダウンロード"
       >
@@ -432,6 +448,10 @@ function PreviewModal({
   // 過去保存の絶対URL（http://host:3000/uploads/...）を相対パスに正規化。
   // 表示中のオリジン（nginx 経由）から `/uploads/...` を引けば 200 で返るため。
   const safeUrl = normalizeFileUrl(att.fileUrl);
+  const isRegistry = att.type === "registry";
+  // preview(iframe) は無 param のまま。download リンクのみ download intent を付ける。
+  const downloadHref = isRegistry ? withDownloadIntent(safeUrl) : safeUrl;
+  const downloadName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -448,10 +468,10 @@ function PreviewModal({
           </p>
           <div className="flex shrink-0 items-center gap-1">
             <a
-              href={safeUrl}
+              href={downloadHref}
               target="_blank"
               rel="noopener noreferrer"
-              download={att.fileName}
+              download={downloadName}
               className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
               title="ダウンロード"
             >
