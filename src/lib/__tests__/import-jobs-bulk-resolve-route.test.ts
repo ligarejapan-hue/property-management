@@ -265,4 +265,66 @@ describe("POST bulk-resolve — B4 duplicate scope", () => {
     expect(status).toBe(200);
     expect(body.affectedCount).toBe(0);
   });
+
+  // ---- Plan-T(17-B): 既存仕様ロック（production 無変更） ----
+
+  it("scope=duplicate / affectedCount=0 でも writeAuditLog を呼ぶ（count:0・PII なし・recalc も実行）", async () => {
+    // 0 件でも監査は記録する＝「一括解決を試行した」証跡を残す現仕様をロックする。
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 0 });
+    const { status, body } = await callPost({
+      action: "skip",
+      scope: "duplicate",
+    });
+    expect(status).toBe(200);
+    expect(body.affectedCount).toBe(0);
+    // updateMany は呼ばれ、その後 recalc / audit も件数に関わらず実行される。
+    expect(pm.importJobRow.updateMany).toHaveBeenCalledTimes(1);
+    expect(recalculateJobCounts).toHaveBeenCalledWith(JOB_ID);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const audit = writeAuditLog.mock.calls[0][0];
+    expect(audit.action).toBe("import_rows_bulk_resolve");
+    expect(audit.detail).toEqual({
+      action: "skip",
+      status: "duplicate",
+      count: 0,
+    });
+    // PII / 識別子は detail に含めない（rawData / 住所 / 氏名 / duplicatePropertyId / errorMessage 本文）。
+    const detailKeys = Object.keys(audit.detail);
+    for (const k of [
+      "name",
+      "ownerName",
+      "address",
+      "phone",
+      "rawData",
+      "errorMessage",
+      "duplicatePropertyId",
+    ]) {
+      expect(detailKeys).not.toContain(k);
+    }
+  });
+
+  it("scope=duplicate の where は startsWith:'重複' を厳密維持＝reception「住所が既存物件と重複」を含めない（B4.1 現状維持ロック）", async () => {
+    // B4.1 決定: reception の住所重複（prefix「住所」・rawData.duplicatePropertyId）は
+    // duplicate scope に含めない。誰かが prefix-OR や rawData 条件へ拡張したら落ちる回帰ロック。
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 1 });
+    await callPost({ action: "skip", scope: "duplicate" });
+    const arg = pm.importJobRow.updateMany.mock.calls[0][0];
+
+    // errorMessage prefix は「重複」厳密（「住所…」や OR 拡張をしていない）。
+    expect(arg.where.errorMessage).toEqual({ startsWith: "重複" });
+    expect(arg.where.errorMessage.startsWith).toBe("重複");
+    expect(arg.where.errorMessage).not.toHaveProperty("OR");
+    // where 全体に「住所」prefix も OR も rawData 条件も現れない。
+    expect(JSON.stringify(arg.where)).not.toContain("住所");
+    expect(arg.where).not.toHaveProperty("OR");
+    expect(arg.where).not.toHaveProperty("rawData");
+    // where の key は jobId / status / errorMessage の3つのみ（discriminator を増やしていない）。
+    expect(Object.keys(arg.where).sort()).toEqual([
+      "errorMessage",
+      "jobId",
+      "status",
+    ]);
+    // status は文字列 "needs_review"（"duplicate" を直接渡していない／detail の actionable と一致）。
+    expect(arg.where.status).toBe("needs_review");
+  });
 });
