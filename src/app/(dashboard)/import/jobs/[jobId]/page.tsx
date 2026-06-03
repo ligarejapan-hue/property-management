@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import {
+  useParams,
+  useRouter,
+  usePathname,
+  useSearchParams,
+} from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -32,7 +37,6 @@ import {
   type AffectedPropertiesResponse,
   type RollbackResponse,
 } from "@/lib/api-client";
-import { isReceptionOwnerJobRow } from "@/lib/reception-owner-link";
 import {
   isDuplicateMessage,
   extractDuplicateReason,
@@ -43,6 +47,9 @@ import {
 import { calcImportSummary, type ImportSummary } from "@/lib/import-summary";
 import { classifyImportError } from "@/lib/import-error-display";
 import { getImportTypeLabel } from "@/lib/import-labels";
+
+// B2: import job detail rows の既定ページサイズ（server 側 MAX_ROW_LIMIT=100 以内）。
+const ROW_LIMIT = 50;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,6 +83,18 @@ interface ImportJob {
   // 段階A(PR-A): 詳細API がサーバ側 groupBy で算出した 5 区分サマリ。
   // 旧形状/モックでは未提供のこともあるため optional。
   summary?: ImportSummary;
+  // B2: B1 で server が additive 返却する全体判定 / ページングメタ。
+  isReceptionOwnerJob?: boolean;
+  duplicateCount?: number;
+  pagination?: {
+    page: number;
+    limit: number;
+    totalRows: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+    status: string | null;
+  };
 }
 
 interface SearchResult {
@@ -135,12 +154,30 @@ const ROW_STATUS_CONFIG: Record<
 export default function ImportJobDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const jobId = params.jobId as string;
+
+  // B2: page / status を URL query から初期復元する。
+  const initialFilter: FilterStatus = ((): FilterStatus => {
+    const s = searchParams.get("status");
+    return s === "needs_review" ||
+      s === "error" ||
+      s === "success" ||
+      s === "skipped"
+      ? s
+      : "all";
+  })();
+  const initialPage: number = (() => {
+    const n = Number(searchParams.get("page"));
+    return Number.isInteger(n) && n >= 1 ? n : 1;
+  })();
 
   const [job, setJob] = useState<ImportJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterStatus>("all");
+  const [filter, setFilter] = useState<FilterStatus>(initialFilter);
+  const [page, setPage] = useState<number>(initialPage);
 
   // この取込で作成・更新された物件一覧（物件CSVジョブのみ）。
   // 主の job fetch と並列に取得する。失敗時は null のまま縮退表示。
@@ -168,19 +205,27 @@ export default function ImportJobDetailPage() {
   const [selectedTarget, setSelectedTarget] = useState<SearchResult | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch job detail
+  // Fetch job detail（B2: page/limit/status をサーバへ送る。status="all" は送らない）
   const fetchJob = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchImportJobDetail(jobId);
-      setJob(data as ImportJob);
+      const data = await fetchImportJobDetail(jobId, {
+        page,
+        limit: ROW_LIMIT,
+        status: filter === "all" ? undefined : filter,
+      });
+      const j = data as ImportJob;
+      setJob(j);
+      // B2: mutation 等で件数が減り現在ページが範囲外になったら安全にクランプ。
+      const totalPages = j.pagination?.totalPages ?? 1;
+      if (page > totalPages) setPage(totalPages);
     } catch (err) {
       setError(err instanceof Error ? err.message : "読み込みに失敗しました");
     } finally {
       setLoading(false);
     }
-  }, [jobId]);
+  }, [jobId, page, filter]);
 
   // この取込で作成・更新された物件一覧。job 本体とは別 API。
   // 行解決で createdId が増えた後にも最新化したいので、resolve / retry の
@@ -199,6 +244,21 @@ export default function ImportJobDetailPage() {
     fetchJob();
     fetchAffected();
   }, [fetchJob, fetchAffected]);
+
+  // B2: page / status を URL query に同期（履歴は置換・スクロール維持）。
+  useEffect(() => {
+    const sp = new URLSearchParams();
+    if (filter !== "all") sp.set("status", filter);
+    if (page > 1) sp.set("page", String(page));
+    const qs = sp.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [filter, page, pathname, router]);
+
+  // B2: status タブ切り替え時は 1 ページ目に戻す。
+  const changeFilter = (next: FilterStatus) => {
+    setFilter(next);
+    setPage(1);
+  };
 
   // ロールバック確認ダイアログ起動 → dry-run で対象件数を取得
   const openRollbackDialog = useCallback(async () => {
@@ -243,9 +303,9 @@ export default function ImportJobDetailPage() {
   // 受付帳×所有者ジョブを行ベースで検出する。
   // jobType === "owner_csv" だが rawData に受付帳×所有者固有マーカがある場合は、
   // 検索対象を Owner ではなく Property に切り替え、紐づけ API も新パスを使う。
-  const isReceptionOwnerJob =
-    job?.rows.some((r) => isReceptionOwnerJobRow(job.jobType, r.rawData)) ??
-    false;
+  // B2: 全体判定はサーバ確定値（job.isReceptionOwnerJob）を使う。
+  // ページング後に現ページ分の rows.some(...) で誤判定しないため。
+  const isReceptionOwnerJob = job?.isReceptionOwnerJob ?? false;
   // 既存の owner_csv 単独取込のときだけ Owner 検索モード。
   const useOwnerSearch = job?.jobType === "owner_csv" && !isReceptionOwnerJob;
 
@@ -278,16 +338,15 @@ export default function ImportJobDetailPage() {
     searchTimerRef.current = setTimeout(() => doSearch(value), 300);
   };
 
-  // Filter rows
-  const filteredRows =
-    job?.rows.filter((r) => filter === "all" || r.status === filter) ?? [];
+  // B2: rows はサーバが status で絞った現在ページ分。client では再フィルタしない。
+  const filteredRows = job?.rows ?? [];
 
   // 段階A(PR-A): 5区分の集計は **サーバ側 summary (job.summary)** を一意の真実とする。
   // job.summary は詳細API が groupBy で算出して additive に返す値。旧形状/モックや
   // 取得前 (job=null) でも壊れないよう、未提供時のみ calcImportSummary(job.rows) に
   // フォールバックする。これにより後続の rows ページング(PR-B)でも件数が現ページに
   // 引きずられない。
-  // duplicate は表示補助で別途 job.rows から数える（PR-A範囲外・rows全件前提を維持）。
+  // B2: duplicate はサーバ確定の job.duplicateCount を使う（ジョブ全体・ページ分非依存）。
   const summary = job?.summary ?? calcImportSummary(job?.rows ?? []);
   const counts = {
     all: summary.totalCount,
@@ -295,18 +354,16 @@ export default function ImportJobDetailPage() {
     error: summary.errorCount,
     success: summary.createdCount + summary.updatedCount,
     skipped: summary.skippedCount,
-    // 重複候補（表示上のヒント。要レビュー or スキップに含まれる「重複」由来の行）
-    duplicate:
-      job?.rows.filter(
-        (r) =>
-          (r.status === "needs_review" || r.status === "skipped") &&
-          isDuplicateMessage(r.errorMessage),
-      ).length ?? 0,
+    // 重複候補（B2: サーバ確定の duplicateCount=ジョブ全体・ページ分に化けない）。
+    duplicate: job?.duplicateCount ?? 0,
     // 更新件数 (= summary.updatedCount のエイリアス。既存表示との互換のため残す)
     updated: summary.updatedCount,
     // 新規件数 (派生表示用)
     created: summary.createdCount,
   };
+
+  // B2: 複数ページに跨るとき（ページング表示中）は一括処理を無効化（全件整合は B3）。
+  const isPaginated = (job?.pagination?.totalPages ?? 1) > 1;
 
   // Handle row actions
   const handleResolve = async (
@@ -376,6 +433,8 @@ export default function ImportJobDetailPage() {
   const handleBatchResolve = async (
     action: "skip" | "mark_error",
   ) => {
+    // B2: ページング表示中は現ページしか見えないため一括処理を行わない（全件整合は B3）。
+    if ((job?.pagination?.totalPages ?? 1) > 1) return;
     const targetRows = filteredRows.filter(
       (r) => r.status === "needs_review" || r.status === "error",
     );
@@ -732,7 +791,7 @@ export default function ImportJobDetailPage() {
         ).map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setFilter(tab.key)}
+            onClick={() => changeFilter(tab.key)}
             className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
               filter === tab.key
                 ? "bg-blue-600 text-white"
@@ -754,9 +813,19 @@ export default function ImportJobDetailPage() {
             {(filter === "needs_review" || filter === "error") &&
               counts[filter] > 0 && (
                 <>
+                  {isPaginated && (
+                    <span className="text-xs text-amber-700">
+                      ※ 全件一括処理は B3 対応予定（ページング表示中は無効）
+                    </span>
+                  )}
                   <button
                     onClick={() => handleBatchResolve("skip")}
-                    disabled={actionLoading === "batch"}
+                    disabled={actionLoading === "batch" || isPaginated}
+                    title={
+                      isPaginated
+                        ? "全件一括処理は B3 で対応予定です（ページング表示中は無効）"
+                        : undefined
+                    }
                     className="flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                   >
                     <SkipForward className="h-3 w-3" />
@@ -764,7 +833,12 @@ export default function ImportJobDetailPage() {
                   </button>
                   <button
                     onClick={() => handleBatchResolve("mark_error")}
-                    disabled={actionLoading === "batch"}
+                    disabled={actionLoading === "batch" || isPaginated}
+                    title={
+                      isPaginated
+                        ? "全件一括処理は B3 で対応予定です（ページング表示中は無効）"
+                        : undefined
+                    }
                     className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
                   >
                     <Ban className="h-3 w-3" />
@@ -790,6 +864,34 @@ export default function ImportJobDetailPage() {
           </div>
         ) : null}
       </div>
+
+      {/* B2: ページネーション（server pagination メタ） */}
+      {job?.pagination && job.pagination.totalRows > 0 && (
+        <div className="mb-4 flex items-center justify-between text-sm text-gray-600">
+          <span>
+            {job.pagination.totalRows} 件中{" "}
+            {(page - 1) * job.pagination.limit + 1}–
+            {Math.min(page * job.pagination.limit, job.pagination.totalRows)} 件
+            （{page} / {job.pagination.totalPages} ページ）
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={!job.pagination.hasPrevPage || loading}
+              className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50"
+            >
+              前へ
+            </button>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!job.pagination.hasNextPage || loading}
+              className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50"
+            >
+              次へ
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Rows list */}
       <div className="space-y-2">
