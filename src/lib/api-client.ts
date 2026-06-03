@@ -624,13 +624,17 @@ export async function resolveImportRow(
 }
 
 // B3: scope に一致する全 actionable 行を server-side で一括解決する（client は ID を持たない）。
+// B4: scope に "duplicate"（重複候補のみ＝needs_review かつ errorMessage「重複」始まり）を追加。
 export interface BulkResolveResponse {
   affectedCount: number;
 }
 
 export async function bulkResolveImportRows(
   jobId: string,
-  body: { action: "skip" | "mark_error"; scope: "needs_review" | "error" },
+  body: {
+    action: "skip" | "mark_error";
+    scope: "needs_review" | "error" | "duplicate";
+  },
 ): Promise<BulkResolveResponse> {
   if (USE_MOCK) {
     await mockDelay();

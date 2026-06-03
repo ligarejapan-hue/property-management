@@ -451,6 +451,30 @@ export default function ImportJobDetailPage() {
     }
   };
 
+  // B4: 重複候補（needs_review かつ errorMessage「重複」始まり）**だけ**を一括スキップする。
+  // 「全件スキップ」(= needs_review 全件) とは別操作で、非重複の要レビュー行は残す。
+  // 件数 N は server の job.duplicateCount（= counts.duplicate）由来で、現ページ件数ではない。
+  const handleBulkResolveDuplicates = async () => {
+    if (filter !== "needs_review") return;
+    const total = counts.duplicate; // job.duplicateCount 由来（内数 hint と同一値）
+    if (total === 0) return;
+    if (!confirm(`重複候補 全 ${total} 件を「スキップ」にしますか？`)) return;
+
+    setActionLoading("batch");
+    try {
+      const res = await bulkResolveImportRows(jobId, {
+        action: "skip",
+        scope: "duplicate",
+      });
+      await Promise.all([fetchJob(), fetchAffected()]);
+      alert(`${res.affectedCount} 件を処理しました`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "操作に失敗しました");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -825,6 +849,19 @@ export default function ImportJobDetailPage() {
                     <Ban className="h-3 w-3" />
                     全件エラー確定
                   </button>
+                  {/* B4: 重複候補のみスキップ（needs_review の重複サブセット限定）。
+                      「全件スキップ」と取り違えないよう amber 色＋件数を明示。 */}
+                  {filter === "needs_review" && counts.duplicate > 0 && (
+                    <button
+                      onClick={handleBulkResolveDuplicates}
+                      disabled={actionLoading === "batch"}
+                      title="取込時に検出された重複候補（要レビューの内数）だけをスキップします。非重複の要レビュー行は残ります。"
+                      className="flex items-center gap-1 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                    >
+                      <AlertTriangle className="h-3 w-3" />
+                      重複候補のみスキップ（{counts.duplicate}件）
+                    </button>
+                  )}
                 </>
               )}
 
