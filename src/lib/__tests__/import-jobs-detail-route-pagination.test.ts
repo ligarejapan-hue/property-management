@@ -439,6 +439,62 @@ describe("GET /api/import/jobs/[jobId] — rows pagination (PR-B / B1)", () => {
     );
   });
 
+  // ---- Plan-T(17-B): duplicateCount と duplicateActionableCount の分離（境界） ----
+  it("duplicateCount>0 かつ duplicateActionableCount=0（skipped 重複のみ残存）＝ボタン非表示・過大表示なし", async () => {
+    // 重複行が全て skip 済み → duplicateCount(needs_review+skipped)>0 だが
+    // duplicateActionableCount(needs_review のみ)=0。UI の「重複候補のみスキップ」は
+    // counts.duplicateActionable>0 でしか出ないため、この状態ではボタンが出ない。
+    setup({
+      statusGroups: [
+        { status: "skipped", _count: { _all: 5 } },
+        { status: "success", _count: { _all: 3 } },
+      ],
+      filteredTotal: 8,
+      duplicateCount: 2, // skipped 重複のみ（needs_review+skipped × 「重複」）
+      duplicateActionableCount: 0, // needs_review 重複は残っていない
+    });
+
+    const { body } = await callGet("");
+
+    expect(body.duplicateCount).toBe(2);
+    expect(body.duplicateActionableCount).toBe(0);
+    // actionable は duplicateCount を超えない（境界で 0）。
+    expect(body.duplicateActionableCount).toBeLessThanOrEqual(
+      body.duplicateCount,
+    );
+
+    // 2 つの count は「status の形」だけが異なる別述語であることを明示ロック:
+    //   duplicateCount           : status:{ in:["needs_review","skipped"] }（オブジェクト）
+    //   duplicateActionableCount : status:"needs_review"（文字列・bulk endpoint と一致）
+    const dupCall = pm.importJobRow.count.mock.calls
+      .map((c) => c[0])
+      .find(
+        (a) =>
+          a.where?.errorMessage?.startsWith === "重複" &&
+          typeof a.where?.status === "object",
+      );
+    expect(dupCall.where).toEqual({
+      jobId: JOB_ID,
+      status: { in: ["needs_review", "skipped"] },
+      errorMessage: { startsWith: "重複" },
+    });
+    const actCall = pm.importJobRow.count.mock.calls
+      .map((c) => c[0])
+      .find(
+        (a) =>
+          a.where?.errorMessage?.startsWith === "重複" &&
+          typeof a.where?.status === "string",
+      );
+    expect(actCall.where).toEqual({
+      jobId: JOB_ID,
+      status: "needs_review",
+      errorMessage: { startsWith: "重複" },
+    });
+    // どちらの述語も「住所」prefix（reception 住所重複）を含めない＝B4.1 現状維持。
+    expect(JSON.stringify(dupCall.where)).not.toContain("住所");
+    expect(JSON.stringify(actCall.where)).not.toContain("住所");
+  });
+
   it("レスポンス root に rows を維持し summary を additive に返す（非破壊）", async () => {
     setup({
       job: { id: JOB_ID, jobType: "property_csv", fileName: "f.csv" },
