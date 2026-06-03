@@ -96,3 +96,227 @@ function xmlEscape(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+// ============================================================
+// S1b-3: copy / cut / contextmenu / print 抑止＋client 監査の純ロジック。
+// detail は非PII enum のみ。URL / path / 選択テキスト / 所有者名は一切扱わない。
+// ============================================================
+
+/** client が送る操作イベント種別（厳格 enum）。 */
+export const SCREEN_PROTECTION_EVENT_TYPES = [
+  "copy",
+  "cut",
+  "contextmenu",
+  "print",
+  "print_shortcut",
+] as const;
+export type ScreenProtectionEventType =
+  (typeof SCREEN_PROTECTION_EVENT_TYPES)[number];
+
+/** PII 画面の粗いラベル（ID を含まない非PII enum）。 */
+export const SCREEN_PROTECTION_SURFACES = [
+  "owner",
+  "property",
+  "history",
+  "import",
+  "registry",
+  "dashboard",
+] as const;
+export type ScreenProtectionSurface =
+  (typeof SCREEN_PROTECTION_SURFACES)[number];
+
+export type ScreenProtectionAuditAction =
+  | "pii_copy_attempt"
+  | "pii_cut_attempt"
+  | "pii_contextmenu_attempt"
+  | "pii_print_attempt";
+
+/** detail.trigger（操作の発生源。非PII enum）。 */
+export type ScreenProtectionTrigger =
+  | "clipboard"
+  | "menu"
+  | "print_dialog"
+  | "keyboard";
+
+export function isScreenProtectionEventType(
+  v: unknown,
+): v is ScreenProtectionEventType {
+  return (
+    typeof v === "string" &&
+    (SCREEN_PROTECTION_EVENT_TYPES as readonly string[]).includes(v)
+  );
+}
+
+export function isScreenProtectionSurface(
+  v: unknown,
+): v is ScreenProtectionSurface {
+  return (
+    typeof v === "string" &&
+    (SCREEN_PROTECTION_SURFACES as readonly string[]).includes(v)
+  );
+}
+
+/**
+ * eventType → AuditLog action。
+ * print と print_shortcut は同一 action(pii_print_attempt) に統合し、trigger で区別する。
+ */
+export function eventTypeToAuditAction(
+  eventType: ScreenProtectionEventType,
+): ScreenProtectionAuditAction {
+  switch (eventType) {
+    case "copy":
+      return "pii_copy_attempt";
+    case "cut":
+      return "pii_cut_attempt";
+    case "contextmenu":
+      return "pii_contextmenu_attempt";
+    case "print":
+    case "print_shortcut":
+      return "pii_print_attempt";
+  }
+}
+
+/** eventType → detail.trigger（非PII enum、サーバ側で決定し client を信用しない）。 */
+export function eventTypeToTrigger(
+  eventType: ScreenProtectionEventType,
+): ScreenProtectionTrigger {
+  switch (eventType) {
+    case "copy":
+    case "cut":
+      return "clipboard";
+    case "contextmenu":
+      return "menu";
+    case "print":
+      return "print_dialog";
+    case "print_shortcut":
+      return "keyboard";
+  }
+}
+
+export interface ScreenProtectionAuditDetail {
+  surface: ScreenProtectionSurface;
+  trigger: ScreenProtectionTrigger;
+}
+
+/** 監査 detail を非PII enum のみで構築する（PII は構造的に混入できない）。 */
+export function buildScreenProtectionAuditDetail(
+  eventType: ScreenProtectionEventType,
+  surface: ScreenProtectionSurface,
+): ScreenProtectionAuditDetail {
+  return { surface, trigger: eventTypeToTrigger(eventType) };
+}
+
+// ------------------------------------------------------------
+// S1b-3 / Codex P1: PII 保護領域の selection-aware 判定。
+// copy/cut では event.target だけでなく選択範囲(range)も見る必要がある
+// （非editable text を選択して Ctrl/Cmd+C すると target が body / focused element に
+//  なり、[data-pii-protected] 内の選択を取りこぼす抜け道があるため）。
+//
+// 実 DOM の Element / Node / Range は下記の構造的 interface を満たすので、guard 側で
+// そのまま渡せる。DOM を直接持たない純関数にして node 環境でモック単体テストする。
+// ------------------------------------------------------------
+
+export interface DomElementLike {
+  getAttribute(name: string): string | null;
+  closest(selector: string): DomElementLike | null;
+}
+export interface DomNodeLike {
+  nodeType: number;
+  parentElement: DomElementLike | null;
+}
+export interface DomRangeLike {
+  commonAncestorContainer: DomNodeLike;
+  startContainer: DomNodeLike;
+  endContainer: DomNodeLike;
+  /** Codex P2: 選択範囲が node と交差するか（protected panel をまたぐ選択の検知）。非対応環境では省略可。 */
+  intersectsNode?(node: DomNodeLike): boolean;
+}
+export interface ProtectedRegionOpts {
+  /** PII 保護領域セレクタ（例: [data-pii-protected]）。 */
+  piiSelector: string;
+  /** 抑止しない操作系要素セレクタ（input/textarea/select/button/a/contenteditable）。 */
+  exemptSelector: string;
+  /** surface を読む属性名（例: data-pii-surface）。 */
+  surfaceAttr: string;
+}
+
+const DOM_ELEMENT_NODE = 1;
+
+function nodeToElement(node: DomNodeLike | null): DomElementLike | null {
+  if (!node) return null;
+  // element node は自身が DomElementLike（closest / getAttribute を持つ）。
+  if (node.nodeType === DOM_ELEMENT_NODE) {
+    return node as unknown as DomElementLike;
+  }
+  // text node 等は親要素から辿る。
+  return node.parentElement;
+}
+
+/**
+ * node が PII 保護領域内（piiSelector）かつ操作系要素(exemptSelector)の外にあれば
+ * その surface を返す。そうでなければ null。
+ */
+export function resolveProtectedSurfaceForNode(
+  node: DomNodeLike | null,
+  opts: ProtectedRegionOpts,
+): string | null {
+  const el = nodeToElement(node);
+  if (!el) return null;
+  const region = el.closest(opts.piiSelector);
+  if (!region) return null;
+  // input / textarea / select / button / a / contenteditable の中は除外（通常操作・a11y 維持）。
+  if (el.closest(opts.exemptSelector)) return null;
+  return region.getAttribute(opts.surfaceAttr) ?? "dashboard";
+}
+
+/**
+ * 選択範囲が PII 保護領域に関係するなら surface を返す（copy/cut の selection 判定）。
+ *
+ * 判定段階:
+ *  - editable 除外維持: 選択範囲全体が操作系要素(input/textarea/contenteditable 等)内
+ *    （commonAncestor が exempt 配下）なら抑止しない。
+ *  - P1: commonAncestorContainer / startContainer / endContainer のいずれかが保護領域内
+ *    （copy event の target が body でも検知）。
+ *  - P2(Codex): start/end/commonAncestor がすべて保護領域外でも、選択が protected panel を
+ *    またぐ場合は range.intersectsNode(protectedElement) で交差を検知する
+ *    （panel 内の PII が選択に含まれるため）。protectedElements は呼び出し側が
+ *    document.querySelectorAll([data-pii-protected]) 相当で渡す。
+ */
+export function resolveProtectedSurfaceForRanges(
+  ranges: readonly DomRangeLike[],
+  protectedElements: readonly DomElementLike[],
+  opts: ProtectedRegionOpts,
+): string | null {
+  for (const range of ranges) {
+    // editable 除外: 選択範囲全体が操作系要素内なら抑止しない。
+    const commonEl = nodeToElement(range.commonAncestorContainer);
+    if (commonEl && commonEl.closest(opts.exemptSelector)) continue;
+
+    // P1: container の ancestor 判定。
+    for (const node of [
+      range.commonAncestorContainer,
+      range.startContainer,
+      range.endContainer,
+    ]) {
+      const surface = resolveProtectedSurfaceForNode(node, opts);
+      if (surface) return surface;
+    }
+
+    // P2: protected panel をまたぐ mixed selection を intersectsNode で検知。
+    if (typeof range.intersectsNode === "function") {
+      for (const el of protectedElements) {
+        let hit = false;
+        try {
+          hit = range.intersectsNode(el as unknown as DomNodeLike);
+        } catch {
+          // intersectsNode 非対応ブラウザ等では container 判定のみで fallback。
+          hit = false;
+        }
+        if (hit) {
+          return el.getAttribute(opts.surfaceAttr) ?? "dashboard";
+        }
+      }
+    }
+  }
+  return null;
+}

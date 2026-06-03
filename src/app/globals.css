@@ -37,3 +37,24 @@ body {
     print-color-adjust: exact;
   }
 }
+
+/*
+ * S1b-3: 印刷保護バナー。screen では非表示、印刷時のみ警告を表示する。
+ * 完全ブロックではなく deterrent（印刷は記録される旨を可視化する）。
+ */
+.screen-protection-print-notice {
+  display: none;
+}
+@media print {
+  .screen-protection-print-notice {
+    display: block;
+    margin: 0 0 12px;
+    padding: 8px 12px;
+    border: 2px solid #b91c1c;
+    color: #b91c1c;
+    font-weight: 700;
+    font-size: 12px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

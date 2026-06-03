@@ -325,7 +325,7 @@ export default function PropertyDetailPage({
   }
 
   return (
-    <div>
+    <div data-pii-protected data-pii-surface="property">
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">

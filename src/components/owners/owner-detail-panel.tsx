@@ -56,7 +56,11 @@ export default function OwnerDetailPanel({ owner }: OwnerDetailPanelProps) {
     !owner.corporateNumber && detection.candidates.length > 0;
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-5">
+    <div
+      className="rounded-lg border border-gray-200 bg-gray-50 p-5"
+      data-pii-protected
+      data-pii-surface="owner"
+    >
       <dl className="grid grid-cols-1 gap-5 md:grid-cols-2">
         {renderField("氏名", owner.name)}
         {renderField("氏名カナ", owner.nameKana)}

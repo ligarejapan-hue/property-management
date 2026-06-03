@@ -1066,7 +1066,7 @@ export default function ImportPage() {
   };
 
   return (
-    <div>
+    <div data-pii-protected data-pii-surface="import">
       <ImportSwitcher />
 
       {/* 利用者向け操作ガイド: 取込の順番と各CSVの役割を説明 */}

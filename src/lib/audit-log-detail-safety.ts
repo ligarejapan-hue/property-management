@@ -137,6 +137,14 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "restoredFieldCount",
     "blocked",
   ]),
+  // S1b-3: copy/cut/contextmenu/print 試行の監査。detail は非PII enum のみ
+  //   surface = どの PII 画面か（owner/property/history/import/registry/dashboard）
+  //   trigger = 操作の発生源（clipboard/menu/print_dialog/keyboard）
+  // url/path/selectedText/ownerName 等は allowlist 外のため引き続き [REDACTED]。
+  pii_copy_attempt: new Set(["surface", "trigger"]),
+  pii_cut_attempt: new Set(["surface", "trigger"]),
+  pii_contextmenu_attempt: new Set(["surface", "trigger"]),
+  pii_print_attempt: new Set(["surface", "trigger"]),
 };
 
 /**

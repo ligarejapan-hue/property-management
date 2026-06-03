@@ -123,7 +123,7 @@ export default function HistoryTab({
   }
 
   return (
-    <div>
+    <div data-pii-protected data-pii-surface="history">
       {/* Filter bar */}
       <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
