@@ -25,6 +25,20 @@ import { createTokenBucketLimiter } from "@/lib/token-bucket";
  * - 濫用対策に in-memory token-bucket（60/min/user）。超過は 429（best-effort、操作は妨げない）。
  *
  * S1b-4 の server-side 監査（/uploads の registry PDF アクセス）とは別系統。
+ *
+ * CSRF / 同一オリジン境界（17-A: Origin / Referer 検証は意図的に未採用）:
+ * - 主な CSRF 経路（cross-site の認証済み POST）は NextAuth v5 既定の SameSite=Lax
+ *   session cookie で既に緩和される。cross-site の fetch / XHR / 上位フォーム POST は
+ *   cookie を送らないため、src/proxy.ts が cookie 不在で /login へ 307 redirect するか、
+ *   getApiSession() が 401 を投げ、本ハンドラの writeAuditLog へ到達しない。
+ * - 本 endpoint は非PII enum（{ surface, trigger }、action / trigger はサーバ派生）だけを
+ *   記録する監査補助であり、想定リスクは主に「監査ノイズ」（token-bucket で 60/min/user に
+ *   上限）であって、PII 漏洩・状態変更・権限変更ではない。
+ * - そのため Route Handler への Origin / Referer 検証（同一オリジン check）は今回採用しない。
+ *   低重大度に対して header 読み取りを増やすと、本ファイルの header 不参照（PII 防御）方針と
+ *   競合し、Origin を省く正規文脈（referrer-policy no-referrer、将来の sendBeacon 等）で
+ *   正規イベントを無音で取りこぼすリスクの方が大きい。残余（同一サイト subdomain、旧 Chrome の
+ *   Lax+POST 窓、将来の SameSite=None 化）は、必要時に別途 defense-in-depth として検討する。
  */
 
 const bodySchema = z.object({
