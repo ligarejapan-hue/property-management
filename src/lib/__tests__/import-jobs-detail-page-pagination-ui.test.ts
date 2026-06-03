@@ -14,6 +14,7 @@
  *    job.rows.some() / job.rows.filter() を全体判定に使い続けない
  *  - mutation 後 refetch が page/limit/status を維持（fetchJob deps）＋ page>totalPages クランプ
  *  - batch resolve は B2 では無効化（ページング表示中）＋ B3 注記
+ *  - 候補5: limit 切替（50/100・page=1 リセット・URL 同期）とページジャンプ（totalPages 範囲内）
  */
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
@@ -31,14 +32,17 @@ describe("import job detail page — B2 pagination 配線 (source-assertion)", (
   it("fetchImportJobDetail を page/limit/status 付きで呼ぶ（status=all は送らない）", () => {
     expect(pageSrc).toMatch(/fetchImportJobDetail\(jobId,\s*\{/);
     expect(pageSrc).toMatch(/page,/);
-    expect(pageSrc).toMatch(/limit:\s*ROW_LIMIT/);
+    // 候補5: limit は state（shorthand）で渡る（固定 ROW_LIMIT 直渡しではない）。
+    expect(pageSrc).toMatch(/fetchImportJobDetail\(jobId,\s*\{\s*page,\s*limit,/);
+    expect(pageSrc).not.toMatch(/limit:\s*ROW_LIMIT/);
     expect(pageSrc).toMatch(
       /status:\s*filter === "all" \? undefined : filter/,
     );
   });
 
-  it("ROW_LIMIT の既定は 50", () => {
+  it("ROW_LIMIT の既定は 50・切替候補は 50/100（server MAX_ROW_LIMIT=100 以内）", () => {
     expect(pageSrc).toMatch(/const ROW_LIMIT = 50;/);
+    expect(pageSrc).toMatch(/const ROW_LIMIT_OPTIONS = \[50, 100\] as const;/);
   });
 
   it("page / status を URL query と同期する（useSearchParams + router.replace）", () => {
@@ -46,9 +50,13 @@ describe("import job detail page — B2 pagination 配線 (source-assertion)", (
     expect(pageSrc).toMatch(/router\.replace\(/);
     expect(pageSrc).toMatch(/sp\.set\("status",\s*filter\)/);
     expect(pageSrc).toMatch(/sp\.set\("page",\s*String\(page\)\)/);
+    // 候補5: limit も URL query と同期（既定 ROW_LIMIT 以外のときのみ載せる）
+    expect(pageSrc).toMatch(/sp\.set\("limit",\s*String\(limit\)\)/);
+    expect(pageSrc).toMatch(/limit !== ROW_LIMIT/);
     // 初期値を URL から復元
     expect(pageSrc).toMatch(/searchParams\.get\("status"\)/);
     expect(pageSrc).toMatch(/searchParams\.get\("page"\)/);
+    expect(pageSrc).toMatch(/searchParams\.get\("limit"\)/);
   });
 
   it("status タブ変更で page=1 に戻す（changeFilter）", () => {
@@ -82,8 +90,9 @@ describe("import job detail page — B2 pagination 配線 (source-assertion)", (
     expect(pageSrc).toMatch(/const filteredRows = job\?\.rows \?\? \[\];/);
   });
 
-  it("mutation 後 refetch が page/limit/status を維持（fetchJob deps）", () => {
-    expect(pageSrc).toMatch(/\}, \[jobId, page, filter\]\);/);
+  it("mutation 後 refetch が page/limit/status を維持（fetchJob deps に limit 込み）", () => {
+    expect(pageSrc).toMatch(/\}, \[jobId, page, filter, limit\]\);/);
+    expect(pageSrc).not.toMatch(/\}, \[jobId, page, filter\]\);/);
   });
 
   it("再取得後 page > totalPages を安全にクランプ", () => {
@@ -169,5 +178,56 @@ describe("import job detail page — B4 重複候補のみスキップ (source-a
     expect(pageSrc).not.toMatch(
       /handleBulkResolveDuplicates[\s\S]*?const scope = filter;/,
     );
+  });
+});
+
+describe("import job detail page — 候補5 ページング UX (source-assertion)", () => {
+  it("limit state を持ち URL から復元する（許可値 50/100 以外は既定 ROW_LIMIT に正規化）", () => {
+    expect(pageSrc).toMatch(
+      /const \[limit, setLimit\] = useState<number>\(initialLimit\);/,
+    );
+    expect(pageSrc).toMatch(/const initialLimit: number = /);
+    expect(pageSrc).toMatch(
+      /\(ROW_LIMIT_OPTIONS as readonly number\[\]\)\.includes\(n\) \? n : ROW_LIMIT/,
+    );
+  });
+
+  it("limit 変更で page=1 に戻す（changeLimit・セレクトは changeLimit 経由）", () => {
+    expect(pageSrc).toMatch(
+      /const changeLimit = \(next: number\) => \{[\s\S]*?setLimit\(next\);[\s\S]*?setPage\(1\);/,
+    );
+    expect(pageSrc).toMatch(
+      /onChange=\{\(e\) => changeLimit\(Number\(e\.target\.value\)\)\}/,
+    );
+    expect(pageSrc).toMatch(/ROW_LIMIT_OPTIONS\.map/);
+  });
+
+  it("ページジャンプは pagination metadata（totalPages）の範囲内に制御する", () => {
+    // 複数ページのときのみ表示（1ページでも表示崩れしない）
+    expect(pageSrc).toMatch(/job\.pagination\.totalPages > 1 && \(/);
+    // 入力値は 1〜totalPages に正規化（NaN・<1 は無視、超過は clamp）
+    expect(pageSrc).toMatch(
+      /const handleGoto = \(e: FormEvent<HTMLFormElement>\) => \{/,
+    );
+    expect(pageSrc).toMatch(/if \(!Number\.isFinite\(n\) \|\| n < 1\) return;/);
+    expect(pageSrc).toMatch(/setPage\(Math\.min\(n, totalPages\)\);/);
+    // input の min/max も metadata を使う
+    expect(pageSrc).toMatch(/max=\{job\.pagination\.totalPages\}/);
+  });
+
+  it("status タブ変更は page=1（既存）・changeFilter は limit を触らない", () => {
+    // changeFilter の body は setFilter + setPage(1) のみ（setLimit を含まない）
+    expect(pageSrc).toMatch(
+      /const changeFilter = \(next: FilterStatus\) => \{\s*setFilter\(next\);\s*setPage\(1\);\s*\};/,
+    );
+  });
+
+  it("既存の前へ/次へ・bulk UI を壊さない", () => {
+    expect(pageSrc).toMatch(/前へ/);
+    expect(pageSrc).toMatch(/次へ/);
+    expect(pageSrc).toMatch(/job\.pagination\.hasPrevPage/);
+    expect(pageSrc).toMatch(/job\.pagination\.hasNextPage/);
+    expect(pageSrc).toMatch(/全件スキップ/);
+    expect(pageSrc).toMatch(/重複候補のみスキップ/);
   });
 });
