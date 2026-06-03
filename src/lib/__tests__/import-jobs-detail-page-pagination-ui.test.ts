@@ -90,20 +90,29 @@ describe("import job detail page — B2 pagination 配線 (source-assertion)", (
     expect(pageSrc).toMatch(/if \(page > totalPages\) setPage\(totalPages\);/);
   });
 
-  it("batch resolve は B2 では無効化（ページング表示中）＋ B3 注記", () => {
-    // ページング判定
+  it("batch resolve は B3 で bulk endpoint を呼び pagination 非依存で全件処理する", () => {
+    // server-side bulk endpoint を呼ぶ（client は ID を持たない）
     expect(pageSrc).toMatch(
-      /const isPaginated = \(job\?\.pagination\?\.totalPages \?\? 1\) > 1;/,
+      /bulkResolveImportRows\(jobId,\s*\{\s*action,\s*scope\s*\}\)/,
     );
-    // ボタンは isPaginated で無効化
-    expect(pageSrc).toMatch(
+    // scope は現在の filter（needs_review / error）
+    expect(pageSrc).toMatch(/const scope = filter;/);
+    // 件数は server summary 由来（現ページ件数ではない）
+    expect(pageSrc).toMatch(/summary\.needsReviewCount/);
+    expect(pageSrc).toMatch(/summary\.errorCount/);
+    // 確認文言は「全 N 件」
+    expect(pageSrc).toMatch(/全 \$\{total\} 件を/);
+    // 実行後に affectedCount を表示
+    expect(pageSrc).toMatch(/res\.affectedCount/);
+  });
+
+  it("B2 の batch 無効化（isPaginated / B3 対応予定）は撤去されている", () => {
+    expect(pageSrc).not.toMatch(/isPaginated/);
+    expect(pageSrc).not.toMatch(/B3 対応予定/);
+    // ボタンは pagination 非依存（actionLoading のみで無効化）
+    expect(pageSrc).toMatch(/disabled=\{actionLoading === "batch"\}/);
+    expect(pageSrc).not.toMatch(
       /disabled=\{actionLoading === "batch" \|\| isPaginated\}/,
     );
-    // handler 側ガード（現ページのみの一括処理にしない）
-    expect(pageSrc).toMatch(
-      /if \(\(job\?\.pagination\?\.totalPages \?\? 1\) > 1\) return;/,
-    );
-    // B3 対応予定の注記
-    expect(pageSrc).toMatch(/B3 対応予定/);
   });
 });

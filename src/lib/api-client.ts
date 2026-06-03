@@ -623,6 +623,29 @@ export async function resolveImportRow(
   });
 }
 
+// B3: scope に一致する全 actionable 行を server-side で一括解決する（client は ID を持たない）。
+export interface BulkResolveResponse {
+  affectedCount: number;
+}
+
+export async function bulkResolveImportRows(
+  jobId: string,
+  body: { action: "skip" | "mark_error"; scope: "needs_review" | "error" },
+): Promise<BulkResolveResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { affectedCount: 0 };
+  }
+  return apiFetch<BulkResolveResponse>(
+    `/api/import/jobs/${jobId}/rows/bulk-resolve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 export async function retryImportRow(
   jobId: string,
   rowId: string,

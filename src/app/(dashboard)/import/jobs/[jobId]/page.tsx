@@ -29,6 +29,7 @@ import {
   fetchImportJobDetail,
   fetchAffectedProperties,
   resolveImportRow,
+  bulkResolveImportRows,
   retryImportRow,
   rollbackImportJob,
   searchProperties,
@@ -362,9 +363,6 @@ export default function ImportJobDetailPage() {
     created: summary.createdCount,
   };
 
-  // B2: 複数ページに跨るとき（ページング表示中）は一括処理を無効化（全件整合は B3）。
-  const isPaginated = (job?.pagination?.totalPages ?? 1) > 1;
-
   // Handle row actions
   const handleResolve = async (
     rowId: string,
@@ -429,25 +427,23 @@ export default function ImportJobDetailPage() {
     setEditedData({});
   };
 
-  // Batch actions
-  const handleBatchResolve = async (
-    action: "skip" | "mark_error",
-  ) => {
-    // B2: ページング表示中は現ページしか見えないため一括処理を行わない（全件整合は B3）。
-    if ((job?.pagination?.totalPages ?? 1) > 1) return;
-    const targetRows = filteredRows.filter(
-      (r) => r.status === "needs_review" || r.status === "error",
-    );
-    if (targetRows.length === 0) return;
+  // Batch actions（B3: 現在の status フィルタ needs_review / error の **全件** を
+  // server-side where + updateMany で一括処理する。現ページに限定せず client は ID を持たない）。
+  const handleBatchResolve = async (action: "skip" | "mark_error") => {
+    if (filter !== "needs_review" && filter !== "error") return;
+    const scope = filter; // "needs_review" | "error"
+    // 件数は server summary（ジョブ全体）由来。現ページ件数ではない。
+    const total =
+      scope === "needs_review" ? summary.needsReviewCount : summary.errorCount;
+    if (total === 0) return;
     const label = action === "skip" ? "スキップ" : "エラー確定";
-    if (!confirm(`${targetRows.length} 件を「${label}」にしますか？`)) return;
+    if (!confirm(`全 ${total} 件を「${label}」にしますか？`)) return;
 
     setActionLoading("batch");
     try {
-      for (const row of targetRows) {
-        await resolveImportRow(jobId, row.id, action);
-      }
+      const res = await bulkResolveImportRows(jobId, { action, scope });
       await Promise.all([fetchJob(), fetchAffected()]);
+      alert(`${res.affectedCount} 件を処理しました`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "操作に失敗しました");
     } finally {
@@ -813,19 +809,9 @@ export default function ImportJobDetailPage() {
             {(filter === "needs_review" || filter === "error") &&
               counts[filter] > 0 && (
                 <>
-                  {isPaginated && (
-                    <span className="text-xs text-amber-700">
-                      ※ 全件一括処理は B3 対応予定（ページング表示中は無効）
-                    </span>
-                  )}
                   <button
                     onClick={() => handleBatchResolve("skip")}
-                    disabled={actionLoading === "batch" || isPaginated}
-                    title={
-                      isPaginated
-                        ? "全件一括処理は B3 で対応予定です（ページング表示中は無効）"
-                        : undefined
-                    }
+                    disabled={actionLoading === "batch"}
                     className="flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                   >
                     <SkipForward className="h-3 w-3" />
@@ -833,12 +819,7 @@ export default function ImportJobDetailPage() {
                   </button>
                   <button
                     onClick={() => handleBatchResolve("mark_error")}
-                    disabled={actionLoading === "batch" || isPaginated}
-                    title={
-                      isPaginated
-                        ? "全件一括処理は B3 で対応予定です（ページング表示中は無効）"
-                        : undefined
-                    }
+                    disabled={actionLoading === "batch"}
                     className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
                   >
                     <Ban className="h-3 w-3" />
