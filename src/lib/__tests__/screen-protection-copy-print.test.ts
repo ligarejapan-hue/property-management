@@ -13,6 +13,10 @@ import {
   isScreenProtectionEventType,
   isScreenProtectionSurface,
   SCREEN_PROTECTION_EVENT_TYPES,
+  resolveProtectedSurfaceForNode,
+  resolveProtectedSurfaceForRanges,
+  type DomNodeLike,
+  type DomRangeLike,
 } from "@/lib/screen-protection";
 
 const read = (p: string) =>
@@ -114,10 +118,10 @@ describe("S1b-3: ScreenProtectionGuard 配線", () => {
     expect(guardSrc).toMatch(/useScreenProtection\(\)/);
   });
 
-  it("[data-pii-protected] 限定・入力/ボタン/リンク等を除外", () => {
+  it("[data-pii-protected] 限定・入力/ボタン/リンク等を除外（helper に委譲）", () => {
     expect(guardSrc).toMatch(/\[data-pii-protected\]/);
     expect(guardSrc).toMatch(/input, textarea, select, button, a/);
-    expect(guardSrc).toMatch(/closest\(/);
+    expect(guardSrc).toMatch(/resolveProtectedSurfaceForNode/);
   });
 
   it("直接 fetch を使い、api-client を import しない", () => {
@@ -150,5 +154,175 @@ describe("S1b-3: PII マーカ付与（初期面）", () => {
   it("16-B B3 の import/jobs/[jobId]/page には付与しない（非衝突）", () => {
     const b3 = read("src/app/(dashboard)/import/jobs/[jobId]/page.tsx");
     expect(b3).not.toMatch(/data-pii-protected/);
+  });
+});
+
+// ============================================================
+// Codex P1: copy/cut の selection-aware 判定（DOM をモックして node 環境で検証）
+// ============================================================
+describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
+  const OPTS = {
+    piiSelector: "[data-pii-protected]",
+    exemptSelector:
+      "input, textarea, select, button, a, [contenteditable], [contenteditable='true']",
+    surfaceAttr: "data-pii-surface",
+  };
+
+  type Fake = {
+    nodeType: number;
+    parentElement: Fake | null;
+    getAttribute(name: string): string | null;
+    closest(selector: string): Fake | null;
+  };
+  const asNode = (f: Fake) => f as unknown as DomNodeLike;
+
+  function region(surface: string): Fake {
+    const r: Fake = {
+      nodeType: 1,
+      parentElement: null,
+      getAttribute: (n) => (n === "data-pii-surface" ? surface : null),
+      closest: (sel) => (sel.includes("data-pii-protected") ? r : null),
+    };
+    return r;
+  }
+  function child(r: Fake): Fake {
+    return {
+      nodeType: 1,
+      parentElement: r,
+      getAttribute: () => null,
+      closest: (sel) => (sel.includes("data-pii-protected") ? r : null),
+    };
+  }
+  // 保護領域内の操作系要素（例: <a>）。closest(exempt) は自身を返す。
+  function exemptChild(r: Fake): Fake {
+    const el: Fake = {
+      nodeType: 1,
+      parentElement: r,
+      getAttribute: () => null,
+      closest: (sel) => (sel.includes("data-pii-protected") ? r : el),
+    };
+    return el;
+  }
+  function text(parent: Fake | null): Fake {
+    return {
+      nodeType: 3,
+      parentElement: parent,
+      getAttribute: () => null,
+      closest: () => null,
+    };
+  }
+  function outside(): Fake {
+    return {
+      nodeType: 1,
+      parentElement: null,
+      getAttribute: () => null,
+      closest: () => null,
+    };
+  }
+  const range = (
+    common: Fake,
+    start: Fake,
+    end: Fake,
+  ): DomRangeLike =>
+    ({
+      commonAncestorContainer: common,
+      startContainer: start,
+      endContainer: end,
+    }) as unknown as DomRangeLike;
+
+  it("保護領域内の要素 → surface を返す", () => {
+    expect(resolveProtectedSurfaceForNode(asNode(child(region("owner"))), OPTS)).toBe(
+      "owner",
+    );
+  });
+
+  it("text node でも parentElement から保護領域を検出（commonAncestor が text node）", () => {
+    const t = text(child(region("property")));
+    expect(resolveProtectedSurfaceForNode(asNode(t), OPTS)).toBe("property");
+  });
+
+  it("操作系要素(input/textarea/a/contenteditable)内は除外（null）", () => {
+    expect(
+      resolveProtectedSurfaceForNode(asNode(exemptChild(region("owner"))), OPTS),
+    ).toBeNull();
+  });
+
+  it("保護領域外（body）は null", () => {
+    expect(resolveProtectedSurfaceForNode(asNode(outside()), OPTS)).toBeNull();
+  });
+
+  it("target が body でも startContainer が保護領域内なら検出（Codex P1 抜け道）", () => {
+    const r = region("owner");
+    expect(
+      resolveProtectedSurfaceForRanges(
+        [range(outside(), text(child(r)), outside())],
+        OPTS,
+      ),
+    ).toBe("owner");
+  });
+
+  it("endContainer が保護領域内でも検出", () => {
+    const r = region("history");
+    expect(
+      resolveProtectedSurfaceForRanges(
+        [range(outside(), outside(), text(child(r)))],
+        OPTS,
+      ),
+    ).toBe("history");
+  });
+
+  it("commonAncestorContainer が保護領域内でも検出", () => {
+    const r = region("import");
+    expect(
+      resolveProtectedSurfaceForRanges(
+        [range(child(r), outside(), outside())],
+        OPTS,
+      ),
+    ).toBe("import");
+  });
+
+  it("いずれも保護領域外なら null（非protected領域の copy は抑止しない）", () => {
+    expect(
+      resolveProtectedSurfaceForRanges(
+        [range(outside(), outside(), outside())],
+        OPTS,
+      ),
+    ).toBeNull();
+  });
+
+  it("選択が操作系要素(editable)内なら除外（null）", () => {
+    const r = region("owner");
+    const e = exemptChild(r);
+    expect(resolveProtectedSurfaceForRanges([range(e, e, e)], OPTS)).toBeNull();
+  });
+});
+
+describe("Codex P1: guard / helper の selection 配線（source-assertion）", () => {
+  const guardSrc = read(
+    "src/components/screen-protection/screen-protection-guard.tsx",
+  );
+  const helperSrc = read("src/lib/screen-protection.ts");
+
+  it("guard: copy/cut で getSelection を確認し selection fallback を使う", () => {
+    expect(guardSrc).toMatch(/document\.getSelection\(\)/);
+    expect(guardSrc).toMatch(
+      /surfaceFromTarget\(e\.target\) \?\? surfaceFromSelection\(\)/,
+    );
+    expect(guardSrc).toMatch(/resolveProtectedSurfaceForRanges/);
+  });
+
+  it("guard: contextmenu は従来どおり target 判定（selection を使わない）", () => {
+    expect(guardSrc).toMatch(/onContextMenu[\s\S]*surfaceFromTarget\(e\.target\)/);
+  });
+
+  it("helper: range の 3 container を辿る", () => {
+    expect(helperSrc).toMatch(/commonAncestorContainer/);
+    expect(helperSrc).toMatch(/startContainer/);
+    expect(helperSrc).toMatch(/endContainer/);
+  });
+
+  it("guard は選択テキストを文字列化して送らない（PII を監査に入れない）", () => {
+    expect(guardSrc).not.toMatch(/toString/);
+    expect(guardSrc).not.toMatch(/selectedText/);
   });
 });

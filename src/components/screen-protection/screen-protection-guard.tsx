@@ -2,9 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useScreenProtection } from "./screen-protection-provider";
-import type {
-  ScreenProtectionEventType,
-  ScreenProtectionSurface,
+import {
+  resolveProtectedSurfaceForNode,
+  resolveProtectedSurfaceForRanges,
+  type ScreenProtectionEventType,
+  type ScreenProtectionSurface,
+  type DomNodeLike,
+  type DomRangeLike,
 } from "@/lib/screen-protection";
 
 /**
@@ -14,6 +18,9 @@ import type {
  *   bypass は fail-safe（判定確定まで false = 抑止側）。
  * - copy / cut / contextmenu は [data-pii-protected] 領域の中だけ抑止する。
  *   input / textarea / select / button / a / contenteditable は除外し通常操作・a11y を壊さない。
+ * - Codex P1: copy / cut は event.target だけでなく document.getSelection() の range
+ *   (commonAncestor / start / end) も確認し、非editable text 選択で target が body になる
+ *   抜け道を塞ぐ。contextmenu は従来どおり target 判定。
  * - 印刷はページ単位（beforeprint / Ctrl+Cmd+P）を監査し、@media print の警告バナーを出す。
  * - 監査送信は throttle 済の直接 fetch("/api/me/audit-events")（api-client は使わない）。
  *
@@ -30,16 +37,43 @@ const NOTICE_MS = 2500;
 // 同一 eventType の連打を間引く（クライアント側 throttle）。サーバ側 rate-limit と二段防御。
 const SEND_THROTTLE_MS = 800;
 
-/** イベント対象が PII 保護領域内（かつ操作系要素でない）なら surface を返す。 */
-function resolveProtectedSurface(
+const REGION_OPTS = {
+  piiSelector: PII_REGION_SELECTOR,
+  exemptSelector: EXEMPT_SELECTOR,
+  surfaceAttr: SURFACE_ATTR,
+};
+
+/** イベント対象（要素 / テキストノード）が PII 保護領域内なら surface を返す。 */
+function surfaceFromTarget(
   target: EventTarget | null,
 ): ScreenProtectionSurface | null {
-  if (!(target instanceof Element)) return null;
-  const region = target.closest(PII_REGION_SELECTOR);
-  if (!region) return null;
-  if (target.closest(EXEMPT_SELECTOR)) return null;
-  const s = region.getAttribute(SURFACE_ATTR);
-  return (s as ScreenProtectionSurface | null) ?? "dashboard";
+  if (!(target instanceof Node)) return null;
+  return (
+    (resolveProtectedSurfaceForNode(
+      target as unknown as DomNodeLike,
+      REGION_OPTS,
+    ) as ScreenProtectionSurface | null) ?? null
+  );
+}
+
+/**
+ * Codex P1: copy/cut では選択範囲も確認する。copy event の target が body / focused element
+ * でも、選択(range)の commonAncestor / start / end のいずれかが PII 領域内なら抑止対象にする。
+ */
+function surfaceFromSelection(): ScreenProtectionSurface | null {
+  if (typeof document === "undefined") return null;
+  const sel = document.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  const ranges: DomRangeLike[] = [];
+  for (let i = 0; i < sel.rangeCount; i++) {
+    ranges.push(sel.getRangeAt(i) as unknown as DomRangeLike);
+  }
+  return (
+    (resolveProtectedSurfaceForRanges(
+      ranges,
+      REGION_OPTS,
+    ) as ScreenProtectionSurface | null) ?? null
+  );
 }
 
 export default function ScreenProtectionGuard() {
@@ -76,7 +110,9 @@ export default function ScreenProtectionGuard() {
 
     const handleClipboard =
       (eventType: "copy" | "cut") => (e: Event) => {
-        const surface = resolveProtectedSurface(e.target);
+        // Codex P1: target だけでなく選択範囲も確認する。非editable text を選択して
+        // Ctrl/Cmd+C した場合に target が body / focused element になる抜け道を塞ぐ。
+        const surface = surfaceFromTarget(e.target) ?? surfaceFromSelection();
         if (!surface) return;
         e.preventDefault();
         sendAudit(eventType, surface);
@@ -85,7 +121,7 @@ export default function ScreenProtectionGuard() {
     const onCopy = handleClipboard("copy");
     const onCut = handleClipboard("cut");
     const onContextMenu = (e: Event) => {
-      const surface = resolveProtectedSurface(e.target);
+      const surface = surfaceFromTarget(e.target);
       if (!surface) return;
       e.preventDefault();
       sendAudit("contextmenu", surface);

@@ -205,3 +205,86 @@ export function buildScreenProtectionAuditDetail(
 ): ScreenProtectionAuditDetail {
   return { surface, trigger: eventTypeToTrigger(eventType) };
 }
+
+// ------------------------------------------------------------
+// S1b-3 / Codex P1: PII 保護領域の selection-aware 判定。
+// copy/cut では event.target だけでなく選択範囲(range)も見る必要がある
+// （非editable text を選択して Ctrl/Cmd+C すると target が body / focused element に
+//  なり、[data-pii-protected] 内の選択を取りこぼす抜け道があるため）。
+//
+// 実 DOM の Element / Node / Range は下記の構造的 interface を満たすので、guard 側で
+// そのまま渡せる。DOM を直接持たない純関数にして node 環境でモック単体テストする。
+// ------------------------------------------------------------
+
+export interface DomElementLike {
+  getAttribute(name: string): string | null;
+  closest(selector: string): DomElementLike | null;
+}
+export interface DomNodeLike {
+  nodeType: number;
+  parentElement: DomElementLike | null;
+}
+export interface DomRangeLike {
+  commonAncestorContainer: DomNodeLike;
+  startContainer: DomNodeLike;
+  endContainer: DomNodeLike;
+}
+export interface ProtectedRegionOpts {
+  /** PII 保護領域セレクタ（例: [data-pii-protected]）。 */
+  piiSelector: string;
+  /** 抑止しない操作系要素セレクタ（input/textarea/select/button/a/contenteditable）。 */
+  exemptSelector: string;
+  /** surface を読む属性名（例: data-pii-surface）。 */
+  surfaceAttr: string;
+}
+
+const DOM_ELEMENT_NODE = 1;
+
+function nodeToElement(node: DomNodeLike | null): DomElementLike | null {
+  if (!node) return null;
+  // element node は自身が DomElementLike（closest / getAttribute を持つ）。
+  if (node.nodeType === DOM_ELEMENT_NODE) {
+    return node as unknown as DomElementLike;
+  }
+  // text node 等は親要素から辿る。
+  return node.parentElement;
+}
+
+/**
+ * node が PII 保護領域内（piiSelector）かつ操作系要素(exemptSelector)の外にあれば
+ * その surface を返す。そうでなければ null。
+ */
+export function resolveProtectedSurfaceForNode(
+  node: DomNodeLike | null,
+  opts: ProtectedRegionOpts,
+): string | null {
+  const el = nodeToElement(node);
+  if (!el) return null;
+  const region = el.closest(opts.piiSelector);
+  if (!region) return null;
+  // input / textarea / select / button / a / contenteditable の中は除外（通常操作・a11y 維持）。
+  if (el.closest(opts.exemptSelector)) return null;
+  return region.getAttribute(opts.surfaceAttr) ?? "dashboard";
+}
+
+/**
+ * 選択範囲の commonAncestorContainer / startContainer / endContainer のいずれかが
+ * PII 保護領域内なら surface を返す（copy/cut の selection 判定）。
+ * これにより copy event の target が body / focused element でも検知できる。
+ */
+export function resolveProtectedSurfaceForRanges(
+  ranges: readonly DomRangeLike[],
+  opts: ProtectedRegionOpts,
+): string | null {
+  for (const range of ranges) {
+    for (const node of [
+      range.commonAncestorContainer,
+      range.startContainer,
+      range.endContainer,
+    ]) {
+      const surface = resolveProtectedSurfaceForNode(node, opts);
+      if (surface) return surface;
+    }
+  }
+  return null;
+}
