@@ -234,8 +234,13 @@ export interface DomRangeLike {
 export interface ProtectedRegionOpts {
   /** PII 保護領域セレクタ（例: [data-pii-protected]）。 */
   piiSelector: string;
-  /** 抑止しない操作系要素セレクタ（input/textarea/select/button/a/contenteditable）。 */
-  exemptSelector: string;
+  /**
+   * 抑止しない「編集系」要素セレクタ（input/textarea/select/contenteditable）。
+   * button / a は editable ではないため含めない。data-pii-protected が明示された
+   * PII 領域内であれば button / a 祖先があっても保護する（PII marker のある領域内
+   * テキストのみ。plain な button/link は pii 領域外なので従来どおり影響を受けない）。
+   */
+  editableSelector: string;
   /** surface を読む属性名（例: data-pii-surface）。 */
   surfaceAttr: string;
 }
@@ -253,8 +258,11 @@ function nodeToElement(node: DomNodeLike | null): DomElementLike | null {
 }
 
 /**
- * node が PII 保護領域内（piiSelector）かつ操作系要素(exemptSelector)の外にあれば
+ * node が PII 保護領域内（piiSelector）かつ editable 要素(editableSelector)の外にあれば
  * その surface を返す。そうでなければ null。
+ * button / a は editable ではないため除外しない: data-pii-protected の付いたテキストが
+ * button 内（例: owner/phone search suggestions）にあっても保護対象にする。plain な
+ * button/link は pii 領域外なので region=null となり、従来どおり surface は返らない。
  */
 export function resolveProtectedSurfaceForNode(
   node: DomNodeLike | null,
@@ -264,8 +272,9 @@ export function resolveProtectedSurfaceForNode(
   if (!el) return null;
   const region = el.closest(opts.piiSelector);
   if (!region) return null;
-  // input / textarea / select / button / a / contenteditable の中は除外（通常操作・a11y 維持）。
-  if (el.closest(opts.exemptSelector)) return null;
+  // input / textarea / select / contenteditable の中は除外（編集操作・a11y 維持）。
+  // button / a は除外しない（PII marker のあるテキストは button 内でも保護する）。
+  if (el.closest(opts.editableSelector)) return null;
   return region.getAttribute(opts.surfaceAttr) ?? "dashboard";
 }
 
@@ -273,8 +282,8 @@ export function resolveProtectedSurfaceForNode(
  * 選択範囲が PII 保護領域に関係するなら surface を返す（copy/cut の selection 判定）。
  *
  * 判定段階:
- *  - editable 除外維持: 選択範囲全体が操作系要素(input/textarea/contenteditable 等)内
- *    （commonAncestor が exempt 配下）なら抑止しない。
+ *  - editable 除外維持: 選択範囲全体が編集系要素(input/textarea/select/contenteditable)内
+ *    （commonAncestor が editable 配下）なら抑止しない。button / a は除外しない。
  *  - P1: commonAncestorContainer / startContainer / endContainer のいずれかが保護領域内
  *    （copy event の target が body でも検知）。
  *  - P2(Codex): start/end/commonAncestor がすべて保護領域外でも、選択が protected panel を
@@ -288,9 +297,10 @@ export function resolveProtectedSurfaceForRanges(
   opts: ProtectedRegionOpts,
 ): string | null {
   for (const range of ranges) {
-    // editable 除外: 選択範囲全体が操作系要素内なら抑止しない。
+    // editable 除外: 選択範囲全体が編集系要素(input/textarea/select/contenteditable)内なら
+    // 抑止しない。button / a は除外しない（PII marker があれば button 内テキストも保護）。
     const commonEl = nodeToElement(range.commonAncestorContainer);
-    if (commonEl && commonEl.closest(opts.exemptSelector)) continue;
+    if (commonEl && commonEl.closest(opts.editableSelector)) continue;
 
     // P1: container の ancestor 判定。
     for (const node of [

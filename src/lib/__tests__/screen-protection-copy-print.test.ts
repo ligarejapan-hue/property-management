@@ -119,9 +119,11 @@ describe("S1b-3: ScreenProtectionGuard 配線", () => {
     expect(guardSrc).toMatch(/useScreenProtection\(\)/);
   });
 
-  it("[data-pii-protected] 限定・入力/ボタン/リンク等を除外（helper に委譲）", () => {
+  it("[data-pii-protected] 限定・editable(input/textarea/select/contenteditable)のみ除外（button/a は除外しない）", () => {
     expect(guardSrc).toMatch(/\[data-pii-protected\]/);
-    expect(guardSrc).toMatch(/input, textarea, select, button, a/);
+    // editable のみ除外。button / a は editable bail に含めない（PII marker があれば button 内も保護）。
+    expect(guardSrc).toMatch(/input, textarea, select, \[contenteditable\]/);
+    expect(guardSrc).not.toMatch(/input, textarea, select, button, a/);
     expect(guardSrc).toMatch(/resolveProtectedSurfaceForNode/);
   });
 
@@ -148,6 +150,19 @@ describe("S1b-3: PII マーカ付与（実レンダリング面）", () => {
     expect(read("src/app/(dashboard)/admin/owners/[id]/page.tsx")).toMatch(
       /data-pii-protected[\s\S]*?data-pii-surface="owner"/,
     );
+  });
+
+  it("owner/phone search suggestions の所有者PII行に owner marker（button 全体ではなく PII 行のみ）", () => {
+    const page = read("src/app/(dashboard)/properties/page.tsx");
+    // owner surface marker は table cell と suggestion の 2 箇所以上。
+    const owners = page.match(/data-pii-surface="owner"/g) ?? [];
+    expect(owners.length).toBeGreaterThanOrEqual(2);
+    // suggestion の所有者PII行（o.name を含む div）に marker がある。
+    expect(page).toMatch(
+      /data-pii-protected[\s\S]{0,160}data-pii-surface="owner"[\s\S]{0,200}o\.name/,
+    );
+    // marker は <button> 自体には付けない（button 全体を保護対象にしない）。
+    expect(page).not.toMatch(/<button[^>]*data-pii-protected/);
   });
 
   it("物件詳細 / 取得履歴 / インポートの PII 面に surface を付与", () => {
@@ -191,8 +206,9 @@ describe("S1b-3: PII マーカ付与（実レンダリング面）", () => {
 describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
   const OPTS = {
     piiSelector: "[data-pii-protected]",
-    exemptSelector:
-      "input, textarea, select, button, a, [contenteditable], [contenteditable='true']",
+    // 17-A: editable のみ除外（button / a は含めない）。
+    editableSelector:
+      "input, textarea, select, [contenteditable], [contenteditable='true']",
     surfaceAttr: "data-pii-surface",
   };
 
@@ -221,13 +237,30 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
       closest: (sel) => (sel.includes("data-pii-protected") ? r : null),
     };
   }
-  // 保護領域内の操作系要素（例: <a>）。closest(exempt) は自身を返す。
-  function exemptChild(r: Fake): Fake {
+  // 保護領域内の編集系要素（input/textarea/select/contenteditable）。
+  // closest(editableSelector) は自身を返す → 従来どおり除外（null）。
+  function editableChild(r: Fake): Fake {
     const el: Fake = {
       nodeType: 1,
       parentElement: r,
       getAttribute: () => null,
-      closest: (sel) => (sel.includes("data-pii-protected") ? r : el),
+      closest: (sel) =>
+        sel.includes("data-pii-protected")
+          ? r
+          : sel.includes("contenteditable")
+            ? el
+            : null,
+    };
+    return el;
+  }
+  // 保護領域内の button / a（編集系ではない）。closest(editableSelector) は null →
+  // 17-A: PII marker があれば button 祖先内でも保護対象（surface を返す）。
+  function interactiveChild(r: Fake): Fake {
+    const el: Fake = {
+      nodeType: 1,
+      parentElement: r,
+      getAttribute: () => null,
+      closest: (sel) => (sel.includes("data-pii-protected") ? r : null),
     };
     return el;
   }
@@ -272,10 +305,19 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     expect(resolveProtectedSurfaceForNode(asNode(t), OPTS)).toBe("property");
   });
 
-  it("操作系要素(input/textarea/a/contenteditable)内は除外（null）", () => {
+  it("editable(input/textarea/select/contenteditable)内は除外（null）", () => {
     expect(
-      resolveProtectedSurfaceForNode(asNode(exemptChild(region("owner"))), OPTS),
+      resolveProtectedSurfaceForNode(asNode(editableChild(region("owner"))), OPTS),
     ).toBeNull();
+  });
+
+  it("17-A: button / a 祖先内でも PII marker があれば保護（editable ではないため除外しない）", () => {
+    expect(
+      resolveProtectedSurfaceForNode(
+        asNode(interactiveChild(region("owner"))),
+        OPTS,
+      ),
+    ).toBe("owner");
   });
 
   it("保護領域外（body）は null", () => {
@@ -325,12 +367,20 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     ).toBeNull();
   });
 
-  it("選択が操作系要素(editable)内なら除外（null）", () => {
+  it("選択が editable 内なら除外（null）", () => {
     const r = region("owner");
-    const e = exemptChild(r);
+    const e = editableChild(r);
     expect(
       resolveProtectedSurfaceForRanges([range(e, e, e)], [], OPTS),
     ).toBeNull();
+  });
+
+  it("17-A: 選択が button / a 内でも PII marker があれば保護（surface を返す）", () => {
+    const r = region("owner");
+    const b = interactiveChild(r);
+    expect(resolveProtectedSurfaceForRanges([range(b, b, b)], [], OPTS)).toBe(
+      "owner",
+    );
   });
 
   // ---- Codex P2: panel をまたぐ mixed selection を intersectsNode で検知 ----
@@ -354,8 +404,8 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
 
   it("Codex P2: 選択全体が editable 内なら intersect しても除外（editable 除外維持）", () => {
     const panel = region("owner");
-    const e = exemptChild(panel);
-    // commonAncestor が editable(<a>)配下 → intersect しても抑止しない。
+    const e = editableChild(panel);
+    // commonAncestor が editable(input/textarea/contenteditable)配下 → intersect しても抑止しない。
     const r = range(e, e, e, [panel]);
     expect(
       resolveProtectedSurfaceForRanges([r], [asEl(panel)], OPTS),
