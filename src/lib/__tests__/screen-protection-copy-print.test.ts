@@ -165,6 +165,21 @@ describe("S1b-3: PII マーカ付与（実レンダリング面）", () => {
     expect(page).not.toMatch(/<button[^>]*data-pii-protected/);
   });
 
+  it("17-A(Codex P2): properties/[id] の操作 button/link は個別に data-pii-protected を付けない（広い container 内 control は resolver が除外）", () => {
+    const page = read("src/app/(dashboard)/properties/[id]/page.tsx");
+    // 保護コンテナは root の 1 つだけ。back/edit/delete 等の個別 button/link には付与しない。
+    const markers = page.match(/data-pii-protected/g) ?? [];
+    expect(markers.length).toBe(1);
+    expect(page).not.toMatch(/<button[^>]*data-pii-protected/);
+  });
+
+  it("17-A(Codex P2): history-tab の filter/reset/pagination button も個別に data-pii-protected を付けない", () => {
+    const tab = read("src/components/properties/history-tab.tsx");
+    const markers = tab.match(/data-pii-protected/g) ?? [];
+    expect(markers.length).toBe(1);
+    expect(tab).not.toMatch(/<button[^>]*data-pii-protected/);
+  });
+
   it("物件詳細 / 取得履歴 / インポートの PII 面に surface を付与", () => {
     expect(read("src/app/(dashboard)/properties/[id]/page.tsx")).toMatch(
       /data-pii-protected data-pii-surface="property"/,
@@ -206,9 +221,11 @@ describe("S1b-3: PII マーカ付与（実レンダリング面）", () => {
 describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
   const OPTS = {
     piiSelector: "[data-pii-protected]",
-    // 17-A: editable のみ除外（button / a は含めない）。
+    // 17-A: 編集系は常に除外。
     editableSelector:
       "input, textarea, select, [contenteditable], [contenteditable='true']",
+    // 17-A(Codex P2): 広い container 内の button/a は除外、内側の明示 PII fragment は保護。
+    interactiveSelector: "button, a",
     surfaceAttr: "data-pii-surface",
   };
 
@@ -253,14 +270,60 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     };
     return el;
   }
-  // 保護領域内の button / a（編集系ではない）。closest(editableSelector) は null →
-  // 17-A: PII marker があれば button 祖先内でも保護対象（surface を返す）。
-  function interactiveChild(r: Fake): Fake {
-    const el: Fake = {
+  // 広い PII container r の内側にある通常 button/link（control）内の target。
+  // closest("button, a") は button を返し、その button の最近接 PII 祖先は r（=region）。
+  // → 17-A(Codex P2): 広い container 内の control として除外（null）。
+  function controlInBroadContainer(r: Fake): Fake {
+    const button: Fake = {
       nodeType: 1,
       parentElement: r,
       getAttribute: () => null,
-      closest: (sel) => (sel.includes("data-pii-protected") ? r : null),
+      closest: (sel) =>
+        sel.includes("data-pii-protected")
+          ? r
+          : sel.includes("button")
+            ? button
+            : null,
+    };
+    const el: Fake = {
+      nodeType: 1,
+      parentElement: button,
+      getAttribute: () => null,
+      closest: (sel) =>
+        sel.includes("data-pii-protected")
+          ? r
+          : sel.includes("button")
+            ? button
+            : null,
+    };
+    return el;
+  }
+  // button の内側にある明示的 PII fragment（小さな data-pii-protected span。例: suggestions の
+  // owner span）内の target。region は span 自身で、button の最近接 PII 祖先は span ではない
+  // （ここでは無し）。→ 17-A: 明示 PII fragment として保護（surface を返す）。
+  function piiSpanInButton(surface: string): Fake {
+    const span: Fake = {
+      nodeType: 1,
+      parentElement: null,
+      getAttribute: (n) => (n === "data-pii-surface" ? surface : null),
+      closest: (sel) => (sel.includes("data-pii-protected") ? span : null),
+    };
+    const button: Fake = {
+      nodeType: 1,
+      parentElement: null,
+      getAttribute: () => null,
+      closest: (sel) => (sel.includes("button") ? button : null),
+    };
+    const el: Fake = {
+      nodeType: 1,
+      parentElement: span,
+      getAttribute: () => null,
+      closest: (sel) =>
+        sel.includes("data-pii-protected")
+          ? span
+          : sel.includes("button")
+            ? button
+            : null,
     };
     return el;
   }
@@ -311,13 +374,28 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     ).toBeNull();
   });
 
-  it("17-A: button / a 祖先内でも PII marker があれば保護（editable ではないため除外しない）", () => {
+  it("17-A: button 内の明示的 PII fragment（owner span）は保護（surface を返す）", () => {
+    expect(
+      resolveProtectedSurfaceForNode(asNode(piiSpanInButton("owner")), OPTS),
+    ).toBe("owner");
+  });
+
+  it("17-A(Codex P2): 広い PII container 内の通常 button は保護しない（null）", () => {
     expect(
       resolveProtectedSurfaceForNode(
-        asNode(interactiveChild(region("owner"))),
+        asNode(controlInBroadContainer(region("property"))),
         OPTS,
       ),
-    ).toBe("owner");
+    ).toBeNull();
+  });
+
+  it("17-A(Codex P2): 広い PII container 内の通常 a/link は保護しない（null・button,a 共通扱い）", () => {
+    expect(
+      resolveProtectedSurfaceForNode(
+        asNode(controlInBroadContainer(region("history"))),
+        OPTS,
+      ),
+    ).toBeNull();
   });
 
   it("保護領域外（body）は null", () => {
@@ -375,12 +453,18 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     ).toBeNull();
   });
 
-  it("17-A: 選択が button / a 内でも PII marker があれば保護（surface を返す）", () => {
-    const r = region("owner");
-    const b = interactiveChild(r);
+  it("17-A: 選択が button 内の明示的 PII fragment 内なら保護（surface を返す）", () => {
+    const b = piiSpanInButton("owner");
     expect(resolveProtectedSurfaceForRanges([range(b, b, b)], [], OPTS)).toBe(
       "owner",
     );
+  });
+
+  it("17-A(Codex P2): 選択が広い container 内の通常 button 内なら抑止しない（null）", () => {
+    const b = controlInBroadContainer(region("property"));
+    expect(
+      resolveProtectedSurfaceForRanges([range(b, b, b)], [], OPTS),
+    ).toBeNull();
   });
 
   // ---- Codex P2: panel をまたぐ mixed selection を intersectsNode で検知 ----

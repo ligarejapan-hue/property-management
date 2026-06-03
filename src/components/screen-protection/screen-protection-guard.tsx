@@ -31,11 +31,13 @@ import {
 
 const PII_REGION_SELECTOR = "[data-pii-protected]";
 const SURFACE_ATTR = "data-pii-surface";
-// 編集系要素(input/textarea/select/contenteditable)の中は抑止しない（編集操作・a11y 維持）。
-// button / a は editable ではないため含めない: data-pii-protected が付いた PII テキストは
-// button 内（owner/phone search suggestions 等）でも copy/cut/contextmenu 抑止＋監査の対象にする。
+// 編集系要素(input/textarea/select/contenteditable)の中は常に抑止しない（編集操作・a11y 維持）。
 const EDITABLE_SELECTOR =
   "input, textarea, select, [contenteditable], [contenteditable='true']";
+// interactive wrapper（button / a）。広い [data-pii-protected] container の中にあるだけの
+// 通常 button/link は抑止しない（contextmenu 等の UX を壊さない）。ただし button / a より内側に
+// 明示的な PII fragment（owner/phone search suggestions の owner span 等）がある場合のみ保護する。
+const INTERACTIVE_SELECTOR = "button, a";
 const NOTICE_MS = 2500;
 // 同一 eventType の連打を間引く（クライアント側 throttle）。サーバ側 rate-limit と二段防御。
 const SEND_THROTTLE_MS = 800;
@@ -43,6 +45,7 @@ const SEND_THROTTLE_MS = 800;
 const REGION_OPTS = {
   piiSelector: PII_REGION_SELECTOR,
   editableSelector: EDITABLE_SELECTOR,
+  interactiveSelector: INTERACTIVE_SELECTOR,
   surfaceAttr: SURFACE_ATTR,
 };
 
