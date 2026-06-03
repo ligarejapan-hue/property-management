@@ -15,6 +15,7 @@
  *  - mutation 後 refetch が page/limit/status を維持（fetchJob deps）＋ page>totalPages クランプ
  *  - batch resolve は B2 では無効化（ページング表示中）＋ B3 注記
  *  - 候補5: limit 切替（50/100・page=1 リセット・URL 同期）とページジャンプ（totalPages 範囲内）
+ *  - Phase 2: 理由別 filter（reason state/URL 同期/page=1/一括ボタン非表示 gating・PII なし token）
  */
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
@@ -90,8 +91,9 @@ describe("import job detail page — B2 pagination 配線 (source-assertion)", (
     expect(pageSrc).toMatch(/const filteredRows = job\?\.rows \?\? \[\];/);
   });
 
-  it("mutation 後 refetch が page/limit/status を維持（fetchJob deps に limit 込み）", () => {
-    expect(pageSrc).toMatch(/\}, \[jobId, page, filter, limit\]\);/);
+  it("mutation 後 refetch が page/limit/status/reason を維持（fetchJob deps）", () => {
+    expect(pageSrc).toMatch(/\}, \[jobId, page, filter, limit, reason\]\);/);
+    expect(pageSrc).not.toMatch(/\}, \[jobId, page, filter, limit\]\);/);
     expect(pageSrc).not.toMatch(/\}, \[jobId, page, filter\]\);/);
   });
 
@@ -229,5 +231,69 @@ describe("import job detail page — 候補5 ページング UX (source-assertio
     expect(pageSrc).toMatch(/job\.pagination\.hasNextPage/);
     expect(pageSrc).toMatch(/全件スキップ/);
     expect(pageSrc).toMatch(/重複候補のみスキップ/);
+  });
+});
+
+describe("import job detail page — 理由別 filter Phase 2 (source-assertion)", () => {
+  it("reason state を持ち URL から復元する（allowlist 外は all に正規化）", () => {
+    expect(pageSrc).toMatch(
+      /const \[reason, setReason\] = useState<ReasonFilter>\(initialReason\);/,
+    );
+    expect(pageSrc).toMatch(/searchParams\.get\("reason"\)/);
+    expect(pageSrc).toMatch(/ROW_REASON_OPTIONS\.some\(\(o\) => o\.key === r\)/);
+  });
+
+  it("token は server VALID_ROW_REASONS と一致し B4 の 'duplicate' を使わない", () => {
+    for (const token of [
+      "dup_candidate",
+      "address_dup",
+      "no_address",
+      "owner_unmatched",
+      "no_key",
+      "building_unresolved",
+    ]) {
+      expect(pageSrc).toContain(`key: "${token}"`);
+    }
+    // bulk-resolve scope と衝突する token 名は使わない（B4.1/B4 と概念分離）。
+    expect(pageSrc).not.toMatch(/key: "duplicate"/);
+  });
+
+  it("reason 変更で page=1 に戻す（セレクトは changeReason 経由）", () => {
+    expect(pageSrc).toMatch(
+      /const changeReason = \(next: ReasonFilter\) => \{[\s\S]*?setReason\(next\);[\s\S]*?setPage\(1\);/,
+    );
+    expect(pageSrc).toMatch(
+      /onChange=\{\(e\) => changeReason\(e\.target\.value as ReasonFilter\)\}/,
+    );
+  });
+
+  it("URL 同期: 未指定（all）は載せず、fetch にも all を送らない", () => {
+    expect(pageSrc).toMatch(
+      /if \(reason !== "all"\) sp\.set\("reason", reason\);/,
+    );
+    expect(pageSrc).toMatch(
+      /reason:\s*reason === "all" \? undefined : reason,/,
+    );
+  });
+
+  it("reason 適用中は bulk ボタンを非表示にしヒントを出す（誤操作防止）", () => {
+    // 一括操作ブロックは reason === "all" のときだけ描画する。
+    expect(pageSrc).toMatch(
+      /\{reason === "all" &&\s*\(filter === "needs_review" \|\| filter === "error"\) &&\s*counts\[filter\] > 0 &&/,
+    );
+    // 適用中は非表示の理由をヒントで明示する。
+    expect(pageSrc).toMatch(/理由フィルタ解除後に一括操作できます/);
+    expect(pageSrc).toMatch(
+      /\{reason !== "all" &&\s*\(filter === "needs_review" \|\| filter === "error"\) &&\s*counts\[filter\] > 0 &&/,
+    );
+  });
+
+  it("既存 pagination/limit/jump/B3/B4 UI を壊さない（ドロップダウン併設）", () => {
+    expect(pageSrc).toMatch(/const changeLimit = \(next: number\)/);
+    expect(pageSrc).toMatch(/const handleGoto = /);
+    expect(pageSrc).toMatch(/全件スキップ/);
+    expect(pageSrc).toMatch(/重複候補のみスキップ/);
+    expect(pageSrc).toMatch(/すべての理由/);
+    expect(pageSrc).toMatch(/ROW_REASON_OPTIONS\.map/);
   });
 });

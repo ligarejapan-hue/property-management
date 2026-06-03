@@ -116,6 +116,20 @@ interface SearchResult {
 
 type FilterStatus = "all" | "needs_review" | "error" | "success" | "skipped";
 
+// 理由別 filter（Phase 2）: token は server の VALID_ROW_REASONS と一致させる
+// （URL-safe な英語 enum・PII なし）。B4 bulk-resolve の scope="duplicate" と
+// 衝突しないよう "duplicate" という token は使わない（dup_candidate）。
+const ROW_REASON_OPTIONS = [
+  { key: "dup_candidate", label: "重複候補" },
+  { key: "address_dup", label: "住所重複（既存物件）" },
+  { key: "no_address", label: "住所なし/空" },
+  { key: "owner_unmatched", label: "所有者未突合" },
+  { key: "no_key", label: "突合キー不足" },
+  { key: "building_unresolved", label: "棟未解決" },
+] as const;
+type RowReason = (typeof ROW_REASON_OPTIONS)[number]["key"];
+type ReasonFilter = RowReason | "all";
+
 // ---------------------------------------------------------------------------
 // Status config
 // ---------------------------------------------------------------------------
@@ -182,6 +196,13 @@ export default function ImportJobDetailPage() {
     const n = Number(searchParams.get("limit"));
     return (ROW_LIMIT_OPTIONS as readonly number[]).includes(n) ? n : ROW_LIMIT;
   })();
+  // 理由別 filter（Phase 2）: reason を URL から復元。allowlist 外は未指定（all）に正規化。
+  const initialReason: ReasonFilter = (() => {
+    const r = searchParams.get("reason");
+    return r && ROW_REASON_OPTIONS.some((o) => o.key === r)
+      ? (r as RowReason)
+      : "all";
+  })();
 
   const [job, setJob] = useState<ImportJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -191,6 +212,8 @@ export default function ImportJobDetailPage() {
   // 候補5: 表示件数（limit）切替とページジャンプ入力。
   const [limit, setLimit] = useState<number>(initialLimit);
   const [gotoPage, setGotoPage] = useState<string>("");
+  // 理由別 filter（Phase 2）: 閲覧用の行絞り込み（"all"=未指定）。
+  const [reason, setReason] = useState<ReasonFilter>(initialReason);
 
   // この取込で作成・更新された物件一覧（物件CSVジョブのみ）。
   // 主の job fetch と並列に取得する。失敗時は null のまま縮退表示。
@@ -227,6 +250,8 @@ export default function ImportJobDetailPage() {
         page,
         limit,
         status: filter === "all" ? undefined : filter,
+        // 理由別 filter（Phase 2）: 未指定（all）は送らない（全理由・後方互換）。
+        reason: reason === "all" ? undefined : reason,
       });
       const j = data as ImportJob;
       setJob(j);
@@ -238,7 +263,7 @@ export default function ImportJobDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [jobId, page, filter, limit]);
+  }, [jobId, page, filter, limit, reason]);
 
   // この取込で作成・更新された物件一覧。job 本体とは別 API。
   // 行解決で createdId が増えた後にも最新化したいので、resolve / retry の
@@ -265,9 +290,11 @@ export default function ImportJobDetailPage() {
     if (page > 1) sp.set("page", String(page));
     // 候補5: 既定（ROW_LIMIT）以外のときだけ limit を URL に載せる（page/status と整合）。
     if (limit !== ROW_LIMIT) sp.set("limit", String(limit));
+    // 理由別 filter（Phase 2）: 未指定（all）のときは URL に載せない。
+    if (reason !== "all") sp.set("reason", reason);
     const qs = sp.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [filter, page, limit, pathname, router]);
+  }, [filter, page, limit, reason, pathname, router]);
 
   // B2: status タブ切り替え時は 1 ページ目に戻す。
   const changeFilter = (next: FilterStatus) => {
@@ -278,6 +305,12 @@ export default function ImportJobDetailPage() {
   // 候補5: 表示件数（limit）切替時は 1 ページ目に戻す（fetchJob deps の limit で再取得）。
   const changeLimit = (next: number) => {
     setLimit(next);
+    setPage(1);
+  };
+
+  // 理由別 filter（Phase 2）: 理由変更時は 1 ページ目に戻す。
+  const changeReason = (next: ReasonFilter) => {
+    setReason(next);
     setPage(1);
   };
 
@@ -859,14 +892,38 @@ export default function ImportJobDetailPage() {
           </button>
         ))}
 
+        {/* 理由別 filter（Phase 2）: 閲覧用・全タブで表示。変更時は changeReason で page=1。
+            token は server VALID_ROW_REASONS と一致（B4 scope="duplicate" と衝突しない命名）。 */}
+        <label className="flex items-center gap-1">
+          <span className="text-xs text-gray-500">理由</span>
+          <select
+            value={reason}
+            onChange={(e) => changeReason(e.target.value as ReasonFilter)}
+            disabled={loading}
+            className="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
+            aria-label="理由で絞り込み"
+          >
+            <option value="all">すべての理由</option>
+            {ROW_REASON_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         {/* 右側: 一括操作 + CSVエクスポート */}
         {((filter === "needs_review" || filter === "error") &&
           counts[filter] > 0) ||
         counts.error > 0 ||
         counts.needs_review > 0 ? (
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            {/* Batch actions: 現在のフィルタが needs_review / error のときのみ */}
-            {(filter === "needs_review" || filter === "error") &&
+            {/* Batch actions: 現在のフィルタが needs_review / error のときのみ。
+                理由別 filter（Phase 2）適用中は **非表示** にする＝一括操作の対象は
+                常にジョブ全体の status/scope 集合（理由で絞らない）であり、絞った
+                表示と一括件数が食い違う誤操作を防ぐ（disabled ではなく非表示を採用）。 */}
+            {reason === "all" &&
+              (filter === "needs_review" || filter === "error") &&
               counts[filter] > 0 && (
                 <>
                   <button
@@ -900,6 +957,15 @@ export default function ImportJobDetailPage() {
                       </button>
                     )}
                 </>
+              )}
+
+            {/* 理由別 filter 適用中の一括操作ヒント（非表示の理由をユーザーに明示） */}
+            {reason !== "all" &&
+              (filter === "needs_review" || filter === "error") &&
+              counts[filter] > 0 && (
+                <span className="text-xs text-gray-500">
+                  理由フィルタ解除後に一括操作できます
+                </span>
               )}
 
             {/* CSV エクスポート: error / needs_review が1件以上あるときに表示

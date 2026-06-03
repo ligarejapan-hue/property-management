@@ -190,6 +190,7 @@ describe("GET /api/import/jobs/[jobId] — rows pagination (PR-B / B1)", () => {
       hasNextPage: false,
       hasPrevPage: false,
       status: null,
+      reason: null, // Phase 2: additive（未指定）
     });
   });
 
@@ -215,6 +216,7 @@ describe("GET /api/import/jobs/[jobId] — rows pagination (PR-B / B1)", () => {
       hasNextPage: true, // 2 < 3
       hasPrevPage: true, // 2 > 1
       status: null,
+      reason: null, // Phase 2: additive（未指定）
     });
   });
 
@@ -519,5 +521,135 @@ describe("GET /api/import/jobs/[jobId] — rows pagination (PR-B / B1)", () => {
 
     expect(status).toBe(404);
     expect(body.error.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("GET /api/import/jobs/[jobId] — 理由別 filter (Phase 2)", () => {
+  // server の ROW_REASON_WHERE と完全一致させる期待値（route 変更時は両方を更新）。
+  // message はテンプレ prefix / exact 値のみ＝PII を含まない。
+  const REASON_WHERE = {
+    dup_candidate: { errorMessage: { startsWith: "重複" } },
+    address_dup: { errorMessage: { startsWith: "住所が既存物件と重複" } },
+    no_address: {
+      OR: [
+        { errorMessage: { startsWith: "住所なし" } },
+        { errorMessage: "住所が空です" },
+      ],
+    },
+    owner_unmatched: { errorMessage: "要レビュー（所有者未突合）" },
+    no_key: { errorMessage: "要レビュー（キー不足）" },
+    building_unresolved: {
+      OR: [
+        { errorMessage: { startsWith: "棟名が見つかりません" } },
+        { errorMessage: { contains: "棟が複数見つかりました" } },
+        { errorMessage: { contains: "棟候補" } },
+      ],
+    },
+  } as const;
+
+  it.each(Object.keys(REASON_WHERE) as (keyof typeof REASON_WHERE)[])(
+    "reason=%s: rows where に理由条件を AND 合成する",
+    async (token) => {
+      setup({ filteredTotal: 2 });
+
+      await callGet(`?reason=${token}&page=1&limit=10`);
+
+      expect(findManyArgs().where).toEqual({
+        jobId: JOB_ID,
+        ...REASON_WHERE[token],
+      });
+    },
+  );
+
+  it("reason + status は AND 直交合成・pagination.reason を additive に返す", async () => {
+    setup({ filteredTotal: 1 });
+
+    const { body } = await callGet(
+      "?status=needs_review&reason=dup_candidate&page=1&limit=10",
+    );
+
+    expect(findManyArgs().where).toEqual({
+      jobId: JOB_ID,
+      status: "needs_review",
+      errorMessage: { startsWith: "重複" },
+    });
+    expect(body.pagination.reason).toBe("dup_candidate");
+    expect(body.pagination.status).toBe("needs_review");
+  });
+
+  it("不正な reason は無視（全理由扱い・where 不変＝後方互換）", async () => {
+    setup({ filteredTotal: 4 });
+
+    // B4 bulk の scope 値 "duplicate" は reason token として受け付けない（衝突回避）。
+    const { body } = await callGet("?reason=duplicate&page=1&limit=5");
+
+    expect(findManyArgs().where).toEqual({ jobId: JOB_ID });
+    expect(body.pagination.reason).toBeNull();
+  });
+
+  it("reason 指定時も summary / duplicateCount / duplicateActionableCount の where は不変（jobId-only / 既存述語）", async () => {
+    setup({
+      statusGroups: [{ status: "needs_review", _count: { _all: 6 } }],
+      filteredTotal: 6,
+      duplicateCount: 4,
+      duplicateActionableCount: 3,
+    });
+
+    const { body } = await callGet("?reason=address_dup&page=1&limit=10");
+
+    // summary 用 groupBy は jobId 全体（reason 非依存）。
+    const statusGroupByCall = pm.importJobRow.groupBy.mock.calls
+      .map((c) => c[0])
+      .find((a) => a.by.includes("status"));
+    expect(statusGroupByCall.where).toEqual({ jobId: JOB_ID });
+
+    // duplicateCount / duplicateActionableCount の述語は既存のまま（reason 非依存）。
+    const dupCall = pm.importJobRow.count.mock.calls
+      .map((c) => c[0])
+      .find(
+        (a) =>
+          a.where?.errorMessage?.startsWith === "重複" &&
+          typeof a.where?.status === "object",
+      );
+    expect(dupCall.where).toEqual({
+      jobId: JOB_ID,
+      status: { in: ["needs_review", "skipped"] },
+      errorMessage: { startsWith: "重複" },
+    });
+    const actCall = pm.importJobRow.count.mock.calls
+      .map((c) => c[0])
+      .find(
+        (a) =>
+          a.where?.errorMessage?.startsWith === "重複" &&
+          typeof a.where?.status === "string",
+      );
+    expect(actCall.where).toEqual({
+      jobId: JOB_ID,
+      status: "needs_review",
+      errorMessage: { startsWith: "重複" },
+    });
+    expect(body.duplicateCount).toBe(4);
+    expect(body.duplicateActionableCount).toBe(3);
+  });
+
+  it("totalRows は reason 合成後の where ベース（ページングの母数）", async () => {
+    setup({});
+    // count の戻りを where ごとに振り分ける:
+    //   合成 rowWhere（owner_unmatched）と一致 → 7（filteredTotal）／それ以外 → 0
+    const composed = {
+      jobId: JOB_ID,
+      errorMessage: "要レビュー（所有者未突合）",
+    };
+    pm.importJobRow.count.mockImplementation((args: { where?: unknown }) =>
+      Promise.resolve(
+        JSON.stringify(args.where) === JSON.stringify(composed) ? 7 : 0,
+      ),
+    );
+
+    const { body } = await callGet("?reason=owner_unmatched&page=1&limit=5");
+
+    expect(body.pagination.totalRows).toBe(7);
+    expect(body.pagination.totalPages).toBe(2); // ceil(7/5)
+    expect(body.pagination.reason).toBe("owner_unmatched");
   });
 });
