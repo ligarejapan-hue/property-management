@@ -198,7 +198,12 @@ export default function AdminOwnerDetailPage() {
             <h2 className="mb-3 text-sm font-semibold text-gray-700">
               Owner 概要
             </h2>
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm md:grid-cols-2">
+            {/* 17-A: masked 値であっても所有者 PII 面として copy/cut/contextmenu 抑止＋監査の対象にする。 */}
+            <dl
+              className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm md:grid-cols-2"
+              data-pii-protected
+              data-pii-surface="owner"
+            >
               <Field label="氏名" value={owner.ownerNameMasked} />
               <Field
                 label="既存法人番号"

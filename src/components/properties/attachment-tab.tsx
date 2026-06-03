@@ -460,6 +460,11 @@ function PreviewModal({
       <div
         className="relative flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
+        // 17-A: 謄本(registry) PDF プレビューの外側コンテナを registry surface として扱う。
+        //       iframe 内の PDF viewer は別ドキュメントで囲めないため、モーダルのコンテナに付与する。
+        //       registry 以外（画像等）の添付には付与しない（undefined で属性自体を出さない）。
+        data-pii-protected={isRegistry ? true : undefined}
+        data-pii-surface={isRegistry ? "registry" : undefined}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2">

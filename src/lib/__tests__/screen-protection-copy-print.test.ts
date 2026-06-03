@@ -136,10 +136,23 @@ describe("S1b-3: ScreenProtectionGuard 配線", () => {
   });
 });
 
-describe("S1b-3: PII マーカ付与（初期面）", () => {
-  it("4 つの PII 面に data-pii-protected / data-pii-surface を付与", () => {
-    expect(read("src/components/owners/owner-detail-panel.tsx")).toMatch(
-      /data-pii-protected[\s\S]*data-pii-surface="owner"/,
+describe("S1b-3: PII マーカ付与（実レンダリング面）", () => {
+  // 17-A: source-assertion は「実際に描画される画面」を対象にする。
+  // 未配線の dead code（owner-detail-panel.tsx）だけを見て安心しないこと。
+  it("実画面で表示される所有者 PII 面に owner surface を付与（物件一覧 / 管理 Owner 詳細）", () => {
+    // 物件一覧の所有者名セル（17-A 追加）
+    expect(read("src/app/(dashboard)/properties/page.tsx")).toMatch(
+      /data-pii-protected data-pii-surface="owner"/,
+    );
+    // 管理 Owner 詳細（masked 値でも owner surface として扱う・17-A 追加）
+    expect(read("src/app/(dashboard)/admin/owners/[id]/page.tsx")).toMatch(
+      /data-pii-protected[\s\S]*?data-pii-surface="owner"/,
+    );
+  });
+
+  it("物件詳細 / 取得履歴 / インポートの PII 面に surface を付与", () => {
+    expect(read("src/app/(dashboard)/properties/[id]/page.tsx")).toMatch(
+      /data-pii-protected data-pii-surface="property"/,
     );
     expect(read("src/components/properties/history-tab.tsx")).toMatch(
       /data-pii-protected data-pii-surface="history"/,
@@ -147,9 +160,20 @@ describe("S1b-3: PII マーカ付与（初期面）", () => {
     expect(read("src/app/(dashboard)/import/page.tsx")).toMatch(
       /data-pii-protected data-pii-surface="import"/,
     );
-    expect(read("src/app/(dashboard)/properties/[id]/page.tsx")).toMatch(
-      /data-pii-protected data-pii-surface="property"/,
-    );
+  });
+
+  it("registry PDF preview の外側コンテナに registry surface を付与（17-A）", () => {
+    const attach = read("src/components/properties/attachment-tab.tsx");
+    expect(attach).toMatch(/data-pii-protected=\{isRegistry/);
+    expect(attach).toMatch(/data-pii-surface=\{isRegistry \? "registry"/);
+  });
+
+  it("再利用候補 owner-detail-panel.tsx は marker を保持するが未配線（dead code）であることを明示", () => {
+    // 削除はしない。ただし live 面の担保は上記テストで別途保証する。
+    const panel = read("src/components/owners/owner-detail-panel.tsx");
+    expect(panel).toMatch(/data-pii-protected[\s\S]*?data-pii-surface="owner"/);
+    // 未配線である旨のコメントが残っていること（dead code を live と誤認させない）。
+    expect(panel).toMatch(/未配線/);
   });
 
   it("16-B B3 の import/jobs/[jobId]/page には付与しない（非衝突）", () => {

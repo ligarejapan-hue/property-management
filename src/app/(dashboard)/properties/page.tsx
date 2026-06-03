@@ -1108,9 +1108,13 @@ function PropertiesPageInner() {
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">
-                    {(property.ownerNames ?? []).length > 0
-                      ? (property.ownerNames ?? []).join("、")
-                      : "—"}
+                    {/* 17-A: 所有者名 PII を copy/cut/contextmenu 抑止＋監査の対象に含める。
+                        行全体ではなく所有者名セルの表示範囲のみ最小限で囲む。 */}
+                    <span data-pii-protected data-pii-surface="owner">
+                      {(property.ownerNames ?? []).length > 0
+                        ? (property.ownerNames ?? []).join("、")
+                        : "—"}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     {warning && (
