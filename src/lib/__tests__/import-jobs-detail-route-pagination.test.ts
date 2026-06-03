@@ -100,6 +100,7 @@ interface SetupArgs {
   updatedGroups?: { jobId: string; _count: { _all: number } }[];
   filteredTotal?: number;
   duplicateCount?: number;
+  duplicateActionableCount?: number;
   markerRow?: { rawData: unknown } | null;
 }
 
@@ -110,6 +111,7 @@ function setup({
   updatedGroups = [],
   filteredTotal = 0,
   duplicateCount = 0,
+  duplicateActionableCount = 0,
   markerRow = null,
 }: SetupArgs) {
   pm.importJob.findUnique.mockResolvedValue(job);
@@ -118,13 +120,24 @@ function setup({
   pm.importJobRow.groupBy.mockImplementation((args: { by: string[] }) =>
     Promise.resolve(args.by.includes("status") ? statusGroups : updatedGroups),
   );
+  // count は3種:
+  //   filteredTotal               : errorMessage 条件なし
+  //   duplicateCount              : 「重複」始まり かつ status:{in:[...]}（オブジェクト）
+  //   duplicateActionableCount    : 「重複」始まり かつ status:"needs_review"（文字列）
   pm.importJobRow.count.mockImplementation(
-    (args: { where?: { errorMessage?: { startsWith?: string } } }) =>
-      Promise.resolve(
-        args.where?.errorMessage?.startsWith === "重複"
-          ? duplicateCount
-          : filteredTotal,
-      ),
+    (args: {
+      where?: { status?: unknown; errorMessage?: { startsWith?: string } };
+    }) => {
+      const where = args.where ?? {};
+      if (where.errorMessage?.startsWith === "重複") {
+        return Promise.resolve(
+          typeof where.status === "string"
+            ? duplicateActionableCount
+            : duplicateCount,
+        );
+      }
+      return Promise.resolve(filteredTotal);
+    },
   );
 }
 
@@ -373,6 +386,57 @@ describe("GET /api/import/jobs/[jobId] — rows pagination (PR-B / B1)", () => {
       status: { in: ["needs_review", "skipped"] },
       errorMessage: { startsWith: "重複" },
     });
+  });
+
+  it("duplicateActionableCount(B4 Codex P2): needs_review のみ・skipped 重複があっても過大にならない", async () => {
+    // needs_review 重複3 + skipped 重複1 → duplicateCount=4 / actionable=3
+    setup({
+      statusGroups: [
+        { status: "needs_review", _count: { _all: 6 } },
+        { status: "skipped", _count: { _all: 5 } },
+      ],
+      filteredTotal: 11,
+      duplicateCount: 4, // needs_review + skipped × 「重複」始まり
+      duplicateActionableCount: 3, // needs_review のみ × 「重複」始まり
+    });
+
+    const { body } = await callGet("");
+
+    expect(body.duplicateCount).toBe(4);
+    expect(body.duplicateActionableCount).toBe(3);
+
+    // duplicateCount は needs_review + skipped（status は { in: [...] }）。
+    const dupCall = pm.importJobRow.count.mock.calls
+      .map((c) => c[0])
+      .find(
+        (a) =>
+          a.where?.errorMessage?.startsWith === "重複" &&
+          typeof a.where?.status === "object",
+      );
+    expect(dupCall.where).toEqual({
+      jobId: JOB_ID,
+      status: { in: ["needs_review", "skipped"] },
+      errorMessage: { startsWith: "重複" },
+    });
+
+    // duplicateActionableCount は needs_review のみ（status は文字列）＝bulk endpoint と一致。
+    const actCall = pm.importJobRow.count.mock.calls
+      .map((c) => c[0])
+      .find(
+        (a) =>
+          a.where?.errorMessage?.startsWith === "重複" &&
+          typeof a.where?.status === "string",
+      );
+    expect(actCall.where).toEqual({
+      jobId: JOB_ID,
+      status: "needs_review",
+      errorMessage: { startsWith: "重複" },
+    });
+
+    // 確認件数（actionable）は duplicateCount を上回らない（過大表示にならない）。
+    expect(body.duplicateActionableCount).toBeLessThanOrEqual(
+      body.duplicateCount,
+    );
   });
 
   it("レスポンス root に rows を維持し summary を additive に返す（非破壊）", async () => {

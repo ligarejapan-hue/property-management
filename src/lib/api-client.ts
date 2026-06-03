@@ -419,6 +419,8 @@ export async function fetchImportJobDetail(
       // PR-B(B1): server-side で確定する additive フィールド。
       isReceptionOwnerJob: false,
       duplicateCount: 0,
+      // B4(Codex P2): bulk-resolve scope="duplicate" の対象件数（needs_review のみ・「重複」始まり）。
+      duplicateActionableCount: 0,
       pagination: {
         page: 1,
         limit: 3,
@@ -624,13 +626,17 @@ export async function resolveImportRow(
 }
 
 // B3: scope に一致する全 actionable 行を server-side で一括解決する（client は ID を持たない）。
+// B4: scope に "duplicate"（重複候補のみ＝needs_review かつ errorMessage「重複」始まり）を追加。
 export interface BulkResolveResponse {
   affectedCount: number;
 }
 
 export async function bulkResolveImportRows(
   jobId: string,
-  body: { action: "skip" | "mark_error"; scope: "needs_review" | "error" },
+  body: {
+    action: "skip" | "mark_error";
+    scope: "needs_review" | "error" | "duplicate";
+  },
 ): Promise<BulkResolveResponse> {
   if (USE_MOCK) {
     await mockDelay();

@@ -193,3 +193,76 @@ describe("POST bulk-resolve — B3", () => {
     expect(pm.importJobRow.updateMany).not.toHaveBeenCalled();
   });
 });
+
+describe("POST bulk-resolve — B4 duplicate scope", () => {
+  it("scope=duplicate / action=skip: where は status 非依存（needs_review + 「重複」始まり）", async () => {
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 4 });
+    const { status, body } = await callPost({
+      action: "skip",
+      scope: "duplicate",
+    });
+    expect(status).toBe(200);
+    expect(body.affectedCount).toBe(4);
+    expect(pm.importJobRow.updateMany).toHaveBeenCalledTimes(1);
+    const arg = pm.importJobRow.updateMany.mock.calls[0][0];
+    // duplicate は status ではない: where は needs_review + errorMessage「重複」始まり。
+    expect(arg.where).toEqual({
+      jobId: JOB_ID,
+      status: "needs_review",
+      errorMessage: { startsWith: "重複" },
+    });
+    // status へ "duplicate" を直接渡していないこと（reception「住所」重複は対象外）。
+    expect(arg.where.status).toBe("needs_review");
+    // skip の data は B3 と同一（解決後は「重複」始まりでなくなり duplicateCount 単調減少）。
+    expect(arg.data).toEqual({ status: "skipped", errorMessage: "手動スキップ" });
+    expect(arg.where).not.toHaveProperty("id");
+    expect(recalculateJobCounts).toHaveBeenCalledWith(JOB_ID);
+  });
+
+  it("scope=duplicate / action=mark_error: where は同一・data はエラー確定", async () => {
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 2 });
+    const { status, body } = await callPost({
+      action: "mark_error",
+      scope: "duplicate",
+    });
+    expect(status).toBe(200);
+    expect(body.affectedCount).toBe(2);
+    const arg = pm.importJobRow.updateMany.mock.calls[0][0];
+    expect(arg.where).toEqual({
+      jobId: JOB_ID,
+      status: "needs_review",
+      errorMessage: { startsWith: "重複" },
+    });
+    expect(arg.data).toEqual({ status: "error", errorMessage: "手動エラー確定" });
+  });
+
+  it("AuditLog detail は { action, status:'duplicate', count } のみ（PII なし）", async () => {
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 6 });
+    await callPost({ action: "skip", scope: "duplicate" });
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const audit = writeAuditLog.mock.calls[0][0];
+    expect(audit.action).toBe("import_rows_bulk_resolve");
+    expect(audit.targetTable).toBe("import_jobs");
+    expect(audit.targetId).toBe(JOB_ID);
+    // detail.status には scope 値（"duplicate"）を格納（既存3キー形状維持）。
+    expect(audit.detail).toEqual({
+      action: "skip",
+      status: "duplicate",
+      count: 6,
+    });
+    const detailKeys = Object.keys(audit.detail);
+    for (const k of ["name", "address", "phone", "rawData", "errorMessage"]) {
+      expect(detailKeys).not.toContain(k);
+    }
+  });
+
+  it("scope=duplicate でも count 0 は 200（冪等・再実行は 0 件）", async () => {
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 0 });
+    const { status, body } = await callPost({
+      action: "skip",
+      scope: "duplicate",
+    });
+    expect(status).toBe(200);
+    expect(body.affectedCount).toBe(0);
+  });
+});
