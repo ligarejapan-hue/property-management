@@ -43,6 +43,11 @@ function renderField(label: string, value: string | null): React.ReactNode {
   );
 }
 
+// NOTE(17-A): この component は現状どこからも import / レンダリングされていない（未配線の再利用候補）。
+// 実画面の所有者 PII に対する copy/cut/contextmenu 抑止・監査は、物件一覧
+// (src/app/(dashboard)/properties/page.tsx) と 管理 Owner 詳細
+// (src/app/(dashboard)/admin/owners/[id]/page.tsx) 側の data-pii-protected で担保している。
+// 将来このコンポーネントを実際に配線する際は、その時点で marker の要否を再確認すること。
 export default function OwnerDetailPanel({ owner }: OwnerDetailPanelProps) {
   // 法人番号が未設定で、name/address/note に法人番号らしき文字列が含まれる場合は
   // UI 上の注意表示を出す（自動上書きはしない）。

@@ -234,8 +234,19 @@ export interface DomRangeLike {
 export interface ProtectedRegionOpts {
   /** PII 保護領域セレクタ（例: [data-pii-protected]）。 */
   piiSelector: string;
-  /** 抑止しない操作系要素セレクタ（input/textarea/select/button/a/contenteditable）。 */
-  exemptSelector: string;
+  /**
+   * 常に抑止しない「編集系」要素セレクタ（input/textarea/select/contenteditable）。
+   * ここに button / a は含めない（編集領域のみ）。
+   */
+  editableSelector: string;
+  /**
+   * interactive wrapper セレクタ（button / a）。これら自体・配下の通常 control は、
+   * 広い [data-pii-protected] container の中にあるだけなら抑止しない（contextmenu 等の
+   * UX を壊さない）。ただし button / a より内側に明示的な PII fragment（小さな
+   * data-pii-protected。例: owner/phone search suggestions の owner span）がある場合は、
+   * その fragment を保護対象にする。
+   */
+  interactiveSelector: string;
   /** surface を読む属性名（例: data-pii-surface）。 */
   surfaceAttr: string;
 }
@@ -253,8 +264,14 @@ function nodeToElement(node: DomNodeLike | null): DomElementLike | null {
 }
 
 /**
- * node が PII 保護領域内（piiSelector）かつ操作系要素(exemptSelector)の外にあれば
- * その surface を返す。そうでなければ null。
+ * node が PII 保護領域内（piiSelector）かつ次の除外条件に当たらなければ surface を返す。
+ *  1. 編集系(editableSelector: input/textarea/select/contenteditable)内 → 常に除外。
+ *  2. button / a の扱いは region との位置関係で 2 分する:
+ *     - 広い PII container 内にあるだけの button / a（最近接 PII 祖先が region と同一）
+ *       → 通常 control として除外（contextmenu 等の UX を壊さない）。
+ *     - button / a より内側に明示的な PII fragment がある（最近接 PII 祖先が region と異なる、
+ *       = region が button/a の内側。例: suggestions の owner span）→ 保護する。
+ * plain な button/link は pii 領域外なので region=null となり、従来どおり surface は返らない。
  */
 export function resolveProtectedSurfaceForNode(
   node: DomNodeLike | null,
@@ -264,8 +281,14 @@ export function resolveProtectedSurfaceForNode(
   if (!el) return null;
   const region = el.closest(opts.piiSelector);
   if (!region) return null;
-  // input / textarea / select / button / a / contenteditable の中は除外（通常操作・a11y 維持）。
-  if (el.closest(opts.exemptSelector)) return null;
+  // 1. 編集系は常に除外（編集操作・a11y 維持）。
+  if (el.closest(opts.editableSelector)) return null;
+  // 2. button / a が広い PII container の内側にあるだけ（最近接 PII 祖先が region と同一）なら
+  //    通常 control として除外。region が button/a より内側（明示的 PII fragment）なら保護する。
+  const interactive = el.closest(opts.interactiveSelector);
+  if (interactive && interactive.closest(opts.piiSelector) === region) {
+    return null;
+  }
   return region.getAttribute(opts.surfaceAttr) ?? "dashboard";
 }
 
@@ -273,14 +296,18 @@ export function resolveProtectedSurfaceForNode(
  * 選択範囲が PII 保護領域に関係するなら surface を返す（copy/cut の selection 判定）。
  *
  * 判定段階:
- *  - editable 除外維持: 選択範囲全体が操作系要素(input/textarea/contenteditable 等)内
- *    （commonAncestor が exempt 配下）なら抑止しない。
+ *  - editable 除外維持: 選択範囲全体が編集系要素(input/textarea/select/contenteditable)内
+ *    （commonAncestor が editable 配下）なら抑止しない。
+ *  - button / a の「広い container 内 control は除外／内側の明示 PII fragment は保護」判定は
+ *    per-container の resolveProtectedSurfaceForNode に委譲する。
  *  - P1: commonAncestorContainer / startContainer / endContainer のいずれかが保護領域内
  *    （copy event の target が body でも検知）。
  *  - P2(Codex): start/end/commonAncestor がすべて保護領域外でも、選択が protected panel を
  *    またぐ場合は range.intersectsNode(protectedElement) で交差を検知する
  *    （panel 内の PII が選択に含まれるため）。protectedElements は呼び出し側が
- *    document.querySelectorAll([data-pii-protected]) 相当で渡す。
+ *    document.querySelectorAll([data-pii-protected]) 相当で渡す。ただし選択全体が button / a 内に
+ *    閉じている場合は、その button / a 内の明示的 PII fragment との交差のみ抑止し、外側の broad
+ *    container との交差では抑止しない（broad container 内の通常 button/link ラベルの copy を壊さない）。
  */
 export function resolveProtectedSurfaceForRanges(
   ranges: readonly DomRangeLike[],
@@ -288,9 +315,10 @@ export function resolveProtectedSurfaceForRanges(
   opts: ProtectedRegionOpts,
 ): string | null {
   for (const range of ranges) {
-    // editable 除外: 選択範囲全体が操作系要素内なら抑止しない。
+    // editable 除外: 選択範囲全体が編集系要素(input/textarea/select/contenteditable)内なら
+    // 抑止しない。button / a の扱いは P1 の resolveProtectedSurfaceForNode に委譲する。
     const commonEl = nodeToElement(range.commonAncestorContainer);
-    if (commonEl && commonEl.closest(opts.exemptSelector)) continue;
+    if (commonEl && commonEl.closest(opts.editableSelector)) continue;
 
     // P1: container の ancestor 判定。
     for (const node of [
@@ -303,8 +331,22 @@ export function resolveProtectedSurfaceForRanges(
     }
 
     // P2: protected panel をまたぐ mixed selection を intersectsNode で検知。
+    // ただし選択全体が button / a 内に閉じている（commonAncestor が interactive 配下）場合は、
+    // その button / a 内にある明示的 PII fragment との交差のみ抑止し、外側の broad container との
+    // 交差では抑止しない（broad container 内の通常 button/link ラベルの copy を壊さない）。
     if (typeof range.intersectsNode === "function") {
+      const interactiveEl = commonEl
+        ? commonEl.closest(opts.interactiveSelector)
+        : null;
       for (const el of protectedElements) {
+        // 選択が button / a 内に閉じているなら、最近接 interactive 祖先が同じ button / a である
+        // 明示的 PII fragment 以外（= 外側 broad container）は無視する。
+        if (
+          interactiveEl &&
+          el.closest(opts.interactiveSelector) !== interactiveEl
+        ) {
+          continue;
+        }
         let hit = false;
         try {
           hit = range.intersectsNode(el as unknown as DomNodeLike);

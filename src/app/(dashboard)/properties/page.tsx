@@ -792,7 +792,14 @@ function PropertiesPageInner() {
                       <span className="font-mono text-[11px] text-gray-400">{item.importSource}</span>
                     )}
                     {item.owners.filter((o) => o.name || o.phone || o.address).map((o, i) => (
-                      <div key={i} className="flex flex-wrap gap-x-2 text-[11px] text-gray-500">
+                      // 17-A/Codex P2: suggestion 内の所有者PII(name/phone/address)を owner surface に。
+                      // button 全体ではなく PII 行(div)のみを最小限で保護する（guard 側で button 祖先でも有効）。
+                      <div
+                        key={i}
+                        className="flex flex-wrap gap-x-2 text-[11px] text-gray-500"
+                        data-pii-protected
+                        data-pii-surface="owner"
+                      >
                         {o.name && <span>{o.name}</span>}
                         {o.phone && <span>{o.phone}</span>}
                         {o.address && <span className="truncate">{o.address}</span>}
@@ -1108,9 +1115,13 @@ function PropertiesPageInner() {
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">
-                    {(property.ownerNames ?? []).length > 0
-                      ? (property.ownerNames ?? []).join("、")
-                      : "—"}
+                    {/* 17-A: 所有者名 PII を copy/cut/contextmenu 抑止＋監査の対象に含める。
+                        行全体ではなく所有者名セルの表示範囲のみ最小限で囲む。 */}
+                    <span data-pii-protected data-pii-surface="owner">
+                      {(property.ownerNames ?? []).length > 0
+                        ? (property.ownerNames ?? []).join("、")
+                        : "—"}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     {warning && (
