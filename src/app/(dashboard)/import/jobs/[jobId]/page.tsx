@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
 import {
   useParams,
   useRouter,
@@ -51,6 +51,8 @@ import { getImportTypeLabel } from "@/lib/import-labels";
 
 // B2: import job detail rows の既定ページサイズ（server 側 MAX_ROW_LIMIT=100 以内）。
 const ROW_LIMIT = 50;
+// 候補5: ユーザーが切り替え可能な表示件数（いずれも server MAX_ROW_LIMIT=100 以内）。
+const ROW_LIMIT_OPTIONS = [50, 100] as const;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -175,12 +177,20 @@ export default function ImportJobDetailPage() {
     const n = Number(searchParams.get("page"));
     return Number.isInteger(n) && n >= 1 ? n : 1;
   })();
+  // 候補5: limit を URL から復元。許可値（50/100）以外は既定 ROW_LIMIT に正規化する。
+  const initialLimit: number = (() => {
+    const n = Number(searchParams.get("limit"));
+    return (ROW_LIMIT_OPTIONS as readonly number[]).includes(n) ? n : ROW_LIMIT;
+  })();
 
   const [job, setJob] = useState<ImportJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterStatus>(initialFilter);
   const [page, setPage] = useState<number>(initialPage);
+  // 候補5: 表示件数（limit）切替とページジャンプ入力。
+  const [limit, setLimit] = useState<number>(initialLimit);
+  const [gotoPage, setGotoPage] = useState<string>("");
 
   // この取込で作成・更新された物件一覧（物件CSVジョブのみ）。
   // 主の job fetch と並列に取得する。失敗時は null のまま縮退表示。
@@ -215,7 +225,7 @@ export default function ImportJobDetailPage() {
     try {
       const data = await fetchImportJobDetail(jobId, {
         page,
-        limit: ROW_LIMIT,
+        limit,
         status: filter === "all" ? undefined : filter,
       });
       const j = data as ImportJob;
@@ -228,7 +238,7 @@ export default function ImportJobDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [jobId, page, filter]);
+  }, [jobId, page, filter, limit]);
 
   // この取込で作成・更新された物件一覧。job 本体とは別 API。
   // 行解決で createdId が増えた後にも最新化したいので、resolve / retry の
@@ -253,14 +263,32 @@ export default function ImportJobDetailPage() {
     const sp = new URLSearchParams();
     if (filter !== "all") sp.set("status", filter);
     if (page > 1) sp.set("page", String(page));
+    // 候補5: 既定（ROW_LIMIT）以外のときだけ limit を URL に載せる（page/status と整合）。
+    if (limit !== ROW_LIMIT) sp.set("limit", String(limit));
     const qs = sp.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [filter, page, pathname, router]);
+  }, [filter, page, limit, pathname, router]);
 
   // B2: status タブ切り替え時は 1 ページ目に戻す。
   const changeFilter = (next: FilterStatus) => {
     setFilter(next);
     setPage(1);
+  };
+
+  // 候補5: 表示件数（limit）切替時は 1 ページ目に戻す（fetchJob deps の limit で再取得）。
+  const changeLimit = (next: number) => {
+    setLimit(next);
+    setPage(1);
+  };
+
+  // 候補5: ページジャンプ。入力値を 1〜totalPages に正規化してから移動する。
+  const handleGoto = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const totalPages = job?.pagination?.totalPages ?? 1;
+    const n = Math.floor(Number(gotoPage));
+    if (!Number.isFinite(n) || n < 1) return;
+    setPage(Math.min(n, totalPages));
+    setGotoPage("");
   };
 
   // ロールバック確認ダイアログ起動 → dry-run で対象件数を取得
@@ -892,16 +920,58 @@ export default function ImportJobDetailPage() {
         ) : null}
       </div>
 
-      {/* B2: ページネーション（server pagination メタ） */}
+      {/* B2 + 候補5: ページネーション（server pagination メタ）＋ 表示件数切替 / ページジャンプ */}
       {job?.pagination && job.pagination.totalRows > 0 && (
-        <div className="mb-4 flex items-center justify-between text-sm text-gray-600">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
           <span>
             {job.pagination.totalRows} 件中{" "}
             {(page - 1) * job.pagination.limit + 1}–
             {Math.min(page * job.pagination.limit, job.pagination.totalRows)} 件
             （{page} / {job.pagination.totalPages} ページ）
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* 候補5: 表示件数（limit）切替。変更時は changeLimit で page=1 に戻る。 */}
+            <label className="flex items-center gap-1">
+              <span className="text-xs text-gray-500">表示件数</span>
+              <select
+                value={limit}
+                onChange={(e) => changeLimit(Number(e.target.value))}
+                disabled={loading}
+                className="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
+                aria-label="1ページあたりの表示件数"
+              >
+                {ROW_LIMIT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt} 件
+                  </option>
+                ))}
+              </select>
+            </label>
+            {/* 候補5: ページジャンプ（1〜totalPages の範囲に制御。複数ページのときのみ表示）。 */}
+            {job.pagination.totalPages > 1 && (
+              <form onSubmit={handleGoto} className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={job.pagination.totalPages}
+                  value={gotoPage}
+                  onChange={(e) => setGotoPage(e.target.value)}
+                  placeholder={String(page)}
+                  aria-label="移動先ページ番号"
+                  className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                />
+                <span className="text-xs text-gray-400">
+                  / {job.pagination.totalPages}
+                </span>
+                <button
+                  type="submit"
+                  disabled={loading || gotoPage === ""}
+                  className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50"
+                >
+                  移動
+                </button>
+              </form>
+            )}
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={!job.pagination.hasPrevPage || loading}
