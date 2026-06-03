@@ -228,6 +228,8 @@ export interface DomRangeLike {
   commonAncestorContainer: DomNodeLike;
   startContainer: DomNodeLike;
   endContainer: DomNodeLike;
+  /** Codex P2: 選択範囲が node と交差するか（protected panel をまたぐ選択の検知）。非対応環境では省略可。 */
+  intersectsNode?(node: DomNodeLike): boolean;
 }
 export interface ProtectedRegionOpts {
   /** PII 保護領域セレクタ（例: [data-pii-protected]）。 */
@@ -268,15 +270,29 @@ export function resolveProtectedSurfaceForNode(
 }
 
 /**
- * 選択範囲の commonAncestorContainer / startContainer / endContainer のいずれかが
- * PII 保護領域内なら surface を返す（copy/cut の selection 判定）。
- * これにより copy event の target が body / focused element でも検知できる。
+ * 選択範囲が PII 保護領域に関係するなら surface を返す（copy/cut の selection 判定）。
+ *
+ * 判定段階:
+ *  - editable 除外維持: 選択範囲全体が操作系要素(input/textarea/contenteditable 等)内
+ *    （commonAncestor が exempt 配下）なら抑止しない。
+ *  - P1: commonAncestorContainer / startContainer / endContainer のいずれかが保護領域内
+ *    （copy event の target が body でも検知）。
+ *  - P2(Codex): start/end/commonAncestor がすべて保護領域外でも、選択が protected panel を
+ *    またぐ場合は range.intersectsNode(protectedElement) で交差を検知する
+ *    （panel 内の PII が選択に含まれるため）。protectedElements は呼び出し側が
+ *    document.querySelectorAll([data-pii-protected]) 相当で渡す。
  */
 export function resolveProtectedSurfaceForRanges(
   ranges: readonly DomRangeLike[],
+  protectedElements: readonly DomElementLike[],
   opts: ProtectedRegionOpts,
 ): string | null {
   for (const range of ranges) {
+    // editable 除外: 選択範囲全体が操作系要素内なら抑止しない。
+    const commonEl = nodeToElement(range.commonAncestorContainer);
+    if (commonEl && commonEl.closest(opts.exemptSelector)) continue;
+
+    // P1: container の ancestor 判定。
     for (const node of [
       range.commonAncestorContainer,
       range.startContainer,
@@ -284,6 +300,22 @@ export function resolveProtectedSurfaceForRanges(
     ]) {
       const surface = resolveProtectedSurfaceForNode(node, opts);
       if (surface) return surface;
+    }
+
+    // P2: protected panel をまたぐ mixed selection を intersectsNode で検知。
+    if (typeof range.intersectsNode === "function") {
+      for (const el of protectedElements) {
+        let hit = false;
+        try {
+          hit = range.intersectsNode(el as unknown as DomNodeLike);
+        } catch {
+          // intersectsNode 非対応ブラウザ等では container 判定のみで fallback。
+          hit = false;
+        }
+        if (hit) {
+          return el.getAttribute(opts.surfaceAttr) ?? "dashboard";
+        }
+      }
     }
   }
   return null;

@@ -17,6 +17,7 @@ import {
   resolveProtectedSurfaceForRanges,
   type DomNodeLike,
   type DomRangeLike,
+  type DomElementLike,
 } from "@/lib/screen-protection";
 
 const read = (p: string) =>
@@ -219,15 +220,18 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
       closest: () => null,
     };
   }
+  const asEl = (f: Fake) => f as unknown as DomElementLike;
   const range = (
     common: Fake,
     start: Fake,
     end: Fake,
+    intersects: Fake[] = [],
   ): DomRangeLike =>
     ({
       commonAncestorContainer: common,
       startContainer: start,
       endContainer: end,
+      intersectsNode: (node: unknown) => intersects.includes(node as Fake),
     }) as unknown as DomRangeLike;
 
   it("保護領域内の要素 → surface を返す", () => {
@@ -256,6 +260,7 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     expect(
       resolveProtectedSurfaceForRanges(
         [range(outside(), text(child(r)), outside())],
+        [],
         OPTS,
       ),
     ).toBe("owner");
@@ -266,6 +271,7 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     expect(
       resolveProtectedSurfaceForRanges(
         [range(outside(), outside(), text(child(r)))],
+        [],
         OPTS,
       ),
     ).toBe("history");
@@ -276,6 +282,7 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     expect(
       resolveProtectedSurfaceForRanges(
         [range(child(r), outside(), outside())],
+        [],
         OPTS,
       ),
     ).toBe("import");
@@ -285,6 +292,7 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
     expect(
       resolveProtectedSurfaceForRanges(
         [range(outside(), outside(), outside())],
+        [],
         OPTS,
       ),
     ).toBeNull();
@@ -293,7 +301,38 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
   it("選択が操作系要素(editable)内なら除外（null）", () => {
     const r = region("owner");
     const e = exemptChild(r);
-    expect(resolveProtectedSurfaceForRanges([range(e, e, e)], OPTS)).toBeNull();
+    expect(
+      resolveProtectedSurfaceForRanges([range(e, e, e)], [], OPTS),
+    ).toBeNull();
+  });
+
+  // ---- Codex P2: panel をまたぐ mixed selection を intersectsNode で検知 ----
+
+  it("Codex P2: start/end/commonAncestor が全て保護領域外でも range が panel と交差すれば surface を検出", () => {
+    const panel = region("owner");
+    // panel の前(outside)で選択開始・後(outside)で終了。各 container は保護領域外だが panel と交差。
+    const r = range(outside(), outside(), outside(), [panel]);
+    expect(resolveProtectedSurfaceForRanges([r], [asEl(panel)], OPTS)).toBe(
+      "owner",
+    );
+  });
+
+  it("Codex P2: どの panel とも交差しない選択は null（非protected は抑止しない）", () => {
+    const panel = region("property");
+    const r = range(outside(), outside(), outside(), []);
+    expect(
+      resolveProtectedSurfaceForRanges([r], [asEl(panel)], OPTS),
+    ).toBeNull();
+  });
+
+  it("Codex P2: 選択全体が editable 内なら intersect しても除外（editable 除外維持）", () => {
+    const panel = region("owner");
+    const e = exemptChild(panel);
+    // commonAncestor が editable(<a>)配下 → intersect しても抑止しない。
+    const r = range(e, e, e, [panel]);
+    expect(
+      resolveProtectedSurfaceForRanges([r], [asEl(panel)], OPTS),
+    ).toBeNull();
   });
 });
 
@@ -319,6 +358,14 @@ describe("Codex P1: guard / helper の selection 配線（source-assertion）", 
     expect(helperSrc).toMatch(/commonAncestorContainer/);
     expect(helperSrc).toMatch(/startContainer/);
     expect(helperSrc).toMatch(/endContainer/);
+  });
+
+  it("Codex P2: guard は querySelectorAll で protected 要素を集め、helper は intersectsNode で交差判定", () => {
+    expect(guardSrc).toMatch(/querySelectorAll\(PII_REGION_SELECTOR\)/);
+    expect(guardSrc).toMatch(
+      /resolveProtectedSurfaceForRanges\([\s\S]*protectedEls/,
+    );
+    expect(helperSrc).toMatch(/intersectsNode/);
   });
 
   it("guard は選択テキストを文字列化して送らない（PII を監査に入れない）", () => {

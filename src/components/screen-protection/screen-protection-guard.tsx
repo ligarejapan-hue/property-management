@@ -9,6 +9,7 @@ import {
   type ScreenProtectionSurface,
   type DomNodeLike,
   type DomRangeLike,
+  type DomElementLike,
 } from "@/lib/screen-protection";
 
 /**
@@ -68,9 +69,15 @@ function surfaceFromSelection(): ScreenProtectionSurface | null {
   for (let i = 0; i < sel.rangeCount; i++) {
     ranges.push(sel.getRangeAt(i) as unknown as DomRangeLike);
   }
+  // Codex P2: protected panel をまたぐ選択を range.intersectsNode で検知するため、
+  // document 内の保護領域要素を渡す。
+  const protectedEls = Array.from(
+    document.querySelectorAll(PII_REGION_SELECTOR),
+  ) as unknown as DomElementLike[];
   return (
     (resolveProtectedSurfaceForRanges(
       ranges,
+      protectedEls,
       REGION_OPTS,
     ) as ScreenProtectionSurface | null) ?? null
   );
