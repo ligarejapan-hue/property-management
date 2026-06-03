@@ -31,6 +31,11 @@ export interface AuthorizeUploadAccessArgs {
   session: ApiSession;
   permissions: PermissionEntry[];
   prisma?: PrismaLike;
+  /**
+   * S1b-4: download intent（/uploads?download=1）。registry PDF(type="registry") の
+   * 場合に registry_pdf:download も要求するかどうかの gate に使う。既定 false（preview 扱い）。
+   */
+  downloadIntent?: boolean;
 }
 
 const UPLOADS_PREFIX = "/uploads/";
@@ -103,7 +108,7 @@ export function extractStorageKeyFromFileUrl(
 export async function authorizeUploadAccess(
   args: AuthorizeUploadAccessArgs,
 ): Promise<UploadAuthDecision> {
-  const { key, session, permissions } = args;
+  const { key, session, permissions, downloadIntent = false } = args;
   const db: PrismaLike = args.prisma ?? prismaDefault;
 
   if (!isValidStorageKey(key)) return "forbidden";
@@ -168,6 +173,7 @@ export async function authorizeUploadAccess(
       targetId: true,
       propertyId: true,
       fileUrl: true,
+      type: true,
     },
   });
   for (const a of attachments) {
@@ -175,6 +181,21 @@ export async function authorizeUploadAccess(
     if (a.isDeleted) {
       decisions.push("not_found");
       continue;
+    }
+    // S1b-4: 謄本PDF(type="registry") は registry_pdf 権限で gate する。
+    //  - registry_pdf:preview が無ければバイトを一切返さない（hard boundary）。
+    //  - download intent(?download=1) の場合は registry_pdf:download も要求する。
+    // これは下の property/owner scope とは独立に AND で課す（OK の場合は
+    // 続けて従来の targetType scope 判定も適用される）。
+    if (a.type === "registry") {
+      if (!hasPermission(permissions, "registry_pdf", "preview")) {
+        decisions.push("forbidden");
+        continue;
+      }
+      if (downloadIntent && !hasPermission(permissions, "registry_pdf", "download")) {
+        decisions.push("forbidden");
+        continue;
+      }
     }
     if (a.targetType === "property") {
       const propertyId = a.propertyId ?? a.targetId;
@@ -239,4 +260,51 @@ async function authorizePropertyAccess(
     return "forbidden";
   }
   return "ok";
+}
+
+/**
+ * S1b-4: serve 用メタ。/uploads が 200 配信する直前に「この key が registry PDF か」を
+ * 判定し、Content-Disposition / Cache-Control / 監査に必要な最小情報を返す。
+ *
+ * 重要: これは **access 判定をしない**。authorizeUploadAccess が既に許可した前提で、
+ * 表示用ヘッダと監査のためだけに使う（registry の hard boundary は authorizeUploadAccess 側）。
+ * active な registry 添付が key に一致しなければ null（= 非 registry として従来挙動）。
+ */
+export interface RegistryServeMeta {
+  isRegistry: true;
+  attachmentId: string;
+  propertyId: string | null;
+}
+
+export async function resolveRegistryServeMeta(
+  key: string,
+  prisma?: PrismaLike,
+): Promise<RegistryServeMeta | null> {
+  const db: PrismaLike = prisma ?? prismaDefault;
+  if (!isValidStorageKey(key)) return null;
+
+  const escapedKey = escapePrismaLikePattern(key);
+  const attachments = await db.attachment.findMany({
+    where: { fileUrl: { contains: escapedKey } },
+    select: {
+      id: true,
+      type: true,
+      propertyId: true,
+      targetId: true,
+      fileUrl: true,
+      isDeleted: true,
+    },
+  });
+  for (const a of attachments) {
+    if (a.isDeleted) continue;
+    if (extractStorageKeyFromFileUrl(a.fileUrl) !== key) continue;
+    if (a.type === "registry") {
+      return {
+        isRegistry: true,
+        attachmentId: a.id,
+        propertyId: a.propertyId ?? a.targetId ?? null,
+      };
+    }
+  }
+  return null;
 }

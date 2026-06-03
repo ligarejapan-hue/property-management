@@ -53,6 +53,9 @@ vi.mock("@/lib/api-helpers", () => {
 // で担保するため、本 mock では既定で "ok" を返し、配信パスをそのまま通す。
 vi.mock("@/lib/uploads-authorization", () => ({
   authorizeUploadAccess: vi.fn().mockResolvedValue("ok"),
+  // S1b-4: 既存 route テストは非 registry 配信の整合確認が目的。registry メタは null
+  // （= 非 registry）を返し、従来ヘッダ・挙動のまま通す。
+  resolveRegistryServeMeta: vi.fn().mockResolvedValue(null),
 }));
 
 const s3Mock = mockClient(S3Client);

@@ -8,6 +8,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   authorizeUploadAccess,
+  resolveRegistryServeMeta,
   escapePrismaLikePattern,
 } from "@/lib/uploads-authorization";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
@@ -20,6 +21,9 @@ type Att = {
   targetType: string;
   targetId: string;
   propertyId: string | null;
+  // S1b-4: registry gating / serve-meta 検証用（既存ケースは未指定=非registry扱い）
+  id?: string;
+  type?: string;
 };
 type Prop = { id: string; createdBy: string; assignedTo: string | null };
 
@@ -840,5 +844,138 @@ describe("authorizeUploadAccess", () => {
       });
       expect(decision).toBe("not_found");
     });
+  });
+});
+
+// ============================================================
+// S1b-4: 謄本PDF(registry) preview/download の server-side enforcement
+// ============================================================
+describe("authorizeUploadAccess — registry_pdf gating (S1b-4)", () => {
+  const REG_KEY = "properties/p1/registry/100.pdf";
+  const regAtt = (over: Partial<Att> = {}): Att => ({
+    id: "att-reg-1",
+    fileUrl: `/uploads/${REG_KEY}`,
+    isDeleted: false,
+    targetType: "property",
+    targetId: "p1",
+    propertyId: "p1",
+    type: "registry",
+    ...over,
+  });
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+  const base: PermissionEntry[] = [
+    { resource: "property", action: "read", granted: true },
+  ];
+  const withPreview: PermissionEntry[] = [
+    ...base,
+    { resource: "registry_pdf", action: "preview", granted: true },
+  ];
+  const withPreviewDownload: PermissionEntry[] = [
+    ...withPreview,
+    { resource: "registry_pdf", action: "download", granted: true },
+  ];
+
+  it("registry + preview 有 → ok（property scope も満たす）", async () => {
+    const prisma = makeDb({ attachments: [regAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REG_KEY, session: officeStaff, permissions: withPreview, prisma }),
+    ).toBe("ok");
+  });
+
+  it("registry + preview 無 → forbidden（property:read だけでは取得不可＝hard boundary）", async () => {
+    const prisma = makeDb({ attachments: [regAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REG_KEY, session: officeStaff, permissions: base, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("registry + downloadIntent + download 無 → forbidden", async () => {
+    const prisma = makeDb({ attachments: [regAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REG_KEY, session: officeStaff, permissions: withPreview, downloadIntent: true, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("registry + downloadIntent + download 有 → ok", async () => {
+    const prisma = makeDb({ attachments: [regAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REG_KEY, session: officeStaff, permissions: withPreviewDownload, downloadIntent: true, prisma }),
+    ).toBe("ok");
+  });
+
+  it("registry + preview 有 でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
+    const prisma = makeDb({
+      attachments: [regAtt()],
+      properties: [{ id: "p1", createdBy: "u-someone", assignedTo: null }],
+    });
+    expect(
+      await authorizeUploadAccess({ key: REG_KEY, session: fieldStaff, permissions: withPreview, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("registry isDeleted → not_found（registry gate より前に判定）", async () => {
+    const prisma = makeDb({ attachments: [regAtt({ isDeleted: true })], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REG_KEY, session: officeStaff, permissions: base, prisma }),
+    ).toBe("not_found");
+  });
+
+  it("非 registry(type='general') は registry gate を通らず従来どおり ok", async () => {
+    const genKey = "properties/p1/attachments/9.pdf";
+    const prisma = makeDb({
+      attachments: [regAtt({ id: "att-gen", fileUrl: `/uploads/${genKey}`, type: "general" })],
+      properties: [prop],
+    });
+    expect(
+      await authorizeUploadAccess({ key: genKey, session: officeStaff, permissions: base, prisma }),
+    ).toBe("ok");
+  });
+
+  it("downloadIntent 未指定（既定 false）なら download 権限無でも preview として ok", async () => {
+    const prisma = makeDb({ attachments: [regAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REG_KEY, session: officeStaff, permissions: withPreview, prisma }),
+    ).toBe("ok");
+  });
+});
+
+describe("resolveRegistryServeMeta (S1b-4)", () => {
+  const REG_KEY = "properties/p1/registry/100.pdf";
+
+  it("active registry 添付 → { isRegistry, attachmentId, propertyId } を返す", async () => {
+    const prisma = makeDb({
+      attachments: [
+        { id: "att-reg-1", fileUrl: `/uploads/${REG_KEY}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "registry" },
+      ],
+    });
+    expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toEqual({
+      isRegistry: true,
+      attachmentId: "att-reg-1",
+      propertyId: "p1",
+    });
+  });
+
+  it("非 registry(general) → null（route は従来ヘッダ・監査なし）", async () => {
+    const GEN_KEY = "properties/p1/attachments/9.pdf";
+    const prisma = makeDb({
+      attachments: [
+        { id: "att-gen", fileUrl: `/uploads/${GEN_KEY}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "general" },
+      ],
+    });
+    expect(await resolveRegistryServeMeta(GEN_KEY, prisma)).toBeNull();
+  });
+
+  it("deleted registry → null", async () => {
+    const prisma = makeDb({
+      attachments: [
+        { id: "att-reg-1", fileUrl: `/uploads/${REG_KEY}`, isDeleted: true, targetType: "property", targetId: "p1", propertyId: "p1", type: "registry" },
+      ],
+    });
+    expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toBeNull();
+  });
+
+  it("invalid key(traversal) → null", async () => {
+    const prisma = makeDb({});
+    expect(await resolveRegistryServeMeta("../etc/passwd", prisma)).toBeNull();
   });
 });
