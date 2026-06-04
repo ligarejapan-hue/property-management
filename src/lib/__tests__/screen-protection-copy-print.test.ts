@@ -15,6 +15,7 @@ import {
   SCREEN_PROTECTION_EVENT_TYPES,
   resolveProtectedSurfaceForNode,
   resolveProtectedSurfaceForRanges,
+  resolvePrintSurface,
   type DomNodeLike,
   type DomRangeLike,
   type DomElementLike,
@@ -135,6 +136,68 @@ describe("S1b-3: ScreenProtectionGuard 配線", () => {
 
   it("client throttle を入れる", () => {
     expect(guardSrc).toMatch(/SEND_THROTTLE_MS/);
+  });
+});
+
+describe("17-A: print protection scoping（PII surface がある時だけ 4 点一体で有効化）", () => {
+  const guardSrc = read(
+    "src/components/screen-protection/screen-protection-guard.tsx",
+  );
+
+  it("resolvePrintSurface: 空=null / 単一=その surface / 混在=dashboard / enum外・null=clamp", () => {
+    expect(resolvePrintSurface([])).toBeNull();
+    expect(resolvePrintSurface(["owner"])).toBe("owner");
+    expect(resolvePrintSurface(["property", "property"])).toBe("property");
+    expect(resolvePrintSurface(["owner", "property"])).toBe("dashboard");
+    expect(resolvePrintSurface([null])).toBe("dashboard");
+    expect(resolvePrintSurface(["evil"])).toBe("dashboard");
+    expect(resolvePrintSurface(["owner", null])).toBe("dashboard");
+  });
+
+  it("print 試行時に surfaceFromDocument で遅延評価し resolvePrintSurface を使う", () => {
+    expect(guardSrc).toMatch(/function surfaceFromDocument/);
+    expect(guardSrc).toMatch(/querySelectorAll\(PII_REGION_SELECTOR\)/);
+    expect(guardSrc).toMatch(/resolvePrintSurface/);
+  });
+
+  it("無条件の sendAudit(print, dashboard) が残っていない（audit は surface 変数のみ）", () => {
+    expect(guardSrc).not.toMatch(/sendAudit\("print", "dashboard"\)/);
+    expect(guardSrc).not.toMatch(/sendAudit\("print_shortcut", "dashboard"\)/);
+    expect(guardSrc).toMatch(/sendAudit\("print", surface\)/);
+    expect(guardSrc).toMatch(/sendAudit\("print_shortcut", surface\)/);
+  });
+
+  it("Ctrl/Cmd+P: surface なしは何もしない（preventDefault/notice/audit に到達しない）", () => {
+    // keydown 内: surfaceFromDocument の直後（空白のみ）に早期 return。
+    // beforeprint 側は間に setPrintBannerActive(...) を挟むためここにはマッチしない。
+    expect(guardSrc).toMatch(
+      /const surface = surfaceFromDocument\(\);\s*if \(!surface\) return;/,
+    );
+  });
+
+  it("beforeprint: banner data-active を同期 toggle し、surface がある時だけ audit", () => {
+    expect(guardSrc).toMatch(/setPrintBannerActive\(surface !== null\)/);
+    expect(guardSrc).toMatch(/setAttribute\(\s*\n?\s*"data-active"/);
+  });
+
+  it("afterprint で banner を解除する", () => {
+    expect(guardSrc).toMatch(/addEventListener\("afterprint"/);
+    expect(guardSrc).toMatch(/removeEventListener\("afterprint"/);
+    expect(guardSrc).toMatch(/setPrintBannerActive\(false\)/);
+  });
+
+  it('globals.css: print banner は data-active="true" 必須（無条件 display:block を撤去）', () => {
+    const css = read("src/app/globals.css");
+    expect(css).toMatch(/\.screen-protection-print-notice\[data-active="true"\]/);
+    // 属性条件なしの .screen-protection-print-notice ルールに display: block が無い
+    expect(css).not.toMatch(/\.screen-protection-print-notice \{[^}]*display:\s*block/);
+    // watermark の print CSS は不変
+    expect(css).toMatch(/\.screen-protection-watermark \{[\s\S]*?display: flex !important/);
+  });
+
+  it("bypass 仕様は不変（component null + effect 早期 return）", () => {
+    expect(guardSrc).toMatch(/if \(bypass\) return null;/);
+    expect(guardSrc).toMatch(/if \(bypass\) return;/);
   });
 });
 

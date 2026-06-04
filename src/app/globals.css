@@ -39,14 +39,16 @@ body {
 }
 
 /*
- * S1b-3: 印刷保護バナー。screen では非表示、印刷時のみ警告を表示する。
- * 完全ブロックではなく deterrent（印刷は記録される旨を可視化する）。
+ * S1b-3 / 17-A print protection scoping: 印刷保護バナー。screen では常に非表示。
+ * 印刷時も、ページ内に [data-pii-protected] があり guard が beforeprint で
+ * data-active="true" を同期付与した場合だけ表示する（PII 保護領域の無いページの印刷には
+ * 「個人情報が含まれます」「記録されます」を出さない）。完全ブロックではなく deterrent。
  */
 .screen-protection-print-notice {
   display: none;
 }
 @media print {
-  .screen-protection-print-notice {
+  .screen-protection-print-notice[data-active="true"] {
     display: block;
     margin: 0 0 12px;
     padding: 8px 12px;
