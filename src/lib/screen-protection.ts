@@ -157,6 +157,28 @@ export function isScreenProtectionSurface(
 }
 
 /**
+ * 17-A: print protection scoping の surface 判定（印刷はページ全体に及ぶため page-wide 判定）。
+ * ページ内に mount されている [data-pii-protected] の data-pii-surface 値一覧から、
+ * print 保護（印刷の既定動作キャンセル / notice / pii_print_attempt 監査 / 印刷バナー）に使う
+ * surface を決める。判定のみの純ロジックで、抑止の副作用は guard 側が持つ。
+ *  - 空（PII 保護領域なし）→ null。print 保護 4 点はいずれも行わず、通常の印刷を妨げない。
+ *  - null / enum 外の値 → "dashboard" に clamp（/api/me/audit-events の enum validation が
+ *    400 を返してイベントが失われるのを防ぐ）。
+ *  - distinct 1 種 → その surface（どの PII 面に対する印刷試行かを監査に残す）。
+ *  - 複数 surface 混在 → "dashboard"（page-wide 集約）。
+ */
+export function resolvePrintSurface(
+  surfaces: readonly (string | null)[],
+): ScreenProtectionSurface | null {
+  if (surfaces.length === 0) return null;
+  const distinct = new Set<ScreenProtectionSurface>(
+    surfaces.map((s) => (isScreenProtectionSurface(s) ? s : "dashboard")),
+  );
+  if (distinct.size > 1) return "dashboard";
+  return distinct.values().next().value ?? "dashboard";
+}
+
+/**
  * eventType → AuditLog action。
  * print と print_shortcut は同一 action(pii_print_attempt) に統合し、trigger で区別する。
  */
