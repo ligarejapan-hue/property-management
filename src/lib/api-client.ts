@@ -389,6 +389,9 @@ export interface FetchImportJobDetailParams {
   page?: number;
   limit?: number;
   status?: string;
+  // 理由別 filter（Phase 2）: server の VALID_ROW_REASONS token。
+  // 未指定なら query に載せない（全理由・後方互換）。
+  reason?: string;
 }
 
 export async function fetchImportJobDetail(
@@ -463,6 +466,7 @@ export async function fetchImportJobDetail(
   if (params.page != null) query.set("page", String(params.page));
   if (params.limit != null) query.set("limit", String(params.limit));
   if (params.status) query.set("status", params.status);
+  if (params.reason) query.set("reason", params.reason);
   const qs = query.toString();
   return apiFetch(`/api/import/jobs/${jobId}${qs ? `?${qs}` : ""}`);
 }

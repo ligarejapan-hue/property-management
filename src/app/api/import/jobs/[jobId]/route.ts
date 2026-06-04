@@ -22,12 +22,15 @@ import { isReceptionOwnerJobRow } from "@/lib/reception-owner-link";
 //     page   : 1始まり（省略可）
 //     limit  : 1〜MAX_ROW_LIMIT（省略可）
 //     status : success | error | skipped | needs_review（省略/不正は無視＝全status）
+//     reason : 理由別 filter token（VALID_ROW_REASONS・省略/不正は無視＝全理由）
 //   - page / limit のいずれも無ければ **rows 全件返却（従来挙動・後方互換）**。
 //     いずれか指定時のみ skip/take でページ分だけ返す。
 //   - status 指定時は rows の where に反映（その status だけページング）。
-//   - summary は **ジョブ全体**（status フィルタ非依存）の 5 区分集計を維持。
-//   - pagination メタ（page/limit/totalRows/totalPages/hasNextPage/hasPrevPage/status）を additive に返す。
-//     totalRows は「現在の status フィルタ後の総行数」（= ページングの母数）。
+//   - reason（Phase 2）は閲覧用の行絞り込み。status と AND 直交合成され、
+//     summary / duplicateCount / duplicateActionableCount には一切影響しない。
+//   - summary は **ジョブ全体**（status/reason フィルタ非依存）の 5 区分集計を維持。
+//   - pagination メタ（page/limit/totalRows/totalPages/hasNextPage/hasPrevPage/status/reason）を additive に返す。
+//     totalRows は「現在の status / reason フィルタ後の総行数」（= ページングの母数）。
 //   - isReceptionOwnerJob / duplicateCount / duplicateActionableCount を additive に返し、
 //     client がページ分の rows を走査して誤判定/誤集計しないで済むようにする。
 //     duplicateActionableCount(B4) は bulk-resolve scope="duplicate" の対象件数と一致。
@@ -39,6 +42,51 @@ const VALID_ROW_STATUSES = [
   "skipped",
   "needs_review",
 ] as const;
+
+// 理由別 filter（Phase 2）: 閲覧用の行絞り込み token（URL-safe な英語 enum・PII なし）。
+// B4 bulk-resolve の scope="duplicate" と衝突しないよう "duplicate" という token は使わない。
+// 判定は errorMessage パターンのみで行う（全 importer を一様にカバーできる唯一の
+// ディスクリミネータ。rawData.__error_code は reception-property 未付与・
+// reception-owner の 4 理由が REVIEW に丸まるため不採用）。
+const VALID_ROW_REASONS = [
+  "dup_candidate",
+  "address_dup",
+  "no_address",
+  "owner_unmatched",
+  "no_key",
+  "building_unresolved",
+] as const;
+type RowReason = (typeof VALID_ROW_REASONS)[number];
+
+// reason → ImportJobRow の where 条件。rowWhere に spread され、jobId / status と
+// Prisma の暗黙 AND で直交合成される（OR 型 reason も同様に AND 合成）。
+const ROW_REASON_WHERE: Record<RowReason, Prisma.ImportJobRowWhereInput> = {
+  // csv / owner-csv の重複候補（「重複」始まり）。閲覧用 filter であり、
+  // bulk-resolve scope="duplicate"（needs_review 限定の操作対象）とは別概念・別 token。
+  dup_candidate: { errorMessage: { startsWith: "重複" } },
+  // reception-property の「住所が既存物件と重複（ID:…）」。full prefix で
+  // 「住所なし（…）」を誤包含しない。B4.1 決定どおり bulk duplicate scope には含めない。
+  address_dup: { errorMessage: { startsWith: "住所が既存物件と重複" } },
+  // 住所なし（reception-property）/ 住所が空です（csv 物件取込）。
+  no_address: {
+    OR: [
+      { errorMessage: { startsWith: "住所なし" } },
+      { errorMessage: "住所が空です" },
+    ],
+  },
+  // 受付帳×所有者のレビュー理由（REVIEW_REASON_LABEL の exact 値）。
+  owner_unmatched: { errorMessage: "要レビュー（所有者未突合）" },
+  no_key: { errorMessage: "要レビュー（キー不足）" },
+  // 棟未解決（csv unit 行の resolveBuildingId 失敗）。実際の生成文言は
+  // すべて「棟名」始まり（Codex P2: 旧 predicate は実メッセージと不一致だった）:
+  //   - `棟名「X」が見つかりません。棟を先に登録するか、…`        (csv/route.ts:225)
+  //   - `棟名「X」に一致する棟がN件あり特定できません。…`        (csv/route.ts:217)
+  //   - `棟名「X」に類似する棟がN件見つかりました。…`            (csv/route.ts:192)
+  //   - `棟名が見つかりません。棟を先に登録してください`（fallback, csv/route.ts:462）
+  // 「棟名」prefix の生成源は上記4箇所のみ＝prefix 固定（startsWith）なので
+  // 無関係な行（住所なし/重複/要レビュー等）を拾わない。
+  building_unresolved: { errorMessage: { startsWith: "棟名" } },
+};
 
 const DEFAULT_ROW_LIMIT = 50;
 const MAX_ROW_LIMIT = 100;
@@ -78,12 +126,20 @@ export async function GET(
     const pageParam = url.searchParams.get("page");
     const limitParam = url.searchParams.get("limit");
     const statusParam = url.searchParams.get("status");
+    const reasonParam = url.searchParams.get("reason");
 
     // 不正な status は無視（全 status 扱い）。
     const status: ImportRowStatus | null =
       statusParam &&
       (VALID_ROW_STATUSES as readonly string[]).includes(statusParam)
         ? (statusParam as ImportRowStatus)
+        : null;
+
+    // 不正な reason は無視（全理由扱い・status と同じ縮退方針）。
+    const reason: RowReason | null =
+      reasonParam &&
+      (VALID_ROW_REASONS as readonly string[]).includes(reasonParam)
+        ? (reasonParam as RowReason)
         : null;
 
     // page / limit のいずれかが来たときだけページング。来なければ全件（後方互換）。
@@ -94,10 +150,13 @@ export async function GET(
       : null;
     const page = paginate ? toPositiveInt(pageParam, 1) : 1;
 
-    // ページングの母数は「現在の status フィルタ後」の行集合。
+    // ページングの母数は「現在の status / reason フィルタ後」の行集合。
+    // reason 条件（errorMessage / OR）は jobId / status と key が重ならないため
+    // spread で安全に AND 合成できる。
     const rowWhere: Prisma.ImportJobRowWhereInput = {
       jobId,
       ...(status ? { status } : {}),
+      ...(reason ? ROW_REASON_WHERE[reason] : {}),
     };
 
     // summary は **ジョブ全体**（status 非依存）で算出する（PR-A から維持）:
@@ -202,6 +261,8 @@ export async function GET(
       hasNextPage: page < totalPages,
       hasPrevPage: page > 1,
       status,
+      // 理由別 filter（Phase 2・additive）。未指定/不正は null。
+      reason,
     };
 
     return apiResponse({
