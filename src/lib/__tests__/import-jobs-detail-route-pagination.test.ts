@@ -538,13 +538,8 @@ describe("GET /api/import/jobs/[jobId] — 理由別 filter (Phase 2)", () => {
     },
     owner_unmatched: { errorMessage: "要レビュー（所有者未突合）" },
     no_key: { errorMessage: "要レビュー（キー不足）" },
-    building_unresolved: {
-      OR: [
-        { errorMessage: { startsWith: "棟名が見つかりません" } },
-        { errorMessage: { contains: "棟が複数見つかりました" } },
-        { errorMessage: { contains: "棟候補" } },
-      ],
-    },
+    // Codex P2: csv route の実メッセージ（4 変種すべて「棟名」始まり）に合わせた prefix。
+    building_unresolved: { errorMessage: { startsWith: "棟名" } },
   } as const;
 
   it.each(Object.keys(REASON_WHERE) as (keyof typeof REASON_WHERE)[])(
@@ -560,6 +555,36 @@ describe("GET /api/import/jobs/[jobId] — 理由別 filter (Phase 2)", () => {
       });
     },
   );
+
+  it("building_unresolved は csv route の実メッセージ全形式に一致し、無関係な理由を拾わない（Codex P2）", () => {
+    // csv/route.ts resolveBuildingId（:192/:217/:225）と fallback（:462）が
+    // 実際に生成する文言の fixture（棟名はダミー値・PII なし）。
+    const realBuildingMessages = [
+      "棟名「テスト棟」が見つかりません。棟を先に登録するか、レビュー画面で対応してください",
+      "棟名「テスト棟」に一致する棟が2件あり特定できません。レビュー画面で選択してください",
+      "棟名「テスト棟」に類似する棟が3件見つかりました。レビュー画面で選択してください",
+      "棟名が見つかりません。棟を先に登録してください", // resolution.error ?? の fallback
+    ];
+    const prefix = REASON_WHERE.building_unresolved.errorMessage.startsWith;
+    for (const msg of realBuildingMessages) {
+      expect(msg.startsWith(prefix)).toBe(true);
+    }
+    // 無関係な理由のメッセージは prefix に一致しない（広すぎる contains を排除）。
+    const unrelatedMessages = [
+      "住所なし（H/I/J/K 列が全て空）",
+      "住所が既存物件と重複（ID: prop-1）",
+      "住所が空です",
+      "氏名が空です",
+      "重複の可能性[住所一致（正規化比較）]: 既存物件ID=p1 (ダミー住所)",
+      "要レビュー（所有者未突合）",
+      "要レビュー（キー不足）",
+      "手動スキップ",
+      "手動エラー確定",
+    ];
+    for (const msg of unrelatedMessages) {
+      expect(msg.startsWith(prefix)).toBe(false);
+    }
+  });
 
   it("reason + status は AND 直交合成・pagination.reason を additive に返す", async () => {
     setup({ filteredTotal: 1 });
