@@ -17,6 +17,11 @@
  * 13. UUID validation（Codex review対応）: 非UUID（単独/valid混在）→ 400 INVALID_PROPERTY_IDS・
  *     Prisma findMany/count 未実行（Postgres uuid 列への invalid syntax 500 を防ぐ）
  * 14. ?rule= モードでは propertyIds の UUID validation は走らない（rule 優先のまま）
+ * 15. ロール別可視範囲（Codex P1）: field_staff は warningPropertiesTotal の count と
+ *     各ルール findMany の両方に一覧APIと同じ createdBy/assignedTo スコープが AND され、
+ *     不可視物件が件数にも警告結果にも漏れない。admin は従来どおり追加条件なし。
+ * 16. scope 条件は property-list-query.ts の単一定義元（propertyVisibilityScopeWhere）を
+ *     再利用しており、一覧API（buildPropertyListWhere）の where と完全一致する。
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import fs from "fs";
@@ -61,6 +66,11 @@ vi.mock("@/lib/prisma", () => ({
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { GET } from "../../app/api/properties/quality-check/route";
+import {
+  propertyVisibilityScopeWhere,
+  buildPropertyListWhere,
+} from "../property-list-query";
+import { propertyListQuerySchema } from "../validators";
 
 const pm = prisma as unknown as {
   property: { findMany: Mock; count: Mock };
@@ -258,7 +268,76 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     const body = await res.json();
     expect(body.rules).toHaveLength(1);
   });
+});
 
+// ---------- ロール別可視範囲（Codex P1）----------
+
+describe("quality-check scoped モード — ロール別可視範囲（Codex P1）", () => {
+  const FS_SESSION = {
+    id: "fs-1",
+    email: "f@x",
+    name: "FS",
+    role: "field_staff",
+  };
+  // 一覧API（buildPropertyListWhere）が field_staff に積むスコープと同一 fragment。
+  const FS_SCOPE = { OR: [{ createdBy: "fs-1" }, { assignedTo: "fs-1" }] };
+
+  it("field_staff: warningPropertiesTotal の count where に一覧と同じ可視範囲が AND される", async () => {
+    vi.mocked(getApiSession).mockResolvedValue(FS_SESSION as never);
+    pm.property.count.mockResolvedValue(3);
+    const res = await GET(makeRequest(`?propertyIds=${UUID1}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.warningPropertiesTotal).toBe(3);
+    const countWhere = pm.property.count.mock.calls[0][0].where as Where;
+    expect(countWhere.isArchived).toBe(false);
+    expect((countWhere.OR as Where[]).length).toBe(4); // 警告述語は従来どおり
+    expect(countWhere.AND).toEqual([FS_SCOPE]); // 可視範囲スコープが追加
+  });
+
+  it("field_staff: 各ルール findMany にも可視範囲が AND され、不可視 propertyIds の警告は返り得ない", async () => {
+    vi.mocked(getApiSession).mockResolvedValue(FS_SESSION as never);
+    pm.property.count.mockResolvedValue(0);
+    await GET(makeRequest(`?propertyIds=${UUID1},${UUID2}`));
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    for (const call of pm.property.findMany.mock.calls) {
+      const where = (call[0] as { where: Where }).where;
+      expect(where.id).toEqual({ in: [UUID1, UUID2] });
+      expect(where.isArchived).toBe(false);
+      // DB 側で「自分の担当分」に必ず絞られる＝任意 ID を渡しても不可視物件は返らない
+      expect(where.AND).toEqual([FS_SCOPE]);
+    }
+  });
+
+  it("admin は可視範囲 AND なし＝従来どおり全体件数・全体判定（回帰lock）", async () => {
+    pm.property.count.mockResolvedValue(0);
+    await GET(makeRequest(`?propertyIds=${UUID1}`));
+    const countWhere = pm.property.count.mock.calls[0][0].where as Where;
+    expect(countWhere.AND).toBeUndefined();
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    for (const call of pm.property.findMany.mock.calls) {
+      expect((call[0] as { where: Where }).where.AND).toBeUndefined();
+    }
+  });
+
+  it("scope 条件は一覧API（buildPropertyListWhere）と完全一致（単一定義元の再利用）", async () => {
+    const fsSession = { id: "fs-1", role: "field_staff" };
+    // helper 単体: field_staff のみ fragment を返す
+    expect(propertyVisibilityScopeWhere(fsSession)).toEqual(FS_SCOPE);
+    expect(propertyVisibilityScopeWhere({ id: "a-1", role: "admin" })).toBeNull();
+    expect(
+      propertyVisibilityScopeWhere({ id: "o-1", role: "office_staff" }),
+    ).toBeNull();
+    // 一覧APIの実物 where にも同一 fragment が積まれる（条件ズレをテストで封じる）
+    const query = propertyListQuerySchema.parse({});
+    const { where } = await buildPropertyListWhere(query, fsSession);
+    expect(where.AND).toContainEqual(FS_SCOPE);
+  });
+});
+
+// ---------- モード優先・既定回帰・権限 ----------
+
+describe("quality-check scoped モード — モード優先・既定回帰・権限", () => {
   it("?rule= ページングモードが優先され propertyIds は無視される", async () => {
     pm.property.count.mockResolvedValue(1);
     pm.property.findMany.mockResolvedValue([{ id: "p9", address: "A9" }]);

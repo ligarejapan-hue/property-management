@@ -7,6 +7,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 
@@ -218,6 +219,16 @@ export async function GET(request: Request) {
         );
       }
 
+      // 一覧API（buildPropertyListWhere）と同一のロール別可視範囲スコープを適用する。
+      // field_staff は createdBy/assignedTo の自分担当分のみ・他ロールは追加条件なし。
+      // これにより「一覧で見えない物件」が件数（warningPropertiesTotal）にも
+      // 警告結果（任意 propertyIds 指定）にも漏れない（Codex P1 対応）。
+      // 条件は property-list-query.ts の単一定義元を再利用＝一覧とズレない。
+      const visibilityScope = propertyVisibilityScopeWhere(session);
+      const scopeAnd: Pick<Prisma.PropertyWhereInput, "AND"> = visibilityScope
+        ? { AND: [visibilityScope] }
+        : {};
+
       // hasWarning 一覧フィルタ（property-list-query.ts）と同じ「error/warning ルールの OR」。
       // info ルール（地番・不動産番号未入力）はバッジ・チップの対象外なので含めない。
       const warningWhere: Prisma.PropertyWhereInput = {
@@ -225,6 +236,7 @@ export async function GET(request: Request) {
         OR: QUALITY_RULES.filter((r) => r.severity !== "info").map(
           (r) => r.where,
         ),
+        ...scopeAnd,
       };
 
       const [warningPropertiesTotal, scopedResults] = await Promise.all([
@@ -240,7 +252,12 @@ export async function GET(request: Request) {
               QUALITY_RULES.map(async (rule) => ({
                 rule,
                 sample: await prisma.property.findMany({
-                  where: { ...NOT_ARCHIVED, ...rule.where, id: { in: ids } },
+                  where: {
+                    ...NOT_ARCHIVED,
+                    ...rule.where,
+                    id: { in: ids },
+                    ...scopeAnd,
+                  },
                   select: { id: true, address: true },
                   orderBy: { id: "asc" },
                 }),
