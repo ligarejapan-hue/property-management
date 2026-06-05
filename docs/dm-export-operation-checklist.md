@@ -32,11 +32,16 @@ DM 出力は所有者個人情報を含むため、UI ボタン表示とサー�
 - [ ] owner の **表示レベルが「生値」**（`full` / `read` / `edit` のいずれか）であること
   - `partial`（先頭3文字+***） / `masked`（末尾4文字） / `hidden`（null）では **氏名・郵便番号・住所のいずれかが生値でない → 403**
   - 判定対象は owner の `name` / `zip` / `address`（`isPlainOwnerLevel`）
-- [ ] UI ボタンの表示は **csv export 権限の目安**（`csv_export:read && csv_export_personal:read`）であり、
-      API ゲートと完全一致ではないことを理解する
-  - API 実行にはさらに `owner:read` と owner の **表示レベル plain 系**（`full` / `read` / `edit`）が必要
-  - そのため **ボタンが見えても API が 403 になる正当ケースがある**（owner 表示レベル不足等）。
-    その場合は owner 表示レベルの不足を確認する。**これは現行仕様上の想定ケースであり、直ちに回帰とは判定しない**
+- [ ] **UI ボタンの表示条件**は `csv_export:read && csv_export_personal:read && owner:read`
+      （DM 差込 CSV ボタンは `owner:read` も含めて表示判定する）。
+      **API 実行はこれに加えて owner の表示レベル plain 系**（`full` / `read` / `edit`）を要求する
+  - そのため **ボタンが見えるのに API が 403 になる正当ケースの主因は、owner の表示レベルが
+    `partial` / `masked` / `hidden` の場合**（`owner:read` 不足はボタン自体が非表示になるため、
+    ボタン表示後の 403 原因にはならない）
+  - 切り分け:
+    - **ボタンが見えない** → `csv_export:read` / `csv_export_personal:read` / `owner:read` のいずれか不足を確認
+    - **ボタンは見えるが API が 403** → owner の表示レベルが `partial` / `masked` / `hidden` になっていないかを確認
+  - この 403 は **現行仕様上の想定ケースであり、直ちに回帰とは判定しない**
 
 > NG 時の切り分け: 403 が返る場合は「どの権限/表示レベルが欠けているか」を本番 DB ではなく
 > **権限テンプレート管理画面**（`/admin/users/[id]/permissions`・`/admin/templates/[id]`）で確認する。
