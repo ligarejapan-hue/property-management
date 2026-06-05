@@ -561,3 +561,104 @@ describe("GET /api/properties/dm-export", () => {
     expect(csv).toContain("MGMT-001");
   });
 });
+
+// ============================================================
+// DM出力運用確認 Phase 1（追加カバレッジ・17-A）
+// 既存ケース未カバーの運用確認点を test-only で固定する:
+//  - 1 所有者が複数物件に紐づく場合の行展開・件数整合
+//  - 代表者は isPrimary のみ「代表」/ 続柄は relationship / 非代表は代表者空欄
+//  - 所有者名・住所内のカンマ / ダブルクオート / 改行の RFC4180 escape（文字化け・列ズレ防止）
+// 既存仕様（dmStatus=send 強制・archived 除外・BOM+CRLF・formula injection 無害化）は
+// 既存 01〜21 と csv-encode.test.ts が担保しており、ここでは重複させない。
+// ============================================================
+describe("GET /api/properties/dm-export — Phase 1 追加ガード", () => {
+  it("1 所有者が複数物件に紐づく場合は物件ごとに 1 行（複数行）になり件数も整合", async () => {
+    const sharedOwner = { name: "共有 一郎", address: "東京都港区3-3" };
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        id: "p1",
+        address: "物件A",
+        propertyOwners: [makePropertyOwner({ owner: sharedOwner })],
+      }),
+      makeProp({
+        id: "p2",
+        address: "物件B",
+        propertyOwners: [makePropertyOwner({ owner: sharedOwner })],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    // ヘッダ + 物件A / 物件B の 2 行（同一所有者でも物件ごとに 1 行）。
+    expect(lines).toHaveLength(3);
+    expect(csv).toContain("物件A");
+    expect(csv).toContain("物件B");
+    // 件数整合: 出力対象 2 物件 = 2 行・skipped 0。
+    const audit = lastAudit();
+    expect(audit.detail.count).toBe(2);
+    expect(audit.detail.resultCount).toBe(2);
+    expect(audit.detail.skippedCount).toBe(0);
+  });
+
+  it("代表者は isPrimary のみ「代表」・続柄は relationship・非代表は代表者空欄", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: "代表 太郎" },
+            isPrimary: true,
+            relationship: "本人",
+          }),
+          makePropertyOwner({
+            owner: { name: "非代表 次郎" },
+            isPrimary: false,
+            relationship: "子",
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(3);
+    // どのフィールドにもカンマを含まない fixture なので列を "," 分割で取り出せる。
+    const header = lines[0].split(",");
+    const idxRep = header.indexOf("代表者");
+    const idxRel = header.indexOf("続柄");
+    const primaryRow = lines.find((l) => l.includes("代表 太郎"))!.split(",");
+    const subRow = lines.find((l) => l.includes("非代表 次郎"))!.split(",");
+    expect(primaryRow[idxRep]).toBe("代表");
+    expect(primaryRow[idxRel]).toBe("本人");
+    // 「非代表」は名前に "代表" を含むが、代表者列は空であること（substring 誤検出を列で回避）。
+    expect(subRow[idxRep]).toBe("");
+    expect(subRow[idxRel]).toBe("子");
+  });
+
+  it("所有者名/住所内のカンマ・ダブルクオート・改行は RFC4180 で escape し列/行が壊れない", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: '田中, "太郎"', address: "東京都\n中央区4-4" },
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    // カンマ + 内部クオートは "..." で囲い、内部 " は "" にエスケープ。
+    expect(csv).toContain('"田中, ""太郎"""');
+    // 改行を含む住所はクオートで囲い、改行はフィールド内に保持する（行が割れない）。
+    expect(csv).toContain('"東京都\n中央区4-4"');
+    // 行区切りは CRLF。埋め込み改行(LF)では CRLF 分割が割れず、データ行は 1 行のみ。
+    const dataLines = csv
+      .split("\r\n")
+      .slice(1)
+      .filter((l) => l.length > 0);
+    expect(dataLines).toHaveLength(1);
+  });
+});
