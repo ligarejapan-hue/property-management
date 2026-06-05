@@ -14,6 +14,9 @@
  * 10. 既定モード（propertyIds なし）は where に id が入らない（従来挙動の回帰防止）
  * 11. property:read 欠如で 403・DB 未実行
  * 12. 一覧ページ側の配線（ソース表明）: scoped 呼び出し・[properties] 依存・補完ボタン撤去・チップは全体実数
+ * 13. UUID validation（Codex review対応）: 非UUID（単独/valid混在）→ 400 INVALID_PROPERTY_IDS・
+ *     Prisma findMany/count 未実行（Postgres uuid 列への invalid syntax 500 を防ぐ）
+ * 14. ?rule= モードでは propertyIds の UUID validation は走らない（rule 優先のまま）
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import fs from "fs";
@@ -66,6 +69,15 @@ const pm = prisma as unknown as {
 const PERMS_FULL = [{ resource: "property", action: "read", granted: true }];
 const PERMS_NO_PROPERTY = [{ resource: "owner", action: "read", granted: true }];
 
+// Property.id は PostgreSQL uuid 列のため、scoped モードの入力は valid UUID を使う。
+const UUID1 = "550e8400-e29b-41d4-a716-446655440001";
+const UUID2 = "550e8400-e29b-41d4-a716-446655440002";
+// 201 件の相異なる valid UUID（上限テスト用）。末尾12桁は10進数字のみ＝hex として常に妥当。
+const UUIDS_201 = Array.from(
+  { length: 201 },
+  (_, i) => `550e8400-e29b-41d4-a716-${String(446655440000 + i)}`,
+);
+
 type Where = Record<string, unknown>;
 
 // 各ルール where の識別（properties-quality-check-route.test.ts と同方式）。
@@ -105,23 +117,23 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
   it("各ルール findMany に id:{in} + isArchived:false が入り take なし・per-rule count なし", async () => {
     pm.property.count.mockResolvedValue(42); // warningPropertiesTotal
     pm.property.findMany.mockImplementation(async ({ where }: { where: Where }) => {
-      // p1 は NO_OWNER と NO_ASSIGNEE の両方に該当（マージ確認用）
+      // UUID1 は NO_OWNER と NO_ASSIGNEE の両方に該当（マージ確認用）
       const code = ruleCode(where);
-      if (code === "NO_OWNER") return [{ id: "p1", address: "A1" }];
-      if (code === "NO_ASSIGNEE") return [{ id: "p1", address: "A1" }];
-      if (code === "REGISTRY_DM_MISMATCH") return [{ id: "p2", address: "A2" }];
+      if (code === "NO_OWNER") return [{ id: UUID1, address: "A1" }];
+      if (code === "NO_ASSIGNEE") return [{ id: UUID1, address: "A1" }];
+      if (code === "REGISTRY_DM_MISMATCH") return [{ id: UUID2, address: "A2" }];
       return [];
     });
 
-    const res = await GET(makeRequest("?propertyIds=p1,p2"));
+    const res = await GET(makeRequest(`?propertyIds=${UUID1},${UUID2}`));
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    // 6 ルールぶんの findMany すべてに id:{in:["p1","p2"]} と isArchived:false、take なし
+    // 6 ルールぶんの findMany すべてに id:{in:[UUID1,UUID2]} と isArchived:false、take なし
     expect(pm.property.findMany).toHaveBeenCalledTimes(6);
     for (const call of pm.property.findMany.mock.calls) {
       const args = call[0] as { where: Where; take?: number; select: Where };
-      expect(args.where.id).toEqual({ in: ["p1", "p2"] });
+      expect(args.where.id).toEqual({ in: [UUID1, UUID2] });
       expect(args.where.isArchived).toBe(false);
       expect(args.take).toBeUndefined();
       expect(args.select).toEqual({ id: true, address: true });
@@ -168,10 +180,14 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
 
   it("propertyIds は trim / 空要素除去 / 重複除去される", async () => {
     pm.property.count.mockResolvedValue(0);
-    await GET(makeRequest("?propertyIds=" + encodeURIComponent(" p1 , ,p2,p1,")));
+    await GET(
+      makeRequest(
+        "?propertyIds=" + encodeURIComponent(` ${UUID1} , ,${UUID2},${UUID1},`),
+      ),
+    );
     expect(pm.property.findMany).toHaveBeenCalledTimes(6);
     const args = pm.property.findMany.mock.calls[0][0] as { where: Where };
-    expect(args.where.id).toEqual({ in: ["p1", "p2"] });
+    expect(args.where.id).toEqual({ in: [UUID1, UUID2] });
   });
 
   it("propertyIds が 0 件 → findMany 不発行・count 1 本のみ・data 空", async () => {
@@ -187,14 +203,60 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     expect(body.summary.total).toBe(0);
   });
 
-  it("上限超過（201件）→ 400 INVALID_PROPERTY_IDS・DB 未実行", async () => {
-    const ids = Array.from({ length: 201 }, (_, i) => `p${i}`).join(",");
-    const res = await GET(makeRequest(`?propertyIds=${ids}`));
+  it("上限超過（valid UUID 201件）→ 400 INVALID_PROPERTY_IDS・DB 未実行", async () => {
+    const res = await GET(makeRequest(`?propertyIds=${UUIDS_201.join(",")}`));
     const body = await res.json();
     expect(res.status).toBe(400);
     expect(body.error.code).toBe("INVALID_PROPERTY_IDS");
     expect(pm.property.findMany).not.toHaveBeenCalled();
     expect(pm.property.count).not.toHaveBeenCalled();
+  });
+
+  it("非UUID（?propertyIds=not-a-uuid）→ 400 INVALID_PROPERTY_IDS・DB 未実行", async () => {
+    const res = await GET(makeRequest("?propertyIds=not-a-uuid"));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_PROPERTY_IDS");
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+    expect(pm.property.count).not.toHaveBeenCalled();
+  });
+
+  it("valid UUID + 非UUID の混在 → 400 INVALID_PROPERTY_IDS・DB 未実行", async () => {
+    for (const mixed of [`${UUID1},not-a-uuid`, `${UUID1},123`]) {
+      vi.clearAllMocks();
+      vi.mocked(getApiSession).mockResolvedValue({
+        id: "u1",
+        email: "a@a",
+        name: "A",
+        role: "admin",
+      } as never);
+      vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
+      const res = await GET(makeRequest(`?propertyIds=${mixed}`));
+      const body = await res.json();
+      expect(res.status).toBe(400);
+      expect(body.error.code).toBe("INVALID_PROPERTY_IDS");
+      expect(pm.property.findMany).not.toHaveBeenCalled();
+      expect(pm.property.count).not.toHaveBeenCalled();
+    }
+  });
+
+  it("大文字 UUID は許容される（Postgres uuid は case-insensitive）", async () => {
+    pm.property.count.mockResolvedValue(0);
+    const upper = UUID1.toUpperCase();
+    const res = await GET(makeRequest(`?propertyIds=${upper}`));
+    expect(res.status).toBe(200);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    const args = pm.property.findMany.mock.calls[0][0] as { where: Where };
+    expect(args.where.id).toEqual({ in: [upper] });
+  });
+
+  it("?rule= モードでは propertyIds の UUID validation は走らない（rule 優先のまま）", async () => {
+    pm.property.count.mockResolvedValue(0);
+    pm.property.findMany.mockResolvedValue([]);
+    const res = await GET(makeRequest("?rule=NO_OWNER&propertyIds=not-a-uuid"));
+    expect(res.status).toBe(200); // 400 にならない＝scoped validation は rule モードに波及しない
+    const body = await res.json();
+    expect(body.rules).toHaveLength(1);
   });
 
   it("?rule= ページングモードが優先され propertyIds は無視される", async () => {

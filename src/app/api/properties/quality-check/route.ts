@@ -7,6 +7,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 
 interface QualityIssue {
@@ -49,6 +50,12 @@ const QUALITY_CHECK_ISSUE_LIMIT = 1000;
 
 // scoped モード（?propertyIds=）で受け付ける物件IDの最大数（一覧1ページ=50 の余裕枠）。
 const PROPERTY_IDS_SCOPE_MAX = 200;
+
+// Property.id は PostgreSQL の uuid 列。不正な形式を Prisma の id:{in} に渡すと
+// Postgres 側で invalid uuid syntax → 意図しない 500 になるため、クエリ前に
+// UUID 形式（大文字小文字許容）を検証して 400 で弾く（Codex review対応）。
+// bulk-update API の propertyIds（z.array(z.string().uuid())・validators.ts）と同じ zod 判定。
+const propertyIdSchema = z.string().uuid();
 
 const NOT_ARCHIVED: Prisma.PropertyWhereInput = { isArchived: false };
 
@@ -199,6 +206,14 @@ export async function GET(request: Request) {
         throw new ApiError(
           400,
           `propertyIds は最大 ${PROPERTY_IDS_SCOPE_MAX} 件までです`,
+          "INVALID_PROPERTY_IDS",
+        );
+      }
+      // 1件でも UUID 形式でない ID があれば DB へ渡さず 400（上限超過と同じエラーコード）。
+      if (!ids.every((id) => propertyIdSchema.safeParse(id).success)) {
+        throw new ApiError(
+          400,
+          "propertyIds に不正な形式のIDが含まれています",
           "INVALID_PROPERTY_IDS",
         );
       }
