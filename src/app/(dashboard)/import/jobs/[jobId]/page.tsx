@@ -571,7 +571,12 @@ export default function ImportJobDetailPage() {
   const isOwnerJob = useOwnerSearch;
 
   return (
-    <div>
+    // S1b-3: import job 詳細は rawData（住所/氏名/所有者名/電話 等の平文）・行ヘッダ
+    // preview・検索結果・影響物件テーブルなど PII を表示する。root を broad container と
+    // して保護し、copy/cut/contextmenu 抑止＋print scoping（PR #118）を surface="import"
+    // で有効化する。container 内の button/a/input/select は screen-protection guard の
+    // exemption で通常操作のまま（個別 marker は付けない）。
+    <div data-pii-protected data-pii-surface="import">
       {/* Header */}
       <div className="mb-6 flex items-center gap-3">
         <Link
