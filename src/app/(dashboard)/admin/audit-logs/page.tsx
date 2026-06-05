@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
+import { debounce } from "@/lib/debounce";
 
 interface AuditLog {
   id: string;
@@ -77,6 +78,10 @@ export default function AuditLogsPage() {
   const [dateTo, setDateTo] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [targetTableFilter, setTargetTableFilter] = useState("");
+  // ユーザー名検索: 入力中文字列（即時反映で入力レスポンスを維持）と、fetchLogs が
+  // 依存する確定値を分離する。確定値は 300ms debounce 後に更新し、毎キーストロークの
+  // /api/admin/audit-logs 再取得を抑制する（F19）。
+  const [userNameInput, setUserNameInput] = useState("");
   const [userNameFilter, setUserNameFilter] = useState("");
   const limit = 50;
 
@@ -112,15 +117,33 @@ export default function AuditLogsPage() {
     fetchLogs();
   }, [fetchLogs]);
 
+  // ユーザー名入力の確定を 300ms debounce する。確定時に page を 1 へ戻し、新しい
+  // 検索語で最初のページから取得する。debounce インスタンスは1度だけ生成する。
+  const commitUserName = useMemo(
+    () =>
+      debounce((value: string) => {
+        setUserNameFilter(value);
+        setPage(1);
+      }, 300),
+    [],
+  );
+  // アンマウント時に保留中の debounce を破棄する。
+  useEffect(() => () => commitUserName.cancel(), [commitUserName]);
+
   function handleSearch() {
+    // 明示的な「検索」確定: 保留中の debounce を破棄し、入力値を即時反映する。
+    commitUserName.cancel();
+    setUserNameFilter(userNameInput);
     setPage(1);
   }
 
   function handleReset() {
+    commitUserName.cancel();
     setDateFrom("");
     setDateTo("");
     setActionFilter("");
     setTargetTableFilter("");
+    setUserNameInput("");
     setUserNameFilter("");
     setPage(1);
   }
@@ -181,8 +204,11 @@ export default function AuditLogsPage() {
               id="user-name-filter"
               type="text"
               placeholder="ユーザー名で検索..."
-              value={userNameFilter}
-              onChange={(e) => setUserNameFilter(e.target.value)}
+              value={userNameInput}
+              onChange={(e) => {
+                setUserNameInput(e.target.value);
+                commitUserName(e.target.value);
+              }}
               className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
             />
           </div>
