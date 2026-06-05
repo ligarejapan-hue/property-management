@@ -45,6 +45,9 @@ interface RuleMeta {
 //  - summary.errors/warnings/info/total は count(全体件数) を severity 合算（truncate 後 data からは数えない）。
 //  - data 取得列は id/address のみ。所有者は relation filter のみで Owner PII 列は取得しない。
 //  - 全件 findMany には戻さない / 5000件超でも hard fail しない（常に 200。rule 不正のみ 400）。
+//  - 全モードで一覧API（propertyVisibilityScopeWhere）と同一のロール別可視範囲を適用する:
+//    field_staff は自分が作成/担当する物件のみが count / data の対象（不可視物件の
+//    id/address/件数が漏れない）。admin / office_staff は従来どおり全体が対象。
 
 // 1ルールあたりに data へ載せる issue 件数の既定値かつ最大値（表示用ページサイズ）。
 const QUALITY_CHECK_ISSUE_LIMIT = 1000;
@@ -150,6 +153,15 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const ruleParam = searchParams.get("rule");
 
+    // 一覧API（buildPropertyListWhere）と同一のロール別可視範囲スコープを全モードに適用する。
+    // field_staff は createdBy/assignedTo の自分担当分のみ・他ロール（admin/office_staff）は
+    // 追加条件なし。条件は property-list-query.ts の単一定義元を再利用＝一覧とズレない。
+    // これにより count / 件数 / id / address のいずれにも一覧で見えない物件が漏れない。
+    const visibilityScope = propertyVisibilityScopeWhere(session);
+    const scopeAnd: Pick<Prisma.PropertyWhereInput, "AND"> = visibilityScope
+      ? { AND: [visibilityScope] }
+      : {};
+
     // ---- (2) ページングモード: 指定ルールのみ skip/take で1ページ取得 ----
     if (ruleParam !== null) {
       const rule = findRule(ruleParam);
@@ -161,6 +173,7 @@ export async function GET(request: Request) {
       const where: Prisma.PropertyWhereInput = {
         ...NOT_ARCHIVED,
         ...rule.where,
+        ...scopeAnd,
       };
       const [totalCount, page] = await Promise.all([
         prisma.property.count({ where }),
@@ -219,16 +232,8 @@ export async function GET(request: Request) {
         );
       }
 
-      // 一覧API（buildPropertyListWhere）と同一のロール別可視範囲スコープを適用する。
-      // field_staff は createdBy/assignedTo の自分担当分のみ・他ロールは追加条件なし。
-      // これにより「一覧で見えない物件」が件数（warningPropertiesTotal）にも
-      // 警告結果（任意 propertyIds 指定）にも漏れない（Codex P1 対応）。
-      // 条件は property-list-query.ts の単一定義元を再利用＝一覧とズレない。
-      const visibilityScope = propertyVisibilityScopeWhere(session);
-      const scopeAnd: Pick<Prisma.PropertyWhereInput, "AND"> = visibilityScope
-        ? { AND: [visibilityScope] }
-        : {};
-
+      // 可視範囲スコープ（scopeAnd・handler 冒頭で算出）は件数（warningPropertiesTotal）と
+      // 警告結果（任意 propertyIds 指定）の両方に適用される（Codex P1 対応）。
       // hasWarning 一覧フィルタ（property-list-query.ts）と同じ「error/warning ルールの OR」。
       // info ルール（地番・不動産番号未入力）はバッジ・チップの対象外なので含めない。
       const warningWhere: Prisma.PropertyWhereInput = {
@@ -324,14 +329,16 @@ export async function GET(request: Request) {
       });
     }
 
-    // ---- (1) 既定モード: 全非アーカイブ件数(count) と 各ルールの count + 先頭ページ ----
+    // ---- (1) 既定モード: 非アーカイブ件数(count) と 各ルールの count + 先頭ページ ----
+    // いずれも可視範囲スコープ込み（field_staff は自分の担当分のみが対象になる）。
     const [propertiesChecked, ruleResults] = await Promise.all([
-      prisma.property.count({ where: NOT_ARCHIVED }),
+      prisma.property.count({ where: { ...NOT_ARCHIVED, ...scopeAnd } }),
       Promise.all(
         QUALITY_RULES.map(async (rule) => {
           const where: Prisma.PropertyWhereInput = {
             ...NOT_ARCHIVED,
             ...rule.where,
+            ...scopeAnd,
           };
           const [count, sample] = await Promise.all([
             prisma.property.count({ where }),
