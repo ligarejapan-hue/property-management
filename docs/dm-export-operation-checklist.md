@@ -32,8 +32,11 @@ DM 出力は所有者個人情報を含むため、UI ボタン表示とサー�
 - [ ] owner の **表示レベルが「生値」**（`full` / `read` / `edit` のいずれか）であること
   - `partial`（先頭3文字+***） / `masked`（末尾4文字） / `hidden`（null）では **氏名・郵便番号・住所のいずれかが生値でない → 403**
   - 判定対象は owner の `name` / `zip` / `address`（`isPlainOwnerLevel`）
-- [ ] UI ボタンの表示条件（`csv_export:read && csv_export_personal:read`）と API ゲートが一致していること
-  - 想定: ボタンが見えるユーザーは出力でき、見えないユーザーは API でも 403
+- [ ] UI ボタンの表示は **csv export 権限の目安**（`csv_export:read && csv_export_personal:read`）であり、
+      API ゲートと完全一致ではないことを理解する
+  - API 実行にはさらに `owner:read` と owner の **表示レベル plain 系**（`full` / `read` / `edit`）が必要
+  - そのため **ボタンが見えても API が 403 になる正当ケースがある**（owner 表示レベル不足等）。
+    その場合は owner 表示レベルの不足を確認する。**これは現行仕様上の想定ケースであり、直ちに回帰とは判定しない**
 
 > NG 時の切り分け: 403 が返る場合は「どの権限/表示レベルが欠けているか」を本番 DB ではなく
 > **権限テンプレート管理画面**（`/admin/users/[id]/permissions`・`/admin/templates/[id]`）で確認する。
@@ -54,8 +57,15 @@ DM 出力は所有者個人情報を含むため、UI ボタン表示とサー�
   - `detail.count` = 送付可かつ owner≥1 の物件数（mailablePropertyCount）
   - `detail.resultCount` = CSV データ行数（= owner 行数）
   - `detail.skippedCount` = owner 0 件で除外した物件数
-- [ ] **上限**: 最終 owner 行数 > `MAX_DM_EXPORT_ROWS`（10,000）の場合は切り捨てず **400**（`EXPORT_LIMIT_EXCEEDED`）。
-  検索条件で絞ってから再実行する
+- [ ] **上限の挙動（現行実装の制約・要注意）**: route は先に property を `MAX_DM_EXPORT_ROWS + 1`（10,001）件で
+      `take` し、その後 owner 行へ展開して `rows.length > 10,000` なら **400**（`EXPORT_LIMIT_EXCEEDED`）を返す。
+  - この **「property 取得上限 → owner 展開」の順序** のため、対象 property が 10,001 件を超える状況では、
+    取得対象外（take の外）の property に属する eligible owner が CSV に **含まれないまま 200 が返る可能性**がある。
+  - したがって **「10,000 超は必ず 400」とは保証されない**（条件次第で 200 + 不完全出力になり得る）。
+  - 運用対応: **検索条件を狭めて対象件数を十分小さくしてから出力**し、`resultCount` / 画面件数 / 抽出条件を照合する。
+    件数が想定より少ない・合わない場合は、上限 `take` による欠落を疑う。
+  - 大量出力や完全性の保証が必要な場合は、**route 側の上限判定（property の `take` と owner 展開の整合）修正を別 PR** で行う
+    （本 docs では route を変更しない）。
 
 確認手順（本番）:
 
