@@ -1,4 +1,5 @@
 import FieldSurveyMapClient from "@/components/field-survey/field-survey-map-client";
+import InsecureContextBanner from "@/components/field-survey/insecure-context-banner";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 
@@ -39,6 +40,9 @@ export default async function FieldSurveyMapPage() {
           </p>
         </div>
       </header>
+
+      {/* HTTPS/secure-context でない実機アクセス時に位置情報・カメラが動かない旨を事前提示（表示のみ・機能は止めない）。 */}
+      <InsecureContextBanner />
 
       <div className="flex-1 overflow-hidden">
         {canRead && currentUserId ? (
