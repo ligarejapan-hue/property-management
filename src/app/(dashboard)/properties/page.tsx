@@ -147,23 +147,13 @@ function PropertiesPageInner() {
   const suggestQueryRef = useRef<string>("");
 
   // 警告 (quality-check) を propertyId 単位で集計。
-  // 既存の /api/properties/quality-check を流用するので新 API は追加しない。
+  // /api/properties/quality-check の scoped モード（propertyIds=表示中の物件）を使う（17-C F2）。
   // severity = "info" は粒度が細かいため一覧ではバッジ対象外 (error / warning のみ)。
   const [warningsByProperty, setWarningsByProperty] = useState<
     Map<string, { severity: "error" | "warning"; messages: string[] }>
   >(new Map());
-  // 警告(quality-check)が上限で一部のみか。true のとき「残りの警告を読み込む」で追加取得できる。
-  const [warningsTruncated, setWarningsTruncated] = useState(false);
-  const [loadingMoreWarnings, setLoadingMoreWarnings] = useState(false);
-  // 直近の quality-check ルールメタ。hasMore の error/warning ルールを後追い取得するために保持。
-  const warningRulesRef = useRef<
-    Array<{
-      rule: string;
-      severity: "error" | "warning" | "info";
-      hasMore: boolean;
-      nextOffset: number | null;
-    }>
-  >([]);
+  // 「警告ありのみ」チップに出す全体件数（warningPropertiesTotal=警告あり物件の実数）。
+  const [warningPropertyCount, setWarningPropertyCount] = useState(0);
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -297,13 +287,19 @@ function PropertiesPageInner() {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort, page, pathname, router]);
 
-  // 警告サマリは初回 / 一覧再取得時に best-effort で更新する。
-  // 失敗してもバッジが出ないだけで一覧本体は表示できる設計。
+  // 警告バッジは「現在ページに表示中の物件」だけに scope して取得する（17-C F2）。
+  // properties が変わるたび（page/filter/sort 変更・mutation 後の再取得）に追従するため、
+  // 旧 mount 時 1 回方式と違いバッジが stale にならず、ページを跨いだ取りこぼしも起きない
+  // （scope 内は常に全件判定＝旧「残りの警告を読み込む」補完は不要になり撤去）。
+  // 「警告ありのみ」チップの件数は warningPropertiesTotal（警告あり物件の全体実数）を使う。
+  // 失敗してもバッジが出ないだけで一覧本体は表示できる設計（best-effort）。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const json = await fetchQualityCheck();
+        const json = await fetchQualityCheck({
+          propertyIds: properties.map((p) => p.id),
+        });
         if (cancelled) return;
         const data = (json as {
           data?: Array<{
@@ -331,24 +327,9 @@ function PropertiesPageInner() {
           }
         }
         setWarningsByProperty(next);
-        // ルールメタを保持。error/warning ルールに続きがあればバッジは「一部のみ」。
-        const rules =
-          (
-            json as {
-              rules?: Array<{
-                rule: string;
-                severity: "error" | "warning" | "info";
-                hasMore: boolean;
-                nextOffset: number | null;
-              }>;
-            }
-          ).rules ?? [];
-        warningRulesRef.current = rules;
-        setWarningsTruncated(
-          rules.some(
-            (r) =>
-              (r.severity === "error" || r.severity === "warning") && r.hasMore,
-          ),
+        setWarningPropertyCount(
+          (json as { warningPropertiesTotal?: number }).warningPropertiesTotal ??
+            0,
         );
       } catch {
         // best-effort: 失敗しても無視
@@ -357,69 +338,7 @@ function PropertiesPageInner() {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  // hasMore の error/warning ルールについて続きの issue を後追い取得し、
-  // warningsByProperty を補完してバッジを実件数に近づける。Owner PII は取得しない。
-  const loadRemainingWarnings = async () => {
-    setLoadingMoreWarnings(true);
-    try {
-      const merged = new Map(
-        Array.from(
-          warningsByProperty,
-          ([k, v]) =>
-            [k, { severity: v.severity, messages: [...v.messages] }] as [
-              string,
-              { severity: "error" | "warning"; messages: string[] },
-            ],
-        ),
-      );
-      for (const meta of warningRulesRef.current) {
-        if (meta.severity === "info") continue;
-        let offset = meta.hasMore ? meta.nextOffset : null;
-        let guard = 0;
-        while (offset != null && guard < 100) {
-          guard += 1;
-          const json = await fetchQualityCheck({ rule: meta.rule, offset });
-          const data =
-            (
-              json as {
-                data?: Array<{
-                  propertyId: string;
-                  severity: "error" | "warning" | "info";
-                  message: string;
-                }>;
-              }
-            ).data ?? [];
-          for (const issue of data) {
-            if (issue.severity === "info") continue;
-            const cur = merged.get(issue.propertyId);
-            if (cur) {
-              cur.messages.push(issue.message);
-              if (issue.severity === "error") cur.severity = "error";
-            } else {
-              merged.set(issue.propertyId, {
-                severity: issue.severity,
-                messages: [issue.message],
-              });
-            }
-          }
-          const nextMeta = (
-            json as {
-              rules?: Array<{ hasMore: boolean; nextOffset: number | null }>;
-            }
-          ).rules?.[0];
-          offset = nextMeta?.hasMore ? nextMeta.nextOffset : null;
-        }
-      }
-      setWarningsByProperty(merged);
-      setWarningsTruncated(false);
-    } catch {
-      // best-effort: 失敗してもバッジは部分表示のまま
-    } finally {
-      setLoadingMoreWarnings(false);
-    }
-  };
+  }, [properties]);
 
   // 入力中候補: searchInput に 300ms debounce をかけて suggest API を呼ぶ。
   // searchInput は確定検索（/api/properties keyword）には流れないため、
@@ -823,24 +742,12 @@ function PropertiesPageInner() {
           />
           <AlertTriangle className="h-3.5 w-3.5" />
           警告ありのみ
-          {warningsByProperty.size > 0 && (
+          {warningPropertyCount > 0 && (
             <span className="rounded-full bg-amber-200 px-1.5 text-xs font-semibold">
-              {warningsByProperty.size}
+              {warningPropertyCount}
             </span>
           )}
         </label>
-
-        {warningsTruncated && (
-          <button
-            type="button"
-            onClick={loadRemainingWarnings}
-            disabled={loadingMoreWarnings}
-            className="rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-            title="表示中の警告バッジは一部です。残りの警告を読み込んでバッジを補完します。"
-          >
-            {loadingMoreWarnings ? "読み込み中…" : "残りの警告を読み込む"}
-          </button>
-        )}
 
         <select
           value={caseFilter}
