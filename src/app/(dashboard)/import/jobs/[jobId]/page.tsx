@@ -450,7 +450,15 @@ export default function ImportJobDetailPage() {
       } else {
         await resolveImportRow(jobId, rowId, action, targetId, edited);
       }
-      await Promise.all([fetchJob(), fetchAffected()]);
+      // F10-subset: affected-properties は status="success" かつ createdId 有りの行のみ
+      // 由来（affected-properties/route.ts）。skip / mark_error は行を success+createdId に
+      // しないため affected は不変＝fetchAffected は冗長。create_new / link_existing のみ
+      // affected を更新するので、その時だけ再取得する。
+      const mutatesAffected =
+        action === "create_new" || action === "link_existing";
+      await (mutatesAffected
+        ? Promise.all([fetchJob(), fetchAffected()])
+        : fetchJob());
       setExpandedRow(null);
       setEditingRow(null);
       setEditedData({});
@@ -509,7 +517,9 @@ export default function ImportJobDetailPage() {
     setActionLoading("batch");
     try {
       const res = await bulkResolveImportRows(jobId, { action, scope });
-      await Promise.all([fetchJob(), fetchAffected()]);
+      // F10-subset: skip / mark_error の一括処理は行を success+createdId にしないため
+      // affected は不変。fetchAffected を省略し fetchJob のみで行/件数を更新する。
+      await fetchJob();
       alert(`${res.affectedCount} 件を処理しました`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "操作に失敗しました");
@@ -535,7 +545,9 @@ export default function ImportJobDetailPage() {
         action: "skip",
         scope: "duplicate",
       });
-      await Promise.all([fetchJob(), fetchAffected()]);
+      // F10-subset: 重複候補の一括スキップは affected を変えない（skip は success+
+      // createdId にしない）。fetchAffected を省略する。
+      await fetchJob();
       alert(`${res.affectedCount} 件を処理しました`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "操作に失敗しました");
