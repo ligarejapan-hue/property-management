@@ -99,15 +99,16 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   matched: { label: "既存一致", color: "text-amber-700 bg-amber-50 border-amber-200" },
 };
 
+// v2: 中間色は yellow → amber に統一(警告系の色相を 1 本化)
 const CONFIDENCE_COLOR: Record<ConfidenceLevel, string> = {
   high: "text-green-500",
-  medium: "text-yellow-500",
+  medium: "text-amber-500",
   low: "text-red-500",
 };
 
 const CONFIDENCE_BG: Record<ConfidenceLevel, string> = {
   high: "bg-green-500",
-  medium: "bg-yellow-500",
+  medium: "bg-amber-500",
   low: "bg-red-500",
 };
 
@@ -258,7 +259,7 @@ function ConfidenceBar({ score }: { score: number }) {
   const pct = Math.round(score * 100);
   let color = "bg-green-500";
   if (pct < 50) color = "bg-red-500";
-  else if (pct < 75) color = "bg-yellow-500";
+  else if (pct < 75) color = "bg-amber-500";
 
   return (
     <div className="flex items-center gap-3">
@@ -772,7 +773,7 @@ export default function RegistryPdfPage() {
                   高信頼
                 </span>
                 <span className="flex items-center gap-1">
-                  <Circle className="h-2.5 w-2.5 fill-current text-yellow-500" />
+                  <Circle className="h-2.5 w-2.5 fill-current text-amber-500" />
                   中信頼
                 </span>
                 <span className="flex items-center gap-1">

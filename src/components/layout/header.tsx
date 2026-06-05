@@ -1,19 +1,13 @@
 "use client";
 
 import { LogOut } from "lucide-react";
+import StatusBadge, { ROLE_INTENT } from "@/components/ui/status-badge";
 
 interface HeaderProps {
   userName: string;
   userRole: string;
   onLogout: () => void;
 }
-
-const roleBadgeStyles: Record<string, string> = {
-  ADMIN: "bg-red-100 text-red-800",
-  MANAGER: "bg-blue-100 text-blue-800",
-  OPERATOR: "bg-green-100 text-green-800",
-  VIEWER: "bg-gray-100 text-gray-800",
-};
 
 const roleLabels: Record<string, string> = {
   ADMIN: "管理者",
@@ -23,7 +17,8 @@ const roleLabels: Record<string, string> = {
 };
 
 export default function Header({ userName, userRole, onLogout }: HeaderProps) {
-  const badgeStyle = roleBadgeStyles[userRole] ?? "bg-gray-100 text-gray-800";
+  // v2: ロールは状態色(赤=エラー等)と衝突しない専用色(violet/sky/neutral)
+  const roleIntent = ROLE_INTENT[userRole] ?? "neutral";
   const roleLabel = roleLabels[userRole] ?? userRole;
 
   return (
@@ -35,11 +30,7 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-700">{userName}</span>
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${badgeStyle}`}
-          >
-            {roleLabel}
-          </span>
+          <StatusBadge intent={roleIntent}>{roleLabel}</StatusBadge>
         </div>
         <button
           onClick={onLogout}

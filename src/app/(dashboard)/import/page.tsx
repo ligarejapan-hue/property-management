@@ -41,6 +41,7 @@ import {
   type ReceptionPropertyImportResponse,
   type StuckImportJob,
 } from "@/lib/api-client";
+import { badgeIntentClass } from "@/components/ui/status-badge";
 import { detectImportFileType } from "@/lib/import-file-type";
 import { readCsvFileAsText } from "@/lib/csv-decode";
 import { filterNonBlankHeaders } from "@/lib/csv-parser";
@@ -1543,7 +1544,7 @@ export default function ImportPage() {
                             <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.address}>{d.address}</td>
                             <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
                             <td className="px-2 py-1.5">
-                              <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-700">{d.matchReason}</span>
+                              <span className={`rounded px-1.5 py-0.5 ${badgeIntentClass("info")}`}>{d.matchReason}</span>
                             </td>
                           </tr>
                         ))}
@@ -1584,7 +1585,7 @@ export default function ImportPage() {
                             <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.address}>{d.address}</td>
                             <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
                             <td className="px-2 py-1.5">
-                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">{d.matchReason}</span>
+                              <span className={`rounded px-1.5 py-0.5 ${badgeIntentClass("warning")}`}>{d.matchReason}</span>
                             </td>
                           </tr>
                         ))}
@@ -1853,9 +1854,9 @@ export default function ImportPage() {
                 <div className="text-xl font-bold text-green-700">{rpPreview.summary.toCreateCount}</div>
                 <div className="text-xs text-green-600">新規作成</div>
               </div>
-              <div className="rounded bg-yellow-50 p-2 text-center">
-                <div className="text-xl font-bold text-yellow-700">{rpPreview.summary.duplicateCount}</div>
-                <div className="text-xs text-yellow-600">既存と重複</div>
+              <div className="rounded bg-amber-50 p-2 text-center">
+                <div className="text-xl font-bold text-amber-700">{rpPreview.summary.duplicateCount}</div>
+                <div className="text-xs text-amber-600">既存と重複</div>
               </div>
               <div className="rounded bg-gray-50 p-2 text-center">
                 <div className="text-xl font-bold text-gray-600">{rpPreview.summary.noAddressCount}</div>
