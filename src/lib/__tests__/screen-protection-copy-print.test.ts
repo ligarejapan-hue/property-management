@@ -579,6 +579,65 @@ describe("Codex P1: resolveProtectedSurface（selection-aware）", () => {
       resolveProtectedSurfaceForRanges([r], [asEl(panel)], OPTS),
     ).toBeNull();
   });
+
+  // ---- 17-A(coverage): selection fallback の境界条件（現仕様ロック・production 不変）----
+
+  it("17-A(coverage): range が空（選択 0 件）なら null・例外を投げない", () => {
+    expect(resolveProtectedSurfaceForRanges([], [], OPTS)).toBeNull();
+  });
+
+  it("17-A(coverage): collapsed 相当（start=end=common が同一 node）でも保護領域内なら検出", () => {
+    const c = child(region("owner"));
+    expect(resolveProtectedSurfaceForRanges([range(c, c, c)], [], OPTS)).toBe(
+      "owner",
+    );
+  });
+
+  it("17-A(coverage): intersectsNode が throw しても落ちず null（非対応環境 fallback）", () => {
+    const panel = region("owner");
+    const throwingRange = {
+      commonAncestorContainer: outside(),
+      startContainer: outside(),
+      endContainer: outside(),
+      intersectsNode: () => {
+        throw new Error("intersectsNode not supported");
+      },
+    } as unknown as DomRangeLike;
+    expect(
+      resolveProtectedSurfaceForRanges([throwingRange], [asEl(panel)], OPTS),
+    ).toBeNull();
+  });
+
+  it("17-A(coverage): intersectsNode 非対応(undefined)でも container 判定は機能する", () => {
+    const panel = region("history");
+    const inside = {
+      commonAncestorContainer: child(region("history")),
+      startContainer: outside(),
+      endContainer: outside(),
+    } as unknown as DomRangeLike;
+    expect(
+      resolveProtectedSurfaceForRanges([inside], [asEl(panel)], OPTS),
+    ).toBe("history");
+    const out = {
+      commonAncestorContainer: outside(),
+      startContainer: outside(),
+      endContainer: outside(),
+    } as unknown as DomRangeLike;
+    expect(
+      resolveProtectedSurfaceForRanges([out], [asEl(panel)], OPTS),
+    ).toBeNull();
+  });
+
+  it("17-A(coverage): 複数 range は順に評価し、いずれかが保護領域内なら surface", () => {
+    const second = child(region("import"));
+    expect(
+      resolveProtectedSurfaceForRanges(
+        [range(outside(), outside(), outside()), range(second, second, second)],
+        [],
+        OPTS,
+      ),
+    ).toBe("import");
+  });
 });
 
 describe("Codex P1: guard / helper の selection 配線（source-assertion）", () => {
@@ -616,5 +675,149 @@ describe("Codex P1: guard / helper の selection 配線（source-assertion）", 
   it("guard は選択テキストを文字列化して送らない（PII を監査に入れない）", () => {
     expect(guardSrc).not.toMatch(/toString/);
     expect(guardSrc).not.toMatch(/selectedText/);
+  });
+});
+
+// ============================================================
+// 17-A(coverage): test-only の現仕様ロック（production code は不変）。
+// resolvePrintSurface の境界 / print scoping の負アサーション / client throttle 境界 /
+// bypass / selection ガード / audit route の PII header guard を固定する。
+// ============================================================
+
+describe("17-A(coverage): resolvePrintSurface 境界条件（現仕様ロック）", () => {
+  it("空文字 / 空白のみ surface は enum 外として dashboard に clamp", () => {
+    expect(resolvePrintSurface([""])).toBe("dashboard");
+    expect(resolvePrintSurface(["   "])).toBe("dashboard");
+  });
+
+  it("複数 null は単一 dashboard に集約（distinct 1 種 → dashboard）", () => {
+    expect(resolvePrintSurface([null, null])).toBe("dashboard");
+  });
+
+  it("3 つ以上の重複 surface も distinct 1 種ならその surface", () => {
+    expect(resolvePrintSurface(["owner", "owner", "owner"])).toBe("owner");
+  });
+
+  it("全 enum 値の単一入力はそのまま返す（registry / dashboard / history 等を含めロック）", () => {
+    expect(resolvePrintSurface(["owner"])).toBe("owner");
+    expect(resolvePrintSurface(["property"])).toBe("property");
+    expect(resolvePrintSurface(["history"])).toBe("history");
+    expect(resolvePrintSurface(["import"])).toBe("import");
+    expect(resolvePrintSurface(["registry"])).toBe("registry");
+    expect(resolvePrintSurface(["dashboard"])).toBe("dashboard");
+  });
+
+  it("有効 surface に null / enum 外が混ざれば dashboard（順序非依存）", () => {
+    expect(resolvePrintSurface([null, "owner"])).toBe("dashboard");
+    expect(resolvePrintSurface(["owner", null, "owner"])).toBe("dashboard");
+    expect(resolvePrintSurface(["owner", "evil"])).toBe("dashboard");
+  });
+
+  it("複数の enum 外も dashboard に集約（distinct 1 種）", () => {
+    expect(resolvePrintSurface(["evil", "nope"])).toBe("dashboard");
+  });
+
+  it("多数の異なる有効 surface 混在は dashboard（page-wide 集約）", () => {
+    expect(
+      resolvePrintSurface([
+        "owner",
+        "property",
+        "history",
+        "import",
+        "registry",
+      ]),
+    ).toBe("dashboard");
+  });
+});
+
+describe("17-A(coverage): print scoping の負アサーション（PII なしで復活しない）", () => {
+  const guardSrc = read(
+    "src/components/screen-protection/screen-protection-guard.tsx",
+  );
+
+  it("PII 保護領域が無ければ resolvePrintSurface は null（guard 早期 return の前提）", () => {
+    expect(resolvePrintSurface([])).toBeNull();
+  });
+
+  it("banner を無条件 active 化するコードが無い（surface !== null 経由のみ）", () => {
+    expect(guardSrc).not.toMatch(/setPrintBannerActive\(true\)/);
+    expect(guardSrc).toMatch(/setPrintBannerActive\(surface !== null\)/);
+  });
+
+  it("beforeprint は banner 同期の直後に surface なし早期 return（無条件 audit が無い）", () => {
+    expect(guardSrc).toMatch(
+      /setPrintBannerActive\(surface !== null\);\s*if \(!surface\) return;/,
+    );
+  });
+});
+
+describe("17-A(coverage): client audit throttle 境界（source-assertion）", () => {
+  const guardSrc = read(
+    "src/components/screen-protection/screen-protection-guard.tsx",
+  );
+
+  it("SEND_THROTTLE_MS は 800ms（境界定数をロック）", () => {
+    expect(guardSrc).toMatch(/SEND_THROTTLE_MS = 800;/);
+  });
+
+  it("now - last < SEND_THROTTLE_MS で間引く（799=間引き / 800=送信 / 801=送信 の境界）", () => {
+    // diff < 800 のみ return（throttle）。diff===800 / diff===801 は送信側。
+    expect(guardSrc).toMatch(/const now = Date\.now\(\);/);
+    expect(guardSrc).toMatch(/lastSentRef\.current\[eventType\] \?\? 0/);
+    expect(guardSrc).toMatch(/if \(now - last < SEND_THROTTLE_MS\) return;/);
+    // 送信時に last を更新（次の throttle 窓の基準）。eventType 別キーで独立。
+    expect(guardSrc).toMatch(/lastSentRef\.current\[eventType\] = now;/);
+  });
+});
+
+describe("17-A(coverage): bypass で listener / banner / audit が発生しない（source-assertion）", () => {
+  const guardSrc = read(
+    "src/components/screen-protection/screen-protection-guard.tsx",
+  );
+
+  it("effect は bypass 早期 return が addEventListener より前（listener 未登録）", () => {
+    expect(guardSrc).toMatch(/if \(bypass\) return;[\s\S]*addEventListener/);
+  });
+
+  it("bypass 時は component が null を返す（banner / notice も描画しない）", () => {
+    expect(guardSrc).toMatch(/if \(bypass\) return null;/);
+  });
+
+  it("effect 依存配列に bypass を含む（bypass 変化で listener を張り直す）", () => {
+    expect(guardSrc).toMatch(/\}, \[bypass, sendAudit\]\);/);
+  });
+});
+
+describe("17-A(coverage): selection fallback のガード（source-assertion）", () => {
+  const guardSrc = read(
+    "src/components/screen-protection/screen-protection-guard.tsx",
+  );
+
+  it("surfaceFromSelection は getSelection null / rangeCount 0 / collapsed で安全に null", () => {
+    expect(guardSrc).toMatch(/function surfaceFromSelection/);
+    expect(guardSrc).toMatch(/document\.getSelection\(\)/);
+    expect(guardSrc).toMatch(
+      /if \(!sel \|\| sel\.rangeCount === 0 \|\| sel\.isCollapsed\) return null;/,
+    );
+  });
+});
+
+describe("17-A(coverage): audit-events route の PII header guard（維持・強化）", () => {
+  const routeSrc = read("src/app/api/me/audit-events/route.ts");
+
+  it("request.headers / req.headers を読まない（header 由来 PII を入れない）", () => {
+    expect(routeSrc).not.toMatch(/request\.headers/);
+    expect(routeSrc).not.toMatch(/req\.headers/);
+  });
+
+  it("user-agent / x-forwarded-for / connecting-ip / clipboardData を参照しない", () => {
+    expect(routeSrc).not.toMatch(/user-agent/i);
+    expect(routeSrc).not.toMatch(/x-forwarded-for/i);
+    expect(routeSrc).not.toMatch(/connecting-ip/i);
+    expect(routeSrc).not.toMatch(/clipboardData/);
+  });
+
+  it("detail は { surface, trigger } の非PII enum のみ（PII フィールド未追加）", () => {
+    expect(routeSrc).toMatch(/detail:\s*\{\s*surface,\s*trigger:/);
   });
 });
