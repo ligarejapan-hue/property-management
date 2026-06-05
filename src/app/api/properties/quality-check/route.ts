@@ -7,6 +7,8 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
+import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 
 interface QualityIssue {
@@ -32,11 +34,13 @@ interface RuleMeta {
 // 物件一覧ロード時に毎回呼ばれる。全件 findMany + JS 全件判定はせず、各品質ルールを Prisma の
 // where 条件に落とし込み「その問題を持つ物件だけ」を DB 側で扱う。
 //
-// 2 モード:
-//  (1) 既定（rule 未指定）: summary(全体実件数=count) + 各ルール先頭 QUALITY_CHECK_ISSUE_LIMIT 件の
+// 3 モード:
+//  (1) 既定（rule / propertyIds 未指定）: summary(全体実件数=count) + 各ルール先頭 QUALITY_CHECK_ISSUE_LIMIT 件の
 //      data(表示用・propertyId 単位マージ) + rules(各ルールの totalCount/hasMore/nextOffset 等)。
 //  (2) ページング（?rule=CODE&offset=&limit=）: 当該ルールのみ skip/take で DB から1ページ取得。
 //      これにより上限を超えた残り issue を UI から追加取得できる（到達不能を解消）。
+//  (3) scoped（?propertyIds=id1,id2,…）: 一覧バッジ用。指定物件だけを各ルールで判定し（PK IN・
+//      結果は ids 件数で有界）、チップ用の warningPropertiesTotal（全体実数）を追加で返す（17-C F2）。
 //
 //  - summary.errors/warnings/info/total は count(全体件数) を severity 合算（truncate 後 data からは数えない）。
 //  - data 取得列は id/address のみ。所有者は relation filter のみで Owner PII 列は取得しない。
@@ -44,6 +48,15 @@ interface RuleMeta {
 
 // 1ルールあたりに data へ載せる issue 件数の既定値かつ最大値（表示用ページサイズ）。
 const QUALITY_CHECK_ISSUE_LIMIT = 1000;
+
+// scoped モード（?propertyIds=）で受け付ける物件IDの最大数（一覧1ページ=50 の余裕枠）。
+const PROPERTY_IDS_SCOPE_MAX = 200;
+
+// Property.id は PostgreSQL の uuid 列。不正な形式を Prisma の id:{in} に渡すと
+// Postgres 側で invalid uuid syntax → 意図しない 500 になるため、クエリ前に
+// UUID 形式（大文字小文字許容）を検証して 400 で弾く（Codex review対応）。
+// bulk-update API の propertyIds（z.array(z.string().uuid())・validators.ts）と同じ zod 判定。
+const propertyIdSchema = z.string().uuid();
 
 const NOT_ARCHIVED: Prisma.PropertyWhereInput = { isArchived: false };
 
@@ -172,6 +185,143 @@ export async function GET(request: Request) {
         nextOffset: hasMore ? offset + returnedCount : null,
       };
       return apiResponse({ data, rules: [meta] });
+    }
+
+    // ---- (3) scoped モード（?propertyIds=）: 一覧バッジ用に「表示中の物件」だけ判定 ----
+    // 既定モードの DB 全域取得（各ルール先頭 1000 件 + 全域 count）を発行せず、指定
+    // propertyIds に AND（PK IN）で絞った各ルール findMany のみで判定する。
+    // 「警告ありのみ」チップ用に warningPropertiesTotal（error/warning ルールのいずれかに
+    // 該当する非アーカイブ物件の distinct 実数・truncate なし）を追加で返す。
+    // ?rule= ページングモードが先に評価されるため、rule 指定時の propertyIds は無視される。
+    const propertyIdsParam = searchParams.get("propertyIds");
+    if (propertyIdsParam !== null) {
+      const ids = Array.from(
+        new Set(
+          propertyIdsParam
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0),
+        ),
+      );
+      if (ids.length > PROPERTY_IDS_SCOPE_MAX) {
+        throw new ApiError(
+          400,
+          `propertyIds は最大 ${PROPERTY_IDS_SCOPE_MAX} 件までです`,
+          "INVALID_PROPERTY_IDS",
+        );
+      }
+      // 1件でも UUID 形式でない ID があれば DB へ渡さず 400（上限超過と同じエラーコード）。
+      if (!ids.every((id) => propertyIdSchema.safeParse(id).success)) {
+        throw new ApiError(
+          400,
+          "propertyIds に不正な形式のIDが含まれています",
+          "INVALID_PROPERTY_IDS",
+        );
+      }
+
+      // 一覧API（buildPropertyListWhere）と同一のロール別可視範囲スコープを適用する。
+      // field_staff は createdBy/assignedTo の自分担当分のみ・他ロールは追加条件なし。
+      // これにより「一覧で見えない物件」が件数（warningPropertiesTotal）にも
+      // 警告結果（任意 propertyIds 指定）にも漏れない（Codex P1 対応）。
+      // 条件は property-list-query.ts の単一定義元を再利用＝一覧とズレない。
+      const visibilityScope = propertyVisibilityScopeWhere(session);
+      const scopeAnd: Pick<Prisma.PropertyWhereInput, "AND"> = visibilityScope
+        ? { AND: [visibilityScope] }
+        : {};
+
+      // hasWarning 一覧フィルタ（property-list-query.ts）と同じ「error/warning ルールの OR」。
+      // info ルール（地番・不動産番号未入力）はバッジ・チップの対象外なので含めない。
+      const warningWhere: Prisma.PropertyWhereInput = {
+        ...NOT_ARCHIVED,
+        OR: QUALITY_RULES.filter((r) => r.severity !== "info").map(
+          (r) => r.where,
+        ),
+        ...scopeAnd,
+      };
+
+      const [warningPropertiesTotal, scopedResults] = await Promise.all([
+        prisma.property.count({ where: warningWhere }),
+        ids.length === 0
+          ? Promise.resolve(
+              [] as Array<{
+                rule: QualityRule;
+                sample: { id: string; address: string }[];
+              }>,
+            )
+          : Promise.all(
+              QUALITY_RULES.map(async (rule) => ({
+                rule,
+                sample: await prisma.property.findMany({
+                  where: {
+                    ...NOT_ARCHIVED,
+                    ...rule.where,
+                    id: { in: ids },
+                    ...scopeAnd,
+                  },
+                  select: { id: true, address: true },
+                  orderBy: { id: "asc" },
+                }),
+              })),
+            ),
+      ]);
+
+      const severityTotals: Record<QualityIssue["severity"], number> = {
+        error: 0,
+        warning: 0,
+        info: 0,
+      };
+      const rules: RuleMeta[] = [];
+      const byProperty = new Map<string, QualityIssue[]>();
+      for (const { rule, sample } of scopedResults) {
+        severityTotals[rule.severity] += sample.length;
+        rules.push({
+          rule: rule.code,
+          severity: rule.severity,
+          // ids（PK IN）で有界のため count クエリ不要＝sample 全件が当該 scope の実数。
+          totalCount: sample.length,
+          returnedCount: sample.length,
+          offset: 0,
+          hasMore: false,
+          nextOffset: null,
+        });
+        for (const p of sample) {
+          const issue = buildIssue(rule, p);
+          const existing = byProperty.get(p.id);
+          if (existing) {
+            existing.push(issue);
+          } else {
+            byProperty.set(p.id, [issue]);
+          }
+        }
+      }
+      const severityOrder = { error: 0, warning: 1, info: 2 };
+      const issues: QualityIssue[] = [];
+      for (const list of byProperty.values()) {
+        for (const issue of list) issues.push(issue);
+      }
+      issues.sort(
+        (a, b) => severityOrder[a.severity] - severityOrder[b.severity],
+      );
+
+      return apiResponse({
+        data: issues,
+        summary: {
+          total:
+            severityTotals.error + severityTotals.warning + severityTotals.info,
+          errors: severityTotals.error,
+          warnings: severityTotals.warning,
+          info: severityTotals.info,
+          // scoped モードでは「チェック対象 = 指定 propertyIds 件数」（DB 全域 count はしない）。
+          propertiesChecked: ids.length,
+          issuesReturned: issues.length,
+          issuesLimited: false,
+          issueLimit: QUALITY_CHECK_ISSUE_LIMIT,
+        },
+        rules,
+        // additive（非PII）: scoped モード識別子と「警告あり物件の全体実数」。
+        scope: { propertyIds: ids.length },
+        warningPropertiesTotal,
+      });
     }
 
     // ---- (1) 既定モード: 全非アーカイブ件数(count) と 各ルールの count + 先頭ページ ----

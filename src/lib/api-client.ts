@@ -283,14 +283,19 @@ export interface QualityRuleMeta {
 
 // params 省略時は既定モード（summary + 各ルール先頭ページ + rules メタ）。
 // rule/offset/limit 指定時はそのルールの1ページ分のみ（data + rules[1件]）を取得（残り issue の追加取得用）。
+// propertyIds 指定時は scoped モード（指定物件のみ判定 + warningPropertiesTotal）。一覧バッジ用（17-C F2）。
 export async function fetchQualityCheck(params?: {
   rule?: string;
   offset?: number;
   limit?: number;
+  propertyIds?: string[];
 }) {
   if (USE_MOCK) {
     await mockDelay();
-    const issues = MOCK_QUALITY_ISSUES;
+    const scopedIds = params?.propertyIds;
+    const issues = scopedIds
+      ? MOCK_QUALITY_ISSUES.filter((i) => scopedIds.includes(i.propertyId))
+      : MOCK_QUALITY_ISSUES;
     return {
       data: issues,
       summary: {
@@ -298,23 +303,35 @@ export async function fetchQualityCheck(params?: {
         errors: issues.filter((i) => i.severity === "error").length,
         warnings: issues.filter((i) => i.severity === "warning").length,
         info: issues.filter((i) => i.severity === "info").length,
-        propertiesChecked: MOCK_PROPERTIES.length,
+        propertiesChecked: scopedIds ? scopedIds.length : MOCK_PROPERTIES.length,
         issuesReturned: issues.length,
         issuesLimited: false,
         issueLimit: issues.length,
       },
       rules: [] as QualityRuleMeta[],
+      // scoped モード時のみ（server 実装と同じ）: 警告(error/warning)あり物件の全体実数。
+      ...(scopedIds
+        ? {
+            warningPropertiesTotal: new Set(
+              MOCK_QUALITY_ISSUES.filter((i) => i.severity !== "info").map(
+                (i) => i.propertyId,
+              ),
+            ).size,
+          }
+        : {}),
     };
   }
   const qs = new URLSearchParams();
   if (params?.rule) qs.set("rule", params.rule);
   if (params?.offset != null) qs.set("offset", String(params.offset));
   if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.propertyIds) qs.set("propertyIds", params.propertyIds.join(","));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return apiFetch<{
     data: typeof MOCK_QUALITY_ISSUES;
     summary?: unknown;
     rules?: QualityRuleMeta[];
+    warningPropertiesTotal?: number;
   }>(`/api/properties/quality-check${suffix}`);
 }
 

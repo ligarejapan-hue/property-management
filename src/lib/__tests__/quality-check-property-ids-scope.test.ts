@@ -1,0 +1,414 @@
+/**
+ * GET /api/properties/quality-check の scoped モード（?propertyIds=）の統合テスト（17-C F2）。
+ *
+ * 確認項目:
+ *  1. scoped: 各ルール findMany の where に id:{in:ids} + isArchived:false が必ず入る（PK IN で有界）
+ *  2. scoped: per-rule count を発行しない（count は warningPropertiesTotal の 1 本のみ）
+ *  3. scoped: warningPropertiesTotal の where は「error/warning ルールの OR」（info ルールを含まない）
+ *  4. scoped: findMany に take を付けない（1000 件サンプリングをしない）
+ *  5. scoped: data は propertyId 単位マージ・rules は hasMore=false / totalCount=実数
+ *  6. propertyIds の trim / 空要素除去 / 重複除去
+ *  7. propertyIds が 0 件 → findMany 不発行・count 1 本のみ・data 空
+ *  8. 上限超過（>200）→ 400 INVALID_PROPERTY_IDS・DB 未実行
+ *  9. ?rule= ページングモードが優先され propertyIds は無視される（where に id が入らない）
+ * 10. 既定モード（propertyIds なし）は where に id が入らない（従来挙動の回帰防止）
+ * 11. property:read 欠如で 403・DB 未実行
+ * 12. 一覧ページ側の配線（ソース表明）: scoped 呼び出し・[properties] 依存・補完ボタン撤去・チップは全体実数
+ * 13. UUID validation（Codex review対応）: 非UUID（単独/valid混在）→ 400 INVALID_PROPERTY_IDS・
+ *     Prisma findMany/count 未実行（Postgres uuid 列への invalid syntax 500 を防ぐ）
+ * 14. ?rule= モードでは propertyIds の UUID validation は走らない（rule 優先のまま）
+ * 15. ロール別可視範囲（Codex P1）: field_staff は warningPropertiesTotal の count と
+ *     各ルール findMany の両方に一覧APIと同じ createdBy/assignedTo スコープが AND され、
+ *     不可視物件が件数にも警告結果にも漏れない。admin は従来どおり追加条件なし。
+ * 16. scope 条件は property-list-query.ts の単一定義元（propertyVisibilityScopeWhere）を
+ *     再利用しており、一覧API（buildPropertyListWhere）の where と完全一致する。
+ */
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import fs from "fs";
+import path from "path";
+
+vi.mock("@/lib/api-helpers", () => {
+  class MockApiError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, message: string, code = "ERROR") {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  }
+  return {
+    ApiError: MockApiError,
+    getApiSession: vi.fn(),
+    getUserPermissions: vi.fn(),
+    apiResponse: vi.fn((data: unknown, status = 200) =>
+      Response.json(data as Record<string, unknown>, { status }),
+    ),
+    handleApiError: vi.fn((error: unknown) => {
+      if (error instanceof MockApiError) {
+        return Response.json(
+          { error: { message: error.message, code: error.code } },
+          { status: error.status },
+        );
+      }
+      return Response.json(
+        { error: { message: "Server error", code: "INTERNAL_ERROR" } },
+        { status: 500 },
+      );
+    }),
+  };
+});
+
+vi.mock("@/lib/prisma", () => ({
+  default: { property: { findMany: vi.fn(), count: vi.fn() } },
+}));
+
+import prisma from "@/lib/prisma";
+import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { GET } from "../../app/api/properties/quality-check/route";
+import {
+  propertyVisibilityScopeWhere,
+  buildPropertyListWhere,
+} from "../property-list-query";
+import { propertyListQuerySchema } from "../validators";
+
+const pm = prisma as unknown as {
+  property: { findMany: Mock; count: Mock };
+};
+
+const PERMS_FULL = [{ resource: "property", action: "read", granted: true }];
+const PERMS_NO_PROPERTY = [{ resource: "owner", action: "read", granted: true }];
+
+// Property.id は PostgreSQL uuid 列のため、scoped モードの入力は valid UUID を使う。
+const UUID1 = "550e8400-e29b-41d4-a716-446655440001";
+const UUID2 = "550e8400-e29b-41d4-a716-446655440002";
+// 201 件の相異なる valid UUID（上限テスト用）。末尾12桁は10進数字のみ＝hex として常に妥当。
+const UUIDS_201 = Array.from(
+  { length: 201 },
+  (_, i) => `550e8400-e29b-41d4-a716-${String(446655440000 + i)}`,
+);
+
+type Where = Record<string, unknown>;
+
+// 各ルール where の識別（properties-quality-check-route.test.ts と同方式）。
+function ruleCode(where: Where): string {
+  if (where.propertyOwners) return "NO_OWNER";
+  if (where.registryStatus) return "REGISTRY_DM_MISMATCH";
+  if (Array.isArray(where.OR) && !("propertyOwners" in (where.OR[0] as object))) {
+    const firstKey = Object.keys(where.OR[0] as object)[0];
+    if (firstKey === "lotNumber") return "NO_LOT_NUMBER";
+    if (firstKey === "realEstateNumber") return "NO_REAL_ESTATE_NUMBER";
+  }
+  if ("investigationConfirmedAt" in where) return "INVESTIGATION_NOT_CONFIRMED";
+  if ("assignedTo" in where) return "NO_ASSIGNEE";
+  return "OTHER";
+}
+
+function makeRequest(qs: string) {
+  return new Request(`http://localhost/api/properties/quality-check${qs}`, {
+    method: "GET",
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(getApiSession).mockResolvedValue({
+    id: "u1",
+    email: "a@a",
+    name: "A",
+    role: "admin",
+  } as never);
+  vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
+  pm.property.findMany.mockResolvedValue([]);
+  pm.property.count.mockResolvedValue(0);
+});
+
+describe("quality-check scoped モード（?propertyIds=）", () => {
+  it("各ルール findMany に id:{in} + isArchived:false が入り take なし・per-rule count なし", async () => {
+    pm.property.count.mockResolvedValue(42); // warningPropertiesTotal
+    pm.property.findMany.mockImplementation(async ({ where }: { where: Where }) => {
+      // UUID1 は NO_OWNER と NO_ASSIGNEE の両方に該当（マージ確認用）
+      const code = ruleCode(where);
+      if (code === "NO_OWNER") return [{ id: UUID1, address: "A1" }];
+      if (code === "NO_ASSIGNEE") return [{ id: UUID1, address: "A1" }];
+      if (code === "REGISTRY_DM_MISMATCH") return [{ id: UUID2, address: "A2" }];
+      return [];
+    });
+
+    const res = await GET(makeRequest(`?propertyIds=${UUID1},${UUID2}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    // 6 ルールぶんの findMany すべてに id:{in:[UUID1,UUID2]} と isArchived:false、take なし
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    for (const call of pm.property.findMany.mock.calls) {
+      const args = call[0] as { where: Where; take?: number; select: Where };
+      expect(args.where.id).toEqual({ in: [UUID1, UUID2] });
+      expect(args.where.isArchived).toBe(false);
+      expect(args.take).toBeUndefined();
+      expect(args.select).toEqual({ id: true, address: true });
+    }
+
+    // count は warningPropertiesTotal の 1 本のみ（per-rule count なし）
+    expect(pm.property.count).toHaveBeenCalledTimes(1);
+    const countWhere = pm.property.count.mock.calls[0][0].where as Where;
+    expect(countWhere.isArchived).toBe(false);
+    const orList = countWhere.OR as Where[];
+    expect(orList).toHaveLength(4); // error/warning の 4 ルールのみ
+    const orCodes = orList.map((w) => ruleCode(w));
+    expect(orCodes).toEqual(
+      expect.arrayContaining([
+        "NO_OWNER",
+        "REGISTRY_DM_MISMATCH",
+        "INVESTIGATION_NOT_CONFIRMED",
+        "NO_ASSIGNEE",
+      ]),
+    );
+    // info ルール（地番/不動産番号）を含まない
+    expect(orCodes).not.toContain("NO_LOT_NUMBER");
+    expect(orCodes).not.toContain("NO_REAL_ESTATE_NUMBER");
+    // count where 自体には id 制約なし（全体実数）
+    expect(countWhere.id).toBeUndefined();
+
+    // レスポンス: p1 はマージで 2 issue、p2 は 1 issue
+    expect(body.data).toHaveLength(3);
+    expect(body.warningPropertiesTotal).toBe(42);
+    expect(body.scope).toEqual({ propertyIds: 2 });
+    expect(body.summary.issuesLimited).toBe(false);
+    expect(body.summary.propertiesChecked).toBe(2);
+    // rules は全ルール hasMore=false / totalCount=実数
+    expect(body.rules).toHaveLength(6);
+    for (const meta of body.rules) {
+      expect(meta.hasMore).toBe(false);
+      expect(meta.nextOffset).toBeNull();
+    }
+    const noOwnerMeta = body.rules.find(
+      (r: { rule: string }) => r.rule === "NO_OWNER",
+    );
+    expect(noOwnerMeta.totalCount).toBe(1);
+  });
+
+  it("propertyIds は trim / 空要素除去 / 重複除去される", async () => {
+    pm.property.count.mockResolvedValue(0);
+    await GET(
+      makeRequest(
+        "?propertyIds=" + encodeURIComponent(` ${UUID1} , ,${UUID2},${UUID1},`),
+      ),
+    );
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    const args = pm.property.findMany.mock.calls[0][0] as { where: Where };
+    expect(args.where.id).toEqual({ in: [UUID1, UUID2] });
+  });
+
+  it("propertyIds が 0 件 → findMany 不発行・count 1 本のみ・data 空", async () => {
+    pm.property.count.mockResolvedValue(7);
+    const res = await GET(makeRequest("?propertyIds="));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+    expect(pm.property.count).toHaveBeenCalledTimes(1);
+    expect(body.data).toEqual([]);
+    expect(body.warningPropertiesTotal).toBe(7);
+    expect(body.scope).toEqual({ propertyIds: 0 });
+    expect(body.summary.total).toBe(0);
+  });
+
+  it("上限超過（valid UUID 201件）→ 400 INVALID_PROPERTY_IDS・DB 未実行", async () => {
+    const res = await GET(makeRequest(`?propertyIds=${UUIDS_201.join(",")}`));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_PROPERTY_IDS");
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+    expect(pm.property.count).not.toHaveBeenCalled();
+  });
+
+  it("非UUID（?propertyIds=not-a-uuid）→ 400 INVALID_PROPERTY_IDS・DB 未実行", async () => {
+    const res = await GET(makeRequest("?propertyIds=not-a-uuid"));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_PROPERTY_IDS");
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+    expect(pm.property.count).not.toHaveBeenCalled();
+  });
+
+  it("valid UUID + 非UUID の混在 → 400 INVALID_PROPERTY_IDS・DB 未実行", async () => {
+    for (const mixed of [`${UUID1},not-a-uuid`, `${UUID1},123`]) {
+      vi.clearAllMocks();
+      vi.mocked(getApiSession).mockResolvedValue({
+        id: "u1",
+        email: "a@a",
+        name: "A",
+        role: "admin",
+      } as never);
+      vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
+      const res = await GET(makeRequest(`?propertyIds=${mixed}`));
+      const body = await res.json();
+      expect(res.status).toBe(400);
+      expect(body.error.code).toBe("INVALID_PROPERTY_IDS");
+      expect(pm.property.findMany).not.toHaveBeenCalled();
+      expect(pm.property.count).not.toHaveBeenCalled();
+    }
+  });
+
+  it("大文字 UUID は許容される（Postgres uuid は case-insensitive）", async () => {
+    pm.property.count.mockResolvedValue(0);
+    const upper = UUID1.toUpperCase();
+    const res = await GET(makeRequest(`?propertyIds=${upper}`));
+    expect(res.status).toBe(200);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    const args = pm.property.findMany.mock.calls[0][0] as { where: Where };
+    expect(args.where.id).toEqual({ in: [upper] });
+  });
+
+  it("?rule= モードでは propertyIds の UUID validation は走らない（rule 優先のまま）", async () => {
+    pm.property.count.mockResolvedValue(0);
+    pm.property.findMany.mockResolvedValue([]);
+    const res = await GET(makeRequest("?rule=NO_OWNER&propertyIds=not-a-uuid"));
+    expect(res.status).toBe(200); // 400 にならない＝scoped validation は rule モードに波及しない
+    const body = await res.json();
+    expect(body.rules).toHaveLength(1);
+  });
+});
+
+// ---------- ロール別可視範囲（Codex P1）----------
+
+describe("quality-check scoped モード — ロール別可視範囲（Codex P1）", () => {
+  const FS_SESSION = {
+    id: "fs-1",
+    email: "f@x",
+    name: "FS",
+    role: "field_staff",
+  };
+  // 一覧API（buildPropertyListWhere）が field_staff に積むスコープと同一 fragment。
+  const FS_SCOPE = { OR: [{ createdBy: "fs-1" }, { assignedTo: "fs-1" }] };
+
+  it("field_staff: warningPropertiesTotal の count where に一覧と同じ可視範囲が AND される", async () => {
+    vi.mocked(getApiSession).mockResolvedValue(FS_SESSION as never);
+    pm.property.count.mockResolvedValue(3);
+    const res = await GET(makeRequest(`?propertyIds=${UUID1}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.warningPropertiesTotal).toBe(3);
+    const countWhere = pm.property.count.mock.calls[0][0].where as Where;
+    expect(countWhere.isArchived).toBe(false);
+    expect((countWhere.OR as Where[]).length).toBe(4); // 警告述語は従来どおり
+    expect(countWhere.AND).toEqual([FS_SCOPE]); // 可視範囲スコープが追加
+  });
+
+  it("field_staff: 各ルール findMany にも可視範囲が AND され、不可視 propertyIds の警告は返り得ない", async () => {
+    vi.mocked(getApiSession).mockResolvedValue(FS_SESSION as never);
+    pm.property.count.mockResolvedValue(0);
+    await GET(makeRequest(`?propertyIds=${UUID1},${UUID2}`));
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    for (const call of pm.property.findMany.mock.calls) {
+      const where = (call[0] as { where: Where }).where;
+      expect(where.id).toEqual({ in: [UUID1, UUID2] });
+      expect(where.isArchived).toBe(false);
+      // DB 側で「自分の担当分」に必ず絞られる＝任意 ID を渡しても不可視物件は返らない
+      expect(where.AND).toEqual([FS_SCOPE]);
+    }
+  });
+
+  it("admin は可視範囲 AND なし＝従来どおり全体件数・全体判定（回帰lock）", async () => {
+    pm.property.count.mockResolvedValue(0);
+    await GET(makeRequest(`?propertyIds=${UUID1}`));
+    const countWhere = pm.property.count.mock.calls[0][0].where as Where;
+    expect(countWhere.AND).toBeUndefined();
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    for (const call of pm.property.findMany.mock.calls) {
+      expect((call[0] as { where: Where }).where.AND).toBeUndefined();
+    }
+  });
+
+  it("scope 条件は一覧API（buildPropertyListWhere）と完全一致（単一定義元の再利用）", async () => {
+    const fsSession = { id: "fs-1", role: "field_staff" };
+    // helper 単体: field_staff のみ fragment を返す
+    expect(propertyVisibilityScopeWhere(fsSession)).toEqual(FS_SCOPE);
+    expect(propertyVisibilityScopeWhere({ id: "a-1", role: "admin" })).toBeNull();
+    expect(
+      propertyVisibilityScopeWhere({ id: "o-1", role: "office_staff" }),
+    ).toBeNull();
+    // 一覧APIの実物 where にも同一 fragment が積まれる（条件ズレをテストで封じる）
+    const query = propertyListQuerySchema.parse({});
+    const { where } = await buildPropertyListWhere(query, fsSession);
+    expect(where.AND).toContainEqual(FS_SCOPE);
+  });
+});
+
+// ---------- モード優先・既定回帰・権限 ----------
+
+describe("quality-check scoped モード — モード優先・既定回帰・権限", () => {
+  it("?rule= ページングモードが優先され propertyIds は無視される", async () => {
+    pm.property.count.mockResolvedValue(1);
+    pm.property.findMany.mockResolvedValue([{ id: "p9", address: "A9" }]);
+    const res = await GET(makeRequest("?rule=NO_OWNER&propertyIds=p1,p2"));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.rules).toHaveLength(1);
+    // ページングモードのクエリ where に id 制約が入らない
+    for (const call of pm.property.findMany.mock.calls) {
+      expect((call[0] as { where: Where }).where.id).toBeUndefined();
+    }
+    expect((pm.property.count.mock.calls[0][0] as { where: Where }).where.id).toBeUndefined();
+  });
+
+  it("既定モード（propertyIds なし）は where に id が入らない（回帰防止）", async () => {
+    await GET(makeRequest(""));
+    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    for (const call of pm.property.findMany.mock.calls) {
+      const args = call[0] as { where: Where; take?: number };
+      expect(args.where.id).toBeUndefined();
+      expect(args.take).toBe(1000); // 既定モードは従来どおり take あり
+    }
+    expect(pm.property.count).toHaveBeenCalledTimes(7); // NOT_ARCHIVED + 6 ルール
+  });
+
+  it("property:read 欠如 → 403・DB 未実行（scoped モード）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_PROPERTY);
+    const res = await GET(makeRequest("?propertyIds=p1"));
+    expect(res.status).toBe(403);
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+    expect(pm.property.count).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- 一覧ページ側の配線（ソース表明）----------
+
+describe("properties 一覧の警告バッジ配線（F2・ソース表明）", () => {
+  const pageSrc = fs.readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/properties/page.tsx"),
+    "utf8",
+  );
+  const apiClientSrc = fs.readFileSync(
+    path.join(process.cwd(), "src/lib/api-client.ts"),
+    "utf8",
+  );
+
+  it("バッジ取得は表示中 propertyIds に scope され properties に追従する", () => {
+    expect(pageSrc).toMatch(
+      /fetchQualityCheck\(\{\s*propertyIds:\s*properties\.map\(\(p\)\s*=>\s*p\.id\),?\s*\}\)/,
+    );
+    // 警告バッジ effect の deps が [properties]（mount 1回方式に戻っていない）
+    expect(pageSrc).toMatch(/\}, \[properties\]\);/);
+  });
+
+  it("旧・全域取得の補完 UI（残りの警告を読み込む）は撤去済み", () => {
+    expect(pageSrc).not.toMatch(/loadRemainingWarnings/);
+    expect(pageSrc).not.toMatch(/warningsTruncated/);
+    expect(pageSrc).not.toMatch(/fetchQualityCheck\(\)/); // 無引数の全域呼び出しが残っていない
+  });
+
+  it("「警告ありのみ」チップは warningPropertiesTotal 由来の全体実数を表示する", () => {
+    expect(pageSrc).toMatch(/warningPropertyCount/);
+    expect(pageSrc).toMatch(/warningPropertiesTotal/);
+    // チップが「現在ページの warnings Map サイズ」表示に戻っていない
+    expect(pageSrc).not.toMatch(/warningsByProperty\.size/);
+  });
+
+  it("api-client fetchQualityCheck は propertyIds をカンマ結合で送る", () => {
+    expect(apiClientSrc).toMatch(/propertyIds\?\:\s*string\[\]/);
+    expect(apiClientSrc).toMatch(
+      /qs\.set\("propertyIds",\s*params\.propertyIds\.join\(","\)\)/,
+    );
+  });
+});

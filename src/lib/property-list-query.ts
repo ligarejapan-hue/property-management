@@ -111,11 +111,9 @@ export async function buildPropertyListWhere(
   // field_staff は自分が作成/担当する物件のみ閲覧可能。
   // where.OR (keyword 条件) と混ぜると「担当外でも keyword に一致すれば返る」に
   // なるため AND に追加してスコープを強制する。
-  if (session.role === "field_staff") {
-    where.AND = [
-      ...(where.AND ?? []),
-      { OR: [{ createdBy: session.id }, { assignedTo: session.id }] },
-    ];
+  const visibilityScope = propertyVisibilityScopeWhere(session);
+  if (visibilityScope) {
+    where.AND = [...(where.AND ?? []), visibilityScope];
   }
 
   // hasWarning: quality-check の "error" / "warning" 条件を OR で表現し、
@@ -140,6 +138,22 @@ export async function buildPropertyListWhere(
   }
 
   return { where, mgmtShortCircuitEmpty, mgmtHitCount, mgmtIdTrimmed };
+}
+
+/**
+ * 一覧APIのロール別可視範囲スコープ（単一定義元）。
+ * field_staff は自分が作成/担当する物件のみ閲覧可能（createdBy / assignedTo の OR）。
+ * それ以外のロールは全件閲覧可＝追加条件なし（null）。
+ *
+ * buildPropertyListWhere（一覧/CSV export）に加え、quality-check の scoped モード
+ * （warningPropertiesTotal / 各ルール判定）でも同一条件を再利用し、
+ * 「一覧で見えない物件の情報が件数や警告として漏れない」ことを保証する（Codex P1）。
+ */
+export function propertyVisibilityScopeWhere(
+  session: PropertyListSession,
+): { OR: Array<{ createdBy: string } | { assignedTo: string }> } | null {
+  if (session.role !== "field_staff") return null;
+  return { OR: [{ createdBy: session.id }, { assignedTo: session.id }] };
 }
 
 /** sortBy / sortOrder から Prisma orderBy を組み立てる。 */
