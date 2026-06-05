@@ -29,7 +29,15 @@ export default function DashboardLayout({
         <Sidebar userRole={userRole} currentPath={pathname} />
         <div className="flex flex-1 flex-col overflow-hidden">
           <Header userName={userName} userRole={userRole} onLogout={handleLogout} />
-          <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
+          {/*
+           * v2: 超ワイド画面での行の間延びを防ぐ(1536px 上限・中央寄せ)。
+           * h-full は子の % 高さ(例: field-survey/map の h-full エラー表示)を
+           * 従来どおり解決させるために必要。縦に長いページは main の
+           * overflow-y-auto がスクロールを担う(挙動不変)。
+           */}
+          <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+            <div className="mx-auto h-full w-full max-w-[1536px]">{children}</div>
+          </main>
         </div>
       </div>
     </ScreenProtectionProvider>
