@@ -163,8 +163,20 @@ export interface OwnerDisplayConfig {
   corporateNumber: DisplayLevel;
 }
 
-export async function getOwnerDisplayConfig(userId: string): Promise<OwnerDisplayConfig> {
-  const permissions = await getUserPermissions(userId);
+/**
+ * owner 各フィールドの表示レベル設定を解決する。
+ *
+ * F6(17-C): 呼び出し側が同一リクエスト内で既に `getUserPermissions(userId)` を
+ * 実行済みの場合、その結果を `preloadedPermissions` に渡すことで権限の
+ * 二重解決（user/permissionTemplate/userPermission の DB 再クエリ）を省略できる。
+ * 渡さない場合は従来どおり内部で取得する（挙動・導出ロジックは完全に同一）。
+ * 注意: `preloadedPermissions` は必ず同じ `userId` の getUserPermissions 結果を渡すこと。
+ */
+export async function getOwnerDisplayConfig(
+  userId: string,
+  preloadedPermissions?: PermissionEntry[],
+): Promise<OwnerDisplayConfig> {
+  const permissions = preloadedPermissions ?? (await getUserPermissions(userId));
 
   const resolveLevel = (field: string): DisplayLevel => {
     const levels: DisplayLevel[] = ["edit", "full", "read", "partial", "masked", "hidden"];

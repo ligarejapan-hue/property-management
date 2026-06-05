@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
     }
 
     // PII フィールドの表示レベルを取得（/api/owners と同じ制御）
-    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
 
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") ?? "all";

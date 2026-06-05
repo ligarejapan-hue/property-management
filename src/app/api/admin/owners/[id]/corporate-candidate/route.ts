@@ -46,7 +46,7 @@ export async function GET(
       throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
     }
 
-    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
 
     // Phase E API と同じガード:
     //   hidden → 403、それ以外は通過。

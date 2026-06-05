@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
       return apiResponse({ data: [] });
     }
 
-    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
 
     // externalLinkKey は固有の権限を持たないため、全項目が非マスクの場合のみ
     // 検索・返却を許可する（部分権限ユーザーには出さない）。
