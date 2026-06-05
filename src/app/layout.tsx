@@ -1,9 +1,16 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Noto_Sans_JP, Schibsted_Grotesk } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// UIトーン統一 v2: 欧文・数字 = Schibsted Grotesk / 和文 = Noto Sans JP。
+// 等幅(ID・コード表示)は従来どおり Geist Mono を維持。
+const appSans = Schibsted_Grotesk({
+  variable: "--font-app-sans",
+  subsets: ["latin"],
+});
+
+const appSansJp = Noto_Sans_JP({
+  variable: "--font-app-sans-jp",
   subsets: ["latin"],
 });
 
@@ -25,7 +32,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${appSans.variable} ${appSansJp.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
