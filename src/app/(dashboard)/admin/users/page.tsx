@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Trash2,
 } from "lucide-react";
+import StatusBadge, { USER_ROLE_INTENT } from "@/components/ui/status-badge";
 
 interface UserItem {
   id: string;
@@ -33,11 +34,6 @@ const ROLE_LABELS: Record<string, string> = {
   admin: "管理者",
   office_staff: "事務担当",
   field_staff: "現地担当",
-};
-const ROLE_COLORS: Record<string, string> = {
-  admin: "bg-red-100 text-red-800",
-  office_staff: "bg-blue-100 text-blue-800",
-  field_staff: "bg-green-100 text-green-800",
 };
 
 export default function UsersPage() {
@@ -235,11 +231,9 @@ export default function UsersPage() {
                       {u.email}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-sm">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${ROLE_COLORS[u.role] ?? "bg-gray-100 text-gray-600"}`}
-                      >
+                      <StatusBadge intent={USER_ROLE_INTENT[u.role] ?? "neutral"}>
                         {ROLE_LABELS[u.role] ?? u.role}
-                      </span>
+                      </StatusBadge>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
                       {u.lastLoginAt
@@ -249,18 +243,12 @@ export default function UsersPage() {
                     <td className="whitespace-nowrap px-4 py-3 text-sm">
                       <div className="flex items-center gap-1.5">
                         {u.isActive ? (
-                          <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                            有効
-                          </span>
+                          <StatusBadge intent="success">有効</StatusBadge>
                         ) : (
-                          <span className="inline-flex rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
-                            無効
-                          </span>
+                          <StatusBadge intent="neutral">無効</StatusBadge>
                         )}
                         {isLocked && (
-                          <span className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                            ロック中
-                          </span>
+                          <StatusBadge intent="error">ロック中</StatusBadge>
                         )}
                       </div>
                     </td>

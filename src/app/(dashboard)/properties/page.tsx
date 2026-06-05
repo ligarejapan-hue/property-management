@@ -7,6 +7,11 @@ import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
 import { debounce } from "@/lib/debounce";
 import NewPropertyModal from "@/components/properties/new-property-modal";
+import StatusBadge, {
+  badgeIntentClass,
+  REGISTRY_STATUS_INTENT,
+  DM_STATUS_INTENT,
+} from "@/components/ui/status-badge";
 
 // ---------- Label maps ----------
 
@@ -21,16 +26,14 @@ import {
   DM_STATUS_LABELS,
 } from "@/lib/property-types";
 
-const registryStatusStyles: Record<string, string> = {
-  obtained: "bg-green-100 text-green-800",
-  unconfirmed: "bg-red-100 text-red-800",
-  scheduled: "bg-yellow-100 text-yellow-800",
-};
-
+// v2: バッジ色は共通レシピ(status-badge.tsx)の intent に集約。
+// scheduled は yellow → amber(warning)に統一。
+// 一覧テーブルのセルは <StatusBadge>(dot 付き)を直接使用。
+// サジェストのミニバッジ(独自サイズ)のみ色クラスを参照する。
 const dmStatusStyles: Record<string, string> = {
-  send: "bg-green-100 text-green-800",
-  no_send: "bg-red-100 text-red-800",
-  hold: "bg-gray-100 text-gray-600",
+  send: badgeIntentClass(DM_STATUS_INTENT.send),
+  no_send: badgeIntentClass(DM_STATUS_INTENT.no_send),
+  hold: badgeIntentClass(DM_STATUS_INTENT.hold),
 };
 
 // ---------- Types ----------
@@ -783,7 +786,7 @@ function PropertiesPageInner() {
                   >
                     <div className="flex items-center gap-2">
                       <span className="flex-1 font-medium text-gray-800 truncate">{item.address}</span>
-                      <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${dmStatusStyles[item.dmStatus] ?? "bg-gray-100 text-gray-600"}`}>
+                      <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${dmStatusStyles[item.dmStatus] ?? badgeIntentClass("neutral")}`}>
                         {DM_STATUS_LABELS[item.dmStatus] ?? item.dmStatus}
                       </span>
                     </div>
@@ -1128,8 +1131,8 @@ function PropertiesPageInner() {
                         title={warning.messages.join("\n")}
                         className={`mr-2 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold align-middle ${
                           warning.severity === "error"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-amber-100 text-amber-800"
+                            ? badgeIntentClass("error")
+                            : badgeIntentClass("warning")
                         }`}
                       >
                         <AlertTriangle className="h-3 w-3" />
@@ -1150,24 +1153,20 @@ function PropertiesPageInner() {
                     {property.lotNumber ?? "-"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                        registryStatusStyles[property.registryStatus] ?? ""
-                      }`}
+                    <StatusBadge
+                      intent={REGISTRY_STATUS_INTENT[property.registryStatus] ?? "neutral"}
                     >
                       {REGISTRY_STATUS_LABELS[property.registryStatus] ??
                         property.registryStatus}
-                    </span>
+                    </StatusBadge>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                        dmStatusStyles[property.dmStatus] ?? ""
-                      }`}
+                    <StatusBadge
+                      intent={DM_STATUS_INTENT[property.dmStatus] ?? "neutral"}
                     >
                       {DM_STATUS_LABELS[property.dmStatus] ??
                         property.dmStatus}
-                    </span>
+                    </StatusBadge>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span className="text-xs text-gray-600">
