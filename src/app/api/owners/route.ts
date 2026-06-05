@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Apply display-level masking based on user permissions
-    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const displayConfig = await getOwnerDisplayConfig(session.id, permissions);
 
     const maskedOwners = owners.map((owner) => ({
       id: owner.id,

@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
     // 差込は生の氏名・郵便番号・住所が必須。これらの表示レベルが
     // 「生値を返すレベル（full / read / edit）」でなければマスクされた値しか
     // 出せないため、出力自体を 403 で拒否する。
-    const ownerDisplayConfig = await getOwnerDisplayConfig(session.id);
+    const ownerDisplayConfig = await getOwnerDisplayConfig(session.id, permissions);
     if (
       !isPlainOwnerLevel(ownerDisplayConfig.name) ||
       !isPlainOwnerLevel(ownerDisplayConfig.zip) ||

@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     // Owner PII 表示権限。owner:read が無ければ全フィールド hidden 扱い。
     // partial / masked / hidden は検索ヒット有無から PII を推測できるため検索対象外。
     const displayConfig = hasOwnerRead
-      ? await getOwnerDisplayConfig(session.id)
+      ? await getOwnerDisplayConfig(session.id, perms)
       : null;
     const SEARCHABLE_LEVELS = new Set(["edit", "full", "read"]);
 

@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
       throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
     }
 
-    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
 
     // Codex 再修正 P2 対応:
     //   - owner_corporate_number=hidden → 403（一覧そのものを見せない）

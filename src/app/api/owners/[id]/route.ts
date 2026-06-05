@@ -53,7 +53,7 @@ export async function GET(
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
 
-    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
     const filtered = applyDisplayToOwner(owner, displayConfig);
 
     await writeAuditLog({
@@ -173,7 +173,7 @@ export async function PATCH(
     }
 
     // displayConfig は表示用。owner_email fallback を含む（書込判定には使っていない）。
-    const displayConfig = await getOwnerDisplayConfig(session.id);
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
     const filtered = applyDisplayToOwner(updatedOwner, displayConfig);
 
     return apiResponse(filtered);

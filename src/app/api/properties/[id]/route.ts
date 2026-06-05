@@ -109,7 +109,7 @@ export async function GET(
     // owner_email:full など field-level 権限が残っていても owner:read denied が優先する。
     // owner:read がある場合のみ getOwnerDisplayConfig で field-level マスキングを適用する。
     const canReadOwner = hasPermission(permissions, "owner", "read");
-    const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id) : null;
+    const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id, permissions) : null;
     const maskedPropertyOwners = property.propertyOwners.map((po) => ({
       ...po,
       owner: canReadOwner && ownerDisplayConfig
@@ -284,7 +284,7 @@ export async function PATCH(
 
     // owner:read gate — GET と同方針（owner:read なしでは owner PII を返さない）
     const canReadOwner = hasPermission(permissions, "owner", "read");
-    const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id) : null;
+    const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id, permissions) : null;
     const maskedUpdatedPropertyOwners = updated.propertyOwners.map((po) => ({
       ...po,
       owner: canReadOwner && ownerDisplayConfig

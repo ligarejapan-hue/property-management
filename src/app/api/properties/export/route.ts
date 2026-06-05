@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
 
     const hasOwnerRead = hasPermission(permissions, "owner", "read");
     const ownerDisplayConfig = hasOwnerRead
-      ? await getOwnerDisplayConfig(session.id)
+      ? await getOwnerDisplayConfig(session.id, permissions)
       : null;
 
     const { searchParams } = new URL(request.url);
