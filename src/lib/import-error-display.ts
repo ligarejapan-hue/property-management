@@ -203,8 +203,17 @@ export function classifyImportError(
   }
 
   // ---- 棟未解決（CSV 物件取込で buildingName が見つからない／候補が複数）----
-  // resolution.error フォールバック文言を含む
+  // csv/route.ts の resolveBuildingId が実際に生成する 4 形式はすべて「棟名」始まり:
+  //   - `棟名「X」が見つかりません。棟を先に登録するか、…`        (csv/route.ts:225)
+  //   - `棟名「X」に一致する棟がN件あり特定できません。…`        (csv/route.ts:217)
+  //   - `棟名「X」に類似する棟がN件見つかりました。…`            (csv/route.ts:192)
+  //   - `棟名が見つかりません。棟を先に登録してください`（fallback, csv/route.ts:462）
+  // → `startsWith("棟名")` で 4 形式を網羅する（reason filter
+  //   jobs/[jobId]/route.ts の building_unresolved と同一述語）。
+  //   旧来の startsWith("棟名が見つかりません") / includes("棟が複数見つかりました")
+  //   / includes("棟候補") は legacy 互換として残す（実 importer は生成しないが無害）。
   if (
+    msg.startsWith("棟名") ||
     msg.startsWith("棟名が見つかりません") ||
     msg.includes("棟が複数見つかりました") ||
     msg.includes("棟候補")

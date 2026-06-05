@@ -50,6 +50,45 @@ describe("classifyImportError", () => {
     expect(r.field).toBe("建物名");
   });
 
+  // csv/route.ts resolveBuildingId が実際に生成する 4 形式（すべて「棟名」始まり）。
+  //   - csv/route.ts:225 / :217 / :192 / :462（fallback）
+  // 旧 predicate（startsWith("棟名が見つかりません") / includes("棟候補") 等）では
+  // 「棟名「X」…」始まりの 3 形式が unknown に落ちていた（additive 修正で網羅）。
+  it.each([
+    "棟名「○○マンション」が見つかりません。棟を先に登録するか、レビュー画面で対応してください",
+    "棟名「○○マンション」に一致する棟が2件あり特定できません。レビュー画面で選択してください",
+    "棟名「○○マンション」に類似する棟が3件見つかりました。レビュー画面で選択してください",
+    "棟名が見つかりません。棟を先に登録してください",
+  ])("csv route 実メッセージ %s → building_not_found / 棟名", (msg) => {
+    const r = classifyImportError(msg, { 棟名: "○○マンション", 住所: "..." });
+    expect(r.type).toBe("building_not_found");
+    expect(r.field).toBe("棟名");
+    expect(r.label).toBe("棟が特定できません");
+  });
+
+  it("棟未解決の rawData が「建物名」キーでも field=建物名 にシノニム解決", () => {
+    const r = classifyImportError(
+      "棟名「A棟」に一致する棟が2件あり特定できません。レビュー画面で選択してください",
+      { 建物名: "A棟" },
+    );
+    expect(r.type).toBe("building_not_found");
+    expect(r.field).toBe("建物名");
+  });
+
+  // 「棟名」始まりの述語が他カテゴリのメッセージを誤って building_not_found に
+  // しないことを確認（誤検知ゼロ）。
+  it.each([
+    ["住所なし（地番・家屋番号も無し）", "review_or_other"],
+    ["重複の可能性[住所一致]: 既存物件ID=abc (東京都港区1-1-1)", "duplicate"],
+    ["要レビュー（所有者未突合）", "review"],
+    ["更新[住所一致]: 既存物件ID=abc (更新項目: 地番)", "update"],
+    ["手動スキップ", "unknown"],
+    ["不明なエラー", "unknown"],
+  ])("無関係メッセージ %s は building_not_found に誤分類されない", (msg) => {
+    const r = classifyImportError(msg, {});
+    expect(r.type).not.toBe("building_not_found");
+  });
+
   // ---------- duplicate ----------
   it("「重複の可能性[住所一致]: 既存物件ID=...」 → duplicate", () => {
     const r = classifyImportError(
@@ -159,6 +198,16 @@ describe("buildErrorRawDataExtras", () => {
       "棟名が見つかりません",
       { 棟名: "X" },
     );
+    expect(r.__error_code).toBe("BUILDING_NOT_FOUND");
+    expect(r.__error_field).toBe("棟名");
+  });
+
+  it.each([
+    "棟名「X」が見つかりません。棟を先に登録するか、レビュー画面で対応してください",
+    "棟名「X」に一致する棟が2件あり特定できません。レビュー画面で選択してください",
+    "棟名「X」に類似する棟が3件見つかりました。レビュー画面で選択してください",
+  ])("csv route 実メッセージ %s → BUILDING_NOT_FOUND", (msg) => {
+    const r = buildErrorRawDataExtras(msg, { 棟名: "X" });
     expect(r.__error_code).toBe("BUILDING_NOT_FOUND");
     expect(r.__error_field).toBe("棟名");
   });
