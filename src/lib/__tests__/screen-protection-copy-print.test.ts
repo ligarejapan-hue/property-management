@@ -272,9 +272,16 @@ describe("S1b-3: PII マーカ付与（実レンダリング面）", () => {
     expect(panel).toMatch(/未配線/);
   });
 
-  it("16-B B3 の import/jobs/[jobId]/page には付与しない（非衝突）", () => {
-    const b3 = read("src/app/(dashboard)/import/jobs/[jobId]/page.tsx");
-    expect(b3).not.toMatch(/data-pii-protected/);
+  it("17-B(D): import/jobs/[jobId]/page の PII 面に import surface を付与（16-B B3 の否定 lock を反転）", () => {
+    // 16-B B3 では bulk-resolve 作業と非衝突にするため marker を付けなかったが、
+    // 17-B D で rawData（住所/氏名/所有者名/電話 平文）・行ヘッダ・検索結果・影響物件
+    // テーブルの copy/cut/contextmenu/print が無防備な穴を塞ぐため root に付与する。
+    const detail = read("src/app/(dashboard)/import/jobs/[jobId]/page.tsx");
+    expect(detail).toMatch(/data-pii-protected data-pii-surface="import"/);
+    // 保護コンテナは root の 1 つだけ（broad wrap）。個別 button/link には付与しない。
+    const markers = detail.match(/data-pii-protected/g) ?? [];
+    expect(markers.length).toBe(1);
+    expect(detail).not.toMatch(/<button[^>]*data-pii-protected/);
   });
 });
 
