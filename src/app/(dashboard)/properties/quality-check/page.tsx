@@ -130,7 +130,7 @@ export default function QualityCheckPage() {
         <button
           onClick={runCheck}
           disabled={loading}
-          className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           再チェック
@@ -168,7 +168,7 @@ export default function QualityCheckPage() {
         <select
           value={filterSeverity}
           onChange={(e) => setFilterSeverity(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
         >
           <option value="">すべての重要度</option>
           <option value="error">エラーのみ</option>
@@ -219,7 +219,7 @@ export default function QualityCheckPage() {
                   <p className={`text-sm ${config.text}`}>{issue.message}</p>
                   <Link
                     href={`/properties/${issue.propertyId}`}
-                    className="mt-1 inline-block text-xs text-blue-600 hover:underline"
+                    className="mt-1 inline-block text-xs text-indigo-600 hover:underline"
                   >
                     {issue.address}
                   </Link>

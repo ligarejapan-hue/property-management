@@ -300,7 +300,7 @@ export default function AdminOwnerDetailPage() {
                   value={corporateInput}
                   onChange={(e) => setCorporateInput(e.target.value)}
                   placeholder="例: 1234567890123"
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 md:w-80"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 md:w-80"
                 />
                 <CorporateLookupPanel
                   ownerId={owner.ownerId}

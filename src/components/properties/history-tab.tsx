@@ -134,7 +134,7 @@ export default function HistoryTab({
             <select
               value={fieldNameFilter}
               onChange={(e) => { setFieldNameFilter(e.target.value); setPage(1); }}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:ring-blue-500"
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
             >
               <option value="">すべて</option>
               {fieldNames.map((f) => (
@@ -149,7 +149,7 @@ export default function HistoryTab({
             <select
               value={sourceFilter}
               onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:ring-blue-500"
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
             >
               <option value="">すべて</option>
               {sources.map((s) => (
@@ -165,7 +165,7 @@ export default function HistoryTab({
               type="date"
               value={dateFrom}
               onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:ring-blue-500"
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
             />
           </div>
           <div>
@@ -176,7 +176,7 @@ export default function HistoryTab({
               type="date"
               value={dateTo}
               onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:ring-blue-500"
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
             />
           </div>
           <div className="flex items-end">

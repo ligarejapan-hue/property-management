@@ -192,7 +192,7 @@ export default function SessionHistoryClient({
                   <Link
                     href={`/field-survey/map?sessionId=${encodeURIComponent(r.id)}`}
                     data-testid="session-history-view-map"
-                    className="text-blue-600 hover:underline"
+                    className="text-indigo-600 hover:underline"
                   >
                     地図で見る
                   </Link>

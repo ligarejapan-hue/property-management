@@ -331,7 +331,7 @@ export default function CorporateLookupPanel({
                   type="button"
                   onClick={handleApply}
                   disabled={!applyButtonEnabled}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-blue-400 bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-300"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-400 bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-300"
                 >
                   {applying ? (
                     <>
@@ -401,7 +401,7 @@ function ApplyCheckbox({
         checked={checked}
         disabled={!editable}
         onChange={onChange}
-        className="h-3 w-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+        className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
       />
       <span>{label}</span>
     </label>

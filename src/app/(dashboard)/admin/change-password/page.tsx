@@ -96,7 +96,7 @@ export default function ChangePasswordPage() {
               autoComplete="current-password"
               value={form.currentPassword}
               onChange={(e) => setField("currentPassword", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div>
@@ -111,7 +111,7 @@ export default function ChangePasswordPage() {
               value={form.newPassword}
               onChange={(e) => setField("newPassword", e.target.value)}
               placeholder="8文字以上"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div>
@@ -125,7 +125,7 @@ export default function ChangePasswordPage() {
               autoComplete="new-password"
               value={form.confirmPassword}
               onChange={(e) => setField("confirmPassword", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <p className="text-xs text-gray-500">
@@ -135,7 +135,7 @@ export default function ChangePasswordPage() {
             <button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               変更する

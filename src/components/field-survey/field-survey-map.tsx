@@ -917,7 +917,7 @@ function PropertyInfo({ row }: { row: PropertyRow }) {
       <div className="mt-2">
         <a
           href={`/properties/${row.id}`}
-          className="text-blue-600 hover:underline"
+          className="text-indigo-600 hover:underline"
         >
           詳細を開く →
         </a>
@@ -942,7 +942,7 @@ function PinInfo({ row, onOpenDetail }: { row: PinRow; onOpenDetail: () => void 
           {row.propertyId ? (
             <a
               href={`/properties/${row.propertyId}`}
-              className="text-blue-600 hover:underline"
+              className="text-indigo-600 hover:underline"
             >
               紐付け済 →
             </a>
@@ -957,7 +957,7 @@ function PinInfo({ row, onOpenDetail }: { row: PinRow; onOpenDetail: () => void 
         type="button"
         onClick={onOpenDetail}
         data-testid="pin-info-open-detail"
-        className="mt-2 text-blue-600 hover:underline"
+        className="mt-2 text-indigo-600 hover:underline"
       >
         詳細を見る →
       </button>

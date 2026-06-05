@@ -196,7 +196,7 @@ export default function PinCreateModal({
             maxLength={FIELD_SURVEY_MEMO_MAX_LEN}
             rows={3}
             disabled={busy}
-            className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] focus:border-blue-500 focus:outline-none"
+            className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
             data-testid="pin-create-memo"
             placeholder="例: 解体予定の張り紙あり"
           />
@@ -311,7 +311,7 @@ export default function PinCreateModal({
                 onClick={onRetryPhoto}
                 disabled={photoUploading}
                 data-testid="pin-create-photo-retry"
-                className="rounded border border-blue-600 bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {photoUploading ? "送信中…" : "写真だけ再試行"}
               </button>
@@ -332,7 +332,7 @@ export default function PinCreateModal({
               onClick={handleSubmit}
               disabled={!canSubmit}
               data-testid="pin-create-submit"
-              className="rounded border border-blue-600 bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busy ? "保存中…" : "保存"}
             </button>

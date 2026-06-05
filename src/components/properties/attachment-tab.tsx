@@ -395,7 +395,7 @@ function AttachmentRow({
           <button
             type="button"
             onClick={onPreviewClick}
-            className="block w-full truncate text-left text-sm font-medium text-blue-600 hover:underline"
+            className="block w-full truncate text-left text-sm font-medium text-indigo-600 hover:underline"
             title="プレビュー"
           >
             {displayName}
@@ -414,7 +414,7 @@ function AttachmentRow({
       {previewable && (
         <button
           onClick={onPreviewClick}
-          className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
+          className="shrink-0 rounded p-1 text-gray-400 hover:bg-indigo-50 hover:text-indigo-500"
           title="プレビュー"
         >
           <Eye className="h-4 w-4" />
@@ -425,7 +425,7 @@ function AttachmentRow({
         target="_blank"
         rel="noopener noreferrer"
         download={displayName}
-        className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
+        className="shrink-0 rounded p-1 text-gray-400 hover:bg-indigo-50 hover:text-indigo-500"
         title="ダウンロード"
       >
         <Download className="h-4 w-4" />
@@ -478,7 +478,7 @@ function PreviewModal({
               target="_blank"
               rel="noopener noreferrer"
               download={displayName}
-              className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
+              className="rounded p-1 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600"
               title="ダウンロード"
             >
               <Download className="h-4 w-4" />
@@ -526,7 +526,7 @@ function PreviewModal({
                 target="_blank"
                 rel="noopener noreferrer"
                 download={displayName}
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
               >
                 <Download className="h-4 w-4" />
                 ダウンロード

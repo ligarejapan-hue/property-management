@@ -83,7 +83,7 @@ export default function NewPropertyModal({ onClose }: Props) {
               value={propertyType}
               onChange={(e) => setPropertyType(e.target.value)}
               disabled={submitting}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
             >
               <option value="">選択してください</option>
               {PROPERTY_TYPE_OPTIONS.filter(
@@ -107,7 +107,7 @@ export default function NewPropertyModal({ onClose }: Props) {
               onChange={(e) => setAddress(e.target.value)}
               disabled={submitting}
               placeholder="例: 東京都千代田区丸の内1-1-1"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
             />
           </div>
 
@@ -122,7 +122,7 @@ export default function NewPropertyModal({ onClose }: Props) {
               onChange={(e) => setLotNumber(e.target.value)}
               disabled={submitting}
               placeholder="例: 1番1"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
             />
           </div>
 
@@ -135,7 +135,7 @@ export default function NewPropertyModal({ onClose }: Props) {
               value={introductionRoute}
               onChange={(e) => setIntroductionRoute(e.target.value)}
               disabled={submitting}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
             >
               <option value="">未設定</option>
               {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
@@ -157,7 +157,7 @@ export default function NewPropertyModal({ onClose }: Props) {
               disabled={submitting}
               rows={3}
               placeholder="登録メモがあれば入力してください"
-              className="w-full resize-y rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50"
+              className="w-full resize-y rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
             />
           </div>
 
@@ -174,7 +174,7 @@ export default function NewPropertyModal({ onClose }: Props) {
             <button
               type="submit"
               disabled={submitting}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
               登録する

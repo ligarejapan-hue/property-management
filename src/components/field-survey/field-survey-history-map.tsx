@@ -448,7 +448,7 @@ function HistoryPinInfo({
           {pin.propertyId ? (
             <a
               href={`/properties/${pin.propertyId}`}
-              className="text-blue-600 hover:underline"
+              className="text-indigo-600 hover:underline"
             >
               紐付け済 →
             </a>
@@ -461,7 +461,7 @@ function HistoryPinInfo({
         type="button"
         onClick={onOpenDetail}
         data-testid="history-pin-open-detail"
-        className="mt-2 text-blue-600 hover:underline"
+        className="mt-2 text-indigo-600 hover:underline"
       >
         詳細を見る
       </button>

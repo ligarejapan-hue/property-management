@@ -129,7 +129,7 @@ function CandidateCard({
         </span>
         <Link
           href={`/properties/${candidate.id}`}
-          className="flex-1 min-w-0 flex items-center gap-1 text-sm text-blue-600 hover:underline font-medium truncate"
+          className="flex-1 min-w-0 flex items-center gap-1 text-sm text-indigo-600 hover:underline font-medium truncate"
         >
           <Link2 className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{candidate.address}</span>

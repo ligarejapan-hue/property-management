@@ -147,7 +147,7 @@ export default function UsersPage() {
         <h2 className="text-2xl font-bold text-gray-800">ユーザー管理</h2>
         <button
           onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
         >
           <Plus className="h-4 w-4" />
           新規ユーザー作成
@@ -171,7 +171,7 @@ export default function UsersPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="名前・メールで検索..."
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
         </div>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
@@ -256,7 +256,7 @@ export default function UsersPage() {
                       <div className="flex items-center gap-2">
                         <Link
                           href={`/admin/users/${u.id}/permissions`}
-                          className="flex items-center gap-0.5 text-blue-600 hover:text-blue-800"
+                          className="flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800"
                           title="権限編集"
                         >
                           <Shield className="h-3.5 w-3.5" />
@@ -390,7 +390,7 @@ export default function UsersPage() {
                     ? "bg-red-600 hover:bg-red-700"
                     : actionType === "deactivate"
                       ? "bg-amber-600 hover:bg-amber-700"
-                      : "bg-blue-600 hover:bg-blue-700"
+                      : "bg-indigo-600 hover:bg-indigo-700"
                 }`}
               >
                 実行
@@ -481,7 +481,7 @@ function CreateUserModal({
               required
               value={form.name}
               onChange={(e) => setField("name", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div>
@@ -493,7 +493,7 @@ function CreateUserModal({
               required
               value={form.email}
               onChange={(e) => setField("email", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div>
@@ -503,7 +503,7 @@ function CreateUserModal({
             <select
               value={form.role}
               onChange={(e) => setField("role", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="field_staff">現地担当</option>
               <option value="office_staff">事務担当</option>
@@ -521,7 +521,7 @@ function CreateUserModal({
               value={form.password}
               onChange={(e) => setField("password", e.target.value)}
               placeholder="8文字以上"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
             <p className="mt-1 text-xs text-gray-400">
               初回ログイン時にパスワード変更を要求されます
@@ -538,7 +538,7 @@ function CreateUserModal({
             <button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               作成
