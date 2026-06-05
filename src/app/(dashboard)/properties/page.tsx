@@ -671,7 +671,7 @@ function PropertiesPageInner() {
         <button
           type="button"
           onClick={() => setShowNewModal(true)}
-          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
         >
           <Plus className="h-4 w-4" />
           新規物件登録
@@ -687,7 +687,7 @@ function PropertiesPageInner() {
         <select
           value={typeFilter}
           onChange={handleFilterChange(setTypeFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
         >
           <option value="">種別: すべて</option>
           {PROPERTY_TYPE_OPTIONS.map((o) => (
@@ -700,7 +700,7 @@ function PropertiesPageInner() {
         <select
           value={registryFilter}
           onChange={handleFilterChange(setRegistryFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
         >
           <option value="">登記状況: すべて</option>
           <option value="obtained">取得済</option>
@@ -711,7 +711,7 @@ function PropertiesPageInner() {
         <select
           value={dmFilter}
           onChange={handleFilterChange(setDmFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
         >
           <option value="">DM判断: すべて</option>
           <option value="send">送付可</option>
@@ -730,7 +730,7 @@ function PropertiesPageInner() {
               setSearchDraft(value);
               commitKeyword(value);
             }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
           />
         </div>
 
@@ -745,7 +745,7 @@ function PropertiesPageInner() {
               setMgmtIdDraft(value);
               commitMgmtId(value);
             }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
           />
         </div>
 
@@ -769,7 +769,7 @@ function PropertiesPageInner() {
             }}
             onBlur={() => setSuggestOpen(false)}
             onFocus={() => { if (suggestResults.length > 0) setSuggestOpen(true); }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
           />
           {suggestOpen && suggestResults.length > 0 && (
             <ul className="absolute left-0 top-full z-50 mt-1 w-full min-w-[320px] rounded-md border border-gray-200 bg-white shadow-lg">
@@ -782,7 +782,7 @@ function PropertiesPageInner() {
                       setSuggestOpen(false);
                       router.push(`/properties/${item.id}`);
                     }}
-                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-blue-50"
+                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50"
                   >
                     <div className="flex items-center gap-2">
                       <span className="flex-1 font-medium text-gray-800 truncate">{item.address}</span>
@@ -848,7 +848,7 @@ function PropertiesPageInner() {
         <select
           value={caseFilter}
           onChange={handleFilterChange(setCaseFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
         >
           <option value="">案件ステータス: すべて</option>
           {CASE_STATUS_OPTIONS.map(({ value: v, label }) => (
@@ -861,7 +861,7 @@ function PropertiesPageInner() {
         <select
           value={introductionRouteFilter}
           onChange={handleFilterChange(setIntroductionRouteFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
         >
           <option value="">導入ルート: すべて</option>
           {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
@@ -877,7 +877,7 @@ function PropertiesPageInner() {
             setSort(e.target.value);
             setPage(1);
           }}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
           title="並び替え"
         >
           <option value="updatedAt:desc">更新日 新しい順</option>
@@ -889,7 +889,7 @@ function PropertiesPageInner() {
         <select
           value={assigneeFilter}
           onChange={handleFilterChange(setAssigneeFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
           title="担当者"
         >
           <option value="">担当者: すべて</option>
@@ -906,7 +906,7 @@ function PropertiesPageInner() {
             type="date"
             value={updatedFromFilter}
             onChange={handleFilterChange(setUpdatedFromFilter)}
-            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
             title="更新日（開始）"
           />
           <span className="text-gray-400">〜</span>
@@ -914,7 +914,7 @@ function PropertiesPageInner() {
             type="date"
             value={updatedToFilter}
             onChange={handleFilterChange(setUpdatedToFilter)}
-            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
             title="更新日（終了）"
           />
         </label>
@@ -1110,7 +1110,7 @@ function PropertiesPageInner() {
                   <td className="whitespace-nowrap px-4 py-3">
                     <Link
                       href={`/properties/${property.id}`}
-                      className="text-blue-600 hover:underline"
+                      className="text-indigo-600 hover:underline"
                     >
                       {PROPERTY_TYPE_LABELS[property.propertyType] ??
                         property.propertyType}
@@ -1144,7 +1144,7 @@ function PropertiesPageInner() {
                     )}
                     <Link
                       href={`/properties/${property.id}`}
-                      className="hover:text-blue-600"
+                      className="hover:text-indigo-600"
                     >
                       {property.address}
                     </Link>
@@ -1237,7 +1237,7 @@ function PropertiesPageInner() {
             <ChevronLeft className="h-4 w-4" />
             前へ
           </button>
-          <span className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white">
+          <span className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white">
             {page}
           </span>
           {pagination.totalPages > 1 && (

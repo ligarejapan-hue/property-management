@@ -212,16 +212,16 @@ function StepIndicator({ current }: { current: Step }) {
             <li key={step.key} className="flex items-center gap-2">
               {idx > 0 && (
                 <div
-                  className={`h-px w-8 ${isDone ? "bg-blue-500" : "bg-gray-200"}`}
+                  className={`h-px w-8 ${isDone ? "bg-indigo-500" : "bg-gray-200"}`}
                 />
               )}
               <div className="flex items-center gap-1.5">
                 <span
                   className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
                     isActive
-                      ? "bg-blue-600 text-white"
+                      ? "bg-indigo-600 text-white"
                       : isDone
-                        ? "bg-blue-100 text-blue-700"
+                        ? "bg-indigo-50 text-indigo-700"
                         : "bg-gray-100 text-gray-400"
                   }`}
                 >
@@ -230,9 +230,9 @@ function StepIndicator({ current }: { current: Step }) {
                 <span
                   className={`text-sm font-medium ${
                     isActive
-                      ? "text-blue-700"
+                      ? "text-indigo-700"
                       : isDone
-                        ? "text-blue-600"
+                        ? "text-indigo-600"
                         : "text-gray-400"
                   }`}
                 >
@@ -571,7 +571,7 @@ export default function RegistryPdfPage() {
               onClick={() => setUploadTab("file")}
               className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 uploadTab === "file"
-                  ? "border-blue-600 text-blue-600"
+                  ? "border-indigo-600 text-indigo-600"
                   : "border-transparent text-gray-500 hover:text-gray-700"
               }`}
             >
@@ -582,7 +582,7 @@ export default function RegistryPdfPage() {
               onClick={() => setUploadTab("text")}
               className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 uploadTab === "text"
-                  ? "border-blue-600 text-blue-600"
+                  ? "border-indigo-600 text-indigo-600"
                   : "border-transparent text-gray-500 hover:text-gray-700"
               }`}
             >
@@ -644,7 +644,7 @@ export default function RegistryPdfPage() {
                 onChange={(e) => setText(e.target.value)}
                 rows={14}
                 placeholder={`謄本テキストを貼り付けてください。例:\n\n不動産番号: 1234567890123\n所在: 東京都千代田区丸の内一丁目\n地番: 1番1\n地目: 宅地\n地積: 150.00㎡\n\n所有者: 山田太郎  東京都千代田区丸の内1-1-1`}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-y"
               />
             </div>
           )}
@@ -667,7 +667,7 @@ export default function RegistryPdfPage() {
             <button
               onClick={handleParse}
               disabled={!text.trim() || parsing}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {parsing ? (
                 <>
@@ -759,7 +759,7 @@ export default function RegistryPdfPage() {
                       value={field.value}
                       onChange={(e) => updateField(key, e.target.value)}
                       placeholder={`${label}を入力`}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                     />
                   </div>
                 );
@@ -821,7 +821,7 @@ export default function RegistryPdfPage() {
                               updateOwner(idx, "name", e.target.value)
                             }
                             placeholder="氏名"
-                            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                           />
                         </td>
                         <td className="py-2 pr-3">
@@ -832,7 +832,7 @@ export default function RegistryPdfPage() {
                               updateOwner(idx, "address", e.target.value)
                             }
                             placeholder="住所"
-                            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                           />
                         </td>
                         <td className="py-2 pr-3">
@@ -843,7 +843,7 @@ export default function RegistryPdfPage() {
                               updateOwner(idx, "share", e.target.value)
                             }
                             placeholder="例: 1/2"
-                            className="w-28 rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                            className="w-28 rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                           />
                         </td>
                         <td className="py-2">
@@ -886,7 +886,7 @@ export default function RegistryPdfPage() {
                   value="auto"
                   checked={target === "auto"}
                   onChange={() => setTarget("auto")}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500"
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500"
                 />
                 <span className="text-sm text-gray-700">
                   自動照合（システムが既存物件と照合し、一致なければ新規作成）
@@ -899,7 +899,7 @@ export default function RegistryPdfPage() {
                   value="new"
                   checked={target === "new"}
                   onChange={() => setTarget("new")}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500"
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500"
                 />
                 <span className="text-sm text-gray-700">
                   新規物件として登録
@@ -912,7 +912,7 @@ export default function RegistryPdfPage() {
                   value="existing"
                   checked={target === "existing"}
                   onChange={() => setTarget("existing")}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500"
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500"
                 />
                 <span className="text-sm text-gray-700">
                   既存物件を更新
@@ -927,7 +927,7 @@ export default function RegistryPdfPage() {
                       value={propertySearchQuery}
                       onChange={(e) => handlePropertySearch(e.target.value)}
                       placeholder="住所・地番・不動産番号で検索..."
-                      className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                     />
                   </div>
                   {propertySearchLoading && (
@@ -946,8 +946,8 @@ export default function RegistryPdfPage() {
                             setPropertySearchQuery(p.address);
                             setPropertySearchResults([]);
                           }}
-                          className={`flex w-full items-start gap-2 border-b border-gray-100 px-3 py-2 text-left text-xs hover:bg-blue-50 last:border-b-0 ${
-                            existingPropertyId === p.id ? "bg-blue-50" : ""
+                          className={`flex w-full items-start gap-2 border-b border-gray-100 px-3 py-2 text-left text-xs hover:bg-indigo-50 last:border-b-0 ${
+                            existingPropertyId === p.id ? "bg-indigo-50" : ""
                           }`}
                         >
                           <div className="flex-1 min-w-0">
@@ -1008,7 +1008,7 @@ export default function RegistryPdfPage() {
             </button>
             <button
               onClick={() => setStep("confirm")}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
             >
               確認画面へ
               <ArrowRight className="h-4 w-4" />
@@ -1135,7 +1135,7 @@ export default function RegistryPdfPage() {
               <button
                 onClick={handleImport}
                 disabled={importing}
-                className="flex items-center gap-2 rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {importing ? (
                   <>

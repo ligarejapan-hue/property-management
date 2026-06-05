@@ -357,8 +357,8 @@ export function OwnerMislinkModal({
                 {searchHits.map((h) => (
                   <li
                     key={h.id}
-                    className={`cursor-pointer border-b border-gray-100 px-2 py-1 text-xs last:border-b-0 hover:bg-blue-50 ${
-                      selectedTarget?.id === h.id ? "bg-blue-100" : ""
+                    className={`cursor-pointer border-b border-gray-100 px-2 py-1 text-xs last:border-b-0 hover:bg-indigo-50 ${
+                      selectedTarget?.id === h.id ? "bg-indigo-100" : ""
                     }`}
                     onClick={() => setSelectedTarget(h)}
                   >

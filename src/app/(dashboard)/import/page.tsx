@@ -381,7 +381,7 @@ function ReviewActionHint({
               href={`/properties/${sample.propertyId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+              className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
             >
               対象物件を開く <ArrowRight className="h-3 w-3" />
             </Link>
@@ -417,7 +417,7 @@ function ReviewActionHint({
             href="/properties"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+            className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
           >
             物件一覧で確認 / 新規登録 <ArrowRight className="h-3 w-3" />
           </Link>
@@ -1118,7 +1118,7 @@ export default function ImportPage() {
                 disabled={!isDone}
                 className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
                   isActive
-                    ? "bg-blue-600 text-white"
+                    ? "bg-indigo-600 text-white"
                     : isDone
                       ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
                       : "bg-gray-100 text-gray-400"
@@ -1152,7 +1152,7 @@ export default function ImportPage() {
               <select
                 value={template}
                 onChange={(e) => setTemplate(e.target.value)}
-                className="appearance-none rounded-md border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="appearance-none rounded-md border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               >
                 {Object.entries(TEMPLATES).map(([key, t]) => (
                   <option key={key} value={key}>
@@ -1286,7 +1286,7 @@ export default function ImportPage() {
                             onChange={(e) =>
                               updateMapping(header, e.target.value)
                             }
-                            className="appearance-none rounded border border-gray-300 bg-white py-1 pl-2 pr-7 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="appearance-none rounded border border-gray-300 bg-white py-1 pl-2 pr-7 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           >
                             <option value="">-- 未設定 --</option>
                             {TARGET_FIELDS.map((f) => (
@@ -1359,7 +1359,7 @@ export default function ImportPage() {
                   setPreviewLoading(false);
                 }
               }}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
             >
               <Eye className="h-4 w-4" />
               プレビューへ
@@ -1625,7 +1625,7 @@ export default function ImportPage() {
             <button
               onClick={handleImport}
               disabled={uploading}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {uploading ? (
                 <>
@@ -1700,14 +1700,14 @@ export default function ImportPage() {
           <div className="flex gap-3">
             <Link
               href={`/import/jobs/${result.jobId}`}
-              className="flex items-center gap-2 rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
+              className="flex items-center gap-2 rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
             >
               <Eye className="h-4 w-4" />
               ジョブ詳細を見る
             </Link>
             <button
               onClick={handleReset}
-              className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
             >
               <RefreshCw className="h-4 w-4" />
               新しいファイルを取込
@@ -2057,7 +2057,7 @@ export default function ImportPage() {
           <button
             onClick={handleRoPreview}
             disabled={!receptionFile || !ownerFile || roLoading}
-            className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
             突合結果をプレビュー
@@ -2265,7 +2265,7 @@ export default function ImportPage() {
                     <td className="px-2 py-1.5 text-gray-800">
                       <Link
                         href={`/import/jobs/${job.jobId}`}
-                        className="text-blue-600 hover:underline"
+                        className="text-indigo-600 hover:underline"
                       >
                         {job.fileName}
                       </Link>
@@ -2326,7 +2326,7 @@ export default function ImportPage() {
             <select
               value={jobFilters.jobType}
               onChange={(e) => updateJobFilter("jobType", e.target.value)}
-              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               {JOB_TYPE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -2342,7 +2342,7 @@ export default function ImportPage() {
             <select
               value={jobFilters.executedBy}
               onChange={(e) => updateJobFilter("executedBy", e.target.value)}
-              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="">すべての実行者</option>
               {executorOptions.map((u) => (
@@ -2360,7 +2360,7 @@ export default function ImportPage() {
               type="date"
               value={jobFilters.from}
               onChange={(e) => updateJobFilter("from", e.target.value)}
-              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div>
@@ -2371,7 +2371,7 @@ export default function ImportPage() {
               type="date"
               value={jobFilters.to}
               onChange={(e) => updateJobFilter("to", e.target.value)}
-              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div className="flex items-end">
@@ -2419,7 +2419,7 @@ export default function ImportPage() {
                     onChange={(e) =>
                       updateJobLimit(Number(e.target.value) as 20 | 50 | 100)
                     }
-                    className="rounded border border-gray-300 bg-white py-0.5 px-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="rounded border border-gray-300 bg-white py-0.5 px-1.5 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   >
                     <option value={20}>20件</option>
                     <option value={50}>50件</option>
@@ -2554,7 +2554,7 @@ export default function ImportPage() {
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-blue-600 hover:underline">
+                      <td className="px-3 py-2 text-indigo-600 hover:underline">
                         {job.fileName}
                       </td>
                       <td className="px-3 py-2 text-xs text-gray-500">

@@ -209,7 +209,7 @@ function ConsentModal({
           <button
             type="button"
             onClick={onAgree}
-            className="rounded border border-blue-600 bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+            className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700"
           >
             同意して記録開始
           </button>

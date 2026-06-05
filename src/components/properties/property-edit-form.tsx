@@ -237,7 +237,7 @@ export default function PropertyEditForm({
                           disabled={
                             field.key === "assignedTo" && usersLoading
                           }
-                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none disabled:bg-gray-100"
+                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none disabled:bg-gray-100"
                         >
                           {field.key === "assignedTo" ? (
                             <>
@@ -263,7 +263,7 @@ export default function PropertyEditForm({
                             handleChange(field.key, e.target.value)
                           }
                           rows={3}
-                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
+                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-y"
                         />
                       ) : (
                         <input
@@ -273,7 +273,7 @@ export default function PropertyEditForm({
                             handleChange(field.key, e.target.value)
                           }
                           step={field.type === "number" ? "any" : undefined}
-                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                         />
                       )}
                     </div>
@@ -298,7 +298,7 @@ export default function PropertyEditForm({
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             {saving ? (
               <Loader2 className="h-4 w-4 animate-spin" />

@@ -124,7 +124,7 @@ export function OwnerMemoHistory({
             onChange={(e) => setInput(e.target.value)}
             rows={3}
             placeholder="例: 連絡時の様子、相続関係の補足、次回の確認事項など"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             disabled={submitting}
             maxLength={OWNER_MEMO_BODY_MAX_LENGTH + 100}
           />
@@ -138,7 +138,7 @@ export function OwnerMemoHistory({
               type="button"
               onClick={handleSubmit}
               disabled={!canSubmit}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {submitting ? "保存中..." : "メモを追加"}
             </button>
@@ -183,7 +183,7 @@ export function OwnerMemoHistory({
                   <span className="mr-1 text-gray-500">関連物件:</span>
                   <Link
                     href={`/properties/${m.property.id}`}
-                    className="text-blue-600 hover:underline break-all"
+                    className="text-indigo-600 hover:underline break-all"
                   >
                     {m.property.address}
                   </Link>

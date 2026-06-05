@@ -572,7 +572,7 @@ function ReadOnlyView({
           {detail.propertyId ? (
             <a
               href={`/properties/${detail.propertyId}`}
-              className="text-blue-600 hover:underline"
+              className="text-indigo-600 hover:underline"
             >
               紐付け済 →
             </a>
@@ -685,7 +685,7 @@ function EditView({
           maxLength={FIELD_SURVEY_MEMO_MAX_LEN}
           rows={3}
           data-testid="pin-edit-memo"
-          className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] focus:border-blue-500 focus:outline-none"
+          className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
         />
         <span className="mt-1 block text-right text-[10px] text-gray-400">
           {draftMemo.length} / {FIELD_SURVEY_MEMO_MAX_LEN}
@@ -715,7 +715,7 @@ function EditView({
           onClick={onSave}
           disabled={saving}
           data-testid="pin-edit-save-button"
-          className="rounded border border-blue-600 bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving ? "保存中…" : "保存"}
         </button>

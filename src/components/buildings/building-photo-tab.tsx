@@ -241,7 +241,7 @@ export default function BuildingPhotoTab({
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
           >
             {uploading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -314,7 +314,7 @@ export default function BuildingPhotoTab({
                     />
                     <button
                       onClick={() => saveCaptionEdit(photo.id)}
-                      className="rounded bg-blue-600 p-0.5 text-white"
+                      className="rounded bg-indigo-600 p-0.5 text-white"
                     >
                       <Check className="h-3 w-3" />
                     </button>

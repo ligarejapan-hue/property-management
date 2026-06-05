@@ -191,7 +191,7 @@ export default function BuildingDetailPage({
     return (
       <div className="py-10 text-center">
         <p className="mb-4 text-red-600">{error ?? "棟が見つかりません"}</p>
-        <Link href="/buildings" className="text-sm text-blue-600 hover:underline">
+        <Link href="/buildings" className="text-sm text-indigo-600 hover:underline">
           棟一覧に戻る
         </Link>
       </div>
@@ -269,7 +269,7 @@ export default function BuildingDetailPage({
                     onChange={(e) =>
                       setEditForm((p) => ({ ...p, [f.key]: e.target.value }))
                     }
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
               ))}
@@ -284,14 +284,14 @@ export default function BuildingDetailPage({
                   setEditForm((p) => ({ ...p, note: e.target.value }))
                 }
                 rows={2}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
               />
             </div>
             <div className="flex gap-2 pt-2">
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 {saving ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -435,7 +435,7 @@ export default function BuildingDetailPage({
                   <td className="px-4 py-3">
                     <Link
                       href={`/properties/${u.id}`}
-                      className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
+                      className="rounded p-1 text-gray-400 hover:bg-indigo-50 hover:text-indigo-500"
                     >
                       <ChevronRight className="h-4 w-4" />
                     </Link>
@@ -552,7 +552,7 @@ function AddUnitModal({
                 value={form.roomNo}
                 onChange={(e) => setField("roomNo", e.target.value)}
                 placeholder="101"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
             <div>
@@ -563,7 +563,7 @@ function AddUnitModal({
                 type="number"
                 value={form.floorNo}
                 onChange={(e) => setField("floorNo", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
           </div>
@@ -577,7 +577,7 @@ function AddUnitModal({
                 step="0.01"
                 value={form.exclusiveArea}
                 onChange={(e) => setField("exclusiveArea", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
             <div>
@@ -589,7 +589,7 @@ function AddUnitModal({
                 step="0.01"
                 value={form.balconyArea}
                 onChange={(e) => setField("balconyArea", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
           </div>
@@ -603,7 +603,7 @@ function AddUnitModal({
                 value={form.layoutType}
                 onChange={(e) => setField("layoutType", e.target.value)}
                 placeholder="3LDK"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
             <div>
@@ -613,7 +613,7 @@ function AddUnitModal({
               <select
                 value={form.orientation}
                 onChange={(e) => setField("orientation", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               >
                 <option value="">-</option>
                 <option value="北">北</option>
@@ -636,7 +636,7 @@ function AddUnitModal({
                 type="number"
                 value={form.managementFee}
                 onChange={(e) => setField("managementFee", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
             <div>
@@ -647,7 +647,7 @@ function AddUnitModal({
                 type="number"
                 value={form.repairReserveFee}
                 onChange={(e) => setField("repairReserveFee", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
           </div>
@@ -658,7 +658,7 @@ function AddUnitModal({
             <select
               value={form.occupancyStatus}
               onChange={(e) => setField("occupancyStatus", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="unknown">不明</option>
               <option value="vacant">空室</option>
@@ -673,7 +673,7 @@ function AddUnitModal({
               value={form.note}
               onChange={(e) => setField("note", e.target.value)}
               rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">

@@ -38,7 +38,7 @@ export default function PinAddModeToggle({
         className={
           "w-full rounded border px-2 py-1 text-xs font-semibold " +
           (active
-            ? "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+            ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
             : "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100") +
           " disabled:cursor-not-allowed disabled:opacity-60"
         }

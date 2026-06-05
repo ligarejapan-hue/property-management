@@ -323,7 +323,7 @@ export default function PropertyDetailPage({
         </p>
         <Link
           href="/properties"
-          className="mt-3 inline-block text-sm text-blue-600 hover:underline"
+          className="mt-3 inline-block text-sm text-indigo-600 hover:underline"
         >
           物件一覧に戻る
         </Link>
@@ -408,7 +408,7 @@ export default function PropertyDetailPage({
               onClick={() => setActiveTab(tab.key)}
               className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 activeTab === tab.key
-                  ? "border-blue-600 text-blue-600"
+                  ? "border-indigo-600 text-indigo-600"
                   : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
               }`}
             >
@@ -852,7 +852,7 @@ function OwnerCard({
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
             )}
@@ -865,7 +865,7 @@ function OwnerCard({
                   type="text"
                   value={form.nameKana}
                   onChange={(e) => setForm((f) => ({ ...f, nameKana: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
             )}
@@ -876,7 +876,7 @@ function OwnerCard({
                   type="tel"
                   value={form.phone}
                   onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
             )}
@@ -887,7 +887,7 @@ function OwnerCard({
                   type="text"
                   value={form.zip}
                   onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
             )}
@@ -898,7 +898,7 @@ function OwnerCard({
                   type="text"
                   value={form.address}
                   onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
             )}
@@ -910,7 +910,7 @@ function OwnerCard({
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
             )}
@@ -938,7 +938,7 @@ function OwnerCard({
                     setForm((f) => ({ ...f, corporateNumber: e.target.value }))
                   }
                   placeholder="例: 1234567890123"
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
                 {form.corporateNumber.trim() !== "" &&
                   normalizeCorporateNumber(form.corporateNumber) === null && (
@@ -985,7 +985,7 @@ function OwnerCard({
                   form.corporateNumber.trim() !== "" &&
                   normalizeCorporateNumber(form.corporateNumber) === null)
               }
-              className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {saving ? "保存中..." : "保存"}
             </button>
@@ -1083,14 +1083,14 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
         onChange={(e) => setValue(e.target.value)}
         rows={3}
         placeholder="例: 連絡時間帯、相続関係、現地でのやり取りなど"
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       />
       <div className="mt-2 flex items-center gap-2">
         <button
           type="button"
           disabled={!dirty || saving}
           onClick={() => persist(value.trim() === "" ? null : value)}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
         >
           {saving ? "保存中..." : "保存"}
         </button>
@@ -1177,7 +1177,7 @@ function CaseStatusField({
           value={property.caseStatus}
           onChange={(e) => handleChange(e.target.value)}
           disabled={saving}
-          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
         >
           {options.map((o) => (
             <option key={o.value} value={o.value}>
@@ -1252,7 +1252,7 @@ function IntroductionRouteField({
           value={property.introductionRoute ?? ""}
           onChange={(e) => handleChange(e.target.value)}
           disabled={saving}
-          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
         >
           <option value="">未設定</option>
           {INTRODUCTION_ROUTE_OPTIONS.map((o) => (

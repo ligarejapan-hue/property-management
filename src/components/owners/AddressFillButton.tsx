@@ -68,7 +68,7 @@ export function AddressFillButton({
         <button
           type="button"
           onClick={handleClick}
-          className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
+          className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
         >
           住所を補完
         </button>
@@ -90,7 +90,7 @@ export function AddressFillButton({
             <button
               type="button"
               onClick={handleConfirm}
-              className="rounded bg-blue-600 px-2 py-1 font-medium text-white hover:bg-blue-700"
+              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
             >
               実行
             </button>

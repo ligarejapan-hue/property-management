@@ -121,7 +121,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const linkClasses = (href: string) =>
     `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
       isActive(href)
-        ? "bg-blue-100 text-blue-800"
+        ? "bg-indigo-50 text-indigo-700"
         : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
     }`;
 
@@ -208,7 +208,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         }`}
       >
         <div className="flex h-14 items-center border-b border-gray-200 px-4">
-          <FileText className="mr-2 h-5 w-5 text-blue-600" />
+          <FileText className="mr-2 h-5 w-5 text-indigo-600" />
           <span className="text-sm font-bold text-gray-800">物件管理</span>
         </div>
         <div className="overflow-y-auto">{navContent}</div>

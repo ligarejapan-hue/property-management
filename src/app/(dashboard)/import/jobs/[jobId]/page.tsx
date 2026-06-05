@@ -570,7 +570,7 @@ export default function ImportJobDetailPage() {
         <p className="mb-4 text-red-600">{error ?? "ジョブが見つかりません"}</p>
         <button
           onClick={() => router.back()}
-          className="text-sm text-blue-600 hover:underline"
+          className="text-sm text-indigo-600 hover:underline"
         >
           戻る
         </button>
@@ -827,7 +827,7 @@ export default function ImportJobDetailPage() {
                         {p.buildingName ? (
                           <Link
                             href={`/buildings/${p.buildingId}`}
-                            className="text-blue-600 hover:underline"
+                            className="text-indigo-600 hover:underline"
                           >
                             {p.buildingName}
                           </Link>
@@ -839,7 +839,7 @@ export default function ImportJobDetailPage() {
                         {p.found ? (
                           <Link
                             href={`/properties/${p.propertyId}`}
-                            className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"
+                            className="inline-flex items-center gap-0.5 text-indigo-600 hover:underline"
                           >
                             開く
                             <ChevronRight className="h-3 w-3" />
@@ -900,7 +900,7 @@ export default function ImportJobDetailPage() {
             onClick={() => changeFilter(tab.key)}
             className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
               filter === tab.key
-                ? "bg-blue-600 text-white"
+                ? "bg-indigo-600 text-white"
                 : "bg-gray-100 text-gray-600 hover:bg-gray-200"
             }`}
           >
@@ -992,7 +992,7 @@ export default function ImportJobDetailPage() {
               <a
                 href={`/api/import/jobs/${jobId}/export-errors`}
                 download={`import-errors-${jobId}.csv`}
-                className="flex items-center gap-1 rounded-md border border-blue-300 bg-white px-3 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                className="flex items-center gap-1 rounded-md border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
                 title="error / needs_review 行を CSV でダウンロード（Excel 互換 / UTF-8 BOM 付き）"
               >
                 <Download className="h-3 w-3" />
@@ -1306,7 +1306,7 @@ export default function ImportJobDetailPage() {
                           !isEditing && (
                             <button
                               onClick={() => startEdit(row)}
-                              className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                              className="flex items-center gap-1 text-xs text-indigo-600 hover:underline"
                             >
                               編集
                             </button>
@@ -1372,7 +1372,7 @@ export default function ImportJobDetailPage() {
                                       className={`w-full rounded border px-2 py-0.5 text-xs focus:outline-none focus:ring-1 ${
                                         isErrorField
                                           ? "border-red-400 bg-white focus:border-red-500 focus:ring-red-500"
-                                          : "border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                          : "border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                                       }`}
                                       autoFocus={isErrorField}
                                     />
@@ -1419,7 +1419,7 @@ export default function ImportJobDetailPage() {
                                     ? "氏名・電話番号・住所で検索..."
                                     : "住所・地番・不動産番号で検索..."
                                 }
-                                className="w-full rounded border border-gray-300 py-1.5 pl-8 pr-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                className="w-full rounded border border-gray-300 py-1.5 pl-8 pr-2 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                               />
                             </div>
 
@@ -1444,9 +1444,9 @@ export default function ImportJobDetailPage() {
                                           result.id,
                                       );
                                     }}
-                                    className={`flex w-full items-start gap-2 border-b border-gray-100 px-3 py-2 text-left text-xs hover:bg-blue-50 last:border-b-0 ${
+                                    className={`flex w-full items-start gap-2 border-b border-gray-100 px-3 py-2 text-left text-xs hover:bg-indigo-50 last:border-b-0 ${
                                       selectedTarget?.id === result.id
-                                        ? "bg-blue-50"
+                                        ? "bg-indigo-50"
                                         : ""
                                     }`}
                                   >
@@ -1499,7 +1499,7 @@ export default function ImportJobDetailPage() {
                                     handleResolve(row.id, "link_existing")
                                   }
                                   disabled={isLoading}
-                                  className="flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                                  className="flex items-center gap-1 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                                 >
                                   {isLoading ? (
                                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -1534,7 +1534,7 @@ export default function ImportJobDetailPage() {
                             <button
                               onClick={() => handleRetry(row.id)}
                               disabled={isLoading}
-                              className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                              className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                             >
                               {isLoading ? (
                                 <Loader2 className="h-3 w-3 animate-spin" />

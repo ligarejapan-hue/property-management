@@ -127,13 +127,13 @@ function CommentForm({
           onChange={(e) => setBody(e.target.value)}
           placeholder={placeholder}
           rows={2}
-          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-none"
+          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-none"
         />
         <div className="flex flex-col gap-1">
           <button
             type="submit"
             disabled={submitting || !body.trim()}
-            className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -187,7 +187,7 @@ function CommentItem({
       </p>
       <button
         onClick={() => setShowReplyForm(!showReplyForm)}
-        className="mt-2 flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+        className="mt-2 flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
       >
         <CornerDownRight className="h-3 w-3" />
         返信

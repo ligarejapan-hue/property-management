@@ -48,7 +48,7 @@ const ACTIONS: ActionConfig[] = [
     key: "set_dm_send",
     label: "DM送付可",
     icon: Send,
-    color: "bg-blue-600 hover:bg-blue-700",
+    color: "bg-indigo-600 hover:bg-indigo-700",
     condition: (p) => p.dmStatus !== "send",
   },
   {
