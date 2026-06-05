@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   Building,
@@ -10,6 +10,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { fetchBuildings, createBuilding } from "@/lib/api-client";
+import { debounce } from "@/lib/debounce";
 
 interface BuildingItem {
   id: string;
@@ -27,8 +28,20 @@ interface BuildingItem {
 export default function BuildingsPage() {
   const [buildings, setBuildings] = useState<BuildingItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // keyword は fetchBuildings を駆動する「確定値」。keywordDraft は入力中の表示値。
+  // 毎キーストロークで keyword（＝確定値）を更新すると load の dep が変わり
+  // fetchBuildings が打鍵ごとに走るため、確定値への反映を 300ms debounce する。
   const [keyword, setKeyword] = useState("");
+  const [keywordDraft, setKeywordDraft] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+
+  // 入力ドラフト → 確定 keyword への反映を 300ms 間引く committer（render 間で安定）。
+  const commitKeyword = useMemo(
+    () => debounce((value: string) => setKeyword(value), 300),
+    [],
+  );
+  // アンマウント時に保留中の確定を取り消す。
+  useEffect(() => () => commitKeyword.cancel(), [commitKeyword]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,8 +77,12 @@ export default function BuildingsPage() {
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
         <input
           type="text"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
+          value={keywordDraft}
+          onChange={(e) => {
+            const value = e.target.value;
+            setKeywordDraft(value);
+            commitKeyword(value);
+          }}
           placeholder="マンション名・住所で検索..."
           className="w-full rounded-md border border-gray-300 py-2.5 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
