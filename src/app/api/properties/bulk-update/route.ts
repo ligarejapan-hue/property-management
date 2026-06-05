@@ -59,9 +59,23 @@ export async function POST(request: NextRequest) {
       ];
     }
 
-    // Fetch current values for change logging
+    // Fetch current values for change logging.
+    // ChangeLog に必要なのは id（targetId / accessibleIds）と、更新され得る
+    // 追跡対象列だけ。recordChanges は newValues に含まれる tracked field の
+    // oldValues[field] しか参照しないため、bulkUpdateSchema.updates で更新可能な
+    // 4 列（caseStatus / registryStatus / dmStatus / assignedTo・いずれも
+    // PROPERTY_TRACKED_FIELDS に含まれる）+ id のみを select する。
+    // ⚠ bulkUpdateSchema.updates に列を追加した場合はこの select も同期すること
+    //   （未 select の更新列は oldValue が誤って null 記録される）。
     const currentProperties = await prisma.property.findMany({
       where: baseWhere,
+      select: {
+        id: true,
+        caseStatus: true,
+        registryStatus: true,
+        dmStatus: true,
+        assignedTo: true,
+      },
     });
 
     if (currentProperties.length === 0) {
@@ -78,18 +92,25 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Record change logs for each property
-    for (const current of currentProperties) {
-      await recordChanges({
-        targetTable: "properties",
-        targetId: current.id,
-        changedBy: session.id,
-        oldValues: current as unknown as Record<string, unknown>,
-        newValues: updateFields as Record<string, unknown>,
-        trackedFields: PROPERTY_TRACKED_FIELDS,
-        source: "manual",
-      });
-    }
+    // Record change logs for each property.
+    // 直列 await ループだと対象件数（最大100）分だけ changeLog 書込が逐次往復し
+    // レイテンシが積み上がるため、Promise.all で並行ディスパッチする。
+    // recordChanges は内部で per-property に createMany + try/catch するため、
+    // 失敗粒度（1物件分が失敗しても他は記録される）・記録内容・署名・共通仕様は
+    // 従来どおり不変（単一 createMany への統合は失敗粒度を変えるため行わない）。
+    await Promise.all(
+      currentProperties.map((current) =>
+        recordChanges({
+          targetTable: "properties",
+          targetId: current.id,
+          changedBy: session.id,
+          oldValues: current as unknown as Record<string, unknown>,
+          newValues: updateFields as Record<string, unknown>,
+          trackedFields: PROPERTY_TRACKED_FIELDS,
+          source: "manual",
+        }),
+      ),
+    );
 
     await writeAuditLog({
       userId: session.id,
