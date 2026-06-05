@@ -50,7 +50,6 @@ interface ApiProperty {
   updatedAt: string;
   assignedTo: string | null;
   assignee: { id: string; name: string } | null;
-  importSource?: string | null;
   ownerNames?: string[];
 }
 

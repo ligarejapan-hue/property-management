@@ -197,8 +197,8 @@ describe("GET /api/properties mgmtId 統合", () => {
     const res = await GET(makeRequest("?keyword=" + encodeURIComponent("東京")));
     expect(res.status).toBe(200);
 
-    // mgmtId helper は呼ばれていない → importJobRow.findMany は本体の importSource 取得のみ
-    // (空結果なので importSource lookup もスキップ)
+    // mgmtId helper は呼ばれていない。一覧本体も importSource 逆引きを
+    // 行わなくなった（17-C F1）ため importJobRow.findMany は一切呼ばれない。
     expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
 
     const listCall = pm.property.findMany.mock.calls.find((c: any[]) => c[0]?.take !== undefined);

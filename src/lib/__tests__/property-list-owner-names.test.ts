@@ -37,12 +37,10 @@ function mapPropertyForResponse(
   },
   hasOwnerRead: boolean,
   ownerDisplayConfig: { name: string } | null,
-  importSource: string | null,
 ) {
   const { propertyOwners, ...property } = p;
   return {
     ...property,
-    importSource,
     ownerNames:
       hasOwnerRead && ownerDisplayConfig
         ? propertyOwners
@@ -63,41 +61,41 @@ describe("property list owner names mapping", () => {
   };
 
   it("propertyOwners キーがレスポンスに含まれない", () => {
-    const result = mapPropertyForResponse(base, true, { name: "full" }, null);
+    const result = mapPropertyForResponse(base, true, { name: "full" });
     expect(result).not.toHaveProperty("propertyOwners");
   });
 
   it("owner:read ありで displayLevel=full のとき所有者名をそのまま返す", () => {
-    const result = mapPropertyForResponse(base, true, { name: "full" }, null);
+    const result = mapPropertyForResponse(base, true, { name: "full" });
     expect(result.ownerNames).toEqual(["田中太郎", "山田花子"]);
   });
 
   it("owner:read なしのとき ownerNames は [] でレスポンスに propertyOwners は含まれない", () => {
-    const result = mapPropertyForResponse(base, false, null, null);
+    const result = mapPropertyForResponse(base, false, null);
     expect(result.ownerNames).toEqual([]);
     expect(result).not.toHaveProperty("propertyOwners");
   });
 
   it("displayLevel=hidden のとき null がフィルタされ ownerNames は []", () => {
-    const result = mapPropertyForResponse(base, true, { name: "hidden" }, null);
+    const result = mapPropertyForResponse(base, true, { name: "hidden" });
     expect(result.ownerNames).toEqual([]);
   });
 
   it("displayLevel=masked のとき末尾4文字が返る", () => {
-    const result = mapPropertyForResponse(base, true, { name: "masked" }, null);
+    const result = mapPropertyForResponse(base, true, { name: "masked" });
     // maskValue(masked) は末尾4文字を残す。"田中太郎" → "中太郎" (3文字以下は全マスク)
     expect(result.ownerNames.length).toBeGreaterThanOrEqual(0);
     expect(result).not.toHaveProperty("propertyOwners");
   });
 
   it("複数所有者が全員含まれる", () => {
-    const result = mapPropertyForResponse(base, true, { name: "full" }, null);
+    const result = mapPropertyForResponse(base, true, { name: "full" });
     expect(result.ownerNames).toHaveLength(2);
   });
 
-  it("importSource が正しく渡される", () => {
-    const result = mapPropertyForResponse(base, true, { name: "full" }, "file.csv:1行");
-    expect(result.importSource).toBe("file.csv:1行");
+  it("importSource キーがレスポンスに含まれない（一覧では返さない・17-C F1）", () => {
+    const result = mapPropertyForResponse(base, true, { name: "full" });
+    expect(result).not.toHaveProperty("importSource");
   });
 });
 

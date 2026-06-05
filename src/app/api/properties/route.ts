@@ -17,7 +17,6 @@ import {
 import {
   buildPropertyListWhere,
   buildPropertyListOrderBy,
-  loadImportSourceMap,
 } from "@/lib/property-list-query";
 
 // ---------- GET /api/properties ----------
@@ -94,18 +93,14 @@ export async function GET(request: NextRequest) {
       ? [[], 0]
       : await fetchListAndCount();
 
-    // 取込元情報を一括逆引きして各物件に付与する（N+1 回避）。
-    // CSV export と共有する loadImportSourceMap を再利用する。
-    const importSourceMap = await loadImportSourceMap(
-      prisma,
-      properties.map((p) => p.id),
-    );
-
+    // 一覧レスポンスに importSource（取込元管理ID）は含めない。
+    // 一覧 UI は描画しておらず、loadImportSourceMap の ImportJobRow 逆引き
+    // （rawData JSONB select 込み）が毎回走るのは無駄なため除去（17-C F1）。
+    // 必要な経路は各自取得する: 詳細 GET / CSV export / dm-export / suggest。
     const data = properties.map((p) => {
       const { propertyOwners, ...property } = p;
       return {
         ...property,
-        importSource: importSourceMap.get(p.id) ?? null,
         ownerNames: hasOwnerRead && ownerDisplayConfig
           ? propertyOwners
               .map(({ owner }) => maskValue(owner.name, ownerDisplayConfig.name))
