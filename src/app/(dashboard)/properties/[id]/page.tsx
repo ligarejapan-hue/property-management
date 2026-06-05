@@ -11,6 +11,11 @@ import {
   Loader2,
   Trash2,
 } from "lucide-react";
+import {
+  badgeIntentClass,
+  REGISTRY_STATUS_INTENT,
+  DM_STATUS_INTENT,
+} from "@/components/ui/status-badge";
 import CommentTab from "@/components/properties/comment-tab";
 import NextActionTab from "@/components/properties/next-action-tab";
 import AttachmentTab from "@/components/properties/attachment-tab";
@@ -50,16 +55,18 @@ const DM_STATUS_LABELS: Record<string, string> = {
   no_send: "送付不可",
 };
 
+// v2: バッジ色は共通レシピ(status-badge.tsx)の intent から導出。
+// 一覧ページと定義が重複していたものを共通化(scheduled は yellow → amber)。
 const registryBadgeStyles: Record<string, string> = {
-  obtained: "bg-green-100 text-green-800",
-  unconfirmed: "bg-red-100 text-red-800",
-  scheduled: "bg-yellow-100 text-yellow-800",
+  obtained: badgeIntentClass(REGISTRY_STATUS_INTENT.obtained),
+  unconfirmed: badgeIntentClass(REGISTRY_STATUS_INTENT.unconfirmed),
+  scheduled: badgeIntentClass(REGISTRY_STATUS_INTENT.scheduled),
 };
 
 const dmBadgeStyles: Record<string, string> = {
-  send: "bg-green-100 text-green-800",
-  no_send: "bg-red-100 text-red-800",
-  hold: "bg-gray-100 text-gray-600",
+  send: badgeIntentClass(DM_STATUS_INTENT.send),
+  no_send: badgeIntentClass(DM_STATUS_INTENT.no_send),
+  hold: badgeIntentClass(DM_STATUS_INTENT.hold),
 };
 
 // ---------- Tabs ----------
