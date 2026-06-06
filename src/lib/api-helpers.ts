@@ -115,22 +115,27 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
 
   const templateName = templateNameMap[user.role] ?? "現地担当用";
 
-  // 3. Get template permissions
-  const template = await prisma.permissionTemplate.findUnique({
-    where: { name: templateName },
-    include: { templatePermissions: true },
-  });
+  // 3+4. Get template permissions & user overrides in parallel.
+  // F5(17-C): template は templateName(user.role 由来・上で確定済み)のみ、
+  // overrides は userId(引数)のみに依存し互いに独立のため並列取得する
+  // （3直列往復→2往復）。クエリ本数(3本)・マージ順・throw 挙動は不変。
+  // user 不在時の 401 throw（上記）が先行するため、user が存在しない場合に
+  // これらのクエリが発行されない従来挙動も維持される。
+  const [template, overrides] = await Promise.all([
+    prisma.permissionTemplate.findUnique({
+      where: { name: templateName },
+      include: { templatePermissions: true },
+    }),
+    prisma.userPermission.findMany({
+      where: { userId },
+    }),
+  ]);
 
   const templatePerms: PermissionEntry[] = (template?.templatePermissions ?? []).map((tp) => ({
     resource: tp.resource,
     action: tp.action,
     granted: tp.granted,
   }));
-
-  // 4. Get user overrides
-  const overrides = await prisma.userPermission.findMany({
-    where: { userId },
-  });
 
   // 5. Merge: overrides take precedence
   const merged = new Map<string, PermissionEntry>();
