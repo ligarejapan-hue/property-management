@@ -69,7 +69,8 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => ({
   default: {
-    property: { findMany: vi.fn() },
+    property: { findMany: vi.fn(), count: vi.fn() },
+    propertyOwner: { count: vi.fn() },
     importJobRow: { findMany: vi.fn() },
   },
 }));
@@ -84,7 +85,8 @@ import { writeAuditLog } from "@/lib/audit";
 import { GET } from "../../app/api/properties/dm-export/route";
 
 const pm = prisma as unknown as {
-  property: { findMany: Mock };
+  property: { findMany: Mock; count: Mock };
+  propertyOwner: { count: Mock };
   importJobRow: { findMany: Mock };
 };
 
@@ -185,6 +187,11 @@ beforeEach(() => {
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL as any);
   vi.mocked(getOwnerDisplayConfig).mockResolvedValue(FULL_DISPLAY as any);
   pm.property.findMany.mockResolvedValue([]);
+  // 事前 COUNT（owner 行数）/ ownerなし送付可物件 COUNT の既定値。
+  // mockResolvedValue は vi.clearAllMocks では消えない（呼び出し履歴のみクリア）ため、
+  // 各テスト内の vi.clearAllMocks() 後も既定値 0 が維持される。
+  pm.propertyOwner.count.mockResolvedValue(0);
+  pm.property.count.mockResolvedValue(0);
   pm.importJobRow.findMany.mockResolvedValue([]);
 });
 
@@ -660,5 +667,152 @@ describe("GET /api/properties/dm-export — Phase 1 追加ガード", () => {
       .slice(1)
       .filter((l) => l.length > 0);
     expect(dataLines).toHaveLength(1);
+  });
+});
+
+// ============================================================
+// 上限判定の保証（owner 行数ベース・PR #134 docs 残課題の解消）
+// route は次の 3 層で「最終 owner 行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」を保証する:
+//  (1) fetch 前の propertyOwner.count（超過なら PII を一切取得せず 400）
+//  (2) findMany を「非アーカイブ所有者を 1 名以上持つ物件」に限定
+//      （ownerなし物件が take 窓を消費して eligible owner 行が欠落するのを防ぐ）
+//  (3) 取得後の owner 行数で再判定（COUNT と fetch の間の race 防御・
+//      取込元逆引き / AuditLog より前で 400）
+// あわせて ownerなし送付可物件の skippedCount は property.count（none 条件）で
+// 全 matching 範囲を正確に計上する。
+// ============================================================
+describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数ベース）", () => {
+  it("(2) findMany は非アーカイブ所有者を持つ物件に限定され take は MAX+1・既存強制条件も維持", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    await GET(makeRequest());
+
+    const call = pm.property.findMany.mock.calls[0][0];
+    // 所有者あり物件への限定（AND マージで keyword OR 等の既存条件を壊さない）
+    expect(call.where.AND).toContainEqual({
+      propertyOwners: { some: { owner: { isArchived: false } } },
+    });
+    // 既存の強制条件・取得上限はそのまま
+    expect(call.where.dmStatus).toBe("send");
+    expect(call.where.isArchived).toBe(false);
+    expect(call.take).toBe(10001);
+  });
+
+  it("(2) 既存の where.AND がある場合（hasWarning）も clobber せず some 条件を追記する", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    await GET(makeRequest("?hasWarning=true"));
+
+    const andClauses: Array<Record<string, unknown>> =
+      pm.property.findMany.mock.calls[0][0].where.AND;
+    // hasWarning 由来の既存 AND 条件（OR 句）が保持されている
+    expect(andClauses.some((c) => "OR" in c)).toBe(true);
+    // 所有者あり限定の some 条件が「追記」されている（上書きでない）
+    expect(andClauses).toContainEqual({
+      propertyOwners: { some: { owner: { isArchived: false } } },
+    });
+    expect(andClauses.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("(1) 事前 COUNT が MAX 超 → findMany / 取込元逆引き / AuditLog を一切実行せず 400", async () => {
+    pm.propertyOwner.count.mockResolvedValue(10001);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("EXPORT_LIMIT_EXCEEDED");
+    // PII を含む行データの取得自体が走らない
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    // COUNT は「property が検索条件に一致 × 所有者が非アーカイブ」のリンク数 = 最終行数
+    const countWhere = pm.propertyOwner.count.mock.calls[0][0].where;
+    expect(countWhere.owner).toEqual({ isArchived: false });
+    expect(countWhere.property.dmStatus).toBe("send");
+    expect(countWhere.property.isArchived).toBe(false);
+  });
+
+  it("(3) 取得後の owner 行数が MAX+1（property 件数は窓内）→ 400・取込元逆引き/AuditLog 未実行", async () => {
+    // 10,000 物件（take 窓内）だが、先頭 1 物件が所有者 2 名 → owner 行 10,001 > MAX。
+    // 旧実装も row 展開後の判定で 400 自体にはなるが、判定が取込元逆引き（importJobRow）の
+    // 後だったため逆引きクエリが先に走っていた。本テストの核は「(3) の再判定は取込元逆引きより
+    // 前に行われ、400 経路では importJobRow アクセスも AuditLog も発生しない」のロック
+    // （下の importJobRow.findMany 未呼び出し assertion が revert 検知の本体）。
+    const many = Array.from({ length: 10000 }, (_, i) =>
+      i === 0
+        ? makeProp({
+            id: "p0",
+            propertyOwners: [
+              makePropertyOwner({ owner: { name: "A" } }),
+              makePropertyOwner({
+                owner: { name: "B" },
+                isPrimary: false,
+              }),
+            ],
+          })
+        : makeProp({ id: `p${i}` }),
+    );
+    pm.property.findMany.mockResolvedValue(many);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("EXPORT_LIMIT_EXCEEDED");
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(res.headers.get("Content-Type")).not.toBe("text/csv; charset=utf-8");
+  });
+
+  it("owner 行数がちょうど MAX（10,000）→ 200・全行出力・resultCount=10000", async () => {
+    pm.propertyOwner.count.mockResolvedValue(10000); // 境界値: 超過ではないので通る
+    const many = Array.from({ length: 10000 }, (_, i) =>
+      makeProp({ id: `p${i}` }),
+    );
+    pm.property.findMany.mockResolvedValue(many);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(10001); // ヘッダ + 10,000 行（切り捨てなし）
+    const audit = lastAudit();
+    expect(audit.detail.count).toBe(10000);
+    expect(audit.detail.resultCount).toBe(10000);
+  });
+
+  it("ownerなし送付可物件が大量にあっても部分 CSV にならず、skippedCount に正確に反映される", async () => {
+    // ownerなし物件は findMany の対象外（take 窓を消費しない）ため、
+    // 50,000 件あっても eligible owner 行は全件出力され、件数は COUNT で監査に残る。
+    pm.property.count.mockResolvedValue(50000);
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ id: "p1", address: "物件A" }),
+      makeProp({ id: "p2", address: "物件B" }),
+    ]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(3); // ヘッダ + 2 行（eligible owner 行は欠落しない）
+    expect(csv).toContain("物件A");
+    expect(csv).toContain("物件B");
+
+    const audit = lastAudit();
+    expect(audit.detail.count).toBe(2);
+    expect(audit.detail.resultCount).toBe(2);
+    expect(audit.detail.skippedCount).toBe(50000);
+
+    // skippedCount の COUNT は「非アーカイブ所有者が 0 名の送付可物件」を数える
+    const skipWhere = pm.property.count.mock.calls[0][0].where;
+    expect(skipWhere.dmStatus).toBe("send");
+    expect(skipWhere.isArchived).toBe(false);
+    expect(skipWhere.AND).toContainEqual({
+      propertyOwners: { none: { owner: { isArchived: false } } },
+    });
+  });
+
+  it("400（上限超過）時は ownerなし COUNT も実行されない（負荷を増やさない）", async () => {
+    pm.propertyOwner.count.mockResolvedValue(10001);
+    await GET(makeRequest());
+    expect(pm.property.count).not.toHaveBeenCalled();
   });
 });

@@ -31,6 +31,8 @@ import {
 //
 // 安全上限: MAX_DM_EXPORT_ROWS 行（最終 CSV 行 = 所有者行で判定）。
 // 超過時は切り捨てず 400 にする（不完全な差込 CSV を渡さない / DoS 防止）。
+// 「最終 owner 行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」は
+// 事前 COUNT + 所有者あり物件のみ取得 + 取得後再判定 の 3 層で保証する（GET 内コメント参照）。
 //
 // PII / 権限:
 //  - property:read / csv_export:read / csv_export_personal:read / owner:read すべて必須
@@ -119,11 +121,47 @@ export async function GET(request: NextRequest) {
 
     const orderBy = buildPropertyListOrderBy(query);
 
+    // 上限判定は「最終 CSV 行数 = 所有者行数」で行う。property 件数を take で切ると、
+    // ownerなし物件が窓を消費して後続の eligible owner 行が欠落した 200（不完全 CSV）に
+    // なり得るため、次の 3 層で「owner 行数が上限超なら確実に 400」を保証する:
+    //  (1) fetch 前に owner 行数を COUNT し、超過なら PII を一切取得せず 400
+    //  (2) fetch 対象を「非アーカイブ所有者が 1 名以上の物件」に限定し、
+    //      ownerなし物件が take 窓を消費しないようにする（行の完全性の核）
+    //  (3) COUNT と fetch の間の更新（race）に備え、取得後の行数でも再判定して 400
+    const eligibleOwnerWhere = { owner: { isArchived: false } };
+
+    // (1) 最終 owner 行数の事前 COUNT。propertyOwners の select 条件と同一の
+    //     「property が where に一致 × 所有者が非アーカイブ」のリンク数 = 最終行数。
+    const ownerRowCount = mgmtShortCircuitEmpty
+      ? 0
+      : await prisma.propertyOwner.count({
+          where: { ...eligibleOwnerWhere, property: where },
+        });
+    if (ownerRowCount > MAX_DM_EXPORT_ROWS) {
+      throw new ApiError(
+        400,
+        "出力対象が上限（10,000件）を超えています。検索条件で絞り込んでください。",
+        "EXPORT_LIMIT_EXCEEDED",
+      );
+    }
+
+    // (2) 非アーカイブ所有者を 1 名以上持つ物件のみ取得（既存の AND マージと同イディオム）。
+    //     owner 持ち物件が take 窓（MAX+1 件）を超える場合は各物件が 1 行以上を生むため
+    //     行数も必ず MAX を超え、(3) で 400 になる。窓内に収まる場合は全件取得済みとなり、
+    //     どちらのケースでも「eligible owner 行を落とした 200 CSV」は返らない。
+    const whereWithEligibleOwners = {
+      ...where,
+      AND: [
+        ...(where.AND ?? []),
+        { propertyOwners: { some: eligibleOwnerWhere } },
+      ],
+    };
+
     // mgmtId 検索が 0 件で短絡する場合は DB を叩かず空結果にする（export route と同方針）。
     const properties = mgmtShortCircuitEmpty
       ? []
       : await prisma.property.findMany({
-          where,
+          where: whereWithEligibleOwners,
           select: {
             id: true,
             address: true,
@@ -151,6 +189,20 @@ export async function GET(request: NextRequest) {
           take: MAX_DM_EXPORT_ROWS + 1,
         });
 
+    // (3) 取得済みデータの owner 行数で再判定。超過時は切り捨てず、取込元逆引き・
+    //     CSV 生成・AuditLog より前で 400 にする（不完全な差込 CSV を渡さない / DoS 防止）。
+    const totalOwnerRows = properties.reduce(
+      (n, p) => n + p.propertyOwners.length,
+      0,
+    );
+    if (totalOwnerRows > MAX_DM_EXPORT_ROWS) {
+      throw new ApiError(
+        400,
+        "出力対象が上限（10,000件）を超えています。検索条件で絞り込んでください。",
+        "EXPORT_LIMIT_EXCEEDED",
+      );
+    }
+
     // 取込元（管理ID）を一括逆引き（一覧 API と共有・N+1 回避）。
     const importSourceMap = await loadImportSourceMap(
       prisma,
@@ -158,6 +210,8 @@ export async function GET(request: NextRequest) {
     );
 
     // 所有者 1 名 = 1 行に展開。非アーカイブ所有者が 0 件の物件は行を生まず skipped に数える。
+    // （fetch 対象は所有者あり物件に限定済みのため、本番でこの skip 分岐に入るのは
+    //   fetch 間際に所有者がアーカイブされた race のみ。防御として残す）
     const rows: Array<Record<string, string>> = [];
     let mailablePropertyCount = 0;
     let skippedCount = 0;
@@ -173,13 +227,20 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 最終 CSV 行数（所有者行）で上限判定。超過時は切り捨てず 400。AuditLog より前で throw する。
-    if (rows.length > MAX_DM_EXPORT_ROWS) {
-      throw new ApiError(
-        400,
-        "出力対象が上限（10,000件）を超えています。検索条件で絞り込んでください。",
-        "EXPORT_LIMIT_EXCEEDED",
-      );
+    // 上限判定は (1)〜(3) で実施済み（rows.length === totalOwnerRows）。
+    // ownerなし送付可物件は fetch 対象から外したため、skippedCount は COUNT で正確に数える。
+    // （従来は take 窓内のみの計上だったが、全 matching 範囲の件数になる。
+    //   loop 側の skip 加算は上記 race の防御として残し、二重計上は通常発生しない）
+    if (!mgmtShortCircuitEmpty) {
+      skippedCount += await prisma.property.count({
+        where: {
+          ...where,
+          AND: [
+            ...(where.AND ?? []),
+            { propertyOwners: { none: eligibleOwnerWhere } },
+          ],
+        },
+      });
     }
 
     // CSV formula injection 対策: 全セルを encodeCsv に渡す前に無害化する。

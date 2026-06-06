@@ -62,15 +62,16 @@ DM 出力は所有者個人情報を含むため、UI ボタン表示とサー�
   - `detail.count` = 送付可かつ owner≥1 の物件数（mailablePropertyCount）
   - `detail.resultCount` = CSV データ行数（= owner 行数）
   - `detail.skippedCount` = owner 0 件で除外した物件数
-- [ ] **上限の挙動（現行実装の制約・要注意）**: route は先に property を `MAX_DM_EXPORT_ROWS + 1`（10,001）件で
-      `take` し、その後 owner 行へ展開して `rows.length > 10,000` なら **400**（`EXPORT_LIMIT_EXCEEDED`）を返す。
-  - この **「property 取得上限 → owner 展開」の順序** のため、対象 property が 10,001 件を超える状況では、
-    取得対象外（take の外）の property に属する eligible owner が CSV に **含まれないまま 200 が返る可能性**がある。
-  - したがって **「10,000 超は必ず 400」とは保証されない**（条件次第で 200 + 不完全出力になり得る）。
-  - 運用対応: **検索条件を狭めて対象件数を十分小さくしてから出力**し、`resultCount` / 画面件数 / 抽出条件を照合する。
-    件数が想定より少ない・合わない場合は、上限 `take` による欠落を疑う。
-  - 大量出力や完全性の保証が必要な場合は、**route 側の上限判定（property の `take` と owner 展開の整合）修正を別 PR** で行う
-    （本 docs では route を変更しない）。
+- [ ] **上限の挙動**: 最終 **owner 行数**が `MAX_DM_EXPORT_ROWS`（10,000）を超える場合は、
+      CSV を切り捨てず **必ず 400**（`EXPORT_LIMIT_EXCEEDED`）を返す。
+  - route は次の 3 層で保証する（`fix/dm-export-owner-row-limit` で修正済み）:
+    1. fetch 前に owner 行数を COUNT し、超過なら PII を一切取得せず 400
+    2. 取得対象を「非アーカイブ所有者が 1 名以上の送付可物件」に限定し、
+       owner なし物件が取得窓（take）を消費して eligible owner 行が欠落することを防ぐ
+    3. COUNT と fetch の間にデータが変わった場合に備え、取得後の owner 行数でも再判定して 400
+  - したがって **200 で返った CSV に eligible owner 行の欠落はない**（部分 CSV は返らない）。
+  - `skippedCount`（owner 0 件の送付可物件数）は取得窓に依存せず、検索条件に一致する**全範囲**を COUNT で計上する。
+  - 上限 400 が出た場合の運用対応: **検索条件を狭めて対象件数を絞ってから再出力**する。
 
 確認手順（本番）:
 
@@ -160,5 +161,8 @@ DM 出力は所有者個人情報を含むため、UI ボタン表示とサー�
 | 権限 403（property/csv_export/csv_export_personal/owner/表示レベル） | dm-export route 10〜15 |
 | 監査 detail 非 PII | dm-export route 16 |
 | 上限 400 | dm-export route 18 |
+| 上限超過時に必ず 400（事前 COUNT / owner あり物件限定 / 取得後再判定・部分 CSV 根絶） | dm-export route「上限判定の保証」describe |
+| owner なし送付可物件の skippedCount 全範囲計上 | dm-export route「上限判定の保証」describe |
 
 > 「Phase1-①②③」= `properties-dm-export-route.test.ts` の「Phase 1 追加ガード」describe（PR #131）。
+> 「上限判定の保証」= 同ファイル末尾の describe（`fix/dm-export-owner-row-limit`）。
