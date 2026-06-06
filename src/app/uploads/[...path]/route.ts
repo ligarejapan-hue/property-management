@@ -5,6 +5,7 @@ import {
   authorizeUploadAccess,
   resolveRegistryServeMeta,
 } from "@/lib/uploads-authorization";
+import { buildUploadsEtag, ifNoneMatchMatches } from "@/lib/uploads-etag";
 import { writeAuditLog } from "@/lib/audit";
 
 /**
@@ -85,6 +86,18 @@ export async function GET(
     return new Response("Not Found", { status: 404 });
   }
 
+  // S1b-4: 謄本PDF(registry) のみ no-store / Content-Disposition / nosniff を付与し、
+  // server-side で preview / download を監査する。hard boundary（preview 権限が無ければ
+  // バイトを返さない）は authorizeUploadAccess 側で既に適用済。
+  // 非 registry（写真・一般添付・owner 系）は従来ヘッダ・挙動のまま。
+  // ※ 304（条件付き GET）の適用可否判定に必要なため storage read より前に解決する。
+  //   registry は no-store + 毎配信監査を維持するため 304 の対象外（常に全量配信）。
+  const registryMeta = await resolveRegistryServeMeta(key);
+
+  // 非 registry のみ: storage key は immutable（採番一意・UUID込み・上書きなし）
+  // のため key 由来の ETag が strong validator として成立する（uploads-etag.ts 参照）。
+  const etag = registryMeta ? null : buildUploadsEtag(key);
+
   let result;
   try {
     result = await getStorage().read(key);
@@ -96,20 +109,37 @@ export async function GET(
   }
 
   if (!result) {
+    // storage 実体が欠落している場合は、If-None-Match の一致有無（`*` 含む）に
+    // 関わらず従来通り 404 を返す（304 で欠落を隠さない。Codex Review 対応）。
     return new Response("Not Found", { status: 404 });
   }
 
-  // S1b-4: 謄本PDF(registry) のみ no-store / Content-Disposition / nosniff を付与し、
-  // server-side で preview / download を監査する。hard boundary（preview 権限が無ければ
-  // バイトを返さない）は authorizeUploadAccess 側で既に適用済。
-  // 非 registry（写真・一般添付・owner 系）は従来ヘッダ・挙動のまま（変更なし）。
-  const registryMeta = await resolveRegistryServeMeta(key);
+  // 304 は「認可（session / permissions / authorizeUploadAccess）通過」かつ
+  // 「storage 実体の存在確認」の両方の後にのみ返す（認可前 304・実体確認前 304 は
+  // ともに禁止。権限剥奪は 304 経路でも 401/403/404 として即時反映される）。
+  // Phase 1 は安全性優先で read 後に判定するため storage fetch 自体は走り、
+  // スキップされるのは本文転送のみ。fetch 回避（exists/metadata read）は
+  // adapter interface 拡張を伴うため次 PR 候補（docs 参照）。
+  if (etag && ifNoneMatchMatches(req.headers.get("if-none-match"), etag)) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        ETag: etag,
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  }
 
   const headers: Record<string, string> = {
     "Content-Type": result.contentType,
     "Content-Length": String(result.size),
     "Cache-Control": "private, max-age=3600",
   };
+
+  if (etag) {
+    // 非 registry の 200 には ETag を付け、次回アクセスを If-None-Match → 304 にする。
+    headers["ETag"] = etag;
+  }
 
   if (registryMeta) {
     // 権限剥奪を即時反映するため registry PDF はキャッシュさせない。
