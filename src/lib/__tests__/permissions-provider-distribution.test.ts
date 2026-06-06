@@ -19,6 +19,11 @@
  * 6) properties 一覧はページ独自の /api/me/permissions fetch を持たず、
  *    useScreenProtection() の permissions から CSV/DM 出力可否を導出する
  * 7) ボタン出し分け条件（csv_export && csv_export_personal、DM は + owner）は不変
+ * 8) Codex 対応（復旧導線）: provider は refetchPermissions（mount fetch と共通の
+ *    loadPermissions・stable callback・in-flight ガード付き）を配布し、
+ *    properties 一覧は「失敗確定（error && permissions===null && !loading）」時のみ
+ *    mount あたり最大 1 回それを呼ぶ（無限リトライなし・成功時の追加 fetch なし・
+ *    旧 page-level 常時 fetch は復活させない）
  *
  * 権限仕様・PII 表示条件・server 側権限ゲート・/api/me/permissions route は一切変更しない
  * （route 契約は me-permissions-route.test.ts が別途ロック済み）。
@@ -41,20 +46,23 @@ const guardSrc = read(
 // ── provider: 配布の形 ──────────────────────────────────────────────────────
 
 describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2）", () => {
-  it("/api/me/permissions の fetch は provider 内の 1 箇所のみ", () => {
+  it("/api/me/permissions の fetch call site は provider 内の 1 箇所のみ（mount と refetch で共有）", () => {
+    // 実行回数は成功経路=1回・失敗→consumer refetch 経路=2回だが、
+    // ソース上の call site は loadPermissions 内の 1 箇所に限定する。
     const matches = providerSrc.match(/fetch\(\s*["']\/api\/me\/permissions["']/g) ?? [];
     expect(matches.length).toBe(1);
   });
 
-  it("context は permissions / capabilities / permissionsLoading / permissionsError を公開する（キー名固定）", () => {
+  it("context は permissions / capabilities / permissionsLoading / permissionsError / refetchPermissions を公開する（キー名固定）", () => {
     // interface 定義
     expect(providerSrc).toMatch(/permissions:\s*PermissionEntry\[\]\s*\|\s*null/);
     expect(providerSrc).toMatch(/capabilities:\s*MeCapabilities\s*\|\s*null/);
     expect(providerSrc).toMatch(/permissionsLoading:\s*boolean/);
     expect(providerSrc).toMatch(/permissionsError:\s*boolean/);
-    // Provider value に 6 キーすべてが渡る
+    expect(providerSrc).toMatch(/refetchPermissions:\s*\(\) => void/);
+    // Provider value に 7 キーすべてが渡る
     expect(providerSrc).toMatch(
-      /value=\{\{\s*bypass,\s*watermarkText,\s*permissions,\s*capabilities,\s*permissionsLoading,\s*permissionsError,?\s*\}\}/,
+      /value=\{\{\s*bypass,\s*watermarkText,\s*permissions,\s*capabilities,\s*permissionsLoading,\s*permissionsError,\s*refetchPermissions:\s*loadPermissions,?\s*\}\}/,
     );
   });
 
@@ -73,23 +81,31 @@ describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2�
     );
   });
 
-  it("fail-safe: catch では permissions を配布せず（null のまま）、bypass も変更しない", () => {
-    const catchBlock = providerSrc.match(/\.catch\(\(\) => \{[\s\S]*?\}\);/)?.[0] ?? "";
+  it("fail-safe: catch では permissions/capabilities を null に保ち、bypass を変更しない", () => {
+    const catchBlock = providerSrc.match(/\.catch\(\(\) => \{[\s\S]*?\}\)/)?.[0] ?? "";
     expect(catchBlock).not.toBe("");
+    expect(catchBlock).toMatch(/setPermissions\(null\)/);
+    expect(catchBlock).toMatch(/setCapabilities\(null\)/);
     expect(catchBlock).toMatch(/setPermissionsError\(true\)/);
     expect(catchBlock).toMatch(/setPermissionsLoading\(false\)/);
     expect(catchBlock).not.toMatch(/setPermissions\(perms\)/);
     expect(catchBlock).not.toMatch(/setBypass/);
-    expect(catchBlock).not.toMatch(/setCapabilities/);
   });
 
-  it("fail-safe: 非 2xx（json=null）でも permissions を配布しない", () => {
-    // res.ok でない場合 null に倒す既存形を維持し、!json 分岐では error 通知のみ
+  it("fail-safe: 非 2xx（json=null）でも permissions を配布しない（null に保つ）", () => {
+    // res.ok でない場合 null に倒す既存形を維持し、!json 分岐では null 維持+error 通知のみ
     expect(providerSrc).toMatch(/res\.ok \? res\.json\(\) : null/);
     const nullBranch = providerSrc.match(/if \(!json\) \{[\s\S]*?\}/)?.[0] ?? "";
+    expect(nullBranch).toMatch(/setPermissions\(null\)/);
+    expect(nullBranch).toMatch(/setCapabilities\(null\)/);
     expect(nullBranch).toMatch(/setPermissionsError\(true\)/);
     expect(nullBranch).not.toMatch(/setPermissions\(perms\)/);
     expect(nullBranch).not.toMatch(/setBypass/);
+  });
+
+  it("成功時は permissions/capabilities を配布し、permissionsError を false に戻す（復旧）", () => {
+    expect(providerSrc).toMatch(/setPermissions\(perms\)/);
+    expect(providerSrc).toMatch(/setPermissionsError\(false\)/);
   });
 
   it("配布用 state の初期値は fail-safe（permissions=null / loading=true / error=false / bypass=false）", () => {
@@ -116,6 +132,43 @@ describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2�
   });
 });
 
+// ── provider: refetch 復旧導線（Codex 対応）────────────────────────────────
+
+describe("ScreenProtectionProvider — refetchPermissions 復旧導線（F12-2 Codex 対応）", () => {
+  it("mount 時 fetch と refetch は共通の loadPermissions（stable callback・deps=[]）", () => {
+    expect(providerSrc).toMatch(
+      /const loadPermissions = useCallback\(\(\) => \{[\s\S]*?\}, \[\]\);/,
+    );
+    // mount effect から共通関数を呼ぶ
+    expect(providerSrc).toMatch(/loadPermissions\(\);/);
+    // context には同一関数を refetchPermissions として配布
+    expect(providerSrc).toMatch(/refetchPermissions:\s*loadPermissions/);
+  });
+
+  it("in-flight ガードで多重実行を防ぐ（StrictMode 二重 effect・連続呼び出しでも fetch は同時 1 本）", () => {
+    expect(providerSrc).toMatch(/if \(inFlightRef\.current\) return;/);
+    expect(providerSrc).toMatch(/inFlightRef\.current = true;/);
+    expect(providerSrc).toMatch(
+      /\.finally\(\(\) => \{\s*inFlightRef\.current = false;\s*\}\);/,
+    );
+  });
+
+  it("refetch 中は permissionsLoading=true（consumer 側の再要求条件も遮断される）", () => {
+    expect(providerSrc).toMatch(
+      /inFlightRef\.current = true;\s*\n\s*setPermissionsLoading\(true\);/,
+    );
+  });
+
+  it("default context の refetchPermissions は no-op（provider 外 fail-safe）", () => {
+    expect(providerSrc).toMatch(/refetchPermissions:\s*\(\) => \{\},/);
+  });
+
+  it("unmount 後は setState しない（mountedRef ガード）", () => {
+    expect(providerSrc).toMatch(/if \(!mountedRef\.current\) return;/);
+    expect(providerSrc).toMatch(/mountedRef\.current = false;/);
+  });
+});
+
 // ── properties 一覧: 重複 fetch 撤去と consume ──────────────────────────────
 
 describe("properties 一覧 — provider 配布値の consume（F12-2）", () => {
@@ -127,9 +180,27 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
 
   it("useScreenProtection() の permissions から CSV/DM 出力可否を導出する", () => {
     expect(pageSrc).toMatch(
-      /const \{ permissions: mePermissions \} = useScreenProtection\(\)/,
+      /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*permissionsError,\s*refetchPermissions,\s*\} = useScreenProtection\(\)/,
     );
     expect(pageSrc).toMatch(/const \{ canExportCsv, canExportDm \} = useMemo\(/);
+  });
+
+  it("復旧導線: 失敗確定時のみ refetchPermissions を mount あたり最大 1 回要求する（Codex 対応）", () => {
+    // 3 条件（失敗確定・未配布・取得中でない）が揃ったときのみ
+    expect(pageSrc).toMatch(
+      /permissionsError && mePermissions === null && !permissionsLoading/,
+    );
+    // ref ガード（失敗が続く場合の無限リトライ防止）
+    expect(pageSrc).toMatch(
+      /if \(permissionsRefetchRequestedRef\.current\) return;/,
+    );
+    expect(pageSrc).toMatch(
+      /permissionsRefetchRequestedRef\.current = true;\s*\n\s*refetchPermissions\(\);/,
+    );
+  });
+
+  it("復旧導線でもページは /api/me/permissions を直接 fetch しない（provider 経由のみ・旧 page-level fetch 非復活）", () => {
+    expect(pageSrc).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
   });
 
   it("出し分け条件は不変: CSV は csv_export && csv_export_personal", () => {

@@ -2,8 +2,10 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -60,6 +62,13 @@ interface ScreenProtectionState {
   permissionsLoading: boolean;
   /** F12-2: 取得失敗（ネットワークエラー・非 2xx）フラグ。 */
   permissionsError: boolean;
+  /**
+   * F12-2 Codex 対応: 取得失敗時の復旧導線。初回 mount 時の fetch と同じ処理を
+   * 再実行する（in-flight 中は no-op = 多重実行防止）。consumer は
+   * 「permissionsError && permissions === null && !permissionsLoading」の
+   * 失敗確定時のみ呼ぶこと（成功済みの再取得用途ではない）。
+   */
+  refetchPermissions: () => void;
 }
 
 const ScreenProtectionContext = createContext<ScreenProtectionState>({
@@ -70,6 +79,8 @@ const ScreenProtectionContext = createContext<ScreenProtectionState>({
   capabilities: null,
   permissionsLoading: true,
   permissionsError: false,
+  // provider 外では no-op（何も取得しない＝広く許可しない側のまま）。
+  refetchPermissions: () => {},
 });
 
 export function useScreenProtection(): ScreenProtectionState {
@@ -96,15 +107,29 @@ export default function ScreenProtectionProvider({
     setMountedAt(new Date());
   }, []);
 
-  useEffect(() => {
-    let active = true;
+  // F12-2 Codex 対応: unmount 後の setState 防止（共有 load 関数は effect 外のため ref 管理）。
+  const mountedRef = useRef(true);
+  // F12-2 Codex 対応: 多重実行防止。StrictMode の二重 effect・consumer からの
+  // 連続呼び出しでも fetch は同時に 1 本しか飛ばない。
+  const inFlightRef = useRef(false);
+
+  // F12-2 Codex 対応: 初回 mount と refetch で共通の取得処理。
+  // transient な失敗（一時的な 5xx・ネットワーク断）で layout 生存中ずっと
+  // permissions=null が残り、consumer のボタンが full reload まで復旧しない問題への
+  // 復旧導線として、context の refetchPermissions からも再実行できるようにする。
+  const loadPermissions = useCallback(() => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setPermissionsLoading(true);
     fetch("/api/me/permissions")
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
-        if (!active) return;
+        if (!mountedRef.current) return;
         if (!json) {
           // 非 2xx は従来どおり bypass=false（透かし表示側）のまま。
           // F12-2: 配布も行わない（permissions=null = 権限なし扱い）。
+          setPermissions(null);
+          setCapabilities(null);
           setPermissionsLoading(false);
           setPermissionsError(true);
           return;
@@ -118,19 +143,30 @@ export default function ScreenProtectionProvider({
           corporateLookup: json.capabilities?.corporateLookup === true,
           registryAutoFetch: json.capabilities?.registryAutoFetch === true,
         });
+        setPermissionsError(false);
         setPermissionsLoading(false);
       })
       .catch(() => {
         // 取得失敗時は fail-safe（透かし表示）のまま保持する。
-        // F12-2: permissions=null のまま（権限なし扱い）。error のみ通知する。
-        if (!active) return;
+        // F12-2: permissions=null（権限なし扱い）に保ち、error のみ通知する。
+        if (!mountedRef.current) return;
+        setPermissions(null);
+        setCapabilities(null);
         setPermissionsLoading(false);
         setPermissionsError(true);
+      })
+      .finally(() => {
+        inFlightRef.current = false;
       });
-    return () => {
-      active = false;
-    };
   }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    loadPermissions();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [loadPermissions]);
 
   // 認証確定 + mount 後、かつ識別情報がある場合のみ透かし文言を生成（汎用透かしを出さない）。
   const watermarkText =
@@ -154,6 +190,7 @@ export default function ScreenProtectionProvider({
         capabilities,
         permissionsLoading,
         permissionsError,
+        refetchPermissions: loadPermissions,
       }}
     >
       {children}

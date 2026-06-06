@@ -139,7 +139,27 @@ function PropertiesPageInner() {
   // が mount 時に 1 回取得して context 配布するため、ページ独自の重複 fetch は撤去し
   // provider 配布値から導出する。未取得・取得失敗時は permissions=null → 全て false の
   // まま＝ボタン非表示（従来の「取得失敗時は false」と同じ fail-safe・緩めない）。
-  const { permissions: mePermissions } = useScreenProtection();
+  const {
+    permissions: mePermissions,
+    permissionsLoading,
+    permissionsError,
+    refetchPermissions,
+  } = useScreenProtection();
+
+  // F12-2 Codex 対応: provider の初回取得が transient に失敗していた場合の復旧導線。
+  // 「失敗確定（permissionsError）・未配布（permissions===null）・取得中でない」の
+  // 3 条件が揃ったときのみ、このページの mount あたり最大 1 回だけ再取得を要求する
+  // （ref ガードで失敗が続く場合の無限リトライを防ぐ）。成功済み・取得中は何もしない
+  // ＝通常成功時の追加 fetch はゼロ。ページは /api/me/permissions を直接 fetch しない
+  // （旧 page-level 常時 fetch は復活させず、あくまで provider 経由の再取得のみ）。
+  const permissionsRefetchRequestedRef = useRef(false);
+  useEffect(() => {
+    if (permissionsRefetchRequestedRef.current) return;
+    if (permissionsError && mePermissions === null && !permissionsLoading) {
+      permissionsRefetchRequestedRef.current = true;
+      refetchPermissions();
+    }
+  }, [permissionsError, mePermissions, permissionsLoading, refetchPermissions]);
 
   // CSV 出力可否。export API が csv_export:read と csv_export_personal:read の
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
