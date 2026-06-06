@@ -120,6 +120,16 @@ client <input type="file" accept="image/*" capture="environment">
 
 ただし **下記 6. の方針がすべて承認されるまで実装しない**。
 
+進捗メモ（POC・route 未接続）:
+
+- B0 の前段として、**route 未接続の pure utility** `src/lib/field-survey/exif-strip.ts`
+  （JPEG = GPS IFD zero-fill・Orientation 保持 / PNG = eXIf chunk drop /
+  WebP = EXIF chunk drop + RIFF size 再計算 / HEIC・HEIF = unsupported / 構造不正 = malformed）と
+  合成バイト fixture テスト `src/lib/__tests__/field-survey-exif-strip.test.ts` を追加済み。
+- **どの route / storage からも import されていないため、本番のアップロード挙動と
+  本 docs §2 の EXIF gap は未解消のまま**。route 接続（= gap 解消）は §6 の承認後に別 PR で行う。
+- MakerNote / XMP / PNG tEXt 系は POC の除去対象外（utility 先頭コメントに残余として明記）。
+
 ---
 
 ## 6. 実装前の承認事項（未決・実装ブロッカー）
