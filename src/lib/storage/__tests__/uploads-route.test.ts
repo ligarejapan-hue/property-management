@@ -26,6 +26,7 @@ import {
   authorizeUploadAccess,
   resolveRegistryServeMeta,
 } from "@/lib/uploads-authorization";
+import { buildUploadsEtag } from "@/lib/uploads-etag";
 import { writeAuditLog } from "@/lib/audit";
 
 vi.mock("@/lib/api-helpers", () => {
@@ -487,5 +488,197 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
     // 解決され、root 外へ出ない（存在しないため 404）ことを境界ロックする。
     const res = await callGet(["%2e%2e", "etc", "passwd"]);
     expect(res.status).toBe(404);
+  });
+});
+
+// ============================================================
+// ETag / If-None-Match → 304（F11 Phase 1・非 registry 条件付き GET）
+//  - ETag は immutable な storage key 由来（uploads-etag.ts）。adapter 変更なし。
+//  - 304 は認可（session / permissions / authorizeUploadAccess）通過後にのみ返す。
+//    認可前 304 は禁止（401/403/404 が常に優先される）。
+//  - registry PDF は S1b-4 の no-store + 毎配信監査を維持するため 304 対象外。
+//  - 304 時は storage backend から実体を取得しない（本文なし）。
+//  - Range は引き続き非対応（既存の現状固定テストを維持・併送時も挙動不変）。
+// ============================================================
+describe("ETag/304: 非 registry の条件付き GET", () => {
+  const REGISTRY_META = {
+    isRegistry: true as const,
+    attachmentId: "att-1",
+    propertyId: "prop-1",
+  };
+
+  beforeEach(() => {
+    process.env.STORAGE_BACKEND = "local";
+    process.env.LOCAL_UPLOAD_ROOT = tmpRoot;
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "u1",
+      email: "a@a",
+      name: "A",
+      role: "admin",
+    });
+    vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
+    vi.mocked(authorizeUploadAccess).mockClear();
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValue(null);
+    vi.mocked(writeAuditLog).mockClear();
+  });
+
+  async function writePhoto(rel: string, bytes: Buffer) {
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, bytes);
+  }
+
+  it("非 registry の 200 に key 由来の決定的 ETag が付く", async () => {
+    const rel = "properties/p1/photos/etag.png";
+    await writePhoto(rel, Buffer.from([1, 2, 3]));
+
+    const res1 = await callGet(["properties", "p1", "photos", "etag.png"]);
+    expect(res1.status).toBe(200);
+    const etag = res1.headers.get("ETag");
+    expect(etag).toBe(buildUploadsEtag(rel));
+    expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+    // 同一 key の再取得でも同一 ETag（決定的）
+    const res2 = await callGet(["properties", "p1", "photos", "etag.png"]);
+    expect(res2.headers.get("ETag")).toBe(etag);
+    // Cache-Control は従来のまま（public 化しない）
+    expect(res1.headers.get("Cache-Control")).toBe("private, max-age=3600");
+  });
+
+  it("If-None-Match 一致 → 認可通過後に 304・本文なし・ETag/Cache-Control 付き", async () => {
+    const rel = "properties/p1/photos/cached.png";
+    const etag = buildUploadsEtag(rel);
+    // 実体ファイルを意図的に作らない: 304 が返る = storage read に到達していない証明
+    const res = await callGet(["properties", "p1", "photos", "cached.png"], {
+      headers: { "If-None-Match": etag },
+    });
+    expect(res.status).toBe(304);
+    expect(await res.text()).toBe(""); // 本文なし
+    expect(res.headers.get("ETag")).toBe(etag);
+    expect(res.headers.get("Cache-Control")).toBe("private, max-age=3600");
+    // 304 でも認可は必ず通っている（認可前 304 禁止）
+    expect(authorizeUploadAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("304 時は storage backend から実体を fetch しない（S3: GetObject 0 回）", async () => {
+    process.env.STORAGE_BACKEND = "s3";
+    process.env.STORAGE_S3_BUCKET = "test-bucket";
+    process.env.STORAGE_S3_REGION = "auto";
+    process.env.STORAGE_S3_ACCESS_KEY_ID = "AKIA_TEST";
+    process.env.STORAGE_S3_SECRET_ACCESS_KEY = "SECRET_TEST";
+    __resetStorageForTest();
+
+    const rel = "properties/p1/photos/s3cached.jpg";
+    const res = await callGet(["properties", "p1", "photos", "s3cached.jpg"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(304);
+    expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
+  });
+
+  it("If-None-Match 不一致 → 従来通り 200 全量 + ETag", async () => {
+    const rel = "properties/p1/photos/miss.png";
+    const bytes = Buffer.from([9, 8, 7, 6]);
+    await writePhoto(rel, bytes);
+
+    const res = await callGet(["properties", "p1", "photos", "miss.png"], {
+      headers: { "If-None-Match": '"deadbeefdeadbeefdeadbeefdeadbeef"' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ETag")).toBe(buildUploadsEtag(rel));
+    expect(res.headers.get("Content-Length")).toBe(String(bytes.length));
+    const arr = new Uint8Array(await res.arrayBuffer());
+    expect(Buffer.from(arr).equals(bytes)).toBe(true);
+  });
+
+  it("W/ 付き・カンマ区切りリストの If-None-Match でも一致すれば 304（weak comparison）", async () => {
+    const rel = "properties/p1/photos/weak.png";
+    const etag = buildUploadsEtag(rel);
+    const res = await callGet(["properties", "p1", "photos", "weak.png"], {
+      headers: { "If-None-Match": `"deadbeef", W/${etag}` },
+    });
+    expect(res.status).toBe(304);
+  });
+
+  it("registry PDF は 304 対象外: If-None-Match 一致相当でも 200 全量 + no-store + 監査（ETag なし）", async () => {
+    const rel = "properties/p1/registry/200.pdf";
+    await writePhoto(rel, Buffer.from("%PDF-1.4 regi"));
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+
+    // 仮に client が key 由来 ETag を偽装して送っても registry は常に全量配信+監査
+    const res = await callGet(["properties", "p1", "registry", "200.pdf"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("ETag")).toBeNull(); // registry に ETag を発行しない
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Disposition")).toBe("inline");
+    expect(await res.text()).toContain("%PDF");
+    // 304 で監査がスキップされない（毎配信監査の維持）
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(writeAuditLog).mock.calls[0][0].action).toBe(
+      "registry_pdf_preview",
+    );
+  });
+
+  it("registry download (?download=1) + If-None-Match でも no-store / attachment 維持", async () => {
+    const rel = "properties/p1/registry/201.pdf";
+    await writePhoto(rel, Buffer.from("%PDF-1.4 dl"));
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+
+    const res = await callGet(["properties", "p1", "registry", "201.pdf"], {
+      query: "?download=1",
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Content-Disposition")).toBe(
+      'attachment; filename="registry.pdf"',
+    );
+    expect(vi.mocked(writeAuditLog).mock.calls[0][0].action).toBe(
+      "registry_pdf_download",
+    );
+  });
+
+  it("未認証は If-None-Match があっても 401（304 にしない）", async () => {
+    vi.mocked(getApiSession).mockRejectedValueOnce(
+      new ApiError(401, "認証が必要です", "UNAUTHORIZED"),
+    );
+    const rel = "properties/p1/photos/auth.png";
+    const res = await callGet(["properties", "p1", "photos", "auth.png"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("authorize forbidden は If-None-Match があっても 403（304 にしない）", async () => {
+    vi.mocked(authorizeUploadAccess).mockResolvedValueOnce("forbidden");
+    const rel = "properties/p1/photos/forbidden.png";
+    const res = await callGet(["properties", "p1", "photos", "forbidden.png"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("authorize not_found は If-None-Match があっても 404（304 にしない）", async () => {
+    vi.mocked(authorizeUploadAccess).mockResolvedValueOnce("not_found");
+    const rel = "properties/p1/photos/gone.png";
+    const res = await callGet(["properties", "p1", "photos", "gone.png"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("Range + If-None-Match 一致の併送 → 304（Range は引き続き無視・206 にしない）", async () => {
+    const rel = "properties/p1/photos/range304.png";
+    const res = await callGet(["properties", "p1", "photos", "range304.png"], {
+      headers: {
+        Range: "bytes=0-2",
+        "If-None-Match": buildUploadsEtag(rel),
+      },
+    });
+    expect(res.status).toBe(304);
+    expect(res.headers.get("Accept-Ranges")).toBeNull();
+    expect(res.headers.get("Content-Range")).toBeNull();
   });
 });
