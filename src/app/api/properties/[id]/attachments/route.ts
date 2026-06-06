@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -167,7 +168,11 @@ export async function POST(
       const buffer = Buffer.from(await file.arrayBuffer());
       const ext = fileName.split(".").pop() ?? "bin";
       const subdir = attachmentType === "registry" ? "registry" : "attachments";
-      const key = `properties/${propertyId}/${subdir}/${Date.now()}.${ext}`;
+      // key に randomUUID を含め、同一物件・同一ミリ秒の upload でも衝突しない
+      // （general / registry とも。key 非再利用は /uploads の key 由来 ETag/304 の
+      //   前提であり、registry でも同一ms衝突による storage 上書きを防ぐ。
+      //   registry の配信方針(no-store/generic filename/監査)はここでは不変）。
+      const key = `properties/${propertyId}/${subdir}/${Date.now()}-${randomUUID()}.${ext}`;
 
       const storage = getStorage();
       const result = await storage.upload(buffer, { key, mimeType, fileName });

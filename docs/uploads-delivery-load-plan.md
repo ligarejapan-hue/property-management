@@ -84,6 +84,12 @@ LIKE `contains` 逆引きは fileUrl への substring scan（index 保証なし�
   **registry PDF は no-store + 毎配信監査を維持するため 304 対象外**（ETag 不発行・
   If-None-Match 偽装でも常に全量+監査）。Cache-Control 値は全カテゴリ不変
   （`private, max-age=3600` / registry `no-store`・public 化なし）。
+- **前提（Codex Review 対応で強化済）**: key 由来 ETag は「upload key が
+  immutable / unique」であることが前提。photos / attachments の key は従来
+  `Date.now()` のみで同一 entity・同一ミリ秒の連続 upload で衝突（後勝ち上書き）
+  し得たため、全 upload 経路の key に `randomUUID()` を追加し
+  `{prefix}/{Date.now()}-{uuid}.{ext}` 形式へ変更（新規生成 key のみ・
+  既存保存済み key/fileUrl の解釈は不変・読み取り互換維持）。
 - Phase 2 候補（未実施・要承認）: PII キャッシュ方針の見直し（owner 添付等の
   no-store 化）・`immutable` ディレクティブ付与・Last-Modified 併用。
   StorageReadResult への etag/mtime 追加（3 adapter 拡張）は Phase 1 では不要だった。

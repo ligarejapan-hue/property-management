@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -122,7 +123,9 @@ export async function POST(
 
       const buffer = Buffer.from(await file.arrayBuffer());
       const ext = fileName.split(".").pop() ?? "jpg";
-      const key = `properties/${id}/photos/${Date.now()}.${ext}`;
+      // key に randomUUID を含め、同一物件・同一ミリ秒の upload でも衝突しない
+      // （key 非再利用は /uploads の key 由来 ETag/304 の前提。uploads-etag.ts 参照）。
+      const key = `properties/${id}/photos/${Date.now()}-${randomUUID()}.${ext}`;
 
       const storage = getStorage();
       const result = await storage.upload(buffer, { key, mimeType, fileName });

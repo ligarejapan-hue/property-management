@@ -3,9 +3,10 @@
  *
  * ETag は storage key のみから決定的に生成する。これが安全に成立する根拠
  * （核は「key は再利用・上書きされない」）:
- *  - storage key は採番時に一意（photos/attachments はタイムスタンプ、
- *    field-survey pin photos は `randomUUID()`）で、アプリは既存 key への
- *    上書き upload を行わず、key を別内容へ再利用することもない。
+ *  - storage key は採番時に一意で、アプリは既存 key への上書き upload を行わず、
+ *    key を別内容へ再利用することもない。全 upload 経路（property/building photos・
+ *    property attachments・field-survey pin photos）の key は `randomUUID()` を
+ *    含み、同一 entity・同一ミリ秒の連続 upload でも衝突しない。
  *  - 削除の扱いはカテゴリで異なる（attachment は DB soft-delete・バイト残置／
  *    photo 系は DB 行削除 + storage.delete の hard delete）が、どちらも
  *    「同一 key が別のバイト列を指すようになる」ことはない。削除後のアクセスは
