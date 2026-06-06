@@ -22,8 +22,9 @@
  * 適用範囲（route 側で制御）:
  *  - 非 registry のみ。registry PDF（登記簿謄本）は S1b-4 の
  *    `Cache-Control: no-store` + 毎配信監査を維持するため対象外。
- *  - 304 判定は session / permissions / authorizeUploadAccess の通過後にのみ
- *    行う（認可前 304 は禁止）。
+ *  - 304 判定は「session / permissions / authorizeUploadAccess の通過」かつ
+ *    「storage 実体の存在確認（read 成功）」の後にのみ行う（認可前 304・
+ *    実体確認前 304 はともに禁止。storage 欠落は 304 で隠さず 404 のまま）。
  */
 import { createHash } from "crypto";
 

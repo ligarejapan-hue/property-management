@@ -497,7 +497,9 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
 //  - 304 は認可（session / permissions / authorizeUploadAccess）通過後にのみ返す。
 //    認可前 304 は禁止（401/403/404 が常に優先される）。
 //  - registry PDF は S1b-4 の no-store + 毎配信監査を維持するため 304 対象外。
-//  - 304 時は storage backend から実体を取得しない（本文なし）。
+//  - 304 は storage 実体の存在確認（read 成功）後にのみ返す。実体欠落は
+//    If-None-Match 一致（`*` 含む）でも 404 のまま（304 で欠落を隠さない）。
+//    Phase 1 は安全性優先で read 後判定のため fetch は走り、本文転送のみスキップ。
 //  - Range は引き続き非対応（既存の現状固定テストを維持・併送時も挙動不変）。
 // ============================================================
 describe("ETag/304: 非 registry の条件付き GET", () => {
@@ -544,22 +546,48 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
     expect(res1.headers.get("Cache-Control")).toBe("private, max-age=3600");
   });
 
-  it("If-None-Match 一致 → 認可通過後に 304・本文なし・ETag/Cache-Control 付き", async () => {
+  it("If-None-Match 一致 → 認可+実体確認の後に 304・本文なし・ETag/Cache-Control 付き", async () => {
     const rel = "properties/p1/photos/cached.png";
+    await writePhoto(rel, Buffer.from([1, 2, 3]));
     const etag = buildUploadsEtag(rel);
-    // 実体ファイルを意図的に作らない: 304 が返る = storage read に到達していない証明
     const res = await callGet(["properties", "p1", "photos", "cached.png"], {
       headers: { "If-None-Match": etag },
     });
     expect(res.status).toBe(304);
-    expect(await res.text()).toBe(""); // 本文なし
+    expect(await res.text()).toBe(""); // 本文なし（転送スキップ）
     expect(res.headers.get("ETag")).toBe(etag);
     expect(res.headers.get("Cache-Control")).toBe("private, max-age=3600");
     // 304 でも認可は必ず通っている（認可前 304 禁止）
     expect(authorizeUploadAccess).toHaveBeenCalledTimes(1);
   });
 
-  it("304 時は storage backend から実体を fetch しない（S3: GetObject 0 回）", async () => {
+  it("storage 実体が欠落していれば If-None-Match 一致でも 404（304 で欠落を隠さない）", async () => {
+    const rel = "properties/p1/photos/missing.png";
+    // 実体ファイルを意図的に作らない
+    const res = await callGet(["properties", "p1", "photos", "missing.png"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("If-None-Match: * は実体ありなら 304・欠落なら 404", async () => {
+    // 欠落 → 404（* でも 304 にしない）
+    const resMissing = await callGet(
+      ["properties", "p1", "photos", "star-missing.png"],
+      { headers: { "If-None-Match": "*" } },
+    );
+    expect(resMissing.status).toBe(404);
+
+    // 実体あり → 304
+    await writePhoto("properties/p1/photos/star.png", Buffer.from([1]));
+    const resHit = await callGet(["properties", "p1", "photos", "star.png"], {
+      headers: { "If-None-Match": "*" },
+    });
+    expect(resHit.status).toBe(304);
+  });
+
+  it("304 時も storage 実体の存在確認は行う（S3: GetObject 1 回・本文は返さない）", async () => {
+    // Phase 1 は安全性優先で read 後に 304 判定（fetch 回避は exists/metadata 導入後の次PR候補）。
     process.env.STORAGE_BACKEND = "s3";
     process.env.STORAGE_S3_BUCKET = "test-bucket";
     process.env.STORAGE_S3_REGION = "auto";
@@ -567,12 +595,39 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = "SECRET_TEST";
     __resetStorageForTest();
 
+    const bytes = new Uint8Array([10, 20, 30]);
+    s3Mock.on(GetObjectCommand).resolves({
+      Body: makeStreamLike(bytes) as never,
+      ContentType: "image/jpeg",
+      ContentLength: bytes.length,
+    });
+
     const rel = "properties/p1/photos/s3cached.jpg";
     const res = await callGet(["properties", "p1", "photos", "s3cached.jpg"], {
       headers: { "If-None-Match": buildUploadsEtag(rel) },
     });
     expect(res.status).toBe(304);
-    expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
+    expect(await res.text()).toBe(""); // 実体確認はするが本文は転送しない
+    expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(1);
+  });
+
+  it("S3 で実体欠落（NoSuchKey）なら If-None-Match 一致でも 404", async () => {
+    process.env.STORAGE_BACKEND = "s3";
+    process.env.STORAGE_S3_BUCKET = "test-bucket";
+    process.env.STORAGE_S3_REGION = "auto";
+    process.env.STORAGE_S3_ACCESS_KEY_ID = "AKIA_TEST";
+    process.env.STORAGE_S3_SECRET_ACCESS_KEY = "SECRET_TEST";
+    __resetStorageForTest();
+
+    s3Mock.on(GetObjectCommand).rejects(
+      new NoSuchKey({ $metadata: { httpStatusCode: 404 }, message: "nope" }),
+    );
+
+    const rel = "properties/p1/photos/s3gone.jpg";
+    const res = await callGet(["properties", "p1", "photos", "s3gone.jpg"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(404);
   });
 
   it("If-None-Match 不一致 → 従来通り 200 全量 + ETag", async () => {
@@ -592,6 +647,7 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
 
   it("W/ 付き・カンマ区切りリストの If-None-Match でも一致すれば 304（weak comparison）", async () => {
     const rel = "properties/p1/photos/weak.png";
+    await writePhoto(rel, Buffer.from([1]));
     const etag = buildUploadsEtag(rel);
     const res = await callGet(["properties", "p1", "photos", "weak.png"], {
       headers: { "If-None-Match": `"deadbeef", W/${etag}` },
@@ -671,6 +727,7 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
 
   it("Range + If-None-Match 一致の併送 → 304（Range は引き続き無視・206 にしない）", async () => {
     const rel = "properties/p1/photos/range304.png";
+    await writePhoto(rel, Buffer.from([1, 2, 3, 4]));
     const res = await callGet(["properties", "p1", "photos", "range304.png"], {
       headers: {
         Range: "bytes=0-2",

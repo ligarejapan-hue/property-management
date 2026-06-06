@@ -76,11 +76,14 @@ LIKE `contains` 逆引きは fileUrl への substring scan（index 保証なし�
 
 ### B. Cache-Control 整理 + 条件付き GET（304）— Phase 1 ✅ 実施済
 - key が immutable なので **ETag(=key 由来) + If-None-Match → 304** が安全に成立。
-  304 時は authz は通す（権限剥奪を反映）が **storage fetch と本文転送をスキップ**
-  → 本番（server backend）の「配信ごとリモート全量 fetch」を再訪問時にゼロ化。
 - **Phase 1 実施済（`perf/uploads-etag-304-phase1`）**: ETag は storage key の
   sha256 由来（`src/lib/uploads-etag.ts`・一方向ハッシュ・adapter 変更ゼロ）。
-  304 は「認可通過後・storage fetch 前」でのみ返す（認可前 304 禁止）。
+  304 は「**認可通過 + storage 実体確認（read 成功）の後**」でのみ返す
+  （認可前 304・実体確認前 304 はともに禁止）。**storage 欠落は If-None-Match
+  一致（`*` 含む）でも 404 のまま＝304 で欠落を隠さない**（Codex Review 対応・
+  安全性優先）。このため Phase 1 の 304 は**本文転送のみスキップ**し、
+  storage fetch 自体は走る。fetch まで回避する完全最適化は adapter への
+  exists/metadata read 導入後の次 PR 候補（interface 拡張を伴うため分離）。
   **registry PDF は no-store + 毎配信監査を維持するため 304 対象外**（ETag 不発行・
   If-None-Match 偽装でも常に全量+監査）。Cache-Control 値は全カテゴリ不変
   （`private, max-age=3600` / registry `no-store`・public 化なし）。
@@ -90,8 +93,10 @@ LIKE `contains` 逆引きは fileUrl への substring scan（index 保証なし�
   し得たため、全 upload 経路の key に `randomUUID()` を追加し
   `{prefix}/{Date.now()}-{uuid}.{ext}` 形式へ変更（新規生成 key のみ・
   既存保存済み key/fileUrl の解釈は不変・読み取り互換維持）。
-- Phase 2 候補（未実施・要承認）: PII キャッシュ方針の見直し（owner 添付等の
-  no-store 化）・`immutable` ディレクティブ付与・Last-Modified 併用。
+- Phase 2 候補（未実施・要承認）: **304 時の storage fetch 回避**（adapter に
+  exists/metadata read を追加し実体確認を本文取得なしで行う・interface 拡張）・
+  PII キャッシュ方針の見直し（owner 添付等の no-store 化）・`immutable`
+  ディレクティブ付与・Last-Modified 併用。
   StorageReadResult への etag/mtime 追加（3 adapter 拡張）は Phase 1 では不要だった。
 
 ### C. サムネイル生成/軽量化 — 要 package 承認（sharp 等）
@@ -130,7 +135,7 @@ LIKE `contains` 逆引きは fileUrl への substring scan（index 保証なし�
 
 1. **（済）F: test-only guard** — PR #140
 2. **（済）B Phase 1: ETag/304** — `perf/uploads-etag-304-phase1`（key 由来 ETag・
-   認可後 304・registry 対象外・adapter 変更ゼロ）
+   認可+実体確認後 304・registry 対象外・adapter 変更ゼロ・本文転送のみスキップ）
 3. **C 前段: lazy + BuildingPhotoTab タブゲート** — 小 production PR（要承認）
 4. B Phase 2（PII キャッシュ方針・要承認）/ C 本体（sharp 承認）→ 必要なら D/E
 - 計測（本番 nginx アクセスログ/応答時間）は VPS 操作を伴うため**別承認**。
