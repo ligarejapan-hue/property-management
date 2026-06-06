@@ -4,10 +4,18 @@
  * 検証ポイント:
  *  - POST: 成功 / MIME 不正 / サイズ超過 / 権限なし / 他人 pin 禁止 / archived 禁止 /
  *    multipart 以外 422 / AuditLog 座標・URL・storageKey・fileName 非含有
+ *  - POST EXIF/GPS strip (route 接続): strip 後 buffer のみ storage.upload に渡る /
+ *    HEIC・HEIF 422 / malformed fail-closed 422 / 422 レスポンス非 PII /
+ *    PropertyPhoto 等への非適用 (source assertion)
  *  - GET: own / read_all / manage で他人 pin 閲覧 / 権限なし / storageKey 非返却
  *  - DELETE: own 成功 / 他人 pin 禁止 / archived 禁止 / storage.delete 失敗でも DB 削除後に成功
+ *
+ * fixture ポリシー: 画像は全てコード内合成バイト列のみ (実画像・実座標・実個人情報なし。
+ * GPS 値は「緯度 9999 度 (>90 で実在不可)」「分母 0 rational」「0xDEADBEEF 系センチネル」のみ)。
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 // route ハンドラの引数型は NextRequest。テストは Request を渡すため（runtime は
 // 下の next/server mock で NextRequest=Request サブクラス）、builder/呼び出し側で
 // NextRequest 相当へキャストして型を合わせる。
@@ -139,8 +147,138 @@ function multipartReq(file: Blob | null) {
   }) as unknown as NextRequest;
 }
 
+// ---------- EXIF strip 用 合成バイト fixture ----------
+// route が保存前に stripFieldSurveyPhotoMetadata (実体・mock しない) を通すため、
+// 画像 fixture は strip が構造検証を通せる「有効な最小合成バイト列」である必要がある。
+// 値は実在し得ないもののみ: 緯度 9999 度 (>90) / 分母 0 rational / 0xDEADBEEF センチネル。
+
+const GPS_SENTINEL = Buffer.from([0xef, 0xbe, 0xad, 0xde]); // 0xDEADBEEF (LE)
+
+function u16le(v: number): Buffer {
+  const b = Buffer.alloc(2);
+  b.writeUInt16LE(v);
+  return b;
+}
+function u32le(v: number): Buffer {
+  const b = Buffer.alloc(4);
+  b.writeUInt32LE(v >>> 0);
+  return b;
+}
+function u16be(v: number): Buffer {
+  const b = Buffer.alloc(2);
+  b.writeUInt16BE(v);
+  return b;
+}
+function u32be(v: number): Buffer {
+  const b = Buffer.alloc(4);
+  b.writeUInt32BE(v >>> 0);
+  return b;
+}
+function tiffEntryLE(tag: number, type: number, count: number, value: Buffer): Buffer {
+  return Buffer.concat([u16le(tag), u16le(type), u32le(count), value]);
+}
+
+/** SOI + SOS + entropy + EOI の最小 JPEG。padTo 指定でゼロ padding (SOS 以降は無検証)。 */
+function minimalJpegBytes(padTo = 0): Buffer {
+  const base = Buffer.from([
+    0xff, 0xd8, // SOI
+    0xff, 0xda, 0x00, 0x04, 0x01, 0x00, // SOS
+    0x12, 0x34, 0xff, 0xd9, // entropy + EOI
+  ]);
+  if (padTo <= base.length) return base;
+  return Buffer.concat([base, Buffer.alloc(padTo - base.length)]);
+}
+
+/** Orientation(=6) + GPS IFD (Latitude rational×3 out-of-line) を持つ Exif APP1 入り JPEG。 */
+function jpegWithGpsBytes(): { bytes: Buffer; orientationValueAbs: number } {
+  const ifd0Offset = 8;
+  const gpsIfdOffset = ifd0Offset + 2 + 2 * 12 + 4; // IFD0 直後
+  const gpsValueOffset = gpsIfdOffset + 2 + 2 * 12 + 4;
+  const tiff = Buffer.concat([
+    Buffer.from("II", "latin1"),
+    u16le(42),
+    u32le(ifd0Offset),
+    // IFD0: Orientation=6 + GPSInfo ポインタ
+    u16le(2),
+    tiffEntryLE(0x0112, 3, 1, Buffer.concat([u16le(6), u16le(0)])),
+    tiffEntryLE(0x8825, 4, 1, u32le(gpsIfdOffset)),
+    u32le(0),
+    // GPS IFD: LatitudeRef "N\0" + Latitude rational×3 (out-of-line)
+    u16le(2),
+    tiffEntryLE(0x0001, 2, 2, Buffer.from("N\0\0\0", "latin1")),
+    tiffEntryLE(0x0002, 5, 3, u32le(gpsValueOffset)),
+    u32le(0),
+    // 緯度 9999 度 (実在不可) + 分母 0 のセンチネル rational
+    u32le(9999),
+    u32le(1),
+    u32le(0xdeadbeef),
+    u32le(0),
+    u32le(0xfeedface),
+    u32le(0),
+  ]);
+  const exifPayload = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), tiff]);
+  const bytes = Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    Buffer.from([0xff, 0xe1]),
+    u16be(exifPayload.length + 2),
+    exifPayload,
+    Buffer.from([0xff, 0xda, 0x00, 0x04, 0x01, 0x00]),
+    Buffer.from([0x12, 0x34, 0xff, 0xd9]),
+  ]);
+  // TIFF 先頭 = SOI(2) + APP1 marker(2) + len(2) + "Exif\0\0"(6) = 12
+  return { bytes, orientationValueAbs: 12 + ifd0Offset + 2 + 8 };
+}
+
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+function pngChunk(type: string, data: Buffer): Buffer {
+  // CRC は strip utility が検証しないため固定ダミー
+  return Buffer.concat([
+    u32be(data.length),
+    Buffer.from(type, "latin1"),
+    data,
+    Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]),
+  ]);
+}
+function pngBytes(withExif: boolean): Buffer {
+  return Buffer.concat([
+    PNG_SIG,
+    pngChunk("IHDR", Buffer.alloc(13, 0x01)),
+    ...(withExif ? [pngChunk("eXIf", GPS_SENTINEL)] : []),
+    pngChunk("IDAT", Buffer.from([0x05, 0x06, 0x07])),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function webpChunkBytes(fourcc: string, data: Buffer): Buffer {
+  const pad = data.length % 2 === 1 ? Buffer.from([0x00]) : Buffer.alloc(0);
+  return Buffer.concat([Buffer.from(fourcc, "latin1"), u32le(data.length), data, pad]);
+}
+function webpBytes(withExif: boolean): Buffer {
+  const body = Buffer.concat([
+    ...(withExif ? [webpChunkBytes("EXIF", GPS_SENTINEL)] : []),
+    webpChunkBytes("VP8 ", Buffer.from([0x10, 0x20, 0x30, 0x40])),
+  ]);
+  return Buffer.concat([
+    Buffer.from("RIFF", "latin1"),
+    u32le(4 + body.length),
+    Buffer.from("WEBP", "latin1"),
+    body,
+  ]);
+}
+
+/** MIME に対応する「strip を通過できる有効バイト列」。strip 対象外 MIME はゼロ埋めのまま。 */
+// 戻り型は注釈しない (明示すると Uint8Array<ArrayBufferLike> に広がり BlobPart と不適合。
+// 各分岐の new Uint8Array(...) は Uint8Array<ArrayBuffer> に推論される)。
+function validBytesFor(type: string) {
+  if (type === "image/jpeg") return new Uint8Array(minimalJpegBytes());
+  if (type === "image/png") return new Uint8Array(pngBytes(false));
+  if (type === "image/webp") return new Uint8Array(webpBytes(false));
+  return new Uint8Array(16);
+}
+
 function jpeg(bytes = 16): Blob {
-  return new Blob([new Uint8Array(bytes)], { type: "image/jpeg" });
+  // strip 導入後はゼロ埋めだと malformed 422 になるため、有効な最小 JPEG + padding。
+  return new Blob([new Uint8Array(minimalJpegBytes(bytes))], { type: "image/jpeg" });
 }
 
 beforeEach(() => {
@@ -314,7 +452,7 @@ describe("POST photos — MIME / key hardening (Codex P2)", () => {
 
   function typedReq(type: string, name: string) {
     const fd = new FormData();
-    fd.append("file", new Blob([new Uint8Array(16)], { type }), name);
+    fd.append("file", new Blob([validBytesFor(type)], { type }), name);
     return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
       method: "POST",
       body: fd,
@@ -392,7 +530,7 @@ describe("POST photos — app proxy url (Codex P1)", () => {
 
   function typedReq(type: string, name = "photo.jpg") {
     const fd = new FormData();
-    fd.append("file", new Blob([new Uint8Array(16)], { type }), name);
+    fd.append("file", new Blob([validBytesFor(type)], { type }), name);
     return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
       method: "POST",
       body: fd,
@@ -437,6 +575,177 @@ describe("POST photos — app proxy url (Codex P1)", () => {
     expect(createdData().thumbnailUrl).toBe(
       `/uploads/field-survey/pins/${PIN_ID}/photos/abc-thumb.jpg`,
     );
+  });
+});
+
+describe("POST photos — EXIF/GPS strip (route 接続)", () => {
+  function setupOwnOpenPinEcho() {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open",
+    });
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: PHOTO_ID,
+        pinId: PIN_ID,
+        fileUrl: data.fileUrl,
+        thumbnailUrl: null,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        mimeType: data.mimeType,
+        sortOrder: 0,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  function reqWith(bytes: Buffer | Uint8Array, type: string, name = "photo.jpg") {
+    const fd = new FormData();
+    fd.append("file", new Blob([new Uint8Array(bytes)], { type }), name);
+    return new Request(`http://t/api/field-survey/pins/${PIN_ID}/photos`, {
+      method: "POST",
+      body: fd,
+    }) as unknown as NextRequest;
+  }
+
+  /** storage.upload に渡された buffer (第1引数)。 */
+  const uploadedBuffer = (): Buffer =>
+    (storageStub.upload as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
+  const createdData = (): Record<string, unknown> =>
+    (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]
+      .data;
+
+  it("JPEG: GPS 付き合成バイトは strip 後 buffer が storage.upload に渡る (長さ不変・Orientation 保持)", async () => {
+    setupOwnOpenPinEcho();
+    const { bytes, orientationValueAbs } = jpegWithGpsBytes();
+    expect(bytes.indexOf(GPS_SENTINEL)).toBeGreaterThanOrEqual(0); // 前提: 入力に GPS あり
+    const res = await POST(reqWith(bytes, "image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    expect(storageStub.upload).toHaveBeenCalledTimes(1);
+    const uploaded = uploadedBuffer();
+    expect(uploaded.indexOf(GPS_SENTINEL)).toBe(-1); // GPS は保存バイトに残らない
+    expect(uploaded.length).toBe(bytes.length); // zero-fill 方式なので長さ不変
+    expect(uploaded.readUInt16LE(orientationValueAbs)).toBe(6); // Orientation 保持
+    expect(uploaded.equals(bytes)).toBe(false); // 原本そのままは保存しない
+    // DB の fileSize は保存実体 (strip 後 buffer) のサイズ
+    expect(createdData().fileSize).toBe(uploaded.length);
+  });
+
+  it("PNG: eXIf chunk 付きは drop 済 buffer が渡る", async () => {
+    setupOwnOpenPinEcho();
+    const bytes = pngBytes(true);
+    const res = await POST(reqWith(bytes, "image/png"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const uploaded = uploadedBuffer();
+    expect(uploaded.indexOf(Buffer.from("eXIf", "latin1"))).toBe(-1);
+    expect(uploaded.indexOf(GPS_SENTINEL)).toBe(-1);
+    expect(uploaded.equals(pngBytes(false))).toBe(true); // eXIf 以外は byte 単位で温存
+  });
+
+  it("WebP: EXIF chunk 付きは drop 済 + RIFF size 再計算済 buffer が渡る", async () => {
+    setupOwnOpenPinEcho();
+    const bytes = webpBytes(true);
+    const res = await POST(reqWith(bytes, "image/webp"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const uploaded = uploadedBuffer();
+    expect(uploaded.indexOf(Buffer.from("EXIF", "latin1"))).toBe(-1);
+    expect(uploaded.indexOf(GPS_SENTINEL)).toBe(-1);
+    expect(uploaded.readUInt32LE(4)).toBe(uploaded.length - 8); // RIFF size 再計算
+  });
+
+  it("metadata 無し画像は変更なしで正常保存される (バイト同一)", async () => {
+    setupOwnOpenPinEcho();
+    const bytes = minimalJpegBytes();
+    const res = await POST(reqWith(bytes, "image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    expect(uploadedBuffer().equals(bytes)).toBe(true);
+  });
+
+  it.each(["image/heic", "image/heif"])(
+    "%s は 422 で storage.upload / DB / audit を行わない",
+    async (mime) => {
+      setupOwnOpenPinEcho();
+      const res = await POST(
+        reqWith(Buffer.from("ftypheic-stub", "latin1"), mime, "secret-spot.heic"),
+        paramsP(PIN_ID),
+      );
+      expect(res.status).toBe(422);
+      expect(storageStub.upload).not.toHaveBeenCalled();
+      expect(prisma.fieldSurveyPinPhoto.create).not.toHaveBeenCalled();
+      expect(writeAuditLog).not.toHaveBeenCalled();
+      const body = await res.json();
+      expect(body.error.message).toBe(
+        "この画像形式は現地調査写真では現在サポートされていません。JPEG / PNG / WebP を使用してください。",
+      );
+    },
+  );
+
+  it("malformed (中身が JPEG でない image/jpeg) は fail-closed 422 で upload しない", async () => {
+    setupOwnOpenPinEcho();
+    const res = await POST(
+      reqWith(new Uint8Array(16), "image/jpeg", "secret-spot.jpg"),
+      paramsP(PIN_ID),
+    );
+    expect(res.status).toBe(422);
+    expect(storageStub.upload).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPinPhoto.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.error.message).toBe("画像ファイルを処理できませんでした。");
+  });
+
+  it("422 レスポンスに fileName / key / path / 座標を含めない (HEIC・malformed 両方)", async () => {
+    setupOwnOpenPinEcho();
+    const heicRes = await POST(
+      reqWith(Buffer.from("ftypheic-stub", "latin1"), "image/heic", "secret-spot.heic"),
+      paramsP(PIN_ID),
+    );
+    const malformedRes = await POST(
+      reqWith(new Uint8Array(16), "image/jpeg", "secret-spot.jpg"),
+      paramsP(PIN_ID),
+    );
+    for (const res of [heicRes, malformedRes]) {
+      expect(res.status).toBe(422);
+      const serialized = JSON.stringify(await res.json());
+      expect(serialized).not.toMatch(
+        /secret-spot|uploads|field-survey\/pins|storageKey|lat|lng|9999/,
+      );
+    }
+  });
+
+  it("strip 成功時の audit detail は従来どおり {pinId, photoId} のみ", async () => {
+    setupOwnOpenPinEcho();
+    const res = await POST(reqWith(jpegWithGpsBytes().bytes, "image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const call = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.detail).toEqual({ pinId: PIN_ID, photoId: PHOTO_ID });
+    expect(JSON.stringify(call)).not.toMatch(/uploads|\.jpg|photo\.jpg|lat|lng|exif/i);
+  });
+
+  // ---- 非適用ロック (source assertion): strip は field-survey photos route 限定 ----
+  function readSource(rel: string): string {
+    return fs.readFileSync(path.resolve(process.cwd(), rel), "utf8");
+  }
+
+  it("PropertyPhoto / BuildingPhoto / attachments route は exif-strip を import しない", () => {
+    const untouched = [
+      "src/app/api/properties/[id]/photos/route.ts",
+      "src/app/api/buildings/[id]/photos/route.ts",
+      "src/app/api/properties/[id]/attachments/route.ts",
+    ];
+    for (const rel of untouched) {
+      expect(readSource(rel), `${rel} は EXIF strip 非適用のまま`).not.toContain(
+        "exif-strip",
+      );
+    }
+    // 適用先は field-survey photos route のみ
+    expect(
+      readSource("src/app/api/field-survey/pins/[id]/photos/route.ts"),
+    ).toContain('from "@/lib/field-survey/exif-strip"');
   });
 });
 

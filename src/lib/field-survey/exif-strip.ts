@@ -1,10 +1,12 @@
 /**
- * field-survey 写真の EXIF / GPS メタデータ除去 pure utility（POC・route 未接続）。
+ * field-survey 写真の EXIF / GPS メタデータ除去 pure utility。
  *
  * 位置づけ:
- *   docs/field-survey-photo-privacy-checklist.md §5 推奨候補 B0（route-level strip）の
- *   前段 POC。**現時点ではどの route / storage からも import されておらず、本番の
- *   アップロード挙動と EXIF gap は未解消のまま**（接続は同 docs §6 の承認後・別 PR）。
+ *   docs/field-survey-photo-privacy-checklist.md §5 推奨候補 B0（route-level strip）の実装。
+ *   PR #142 で POC（route 未接続）として追加し、**現在は field-survey photos route
+ *   (src/app/api/field-survey/pins/[id]/photos/route.ts) の保存前処理として接続済み =
+ *   本番アップロード経路の一部**。適用は同 route 限定で、PropertyPhoto / BuildingPhoto /
+ *   attachments には適用しない（route test の source assertion でロック）。
  *
  * 方式評価（APP1 全 drop 案 vs GPS IFD 削除案）:
  *   - APP1 全 drop 案: 実装は容易だが Orientation タグ（0x0112）も消えるため、
@@ -23,9 +25,9 @@
  *     VP8X ヘッダの EXIF flag clear 込み）
  *   - 残余: Exif 内 MakerNote（ベンダ独自領域に位置情報が含まれ得る）・XMP
  *     （JPEG の非 Exif APP1 / WebP の XMP chunk / PNG の iTXt）・PNG の tEXt 系キー。
- *     これらは本 POC では対象外（route 接続 PR 以降の拡張候補）。
+ *     これらは本 utility では対象外（将来の拡張候補・docs §2 に残余として明記）。
  *   - HEIC / HEIF（ISOBMFF）: 依存追加なしで安全に解析できないため
- *     unsupported_mime を返す（route 側で 422 にするかは次 PR の判断）。
+ *     unsupported_mime を返す（field-survey photos route はこれを 422 にする = docs §6 決定済）。
  *
  * 失敗時の設計（fail-closed 前提）:
  *   - 構造が検証できない入力は { ok: false, reason: "malformed" } を返し、

@@ -1,5 +1,6 @@
 /**
- * field-survey EXIF/GPS strip pure utility（POC・route 未接続）の合成バイト fixture テスト。
+ * field-survey EXIF/GPS strip pure utility（field-survey photos route に接続済み）の
+ * 合成バイト fixture テスト。route 側の結合テストは field-survey-pin-photos-route.test.ts。
  *
  * fixture ポリシー:
  *   - 実画像ファイルは一切追加しない。全 fixture はコード内で組み立てる合成バイト列のみ。
