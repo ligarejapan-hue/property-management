@@ -7,6 +7,7 @@ import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
 import { debounce } from "@/lib/debounce";
 import NewPropertyModal from "@/components/properties/new-property-modal";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import StatusBadge, {
   badgeIntentClass,
   REGISTRY_STATUS_INTENT,
@@ -134,13 +135,28 @@ function PropertiesPageInner() {
   // 担当者プルダウン用ユーザー一覧
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
 
+  // F12-2(17-C): /api/me/permissions は ScreenProtectionProvider（dashboard 全体を覆う）
+  // が mount 時に 1 回取得して context 配布するため、ページ独自の重複 fetch は撤去し
+  // provider 配布値から導出する。未取得・取得失敗時は permissions=null → 全て false の
+  // まま＝ボタン非表示（従来の「取得失敗時は false」と同じ fail-safe・緩めない）。
+  const { permissions: mePermissions } = useScreenProtection();
+
   // CSV 出力可否。export API が csv_export:read と csv_export_personal:read の
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
-  const [canExportCsv, setCanExportCsv] = useState(false);
-
   // DM差込CSV の出力可否。dm-export API は csv_export:read / csv_export_personal:read に
   // 加えて owner:read（所有者個人情報を含むため）を必須にする。UI も同条件で判定する。
-  const [canExportDm, setCanExportDm] = useState(false);
+  const { canExportCsv, canExportDm } = useMemo(() => {
+    const perms = mePermissions ?? [];
+    const has = (resource: string) =>
+      perms.some(
+        (p) => p.resource === resource && p.action === "read" && p.granted,
+      );
+    const canCsv = has("csv_export") && has("csv_export_personal");
+    return {
+      canExportCsv: canCsv,
+      canExportDm: canCsv && has("owner"),
+    };
+  }, [mePermissions]);
 
   // 入力中候補表示
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
@@ -234,31 +250,8 @@ function PropertiesPageInner() {
     fetchProperties();
   }, [fetchProperties]);
 
-  // CSV 出力権限を初回のみ取得。csv_export:read かつ csv_export_personal:read の
-  // 両方が granted のときだけ CSV 出力ボタンを表示する（export API と同条件）。
-  // 取得失敗時は false のままにし、ボタンを出さない（誤って JSON エラー画面に飛ばさない）。
-  useEffect(() => {
-    fetch("/api/me/permissions")
-      .then((r) => r.json())
-      .then((json: {
-        permissions?: { resource: string; action: string; granted: boolean }[];
-      }) => {
-        const perms = json.permissions ?? [];
-        const has = (resource: string) =>
-          perms.some(
-            (p) => p.resource === resource && p.action === "read" && p.granted,
-          );
-        setCanExportCsv(has("csv_export") && has("csv_export_personal"));
-        // DM差込CSV の出力は所有者個人情報を含むため owner:read も併せて要求する。
-        setCanExportDm(
-          has("csv_export") && has("csv_export_personal") && has("owner"),
-        );
-      })
-      .catch(() => {
-        setCanExportCsv(false);
-        setCanExportDm(false);
-      });
-  }, []);
+  // CSV/DM 出力権限の取得は ScreenProtectionProvider の context 配布に集約した
+  // （F12-2・上の useMemo を参照）。ページ独自の /api/me/permissions fetch は持たない。
 
   // 担当者プルダウン用にユーザー一覧を初回のみ取得（失敗時はサイレントに無視）
   useEffect(() => {

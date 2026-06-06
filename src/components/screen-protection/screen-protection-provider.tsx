@@ -34,16 +34,42 @@ import ScreenProtectionGuard from "./screen-protection-guard";
  * スコープ外（後続 PR）: copy/cut/contextmenu/print 抑止・クライアント監査・
  * registry PDF preview/download enforcement。本 Provider はそれらを一切行わない。
  * context は将来 S1b-3 が bypass 状態を参照できるよう公開する。
+ *
+ * F12-2(17-C): provider が既に取得している /api/me/permissions の結果
+ * （permissions / capabilities）を context で配布する。配布のみで、
+ * 権限判定そのもの（bypass・各ページのボタン出し分け条件）は変更しない。
+ * これにより各ページの同一エンドポイント重複 fetch を撤去できる。
+ * fail-safe: permissions=null（未取得・取得失敗）を消費側は「権限なし」として
+ * 扱うこと（広く許可しない）。capabilities も同様に null = 機能なし扱い。
  */
+
+/** /api/me/permissions の capabilities（boolean のみ・PR#141 の route test で契約固定済）。 */
+export interface MeCapabilities {
+  corporateLookup: boolean;
+  registryAutoFetch: boolean;
+}
 
 interface ScreenProtectionState {
   bypass: boolean;
   watermarkText: string | null;
+  /** F12-2: 取得済み permissions。null = 未取得 or 取得失敗（= 権限なし扱い・fail-safe）。 */
+  permissions: PermissionEntry[] | null;
+  /** F12-2: 取得済み capabilities。null = 未取得 or 取得失敗（= 機能なし扱い・fail-safe）。 */
+  capabilities: MeCapabilities | null;
+  /** F12-2: /api/me/permissions の取得中フラグ（初期 true）。 */
+  permissionsLoading: boolean;
+  /** F12-2: 取得失敗（ネットワークエラー・非 2xx）フラグ。 */
+  permissionsError: boolean;
 }
 
 const ScreenProtectionContext = createContext<ScreenProtectionState>({
   bypass: false,
   watermarkText: null,
+  // provider 外で参照された場合も fail-safe（権限なし・取得中扱い）に倒す。
+  permissions: null,
+  capabilities: null,
+  permissionsLoading: true,
+  permissionsError: false,
 });
 
 export function useScreenProtection(): ScreenProtectionState {
@@ -58,6 +84,11 @@ export default function ScreenProtectionProvider({
   const { data: session, status } = useSession();
   // fail-safe: 判定が確定するまで bypass=false（= 透かし表示側）。
   const [bypass, setBypass] = useState(false);
+  // F12-2: 配布用。null のまま = 未取得 or 取得失敗（消費側は「権限なし」として扱う）。
+  const [permissions, setPermissions] = useState<PermissionEntry[] | null>(null);
+  const [capabilities, setCapabilities] = useState<MeCapabilities | null>(null);
+  const [permissionsLoading, setPermissionsLoading] = useState(true);
+  const [permissionsError, setPermissionsError] = useState(false);
   // mount 時刻。SSR/hydration mismatch 回避のためクライアントの effect で一度だけ確定する。
   const [mountedAt, setMountedAt] = useState<Date | null>(null);
 
@@ -70,12 +101,31 @@ export default function ScreenProtectionProvider({
     fetch("/api/me/permissions")
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
-        if (!active || !json) return;
+        if (!active) return;
+        if (!json) {
+          // 非 2xx は従来どおり bypass=false（透かし表示側）のまま。
+          // F12-2: 配布も行わない（permissions=null = 権限なし扱い）。
+          setPermissionsLoading(false);
+          setPermissionsError(true);
+          return;
+        }
         const perms = (json.permissions ?? []) as PermissionEntry[];
         setBypass(isScreenProtectionBypassed(perms));
+        // F12-2: 取得結果を配布する。capabilities は boolean のみを厳格に通す
+        // （=== true 以外は false に倒す = 広く許可しない）。
+        setPermissions(perms);
+        setCapabilities({
+          corporateLookup: json.capabilities?.corporateLookup === true,
+          registryAutoFetch: json.capabilities?.registryAutoFetch === true,
+        });
+        setPermissionsLoading(false);
       })
       .catch(() => {
         // 取得失敗時は fail-safe（透かし表示）のまま保持する。
+        // F12-2: permissions=null のまま（権限なし扱い）。error のみ通知する。
+        if (!active) return;
+        setPermissionsLoading(false);
+        setPermissionsError(true);
       });
     return () => {
       active = false;
@@ -96,7 +146,16 @@ export default function ScreenProtectionProvider({
   // bypass されておらず、traceability 可能な文言が得られている場合のみ表示する
   // （watermarkText !== null を JSX 内で判定し、Overlay には string を渡す）。
   return (
-    <ScreenProtectionContext.Provider value={{ bypass, watermarkText }}>
+    <ScreenProtectionContext.Provider
+      value={{
+        bypass,
+        watermarkText,
+        permissions,
+        capabilities,
+        permissionsLoading,
+        permissionsError,
+      }}
+    >
       {children}
       {!bypass && watermarkText !== null && (
         <WatermarkOverlay text={watermarkText} />
