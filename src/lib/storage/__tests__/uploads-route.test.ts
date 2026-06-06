@@ -22,7 +22,11 @@ import {
 import { __resetStorageForTest } from "@/lib/storage";
 import { GET } from "@/app/uploads/[...path]/route";
 import { getApiSession, getUserPermissions, ApiError } from "@/lib/api-helpers";
-import { authorizeUploadAccess } from "@/lib/uploads-authorization";
+import {
+  authorizeUploadAccess,
+  resolveRegistryServeMeta,
+} from "@/lib/uploads-authorization";
+import { writeAuditLog } from "@/lib/audit";
 
 vi.mock("@/lib/api-helpers", () => {
   class ApiError extends Error {
@@ -58,6 +62,11 @@ vi.mock("@/lib/uploads-authorization", () => ({
   resolveRegistryServeMeta: vi.fn().mockResolvedValue(null),
 }));
 
+// registry 配信の監査呼び出しを runtime で検証するため mock する。
+// （実体 writeAuditLog は内部 try/catch の fail-open。route は registryMeta が
+//   null の既存テストでは一切呼ばない）
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+
 const s3Mock = mockClient(S3Client);
 const ORIGINAL_ENV = { ...process.env };
 
@@ -68,9 +77,15 @@ function makeStreamLike(bytes: Uint8Array) {
 }
 
 // Next.js 16 の (req, ctx) 形式に合わせた呼び出し helper。
-async function callGet(parts: string[]) {
-  const url = `http://localhost/uploads/${parts.join("/")}`;
-  const req = new Request(url) as unknown as Parameters<typeof GET>[0];
+// query（?download=1 等）/ headers（Range 等）は省略時従来通り。
+async function callGet(
+  parts: string[],
+  opts: { query?: string; headers?: Record<string, string> } = {},
+) {
+  const url = `http://localhost/uploads/${parts.join("/")}${opts.query ?? ""}`;
+  const req = new Request(url, {
+    headers: opts.headers,
+  }) as unknown as Parameters<typeof GET>[0];
   return GET(req, {
     params: Promise.resolve({ path: parts }),
   });
@@ -325,5 +340,152 @@ describe("Phase B: getUserPermissions auth error handling", () => {
     await expect(
       callGet(["properties", "p1", "photos", "x.png"]),
     ).rejects.toThrow("DB connection error");
+  });
+});
+
+// ============================================================
+// F11 uploads配信 現状ロック（17-A・test-only guard）
+//  (1) S1b-4 registry 配信ヘッダ/監査の runtime 検証
+//      （従来は registry-pdf-enforcement.test.ts の source-assertion のみで、
+//        実 Response のヘッダ・writeAuditLog 呼び出しは未検証だった盲点を閉じる）
+//  (2) Range request 非対応の現状固定（常に 200 全量・206/Accept-Ranges 無し）
+//      → 将来 Range 対応する際はこのロックを意図的に更新する
+//  (3) MIME 未知拡張子（.svg 等の危険型含む）は application/octet-stream に
+//      フォールバックする安全挙動の固定（Local backend）
+//  (4) 未デコード "%2e%2e" セグメントはリテラル名として扱われ traversal しない
+//      （key-validation.ts の「Next.js が decode 済みで渡す」前提の境界ロック）
+// production code は不変。route/lib/headers の現状仕様をロックするのみ。
+// ============================================================
+describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
+  const REGISTRY_META = {
+    isRegistry: true as const,
+    attachmentId: "att-1",
+    propertyId: "prop-1",
+  };
+
+  beforeEach(() => {
+    process.env.STORAGE_BACKEND = "local";
+    process.env.LOCAL_UPLOAD_ROOT = tmpRoot;
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "u1",
+      email: "a@a",
+      name: "A",
+      role: "admin",
+    });
+    vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValue(null);
+    vi.mocked(writeAuditLog).mockClear();
+  });
+
+  async function writeRegistryPdf() {
+    const rel = "properties/p1/registry/100.pdf";
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, Buffer.from("%PDF-1.4 test"));
+    return ["properties", "p1", "registry", "100.pdf"];
+  }
+
+  it("registry preview: no-store / nosniff / inline / 監査 registry_pdf_preview（runtime）", async () => {
+    const parts = await writeRegistryPdf();
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+
+    const res = await callGet(parts);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Disposition")).toBe("inline");
+    expect(res.headers.get("Content-Type")).toBe("application/pdf");
+
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const audit = vi.mocked(writeAuditLog).mock.calls[0][0];
+    expect(audit.action).toBe("registry_pdf_preview");
+    expect(audit.targetTable).toBe("attachments");
+    expect(audit.targetId).toBe("att-1");
+    expect(audit.detail).toEqual({ propertyId: "prop-1" });
+    // 元ファイル名（PII の恐れ）が監査 detail に乗らない
+    expect(JSON.stringify(audit.detail)).not.toContain("fileName");
+  });
+
+  it("registry download (?download=1): generic filename の attachment / 監査 registry_pdf_download", async () => {
+    const parts = await writeRegistryPdf();
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+
+    const res = await callGet(parts, { query: "?download=1" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Content-Disposition")).toBe(
+      'attachment; filename="registry.pdf"',
+    );
+
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const audit = vi.mocked(writeAuditLog).mock.calls[0][0];
+    expect(audit.action).toBe("registry_pdf_download");
+  });
+
+  it("registry: propertyId が null の場合 detail は undefined（非 PII 維持）", async () => {
+    const parts = await writeRegistryPdf();
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce({
+      ...REGISTRY_META,
+      propertyId: null,
+    });
+
+    const res = await callGet(parts);
+    expect(res.status).toBe(200);
+    const audit = vi.mocked(writeAuditLog).mock.calls[0][0];
+    expect(audit.detail).toBeUndefined();
+  });
+
+  it("非 registry 配信は監査を書かない（registryMeta null）", async () => {
+    const rel = "properties/p1/photos/plain.png";
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    const res = await callGet(["properties", "p1", "photos", "plain.png"]);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, max-age=3600");
+    // 非 registry には nosniff / Content-Disposition を付けない（現状仕様）
+    expect(res.headers.get("X-Content-Type-Options")).toBeNull();
+    expect(res.headers.get("Content-Disposition")).toBeNull();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("Range ヘッダは無視され 200 全量を返す（206/Accept-Ranges/Content-Range なし＝現状固定）", async () => {
+    const rel = "properties/p1/photos/range.png";
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    const bytes = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    await fs.writeFile(abs, bytes);
+
+    const res = await callGet(["properties", "p1", "photos", "range.png"], {
+      headers: { Range: "bytes=0-2" },
+    });
+    // 現状は Range 非対応: 部分応答にせず常に全量 200。
+    // 将来 Range/206 対応を入れる場合はこのテストを意図的に更新すること。
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Accept-Ranges")).toBeNull();
+    expect(res.headers.get("Content-Range")).toBeNull();
+    expect(res.headers.get("Content-Length")).toBe(String(bytes.length));
+    const arr = new Uint8Array(await res.arrayBuffer());
+    expect(Buffer.from(arr).equals(bytes)).toBe(true);
+  });
+
+  it("MIME map 外拡張子（.svg）は application/octet-stream（inline 実行されない安全側）", async () => {
+    const rel = "properties/p1/attachments/evil.svg";
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, Buffer.from("<svg onload=alert(1)/>"));
+
+    const res = await callGet(["properties", "p1", "attachments", "evil.svg"]);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/octet-stream");
+  });
+
+  it("未デコード '%2e%2e' セグメントはリテラル名扱いで traversal しない（404）", async () => {
+    // Next.js は通常 decode 済み params を渡す（key-validation.ts の前提）。
+    // 仮に未デコード文字列が届いても '..' にならずリテラルなディレクトリ名として
+    // 解決され、root 外へ出ない（存在しないため 404）ことを境界ロックする。
+    const res = await callGet(["%2e%2e", "etc", "passwd"]);
+    expect(res.status).toBe(404);
   });
 });
