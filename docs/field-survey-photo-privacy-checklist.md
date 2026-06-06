@@ -51,8 +51,10 @@
 - **route 接続前にアップロード済みの画像ファイルには EXIF GPS が残っている**
   （遡及 strip は未実施・別タスク・要承認 = 下記 6.）
 - strip 対象は JPEG / PNG / WebP のみ。**HEIC / HEIF は本 route で 422 reject**（保存されない）
-- **MakerNote / XMP / PNG tEXt 系は strip 対象外**（残余。utility 先頭コメント参照。
-  「完全解消」ではない）
+- 残余（strip 対象外。utility 先頭コメント参照。「完全解消」ではない）:
+  **WebP の XMP chunk・PNG の iTXt / tEXt 系テキスト・JPEG の APPn (n≠1) / COM(コメント)
+  にベンダ・ユーザが書き込むメタデータ**。なお JPEG の Exif（MakerNote 含む）と
+  XMP（APP1）は PR #144 Codex review 対応で APP1 全 drop となり**残らなくなった**
 - storage adapter（local / server / s3）は引き続きバイト無加工で保存する
   （strip は field-survey route 層の責務。adapter には入れない = 下記 4. 注意参照）
 - `/uploads` 配信 proxy は認可後に保存バイトをそのまま返す（新規分は strip 済バイト）
@@ -113,7 +115,8 @@ client <input type="file" accept="image/*" capture="environment">
 
 **B0: field-survey route-level の pure TS strip**（承認後に別 PR で実装）。
 
-- 形式別の処理: JPEG = EXIF（APP1）内の GPS 情報を除去 / PNG = `eXIf` chunk 除去 /
+- 形式別の処理: JPEG = APP1 segment（Exif / XMP とも）を全 drop し Orientation のみ
+  最小 Exif として再注入 / PNG = `eXIf` chunk 除去 /
   WebP = RIFF 内 EXIF chunk 除去 / **HEIC・HEIF = 手書きパース困難なため方針承認が必要**（下記 6.）
 - lossless（画素データの再エンコードなし）のため画質・ファイルサイズに影響しない
 - route 内の server-side 処理のため、クライアントを差し替えても迂回できない
@@ -122,15 +125,20 @@ client <input type="file" accept="image/*" capture="environment">
 
 進捗メモ:
 
-- POC（PR #142）: pure utility `src/lib/field-survey/exif-strip.ts`
-  （JPEG = GPS IFD zero-fill・Orientation 保持 / PNG = eXIf chunk drop /
-  WebP = EXIF chunk drop + RIFF size 再計算 / HEIC・HEIF = unsupported / 構造不正 = malformed）と
-  合成バイト fixture テスト `src/lib/__tests__/field-survey-exif-strip.test.ts` を追加済み。
+- POC（PR #142）: pure utility `src/lib/field-survey/exif-strip.ts` と
+  合成バイト fixture テスト `src/lib/__tests__/field-survey-exif-strip.test.ts` を追加済み
+  （当初の JPEG 方式は GPS IFD zero-fill）。
 - **（2026-06-07）route 接続済み**: POST `/api/field-survey/pins/[id]/photos` が保存前に
   utility を必ず通し、**strip 後 buffer のみ** `storage.upload()` に渡す
   （HEIC/HEIF・malformed は 422。下記 6. の決定に基づく）。
-  これにより**新規アップロード分の §2 gap は解消**。既存保存分（遡及）と strip 残余
-  （MakerNote / XMP / PNG tEXt 系）は §2 のとおり残る。
+  これにより**新規アップロード分の §2 gap は解消**。既存保存分（遡及）と strip 残余は
+  §2 のとおり残る。
+- **（2026-06-07・PR #144 Codex review 対応）JPEG 方式を変更**: GPS IFD zero-fill は
+  GPS を含まない通常 EXIF（Make / Model / DateTimeOriginal / シリアル / ExifIFD /
+  MakerNote 等）を残すため不十分との指摘を受け、**APP1 全 drop + Orientation
+  （0x0112・値 1〜8）のみ最小 Exif（固定テンプレート）として再注入**に変更。
+  Exif 内部の異常は malformed にせず drop + 再注入なしへ倒す
+  （malformed = JPEG segment 構造の異常のみ）。
 - 適用は field-survey photos route 限定（PropertyPhoto / BuildingPhoto / attachments は非適用。
   route test の source assertion でロック）。
 
@@ -146,9 +154,11 @@ client <input type="file" accept="image/*" capture="environment">
 - [x] **malformed（パース不能）画像 = fail-closed（422 reject）**（採用・実装済み）。
   原本をそのまま保存する fail-open は silent gap になるため不採用。
   エラーメッセージは「画像ファイルを処理できませんでした。」（PII 非含有）
-- [x] **JPEG の除去方式 = GPS IFD のみ外科的削除（zero-fill）**（採用・PR #142 で実装）。
-  Orientation タグ保持 = 表示回転に影響なし。MakerNote 内の位置情報は理論上残り得る
-  （残余として許容・§2 に明記。APP1 全 drop + Orientation 再注入案は採らなかった）
+- [x] **JPEG の除去方式 = APP1 全 drop + Orientation のみ最小 Exif 再注入**
+  （PR #144 Codex review 対応で GPS IFD zero-fill から変更・実装済み）。
+  Orientation（値 1〜8）が読めた場合のみ固定テンプレートの最小 APP1 を再注入 =
+  表示回転に影響なし。Make / Model / DateTime / GPS / ExifIFD / MakerNote / XMP は
+  一切保存しない。Exif 内部の異常は malformed にせず drop + 再注入なし
 - [ ] **既存アップロード済み画像の遡及 strip**: 未決のまま（route 接続 PR の対象外。
   storage 内の走査が必要・別タスク・別承認）
 - [x] **PropertyPhoto には適用しない**（不変条件・維持）:

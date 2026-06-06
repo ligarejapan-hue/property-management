@@ -8,35 +8,40 @@
  *   本番アップロード経路の一部**。適用は同 route 限定で、PropertyPhoto / BuildingPhoto /
  *   attachments には適用しない（route test の source assertion でロック）。
  *
- * 方式評価（APP1 全 drop 案 vs GPS IFD 削除案）:
- *   - APP1 全 drop 案: 実装は容易だが Orientation タグ（0x0112）も消えるため、
- *     タグ回転前提のスマホ写真が横倒し表示になる回帰リスクが高く不採用。
- *   - GPS IFD 削除案（採用）: IFD0/IFD1 チェーンの GPSInfo ポインタ（0x8825）が指す
- *     GPS IFD とその out-of-line 値領域を**バイト位置を動かさず zero-fill** する。
- *     TIFF 内の絶対 offset を一切移動しないため、Orientation / ExifIFD 等の他構造を
- *     壊さない（= Orientation は保持される）。エントリの物理削除（バイト詰め）は
- *     全 offset の再計算が必要で危険なため行わない。
+ * JPEG の方式（PR #144 Codex review 対応で変更）:
+ *   - 旧方式（PR #142 POC）= GPS IFD のみ zero-fill は、GPS を含まない通常 EXIF
+ *     （Make / Model / DateTime / シリアル / ExifIFD / MakerNote 等）をそのまま残すため
+ *     「EXIF/GPS stripping」として不十分（Codex 指摘）。
+ *   - 現方式 = **APP1 segment（Exif も XMP もすべて）を drop し、元 Exif の IFD0 から
+ *     Orientation（0x0112・値 1〜8）だけ読めた場合に限り、Orientation 1 タグのみの
+ *     最小 Exif APP1（固定テンプレート・little-endian）を SOI 直後に再注入**する。
+ *     Make / Model / DateTime / GPS / ExifIFD / MakerNote / XMP は一切保持しない。
+ *   - Orientation が無い / 値が 1〜8 でない / Exif 内部が解釈できない場合は再注入しない
+ *     （APP1 は drop され、メタデータは何も残らない側に倒れる）。
  *
- * 除去範囲と残余（**完全解消ではない**）:
- *   - 除去: JPEG = Exif APP1 内 GPS IFD（entry count / entries / next pointer と
- *     out-of-line 値を zero-fill。IFD0 側の 0x8825 エントリ自体は「空 IFD への参照」
- *     として残る = タグ ID のみで GPS 値は一切持たない）
- *     / PNG = eXIf chunk drop / WebP = EXIF chunk drop（RIFF size 再計算 +
- *     VP8X ヘッダの EXIF flag clear 込み）
- *   - 残余: Exif 内 MakerNote（ベンダ独自領域に位置情報が含まれ得る）・XMP
- *     （JPEG の非 Exif APP1 / WebP の XMP chunk / PNG の iTXt）・PNG の tEXt 系キー。
- *     これらは本 utility では対象外（将来の拡張候補・docs §2 に残余として明記）。
+ * malformed 境界（fail-closed の対象）:
+ *   - **JPEG の segment 構造**（SOI / 長さ付き segment / SOS）が検証できない入力は
+ *     { ok: false, reason: "malformed" }（原本をそのまま通す fail-open を既定にしない）。
+ *   - **Exif APP1 の内部**（TIFF 構造）の異常は malformed にしない。APP1 は丸ごと drop
+ *     されるため、内部が壊れていても出力にメタデータは残らない（Orientation の
+ *     再注入だけを諦める）。捨てる対象の異常でアップロードを拒否しない。
+ *
+ * 除去範囲と残余:
+ *   - JPEG: APP1 全 drop（Exif / XMP とも）+ Orientation のみ最小再注入。
+ *     APP0(JFIF) / DQT / SOF / コメント(COM) 等の非 APP1 segment は温存する。
+ *     再注入 APP1 は SOI 直後に置く（Exif 仕様準拠。JFIF の「APP0 先頭」慣行とは
+ *     順序が前後するが、デコーダ互換上の実害は無い）。
+ *   - PNG: eXIf chunk drop / WebP: EXIF chunk drop（RIFF size 再計算 +
+ *     VP8X ヘッダの EXIF flag clear 込み）。
+ *   - 残余: WebP の XMP chunk・PNG の iTXt / tEXt 系テキスト・JPEG の APPn (n≠1) /
+ *     COM(コメント) にベンダ・ユーザが書き込むメタデータ。
+ *     docs §2 に残余として明記（「完全解消」ではない）。
  *   - HEIC / HEIF（ISOBMFF）: 依存追加なしで安全に解析できないため
  *     unsupported_mime を返す（field-survey photos route はこれを 422 にする = docs §6 決定済）。
  *
- * 失敗時の設計（fail-closed 前提）:
- *   - 構造が検証できない入力は { ok: false, reason: "malformed" } を返し、
- *     原本をそのまま通す fail-open を呼び出し側の既定にしない（silent gap 防止）。
- *   - 入力 buffer は一切 mutate しない。バイト変更がある場合のみ copy を返す
- *     （changed=false のときは入力 buffer をそのまま返す）。
- *
  * 依存: なし（pure TypeScript + Node Buffer のみ。sharp 等の未宣言 transitive 依存も
- * import しない）。
+ * import しない）。入力 buffer は一切 mutate しない。バイト変更がある場合のみ新規 buffer を
+ * 返す（changed=false のときは入力 buffer をそのまま返す）。
  */
 
 export type ExifStripFailureReason = "unsupported_mime" | "malformed";
@@ -48,10 +53,10 @@ export type ExifStripResult =
 const MALFORMED: ExifStripResult = { ok: false, reason: "malformed" };
 
 /**
- * field-survey 写真 1 枚分のバイト列から GPS / EXIF メタデータを除去する。
- * 対応: image/jpeg（GPS IFD zero-fill）/ image/png（eXIf chunk drop）/
- * image/webp（EXIF chunk drop）。image/heic・image/heif ほか未対応 MIME は
- * unsupported_mime、構造不正は malformed を返す。
+ * field-survey 写真 1 枚分のバイト列から EXIF / GPS メタデータを除去する。
+ * 対応: image/jpeg（APP1 全 drop + Orientation のみ最小再注入）/
+ * image/png（eXIf chunk drop）/ image/webp（EXIF chunk drop）。
+ * image/heic・image/heif ほか未対応 MIME は unsupported_mime、構造不正は malformed を返す。
  */
 export function stripFieldSurveyPhotoMetadata(
   buffer: Buffer,
@@ -59,7 +64,7 @@ export function stripFieldSurveyPhotoMetadata(
 ): ExifStripResult {
   switch (mimeType.toLowerCase()) {
     case "image/jpeg":
-      return stripJpegGps(buffer);
+      return stripJpegExif(buffer);
     case "image/png":
       return stripPngExif(buffer);
     case "image/webp":
@@ -73,48 +78,38 @@ export function stripFieldSurveyPhotoMetadata(
 }
 
 // ---------------------------------------------------------------
-// JPEG: Exif APP1 内の GPS IFD を offset を動かさず zero-fill する
+// JPEG: APP1 segment を全て drop し、Orientation のみ最小 Exif として再注入する
 // ---------------------------------------------------------------
 
 const EXIF_APP1_HEADER = Buffer.from("Exif\0\0", "latin1");
 
-/** TIFF フィールド型ごとの 1 要素のバイト幅（EXIF/TIFF 6.0 の型 1..12。不明型は malformed）。 */
-const TIFF_TYPE_SIZE: Record<number, number> = {
-  1: 1, // BYTE
-  2: 1, // ASCII
-  3: 2, // SHORT
-  4: 4, // LONG
-  5: 8, // RATIONAL
-  6: 1, // SBYTE
-  7: 1, // UNDEFINED
-  8: 2, // SSHORT
-  9: 4, // SLONG
-  10: 8, // SRATIONAL
-  11: 4, // FLOAT
-  12: 8, // DOUBLE
-};
-
-const GPS_IFD_POINTER_TAG = 0x8825;
+const ORIENTATION_TAG = 0x0112;
 
 /** IFD チェーン（IFD0 → IFD1 …）の走査上限。循環 offset への防御。 */
 const MAX_IFD_CHAIN = 8;
 
-function stripJpegGps(input: Buffer): ExifStripResult {
+function stripJpegExif(input: Buffer): ExifStripResult {
   if (input.length < 4 || input[0] !== 0xff || input[1] !== 0xd8) return MALFORMED;
-  let out: Buffer | null = null;
+  /** SOI の後・SOS の前に温存する segment 群（APP1 以外）。 */
+  const kept: Buffer[] = [];
+  /** SOS segment 以降（entropy-coded data + EOI）。無検証で丸ごと温存する。 */
+  let tail: Buffer | null = null;
+  let orientation: number | null = null;
+  let droppedApp1 = 0;
   let pos = 2;
-  let sawSos = false;
   while (pos < input.length) {
     if (input[pos] !== 0xff) return MALFORMED;
-    // marker 直前の 0xFF fill byte は仕様上許容される
+    const segHead = pos;
+    // marker 直前の 0xFF fill byte は仕様上許容される（温存対象に含める）
     while (pos < input.length && input[pos] === 0xff) pos += 1;
     if (pos >= input.length) return MALFORMED;
     const marker = input[pos];
     pos += 1;
     if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      continue; // 長さフィールドを持たない standalone marker
+      kept.push(input.subarray(segHead, pos)); // 長さフィールドを持たない standalone marker
+      continue;
     }
-    if (marker === 0xd9) break; // SOS 前に EOI（sawSos=false のままなら下で malformed）
+    if (marker === 0xd9) break; // SOS 前に EOI（tail=null のままなので下で malformed）
     if (pos + 2 > input.length) return MALFORMED;
     const segLen = input.readUInt16BE(pos);
     if (segLen < 2 || pos + segLen > input.length) return MALFORMED;
@@ -123,102 +118,120 @@ function stripJpegGps(input: Buffer): ExifStripResult {
     if (marker === 0xda) {
       // SOS 以降は entropy-coded data（APPn はこれより前にしか現れない）。
       // 末尾の EOI 検証は行わない（実機 JPEG は EOI 後に余剰バイトを持つことがある）。
-      sawSos = true;
+      tail = input.subarray(segHead);
       break;
     }
-    if (
-      marker === 0xe1 &&
-      segEnd - payloadStart >= EXIF_APP1_HEADER.length &&
-      input
-        .subarray(payloadStart, payloadStart + EXIF_APP1_HEADER.length)
-        .equals(EXIF_APP1_HEADER)
-    ) {
-      // Exif APP1 のみ対象。XMP 等の非 Exif APP1 は素通し（残余としてファイル先頭に明記）。
-      const zeroed = zeroGpsInTiff(input, out, payloadStart + EXIF_APP1_HEADER.length, segEnd);
-      if (!zeroed.ok) return MALFORMED;
-      out = zeroed.out;
+    if (marker === 0xe1) {
+      // APP1 は Exif / XMP とも全て drop する（メタデータを出力に残さない）。
+      // 最初に見つかった Exif APP1 から Orientation だけを best-effort で読む。
+      droppedApp1 += 1;
+      if (
+        orientation === null &&
+        segEnd - payloadStart >= EXIF_APP1_HEADER.length &&
+        input
+          .subarray(payloadStart, payloadStart + EXIF_APP1_HEADER.length)
+          .equals(EXIF_APP1_HEADER)
+      ) {
+        orientation = readIfdOrientation(
+          input,
+          payloadStart + EXIF_APP1_HEADER.length,
+          segEnd,
+        );
+      }
+    } else {
+      kept.push(input.subarray(segHead, segEnd));
     }
     pos = segEnd;
   }
-  if (!sawSos) return MALFORMED;
-  if (out === null || out.equals(input)) {
+  if (tail === null) return MALFORMED; // SOS 不達 = JPEG 構造として不正（fail-closed）
+  if (droppedApp1 === 0) {
+    return { ok: true, buffer: input, changed: false }; // APP1 が無ければ無変更
+  }
+  const parts: Buffer[] = [Buffer.from([0xff, 0xd8])];
+  if (orientation !== null) {
+    // Exif 仕様どおり SOI 直後に配置する（APP0 等の温存 segment より前で問題ない）
+    parts.push(buildMinimalOrientationApp1(orientation));
+  }
+  parts.push(...kept, tail);
+  const out = Buffer.concat(parts);
+  if (out.equals(input)) {
+    // 既に最小 Orientation APP1 のみ（= 本 utility の出力を再処理した場合等）は無変更扱い
     return { ok: true, buffer: input, changed: false };
   }
   return { ok: true, buffer: out, changed: true };
 }
 
-function zeroGpsInTiff(
+/**
+ * Exif APP1 内 TIFF の IFD チェーンから Orientation（0x0112・SHORT×1・値 1〜8）を読む。
+ * **best-effort**: 構造異常・値域外・不在は全て null（呼び出し側は再注入を諦めるだけで、
+ * malformed にはしない。APP1 自体は drop されるため出力にメタデータは残らない）。
+ */
+function readIfdOrientation(
   input: Buffer,
-  existing: Buffer | null,
   tiffStart: number,
   tiffEnd: number,
-): { ok: true; out: Buffer | null } | { ok: false } {
-  if (tiffEnd - tiffStart < 8) return { ok: false };
+): number | null {
+  if (tiffEnd - tiffStart < 8) return null;
   let littleEndian: boolean;
   if (input[tiffStart] === 0x49 && input[tiffStart + 1] === 0x49) {
     littleEndian = true; // "II"
   } else if (input[tiffStart] === 0x4d && input[tiffStart + 1] === 0x4d) {
     littleEndian = false; // "MM"
   } else {
-    return { ok: false };
+    return null;
   }
   const readU16 = (off: number): number =>
     littleEndian ? input.readUInt16LE(off) : input.readUInt16BE(off);
   const readU32 = (off: number): number =>
     littleEndian ? input.readUInt32LE(off) : input.readUInt32BE(off);
-  if (readU16(tiffStart + 2) !== 42) return { ok: false };
-
-  /** absStart から byteLen バイトが APP1 segment（TIFF 領域）内に収まるか。 */
+  if (readU16(tiffStart + 2) !== 42) return null;
   const inBounds = (absStart: number, byteLen: number): boolean =>
     absStart >= tiffStart && byteLen >= 0 && absStart + byteLen <= tiffEnd;
-
-  // 書き込み予定領域を全て検証してから zero-fill する（途中失敗で半端な出力を作らない）。
-  const zeroRanges: Array<{ start: number; end: number }> = [];
 
   let ifdRel = readU32(tiffStart + 4);
   for (let chain = 0; chain < MAX_IFD_CHAIN && ifdRel !== 0; chain += 1) {
     const ifd = tiffStart + ifdRel;
-    if (!inBounds(ifd, 2)) return { ok: false };
+    if (!inBounds(ifd, 2)) return null;
     const entryCount = readU16(ifd);
     const entriesStart = ifd + 2;
-    if (!inBounds(entriesStart, entryCount * 12 + 4)) return { ok: false };
+    if (!inBounds(entriesStart, entryCount * 12 + 4)) return null;
     for (let i = 0; i < entryCount; i += 1) {
       const entry = entriesStart + i * 12;
-      if (readU16(entry) !== GPS_IFD_POINTER_TAG) continue;
-      // GPSInfo ポインタは LONG × 1 が仕様。それ以外は構造不正として弾く
-      if (readU16(entry + 2) !== 4 || readU32(entry + 4) !== 1) return { ok: false };
-      const gpsIfd = tiffStart + readU32(entry + 8);
-      if (!inBounds(gpsIfd, 2)) return { ok: false };
-      const gpsCount = readU16(gpsIfd);
-      const gpsEntriesStart = gpsIfd + 2;
-      if (!inBounds(gpsEntriesStart, gpsCount * 12 + 4)) return { ok: false };
-      for (let j = 0; j < gpsCount; j += 1) {
-        const gpsEntry = gpsEntriesStart + j * 12;
-        const typeSize = TIFF_TYPE_SIZE[readU16(gpsEntry + 2)];
-        if (typeSize === undefined) return { ok: false };
-        const valueLen = typeSize * readU32(gpsEntry + 4);
-        if (valueLen > 4) {
-          // 4 byte 超の値は out-of-line（offset 参照）。値の実体も zero-fill 対象
-          const valueAbs = tiffStart + readU32(gpsEntry + 8);
-          if (!inBounds(valueAbs, valueLen)) return { ok: false };
-          zeroRanges.push({ start: valueAbs, end: valueAbs + valueLen });
-        }
-      }
-      // GPS IFD 本体（entry count / entries / next-IFD pointer）を zero-fill。
-      // count=0 の「空 IFD」として残り、IFD0 側の 0x8825 エントリは温存される
-      // （offset を動かせないため。タグ ID のみ残り GPS 値は一切持たない）。
-      zeroRanges.push({ start: gpsIfd, end: gpsEntriesStart + gpsCount * 12 + 4 });
+      if (readU16(entry) !== ORIENTATION_TAG) continue;
+      // SHORT × 1 以外の Orientation は不正値として採用しない
+      if (readU16(entry + 2) !== 3 || readU32(entry + 4) !== 1) return null;
+      const value = readU16(entry + 8); // SHORT の inline 値は value field 先頭 2 byte
+      return value >= 1 && value <= 8 ? value : null;
     }
-    // next IFD（IFD1 = サムネイル等）もチェーンで確認する
-    ifdRel = readU32(entriesStart + entryCount * 12);
+    ifdRel = readU32(entriesStart + entryCount * 12); // next IFD（通常 Orientation は IFD0）
   }
+  return null;
+}
 
-  if (zeroRanges.length === 0) return { ok: true, out: existing };
-  const out = existing ?? Buffer.from(input);
-  for (const range of zeroRanges) {
-    out.fill(0, range.start, range.end);
-  }
-  return { ok: true, out };
+/**
+ * Orientation 1 タグのみを含む最小 Exif APP1（固定テンプレート・little-endian）。
+ * 構成: FF E1 + len(2) + "Exif\0\0" + TIFF header(8) + IFD0(count=1 + entry 12 + next 4)。
+ * Make / Model / DateTime / GPS / ExifIFD / MakerNote は一切含めない。
+ */
+function buildMinimalOrientationApp1(orientation: number): Buffer {
+  const tiff = Buffer.alloc(26);
+  tiff.write("II", 0, "latin1");
+  tiff.writeUInt16LE(42, 2);
+  tiff.writeUInt32LE(8, 4); // IFD0 offset
+  tiff.writeUInt16LE(1, 8); // entry count = 1
+  tiff.writeUInt16LE(ORIENTATION_TAG, 10); // entry: tag(2) + type(2) + count(4) + value(4)
+  tiff.writeUInt16LE(3, 12); // type = SHORT
+  tiff.writeUInt32LE(1, 14); // count = 1
+  tiff.writeUInt16LE(orientation, 18); // inline 値は value field (offset 18) 先頭 2 byte
+  tiff.writeUInt32LE(0, 22); // next IFD = 0
+  const payloadLen = EXIF_APP1_HEADER.length + tiff.length; // 6 + 26 = 32
+  const out = Buffer.alloc(4 + payloadLen); // marker(2) + len(2) + payload
+  out[0] = 0xff;
+  out[1] = 0xe1;
+  out.writeUInt16BE(payloadLen + 2, 2); // len は自身の 2 byte を含む
+  EXIF_APP1_HEADER.copy(out, 4);
+  tiff.copy(out, 4 + EXIF_APP1_HEADER.length);
+  return out;
 }
 
 // ---------------------------------------------------------------

@@ -229,6 +229,53 @@ function jpegWithGpsBytes(): { bytes: Buffer; orientationValueAbs: number } {
   return { bytes, orientationValueAbs: 12 + ifd0Offset + 2 + 8 };
 }
 
+/**
+ * 非 GPS EXIF（Make / Model / DateTimeOriginal / Serial / MakerNote）を持つ Exif APP1 入り
+ * JPEG。値は全て架空の合成文字列のみ（Codex 指摘: GPS なし EXIF も保存しない、の検証用）。
+ */
+function jpegWithRichExifBytes(): Buffer {
+  const make = "SyntheticCam\0"; // 13
+  const model = "SynthModel-9\0"; // 13
+  const dto = "2026:01:01 00:00:00\0"; // 20
+  const serial = "SER1234567\0"; // 11
+  const makerNote = "MKNOTE-SYNTH"; // 12
+  const exifIfdOffset = 8 + 2 + 4 * 12 + 4; // IFD0 (count=4) 直後 = 62
+  const stringsOffset = exifIfdOffset + 2 + 3 * 12 + 4; // ExifIFD (count=3) 直後 = 104
+  const makeOff = stringsOffset;
+  const modelOff = makeOff + make.length;
+  const dtoOff = modelOff + model.length;
+  const serialOff = dtoOff + dto.length;
+  const makerNoteOff = serialOff + serial.length;
+  const tiff = Buffer.concat([
+    Buffer.from("II", "latin1"),
+    u16le(42),
+    u32le(8),
+    // IFD0: Make / Model / Orientation / ExifIFD ポインタ
+    u16le(4),
+    tiffEntryLE(0x010f, 2, make.length, u32le(makeOff)),
+    tiffEntryLE(0x0110, 2, model.length, u32le(modelOff)),
+    tiffEntryLE(0x0112, 3, 1, Buffer.concat([u16le(6), u16le(0)])),
+    tiffEntryLE(0x8769, 4, 1, u32le(exifIfdOffset)),
+    u32le(0),
+    // ExifIFD: DateTimeOriginal / BodySerialNumber / MakerNote
+    u16le(3),
+    tiffEntryLE(0x9003, 2, dto.length, u32le(dtoOff)),
+    tiffEntryLE(0xa431, 2, serial.length, u32le(serialOff)),
+    tiffEntryLE(0x927c, 7, makerNote.length, u32le(makerNoteOff)),
+    u32le(0),
+    Buffer.from(make + model + dto + serial + makerNote, "latin1"),
+  ]);
+  const exifPayload = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), tiff]);
+  return Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    Buffer.from([0xff, 0xe1]),
+    u16be(exifPayload.length + 2),
+    exifPayload,
+    Buffer.from([0xff, 0xda, 0x00, 0x04, 0x01, 0x00]),
+    Buffer.from([0x12, 0x34, 0xff, 0xd9]),
+  ]);
+}
+
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 function pngChunk(type: string, data: Buffer): Buffer {
   // CRC は strip utility が検証しないため固定ダミー
@@ -618,7 +665,7 @@ describe("POST photos — EXIF/GPS strip (route 接続)", () => {
     (prisma.fieldSurveyPinPhoto.create as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]
       .data;
 
-  it("JPEG: GPS 付き合成バイトは strip 後 buffer が storage.upload に渡る (長さ不変・Orientation 保持)", async () => {
+  it("JPEG: GPS 付き合成バイトは strip 後 buffer が storage.upload に渡る (APP1 drop・Orientation 保持)", async () => {
     setupOwnOpenPinEcho();
     const { bytes, orientationValueAbs } = jpegWithGpsBytes();
     expect(bytes.indexOf(GPS_SENTINEL)).toBeGreaterThanOrEqual(0); // 前提: 入力に GPS あり
@@ -627,11 +674,37 @@ describe("POST photos — EXIF/GPS strip (route 接続)", () => {
     expect(storageStub.upload).toHaveBeenCalledTimes(1);
     const uploaded = uploadedBuffer();
     expect(uploaded.indexOf(GPS_SENTINEL)).toBe(-1); // GPS は保存バイトに残らない
-    expect(uploaded.length).toBe(bytes.length); // zero-fill 方式なので長さ不変
-    expect(uploaded.readUInt16LE(orientationValueAbs)).toBe(6); // Orientation 保持
+    expect(uploaded.length).toBeLessThan(bytes.length); // APP1 drop + 最小再注入で縮む
+    // Orientation は最小 APP1 (SOI 直後) として再注入される。value field の絶対位置は
+    // SOI(2)+marker(2)+len(2)+"Exif\0\0"(6)+TIFF header(8)+count(2)+tag/type/count(8) = 30
+    // （元 fixture の orientationValueAbs と同値になる配置）
+    expect(uploaded.readUInt16LE(orientationValueAbs)).toBe(6);
     expect(uploaded.equals(bytes)).toBe(false); // 原本そのままは保存しない
     // DB の fileSize は保存実体 (strip 後 buffer) のサイズ
     expect(createdData().fileSize).toBe(uploaded.length);
+  });
+
+  it("JPEG: GPS なしの通常 EXIF (Make/Model/DateTimeOriginal/Serial/ExifIFD/MakerNote) も保存されない (Codex 指摘対応)", async () => {
+    setupOwnOpenPinEcho();
+    const tokens = [
+      "SyntheticCam", // Make
+      "SynthModel-9", // Model
+      "2026:01:01 00:00:00", // DateTimeOriginal
+      "SER1234567", // BodySerialNumber
+      "MKNOTE-SYNTH", // MakerNote
+    ];
+    const bytes = jpegWithRichExifBytes();
+    for (const token of tokens) {
+      expect(bytes.indexOf(Buffer.from(token, "latin1"))).toBeGreaterThanOrEqual(0); // 前提
+    }
+    const res = await POST(reqWith(bytes, "image/jpeg"), paramsP(PIN_ID));
+    expect(res.status).toBe(201);
+    const uploaded = uploadedBuffer();
+    for (const token of tokens) {
+      expect(uploaded.indexOf(Buffer.from(token, "latin1"))).toBe(-1);
+    }
+    // Orientation のみ最小 APP1 で保持される（value field 絶対位置 30）
+    expect(uploaded.readUInt16LE(30)).toBe(6);
   });
 
   it("PNG: eXIf chunk 付きは drop 済 buffer が渡る", async () => {
