@@ -167,6 +167,14 @@ function PropertiesPageInner() {
   if (permissionsLoadingAtMountRef.current === null) {
     permissionsLoadingAtMountRef.current = permissionsLoading;
   }
+  // F12-2 Codex 対応(3): 進入時 refresh が完了するまで stale な granted permissions で
+  // CSV/DM ボタンを出さない（一瞬表示・クリック可能の回帰防止）。mount 時点で取得
+  // 完了済み（= この後 entry refresh が走る）の場合は最初の描画から pending=true で
+  // 開始し、旧 page-local fetch 時代の「mount 時は hidden から開始」と同じ挙動にする。
+  // refresh 完了（finally）で解除し、最新 permissions からのみ導出する。
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
   useEffect(() => {
     if (permissionsRefreshRequestedRef.current) return;
     // 進行中は完了を待つ（追加 fetch しない・ref はまだ立てない）。
@@ -179,7 +187,10 @@ function PropertiesPageInner() {
     // mount 時点で取得完了済みだった（stale の可能性）、または mount 時に進行中
     // だった取得が失敗した（permissions===null・復旧）→ 1 回だけ再確認する。
     permissionsRefreshRequestedRef.current = true;
-    refetchPermissions();
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
   }, [permissionsLoading, mePermissions, refetchPermissions]);
 
   // CSV 出力可否。export API が csv_export:read と csv_export_personal:read の
@@ -187,9 +198,15 @@ function PropertiesPageInner() {
   // DM差込CSV の出力可否。dm-export API は csv_export:read / csv_export_personal:read に
   // 加えて owner:read（所有者個人情報を含むため）を必須にする。UI も同条件で判定する。
   const { canExportCsv, canExportDm } = useMemo(() => {
-    const perms = mePermissions ?? [];
+    // F12-2 Codex 対応(3): 進入時 refresh 中（pending）・provider 取得中（loading）は
+    // stale な granted permissions を使わず空配列に倒す＝ボタン非表示（fail-safe 側）。
+    // refresh 完了後の最新 permissions からのみ true になり得る。
+    const effectivePermissions =
+      permissionsRefreshPending || permissionsLoading
+        ? []
+        : (mePermissions ?? []);
     const has = (resource: string) =>
-      perms.some(
+      effectivePermissions.some(
         (p) => p.resource === resource && p.action === "read" && p.granted,
       );
     const canCsv = has("csv_export") && has("csv_export_personal");
@@ -197,7 +214,7 @@ function PropertiesPageInner() {
       canExportCsv: canCsv,
       canExportDm: canCsv && has("owner"),
     };
-  }, [mePermissions]);
+  }, [permissionsRefreshPending, permissionsLoading, mePermissions]);
 
   // 入力中候補表示
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);

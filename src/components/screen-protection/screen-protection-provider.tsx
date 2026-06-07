@@ -63,12 +63,11 @@ interface ScreenProtectionState {
   /** F12-2: 取得失敗（ネットワークエラー・非 2xx）フラグ。 */
   permissionsError: boolean;
   /**
-   * F12-2 Codex 対応: 取得失敗時の復旧導線。初回 mount 時の fetch と同じ処理を
-   * 再実行する（in-flight 中は no-op = 多重実行防止）。consumer は
-   * 「permissionsError && permissions === null && !permissionsLoading」の
-   * 失敗確定時のみ呼ぶこと（成功済みの再取得用途ではない）。
+   * F12-2 Codex 対応: 復旧・鮮度再確認の導線。初回 mount 時の fetch と同じ処理を
+   * 再実行し、完了で解決する Promise を返す（in-flight 中は進行中の同一 Promise を
+   * 返して dedupe = 多重実行防止）。consumer は完了を待って表示判定に使える。
    */
-  refetchPermissions: () => void;
+  refetchPermissions: () => Promise<void>;
 }
 
 const ScreenProtectionContext = createContext<ScreenProtectionState>({
@@ -80,7 +79,7 @@ const ScreenProtectionContext = createContext<ScreenProtectionState>({
   permissionsLoading: true,
   permissionsError: false,
   // provider 外では no-op（何も取得しない＝広く許可しない側のまま）。
-  refetchPermissions: () => {},
+  refetchPermissions: () => Promise.resolve(),
 });
 
 export function useScreenProtection(): ScreenProtectionState {
@@ -109,25 +108,28 @@ export default function ScreenProtectionProvider({
 
   // F12-2 Codex 対応: unmount 後の setState 防止（共有 load 関数は effect 外のため ref 管理）。
   const mountedRef = useRef(true);
-  // F12-2 Codex 対応: 多重実行防止。StrictMode の二重 effect・consumer からの
-  // 連続呼び出しでも fetch は同時に 1 本しか飛ばない。
-  const inFlightRef = useRef(false);
+  // F12-2 Codex 対応: 多重実行防止。in-flight 中の呼び出しには進行中の同一 Promise を
+  // 返して dedupe する（StrictMode の二重 effect・consumer からの連続呼び出しでも
+  // fetch は同時に 1 本。呼び出し側はその完了を await できる）。
+  const inFlightRef = useRef<Promise<void> | null>(null);
 
-  // F12-2 Codex 対応: 初回 mount と refetch で共通の取得処理。
+  // F12-2 Codex 対応: 初回 mount と refetch で共通の取得処理（完了で解決する Promise を返す）。
   // transient な失敗（一時的な 5xx・ネットワーク断）で layout 生存中ずっと
   // permissions=null が残り、consumer のボタンが full reload まで復旧しない問題への
   // 復旧導線として、context の refetchPermissions からも再実行できるようにする。
-  const loadPermissions = useCallback(() => {
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
+  const loadPermissions = useCallback((): Promise<void> => {
+    if (inFlightRef.current) return inFlightRef.current;
     setPermissionsLoading(true);
-    fetch("/api/me/permissions")
+    const run = fetch("/api/me/permissions")
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
         if (!mountedRef.current) return;
         if (!json) {
-          // 非 2xx は従来どおり bypass=false（透かし表示側）のまま。
-          // F12-2: 配布も行わない（permissions=null = 権限なし扱い）。
+          // 非 2xx = 信頼できる permissions 応答が得られていない。配布しない
+          // （permissions=null = 権限なし扱い）だけでなく、bypass も false
+          // （透かし表示側）へ倒す（Codex 対応3: bypass 剥奪後に refetch が
+          // 失敗しても古い bypass=true が残らない）。
+          setBypass(false);
           setPermissions(null);
           setCapabilities(null);
           setPermissionsLoading(false);
@@ -147,17 +149,21 @@ export default function ScreenProtectionProvider({
         setPermissionsLoading(false);
       })
       .catch(() => {
-        // 取得失敗時は fail-safe（透かし表示）のまま保持する。
-        // F12-2: permissions=null（権限なし扱い）に保ち、error のみ通知する。
+        // 取得失敗時も同一の fail-safe 一式へ倒す: permissions/capabilities=null
+        // （権限なし扱い）+ bypass=false（透かし表示側）+ error 通知
+        // （Codex 対応3: 信頼できる応答が無いときは bypass を維持しない）。
         if (!mountedRef.current) return;
+        setBypass(false);
         setPermissions(null);
         setCapabilities(null);
         setPermissionsLoading(false);
         setPermissionsError(true);
       })
       .finally(() => {
-        inFlightRef.current = false;
+        inFlightRef.current = null;
       });
+    inFlightRef.current = run;
+    return run;
   }, []);
 
   useEffect(() => {

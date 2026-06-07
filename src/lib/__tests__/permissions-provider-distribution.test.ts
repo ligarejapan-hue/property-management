@@ -27,6 +27,11 @@
  *    成功した場合は追加 fetch しない（失敗時のみ復旧として再取得）。
  *    ref ガード+in-flight dedupe で無限リトライなし・旧 page-level 直接 fetch は
  *    復活させない
+ * 9) Codex 対応3（stale 非表示 + bypass fail-safe）: 進入時 refresh 完了までは
+ *    stale な granted permissions でボタンを出さない（pending/loading 中は空配列に
+ *    倒す）。provider の失敗系 2 分岐（catch/非 2xx）は permissions/capabilities=null
+ *    に加えて bypass=false へ倒す（信頼できる応答が無いとき古い bypass=true を
+ *    残さない）。refetchPermissions は完了を await できる Promise を返す
  *
  * 権限仕様・PII 表示条件・server 側権限ゲート・/api/me/permissions route は一切変更しない
  * （route 契約は me-permissions-route.test.ts が別途ロック済み）。
@@ -62,7 +67,8 @@ describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2�
     expect(providerSrc).toMatch(/capabilities:\s*MeCapabilities\s*\|\s*null/);
     expect(providerSrc).toMatch(/permissionsLoading:\s*boolean/);
     expect(providerSrc).toMatch(/permissionsError:\s*boolean/);
-    expect(providerSrc).toMatch(/refetchPermissions:\s*\(\) => void/);
+    // Codex 対応3: 完了を await できるよう Promise を返す
+    expect(providerSrc).toMatch(/refetchPermissions:\s*\(\) => Promise<void>/);
     // Provider value に 7 キーすべてが渡る
     expect(providerSrc).toMatch(
       /value=\{\{\s*bypass,\s*watermarkText,\s*permissions,\s*capabilities,\s*permissionsLoading,\s*permissionsError,\s*refetchPermissions:\s*loadPermissions,?\s*\}\}/,
@@ -84,26 +90,40 @@ describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2�
     );
   });
 
-  it("fail-safe: catch では permissions/capabilities を null に保ち、bypass を変更しない", () => {
+  it("fail-safe 一式: catch では permissions/capabilities=null + bypass=false へ倒す（Codex 対応3）", () => {
     const catchBlock = providerSrc.match(/\.catch\(\(\) => \{[\s\S]*?\}\)/)?.[0] ?? "";
     expect(catchBlock).not.toBe("");
+    expect(catchBlock).toMatch(/setBypass\(false\)/);
     expect(catchBlock).toMatch(/setPermissions\(null\)/);
     expect(catchBlock).toMatch(/setCapabilities\(null\)/);
     expect(catchBlock).toMatch(/setPermissionsError\(true\)/);
     expect(catchBlock).toMatch(/setPermissionsLoading\(false\)/);
     expect(catchBlock).not.toMatch(/setPermissions\(perms\)/);
-    expect(catchBlock).not.toMatch(/setBypass/);
+    // bypass=true へ広げる方向の呼び出しが無い（false 固定のみ）
+    expect(catchBlock).not.toMatch(/setBypass\(true\)|setBypass\(isScreenProtectionBypassed/);
   });
 
-  it("fail-safe: 非 2xx（json=null）でも permissions を配布しない（null に保つ）", () => {
-    // res.ok でない場合 null に倒す既存形を維持し、!json 分岐では null 維持+error 通知のみ
+  it("fail-safe 一式: 非 2xx（json=null）でも permissions/capabilities=null + bypass=false へ倒す（Codex 対応3）", () => {
+    // res.ok でない場合 null に倒す既存形を維持し、!json 分岐は fail-safe 一式のみ
     expect(providerSrc).toMatch(/res\.ok \? res\.json\(\) : null/);
     const nullBranch = providerSrc.match(/if \(!json\) \{[\s\S]*?\}/)?.[0] ?? "";
+    expect(nullBranch).toMatch(/setBypass\(false\)/);
     expect(nullBranch).toMatch(/setPermissions\(null\)/);
     expect(nullBranch).toMatch(/setCapabilities\(null\)/);
     expect(nullBranch).toMatch(/setPermissionsError\(true\)/);
     expect(nullBranch).not.toMatch(/setPermissions\(perms\)/);
-    expect(nullBranch).not.toMatch(/setBypass/);
+    expect(nullBranch).not.toMatch(/setBypass\(true\)|setBypass\(isScreenProtectionBypassed/);
+  });
+
+  it("以前 bypass=true でも、信頼できる応答が無い refetch 後は bypass=false に倒れる（透かし/Guard が fail-safe 側で復帰）", () => {
+    // bypass を true 側へ更新できるのは成功分岐の isScreenProtectionBypassed(perms)
+    // のみで、失敗系 2 分岐（catch / !json）は無条件 setBypass(false)。
+    // → 剥奪後に refetch が失敗しても古い bypass=true は残らず、
+    //   !bypass 側の WatermarkOverlay 表示・Guard 抑止が有効になる。
+    const successSets = providerSrc.match(/setBypass\(isScreenProtectionBypassed\(perms\)\)/g) ?? [];
+    expect(successSets.length).toBe(1);
+    const failSafeSets = providerSrc.match(/setBypass\(false\)/g) ?? [];
+    expect(failSafeSets.length).toBe(2); // catch + !json
   });
 
   it("成功時は permissions/capabilities を配布し、permissionsError を false に戻す（復旧）", () => {
@@ -138,9 +158,9 @@ describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2�
 // ── provider: refetch 復旧導線（Codex 対応）────────────────────────────────
 
 describe("ScreenProtectionProvider — refetchPermissions 復旧導線（F12-2 Codex 対応）", () => {
-  it("mount 時 fetch と refetch は共通の loadPermissions（stable callback・deps=[]）", () => {
+  it("mount 時 fetch と refetch は共通の loadPermissions（stable callback・deps=[]・Promise 返却）", () => {
     expect(providerSrc).toMatch(
-      /const loadPermissions = useCallback\(\(\) => \{[\s\S]*?\}, \[\]\);/,
+      /const loadPermissions = useCallback\(\(\): Promise<void> => \{[\s\S]*?\}, \[\]\);/,
     );
     // mount effect から共通関数を呼ぶ
     expect(providerSrc).toMatch(/loadPermissions\(\);/);
@@ -148,22 +168,22 @@ describe("ScreenProtectionProvider — refetchPermissions 復旧導線（F12-2 C
     expect(providerSrc).toMatch(/refetchPermissions:\s*loadPermissions/);
   });
 
-  it("in-flight ガードで多重実行を防ぐ（StrictMode 二重 effect・連続呼び出しでも fetch は同時 1 本）", () => {
-    expect(providerSrc).toMatch(/if \(inFlightRef\.current\) return;/);
-    expect(providerSrc).toMatch(/inFlightRef\.current = true;/);
+  it("in-flight dedupe: 進行中は同一 Promise を返し fetch は同時 1 本（StrictMode 二重 effect・連続呼び出し対応）", () => {
+    expect(providerSrc).toMatch(/if \(inFlightRef\.current\) return inFlightRef\.current;/);
+    expect(providerSrc).toMatch(/inFlightRef\.current = run;/);
     expect(providerSrc).toMatch(
-      /\.finally\(\(\) => \{\s*inFlightRef\.current = false;\s*\}\);/,
+      /\.finally\(\(\) => \{\s*inFlightRef\.current = null;\s*\}\);/,
     );
   });
 
-  it("refetch 中は permissionsLoading=true（consumer 側の再要求条件も遮断される）", () => {
+  it("refetch 中は permissionsLoading=true（dedupe 判定の直後に設定）", () => {
     expect(providerSrc).toMatch(
-      /inFlightRef\.current = true;\s*\n\s*setPermissionsLoading\(true\);/,
+      /if \(inFlightRef\.current\) return inFlightRef\.current;\s*\n\s*setPermissionsLoading\(true\);/,
     );
   });
 
-  it("default context の refetchPermissions は no-op（provider 外 fail-safe）", () => {
-    expect(providerSrc).toMatch(/refetchPermissions:\s*\(\) => \{\},/);
+  it("default context の refetchPermissions は no-op（provider 外 fail-safe・resolved Promise）", () => {
+    expect(providerSrc).toMatch(/refetchPermissions:\s*\(\) => Promise\.resolve\(\),/);
   });
 
   it("unmount 後は setState しない（mountedRef ガード）", () => {
@@ -193,9 +213,33 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
     expect(pageSrc).toMatch(
       /if \(permissionsRefreshRequestedRef\.current\) return;/,
     );
-    // 再確認の実行（mount 時完了済み=stale の可能性、または進行中だった取得の失敗=復旧）
+    // 再確認の実行（mount 時完了済み=stale の可能性、または進行中だった取得の失敗=復旧）。
+    // pending を立ててから呼び、完了（finally）で解除する（Codex 対応3）。
     expect(pageSrc).toMatch(
-      /permissionsRefreshRequestedRef\.current = true;\s*\n\s*refetchPermissions\(\);/,
+      /permissionsRefreshRequestedRef\.current = true;\s*\n\s*setPermissionsRefreshPending\(true\);\s*\n\s*refetchPermissions\(\)\.finally\(\(\) => \{\s*\n\s*setPermissionsRefreshPending\(false\);\s*\n\s*\}\);/,
+    );
+  });
+
+  it("refresh 中は stale な granted permissions でボタンを出さない（Codex 対応3）", () => {
+    // mount 時点で取得完了済み（= entry refresh が走る予定）なら最初の描画から
+    // pending=true（旧 page-local fetch 時代の「mount 時 hidden 開始」と同じ）
+    expect(pageSrc).toMatch(
+      /useState\(\s*\n?\s*\(\) => !permissionsLoading,?\s*\n?\s*\)/,
+    );
+    // pending・loading 中は空配列に倒す＝refresh 完了後の最新 permissions からのみ導出
+    expect(pageSrc).toMatch(
+      /permissionsRefreshPending \|\| permissionsLoading\s*\n?\s*\?\s*\[\]\s*\n?\s*:\s*\(mePermissions \?\? \[\]\)/,
+    );
+  });
+
+  it("refresh 完了後: 最新 permissions が granted なら表示・revoked なら非表示（純関数導出・失敗時は null→非表示）", () => {
+    // refresh 完了（pending=false・loading=false）後は effectivePermissions =
+    // mePermissions ?? [] となり、refetch 成功時は provider が配布した最新権限から
+    // has() で再導出（granted→表示/revoked→非表示）。refetch 失敗時は provider が
+    // permissions=null に倒すため [] → 全 false → 非表示（fail-safe）。
+    expect(pageSrc).toMatch(/const effectivePermissions =/);
+    expect(pageSrc).toMatch(
+      /effectivePermissions\.some\(\s*\n?\s*\(p\) => p\.resource === resource && p\.action === "read" && p\.granted,?\s*\n?\s*\)/,
     );
   });
 
@@ -214,11 +258,13 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
     );
   });
 
-  it("権限付与・剥奪への追従: 導出は mePermissions の純関数（state 持ち越しなし）+ 進入時再確認", () => {
+  it("権限付与・剥奪への追従: 導出は context 値の純関数（state 持ち越しなし）+ 進入時再確認", () => {
     // refetch 成功 → provider が setPermissions(perms) → context 更新 → useMemo 再導出
     // → ボタン表示/非表示が最新権限に追従する。導出結果を useState に保持しない
     // （古い snapshot が残らない）ことをロックする。
-    expect(pageSrc).toMatch(/\}, \[mePermissions\]\);/);
+    expect(pageSrc).toMatch(
+      /\}, \[permissionsRefreshPending, permissionsLoading, mePermissions\]\);/,
+    );
     expect(pageSrc).not.toMatch(/useState[^\n]*canExportCsv/);
     expect(pageSrc).not.toMatch(/setCanExportCsv|setCanExportDm/);
   });
