@@ -617,12 +617,14 @@ describe("processRetroStripRow: race / 失敗系", () => {
     expect(calls.delete).toHaveLength(0);
   });
 
+  // ── Codex P2: uploaded.key 自体が canonical でないと DB 保存 URL（正規化後）と
+  //    storage 実体 key（非正規のまま）がズレる。canonical 検証で repoint を止める。
+
   it.each([
     ["traversal key", "../escape.jpg"],
     ["空 key", ""],
-    ["query 混入 key（保存 URL と key 導出が食い違う）", "field-survey/x?y.jpg"],
   ])(
-    "backend 返却 key が round-trip 不能（%s）なら repoint せず failed（正常行を不正行に書き換えない）",
+    "backend 返却 key が proxy URL に変換できない（%s）なら failed(InvalidUploadResultKey)・repoint も delete もしない",
     async (_label, badKey) => {
       const { ports, calls } = createFakes({
         files: { [OLD_KEY]: buildJpegWithApp1() },
@@ -635,12 +637,96 @@ describe("processRetroStripRow: race / 失敗系", () => {
         stage: "upload",
         errorName: "InvalidUploadResultKey",
         newKey: badKey,
+        compensationDeleted: false,
       });
       expect(calls.repoint).toHaveLength(0);
-      // 不正 key に対する delete も発行しない（traversal key で delete しない）
+      // 危険な key（traversal/空）は delete にも渡さない（旧データ破壊を最優先で回避）
       expect(calls.delete).toHaveLength(0);
     },
   );
+
+  it.each([
+    ["backslash key", `field-survey\\pins\\${PIN_ID}\\photos\\x.jpg`],
+    ["連続スラッシュ key", `field-survey//pins/${PIN_ID}/photos/x.jpg`],
+    ["先頭スラッシュ key", `/field-survey/pins/${PIN_ID}/photos/x.jpg`],
+  ])(
+    "backend が非 canonical key（%s）を返したら failed(NonCanonical)・repoint せず DB を更新しない・旧 key 不可侵（adapter が弾く形なので delete も発行しない）",
+    async (_label, nonCanonicalKey) => {
+      const { ports, calls } = createFakes({
+        files: { [OLD_KEY]: buildJpegWithApp1() },
+        uploadResult: { key: nonCanonicalKey },
+      });
+      const result = await processRetroStripRow(makeRow(), ports, { mode: "apply" });
+      expect(result).toEqual({
+        outcome: "failed",
+        photoId: PHOTO_ID,
+        stage: "upload",
+        errorName: "NonCanonicalUploadResultKey",
+        newKey: nonCanonicalKey,
+        compensationDeleted: false,
+      });
+      // DB（repoint）は新 URL へ更新されない
+      expect(calls.repoint).toHaveLength(0);
+      // 旧 key・非正規 key いずれも delete に渡さない（旧データ破壊回避を最優先）
+      expect(calls.delete).toHaveLength(0);
+    },
+  );
+
+  it("非 canonical だが構造的に有効な key（'?' 混入）は repoint せず、新 key のみ補償削除する（旧 key 不可侵）", async () => {
+    // '?' は isValidStorageKey 的には有効だが proxy URL で truncate され key 導出がズレる。
+    // この実体（新規 upload 分）だけは安全に補償削除できる（旧 key には触れない）。
+    const queryKey = `field-survey/pins/${PIN_ID}/photos/x?y.jpg`;
+    const { ports, calls } = createFakes({
+      files: { [OLD_KEY]: buildJpegWithApp1() },
+      uploadResult: { key: queryKey },
+    });
+    const result = await processRetroStripRow(makeRow(), ports, { mode: "apply" });
+    expect(result).toEqual({
+      outcome: "failed",
+      photoId: PHOTO_ID,
+      stage: "upload",
+      errorName: "NonCanonicalUploadResultKey",
+      newKey: queryKey,
+      compensationDeleted: true,
+    });
+    expect(calls.repoint).toHaveLength(0);
+    // 補償削除は新 key（backend が返した実体）のみ。旧 key には決して到達しない。
+    expect(calls.delete).toEqual([queryKey]);
+    expect(calls.delete).not.toContain(OLD_KEY);
+  });
+
+  it("非 canonical key の補償削除が throw しても swallow し compensationDeleted=false で返す（旧データ不変）", async () => {
+    const queryKey = `field-survey/pins/${PIN_ID}/photos/x?y.jpg`;
+    const { ports, calls } = createFakes({
+      files: { [OLD_KEY]: buildJpegWithApp1() },
+      uploadResult: { key: queryKey },
+      deleteThrows: true,
+    });
+    const result = await processRetroStripRow(makeRow(), ports, { mode: "apply" });
+    expect(result).toMatchObject({
+      outcome: "failed",
+      errorName: "NonCanonicalUploadResultKey",
+      compensationDeleted: false,
+    });
+    expect(calls.repoint).toHaveLength(0);
+    expect(calls.delete).not.toContain(OLD_KEY);
+  });
+
+  it("canonical key（旧 key と異なる正規 key）なら従来どおり成功する（回帰確認）", async () => {
+    const canonicalKey = `field-survey/pins/${PIN_ID}/photos/fresh-canonical.jpg`;
+    const { ports, calls } = createFakes({
+      files: { [OLD_KEY]: buildJpegWithApp1() },
+      uploadResult: { key: canonicalKey },
+    });
+    const result = await processRetroStripRow(makeRow(), ports, { mode: "apply" });
+    expect(result.outcome).toBe("repointed");
+    if (result.outcome !== "repointed") throw new Error("unreachable");
+    expect(result.newKey).toBe(canonicalKey);
+    expect(result.newFileUrl).toBe(`/uploads/${canonicalKey}`);
+    expect(calls.repoint).toHaveLength(1);
+    expect(calls.repoint[0].newFileUrl).toBe(`/uploads/${canonicalKey}`);
+    expect(calls.delete).toHaveLength(0);
+  });
 
   it.each([
     ["旧 key そのまま", OLD_KEY],
@@ -682,6 +768,20 @@ describe("retro-exif-strip: 規律", () => {
       { files: { [OLD_KEY]: MALFORMED_BYTES } }, // malformed
       { files: {} }, // missing
       { files: { [OLD_KEY]: buildJpegWithApp1() }, uploadThrows: true }, // failed
+      // non-canonical 返却 key（補償削除あり/なし）でも旧 key・旧 thumb は不可侵
+      {
+        files: { [OLD_KEY]: buildJpegWithApp1() },
+        uploadResult: { key: `field-survey/pins/${PIN_ID}/photos/x?y.jpg` },
+      }, // NonCanonical（補償削除 = 新 key のみ）
+      {
+        files: { [OLD_KEY]: buildJpegWithApp1() },
+        uploadResult: { key: `field-survey\\pins\\${PIN_ID}\\x.jpg` },
+      }, // NonCanonical（delete 非発行）
+      {
+        files: { [OLD_KEY]: buildJpegWithApp1() },
+        uploadResult: { key: OLD_KEY },
+        repointCount: 0,
+      }, // UploadKeyNotRotated（delete 非発行）
     ];
     for (const options of scenarios) {
       const { ports, calls } = createFakes(options);
@@ -754,7 +854,12 @@ describe("retro-exif-strip: 規律", () => {
     // 既存 utility の再利用（独自再実装しない）
     expect(src).toContain("stripFieldSurveyPhotoMetadata");
     expect(src).toContain("extractStorageKeyFromUrl");
-    // storage.delete の呼び出しは補償削除の 1 箇所のみ（cleanup 機能を持ち込まない）
-    expect(src.match(/storage\.delete\(/g)).toHaveLength(1);
+    expect(src).toContain("isValidStorageKey");
+    // storage.delete の呼び出しは「補償削除」2 箇所のみ（cleanup 機能は持ち込まない）:
+    //   ① 楽観ガード負け時の新 key 補償削除
+    //   ② canonical 検証失敗時の非正規 新 key 補償削除（isValidStorageKey gate 付き）
+    // いずれも対象は新 key のみ。旧 key を delete に渡す箇所は存在しない。
+    expect(src.match(/storage\.delete\(/g)).toHaveLength(2);
+    expect(src).not.toContain("storage.delete(oldKey)");
   });
 });

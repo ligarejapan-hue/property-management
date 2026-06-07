@@ -37,6 +37,7 @@
 import { randomUUID } from "node:crypto";
 import { stripFieldSurveyPhotoMetadata } from "./exif-strip";
 import { extractStorageKeyFromUrl } from "../storage/url-to-key";
+import { isValidStorageKey } from "../storage/key-validation";
 import { normalizeFileUrl } from "../url-normalize";
 import type { StorageAdapter } from "../storage/types";
 
@@ -155,8 +156,13 @@ export type RetroStripRowResult =
       stage: RetroStripFailStage;
       /** Error.name のみ（メッセージ本文は PII 混入リスクがあるため記録しない）。 */
       errorName: string;
-      /** upload 後に失敗した場合の新 key（孤児候補の記録。削除はしない）。 */
+      /** upload 後に失敗した場合の新 key（孤児候補の記録）。旧 key は決して含めない。 */
       newKey?: string;
+      /**
+       * 非 canonical な新 key を補償削除できたか（upload 段の non-canonical 失敗時のみ設定）。
+       * false = 新 key 孤児が残存し得る（cleanup 対象）。旧 key は常に不可侵。
+       */
+      compensationDeleted?: boolean;
     };
 
 // ---------------------------------------------------------------
@@ -282,30 +288,19 @@ export async function processRetroStripRow(
     return { outcome: "failed", photoId, stage: "upload", errorName: errorNameOf(error) };
   }
 
-  // backend は key を書き換えて返しうる（route と同様に返却 key を採用する）。
+  // backend が返した key（uploaded.key）をそのまま採用する前に検証する。
+  // newFileUrl は DB に保存する値、roundTripKey は「その URL から復元される key」。
+  // 注意: toUploadProxyUrl は backslash / 連続スラッシュ / 先頭スラッシュを正規化するため、
+  // 非正規 key でも newFileUrl だけ見ると正常に見えてしまう（= Codex P2 指摘）。
+  // よって uploaded.key 自体が canonical（= round-trip で同一）であることを要求する。
   const newKey = uploaded.key;
   const newFileUrl = toUploadProxyUrl(newKey);
-  // 防御 1: 返却 key が proxy URL と完全 round-trip しない場合は repoint しない。
-  //   - 復元不能（traversal / 空 / backslash）→ 正常な行を unmappable な行に
-  //     書き換えるのが最悪の失敗のため fail-closed。
-  //   - 復元結果が URL を再生成しない（'?' / '#' 混入等）→ 保存 URL と key 導出が
-  //     食い違う行を作らない。
-  //   いずれも newKey が信頼できない以上 delete も呼ばない。
   const roundTripKey = extractStorageKeyFromUrl(newFileUrl);
-  if (roundTripKey === null || toUploadProxyUrl(roundTripKey) !== newFileUrl) {
-    return {
-      outcome: "failed",
-      photoId,
-      stage: "upload",
-      errorName: "InvalidUploadResultKey",
-      newKey,
-    };
-  }
-  // 防御 2: backend が要求した新 key を無視して旧 key（と同一実体）を返した場合は
-  // 「key が回転していない = 旧実体が in-place 上書きされた疑い」。このまま進めると
-  // ガード負け時の補償削除が唯一の実体（旧 key）に到達し得るため fail-closed。
-  // ここで弾くことで「旧 key は delete に決して到達しない」が無条件に成立する。
-  if (roundTripKey === oldKey) {
+
+  // 防御 1（最優先）: 返却 key が（非正規スペルでも）旧 key を指す = key 未回転。
+  // in-place 上書きの疑いがあり、補償削除が唯一の実体（旧 key）に到達し得るため
+  // fail-closed。旧 key には絶対に触れない（delete しない）。
+  if (roundTripKey !== null && roundTripKey === oldKey) {
     return {
       outcome: "failed",
       photoId,
@@ -314,6 +309,43 @@ export async function processRetroStripRow(
       newKey,
     };
   }
+
+  // 防御 2: canonical key 要求。uploaded.key === extractStorageKeyFromUrl(その proxy URL)
+  // でなければ「DB 保存 URL（正規化後）」と「storage 実体 key（非正規のまま）」が食い違い、
+  // 写真参照や将来の cleanup 対象がズレる。該当ケース:
+  //   - roundTripKey === null : traversal / 空（そもそも proxy URL にできない）
+  //   - roundTripKey !== newKey: backslash / 連続スラッシュ / 先頭スラッシュ / '?' '#' 混入
+  // いずれも repoint しない。新 key は「安全に delete できる形（isValidStorageKey）」の
+  // ときのみ補償削除を試みる（旧 key には決して触れない・失敗は swallow し孤児として記録）。
+  if (roundTripKey === null || roundTripKey !== newKey) {
+    let compensationDeleted = false;
+    // isValidStorageKey が false の key（backslash / 連続スラッシュ / 先頭スラッシュ /
+    // traversal / 空）は delete に渡しても adapter が弾くだけなので試みない
+    // （旧データ破壊を最優先で避ける）。'?' '#' 混入のような「構造的には有効だが
+    // 非 canonical」な key のみ、その実体（新規 upload 分）を補償削除する。
+    if (isValidStorageKey(newKey)) {
+      try {
+        await ports.storage.delete(newKey);
+        compensationDeleted = true;
+      } catch {
+        // 補償削除失敗は致命にしない（新 key 孤児は非配信・cleanup 対象として記録）。
+      }
+    }
+    return {
+      outcome: "failed",
+      photoId,
+      stage: "upload",
+      errorName:
+        roundTripKey === null
+          ? "InvalidUploadResultKey"
+          : "NonCanonicalUploadResultKey",
+      newKey,
+      compensationDeleted,
+    };
+  }
+
+  // ここに到達 = roundTripKey === newKey（canonical）かつ ≠ oldKey。
+  // newFileUrl === `/uploads/${newKey}` で DB 保存値と storage 実体が一致する。
   const newThumbnailUrl = toProxyThumbnailUrl(uploaded.thumbnailUrl);
 
   let repointedCount: number;
