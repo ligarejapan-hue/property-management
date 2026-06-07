@@ -110,7 +110,7 @@ exiftool -a -G1 <file>                                   # 全タグ概観
 | 4-2 | ピン作成で「現在地を使う」 | 位置情報の許可ダイアログ → 現在地取得が成功する |
 | 4-3 | 写真追加の「カメラ」導線を押す | カメラが起動する（`<input capture="environment">` 由来・背面カメラ） |
 
-参考（仕様。確認は任意）: バナーは「http かつ 非 localhost」のときだけ表示される。
+参考（仕様。確認は任意）: バナーは「http かつ 非 localhost かつ secure context でない」ときだけ表示される。
 バナーは**表示のみで機能は止めない**（HTTP でもアップロード自体は可能。geolocation / カメラのみ不安定になる）。
 
 ---
@@ -228,7 +228,8 @@ exiftool -a -G1 <file>                                   # 全タグ概観
       **画像がそのまま表示されたら重大**（認可迂回。STORAGE_BACKEND=local の static 直配信の可能性。
       本番は server / s3 想定）→ 即報告
 - [ ] 10-3 （任意・別アカウントがある場合）他スタッフのアカウントで自分のピンの写真 URL を開く → 403
-      （`read_all` / `manage` を持つアカウントでは 200 になるのが仕様）
+      （`field_survey:read` に加えて `read_all` / `manage` を持つアカウント = 標準の office_staff / admin
+      テンプレートでは 200 になるのが仕様）
 - [ ] 10-4 （任意）DevTools Network で同じ写真を再読込 → 304 が返る（ETag による再検証。
       認可は毎回実施され、未ログインで If-None-Match を付けても 401 のまま = 認可前に 304 は返らない）
 - [ ] 10-5 （任意）レスポンスヘッダの Cache-Control が `private, max-age=3600` である
