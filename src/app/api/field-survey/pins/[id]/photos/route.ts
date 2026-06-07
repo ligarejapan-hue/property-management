@@ -11,6 +11,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage, validateFile, ALLOWED_PHOTO_MIMES } from "@/lib/storage";
+import { stripFieldSurveyPhotoMetadata } from "@/lib/field-survey/exif-strip";
 import { normalizeFileUrl, normalizeFileUrlsInRecord } from "@/lib/url-normalize";
 
 // storage key を app proxy 経由の相対 URL にする。絶対 URL / public URL は保存しない。
@@ -38,9 +39,15 @@ function toProxyThumbnailUrl(raw: string | undefined | null): string | null {
 // - 座標 / memo / EXIF は本テーブルに無い。レスポンスにも含めない。
 // - AuditLog は pin_photo_create / pin_photo_delete の操作事実 + ID のみ。
 //   URL / storageKey / fileName / 座標 / memo / PII は detail に書かない。
+// - 保存前に EXIF/GPS strip (stripFieldSurveyPhotoMetadata) を必ず通す。
+//   HEIC/HEIF と構造不正は 422 (fail-closed)。本 route 限定で、PropertyPhoto /
+//   BuildingPhoto / attachments には適用しない。
+//   詳細: docs/field-survey-photo-privacy-checklist.md §5/§6
 
 // storage key の拡張子は元 fileName ではなく MIME type から決める。
 // 許可 MIME 以外は validateFile で 422 になるため、ここに来るのは下記のみ。
+// (heic/heif は ALLOWED_PHOTO_MIMES に残るが、本 route では EXIF strip 未対応のため
+//  strip 段階で 422 になり key 生成まで到達しない。共有定数は変更しない。)
 const MIME_TO_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -130,13 +137,36 @@ export async function POST(
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    // 保存前 EXIF/GPS strip (PR #142 の pure utility・本 route 限定)。
+    // - image/heic / image/heif は strip 未対応のため 422 (docs §6 で決定済)。
+    // - 構造不正 (malformed) は fail-closed で 422 (原本をそのまま保存しない)。
+    // - エラーメッセージは fileName / key / 座標を含まない汎用文言のみ。
+    const stripResult = stripFieldSurveyPhotoMetadata(buffer, mimeType);
+    if (!stripResult.ok) {
+      if (stripResult.reason === "unsupported_mime") {
+        throw new ApiError(
+          422,
+          "この画像形式は現地調査写真では現在サポートされていません。JPEG / PNG / WebP を使用してください。",
+          "VALIDATION_ERROR",
+        );
+      }
+      throw new ApiError(
+        422,
+        "画像ファイルを処理できませんでした。",
+        "VALIDATION_ERROR",
+      );
+    }
+    // storage には strip 後の buffer のみを渡す (原本 buffer は保存しない)。
+    const uploadBuffer = stripResult.buffer;
+
     // 拡張子は MIME type から決定 (元 fileName の拡張子は信用しない)。
     // key には randomUUID を含め、同一 pin / 同一ミリ秒 upload でも衝突しない。
     const ext = MIME_TO_EXT[mimeType] ?? "bin";
     const key = `field-survey/pins/${id}/photos/${randomUUID()}.${ext}`;
 
     const storage = getStorage();
-    const result = await storage.upload(buffer, { key, mimeType, fileName });
+    const result = await storage.upload(uploadBuffer, { key, mimeType, fileName });
 
     // Codex P1: backend (例 server adapter) は絶対 URL を result.url で返しうる。
     // 絶対 URL を DB に保存すると /uploads 認可 proxy を迂回し、DELETE 時の
@@ -157,7 +187,9 @@ export async function POST(
         fileUrl: proxyFileUrl,
         thumbnailUrl: proxyThumbnailUrl,
         fileName,
-        fileSize,
+        // 保存実体は strip 後 buffer のため、そのサイズを記録する
+        // (PNG/WebP は chunk drop で縮み得る。JPEG zero-fill は長さ不変)。
+        fileSize: uploadBuffer.length,
         mimeType,
         uploadedByUserId: session.id,
         sortOrder: nextSort,

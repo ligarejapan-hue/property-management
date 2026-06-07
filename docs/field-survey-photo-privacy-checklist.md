@@ -41,28 +41,31 @@
 
 ---
 
-## 2. 残る gap（未実装・本 docs の主対象）
+## 2. 残る gap（本 docs の主対象）
 
-**アップロードされた画像ファイル本体の EXIF（GPS 含む）は、現在どの層でも除去されない。**
+**（2026-06-07 更新）新規アップロード分は、POST route が保存前に EXIF/GPS strip
+（`stripFieldSurveyPhotoMetadata`）を実行するようになった（route 接続済み・下記 5. 参照）。**
 
-- アップロード route は `Buffer.from(await file.arrayBuffer())` で受け取った生バイトを
-  **そのまま** `storage.upload()` に渡す（`validateFile` は MIME / サイズ判定のみで、バイト変換はしない）
-- storage adapter（local / server / s3）は **3 つとも生バイトを無加工で保存**する
-- `/uploads` 配信 proxy は **認可後に生バイトをそのまま返す**
+ただし、以下の gap / 残余は引き続き残る:
 
-つまり、調査端末のカメラが位置情報タグを付けて撮影した場合:
-
-- その **GPS タグは storage（at rest）に残り続ける**
-- 閲覧権限のあるユーザーがダウンロードしたファイルにも **GPS タグが残る**
-- 機種名・撮影日時などの付随 metadata も同様に残る
+- **route 接続前にアップロード済みの画像ファイルには EXIF GPS が残っている**
+  （遡及 strip は未実施・別タスク・要承認 = 下記 6.）
+- strip 対象は JPEG / PNG / WebP のみ。**HEIC / HEIF は本 route で 422 reject**（保存されない）
+- 残余（strip 対象外。utility 先頭コメント参照。「完全解消」ではない）:
+  **WebP の XMP chunk・PNG の iTXt / tEXt 系テキスト・JPEG の APPn (n≠1) / COM(コメント)
+  にベンダ・ユーザが書き込むメタデータ**。なお JPEG の Exif（MakerNote 含む）と
+  XMP（APP1）は PR #144 Codex review 対応で APP1 全 drop となり**残らなくなった**
+- storage adapter（local / server / s3）は引き続きバイト無加工で保存する
+  （strip は field-survey route 層の責務。adapter には入れない = 下記 4. 注意参照）
+- `/uploads` 配信 proxy は認可後に保存バイトをそのまま返す（新規分は strip 済バイト）
 
 補足:
 
 - DB / API レスポンス / audit の防衛（上記 1.）は **ファイルバイトには及ばない**。別レイヤの問題である
 - local backend（開発時）は `public/uploads/` 配下へ書き込むため、proxy を経ない static 配信経路があり得る
   （本番は server / s3 backend のため非該当）
-- 当面の運用緩和（任意・強制力なし）: 調査端末側でカメラアプリの位置情報タグを OFF にしておく。
-  ただし設定漏れを検知する手段はなく、**恒久対策は server 側 strip（下記 4.〜6.）**
+- 運用緩和（任意・強制力なし）: 調査端末側でカメラアプリの位置情報タグを OFF にしておく
+  （既存保存分と strip 残余への防御として引き続き有効）
 
 ---
 
@@ -72,11 +75,12 @@
 client <input type="file" accept="image/*" capture="environment">
   → File を無加工で FormData に append
   → POST /api/field-survey/pins/[id]/photos
-      validateFile(MIME allowlist + 8MB)    ← 判定のみ・変換なし
-      Buffer.from(await file.arrayBuffer()) ← 生バイト
-      storage.upload(buffer)                ← そのまま保存
-  → prisma.fieldSurveyPinPhoto.create（proxy 相対 fileUrl）
-  → GET /uploads/{key}（認可後、生バイトを返却）
+      validateFile(MIME allowlist + 8MB)            ← 判定のみ・変換なし
+      Buffer.from(await file.arrayBuffer())         ← 生バイト
+      stripFieldSurveyPhotoMetadata(buffer, mime)   ← EXIF/GPS strip（HEIC/HEIF・malformed は 422）
+      storage.upload(strippedBuffer)                ← strip 後バイトのみ保存
+  → prisma.fieldSurveyPinPhoto.create（proxy 相対 fileUrl・fileSize は strip 後サイズ）
+  → GET /uploads/{key}（認可後、保存バイトを返却）
 ```
 
 - MIME allowlist: `image/jpeg` / `image/png` / `image/webp` / `image/heic` / `image/heif`
@@ -111,45 +115,56 @@ client <input type="file" accept="image/*" capture="environment">
 
 **B0: field-survey route-level の pure TS strip**（承認後に別 PR で実装）。
 
-- 形式別の処理: JPEG = EXIF（APP1）内の GPS 情報を除去 / PNG = `eXIf` chunk 除去 /
+- 形式別の処理: JPEG = APP1 segment（Exif / XMP とも）を全 drop し Orientation のみ
+  最小 Exif として再注入 / PNG = `eXIf` chunk 除去 /
   WebP = RIFF 内 EXIF chunk 除去 / **HEIC・HEIF = 手書きパース困難なため方針承認が必要**（下記 6.）
 - lossless（画素データの再エンコードなし）のため画質・ファイルサイズに影響しない
 - route 内の server-side 処理のため、クライアントを差し替えても迂回できない
 - 合成バイト fixture（手組みの最小 JPEG/PNG/WebP バイト列）で実画像なしにテスト固定できる
   （vitest environment "node" と整合）
 
-ただし **下記 6. の方針がすべて承認されるまで実装しない**。
+進捗メモ:
 
-進捗メモ（POC・route 未接続）:
-
-- B0 の前段として、**route 未接続の pure utility** `src/lib/field-survey/exif-strip.ts`
-  （JPEG = GPS IFD zero-fill・Orientation 保持 / PNG = eXIf chunk drop /
-  WebP = EXIF chunk drop + RIFF size 再計算 / HEIC・HEIF = unsupported / 構造不正 = malformed）と
-  合成バイト fixture テスト `src/lib/__tests__/field-survey-exif-strip.test.ts` を追加済み。
-- **どの route / storage からも import されていないため、本番のアップロード挙動と
-  本 docs §2 の EXIF gap は未解消のまま**。route 接続（= gap 解消）は §6 の承認後に別 PR で行う。
-- MakerNote / XMP / PNG tEXt 系は POC の除去対象外（utility 先頭コメントに残余として明記）。
+- POC（PR #142）: pure utility `src/lib/field-survey/exif-strip.ts` と
+  合成バイト fixture テスト `src/lib/__tests__/field-survey-exif-strip.test.ts` を追加済み
+  （当初の JPEG 方式は GPS IFD zero-fill）。
+- **（2026-06-07）route 接続済み**: POST `/api/field-survey/pins/[id]/photos` が保存前に
+  utility を必ず通し、**strip 後 buffer のみ** `storage.upload()` に渡す
+  （HEIC/HEIF・malformed は 422。下記 6. の決定に基づく）。
+  これにより**新規アップロード分の §2 gap は解消**。既存保存分（遡及）と strip 残余は
+  §2 のとおり残る。
+- **（2026-06-07・PR #144 Codex review 対応）JPEG 方式を変更**: GPS IFD zero-fill は
+  GPS を含まない通常 EXIF（Make / Model / DateTimeOriginal / シリアル / ExifIFD /
+  MakerNote 等）を残すため不十分との指摘を受け、**APP1 全 drop + Orientation
+  （0x0112・値 1〜8）のみ最小 Exif（固定テンプレート）として再注入**に変更。
+  Exif 内部の異常は malformed にせず drop + 再注入なしへ倒す
+  （malformed = JPEG segment 構造の異常のみ）。
+- 適用は field-survey photos route 限定（PropertyPhoto / BuildingPhoto / attachments は非適用。
+  route test の source assertion でロック）。
 
 ---
 
-## 6. 実装前の承認事項（未決・実装ブロッカー）
+## 6. 実装方針の決定状況（2026-06-07 時点）
 
-- [ ] **HEIC / HEIF の扱い**: field-survey route でのみ 422 reject とするか
-  （共有定数 `ALLOWED_PHOTO_MIMES` は変更せず、field-survey route 側の分岐とする。
-  pass-through を選ぶと HEIC 経由の GPS gap が残る。iPhone 既定形式のため UX 影響の確認も必要）
-- [ ] **malformed（パース不能）画像の扱い**: fail-closed（422 で reject）とするか
-  （fail-open = 原本をそのまま保存は silent gap になる。fail-closed 推奨だが、正当な写真が
-  パーサ都合で弾かれる UX リスクの許容判断が必要）
-- [ ] **JPEG の除去方式**:
-  - GPS IFD のみ外科的削除（Orientation タグ保持 = 表示回転に影響なし。ただし MakerNote 内の
-    位置情報は理論上残り得る）
-  - APP1 全 drop + Orientation のみ最小 EXIF を再注入（MakerNote も消えるが実装が増える）
-  - ※ APP1 全 drop のみ（再注入なし）は、スマホ写真の大半が Orientation タグ依存のため
-    **表示が横倒しになる回帰リスクが高く非推奨**
-- [ ] **既存アップロード済み画像の遡及 strip**: 行うか（storage 内の走査・別タスク・別承認）
-- [ ] **PropertyPhoto には適用しないことの確認**（不変条件）:
+- [x] **HEIC / HEIF の扱い = field-survey route で 422 reject**（採用・実装済み）。
+  共有定数 `ALLOWED_PHOTO_MIMES` は変更せず、strip 段階の route 側分岐で 422 にする。
+  エラーメッセージは PII を含まない汎用文言
+  （「この画像形式は現地調査写真では現在サポートされていません。JPEG / PNG / WebP を使用してください。」）。
+  iPhone 既定形式のため UX 影響は実機検証（下記 7.）で確認する
+- [x] **malformed（パース不能）画像 = fail-closed（422 reject）**（採用・実装済み）。
+  原本をそのまま保存する fail-open は silent gap になるため不採用。
+  エラーメッセージは「画像ファイルを処理できませんでした。」（PII 非含有）
+- [x] **JPEG の除去方式 = APP1 全 drop + Orientation のみ最小 Exif 再注入**
+  （PR #144 Codex review 対応で GPS IFD zero-fill から変更・実装済み）。
+  Orientation（値 1〜8）が読めた場合のみ固定テンプレートの最小 APP1 を再注入 =
+  表示回転に影響なし。Make / Model / DateTime / GPS / ExifIFD / MakerNote / XMP は
+  一切保存しない。Exif 内部の異常は malformed にせず drop + 再注入なし
+- [ ] **既存アップロード済み画像の遡及 strip**: 未決のまま（route 接続 PR の対象外。
+  storage 内の走査が必要・別タスク・別承認）
+- [x] **PropertyPhoto には適用しない**（不変条件・維持）:
   PropertyPhoto の gpsLat / gpsLng / takenAt は物件ドキュメント用途で**意図的に保持**しており、
-  invariant test が保持を強制する。EXIF strip は FieldSurveyPinPhoto（field-survey route）限定とする
+  invariant test が保持を強制する。EXIF strip は FieldSurveyPinPhoto（field-survey route）限定
+  （route test の source assertion でもロック）
 
 ---
 

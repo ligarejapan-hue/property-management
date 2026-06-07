@@ -1,5 +1,6 @@
 /**
- * field-survey EXIF/GPS strip pure utility（POC・route 未接続）の合成バイト fixture テスト。
+ * field-survey EXIF/GPS strip pure utility（field-survey photos route に接続済み）の
+ * 合成バイト fixture テスト。route 側の結合テストは field-survey-pin-photos-route.test.ts。
  *
  * fixture ポリシー:
  *   - 実画像ファイルは一切追加しない。全 fixture はコード内で組み立てる合成バイト列のみ。
@@ -7,11 +8,15 @@
  *     「分母 0 の rational（数値として無効）」のセンチネルのみを埋め込む。
  *   - GPS 値センチネル（0xDEADBEEF / 0xFEEDFACE）は除去確認の検索キーを兼ねる。
  *
- * ロックする仕様:
- *   - JPEG: Exif APP1 内 GPS IFD の zero-fill（Orientation 0x0112 は保持・
- *     IFD0 の 0x8825 ポインタエントリは空 IFD 参照として残る = 設計通り）
+ * ロックする仕様（PR #144 Codex review 対応で JPEG 方式を変更）:
+ *   - JPEG: APP1 segment（Exif / XMP とも）を全 drop し、元 Exif の Orientation
+ *     （0x0112・値 1〜8）が読めた場合のみ「Orientation 1 タグだけの最小 Exif APP1
+ *     （LE 固定テンプレート）」を SOI 直後に再注入する。Make / Model /
+ *     DateTimeOriginal / シリアル / ExifIFD / MakerNote / GPS は一切保存しない
+ *   - malformed 境界: JPEG segment 構造の異常のみ malformed（fail-closed 連結用）。
+ *     Exif APP1 内部の異常は drop + 再注入なしに倒し、upload を拒否しない
  *   - PNG: eXIf chunk drop / WebP: EXIF chunk drop + RIFF size 再計算 + VP8X flag clear
- *   - HEIC/HEIF ほか未対応 MIME: unsupported_mime / 構造不正: malformed（fail-closed 連結用）
+ *   - HEIC/HEIF ほか未対応 MIME: unsupported_mime
  *   - 入力 buffer を mutate しない・changed=false 時は入力をそのまま返す
  */
 import { describe, it, expect } from "vitest";
@@ -80,6 +85,7 @@ function buildExifTiff(opts: {
   gpsValueOffsetOverride?: number;
   tiffMagicOverride?: number;
   gpsLatTypeOverride?: number;
+  orientationValueOverride?: number;
 }): ExifTiffFixture {
   const { le, withGps } = opts;
   const entryCount = withGps ? 2 : 1;
@@ -101,7 +107,7 @@ function buildExifTiff(opts: {
     0x0112,
     3,
     1,
-    Buffer.concat([u16(le, 6), u16(le, 0)]),
+    Buffer.concat([u16(le, opts.orientationValueOverride ?? 6), u16(le, 0)]),
   );
   const ifd0Entries = [orientationEntry];
   if (withGps) {
@@ -298,76 +304,199 @@ describe("fixture 健全性", () => {
 // JPEG
 // ---------------------------------------------------------------
 
-describe("stripFieldSurveyPhotoMetadata: JPEG (GPS IFD zero-fill)", () => {
-  it("APP1 Exif + GPS IFD を含む合成 JPEG を処理できる（ok:true / changed:true）", () => {
+/** 期待される最小 Orientation APP1（実装と独立に手書きしたリテラル。出力フォーマットをロック）。 */
+function expectedMinimalApp1(orientation: number): Buffer {
+  return Buffer.concat([
+    Buffer.from([0xff, 0xe1, 0x00, 0x22]), // marker + len(34 = payload 32 + 自身 2)
+    Buffer.from("Exif\0\0", "latin1"),
+    Buffer.from("II", "latin1"),
+    u16(true, 42),
+    u32(true, 8),
+    u16(true, 1),
+    tiffEntry(true, 0x0112, 3, 1, Buffer.concat([u16(true, orientation), u16(true, 0)])),
+    u32(true, 0),
+  ]);
+}
+
+/** 非 GPS EXIF の合成トークン（全て架空値。除去確認の検索キーを兼ねる）。 */
+const RICH_EXIF_TOKENS = [
+  "SyntheticCam", // Make (0x010F)
+  "SynthModel-9", // Model (0x0110)
+  "2026:01:01 00:00:00", // DateTimeOriginal (0x9003)
+  "SER1234567", // BodySerialNumber (0xA431)
+  "MKNOTE-SYNTH", // MakerNote (0x927C)
+] as const;
+
+/** Make / Model / Orientation / ExifIFD(DateTimeOriginal / Serial / MakerNote) を持つ Exif TIFF。 */
+function buildRichExifTiff(): Buffer {
+  const le = true;
+  const make = "SyntheticCam\0"; // 13
+  const model = "SynthModel-9\0"; // 13
+  const dto = "2026:01:01 00:00:00\0"; // 20
+  const serial = "SER1234567\0"; // 11
+  const makerNote = "MKNOTE-SYNTH"; // 12
+  const exifIfdOffset = 8 + 2 + 4 * 12 + 4; // IFD0 (count=4) 直後 = 62
+  const stringsOffset = exifIfdOffset + 2 + 3 * 12 + 4; // ExifIFD (count=3) 直後 = 104
+  const makeOff = stringsOffset;
+  const modelOff = makeOff + make.length;
+  const dtoOff = modelOff + model.length;
+  const serialOff = dtoOff + dto.length;
+  const makerNoteOff = serialOff + serial.length;
+  return Buffer.concat([
+    Buffer.from("II", "latin1"),
+    u16(le, 42),
+    u32(le, 8),
+    // IFD0: Make / Model / Orientation / ExifIFD ポインタ
+    u16(le, 4),
+    tiffEntry(le, 0x010f, 2, make.length, u32(le, makeOff)),
+    tiffEntry(le, 0x0110, 2, model.length, u32(le, modelOff)),
+    tiffEntry(le, 0x0112, 3, 1, Buffer.concat([u16(le, 6), u16(le, 0)])),
+    tiffEntry(le, 0x8769, 4, 1, u32(le, exifIfdOffset)),
+    u32(le, 0),
+    // ExifIFD: DateTimeOriginal / BodySerialNumber / MakerNote
+    u16(le, 3),
+    tiffEntry(le, 0x9003, 2, dto.length, u32(le, dtoOff)),
+    tiffEntry(le, 0xa431, 2, serial.length, u32(le, serialOff)),
+    tiffEntry(le, 0x927c, 7, makerNote.length, u32(le, makerNoteOff)),
+    u32(le, 0),
+    Buffer.from(make + model + dto + serial + makerNote, "latin1"),
+  ]);
+}
+
+describe("stripFieldSurveyPhotoMetadata: JPEG (APP1 全 drop + Orientation 最小再注入)", () => {
+  it("GPS 付き合成 JPEG: APP1 が drop され、期待バイト列（SOI + 最小 Orientation APP1 + 残り segment）と完全一致する", () => {
     const { jpeg } = buildJpeg({ tiff: buildExifTiff({ le: true, withGps: true }) });
     const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
     expectOk(result);
     expect(result.changed).toBe(true);
-    expect(result.buffer.length).toBe(jpeg.length); // zero-fill 方式なので長さ不変
-  });
-
-  it("GPS IFD を含む場合のみ changed=true（検知として機能する）", () => {
-    const withGps = buildJpeg({ tiff: buildExifTiff({ le: true, withGps: true }) });
-    const withoutGps = buildJpeg({ tiff: buildExifTiff({ le: true, withGps: false }) });
-    const r1 = stripFieldSurveyPhotoMetadata(withGps.jpeg, "image/jpeg");
-    const r2 = stripFieldSurveyPhotoMetadata(withoutGps.jpeg, "image/jpeg");
-    expectOk(r1);
-    expectOk(r2);
-    expect(r1.changed).toBe(true);
-    expect(r2.changed).toBe(false);
-    // changed=false 時は入力 buffer をそのまま返す
-    expect(r2.buffer).toBe(withoutGps.jpeg);
-  });
-
-  it("GPS 削除後に GPS センチネル値・GPS IFD エントリが残らない", () => {
-    const fixture = buildExifTiff({ le: true, withGps: true });
-    const { jpeg, tiffAbsStart } = buildJpeg({ tiff: fixture });
+    const expected = Buffer.concat([
+      Buffer.from([0xff, 0xd8]),
+      expectedMinimalApp1(6),
+      jpegSegment(0xdb, Buffer.from([0x00, 0x01])),
+      jpegSegment(0xda, Buffer.from([0x01, 0x00])),
+      Buffer.from([0x12, 0x34, 0xff, 0xd9]),
+    ]);
+    expect(result.buffer.equals(expected)).toBe(true);
     for (const sentinel of sentinelBuffers(true)) {
-      expect(jpeg.indexOf(sentinel)).toBeGreaterThanOrEqual(0); // 前提: 入力には含まれる
+      expect(result.buffer.indexOf(sentinel)).toBe(-1);
     }
+  });
+
+  it("非 GPS EXIF（Make/Model/DateTimeOriginal/Serial/ExifIFD/MakerNote）も保存されない", () => {
+    const { jpeg } = buildJpeg({
+      tiff: { tiff: buildRichExifTiff(), gps: null, orientationValueOffset: 0 },
+    });
+    for (const token of RICH_EXIF_TOKENS) {
+      expect(jpeg.indexOf(Buffer.from(token, "latin1"))).toBeGreaterThanOrEqual(0); // 前提
+    }
+    const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
+    expectOk(result);
+    expect(result.changed).toBe(true);
+    for (const token of RICH_EXIF_TOKENS) {
+      expect(result.buffer.indexOf(Buffer.from(token, "latin1"))).toBe(-1);
+    }
+    // Orientation だけは最小 APP1 として SOI 直後 (offset 2) に再注入される
+    expect(result.buffer.indexOf(expectedMinimalApp1(6))).toBe(2);
+  });
+
+  it("Orientation のみの Exif（= 本 utility の最小出力と同形）は無変更（changed=false・同一参照）", () => {
+    const withoutGps = buildJpeg({ tiff: buildExifTiff({ le: true, withGps: false }) });
+    const result = stripFieldSurveyPhotoMetadata(withoutGps.jpeg, "image/jpeg");
+    expectOk(result);
+    expect(result.changed).toBe(false);
+    expect(result.buffer).toBe(withoutGps.jpeg);
+  });
+
+  it("APP1 の無い JPEG は changed=false で入力をそのまま返す", () => {
+    const { jpeg } = buildJpeg({});
+    const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
+    expectOk(result);
+    expect(result.changed).toBe(false);
+    expect(result.buffer).toBe(jpeg);
+  });
+
+  it("Orientation の無い Exif APP1 は drop され、何も再注入されない", () => {
+    const le = true;
+    // IFD0 に Make 相当 1 エントリのみ（inline 値・Orientation 無し）
+    const tiff = Buffer.concat([
+      Buffer.from("II", "latin1"),
+      u16(le, 42),
+      u32(le, 8),
+      u16(le, 1),
+      tiffEntry(le, 0x010f, 2, 4, Buffer.from("AB9\0", "latin1")),
+      u32(le, 0),
+    ]);
+    const { jpeg } = buildJpeg({ tiff: { tiff, gps: null, orientationValueOffset: 0 } });
+    const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
+    expectOk(result);
+    expect(result.changed).toBe(true);
+    expect(result.buffer.indexOf(Buffer.from("Exif\0\0", "latin1"))).toBe(-1);
+    expect(result.buffer.indexOf(Buffer.from([0xff, 0xe1]))).toBe(-1); // APP1 marker 自体が無い
+    expect(result.buffer.indexOf(Buffer.from("AB9", "latin1"))).toBe(-1);
+  });
+
+  it("Orientation が IFD1（next-IFD チェーン先）にあっても読めて再注入される", () => {
+    const le = true;
+    const ifd1Offset = 8 + 2 + 12 + 4; // IFD0 (count=1) 直後 = 26
+    const tiff = Buffer.concat([
+      Buffer.from("II", "latin1"),
+      u16(le, 42),
+      u32(le, 8),
+      // IFD0: Make 相当のみ・next-IFD → IFD1
+      u16(le, 1),
+      tiffEntry(le, 0x010f, 2, 4, Buffer.from("AB9\0", "latin1")),
+      u32(le, ifd1Offset),
+      // IFD1: Orientation=3 のみ・next=0
+      u16(le, 1),
+      tiffEntry(le, 0x0112, 3, 1, Buffer.concat([u16(le, 3), u16(le, 0)])),
+      u32(le, 0),
+    ]);
+    const { jpeg } = buildJpeg({ tiff: { tiff, gps: null, orientationValueOffset: 0 } });
+    const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
+    expectOk(result);
+    expect(result.changed).toBe(true);
+    expect(result.buffer.indexOf(expectedMinimalApp1(3))).toBe(2);
+    expect(result.buffer.indexOf(Buffer.from("AB9", "latin1"))).toBe(-1);
+  });
+
+  it("Orientation 値が 1〜8 以外なら再注入しない（APP1 は drop）", () => {
+    const { jpeg } = buildJpeg({
+      tiff: buildExifTiff({ le: true, withGps: true, orientationValueOverride: 9 }),
+    });
+    const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
+    expectOk(result);
+    expect(result.changed).toBe(true);
+    expect(result.buffer.indexOf(Buffer.from("Exif\0\0", "latin1"))).toBe(-1);
+    for (const sentinel of sentinelBuffers(true)) {
+      expect(result.buffer.indexOf(sentinel)).toBe(-1);
+    }
+  });
+
+  it("Exif APP1 内部が解釈できない（TIFF magic 不正）場合は malformed にせず drop・再注入なし", () => {
+    // malformed 境界: JPEG segment 構造の異常のみ 422 対象。捨てる対象である
+    // Exif 内部の異常では upload を拒否しない（メタデータは何も残らない側に倒す）。
+    const { jpeg } = buildJpeg({
+      tiff: buildExifTiff({ le: true, withGps: true, tiffMagicOverride: 43 }),
+    });
+    const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
+    expectOk(result);
+    expect(result.changed).toBe(true);
+    expect(result.buffer.indexOf(Buffer.from("Exif\0\0", "latin1"))).toBe(-1);
+    for (const sentinel of sentinelBuffers(true)) {
+      expect(result.buffer.indexOf(sentinel)).toBe(-1);
+    }
+  });
+
+  it("GPS offset が範囲外の壊れた Exif でも APP1 ごと drop され何も残らない（Orientation は再注入）", () => {
+    const { jpeg } = buildJpeg({
+      tiff: buildExifTiff({ le: true, withGps: true, gpsIfdOffsetOverride: 0xffff }),
+    });
     const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
     expectOk(result);
     for (const sentinel of sentinelBuffers(true)) {
       expect(result.buffer.indexOf(sentinel)).toBe(-1);
     }
-    const gps = fixture.gps;
-    expect(gps).not.toBeNull();
-    if (!gps) return;
-    // GPS IFD は entry count = 0 の空 IFD になり、entries / next pointer / 値も全て 0
-    const zeroedRegionA = result.buffer.subarray(
-      tiffAbsStart + gps.ifdStart,
-      tiffAbsStart + gps.ifdEnd,
-    );
-    const zeroedRegionB = result.buffer.subarray(
-      tiffAbsStart + gps.valueStart,
-      tiffAbsStart + gps.valueEnd,
-    );
-    expect(zeroedRegionA.every((b) => b === 0)).toBe(true);
-    expect(zeroedRegionB.every((b) => b === 0)).toBe(true);
-    // 設計どおり IFD0 側の GPSInfo ポインタタグ (0x8825) 自体は「空 IFD への参照」
-    // として残る（offset を動かさないため）。値は上で全て 0 であることを確認済み。
-    const ifd0Entry1 = tiffAbsStart + 8 + 2 + 12; // IFD0 2 本目のエントリ
-    expect(result.buffer.readUInt16LE(ifd0Entry1)).toBe(0x8825);
-  });
-
-  it("GPS 領域以外は 1 byte も変えない（期待バイト列と完全一致・Orientation 保持）", () => {
-    const fixture = buildExifTiff({ le: true, withGps: true });
-    const { jpeg, tiffAbsStart } = buildJpeg({ tiff: fixture });
-    const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
-    expectOk(result);
-    const gps = fixture.gps;
-    expect(gps).not.toBeNull();
-    if (!gps) return;
-    // 期待値 = 入力の GPS IFD / GPS 値領域のみを手動で zero-fill したもの
-    const expected = Buffer.from(jpeg);
-    expected.fill(0, tiffAbsStart + gps.ifdStart, tiffAbsStart + gps.ifdEnd);
-    expected.fill(0, tiffAbsStart + gps.valueStart, tiffAbsStart + gps.valueEnd);
-    expect(result.buffer.equals(expected)).toBe(true);
-    // Orientation (0x0112) は値 6 のまま保持される
-    expect(
-      result.buffer.readUInt16LE(tiffAbsStart + fixture.orientationValueOffset),
-    ).toBe(6);
+    expect(result.buffer.indexOf(expectedMinimalApp1(6))).toBe(2);
   });
 
   it("入力 buffer を mutate しない", () => {
@@ -379,18 +508,15 @@ describe("stripFieldSurveyPhotoMetadata: JPEG (GPS IFD zero-fill)", () => {
     expect(result.buffer).not.toBe(jpeg); // changed=true 時は copy を返す
   });
 
-  it("big-endian (MM) の TIFF でも GPS を除去し Orientation を保持する", () => {
-    const fixture = buildExifTiff({ le: false, withGps: true });
-    const { jpeg, tiffAbsStart } = buildJpeg({ tiff: fixture });
+  it("big-endian (MM) の Exif からも Orientation を読み、最小 APP1 (LE 固定) を再注入する", () => {
+    const { jpeg } = buildJpeg({ tiff: buildExifTiff({ le: false, withGps: true }) });
     const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
     expectOk(result);
     expect(result.changed).toBe(true);
     for (const sentinel of sentinelBuffers(false)) {
       expect(result.buffer.indexOf(sentinel)).toBe(-1);
     }
-    expect(
-      result.buffer.readUInt16BE(tiffAbsStart + fixture.orientationValueOffset),
-    ).toBe(6);
+    expect(result.buffer.indexOf(expectedMinimalApp1(6))).toBe(2);
   });
 
   it("冪等: 一度 strip した出力をもう一度処理すると changed=false で同一バイト", () => {
@@ -403,12 +529,14 @@ describe("stripFieldSurveyPhotoMetadata: JPEG (GPS IFD zero-fill)", () => {
     expect(second.buffer.equals(first.buffer)).toBe(true);
   });
 
-  it("非 Exif APP1（XMP）は対象外として素通しする（changed=false・残余は docs/コメントに明記）", () => {
+  it("非 Exif APP1（XMP）も drop され、メタデータも再注入も残らない", () => {
     const { jpeg } = buildJpeg({ xmpApp1: true });
+    expect(jpeg.indexOf(Buffer.from("xmpmeta", "latin1"))).toBeGreaterThanOrEqual(0); // 前提
     const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
     expectOk(result);
-    expect(result.changed).toBe(false);
-    expect(result.buffer).toBe(jpeg);
+    expect(result.changed).toBe(true);
+    expect(result.buffer.indexOf(Buffer.from("xmpmeta", "latin1"))).toBe(-1);
+    expect(result.buffer.indexOf(Buffer.from([0xff, 0xe1]))).toBe(-1); // Orientation 不明のため再注入なし
   });
 
   it("MIME type は大文字小文字を区別しない", () => {
@@ -418,7 +546,7 @@ describe("stripFieldSurveyPhotoMetadata: JPEG (GPS IFD zero-fill)", () => {
     expect(result.changed).toBe(true);
   });
 
-  it("Exif APP1 が複数あれば全ての GPS IFD を zero-fill する", () => {
+  it("Exif APP1 が複数あっても全て drop され、最小 APP1 は 1 つだけ再注入される", () => {
     const exifPayload = (): Buffer =>
       Buffer.concat([
         Buffer.from("Exif\0\0", "latin1"),
@@ -441,6 +569,9 @@ describe("stripFieldSurveyPhotoMetadata: JPEG (GPS IFD zero-fill)", () => {
     for (const s of sentinelBuffers(true)) {
       expect(result.buffer.indexOf(s)).toBe(-1); // 2 箇所とも消えている
     }
+    // APP1 marker は再注入分の 1 つ（SOI 直後）だけ
+    expect(result.buffer.indexOf(expectedMinimalApp1(6))).toBe(2);
+    expect(result.buffer.lastIndexOf(Buffer.from([0xff, 0xe1]))).toBe(2);
   });
 
   it("GPS IFD ポインタが IFD1（next-IFD チェーン先）にあっても除去する", () => {
@@ -478,16 +609,15 @@ describe("stripFieldSurveyPhotoMetadata: JPEG (GPS IFD zero-fill)", () => {
       gps: null,
       orientationValueOffset: 8 + 2 + 8,
     };
-    const { jpeg, tiffAbsStart } = buildJpeg({ tiff: fixture });
+    const { jpeg } = buildJpeg({ tiff: fixture });
     const result = stripFieldSurveyPhotoMetadata(jpeg, "image/jpeg");
     expectOk(result);
     expect(result.changed).toBe(true);
     for (const s of sentinelBuffers(le)) {
       expect(result.buffer.indexOf(s)).toBe(-1);
     }
-    expect(
-      result.buffer.readUInt16LE(tiffAbsStart + fixture.orientationValueOffset),
-    ).toBe(6);
+    // Orientation は IFD0 から読まれ、最小 APP1 として再注入される
+    expect(result.buffer.indexOf(expectedMinimalApp1(6))).toBe(2);
   });
 
   it("marker 前に連続する 0xFF fill byte があっても処理できる", () => {
@@ -529,33 +659,9 @@ describe("stripFieldSurveyPhotoMetadata: JPEG malformed（fail-closed 連結用�
     expectMalformed(broken);
   });
 
-  it("TIFF magic が 42 でない", () => {
-    const { jpeg } = buildJpeg({
-      tiff: buildExifTiff({ le: true, withGps: true, tiffMagicOverride: 43 }),
-    });
-    expectMalformed(jpeg);
-  });
-
-  it("GPS IFD offset が APP1 segment 外を指す", () => {
-    const { jpeg } = buildJpeg({
-      tiff: buildExifTiff({ le: true, withGps: true, gpsIfdOffsetOverride: 0xffff }),
-    });
-    expectMalformed(jpeg);
-  });
-
-  it("GPS 値 offset が APP1 segment 外を指す", () => {
-    const { jpeg } = buildJpeg({
-      tiff: buildExifTiff({ le: true, withGps: true, gpsValueOffsetOverride: 0xffff }),
-    });
-    expectMalformed(jpeg);
-  });
-
-  it("GPS エントリの TIFF 型が不明", () => {
-    const { jpeg } = buildJpeg({
-      tiff: buildExifTiff({ le: true, withGps: true, gpsLatTypeOverride: 200 }),
-    });
-    expectMalformed(jpeg);
-  });
+  // 注: Exif APP1 「内部」の異常（TIFF magic 不正・GPS offset 範囲外等）は malformed に
+  // しない（APP1 ごと drop されるため。前 describe の lenient テスト参照）。
+  // malformed は JPEG の segment 構造の異常のみ。
 
   it("SOS が無い（segment 列のみで終端）", () => {
     const { jpeg } = buildJpeg({
