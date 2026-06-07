@@ -281,8 +281,19 @@ exiftool -a -G1 <file>                                   # 全タグ概観
 
 - [ ] 13-1 検証ピンの写真を UI からすべて削除する（自分のピン + `field_survey:write` で削除可能）
 - [ ] 13-2 削除後、写真一覧から消えたこと・拡大プレビューが開けないことを確認する
-- [ ] 13-3 削除した写真の `/uploads/{key}` をログイン済みブラウザで直開き → **404**。
-      200 のままなら storage 実体の削除漏れ（orphan。実体削除は best-effort 設計のため起こり得る）→ 報告する
+- [ ] 13-3 削除した写真の `/uploads/{key}` をログイン済みブラウザで直開き → **404**
+      （= **アプリ経由で配信されなくなったこと**の確認）。
+      なお `/uploads/{key}` は storage 実体を読む前に **DB 参照ベースで認可判断**する
+      （`authorizeFieldSurveyPinPhoto`: 写真の DB 行から解決した pin が無ければ `not_found` → 404）。
+      よって **UI 削除で DB 行が消えると、storage 実体が残っていても 404 になり得る**。
+      この 404 は storage 実体の削除完了や orphan 不在の証明には**ならない**
+
+> **orphan（storage 実体の削除漏れ）確認は本チェックリストのスコープ外**。
+> 実体削除は best-effort 設計のため、API 削除が成功しても実体が残る可能性がある。
+> 確認するには backend / storage レベルの直接点検（local backend なら `public/uploads/` 配下の
+> 実ファイル走査、s3 / server backend なら該当 backend 側の存在確認）か、
+> **削除前後で実体の有無を突き合わせる専用検証**が別途必要。
+> orphan の有無を厳密に追う場合は**別タスク（バックエンド検証）**として扱う。
 - [ ] 13-4 検証ピン自体を削除（または archive）する。**写真削除 → ピン削除 / archive の順**を守る
       （archived ピンの写真は操作できなくなるため）
 - [ ] 13-5 PC・実機に残したテスト資産（GPS 付き JPEG / ダミー PNG / WebP / malformed ファイル等）を削除する
