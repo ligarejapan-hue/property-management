@@ -26,9 +26,13 @@ const apiHelpersSrc = fs.readFileSync(
 // ── P2: CSV出力ボタンの権限制御 ─────────────────────────────────────────────
 
 describe("properties page: CSV出力ボタンの権限制御 (P2)", () => {
-  it("canExportCsv state を持ち、/api/me/permissions から権限を取得する", () => {
-    expect(pageSrc).toMatch(/setCanExportCsv/);
-    expect(pageSrc).toMatch(/fetch\("\/api\/me\/permissions"\)/);
+  it("canExportCsv を provider 配布の permissions から導出する（F12-2: ページ独自 fetch なし）", () => {
+    // F12-2(17-C): /api/me/permissions は ScreenProtectionProvider が 1 回取得して
+    // context 配布する。ページは useScreenProtection() の permissions から導出し、
+    // 同一エンドポイントへの重複 fetch を持たない。
+    expect(pageSrc).toMatch(/useScreenProtection\(\)/);
+    expect(pageSrc).toMatch(/canExportCsv/);
+    expect(pageSrc).not.toMatch(/fetch\("\/api\/me\/permissions"\)/);
   });
 
   it("csv_export と csv_export_personal の両方を要求する（export API と同条件）", () => {
@@ -45,8 +49,10 @@ describe("properties page: CSV出力ボタンの権限制御 (P2)", () => {
     expect(buttonIdx).toBeGreaterThan(guardIdx);
   });
 
-  it("権限取得失敗時は canExportCsv を false にする（誤って遷移させない）", () => {
-    expect(pageSrc).toMatch(/catch\([\s\S]*?setCanExportCsv\(false\)/);
+  it("権限未取得・取得失敗時（permissions=null）は false のまま（誤って遷移させない）", () => {
+    // provider が未取得/失敗のとき permissions は null → `?? []` で空配列に倒し、
+    // has(...) が全て false ＝ボタン非表示（従来の catch→false と同じ fail-safe）。
+    expect(pageSrc).toMatch(/mePermissions\s*\?\?\s*\[\]/);
   });
 
   it("既存の新規物件登録ボタン・検索・フィルタ挙動は維持されている", () => {

@@ -2,8 +2,10 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -34,16 +36,50 @@ import ScreenProtectionGuard from "./screen-protection-guard";
  * スコープ外（後続 PR）: copy/cut/contextmenu/print 抑止・クライアント監査・
  * registry PDF preview/download enforcement。本 Provider はそれらを一切行わない。
  * context は将来 S1b-3 が bypass 状態を参照できるよう公開する。
+ *
+ * F12-2(17-C): provider が既に取得している /api/me/permissions の結果
+ * （permissions / capabilities）を context で配布する。配布のみで、
+ * 権限判定そのもの（bypass・各ページのボタン出し分け条件）は変更しない。
+ * これにより各ページの同一エンドポイント重複 fetch を撤去できる。
+ * fail-safe: permissions=null（未取得・取得失敗）を消費側は「権限なし」として
+ * 扱うこと（広く許可しない）。capabilities も同様に null = 機能なし扱い。
  */
+
+/** /api/me/permissions の capabilities（boolean のみ・PR#141 の route test で契約固定済）。 */
+export interface MeCapabilities {
+  corporateLookup: boolean;
+  registryAutoFetch: boolean;
+}
 
 interface ScreenProtectionState {
   bypass: boolean;
   watermarkText: string | null;
+  /** F12-2: 取得済み permissions。null = 未取得 or 取得失敗（= 権限なし扱い・fail-safe）。 */
+  permissions: PermissionEntry[] | null;
+  /** F12-2: 取得済み capabilities。null = 未取得 or 取得失敗（= 機能なし扱い・fail-safe）。 */
+  capabilities: MeCapabilities | null;
+  /** F12-2: /api/me/permissions の取得中フラグ（初期 true）。 */
+  permissionsLoading: boolean;
+  /** F12-2: 取得失敗（ネットワークエラー・非 2xx）フラグ。 */
+  permissionsError: boolean;
+  /**
+   * F12-2 Codex 対応: 復旧・鮮度再確認の導線。初回 mount 時の fetch と同じ処理を
+   * 再実行し、完了で解決する Promise を返す（in-flight 中は進行中の同一 Promise を
+   * 返して dedupe = 多重実行防止）。consumer は完了を待って表示判定に使える。
+   */
+  refetchPermissions: () => Promise<void>;
 }
 
 const ScreenProtectionContext = createContext<ScreenProtectionState>({
   bypass: false,
   watermarkText: null,
+  // provider 外で参照された場合も fail-safe（権限なし・取得中扱い）に倒す。
+  permissions: null,
+  capabilities: null,
+  permissionsLoading: true,
+  permissionsError: false,
+  // provider 外では no-op（何も取得しない＝広く許可しない側のまま）。
+  refetchPermissions: () => Promise.resolve(),
 });
 
 export function useScreenProtection(): ScreenProtectionState {
@@ -58,6 +94,11 @@ export default function ScreenProtectionProvider({
   const { data: session, status } = useSession();
   // fail-safe: 判定が確定するまで bypass=false（= 透かし表示側）。
   const [bypass, setBypass] = useState(false);
+  // F12-2: 配布用。null のまま = 未取得 or 取得失敗（消費側は「権限なし」として扱う）。
+  const [permissions, setPermissions] = useState<PermissionEntry[] | null>(null);
+  const [capabilities, setCapabilities] = useState<MeCapabilities | null>(null);
+  const [permissionsLoading, setPermissionsLoading] = useState(true);
+  const [permissionsError, setPermissionsError] = useState(false);
   // mount 時刻。SSR/hydration mismatch 回避のためクライアントの effect で一度だけ確定する。
   const [mountedAt, setMountedAt] = useState<Date | null>(null);
 
@@ -65,22 +106,73 @@ export default function ScreenProtectionProvider({
     setMountedAt(new Date());
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    fetch("/api/me/permissions")
+  // F12-2 Codex 対応: unmount 後の setState 防止（共有 load 関数は effect 外のため ref 管理）。
+  const mountedRef = useRef(true);
+  // F12-2 Codex 対応: 多重実行防止。in-flight 中の呼び出しには進行中の同一 Promise を
+  // 返して dedupe する（StrictMode の二重 effect・consumer からの連続呼び出しでも
+  // fetch は同時に 1 本。呼び出し側はその完了を await できる）。
+  const inFlightRef = useRef<Promise<void> | null>(null);
+
+  // F12-2 Codex 対応: 初回 mount と refetch で共通の取得処理（完了で解決する Promise を返す）。
+  // transient な失敗（一時的な 5xx・ネットワーク断）で layout 生存中ずっと
+  // permissions=null が残り、consumer のボタンが full reload まで復旧しない問題への
+  // 復旧導線として、context の refetchPermissions からも再実行できるようにする。
+  const loadPermissions = useCallback((): Promise<void> => {
+    if (inFlightRef.current) return inFlightRef.current;
+    setPermissionsLoading(true);
+    const run = fetch("/api/me/permissions")
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
-        if (!active || !json) return;
+        if (!mountedRef.current) return;
+        if (!json) {
+          // 非 2xx = 信頼できる permissions 応答が得られていない。配布しない
+          // （permissions=null = 権限なし扱い）だけでなく、bypass も false
+          // （透かし表示側）へ倒す（Codex 対応3: bypass 剥奪後に refetch が
+          // 失敗しても古い bypass=true が残らない）。
+          setBypass(false);
+          setPermissions(null);
+          setCapabilities(null);
+          setPermissionsLoading(false);
+          setPermissionsError(true);
+          return;
+        }
         const perms = (json.permissions ?? []) as PermissionEntry[];
         setBypass(isScreenProtectionBypassed(perms));
+        // F12-2: 取得結果を配布する。capabilities は boolean のみを厳格に通す
+        // （=== true 以外は false に倒す = 広く許可しない）。
+        setPermissions(perms);
+        setCapabilities({
+          corporateLookup: json.capabilities?.corporateLookup === true,
+          registryAutoFetch: json.capabilities?.registryAutoFetch === true,
+        });
+        setPermissionsError(false);
+        setPermissionsLoading(false);
       })
       .catch(() => {
-        // 取得失敗時は fail-safe（透かし表示）のまま保持する。
+        // 取得失敗時も同一の fail-safe 一式へ倒す: permissions/capabilities=null
+        // （権限なし扱い）+ bypass=false（透かし表示側）+ error 通知
+        // （Codex 対応3: 信頼できる応答が無いときは bypass を維持しない）。
+        if (!mountedRef.current) return;
+        setBypass(false);
+        setPermissions(null);
+        setCapabilities(null);
+        setPermissionsLoading(false);
+        setPermissionsError(true);
+      })
+      .finally(() => {
+        inFlightRef.current = null;
       });
-    return () => {
-      active = false;
-    };
+    inFlightRef.current = run;
+    return run;
   }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    loadPermissions();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [loadPermissions]);
 
   // 認証確定 + mount 後、かつ識別情報がある場合のみ透かし文言を生成（汎用透かしを出さない）。
   const watermarkText =
@@ -96,7 +188,17 @@ export default function ScreenProtectionProvider({
   // bypass されておらず、traceability 可能な文言が得られている場合のみ表示する
   // （watermarkText !== null を JSX 内で判定し、Overlay には string を渡す）。
   return (
-    <ScreenProtectionContext.Provider value={{ bypass, watermarkText }}>
+    <ScreenProtectionContext.Provider
+      value={{
+        bypass,
+        watermarkText,
+        permissions,
+        capabilities,
+        permissionsLoading,
+        permissionsError,
+        refetchPermissions: loadPermissions,
+      }}
+    >
       {children}
       {!bypass && watermarkText !== null && (
         <WatermarkOverlay text={watermarkText} />

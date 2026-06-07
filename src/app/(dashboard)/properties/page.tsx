@@ -7,6 +7,7 @@ import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
 import { debounce } from "@/lib/debounce";
 import NewPropertyModal from "@/components/properties/new-property-modal";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import StatusBadge, {
   badgeIntentClass,
   REGISTRY_STATUS_INTENT,
@@ -134,13 +135,86 @@ function PropertiesPageInner() {
   // 担当者プルダウン用ユーザー一覧
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
 
+  // F12-2(17-C): /api/me/permissions は ScreenProtectionProvider（dashboard 全体を覆う）
+  // が mount 時に 1 回取得して context 配布するため、ページ独自の重複 fetch は撤去し
+  // provider 配布値から導出する。未取得・取得失敗時は permissions=null → 全て false の
+  // まま＝ボタン非表示（従来の「取得失敗時は false」と同じ fail-safe・緩めない）。
+  const {
+    permissions: mePermissions,
+    permissionsLoading,
+    refetchPermissions,
+  } = useScreenProtection();
+
+  // F12-2 Codex 対応(2): 権限鮮度の再確認。App Router の layout は client navigation で
+  // 保持されるため、provider の mount 時 1 回 fetch だけでは dashboard 滞在中の
+  // 権限付与・剥奪に追従できない（旧実装はこのページが mount 毎に独自 fetch して
+  // いたため、properties に戻ったタイミングで最新権限を拾えていた）。その鮮度を
+  // provider 経由で復元する: このページ進入（mount）あたり最大 1 回だけ
+  // refetchPermissions() を呼ぶ。初回の transient 失敗からの復旧導線も兼ねる。
+  // - provider の取得が進行中（permissionsLoading）の間は呼ばない＝初回 dashboard
+  //   mount 時の fetch と重複させない（同時 2 本に戻さない）。
+  // - mount 時に進行中だった取得が成功した場合は、その結果がこのページ進入分の
+  //   鮮度を満たすため追加 fetch しない。失敗した場合（permissions===null）は
+  //   復旧として 1 回だけ再取得する。
+  // - mount 時点で取得完了済みだった場合（client navigation での再訪）は stale の
+  //   可能性があるため 1 回だけ再確認する。
+  // - ref ガード＋provider 側 in-flight dedupe の二重防御で多重 fetch・無限リトライなし。
+  // 再取得失敗時は permissions=null のまま（fail-safe＝ボタン非表示・広げない）。
+  // ページは /api/me/permissions を直接 fetch しない（provider 経由のみ）。
+  const permissionsRefreshRequestedRef = useRef(false);
+  // mount 時点で provider 取得が進行中だったか（初回 render で一度だけ確定する）。
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  // F12-2 Codex 対応(3): 進入時 refresh が完了するまで stale な granted permissions で
+  // CSV/DM ボタンを出さない（一瞬表示・クリック可能の回帰防止）。mount 時点で取得
+  // 完了済み（= この後 entry refresh が走る）の場合は最初の描画から pending=true で
+  // 開始し、旧 page-local fetch 時代の「mount 時は hidden から開始」と同じ挙動にする。
+  // refresh 完了（finally）で解除し、最新 permissions からのみ導出する。
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
+  useEffect(() => {
+    if (permissionsRefreshRequestedRef.current) return;
+    // 進行中は完了を待つ（追加 fetch しない・ref はまだ立てない）。
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && mePermissions !== null) {
+      // mount 時に進行中だった取得が成功 → このページが見ているデータは最新。
+      permissionsRefreshRequestedRef.current = true;
+      return;
+    }
+    // mount 時点で取得完了済みだった（stale の可能性）、または mount 時に進行中
+    // だった取得が失敗した（permissions===null・復旧）→ 1 回だけ再確認する。
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, mePermissions, refetchPermissions]);
+
   // CSV 出力可否。export API が csv_export:read と csv_export_personal:read の
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
-  const [canExportCsv, setCanExportCsv] = useState(false);
-
   // DM差込CSV の出力可否。dm-export API は csv_export:read / csv_export_personal:read に
   // 加えて owner:read（所有者個人情報を含むため）を必須にする。UI も同条件で判定する。
-  const [canExportDm, setCanExportDm] = useState(false);
+  const { canExportCsv, canExportDm } = useMemo(() => {
+    // F12-2 Codex 対応(3): 進入時 refresh 中（pending）・provider 取得中（loading）は
+    // stale な granted permissions を使わず空配列に倒す＝ボタン非表示（fail-safe 側）。
+    // refresh 完了後の最新 permissions からのみ true になり得る。
+    const effectivePermissions =
+      permissionsRefreshPending || permissionsLoading
+        ? []
+        : (mePermissions ?? []);
+    const has = (resource: string) =>
+      effectivePermissions.some(
+        (p) => p.resource === resource && p.action === "read" && p.granted,
+      );
+    const canCsv = has("csv_export") && has("csv_export_personal");
+    return {
+      canExportCsv: canCsv,
+      canExportDm: canCsv && has("owner"),
+    };
+  }, [permissionsRefreshPending, permissionsLoading, mePermissions]);
 
   // 入力中候補表示
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
@@ -234,31 +308,8 @@ function PropertiesPageInner() {
     fetchProperties();
   }, [fetchProperties]);
 
-  // CSV 出力権限を初回のみ取得。csv_export:read かつ csv_export_personal:read の
-  // 両方が granted のときだけ CSV 出力ボタンを表示する（export API と同条件）。
-  // 取得失敗時は false のままにし、ボタンを出さない（誤って JSON エラー画面に飛ばさない）。
-  useEffect(() => {
-    fetch("/api/me/permissions")
-      .then((r) => r.json())
-      .then((json: {
-        permissions?: { resource: string; action: string; granted: boolean }[];
-      }) => {
-        const perms = json.permissions ?? [];
-        const has = (resource: string) =>
-          perms.some(
-            (p) => p.resource === resource && p.action === "read" && p.granted,
-          );
-        setCanExportCsv(has("csv_export") && has("csv_export_personal"));
-        // DM差込CSV の出力は所有者個人情報を含むため owner:read も併せて要求する。
-        setCanExportDm(
-          has("csv_export") && has("csv_export_personal") && has("owner"),
-        );
-      })
-      .catch(() => {
-        setCanExportCsv(false);
-        setCanExportDm(false);
-      });
-  }, []);
+  // CSV/DM 出力権限の取得は ScreenProtectionProvider の context 配布に集約した
+  // （F12-2・上の useMemo を参照）。ページ独自の /api/me/permissions fetch は持たない。
 
   // 担当者プルダウン用にユーザー一覧を初回のみ取得（失敗時はサイレントに無視）
   useEffect(() => {
