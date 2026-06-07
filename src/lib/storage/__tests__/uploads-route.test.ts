@@ -739,3 +739,141 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
     expect(res.headers.get("Content-Range")).toBeNull();
   });
 });
+
+// ============================================================
+// 19-A: VPS 無認証外形チェック期待値ロック（test-only guard）
+//  本番 VPS（08af869）への無認証 curl で確認した外形挙動を回帰防止として固定する。
+//  (1) 401 応答のヘッダ衛生: 無認証 401 に ETag / Cache-Control を載せない
+//      （実機確認: 401 応答ヘッダに ETag / Cache-Control なし。キャッシュ層や
+//        client に認可前のキャッシュ手がかりを一切与えない）
+//  (2) 無認証 + If-None-Match（一致偽装・`*`）でも常に 401（認可前 304 禁止の
+//      ヘッダ衛生込み再固定。status のみの既存ロックを補完する）
+//  (3) 無認証の registry パスは 401 で、registry 解決・認可・監査・registry
+//      配信ヘッダ（no-store/nosniff/Content-Disposition）のいずれも発生しない
+//      （auth が全段より先に走る順序のロック）
+//  (4) registry preview / download は If-None-Match の有無に関わらず ETag を
+//      発行しない（既存ロックは If-None-Match 併送時のみだった盲点を閉じる）
+// production code は不変。route の現状仕様をロックするのみ。
+// ============================================================
+describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック", () => {
+  const REGISTRY_META = {
+    isRegistry: true as const,
+    attachmentId: "att-1",
+    propertyId: "prop-1",
+  };
+
+  beforeEach(() => {
+    process.env.STORAGE_BACKEND = "local";
+    process.env.LOCAL_UPLOAD_ROOT = tmpRoot;
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "u1",
+      email: "a@a",
+      name: "A",
+      role: "admin",
+    });
+    vi.mocked(getUserPermissions).mockClear();
+    vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
+    vi.mocked(authorizeUploadAccess).mockClear();
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValue(null);
+    vi.mocked(resolveRegistryServeMeta).mockClear();
+    vi.mocked(writeAuditLog).mockClear();
+  });
+
+  function mockUnauthenticated() {
+    vi.mocked(getApiSession).mockRejectedValueOnce(
+      new ApiError(401, "認証が必要です", "UNAUTHORIZED"),
+    );
+  }
+
+  async function writeFile(rel: string, bytes: Buffer) {
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, bytes);
+  }
+
+  it("無認証 401 に ETag / Cache-Control を載せない（ヘッダ衛生）", async () => {
+    mockUnauthenticated();
+    const res = await callGet(["properties", "p1", "photos", "noauth.png"]);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("ETag")).toBeNull();
+    expect(res.headers.get("Cache-Control")).toBeNull();
+  });
+
+  it("無認証 + If-None-Match 一致偽装でも 401・ETag / Cache-Control なし（304 にしない）", async () => {
+    // 実体ファイルが存在し、かつ正しい key 由来 ETag を client が偽装しても、
+    // 認可前に 304 もキャッシュヘッダも返さない。
+    const rel = "properties/p1/photos/forged.png";
+    await writeFile(rel, Buffer.from([1, 2, 3]));
+    mockUnauthenticated();
+    const res = await callGet(["properties", "p1", "photos", "forged.png"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("ETag")).toBeNull();
+    expect(res.headers.get("Cache-Control")).toBeNull();
+  });
+
+  it("無認証 + If-None-Match: * でも 401・ETag / Cache-Control なし", async () => {
+    // VPS 外形チェックと同形（`*` は実体があれば常に一致扱いになる最強の偽装）。
+    const rel = "properties/p1/photos/star-noauth.png";
+    await writeFile(rel, Buffer.from([1]));
+    mockUnauthenticated();
+    const res = await callGet(
+      ["properties", "p1", "photos", "star-noauth.png"],
+      { headers: { "If-None-Match": "*" } },
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("ETag")).toBeNull();
+    expect(res.headers.get("Cache-Control")).toBeNull();
+  });
+
+  it("無認証の registry パスも 401・registry 解決/認可/監査/配信ヘッダが一切発生しない", async () => {
+    const rel = "properties/p1/registry/noauth.pdf";
+    await writeFile(rel, Buffer.from("%PDF-1.4 noauth"));
+    mockUnauthenticated();
+    const res = await callGet(["properties", "p1", "registry", "noauth.pdf"], {
+      headers: { "If-None-Match": buildUploadsEtag(rel) },
+    });
+    expect(res.status).toBe(401);
+    // 401 に registry 配信ヘッダ・キャッシュヘッダの痕跡を残さない
+    expect(res.headers.get("ETag")).toBeNull();
+    expect(res.headers.get("Cache-Control")).toBeNull();
+    expect(res.headers.get("X-Content-Type-Options")).toBeNull();
+    expect(res.headers.get("Content-Disposition")).toBeNull();
+    // auth が最初に走り、後段（permissions / authorize / registry 解決 / 監査）は
+    // 一切実行されない（順序ロック）
+    expect(getUserPermissions).not.toHaveBeenCalled();
+    expect(authorizeUploadAccess).not.toHaveBeenCalled();
+    expect(resolveRegistryServeMeta).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("registry preview（If-None-Match なし）にも ETag を発行しない", async () => {
+    // 既存ロック（:658-）は If-None-Match 併送時のみ ETag null を assert していた。
+    // 素の preview / download でも ETag 不発行であることを固定する。
+    const rel = "properties/p1/registry/plain.pdf";
+    await writeFile(rel, Buffer.from("%PDF-1.4 plain"));
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+
+    const res = await callGet(["properties", "p1", "registry", "plain.pdf"]);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ETag")).toBeNull();
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("registry download（If-None-Match なし）にも ETag を発行しない", async () => {
+    const rel = "properties/p1/registry/plain-dl.pdf";
+    await writeFile(rel, Buffer.from("%PDF-1.4 plain dl"));
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+
+    const res = await callGet(["properties", "p1", "registry", "plain-dl.pdf"], {
+      query: "?download=1",
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ETag")).toBeNull();
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Content-Disposition")).toBe(
+      'attachment; filename="registry.pdf"',
+    );
+  });
+});
