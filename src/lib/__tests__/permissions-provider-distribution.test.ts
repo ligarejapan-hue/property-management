@@ -19,11 +19,14 @@
  * 6) properties 一覧はページ独自の /api/me/permissions fetch を持たず、
  *    useScreenProtection() の permissions から CSV/DM 出力可否を導出する
  * 7) ボタン出し分け条件（csv_export && csv_export_personal、DM は + owner）は不変
- * 8) Codex 対応（復旧導線）: provider は refetchPermissions（mount fetch と共通の
- *    loadPermissions・stable callback・in-flight ガード付き）を配布し、
- *    properties 一覧は「失敗確定（error && permissions===null && !loading）」時のみ
- *    mount あたり最大 1 回それを呼ぶ（無限リトライなし・成功時の追加 fetch なし・
- *    旧 page-level 常時 fetch は復活させない）
+ * 8) Codex 対応（復旧導線+権限鮮度）: provider は refetchPermissions（mount fetch と
+ *    共通の loadPermissions・stable callback・in-flight ガード付き）を配布する。
+ *    properties 一覧は進入（mount）あたり最大 1 回だけそれを呼び、dashboard 滞在中の
+ *    権限付与・剥奪に追従する（旧 page-level fetch が持っていた鮮度の復元）。
+ *    ただし provider 取得進行中は呼ばず（同時 2 本に戻さない）、進行中だった取得が
+ *    成功した場合は追加 fetch しない（失敗時のみ復旧として再取得）。
+ *    ref ガード+in-flight dedupe で無限リトライなし・旧 page-level 直接 fetch は
+ *    復活させない
  *
  * 権限仕様・PII 表示条件・server 側権限ゲート・/api/me/permissions route は一切変更しない
  * （route 契約は me-permissions-route.test.ts が別途ロック済み）。
@@ -180,26 +183,47 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
 
   it("useScreenProtection() の permissions から CSV/DM 出力可否を導出する", () => {
     expect(pageSrc).toMatch(
-      /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*permissionsError,\s*refetchPermissions,\s*\} = useScreenProtection\(\)/,
+      /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*refetchPermissions,\s*\} = useScreenProtection\(\)/,
     );
     expect(pageSrc).toMatch(/const \{ canExportCsv, canExportDm \} = useMemo\(/);
   });
 
-  it("復旧導線: 失敗確定時のみ refetchPermissions を mount あたり最大 1 回要求する（Codex 対応）", () => {
-    // 3 条件（失敗確定・未配布・取得中でない）が揃ったときのみ
+  it("権限鮮度: properties 進入（mount）あたり最大 1 回だけ refetchPermissions を呼ぶ（Codex 対応2）", () => {
+    // ref ガード（進入あたり 1 回・無限リトライ防止）
     expect(pageSrc).toMatch(
-      /permissionsError && mePermissions === null && !permissionsLoading/,
+      /if \(permissionsRefreshRequestedRef\.current\) return;/,
     );
-    // ref ガード（失敗が続く場合の無限リトライ防止）
+    // 再確認の実行（mount 時完了済み=stale の可能性、または進行中だった取得の失敗=復旧）
     expect(pageSrc).toMatch(
-      /if \(permissionsRefetchRequestedRef\.current\) return;/,
-    );
-    expect(pageSrc).toMatch(
-      /permissionsRefetchRequestedRef\.current = true;\s*\n\s*refetchPermissions\(\);/,
+      /permissionsRefreshRequestedRef\.current = true;\s*\n\s*refetchPermissions\(\);/,
     );
   });
 
-  it("復旧導線でもページは /api/me/permissions を直接 fetch しない（provider 経由のみ・旧 page-level fetch 非復活）", () => {
+  it("権限鮮度: provider 取得進行中は呼ばない（初回 fetch と重複させない＝同時 2 本に戻さない）", () => {
+    expect(pageSrc).toMatch(/if \(permissionsLoading\) return;/);
+  });
+
+  it("権限鮮度: mount 時進行中だった取得が成功した場合は追加 fetch しない（refetch せず満了）", () => {
+    // mount 時点の進行状態を初回 render で一度だけ snapshot する
+    expect(pageSrc).toMatch(
+      /permissionsLoadingAtMountRef\.current === null\) \{\s*\n\s*permissionsLoadingAtMountRef\.current = permissionsLoading;/,
+    );
+    // 成功（permissions 非 null）なら ref を立てて return（refetch しない）
+    expect(pageSrc).toMatch(
+      /permissionsLoadingAtMountRef\.current === true && mePermissions !== null\) \{\s*\n[\s\S]{0,200}?permissionsRefreshRequestedRef\.current = true;\s*\n\s*return;/,
+    );
+  });
+
+  it("権限付与・剥奪への追従: 導出は mePermissions の純関数（state 持ち越しなし）+ 進入時再確認", () => {
+    // refetch 成功 → provider が setPermissions(perms) → context 更新 → useMemo 再導出
+    // → ボタン表示/非表示が最新権限に追従する。導出結果を useState に保持しない
+    // （古い snapshot が残らない）ことをロックする。
+    expect(pageSrc).toMatch(/\}, \[mePermissions\]\);/);
+    expect(pageSrc).not.toMatch(/useState[^\n]*canExportCsv/);
+    expect(pageSrc).not.toMatch(/setCanExportCsv|setCanExportDm/);
+  });
+
+  it("鮮度再確認でもページは /api/me/permissions を直接 fetch しない（provider 経由のみ・旧 page-level fetch 非復活）", () => {
     expect(pageSrc).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
   });
 

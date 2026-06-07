@@ -142,24 +142,45 @@ function PropertiesPageInner() {
   const {
     permissions: mePermissions,
     permissionsLoading,
-    permissionsError,
     refetchPermissions,
   } = useScreenProtection();
 
-  // F12-2 Codex 対応: provider の初回取得が transient に失敗していた場合の復旧導線。
-  // 「失敗確定（permissionsError）・未配布（permissions===null）・取得中でない」の
-  // 3 条件が揃ったときのみ、このページの mount あたり最大 1 回だけ再取得を要求する
-  // （ref ガードで失敗が続く場合の無限リトライを防ぐ）。成功済み・取得中は何もしない
-  // ＝通常成功時の追加 fetch はゼロ。ページは /api/me/permissions を直接 fetch しない
-  // （旧 page-level 常時 fetch は復活させず、あくまで provider 経由の再取得のみ）。
-  const permissionsRefetchRequestedRef = useRef(false);
+  // F12-2 Codex 対応(2): 権限鮮度の再確認。App Router の layout は client navigation で
+  // 保持されるため、provider の mount 時 1 回 fetch だけでは dashboard 滞在中の
+  // 権限付与・剥奪に追従できない（旧実装はこのページが mount 毎に独自 fetch して
+  // いたため、properties に戻ったタイミングで最新権限を拾えていた）。その鮮度を
+  // provider 経由で復元する: このページ進入（mount）あたり最大 1 回だけ
+  // refetchPermissions() を呼ぶ。初回の transient 失敗からの復旧導線も兼ねる。
+  // - provider の取得が進行中（permissionsLoading）の間は呼ばない＝初回 dashboard
+  //   mount 時の fetch と重複させない（同時 2 本に戻さない）。
+  // - mount 時に進行中だった取得が成功した場合は、その結果がこのページ進入分の
+  //   鮮度を満たすため追加 fetch しない。失敗した場合（permissions===null）は
+  //   復旧として 1 回だけ再取得する。
+  // - mount 時点で取得完了済みだった場合（client navigation での再訪）は stale の
+  //   可能性があるため 1 回だけ再確認する。
+  // - ref ガード＋provider 側 in-flight dedupe の二重防御で多重 fetch・無限リトライなし。
+  // 再取得失敗時は permissions=null のまま（fail-safe＝ボタン非表示・広げない）。
+  // ページは /api/me/permissions を直接 fetch しない（provider 経由のみ）。
+  const permissionsRefreshRequestedRef = useRef(false);
+  // mount 時点で provider 取得が進行中だったか（初回 render で一度だけ確定する）。
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
   useEffect(() => {
-    if (permissionsRefetchRequestedRef.current) return;
-    if (permissionsError && mePermissions === null && !permissionsLoading) {
-      permissionsRefetchRequestedRef.current = true;
-      refetchPermissions();
+    if (permissionsRefreshRequestedRef.current) return;
+    // 進行中は完了を待つ（追加 fetch しない・ref はまだ立てない）。
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && mePermissions !== null) {
+      // mount 時に進行中だった取得が成功 → このページが見ているデータは最新。
+      permissionsRefreshRequestedRef.current = true;
+      return;
     }
-  }, [permissionsError, mePermissions, permissionsLoading, refetchPermissions]);
+    // mount 時点で取得完了済みだった（stale の可能性）、または mount 時に進行中
+    // だった取得が失敗した（permissions===null・復旧）→ 1 回だけ再確認する。
+    permissionsRefreshRequestedRef.current = true;
+    refetchPermissions();
+  }, [permissionsLoading, mePermissions, refetchPermissions]);
 
   // CSV 出力可否。export API が csv_export:read と csv_export_personal:read の
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
