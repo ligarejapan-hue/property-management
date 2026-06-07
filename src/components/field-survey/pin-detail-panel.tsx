@@ -435,6 +435,9 @@ function PinPhotoSection({
                     src={p.thumbnailUrl ?? p.fileUrl}
                     alt="調査ピンの写真"
                     onError={() => markBroken(p.id)}
+                    // thumbnailUrl が null の場合は原本 (/uploads 原寸) に fallback するため、
+                    // 画面外サムネの先読みを抑止する（F11 uploads 配信負荷・C前段）。
+                    loading="lazy"
                     className="h-full w-full object-cover"
                   />
                 )}
