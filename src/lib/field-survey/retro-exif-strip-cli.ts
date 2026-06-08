@@ -19,7 +19,6 @@
 
 import {
   processRetroStripRow,
-  summarizeRetroStripResults,
   extractStorageKeyFromStoredFileUrl,
   RETRO_STRIP_SUPPORTED_MIMES,
   RETRO_STRIP_OUTCOMES,
@@ -393,16 +392,17 @@ export async function runRetroStripDryRun(
   ports: RetroStripPorts,
   onLine?: (line: RetroStripRunLogLine) => void | Promise<void>,
 ): Promise<RetroStripDryRunResult> {
-  const results: RetroStripRowResult[] = [];
+  // Codex P2: 結果配列を保持せず outcome counter を per-row 更新する（全件 dry-run でも
+  // ヒープが行数に比例して増えない＝行ページング / JSONL 逐次書き出しと同じ streaming 規律）。
+  const summary = emptyOutcomeSummary();
+  let processed = 0;
   for await (const row of rows) {
     const result = await processRetroStripRow(row, ports, { mode: "dry-run" });
-    results.push(result);
+    summary[result.outcome] += 1;
+    processed += 1;
     if (onLine) await onLine(toRunLogLine(result));
   }
-  return {
-    processed: results.length,
-    summary: summarizeRetroStripResults(results),
-  };
+  return { processed, summary };
 }
 
 /** help / banner 用に、空サマリ（全 outcome 0）を返す。 */

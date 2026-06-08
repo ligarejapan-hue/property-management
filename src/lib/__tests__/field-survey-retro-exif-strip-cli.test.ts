@@ -493,6 +493,12 @@ describe("retro-exif-strip-cli source assertion", () => {
     expect(libSrc).not.toContain('from "next');
   });
 
+  it("dry-run runner は結果配列を保持せず outcome を per-row 集計する（Codex P2・streaming）", () => {
+    // 全件 dry-run でヒープが行数比例で増えないこと（buffered-then-summarize の不再導入）。
+    expect(libSrc).toContain("summary[result.outcome] += 1");
+    expect(libSrc).not.toContain("summarizeRetroStripResults");
+  });
+
   it("script は書き込み導線を持たない（dry-run 専用・storage read + prisma findMany のみ）", () => {
     // 注: この textual grep は best-effort のガード（alias 経由や空白入りの記述は素通りし得る）。
     // 「書き込みが起きない」ことの本質的な保証は makeDryRunPorts の throw スタブ +
