@@ -84,17 +84,25 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
   sudo -u www-data HOME=/var/www git <subcommand> ...
   ```
 
-- **npm / npx / prisma / build / prune も app user で実行**（root 実行すると npm cache / build artifacts / generated Prisma / node_modules 生成物が root 所有になる）:
+- **npm / npx / prisma / build / prune も app user で実行**（root 実行すると npm cache / build artifacts / generated Prisma / node_modules 生成物が root 所有になる）。
+  - **app.env 取り扱い（重要）**: `/etc/property-management/app.env` は **`root:root 600`** で **www-data からは読めない**。
+    **app.env は root 側で先に source し、`sudo -E` で env を www-data 実行コマンドへ引き継ぐ**（www-data シェル内で直接 `source` しない）。
+  - **build にも app.env を渡す（必須）**: `FieldSurveyMapClient` が読む `NEXT_PUBLIC_GOOGLE_MAPS_*` は **build 時に bundle へ埋め込まれる**。
+    build 時に env が無いと、systemd restart 時に env が正しくても **bundle 側の map key / map ID / billing flag が欠落**し得る。
+  - **npm ci / prune**（app.env 不要・cache/artifacts を root 所有にしないため app user 固定）:
 
   ```
   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management <args>
   ```
 
-  - **Prisma 系は cwd / env が要る**（`npx --prefix` はバイナリ解決のみで `prisma/schema.prisma` / `DATABASE_URL` を保証しない）。
-    `cd /opt/property-management` して実行し、DB 接続を伴う `migrate status` 等では `/etc/property-management/app.env` を source する:
+  - **Prisma 系 / build**（cwd 固定 + app.env を root source → `sudo -E` で引き継ぎ）。
+    `npx --prefix` はバイナリ解決のみで `prisma/schema.prisma` / `DATABASE_URL` を保証しないため使わない:
 
   ```
-  sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && npx prisma <args>'
+  set -a
+  source /etc/property-management/app.env   # root:root 600 → root で source（www-data から直接 source しない）
+  set +a
+  sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && <cmd>'
   ```
 
 - **root で実行してよいのは管理・確認系のみ**: `systemctl` / `journalctl` / `curl` / `ls -l .git/index`。
@@ -114,13 +122,15 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 - [ ] **service status** が active/running — `systemctl status property-management`（現 MainPID を控える）
 - [ ] **curl /** が 307 → `/login?callbackUrl=%2F` — `curl -I http://localhost:3000/`
 - [ ] **disk 容量**に余裕（build / node_modules 用） — `df -h /opt`
-- [ ] **env 差分なし**確認: 今回バッチに `.env` 系差分は 0。`/etc/property-management/app.env` は不変・触らない（読み取りのみ）
+- [ ] **env 差分なし**確認: 今回バッチに `.env` 系差分は 0。`/etc/property-management/app.env` は不変・触らない（読み取りのみ）。
+      ただし **app.env は `root:root 600` で www-data から読めない**ため、prisma / build は **root で source → `sudo -E` で引き継ぐ**（§4・§6）
 - [ ] **このrunbookは `08af869..59c03b7` 専用**。反映時に **`origin/main` が `59c03b7` 以外なら停止**（後続 commit を未レビューで含めない・§6-2・§8）。
       後続 commit を含めたい場合は、**新しい差分範囲で本チェックリストを作り直す**
 - [ ] **package / lock / migration の有無**: 今回バッチは **package.json / package-lock.json / prisma 差分が 0**（§2 で実測）
 - [ ] **今回 migrate が必要か不要か**: **不要**（新規 migration 0 件。`prisma migrate deploy` は実行しない／実行しても no-op）
 - [ ] **npm install 方針**: **devDeps 込み**（`--include=dev`）。build が `vitest.config.ts` を型チェックするため `--omit=dev` での build は失敗する既知の落とし穴（コマンド全体は §6）
-- [ ] **build 方針**: devDeps 込みで build → 成功後に `--omit=dev` で prune（コマンド全体は §6）
+- [ ] **build 方針**: devDeps 込みで build → 成功後に `--omit=dev` で prune（コマンド全体は §6）。
+      **build には app.env を渡す**（`NEXT_PUBLIC_GOOGLE_MAPS_*` は build 時に bundle へ埋め込まれる。restart 時だけ env があっても不十分）
 
 ---
 
@@ -147,18 +157,28 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
    sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management ci --include=dev
    ```
 4. **prisma generate**（client 再生成＝DB 操作ではない・schema 不変でも安全）。
-   **`--prefix` は Prisma バイナリ解決のみで cwd / `prisma/schema.prisma` を保証しない**ため、`cd /opt/property-management` して実行する:
+   cwd 固定 + **app.env は root で source → `sudo -E` で引き継ぐ**（www-data は app.env を読めないため）:
    ```
-   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && npx prisma generate'
+   set -a
+   source /etc/property-management/app.env
+   set +a
+   sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && npx prisma generate'
    ```
 5. **prisma migrate deploy は実行しない**（新規 migration 0 件）。安全のため status のみ確認可（pending が出たら停止＝§8）。
-   **`migrate status` は `DATABASE_URL` が必要**なので、cwd 固定に加え `/etc/property-management/app.env` を source して実行する:
+   **`migrate status` は `DATABASE_URL` が必要**。app.env を root で source → `sudo -E` で引き継ぐ:
    ```
-   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && set -a && source /etc/property-management/app.env && set +a && npx prisma migrate status'
+   set -a
+   source /etc/property-management/app.env
+   set +a
+   sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && npx prisma migrate status'
    ```
-6. **build**（exit 0 を確認）:
+6. **build**（exit 0 を確認）。**build にも app.env が必須**（`NEXT_PUBLIC_GOOGLE_MAPS_*` は build 時に bundle へ埋め込まれる。
+   build 時に env が無いと restart 時に env が正しくても bundle 側で欠落し得る）。root で source → `sudo -E` で引き継ぐ:
    ```
-   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management run build
+   set -a
+   source /etc/property-management/app.env
+   set +a
+   sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && npm run build'
    ```
 7. **prune**:
    ```
