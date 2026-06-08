@@ -87,8 +87,14 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 - **npm / npx / prisma / build / prune も app user で実行**（root 実行すると npm cache / build artifacts / generated Prisma / node_modules 生成物が root 所有になる）:
 
   ```
-  sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm  -C /opt/property-management <args>
-  sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npx --prefix /opt/property-management <args>
+  sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management <args>
+  ```
+
+  - **Prisma 系は cwd / env が要る**（`npx --prefix` はバイナリ解決のみで `prisma/schema.prisma` / `DATABASE_URL` を保証しない）。
+    `cd /opt/property-management` して実行し、DB 接続を伴う `migrate status` 等では `/etc/property-management/app.env` を source する:
+
+  ```
+  sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && npx prisma <args>'
   ```
 
 - **root で実行してよいのは管理・確認系のみ**: `systemctl` / `journalctl` / `curl` / `ls -l .git/index`。
@@ -140,13 +146,15 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
    ```
    sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management ci --include=dev
    ```
-4. **prisma generate**（client 再生成＝DB 操作ではない・schema 不変でも安全）:
+4. **prisma generate**（client 再生成＝DB 操作ではない・schema 不変でも安全）。
+   **`--prefix` は Prisma バイナリ解決のみで cwd / `prisma/schema.prisma` を保証しない**ため、`cd /opt/property-management` して実行する:
    ```
-   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npx --prefix /opt/property-management prisma generate
+   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && npx prisma generate'
    ```
-5. **prisma migrate deploy は実行しない**（新規 migration 0 件）。安全のため status のみ確認可（pending が出たら停止＝§8）:
+5. **prisma migrate deploy は実行しない**（新規 migration 0 件）。安全のため status のみ確認可（pending が出たら停止＝§8）。
+   **`migrate status` は `DATABASE_URL` が必要**なので、cwd 固定に加え `/etc/property-management/app.env` を source して実行する:
    ```
-   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npx --prefix /opt/property-management prisma migrate status
+   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm bash -lc 'cd /opt/property-management && set -a && source /etc/property-management/app.env && set +a && npx prisma migrate status'
    ```
 6. **build**（exit 0 を確認）:
    ```
