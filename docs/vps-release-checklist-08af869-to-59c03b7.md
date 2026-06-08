@@ -118,15 +118,16 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 > すべて `sudo -u www-data HOME=/var/www`（git）/ `sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm`（npm/prisma）で実行する。
 > 実行はユーザー承認後に別タスクで行う。
 
-1. **fetch**（www-data）: `git -C /opt/property-management fetch origin --prune`
-2. **ff-only 反映**: `git -C /opt/property-management merge --ff-only origin/main`
+1. **fetch**（www-data）: `sudo -u www-data HOME=/var/www git -C /opt/property-management fetch origin --prune`
+2. **ff-only 反映**: `sudo -u www-data HOME=/var/www git -C /opt/property-management merge --ff-only origin/main`
    （`08af869` は `59c03b7` の祖先なので ff 可。ff できなければ停止＝§8）
 3. **npm ci 方針**: `npm ci --include=dev`（devDeps 込み・lock 不変前提。EBADENGINE warning は node>=22 要求パッケージの既知非致命）
 4. **prisma generate 要否**: `npx prisma generate` を実行（client 再生成＝DB 操作ではない・schema 不変でも generate は安全）
 5. **prisma migrate deploy**: **実行しない**（新規 migration 0 件。安全のため `migrate status` で「No pending」のみ確認可）
 6. **build**: `npm run build`（exit 0 を確認）
 7. **prune**: `npm prune --omit=dev`
-   - その後 **package-lock.json のみ dirty**（npm メタデータ `libc` churn 等）になりがち → **www-data で `git restore package-lock.json`** して clean に戻す（lock の実依存は不変）
+   - その後 **package-lock.json のみ dirty**（npm メタデータ `libc` churn 等）になりがち →
+     `sudo -u www-data HOME=/var/www git -C /opt/property-management restore package-lock.json` で clean に戻す（lock の実依存は不変）
 8. **systemd restart**: `systemctl restart property-management`（OLD→NEW MainPID を控える。停止時 journal の `status=143` は SIGTERM 正常 graceful）
 9. **journal 確認**: `journalctl -u property-management -n 50` で「✓ Ready in …ms」、`journalctl -u property-management -p err -n 50` が 0 件
 10. **curl 確認**: `curl -I http://localhost:3000/` が 307 → `/login`
