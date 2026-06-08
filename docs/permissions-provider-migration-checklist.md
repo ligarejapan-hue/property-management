@@ -216,8 +216,8 @@ properties/[id] は条件層が最多のため、3 点セットに習熟して�
 - [ ] capabilities は provider 側で `=== true` 厳格判定済み。consumer 側で**再緩和しない**（`?? true` / `!= false` 等で広げない・§8）。
 - [ ] capability は **disabled 判定専用**。実行ゲートに昇格させない（実行可否は常にサーバ側で再判定）。
 - [ ] consumer は capability を別名 state へ写すだけで**判定式を変えない**。
-      （`corporate-lookup-panel.tsx` の zip activation のように `fieldEditable.zip && record.postCode` の AND など
-      capability 単独でない activation 条件は移行対象外。）
+      （`corporate-lookup-panel.tsx` の zip activation のように `!!fieldEditable?.zip && !!result.record.postCode` の AND など
+      capability / 編集権限単独でない activation 条件は移行対象外。）
 
 ---
 
@@ -243,8 +243,10 @@ docs-only の本 runbook 自体は build/test 省略可（CLAUDE.md §10）。�
 6. [ ] **`npx vitest run`**（関連／全体）。
 7. [ ] **`npm run build`**。
 8. [ ] **`git diff --check`**。
-9. [ ] **直接 fetch 残数の証跡**: `grep` で `fetch("/api/me/permissions")` の箇所数を before→after で提示し、
+9. [ ] **直接 fetch 残数の証跡**: 直接 fetch の箇所数を before→after で提示し、
       **allowlist が 1 減った**（canonical 除き 3→2→1→0）ことを報告に含める。
+      検出は test と同じ正規表現 `fetch\(\s*["']\/api\/me\/permissions["']`（シングル／ダブル両対応）で行う
+      （`fetch("/api/me/permissions")` のダブルクォート固定 grep は test の検出ロジックとずれ得る）。
 
 > AbortController を撤去したページは、bare `/AbortController/` の source assertion が**偽 green**になり得るため、
 > test 通過を撤去の証拠にしない。**対象 effect の cleanup（return 文）と未使用変数の消滅を diff 目視**で確認する。
