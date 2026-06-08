@@ -98,7 +98,7 @@ refetchPermissions(() => Promise<void>)
 
 | 順 | ページ | 複雑度プロファイル | 固有の罠 |
 |---|---|---|---|
-| 1 | **field-survey-map.tsx** | 判定 2 個（`field_survey:write` → canWritePin / `field_survey:manage` → canManagePin）。capability 不使用 | **tristate**（`boolean\|null`）＋**server read gate 併存**（§5・§8） |
+| 1 | **field-survey-map.tsx** | 判定 2 個（`field_survey:write` → canWritePin / `field_survey:manage` → canManagePin）。capability 不使用 | **write 系 = tri-state（`boolean\|null`・null は 403 委譲で押下可）／manage 系 = true-only fail-closed（`canManagePin === true` のみ削除 UI）の挙動差**＋**server read gate 併存**（§5・§8） |
 | 2 | **admin/owners/[id]/page.tsx** | owner field-level 4 種（owner_name/owner_address/owner_zip/owner_corporate_number）＋ capability 1 種（corporateLookup） | UI source test が setter をロック（§付録B） |
 | 3 | **properties/[id]/page.tsx** | **最多面**: resource:action 判定（registry:auto_fetch / property:write / owner:write×2 / owner:read）＋ field-level 8 種＋ capability 2 種＋**API レスポンスのキー有無（masked/hidden）分岐** | 多層条件が 1 ファイル集約 |
 
@@ -165,13 +165,25 @@ properties/[id] は条件層が最多のため、3 点セットに習熟して�
 
 ### 5-1. field-survey-map.tsx（`field_survey:write` / `field_survey:manage`）
 
-- [ ] **tristate 注意ページ**。`canWritePin` / `canManagePin` は `boolean | null` の**3 状態**:
-  - `null` = 判定不能 → UI は**押下許可**し **API 403 で最終ガード**（`PinAddModeToggle` の `canWrite`）。
+- [ ] **`canWritePin` と `canManagePin` は挙動が異なる。同一の tri-state として扱わない**（write 系は 403 委譲、manage 系は fail-closed）。
+
+  **(A) `canWritePin`（追加/write 系）= tri-state（`boolean | null`）・null は押下許可で 403 委譲**:
+  - `null` = 判定不能 → `PinAddModeToggle` の追加トグルは**押下可能**のまま → **API 403 で最終ガード**
+    （「判定不能時は押せる」が既存 UX として成立している）。
   - `false` = 既知の権限なし → **ボタン disable**（`canWrite === false` で disabled の表示文言あり）。
   - `true` = 許可。
+
+  **(B) `canManagePin`（削除/manage 系）= true-only / fail-closed・UI 露出自体を抑制**:
+  - `canManage={canManagePin === true}` として `PinDetailPanel` へ渡し、**`true` のときだけ他人 pin の削除 UI を出す**。
+  - `false` / `null` / loading / error / unknown は**すべて削除 UI を出さない**（403 委譲ではなく**UI 露出自体を抑制**する現行挙動）。
+  - すなわち manage 系は「判定不能なら出さない」=フェイルクローズ。write 系の「判定不能なら押せる（403 委譲）」とは**逆**。
+
 - [ ] **`permissions=null`（2 状態に collapse）への素朴移行は NG**。provider は loading も error も `permissions=null` に倒すため、
-      consumer 側で `permissionsLoading` / `permissionsError` を使い「**取得中／失敗 = 従来 null 相当（押下許可・403 委譲）**」と
-      「**成功して entry 無し = false（disable）**」を**書き分ける**こと（§8）。
+      consumer 側で `permissionsLoading` / `permissionsError` を使って**write 系と manage 系を別扱い**で再現すること（§8）:
+  - write 系（`canWritePin`）: 「**取得中／失敗 = 従来 null 相当（押下許可・403 委譲）**」と「**成功して entry 無し = false（disable）**」を書き分ける。
+  - manage 系（`canManagePin`）: **delete/manage 系 UI は `canManagePin === true` のときだけ表示**。loading / error / 取得失敗 / unknown では**削除 UI を出さない**（fail-closed を維持）。
+- [ ] **migration 注意**: `canWritePin` の `null` と `canManagePin` の `null` を**同一扱いしない**。provider 移行後も
+      delete/manage 系 UI は `canManagePin === true` のみ表示し、loading / error 中に削除 UI を露出させない。
 - [ ] 権限判定は `resource === "field_survey" && action === "write"/"manage" && p.granted === true`（明示 deny を許可扱いしない）。
 - [ ] **AbortController 置換注意**。permissions fetch は AbortController + `cleanup return () => ac.abort()` を持つが、
       **同ファイルの map データ（pins / properties）fetch も別系統で AbortController を持つ**。これは**触らない**。
@@ -258,7 +270,10 @@ docs-only の本 runbook 自体は build/test 省略可（CLAUDE.md §10）。�
 - [ ] **stale 権限ボタンが一瞬でも出る**（3 点セットの欠落・§4）。
 - [ ] **provider 取得失敗時に bypass / 権限が fail-safe にならない**（透かし復活・ボタン消失が起きない）。
 - [ ] **capabilities の意味が変わる**（`=== true` 厳格を緩める・disabled 専用から実行ゲートへ昇格・サーバ再判定を外す）。
-- [ ] **field-survey で tristate を 2 状態に collapse**し disable 文言が誤表示される（取得失敗で従来 null だった所が false に倒れる等）。
+- [ ] **field-survey の write 系 tri-state を 2 状態に collapse**し disable 文言が誤表示される（取得失敗で従来 null だった所が false に倒れる等）。
+- [ ] **field-survey の delete/manage 系 UI が `canManagePin === true` 以外で表示される**（`null` / loading / error / 取得失敗 / unknown で
+      他人 pin の削除 UI が一時的にでも露出）。manage 系は 403 委譲ではなく fail-closed が現行挙動。
+      **stale window 中に削除 UI が表示されたら NG**（write 系の「判定不能なら押せる」を manage 系にも適用してしまう典型ミス）。
 - [ ] **server 側権限ゲートを触る必要が出る**（field-survey の server read gate 等）。
 - [ ] **API route や DB 権限ロジックの変更が必要**になる。
 - [ ] **provider 実装（screen-protection-provider.tsx）を編集する必要**が出る（consumer のみ編集が原則。
@@ -329,10 +344,16 @@ docs-only の本 runbook 自体は build/test 省略可（CLAUDE.md §10）。�
 | properties 一覧（参照） | CSV / DM ボタン |
 | properties/[id] | owner 編集ボタン / 誤紐づき修正ボタン |
 | admin/owners/[id] | 法人番号編集欄 / CorporateLookupPanel |
-| field-survey-map | PinAddModeToggle（追加トグル）/ PinDetailPanel の削除ボタン |
+| field-survey-map（**add/write 系**） | PinAddModeToggle（追加トグル） |
+| field-survey-map（**delete/manage 系**） | PinDetailPanel の他人 pin 削除 UI |
 
 - (a) **grant 追従**: 権限 grant 状態でページ再訪 → 進入時 refetch でボタン**出現**。
 - (b) **revoke 追従**: 滞在中に管理者が revoke → 次回進入の refetch でボタン**消失**。
 - (c) **fail-safe**: refetch を失敗（5xx / 非 2xx）させる → `permissions=null` → ボタン**消失**、
       かつ `bypass=false` へ倒れ**透かし（WatermarkOverlay）が復活**することを確認。
 - consumer 側で `bypass` を表示ゲートに使っていないこと（guard / watermark 専用）を diff で確認。
+
+> **field-survey は add/write 系と delete/manage 系で期待値を分けて確認する**:
+> - **add/write 系（PinAddModeToggle）**: `null`（判定不能・取得中）でも**押下可能**（403 委譲）が維持されること。`false` で disable。
+> - **delete/manage 系（PinDetailPanel 削除 UI）**: `canManagePin === true` のときだけ表示。
+>   **stale window 中（refresh 中）・取得失敗・loading / error で削除 UI が一度も表示されない**ことを確認（fail-closed）。
