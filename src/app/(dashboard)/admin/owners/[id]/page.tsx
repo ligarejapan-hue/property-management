@@ -13,7 +13,7 @@
 // - 既存 CorporateLookupPanel を再利用し、lookup → preview → apply の Phase B/C
 //   フローに誘導する。Panel 自体は変更しない。
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
@@ -22,6 +22,7 @@ import {
   type AdminOwnerCorporateCandidateResponse,
 } from "@/lib/api-client";
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 type FieldEditable = {
   name: boolean;
@@ -58,15 +59,89 @@ export default function AdminOwnerDetailPage() {
     useState<AdminOwnerCorporateCandidateResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // permissions / lookup capability
-  const [fieldEditable, setFieldEditable] = useState<FieldEditable>({
-    name: false,
-    address: false,
-    zip: false,
-    corporateNumber: false,
-  });
-  const [corporateLookupConfigured, setCorporateLookupConfigured] =
-    useState(false);
+  // permissions / lookup capability は ScreenProtectionProvider（dashboard 全体を覆う）が
+  // mount 時に 1 回取得して context 配布するため、本ページ独自の /api/me/permissions
+  // fetch は撤去し、provider 配布値（permissions / capabilities）から導出する
+  // （properties 一覧 F12-2・field-survey-map 19-A と同方針）。
+  // fail-safe: 未取得・取得失敗（permissions=null / capabilities=null）は「権限なし・
+  // 機能なし」扱いに倒す（owner full/edit は全 false＝編集・照会 UI 非表示、
+  // corporateLookup は false）。緩めない。owner full/edit は boolean ゲートのため
+  // field-survey の tristate null ではなく properties 一覧型の制限的 collapse を使う。
+  const {
+    permissions: mePermissions,
+    capabilities: meCapabilities,
+    permissionsLoading,
+    refetchPermissions,
+  } = useScreenProtection();
+
+  // 進入時 refresh（properties 一覧・field-survey-map と同方針）: App Router の layout は
+  // client navigation で保持されるため、provider の mount 時 1 回 fetch だけでは dashboard
+  // 滞在中の権限付与・剥奪に追従できない。進入（mount）あたり最大 1 回だけ
+  // refetchPermissions() を呼び、旧 page-local fetch が持っていた鮮度を復元する。
+  // - 取得進行中（permissionsLoading）は呼ばない＝初回 fetch と重複させない。
+  // - mount 時進行中だった取得が成功した場合はそのデータが最新なので追加 fetch しない。
+  // - mount 時取得完了済み（stale 可能性）/ 進行中だった取得の失敗（復旧）は 1 回再取得。
+  // - ref ガード＋provider 側 in-flight dedupe の二重防御で多重 fetch・無限リトライなし。
+  const permissionsRefreshRequestedRef = useRef(false);
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  // 進入時 refresh 完了まで stale な権限・capability で編集/照会 UI を出さない。mount 時点で
+  // 取得完了済み（= この後 refresh が走る）なら最初の描画から pending=true で開始する。
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
+  useEffect(() => {
+    if (permissionsRefreshRequestedRef.current) return;
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && mePermissions !== null) {
+      permissionsRefreshRequestedRef.current = true;
+      return;
+    }
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, mePermissions, refetchPermissions]);
+
+  // effectivePermissions / effectiveCapabilities による導出（純関数・context 値の派生）。
+  // 進入時 refresh 中（pending）・provider 取得中（loading）は空配列 / false に倒す
+  // ＝refresh 完了後の最新値からのみ編集/照会 UI を出す（stale 権限表示防止・fail-safe 側）。
+  // owner full/edit と corporateLookup の判定ロジック自体は従来どおり（緩めない）。
+  const { fieldEditable, corporateLookupConfigured } = useMemo<{
+    fieldEditable: FieldEditable;
+    corporateLookupConfigured: boolean;
+  }>(() => {
+    const effectivePermissions =
+      permissionsRefreshPending || permissionsLoading
+        ? []
+        : (mePermissions ?? []);
+    const effectiveCorporateLookup =
+      permissionsRefreshPending || permissionsLoading
+        ? false
+        : meCapabilities?.corporateLookup === true;
+    const hasFullPerm = (resource: string) =>
+      effectivePermissions.some(
+        (p) => p.resource === resource && p.action === "full" && p.granted,
+      );
+    const hasEditPerm = (resource: string) =>
+      effectivePermissions.some(
+        (p) => p.resource === resource && p.action === "edit" && p.granted,
+      );
+    return {
+      fieldEditable: {
+        name: hasFullPerm("owner_name"),
+        address: hasFullPerm("owner_address"),
+        zip: hasFullPerm("owner_zip"),
+        corporateNumber:
+          hasFullPerm("owner_corporate_number") ||
+          hasEditPerm("owner_corporate_number"),
+      },
+      corporateLookupConfigured: effectiveCorporateLookup,
+    };
+  }, [permissionsRefreshPending, permissionsLoading, mePermissions, meCapabilities]);
   // 法人番号入力欄（CorporateLookupPanel に渡す）
   // 初期値は existing 法人番号 → なければ missing 候補値（共にマスク済）
   const [corporateInput, setCorporateInput] = useState("");
@@ -124,36 +199,6 @@ export default function AdminOwnerDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
-
-  // permission / capability の取得（properties/[id]/page.tsx と同方針）
-  useEffect(() => {
-    fetch("/api/me/permissions")
-      .then((r) => r.json())
-      .then((json: {
-        permissions?: { resource: string; action: string; granted: boolean }[];
-        capabilities?: { corporateLookup?: boolean };
-      }) => {
-        const perms = json.permissions ?? [];
-        setCorporateLookupConfigured(json.capabilities?.corporateLookup ?? false);
-        const hasFullPerm = (resource: string) =>
-          perms.some(
-            (p) => p.resource === resource && p.action === "full" && p.granted,
-          );
-        const hasEditPerm = (resource: string) =>
-          perms.some(
-            (p) => p.resource === resource && p.action === "edit" && p.granted,
-          );
-        setFieldEditable({
-          name: hasFullPerm("owner_name"),
-          address: hasFullPerm("owner_address"),
-          zip: hasFullPerm("owner_zip"),
-          corporateNumber:
-            hasFullPerm("owner_corporate_number") ||
-            hasEditPerm("owner_corporate_number"),
-        });
-      })
-      .catch(() => {});
-  }, []);
 
   const owner = data?.owner;
   const candidate = data?.candidate;
