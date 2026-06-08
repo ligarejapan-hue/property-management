@@ -50,10 +50,10 @@ M src/components/field-survey/field-survey-map.tsx               (#153 provider 
 M src/lib/__tests__/field-survey-pin-ui-source.test.ts           (#153 test)
 A src/lib/__tests__/field-survey-retro-exif-strip-cli.test.ts    (#152 test)
 A src/lib/__tests__/field-survey-retro-exif-strip.test.ts        (#148 test)
-A src/lib/__tests__/permissions-direct-fetch-allowlist.test.ts   (#150 test)
-M src/lib/__tests__/permissions-provider-distribution.test.ts    (#150/#153 test)
+A src/lib/__tests__/permissions-direct-fetch-allowlist.test.ts   (#150 で追加・#153 で allowlist 4→3 更新・test)
+M src/lib/__tests__/permissions-provider-distribution.test.ts    (#153 test・distribution 配列から field-survey-map 除外)
 A src/lib/field-survey/retro-exif-strip-cli.ts                   (#152 lib・413/0・未配線)
-A src/lib/field-survey/retro-exif-strip.ts                       (#148 lib・485/0・未配線)
+A src/lib/field-survey/retro-exif-strip.ts                       (#148 で追加・#152 でも更新・485/0 net・未配線)
 M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 ```
 
