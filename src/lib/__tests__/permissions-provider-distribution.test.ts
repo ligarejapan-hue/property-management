@@ -302,14 +302,23 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
 // ── 非接触の確認 ────────────────────────────────────────────────────────────
 
 describe("F12-2 — 他ページ・他領域は非接触（スコープ固定）", () => {
-  it("properties 詳細・admin owner 詳細・field-survey-map は従来どおり独自 fetch のまま（別PR）", () => {
+  it("properties 詳細・admin owner 詳細は従来どおり独自 fetch のまま（別PR）", () => {
     for (const p of [
       "src/app/(dashboard)/properties/[id]/page.tsx",
       "src/app/(dashboard)/admin/owners/[id]/page.tsx",
-      "src/components/field-survey/field-survey-map.tsx",
     ]) {
       expect(read(p)).toMatch(/\/api\/me\/permissions/);
     }
+  });
+
+  it("field-survey-map は provider 経由へ移行済み（19-A・直接 fetch を持たない）", () => {
+    // 19-A: F12 展開で field-survey-map.tsx の独自 /api/me/permissions fetch を撤去し、
+    // useScreenProtection() の配布値から write/manage を導出する。詳細な新形
+    //（tristate・進入時 refresh・pending lazy init）は field-survey-pin-ui-source.test.ts
+    // がロックする。ここでは「直接 fetch を持たず provider を消費する」最小集合を固定。
+    const mapSrc = read("src/components/field-survey/field-survey-map.tsx");
+    expect(mapSrc).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
+    expect(mapSrc).toMatch(/useScreenProtection/);
   });
 
   it("dashboard layout の Provider 配置は不変", () => {
