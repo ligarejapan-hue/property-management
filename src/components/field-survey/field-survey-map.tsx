@@ -49,6 +49,7 @@ import {
 } from "@/lib/field-survey-pin-util";
 import CurrentLocationMarker from "@/components/field-survey/current-location-marker";
 import CurrentLocationStatus from "@/components/field-survey/current-location-status";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
@@ -156,66 +157,94 @@ export default function FieldSurveyMap({
     recorder.status === "recording" &&
     !!recorder.latestPositionForDisplay;
 
-  // Phase 1-G: pin 追加モード / 詳細パネル / write 権限。
-  // canWrite は /api/me/permissions で 1 回取得して memoize する。
-  // 判定できない場合 (fetch 失敗) は null のまま、UI は API 403 を汎用化する。
+  // Phase 1-G / 1-I: pin 追加モード / 詳細パネル用の write/manage 権限。
   //
-  // Codex P2 (本 fix): permission entry の `granted: boolean` を必ず見る。
-  // resource + action だけで判定すると、明示 deny (granted: false) も
-  // 「許可」として扱ってしまうため、`granted === true` を必須にする。
-  // malformed / 欠損 entry は安全側で false。response 全文は console に出さない。
-  const [canWritePin, setCanWritePin] = useState<boolean | null>(null);
-  // Phase 1-I: 他人 pin 削除可否は field_survey:manage の granted===true で判定。
-  // read_all だけでは削除不可。判定不能時は false 寄りに倒す (API 403 で最終ガード)。
-  const [canManagePin, setCanManagePin] = useState<boolean | null>(null);
+  // F12 展開(19-A): permissions は ScreenProtectionProvider（dashboard 全体を覆う）が
+  // mount 時に 1 回取得して context 配布するため、本コンポーネント独自の
+  // /api/me/permissions fetch は撤去し、provider 配布値から導出する
+  // （properties 一覧 F12-2 と同方針・同一エンドポイントの重複 fetch 撤去）。
+  //
+  // tristate を維持する: canWritePin / canManagePin は boolean | null。
+  //   null  = 判定不能（取得中 / 取得失敗 / 進入時 refresh 中 / 未取得）→ UI は押下可とし
+  //           API 403 で委譲（PinAddModeToggle は disable しない）。
+  //   true  = field_survey:write|manage を granted===true で保有。
+  //   false = 取得済みだが未付与 → PinAddModeToggle を disable。
+  // 取得中/取得失敗を [] や false へ collapse すると「権限がありません」を誤表示するため、
+  // 従来の「fetch 未完了/失敗時は null 据え置き」を permissionsLoading/Error/null で再現する。
+  // Codex P2: 明示 deny（granted:false）/ 欠損 entry は granted===true 判定で安全側 false。
+  // response 全文は console に出さない（provider も同様）。
+  const {
+    permissions: mePermissions,
+    permissionsLoading,
+    permissionsError,
+    refetchPermissions,
+  } = useScreenProtection();
+
+  // 進入時 refresh（properties 一覧と同方針）: App Router の layout は client
+  // navigation で保持されるため、provider の mount 時 1 回 fetch だけでは dashboard
+  // 滞在中の権限付与・剥奪に追従できない。進入（mount）あたり最大 1 回だけ
+  // refetchPermissions() を呼び、旧 page-local fetch が持っていた鮮度を復元する。
+  // - 取得進行中（permissionsLoading）は呼ばない＝初回 fetch と重複させない。
+  // - mount 時進行中だった取得が成功した場合はそのデータが最新なので追加 fetch しない。
+  // - mount 時取得完了済み（stale 可能性）/ 進行中だった取得の失敗（復旧）は 1 回再取得。
+  // - ref ガード＋provider 側 in-flight dedupe の二重防御で多重 fetch・無限リトライなし。
+  const permissionsRefreshRequestedRef = useRef(false);
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  // 進入時 refresh 完了まで stale な granted permissions で判定しない。mount 時点で
+  // 取得完了済み（= この後 refresh が走る）なら最初の描画から pending=true で開始する。
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
   useEffect(() => {
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const res = await fetch("/api/me/permissions", {
-          credentials: "same-origin",
-          signal: ac.signal,
-        });
-        if (!res.ok) return;
-        const body = (await res.json().catch(() => null)) as
-          | {
-              permissions?: {
-                resource?: string;
-                action?: string;
-                granted?: boolean;
-              }[];
-            }
-          | null;
-        if (!Array.isArray(body?.permissions)) {
-          setCanWritePin(false);
-          setCanManagePin(false);
-          return;
-        }
-        const has = body!.permissions!.some(
-          (p) =>
-            p !== null &&
-            typeof p === "object" &&
-            p.resource === "field_survey" &&
-            p.action === "write" &&
-            p.granted === true,
-        );
-        setCanWritePin(has);
-        // Phase 1-I: 他人 pin 削除可否は manage の granted===true のみで判定。
-        const hasManage = body!.permissions!.some(
-          (p) =>
-            p !== null &&
-            typeof p === "object" &&
-            p.resource === "field_survey" &&
-            p.action === "manage" &&
-            p.granted === true,
-        );
-        setCanManagePin(hasManage);
-      } catch {
-        // 判定不能。null のまま (API 403 で汎用化)。
-      }
-    })();
-    return () => ac.abort();
-  }, []);
+    if (permissionsRefreshRequestedRef.current) return;
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && mePermissions !== null) {
+      // mount 時に進行中だった取得が成功 → 見ているデータは最新。追加 fetch しない。
+      permissionsRefreshRequestedRef.current = true;
+      return;
+    }
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, mePermissions, refetchPermissions]);
+
+  // tristate 導出（純関数・context 値の派生・state 持ち越しなし）。進入時 refresh 中
+  // （pending）・provider 取得中（loading）・取得失敗（error）・未取得（null）は判定不能
+  // null（= API 403 委譲）に倒す。ここで [] や false に倒すと PinAddModeToggle が
+  // 「権限がありません」を誤表示するため、tristate の null を維持して stale 権限表示を防ぐ。
+  const { canWritePin, canManagePin } = useMemo<{
+    canWritePin: boolean | null;
+    canManagePin: boolean | null;
+  }>(() => {
+    if (
+      permissionsRefreshPending ||
+      permissionsLoading ||
+      permissionsError ||
+      mePermissions === null
+    ) {
+      return { canWritePin: null, canManagePin: null };
+    }
+    // granted===true のみ許可（明示 deny / 欠損 entry は false）。
+    const canWrite = mePermissions.some(
+      (p) =>
+        p.resource === "field_survey" &&
+        p.action === "write" &&
+        p.granted === true,
+    );
+    // Phase 1-I: 他人 pin 削除可否は manage の granted===true のみで判定（read_all 不可）。
+    const canManage = mePermissions.some(
+      (p) =>
+        p.resource === "field_survey" &&
+        p.action === "manage" &&
+        p.granted === true,
+    );
+    return { canWritePin: canWrite, canManagePin: canManage };
+  }, [permissionsRefreshPending, permissionsLoading, permissionsError, mePermissions]);
 
   const [pinAddMode, setPinAddMode] = useState(false);
   // 地図 click / 「現在地を使う」で確定した作成候補座標。

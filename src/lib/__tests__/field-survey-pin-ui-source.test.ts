@@ -294,10 +294,12 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     expect(MAP_SRC).toMatch(/detailPinId\s*&&\s*\(?\s*<PinDetailPanel/);
   });
 
-  it("/api/me/permissions で field_survey:write を判定する", () => {
-    expect(MAP_SRC).toMatch(/\/api\/me\/permissions/);
+  it("permissions は ScreenProtectionProvider 経由（useScreenProtection）で取得し field_survey:write を判定する", () => {
+    // F12 展開(19-A): ページ独自の /api/me/permissions fetch を撤去し、
+    // provider 配布値（permissions）から導出する。直接 fetch は持たない。
+    expect(MAP_SRC).toMatch(/useScreenProtection\(\)/);
+    expect(MAP_SRC).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
     expect(MAP_SRC).toMatch(/"field_survey"[\s\S]*?"write"/);
-    expect(MAP_SRC).toMatch(/setCanWritePin/);
   });
 
   it("map.addListener('click', ...) は pinAddMode の時のみ effect が走る", () => {
@@ -370,7 +372,7 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
 // =======================================================================
 // Codex P2 fix 1: granted===true を要求
 // =======================================================================
-describe("Codex P2 fix 1 — honor granted entries in /api/me/permissions", () => {
+describe("Codex P2 fix 1 — honor granted entries (provider permissions)", () => {
   it("permissions の判定で p.granted === true を必須にしている", () => {
     // resource + action だけでなく granted の検査を含むこと
     expect(MAP_SRC).toMatch(
@@ -385,13 +387,91 @@ describe("Codex P2 fix 1 — honor granted entries in /api/me/permissions", () =
     );
   });
 
-  it("permissions が配列で無い / 空 / malformed なら canWritePin=false (安全側)", () => {
-    expect(MAP_SRC).toMatch(/setCanWritePin\(false\)/);
-    // permissions 配列 typeguard
-    expect(MAP_SRC).toMatch(/Array\.isArray\(body\?\.permissions\)/);
+  it("provider 未取得/取得失敗（permissions=null）・取得中・進入時 refresh 中は canWritePin を判定不能 null に倒す（API 403 委譲・disable 文言を誤表示しない）", () => {
+    // tristate: null=判定不能(委譲) / true|false=確定。配列 typeguard は provider
+    // 側（permissions: PermissionEntry[] | null）が担保するため、消費側は null と
+    // loading/error を見て従来の「fetch 未完了/失敗時は null 据え置き」を再現する。
+    expect(MAP_SRC).toMatch(/mePermissions === null/);
+    expect(MAP_SRC).toMatch(/permissionsLoading/);
+    expect(MAP_SRC).toMatch(/permissionsError/);
+    expect(MAP_SRC).toMatch(/canWritePin:\s*null/);
+    // loaded array なら .some(...granted===true) が空/未付与で false（安全側）を返す。
+    // 旧 fetch-parse 経路（setter / 配列 typeguard）は撤去済み。
+    expect(MAP_SRC).not.toMatch(/setCanWritePin\(false\)/);
+    expect(MAP_SRC).not.toMatch(/Array\.isArray\(body\?\.permissions\)/);
   });
 
   it("permissions response 全文 / granted 値を console に出さない", () => {
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*permissions/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*granted/i);
+    expect(MAP_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
+  });
+});
+
+// =======================================================================
+// F12 展開(19-A): permissions を ScreenProtectionProvider 経由へ移行する。
+//   - ページ独自 /api/me/permissions fetch を撤去し provider 配布値を消費する
+//   - 進入時 refresh + pending lazy init + effectivePermissions(tristate)
+//   - 取得中 / 取得失敗 / 進入時 refresh 中 / 未取得は判定不能 null(API 403 委譲)
+//     に倒す（[] や false へ collapse すると「権限がありません」を誤表示するため）
+// 参照実装は properties 一覧（permissions-provider-distribution.test.ts がロック）。
+// =======================================================================
+describe("F12 展開(19-A) — field-survey-map は provider 経由で権限を取得", () => {
+  it("useScreenProtection() から permissions/permissionsLoading/permissionsError/refetchPermissions を取得する", () => {
+    expect(MAP_SRC).toMatch(/useScreenProtection/);
+    expect(MAP_SRC).toMatch(/permissions:\s*mePermissions/);
+    expect(MAP_SRC).toMatch(/permissionsLoading/);
+    expect(MAP_SRC).toMatch(/permissionsError/);
+    expect(MAP_SRC).toMatch(/refetchPermissions/);
+  });
+
+  it("ページ独自の /api/me/permissions 直接 fetch を持たない（provider 経由のみ・旧 fetch 痕跡なし）", () => {
+    expect(MAP_SRC).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
+    expect(MAP_SRC).not.toMatch(/setCanWritePin/);
+    expect(MAP_SRC).not.toMatch(/setCanManagePin/);
+    expect(MAP_SRC).not.toMatch(/Array\.isArray\(body\?\.permissions\)/);
+  });
+
+  it("進入時 refresh: 進入(mount)あたり最大1回 refetchPermissions を呼び finally で pending を解除する", () => {
+    expect(MAP_SRC).toMatch(/permissionsRefreshRequestedRef\.current/);
+    expect(MAP_SRC).toMatch(
+      /refetchPermissions\(\)\.finally\(\(\) => \{\s*setPermissionsRefreshPending\(false\);\s*\}\)/,
+    );
+  });
+
+  it("進入時 refresh: provider 取得進行中は呼ばない（初回 fetch と重複させない）", () => {
+    expect(MAP_SRC).toMatch(/if \(permissionsLoading\) return;/);
+  });
+
+  it("進入時 refresh: mount 時進行中だった取得が成功した場合は追加 fetch しない", () => {
+    expect(MAP_SRC).toMatch(
+      /permissionsLoadingAtMountRef\.current === true && mePermissions !== null/,
+    );
+  });
+
+  it("pending lazy init: mount 時に取得完了済み（stale 可能性）なら最初の描画から pending=true で開始", () => {
+    expect(MAP_SRC).toMatch(
+      /useState\(\s*\n?\s*\(\) => !permissionsLoading,?\s*\n?\s*\)/,
+    );
+  });
+
+  it("effectivePermissions(tristate): 取得中/取得失敗/進入時 refresh 中/未取得は判定不能 null に倒す（[] でも false でもない・stale 権限表示防止）", () => {
+    expect(MAP_SRC).toMatch(
+      /permissionsRefreshPending \|\|\s*\n?\s*permissionsLoading \|\|\s*\n?\s*permissionsError \|\|\s*\n?\s*mePermissions === null/,
+    );
+    expect(MAP_SRC).toMatch(
+      /return \{ canWritePin: null, canManagePin: null \}/,
+    );
+  });
+
+  it("導出は useMemo の純関数で context 値の派生（setter / state 持ち越しなし）", () => {
+    expect(MAP_SRC).toMatch(/const \{ canWritePin, canManagePin \} = useMemo/);
+    expect(MAP_SRC).toMatch(
+      /\[permissionsRefreshPending,\s*permissionsLoading,\s*permissionsError,\s*mePermissions\]/,
+    );
+  });
+
+  it("provider 経由でも console に permissions / granted / response 全文を出さない（継続）", () => {
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*permissions/i);
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*granted/i);
     expect(MAP_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
@@ -892,8 +972,8 @@ describe("Phase 1-I — field-survey-map 削除連携", () => {
     );
   });
 
-  it("canManagePin は field_survey:manage の granted===true で判定する", () => {
-    expect(MAP_SRC).toMatch(/setCanManagePin/);
+  it("canManagePin は field_survey:manage の granted===true で判定する（provider 配布値から導出）", () => {
+    expect(MAP_SRC).toMatch(/canManagePin/);
     expect(MAP_SRC).toMatch(
       /action\s*===\s*"manage"[\s\S]{0,80}granted\s*===\s*true/,
     );
