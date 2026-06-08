@@ -302,10 +302,9 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
 // ── 非接触の確認 ────────────────────────────────────────────────────────────
 
 describe("F12-2 — 他ページ・他領域は非接触（スコープ固定）", () => {
-  it("properties 詳細・admin owner 詳細は従来どおり独自 fetch のまま（別PR）", () => {
+  it("properties 詳細は従来どおり独自 fetch のまま（別PR・最後の移行候補）", () => {
     for (const p of [
       "src/app/(dashboard)/properties/[id]/page.tsx",
-      "src/app/(dashboard)/admin/owners/[id]/page.tsx",
     ]) {
       expect(read(p)).toMatch(/\/api\/me\/permissions/);
     }
@@ -319,6 +318,17 @@ describe("F12-2 — 他ページ・他領域は非接触（スコープ固定）
     const mapSrc = read("src/components/field-survey/field-survey-map.tsx");
     expect(mapSrc).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
     expect(mapSrc).toMatch(/useScreenProtection/);
+  });
+
+  it("admin owner 詳細は provider 経由へ移行済み（19-A・直接 fetch を持たない）", () => {
+    // 19-A: F12 展開で admin/owners/[id]/page.tsx の独自 /api/me/permissions fetch を
+    // 撤去し、useScreenProtection() の permissions / capabilities から fieldEditable /
+    // corporateLookupConfigured を導出する。詳細な新形（進入時 refresh・pending lazy
+    // init・effectivePermissions/effectiveCapabilities の制限的 collapse）は
+    // admin-owner-detail-ui.test.ts がロックする。ここでは最小集合を固定。
+    const ownerPageSrc = read("src/app/(dashboard)/admin/owners/[id]/page.tsx");
+    expect(ownerPageSrc).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
+    expect(ownerPageSrc).toMatch(/useScreenProtection/);
   });
 
   it("dashboard layout の Provider 配置は不変", () => {

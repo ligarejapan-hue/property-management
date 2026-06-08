@@ -82,10 +82,14 @@ describe("/admin/owners/[id] page (Phase F)", () => {
     expect(pageSrc).toMatch(/法人番号の編集権限がありません/);
   });
 
-  it("/api/me/permissions を呼んで fieldEditable / corporateLookupConfigured を取得", () => {
-    expect(pageSrc).toMatch(/\/api\/me\/permissions/);
-    expect(pageSrc).toMatch(/setCorporateLookupConfigured/);
-    expect(pageSrc).toMatch(/setFieldEditable/);
+  it("permissions / capabilities は ScreenProtectionProvider 経由（useScreenProtection）で取得する（直接 fetch しない）", () => {
+    // F12 展開(19-A): ページ独自の /api/me/permissions fetch を撤去し、provider 配布値
+    //（permissions / capabilities）から fieldEditable / corporateLookupConfigured を導出。
+    expect(pageSrc).toMatch(/useScreenProtection\(\)/);
+    expect(pageSrc).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
+    // 旧 fetch 実装の痕跡（setter）が残っていない
+    expect(pageSrc).not.toMatch(/setCorporateLookupConfigured/);
+    expect(pageSrc).not.toMatch(/setFieldEditable/);
   });
 
   it("missing 候補に「法人番号欄に転記」ボタンがあり、転記値は API レスポンス候補値", () => {
@@ -174,5 +178,82 @@ describe("/admin/owners/[id] page (Phase F)", () => {
         m === "setCorporateInput(e.target.value)";
       expect(ok, `unexpected setCorporateInput call: ${m}`).toBe(true);
     }
+  });
+});
+
+// =======================================================================
+// F12 展開(19-A): permissions/capabilities を ScreenProtectionProvider 経由へ移行。
+//   - ページ独自 /api/me/permissions fetch を撤去し provider 配布値を消費する
+//   - 進入時 refresh + pending lazy init + effectivePermissions/effectiveCapabilities
+//   - 取得中 / 進入時 refresh 中 / 取得失敗 / 未取得は fail-safe（[] / false）に倒し、
+//     stale な権限・capability で編集/照会 UI を出さない（field-survey の tristate null
+//     とは異なり、owner full/edit は boolean なので properties 一覧型の制限的 collapse）。
+// 参照実装は properties 一覧（permissions-provider-distribution.test.ts がロック）。
+// =======================================================================
+describe("F12 展開(19-A) — admin owner 詳細は provider 経由で permissions/capabilities を取得", () => {
+  it("useScreenProtection() から permissions/capabilities/permissionsLoading/refetchPermissions を取得する", () => {
+    expect(pageSrc).toMatch(/useScreenProtection/);
+    expect(pageSrc).toMatch(/permissions:\s*mePermissions/);
+    expect(pageSrc).toMatch(/capabilities:\s*meCapabilities/);
+    expect(pageSrc).toMatch(/permissionsLoading/);
+    expect(pageSrc).toMatch(/refetchPermissions/);
+  });
+
+  it("ページ独自の /api/me/permissions 直接 fetch を持たない（provider 経由のみ・旧 fetch 痕跡なし）", () => {
+    expect(pageSrc).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
+    expect(pageSrc).not.toMatch(/setFieldEditable/);
+    expect(pageSrc).not.toMatch(/setCorporateLookupConfigured/);
+  });
+
+  it("進入時 refresh: 進入(mount)あたり最大1回 refetchPermissions を呼び finally で pending を解除する", () => {
+    expect(pageSrc).toMatch(/permissionsRefreshRequestedRef\.current/);
+    expect(pageSrc).toMatch(
+      /refetchPermissions\(\)\.finally\(\(\) => \{\s*setPermissionsRefreshPending\(false\);\s*\}\)/,
+    );
+  });
+
+  it("進入時 refresh: provider 取得進行中は呼ばない / mount 時進行中の成功時は追加 fetch しない", () => {
+    expect(pageSrc).toMatch(/if \(permissionsLoading\) return;/);
+    expect(pageSrc).toMatch(
+      /permissionsLoadingAtMountRef\.current === true && mePermissions !== null/,
+    );
+  });
+
+  it("pending lazy init: mount 時に取得完了済みなら最初の描画から pending=true で開始", () => {
+    expect(pageSrc).toMatch(
+      /useState\(\s*\n?\s*\(\) => !permissionsLoading,?\s*\n?\s*\)/,
+    );
+  });
+
+  it("effectivePermissions / effectiveCapabilities: pending/loading 中は [] / false に倒す（stale 表示防止・fail-safe）", () => {
+    expect(pageSrc).toMatch(
+      /permissionsRefreshPending \|\| permissionsLoading\s*\n?\s*\?\s*\[\]\s*\n?\s*:\s*\(mePermissions \?\? \[\]\)/,
+    );
+    expect(pageSrc).toMatch(
+      /permissionsRefreshPending \|\| permissionsLoading\s*\n?\s*\?\s*false\s*\n?\s*:\s*meCapabilities\?\.corporateLookup === true/,
+    );
+  });
+
+  it("導出は useMemo の純関数（setter / state 持ち越しなし）で fieldEditable / corporateLookupConfigured を返す", () => {
+    expect(pageSrc).toMatch(
+      /const \{ fieldEditable, corporateLookupConfigured \} = useMemo/,
+    );
+    expect(pageSrc).toMatch(
+      /\[permissionsRefreshPending,\s*permissionsLoading,\s*mePermissions,\s*meCapabilities\]/,
+    );
+  });
+
+  it("owner full/edit と corporateLookup 判定ロジックは不変（緩めない）", () => {
+    expect(pageSrc).toMatch(/p\.action === "full" && p\.granted/);
+    expect(pageSrc).toMatch(/p\.action === "edit" && p\.granted/);
+    expect(pageSrc).toMatch(
+      /hasFullPerm\("owner_corporate_number"\)\s*\|\|\s*\n?\s*hasEditPerm\("owner_corporate_number"\)/,
+    );
+    expect(pageSrc).toMatch(/meCapabilities\?\.corporateLookup === true/);
+  });
+
+  it("server 側権限ゲート・API route は触らず、導出値を Panel に props で渡すのみ", () => {
+    expect(pageSrc).toMatch(/fieldEditable=\{fieldEditable\}/);
+    expect(pageSrc).toMatch(/configured=\{corporateLookupConfigured\}/);
   });
 });
