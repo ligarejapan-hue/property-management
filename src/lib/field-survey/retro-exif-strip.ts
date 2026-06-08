@@ -185,6 +185,61 @@ function toProxyThumbnailUrl(raw: string | undefined | null): string | null {
   return normalized.startsWith("/uploads/") ? normalized : null;
 }
 
+const UPLOADS_PREFIX = "/uploads/";
+
+/**
+ * DB 保存された fileUrl / thumbnailUrl から storage key を復元する（遡及 strip 入力側）。
+ *
+ * 通常 import の {@link extractStorageKeyFromUrl} は scheme 付き URL を全て null にする。
+ * しかし legacy データには upload route が `result.url` をそのまま保存していた時期の
+ * **absolute `/uploads/{key}` URL**（例: `https://{host}/uploads/field-survey/...jpg`・
+ * server storage adapter 由来）が残り得る。これらを取りこぼすと本来 strip すべき
+ * GPS/EXIF 入りの古い写真が `skipped_unmappable_url` になってしまう（= Codex P1 指摘）。
+ *
+ * 受理する形:
+ *   - 相対 `/uploads/{key}`
+ *   - absolute `http(s)://{host}/uploads/{key}`（host を除いた raw な path 部分のみ使用）
+ *
+ * 設計上の重要点:
+ *   - **URL コンストラクタ（`new URL`）を使わない**。WHATWG URL は http(s) の path 中の
+ *     backslash を slash に正規化するため、`https://h/uploads/a\b.jpg` を `a/b.jpg` として
+ *     誤って canonical 化してしまう。raw な `/uploads/...` 部分文字列をそのまま取り出し、
+ *     {@link extractStorageKeyFromUrl} に委譲して **canonical validation（isValidStorageKey）**
+ *     を必ず通す。これにより backslash / 連続スラッシュ / 先頭スラッシュ等の非 canonical
+ *     key は（相対でも absolute でも）一貫して null になる。
+ *   - 出力側（uploaded.key / newKey）の厳格 canonical 検証（Codex P2）はこの関数とは
+ *     無関係。あちらは一切変更しない。
+ */
+function extractStorageKeyFromStoredFileUrl(
+  fileUrl: string | null | undefined,
+): string | null {
+  if (typeof fileUrl !== "string") return null;
+  const trimmed = fileUrl.trim();
+  if (trimmed === "") return null;
+
+  let rest: string;
+  if (trimmed.startsWith("/")) {
+    // 相対パス。/uploads/ で始まらなければ下の委譲先で null になる。
+    rest = trimmed;
+  } else if (/^https?:\/\//i.test(trimmed)) {
+    // absolute http(s) のみ対象。host を除き、最初の '/' 以降を raw のまま取り出す。
+    // URL コンストラクタは backslash を slash に正規化してしまうため使わない。
+    // （data: / blob: / file: / その他 scheme は対象外 = この分岐に入らない）
+    const afterScheme = trimmed.replace(/^https?:\/\//i, "");
+    const slashIdx = afterScheme.indexOf("/");
+    if (slashIdx < 1) return null; // host が無い / 空（path のみ）は対象外
+    rest = afterScheme.slice(slashIdx);
+  } else {
+    // data: / blob: / file: / その他 scheme / /uploads 以外の相対 → 対象外
+    return null;
+  }
+
+  if (!rest.startsWith(UPLOADS_PREFIX)) return null;
+  // /uploads/ 除去 + query/fragment 切り落とし + isValidStorageKey は委譲先に任せる
+  // （二重実装を避け、canonical 規律を一元化する）。
+  return extractStorageKeyFromUrl(rest);
+}
+
 // エラーは name のみ記録する（message は path / fileName 等を含み得るため）。
 function errorNameOf(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
@@ -215,8 +270,10 @@ export async function processRetroStripRow(
 ): Promise<RetroStripRowResult> {
   const photoId = row.id;
 
-  // 1. 旧 key 復元。絶対 URL / 非 /uploads/ / traversal は null（= 触らず skip）。
-  const oldKey = extractStorageKeyFromUrl(row.fileUrl);
+  // 1. 旧 key 復元。legacy absolute `/uploads/{key}` URL も対象化する（Codex P1）。
+  //    /uploads/ を含まない absolute URL / 非 canonical key（backslash / 連続スラッシュ /
+  //    traversal 等）は null = 触らず skip。
+  const oldKey = extractStorageKeyFromStoredFileUrl(row.fileUrl);
   if (oldKey === null) {
     return { outcome: "skipped_unmappable_url", photoId };
   }
@@ -389,7 +446,8 @@ export async function processRetroStripRow(
   }
 
   // 旧 thumbnail key は cleanup フェーズ用に記録だけする（削除しない）。
-  const oldThumbnailKey = extractStorageKeyFromUrl(row.thumbnailUrl);
+  // legacy absolute URL の thumbnail も復元対象にする（fileUrl と同セマンティクス）。
+  const oldThumbnailKey = extractStorageKeyFromStoredFileUrl(row.thumbnailUrl);
 
   return {
     outcome: "repointed",

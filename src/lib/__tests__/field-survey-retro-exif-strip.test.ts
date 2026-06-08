@@ -225,12 +225,43 @@ function expectNoWrites(calls: FakeCalls): void {
 
 describe("processRetroStripRow: 分類（書き込みなし）", () => {
   it.each([
-    ["絶対 URL", "https://example.com/uploads/a.jpg"],
+    ["/uploads/ 以外の absolute URL", "https://example.com/files/a.jpg"],
+    ["/api/ 配下の absolute URL", "https://example.com/api/x/a.jpg"],
     ["data URL", "data:image/jpeg;base64,AAAA"],
-    ["/uploads/ 以外", "/files/a.jpg"],
+    ["blob URL", "blob:https://example.com/uuid"],
+    ["file スキーマ", "file:///uploads/a.jpg"],
+    ["ftp スキーマ（http(s) 以外）", "ftp://example.com/uploads/a.jpg"],
+    ["host 無し absolute（path のみ）", "https:///uploads/a.jpg"],
+    ["/uploads/ 以外の相対", "/files/a.jpg"],
     ["空白のみ", "   "],
   ])(
     "fileUrl から key を復元できない行（%s）は skipped_unmappable_url・storage に一切触れない",
+    async (_label, fileUrl) => {
+      const { ports, calls } = createFakes();
+      const result = await processRetroStripRow(
+        makeRow({ fileUrl }),
+        ports,
+        { mode: "apply" },
+      );
+      expect(result).toEqual({
+        outcome: "skipped_unmappable_url",
+        photoId: PHOTO_ID,
+      });
+      expect(calls.read).toHaveLength(0);
+      expectNoWrites(calls);
+    },
+  );
+
+  it.each([
+    ["先頭スラッシュ key の absolute", "https://example.com/uploads//a.jpg"],
+    ["連続スラッシュ key の absolute", "https://example.com/uploads/field-survey//a.jpg"],
+    // 実文字列は単一 backslash（"\\" はエスケープ表現）。new URL を使わないため
+    // backslash が slash に化けず、isValidStorageKey で確実に弾かれる。
+    ["backslash key の absolute", "https://example.com/uploads/field-survey\\a.jpg"],
+    ["traversal を含む absolute", "https://example.com/uploads/../etc/a.jpg"],
+    ["backslash key の相対", "/uploads/field-survey\\a.jpg"],
+  ])(
+    "absolute/相対でも非 canonical key（%s）は skipped_unmappable_url・storage に触れない",
     async (_label, fileUrl) => {
       const { ports, calls } = createFakes();
       const result = await processRetroStripRow(
@@ -472,6 +503,79 @@ describe("processRetroStripRow: apply 正常系", () => {
     expect(result.newFileUrl).toBe(`/uploads/${renamedKey}`);
     expect(calls.repoint[0].newFileUrl).toBe(`/uploads/${renamedKey}`);
     expect(calls.repoint[0].expectedFileUrl).toBe(OLD_FILE_URL);
+  });
+});
+
+// ---------------------------------------------------------------
+// Codex P1: legacy absolute `/uploads/{key}` URL（古い upload route が result.url を
+// そのまま保存していた時期のデータ）を取りこぼさず対象化する
+// ---------------------------------------------------------------
+
+describe("processRetroStripRow: legacy absolute fileUrl（Codex P1）", () => {
+  // absolute URL でも key 部分は同一（OLD_KEY）。実体は OLD_KEY に置く。
+  const ABSOLUTE_FILE_URL = `https://example.com/uploads/${OLD_KEY}`;
+
+  it("legacy absolute URL から key を抽出し、新 key + repoint で成功する", async () => {
+    const fixture = buildJpegWithApp1();
+    const { ports, calls } = createFakes({ files: { [OLD_KEY]: fixture } });
+    const result = await processRetroStripRow(
+      makeRow({ fileUrl: ABSOLUTE_FILE_URL }),
+      ports,
+      { mode: "apply" },
+    );
+    expect(result.outcome).toBe("repointed");
+    if (result.outcome !== "repointed") throw new Error("unreachable");
+    // 旧 key は absolute URL から復元できている
+    expect(result.oldKey).toBe(OLD_KEY);
+    expect(calls.read).toEqual([OLD_KEY]);
+    // 新 key + repoint（楽観ガードは「読み取り時点の絶対 URL」をそのまま使う）
+    expect(result.newKey).toBe(EXPECTED_NEW_KEY);
+    expect(calls.upload[0].key).toBe(EXPECTED_NEW_KEY);
+    expect(calls.repoint).toHaveLength(1);
+    expect(calls.repoint[0].expectedFileUrl).toBe(ABSOLUTE_FILE_URL);
+    expect(calls.repoint[0].newFileUrl).toBe(`/uploads/${EXPECTED_NEW_KEY}`);
+  });
+
+  it("legacy absolute URL でも旧 key・旧 thumbnail key を削除しない（rollback 窓保持）", async () => {
+    const absoluteThumb = `https://example.com/uploads/field-survey/thumbs/old-thumb.jpg`;
+    const { ports, calls } = createFakes({
+      files: { [OLD_KEY]: buildJpegWithApp1() },
+    });
+    const result = await processRetroStripRow(
+      makeRow({ fileUrl: ABSOLUTE_FILE_URL, thumbnailUrl: absoluteThumb }),
+      ports,
+      { mode: "apply" },
+    );
+    expect(result.outcome).toBe("repointed");
+    if (result.outcome !== "repointed") throw new Error("unreachable");
+    // 旧 thumbnail key も absolute URL から復元され、記録される（削除はしない）
+    expect(result.oldThumbnailKey).toBe("field-survey/thumbs/old-thumb.jpg");
+    expect(calls.delete).toHaveLength(0);
+  });
+
+  it("dry-run でも legacy absolute URL を would_strip として対象化する", async () => {
+    const fixture = buildJpegWithApp1();
+    const { ports, calls } = createFakes({ files: { [OLD_KEY]: fixture } });
+    const result = await processRetroStripRow(
+      makeRow({ fileUrl: ABSOLUTE_FILE_URL }),
+      ports,
+      { mode: "dry-run" },
+    );
+    expect(result.outcome).toBe("would_strip");
+    if (result.outcome !== "would_strip") throw new Error("unreachable");
+    expect(result.oldKey).toBe(OLD_KEY);
+    expectNoWrites(calls);
+  });
+
+  it("http(localhost:port) の legacy absolute URL も対象化する", async () => {
+    const { ports, calls } = createFakes({ files: { [OLD_KEY]: buildJpegWithApp1() } });
+    const result = await processRetroStripRow(
+      makeRow({ fileUrl: `http://localhost:3000/uploads/${OLD_KEY}` }),
+      ports,
+      { mode: "apply" },
+    );
+    expect(result.outcome).toBe("repointed");
+    expect(calls.read).toEqual([OLD_KEY]);
   });
 });
 
@@ -805,7 +909,9 @@ describe("retro-exif-strip: 規律", () => {
       { options: { files: { [OLD_KEY]: buildJpegWithApp1() }, uploadThrows: true } }, // failed(upload)
       { options: { files: { [OLD_KEY]: buildJpegWithApp1() }, repointThrows: true } }, // failed(repoint)
       { options: {}, row: { mimeType: "image/heic" } }, // skipped_unsupported_mime
-      { options: {}, row: { fileUrl: "https://example.com/uploads/a.jpg" } }, // skipped_unmappable_url
+      { options: {}, row: { fileUrl: "https://example.com/files/a.jpg" } }, // skipped_unmappable_url（/uploads/ 以外）
+      // legacy absolute /uploads/ URL（P1 対象化）も非 PII を確認
+      { options: { files: { [OLD_KEY]: buildJpegWithApp1() } }, row: { fileUrl: `https://example.com/uploads/${OLD_KEY}` } }, // repointed
     ];
     const results: RetroStripRowResult[] = [];
     for (const { options, row } of scenarios) {
@@ -851,6 +957,12 @@ describe("retro-exif-strip: 規律", () => {
     expect(src).not.toContain("@/lib/prisma");
     expect(src).not.toContain('from "next');
     expect(src).not.toContain("getStorage");
+    // Codex P1: prisma を transitive ロードする uploads-authorization は import しない
+    // （入力側 key 抽出は自前の URL-parse 非依存 純関数で行う）。
+    expect(src).not.toContain("uploads-authorization");
+    // 同 P1: backslash を slash に正規化してしまう new URL() は使わない
+    // （非 canonical key の取りこぼし/誤処理を防ぐため raw 部分文字列で扱う）。
+    expect(src).not.toContain("new URL(");
     // 既存 utility の再利用（独自再実装しない）
     expect(src).toContain("stripFieldSurveyPhotoMetadata");
     expect(src).toContain("extractStorageKeyFromUrl");
