@@ -1,12 +1,12 @@
-# VPS まとめ反映チェックリスト（`08af869` → `59c03b7`）
+# VPS まとめ反映チェックリスト（`08af869` → `fb3e930`）
 
-VPS 最終反映済み HEAD `08af869`（2026-06-07）以降に main へ merge された **PR #147〜#153** を、
+VPS 最終反映済み HEAD `08af869`（2026-06-07）以降に main へ merge された **PR #147〜#155** を、
 VPS（本番）へ安全に**まとめて反映**するための手順書。
 
 これは手順書（docs-only）であり、**本ファイルの作成時点で VPS 操作は一切行っていない**。
 実際の反映は、ユーザーが (a) `systemctl restart` / (b) 必要時の DB 操作を**明示承認**した後に別タスクで実行する。
 
-- 反映元: `08af869`（VPS 現 HEAD・記録上）/ 反映先: `59c03b7`（= local main == origin/main・現時点）
+- 反映元: `08af869`（VPS 現 HEAD・記録上）/ 反映先: `fb3e930`（= local main == origin/main・現時点・PR#155 merge commit）
 - 基準ルール: CLAUDE.md §13・`docs/deploy.md`・運用知見（本書はそれらを今回バッチ向けに具体化する索引）
 
 > ⚠ 本書の手順・コマンド例は**載せるが実行しない**。read-only 確認すら**root では行わない**（§4）。
@@ -15,19 +15,19 @@ VPS（本番）へ安全に**まとめて反映**するための手順書。
 
 ## 1. 目的
 
-- `08af869` 以降の main 差分（PR #147〜#153）を VPS へ**まとめて反映**する。
+- `08af869` 以降の main 差分（PR #147〜#155）を VPS へ**まとめて反映**する。
 - 本番 DB / storage / 権限 / アップロードに影響し得る変更を整理し、**今回バッチの実リスクを確定**する。
 - 反映前・反映中・反映後の**停止条件**を明確にし、異常時は止めて報告する。
 
 今回バッチの結論（差分実測・§2/§3 参照）:
 
 - **schema / migration / package.json / package-lock.json / env の差分は 0** → `prisma migrate deploy` は**不要（no-op／実行しない）**。
-- 本番**ランタイム挙動**を変えるのは **`field-survey-map.tsx`（#153 provider 移行）1 ファイルのみ**。
+- 本番**ランタイム挙動**を変えるのは **provider 移行 2 ファイル**: `field-survey-map.tsx`（#153）と `admin/owners/[id]/page.tsx`（#155）。いずれも `/api/me/permissions` 直接 fetch → `useScreenProtection` への移行で、既存 UX 維持が前提。
 - 新規 production lib（retro EXIF strip core / CLI）と script は **app / components から未配線 = 本番実行導線なし**。
 
 ---
 
-## 2. 対象 PR 一覧（`08af869..59c03b7`・merge 順）
+## 2. 対象 PR 一覧（`08af869..fb3e930`・merge 順）
 
 | PR | merge commit | 種別 | 内容 | 本番ランタイム影響 |
 |---|---|---|---|---|
@@ -37,27 +37,30 @@ VPS（本番）へ安全に**まとめて反映**するための手順書。
 | **#150**（19-A） | `be4bda2` | **test-only** | permissions direct fetch allowlist source assertion | なし |
 | **#151**（19-B） | `6b1a53e` | **docs-only** | permissions provider migration runbook | なし |
 | **#152**（19-C） | `977e491` | **dry-run CLI 導線**（apply なし） | retro EXIF strip **dry-run CLI**（`scripts/retro-exif-strip-field-survey.ts` + `src/lib/field-survey/retro-exif-strip-cli.ts`）+ test + runbook | なし（手動 tsx 起動のみ・`--apply` は parse error） |
-| **#153**（19-A） | `59c03b7` | **production UI / provider 移行** | field-survey-map の provider 移行（`field-survey-map.tsx` の直接 fetch 撤去 → `useScreenProtection`） | **あり（唯一）** |
+| **#153**（19-A） | `59c03b7` | **production / provider 移行** | field-survey-map の provider 移行（`field-survey-map.tsx` の直接 fetch 撤去 → `useScreenProtection`） | **あり** |
+| **#155**（19-A） | `fb3e930` | **production small / provider 移行** | admin owners detail の provider 移行（`admin/owners/[id]/page.tsx` の `/api/me/permissions` 直接 fetch 撤去 → `useScreenProtection()`・permissions + capabilities）。admin owners は**制限的 collapse `[]` / false**。直接 fetch allowlist は **canonical provider + `properties/[id]` の 2 箇所へ減少** | **あり**（admin owners detail の権限取得経路変更・既存 UX 維持が前提） |
 
-変更ファイル全体（`08af869..59c03b7`・`git diff --name-status`）:
+変更ファイル全体（`08af869..fb3e930`・`git diff --name-status`）:
 
 ```
 A docs/field-survey-photo-device-verification-checklist.md       (#149 docs)
 A docs/field-survey-retro-exif-strip-runbook.md                  (#152 docs)
 A docs/permissions-provider-migration-checklist.md               (#151 docs)
 A scripts/retro-exif-strip-field-survey.ts                       (#152 dry-run CLI entry・235/0)
-M src/components/field-survey/field-survey-map.tsx               (#153 provider 移行・87/58)★唯一のランタイム変更
+M src/app/(dashboard)/admin/owners/[id]/page.tsx                 (#155 provider 移行・85/40)★ランタイム変更
+M src/components/field-survey/field-survey-map.tsx               (#153 provider 移行・87/58)★ランタイム変更
+M src/lib/__tests__/admin-owner-detail-ui.test.ts                (#155 test)
 M src/lib/__tests__/field-survey-pin-ui-source.test.ts           (#153 test)
 A src/lib/__tests__/field-survey-retro-exif-strip-cli.test.ts    (#152 test)
 A src/lib/__tests__/field-survey-retro-exif-strip.test.ts        (#148 test)
-A src/lib/__tests__/permissions-direct-fetch-allowlist.test.ts   (#150 で追加・#153 で allowlist 4→3 更新・test)
-M src/lib/__tests__/permissions-provider-distribution.test.ts    (#153 test・distribution 配列から field-survey-map 除外)
+A src/lib/__tests__/permissions-direct-fetch-allowlist.test.ts   (#150 で追加・#153 で 4→3・#155 で 3→2 更新・test)
+M src/lib/__tests__/permissions-provider-distribution.test.ts    (#153/#155 test・distribution 配列から field-survey-map / admin owners 除外)
 A src/lib/field-survey/retro-exif-strip-cli.ts                   (#152 lib・413/0・未配線)
 A src/lib/field-survey/retro-exif-strip.ts                       (#148 で追加・#152 でも更新・485/0 net・未配線)
 M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 ```
 
-> ⚠ `prisma/**` / `package.json` / `package-lock.json` / `.env` 系の差分は**この一覧に存在しない**（実測で 0 件）。
+> ⚠ `prisma/**` / `package.json` / `package-lock.json` / `.env` 系の差分は**この一覧に存在しない**（実測で 0 件・`08af869..fb3e930`）。
 
 ---
 
@@ -68,7 +71,7 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 | **test-only** | #147 / #150（+ 各 PR の test 追加） | 本番ランタイム不変。build 対象だが挙動変更なし |
 | **docs-only** | #149 / #151（+ #152 の runbook） | 本番ランタイム不変。VPS 反映自体は本来不要（バッチに同梱されるだけ） |
 | **production code だが本番実行導線なし** | #148（core lib）/ #152（CLI lib） | app / components から import されず、ルートにも載らない。**ビルドに含まれるが実行されない**。手動 `tsx` 起動でのみ動く（dry-run・別承認） |
-| **production UI / provider 移行** | **#153 field-survey-map.tsx** | **唯一のランタイム変更**。field-survey マップの権限取得を直接 fetch → `useScreenProtection` 経由へ。挙動同等を狙った移行（§7 で要スポット確認） |
+| **production / provider 移行** | **#153 field-survey-map.tsx**・**#155 admin/owners/[id]/page.tsx** | **ランタイム変更 2 件**。いずれも権限取得を直接 fetch → `useScreenProtection` 経由へ。挙動同等を狙った移行（§7 で要スポット確認）。field-survey は tristate（`null`=403 委譲）/admin owners は制限的 collapse（`[]`/false）と collapse 方式が異なる点に注意 |
 | **dry-run CLI 導線** | #152 `scripts/retro-exif-strip-field-survey.ts` | 反映後も**存在確認のみ**。本番 dry-run 実行は別承認（§9）。`--apply` は未実装で parse error |
 
 ---
@@ -124,7 +127,7 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 - [ ] **disk 容量**に余裕（build / node_modules 用） — `df -h /opt`
 - [ ] **env 差分なし**確認: 今回バッチに `.env` 系差分は 0。`/etc/property-management/app.env` は不変・触らない（読み取りのみ）。
       ただし **app.env は `root:root 600` で www-data から読めない**ため、prisma / build は **root で source → `sudo -E` で引き継ぐ**（§4・§6）
-- [ ] **このrunbookは `08af869..59c03b7` 専用**。反映時に **`origin/main` が `59c03b7` 以外なら停止**（後続 commit を未レビューで含めない・§6-2・§8）。
+- [ ] **このrunbookは `08af869..fb3e930` 専用**。反映時に **`origin/main` が `fb3e930` 以外なら停止**（後続 commit を未レビューで含めない・§6-2・§8）。
       後続 commit を含めたい場合は、**新しい差分範囲で本チェックリストを作り直す**
 - [ ] **package / lock / migration の有無**: 今回バッチは **package.json / package-lock.json / prisma 差分が 0**（§2 で実測）
 - [ ] **今回 migrate が必要か不要か**: **不要**（新規 migration 0 件。`prisma migrate deploy` は実行しない／実行しても no-op）
@@ -145,13 +148,13 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
    ```
    sudo -u www-data HOME=/var/www git -C /opt/property-management fetch origin --prune
    ```
-2. **反映対象の確認 → merge は明示 commit `59c03b7` に pin**（`origin/main` を直接 merge しない）:
+2. **反映対象の確認 → merge は明示 commit `fb3e930` に pin**（`origin/main` を直接 merge しない）:
    ```
    sudo -u www-data HOME=/var/www git -C /opt/property-management rev-parse origin/main
-   # 出力が 59c03b7 で始まることを確認。違う場合は停止（§8）= 後続 commit を未レビューで含めない
-   sudo -u www-data HOME=/var/www git -C /opt/property-management merge --ff-only 59c03b7
+   # 出力が fb3e930 で始まることを確認。違う場合は停止（§8）= 後続 commit を未レビューで含めない
+   sudo -u www-data HOME=/var/www git -C /opt/property-management merge --ff-only fb3e930
    ```
-   （`08af869` は `59c03b7` の祖先なので ff 可。`origin/main` が `59c03b7` より先に進んでいたら**停止し、新差分範囲でチェックリストを作り直す**）
+   （`08af869` は `fb3e930` の祖先なので ff 可。`origin/main` が `fb3e930` より先に進んでいたら**停止し、新差分範囲でチェックリストを作り直す**）
 3. **npm ci**（devDeps 込み・lock 不変前提。EBADENGINE warning は node>=22 要求パッケージの既知非致命）:
    ```
    sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management ci --include=dev
@@ -201,9 +204,13 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 - [ ] **`/api/me/permissions`**: 307 → `/login`（無認証ゲート。認証時は `{ permissions, capabilities }` を返す）
 - [ ] **`/uploads/...`**: **401**（無認証は認可前に弾く。If-None-Match 付き無認証も 401 = 認可前 304 なし）
 - [ ] **`/field-survey`（map ページ）**: 307 → `/login`（無認証）。認証後はマップ表示（HTTPS 未構成のため位置情報は N/A は既知・別件）
-- [ ] **field-survey map（#153 = 唯一のランタイム変更・要重点確認）**: 認証後、ピン追加トグル・他人 pin 削除 UI が権限どおり。
+- [ ] **field-survey map（#153 = ランタイム変更・要重点確認）**: 認証後、ピン追加トグル・他人 pin 削除 UI が権限どおり。
       provider 移行で**権限取得が直接 fetch → `useScreenProtection` 経由**に変わったため、**add/write 系（判定不能でも押下可・最終 403）と
       delete/manage 系（`canManagePin === true` のときだけ削除 UI・stale 中も露出しない fail-closed）**が従来どおりか確認
+- [ ] **admin owners detail（#155 = ランタイム変更・要重点確認）**: 認証後（admin）に `admin/owners/[id]` で
+      owner field-level 表示/編集（owner_name/owner_address/owner_zip = full、owner_corporate_number = full/edit）と
+      法人番号 lookup（corporateLookup capability）が従来どおり。provider 移行で**権限/capability 取得が直接 fetch → `useScreenProtection` 経由**に変わったため、
+      **制限的 collapse（`[]`/false）で stale 権限ボタン・編集欄が一瞬でも露出しない**ことを確認（3 点セット）
 - [ ] **admin 権限画面**: 認証後（admin）に権限テンプレート画面・透かし等が従来どおり
 - [ ] **retro EXIF strip CLI**: **存在確認のみ**（`scripts/retro-exif-strip-field-survey.ts` がツリーに在る）。
       **dry-run の本番実行は別承認**（§9）。誤って `--apply` しても未実装で parse error になる
@@ -217,9 +224,9 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 
 - [ ] **VPS git status dirty**（未コミット差分・想定外ファイル）
 - [ ] **`.git/index` owner 異常**（root:root 混在）→ §4 のとおり承認を得るまで進めない
-- [ ] **`origin/main` が `59c03b7` 以外**（fetch 後 `rev-parse origin/main` が `59c03b7` で始まらない）。
-      後続 commit を未レビューで VPS に入れないため**停止**し、新差分範囲でチェックリストを作り直す。**本runbookは `08af869..59c03b7` 専用**
-- [ ] **ff-only 不可**（`08af869` が `59c03b7` の祖先でない＝VPS が想定外に進んでいる/分岐）
+- [ ] **`origin/main` が `fb3e930` 以外**（fetch 後 `rev-parse origin/main` が `fb3e930` で始まらない）。
+      後続 commit を未レビューで VPS に入れないため**停止**し、新差分範囲でチェックリストを作り直す。**本runbookは `08af869..fb3e930` 専用**
+- [ ] **ff-only 不可**（`08af869` が `fb3e930` の祖先でない＝VPS が想定外に進んでいる/分岐）
 - [ ] **package / lock 差分が想定外**（今回は 0 のはず。`npm ci` 後に lock が実依存レベルで変わる等）
 - [ ] **build 失敗**（`npm run build` exit≠0。`--omit=dev` での実行になっていないか先に疑う）
 - [ ] **migration 要求が出る**（`migrate status` に pending が出る＝想定外。今回は 0 件のはず）
@@ -248,12 +255,12 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 ## 10. 報告テンプレート（反映タスク実行時）
 
 ```markdown
-## VPS まとめ反映 報告（08af869 → 59c03b7）
+## VPS まとめ反映 報告（08af869 → fb3e930）
 
 - 反映前 HEAD:（例 08af869・www-data git で確認）
-- origin/main 一致確認:（rev-parse origin/main == 59c03b7 か。違えば停止した旨）
-- 反映後 HEAD:（例 59c03b7・明示 commit pin で merge）
-- 実行コマンド:（www-data wrapper 付き: fetch / merge 59c03b7 / npm ci --include=dev / prisma generate / build / prune / git restore lock / restart の要点）
+- origin/main 一致確認:（rev-parse origin/main == fb3e930 か。違えば停止した旨）
+- 反映後 HEAD:（例 fb3e930・明示 commit pin で merge）
+- 実行コマンド:（www-data wrapper 付き: fetch / merge fb3e930 / npm ci --include=dev / prisma generate / build / prune / git restore lock / restart の要点）
 - build 結果:（exit code・所要）
 - service 結果:（OLD→NEW MainPID・active/running）
 - curl 結果:（/ → 307 /login ・主要パスの status）
