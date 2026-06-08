@@ -209,8 +209,13 @@ const UPLOADS_PREFIX = "/uploads/";
  *     key は（相対でも absolute でも）一貫して null になる。
  *   - 出力側（uploaded.key / newKey）の厳格 canonical 検証（Codex P2）はこの関数とは
  *     無関係。あちらは一切変更しない。
+ *
+ * export 理由: 遡及 strip の inventory / dry-run CLI（PR-R2a）が、対象行の
+ * 「key 抽出可否 / legacy absolute 件数 / unmappable 件数」を **storage を読まずに**
+ * 分類する際、本 helper と同一の canonical セマンティクスを再利用する
+ * （CLI 側で抽出ロジックを再実装すると乖離リスクが出るため）。挙動は不変。
  */
-function extractStorageKeyFromStoredFileUrl(
+export function extractStorageKeyFromStoredFileUrl(
   fileUrl: string | null | undefined,
 ): string | null {
   if (typeof fileUrl !== "string") return null;
