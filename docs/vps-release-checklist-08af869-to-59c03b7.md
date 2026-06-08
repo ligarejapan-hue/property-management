@@ -84,15 +84,18 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
   sudo -u www-data HOME=/var/www git <subcommand> ...
   ```
 
-- prisma / build / npm はアプリ実行ユーザーで env 付き:
+- **npm / npx / prisma / build / prune も app user で実行**（root 実行すると npm cache / build artifacts / generated Prisma / node_modules 生成物が root 所有になる）:
 
   ```
-  sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm <cmd>
+  sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm  -C /opt/property-management <args>
+  sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npx --prefix /opt/property-management <args>
   ```
 
+- **root で実行してよいのは管理・確認系のみ**: `systemctl` / `journalctl` / `curl` / `ls -l .git/index`。
+  git / npm / npx / prisma / build / prune を root で実行しない（コピペ用コマンドは §6 で wrapper 付き）。
 - `.git/index` が root:root 混在になっていたら、**ユーザー明示承認を得てから** `chown www-data:www-data .git/index` で単体修復
   （「権限変更」に該当・自動実行しない）。`.git/objects` が www-data 所有なら index 単体混在は ff merge の atomic rename で自己修復することもある。
-- 接続: `ssh root@133.117.72.225`（root ログインは可。ただし**git は必ず www-data 経由**）。
+- 接続: `ssh root@133.117.72.225`（root ログインは可。ただし**git / npm / npx / prisma は必ず www-data 経由**）。
 - VPS path `/opt/property-management` / service `property-management`（pm2 不使用）/ env `/etc/property-management/app.env`（root:root 600・読み取りのみ）/ HOME `/var/www` / npm cache `/var/www/.npm` / node v20 系。
 
 ---
@@ -106,31 +109,58 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 - [ ] **curl /** が 307 → `/login?callbackUrl=%2F` — `curl -I http://localhost:3000/`
 - [ ] **disk 容量**に余裕（build / node_modules 用） — `df -h /opt`
 - [ ] **env 差分なし**確認: 今回バッチに `.env` 系差分は 0。`/etc/property-management/app.env` は不変・触らない（読み取りのみ）
+- [ ] **このrunbookは `08af869..59c03b7` 専用**。反映時に **`origin/main` が `59c03b7` 以外なら停止**（後続 commit を未レビューで含めない・§6-2・§8）。
+      後続 commit を含めたい場合は、**新しい差分範囲で本チェックリストを作り直す**
 - [ ] **package / lock / migration の有無**: 今回バッチは **package.json / package-lock.json / prisma 差分が 0**（§2 で実測）
 - [ ] **今回 migrate が必要か不要か**: **不要**（新規 migration 0 件。`prisma migrate deploy` は実行しない／実行しても no-op）
-- [ ] **npm install 方針**: `npm ci --include=dev`（**devDeps 込み**。build が `vitest.config.ts` を型チェックするため `--omit=dev` build は失敗する既知の落とし穴）
-- [ ] **build 方針**: `npm run build`（devDeps 込みで実行 → 成功後に `npm prune --omit=dev`）
+- [ ] **npm install 方針**: **devDeps 込み**（`--include=dev`）。build が `vitest.config.ts` を型チェックするため `--omit=dev` での build は失敗する既知の落とし穴（コマンド全体は §6）
+- [ ] **build 方針**: devDeps 込みで build → 成功後に `--omit=dev` で prune（コマンド全体は §6）
 
 ---
 
 ## 6. 反映手順案（コマンド例は参考・**実行はしない**）
 
-> すべて `sudo -u www-data HOME=/var/www`（git）/ `sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm`（npm/prisma）で実行する。
-> 実行はユーザー承認後に別タスクで行う。
+> **コピペ用コマンド自体に app user wrapper を含めてある**（root SSH 後にそのまま貼っても root 実行にならない形）。
+> - git / npm / npx / prisma / build / prune は **すべて `sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm ...`** で実行する。
+> - **root で実行してよいのは `systemctl` / `journalctl` / `curl` / `ls -l .git/index` など管理・確認系のみ**。
+> - 実行はユーザー承認後に別タスクで行う（本書では実行しない）。
 
-1. **fetch**（www-data）: `sudo -u www-data HOME=/var/www git -C /opt/property-management fetch origin --prune`
-2. **ff-only 反映**: `sudo -u www-data HOME=/var/www git -C /opt/property-management merge --ff-only origin/main`
-   （`08af869` は `59c03b7` の祖先なので ff 可。ff できなければ停止＝§8）
-3. **npm ci 方針**: `npm ci --include=dev`（devDeps 込み・lock 不変前提。EBADENGINE warning は node>=22 要求パッケージの既知非致命）
-4. **prisma generate 要否**: `npx prisma generate` を実行（client 再生成＝DB 操作ではない・schema 不変でも generate は安全）
-5. **prisma migrate deploy**: **実行しない**（新規 migration 0 件。安全のため `migrate status` で「No pending」のみ確認可）
-6. **build**: `npm run build`（exit 0 を確認）
-7. **prune**: `npm prune --omit=dev`
+1. **fetch**（www-data）:
+   ```
+   sudo -u www-data HOME=/var/www git -C /opt/property-management fetch origin --prune
+   ```
+2. **反映対象の確認 → merge は明示 commit `59c03b7` に pin**（`origin/main` を直接 merge しない）:
+   ```
+   sudo -u www-data HOME=/var/www git -C /opt/property-management rev-parse origin/main
+   # 出力が 59c03b7 で始まることを確認。違う場合は停止（§8）= 後続 commit を未レビューで含めない
+   sudo -u www-data HOME=/var/www git -C /opt/property-management merge --ff-only 59c03b7
+   ```
+   （`08af869` は `59c03b7` の祖先なので ff 可。`origin/main` が `59c03b7` より先に進んでいたら**停止し、新差分範囲でチェックリストを作り直す**）
+3. **npm ci**（devDeps 込み・lock 不変前提。EBADENGINE warning は node>=22 要求パッケージの既知非致命）:
+   ```
+   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management ci --include=dev
+   ```
+4. **prisma generate**（client 再生成＝DB 操作ではない・schema 不変でも安全）:
+   ```
+   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npx --prefix /opt/property-management prisma generate
+   ```
+5. **prisma migrate deploy は実行しない**（新規 migration 0 件）。安全のため status のみ確認可（pending が出たら停止＝§8）:
+   ```
+   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npx --prefix /opt/property-management prisma migrate status
+   ```
+6. **build**（exit 0 を確認）:
+   ```
+   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management run build
+   ```
+7. **prune**:
+   ```
+   sudo -u www-data HOME=/var/www npm_config_cache=/var/www/.npm npm -C /opt/property-management prune --omit=dev
+   ```
    - その後 **package-lock.json のみ dirty**（npm メタデータ `libc` churn 等）になりがち →
      `sudo -u www-data HOME=/var/www git -C /opt/property-management restore package-lock.json` で clean に戻す（lock の実依存は不変）
-8. **systemd restart**: `systemctl restart property-management`（OLD→NEW MainPID を控える。停止時 journal の `status=143` は SIGTERM 正常 graceful）
-9. **journal 確認**: `journalctl -u property-management -n 50` で「✓ Ready in …ms」、`journalctl -u property-management -p err -n 50` が 0 件
-10. **curl 確認**: `curl -I http://localhost:3000/` が 307 → `/login`
+8. **systemd restart**（root 可）: `systemctl restart property-management`（OLD→NEW MainPID を控える。停止時 journal の `status=143` は SIGTERM 正常 graceful）
+9. **journal 確認**（root 可）: `journalctl -u property-management -n 50` で「✓ Ready in …ms」、`journalctl -u property-management -p err -n 50` が 0 件
+10. **curl 確認**（root 可）: `curl -I http://localhost:3000/` が 307 → `/login`
 
 ---
 
@@ -159,6 +189,8 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 
 - [ ] **VPS git status dirty**（未コミット差分・想定外ファイル）
 - [ ] **`.git/index` owner 異常**（root:root 混在）→ §4 のとおり承認を得るまで進めない
+- [ ] **`origin/main` が `59c03b7` 以外**（fetch 後 `rev-parse origin/main` が `59c03b7` で始まらない）。
+      後続 commit を未レビューで VPS に入れないため**停止**し、新差分範囲でチェックリストを作り直す。**本runbookは `08af869..59c03b7` 専用**
 - [ ] **ff-only 不可**（`08af869` が `59c03b7` の祖先でない＝VPS が想定外に進んでいる/分岐）
 - [ ] **package / lock 差分が想定外**（今回は 0 のはず。`npm ci` 後に lock が実依存レベルで変わる等）
 - [ ] **build 失敗**（`npm run build` exit≠0。`--omit=dev` での実行になっていないか先に疑う）
@@ -191,8 +223,9 @@ M src/lib/storage/__tests__/uploads-route.test.ts                (#147 test)
 ## VPS まとめ反映 報告（08af869 → 59c03b7）
 
 - 反映前 HEAD:（例 08af869・www-data git で確認）
-- 反映後 HEAD:（例 59c03b7・== origin/main）
-- 実行コマンド:（fetch / ff merge / npm ci --include=dev / prisma generate / build / prune / git restore lock / restart の要点）
+- origin/main 一致確認:（rev-parse origin/main == 59c03b7 か。違えば停止した旨）
+- 反映後 HEAD:（例 59c03b7・明示 commit pin で merge）
+- 実行コマンド:（www-data wrapper 付き: fetch / merge 59c03b7 / npm ci --include=dev / prisma generate / build / prune / git restore lock / restart の要点）
 - build 結果:（exit code・所要）
 - service 結果:（OLD→NEW MainPID・active/running）
 - curl 結果:（/ → 307 /login ・主要パスの status）
