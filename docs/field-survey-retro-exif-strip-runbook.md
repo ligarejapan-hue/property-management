@@ -275,7 +275,14 @@ thumbnail あり: <withThumbnail>（うち key 抽出可: <thumbnailMappable>）
 - 本番 DB スキーマ・migration・package / lock / env（**変更なし**）。
 - production route / upload route / authorization のコード（**変更なし**）。
 - AuditLog（apply は AuditLog を書きません。処理記録は JSONL run-log が正）。
-- 旧 key / 旧 thumbnail key の削除（cleanup）= **未実装・別承認（PR-R2c）**。
+- 旧 key / 旧 thumbnail key の **実削除（storage から消す）= 未実装・別承認（PR-R2c-ii）**。
+  - なお **cleanup の dry-run 列挙**（削除対象候補の分類・報告のみ・**storage 削除は一切なし**・読み取り専用）は
+    **PR-R2c-i として別 CLI で実装済み**です：
+    `npx tsx scripts/retro-exif-strip-cleanup-field-survey.ts --apply-run-log <apply の JSONL run-log> [--out <path>]`。
+    apply 時に `--jsonl` で保存した run-log の `repointed` 行（`oldKey` / `oldThumbnailKey`）を入力に、
+    現 DB（FieldSurveyPinPhoto）がまだその旧 key を参照していないかを再確認し、`deletable` /
+    `skipped_still_referenced` / `skipped_unmappable` / `skipped_row_missing` / `skipped_invalid_key` /
+    `skipped_not_repointed` / `malformed_line` に分類します（**実削除は行いません**）。実削除の配線は PR-R2c-ii。
 - 孤児新 key の reconciliation / resume checkpoint = **別承認**。
 
 実 strip（`--apply`）の**本番実行そのもの**、および cleanup（旧 key 削除）は **別承認**として
