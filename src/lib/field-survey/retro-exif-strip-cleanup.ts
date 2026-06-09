@@ -1,9 +1,13 @@
 /**
- * 既存 field-survey 写真の遡及 EXIF strip — cleanup dry-run 列挙 core（PR-R2c-i）。
+ * 既存 field-survey 写真の遡及 EXIF strip — cleanup core（dry-run 列挙 PR-R2c-i / 実削除 PR-R2c-ii）。
  *
  * 位置づけ:
- *   docs/field-survey-retro-exif-strip-runbook.md の cleanup（旧 key / 旧 thumbnail key 削除）
- *   の **dry-run 列挙のみ**。実削除（storage 実体の delete 配線・実削除フラグ）は PR-R2c-ii。
+ *   docs/field-survey-retro-exif-strip-runbook.md の cleanup（旧 key / 旧 thumbnail key 削除）。
+ *   - dry-run 列挙（runCleanupDryRun・PR-R2c-i）= 削除対象候補を分類・報告するのみ（storage 非操作）。
+ *   - 実削除（runCleanupDelete・PR-R2c-ii）= deletable 候補のみ deleteObject port 経由で storage 実体を
+ *     削除する。**実 storage 実体の削除 / storage 取得関数 は本 lib に import せず**、wrapper が二重ゲート
+ *     （--delete && --confirm）の内側でのみ注入する。deletability 判定は dry-run と同一の
+ *     evaluateCleanupCandidate を共通利用し、deletable 以外は storage 実体の削除 に到達させない。
  *   本モジュールは純関数群で、prisma / storage 実体 / process / next / node:fs を一切 import しない（DI）。
  *   実際の DB read（lookupRow）・run-log 読み込み・出力は薄い wrapper
  *   （scripts/retro-exif-strip-cleanup-field-survey.ts）が実体を注入して担当する。
@@ -52,6 +56,19 @@ export const CLEANUP_DRY_RUN_OUTCOMES = [
 
 export type CleanupDryRunOutcome = (typeof CLEANUP_DRY_RUN_OUTCOMES)[number];
 
+/**
+ * cleanup **実削除**（PR-R2c-ii）の outcome 一覧。
+ * dry-run の全 outcome（無改変）に deleted / delete_failed を加えた superset
+ * （deletable は実削除時に deleted / delete_failed へ re-label されるため delete モードでは 0）。
+ */
+export const CLEANUP_DELETE_OUTCOMES = [
+  ...CLEANUP_DRY_RUN_OUTCOMES,
+  "deleted",
+  "delete_failed",
+] as const;
+
+export type CleanupDeleteOutcome = (typeof CLEANUP_DELETE_OUTCOMES)[number];
+
 export type CleanupCandidateKind = "file" | "thumbnail";
 
 /** lookupRow が返す現 DB 行の最小形（repoint 済かの再確認用）。 */
@@ -60,10 +77,20 @@ export interface CleanupCurrentRow {
   thumbnailUrl: string | null;
 }
 
-/** 依存注入 ports（R2c-i は DB read のみ。storage 操作は無い＝delete は PR-R2c-ii）。 */
+/** 依存注入 ports（dry-run は DB read のみ。storage 操作は無い）。 */
 export interface CleanupDryRunPorts {
   /** 現在の FieldSurveyPinPhoto 行を読む。存在しなければ null。 */
   lookupRow(photoId: string): Promise<CleanupCurrentRow | null>;
+}
+
+/**
+ * 実削除（PR-R2c-ii）の ports。dry-run ports（lookupRow）に storage 実体の削除を加える。
+ * メソッド名は delete でなく deleteObject（dot-delete 呼び出しパターンの source-assertion 罠回避 +
+ * prisma の無関係な delete 呼び出しと区別）。wrapper が delete && confirm ゲートの内側でのみ
+ * storage 取得関数経由の削除関数を注入する（lib は storage 取得関数 / storage 実体を import しない）。
+ */
+export interface CleanupDeletePorts extends CleanupDryRunPorts {
+  deleteObject(key: string): Promise<void>;
 }
 
 /** cleanup dry-run の非 PII 出力行（JSONL の 1 オブジェクト）。 */
@@ -85,6 +112,16 @@ export interface CleanupDryRunLogLine {
   lineNumber?: number;
 }
 
+/**
+ * cleanup 実削除（PR-R2c-ii）の非 PII 出力行。dry-run 行に deleted/delete_failed の
+ * outcome 拡張と delete_failed 用 errorName を加える（message 本文・PII は出さない）。
+ */
+export interface CleanupDeleteLogLine extends Omit<CleanupDryRunLogLine, "outcome"> {
+  outcome: CleanupDeleteOutcome;
+  /** delete_failed のとき、storage 実体の削除 の error.name のみ（message 本文・PII は出さない）。 */
+  errorName?: string;
+}
+
 /** cleanup dry-run の集計結果。 */
 export interface CleanupDryRunResult {
   /** 処理した非空行数（blank 行は数えない）。 */
@@ -92,11 +129,29 @@ export interface CleanupDryRunResult {
   summary: Record<CleanupDryRunOutcome, number>;
 }
 
-/** 全 outcome を 0 で初期化した summary を返す。 */
+/** cleanup 実削除（PR-R2c-ii）の集計結果。 */
+export interface CleanupDeleteResult {
+  lines: number;
+  summary: Record<CleanupDeleteOutcome, number>;
+}
+
+/** 全 outcome を 0 で初期化した dry-run summary を返す。 */
 export function emptyCleanupSummary(): Record<CleanupDryRunOutcome, number> {
   return Object.fromEntries(
     CLEANUP_DRY_RUN_OUTCOMES.map((o) => [o, 0]),
   ) as Record<CleanupDryRunOutcome, number>;
+}
+
+/** 全 outcome を 0 で初期化した delete summary を返す。 */
+export function emptyCleanupDeleteSummary(): Record<CleanupDeleteOutcome, number> {
+  return Object.fromEntries(
+    CLEANUP_DELETE_OUTCOMES.map((o) => [o, 0]),
+  ) as Record<CleanupDeleteOutcome, number>;
+}
+
+/** エラーは name のみ記録する（message は path / 詳細を含み得るため非 PII 規律で出さない）。 */
+function errorNameOf(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
 }
 
 // ---------------------------------------------------------------
@@ -315,6 +370,76 @@ export async function runCleanupDryRun(
   return { lines, summary };
 }
 
+/**
+ * apply run-log の生 JSONL 行を 1 件ずつ評価し、**deletable と判定された候補のみ** storage 実体を
+ * 削除する（PR-R2c-ii・二重ゲート通過後に wrapper が呼ぶ）。
+ *
+ * 安全規律:
+ *   - deletability 判定は dry-run と同一の {@link evaluateCleanupCandidate}（両カラム照合・fail-closed）
+ *     を共通利用し、再実装しない。delete を呼ぶのは outcome==='deletable' の瞬間のみ
+ *     （deletable 以外は dry-run と同一行を透過し storage 実体の削除 に到達しない＝bypass 経路を作らない）。
+ *   - delete 直前に lookupRow→evaluate を再実行する（dry-run 結果を信用した盲目削除をしない）。
+ *   - deleteObject は void 契約で deleted/already_absent を区別不能。throw しなければ deleted、
+ *     throw すれば delete_failed（errorName のみ記録・best-effort 継続で batch 全停止にしない）。
+ *   - per-line streaming fold（結果配列を保持しない・dry-run と同一規律）。sequential。
+ */
+export async function runCleanupDelete(
+  rawLines: AsyncIterable<string>,
+  ports: CleanupDeletePorts,
+  onLine?: (line: CleanupDeleteLogLine) => void | Promise<void>,
+): Promise<CleanupDeleteResult> {
+  const summary = emptyCleanupDeleteSummary();
+  let lines = 0;
+  let lineNumber = 0;
+
+  const emit = async (line: CleanupDeleteLogLine): Promise<void> => {
+    summary[line.outcome] += 1;
+    if (onLine) await onLine(line);
+  };
+
+  for await (const raw of rawLines) {
+    lineNumber += 1;
+    const parsed = parseCleanupRunLogLine(raw, lineNumber);
+    if (parsed.kind === "blank") continue;
+    lines += 1;
+
+    if (parsed.kind === "malformed") {
+      await emit({ outcome: "malformed_line", lineNumber: parsed.lineNumber });
+      continue;
+    }
+    if (parsed.kind === "not_repointed") {
+      await emit({
+        outcome: "skipped_not_repointed",
+        photoId: parsed.photoId,
+        sourceOutcome: parsed.sourceOutcome,
+      });
+      continue;
+    }
+
+    // delete 直前の DB 再確認（dry-run 結果を信用せず lookupRow→evaluate を再実行）。
+    const row = await ports.lookupRow(parsed.photoId);
+    for (const candidate of parsed.candidates) {
+      const evaluation = evaluateCleanupCandidate(parsed.photoId, candidate, row);
+      if (evaluation.outcome !== "deletable") {
+        // deletable 以外は storage 実体の削除 に到達させず、dry-run と同一行を透過する。
+        await emit(evaluation);
+        continue;
+      }
+      // deletable のときだけ実 delete。throw 無し=deleted / throw=delete_failed（best-effort 継続）。
+      const line: CleanupDeleteLogLine = { ...evaluation, outcome: "deleted" };
+      try {
+        await ports.deleteObject(candidate.key);
+      } catch (error) {
+        line.outcome = "delete_failed";
+        line.errorName = errorNameOf(error);
+      }
+      await emit(line);
+    }
+  }
+
+  return { lines, summary };
+}
+
 // ---------------------------------------------------------------
 // 終了コード（純関数・テスト可能）
 // ---------------------------------------------------------------
@@ -337,6 +462,27 @@ export function cleanupDryRunExitCode(
   if (summary.malformed_line > 0) return CLEANUP_DRY_RUN_EXIT_MALFORMED;
   if (summary.skipped_still_referenced > 0) return CLEANUP_DRY_RUN_EXIT_STILL_REFERENCED;
   return CLEANUP_DRY_RUN_EXIT_OK;
+}
+
+export const CLEANUP_DELETE_EXIT_OK = 0;
+export const CLEANUP_DELETE_EXIT_MALFORMED = 1;
+export const CLEANUP_DELETE_EXIT_STILL_REFERENCED = 2;
+export const CLEANUP_DELETE_EXIT_DELETE_FAILED = 3;
+
+/**
+ * cleanup 実削除（PR-R2c-ii）の終了コードを決める純関数（致命優先スタイル）。
+ *   1 = malformed_line > 0（run-log 破損・最優先で要調査）
+ *   3 = delete_failed > 0（storage 削除に失敗＝orphan 残存・要対応）
+ *   2 = skipped_still_referenced > 0（手動 rollback / 未 repoint の疑い）
+ *   0 = それ以外（deleted / 期待 skip のみ）
+ */
+export function cleanupDeleteExitCode(
+  summary: Record<CleanupDeleteOutcome, number>,
+): number {
+  if (summary.malformed_line > 0) return CLEANUP_DELETE_EXIT_MALFORMED;
+  if (summary.delete_failed > 0) return CLEANUP_DELETE_EXIT_DELETE_FAILED;
+  if (summary.skipped_still_referenced > 0) return CLEANUP_DELETE_EXIT_STILL_REFERENCED;
+  return CLEANUP_DELETE_EXIT_OK;
 }
 
 // ---------------------------------------------------------------
@@ -365,8 +511,12 @@ export function isSameIoPath(a: string, b: string): boolean {
 export interface CleanupCliOptions {
   /** 入力 = apply の JSONL run-log パス（必須）。 */
   applyRunLogPath: string;
-  /** cleanup dry-run の JSONL 出力先（任意）。 */
+  /** JSONL 出力先（dry-run は任意。実削除〔delete && confirm〕では必須＝不可逆操作の証跡）。 */
   outPath: string | null;
+  /** 実削除ゲート 1（--delete）。confirm と両方そろって初めて実削除。 */
+  delete: boolean;
+  /** 実削除ゲート 2（--confirm）。delete と両方そろって初めて実削除。 */
+  confirm: boolean;
   help: boolean;
 }
 
@@ -377,15 +527,18 @@ export type CleanupCliParseResult =
 /**
  * argv（実行ファイル名等を除いた純粋な引数配列）を parse する。
  *
- * 受理: --apply-run-log <path>（必須）/ --out <path> / --help。
- * 拒否: 未知フラグ / --apply-run-log 未指定 / 値欠落 /
- *       --delete・--confirm（R2c-i は列挙のみ・実削除は PR-R2c-ii）。
+ * 受理: --apply-run-log <path>（必須）/ --out <path> / --delete / --confirm / --help。
+ * 実削除は **二重ゲート**: --delete と --confirm の両方が必要（単独は拒否）。
+ * 実削除（delete && confirm）時は不可逆ゆえ --out（delete log）も必須。
+ * 拒否: 未知フラグ / --apply-run-log 未指定 / 値欠落 / --delete・--confirm 単独 / 実削除で --out 欠落。
  */
 export function parseCleanupCliArgs(
   argv: readonly string[],
 ): CleanupCliParseResult {
   let applyRunLogPath: string | null = null;
   let outPath: string | null = null;
+  let del = false;
+  let confirm = false;
   let help = false;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -412,7 +565,7 @@ export function parseCleanupCliArgs(
         if (value === undefined || value.startsWith("-")) {
           return {
             ok: false,
-            error: "--out には cleanup dry-run の JSONL 出力先パスを指定してください",
+            error: "--out には JSONL 出力先パスを指定してください",
           };
         }
         outPath = value;
@@ -420,12 +573,11 @@ export function parseCleanupCliArgs(
         break;
       }
       case "--delete":
+        del = true;
+        break;
       case "--confirm":
-        // R2c-i は cleanup dry-run 列挙のみ。実削除フラグは構造的に拒否する。
-        return {
-          ok: false,
-          error: `${arg} は cleanup dry-run（PR-R2c-i）では使用できません（実削除の配線は PR-R2c-ii）。`,
-        };
+        confirm = true;
+        break;
       default:
         return { ok: false, error: `未知のオプション: ${arg}` };
     }
@@ -434,7 +586,7 @@ export function parseCleanupCliArgs(
   if (help) {
     return {
       ok: true,
-      options: { applyRunLogPath: applyRunLogPath ?? "", outPath, help: true },
+      options: { applyRunLogPath: applyRunLogPath ?? "", outPath, delete: del, confirm, help: true },
     };
   }
   if (applyRunLogPath === null) {
@@ -443,5 +595,19 @@ export function parseCleanupCliArgs(
       error: "--apply-run-log（apply の JSONL run-log）を指定してください",
     };
   }
-  return { ok: true, options: { applyRunLogPath, outPath, help: false } };
+  // 二重ゲート: --delete / --confirm は両方そろって初めて実削除（単独は拒否）。
+  if (del && !confirm) {
+    return { ok: false, error: "--delete には --confirm が必須です（実削除は二重ゲート）。" };
+  }
+  if (confirm && !del) {
+    return { ok: false, error: "--confirm は --delete と併用が必須です（実削除は二重ゲート）。" };
+  }
+  // 実削除は不可逆ゆえ delete log（--out）を必須にする。
+  if (del && confirm && outPath === null) {
+    return {
+      ok: false,
+      error: "--delete --confirm 時は --out（delete log の出力先）が必須です（不可逆操作の証跡を残すため）。",
+    };
+  }
+  return { ok: true, options: { applyRunLogPath, outPath, delete: del, confirm, help: false } };
 }
