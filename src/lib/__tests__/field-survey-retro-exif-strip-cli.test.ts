@@ -1,10 +1,14 @@
 /**
- * 遡及 EXIF strip inventory / dry-run CLI core（retro-exif-strip-cli.ts・PR-R2a）の単体テスト。
+ * 遡及 EXIF strip inventory / dry-run / apply CLI core（retro-exif-strip-cli.ts）の単体テスト。
  *
  * 方針:
  *   - prisma / storage 実体 / process を一切使わない。合成バイト fixture + mock ports のみ。
- *   - dry-run 専用であること（upload / delete / repoint が呼ばれないこと）を強くロックする。
- *   - --apply は parse 時点で error になることをロックする。
+ *   - dry-run は upload / delete / repoint が呼ばれないことを強くロックする
+ *     （PR-R2b で apply 導線が増えても dry-run の no-write 不変条件は維持）。
+ *   - apply（PR-R2b）は --apply 受理 / makeApplyPorts + makeUpdateManyRepointPhoto の配線 /
+ *     count=1→repointed・count=0→skipped_row_changed（新 key のみ補償削除・旧 key 不可侵）/
+ *     upload・repoint 例外→failed / exit-code / 非 PII run-log をロックする。
+ *   - core（processRetroStripRow の各分岐）は PR-R1 でロック済みのため再テストしない。
  *   - 出力（run-log 行）に fileName / 座標 / PII が混入しないことをロックする。
  */
 import { describe, it, expect } from "vitest";
@@ -19,7 +23,11 @@ import {
   accumulateInventoryRow,
   toRunLogLine,
   runRetroStripDryRun,
+  runRetroStripApply,
   makeDryRunPorts,
+  makeApplyPorts,
+  makeUpdateManyRepointPhoto,
+  applyExitCode,
   emptyOutcomeSummary,
   type InventoryRowInput,
 } from "@/lib/field-survey/retro-exif-strip-cli";
@@ -95,15 +103,47 @@ describe("parseRetroStripCliArgs", () => {
     });
   });
 
-  it("--apply は error（dry-run 専用・apply 未実装）", () => {
+  it("--apply を受理する（PR-R2b で apply 実装済み）", () => {
     const r = parseRetroStripCliArgs(["--apply"]);
-    expect(r.ok).toBe(false);
-    if (r.ok) throw new Error("unreachable");
-    expect(r.error).toContain("--apply");
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r.options).toEqual({
+      mode: "apply",
+      jsonlPath: null,
+      batchSize: 500,
+      limit: null,
+      help: false,
+    });
   });
 
-  it("--dry-run --apply のように apply が混ざっても error", () => {
+  it("--apply + --jsonl + --batch-size + --limit を受理する", () => {
+    const r = parseRetroStripCliArgs([
+      "--apply",
+      "--jsonl",
+      "/tmp/apply.jsonl",
+      "--batch-size",
+      "200",
+      "--limit",
+      "5",
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r.options).toEqual({
+      mode: "apply",
+      jsonlPath: "/tmp/apply.jsonl",
+      batchSize: 200,
+      limit: 5,
+      help: false,
+    });
+  });
+
+  it("--dry-run --apply のように mode を 2 つ指定すると排他違反 error", () => {
     const r = parseRetroStripCliArgs(["--dry-run", "--apply"]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("--inventory --apply の併用（排他違反）は error", () => {
+    const r = parseRetroStripCliArgs(["--inventory", "--apply"]);
     expect(r.ok).toBe(false);
   });
 
@@ -473,7 +513,376 @@ describe("emptyOutcomeSummary", () => {
 });
 
 // ---------------------------------------------------------------
-// source assertion（dry-run 専用・書き込み導線の不在をロック）
+// apply（PR-R2b）: makeUpdateManyRepointPhoto / makeApplyPorts / runRetroStripApply / applyExitCode
+// ---------------------------------------------------------------
+
+const NEW_KEY = `field-survey/pins/${PIN}/photos/uuid-fixed.jpg`;
+
+describe("makeUpdateManyRepointPhoto", () => {
+  it("repoint を updateMany({where:{id,fileUrl}, data:{fileUrl,thumbnailUrl,fileSize}}) に写像し count を返す", async () => {
+    let captured: unknown = null;
+    const repoint = makeUpdateManyRepointPhoto((args) => {
+      captured = args;
+      return Promise.resolve({ count: 1 });
+    });
+    const count = await repoint({
+      id: "photo-9",
+      expectedFileUrl: OLD_URL,
+      newFileUrl: `/uploads/${NEW_KEY}`,
+      newThumbnailUrl: null,
+      newFileSize: 1234,
+    });
+    expect(count).toBe(1);
+    // 楽観ガード = where に {id, fileUrl(=読み取り時 verbatim)} を使う（version/updatedAt 列が無いため）。
+    expect(captured).toEqual({
+      where: { id: "photo-9", fileUrl: OLD_URL },
+      data: {
+        fileUrl: `/uploads/${NEW_KEY}`,
+        thumbnailUrl: null,
+        fileSize: 1234,
+      },
+    });
+  });
+
+  it("data に mimeType を含めない（format 保持＝mime 不変）", async () => {
+    let capturedData: Record<string, unknown> = {};
+    const repoint = makeUpdateManyRepointPhoto((args) => {
+      capturedData = args.data as unknown as Record<string, unknown>;
+      return Promise.resolve({ count: 1 });
+    });
+    await repoint({
+      id: "i",
+      expectedFileUrl: "u",
+      newFileUrl: "/uploads/n.jpg",
+      newThumbnailUrl: "/uploads/t.jpg",
+      newFileSize: 1,
+    });
+    expect(Object.keys(capturedData).sort()).toEqual(["fileSize", "fileUrl", "thumbnailUrl"]);
+    expect(capturedData).not.toHaveProperty("mimeType");
+  });
+
+  it("count=0（楽観ガード負け）をそのまま返す", async () => {
+    const repoint = makeUpdateManyRepointPhoto(() => Promise.resolve({ count: 0 }));
+    await expect(
+      repoint({ id: "i", expectedFileUrl: "u", newFileUrl: "n", newThumbnailUrl: null, newFileSize: 1 }),
+    ).resolves.toBe(0);
+  });
+});
+
+describe("makeApplyPorts", () => {
+  it("注入した storage / repointPhoto / generateUuid をそのまま ports に組む（DI・実体は注入側）", () => {
+    const read = async () => null;
+    const upload = async () => ({ url: "u", key: "k" });
+    const del = async () => {};
+    const repointPhoto = async () => 1;
+    const generateUuid = () => "x";
+    const ports = makeApplyPorts({
+      storage: { read, upload, delete: del },
+      repointPhoto,
+      generateUuid,
+    });
+    expect(ports.storage.read).toBe(read);
+    expect(ports.storage.upload).toBe(upload);
+    expect(ports.storage.delete).toBe(del);
+    expect(ports.repointPhoto).toBe(repointPhoto);
+    expect(ports.generateUuid).toBe(generateUuid);
+  });
+});
+
+interface ApplyFakeOptions {
+  files: Record<string, Buffer>;
+  uploadThrows?: boolean;
+  repointCount?: number;
+  repointThrows?: boolean;
+}
+
+function applyFake(opts: ApplyFakeOptions) {
+  const deletes: string[] = [];
+  const uploads: string[] = [];
+  const repoints: {
+    id: string;
+    expectedFileUrl: string;
+    newFileUrl: string;
+    newThumbnailUrl: string | null;
+    newFileSize: number;
+  }[] = [];
+  const ports = makeApplyPorts({
+    storage: {
+      read: async (key) => {
+        const body = opts.files[key];
+        if (!body) return null;
+        return { body, contentType: "application/octet-stream", size: body.length };
+      },
+      upload: async (_buffer, o) => {
+        if (opts.uploadThrows) throw new TypeError("upload boom");
+        uploads.push(o.key);
+        return { url: `/uploads/${o.key}`, key: o.key };
+      },
+      delete: async (key) => {
+        deletes.push(key);
+      },
+    },
+    repointPhoto: async (u) => {
+      repoints.push(u);
+      if (opts.repointThrows) throw new TypeError("repoint boom");
+      return opts.repointCount ?? 1;
+    },
+    generateUuid: () => "uuid-fixed",
+  });
+  return { ports, deletes, uploads, repoints };
+}
+
+describe("runRetroStripApply", () => {
+  it("count=1 → repointed。旧 key は削除されず、新 key で repoint される", async () => {
+    const fixture = buildJpegWithApp1();
+    const fake = applyFake({ files: { [OLD_KEY]: fixture }, repointCount: 1 });
+    const lines: ReturnType<typeof toRunLogLine>[] = [];
+    const result = await runRetroStripApply(asyncRows([row()]), fake.ports, (l) => {
+      lines.push(l);
+    });
+
+    expect(result.processed).toBe(1);
+    expect(result.summary.repointed).toBe(1);
+    // 旧 key は決して削除しない（rollback 窓・cleanup は PR-R2c）。
+    expect(fake.deletes).toEqual([]);
+    expect(fake.uploads).toEqual([NEW_KEY]);
+    // repoint は楽観ガード（expectedFileUrl = 読み取り時 fileUrl verbatim）で新 key を指す。
+    expect(fake.repoints).toHaveLength(1);
+    expect(fake.repoints[0].expectedFileUrl).toBe(OLD_URL);
+    expect(fake.repoints[0].newFileUrl).toBe(`/uploads/${NEW_KEY}`);
+    expect(fake.repoints[0].newFileSize).toBeLessThan(fixture.length); // strip 後バイト
+    // run-log: repointed は oldKey/newKey/bytes を持ち、newFileUrl/fileName を持たない。
+    expect(lines[0]).toMatchObject({
+      photoId: "photo-1",
+      outcome: "repointed",
+      oldKey: OLD_KEY,
+      newKey: NEW_KEY,
+    });
+    expect(lines[0].bytesAfter as number).toBeLessThan(lines[0].bytesBefore as number);
+    const json = JSON.stringify(lines[0]);
+    expect(json).not.toContain("newFileUrl");
+    expect(json).not.toContain("SENTINEL-PII-FILENAME");
+  });
+
+  it("repointed: 旧 thumbnail を持つ行は oldThumbnailKey が非 PII の path で run-log に乗り、旧 thumbnail key も削除されない（配線の thumbnail 透過）", async () => {
+    // 不変条件 A（旧 thumbnail key 不削除）と C（thumbnail 側の非 PII 透過）を wrapper→core→
+    // runner→sink の鎖で統合検証する（toRunLogLine の oldThumbnailKey 非 null 分岐を end-to-end で通す）。
+    const fake = applyFake({ files: { [OLD_KEY]: buildJpegWithApp1() }, repointCount: 1 });
+    const lines: ReturnType<typeof toRunLogLine>[] = [];
+    const result = await runRetroStripApply(
+      asyncRows([row({ thumbnailUrl: "/uploads/field-survey/thumbs/old-t.jpg" })]),
+      fake.ports,
+      (l) => {
+        lines.push(l);
+      },
+    );
+    expect(result.summary.repointed).toBe(1);
+    // 旧 key も旧 thumbnail key も削除しない（rollback 窓・cleanup は PR-R2c）。
+    expect(fake.deletes).toEqual([]);
+    expect(lines[0]).toMatchObject({
+      photoId: "photo-1",
+      outcome: "repointed",
+      oldKey: OLD_KEY,
+      oldThumbnailKey: "field-survey/thumbs/old-t.jpg",
+      newKey: NEW_KEY,
+    });
+    // 非 PII: newFileUrl / newThumbnailUrl / fileName は run-log に出さない。
+    const json = JSON.stringify(lines[0]);
+    expect(json).not.toContain("newFileUrl");
+    expect(json).not.toContain("newThumbnailUrl");
+    expect(json).not.toContain("SENTINEL-PII-FILENAME");
+  });
+
+  it("count=0（並行変更）→ skipped_row_changed。新 key のみ補償削除（旧 key は不可侵）", async () => {
+    const fake = applyFake({ files: { [OLD_KEY]: buildJpegWithApp1() }, repointCount: 0 });
+    const lines: ReturnType<typeof toRunLogLine>[] = [];
+    const result = await runRetroStripApply(asyncRows([row()]), fake.ports, (l) => {
+      lines.push(l);
+    });
+
+    expect(result.summary.skipped_row_changed).toBe(1);
+    expect(result.summary.repointed).toBe(0);
+    // 補償削除は新 key のみ。旧 key は決して含まない。
+    expect(fake.deletes).toEqual([NEW_KEY]);
+    expect(fake.deletes).not.toContain(OLD_KEY);
+    expect(lines[0]).toMatchObject({
+      photoId: "photo-1",
+      outcome: "skipped_row_changed",
+      oldKey: OLD_KEY,
+      newKey: NEW_KEY,
+      compensationDeleted: true,
+    });
+  });
+
+  it("upload 例外 → failed(upload)。delete / repoint は発生しない", async () => {
+    const fake = applyFake({ files: { [OLD_KEY]: buildJpegWithApp1() }, uploadThrows: true });
+    const lines: ReturnType<typeof toRunLogLine>[] = [];
+    const result = await runRetroStripApply(asyncRows([row()]), fake.ports, (l) => {
+      lines.push(l);
+    });
+    expect(result.summary.failed).toBe(1);
+    expect(fake.deletes).toEqual([]);
+    expect(fake.repoints).toEqual([]);
+    expect(lines[0]).toMatchObject({
+      photoId: "photo-1",
+      outcome: "failed",
+      stage: "upload",
+      errorName: "TypeError",
+    });
+  });
+
+  it("repoint 例外 → failed(repoint)。新 key は記録のみ（DB 状態不明ゆえ補償削除しない）", async () => {
+    const fake = applyFake({ files: { [OLD_KEY]: buildJpegWithApp1() }, repointThrows: true });
+    const lines: ReturnType<typeof toRunLogLine>[] = [];
+    const result = await runRetroStripApply(asyncRows([row()]), fake.ports, (l) => {
+      lines.push(l);
+    });
+    expect(result.summary.failed).toBe(1);
+    expect(fake.deletes).toEqual([]); // 補償削除しない（DB が更新済みか不明）
+    expect(lines[0]).toMatchObject({
+      photoId: "photo-1",
+      outcome: "failed",
+      stage: "repoint",
+      errorName: "TypeError",
+      newKey: NEW_KEY,
+    });
+  });
+
+  it("複数行を sequential 集計し、run-log / 結果に fileName（PII）が漏れない", async () => {
+    const clean = `field-survey/pins/${PIN}/photos/clean.jpg`;
+    const fake = applyFake({
+      files: { [OLD_KEY]: buildJpegWithApp1(), [clean]: buildCleanJpeg() },
+      repointCount: 1,
+    });
+    const lines: unknown[] = [];
+    const items = [
+      row(), // repointed
+      row({ id: "p2", fileUrl: `/uploads/${clean}` }), // unchanged（書き込みなし）
+      row({ id: "p3", mimeType: "image/heic" }), // skipped_unsupported_mime
+    ];
+    const result = await runRetroStripApply(asyncRows(items), fake.ports, (l) => {
+      lines.push(l);
+    });
+    expect(result.processed).toBe(3);
+    expect(result.summary.repointed).toBe(1);
+    expect(result.summary.unchanged).toBe(1);
+    expect(result.summary.skipped_unsupported_mime).toBe(1);
+    const serialized = JSON.stringify({ lines, result });
+    expect(serialized).not.toContain("SENTINEL-PII-FILENAME");
+  });
+});
+
+describe("applyExitCode", () => {
+  const base = emptyOutcomeSummary();
+  it("clean（failed/skipped_row_changed なし）→ 0", () => {
+    expect(applyExitCode({ ...base, repointed: 5, unchanged: 3 })).toBe(0);
+  });
+  it("failed>0 → 1", () => {
+    expect(applyExitCode({ ...base, repointed: 5, failed: 1 })).toBe(1);
+  });
+  it("skipped_row_changed>0 かつ failed=0 → 2（再実行推奨）", () => {
+    expect(applyExitCode({ ...base, repointed: 5, skipped_row_changed: 2 })).toBe(2);
+  });
+  it("failed と skipped_row_changed が同時 → 1（致命を優先）", () => {
+    expect(applyExitCode({ ...base, failed: 1, skipped_row_changed: 1 })).toBe(1);
+  });
+  it("expected skip（unsupported/malformed/unmappable/missing）のみ → 0", () => {
+    expect(
+      applyExitCode({
+        ...base,
+        skipped_unsupported_mime: 3,
+        skipped_malformed: 1,
+        skipped_unmappable_url: 2,
+        skipped_missing_bytes: 1,
+      }),
+    ).toBe(0);
+  });
+});
+
+describe("toRunLogLine（apply outcome）", () => {
+  it("repointed は oldKey/newKey/bytes + (非null時)oldThumbnailKey。newFileUrl/newThumbnailUrl は持たない", () => {
+    const line = toRunLogLine({
+      outcome: "repointed",
+      photoId: "x",
+      oldKey: OLD_KEY,
+      oldThumbnailKey: "field-survey/thumbs/old-t.jpg",
+      newKey: NEW_KEY,
+      newFileUrl: `/uploads/${NEW_KEY}`,
+      newThumbnailUrl: "/uploads/field-survey/thumbs/new-t.jpg",
+      bytesBefore: 100,
+      bytesAfter: 60,
+    });
+    expect(line).toEqual({
+      photoId: "x",
+      outcome: "repointed",
+      oldKey: OLD_KEY,
+      oldThumbnailKey: "field-survey/thumbs/old-t.jpg",
+      newKey: NEW_KEY,
+      bytesBefore: 100,
+      bytesAfter: 60,
+    });
+    const json = JSON.stringify(line);
+    expect(json).not.toContain("newFileUrl");
+    expect(json).not.toContain("newThumbnailUrl");
+  });
+
+  it("repointed で oldThumbnailKey=null のときは oldThumbnailKey を省略する", () => {
+    const line = toRunLogLine({
+      outcome: "repointed",
+      photoId: "x",
+      oldKey: OLD_KEY,
+      oldThumbnailKey: null,
+      newKey: NEW_KEY,
+      newFileUrl: `/uploads/${NEW_KEY}`,
+      newThumbnailUrl: null,
+      bytesBefore: 100,
+      bytesAfter: 60,
+    });
+    expect(line).not.toHaveProperty("oldThumbnailKey");
+    expect(line).toMatchObject({ outcome: "repointed", oldKey: OLD_KEY, newKey: NEW_KEY });
+  });
+
+  it("skipped_row_changed は oldKey/newKey/compensationDeleted のみ", () => {
+    expect(
+      toRunLogLine({
+        outcome: "skipped_row_changed",
+        photoId: "x",
+        oldKey: OLD_KEY,
+        newKey: NEW_KEY,
+        compensationDeleted: false,
+      }),
+    ).toEqual({
+      photoId: "x",
+      outcome: "skipped_row_changed",
+      oldKey: OLD_KEY,
+      newKey: NEW_KEY,
+      compensationDeleted: false,
+    });
+  });
+
+  it("failed(apply・newKey/compensationDeleted 付き) は stage/errorName/newKey/compensationDeleted を含む", () => {
+    expect(
+      toRunLogLine({
+        outcome: "failed",
+        photoId: "x",
+        stage: "upload",
+        errorName: "NonCanonicalUploadResultKey",
+        newKey: NEW_KEY,
+        compensationDeleted: true,
+      }),
+    ).toEqual({
+      photoId: "x",
+      outcome: "failed",
+      stage: "upload",
+      errorName: "NonCanonicalUploadResultKey",
+      newKey: NEW_KEY,
+      compensationDeleted: true,
+    });
+  });
+});
+
+// ---------------------------------------------------------------
+// source assertion（dry-run の no-write 維持 + apply 配線のロック）
 // ---------------------------------------------------------------
 
 describe("retro-exif-strip-cli source assertion", () => {
@@ -486,34 +895,52 @@ describe("retro-exif-strip-cli source assertion", () => {
     "utf8",
   );
 
-  it("lib は prisma / storage 実体 / next を import しない（DI）", () => {
+  it("lib は prisma / storage 実体 / next を import しない（DI を維持）", () => {
+    // apply 配線（makeApplyPorts / makeUpdateManyRepointPhoto）も注入のみで、
+    // getStorage / prisma を import しない（実体注入は wrapper が担う）。
     expect(libSrc).not.toContain("@/lib/prisma");
     expect(libSrc).not.toContain("generated/prisma");
     expect(libSrc).not.toContain("getStorage");
     expect(libSrc).not.toContain('from "next');
   });
 
-  it("dry-run runner は結果配列を保持せず outcome を per-row 集計する（Codex P2・streaming）", () => {
-    // 全件 dry-run でヒープが行数比例で増えないこと（buffered-then-summarize の不再導入）。
+  it("runner（dry-run / apply 共有）は結果配列を保持せず outcome を per-row 集計する（streaming）", () => {
+    // 全件処理でヒープが行数比例で増えないこと（buffered-then-summarize の不再導入）。
     expect(libSrc).toContain("summary[result.outcome] += 1");
     expect(libSrc).not.toContain("summarizeRetroStripResults");
   });
 
-  it("script は書き込み導線を持たない（dry-run 専用・storage read + prisma findMany のみ）", () => {
-    // 注: この textual grep は best-effort のガード（alias 経由や空白入りの記述は素通りし得る）。
-    // 「書き込みが起きない」ことの本質的な保証は makeDryRunPorts の throw スタブ +
-    // processRetroStripRow(mode:"dry-run") の早期 return（上の runtime テストでロック済み）。
-    // 本テストは「明白な regression（直接の write 呼び出し追加）」を追加で弾く位置づけ。
-    expect(scriptSrc).not.toContain("storage.upload(");
-    expect(scriptSrc).not.toContain("storage.delete(");
+  it("wrapper の dry-run は no-write（makeDryRunPorts の throw スタブ）を維持する", () => {
+    // dry-run の「書き込みが起きない」本質保証は makeDryRunPorts の throw スタブ +
+    // processRetroStripRow(mode:"dry-run") の早期 return（runtime テストでロック済み）。
+    expect(scriptSrc).toContain("makeDryRunPorts");
+  });
+
+  it("wrapper の apply repoint は lib の makeUpdateManyRepointPhoto を経由する（updateMany shape は lib で型固定・テスト済）", () => {
+    // 注: textual grep は best-effort。本質保証は makeUpdateManyRepointPhoto の型 +
+    // runtime テスト（where{id,fileUrl} / data に mimeType 無し / .count 返却）。
+    expect(scriptSrc).toContain("makeApplyPorts");
+    expect(scriptSrc).toContain("makeUpdateManyRepointPhoto");
+    // wrapper は updateMany の data オブジェクトを手書きしない（shape を lib に集約）。
+    // data リテラル固有の fileSize は wrapper（SELECT_ROW に fileSize 無し）に現れない。
+    expect(scriptSrc).not.toContain("fileSize");
+    // 単一行 update（楽観ガード無し）は使わない（楽観ガード付き updateMany のみ）。
     expect(scriptSrc).not.toContain(".update(");
-    expect(scriptSrc).not.toContain("updateMany");
+    // 新規行作成はしない。
     expect(scriptSrc).not.toContain(".create(");
-    // prisma は findMany（READ）のみを使う
+  });
+
+  it("wrapper は旧 key の削除導線を持たない（cleanup は PR-R2c・別承認）", () => {
+    // 旧 key / 旧 thumbnail key の削除は本 PR の範囲外。core は新 key 補償削除にのみ
+    // storage.delete を使う（core 側 source assertion でロック済み）。wrapper が oldKey /
+    // oldThumbnailKey を参照していたら旧 key 操作の混入を疑うべき。
+    expect(scriptSrc).not.toContain("oldKey");
+    expect(scriptSrc).not.toContain("oldThumbnailKey");
+  });
+
+  it("wrapper は parse を lib に委譲し、prisma READ（findMany）/ storage read を使う", () => {
+    expect(scriptSrc).toContain("parseRetroStripCliArgs");
     expect(scriptSrc).toContain("findMany");
     expect(scriptSrc).toContain("storage.read(");
-    // --apply の受理は lib parser がエラーにする（parse 段でロック済み・別 it）。
-    // wrapper は parseRetroStripCliArgs に委譲し、自前で apply 分岐を持たない。
-    expect(scriptSrc).toContain("parseRetroStripCliArgs");
   });
 });
