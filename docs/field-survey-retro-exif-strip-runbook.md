@@ -68,19 +68,32 @@
 
 ### apply（実 strip）を実行する前に追加で必須（**本番実行は別承認**）
 
-4. **DB backup を取得済み**：`backup-db.sh`（DB の論理バックアップ）。rollback の DB 側手段。
-5. **inventory を実施・レビュー済み**：対象件数 / mimeType 分布 / 非対応 MIME 数 / unmappable 数 /
+4. **⚠ `STORAGE_BACKEND` を明示設定・稼働 app と一致**（最重要・Codex P1）：`--apply` は
+   `STORAGE_BACKEND` が **未設定 / 空 / 未対応値**のとき、**DB へ触れる前（storage 取得・DB repoint
+   前）に停止**する（暗黙の local fallback を禁止）。許可値は `local` / `server` / `s3`。
+   - **稼働中アプリと同じ backend** を指すこと。**`local` backend のまま production DB へ apply して
+     はいけない**（strip 画像が local disk に置かれ、production DB が new key を指すと、稼働 app
+     〔server backend 等〕がその new key を読めず写真が 404 化する）。
+   - `DATABASE_URL` だけでなく **storage 系 env も実行前チェック対象**：`server` なら
+     `STORAGE_SERVER_URL` / `STORAGE_SERVER_API_KEY`、`s3` なら `STORAGE_S3_BUCKET` /
+     `STORAGE_S3_REGION` / `STORAGE_S3_ACCESS_KEY_ID` / `STORAGE_S3_SECRET_ACCESS_KEY`。不足時は
+     storage 取得時点（= repoint 前）に fail-closed で停止する。
+   - 実行開始時にログへ出る `storage backend（明示確認済み）: <値>` が想定どおりか必ず確認する。
+     **backend 確認は DB repoint 前の停止条件**。
+5. **DB backup を取得済み**：`backup-db.sh`（DB の論理バックアップ）。rollback の DB 側手段。
+6. **inventory を実施・レビュー済み**：対象件数 / mimeType 分布 / 非対応 MIME 数 / unmappable 数 /
    thumbnail 有無 を把握。
-6. **dry-run を実施・レビュー済み**：`would_strip`（変更見込み件数）・skip 内訳・`failed` が
-   想定どおりか確認（§6）。
-7. **thumbnail probe**：thumbnail を持つ行がある場合、apply で `thumbnailUrl` が **upload 返却値**に
+7. **dry-run を実施・レビュー済み**：`would_strip`（変更見込み件数）・skip 内訳・`failed` が
+   想定どおりか確認（§6）。dry-run のログ冒頭に出る `storage backend` が apply で使う backend と
+   一致しているかも確認する。
+8. **thumbnail probe**：thumbnail を持つ行がある場合、apply で `thumbnailUrl` が **upload 返却値**に
    置き換わる。server backend が再アップロード時に thumbnail を生成して返すならクリーンな
    thumbnail に更新されるが、**返さない場合は `thumbnailUrl` が null 化し得る**。事前に 1 件
    probe して挙動を確認すること（影響範囲はリポジトリからは判定不能）。
-8. **ディスク空き**：新 key を旧 key と並存させるため、対象 corpus 相当の追加容量＋余裕。
-9. **低トラフィック窓**：楽観ガードで並行安全だが、`skipped_row_changed`（並行変更）が増えると
-   再実行が必要になるため、書き込みの少ない時間帯を選ぶ。
-10. **run-log（`--jsonl`）の保存先**：apply では rollback / cleanup 判断の根拠になるため保存を推奨。
+9. **ディスク空き**：新 key を旧 key と並存させるため、対象 corpus 相当の追加容量＋余裕。
+10. **低トラフィック窓**：楽観ガードで並行安全だが、`skipped_row_changed`（並行変更）が増えると
+    再実行が必要になるため、書き込みの少ない時間帯を選ぶ。
+11. **run-log（`--jsonl`）の保存先**：apply では rollback / cleanup 判断の根拠になるため保存を推奨。
 
 ### `npm ci --include=dev` / `tsx` についての注意
 
@@ -224,6 +237,9 @@ thumbnail あり: <withThumbnail>（うち key 抽出可: <thumbnailMappable>）
 
 ## 9. NG 時の停止条件（該当したら作業を止めて報告）
 
+- **apply が `STORAGE_BACKEND` 未設定 / 空 / 未対応で停止した**（暗黙 local fallback の防止＝正常な
+  fail-closed・Codex P1）。backend を稼働 app と一致させて明示してから再実行する。実行開始ログの
+  `storage backend（明示確認済み）` が想定と違う場合も止めて確認する（**DB repoint 前の停止条件**）。
 - dry-run で `repointed` または `skipped_row_changed` が **0 以外**になった（書き込み導線が
   動いている疑い。dry-run では起き得ない）。
 - apply の `failed` が想定外に多い（storage backend / 認証 / ネットワーク異常、または非 canonical

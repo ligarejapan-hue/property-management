@@ -9,6 +9,7 @@
  *
  * ⚠ --apply は本番データを変更します。実行は docs/field-survey-retro-exif-strip-runbook.md の
  *    手順（DB backup・inventory/dry-run レビュー・低トラフィック窓・別承認）に従ってください。
+ *    --apply では STORAGE_BACKEND を稼働 app と一致させて明示すること（未設定では拒否）。
  *
  * 実行（VPS では devDeps の tsx が必要。`npm ci --include=dev` 後・prune 前に実行）:
  *   npx tsx scripts/retro-exif-strip-field-survey.ts --inventory
@@ -21,6 +22,8 @@
  *   - 本ファイルは I/O（prisma READ/repoint・storage read/upload/delete・JSONL 追記・stdout）に
  *     限定した薄い wrapper。repoint の updateMany 形は makeUpdateManyRepointPhoto（lib・型固定・
  *     テスト済）に集約し、ここでは更新 data を手書きしない。
+ *   - apply は STORAGE_BACKEND を明示必須（resolveApplyStorageBackend）。未設定での暗黙 local
+ *     fallback を禁止し、getStorage / DB repoint 前に fail-closed する（Codex P1）。
  *   - exit code（apply）: 0=clean / 1=failed>0 / 2=skipped_row_changed>0（再実行推奨）。
  */
 
@@ -31,6 +34,7 @@ import { getStorage } from "../src/lib/storage";
 import {
   parseRetroStripCliArgs,
   assertSafeEnvironment,
+  resolveApplyStorageBackend,
   emptyInventorySummary,
   accumulateInventoryRow,
   runRetroStripDryRun,
@@ -118,6 +122,16 @@ async function main(): Promise<number> {
     log("⚠⚠ APPLY モード: 実 strip を実行します（新 key 再アップロード + DB repoint）。");
     log("   旧 key / 旧 thumbnail key は削除しません（rollback 窓として保持。cleanup は別承認の PR-R2c）。");
     log("   事前に inventory / dry-run のレビューと DB backup を完了していること（runbook 参照）。");
+    // Codex P1: getStorage() は STORAGE_BACKEND 未設定で local へ暗黙 fallback する。
+    // apply でそれを許すと「local disk へ upload + production DB を new key へ repoint」で
+    // 稼働 app（server backend 等）が new key を読めず写真が 404 化する。
+    // DB へ触れる前（getStorage / DB repoint 前）に backend を明示検証して fail-closed する。
+    const backendCheck = resolveApplyStorageBackend(process.env);
+    if (!backendCheck.ok) {
+      process.stderr.write(`停止: ${backendCheck.reason}\n`);
+      return 1;
+    }
+    log(`   storage backend（明示確認済み）: ${backendCheck.backend}`);
   } else {
     log("⚠ INVENTORY/DRY-RUN: DB 更新・storage 書き込み・repoint・cleanup は行いません（READ のみ）。");
   }
@@ -236,6 +250,9 @@ async function runDryRun(
   options: RetroStripCliOptions,
 ): Promise<number> {
   const storage = getStorage();
+  // 透明性: dry-run でも実際に read する storage backend を表示する（apply 前に backend 取り違えを
+  // 早期に気づけるようにする。dry-run は read-only ゆえ未設定でも従来どおり既定 local で動作する）。
+  log(`storage backend: ${process.env.STORAGE_BACKEND ?? "local（STORAGE_BACKEND 未設定の既定）"}`);
   const ports = makeDryRunPorts((key) => storage.read(key));
 
   if (options.jsonlPath) {

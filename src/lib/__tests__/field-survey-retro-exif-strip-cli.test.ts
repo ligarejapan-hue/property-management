@@ -17,6 +17,8 @@ import path from "node:path";
 import {
   parseRetroStripCliArgs,
   assertSafeEnvironment,
+  resolveApplyStorageBackend,
+  APPLY_STORAGE_BACKENDS,
   classifyInventoryRow,
   aggregateInventory,
   emptyInventorySummary,
@@ -204,6 +206,63 @@ describe("assertSafeEnvironment", () => {
     const r = assertSafeEnvironment({ NEXT_PUBLIC_USE_MOCK: "true" });
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("NEXT_PUBLIC_USE_MOCK");
+  });
+});
+
+// ---------------------------------------------------------------
+// resolveApplyStorageBackend（Codex P1: apply で STORAGE_BACKEND 明示必須）
+// ---------------------------------------------------------------
+
+describe("resolveApplyStorageBackend", () => {
+  it("STORAGE_BACKEND 未設定は error（暗黙 local fallback を禁止）", () => {
+    const r = resolveApplyStorageBackend({});
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.reason).toContain("STORAGE_BACKEND");
+  });
+
+  it("STORAGE_BACKEND='' は error", () => {
+    const r = resolveApplyStorageBackend({ STORAGE_BACKEND: "" });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.reason).toContain("STORAGE_BACKEND");
+  });
+
+  it("未対応 backend（unknown）は error・許可値を示す", () => {
+    const r = resolveApplyStorageBackend({ STORAGE_BACKEND: "ftp" });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.reason).toContain("ftp");
+    // 許可値（local/server/s3）を提示する
+    expect(r.reason).toContain("local");
+    expect(r.reason).toContain("server");
+    expect(r.reason).toContain("s3");
+  });
+
+  it("前後空白のみ等の非 canonical 値も error（getStorage と一致＝trim しない）", () => {
+    // getStorage は process.env.STORAGE_BACKEND を trim せず switch に渡すため、
+    // " server " は default に落ちて throw する。pre-check も同じく reject する。
+    expect(resolveApplyStorageBackend({ STORAGE_BACKEND: " server " }).ok).toBe(false);
+    expect(resolveApplyStorageBackend({ STORAGE_BACKEND: "  " }).ok).toBe(false);
+  });
+
+  it.each(["local", "server", "s3"])("有効な backend %s は ok でその値を返す", (backend) => {
+    const r = resolveApplyStorageBackend({ STORAGE_BACKEND: backend });
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("unreachable");
+    expect(r.backend).toBe(backend);
+  });
+
+  it("APPLY_STORAGE_BACKENDS は getStorage() の switch case と完全一致する（同期ロック）", () => {
+    const storageSrc = fs.readFileSync(
+      path.resolve(process.cwd(), "src/lib/storage/index.ts"),
+      "utf8",
+    );
+    // getStorage() の switch の case "X": を列挙し、許可リストと一致することを確認する。
+    const cases = [...storageSrc.matchAll(/case\s+"([^"]+)":/g)].map((m) => m[1]);
+    expect([...new Set(cases)].sort()).toEqual([...APPLY_STORAGE_BACKENDS].sort());
+    // getStorage は未設定時 local へ暗黙 fallback する（= apply が明示必須にする根拠）。
+    expect(storageSrc).toContain('?? "local"');
   });
 });
 
@@ -936,6 +995,14 @@ describe("retro-exif-strip-cli source assertion", () => {
     // oldThumbnailKey を参照していたら旧 key 操作の混入を疑うべき。
     expect(scriptSrc).not.toContain("oldKey");
     expect(scriptSrc).not.toContain("oldThumbnailKey");
+  });
+
+  it("wrapper の apply は getStorage 前に resolveApplyStorageBackend で backend を明示検証する（Codex P1）", () => {
+    // 暗黙 local fallback による「local upload + production DB repoint → 404」事故を防ぐため、
+    // apply 経路は getStorage() / DB repoint より前に STORAGE_BACKEND を明示検証する。
+    // 実挙動の本質保証は resolveApplyStorageBackend の unit テスト + apply smoke（backend 無し→
+    // DB 非接触で停止）。本 grep は gate の存在を追加で固定する。
+    expect(scriptSrc).toContain("resolveApplyStorageBackend");
   });
 
   it("wrapper は parse を lib に委譲し、prisma READ（findMany）/ storage read を使う", () => {

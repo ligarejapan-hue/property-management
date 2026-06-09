@@ -189,6 +189,56 @@ export function assertSafeEnvironment(
 }
 
 // ---------------------------------------------------------------
+// apply の storage backend 明示ガード（Codex P1）
+// ---------------------------------------------------------------
+
+/**
+ * --apply で許可する STORAGE_BACKEND の値。
+ * **src/lib/storage/index.ts の storage 取得関数の switch case と必ず一致させること**
+ * （同期は cli テストの source-assertion でロック）。
+ */
+export const APPLY_STORAGE_BACKENDS = ["local", "server", "s3"] as const;
+export type ApplyStorageBackend = (typeof APPLY_STORAGE_BACKENDS)[number];
+
+export type ApplyStorageBackendResult =
+  | { ok: true; backend: ApplyStorageBackend }
+  | { ok: false; reason: string };
+
+/**
+ * --apply 実行時に STORAGE_BACKEND を明示必須にする（暗黙の local fallback を禁止）。
+ *
+ * storage 取得関数は `process.env.STORAGE_BACKEND ?? "local"` で未設定時に local adapter へ
+ * fallback する。apply でこれを許すと「strip 画像を local disk へ upload しつつ production DB を
+ * new key へ repoint」し、稼働 app（server backend 等）が new key を読めず写真が 404 化する
+ * 事故が起き得る（Codex P1）。よって apply では未設定 / 空 / 未対応値を即エラーにし、
+ * **storage 取得・DB repoint 前**にこの検証を完了させる（wrapper が main で呼ぶ）。
+ *
+ * trim しない（storage 取得関数が trim しないため。" server " 等は switch の default で throw
+ * する＝reject が正）。server / s3 backend が要求する関連 env（STORAGE_SERVER_URL / STORAGE_S3_*
+ * 等）は各 adapter の constructor が fail-closed で throw する（storage 取得時点＝repoint 前）。
+ */
+export function resolveApplyStorageBackend(
+  env: Record<string, string | undefined>,
+): ApplyStorageBackendResult {
+  const backend = env.STORAGE_BACKEND;
+  if (backend === undefined || backend === "") {
+    return {
+      ok: false,
+      reason:
+        "STORAGE_BACKEND が未設定（または空）です。--apply では暗黙の local fallback を禁止します" +
+        `（稼働 app と同じ backend を明示してください。許可値: ${APPLY_STORAGE_BACKENDS.join(" / ")}）。`,
+    };
+  }
+  if (!(APPLY_STORAGE_BACKENDS as readonly string[]).includes(backend)) {
+    return {
+      ok: false,
+      reason: `STORAGE_BACKEND="${backend}" は --apply では未対応です（許可値: ${APPLY_STORAGE_BACKENDS.join(" / ")}）。`,
+    };
+  }
+  return { ok: true, backend: backend as ApplyStorageBackend };
+}
+
+// ---------------------------------------------------------------
 // inventory（storage を読まない DB-only 分類・集計）
 // ---------------------------------------------------------------
 
