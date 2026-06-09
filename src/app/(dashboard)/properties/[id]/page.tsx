@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -32,6 +32,7 @@ import { normalizeCorporateNumber, detectCorporateNumberInOwnerLike } from "@/li
 import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 // ---------- Label maps ----------
 
@@ -199,28 +200,6 @@ export default function PropertyDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [canWriteProperty, setCanWriteProperty] = useState(false);
-  const [canWriteOwner, setCanWriteOwner] = useState(false);
-  const [canReadOwner, setCanReadOwner] = useState(false);
-  const [canCreateOwnerMemo, setCanCreateOwnerMemo] = useState(false);
-  // 法人番号API（国税庁 Web-API）が env で有効になっているか。
-  // /api/me/permissions の capabilities.corporateLookup から取得し、UI 上は
-  // 検索ボタンの disabled 判定だけに使う（lookup 自体は常にサーバー側で再判定）。
-  const [corporateLookupConfigured, setCorporateLookupConfigured] = useState(false);
-  // 謄本自動取得（registry:auto_fetch）。admin のみ付与の高リスク権限。無ければボタン非表示。
-  const [canAutoFetchRegistry, setCanAutoFetchRegistry] = useState(false);
-  // 本番 provider が設定済みか（/api/me/permissions の capabilities.registryAutoFetch）。
-  // UI 上は実行ボタンの disabled 判定だけに使い、実行可否は常にサーバー側で再判定する。
-  const [registryAutoFetchConfigured, setRegistryAutoFetchConfigured] = useState(false);
-  const [ownerEditableFields, setOwnerEditableFields] = useState<OwnerEditableFields>({
-    name: false,
-    nameKana: false,
-    phone: false,
-    zip: false,
-    address: false,
-    email: false,
-    corporateNumber: false,
-  });
 
   const handleDelete = async () => {
     if (!property) return;
@@ -258,53 +237,125 @@ export default function PropertyDetailPage({
     fetchProperty();
   }, [fetchProperty]);
 
+  // F12 展開(19-A 第3実装): permissions / capabilities は ScreenProtectionProvider
+  //（dashboard 全体を覆う）が mount 時に 1 回取得して context 配布するため、本ページ独自の
+  // /api/me/permissions fetch は撤去し、provider 配布値（permissions / capabilities）から
+  // 8 つの権限/capability 状態を導出する（properties 一覧 F12-2・field-survey-map・
+  // admin owner 詳細 19-A と同方針・同一エンドポイントの重複 fetch 撤去）。
+  // fail-safe: 未取得・取得失敗（permissions=null / capabilities=null）・取得中・進入時
+  // refresh 中は「権限なし・機能なし」へ倒す（制限的 collapse = [] / false）。本ページの
+  // 8 状態は全て boolean ゲート（編集ボタン/入力欄/閲覧/自動取得ボタンの表示・disabled）で
+  // あり、field-survey の tristate null（API 403 委譲）とは異なる properties 一覧型の collapse。
+  const {
+    permissions: mePermissions,
+    capabilities: meCapabilities,
+    permissionsLoading,
+    refetchPermissions,
+  } = useScreenProtection();
+
+  // 進入時 refresh（properties 一覧・field-survey-map・admin owner 詳細と同方針）: App Router の
+  // layout は client navigation で保持されるため、provider の mount 時 1 回 fetch だけでは
+  // dashboard 滞在中の権限付与・剥奪に追従できない。進入（mount）あたり最大 1 回だけ
+  // refetchPermissions() を呼び、旧 page-local fetch が持っていた鮮度を復元する。
+  // - 取得進行中（permissionsLoading）は呼ばない＝初回 fetch と重複させない。
+  // - mount 時進行中だった取得が成功した場合はそのデータが最新なので追加 fetch しない。
+  // - mount 時取得完了済み（stale 可能性）/ 進行中だった取得の失敗（復旧）は 1 回再取得。
+  // - ref ガード＋provider 側 in-flight dedupe の二重防御で多重 fetch・無限リトライなし。
+  const permissionsRefreshRequestedRef = useRef(false);
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  // 進入時 refresh 完了まで stale な権限・capability で編集/閲覧/自動取得 UI を出さない。
+  // mount 時点で取得完了済み（= この後 refresh が走る）なら最初の描画から pending=true で開始。
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
   useEffect(() => {
-    fetch("/api/me/permissions")
-      .then((r) => r.json())
-      .then((json: {
-        permissions?: { resource: string; action: string; granted: boolean }[];
-        capabilities?: { corporateLookup?: boolean; registryAutoFetch?: boolean };
-      }) => {
-        const perms = json.permissions ?? [];
-        setCorporateLookupConfigured(json.capabilities?.corporateLookup ?? false);
-        setRegistryAutoFetchConfigured(json.capabilities?.registryAutoFetch ?? false);
-        setCanAutoFetchRegistry(
-          perms.some((p) => p.resource === "registry" && p.action === "auto_fetch" && p.granted),
-        );
-        setCanWriteProperty(
-          perms.some((p) => p.resource === "property" && p.action === "write" && p.granted),
-        );
-        setCanWriteOwner(
-          perms.some((p) => p.resource === "owner" && p.action === "write" && p.granted),
-        );
-        setCanReadOwner(
-          perms.some((p) => p.resource === "owner" && p.action === "read" && p.granted),
-        );
-        const hasFullPerm = (resource: string) =>
-          perms.some((p) => p.resource === resource && p.action === "full" && p.granted);
-        const hasEditPerm = (resource: string) =>
-          perms.some((p) => p.resource === resource && p.action === "edit" && p.granted);
-        setOwnerEditableFields({
-          name: hasFullPerm("owner_name"),
-          nameKana: hasFullPerm("owner_name_kana"),
-          phone: hasFullPerm("owner_phone"),
-          zip: hasFullPerm("owner_zip"),
-          address: hasFullPerm("owner_address"),
-          email: hasFullPerm("owner_email"),
-          corporateNumber:
-            hasFullPerm("owner_corporate_number") ||
-            hasEditPerm("owner_corporate_number"),
-        });
-        // OwnerMemo 作成可否: owner:write かつ owner_note の full/edit を要求（API 側の canCreateOwnerMemo と整合）
-        const ownerWrite = perms.some(
-          (p) => p.resource === "owner" && p.action === "write" && p.granted,
-        );
-        setCanCreateOwnerMemo(
-          ownerWrite && (hasFullPerm("owner_note") || hasEditPerm("owner_note")),
-        );
-      })
-      .catch(() => {});
-  }, []);
+    if (permissionsRefreshRequestedRef.current) return;
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && mePermissions !== null) {
+      permissionsRefreshRequestedRef.current = true;
+      return;
+    }
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, mePermissions, refetchPermissions]);
+
+  // effectivePermissions / effectiveCapabilities による導出（純関数・context 値の派生）。
+  // 進入時 refresh 中（pending）・provider 取得中（loading）は [] / false に倒す＝refresh
+  // 完了後の最新値からのみ権限/capability 由来の UI を出す（stale 権限表示防止・fail-safe）。
+  // 判定ロジック（granted / full|edit / 複合 owner:write && owner_note）は従来どおり（緩めない）。
+  const {
+    canWriteProperty,
+    canWriteOwner,
+    canReadOwner,
+    canCreateOwnerMemo,
+    corporateLookupConfigured,
+    canAutoFetchRegistry,
+    registryAutoFetchConfigured,
+    ownerEditableFields,
+  } = useMemo(() => {
+    const effectivePermissions =
+      permissionsRefreshPending || permissionsLoading
+        ? []
+        : (mePermissions ?? []);
+    const collapseCapabilities = permissionsRefreshPending || permissionsLoading;
+    const corporateLookupConfigured = collapseCapabilities
+      ? false
+      : meCapabilities?.corporateLookup === true;
+    const registryAutoFetchConfigured = collapseCapabilities
+      ? false
+      : meCapabilities?.registryAutoFetch === true;
+    const canAutoFetchRegistry = effectivePermissions.some(
+      (p) => p.resource === "registry" && p.action === "auto_fetch" && p.granted,
+    );
+    const canWriteProperty = effectivePermissions.some(
+      (p) => p.resource === "property" && p.action === "write" && p.granted,
+    );
+    const canWriteOwner = effectivePermissions.some(
+      (p) => p.resource === "owner" && p.action === "write" && p.granted,
+    );
+    const canReadOwner = effectivePermissions.some(
+      (p) => p.resource === "owner" && p.action === "read" && p.granted,
+    );
+    const hasFullPerm = (resource: string) =>
+      effectivePermissions.some(
+        (p) => p.resource === resource && p.action === "full" && p.granted,
+      );
+    const hasEditPerm = (resource: string) =>
+      effectivePermissions.some(
+        (p) => p.resource === resource && p.action === "edit" && p.granted,
+      );
+    const ownerEditableFields: OwnerEditableFields = {
+      name: hasFullPerm("owner_name"),
+      nameKana: hasFullPerm("owner_name_kana"),
+      phone: hasFullPerm("owner_phone"),
+      zip: hasFullPerm("owner_zip"),
+      address: hasFullPerm("owner_address"),
+      email: hasFullPerm("owner_email"),
+      corporateNumber:
+        hasFullPerm("owner_corporate_number") ||
+        hasEditPerm("owner_corporate_number"),
+    };
+    // OwnerMemo 作成可否: owner:write かつ owner_note の full/edit を要求（API 側の
+    // canCreateOwnerMemo と整合）。複合述語ゆえ verbatim 維持（緩めない）。
+    const canCreateOwnerMemo =
+      canWriteOwner && (hasFullPerm("owner_note") || hasEditPerm("owner_note"));
+    return {
+      canWriteProperty,
+      canWriteOwner,
+      canReadOwner,
+      canCreateOwnerMemo,
+      corporateLookupConfigured,
+      canAutoFetchRegistry,
+      registryAutoFetchConfigured,
+      ownerEditableFields,
+    };
+  }, [permissionsRefreshPending, permissionsLoading, mePermissions, meCapabilities]);
 
   if (loading) {
     return (

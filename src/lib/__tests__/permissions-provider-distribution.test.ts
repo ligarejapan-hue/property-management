@@ -302,12 +302,15 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
 // ── 非接触の確認 ────────────────────────────────────────────────────────────
 
 describe("F12-2 — 他ページ・他領域は非接触（スコープ固定）", () => {
-  it("properties 詳細は従来どおり独自 fetch のまま（別PR・最後の移行候補）", () => {
-    for (const p of [
-      "src/app/(dashboard)/properties/[id]/page.tsx",
-    ]) {
-      expect(read(p)).toMatch(/\/api\/me\/permissions/);
-    }
+  it("properties 詳細は provider 経由へ移行済み（19-A 第3実装・直接 fetch を持たない）", () => {
+    // 19-A: F12 展開で properties/[id]/page.tsx の独自 /api/me/permissions fetch を撤去し、
+    // useScreenProtection() の permissions / capabilities から 8 状態を導出する。詳細な
+    // 新形（進入時 refresh・pending lazy init・effectivePermissions/effectiveCapabilities の
+    // 制限的 collapse・8 状態の述語不変）は properties-detail-permissions-provider.test.ts が
+    // ロックする。ここでは最小集合を固定。
+    const detailSrc = read("src/app/(dashboard)/properties/[id]/page.tsx");
+    expect(detailSrc).not.toMatch(/fetch\(\s*["']\/api\/me\/permissions["']/);
+    expect(detailSrc).toMatch(/useScreenProtection/);
   });
 
   it("field-survey-map は provider 経由へ移行済み（19-A・直接 fetch を持たない）", () => {

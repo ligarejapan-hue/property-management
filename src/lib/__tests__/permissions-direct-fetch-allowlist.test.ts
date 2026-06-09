@@ -5,10 +5,10 @@
  *   F12-2(PR#145) で properties 一覧は ScreenProtectionProvider 経由の
  *   permissions 配布へ移行し、ページ独自 fetch を撤去した
  *   （permissions-provider-distribution.test.ts が移行済みの「形」をロック）。
- *   19-A の F12 展開で field-survey map（field-survey-pin-ui-source.test.ts）と
- *   admin owner 詳細（admin-owner-detail-ui.test.ts）も provider 経由へ移行した。
- *   一方で properties 詳細 は依然 `fetch("/api/me/permissions")` を直接持つ
- *   （= 次に provider へ寄せる最後の候補）。
+ *   19-A の F12 展開で field-survey map（field-survey-pin-ui-source.test.ts）・
+ *   admin owner 詳細（admin-owner-detail-ui.test.ts）・properties 詳細
+ *   （properties-detail-permissions-provider.test.ts）も provider 経由へ移行した。
+ *   これで全ページが provider 経由となり、直接 fetch の残候補は無くなった。
  *
  *   本テストは distribution test を補完し、src ツリー全体を走査して
  *   **直接 fetch の call site 全体集合を許可リストとして固定**する。distribution
@@ -16,9 +16,9 @@
  *   無断で許可リスト外の直接 fetch を増やしていないか」「移行が進んで
  *   許可リストから減ったか」を repo 横断で検出する回帰防止網。
  *
- * 固定する事実（field-survey-map / admin-owner-detail を provider へ移行後）:
+ * 固定する事実（全ページを provider へ移行後）:
  *   - canonical provider（1 箇所）……… ここだけが本来あるべき唯一の取得点
- *   - 移行待ち（1 箇所）……………… properties 詳細のみ（移行で許可リストから外す）
+ *   - 移行待ち（0 箇所）……………… 全ページ provider 経由へ移行済み
  *
  * このテストが落ちたら:
  *   - 想定外ファイルが増えた → 新規ページが直接 fetch を足した（provider 経由へ）
@@ -58,15 +58,16 @@ function countDirectFetch(relPath: string): number {
   return (src.match(DIRECT_FETCH_RE) ?? []).length;
 }
 
-// ── 許可リスト（field-survey-map / admin-owner-detail を provider へ移行後の唯一の真実）──
+// ── 許可リスト（全ページを provider へ移行後の唯一の真実）──
 // canonical = provider（唯一あるべき取得点）。
 // migration-pending = F12 で provider へ寄せる残候補（移行したらここから外す）。
-// field-survey-map.tsx（PR#153）・admin/owners/[id]/page.tsx（19-A 本PR）は provider
-// 経由へ移行済み（許可リストから除外）。残るは properties 詳細のみ。
+// field-survey-map.tsx（PR#153）・admin/owners/[id]/page.tsx（PR#155）・
+// properties/[id]/page.tsx（19-A 第3実装）は provider 経由へ移行済み。
+// 移行待ちは無くなり、直接 fetch は canonical provider 1 箇所のみ。
 const CANONICAL = "src/components/screen-protection/screen-protection-provider.tsx";
-const MIGRATION_PENDING = [
-  "src/app/(dashboard)/properties/[id]/page.tsx",
-] as const;
+// F12 展開完了(19-A 第3実装): properties 詳細も provider 経由へ移行済み。
+// 移行待ちページは無くなり、直接 fetch の canonical 取得点は provider 1 箇所のみ。
+const MIGRATION_PENDING = [] as const;
 
 const ALLOWLIST = [CANONICAL, ...MIGRATION_PENDING];
 
@@ -85,9 +86,9 @@ describe("19-A: /api/me/permissions 直接 fetch 許可リスト（source assert
     expect([...filesWithDirectFetch].sort()).toEqual([...ALLOWLIST].sort());
   });
 
-  it("直接 fetch の総 call site 数は 2（各許可ファイル 1 箇所ずつ）", () => {
+  it("直接 fetch の総 call site 数は 1（canonical provider 1 箇所のみ）", () => {
     const total = ALLOWLIST.reduce((n, f) => n + countDirectFetch(f), 0);
-    expect(total).toBe(2);
+    expect(total).toBe(1);
     for (const f of ALLOWLIST) {
       expect(countDirectFetch(f)).toBe(1);
     }
@@ -97,12 +98,8 @@ describe("19-A: /api/me/permissions 直接 fetch 許可リスト（source assert
     expect(countDirectFetch(CANONICAL)).toBe(1);
   });
 
-  it("移行待ち 1 ページ（properties 詳細）は現状なお直接 fetch を保持（次の F12 展開候補）", () => {
-    // distribution test (line 304-313) はパス文字列の存在のみを見るため
-    // コメント言及でもマッチする。ここでは実 fetch literal の存在を強く固定する。
-    for (const f of MIGRATION_PENDING) {
-      expect(countDirectFetch(f)).toBe(1);
-    }
+  it("properties 詳細は直接 fetch を持たない（19-A 第3実装で provider 経由へ移行済み・回帰防止）", () => {
+    expect(countDirectFetch("src/app/(dashboard)/properties/[id]/page.tsx")).toBe(0);
   });
 
   it("properties 一覧は直接 fetch を持たない（F12-2 で provider 経由へ移行済み・回帰防止）", () => {

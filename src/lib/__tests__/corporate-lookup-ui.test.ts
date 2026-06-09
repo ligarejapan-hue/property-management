@@ -128,11 +128,11 @@ describe("properties/[id]/page.tsx — CorporateLookupPanel 統合", () => {
     expect(pageSrc).toMatch(/rawCorporateNumber=\{form\.corporateNumber\}/);
   });
 
-  it("corporateLookupConfigured を /api/me/permissions の capabilities から取得", () => {
-    // capabilities 型には他の機能フラグ（例: registryAutoFetch）が追加され得るため、
-    // corporateLookup?: boolean を含むことだけを確認する（兄弟フィールドを許容）。
-    expect(pageSrc).toMatch(/capabilities\?:\s*\{[^}]*corporateLookup\?:\s*boolean[^}]*\}/);
-    expect(pageSrc).toMatch(/setCorporateLookupConfigured/);
+  it("corporateLookupConfigured を provider 配布の capabilities から導出（直接 fetch しない）", () => {
+    // F12 展開(19-A 第3実装): ページ独自 fetch を撤去し meCapabilities から導出。
+    // 移行形の網羅ロックは properties-detail-permissions-provider.test.ts。
+    expect(pageSrc).toMatch(/meCapabilities\?\.corporateLookup === true/);
+    expect(pageSrc).not.toMatch(/setCorporateLookupConfigured/);
   });
 
   it("候補バナー (CorporateNumberCandidateBanner) から法人番号欄へ転記する導線", () => {

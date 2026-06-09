@@ -1445,8 +1445,10 @@ describe("properties/[id]/page.tsx — owner:read gate in UI", () => {
   );
   const source = fs.readFileSync(filePath, "utf-8");
 
-  it("canReadOwner state を派生している", () => {
-    expect(source).toMatch(/setCanReadOwner\(/);
+  it("canReadOwner を provider 配布の permissions から派生している", () => {
+    // F12 展開(19-A 第3実装): ページ独自 fetch + setCanReadOwner を撤去し useMemo 導出へ。
+    expect(source).not.toMatch(/setCanReadOwner\(/);
+    // owner:read 述語は不変（導出元が effectivePermissions に変わるだけ）。
     expect(source).toMatch(/p\.resource\s*===\s*"owner"\s*&&\s*p\.action\s*===\s*"read"/);
   });
 

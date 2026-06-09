@@ -108,17 +108,20 @@ describe("RegistryAutoFetchButton — 描画ゲートと安全性 (source assert
 });
 
 describe("PropertyDetailPage — 自動取得導線の配線 (source assertion)", () => {
-  it("registry:auto_fetch 権限を /api/me/permissions から判定する", () => {
-    expect(pageSrc).toMatch(/setCanAutoFetchRegistry/);
+  it("registry:auto_fetch 権限を provider 配布の permissions から導出する", () => {
+    // F12 展開(19-A 第3実装): setter を撤去し useMemo 内で effectivePermissions から導出。
+    expect(pageSrc).not.toMatch(/setCanAutoFetchRegistry/);
+    // 判定述語は不変（緩めない）。導出元が provider 配布値に変わるだけ。
     expect(pageSrc).toMatch(
       /p\.resource === "registry" && p\.action === "auto_fetch" && p\.granted/,
     );
   });
 
-  it("capabilities.registryAutoFetch を取得する", () => {
-    expect(pageSrc).toMatch(/registryAutoFetch\?:\s*boolean/);
-    expect(pageSrc).toMatch(/capabilities\?\.registryAutoFetch/);
-    expect(pageSrc).toMatch(/setRegistryAutoFetchConfigured/);
+  it("registryAutoFetch capability を provider 配布値から導出する", () => {
+    // F12 展開(19-A 第3実装): inline fetch 型 + setter を撤去し meCapabilities から導出。
+    expect(pageSrc).not.toMatch(/setRegistryAutoFetchConfigured/);
+    expect(pageSrc).not.toMatch(/registryAutoFetch\?:\s*boolean/);
+    expect(pageSrc).toMatch(/meCapabilities\?\.registryAutoFetch === true/);
   });
 
   it("ActionBar の直後に RegistryAutoFetchButton を 1 箇所だけ描画する", () => {
