@@ -2057,6 +2057,55 @@ export async function searchOwners(query: string) {
   }>(`/api/owners/search?q=${encodeURIComponent(query)}`);
 }
 
+// 新規所有者を作成する（POST /api/owners・createOwnerSchema 準拠）。
+// 重複（同名+住所）はサーバが 409 を返し、apiFetch がそのメッセージで throw する。
+export async function createOwner(data: {
+  name: string;
+  nameKana?: string | null;
+  phone?: string | null;
+  zip?: string | null;
+  address?: string | null;
+  email?: string | null;
+}) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-owner-id", name: data.name, version: 1 };
+  }
+  return apiFetch<{ id: string; name: string; version: number }>("/api/owners", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+// 既存の所有者を物件に紐付ける（POST /api/properties/[id]/owners・linkOwnerSchema 準拠）。
+export async function linkOwnerToProperty(
+  propertyId: string,
+  data: { ownerId: string; relationship?: string | null; isPrimary?: boolean },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      id: "mock-property-owner-id",
+      propertyId,
+      ownerId: data.ownerId,
+      relationship: data.relationship ?? null,
+      isPrimary: data.isPrimary ?? false,
+    };
+  }
+  return apiFetch<{
+    id: string;
+    propertyId: string;
+    ownerId: string;
+    relationship: string | null;
+    isPrimary: boolean;
+  }>(`/api/properties/${propertyId}/owners`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
 // ---------- File Upload ----------
 
 export async function uploadFile(

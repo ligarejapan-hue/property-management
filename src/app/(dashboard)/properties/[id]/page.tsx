@@ -10,6 +10,7 @@ import {
   Edit,
   Loader2,
   Trash2,
+  UserPlus,
 } from "lucide-react";
 import {
   badgeIntentClass,
@@ -28,9 +29,11 @@ import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
+import { canShowAddOwner } from "@/lib/owner-link-utils";
 import { normalizeCorporateNumber, detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
+import { OwnerLinkModal } from "@/components/owners/owner-link-modal";
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
@@ -74,8 +77,8 @@ const dmBadgeStyles: Record<string, string> = {
 
 const tabs = [
   { key: "basic", label: "基本情報" },
+  { key: "owner", label: "所有者情報" },
   { key: "photos", label: "写真" },
-  { key: "owner", label: "所有者" },
   { key: "investigation", label: "調査情報" },
   { key: "actions", label: "ネクストアクション" },
   { key: "comments", label: "コメント" },
@@ -402,14 +405,18 @@ export default function PropertyDetailPage({
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowEditForm(true)}
+            aria-label="物件を編集"
+            title="物件情報を編集"
             className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
           >
             <Edit className="h-4 w-4" />
-            編集
+            物件を編集
           </button>
           <button
             onClick={handleDelete}
             disabled={deleting}
+            aria-label="物件を削除"
+            title="この物件を削除"
             className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
           >
             {deleting ? (
@@ -417,7 +424,7 @@ export default function PropertyDetailPage({
             ) : (
               <Trash2 className="h-4 w-4" />
             )}
-            削除
+            物件を削除
           </button>
         </div>
       </div>
@@ -675,6 +682,8 @@ function OwnerTab({
   corporateLookupConfigured: boolean;
   onRefresh: () => Promise<void>;
 }) {
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+
   // owner:read がない場合、API は owner を { id } のみで返すため詳細表示・編集は不可。
   // 編集ボタンも出さない（OwnerCard 側の canEditOwner でも防御するが、ここで早期に閉じる）。
   if (!canRead) {
@@ -685,38 +694,82 @@ function OwnerTab({
     );
   }
 
-  if (owners.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm text-gray-500">
-        所有者が紐付けられていません
-      </p>
-    );
-  }
-
+  // 追加導線（既存紐付け / 新規作成して紐付け）は owner:write がある場合のみ。
+  // owner:write が無いユーザー（field_staff 等）には導線を一切出さない（canShowAddOwner）。
+  const showAdd = canShowAddOwner(canRead, canWrite);
   const isShared = owners.length > 1;
 
   return (
     <div className="space-y-4">
-      {isShared && (
-        <p className="text-xs text-gray-500">
-          共有名義: {owners.length} 名（メモは所有者ごと・物件単位で保持されます）
-        </p>
+      {/* 追加導線: 0 件時も既存所有者がいる時も常設（共有名義の追加に対応） */}
+      {showAdd && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setLinkModalOpen(true)}
+            aria-label="所有者を追加（既存の所有者を紐付け / 新規作成して紐付け）"
+            title="この物件に所有者を追加（既存紐付け / 新規作成）"
+            className="flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+          >
+            <UserPlus className="h-3.5 w-3.5" />
+            所有者を追加
+          </button>
+        </div>
       )}
-      {owners.map((po, idx) => (
-        <OwnerCard
-          key={po.id}
-          po={po}
+
+      {owners.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 py-10 text-center">
+          <p className="text-sm text-gray-500">所有者が紐付けされていません</p>
+          {showAdd ? (
+            <button
+              type="button"
+              onClick={() => setLinkModalOpen(true)}
+              aria-label="所有者を追加（既存の所有者を紐付け / 新規作成して紐付け）"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            >
+              <UserPlus className="h-4 w-4" />
+              所有者を追加
+            </button>
+          ) : (
+            <p className="mt-1 text-xs text-gray-400">
+              所有者を追加するには所有者の編集権限（owner:write）が必要です。
+            </p>
+          )}
+        </div>
+      ) : (
+        <>
+          {isShared && (
+            <p className="text-xs text-gray-500">
+              共有名義: {owners.length} 名（メモは所有者ごと・物件単位で保持されます）
+            </p>
+          )}
+          {owners.map((po, idx) => (
+            <OwnerCard
+              key={po.id}
+              po={po}
+              propertyId={propertyId}
+              idx={idx}
+              total={owners.length}
+              canRead={canRead}
+              canWrite={canWrite}
+              editableFields={editableFields}
+              canCreateMemo={canCreateMemo}
+              corporateLookupConfigured={corporateLookupConfigured}
+              onRefresh={onRefresh}
+            />
+          ))}
+        </>
+      )}
+
+      {/* 追加モーダル（owner:write がある時のみ開ける） */}
+      {showAdd && linkModalOpen && (
+        <OwnerLinkModal
           propertyId={propertyId}
-          idx={idx}
-          total={owners.length}
-          canRead={canRead}
-          canWrite={canWrite}
-          editableFields={editableFields}
-          canCreateMemo={canCreateMemo}
-          corporateLookupConfigured={corporateLookupConfigured}
-          onRefresh={onRefresh}
+          existingOwnerCount={owners.length}
+          onClose={() => setLinkModalOpen(false)}
+          onLinked={onRefresh}
         />
-      ))}
+      )}
     </div>
   );
 }
@@ -848,10 +901,12 @@ function OwnerCard({
           <button
             type="button"
             onClick={handleEdit}
+            aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}の所有者情報を編集`}
+            title="所有者情報を編集"
             className="ml-auto flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
           >
             <Edit className="h-3 w-3" />
-            編集
+            所有者情報を編集
           </button>
         )}
         {/* 誤紐づき修正ボタン (Phase 2-C): owner:write がある場合のみ表示。
@@ -861,6 +916,8 @@ function OwnerCard({
           <button
             type="button"
             onClick={() => setMislinkOpen(true)}
+            title="この物件と所有者の紐づきを修正"
+            aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}の紐づきを修正`}
             className={`${editAllowed ? "" : "ml-auto"} flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100`}
           >
             誤紐づき修正
