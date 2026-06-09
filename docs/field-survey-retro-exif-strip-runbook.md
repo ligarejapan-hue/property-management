@@ -329,10 +329,16 @@ DB は変更せず **storage 実体のみ削除**する（apply で repoint 済�
 
 ### 12.2 delete 実行の前提条件
 
-- **VPS に #161 以降が反映済みであること**（最重要）：現 VPS は `d1cb908` で **#161 は未反映**。
-  delete mode（`--delete --confirm`）は **#161（PR-R2c-ii）で初めて実装**された（R2c-i では
-  `--delete` / `--confirm` は拒否）。#161 未反映の VPS では delete を実行できない。**本番 delete 実行前に
-  #161 以降を VPS へ反映済み**であることを確認する（反映手順そのものは VPS release runbook 側）。
+- **本番 VPS のデプロイ済み commit が PR #161（R2c-ii 実削除配線）以降を含むことを実行前に確認する**
+  （最重要）。delete mode（`--delete --confirm`）は **#161 で初めて実装**された（それ以前の R2c-i では
+  `--delete` / `--confirm` は拒否）。確認方法のいずれか:
+  - デプロイ済み commit から見て **PR #161 の merge commit（例: `6601aee`）が祖先**であること
+    （`git merge-base --is-ancestor <PR #161 merge commit> HEAD` が成功すること）、または
+  - 対象環境の cleanup CLI に **`--delete --confirm` 二重ゲート / `--out` 必須 / malformed run-log の
+    削除前 abort（§12.4）** が含まれることを確認する。
+  - **この確認が取れない場合は cleanup delete を実行しない。**
+  - 現在の本番環境が #161 を含むか否かといった**一時的な状態の記録は、本長期 Runbook には残さず**、
+    個別の VPS release checklist / 作業ログ側に記録する（VPS 反映手順そのものも VPS release runbook 側）。
 - **`STORAGE_BACKEND` が明示されていること**（稼働 app と一致）：未設定 / 空 / 未対応値のときは
   storage 取得前に **fail-closed で停止**（暗黙 local fallback 禁止）。許可値 `local` / `server` / `s3`。
   稼働 app と違う backend を指すと、稼働中の正しい key を消す / 別 store を消す事故になり得る。
