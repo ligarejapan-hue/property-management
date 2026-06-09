@@ -20,13 +20,25 @@ import {
   cleanupDryRunExitCode,
   emptyCleanupSummary,
   isSameIoPath,
+  runCleanupDelete,
+  preValidateCleanupRunLog,
+  cleanupDeleteExitCode,
+  emptyCleanupDeleteSummary,
   CLEANUP_DRY_RUN_OUTCOMES,
   CLEANUP_DRY_RUN_EXIT_OK,
   CLEANUP_DRY_RUN_EXIT_MALFORMED,
   CLEANUP_DRY_RUN_EXIT_STILL_REFERENCED,
+  CLEANUP_DELETE_OUTCOMES,
+  CLEANUP_DELETE_EXIT_OK,
+  CLEANUP_DELETE_EXIT_MALFORMED,
+  CLEANUP_DELETE_EXIT_STILL_REFERENCED,
+  CLEANUP_DELETE_EXIT_DELETE_FAILED,
   type CleanupDryRunLogLine,
   type CleanupDryRunPorts,
   type CleanupCurrentRow,
+  type CleanupDeletePorts,
+  type CleanupDeleteLogLine,
+  type CleanupDeleteResult,
 } from "@/lib/field-survey/retro-exif-strip-cleanup";
 import { toRunLogLine } from "@/lib/field-survey/retro-exif-strip-cli";
 import type { RetroStripRowResult } from "@/lib/field-survey/retro-exif-strip";
@@ -217,16 +229,48 @@ describe("parseCleanupCliArgs", () => {
     if (r.ok) expect(r.options.help).toBe(true);
   });
 
-  it("--delete は拒否する（実削除は PR-R2c-ii）", () => {
-    const r = parseCleanupCliArgs(["--apply-run-log", "/tmp/a.jsonl", "--delete"]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain("R2c-ii");
+  it("フラグ無し（dry-run）は delete=false / confirm=false（R2c-i 後方互換）", () => {
+    const r = parseCleanupCliArgs(["--apply-run-log", "/tmp/a.jsonl"]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.options.delete).toBe(false);
+      expect(r.options.confirm).toBe(false);
+    }
   });
 
-  it("--confirm は拒否する（実削除は PR-R2c-ii）", () => {
-    const r = parseCleanupCliArgs(["--apply-run-log", "/tmp/a.jsonl", "--confirm"]);
+  it("--delete 単独は拒否（--confirm が必須＝二重ゲート）", () => {
+    const r = parseCleanupCliArgs(["--apply-run-log", "/tmp/a.jsonl", "--delete", "--out", "/tmp/d.jsonl"]);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain("R2c-ii");
+    if (!r.ok) expect(r.error).toContain("--confirm");
+  });
+
+  it("--confirm 単独は拒否（--delete が必須＝二重ゲート）", () => {
+    const r = parseCleanupCliArgs(["--apply-run-log", "/tmp/a.jsonl", "--confirm", "--out", "/tmp/d.jsonl"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("--delete");
+  });
+
+  it("--delete --confirm --out で実削除モードを受理（二重ゲート両方）", () => {
+    const r = parseCleanupCliArgs([
+      "--apply-run-log",
+      "/tmp/a.jsonl",
+      "--delete",
+      "--confirm",
+      "--out",
+      "/tmp/del.jsonl",
+    ]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.options.delete).toBe(true);
+      expect(r.options.confirm).toBe(true);
+      expect(r.options.outPath).toBe("/tmp/del.jsonl");
+    }
+  });
+
+  it("--delete --confirm で --out 未指定は拒否（不可逆ゆえ delete log 必須）", () => {
+    const r = parseCleanupCliArgs(["--apply-run-log", "/tmp/a.jsonl", "--delete", "--confirm"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("--out");
   });
 
   it("未知オプションは拒否", () => {
@@ -694,6 +738,355 @@ describe("apply toRunLogLine との契約整合", () => {
 });
 
 // ---------------------------------------------------------------
+// runCleanupDelete（実削除配線・二重ゲート通過後・PR-R2c-ii）
+// ---------------------------------------------------------------
+
+function makeDeletePorts(
+  rows: Record<string, CleanupCurrentRow | null>,
+  opts: { failKeys?: readonly string[] } = {},
+) {
+  const lookupCalls: string[] = [];
+  const deletes: string[] = [];
+  const failKeys = new Set(opts.failKeys ?? []);
+  const ports: CleanupDeletePorts = {
+    async lookupRow(photoId) {
+      lookupCalls.push(photoId);
+      return Object.prototype.hasOwnProperty.call(rows, photoId) ? rows[photoId] : null;
+    },
+    async deleteObject(key) {
+      deletes.push(key);
+      if (failKeys.has(key)) throw new Error(`delete failure ${key}`);
+    },
+  };
+  return { ports, deletes, lookupCalls };
+}
+
+async function runCollectDelete(lines: AsyncIterable<string>, ports: CleanupDeletePorts) {
+  const out: CleanupDeleteLogLine[] = [];
+  const result = await runCleanupDelete(lines, ports, (line) => {
+    out.push(line);
+  });
+  return { result, out };
+}
+
+describe("runCleanupDelete", () => {
+  it("deletable 候補のみ deleteObject が呼ばれる（oldKey + oldThumbnailKey 両方非参照→2件 deleted）", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: uploads(NEW_THUMB_KEY) },
+    });
+    const { result, out } = await runCollectDelete(
+      linesOf(repointedLine({ oldThumbnailKey: OLD_THUMB_KEY })),
+      ports,
+    );
+    expect(deletes).toEqual([OLD_KEY, OLD_THUMB_KEY]);
+    expect(result.summary.deleted).toBe(2);
+    expect(out.every((l) => l.outcome === "deleted")).toBe(true);
+  });
+
+  it("現 fileUrl に候補 key があれば削除しない（skipped_still_referenced）", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(OLD_KEY), thumbnailUrl: null },
+    });
+    const { result, out } = await runCollectDelete(linesOf(repointedLine()), ports);
+    expect(deletes).toEqual([]);
+    expect(out[0].outcome).toBe("skipped_still_referenced");
+    expect(result.summary.deleted).toBe(0);
+  });
+
+  it("現 thumbnailUrl に候補 key があれば削除しない（cross-column・file 候補でも thumbnailUrl 確認）", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: uploads(OLD_KEY) },
+    });
+    const { out } = await runCollectDelete(linesOf(repointedLine()), ports);
+    expect(deletes).not.toContain(OLD_KEY);
+    expect(out[0]).toMatchObject({ outcome: "skipped_still_referenced", referencedColumn: "thumbnail" });
+  });
+
+  it("thumbnail 候補でも fileUrl を確認する（cross-column）", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(OLD_THUMB_KEY), thumbnailUrl: null },
+    });
+    const { out } = await runCollectDelete(
+      linesOf(repointedLine({ oldThumbnailKey: OLD_THUMB_KEY })),
+      ports,
+    );
+    expect(deletes).not.toContain(OLD_THUMB_KEY);
+    expect(out.find((l) => l.kind === "thumbnail")).toMatchObject({
+      outcome: "skipped_still_referenced",
+      referencedColumn: "file",
+    });
+  });
+
+  it("legacy absolute URL でも両カラム一致を検出し削除しない", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: `https://example.com${uploads(OLD_KEY)}`, thumbnailUrl: null },
+    });
+    const { out } = await runCollectDelete(linesOf(repointedLine()), ports);
+    expect(deletes).toEqual([]);
+    expect(out[0].outcome).toBe("skipped_still_referenced");
+  });
+
+  it("non-null unmappable URL があれば fail-closed（削除しない）", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: "data:image/jpeg;base64,AAAA" },
+    });
+    const { out } = await runCollectDelete(linesOf(repointedLine()), ports);
+    expect(deletes).toEqual([]);
+    expect(out[0].outcome).toBe("skipped_unmappable");
+  });
+
+  it("null thumbnail は file 候補の削除を過剰に止めない", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    const { out } = await runCollectDelete(linesOf(repointedLine()), ports);
+    expect(deletes).toEqual([OLD_KEY]);
+    expect(out[0].outcome).toBe("deleted");
+  });
+
+  it("noncanonical / ? / # key は削除しない（skipped_invalid_key）", async () => {
+    const inv = makeDeletePorts({ [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null } });
+    const r1 = await runCollectDelete(linesOf(repointedLine({ oldKey: "../secret.jpg" })), inv.ports);
+    expect(inv.deletes).toEqual([]);
+    expect(r1.out[0].outcome).toBe("skipped_invalid_key");
+    const q = makeDeletePorts({ [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null } });
+    await runCollectDelete(linesOf(repointedLine({ oldKey: `${OLD_KEY}?v=2` })), q.ports);
+    expect(q.deletes).toEqual([]);
+  });
+
+  it("malformed run-log は削除しない（malformed_line）", async () => {
+    const { ports, deletes } = makeDeletePorts({ [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null } });
+    const { out } = await runCollectDelete(linesOf("{broken"), ports);
+    expect(deletes).toEqual([]);
+    expect(out[0].outcome).toBe("malformed_line");
+  });
+
+  it("outcome !== repointed は削除しない（skipped_not_repointed・lookupRow も呼ばない）", async () => {
+    const { ports, deletes, lookupCalls } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    const notRepointed = JSON.stringify({
+      photoId: PHOTO_ID,
+      outcome: "skipped_row_changed",
+      oldKey: OLD_KEY,
+      newKey: NEW_KEY,
+    });
+    const { out } = await runCollectDelete(linesOf(notRepointed), ports);
+    expect(deletes).toEqual([]);
+    expect(lookupCalls).toEqual([]);
+    expect(out[0].outcome).toBe("skipped_not_repointed");
+  });
+
+  it("delete 失敗は best-effort 継続（delete_failed + errorName・後続候補も deleted）", async () => {
+    const p = makeDeletePorts(
+      { [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: uploads(NEW_THUMB_KEY) } },
+      { failKeys: [OLD_KEY] },
+    );
+    const { result, out } = await runCollectDelete(
+      linesOf(repointedLine({ oldThumbnailKey: OLD_THUMB_KEY })),
+      p.ports,
+    );
+    expect(p.deletes).toEqual([OLD_KEY, OLD_THUMB_KEY]); // 1 件失敗でも後続を試行（継続）
+    expect(result.summary.delete_failed).toBe(1);
+    expect(result.summary.deleted).toBe(1);
+    const failed = out.find((l) => l.outcome === "delete_failed");
+    expect(failed).toMatchObject({ kind: "file", candidateKey: OLD_KEY, errorName: "Error" });
+  });
+
+  it("lookupRow は repointed 行ごとに 1 回（候補数に依らない）", async () => {
+    const { ports, lookupCalls } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: uploads(NEW_THUMB_KEY) },
+    });
+    await runCollectDelete(linesOf(repointedLine({ oldThumbnailKey: OLD_THUMB_KEY })), ports);
+    expect(lookupCalls).toEqual([PHOTO_ID]);
+  });
+
+  it("非 PII: delete_failed の errorName は error.name のみ（message 本文を出さない）+ 出力は whitelist", async () => {
+    const ports: CleanupDeletePorts = {
+      async lookupRow() {
+        return { fileUrl: uploads(NEW_KEY), thumbnailUrl: null };
+      },
+      async deleteObject() {
+        throw new Error("SENTINEL-SECRET /uploads/owner-pii.jpg");
+      },
+    };
+    const { out } = await runCollectDelete(linesOf(repointedLine()), ports);
+    const serialized = JSON.stringify(out);
+    expect(serialized).not.toContain("SENTINEL");
+    expect(out[0]).toMatchObject({ outcome: "delete_failed", errorName: "Error" });
+    const allowed = new Set([
+      "outcome",
+      "photoId",
+      "kind",
+      "candidateKey",
+      "currentKey",
+      "referencedColumn",
+      "sourceOutcome",
+      "lineNumber",
+      "errorName",
+    ]);
+    for (const l of out) {
+      for (const k of Object.keys(l)) expect(allowed.has(k)).toBe(true);
+    }
+  });
+});
+
+describe("cleanupDeleteExitCode", () => {
+  it("全 deleted / 期待 skip のみ → 0", () => {
+    const s = emptyCleanupDeleteSummary();
+    s.deleted = 3;
+    s.skipped_row_missing = 1;
+    expect(cleanupDeleteExitCode(s)).toBe(CLEANUP_DELETE_EXIT_OK);
+  });
+
+  it("malformed_line > 0 → 1（最優先）", () => {
+    const s = emptyCleanupDeleteSummary();
+    s.deleted = 1;
+    s.malformed_line = 1;
+    s.delete_failed = 1;
+    s.skipped_still_referenced = 1;
+    expect(cleanupDeleteExitCode(s)).toBe(CLEANUP_DELETE_EXIT_MALFORMED);
+  });
+
+  it("malformed 無し・delete_failed > 0 → 3（orphan 残存・要対応）", () => {
+    const s = emptyCleanupDeleteSummary();
+    s.deleted = 1;
+    s.delete_failed = 2;
+    s.skipped_still_referenced = 1;
+    expect(cleanupDeleteExitCode(s)).toBe(CLEANUP_DELETE_EXIT_DELETE_FAILED);
+  });
+
+  it("malformed / delete_failed 無し・skipped_still_referenced > 0 → 2", () => {
+    const s = emptyCleanupDeleteSummary();
+    s.deleted = 1;
+    s.skipped_still_referenced = 2;
+    expect(cleanupDeleteExitCode(s)).toBe(CLEANUP_DELETE_EXIT_STILL_REFERENCED);
+  });
+});
+
+// ---------------------------------------------------------------
+// P1: delete mode は malformed が1行でもあれば削除前に abort（pre-validation）
+// ---------------------------------------------------------------
+
+describe("preValidateCleanupRunLog", () => {
+  it("全行 valid（repointed / not_repointed / blank）→ ok:true", async () => {
+    const r = await preValidateCleanupRunLog(
+      linesOf(
+        repointedLine(),
+        "",
+        JSON.stringify({ photoId: PHOTO_ID, outcome: "unchanged", oldKey: OLD_KEY }),
+      ),
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("malformed が1件でもあれば ok:false（最初の malformed 行番号）", async () => {
+    const r = await preValidateCleanupRunLog(linesOf(repointedLine(), "{broken"));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.malformedLineNumber).toBe(2);
+  });
+
+  it("malformed が先頭でも検出（行番号 1）", async () => {
+    const r = await preValidateCleanupRunLog(linesOf("{broken", repointedLine()));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.malformedLineNumber).toBe(1);
+  });
+});
+
+// wrapper の runDelete を模した composition（pre-validate → malformed なら storage 取得 / truncate /
+// delete をせず abort、通過時のみ delete）。delete 前 abort の契約を end-to-end で固定する。
+async function deleteWithPreValidation(
+  linesArr: string[],
+  ports: CleanupDeletePorts,
+  spies: { onGetStorage?: () => void; onTruncate?: () => void } = {},
+): Promise<{ aborted: boolean; exitCode: number; result: CleanupDeleteResult | null }> {
+  const pre = await preValidateCleanupRunLog(linesOf(...linesArr));
+  if (!pre.ok) {
+    // 不可逆削除の前に abort。getStorage / sink truncate / deleteObject に到達しない。
+    return { aborted: true, exitCode: CLEANUP_DELETE_EXIT_MALFORMED, result: null };
+  }
+  spies.onGetStorage?.(); // wrapper の getStorage()（pre-validate 通過後のみ）
+  spies.onTruncate?.(); // wrapper の makeJsonlSink truncate（pre-validate 通過後のみ）
+  const result = await runCleanupDelete(linesOf(...linesArr), ports);
+  return { aborted: false, exitCode: cleanupDeleteExitCode(result.summary), result };
+}
+
+describe("runCleanupDelete pre-validation（P1: malformed なら削除前 abort）", () => {
+  it("malformed が valid deletable より前 → deleteObject 未呼出・exit 1・getStorage/truncate 未到達", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    let storageGot = false;
+    let truncated = false;
+    const r = await deleteWithPreValidation(["{broken", repointedLine()], ports, {
+      onGetStorage: () => {
+        storageGot = true;
+      },
+      onTruncate: () => {
+        truncated = true;
+      },
+    });
+    expect(r.aborted).toBe(true);
+    expect(r.exitCode).toBe(CLEANUP_DELETE_EXIT_MALFORMED);
+    expect(deletes).toEqual([]);
+    expect(storageGot).toBe(false);
+    expect(truncated).toBe(false);
+  });
+
+  it("[P1 核心] malformed が valid deletable より後 → 先行 valid があっても deleteObject 未呼出・exit 1", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    let storageGot = false;
+    const r = await deleteWithPreValidation([repointedLine(), "{broken"], ports, {
+      onGetStorage: () => {
+        storageGot = true;
+      },
+    });
+    expect(r.aborted).toBe(true);
+    expect(r.exitCode).toBe(CLEANUP_DELETE_EXIT_MALFORMED);
+    expect(deletes).toEqual([]); // 先行 valid 行があっても何も削除しない
+    expect(storageGot).toBe(false);
+  });
+
+  it("全行 valid → pre-validation 通過し deletable を削除（通常動作）", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    let storageGot = false;
+    const r = await deleteWithPreValidation([repointedLine()], ports, {
+      onGetStorage: () => {
+        storageGot = true;
+      },
+    });
+    expect(r.aborted).toBe(false);
+    expect(storageGot).toBe(true);
+    expect(deletes).toEqual([OLD_KEY]);
+    expect(r.exitCode).toBe(CLEANUP_DELETE_EXIT_OK);
+  });
+
+  it("dry-run は従来どおり malformed_line を emit して継続（fail-before-delete は delete mode のみ）", async () => {
+    const { ports } = makeLookup({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    const { result } = await runCollect(linesOf("{broken", repointedLine()), ports);
+    expect(result.summary.malformed_line).toBe(1);
+    expect(result.summary.deletable).toBe(1); // 後続 valid は dry-run では継続評価
+  });
+});
+
+describe("CLEANUP_DELETE_OUTCOMES", () => {
+  it("dry-run の全 outcome + deleted/delete_failed の superset（dry-run tuple は無改変）", () => {
+    expect(CLEANUP_DELETE_OUTCOMES).toEqual([...CLEANUP_DRY_RUN_OUTCOMES, "deleted", "delete_failed"]);
+  });
+
+  it("emptyCleanupDeleteSummary は全 outcome を 0 初期化", () => {
+    const s = emptyCleanupDeleteSummary();
+    for (const o of CLEANUP_DELETE_OUTCOMES) expect(s[o]).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------
 // source assertion（DI 維持 / delete 導線不在 / streaming / wrapper 配線）
 // ---------------------------------------------------------------
 
@@ -725,17 +1118,53 @@ describe("retro-exif-strip-cleanup source assertion", () => {
     expect(libSrc).not.toContain("StorageAdapter");
   });
 
-  it("runner は結果配列を保持せず outcome を per-row streaming 集計する", () => {
+  it("dry-run runner は結果配列を保持せず outcome を per-row streaming 集計する", () => {
     expect(libSrc).toContain("summary[evaluation.outcome] += 1");
     expect(libSrc).not.toContain("evaluations.push");
   });
 
-  it("wrapper は実削除導線（--delete / --confirm / storage delete / getStorage）を持たない", () => {
-    expect(scriptSrc).not.toContain("--delete");
-    expect(scriptSrc).not.toContain("--confirm");
-    expect(scriptSrc).not.toContain("storage.delete");
-    expect(scriptSrc).not.toContain(".delete(");
-    expect(scriptSrc).not.toContain("getStorage");
+  it("delete runner（runCleanupDelete）も結果配列を保持せず per-row streaming 集計する", () => {
+    expect(libSrc).toContain("summary[line.outcome] += 1");
+  });
+
+  it("cleanup lib は storage.delete / getStorage を直接持たず deleteObject port 経由（R2c-ii）", () => {
+    // 実 delete は wrapper が注入する deleteObject port 経由。lib は storage 実体を import/呼出しない。
+    // deleteObject 命名により '.delete(' substring も踏まない。
+    expect(libSrc).not.toContain("storage.delete");
+    expect(libSrc).not.toContain(".delete(");
+    expect(libSrc).not.toContain("getStorage");
+    expect(libSrc).toContain("deleteObject");
+  });
+
+  it("wrapper の実削除導線は二重ゲート（--delete && --confirm）の内側にのみ置かれる（getStorage/storage.delete が confirm ゲートより後）", () => {
+    // R2c-ii では wrapper が getStorage()/storage.delete を持つが、confirm ゲートの後にのみ到達する。
+    // 素の禁止 not.toContain では検出できないため、ordering で『confirm ゲート → getStorage → storage.delete』
+    // を固定する。本質保証は runtime fake-deleteObject テスト（--delete 単独/dry-run で deletes 空）。
+    const gateIdx = scriptSrc.indexOf("options.confirm");
+    const getStorageIdx = scriptSrc.indexOf("getStorage(");
+    const deleteIdx = scriptSrc.indexOf("storage.delete(");
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(getStorageIdx).toBeGreaterThan(-1);
+    expect(deleteIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeLessThan(getStorageIdx);
+    expect(getStorageIdx).toBeLessThan(deleteIdx);
+  });
+
+  it("wrapper は DB 行削除（fieldSurveyPinPhoto.delete）を持たない（R2c-ii は純 storage 削除・DB 非削除）", () => {
+    expect(scriptSrc).not.toContain("fieldSurveyPinPhoto.delete");
+    expect(scriptSrc).not.toContain(".update(");
+    expect(scriptSrc).not.toContain(".create(");
+  });
+
+  it("wrapper の実削除は pre-validation（preValidateCleanupRunLog）を getStorage / 削除より前に行う（P1: malformed なら storage 取得前に abort）", () => {
+    // 不可逆削除ゆえ、run-log に malformed が1行でもあれば getStorage / sink truncate / deleteObject に
+    // 到達する前に abort する。本質保証は runtime composition テスト（malformed→deletes 空・storage 未取得）。
+    expect(scriptSrc).toContain("preValidateCleanupRunLog");
+    const preIdx = scriptSrc.indexOf("preValidateCleanupRunLog(");
+    const getStorageIdx = scriptSrc.indexOf("getStorage(");
+    expect(preIdx).toBeGreaterThan(-1);
+    expect(getStorageIdx).toBeGreaterThan(-1);
+    expect(preIdx).toBeLessThan(getStorageIdx);
   });
 
   it("wrapper は STORAGE_BACKEND fail-closed を維持する（resolveApplyStorageBackend / assertSafeEnvironment 流用）", () => {
