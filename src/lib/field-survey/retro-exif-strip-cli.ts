@@ -1,20 +1,23 @@
 /**
- * 既存 field-survey 写真の遡及 EXIF/GPS strip — inventory / dry-run CLI core（PR-R2a）。
+ * 既存 field-survey 写真の遡及 EXIF/GPS strip — inventory / dry-run / apply CLI core。
  *
  * 位置づけ:
  *   docs/field-survey-retro-exif-strip-runbook.md の実行ロジック部分。
- *   本モジュールは **dry-run / inventory 専用** の純関数群で、prisma / storage 実体 /
- *   process / next を一切 import しない（DI）。実際の DB read・storage read・出力は
- *   薄い wrapper（scripts/retro-exif-strip-field-survey.ts）が担当する。
+ *   本モジュールは純関数群で、prisma / storage 実体 / process / next を一切 import しない（DI）。
+ *   実際の DB read/repoint・storage read/upload/delete・出力は薄い wrapper
+ *   （scripts/retro-exif-strip-field-survey.ts）が実体を注入して担当する。
  *
- * 安全境界（PR-R2a の絶対条件）:
- *   - `--apply` は受理しない（parse 時点で error）。DB 更新 / storage upload・delete /
- *     repoint / cleanup は本 PR に存在しない（PR-R2b 以降・別承認）。
- *   - dry-run は processRetroStripRow を mode:"dry-run" で呼ぶだけ。同関数は
- *     upload / repoint / delete を呼ばない（PR #148 でロック済み）。本 CLI は
- *     さらに「呼ばれたら throw する ports」を wrapper 側で渡し、多層防御する。
+ * モードと安全境界:
+ *   - inventory / dry-run は READ のみ（書き込み導線なし）。dry-run の no-write は
+ *     makeDryRunPorts の throw スタブ + processRetroStripRow(mode:"dry-run") の早期 return
+ *     で多層に保証する。
+ *   - apply（PR-R2b）は processRetroStripRow を mode:"apply" で呼ぶ「配線のみ」。
+ *     新 key 再アップロード + 楽観ガード付き repoint・新 key 補償削除は core（PR #148）が
+ *     完結しており、本モジュールはそれを呼ぶ ports（makeApplyPorts）と repoint closure
+ *     （makeUpdateManyRepointPhoto）を組むだけ。**旧 key / 旧 thumbnail key は削除しない**
+ *     （rollback 窓として保持。cleanup は別承認の PR-R2c）。
  *   - 出力は非 PII。fileName / 座標 / EXIF 値 / 所有者情報は出さない
- *     （RetroStripRowResult は元々 fileName を含まない。JSONL も whitelist 整形）。
+ *     （RetroStripRowResult は fileName を含まない。JSONL も whitelist 整形）。
  */
 
 import {
@@ -22,6 +25,7 @@ import {
   extractStorageKeyFromStoredFileUrl,
   RETRO_STRIP_SUPPORTED_MIMES,
   RETRO_STRIP_OUTCOMES,
+  type RetroStripMode,
   type RetroStripPorts,
   type RetroStripRowInput,
   type RetroStripRowResult,
@@ -32,7 +36,7 @@ import {
 // CLI 引数 / 安全ガード
 // ---------------------------------------------------------------
 
-export type RetroStripCliMode = "inventory" | "dry-run";
+export type RetroStripCliMode = "inventory" | "dry-run" | "apply";
 
 export interface RetroStripCliOptions {
   mode: RetroStripCliMode;
@@ -59,10 +63,9 @@ const DEFAULT_BATCH_SIZE = 500;
 /**
  * argv（実行ファイル名等を除いた純粋な引数配列）を parse する。
  *
- * 受理: --inventory | --dry-run（いずれか必須・排他）/ --jsonl <path> /
+ * 受理: --inventory | --dry-run | --apply（いずれか必須・排他）/ --jsonl <path> /
  *       --batch-size <n> / --limit <n> / --help。
- * 拒否: --apply（PR-R2a では実装しない＝明示エラー）/ 未知フラグ / mode 未指定 /
- *       mode 重複 / 数値オプションの不正値。
+ * 拒否: 未知フラグ / mode 未指定 / mode 重複 / 数値オプションの不正値。
  */
 export function parseRetroStripCliArgs(
   argv: readonly string[],
@@ -75,7 +78,7 @@ export function parseRetroStripCliArgs(
 
   const setMode = (m: RetroStripCliMode): string | null => {
     if (mode !== null && mode !== m) {
-      return `モードは1つだけ指定してください（--inventory と --dry-run は排他）`;
+      return `モードは1つだけ指定してください（--inventory / --dry-run / --apply は排他）`;
     }
     mode = m;
     return null;
@@ -98,13 +101,13 @@ export function parseRetroStripCliArgs(
         if (e) return { ok: false, error: e };
         break;
       }
-      case "--apply":
-        // PR-R2a は dry-run / inventory 専用。apply は未実装（別承認の PR-R2b 以降）。
-        return {
-          ok: false,
-          error:
-            "--apply はこの CLI では実装されていません（dry-run / inventory 専用）。実 strip は別 PR・別承認です。",
-        };
+      case "--apply": {
+        // PR-R2b: 実 strip（新 key 再アップロード + 楽観ガード付き repoint・新 key 補償削除）。
+        // 旧 key は削除しない（rollback 窓）。本番実行は runbook の手順・別承認に従う。
+        const e = setMode("apply");
+        if (e) return { ok: false, error: e };
+        break;
+      }
       case "--jsonl": {
         const value = argv[i + 1];
         if (value === undefined || value.startsWith("-")) {
@@ -150,7 +153,7 @@ export function parseRetroStripCliArgs(
   if (mode === null) {
     return {
       ok: false,
-      error: "--inventory または --dry-run のいずれかを指定してください",
+      error: "--inventory / --dry-run / --apply のいずれかを指定してください",
     };
   }
 
@@ -183,6 +186,56 @@ export function assertSafeEnvironment(
     };
   }
   return { ok: true };
+}
+
+// ---------------------------------------------------------------
+// apply の storage backend 明示ガード（Codex P1）
+// ---------------------------------------------------------------
+
+/**
+ * --apply で許可する STORAGE_BACKEND の値。
+ * **src/lib/storage/index.ts の storage 取得関数の switch case と必ず一致させること**
+ * （同期は cli テストの source-assertion でロック）。
+ */
+export const APPLY_STORAGE_BACKENDS = ["local", "server", "s3"] as const;
+export type ApplyStorageBackend = (typeof APPLY_STORAGE_BACKENDS)[number];
+
+export type ApplyStorageBackendResult =
+  | { ok: true; backend: ApplyStorageBackend }
+  | { ok: false; reason: string };
+
+/**
+ * --apply 実行時に STORAGE_BACKEND を明示必須にする（暗黙の local fallback を禁止）。
+ *
+ * storage 取得関数は `process.env.STORAGE_BACKEND ?? "local"` で未設定時に local adapter へ
+ * fallback する。apply でこれを許すと「strip 画像を local disk へ upload しつつ production DB を
+ * new key へ repoint」し、稼働 app（server backend 等）が new key を読めず写真が 404 化する
+ * 事故が起き得る（Codex P1）。よって apply では未設定 / 空 / 未対応値を即エラーにし、
+ * **storage 取得・DB repoint 前**にこの検証を完了させる（wrapper が main で呼ぶ）。
+ *
+ * trim しない（storage 取得関数が trim しないため。" server " 等は switch の default で throw
+ * する＝reject が正）。server / s3 backend が要求する関連 env（STORAGE_SERVER_URL / STORAGE_S3_*
+ * 等）は各 adapter の constructor が fail-closed で throw する（storage 取得時点＝repoint 前）。
+ */
+export function resolveApplyStorageBackend(
+  env: Record<string, string | undefined>,
+): ApplyStorageBackendResult {
+  const backend = env.STORAGE_BACKEND;
+  if (backend === undefined || backend === "") {
+    return {
+      ok: false,
+      reason:
+        "STORAGE_BACKEND が未設定（または空）です。--apply では暗黙の local fallback を禁止します" +
+        `（稼働 app と同じ backend を明示してください。許可値: ${APPLY_STORAGE_BACKENDS.join(" / ")}）。`,
+    };
+  }
+  if (!(APPLY_STORAGE_BACKENDS as readonly string[]).includes(backend)) {
+    return {
+      ok: false,
+      reason: `STORAGE_BACKEND="${backend}" は --apply では未対応です（許可値: ${APPLY_STORAGE_BACKENDS.join(" / ")}）。`,
+    };
+  }
+  return { ok: true, backend: backend as ApplyStorageBackend };
 }
 
 // ---------------------------------------------------------------
@@ -295,13 +348,13 @@ export function aggregateInventory(
 // dry-run（storage read + strip in-memory のみ・書き込み一切なし）
 // ---------------------------------------------------------------
 
-/** dry-run 1 件分の非 PII run-log 行（JSONL の 1 オブジェクト）。 */
+/** dry-run / apply 1 件分の非 PII run-log 行（JSONL の 1 オブジェクト）。 */
 export interface RetroStripRunLogLine {
   photoId: string;
   outcome: RetroStripOutcome;
   /** 復元できた旧 key（path のみ。氏名/座標を含まない）。無い分岐では省略。 */
   oldKey?: string;
-  /** strip 前後のバイト数（would_strip のみ）。 */
+  /** strip 前後のバイト数（would_strip / repointed）。 */
   bytesBefore?: number;
   bytesAfter?: number;
   /** 非対応 MIME 件のための mimeType（HEIC/HEIF 等）。 */
@@ -309,11 +362,19 @@ export interface RetroStripRunLogLine {
   /** failed の段階とエラー名（メッセージ本文は含めない）。 */
   stage?: string;
   errorName?: string;
+  /** apply で新規 upload した key（repointed / skipped_row_changed / 一部 failed）。非 PII（path のみ）。 */
+  newKey?: string;
+  /** repointed 時の旧 thumbnail key（cleanup フェーズ用の記録。本モジュールは削除しない）。null なら省略。 */
+  oldThumbnailKey?: string;
+  /** 新 key のみの補償削除が成功したか（skipped_row_changed / 非 canonical failed）。false = 新 key 孤児。 */
+  compensationDeleted?: boolean;
 }
 
 /**
  * RetroStripRowResult を非 PII の JSONL 行へ整形する（whitelist 方式・防御的）。
- * fileName / newFileUrl / thumbnail などは run-log に出さない（dry-run の確認に不要）。
+ * fileName / newFileUrl / newThumbnailUrl / 座標などは run-log に出さない
+ * （key と outcome で確認・cleanup に十分。旧 key は repointed/skip 系で記録するが、
+ *  apply の失敗系でも旧 key には触れない＝新 key のみ追跡する）。
  */
 export function toRunLogLine(result: RetroStripRowResult): RetroStripRunLogLine {
   const line: RetroStripRunLogLine = {
@@ -326,6 +387,21 @@ export function toRunLogLine(result: RetroStripRowResult): RetroStripRunLogLine 
       line.bytesBefore = result.bytesBefore;
       line.bytesAfter = result.bytesAfter;
       break;
+    case "repointed":
+      // 新 key / 旧 key / バイト数（全て非 PII の path / 数値）。
+      // newFileUrl / newThumbnailUrl は run-log に出さない（key で十分・冗長回避）。
+      line.oldKey = result.oldKey;
+      if (result.oldThumbnailKey !== null) line.oldThumbnailKey = result.oldThumbnailKey;
+      line.newKey = result.newKey;
+      line.bytesBefore = result.bytesBefore;
+      line.bytesAfter = result.bytesAfter;
+      break;
+    case "skipped_row_changed":
+      // 楽観ガード負け。新 key の補償削除可否も記録（false = 新 key 孤児・要 cleanup）。
+      line.oldKey = result.oldKey;
+      line.newKey = result.newKey;
+      line.compensationDeleted = result.compensationDeleted;
+      break;
     case "unchanged":
     case "skipped_malformed":
     case "skipped_missing_bytes":
@@ -337,17 +413,21 @@ export function toRunLogLine(result: RetroStripRowResult): RetroStripRunLogLine 
     case "failed":
       line.stage = result.stage;
       line.errorName = result.errorName;
+      // apply の upload 後 / repoint 失敗時のみ存在（孤児候補の追跡用）。旧 key は決して含めない。
+      if (result.newKey !== undefined) line.newKey = result.newKey;
+      if (result.compensationDeleted !== undefined) {
+        line.compensationDeleted = result.compensationDeleted;
+      }
       break;
     // skipped_unmappable_url は photoId + outcome のみ（key 復元できていない）。
-    // repointed / would_strip 以外の apply 系 outcome は dry-run では発生しない。
     default:
       break;
   }
   return line;
 }
 
-/** dry-run の集計結果。 */
-export interface RetroStripDryRunResult {
+/** dry-run / apply 共通の集計結果。 */
+export interface RetroStripRunResult {
   processed: number;
   summary: Record<RetroStripOutcome, number>;
 }
@@ -367,7 +447,7 @@ export function makeDryRunPorts(
   // rejected promise を返す。dry-run では到達しないが、到達したら即失敗させる安全網）。
   const forbidden = (op: string) => async (): Promise<never> => {
     throw new Error(
-      `dry-run では ${op} は実行されません（書き込み導線は PR-R2a に存在しません）`,
+      `dry-run では ${op} は実行されません（dry-run モードに書き込み導線はありません）`,
     );
   };
   return {
@@ -380,29 +460,143 @@ export function makeDryRunPorts(
   };
 }
 
+// ---------------------------------------------------------------
+// apply ports / repoint closure（PR-R2b）。実体は wrapper が注入する（DI）。
+// ---------------------------------------------------------------
+
 /**
- * 行を 1 件ずつ dry-run 処理し、非 PII run-log 行を sink へ流しつつ集計する。
+ * 楽観ガード付き repoint の updateMany 引数形。
+ * - where に {id, fileUrl} を使い、読み取り時の fileUrl 値自体を楽観ロックにする
+ *   （FieldSurveyPinPhoto に version / updatedAt 列が無いため）。
+ * - data に mimeType を含めない（apply は format を保持するため mime は不変）。
+ *   この型が mimeType を構造的に拒否する（混入はコンパイルエラー）。
+ */
+export interface RetroStripUpdateManyArgs {
+  where: { id: string; fileUrl: string };
+  data: { fileUrl: string; thumbnailUrl: string | null; fileSize: number };
+}
+
+/**
+ * prisma の updateMany を遡及 strip の repointPhoto 契約に適合させる closure を組む。
+ *
+ * - 注入された updateMany（wrapper が `prisma.fieldSurveyPinPhoto.updateMany` を渡す）を、
+ *   {@link RetroStripUpdateManyArgs} の固定 shape で呼ぶ。
+ * - 返り値 = 更新行数（0 = 並行変更/削除＝楽観ガード負け。core が新 key を補償削除する）。
+ * - 本 lib は prisma を import しない。updateMany 関数だけを受け取る（DI）。
+ */
+export function makeUpdateManyRepointPhoto(
+  updateMany: (args: RetroStripUpdateManyArgs) => Promise<{ count: number }>,
+): RetroStripPorts["repointPhoto"] {
+  return async (update) => {
+    const { count } = await updateMany({
+      where: { id: update.id, fileUrl: update.expectedFileUrl },
+      data: {
+        fileUrl: update.newFileUrl,
+        thumbnailUrl: update.newThumbnailUrl,
+        fileSize: update.newFileSize,
+      },
+    });
+    return count;
+  };
+}
+
+/**
+ * apply 用 ports を組み立てる（実 storage / repoint callback を注入するだけ）。
+ *
+ * 本 lib は storage adapter 取得関数 / prisma を import しない（DI）。storage 実体
+ * （read/upload/delete）と repointPhoto closure（{@link makeUpdateManyRepointPhoto} 推奨）は
+ * wrapper が注入する。dry-run の makeDryRunPorts と対になる関数で、apply では throw スタブを
+ * 置かない（upload/delete/repoint は core が実際に呼ぶ）。
+ */
+export function makeApplyPorts(deps: {
+  storage: RetroStripPorts["storage"];
+  repointPhoto: RetroStripPorts["repointPhoto"];
+  generateUuid?: RetroStripPorts["generateUuid"];
+}): RetroStripPorts {
+  return {
+    storage: deps.storage,
+    repointPhoto: deps.repointPhoto,
+    generateUuid: deps.generateUuid,
+  };
+}
+
+// ---------------------------------------------------------------
+// runner（dry-run / apply 共有・per-row streaming 集計）
+// ---------------------------------------------------------------
+
+/**
+ * 行を 1 件ずつ処理し、非 PII run-log 行を sink へ流しつつ outcome を集計する。
+ * 結果配列を保持しない（per-row 逐次集計＝行ページング / JSONL 逐次書き出しと同じ streaming
+ * 規律。全件処理でもヒープが行数に比例して増えない）。並行度は sequential。
+ */
+async function runRetroStrip(
+  rows: AsyncIterable<RetroStripRowInput>,
+  ports: RetroStripPorts,
+  mode: RetroStripMode,
+  onLine?: (line: RetroStripRunLogLine) => void | Promise<void>,
+): Promise<RetroStripRunResult> {
+  const summary = emptyOutcomeSummary();
+  let processed = 0;
+  for await (const row of rows) {
+    const result = await processRetroStripRow(row, ports, { mode });
+    summary[result.outcome] += 1;
+    processed += 1;
+    if (onLine) await onLine(toRunLogLine(result));
+  }
+  return { processed, summary };
+}
+
+/**
+ * dry-run（storage read + strip in-memory のみ・書き込みなし）。makeDryRunPorts 推奨。
  *
  * @param rows    非同期反復可能な行ソース（wrapper が prisma ページングで供給）。
- * @param ports   dry-run ports（makeDryRunPorts 推奨）。
+ * @param ports   dry-run ports（makeDryRunPorts 推奨＝upload/delete/repoint は throw）。
  * @param onLine  各 run-log 行の sink（JSONL ファイル追記等。省略可）。
  */
 export async function runRetroStripDryRun(
   rows: AsyncIterable<RetroStripRowInput>,
   ports: RetroStripPorts,
   onLine?: (line: RetroStripRunLogLine) => void | Promise<void>,
-): Promise<RetroStripDryRunResult> {
-  // Codex P2: 結果配列を保持せず outcome counter を per-row 更新する（全件 dry-run でも
-  // ヒープが行数に比例して増えない＝行ページング / JSONL 逐次書き出しと同じ streaming 規律）。
-  const summary = emptyOutcomeSummary();
-  let processed = 0;
-  for await (const row of rows) {
-    const result = await processRetroStripRow(row, ports, { mode: "dry-run" });
-    summary[result.outcome] += 1;
-    processed += 1;
-    if (onLine) await onLine(toRunLogLine(result));
-  }
-  return { processed, summary };
+): Promise<RetroStripRunResult> {
+  return runRetroStrip(rows, ports, "dry-run", onLine);
+}
+
+/**
+ * apply（新 key 再アップロード + 楽観ガード付き repoint・新 key 補償削除）。makeApplyPorts 必須。
+ *
+ * - 実 strip の判断・新 key 生成・canonical 検証・補償削除は core（processRetroStripRow）が完結。
+ *   本 runner は dry-run と同じ streaming で回すだけ。
+ * - 旧 key / 旧 thumbnail key は core が削除しない（rollback 窓・cleanup は PR-R2c）。
+ * - sequential（行ごとに read→strip→upload→repoint を完結。楽観ガード〔fileUrl 値〕で並行安全）。
+ */
+export async function runRetroStripApply(
+  rows: AsyncIterable<RetroStripRowInput>,
+  ports: RetroStripPorts,
+  onLine?: (line: RetroStripRunLogLine) => void | Promise<void>,
+): Promise<RetroStripRunResult> {
+  return runRetroStrip(rows, ports, "apply", onLine);
+}
+
+// ---------------------------------------------------------------
+// apply の終了コード（純関数・テスト可能）
+// ---------------------------------------------------------------
+
+export const APPLY_EXIT_OK = 0;
+export const APPLY_EXIT_FAILED = 1;
+export const APPLY_EXIT_ROW_CHANGED = 2;
+
+/**
+ * apply の終了コードを決める純関数。
+ *   0 = clean（failed も skipped_row_changed も無い。期待された skip〔unsupported/malformed/
+ *       unmappable/missing〕は許容＝inventory/dry-run で事前レビュー済みの想定）
+ *   1 = failed > 0（read/upload/repoint 例外・非 canonical key 等。要調査）
+ *   2 = failed は無いが skipped_row_changed > 0（並行変更＝再実行で収束を推奨）
+ * failed と skipped_row_changed が同時のときは 1（致命を優先）。
+ */
+export function applyExitCode(summary: Record<RetroStripOutcome, number>): number {
+  if (summary.failed > 0) return APPLY_EXIT_FAILED;
+  if (summary.skipped_row_changed > 0) return APPLY_EXIT_ROW_CHANGED;
+  return APPLY_EXIT_OK;
 }
 
 /** help / banner 用に、空サマリ（全 outcome 0）を返す。 */
