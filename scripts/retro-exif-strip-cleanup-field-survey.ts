@@ -23,7 +23,13 @@
  *   - 出力は非 PII（key の path / 数値 / enum のみ）。
  */
 
-import { createReadStream, existsSync, writeFileSync, appendFileSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  realpathSync,
+  writeFileSync,
+  appendFileSync,
+} from "node:fs";
 import { createInterface } from "node:readline";
 import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -35,6 +41,7 @@ import {
   parseCleanupCliArgs,
   runCleanupDryRun,
   cleanupDryRunExitCode,
+  isSameIoPath,
   type CleanupCliOptions,
   type CleanupCurrentRow,
   type CleanupDryRunLogLine,
@@ -96,6 +103,21 @@ function makeJsonlSink(
   };
 }
 
+// 入力（--apply-run-log）と出力（--out）が同一ファイルかを判定する（P2-1）。
+// lib の字句的判定（isSameIoPath）に加え、両方が存在する場合は realpath で symlink / hardlink
+// 由来の実体一致も検出する。同一なら出力 sink の truncate が入力を破壊するため拒否に使う。
+function isSameInputOutput(applyRunLogPath: string, outPath: string): boolean {
+  if (isSameIoPath(applyRunLogPath, outPath)) return true;
+  try {
+    if (existsSync(applyRunLogPath) && existsSync(outPath)) {
+      return realpathSync.native(applyRunLogPath) === realpathSync.native(outPath);
+    }
+  } catch {
+    // realpath 失敗時は字句的判定（既に false）に委ねる。
+  }
+  return false;
+}
+
 async function main(): Promise<number> {
   const parsed = parseCleanupCliArgs(process.argv.slice(2));
   if (!parsed.ok) {
@@ -106,6 +128,19 @@ async function main(): Promise<number> {
   if (options.help) {
     log(HELP_TEXT);
     return 0;
+  }
+
+  // P2-1: 出力 sink（writeFileSync で truncate）を開く前に、入力 = 削除の権威ソースである
+  // apply run-log を上書きしないことを保証する。同一ファイルなら即停止（truncate より前）。
+  if (
+    options.outPath !== null &&
+    isSameInputOutput(options.applyRunLogPath, options.outPath)
+  ) {
+    process.stderr.write(
+      "停止: --out は入力 run-log（--apply-run-log）と同一ファイルにできません" +
+        "（入力 = 削除対象の権威ソースの破壊を防ぐため）。\n",
+    );
+    return 1;
   }
 
   // 安全ガード（DB へ接続する前に判定する）。

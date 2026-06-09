@@ -31,6 +31,7 @@
  *     信頼する（既に apply 時に canonical 化済みの key）。
  */
 
+import path from "node:path";
 import { extractStorageKeyFromStoredFileUrl } from "./retro-exif-strip";
 import { isValidStorageKey } from "../storage/key-validation";
 
@@ -76,6 +77,8 @@ export interface CleanupDryRunLogLine {
   candidateKey?: string;
   /** still_referenced のとき、現 DB が指す key（path のみ・デバッグ補助）。 */
   currentKey?: string;
+  /** still_referenced のとき、候補 key が一致した現 DB カラム（cross-column 参照の可視化）。 */
+  referencedColumn?: CleanupCandidateKind;
   /** not_repointed のとき、run-log 行の元 outcome（enum 文字列・非 PII）。 */
   sourceOutcome?: string;
   /** malformed_line のとき、入力 run-log の行番号（locate 用）。 */
@@ -193,11 +196,17 @@ export function parseCleanupRunLogLine(
  * 候補 key 1 件を現 DB 行に照らして評価する（削除しない・分類のみ）。
  *
  * 順序（fail-closed）:
- *   1. 非 canonical key            → skipped_invalid_key（DB を見るまでもなく除外）
- *   2. 行が存在しない              → skipped_row_missing
- *   3. 現 URL から key 復元不能     → skipped_unmappable（非参照を証明できない）
- *   4. 現 key === 候補 key         → skipped_still_referenced（誤削除しない）
- *   5. それ以外                    → deletable（R2c-ii で削除対象）
+ *   1. 非 canonical key                          → skipped_invalid_key（DB を見るまでもなく除外）
+ *   2. 行が存在しない                            → skipped_row_missing
+ *   3. fileUrl / thumbnailUrl の **どちらか** が候補 key を指す → skipped_still_referenced（誤削除しない）
+ *   4. non-null だが key 抽出不能なカラムがある   → skipped_unmappable（非参照を証明できない）
+ *   5. それ以外                                  → deletable（R2c-ii で削除対象）
+ *
+ * P2-2: storage namespace は fileUrl / thumbnailUrl で共通のため、候補 key（file / thumbnail いずれ
+ * でも）を **両カラム** に照合する。手動修正 / rollback / 事故復旧で旧 file key が現 thumbnailUrl に、
+ * または旧 thumbnail key が現 fileUrl に入っているケースを取りこぼすと、現役 key を deletable と
+ * 誤判定するため。`thumbnailUrl === null` は「参照なし」として扱い、fail-closed にしない
+ * （file 候補の deletable 判定を妨げない）。
  */
 export function evaluateCleanupCandidate(
   photoId: string,
@@ -214,16 +223,43 @@ export function evaluateCleanupCandidate(
     return { outcome: "skipped_row_missing", photoId, kind, candidateKey };
   }
 
-  const currentUrl = kind === "file" ? row.fileUrl : row.thumbnailUrl;
-  const currentKey = extractStorageKeyFromStoredFileUrl(currentUrl);
-  if (currentKey === null) {
-    // thumbnailUrl が null / 現 URL が unmappable → 非参照を証明できないため fail-closed skip。
+  // 両カラムを canonical key へ復元（legacy absolute URL も extractStorageKeyFromStoredFileUrl で対応）。
+  const fileKey = extractStorageKeyFromStoredFileUrl(row.fileUrl);
+  const thumbnailKey =
+    row.thumbnailUrl === null
+      ? null
+      : extractStorageKeyFromStoredFileUrl(row.thumbnailUrl);
+
+  // どちらかのカラムが候補 key を指していたら現役（手動 rollback / 未 repoint / cross-column）→ 削除しない。
+  if (fileKey === candidateKey) {
+    return {
+      outcome: "skipped_still_referenced",
+      photoId,
+      kind,
+      candidateKey,
+      currentKey: fileKey,
+      referencedColumn: "file",
+    };
+  }
+  if (thumbnailKey === candidateKey) {
+    return {
+      outcome: "skipped_still_referenced",
+      photoId,
+      kind,
+      candidateKey,
+      currentKey: thumbnailKey,
+      referencedColumn: "thumbnail",
+    };
+  }
+
+  // fail-closed: non-null だが key 抽出不能なカラムがあれば「そのカラムが候補を参照しない」ことを
+  // 証明できない → skip。thumbnailUrl === null は「参照なし」として扱い fail-closed にしない。
+  const fileUnmappable = fileKey === null;
+  const thumbnailUnmappable = row.thumbnailUrl !== null && thumbnailKey === null;
+  if (fileUnmappable || thumbnailUnmappable) {
     return { outcome: "skipped_unmappable", photoId, kind, candidateKey };
   }
-  if (currentKey === candidateKey) {
-    // 手動 rollback / 未 repoint。現役の旧 key を削除しない。
-    return { outcome: "skipped_still_referenced", photoId, kind, candidateKey, currentKey };
-  }
+
   return { outcome: "deletable", photoId, kind, candidateKey };
 }
 
@@ -301,6 +337,25 @@ export function cleanupDryRunExitCode(
   if (summary.malformed_line > 0) return CLEANUP_DRY_RUN_EXIT_MALFORMED;
   if (summary.skipped_still_referenced > 0) return CLEANUP_DRY_RUN_EXIT_STILL_REFERENCED;
   return CLEANUP_DRY_RUN_EXIT_OK;
+}
+
+// ---------------------------------------------------------------
+// 入出力パスの同一判定（P2-1）
+// ---------------------------------------------------------------
+
+/**
+ * cleanup の入力（--apply-run-log）と出力（--out）が同一ファイルを指すかを判定する。
+ *
+ * 同一だと出力 sink の truncate（`writeFileSync(out, "")`）が入力 = 削除の権威ソースである
+ * apply run-log を破壊するため、wrapper がこの判定で同一パスを拒否する（truncate より前に）。
+ * path.resolve で正規化し、大文字小文字非区別 FS（Windows / macOS 既定）での取りこぼしを防ぐため
+ * case-insensitive 比較も併用する（別ファイルと誤判定して上書きするより、同一寄りに倒す方が安全）。
+ * symlink / hardlink の厳密判定（realpath）は wrapper 側で追加的に行う。
+ */
+export function isSameIoPath(a: string, b: string): boolean {
+  const ra = path.resolve(a);
+  const rb = path.resolve(b);
+  return ra === rb || ra.toLowerCase() === rb.toLowerCase();
 }
 
 // ---------------------------------------------------------------

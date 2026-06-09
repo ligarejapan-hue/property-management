@@ -19,6 +19,7 @@ import {
   runCleanupDryRun,
   cleanupDryRunExitCode,
   emptyCleanupSummary,
+  isSameIoPath,
   CLEANUP_DRY_RUN_OUTCOMES,
   CLEANUP_DRY_RUN_EXIT_OK,
   CLEANUP_DRY_RUN_EXIT_MALFORMED,
@@ -294,7 +295,9 @@ describe("runCleanupDryRun", () => {
     expect(result.summary.skipped_unmappable).toBe(1);
   });
 
-  it("現 DB thumbnailUrl が null の行の旧 thumbnail 候補 → skipped_unmappable（表示消失防止の fail-closed）", async () => {
+  it("現 thumbnailUrl が null（参照なし）→ 旧 thumbnail 候補は orphan として deletable・file 候補も deletable（null は unmappable ではない）", async () => {
+    // P2-2: thumbnailUrl===null は「参照なし」として扱う。両カラム（fileUrl=newKey / thumbnail=null）の
+    // どちらも旧 thumbnail key を参照しないため、旧 thumbnail は orphan = deletable。file 候補も妨げない。
     const { ports } = makeLookup({
       [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
     });
@@ -302,8 +305,74 @@ describe("runCleanupDryRun", () => {
       linesOf(repointedLine({ oldThumbnailKey: OLD_THUMB_KEY })),
       ports,
     );
-    expect(pick(out, "file")).toMatchObject({ outcome: "deletable" });
-    expect(pick(out, "thumbnail")).toMatchObject({ outcome: "skipped_unmappable", candidateKey: OLD_THUMB_KEY });
+    expect(pick(out, "file")).toMatchObject({ outcome: "deletable", candidateKey: OLD_KEY });
+    expect(pick(out, "thumbnail")).toMatchObject({ outcome: "deletable", candidateKey: OLD_THUMB_KEY });
+  });
+
+  // ---- P2-2: 候補 key を現 DB 行の両カラム（fileUrl / thumbnailUrl）に照合する ----
+
+  it("[cross-column] old file key が現 thumbnailUrl に入っている → file 候補を skipped_still_referenced", async () => {
+    const { ports } = makeLookup({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: uploads(OLD_KEY) },
+    });
+    const { out } = await runCollect(linesOf(repointedLine()), ports);
+    expect(out[0]).toMatchObject({
+      outcome: "skipped_still_referenced",
+      kind: "file",
+      candidateKey: OLD_KEY,
+      currentKey: OLD_KEY,
+      referencedColumn: "thumbnail",
+    });
+  });
+
+  it("[cross-column] old thumbnail key が現 fileUrl に入っている → thumbnail 候補を skipped_still_referenced", async () => {
+    const { ports } = makeLookup({
+      [PHOTO_ID]: { fileUrl: uploads(OLD_THUMB_KEY), thumbnailUrl: null },
+    });
+    const { out } = await runCollect(
+      linesOf(repointedLine({ oldThumbnailKey: OLD_THUMB_KEY })),
+      ports,
+    );
+    expect(pick(out, "thumbnail")).toMatchObject({
+      outcome: "skipped_still_referenced",
+      candidateKey: OLD_THUMB_KEY,
+      currentKey: OLD_THUMB_KEY,
+      referencedColumn: "file",
+    });
+  });
+
+  it("[cross-column] 反対カラムが legacy absolute URL でも一致検出する", async () => {
+    const { ports } = makeLookup({
+      [PHOTO_ID]: {
+        fileUrl: uploads(NEW_KEY),
+        thumbnailUrl: `https://example.com${uploads(OLD_KEY)}`,
+      },
+    });
+    const { out } = await runCollect(linesOf(repointedLine()), ports);
+    expect(out[0]).toMatchObject({
+      outcome: "skipped_still_referenced",
+      kind: "file",
+      candidateKey: OLD_KEY,
+      referencedColumn: "thumbnail",
+    });
+  });
+
+  it("[cross-column] non-null だが抽出不能なカラムがある → skipped_unmappable（fail-closed）", async () => {
+    // file 候補 OLD_KEY は fileUrl=newKey で非参照だが、thumbnailUrl が non-null unmappable のため
+    // 「thumbnailUrl が候補を参照しない」ことを証明できず fail-closed。
+    const { ports } = makeLookup({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: "data:image/jpeg;base64,AAAA" },
+    });
+    const { out } = await runCollect(linesOf(repointedLine()), ports);
+    expect(out[0]).toMatchObject({ outcome: "skipped_unmappable", kind: "file", candidateKey: OLD_KEY });
+  });
+
+  it("[cross-column] thumbnailUrl === null は file 候補の deletable 判定を妨げない", async () => {
+    const { ports } = makeLookup({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    const { out } = await runCollect(linesOf(repointedLine()), ports);
+    expect(out[0]).toMatchObject({ outcome: "deletable", kind: "file", candidateKey: OLD_KEY });
   });
 
   it("photoId が現 DB に無い（行消滅）→ skipped_row_missing", async () => {
@@ -483,6 +552,7 @@ describe("runCleanupDryRun", () => {
       "kind",
       "candidateKey",
       "currentKey",
+      "referencedColumn",
       "sourceOutcome",
       "lineNumber",
     ]);
@@ -530,6 +600,32 @@ describe("emptyCleanupSummary", () => {
   it("全 outcome を 0 で初期化する", () => {
     const s = emptyCleanupSummary();
     for (const o of CLEANUP_DRY_RUN_OUTCOMES) expect(s[o]).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------
+// isSameIoPath（P2-1: --apply-run-log と --out の同一ファイル検出）
+// ---------------------------------------------------------------
+
+describe("isSameIoPath", () => {
+  it("同一文字列のパスは同一と判定する（--apply-run-log a.jsonl --out a.jsonl を拒否できる）", () => {
+    expect(isSameIoPath("/tmp/a.jsonl", "/tmp/a.jsonl")).toBe(true);
+    expect(isSameIoPath("run.jsonl", "run.jsonl")).toBe(true);
+  });
+
+  it("相対パスと、その解決先の絶対パスは同一と判定する", () => {
+    expect(isSameIoPath("run.jsonl", path.resolve("run.jsonl"))).toBe(true);
+    expect(isSameIoPath("./sub/../run.jsonl", path.resolve("run.jsonl"))).toBe(true);
+  });
+
+  it("大文字小文字のみ異なるパスも安全側（同一）に倒す", () => {
+    // 大文字小文字非区別 FS（Windows/macOS 既定）で同一ファイルを上書きする事故を防ぐ。
+    expect(isSameIoPath("/tmp/Apply.JSONL", "/tmp/apply.jsonl")).toBe(true);
+  });
+
+  it("別ファイルは false（正常に別ファイルなら従来通り動く）", () => {
+    expect(isSameIoPath("/tmp/apply.jsonl", "/tmp/cleanup.jsonl")).toBe(false);
+    expect(isSameIoPath("a.jsonl", "b.jsonl")).toBe(false);
   });
 });
 
@@ -653,5 +749,16 @@ describe("retro-exif-strip-cleanup source assertion", () => {
     expect(scriptSrc).toContain("createInterface");
     expect(scriptSrc).toContain("findUnique");
     expect(scriptSrc).not.toContain("readFileSync");
+  });
+
+  it("wrapper は --apply-run-log と --out の同一パスを、出力 sink（truncate）より前に拒否する（P2-1）", () => {
+    // makeJsonlSink(options.outPath) は writeFileSync(outPath,"") で truncate するため、
+    // 入力 run-log の破壊を防ぐべく isSameIoPath ガードを sink 呼び出しより前に置く。
+    expect(scriptSrc).toContain("isSameIoPath");
+    const guardIdx = scriptSrc.indexOf("isSameIoPath(");
+    const sinkCallIdx = scriptSrc.indexOf("makeJsonlSink(options.outPath");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(sinkCallIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(sinkCallIdx);
   });
 });
