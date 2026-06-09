@@ -42,9 +42,11 @@ import {
   parseCleanupCliArgs,
   runCleanupDryRun,
   runCleanupDelete,
+  preValidateCleanupRunLog,
   cleanupDryRunExitCode,
   cleanupDeleteExitCode,
   isSameIoPath,
+  CLEANUP_DELETE_EXIT_MALFORMED,
   type CleanupCliOptions,
   type CleanupCurrentRow,
   type CleanupDeletePorts,
@@ -266,6 +268,24 @@ async function runDelete(
   // --out は実削除モードで必須（parse で保証）。不可逆操作ゆえ delete log を必ず残す。
   log(`delete log（JSONL・非 PII）: ${options.outPath}`);
 
+  // P1: 実削除は不可逆ゆえ、**storage 取得 / sink truncate / deleteObject の前**に run-log 全体を
+  // parse-only で pre-validate する。malformed が 1 行でもあれば run-log 全体を信用できないため、
+  // 何も削除せず即 abort する（getStorage / makeJsonlSink〔truncate〕に到達しない）。
+  const preValidation = await preValidateCleanupRunLog(
+    createInterface({
+      input: createReadStream(options.applyRunLogPath, "utf8"),
+      crlfDelay: Infinity,
+    }),
+  );
+  if (!preValidation.ok) {
+    process.stderr.write(
+      `停止: 入力 run-log に壊れた行（malformed・行 ${preValidation.malformedLineNumber}）が含まれます。` +
+        "実削除は run-log 全体の信頼性が前提のため、何も削除せず中止します" +
+        "（dry-run で malformed を解消してから再実行してください）。\n",
+    );
+    return CLEANUP_DELETE_EXIT_MALFORMED;
+  }
+
   // DB 再確認 port（READ のみ）。delete 直前にも現 fileUrl / thumbnailUrl を再確認する。
   const lookupRow = async (
     photoId: string,
@@ -275,7 +295,7 @@ async function runDelete(
       select: { fileUrl: true, thumbnailUrl: true },
     });
 
-  // 実 storage の取得は二重ゲート通過後・backend 明示検証後・本関数の内側でのみ。
+  // 実 storage の取得は二重ゲート通過 + 前段検証通過後・backend 明示検証後・本関数の内側でのみ。
   const storage = getStorage();
   const ports: CleanupDeletePorts = {
     lookupRow,

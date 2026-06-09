@@ -21,6 +21,7 @@ import {
   emptyCleanupSummary,
   isSameIoPath,
   runCleanupDelete,
+  preValidateCleanupRunLog,
   cleanupDeleteExitCode,
   emptyCleanupDeleteSummary,
   CLEANUP_DRY_RUN_OUTCOMES,
@@ -37,6 +38,7 @@ import {
   type CleanupCurrentRow,
   type CleanupDeletePorts,
   type CleanupDeleteLogLine,
+  type CleanupDeleteResult,
 } from "@/lib/field-survey/retro-exif-strip-cleanup";
 import { toRunLogLine } from "@/lib/field-survey/retro-exif-strip-cli";
 import type { RetroStripRowResult } from "@/lib/field-survey/retro-exif-strip";
@@ -962,6 +964,117 @@ describe("cleanupDeleteExitCode", () => {
   });
 });
 
+// ---------------------------------------------------------------
+// P1: delete mode は malformed が1行でもあれば削除前に abort（pre-validation）
+// ---------------------------------------------------------------
+
+describe("preValidateCleanupRunLog", () => {
+  it("全行 valid（repointed / not_repointed / blank）→ ok:true", async () => {
+    const r = await preValidateCleanupRunLog(
+      linesOf(
+        repointedLine(),
+        "",
+        JSON.stringify({ photoId: PHOTO_ID, outcome: "unchanged", oldKey: OLD_KEY }),
+      ),
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("malformed が1件でもあれば ok:false（最初の malformed 行番号）", async () => {
+    const r = await preValidateCleanupRunLog(linesOf(repointedLine(), "{broken"));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.malformedLineNumber).toBe(2);
+  });
+
+  it("malformed が先頭でも検出（行番号 1）", async () => {
+    const r = await preValidateCleanupRunLog(linesOf("{broken", repointedLine()));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.malformedLineNumber).toBe(1);
+  });
+});
+
+// wrapper の runDelete を模した composition（pre-validate → malformed なら storage 取得 / truncate /
+// delete をせず abort、通過時のみ delete）。delete 前 abort の契約を end-to-end で固定する。
+async function deleteWithPreValidation(
+  linesArr: string[],
+  ports: CleanupDeletePorts,
+  spies: { onGetStorage?: () => void; onTruncate?: () => void } = {},
+): Promise<{ aborted: boolean; exitCode: number; result: CleanupDeleteResult | null }> {
+  const pre = await preValidateCleanupRunLog(linesOf(...linesArr));
+  if (!pre.ok) {
+    // 不可逆削除の前に abort。getStorage / sink truncate / deleteObject に到達しない。
+    return { aborted: true, exitCode: CLEANUP_DELETE_EXIT_MALFORMED, result: null };
+  }
+  spies.onGetStorage?.(); // wrapper の getStorage()（pre-validate 通過後のみ）
+  spies.onTruncate?.(); // wrapper の makeJsonlSink truncate（pre-validate 通過後のみ）
+  const result = await runCleanupDelete(linesOf(...linesArr), ports);
+  return { aborted: false, exitCode: cleanupDeleteExitCode(result.summary), result };
+}
+
+describe("runCleanupDelete pre-validation（P1: malformed なら削除前 abort）", () => {
+  it("malformed が valid deletable より前 → deleteObject 未呼出・exit 1・getStorage/truncate 未到達", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    let storageGot = false;
+    let truncated = false;
+    const r = await deleteWithPreValidation(["{broken", repointedLine()], ports, {
+      onGetStorage: () => {
+        storageGot = true;
+      },
+      onTruncate: () => {
+        truncated = true;
+      },
+    });
+    expect(r.aborted).toBe(true);
+    expect(r.exitCode).toBe(CLEANUP_DELETE_EXIT_MALFORMED);
+    expect(deletes).toEqual([]);
+    expect(storageGot).toBe(false);
+    expect(truncated).toBe(false);
+  });
+
+  it("[P1 核心] malformed が valid deletable より後 → 先行 valid があっても deleteObject 未呼出・exit 1", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    let storageGot = false;
+    const r = await deleteWithPreValidation([repointedLine(), "{broken"], ports, {
+      onGetStorage: () => {
+        storageGot = true;
+      },
+    });
+    expect(r.aborted).toBe(true);
+    expect(r.exitCode).toBe(CLEANUP_DELETE_EXIT_MALFORMED);
+    expect(deletes).toEqual([]); // 先行 valid 行があっても何も削除しない
+    expect(storageGot).toBe(false);
+  });
+
+  it("全行 valid → pre-validation 通過し deletable を削除（通常動作）", async () => {
+    const { ports, deletes } = makeDeletePorts({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    let storageGot = false;
+    const r = await deleteWithPreValidation([repointedLine()], ports, {
+      onGetStorage: () => {
+        storageGot = true;
+      },
+    });
+    expect(r.aborted).toBe(false);
+    expect(storageGot).toBe(true);
+    expect(deletes).toEqual([OLD_KEY]);
+    expect(r.exitCode).toBe(CLEANUP_DELETE_EXIT_OK);
+  });
+
+  it("dry-run は従来どおり malformed_line を emit して継続（fail-before-delete は delete mode のみ）", async () => {
+    const { ports } = makeLookup({
+      [PHOTO_ID]: { fileUrl: uploads(NEW_KEY), thumbnailUrl: null },
+    });
+    const { result } = await runCollect(linesOf("{broken", repointedLine()), ports);
+    expect(result.summary.malformed_line).toBe(1);
+    expect(result.summary.deletable).toBe(1); // 後続 valid は dry-run では継続評価
+  });
+});
+
 describe("CLEANUP_DELETE_OUTCOMES", () => {
   it("dry-run の全 outcome + deleted/delete_failed の superset（dry-run tuple は無改変）", () => {
     expect(CLEANUP_DELETE_OUTCOMES).toEqual([...CLEANUP_DRY_RUN_OUTCOMES, "deleted", "delete_failed"]);
@@ -1041,6 +1154,17 @@ describe("retro-exif-strip-cleanup source assertion", () => {
     expect(scriptSrc).not.toContain("fieldSurveyPinPhoto.delete");
     expect(scriptSrc).not.toContain(".update(");
     expect(scriptSrc).not.toContain(".create(");
+  });
+
+  it("wrapper の実削除は pre-validation（preValidateCleanupRunLog）を getStorage / 削除より前に行う（P1: malformed なら storage 取得前に abort）", () => {
+    // 不可逆削除ゆえ、run-log に malformed が1行でもあれば getStorage / sink truncate / deleteObject に
+    // 到達する前に abort する。本質保証は runtime composition テスト（malformed→deletes 空・storage 未取得）。
+    expect(scriptSrc).toContain("preValidateCleanupRunLog");
+    const preIdx = scriptSrc.indexOf("preValidateCleanupRunLog(");
+    const getStorageIdx = scriptSrc.indexOf("getStorage(");
+    expect(preIdx).toBeGreaterThan(-1);
+    expect(getStorageIdx).toBeGreaterThan(-1);
+    expect(preIdx).toBeLessThan(getStorageIdx);
   });
 
   it("wrapper は STORAGE_BACKEND fail-closed を維持する（resolveApplyStorageBackend / assertSafeEnvironment 流用）", () => {

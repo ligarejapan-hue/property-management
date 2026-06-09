@@ -370,9 +370,37 @@ export async function runCleanupDryRun(
   return { lines, summary };
 }
 
+export type CleanupPreValidationResult =
+  | { ok: true }
+  | { ok: false; malformedLineNumber: number };
+
+/**
+ * 実削除（PR-R2c-ii）の前段検証。apply run-log を parse-only で走査し、malformed 行が 1 件でも
+ * あれば ok:false（最初の malformed 行番号）を返す（最初の malformed で早期 return・結果を保持しない）。
+ *
+ * 実削除は不可逆ゆえ、削除対象を決める権威ソースである run-log が 1 行でも壊れていれば run-log 全体を
+ * 信用できない。よって wrapper は **storage 取得 / sink truncate / deleteObject の前** に本検証を呼び、
+ * malformed を検出したら何も削除せず即 abort する（fail-before-delete）。
+ * storage / DB に一切触れない（pure・streaming）。dry-run（runCleanupDryRun）はこの前段検証を行わず、
+ * 従来どおり malformed_line を emit して継続する（fail-before-delete は delete モードのみ）。
+ */
+export async function preValidateCleanupRunLog(
+  rawLines: AsyncIterable<string>,
+): Promise<CleanupPreValidationResult> {
+  let lineNumber = 0;
+  for await (const raw of rawLines) {
+    lineNumber += 1;
+    const parsed = parseCleanupRunLogLine(raw, lineNumber);
+    if (parsed.kind === "malformed") {
+      return { ok: false, malformedLineNumber: parsed.lineNumber };
+    }
+  }
+  return { ok: true };
+}
+
 /**
  * apply run-log の生 JSONL 行を 1 件ずつ評価し、**deletable と判定された候補のみ** storage 実体を
- * 削除する（PR-R2c-ii・二重ゲート通過後に wrapper が呼ぶ）。
+ * 削除する（PR-R2c-ii・二重ゲート + 前段検証〔preValidateCleanupRunLog〕通過後に wrapper が呼ぶ）。
  *
  * 安全規律:
  *   - deletability 判定は dry-run と同一の {@link evaluateCleanupCandidate}（両カラム照合・fail-closed）
