@@ -1,14 +1,15 @@
-# field-survey 写真 遡及 EXIF/GPS strip 運用 Runbook（inventory / dry-run / apply）
+# field-survey 写真 遡及 EXIF/GPS strip 運用 Runbook（inventory / dry-run / apply / cleanup）
 
 既存アップロード済み field-survey 写真（`FieldSurveyPinPhoto`）に残る EXIF/GPS を遡及的に
 除去する作業の手順書です。**inventory（棚卸し）/ dry-run（無害な事前確認）/ apply（実 strip）**
-の 3 モードを扱います。
+の 3 モードに加え、apply 後の **cleanup（旧 key 削除：dry-run 列挙 R2c-i / 実削除 R2c-ii）**（§12）を扱います。
 
 > ⚠ **`--apply` は本番データを変更します。**
 > apply は新 key での再アップロードと DB の repoint を行います（実 strip）。**本番での apply 実行は
 > 別承認**で、本 Runbook の事前手順（DB backup・inventory/dry-run レビュー・低トラフィック窓）を
-> 完了してから行ってください。**旧 key / 旧 thumbnail key の削除（cleanup）は本 PR の範囲外**で、
-> さらに別承認（PR-R2c）です。
+> 完了してから行ってください。**旧 key / 旧 thumbnail key の削除（cleanup）は実装済み**
+> （dry-run 列挙 = PR #159 / 実削除 = PR #161）ですが、**本番での cleanup 実行は別承認**で
+> **不可逆**です（手順は §12）。
 
 関連: [field-survey-photo-privacy-checklist.md](./field-survey-photo-privacy-checklist.md) §6
 （遡及 strip = 別タスク・別承認）／ コアロジックは PR #148 で main 反映済み
@@ -22,9 +23,10 @@
 | 区分 | 内容 |
 | --- | --- |
 | できる（本PR） | inventory（対象件数・mimeType 分布・key 抽出可否・legacy absolute 件数・非対応 MIME 件数・thumbnail 有無）／ dry-run（storage read + strip を**メモリ上だけ**で実施し outcome 集計・JSONL run-log）／ **apply（実 strip：新 key 再アップロード + 楽観ガード付き DB repoint・新 key 補償削除）** |
-| できない（別承認） | 旧 key・旧 thumbnail key の削除（cleanup = **PR-R2c**）／ 孤児新 key の reconciliation ／ resume checkpoint ／ storage ファイルの別バックアップ tooling ／ **本番での apply 実行そのもの**（= 本 Runbook 手順の実行は別承認） |
+| できる（別 CLI・実装済） | **cleanup**（旧 key / 旧 thumbnail key 削除）：dry-run 列挙（R2c-i・PR #159）／ 実削除（R2c-ii・PR #161・二重ゲート `--delete --confirm`）。手順は §12。**本番での cleanup 実行は別承認** |
+| できない（別承認） | 孤児新 key の reconciliation ／ resume checkpoint ／ storage ファイルの別バックアップ tooling ／ **本番での apply / cleanup 実行そのもの**（= 本 Runbook 手順の実行は別承認） |
 
-`--apply` は実装済みですが、**本番での実行は別承認**です（runbook の事前手順を完了してから）。
+`--apply`（§4）・cleanup（§12）は実装済みですが、**本番での実行はいずれも別承認**です（runbook の事前手順を完了してから）。
 
 ---
 
@@ -51,8 +53,9 @@
 - **legacy absolute URL 対応済み**：古い upload route が `result.url`（server adapter 由来の
   `https://{host}/uploads/...`）をそのまま DB 保存していた時期のデータも、key を復元して
   対象化する（Codex P1 対応）。非 canonical key（backslash / 連続スラッシュ等）は対象外。
-- **旧 key / 旧 thumbnail key は削除しない**。apply 後も旧 key は **rollback 窓**として保持する
-  設計（cleanup = 別承認の PR-R2c）。
+- **apply は旧 key / 旧 thumbnail key を削除しない**。apply 後も旧 key は **rollback 窓**として保持する
+  設計。旧 key の削除（cleanup）は apply とは別の CLI（§12・R2c-i dry-run / R2c-ii 実削除）で行い、
+  **cleanup を実行するとこの rollback 窓は閉じる**（不可逆）。
 
 ---
 
@@ -250,7 +253,8 @@ thumbnail あり: <withThumbnail>（うち key 抽出可: <thumbnailMappable>）
   疑い → 影響範囲を確認）。
 - inventory の `対象件数` が想定と大きく食い違う（DB 接続先の取り違え）。
 - CLI が `NEXT_PUBLIC_USE_MOCK=true` で停止した（mock 環境を本番と取り違えた）。
-- 旧 key の削除（cleanup）が必要になった（→ 本 PR の範囲外。別承認の PR-R2c）。
+- 旧 key の削除（cleanup）が必要になった（→ cleanup は実装済み〔§12〕。**本番実行は別承認・不可逆**。
+  apply 検証〔§8〕完了後に §12 の手順で行う）。
 - DB スキーマ / storage 契約の変更が必要になった（→ 停止して設計見直し）。
 
 いずれも「環境要因」と決めつけず、原因を切り分けてから次へ進むこと。
@@ -261,12 +265,14 @@ thumbnail あり: <withThumbnail>（うち key 抽出可: <thumbnailMappable>）
 
 - **storage 側**：apply は旧 key を**削除しない**ため、旧バイト（GPS 入り）が rollback 窓として
   残っている。DB の `fileUrl` を旧 key に戻せば旧バイトに復帰できる（run-log の `oldKey` / `newKey`
-  対が逆適用の材料）。
+  対が逆適用の材料）。**ただしこの storage 側 rollback は cleanup（§12・R2c-ii 実削除）を実行していない
+  間に限る**。cleanup で旧 key を消すと旧バイトは復元できなくなる（不可逆）。
 - **DB 側**：`restore-db.sh`（事前に `backup-db.sh` を取得していること）。
 - **クラッシュ窓**（すべて良性）:
-  - upload 後 repoint 前 = 新 key 孤児（非配信。run-log に現れない場合あり）→ cleanup（PR-R2c）で掃除。
-  - repoint 後（apply 完了）= 旧 key 孤児（非配信。DB は新 key を指す）→ cleanup（PR-R2c）で掃除。
-  - いずれも原本（旧 key）は無傷のまま。再実行は冪等。
+  - upload 後 repoint 前 = **新 key 孤児**（非配信。run-log に現れない場合あり）→ 新 key 孤児の
+    reconciliation は**別承認**（cleanup〔§12〕は旧 key 削除であって新 key 孤児は対象外）。
+  - repoint 後（apply 完了）= **旧 key 孤児**（非配信。DB は新 key を指す）→ cleanup（§12・R2c-ii）で掃除。
+  - いずれも原本（旧 key）は cleanup 未実行の間は無傷のまま。再実行は冪等。
 
 ---
 
@@ -275,15 +281,169 @@ thumbnail あり: <withThumbnail>（うち key 抽出可: <thumbnailMappable>）
 - 本番 DB スキーマ・migration・package / lock / env（**変更なし**）。
 - production route / upload route / authorization のコード（**変更なし**）。
 - AuditLog（apply は AuditLog を書きません。処理記録は JSONL run-log が正）。
-- 旧 key / 旧 thumbnail key の **実削除（storage から消す）= 未実装・別承認（PR-R2c-ii）**。
-  - なお **cleanup の dry-run 列挙**（削除対象候補の分類・報告のみ・**storage 削除は一切なし**・読み取り専用）は
-    **PR-R2c-i として別 CLI で実装済み**です：
-    `npx tsx scripts/retro-exif-strip-cleanup-field-survey.ts --apply-run-log <apply の JSONL run-log> [--out <path>]`。
-    apply 時に `--jsonl` で保存した run-log の `repointed` 行（`oldKey` / `oldThumbnailKey`）を入力に、
-    現 DB（FieldSurveyPinPhoto）がまだその旧 key を参照していないかを再確認し、`deletable` /
-    `skipped_still_referenced` / `skipped_unmappable` / `skipped_row_missing` / `skipped_invalid_key` /
-    `skipped_not_repointed` / `malformed_line` に分類します（**実削除は行いません**）。実削除の配線は PR-R2c-ii。
-- 孤児新 key の reconciliation / resume checkpoint = **別承認**。
+- 旧 key / 旧 thumbnail key の **cleanup は実装済み**：dry-run 列挙（R2c-i・PR #159・storage 非削除・
+  読み取り専用）+ **実削除（R2c-ii・PR #161・`--delete --confirm` 二重ゲート + Codex P1 の削除前
+  pre-validation 込み）**。別 CLI `scripts/retro-exif-strip-cleanup-field-survey.ts`。**手順・前提条件・
+  outcome / exit code の解釈は §12**。**本番での cleanup 実行は別承認・不可逆**。cleanup は DB を変更せず
+  storage 実体のみ削除する（apply の repoint 済み行はそのまま）。
+- 孤児新 key の reconciliation / resume checkpoint = **別承認**（cleanup〔§12〕は旧 key 削除であって
+  新 key 孤児の reconciliation は対象外）。
+- AuditLog は apply・cleanup とも書きません（処理記録は JSONL run-log / delete log が正）。
 
-実 strip（`--apply`）の**本番実行そのもの**、および cleanup（旧 key 削除）は **別承認**として
-扱います（本 Runbook はその手順書）。
+実 strip（`--apply`）の**本番実行そのもの**、および cleanup（旧 key 削除）の**本番実行**は
+**別承認**として扱います（本 Runbook はその手順書）。cleanup の手順は §12 を参照。
+
+---
+
+## 12. cleanup（旧 key / 旧 thumbnail key の削除）— R2c-i dry-run 列挙 / R2c-ii 実削除
+
+> ⚠ **storage delete は不可逆です。** cleanup は apply 後に rollback 窓として残していた旧 key /
+> 旧 thumbnail key を storage から**実体削除**します（DB は変更しません）。実行すると §10 の storage 側
+> rollback（旧 key へ戻す）は**できなくなります**。**本番での cleanup 実行は別承認**で、本 §12 の
+> 前提条件・順序を完了してから行ってください。
+
+実装: dry-run 列挙 = PR #159（R2c-i）、実削除配線 = PR #161（R2c-ii・Codex P1 対応込み）。CLI は
+`scripts/retro-exif-strip-cleanup-field-survey.ts`（lib = `src/lib/field-survey/retro-exif-strip-cleanup.ts`）。
+**入力は apply の JSONL run-log**（`repointed` 行の `oldKey` / 非 null `oldThumbnailKey` が削除対象候補）。
+DB は変更せず **storage 実体のみ削除**する（apply で repoint 済みの行はそのまま）。
+
+### 12.1 cleanup 実行の全体順序
+
+1. **apply run-log を保存**：apply（§4・§7）を `--jsonl <path>` 付きで実行し、その run-log を保管する。
+   これが cleanup の削除対象を決める**権威ソース**（DB 単独では apply 後の旧 key を逆算できない）。
+   run-log が無い / 部分的な apply は cleanup できない。
+2. **R2c-i dry-run を実行**（列挙のみ・storage 非削除）:
+   ```sh
+   npx tsx scripts/retro-exif-strip-cleanup-field-survey.ts \
+     --apply-run-log /tmp/retro-apply.jsonl --out /tmp/retro-cleanup-dryrun.jsonl
+   ```
+3. **dry-run exit 0 を確認**：`malformed_line`（exit 1）/ `skipped_still_referenced`（exit 2）が出て
+   いないこと。**exit 0 でなければ delete に進まない**（§12.2）。
+4. **delete 実行前に対象 / 件数 / log を確認**：dry-run の summary（`deletable` 件数・skip 内訳）と
+   `--out` の delete log（per-candidate の outcome / candidateKey）をレビューし、削除対象が想定どおりか
+   確認する。
+5. **R2c-ii delete を実行**（二重ゲート + `--out` 必須・§12.3）。
+6. **delete log を保存**：`--out` の出力（deleted / delete_failed / skip 内訳）を保管（不可逆操作の
+   証跡・唯一の記録＝AuditLog は書かない）。
+7. **結果を確認**（§12.4 exit code / §12.7 実行後確認）。
+
+### 12.2 delete 実行の前提条件
+
+- **本番 VPS のデプロイ済み commit が PR #161（R2c-ii 実削除配線）以降を含むことを実行前に確認する**
+  （最重要）。delete mode（`--delete --confirm`）は **#161 で初めて実装**された（それ以前の R2c-i では
+  `--delete` / `--confirm` は拒否）。確認方法のいずれか:
+  - デプロイ済み commit から見て **PR #161 の merge commit（例: `6601aee`）が祖先**であること
+    （`git merge-base --is-ancestor <PR #161 merge commit> HEAD` が成功すること）、または
+  - 対象環境の cleanup CLI に **`--delete --confirm` 二重ゲート / `--out` 必須 / malformed run-log の
+    削除前 abort（§12.4）** が含まれることを確認する。
+  - **この確認が取れない場合は cleanup delete を実行しない。**
+  - 現在の本番環境が #161 を含むか否かといった**一時的な状態の記録は、本長期 Runbook には残さず**、
+    個別の VPS release checklist / 作業ログ側に記録する（VPS 反映手順そのものも VPS release runbook 側）。
+- **`STORAGE_BACKEND` が明示されていること**（稼働 app と一致）：未設定 / 空 / 未対応値のときは
+  storage 取得前に **fail-closed で停止**（暗黙 local fallback 禁止）。許可値 `local` / `server` / `s3`。
+  稼働 app と違う backend を指すと、稼働中の正しい key を消す / 別 store を消す事故になり得る。
+- **mock 環境でないこと**：`NEXT_PUBLIC_USE_MOCK=true` では停止。
+- **apply run-log が正であること**：削除対象の権威ソース。apply 時に保存した run-log をそのまま使う。
+- **直前 dry-run が exit 0 であること**（運用ゲート）：malformed / still_referenced があるまま delete に
+  進まない。delete mode は malformed が 1 行でもあれば削除前に abort（§12.4）するが、運用としても
+  dry-run exit 0 を delete の前提とする。
+- **input / output 同一パス禁止**：`--apply-run-log`（入力）と `--out`（出力）を同一ファイルにしない
+  （出力 sink が入力 run-log を truncate して破壊するため・CLI が同一パスを拒否）。
+- **delete 時は `--out` 必須**：不可逆操作ゆえ delete log を必ず残す（`--out` 無しの `--delete --confirm`
+  は parse でエラー）。
+
+### 12.3 delete コマンド形
+
+```sh
+# 実削除（二重ゲート --delete --confirm + delete log 必須 + STORAGE_BACKEND 明示）
+STORAGE_BACKEND=server \
+npx tsx scripts/retro-exif-strip-cleanup-field-survey.ts \
+  --apply-run-log /tmp/retro-apply.jsonl \
+  --delete --confirm \
+  --out /tmp/retro-cleanup-delete.jsonl
+```
+
+- **`--delete --confirm` の二重ゲート**：`--delete` 単独 / `--confirm` 単独はエラー（削除しない）。
+  両方そろったときだけ実削除経路に入る。
+- **`STORAGE_BACKEND` 明示**：稼働 app と一致（`server` 等）。`DATABASE_URL` と storage 系 env
+  （`server` なら `STORAGE_SERVER_URL` / `STORAGE_SERVER_API_KEY` 等）は §3-4 と同じ。
+- **app.env の扱い**：本番 VPS では env（`DATABASE_URL` / `STORAGE_BACKEND` / storage creds）を
+  `/etc/property-management/app.env` から CLI の実行環境へ読み込むこと（apply（§3）と同じ要領で env を
+  source し CLI へ引き継ぐ）。`STORAGE_BACKEND` は明示し、実行開始ログの
+  `storage backend（明示確認済み）: <値>` で確認する。VPS 反映そのものの手順は本 Runbook の対象外。
+- **tsx**：apply と同じく devDependency。`npm ci --include=dev` 後・`npm prune` 前に実行（§3）。
+
+### 12.4 exit code 解釈（delete mode）
+
+| code | 意味 | 対応 |
+| --- | --- | --- |
+| `0` | 成功（`deleted` / 期待 skip のみ・`delete_failed` なし） | 完了。delete log を保管（§12.7） |
+| `1` | `malformed_line`（致命的な入力不正） | **delete mode は malformed があれば削除前に abort**（何も削除していない）。run-log を修復してから再実行 |
+| `2` | `skipped_still_referenced` あり | 現 DB がまだ旧 key を参照（手動 rollback / 未 repoint の疑い）。削除しない判断・調査（§12.7） |
+| `3` | `delete_failed` あり | storage 削除に失敗（orphan 残存）。delete log を確認し手動対応（§12.7） |
+
+- **delete mode は run-log に malformed が 1 行でもあれば、storage 取得 / delete log 出力（truncate）/
+  削除の前に pre-validation で abort する**（fail-before-delete・Codex P1）。「壊れた run-log は権威
+  ソースとして信用できない」ため、後続の valid な deletable 行も**削除しない**（exit 1・何も消さない）。
+- precedence（致命優先）: `malformed_line(1)` → `delete_failed(3)` → `skipped_still_referenced(2)` → `0`。
+- dry-run の exit code は別系統（`0` / `1` malformed / `2` still_referenced。`3`=delete_failed は
+  delete mode のみ）。
+
+### 12.5 outcome 解釈
+
+delete log（`--out`）の per-candidate outcome（実 CLI が出力する enum 名）:
+
+| outcome | 意味 |
+| --- | --- |
+| `deleted` | storage から削除した（`StorageAdapter.delete` が throw せず完了） |
+| `delete_failed` | storage 削除が失敗した（orphan 残存・`errorName` のみ記録） |
+| `skipped_still_referenced` | 現 DB の `fileUrl` / `thumbnailUrl` のどちらかがまだ旧 key を参照 → 削除しない（cross-column 照合・手動 rollback / 未 repoint） |
+| `skipped_unmappable` | 現 URL（non-null）から key を復元できない → 非参照を証明できず fail-closed で削除しない |
+| `skipped_row_missing` | 該当 photo 行が現 DB に無い（pin cascade 削除等） |
+| `skipped_invalid_key` | 候補 key が非 canonical（traversal / `?` / `#` 等） → 削除しない |
+| `skipped_not_repointed` | run-log 行が `repointed` 以外（新 key 孤児等・別スコープ） → 候補化しない |
+| `malformed_line` | run-log 行が壊れている（delete mode は §12.4 のとおり削除前 abort） |
+
+- **既存 dry-run（R2c-i）outcome との違い**：dry-run は削除対象候補を `deletable` として列挙するのみ
+  （storage 非削除）。delete mode はその `deletable` を実削除して **`deleted` / `delete_failed` に
+  re-label** する（よって delete mode では `deletable` は出ない）。`skipped_*` 系の意味は dry-run と同一。
+
+### 12.6 安全上の注意
+
+- **storage delete は不可逆**：旧 key を消すと §10 の storage 側 rollback（旧 key へ戻す）ができなく
+  なる。apply の検証（§8）完了・rollback 窓が不要と確認できてから実行する。
+- **`deleted` / `already_absent` は区別しない**：`StorageAdapter.delete` は戻り値 void で「実際に
+  消えたか / 既に無かったか」を返さない（全 backend が冪等で missing を成功扱い）。**`deleted` は
+  「delete が throw せず完了した試行数」**であり「実体が確かに消えた」確証ではない（read probe は
+  追加しない）。
+- **`delete_failed` 時は best-effort 継続**：1 件の delete 失敗で batch を全停止しない。失敗は
+  `delete_failed` に集計し、後続候補の処理を続ける。
+- **記録は `errorName` のみ**：delete 失敗時も `error.name` だけを記録し、**`error.message` 本文や
+  PII（fileName / 座標 / 所有者情報）は出さない**。
+- **部分削除は正常に起こり得る**：file 候補は `deleted`・thumbnail 候補は `skipped_still_referenced`
+  （または逆）のように、1 行内で片方だけ削除されることがある（per-candidate 独立評価）。これは異常では
+  ない。
+- **再実行時の summary は backend 挙動で変わり得る**：同じ run-log で 2 回実行すると、1 回目で消えた key
+  の 2 回目は backend により `deleted`（local/server が missing を成功扱い）/ `delete_failed`（一部 S3
+  互換が throw）に分岐し、summary が backend 依存でぶれ得る。
+- **本番 cleanup 実行は別承認**。
+
+### 12.7 実行後確認
+
+1. **delete log を保存**：`--out` の JSONL（deleted / delete_failed / skip 内訳）を保管。不可逆操作の
+   唯一の証跡（AuditLog は書かない＝run-log が正）。
+2. **summary を確認**：`処理行数` と outcome 別件数の整合。`deleted` 件数が dry-run の `deletable` 件数と
+   整合するか（間に手動 rollback 等が入ると `skipped_still_referenced` へ転じ得る）。
+3. **`delete_failed` がある場合**：orphan が残存している。delete log で該当 `candidateKey` を確認し、
+   backend 障害が原因なら復旧後に再実行、個別なら手動削除を検討（**手動 storage 操作は別承認**）。
+4. **`skipped_still_referenced` がある場合**：現 DB がまだ旧 key を参照している＝**削除しない判断が
+   正しい**。手動 rollback / 未 repoint の疑いがあるため原因を調査する（exit 2）。
+5. **本番 storage / DB に対する追加操作は別承認**：本 Runbook の手順を超える手動介入は行わない。
+
+### 12.8 明確な禁止事項（本 runbook 作成 PR の範囲）
+
+- **runbook 作成 PR 内で本番実行しない**（docs-only）。
+- **VPS 操作をしない**。
+- **production DB / production storage 操作をしない**。
+- **retro EXIF apply / cleanup CLI を実行しない**。
+- **`--delete --confirm` を実行しない**。
