@@ -108,13 +108,26 @@ describe("OwnerLinkModal: stale 検索レスポンス破棄（Codex）", () => {
 });
 
 describe("OwnerLinkModal: 空クエリ/モード離脱/閉じる で stale 検索を無効化（Codex）", () => {
-  it("空クエリ(q.length < 1)でも searchSeqRef を進めて in-flight 検索を無効化する", () => {
-    // 空欄化前に発火した古い検索の結果が復活しないよう、分岐直後で seq を bump する
-    expect(modalSrc).toMatch(/if \(q\.length < 1\) \{\s*searchSeqRef\.current \+= 1/);
+  it("invalidateSearch が seq 前進 + searchHits/selected/searchLoading/searchError を全リセットする", () => {
+    // loading/error が残って「検索中...」のまま固まらないよう、1 関数で seq 前進 + 4 状態リセット。
+    const m = modalSrc.match(
+      /const invalidateSearch = useCallback\(\(\) => \{([\s\S]*?)\}, \[\]\)/,
+    );
+    expect(m).toBeTruthy();
+    const body = m![1];
+    expect(body).toMatch(/searchSeqRef\.current \+= 1/); // in-flight 検索を無効化
+    expect(body).toMatch(/setSearchHits\(\[\]\)/);
+    expect(body).toMatch(/setSelected\(null\)/);
+    expect(body).toMatch(/setSearchLoading\(false\)/); // loading が残らない
+    expect(body).toMatch(/setSearchError\(null\)/); // 古い error が残らない
   });
 
-  it("非検索モード（新規作成へ切替 等）でも searchSeqRef を進めて in-flight 検索を無効化する", () => {
-    expect(modalSrc).toMatch(/if \(mode !== "search"\) \{\s*searchSeqRef\.current \+= 1/);
+  it("空クエリ(q.length < 1)で invalidateSearch を呼ぶ（hits/loading/error/selected をリセット）", () => {
+    expect(modalSrc).toMatch(/if \(q\.length < 1\) \{\s*invalidateSearch\(\);/);
+  });
+
+  it("非検索モード（新規作成へ切替 等）で invalidateSearch を呼ぶ", () => {
+    expect(modalSrc).toMatch(/if \(mode !== "search"\) \{\s*invalidateSearch\(\);/);
   });
 
   it("アンマウント（閉じる/リセット）時に in-flight 検索を無効化する", () => {

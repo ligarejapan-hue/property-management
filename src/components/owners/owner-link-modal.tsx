@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Search, UserPlus, X } from "lucide-react";
 import {
   searchOwners,
@@ -79,6 +79,17 @@ export function OwnerLinkModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // stale な検索を全無効化する（seq 前進 + 表示状態リセット）。古い in-flight 検索の結果だけでなく
+  // searchLoading / searchError も残らないようにし、「検索中...」のまま固まる/古い error が残るのを防ぐ
+  //（Codex）。setState setter と ref は安定なので deps は []。
+  const invalidateSearch = useCallback(() => {
+    searchSeqRef.current += 1;
+    setSearchHits([]);
+    setSelected(null);
+    setSearchLoading(false);
+    setSearchError(null);
+  }, []);
+
   // 閉じる/アンマウント時に in-flight 検索を無効化する（閉じた後に古い結果を適用しない・Codex）。
   useEffect(() => {
     return () => {
@@ -88,16 +99,15 @@ export function OwnerLinkModal({
 
   // 検索 debounce（searchOwners 経由・300ms）
   useEffect(() => {
-    // 非検索モードでは in-flight 検索を無効化（seq を進める）して結果を出さない（Codex）。
+    // 非検索モードでは in-flight 検索を無効化し、loading/error/hits/selected をリセット（Codex）。
     if (mode !== "search") {
-      searchSeqRef.current += 1;
+      invalidateSearch();
       return;
     }
     const q = searchQ.trim();
-    // 空クエリでも seq を進め、進行中だった古い検索の結果が復活しないようにする（Codex）。
+    // 空クエリでも in-flight 検索を無効化し、loading/error/hits/selected をリセット（Codex）。
     if (q.length < 1) {
-      searchSeqRef.current += 1;
-      setSearchHits([]);
+      invalidateSearch();
       return;
     }
     const timer = setTimeout(async () => {
@@ -120,7 +130,7 @@ export function OwnerLinkModal({
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchQ, mode]);
+  }, [searchQ, mode, invalidateSearch]);
 
   // P2(Codex): 検索クエリが変わったら古い選択をクリアする。
   // 別クエリの表示状態で旧 owner を誤って紐付けないため（submit ゲートと二重防御）。
