@@ -59,6 +59,16 @@ describe("AddressLookupControls の配線", () => {
     expect(src).toContain("not_configured");
   });
 
+  it("disabled 中は住所検索 effect を走らせない（Codex P2-A）＝decide で分岐し deps に disabled を含む", () => {
+    expect(src).toContain("decideAddressSearchEffect");
+    expect(src).toMatch(
+      /decideAddressSearchEffect\(showSearch,\s*disabled,\s*address\)/,
+    );
+    expect(src).toMatch(
+      /\[address,\s*showSearch,\s*disabled,\s*searchByAddress,\s*reset\]/,
+    );
+  });
+
   it("APIキー/サーバ provider/orchestrator を露出しない（#8）", () => {
     expect(src).not.toContain("ADDRESS_LOOKUP_API_KEY");
     expect(src).not.toContain("process.env.ADDRESS_LOOKUP");

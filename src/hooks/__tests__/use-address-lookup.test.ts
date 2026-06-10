@@ -1,6 +1,7 @@
 /**
  * useAddressLookup の配線を source assertion で固定する（node 環境のため描画テスト不可）。
- * 振る舞いの核（reducer / isLatestRequest / 分類）は address-lookup-ui-utils.test.ts で実検証する。
+ * 振る舞いの核（reducer / controller の seq stale ガード / debounce / cancel / 分類）は
+ * address-lookup-ui-utils.test.ts で実検証する。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -22,21 +23,21 @@ describe("useAddressLookup の配線", () => {
     expect(src).toContain("fetchAddressCandidates");
   });
 
-  it("住所検索は debounce 300ms（#5）", () => {
-    expect(src).toMatch(/from\s+["']@\/lib\/debounce["']/);
-    expect(src).toContain("debounce(");
-    expect(src).toContain("300");
+  it("検索実行（seq stale ガード/debounce/cancel）は createAddressLookupController に集約（#6・Codex P2-1/P2-B）", () => {
+    expect(src).toMatch(/from\s+["']@\/lib\/address-lookup-ui-utils["']/);
+    expect(src).toContain("createAddressLookupController");
+    expect(src).toContain("controllerRef");
+    expect(src).toContain("useRef");
+  });
+
+  it("住所検索は debounce 300ms を controller へ渡す（#5）", () => {
+    expect(src).toContain("SEARCH_DEBOUNCE_MS = 300");
+    expect(src).toMatch(/createAddressLookupController\(/);
   });
 
   it("reducer / 初期状態 を utils から使う", () => {
-    expect(src).toMatch(/from\s+["']@\/lib\/address-lookup-ui-utils["']/);
     expect(src).toContain("addressLookupReducer");
     expect(src).toContain("initialLookupState");
-  });
-
-  it("stale response 対策に seq ref + isLatestRequest を使う（#6）", () => {
-    expect(src).toContain("useRef");
-    expect(src).toContain("isLatestRequest");
   });
 
   it("郵便番号→住所は明示（debounce なし）の lookupByPostalCode を公開", () => {
@@ -55,8 +56,8 @@ describe("useAddressLookup の配線", () => {
     }
   });
 
-  it("debounce は cleanup で cancel する", () => {
-    expect(src).toContain("cancel");
+  it("unmount cleanup で dispose（保留 debounce cancel＋遅延応答破棄）する", () => {
+    expect(src).toContain("dispose");
   });
 
   it("APIキー/サーバ provider/orchestrator を露出しない（#8）", () => {

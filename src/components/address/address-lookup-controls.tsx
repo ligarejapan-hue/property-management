@@ -22,6 +22,7 @@ import {
   requiresCandidateSelection,
   needsOverwriteConfirm,
   shouldAutofillAddress,
+  decideAddressSearchEffect,
   type AddressLookupErrorKind,
 } from "@/lib/address-lookup-ui-utils";
 
@@ -80,15 +81,20 @@ export function AddressLookupControls({
   const showSearch = mode === "search" || mode === "both";
 
   // 住所 → 郵便番号: 住所が変わるたびに検索（hook 内で 300ms debounce）。
-  // 空になったらリセットして古い候補を消す。effect 内では関数呼び出しのみ（setState しない）。
+  // 空になったらリセットして古い候補を消す。disabled 中は検索しない＝表示しただけで
+  // 住所 PII を route へ送らない・provider 課金を消費しない（Codex P2-A）。
+  // disabled へ切り替わった時も reset が保留 debounce を破棄する。
+  // effect 内では関数呼び出しのみ（setState しない）。
   useEffect(() => {
-    if (!showSearch) return;
-    if (address.trim() === "") {
+    const decision = decideAddressSearchEffect(showSearch, disabled, address);
+    if (decision === "reset") {
       reset();
       return;
     }
-    searchByAddress(address);
-  }, [address, showSearch, searchByAddress, reset]);
+    if (decision === "search") {
+      searchByAddress(address);
+    }
+  }, [address, showSearch, disabled, searchByAddress, reset]);
 
   // 候補を採用: 郵便番号があれば反映し、住所は空なら即時・既存なら確認。
   const applyCandidate = (candidate: AddressLookupCandidate) => {
