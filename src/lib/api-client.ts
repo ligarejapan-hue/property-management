@@ -2057,24 +2057,49 @@ export async function searchOwners(query: string) {
   }>(`/api/owners/search?q=${encodeURIComponent(query)}`);
 }
 
-// 新規所有者を作成する（POST /api/owners・createOwnerSchema 準拠）。
-// 重複（同名+住所）はサーバが 409 を返し、apiFetch がそのメッセージで throw する。
-export async function createOwner(data: {
-  name: string;
-  nameKana?: string | null;
-  phone?: string | null;
-  zip?: string | null;
-  address?: string | null;
-  email?: string | null;
-}) {
+// 新規所有者の作成と物件への紐付けを 1 リクエストで atomic に行う（Codex P1 対応）。
+// POST /api/properties/[id]/owners/create-and-link。サーバ側 transaction で owner 作成と
+// PropertyOwner link を同時に成功/失敗させ、フロントでの createOwner→link 逐次実行で生じる
+// orphan owner（作成されたが紐付かない）を防ぐ。
+export async function createAndLinkOwnerToProperty(
+  propertyId: string,
+  payload: {
+    name: string;
+    nameKana?: string | null;
+    phone?: string | null;
+    zip?: string | null;
+    address?: string | null;
+    email?: string | null;
+    relationship?: string | null;
+    isPrimary?: boolean;
+  },
+) {
   if (USE_MOCK) {
     await mockDelay();
-    return { id: "mock-owner-id", name: data.name, version: 1 };
+    return {
+      owner: { id: "mock-owner-id", name: payload.name, version: 1 },
+      propertyOwner: {
+        id: "mock-property-owner-id",
+        propertyId,
+        ownerId: "mock-owner-id",
+        relationship: payload.relationship ?? null,
+        isPrimary: payload.isPrimary ?? false,
+      },
+    };
   }
-  return apiFetch<{ id: string; name: string; version: number }>("/api/owners", {
+  return apiFetch<{
+    owner: { id: string; name: string; version: number };
+    propertyOwner: {
+      id: string;
+      propertyId: string;
+      ownerId: string;
+      relationship: string | null;
+      isPrimary: boolean;
+    };
+  }>(`/api/properties/${propertyId}/owners/create-and-link`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
+    body: JSON.stringify(payload),
   });
 }
 

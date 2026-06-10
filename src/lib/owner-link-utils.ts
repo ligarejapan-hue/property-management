@@ -88,3 +88,38 @@ export function buildLinkOwnerPayload(
     isPrimary,
   };
 }
+
+/**
+ * 既存所有者の選択が「現在の検索結果」に含まれているか。
+ * P2(Codex): 検索クエリ変更後に残った古い selected で誤って別 owner を紐付けるのを防ぐため、
+ * 紐付けボタンの活性条件に使う（selected が現在の hits に存在するときのみ submit 可）。
+ */
+export function isSelectedOwnerSubmittable(
+  selected: { id: string } | null,
+  hits: Array<{ id: string }>,
+): boolean {
+  return selected !== null && hits.some((h) => h.id === selected.id);
+}
+
+/** atomic create-and-link 用 payload（owner 作成フィールド + relationship/isPrimary）。 */
+export interface CreateAndLinkPayload extends OwnerCreatePayload {
+  relationship?: string | null;
+  isPrimary: boolean;
+}
+
+/**
+ * 新規作成して紐付ける atomic エンドポイント用の payload を構築する。
+ * owner 作成 payload（buildCreateOwnerPayload）に relationship（空→null）と isPrimary を統合する。
+ * フロントで createOwner → linkOwnerToProperty を逐次実行する代わりに 1 リクエストで送る（orphan 防止）。
+ */
+export function buildCreateAndLinkPayload(
+  form: OwnerCreateFormValues,
+  relationship: string,
+  isPrimary: boolean,
+): CreateAndLinkPayload {
+  return {
+    ...buildCreateOwnerPayload(form),
+    relationship: relationship.trim() || null,
+    isPrimary,
+  };
+}

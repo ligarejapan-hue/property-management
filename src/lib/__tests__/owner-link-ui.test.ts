@@ -25,14 +25,22 @@ const modalSrc = read("src/components/owners/owner-link-modal.tsx");
 const pageSrc = read("src/app/(dashboard)/properties/[id]/page.tsx");
 
 describe("api-client: 所有者作成・物件紐付け wrapper", () => {
-  it("createOwner が POST /api/owners を呼ぶ", () => {
-    expect(apiClientSrc).toMatch(/export async function createOwner\(/);
-    expect(apiClientSrc).toMatch(/["']\/api\/owners["']/);
+  it("createAndLinkOwnerToProperty が POST /api/properties/<id>/owners/create-and-link を呼ぶ（atomic）", () => {
+    expect(apiClientSrc).toMatch(
+      /export async function createAndLinkOwnerToProperty\(/,
+    );
+    expect(apiClientSrc).toMatch(
+      /\/api\/properties\/\$\{propertyId\}\/owners\/create-and-link/,
+    );
   });
 
-  it("linkOwnerToProperty が POST /api/properties/<id>/owners を呼ぶ", () => {
+  it("P1: 逐次実行用の createOwner wrapper は廃止（atomic endpoint へ集約）", () => {
+    expect(apiClientSrc).not.toMatch(/export async function createOwner\(/);
+  });
+
+  it("linkOwnerToProperty（既存紐付け）が POST /api/properties/<id>/owners を呼ぶ", () => {
     expect(apiClientSrc).toMatch(/export async function linkOwnerToProperty\(/);
-    expect(apiClientSrc).toMatch(/\/api\/properties\/\$\{propertyId\}\/owners/);
+    expect(apiClientSrc).toMatch(/\/api\/properties\/\$\{propertyId\}\/owners`/);
   });
 });
 
@@ -46,13 +54,18 @@ describe("OwnerLinkModal: 既存検索 / 新規作成の 2 モード", () => {
     expect(modalSrc).toMatch(/searchOwners\(/);
   });
 
-  it("新規作成は createOwner → linkOwnerToProperty を使う", () => {
-    expect(modalSrc).toMatch(/createOwner\(/);
+  it("新規作成は atomic な createAndLinkOwnerToProperty を呼ぶ（createOwner→link 逐次実行をしない）", () => {
+    expect(modalSrc).toMatch(/createAndLinkOwnerToProperty\(/);
+    // P1: フロントで owner 作成 → 紐付けを逐次実行しない（orphan 防止はサーバ atomic）
+    expect(modalSrc).not.toMatch(/createOwner\(/);
+  });
+
+  it("既存紐付けモードは linkOwnerToProperty を使う", () => {
     expect(modalSrc).toMatch(/linkOwnerToProperty\(/);
   });
 
   it("純関数ヘルパー（payload 構築・活性条件・isPrimary 既定）を使う", () => {
-    expect(modalSrc).toMatch(/buildCreateOwnerPayload\(/);
+    expect(modalSrc).toMatch(/buildCreateAndLinkPayload\(/);
     expect(modalSrc).toMatch(/canSubmitOwnerCreate\(/);
     expect(modalSrc).toMatch(/buildLinkOwnerPayload\(/);
     expect(modalSrc).toMatch(/defaultIsPrimaryForLink\(/);
@@ -67,6 +80,16 @@ describe("OwnerLinkModal: 既存検索 / 新規作成の 2 モード", () => {
   it("成功時 onLinked / 閉じるで onClose を呼ぶ", () => {
     expect(modalSrc).toMatch(/onLinked/);
     expect(modalSrc).toMatch(/onClose/);
+  });
+});
+
+describe("OwnerLinkModal: P2 stale selected 防止", () => {
+  it("検索クエリ変更で選択(selected)をクリアする", () => {
+    expect(modalSrc).toMatch(/setSelected\(null\)/);
+  });
+
+  it("紐付けボタンの活性は現在の検索結果に含まれる selected のみ（isSelectedOwnerSubmittable）", () => {
+    expect(modalSrc).toMatch(/isSelectedOwnerSubmittable\(/);
   });
 });
 

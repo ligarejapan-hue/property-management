@@ -147,6 +147,15 @@ export const linkOwnerSchema = z.object({
   isPrimary: z.boolean().default(false),
 });
 
+// ---------- Create owner + link to property (atomic) ----------
+// /api/properties/[id]/owners/create-and-link で使用。owner 作成フィールド（createOwnerSchema）に
+// 紐付けの relationship / isPrimary を加える。フロントの createOwner→link 逐次実行を 1 リクエストへ
+// 集約し、owner 作成と PropertyOwner link 作成を 1 つの DB transaction で atomic に行う（orphan 防止）。
+export const createAndLinkOwnerSchema = createOwnerSchema.extend({
+  relationship: z.string().optional().nullable(),
+  isPrimary: z.boolean().default(false),
+});
+
 // ---------- Field survey session ----------
 
 export const createFieldSurveySessionSchema = z.object({

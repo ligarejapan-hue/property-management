@@ -2,12 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Search, UserPlus, X } from "lucide-react";
-import { searchOwners, createOwner, linkOwnerToProperty } from "@/lib/api-client";
 import {
-  buildCreateOwnerPayload,
+  searchOwners,
+  createAndLinkOwnerToProperty,
+  linkOwnerToProperty,
+} from "@/lib/api-client";
+import {
+  buildCreateAndLinkPayload,
   buildLinkOwnerPayload,
   canSubmitOwnerCreate,
   defaultIsPrimaryForLink,
+  isSelectedOwnerSubmittable,
   type OwnerCreateFormValues,
 } from "@/lib/owner-link-utils";
 
@@ -35,7 +40,7 @@ const EMPTY_FORM: OwnerCreateFormValues = {
 /**
  * 物件詳細「所有者を追加」モーダル（owner:write 前提・呼び出し側でゲート）。
  *  - 既存の所有者を紐付け（検索 → 選択 → linkOwnerToProperty）
- *  - 新規作成して紐付け（createOwner → linkOwnerToProperty）
+ *  - 新規作成して紐付け（createAndLinkOwnerToProperty = サーバ側 1 transaction で atomic）
  * 重複作成を避けるため既定は検索モード。氏名のみ必須（他は任意）。
  */
 export function OwnerLinkModal({
@@ -95,10 +100,18 @@ export function OwnerLinkModal({
     return () => clearTimeout(timer);
   }, [searchQ, mode]);
 
+  // P2(Codex): 検索クエリが変わったら古い選択をクリアする。
+  // 別クエリの表示状態で旧 owner を誤って紐付けないため（submit ゲートと二重防御）。
+  useEffect(() => {
+    setSelected(null);
+  }, [searchQ]);
+
   const createReady = canSubmitOwnerCreate(form);
 
   const handleLinkExisting = async () => {
     if (!selected) return;
+    // P2(Codex): 現在の検索結果に含まれない古い選択では紐付けない（submit 時にも再確認）。
+    if (!isSelectedOwnerSubmittable(selected, searchHits)) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -120,10 +133,10 @@ export function OwnerLinkModal({
     setSubmitting(true);
     setError(null);
     try {
-      const created = await createOwner(buildCreateOwnerPayload(form));
-      await linkOwnerToProperty(
+      // P1(Codex): owner 作成 + 紐付けをサーバ側 1 transaction で atomic に実行（orphan 防止）。
+      await createAndLinkOwnerToProperty(
         propertyId,
-        buildLinkOwnerPayload(created.id, relationship, isPrimary),
+        buildCreateAndLinkPayload(form, relationship, isPrimary),
       );
       await onLinked();
       onClose();
@@ -341,7 +354,7 @@ export function OwnerLinkModal({
             <button
               type="button"
               onClick={handleLinkExisting}
-              disabled={submitting || !selected}
+              disabled={submitting || !isSelectedOwnerSubmittable(selected, searchHits)}
               className="rounded bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {submitting ? "紐付け中..." : "この所有者を紐付け"}
