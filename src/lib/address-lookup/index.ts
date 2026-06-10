@@ -39,7 +39,8 @@ export function isAddressLookupConfigured(): boolean {
   return (
     !!process.env.ADDRESS_LOOKUP_API_KEY &&
     !!process.env.ADDRESS_LOOKUP_CLIENT_ID &&
-    !!process.env.ADDRESS_LOOKUP_BASE_URL
+    !!process.env.ADDRESS_LOOKUP_BASE_URL &&
+    !!process.env.ADDRESS_LOOKUP_SOURCE_IP
   );
 }
 
@@ -52,9 +53,11 @@ function resolveProvider(): AddressLookupProvider {
   const secretKey = process.env.ADDRESS_LOOKUP_API_KEY;
   const clientId = process.env.ADDRESS_LOOKUP_CLIENT_ID;
   const baseUrl = process.env.ADDRESS_LOOKUP_BASE_URL;
+  // 日本郵便の IP ベース認可で必須の登録済み送信元 IP（x-forwarded-for で送る）。
+  const sourceIp = process.env.ADDRESS_LOOKUP_SOURCE_IP;
 
-  // キー（secret）/ client_id / base_url のいずれか欠落で未構成扱い → route 503。
-  if (!secretKey || !clientId || !baseUrl) {
+  // secret / client_id / base_url / source_ip のいずれか欠落で未構成扱い → route 503。
+  if (!secretKey || !clientId || !baseUrl || !sourceIp) {
     throw new AddressLookupError(
       "NOT_CONFIGURED",
       "住所補完APIが設定されていません",
@@ -69,6 +72,7 @@ function resolveProvider(): AddressLookupProvider {
       return new JapanPostAddressProvider({
         clientId,
         secretKey,
+        sourceIp,
         baseUrl,
         timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
       });

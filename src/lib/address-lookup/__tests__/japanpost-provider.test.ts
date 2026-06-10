@@ -4,6 +4,7 @@ import { AddressLookupError } from "../types";
 
 const SECRET = "super-secret-key-DO-NOT-LEAK";
 const CLIENT_ID = "client-abc";
+const SOURCE_IP = "203.0.113.45"; // TEST-NET（実IPではない）
 const BASE = "https://example.test/org/system";
 
 type FetchOpts = {
@@ -11,7 +12,10 @@ type FetchOpts = {
   tokenBody?: unknown;
   searchStatus?: number;
   searchBody?: unknown;
-  searchRaw?: string; // override raw text (for parse-error test)
+  searchRaw?: string;
+  addresszipStatus?: number;
+  addresszipBody?: unknown;
+  addresszipRaw?: string;
 };
 
 function makeFetch(opts: FetchOpts) {
@@ -20,17 +24,31 @@ function makeFetch(opts: FetchOpts) {
     calls.push({ url, init });
     if (url.includes("/token")) {
       return new Response(
-        JSON.stringify(opts.tokenBody ?? { token: "tok-123", token_type: "Bearer", expires_in: 600 }),
+        JSON.stringify(
+          opts.tokenBody ?? { token: "tok-123", token_type: "Bearer", expires_in: 600 },
+        ),
         { status: opts.tokenStatus ?? 200, headers: { "content-type": "application/json" } },
       );
     }
-    // searchcode endpoint
-    const status = opts.searchStatus ?? 200;
+    if (url.includes("/addresszip")) {
+      const raw =
+        opts.addresszipRaw !== undefined
+          ? opts.addresszipRaw
+          : JSON.stringify(opts.addresszipBody ?? { addresses: [] });
+      return new Response(raw, {
+        status: opts.addresszipStatus ?? 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    // searchcode endpoint（郵便番号/デジタルアドレスコード検索）
     const raw =
       opts.searchRaw !== undefined
         ? opts.searchRaw
         : JSON.stringify(opts.searchBody ?? { count: 0, addresses: [] });
-    return new Response(raw, { status, headers: { "content-type": "application/json" } });
+    return new Response(raw, {
+      status: opts.searchStatus ?? 200,
+      headers: { "content-type": "application/json" },
+    });
   };
   return { fn, calls };
 }
@@ -40,6 +58,7 @@ function makeProvider(opts: FetchOpts) {
   const provider = new JapanPostAddressProvider({
     clientId: CLIENT_ID,
     secretKey: SECRET,
+    sourceIp: SOURCE_IP,
     baseUrl: BASE,
     fetchFn: fn as unknown as typeof fetch,
   });
@@ -56,19 +75,25 @@ const SAMPLE_ADDRESS = {
   town_name: "丸の内",
 };
 
-describe("JapanPostAddressProvider.lookupByPostalCode", () => {
+describe("JapanPostAddressProvider.lookupByPostalCode（searchcode）", () => {
   it("成功時に候補へマッピングする", async () => {
-    const { provider } = makeProvider({ searchBody: { count: 1, addresses: [SAMPLE_ADDRESS] } });
-    const got = await provider.lookupByPostalCode("1000005");
-    expect(got).toHaveLength(1);
-    expect(got[0]).toEqual({
-      postalCode: "1000005",
-      prefecture: "東京都",
-      city: "千代田区",
-      town: "丸の内",
-      addressLine: "東京都千代田区丸の内",
-      source: "japanpost",
+    const { provider, calls } = makeProvider({
+      searchBody: { count: 1, addresses: [SAMPLE_ADDRESS] },
     });
+    const got = await provider.lookupByPostalCode("1000005");
+    expect(got).toEqual([
+      {
+        postalCode: "1000005",
+        prefecture: "東京都",
+        city: "千代田区",
+        town: "丸の内",
+        addressLine: "東京都千代田区丸の内",
+        source: "japanpost",
+      },
+    ]);
+    // searchcode を使う（addresszip は呼ばない）
+    expect(calls.some((c) => c.url.includes("/searchcode/"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/addresszip"))).toBe(false);
   });
 
   it("候補なしは [] を返す", async () => {
@@ -82,11 +107,23 @@ describe("JapanPostAddressProvider.lookupByPostalCode", () => {
   });
 });
 
-describe("JapanPostAddressProvider.searchByAddress", () => {
-  it("複数候補を返す", async () => {
+describe("JapanPostAddressProvider.searchByAddress（addresszip）", () => {
+  it("POST /api/v1/addresszip を呼ぶ（searchcode は呼ばない）", async () => {
+    const { provider, calls } = makeProvider({
+      addresszipBody: { addresses: [SAMPLE_ADDRESS] },
+    });
+    await provider.searchByAddress("東京都千代田区丸の内");
+    const azCall = calls.find((c) => c.url.includes("/addresszip"));
+    expect(azCall).toBeTruthy();
+    expect(azCall?.url).toContain("/api/v1/addresszip");
+    expect(azCall?.init?.method).toBe("POST");
+    // searchcode は使わない
+    expect(calls.some((c) => c.url.includes("/searchcode/"))).toBe(false);
+  });
+
+  it("addresszip レスポンスを候補へ正規化する（複数）", async () => {
     const { provider } = makeProvider({
-      searchBody: {
-        count: 2,
+      addresszipBody: {
         addresses: [
           SAMPLE_ADDRESS,
           { ...SAMPLE_ADDRESS, zip_code: "1000004", town_name: "大手町" },
@@ -98,12 +135,45 @@ describe("JapanPostAddressProvider.searchByAddress", () => {
     expect(got.map((c) => c.postalCode)).toEqual(["1000005", "1000004"]);
     expect(got.every((c) => c.source === "japanpost")).toBe(true);
   });
+
+  it("候補なしは [] を返す", async () => {
+    const { provider } = makeProvider({ addresszipBody: { addresses: [] } });
+    expect(await provider.searchByAddress("該当なし町")).toEqual([]);
+  });
+});
+
+describe("JapanPostAddressProvider — token に x-forwarded-for(送信元IP)を付与", () => {
+  it("token request に x-forwarded-for: source IP を含める", async () => {
+    const { provider, calls } = makeProvider({ searchBody: { addresses: [] } });
+    await provider.lookupByPostalCode("1000005");
+    const tokenCall = calls.find((c) => c.url.includes("/token"));
+    const headers = tokenCall?.init?.headers as Record<string, string> | undefined;
+    expect(headers?.["x-forwarded-for"]).toBe(SOURCE_IP);
+  });
+
+  it("検索リクエストには Bearer token のみ（secret/source IP を生で送らない）", async () => {
+    const { provider, calls } = makeProvider({ addresszipBody: { addresses: [] } });
+    await provider.searchByAddress("東京都");
+    const azCall = calls.find((c) => c.url.includes("/addresszip"));
+    const headers = azCall?.init?.headers as Record<string, string> | undefined;
+    expect(headers?.["Authorization"]).toBe("Bearer tok-123");
+    const serialized = JSON.stringify(azCall?.init ?? {});
+    expect(serialized).not.toContain(SECRET);
+    expect(serialized).not.toContain(SOURCE_IP);
+  });
 });
 
 describe("JapanPostAddressProvider — エラー分類", () => {
   it("検索が 500 なら UPSTREAM_5XX", async () => {
     const { provider } = makeProvider({ searchStatus: 500, searchRaw: "upstream boom" });
     await expect(provider.lookupByPostalCode("1000005")).rejects.toMatchObject({
+      code: "UPSTREAM_5XX",
+    });
+  });
+
+  it("addresszip が 500 なら UPSTREAM_5XX", async () => {
+    const { provider } = makeProvider({ addresszipStatus: 500, addresszipRaw: "boom" });
+    await expect(provider.searchByAddress("東京都")).rejects.toMatchObject({
       code: "UPSTREAM_5XX",
     });
   });
@@ -118,7 +188,7 @@ describe("JapanPostAddressProvider — エラー分類", () => {
 
   it("検索が 429 なら RATE_LIMITED", async () => {
     const { provider } = makeProvider({ searchStatus: 429, searchRaw: "rate" });
-    await expect(provider.searchByAddress("東京")).rejects.toMatchObject({
+    await expect(provider.lookupByPostalCode("1000005")).rejects.toMatchObject({
       code: "RATE_LIMITED",
     });
   });
@@ -131,9 +201,46 @@ describe("JapanPostAddressProvider — エラー分類", () => {
   });
 });
 
-describe("JapanPostAddressProvider — secret 非漏洩", () => {
-  it("token 失敗時の例外 message に secret/clientId を含めない", async () => {
-    const { provider } = makeProvider({ tokenStatus: 403, searchRaw: "x" });
+describe("JapanPostAddressProvider — zip_code の string/number 両対応(P2)", () => {
+  it("zip_code が string でも postalCode を保持", async () => {
+    const { provider } = makeProvider({
+      searchBody: { addresses: [{ ...SAMPLE_ADDRESS, zip_code: "1000005" }] },
+    });
+    const got = await provider.lookupByPostalCode("1000005");
+    expect(got[0].postalCode).toBe("1000005");
+  });
+
+  it("zip_code が number でも padStart(7) で postalCode を保持", async () => {
+    const { provider } = makeProvider({
+      searchBody: { addresses: [{ ...SAMPLE_ADDRESS, zip_code: 1000005 }] },
+    });
+    const got = await provider.lookupByPostalCode("1000005");
+    expect(got[0].postalCode).toBe("1000005");
+  });
+
+  it("先頭0系: number 100492 を 0100492 として保持", async () => {
+    const { provider } = makeProvider({
+      addresszipBody: {
+        addresses: [{ ...SAMPLE_ADDRESS, zip_code: 100492, pref_name: "北海道", city_name: "札幌市東区", town_name: "" }],
+      },
+    });
+    const got = await provider.searchByAddress("北海道札幌市東区");
+    expect(got[0].postalCode).toBe("0100492");
+  });
+
+  it("不正な zip_code（7桁化できない）は postalCode を入れない", async () => {
+    const { provider } = makeProvider({
+      searchBody: { addresses: [{ ...SAMPLE_ADDRESS, zip_code: "abc" }] },
+    });
+    const got = await provider.lookupByPostalCode("1000005");
+    expect(got[0].postalCode).toBeUndefined();
+    expect(got[0].addressLine.length).toBeGreaterThan(0); // 住所自体は返る
+  });
+});
+
+describe("JapanPostAddressProvider — secret / source IP 非漏洩", () => {
+  it("token 失敗時の例外 message に secret/clientId/source IP を含めない", async () => {
+    const { provider } = makeProvider({ tokenStatus: 403 });
     try {
       await provider.lookupByPostalCode("1000005");
       throw new Error("should have thrown");
@@ -141,26 +248,17 @@ describe("JapanPostAddressProvider — secret 非漏洩", () => {
       const text = `${(e as Error).name}:${(e as Error).message}:${(e as Error).stack ?? ""}`;
       expect(text).not.toContain(SECRET);
       expect(text).not.toContain(CLIENT_ID);
+      expect(text).not.toContain(SOURCE_IP);
     }
   });
 
-  it("成功候補に secret/token/生レスポンスを含めない", async () => {
-    const { provider } = makeProvider({ searchBody: { count: 1, addresses: [SAMPLE_ADDRESS] } });
-    const got = await provider.lookupByPostalCode("1000005");
-    const json = JSON.stringify(got);
+  it("成功候補に secret/token/source IP/生レスポンスを含めない", async () => {
+    const { provider } = makeProvider({ searchBody: { addresses: [SAMPLE_ADDRESS] } });
+    const json = JSON.stringify(await provider.lookupByPostalCode("1000005"));
     expect(json).not.toContain(SECRET);
     expect(json).not.toContain("tok-123");
+    expect(json).not.toContain(SOURCE_IP);
     expect(json).not.toContain("dgacode");
     expect(json).not.toContain("pref_code");
-  });
-
-  it("Authorization ヘッダには Bearer token を使い secret を生で送らない", async () => {
-    const { provider, calls } = makeProvider({ searchBody: { count: 0, addresses: [] } });
-    await provider.lookupByPostalCode("1000005");
-    const searchCall = calls.find((c) => c.url.includes("/searchcode/"));
-    const auth = (searchCall?.init?.headers as Record<string, string> | undefined)?.["Authorization"];
-    expect(auth).toBe("Bearer tok-123");
-    // secret はトークン取得 body にのみ使われ、検索リクエストには現れない
-    expect(JSON.stringify(searchCall?.init ?? {})).not.toContain(SECRET);
   });
 });
