@@ -154,6 +154,27 @@ describe("JapanPostAddressProvider.searchByAddress（addresszip）", () => {
     expect(got.every((c) => c.source === "japanpost")).toBe(true);
   });
 
+  it("想定外shape: 配列/primitive 混在でも壊れた候補を作らず正当なオブジェクトのみ候補化する", async () => {
+    // Array.isArray(addresses) だけで RawAddress[] と見なさない。
+    // 内側配列・primitive・null は候補化しない（空 addressLine の壊れた候補を出さない）。
+    const { provider } = makeProvider({
+      addresszipBody: {
+        addresses: ["foo", 123, null, [SAMPLE_ADDRESS], SAMPLE_ADDRESS],
+      },
+    });
+    const got = await provider.searchByAddress("東京都千代田区");
+    expect(got).toHaveLength(1);
+    expect(got[0].postalCode).toBe("1000005");
+    expect(got.every((c) => c.addressLine.length > 0)).toBe(true);
+  });
+
+  it("想定外shape: 配列の配列だが中身が非オブジェクトなら [](壊れた候補なし)", async () => {
+    const { provider } = makeProvider({
+      addresszipBody: { addresses: [["x", "y"], ["z"]] },
+    });
+    expect(await provider.searchByAddress("東京都")).toEqual([]);
+  });
+
   it("候補なしは [] を返す", async () => {
     const { provider } = makeProvider({ addresszipBody: { addresses: [] } });
     expect(await provider.searchByAddress("該当なし町")).toEqual([]);

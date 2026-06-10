@@ -43,6 +43,14 @@ interface RawAddress {
   town_name?: unknown;
 }
 
+/**
+ * 配列そのものや primitive を RawAddress として扱わないための最小ガード。
+ * （addresszip の「配列の配列」flatten 時に内側配列を 1 件の候補と誤認しないため。）
+ */
+function isRawAddressLike(value: unknown): value is RawAddress {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export class JapanPostAddressProvider implements AddressLookupProvider {
   readonly name = "japanpost";
 
@@ -191,21 +199,16 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
   }
 
   private extractAddresses(data: unknown): RawAddress[] {
-    if (data && typeof data === "object") {
-      const addresses = (data as { addresses?: unknown }).addresses;
-      if (Array.isArray(addresses)) {
-        // 日本郵便 addresszip は候補を addresses 配下に「配列の配列」(グループ)で返す。
-        // searchcode は flat。1段平坦化で両形を統一し、オブジェクト行のみ採用する
-        // （flat 形には無改変＝searchcode の挙動は不変）。
-        return (addresses as unknown[])
-          .flat()
-          .filter(
-            (a): a is RawAddress =>
-              a !== null && typeof a === "object" && !Array.isArray(a),
-          );
-      }
-    }
-    return [];
+    const raw = (data as { addresses?: unknown } | null | undefined)?.addresses;
+    if (!Array.isArray(raw)) return [];
+    const list = raw as unknown[];
+    // searchcode は addresses が flat な RawAddress[]。
+    // addresszip(住所フリーワード検索)は候補グループの「配列の配列」RawAddress[][] で返る。
+    // 全要素が配列ならグループ形として 1 段 flatten、そうでなければ flat 形として扱う
+    // （flat な searchcode の挙動は不変）。
+    const rows = list.every((a) => Array.isArray(a)) ? list.flat() : list;
+    // 配列そのもの・primitive・null は候補にしない（壊れた候補を返さない）。
+    return rows.filter(isRawAddressLike);
   }
 
   private mapAddresses(data: unknown): AddressLookupCandidate[] {
