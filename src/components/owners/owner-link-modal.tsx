@@ -79,11 +79,24 @@ export function OwnerLinkModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 閉じる/アンマウント時に in-flight 検索を無効化する（閉じた後に古い結果を適用しない・Codex）。
+  useEffect(() => {
+    return () => {
+      searchSeqRef.current += 1;
+    };
+  }, []);
+
   // 検索 debounce（searchOwners 経由・300ms）
   useEffect(() => {
-    if (mode !== "search") return;
+    // 非検索モードでは in-flight 検索を無効化（seq を進める）して結果を出さない（Codex）。
+    if (mode !== "search") {
+      searchSeqRef.current += 1;
+      return;
+    }
     const q = searchQ.trim();
+    // 空クエリでも seq を進め、進行中だった古い検索の結果が復活しないようにする（Codex）。
     if (q.length < 1) {
+      searchSeqRef.current += 1;
       setSearchHits([]);
       return;
     }

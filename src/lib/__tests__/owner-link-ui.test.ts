@@ -107,6 +107,21 @@ describe("OwnerLinkModal: stale 検索レスポンス破棄（Codex）", () => {
   });
 });
 
+describe("OwnerLinkModal: 空クエリ/モード離脱/閉じる で stale 検索を無効化（Codex）", () => {
+  it("空クエリ(q.length < 1)でも searchSeqRef を進めて in-flight 検索を無効化する", () => {
+    // 空欄化前に発火した古い検索の結果が復活しないよう、分岐直後で seq を bump する
+    expect(modalSrc).toMatch(/if \(q\.length < 1\) \{\s*searchSeqRef\.current \+= 1/);
+  });
+
+  it("非検索モード（新規作成へ切替 等）でも searchSeqRef を進めて in-flight 検索を無効化する", () => {
+    expect(modalSrc).toMatch(/if \(mode !== "search"\) \{\s*searchSeqRef\.current \+= 1/);
+  });
+
+  it("アンマウント（閉じる/リセット）時に in-flight 検索を無効化する", () => {
+    expect(modalSrc).toMatch(/return \(\) => \{\s*searchSeqRef\.current \+= 1/);
+  });
+});
+
 describe("page.tsx: タブ並べ替え・改名", () => {
   it("「所有者情報」タブが存在する", () => {
     expect(pageSrc).toMatch(/key:\s*"owner",\s*label:\s*"所有者情報"/);
