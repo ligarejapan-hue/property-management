@@ -66,7 +66,7 @@ import {
   AddressLookupError,
 } from "@/lib/address-lookup";
 import { GET as postalGET } from "../../app/api/address/lookup/postal-code/route";
-import { GET as searchGET } from "../../app/api/address/lookup/search/route";
+import { POST as searchPOST } from "../../app/api/address/lookup/search/route";
 
 const CANDIDATE = {
   postalCode: "1000005",
@@ -83,9 +83,18 @@ function postalReq(zip: string) {
   ) as unknown as import("next/server").NextRequest;
 }
 function searchReq(address: string) {
-  return new Request(
-    `http://localhost/api/address/lookup/search?address=${encodeURIComponent(address)}`,
-  ) as unknown as import("next/server").NextRequest;
+  return new Request("http://localhost/api/address/lookup/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address }),
+  }) as unknown as import("next/server").NextRequest;
+}
+function searchRawReq(rawBody: string) {
+  return new Request("http://localhost/api/address/lookup/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: rawBody,
+  }) as unknown as import("next/server").NextRequest;
 }
 
 beforeEach(() => {
@@ -181,22 +190,56 @@ describe("GET /api/address/lookup/postal-code", () => {
   });
 });
 
-describe("GET /api/address/lookup/search", () => {
-  it("複数候補を返す", async () => {
+describe("POST /api/address/lookup/search", () => {
+  it("body の住所で複数候補を返す（route は POST body から address を読む）", async () => {
     vi.mocked(searchAddressByText).mockResolvedValueOnce([
       CANDIDATE,
       { ...CANDIDATE, postalCode: "1000004", town: "大手町", addressLine: "東京都千代田区大手町" },
     ]);
-    const res = await searchGET(searchReq("東京都千代田区"));
+    const res = await searchPOST(searchReq("東京都千代田区"));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.candidates).toHaveLength(2);
     expect(vi.mocked(searchAddressByText)).toHaveBeenCalledWith("東京都千代田区");
   });
 
+  it("候補なしは candidates=[] を返す", async () => {
+    vi.mocked(searchAddressByText).mockResolvedValueOnce([]);
+    const res = await searchPOST(searchReq("該当なし町"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).candidates).toEqual([]);
+  });
+
   it("空住所は 400（lib を呼ばない）", async () => {
-    const res = await searchGET(searchReq("   "));
+    const res = await searchPOST(searchReq("   "));
     expect(res.status).toBe(400);
+    expect(vi.mocked(searchAddressByText)).not.toHaveBeenCalled();
+  });
+
+  it("address 欠落の body は 400（lib を呼ばない）", async () => {
+    const req = new Request("http://localhost/api/address/lookup/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }) as unknown as import("next/server").NextRequest;
+    const res = await searchPOST(req);
+    expect(res.status).toBe(400);
+    expect(vi.mocked(searchAddressByText)).not.toHaveBeenCalled();
+  });
+
+  it("不正 JSON body は 400（lib を呼ばない）", async () => {
+    const res = await searchPOST(searchRawReq("<<<not json>>>"));
+    expect(res.status).toBe(400);
+    expect(vi.mocked(searchAddressByText)).not.toHaveBeenCalled();
+  });
+
+  it("未認証は 401（lib を呼ばない）", async () => {
+    const { ApiError } = await import("@/lib/api-helpers");
+    vi.mocked(getApiSession).mockRejectedValueOnce(
+      new ApiError(401, "認証が必要です", "UNAUTHORIZED"),
+    );
+    const res = await searchPOST(searchReq("東京都"));
+    expect(res.status).toBe(401);
     expect(vi.mocked(searchAddressByText)).not.toHaveBeenCalled();
   });
 
@@ -204,10 +247,31 @@ describe("GET /api/address/lookup/search", () => {
     vi.mocked(searchAddressByText).mockRejectedValueOnce(
       new AddressLookupError("NOT_CONFIGURED", "未設定"),
     );
-    expect((await searchGET(searchReq("東京都"))).status).toBe(503);
+    expect((await searchPOST(searchReq("東京都"))).status).toBe(503);
     vi.mocked(searchAddressByText).mockRejectedValueOnce(
       new AddressLookupError("NETWORK", "net"),
     );
-    expect((await searchGET(searchReq("東京都"))).status).toBe(502);
+    expect((await searchPOST(searchReq("東京都"))).status).toBe(502);
+  });
+
+  it("入力住所を error message / response に出さない", async () => {
+    const secretAddress = "東京都港区秘密町9-9-9";
+    vi.mocked(searchAddressByText).mockRejectedValueOnce(
+      new AddressLookupError("UPSTREAM_5XX", "5xx", 502),
+    );
+    const res = await searchPOST(searchReq(secretAddress));
+    expect(res.status).toBe(502);
+    expect(JSON.stringify(await res.json())).not.toContain(secretAddress);
+  });
+
+  it("応答に APIキー/トークン/secret を含めない（candidates キーのみ）", async () => {
+    const res = await searchPOST(searchReq("東京都千代田区"));
+    const json = await res.json();
+    const text = JSON.stringify(json);
+    expect(text).not.toContain("ADDRESS_LOOKUP_API_KEY");
+    expect(text).not.toContain("Bearer");
+    expect(text).not.toContain("secret");
+    expect(text).not.toContain("token");
+    expect(Object.keys(json)).toEqual(["candidates"]);
   });
 });

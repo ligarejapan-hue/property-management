@@ -2360,7 +2360,10 @@ export async function fetchAddressByPostalCode(
   );
 }
 
-/** 住所文字列 → 郵便番号付き候補。route 経由で取得する。 */
+/**
+ * 住所文字列 → 郵便番号付き候補。route 経由で取得する。
+ * 住所は URL に載せず POST body で送る（住所 PII を browser history / proxy / access log に残さない）。
+ */
 export async function fetchAddressCandidates(
   address: string,
 ): Promise<{ candidates: AddressLookupCandidate[] }> {
@@ -2380,6 +2383,11 @@ export async function fetchAddressCandidates(
     };
   }
   return apiFetch<{ candidates: AddressLookupCandidate[] }>(
-    `/api/address/lookup/search?address=${encodeURIComponent(address)}`,
+    "/api/address/lookup/search",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+    },
   );
 }
