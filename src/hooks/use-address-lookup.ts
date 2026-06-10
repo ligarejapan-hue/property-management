@@ -7,7 +7,8 @@
  *    保留中の住所検索 debounce は取り消す（Codex P2-B＝明示操作の結果を後発の住所検索で
  *    上書きさせない）。
  *  - searchByAddress(address): 住所 → 郵便番号付き候補。入力途中で叩くため debounce 300ms。
- *    スケジュール時点で旧リクエストを無効化する（Codex P2-1＝debounce 窓内の stale 応答対策）。
+ *    スケジュール時点で旧リクエストを無効化し（Codex P2-1＝debounce 窓内の stale 応答対策）、
+ *    旧クエリの候補も即クリアする（Codex P2-F＝窓中の旧候補ボタン誤クリック防止）。
  *  - loading / error / candidates / reset を公開。
  *
  * 取得は api-client の wrapper（fetchAddressByPostalCode / fetchAddressCandidates）経由＝

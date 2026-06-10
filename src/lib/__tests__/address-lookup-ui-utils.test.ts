@@ -247,6 +247,58 @@ describe("createAddressLookupController (P2-1: スケジュール時の即時inv
   });
 });
 
+describe("createAddressLookupController (P2-F: schedule時に旧候補を即クリア)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("住所を再編集した瞬間（debounce発火前）に旧候補クリアの action が積まれる", async () => {
+    const { actions, fetchByAddress, controller, successes } =
+      setupController();
+    const first = deferred<LookupResult>();
+    fetchByAddress.mockReturnValueOnce(first.promise);
+
+    controller.searchByAddress("東京都A");
+    vi.advanceTimersByTime(300);
+    first.resolve({ candidates: [cand({ addressLine: "旧候補" })] });
+    await flushMicrotasks();
+    expect(successes()).toHaveLength(1); // 旧候補が表示されている状態
+
+    controller.searchByAddress("東京都AB"); // 編集＝schedule（debounce 未発火）
+    expect(actions[actions.length - 1]).toEqual({ type: "reset" }); // 即クリア
+  });
+
+  it("debounce窓の間、UIに見える候補は空＝クリックできる旧候補が存在しない", async () => {
+    const { actions, fetchByAddress, controller } = setupController();
+    const first = deferred<LookupResult>();
+    const second = deferred<LookupResult>();
+    fetchByAddress
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    controller.searchByAddress("東京都A");
+    vi.advanceTimersByTime(300);
+    first.resolve({
+      candidates: [cand({ postalCode: "1110000", addressLine: "旧クエリ候補" })],
+    });
+    await flushMicrotasks();
+
+    controller.searchByAddress("東京都AB"); // 編集＝schedule
+    // action 列を reducer で再生＝この瞬間に UI に見える状態を検証
+    const duringWindow = actions.reduce(addressLookupReducer, initialLookupState);
+    expect(duringWindow.candidates).toEqual([]); // 旧クエリの候補ボタンは消えている
+
+    vi.advanceTimersByTime(300); // 新しい検索が発火
+    second.resolve({ candidates: [cand({ addressLine: "新候補" })] });
+    await flushMicrotasks();
+    const after = actions.reduce(addressLookupReducer, initialLookupState);
+    expect(after.candidates.map((c) => c.addressLine)).toEqual(["新候補"]); // 新結果のみ
+  });
+});
+
 describe("createAddressLookupController (P2-B: 郵便番号lookupと住所検索の競合)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -339,8 +391,8 @@ describe("createAddressLookupController (reset / dispose / エラー分類)", ()
 
     controller.searchByAddress("東京都");
     vi.advanceTimersByTime(300); // in-flight（request 発行済み）
+    controller.searchByAddress("神奈川県"); // 保留（schedule 時の即クリアまで含む）
     const issued = actions.length;
-    controller.searchByAddress("神奈川県"); // 保留
     controller.dispose();
 
     addr.resolve({ candidates: [cand()] });

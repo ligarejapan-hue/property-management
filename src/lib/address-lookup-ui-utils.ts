@@ -173,7 +173,10 @@ export interface AddressLookupController {
     zip: string,
     onSuccess?: (candidates: AddressLookupCandidate[]) => void,
   ) => void;
-  /** 住所 → 郵便番号付き候補（debounce）。スケジュール時点で旧リクエストを無効化する。 */
+  /**
+   * 住所 → 郵便番号付き候補（debounce）。スケジュール時点で旧リクエストを無効化し、
+   * 旧クエリの候補も即クリアする（debounce 窓中の誤クリック防止＝Codex P2-F）。
+   */
   searchByAddress: (address: string) => void;
   /** 状態初期化＋保留 debounce 取り消し＋in-flight 応答破棄。 */
   reset: () => void;
@@ -227,6 +230,11 @@ export function createAddressLookupController(
       // Codex P2-1: スケジュール時点で即 invalidate（debounce 発火を待たない）。
       // 300ms 窓内に旧 in-flight 応答が解決しても isLatestRequest で破棄される。
       seq += 1;
+      // Codex P2-F: 旧クエリの候補も schedule 時点で即クリア＝debounce 窓の間に
+      // 旧候補ボタンを押して前回クエリの zip/住所を誤適用できないようにする
+      // （P2-1 のレスポンス側 stale 対策に対する表示側の対）。loading は
+      // 立てない（reset）＝キーストローク毎に spinner が点滅しない。
+      ports.onAction({ type: "reset" });
       debouncedSearch(address);
     },
     reset() {
