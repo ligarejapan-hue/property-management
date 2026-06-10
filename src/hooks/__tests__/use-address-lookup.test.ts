@@ -44,6 +44,10 @@ describe("useAddressLookup の配線", () => {
     expect(src).toContain("lookupByPostalCode");
   });
 
+  it("lookupByPostalCode は単一候補自動反映用の onSuccess を controller へ引き継ぐ（Codex P2-D）", () => {
+    expect(src).toContain("onSuccess");
+  });
+
   it("loading / error / candidates / reset / searchByAddress を公開", () => {
     for (const k of [
       "loading",

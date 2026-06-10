@@ -20,6 +20,7 @@ import {
   fetchAddressByPostalCode,
   fetchAddressCandidates,
 } from "@/lib/api-client";
+import type { AddressLookupCandidate } from "@/lib/address-lookup/types";
 import {
   addressLookupReducer,
   initialLookupState,
@@ -53,9 +54,16 @@ export function useAddressLookup() {
   }, []);
 
   // 郵便番号 → 住所候補（明示操作・debounce なし）。保留中の住所検索は controller が破棄。
-  const lookupByPostalCode = useCallback((zip: string) => {
-    controllerRef.current?.lookupByPostalCode(zip);
-  }, []);
+  // onSuccess は成功かつ最新のときだけ呼ばれる継続＝単一候補の自動反映用（Codex P2-D）。
+  const lookupByPostalCode = useCallback(
+    (
+      zip: string,
+      onSuccess?: (candidates: AddressLookupCandidate[]) => void,
+    ) => {
+      controllerRef.current?.lookupByPostalCode(zip, onSuccess);
+    },
+    [],
+  );
 
   // 住所 → 郵便番号付き候補（debounce 300ms・スケジュール時点で旧リクエスト無効化）。
   const searchByAddress = useCallback((address: string) => {

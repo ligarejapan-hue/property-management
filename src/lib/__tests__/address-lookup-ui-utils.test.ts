@@ -18,6 +18,9 @@ import {
   isLatestRequest,
   createAddressLookupController,
   decideAddressSearchEffect,
+  planCandidateApplication,
+  evaluateAddressSearchEffect,
+  type AddressSearchEffectState,
   type LookupAction,
 } from "@/lib/address-lookup-ui-utils";
 
@@ -369,6 +372,169 @@ describe("createAddressLookupController (reset / dispose / エラー分類)", ()
 // ---------------------------------------------------------------
 // decideAddressSearchEffect（Codex P2-A）
 // ---------------------------------------------------------------
+
+// ---------------------------------------------------------------
+// planCandidateApplication（Codex P2-C: 確認前に親フォームを部分更新しない）
+// ---------------------------------------------------------------
+
+describe("planCandidateApplication (P2-C: zip と住所をペアで計画)", () => {
+  it("住所空なら immediate＝zip と住所を同時に即反映してよい (#1)(#3)", () => {
+    const plan = planCandidateApplication(
+      cand({ postalCode: "1000005", addressLine: "東京都千代田区丸の内" }),
+      "",
+    );
+    expect(plan).toEqual({
+      mode: "immediate",
+      zip: "1000005",
+      addressLine: "東京都千代田区丸の内",
+    });
+  });
+
+  it("住所非空なら needs-confirm＝確認まで zip も住所も反映しない (#1)(#2)", () => {
+    const plan = planCandidateApplication(
+      cand({ postalCode: "1000005", addressLine: "東京都千代田区丸の内" }),
+      "既存の住所",
+    );
+    expect(plan.mode).toBe("needs-confirm");
+    // 確認確定時に zip と住所を「同時に」反映できるよう、plan が両方を運ぶ (#3)
+    expect(plan.zip).toBe("1000005");
+    expect(plan.addressLine).toBe("東京都千代田区丸の内");
+  });
+
+  it("空白のみの住所は空扱い＝immediate", () => {
+    expect(planCandidateApplication(cand(), "   ").mode).toBe("immediate");
+  });
+
+  it("postalCode の無い候補は zip=null（郵便番号は変更しない）", () => {
+    expect(
+      planCandidateApplication(cand({ postalCode: undefined }), "").zip,
+    ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------
+// lookupByPostalCode の onSuccess（Codex P2-D: 単一候補の自動反映用）
+// ---------------------------------------------------------------
+
+describe("createAddressLookupController (P2-D: lookupByPostalCode の onSuccess)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("成功かつ最新のとき onSuccess が候補つきで呼ばれる (#4)(#5)", async () => {
+    const { fetchByPostalCode, controller } = setupController();
+    const postal = deferred<LookupResult>();
+    fetchByPostalCode.mockReturnValueOnce(postal.promise);
+    const onSuccess = vi.fn();
+
+    controller.lookupByPostalCode("1000005", onSuccess);
+    postal.resolve({ candidates: [cand({ postalCode: "1000005" })] });
+    await flushMicrotasks();
+
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(onSuccess.mock.calls[0][0]).toHaveLength(1);
+  });
+
+  it("stale（後続操作で無効化）なら onSuccess は呼ばれない (#10)", async () => {
+    const { fetchByPostalCode, controller } = setupController();
+    const postal = deferred<LookupResult>();
+    fetchByPostalCode.mockReturnValueOnce(postal.promise);
+    const onSuccess = vi.fn();
+
+    controller.lookupByPostalCode("1000005", onSuccess);
+    controller.reset(); // 後続操作＝postal 応答は stale
+    postal.resolve({ candidates: [cand()] });
+    await flushMicrotasks();
+
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("失敗時は onSuccess は呼ばれない", async () => {
+    const { fetchByPostalCode, controller } = setupController();
+    fetchByPostalCode.mockRejectedValueOnce(new Error("err"));
+    const onSuccess = vi.fn();
+
+    controller.lookupByPostalCode("1000005", onSuccess);
+    await flushMicrotasks();
+
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------
+// evaluateAddressSearchEffect（Codex P2-E: mount 時の既存住所では検索しない）
+// ---------------------------------------------------------------
+
+describe("evaluateAddressSearchEffect (P2-E: ユーザー編集後だけ検索)", () => {
+  const guard = (
+    lastSeen: string,
+    programmatic: string | null = null,
+  ): AddressSearchEffectState => ({
+    lastSeenAddress: lastSeen,
+    programmaticAddress: programmatic,
+  });
+
+  it("mount 時＝住所が lastSeen と同値なら検索しない (#7)", () => {
+    const out = evaluateAddressSearchEffect(
+      true,
+      false,
+      "東京都既存住所",
+      guard("東京都既存住所"),
+    );
+    expect(out.action).toBe("none");
+    expect(out.nextState.lastSeenAddress).toBe("東京都既存住所");
+  });
+
+  it("ユーザー編集＝住所が変わったら検索する (#8)", () => {
+    const out = evaluateAddressSearchEffect(
+      true,
+      false,
+      "東京都新宿区",
+      guard("東京都"),
+    );
+    expect(out.action).toBe("search");
+    expect(out.nextState.lastSeenAddress).toBe("東京都新宿区");
+    expect(out.nextState.programmaticAddress).toBeNull();
+  });
+
+  it("disabled なら住所が変わっても検索せず reset (#9)", () => {
+    const out = evaluateAddressSearchEffect(
+      true,
+      true,
+      "東京都変更後",
+      guard("東京都"),
+    );
+    expect(out.action).toBe("reset");
+    expect(out.nextState.lastSeenAddress).toBe("東京都変更後");
+  });
+
+  it("候補反映で自分が書いた住所では検索しない（consume される）", () => {
+    const out = evaluateAddressSearchEffect(
+      true,
+      false,
+      "東京都千代田区丸の内",
+      guard("", "東京都千代田区丸の内"),
+    );
+    expect(out.action).toBe("none");
+    expect(out.nextState.programmaticAddress).toBeNull();
+    expect(out.nextState.lastSeenAddress).toBe("東京都千代田区丸の内");
+  });
+
+  it("空になったら reset＝古い候補を消す", () => {
+    const out = evaluateAddressSearchEffect(true, false, "", guard("東京都"));
+    expect(out.action).toBe("reset");
+    expect(out.nextState.lastSeenAddress).toBe("");
+  });
+
+  it("showSearch=false なら何もしない", () => {
+    expect(
+      evaluateAddressSearchEffect(false, false, "東京都", guard("")).action,
+    ).toBe("none");
+  });
+});
 
 describe("decideAddressSearchEffect (P2-A: disabled 中は検索しない)", () => {
   it("disabled なら住所非空でも search しない＝reset（mount/prop 変更は同一判定）(#3)(#4)", () => {

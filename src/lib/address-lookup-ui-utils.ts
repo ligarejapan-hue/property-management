@@ -164,8 +164,15 @@ export interface AddressLookupControllerPorts {
 }
 
 export interface AddressLookupController {
-  /** 郵便番号 → 住所候補（明示操作・debounce なし）。保留中の住所検索は破棄する。 */
-  lookupByPostalCode: (zip: string) => void;
+  /**
+   * 郵便番号 → 住所候補（明示操作・debounce なし）。保留中の住所検索は破棄する。
+   * onSuccess は成功かつ最新（stale でない）のときだけ候補つきで呼ばれる
+   * ＝単一候補の自動反映（Codex P2-D）などイベント由来の継続に使う。
+   */
+  lookupByPostalCode: (
+    zip: string,
+    onSuccess?: (candidates: AddressLookupCandidate[]) => void,
+  ) => void;
   /** 住所 → 郵便番号付き候補（debounce）。スケジュール時点で旧リクエストを無効化する。 */
   searchByAddress: (address: string) => void;
   /** 状態初期化＋保留 debounce 取り消し＋in-flight 応答破棄。 */
@@ -184,14 +191,17 @@ export function createAddressLookupController(
 
   const run = async (
     fetcher: () => Promise<{ candidates: AddressLookupCandidate[] }>,
+    onSuccess?: (candidates: AddressLookupCandidate[]) => void,
   ) => {
     seq += 1;
     const issued = seq;
     ports.onAction({ type: "request" });
     try {
       const res = await fetcher();
-      if (!isLatestRequest(issued, seq)) return; // stale → 破棄
-      ports.onAction({ type: "success", candidates: res.candidates ?? [] });
+      if (!isLatestRequest(issued, seq)) return; // stale → 破棄（onSuccess も呼ばない）
+      const received = res.candidates ?? [];
+      ports.onAction({ type: "success", candidates: received });
+      onSuccess?.(received);
     } catch (err) {
       if (!isLatestRequest(issued, seq)) return; // stale → 破棄
       ports.onAction({ type: "failure", error: classifyAddressLookupError(err) });
@@ -203,12 +213,15 @@ export function createAddressLookupController(
   }, searchDebounceMs);
 
   return {
-    lookupByPostalCode(zip: string) {
+    lookupByPostalCode(
+      zip: string,
+      onSuccess?: (candidates: AddressLookupCandidate[]) => void,
+    ) {
       // Codex P2-B: 保留中の住所検索を取り消し、明示操作（郵便番号）を優先する。
       // 直後の run() の seq++ が in-flight の住所検索応答も無効化する
       // ＝郵便番号の結果が後発の住所検索に上書きされない。
       debouncedSearch.cancel();
-      void run(() => ports.fetchByPostalCode(zip));
+      void run(() => ports.fetchByPostalCode(zip), onSuccess);
     },
     searchByAddress(address: string) {
       // Codex P2-1: スケジュール時点で即 invalidate（debounce 発火を待たない）。
@@ -249,4 +262,90 @@ export function decideAddressSearchEffect(
   if (disabled) return "reset";
   if (address.trim() === "") return "reset";
   return "search";
+}
+
+// ---------------------------------------------------------------
+// 住所検索 effect の状態機械（Codex P2-E: mount/プログラム反映では検索しない）
+// ---------------------------------------------------------------
+
+export interface AddressSearchEffectState {
+  /** 前回 effect が見た住所（mount 時は初期 prop）。同値では検索しない。 */
+  lastSeenAddress: string;
+  /** 候補反映で自分が書いた住所（次の 1 回だけ検索を抑止して consume する）。 */
+  programmaticAddress: string | null;
+}
+
+export interface AddressSearchEffectOutcome {
+  action: AddressSearchEffectDecision;
+  nextState: AddressSearchEffectState;
+}
+
+/**
+ * 住所検索 effect の判定＋ガード状態遷移。
+ * decideAddressSearchEffect（showSearch / disabled / 空）に加えて:
+ *  - mount 時の既存住所（lastSeen と同値）では検索しない＝レコードを開いた・
+ *    親から既存値が渡ってきただけでは住所 PII を provider へ送らない（Codex P2-E）。
+ *  - 候補反映で自分が書いた住所（programmaticAddress）でも検索しない。
+ * 検索はユーザー編集等で住所が「変わった」時だけ走る。
+ */
+export function evaluateAddressSearchEffect(
+  showSearch: boolean,
+  disabled: boolean,
+  address: string,
+  state: AddressSearchEffectState,
+): AddressSearchEffectOutcome {
+  const decision = decideAddressSearchEffect(showSearch, disabled, address);
+  if (decision === "none") {
+    return { action: "none", nextState: state };
+  }
+  if (decision === "reset") {
+    return {
+      action: "reset",
+      nextState: { lastSeenAddress: address, programmaticAddress: null },
+    };
+  }
+  if (address === state.lastSeenAddress) {
+    // mount 時の既存住所・値の変化なし → 検索しない（P2-E）。
+    return { action: "none", nextState: state };
+  }
+  if (state.programmaticAddress === address) {
+    // 候補反映で自分が書いた住所 → consume して検索しない。
+    return {
+      action: "none",
+      nextState: { lastSeenAddress: address, programmaticAddress: null },
+    };
+  }
+  return {
+    action: "search",
+    nextState: { lastSeenAddress: address, programmaticAddress: null },
+  };
+}
+
+// ---------------------------------------------------------------
+// 候補反映の計画（Codex P2-C: 確認前に親フォームを部分更新しない）
+// ---------------------------------------------------------------
+
+export interface CandidateApplication {
+  /** immediate=住所欄が空で即反映してよい / needs-confirm=既存住所ありで確認が必要 */
+  mode: "immediate" | "needs-confirm";
+  /** 反映する郵便番号（候補に無ければ null＝郵便番号は変更しない） */
+  zip: string | null;
+  /** 反映する住所 */
+  addressLine: string;
+}
+
+/**
+ * 候補を親フォームへどう反映するかの計画。zip と住所を必ずペアで運び、
+ * needs-confirm の間はどちらも反映しない＝キャンセル時に
+ * 「郵便番号だけ変わって住所は旧値」という不整合を残さない（Codex P2-C）。
+ */
+export function planCandidateApplication(
+  candidate: AddressLookupCandidate,
+  currentAddress: string,
+): CandidateApplication {
+  return {
+    mode: shouldAutofillAddress(currentAddress) ? "immediate" : "needs-confirm",
+    zip: candidate.postalCode ?? null,
+    addressLine: candidate.addressLine,
+  };
 }

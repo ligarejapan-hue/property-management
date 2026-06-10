@@ -47,10 +47,22 @@ describe("AddressLookupControls の配線", () => {
     expect(src).toContain("requiresCandidateSelection");
   });
 
-  it("silent overwrite を禁止＝既存住所は上書き確認する", () => {
+  it("silent overwrite を禁止＝既存住所は確認まで zip も住所も反映しない（Codex P2-C）", () => {
     expect(src).toContain("needsOverwriteConfirm");
-    expect(src).toContain("shouldAutofillAddress");
+    expect(src).toContain("planCandidateApplication");
+    expect(src).toContain("pendingCandidate");
     expect(src).toContain("上書き");
+    // 確認確定時に zip と住所を同時反映する helper（plan 経由）
+    expect(src).toMatch(
+      /const applyPlanNow[\s\S]*?onZipChange[\s\S]*?onAddressChange[\s\S]*?reset\(\)/,
+    );
+    // キャンセルは pending を捨てるだけ＝親フォームを一切更新しない (#2)
+    expect(src).toMatch(/onClick=\{\(\) => setPendingCandidate\(null\)\}/);
+  });
+
+  it("郵便番号lookupの単一候補は onSuccess で自動反映（空住所）/上書き確認（既存住所）（Codex P2-D）", () => {
+    expect(src).toContain("isSingleCandidate");
+    expect(src).toMatch(/lookupByPostalCode\(zip,/);
   });
 
   it("loading / error を扱う（spinner と分類済みエラー文言）", () => {
@@ -59,11 +71,9 @@ describe("AddressLookupControls の配線", () => {
     expect(src).toContain("not_configured");
   });
 
-  it("disabled 中は住所検索 effect を走らせない（Codex P2-A）＝decide で分岐し deps に disabled を含む", () => {
-    expect(src).toContain("decideAddressSearchEffect");
-    expect(src).toMatch(
-      /decideAddressSearchEffect\(showSearch,\s*disabled,\s*address\)/,
-    );
+  it("住所検索 effect は evaluateAddressSearchEffect で判定（P2-A disabled / P2-E mount・編集ガード）", () => {
+    expect(src).toContain("evaluateAddressSearchEffect");
+    expect(src).toContain("searchGuardRef");
     expect(src).toMatch(
       /\[address,\s*showSearch,\s*disabled,\s*searchByAddress,\s*reset\]/,
     );
