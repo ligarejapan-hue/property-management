@@ -77,6 +77,7 @@ vi.mock("@/lib/prisma", () => {
 
 import prisma from "@/lib/prisma";
 import { getUserPermissions } from "@/lib/api-helpers";
+import { writeAuditLog } from "@/lib/audit";
 import { POST } from "../../app/api/properties/[id]/owners/create-and-link/route";
 
 const PROPERTY_ID = "11111111-1111-4111-8111-111111111111";
@@ -114,6 +115,7 @@ beforeEach(() => {
   (getUserPermissions as Mock).mockResolvedValue([
     { resource: "owner", action: "write", granted: true },
     { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_phone", action: "full", granted: true },
     { resource: "owner_address", action: "full", granted: true },
   ]);
 });
@@ -187,6 +189,52 @@ describe("POST /api/properties/[id]/owners/create-and-link — atomic create + l
     expect(pm._tx.propertyOwner.updateMany).toHaveBeenCalledWith({
       where: { propertyId: PROPERTY_ID, isPrimary: true },
       data: { isPrimary: false },
+    });
+  });
+
+  it("AuditLog(owners): 生の owner PII（氏名/住所/電話）を detail に含めない・非PII識別子のみ", async () => {
+    pm._tx.owner.create.mockResolvedValue({ id: "owner-new", name: "山田太郎" });
+    pm._tx.propertyOwner.create.mockResolvedValue({ id: "po-1" });
+    await POST(
+      makeRequest({
+        name: "山田太郎",
+        phone: "090-1234-5678",
+        address: "東京都千代田区1-1",
+      }),
+      makeParams(),
+    );
+    const ownerAudit = (writeAuditLog as Mock).mock.calls
+      .map((c) => c[0] as { targetTable?: string; targetId?: string; detail?: Record<string, unknown> })
+      .find((a) => a.targetTable === "owners");
+    expect(ownerAudit).toBeTruthy();
+    const detailStr = JSON.stringify(ownerAudit!.detail ?? {});
+    // 生 PII（氏名/住所/電話）が detail に現れない
+    expect(detailStr).not.toContain("山田太郎");
+    expect(detailStr).not.toContain("東京都千代田区");
+    expect(detailStr).not.toContain("090-1234-5678");
+    // raw name キーを持たない
+    expect(ownerAudit!.detail).not.toHaveProperty("name");
+    // 追跡に必要な非PII（識別子・件数・状態）は残る（owner は targetId の UUID で特定）
+    expect(ownerAudit!.targetId).toBe("owner-new");
+    expect(ownerAudit!.detail).toMatchObject({
+      createdOwner: true,
+      propertyId: PROPERTY_ID,
+    });
+    expect(typeof ownerAudit!.detail!.fieldCount).toBe("number");
+  });
+
+  it("AuditLog(property_owners): propertyId / ownerId(UUID) 等の非PIIのみ（生氏名なし）", async () => {
+    pm._tx.owner.create.mockResolvedValue({ id: "owner-new", name: "山田太郎" });
+    pm._tx.propertyOwner.create.mockResolvedValue({ id: "po-1" });
+    await POST(makeRequest({ name: "山田太郎" }), makeParams());
+    const linkAudit = (writeAuditLog as Mock).mock.calls
+      .map((c) => c[0] as { targetTable?: string; detail?: Record<string, unknown> })
+      .find((a) => a.targetTable === "property_owners");
+    expect(linkAudit).toBeTruthy();
+    expect(JSON.stringify(linkAudit!.detail ?? {})).not.toContain("山田太郎");
+    expect(linkAudit!.detail).toMatchObject({
+      propertyId: PROPERTY_ID,
+      ownerId: "owner-new",
     });
   });
 });

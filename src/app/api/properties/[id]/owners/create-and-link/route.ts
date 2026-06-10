@@ -110,20 +110,35 @@ export async function POST(
       return { owner, propertyOwner };
     });
 
-    // AuditLog: owner 作成と link 作成をそれぞれ記録（PII 生値は含めない＝氏名 / ID のみ）。
+    // AuditLog: 生の owner PII（氏名 / 住所 / 電話 / email / 法人番号 等）は detail に含めない。
+    // owner field display 権限を持たない監査ログ閲覧者にも detail は見えるため、非PII の
+    // 識別子・件数・状態のみ記録する（owner / PropertyOwner は targetId の UUID で一意特定できる）。
+    const ownerFieldCount = Object.values(ownerData).filter(
+      (v) => v != null,
+    ).length;
     await writeAuditLog({
       userId: session.id,
       action: "create",
       targetTable: "owners",
       targetId: owner.id,
-      detail: { name: owner.name },
+      detail: {
+        createdOwner: true,
+        linkedProperty: true,
+        propertyId,
+        source: "property_detail_create_and_link",
+        fieldCount: ownerFieldCount,
+      },
     });
     await writeAuditLog({
       userId: session.id,
       action: "create",
       targetTable: "property_owners",
       targetId: propertyOwner.id,
-      detail: { propertyId, ownerId: owner.id },
+      detail: {
+        propertyId,
+        ownerId: owner.id,
+        source: "property_detail_create_and_link",
+      },
     });
 
     return apiResponse({ owner, propertyOwner }, 201);
