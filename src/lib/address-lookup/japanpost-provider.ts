@@ -79,6 +79,8 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
       { method: "GET", headers: { Authorization: `Bearer ${token}` } },
       "searchcode",
     );
+    // 形式上正しいが該当なしのとき日本郵便は 404 を返す＝外部障害ではなく候補なし。
+    if (res.status === 404) return [];
     if (!res.ok) throw this.classify(res.status, "searchcode");
     return this.mapAddresses(await this.parseJson(res, "searchcode"));
   }
@@ -100,6 +102,8 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
       },
       "addresszip",
     );
+    // 形式上正しいが該当なしのとき日本郵便は 404 を返す＝外部障害ではなく候補なし。
+    if (res.status === 404) return [];
     if (!res.ok) throw this.classify(res.status, "addresszip");
     return this.mapAddresses(await this.parseJson(res, "addresszip"));
   }

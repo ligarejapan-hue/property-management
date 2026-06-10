@@ -240,6 +240,32 @@ describe("JapanPostAddressProvider — エラー分類", () => {
   });
 });
 
+describe("JapanPostAddressProvider — 404(該当なし)は候補なし [] を返す", () => {
+  it("searchcode が 404 なら [](UPSTREAM_4XX/外部失敗にしない)", async () => {
+    const { provider } = makeProvider({ searchStatus: 404, searchRaw: "not found" });
+    expect(await provider.lookupByPostalCode("1000005")).toEqual([]);
+  });
+
+  it("addresszip が 404 なら [](外部失敗にしない)", async () => {
+    const { provider } = makeProvider({ addresszipStatus: 404, addresszipRaw: "not found" });
+    expect(await provider.searchByAddress("該当なし町")).toEqual([]);
+  });
+
+  it("token endpoint の 404 は候補なし扱いにせず error を投げる", async () => {
+    const { provider } = makeProvider({ tokenStatus: 404 });
+    await expect(provider.lookupByPostalCode("1000005")).rejects.toMatchObject({
+      code: "UPSTREAM_4XX",
+    });
+  });
+
+  it("404 以外の 4xx(403)は AUTH_FAILED を維持（候補なしにしない）", async () => {
+    const { provider } = makeProvider({ searchStatus: 403, searchRaw: "forbidden" });
+    await expect(provider.lookupByPostalCode("1000005")).rejects.toMatchObject({
+      code: "AUTH_FAILED",
+    });
+  });
+});
+
 describe("JapanPostAddressProvider — zip_code の string/number 両対応(P2)", () => {
   it("zip_code が string でも postalCode を保持", async () => {
     const { provider } = makeProvider({
