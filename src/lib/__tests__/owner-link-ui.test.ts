@@ -107,7 +107,7 @@ describe("OwnerLinkModal: stale 検索レスポンス破棄（Codex）", () => {
   });
 });
 
-describe("OwnerLinkModal: 空クエリ/モード離脱/閉じる で stale 検索を無効化（Codex）", () => {
+describe("OwnerLinkModal: query/mode 変更で stale 検索を即時無効化（Codex）", () => {
   it("invalidateSearch が seq 前進 + searchHits/selected/searchLoading/searchError を全リセットする", () => {
     // loading/error が残って「検索中...」のまま固まらないよう、1 関数で seq 前進 + 4 状態リセット。
     const m = modalSrc.match(
@@ -122,12 +122,23 @@ describe("OwnerLinkModal: 空クエリ/モード離脱/閉じる で stale 検�
     expect(body).toMatch(/setSearchError\(null\)/); // 古い error が残らない
   });
 
-  it("空クエリ(q.length < 1)で invalidateSearch を呼ぶ（hits/loading/error/selected をリセット）", () => {
-    expect(modalSrc).toMatch(/if \(q\.length < 1\) \{\s*invalidateSearch\(\);/);
+  it("debounce effect は mode/q 判定の前に invalidateSearch() を呼ぶ（非空→非空でも古い hits を即時クリア）", () => {
+    // invalidateSearch() が mode チェックより前 = query/mode 変更時に常に即時 invalidate。
+    expect(modalSrc).toMatch(/invalidateSearch\(\);\s*if \(mode !== "search"\) return;/);
   });
 
-  it("非検索モード（新規作成へ切替 等）で invalidateSearch を呼ぶ", () => {
-    expect(modalSrc).toMatch(/if \(mode !== "search"\) \{\s*invalidateSearch\(\);/);
+  it("非検索モード・空クエリでは新検索を出さず return のみ（invalidate 済み）", () => {
+    expect(modalSrc).toMatch(/if \(mode !== "search"\) return;/);
+    expect(modalSrc).toMatch(/if \(q\.length < 1\) return;/);
+  });
+
+  it("非空クエリは debounce 開始時に searchLoading=true にする（古い hits も「該当なし」も出さない）", () => {
+    const iEmptyReturn = modalSrc.indexOf("if (q.length < 1) return;");
+    const iLoadingTrue = modalSrc.indexOf("setSearchLoading(true)");
+    const iTimer = modalSrc.indexOf("setTimeout(async");
+    expect(iEmptyReturn).toBeGreaterThanOrEqual(0);
+    expect(iLoadingTrue).toBeGreaterThan(iEmptyReturn); // 空クエリ判定の後
+    expect(iTimer).toBeGreaterThan(iLoadingTrue); // timer の前
   });
 
   it("アンマウント（閉じる/リセット）時に in-flight 検索を無効化する", () => {

@@ -99,24 +99,19 @@ export function OwnerLinkModal({
 
   // 検索 debounce（searchOwners 経由・300ms）
   useEffect(() => {
-    // 非検索モードでは in-flight 検索を無効化し、loading/error/hits/selected をリセット（Codex）。
-    if (mode !== "search") {
-      invalidateSearch();
-      return;
-    }
+    // query / mode が変わったら、まず stale な検索結果・選択・loading・error を即時クリアする。
+    // 非空→非空の変更でも、新しい検索結果が返るまで古い hits を表示・クリック・submit させない（Codex）。
+    invalidateSearch();
+    if (mode !== "search") return;
     const q = searchQ.trim();
-    // 空クエリでも in-flight 検索を無効化し、loading/error/hits/selected をリセット（Codex）。
-    if (q.length < 1) {
-      invalidateSearch();
-      return;
-    }
+    if (q.length < 1) return;
+    // 非空クエリは debounce 中から「検索中...」を出す（古い hits も「該当なし」も出さない）。
+    setSearchLoading(true);
     const timer = setTimeout(async () => {
       // この検索リクエストの seq。解決時に最新でなければ結果を破棄する
       //（後から解決した古い検索が新しいクエリの結果/状態を上書きしない・Codex）。
       searchSeqRef.current += 1;
       const seq = searchSeqRef.current;
-      setSearchLoading(true);
-      setSearchError(null);
       try {
         const res = await searchOwners(q);
         if (!isLatestSearch(seq, searchSeqRef.current)) return;
@@ -132,11 +127,8 @@ export function OwnerLinkModal({
     return () => clearTimeout(timer);
   }, [searchQ, mode, invalidateSearch]);
 
-  // P2(Codex): 検索クエリが変わったら古い選択をクリアする。
-  // 別クエリの表示状態で旧 owner を誤って紐付けないため（submit ゲートと二重防御）。
-  useEffect(() => {
-    setSelected(null);
-  }, [searchQ]);
+  // 注: query 変更時の selected クリアは上の effect 先頭の invalidateSearch() が担う
+  // （searchQ / mode 変更のたびに hits/selected/loading/error を即時リセット）。
 
   const createReady = canSubmitOwnerCreate(form);
 
