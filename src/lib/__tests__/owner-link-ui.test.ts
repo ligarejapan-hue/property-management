@@ -146,6 +146,32 @@ describe("OwnerLinkModal: query/mode 変更で stale 検索を即時無効化（
   });
 });
 
+describe("OwnerLinkModal: 既に紐付け済み owner を選択不可にする（Codex）", () => {
+  it("親(OwnerTab)から existingOwnerIds を owners.map で渡す", () => {
+    expect(pageSrc).toMatch(/existingOwnerIds=\{owners\.map\(/);
+  });
+
+  it("modal は existingOwnerIds prop を受け取る", () => {
+    expect(modalSrc).toMatch(/existingOwnerIds/);
+  });
+
+  it("検索結果で既存紐付け済みを isExistingLinkedOwner で判定し「既に紐付け済み」を表示する", () => {
+    expect(modalSrc).toMatch(/isExistingLinkedOwner\(/);
+    expect(modalSrc).toMatch(/既に紐付け済み/);
+  });
+
+  it("既存紐付け済み owner は aria-disabled かつ click で選択されない", () => {
+    expect(modalSrc).toMatch(/aria-disabled/);
+    expect(modalSrc).toMatch(/onClick=\{linked \? undefined/);
+  });
+
+  it("submit 活性判定は existingOwnerIds を含めて行う", () => {
+    expect(modalSrc).toMatch(
+      /isSelectedOwnerSubmittable\(\s*selected,\s*searchHits,\s*existingOwnerIds/,
+    );
+  });
+});
+
 describe("page.tsx: タブ並べ替え・改名", () => {
   it("「所有者情報」タブが存在する", () => {
     expect(pageSrc).toMatch(/key:\s*"owner",\s*label:\s*"所有者情報"/);

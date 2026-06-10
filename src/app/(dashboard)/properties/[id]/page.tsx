@@ -765,7 +765,7 @@ function OwnerTab({
       {showAdd && linkModalOpen && (
         <OwnerLinkModal
           propertyId={propertyId}
-          existingOwnerCount={owners.length}
+          existingOwnerIds={owners.map((po) => po.ownerId)}
           onClose={() => setLinkModalOpen(false)}
           onLinked={onRefresh}
         />

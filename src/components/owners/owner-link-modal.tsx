@@ -14,6 +14,7 @@ import {
   defaultIsPrimaryForLink,
   isSelectedOwnerSubmittable,
   isLatestSearch,
+  isExistingLinkedOwner,
   type OwnerCreateFormValues,
 } from "@/lib/owner-link-utils";
 
@@ -46,12 +47,13 @@ const EMPTY_FORM: OwnerCreateFormValues = {
  */
 export function OwnerLinkModal({
   propertyId,
-  existingOwnerCount,
+  existingOwnerIds,
   onClose,
   onLinked,
 }: {
   propertyId: string;
-  existingOwnerCount: number;
+  /** この物件に既に紐付いている owner の id 一覧。検索結果で選択不可にし @@unique 違反(500)を防ぐ。 */
+  existingOwnerIds: string[];
   onClose: () => void;
   onLinked: () => void | Promise<void>;
 }) {
@@ -60,7 +62,7 @@ export function OwnerLinkModal({
   // 紐付け共通: 続柄 / 主所有者（最初の 1 人は主所有者を既定 true）
   const [relationship, setRelationship] = useState("");
   const [isPrimary, setIsPrimary] = useState(() =>
-    defaultIsPrimaryForLink(existingOwnerCount),
+    defaultIsPrimaryForLink(existingOwnerIds.length),
   );
 
   // 既存検索
@@ -135,7 +137,8 @@ export function OwnerLinkModal({
   const handleLinkExisting = async () => {
     if (!selected) return;
     // P2(Codex): 現在の検索結果に含まれない古い選択では紐付けない（submit 時にも再確認）。
-    if (!isSelectedOwnerSubmittable(selected, searchHits)) return;
+    if (!isSelectedOwnerSubmittable(selected, searchHits, existingOwnerIds))
+      return;
     setSubmitting(true);
     setError(null);
     try {
@@ -241,21 +244,48 @@ export function OwnerLinkModal({
             )}
             {searchError && <p className="text-xs text-red-600">{searchError}</p>}
             {!searchLoading && searchHits.length > 0 && (
-              <ul className="max-h-48 overflow-y-auto rounded border border-gray-200">
-                {searchHits.map((h) => (
-                  <li
-                    key={h.id}
-                    onClick={() => setSelected(h)}
-                    className={`cursor-pointer border-b border-gray-100 px-2 py-1.5 text-xs last:border-b-0 hover:bg-indigo-50 ${
-                      selected?.id === h.id ? "bg-indigo-100" : ""
-                    }`}
-                  >
-                    <div className="font-medium text-gray-900">{h.name}</div>
-                    <div className="text-[11px] text-gray-500">
-                      {[h.nameKana, h.address].filter(Boolean).join(" ")}
-                    </div>
-                  </li>
-                ))}
+              <ul
+                role="listbox"
+                className="max-h-48 overflow-y-auto rounded border border-gray-200"
+              >
+                {searchHits.map((h) => {
+                  // 既にこの物件へ紐付け済みの owner は選択不可（@@unique 違反 500 を UI で防ぐ・Codex）。
+                  const linked = isExistingLinkedOwner(h.id, existingOwnerIds);
+                  return (
+                    <li
+                      key={h.id}
+                      role="option"
+                      aria-selected={selected?.id === h.id}
+                      onClick={linked ? undefined : () => setSelected(h)}
+                      aria-disabled={linked || undefined}
+                      className={`border-b border-gray-100 px-2 py-1.5 text-xs last:border-b-0 ${
+                        linked
+                          ? "cursor-not-allowed bg-gray-50 text-gray-400"
+                          : `cursor-pointer hover:bg-indigo-50 ${
+                              selected?.id === h.id ? "bg-indigo-100" : ""
+                            }`
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div
+                          className={`font-medium ${
+                            linked ? "text-gray-400" : "text-gray-900"
+                          }`}
+                        >
+                          {h.name}
+                        </div>
+                        {linked && (
+                          <span className="shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
+                            既に紐付け済み
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        {[h.nameKana, h.address].filter(Boolean).join(" ")}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {!searchLoading &&
@@ -378,7 +408,10 @@ export function OwnerLinkModal({
             <button
               type="button"
               onClick={handleLinkExisting}
-              disabled={submitting || !isSelectedOwnerSubmittable(selected, searchHits)}
+              disabled={
+                submitting ||
+                !isSelectedOwnerSubmittable(selected, searchHits, existingOwnerIds)
+              }
               className="rounded bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {submitting ? "紐付け中..." : "この所有者を紐付け"}

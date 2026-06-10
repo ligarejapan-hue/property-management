@@ -7,6 +7,8 @@ import {
   canShowAddOwner,
   isSelectedOwnerSubmittable,
   isLatestSearch,
+  isExistingLinkedOwner,
+  isOwnerSearchHitSelectable,
   buildCreateAndLinkPayload,
   type OwnerCreateFormValues,
 } from "@/lib/owner-link-utils";
@@ -92,20 +94,38 @@ describe("canShowAddOwner", () => {
   });
 });
 
-describe("isSelectedOwnerSubmittable（P2: stale selected 防止）", () => {
+describe("isSelectedOwnerSubmittable（P2: stale selected / 既存紐付け防止）", () => {
   const hits = [{ id: "a" }, { id: "b" }, { id: "c" }];
 
   it("未選択（null）なら false", () => {
-    expect(isSelectedOwnerSubmittable(null, hits)).toBe(false);
+    expect(isSelectedOwnerSubmittable(null, hits, [])).toBe(false);
   });
 
   it("選択中の owner が現在の検索結果に含まれていなければ false（古い選択は紐付け不可）", () => {
-    expect(isSelectedOwnerSubmittable({ id: "z" }, hits)).toBe(false);
-    expect(isSelectedOwnerSubmittable({ id: "a" }, [])).toBe(false);
+    expect(isSelectedOwnerSubmittable({ id: "z" }, hits, [])).toBe(false);
+    expect(isSelectedOwnerSubmittable({ id: "a" }, [], [])).toBe(false);
   });
 
   it("選択中の owner が現在の検索結果に含まれていれば true", () => {
-    expect(isSelectedOwnerSubmittable({ id: "b" }, hits)).toBe(true);
+    expect(isSelectedOwnerSubmittable({ id: "b" }, hits, [])).toBe(true);
+  });
+
+  it("選択中の owner が既に紐付け済み(existingOwnerIds)なら false（unique 制約 500 を UI で防ぐ）", () => {
+    expect(isSelectedOwnerSubmittable({ id: "b" }, hits, ["b"])).toBe(false);
+  });
+});
+
+describe("isExistingLinkedOwner / isOwnerSearchHitSelectable（既に紐付け済み owner）", () => {
+  const existing = ["o1", "o2"];
+
+  it("既存紐付けID一覧に含まれれば既存紐付け済み", () => {
+    expect(isExistingLinkedOwner("o1", existing)).toBe(true);
+    expect(isExistingLinkedOwner("o9", existing)).toBe(false);
+  });
+
+  it("既存紐付け済み owner は検索結果で選択不可（それ以外は選択可）", () => {
+    expect(isOwnerSearchHitSelectable({ id: "o1" }, existing)).toBe(false);
+    expect(isOwnerSearchHitSelectable({ id: "o9" }, existing)).toBe(true);
   });
 });
 

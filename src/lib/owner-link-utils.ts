@@ -90,15 +90,38 @@ export function buildLinkOwnerPayload(
 }
 
 /**
- * 既存所有者の選択が「現在の検索結果」に含まれているか。
- * P2(Codex): 検索クエリ変更後に残った古い selected で誤って別 owner を紐付けるのを防ぐため、
- * 紐付けボタンの活性条件に使う（selected が現在の hits に存在するときのみ submit 可）。
+ * 既存所有者の選択を submit してよいか。
+ * - selected が現在の検索結果（hits）に含まれる（query 変更後の古い選択は不可）。
+ * - selected が既にこの物件に紐付いていない（existingOwnerIds に含まれない）。
+ *   既存紐付け owner を再度紐付けると PropertyOwner の @@unique([propertyId, ownerId]) 違反で
+ *   500 になるため、UI 側で submit を不可にする（Codex）。
  */
 export function isSelectedOwnerSubmittable(
   selected: { id: string } | null,
   hits: Array<{ id: string }>,
+  existingOwnerIds: string[],
 ): boolean {
-  return selected !== null && hits.some((h) => h.id === selected.id);
+  return (
+    selected !== null &&
+    hits.some((h) => h.id === selected.id) &&
+    !isExistingLinkedOwner(selected.id, existingOwnerIds)
+  );
+}
+
+/** owner が既にこの物件に紐付いているか（existingOwnerIds に含まれるか）。 */
+export function isExistingLinkedOwner(
+  ownerId: string,
+  existingOwnerIds: string[],
+): boolean {
+  return existingOwnerIds.includes(ownerId);
+}
+
+/** 検索結果の owner を選択可能か（既にこの物件へ紐付け済みの owner は選択不可）。 */
+export function isOwnerSearchHitSelectable(
+  hit: { id: string },
+  existingOwnerIds: string[],
+): boolean {
+  return !isExistingLinkedOwner(hit.id, existingOwnerIds);
 }
 
 /**
