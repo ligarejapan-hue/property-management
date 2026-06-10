@@ -191,12 +191,19 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
   }
 
   private extractAddresses(data: unknown): RawAddress[] {
-    if (
-      data &&
-      typeof data === "object" &&
-      Array.isArray((data as { addresses?: unknown }).addresses)
-    ) {
-      return (data as { addresses: RawAddress[] }).addresses;
+    if (data && typeof data === "object") {
+      const addresses = (data as { addresses?: unknown }).addresses;
+      if (Array.isArray(addresses)) {
+        // 日本郵便 addresszip は候補を addresses 配下に「配列の配列」(グループ)で返す。
+        // searchcode は flat。1段平坦化で両形を統一し、オブジェクト行のみ採用する
+        // （flat 形には無改変＝searchcode の挙動は不変）。
+        return (addresses as unknown[])
+          .flat()
+          .filter(
+            (a): a is RawAddress =>
+              a !== null && typeof a === "object" && !Array.isArray(a),
+          );
+      }
     }
     return [];
   }

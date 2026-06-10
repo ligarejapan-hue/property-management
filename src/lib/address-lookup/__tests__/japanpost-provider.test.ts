@@ -136,6 +136,24 @@ describe("JapanPostAddressProvider.searchByAddress（addresszip）", () => {
     expect(got.every((c) => c.source === "japanpost")).toBe(true);
   });
 
+  it("addresses が配列の配列(グループ)でも平坦化して候補化する（addresszip 実形）", async () => {
+    // 日本郵便 addresszip は候補を addresses 配下に「配列の配列」(グループ)で返す。
+    // グループ内・グループ間の両方を平坦化して個々の候補にする必要がある。
+    const { provider } = makeProvider({
+      addresszipBody: {
+        addresses: [
+          [SAMPLE_ADDRESS, { ...SAMPLE_ADDRESS, zip_code: "1000004", town_name: "大手町" }],
+          [{ ...SAMPLE_ADDRESS, zip_code: "1000001", town_name: "千代田" }],
+        ],
+      },
+    });
+    const got = await provider.searchByAddress("東京都千代田区");
+    expect(got).toHaveLength(3);
+    expect(got.map((c) => c.postalCode)).toEqual(["1000005", "1000004", "1000001"]);
+    expect(got[0].addressLine).toBe("東京都千代田区丸の内");
+    expect(got.every((c) => c.source === "japanpost")).toBe(true);
+  });
+
   it("候補なしは [] を返す", async () => {
     const { provider } = makeProvider({ addresszipBody: { addresses: [] } });
     expect(await provider.searchByAddress("該当なし町")).toEqual([]);
