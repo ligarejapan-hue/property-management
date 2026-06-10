@@ -2057,6 +2057,80 @@ export async function searchOwners(query: string) {
   }>(`/api/owners/search?q=${encodeURIComponent(query)}`);
 }
 
+// 新規所有者の作成と物件への紐付けを 1 リクエストで atomic に行う（Codex P1 対応）。
+// POST /api/properties/[id]/owners/create-and-link。サーバ側 transaction で owner 作成と
+// PropertyOwner link を同時に成功/失敗させ、フロントでの createOwner→link 逐次実行で生じる
+// orphan owner（作成されたが紐付かない）を防ぐ。
+export async function createAndLinkOwnerToProperty(
+  propertyId: string,
+  payload: {
+    name: string;
+    nameKana?: string | null;
+    phone?: string | null;
+    zip?: string | null;
+    address?: string | null;
+    email?: string | null;
+    relationship?: string | null;
+    isPrimary?: boolean;
+  },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      owner: { id: "mock-owner-id", name: payload.name, version: 1 },
+      propertyOwner: {
+        id: "mock-property-owner-id",
+        propertyId,
+        ownerId: "mock-owner-id",
+        relationship: payload.relationship ?? null,
+        isPrimary: payload.isPrimary ?? false,
+      },
+    };
+  }
+  return apiFetch<{
+    owner: { id: string; name: string; version: number };
+    propertyOwner: {
+      id: string;
+      propertyId: string;
+      ownerId: string;
+      relationship: string | null;
+      isPrimary: boolean;
+    };
+  }>(`/api/properties/${propertyId}/owners/create-and-link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// 既存の所有者を物件に紐付ける（POST /api/properties/[id]/owners・linkOwnerSchema 準拠）。
+export async function linkOwnerToProperty(
+  propertyId: string,
+  data: { ownerId: string; relationship?: string | null; isPrimary?: boolean },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      id: "mock-property-owner-id",
+      propertyId,
+      ownerId: data.ownerId,
+      relationship: data.relationship ?? null,
+      isPrimary: data.isPrimary ?? false,
+    };
+  }
+  return apiFetch<{
+    id: string;
+    propertyId: string;
+    ownerId: string;
+    relationship: string | null;
+    isPrimary: boolean;
+  }>(`/api/properties/${propertyId}/owners`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
 // ---------- File Upload ----------
 
 export async function uploadFile(
