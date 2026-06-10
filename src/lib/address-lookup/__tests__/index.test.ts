@@ -12,6 +12,7 @@ const ENV_KEYS = [
   "ADDRESS_LOOKUP_API_KEY",
   "ADDRESS_LOOKUP_CLIENT_ID",
   "ADDRESS_LOOKUP_BASE_URL",
+  "ADDRESS_LOOKUP_SOURCE_IP",
 ] as const;
 
 let saved: Record<string, string | undefined> = {};
@@ -36,15 +37,24 @@ describe("isAddressLookupConfigured", () => {
     expect(isAddressLookupConfigured()).toBe(false);
   });
 
-  it("API_KEY のみでは false（client_id / base_url も必要）", () => {
+  it("API_KEY のみでは false（client_id / base_url / source_ip も必要）", () => {
     process.env.ADDRESS_LOOKUP_API_KEY = "secret";
     expect(isAddressLookupConfigured()).toBe(false);
   });
 
-  it("API_KEY + CLIENT_ID + BASE_URL が揃えば true", () => {
+  it("source_ip 未設定なら false（japanpost は登録IP必須）", () => {
     process.env.ADDRESS_LOOKUP_API_KEY = "secret";
     process.env.ADDRESS_LOOKUP_CLIENT_ID = "cid";
     process.env.ADDRESS_LOOKUP_BASE_URL = "https://example.test";
+    // ADDRESS_LOOKUP_SOURCE_IP は未設定
+    expect(isAddressLookupConfigured()).toBe(false);
+  });
+
+  it("API_KEY + CLIENT_ID + BASE_URL + SOURCE_IP が揃えば true", () => {
+    process.env.ADDRESS_LOOKUP_API_KEY = "secret";
+    process.env.ADDRESS_LOOKUP_CLIENT_ID = "cid";
+    process.env.ADDRESS_LOOKUP_BASE_URL = "https://example.test";
+    process.env.ADDRESS_LOOKUP_SOURCE_IP = "203.0.113.45";
     expect(isAddressLookupConfigured()).toBe(true);
   });
 
@@ -66,6 +76,16 @@ describe("未設定時の lookup は NOT_CONFIGURED を throw（=route 503 の�
 
   it("searchAddressByText", async () => {
     await expect(searchAddressByText("東京都千代田区")).rejects.toMatchObject({
+      code: "NOT_CONFIGURED",
+    });
+  });
+
+  it("source_ip だけ欠落でも NOT_CONFIGURED(503)", async () => {
+    process.env.ADDRESS_LOOKUP_API_KEY = "secret";
+    process.env.ADDRESS_LOOKUP_CLIENT_ID = "cid";
+    process.env.ADDRESS_LOOKUP_BASE_URL = "https://example.test";
+    // ADDRESS_LOOKUP_SOURCE_IP 未設定
+    await expect(lookupAddressByPostalCode("1000005")).rejects.toMatchObject({
       code: "NOT_CONFIGURED",
     });
   });

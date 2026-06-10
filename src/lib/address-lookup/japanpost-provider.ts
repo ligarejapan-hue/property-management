@@ -3,15 +3,20 @@
  *
  * - 認証: client_credentials で token を取得し、検索リクエストに Bearer で付与する。
  *   secret（APIキー）は token 取得 body にのみ使い、検索リクエストや候補・例外に出さない。
- * - エンドポイントの base URL は env（ADDRESS_LOOKUP_BASE_URL）で差し替える。
- *   組織/サービス配下の systems URL を指定する想定。
+ * - token 取得には登録済み送信元 IP を `x-forwarded-for` で送る（日本郵便の IP ベース認可）。
+ *   IP は inbound request の XFF ではなく、サーバの登録 IP を env から渡す（sourceIp）。
+ * - 検索エンドポイントは用途で分ける（混線防止）:
+ *     郵便番号/デジタルアドレスコード → GET  /api/v1/searchcode/{code}
+ *     住所（フリーワード）            → POST /api/v1/addresszip
+ * - base URL は env（ADDRESS_LOOKUP_BASE_URL）で差し替える（組織/サービス配下 systems）。
  * - raw response は返さず {@link AddressLookupCandidate} へ整形する。
- * - 失敗時は {@link AddressLookupError}（分類コードのみの安全な例外）を throw する。
+ * - 失敗時は {@link AddressLookupError}（分類コードのみの安全な例外）を throw。
+ *   message には secret / client_id / source IP / 外部 raw 本文を含めない。
  *
  * 注: 外部 I/O を伴うため server-side（API route）からのみ利用する。client へ import しない。
  */
 
-import { normalizePostalCode } from "./normalize";
+import { normalizePostalCode, isValidPostalCode } from "./normalize";
 import {
   AddressLookupError,
   type AddressLookupCandidate,
@@ -22,6 +27,8 @@ import {
 export interface JapanPostProviderOptions {
   clientId: string;
   secretKey: string;
+  /** 登録済み送信元グローバル IP（x-forwarded-for で送る）。 */
+  sourceIp: string;
   baseUrl: string;
   /** テスト用に fetch を注入する（既定: グローバル fetch）。 */
   fetchFn?: typeof fetch;
@@ -30,10 +37,18 @@ export interface JapanPostProviderOptions {
 }
 
 interface RawAddress {
-  zip_code?: unknown;
+  zip_code?: unknown; // string も number も来る（API/項目により異なる）
   pref_name?: unknown;
   city_name?: unknown;
   town_name?: unknown;
+}
+
+/**
+ * 配列そのものや primitive を RawAddress として扱わないための最小ガード。
+ * （addresszip の「配列の配列」flatten 時に内側配列を 1 件の候補と誤認しないため。）
+ */
+function isRawAddressLike(value: unknown): value is RawAddress {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export class JapanPostAddressProvider implements AddressLookupProvider {
@@ -41,6 +56,7 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
 
   private readonly clientId: string;
   private readonly secretKey: string;
+  private readonly sourceIp: string;
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
   private readonly timeoutMs: number;
@@ -48,33 +64,51 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
   constructor(opts: JapanPostProviderOptions) {
     this.clientId = opts.clientId;
     this.secretKey = opts.secretKey;
+    this.sourceIp = opts.sourceIp;
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.fetchFn = opts.fetchFn ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 8000;
   }
 
+  /** 郵便番号/デジタルアドレスコード → searchcode（GET）。 */
   async lookupByPostalCode(postalCode7: string): Promise<AddressLookupCandidate[]> {
-    return this.search(postalCode7);
-  }
-
-  async searchByAddress(address: string): Promise<AddressLookupCandidate[]> {
-    return this.search(address);
-  }
-
-  // ---- internal ----
-
-  private async search(term: string): Promise<AddressLookupCandidate[]> {
     const token = await this.getToken();
-    const url = `${this.baseUrl}/api/v1/searchcode/${encodeURIComponent(term)}`;
+    const url = `${this.baseUrl}/api/v1/searchcode/${encodeURIComponent(postalCode7)}`;
     const res = await this.doFetch(
       url,
       { method: "GET", headers: { Authorization: `Bearer ${token}` } },
-      "search",
+      "searchcode",
     );
-    if (!res.ok) throw this.classify(res.status, "search");
-    const data = await this.parseJson(res, "search");
-    return this.mapAddresses(data);
+    // 形式上正しいが該当なしのとき日本郵便は 404 を返す＝外部障害ではなく候補なし。
+    if (res.status === 404) return [];
+    if (!res.ok) throw this.classify(res.status, "searchcode");
+    return this.mapAddresses(await this.parseJson(res, "searchcode"));
   }
+
+  /** 住所（フリーワード）→ addresszip（POST）。code 検索とは別経路。 */
+  async searchByAddress(address: string): Promise<AddressLookupCandidate[]> {
+    const token = await this.getToken();
+    const url = `${this.baseUrl}/api/v1/addresszip`;
+    const res = await this.doFetch(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        // 日本郵便 addresszip のフリーワード住所検索フィールド。
+        body: JSON.stringify({ freeword: address }),
+      },
+      "addresszip",
+    );
+    // 形式上正しいが該当なしのとき日本郵便は 404 を返す＝外部障害ではなく候補なし。
+    if (res.status === 404) return [];
+    if (!res.ok) throw this.classify(res.status, "addresszip");
+    return this.mapAddresses(await this.parseJson(res, "addresszip"));
+  }
+
+  // ---- internal ----
 
   private async getToken(): Promise<string> {
     const url = `${this.baseUrl}/api/v1/j/token`;
@@ -82,7 +116,11 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
       url,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // 登録済み送信元 IP。inbound の XFF ではなく env 由来の自サーバ IP。
+          "x-forwarded-for": this.sourceIp,
+        },
         body: JSON.stringify({
           grant_type: "client_credentials",
           client_id: this.clientId,
@@ -143,26 +181,51 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
     else if (status === 429) code = "RATE_LIMITED";
     else if (status >= 500) code = "UPSTREAM_5XX";
     else code = "UPSTREAM_4XX";
-    // message には status と phase のみ（外部 raw 本文・secret は含めない）。
+    // message には status と phase のみ（外部 raw 本文・secret・source IP は含めない）。
     return new AddressLookupError(code, `address lookup upstream error (${phase})`, status);
   }
 
+  /**
+   * zip_code（string または number）を 7 桁の郵便番号文字列へ。
+   * number は先頭 0 落ち対策で padStart(7, "0") してから正規化する。
+   * 7 桁にできなければ undefined（candidate.postalCode に入れない）。
+   */
+  private toPostalCode(zipRaw: unknown): string | undefined {
+    let s: string | undefined;
+    if (typeof zipRaw === "number" && Number.isFinite(zipRaw)) {
+      s = String(zipRaw).padStart(7, "0");
+    } else if (typeof zipRaw === "string") {
+      s = zipRaw;
+    }
+    if (s === undefined) return undefined;
+    const normalized = normalizePostalCode(s);
+    return isValidPostalCode(normalized) ? normalized : undefined;
+  }
+
+  private extractAddresses(data: unknown): RawAddress[] {
+    const raw = (data as { addresses?: unknown } | null | undefined)?.addresses;
+    if (!Array.isArray(raw)) return [];
+    const list = raw as unknown[];
+    // searchcode は addresses が flat な RawAddress[]。
+    // addresszip(住所フリーワード検索)は候補グループの「配列の配列」RawAddress[][] で返る。
+    // 全要素が配列ならグループ形として 1 段 flatten、そうでなければ flat 形として扱う
+    // （flat な searchcode の挙動は不変）。
+    const rows = list.every((a) => Array.isArray(a)) ? list.flat() : list;
+    // 配列そのもの・primitive・null は候補にしない（壊れた候補を返さない）。
+    return rows.filter(isRawAddressLike);
+  }
+
   private mapAddresses(data: unknown): AddressLookupCandidate[] {
-    const list =
-      data && typeof data === "object" && Array.isArray((data as { addresses?: unknown }).addresses)
-        ? ((data as { addresses: RawAddress[] }).addresses)
-        : [];
-    return list.map((a) => {
+    return this.extractAddresses(data).map((a) => {
       const pref = typeof a.pref_name === "string" ? a.pref_name : undefined;
       const city = typeof a.city_name === "string" ? a.city_name : undefined;
       const town = typeof a.town_name === "string" ? a.town_name : undefined;
-      const zipRaw = typeof a.zip_code === "string" ? a.zip_code : undefined;
-      const zip = zipRaw ? normalizePostalCode(zipRaw) : undefined;
+      const postalCode = this.toPostalCode(a.zip_code);
       const candidate: AddressLookupCandidate = {
         addressLine: [pref, city, town].filter(Boolean).join(""),
         source: this.name,
       };
-      if (zip) candidate.postalCode = zip;
+      if (postalCode) candidate.postalCode = postalCode;
       if (pref) candidate.prefecture = pref;
       if (city) candidate.city = city;
       if (town) candidate.town = town;
