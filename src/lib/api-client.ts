@@ -21,6 +21,9 @@ import {
   MOCK_PHOTOS,
   MOCK_INVESTIGATION_RESULTS,
 } from "./mock-data";
+// 候補の型のみ取得する type-only import（runtime には何も import されない＝
+// server 専用の provider/orchestrator や住所補完の APIキー(secret env) は client bundle に入らない）。
+import type { AddressLookupCandidate } from "./address-lookup/types";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -2399,5 +2402,66 @@ export async function fetchCorporateCandidates(
   if (options?.cursor) params.set("cursor", options.cursor);
   return apiFetch<CorporateCandidatesResponse>(
     `/api/admin/owners/correction/corporate-number-candidates?${params.toString()}`,
+  );
+}
+
+// ---------- Address lookup (郵便番号 / 住所補完) ----------
+// APIキーは server-side route (/api/address/lookup/*) と server lib 内でのみ使う。
+// client はここから route を叩くだけで APIキー(secret env) には一切触れない
+// （外部 API を client から直接呼ばない＝server-side proxy 経由に統一）。
+
+/** 郵便番号 → 住所候補。route 経由で取得する。 */
+export async function fetchAddressByPostalCode(
+  zip: string,
+): Promise<{ candidates: AddressLookupCandidate[] }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      candidates: [
+        {
+          postalCode: "1000005",
+          prefecture: "東京都",
+          city: "千代田区",
+          town: "丸の内",
+          addressLine: "東京都千代田区丸の内",
+          source: "mock",
+        },
+      ],
+    };
+  }
+  return apiFetch<{ candidates: AddressLookupCandidate[] }>(
+    `/api/address/lookup/postal-code?zip=${encodeURIComponent(zip)}`,
+  );
+}
+
+/**
+ * 住所文字列 → 郵便番号付き候補。route 経由で取得する。
+ * 住所は URL に載せず POST body で送る（住所 PII を browser history / proxy / access log に残さない）。
+ */
+export async function fetchAddressCandidates(
+  address: string,
+): Promise<{ candidates: AddressLookupCandidate[] }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      candidates: [
+        {
+          postalCode: "1000005",
+          prefecture: "東京都",
+          city: "千代田区",
+          town: "丸の内",
+          addressLine: address,
+          source: "mock",
+        },
+      ],
+    };
+  }
+  return apiFetch<{ candidates: AddressLookupCandidate[] }>(
+    "/api/address/lookup/search",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+    },
   );
 }
