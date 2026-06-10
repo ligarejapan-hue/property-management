@@ -6,6 +6,7 @@ import {
   buildLinkOwnerPayload,
   canShowAddOwner,
   isSelectedOwnerSubmittable,
+  isLatestSearch,
   buildCreateAndLinkPayload,
   type OwnerCreateFormValues,
 } from "@/lib/owner-link-utils";
@@ -105,6 +106,18 @@ describe("isSelectedOwnerSubmittable（P2: stale selected 防止）", () => {
 
   it("選択中の owner が現在の検索結果に含まれていれば true", () => {
     expect(isSelectedOwnerSubmittable({ id: "b" }, hits)).toBe(true);
+  });
+});
+
+describe("isLatestSearch（Codex: stale 検索レスポンス破棄）", () => {
+  it("リクエスト seq が最新と一致すれば true（結果を反映してよい）", () => {
+    expect(isLatestSearch(3, 3)).toBe(true);
+  });
+
+  it("古いリクエスト（seq < 最新）の結果は破棄する（false）", () => {
+    // 後から解決した古い検索が新しい検索結果を上書きしないことを保証する判定。
+    expect(isLatestSearch(1, 2)).toBe(false);
+    expect(isLatestSearch(2, 5)).toBe(false);
   });
 });
 

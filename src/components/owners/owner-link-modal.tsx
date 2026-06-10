@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Search, UserPlus, X } from "lucide-react";
 import {
   searchOwners,
@@ -13,6 +13,7 @@ import {
   canSubmitOwnerCreate,
   defaultIsPrimaryForLink,
   isSelectedOwnerSubmittable,
+  isLatestSearch,
   type OwnerCreateFormValues,
 } from "@/lib/owner-link-utils";
 
@@ -68,6 +69,8 @@ export function OwnerLinkModal({
   const [searchHits, setSearchHits] = useState<OwnerSearchHit[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selected, setSelected] = useState<OwnerSearchHit | null>(null);
+  // 検索リクエストのシーケンス番号（stale レスポンス破棄用・Codex）
+  const searchSeqRef = useRef(0);
 
   // 新規作成フォーム
   const [form, setForm] = useState<OwnerCreateFormValues>(EMPTY_FORM);
@@ -85,16 +88,22 @@ export function OwnerLinkModal({
       return;
     }
     const timer = setTimeout(async () => {
+      // この検索リクエストの seq。解決時に最新でなければ結果を破棄する
+      //（後から解決した古い検索が新しいクエリの結果/状態を上書きしない・Codex）。
+      searchSeqRef.current += 1;
+      const seq = searchSeqRef.current;
       setSearchLoading(true);
       setSearchError(null);
       try {
         const res = await searchOwners(q);
+        if (!isLatestSearch(seq, searchSeqRef.current)) return;
         setSearchHits((res?.data ?? []) as OwnerSearchHit[]);
       } catch (e) {
+        if (!isLatestSearch(seq, searchSeqRef.current)) return;
         setSearchError(e instanceof Error ? e.message : "検索に失敗しました");
         setSearchHits([]);
       } finally {
-        setSearchLoading(false);
+        if (isLatestSearch(seq, searchSeqRef.current)) setSearchLoading(false);
       }
     }, 300);
     return () => clearTimeout(timer);

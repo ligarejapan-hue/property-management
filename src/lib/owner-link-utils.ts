@@ -101,6 +101,16 @@ export function isSelectedOwnerSubmittable(
   return selected !== null && hits.some((h) => h.id === selected.id);
 }
 
+/**
+ * stale 検索レスポンス破棄判定（Codex）。
+ * debounce 後に開始した検索リクエストへ単調増加のシーケンス番号を振り、レスポンス解決時点で
+ * 最新（latest）のリクエストでなければ結果を反映しない。これにより、後から解決した古い検索の
+ * 結果が新しいクエリの結果（searchHits）を上書きするのを防ぐ。
+ */
+export function isLatestSearch(requestSeq: number, latestSeq: number): boolean {
+  return requestSeq === latestSeq;
+}
+
 /** atomic create-and-link 用 payload（owner 作成フィールド + relationship/isPrimary）。 */
 export interface CreateAndLinkPayload extends OwnerCreatePayload {
   relationship?: string | null;

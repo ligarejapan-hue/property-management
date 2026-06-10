@@ -93,6 +93,20 @@ describe("OwnerLinkModal: P2 stale selected 防止", () => {
   });
 });
 
+describe("OwnerLinkModal: stale 検索レスポンス破棄（Codex）", () => {
+  it("検索リクエストにシーケンス番号(useRef)を振る", () => {
+    expect(modalSrc).toMatch(/useRef/);
+    expect(modalSrc).toMatch(/searchSeqRef/);
+  });
+
+  it("最新でない検索レスポンスは isLatestSearch ガードで破棄する（古い結果で上書きしない）", () => {
+    expect(modalSrc).toMatch(/isLatestSearch\(/);
+    // setSearchHits の前に最新判定で return（後から来た古い検索を反映しない）
+    expect(modalSrc).toMatch(/if \(!isLatestSearch\(/);
+    expect(modalSrc).toMatch(/searchSeqRef\.current/);
+  });
+});
+
 describe("page.tsx: タブ並べ替え・改名", () => {
   it("「所有者情報」タブが存在する", () => {
     expect(pageSrc).toMatch(/key:\s*"owner",\s*label:\s*"所有者情報"/);
