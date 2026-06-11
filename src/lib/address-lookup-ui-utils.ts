@@ -53,6 +53,33 @@ export function formatPostalCode(postalCode: string): string {
     : postalCode;
 }
 
+// ---------------------------------------------------------------
+// 郵便番号の一致判定（Codex P2-H: postal lookup 結果を生成元 zip に紐付け）
+// ---------------------------------------------------------------
+
+/**
+ * 一致判定用に郵便番号を正規化する（ハイフン・空白を無視）。
+ * 表示用整形（formatPostalCode）とは別目的＝「同じ郵便番号か」だけを見る。
+ */
+export function normalizeZipForCompare(zip: string): string {
+  return zip.replace(/[\s-]/g, "");
+}
+
+/**
+ * 現在表示中の postal lookup 結果（候補/該当なし）が、現在の zip に対応しているか。
+ * attemptedZip=null（postal 由来でない＝住所検索結果 or 未検索）なら false。
+ * postal 由来のときだけ、現在 zip と正規化一致で true。
+ * これにより、郵便番号で検索したあと親フォーム/入力で zip が変わると postal 結果が
+ * stale になり、古い候補の誤適用・古い「該当なし」表示を防げる（Codex P2-H）。
+ */
+export function isPostalResultForZip(
+  currentZip: string,
+  attemptedZip: string | null,
+): boolean {
+  if (attemptedZip === null) return false;
+  return normalizeZipForCompare(currentZip) === normalizeZipForCompare(attemptedZip);
+}
+
 /** 候補の表示ラベル（郵便番号があれば 〒付き）。PII を増やさず addressLine を主に使う。 */
 export function formatCandidateLabel(candidate: AddressLookupCandidate): string {
   const zip = candidate.postalCode
@@ -103,16 +130,23 @@ export interface LookupState {
   loading: boolean;
   error: AddressLookupErrorKind | null;
   candidates: AddressLookupCandidate[];
+  /**
+   * 現在の候補/該当なし表示を生成した郵便番号（postal lookup 由来のときだけ非 null）。
+   * 住所検索由来・未検索では null。component は現在 zip と照合して stale を判定する
+   * （Codex P2-H）。reset で null へ戻り、住所検索（reset 経由）でもクリアされる。
+   */
+  attemptedZip: string | null;
 }
 
 export const initialLookupState: LookupState = {
   loading: false,
   error: null,
   candidates: [],
+  attemptedZip: null,
 };
 
 export type LookupAction =
-  | { type: "request" }
+  | { type: "request"; attemptedZip?: string | null }
   | { type: "success"; candidates: AddressLookupCandidate[] }
   | { type: "failure"; error: AddressLookupErrorKind }
   | { type: "reset" };
@@ -123,11 +157,29 @@ export function addressLookupReducer(
 ): LookupState {
   switch (action.type) {
     case "request":
-      return { loading: true, error: null, candidates: [] };
+      // postal lookup は attemptedZip=zip を載せる。住所検索など省略時は null。
+      return {
+        loading: true,
+        error: null,
+        candidates: [],
+        attemptedZip: action.attemptedZip ?? null,
+      };
     case "success":
-      return { loading: false, error: null, candidates: action.candidates };
+      // 候補がどの zip 由来かを保つ（attemptedZip は request で確定済み）。
+      return {
+        loading: false,
+        error: null,
+        candidates: action.candidates,
+        attemptedZip: state.attemptedZip,
+      };
     case "failure":
-      return { loading: false, error: action.error, candidates: [] };
+      // 「該当なし/失敗」表示も生成元 zip に紐付けたまま保つ。
+      return {
+        loading: false,
+        error: action.error,
+        candidates: [],
+        attemptedZip: state.attemptedZip,
+      };
     case "reset":
       return initialLookupState;
     default:
@@ -194,17 +246,21 @@ export function createAddressLookupController(
 
   const run = async (
     fetcher: () => Promise<{ candidates: AddressLookupCandidate[] }>,
-    onSuccess?: (candidates: AddressLookupCandidate[]) => void,
+    opts?: {
+      onSuccess?: (candidates: AddressLookupCandidate[]) => void;
+      // postal lookup のときだけ載せる（住所検索は null＝postal 結果と混同しない・P2-H）。
+      attemptedZip?: string | null;
+    },
   ) => {
     seq += 1;
     const issued = seq;
-    ports.onAction({ type: "request" });
+    ports.onAction({ type: "request", attemptedZip: opts?.attemptedZip ?? null });
     try {
       const res = await fetcher();
       if (!isLatestRequest(issued, seq)) return; // stale → 破棄（onSuccess も呼ばない）
       const received = res.candidates ?? [];
       ports.onAction({ type: "success", candidates: received });
-      onSuccess?.(received);
+      opts?.onSuccess?.(received);
     } catch (err) {
       if (!isLatestRequest(issued, seq)) return; // stale → 破棄
       ports.onAction({ type: "failure", error: classifyAddressLookupError(err) });
@@ -224,7 +280,8 @@ export function createAddressLookupController(
       // 直後の run() の seq++ が in-flight の住所検索応答も無効化する
       // ＝郵便番号の結果が後発の住所検索に上書きされない。
       debouncedSearch.cancel();
-      void run(() => ports.fetchByPostalCode(zip), onSuccess);
+      // attemptedZip=zip を載せ、結果が「この zip 由来」と分かるようにする（P2-H）。
+      void run(() => ports.fetchByPostalCode(zip), { onSuccess, attemptedZip: zip });
     },
     searchByAddress(address: string) {
       // Codex P2-1: スケジュール時点で即 invalidate（debounce 発火を待たない）。

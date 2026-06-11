@@ -92,6 +92,26 @@ describe("AddressLookupControls の配線", () => {
     expect(src).not.toMatch(/setAddressEdited|addressEdited\s*=\s*true/);
   });
 
+  it("postal 結果は生成元 zip に紐付け、zip 変更で stale 化する（P2-H）", () => {
+    // hook state の attemptedZip を読み、isPostalResultForZip で現在 zip と照合。
+    expect(src).toContain("attemptedZip");
+    expect(src).toContain("isPostalResultForZip");
+    // 「該当なし」表示は現在 zip に対応する postal 結果のときだけ。
+    expect(src).toMatch(/showNoResult[\s\S]*?isPostalResultForZip\(zip,\s*attemptedZip\)/);
+    // stale 判定（zip 変更後の旧 postal 結果）を一箇所に持つ。
+    expect(src).toContain("postalResultStale");
+  });
+
+  it("stale な postal 候補は applyCandidate で適用拒否する（P2-H・defense-in-depth）", () => {
+    // applyCandidate 冒頭で stale postal を弾く＝古い候補をクリックしても親へ反映しない。
+    expect(src).toMatch(/const applyCandidate = \([\s\S]*?postalResultStale[\s\S]*?return/);
+  });
+
+  it("postalAttempted の boolean フラグには依存しない＝生成元 zip を見る（P2-H）", () => {
+    // 「検索したか」ではなく「現在 zip に対応する結果か」で表示制御する。
+    expect(src).not.toContain("postalAttempted");
+  });
+
   it("APIキー/サーバ provider/orchestrator を露出しない（#8）", () => {
     expect(src).not.toContain("ADDRESS_LOOKUP_API_KEY");
     expect(src).not.toContain("process.env.ADDRESS_LOOKUP");

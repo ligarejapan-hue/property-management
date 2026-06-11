@@ -20,6 +20,8 @@ import {
   decideAddressSearchEffect,
   planCandidateApplication,
   evaluateAddressSearchEffect,
+  normalizeZipForCompare,
+  isPostalResultForZip,
   type AddressSearchEffectState,
   type LookupAction,
 } from "@/lib/address-lookup-ui-utils";
@@ -109,10 +111,20 @@ describe("classifyAddressLookupError (route の安定メッセージで分類)",
 describe("addressLookupReducer", () => {
   it("request で loading=true・error/candidates クリア", () => {
     const s = addressLookupReducer(
-      { loading: false, error: "unknown", candidates: [cand()] },
+      {
+        loading: false,
+        error: "unknown",
+        candidates: [cand()],
+        attemptedZip: null,
+      },
       { type: "request" },
     );
-    expect(s).toEqual({ loading: true, error: null, candidates: [] });
+    expect(s).toEqual({
+      loading: true,
+      error: null,
+      candidates: [],
+      attemptedZip: null,
+    });
   });
 
   it("success で candidates 反映・loading=false", () => {
@@ -121,30 +133,128 @@ describe("addressLookupReducer", () => {
       type: "success",
       candidates: cs,
     });
-    expect(s).toEqual({ loading: false, error: null, candidates: cs });
+    expect(s).toEqual({
+      loading: false,
+      error: null,
+      candidates: cs,
+      attemptedZip: null,
+    });
   });
 
   it("failure で error 反映・loading=false・candidates 空", () => {
     const s = addressLookupReducer(
-      { loading: true, error: null, candidates: [cand()] },
+      { loading: true, error: null, candidates: [cand()], attemptedZip: null },
       { type: "failure", error: "provider_error" },
     );
     expect(s).toEqual({
       loading: false,
       error: "provider_error",
       candidates: [],
+      attemptedZip: null,
     });
   });
 
   it("reset で loading/error/candidates が消える (#7)", () => {
     const s = addressLookupReducer(
-      { loading: true, error: "provider_error", candidates: [cand(), cand()] },
+      {
+        loading: true,
+        error: "provider_error",
+        candidates: [cand(), cand()],
+        attemptedZip: "1000005",
+      },
       { type: "reset" },
     );
     expect(s).toEqual(initialLookupState);
     expect(s.loading).toBe(false);
     expect(s.error).toBeNull();
     expect(s.candidates).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------
+// normalizeZipForCompare / isPostalResultForZip
+// （Codex P2-H: postal lookup 結果を生成元 zip に紐付け＝zip 変更で stale 化）
+// ---------------------------------------------------------------
+
+describe("normalizeZipForCompare / isPostalResultForZip (P2-H)", () => {
+  it("normalizeZipForCompare はハイフン・空白を無視して比較できる", () => {
+    expect(normalizeZipForCompare("100-0005")).toBe("1000005");
+    expect(normalizeZipForCompare(" 100 0005 ")).toBe("1000005");
+    expect(normalizeZipForCompare("100-0005")).toBe(
+      normalizeZipForCompare("1000005"),
+    );
+  });
+
+  it("attemptedZip=null は postal 由来でない＝false（住所検索結果は zip に紐づかない）", () => {
+    expect(isPostalResultForZip("1000005", null)).toBe(false);
+    expect(isPostalResultForZip("", null)).toBe(false);
+  });
+
+  it("現在 zip と attemptedZip が正規化一致なら true（ハイフン差を無視）", () => {
+    expect(isPostalResultForZip("100-0005", "1000005")).toBe(true);
+    expect(isPostalResultForZip("1000005", "100-0005")).toBe(true);
+  });
+
+  it("zip が変わって attemptedZip と不一致なら false＝postal 結果は stale", () => {
+    expect(isPostalResultForZip("2000000", "1000005")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------
+// addressLookupReducer の attemptedZip 追跡（Codex P2-H）
+// ---------------------------------------------------------------
+
+describe("addressLookupReducer attemptedZip (P2-H)", () => {
+  it("初期状態の attemptedZip は null", () => {
+    expect(initialLookupState.attemptedZip).toBeNull();
+  });
+
+  it("request は attemptedZip を保持する（postal 由来の zip を記録）", () => {
+    const s = addressLookupReducer(initialLookupState, {
+      type: "request",
+      attemptedZip: "1000005",
+    });
+    expect(s.attemptedZip).toBe("1000005");
+    expect(s.loading).toBe(true);
+    expect(s.candidates).toEqual([]);
+  });
+
+  it("request で attemptedZip 省略時は null（住所検索など postal でない取得）", () => {
+    const s = addressLookupReducer(initialLookupState, { type: "request" });
+    expect(s.attemptedZip).toBeNull();
+  });
+
+  it("success は attemptedZip を維持する（候補がどの zip 由来か保つ）", () => {
+    const req = addressLookupReducer(initialLookupState, {
+      type: "request",
+      attemptedZip: "1000005",
+    });
+    const s = addressLookupReducer(req, {
+      type: "success",
+      candidates: [cand()],
+    });
+    expect(s.attemptedZip).toBe("1000005");
+  });
+
+  it("failure も attemptedZip を維持する（該当なし/失敗表示を zip に紐付け）", () => {
+    const req = addressLookupReducer(initialLookupState, {
+      type: "request",
+      attemptedZip: "1000005",
+    });
+    const s = addressLookupReducer(req, {
+      type: "failure",
+      error: "provider_error",
+    });
+    expect(s.attemptedZip).toBe("1000005");
+  });
+
+  it("reset で attemptedZip も null へ戻る（postal context を捨てる）", () => {
+    const req = addressLookupReducer(initialLookupState, {
+      type: "request",
+      attemptedZip: "1000005",
+    });
+    const s = addressLookupReducer(req, { type: "reset" });
+    expect(s.attemptedZip).toBeNull();
   });
 });
 
@@ -513,6 +623,90 @@ describe("createAddressLookupController (P2-D: lookupByPostalCode の onSuccess)
     await flushMicrotasks();
 
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------
+// createAddressLookupController（Codex P2-H: postal request は attemptedZip を載せ、
+// 住所検索/reset は postal context をクリアする）
+// ---------------------------------------------------------------
+
+describe("createAddressLookupController (P2-H: postal 結果を zip に紐付け)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("lookupByPostalCode の request に attemptedZip=zip が載る", () => {
+    const { actions, fetchByPostalCode, controller } = setupController();
+    fetchByPostalCode.mockReturnValueOnce(deferred<LookupResult>().promise);
+
+    controller.lookupByPostalCode("100-0005");
+
+    const req = actions.find((a) => a.type === "request");
+    expect(req).toEqual({ type: "request", attemptedZip: "100-0005" });
+  });
+
+  it("postal 成功後の reduce 結果は attemptedZip=zip を保つ（候補が zip 由来と分かる）", async () => {
+    const { actions, fetchByPostalCode, controller } = setupController();
+    const postal = deferred<LookupResult>();
+    fetchByPostalCode.mockReturnValueOnce(postal.promise);
+
+    controller.lookupByPostalCode("1000005");
+    postal.resolve({ candidates: [cand({ postalCode: "1000005" })] });
+    await flushMicrotasks();
+
+    const reduced = actions.reduce(addressLookupReducer, initialLookupState);
+    expect(reduced.attemptedZip).toBe("1000005");
+    expect(reduced.candidates).toHaveLength(1);
+  });
+
+  it("住所検索は attemptedZip を載せない＝reduce 後 attemptedZip=null（postal と混同しない）", async () => {
+    const { actions, fetchByAddress, controller } = setupController();
+    const addr = deferred<LookupResult>();
+    fetchByAddress.mockReturnValueOnce(addr.promise);
+
+    controller.searchByAddress("東京都新宿区");
+    vi.advanceTimersByTime(300);
+    addr.resolve({ candidates: [cand()] });
+    await flushMicrotasks();
+
+    const reduced = actions.reduce(addressLookupReducer, initialLookupState);
+    expect(reduced.attemptedZip).toBeNull();
+  });
+
+  it("postal lookup 後に住所検索すると attemptedZip が即 null へクリアされる（mode=both で postal context が残らない）", async () => {
+    const { actions, fetchByPostalCode, fetchByAddress, controller } =
+      setupController();
+    const postal = deferred<LookupResult>();
+    fetchByPostalCode.mockReturnValueOnce(postal.promise);
+
+    controller.lookupByPostalCode("1000005");
+    postal.resolve({ candidates: [cand({ postalCode: "1000005" })] });
+    await flushMicrotasks();
+    expect(
+      actions.reduce(addressLookupReducer, initialLookupState).attemptedZip,
+    ).toBe("1000005");
+
+    fetchByAddress.mockReturnValueOnce(deferred<LookupResult>().promise);
+    controller.searchByAddress("東京都新宿区"); // schedule 時の reset で即クリア
+    expect(
+      actions.reduce(addressLookupReducer, initialLookupState).attemptedZip,
+    ).toBeNull();
+  });
+
+  it("reset は attemptedZip を null へ戻す", async () => {
+    const { actions, fetchByPostalCode, controller } = setupController();
+    fetchByPostalCode.mockReturnValueOnce(deferred<LookupResult>().promise);
+
+    controller.lookupByPostalCode("1000005");
+    controller.reset();
+
+    expect(
+      actions.reduce(addressLookupReducer, initialLookupState).attemptedZip,
+    ).toBeNull();
   });
 });
 

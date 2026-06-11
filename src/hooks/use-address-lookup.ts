@@ -80,6 +80,9 @@ export function useAddressLookup() {
     loading: state.loading,
     error: state.error,
     candidates: state.candidates,
+    // 現在の候補/該当なし表示を生成した郵便番号（postal 由来のみ非 null）。
+    // component が現在 zip と照合して stale postal 結果を弾く（Codex P2-H）。
+    attemptedZip: state.attemptedZip,
     lookupByPostalCode,
     searchByAddress,
     reset,

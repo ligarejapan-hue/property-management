@@ -28,6 +28,7 @@ import {
   requiresCandidateSelection,
   needsOverwriteConfirm,
   isSingleCandidate,
+  isPostalResultForZip,
   planCandidateApplication,
   evaluateAddressSearchEffect,
   type AddressLookupErrorKind,
@@ -83,6 +84,7 @@ export function AddressLookupControls({
     loading,
     error,
     candidates,
+    attemptedZip,
     lookupByPostalCode,
     searchByAddress,
     reset,
@@ -92,12 +94,18 @@ export function AddressLookupControls({
   // 確認確定まで onZipChange / onAddressChange は一切呼ばない（Codex P2-C）。
   const [pendingCandidate, setPendingCandidate] =
     useState<AddressLookupCandidate | null>(null);
-  // 郵便番号ボタンで一度でも引いたか（mount 直後・既存値ありで「見つかりません」を出さないため。
-  // event handler / 非同期継続でのみ更新＝effect 内 setState を避ける）。
-  const [postalAttempted, setPostalAttempted] = useState(false);
 
   const showPostal = mode === "postal" || mode === "both";
   const showSearch = mode === "search" || mode === "both";
+
+  // postal lookup 結果（候補/該当なし）は、それを生成した zip に紐づく（attemptedZip）。
+  // 郵便番号で検索したあと親フォーム/入力で zip が変わると、旧結果は現在 zip に
+  // 対応しなくなる＝stale。住所検索由来（attemptedZip=null）は zip に依存しないため
+  // stale にならない。stale な postal 結果は表示せず・適用も拒否する（Codex P2-H）。
+  // すべて render 由来の derived 値＝effect 内 setState を増やさない。
+  const postalResultStale =
+    attemptedZip !== null && !isPostalResultForZip(zip, attemptedZip);
+  const showCandidates = !postalResultStale && candidates.length > 0;
 
   // 郵便番号 lookup の onSuccess 継続（非同期）から現在の住所を読むための ref。
   // render では読まず、effect / handler / 継続の中だけで使う。
@@ -147,13 +155,15 @@ export function AddressLookupControls({
     if (plan.zip !== null) onZipChange(plan.zip);
     onAddressChange(plan.addressLine);
     setPendingCandidate(null);
-    setPostalAttempted(false);
     reset();
   };
 
   // 候補を採用: 住所欄が空なら zip と住所を同時に即反映。既存住所があれば確認まで
   // どちらも反映しない（キャンセルで「郵便番号だけ変わる」を残さない＝P2-C）。
   const applyCandidate = (candidate: AddressLookupCandidate) => {
+    // stale な postal 候補（zip 変更後に残った旧結果）は適用しない（Codex P2-H）。
+    // 表示側でも隠すが、クリック時にも現在 zip との整合性を確認して弾く（defense-in-depth）。
+    if (postalResultStale) return;
     const plan = planCandidateApplication(candidate, address);
     if (plan.mode === "immediate") {
       applyPlanNow(plan);
@@ -164,6 +174,8 @@ export function AddressLookupControls({
   };
 
   const confirmOverwrite = () => {
+    // 確認 UI 表示中に zip が変わって postal 候補が stale 化した場合は反映しない（P2-H）。
+    if (postalResultStale) return;
     if (pendingCandidate !== null) {
       applyPlanNow(planCandidateApplication(pendingCandidate, address));
     }
@@ -172,9 +184,10 @@ export function AddressLookupControls({
   // 郵便番号 → 住所（明示操作）。単一候補は onSuccess（成功かつ最新のときだけ呼ばれる
   // 非同期継続）で自動反映＝空住所ならボタン 1 回で入力が完了する（Codex P2-D）。
   // 既存住所がある場合は単一候補でも上書き確認を出す。
+  // 「検索したか」は hook state の attemptedZip（生成元 zip）で表現する＝
+  // 単なる boolean フラグは持たず、現在 zip との照合で表示制御する（Codex P2-H）。
   const handlePostalLookup = () => {
     setPendingCandidate(null);
-    setPostalAttempted(true);
     lookupByPostalCode(zip, (received) => {
       if (!isSingleCandidate(received)) return;
       const plan = planCandidateApplication(received[0], addressRef.current);
@@ -186,10 +199,12 @@ export function AddressLookupControls({
     });
   };
 
-  // 「該当なし」は明示的な郵便番号ボタン操作の後にだけ出す（debounce 検索中の誤表示・
-  // mount 直後の誤表示を避ける。検索方向の空は候補リストが出ないことで自明）。
+  // 「該当なし」は、現在 zip に対応する postal lookup 結果のときだけ出す
+  // （isPostalResultForZip(zip, attemptedZip)）。zip が変われば旧「該当なし」は消える＝
+  // 別 zip に古いメッセージを残さない（Codex P2-H）。住所検索由来（attemptedZip=null）や
+  // mount 直後・loading 中は出さない。
   const showNoResult =
-    postalAttempted &&
+    isPostalResultForZip(zip, attemptedZip) &&
     !loading &&
     error === null &&
     pendingCandidate === null &&
@@ -224,11 +239,11 @@ export function AddressLookupControls({
 
       {error && <p className="text-red-600">{ERROR_MESSAGES[error]}</p>}
 
-      {!loading && requiresCandidateSelection(candidates) && (
+      {!loading && showCandidates && requiresCandidateSelection(candidates) && (
         <p className="text-gray-500">複数の候補があります。選択してください。</p>
       )}
 
-      {!loading && candidates.length > 0 && (
+      {!loading && showCandidates && (
         <ul className="max-h-40 overflow-y-auto rounded border border-gray-200">
           {candidates.map((candidate, i) => (
             <li
@@ -249,8 +264,11 @@ export function AddressLookupControls({
       )}
 
       {/* 既存住所がある場合の上書き確認（silent overwrite 禁止）。確認確定まで
-          郵便番号も住所も親フォームへ反映しない＝キャンセルで不整合を残さない（P2-C）。 */}
-      {pendingCandidate !== null && needsOverwriteConfirm(address) && (
+          郵便番号も住所も親フォームへ反映しない＝キャンセルで不整合を残さない（P2-C）。
+          確認 UI 表示中に zip が変わって postal 候補が stale 化したら確認も閉じる（P2-H）。 */}
+      {pendingCandidate !== null &&
+        !postalResultStale &&
+        needsOverwriteConfirm(address) && (
         <div className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
           <p>
             現在の郵便番号・住所を「{formatCandidateLabel(pendingCandidate)}
