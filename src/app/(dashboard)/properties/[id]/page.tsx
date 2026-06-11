@@ -35,6 +35,7 @@ import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
 import { OwnerLinkModal } from "@/components/owners/owner-link-modal";
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
+import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 // ---------- Label maps ----------
@@ -802,6 +803,10 @@ function OwnerCard({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 住所補完の user-edit signal（Codex P2-G）。住所 input をユーザーが直接編集した時だけ
+  // true。編集開始（handleEdit）の保存値ロードや候補 apply では立てない＝開いただけで
+  // provider へ住所 PII を送らない。
+  const [addressEdited, setAddressEdited] = useState(false);
   // 誤紐づき修正モーダル（Phase 2-C）。owner:write 権限がない場合は出さない。
   const [mislinkOpen, setMislinkOpen] = useState(false);
 
@@ -842,6 +847,8 @@ function OwnerCard({
       email: po.owner.email ?? "",
       corporateNumber: po.owner.corporateNumber ?? "",
     });
+    // 保存値ロードは user-edit ではない＝signal をリセット（開いただけでは検索しない）。
+    setAddressEdited(false);
     setSaveError(null);
     setEditing(true);
   };
@@ -1005,9 +1012,29 @@ function OwnerCard({
                 <input
                   type="text"
                   value={form.address}
-                  onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                  onChange={(e) => {
+                    // ユーザーの直接編集＝user-edit signal を立てる（住所検索のトリガー）。
+                    setAddressEdited(true);
+                    setForm((f) => ({ ...f, address: e.target.value }));
+                  }}
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
+                {/* 郵便番号⇄住所 補完。zip と address の双方が編集可能なときだけ表示
+                    （候補確定で zip/address をペア反映するため）。onZipChange/onAddressChange は
+                    form 更新のみ＝addressEdited は立てない（候補 apply で再検索しない）。 */}
+                {editableFields.zip && editableFields.address && (
+                  <AddressLookupControls
+                    zip={form.zip}
+                    address={form.address}
+                    onZipChange={(z) => setForm((f) => ({ ...f, zip: z }))}
+                    onAddressChange={(a) =>
+                      setForm((f) => ({ ...f, address: a }))
+                    }
+                    addressEdited={addressEdited}
+                    disabled={saving}
+                    mode="both"
+                  />
+                )}
               </div>
             )}
             {/* email は full 権限かつ API レスポンスに含まれる場合のみ入力フィールドを表示 */}

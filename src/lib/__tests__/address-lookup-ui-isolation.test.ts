@@ -1,8 +1,10 @@
 /**
- * PR2 のスコープ・ガードレール（source assertion）。
- *  #8: 新規 UI ファイルが APIキー/secret/外部 provider/外部ホストを露出しない
+ * 住所補完 UI core のスコープ・ガードレール（source assertion）。
+ *  #8: UI core ファイルが APIキー/secret/外部 provider/外部ホストを露出しない
  *      （取得は api-client wrapper＝社内 route 経由のみ）。
- *  #9: Owner/Property/Building のフォーム本体にまだ組み込んでいない（#163 競合回避）。
+ *  #9: Property/Building のフォーム本体には**まだ組み込まない**（21-C 方針: Owner 先行・
+ *      Property/Building は postalCode カラム要否を別途判断してから／本 PR では非接触）。
+ *      Owner フォーム（owner-link-modal / 物件詳細 OwnerCard）は本 PR で統合するため対象外。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "fs";
@@ -17,15 +19,13 @@ const NEW_FILES = [
   "src/components/address/address-lookup-controls.tsx",
 ];
 
-// 住所補完を将来組み込む候補。本 PR ではいずれにも import を入れない。
-// owner-link-modal.tsx は #163(別ブランチ)所有のため当ブランチには存在しない場合がある。
-const FORM_FILES = [
-  "src/app/(dashboard)/properties/[id]/page.tsx",
+// Property/Building のフォーム本体。21-C PR4 方針変更により本 PR では非接触＝import を入れない。
+// （Property/Building は zip カラムを持たず、postalCode 追加の要否を別途判断してから統合する。）
+const PROPERTY_BUILDING_FORM_FILES = [
   "src/components/properties/new-property-modal.tsx",
   "src/components/properties/property-edit-form.tsx",
   "src/app/(dashboard)/buildings/page.tsx",
   "src/app/(dashboard)/buildings/[id]/page.tsx",
-  "src/components/owners/owner-link-modal.tsx",
 ];
 
 describe("#8 新規UIファイルは APIキー/secret/外部provider を露出しない", () => {
@@ -44,11 +44,11 @@ describe("#8 新規UIファイルは APIキー/secret/外部provider を露出�
   }
 });
 
-describe("#9 フォーム本体にまだ住所補完UIを組み込んでいない", () => {
-  for (const f of FORM_FILES) {
+describe("#9 Property/Building フォーム本体には住所補完UIを組み込んでいない（21-C 方針: Owner 先行）", () => {
+  for (const f of PROPERTY_BUILDING_FORM_FILES) {
     it(`${f}`, () => {
       const abs = resolve(process.cwd(), f);
-      if (!existsSync(abs)) return; // 当ブランチに無いファイルは対象外(#163 所有等)。
+      if (!existsSync(abs)) return;
       const src = readFileSync(abs, "utf8");
       expect(src).not.toContain("address-lookup-controls");
       expect(src).not.toContain("AddressLookupControls");
