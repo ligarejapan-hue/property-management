@@ -520,7 +520,7 @@ describe("createAddressLookupController (P2-D: lookupByPostalCode の onSuccess)
 // evaluateAddressSearchEffect（Codex P2-E: mount 時の既存住所では検索しない）
 // ---------------------------------------------------------------
 
-describe("evaluateAddressSearchEffect (P2-E: ユーザー編集後だけ検索)", () => {
+describe("evaluateAddressSearchEffect (P2-E/P2-G: ユーザー編集後だけ検索)", () => {
   const guard = (
     lastSeen: string,
     programmatic: string | null = null,
@@ -529,10 +529,56 @@ describe("evaluateAddressSearchEffect (P2-E: ユーザー編集後だけ検索)"
     programmaticAddress: programmatic,
   });
 
+  // ---- P2-G: 明示的な user-edit (touched) signal が必須 ----
+
+  it("edit form 想定: mount 時 address=''（loading 中）→ 保存済み住所が prop 反映されても userEdited=false なら検索しない（P2-G）", () => {
+    // 親フォームの非同期ロード: control が先に mount → 後から保存値が prop update。
+    // 住所は変化して見えるが user edit ではない → provider へ住所 PII を送らない。
+    const out = evaluateAddressSearchEffect(
+      true,
+      false,
+      false, // userEdited=false（親からの保存値反映）
+      "東京都千代田区保存済み住所",
+      guard(""), // mount 時は空を記録していた
+    );
+    expect(out.action).toBe("none");
+    // 届いた値は lastSeen に記録される（後の編集判定の基準が最新化される）
+    expect(out.nextState.lastSeenAddress).toBe("東京都千代田区保存済み住所");
+  });
+
+  it("prop update と user input の区別: 同じ住所変化でも userEdited の有無だけで search/none が分かれる（P2-G）", () => {
+    const byProp = evaluateAddressSearchEffect(
+      true,
+      false,
+      false,
+      "東京都新宿区",
+      guard("東京都"),
+    );
+    const byUser = evaluateAddressSearchEffect(
+      true,
+      false,
+      true,
+      "東京都新宿区",
+      guard("東京都"),
+    );
+    expect(byProp.action).toBe("none");
+    expect(byUser.action).toBe("search");
+  });
+
+  it("mode=search/both とも保存済み住所のロードだけでは検索しない（showSearch=true 経路で userEdited=false）（P2-G）", () => {
+    // showSearch=true は mode="search"/"both" の両方を表す（component 側で固定済み）。
+    expect(
+      evaluateAddressSearchEffect(true, false, false, "保存済み", guard("")).action,
+    ).toBe("none");
+  });
+
+  // ---- P2-E（userEdited=true のときの既存ガードは維持） ----
+
   it("mount 時＝住所が lastSeen と同値なら検索しない (#7)", () => {
     const out = evaluateAddressSearchEffect(
       true,
       false,
+      true,
       "東京都既存住所",
       guard("東京都既存住所"),
     );
@@ -540,10 +586,11 @@ describe("evaluateAddressSearchEffect (P2-E: ユーザー編集後だけ検索)"
     expect(out.nextState.lastSeenAddress).toBe("東京都既存住所");
   });
 
-  it("ユーザー編集＝住所が変わったら検索する (#8)", () => {
+  it("ユーザー編集＝touched かつ住所が変わったら検索する (#8)", () => {
     const out = evaluateAddressSearchEffect(
       true,
       false,
+      true,
       "東京都新宿区",
       guard("東京都"),
     );
@@ -554,6 +601,7 @@ describe("evaluateAddressSearchEffect (P2-E: ユーザー編集後だけ検索)"
 
   it("disabled なら住所が変わっても検索せず reset (#9)", () => {
     const out = evaluateAddressSearchEffect(
+      true,
       true,
       true,
       "東京都変更後",
@@ -567,6 +615,7 @@ describe("evaluateAddressSearchEffect (P2-E: ユーザー編集後だけ検索)"
     const out = evaluateAddressSearchEffect(
       true,
       false,
+      true,
       "東京都千代田区丸の内",
       guard("", "東京都千代田区丸の内"),
     );
@@ -576,14 +625,21 @@ describe("evaluateAddressSearchEffect (P2-E: ユーザー編集後だけ検索)"
   });
 
   it("空になったら reset＝古い候補を消す", () => {
-    const out = evaluateAddressSearchEffect(true, false, "", guard("東京都"));
+    const out = evaluateAddressSearchEffect(
+      true,
+      false,
+      true,
+      "",
+      guard("東京都"),
+    );
     expect(out.action).toBe("reset");
     expect(out.nextState.lastSeenAddress).toBe("");
   });
 
   it("showSearch=false なら何もしない", () => {
     expect(
-      evaluateAddressSearchEffect(false, false, "東京都", guard("")).action,
+      evaluateAddressSearchEffect(false, false, true, "東京都", guard(""))
+        .action,
     ).toBe("none");
   });
 });

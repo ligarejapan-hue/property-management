@@ -291,14 +291,19 @@ export interface AddressSearchEffectOutcome {
 /**
  * 住所検索 effect の判定＋ガード状態遷移。
  * decideAddressSearchEffect（showSearch / disabled / 空）に加えて:
- *  - mount 時の既存住所（lastSeen と同値）では検索しない＝レコードを開いた・
- *    親から既存値が渡ってきただけでは住所 PII を provider へ送らない（Codex P2-E）。
+ *  - 明示的な user-edit signal（userEdited）が立っていない限り検索しない＝
+ *    親フォームの非同期ロードで「空→保存済み住所」と prop が変化しても、
+ *    レコードを開いただけでは住所 PII を provider へ送らない（Codex P2-G）。
+ *    住所差分（lastSeen との比較）だけでは user edit と prop 反映を区別
+ *    できないため、検索トリガーには使わない。
+ *  - mount 時の既存住所（lastSeen と同値）では検索しない（Codex P2-E）。
  *  - 候補反映で自分が書いた住所（programmaticAddress）でも検索しない。
- * 検索はユーザー編集等で住所が「変わった」時だけ走る。
+ * 検索は userEdited かつ住所が「変わった」時だけ走る。
  */
 export function evaluateAddressSearchEffect(
   showSearch: boolean,
   disabled: boolean,
+  userEdited: boolean,
   address: string,
   state: AddressSearchEffectState,
 ): AddressSearchEffectOutcome {
@@ -318,6 +323,14 @@ export function evaluateAddressSearchEffect(
   }
   if (state.programmaticAddress === address) {
     // 候補反映で自分が書いた住所 → consume して検索しない。
+    return {
+      action: "none",
+      nextState: { lastSeenAddress: address, programmaticAddress: null },
+    };
+  }
+  if (!userEdited) {
+    // user-edit signal なしの住所変化＝親からの prop 反映（非同期ロード等）。
+    // 検索せず lastSeen だけ最新化し、以後の編集判定の基準にする（P2-G）。
     return {
       action: "none",
       nextState: { lastSeenAddress: address, programmaticAddress: null },

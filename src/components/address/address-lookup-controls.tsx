@@ -14,7 +14,9 @@
  * せず確認し、**確認まで zip も住所も反映しない**（キャンセルで「郵便番号だけ変わる」
  * 不整合を残さない＝Codex P2-C）。郵便番号 lookup の単一候補は自動反映する（Codex P2-D）。
  * 住所検索はユーザー編集で住所が変わった時だけ＝mount 時の既存住所では provider へ
- * 送らない（Codex P2-E）。
+ * 送らない（Codex P2-E）。さらに検索には親からの明示的な user-edit signal
+ * （addressEdited・default false＝fail-closed）が必須＝親フォームの非同期ロードで
+ * 「空→保存済み住所」と prop が変化しても provider へ送らない（Codex P2-G）。
  * 取得は hook（api-client wrapper 経由）＝社内 route のみ・APIキーには触れない。
  */
 import { useEffect, useRef, useState } from "react";
@@ -56,6 +58,13 @@ export interface AddressLookupControlsProps {
   /** 親フォームが編集不可のとき true（権限ゲート等は親側で判定）。 */
   disabled?: boolean;
   mode: AddressLookupMode;
+  /**
+   * user-edit signal: 親が住所 input の onChange（UI 入力イベント）でのみ true に
+   * する。非同期ロード・保存値反映・候補適用では立てない。false（既定）の間は
+   * address prop が変化しても住所検索しない＝レコードを開いただけで住所 PII を
+   * provider へ送らない（Codex P2-G・fail-closed）。
+   */
+  addressEdited?: boolean;
 }
 
 const linkBtn =
@@ -68,6 +77,7 @@ export function AddressLookupControls({
   onAddressChange,
   disabled = false,
   mode,
+  addressEdited = false,
 }: AddressLookupControlsProps) {
   const {
     loading,
@@ -103,14 +113,17 @@ export function AddressLookupControls({
     programmaticAddress: null,
   });
 
-  // 住所 → 郵便番号: ユーザー編集で住所が「変わった」時だけ検索（hook 内で 300ms debounce）。
-  // mount 時の既存住所では検索しない＝レコードを開いただけで住所 PII を送らない（P2-E）。
+  // 住所 → 郵便番号: user-edit signal（addressEdited）が立っていて、かつ住所が
+  // 「変わった」時だけ検索（hook 内で 300ms debounce）。mount 時の既存住所（P2-E）
+  // でも、親フォームの非同期ロードによる「空→保存済み住所」の prop 変化（P2-G）でも
+  // 検索しない＝レコードを開いただけで住所 PII を送らない。
   // disabled 中は検索しない（P2-A）。空になったらリセットして古い候補を消す。
   // effect 内では関数呼び出しのみ（setState しない）。
   useEffect(() => {
     const outcome = evaluateAddressSearchEffect(
       showSearch,
       disabled,
+      addressEdited,
       address,
       searchGuardRef.current,
     );
@@ -122,7 +135,7 @@ export function AddressLookupControls({
     if (outcome.action === "search") {
       searchByAddress(address);
     }
-  }, [address, showSearch, disabled, searchByAddress, reset]);
+  }, [address, addressEdited, showSearch, disabled, searchByAddress, reset]);
 
   // 計画（zip＋住所のペア）を親フォームへ同時反映し、保留・候補状態を片付ける。
   // 自分が書いた住所は次の検索 effect で consume させる（反映による再検索を防ぐ）。

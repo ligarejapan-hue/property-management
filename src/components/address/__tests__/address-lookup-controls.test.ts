@@ -17,7 +17,7 @@ describe("AddressLookupControls の配線", () => {
     expect(src).toMatch(/export function AddressLookupControls/);
   });
 
-  it("仕様どおりの props を受け取る", () => {
+  it("仕様どおりの props を受け取る（addressEdited=user-edit signal 含む）", () => {
     for (const prop of [
       "zip",
       "address",
@@ -25,6 +25,7 @@ describe("AddressLookupControls の配線", () => {
       "onAddressChange",
       "disabled",
       "mode",
+      "addressEdited",
     ]) {
       expect(src).toContain(prop);
     }
@@ -75,8 +76,20 @@ describe("AddressLookupControls の配線", () => {
     expect(src).toContain("evaluateAddressSearchEffect");
     expect(src).toContain("searchGuardRef");
     expect(src).toMatch(
-      /\[address,\s*showSearch,\s*disabled,\s*searchByAddress,\s*reset\]/,
+      /\[address,\s*addressEdited,\s*showSearch,\s*disabled,\s*searchByAddress,\s*reset\]/,
     );
+  });
+
+  it("user-edit signal: addressEdited を effect 判定へ渡し、default false＝fail-closed（P2-G）", () => {
+    // 親フォームの非同期ロードで address prop が「空→保存済み住所」と変化しても、
+    // UI 入力イベント由来の addressEdited が立っていない限り検索しない。
+    expect(src).toMatch(/addressEdited\s*=\s*false/);
+    expect(src).toMatch(
+      /evaluateAddressSearchEffect\(\s*showSearch,\s*disabled,\s*addressEdited,\s*address,/,
+    );
+    // component 自身は touched を立てない（input を所有しない＝親が UI 入力
+    // イベントでのみ立てる契約）。candidate 適用でも立てない。
+    expect(src).not.toMatch(/setAddressEdited|addressEdited\s*=\s*true/);
   });
 
   it("APIキー/サーバ provider/orchestrator を露出しない（#8）", () => {
