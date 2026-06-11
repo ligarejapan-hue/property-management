@@ -152,6 +152,7 @@ export async function PATCH(
         assignedTo: true,
         propertyType: true,
         address: true,
+        postalCode: true,
         lotNumber: true,
         buildingNumber: true,
         realEstateNumber: true,

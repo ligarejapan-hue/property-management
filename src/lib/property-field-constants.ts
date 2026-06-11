@@ -57,6 +57,7 @@ export const OWNER_TRACKED_FIELDS = [
 export const BUILDING_TRACKED_FIELDS = [
   "name",
   "address",
+  "postalCode",
   "lotNumber",
   "realEstateNumber",
   "totalFloors",

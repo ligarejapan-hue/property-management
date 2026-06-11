@@ -2177,6 +2177,7 @@ export async function uploadFile(
 export async function createProperty(data: {
   propertyType: string;
   address: string;
+  postalCode?: string | null;
   lotNumber?: string | null;
   introductionRoute?: string | null;
   note?: string | null;
