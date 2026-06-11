@@ -114,6 +114,16 @@ describe("POST /api/buildings — postalCode 受理（21-C PR-1）", () => {
     expect(pm.building.create.mock.calls[0][0].data.postalCode).toBe("1050001");
   });
 
+  it("postalCode=null（空のシリアライズ）を受理し create の data に null を渡す", async () => {
+    // 他の postalCode 経路は null 許容。Building create だけ null 拒否だと
+    // 同一フォーム payload で Building 新規作成だけ失敗する（API 非一貫）。
+    const res = await POST(
+      postReq({ name: "棟N", address: "東京都港区", postalCode: null }),
+    );
+    expect(res.status).toBe(201);
+    expect(pm.building.create.mock.calls[0][0].data.postalCode).toBeNull();
+  });
+
   it("postalCode 未指定でも create 成功（既存挙動が壊れない）", async () => {
     const res = await POST(postReq({ name: "棟B", address: "東京都港区" }));
     expect(res.status).toBe(201);

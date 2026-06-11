@@ -14,7 +14,7 @@ import { hasPermission } from "@/lib/permissions";
 const createBuildingSchema = z.object({
   name: z.string().min(1, "マンション名は必須です"),
   address: z.string().min(1, "住所は必須です"),
-  postalCode: z.string().optional(),
+  postalCode: z.string().nullable().optional(),
   lotNumber: z.string().optional(),
   realEstateNumber: z.string().optional(),
   totalFloors: z.number().int().positive().optional(),
