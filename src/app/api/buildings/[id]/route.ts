@@ -84,6 +84,7 @@ export async function PATCH(
         version: true,
         name: true,
         address: true,
+        postalCode: true,
         lotNumber: true,
         realEstateNumber: true,
         totalFloors: true,
