@@ -17,6 +17,7 @@ import {
   isExistingLinkedOwner,
   type OwnerCreateFormValues,
 } from "@/lib/owner-link-utils";
+import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 /** 検索 API（GET /api/owners/search）が返す 1 件。owner:read のマスク済み値が来る。 */
 interface OwnerSearchHit {
@@ -76,6 +77,9 @@ export function OwnerLinkModal({
 
   // 新規作成フォーム
   const [form, setForm] = useState<OwnerCreateFormValues>(EMPTY_FORM);
+  // 住所補完の user-edit signal（Codex P2-G）。住所 input をユーザーが直接編集した時だけ
+  // true。候補 apply（onAddressChange）では立てない＝開いた/反映されただけでは検索しない。
+  const [addressEdited, setAddressEdited] = useState(false);
 
   // 紐付け実行
   const [submitting, setSubmitting] = useState(false);
@@ -349,10 +353,23 @@ export function OwnerLinkModal({
               <input
                 type="text"
                 value={form.address}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, address: e.target.value }))
-                }
+                onChange={(e) => {
+                  // ユーザーの直接編集＝user-edit signal を立てる（住所検索のトリガー）。
+                  setAddressEdited(true);
+                  setForm((f) => ({ ...f, address: e.target.value }));
+                }}
                 className={inputClass}
+              />
+              {/* 郵便番号⇄住所 補完（社内 route 経由）。候補確定で zip/address をペア反映。
+                  onZipChange/onAddressChange は form 更新のみ＝addressEdited は立てない。 */}
+              <AddressLookupControls
+                zip={form.zip}
+                address={form.address}
+                onZipChange={(z) => setForm((f) => ({ ...f, zip: z }))}
+                onAddressChange={(a) => setForm((f) => ({ ...f, address: a }))}
+                addressEdited={addressEdited}
+                disabled={submitting}
+                mode="both"
               />
             </div>
             <div className="space-y-1 md:col-span-2">
