@@ -80,6 +80,49 @@ export function isPostalResultForZip(
   return normalizeZipForCompare(currentZip) === normalizeZipForCompare(attemptedZip);
 }
 
+/**
+ * postal lookup の非同期 onSuccess で単一候補を自動反映してよいか（Codex P2-I）。
+ * lookup 開始時に捕捉した requestedZip と、応答到着時点の現在 zip が正規化一致する
+ * ときだけ true。in-flight 中にユーザーが zip を編集していたら false＝古い応答で
+ * 新しい zip/住所を上書きしない。**render-time の postalResultStale はこの経路を
+ * 守れない**（onSuccess は success dispatch 直後・再 render 前に副作用を走らせるため）
+ * ＝表示 guard とは別に副作用側でこの判定を行う必要がある。
+ */
+export function shouldApplyPostalAutofill(
+  currentZip: string,
+  requestedZip: string,
+): boolean {
+  return normalizeZipForCompare(currentZip) === normalizeZipForCompare(requestedZip);
+}
+
+// ---------------------------------------------------------------
+// 上書き確認の保留候補（pendingCandidate）の stale 判定（Codex A 横断指摘）
+// ---------------------------------------------------------------
+
+/** pendingCandidate を出した時点の入力コンテキスト（zip/住所）。 */
+export interface PendingCandidateContext {
+  zip: string;
+  address: string;
+}
+
+/**
+ * 保留中の上書き確認候補が、設定時のコンテキスト（zip/住所）からズレていないか。
+ * 確認 UI 表示中に zip か住所（＝住所検索の検索条件）が変わったら stale とみなし、
+ * 古い候補を表示・confirm させない（Codex A 横断指摘）。
+ * context=null（保留なし）は stale でない。
+ */
+export function isPendingCandidateStale(
+  currentZip: string,
+  currentAddress: string,
+  context: PendingCandidateContext | null,
+): boolean {
+  if (context === null) return false;
+  return (
+    normalizeZipForCompare(currentZip) !== normalizeZipForCompare(context.zip) ||
+    currentAddress !== context.address
+  );
+}
+
 /** 候補の表示ラベル（郵便番号があれば 〒付き）。PII を増やさず addressLine を主に使う。 */
 export function formatCandidateLabel(candidate: AddressLookupCandidate): string {
   const zip = candidate.postalCode

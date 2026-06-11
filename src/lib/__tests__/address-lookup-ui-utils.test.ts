@@ -22,8 +22,11 @@ import {
   evaluateAddressSearchEffect,
   normalizeZipForCompare,
   isPostalResultForZip,
+  shouldApplyPostalAutofill,
+  isPendingCandidateStale,
   type AddressSearchEffectState,
   type LookupAction,
+  type PendingCandidateContext,
 } from "@/lib/address-lookup-ui-utils";
 
 const cand = (over: Partial<AddressLookupCandidate> = {}): AddressLookupCandidate => ({
@@ -197,6 +200,60 @@ describe("normalizeZipForCompare / isPostalResultForZip (P2-H)", () => {
 
   it("zip が変わって attemptedZip と不一致なら false＝postal 結果は stale", () => {
     expect(isPostalResultForZip("2000000", "1000005")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------
+// shouldApplyPostalAutofill
+// （Codex P2-I: postal lookup の非同期 onSuccess で stale ZIP を自動反映しない）
+// ---------------------------------------------------------------
+
+describe("shouldApplyPostalAutofill (P2-I: 非同期 autofill の stale ZIP ガード)", () => {
+  it("requestedZip と現在 zip が一致すれば自動反映してよい（true）", () => {
+    expect(shouldApplyPostalAutofill("1000005", "1000005")).toBe(true);
+  });
+
+  it("ハイフン差は無視して一致と見なす（true）", () => {
+    expect(shouldApplyPostalAutofill("100-0005", "1000005")).toBe(true);
+  });
+
+  it("in-flight 中に zip が変わって不一致なら自動反映しない（false）＝stale 応答ガード", () => {
+    // ZIP A で lookup 開始 → 応答前に ZIP B へ編集 → A の応答が来ても false。
+    expect(shouldApplyPostalAutofill("2000000", "1000005")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------
+// isPendingCandidateStale
+// （Codex A 横断: 確認 UI 表示中に zip/住所が変わったら古い候補を confirm させない）
+// ---------------------------------------------------------------
+
+describe("isPendingCandidateStale (A: pendingCandidate の stale 判定)", () => {
+  const ctx = (zip: string, address: string): PendingCandidateContext => ({
+    zip,
+    address,
+  });
+
+  it("context=null（保留なし）は stale でない（false）", () => {
+    expect(isPendingCandidateStale("1000005", "東京都", null)).toBe(false);
+  });
+
+  it("設定時と zip/住所が同じなら stale でない（false・ハイフン差は無視）", () => {
+    expect(
+      isPendingCandidateStale("100-0005", "東京都千代田区", ctx("1000005", "東京都千代田区")),
+    ).toBe(false);
+  });
+
+  it("確認 UI 表示中に zip が変わったら stale（true）", () => {
+    expect(
+      isPendingCandidateStale("2000000", "東京都千代田区", ctx("1000005", "東京都千代田区")),
+    ).toBe(true);
+  });
+
+  it("確認 UI 表示中に住所が変わったら stale（true）＝住所/検索条件の変化を捉える", () => {
+    expect(
+      isPendingCandidateStale("1000005", "東京都新宿区", ctx("1000005", "東京都千代田区")),
+    ).toBe(true);
   });
 });
 

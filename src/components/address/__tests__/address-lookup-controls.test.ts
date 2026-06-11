@@ -57,13 +57,15 @@ describe("AddressLookupControls の配線", () => {
     expect(src).toMatch(
       /const applyPlanNow[\s\S]*?onZipChange[\s\S]*?onAddressChange[\s\S]*?reset\(\)/,
     );
-    // キャンセルは pending を捨てるだけ＝親フォームを一切更新しない (#2)
-    expect(src).toMatch(/onClick=\{\(\) => setPendingCandidate\(null\)\}/);
+    // キャンセルは pending（候補＋コンテキスト）を捨てるだけ＝親フォームを一切更新しない (#2)
+    expect(src).toContain("clearPending");
+    expect(src).toMatch(/onClick=\{clearPending\}/);
   });
 
   it("郵便番号lookupの単一候補は onSuccess で自動反映（空住所）/上書き確認（既存住所）（Codex P2-D）", () => {
     expect(src).toContain("isSingleCandidate");
-    expect(src).toMatch(/lookupByPostalCode\(zip,/);
+    // lookup 開始時に zip を requestedZip として捕捉して渡す（P2-I）。
+    expect(src).toMatch(/lookupByPostalCode\(requestedZip,/);
   });
 
   it("loading / error を扱う（spinner と分類済みエラー文言）", () => {
@@ -110,6 +112,29 @@ describe("AddressLookupControls の配線", () => {
   it("postalAttempted の boolean フラグには依存しない＝生成元 zip を見る（P2-H）", () => {
     // 「検索したか」ではなく「現在 zip に対応する結果か」で表示制御する。
     expect(src).not.toContain("postalAttempted");
+  });
+
+  it("postal autofill は非同期 onSuccess で stale ZIP を弾く（P2-I・副作用 guard）", () => {
+    // lookup 開始時の zip を requestedZip として捕捉し、応答到着時の現在 zip(zipRef) と
+    // 照合してから auto-apply する＝render-time guard では守れない非同期経路を守る。
+    expect(src).toContain("requestedZip");
+    expect(src).toContain("zipRef");
+    expect(src).toContain("shouldApplyPostalAutofill");
+    // onSuccess 継続内（applyPlanNow より前）で stale なら early return する。
+    expect(src).toMatch(
+      /shouldApplyPostalAutofill\(zipRef\.current,\s*requestedZip\)[\s\S]*?return/,
+    );
+  });
+
+  it("pendingCandidate は設定時コンテキストを持ち、zip/住所変化で stale 化する（A 横断）", () => {
+    // 確認 UI 表示中に zip/住所が変わったら古い候補を表示・confirm させない。
+    expect(src).toContain("pendingContext");
+    expect(src).toContain("isPendingCandidateStale");
+    expect(src).toContain("pendingStale");
+    // confirmOverwrite は stale なら反映しない（副作用 guard）。
+    expect(src).toMatch(
+      /const confirmOverwrite = \(\) => \{[\s\S]*?(pendingStale|isPendingCandidateStale)[\s\S]*?return/,
+    );
   });
 
   it("APIキー/サーバ provider/orchestrator を露出しない（#8）", () => {

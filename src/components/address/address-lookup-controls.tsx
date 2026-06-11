@@ -29,11 +29,14 @@ import {
   needsOverwriteConfirm,
   isSingleCandidate,
   isPostalResultForZip,
+  shouldApplyPostalAutofill,
+  isPendingCandidateStale,
   planCandidateApplication,
   evaluateAddressSearchEffect,
   type AddressLookupErrorKind,
   type AddressSearchEffectState,
   type CandidateApplication,
+  type PendingCandidateContext,
 } from "@/lib/address-lookup-ui-utils";
 
 export type AddressLookupMode = "postal" | "search" | "both";
@@ -94,6 +97,10 @@ export function AddressLookupControls({
   // 確認確定まで onZipChange / onAddressChange は一切呼ばない（Codex P2-C）。
   const [pendingCandidate, setPendingCandidate] =
     useState<AddressLookupCandidate | null>(null);
+  // pendingCandidate を出した時点の入力コンテキスト（zip/住所）。確認 UI 表示中に
+  // zip/住所が変わったら古い候補を confirm させない（Codex A 横断指摘）。
+  const [pendingContext, setPendingContext] =
+    useState<PendingCandidateContext | null>(null);
 
   const showPostal = mode === "postal" || mode === "both";
   const showSearch = mode === "search" || mode === "both";
@@ -107,12 +114,21 @@ export function AddressLookupControls({
     attemptedZip !== null && !isPostalResultForZip(zip, attemptedZip);
   const showCandidates = !postalResultStale && candidates.length > 0;
 
-  // 郵便番号 lookup の onSuccess 継続（非同期）から現在の住所を読むための ref。
+  // 保留中の上書き確認候補が、設定時の zip/住所からズレたか（確認 UI 表示中に
+  // zip/住所を再編集したら古い候補を表示・confirm させない＝Codex A 横断指摘）。
+  const pendingStale = isPendingCandidateStale(zip, address, pendingContext);
+
+  // 郵便番号 lookup の onSuccess 継続（非同期）から現在の住所/郵便番号を読むための ref。
   // render では読まず、effect / handler / 継続の中だけで使う。
   const addressRef = useRef(address);
   useEffect(() => {
     addressRef.current = address;
   }, [address]);
+  // P2-I: 非同期 onSuccess で「応答到着時点の現在 zip」を読むための ref。
+  const zipRef = useRef(zip);
+  useEffect(() => {
+    zipRef.current = zip;
+  }, [zip]);
 
   // 住所検索ガード: mount 時の既存住所・候補反映で自分が書いた住所では検索しない
   // （Codex P2-E）。effect 内でのみ読み書きする。
@@ -145,6 +161,18 @@ export function AddressLookupControls({
     }
   }, [address, addressEdited, showSearch, disabled, searchByAddress, reset]);
 
+  // 保留候補と設定時コンテキストを一括で片付ける／開く（常にペアで動かす）。
+  const clearPending = () => {
+    setPendingCandidate(null);
+    setPendingContext(null);
+  };
+  // 上書き確認を開く。設定時の zip/住所を覚え、以後の編集で stale 判定できるようにする
+  // （非同期継続から呼ばれ得るため現在値は ref で読む＝Codex A 横断指摘）。
+  const openPending = (candidate: AddressLookupCandidate) => {
+    setPendingCandidate(candidate);
+    setPendingContext({ zip: zipRef.current, address: addressRef.current });
+  };
+
   // 計画（zip＋住所のペア）を親フォームへ同時反映し、保留・候補状態を片付ける。
   // 自分が書いた住所は次の検索 effect で consume させる（反映による再検索を防ぐ）。
   const applyPlanNow = (plan: CandidateApplication) => {
@@ -154,7 +182,7 @@ export function AddressLookupControls({
     };
     if (plan.zip !== null) onZipChange(plan.zip);
     onAddressChange(plan.addressLine);
-    setPendingCandidate(null);
+    clearPending();
     reset();
   };
 
@@ -168,14 +196,15 @@ export function AddressLookupControls({
     if (plan.mode === "immediate") {
       applyPlanNow(plan);
     } else {
-      // silent overwrite せず確認 UI を出す。
-      setPendingCandidate(candidate);
+      // silent overwrite せず確認 UI を出す（設定時コンテキストを記録）。
+      openPending(candidate);
     }
   };
 
   const confirmOverwrite = () => {
     // 確認 UI 表示中に zip が変わって postal 候補が stale 化した場合は反映しない（P2-H）。
-    if (postalResultStale) return;
+    // 設定時から zip/住所が変わって候補が stale 化した場合も反映しない（A 横断指摘）。
+    if (postalResultStale || pendingStale) return;
     if (pendingCandidate !== null) {
       applyPlanNow(planCandidateApplication(pendingCandidate, address));
     }
@@ -186,15 +215,21 @@ export function AddressLookupControls({
   // 既存住所がある場合は単一候補でも上書き確認を出す。
   // 「検索したか」は hook state の attemptedZip（生成元 zip）で表現する＝
   // 単なる boolean フラグは持たず、現在 zip との照合で表示制御する（Codex P2-H）。
+  // P2-I: 非同期 onSuccess は「応答到着時点の現在 zip(zipRef)」と「lookup 開始時の
+  // requestedZip」を照合してから反映する＝render-time guard では守れない経路で、
+  // in-flight 中に zip を編集していたら古い候補を適用しない。
   const handlePostalLookup = () => {
-    setPendingCandidate(null);
-    lookupByPostalCode(zip, (received) => {
+    const requestedZip = zip;
+    clearPending();
+    lookupByPostalCode(requestedZip, (received) => {
       if (!isSingleCandidate(received)) return;
+      // stale ZIP 応答ガード（副作用側・applyPlanNow / openPending より前）。
+      if (!shouldApplyPostalAutofill(zipRef.current, requestedZip)) return;
       const plan = planCandidateApplication(received[0], addressRef.current);
       if (plan.mode === "immediate") {
         applyPlanNow(plan);
       } else {
-        setPendingCandidate(received[0]);
+        openPending(received[0]);
       }
     });
   };
@@ -265,9 +300,11 @@ export function AddressLookupControls({
 
       {/* 既存住所がある場合の上書き確認（silent overwrite 禁止）。確認確定まで
           郵便番号も住所も親フォームへ反映しない＝キャンセルで不整合を残さない（P2-C）。
-          確認 UI 表示中に zip が変わって postal 候補が stale 化したら確認も閉じる（P2-H）。 */}
+          確認 UI 表示中に zip が変わって postal 候補が stale 化（P2-H）したり、設定時から
+          zip/住所が変わって候補が stale 化（A 横断指摘）したら確認も閉じる。 */}
       {pendingCandidate !== null &&
         !postalResultStale &&
+        !pendingStale &&
         needsOverwriteConfirm(address) && (
         <div className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
           <p>
@@ -285,7 +322,7 @@ export function AddressLookupControls({
             </button>
             <button
               type="button"
-              onClick={() => setPendingCandidate(null)}
+              onClick={clearPending}
               className="rounded border border-gray-300 px-2 py-0.5 text-gray-600 hover:bg-gray-50"
             >
               キャンセル
