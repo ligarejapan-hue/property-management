@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
 import { USE_MOCK, fetchUsers } from "@/lib/api-client";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface AssigneeOption {
   id: string;
@@ -58,6 +59,7 @@ interface FormField {
 const FORM_FIELDS: FormField[] = [
   { key: "propertyType", label: "種別", type: "select", section: "基本",
     options: PROPERTY_TYPE_OPTIONS },
+  { key: "postalCode", label: "郵便番号", type: "text", section: "基本" },
   { key: "address", label: "住所", type: "text", section: "基本" },
   { key: "lotNumber", label: "地番", type: "text", section: "基本" },
   { key: "buildingNumber", label: "家屋番号", type: "text", section: "基本" },
@@ -99,6 +101,8 @@ export default function PropertyEditForm({
   onSaved,
 }: PropertyEditFormProps) {
   const [values, setValues] = useState<Record<string, string>>({});
+  // 住所補完の user-edit signal（Codex P2-G）。住所 input 直接編集時だけ true。
+  const [addressEdited, setAddressEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [users, setUsers] = useState<AssigneeOption[]>([]);
@@ -111,6 +115,8 @@ export default function PropertyEditForm({
       initial[f.key] = val != null ? String(val) : "";
     }
     setValues(initial);
+    // prop（既存値）再投入は user-edit ではない＝signal をリセット（初期ロードで検索しない）。
+    setAddressEdited(false);
   }, [property]);
 
   useEffect(() => {
@@ -269,12 +275,29 @@ export default function PropertyEditForm({
                         <input
                           type={field.type}
                           value={values[field.key] ?? ""}
-                          onChange={(e) =>
-                            handleChange(field.key, e.target.value)
-                          }
+                          onChange={(e) => {
+                            // 住所のユーザー直接編集だけ user-edit signal を立てる。
+                            if (field.key === "address") setAddressEdited(true);
+                            handleChange(field.key, e.target.value);
+                          }}
                           step={field.type === "number" ? "any" : undefined}
                           className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                         />
+                      )}
+                      {field.key === "address" && (
+                        <div className="mt-1.5">
+                          {/* 郵便番号⇄住所 補完。候補確定は postalCode/address をペア反映。
+                              onZipChange/onAddressChange は addressEdited を立てない。 */}
+                          <AddressLookupControls
+                            zip={values.postalCode ?? ""}
+                            address={values.address ?? ""}
+                            onZipChange={(z) => handleChange("postalCode", z)}
+                            onAddressChange={(a) => handleChange("address", a)}
+                            addressEdited={addressEdited}
+                            disabled={saving}
+                            mode="both"
+                          />
+                        </div>
                       )}
                     </div>
                   ),
