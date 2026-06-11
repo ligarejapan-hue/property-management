@@ -31,6 +31,7 @@ import {
   isPostalResultForZip,
   shouldApplyPostalAutofill,
   isPendingCandidateStale,
+  shouldShowLookupError,
   planCandidateApplication,
   evaluateAddressSearchEffect,
   type AddressLookupErrorKind,
@@ -113,6 +114,8 @@ export function AddressLookupControls({
   const postalResultStale =
     attemptedZip !== null && !isPostalResultForZip(zip, attemptedZip);
   const showCandidates = !postalResultStale && candidates.length > 0;
+  // error も候補/該当なしと同基準で gate＝postal 由来 error は zip 変更で消す（Codex P2-K）。
+  const showError = shouldShowLookupError(error, zip, attemptedZip);
 
   // 保留中の上書き確認候補が、設定時の zip/住所からズレたか（確認 UI 表示中に
   // zip/住所を再編集したら古い候補を表示・confirm させない＝Codex A 横断指摘）。
@@ -272,7 +275,9 @@ export function AddressLookupControls({
         </p>
       )}
 
-      {error && <p className="text-red-600">{ERROR_MESSAGES[error]}</p>}
+      {showError && error && (
+        <p className="text-red-600">{ERROR_MESSAGES[error]}</p>
+      )}
 
       {!loading && showCandidates && requiresCandidateSelection(candidates) && (
         <p className="text-gray-500">複数の候補があります。選択してください。</p>

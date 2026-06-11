@@ -24,6 +24,7 @@ import {
   isPostalResultForZip,
   shouldApplyPostalAutofill,
   isPendingCandidateStale,
+  shouldShowLookupError,
   type AddressSearchEffectState,
   type LookupAction,
   type PendingCandidateContext,
@@ -254,6 +255,52 @@ describe("isPendingCandidateStale (A: pendingCandidate の stale 判定)", () =>
     expect(
       isPendingCandidateStale("1000005", "東京都新宿区", ctx("1000005", "東京都千代田区")),
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------
+// shouldShowLookupError
+// （Codex P2-K: zip 変更後の stale な postal error を表示しない＝候補/該当なしと同基準）
+// ---------------------------------------------------------------
+
+describe("shouldShowLookupError (P2-K: stale lookup error を表示しない)", () => {
+  it("error=null なら表示しない", () => {
+    expect(shouldShowLookupError(null, "1000005", "1000005")).toBe(false);
+  });
+
+  it("postal 由来 error（attemptedZip 非 null）は現在 zip と一致するときだけ表示（ハイフン差は無視）", () => {
+    expect(shouldShowLookupError("invalid_input", "1000005", "1000005")).toBe(true);
+    expect(shouldShowLookupError("invalid_input", "100-0005", "1000005")).toBe(true);
+  });
+
+  it("postal lookup 失敗後に zip を変えたら旧 error は表示しない（stale）", () => {
+    // zip A=1000005 で provider_error → zip B=2000000 へ編集 → A 由来 error は消える。
+    expect(shouldShowLookupError("provider_error", "2000000", "1000005")).toBe(false);
+  });
+
+  it("住所検索由来 error（attemptedZip=null）は zip に紐づかずそのまま表示", () => {
+    expect(shouldShowLookupError("provider_error", "1000005", null)).toBe(true);
+  });
+
+  it("P2-K 経路: zip A 失敗→B へ編集で旧 error 非表示、B で再 lookup 失敗は B 由来表示、B 成功で復活しない", () => {
+    // zip A 失敗
+    let s = addressLookupReducer(initialLookupState, {
+      type: "request",
+      attemptedZip: "1000005",
+    });
+    s = addressLookupReducer(s, { type: "failure", error: "provider_error" });
+    expect(shouldShowLookupError(s.error, "1000005", s.attemptedZip)).toBe(true);
+    // zip B へ編集（まだ再 lookup していない）→ A 由来 error は表示しない
+    expect(shouldShowLookupError(s.error, "2000000", s.attemptedZip)).toBe(false);
+    // zip B で再 lookup（request が旧 error をクリア）→ B 失敗 → B 由来 error
+    s = addressLookupReducer(s, { type: "request", attemptedZip: "2000000" });
+    expect(s.error).toBeNull();
+    s = addressLookupReducer(s, { type: "failure", error: "invalid_input" });
+    expect(shouldShowLookupError(s.error, "2000000", s.attemptedZip)).toBe(true);
+    // zip B で成功 → error クリア・古い error は復活しない
+    s = addressLookupReducer(s, { type: "request", attemptedZip: "2000000" });
+    s = addressLookupReducer(s, { type: "success", candidates: [cand()] });
+    expect(shouldShowLookupError(s.error, "2000000", s.attemptedZip)).toBe(false);
   });
 });
 

@@ -95,6 +95,22 @@ export function shouldApplyPostalAutofill(
   return normalizeZipForCompare(currentZip) === normalizeZipForCompare(requestedZip);
 }
 
+/**
+ * lookup の error を表示してよいか（Codex P2-K: candidates / 該当なし と同基準で stale を弾く）。
+ * postal 由来 error（attemptedZip 非 null）は現在 zip と正規化一致のときだけ表示し、
+ * zip を変えたら旧 error は消す。住所検索由来（attemptedZip=null）は zip に紐づかない
+ * のでそのまま表示する（次の検索で reducer の request が error をクリアする）。
+ */
+export function shouldShowLookupError(
+  error: AddressLookupErrorKind | null,
+  currentZip: string,
+  attemptedZip: string | null,
+): boolean {
+  if (error === null) return false;
+  if (attemptedZip === null) return true;
+  return isPostalResultForZip(currentZip, attemptedZip);
+}
+
 // ---------------------------------------------------------------
 // 上書き確認の保留候補（pendingCandidate）の stale 判定（Codex A 横断指摘）
 // ---------------------------------------------------------------

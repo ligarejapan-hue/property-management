@@ -137,6 +137,15 @@ describe("AddressLookupControls の配線", () => {
     );
   });
 
+  it("error 表示も候補/該当なしと同じ基準で stale を gate する（P2-K）", () => {
+    // postal lookup 失敗後に zip を変えたら、候補/該当なしと同様に error も消す。
+    expect(src).toContain("shouldShowLookupError");
+    expect(src).toContain("showError");
+    // error を無条件表示しない（旧: {error && <p ...}）。showError gate を通す。
+    expect(src).not.toMatch(/\{error && <p/);
+    expect(src).toMatch(/\{showError && error &&/);
+  });
+
   it("APIキー/サーバ provider/orchestrator を露出しない（#8）", () => {
     expect(src).not.toContain("ADDRESS_LOOKUP_API_KEY");
     expect(src).not.toContain("process.env.ADDRESS_LOOKUP");
