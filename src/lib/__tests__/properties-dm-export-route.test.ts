@@ -70,6 +70,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findMany: vi.fn(), count: vi.fn() },
+    propertyOwner: { count: vi.fn() },
     importJobRow: { findMany: vi.fn() },
     // export は CSV 生成であり送付履歴ではない。PropertyDmLog には一切書き込まないことを
     // 固定するため mock を用意し、各テストで未呼び出しを検証する。
@@ -88,6 +89,7 @@ import { GET } from "../../app/api/properties/dm-export/route";
 
 const pm = prisma as unknown as {
   property: { findMany: Mock; count: Mock };
+  propertyOwner: { count: Mock };
   importJobRow: { findMany: Mock };
   propertyDmLog: { create: Mock; createMany: Mock; update: Mock };
 };
@@ -189,10 +191,12 @@ beforeEach(() => {
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL as any);
   vi.mocked(getOwnerDisplayConfig).mockResolvedValue(FULL_DISPLAY as any);
   pm.property.findMany.mockResolvedValue([]);
-  // ownerなし送付可物件 COUNT（skippedCount 用）の既定値。
+  // ownerなし送付可物件 COUNT（skippedCount 用）/ address 欠落所有者 COUNT
+  // （skippedAddressMissingCount 用）の既定値。
   // mockResolvedValue は vi.clearAllMocks では消えない（呼び出し履歴のみクリア）ため、
   // 各テスト内の vi.clearAllMocks() 後も既定値 0 が維持される。
   pm.property.count.mockResolvedValue(0);
+  pm.propertyOwner.count.mockResolvedValue(0);
   pm.importJobRow.findMany.mockResolvedValue([]);
 });
 
@@ -1071,7 +1075,9 @@ describe("GET /api/properties/dm-export — 同一送付先住所グルーピン
     expect(csv).not.toContain("888-8888");
   });
 
-  it("08. Owner.address が空欄の所有者は skip され skippedAddressMissingCount に計上", async () => {
+  it("08. address 空欄の所有者は CSV に出ず、skippedAddressMissingCount は DB COUNT を反映", async () => {
+    // 取得物件内では address 空欄の共有者は grouping で skip され CSV に出ない。
+    // skippedAddressMissingCount は fetch ではなく DB COUNT（全 matching 範囲）由来。
     pm.property.findMany.mockResolvedValue([
       makeProp({
         id: "p1",
@@ -1084,6 +1090,7 @@ describe("GET /api/properties/dm-export — 同一送付先住所グルーピン
         ],
       }),
     ]);
+    pm.propertyOwner.count.mockResolvedValue(1); // address null/"" の非アーカイブ所有者数
 
     const res = await GET(makeRequest());
     expect(res.status).toBe(200);
@@ -1097,29 +1104,31 @@ describe("GET /api/properties/dm-export — 同一送付先住所グルーピン
     // skippedCount（非アーカイブ所有者0件の物件）には混ぜない
     expect(audit.detail.skippedCount).toBe(0);
     expect(audit.detail.resultCount).toBe(1);
+
+    // COUNT は「matching 送付可物件 × 非アーカイブ所有者 × address が null/空」を数える
+    const cwhere = pm.propertyOwner.count.mock.calls[0][0].where;
+    expect(cwhere.owner.isArchived).toBe(false);
+    expect(cwhere.owner.OR).toEqual([{ address: null }, { address: "" }]);
+    expect(cwhere.property.dmStatus).toBe("send");
+    expect(cwhere.property.isArchived).toBe(false);
   });
 
-  it("08b. 全員 address 空欄の物件は 0 行（skippedAddressMissingCount に全員計上・skippedCount は据え置き）", async () => {
-    pm.property.findMany.mockResolvedValue([
-      makeProp({
-        id: "p1",
-        propertyOwners: [
-          makePropertyOwner({ owner: { name: "空1", address: "" } }),
-          makePropertyOwner({ owner: { name: "空2", address: null }, isPrimary: false }),
-        ],
-      }),
-    ]);
+  it("08b. address 空欄しか無い物件は fetch されなくても skippedAddressMissingCount に計上（Codex P2: 取りこぼさない）", async () => {
+    // address 空欄しか持たない物件は mailable 述語で fetch 対象外（findMany は空）。
+    // それでも DB COUNT は全 matching 範囲を数えるため、当該所有者は監査に残る。
+    pm.property.findMany.mockResolvedValue([]); // mailable 物件なし
+    pm.propertyOwner.count.mockResolvedValue(3); // address 空欄の非アーカイブ所有者 3 名
 
     const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
     const csv = await readCsv(res);
     const lines = csv.split("\r\n").filter((l) => l.length > 0);
     expect(lines).toHaveLength(1); // ヘッダのみ
     const audit = lastAudit();
     expect(audit.detail.resultCount).toBe(0);
     expect(audit.detail.count).toBe(0);
-    expect(audit.detail.skippedAddressMissingCount).toBe(2);
-    // 「非アーカイブ所有者0件」ではない（所有者は居る）ため skippedCount には数えない
-    expect(audit.detail.skippedCount).toBe(0);
+    // fetch されていない物件の所有者も DB COUNT で計上される（取りこぼさない）
+    expect(audit.detail.skippedAddressMissingCount).toBe(3);
   });
 
   it("09. 既存 12 列の列順を維持し、末尾に送付先所有者名一覧・共有者数を追加", async () => {

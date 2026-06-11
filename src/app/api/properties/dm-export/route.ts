@@ -205,8 +205,7 @@ export async function GET(request: NextRequest) {
 
     // 物件ごとに「同一送付先住所（Owner.zip + Owner.address）の共有者 = 1 行」へグループ化する。
     // 取込元逆引き・行マッピングより前にグルーピングし、最終行数（グループ数）で上限を再判定する。
-    //  - Owner.address 空欄の所有者は送付先不明として skip（skippedAddressMissingCount に計上）。
-    //  - グループが 0 件になった物件（全員 address 空欄等）は行を生まず skippedCount に数える。
+    //  - Owner.address 空欄の所有者は送付先不明として skip（件数は下で DB COUNT する）。
     //  - 同一住所の共有者は名義違いでも 1 通にまとめる（未成年・家族名義への個別 DM を回避）。
     const grouped = properties.map((p) => ({
       property: p,
@@ -214,23 +213,18 @@ export async function GET(request: NextRequest) {
     }));
 
     // skippedCount は既存の意味（非アーカイブ所有者 0 件の物件）を維持する。
-    // address 空欄による送付先欠落は別カウント（skippedAddressMissingCount）に分け、
-    // skippedCount や行数の意味を混ぜない（既存差込運用・監査の互換維持）。
     let mailablePropertyCount = 0;
     let skippedCount = 0;
-    let skippedAddressMissingCount = 0;
     let totalRows = 0;
     for (const g of grouped) {
-      skippedAddressMissingCount += g.skippedAddressCount;
       if (g.property.propertyOwners.length === 0) {
         // 非アーカイブ所有者 0 件（既存 skippedCount の意味そのもの・race 防御）。
         skippedCount += 1;
         continue;
       }
       if (g.groups.length === 0) {
-        // 所有者は居るが全員 address 空欄 → 送付先 0 件。
-        // これは「所有者 0 件」ではないため skippedCount には混ぜない
-        //（欠落は skippedAddressMissingCount に計上済み）。
+        // mailable 物件として取得したが、全員 address が空白のみ等で送付先 0 件になった残留ケース。
+        // 「所有者 0 件」ではないため skippedCount には混ぜない（行も生まない）。
         continue;
       }
       mailablePropertyCount += 1;
@@ -265,10 +259,14 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 上限判定は (1)〜(3) で実施済み（rows.length === totalRows）。
-    // ownerなし送付可物件は fetch 対象から外したため、skippedCount は COUNT で正確に数える。
-    // （ここで数えるのは「非アーカイブ所有者が 0 名」の物件。address 空欄で送付先 0 件に
-    //   なった物件は上の loop で skippedCount に加算済みで、none 条件とは別集合のため二重計上しない）
+    // 監査用カウントは上限ガードを通過した成功確定後に DB から数える（400 経路では実行しない）。
+    //  - skippedCount: 非アーカイブ所有者が 0 名の送付可物件（既存の意味そのもの）。
+    //  - skippedAddressMissingCount: 送付先になり得ない（Owner.address が null/空文字）の
+    //    非アーカイブ所有者数。fetch は mailable 物件に絞るため address 空欄しか持たない物件の
+    //    所有者は取得されない。それらも漏れなく数えるため fetch ではなく全 matching 範囲を
+    //    DB COUNT する（取得ウィンドウに依存しない正確な件数）。
+    //    ※「空白のみ」の住所は DB の null/"" 条件では拾えない（グルーピング側では skip される）。
+    let skippedAddressMissingCount = 0;
     if (!mgmtShortCircuitEmpty) {
       skippedCount += await prisma.property.count({
         where: {
@@ -277,6 +275,12 @@ export async function GET(request: NextRequest) {
             ...(where.AND ?? []),
             { propertyOwners: { none: eligibleOwnerWhere } },
           ],
+        },
+      });
+      skippedAddressMissingCount = await prisma.propertyOwner.count({
+        where: {
+          owner: { isArchived: false, OR: [{ address: null }, { address: "" }] },
+          property: where,
         },
       });
     }
