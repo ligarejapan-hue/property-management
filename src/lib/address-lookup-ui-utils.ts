@@ -429,10 +429,13 @@ export function evaluateAddressSearchEffect(
     };
   }
   if (!userEdited) {
-    // user-edit signal なしの住所変化＝親からの prop 反映（非同期ロード等）。
-    // 検索せず lastSeen だけ最新化し、以後の編集判定の基準にする（P2-G）。
+    // user-edit signal なしの住所変化＝親からの prop 反映（非同期ロード・レコード切替等）。
+    // provider へは送らない（P2-G＝PII 非送信）が、直前の user 編集で出ていた旧クエリの
+    // 候補をそのまま残すと、別レコードへ前住所の郵便番号/住所を誤適用できる。
+    // そこで reset して候補を消す＝検索はしないが古い候補は残さない（Codex P2-J）。
+    // lastSeen は最新化し、以後の編集判定の基準にする。
     return {
-      action: "none",
+      action: "reset",
       nextState: { lastSeenAddress: address, programmaticAddress: null },
     };
   }

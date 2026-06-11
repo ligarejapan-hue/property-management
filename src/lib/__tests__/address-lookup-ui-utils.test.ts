@@ -780,11 +780,12 @@ describe("evaluateAddressSearchEffect (P2-E/P2-G: ユーザー編集後だけ検
     programmaticAddress: programmatic,
   });
 
-  // ---- P2-G: 明示的な user-edit (touched) signal が必須 ----
+  // ---- P2-G/P2-J: 明示的な user-edit (touched) signal が必須＋prop 変化では候補を clear ----
 
   it("edit form 想定: mount 時 address=''（loading 中）→ 保存済み住所が prop 反映されても userEdited=false なら検索しない（P2-G）", () => {
     // 親フォームの非同期ロード: control が先に mount → 後から保存値が prop update。
     // 住所は変化して見えるが user edit ではない → provider へ住所 PII を送らない。
+    // 検索はしないが、旧クエリの候補を残さないよう reset する（P2-J）。
     const out = evaluateAddressSearchEffect(
       true,
       false,
@@ -792,12 +793,12 @@ describe("evaluateAddressSearchEffect (P2-E/P2-G: ユーザー編集後だけ検
       "東京都千代田区保存済み住所",
       guard(""), // mount 時は空を記録していた
     );
-    expect(out.action).toBe("none");
+    expect(out.action).toBe("reset");
     // 届いた値は lastSeen に記録される（後の編集判定の基準が最新化される）
     expect(out.nextState.lastSeenAddress).toBe("東京都千代田区保存済み住所");
   });
 
-  it("prop update と user input の区別: 同じ住所変化でも userEdited の有無だけで search/none が分かれる（P2-G）", () => {
+  it("prop update と user input の区別: 同じ住所変化でも userEdited の有無で reset/search が分かれる（P2-G/P2-J）", () => {
     const byProp = evaluateAddressSearchEffect(
       true,
       false,
@@ -812,15 +813,34 @@ describe("evaluateAddressSearchEffect (P2-E/P2-G: ユーザー編集後だけ検
       "東京都新宿区",
       guard("東京都"),
     );
-    expect(byProp.action).toBe("none");
+    // prop 由来＝検索しない（PII 非送信）が、旧候補を残さないよう reset（P2-J）。
+    expect(byProp.action).toBe("reset");
     expect(byUser.action).toBe("search");
   });
 
-  it("mode=search/both とも保存済み住所のロードだけでは検索しない（showSearch=true 経路で userEdited=false）（P2-G）", () => {
+  it("mode=search/both とも保存済み住所のロードでは検索しない（showSearch=true 経路で userEdited=false）（P2-G/P2-J）", () => {
     // showSearch=true は mode="search"/"both" の両方を表す（component 側で固定済み）。
+    // 検索はしない（P2-G）が、旧候補は reset で消す（P2-J）。
     expect(
       evaluateAddressSearchEffect(true, false, false, "保存済み", guard("")).action,
-    ).toBe("none");
+    ).toBe("reset");
+  });
+
+  it("P2-J: ユーザー編集済み候補が出ている状態でレコード切替（prop 由来の住所変化・userEdited=false）→ 旧候補を残さず reset・検索しない", () => {
+    // 直前に user 編集で候補が出ていた → 親がレコードを切替/再ロード（addressEdited=false で
+    // 別住所が prop で届く）。検索はしない（PII 非送信）が、旧住所の候補をクリックして
+    // 別レコードへ前住所の郵便番号/住所を適用できないよう、候補を reset でクリアする。
+    const out = evaluateAddressSearchEffect(
+      true,
+      false,
+      false, // prop 由来（非 user-edit）
+      "大阪府大阪市別レコード住所",
+      guard("東京都千代田区前レコード住所"), // 直前に user 編集していた住所
+    );
+    expect(out.action).toBe("reset");
+    expect(out.action).not.toBe("search"); // provider へは送らない
+    expect(out.nextState.lastSeenAddress).toBe("大阪府大阪市別レコード住所");
+    expect(out.nextState.programmaticAddress).toBeNull();
   });
 
   // ---- P2-E（userEdited=true のときの既存ガードは維持） ----
