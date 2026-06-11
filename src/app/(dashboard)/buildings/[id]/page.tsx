@@ -24,6 +24,7 @@ import {
   createBuildingUnit,
 } from "@/lib/api-client";
 import BuildingPhotoTab from "@/components/buildings/building-photo-tab";
+import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { CASE_STATUS_LABELS as CASE_LABELS } from "@/lib/property-types";
 
 // ---------- Types ----------
@@ -31,6 +32,7 @@ import { CASE_STATUS_LABELS as CASE_LABELS } from "@/lib/property-types";
 interface BuildingData {
   id: string;
   name: string;
+  postalCode: string | null;
   address: string;
   lotNumber: string | null;
   realEstateNumber: string | null;
@@ -92,6 +94,8 @@ export default function BuildingDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
+  // 住所補完の user-edit signal（Codex P2-G）。住所 input 直接編集時だけ true。
+  const [addressEdited, setAddressEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showAddUnit, setShowAddUnit] = useState(false);
@@ -121,6 +125,7 @@ export default function BuildingDetailPage({
     if (!building) return;
     setEditForm({
       name: building.name,
+      postalCode: building.postalCode ?? "",
       address: building.address,
       totalFloors: building.totalFloors?.toString() ?? "",
       totalUnits: building.totalUnits?.toString() ?? "",
@@ -129,6 +134,8 @@ export default function BuildingDetailPage({
       managementCompany: building.managementCompany ?? "",
       note: building.note ?? "",
     });
+    // 保存値ロードは user-edit ではない＝signal をリセット（開いただけでは検索しない）。
+    setAddressEdited(false);
     setEditing(true);
   };
 
@@ -161,6 +168,7 @@ export default function BuildingDetailPage({
     try {
       await updateBuilding(building.id, {
         name: editForm.name,
+        postalCode: editForm.postalCode || null,
         address: editForm.address,
         totalFloors: editForm.totalFloors ? Number(editForm.totalFloors) : null,
         totalUnits: editForm.totalUnits ? Number(editForm.totalUnits) : null,
@@ -251,6 +259,7 @@ export default function BuildingDetailPage({
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {[
                 { key: "name", label: "マンション名", required: true },
+                { key: "postalCode", label: "郵便番号" },
                 { key: "address", label: "住所", required: true },
                 { key: "totalFloors", label: "階数", type: "number" },
                 { key: "totalUnits", label: "総戸数", type: "number" },
@@ -266,11 +275,30 @@ export default function BuildingDetailPage({
                   <input
                     type={f.type ?? "text"}
                     value={editForm[f.key] ?? ""}
-                    onChange={(e) =>
-                      setEditForm((p) => ({ ...p, [f.key]: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      // 住所のユーザー直接編集だけ user-edit signal を立てる。
+                      if (f.key === "address") setAddressEdited(true);
+                      setEditForm((p) => ({ ...p, [f.key]: e.target.value }));
+                    }}
                     className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
+                  {f.key === "address" && (
+                    <div className="mt-1.5">
+                      <AddressLookupControls
+                        zip={editForm.postalCode ?? ""}
+                        address={editForm.address ?? ""}
+                        onZipChange={(z) =>
+                          setEditForm((p) => ({ ...p, postalCode: z }))
+                        }
+                        onAddressChange={(a) =>
+                          setEditForm((p) => ({ ...p, address: a }))
+                        }
+                        addressEdited={addressEdited}
+                        disabled={saving}
+                        mode="both"
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

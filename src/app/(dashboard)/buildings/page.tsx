@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { fetchBuildings, createBuilding } from "@/lib/api-client";
 import { debounce } from "@/lib/debounce";
+import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface BuildingItem {
   id: string;
@@ -146,6 +147,7 @@ function CreateBuildingModal({
 }) {
   const [form, setForm] = useState({
     name: "",
+    postalCode: "",
     address: "",
     totalFloors: "",
     totalUnits: "",
@@ -154,6 +156,8 @@ function CreateBuildingModal({
     managementCompany: "",
     note: "",
   });
+  // 住所補完の user-edit signal（Codex P2-G）。住所 input の直接編集時だけ true。
+  const [addressEdited, setAddressEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -164,6 +168,7 @@ function CreateBuildingModal({
     try {
       await createBuilding({
         name: form.name,
+        postalCode: form.postalCode || undefined,
         address: form.address,
         totalFloors: form.totalFloors ? Number(form.totalFloors) : undefined,
         totalUnits: form.totalUnits ? Number(form.totalUnits) : undefined,
@@ -207,15 +212,42 @@ function CreateBuildingModal({
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">
+              郵便番号 <span className="text-gray-400">任意</span>
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={form.postalCode}
+              onChange={(e) => setField("postalCode", e.target.value)}
+              placeholder="例: 1000005"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
               住所 <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
               required
               value={form.address}
-              onChange={(e) => setField("address", e.target.value)}
+              onChange={(e) => {
+                setAddressEdited(true);
+                setField("address", e.target.value);
+              }}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
+            <div className="mt-1.5">
+              <AddressLookupControls
+                zip={form.postalCode}
+                address={form.address}
+                onZipChange={(z) => setField("postalCode", z)}
+                onAddressChange={(a) => setField("address", a)}
+                addressEdited={addressEdited}
+                disabled={saving}
+                mode="both"
+              />
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>

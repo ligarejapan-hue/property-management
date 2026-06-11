@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { X, Loader2, AlertTriangle } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS, INTRODUCTION_ROUTE_OPTIONS } from "@/lib/property-types";
 import { createProperty } from "@/lib/api-client";
+import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface Props {
   onClose: () => void;
@@ -14,7 +15,10 @@ export default function NewPropertyModal({ onClose }: Props) {
   const router = useRouter();
 
   const [propertyType, setPropertyType] = useState("");
+  const [postalCode, setPostalCode] = useState("");
   const [address, setAddress] = useState("");
+  // 住所補完の user-edit signal（Codex P2-G）。住所 input をユーザーが直接編集した時だけ true。
+  const [addressEdited, setAddressEdited] = useState(false);
   const [lotNumber, setLotNumber] = useState("");
   const [introductionRoute, setIntroductionRoute] = useState("");
   const [note, setNote] = useState("");
@@ -38,6 +42,7 @@ export default function NewPropertyModal({ onClose }: Props) {
     try {
       const result = await createProperty({
         propertyType,
+        postalCode: postalCode.trim() || null,
         address: address.trim(),
         lotNumber: lotNumber.trim() || null,
         introductionRoute: introductionRoute || null,
@@ -96,6 +101,22 @@ export default function NewPropertyModal({ onClose }: Props) {
             </select>
           </div>
 
+          {/* 郵便番号 */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              郵便番号 <span className="text-xs text-gray-400">任意</span>
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={postalCode}
+              onChange={(e) => setPostalCode(e.target.value)}
+              disabled={submitting}
+              placeholder="例: 1000005"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+            />
+          </div>
+
           {/* 住所 */}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -104,11 +125,28 @@ export default function NewPropertyModal({ onClose }: Props) {
             <input
               type="text"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => {
+                // ユーザーの直接編集＝user-edit signal（住所検索のトリガー）。
+                setAddressEdited(true);
+                setAddress(e.target.value);
+              }}
               disabled={submitting}
               placeholder="例: 東京都千代田区丸の内1-1-1"
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
             />
+            {/* 郵便番号⇄住所 補完。onZipChange/onAddressChange は state 更新のみ＝
+                addressEdited は立てない（候補 apply で再検索しない）。 */}
+            <div className="mt-1.5">
+              <AddressLookupControls
+                zip={postalCode}
+                address={address}
+                onZipChange={setPostalCode}
+                onAddressChange={setAddress}
+                addressEdited={addressEdited}
+                disabled={submitting}
+                mode="both"
+              />
+            </div>
           </div>
 
           {/* 地番 */}

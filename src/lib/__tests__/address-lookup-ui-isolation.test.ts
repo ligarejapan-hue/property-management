@@ -2,9 +2,8 @@
  * 住所補完 UI core のスコープ・ガードレール（source assertion）。
  *  #8: UI core ファイルが APIキー/secret/外部 provider/外部ホストを露出しない
  *      （取得は api-client wrapper＝社内 route 経由のみ）。
- *  #9: Property/Building のフォーム本体には**まだ組み込まない**（21-C 方針: Owner 先行・
- *      Property/Building は postalCode カラム要否を別途判断してから／本 PR では非接触）。
- *      Owner フォーム（owner-link-modal / 物件詳細 OwnerCard）は本 PR で統合するため対象外。
+ *  #9: Property/Building フォーム本体には住所補完 UI を統合済み（21-C PR-2 / postalCode 追加後）。
+ *      AddressLookupControls を import し、addressEdited（user-edit signal）を渡す。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "fs";
@@ -19,8 +18,8 @@ const NEW_FILES = [
   "src/components/address/address-lookup-controls.tsx",
 ];
 
-// Property/Building のフォーム本体。21-C PR4 方針変更により本 PR では非接触＝import を入れない。
-// （Property/Building は zip カラムを持たず、postalCode 追加の要否を別途判断してから統合する。）
+// Property/Building のフォーム本体。21-C PR-2 で AddressLookupControls を統合済み
+// （postalCode カラム追加 #167 後）。
 const PROPERTY_BUILDING_FORM_FILES = [
   "src/components/properties/new-property-modal.tsx",
   "src/components/properties/property-edit-form.tsx",
@@ -44,16 +43,18 @@ describe("#8 新規UIファイルは APIキー/secret/外部provider を露出�
   }
 });
 
-describe("#9 Property/Building フォーム本体には住所補完UIを組み込んでいない（21-C 方針: Owner 先行）", () => {
+describe("#9 Property/Building フォーム本体に住所補完UIを統合済み（21-C PR-2）", () => {
   for (const f of PROPERTY_BUILDING_FORM_FILES) {
     it(`${f}`, () => {
       const abs = resolve(process.cwd(), f);
-      if (!existsSync(abs)) return;
+      expect(existsSync(abs)).toBe(true);
       const src = readFileSync(abs, "utf8");
-      expect(src).not.toContain("address-lookup-controls");
-      expect(src).not.toContain("AddressLookupControls");
-      expect(src).not.toContain("use-address-lookup");
-      expect(src).not.toContain("useAddressLookup");
+      expect(src).toMatch(
+        /from\s+["']@\/components\/address\/address-lookup-controls["']/,
+      );
+      expect(src).toContain("<AddressLookupControls");
+      // user-edit signal を渡している。
+      expect(src).toContain("addressEdited={addressEdited}");
     });
   }
 });
