@@ -698,22 +698,26 @@ describe("GET /api/properties/dm-export — Phase 1 追加ガード", () => {
 // 全 matching 範囲を正確に計上する。
 // ============================================================
 describe("GET /api/properties/dm-export — 上限判定の保証（送付先住所グループ数ベース）", () => {
-  it("(2) findMany は非アーカイブ所有者を持つ物件に限定され take は MAX+1・既存強制条件も維持", async () => {
+  it("(1) findMany は mailable 所有者（非アーカイブ + address 非空）を持つ物件に限定され take は MAX+1", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     await GET(makeRequest());
 
     const call = pm.property.findMany.mock.calls[0][0];
-    // 所有者あり物件への限定（AND マージで keyword OR 等の既存条件を壊さない）
+    // address 空欄しか持たない物件を窓から除外するため、some に address 非空条件を含める
     expect(call.where.AND).toContainEqual({
-      propertyOwners: { some: { owner: { isArchived: false } } },
+      propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } },
     });
     // 既存の強制条件・取得上限はそのまま
     expect(call.where.dmStatus).toBe("send");
     expect(call.where.isArchived).toBe(false);
     expect(call.take).toBe(10001);
+    // nested select は非アーカイブ所有者を全件取る（address 空欄も grouping 側で skip/計上するため）
+    expect(call.select.propertyOwners.where).toEqual({
+      owner: { isArchived: false },
+    });
   });
 
-  it("(2) 既存の where.AND がある場合（hasWarning）も clobber せず some 条件を追記する", async () => {
+  it("(1) 既存の where.AND がある場合（hasWarning）も clobber せず some 条件を追記する", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     await GET(makeRequest("?hasWarning=true"));
 
@@ -721,9 +725,9 @@ describe("GET /api/properties/dm-export — 上限判定の保証（送付先住
       pm.property.findMany.mock.calls[0][0].where.AND;
     // hasWarning 由来の既存 AND 条件（OR 句）が保持されている
     expect(andClauses.some((c) => "OR" in c)).toBe(true);
-    // 所有者あり限定の some 条件が「追記」されている（上書きでない）
+    // mailable 限定の some 条件が「追記」されている（上書きでない）
     expect(andClauses).toContainEqual({
-      propertyOwners: { some: { owner: { isArchived: false } } },
+      propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } },
     });
     expect(andClauses.length).toBeGreaterThanOrEqual(2);
   });

@@ -132,20 +132,27 @@ export async function GET(request: NextRequest) {
     // 畳まれるため、owner リンク数を hard reject に使うと正当な grouped export を false 400 に
     // してしまう（例: 1 物件に同住所の共有者 10,001 名 → 実際は 1 行なのに 400）。
     // そこで owner リンク数では reject せず、次の 2 段で「完全な CSV か 400 か」を保証する:
-    //  (1) fetch 対象を「非アーカイブ所有者が 1 名以上の物件」に限定（ownerなし物件が
-    //      property 窓を消費して eligible 物件を落とすのを防ぐ）+ take = MAX+1 件。
-    //      取得物件数が MAX を超えた（窓を埋め切った）= 未取得の eligible 物件が残り得る
-    //      → 全件性を保証できないため 400（取得「物件数」での安全側カット。owner 数ではない）。
+    //  (1) fetch 対象を「送付先になり得る所有者（非アーカイブ かつ Owner.address 非空）を
+    //      1 名以上持つ物件」に限定 + take = MAX+1 件。address 空欄しか持たない物件は最終的に
+    //      0 行になるため窓から除外し、それらが窓を埋めて正当な物件を落とす/誤 400 になるのを防ぐ。
+    //      取得物件数が MAX を超えた（窓を埋め切った）= 各物件が必ず 1 グループ以上を生むため
+    //      最終行数も必ず MAX 超 → 全件性を保証できないので 400（取得「物件数」での安全側カット）。
     //  (2) 取得後にグルーピングし、最終 CSV 行数（送付先グループ数）が MAX 超なら 400。
-    //      取得物件数が MAX 以下なら eligible 物件は全件取得済みのため、グループ数 = 真の総行数。
+    //      取得物件数が MAX 以下なら mailable 物件は全件取得済みのため、グループ数 = 真の総行数。
+    // 注: DB の `address: { not: "" }` は null / 空文字を除外する（SQL の `<> ''` は NULL も除外）。
+    //     正規化後に空になる「空白のみ」の住所は除外しきれないが、グルーピング側で skip される。
     const eligibleOwnerWhere = { owner: { isArchived: false } };
+    const mailableOwnerWhere = {
+      owner: { isArchived: false, address: { not: "" } },
+    };
 
-    // (1) 非アーカイブ所有者を 1 名以上持つ物件のみ取得（既存の AND マージと同イディオム）。
-    const whereWithEligibleOwners = {
+    // (1) 送付先になり得る所有者を 1 名以上持つ物件のみ取得（既存の AND マージと同イディオム）。
+    //     skippedCount 用の eligibleOwnerWhere（非アーカイブのみ）とは別の、address 非空も要求する条件。
+    const whereWithMailableOwners = {
       ...where,
       AND: [
         ...(where.AND ?? []),
-        { propertyOwners: { some: eligibleOwnerWhere } },
+        { propertyOwners: { some: mailableOwnerWhere } },
       ],
     };
 
@@ -153,12 +160,14 @@ export async function GET(request: NextRequest) {
     const properties = mgmtShortCircuitEmpty
       ? []
       : await prisma.property.findMany({
-          where: whereWithEligibleOwners,
+          where: whereWithMailableOwners,
           select: {
             id: true,
             address: true,
             propertyType: true,
             roomNo: true,
+            // 物件は mailable 所有者で絞るが、ここは非アーカイブ所有者を全件取る
+            // （address 空欄の共有者も grouping 側で skip・skippedAddressMissingCount に計上するため）。
             propertyOwners: {
               where: { owner: { isArchived: false } },
               select: {
@@ -181,10 +190,11 @@ export async function GET(request: NextRequest) {
           take: MAX_DM_EXPORT_ROWS + 1,
         });
 
-    // (1) 取得した eligible 物件が take 窓（MAX+1 件）を埋めた = eligible 物件が MAX 件超存在し、
+    // (1) 取得した mailable 物件が take 窓（MAX+1 件）を埋めた = mailable 物件が MAX 件超存在し、
     //     未取得分が残り得る → 全件性を保証できないため 400（PII 行マッピング前・取込元逆引き前）。
-    //     ここは owner リンク数ではなく「取得物件数」で判定する（同住所共有者は 1 行に畳まれるので
-    //     owner 数での reject は false 400 になる）。物件数 ≤ MAX なら eligible 物件は全件取得済み。
+    //     各 mailable 物件は address 非空の所有者を必ず持つ = 必ず 1 グループ以上を生むため、
+    //     取得物件数 > MAX は最終行数 > MAX を含意する（address 空欄物件は窓から除外済みなので
+    //     誤 400 にならない）。物件数 ≤ MAX なら mailable 物件は全件取得済み。
     if (properties.length > MAX_DM_EXPORT_ROWS) {
       throw new ApiError(
         400,
