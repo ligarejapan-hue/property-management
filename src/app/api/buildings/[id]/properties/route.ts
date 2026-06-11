@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 
 const createUnitSchema = z.object({
   address: z.string().min(1, "住所は必須です"),
+  postalCode: z.string().optional().nullable(),
   roomNo: z.string().optional(),
   floorNo: z.number().int().optional(),
   exclusiveArea: z.number().optional(),
@@ -101,6 +102,7 @@ export async function POST(
       data: {
         propertyType: "unit",
         address: data.address,
+        postalCode: data.postalCode,
         buildingId: id,
         roomNo: data.roomNo,
         floorNo: data.floorNo,
