@@ -256,6 +256,7 @@ model Building {
   id                  String    @id @default(uuid()) @db.Uuid
   name                String
   address             String
+  postalCode          String?   @map("postal_code")
   lotNumber           String?   @map("lot_number")
   realEstateNumber    String?   @map("real_estate_number")
   totalFloors         Int?      @map("total_floors")
@@ -284,6 +285,7 @@ model Property {
   id                       String            @id @default(uuid()) @db.Uuid
   propertyType             PropertyType      @map("property_type")
   address                  String
+  postalCode               String?           @map("postal_code")
   originalAddress          String?           @map("original_address")
   lotNumber                String?           @map("lot_number")
   originalLotNumber        String?           @map("original_lot_number")

@@ -15,6 +15,7 @@ import { recordChanges, BUILDING_TRACKED_FIELDS } from "@/lib/change-log";
 const updateBuildingSchema = z.object({
   name: z.string().min(1, "棟名は必須です").optional(),
   address: z.string().min(1, "住所は必須です").optional(),
+  postalCode: z.string().nullable().optional(),
   lotNumber: z.string().nullable().optional(),
   realEstateNumber: z.string().nullable().optional(),
   totalFloors: z.number().int().positive().nullable().optional(),

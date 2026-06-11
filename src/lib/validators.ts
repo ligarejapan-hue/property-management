@@ -64,6 +64,7 @@ export const propertyListQuerySchema = z.object({
 export const createPropertySchema = z.object({
   propertyType: z.enum(PROPERTY_TYPE_VALUES),
   address: z.string().min(1, "住所は必須です"),
+  postalCode: z.string().optional().nullable(),
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
   realEstateNumber: z.string().optional().nullable(),
@@ -82,6 +83,7 @@ export const createPropertySchema = z.object({
 export const updatePropertySchema = z.object({
   propertyType: z.enum(PROPERTY_TYPE_VALUES).optional(),
   address: z.string().min(1).optional(),
+  postalCode: z.string().optional().nullable(),
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
   realEstateNumber: z.string().optional().nullable(),
