@@ -70,7 +70,6 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findMany: vi.fn(), count: vi.fn() },
-    propertyOwner: { count: vi.fn() },
     importJobRow: { findMany: vi.fn() },
     // export は CSV 生成であり送付履歴ではない。PropertyDmLog には一切書き込まないことを
     // 固定するため mock を用意し、各テストで未呼び出しを検証する。
@@ -89,7 +88,6 @@ import { GET } from "../../app/api/properties/dm-export/route";
 
 const pm = prisma as unknown as {
   property: { findMany: Mock; count: Mock };
-  propertyOwner: { count: Mock };
   importJobRow: { findMany: Mock };
   propertyDmLog: { create: Mock; createMany: Mock; update: Mock };
 };
@@ -191,10 +189,9 @@ beforeEach(() => {
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL as any);
   vi.mocked(getOwnerDisplayConfig).mockResolvedValue(FULL_DISPLAY as any);
   pm.property.findMany.mockResolvedValue([]);
-  // 事前 COUNT（owner 行数）/ ownerなし送付可物件 COUNT の既定値。
+  // ownerなし送付可物件 COUNT（skippedCount 用）の既定値。
   // mockResolvedValue は vi.clearAllMocks では消えない（呼び出し履歴のみクリア）ため、
   // 各テスト内の vi.clearAllMocks() 後も既定値 0 が維持される。
-  pm.propertyOwner.count.mockResolvedValue(0);
   pm.property.count.mockResolvedValue(0);
   pm.importJobRow.findMany.mockResolvedValue([]);
 });
@@ -689,17 +686,18 @@ describe("GET /api/properties/dm-export — Phase 1 追加ガード", () => {
 });
 
 // ============================================================
-// 上限判定の保証（owner 行数ベース・PR #134 docs 残課題の解消）
-// route は次の 3 層で「最終 owner 行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」を保証する:
-//  (1) fetch 前の propertyOwner.count（超過なら PII を一切取得せず 400）
-//  (2) findMany を「非アーカイブ所有者を 1 名以上持つ物件」に限定
-//      （ownerなし物件が take 窓を消費して eligible owner 行が欠落するのを防ぐ）
-//  (3) 取得後の owner 行数で再判定（COUNT と fetch の間の race 防御・
-//      取込元逆引き / AuditLog より前で 400）
+// 上限判定の保証（送付先住所グループ数ベース・PR-3a で owner 行数ベースから再設計）
+// route は次の 2 段で「最終グループ行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」を保証する:
+//  (1) findMany を「非アーカイブ所有者を 1 名以上持つ物件」に限定 + take=MAX+1。
+//      取得物件数が MAX 超（窓を埋め切った）→ 全件性を保証できないため 400
+//      （owner リンク数ではなく「取得物件数」で判定。同住所共有者は 1 行に畳まれるので
+//        owner 数での reject は false 400 になる）。
+//  (2) 取得後にグルーピングし、送付先グループ数（= 最終 CSV 行数）が MAX 超なら 400
+//      （取込元逆引き / AuditLog より前）。
 // あわせて ownerなし送付可物件の skippedCount は property.count（none 条件）で
 // 全 matching 範囲を正確に計上する。
 // ============================================================
-describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数ベース）", () => {
+describe("GET /api/properties/dm-export — 上限判定の保証（送付先住所グループ数ベース）", () => {
   it("(2) findMany は非アーカイブ所有者を持つ物件に限定され take は MAX+1・既存強制条件も維持", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     await GET(makeRequest());
@@ -730,22 +728,64 @@ describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数
     expect(andClauses.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("(1) 事前 COUNT が MAX 超 → findMany / 取込元逆引き / AuditLog を一切実行せず 400", async () => {
-    pm.propertyOwner.count.mockResolvedValue(10001);
+  it("(1) 取得物件数が MAX 超 → グルーピング前に 400・取込元逆引き/AuditLog 未実行", async () => {
+    // eligible 物件が take 窓を埋めた（MAX+1=10,001 件取得）= 全件性を保証できない → 400。
+    const many = Array.from({ length: 10001 }, (_, i) => makeProp({ id: `p${i}` }));
+    pm.property.findMany.mockResolvedValue(many);
 
     const res = await GET(makeRequest());
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error.code).toBe("EXPORT_LIMIT_EXCEEDED");
-    // PII を含む行データの取得自体が走らない
-    expect(pm.property.findMany).not.toHaveBeenCalled();
+    // PII 行マッピング前に 400（取込元逆引き / 監査ログを実行しない）
     expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
-    // COUNT は「property が検索条件に一致 × 所有者が非アーカイブ」のリンク数 = 最終行数
-    const countWhere = pm.propertyOwner.count.mock.calls[0][0].where;
-    expect(countWhere.owner).toEqual({ isArchived: false });
-    expect(countWhere.property.dmStatus).toBe("send");
-    expect(countWhere.property.isArchived).toBe(false);
+    expect(res.headers.get("Content-Type")).not.toBe("text/csv; charset=utf-8");
+  });
+
+  it("owner リンク数が MAX 超でも、全員が同一 zip+address なら 1 行で export 成功（false 400 にしない）", async () => {
+    // Codex P2 シナリオ: 1 物件・同一送付先住所の共有者 10,001 名 → グルーピング後 1 行。
+    // owner リンク数（10,001）で hard reject すると 400 になってしまうが、最終行数は 1 なので 200。
+    const manyOwners = Array.from({ length: 10001 }, (_, i) =>
+      makePropertyOwner({
+        owner: { name: `共有 ${i}`, zip: "100-0001", address: "東京都港区3-3" },
+        isPrimary: i === 0,
+      }),
+    );
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ id: "p1", propertyOwners: manyOwners }),
+    ]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(2); // ヘッダ + 1 行（同住所 10,001 名 → 1 通）
+    const audit = lastAudit();
+    expect(audit.detail.resultCount).toBe(1);
+    expect(audit.detail.count).toBe(1);
+  });
+
+  it("送付先住所グループ数が MAX 超なら 400（少数物件でも異住所共有者が多数）", async () => {
+    // 1 物件に「異なる住所」の共有者 10,001 名 → 10,001 グループ → 最終行数 > MAX → 400。
+    const distinctOwners = Array.from({ length: 10001 }, (_, i) =>
+      makePropertyOwner({
+        owner: { name: `共有 ${i}`, zip: "100-0001", address: `住所-${i}` },
+        isPrimary: i === 0,
+      }),
+    );
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ id: "p1", propertyOwners: distinctOwners }),
+    ]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("EXPORT_LIMIT_EXCEEDED");
+    // グループ数判定は取込元逆引き / AuditLog より前
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("(3) 取得後のグループ行数が MAX+1（property 件数は窓内）→ 400・取込元逆引き/AuditLog 未実行", async () => {
@@ -778,8 +818,8 @@ describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数
     expect(res.headers.get("Content-Type")).not.toBe("text/csv; charset=utf-8");
   });
 
-  it("owner 行数がちょうど MAX（10,000）→ 200・全行出力・resultCount=10000", async () => {
-    pm.propertyOwner.count.mockResolvedValue(10000); // 境界値: 超過ではないので通る
+  it("グループ行数がちょうど MAX（10,000）→ 200・全行出力・resultCount=10000", async () => {
+    // 10,000 物件 × 各 1 送付先 = 10,000 行（境界値・取得物件数も 10,000 = MAX で通る）。
     const many = Array.from({ length: 10000 }, (_, i) =>
       makeProp({ id: `p${i}` }),
     );
@@ -827,9 +867,12 @@ describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数
     });
   });
 
-  it("400（上限超過）時は ownerなし COUNT も実行されない（負荷を増やさない）", async () => {
-    pm.propertyOwner.count.mockResolvedValue(10001);
-    await GET(makeRequest());
+  it("400（取得物件数 超過）時は ownerなし COUNT も実行されない（負荷を増やさない）", async () => {
+    // 取得物件数 > MAX で 400 する経路では、skippedCount 用の property.count も実行しない。
+    const many = Array.from({ length: 10001 }, (_, i) => makeProp({ id: `p${i}` }));
+    pm.property.findMany.mockResolvedValue(many);
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(400);
     expect(pm.property.count).not.toHaveBeenCalled();
   });
 });

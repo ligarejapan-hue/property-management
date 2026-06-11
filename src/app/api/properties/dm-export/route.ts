@@ -32,11 +32,13 @@ import {
 // 「同一物件内・同一送付先住所（Owner.zip + Owner.address）の共有者 = 1 行」に
 // グルーピングして DM 差込用 CSV を出力する（名義違いでも同住所なら 1 通＝重複送付しない）。
 //
-// 安全上限: MAX_DM_EXPORT_ROWS 行（最終 CSV 行 = 送付先グループ数で判定）。
+// 安全上限: MAX_DM_EXPORT_ROWS 行（最終 CSV 行 = 送付先住所グループ数で判定）。
 // 超過時は切り捨てず 400 にする（不完全な差込 CSV を渡さない / DoS 防止）。
 // 「最終グループ行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」は
-// 事前 COUNT（owner リンク数＝グループ数の上限）+ 所有者あり物件のみ取得 +
-// 取得後にグループ数で再判定 の 3 層で保証する（GET 内コメント参照）。
+// 所有者あり物件のみを take=MAX+1 で取得し、(1) 取得物件数が MAX 超なら 400 /
+// (2) グルーピング後の送付先グループ数が MAX 超なら 400、の 2 段で保証する。
+// owner リンク数（共有者数）は同住所で 1 行に畳まれるため reject には使わない（false 400 回避・
+// GET 内コメント参照）。
 //
 // PII / 権限:
 //  - property:read / csv_export:read / csv_export_personal:read / owner:read すべて必須
@@ -125,34 +127,20 @@ export async function GET(request: NextRequest) {
 
     const orderBy = buildPropertyListOrderBy(query);
 
-    // 上限判定は「最終 CSV 行数 = 送付先グループ数」で行う。property 件数を take で切ると、
-    // ownerなし物件が窓を消費して後続の eligible owner 行が欠落した 200（不完全 CSV）に
-    // なり得るため、次の 3 層で「行数が上限超なら確実に 400」を保証する:
-    //  (1) fetch 前に owner リンク数を COUNT（= グループ数の上限・安全側）、超過なら PII を取得せず 400
-    //  (2) fetch 対象を「非アーカイブ所有者が 1 名以上の物件」に限定し、
-    //      ownerなし物件が take 窓を消費しないようにする（行の完全性の核）
-    //  (3) COUNT と fetch の間の更新（race）に備え、取得後にグループ数で再判定して 400
+    // 上限判定は必ず「最終 CSV 行数 = 送付先住所グループ数」で行う。
+    // owner リンク数（共有者数）は「グループ数の上限」ではあるが、同一住所の共有者は 1 行に
+    // 畳まれるため、owner リンク数を hard reject に使うと正当な grouped export を false 400 に
+    // してしまう（例: 1 物件に同住所の共有者 10,001 名 → 実際は 1 行なのに 400）。
+    // そこで owner リンク数では reject せず、次の 2 段で「完全な CSV か 400 か」を保証する:
+    //  (1) fetch 対象を「非アーカイブ所有者が 1 名以上の物件」に限定（ownerなし物件が
+    //      property 窓を消費して eligible 物件を落とすのを防ぐ）+ take = MAX+1 件。
+    //      取得物件数が MAX を超えた（窓を埋め切った）= 未取得の eligible 物件が残り得る
+    //      → 全件性を保証できないため 400（取得「物件数」での安全側カット。owner 数ではない）。
+    //  (2) 取得後にグルーピングし、最終 CSV 行数（送付先グループ数）が MAX 超なら 400。
+    //      取得物件数が MAX 以下なら eligible 物件は全件取得済みのため、グループ数 = 真の総行数。
     const eligibleOwnerWhere = { owner: { isArchived: false } };
 
-    // (1) 最終 owner 行数の事前 COUNT。propertyOwners の select 条件と同一の
-    //     「property が where に一致 × 所有者が非アーカイブ」のリンク数 = 最終行数。
-    const ownerRowCount = mgmtShortCircuitEmpty
-      ? 0
-      : await prisma.propertyOwner.count({
-          where: { ...eligibleOwnerWhere, property: where },
-        });
-    if (ownerRowCount > MAX_DM_EXPORT_ROWS) {
-      throw new ApiError(
-        400,
-        "出力対象が上限（10,000件）を超えています。検索条件で絞り込んでください。",
-        "EXPORT_LIMIT_EXCEEDED",
-      );
-    }
-
-    // (2) 非アーカイブ所有者を 1 名以上持つ物件のみ取得（既存の AND マージと同イディオム）。
-    //     owner 持ち物件が take 窓（MAX+1 件）を超える場合は各物件が 1 行以上を生むため
-    //     行数も必ず MAX を超え、(3) で 400 になる。窓内に収まる場合は全件取得済みとなり、
-    //     どちらのケースでも「eligible owner 行を落とした 200 CSV」は返らない。
+    // (1) 非アーカイブ所有者を 1 名以上持つ物件のみ取得（既存の AND マージと同イディオム）。
     const whereWithEligibleOwners = {
       ...where,
       AND: [
@@ -193,6 +181,18 @@ export async function GET(request: NextRequest) {
           take: MAX_DM_EXPORT_ROWS + 1,
         });
 
+    // (1) 取得した eligible 物件が take 窓（MAX+1 件）を埋めた = eligible 物件が MAX 件超存在し、
+    //     未取得分が残り得る → 全件性を保証できないため 400（PII 行マッピング前・取込元逆引き前）。
+    //     ここは owner リンク数ではなく「取得物件数」で判定する（同住所共有者は 1 行に畳まれるので
+    //     owner 数での reject は false 400 になる）。物件数 ≤ MAX なら eligible 物件は全件取得済み。
+    if (properties.length > MAX_DM_EXPORT_ROWS) {
+      throw new ApiError(
+        400,
+        "出力対象が上限（10,000件）を超えています。検索条件で絞り込んでください。",
+        "EXPORT_LIMIT_EXCEEDED",
+      );
+    }
+
     // 物件ごとに「同一送付先住所（Owner.zip + Owner.address）の共有者 = 1 行」へグループ化する。
     // 取込元逆引き・行マッピングより前にグルーピングし、最終行数（グループ数）で上限を再判定する。
     //  - Owner.address 空欄の所有者は送付先不明として skip（skippedAddressMissingCount に計上）。
@@ -227,9 +227,10 @@ export async function GET(request: NextRequest) {
       totalRows += g.groups.length;
     }
 
-    // (3) 最終行数（グループ数）で再判定。超過時は切り捨てず、取込元逆引き・
+    // (2) 最終 CSV 行数（送付先住所グループ数）で判定。超過時は切り捨てず、取込元逆引き・
     //     CSV 生成・AuditLog より前で 400 にする（不完全な差込 CSV を渡さない / DoS 防止）。
-    //     事前 COUNT (1) は owner リンク数（= グループ数の上限）で安全側に判定済み。
+    //     (1) で取得物件数 ≤ MAX を確認済みのため eligible 物件は全件取得済み = totalRows は
+    //     真の総送付先数。少数物件に多数の異住所共有者が居て totalRows が膨らむケースをここで捕捉。
     if (totalRows > MAX_DM_EXPORT_ROWS) {
       throw new ApiError(
         400,
