@@ -30,6 +30,10 @@ import {
 } from "@/lib/import-dedupe";
 import { normalizeBuildingName } from "@/lib/normalize";
 import {
+  normalizePostalCode,
+  isValidPostalCode,
+} from "@/lib/address-lookup/normalize";
+import {
   REIMPORT_IGNORED_HEADERS,
   buildErrorRawDataExtras,
 } from "@/lib/import-error-display";
@@ -42,6 +46,7 @@ const VALID_OCCUPANCY_STATUS = ["vacant", "occupied", "unknown"];
 /** Map Japanese target field names to property field names. */
 const JAPANESE_FIELD_MAP: Record<string, string> = {
   "住所": "address",
+  "郵便番号": "postalCode",
   "地番": "lotNumber",
   "家屋番号": "buildingNumber",
   "不動産番号": "realEstateNumber",
@@ -419,6 +424,24 @@ export async function POST(request: NextRequest) {
         ) {
           delete mapped.occupancyStatus;
         }
+        // 郵便番号: 妥当な 7 桁はハイフン無しへ正規化（先頭 0 保持・全角/ハイフン吸収）。
+        // 不正値は enum 不正値と同じく drop（raw 保存しない・行自体は失敗にしない）。
+        //
+        // 既知の制限（XLSX 数値セル）: .xlsx で郵便番号セルが「数値」として保存され、
+        // 先頭 0 を含む 7 桁が表示上 0100492・実値 100492 のような場合、parseSheet の
+        // raw 読み取り（指数表記回避のため意図的に raw:true）でこの段階には "100492" が
+        // 届き、6 桁ゆえ不正として drop される。ここで 6→7 桁へ左 0 詰めする復元は採らない
+        // （誤入力 "123456" を正当な別コードに化けさせ DM 誤送につながるため、fail-closed で
+        // 落とす方が安全）。恒久対応は sheet-parser 側で郵便番号列の整形済みテキストを保持する
+        // 別 PR（全 import 共有の parser 改変を伴うため本 PR スコープ外）。ハイフン付き
+        // テキストセル（010-0492）や CSV は本パスで正しく取り込める。
+        if (mapped.postalCode !== undefined) {
+          if (isValidPostalCode(mapped.postalCode)) {
+            mapped.postalCode = normalizePostalCode(mapped.postalCode);
+          } else {
+            delete mapped.postalCode;
+          }
+        }
 
         // -----------------------------------------------------------
         // Unit / building name resolution
@@ -624,6 +647,8 @@ export async function POST(request: NextRequest) {
         };
 
         // Standard fields
+        // 郵便番号は上流で正規化済み（妥当 7 桁のみ残る）。空欄は未設定（null 上書きしない）。
+        if (mapped.postalCode) createData.postalCode = mapped.postalCode;
         if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;
         if (mapped.buildingNumber)
           createData.buildingNumber = mapped.buildingNumber;

@@ -18,7 +18,7 @@ function toHalfWidthDigits(s: string): string {
  * 郵便番号を正規化する。
  *  - 全角数字 → 半角数字
  *  - 空白（半角/全角）を除去
- *  - ハイフン/ダッシュ類（-, U+2010〜U+2015, 長音 ー, 全角 －）を除去
+ *  - ハイフン/ダッシュ類（-, U+2010〜U+2015, 長音 ー, 全角 －, 数学マイナス U+2212）を除去
  *
  * 上記以外の文字は残す（厳密な妥当性判定は {@link isValidPostalCode} で行う）。
  */
@@ -26,7 +26,7 @@ export function normalizePostalCode(input: string): string {
   if (!input) return "";
   return toHalfWidthDigits(input)
     .replace(/[\s　]/g, "")
-    .replace(/[-‐-―ー－]/g, "");
+    .replace(/[-‐-―ー－−]/g, "");
 }
 
 /** 正規化後にちょうど 7 桁の半角数字かどうか。 */

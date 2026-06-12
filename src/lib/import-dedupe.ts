@@ -67,6 +67,7 @@ export function isUpdateEligibleReason(reason: DuplicateReason): boolean {
  */
 export const UPDATABLE_PROPERTY_FIELDS = [
   "address",
+  "postalCode",
   "lotNumber",
   "buildingNumber",
   "introductionRoute",

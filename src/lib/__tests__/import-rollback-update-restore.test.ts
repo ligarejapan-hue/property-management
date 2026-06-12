@@ -105,6 +105,11 @@ describe("RESTORABLE_PROPERTY_FIELDS", () => {
       expect(RESTORABLE_PROPERTY_FIELD_TYPES[f]).toBeDefined();
     }
   });
+
+  it("postalCode を復元対象に含み string 型である（21-C PR-3c）", () => {
+    expect(RESTORABLE_PROPERTY_FIELDS).toContain("postalCode");
+    expect(RESTORABLE_PROPERTY_FIELD_TYPES.postalCode).toBe("string");
+  });
 });
 
 describe("classifyUpdateFieldsForRestore — Window 形式 (P1#2)", () => {
