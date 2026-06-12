@@ -72,6 +72,9 @@ vi.mock("@/lib/prisma", () => ({
     property: { findMany: vi.fn(), count: vi.fn() },
     propertyOwner: { count: vi.fn() },
     importJobRow: { findMany: vi.fn() },
+    // export は CSV 生成であり送付履歴ではない。PropertyDmLog には一切書き込まないことを
+    // 固定するため mock を用意し、各テストで未呼び出しを検証する。
+    propertyDmLog: { create: vi.fn(), createMany: vi.fn(), update: vi.fn() },
   },
 }));
 
@@ -88,6 +91,7 @@ const pm = prisma as unknown as {
   property: { findMany: Mock; count: Mock };
   propertyOwner: { count: Mock };
   importJobRow: { findMany: Mock };
+  propertyDmLog: { create: Mock; createMany: Mock; update: Mock };
 };
 
 const PERMS_FULL = [
@@ -187,11 +191,12 @@ beforeEach(() => {
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL as any);
   vi.mocked(getOwnerDisplayConfig).mockResolvedValue(FULL_DISPLAY as any);
   pm.property.findMany.mockResolvedValue([]);
-  // 事前 COUNT（owner 行数）/ ownerなし送付可物件 COUNT の既定値。
+  // ownerなし送付可物件 COUNT（skippedCount 用）/ address 欠落所有者 COUNT
+  // （skippedAddressMissingCount 用）の既定値。
   // mockResolvedValue は vi.clearAllMocks では消えない（呼び出し履歴のみクリア）ため、
   // 各テスト内の vi.clearAllMocks() 後も既定値 0 が維持される。
-  pm.propertyOwner.count.mockResolvedValue(0);
   pm.property.count.mockResolvedValue(0);
+  pm.propertyOwner.count.mockResolvedValue(0);
   pm.importJobRow.findMany.mockResolvedValue([]);
 });
 
@@ -238,13 +243,16 @@ describe("GET /api/properties/dm-export", () => {
     expect(where.isArchived).toBe(false);
   });
 
-  it("04. 所有者2名の物件 → 2行", async () => {
+  it("04. 送付先住所が異なる所有者2名の物件 → 2行", async () => {
     pm.property.findMany.mockResolvedValue([
       makeProp({
         propertyOwners: [
-          makePropertyOwner({ owner: { name: "所有 花子" }, isPrimary: true }),
           makePropertyOwner({
-            owner: { name: "所有 次郎" },
+            owner: { name: "所有 花子", address: "東京都千代田区1-1" },
+            isPrimary: true,
+          }),
+          makePropertyOwner({
+            owner: { name: "所有 次郎", address: "東京都港区9-9" },
             isPrimary: false,
             relationship: "子",
           }),
@@ -255,7 +263,7 @@ describe("GET /api/properties/dm-export", () => {
     const res = await GET(makeRequest());
     const csv = await readCsv(res);
     const lines = csv.split("\r\n").filter((l) => l.length > 0);
-    // ヘッダ + 2 行
+    // ヘッダ + 2 行（住所が異なるので別送付先 = 別行）
     expect(lines).toHaveLength(3);
     expect(csv).toContain("所有 花子");
     expect(csv).toContain("所有 次郎");
@@ -445,13 +453,14 @@ describe("GET /api/properties/dm-export", () => {
   });
 
   it("17. count / resultCount / skippedCount が混在 fixture で正しい", async () => {
-    // 2 物件: 一方は所有者2名、もう一方は0名 → count=1, resultCount=2, skippedCount=1
+    // 2 物件: 一方は別住所の所有者2名（2送付先=2行）、もう一方は0名
+    //  → count=1, resultCount=2, skippedCount=1
     pm.property.findMany.mockResolvedValue([
       makeProp({
         id: "p1",
         propertyOwners: [
-          makePropertyOwner({ owner: { name: "A" } }),
-          makePropertyOwner({ owner: { name: "B" } }),
+          makePropertyOwner({ owner: { name: "A", address: "住所A" } }),
+          makePropertyOwner({ owner: { name: "B", address: "住所B" } }),
         ],
       }),
       makeProp({ id: "p2", propertyOwners: [] }),
@@ -491,15 +500,24 @@ describe("GET /api/properties/dm-export", () => {
   });
 
   it("20. 敬称: corporateNumber あり → 御中 / なし → 様", async () => {
+    // 単独送付先（別住所）にして、各 1 名グループの敬称を検証する。
     pm.property.findMany.mockResolvedValue([
       makeProp({
         id: "p1",
         propertyOwners: [
           makePropertyOwner({
-            owner: { name: "法人A", corporateNumber: "1234567890123" },
+            owner: {
+              name: "法人A",
+              corporateNumber: "1234567890123",
+              address: "東京都中央区1-1",
+            },
           }),
           makePropertyOwner({
-            owner: { name: "個人B", corporateNumber: null },
+            owner: {
+              name: "個人B",
+              corporateNumber: null,
+              address: "東京都新宿区2-2",
+            },
             isPrimary: false,
           }),
         ],
@@ -610,16 +628,17 @@ describe("GET /api/properties/dm-export — Phase 1 追加ガード", () => {
   });
 
   it("代表者は isPrimary のみ「代表」・続柄は relationship・非代表は代表者空欄", async () => {
+    // 別住所にして 2 送付先 = 2 行とし、各行（各 1 名グループ）の代表者/続柄列を検証する。
     pm.property.findMany.mockResolvedValue([
       makeProp({
         propertyOwners: [
           makePropertyOwner({
-            owner: { name: "代表 太郎" },
+            owner: { name: "代表 太郎", address: "東京都千代田区1-1" },
             isPrimary: true,
             relationship: "本人",
           }),
           makePropertyOwner({
-            owner: { name: "非代表 次郎" },
+            owner: { name: "非代表 次郎", address: "東京都港区9-9" },
             isPrimary: false,
             relationship: "子",
           }),
@@ -671,33 +690,38 @@ describe("GET /api/properties/dm-export — Phase 1 追加ガード", () => {
 });
 
 // ============================================================
-// 上限判定の保証（owner 行数ベース・PR #134 docs 残課題の解消）
-// route は次の 3 層で「最終 owner 行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」を保証する:
-//  (1) fetch 前の propertyOwner.count（超過なら PII を一切取得せず 400）
-//  (2) findMany を「非アーカイブ所有者を 1 名以上持つ物件」に限定
-//      （ownerなし物件が take 窓を消費して eligible owner 行が欠落するのを防ぐ）
-//  (3) 取得後の owner 行数で再判定（COUNT と fetch の間の race 防御・
-//      取込元逆引き / AuditLog より前で 400）
+// 上限判定の保証（送付先住所グループ数ベース・PR-3a で owner 行数ベースから再設計）
+// route は次の 2 段で「最終グループ行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」を保証する:
+//  (1) findMany を「非アーカイブ所有者を 1 名以上持つ物件」に限定 + take=MAX+1。
+//      取得物件数が MAX 超（窓を埋め切った）→ 全件性を保証できないため 400
+//      （owner リンク数ではなく「取得物件数」で判定。同住所共有者は 1 行に畳まれるので
+//        owner 数での reject は false 400 になる）。
+//  (2) 取得後にグルーピングし、送付先グループ数（= 最終 CSV 行数）が MAX 超なら 400
+//      （取込元逆引き / AuditLog より前）。
 // あわせて ownerなし送付可物件の skippedCount は property.count（none 条件）で
 // 全 matching 範囲を正確に計上する。
 // ============================================================
-describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数ベース）", () => {
-  it("(2) findMany は非アーカイブ所有者を持つ物件に限定され take は MAX+1・既存強制条件も維持", async () => {
+describe("GET /api/properties/dm-export — 上限判定の保証（送付先住所グループ数ベース）", () => {
+  it("(1) findMany は mailable 所有者（非アーカイブ + address 非空）を持つ物件に限定され take は MAX+1", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     await GET(makeRequest());
 
     const call = pm.property.findMany.mock.calls[0][0];
-    // 所有者あり物件への限定（AND マージで keyword OR 等の既存条件を壊さない）
+    // address 空欄しか持たない物件を窓から除外するため、some に address 非空条件を含める
     expect(call.where.AND).toContainEqual({
-      propertyOwners: { some: { owner: { isArchived: false } } },
+      propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } },
     });
     // 既存の強制条件・取得上限はそのまま
     expect(call.where.dmStatus).toBe("send");
     expect(call.where.isArchived).toBe(false);
     expect(call.take).toBe(10001);
+    // nested select は非アーカイブ所有者を全件取る（address 空欄も grouping 側で skip/計上するため）
+    expect(call.select.propertyOwners.where).toEqual({
+      owner: { isArchived: false },
+    });
   });
 
-  it("(2) 既存の where.AND がある場合（hasWarning）も clobber せず some 条件を追記する", async () => {
+  it("(1) 既存の where.AND がある場合（hasWarning）も clobber せず some 条件を追記する", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     await GET(makeRequest("?hasWarning=true"));
 
@@ -705,45 +729,86 @@ describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数
       pm.property.findMany.mock.calls[0][0].where.AND;
     // hasWarning 由来の既存 AND 条件（OR 句）が保持されている
     expect(andClauses.some((c) => "OR" in c)).toBe(true);
-    // 所有者あり限定の some 条件が「追記」されている（上書きでない）
+    // mailable 限定の some 条件が「追記」されている（上書きでない）
     expect(andClauses).toContainEqual({
-      propertyOwners: { some: { owner: { isArchived: false } } },
+      propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } },
     });
     expect(andClauses.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("(1) 事前 COUNT が MAX 超 → findMany / 取込元逆引き / AuditLog を一切実行せず 400", async () => {
-    pm.propertyOwner.count.mockResolvedValue(10001);
+  it("(1) 取得物件数が MAX 超 → グルーピング前に 400・取込元逆引き/AuditLog 未実行", async () => {
+    // eligible 物件が take 窓を埋めた（MAX+1=10,001 件取得）= 全件性を保証できない → 400。
+    const many = Array.from({ length: 10001 }, (_, i) => makeProp({ id: `p${i}` }));
+    pm.property.findMany.mockResolvedValue(many);
 
     const res = await GET(makeRequest());
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error.code).toBe("EXPORT_LIMIT_EXCEEDED");
-    // PII を含む行データの取得自体が走らない
-    expect(pm.property.findMany).not.toHaveBeenCalled();
+    // PII 行マッピング前に 400（取込元逆引き / 監査ログを実行しない）
     expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
-    // COUNT は「property が検索条件に一致 × 所有者が非アーカイブ」のリンク数 = 最終行数
-    const countWhere = pm.propertyOwner.count.mock.calls[0][0].where;
-    expect(countWhere.owner).toEqual({ isArchived: false });
-    expect(countWhere.property.dmStatus).toBe("send");
-    expect(countWhere.property.isArchived).toBe(false);
+    expect(res.headers.get("Content-Type")).not.toBe("text/csv; charset=utf-8");
   });
 
-  it("(3) 取得後の owner 行数が MAX+1（property 件数は窓内）→ 400・取込元逆引き/AuditLog 未実行", async () => {
-    // 10,000 物件（take 窓内）だが、先頭 1 物件が所有者 2 名 → owner 行 10,001 > MAX。
-    // 旧実装も row 展開後の判定で 400 自体にはなるが、判定が取込元逆引き（importJobRow）の
-    // 後だったため逆引きクエリが先に走っていた。本テストの核は「(3) の再判定は取込元逆引きより
-    // 前に行われ、400 経路では importJobRow アクセスも AuditLog も発生しない」のロック
-    // （下の importJobRow.findMany 未呼び出し assertion が revert 検知の本体）。
+  it("owner リンク数が MAX 超でも、全員が同一 zip+address なら 1 行で export 成功（false 400 にしない）", async () => {
+    // Codex P2 シナリオ: 1 物件・同一送付先住所の共有者 10,001 名 → グルーピング後 1 行。
+    // owner リンク数（10,001）で hard reject すると 400 になってしまうが、最終行数は 1 なので 200。
+    const manyOwners = Array.from({ length: 10001 }, (_, i) =>
+      makePropertyOwner({
+        owner: { name: `共有 ${i}`, zip: "100-0001", address: "東京都港区3-3" },
+        isPrimary: i === 0,
+      }),
+    );
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ id: "p1", propertyOwners: manyOwners }),
+    ]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(2); // ヘッダ + 1 行（同住所 10,001 名 → 1 通）
+    const audit = lastAudit();
+    expect(audit.detail.resultCount).toBe(1);
+    expect(audit.detail.count).toBe(1);
+  });
+
+  it("送付先住所グループ数が MAX 超なら 400（少数物件でも異住所共有者が多数）", async () => {
+    // 1 物件に「異なる住所」の共有者 10,001 名 → 10,001 グループ → 最終行数 > MAX → 400。
+    const distinctOwners = Array.from({ length: 10001 }, (_, i) =>
+      makePropertyOwner({
+        owner: { name: `共有 ${i}`, zip: "100-0001", address: `住所-${i}` },
+        isPrimary: i === 0,
+      }),
+    );
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ id: "p1", propertyOwners: distinctOwners }),
+    ]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("EXPORT_LIMIT_EXCEEDED");
+    // グループ数判定は取込元逆引き / AuditLog より前
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("(3) 取得後のグループ行数が MAX+1（property 件数は窓内）→ 400・取込元逆引き/AuditLog 未実行", async () => {
+    // 10,000 物件（take 窓内）だが、先頭 1 物件が「別住所」の所有者 2 名 → グループ行 10,001 > MAX。
+    // （住所が異なるためグルーピングされず 2 行になる点が核。同住所だと 1 行にまとまり 400 にならない）
+    // 本テストの核は「(3) の再判定は取込元逆引きより前に行われ、400 経路では importJobRow
+    // アクセスも AuditLog も発生しない」のロック（下の importJobRow.findMany 未呼び出し assertion）。
     const many = Array.from({ length: 10000 }, (_, i) =>
       i === 0
         ? makeProp({
             id: "p0",
             propertyOwners: [
-              makePropertyOwner({ owner: { name: "A" } }),
+              makePropertyOwner({ owner: { name: "A", address: "住所A" } }),
               makePropertyOwner({
-                owner: { name: "B" },
+                owner: { name: "B", address: "住所B" },
                 isPrimary: false,
               }),
             ],
@@ -761,8 +826,8 @@ describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数
     expect(res.headers.get("Content-Type")).not.toBe("text/csv; charset=utf-8");
   });
 
-  it("owner 行数がちょうど MAX（10,000）→ 200・全行出力・resultCount=10000", async () => {
-    pm.propertyOwner.count.mockResolvedValue(10000); // 境界値: 超過ではないので通る
+  it("グループ行数がちょうど MAX（10,000）→ 200・全行出力・resultCount=10000", async () => {
+    // 10,000 物件 × 各 1 送付先 = 10,000 行（境界値・取得物件数も 10,000 = MAX で通る）。
     const many = Array.from({ length: 10000 }, (_, i) =>
       makeProp({ id: `p${i}` }),
     );
@@ -810,9 +875,316 @@ describe("GET /api/properties/dm-export — 上限判定の保証（owner 行数
     });
   });
 
-  it("400（上限超過）時は ownerなし COUNT も実行されない（負荷を増やさない）", async () => {
-    pm.propertyOwner.count.mockResolvedValue(10001);
-    await GET(makeRequest());
+  it("400（取得物件数 超過）時は ownerなし COUNT も実行されない（負荷を増やさない）", async () => {
+    // 取得物件数 > MAX で 400 する経路では、skippedCount 用の property.count も実行しない。
+    const many = Array.from({ length: 10001 }, (_, i) => makeProp({ id: `p${i}` }));
+    pm.property.findMany.mockResolvedValue(many);
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(400);
     expect(pm.property.count).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// PR-3a: 同一送付先住所グルーピング（1 送付先住所 = 1 行）
+// 送付方針: 同一物件内で「Owner.zip + Owner.address」が同じ共有者は 1 通にまとめる。
+//  - 名義が違っても同住所なら重複送付しない（未成年・家族名義への個別 DM を回避）。
+//  - 宛先は Owner.zip / Owner.address のみ（Property / Building.postalCode は使わない）。
+// 列ヘッダは既存 12 列を維持し、末尾に「送付先所有者名一覧 / 共有者数」を追加。
+// ============================================================
+describe("GET /api/properties/dm-export — 同一送付先住所グルーピング（PR-3a）", () => {
+  // カンマを含まない fixture 前提で 1 行を列配列に分解するヘルパー。
+  function rowCells(csv: string, needle: string): string[] {
+    const line = csv
+      .split("\r\n")
+      .filter((l) => l.length > 0)
+      .find((l) => l.includes(needle));
+    if (!line) throw new Error(`row containing ${needle} not found`);
+    return line.split(",");
+  }
+  function headerIndex(csv: string, col: string): number {
+    return csv.split("\r\n")[0].split(",").indexOf(col);
+  }
+
+  it("01. 同一 zip+address の共有者は 1 行にまとまる（共有者数 2・送付先一覧に両名）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        id: "p1",
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: "親 太郎", zip: "100-0001", address: "東京都港区3-3" },
+            isPrimary: true,
+          }),
+          makePropertyOwner({
+            owner: { name: "子 次郎", zip: "100-0001", address: "東京都港区3-3" },
+            isPrimary: false,
+            relationship: "子",
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    // ヘッダ + 1 行（2 名が同住所 → 1 通）
+    expect(lines).toHaveLength(2);
+    const idxCount = headerIndex(csv, "共有者数");
+    const cells = rowCells(csv, "親 太郎");
+    expect(cells[idxCount]).toBe("2");
+    expect(csv).toContain("親 太郎、子 次郎"); // 送付先所有者名一覧
+    const audit = lastAudit();
+    expect(audit.detail.count).toBe(1);
+    expect(audit.detail.resultCount).toBe(1);
+  });
+
+  it("02. 異なる zip+address の共有者は別行（住所違いは個別送付）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({ owner: { name: "甲", address: "住所X" } }),
+          makePropertyOwner({
+            owner: { name: "乙", address: "住所Y" },
+            isPrimary: false,
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(3); // ヘッダ + 2 行
+  });
+
+  it("03. 同一住所だが氏名が違っても重複出力されない（氏名はキーに含めない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: "名義A", zip: "100-0001", address: "同じ住所1-1" },
+          }),
+          makePropertyOwner({
+            owner: { name: "名義B", zip: "100-0001", address: "同じ住所1-1" },
+            isPrimary: false,
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(2); // 1 通のみ
+  });
+
+  it("04. 1 名なら宛名は『所有者名』+『様』", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: "単独 一郎", address: "東京都港区3-3", corporateNumber: null },
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const idxName = headerIndex(csv, "所有者名");
+    const idxHon = headerIndex(csv, "敬称");
+    const cells = rowCells(csv, "単独 一郎");
+    expect(cells[idxName]).toBe("単独 一郎");
+    expect(cells[idxHon]).toBe("様");
+  });
+
+  it("05. 複数名なら宛名は『代表所有者名』+『様 他共有者様』", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: "代表 太郎", zip: "100-0001", address: "東京都港区3-3" },
+            isPrimary: true,
+          }),
+          makePropertyOwner({
+            owner: { name: "共有 次郎", zip: "100-0001", address: "東京都港区3-3" },
+            isPrimary: false,
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const idxName = headerIndex(csv, "所有者名");
+    const idxHon = headerIndex(csv, "敬称");
+    const cells = rowCells(csv, "代表 太郎");
+    expect(cells[idxName]).toBe("代表 太郎");
+    expect(cells[idxHon]).toBe("様 他共有者様");
+  });
+
+  it("06. primary owner が代表者として優先される（入力順が primary 後でも）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          // 入力順では非 primary が先頭
+          makePropertyOwner({
+            owner: { name: "非代表 先頭", zip: "100-0001", address: "東京都港区3-3" },
+            isPrimary: false,
+          }),
+          makePropertyOwner({
+            owner: { name: "代表 後ろ", zip: "100-0001", address: "東京都港区3-3" },
+            isPrimary: true,
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const idxName = headerIndex(csv, "所有者名");
+    const idxRep = headerIndex(csv, "代表者");
+    const cells = rowCells(csv, "代表 後ろ");
+    // 宛名（所有者名列）は primary を採用
+    expect(cells[idxName]).toBe("代表 後ろ");
+    expect(cells[idxRep]).toBe("代表");
+  });
+
+  it("07. 郵便番号列は Owner.zip を使い、Property.postalCode / Building.postalCode に影響されない", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        // route の select には postalCode / building が含まれないが、混入回帰を防ぐため fixture に入れる
+        postalCode: "999-9999",
+        building: { postalCode: "888-8888", address: "棟住所" },
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { zip: "100-0001", address: "東京都千代田区2-2", name: "所有 花子" },
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const idxZip = headerIndex(csv, "郵便番号");
+    const cells = rowCells(csv, "所有 花子");
+    expect(cells[idxZip]).toBe("100-0001"); // Owner.zip
+    // 物件/棟の postalCode は出力に現れない
+    expect(csv).not.toContain("999-9999");
+    expect(csv).not.toContain("888-8888");
+  });
+
+  it("08. address 空欄の所有者は CSV に出ず、skippedAddressMissingCount は DB COUNT を反映", async () => {
+    // 取得物件内では address 空欄の共有者は grouping で skip され CSV に出ない。
+    // skippedAddressMissingCount は fetch ではなく DB COUNT（全 matching 範囲）由来。
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        id: "p1",
+        propertyOwners: [
+          makePropertyOwner({ owner: { name: "送付可 太郎", address: "東京都港区3-3" } }),
+          makePropertyOwner({
+            owner: { name: "住所空 次郎", address: "" },
+            isPrimary: false,
+          }),
+        ],
+      }),
+    ]);
+    pm.propertyOwner.count.mockResolvedValue(1); // address null/"" の非アーカイブ所有者数
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(2); // ヘッダ + 1 行（住所空の所有者は出ない）
+    expect(csv).toContain("送付可 太郎");
+    expect(csv).not.toContain("住所空 次郎");
+    const audit = lastAudit();
+    expect(audit.detail.skippedAddressMissingCount).toBe(1);
+    // skippedCount（非アーカイブ所有者0件の物件）には混ぜない
+    expect(audit.detail.skippedCount).toBe(0);
+    expect(audit.detail.resultCount).toBe(1);
+
+    // COUNT は「matching 送付可物件 × 非アーカイブ所有者 × address が null/空」を数える
+    const cwhere = pm.propertyOwner.count.mock.calls[0][0].where;
+    expect(cwhere.owner.isArchived).toBe(false);
+    expect(cwhere.owner.OR).toEqual([{ address: null }, { address: "" }]);
+    expect(cwhere.property.dmStatus).toBe("send");
+    expect(cwhere.property.isArchived).toBe(false);
+  });
+
+  it("08b. address 空欄しか無い物件は fetch されなくても skippedAddressMissingCount に計上（Codex P2: 取りこぼさない）", async () => {
+    // address 空欄しか持たない物件は mailable 述語で fetch 対象外（findMany は空）。
+    // それでも DB COUNT は全 matching 範囲を数えるため、当該所有者は監査に残る。
+    pm.property.findMany.mockResolvedValue([]); // mailable 物件なし
+    pm.propertyOwner.count.mockResolvedValue(3); // address 空欄の非アーカイブ所有者 3 名
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const csv = await readCsv(res);
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(1); // ヘッダのみ
+    const audit = lastAudit();
+    expect(audit.detail.resultCount).toBe(0);
+    expect(audit.detail.count).toBe(0);
+    // fetch されていない物件の所有者も DB COUNT で計上される（取りこぼさない）
+    expect(audit.detail.skippedAddressMissingCount).toBe(3);
+  });
+
+  it("09. 既存 12 列の列順を維持し、末尾に送付先所有者名一覧・共有者数を追加", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    // 先頭 BOM（U+FEFF）を除いてヘッダ行を厳密一致で検証する。
+    const header = csv.split("\r\n")[0].replace(/^﻿/, "");
+    expect(header).toBe(
+      "管理ID,物件住所,所有者名,敬称,郵便番号,所有者住所,物件種別,所有者名カナ,代表者,続柄,部屋番号,DM判断,送付先所有者名一覧,共有者数",
+    );
+  });
+
+  it("11. AuditLog に PII が無く、skippedAddressMissingCount などのキー名にも owner を含まない", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: "秘密 花子", zip: "100-0001", address: "東京都千代田区2-2" },
+          }),
+        ],
+      }),
+    ]);
+
+    await GET(makeRequest());
+    const audit = lastAudit();
+    const detailStr = JSON.stringify(audit.detail);
+    expect(detailStr).not.toContain("秘密 花子");
+    expect(detailStr).not.toContain("東京都千代田区2-2");
+    expect(detailStr).not.toContain("100-0001");
+    for (const key of Object.keys(audit.detail)) {
+      expect(key.toLowerCase()).not.toContain("owner");
+    }
+    // 新カウントは数値のみ
+    expect(typeof audit.detail.skippedAddressMissingCount).toBe("number");
+  });
+
+  it("12. PropertyDmLog には一切書き込まない（export は送付履歴ではない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: "親 太郎", zip: "100-0001", address: "東京都港区3-3" },
+          }),
+          makePropertyOwner({
+            owner: { name: "子 次郎", zip: "100-0001", address: "東京都港区3-3" },
+            isPrimary: false,
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.createMany).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
   });
 });

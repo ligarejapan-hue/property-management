@@ -21,18 +21,24 @@ import {
   MAX_DM_EXPORT_ROWS,
   isPlainOwnerLevel,
   buildDmRow,
+  groupPropertyOwnersByAddress,
+  type DmRowPropertyOwner,
 } from "@/lib/dm-export";
 
 // ---------- GET /api/properties/dm-export ----------
 //
 // 物件一覧と同じ検索・フィルタ・sort・field_staff スコープを共有しつつ、
 // サーバ側で dmStatus=send / isArchived=false を強制し、「送付可」の物件を
-// 所有者 1 名 = 1 行に展開して DM 差込用 CSV を出力する。
+// 「同一物件内・同一送付先住所（Owner.zip + Owner.address）の共有者 = 1 行」に
+// グルーピングして DM 差込用 CSV を出力する（名義違いでも同住所なら 1 通＝重複送付しない）。
 //
-// 安全上限: MAX_DM_EXPORT_ROWS 行（最終 CSV 行 = 所有者行で判定）。
+// 安全上限: MAX_DM_EXPORT_ROWS 行（最終 CSV 行 = 送付先住所グループ数で判定）。
 // 超過時は切り捨てず 400 にする（不完全な差込 CSV を渡さない / DoS 防止）。
-// 「最終 owner 行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」は
-// 事前 COUNT + 所有者あり物件のみ取得 + 取得後再判定 の 3 層で保証する（GET 内コメント参照）。
+// 「最終グループ行数が上限超なら必ず 400 / 部分 CSV の 200 を返さない」は
+// 所有者あり物件のみを take=MAX+1 で取得し、(1) 取得物件数が MAX 超なら 400 /
+// (2) グルーピング後の送付先グループ数が MAX 超なら 400、の 2 段で保証する。
+// owner リンク数（共有者数）は同住所で 1 行に畳まれるため reject には使わない（false 400 回避・
+// GET 内コメント参照）。
 //
 // PII / 権限:
 //  - property:read / csv_export:read / csv_export_personal:read / owner:read すべて必須
@@ -121,39 +127,32 @@ export async function GET(request: NextRequest) {
 
     const orderBy = buildPropertyListOrderBy(query);
 
-    // 上限判定は「最終 CSV 行数 = 所有者行数」で行う。property 件数を take で切ると、
-    // ownerなし物件が窓を消費して後続の eligible owner 行が欠落した 200（不完全 CSV）に
-    // なり得るため、次の 3 層で「owner 行数が上限超なら確実に 400」を保証する:
-    //  (1) fetch 前に owner 行数を COUNT し、超過なら PII を一切取得せず 400
-    //  (2) fetch 対象を「非アーカイブ所有者が 1 名以上の物件」に限定し、
-    //      ownerなし物件が take 窓を消費しないようにする（行の完全性の核）
-    //  (3) COUNT と fetch の間の更新（race）に備え、取得後の行数でも再判定して 400
+    // 上限判定は必ず「最終 CSV 行数 = 送付先住所グループ数」で行う。
+    // owner リンク数（共有者数）は「グループ数の上限」ではあるが、同一住所の共有者は 1 行に
+    // 畳まれるため、owner リンク数を hard reject に使うと正当な grouped export を false 400 に
+    // してしまう（例: 1 物件に同住所の共有者 10,001 名 → 実際は 1 行なのに 400）。
+    // そこで owner リンク数では reject せず、次の 2 段で「完全な CSV か 400 か」を保証する:
+    //  (1) fetch 対象を「送付先になり得る所有者（非アーカイブ かつ Owner.address 非空）を
+    //      1 名以上持つ物件」に限定 + take = MAX+1 件。address 空欄しか持たない物件は最終的に
+    //      0 行になるため窓から除外し、それらが窓を埋めて正当な物件を落とす/誤 400 になるのを防ぐ。
+    //      取得物件数が MAX を超えた（窓を埋め切った）= 各物件が必ず 1 グループ以上を生むため
+    //      最終行数も必ず MAX 超 → 全件性を保証できないので 400（取得「物件数」での安全側カット）。
+    //  (2) 取得後にグルーピングし、最終 CSV 行数（送付先グループ数）が MAX 超なら 400。
+    //      取得物件数が MAX 以下なら mailable 物件は全件取得済みのため、グループ数 = 真の総行数。
+    // 注: DB の `address: { not: "" }` は null / 空文字を除外する（SQL の `<> ''` は NULL も除外）。
+    //     正規化後に空になる「空白のみ」の住所は除外しきれないが、グルーピング側で skip される。
     const eligibleOwnerWhere = { owner: { isArchived: false } };
+    const mailableOwnerWhere = {
+      owner: { isArchived: false, address: { not: "" } },
+    };
 
-    // (1) 最終 owner 行数の事前 COUNT。propertyOwners の select 条件と同一の
-    //     「property が where に一致 × 所有者が非アーカイブ」のリンク数 = 最終行数。
-    const ownerRowCount = mgmtShortCircuitEmpty
-      ? 0
-      : await prisma.propertyOwner.count({
-          where: { ...eligibleOwnerWhere, property: where },
-        });
-    if (ownerRowCount > MAX_DM_EXPORT_ROWS) {
-      throw new ApiError(
-        400,
-        "出力対象が上限（10,000件）を超えています。検索条件で絞り込んでください。",
-        "EXPORT_LIMIT_EXCEEDED",
-      );
-    }
-
-    // (2) 非アーカイブ所有者を 1 名以上持つ物件のみ取得（既存の AND マージと同イディオム）。
-    //     owner 持ち物件が take 窓（MAX+1 件）を超える場合は各物件が 1 行以上を生むため
-    //     行数も必ず MAX を超え、(3) で 400 になる。窓内に収まる場合は全件取得済みとなり、
-    //     どちらのケースでも「eligible owner 行を落とした 200 CSV」は返らない。
-    const whereWithEligibleOwners = {
+    // (1) 送付先になり得る所有者を 1 名以上持つ物件のみ取得（既存の AND マージと同イディオム）。
+    //     skippedCount 用の eligibleOwnerWhere（非アーカイブのみ）とは別の、address 非空も要求する条件。
+    const whereWithMailableOwners = {
       ...where,
       AND: [
         ...(where.AND ?? []),
-        { propertyOwners: { some: eligibleOwnerWhere } },
+        { propertyOwners: { some: mailableOwnerWhere } },
       ],
     };
 
@@ -161,12 +160,14 @@ export async function GET(request: NextRequest) {
     const properties = mgmtShortCircuitEmpty
       ? []
       : await prisma.property.findMany({
-          where: whereWithEligibleOwners,
+          where: whereWithMailableOwners,
           select: {
             id: true,
             address: true,
             propertyType: true,
             roomNo: true,
+            // 物件は mailable 所有者で絞るが、ここは非アーカイブ所有者を全件取る
+            // （address 空欄の共有者も grouping 側で skip・skippedAddressMissingCount に計上するため）。
             propertyOwners: {
               where: { owner: { isArchived: false } },
               select: {
@@ -189,13 +190,60 @@ export async function GET(request: NextRequest) {
           take: MAX_DM_EXPORT_ROWS + 1,
         });
 
-    // (3) 取得済みデータの owner 行数で再判定。超過時は切り捨てず、取込元逆引き・
+    // (1) 取得した mailable 物件が take 窓（MAX+1 件）を埋めた = mailable 物件が MAX 件超存在し、
+    //     未取得分が残り得る → 全件性を保証できないため 400。これは PII 行マッピング・取込元逆引き
+    //     より前に走る「安全側のガード」（過剰取得・部分 CSV・PII の不要取得を防ぐ）。
+    //     各 mailable 物件は address 非空の所有者を持つため通常 1 グループ以上を生み、
+    //     取得物件数 > MAX は最終行数 > MAX を含意する。null/空 address のみの物件は窓から除外済み。
+    //
+    //     既知の受容済み制限（安全側）: DB の `address: { not: "" }` は「空白のみ」の住所
+    //     （半角/全角スペースだけ）を除外できない。それらは後続の grouping で trim され skip される
+    //     が、本ガードはその前に走るため、「非アーカイブ所有者の住所が全て空白のみ」の物件が
+    //     1 万件超ある極端なケースでは、実際には skip 対象でも preflight で 400 になり得る。
+    //     データ損失でも PII 漏洩でもない安全側 400 として受容する（発生条件は実データ上ほぼ非現実的）。
+    //     完全対応は将来、raw SQL 等で DB 側のグループ数を精密化する別 PR 候補（本 PR では Prisma 中心
+    //     の実装を維持し raw SQL を入れない）。通常の上限は後段 (2) の送付先グループ数判定で担保する。
+    if (properties.length > MAX_DM_EXPORT_ROWS) {
+      throw new ApiError(
+        400,
+        "出力対象が上限（10,000件）を超えています。検索条件で絞り込んでください。",
+        "EXPORT_LIMIT_EXCEEDED",
+      );
+    }
+
+    // 物件ごとに「同一送付先住所（Owner.zip + Owner.address）の共有者 = 1 行」へグループ化する。
+    // 取込元逆引き・行マッピングより前にグルーピングし、最終行数（グループ数）で上限を再判定する。
+    //  - Owner.address 空欄の所有者は送付先不明として skip（件数は下で DB COUNT する）。
+    //  - 同一住所の共有者は名義違いでも 1 通にまとめる（未成年・家族名義への個別 DM を回避）。
+    const grouped = properties.map((p) => ({
+      property: p,
+      ...groupPropertyOwnersByAddress(p.propertyOwners as DmRowPropertyOwner[]),
+    }));
+
+    // skippedCount は既存の意味（非アーカイブ所有者 0 件の物件）を維持する。
+    let mailablePropertyCount = 0;
+    let skippedCount = 0;
+    let totalRows = 0;
+    for (const g of grouped) {
+      if (g.property.propertyOwners.length === 0) {
+        // 非アーカイブ所有者 0 件（既存 skippedCount の意味そのもの・race 防御）。
+        skippedCount += 1;
+        continue;
+      }
+      if (g.groups.length === 0) {
+        // mailable 物件として取得したが、全員 address が空白のみ等で送付先 0 件になった残留ケース。
+        // 「所有者 0 件」ではないため skippedCount には混ぜない（行も生まない）。
+        continue;
+      }
+      mailablePropertyCount += 1;
+      totalRows += g.groups.length;
+    }
+
+    // (2) 最終 CSV 行数（送付先住所グループ数）で判定。超過時は切り捨てず、取込元逆引き・
     //     CSV 生成・AuditLog より前で 400 にする（不完全な差込 CSV を渡さない / DoS 防止）。
-    const totalOwnerRows = properties.reduce(
-      (n, p) => n + p.propertyOwners.length,
-      0,
-    );
-    if (totalOwnerRows > MAX_DM_EXPORT_ROWS) {
+    //     (1) で取得物件数 ≤ MAX を確認済みのため eligible 物件は全件取得済み = totalRows は
+    //     真の総送付先数。少数物件に多数の異住所共有者が居て totalRows が膨らむケースをここで捕捉。
+    if (totalRows > MAX_DM_EXPORT_ROWS) {
       throw new ApiError(
         400,
         "出力対象が上限（10,000件）を超えています。検索条件で絞り込んでください。",
@@ -209,28 +257,24 @@ export async function GET(request: NextRequest) {
       properties.map((p) => p.id),
     );
 
-    // 所有者 1 名 = 1 行に展開。非アーカイブ所有者が 0 件の物件は行を生まず skipped に数える。
-    // （fetch 対象は所有者あり物件に限定済みのため、本番でこの skip 分岐に入るのは
-    //   fetch 間際に所有者がアーカイブされた race のみ。防御として残す）
+    // 各グループ = 1 行に展開（宛名・送付先一覧・共有者数は buildDmRow が生成）。
     const rows: Array<Record<string, string>> = [];
-    let mailablePropertyCount = 0;
-    let skippedCount = 0;
-    for (const p of properties) {
-      if (p.propertyOwners.length === 0) {
-        skippedCount += 1;
-        continue;
-      }
-      mailablePropertyCount += 1;
-      const importSourceValue = importSourceMap.get(p.id) ?? "";
-      for (const po of p.propertyOwners) {
-        rows.push(buildDmRow(p, po, ownerDisplayConfig, importSourceValue));
+    for (const g of grouped) {
+      if (g.groups.length === 0) continue;
+      const importSourceValue = importSourceMap.get(g.property.id) ?? "";
+      for (const group of g.groups) {
+        rows.push(buildDmRow(g.property, group, ownerDisplayConfig, importSourceValue));
       }
     }
 
-    // 上限判定は (1)〜(3) で実施済み（rows.length === totalOwnerRows）。
-    // ownerなし送付可物件は fetch 対象から外したため、skippedCount は COUNT で正確に数える。
-    // （従来は take 窓内のみの計上だったが、全 matching 範囲の件数になる。
-    //   loop 側の skip 加算は上記 race の防御として残し、二重計上は通常発生しない）
+    // 監査用カウントは上限ガードを通過した成功確定後に DB から数える（400 経路では実行しない）。
+    //  - skippedCount: 非アーカイブ所有者が 0 名の送付可物件（既存の意味そのもの）。
+    //  - skippedAddressMissingCount: 送付先になり得ない（Owner.address が null/空文字）の
+    //    非アーカイブ所有者数。fetch は mailable 物件に絞るため address 空欄しか持たない物件の
+    //    所有者は取得されない。それらも漏れなく数えるため fetch ではなく全 matching 範囲を
+    //    DB COUNT する（取得ウィンドウに依存しない正確な件数）。
+    //    ※「空白のみ」の住所は DB の null/"" 条件では拾えない（グルーピング側では skip される）。
+    let skippedAddressMissingCount = 0;
     if (!mgmtShortCircuitEmpty) {
       skippedCount += await prisma.property.count({
         where: {
@@ -239,6 +283,12 @@ export async function GET(request: NextRequest) {
             ...(where.AND ?? []),
             { propertyOwners: { none: eligibleOwnerWhere } },
           ],
+        },
+      });
+      skippedAddressMissingCount = await prisma.propertyOwner.count({
+        where: {
+          owner: { isArchived: false, OR: [{ address: null }, { address: "" }] },
+          property: where,
         },
       });
     }
@@ -272,6 +322,7 @@ export async function GET(request: NextRequest) {
         count: mailablePropertyCount,
         resultCount: rows.length,
         skippedCount,
+        skippedAddressMissingCount,
         exportedAt: new Date().toISOString(),
       },
     });
