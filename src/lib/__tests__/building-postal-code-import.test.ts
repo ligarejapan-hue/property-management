@@ -272,6 +272,37 @@ describe("POST /api/import/csv — 棟郵便番号取込（タスク5）", () =>
   });
 });
 
+describe("棟郵便番号は行が create/update 成功した時のみ適用（Codex P2）", () => {
+  it("住所のみ一致で needs_review に逸れた行 → building.update しない", async () => {
+    // dedupe index に「同住所・別棟(buildingId=null)・roomNo無」の既存物件を置く
+    // → ユニット行は住所一致のみ（更新不可理由）で needs_review。
+    pm.property.findMany.mockResolvedValue([
+      {
+        id: "px",
+        address: "東京都港区1-1-1",
+        roomNo: null,
+        buildingId: null,
+        realEstateNumber: null,
+        externalLinkKey: null,
+      },
+    ]);
+    const csv = unitCsv("棟郵便番号", "100-0005");
+    const res = await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    const json = (await res.json()) as { needsReviewCount: number };
+    expect(json.needsReviewCount).toBe(1);
+    expect(pm.building.update).not.toHaveBeenCalled();
+  });
+
+  it("property.create が失敗した行 → building.update しない", async () => {
+    pm.property.create.mockRejectedValue(new Error("db down"));
+    const csv = unitCsv("棟郵便番号", "100-0005");
+    const res = await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    const json = (await res.json()) as { errorCount: number };
+    expect(json.errorCount).toBe(1);
+    expect(pm.building.update).not.toHaveBeenCalled();
+  });
+});
+
 describe("郵便番号ヘッダ集合の分離（Property / Building / Owner）", () => {
   it("BUILDING_POSTAL_CODE_HEADERS は棟3ヘッダを含む", () => {
     expect(BUILDING_POSTAL_CODE_HEADERS.has("棟郵便番号")).toBe(true);

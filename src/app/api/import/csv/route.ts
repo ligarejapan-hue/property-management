@@ -570,10 +570,13 @@ export async function POST(request: NextRequest) {
             continue;
           }
           resolvedBuildingId = resolution.buildingId;
+        }
 
-          // 棟が解決された行のみ、棟郵便番号を Building.postalCode へ適用する。
-          // 棟が無い行（非ユニット/needs_review）では buildingPostalCode は適用されず drop。
-          if (mapped.buildingPostalCode) {
+        // 棟郵便番号は「行が物件 create/update として成功した時のみ」棟へ適用する
+        // （needs_review や create/update 失敗の行ではマスター Building を変更しない）。
+        // 棟が無い行（非ユニット/未解決）は resolvedBuildingId が null のため何もしない。
+        const commitBuildingPostalCode = async () => {
+          if (resolvedBuildingId && mapped.buildingPostalCode) {
             await applyBuildingPostalCode(
               resolvedBuildingId,
               mapped.buildingPostalCode,
@@ -581,7 +584,7 @@ export async function POST(request: NextRequest) {
               buildingPostalApplied,
             );
           }
-        }
+        };
 
         // -----------------------------------------------------------
         // Duplicate check (比較用値ベース / 正規化比較)
@@ -669,6 +672,7 @@ export async function POST(request: NextRequest) {
 
           if (!existing || changedFields.length === 0) {
             // 既存値と完全一致 → 変更なし。success 扱いで「更新なし」を伝える
+            await commitBuildingPostalCode();
             jobRows.push({
               jobId: job.id,
               rowNumber,
@@ -714,6 +718,7 @@ export async function POST(request: NextRequest) {
           );
           if (idxInAll >= 0) existingPropsForDedupe[idxInAll] = updatedRecord;
 
+          await commitBuildingPostalCode();
           jobRows.push({
             jobId: job.id,
             rowNumber,
@@ -806,6 +811,7 @@ export async function POST(request: NextRequest) {
         addToDedupeIndex(dedupeIndex, newRecord);
         existingPropsForDedupe.push(newRecord);
 
+        await commitBuildingPostalCode();
         jobRows.push({
           jobId: job.id,
           rowNumber,
