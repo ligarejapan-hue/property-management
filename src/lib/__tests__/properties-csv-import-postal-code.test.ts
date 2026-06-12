@@ -76,6 +76,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+import * as XLSX from "xlsx";
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { recordChanges } from "@/lib/change-log";
@@ -283,5 +284,51 @@ describe("POST /api/import/csv — 郵便番号取込（update）", () => {
     expect(pm.property.update).toHaveBeenCalledTimes(1);
     expect("postalCode" in lastUpdateData()).toBe(false);
     expect(lastUpdateData().note).toBe("新メモ");
+  });
+});
+
+describe("POST /api/import/csv — XLSX 郵便番号 formatted-text 取込（タスク4）", () => {
+  /** 住所 + 郵便番号(セル指定) の XLSX base64 を作る。 */
+  function makeXlsx(
+    postalCell: { t: string; v: unknown; z?: string },
+    address = "秋田県南秋田郡",
+  ): string {
+    const ws: Record<string, unknown> = { "!ref": "A1:B2" };
+    ws["A1"] = { t: "s", v: "住所" };
+    ws["B1"] = { t: "s", v: "郵便番号" };
+    ws["A2"] = { t: "s", v: address };
+    ws["B2"] = postalCell.z
+      ? { t: postalCell.t, v: postalCell.v, z: postalCell.z }
+      : { t: postalCell.t, v: postalCell.v };
+    const wb = { SheetNames: ["S"], Sheets: { S: ws } };
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    return buf.toString("base64");
+  }
+
+  it("郵便書式数値セル(0000000/値100492)→ .w回収→ 0100492 保存", async () => {
+    const xlsxBase64 = makeXlsx({ t: "n", v: 100492, z: "0000000" });
+    const res = await POST(makeRequest({ fileName: "x.xlsx", xlsxBase64 }));
+    expect(res.status).toBe(201);
+    expect(lastCreateData().postalCode).toBe("0100492");
+  });
+
+  it("ハイフン入り書式(000-0000/値100492)→ .w=010-0492→ normalize→ 0100492 保存", async () => {
+    const xlsxBase64 = makeXlsx({ t: "n", v: 100492, z: "000-0000" });
+    await POST(makeRequest({ fileName: "x.xlsx", xlsxBase64 }));
+    expect(lastCreateData().postalCode).toBe("0100492");
+  });
+
+  it("General数値セル(値100492・Excel時点で0喪失)→ 回収不能→ drop（fail-closed維持）", async () => {
+    const xlsxBase64 = makeXlsx({ t: "n", v: 100492 });
+    const res = await POST(makeRequest({ fileName: "x.xlsx", xlsxBase64 }));
+    expect(res.status).toBe(201);
+    // 6桁ゆえ不正→ drop（左0詰めの誤補正をしない）
+    expect("postalCode" in lastCreateData()).toBe(false);
+  });
+
+  it("テキストセル 010-0492 → 0100492 保存", async () => {
+    const xlsxBase64 = makeXlsx({ t: "s", v: "010-0492" });
+    await POST(makeRequest({ fileName: "x.xlsx", xlsxBase64 }));
+    expect(lastCreateData().postalCode).toBe("0100492");
   });
 });

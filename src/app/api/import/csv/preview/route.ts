@@ -8,7 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
+import { PROPERTY_CSV_COLUMN_MAP, POSTAL_CODE_HEADERS } from "@/lib/csv-parser";
 import {
   buildDedupeIndex,
   findPropertyDuplicate,
@@ -65,10 +65,25 @@ export async function POST(request: NextRequest) {
 
     const fileTypeDetection = detectImportFileType(fileName);
 
+    // 本取込 route と同じく、郵便番号列は XLSX の整形済みテキストで読む（ドリフト防止）。
+    const postalFormattedHeaders = new Set<string>(POSTAL_CODE_HEADERS);
+    if (columnMapping) {
+      for (const [csvHeader, japaneseName] of Object.entries(columnMapping)) {
+        if (JAPANESE_FIELD_MAP[japaneseName] === "postalCode") {
+          postalFormattedHeaders.add(csvHeader);
+        }
+      }
+    }
+
     let headers: string[];
     let rows: Record<string, string>[];
     try {
-      const parsed = parseSheet({ fileName, csvText, xlsxBase64 });
+      const parsed = parseSheet({
+        fileName,
+        csvText,
+        xlsxBase64,
+        formattedTextHeaders: postalFormattedHeaders,
+      });
       headers = parsed.headers;
       rows = parsed.rows;
     } catch (e) {

@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import { PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
+import { PROPERTY_CSV_COLUMN_MAP, POSTAL_CODE_HEADERS } from "@/lib/csv-parser";
 import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import {
@@ -259,12 +259,29 @@ export async function POST(request: NextRequest) {
       throw new ApiError(422, "csvText または xlsxBase64 は必須です", "VALIDATION_ERROR");
     }
 
+    // XLSX 取込時、郵便番号列だけ整形済みテキスト（.w）で読むためのヘッダ集合。
+    // 固定トークン（郵便番号/postalCode/postal_code）＋ columnMapping で「郵便番号」に
+    // 割り当てられた CSV ヘッダ。CSV には影響しない（parseSheet 側で xlsx のみ使用）。
+    const postalFormattedHeaders = new Set<string>(POSTAL_CODE_HEADERS);
+    if (columnMapping) {
+      for (const [csvHeader, japaneseName] of Object.entries(columnMapping)) {
+        if (JAPANESE_FIELD_MAP[japaneseName] === "postalCode") {
+          postalFormattedHeaders.add(csvHeader);
+        }
+      }
+    }
+
     // Parse CSV or XLSX (unified)
     let headers: string[];
     let rows: Record<string, string>[];
     let parseErrors: Array<{ row: number; message: string }>;
     try {
-      const parsed = parseSheet({ fileName, csvText, xlsxBase64 });
+      const parsed = parseSheet({
+        fileName,
+        csvText,
+        xlsxBase64,
+        formattedTextHeaders: postalFormattedHeaders,
+      });
       headers = parsed.headers;
       rows = parsed.rows;
       parseErrors = parsed.errors;
