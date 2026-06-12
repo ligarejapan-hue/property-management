@@ -55,6 +55,8 @@ const CSV_HEADERS = [
   "所有者名",
   "更新日時",
   "作成日時",
+  // PR-3b: 既存列順を壊さないため郵便番号は末尾に追加（値は Property.postalCode のみ）。
+  "郵便番号",
 ] as const;
 
 function toCsvDateTime(value: Date | string | null | undefined): string {
@@ -117,6 +119,7 @@ export async function GET(request: NextRequest) {
             id: true,
             propertyType: true,
             address: true,
+            postalCode: true,
             lotNumber: true,
             buildingNumber: true,
             realEstateNumber: true,
@@ -177,6 +180,8 @@ export async function GET(request: NextRequest) {
         所有者名: ownerNames.join("、"),
         更新日時: toCsvDateTime(p.updatedAt),
         作成日時: toCsvDateTime(p.createdAt),
+        // Property.postalCode のみ（Building.postalCode fallback は別 PR）。null は空欄。
+        郵便番号: p.postalCode ?? "",
       };
     });
 
