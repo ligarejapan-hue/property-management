@@ -180,6 +180,10 @@ export const PROPERTY_CSV_COLUMN_MAP: Record<string, string> = {
   // Unit-specific fields (区分マンション)
   "棟名": "buildingName",
   "マンション名": "buildingName",
+  // 棟(建物)郵便番号。bare「郵便番号」は Property 専用のため、棟用は専用ヘッダで分離する。
+  "棟郵便番号": "buildingPostalCode",
+  "buildingPostalCode": "buildingPostalCode",
+  "building_postal_code": "buildingPostalCode",
   "部屋番号": "roomNo",
   "号室": "roomNo",
   "階": "floorNo",
@@ -225,6 +229,18 @@ export const PROPERTY_CSV_COLUMN_MAP: Record<string, string> = {
 export const POSTAL_CODE_HEADERS: ReadonlySet<string> = new Set(
   Object.keys(PROPERTY_CSV_COLUMN_MAP).filter(
     (h) => PROPERTY_CSV_COLUMN_MAP[h] === "postalCode",
+  ),
+);
+
+/**
+ * Building の postalCode（棟郵便番号）へマップされる CSV ヘッダ名の集合。
+ * `PROPERTY_CSV_COLUMN_MAP` から自動導出。
+ *
+ * 用途: XLSX 取込時に棟郵便番号列も整形済みテキスト（.w）で読む（先頭0回収）。
+ */
+export const BUILDING_POSTAL_CODE_HEADERS: ReadonlySet<string> = new Set(
+  Object.keys(PROPERTY_CSV_COLUMN_MAP).filter(
+    (h) => PROPERTY_CSV_COLUMN_MAP[h] === "buildingPostalCode",
   ),
 );
 

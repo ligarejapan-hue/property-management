@@ -9,9 +9,17 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import { PROPERTY_CSV_COLUMN_MAP, POSTAL_CODE_HEADERS } from "@/lib/csv-parser";
+import {
+  PROPERTY_CSV_COLUMN_MAP,
+  POSTAL_CODE_HEADERS,
+  BUILDING_POSTAL_CODE_HEADERS,
+} from "@/lib/csv-parser";
 import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
-import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
+import {
+  recordChanges,
+  PROPERTY_TRACKED_FIELDS,
+  BUILDING_TRACKED_FIELDS,
+} from "@/lib/change-log";
 import {
   PROPERTY_TYPE_VALUES,
   PROPERTY_TYPE_JP_TO_VALUE,
@@ -47,6 +55,7 @@ const VALID_OCCUPANCY_STATUS = ["vacant", "occupied", "unknown"];
 const JAPANESE_FIELD_MAP: Record<string, string> = {
   "住所": "address",
   "郵便番号": "postalCode",
+  "棟郵便番号": "buildingPostalCode",
   "地番": "lotNumber",
   "家屋番号": "buildingNumber",
   "不動産番号": "realEstateNumber",
@@ -231,6 +240,46 @@ async function resolveBuildingId(
   };
 }
 
+/**
+ * 解決済みの棟へ郵便番号（正規化済み・妥当 7 桁）を適用する。
+ *
+ * - 1 取込あたり棟ごとに 1 回だけ適用（`applied` Set・first-wins）。同一棟の複数ユニット行で
+ *   重複 update しない。
+ * - 既存値と異なる時のみ update し、building の ChangeLog（source=csv_import）を記録する。
+ * - 空欄/不正値は呼び出し側で既に drop 済みのため、本関数には妥当値のみ渡る
+ *   （= 空欄で既存値を潰さない）。
+ */
+async function applyBuildingPostalCode(
+  buildingId: string,
+  normalizedPostalCode: string,
+  changedBy: string,
+  applied: Set<string>,
+): Promise<void> {
+  if (applied.has(buildingId)) return;
+  applied.add(buildingId);
+
+  const building = await prisma.building.findUnique({
+    where: { id: buildingId },
+    select: { postalCode: true },
+  });
+  const prev = building?.postalCode ?? null;
+  if (prev === normalizedPostalCode) return; // 変化なし
+
+  await prisma.building.update({
+    where: { id: buildingId },
+    data: { postalCode: normalizedPostalCode },
+  });
+  await recordChanges({
+    targetTable: "buildings",
+    targetId: buildingId,
+    changedBy,
+    oldValues: { postalCode: prev },
+    newValues: { postalCode: normalizedPostalCode },
+    trackedFields: BUILDING_TRACKED_FIELDS,
+    source: "csv_import",
+  });
+}
+
 // ---------- POST /api/import/csv ----------
 // Accepts raw CSV text in request body (Content-Type: text/csv or multipart).
 // For simplicity in Phase 3, accepts JSON { fileName, csvText }.
@@ -259,13 +308,18 @@ export async function POST(request: NextRequest) {
       throw new ApiError(422, "csvText または xlsxBase64 は必須です", "VALIDATION_ERROR");
     }
 
-    // XLSX 取込時、郵便番号列だけ整形済みテキスト（.w）で読むためのヘッダ集合。
-    // 固定トークン（郵便番号/postalCode/postal_code）＋ columnMapping で「郵便番号」に
-    // 割り当てられた CSV ヘッダ。CSV には影響しない（parseSheet 側で xlsx のみ使用）。
-    const postalFormattedHeaders = new Set<string>(POSTAL_CODE_HEADERS);
+    // XLSX 取込時、郵便番号系の列だけ整形済みテキスト（.w）で読むためのヘッダ集合。
+    // 固定トークン（郵便番号/postalCode/postal_code・棟郵便番号/buildingPostalCode/
+    // building_postal_code）＋ columnMapping で postalCode/buildingPostalCode に割り当てた
+    // CSV ヘッダ。CSV には影響しない（parseSheet 側で xlsx のみ使用）。
+    const postalFormattedHeaders = new Set<string>([
+      ...POSTAL_CODE_HEADERS,
+      ...BUILDING_POSTAL_CODE_HEADERS,
+    ]);
     if (columnMapping) {
       for (const [csvHeader, japaneseName] of Object.entries(columnMapping)) {
-        if (JAPANESE_FIELD_MAP[japaneseName] === "postalCode") {
+        const field = JAPANESE_FIELD_MAP[japaneseName];
+        if (field === "postalCode" || field === "buildingPostalCode") {
           postalFormattedHeaders.add(csvHeader);
         }
       }
@@ -357,6 +411,8 @@ export async function POST(request: NextRequest) {
 
     // Building name lookup cache for unit imports
     const buildingCache: BuildingLookupCache = new Map();
+    // 棟郵便番号を適用済みの buildingId（1 取込あたり棟ごとに 1 回・first-wins）
+    const buildingPostalApplied = new Set<string>();
 
     // Build normalized dedupe index once (address / unit roomNo / identifier fallback)
     const existingPropsForDedupe = await prisma.property.findMany({
@@ -459,6 +515,15 @@ export async function POST(request: NextRequest) {
             delete mapped.postalCode;
           }
         }
+        // 棟郵便番号（Building.postalCode 用・Property.postalCode とは別ヘッダ）も同方針で
+        // 正規化/不正値 drop。適用は棟解決後（resolvedBuildingId != null）のみ。
+        if (mapped.buildingPostalCode !== undefined) {
+          if (isValidPostalCode(mapped.buildingPostalCode)) {
+            mapped.buildingPostalCode = normalizePostalCode(mapped.buildingPostalCode);
+          } else {
+            delete mapped.buildingPostalCode;
+          }
+        }
 
         // -----------------------------------------------------------
         // Unit / building name resolution
@@ -505,6 +570,17 @@ export async function POST(request: NextRequest) {
             continue;
           }
           resolvedBuildingId = resolution.buildingId;
+
+          // 棟が解決された行のみ、棟郵便番号を Building.postalCode へ適用する。
+          // 棟が無い行（非ユニット/needs_review）では buildingPostalCode は適用されず drop。
+          if (mapped.buildingPostalCode) {
+            await applyBuildingPostalCode(
+              resolvedBuildingId,
+              mapped.buildingPostalCode,
+              session.id,
+              buildingPostalApplied,
+            );
+          }
         }
 
         // -----------------------------------------------------------
