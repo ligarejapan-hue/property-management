@@ -495,10 +495,12 @@ describe("GET /api/properties/export", () => {
 
     const res = await GET(makeRequest());
     const csv = await res.text();
-    // makeProp 既定値にカンマを含むセルは無いので「,」分割で検証できる
+    // makeProp 既定値にカンマを含むセルは無いので「,」分割で検証できる。
+    // 郵便番号 列が末尾に増えたため、位置依存（at(-1)/at(-2)）ではなくヘッダ index で取り出す。
+    const header = csv.split("\r\n")[0].split(",");
     const cells = csv.split("\r\n")[1].split(",");
-    expect(cells.at(-2)).toBe(""); // 更新日時
-    expect(cells.at(-1)).toBe(""); // 作成日時
+    expect(cells[header.indexOf("更新日時")]).toBe("");
+    expect(cells[header.indexOf("作成日時")]).toBe("");
   });
 
   it("owner_name の display-level が hidden なら所有者名は空欄（生名を出さない）", async () => {
@@ -536,6 +538,131 @@ describe("GET /api/properties/export", () => {
     const lines = csv.split("\r\n").filter((l) => l.length > 0);
     expect(lines).toHaveLength(1); // ヘッダのみ
     expect(csv).toContain("管理ID");
+  });
+});
+
+// ============================================================
+// PR-3b: 物件CSV export に Property.postalCode（郵便番号）列を末尾追加
+// - 既存列順は壊さず、郵便番号 を最終列に追加する。
+// - 値は Property.postalCode（Building.postalCode fallback は今回入れない）。
+// - null は空欄・既存 sanitize（formula injection 対策）を通す。
+// - owner:read / owner 表示レベルに依存しない（物件情報として出力）。
+// ============================================================
+describe("GET /api/properties/export — 郵便番号列（PR-3b）", () => {
+  function headerCols(csv: string): string[] {
+    return csv.split("\r\n")[0].split(",");
+  }
+
+  it("CSV ヘッダ末尾に『郵便番号』が追加され、既存列順は不変", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    expect(headerCols(csv)).toEqual([
+      "管理ID",
+      "物件種別",
+      "住所",
+      "地番",
+      "家屋番号",
+      "不動産番号",
+      "登記状況",
+      "DM判断",
+      "案件ステータス",
+      "導入ルート",
+      "担当者名",
+      "所有者名",
+      "更新日時",
+      "作成日時",
+      "郵便番号",
+    ]);
+  });
+
+  it("Property.postalCode が郵便番号列（末尾）に出力される", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "100-0001" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("100-0001");
+    // 末尾列であること
+    expect(cells.at(-1)).toBe("100-0001");
+  });
+
+  it("正規化済み 7 桁 postalCode は NNN-NNNN へ整形し、先頭 0 を保持する（Excel 数値化対策）", async () => {
+    // 住所補完フローは Owner/Property に 7 桁（ハイフン無し）で保存し得る。
+    // 例 "0100492" を素のまま出すと Excel が数値化し先頭 0 を落とす → NNN-NNNN でテキスト化。
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "0100492" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("010-0492");
+  });
+
+  it("既にハイフン付きの 7 桁 postalCode はそのまま NNN-NNNN で出る", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "100-0001" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("100-0001");
+  });
+
+  it("7 桁として妥当でない postalCode は素の値のまま出力する（勝手に変形しない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "不明" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("不明");
+  });
+
+  it("Property.postalCode が null の場合は空欄（literal null を出さない）", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp({ postalCode: null })]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("");
+    expect(csv).not.toContain("null");
+  });
+
+  it("postalCode にも formula injection 対策が効く（先頭 = + - @ に ' 付与）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "=1+1" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    expect(csv).toContain("'=1+1");
+  });
+
+  it("property.findMany の select に postalCode: true が含まれる", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    await GET(makeRequest());
+    const call = pm.property.findMany.mock.calls[0][0];
+    expect(call.select.postalCode).toBe(true);
+  });
+
+  it("owner:read が無くても物件CSV export は動き、postalCode は出力される", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_OWNER as any);
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "200-0002" }),
+    ]);
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("200-0002");
+    // owner:read 無しなので所有者名は空（postalCode は owner 権限に依存しない）
+    expect(getOwnerDisplayConfig).not.toHaveBeenCalled();
   });
 });
 
