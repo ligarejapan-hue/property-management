@@ -241,4 +241,8 @@ describe("UPDATABLE_PROPERTY_FIELDS", () => {
       expect(fields).not.toContain(forbidden);
     }
   });
+
+  it("postalCode を更新対象に含む（21-C PR-3c）", () => {
+    expect(UPDATABLE_PROPERTY_FIELDS as readonly string[]).toContain("postalCode");
+  });
 });

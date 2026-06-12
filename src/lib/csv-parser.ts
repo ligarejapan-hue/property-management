@@ -123,6 +123,7 @@ function parseCsvLine(line: string, delimiter: string): string[] {
 export const PROPERTY_CSV_COLUMN_MAP: Record<string, string> = {
   // Japanese
   "住所": "address",
+  "郵便番号": "postalCode",
   "地番": "lotNumber",
   "家屋番号": "buildingNumber",
   "不動産番号": "realEstateNumber",
@@ -142,6 +143,8 @@ export const PROPERTY_CSV_COLUMN_MAP: Record<string, string> = {
   "外部キー": "externalLinkKey",
   // English
   "address": "address",
+  "postalCode": "postalCode",
+  "postal_code": "postalCode",
   "lotNumber": "lotNumber",
   "lot_number": "lotNumber",
   "buildingNumber": "buildingNumber",

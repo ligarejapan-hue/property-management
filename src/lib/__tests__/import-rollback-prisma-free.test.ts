@@ -68,10 +68,11 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
     expect(constantsSrc).not.toMatch(/from\s+("|')next\//);
   });
 
-  it("PROPERTY_TRACKED_FIELDS の中身は既存と同一 (28 項目)", () => {
+  it("PROPERTY_TRACKED_FIELDS の中身は既存と同一 (29 項目・21-C PR-3c で postalCode 追加)", () => {
     expect(PROPERTY_TRACKED_FIELDS).toEqual([
       "propertyType",
       "address",
+      "postalCode",
       "lotNumber",
       "buildingNumber",
       "realEstateNumber",

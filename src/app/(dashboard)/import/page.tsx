@@ -108,6 +108,7 @@ type Step = 1 | 2 | 3 | 4;
 
 const TARGET_FIELDS = [
   "住所",
+  "郵便番号",
   "地番",
   "家屋番号",
   "不動産番号",
@@ -131,6 +132,7 @@ type TargetField = (typeof TARGET_FIELDS)[number];
 // 値変更するとサーバ側 JAPANESE_FIELD_MAP と整合しなくなるため値は変えない。
 const TARGET_FIELD_LABELS: Record<TargetField, string> = {
   "住所": "物件住所 (必須)",
+  "郵便番号": "郵便番号",
   "地番": "地番",
   "家屋番号": "家屋番号",
   "不動産番号": "不動産番号",
@@ -155,6 +157,7 @@ const TEMPLATES: Record<
     label: "標準受付帳CSV",
     columns: [
       "住所(必須)",
+      "郵便番号",
       "地番",
       "家屋番号",
       "不動産番号",
@@ -203,6 +206,9 @@ const AUTO_MAP: Record<string, TargetField> = {
   "所在地": "住所",
   "物件住所": "住所",
   "address": "住所",
+  "郵便番号": "郵便番号",
+  "postalCode": "郵便番号",
+  "postal_code": "郵便番号",
   "地番": "地番",
   "家屋番号": "家屋番号",
   "不動産番号": "不動産番号",

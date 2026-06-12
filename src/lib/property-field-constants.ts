@@ -13,6 +13,7 @@
 export const PROPERTY_TRACKED_FIELDS = [
   "propertyType",
   "address",
+  "postalCode",
   "lotNumber",
   "buildingNumber",
   "realEstateNumber",

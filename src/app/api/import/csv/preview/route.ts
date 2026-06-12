@@ -19,6 +19,8 @@ import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
 
 const JAPANESE_FIELD_MAP: Record<string, string> = {
   "住所": "address",
+  // preview は重複判定にしか使わないが、本取込 route とのドリフト防止のため列を揃える。
+  "郵便番号": "postalCode",
   "地番": "lotNumber",
   "家屋番号": "buildingNumber",
   "不動産番号": "realEstateNumber",

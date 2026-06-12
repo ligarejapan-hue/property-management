@@ -23,6 +23,9 @@ describe("normalizePostalCode", () => {
   it("全角ハイフン類を除去する", () => {
     expect(normalizePostalCode("１２３－４５６７")).toBe("1234567");
   });
+  it("数学マイナス(U+2212)を含む全角入力も除去する", () => {
+    expect(normalizePostalCode("０１０−0４９２")).toBe("0100492");
+  });
 });
 
 describe("isValidPostalCode", () => {

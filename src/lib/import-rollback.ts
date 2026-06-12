@@ -68,6 +68,7 @@ type FieldType = "string" | "int" | "decimal";
 /** 復元対象 field の Prisma 型マップ（型変換に利用）。schema.prisma 準拠。 */
 export const RESTORABLE_PROPERTY_FIELD_TYPES: Record<string, FieldType> = {
   address: "string",
+  postalCode: "string",
   lotNumber: "string",
   buildingNumber: "string",
   introductionRoute: "string",
