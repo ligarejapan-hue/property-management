@@ -589,6 +589,41 @@ describe("GET /api/properties/export — 郵便番号列（PR-3b）", () => {
     expect(cells.at(-1)).toBe("100-0001");
   });
 
+  it("正規化済み 7 桁 postalCode は NNN-NNNN へ整形し、先頭 0 を保持する（Excel 数値化対策）", async () => {
+    // 住所補完フローは Owner/Property に 7 桁（ハイフン無し）で保存し得る。
+    // 例 "0100492" を素のまま出すと Excel が数値化し先頭 0 を落とす → NNN-NNNN でテキスト化。
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "0100492" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("010-0492");
+  });
+
+  it("既にハイフン付きの 7 桁 postalCode はそのまま NNN-NNNN で出る", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "100-0001" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("100-0001");
+  });
+
+  it("7 桁として妥当でない postalCode は素の値のまま出力する（勝手に変形しない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ postalCode: "不明" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("不明");
+  });
+
   it("Property.postalCode が null の場合は空欄（literal null を出さない）", async () => {
     pm.property.findMany.mockResolvedValue([makeProp({ postalCode: null })]);
     const res = await GET(makeRequest());

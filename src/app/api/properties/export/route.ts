@@ -23,6 +23,16 @@ import {
   REGISTRY_STATUS_LABELS,
   DM_STATUS_LABELS,
 } from "@/lib/property-types";
+import { formatPostalCode, isValidPostalCode } from "@/lib/address-lookup/normalize";
+
+// 郵便番号を CSV セル用に整形する。
+// 住所補完フローは 7 桁（ハイフン無し）で保存し得るため、妥当な 7 桁は NNN-NNNN へ整形して
+// テキスト化し、Excel での数値化による先頭 0 欠落を防ぐ。7 桁として妥当でない値は素のまま
+// 返す（勝手に変形しない）。null/空は空欄。formula injection 対策は後段の sanitize が担う。
+function toPostalCodeCell(postalCode: string | null | undefined): string {
+  if (!postalCode) return "";
+  return isValidPostalCode(postalCode) ? formatPostalCode(postalCode) : postalCode;
+}
 
 // ---------- GET /api/properties/export ----------
 //
@@ -180,8 +190,9 @@ export async function GET(request: NextRequest) {
         所有者名: ownerNames.join("、"),
         更新日時: toCsvDateTime(p.updatedAt),
         作成日時: toCsvDateTime(p.createdAt),
-        // Property.postalCode のみ（Building.postalCode fallback は別 PR）。null は空欄。
-        郵便番号: p.postalCode ?? "",
+        // Property.postalCode のみ（Building.postalCode fallback は別 PR）。
+        // 妥当な 7 桁は NNN-NNNN へテキスト化（Excel の先頭 0 欠落対策）・null は空欄。
+        郵便番号: toPostalCodeCell(p.postalCode),
       };
     });
 
