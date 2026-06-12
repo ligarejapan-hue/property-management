@@ -45,6 +45,13 @@ export interface SheetParseInput {
   csvText?: string;
   /** XLSX バイナリの base64（xlsx 形式時に必須） */
   xlsxBase64?: string;
+  /**
+   * このヘッダ名に一致する列だけ、XLSX セルの整形済みテキスト（.w）を採用する。
+   * 郵便番号のように「数値セルで先頭0が落ちる」列を、表示文字列で取り込むための指定。
+   * 未指定/空、または対象ヘッダが無い場合は従来通り単一パス（raw 値）で読む。
+   * CSV には影響しない（CSV は元々テキスト）。
+   */
+  formattedTextHeaders?: ReadonlySet<string>;
 }
 
 export interface SheetParseResult extends CsvParseResult {
@@ -77,7 +84,7 @@ export function parseSheet(input: SheetParseInput): SheetParseResult {
         "Excelバイナリが空です",
       );
     }
-    return parseXlsxFromBase64(input.xlsxBase64);
+    return parseXlsxFromBase64(input.xlsxBase64, input.formattedTextHeaders);
   }
   throw new SheetParseError(
     "UNSUPPORTED_FORMAT",
@@ -85,7 +92,65 @@ export function parseSheet(input: SheetParseInput): SheetParseResult {
   );
 }
 
-function parseXlsxFromBase64(base64: string): SheetParseResult {
+const XLSX_SHEET_TO_JSON_OPTS = {
+  header: 1 as const,
+  defval: "",
+  blankrows: false,
+};
+
+/**
+ * 二パス AOA（raw 値 / 整形済みテキスト）を 1 行オブジェクト配列へ統合する純関数。
+ *
+ * - `formattedTextHeaders` に一致するヘッダ列だけ `aoaFmt`（.w 文字列）を採用し、
+ *   それ以外の列は `aoaRaw`（生値）を使う（他列に指数表記などの影響を出さない）。
+ * - 整列ガード: `aoaFmt` が null、行数不一致、いずれかの行長不一致のいずれかなら
+ *   formatted を**まるごと放棄**し全列 raw へフォールバックする（throw せず・最悪でも
+ *   #171 の単一パス挙動＝先頭0喪失セルは drop に帰着）。
+ *
+ * headers は `aoaRaw[0]` から抽出する。空行（全セル空文字）は raw ベースで除外する。
+ */
+export function buildXlsxRows(
+  aoaRaw: unknown[][],
+  aoaFmt: unknown[][] | null,
+  formattedTextHeaders: ReadonlySet<string>,
+): { headers: string[]; rows: Record<string, string>[] } {
+  const headerRow = aoaRaw[0] ?? [];
+  const headers = headerRow.map((v) => cellToString(v).trim());
+
+  const wantFormatted =
+    formattedTextHeaders.size > 0 &&
+    headers.some((h) => formattedTextHeaders.has(h));
+  // 整列ガード（行数・各行の行長が raw と一致する時のみ formatted を信頼）
+  const formattedUsable =
+    wantFormatted &&
+    aoaFmt != null &&
+    aoaFmt.length === aoaRaw.length &&
+    aoaRaw.every((r, i) => (aoaFmt[i]?.length ?? -1) === (r?.length ?? 0));
+
+  const rows: Record<string, string>[] = [];
+  for (let i = 1; i < aoaRaw.length; i++) {
+    const rawRow = aoaRaw[i] ?? [];
+    const fmtRow = formattedUsable ? aoaFmt![i] : undefined;
+    const values = headers.map((_, j) => {
+      const useFmt = fmtRow != null && formattedTextHeaders.has(headers[j]);
+      const cell = useFmt ? fmtRow[j] : rawRow[j];
+      return cellToString(cell).trim();
+    });
+    // 全セルが空白の行はスキップ
+    if (values.every((v) => v === "")) continue;
+    const record: Record<string, string> = {};
+    for (let j = 0; j < headers.length; j++) {
+      record[headers[j]] = values[j];
+    }
+    rows.push(record);
+  }
+  return { headers, rows };
+}
+
+function parseXlsxFromBase64(
+  base64: string,
+  formattedTextHeaders?: ReadonlySet<string>,
+): SheetParseResult {
   let wb: XLSX.WorkBook;
   try {
     const buf = Buffer.from(base64, "base64");
@@ -100,32 +165,36 @@ function parseXlsxFromBase64(base64: string): SheetParseResult {
   const sheet = wb.Sheets[sheetName];
   // raw:true → JS の生値（number / string / Date / boolean）を自前で安全に文字列化する。
   // formatted 文字列（.w）は「1.23E+12」等の指数表記を含むケースがあるため raw を優先する。
-  const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    defval: "",
-    blankrows: false,
+  const aoaRaw = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    ...XLSX_SHEET_TO_JSON_OPTS,
     raw: true,
   });
-  if (!aoa || aoa.length === 0) {
+  if (!aoaRaw || aoaRaw.length === 0) {
     throw new SheetParseError("EMPTY_SHEET", "Excelシートが空です");
   }
-  const headerRow = aoa[0] ?? [];
+  const headerRow = aoaRaw[0] ?? [];
   const headers = headerRow.map((v) => cellToString(v).trim());
   if (headers.every((h) => h === "")) {
     throw new SheetParseError("NO_HEADER", "Excelの1行目が空です");
   }
-  const rows: Record<string, string>[] = [];
-  for (let i = 1; i < aoa.length; i++) {
-    const row = aoa[i] ?? [];
-    // 全セルが空白の行はスキップ
-    const values = headers.map((_, j) => cellToString(row[j]).trim());
-    if (values.every((v) => v === "")) continue;
-    const record: Record<string, string> = {};
-    for (let j = 0; j < headers.length; j++) {
-      record[headers[j]] = values[j];
-    }
-    rows.push(record);
-  }
+  // 郵便番号など指定ヘッダ列がある時だけ第2パス（raw:false=.w）を取得する。
+  // それ以外は従来通り単一パス＝挙動・性能を変えない。
+  const wantFormatted =
+    !!formattedTextHeaders &&
+    formattedTextHeaders.size > 0 &&
+    headers.some((h) => formattedTextHeaders.has(h));
+  const aoaFmt = wantFormatted
+    ? XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+        ...XLSX_SHEET_TO_JSON_OPTS,
+        raw: false,
+      })
+    : null;
+
+  const { rows } = buildXlsxRows(
+    aoaRaw,
+    aoaFmt,
+    formattedTextHeaders ?? new Set<string>(),
+  );
   return { format: "xlsx", headers, rows, errors: [] };
 }
 

@@ -216,6 +216,19 @@ export const PROPERTY_CSV_COLUMN_MAP: Record<string, string> = {
 };
 
 /**
+ * Property の postalCode へマップされる CSV ヘッダ名の集合。
+ * `PROPERTY_CSV_COLUMN_MAP` から自動導出（マップ追加に追随）。
+ *
+ * 用途: XLSX 取込時に「郵便番号列だけ」整形済みテキスト（.w）を採用するための
+ * formattedTextHeaders 指定（先頭0欠落の回収）。
+ */
+export const POSTAL_CODE_HEADERS: ReadonlySet<string> = new Set(
+  Object.keys(PROPERTY_CSV_COLUMN_MAP).filter(
+    (h) => PROPERTY_CSV_COLUMN_MAP[h] === "postalCode",
+  ),
+);
+
+/**
  * CSV column name → Owner field name mapping.
  * Supports both Japanese and English column names.
  */
