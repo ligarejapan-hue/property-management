@@ -96,4 +96,13 @@ describe("decideOwnerCorporateCleanup", () => {
     expect(p.action).toBe("none");
     expect(p.corporateNumberToSet).toBeNull();
   });
+
+  it("空文字フィールドの null 正規化を『除去』と誤判定しない(hyphen ID + address='' → action none・Codex P2 round5)", () => {
+    // address='' は emptyToNull で null になるが、番号は1件も除去していない。
+    // これを「除去あり」と誤判定して save すると数字断片を誤保存し address も書き換える。
+    const p = decideOwnerCorporateCleanup({ name: "整理番号 1234567890123-45", address: "", note: null, corporateNumber: null });
+    expect(p.action).toBe("none");
+    expect(p.corporateNumberToSet).toBeNull();
+    expect(p.changedFields).toEqual([]);
+  });
 });

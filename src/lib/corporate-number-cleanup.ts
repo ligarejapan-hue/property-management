@@ -80,13 +80,21 @@ export function decideOwnerCorporateCleanup(
       ? detect.candidates
       : [importDecision.corporateNumber as string];
 
-  const cleanedName = removeCorporateNumbersFromText(owner.name, numbersToRemove);
-  const cleanedAddress = emptyToNull(
-    removeCorporateNumbersFromText(owner.address, numbersToRemove),
-  );
-  const cleanedNote = emptyToNull(
-    removeCorporateNumbersFromText(owner.note, numbersToRemove),
-  );
+  // removeCorporateNumbersFromText は除去が無ければ入力を不変で返す。raw 出力が元と
+  // 異なるか = 実際に番号を除去したか、で判定する。emptyToNull("")→null の正規化を
+  // 「除去」と誤判定しないよう、判定は raw 出力で行い、null 化は実際に除去が起きた
+  // フィールドにのみ適用する(Codex P2 round5)。
+  const rawName = removeCorporateNumbersFromText(owner.name, numbersToRemove);
+  const rawAddress = removeCorporateNumbersFromText(owner.address, numbersToRemove);
+  const rawNote = removeCorporateNumbersFromText(owner.note, numbersToRemove);
+
+  const nameRemoved = rawName !== owner.name;
+  const addressRemoved = rawAddress !== owner.address;
+  const noteRemoved = rawNote !== owner.note;
+
+  const cleanedName = rawName;
+  const cleanedAddress = addressRemoved ? emptyToNull(rawAddress) : owner.address;
+  const cleanedNote = noteRemoved ? emptyToNull(rawNote) : owner.note;
 
   // 空化ガード(name のみ)
   const nameWasNonEmpty = (owner.name ?? "").trim() !== "";
@@ -98,11 +106,8 @@ export function decideOwnerCorporateCleanup(
   // save(空き列へ移送)は「実際にテキストから番号を除去できた」ときだけ行う。
   // ハイフン連結ID(例 "…1234567890123-45" / 全角 "－45")は共有検出器が先頭13桁を
   // save 候補にするが、厳格な cleanup remover は除去しない。テキスト無変更のまま列へ
-  // 数字断片を誤保存しないよう、除去が1件も起きていない save は列移送しない(Codex P2 round4)。
-  const anyTextRemoved =
-    cleanedName !== owner.name ||
-    cleanedAddress !== owner.address ||
-    cleanedNote !== owner.note;
+  // 数字断片を誤保存しないよう、除去が1件も起きていない save は列移送しない(Codex P2 round4/5)。
+  const anyTextRemoved = nameRemoved || addressRemoved || noteRemoved;
   const corporateNumberToSet =
     importDecision.action === "save" && anyTextRemoved
       ? importDecision.corporateNumber
