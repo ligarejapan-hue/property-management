@@ -108,9 +108,21 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
 
       {preview && preview.action === "cleanup" && (
         <div className="mt-2 space-y-2">
-          <div className="text-slate-600">
-            <div>変更前: {preview.before.nameMasked}</div>
-            <div>変更後: {preview.after.nameMasked}</div>
+          <div className="text-slate-600 space-y-1">
+            {(["name", "address", "note"] as const)
+              .filter((f) => preview.changedFields.includes(f))
+              .map((f) => {
+                const key = `${f}Masked` as
+                  | "nameMasked"
+                  | "addressMasked"
+                  | "noteMasked";
+                return (
+                  <div key={f}>
+                    {FIELD_LABEL[f]}: {preview.before[key] ?? "(空)"} →{" "}
+                    {preview.after[key] ?? "(空)"}
+                  </div>
+                );
+              })}
             {preview.corporateNumberToSetMasked && (
               <div>法人番号 → {preview.corporateNumberToSetMasked}</div>
             )}

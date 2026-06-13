@@ -43,6 +43,15 @@ describe("corporate-cleanup-panel.tsx", () => {
     expect(panelSrc).toMatch(/after\.nameMasked|after\[/);
   });
 
+  it("before/after は name 固定でなく changedFields の各フィールド(name/address/note)を走査して描画する (Codex P2)", () => {
+    // address / note が changedFields に含まれる場合も before/after を表示する
+    // (name だけハードコードしない)。
+    expect(panelSrc).toMatch(/\["name",\s*"address",\s*"note"\]/);
+    expect(panelSrc).toMatch(/\$\{f\}Masked/);
+    expect(panelSrc).toMatch(/before\[key\]/);
+    expect(panelSrc).toMatch(/after\[key\]/);
+  });
+
   it("法人番号 (corporateNumberToSetMasked) を表示する構造がある", () => {
     expect(panelSrc).toMatch(/法人番号/);
     expect(panelSrc).toMatch(/corporateNumberToSetMasked/);
