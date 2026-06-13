@@ -102,14 +102,17 @@ function tidyAfterCorporateRemoval(s: string): string {
  * BARE_CORPORATE_NUMBER_RE は半角 \d のみのため、全角数字のみの列は別途処理する。
  * 全角数字 [０-９] の連続 13桁（前後に半角数字・全角数字・ハイフンが連結しない）を対象とする。
  */
-const BARE_FULLWIDTH_CORPORATE_NUMBER_RE = /(?<![0-9０-９\-])([０-９]{13})(?![0-9０-９\-])/g;
+// cleanup の破壊的除去で使う全角 13桁 regex。境界では半角/全角数字に加え、
+// HYPHEN_LIKE_CHARS と同じ各種ハイフン(全角 － / 数学マイナス − / ダッシュ類 / ー 等)も
+// 除外し、"…－45" のような ID の先頭13桁を誤除去しない(Codex P2 round3)。
+const BARE_FULLWIDTH_CORPORATE_NUMBER_RE = /(?<![0-9０-９\-‐‑‒–—―ー－−─])([０-９]{13})(?![0-9０-９\-‐‑‒–—―ー－−─])/g;
 
-// cleanup の破壊的除去では右側も hyphen を除外する。
-// 共有の BARE_CORPORATE_NUMBER_RE は右境界が (?!\d) のみで "1234567890123-45" の
-// 先頭13桁にマッチしてしまい、cleanup で削ると "-45" の壊れた残骸になる。
+// cleanup の破壊的除去では左右とも、HYPHEN_LIKE_CHARS と同じ各種ハイフンを除外する。
+// 共有の BARE_CORPORATE_NUMBER_RE は右境界が (?!\d) のみで "1234567890123-45"(全角 － 含む)の
+// 先頭13桁にマッチしてしまい、cleanup で削ると "-45" / "－45" の壊れた残骸になる。
 // 検出側（extractCorporateNumbersFromText が使う BARE_CORPORATE_NUMBER_RE）は
 // import/candidate と共有のため変更せず、cleanup 専用にこの厳格版を使う。
-const BARE_CORPORATE_NUMBER_RE_FOR_CLEANUP = /(?<![\d-])(\d{13})(?![\d-])/g;
+const BARE_CORPORATE_NUMBER_RE_FOR_CLEANUP = /(?<![\d\-‐‑‒–—―ー－−─])(\d{13})(?![\d\-‐‑‒–—―ー－−─])/g;
 
 /**
  * テキストから「指定した 13桁法人番号」の混入を除去する。

@@ -47,4 +47,11 @@ describe("removeCorporateNumbersFromText", () => {
       "整理番号 1234567890123-45",
     );
   });
+
+  it("全角ハイフン連結IDも先頭13桁を裸番号として除去しない(1234567890123－45・Codex P2 round3)", () => {
+    // 全角ハイフン U+FF0D。境界が ASCII '-' だけだと誤除去して "－45" に壊れる。
+    expect(removeCorporateNumbersFromText("整理番号 1234567890123－45", [N])).toBe(
+      "整理番号 1234567890123－45",
+    );
+  });
 });
