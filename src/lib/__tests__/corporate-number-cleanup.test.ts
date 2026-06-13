@@ -71,4 +71,14 @@ describe("decideOwnerCorporateCleanup", () => {
     expect(p.changedFields).toEqual([]);
     expect(p.corporateNumberToSet).toBeNull();
   });
+
+  it("除去対象を含まないフィールド(空白のみ差分)は changedFields に含めない(Codex P2: 無関係改変防止)", () => {
+    // name に番号、address は全角スペースのみ(番号なし)→ address は変更しない
+    const p = decideOwnerCorporateCleanup({ name: `株式会社○○ ${N}`, address: "東京都　港区", note: null, corporateNumber: null });
+    expect(p.action).toBe("cleanup");
+    expect(p.changedFields).toContain("name");
+    expect(p.changedFields).toContain("corporateNumber");
+    expect(p.changedFields).not.toContain("address");
+    expect(p.cleanedAddress).toBe("東京都　港区");
+  });
 });

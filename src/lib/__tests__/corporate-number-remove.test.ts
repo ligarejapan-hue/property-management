@@ -36,4 +36,15 @@ describe("removeCorporateNumbersFromText", () => {
   it("番号のみの文字列は空文字になる", () => {
     expect(removeCorporateNumbersFromText(N, [N])).toBe("");
   });
+
+  it("除去対象が無いフィールドは tidy せず原文を返す(無関係な空白を変更しない・Codex P2)", () => {
+    expect(removeCorporateNumbersFromText("東京都　港区", [N])).toBe("東京都　港区");
+    expect(removeCorporateNumbersFromText("  株式会社○○  ", [N])).toBe("  株式会社○○  ");
+  });
+
+  it("ハイフン連結IDの先頭13桁を裸番号として除去しない(1234567890123-45・Codex P2)", () => {
+    expect(removeCorporateNumbersFromText("整理番号 1234567890123-45", [N])).toBe(
+      "整理番号 1234567890123-45",
+    );
+  });
 });

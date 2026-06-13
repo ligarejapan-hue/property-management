@@ -104,6 +104,13 @@ function tidyAfterCorporateRemoval(s: string): string {
  */
 const BARE_FULLWIDTH_CORPORATE_NUMBER_RE = /(?<![0-9０-９\-])([０-９]{13})(?![0-9０-９\-])/g;
 
+// cleanup の破壊的除去では右側も hyphen を除外する。
+// 共有の BARE_CORPORATE_NUMBER_RE は右境界が (?!\d) のみで "1234567890123-45" の
+// 先頭13桁にマッチしてしまい、cleanup で削ると "-45" の壊れた残骸になる。
+// 検出側（extractCorporateNumbersFromText が使う BARE_CORPORATE_NUMBER_RE）は
+// import/candidate と共有のため変更せず、cleanup 専用にこの厳格版を使う。
+const BARE_CORPORATE_NUMBER_RE_FOR_CLEANUP = /(?<![\d-])(\d{13})(?![\d-])/g;
+
 /**
  * テキストから「指定した 13桁法人番号」の混入を除去する。
  *  - ラベル付き(法人番号: など)はラベルごと、裸 13桁はその数列を除去する。
@@ -121,22 +128,26 @@ export function removeCorporateNumbersFromText(
   if (numbersToRemove.length === 0) return input;
   const targets = new Set(numbersToRemove);
 
+  // 実際に除去が起きたかを追跡する。対象番号を含まないフィールドは tidy せず原文を返し、
+  // 無関係な空白の正規化などで「変更扱い」にしない(Codex P2: 混入除去が無関係データを書き換えない)。
+  let removed = false;
+  const strip = (full: string, num: string): string => {
+    const normalized = normalizeCorporateNumber(num);
+    if (normalized && targets.has(normalized)) {
+      removed = true;
+      return "";
+    }
+    return full;
+  };
+
   // 1. ラベル付き(ラベル+区切り+番号)を除去
-  let result = input.replace(LABELED_CORPORATE_NUMBER_RE, (full, num: string) => {
-    const normalized = normalizeCorporateNumber(num);
-    return normalized && targets.has(normalized) ? "" : full;
-  });
-  // 2. 裸 13桁(半角)を除去
-  result = result.replace(BARE_CORPORATE_NUMBER_RE, (full, num: string) => {
-    const normalized = normalizeCorporateNumber(num);
-    return normalized && targets.has(normalized) ? "" : full;
-  });
+  let result = input.replace(LABELED_CORPORATE_NUMBER_RE, strip);
+  // 2. 裸 13桁(半角)を除去（右側も hyphen を除外する厳格版＝ID "…-45" の先頭13桁を壊さない）
+  result = result.replace(BARE_CORPORATE_NUMBER_RE_FOR_CLEANUP, strip);
   // 3. 裸 13桁(全角)を除去
-  result = result.replace(BARE_FULLWIDTH_CORPORATE_NUMBER_RE, (full, num: string) => {
-    const normalized = normalizeCorporateNumber(num);
-    return normalized && targets.has(normalized) ? "" : full;
-  });
-  return tidyAfterCorporateRemoval(result);
+  result = result.replace(BARE_FULLWIDTH_CORPORATE_NUMBER_RE, strip);
+
+  return removed ? tidyAfterCorporateRemoval(result) : input;
 }
 
 export interface OwnerLikeForCorporateDetection {
