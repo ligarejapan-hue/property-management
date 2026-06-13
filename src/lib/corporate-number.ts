@@ -53,6 +53,13 @@ const LABELED_CORPORATE_NUMBER_RE =
 
 const BARE_CORPORATE_NUMBER_RE = /(?<![\d-])(\d{13})(?!\d)/g;
 
+// 裸の全角数字 13桁にマッチする正規表現。検出(extractCorporateNumbersFromText)と
+// cleanup 除去(removeCorporateNumbersFromText)の両方で使う。BARE_CORPORATE_NUMBER_RE は
+// 半角 \d のみで全角数字列を拾えないため別途用意する。境界では半角/全角数字に加え
+// HYPHEN_LIKE_CHARS と同じ各種ハイフン(全角 － / 数学マイナス − / ダッシュ類 / ー 等)も
+// 除外し、"…－45" のようなハイフン連結 ID の先頭13桁を誤検出/誤除去しない。
+const BARE_FULLWIDTH_CORPORATE_NUMBER_RE = /(?<![0-9０-９\-‐‑‒–—―ー－−─])([０-９]{13})(?![0-9０-９\-‐‑‒–—―ー－−─])/g;
+
 /**
  * 入力テキストから法人番号候補を抽出する。
  *
@@ -81,7 +88,72 @@ export function extractCorporateNumbersFromText(input: string | null | undefined
     if (normalized) found.add(normalized);
   }
 
+  // ラベルなしの裸 全角13桁(例 "株式会社○○ １２３４５６７８９０１２３")も抽出する。
+  for (const match of text.matchAll(BARE_FULLWIDTH_CORPORATE_NUMBER_RE)) {
+    const normalized = normalizeCorporateNumber(match[1]);
+    if (normalized) found.add(normalized);
+  }
+
   return Array.from(found);
+}
+
+/**
+ * tidy: 除去後の文字列を整える。
+ *  - 連続する空白(半角/全角/タブ)を半角1つへ畳む
+ *  - 先頭/末尾の孤立した区切り(、,／/・)と周囲の空白を除去
+ *  - 前後 trim
+ */
+function tidyAfterCorporateRemoval(s: string): string {
+  let r = s.replace(/[ 　\t]+/g, " ");
+  r = r.replace(/^\s*[、,／/・]\s*/u, "");
+  r = r.replace(/\s*[、,／/・]\s*$/u, "");
+  return r.trim();
+}
+
+// cleanup の破壊的除去では左右とも、HYPHEN_LIKE_CHARS と同じ各種ハイフンを除外する。
+// 共有の BARE_CORPORATE_NUMBER_RE は右境界が (?!\d) のみで "1234567890123-45"(全角 － 含む)の
+// 先頭13桁にマッチしてしまい、cleanup で削ると "-45" / "－45" の壊れた残骸になる。
+// 検出側（extractCorporateNumbersFromText が使う BARE_CORPORATE_NUMBER_RE）は
+// import/candidate と共有のため変更せず、cleanup 専用にこの厳格版を使う。
+const BARE_CORPORATE_NUMBER_RE_FOR_CLEANUP = /(?<![\d\-‐‑‒–—―ー－−─])(\d{13})(?![\d\-‐‑‒–—―ー－−─])/g;
+
+/**
+ * テキストから「指定した 13桁法人番号」の混入を除去する。
+ *  - ラベル付き(法人番号: など)はラベルごと、裸 13桁はその数列を除去する。
+ *  - 除去対象は normalize 後の値が numbersToRemove に含まれるものだけ
+ *    (extractCorporateNumbersFromText と同じ regex を使うため検出と除去の対象が一致する)。
+ *  - 裸の全角数字 13桁も除去対象となる(normalize により同値と判定)。
+ *  - 除去後は tidyAfterCorporateRemoval で空白・孤立区切りを整える。
+ *  - input が null/undefined → null。numbersToRemove が空 → input をそのまま返す。
+ */
+export function removeCorporateNumbersFromText(
+  input: string | null | undefined,
+  numbersToRemove: string[],
+): string | null {
+  if (input == null) return null;
+  if (numbersToRemove.length === 0) return input;
+  const targets = new Set(numbersToRemove);
+
+  // 実際に除去が起きたかを追跡する。対象番号を含まないフィールドは tidy せず原文を返し、
+  // 無関係な空白の正規化などで「変更扱い」にしない(Codex P2: 混入除去が無関係データを書き換えない)。
+  let removed = false;
+  const strip = (full: string, num: string): string => {
+    const normalized = normalizeCorporateNumber(num);
+    if (normalized && targets.has(normalized)) {
+      removed = true;
+      return "";
+    }
+    return full;
+  };
+
+  // 1. ラベル付き(ラベル+区切り+番号)を除去
+  let result = input.replace(LABELED_CORPORATE_NUMBER_RE, strip);
+  // 2. 裸 13桁(半角)を除去（右側も hyphen を除外する厳格版＝ID "…-45" の先頭13桁を壊さない）
+  result = result.replace(BARE_CORPORATE_NUMBER_RE_FOR_CLEANUP, strip);
+  // 3. 裸 13桁(全角)を除去
+  result = result.replace(BARE_FULLWIDTH_CORPORATE_NUMBER_RE, strip);
+
+  return removed ? tidyAfterCorporateRemoval(result) : input;
 }
 
 export interface OwnerLikeForCorporateDetection {

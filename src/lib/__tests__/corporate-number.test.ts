@@ -81,6 +81,16 @@ describe("extractCorporateNumbersFromText", () => {
     ]);
   });
 
+  it("ラベルなしの裸 全角13桁数字も抽出する(Codex round5: full-width 検出)", () => {
+    expect(extractCorporateNumbersFromText("株式会社○○ １２３４５６７８９０１２３")).toEqual([
+      "1234567890123",
+    ]);
+  });
+
+  it("全角ハイフン連結IDの先頭全角13桁は裸番号として誤検出しない(１２３…－４５)", () => {
+    expect(extractCorporateNumbersFromText("整理番号 １２３４５６７８９０１２３－４５")).toEqual([]);
+  });
+
   it("電話番号風 (090-1234-5678 / 03-1234-5678) は誤検出しない", () => {
     expect(extractCorporateNumbersFromText("090-1234-5678")).toEqual([]);
     expect(extractCorporateNumbersFromText("03-1234-5678")).toEqual([]);
