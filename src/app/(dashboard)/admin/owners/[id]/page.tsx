@@ -22,6 +22,7 @@ import {
   type AdminOwnerCorporateCandidateResponse,
 } from "@/lib/api-client";
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
+import CorporateCleanupPanel from "@/components/owners/corporate-cleanup-panel";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 type FieldEditable = {
@@ -353,6 +354,12 @@ export default function AdminOwnerDetailPage() {
                   configured={corporateLookupConfigured}
                   ownerVersion={owner.version}
                   fieldEditable={fieldEditable}
+                  onApplied={async () => {
+                    await load();
+                  }}
+                />
+                <CorporateCleanupPanel
+                  ownerId={owner.ownerId}
                   onApplied={async () => {
                     await load();
                   }}
