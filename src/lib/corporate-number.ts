@@ -84,6 +84,61 @@ export function extractCorporateNumbersFromText(input: string | null | undefined
   return Array.from(found);
 }
 
+/**
+ * tidy: 除去後の文字列を整える。
+ *  - 連続する空白(半角/全角/タブ)を半角1つへ畳む
+ *  - 先頭/末尾の孤立した区切り(、,／/・)と周囲の空白を除去
+ *  - 前後 trim
+ */
+function tidyAfterCorporateRemoval(s: string): string {
+  let r = s.replace(/[ 　\t]+/g, " ");
+  r = r.replace(/^\s*[、,／/・]\s*/u, "");
+  r = r.replace(/\s*[、,／/・]\s*$/u, "");
+  return r.trim();
+}
+
+/**
+ * 裸の全角数字 13桁にもマッチする正規表現。
+ * BARE_CORPORATE_NUMBER_RE は半角 \d のみのため、全角数字のみの列は別途処理する。
+ * 全角数字 [０-９] の連続 13桁（前後に半角数字・全角数字・ハイフンが連結しない）を対象とする。
+ */
+const BARE_FULLWIDTH_CORPORATE_NUMBER_RE = /(?<![0-9０-９\-])([０-９]{13})(?![0-9０-９\-])/g;
+
+/**
+ * テキストから「指定した 13桁法人番号」の混入を除去する。
+ *  - ラベル付き(法人番号: など)はラベルごと、裸 13桁はその数列を除去する。
+ *  - 除去対象は normalize 後の値が numbersToRemove に含まれるものだけ
+ *    (extractCorporateNumbersFromText と同じ regex を使うため検出と除去の対象が一致する)。
+ *  - 裸の全角数字 13桁も除去対象となる(normalize により同値と判定)。
+ *  - 除去後は tidyAfterCorporateRemoval で空白・孤立区切りを整える。
+ *  - input が null/undefined → null。numbersToRemove が空 → input をそのまま返す。
+ */
+export function removeCorporateNumbersFromText(
+  input: string | null | undefined,
+  numbersToRemove: string[],
+): string | null {
+  if (input == null) return null;
+  if (numbersToRemove.length === 0) return input;
+  const targets = new Set(numbersToRemove);
+
+  // 1. ラベル付き(ラベル+区切り+番号)を除去
+  let result = input.replace(LABELED_CORPORATE_NUMBER_RE, (full, num: string) => {
+    const normalized = normalizeCorporateNumber(num);
+    return normalized && targets.has(normalized) ? "" : full;
+  });
+  // 2. 裸 13桁(半角)を除去
+  result = result.replace(BARE_CORPORATE_NUMBER_RE, (full, num: string) => {
+    const normalized = normalizeCorporateNumber(num);
+    return normalized && targets.has(normalized) ? "" : full;
+  });
+  // 3. 裸 13桁(全角)を除去
+  result = result.replace(BARE_FULLWIDTH_CORPORATE_NUMBER_RE, (full, num: string) => {
+    const normalized = normalizeCorporateNumber(num);
+    return normalized && targets.has(normalized) ? "" : full;
+  });
+  return tidyAfterCorporateRemoval(result);
+}
+
 export interface OwnerLikeForCorporateDetection {
   name?: string | null;
   address?: string | null;
