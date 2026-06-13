@@ -95,8 +95,18 @@ export function decideOwnerCorporateCleanup(
     return { ...unchanged, action: "manual", manualReason: "name_would_be_empty" };
   }
 
+  // save(空き列へ移送)は「実際にテキストから番号を除去できた」ときだけ行う。
+  // ハイフン連結ID(例 "…1234567890123-45" / 全角 "－45")は共有検出器が先頭13桁を
+  // save 候補にするが、厳格な cleanup remover は除去しない。テキスト無変更のまま列へ
+  // 数字断片を誤保存しないよう、除去が1件も起きていない save は列移送しない(Codex P2 round4)。
+  const anyTextRemoved =
+    cleanedName !== owner.name ||
+    cleanedAddress !== owner.address ||
+    cleanedNote !== owner.note;
   const corporateNumberToSet =
-    importDecision.action === "save" ? importDecision.corporateNumber : null;
+    importDecision.action === "save" && anyTextRemoved
+      ? importDecision.corporateNumber
+      : null;
 
   const changedFields: CorporateCleanupProposal["changedFields"] = [];
   if (cleanedName !== owner.name) changedFields.push("name");

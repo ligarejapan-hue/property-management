@@ -81,4 +81,19 @@ describe("decideOwnerCorporateCleanup", () => {
     expect(p.changedFields).not.toContain("address");
     expect(p.cleanedAddress).toBe("東京都　港区");
   });
+
+  it("save候補でも text除去が起きないハイフン連結IDは列に保存しない(action none・Codex P2 round4)", () => {
+    // 検出器は "整理番号 1234567890123-45" の先頭13桁を save 候補にするが、
+    // 厳格 cleanup remover は除去しない → text無変更のまま列へ誤保存しない。
+    const p = decideOwnerCorporateCleanup({ name: "整理番号 1234567890123-45", address: null, note: null, corporateNumber: null });
+    expect(p.action).toBe("none");
+    expect(p.corporateNumberToSet).toBeNull();
+    expect(p.changedFields).toEqual([]);
+  });
+
+  it("全角ハイフン連結ID save候補も列に保存しない(Codex P2 round4)", () => {
+    const p = decideOwnerCorporateCleanup({ name: "整理番号 1234567890123－45", address: null, note: null, corporateNumber: null });
+    expect(p.action).toBe("none");
+    expect(p.corporateNumberToSet).toBeNull();
+  });
 });
