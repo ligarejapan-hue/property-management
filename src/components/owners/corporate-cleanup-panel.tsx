@@ -80,7 +80,13 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
     checked.name || checked.address || checked.note || checked.corporateNumber;
 
   return (
-    <div className="rounded border p-3 text-sm">
+    // プレビューの before/after は raw-visible な owner 氏名/住所/備考(PII)を含み得るため、
+    // 既存の screen-protection guard(copy/cut/contextmenu 抑止)が効くよう PII 保護領域にする。
+    <div
+      className="rounded border p-3 text-sm"
+      data-pii-protected
+      data-pii-surface="owner"
+    >
       <button
         type="button"
         onClick={onCheck}

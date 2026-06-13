@@ -57,6 +57,11 @@ describe("corporate-cleanup-panel.tsx", () => {
     expect(panelSrc).toMatch(/corporateNumberToSetMasked/);
   });
 
+  it("プレビューの owner PII を data-pii-protected / data-pii-surface=owner で保護する (Codex P2 round3)", () => {
+    expect(panelSrc).toMatch(/data-pii-protected/);
+    expect(panelSrc).toMatch(/data-pii-surface="owner"/);
+  });
+
   it("action === \"manual\" の時は手動対応テキストを出し確定ボタンを出さない構造がある", () => {
     // manual 時に表示する文言
     expect(panelSrc).toMatch(/手動|manual/);
