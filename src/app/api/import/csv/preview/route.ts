@@ -8,7 +8,11 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { PROPERTY_CSV_COLUMN_MAP, POSTAL_CODE_HEADERS } from "@/lib/csv-parser";
+import {
+  PROPERTY_CSV_COLUMN_MAP,
+  POSTAL_CODE_HEADERS,
+  BUILDING_POSTAL_CODE_HEADERS,
+} from "@/lib/csv-parser";
 import {
   buildDedupeIndex,
   findPropertyDuplicate,
@@ -21,6 +25,7 @@ const JAPANESE_FIELD_MAP: Record<string, string> = {
   "住所": "address",
   // preview は重複判定にしか使わないが、本取込 route とのドリフト防止のため列を揃える。
   "郵便番号": "postalCode",
+  "棟郵便番号": "buildingPostalCode",
   "地番": "lotNumber",
   "家屋番号": "buildingNumber",
   "不動産番号": "realEstateNumber",
@@ -65,11 +70,15 @@ export async function POST(request: NextRequest) {
 
     const fileTypeDetection = detectImportFileType(fileName);
 
-    // 本取込 route と同じく、郵便番号列は XLSX の整形済みテキストで読む（ドリフト防止）。
-    const postalFormattedHeaders = new Set<string>(POSTAL_CODE_HEADERS);
+    // 本取込 route と同じく、郵便番号系列は XLSX の整形済みテキストで読む（ドリフト防止）。
+    const postalFormattedHeaders = new Set<string>([
+      ...POSTAL_CODE_HEADERS,
+      ...BUILDING_POSTAL_CODE_HEADERS,
+    ]);
     if (columnMapping) {
       for (const [csvHeader, japaneseName] of Object.entries(columnMapping)) {
-        if (JAPANESE_FIELD_MAP[japaneseName] === "postalCode") {
+        const field = JAPANESE_FIELD_MAP[japaneseName];
+        if (field === "postalCode" || field === "buildingPostalCode") {
           postalFormattedHeaders.add(csvHeader);
         }
       }
