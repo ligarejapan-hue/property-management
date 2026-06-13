@@ -71,6 +71,12 @@ describe("decideCorporateImport", () => {
     expect(d.corporateNumber).toBe(CN);
   });
 
+  it("ラベルなし全角bare 13桁 → save（Codex round5: full-width 検出を共有extractorに追加）", () => {
+    const d = decideCorporateImport({ name: "○○株式会社 １２３４５６７８９０１２３" });
+    expect(d.action).toBe("save");
+    expect(d.corporateNumber).toBe(CN);
+  });
+
   it("ハイフン混じり 13桁 → save（normalize 経由で採用）", () => {
     const d = decideCorporateImport({
       name: `○○株式会社 法人番号:${CN.slice(0, 4)}-${CN.slice(4, 8)}-${CN.slice(8)}`,

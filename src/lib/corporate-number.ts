@@ -53,6 +53,13 @@ const LABELED_CORPORATE_NUMBER_RE =
 
 const BARE_CORPORATE_NUMBER_RE = /(?<![\d-])(\d{13})(?!\d)/g;
 
+// 裸の全角数字 13桁にマッチする正規表現。検出(extractCorporateNumbersFromText)と
+// cleanup 除去(removeCorporateNumbersFromText)の両方で使う。BARE_CORPORATE_NUMBER_RE は
+// 半角 \d のみで全角数字列を拾えないため別途用意する。境界では半角/全角数字に加え
+// HYPHEN_LIKE_CHARS と同じ各種ハイフン(全角 － / 数学マイナス − / ダッシュ類 / ー 等)も
+// 除外し、"…－45" のようなハイフン連結 ID の先頭13桁を誤検出/誤除去しない。
+const BARE_FULLWIDTH_CORPORATE_NUMBER_RE = /(?<![0-9０-９\-‐‑‒–—―ー－−─])([０-９]{13})(?![0-9０-９\-‐‑‒–—―ー－−─])/g;
+
 /**
  * 入力テキストから法人番号候補を抽出する。
  *
@@ -81,6 +88,12 @@ export function extractCorporateNumbersFromText(input: string | null | undefined
     if (normalized) found.add(normalized);
   }
 
+  // ラベルなしの裸 全角13桁(例 "株式会社○○ １２３４５６７８９０１２３")も抽出する。
+  for (const match of text.matchAll(BARE_FULLWIDTH_CORPORATE_NUMBER_RE)) {
+    const normalized = normalizeCorporateNumber(match[1]);
+    if (normalized) found.add(normalized);
+  }
+
   return Array.from(found);
 }
 
@@ -96,16 +109,6 @@ function tidyAfterCorporateRemoval(s: string): string {
   r = r.replace(/\s*[、,／/・]\s*$/u, "");
   return r.trim();
 }
-
-/**
- * 裸の全角数字 13桁にもマッチする正規表現。
- * BARE_CORPORATE_NUMBER_RE は半角 \d のみのため、全角数字のみの列は別途処理する。
- * 全角数字 [０-９] の連続 13桁（前後に半角数字・全角数字・ハイフンが連結しない）を対象とする。
- */
-// cleanup の破壊的除去で使う全角 13桁 regex。境界では半角/全角数字に加え、
-// HYPHEN_LIKE_CHARS と同じ各種ハイフン(全角 － / 数学マイナス − / ダッシュ類 / ー 等)も
-// 除外し、"…－45" のような ID の先頭13桁を誤除去しない(Codex P2 round3)。
-const BARE_FULLWIDTH_CORPORATE_NUMBER_RE = /(?<![0-9０-９\-‐‑‒–—―ー－−─])([０-９]{13})(?![0-9０-９\-‐‑‒–—―ー－−─])/g;
 
 // cleanup の破壊的除去では左右とも、HYPHEN_LIKE_CHARS と同じ各種ハイフンを除外する。
 // 共有の BARE_CORPORATE_NUMBER_RE は右境界が (?!\d) のみで "1234567890123-45"(全角 － 含む)の

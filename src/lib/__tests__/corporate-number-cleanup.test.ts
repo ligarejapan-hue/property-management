@@ -105,4 +105,13 @@ describe("decideOwnerCorporateCleanup", () => {
     expect(p.corporateNumberToSet).toBeNull();
     expect(p.changedFields).toEqual([]);
   });
+
+  it("ラベルなし全角bare 13桁が cleanup で到達可能(検出→save→除去・Codex round5 scope拡張)", () => {
+    const p = decideOwnerCorporateCleanup({ name: "株式会社○○ １２３４５６７８９０１２３", address: null, note: null, corporateNumber: null });
+    expect(p.action).toBe("cleanup");
+    expect(p.importAction).toBe("save");
+    expect(p.corporateNumberToSet).toBe("1234567890123");
+    expect(p.cleanedName).toBe("株式会社○○");
+    expect(p.changedFields).toEqual(["name", "corporateNumber"]);
+  });
 });
