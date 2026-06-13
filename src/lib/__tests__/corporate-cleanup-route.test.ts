@@ -29,6 +29,7 @@ import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges } from "@/lib/change-log";
+import { maskCorporateNumber } from "@/lib/display-level";
 import { GET, POST } from "../../app/api/owners/[id]/corporate-cleanup/route";
 
 const pm = prisma as unknown as { owner: { findUnique: Mock; updateMany: Mock } };
@@ -68,6 +69,16 @@ describe("GET /api/owners/[id]/corporate-cleanup (preview)", () => {
     expect(body.cleanup.changedFields).toContain("name");
     expect(body.cleanup.changedFields).toContain("corporateNumber");
     expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("P1: corporateNumberToSetMasked は full 以外(edit/read)ではマスクし生13桁を露出しない", async () => {
+    // owner_corporate_number=edit。混入13桁が空き列へ移送される save ケースでも、
+    // 既存 corporate-candidate と同じ「full のみ生値・それ以外マスク」方針に従う。
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({ ...FULL_DISPLAY, corporateNumber: "edit" } as any);
+    const res = await GET(getReq(), ctx());
+    const body = await res.json();
+    expect(body.cleanup.corporateNumberToSetMasked).not.toBe(N);
+    expect(body.cleanup.corporateNumberToSetMasked).toBe(maskCorporateNumber(N));
   });
 
   it("owner_corporate_number=hidden は 403", async () => {

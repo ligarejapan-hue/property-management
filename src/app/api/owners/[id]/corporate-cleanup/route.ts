@@ -47,7 +47,9 @@ function gatedInput(
 
 function maskCnToSet(value: string | null, level: Level): string | null {
   if (value == null) return null;
-  return level === "full" || level === "edit" || level === "read" ? value : maskCorporateNumber(value);
+  // 法人番号は owner-corporate-candidates の maskCorporateField と同方針:
+  // full のときだけ生 13桁を返し、edit / read / masked / partial はマスクする。
+  return level === "full" ? value : maskCorporateNumber(value);
 }
 
 export async function GET(
