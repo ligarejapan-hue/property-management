@@ -24,6 +24,8 @@ import {
   DM_STATUS_LABELS,
 } from "@/lib/property-types";
 import { formatPostalCode, isValidPostalCode } from "@/lib/address-lookup/normalize";
+import { selectGroupRepresentative, type DmRowPropertyOwner } from "@/lib/dm-export";
+import { resolveExportColumns } from "@/lib/property-export-columns";
 
 // 郵便番号を CSV セル用に整形する。
 // 住所補完フローは 7 桁（ハイフン無し）で保存し得るため、妥当な 7 桁は NNN-NNNN へ整形して
@@ -50,24 +52,8 @@ function toPostalCodeCell(postalCode: string | null | undefined): string {
 
 const MAX_EXPORT_ROWS = 10000;
 
-const CSV_HEADERS = [
-  "管理ID",
-  "物件種別",
-  "住所",
-  "地番",
-  "家屋番号",
-  "不動産番号",
-  "登記状況",
-  "DM判断",
-  "案件ステータス",
-  "導入ルート",
-  "担当者名",
-  "所有者名",
-  "更新日時",
-  "作成日時",
-  // PR-3b: 既存列順を壊さないため郵便番号は末尾に追加（値は Property.postalCode のみ）。
-  "郵便番号",
-] as const;
+// CSV 列の定義（安定英語キー↔日本語ヘッダ・列順）は property-export-columns.ts に集約。
+// 行オブジェクトは全列の日本語ヘッダをキーに持たせ、出力時に選択列の部分集合で絞る。
 
 function toCsvDateTime(value: Date | string | null | undefined): string {
   if (!value) return "";
@@ -112,6 +98,10 @@ export async function GET(request: NextRequest) {
       queryObj[key] = value;
     });
 
+    // 出力項目選択（?columns=安定英語キー）。無指定=全列（後方互換）・既知キーのみ定義順に
+    // 正規化・未知/空は無視・全て無効なら全列。認可は別途（案A: ルート全体で権限ゲート済み）。
+    const selectedColumns = resolveExportColumns(searchParams.get("columns"));
+
     // page / limit は無視して全件出力するが、schema は共有のため parse はそのまま通す。
     const query = propertyListQuerySchema.parse(queryObj);
 
@@ -129,7 +119,6 @@ export async function GET(request: NextRequest) {
             id: true,
             propertyType: true,
             address: true,
-            postalCode: true,
             lotNumber: true,
             buildingNumber: true,
             realEstateNumber: true,
@@ -140,8 +129,10 @@ export async function GET(request: NextRequest) {
             updatedAt: true,
             createdAt: true,
             assignee: { select: { name: true } },
+            // 郵便番号は代表所有者(selectGroupRepresentative)の Owner.zip から出す（非PII扱い）。
+            // 所有者名(ownerNames)用の name と、代表選定用の isPrimary も同時取得する。
             propertyOwners: {
-              select: { owner: { select: { name: true } } },
+              select: { isPrimary: true, owner: { select: { name: true, zip: true } } },
               orderBy: { createdAt: "asc" },
             },
           },
@@ -172,6 +163,26 @@ export async function GET(request: NextRequest) {
               .filter((n): n is string => n !== null)
           : [];
 
+      // 郵便番号 = 代表所有者(primary 優先・無ければ createdAt 昇順の先頭)の Owner.zip。
+      // 非PII扱い: owner:read ゲート無し・マスク非経由・NNN-NNNN 整形のみ。
+      // selectGroupRepresentative(#169) を再利用するため DmRowPropertyOwner 形へ写像する
+      //（同関数は isPrimary のみ参照。未使用フィールドは null で埋める＝余分取得なし）。
+      const repCandidates: DmRowPropertyOwner[] = p.propertyOwners.map((po) => ({
+        isPrimary: po.isPrimary,
+        relationship: null,
+        owner: {
+          name: po.owner.name,
+          nameKana: null,
+          zip: po.owner.zip,
+          address: null,
+          corporateNumber: null,
+        },
+      }));
+      const representativeZip =
+        repCandidates.length > 0
+          ? selectGroupRepresentative(repCandidates).owner.zip
+          : null;
+
       return {
         管理ID: importSourceMap.get(p.id) ?? "",
         物件種別: PROPERTY_TYPE_LABELS[p.propertyType] ?? p.propertyType,
@@ -190,9 +201,9 @@ export async function GET(request: NextRequest) {
         所有者名: ownerNames.join("、"),
         更新日時: toCsvDateTime(p.updatedAt),
         作成日時: toCsvDateTime(p.createdAt),
-        // Property.postalCode のみ（Building.postalCode fallback は別 PR）。
-        // 妥当な 7 桁は NNN-NNNN へテキスト化（Excel の先頭 0 欠落対策）・null は空欄。
-        郵便番号: toPostalCodeCell(p.postalCode),
+        // 代表所有者の Owner.zip（非PII扱い）。妥当な 7 桁は NNN-NNNN へテキスト化
+        //（Excel の先頭 0 欠落対策）・null/未保有は空欄。
+        郵便番号: toPostalCodeCell(representativeZip),
       };
     });
 
@@ -208,7 +219,13 @@ export async function GET(request: NextRequest) {
     );
 
     // UTF-8 BOM + CRLF（既存 encodeCsv の既定挙動）で Excel 互換に出力。
-    const csv = encodeCsv([...CSV_HEADERS], sanitizedRows, { bom: true });
+    // 出力列は ?columns= の選択（無指定=全列）。encodeCsv は headers のキーで行から
+    // 値を引くため、行オブジェクトは全列を持たせたまま headers の部分集合で列を絞る。
+    const csv = encodeCsv(
+      selectedColumns.map((c) => c.header),
+      sanitizedRows,
+      { bom: true },
+    );
 
     // AuditLog は操作事実のみ。CSV 本文・所有者名などの PII は残さない。
     // filters は raw query の rest ではなく、parse 済み query からの明示 allowlist で組む。

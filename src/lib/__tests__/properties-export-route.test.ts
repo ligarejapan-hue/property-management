@@ -136,7 +136,9 @@ function makeProp(over: Record<string, unknown> = {}) {
     updatedAt: new Date("2026-05-01T12:00:00Z"),
     createdAt: new Date("2026-04-01T09:00:00Z"),
     assignee: { name: "担当 太郎" },
-    propertyOwners: [{ owner: { name: "所有 花子" } }],
+    // 郵便番号は代表所有者(selectGroupRepresentative)の Owner.zip から出す(非PII扱い)。
+    // 既定は単独 primary・zip 無し。zip を見るテストは propertyOwners を上書きする。
+    propertyOwners: [{ isPrimary: true, owner: { name: "所有 花子", zip: null } }],
     ...over,
   };
 }
@@ -548,12 +550,21 @@ describe("GET /api/properties/export", () => {
 // - null は空欄・既存 sanitize（formula injection 対策）を通す。
 // - owner:read / owner 表示レベルに依存しない（物件情報として出力）。
 // ============================================================
-describe("GET /api/properties/export — 郵便番号列（PR-3b）", () => {
+describe("GET /api/properties/export — 郵便番号列（代表所有者 Owner.zip ソース）", () => {
   function headerCols(csv: string): string[] {
     return csv.split("\r\n")[0].split(",");
   }
+  // 代表所有者の zip を持つ propertyOwners を作る（PO は {isPrimary, owner:{name,zip}}）。
+  function owners(
+    list: Array<{ name?: string; zip: string | null; isPrimary?: boolean }>,
+  ) {
+    return list.map((o, i) => ({
+      isPrimary: o.isPrimary ?? i === 0,
+      owner: { name: o.name ?? `所有者${i}`, zip: o.zip },
+    }));
+  }
 
-  it("CSV ヘッダ末尾に『郵便番号』が追加され、既存列順は不変", async () => {
+  it("CSV ヘッダ末尾に『郵便番号』があり、既存列順は不変（全列）", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     const res = await GET(makeRequest());
     const csv = await res.text();
@@ -576,24 +587,53 @@ describe("GET /api/properties/export — 郵便番号列（PR-3b）", () => {
     ]);
   });
 
-  it("Property.postalCode が郵便番号列（末尾）に出力される", async () => {
+  it("代表所有者の Owner.zip が郵便番号列（末尾）に出力される", async () => {
     pm.property.findMany.mockResolvedValue([
-      makeProp({ postalCode: "100-0001" }),
+      makeProp({ propertyOwners: owners([{ zip: "100-0001" }]) }),
     ]);
     const res = await GET(makeRequest());
     const csv = await res.text();
     const idx = headerCols(csv).indexOf("郵便番号");
     const cells = csv.split("\r\n")[1].split(",");
     expect(cells[idx]).toBe("100-0001");
-    // 末尾列であること
     expect(cells.at(-1)).toBe("100-0001");
   });
 
-  it("正規化済み 7 桁 postalCode は NNN-NNNN へ整形し、先頭 0 を保持する（Excel 数値化対策）", async () => {
-    // 住所補完フローは Owner/Property に 7 桁（ハイフン無し）で保存し得る。
-    // 例 "0100492" を素のまま出すと Excel が数値化し先頭 0 を落とす → NNN-NNNN でテキスト化。
+  it("代表者は primary 所有者を優先する（順序に関わらず primary の zip）", async () => {
     pm.property.findMany.mockResolvedValue([
-      makeProp({ postalCode: "0100492" }),
+      makeProp({
+        propertyOwners: owners([
+          { name: "先頭 非代表", zip: "999-9999", isPrimary: false },
+          { name: "代表 太郎", zip: "100-0001", isPrimary: true },
+        ]),
+      }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("100-0001");
+  });
+
+  it("primary が居なければ先頭（createdAt 昇順の group[0]）の zip", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: owners([
+          { name: "先頭", zip: "200-0002", isPrimary: false },
+          { name: "次", zip: "300-0003", isPrimary: false },
+        ]),
+      }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const idx = headerCols(csv).indexOf("郵便番号");
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[idx]).toBe("200-0002");
+  });
+
+  it("正規化済み 7 桁 zip は NNN-NNNN へ整形し先頭 0 を保持（Excel 数値化対策）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ propertyOwners: owners([{ zip: "0100492" }]) }),
     ]);
     const res = await GET(makeRequest());
     const csv = await res.text();
@@ -602,20 +642,9 @@ describe("GET /api/properties/export — 郵便番号列（PR-3b）", () => {
     expect(cells[idx]).toBe("010-0492");
   });
 
-  it("既にハイフン付きの 7 桁 postalCode はそのまま NNN-NNNN で出る", async () => {
+  it("7 桁として妥当でない zip は素の値のまま（勝手に変形しない）", async () => {
     pm.property.findMany.mockResolvedValue([
-      makeProp({ postalCode: "100-0001" }),
-    ]);
-    const res = await GET(makeRequest());
-    const csv = await res.text();
-    const idx = headerCols(csv).indexOf("郵便番号");
-    const cells = csv.split("\r\n")[1].split(",");
-    expect(cells[idx]).toBe("100-0001");
-  });
-
-  it("7 桁として妥当でない postalCode は素の値のまま出力する（勝手に変形しない）", async () => {
-    pm.property.findMany.mockResolvedValue([
-      makeProp({ postalCode: "不明" }),
+      makeProp({ propertyOwners: owners([{ zip: "不明" }]) }),
     ]);
     const res = await GET(makeRequest());
     const csv = await res.text();
@@ -624,47 +653,127 @@ describe("GET /api/properties/export — 郵便番号列（PR-3b）", () => {
     expect(cells[idx]).toBe("不明");
   });
 
-  it("Property.postalCode が null の場合は空欄（literal null を出さない）", async () => {
-    pm.property.findMany.mockResolvedValue([makeProp({ postalCode: null })]);
+  it("代表 zip が null / 所有者0件 の場合は空欄（literal null を出さない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ propertyOwners: owners([{ zip: null }]) }),
+      makeProp({ id: "p2", propertyOwners: [] }),
+    ]);
     const res = await GET(makeRequest());
     const csv = await res.text();
     const idx = headerCols(csv).indexOf("郵便番号");
-    const cells = csv.split("\r\n")[1].split(",");
-    expect(cells[idx]).toBe("");
+    const rows = csv.split("\r\n");
+    expect(rows[1].split(",")[idx]).toBe("");
+    expect(rows[2].split(",")[idx]).toBe("");
     expect(csv).not.toContain("null");
   });
 
-  it("postalCode にも formula injection 対策が効く（先頭 = + - @ に ' 付与）", async () => {
+  it("zip にも formula injection 対策が効く（先頭 = + - @ に ' 付与）", async () => {
     pm.property.findMany.mockResolvedValue([
-      makeProp({ postalCode: "=1+1" }),
+      makeProp({ propertyOwners: owners([{ zip: "=1+1" }]) }),
     ]);
     const res = await GET(makeRequest());
     const csv = await res.text();
     expect(csv).toContain("'=1+1");
   });
 
-  it("property.findMany の select に postalCode: true が含まれる", async () => {
+  it("select は postalCode を引かず、propertyOwners に isPrimary + owner.zip を含む", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     await GET(makeRequest());
     const call = pm.property.findMany.mock.calls[0][0];
-    expect(call.select.postalCode).toBe(true);
+    expect(call.select.postalCode).toBeUndefined();
+    expect(call.select.propertyOwners.select.isPrimary).toBe(true);
+    expect(call.select.propertyOwners.select.owner.select.zip).toBe(true);
+    expect(call.select.propertyOwners.select.owner.select.name).toBe(true);
   });
 
-  it("owner:read が無くても物件CSV export は動き、postalCode は出力される", async () => {
+  it("郵便番号は非PII扱い: owner:read 無しでも代表 zip を出力する（マスク非経由）", async () => {
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_OWNER as any);
     pm.property.findMany.mockResolvedValue([
-      makeProp({ postalCode: "200-0002" }),
+      makeProp({ propertyOwners: owners([{ zip: "200-0002" }]) }),
     ]);
     const res = await GET(makeRequest());
     expect(res.status).toBe(200);
     const csv = await res.text();
     const idx = headerCols(csv).indexOf("郵便番号");
     const cells = csv.split("\r\n")[1].split(",");
-    expect(cells[idx]).toBe("200-0002");
-    // owner:read 無しなので所有者名は空（postalCode は owner 権限に依存しない）
+    expect(cells[idx]).toBe("200-0002"); // 所有者名は空でも郵便番号は出る
     expect(getOwnerDisplayConfig).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/properties/export — 出力項目選択（?columns=）", () => {
+  function headerCols(csv: string): string[] {
+    return csv.split("\r\n")[0].split(",");
+  }
+
+  it("?columns 無指定は全15列（後方互換）", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    expect(headerCols(csv)).toHaveLength(15);
+  });
+
+  it("?columns 指定で選択列のみ・定義順に出力", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ propertyOwners: ownersHelper("160-0001") }),
+    ]);
+    // 指定順を postalCode,address と逆に書いても定義順(address→postalCode)で出る
+    const res = await GET(makeRequest("?columns=postalCode,address"));
+    const csv = await res.text();
+    expect(headerCols(csv)).toEqual(["住所", "郵便番号"]);
+    const cells = csv.split("\r\n")[1].split(",");
+    expect(cells[0]).toBe("東京都千代田区1-1");
+    expect(cells[1]).toBe("160-0001");
+  });
+
+  it("未知キーは無視し、既知キーのみ出力", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    const res = await GET(makeRequest("?columns=address,__bogus"));
+    const csv = await res.text();
+    expect(headerCols(csv)).toEqual(["住所"]);
+  });
+
+  it("全て未知/空 → 全列フォールバック", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    const res = await GET(makeRequest("?columns=__x,__y"));
+    const csv = await res.text();
+    expect(headerCols(csv)).toHaveLength(15);
+  });
+
+  it("列選択時も BOM + CRLF を維持する", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp(),
+      makeProp({ id: "p2" }),
+    ]);
+    const res = await GET(makeRequest("?columns=address"));
+    // text() は先頭 BOM を除去するため生バイトで検証する。
+    const buf = new Uint8Array(await res.arrayBuffer());
+    expect(Array.from(buf.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+    const csv = new TextDecoder("utf-8", { ignoreBOM: true }).decode(buf);
+    expect(csv.includes("\r\n")).toBe(true);
+  });
+
+  it("列選択時も formula injection 対策が効く", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ address: "=1+1" }),
+    ]);
+    const res = await GET(makeRequest("?columns=address"));
+    const csv = await res.text();
+    expect(csv).toContain("'=1+1");
+  });
+
+  // 所有者名(PII)列を選んでも、案A: ルート全体が csv_export_personal 必須のため
+  // 権限欠如は 403（列選択で認可バイパス不可）。
+  it("案A: csv_export_personal 無しは列選択に関わらず 403（認可挙動不変）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_CSV_PERSONAL as any);
+    const res = await GET(makeRequest("?columns=address"));
+    expect(res.status).toBe(403);
+  });
+});
+
+function ownersHelper(zip: string) {
+  return [{ isPrimary: true, owner: { name: "所有 花子", zip } }];
+}
 
 describe("buildPropertyListWhere（一覧 API と共有・従来挙動の固定）", () => {
   const adminSession = { id: "admin", role: "admin" };

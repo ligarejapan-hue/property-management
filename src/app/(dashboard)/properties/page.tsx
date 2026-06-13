@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
 import { debounce } from "@/lib/debounce";
+import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
 import NewPropertyModal from "@/components/properties/new-property-modal";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import StatusBadge, {
@@ -131,6 +132,12 @@ function PropertiesPageInner() {
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
   const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
+
+  // CSVエクスポートの列ピッカー。既定=全列選択。ゼロ列選択時は出力ボタンを無効化する。
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+  const [selectedExportColumns, setSelectedExportColumns] = useState<Set<string>>(
+    () => new Set(EXPORT_COLUMNS.map((c) => c.key)),
+  );
 
   // 担当者プルダウン用ユーザー一覧
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
@@ -289,11 +296,32 @@ function PropertiesPageInner() {
     }
   }, [page, buildFilterParams]);
 
-  // CSV 出力: 現在の検索条件（buildFilterParams）を引き継いで export API を開く。
+  // CSV 出力: 現在の検索条件（buildFilterParams）+ 選択列を引き継いで export API を開く。
   // page/limit は付けないため、条件一致の全件が対象になる。
+  // 全列選択時は columns を省略（無指定=全列の後方互換）。1列も無い場合は何もしない
+  //（呼び出し側で出力ボタンを無効化済み・防御）。
   const handleExportCsv = () => {
-    const qs = new URLSearchParams(buildFilterParams()).toString();
+    const selectedKeys = EXPORT_COLUMNS.filter((c) =>
+      selectedExportColumns.has(c.key),
+    ).map((c) => c.key);
+    if (selectedKeys.length === 0) return;
+
+    const params = new URLSearchParams(buildFilterParams());
+    if (selectedKeys.length < EXPORT_COLUMNS.length) {
+      params.set("columns", selectedKeys.join(","));
+    }
+    const qs = params.toString();
+    setShowColumnPicker(false);
     window.location.href = `/api/properties/export${qs ? `?${qs}` : ""}`;
+  };
+
+  const toggleExportColumn = (key: string) => {
+    setSelectedExportColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   // DM差込CSV の出力: 現在の検索条件を引き継いで dm-export API を開く。
@@ -617,15 +645,80 @@ function PropertiesPageInner() {
       {/* Action row */}
       <div className="mb-4 flex justify-end gap-2">
         {canExportCsv && (
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            title="現在の検索条件で全件をCSV出力"
-          >
-            <Download className="h-4 w-4" />
-            CSV出力
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowColumnPicker((v) => !v)}
+              aria-haspopup="true"
+              aria-expanded={showColumnPicker}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              title="出力する列を選んでCSV出力"
+            >
+              <Download className="h-4 w-4" />
+              CSV出力
+            </button>
+            {showColumnPicker && (
+              <div
+                className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-gray-200 bg-white p-3 shadow-lg"
+                role="dialog"
+                aria-label="CSV出力する列の選択"
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-gray-600">出力する列</span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="text-xs text-indigo-600 hover:underline"
+                      onClick={() =>
+                        setSelectedExportColumns(
+                          new Set(EXPORT_COLUMNS.map((c) => c.key)),
+                        )
+                      }
+                    >
+                      全選択
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-gray-500 hover:underline"
+                      onClick={() => setSelectedExportColumns(new Set())}
+                    >
+                      全解除
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  {EXPORT_COLUMNS.map((c) => (
+                    <label
+                      key={c.key}
+                      className="flex cursor-pointer items-center gap-2 py-1 text-sm text-gray-700"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedExportColumns.has(c.key)}
+                        onChange={() => toggleExportColumn(c.key)}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      {c.header}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  disabled={selectedExportColumns.size === 0}
+                  className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  title={
+                    selectedExportColumns.size === 0
+                      ? "1列以上選択してください"
+                      : "現在の検索条件で選択列をCSV出力"
+                  }
+                >
+                  <Download className="h-4 w-4" />
+                  CSV出力
+                </button>
+              </div>
+            )}
+          </div>
         )}
         {canExportDm && (
           <button
