@@ -209,6 +209,21 @@ export async function POST(
       }
     }
 
+    // save(列が空・番号がテキストにしかない)では、テキストから番号を除去するなら
+    // 必ず corporateNumber 列への移送も併せて適用する。さもないと唯一の番号が消え
+    // 以後のプレビューで復元できなくなる(Codex P2: データ消失防止)。
+    if (
+      proposal.importAction === "save" &&
+      (body.apply.name || body.apply.address || body.apply.note) &&
+      !body.apply.corporateNumber
+    ) {
+      throw new ApiError(
+        400,
+        "法人番号が未登録のため、テキストからの除去には法人番号列への移送(corporateNumber)も併せて指定してください",
+        "CORPORATE_NUMBER_REQUIRED",
+      );
+    }
+
     const updateFields: Record<string, unknown> = {};
     if (body.apply.name) updateFields.name = proposal.cleanedName;
     if (body.apply.address) updateFields.address = proposal.cleanedAddress;

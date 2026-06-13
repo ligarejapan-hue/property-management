@@ -167,6 +167,14 @@ describe("POST /api/owners/[id]/corporate-cleanup (apply)", () => {
     expect((await res.json()).error.code).toBe("APPLY_FIELD_MISMATCH");
   });
 
+  it("P2: save 提案でテキスト除去のみ(corporateNumber 未適用)は 400 CORPORATE_NUMBER_REQUIRED(番号消失防止)", async () => {
+    // default owner = 列 null・name に番号 → save。name のみ除去し列移送しない = 唯一の番号が消える。
+    const res = await POST(postReq({ version: 2, apply: { name: true, address: false, note: false, corporateNumber: false } }), ctx());
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("CORPORATE_NUMBER_REQUIRED");
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
   it("apply 全 false は 400", async () => {
     const res = await POST(postReq({ version: 2, apply: { name: false, address: false, note: false, corporateNumber: false } }), ctx());
     expect(res.status).toBe(400);
