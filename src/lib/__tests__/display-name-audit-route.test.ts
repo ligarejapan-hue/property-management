@@ -369,26 +369,24 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     expect(csv).toContain("'=cmd");
   });
 
-  it("CSV: csv_export:read 欠如なら owner も building も CSV に出さない（CSV 出力一般ゲート不足）", async () => {
+  it("CSV: csv_export:read 欠如なら 403（不正な CSV 出力を拒否・空 CSV を返さない）", async () => {
     // csv_export:read は CSV 出力という行為の一般ゲート。欠如時は entity を問わず
-    // 一切 CSV に載せない（building が非PII でも対象）。Codex 追加 P2 の是正。
+    // 403 で拒否する（既存 PII CSV 出力ルートと同じ fail-closed）。Codex 追加 P2 の是正。
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER_NO_CSV);
     pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
     const res = await GET(makeRequest("?format=csv"));
-    expect(res.status).toBe(200);
-    const csv = await res.text();
-    // owner の生 name は CSV に出ない（PII CSV 出力権限が無い）
-    expect(csv).not.toContain("田中");
-    // building も出ない（CSV 出力一般ゲート csv_export:read が無い）
-    expect(csv).not.toContain("ABC");
-    // どちらも CSV に載せないため DB も叩かない
+    expect(res.status).toBe(403);
+    // DB 取得・CSV 生成・AuditLog 書き込みは一切行わない
     expect(pm.owner.findMany).not.toHaveBeenCalled();
     expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("CSV: csv_export_personal:read 欠如なら owner（PII）は出さず building のみ出力する", async () => {
+  it("CSV: owner を含むのに csv_export_personal:read 欠如なら 403（空 owner CSV を返さない）", async () => {
+    // owner（PII）を CSV に含む要求（entity=owner / 既定 all）で個人情報 CSV 権限が
+    // 無い場合は 403 で拒否する（既存 PII CSV 出力ルートと同基準）。Codex 追加 P2 の是正。
     vi.mocked(getUserPermissions).mockResolvedValue(
       PERMS_ADMIN_OWNER_NO_CSV_PERSONAL,
     );
@@ -396,11 +394,10 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
     const res = await GET(makeRequest("?format=csv"));
-    expect(res.status).toBe(200);
-    const csv = await res.text();
-    expect(csv).not.toContain("田中");
-    expect(csv).toContain("ABC");
+    expect(res.status).toBe(403);
     expect(pm.owner.findMany).not.toHaveBeenCalled();
+    expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("JSON では owner（PII）は CSV 権限に依らず owner:read + 表示レベルで返る", async () => {
@@ -431,20 +428,30 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
 
   // ---- Codex 追加 P2: CSV 出力は entity を問わず csv_export:read を一般ゲートとして要求する ----
 
-  it("CSV building: csv_export:read 欠如なら building も CSV に出さない（property:read のみでは不可）", async () => {
+  it("CSV building: csv_export:read 欠如なら 403（property:read のみでは不可）", async () => {
     // property:read はあるが csv_export:read が無い。建物は非PII でも
-    // 「CSV 出力という行為」の一般ゲート（csv_export:read）を満たさないため CSV に載せない。
+    // 「CSV 出力という行為」の一般ゲート（csv_export:read）を満たさないため 403 で拒否する。
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER_NO_CSV);
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
     const res = await GET(makeRequest("?format=csv&entity=building"));
-    expect(res.status).toBe(200);
-    const csv = await res.text();
-    // building の名前は CSV に出ない（CSV 出力権限が無い）
-    expect(csv).not.toContain("ABC");
-    expect(csv).not.toContain("建物");
-    // CSV に載せないため building の DB も叩かない（fail-closed）
+    expect(res.status).toBe(403);
+    // 403 ゆえ building の DB も叩かない・AuditLog も書かない（fail-closed）
     expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("CSV owner: csv_export_personal:read 欠如なら entity=owner も 403", async () => {
+    // entity=owner（PII のみ）で個人情報 CSV 権限が無い場合も 403 で拒否する。
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ADMIN_OWNER_NO_CSV_PERSONAL,
+    );
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv&entity=owner"));
+    expect(res.status).toBe(403);
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("CSV building: csv_export:read + property:read があれば building CSV を出力する", async () => {
@@ -477,18 +484,16 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     expect(pm.building.findMany).not.toHaveBeenCalled();
   });
 
-  it("CSV 両 entity: csv_export:read 欠如なら owner も building も CSV に出ない（空 CSV）", async () => {
+  it("CSV 両 entity: csv_export:read 欠如なら 403（owner も building も出さない）", async () => {
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER_NO_CSV);
     pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
     const res = await GET(makeRequest("?format=csv"));
-    expect(res.status).toBe(200);
-    const csv = await res.text();
-    expect(csv).not.toContain("田中");
-    expect(csv).not.toContain("ABC");
+    expect(res.status).toBe(403);
     expect(pm.owner.findMany).not.toHaveBeenCalled();
     expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("JSON building: csv_export:read 非依存で property:read だけで building 群が返る（回帰維持）", async () => {

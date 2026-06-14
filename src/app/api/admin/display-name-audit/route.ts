@@ -28,11 +28,13 @@ import { encodeCsv, sanitizeCsvCellForExcel } from "@/lib/csv-encode";
 //  - building 名/ID を返す経路は property:read を要求する（既存の建物読み取り API
 //    GET /api/buildings と同一基準）。不足時は building 群を空で返す（fail-closed）。
 //  - ?format=csv（CSV 出力という行為）は entity を問わず csv_export:read を一般ゲートとして
-//    要求する（既存 CSV 出力ルートと同じ作法）。不足時は owner も building も CSV に載せない。
-//    さらに所有者名（PII）・ID を CSV 出力する経路は csv_export_personal:read も追加で要求する
-//    （既存の PII CSV 出力ルート＝物件 CSV export / DM export と同基準）。building（非PII）は
-//    csv_export:read のみで足り personal は不要。JSON 閲覧（owner=owner:read + 表示レベル /
-//    building=property:read）は CSV 権限に依らず従来どおり。
+//    要求する（既存 CSV 出力ルートと同じ作法）。不足時は結果を空にするのでなく 403 で拒否する。
+//    さらに所有者名（PII）・ID を CSV 出力する経路（既定 all / entity=owner）は
+//    csv_export_personal:read も追加で要求し、不足時は 403（空 owner CSV を返さない）。
+//    （既存の PII CSV 出力ルート＝物件 CSV export / DM export と同じ fail-closed 基準）。
+//    building（非PII）のみの CSV は csv_export:read だけで足り personal は不要。
+//    JSON 閲覧（owner=owner:read + 表示レベル / building=property:read）は CSV 権限に
+//    依らず従来どおり（空/返すの既存挙動を維持）。
 //
 // 出力:
 //  - 既定 JSON: { owner?: AuditResult, building?: AuditResult }
@@ -107,25 +109,37 @@ export async function GET(request: NextRequest) {
     // 不足時は building 群を空で返す（owner と同じ fail-closed・DB も叩かない）。
     const buildingReadable = hasPermission(permissions, "property", "read");
 
-    // CSV 出力（format=csv）の一般ゲート。既存の CSV 出力ルートと同様、
-    // 「CSV を出力するという行為」自体に csv_export:read を要求する（entity 非依存）。
-    // 不足時は entity を問わず一切 CSV に載せない（building は非PII でも対象）。
-    const canExportCsv = hasPermission(permissions, "csv_export", "read");
-
-    // CSV で所有者名（PII）・ID を出力できるのは、既存 PII CSV 出力ルートと同じ
-    // csv_export:read + csv_export_personal:read を満たす場合のみ。
-    // JSON の owner は従来どおり owner:read + 表示レベルで返す（CSV 権限に依らない）。
-    const canExportPersonalCsv =
-      canExportCsv && hasPermission(permissions, "csv_export_personal", "read");
+    // CSV 出力（format=csv）の権限ゲート。既存の PII CSV 出力ルート
+    // （物件 CSV export / DM export）と同じく、権限不足時は「結果を空にする」のでなく
+    // 403 で拒否する（fail-closed）。ここで弾くため DB 取得・CSV 生成・AuditLog 書き込みは
+    // 一切行わない。CSV 権限が CSV 出力という行為を保護する意味を維持する（Codex P2 是正）。
+    if (asCsv) {
+      // CSV 出力という行為の一般ゲート。entity 非依存（building が非PII でも必須）。
+      if (!hasPermission(permissions, "csv_export", "read")) {
+        throw new ApiError(
+          403,
+          "CSV エクスポートの権限がありません",
+          "FORBIDDEN",
+        );
+      }
+      // owner（所有者名＝PII）を CSV に含む要求は csv_export_personal:read も必須。
+      // 既定（両 entity）/entity=owner はいずれも owner を含む。
+      if (wantOwner && !hasPermission(permissions, "csv_export_personal", "read")) {
+        throw new ApiError(
+          403,
+          "個人情報を含む CSV エクスポートの権限がありません",
+          "FORBIDDEN",
+        );
+      }
+    }
 
     // owner 群（PII）を返す条件:
     //  - owner:read かつ name 表示レベルが生値レベル
-    //  - かつ CSV 出力時は PII CSV 出力権限（csv_export + csv_export_personal）も必須
-    // owner を要求していない（entity=building）/CSV で PII CSV 権限が無い場合は
-    // owner 表示設定の解決・owner の DB 取得自体を行わない（fail-closed）。
-    const ownerOutputAllowed = wantOwner && (!asCsv || canExportPersonalCsv);
+    // CSV 出力時の CSV 権限は上で 403 ゲート済み。
+    // owner を要求していない（entity=building）場合は owner 表示設定の解決・
+    // owner の DB 取得自体を行わない（fail-closed）。
     let ownerNameVisible = false;
-    if (ownerOutputAllowed && hasPermission(permissions, "owner", "read")) {
+    if (wantOwner && hasPermission(permissions, "owner", "read")) {
       const ownerDisplayConfig = await getOwnerDisplayConfig(
         session.id,
         permissions,
@@ -154,11 +168,10 @@ export async function GET(request: NextRequest) {
 
     // building 群を返す条件:
     //  - property:read（既存 JSON 基準）
-    //  - かつ CSV 出力時は CSV 出力の一般ゲート（csv_export:read）も必須
-    //    （building は非PII ゆえ csv_export_personal は不要）。
-    // CSV で csv_export:read が無い場合は building を CSV に載せない（DB も叩かない・fail-closed）。
-    const buildingOutputAllowed =
-      wantBuilding && buildingReadable && (!asCsv || canExportCsv);
+    // CSV 出力時の csv_export:read は上で 403 ゲート済み（building は非PII ゆえ
+    // csv_export_personal は不要）。property:read が無い場合は building を載せない
+    // （DB も叩かない・fail-closed・CSV/JSON 共通）。
+    const buildingOutputAllowed = wantBuilding && buildingReadable;
 
     let buildingResult: AuditResult | undefined;
     if (wantBuilding) {
