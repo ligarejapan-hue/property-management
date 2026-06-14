@@ -27,10 +27,12 @@ import { encodeCsv, sanitizeCsvCellForExcel } from "@/lib/csv-encode";
 //    場合のみ owner 群を返す。不足時は owner 群は空。
 //  - building 名/ID を返す経路は property:read を要求する（既存の建物読み取り API
 //    GET /api/buildings と同一基準）。不足時は building 群を空で返す（fail-closed）。
-//  - ?format=csv で所有者名（PII）・ID を CSV 出力する経路は、既存の PII CSV 出力ルート
-//    （物件 CSV export / DM export）と同じ csv_export:read + csv_export_personal:read を
-//    要求する。不足時は owner（PII）を CSV に載せず building のみ出力する（building は非PII
-//    ゆえ CSV 出力権限は要求しない）。JSON の owner は従来どおり owner:read + 表示レベルで返す。
+//  - ?format=csv（CSV 出力という行為）は entity を問わず csv_export:read を一般ゲートとして
+//    要求する（既存 CSV 出力ルートと同じ作法）。不足時は owner も building も CSV に載せない。
+//    さらに所有者名（PII）・ID を CSV 出力する経路は csv_export_personal:read も追加で要求する
+//    （既存の PII CSV 出力ルート＝物件 CSV export / DM export と同基準）。building（非PII）は
+//    csv_export:read のみで足り personal は不要。JSON 閲覧（owner=owner:read + 表示レベル /
+//    building=property:read）は CSV 権限に依らず従来どおり。
 //
 // 出力:
 //  - 既定 JSON: { owner?: AuditResult, building?: AuditResult }
@@ -95,12 +97,16 @@ export async function GET(request: NextRequest) {
     // 不足時は building 群を空で返す（owner と同じ fail-closed・DB も叩かない）。
     const buildingReadable = hasPermission(permissions, "property", "read");
 
+    // CSV 出力（format=csv）の一般ゲート。既存の CSV 出力ルートと同様、
+    // 「CSV を出力するという行為」自体に csv_export:read を要求する（entity 非依存）。
+    // 不足時は entity を問わず一切 CSV に載せない（building は非PII でも対象）。
+    const canExportCsv = hasPermission(permissions, "csv_export", "read");
+
     // CSV で所有者名（PII）・ID を出力できるのは、既存 PII CSV 出力ルートと同じ
     // csv_export:read + csv_export_personal:read を満たす場合のみ。
     // JSON の owner は従来どおり owner:read + 表示レベルで返す（CSV 権限に依らない）。
     const canExportPersonalCsv =
-      hasPermission(permissions, "csv_export", "read") &&
-      hasPermission(permissions, "csv_export_personal", "read");
+      canExportCsv && hasPermission(permissions, "csv_export_personal", "read");
 
     // owner 群（PII）を返す条件:
     //  - owner:read かつ name 表示レベルが生値レベル
@@ -136,9 +142,17 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // building 群を返す条件:
+    //  - property:read（既存 JSON 基準）
+    //  - かつ CSV 出力時は CSV 出力の一般ゲート（csv_export:read）も必須
+    //    （building は非PII ゆえ csv_export_personal は不要）。
+    // CSV で csv_export:read が無い場合は building を CSV に載せない（DB も叩かない・fail-closed）。
+    const buildingOutputAllowed =
+      wantBuilding && buildingReadable && (!asCsv || canExportCsv);
+
     let buildingResult: AuditResult | undefined;
     if (wantBuilding) {
-      if (buildingReadable) {
+      if (buildingOutputAllowed) {
         const buildings = await prisma.building.findMany({
           where: {},
           select: { id: true, name: true },
@@ -149,7 +163,8 @@ export async function GET(request: NextRequest) {
           { maxGroups: MAX_GROUPS },
         );
       } else {
-        // property:read 不足: building 群は空（fail-closed）。DB も叩かない。
+        // property:read 不足、または CSV 出力で csv_export:read 不足:
+        // building 群は空（fail-closed）。DB も叩かない。
         buildingResult = { groups: [], truncated: false };
       }
     }
