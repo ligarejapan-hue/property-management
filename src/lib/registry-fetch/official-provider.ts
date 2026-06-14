@@ -19,6 +19,13 @@
  * PII: input は非PII の realEstateNumber / ref のみ（既存 RegistryFetchRequest 制約）。
  *   スクショ/HTML/Cookie/セッションなどの中間成果物は永続しない・ログに出さない・即破棄。
  *   PR-1 では中間成果物自体を生成しない（実操作が無いため）。
+ *
+ * ★ Playwright バンドル混入防止の契約（C-1）:
+ *   本ファイルは playwright を **静的 import / require しない**（source-assertion テストで固定）。
+ *   実ブラウザ（Playwright）の読み込みは、呼び出し側 auto-fetch.ts の
+ *   resolveDefaultRegistryBrowserFactory() 内の **動的 import** にのみ閉じ込める契約とする。
+ *   これにより OfficialRegistryProvider を value import しても（auto-fetch → me/permissions route の
+ *   import 連鎖）Playwright がサーバーバンドルへ混入しない。
  */
 import type {
   RegistryFetchProvider,
@@ -123,4 +130,17 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
 
     throw new RegistryFetchError("provider_error");
   }
+}
+
+/**
+ * OfficialRegistryProvider を生成する薄い factory（C-1: value import 境界を明確化）。
+ *
+ * 本ファイルは playwright を静的 import しないため、この factory を value import しても
+ * Playwright はバンドルへ混入しない。実 Playwright 起動 adapter（browserFactory）の配線は
+ * 呼び出し側（auto-fetch.ts の resolveDefaultRegistryBrowserFactory 内の動的 import）に閉じ込める。
+ */
+export function createOfficialRegistryProvider(
+  options: OfficialRegistryProviderOptions,
+): OfficialRegistryProvider {
+  return new OfficialRegistryProvider(options);
 }

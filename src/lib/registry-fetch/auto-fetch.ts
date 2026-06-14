@@ -36,7 +36,7 @@ import {
   type RegistryFetchErrorCode,
 } from "@/lib/registry-fetch";
 import {
-  OfficialRegistryProvider,
+  createOfficialRegistryProvider,
   type RegistryBrowserFactory,
 } from "@/lib/registry-fetch/official-provider";
 
@@ -55,7 +55,9 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   timeout: 504,
   rate_limited: 429,
   auth_failed: 502,
-  not_found: 502,
+  // 業務的 not found（対象謄本が存在しない）。upstream 障害（502）と区別し 404 を返す。
+  // 502 だとクライアント/呼び出し側が「一時的な upstream 障害 → リトライ」と誤認しうるため。
+  not_found: 404,
   provider_error: 502,
 };
 
@@ -102,6 +104,13 @@ export interface ResolveRegistryFetchProviderOptions {
  * PR-1 では実 Playwright 起動 adapter を一切配線しない（playwright 依存追加なし）。よって本関数は
  * 常に undefined を返し、env が設定済みでも getRegistryFetchProvider() は null = 501 維持となる。
  * PR-2 でここに実 adapter を返す実装を入れると、env が揃った時点で capability=true になる。
+ *
+ * ★ Playwright バンドル混入防止の契約（C-1）:
+ *   Playwright は **この関数内の動的 import（`const { chromium } = await import("playwright")` 等）
+ *   でのみ** 読み込む。auto-fetch.ts / official-provider.ts は playwright を **静的 import / require
+ *   しない**（source-assertion テストで固定）。これにより auto-fetch.ts → /api/me/permissions route
+ *   の value import 連鎖で Playwright がサーバーバンドルへ混入するのを防ぐ。OfficialRegistryProvider
+ *   クラス自体が playwright を静的 import しない構造のため、value import（下記）は安全。
  */
 function resolveDefaultRegistryBrowserFactory():
   | RegistryBrowserFactory
@@ -150,7 +159,10 @@ export function getRegistryFetchProvider(
   const timeoutRaw = process.env.REGISTRY_FETCH_TIMEOUT_MS;
   const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
 
-  return new OfficialRegistryProvider({
+  // C-1: value import の boundary を factory に薄く包む。createOfficialRegistryProvider /
+  // OfficialRegistryProvider はいずれも playwright を静的 import しないため、この value import
+  // 連鎖（auto-fetch → me/permissions route）で Playwright はバンドルへ混入しない。
+  return createOfficialRegistryProvider({
     loginId,
     password,
     baseUrl,

@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 import {
   OfficialRegistryProvider,
   type RegistryBrowserPage,
@@ -56,6 +58,26 @@ describe("OfficialRegistryProvider（PR-1 scaffold・外部接続なし）", () 
     ).rejects.toMatchObject({ code: "provider_error" });
     // PR-1 では実ブラウザ操作（factory 呼び出し含む実取得）に到達しない設計。
     expect(factoryCalled).toBe(false);
+  });
+
+  it("C-1. official-provider.ts は Playwright を静的 import / require しない（バンドル混入防止）", () => {
+    // 契約: Playwright は将来 resolveDefaultRegistryBrowserFactory() 内の動的 import で
+    // のみ読み込む。OfficialRegistryProvider クラス自体が playwright を静的 import しない
+    // 構造を保つことで、value import 連鎖（auto-fetch → me/permissions route）での
+    // サーバーバンドル混入を防ぐ。
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../official-provider.ts"),
+      "utf8",
+    );
+    expect(src).not.toMatch(
+      /from\s+["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']/,
+    );
+    expect(src).not.toMatch(
+      /import\s+["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']/,
+    );
+    expect(src).not.toMatch(
+      /require\s*\(\s*["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']\s*\)/,
+    );
   });
 
   it("失敗例外（RegistryFetchError）に secret/PII を載せない", async () => {

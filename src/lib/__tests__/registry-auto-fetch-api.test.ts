@@ -397,6 +397,42 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(pm.property.update).not.toHaveBeenCalled();
   });
 
+  it("I-1. not_found は業務的 not found ゆえ 404（upstream 障害扱いの 502 にしない・リトライ誤認回避）", async () => {
+    const provider = new MockRegistryFetchProvider({ failWith: "not_found" });
+    await expect(runLib({ provider })).rejects.toMatchObject({
+      status: 404,
+      code: "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
+    });
+    // 失敗時はロック解除され process へ進まない（既存挙動不変）。
+    const release = pm.property.updateMany.mock.calls.find(
+      (c) => c[0]?.data?.registryStatus === "unconfirmed",
+    );
+    expect(release).toBeTruthy();
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("I-1. 他の provider 失敗コードの HTTP ステータスは不変（timeout=504/rate_limited=429/auth_failed=502/provider_error=502）", async () => {
+    const cases: Array<
+      ["timeout" | "rate_limited" | "auth_failed" | "provider_error", number]
+    > = [
+      ["timeout", 504],
+      ["rate_limited", 429],
+      ["auth_failed", 502],
+      ["provider_error", 502],
+    ];
+    for (const [code, status] of cases) {
+      vi.clearAllMocks();
+      setProperty();
+      pm.property.updateMany.mockResolvedValue({ count: 1 });
+      const provider = new MockRegistryFetchProvider({ failWith: code });
+      await expect(runLib({ provider })).rejects.toMatchObject({
+        status,
+        code: "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
+      });
+    }
+  });
+
   it("9. AuditLog に PII / rawText / fileUrl / owner / address / zip / token 等が入らない", async () => {
     const provider = successProvider();
     (parseRegistryText as Mock).mockReturnValue({
@@ -608,8 +644,10 @@ describe("PR4: source-assertion（スコープ固定）", () => {
   const routeFile =
     "src/app/api/properties/[id]/registry/auto-fetch/route.ts";
   const libFile = "src/lib/registry-fetch/auto-fetch.ts";
+  const officialProviderFile = "src/lib/registry-fetch/official-provider.ts";
   const routeSrc = read(routeFile);
   const libSrc = read(libFile);
+  const officialProviderSrc = read(officialProviderFile);
 
   it("10. 外部 HTTP / Playwright / 旧ベンダAPIキー を使っていない（PR-1: env は REGISTRY_FETCH_* のみ許可）", () => {
     for (const src of [routeSrc, libSrc]) {
@@ -634,6 +672,36 @@ describe("PR4: source-assertion（スコープ固定）", () => {
       expect(ref).toMatch(/^process\.env\.REGISTRY_FETCH_/);
     }
     expect(libSrc).not.toMatch(/process\.env\.NEXT_PUBLIC_/);
+  });
+
+  it("C-1. official-provider.ts / auto-fetch.ts は Playwright を静的 import しない（PR-2 で混入する芽を断つ）", () => {
+    // 契約: Playwright は将来 resolveDefaultRegistryBrowserFactory() 内の動的 import
+    // （await import("playwright") 等）でのみ読む。official-provider.ts と auto-fetch.ts は
+    // static import / require の形で playwright を読み込まない。これにより
+    // auto-fetch.ts → me/permissions route の import 連鎖で Playwright が
+    // サーバーバンドルへ混入する芽を断つ。
+    for (const src of [officialProviderSrc, libSrc]) {
+      // ES static import: `import ... from "playwright"` / `import "playwright"`。
+      expect(src).not.toMatch(
+        /from\s+["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']/,
+      );
+      expect(src).not.toMatch(
+        /import\s+["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']/,
+      );
+      // CommonJS require: `require("playwright")`。
+      expect(src).not.toMatch(
+        /require\s*\(\s*["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']\s*\)/,
+      );
+    }
+  });
+
+  it("C-1. 動的 import 契約: 将来 Playwright を読むのは resolveDefaultRegistryBrowserFactory（または注入境界）のみ", () => {
+    // PR-1 では playwright 依存を一切追加しないため動的 import も存在しないが、
+    // 契約として「読むなら動的 import 境界でのみ」をコメントで明示していることを固定する。
+    expect(libSrc).toMatch(/resolveDefaultRegistryBrowserFactory/);
+    // OfficialRegistryProvider は value import 可（クラス自体が playwright を静的 import
+    // しない構造を上のアサートで保証済み）。
+    expect(libSrc).toMatch(/OfficialRegistryProvider/);
   });
 
   it("11. schema/migration/package を変更しない（DDL/env なし・既存 enum 値のみ使用）", () => {
