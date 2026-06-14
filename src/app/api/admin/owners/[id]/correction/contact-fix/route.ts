@@ -75,8 +75,7 @@ function canSeeField(
 //   - no_change                : currentValue === newValue（set/format 共通）
 //   - empty / suspicious /
 //     non_phone / manual        : format mode の decide*Fix が currentValue を分類した結果
-// 一方 forbidden_value（operator の newValue 由来）や version_mismatch /
-// owner_archived は現在値 PII を漏らさないため抑止しない。
+// 一方 forbidden_value（operator の newValue 由来）は現在値 PII を漏らさないため抑止しない。
 const CURRENT_VALUE_DERIVED_REASONS = new Set<string>([
   "no_change",
   "empty",
@@ -85,9 +84,31 @@ const CURRENT_VALUE_DERIVED_REASONS = new Set<string>([
   "manual",
 ]);
 
-/** 隠し現在値に依存する blockReasons を除去する（不可視フィールド用）。 */
-function stripHiddenOracle(reasons: string[]): string[] {
-  return reasons.filter((r) => !CURRENT_VALUE_DERIVED_REASONS.has(r));
+// format mode の dry-run probe では、safety（version/archived）に到達できるのは
+// proposal.action === "format"（＝隠し現在値が valid だが未整形＝format 候補）の
+// ときに限られる。短絡する suspicious/empty/non_phone/同値は safety 前に弾かれ []
+// になる。よって不可視フィールドに対する format probe で version_mismatch /
+// owner_archived を返すと、その存在自体が「隠し値は format 候補」というクラスを
+// 漏らすオラクルになる（Codex DQ-02 P1）。
+//   - これらは format mode の不可視 probe でのみ抑止する。
+//   - set mode は safety 到達が operator の newValue 妥当性のみに依存し隠し現在値の
+//     クラスに依存しないため抑止しない（正当な楽観ロック/アーカイブ通知を維持）。
+//   - 実 apply（非 dry-run）でも従来どおり返す。
+const FORMAT_CONDITIONAL_SAFETY_REASONS = new Set<string>([
+  "version_mismatch",
+  "owner_archived",
+]);
+
+/**
+ * 隠し現在値に依存する blockReasons を除去する（不可視フィールド用）。
+ * format mode では version_mismatch / owner_archived も抑止する（上記 P1）。
+ */
+function stripHiddenOracle(reasons: string[], mode: "format" | "set"): string[] {
+  return reasons.filter((r) => {
+    if (CURRENT_VALUE_DERIVED_REASONS.has(r)) return false;
+    if (mode === "format" && FORMAT_CONDITIONAL_SAFETY_REASONS.has(r)) return false;
+    return true;
+  });
 }
 
 export async function POST(
@@ -202,7 +223,7 @@ export async function POST(
         // 対象フィールド不可視ユーザーには no_change（同値オラクル）を伏せ、eligible も出さない。
         return apiResponse({
           executed: false,
-          blockReasons: stripHiddenOracle(blockReasons),
+          blockReasons: stripHiddenOracle(blockReasons, mode),
           field,
           mode,
           fieldVisible: false,

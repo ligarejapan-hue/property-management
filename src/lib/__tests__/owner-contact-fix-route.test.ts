@@ -364,3 +364,87 @@ describe("不可視フィールドの dry-run は同値オラクルを出さな�
     expect(json.blockReasons).toEqual([]);
   });
 });
+
+// DQ-02 P1: format mode の dry-run で safety（version/archived）に到達できるのは
+// 隠し現在値が「valid だが未整形＝format 候補」のときに限られる（suspicious/empty/
+// non_phone/同値は safety 前に短絡して [] になる）。よって不可視フィールドの format
+// probe で version_mismatch / owner_archived を返すと、その存在が「隠し値は format
+// 候補」というクラスを漏らすオラクルになる。format probe ではこれらも抑止する。
+// 一方 set mode / 実 apply は safety 到達が隠し値クラスに依存しないため従来どおり返す。
+describe("不可視フィールドの format dry-run は version/archived オラクルを出さない (P1)", () => {
+  it("不可視 + format + 故意の version 不一致でも version_mismatch を漏らさない（formattable 隠し値）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_FIELD_MASKED);
+    mockOwner({ zip: "1234567", version: 1 }); // valid 未整形 = format 候補
+    const res = await POST(
+      req({ version: 999, field: "zip", mode: "format" }), // 故意に誤った version
+      params,
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.executed).toBe(false);
+    expect(json.fieldVisible).toBe(false);
+    expect(json).not.toHaveProperty("eligible");
+    expect(json.blockReasons).not.toContain("version_mismatch");
+    expect(json.blockReasons).not.toContain("owner_archived");
+    // suspicious な隠し値（短絡で [] になる）と区別できないこと。
+    expect(json.blockReasons).toEqual([]);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("不可視 + format + archived 隠し値でも owner_archived を漏らさない（formattable 隠し値）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_FIELD_MASKED);
+    mockOwner({ zip: "1234567", version: 1, isArchived: true }); // format 候補 + archived
+    const res = await POST(
+      req({ version: 1, field: "zip", mode: "format" }),
+      params,
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.fieldVisible).toBe(false);
+    expect(json.blockReasons).not.toContain("owner_archived");
+    expect(json.blockReasons).not.toContain("version_mismatch");
+    expect(json.blockReasons).toEqual([]);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("可視 + format + version 不一致では version_mismatch を従来どおり返す（過剰抑止しない）", async () => {
+    // PERMS_RW = owner_zip full（可視）。
+    mockOwner({ zip: "1234567", version: 1 }); // format 候補
+    const res = await POST(
+      req({ version: 999, field: "zip", mode: "format" }),
+      params,
+    );
+    const json = await res.json();
+    expect(json.fieldVisible).toBe(true);
+    expect(json.eligible).toBe(false);
+    expect(json.blockReasons).toContain("version_mismatch");
+  });
+
+  it("不可視 + set + version 不一致では version_mismatch を従来どおり返す（隠し値クラス非依存）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_FIELD_MASKED);
+    mockOwner({ zip: "765", version: 1 });
+    const res = await POST(
+      req({ version: 999, field: "zip", mode: "set", newValue: "123-4567" }),
+      params,
+    );
+    const json = await res.json();
+    expect(json.fieldVisible).toBe(false);
+    expect(json.blockReasons).toContain("version_mismatch");
+  });
+
+  it("実 apply（非 dry-run）では version 競合で 409 version_mismatch を従来どおり返す", async () => {
+    // 実 apply は field-level write 必須ゆえ可視フィールド（PERMS_RW）で検証。
+    mockOwner({ zip: "1234567", version: 1 });
+    pm.owner.updateMany.mockResolvedValue({ count: 0 });
+    pm.owner.findUnique
+      .mockResolvedValueOnce({ id: "o-1", zip: "1234567", phone: null, version: 1, isArchived: false })
+      .mockResolvedValueOnce({ version: 2, isArchived: false });
+    const res = await POST(
+      req({ version: 1, field: "zip", mode: "format", dryRun: false }),
+      params,
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.blockReasons).toContain("version_mismatch");
+  });
+});
