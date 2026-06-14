@@ -63,6 +63,9 @@ import {
   getApiSession,
   getUserPermissions,
   getOwnerDisplayConfig,
+  type ApiSession,
+  type PermissionEntry,
+  type OwnerDisplayConfig,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { GET } from "../../app/api/admin/display-name-audit/route";
@@ -72,18 +75,18 @@ const pm = prisma as unknown as {
   building: { findMany: Mock };
 };
 
-const PERMS_ADMIN_OWNER = [
+const PERMS_ADMIN_OWNER: PermissionEntry[] = [
   { resource: "user_management", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
 ];
-const PERMS_ADMIN_NO_OWNER = [
+const PERMS_ADMIN_NO_OWNER: PermissionEntry[] = [
   { resource: "user_management", action: "read", granted: true },
 ];
-const PERMS_NON_ADMIN = [
+const PERMS_NON_ADMIN: PermissionEntry[] = [
   { resource: "owner", action: "read", granted: true },
 ];
 
-const FULL_DISPLAY = {
+const FULL_DISPLAY: OwnerDisplayConfig = {
   name: "full",
   nameKana: "full",
   phone: "full",
@@ -94,6 +97,13 @@ const FULL_DISPLAY = {
   corporateNumber: "full",
 };
 
+const ADMIN_SESSION: ApiSession = {
+  id: "user-admin",
+  email: "a@a",
+  name: "A",
+  role: "admin",
+};
+
 function makeRequest(qs = "") {
   return new Request(
     `http://localhost/api/admin/display-name-audit${qs}`,
@@ -101,8 +111,10 @@ function makeRequest(qs = "") {
   ) as unknown as import("next/server").NextRequest;
 }
 
-function lastAudit(): any {
-  return vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0];
+function lastAudit() {
+  const call = vi.mocked(writeAuditLog).mock.calls.at(-1);
+  if (!call) throw new Error("writeAuditLog was not called");
+  return call[0];
 }
 
 // 同一キー2バリアントの owner / building データ。
@@ -117,21 +129,16 @@ const BUILDING_VARIANTS = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getApiSession).mockResolvedValue({
-    id: "user-admin",
-    email: "a@a",
-    name: "A",
-    role: "admin",
-  } as any);
-  vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER as any);
-  vi.mocked(getOwnerDisplayConfig).mockResolvedValue(FULL_DISPLAY as any);
+  vi.mocked(getApiSession).mockResolvedValue(ADMIN_SESSION);
+  vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER);
+  vi.mocked(getOwnerDisplayConfig).mockResolvedValue(FULL_DISPLAY);
   pm.owner.findMany.mockResolvedValue([]);
   pm.building.findMany.mockResolvedValue([]);
 });
 
 describe("GET /api/admin/display-name-audit — 認可", () => {
   it("admin ガード（user_management:read）なしは 403・DB を叩かない", async () => {
-    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NON_ADMIN as any);
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NON_ADMIN);
 
     const res = await GET(makeRequest());
     expect(res.status).toBe(403);
@@ -141,7 +148,7 @@ describe("GET /api/admin/display-name-audit — 認可", () => {
   });
 
   it("admin だが owner:read 無し → owner 群は空・building 群は返る", async () => {
-    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_NO_OWNER as any);
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_NO_OWNER);
     pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
@@ -158,7 +165,7 @@ describe("GET /api/admin/display-name-audit — 認可", () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
       ...FULL_DISPLAY,
       name: "masked",
-    } as any);
+    });
     pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
@@ -169,14 +176,15 @@ describe("GET /api/admin/display-name-audit — 認可", () => {
   });
 
   it("name 表示レベルが read / edit でも owner 群は返る（生値レベル）", async () => {
-    for (const level of ["read", "edit", "full"]) {
+    const rawLevels: OwnerDisplayConfig["name"][] = ["read", "edit", "full"];
+    for (const level of rawLevels) {
       vi.clearAllMocks();
-      vi.mocked(getApiSession).mockResolvedValue({ id: "u", role: "admin" } as any);
-      vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER as any);
+      vi.mocked(getApiSession).mockResolvedValue(ADMIN_SESSION);
+      vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER);
       vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
         ...FULL_DISPLAY,
         name: level,
-      } as any);
+      });
       pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
       pm.building.findMany.mockResolvedValue([]);
 
@@ -321,7 +329,7 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
       ...FULL_DISPLAY,
       name: "masked",
-    } as any);
+    });
     pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
@@ -350,7 +358,7 @@ describe("GET /api/admin/display-name-audit — 監査ログ", () => {
   });
 
   it("403（認可不足）時は監査ログを書かない", async () => {
-    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NON_ADMIN as any);
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NON_ADMIN);
     await GET(makeRequest());
     expect(writeAuditLog).not.toHaveBeenCalled();
   });

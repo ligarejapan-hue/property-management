@@ -126,7 +126,7 @@ describe("buildDisplayNameAuditGroups", () => {
     ];
     // 「あ」「い」「う」は normalizeName 後も別バリアント。これらを同一キーに揃えるため
     // 正規化を「定数キー」に固定するスタブで群化させる。
-    const constKey = (_: string) => "K";
+    const constKey = () => "K";
     const { groups } = buildDisplayNameAuditGroups(records, constKey);
     expect(groups).toHaveLength(1);
     // 件数降順: い(2) が先頭。同数の あ(1)/う(1) は name 昇順（あ < う）。

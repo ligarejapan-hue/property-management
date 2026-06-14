@@ -19,6 +19,7 @@ import {
   KeyRound,
   UserCog,
   Map as MapIcon,
+  ScanSearch,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -100,6 +101,11 @@ const adminNavItems: NavItem[] = [
     label: "所有者補正候補",
     href: "/admin/owners/correction",
     icon: <UserCog className="h-5 w-5" />,
+  },
+  {
+    label: "表示名監査",
+    href: "/admin/display-name-audit",
+    icon: <ScanSearch className="h-5 w-5" />,
   },
 ];
 
