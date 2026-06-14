@@ -341,6 +341,44 @@ describe("GET /api/admin/display-name-audit — スキャン上限（DQ-01 と�
     expect(buildingCall.take).toBe(MAX_SCAN + 1);
   });
 
+  // ---- Codex 追加 P2: scan cap には決定的 orderBy を併せて指定する ----
+  // take（行上限）だけでは DB が任意順で返すため、超過時に cap される
+  // サブセットが実行ごとに変わる（非決定的）。安定一意キー id 昇順で固定する。
+
+  it("owner findMany は決定的 orderBy（id 昇順）で取得する", async () => {
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue([]);
+
+    await GET(makeRequest("?entity=owner"));
+
+    const ownerCall = pm.owner.findMany.mock.calls[0][0];
+    expect(ownerCall.orderBy).toEqual({ id: "asc" });
+  });
+
+  it("building findMany も決定的 orderBy（id 昇順）で取得する", async () => {
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    await GET(makeRequest("?entity=building"));
+
+    const buildingCall = pm.building.findMany.mock.calls[0][0];
+    expect(buildingCall.orderBy).toEqual({ id: "asc" });
+  });
+
+  it("同一入力で owner findMany 引数（take + orderBy）が毎回同一＝決定的サブセット", async () => {
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue([]);
+
+    await GET(makeRequest("?entity=owner"));
+    await GET(makeRequest("?entity=owner"));
+
+    const first = pm.owner.findMany.mock.calls[0][0];
+    const second = pm.owner.findMany.mock.calls[1][0];
+    // 行上限 + 安定順の両方が固定されていれば、cap されるサブセットは実行間で一致する。
+    expect(second.take).toBe(first.take);
+    expect(second.orderBy).toEqual(first.orderBy);
+    expect(first.orderBy).toEqual({ id: "asc" });
+  });
+
   it("owner scan が MAX_SCAN を超える（MAX_SCAN+1 件返る）と truncated:true・先頭 MAX_SCAN 件のみ集計", async () => {
     // DB が take 上限ぶん（MAX_SCAN+1）返した状況を模す。単一キー・全件 distinct。
     pm.owner.findMany.mockResolvedValue(makeOneKeyManyVariants(MAX_SCAN + 1));

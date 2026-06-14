@@ -177,6 +177,10 @@ export async function GET(request: NextRequest) {
         const owners = await prisma.owner.findMany({
           where: { isArchived: false },
           select: { id: true, name: true },
+          // 決定的順序。take（行上限）だけだと DB が任意順で返し、超過時に
+          // cap されるサブセットが実行ごとに変わる（非決定的）。安定一意キー
+          // id 昇順で固定し、同一データなら同一サブセットを集計する（Codex P2 是正）。
+          orderBy: { id: "asc" },
           take: MAX_SCAN + 1,
         });
         const { scanned, scanTruncated } = capScan(owners);
@@ -209,6 +213,8 @@ export async function GET(request: NextRequest) {
         const buildings = await prisma.building.findMany({
           where: {},
           select: { id: true, name: true },
+          // owner と同様、scan cap を決定的にするため id 昇順で固定する（Codex P2 是正）。
+          orderBy: { id: "asc" },
           take: MAX_SCAN + 1,
         });
         const { scanned, scanTruncated } = capScan(buildings);
