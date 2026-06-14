@@ -136,6 +136,17 @@ interface RegistryChromiumLike {
  * 本 PR は枠組み + プレースホルダ定数で集約し、live 投入時にキャリブレーションする（TODO(calibrate)）。
  * いずれも非PII・非secret。
  */
+/**
+ * 公式「登記情報提供サービス」の documented default base URL。
+ *
+ * REGISTRY_FETCH_BASE_URL を省略した場合（.env.example に「省略時は provider 既定を使う」と
+ * 明記）に login の goto がここを前置する。これが無いと相対 "/login" へ遷移して即 auth_failed に
+ * なる（CodexP2: relative URL bug）。env example の記述と実装をこの定数で一致させる。
+ * 非PII・非secret（公開された公式サービスの URL）。実サイトの最終パス/サブドメインは
+ * live キャリブレーション時に REGISTRY_FETCH_BASE_URL で上書きできる（既定は安全側の表玄関）。
+ */
+export const DEFAULT_REGISTRY_BASE_URL = "https://www1.touki.or.jp";
+
 const REGISTRY_SELECTORS = {
   loginPath: "/login",
   loginId: "#login-id", // TODO(calibrate): 実サイトの入力欄に合わせる
@@ -170,7 +181,8 @@ function createPlaywrightRegistryPage(handles: {
   return {
     async login(input) {
       try {
-        const base = input.baseUrl ?? "";
+        // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
+        const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
         await page.goto(`${base}${REGISTRY_SELECTORS.loginPath}`);
         await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
         await page.fill(REGISTRY_SELECTORS.password, input.password);
@@ -183,9 +195,20 @@ function createPlaywrightRegistryPage(handles: {
       }
     },
     async searchByRealEstateNumber(realEstateNumber) {
+      // CodexP2: timeout を「無結果待ち（not_found）」と「セットアップ失敗（provider_error）」で
+      // 弁別する。fill/click はフォーム入力・送信のセットアップ段で、ここでの TimeoutError は
+      // セレクタ校正ズレ/ページ未準備（= 連携不備）を意味するため not_found ではなく
+      // provider_error（リトライ/監視を誤誘導しない）。結果要素の waitForSelector の timeout
+      // だけが「謄本ヒット無し（not_found 近似）」を意味する。
       try {
         await page.fill(REGISTRY_SELECTORS.searchInput, realEstateNumber);
         await page.click(REGISTRY_SELECTORS.searchSubmit);
+      } catch {
+        // セットアップ（fill/click）由来の失敗は timeout 含め provider_error 扱い。
+        // 生メッセージ（selector/入力が混入しうる）は載せない。
+        throw new RegistryFetchError("provider_error");
+      }
+      try {
         await page.waitForSelector(REGISTRY_SELECTORS.searchResult);
         return { found: true };
       } catch (err) {

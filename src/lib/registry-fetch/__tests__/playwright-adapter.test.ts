@@ -25,14 +25,29 @@ vi.mock("@/lib/api-helpers", () => {
   return { ApiError: MockApiError };
 });
 
-import { resolveDefaultRegistryBrowserFactory } from "../auto-fetch";
+import {
+  resolveDefaultRegistryBrowserFactory,
+  DEFAULT_REGISTRY_BASE_URL,
+} from "../auto-fetch";
+import { RegistryFetchError } from "../errors";
+
+/** name=="TimeoutError" の擬似エラー（Playwright TimeoutError 相当）。 */
+function makeTimeoutError(): Error {
+  const e = new Error("timeout exceeded");
+  e.name = "TimeoutError";
+  return e;
+}
 
 function makeFakeChromium() {
   const page = {
     setDefaultTimeout: vi.fn(),
-    goto: vi.fn(async () => undefined),
-    fill: vi.fn(async () => undefined),
-    click: vi.fn(async () => undefined),
+    goto: vi.fn<(url: string) => Promise<undefined>>(async () => undefined),
+    fill: vi.fn<(selector: string, value: string) => Promise<undefined>>(
+      async () => undefined,
+    ),
+    click: vi.fn<(selector: string) => Promise<undefined>>(
+      async () => undefined,
+    ),
     waitForSelector: vi.fn(async () => ({})),
     waitForEvent: vi.fn(async () => ({
       createReadStream: async () => Readable.from([Buffer.from("%PDF-1.4 dl")]),
@@ -174,5 +189,103 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await page.close();
     expect(f.context.close).toHaveBeenCalledTimes(1);
     expect(f.browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  // CodexP2-1: baseUrl 省略時は documented default を使い、相対 URL へ遷移しない。
+  it("C8: login で baseUrl 省略時は DEFAULT_REGISTRY_BASE_URL を前置した絶対 URL へ goto する", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "the-id", password: "the-pw" }); // baseUrl 省略
+    expect(f.page.goto).toHaveBeenCalledTimes(1);
+    const gotoUrl = f.page.goto.mock.calls[0][0];
+    // 既定 base が前置された絶対 URL（相対 "/login" のままにしない）。
+    expect(gotoUrl.startsWith(DEFAULT_REGISTRY_BASE_URL)).toBe(true);
+    expect(/^https?:\/\//.test(gotoUrl)).toBe(true);
+    expect(gotoUrl).not.toBe("/login");
+  });
+
+  it("C8b: DEFAULT_REGISTRY_BASE_URL は https の絶対 URL（末尾スラッシュ無し）", () => {
+    expect(/^https:\/\//.test(DEFAULT_REGISTRY_BASE_URL)).toBe(true);
+    expect(DEFAULT_REGISTRY_BASE_URL.endsWith("/")).toBe(false);
+  });
+
+  it("C8c: login で baseUrl 明示時はそれを優先（既定で上書きしない）", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({
+      loginId: "the-id",
+      password: "the-pw",
+      baseUrl: "https://reg.test",
+    });
+    const gotoUrl = f.page.goto.mock.calls[0][0];
+    expect(gotoUrl.startsWith("https://reg.test")).toBe(true);
+  });
+
+  // CodexP2-2: search のセットアップ(fill/click)由来 timeout は not_found ではなく provider_error。
+  it("C9: searchByRealEstateNumber の結果待ち(waitForSelector)の timeout は found:false（not_found 維持）", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async () => {
+      throw makeTimeoutError();
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    const outcome = await page.searchByRealEstateNumber("1234567890123");
+    expect(outcome.found).toBe(false);
+  });
+
+  it("C9b: search の fill が timeout を投げたら provider_error（not_found にしない）", async () => {
+    const f = makeFakeChromium();
+    f.page.fill = vi.fn(async () => {
+      throw makeTimeoutError();
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.searchByRealEstateNumber("1234567890123"),
+    ).rejects.toMatchObject({
+      // RegistryFetchError("provider_error")（found:false で返さない）。
+      code: "provider_error",
+    });
+  });
+
+  it("C9c: search の click が timeout を投げたら provider_error（not_found にしない）", async () => {
+    const f = makeFakeChromium();
+    f.page.click = vi.fn(async () => {
+      throw makeTimeoutError();
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.searchByRealEstateNumber("1234567890123"),
+    ).rejects.toBeInstanceOf(RegistryFetchError);
+    await expect(
+      page.searchByRealEstateNumber("1234567890123"),
+    ).rejects.toMatchObject({ code: "provider_error" });
+  });
+
+  it("C9d: search の waitForSelector が非 timeout の例外なら provider_error", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.searchByRealEstateNumber("1234567890123"),
+    ).rejects.toMatchObject({ code: "provider_error" });
   });
 });
