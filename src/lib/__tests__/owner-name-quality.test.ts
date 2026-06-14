@@ -314,3 +314,72 @@ describe("summary helper", () => {
     expect(s.totalCandidates).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// DQ-01 P1: フィールド可視性ゲート（不可視フィールドの生値を分類しない）
+// ---------------------------------------------------------------------------
+describe("classifyOwnerNameQuality — 可視性ゲート（P1）", () => {
+  it("name 不可視なら name 由来 issue を一切出さない（numeric_only も出ない）", () => {
+    const r = classifyOwnerNameQuality({ name: "44225" }, { name: false });
+    expect(r.issues).toEqual([]);
+    expect(r.kanaIssues).toEqual([]);
+    expect(r.severity).toBeNull();
+  });
+
+  it("name 不可視なら name 由来 control_chars も出さない", () => {
+    const r = classifyOwnerNameQuality(
+      { name: NAME_WITH_CONTROL },
+      { name: false },
+    );
+    expect(r.issues).not.toContain("control_chars");
+    expect(r.issues).toEqual([]);
+  });
+
+  it("nameKana 不可視なら kana_non_kana を出さない", () => {
+    const r = classifyOwnerNameQuality(
+      { name: "山田太郎", nameKana: "やまだABC" },
+      { nameKana: false },
+    );
+    expect(r.kanaIssues).toEqual([]);
+  });
+
+  it("nameKana 不可視なら nameKana 由来 control_chars を出さない（name 可視で他 issue 無し）", () => {
+    const r = classifyOwnerNameQuality(
+      { name: "山田太郎", nameKana: "ヤマ" + SOH + "ダ" },
+      { name: true, nameKana: false },
+    );
+    expect(r.issues).toEqual([]);
+    expect(r.kanaIssues).toEqual([]);
+  });
+
+  it("name 不可視・nameKana 可視なら kana 由来 control_chars は出す（発生源ごとゲート）", () => {
+    const r = classifyOwnerNameQuality(
+      { name: "44225", nameKana: "ヤマ" + SOH + "ダ" },
+      { name: false, nameKana: true },
+    );
+    // name 由来（numeric_only / name の control_chars）は出ない
+    expect(r.issues).not.toContain("numeric_only");
+    // kana 由来 control_chars は出る
+    expect(r.issues).toContain("control_chars");
+  });
+
+  it("両方不可視なら issue/kanaIssue とも空", () => {
+    const r = classifyOwnerNameQuality(
+      { name: "44225", nameKana: "やまだABC" },
+      { name: false, nameKana: false },
+    );
+    expect(r.issues).toEqual([]);
+    expect(r.kanaIssues).toEqual([]);
+    expect(r.severity).toBeNull();
+  });
+
+  it("可視（省略時 true）は従来通り検出する（後方互換）", () => {
+    const r = classifyOwnerNameQuality({ name: "44225" });
+    expect(r.issues).toContain("numeric_only");
+    const r2 = classifyOwnerNameQuality(
+      { name: "44225" },
+      { name: true, nameKana: true },
+    );
+    expect(r2.issues).toContain("numeric_only");
+  });
+});

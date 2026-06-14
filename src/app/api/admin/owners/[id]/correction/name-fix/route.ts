@@ -45,8 +45,12 @@ import {
 //   dryRun=true（氏名不可視）: 200 { executed:false, blockReasons[], mode, nameVisible:false }
 //       └ 氏名生値の値当てオラクル防止（P1）: owner_name の field-level 可視性が
 //         full/edit/read 未満（masked/partial/hidden）のユーザーには、隠れた現在値に
-//         依存する判定（no_change= set値==現在値, eligible=一致/不一致の確定）を出さない。
-//         入力値だけで決まる判定（forbidden_value / name_would_be_empty）は出してよい。
+//         依存する判定を出さない。
+//         - set: no_change（set値==現在値）と eligible（一致/不一致の確定）を伏せる。
+//           入力値だけで決まる判定（forbidden_value / name_would_be_empty）は出してよい。
+//         - sanitize: 判定材料が隠し現在値そのもの。現在値由来 reason
+//           （no_safe_autofix / name_would_be_empty / forbidden_value / no_change）と
+//           eligible を全て伏せる（version_mismatch / owner_archived は保持）。
 //   dryRun=false: 200 { executed:true, id, version(new), updatedFields:["name"] }
 //   400 入力不正 / 403 権限不足 / 404 不存在 / 409 version_mismatch / 422 その他
 //
@@ -69,14 +73,34 @@ function canSeeOwnerName(perms: Parameters<typeof getOwnerFieldLevel>[0]): boole
   return level === "full" || level === "edit" || level === "read";
 }
 
+// set mode: 入力値（newName）だけで決まる reason は現在値の生値を漏らさないため
+// 保持してよい。隠し現在値に依存する no_change（set値 == 現在値）のみ落とす。
+const SET_MODE_HIDDEN_NAME_ORACLE = new Set<string>(["no_change"]);
+
+// sanitize mode: 補正対象・判定材料が隠し現在値そのもの。reason は現在値の性質を
+// 漏らす（no_safe_autofix=数値/記号ゴミ, name_would_be_empty=制御文字のみ等,
+// no_change=既に整形済み, forbidden_value=sanitize 後も DQ）。現在値由来の reason を
+// 全て落とす。version_mismatch / owner_archived は現在値の氏名生値を漏らさないため保持。
+const SANITIZE_MODE_HIDDEN_NAME_ORACLE = new Set<string>([
+  "no_change",
+  "no_safe_autofix",
+  "name_would_be_empty",
+  "forbidden_value",
+]);
+
 /**
- * 隠し現在値に依存する判定（同値オラクル）を blockReasons から除去する。
- * - no_change は「set値 == 現在値」を直接漏らすため必ず落とす。
- * 入力値だけで決まる forbidden_value / name_would_be_empty / version_mismatch /
- * owner_archived は現在値の生値を漏らさないため保持する。
+ * 氏名不可視ユーザーの dry-run preview から、隠し現在値に依存する判定（同値/性質
+ * オラクル）を blockReasons から除去する（P1）。mode により対象が異なる:
+ * - set: newName は入力値ゆえ大半の reason は安全。no_change のみ落とす。
+ * - sanitize: 判定材料が隠し現在値そのもの。現在値由来の reason を全て落とす。
+ * version_mismatch / owner_archived は現在値の氏名生値を漏らさないため保持する。
  */
-function stripHiddenNameOracle(reasons: string[]): string[] {
-  return reasons.filter((r) => r !== "no_change");
+function stripHiddenNameOracle(reasons: string[], mode: "sanitize" | "set"): string[] {
+  const oracle =
+    mode === "sanitize"
+      ? SANITIZE_MODE_HIDDEN_NAME_ORACLE
+      : SET_MODE_HIDDEN_NAME_ORACLE;
+  return reasons.filter((r) => !oracle.has(r));
 }
 
 export async function POST(
@@ -168,11 +192,15 @@ export async function POST(
     // ── dryRun: DB / AuditLog を一切書かない ────────────────────────────────
     if (dryRun) {
       if (!nameVisible) {
-        // 氏名不可視ユーザーには隠し現在値依存の判定（no_change / eligible）を出さない（P1）。
-        // 入力値だけで決まる reason（forbidden_value 等）は伏せずに返す。
+        // 氏名不可視ユーザーには隠し現在値依存の判定（同値/性質オラクル）を出さない（P1）。
+        // - set: eligible（一致/不一致の確定）と no_change を伏せ、入力値由来 reason
+        //   （forbidden_value 等）は返す。
+        // - sanitize: 判定材料が隠し現在値そのもの。eligible と現在値由来 reason
+        //   （no_safe_autofix / name_would_be_empty / forbidden_value / no_change）を
+        //   全て伏せる（version_mismatch / owner_archived は氏名生値を漏らさず保持）。
         return apiResponse({
           executed: false,
-          blockReasons: stripHiddenNameOracle(blockReasons),
+          blockReasons: stripHiddenNameOracle(blockReasons, mode),
           mode,
           nameVisible: false,
         });

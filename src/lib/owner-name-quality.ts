@@ -39,6 +39,25 @@ export interface OwnerNameQualityResult {
   severity: OwnerNameSeverity | null;
 }
 
+/**
+ * フィールド可視性ゲート（DQ-01 P1）。
+ * 呼び出し側（route）で各 PII フィールドの生値が可視か（display-level が
+ * full/edit/read）を渡す。`false` のフィールドは分類自体をスキップし、issue・
+ * kanaIssue・severity・summary に一切寄与させない。これにより、生値を見られない
+ * ユーザーが issue コード（numeric_only / symbol_only / control_chars /
+ * kana_non_kana 等）から隠し値の品質・性質を推測するオラクルを塞ぐ
+ * （DQ-02 owner-contact-format の classifyOwnerContact 可視性ゲートと同方針）。
+ * 省略時は両方 true（純関数テスト・後方互換）。
+ *
+ * 注意: control_chars は name / nameKana の双方が発生源になり得るため、
+ * 各フィールドの可視性で発生源ごとに個別ゲートする（不可視フィールド由来の
+ * control_chars は出さない）。
+ */
+export interface OwnerNameQualityVisibility {
+  name?: boolean;
+  nameKana?: boolean;
+}
+
 /** 氏名の既定の最大長（コードポイント数）。 */
 export const OWNER_NAME_MAX_LEN = 60;
 /** 法人レコードでの最大長（正式名称は長い）。 */
@@ -103,51 +122,65 @@ function isCorporateLike(
 /**
  * 氏名（と任意で nameKana）の品質を分類する。問題がなければ issues/kanaIssues は空。
  * 戻り値はコードのみで氏名生値を含まない。
+ *
+ * `visibility` で不可視指定されたフィールドは分類しない（DQ-01 P1 オラクル防止）。
+ * - name 不可視: name 由来の issue（numeric_only/symbol_only/whitespace_only/
+ *   control_chars/too_long/too_short/mostly_digits）を一切出さない。
+ * - nameKana 不可視: kana_non_kana および nameKana 由来の control_chars を出さない。
  */
 export function classifyOwnerNameQuality(
   input: OwnerNameQualityInput,
+  visibility?: OwnerNameQualityVisibility,
 ): OwnerNameQualityResult {
-  const raw = input.name ?? "";
-  const norm = raw.normalize("NFKC");
-  const t = norm.trim();
+  const nameVisible = visibility?.name ?? true;
+  const kanaVisible = visibility?.nameKana ?? true;
+
   const issues: OwnerNameIssueCode[] = [];
 
-  // 制御文字 / 文字化けは raw 全体で判定（NFKC/trim では除去されないため raw で十分）。
-  if (CONTROL_RE.test(raw)) issues.push("control_chars");
+  if (nameVisible) {
+    const raw = input.name ?? "";
+    const norm = raw.normalize("NFKC");
+    const t = norm.trim();
 
-  if (t.length === 0) {
-    issues.push("whitespace_only");
-  } else {
-    const hasLetter = LETTER_RE.test(t);
-    const hasDigit = DIGIT_RE.test(t);
+    // 制御文字 / 文字化けは raw 全体で判定（NFKC/trim では除去されないため raw で十分）。
+    if (CONTROL_RE.test(raw)) issues.push("control_chars");
 
-    if (!hasLetter && hasDigit) {
-      issues.push("numeric_only");
-    } else if (!hasLetter && !hasDigit) {
-      issues.push("symbol_only");
-    }
+    if (t.length === 0) {
+      issues.push("whitespace_only");
+    } else {
+      const hasLetter = LETTER_RE.test(t);
+      const hasDigit = DIGIT_RE.test(t);
 
-    const codePoints = Array.from(t);
-    const maxLen = isCorporateLike(input, t)
-      ? OWNER_NAME_CORP_MAX_LEN
-      : OWNER_NAME_MAX_LEN;
-    if (codePoints.length > maxLen) issues.push("too_long");
-    if (hasLetter && codePoints.length === 1) issues.push("too_short");
+      if (!hasLetter && hasDigit) {
+        issues.push("numeric_only");
+      } else if (!hasLetter && !hasDigit) {
+        issues.push("symbol_only");
+      }
 
-    if (hasLetter && hasDigit) {
-      const digitCount = codePoints.filter((c) => DIGIT_RE.test(c)).length;
-      if (digitCount / codePoints.length >= OWNER_NAME_MOSTLY_DIGITS_RATIO) {
-        issues.push("mostly_digits");
+      const codePoints = Array.from(t);
+      const maxLen = isCorporateLike(input, t)
+        ? OWNER_NAME_CORP_MAX_LEN
+        : OWNER_NAME_MAX_LEN;
+      if (codePoints.length > maxLen) issues.push("too_long");
+      if (hasLetter && codePoints.length === 1) issues.push("too_short");
+
+      if (hasLetter && hasDigit) {
+        const digitCount = codePoints.filter((c) => DIGIT_RE.test(c)).length;
+        if (digitCount / codePoints.length >= OWNER_NAME_MOSTLY_DIGITS_RATIO) {
+          issues.push("mostly_digits");
+        }
       }
     }
   }
 
   const kanaIssues: OwnerNameKanaIssueCode[] = [];
   const kanaRaw = input.nameKana;
-  if (kanaRaw != null) {
+  if (kanaVisible && kanaRaw != null) {
     // 制御文字 / 制御空白(タブ/改行)/ U+FFFD は name と同様 raw 全体で判定する。
     // NON_KANA_RE は \s を使わないため allowlist では拾えない制御空白をここで検出し、
     // control_chars として name の制御文字検出と整合させる(Codex P2)。
+    // name が不可視で control_chars 未追加でも、kana 可視ならここで kana 由来の
+    // control_chars を立てる（発生源ごとの可視性ゲート）。
     if (!issues.includes("control_chars") && CONTROL_RE.test(kanaRaw)) {
       issues.push("control_chars");
     }

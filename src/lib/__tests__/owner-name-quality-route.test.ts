@@ -236,7 +236,24 @@ describe("blockReasons / recommendedAction", () => {
 });
 
 describe("PII マスキング", () => {
-  it("name は display-level に従ってマスクされる", async () => {
+  it("nameKana は display-level に従ってマスクされる（name 可視で行がマッチ）", async () => {
+    // name は可視（full）で numeric_only マッチ → 行が出る。nameKana は masked。
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      nameKana: "masked",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: "44225", nameKana: "ヤマダタロウ" }),
+    ]);
+    const res = await GET(url("?type=numeric_only"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].nameKanaMasked).not.toBe("ヤマダタロウ");
+  });
+
+  it("name が masked のとき name 由来候補は出ない（P1 でマスク漏洩経路を遮断）", async () => {
+    // 以前は masked でも候補を出し maskValue でマスクしていたが、P1 で
+    // 不可視フィールドは分類自体をスキップする（候補に出さない）方針へ変更。
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
       ...DISPLAY_FULL,
       name: "masked",
@@ -246,7 +263,95 @@ describe("PII マスキング", () => {
     ]);
     const res = await GET(url("?type=mostly_digits"));
     const json = await res.json();
-    expect(json.candidates[0].ownerNameMasked).not.toBe("山123456");
+    expect(json.candidates).toHaveLength(0);
+  });
+});
+
+describe("可視性ゲート（P1: 不可視フィールドを分類しない）", () => {
+  it("name が masked のユーザーには name 由来の候補/issue/summary を出さない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      name: "masked",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: "44225" }), // numeric_only（name 由来）
+      owner({ id: "o-2", name: "---" }), // symbol_only（name 由来）
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    // name 不可視 → name 由来 issue は分類されず候補ゼロ
+    expect(json.candidates).toHaveLength(0);
+    expect(json.summary.numericOnly).toBe(0);
+    expect(json.summary.symbolOnly).toBe(0);
+    expect(json.summary.totalCandidates).toBe(0);
+  });
+
+  it("name が hidden でも type= を変えて隠し PII を推測できない（全 type で件数 0）", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+      ...DISPLAY_FULL,
+      name: "hidden",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: "44225" }),
+      owner({ id: "o-2", name: "山" + String.fromCharCode(1) + "田" }),
+    ]);
+    for (const t of ["numeric_only", "symbol_only", "control_chars", "all"]) {
+      const res = await GET(url(`?type=${t}`));
+      const json = await res.json();
+      expect(json.candidates).toHaveLength(0);
+    }
+  });
+
+  it("name 不可視・nameKana 可視なら kana 由来候補のみ出る（name 由来は出ない）", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      name: "masked",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      // numeric_only(name 由来) は出ない / kana_non_kana(kana 由来) は出る
+      owner({ id: "o-1", name: "44225", nameKana: "やまだABC" }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { createdId: "o-1", status: "success" },
+    ]);
+    const res = await GET(url("?type=kana_non_kana"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].kanaIssues).toContain("kana_non_kana");
+    expect(json.candidates[0].issues).not.toContain("numeric_only");
+  });
+
+  it("name 不可視・kana のみマッチの行は sanitize_candidate を出さない（review）", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      name: "masked",
+    });
+    // name 自体は制御文字混入（=本来 sanitize 可能）だが name 不可視。
+    const controlName = "山田" + String.fromCharCode(1) + "太郎";
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: controlName, nameKana: "やまだABC" }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { createdId: "o-1", status: "success" },
+    ]);
+    const res = await GET(url("?type=kana_non_kana"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    // 隠し name の自動補正可否を漏らさない
+    expect(json.candidates[0].recommendedAction).not.toBe("sanitize_candidate");
+    expect(json.candidates[0].recommendedAction).toBe("review");
+  });
+
+  it("partial レベルも生値非可視として分類しない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      name: "partial",
+    });
+    pm.owner.findMany.mockResolvedValue([owner({ id: "o-1", name: "44225" })]);
+    const res = await GET(url());
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(0);
+    expect(json.summary.numericOnly).toBe(0);
   });
 });
 

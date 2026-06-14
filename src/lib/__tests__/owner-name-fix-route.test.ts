@@ -251,6 +251,80 @@ describe("氏名不可視ユーザーの dry-run は同値オラクルを出さ�
   });
 });
 
+describe("氏名不可視ユーザーの sanitize dry-run は現在値由来理由を漏らさない（P1）", () => {
+  it("sanitize + 数値ゴミ現在値でも no_safe_autofix を漏らさない（eligible も出さない）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_MASKED);
+    mockOwner({ name: "44225", version: 1 }); // 数値ゴミ → 本来 no_safe_autofix
+    const res = await POST(req({ version: 1, mode: "sanitize" }), params);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.executed).toBe(false);
+    expect(json.blockReasons).not.toContain("no_safe_autofix");
+    expect(json).not.toHaveProperty("eligible");
+    expect(json.nameVisible).toBe(false);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("sanitize + 制御文字のみ現在値でも name_would_be_empty を漏らさない", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_MASKED);
+    // 制御文字のみ（除去すると空）→ 本来 name_would_be_empty
+    mockOwner({ name: SOH + SOH, version: 1 });
+    const res = await POST(req({ version: 1, mode: "sanitize" }), params);
+    const json = await res.json();
+    expect(json.blockReasons).not.toContain("name_would_be_empty");
+    expect(json.blockReasons).not.toContain("no_safe_autofix");
+    expect(json).not.toHaveProperty("eligible");
+    expect(json.nameVisible).toBe(false);
+  });
+
+  it("sanitize + 既に整形済み現在値でも no_change を漏らさない", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_MASKED);
+    mockOwner({ name: "山田太郎", version: 1 }); // sanitize で無変更 → 本来 no_change
+    const res = await POST(req({ version: 1, mode: "sanitize" }), params);
+    const json = await res.json();
+    expect(json.blockReasons).not.toContain("no_change");
+    expect(json).not.toHaveProperty("eligible");
+  });
+
+  it("sanitize + 救える現在値（制御文字混入）でも eligible/空リストで確定情報を漏らさない", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_MASKED);
+    // 制御文字混入だが文字も残る → 本来 eligible=true / blockReasons=[]
+    mockOwner({ name: "Yamada" + SOH + "Taro", version: 1 });
+    const res = await POST(req({ version: 1, mode: "sanitize" }), params);
+    const json = await res.json();
+    // eligible を出さない（救える＝隠し値が制御文字混入だと推測されてしまう）
+    expect(json).not.toHaveProperty("eligible");
+    expect(json.blockReasons).toEqual([]);
+    expect(json.nameVisible).toBe(false);
+  });
+
+  it("sanitize + version 不一致は version_mismatch を保持する（氏名生値を漏らさない）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_MASKED);
+    mockOwner({ name: "Yamada" + SOH + "Taro", version: 3 });
+    const res = await POST(req({ version: 1, mode: "sanitize" }), params);
+    const json = await res.json();
+    expect(json.blockReasons).toContain("version_mismatch");
+    expect(json).not.toHaveProperty("eligible");
+  });
+
+  it("可視ユーザーの sanitize は従来通り no_safe_autofix / eligible を返す（過剰抑止なし）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_VISIBLE);
+    mockOwner({ name: "44225", version: 1 });
+    const res = await POST(req({ version: 1, mode: "sanitize" }), params);
+    const json = await res.json();
+    expect(json.blockReasons).toContain("no_safe_autofix");
+    expect(json.eligible).toBe(false);
+    expect(json.nameVisible).toBe(true);
+
+    // 救えるケースは eligible=true（従来通り）
+    mockOwner({ name: "Yamada" + SOH + "Taro", version: 1 });
+    const res2 = await POST(req({ version: 1, mode: "sanitize" }), params);
+    const json2 = await res2.json();
+    expect(json2.eligible).toBe(true);
+    expect(json2.blockReasons).toEqual([]);
+  });
+});
+
 describe("入力検証", () => {
   it("version 不正で 400", async () => {
     expect((await POST(req({ mode: "sanitize" }), params)).status).toBe(400);

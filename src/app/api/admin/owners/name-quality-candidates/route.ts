@@ -93,6 +93,20 @@ function parseLimit(input: string | null): number {
   return Math.min(Math.floor(n), MAX_LIMIT);
 }
 
+/**
+ * display-level がそのフィールドの「生値」を見せるレベルか。
+ * full / edit / read のみ生値可視。partial / masked / hidden は生値非可視。
+ * maskValue の挙動（read 以上は生値、それ未満はマスク/null）と一致させる。
+ *
+ * DQ-01 P1: 生値非可視のフィールド（owner_name / owner_name_kana）は
+ * classifyOwnerNameQuality をスキップ（= 分類させない）し、issue コード・summary を
+ * 一切出さない。これにより、生値を見られないユーザーが issue コードや type= の
+ * 件数差分から隠し PII の品質・性質を推測するオラクルを塞ぐ（DQ-02 と同方針）。
+ */
+function isRawVisible(level: string): boolean {
+  return level === "full" || level === "edit" || level === "read";
+}
+
 function matchesFilter(
   result: { issues: OwnerNameIssueCode[]; kanaIssues: OwnerNameKanaIssueCode[] },
   filter: FilterType,
@@ -119,6 +133,10 @@ export async function GET(request: NextRequest) {
     }
 
     const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+    // DQ-01 P1: 各フィールドの生値が可視か（full/edit/read）。不可視のフィールドは
+    // classifyOwnerNameQuality をスキップし、issue/summary/分類由来情報を一切出さない。
+    const nameVisible = isRawVisible(displayConfig.name);
+    const nameKanaVisible = isRawVisible(displayConfig.nameKana);
 
     const { searchParams } = new URL(request.url);
     const type = parseType(searchParams.get("type"));
@@ -194,11 +212,14 @@ export async function GET(request: NextRequest) {
     const matchedRows: NameQualityRow[] = [];
 
     for (const owner of scanned) {
-      const result = classifyOwnerNameQuality({
-        name: owner.name,
-        nameKana: owner.nameKana,
-        corporateNumber: owner.corporateNumber,
-      });
+      const result = classifyOwnerNameQuality(
+        {
+          name: owner.name,
+          nameKana: owner.nameKana,
+          corporateNumber: owner.corporateNumber,
+        },
+        { name: nameVisible, nameKana: nameKanaVisible },
+      );
       tallyOwnerNameQuality(summary, result);
 
       if (!matchesFilter(result, type)) continue;
@@ -227,10 +248,16 @@ export async function GET(request: NextRequest) {
         ].includes(r),
       );
 
+      // DQ-01 P1: sanitize_candidate は name 由来の自動補正可否（隠し name の性質）を
+      // 漏らすため、name 不可視時は判定しない（review へ倒す）。name-fix 自体が
+      // owner_name field-level write を要求するため、不可視ユーザーには無意味でもある。
       let recommendedAction: RecommendedAction;
       if (hasSafeguard) {
         recommendedAction = "hold";
-      } else if (decideOwnerNameFix(owner.name).action === "sanitize") {
+      } else if (
+        nameVisible &&
+        decideOwnerNameFix(owner.name).action === "sanitize"
+      ) {
         recommendedAction = "sanitize_candidate";
       } else {
         recommendedAction = "review";
