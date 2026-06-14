@@ -37,7 +37,12 @@ export type PostalAuditIndeterminateReason =
   | "invalid_postal_code"
   | "address_empty"
   | "no_candidate"
-  | "lookup_unavailable";
+  | "lookup_unavailable"
+  /**
+   * 時間バジェット超過などで、この owner は照合まで到達しなかった（未処理）。
+   * silent に切り捨てず、未処理であることを明示するために行として返す（Codex P1）。
+   */
+  | "not_processed";
 
 /** 比較に渡す API 候補住所（address-lookup の AddressLookupCandidate の最小部分）。 */
 export interface PostalAuditCandidate {
@@ -118,8 +123,47 @@ export function comparePostalAddress(
 /**
  * 対象件数の安全上限。多数 owner 分の API 呼び出しになるため、これを超える場合は
  * silent に切り捨てず route 側で `truncated` を立てて明示する。
+ *
+ * 値の根拠（Codex P1: nginx proxy_read_timeout 60s 超過の防止）:
+ *   共有 token-bucket は 5 lookups/sec（最大バースト 5）。全 owner の ZIP が
+ *   ユニーク（キャッシュ無効）な最悪ケースでは、N 件の照合に約 N/5 秒かかる。
+ *   200 件なら最悪 ~40 秒で、下記の時間バジェット(45s)・nginx の 60s タイムアウトの
+ *   いずれにも収まる(serialize/audit/CSV 生成の余裕も確保)。実運用では同一 ZIP は
+ *   キャッシュで 1 回に集約されるため、さらに速い。これを超える対象は照合せず
+ *   route 側で `truncated` を立てて明示する（silent 切り捨てはしない）。
+ *   旧値 2000 は最悪 ~400 秒となり 60s プロキシタイムアウトを確実に超過していた。
  */
-export const POSTAL_AUDIT_MAX_TARGETS = 2000;
+export const POSTAL_AUDIT_MAX_TARGETS = 200;
+
+/**
+ * 1 リクエスト内で lookup ループに費やす経過時間の上限(ミリ秒)。
+ *
+ * 値の根拠（Codex P1）: nginx の proxy_read_timeout は 60s
+ *   (deploy/nginx/property-management.conf.example)。DB 取得・監査ログ書込・CSV
+ *   生成・レスポンス転送に十分な余裕(~15s)を残し、45s で lookup ループを打ち切る。
+ *   上流レイテンシやトークン待機で件数上限(200)以内でも 60s に迫る場合に効く二重の
+ *   ガード。バジェット超過時は残りの owner を silent に捨てず、`not_processed` の
+ *   行として返し、route は `timeBudgetExhausted=true`・`processed` 件数を明示する。
+ */
+export const POSTAL_AUDIT_TIME_BUDGET_MS = 45000;
+
+/** 時間バジェット超過で未処理になった owner の行を生成する純関数。 */
+export function buildNotProcessedRow(args: {
+  ownerId: string;
+  nameMasked: string | null;
+  zipMasked: string | null;
+  addressMasked: string | null;
+}): PostalAuditRow {
+  return {
+    ownerId: args.ownerId,
+    nameMasked: args.nameMasked,
+    zipMasked: args.zipMasked,
+    addressMasked: args.addressMasked,
+    apiAddressLine: null,
+    verdict: "indeterminate",
+    reason: "not_processed",
+  };
+}
 
 /** route が返す 1 owner 分の行（PII は route 側で maskValue 済みの値が入る）。 */
 export interface PostalAuditRow {
@@ -163,6 +207,7 @@ export const INDETERMINATE_REASON_LABELS: Record<PostalAuditIndeterminateReason,
   address_empty: "住所が空",
   no_candidate: "該当住所なし",
   lookup_unavailable: "API照合不可",
+  not_processed: "未処理（時間上限）",
 };
 
 /** PostalAuditRow を CSV 1 行（ヘッダ key → 値）に変換する純関数。 */

@@ -23,8 +23,10 @@ import {
 import {
   comparePostalAddress,
   buildPostalAuditCsvRow,
+  buildNotProcessedRow,
   POSTAL_AUDIT_CSV_HEADERS,
   POSTAL_AUDIT_MAX_TARGETS,
+  POSTAL_AUDIT_TIME_BUDGET_MS,
   type PostalAuditRow,
   type PostalAuditCandidate,
 } from "@/lib/postal-code-audit";
@@ -46,9 +48,14 @@ import { normalizeAddress } from "@/lib/address-lookup/normalize";
 //     取得済み候補住所（一般地名）と突き合わせるだけ（comparePostalAddress）。
 //   - 同一郵便番号は 1 回だけ lookup してキャッシュする（API 呼び出し削減 + egress 削減）。
 //
-// レート制御・件数上限:
+// レート制御・件数上限・時間バジェット（Codex P1: 60s プロキシタイムアウト対策）:
 //   - 対象 owner が多いと多数の API 呼び出しになるため token-bucket で throttle。
 //   - 対象は POSTAL_AUDIT_MAX_TARGETS 件で打ち切り、超過時は silent に切らず truncated を立てる。
+//   - さらに lookup ループ全体に POSTAL_AUDIT_TIME_BUDGET_MS(45s) の経過時間バジェットを設け、
+//     超過したら残りの owner を silent に捨てず `not_processed` 行として返し、
+//     `timeBudgetExhausted=true`・`processed`(照合済件数) を明示する。これにより 1 リクエストは
+//     nginx の proxy_read_timeout(60s) 内に確実に収まる（共有 limiter は 5 lookups/sec のため、
+//     上限 200 件 × 全ユニーク ZIP の最悪でも ~40s で、45s バジェット・60s タイムアウトに収まる）。
 
 // 1 秒あたり 5 リクエスト・バースト 5 の控えめなレート。外部 API への礼儀的 throttle。
 const LOOKUP_REFILL_PER_SEC = 5;
@@ -209,8 +216,35 @@ export async function GET(request: NextRequest) {
     }
 
     // 3. owner ごとに照合。
+    //    Codex P1: lookup ループに経過時間バジェット(POSTAL_AUDIT_TIME_BUDGET_MS=45s)を設ける。
+    //    共有 limiter が 5 lookups/sec のため、多数のユニーク ZIP を直列 await すると nginx の
+    //    proxy_read_timeout(60s) を超過し、レポート/CSV を一切返せず失敗する。バジェット超過時は
+    //    残りの owner を silent に捨てず `not_processed` 行として返し、`timeBudgetExhausted` を立てる。
+    //    開始時刻はループ直前に取る（DB 取得時間はバジェットに含めない＝照合に使える時間を最大化）。
+    const deadline = Date.now() + POSTAL_AUDIT_TIME_BUDGET_MS;
     const rows: PostalAuditRow[] = [];
-    for (const owner of targets) {
+    let timeBudgetExhausted = false;
+    let processed = 0;
+    for (let i = 0; i < targets.length; i += 1) {
+      const owner = targets[i];
+      // バジェット超過: ここからの owner は照合せず未処理として明示する（silent 切り捨て禁止）。
+      // 既に消費したトークンは無駄にしないため「次の lookup を始める前」に判定する。
+      if (Date.now() >= deadline) {
+        timeBudgetExhausted = true;
+        for (let j = i; j < targets.length; j += 1) {
+          const rest = targets[j];
+          rows.push(
+            buildNotProcessedRow({
+              ownerId: rest.id,
+              nameMasked: maskValue(rest.name, displayConfig.name),
+              zipMasked: maskValue(rest.zip, displayConfig.zip),
+              addressMasked: maskValue(rest.address, displayConfig.address),
+            }),
+          );
+        }
+        break;
+      }
+
       // Codex P2-①: 住所が空 / 空白のみの行は判定が自明（address_empty）であり、
       // ZIP を外部 API へ送る意味がない。lookup を呼ばず（PII egress / 無駄な外部呼び出しを
       // 避ける）、candidates=[] を渡して comparePostalAddress に address_empty を確定させる。
@@ -218,6 +252,7 @@ export async function GET(request: NextRequest) {
       const addressEmpty = !owner.address || normalizeAddress(owner.address) === "";
       const candidates = addressEmpty ? [] : await lookupCandidates(owner.zip ?? "");
       const cmp = comparePostalAddress(owner.zip, owner.address, candidates);
+      processed += 1;
       rows.push({
         ownerId: owner.id,
         nameMasked: maskValue(owner.name, displayConfig.name),
@@ -230,6 +265,7 @@ export async function GET(request: NextRequest) {
         reason: cmp.reason,
       });
     }
+    const notProcessed = rows.length - processed;
 
     const summary = {
       total: rows.length,
@@ -245,7 +281,11 @@ export async function GET(request: NextRequest) {
       detail: {
         apiConfigured,
         truncated,
+        timeBudgetExhausted,
+        processed,
+        notProcessed,
         maxTargets: POSTAL_AUDIT_MAX_TARGETS,
+        timeBudgetMs: POSTAL_AUDIT_TIME_BUDGET_MS,
         summary,
       },
     });
@@ -275,7 +315,12 @@ export async function GET(request: NextRequest) {
     return apiResponse({
       apiConfigured,
       truncated,
+      // Codex P1: 時間バジェット超過で未処理が出た場合に UI へ明示する（silent 切り捨て禁止）。
+      timeBudgetExhausted,
+      processed,
+      notProcessed,
       maxTargets: POSTAL_AUDIT_MAX_TARGETS,
+      timeBudgetMs: POSTAL_AUDIT_TIME_BUDGET_MS,
       summary,
       rows,
     });

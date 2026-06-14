@@ -370,6 +370,89 @@ describe("上限 truncation", () => {
   });
 });
 
+describe("時間バジェット（Codex P1: 60s プロキシタイムアウト対策）", () => {
+  it("件数上限はプロキシタイムアウト(60s)内に収まる安全値である", async () => {
+    const { POSTAL_AUDIT_MAX_TARGETS, POSTAL_AUDIT_TIME_BUDGET_MS } = await import(
+      "../postal-code-audit"
+    );
+    // 共有 limiter は 5 lookups/sec。上限件数を全ユニーク ZIP で照合した最悪所要時間が
+    // 時間バジェット(45s)・nginx の 60s タイムアウト双方に収まること。
+    const LOOKUP_PER_SEC = 5;
+    const worstCaseMs = (POSTAL_AUDIT_MAX_TARGETS / LOOKUP_PER_SEC) * 1000;
+    expect(worstCaseMs).toBeLessThanOrEqual(POSTAL_AUDIT_TIME_BUDGET_MS);
+    expect(POSTAL_AUDIT_TIME_BUDGET_MS).toBeLessThan(60_000);
+  });
+
+  it("時間バジェット超過で残りを未処理(not_processed)として明示し打ち切る（silent切り捨てしない）", async () => {
+    // limiter を「バースト分(5)だけ通し以降は枯渇」にして、6 件目以降の lookup で sleep(100ms)
+    // を強制し、fake timer を進めて経過時間をバジェット超過させる。多数ユニーク ZIP を直列 await
+    // しても、未処理の owner は捨てられず not_processed 行として返ること・timeBudgetExhausted が
+    // 立つこと・processed 件数が一致することを確認する。
+    let consumed = 0;
+    tryConsumeImpl.fn = () => {
+      // 最初の数件だけトークンを通し、それ以降は枯渇させる（= sleep が入り時間が進む）。
+      consumed += 1;
+      return consumed <= 5;
+    };
+
+    const owners = Array.from({ length: 50 }, (_, i) => ({
+      id: `o${i}`,
+      name: "n",
+      // 全件ユニーク ZIP（キャッシュで集約されない最悪ケース）。
+      zip: String(1000000 + i).padStart(7, "0"),
+      address: "東京都千代田区丸の内1-1",
+    }));
+    pm.owner.findMany.mockResolvedValue(owners);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+
+    vi.useFakeTimers();
+    try {
+      const p = GET(req());
+      await vi.runAllTimersAsync();
+      const res = await p;
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // 1 リクエストで全 50 owner が（処理済 or 未処理として）行に出る＝silent 切り捨て無し。
+      expect(body.rows.length).toBe(50);
+      // 時間バジェット超過フラグが立つ。
+      expect(body.timeBudgetExhausted).toBe(true);
+      // processed + notProcessed = 全件。
+      expect(body.processed + body.notProcessed).toBe(50);
+      // 未処理が 1 件以上ある（バジェットで打ち切られた）。
+      expect(body.notProcessed).toBeGreaterThan(0);
+      // 未処理行は indeterminate / not_processed として明示される。
+      const notProcessedRows = body.rows.filter(
+        (r: { reason: string | null }) => r.reason === "not_processed",
+      );
+      expect(notProcessedRows.length).toBe(body.notProcessed);
+      for (const r of notProcessedRows) {
+        expect(r.verdict).toBe("indeterminate");
+        expect(r.apiAddressLine).toBeNull();
+      }
+      // 実際の upstream lookup 呼び出しはトークンが取れた範囲に限られる（バジェット以降は呼ばない）。
+      expect(lookupMock.mock.calls.length).toBeLessThanOrEqual(body.processed);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("バジェット内に収まる小規模監査では未処理を出さず timeBudgetExhausted=false", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o1", name: "n", zip: "1000005", address: "東京都千代田区丸の内1-1" },
+      { id: "o2", name: "n", zip: "1000006", address: "東京都千代田区大手町1-1" },
+    ]);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.timeBudgetExhausted).toBe(false);
+    expect(body.notProcessed).toBe(0);
+    expect(body.processed).toBe(2);
+    expect(body.rows.every((r: { reason: string | null }) => r.reason !== "not_processed")).toBe(
+      true,
+    );
+  });
+});
+
 describe("CSV", () => {
   it("?format=csv で CSV を返す（BOM + ヘッダ + no-store）", async () => {
     pm.owner.findMany.mockResolvedValue([
