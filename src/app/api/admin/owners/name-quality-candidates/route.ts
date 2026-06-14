@@ -137,6 +137,10 @@ export async function GET(request: NextRequest) {
     // classifyOwnerNameQuality をスキップし、issue/summary/分類由来情報を一切出さない。
     const nameVisible = isRawVisible(displayConfig.name);
     const nameKanaVisible = isRawVisible(displayConfig.nameKana);
+    // DQ-01 P2: 法人番号（owner_corporate_number）の生値が可視か。不可視なら
+    // corporateNumber を classifyOwnerNameQuality に渡さず、too_long 緩和（60→100）の
+    // 根拠にも使わない（隠し法人番号の有無を too_long 出現差で漏らさない）。
+    const corporateNumberVisible = isRawVisible(displayConfig.corporateNumber);
 
     const { searchParams } = new URL(request.url);
     const type = parseType(searchParams.get("type"));
@@ -216,9 +220,15 @@ export async function GET(request: NextRequest) {
         {
           name: owner.name,
           nameKana: owner.nameKana,
+          // corporateNumber は不可視時は緩和に効かせない（visibility ゲートで制御）。
+          // ここでは生値を渡し、緩和に使うか否かは corporateNumber 可視性で判定する。
           corporateNumber: owner.corporateNumber,
         },
-        { name: nameVisible, nameKana: nameKanaVisible },
+        {
+          name: nameVisible,
+          nameKana: nameKanaVisible,
+          corporateNumber: corporateNumberVisible,
+        },
       );
       tallyOwnerNameQuality(summary, result);
 

@@ -355,6 +355,60 @@ describe("可視性ゲート（P1: 不可視フィールドを分類しない）
   });
 });
 
+describe("可視性ゲート（P2: 隠し法人番号を分類に渡さない）", () => {
+  // too_long 緩和は corporateNumber の有無で 60→100 に変わる。owner_corporate_number が
+  // 不可視のユーザーには corporateNumber を classify に渡さない（隠し法人番号の有無を
+  // too_long の出現差で推測させない）。name は可視前提（生値長で分類は成立する）。
+  const longName = "あ".repeat(61); // 60 超 100 以下
+
+  it("corporateNumber が masked のとき too_long 緩和を効かせない（候補に出る）", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      corporateNumber: "masked",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: longName, corporateNumber: "1234567890123" }),
+    ]);
+    const res = await GET(url("?type=too_long"));
+    const json = await res.json();
+    // corporateNumber 不可視 → 緩和なし → 既定上限 60 超で too_long
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].issues).toContain("too_long");
+    expect(json.summary.tooLong).toBe(1);
+  });
+
+  it("corporateNumber が full のときは緩和が効き too_long を出さない（従来通り）", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      corporateNumber: "full",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: longName, corporateNumber: "1234567890123" }),
+    ]);
+    const res = await GET(url("?type=too_long"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(0);
+    expect(json.summary.tooLong).toBe(0);
+  });
+
+  it("corporateNumber 不可視でも全 type で隠し法人番号は推測不能（緩和差が出ない=候補内容は法人番号非依存）", async () => {
+    // corporateNumber を hidden に固定。法人番号あり owner / なし owner の
+    // too_long 判定が同一（どちらも 60 超で too_long）になることを確認。
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+      ...DISPLAY_FULL,
+      corporateNumber: "hidden",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: longName, corporateNumber: "1234567890123" }),
+      owner({ id: "o-2", name: longName, corporateNumber: null }),
+    ]);
+    const res = await GET(url("?type=too_long"));
+    const json = await res.json();
+    const ids = json.candidates.map((c: { ownerId: string }) => c.ownerId).sort();
+    expect(ids).toEqual(["o-1", "o-2"]);
+  });
+});
+
 describe("AuditLog PII 漏洩防止", () => {
   it("detail に氏名生値が含まれず type/summary のみ", async () => {
     pm.owner.findMany.mockResolvedValue([

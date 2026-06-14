@@ -96,6 +96,44 @@ describe("classifyOwnerNameQuality — 誤検出回避（正当値は issues 空
       classifyOwnerNameQuality({ name: longName, corporateNumber: "1234567890123" }).issues,
     ).not.toContain("too_long");
   });
+
+  // DQ-01 P2: corporateNumber は法人番号フィールドの生値。これが不可視なら
+  // too_long 緩和の根拠に使わない（隠し法人番号の有無を分類差で漏らさない）。
+  it("corporateNumber 不可視時は too_long 緩和を効かせない（隠し法人番号を漏らさない）", () => {
+    const longName = "あ".repeat(OWNER_NAME_MAX_LEN + 5);
+    // 可視（既定 true）なら緩和が効き too_long は出ない（上の契約）。
+    expect(
+      classifyOwnerNameQuality({ name: longName, corporateNumber: "1234567890123" }).issues,
+    ).not.toContain("too_long");
+    // 不可視なら corporateNumber を無視 → 既定上限で too_long を出す。
+    expect(
+      classifyOwnerNameQuality(
+        { name: longName, corporateNumber: "1234567890123" },
+        { corporateNumber: false },
+      ).issues,
+    ).toContain("too_long");
+  });
+
+  it("corporateNumber 可視指定なら従来通り緩和が効く", () => {
+    const longName = "あ".repeat(OWNER_NAME_MAX_LEN + 5);
+    expect(
+      classifyOwnerNameQuality(
+        { name: longName, corporateNumber: "1234567890123" },
+        { corporateNumber: true },
+      ).issues,
+    ).not.toContain("too_long");
+  });
+
+  it("corporateNumber 不可視でも可視 name 中の法人格語による緩和は維持する", () => {
+    // 緩和の根拠が「可視 name の法人格語」なら hidden 法人番号と無関係 → 維持。
+    const longCorp = "株式会社" + "あ".repeat(OWNER_NAME_MAX_LEN + 5);
+    expect(
+      classifyOwnerNameQuality(
+        { name: longCorp, corporateNumber: "1234567890123" },
+        { corporateNumber: false },
+      ).issues,
+    ).not.toContain("too_long");
+  });
 });
 
 describe("classifyOwnerNameQuality — warning / info", () => {

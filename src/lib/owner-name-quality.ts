@@ -56,6 +56,15 @@ export interface OwnerNameQualityResult {
 export interface OwnerNameQualityVisibility {
   name?: boolean;
   nameKana?: boolean;
+  /**
+   * DQ-01 P2: 法人番号（corporateNumber）の生値が可視か。
+   * `false` のとき corporateNumber を too_long 緩和（60→100）の根拠に使わない。
+   * これにより、owner_corporate_number が hidden/masked のユーザーが、
+   * 同じ可視 name でも too_long の出現有無が変わる差から「隠し法人番号の有無」を
+   * 推測するオラクルを塞ぐ。可視 name 内の法人格語（株式会社 等）による緩和は
+   * 可視値に基づくため維持する。省略時は true（後方互換）。
+   */
+  corporateNumber?: boolean;
 }
 
 /** 氏名の既定の最大長（コードポイント数）。 */
@@ -113,9 +122,15 @@ function maxSeverity(
 function isCorporateLike(
   input: OwnerNameQualityInput,
   normalized: string,
+  corporateNumberVisible: boolean,
 ): boolean {
-  const cn = input.corporateNumber;
-  if (cn != null && cn.trim() !== "") return true;
+  // DQ-01 P2: corporateNumber は法人番号フィールドの生値。生値非可視のとき
+  // この信号を緩和根拠に使わない（隠し法人番号の有無を too_long 差で漏らさない）。
+  if (corporateNumberVisible) {
+    const cn = input.corporateNumber;
+    if (cn != null && cn.trim() !== "") return true;
+  }
+  // 可視 name 内の法人格語による緩和は可視値由来なので常に維持する。
   return CORP_WORD_RE.test(normalized);
 }
 
@@ -134,6 +149,7 @@ export function classifyOwnerNameQuality(
 ): OwnerNameQualityResult {
   const nameVisible = visibility?.name ?? true;
   const kanaVisible = visibility?.nameKana ?? true;
+  const corporateNumberVisible = visibility?.corporateNumber ?? true;
 
   const issues: OwnerNameIssueCode[] = [];
 
@@ -158,7 +174,7 @@ export function classifyOwnerNameQuality(
       }
 
       const codePoints = Array.from(t);
-      const maxLen = isCorporateLike(input, t)
+      const maxLen = isCorporateLike(input, t, corporateNumberVisible)
         ? OWNER_NAME_CORP_MAX_LEN
         : OWNER_NAME_MAX_LEN;
       if (codePoints.length > maxLen) issues.push("too_long");
