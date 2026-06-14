@@ -230,5 +230,24 @@ describe("decideOwnerCorporateCleanup", () => {
       expect(p.manualReason).toBe("multi");
       expect(p.changedFields).toEqual([]);
     });
+
+    it("13桁誤検出save候補(ハイフン連結ID=列移送なし) + 別フィールド12桁 → cleanup・corporateNumberToSet null・12桁除去のみ(Codex P2)", () => {
+      // name のハイフン連結ID は save 候補(importAction=save)だが厳格 remover は除去しない
+      // (corporate13Removed=false → corporateNumberToSet=null)。一方 address の12桁は除去される。
+      // この場合 changedFields は ["address"] のみ(corporateNumber は含まれない)。
+      const p = decideOwnerCorporateCleanup({
+        name: "整理番号 1234567890123-45",
+        address: `東京都港区1-1 会社法人等番号 ${REG}`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("cleanup");
+      expect(p.importAction).toBe("save"); // 13桁は save 候補のまま
+      expect(p.corporateNumberToSet).toBeNull(); // ただし 13桁は除去できないので列移送なし
+      expect(p.cleanedName).toBe("整理番号 1234567890123-45"); // name は不変
+      expect(p.cleanedAddress).toBe("東京都港区1-1"); // 12桁のみ除去
+      expect(p.changedFields).toEqual(["address"]);
+      expect(p.changedFields).not.toContain("corporateNumber");
+    });
   });
 });

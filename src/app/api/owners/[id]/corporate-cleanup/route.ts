@@ -212,8 +212,15 @@ export async function POST(
     // save(列が空・番号がテキストにしかない)では、テキストから番号を除去するなら
     // 必ず corporateNumber 列への移送も併せて適用する。さもないと唯一の番号が消え
     // 以後のプレビューで復元できなくなる(Codex P2: データ消失防止)。
+    //
+    // ガードの発火条件は「実際に列へ移送すべき 13桁番号が存在する」(corporateNumberToSet
+    // !== null)ときに限る。importAction だけで判定すると、13桁を save 候補にしたが厳格な
+    // remover が除去しなかった(ハイフン連結ID 等で corporate13Removed=false → toSet=null)
+    // ケースで、別フィールドのラベル付き12桁(会社法人等番号)テキスト除去まで巻き添えで
+    // 拒否してしまう。12桁は列移送を伴わず、消失する13桁番号も無いため、テキスト除去のみの
+    // apply を許容する(Codex P2)。13桁の save 列移送保護(toSet!==null 時)は不変。
     if (
-      proposal.importAction === "save" &&
+      proposal.corporateNumberToSet !== null &&
       (body.apply.name || body.apply.address || body.apply.note) &&
       !body.apply.corporateNumber
     ) {

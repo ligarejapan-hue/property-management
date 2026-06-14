@@ -175,6 +175,47 @@ describe("POST /api/owners/[id]/corporate-cleanup (apply)", () => {
     expect(pm.owner.updateMany).not.toHaveBeenCalled();
   });
 
+  it("P2(Codex): importAction=save でも 13桁を実際には除去できない(corporateNumberToSet null)ケースは 12桁テキスト除去のみ apply 可", async () => {
+    // name のハイフン連結ID は save 候補だが厳格 remover は除去しない(corporateNumberToSet null)。
+    // address の12桁(会社法人等番号)のみ除去対象。番号消失リスクが無いので
+    // corporateNumber 未適用でも address 除去を拒否してはならない。
+    pm.owner.findUnique.mockResolvedValue({
+      id: "o1",
+      name: "整理番号 1234567890123-45",
+      address: "東京都港区1-1 会社法人等番号 020001012345",
+      note: null,
+      corporateNumber: null,
+      version: 2,
+      isArchived: false,
+    });
+    const res = await POST(postReq({ version: 2, apply: { name: false, address: true, note: false, corporateNumber: false } }), ctx());
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    const call = pm.owner.updateMany.mock.calls[0][0];
+    expect(call.data.address).toBe("東京都港区1-1");
+    expect(call.data).not.toHaveProperty("corporateNumber"); // 列移送はしない
+    expect(call.data).not.toHaveProperty("name"); // name は触らない
+    expect(recordChanges).toHaveBeenCalled();
+  });
+
+  it("12桁のみ(13桁無し)テキスト除去は corporateNumber 未適用でも apply 可", async () => {
+    pm.owner.findUnique.mockResolvedValue({
+      id: "o1",
+      name: "株式会社○○",
+      address: "東京都港区1-1 会社法人等番号 020001012345",
+      note: null,
+      corporateNumber: null,
+      version: 2,
+      isArchived: false,
+    });
+    const res = await POST(postReq({ version: 2, apply: { name: false, address: true, note: false, corporateNumber: false } }), ctx());
+    expect(res.status).toBe(200);
+    const call = pm.owner.updateMany.mock.calls[0][0];
+    expect(call.data.address).toBe("東京都港区1-1");
+    expect(call.data).not.toHaveProperty("corporateNumber");
+  });
+
   it("apply 全 false は 400", async () => {
     const res = await POST(postReq({ version: 2, apply: { name: false, address: false, note: false, corporateNumber: false } }), ctx());
     expect(res.status).toBe(400);
