@@ -145,6 +145,32 @@ describe("classifyOwnerNameQuality — warning / info", () => {
     const r = classifyOwnerNameQuality({ name: "山田太郎", nameKana: "ヤマダ タロウ" });
     expect(r.kanaIssues).toHaveLength(0);
   });
+
+  it("全角空白を含むカナは valid（kana/control 問題なし）", () => {
+    const r = classifyOwnerNameQuality({ name: "山田太郎", nameKana: "ヤマダ　タロウ" });
+    expect(r.kanaIssues).toHaveLength(0);
+    expect(r.issues).not.toContain("control_chars");
+  });
+
+  it("nameKana にタブが混入すると control_chars（\\s 経由で valid 扱いしない・P2）", () => {
+    const r = classifyOwnerNameQuality({ name: "山田", nameKana: "ヤマ\tダ" });
+    expect(r.issues).toContain("control_chars");
+  });
+
+  it("nameKana に改行が混入すると control_chars（P2）", () => {
+    const r = classifyOwnerNameQuality({ name: "山田", nameKana: "ヤマ\nダ" });
+    expect(r.issues).toContain("control_chars");
+  });
+
+  it("nameKana に C1 制御文字（U+0085）が混入すると control_chars（P2）", () => {
+    const r = classifyOwnerNameQuality({ name: "山田", nameKana: "ヤマ" + NEL + "ダ" });
+    expect(r.issues).toContain("control_chars");
+  });
+
+  it("nameKana に U+FFFD（文字化け）が混入すると control_chars（P2）", () => {
+    const r = classifyOwnerNameQuality({ name: "山田", nameKana: "ヤマ" + REPL + "ダ" });
+    expect(r.issues).toContain("control_chars");
+  });
 });
 
 describe("classifyOwnerNameQuality — severity は最大重大度", () => {

@@ -59,7 +59,10 @@ const CORP_WORD_RE =
   /(株式会社|有限会社|合同会社|合資会社|合名会社|（株）|\(株\)|㈱|㈲|医療法人|社会福祉法人|学校法人|宗教法人|管理組合|財団法人|一般財団法人|一般社団法人|公益財団法人|公益社団法人|特定非営利活動法人|協同組合|町内会|自治会)/;
 
 // nameKana として許容する文字: ひらがな/カタカナ/長音/各種空白。
-const NON_KANA_RE = /[^\u3040-\u309F\u30A0-\u30FF\u30FC\s\u3000]/u;
+// \u7A7A\u767D\u306B \s \u3092\u4F7F\u308F\u306A\u3044: \s \u306F C0 \u5236\u5FA1\u7A7A\u767D(\u30BF\u30D6 U+0009/\u6539\u884C U+000A \u7B49)\u3082\u542B\u3080\u305F\u3081
+// \u305D\u308C\u3089\u3092 valid \u6271\u3044\u3057\u3066\u3057\u307E\u3046(Codex P2)\u3002\u5236\u5FA1\u6587\u5B57/\u5236\u5FA1\u7A7A\u767D\u306F CONTROL_RE \u3067
+// \u5225\u9014 control_chars \u3068\u3057\u3066\u691C\u51FA\u3059\u308B\u3002\u8A31\u5BB9\u7A7A\u767D\u306F\u534A\u89D2 U+0020 \u3068\u5168\u89D2 U+3000 \u306E\u307F\u3002
+const NON_KANA_RE = /[^\u3040-\u309F\u30A0-\u30FF\u30FC \u3000]/u;
 
 const ISSUE_SEVERITY: Record<OwnerNameIssueCode, OwnerNameSeverity> = {
   whitespace_only: "error",
@@ -142,6 +145,12 @@ export function classifyOwnerNameQuality(
   const kanaIssues: OwnerNameKanaIssueCode[] = [];
   const kanaRaw = input.nameKana;
   if (kanaRaw != null) {
+    // 制御文字 / 制御空白(タブ/改行)/ U+FFFD は name と同様 raw 全体で判定する。
+    // NON_KANA_RE は \s を使わないため allowlist では拾えない制御空白をここで検出し、
+    // control_chars として name の制御文字検出と整合させる(Codex P2)。
+    if (!issues.includes("control_chars") && CONTROL_RE.test(kanaRaw)) {
+      issues.push("control_chars");
+    }
     const kt = kanaRaw.normalize("NFKC").trim();
     if (kt.length > 0 && NON_KANA_RE.test(kt)) {
       kanaIssues.push("kana_non_kana");
