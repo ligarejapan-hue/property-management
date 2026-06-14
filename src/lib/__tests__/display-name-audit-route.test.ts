@@ -533,4 +533,45 @@ describe("GET /api/admin/display-name-audit — 監査ログ", () => {
     expect(writeAuditLog).toHaveBeenCalledTimes(1);
     expect(lastAudit().action).toBe("display_name_audit_view");
   });
+
+  // ---- Codex 追加 P2（4巡目）: entity は正規化値のみ記録（生入力を残さない） ----
+
+  it("未知の entity（PII/トークン風の生入力）は AuditLog.detail に残さず canonical(all) に畳む", async () => {
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    // 任意の長い PII/秘密風文字列を entity として渡す（既存挙動では両方を返す＝all）。
+    const secret = "山田花子-secret-token-0123456789abcdef-PII-leak-attempt";
+    const res = await GET(
+      makeRequest(`?entity=${encodeURIComponent(secret)}`),
+    );
+    expect(res.status).toBe(200);
+
+    const detailStr = JSON.stringify(lastAudit().detail ?? {});
+    // 生入力は一切 detail に入らない
+    expect(detailStr).not.toContain("山田花子");
+    expect(detailStr).not.toContain("secret-token");
+    expect(detailStr).not.toContain("PII-leak");
+    // canonical 値のみが記録される（未知値は両方＝all に畳む）
+    expect(lastAudit().detail).toMatchObject({ entity: "all" });
+  });
+
+  it("entity=owner は canonical 'owner' を記録する", async () => {
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    await GET(makeRequest("?entity=owner"));
+    expect(lastAudit().detail).toMatchObject({ entity: "owner" });
+  });
+
+  it("entity=building は canonical 'building' を記録する", async () => {
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+    await GET(makeRequest("?entity=building"));
+    expect(lastAudit().detail).toMatchObject({ entity: "building" });
+  });
+
+  it("entity 未指定（null）は canonical 'all' を記録する", async () => {
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+    await GET(makeRequest());
+    expect(lastAudit().detail).toMatchObject({ entity: "all" });
+  });
 });

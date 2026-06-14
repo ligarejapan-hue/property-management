@@ -93,6 +93,16 @@ export async function GET(request: NextRequest) {
     const wantBuilding = entityParam !== "owner";
     const asCsv = searchParams.get("format") === "csv";
 
+    // 監査ログに記録する entity は canonical 値のみに正規化する。
+    // 生のクエリ文字列（entityParam）は所有者名・トークン等の任意 PII/秘密を
+    // 含み得るため、AuditLog.detail には絶対に入れない（PII 本文非記録方針の強化）。
+    // 既知の owner/building 以外は既存挙動どおり両方を返す＝"all" に畳む。
+    const auditEntity: "owner" | "building" | "all" = wantOwner
+      ? wantBuilding
+        ? "all"
+        : "owner"
+      : "building";
+
     // building 名/ID は property:read を要求する（既存の建物読み取り API と同一基準）。
     // 不足時は building 群を空で返す（owner と同じ fail-closed・DB も叩かない）。
     const buildingReadable = hasPermission(permissions, "property", "read");
@@ -174,7 +184,8 @@ export async function GET(request: NextRequest) {
       userId: session.id,
       action: "display_name_audit_view",
       detail: {
-        entity: entityParam ?? "all",
+        // canonical 値のみ（生入力 entityParam は記録しない）。
+        entity: auditEntity,
         format: asCsv ? "csv" : "json",
         ...(ownerResult
           ? {
