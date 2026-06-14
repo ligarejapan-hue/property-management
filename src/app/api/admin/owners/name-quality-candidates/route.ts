@@ -126,8 +126,17 @@ export async function GET(request: NextRequest) {
     const cursor = searchParams.get("cursor");
 
     // active Owner を id 昇順で取得（cursor 安定性のため）。
+    //
+    // ページング設計（Codex P2 対応）:
+    //   cursor は DB クエリの where に id.gt として渡し、cursor 以降の owner だけを
+    //   1 窓ぶん（最大 MAX_SCAN 件）スキャンする。これにより MAX_SCAN は
+    //   「総件数の上限」ではなく「1 リクエストのスキャン窓サイズ」になり、
+    //   cursor を進めれば全 owner 集合を窓単位で辿り切れる（10k 超も到達可能）。
     const owners = await prisma.owner.findMany({
-      where: { isArchived: false },
+      where: {
+        isArchived: false,
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
       select: {
         id: true,
         name: true,
@@ -241,15 +250,28 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // cursor 適用（id 昇順前提）
-    const startIndex = cursor
-      ? matchedRows.findIndex((r) => r.ownerId > cursor)
-      : 0;
-    const offset = startIndex < 0 ? matchedRows.length : startIndex;
-    const page = matchedRows.slice(offset, offset + limit);
-    const hasNextPage = offset + limit < matchedRows.length;
-    const nextCursor =
-      hasNextPage && page.length > 0 ? page[page.length - 1].ownerId : null;
+    // ページング（cursor は既に DB の where:{id:{gt:cursor}} で適用済み。
+    // matchedRows は cursor 以降・このスキャン窓内の id 昇順マッチ）。
+    const page = matchedRows.slice(0, limit);
+
+    // 次ページの有無:
+    //   - このスキャン窓内にまだ未返却のマッチがある (matchedRows.length > limit)
+    //   - もしくは窓が truncated（窓の先にまだ owner が存在する＝次窓に
+    //     マッチが現れる可能性がある）。silent な切り捨てを禁止する。
+    const hasMoreInWindow = matchedRows.length > page.length;
+    const hasNextPage = hasMoreInWindow || truncated;
+
+    // nextCursor の前進:
+    //   - 窓内にまだマッチが残るなら、返却した最後のマッチ id まで進める。
+    //   - 窓内のマッチを使い切ったが truncated なら、最後にスキャンした owner の
+    //     id（= 窓末尾）まで進める。これにより次リクエストは window の続きを
+    //     スキャンでき、MAX_SCAN を超える owner にも到達できる。
+    let nextCursor: string | null = null;
+    if (hasMoreInWindow && page.length > 0) {
+      nextCursor = page[page.length - 1].ownerId;
+    } else if (hasNextPage && scanned.length > 0) {
+      nextCursor = scanned[scanned.length - 1].id;
+    }
 
     await writeAuditLog({
       userId: session.id,

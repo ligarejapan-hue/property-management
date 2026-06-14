@@ -267,10 +267,16 @@ describe("AuditLog PII 漏洩防止", () => {
 
 describe("ページング", () => {
   beforeEach(() => {
-    pm.owner.findMany.mockResolvedValue(
-      Array.from({ length: 5 }, (_, i) =>
-        owner({ id: `o-${i}`, name: `${1000 + i}` }),
-      ),
+    // cursor は DB の where:{id:{gt:cursor}} で適用されるため、mock も尊重する。
+    const fixtures = Array.from({ length: 5 }, (_, i) =>
+      owner({ id: `o-${i}`, name: `${1000 + i}` }),
+    );
+    pm.owner.findMany.mockImplementation(
+      (args: { where?: { id?: { gt?: string } }; take?: number }) => {
+        const gt = args?.where?.id?.gt ?? null;
+        const rows = gt ? fixtures.filter((o) => o.id > gt) : fixtures;
+        return Promise.resolve(rows.slice(0, args?.take ?? rows.length));
+      },
     );
   });
 
@@ -288,5 +294,86 @@ describe("ページング", () => {
     const res2 = await GET(url(`?type=numeric_only&limit=2&cursor=${json1.nextCursor}`));
     const json2 = await res2.json();
     expect(json2.candidates[0].ownerId > json1.nextCursor).toBe(true);
+  });
+
+  it("cursor は DB クエリの where に id.gt として渡る（先頭固定スキャンにしない）", async () => {
+    await GET(url("?type=numeric_only&limit=2&cursor=o-1"));
+    const arg = pm.owner.findMany.mock.calls[0][0];
+    expect(arg.where).toEqual({ isArchived: false, id: { gt: "o-1" } });
+  });
+
+  it("cursor 無しのときは where に id 条件を付けない", async () => {
+    await GET(url("?type=numeric_only&limit=2"));
+    const arg = pm.owner.findMany.mock.calls[0][0];
+    expect(arg.where).toEqual({ isArchived: false });
+  });
+});
+
+// MAX_SCAN(10k) 超のデータでもページングが取りこぼさないことを検証する。
+// 10k 件をモックするのは非現実的なので、route 内部の MAX_SCAN を一時的に
+// 小さく上書きできない以上、ここでは「window が truncated かつページ内で
+// matchedRows を使い切ったとき、hasNextPage=true・nextCursor が
+// 最後にスキャンした owner の id まで前進する」契約を検証する。
+//
+// この契約により、次リクエストは where:{id:{gt:nextCursor}} で
+// スキャン窓の続きへ進めるため、10k 超の owner も到達可能になる。
+describe("scan cap 超のページング前進（取りこぼし防止）", () => {
+  // route の MAX_SCAN は 10_000。テストで擬似的に超過させるため、
+  // findMany が take 件数ぶん返すよう動的生成する（cursor を尊重）。
+  function generateOwners(cursorId: string | null, total: number, take: number) {
+    // total 件の連番 owner（id は 0 埋め6桁で昇順安定）からスキャンを再現。
+    const all = Array.from({ length: total }, (_, i) => {
+      const idx = i;
+      return owner({
+        id: `o-${String(idx).padStart(6, "0")}`,
+        // 末尾に向けてのみ numeric_only ゴミを置く（窓内で matched が枯渇する状況を作る）
+        name: idx >= total - 1 ? `${1000 + idx}` : `山田太郎`,
+      });
+    });
+    const startIdx = cursorId
+      ? all.findIndex((o) => o.id > cursorId)
+      : 0;
+    const from = startIdx < 0 ? all.length : startIdx;
+    return all.slice(from, from + take);
+  }
+
+  it("truncated 窓で matched 枯渇 → hasNextPage=true かつ nextCursor は最後にスキャンした id へ前進", async () => {
+    // 総数 = MAX_SCAN + 5。最初の窓 = 先頭 10_000 件（take=10_001 で truncated 検知）。
+    // 先頭 10_000 件はすべて「山田太郎」(問題なし) で matched 0 件。
+    const TOTAL = 10_005;
+    pm.owner.findMany.mockImplementation((args: { where?: { id?: { gt?: string } }; take?: number }) => {
+      const cursorId = args?.where?.id?.gt ?? null;
+      return Promise.resolve(generateOwners(cursorId, TOTAL, args?.take ?? 10_001));
+    });
+
+    const res = await GET(url("?type=numeric_only&limit=2"));
+    const json = await res.json();
+
+    // 先頭窓には numeric ゴミが無いので candidates は空。
+    expect(json.candidates).toHaveLength(0);
+    // しかし truncated（窓の先にまだ owner がいる）なので前進しなければならない。
+    expect(json.truncated).toBe(true);
+    expect(json.hasNextPage).toBe(true);
+    // nextCursor は最後にスキャンした owner の id（= 窓の末尾）まで前進する。
+    expect(json.nextCursor).toBe(`o-${String(9999).padStart(6, "0")}`);
+  });
+
+  it("前進した cursor で次窓を取得すると scan cap 超の候補へ到達できる", async () => {
+    const TOTAL = 10_005;
+    pm.owner.findMany.mockImplementation((args: { where?: { id?: { gt?: string } }; take?: number }) => {
+      const cursorId = args?.where?.id?.gt ?? null;
+      return Promise.resolve(generateOwners(cursorId, TOTAL, args?.take ?? 10_001));
+    });
+
+    const res1 = await GET(url("?type=numeric_only&limit=2"));
+    const json1 = await res1.json();
+    const res2 = await GET(
+      url(`?type=numeric_only&limit=2&cursor=${json1.nextCursor}`),
+    );
+    const json2 = await res2.json();
+
+    // 2 窓目で 10_000 番目以降の numeric ゴミ（10_004 = "o-010004"）へ到達。
+    expect(json2.candidates.length).toBeGreaterThan(0);
+    expect(json2.candidates[0].ownerId).toBe(`o-${String(10004).padStart(6, "0")}`);
   });
 });
