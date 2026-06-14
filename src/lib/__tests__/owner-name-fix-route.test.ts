@@ -85,6 +85,19 @@ const PERMS_RW_NO_NAME = [
   { resource: "owner", action: "write", granted: true },
   { resource: "owner_name", action: "masked", granted: true },
 ];
+// owner:read / user_management:read はあるが owner_name が masked（氏名生値が不可視）。
+// dryRun preview しかできない（owner:write も無い）。
+const PERMS_RO_NAME_MASKED = [
+  { resource: "user_management", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+  { resource: "owner_name", action: "masked", granted: true },
+];
+// owner_name=read（氏名生値が可視）。
+const PERMS_RO_NAME_VISIBLE = [
+  { resource: "user_management", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+  { resource: "owner_name", action: "read", granted: true },
+];
 
 const SOH = String.fromCharCode(1);
 
@@ -175,6 +188,66 @@ describe("認可", () => {
       params,
     );
     expect(res.status).toBe(200);
+  });
+});
+
+describe("氏名不可視ユーザーの dry-run は同値オラクルを出さない（P1）", () => {
+  it("owner_name 不可視 + set で current と一致しても no_change を漏らさない（eligible も出さない）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_MASKED);
+    mockOwner({ name: "山田太郎", version: 1 });
+    // 隠れた現在値（山田太郎）と一致する値を当てに来ても no_change を返さない。
+    const res = await POST(
+      req({ version: 1, mode: "set", newName: "山田太郎" }),
+      params,
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.executed).toBe(false);
+    expect(json.blockReasons).not.toContain("no_change");
+    // 一致/不一致を判別させない: eligible も伏せる。
+    expect(json).not.toHaveProperty("eligible");
+    expect(json.nameVisible).toBe(false);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("owner_name 不可視 + set で current と不一致でも eligible/no_change を出さない（P1）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_MASKED);
+    mockOwner({ name: "山田太郎", version: 1 });
+    const res = await POST(
+      req({ version: 1, mode: "set", newName: "佐藤花子" }),
+      params,
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.blockReasons).not.toContain("no_change");
+    expect(json).not.toHaveProperty("eligible");
+    expect(json.nameVisible).toBe(false);
+  });
+
+  it("owner_name 不可視でも入力依存の forbidden_value は出す（隠し値に依存しない）（P1）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_MASKED);
+    mockOwner({ name: "山田太郎", version: 1 });
+    const res = await POST(
+      req({ version: 1, mode: "set", newName: "999" }),
+      params,
+    );
+    const json = await res.json();
+    expect(json.blockReasons).toContain("forbidden_value");
+    expect(json.blockReasons).not.toContain("no_change");
+    expect(json).not.toHaveProperty("eligible");
+  });
+
+  it("owner_name 可視（read）なら従来通り no_change / eligible を返す", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_NAME_VISIBLE);
+    mockOwner({ name: "山田太郎", version: 1 });
+    const res = await POST(
+      req({ version: 1, mode: "set", newName: "山田太郎" }),
+      params,
+    );
+    const json = await res.json();
+    expect(json.blockReasons).toContain("no_change");
+    expect(json.eligible).toBe(false);
+    expect(json.nameVisible).toBe(true);
   });
 });
 

@@ -7,7 +7,11 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
+import {
+  hasPermission,
+  hasExplicitWritePerm,
+  getOwnerFieldLevel,
+} from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import {
   decideOwnerNameFix,
@@ -37,7 +41,12 @@ import {
 //   dryRun の default は true。dryRun=false を明示したときのみ DB を更新する。
 //
 // レスポンス（PII / 氏名生値を含めない）:
-//   dryRun=true:  200 { executed:false, eligible, blockReasons[], mode }
+//   dryRun=true（氏名可視）:   200 { executed:false, eligible, blockReasons[], mode, nameVisible:true }
+//   dryRun=true（氏名不可視）: 200 { executed:false, blockReasons[], mode, nameVisible:false }
+//       └ 氏名生値の値当てオラクル防止（P1）: owner_name の field-level 可視性が
+//         full/edit/read 未満（masked/partial/hidden）のユーザーには、隠れた現在値に
+//         依存する判定（no_change= set値==現在値, eligible=一致/不一致の確定）を出さない。
+//         入力値だけで決まる判定（forbidden_value / name_would_be_empty）は出してよい。
 //   dryRun=false: 200 { executed:true, id, version(new), updatedFields:["name"] }
 //   400 入力不正 / 403 権限不足 / 404 不存在 / 409 version_mismatch / 422 その他
 //
@@ -48,6 +57,26 @@ import {
 function statusFromReasons(reasons: string[]): number {
   if (reasons.includes("version_mismatch")) return 409;
   return 422;
+}
+
+/**
+ * 氏名生値が可視か（owner_name の field-level 表示レベルが full/edit/read）。
+ * masked/partial/hidden（生値を見せない・伏字）の場合は false。owner-memo の
+ * resolveOwnerMemoBodyVisibility と同じ閾値で field-level 可視性を判定する。
+ */
+function canSeeOwnerName(perms: Parameters<typeof getOwnerFieldLevel>[0]): boolean {
+  const level = getOwnerFieldLevel(perms, "owner_name");
+  return level === "full" || level === "edit" || level === "read";
+}
+
+/**
+ * 隠し現在値に依存する判定（同値オラクル）を blockReasons から除去する。
+ * - no_change は「set値 == 現在値」を直接漏らすため必ず落とす。
+ * 入力値だけで決まる forbidden_value / name_would_be_empty / version_mismatch /
+ * owner_archived は現在値の生値を漏らさないため保持する。
+ */
+function stripHiddenNameOracle(reasons: string[]): string[] {
+  return reasons.filter((r) => r !== "no_change");
 }
 
 export async function POST(
@@ -65,6 +94,9 @@ export async function POST(
     if (!hasPermission(perms, "owner", "read")) {
       throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
     }
+    // 氏名生値が可視か（owner_name field-level 可視性）。dryRun preview で隠し現在値の
+    // 値当てオラクルを抑止するために使う（P1）。
+    const nameVisible = canSeeOwnerName(perms);
 
     const body = await request.json().catch(() => ({}));
     const version = body?.version;
@@ -135,7 +167,23 @@ export async function POST(
 
     // ── dryRun: DB / AuditLog を一切書かない ────────────────────────────────
     if (dryRun) {
-      return apiResponse({ executed: false, eligible, blockReasons, mode });
+      if (!nameVisible) {
+        // 氏名不可視ユーザーには隠し現在値依存の判定（no_change / eligible）を出さない（P1）。
+        // 入力値だけで決まる reason（forbidden_value 等）は伏せずに返す。
+        return apiResponse({
+          executed: false,
+          blockReasons: stripHiddenNameOracle(blockReasons),
+          mode,
+          nameVisible: false,
+        });
+      }
+      return apiResponse({
+        executed: false,
+        eligible,
+        blockReasons,
+        mode,
+        nameVisible: true,
+      });
     }
 
     // ── 実行 ────────────────────────────────────────────────────────────────

@@ -46,9 +46,11 @@ export const OWNER_NAME_CORP_MAX_LEN = 100;
 /** mostly_digits とみなす数字比率の閾値。 */
 export const OWNER_NAME_MOSTLY_DIGITS_RATIO = 0.7;
 
-// 制御文字（C0 / DEL）と U+FFFD（文字化け置換文字）。NFKC でも除去されない。
-const CONTROL_RE = /[\u0000-\u001F\u007F\uFFFD]/;
-const CONTROL_RE_G = /[\u0000-\u001F\u007F\uFFFD]/g;
+// 制御文字（C0 U+0000-U+001F / DEL U+007F / C1 U+0080-U+009F）と U+FFFD（文字化け置換文字）。
+// C1 には U+0085(NEL) / U+009F(APC) 等が含まれ、貼付/取込で混入し得る。NFKC でも除去されない。
+// \u エスケープで記述するため no-control-regex には抵触しない。
+const CONTROL_RE = /[\u0000-\u001F\u007F-\u009F\uFFFD]/;
+const CONTROL_RE_G = /[\u0000-\u001F\u007F-\u009F\uFFFD]/g;
 const LETTER_RE = /\p{L}/u;
 const DIGIT_RE = /\p{Nd}/u;
 

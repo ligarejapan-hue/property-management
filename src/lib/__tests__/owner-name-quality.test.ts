@@ -23,8 +23,12 @@ import {
 // 制御文字 / 文字化け文字はエディタ非表示のため fromCharCode で構成（ASCII ソース）。
 const SOH = String.fromCharCode(0x01); // C0 制御文字
 const REPL = String.fromCharCode(0xfffd); // U+FFFD 置換文字（文字化け）
+const NEL = String.fromCharCode(0x85); // C1 制御文字 U+0085 (NEL)
+const APC = String.fromCharCode(0x9f); // C1 制御文字 U+009F (APC)
 const NAME_WITH_CONTROL = "Yamada" + SOH + "Taro"; // 文字あり + 制御文字
 const NAME_WITH_REPL = "Sa" + REPL + "to";
+const NAME_WITH_C1_NEL = "Yamada" + NEL + "Taro"; // 文字あり + C1 制御文字
+const NAME_WITH_C1_APC = "山田" + APC + "太郎"; // 文字あり + C1 制御文字
 const NUMERIC_WITH_CONTROL = "42" + SOH; // 数字のみ + 制御文字
 
 describe("classifyOwnerNameQuality — 検出（error）", () => {
@@ -104,6 +108,14 @@ describe("classifyOwnerNameQuality — warning / info", () => {
     expect(classifyOwnerNameQuality({ name: NAME_WITH_REPL }).issues).toContain("control_chars");
   });
 
+  it("C1 制御文字 U+0085(NEL) は control_chars（P2）", () => {
+    expect(classifyOwnerNameQuality({ name: NAME_WITH_C1_NEL }).issues).toContain("control_chars");
+  });
+
+  it("C1 制御文字 U+009F(APC) は control_chars（P2）", () => {
+    expect(classifyOwnerNameQuality({ name: NAME_WITH_C1_APC }).issues).toContain("control_chars");
+  });
+
   it("既定上限超は too_long / warning", () => {
     const r = classifyOwnerNameQuality({ name: "あ".repeat(OWNER_NAME_MAX_LEN + 1) });
     expect(r.issues).toContain("too_long");
@@ -153,6 +165,11 @@ describe("sanitizeOwnerName", () => {
     expect(sanitizeOwnerName("山田 太郎 ")).toBe("山田 太郎");
     expect(sanitizeOwnerName(NAME_WITH_REPL)).toBe("Sato");
     expect(sanitizeOwnerName(NAME_WITH_CONTROL)).toBe("YamadaTaro");
+  });
+
+  it("C1 制御文字（U+0085/U+009F）も除去する（P2）", () => {
+    expect(sanitizeOwnerName(NAME_WITH_C1_NEL)).toBe("YamadaTaro");
+    expect(sanitizeOwnerName(NAME_WITH_C1_APC)).toBe("山田太郎");
   });
 });
 
@@ -231,6 +248,18 @@ describe("checkOwnerNameFixSafety", () => {
 
   it("新値に U+FFFD（文字化け）混入なら forbidden_value（P2）", () => {
     const r = checkOwnerNameFixSafety({ ...base, newName: NAME_WITH_REPL });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("forbidden_value");
+  });
+
+  it("新値に C1 制御文字（U+0085）混入なら forbidden_value（P2）", () => {
+    const r = checkOwnerNameFixSafety({ ...base, newName: NAME_WITH_C1_NEL });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("forbidden_value");
+  });
+
+  it("新値に C1 制御文字（U+009F）混入なら forbidden_value（P2）", () => {
+    const r = checkOwnerNameFixSafety({ ...base, newName: NAME_WITH_C1_APC });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reasons).toContain("forbidden_value");
   });
