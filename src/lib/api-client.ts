@@ -2474,7 +2474,10 @@ export type PostalAuditIndeterminateReason =
   | "invalid_postal_code"
   | "address_empty"
   | "no_candidate"
-  | "lookup_unavailable";
+  | "lookup_unavailable"
+  // 時間バジェット超過で照合まで到達しなかった（未処理）owner。route は silent に
+  // 切り捨てず、verdict=indeterminate / reason=not_processed の行として返す（Codex P1）。
+  | "not_processed";
 
 export interface PostalAuditRowDTO {
   ownerId: string;
@@ -2489,7 +2492,15 @@ export interface PostalAuditRowDTO {
 export interface PostalCodeAuditResponse {
   apiConfigured: boolean;
   truncated: boolean;
+  // 時間バジェット（POSTAL_AUDIT_TIME_BUDGET_MS）超過で未処理 owner が出たか（Codex P1）。
+  timeBudgetExhausted: boolean;
+  // 実際に照合まで到達した owner 件数。
+  processed: number;
+  // 時間バジェット超過などで未処理（not_processed）になった owner 件数。
+  notProcessed: number;
   maxTargets: number;
+  // lookup ループの経過時間バジェット（ミリ秒）。通知文言の根拠に使う。
+  timeBudgetMs: number;
   summary: {
     total: number;
     match: number;
@@ -2506,7 +2517,11 @@ export async function fetchPostalCodeAudit(): Promise<PostalCodeAuditResponse> {
     return {
       apiConfigured: false,
       truncated: false,
-      maxTargets: 2000,
+      timeBudgetExhausted: false,
+      processed: 0,
+      notProcessed: 0,
+      maxTargets: 200,
+      timeBudgetMs: 45000,
       summary: { total: 0, match: 0, mismatch: 0, indeterminate: 0 },
       rows: [],
     };

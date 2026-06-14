@@ -7,8 +7,11 @@ import {
   type PostalCodeAuditResponse,
   type PostalAuditRowDTO,
   type PostalAuditVerdict,
-  type PostalAuditIndeterminateReason,
 } from "@/lib/api-client";
+// reason → ラベルは共有マップ（型 Record で not_processed を含む全 reason を網羅保証）を使う。
+// ローカルで別マップを再定義すると not_processed 等の取りこぼし（『判定不能（undefined）』）が
+// 再発するため、必ず共有マップを参照する（Codex P2）。
+import { INDETERMINATE_REASON_LABELS } from "@/lib/postal-code-audit";
 
 const VERDICT_LABELS: Record<PostalAuditVerdict, string> = {
   match: "一致",
@@ -22,18 +25,21 @@ const VERDICT_BADGE: Record<PostalAuditVerdict, string> = {
   indeterminate: "bg-gray-100 text-gray-600",
 };
 
-const REASON_LABELS: Record<PostalAuditIndeterminateReason, string> = {
-  invalid_postal_code: "郵便番号が不正",
-  address_empty: "住所が空",
-  no_candidate: "該当住所なし",
-  lookup_unavailable: "API照合不可",
-};
+const REASON_LABELS = INDETERMINATE_REASON_LABELS;
 
-type VerdictFilter = "all" | PostalAuditVerdict;
+// not_processed（時間バジェット超過の未処理）は verdict=indeterminate だが、
+// 「判定不能」ではなく未処理として明示するため別タブ・別バッジで扱う。
+type VerdictFilter = "all" | PostalAuditVerdict | "not_processed";
+
+/** not_processed 行か（verdict は indeterminate だが UI では未処理として独立扱い）。 */
+function isNotProcessed(r: PostalAuditRowDTO): boolean {
+  return r.reason === "not_processed";
+}
 
 const FILTER_TABS: { key: VerdictFilter; label: string }[] = [
   { key: "mismatch", label: "不一致" },
   { key: "indeterminate", label: "判定不能" },
+  { key: "not_processed", label: "未処理" },
   { key: "match", label: "一致" },
   { key: "all", label: "すべて" },
 ];
@@ -64,7 +70,15 @@ export default function PostalCodeAuditPage() {
 
   const rows: PostalAuditRowDTO[] = data?.rows ?? [];
   const filteredRows =
-    filter === "all" ? rows : rows.filter((r) => r.verdict === filter);
+    filter === "all"
+      ? rows
+      : filter === "not_processed"
+        ? // 未処理（時間上限）だけを抽出。
+          rows.filter(isNotProcessed)
+        : filter === "indeterminate"
+          ? // 判定不能タブは未処理（not_processed）を含めない（別タブで明示する）。
+            rows.filter((r) => r.verdict === "indeterminate" && !isNotProcessed(r))
+          : rows.filter((r) => r.verdict === filter);
 
   return (
     <div className="p-6">
@@ -120,6 +134,18 @@ export default function PostalCodeAuditPage() {
         </div>
       )}
 
+      {data && data.timeBudgetExhausted && (
+        <div className="mb-4 flex items-start gap-2 rounded-md bg-orange-50 p-3 text-sm text-orange-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            処理時間の上限（{Math.round(data.timeBudgetMs / 1000)}秒）に達したため、
+            {data.notProcessed.toLocaleString()}件が未処理（時間上限）です。
+            未処理分はもう一度「照合を実行」するか、対象を絞って再実行してください。
+            （照合済み {data.processed.toLocaleString()}件）
+          </span>
+        </div>
+      )}
+
       {data && (
         <>
           <div className="mb-4 flex flex-wrap gap-4 text-sm">
@@ -133,8 +159,15 @@ export default function PostalCodeAuditPage() {
               不一致 <strong>{data.summary.mismatch}</strong>
             </span>
             <span className="text-gray-600">
-              判定不能 <strong>{data.summary.indeterminate}</strong>
+              {/* route の summary.indeterminate は未処理(not_processed)も含むため、
+                  「判定不能」表示は未処理を除いた数にして未処理タブと整合させる。 */}
+              判定不能 <strong>{data.summary.indeterminate - data.notProcessed}</strong>
             </span>
+            {data.notProcessed > 0 && (
+              <span className="text-orange-700">
+                未処理 <strong>{data.notProcessed}</strong>
+              </span>
+            )}
           </div>
 
           <div className="mb-3 flex gap-1 border-b border-gray-200">
@@ -179,12 +212,20 @@ export default function PostalCodeAuditPage() {
                       <td className="px-3 py-2 text-gray-700">{r.addressMasked ?? "—"}</td>
                       <td className="px-3 py-2 text-gray-700">{r.apiAddressLine ?? "—"}</td>
                       <td className="px-3 py-2">
-                        <span
-                          className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${VERDICT_BADGE[r.verdict]}`}
-                        >
-                          {VERDICT_LABELS[r.verdict]}
-                          {r.reason ? `（${REASON_LABELS[r.reason]}）` : ""}
-                        </span>
+                        {isNotProcessed(r) ? (
+                          // 未処理(時間上限): verdict は indeterminate だが「判定不能」とは
+                          // 別物として専用ラベル・専用バッジで明示する（Codex P2）。
+                          <span className="inline-block rounded bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">
+                            {REASON_LABELS.not_processed}
+                          </span>
+                        ) : (
+                          <span
+                            className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${VERDICT_BADGE[r.verdict]}`}
+                          >
+                            {VERDICT_LABELS[r.verdict]}
+                            {r.reason ? `（${REASON_LABELS[r.reason]}）` : ""}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))
