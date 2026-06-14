@@ -44,6 +44,7 @@ const ENV_KEYS = [
   "REGISTRY_FETCH_PASSWORD",
   "REGISTRY_FETCH_BASE_URL",
   "REGISTRY_FETCH_TIMEOUT_MS",
+  "REGISTRY_FETCH_PROVIDER",
 ] as const;
 
 let saved: Record<string, string | undefined> = {};
@@ -81,11 +82,31 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
 
-  it("CodexP2: LOGIN_ID + PASSWORD が揃っても browserFactory 未配線なら null（capability false・501維持）", () => {
-    // env を設定しても、PR-1 では browserFactory が配線されていないため実取得は不可能。
-    // readiness=false ゆえ provider は解決されず（null）、capability も false に保つ。
+  it("CodexP2: 資格情報のみ（opt-in env なし）では null（capability false・501維持・本番挙動不変）", () => {
+    // PR-2: 既定 factory は明示 opt-in（REGISTRY_FETCH_PROVIDER=official）でのみ配線される。
+    // 資格情報だけ設定して chromium 未配置のまま capability=true で常に失敗する操作を露出しない
+    // ため、opt-in env が無ければ readiness=false → null（現本番は当 env 未設定ゆえ 501 維持）。
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    expect(getRegistryFetchProvider()).toBeNull();
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
+  });
+
+  it("PR-2 live: 資格情報 + opt-in env（REGISTRY_FETCH_PROVIDER=official）で OfficialRegistryProvider を返す（capability true）", () => {
+    // 運用 runbook で playwright/chromium を配置後に REGISTRY_FETCH_PROVIDER=official を設定すると、
+    // 既定 factory が配線され（実 chromium 起動は fetch 実行時の動的 import まで遅延）、provider が
+    // 解決される。ここでは provider 解決のみを検証し、実ブラウザは起動しない（factory 未呼び出し）。
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    const provider = getRegistryFetchProvider();
+    expect(provider).toBeInstanceOf(OfficialRegistryProvider);
+    expect(provider?.name).toBe("official");
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(true);
+  });
+
+  it("PR-2 live: opt-in env のみ（資格情報欠落）では null（資格情報も必須）", () => {
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
     expect(getRegistryFetchProvider()).toBeNull();
     expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
@@ -96,8 +117,14 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
     const browserFactory = async () => ({
-      async goto() {
+      async login() {
         /* no-op */
+      },
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF");
       },
       async close() {
         /* no-op */
@@ -111,8 +138,14 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
 
   it("（将来）browserFactory を注入しても env 未設定なら null（資格情報も必須・両方揃って初めて解決）", () => {
     const browserFactory = async () => ({
-      async goto() {
+      async login() {
         /* no-op */
+      },
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF");
       },
       async close() {
         /* no-op */

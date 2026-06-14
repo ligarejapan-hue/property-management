@@ -38,6 +38,7 @@ import {
 import {
   createOfficialRegistryProvider,
   type RegistryBrowserFactory,
+  type RegistryBrowserPage,
 } from "@/lib/registry-fetch/official-provider";
 
 export interface RunRegistryAutoFetchArgs {
@@ -92,31 +93,197 @@ export interface ResolveRegistryFetchProviderOptions {
   browserFactory?: RegistryBrowserFactory;
 }
 
+// ---------------------------------------------------------------------------
+// PR-2: 実 Playwright adapter（公式「登記情報提供サービス」の自動操作）。
+//
+// ★ Playwright バンドル混入防止の契約（C-1）:
+//   Playwright は **defaultChromiumLoader 内の動的 import でのみ** 読み込む。auto-fetch.ts /
+//   official-provider.ts は playwright を **静的 import / require しない**（source-assertion で固定）。
+//   動的 import は文字列変数経由にして tsc のモジュール解決と webpack のバンドルを回避する
+//   （next.config の serverExternalPackages にも "playwright" を加えて二重に external 化）。
+// ---------------------------------------------------------------------------
+
+/** Playwright Download の最小ローカル型（静的 import / 型依存しない）。 */
+interface RegistryDownloadLike {
+  createReadStream(): Promise<RegistryReadableLike | null> | RegistryReadableLike | null;
+}
+interface RegistryReadableLike {
+  on(event: string, listener: (arg?: unknown) => void): unknown;
+}
+/** Playwright Page の、本 adapter が使う最小サブセット。 */
+interface RegistryPageLike {
+  setDefaultTimeout?(ms: number): void;
+  goto(url: string, options?: unknown): Promise<unknown>;
+  fill(selector: string, value: string): Promise<void>;
+  click(selector: string): Promise<void>;
+  waitForSelector(selector: string, options?: unknown): Promise<unknown>;
+  waitForEvent(event: string, options?: unknown): Promise<RegistryDownloadLike>;
+}
+interface RegistryContextLike {
+  newPage(): Promise<RegistryPageLike>;
+  close(): Promise<void>;
+}
+interface RegistryBrowserLike {
+  newContext(options?: unknown): Promise<RegistryContextLike>;
+  close(): Promise<void>;
+}
+interface RegistryChromiumLike {
+  chromium: { launch(options?: unknown): Promise<RegistryBrowserLike> };
+}
+
 /**
- * PR-1 で本番（引数なし呼び出し）が用いる browserFactory を解決する。
- *
- * CodexP2 の核心: 「env が設定されたら provider を返す」だけの解決は、browserFactory 未配線でも
- * 非null を返してしまい、capability=true → 有料ボタン有効化 → POST が 501 ガードをバイパスして
- * 物件を一瞬 scheduled にした後 OfficialRegistryProvider.fetchRegistryPdf() が必ず provider_error
- * を throw する（= 本番に常に失敗する操作の露出）。これを防ぐため、解決は **readiness（実際に
- * 実行可能か = browserFactory の有無）** に基づかせる。
- *
- * PR-1 では実 Playwright 起動 adapter を一切配線しない（playwright 依存追加なし）。よって本関数は
- * 常に undefined を返し、env が設定済みでも getRegistryFetchProvider() は null = 501 維持となる。
- * PR-2 でここに実 adapter を返す実装を入れると、env が揃った時点で capability=true になる。
- *
- * ★ Playwright バンドル混入防止の契約（C-1）:
- *   Playwright は **この関数内の動的 import（`const { chromium } = await import("playwright")` 等）
- *   でのみ** 読み込む。auto-fetch.ts / official-provider.ts は playwright を **静的 import / require
- *   しない**（source-assertion テストで固定）。これにより auto-fetch.ts → /api/me/permissions route
- *   の value import 連鎖で Playwright がサーバーバンドルへ混入するのを防ぐ。OfficialRegistryProvider
- *   クラス自体が playwright を静的 import しない構造のため、value import（下記）は安全。
+ * 公式サービスの DOM セレクタ/パス。**実サイトの値は実ログイン環境でのみ確定**するため、
+ * 本 PR は枠組み + プレースホルダ定数で集約し、live 投入時にキャリブレーションする（TODO(calibrate)）。
+ * いずれも非PII・非secret。
  */
-function resolveDefaultRegistryBrowserFactory():
-  | RegistryBrowserFactory
-  | undefined {
-  // PR-1: 実ブラウザ起動境界は未配線 = 実取得不能 = readiness なし。
-  return undefined;
+const REGISTRY_SELECTORS = {
+  loginPath: "/login",
+  loginId: "#login-id", // TODO(calibrate): 実サイトの入力欄に合わせる
+  password: "#login-password", // TODO(calibrate)
+  loginSubmit: "button[type=submit]", // TODO(calibrate)
+  loggedIn: "#mypage", // TODO(calibrate): ログイン成功を示す固有要素
+  searchInput: "#real-estate-number", // TODO(calibrate)
+  searchSubmit: "#search-submit", // TODO(calibrate)
+  searchResult: "#registry-result", // TODO(calibrate): 謄本ヒットを示す要素
+  downloadButton: "#download-pdf", // TODO(calibrate)
+} as const;
+
+function isTimeoutError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: string }).name === "TimeoutError"
+  );
+}
+
+/**
+ * 生 Playwright Page を RegistryBrowserPage（高水準セッション抽象）へ適合させる adapter。
+ * 失敗は **RegistryFetchError（分類コードのみ）** に正規化し、生メッセージ（URL/入力/selector が
+ * 混入しうる）を例外に載せない。中間成果物（Cookie/DL）は close() で破棄する。
+ */
+function createPlaywrightRegistryPage(handles: {
+  browser: RegistryBrowserLike;
+  context: RegistryContextLike;
+  page: RegistryPageLike;
+}): RegistryBrowserPage {
+  const { browser, context, page } = handles;
+  return {
+    async login(input) {
+      try {
+        const base = input.baseUrl ?? "";
+        await page.goto(`${base}${REGISTRY_SELECTORS.loginPath}`);
+        await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
+        await page.fill(REGISTRY_SELECTORS.password, input.password);
+        await page.click(REGISTRY_SELECTORS.loginSubmit);
+        // ログイン成功を固有要素で確認（URL だけで判定しない）。
+        await page.waitForSelector(REGISTRY_SELECTORS.loggedIn);
+      } catch {
+        // ログイン確認に至らない = 認証失敗扱い（生メッセージ非載・secret 非露出）。
+        throw new RegistryFetchError("auth_failed");
+      }
+    },
+    async searchByRealEstateNumber(realEstateNumber) {
+      try {
+        await page.fill(REGISTRY_SELECTORS.searchInput, realEstateNumber);
+        await page.click(REGISTRY_SELECTORS.searchSubmit);
+        await page.waitForSelector(REGISTRY_SELECTORS.searchResult);
+        return { found: true };
+      } catch (err) {
+        // 結果要素が出ない（TimeoutError）= 該当なし（PR-2 近似）。not-found と timeout の
+        // 厳密弁別は live キャリブレーションで精緻化（TODO(calibrate)）。それ以外は provider_error。
+        if (isTimeoutError(err)) return { found: false };
+        throw new RegistryFetchError("provider_error");
+      }
+    },
+    async downloadRegistryPdf() {
+      try {
+        // download イベントの待受を click より先に張る（Playwright 推奨）。
+        const [download] = await Promise.all([
+          page.waitForEvent("download", {}),
+          page.click(REGISTRY_SELECTORS.downloadButton),
+        ]);
+        const stream = await download.createReadStream();
+        if (!stream) {
+          throw new RegistryFetchError("provider_error");
+        }
+        return await readStreamToBuffer(stream);
+      } catch (err) {
+        if (err instanceof RegistryFetchError) throw err;
+        if (isTimeoutError(err)) throw new RegistryFetchError("timeout");
+        throw new RegistryFetchError("provider_error");
+      }
+    },
+    async close() {
+      // best-effort: context → browser を確実に閉じ、Cookie/セッション/DL を残さない。
+      try {
+        await context.close();
+      } catch {
+        // swallow
+      }
+      try {
+        await browser.close();
+      } catch {
+        // swallow
+      }
+    },
+  };
+}
+
+/** Download stream を Buffer に集約する（HTTP クライアント呼び出しを使わない＝source-assertion 準拠）。 */
+function readStreamToBuffer(stream: RegistryReadableLike): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk) => {
+      chunks.push(Buffer.from(chunk as Uint8Array));
+    });
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", (err) => reject(err));
+  });
+}
+
+/**
+ * 実 Playwright を読み込む動的ローダ（C-1: ここだけが playwright を読む）。
+ * 文字列変数経由の動的 import で tsc のモジュール解決と webpack のバンドルを回避する。
+ */
+async function defaultChromiumLoader(): Promise<RegistryChromiumLike> {
+  const moduleId = "playwright";
+  return (await import(/* webpackIgnore: true */ moduleId)) as RegistryChromiumLike;
+}
+
+/**
+ * 本番（引数なし呼び出し）/ テスト（chromiumLoader 注入）で使う browserFactory を解決する。
+ *
+ * readiness 設計（CodexP2 を維持しつつ PR-2 で live 化）:
+ *   - **本番経路（chromiumLoader 未注入）**: 明示 opt-in `REGISTRY_FETCH_PROVIDER==="official"` が
+ *     無ければ undefined を返す（= getRegistryFetchProvider() が null = route 501 維持 = 本番挙動不変。
+ *     現本番は当 env 未設定）。これにより「資格情報だけ設定して playwright/chromium 未配置」でも
+ *     capability=true で常に失敗する操作を露出しない（runbook で chromium 配置後に opt-in する運用）。
+ *   - **テスト経路（chromiumLoader 注入）**: opt-in env なしでも factory を返す（実 playwright を
+ *     読み込まず注入 chromium で adapter を検証するため）。
+ *
+ * ★ C-1: playwright は defaultChromiumLoader 内の動的 import でのみ読む（静的 import / require なし）。
+ */
+export function resolveDefaultRegistryBrowserFactory(
+  deps: { chromiumLoader?: () => Promise<RegistryChromiumLike> } = {},
+): RegistryBrowserFactory | undefined {
+  // 本番経路は明示 opt-in を要求（chromium 配置済みの運用宣言）。テスト注入時は不要。
+  if (!deps.chromiumLoader && process.env.REGISTRY_FETCH_PROVIDER !== "official") {
+    return undefined;
+  }
+  const load = deps.chromiumLoader ?? defaultChromiumLoader;
+  const timeoutRaw = process.env.REGISTRY_FETCH_TIMEOUT_MS;
+  const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
+
+  return async () => {
+    const { chromium } = await load();
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ acceptDownloads: true });
+    const page = await context.newPage();
+    if (timeoutMs && Number.isFinite(timeoutMs) && page.setDefaultTimeout) {
+      page.setDefaultTimeout(timeoutMs);
+    }
+    return createPlaywrightRegistryPage({ browser, context, page });
+  };
 }
 
 /**
