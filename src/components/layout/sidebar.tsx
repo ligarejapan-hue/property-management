@@ -18,6 +18,7 @@ import {
   Upload,
   KeyRound,
   UserCog,
+  MapPinned,
   Map as MapIcon,
 } from "lucide-react";
 
@@ -100,6 +101,11 @@ const adminNavItems: NavItem[] = [
     label: "所有者補正候補",
     href: "/admin/owners/correction",
     icon: <UserCog className="h-5 w-5" />,
+  },
+  {
+    label: "郵便番号×住所チェック",
+    href: "/admin/postal-code-audit",
+    icon: <MapPinned className="h-5 w-5" />,
   },
 ];
 

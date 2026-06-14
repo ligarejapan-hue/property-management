@@ -2466,3 +2466,50 @@ export async function fetchAddressCandidates(
     },
   );
 }
+
+// ---------- 郵便番号×住所 整合チェック（read-only レポート） ----------
+
+export type PostalAuditVerdict = "match" | "mismatch" | "indeterminate";
+export type PostalAuditIndeterminateReason =
+  | "invalid_postal_code"
+  | "address_empty"
+  | "no_candidate"
+  | "lookup_unavailable";
+
+export interface PostalAuditRowDTO {
+  ownerId: string;
+  nameMasked: string | null;
+  zipMasked: string | null;
+  addressMasked: string | null;
+  apiAddressLine: string | null;
+  verdict: PostalAuditVerdict;
+  reason: PostalAuditIndeterminateReason | null;
+}
+
+export interface PostalCodeAuditResponse {
+  apiConfigured: boolean;
+  truncated: boolean;
+  maxTargets: number;
+  summary: {
+    total: number;
+    match: number;
+    mismatch: number;
+    indeterminate: number;
+  };
+  rows: PostalAuditRowDTO[];
+}
+
+/** 郵便番号×住所 整合チェックレポートを取得する（read-only）。 */
+export async function fetchPostalCodeAudit(): Promise<PostalCodeAuditResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      apiConfigured: false,
+      truncated: false,
+      maxTargets: 2000,
+      summary: { total: 0, match: 0, mismatch: 0, indeterminate: 0 },
+      rows: [],
+    };
+  }
+  return apiFetch<PostalCodeAuditResponse>("/api/admin/postal-code-audit");
+}
