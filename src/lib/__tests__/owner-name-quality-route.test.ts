@@ -290,6 +290,52 @@ describe("複数 ImportJobRow の曖昧性（import_source_ambiguous）", () => 
   });
 });
 
+// Codex P2: 自動補正（sanitize_candidate）の安全網は「success な owner_csv 取込行が
+// 存在する」ことが前提。取込行が無い（import_source_unknown）／単一だが非 success
+// （import_row_not_success）の owner は、たとえ name が sanitize 可能でも昇格させず
+// review に倒す（import_source_ambiguous と整合）。
+describe("success 取込行を sanitize 昇格の前提にする（import_row_not_success / import_source_unknown）", () => {
+  const controlName = "山田" + String.fromCharCode(1) + "太郎"; // sanitize 可能
+
+  it("success な単一取込行があれば sanitize_candidate に昇格できる", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: controlName }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { createdId: "o-1", status: "success" },
+    ]);
+    const res = await GET(url("?type=control_chars"));
+    const json = await res.json();
+    expect(json.candidates[0].recommendedAction).toBe("sanitize_candidate");
+  });
+
+  it("取込行が無い（import_source_unknown）owner は sanitize 可能でも review", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: controlName }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([]); // owner_csv 取込行なし
+    const res = await GET(url("?type=control_chars"));
+    const json = await res.json();
+    expect(json.candidates[0].blockReasons).toContain("import_source_unknown");
+    expect(json.candidates[0].recommendedAction).toBe("review");
+    expect(json.candidates[0].recommendedAction).not.toBe("sanitize_candidate");
+  });
+
+  it("単一だが非 success の取込行（import_row_not_success）owner は review に倒す", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: controlName }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { createdId: "o-1", status: "failed" },
+    ]);
+    const res = await GET(url("?type=control_chars"));
+    const json = await res.json();
+    expect(json.candidates[0].blockReasons).toContain("import_row_not_success");
+    expect(json.candidates[0].recommendedAction).toBe("review");
+    expect(json.candidates[0].recommendedAction).not.toBe("sanitize_candidate");
+  });
+});
+
 describe("PII マスキング", () => {
   it("nameKana は display-level に従ってマスクされる（name 可視で行がマッチ）", async () => {
     // name は可視（full）で numeric_only マッチ → 行が出る。nameKana は masked。

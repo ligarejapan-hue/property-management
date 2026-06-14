@@ -249,6 +249,14 @@ export async function GET(request: NextRequest) {
       const importRowCount = importRowCountMap.get(owner.id) ?? 0;
       // Issue1: ImportJobRow が 2 件以上なら取込元が一意に特定できない。
       const importSourceAmbiguous = importRowCount >= 2;
+      // Codex P2: 自動補正（sanitize_candidate）の安全網は「success な owner_csv
+      // 取込行が存在する」ことを前提にする。取込行が無い（unknown）／単一だが
+      // 非 success（not_success）／曖昧（ambiguous）はいずれも自動補正の根拠に
+      // できないため、sanitize へ昇格させない（= review に倒す）。
+      const hasSuccessfulImportRow =
+        !importSourceAmbiguous &&
+        importRowCount === 1 &&
+        importStatus === "success";
 
       const blockReasons: string[] = [];
       if (owner._count.propertyOwners > 0)
@@ -285,12 +293,16 @@ export async function GET(request: NextRequest) {
       // Issue1: 取込元が曖昧（ImportJobRow 複数）な owner も sanitize_candidate へ
       // 昇格させない。success 行が紛れていても取込元を一意に特定できず、自動補正の
       // 根拠にできないため review に倒して人手確認に回す（hold ではない=safeguard 不在）。
+      //
+      // Codex P2: さらに、取込行が無い（import_source_unknown）／単一だが非 success
+      // （import_row_not_success）owner も昇格させない。自動補正の安全網は
+      // 「success な owner_csv 取込行が存在する」ことが前提のため、無ければ review。
       let recommendedAction: RecommendedAction;
       if (hasSafeguard) {
         recommendedAction = "hold";
       } else if (
         nameVisible &&
-        !importSourceAmbiguous &&
+        hasSuccessfulImportRow &&
         decideOwnerNameFix(owner.name).action === "sanitize"
       ) {
         recommendedAction = "sanitize_candidate";
