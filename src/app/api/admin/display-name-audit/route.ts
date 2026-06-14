@@ -33,8 +33,12 @@ import { encodeCsv, sanitizeCsvCellForExcel } from "@/lib/csv-encode";
 //    csv_export_personal:read も追加で要求し、不足時は 403（空 owner CSV を返さない）。
 //    （既存の PII CSV 出力ルート＝物件 CSV export / DM export と同じ fail-closed 基準）。
 //    building（非PII）のみの CSV は csv_export:read だけで足り personal は不要。
+//    さらに entity 単独（owner のみ / building のみ）の CSV で当該結果が権限不足の
+//    未スキャン（unavailable）になる場合は 403 で拒否する。CSV は JSON と違い
+//    unavailable フラグを表現できず、ヘッダのみの空 CSV が「指摘ゼロ（clean）」と
+//    区別できないため（既定の両 entity CSV は他方が出力され区別可能ゆえ対象外）。
 //    JSON 閲覧（owner=owner:read + 表示レベル / building=property:read）は CSV 権限に
-//    依らず従来どおり（空/返すの既存挙動を維持）。
+//    依らず従来どおり（空/返すの既存挙動を維持・unavailable はフラグで区別）。
 //
 // 出力:
 //  - 既定 JSON: { owner?: AuditResult, building?: AuditResult }
@@ -165,6 +169,31 @@ export async function GET(request: NextRequest) {
         permissions,
       );
       ownerNameVisible = RAW_NAME_LEVELS.has(ownerDisplayConfig.name);
+    }
+
+    // CSV 出力で entity が単独（owner のみ / building のみ）の場合、選択した entity が
+    // 権限不足で未スキャン（unavailable）だと、CSV はヘッダのみの空出力になる。
+    // CSV は JSON と違い unavailable フラグを表現できないため、空ヘッダ CSV は
+    // 「指摘ゼロ（clean）」と区別できない（直接ダウンロードした owner-only / building-only
+    // 監査が誤って clean に見える）。よって entity 単独 CSV で当該結果が unavailable なら
+    // 403 で拒否する（既存 CSV ルートと同じ fail-closed・DB/CSV/AuditLog を行わない・Codex P2 是正）。
+    // owner の unavailable = owner:read 不足 or name 表示レベル不足（ownerNameVisible=false）。
+    // building の unavailable = property:read 不足（buildingReadable=false）。
+    // 既定（両 entity）は単独でないため対象外: 片方 unavailable でも他方が出力されれば
+    // 空ヘッダにはならず clean と区別できる（JSON の unavailable 区別を維持）。
+    if (asCsv) {
+      const ownerOnly = wantOwner && !wantBuilding;
+      const buildingOnly = wantBuilding && !wantOwner;
+      if (
+        (ownerOnly && !ownerNameVisible) ||
+        (buildingOnly && !buildingReadable)
+      ) {
+        throw new ApiError(
+          403,
+          "権限不足のため CSV を出力できません",
+          "FORBIDDEN",
+        );
+      }
     }
 
     // 取得は findMany のみ（書込なし）。列は id/name に最小化。

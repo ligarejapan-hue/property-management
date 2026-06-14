@@ -653,8 +653,10 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     expect(pm.building.findMany).toHaveBeenCalledTimes(1);
   });
 
-  it("CSV building: csv_export:read はあるが property:read 無し → building は出さない", async () => {
-    // CSV 出力権限はあるが、building データ読み取り権限（property:read）が無い。
+  it("CSV building: csv_export:read はあるが property:read 無し → 403（building unavailable・空ヘッダCSVを返さない）", async () => {
+    // CSV 出力権限はあるが、building データ読み取り権限（property:read）が無い
+    // ＝entity=building 単独 CSV で building は unavailable。CSV は unavailable を
+    // 表現できずヘッダのみ空 CSV が clean と区別できないため 403 で拒否する（Codex P2 是正）。
     vi.mocked(getUserPermissions).mockResolvedValue([
       { resource: "user_management", action: "read", granted: true },
       { resource: "csv_export", action: "read", granted: true },
@@ -662,10 +664,9 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
     const res = await GET(makeRequest("?format=csv&entity=building"));
-    expect(res.status).toBe(200);
-    const csv = await res.text();
-    expect(csv).not.toContain("ABC");
+    expect(res.status).toBe(403);
     expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("CSV 両 entity: csv_export:read 欠如なら 403（owner も building も出さない）", async () => {
@@ -690,6 +691,99 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     const body = await res.json();
     expect(body.building.groups).toHaveLength(1);
     expect(pm.building.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  // ---- Codex 追加 P2: entity 単独 CSV で当該結果が unavailable なら 403 ----
+  // CSV は JSON と違い unavailable フラグを表現できない。entity=owner（または
+  // entity=building）の単独 CSV で、選択した entity が権限不足で未スキャン
+  // （unavailable:true）になると、ヘッダのみの空 CSV が「指摘ゼロ（clean）」と
+  // 区別できない。よって entity 単独 CSV の選択結果が unavailable なら 403 で拒否する。
+
+  it("CSV entity=owner: owner:read 欠如（owner unavailable）なら 403（空ヘッダCSVを返さない）", async () => {
+    // CSV 出力権限（csv_export / csv_export_personal）は満たすが owner:read が無い
+    // ＝owner 群は unavailable。entity=owner 単独 CSV なので 403 で拒否する。
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_NO_OWNER);
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv&entity=owner"));
+    expect(res.status).toBe(403);
+    // 403 ゆえ DB 取得・CSV 生成・AuditLog 書き込みは一切行わない（fail-closed）
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("CSV entity=owner: name 表示レベル不足（masked）でも owner unavailable → 403", async () => {
+    // owner:read はあるが name 表示レベルが生値未満（masked）＝owner 群は unavailable。
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+      ...FULL_DISPLAY,
+      name: "masked",
+    });
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv&entity=owner"));
+    expect(res.status).toBe(403);
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("CSV entity=building: property:read 欠如（building unavailable）なら 403", async () => {
+    // csv_export:read はあるが property:read が無い＝building 群は unavailable。
+    // entity=building 単独 CSV なので 403 で拒否する。
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "csv_export", action: "read", granted: true },
+    ]);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv&entity=building"));
+    expect(res.status).toBe(403);
+    expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("CSV entity=owner: owner available なら従来どおり 200 で出力（回帰維持）", async () => {
+    // 権限が揃っている（unavailable でない）entity=owner 単独 CSV は従来どおり出力。
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv&entity=owner"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    expect(csv).toContain("所有者");
+    expect(csv).toContain("田中");
+    expect(pm.owner.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("CSV entity=building: building available なら従来どおり 200 で出力（回帰維持）", async () => {
+    // property:read + csv_export:read が揃う entity=building 単独 CSV は従来どおり出力。
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ADMIN_OWNER_NO_CSV_PERSONAL,
+    );
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv&entity=building"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    expect(csv).toContain("建物");
+    expect(csv).toContain("ABC");
+    expect(pm.building.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("CSV 既定（all）: owner unavailable でも building available なら 403 にせず出力（entity 単独でないため）", async () => {
+    // 既定（両 entity）CSV は entity 単独ではない。owner が unavailable でも
+    // building が出力されるため空ヘッダ CSV にはならず、403 にはしない（JSON と異なり
+    // CSV では unavailable を表現できないが、出力行があれば clean と区別可能）。
+    // owner:read 欠如だが building は property:read で取得できる。
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_NO_OWNER);
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    // owner（PII）は出ない、building は出る
+    expect(csv).not.toContain("田中");
+    expect(csv).toContain("建物");
+    expect(csv).toContain("ABC");
   });
 });
 
