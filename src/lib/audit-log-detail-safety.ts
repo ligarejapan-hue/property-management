@@ -157,6 +157,26 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "buildingGroupCount",
     "buildingTruncated",
   ]),
+  // 郵便番号照合レポート（read-only）の閲覧/CSV 出力監査。detail は操作事実の
+  // 非PIIメタデータのみ（postal-code-audit route の writeAuditLog 参照）。
+  // boolean フラグ（apiConfigured/truncated/timeBudgetExhausted）と構造コンテナ
+  // summary だけを allowlist 化する。件数系（processed/notProcessed/maxTargets/
+  // timeBudgetMs + summary 子の match/mismatch/indeterminate）は数値限定の
+  // numeric-force-safe 側で許可する（非数値は PII 流入の恐れがあるため [REDACTED]）。
+  // owner 名 / zip / address 等の PII は route 側で記録しないが、混入しても
+  // allowlist 外 + denylist で引き続き [REDACTED]。
+  postal_code_audit_list: new Set([
+    "apiConfigured",
+    "truncated",
+    "timeBudgetExhausted",
+    "summary",
+  ]),
+  postal_code_audit_csv_export: new Set([
+    "apiConfigured",
+    "truncated",
+    "timeBudgetExhausted",
+    "summary",
+  ]),
 };
 
 /**
@@ -192,6 +212,30 @@ const ACTION_NUMERIC_FORCE_SAFE_KEYS: Readonly<
   // display_name_audit_view の owner 群件数。/owner/i denylist に当たるが有限数値
   // （群数）のときだけ保持する。非数値は PII 流入の恐れがあるため [REDACTED]。
   display_name_audit_view: new Set(["ownerGroupCount"]),
+  // 郵便番号照合レポートの件数メタデータ。有限数値のときだけ保持する。
+  // processed/notProcessed/maxTargets/timeBudgetMs はトップレベル、
+  // match/mismatch/indeterminate は summary 子（同一 numericSafe 集合が再帰で
+  // 全階層に適用される）。非数値が来た場合は PII 流入の恐れがあるため [REDACTED]。
+  // （match は ALWAYS_SAFE だが numeric-force-safe が優先されるため、postal action
+  //  では非数値 match も [REDACTED] になる＝防御の二重化。）
+  postal_code_audit_list: new Set([
+    "processed",
+    "notProcessed",
+    "maxTargets",
+    "timeBudgetMs",
+    "match",
+    "mismatch",
+    "indeterminate",
+  ]),
+  postal_code_audit_csv_export: new Set([
+    "processed",
+    "notProcessed",
+    "maxTargets",
+    "timeBudgetMs",
+    "match",
+    "mismatch",
+    "indeterminate",
+  ]),
 };
 
 const EMPTY_KEY_SET: ReadonlySet<string> = new Set();

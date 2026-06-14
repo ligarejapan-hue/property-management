@@ -398,6 +398,121 @@ describe("sanitizeAuditDetail: update監査 updatedFields / CSV import counters 
   });
 });
 
+describe("postal_code_audit: 郵便番号照合レポートの操作メタデータ allowlist", () => {
+  // 郵便番号照合レポート（read-only）の閲覧/CSV 出力監査。detail は件数/真偽/数値
+  // メタデータのみ（apiConfigured/truncated/timeBudgetExhausted=bool・processed/
+  // notProcessed/maxTargets/timeBudgetMs=数値）+ summary 子キー match/mismatch/
+  // indeterminate(数値)。owner名/zip/address 等の PII は route 側で記録しないが、
+  // 万一混入しても allowlist 外 + denylist で [REDACTED] を維持する。
+  const POSTAL_AUDIT_ACTIONS = [
+    "postal_code_audit_list",
+    "postal_code_audit_csv_export",
+  ];
+
+  it("list/csv: bool/数値メタデータ + summary 子件数を保持する", () => {
+    for (const action of POSTAL_AUDIT_ACTIONS) {
+      const out = sanitizeAuditDetail(action, {
+        apiConfigured: true,
+        truncated: false,
+        timeBudgetExhausted: false,
+        processed: 120,
+        notProcessed: 0,
+        maxTargets: 200,
+        timeBudgetMs: 45000,
+        summary: {
+          total: 120,
+          match: 100,
+          mismatch: 15,
+          indeterminate: 5,
+        },
+      }) as Record<string, unknown>;
+      expect(out.apiConfigured).toBe(true);
+      expect(out.truncated).toBe(false);
+      expect(out.timeBudgetExhausted).toBe(false);
+      expect(out.processed).toBe(120);
+      expect(out.notProcessed).toBe(0);
+      expect(out.maxTargets).toBe(200);
+      expect(out.timeBudgetMs).toBe(45000);
+      const summary = out.summary as Record<string, unknown>;
+      expect(summary.total).toBe(120);
+      expect(summary.match).toBe(100);
+      expect(summary.mismatch).toBe(15);
+      expect(summary.indeterminate).toBe(5);
+    }
+  });
+
+  it("万一 PII（owner名/zip/address/rows）が混入しても [REDACTED]", () => {
+    const out = sanitizeAuditDetail("postal_code_audit_list", {
+      apiConfigured: true,
+      processed: 1,
+      ownerName: "山田太郎",
+      owner: { name: "山田太郎" },
+      zip: "1000001",
+      address: "東京都千代田区千代田1-1",
+      // route は rows を audit detail に書かないが、万一混入した場合の防御も確認する。
+      rows: [{ ownerName: "山田太郎", verdict: "mismatch" }],
+    }) as Record<string, unknown>;
+    expect(out.apiConfigured).toBe(true);
+    expect(out.processed).toBe(1);
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.owner).toBe(REDACTED);
+    expect(out.zip).toBe(REDACTED);
+    expect(out.address).toBe(REDACTED);
+    // rows は構造コンテナとして通過するが、内部の ownerName(PII)・verdict(未許可キー)
+    // はともにマスクされる（postal action では verdict を allowlist 化していない）。
+    const rows = out.rows as Array<Record<string, unknown>>;
+    expect(rows[0].ownerName).toBe(REDACTED);
+    expect(rows[0].verdict).toBe(REDACTED);
+  });
+
+  it("数値キーに非数値が来たら（PII 流入の恐れ）[REDACTED]", () => {
+    const out = sanitizeAuditDetail("postal_code_audit_list", {
+      processed: "山田太郎",
+      notProcessed: { evil: 1 },
+      maxTargets: ["x"],
+      timeBudgetMs: "45000ms",
+      summary: {
+        match: "東京都千代田区",
+        mismatch: 15,
+        indeterminate: 5,
+      },
+    }) as Record<string, unknown>;
+    expect(out.processed).toBe(REDACTED);
+    expect(out.notProcessed).toBe(REDACTED);
+    expect(out.maxTargets).toBe(REDACTED);
+    expect(out.timeBudgetMs).toBe(REDACTED);
+    const summary = out.summary as Record<string, unknown>;
+    expect(summary.match).toBe(REDACTED);
+    expect(summary.mismatch).toBe(15);
+    expect(summary.indeterminate).toBe(5);
+  });
+
+  it("未登録 action では postal_code_audit メタデータを保持しない", () => {
+    const out = sanitizeAuditDetail("some_other_action", {
+      apiConfigured: true,
+      truncated: false,
+      timeBudgetExhausted: false,
+      processed: 1,
+      notProcessed: 0,
+      maxTargets: 200,
+      timeBudgetMs: 45000,
+    }) as Record<string, unknown>;
+    expect(out.apiConfigured).toBe(REDACTED);
+    expect(out.truncated).toBe(REDACTED);
+    expect(out.timeBudgetExhausted).toBe(REDACTED);
+    expect(out.processed).toBe(REDACTED);
+    expect(out.notProcessed).toBe(REDACTED);
+    expect(out.maxTargets).toBe(REDACTED);
+    expect(out.timeBudgetMs).toBe(REDACTED);
+  });
+
+  it("route 配線: postal-code-audit route が両 action 名で writeAuditLog する", () => {
+    const routeSrc = read("src/app/api/admin/postal-code-audit/route.ts");
+    expect(routeSrc).toMatch(/postal_code_audit_csv_export/);
+    expect(routeSrc).toMatch(/postal_code_audit_list/);
+  });
+});
+
 describe("admin/audit-logs route 配線（source-assertion）", () => {
   const routeSrc = read("src/app/api/admin/audit-logs/route.ts");
 
