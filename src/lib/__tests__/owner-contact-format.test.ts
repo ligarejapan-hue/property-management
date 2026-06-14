@@ -117,6 +117,39 @@ describe("classifyOwnerContact", () => {
     const r = classifyOwnerContact({ zip: "", phone: null });
     expect(r.issues).toHaveLength(0);
   });
+
+  describe("フィールド可視性ゲート（DQ-02 P1）", () => {
+    it("zip 不可視のとき zip 由来の issue を出さない", () => {
+      const r = classifyOwnerContact(
+        { zip: "123", phone: "不明" },
+        { zip: false, phone: true },
+      );
+      expect(r.issues).not.toContain("zip_suspicious");
+      expect(r.issues).toContain("phone_non_phone");
+    });
+    it("phone 不可視のとき phone 由来の issue を出さない", () => {
+      const r = classifyOwnerContact(
+        { zip: "123", phone: "不明" },
+        { zip: true, phone: false },
+      );
+      expect(r.issues).toContain("zip_suspicious");
+      expect(r.issues).not.toContain("phone_non_phone");
+      expect(r.issues).not.toContain("phone_unnormalized");
+    });
+    it("両方不可視なら issue なし・severity null", () => {
+      const r = classifyOwnerContact(
+        { zip: "123", phone: "不明" },
+        { zip: false, phone: false },
+      );
+      expect(r.issues).toHaveLength(0);
+      expect(r.severity).toBeNull();
+    });
+    it("visibility 未指定は従来どおり両方分類（後方互換）", () => {
+      const r = classifyOwnerContact({ zip: "123", phone: "不明" });
+      expect(r.issues).toContain("zip_suspicious");
+      expect(r.issues).toContain("phone_non_phone");
+    });
+  });
 });
 
 describe("decideZipFix / decidePhoneFix", () => {

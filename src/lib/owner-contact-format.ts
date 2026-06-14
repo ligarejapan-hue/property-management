@@ -107,30 +107,56 @@ const WARNING_ISSUES = new Set<OwnerContactIssueCode>([
 ]);
 
 /**
+ * フィールド可視性ゲート（DQ-02 P1）。
+ * 呼び出し側（route）で各 PII フィールドの生値が可視か（display-level が
+ * full/edit/read）を渡す。`false` のフィールドは分類自体をスキップし、issue・
+ * severity・summary に一切寄与させない。これにより、生値を見られないユーザーが
+ * issue コード（zip_suspicious / phone_non_phone 等）から隠し値の品質を推測する
+ * オラクルを塞ぐ（既存 corporate_number 重複検出のゲートと同方針）。
+ * 省略時は両方 true（純関数テスト・後方互換）。
+ */
+export interface OwnerContactVisibility {
+  zip?: boolean;
+  phone?: boolean;
+}
+
+/**
  * Owner の zip / phone をまとめて分類する。
  * empty（欠損）は「形式エラーではない」ため issue にしない。
+ * `visibility` で不可視指定されたフィールドは分類しない（P1 オラクル防止）。
  */
 export function classifyOwnerContact(
   input: OwnerContactInput,
+  visibility?: OwnerContactVisibility,
 ): OwnerContactResult {
+  const zipVisible = visibility?.zip ?? true;
+  const phoneVisible = visibility?.phone ?? true;
   const issues: OwnerContactIssueCode[] = [];
 
-  const zip = input.zip;
-  const zc = classifyZip(zip);
-  if (zc === "suspicious") {
-    issues.push("zip_suspicious");
-  } else if (zc === "valid" && zip != null && formatPostalCode(zip) !== zip) {
-    issues.push("zip_unformatted");
+  if (zipVisible) {
+    const zip = input.zip;
+    const zc = classifyZip(zip);
+    if (zc === "suspicious") {
+      issues.push("zip_suspicious");
+    } else if (zc === "valid" && zip != null && formatPostalCode(zip) !== zip) {
+      issues.push("zip_unformatted");
+    }
   }
 
-  const phone = input.phone;
-  const pc = classifyPhone(phone);
-  if (pc === "suspicious") {
-    issues.push("phone_suspicious");
-  } else if (pc === "non_phone") {
-    issues.push("phone_non_phone");
-  } else if (pc === "valid" && phone != null && normalizePhone(phone) !== phone) {
-    issues.push("phone_unnormalized");
+  if (phoneVisible) {
+    const phone = input.phone;
+    const pc = classifyPhone(phone);
+    if (pc === "suspicious") {
+      issues.push("phone_suspicious");
+    } else if (pc === "non_phone") {
+      issues.push("phone_non_phone");
+    } else if (
+      pc === "valid" &&
+      phone != null &&
+      normalizePhone(phone) !== phone
+    ) {
+      issues.push("phone_unnormalized");
+    }
   }
 
   let severity: ContactSeverity | null = null;

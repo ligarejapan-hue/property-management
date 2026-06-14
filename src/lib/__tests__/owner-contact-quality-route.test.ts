@@ -210,18 +210,89 @@ describe("blockReasons / recommendedAction", () => {
 });
 
 describe("PII マスキング", () => {
-  it("zip/phone は display-level に従ってマスク", async () => {
+  it("可視フィールドで候補化しつつ、別の masked フィールドは生値を返さない", async () => {
+    // phone は full（可視）で phone_non_phone により候補化。zip は masked のため
+    // zipMasked に生値（1234567）を返さない。
     vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
       ...DISPLAY_FULL,
       zip: "masked",
-      phone: "masked",
+      phone: "full",
     });
     pm.owner.findMany.mockResolvedValue([
       owner({ id: "o-1", zip: "1234567", phone: "不明" }),
     ]);
     const res = await GET(url("?type=phone_non_phone"));
     const json = await res.json();
-    expect(json.candidates[0].phoneMasked).not.toBe("不明");
+    expect(json.candidates[0].ownerId).toBe("o-1");
+    expect(json.candidates[0].zipMasked).not.toBe("1234567");
+  });
+});
+
+describe("フィールド可視性ゲート（DQ-02 P1）", () => {
+  it("zip が masked（生値不可視）なら zip 由来の分類・summary を出さない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      zip: "masked",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", zip: "123" }), // zip_suspicious だが zip 不可視 → 出さない
+      owner({ id: "o-2", phone: "不明" }), // phone_non_phone は出す
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    const ids = json.candidates.map((c: { ownerId: string }) => c.ownerId).sort();
+    expect(ids).toEqual(["o-2"]);
+    // zip 由来 summary はゼロ（隠し値の品質を推測させない）
+    expect(json.summary.zipSuspicious).toBe(0);
+    expect(json.summary.phoneNonPhone).toBe(1);
+  });
+
+  it("phone が hidden なら phone 由来の分類・summary を出さない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      phone: "hidden",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", zip: "123" }), // zip_suspicious は出す
+      owner({ id: "o-2", phone: "不明" }), // phone 不可視 → 出さない
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    const ids = json.candidates.map((c: { ownerId: string }) => c.ownerId).sort();
+    expect(ids).toEqual(["o-1"]);
+    expect(json.summary.phoneNonPhone).toBe(0);
+    expect(json.summary.zipSuspicious).toBe(1);
+  });
+
+  it("partial（生値非可視）も分類しない", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      zip: "partial",
+      phone: "partial",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", zip: "123", phone: "不明" }),
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(0);
+    expect(json.summary.totalCandidates).toBe(0);
+  });
+
+  it("read 権限（生値可視）は従来どおり分類する", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      ...DISPLAY_FULL,
+      zip: "read",
+      phone: "read",
+    });
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", zip: "123" }),
+      owner({ id: "o-2", phone: "不明" }),
+    ]);
+    const res = await GET(url());
+    const json = await res.json();
+    const ids = json.candidates.map((c: { ownerId: string }) => c.ownerId).sort();
+    expect(ids).toEqual(["o-1", "o-2"]);
   });
 });
 

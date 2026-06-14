@@ -310,4 +310,57 @@ describe("不可視フィールドの dry-run は同値オラクルを出さな�
     expect(json.fieldVisible).toBe(false);
     expect(pm.owner.updateMany).not.toHaveBeenCalled();
   });
+
+  // DQ-02 P2: format mode は現在値を decide*Fix で分類するため、隠し値が
+  // suspicious / non_phone / empty / no_change のどれかを blockReasons から
+  // 推測できてしまう。不可視フィールドではこれらを一切返さない。
+  it("owner_zip 不可視 + format で suspicious な隠し値の blockReasons を漏らさない", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_FIELD_MASKED);
+    mockOwner({ zip: "123", version: 1 }); // suspicious
+    const res = await POST(
+      req({ version: 1, field: "zip", mode: "format" }),
+      params,
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.executed).toBe(false);
+    expect(json.fieldVisible).toBe(false);
+    expect(json).not.toHaveProperty("eligible");
+    expect(json.blockReasons).not.toContain("suspicious");
+    expect(json.blockReasons).not.toContain("no_change");
+    expect(json.blockReasons).not.toContain("empty");
+    expect(json.blockReasons).not.toContain("manual");
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("owner_phone 不可視 + format で non_phone な隠し値の blockReasons を漏らさない", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "owner_phone", action: "hidden", granted: true },
+    ]);
+    mockOwner({ phone: "不明", version: 1 }); // non_phone
+    const res = await POST(
+      req({ version: 1, field: "phone", mode: "format" }),
+      params,
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.fieldVisible).toBe(false);
+    expect(json.blockReasons).not.toContain("non_phone");
+    expect(json.blockReasons).not.toContain("manual");
+  });
+
+  it("不可視フィールド + format で formattable な隠し値も eligible を漏らさない", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_RO_FIELD_MASKED);
+    mockOwner({ zip: "1234567", version: 1 }); // valid だが未整形 = format 可能
+    const res = await POST(
+      req({ version: 1, field: "zip", mode: "format" }),
+      params,
+    );
+    const json = await res.json();
+    expect(json).not.toHaveProperty("eligible");
+    expect(json.fieldVisible).toBe(false);
+    expect(json.blockReasons).toEqual([]);
+  });
 });

@@ -69,9 +69,25 @@ function canSeeField(
   return level === "full" || level === "edit" || level === "read";
 }
 
-/** 隠し現在値依存の判定（no_change）を除去する。 */
+// 現在値（隠し値）から導出される blockReasons。対象フィールドが不可視のとき
+// これらを返すと、隠し値が empty / suspicious / non_phone / 同値 のどれかを
+// dry-run プローブで推測できてしまう（Codex DQ-02 P2）。
+//   - no_change                : currentValue === newValue（set/format 共通）
+//   - empty / suspicious /
+//     non_phone / manual        : format mode の decide*Fix が currentValue を分類した結果
+// 一方 forbidden_value（operator の newValue 由来）や version_mismatch /
+// owner_archived は現在値 PII を漏らさないため抑止しない。
+const CURRENT_VALUE_DERIVED_REASONS = new Set<string>([
+  "no_change",
+  "empty",
+  "suspicious",
+  "non_phone",
+  "manual",
+]);
+
+/** 隠し現在値に依存する blockReasons を除去する（不可視フィールド用）。 */
 function stripHiddenOracle(reasons: string[]): string[] {
-  return reasons.filter((r) => r !== "no_change");
+  return reasons.filter((r) => !CURRENT_VALUE_DERIVED_REASONS.has(r));
 }
 
 export async function POST(

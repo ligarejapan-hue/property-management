@@ -92,6 +92,18 @@ function matchesFilter(
   return issues.includes(filter);
 }
 
+/**
+ * display-level がそのフィールドの「生値」を見せるレベルか。
+ * full / edit / read のみ生値可視。partial / masked / hidden は生値非可視。
+ * maskValue の挙動（read 以上は生値、それ未満はマスク/null）と一致させる。
+ *
+ * DQ-02 P1: 生値非可視のフィールドは classifyOwnerContact をスキップし、
+ * issue コード・summary を一切出さない（隠し値の品質を推測させない）。
+ */
+function isRawVisible(level: string): boolean {
+  return level === "full" || level === "edit" || level === "read";
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getApiSession();
@@ -105,6 +117,10 @@ export async function GET(request: NextRequest) {
     }
 
     const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+    // DQ-02 P1: 各 PII フィールドの生値が可視か（full/edit/read）。不可視のフィールドは
+    // classifyOwnerContact をスキップし、issue/summary/分類由来情報を一切出さない。
+    const zipVisible = isRawVisible(displayConfig.zip);
+    const phoneVisible = isRawVisible(displayConfig.phone);
 
     const { searchParams } = new URL(request.url);
     const type = parseType(searchParams.get("type"));
@@ -167,7 +183,10 @@ export async function GET(request: NextRequest) {
     const matchedRows: ContactQualityRow[] = [];
 
     for (const owner of scanned) {
-      const result = classifyOwnerContact({ zip: owner.zip, phone: owner.phone });
+      const result = classifyOwnerContact(
+        { zip: owner.zip, phone: owner.phone },
+        { zip: zipVisible, phone: phoneVisible },
+      );
       tallyOwnerContact(summary, result);
 
       if (!matchesFilter(result.issues, type)) continue;
