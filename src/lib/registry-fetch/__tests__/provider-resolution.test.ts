@@ -46,6 +46,7 @@ const ENV_KEYS = [
   "REGISTRY_FETCH_BASE_URL",
   "REGISTRY_FETCH_TIMEOUT_MS",
   "REGISTRY_FETCH_PROVIDER",
+  "REGISTRY_FETCH_SELECTORS_CALIBRATED",
   "REGISTRY_FETCH_MIN_INTERVAL_MS",
 ] as const;
 
@@ -96,13 +97,26 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
 
-  it("PR-2 live: 資格情報 + opt-in env（REGISTRY_FETCH_PROVIDER=official）で OfficialRegistryProvider を返す（capability true）", () => {
-    // 運用 runbook で playwright/chromium を配置後に REGISTRY_FETCH_PROVIDER=official を設定すると、
+  it("CodexP1: 資格情報 + opt-in env のみ（校正フラグ無し）では null（誤セレクタ露出防止・501 維持）", () => {
+    // CodexP1: REGISTRY_SELECTORS は TODO プレースホルダのまま。opt-in だけで capability=true に
+    // すると実サイトを誤セレクタで操作してしまう。REGISTRY_FETCH_SELECTORS_CALIBRATED=true が
+    // 無ければ readiness=false → null（= 501 維持）。
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    expect(getRegistryFetchProvider()).toBeNull();
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
+  });
+
+  it("PR-2 live: 資格情報 + opt-in env + 校正フラグ で OfficialRegistryProvider を返す（capability true）", () => {
+    // 運用 runbook で playwright/chromium を配置 + セレクタを実サイトに校正後、
+    // REGISTRY_FETCH_PROVIDER=official かつ REGISTRY_FETCH_SELECTORS_CALIBRATED=true を設定すると、
     // 既定 factory が配線され（実 chromium 起動は fetch 実行時の動的 import まで遅延）、provider が
     // 解決される。ここでは provider 解決のみを検証し、実ブラウザは起動しない（factory 未呼び出し）。
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
     process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_SELECTORS_CALIBRATED = "true";
     const provider = getRegistryFetchProvider();
     expect(provider).toBeInstanceOf(OfficialRegistryProvider);
     expect(provider?.name).toBe("official");

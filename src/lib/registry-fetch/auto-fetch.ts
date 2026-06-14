@@ -173,6 +173,22 @@ const REGISTRY_SELECTORS = {
   downloadButton: "#download-pdf", // TODO(calibrate)
 } as const;
 
+/**
+ * CodexP1: REGISTRY_SELECTORS が **実サイトに校正済み** だと運用者が明示宣言したかを判定する。
+ *
+ * 上記セレクタは TODO プレースホルダ（"/login" path 以外は env で上書きできない）。資格情報 +
+ * opt-in（REGISTRY_FETCH_PROVIDER=official）だけで本番経路の provider を有効化すると、誤った
+ * セレクタのまま実サイト（公式「登記情報提供サービス」）を自動操作し、ログイン/検索の途中で必ず
+ * 失敗する有料 capability を「設定済み」として露出してしまう。これを防ぐため、本番経路では
+ * **明示の校正フラグ REGISTRY_FETCH_SELECTORS_CALIBRATED="true"** が無い限り readiness=false
+ * （= getRegistryFetchProvider() が null = route 501 維持）とする。実サイトでセレクタを校正し
+ * コード定数へ反映した後に、runbook 手順でこのフラグを立てて初めて有効化する運用。
+ * 値は明示の "true" のみ受理（"1"/"yes" 等は不可＝誤設定での意図せぬ有効化を避ける）。非PII・非secret。
+ */
+function areRegistrySelectorsCalibrated(): boolean {
+  return process.env.REGISTRY_FETCH_SELECTORS_CALIBRATED === "true";
+}
+
 function isTimeoutError(err: unknown): boolean {
   return (
     typeof err === "object" &&
@@ -214,26 +230,33 @@ function createPlaywrightRegistryPage(
       }
     },
     async searchByRealEstateNumber(realEstateNumber) {
-      // CodexP2: timeout を「無結果待ち（not_found）」と「セットアップ失敗（provider_error）」で
-      // 弁別する。fill/click はフォーム入力・送信のセットアップ段で、ここでの TimeoutError は
-      // セレクタ校正ズレ/ページ未準備（= 連携不備）を意味するため not_found ではなく
-      // provider_error（リトライ/監視を誤誘導しない）。結果要素の waitForSelector の timeout
-      // だけが「謄本ヒット無し（not_found 近似）」を意味する。
+      // CodexP2: timeout を「provider 連携の不具合（リトライ可能）」と「真の結果なし（not_found）」で
+      // 弁別する。
+      //   - fill/click（フォーム入力・送信のセットアップ段）由来の TimeoutError は
+      //     セレクタ校正ズレ/ページ未準備（= 連携不備）→ provider_error。
+      //   - 結果待ち（waitForSelector）の TimeoutError は「検索ページが遅い/セレクタ変更/結果行が
+      //     描画される前のタイムアウト」を意味し、**「謄本が存在しない」ではない**。これを
+      //     found:false（→ not_found 404）と誤分類するとリトライ/監視を誤誘導し、一時的な障害を
+      //     偽陰性（該当なし）にしてしまう。よって timeout 系（RegistryFetchError("timeout")）へ
+      //     分類し、真の「結果なし」とは区別する。
+      //   - 真の「結果なし」（明示の no-result インジケータ）の検出は live キャリブレーションで
+      //     導入し、その経路でのみ found:false（→ not_found）を返す（TODO(calibrate)）。
+      // いずれも生メッセージ（selector/入力が混入しうる）は例外に載せない。
       try {
         await page.fill(REGISTRY_SELECTORS.searchInput, realEstateNumber);
         await page.click(REGISTRY_SELECTORS.searchSubmit);
       } catch {
         // セットアップ（fill/click）由来の失敗は timeout 含め provider_error 扱い。
-        // 生メッセージ（selector/入力が混入しうる）は載せない。
         throw new RegistryFetchError("provider_error");
       }
       try {
         await page.waitForSelector(REGISTRY_SELECTORS.searchResult);
         return { found: true };
       } catch (err) {
-        // 結果要素が出ない（TimeoutError）= 該当なし（PR-2 近似）。not-found と timeout の
-        // 厳密弁別は live キャリブレーションで精緻化（TODO(calibrate)）。それ以外は provider_error。
-        if (isTimeoutError(err)) return { found: false };
+        if (err instanceof RegistryFetchError) throw err;
+        // 結果待ちの TimeoutError は連携不備（リトライ可能）= timeout。not_found にしない。
+        if (isTimeoutError(err)) throw new RegistryFetchError("timeout");
+        // それ以外（非 timeout の生例外）は provider_error。
         throw new RegistryFetchError("provider_error");
       }
     },
@@ -296,11 +319,14 @@ async function defaultChromiumLoader(): Promise<RegistryChromiumLike> {
  * 本番（引数なし呼び出し）/ テスト（chromiumLoader 注入）で使う browserFactory を解決する。
  *
  * readiness 設計（CodexP2 を維持しつつ PR-2 で live 化）:
- *   - **本番経路（chromiumLoader 未注入）**: 明示 opt-in `REGISTRY_FETCH_PROVIDER==="official"` が
- *     無ければ undefined を返す（= getRegistryFetchProvider() が null = route 501 維持 = 本番挙動不変。
- *     現本番は当 env 未設定）。これにより「資格情報だけ設定して playwright/chromium 未配置」でも
- *     capability=true で常に失敗する操作を露出しない（runbook で chromium 配置後に opt-in する運用）。
- *   - **テスト経路（chromiumLoader 注入）**: opt-in env なしでも factory を返す（実 playwright を
+ *   - **本番経路（chromiumLoader 未注入）**: 次の **両方** が揃って初めて factory を返す。
+ *       (a) 明示 opt-in `REGISTRY_FETCH_PROVIDER==="official"`（chromium 配置済みの運用宣言）
+ *       (b) CodexP1 セレクタ校正フラグ `REGISTRY_FETCH_SELECTORS_CALIBRATED==="true"`
+ *     いずれか欠ければ undefined（= getRegistryFetchProvider() が null = route 501 維持 = 本番挙動
+ *     不変。現本番は当 env 未設定）。これにより「資格情報だけ設定して playwright/chromium 未配置」
+ *     や「セレクタが TODO プレースホルダのまま」でも capability=true で常に失敗する操作（誤セレクタ
+ *     での実サイト操作）を露出しない（runbook で chromium 配置 + セレクタ校正後に両 env を立てる運用）。
+ *   - **テスト経路（chromiumLoader 注入）**: opt-in/校正 env なしでも factory を返す（実 playwright を
  *     読み込まず注入 chromium で adapter を検証するため）。
  *
  * ★ C-1: playwright は defaultChromiumLoader 内の動的 import でのみ読む（静的 import / require なし）。
@@ -308,8 +334,14 @@ async function defaultChromiumLoader(): Promise<RegistryChromiumLike> {
 export function resolveDefaultRegistryBrowserFactory(
   deps: { chromiumLoader?: () => Promise<RegistryChromiumLike> } = {},
 ): RegistryBrowserFactory | undefined {
-  // 本番経路は明示 opt-in を要求（chromium 配置済みの運用宣言）。テスト注入時は不要。
-  if (!deps.chromiumLoader && process.env.REGISTRY_FETCH_PROVIDER !== "official") {
+  // 本番経路は明示 opt-in + セレクタ校正フラグの両方を要求（テスト注入時は不要）。
+  // CodexP1: 校正フラグ無し（TODO プレースホルダのまま）の opt-in では誤セレクタで実サイトを
+  //   操作してしまうため、有効化せず undefined を維持する（= 501 維持）。
+  if (
+    !deps.chromiumLoader &&
+    (process.env.REGISTRY_FETCH_PROVIDER !== "official" ||
+      !areRegistrySelectorsCalibrated())
+  ) {
     return undefined;
   }
   const load = deps.chromiumLoader ?? defaultChromiumLoader;

@@ -69,6 +69,7 @@ function makeFakeChromium() {
 
 const ENV_KEYS = [
   "REGISTRY_FETCH_PROVIDER",
+  "REGISTRY_FETCH_SELECTORS_CALIBRATED",
   "REGISTRY_FETCH_TIMEOUT_MS",
   "REGISTRY_FETCH_LOGIN_PATH",
 ] as const;
@@ -102,9 +103,28 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(resolveDefaultRegistryBrowserFactory()).toBeUndefined();
   });
 
-  it("opt-in env が official なら（loader 未注入でも）factory を返す", () => {
+  it("opt-in env が official でもセレクタ未校正なら undefined（= 501 維持・CodexP1）", () => {
+    // CodexP1: REGISTRY_SELECTORS は TODO プレースホルダ。校正フラグ無しで opt-in だけでは
+    // 実サイトを誤セレクタで操作してしまうため、本番経路では undefined を維持する。
     process.env.REGISTRY_FETCH_PROVIDER = "official";
+    expect(resolveDefaultRegistryBrowserFactory()).toBeUndefined();
+  });
+
+  it("opt-in env が official かつ校正フラグありなら factory を返す（CodexP1）", () => {
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_SELECTORS_CALIBRATED = "true";
     expect(typeof resolveDefaultRegistryBrowserFactory()).toBe("function");
+  });
+
+  it("校正フラグのみ（opt-in env 無し）では undefined（両方必須・CodexP1）", () => {
+    process.env.REGISTRY_FETCH_SELECTORS_CALIBRATED = "true";
+    expect(resolveDefaultRegistryBrowserFactory()).toBeUndefined();
+  });
+
+  it("校正フラグが 'true' 以外（例: 1/yes）では undefined（明示 true のみ受理・CodexP1）", () => {
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_SELECTORS_CALIBRATED = "1";
+    expect(resolveDefaultRegistryBrowserFactory()).toBeUndefined();
   });
 
   it("C1: factory() が chromium.launch({headless:true})→newContext({acceptDownloads:true})→newPage を順に呼ぶ", async () => {
@@ -273,7 +293,11 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(gotoUrl).toBe(`https://reg.test${DEFAULT_REGISTRY_LOGIN_PATH}`);
   });
 
-  it("C9: searchByRealEstateNumber の結果待ち(waitForSelector)の timeout は found:false（not_found 維持）", async () => {
+  it("C9: searchByRealEstateNumber の結果待ち(waitForSelector)の timeout は not_found にせず timeout 系に分類する（CodexP2）", async () => {
+    // CodexP2: 検索ページが遅い / セレクタ変更 / 結果行レンダリング前の timeout を
+    // 「該当なし（found:false → not_found 404）」と誤分類しない。結果待ちの TimeoutError は
+    // 連携不備（リトライ可能）であって「謄本が存在しない」ではないため timeout/provider_error
+    // に分類し、真の「結果なし」とは区別する。
     const f = makeFakeChromium();
     f.page.waitForSelector = vi.fn(async () => {
       throw makeTimeoutError();
@@ -282,8 +306,13 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       chromiumLoader: f.loader,
     });
     const page = await factory!();
-    const outcome = await page.searchByRealEstateNumber("1234567890123");
-    expect(outcome.found).toBe(false);
+    // found:false（not_found 経路）にはならず、RegistryFetchError（timeout 系）を投げる。
+    await expect(
+      page.searchByRealEstateNumber("1234567890123"),
+    ).rejects.toBeInstanceOf(RegistryFetchError);
+    await expect(
+      page.searchByRealEstateNumber("1234567890123"),
+    ).rejects.toMatchObject({ code: "timeout" });
   });
 
   it("C9b: search の fill が timeout を投げたら provider_error（not_found にしない）", async () => {
