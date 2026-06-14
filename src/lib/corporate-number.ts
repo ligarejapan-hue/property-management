@@ -156,6 +156,103 @@ export function removeCorporateNumbersFromText(
   return removed ? tidyAfterCorporateRemoval(result) : input;
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// 会社法人等番号(12桁 / 登記の番号)= 国税庁の法人番号(13桁)とは別物。
+//
+// 重要な不変条件(13桁ロジックとの分離):
+//  - 採用形式は 12桁数字のみ。13桁(法人番号)は本ヘルパーでは採用しない(混同しない)。
+//  - 13桁の検出/正規化/移送(corporateNumber 列)には一切干渉しない(別関数・別 regex)。
+//  - 誤検出回避: 裸 12桁(電話番号 / マイナンバー等)は採用せず、ラベル付き
+//    (会社法人等番号 / 法人等番号)のみを抽出・除去する。これは 13桁実装が裸検出を
+//    許すのと比べ「より厳格」な方針(12桁は識別子としての特異性が低いため)。
+//  - 全角数字 / 各種ハイフン / 空白は正規化で吸収する(13桁と同じ HYPHEN_LIKE_CHARS)。
+// ───────────────────────────────────────────────────────────────────────────
+
+const COMPANY_REGISTRY_NUMBER_LENGTH = 12;
+
+/**
+ * 会社法人等番号として有効な 12桁数字に正規化する。
+ *
+ * - null / undefined / 空 → null
+ * - ハイフン・空白・全角数字を吸収後、12桁数字なら採用、それ以外は null
+ * - 11桁以下 / 13桁以上 → null(13桁=法人番号は別物として弾く)
+ * - 数字以外を含む → null
+ */
+export function normalizeCompanyRegistryNumber(
+  input: string | null | undefined,
+): string | null {
+  if (input == null) return null;
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+
+  const digits = toHalfwidthDigitsOnly(trimmed);
+  if (!/^\d+$/.test(digits)) return null;
+  if (digits.length !== COMPANY_REGISTRY_NUMBER_LENGTH) return null;
+  return digits;
+}
+
+// ラベル付き「会社法人等番号 / 法人等番号」+ 区切り + 12桁(ハイフン/全角/空白混じり許容)。
+// 13桁を弾くため、最終的に normalizeCompanyRegistryNumber で 12桁検証を再度通す。
+// (13桁の LABELED_CORPORATE_NUMBER_RE とは別 regex。"法人番号"(13桁用ラベル)は
+//  ここには含めない=12桁抽出のラベルは会社法人等番号系に限定する。)
+const LABELED_COMPANY_REGISTRY_NUMBER_RE =
+  /(?:会社法人等番号|法人等番号)[\s:：=]*([0-9０-９][0-9０-９\s\-‐‑‒–—―ー－−─]{10,30})/gi;
+
+/**
+ * 入力テキストから会社法人等番号(12桁)候補を抽出する。
+ *
+ * 抽出ルール:
+ *  - ラベル付き(会社法人等番号 / 法人等番号)のみ抽出する(裸 12桁は誤検出回避で対象外)。
+ *  - 抽出後 normalizeCompanyRegistryNumber で 12桁検証を通すため、13桁などは除外される。
+ *  - 戻り値は重複除去済み(Set 経由)。
+ */
+export function extractCompanyRegistryNumbersFromText(
+  input: string | null | undefined,
+): string[] {
+  if (input == null) return [];
+  if (input.trim() === "") return [];
+
+  const found = new Set<string>();
+  for (const match of input.matchAll(LABELED_COMPANY_REGISTRY_NUMBER_RE)) {
+    const normalized = normalizeCompanyRegistryNumber(match[1]);
+    if (normalized) found.add(normalized);
+  }
+  return Array.from(found);
+}
+
+/**
+ * テキストから「指定した 12桁会社法人等番号」のラベル付き混入を除去する。
+ *
+ *  - 除去対象はラベル付き(会社法人等番号 / 法人等番号 + 区切り + 番号)のみ。
+ *    ラベルごと番号を除去し、孤立ハイフン等の残骸を残さない。
+ *  - 除去対象は normalize 後の値が numbersToRemove に含まれるものだけ。
+ *  - 裸 12桁は検出しない方針ゆえ除去もしない(無関係データを破壊しない)。
+ *  - 除去後は tidyAfterCorporateRemoval で空白・孤立区切りを整える。
+ *  - input が null/undefined → null。numbersToRemove が空 → input をそのまま返す。
+ *  - 実際に除去が起きなければ tidy せず原文を返す(無関係な空白を変更しない)。
+ */
+export function removeCompanyRegistryNumbersFromText(
+  input: string | null | undefined,
+  numbersToRemove: string[],
+): string | null {
+  if (input == null) return null;
+  if (numbersToRemove.length === 0) return input;
+  const targets = new Set(numbersToRemove);
+
+  let removed = false;
+  const strip = (full: string, num: string): string => {
+    const normalized = normalizeCompanyRegistryNumber(num);
+    if (normalized && targets.has(normalized)) {
+      removed = true;
+      return "";
+    }
+    return full;
+  };
+
+  const result = input.replace(LABELED_COMPANY_REGISTRY_NUMBER_RE, strip);
+  return removed ? tidyAfterCorporateRemoval(result) : input;
+}
+
 export interface OwnerLikeForCorporateDetection {
   name?: string | null;
   address?: string | null;
