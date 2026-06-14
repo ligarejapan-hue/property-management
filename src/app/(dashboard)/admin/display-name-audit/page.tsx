@@ -70,6 +70,15 @@ export default function DisplayNameAuditPage() {
 
   const current: AuditResult | undefined = data[tab];
 
+  // Codex P1: owner タブは生の所有者名(PII)と正規化キーを表示し得る。既存
+  // ScreenProtectionGuard は [data-pii-protected] 領域内でのみ copy/cut/contextmenu/print を
+  // 抑止・client 監査するため、owner タブが active のときだけ結果領域を PII 保護領域にする。
+  // building は非PII（既存方針）ゆえ無印のままにし、誤って owner surface を付けない。
+  const piiSurfaceProps =
+    tab === "owner"
+      ? { "data-pii-protected": true, "data-pii-surface": "owner" as const }
+      : {};
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <nav className="mb-4 text-sm text-gray-500">
@@ -129,7 +138,10 @@ export default function DisplayNameAuditPage() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div
+        className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
+        {...piiSurfaceProps}
+      >
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
