@@ -95,10 +95,11 @@ export async function POST(
     if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
       throw new ApiError(400, "version は正の整数で指定してください", "INVALID_INPUT");
     }
-    const field = body?.field;
-    if (field !== "zip" && field !== "phone") {
+    const fieldRaw = body?.field;
+    if (fieldRaw !== "zip" && fieldRaw !== "phone") {
       throw new ApiError(400, "field は zip / phone で指定してください", "INVALID_INPUT");
     }
+    const field: ContactField = fieldRaw;
     const mode = body?.mode;
     if (mode !== "format" && mode !== "set") {
       throw new ApiError(400, "mode は format / set で指定してください", "INVALID_INPUT");
