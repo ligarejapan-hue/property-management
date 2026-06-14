@@ -165,7 +165,6 @@ export async function GET(request: NextRequest) {
             id: true,
             address: true,
             propertyType: true,
-            roomNo: true,
             // 物件は mailable 所有者で絞るが、ここは非アーカイブ所有者を全件取る
             // （address 空欄の共有者も grouping 側で skip・skippedAddressMissingCount に計上するため）。
             propertyOwners: {

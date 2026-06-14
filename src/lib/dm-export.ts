@@ -20,7 +20,10 @@ import { PROPERTY_TYPE_LABELS, DM_STATUS_LABELS } from "@/lib/property-types";
 import type { OwnerDisplayConfig } from "@/lib/api-helpers";
 
 // CSV ヘッダ（差込テンプレートの列順に厳密一致させること）。
-// 先頭 12 列は従来の差込テンプレ互換（列順・列名を変えない）。
+// 先頭 11 列は従来の差込テンプレ互換（列順・列名を変えない）。
+// 「部屋番号」列は所有者宛 DM の宛名印刷に使わず紛らわしいため削除した。
+//   ※列削除により後続列（DM判断 以降）の位置が左にずれる点に注意
+//     （列位置で差込む外注テンプレには影響・ヘッダ名ベースの差込なら影響なし）。
 // グルーピング（1 送付先住所 = 1 行）後の追跡用に「送付先所有者名一覧 / 共有者数」を
 // 末尾に追加する（既存テンプレへの影響を避けるため末尾追加とする）。
 export const DM_EXPORT_HEADERS = [
@@ -34,7 +37,6 @@ export const DM_EXPORT_HEADERS = [
   "所有者名カナ",
   "代表者",
   "続柄",
-  "部屋番号",
   "DM判断",
   "送付先所有者名一覧",
   "共有者数",
@@ -78,7 +80,6 @@ export function isPlainOwnerLevel(level: string): boolean {
 export interface DmRowProperty {
   address: string | null | undefined;
   propertyType: string;
-  roomNo: string | null | undefined;
 }
 
 export interface DmRowOwner {
@@ -224,7 +225,6 @@ export function buildDmRow(
     所有者名カナ: maskValue(repOwner.nameKana, ownerDisplayConfig.nameKana) ?? "",
     代表者: representative.isPrimary ? "代表" : "",
     続柄: representative.relationship ?? "",
-    部屋番号: property.roomNo ?? "",
     DM判断: DM_STATUS_LABELS["send"] ?? "送付可",
     送付先所有者名一覧: names.join("、"),
     共有者数: String(group.length),

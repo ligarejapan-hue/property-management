@@ -19,7 +19,15 @@
  * quality-check route（hasPermission は実物・getUserPermissions のみ mock）に倣う。
  * lib コア runRegistryAutoFetch は provider 注入で直接検証し、権限ゲートは route 実行で検証する。
  */
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -389,6 +397,42 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(pm.property.update).not.toHaveBeenCalled();
   });
 
+  it("I-1. not_found は業務的 not found ゆえ 404（upstream 障害扱いの 502 にしない・リトライ誤認回避）", async () => {
+    const provider = new MockRegistryFetchProvider({ failWith: "not_found" });
+    await expect(runLib({ provider })).rejects.toMatchObject({
+      status: 404,
+      code: "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
+    });
+    // 失敗時はロック解除され process へ進まない（既存挙動不変）。
+    const release = pm.property.updateMany.mock.calls.find(
+      (c) => c[0]?.data?.registryStatus === "unconfirmed",
+    );
+    expect(release).toBeTruthy();
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("I-1. 他の provider 失敗コードの HTTP ステータスは不変（timeout=504/rate_limited=429/auth_failed=502/provider_error=502）", async () => {
+    const cases: Array<
+      ["timeout" | "rate_limited" | "auth_failed" | "provider_error", number]
+    > = [
+      ["timeout", 504],
+      ["rate_limited", 429],
+      ["auth_failed", 502],
+      ["provider_error", 502],
+    ];
+    for (const [code, status] of cases) {
+      vi.clearAllMocks();
+      setProperty();
+      pm.property.updateMany.mockResolvedValue({ count: 1 });
+      const provider = new MockRegistryFetchProvider({ failWith: code });
+      await expect(runLib({ provider })).rejects.toMatchObject({
+        status,
+        code: "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
+      });
+    }
+  });
+
   it("9. AuditLog に PII / rawText / fileUrl / owner / address / zip / token 等が入らない", async () => {
     const provider = successProvider();
     (parseRegistryText as Mock).mockReturnValue({
@@ -492,6 +536,54 @@ describe("PR4/CodexP1: live route は provider 未設定で安全停止（mock �
   });
 });
 
+describe("PR4/CodexP2: env 設定済みでも browserFactory 未配線なら 501・scheduled にしない", () => {
+  const ENV_KEYS = [
+    "REGISTRY_FETCH_LOGIN_ID",
+    "REGISTRY_FETCH_PASSWORD",
+  ] as const;
+  let savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv = {};
+    for (const k of ENV_KEYS) {
+      savedEnv[k] = process.env[k];
+    }
+    // 資格情報 env を「設定済み」にする（= 旧実装ならここで provider 解決し POST が
+    // 物件を scheduled にして provider_error で必ず失敗する経路に入ってしまう）。
+    process.env.REGISTRY_FETCH_LOGIN_ID = "configured-id";
+    process.env.REGISTRY_FETCH_PASSWORD = "configured-pw";
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it("env 設定済み + browserFactory 未配線 → POST 501・registryStatus/ImportJob/Attachment/AuditLog 副作用ゼロ（scheduled にしない）", async () => {
+    const res = await callRoute({ confirmed: true });
+    expect(res.status).toBe(501);
+    const body = await res.json();
+    expect(body.error.code).toBe("REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED");
+    // 物件を一瞬たりとも scheduled にしない（楽観ロックの updateMany を呼ばない）
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+    // ImportJob / Attachment / AuditLog いずれも作成されない
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("capability も false（isRegistryAutoFetchProviderConfigured() が env 設定済みでも false）", async () => {
+    const { isRegistryAutoFetchProviderConfigured } = await import(
+      "@/lib/registry-fetch/auto-fetch"
+    );
+    // env 設定済みでも browserFactory 未配線（PR-1）ゆえ capability=false。
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
+  });
+});
+
 describe("PR4/CodexP2: レスポンスから owner PII を除去", () => {
   const PARSED_WITH_PII = () => ({
     ...EMPTY_PARSED(),
@@ -552,10 +644,12 @@ describe("PR4: source-assertion（スコープ固定）", () => {
   const routeFile =
     "src/app/api/properties/[id]/registry/auto-fetch/route.ts";
   const libFile = "src/lib/registry-fetch/auto-fetch.ts";
+  const officialProviderFile = "src/lib/registry-fetch/official-provider.ts";
   const routeSrc = read(routeFile);
   const libSrc = read(libFile);
+  const officialProviderSrc = read(officialProviderFile);
 
-  it("10. 外部 HTTP / Playwright / env / APIキー を使っていない", () => {
+  it("10. 外部 HTTP / Playwright / 旧ベンダAPIキー を使っていない（PR-1: env は REGISTRY_FETCH_* のみ許可）", () => {
     for (const src of [routeSrc, libSrc]) {
       expect(src).not.toMatch(
         /from\s+["'](node:)?(http|https|net|child_process|dns|tls|dgram)["']/,
@@ -564,11 +658,50 @@ describe("PR4: source-assertion（スコープ固定）", () => {
         /from\s+["'](axios|node-fetch|undici|got|playwright|puppeteer|@playwright\/test)["']/,
       );
       expect(src).not.toMatch(/\bfetch\s*\(/);
-      expect(src).not.toMatch(/process\.env/);
+      // 旧ベンダAPIキー方式（路線変更前）の env 名は使わない。
       expect(src).not.toMatch(/REGISTRY_API_KEY|REGISTRY_API_URL/);
       // playwright/puppeteer は import 形（上の正規表現）で禁止。実コードでの使用には
       // import が必須のため、コメント言及の誤検知を避けつつ実害を防げる（PR3 と同方針）。
     }
+    // route は env を一切読まない（provider 解決は lib に委譲）。
+    expect(routeSrc).not.toMatch(/process\.env/);
+    // PR-1: lib は getRegistryFetchProvider() 内で REGISTRY_FETCH_*（server-side 資格情報）
+    // のみを読む。NEXT_PUBLIC_* は読まない（client 露出禁止）。
+    const libEnvRefs = libSrc.match(/process\.env\.\w+/g) ?? [];
+    for (const ref of libEnvRefs) {
+      expect(ref).toMatch(/^process\.env\.REGISTRY_FETCH_/);
+    }
+    expect(libSrc).not.toMatch(/process\.env\.NEXT_PUBLIC_/);
+  });
+
+  it("C-1. official-provider.ts / auto-fetch.ts は Playwright を静的 import しない（PR-2 で混入する芽を断つ）", () => {
+    // 契約: Playwright は将来 resolveDefaultRegistryBrowserFactory() 内の動的 import
+    // （await import("playwright") 等）でのみ読む。official-provider.ts と auto-fetch.ts は
+    // static import / require の形で playwright を読み込まない。これにより
+    // auto-fetch.ts → me/permissions route の import 連鎖で Playwright が
+    // サーバーバンドルへ混入する芽を断つ。
+    for (const src of [officialProviderSrc, libSrc]) {
+      // ES static import: `import ... from "playwright"` / `import "playwright"`。
+      expect(src).not.toMatch(
+        /from\s+["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']/,
+      );
+      expect(src).not.toMatch(
+        /import\s+["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']/,
+      );
+      // CommonJS require: `require("playwright")`。
+      expect(src).not.toMatch(
+        /require\s*\(\s*["'](playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)["']\s*\)/,
+      );
+    }
+  });
+
+  it("C-1. 動的 import 契約: 将来 Playwright を読むのは resolveDefaultRegistryBrowserFactory（または注入境界）のみ", () => {
+    // PR-1 では playwright 依存を一切追加しないため動的 import も存在しないが、
+    // 契約として「読むなら動的 import 境界でのみ」をコメントで明示していることを固定する。
+    expect(libSrc).toMatch(/resolveDefaultRegistryBrowserFactory/);
+    // OfficialRegistryProvider は value import 可（クラス自体が playwright を静的 import
+    // しない構造を上のアサートで保証済み）。
+    expect(libSrc).toMatch(/OfficialRegistryProvider/);
   });
 
   it("11. schema/migration/package を変更しない（DDL/env なし・既存 enum 値のみ使用）", () => {
@@ -603,10 +736,11 @@ describe("PR4: source-assertion（スコープ固定）", () => {
     expect(libSrc).toMatch(/provider: RegistryFetchProvider/);
     expect(libSrc).not.toMatch(/provider\s*=\s*new MockRegistryFetchProvider/);
     expect(libSrc).not.toMatch(/MockRegistryFetchProvider/);
-    // 本番 provider 解決は未設定（null）。env フラグでの切替もしない
+    // 本番 provider 解決は資格情報 env（REGISTRY_FETCH_*）で行い、env フラグ切替はしない。
     expect(libSrc).toMatch(/getRegistryFetchProvider/);
     expect(libSrc).not.toMatch(/ENABLE_MOCK_REGISTRY_FETCH/);
-    expect(libSrc).not.toMatch(/process\.env/);
+    // mock を本番解決に使わない（official-provider のみ解決する）。
+    expect(libSrc).not.toMatch(/MockRegistryFetchProvider/);
   });
 
   it("CodexP1-2. route は mock provider を直接 new せず provider 未設定で 501 を返す", () => {

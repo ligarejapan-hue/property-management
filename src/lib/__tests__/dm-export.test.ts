@@ -60,7 +60,6 @@ function po(over: Record<string, unknown> = {}): DmRowPropertyOwner {
 const PROP: DmRowProperty = {
   address: "東京都千代田区1-1",
   propertyType: "land",
-  roomNo: null,
 };
 
 describe("normalizeZipForGroup", () => {
@@ -266,7 +265,7 @@ describe("buildDmRow（1 グループ = 1 行）", () => {
 
   it("null フィールドは空文字（literal null を出さない）", () => {
     const row = buildDmRow(
-      { address: null, propertyType: "land", roomNo: null },
+      { address: null, propertyType: "land" },
       [po({ owner: { name: "X", nameKana: null, zip: null, address: null }, relationship: null })],
       FULL,
       null,
@@ -274,10 +273,15 @@ describe("buildDmRow（1 グループ = 1 行）", () => {
     expect(Object.values(row)).not.toContain(null);
     expect(JSON.stringify(row)).not.toContain("null");
   });
+
+  it("部屋番号 キーを出力しない（列削除）", () => {
+    const row = buildDmRow(PROP, [po({ owner: { name: "所有 花子" } })], FULL, "MGMT-1");
+    expect(Object.keys(row)).not.toContain("部屋番号");
+  });
 });
 
 describe("DM_EXPORT_HEADERS（列順・末尾追加列）", () => {
-  it("既存 12 列を順序通り維持し、末尾に送付先所有者名一覧・共有者数を追加", () => {
+  it("部屋番号を除いた既存 11 列を順序通り維持し、末尾に送付先所有者名一覧・共有者数を追加（計 13 列）", () => {
     expect(DM_EXPORT_HEADERS).toEqual([
       "管理ID",
       "物件住所",
@@ -289,10 +293,13 @@ describe("DM_EXPORT_HEADERS（列順・末尾追加列）", () => {
       "所有者名カナ",
       "代表者",
       "続柄",
-      "部屋番号",
       "DM判断",
       "送付先所有者名一覧",
       "共有者数",
     ]);
+  });
+
+  it("部屋番号 列を含まない", () => {
+    expect(DM_EXPORT_HEADERS).not.toContain("部屋番号");
   });
 });

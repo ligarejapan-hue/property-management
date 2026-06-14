@@ -18,6 +18,7 @@ import {
   Upload,
   KeyRound,
   UserCog,
+  MapPinned,
   Map as MapIcon,
   ScanSearch,
 } from "lucide-react";
@@ -106,6 +107,11 @@ const adminNavItems: NavItem[] = [
     label: "表示名監査",
     href: "/admin/display-name-audit",
     icon: <ScanSearch className="h-5 w-5" />,
+  },
+  {
+    label: "郵便番号×住所チェック",
+    href: "/admin/postal-code-audit",
+    icon: <MapPinned className="h-5 w-5" />,
   },
 ];
 
