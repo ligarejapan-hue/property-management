@@ -28,6 +28,7 @@ vi.mock("@/lib/api-helpers", () => {
 import {
   resolveDefaultRegistryBrowserFactory,
   DEFAULT_REGISTRY_BASE_URL,
+  DEFAULT_REGISTRY_LOGIN_PATH,
 } from "../auto-fetch";
 import { RegistryFetchError } from "../errors";
 
@@ -69,6 +70,7 @@ function makeFakeChromium() {
 const ENV_KEYS = [
   "REGISTRY_FETCH_PROVIDER",
   "REGISTRY_FETCH_TIMEOUT_MS",
+  "REGISTRY_FETCH_LOGIN_PATH",
 ] as const;
 let saved: Record<string, string | undefined> = {};
 beforeEach(() => {
@@ -228,6 +230,49 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
   });
 
   // CodexP2-2: search のセットアップ(fill/click)由来 timeout は not_found ではなく provider_error。
+  // CodexP2: login のパスは env（REGISTRY_FETCH_LOGIN_PATH）で上書きできる。
+  // 既定の "/login" は実サービスのログインパスと一致が未確証ゆえ、live キャリブレーション時に
+  // 固定値を確定する前に env で校正できるようにする（誤った固定値で確定しない）。
+  it("C14: DEFAULT_REGISTRY_LOGIN_PATH は '/' 始まりの相対パス（base に前置する想定）", () => {
+    expect(DEFAULT_REGISTRY_LOGIN_PATH.startsWith("/")).toBe(true);
+  });
+
+  it("C15: login で baseUrl 省略時は default base + default login path の絶対 URL へ goto する", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "id", password: "pw" });
+    const gotoUrl = f.page.goto.mock.calls[0][0];
+    expect(gotoUrl).toBe(`${DEFAULT_REGISTRY_BASE_URL}${DEFAULT_REGISTRY_LOGIN_PATH}`);
+  });
+
+  it("C16: REGISTRY_FETCH_LOGIN_PATH を設定すると login の goto パスがそれで上書きされる", async () => {
+    process.env.REGISTRY_FETCH_LOGIN_PATH = "/svc/auth/signin";
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" });
+    const gotoUrl = f.page.goto.mock.calls[0][0];
+    expect(gotoUrl).toBe("https://reg.test/svc/auth/signin");
+    // 既定の "/login" は使われない。
+    expect(gotoUrl).not.toContain("/login");
+  });
+
+  it("C17: REGISTRY_FETCH_LOGIN_PATH 未設定なら既定 login path（/login）を使う", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" });
+    const gotoUrl = f.page.goto.mock.calls[0][0];
+    expect(gotoUrl).toBe(`https://reg.test${DEFAULT_REGISTRY_LOGIN_PATH}`);
+  });
+
   it("C9: searchByRealEstateNumber の結果待ち(waitForSelector)の timeout は found:false（not_found 維持）", async () => {
     const f = makeFakeChromium();
     f.page.waitForSelector = vi.fn(async () => {

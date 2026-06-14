@@ -151,8 +151,18 @@ interface RegistryChromiumLike {
  */
 export const DEFAULT_REGISTRY_BASE_URL = "https://www1.touki.or.jp";
 
+/**
+ * ログインページの既定パス（base URL に前置する相対パス）。
+ *
+ * CodexP2: 実サービスの正確な login エンドポイントは実ログイン環境でのみ確証できるため、
+ * 既定値（"/login"）を **誤った固定値として確定しない**。live キャリブレーション時は
+ * REGISTRY_FETCH_LOGIN_PATH（env）でこのパスを上書きできるようにし、確証後にこの定数へ
+ * 反映する運用とする（TODO(calibrate): 実サイトの login パス/URL を確認して確定）。
+ * 非PII・非secret（公開された公式サービスのパス）。
+ */
+export const DEFAULT_REGISTRY_LOGIN_PATH = "/login";
+
 const REGISTRY_SELECTORS = {
-  loginPath: "/login",
   loginId: "#login-id", // TODO(calibrate): 実サイトの入力欄に合わせる
   password: "#login-password", // TODO(calibrate)
   loginSubmit: "button[type=submit]", // TODO(calibrate)
@@ -176,18 +186,23 @@ function isTimeoutError(err: unknown): boolean {
  * 失敗は **RegistryFetchError（分類コードのみ）** に正規化し、生メッセージ（URL/入力/selector が
  * 混入しうる）を例外に載せない。中間成果物（Cookie/DL）は close() で破棄する。
  */
-function createPlaywrightRegistryPage(handles: {
-  browser: RegistryBrowserLike;
-  context: RegistryContextLike;
-  page: RegistryPageLike;
-}): RegistryBrowserPage {
+function createPlaywrightRegistryPage(
+  handles: {
+    browser: RegistryBrowserLike;
+    context: RegistryContextLike;
+    page: RegistryPageLike;
+  },
+  config: { loginPath: string } = { loginPath: DEFAULT_REGISTRY_LOGIN_PATH },
+): RegistryBrowserPage {
   const { browser, context, page } = handles;
+  const { loginPath } = config;
   return {
     async login(input) {
       try {
         // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
+        // loginPath は env（REGISTRY_FETCH_LOGIN_PATH）で上書き可能（live キャリブレーション）。
         const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
-        await page.goto(`${base}${REGISTRY_SELECTORS.loginPath}`);
+        await page.goto(`${base}${loginPath}`);
         await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
         await page.fill(REGISTRY_SELECTORS.password, input.password);
         await page.click(REGISTRY_SELECTORS.loginSubmit);
@@ -300,6 +315,10 @@ export function resolveDefaultRegistryBrowserFactory(
   const load = deps.chromiumLoader ?? defaultChromiumLoader;
   const timeoutRaw = process.env.REGISTRY_FETCH_TIMEOUT_MS;
   const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
+  // CodexP2: login パスは env（REGISTRY_FETCH_LOGIN_PATH）で上書き可能（誤った固定値で確定しない）。
+  //   未設定なら DEFAULT_REGISTRY_LOGIN_PATH（"/login"・TODO(calibrate)）。非PII・非secret。
+  const loginPath =
+    process.env.REGISTRY_FETCH_LOGIN_PATH || DEFAULT_REGISTRY_LOGIN_PATH;
 
   return async () => {
     const { chromium } = await load();
@@ -327,7 +346,7 @@ export function resolveDefaultRegistryBrowserFactory(
     if (timeoutMs && Number.isFinite(timeoutMs) && page.setDefaultTimeout) {
       page.setDefaultTimeout(timeoutMs);
     }
-    return createPlaywrightRegistryPage({ browser, context, page });
+    return createPlaywrightRegistryPage({ browser, context, page }, { loginPath });
   };
 }
 

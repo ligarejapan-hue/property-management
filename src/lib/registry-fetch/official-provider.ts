@@ -158,13 +158,18 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     const requestId = this.requestIdFactory();
 
     // 4. ブラウザ起動（動的 Playwright import / chromium.launch / newContext / newPage）。
-    //    ここでの失敗（依存未導入・起動不能・生エラー＝パス/内部情報が混入しうる）は、
-    //    後続の try/catch（classifyRegistryFetchError）に入る前に発生するため、
-    //    **この時点で明示的に provider_error へ正規化**して生メッセージの伝播を防ぐ
-    //    （RegistryFetchError は分類コードを保ったまま伝播）。page 未生成ゆえ close 不要。
+    //    CodexP2: timeoutMs は login/search/download だけでなく **起動全体** にも効かせる。
+    //    起動が解決しない（chromium 起動ハング等）と、後続の withTimeout に到達しないまま
+    //    await が宙吊りになり、runRegistryAutoFetch が scheduled のまま catch/解除へ到達できず
+    //    物件がロック固着する。よって factory 呼び出しを timeout budget 配下で実行する。
+    //    起動段の失敗（依存未導入・起動不能・生エラー＝パス/内部情報が混入しうる）は、
+    //    後続 try/catch（classifyRegistryFetchError）に入る前に発生するため、ここで明示的に
+    //    provider_error へ正規化して生メッセージの伝播を防ぐ（RegistryFetchError は分類コード
+    //    を保ったまま伝播）。timeout で打ち切った後に factory が遅れて page を返した場合は、
+    //    宙に浮いたブラウザ/コンテキストをリークさせないよう、その page を best-effort で閉じる。
     let page: RegistryBrowserPage;
     try {
-      page = await this.browserFactory();
+      page = await this.withStartupTimeout(() => this.browserFactory!());
     } catch (err) {
       throw classifyRegistryFetchError(err);
     }
@@ -223,6 +228,50 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         },
         (err) => {
           clearTimeout(timer);
+          reject(err);
+        },
+      );
+    });
+  }
+
+  /**
+   * ブラウザ起動（browserFactory）専用の timeout ラッパ（CodexP2）。
+   *
+   * withTimeout との違い: ここで race するのは page をまだ握っていない起動段のため、timeout で
+   * 打ち切った後に factory が **遅れて** RegistryBrowserPage を resolve するケースがある。その
+   * page は fetchRegistryPdf の finally に到達しない（既に timeout を throw 済み）ので、宙に浮いた
+   * ブラウザ/コンテキスト/Chromium プロセスがリークする。これを防ぐため、timeout 後に到着した
+   * page は本ラッパ内で best-effort で close する（生エラーは握りつぶし元の timeout を優先）。
+   * timeoutMs 未指定なら factory をそのまま await（タイムアウト無し）。
+   */
+  private withStartupTimeout(
+    factory: () => Promise<RegistryBrowserPage>,
+  ): Promise<RegistryBrowserPage> {
+    const timeoutMs = this.timeoutMs;
+    if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return factory();
+    }
+    return new Promise<RegistryBrowserPage>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        reject(new RegistryFetchError("timeout"));
+      }, timeoutMs);
+      factory().then(
+        (page) => {
+          clearTimeout(timer);
+          if (settled) {
+            // timeout 後に遅れて起動完了 → 宙に浮いた page を確実に閉じる（リーク防止）。
+            void page.close().catch(() => {
+              // close 失敗は握りつぶす（既に timeout を呼び出し側へ返している）。
+            });
+            return;
+          }
+          resolve(page);
+        },
+        (err) => {
+          clearTimeout(timer);
+          if (settled) return; // 既に timeout で reject 済み。
           reject(err);
         },
       );

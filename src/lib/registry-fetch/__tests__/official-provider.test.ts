@@ -256,6 +256,54 @@ describe("OfficialRegistryProvider（PR-2 実フロー・fake page 注入・外�
     expect(page.closed).toBe(true);
   });
 
+  it("A8b: timeoutMs を超えるブラウザ起動（factory ハング）も timeout で打ち切られる", async () => {
+    // CodexP2: factory（動的 import / chromium.launch / newContext / newPage）が解決しない
+    // = 起動ハング。timeout は login/search/download だけでなく **起動全体** に効く必要がある
+    // （効かないと runRegistryAutoFetch が scheduled のまま catch へ到達せず物件が固着する）。
+    const factory: RegistryBrowserFactory = () =>
+      new Promise<RegistryBrowserPage>(() => {
+        /* 永遠に解決しない（起動ハング） */
+      });
+    const provider = new OfficialRegistryProvider({
+      loginId: "id",
+      password: "pw",
+      timeoutMs: 10,
+      browserFactory: factory,
+    });
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+    ).rejects.toMatchObject({ code: "timeout" });
+  });
+
+  it("A8c: factory が timeout 後に遅れて page を返したら、その page を close する（リーク防止）", async () => {
+    // 起動が timeout を超えた後に factory が解決した場合、宙に浮いた page を確実に閉じる。
+    const lateClose = vi.fn(async () => {});
+    let resolveFactory: ((p: RegistryBrowserPage) => void) | undefined;
+    const factory: RegistryBrowserFactory = () =>
+      new Promise<RegistryBrowserPage>((resolve) => {
+        resolveFactory = resolve;
+      });
+    const provider = new OfficialRegistryProvider({
+      loginId: "id",
+      password: "pw",
+      timeoutMs: 10,
+      browserFactory: factory,
+    });
+    const promise = provider.fetchRegistryPdf({
+      realEstateNumber: "1",
+      ref: "p",
+    });
+    await expect(promise).rejects.toMatchObject({ code: "timeout" });
+    // timeout 後に factory が遅れて page を返す。
+    const latePage = makeFakePage();
+    latePage.close = lateClose;
+    resolveFactory?.(latePage);
+    // microtask を一巡させて late-close が走るのを待つ。
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(lateClose).toHaveBeenCalledTimes(1);
+  });
+
   it("A9: download が失敗しても close される（リーク防止）", async () => {
     const page = makeFakePage({
       downloadRegistryPdf: async () => {
