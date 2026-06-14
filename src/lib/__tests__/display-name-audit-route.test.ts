@@ -304,6 +304,95 @@ describe("GET /api/admin/display-name-audit — JSON 出力", () => {
   });
 });
 
+describe("GET /api/admin/display-name-audit — スキャン上限（DQ-01 と同型）", () => {
+  // scan 上限の値。route の MAX_SCAN（10000）と一致させる。
+  const MAX_SCAN = 10_000;
+
+  // 「単一の正規化キーに大量の生バリアント」を作る（Codex P2 の主シナリオ）。
+  // 群数は常に 1（MAX_GROUPS 上限には掛からない）が、行数=変動するので
+  // 群数上限ではなく scan/row 上限の効果だけを切り分けて検証できる。
+  // 半角/全角スペースの位置を 1 文字ずつずらして全件 distinct な生 name にする。
+  function makeOneKeyManyVariants(count: number) {
+    const rows: Array<{ id: string; name: string }> = [];
+    for (let i = 0; i < count; i++) {
+      // "山田" + 半角スペース i 個 + "太郎"。normalizeName は空白を畳むため
+      // 正規化キーは全件同一（"山田太郎"）だが、生 name は全件別バリアント。
+      rows.push({ id: `o${i}`, name: `山田${" ".repeat(i + 1)}太郎` });
+    }
+    return rows;
+  }
+
+  it("owner findMany は take: MAX_SCAN+1 で取得上限を設ける", async () => {
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue([]);
+
+    await GET(makeRequest("?entity=owner"));
+
+    const ownerCall = pm.owner.findMany.mock.calls[0][0];
+    expect(ownerCall.take).toBe(MAX_SCAN + 1);
+  });
+
+  it("building findMany も take: MAX_SCAN+1 で取得上限を設ける", async () => {
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    await GET(makeRequest("?entity=building"));
+
+    const buildingCall = pm.building.findMany.mock.calls[0][0];
+    expect(buildingCall.take).toBe(MAX_SCAN + 1);
+  });
+
+  it("owner scan が MAX_SCAN を超える（MAX_SCAN+1 件返る）と truncated:true・先頭 MAX_SCAN 件のみ集計", async () => {
+    // DB が take 上限ぶん（MAX_SCAN+1）返した状況を模す。単一キー・全件 distinct。
+    pm.owner.findMany.mockResolvedValue(makeOneKeyManyVariants(MAX_SCAN + 1));
+    pm.building.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest("?entity=owner"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.owner.truncated).toBe(true);
+    // 群は単一キーゆえ常に1群。だが先頭 MAX_SCAN 件のみ集計＝バリアント数は MAX_SCAN。
+    expect(body.owner.groups).toHaveLength(1);
+    expect(body.owner.groups[0].variants).toHaveLength(MAX_SCAN);
+    // 監査ログにも scan 切り捨てが反映される
+    expect(lastAudit().detail).toMatchObject({ ownerTruncated: true });
+  });
+
+  it("building scan が MAX_SCAN を超えると truncated:true（silent 切り捨てしない）", async () => {
+    pm.owner.findMany.mockResolvedValue([]);
+    pm.building.findMany.mockResolvedValue(makeOneKeyManyVariants(MAX_SCAN + 1));
+
+    const res = await GET(makeRequest("?entity=building"));
+    const body = await res.json();
+    expect(body.building.truncated).toBe(true);
+    expect(lastAudit().detail).toMatchObject({ buildingTruncated: true });
+  });
+
+  it("scan が MAX_SCAN 以下なら truncated:false・従来どおり全件集計", async () => {
+    // ちょうど MAX_SCAN 件（take 上限ぶん未満＝超過判定されない）。
+    pm.owner.findMany.mockResolvedValue(makeOneKeyManyVariants(MAX_SCAN));
+    pm.building.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest("?entity=owner"));
+    const body = await res.json();
+    expect(body.owner.truncated).toBe(false);
+    expect(body.owner.groups[0].variants).toHaveLength(MAX_SCAN);
+  });
+
+  it("CSV: owner scan 超過時も truncated を握りつぶさず・先頭 MAX_SCAN 件のみ展開する", async () => {
+    pm.owner.findMany.mockResolvedValue(makeOneKeyManyVariants(MAX_SCAN + 1));
+    pm.building.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest("?format=csv&entity=owner"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    // ヘッダ1 + 先頭 MAX_SCAN 件のバリアント行（単一群・全件 distinct）= 1 + MAX_SCAN。
+    // 超過分1件は scan 上限で捨てられるため 1 + (MAX_SCAN+1) にはならない。
+    expect(lines).toHaveLength(1 + MAX_SCAN);
+    expect(lastAudit().detail).toMatchObject({ ownerTruncated: true });
+  });
+});
+
 describe("GET /api/admin/display-name-audit — CSV 出力", () => {
   it("?format=csv は text/csv・BOM・CRLF・ヘッダ行を返す", async () => {
     pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);

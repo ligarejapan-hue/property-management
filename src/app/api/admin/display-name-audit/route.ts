@@ -46,6 +46,26 @@ import { encodeCsv, sanitizeCsvCellForExcel } from "@/lib/csv-encode";
 // 群数の安全上限。超過は silent 切り捨てせず truncated:true を返す。
 const MAX_GROUPS = 1000;
 
+// スキャン（行）上限。Owner/Building が異常に多い、または単一の正規化キーに
+// 大量の生バリアントがある場合に、全件 findMany ＋ 全 variant ID 保持で
+// メモリ/負荷が過大になるのを防ぐ安全弁（既存 corporate-number-candidates の
+// MAX_SCAN と同型）。findMany は take: MAX_SCAN+1 で取得し、超過分は集計前に
+// 切り捨てたうえで truncated:true を立てる（silent 切り捨てしない）。
+// MAX_GROUPS（出力群数の上限）とは別レイヤ。どちらの上限に掛かっても truncated。
+const MAX_SCAN = 10_000;
+
+/**
+ * findMany が take: MAX_SCAN+1 で取得した行を、集計前に MAX_SCAN 件へ切り詰める。
+ * 超過していたら scanTruncated=true を返す（出力に明示するため）。
+ */
+function capScan<T>(rows: T[]): { scanned: T[]; scanTruncated: boolean } {
+  const scanTruncated = rows.length > MAX_SCAN;
+  return {
+    scanned: scanTruncated ? rows.slice(0, MAX_SCAN) : rows,
+    scanTruncated,
+  };
+}
+
 // owner の name を生値で表示してよい表示レベル（maskValue が生値を返すレベルと一致）。
 const RAW_NAME_LEVELS = new Set(["full", "read", "edit"]);
 
@@ -153,13 +173,22 @@ export async function GET(request: NextRequest) {
     let ownerResult: AuditResult | undefined;
     if (wantOwner) {
       if (ownerNameVisible) {
+        // scan 上限ぶん +1 を取得し、超過判定後に MAX_SCAN 件へ切り詰める。
         const owners = await prisma.owner.findMany({
           where: { isArchived: false },
           select: { id: true, name: true },
+          take: MAX_SCAN + 1,
         });
-        ownerResult = buildDisplayNameAuditGroups(owners, normalizeName, {
+        const { scanned, scanTruncated } = capScan(owners);
+        const grouped = buildDisplayNameAuditGroups(scanned, normalizeName, {
           maxGroups: MAX_GROUPS,
         });
+        // scan 上限・群数上限のいずれに掛かっても truncated を立てる
+        // （scan 切り捨てを silent にしない）。
+        ownerResult = {
+          ...grouped,
+          truncated: grouped.truncated || scanTruncated,
+        };
       } else {
         // 表示レベル不足: owner 群は空（building は返す）。DB も叩かない。
         ownerResult = { groups: [], truncated: false };
@@ -176,15 +205,22 @@ export async function GET(request: NextRequest) {
     let buildingResult: AuditResult | undefined;
     if (wantBuilding) {
       if (buildingOutputAllowed) {
+        // scan 上限ぶん +1 を取得し、超過判定後に MAX_SCAN 件へ切り詰める。
         const buildings = await prisma.building.findMany({
           where: {},
           select: { id: true, name: true },
+          take: MAX_SCAN + 1,
         });
-        buildingResult = buildDisplayNameAuditGroups(
-          buildings,
+        const { scanned, scanTruncated } = capScan(buildings);
+        const grouped = buildDisplayNameAuditGroups(
+          scanned,
           normalizeBuildingName,
           { maxGroups: MAX_GROUPS },
         );
+        buildingResult = {
+          ...grouped,
+          truncated: grouped.truncated || scanTruncated,
+        };
       } else {
         // property:read 不足、または CSV 出力で csv_export:read 不足:
         // building 群は空（fail-closed）。DB も叩かない。
