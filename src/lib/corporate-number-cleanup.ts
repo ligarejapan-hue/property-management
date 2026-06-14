@@ -11,6 +11,8 @@
 import {
   detectCorporateNumberInOwnerLike,
   removeCorporateNumbersFromText,
+  extractCompanyRegistryNumbersFromText,
+  removeCompanyRegistryNumbersFromText,
 } from "./corporate-number";
 import {
   decideCorporateImport,
@@ -37,6 +39,10 @@ export interface CorporateCleanupProposal {
   cleanedNote: string | null;
   corporateNumberToSet: string | null;
   changedFields: Array<"name" | "address" | "note" | "corporateNumber">;
+  // 13桁(法人番号)を「実際に」テキストから除去するフィールド(name/address/note)。
+  // 12桁(会社法人等番号)だけを除去するフィールドは含めない。save 保護(corporateNumber
+  // 同時適用の要求)は、このフィールドを apply するときに限定する(Codex P2)。
+  corporate13RemovedFields: Array<"name" | "address" | "note">;
 }
 
 function emptyToNull(s: string | null): string | null {
@@ -57,40 +63,89 @@ export function decideOwnerCorporateCleanup(
     owner.corporateNumber,
   );
 
+  // 会社法人等番号(12桁)の検出は 13桁とは完全に独立した別レイヤ。
+  // ラベル付きのみ抽出し、除去のみ(列移送なし=corporateNumberToSet には影響しない)。
+  const registryFields: Array<["name" | "address" | "note", string | null]> = [
+    ["name", owner.name],
+    ["address", owner.address],
+    ["note", owner.note],
+  ];
+  const registryNumbers = new Set<string>();
+  const registryDetectedIn = new Set<"name" | "address" | "note">();
+  for (const [field, value] of registryFields) {
+    const hits = extractCompanyRegistryNumbersFromText(value);
+    if (hits.length > 0) {
+      registryDetectedIn.add(field);
+      for (const h of hits) registryNumbers.add(h);
+    }
+  }
+  const registryNumbersToRemove = Array.from(registryNumbers);
+  const hasRegistry = registryNumbersToRemove.length > 0;
+
+  // detectedIn は 13桁・12桁の和集合(field 順は name/address/note 固定)。
+  const detectedIn = (["name", "address", "note"] as const).filter(
+    (f) => detect.detectedIn.includes(f) || registryDetectedIn.has(f),
+  );
+
   const unchanged: CorporateCleanupProposal = {
     action: "none",
     manualReason: null,
     importAction: importDecision.action,
-    detectedIn: detect.detectedIn,
+    detectedIn,
     cleanedName: owner.name,
     cleanedAddress: owner.address,
     cleanedNote: owner.note,
     corporateNumberToSet: null,
     changedFields: [],
+    corporate13RemovedFields: [],
   };
 
-  if (detect.candidates.length === 0) return unchanged;
+  // 13桁候補も 12桁混入も無ければ何もしない。
+  if (detect.candidates.length === 0 && !hasRegistry) return unchanged;
+  // 13桁の multi(複数候補)は従来どおり手動フラグ(12桁が併存しても 13桁挙動を維持)。
   if (importDecision.action === "multi") {
     return { ...unchanged, action: "manual", manualReason: "multi" };
   }
 
-  // 除去対象: save/noop は採用候補、conflict は検出された候補(列値とは別)
+  // 除去対象(13桁): save/noop は採用候補、conflict は検出された候補(列値とは別)。
+  // 13桁候補が無い(12桁のみ)場合は 13桁除去は空配列=不変。
   const numbersToRemove =
-    importDecision.action === "conflict"
-      ? detect.candidates
-      : [importDecision.corporateNumber as string];
+    detect.candidates.length === 0
+      ? []
+      : importDecision.action === "conflict"
+        ? detect.candidates
+        : [importDecision.corporateNumber as string];
 
   // removeCorporateNumbersFromText は除去が無ければ入力を不変で返す。raw 出力が元と
   // 異なるか = 実際に番号を除去したか、で判定する。emptyToNull("")→null の正規化を
   // 「除去」と誤判定しないよう、判定は raw 出力で行い、null 化は実際に除去が起きた
   // フィールドにのみ適用する(Codex P2 round5)。
-  const rawName = removeCorporateNumbersFromText(owner.name, numbersToRemove);
-  const rawAddress = removeCorporateNumbersFromText(owner.address, numbersToRemove);
-  const rawNote = removeCorporateNumbersFromText(owner.note, numbersToRemove);
+  // まず 13桁を除去し、その出力に対して 12桁(会社法人等番号)を重ねて除去する。
+  // 12桁は除去のみで corporateNumber 列移送には一切関与しない。
+  const rawName13 = removeCorporateNumbersFromText(owner.name, numbersToRemove);
+  const rawAddress13 = removeCorporateNumbersFromText(owner.address, numbersToRemove);
+  const rawNote13 = removeCorporateNumbersFromText(owner.note, numbersToRemove);
 
-  const nameRemoved = rawName !== owner.name;
+  const rawName = removeCompanyRegistryNumbersFromText(rawName13, registryNumbersToRemove);
+  const rawAddress = removeCompanyRegistryNumbersFromText(rawAddress13, registryNumbersToRemove);
+  const rawNote = removeCompanyRegistryNumbersFromText(rawNote13, registryNumbersToRemove);
+
   const addressRemoved = rawAddress !== owner.address;
   const noteRemoved = rawNote !== owner.note;
+
+  // 13桁の除去が「実際に」起きたか(12桁除去とは独立に追跡)。save 列移送の可否判定は
+  // 13桁の除去成否のみで行う。12桁(会社法人等番号)を除去しただけで 13桁番号を列へ
+  // 誤移送しないため(ハイフン連結ID 等の Codex P2 round4/5 ガードを 12桁併存時も維持)。
+  // 13桁を実際に除去したフィールドを個別に追跡する。save 保護(corporateNumber 同時適用の
+  // 要求)は「この中のフィールドを apply するとき」だけに限定し、12桁だけを除去する別フィールドの
+  // apply を巻き添えで拒否しない(Codex P2)。
+  const corporate13RemovedFields = (["name", "address", "note"] as const).filter(
+    (f) =>
+      (f === "name" && rawName13 !== owner.name) ||
+      (f === "address" && rawAddress13 !== owner.address) ||
+      (f === "note" && rawNote13 !== owner.note),
+  );
+  const corporate13Removed = corporate13RemovedFields.length > 0;
 
   const cleanedName = rawName;
   const cleanedAddress = addressRemoved ? emptyToNull(rawAddress) : owner.address;
@@ -107,9 +162,9 @@ export function decideOwnerCorporateCleanup(
   // ハイフン連結ID(例 "…1234567890123-45" / 全角 "－45")は共有検出器が先頭13桁を
   // save 候補にするが、厳格な cleanup remover は除去しない。テキスト無変更のまま列へ
   // 数字断片を誤保存しないよう、除去が1件も起きていない save は列移送しない(Codex P2 round4/5)。
-  const anyTextRemoved = nameRemoved || addressRemoved || noteRemoved;
+  // 12桁除去ではなく 13桁除去成否(corporate13Removed)でのみ save を許可する。
   const corporateNumberToSet =
-    importDecision.action === "save" && anyTextRemoved
+    importDecision.action === "save" && corporate13Removed
       ? importDecision.corporateNumber
       : null;
 
@@ -125,11 +180,12 @@ export function decideOwnerCorporateCleanup(
     action: "cleanup",
     manualReason: null,
     importAction: importDecision.action,
-    detectedIn: detect.detectedIn,
+    detectedIn,
     cleanedName,
     cleanedAddress,
     cleanedNote,
     corporateNumberToSet,
     changedFields,
+    corporate13RemovedFields,
   };
 }

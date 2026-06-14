@@ -175,6 +175,91 @@ describe("POST /api/owners/[id]/corporate-cleanup (apply)", () => {
     expect(pm.owner.updateMany).not.toHaveBeenCalled();
   });
 
+  it("P2(Codex): importAction=save でも 13桁を実際には除去できない(corporateNumberToSet null)ケースは 12桁テキスト除去のみ apply 可", async () => {
+    // name のハイフン連結ID は save 候補だが厳格 remover は除去しない(corporateNumberToSet null)。
+    // address の12桁(会社法人等番号)のみ除去対象。番号消失リスクが無いので
+    // corporateNumber 未適用でも address 除去を拒否してはならない。
+    pm.owner.findUnique.mockResolvedValue({
+      id: "o1",
+      name: "整理番号 1234567890123-45",
+      address: "東京都港区1-1 会社法人等番号 020001012345",
+      note: null,
+      corporateNumber: null,
+      version: 2,
+      isArchived: false,
+    });
+    const res = await POST(postReq({ version: 2, apply: { name: false, address: true, note: false, corporateNumber: false } }), ctx());
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    const call = pm.owner.updateMany.mock.calls[0][0];
+    expect(call.data.address).toBe("東京都港区1-1");
+    expect(call.data).not.toHaveProperty("corporateNumber"); // 列移送はしない
+    expect(call.data).not.toHaveProperty("name"); // name は触らない
+    expect(recordChanges).toHaveBeenCalled();
+  });
+
+  it("P2(Codex): 実除去可能な13桁(name)+12桁(address)併存・address のみ apply は 200(13桁を消さない apply は save 保護対象外)", async () => {
+    // name には実際に除去できる save 候補の13桁(corporateNumberToSet=N)があり、
+    // address には別の12桁(会社法人等番号)がある。ユーザーは address(12桁)だけを apply する。
+    // この apply は13桁(name)に一切触れない=唯一の13桁番号が消失しないため、
+    // save 保護(corporateNumber 同時適用の要求)を address 除去に巻き添えで掛けてはならない。
+    // save 保護は「13桁を実際に除去するフィールドを apply するとき」のみに限定する。
+    pm.owner.findUnique.mockResolvedValue({
+      id: "o1",
+      name: `株式会社○○ ${N}`,
+      address: "東京都港区1-1 会社法人等番号 020001012345",
+      note: null,
+      corporateNumber: null,
+      version: 2,
+      isArchived: false,
+    });
+    const res = await POST(postReq({ version: 2, apply: { name: false, address: true, note: false, corporateNumber: false } }), ctx());
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    const call = pm.owner.updateMany.mock.calls[0][0];
+    expect(call.data.address).toBe("東京都港区1-1");
+    expect(call.data).not.toHaveProperty("name"); // 13桁(name)は触らない=番号は安全
+    expect(call.data).not.toHaveProperty("corporateNumber"); // 列移送もしない
+    expect(recordChanges).toHaveBeenCalled();
+  });
+
+  it("P2(Codex): 13桁を除去する name を apply するなら corporateNumber 同時適用必須(save 保護維持)", async () => {
+    // 上と同じ owner だが、今度は13桁を実際に除去する name を apply する。
+    // この場合は唯一の13桁番号がテキストから消えるため、従来どおり corporateNumber 列移送が必須。
+    pm.owner.findUnique.mockResolvedValue({
+      id: "o1",
+      name: `株式会社○○ ${N}`,
+      address: "東京都港区1-1 会社法人等番号 020001012345",
+      note: null,
+      corporateNumber: null,
+      version: 2,
+      isArchived: false,
+    });
+    const res = await POST(postReq({ version: 2, apply: { name: true, address: false, note: false, corporateNumber: false } }), ctx());
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("CORPORATE_NUMBER_REQUIRED");
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("12桁のみ(13桁無し)テキスト除去は corporateNumber 未適用でも apply 可", async () => {
+    pm.owner.findUnique.mockResolvedValue({
+      id: "o1",
+      name: "株式会社○○",
+      address: "東京都港区1-1 会社法人等番号 020001012345",
+      note: null,
+      corporateNumber: null,
+      version: 2,
+      isArchived: false,
+    });
+    const res = await POST(postReq({ version: 2, apply: { name: false, address: true, note: false, corporateNumber: false } }), ctx());
+    expect(res.status).toBe(200);
+    const call = pm.owner.updateMany.mock.calls[0][0];
+    expect(call.data.address).toBe("東京都港区1-1");
+    expect(call.data).not.toHaveProperty("corporateNumber");
+  });
+
   it("apply 全 false は 400", async () => {
     const res = await POST(postReq({ version: 2, apply: { name: false, address: false, note: false, corporateNumber: false } }), ctx());
     expect(res.status).toBe(400);

@@ -209,12 +209,27 @@ export async function POST(
       }
     }
 
-    // save(列が空・番号がテキストにしかない)では、テキストから番号を除去するなら
+    // save(列が空・番号がテキストにしかない)では、テキストから 13桁番号を除去するなら
     // 必ず corporateNumber 列への移送も併せて適用する。さもないと唯一の番号が消え
     // 以後のプレビューで復元できなくなる(Codex P2: データ消失防止)。
+    //
+    // ガードの発火条件は「実際に列へ移送すべき 13桁番号が存在する」(corporateNumberToSet
+    // !== null)かつ「apply 対象に 13桁を実際に除去するフィールドが含まれる」ときに限る。
+    //  - importAction だけで判定すると、13桁を save 候補にしたが厳格な remover が除去しな
+    //    かった(ハイフン連結ID 等で corporate13Removed=false → toSet=null)ケースで、別
+    //    フィールドの 12桁テキスト除去まで巻き添えで拒否してしまう。
+    //  - さらに、実除去可能な 13桁(フィールドA)と 12桁(フィールドB)が併存し、ユーザーが
+    //    フィールドB(12桁)だけを apply するケースでは、13桁(フィールドA)に一切触れない=
+    //    唯一の 13桁番号は消失しない。よって save 保護は「13桁を実際に除去するフィールド
+    //    (corporate13RemovedFields)を apply するとき」のみに限定し、12桁だけの除去 apply を
+    //    巻き添えで拒否しない(Codex P2)。
+    // 13桁の save 列移送保護(13桁を消すなら corporateNumber 選択必須)は不変。
+    const appliesCorporate13Removal = proposal.corporate13RemovedFields.some(
+      (f) => body.apply[f],
+    );
     if (
-      proposal.importAction === "save" &&
-      (body.apply.name || body.apply.address || body.apply.note) &&
+      proposal.corporateNumberToSet !== null &&
+      appliesCorporate13Removal &&
       !body.apply.corporateNumber
     ) {
       throw new ApiError(
