@@ -36,6 +36,7 @@ vi.mock("@/lib/api-helpers", () => {
 import {
   getRegistryFetchProvider,
   isRegistryAutoFetchProviderConfigured,
+  __resetRegistryFetchThrottleForTest,
 } from "../auto-fetch";
 import { OfficialRegistryProvider } from "../official-provider";
 
@@ -45,11 +46,14 @@ const ENV_KEYS = [
   "REGISTRY_FETCH_BASE_URL",
   "REGISTRY_FETCH_TIMEOUT_MS",
   "REGISTRY_FETCH_PROVIDER",
+  "REGISTRY_FETCH_MIN_INTERVAL_MS",
 ] as const;
 
 let saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
+  // 共有 throttle シングルトンの状態がテスト間で漏れないようリセットする。
+  __resetRegistryFetchThrottleForTest();
   saved = {};
   for (const k of ENV_KEYS) {
     saved[k] = process.env[k];
@@ -134,6 +138,76 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     expect(provider).toBeInstanceOf(OfficialRegistryProvider);
     expect(provider?.name).toBe("official");
     expect(isRegistryAutoFetchProviderConfigured({ browserFactory })).toBe(true);
+  });
+
+  // CodexP2: 本番 provider 生成時に throttle（REGISTRY_FETCH_MIN_INTERVAL_MS）を配線する。
+  // 配線が無いと live route で getRegistryFetchProvider() が throttle 無し provider を作り、
+  // 同時 POST がレート制御をすり抜けて公式へ複数同時アクセスしてしまう。
+  it("CodexP2: live 解決した provider は throttle を持つ（連続 fetch の 2 回目が rate_limited）", async () => {
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_MIN_INTERVAL_MS = "60000";
+
+    // 実ブラウザを起動しない fake factory を注入（解決経路は本番と同じ getRegistryFetchProvider）。
+    const browserFactory = async () => ({
+      async login() {
+        /* no-op */
+      },
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF-1.4 dl");
+      },
+      async close() {
+        /* no-op */
+      },
+    });
+    const provider = getRegistryFetchProvider({ browserFactory });
+    expect(provider).not.toBeNull();
+    // 1 回目は許可。
+    await provider!.fetchRegistryPdf({
+      realEstateNumber: "1234567890123",
+      ref: "p1",
+    });
+    // 同一プロセス内・最小間隔未満の 2 回目は throttle で rate_limited。
+    await expect(
+      provider!.fetchRegistryPdf({
+        realEstateNumber: "1234567890123",
+        ref: "p2",
+      }),
+    ).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
+  it("CodexP2: throttle は別 provider インスタンス間で共有される（同時 POST 直列化）", async () => {
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_MIN_INTERVAL_MS = "60000";
+
+    const browserFactory = async () => ({
+      async login() {
+        /* no-op */
+      },
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF-1.4 dl");
+      },
+      async close() {
+        /* no-op */
+      },
+    });
+    // route が別リクエストで getRegistryFetchProvider() を 2 回呼ぶケースを模す。
+    const p1 = getRegistryFetchProvider({ browserFactory });
+    const p2 = getRegistryFetchProvider({ browserFactory });
+    await p1!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p1" });
+    // 別インスタンスでも共有 throttle が効き 2 回目は rate_limited。
+    await expect(
+      p2!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p2" }),
+    ).rejects.toMatchObject({ code: "rate_limited" });
   });
 
   it("（将来）browserFactory を注入しても env 未設定なら null（資格情報も必須・両方揃って初めて解決）", () => {

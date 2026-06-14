@@ -40,6 +40,10 @@ import {
   type RegistryBrowserFactory,
   type RegistryBrowserPage,
 } from "@/lib/registry-fetch/official-provider";
+import {
+  createRegistryFetchThrottle,
+  type RegistryFetchThrottle,
+} from "@/lib/registry-fetch/throttle";
 
 export interface RunRegistryAutoFetchArgs {
   /** 認証済みセッション（route の getApiSession から id/role のみ）。 */
@@ -299,14 +303,78 @@ export function resolveDefaultRegistryBrowserFactory(
 
   return async () => {
     const { chromium } = await load();
+    // CodexP2: launch 成功後に newContext/newPage が reject すると、起動済みの
+    //   browser（さらに context）が close されず Chromium プロセスがリークする。
+    //   セットアップ段の部分失敗では、生成済みハンドルを best-effort で確実に閉じてから
+    //   元の起動エラーを rethrow する（provider 側 classifyRegistryFetchError が
+    //   生メッセージを provider_error へ正規化する契約は不変）。
     const browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ acceptDownloads: true });
-    const page = await context.newPage();
+    let context: RegistryContextLike;
+    try {
+      context = await browser.newContext({ acceptDownloads: true });
+    } catch (err) {
+      await closeQuietly(browser);
+      throw err;
+    }
+    let page: RegistryPageLike;
+    try {
+      page = await context.newPage();
+    } catch (err) {
+      await closeQuietly(context);
+      await closeQuietly(browser);
+      throw err;
+    }
     if (timeoutMs && Number.isFinite(timeoutMs) && page.setDefaultTimeout) {
       page.setDefaultTimeout(timeoutMs);
     }
     return createPlaywrightRegistryPage({ browser, context, page });
   };
+}
+
+/** close を best-effort で呼ぶ（部分失敗時のリソース解放・close 例外は握りつぶす）。 */
+async function closeQuietly(
+  handle: { close(): Promise<void> } | undefined,
+): Promise<void> {
+  try {
+    await handle?.close();
+  } catch {
+    // swallow: 元の起動エラーを優先する（close 失敗で握り直さない）。
+  }
+}
+
+/**
+ * 本番レート制御 throttle の共有シングルトン（CodexP2）。
+ *
+ * getRegistryFetchProvider() が呼ばれるたびに throttle を作り直すと、別リクエスト由来の
+ * 別 provider インスタンスが各々独立した throttle を持ち、同時 POST が公式サービスへ複数
+ * 同時アクセスしてしまう（約款第12条の2: 過度な検索回避が効かない）。単一 Node プロセス
+ * 前提（本番 VPS）でプロセス全体に 1 つの throttle を共有し、provider をまたいで直列化する。
+ *
+ * 最小間隔は REGISTRY_FETCH_MIN_INTERVAL_MS（.env.example に記載）から読む。未設定なら
+ * createRegistryFetchThrottle の保守的既定（60_000ms = 1 件/分）。throttle は token-bucket の
+ * 純粋ラッパで nowMs を引数で受けるため、provider 側の now() 注入と整合する。
+ */
+let sharedRegistryFetchThrottle: RegistryFetchThrottle | undefined;
+
+function getSharedRegistryFetchThrottle(): RegistryFetchThrottle {
+  if (!sharedRegistryFetchThrottle) {
+    const raw = process.env.REGISTRY_FETCH_MIN_INTERVAL_MS;
+    const parsed = raw ? Number(raw) : undefined;
+    const minIntervalMs =
+      parsed && Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+    sharedRegistryFetchThrottle = createRegistryFetchThrottle(
+      minIntervalMs ? { minIntervalMs } : {},
+    );
+  }
+  return sharedRegistryFetchThrottle;
+}
+
+/**
+ * テスト専用: 共有 throttle シングルトンを破棄する（プロセス内状態がテスト間で漏れないように）。
+ * 本番経路からは呼ばない。
+ */
+export function __resetRegistryFetchThrottleForTest(): void {
+  sharedRegistryFetchThrottle = undefined;
 }
 
 /**
@@ -352,12 +420,17 @@ export function getRegistryFetchProvider(
   // C-1: value import の boundary を factory に薄く包む。createOfficialRegistryProvider /
   // OfficialRegistryProvider はいずれも playwright を静的 import しないため、この value import
   // 連鎖（auto-fetch → me/permissions route）で Playwright はバンドルへ混入しない。
+  //
+  // CodexP2: 本番 provider に共有 throttle（REGISTRY_FETCH_MIN_INTERVAL_MS）を配線する。
+  //   これが無いと live route の同時 POST がレート制御をすり抜けて公式へ複数同時アクセスして
+  //   しまう。プロセス全体で 1 つの throttle を共有し、provider をまたいで直列化する。
   return createOfficialRegistryProvider({
     loginId,
     password,
     baseUrl,
     timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
     browserFactory,
+    throttle: getSharedRegistryFetchThrottle(),
   });
 }
 

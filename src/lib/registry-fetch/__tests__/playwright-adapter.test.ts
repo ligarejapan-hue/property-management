@@ -288,4 +288,69 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       page.searchByRealEstateNumber("1234567890123"),
     ).rejects.toMatchObject({ code: "provider_error" });
   });
+
+  // CodexP2: factory のセットアップ部分失敗（launch 後に newContext/newPage が reject）で
+  // 起動済みリソース（browser/context）を確実に close してから throw する（プロセスリーク防止）。
+  it("C10: newContext が reject したら起動済み browser を close してから throw する", async () => {
+    const f = makeFakeChromium();
+    const boom = new Error("newContext failed");
+    f.browser.newContext = vi.fn(async () => {
+      throw boom;
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    await expect(factory!()).rejects.toBe(boom);
+    // launch は成功しているので browser は close されねばならない。
+    expect(f.browser.close).toHaveBeenCalledTimes(1);
+    // context は生成されていないので close 対象外。
+    expect(f.context.close).not.toHaveBeenCalled();
+  });
+
+  it("C11: newPage が reject したら起動済み context→browser を close してから throw する", async () => {
+    const f = makeFakeChromium();
+    const boom = new Error("newPage failed");
+    f.context.newPage = vi.fn(async () => {
+      throw boom;
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    await expect(factory!()).rejects.toBe(boom);
+    expect(f.context.close).toHaveBeenCalledTimes(1);
+    expect(f.browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("C12: 部分失敗時の close が失敗しても元の起動エラーを throw する（close エラーは握りつぶす）", async () => {
+    const f = makeFakeChromium();
+    const boom = new Error("newPage failed");
+    f.context.newPage = vi.fn(async () => {
+      throw boom;
+    });
+    f.context.close = vi.fn(async () => {
+      throw new Error("context close failed");
+    });
+    f.browser.close = vi.fn(async () => {
+      throw new Error("browser close failed");
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    // close 失敗にかかわらず、元の起動エラーが伝播する。
+    await expect(factory!()).rejects.toBe(boom);
+  });
+
+  it("C13: launch 自体が reject したら close を呼ばずに throw する（起動済みリソースなし）", async () => {
+    const f = makeFakeChromium();
+    const boom = new Error("launch failed");
+    f.chromium.launch = vi.fn(async () => {
+      throw boom;
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    await expect(factory!()).rejects.toBe(boom);
+    expect(f.browser.close).not.toHaveBeenCalled();
+    expect(f.context.close).not.toHaveBeenCalled();
+  });
 });
