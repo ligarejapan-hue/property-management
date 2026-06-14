@@ -47,9 +47,7 @@ export const OWNER_NAME_CORP_MAX_LEN = 100;
 export const OWNER_NAME_MOSTLY_DIGITS_RATIO = 0.7;
 
 // 制御文字（C0 / DEL）と U+FFFD（文字化け置換文字）。NFKC でも除去されない。
-// eslint-disable-next-line no-control-regex
 const CONTROL_RE = /[\u0000-\u001F\u007F\uFFFD]/;
-// eslint-disable-next-line no-control-regex
 const CONTROL_RE_G = /[\u0000-\u001F\u007F\uFFFD]/g;
 const LETTER_RE = /\p{L}/u;
 const DIGIT_RE = /\p{Nd}/u;
