@@ -24,7 +24,13 @@ import { encodeCsv, sanitizeCsvCellForExcel } from "@/lib/csv-encode";
 // 認可:
 //  - admin ガード: user_management:read（既存 admin データ補正ツールと同じゲート）
 //  - 所有者名は PII。生値を返すため owner:read かつ name 表示レベルが生値（full/read/edit）の
-//    場合のみ owner 群を返す。不足時は owner 群は空（building 群は非PIIのため返す）。
+//    場合のみ owner 群を返す。不足時は owner 群は空。
+//  - building 名/ID を返す経路は property:read を要求する（既存の建物読み取り API
+//    GET /api/buildings と同一基準）。不足時は building 群を空で返す（fail-closed）。
+//  - ?format=csv で所有者名（PII）・ID を CSV 出力する経路は、既存の PII CSV 出力ルート
+//    （物件 CSV export / DM export）と同じ csv_export:read + csv_export_personal:read を
+//    要求する。不足時は owner（PII）を CSV に載せず building のみ出力する（building は非PII
+//    ゆえ CSV 出力権限は要求しない）。JSON の owner は従来どおり owner:read + 表示レベルで返す。
 //
 // 出力:
 //  - 既定 JSON: { owner?: AuditResult, building?: AuditResult }
@@ -85,10 +91,25 @@ export async function GET(request: NextRequest) {
     const wantBuilding = entityParam !== "owner";
     const asCsv = searchParams.get("format") === "csv";
 
-    // owner 群は PII。owner:read かつ name 表示レベルが生値レベルの場合のみ返す。
-    // owner を要求していない（entity=building）場合は owner 表示設定の解決自体を行わない。
+    // building 名/ID は property:read を要求する（既存の建物読み取り API と同一基準）。
+    // 不足時は building 群を空で返す（owner と同じ fail-closed・DB も叩かない）。
+    const buildingReadable = hasPermission(permissions, "property", "read");
+
+    // CSV で所有者名（PII）・ID を出力できるのは、既存 PII CSV 出力ルートと同じ
+    // csv_export:read + csv_export_personal:read を満たす場合のみ。
+    // JSON の owner は従来どおり owner:read + 表示レベルで返す（CSV 権限に依らない）。
+    const canExportPersonalCsv =
+      hasPermission(permissions, "csv_export", "read") &&
+      hasPermission(permissions, "csv_export_personal", "read");
+
+    // owner 群（PII）を返す条件:
+    //  - owner:read かつ name 表示レベルが生値レベル
+    //  - かつ CSV 出力時は PII CSV 出力権限（csv_export + csv_export_personal）も必須
+    // owner を要求していない（entity=building）/CSV で PII CSV 権限が無い場合は
+    // owner 表示設定の解決・owner の DB 取得自体を行わない（fail-closed）。
+    const ownerOutputAllowed = wantOwner && (!asCsv || canExportPersonalCsv);
     let ownerNameVisible = false;
-    if (wantOwner && hasPermission(permissions, "owner", "read")) {
+    if (ownerOutputAllowed && hasPermission(permissions, "owner", "read")) {
       const ownerDisplayConfig = await getOwnerDisplayConfig(
         session.id,
         permissions,
@@ -117,15 +138,20 @@ export async function GET(request: NextRequest) {
 
     let buildingResult: AuditResult | undefined;
     if (wantBuilding) {
-      const buildings = await prisma.building.findMany({
-        where: {},
-        select: { id: true, name: true },
-      });
-      buildingResult = buildDisplayNameAuditGroups(
-        buildings,
-        normalizeBuildingName,
-        { maxGroups: MAX_GROUPS },
-      );
+      if (buildingReadable) {
+        const buildings = await prisma.building.findMany({
+          where: {},
+          select: { id: true, name: true },
+        });
+        buildingResult = buildDisplayNameAuditGroups(
+          buildings,
+          normalizeBuildingName,
+          { maxGroups: MAX_GROUPS },
+        );
+      } else {
+        // property:read 不足: building 群は空（fail-closed）。DB も叩かない。
+        buildingResult = { groups: [], truncated: false };
+      }
     }
 
     // 監査ログ: 操作事実のみ。生 name 等の PII 本文は残さない（群数・バリアント数のみ）。

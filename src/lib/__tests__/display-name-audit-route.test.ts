@@ -75,15 +75,43 @@ const pm = prisma as unknown as {
   building: { findMany: Mock };
 };
 
+// 完全権限の admin: 監査閲覧(user_management) + owner 生値 + building(property) +
+// PII CSV 出力(csv_export / csv_export_personal)。既存の正常系はこれを既定に置く。
 const PERMS_ADMIN_OWNER: PermissionEntry[] = [
   { resource: "user_management", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
+  { resource: "property", action: "read", granted: true },
+  { resource: "csv_export", action: "read", granted: true },
+  { resource: "csv_export_personal", action: "read", granted: true },
 ];
+// admin だが owner:read 無し（building は property:read で見える）。
 const PERMS_ADMIN_NO_OWNER: PermissionEntry[] = [
   { resource: "user_management", action: "read", granted: true },
+  { resource: "property", action: "read", granted: true },
+  { resource: "csv_export", action: "read", granted: true },
+  { resource: "csv_export_personal", action: "read", granted: true },
 ];
 const PERMS_NON_ADMIN: PermissionEntry[] = [
   { resource: "owner", action: "read", granted: true },
+];
+// admin + owner だが property:read 無し（building 群は空になる）。
+const PERMS_ADMIN_OWNER_NO_PROPERTY: PermissionEntry[] = [
+  { resource: "user_management", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+  { resource: "csv_export", action: "read", granted: true },
+  { resource: "csv_export_personal", action: "read", granted: true },
+];
+// admin + owner + property だが PII CSV 出力権限を欠く（CSV では owner を出さない）。
+const PERMS_ADMIN_OWNER_NO_CSV: PermissionEntry[] = [
+  { resource: "user_management", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+  { resource: "property", action: "read", granted: true },
+];
+const PERMS_ADMIN_OWNER_NO_CSV_PERSONAL: PermissionEntry[] = [
+  { resource: "user_management", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+  { resource: "property", action: "read", granted: true },
+  { resource: "csv_export", action: "read", granted: true },
 ];
 
 const FULL_DISPLAY: OwnerDisplayConfig = {
@@ -173,6 +201,22 @@ describe("GET /api/admin/display-name-audit — 認可", () => {
     const body = await res.json();
     expect(body.owner.groups).toEqual([]);
     expect(body.building.groups).toHaveLength(1);
+  });
+
+  it("admin だが property:read 無し → building 群は空・owner 群は返る（fail-closed）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ADMIN_OWNER_NO_PROPERTY,
+    );
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.owner.groups).toHaveLength(1);
+    expect(body.building.groups).toEqual([]);
+    // property:read 無しでは building の DB も叩かない
+    expect(pm.building.findMany).not.toHaveBeenCalled();
   });
 
   it("name 表示レベルが read / edit でも owner 群は返る（生値レベル）", async () => {
@@ -323,6 +367,48 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     const res = await GET(makeRequest("?format=csv"));
     const csv = await res.text();
     expect(csv).toContain("'=cmd");
+  });
+
+  it("CSV: csv_export:read 欠如なら owner（PII）は出さず building のみ出力する", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER_NO_CSV);
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    // owner の生 name は CSV に出ない（PII CSV 出力権限が無い）
+    expect(csv).not.toContain("田中");
+    // building（非PII）は出る
+    expect(csv).toContain("ABC");
+    // owner の生値は CSV に載せないため owner の DB も叩かない
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+  });
+
+  it("CSV: csv_export_personal:read 欠如なら owner（PII）は出さず building のみ出力する", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ADMIN_OWNER_NO_CSV_PERSONAL,
+    );
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    expect(csv).not.toContain("田中");
+    expect(csv).toContain("ABC");
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+  });
+
+  it("JSON では owner（PII）は CSV 権限に依らず owner:read + 表示レベルで返る", async () => {
+    // CSV 出力権限が無くても JSON の owner 群は owner:read + 生値レベルで従来どおり返る。
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER_NO_CSV);
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    expect(body.owner.groups).toHaveLength(1);
   });
 
   it("CSV: owner 群が表示レベル不足なら building のみ出力される", async () => {
