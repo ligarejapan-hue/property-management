@@ -172,6 +172,32 @@ describe("decideOwnerCorporateCleanup", () => {
       expect(p.changedFields).toContain("name");
       expect(p.changedFields).toContain("address");
       expect(p.changedFields).toContain("corporateNumber");
+      // 13桁は name でのみ実除去・12桁(address)は corporate13RemovedFields に含めない(Codex P2)
+      expect(p.corporate13RemovedFields).toEqual(["name"]);
+    });
+
+    it("corporate13RemovedFields: 13桁を実除去するフィールドのみ・12桁除去フィールドは除く(Codex P2)", () => {
+      // name=実除去可能13桁 / address=12桁のみ / note=13桁誤検出save候補(ハイフン連結ID=実除去なし)
+      const p = decideOwnerCorporateCleanup({
+        name: `株式会社○○ ${N}`,
+        address: `東京都港区1-1 会社法人等番号 ${REG}`,
+        note: "整理番号 1234567890123-45",
+        corporateNumber: null,
+      });
+      // 13桁を実際に除去するのは name のみ。address(12桁のみ)と note(除去されないID)は含まない。
+      expect(p.corporate13RemovedFields).toEqual(["name"]);
+      expect(p.corporate13RemovedFields).not.toContain("address");
+      expect(p.corporate13RemovedFields).not.toContain("note");
+    });
+
+    it("12桁のみ除去ケースは corporate13RemovedFields が空(save 保護対象外)", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: `東京都港区1-1 会社法人等番号 ${REG}`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.corporate13RemovedFields).toEqual([]);
     });
 
     it("12桁検出は detectedIn に該当フィールドを含める", () => {

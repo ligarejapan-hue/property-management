@@ -39,6 +39,10 @@ export interface CorporateCleanupProposal {
   cleanedNote: string | null;
   corporateNumberToSet: string | null;
   changedFields: Array<"name" | "address" | "note" | "corporateNumber">;
+  // 13桁(法人番号)を「実際に」テキストから除去するフィールド(name/address/note)。
+  // 12桁(会社法人等番号)だけを除去するフィールドは含めない。save 保護(corporateNumber
+  // 同時適用の要求)は、このフィールドを apply するときに限定する(Codex P2)。
+  corporate13RemovedFields: Array<"name" | "address" | "note">;
 }
 
 function emptyToNull(s: string | null): string | null {
@@ -93,6 +97,7 @@ export function decideOwnerCorporateCleanup(
     cleanedNote: owner.note,
     corporateNumberToSet: null,
     changedFields: [],
+    corporate13RemovedFields: [],
   };
 
   // 13桁候補も 12桁混入も無ければ何もしない。
@@ -131,10 +136,16 @@ export function decideOwnerCorporateCleanup(
   // 13桁の除去が「実際に」起きたか(12桁除去とは独立に追跡)。save 列移送の可否判定は
   // 13桁の除去成否のみで行う。12桁(会社法人等番号)を除去しただけで 13桁番号を列へ
   // 誤移送しないため(ハイフン連結ID 等の Codex P2 round4/5 ガードを 12桁併存時も維持)。
-  const corporate13Removed =
-    rawName13 !== owner.name ||
-    rawAddress13 !== owner.address ||
-    rawNote13 !== owner.note;
+  // 13桁を実際に除去したフィールドを個別に追跡する。save 保護(corporateNumber 同時適用の
+  // 要求)は「この中のフィールドを apply するとき」だけに限定し、12桁だけを除去する別フィールドの
+  // apply を巻き添えで拒否しない(Codex P2)。
+  const corporate13RemovedFields = (["name", "address", "note"] as const).filter(
+    (f) =>
+      (f === "name" && rawName13 !== owner.name) ||
+      (f === "address" && rawAddress13 !== owner.address) ||
+      (f === "note" && rawNote13 !== owner.note),
+  );
+  const corporate13Removed = corporate13RemovedFields.length > 0;
 
   const cleanedName = rawName;
   const cleanedAddress = addressRemoved ? emptyToNull(rawAddress) : owner.address;
@@ -175,5 +186,6 @@ export function decideOwnerCorporateCleanup(
     cleanedNote,
     corporateNumberToSet,
     changedFields,
+    corporate13RemovedFields,
   };
 }
