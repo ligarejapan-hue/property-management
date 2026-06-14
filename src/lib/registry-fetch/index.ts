@@ -18,3 +18,14 @@ export {
   MockRegistryFetchProvider,
   type MockRegistryFetchOptions,
 } from "./mock-provider";
+export {
+  OfficialRegistryProvider,
+  type OfficialRegistryProviderOptions,
+  type RegistryBrowserPage,
+  type RegistryBrowserFactory,
+} from "./official-provider";
+export {
+  createRegistryFetchThrottle,
+  type RegistryFetchThrottle,
+  type RegistryFetchThrottleOptions,
+} from "./throttle";

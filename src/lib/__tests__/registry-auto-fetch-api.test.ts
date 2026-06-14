@@ -555,7 +555,7 @@ describe("PR4: source-assertion（スコープ固定）", () => {
   const routeSrc = read(routeFile);
   const libSrc = read(libFile);
 
-  it("10. 外部 HTTP / Playwright / env / APIキー を使っていない", () => {
+  it("10. 外部 HTTP / Playwright / 旧ベンダAPIキー を使っていない（PR-1: env は REGISTRY_FETCH_* のみ許可）", () => {
     for (const src of [routeSrc, libSrc]) {
       expect(src).not.toMatch(
         /from\s+["'](node:)?(http|https|net|child_process|dns|tls|dgram)["']/,
@@ -564,11 +564,20 @@ describe("PR4: source-assertion（スコープ固定）", () => {
         /from\s+["'](axios|node-fetch|undici|got|playwright|puppeteer|@playwright\/test)["']/,
       );
       expect(src).not.toMatch(/\bfetch\s*\(/);
-      expect(src).not.toMatch(/process\.env/);
+      // 旧ベンダAPIキー方式（路線変更前）の env 名は使わない。
       expect(src).not.toMatch(/REGISTRY_API_KEY|REGISTRY_API_URL/);
       // playwright/puppeteer は import 形（上の正規表現）で禁止。実コードでの使用には
       // import が必須のため、コメント言及の誤検知を避けつつ実害を防げる（PR3 と同方針）。
     }
+    // route は env を一切読まない（provider 解決は lib に委譲）。
+    expect(routeSrc).not.toMatch(/process\.env/);
+    // PR-1: lib は getRegistryFetchProvider() 内で REGISTRY_FETCH_*（server-side 資格情報）
+    // のみを読む。NEXT_PUBLIC_* は読まない（client 露出禁止）。
+    const libEnvRefs = libSrc.match(/process\.env\.\w+/g) ?? [];
+    for (const ref of libEnvRefs) {
+      expect(ref).toMatch(/^process\.env\.REGISTRY_FETCH_/);
+    }
+    expect(libSrc).not.toMatch(/process\.env\.NEXT_PUBLIC_/);
   });
 
   it("11. schema/migration/package を変更しない（DDL/env なし・既存 enum 値のみ使用）", () => {
@@ -603,10 +612,11 @@ describe("PR4: source-assertion（スコープ固定）", () => {
     expect(libSrc).toMatch(/provider: RegistryFetchProvider/);
     expect(libSrc).not.toMatch(/provider\s*=\s*new MockRegistryFetchProvider/);
     expect(libSrc).not.toMatch(/MockRegistryFetchProvider/);
-    // 本番 provider 解決は未設定（null）。env フラグでの切替もしない
+    // 本番 provider 解決は資格情報 env（REGISTRY_FETCH_*）で行い、env フラグ切替はしない。
     expect(libSrc).toMatch(/getRegistryFetchProvider/);
     expect(libSrc).not.toMatch(/ENABLE_MOCK_REGISTRY_FETCH/);
-    expect(libSrc).not.toMatch(/process\.env/);
+    // mock を本番解決に使わない（official-provider のみ解決する）。
+    expect(libSrc).not.toMatch(/MockRegistryFetchProvider/);
   });
 
   it("CodexP1-2. route は mock provider を直接 new せず provider 未設定で 501 を返す", () => {

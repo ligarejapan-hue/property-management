@@ -35,6 +35,7 @@ import {
   type RegistryFetchProvider,
   type RegistryFetchErrorCode,
 } from "@/lib/registry-fetch";
+import { OfficialRegistryProvider } from "@/lib/registry-fetch/official-provider";
 
 export interface RunRegistryAutoFetchArgs {
   /** 認証済みセッション（route の getApiSession から id/role のみ）。 */
@@ -77,14 +78,40 @@ async function releaseSchedulingLock(
 /**
  * 本番で使用する謄本取得 provider を解決する。
  *
- * CodexP1: 現時点では実 provider が未実装のため null を返す。これにより live API route は
- * 501（REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED）で安全停止し、mock provider で本番 DB
- * （registryStatus / Attachment / ImportJob）を更新してしまう事故を防ぐ。mock は本番では
- * 決して使わず、テストでのみ runRegistryAutoFetch に明示注入する。将来 PR で実 provider を
- * 実装したら、ここでそれを返す（env フラグでの切替はしない）。
+ * CodexP1: env フラグで provider を切替えず、「資格情報が揃えば実 provider を返す / 無ければ
+ * null（= route 501 維持）」とする。throw でなく null を返し、既存の 501 null 契約を温存する
+ * （住所補完 resolveProvider() は 503 throw だが、registry は 501 null 契約を変えない）。
+ *
+ * 秘密管理: REGISTRY_FETCH_* は **この関数内でのみ** 読む（server-side のみ・NEXT_PUBLIC 禁止）。
+ * isRegistryAutoFetchProviderConfigured() は boolean のみを返し、値・PII は返さない。
+ *
+ * PR-1 scaffold の重要な安全性: ここで返す OfficialRegistryProvider には **browserFactory を
+ * 注入しない**。実ブラウザ操作（ログイン/検索/PDF DL）は PR-2 で browserFactory 経由に実装
+ * するため、PR-1 では env を設定しても実取得は走らず（fetchRegistryPdf が provider_error で
+ * 安全停止）、本番に外部接続は発生しない。**REGISTRY_FETCH_* を本番 app.env に設定しない限り
+ * null = 501 維持で本番挙動は不変。**
  */
 export function getRegistryFetchProvider(): RegistryFetchProvider | null {
-  return null;
+  const loginId = process.env.REGISTRY_FETCH_LOGIN_ID;
+  const password = process.env.REGISTRY_FETCH_PASSWORD;
+
+  // 資格情報のいずれか欠落 → null（= route 501 維持 = 本番挙動不変）。
+  if (!loginId || !password) {
+    return null;
+  }
+
+  const baseUrl = process.env.REGISTRY_FETCH_BASE_URL || undefined;
+  const timeoutRaw = process.env.REGISTRY_FETCH_TIMEOUT_MS;
+  const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
+
+  return new OfficialRegistryProvider({
+    loginId,
+    password,
+    baseUrl,
+    timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+    // PR-1: browserFactory は注入しない（= 実取得は走らず provider_error で安全停止）。
+    // PR-2 で実 Playwright 起動 adapter をここで注入する。
+  });
 }
 
 /**
