@@ -142,6 +142,15 @@ describe("認可", () => {
     expect(res.status).toBe(403);
   });
 
+  // Issue2: owner:read 不足の回帰保護（owner-correction-route と同形式）。
+  it("owner:read 無しで 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+    ]);
+    const res = await POST(req({ version: 1, mode: "sanitize" }), params);
+    expect(res.status).toBe(403);
+  });
+
   it("実行時 owner:write 無しで 403", async () => {
     vi.mocked(getUserPermissions).mockResolvedValueOnce(PERMS_RO);
     const res = await POST(

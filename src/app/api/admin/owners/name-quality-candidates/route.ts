@@ -205,7 +205,17 @@ export async function GET(request: NextRequest) {
           })
         : [];
     const importStatusMap = new Map<string, string>();
+    // Issue1: 取込元 ImportJobRow の件数も保持する。複数行を持つ owner は
+    // 取込元が一意に特定できない（= correction-candidates / owner-correction の
+    // import_source_ambiguous 相当）。success 行が紛れていても自動補正の根拠に
+    // できないため、後段で import_source_ambiguous を付けて sanitize_candidate へ
+    // 昇格させない（誤って「安全に補正可能」と推奨させない）。
+    const importRowCountMap = new Map<string, number>();
     for (const r of importRows) {
+      importRowCountMap.set(
+        r.createdId!,
+        (importRowCountMap.get(r.createdId!) ?? 0) + 1,
+      );
       const existing = importStatusMap.get(r.createdId!);
       if (!existing || (existing !== "success" && r.status === "success")) {
         importStatusMap.set(r.createdId!, r.status);
@@ -236,6 +246,9 @@ export async function GET(request: NextRequest) {
 
       const changeLogCount = changeLogCountMap.get(owner.id) ?? 0;
       const importStatus = importStatusMap.get(owner.id) ?? null;
+      const importRowCount = importRowCountMap.get(owner.id) ?? 0;
+      // Issue1: ImportJobRow が 2 件以上なら取込元が一意に特定できない。
+      const importSourceAmbiguous = importRowCount >= 2;
 
       const blockReasons: string[] = [];
       if (owner._count.propertyOwners > 0)
@@ -244,9 +257,16 @@ export async function GET(request: NextRequest) {
       if (owner.version > 1) blockReasons.push("version_gt_1");
       if (owner.externalLinkKey) blockReasons.push("external_link_key_exists");
       if (owner.note) blockReasons.push("note_exists");
-      if (!importStatus) blockReasons.push("import_source_unknown");
-      if (importStatus && importStatus !== "success")
+      // Issue1: 取込元が曖昧（複数行）なら import_source_ambiguous を付け、
+      // import_source_unknown（0 件）とは排他にする（owner-correction の
+      // resolveOwnerSourceImportRow と同方針: 0件→unknown / 2件以上→ambiguous）。
+      if (importSourceAmbiguous) {
+        blockReasons.push("import_source_ambiguous");
+      } else if (!importStatus) {
+        blockReasons.push("import_source_unknown");
+      } else if (importStatus !== "success") {
         blockReasons.push("import_row_not_success");
+      }
 
       const hasSafeguard = blockReasons.some((r) =>
         [
@@ -261,11 +281,16 @@ export async function GET(request: NextRequest) {
       // DQ-01 P1: sanitize_candidate は name 由来の自動補正可否（隠し name の性質）を
       // 漏らすため、name 不可視時は判定しない（review へ倒す）。name-fix 自体が
       // owner_name field-level write を要求するため、不可視ユーザーには無意味でもある。
+      //
+      // Issue1: 取込元が曖昧（ImportJobRow 複数）な owner も sanitize_candidate へ
+      // 昇格させない。success 行が紛れていても取込元を一意に特定できず、自動補正の
+      // 根拠にできないため review に倒して人手確認に回す（hold ではない=safeguard 不在）。
       let recommendedAction: RecommendedAction;
       if (hasSafeguard) {
         recommendedAction = "hold";
       } else if (
         nameVisible &&
+        !importSourceAmbiguous &&
         decideOwnerNameFix(owner.name).action === "sanitize"
       ) {
         recommendedAction = "sanitize_candidate";

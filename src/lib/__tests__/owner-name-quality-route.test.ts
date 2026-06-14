@@ -235,6 +235,61 @@ describe("blockReasons / recommendedAction", () => {
   });
 });
 
+// Issue1: 複数 ImportJobRow を持つ owner は取込元が一意に特定できない
+// （= correction-candidates の import_source_ambiguous 相当）。success 行が
+// 紛れていても自動補正の根拠にできないため、blockReasons に
+// import_source_ambiguous を付け、sanitize_candidate へ昇格させない。
+describe("複数 ImportJobRow の曖昧性（import_source_ambiguous）", () => {
+  it("import 行が 2 件以上なら success があっても import_source_ambiguous を付ける", async () => {
+    const controlName = "山田" + String.fromCharCode(1) + "太郎";
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: controlName }),
+    ]);
+    // success と failed が混在（旧実装は success を採用してブロックしなかった）。
+    pm.importJobRow.findMany.mockResolvedValue([
+      { createdId: "o-1", status: "failed" },
+      { createdId: "o-1", status: "success" },
+    ]);
+    const res = await GET(url("?type=control_chars"));
+    const json = await res.json();
+    expect(json.candidates[0].blockReasons).toContain("import_source_ambiguous");
+    // 取込元が曖昧なので import_source_unknown は付けない（排他）。
+    expect(json.candidates[0].blockReasons).not.toContain("import_source_unknown");
+  });
+
+  it("曖昧な取込元の owner は sanitize_candidate に昇格せず review に倒す", async () => {
+    // 単一 success なら sanitize_candidate になる制御文字混入ケースで検証。
+    const controlName = "山田" + String.fromCharCode(1) + "太郎";
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: controlName }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { createdId: "o-1", status: "success" },
+      { createdId: "o-1", status: "success" },
+    ]);
+    const res = await GET(url("?type=control_chars"));
+    const json = await res.json();
+    expect(json.candidates[0].recommendedAction).toBe("review");
+    expect(json.candidates[0].recommendedAction).not.toBe("sanitize_candidate");
+  });
+
+  it("単一 ImportJobRow は従来通り曖昧フラグを付けない", async () => {
+    const controlName = "山田" + String.fromCharCode(1) + "太郎";
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: controlName }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([
+      { createdId: "o-1", status: "success" },
+    ]);
+    const res = await GET(url("?type=control_chars"));
+    const json = await res.json();
+    expect(json.candidates[0].blockReasons).not.toContain(
+      "import_source_ambiguous",
+    );
+    expect(json.candidates[0].recommendedAction).toBe("sanitize_candidate");
+  });
+});
+
 describe("PII マスキング", () => {
   it("nameKana は display-level に従ってマスクされる（name 可視で行がマッチ）", async () => {
     // name は可視（full）で numeric_only マッチ → 行が出る。nameKana は masked。

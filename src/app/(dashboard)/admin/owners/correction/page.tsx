@@ -98,6 +98,7 @@ const BLOCK_REASON_LABELS: Record<string, string> = {
   external_link_key_exists: "外部キーあり",
   note_exists: "メモあり",
   import_source_unknown: "取込元不明",
+  import_source_ambiguous: "取込元が複数（要確認）",
   import_row_not_success: "取込行未解決",
   // Codex P1 (round 3): non-name duplicate （法人番号 / 外部キー一致）に
   // 付与される「削除させず確認に回す」reason。raw 法人番号 / externalLinkKey は
