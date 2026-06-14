@@ -133,6 +133,28 @@ describe("extractCompanyRegistryNumbersFromText", () => {
     ).toEqual([]);
   });
 
+  // ── Codex 追加 P2(残り穴): ラベル付き12桁の後に「ハイフン付きサフィックス」が続くと、
+  // ハイフンが捕捉ラン内部に許容されているため regex がバックトラックしてハイフン手前で
+  // 12桁を確定し、別番号の一部を会社法人等番号と誤認する。トークンをまるごと捕捉して
+  // 厳格検証することで部分一致を塞ぐ。
+  it("12桁の直後にハイフン付き英字サフィックス(…-45A)が続く場合は部分抽出しない", () => {
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 020001012345-45A"),
+    ).toEqual([]);
+  });
+
+  it("12桁の直後にハイフン付き数字サフィックス(…-45)が続く場合は部分抽出しない(14桁化)", () => {
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 020001012345-45"),
+    ).toEqual([]);
+  });
+
+  it("全角12桁の直後に全角ハイフン+数字が続く場合も部分抽出しない", () => {
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 ０２００−０１−０１２３４５−４５"),
+    ).toEqual([]);
+  });
+
   it("12桁で完結する実例(全角ハイフン表記)は従来どおり抽出できる", () => {
     expect(
       extractCompanyRegistryNumbersFromText("会社法人等番号 ０２００−０１−０１２３４５"),
@@ -212,5 +234,24 @@ describe("removeCompanyRegistryNumbersFromText", () => {
     expect(
       removeCompanyRegistryNumbersFromText("東京都港区1-1 会社法人等番号 ０２００−０１−０１２３４５", [REG]),
     ).toBe("東京都港区1-1");
+  });
+
+  // ── Codex 追加 P2(残り穴): ハイフン付きサフィックスの部分除去を塞ぐ。
+  it("12桁の直後にハイフン付き英字サフィックス(…-45A)が続く場合は部分除去しない(原文保持)", () => {
+    expect(
+      removeCompanyRegistryNumbersFromText("会社法人等番号 020001012345-45A", [REG]),
+    ).toBe("会社法人等番号 020001012345-45A");
+  });
+
+  it("12桁の直後にハイフン付き数字サフィックス(…-45)が続く場合は部分除去しない(原文保持)", () => {
+    expect(
+      removeCompanyRegistryNumbersFromText("会社法人等番号 020001012345-45", [REG]),
+    ).toBe("会社法人等番号 020001012345-45");
+  });
+
+  it("全角12桁の直後に全角ハイフン+数字が続く場合も部分除去しない(原文保持)", () => {
+    expect(
+      removeCompanyRegistryNumbersFromText("会社法人等番号 ０２００−０１−０１２３４５−４５", [REG]),
+    ).toBe("会社法人等番号 ０２００−０１−０１２３４５−４５");
   });
 });
