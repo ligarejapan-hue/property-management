@@ -162,9 +162,29 @@ describe("isRegistryAutoFetchProviderConfigured — provider capability", () => 
     expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
 
-  it("実装は getRegistryFetchProvider() != null（provider あり → true の関係）", () => {
+  it("実装は getRegistryFetchProvider(...) != null（provider あり → true の関係・readiness 委譲）", () => {
+    // CodexP2: signature に readiness 注入用の options を許容しつつ、boolean を返し
+    // getRegistryFetchProvider(...) の null/非null をそのまま反映する関係を固定する。
     expect(autoFetchSrc).toMatch(
-      /export function isRegistryAutoFetchProviderConfigured\(\)\s*:\s*boolean\s*\{\s*return getRegistryFetchProvider\(\)\s*!==?\s*null;\s*\}/,
+      /export function isRegistryAutoFetchProviderConfigured\([\s\S]*?\)\s*:\s*boolean\s*\{\s*return getRegistryFetchProvider\([^)]*\)\s*!==?\s*null;\s*\}/,
     );
+  });
+
+  it("CodexP2: env 設定済みでも browserFactory 未配線なら false（capability false・runtime）", () => {
+    const KEYS = ["REGISTRY_FETCH_LOGIN_ID", "REGISTRY_FETCH_PASSWORD"] as const;
+    const saved: Record<string, string | undefined> = {};
+    for (const k of KEYS) saved[k] = process.env[k];
+    try {
+      process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+      process.env.REGISTRY_FETCH_PASSWORD = "pw";
+      // browserFactory を配線していない（PR-1）ため、env 設定済みでも null/false。
+      expect(getRegistryFetchProvider()).toBeNull();
+      expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
+    } finally {
+      for (const k of KEYS) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
   });
 });

@@ -35,6 +35,10 @@ import {
   type RegistryFetchProvider,
   type RegistryFetchErrorCode,
 } from "@/lib/registry-fetch";
+import {
+  createOfficialRegistryProvider,
+  type RegistryBrowserFactory,
+} from "@/lib/registry-fetch/official-provider";
 
 export interface RunRegistryAutoFetchArgs {
   /** 認証済みセッション（route の getApiSession から id/role のみ）。 */
@@ -51,7 +55,9 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   timeout: 504,
   rate_limited: 429,
   auth_failed: 502,
-  not_found: 502,
+  // 業務的 not found（対象謄本が存在しない）。upstream 障害（502）と区別し 404 を返す。
+  // 502 だとクライアント/呼び出し側が「一時的な upstream 障害 → リトライ」と誤認しうるため。
+  not_found: 404,
   provider_error: 502,
 };
 
@@ -75,25 +81,109 @@ async function releaseSchedulingLock(
 }
 
 /**
- * 本番で使用する謄本取得 provider を解決する。
- *
- * CodexP1: 現時点では実 provider が未実装のため null を返す。これにより live API route は
- * 501（REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED）で安全停止し、mock provider で本番 DB
- * （registryStatus / Attachment / ImportJob）を更新してしまう事故を防ぐ。mock は本番では
- * 決して使わず、テストでのみ runRegistryAutoFetch に明示注入する。将来 PR で実 provider を
- * 実装したら、ここでそれを返す（env フラグでの切替はしない）。
+ * provider 解決のオプション。呼び出し側（PR-2 / テスト）が browserFactory を注入するための境界。
+ * 本番 route / me-permissions は引数なしで呼ぶため、PR-1 では常に readiness=false（後述）。
  */
-export function getRegistryFetchProvider(): RegistryFetchProvider | null {
-  return null;
+export interface ResolveRegistryFetchProviderOptions {
+  /**
+   * 実ブラウザ（Playwright）を起動する readiness の実体。これが渡されて初めて
+   * 「実際に実取得が可能」= provider 解決可能とみなす。PR-2 でここに実 adapter を配線する。
+   */
+  browserFactory?: RegistryBrowserFactory;
 }
 
 /**
- * UI の capability 表示用 read-only ヘルパ。本番 provider が解決できるか（= 設定済みか）を
- * boolean だけで返す。secret・設定値そのもの・PII は一切返さない。副作用・外部接続・env 追加なし。
- * 現状は getRegistryFetchProvider() が null のため false（PR6 で実 provider 実装時に true）。
+ * PR-1 で本番（引数なし呼び出し）が用いる browserFactory を解決する。
+ *
+ * CodexP2 の核心: 「env が設定されたら provider を返す」だけの解決は、browserFactory 未配線でも
+ * 非null を返してしまい、capability=true → 有料ボタン有効化 → POST が 501 ガードをバイパスして
+ * 物件を一瞬 scheduled にした後 OfficialRegistryProvider.fetchRegistryPdf() が必ず provider_error
+ * を throw する（= 本番に常に失敗する操作の露出）。これを防ぐため、解決は **readiness（実際に
+ * 実行可能か = browserFactory の有無）** に基づかせる。
+ *
+ * PR-1 では実 Playwright 起動 adapter を一切配線しない（playwright 依存追加なし）。よって本関数は
+ * 常に undefined を返し、env が設定済みでも getRegistryFetchProvider() は null = 501 維持となる。
+ * PR-2 でここに実 adapter を返す実装を入れると、env が揃った時点で capability=true になる。
+ *
+ * ★ Playwright バンドル混入防止の契約（C-1）:
+ *   Playwright は **この関数内の動的 import（`const { chromium } = await import("playwright")` 等）
+ *   でのみ** 読み込む。auto-fetch.ts / official-provider.ts は playwright を **静的 import / require
+ *   しない**（source-assertion テストで固定）。これにより auto-fetch.ts → /api/me/permissions route
+ *   の value import 連鎖で Playwright がサーバーバンドルへ混入するのを防ぐ。OfficialRegistryProvider
+ *   クラス自体が playwright を静的 import しない構造のため、value import（下記）は安全。
  */
-export function isRegistryAutoFetchProviderConfigured(): boolean {
-  return getRegistryFetchProvider() != null;
+function resolveDefaultRegistryBrowserFactory():
+  | RegistryBrowserFactory
+  | undefined {
+  // PR-1: 実ブラウザ起動境界は未配線 = 実取得不能 = readiness なし。
+  return undefined;
+}
+
+/**
+ * 本番で使用する謄本取得 provider を解決する。
+ *
+ * CodexP1: env フラグで provider を切替えず、資格情報（REGISTRY_FETCH_LOGIN_ID/PASSWORD）で解決する。
+ * CodexP2: さらに **readiness（browserFactory の有無 = 実取得が実際に可能か）** を解決条件に加える。
+ *   - 資格情報が揃い かつ readiness（browserFactory）が揃って初めて実 provider を返す。
+ *   - いずれか欠ければ null（= route 501 維持）。throw でなく null を返し、既存の 501 null 契約を
+ *     温存する（住所補完 resolveProvider() は 503 throw だが、registry は 501 null 契約を変えない）。
+ *
+ * 秘密管理: REGISTRY_FETCH_* は **この関数内でのみ** 読む（server-side のみ・NEXT_PUBLIC 禁止）。
+ *
+ * PR-1 scaffold の安全性: 本番は引数なしで呼ぶ → readiness（browserFactory）は
+ * resolveDefaultRegistryBrowserFactory() が undefined を返す（PR-1 では実 adapter 未配線）→ 常に
+ * null = 501 維持で本番挙動は不変（env を設定しても scheduled にせず・有料ボタンも無効）。
+ * PR-2 で resolveDefaultRegistryBrowserFactory() に実 adapter を入れる（または呼び出し側が
+ * browserFactory を注入する）と、env が揃った時点で capability=true になる。
+ */
+export function getRegistryFetchProvider(
+  options: ResolveRegistryFetchProviderOptions = {},
+): RegistryFetchProvider | null {
+  const loginId = process.env.REGISTRY_FETCH_LOGIN_ID;
+  const password = process.env.REGISTRY_FETCH_PASSWORD;
+
+  // 資格情報のいずれか欠落 → null（= route 501 維持 = 本番挙動不変）。
+  if (!loginId || !password) {
+    return null;
+  }
+
+  // CodexP2: readiness（browserFactory）が無ければ実取得不能 → null（= 501 維持）。
+  // PR-1 では default factory が undefined ゆえ、env 設定済みでもここで null になる。
+  const browserFactory =
+    options.browserFactory ?? resolveDefaultRegistryBrowserFactory();
+  if (!browserFactory) {
+    return null;
+  }
+
+  const baseUrl = process.env.REGISTRY_FETCH_BASE_URL || undefined;
+  const timeoutRaw = process.env.REGISTRY_FETCH_TIMEOUT_MS;
+  const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
+
+  // C-1: value import の boundary を factory に薄く包む。createOfficialRegistryProvider /
+  // OfficialRegistryProvider はいずれも playwright を静的 import しないため、この value import
+  // 連鎖（auto-fetch → me/permissions route）で Playwright はバンドルへ混入しない。
+  return createOfficialRegistryProvider({
+    loginId,
+    password,
+    baseUrl,
+    timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+    browserFactory,
+  });
+}
+
+/**
+ * UI の capability 表示用 read-only ヘルパ。本番 provider が解決できるか（= 設定済み かつ
+ * 実取得可能 = readiness 充足か）を boolean だけで返す。secret・設定値そのもの・PII は返さない。
+ * 副作用・外部接続・env 追加なし。
+ *
+ * CodexP2: env 設定済みでも browserFactory 未配線（PR-1）なら false を返す。これにより
+ * /api/me/permissions の capabilities.registryAutoFetch が false となり、有料の自動取得ボタンは
+ * 無効・POST は 501 維持となる（「設定済みなのに常に失敗する操作」を露出しない）。
+ */
+export function isRegistryAutoFetchProviderConfigured(
+  options: ResolveRegistryFetchProviderOptions = {},
+): boolean {
+  return getRegistryFetchProvider(options) != null;
 }
 
 /**
