@@ -7,7 +7,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import {
   decideOwnerNameFix,
@@ -29,7 +29,9 @@ import {
 //
 // 権限:
 //   - dryRun: user_management:read + owner:read
-//   - 実行 (dryRun=false): 上記に加えて owner:write
+//   - 実行 (dryRun=false): 上記に加えて owner:write かつ owner_name の
+//     field-level write（full/edit）。氏名は PII フィールドのため owner PATCH と
+//     同じ field-level 書込モデルを適用する。
 //
 // Request body: { version:int, mode:"sanitize"|"set", newName?:string, dryRun?:boolean }
 //   dryRun の default は true。dryRun=false を明示したときのみ DB を更新する。
@@ -82,8 +84,15 @@ export async function POST(
     }
     const dryRun = body?.dryRun !== false; // default: true
 
-    if (!dryRun && !hasPermission(perms, "owner", "write")) {
-      throw new ApiError(403, "所有者編集の権限がありません", "FORBIDDEN");
+    if (!dryRun) {
+      if (!hasPermission(perms, "owner", "write")) {
+        throw new ApiError(403, "所有者編集の権限がありません", "FORBIDDEN");
+      }
+      // 編集対象は氏名（PII フィールド）。generic owner:write だけでなく
+      // owner_name の field-level write（full/edit）を必須にする（owner PATCH と同方針）。
+      if (!hasExplicitWritePerm(perms, "owner_name")) {
+        throw new ApiError(403, "所有者氏名を更新する権限がありません", "FORBIDDEN");
+      }
     }
 
     const owner = await prisma.owner.findUnique({

@@ -248,7 +248,8 @@ export type OwnerNameFixSafetyResult =
 
 /**
  * 氏名補正の安全条件チェック。複数違反は全件返す。
- * 新値が再びゴミ（数値/記号/空白のみ）の場合は forbidden_value で拒否する。
+ * 新値が再びゴミ（数値/記号/空白のみ）または制御文字 / U+FFFD（文字化け）を
+ * 含む場合は forbidden_value で拒否する（補正後に再び DQ になる値を書かせない）。
  */
 export function checkOwnerNameFixSafety(
   input: OwnerNameFixSafetyInput,
@@ -266,7 +267,10 @@ export function checkOwnerNameFixSafety(
     if (
       cls.issues.some(
         (i) =>
-          i === "numeric_only" || i === "symbol_only" || i === "whitespace_only",
+          i === "numeric_only" ||
+          i === "symbol_only" ||
+          i === "whitespace_only" ||
+          i === "control_chars",
       )
     ) {
       reasons.push("forbidden_value");

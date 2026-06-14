@@ -72,10 +72,18 @@ const PERMS_RW = [
   { resource: "user_management", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
   { resource: "owner", action: "write", granted: true },
+  { resource: "owner_name", action: "full", granted: true },
 ];
 const PERMS_RO = [
   { resource: "user_management", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
+];
+// owner:write はあるが owner_name の field-level write（full/edit）が無い。
+const PERMS_RW_NO_NAME = [
+  { resource: "user_management", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+  { resource: "owner", action: "write", granted: true },
+  { resource: "owner_name", action: "masked", granted: true },
 ];
 
 const SOH = String.fromCharCode(1);
@@ -138,6 +146,36 @@ describe("認可", () => {
     );
     expect(res.status).toBe(200);
   });
+
+  it("owner:write はあるが owner_name の field-level write 無しは実行 403（P1）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce(PERMS_RW_NO_NAME);
+    const res = await POST(
+      req({ version: 1, mode: "set", newName: "山田太郎", dryRun: false }),
+      params,
+    );
+    expect(res.status).toBe(403);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("owner_name write 無しでも sanitize 実行は 403（P1）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce(PERMS_RW_NO_NAME);
+    mockOwner({ name: "Yamada" + SOH + "Taro" });
+    const res = await POST(
+      req({ version: 1, mode: "sanitize", dryRun: false }),
+      params,
+    );
+    expect(res.status).toBe(403);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("owner_name write 無しでも dryRun（preview）は 200（P1: 読み取りは許可）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce(PERMS_RW_NO_NAME);
+    const res = await POST(
+      req({ version: 1, mode: "set", newName: "山田太郎" }),
+      params,
+    );
+    expect(res.status).toBe(200);
+  });
 });
 
 describe("入力検証", () => {
@@ -181,6 +219,16 @@ describe("dryRun: eligible / blockReasons", () => {
   it("set で再びゴミ（数値のみ）は forbidden_value", async () => {
     const res = await POST(req({ version: 1, mode: "set", newName: "999" }), params);
     const json = await res.json();
+    expect(json.blockReasons).toContain("forbidden_value");
+  });
+
+  it("set 値に制御文字混入は forbidden_value（P2）", async () => {
+    const res = await POST(
+      req({ version: 1, mode: "set", newName: "山田" + SOH + "太郎" }),
+      params,
+    );
+    const json = await res.json();
+    expect(json.eligible).toBe(false);
     expect(json.blockReasons).toContain("forbidden_value");
   });
 
@@ -234,6 +282,17 @@ describe("実行 (dryRun=false)", () => {
     expect(detailJson).not.toContain("山田太郎");
     expect(detailJson).not.toContain("44225");
     expect(call.detail).toHaveProperty("updatedFields");
+  });
+
+  it("制御文字 set 値は実行でも DB 更新せずブロック（P2）", async () => {
+    const res = await POST(
+      req({ version: 1, mode: "set", newName: "山田" + SOH + "太郎", dryRun: false }),
+      params,
+    );
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error.blockReasons).toContain("forbidden_value");
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
   });
 
   it("tx 内 updateMany count=0（version 競合）で 409", async () => {

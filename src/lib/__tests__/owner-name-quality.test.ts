@@ -223,6 +223,18 @@ describe("checkOwnerNameFixSafety", () => {
     if (!r.ok) expect(r.reasons).toContain("forbidden_value");
   });
 
+  it("新値に制御文字混入なら forbidden_value（P2）", () => {
+    const r = checkOwnerNameFixSafety({ ...base, newName: NAME_WITH_CONTROL });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("forbidden_value");
+  });
+
+  it("新値に U+FFFD（文字化け）混入なら forbidden_value（P2）", () => {
+    const r = checkOwnerNameFixSafety({ ...base, newName: NAME_WITH_REPL });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons).toContain("forbidden_value");
+  });
+
   it("無変更は no_change", () => {
     const r = checkOwnerNameFixSafety({ ...base, currentName: "山田太郎", newName: "山田太郎" });
     if (!r.ok) expect(r.reasons).toContain("no_change");
