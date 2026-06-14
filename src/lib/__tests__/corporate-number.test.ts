@@ -91,6 +91,29 @@ describe("extractCorporateNumbersFromText", () => {
     expect(extractCorporateNumbersFromText("整理番号 １２３４５６７８９０１２３－４５")).toEqual([]);
   });
 
+  // ── Codex 追加 P1: 会社法人等番号(12桁・ラベル付き)の直後に空白を挟んで
+  // 数字で始まる住所断片が続くと、ラベル付き 13桁検出器が空白を跨いで
+  // 「12桁ラベル値 + 住所先頭の数字」= 13桁を合成して誤検出していた。
+  // ラベル後の値捕捉から空白を除外し、空白跨ぎの数字連結を 13桁候補にしない。
+  it("12桁会社法人等番号+空白+住所先頭数字を13桁として誤検出しない(0200-01-012345 1丁目)", () => {
+    expect(
+      extractCorporateNumbersFromText("会社法人等番号 0200-01-012345 1丁目"),
+    ).toEqual([]);
+  });
+
+  it("12桁ラベル値+空白+数字(全角)も13桁として誤検出しない", () => {
+    expect(
+      extractCorporateNumbersFromText("会社法人等番号 ０２００−０１−０１２３４５ １丁目"),
+    ).toEqual([]);
+  });
+
+  it("正当な13桁ラベル値の直後に数字で始まる住所が続いても13桁は正しく検出する", () => {
+    // 値自体が 13桁で完結 → 後続の住所数字は跨がない。
+    expect(
+      extractCorporateNumbersFromText("法人番号 1234567890123 1丁目2番3号"),
+    ).toEqual(["1234567890123"]);
+  });
+
   it("電話番号風 (090-1234-5678 / 03-1234-5678) は誤検出しない", () => {
     expect(extractCorporateNumbersFromText("090-1234-5678")).toEqual([]);
     expect(extractCorporateNumbersFromText("03-1234-5678")).toEqual([]);

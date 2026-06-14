@@ -160,6 +160,15 @@ describe("extractCompanyRegistryNumbersFromText", () => {
       extractCompanyRegistryNumbersFromText("会社法人等番号 ０２００−０１−０１２３４５"),
     ).toEqual(["020001012345"]);
   });
+
+  // ── Codex 追加 P1: 12桁ラベル値の後に空白+数字住所(0200-01-012345 1丁目)が続く場合、
+  // 値捕捉が空白を跨いで擬似13桁化すると 12桁検証で弾かれ「検出漏れ」になっていた。
+  // 値捕捉から空白を除外し、空白手前(12桁)で完結させることで正しく12桁として検出する。
+  it("12桁ラベル値の後に空白+数字住所が続いても12桁会社法人等番号として検出する", () => {
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 0200-01-012345 1丁目"),
+    ).toEqual(["020001012345"]);
+  });
 });
 
 describe("removeCompanyRegistryNumbersFromText", () => {

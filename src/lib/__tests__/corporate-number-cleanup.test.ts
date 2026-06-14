@@ -249,5 +249,26 @@ describe("decideOwnerCorporateCleanup", () => {
       expect(p.changedFields).toEqual(["address"]);
       expect(p.changedFields).not.toContain("corporateNumber");
     });
+
+    // ── Codex 追加 P1: 12桁ラベル値の直後に空白+数字住所が続くケース。
+    // 旧挙動: 13桁検出器が空白を跨いで 020001012345 + 住所先頭 "1" = 0200010123451 を
+    // 13桁法人番号と誤検出 → corporateNumberToSet に擬似番号を保存し、住所を "丁目" に破壊。
+    // 修正後: 13桁誤検出は起きず(corporateNumberToSet=null)、12桁として label ごと除去。
+    it("12桁ラベル値+空白+数字住所 → 擬似13桁を保存せず・住所を壊さず12桁のみ除去(Codex P1)", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: "会社法人等番号 0200-01-012345 1丁目",
+        note: null,
+        corporateNumber: null,
+      });
+      // 13桁の誤検出が無い = save 判定にもならず、列へ擬似番号を移送しない。
+      expect(p.corporateNumberToSet).toBeNull();
+      expect(p.changedFields).not.toContain("corporateNumber");
+      // 住所が "丁目" に壊れない=12桁ラベル値のみ除去し "1丁目" は保持。
+      expect(p.cleanedAddress).toBe("1丁目");
+      expect(p.cleanedName).toBe("株式会社○○");
+      expect(p.action).toBe("cleanup");
+      expect(p.changedFields).toEqual(["address"]);
+    });
   });
 });
