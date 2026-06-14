@@ -19,7 +19,15 @@
  * quality-check route（hasPermission は実物・getUserPermissions のみ mock）に倣う。
  * lib コア runRegistryAutoFetch は provider 注入で直接検証し、権限ゲートは route 実行で検証する。
  */
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -489,6 +497,54 @@ describe("PR4/CodexP1: live route は provider 未設定で安全停止（mock �
     const body = await res.json();
     expect(body.error.code).toBe("REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED");
     expect(pm.importJob.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("PR4/CodexP2: env 設定済みでも browserFactory 未配線なら 501・scheduled にしない", () => {
+  const ENV_KEYS = [
+    "REGISTRY_FETCH_LOGIN_ID",
+    "REGISTRY_FETCH_PASSWORD",
+  ] as const;
+  let savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv = {};
+    for (const k of ENV_KEYS) {
+      savedEnv[k] = process.env[k];
+    }
+    // 資格情報 env を「設定済み」にする（= 旧実装ならここで provider 解決し POST が
+    // 物件を scheduled にして provider_error で必ず失敗する経路に入ってしまう）。
+    process.env.REGISTRY_FETCH_LOGIN_ID = "configured-id";
+    process.env.REGISTRY_FETCH_PASSWORD = "configured-pw";
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it("env 設定済み + browserFactory 未配線 → POST 501・registryStatus/ImportJob/Attachment/AuditLog 副作用ゼロ（scheduled にしない）", async () => {
+    const res = await callRoute({ confirmed: true });
+    expect(res.status).toBe(501);
+    const body = await res.json();
+    expect(body.error.code).toBe("REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED");
+    // 物件を一瞬たりとも scheduled にしない（楽観ロックの updateMany を呼ばない）
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+    // ImportJob / Attachment / AuditLog いずれも作成されない
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("capability も false（isRegistryAutoFetchProviderConfigured() が env 設定済みでも false）", async () => {
+    const { isRegistryAutoFetchProviderConfigured } = await import(
+      "@/lib/registry-fetch/auto-fetch"
+    );
+    // env 設定済みでも browserFactory 未配線（PR-1）ゆえ capability=false。
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
 });
 

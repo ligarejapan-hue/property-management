@@ -2,8 +2,17 @@
  * PR-1: getRegistryFetchProvider() の解決ロジック（外部接続なし）。
  *
  * 最重要の不変条件: **REGISTRY_FETCH_* 未設定 → null → route 501 維持 = 本番挙動不変。**
- * env が揃えば OfficialRegistryProvider を返すが、PR-1 では browserFactory を注入しないため
- * 実取得（fetchRegistryPdf）は provider_error で安全停止し、本番に外部接続は発生しない。
+ *
+ * CodexP2: provider 解決を「env が揃えば返す」ではなく **readiness（実際に実行可能か =
+ * browserFactory の有無）** に基づかせる。PR-1 では browserFactory を配線しないため、
+ * env を設定しても getRegistryFetchProvider() は null・isRegistryAutoFetchProviderConfigured()
+ * は false（= capability false・有料ボタン無効・POST 501 維持・registryStatus を一切動かさない）。
+ * これにより「env 設定済みなのに browserFactory 未配線」のとき、capability=true で有料ボタンが
+ * 有効化され POST が 501 ガードをバイパスして物件を一瞬 scheduled にした後 provider_error で
+ * 必ず失敗する、という「本番に常に失敗する操作」の露出を防ぐ。
+ *
+ * 将来（PR-2）browserFactory を配線すれば、env が揃った時点で capability=true になる解決経路を
+ * テストでも表現する（factory を注入した場合のみ非null）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
@@ -29,7 +38,6 @@ import {
   isRegistryAutoFetchProviderConfigured,
 } from "../auto-fetch";
 import { OfficialRegistryProvider } from "../official-provider";
-import { RegistryFetchError } from "../errors";
 
 const ENV_KEYS = [
   "REGISTRY_FETCH_LOGIN_ID",
@@ -55,7 +63,7 @@ afterEach(() => {
   }
 });
 
-describe("getRegistryFetchProvider（PR-1 解決ロジック）", () => {
+describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベース）", () => {
   it("REGISTRY_FETCH_* 未設定なら null（= route 501 維持 = 本番挙動不変）", () => {
     expect(getRegistryFetchProvider()).toBeNull();
     expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
@@ -73,25 +81,46 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック）", () => {
     expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
 
-  it("LOGIN_ID + PASSWORD が揃えば OfficialRegistryProvider を返す", () => {
+  it("CodexP2: LOGIN_ID + PASSWORD が揃っても browserFactory 未配線なら null（capability false・501維持）", () => {
+    // env を設定しても、PR-1 では browserFactory が配線されていないため実取得は不可能。
+    // readiness=false ゆえ provider は解決されず（null）、capability も false に保つ。
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
-    const provider = getRegistryFetchProvider();
-    expect(provider).toBeInstanceOf(OfficialRegistryProvider);
-    expect(provider?.name).toBe("official");
-    expect(isRegistryAutoFetchProviderConfigured()).toBe(true);
+    expect(getRegistryFetchProvider()).toBeNull();
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
 
-  it("PR-1: 解決しても browserFactory 未注入ゆえ実取得は走らず provider_error（外部接続なし）", async () => {
+  it("（将来）browserFactory が注入され env も揃えば OfficialRegistryProvider を返す（capability true）", () => {
+    // PR-2 で browserFactory を配線したら capability=true になる解決経路を表現する。
+    // テストでは実ブラウザを起動しない fake factory を注入し、readiness を満たす。
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
-    const provider = getRegistryFetchProvider();
-    expect(provider).not.toBeNull();
-    await expect(
-      provider!.fetchRegistryPdf({ realEstateNumber: "0123", ref: "prop-1" }),
-    ).rejects.toBeInstanceOf(RegistryFetchError);
-    await expect(
-      provider!.fetchRegistryPdf({ realEstateNumber: "0123", ref: "prop-1" }),
-    ).rejects.toMatchObject({ code: "provider_error" });
+    const browserFactory = async () => ({
+      async goto() {
+        /* no-op */
+      },
+      async close() {
+        /* no-op */
+      },
+    });
+    const provider = getRegistryFetchProvider({ browserFactory });
+    expect(provider).toBeInstanceOf(OfficialRegistryProvider);
+    expect(provider?.name).toBe("official");
+    expect(isRegistryAutoFetchProviderConfigured({ browserFactory })).toBe(true);
+  });
+
+  it("（将来）browserFactory を注入しても env 未設定なら null（資格情報も必須・両方揃って初めて解決）", () => {
+    const browserFactory = async () => ({
+      async goto() {
+        /* no-op */
+      },
+      async close() {
+        /* no-op */
+      },
+    });
+    expect(getRegistryFetchProvider({ browserFactory })).toBeNull();
+    expect(isRegistryAutoFetchProviderConfigured({ browserFactory })).toBe(
+      false,
+    );
   });
 });
