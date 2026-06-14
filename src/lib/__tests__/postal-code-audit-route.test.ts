@@ -68,7 +68,16 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 // 1 インスタンス）」であることを検証する。実装（tryConsume）はそのまま使う。
 // route がモジュール読込時に limiter を生成する（= 共有）ため、spy は vi.hoisted で
 // mock factory より前に初期化しておく（TDZ 回避）。
-const { createLimiterSpy } = vi.hoisted(() => ({ createLimiterSpy: vi.fn() }));
+// tryConsumeImpl で limiter の挙動を差し替えられるようにしておき、
+// 「バケット枯渇（常に false）」下で上流 lookup を叩かないことを検証する（P2-②）。
+const { createLimiterSpy, tryConsumeSpy, tryConsumeImpl } = vi.hoisted(() => {
+  const impl: { fn: ((key: string, nowMs: number) => boolean) | null } = { fn: null };
+  return {
+    createLimiterSpy: vi.fn(),
+    tryConsumeSpy: vi.fn(),
+    tryConsumeImpl: impl,
+  };
+});
 vi.mock("@/lib/token-bucket", async () => {
   const actual = await vi.importActual<typeof import("../token-bucket")>(
     "../token-bucket",
@@ -77,7 +86,14 @@ vi.mock("@/lib/token-bucket", async () => {
     ...actual,
     createTokenBucketLimiter: (opts: Parameters<typeof actual.createTokenBucketLimiter>[0]) => {
       createLimiterSpy(opts);
-      return actual.createTokenBucketLimiter(opts);
+      const real = actual.createTokenBucketLimiter(opts);
+      return {
+        tryConsume(key: string, nowMs: number): boolean {
+          tryConsumeSpy(key, nowMs);
+          if (tryConsumeImpl.fn) return tryConsumeImpl.fn(key, nowMs);
+          return real.tryConsume(key, nowMs);
+        },
+      };
     },
   };
 });
@@ -139,6 +155,7 @@ function req(url = "http://localhost/api/admin/postal-code-audit") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  tryConsumeImpl.fn = null;
   permsMock.mockResolvedValue(FULL_PERMS);
   displayMock.mockResolvedValue(FULL_DISPLAY);
   configuredMock.mockReturnValue(true);
@@ -173,6 +190,41 @@ describe("認可", () => {
     ]);
     const res = await GET(req("http://localhost/api/admin/postal-code-audit?format=csv"));
     expect(res.status).toBe(403);
+  });
+});
+
+describe("空住所スキップ（Codex P2-①）", () => {
+  it("妥当ZIP + 空文字 address なら lookup(API) を叩かず address_empty", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o-empty", name: "空住所", zip: "1000005", address: "" },
+    ]);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(lookupMock).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.rows[0].verdict).toBe("indeterminate");
+    expect(body.rows[0].reason).toBe("address_empty");
+  });
+
+  it("妥当ZIP + 空白のみ address なら lookup(API) を叩かず address_empty", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o-ws", name: "空白住所", zip: "1000005", address: "  　\t " },
+    ]);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(lookupMock).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.rows[0].verdict).toBe("indeterminate");
+    expect(body.rows[0].reason).toBe("address_empty");
+  });
+
+  it("住所ありは従来どおり lookup する", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o1", name: "n", zip: "1000005", address: "東京都千代田区丸の内1-1" },
+    ]);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+    await GET(req());
+    expect(lookupMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -383,5 +435,33 @@ describe("throttle 共有（Codex P2）", () => {
     await GET(req());
     await GET(req());
     expect(createLimiterSpy).not.toHaveBeenCalled();
+  });
+
+  it("バケット枯渇（待機タイムアウト）時はトークン未消費で上流を呼ばない", async () => {
+    // limiter が常に枯渇（tryConsume が必ず false）= バックプレッシャ最大の状況。
+    // 待機ループのタイムアウトで諦めても、トークンを消費せずに上流 lookup を
+    // 呼んではならない（共有 limiter のレート制御がバイパスされる）。
+    tryConsumeImpl.fn = () => false;
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o1", name: "n", zip: "1000005", address: "東京都千代田区丸の内1-1" },
+    ]);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+
+    vi.useFakeTimers();
+    try {
+      const p = GET(req());
+      // 待機ループ(sleep)を全て進める。
+      await vi.runAllTimersAsync();
+      const res = await p;
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // トークンを 1 つも消費できていない（= 上流は呼べない）。
+      expect(lookupMock).not.toHaveBeenCalled();
+      // 判定不能（lookup できなかった = lookup_unavailable）に倒れる。
+      expect(body.rows[0].verdict).toBe("indeterminate");
+      expect(body.rows[0].reason).toBe("lookup_unavailable");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

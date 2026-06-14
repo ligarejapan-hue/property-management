@@ -28,6 +28,7 @@ import {
   type PostalAuditRow,
   type PostalAuditCandidate,
 } from "@/lib/postal-code-audit";
+import { normalizeAddress } from "@/lib/address-lookup/normalize";
 
 // ---------- GET /api/admin/postal-code-audit ----------
 //
@@ -151,11 +152,27 @@ export async function GET(request: NextRequest) {
       if (lookupCache.has(zip7)) return lookupCache.get(zip7)!;
 
       // throttle: トークンが取れるまで短時間待つ（暴走防止に上限あり）。
+      // Codex P2-②: token-bucket の意味（バックプレッシャ）を保つため、
+      // トークンを消費できなければ上流 lookup を呼ばない。以前は待機ループの
+      // タイムアウトで break した後、トークン未消費のまま上流を呼んでいたため、
+      // 高負荷（同時監査 / ユニーク ZIP がバケット容量超過）下で共有 limiter の
+      // レート制御がバイパスされていた。取得できないままタイムアウトしたら、
+      // 上流を呼ばずに照合不能(null=lookup_unavailable)へ安全に倒す。
+      let acquired = false;
       let waited = 0;
-      while (!limiter.tryConsume("postal-audit", Date.now())) {
+      for (;;) {
+        if (limiter.tryConsume("postal-audit", Date.now())) {
+          acquired = true;
+          break;
+        }
         if (waited >= MAX_WAIT_MS_PER_LOOKUP) break;
         await sleep(100);
         waited += 100;
+      }
+      if (!acquired) {
+        // トークン未消費 = 上流を呼ばない。キャッシュには入れない
+        //（後続リクエストでトークンが空けば再試行できるようにする）。
+        return null;
       }
 
       let result: PostalAuditCandidate[] | null;
@@ -179,7 +196,12 @@ export async function GET(request: NextRequest) {
     // 3. owner ごとに照合。
     const rows: PostalAuditRow[] = [];
     for (const owner of targets) {
-      const candidates = await lookupCandidates(owner.zip ?? "");
+      // Codex P2-①: 住所が空 / 空白のみの行は判定が自明（address_empty）であり、
+      // ZIP を外部 API へ送る意味がない。lookup を呼ばず（PII egress / 無駄な外部呼び出しを
+      // 避ける）、candidates=[] を渡して comparePostalAddress に address_empty を確定させる。
+      // （ZIP が不正なら invalid_postal_code が優先される。どちらも API 不要で確定する。）
+      const addressEmpty = !owner.address || normalizeAddress(owner.address) === "";
+      const candidates = addressEmpty ? [] : await lookupCandidates(owner.zip ?? "");
       const cmp = comparePostalAddress(owner.zip, owner.address, candidates);
       rows.push({
         ownerId: owner.id,
