@@ -189,6 +189,63 @@ describe("GET /api/admin/display-name-audit — 認可", () => {
     expect(getOwnerDisplayConfig).not.toHaveBeenCalled();
   });
 
+  // ---- Codex P2: 未認可スキャンを clean（指摘ゼロ）と区別する ----
+  // owner:read 無し / 表示レベル不足 / property:read 無しで空になった結果は
+  // unavailable:true を立て、UI が「権限不足で未取得」を「指摘ゼロ」と取り違えない
+  // ようにする。実際にスキャンして 0 件だった場合は unavailable:false（または省略）。
+
+  it("owner:read 無しの空 owner 結果は unavailable:true（clean と区別）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_NO_OWNER);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    expect(body.owner.groups).toEqual([]);
+    expect(body.owner.unavailable).toBe(true);
+    // building は property:read で取得済み＝未認可ではない
+    expect(body.building.unavailable).toBeFalsy();
+  });
+
+  it("owner 表示レベル不足の空 owner 結果も unavailable:true", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+      ...FULL_DISPLAY,
+      name: "masked",
+    });
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    expect(body.owner.groups).toEqual([]);
+    expect(body.owner.unavailable).toBe(true);
+  });
+
+  it("property:read 無しの空 building 結果は unavailable:true", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ADMIN_OWNER_NO_PROPERTY,
+    );
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    expect(body.building.groups).toEqual([]);
+    expect(body.building.unavailable).toBe(true);
+    // 認可済みで取得した owner は未認可ではない
+    expect(body.owner.unavailable).toBeFalsy();
+  });
+
+  it("認可済みで実スキャン 0 件は unavailable を立てない（clean）", async () => {
+    pm.owner.findMany.mockResolvedValue([{ id: "o1", name: "唯一の名前" }]);
+    pm.building.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    expect(body.owner.groups).toEqual([]);
+    expect(body.owner.unavailable).toBeFalsy();
+    expect(body.building.groups).toEqual([]);
+    expect(body.building.unavailable).toBeFalsy();
+  });
+
   it("owner:read はあるが name 表示レベルが生値未満（masked）→ owner 群は空・building は返る", async () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
       ...FULL_DISPLAY,

@@ -43,6 +43,13 @@ export interface AuditResult {
   groups: AuditGroup[];
   /** 群数が maxGroups を超えたため先頭 maxGroups 群に制限したか */
   truncated: boolean;
+  /**
+   * この区分（owner/building）が権限不足で**スキャンされなかった**ことを示す。
+   * true のとき groups は空だが「指摘ゼロ（clean）」ではなく「未取得（権限不足）」を意味する。
+   * 実際にスキャンした結果（0 件含む）では立てない。buildDisplayNameAuditGroups は
+   * 常に実スキャン由来ゆえ設定しない＝呼び出し側（route）が未認可時のみ付与する。
+   */
+  unavailable?: boolean;
 }
 
 export interface BuildDisplayNameAuditOptions {

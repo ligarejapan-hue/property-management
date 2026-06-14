@@ -460,3 +460,70 @@ describe("S1b-3: copy/print 監査 action の detail 安全化", () => {
     expect(out.trigger).toBe(REDACTED);
   });
 });
+
+describe("display_name_audit_view: 操作メタデータ allowlist（Codex P2）", () => {
+  // 表示名監査 API（PII/CSV 監査エンドポイント）が書く非PIIメタデータは
+  // audit-logs 画面で保持されるべき。owner-prefixed キーは /owner/i denylist に
+  // 当たるため、件数(数値)/真偽だけ action 固有で force-safe 化する。
+  it("entity / format / *GroupCount / *Truncated / ownerNameVisible / viewedAt を保持する", () => {
+    const out = sanitizeAuditDetail("display_name_audit_view", {
+      entity: "all",
+      format: "csv",
+      ownerGroupCount: 3,
+      ownerTruncated: true,
+      ownerNameVisible: true,
+      buildingGroupCount: 5,
+      buildingTruncated: false,
+      viewedAt: "2026-06-14T00:00:00.000Z",
+    }) as Record<string, unknown>;
+    expect(out.entity).toBe("all");
+    expect(out.format).toBe("csv");
+    expect(out.ownerGroupCount).toBe(3);
+    expect(out.ownerTruncated).toBe(true);
+    expect(out.ownerNameVisible).toBe(true);
+    expect(out.buildingGroupCount).toBe(5);
+    expect(out.buildingTruncated).toBe(false);
+    expect(out.viewedAt).toBe("2026-06-14T00:00:00.000Z");
+  });
+
+  it("万一 PII（生 name/owner オブジェクト/住所）が混入しても [REDACTED]", () => {
+    const out = sanitizeAuditDetail("display_name_audit_view", {
+      entity: "owner",
+      ownerGroupCount: 1,
+      ownerName: "山田太郎",
+      owner: { name: "山田太郎" },
+      address: "東京都港区1-2-3",
+    }) as Record<string, unknown>;
+    expect(out.entity).toBe("owner");
+    expect(out.ownerGroupCount).toBe(1);
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.owner).toBe(REDACTED);
+    expect(out.address).toBe(REDACTED);
+  });
+
+  it("ownerGroupCount に非数値が来たら（PII 流入の恐れ）[REDACTED]", () => {
+    const out = sanitizeAuditDetail("display_name_audit_view", {
+      ownerGroupCount: "山田太郎",
+    }) as Record<string, unknown>;
+    expect(out.ownerGroupCount).toBe(REDACTED);
+  });
+
+  it("未登録 action では entity/format/ownerGroupCount 等を保持しない", () => {
+    const out = sanitizeAuditDetail("some_other_action", {
+      entity: "all",
+      format: "csv",
+      ownerGroupCount: 3,
+      ownerTruncated: true,
+      ownerNameVisible: true,
+      buildingGroupCount: 5,
+      viewedAt: "2026-06-14T00:00:00.000Z",
+    }) as Record<string, unknown>;
+    expect(out.entity).toBe(REDACTED);
+    expect(out.format).toBe(REDACTED);
+    expect(out.ownerGroupCount).toBe(REDACTED);
+    expect(out.ownerTruncated).toBe(REDACTED);
+    expect(out.ownerNameVisible).toBe(REDACTED);
+    expect(out.buildingGroupCount).toBe(REDACTED);
+    expect(out.viewedAt).toBe(REDACTED);
+  });
+});

@@ -18,6 +18,11 @@ interface AuditGroup {
 interface AuditResult {
   groups: AuditGroup[];
   truncated: boolean;
+  /**
+   * 権限不足でこの区分がスキャンされなかったことを示す（API が付与）。
+   * true のとき groups は空だが「指摘ゼロ（clean）」ではなく「未取得（権限不足）」。
+   */
+  unavailable?: boolean;
 }
 interface AuditResponse {
   owner?: AuditResult;
@@ -131,8 +136,13 @@ export default function DisplayNameAuditPage() {
           </div>
         ) : !current || current.groups.length === 0 ? (
           <div className="px-6 py-8 text-center text-sm text-gray-400">
-            {data[tab] === undefined
-              ? "この区分は表示できません（権限が不足している可能性があります）。"
+            {/* 3 状態を区別する:
+                 - data[tab] === undefined: API がこの区分を返していない（区分非表示）
+                 - current.unavailable: 権限不足で未スキャン（clean ではない）
+                 - それ以外: 実スキャン済みで指摘ゼロ（clean）
+                未認可を「表記ゆれなし」と誤認させない（Codex P2 是正）。 */}
+            {data[tab] === undefined || current?.unavailable
+              ? "権限が不足しているため、この区分は確認できませんでした（表記ゆれの有無は不明です）。"
               : "表記ゆれは見つかりませんでした。"}
           </div>
         ) : (

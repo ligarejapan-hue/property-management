@@ -194,8 +194,10 @@ export async function GET(request: NextRequest) {
           truncated: grouped.truncated || scanTruncated,
         };
       } else {
-        // 表示レベル不足: owner 群は空（building は返す）。DB も叩かない。
-        ownerResult = { groups: [], truncated: false };
+        // owner:read 不足 または name 表示レベル不足: owner 群は空（building は返す）。
+        // DB も叩かない。空 groups を「指摘ゼロ（clean）」と誤認させないため
+        // unavailable:true を立てる（権限不足で未スキャン＝UI で別表示する・Codex P2 是正）。
+        ownerResult = { groups: [], truncated: false, unavailable: true };
       }
     }
 
@@ -228,9 +230,10 @@ export async function GET(request: NextRequest) {
           truncated: grouped.truncated || scanTruncated,
         };
       } else {
-        // property:read 不足、または CSV 出力で csv_export:read 不足:
-        // building 群は空（fail-closed）。DB も叩かない。
-        buildingResult = { groups: [], truncated: false };
+        // property:read 不足: building 群は空（fail-closed）。DB も叩かない。
+        // owner と同様、空 groups を clean と誤認させないため unavailable:true を立てる
+        // （権限不足で未スキャン＝UI で別表示する・Codex P2 是正）。
+        buildingResult = { groups: [], truncated: false, unavailable: true };
       }
     }
 

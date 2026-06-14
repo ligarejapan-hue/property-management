@@ -145,6 +145,18 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   pii_cut_attempt: new Set(["surface", "trigger"]),
   pii_contextmenu_attempt: new Set(["surface", "trigger"]),
   pii_print_attempt: new Set(["surface", "trigger"]),
+  // 表示名監査（read-only レポート）の閲覧/CSV 出力監査。detail は操作事実の
+  // 非PIIメタデータのみ（entity/format=enum・viewedAt=ISO日時・各種件数/真偽）。
+  // owner-prefixed な件数/真偽（ownerGroupCount/ownerTruncated/ownerNameVisible）は
+  // /owner/i denylist に当たるため、下の force-safe / numeric-force-safe で別途許可する。
+  // 生 name / owner オブジェクト / 住所等の PII は allowlist 外 + denylist で引き続き [REDACTED]。
+  display_name_audit_view: new Set([
+    "entity",
+    "format",
+    "viewedAt",
+    "buildingGroupCount",
+    "buildingTruncated",
+  ]),
 };
 
 /**
@@ -157,6 +169,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
  */
 const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   import_job_rollback: new Set(["fieldNames"]),
+  // display_name_audit_view の owner-prefixed な真偽メタデータ。/owner/i denylist に
+  // 当たるが PII ではなく「owner 群を切り捨てたか / owner 名を生値表示できたか」の
+  // boolean 監査情報。force-safe で保持する（値は boolean ゆえ PII 流入余地なし）。
+  // ownerGroupCount（件数）は数値限定の numeric-force-safe 側で許可する。
+  display_name_audit_view: new Set(["ownerTruncated", "ownerNameVisible"]),
 };
 
 /**
@@ -172,6 +189,9 @@ const ACTION_NUMERIC_FORCE_SAFE_KEYS: Readonly<
   Record<string, ReadonlySet<string>>
 > = {
   pdf_import: new Set(["ownersMatched", "ownersCreated", "ownersLinked"]),
+  // display_name_audit_view の owner 群件数。/owner/i denylist に当たるが有限数値
+  // （群数）のときだけ保持する。非数値は PII 流入の恐れがあるため [REDACTED]。
+  display_name_audit_view: new Set(["ownerGroupCount"]),
 };
 
 const EMPTY_KEY_SET: ReadonlySet<string> = new Set();
