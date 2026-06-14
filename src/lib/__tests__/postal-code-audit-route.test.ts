@@ -287,6 +287,53 @@ describe("照合結果", () => {
   });
 });
 
+describe("空文字 zip/address の DB 除外（指摘1）", () => {
+  it("findMany の where で zip/address の空文字を除外する（not:null だけに頼らない）", async () => {
+    await GET(req());
+    expect(pm.owner.findMany).toHaveBeenCalledTimes(1);
+    const where = pm.owner.findMany.mock.calls[0][0].where as Record<string, unknown>;
+    // Prisma では空文字 "" は not:null を通過するため、空文字も明示的に除外する。
+    // 実装は zip/address それぞれに { not: null } と { not: "" } を AND で併記する。
+    const serialized = JSON.stringify(where);
+    // null 除外（既存挙動の維持）。
+    expect(serialized).toContain("\"not\":null");
+    // 空文字除外（指摘1の本修正）。zip・address とも { not: "" } を含むこと。
+    expect(where).toMatchObject({
+      AND: expect.arrayContaining([
+        { zip: { not: "" } },
+        { address: { not: "" } },
+        { zip: { not: null } },
+        { address: { not: null } },
+      ]),
+    });
+  });
+
+  it("空文字 zip の行がキャッシュを汚染せず、正常な同一正規化キーの行を no_candidate にしない", async () => {
+    // DB が（仮に）空文字 zip を返しても、空文字 zip の lookup は [] を返すだけで
+    // キャッシュに書かれてはならない。書かれると後続の正常レコード（normalizePostalCode が
+    // 同じ "" を生む値）まで候補なし扱い（no_candidate）に誤判定される。
+    // ここでは「空文字 zip → 続いて妥当 zip」で、妥当 zip の lookup が確実に呼ばれ
+    // match できることを確認する（キャッシュ汚染が無いことの固定）。
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o-empty-zip", name: "空zip", zip: "", address: "東京都千代田区丸の内1-1" },
+      { id: "o-valid", name: "正常", zip: "1000005", address: "東京都千代田区丸の内1-1" },
+    ]);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const byId = Object.fromEntries(
+      body.rows.map((r: { ownerId: string }) => [r.ownerId, r]),
+    );
+    // 空文字 zip は invalid_postal_code（API 非呼出）。
+    expect(byId["o-empty-zip"].verdict).toBe("indeterminate");
+    expect(byId["o-empty-zip"].reason).toBe("invalid_postal_code");
+    // 正常レコードは lookup が呼ばれ match する（空 zip の [] にキャッシュ汚染されない）。
+    expect(byId["o-valid"].verdict).toBe("match");
+    expect(lookupMock).toHaveBeenCalledWith("1000005");
+  });
+});
+
 describe("API 未設定時の安全動作", () => {
   it("未設定なら照合せず全件 lookup_unavailable・apiConfigured=false", async () => {
     configuredMock.mockReturnValue(false);

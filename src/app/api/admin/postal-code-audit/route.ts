@@ -116,11 +116,24 @@ export async function GET(request: NextRequest) {
     // 1. 対象 owner（非アーカイブ・zip と address の両方あり）を取得。
     //    DB レベルで zip/address 非空に絞り、無駄な API 照合対象を減らす。
     //    take = MAX+1 で「上限超過」を検出（超過分は照合せず truncated を立てる）。
+    //
+    //    NOTE: Prisma では空文字列 "" は `{ not: null }` を通過してしまう（null ではないため）。
+    //    空文字 zip を対象に含めると lookupCandidates が早期 return で [] を返し、無駄な
+    //    対象行（必ず invalid_postal_code）になるうえ、将来 lookup 経路が変わった際に空文字 ZIP
+    //    の照合不能結果が同一正規化キーのキャッシュを汚染するリスクもある。よって null だけでなく
+    //    空文字も DB レベルで除外する（`{ not: null }` と `{ not: "" }` を AND で併記）。
+    //    後段ガード（normalizeAddress===""・isValidPostalCode）はフェイルセーフとして維持する。
     const owners = await prisma.owner.findMany({
       where: {
         isArchived: false,
-        zip: { not: null },
-        address: { not: null },
+        // null・空文字の両方を除外する。フィールドフィルタ内では同一キー(not)を二重に
+        // 書けないため、モデルレベルの AND で `{ not: null }` と `{ not: "" }` を併記する。
+        AND: [
+          { zip: { not: null } },
+          { zip: { not: "" } },
+          { address: { not: null } },
+          { address: { not: "" } },
+        ],
       },
       select: { id: true, name: true, zip: true, address: true },
       orderBy: { createdAt: "asc" },
@@ -147,6 +160,8 @@ export async function GET(request: NextRequest) {
       if (!isValidPostalCode(zip7)) {
         // 不正郵便番号は API を叩かない（comparePostalAddress が invalid_postal_code を返す）。
         // candidates は [] を渡しても invalid 判定が優先されるが、PII egress と無駄打ちを避けるため照合しない。
+        // ここで返す [] は lookupCache に書かない（早期 return）。書くと、正規化後に同じ zip7 を
+        // 生む別レコード（本来は妥当）まで「候補なし([])」を引いて no_candidate に誤判定するキャッシュ汚染になる。
         return [];
       }
       if (lookupCache.has(zip7)) return lookupCache.get(zip7)!;
