@@ -98,6 +98,46 @@ describe("extractCompanyRegistryNumbersFromText", () => {
       extractCompanyRegistryNumbersFromText("法人番号: 1234567890123"),
     ).toEqual([]);
   });
+
+  // ── Codex 追加 P2: ラベル付き値の数字列の「後ろに非数字サフィックス」がある場合、
+  // 右境界が無いと先頭12桁だけ部分一致して妥当な会社法人等番号と誤認してしまう。
+  // 12桁で完結していないトークンは保守的に「会社法人等番号として扱わない=抽出/除去しない」。
+  it("12桁の直後に英字サフィックスが続く場合は部分一致で抽出しない", () => {
+    // "020001012345A" は先頭12桁だけ拾うと一見妥当に見えるが、トークンが12桁で
+    // 完結していない(直後に英字)ため別番号の可能性 → 抽出しない。
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 020001012345A"),
+    ).toEqual([]);
+  });
+
+  it("全角12桁の直後に英字が続く場合も部分一致で抽出しない", () => {
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 ０２００−０１−０１２３４５abc"),
+    ).toEqual([]);
+  });
+
+  it("12桁の直後に更に数字が続く(13桁以上に化ける)場合は12桁部分一致しない", () => {
+    // 半角13連続: 全体トークンを拾うと13桁 → normalize で弾かれ抽出されない。
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 0200010123450"),
+    ).toEqual([]);
+    // 全角13連続も同様。
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 ０２０００１０１２３４５１"),
+    ).toEqual([]);
+  });
+
+  it("桁不足/別番号の可能性(『012345号』等)を誤って部分抽出しない", () => {
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 012345号"),
+    ).toEqual([]);
+  });
+
+  it("12桁で完結する実例(全角ハイフン表記)は従来どおり抽出できる", () => {
+    expect(
+      extractCompanyRegistryNumbersFromText("会社法人等番号 ０２００−０１−０１２３４５"),
+    ).toEqual(["020001012345"]);
+  });
 });
 
 describe("removeCompanyRegistryNumbersFromText", () => {
@@ -151,5 +191,26 @@ describe("removeCompanyRegistryNumbersFromText", () => {
 
   it("番号のみ(ラベル+番号)の文字列は空文字になる", () => {
     expect(removeCompanyRegistryNumbersFromText("会社法人等番号 020001012345", [REG])).toBe("");
+  });
+
+  // ── Codex 追加 P2: 右境界が無いと "020001012345A" の先頭12桁だけを部分除去し、
+  // "会社法人等番号 A" のような壊れた残骸を生む恐れ。12桁で完結していないトークンは
+  // 除去対象にしない(原文を保つ)。
+  it("12桁の直後に英字サフィックスが続く場合は部分除去しない(原文保持)", () => {
+    expect(
+      removeCompanyRegistryNumbersFromText("会社法人等番号 020001012345A", [REG]),
+    ).toBe("会社法人等番号 020001012345A");
+  });
+
+  it("全角12桁の直後に英字が続く場合も部分除去しない(原文保持)", () => {
+    expect(
+      removeCompanyRegistryNumbersFromText("会社法人等番号 ０２００−０１−０１２３４５abc", [REG]),
+    ).toBe("会社法人等番号 ０２００−０１−０１２３４５abc");
+  });
+
+  it("12桁で完結する実例(全角ハイフン表記)は従来どおり除去できる", () => {
+    expect(
+      removeCompanyRegistryNumbersFromText("東京都港区1-1 会社法人等番号 ０２００−０１−０１２３４５", [REG]),
+    ).toBe("東京都港区1-1");
   });
 });
