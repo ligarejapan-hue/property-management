@@ -114,4 +114,187 @@ describe("decideOwnerCorporateCleanup", () => {
     expect(p.cleanedName).toBe("株式会社○○");
     expect(p.changedFields).toEqual(["name", "corporateNumber"]);
   });
+
+  // ─── 会社法人等番号(12桁)混入除去(除去のみ・列移送なし・13桁非干渉) ───
+  describe("会社法人等番号(12桁)混入除去", () => {
+    const REG = "020001012345";
+
+    it("address にラベル付き12桁混入のみ → cleanup・address除去・列移送なし(corporateNumberToSet null)", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: `東京都港区1-1 会社法人等番号 0200-01-012345`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("cleanup");
+      expect(p.importAction).toBe("none"); // 13桁は無いので import 判定は none
+      expect(p.corporateNumberToSet).toBeNull(); // 12桁は列へ移送しない
+      expect(p.cleanedAddress).toBe("東京都港区1-1");
+      expect(p.changedFields).toEqual(["address"]);
+    });
+
+    it("全角ラベル・全角数字・全角ハイフンの12桁も除去", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: `東京都港区1-1 会社法人等番号 ０２００−０１−０１２３４５`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("cleanup");
+      expect(p.cleanedAddress).toBe("東京都港区1-1");
+      expect(p.corporateNumberToSet).toBeNull();
+      expect(p.changedFields).toEqual(["address"]);
+    });
+
+    it("ラベルなし裸12桁は誤検出/除去しない(action none・無関係改変なし)", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "整理番号 020001012345",
+        address: "東京都港区1-1 020001012345",
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("none");
+      expect(p.changedFields).toEqual([]);
+    });
+
+    it("13桁(name)+ 12桁(address)同時 → 両方除去・13桁は列移送・12桁は除去のみ", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: `株式会社○○ ${N}`,
+        address: `東京都港区1-1 会社法人等番号 ${REG}`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("cleanup");
+      expect(p.importAction).toBe("save");
+      expect(p.corporateNumberToSet).toBe(N); // 13桁のみ列へ
+      expect(p.cleanedName).toBe("株式会社○○");
+      expect(p.cleanedAddress).toBe("東京都港区1-1");
+      expect(p.changedFields).toContain("name");
+      expect(p.changedFields).toContain("address");
+      expect(p.changedFields).toContain("corporateNumber");
+      // 13桁は name でのみ実除去・12桁(address)は corporate13RemovedFields に含めない(Codex P2)
+      expect(p.corporate13RemovedFields).toEqual(["name"]);
+    });
+
+    it("corporate13RemovedFields: 13桁を実除去するフィールドのみ・12桁除去フィールドは除く(Codex P2)", () => {
+      // name=実除去可能13桁 / address=12桁のみ / note=13桁誤検出save候補(ハイフン連結ID=実除去なし)
+      const p = decideOwnerCorporateCleanup({
+        name: `株式会社○○ ${N}`,
+        address: `東京都港区1-1 会社法人等番号 ${REG}`,
+        note: "整理番号 1234567890123-45",
+        corporateNumber: null,
+      });
+      // 13桁を実際に除去するのは name のみ。address(12桁のみ)と note(除去されないID)は含まない。
+      expect(p.corporate13RemovedFields).toEqual(["name"]);
+      expect(p.corporate13RemovedFields).not.toContain("address");
+      expect(p.corporate13RemovedFields).not.toContain("note");
+    });
+
+    it("12桁のみ除去ケースは corporate13RemovedFields が空(save 保護対象外)", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: `東京都港区1-1 会社法人等番号 ${REG}`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.corporate13RemovedFields).toEqual([]);
+    });
+
+    it("12桁検出は detectedIn に該当フィールドを含める", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: `会社法人等番号 ${REG} 東京都`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.detectedIn).toContain("address");
+    });
+
+    it("除去で address が空になれば null 化", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: `会社法人等番号 ${REG}`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("cleanup");
+      expect(p.cleanedAddress).toBeNull();
+      expect(p.changedFields).toEqual(["address"]);
+    });
+
+    it("空化ガード: name が「ラベル+12桁」のみ → manual(name_would_be_empty)", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: `会社法人等番号 ${REG}`,
+        address: null,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("manual");
+      expect(p.manualReason).toBe("name_would_be_empty");
+      expect(p.changedFields).toEqual([]);
+    });
+
+    it("idempotency: 12桁除去済みを再投入 → action none", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: "東京都港区1-1",
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("none");
+      expect(p.changedFields).toEqual([]);
+    });
+
+    it("13桁の multi 判定は 12桁混入が併存しても従来どおり manual(multi)", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: `${N} ${M}`,
+        address: `会社法人等番号 ${REG}`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("manual");
+      expect(p.manualReason).toBe("multi");
+      expect(p.changedFields).toEqual([]);
+    });
+
+    it("13桁誤検出save候補(ハイフン連結ID=列移送なし) + 別フィールド12桁 → cleanup・corporateNumberToSet null・12桁除去のみ(Codex P2)", () => {
+      // name のハイフン連結ID は save 候補(importAction=save)だが厳格 remover は除去しない
+      // (corporate13Removed=false → corporateNumberToSet=null)。一方 address の12桁は除去される。
+      // この場合 changedFields は ["address"] のみ(corporateNumber は含まれない)。
+      const p = decideOwnerCorporateCleanup({
+        name: "整理番号 1234567890123-45",
+        address: `東京都港区1-1 会社法人等番号 ${REG}`,
+        note: null,
+        corporateNumber: null,
+      });
+      expect(p.action).toBe("cleanup");
+      expect(p.importAction).toBe("save"); // 13桁は save 候補のまま
+      expect(p.corporateNumberToSet).toBeNull(); // ただし 13桁は除去できないので列移送なし
+      expect(p.cleanedName).toBe("整理番号 1234567890123-45"); // name は不変
+      expect(p.cleanedAddress).toBe("東京都港区1-1"); // 12桁のみ除去
+      expect(p.changedFields).toEqual(["address"]);
+      expect(p.changedFields).not.toContain("corporateNumber");
+    });
+
+    // ── Codex 追加 P1: 12桁ラベル値の直後に空白+数字住所が続くケース。
+    // 旧挙動: 13桁検出器が空白を跨いで 020001012345 + 住所先頭 "1" = 0200010123451 を
+    // 13桁法人番号と誤検出 → corporateNumberToSet に擬似番号を保存し、住所を "丁目" に破壊。
+    // 修正後: 13桁誤検出は起きず(corporateNumberToSet=null)、12桁として label ごと除去。
+    it("12桁ラベル値+空白+数字住所 → 擬似13桁を保存せず・住所を壊さず12桁のみ除去(Codex P1)", () => {
+      const p = decideOwnerCorporateCleanup({
+        name: "株式会社○○",
+        address: "会社法人等番号 0200-01-012345 1丁目",
+        note: null,
+        corporateNumber: null,
+      });
+      // 13桁の誤検出が無い = save 判定にもならず、列へ擬似番号を移送しない。
+      expect(p.corporateNumberToSet).toBeNull();
+      expect(p.changedFields).not.toContain("corporateNumber");
+      // 住所が "丁目" に壊れない=12桁ラベル値のみ除去し "1丁目" は保持。
+      expect(p.cleanedAddress).toBe("1丁目");
+      expect(p.cleanedName).toBe("株式会社○○");
+      expect(p.action).toBe("cleanup");
+      expect(p.changedFields).toEqual(["address"]);
+    });
+  });
 });
