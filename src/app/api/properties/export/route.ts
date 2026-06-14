@@ -15,7 +15,11 @@ import {
   buildPropertyListOrderBy,
   loadImportSourceMap,
 } from "@/lib/property-list-query";
-import { encodeCsv, sanitizeCsvCellForExcel } from "@/lib/csv-encode";
+import {
+  encodeCsv,
+  sanitizeCsvCellForExcel,
+  wrapCsvTextCell,
+} from "@/lib/csv-encode";
 import {
   PROPERTY_TYPE_LABELS,
   CASE_STATUS_LABELS,
@@ -35,6 +39,14 @@ function toPostalCodeCell(postalCode: string | null | undefined): string {
   if (!postalCode) return "";
   return isValidPostalCode(postalCode) ? formatPostalCode(postalCode) : postalCode;
 }
+
+// 地番（例: 4-2）・家屋番号（例: 1-2-3）は「数字＋ハイフン」のため Excel が CSV を開く際に
+// 日付（4月2日 等）へ自動変換してしまう。Excel テキスト数式 `="<値>"` に包んでテキスト固定する
+// （wrapCsvTextCell 参照）。空欄は空のまま・表記（桁/ハイフン）は変えない（郵便番号のような
+// 整形はしない）。値全体が文字列リテラル化されるため formula injection も中和され、後段の
+// sanitizeCsvCellForExcel（' 付与）はこの2列には重ねない（= 始まりに ' が付くと数式が壊れる）。
+// 取込側は unwrapCsvTextCell で元値へ戻すため、出力→再取込の往復で元値に一致する。
+const TEXT_FORCED_HEADERS: ReadonlySet<string> = new Set(["地番", "家屋番号"]);
 
 // ---------- GET /api/properties/export ----------
 //
@@ -187,8 +199,10 @@ export async function GET(request: NextRequest) {
         管理ID: importSourceMap.get(p.id) ?? "",
         物件種別: PROPERTY_TYPE_LABELS[p.propertyType] ?? p.propertyType,
         住所: p.address ?? "",
-        地番: p.lotNumber ?? "",
-        家屋番号: p.buildingNumber ?? "",
+        // 地番・家屋番号は Excel の日付自動変換を防ぐためテキスト数式 `="<値>"` で固定する
+        //（空欄は空のまま）。再取込時は import 側が unwrap して元値へ戻す。
+        地番: wrapCsvTextCell(p.lotNumber),
+        家屋番号: wrapCsvTextCell(p.buildingNumber),
         不動産番号: p.realEstateNumber ?? "",
         登記状況:
           REGISTRY_STATUS_LABELS[p.registryStatus] ?? p.registryStatus,
@@ -209,11 +223,16 @@ export async function GET(request: NextRequest) {
 
     // CSV formula injection 対策: 外部入力・DB 由来の全セル値を encodeCsv に渡す前に
     // 無害化する（先頭が = + - @ tab CR のセルに ' を付与）。RFC quoting は encodeCsv 側。
+    //
+    // ただし地番・家屋番号（TEXT_FORCED_HEADERS）は既に wrapCsvTextCell で `="<値>"` に
+    // テキスト固定済み。これは値全体を文字列リテラル化するため formula injection は中和済みで、
+    // ここで sanitize を重ねると先頭 `=` に `'` が付いて Excel 数式が壊れる（テキスト固定が無効化）。
+    // よってこの2列は sanitize をスキップし、wrap 済みの値をそのまま使う。
     const sanitizedRows = rows.map((row) =>
       Object.fromEntries(
         Object.entries(row).map(([key, value]) => [
           key,
-          sanitizeCsvCellForExcel(value),
+          TEXT_FORCED_HEADERS.has(key) ? value : sanitizeCsvCellForExcel(value),
         ]),
       ),
     );

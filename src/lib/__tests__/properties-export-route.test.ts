@@ -433,10 +433,11 @@ describe("GET /api/properties/export", () => {
   });
 
   it("CSV formula injection: 先頭が = + - @ のセル値は ' を付けて無害化して出力する", async () => {
+    // 地番・家屋番号は別方式（テキスト数式 ="..."）で中和するため、ここでは ' 付与方式の
+    // 対象となる列（住所・不動産番号・所有者名）で検証する。
     pm.property.findMany.mockResolvedValue([
       makeProp({
         address: "=1+1",
-        lotNumber: "+SUM(A1:A2)",
         realEstateNumber: "-10",
         propertyOwners: [{ owner: { name: "@cmd" } }],
       }),
@@ -445,7 +446,6 @@ describe("GET /api/properties/export", () => {
     const res = await GET(makeRequest());
     const csv = await res.text();
     expect(csv).toContain("'=1+1");
-    expect(csv).toContain("'+SUM(A1:A2)");
     expect(csv).toContain("'-10");
     expect(csv).toContain("'@cmd");
   });
@@ -774,6 +774,107 @@ describe("GET /api/properties/export — 出力項目選択（?columns=）", () 
 function ownersHelper(zip: string) {
   return [{ isPrimary: true, owner: { name: "所有 花子", zip } }];
 }
+
+// ============================================================
+// バグ修正: 地番（D列）・家屋番号（E列）が Excel で日付に自動変換される
+// - 値を Excel テキスト数式 `="<値>"` で固定し、日付化を防ぐ。
+// - 空欄は空のまま・表記（桁/ハイフン）は変えない。
+// - formula injection は wrap で中和（追加の ' は付けない）。
+// - 郵便番号セルの既存挙動は不変。
+// ============================================================
+describe("GET /api/properties/export — 地番・家屋番号のテキスト固定（日付化対策）", () => {
+  function headerCols(csv: string): string[] {
+    return csv.split("\r\n")[0].split(",");
+  }
+  // 地番/家屋番号は ="..." 形式（内部にカンマは無いが " を含むため RFC quoting される）。
+  // ヘッダ index でセルを取り出し、エスケープを解いた論理値で検証する。
+  function logicalCells(csv: string): string[] {
+    // 単純化のため、値にカンマを含まない前提で論理セルへ復元する小パーサ。
+    const line = csv.split("\r\n")[1];
+    const cells: string[] = [];
+    let cur = "";
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQ = !inQ;
+        }
+      } else if (ch === "," && !inQ) {
+        cells.push(cur);
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    cells.push(cur);
+    return cells;
+  }
+
+  it("地番・家屋番号は =\"値\" のテキスト数式で出力され Excel で日付化されない", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ lotNumber: "4-2", buildingNumber: "1-2-3" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const header = headerCols(csv);
+    const cells = logicalCells(csv);
+    expect(cells[header.indexOf("地番")]).toBe('="4-2"');
+    expect(cells[header.indexOf("家屋番号")]).toBe('="1-2-3"');
+  });
+
+  it("地番・家屋番号が空（null）なら空欄のまま（余計な =\"\" を出さない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ lotNumber: null, buildingNumber: null }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const header = headerCols(csv);
+    const cells = logicalCells(csv);
+    expect(cells[header.indexOf("地番")]).toBe("");
+    expect(cells[header.indexOf("家屋番号")]).toBe("");
+  });
+
+  it("表記（桁・ハイフン）は変えない（郵便番号のような整形をしない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ lotNumber: "0100492", buildingNumber: "１２３-４" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const header = headerCols(csv);
+    const cells = logicalCells(csv);
+    expect(cells[header.indexOf("地番")]).toBe('="0100492"');
+    expect(cells[header.indexOf("家屋番号")]).toBe('="１２３-４"');
+  });
+
+  it("地番・家屋番号の formula injection は wrap で中和（' を重ねず =\"...\" のまま）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ lotNumber: "=1+1", buildingNumber: "+SUM(A1:A2)" }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const header = headerCols(csv);
+    const cells = logicalCells(csv);
+    expect(cells[header.indexOf("地番")]).toBe('="=1+1"');
+    expect(cells[header.indexOf("家屋番号")]).toBe('="+SUM(A1:A2)"');
+    // wrap 済みセルには ' は付かない（先頭 = の数式が壊れないこと）
+    expect(cells[header.indexOf("地番")]).not.toContain("'=");
+  });
+
+  it("郵便番号セルの既存挙動は不変（NNN-NNNN 整形・テキスト数式化しない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ propertyOwners: ownersHelper("0100492") }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await res.text();
+    const header = headerCols(csv);
+    const cells = logicalCells(csv);
+    expect(cells[header.indexOf("郵便番号")]).toBe("010-0492");
+  });
+});
 
 describe("buildPropertyListWhere（一覧 API と共有・従来挙動の固定）", () => {
   const adminSession = { id: "admin", role: "admin" };
