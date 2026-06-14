@@ -158,7 +158,6 @@ function makeProp(over: Record<string, unknown> = {}) {
     id: "p1",
     address: "東京都千代田区1-1",
     propertyType: "land",
-    roomNo: null,
     propertyOwners: [makePropertyOwner()],
     ...over,
   };
@@ -338,7 +337,7 @@ describe("GET /api/properties/dm-export", () => {
     expect(csv).not.toMatch(/[^\r]\n/);
     // ヘッダ列順
     expect(csv).toContain(
-      "管理ID,物件住所,所有者名,敬称,郵便番号,所有者住所,物件種別,所有者名カナ,代表者,続柄,部屋番号,DM判断",
+      "管理ID,物件住所,所有者名,敬称,郵便番号,所有者住所,物件種別,所有者名カナ,代表者,続柄,DM判断",
     );
   });
 
@@ -548,7 +547,6 @@ describe("GET /api/properties/dm-export", () => {
     pm.property.findMany.mockResolvedValue([
       makeProp({
         address: null,
-        roomNo: null,
         propertyOwners: [
           makePropertyOwner({
             owner: {
@@ -1138,7 +1136,7 @@ describe("GET /api/properties/dm-export — 同一送付先住所グルーピン
     // 先頭 BOM（U+FEFF）を除いてヘッダ行を厳密一致で検証する。
     const header = csv.split("\r\n")[0].replace(/^﻿/, "");
     expect(header).toBe(
-      "管理ID,物件住所,所有者名,敬称,郵便番号,所有者住所,物件種別,所有者名カナ,代表者,続柄,部屋番号,DM判断,送付先所有者名一覧,共有者数",
+      "管理ID,物件住所,所有者名,敬称,郵便番号,所有者住所,物件種別,所有者名カナ,代表者,続柄,DM判断,送付先所有者名一覧,共有者数",
     );
   });
 
