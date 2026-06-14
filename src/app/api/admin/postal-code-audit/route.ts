@@ -59,6 +59,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Codex P2: token-bucket(throttle) はモジュールレベルの単一インスタンスにして
+// リクエスト間で共有する。GET 内で都度生成すると、同時リクエスト（複数管理者/タブ）が
+// それぞれ fresh burst + 独自 refill を持ち、同一 ZIP を重複で叩いて上流呼び出しが増える。
+// 単一 Node プロセス前提（token-bucket.ts と同方針）。
+const sharedLimiter = createTokenBucketLimiter({
+  capacity: LOOKUP_BURST,
+  refillPerSec: LOOKUP_REFILL_PER_SEC,
+});
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getApiSession();
@@ -91,10 +100,17 @@ export async function GET(request: NextRequest) {
 
     const displayConfig = await getOwnerDisplayConfig(session.id, perms);
 
-    // 表示権限が「生値を返すレベル」かどうか。保存住所が隠れるレベルでは、
-    // 突き合わせ結果（API住所/判定）を出しても監査として意味が薄く、かつ
-    // API住所と保存住所マスクの差で住所を推測される懸念があるため API住所も伏せる。
+    // 表示権限が「生値を返すレベル」かどうか。
+    //  - 保存住所が隠れるレベルでは、API住所と保存住所マスクの差で住所を推測される
+    //    懸念があるため API住所を伏せる。
+    //  - Codex P1: API住所(matchedAddressLine)は保存 ZIP から API で導出した値であり、
+    //    ZIP の地域情報を含む。owner_address が生値でも owner_zip がマスク/非表示なら、
+    //    見えてはいけない ZIP 由来の地域情報を露出させてしまう。したがって ZIP も
+    //    生値レベルのときに限り API住所を返す（判定/不一致フラグ自体は出してよい）。
     const addressPlain = isPlainOwnerLevel(displayConfig.address);
+    const zipPlain = isPlainOwnerLevel(displayConfig.zip);
+    // ZIP 由来の照合住所は「住所が生値 かつ ZIP が生値」のときのみ提示する。
+    const canShowApiAddress = addressPlain && zipPlain;
 
     // 1. 対象 owner（非アーカイブ・zip と address の両方あり）を取得。
     //    DB レベルで zip/address 非空に絞り、無駄な API 照合対象を減らす。
@@ -118,11 +134,9 @@ export async function GET(request: NextRequest) {
     const apiConfigured = isAddressLookupConfigured();
 
     // 同一郵便番号の lookup 結果キャッシュ（正規化済み 7 桁 zip → 候補 or null[=不能]）。
+    // キャッシュはリクエスト単位（最新の DB 値で照合するため）。throttle のみ共有する。
     const lookupCache = new Map<string, PostalAuditCandidate[] | null>();
-    const limiter = createTokenBucketLimiter({
-      capacity: LOOKUP_BURST,
-      refillPerSec: LOOKUP_REFILL_PER_SEC,
-    });
+    const limiter = sharedLimiter;
 
     // API 設定済みのときだけ実際に lookup する純度の高い helper。
     // 未設定・有効な郵便番号でない場合は null/skip を返し、comparePostalAddress に委ねる。
@@ -172,8 +186,9 @@ export async function GET(request: NextRequest) {
         nameMasked: maskValue(owner.name, displayConfig.name),
         zipMasked: maskValue(owner.zip, displayConfig.zip),
         addressMasked: maskValue(owner.address, displayConfig.address),
-        // API住所（一般地名）は保存住所が生値レベルのときだけ提示（推測防止の保守的措置）。
-        apiAddressLine: addressPlain ? cmp.matchedAddressLine : null,
+        // API住所（ZIP 由来の照合住所）は住所・ZIP ともに生値レベルのときだけ提示。
+        // ZIP がマスク/非表示なら ZIP 由来の地域情報露出を防ぐため伏せる（Codex P1）。
+        apiAddressLine: canShowApiAddress ? cmp.matchedAddressLine : null,
         verdict: cmp.verdict,
         reason: cmp.reason,
       });

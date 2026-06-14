@@ -64,6 +64,24 @@ vi.mock("@/lib/api-helpers", () => {
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
+// token-bucket: createTokenBucketLimiter を spy して「モジュール共有（リクエスト間で
+// 1 インスタンス）」であることを検証する。実装（tryConsume）はそのまま使う。
+// route がモジュール読込時に limiter を生成する（= 共有）ため、spy は vi.hoisted で
+// mock factory より前に初期化しておく（TDZ 回避）。
+const { createLimiterSpy } = vi.hoisted(() => ({ createLimiterSpy: vi.fn() }));
+vi.mock("@/lib/token-bucket", async () => {
+  const actual = await vi.importActual<typeof import("../token-bucket")>(
+    "../token-bucket",
+  );
+  return {
+    ...actual,
+    createTokenBucketLimiter: (opts: Parameters<typeof actual.createTokenBucketLimiter>[0]) => {
+      createLimiterSpy(opts);
+      return actual.createTokenBucketLimiter(opts);
+    },
+  };
+});
+
 vi.mock("@/lib/prisma", () => ({
   default: {
     owner: { findMany: vi.fn() },
@@ -309,5 +327,61 @@ describe("マスキング", () => {
     expect(body.rows[0].apiAddressLine).toBeNull();
     // 判定自体は内部の生値で行われる（mismatch のまま）。
     expect(body.rows[0].verdict).toBe("mismatch");
+  });
+
+  // Codex P1: API住所(matchedAddressLine)は保存ZIPから API で導出した値であり、
+  // ZIP の地域情報を含む。住所が生値レベルでも ZIP がマスク/非表示なら、
+  // 見えてはいけない ZIP 由来の地域情報を露出させてしまうため API住所も伏せる。
+  it("住所は生値だが ZIP がマスクなら API住所は出さない（ZIP 地域情報の露出防止）", async () => {
+    displayMock.mockResolvedValue({ ...FULL_DISPLAY, address: "full", zip: "masked" });
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o1", name: "山田", zip: "1000005", address: "大阪府大阪市北区梅田" },
+    ]);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.rows[0].apiAddressLine).toBeNull();
+    // 判定（不一致フラグ）自体は内部の生値で行われ、出してよい。
+    expect(body.rows[0].verdict).toBe("mismatch");
+  });
+
+  it("住所は生値だが ZIP が非表示(hidden)なら API住所は出さない", async () => {
+    displayMock.mockResolvedValue({ ...FULL_DISPLAY, address: "full", zip: "hidden" });
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o1", name: "山田", zip: "1000005", address: "東京都千代田区丸の内1-1" },
+    ]);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.rows[0].apiAddressLine).toBeNull();
+    expect(body.rows[0].verdict).toBe("match");
+  });
+
+  it("住所・ZIP ともに生値なら従来どおり API住所を返す", async () => {
+    displayMock.mockResolvedValue({ ...FULL_DISPLAY, address: "full", zip: "full" });
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o1", name: "山田", zip: "1000005", address: "東京都千代田区丸の内1-1" },
+    ]);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.rows[0].apiAddressLine).toBe("東京都千代田区丸の内");
+    expect(body.rows[0].verdict).toBe("match");
+  });
+});
+
+describe("throttle 共有（Codex P2）", () => {
+  it("token-bucket はモジュールレベルの単一インスタンス（リクエスト毎に生成しない）", async () => {
+    // モジュール読込時に 1 度だけ生成される。各 GET では生成しない（共有）。
+    // beforeEach の clearAllMocks 後、複数回 GET しても createTokenBucketLimiter は呼ばれない。
+    pm.owner.findMany.mockResolvedValue([
+      { id: "o1", name: "n", zip: "1000005", address: "東京都千代田区丸の内" },
+    ]);
+    lookupMock.mockResolvedValue([{ addressLine: "東京都千代田区丸の内", source: "mock" }]);
+    createLimiterSpy.mockClear();
+    await GET(req());
+    await GET(req());
+    await GET(req());
+    expect(createLimiterSpy).not.toHaveBeenCalled();
   });
 });
