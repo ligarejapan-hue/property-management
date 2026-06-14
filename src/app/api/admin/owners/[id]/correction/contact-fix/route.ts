@@ -1,0 +1,304 @@
+import { NextRequest } from "next/server";
+import prisma from "@/lib/prisma";
+import {
+  getApiSession,
+  getUserPermissions,
+  ApiError,
+  handleApiError,
+  apiResponse,
+} from "@/lib/api-helpers";
+import {
+  hasPermission,
+  hasExplicitWritePerm,
+  getOwnerFieldLevel,
+} from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
+import {
+  isValidPostalCode,
+  formatPostalCode,
+} from "@/lib/address-lookup/normalize";
+import {
+  decideZipFix,
+  decidePhoneFix,
+  checkContactFixSafety,
+  classifyPhone,
+  normalizePhone,
+  type ContactField,
+  type ContactFixBlockReason,
+} from "@/lib/owner-contact-format";
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/owners/:id/correction/contact-fix
+// ---------------------------------------------------------------------------
+// DQ-02: Owner.zip / Owner.phone の整形補正。
+//
+// body: { version:int, field:"zip"|"phone", mode:"format"|"set", newValue?:string, dryRun?:boolean }
+//   - mode "format": サーバ側で decideZipFix/decidePhoneFix を再計算し、valid だが
+//     未整形のときのみ整形（123-4567 / 区切り統一）を適用。suspicious/non_phone/empty は manual。
+//   - mode "set": operator 入力値を採用。空はクリア許可、非空は valid でなければ forbidden_value。
+//     採用時は canonical（zip=formatPostalCode / phone=normalizePhone）で保存。
+//
+// 権限:
+//   - dryRun: user_management:read + owner:read
+//   - 実行: 上記 + owner:write + 対象フィールドの field-level write
+//     （zip→owner_zip / phone→owner_phone の full/edit）。
+//
+// dryRun preview は対象フィールドが不可視（field-level < read）のとき no_change を伏せ、
+// eligible も返さない（隠し現在値の同値オラクル防止。name-fix P1 と同方針）。
+//
+// ChangeLog（zip/phone の old/new）は内部変更履歴として記録するが、AuditLog detail には
+// 値を入れない。
+// ---------------------------------------------------------------------------
+
+const FIELD_RESOURCE: Record<ContactField, string> = {
+  zip: "owner_zip",
+  phone: "owner_phone",
+};
+
+function statusFromReasons(reasons: string[]): number {
+  if (reasons.includes("version_mismatch")) return 409;
+  return 422;
+}
+
+/** 対象フィールドの生値が可視か（field-level が full/edit/read）。 */
+function canSeeField(
+  perms: Parameters<typeof getOwnerFieldLevel>[0],
+  field: ContactField,
+): boolean {
+  const level = getOwnerFieldLevel(perms, FIELD_RESOURCE[field]);
+  return level === "full" || level === "edit" || level === "read";
+}
+
+/** 隠し現在値依存の判定（no_change）を除去する。 */
+function stripHiddenOracle(reasons: string[]): string[] {
+  return reasons.filter((r) => r !== "no_change");
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id: ownerId } = await params;
+    const session = await getApiSession();
+    const perms = await getUserPermissions(session.id);
+
+    if (!hasPermission(perms, "user_management", "read")) {
+      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
+    if (!hasPermission(perms, "owner", "read")) {
+      throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const version = body?.version;
+    if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+      throw new ApiError(400, "version は正の整数で指定してください", "INVALID_INPUT");
+    }
+    const field = body?.field;
+    if (field !== "zip" && field !== "phone") {
+      throw new ApiError(400, "field は zip / phone で指定してください", "INVALID_INPUT");
+    }
+    const mode = body?.mode;
+    if (mode !== "format" && mode !== "set") {
+      throw new ApiError(400, "mode は format / set で指定してください", "INVALID_INPUT");
+    }
+    let newValueInput: string | null = null;
+    if (mode === "set") {
+      if (typeof body?.newValue !== "string") {
+        throw new ApiError(400, "newValue は文字列で指定してください", "INVALID_INPUT");
+      }
+      newValueInput = body.newValue;
+    }
+    const dryRun = body?.dryRun !== false; // default: true
+
+    const fieldVisible = canSeeField(perms, field);
+
+    if (!dryRun) {
+      if (!hasPermission(perms, "owner", "write")) {
+        throw new ApiError(403, "所有者編集の権限がありません", "FORBIDDEN");
+      }
+      // 対象は PII フィールド。generic owner:write に加えて field-level write を必須にする。
+      if (!hasExplicitWritePerm(perms, FIELD_RESOURCE[field])) {
+        throw new ApiError(403, "対象フィールドを更新する権限がありません", "FORBIDDEN");
+      }
+    }
+
+    const owner = await prisma.owner.findUnique({
+      where: { id: ownerId },
+      select: { id: true, zip: true, phone: true, version: true, isArchived: true },
+    });
+    if (!owner) {
+      throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
+    }
+    const currentValue = field === "zip" ? owner.zip : owner.phone;
+
+    // 1) finalValue（保存する canonical 値）と blockReasons を決定。
+    let finalValue: string | null = null;
+    let hasFinal = false;
+    let blockReasons: string[] = [];
+
+    if (mode === "format") {
+      const proposal =
+        field === "zip" ? decideZipFix(currentValue) : decidePhoneFix(currentValue);
+      if (proposal.action === "format") {
+        finalValue = proposal.cleanedValue;
+        hasFinal = true;
+      } else if (proposal.action === "none") {
+        blockReasons = ["no_change"];
+      } else {
+        blockReasons = [proposal.manualReason ?? "manual"];
+      }
+    } else {
+      const raw = newValueInput ?? "";
+      if (raw.trim() === "") {
+        finalValue = null; // クリア（ゴミ削除）許可
+        hasFinal = true;
+      } else {
+        const valid =
+          field === "zip" ? isValidPostalCode(raw) : classifyPhone(raw) === "valid";
+        if (!valid) {
+          blockReasons = ["forbidden_value"];
+        } else {
+          finalValue = field === "zip" ? formatPostalCode(raw) : normalizePhone(raw);
+          hasFinal = true;
+        }
+      }
+    }
+
+    // 2) 共通 safety（archived / version / no_change を canonical 値で判定）。
+    if (blockReasons.length === 0 && hasFinal) {
+      const safety = checkContactFixSafety({
+        field,
+        isArchived: owner.isArchived,
+        versionMatches: owner.version === version,
+        currentValue,
+        newValue: finalValue,
+      });
+      blockReasons = safety.ok ? [] : safety.reasons;
+    }
+    const eligible = blockReasons.length === 0;
+
+    // ── dryRun ───────────────────────────────────────────────────────────────
+    if (dryRun) {
+      if (!fieldVisible) {
+        // 対象フィールド不可視ユーザーには no_change（同値オラクル）を伏せ、eligible も出さない。
+        return apiResponse({
+          executed: false,
+          blockReasons: stripHiddenOracle(blockReasons),
+          field,
+          mode,
+          fieldVisible: false,
+        });
+      }
+      return apiResponse({
+        executed: false,
+        eligible,
+        blockReasons,
+        field,
+        mode,
+        fieldVisible: true,
+      });
+    }
+
+    // ── 実行 ──────────────────────────────────────────────────────────────────
+    if (!eligible || !hasFinal) {
+      return apiResponse(
+        {
+          error: {
+            message: "連絡先補正の条件を満たしていません",
+            code: "CONTACT_FIX_BLOCKED",
+            blockReasons,
+          },
+        },
+        statusFromReasons(blockReasons),
+      );
+    }
+
+    const newVersion = version + 1;
+    const storeValue = finalValue;
+    const TX_BLOCKED_SENTINEL = "__contact_fix_blocked_in_tx__";
+    let txBlockedReasons: ContactFixBlockReason[] | null = null;
+    let txNotFound = false;
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        const result = await tx.owner.updateMany({
+          where: { id: ownerId, version, isArchived: false },
+          data: { [field]: storeValue, version: { increment: 1 } },
+        });
+        if (result.count === 0) {
+          const cur = await tx.owner.findUnique({
+            where: { id: ownerId },
+            select: { version: true, isArchived: true },
+          });
+          if (!cur) {
+            txNotFound = true;
+            throw new Error(TX_BLOCKED_SENTINEL);
+          }
+          const reasons: ContactFixBlockReason[] = [];
+          if (cur.isArchived) reasons.push("owner_archived");
+          if (cur.version !== version) reasons.push("version_mismatch");
+          if (reasons.length === 0) reasons.push("version_mismatch");
+          txBlockedReasons = reasons;
+          throw new Error(TX_BLOCKED_SENTINEL);
+        }
+
+        await tx.changeLog.createMany({
+          data: [
+            {
+              targetTable: "owners",
+              targetId: ownerId,
+              fieldName: field,
+              oldValue: currentValue ?? null,
+              newValue: storeValue ?? null,
+              source: "manual",
+              changedBy: session.id,
+            },
+          ],
+        });
+      });
+    } catch (e) {
+      if (e instanceof Error && e.message === TX_BLOCKED_SENTINEL) {
+        if (txNotFound) {
+          throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
+        }
+        const reasons = txBlockedReasons ?? [];
+        return apiResponse(
+          {
+            error: {
+              message: "連絡先補正の条件を満たしていません",
+              code: "CONTACT_FIX_BLOCKED",
+              blockReasons: reasons,
+            },
+          },
+          statusFromReasons(reasons),
+        );
+      }
+      throw e;
+    }
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "owner_correction_contact_fix",
+      targetTable: "owners",
+      targetId: ownerId,
+      detail: {
+        correctionType: "contact_fix",
+        dryRun: false,
+        field,
+        mode,
+        updatedFields: [field],
+      },
+    });
+
+    return apiResponse({
+      executed: true,
+      id: ownerId,
+      version: newVersion,
+      updatedFields: [field],
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
