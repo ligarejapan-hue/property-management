@@ -156,7 +156,19 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     }
 
     const requestId = this.requestIdFactory();
-    const page = await this.browserFactory();
+
+    // 4. ブラウザ起動（動的 Playwright import / chromium.launch / newContext / newPage）。
+    //    ここでの失敗（依存未導入・起動不能・生エラー＝パス/内部情報が混入しうる）は、
+    //    後続の try/catch（classifyRegistryFetchError）に入る前に発生するため、
+    //    **この時点で明示的に provider_error へ正規化**して生メッセージの伝播を防ぐ
+    //    （RegistryFetchError は分類コードを保ったまま伝播）。page 未生成ゆえ close 不要。
+    let page: RegistryBrowserPage;
+    try {
+      page = await this.browserFactory();
+    } catch (err) {
+      throw classifyRegistryFetchError(err);
+    }
+
     try {
       const pdfBuffer = await this.withTimeout(async () => {
         await page.login({

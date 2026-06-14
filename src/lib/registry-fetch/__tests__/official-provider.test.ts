@@ -100,6 +100,47 @@ describe("OfficialRegistryProvider（PR-2 実フロー・fake page 注入・外�
     ).rejects.toMatchObject({ code: "provider_error" });
   });
 
+  it("A2b: browserFactory が生エラーで reject したら provider_error に正規化（生メッセージ非露出）", async () => {
+    // 動的 Playwright import / chromium.launch / newContext / newPage 失敗を模す。
+    // 例: 依存未導入ホストで raw Error（パス/内部情報混入しうる）が出るケース。
+    const factory: RegistryBrowserFactory = async () => {
+      throw new Error(
+        "Cannot find module 'playwright' at C:/secret/path SECRET_TOKEN",
+      );
+    };
+    const provider = new OfficialRegistryProvider({
+      loginId: "SECRET_ID",
+      password: "SECRET_PW",
+      browserFactory: factory,
+    });
+    try {
+      await provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RegistryFetchError);
+      expect((err as RegistryFetchError).code).toBe("provider_error");
+      const serialized = `${(err as Error).message} ${(err as Error).stack ?? ""}`;
+      expect(serialized).not.toContain("playwright");
+      expect(serialized).not.toContain("secret/path");
+      expect(serialized).not.toContain("SECRET_TOKEN");
+    }
+  });
+
+  it("A2c: browserFactory が RegistryFetchError(rate_limited) で reject したら同 code を伝播", async () => {
+    // 既存の例外正規化方針と統一: RegistryFetchError は分類コードを保ったまま伝播する。
+    const factory: RegistryBrowserFactory = async () => {
+      throw new RegistryFetchError("rate_limited");
+    };
+    const provider = new OfficialRegistryProvider({
+      loginId: "id",
+      password: "pw",
+      browserFactory: factory,
+    });
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+    ).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
   it("A3: 成功フロー — login→search→download→close の順で実行し RegistryFetchResult を返す", async () => {
     const { provider, page } = makeProvider({ baseUrl: "https://reg.test" });
     const res = await provider.fetchRegistryPdf({
