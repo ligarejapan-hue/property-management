@@ -58,6 +58,54 @@ export function sanitizeCsvCellForExcel(
   return value;
 }
 
+/**
+ * Excel の「日付自動変換」を防ぐためのテキスト固定セル化。
+ *
+ * 地番（例: 4-2）・家屋番号（例: 1-2-3）のような「数字とハイフン」の値は、Excel が CSV を
+ * 開く際に日付（4月2日 等）へ勝手に変換してしまう。これを防ぐため、値を Excel の
+ * **テキスト数式** `="<値>"` に包む。Excel は CSV を開く際にこの数式を評価し、内側を
+ * **文字列リテラル**として表示するため、日付化されず元の表記（桁・ハイフン）が保持される。
+ *
+ * 方式選定（なぜ ' プレフィックスではないか）:
+ *  - 先頭 `'` は「セルへ手入力する時」だけテキスト扱いになる Excel の入力規約であり、CSV を
+ *    開いた場合は除去されず `'4-2` と表示されてしまう（値が汚れ、往復でも壊れる）。
+ *  - `="..."` は CSV を開いた Excel が必ず文字列リテラルとして解釈するため、表示は元値どおり
+ *    （余計な文字が残らない）。取込側の `unwrapCsvTextCell` で `="4-2"` → `4-2` に戻せるため
+ *    出力→再取込の往復で元値に一致する。
+ *
+ * formula injection との両立:
+ *  - 値全体を文字列リテラル化するため、`=1+1` 等の数式起動文字も「文字列」として中和される
+ *    （Excel は `="=1+1"` を文字列 `=1+1` として表示する＝数式実行されない）。よって本ラップを
+ *    施したセルには追加の `sanitizeCsvCellForExcel`（' 付与）を重ねる必要はない。
+ *  - RFC quoting（`escapeCsvField`）は別途 `encodeCsv` が担う。ここではセル内 `"` のみ
+ *    数式リテラルを壊さないよう二重化する。
+ *
+ * - null / undefined / 空文字は包まず空文字を返す（空は空のまま・余計な文字を足さない）。
+ * - 値そのもの（桁・ハイフン・全角）は変換しない（郵便番号のような整形はしない）。
+ */
+export function wrapCsvTextCell(value: string | null | undefined): string {
+  if (value == null || value === "") return "";
+  return `="${value.replace(/"/g, '""')}"`;
+}
+
+/**
+ * `wrapCsvTextCell` の逆変換。Excel テキスト数式 `="<値>"` を内側の値へ戻す。
+ *
+ * - `="..."`（先頭 `="` ・末尾 `"`・最低 `=""` の長さ）にマッチした時のみ unwrap し、
+ *   二重化された `""` を `"` に戻す。
+ * - それ以外（通常値・手入力・既存 CSV の生 `4-2`・閉じ括弧の無い不完全値）は無改変で返す。
+ *
+ * 取込（CSV/XLSX パース後）に地番・家屋番号セルへ適用すると、本システムが出力した CSV を
+ * 再取込しても元値に戻る。取込の一般仕様（ヘッダ→フィールド対応・正規化）は変えない。
+ */
+export function unwrapCsvTextCell(value: string | null | undefined): string {
+  if (value == null) return "";
+  if (value.length >= 3 && value.startsWith('="') && value.endsWith('"')) {
+    return value.slice(2, -1).replace(/""/g, '"');
+  }
+  return value;
+}
+
 export interface EncodeCsvOptions {
   /** UTF-8 BOM を先頭に付与する（Excel での文字化け回避） */
   bom?: boolean;

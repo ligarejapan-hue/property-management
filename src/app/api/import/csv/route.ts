@@ -45,6 +45,7 @@ import {
   REIMPORT_IGNORED_HEADERS,
   buildErrorRawDataExtras,
 } from "@/lib/import-error-display";
+import { unwrapCsvTextCell } from "@/lib/csv-encode";
 
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
@@ -439,6 +440,17 @@ export async function POST(request: NextRequest) {
           if (field) {
             mapped[field] = value;
           }
+        }
+
+        // 地番・家屋番号: 本システムが出力した CSV は Excel 日付化対策で `="<値>"`（テキスト
+        // 数式）で固定されている。再取込時はこの数式を unwrap して元値に戻す（出力→再取込の
+        // 往復一致）。手入力 / 外部 CSV の生値（4-2 等）は unwrap 対象外でそのまま通る。
+        // 表記そのもの（桁/ハイフン）は変えない＝既存の取込仕様は不変。
+        if (mapped.lotNumber !== undefined) {
+          mapped.lotNumber = unwrapCsvTextCell(mapped.lotNumber);
+        }
+        if (mapped.buildingNumber !== undefined) {
+          mapped.buildingNumber = unwrapCsvTextCell(mapped.buildingNumber);
         }
 
         // Validate required field
