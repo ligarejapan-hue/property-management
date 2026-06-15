@@ -39,6 +39,7 @@ vi.mock("@/lib/api-helpers", () => {
       name: "A",
       role: "admin",
     }),
+    getUserPermissions: vi.fn(),
     handleApiError: vi.fn((error: unknown) => {
       if (error instanceof MockApiError) {
         return Response.json(
@@ -67,12 +68,24 @@ vi.mock("@/lib/corporate-lookup", async () => {
   };
 });
 
-import { ApiError, getApiSession } from "@/lib/api-helpers";
+import { ApiError, getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import {
   lookupCorporateNumber,
   CorporateLookupError,
 } from "@/lib/corporate-lookup";
 import { POST } from "../../app/api/corporate/lookup/route";
+
+// owner-scoped route と同一の認可ゲート（owner:read + 明示 owner_corporate_number）を検証する。
+const PERMS_FULL = [
+  { resource: "owner", action: "read", granted: true },
+  { resource: "owner_corporate_number", action: "full", granted: true },
+];
+const PERMS_NO_OWNER_READ = [
+  { resource: "owner_corporate_number", action: "full", granted: true },
+];
+const PERMS_NO_CORP = [
+  { resource: "owner", action: "read", granted: true },
+];
 
 const RAW_NUMBER = "1234567890123";
 const RAW_NAME = "○○株式会社";
@@ -106,6 +119,7 @@ beforeEach(() => {
     name: "A",
     role: "admin",
   } as Awaited<ReturnType<typeof getApiSession>>);
+  vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
   vi.mocked(lookupCorporateNumber).mockResolvedValue({
     found: true,
     isClosed: false,
@@ -184,6 +198,20 @@ describe("POST /api/corporate/lookup — 異常系", () => {
     );
     const res = await POST(makeRequest({ corporateNumber: RAW_NUMBER }));
     expect(res.status).toBe(401);
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+  });
+
+  it("owner:read 無しで 403・lookup 未呼び出し（Codex P1: API側バイパス防止）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce(PERMS_NO_OWNER_READ);
+    const res = await POST(makeRequest({ corporateNumber: RAW_NUMBER }));
+    expect(res.status).toBe(403);
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+  });
+
+  it("owner_corporate_number 権限なしで 403・lookup 未呼び出し（hidden ユーザーのバイパス防止）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce(PERMS_NO_CORP);
+    const res = await POST(makeRequest({ corporateNumber: RAW_NUMBER }));
+    expect(res.status).toBe(403);
     expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
   });
 

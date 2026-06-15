@@ -15,10 +15,12 @@
 import { NextRequest } from "next/server";
 import {
   getApiSession,
+  getUserPermissions,
   ApiError,
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { normalizeCorporateNumber } from "@/lib/corporate-number";
 import {
   CorporateLookupError,
@@ -49,7 +51,20 @@ function mapLookupErrorToApi(err: CorporateLookupError): ApiError {
 export async function POST(request: NextRequest) {
   try {
     // 認証必須（未ログインは getApiSession が 401 を throw）。
-    await getApiSession();
+    const session = await getApiSession();
+
+    // 認可: owner-scoped /api/owners/[id]/corporate-lookup と同一ゲート。
+    // owner:read + 明示 owner_corporate_number(full/edit) を要求する。これが無いと、
+    // 法人番号フィールドが hidden のユーザーが本汎用エンドポイント経由で任意の13桁を投げ、
+    // server APIキーで法人番号・法人名・所在地を取得できてしまう（既存 owner-scoped 制御の
+    // API側バイパス）。lookup 実行前に同じ制御を必ず通す（Codex P1）。
+    const perms = await getUserPermissions(session.id);
+    if (!hasPermission(perms, "owner", "read")) {
+      throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
+    }
+    if (!hasExplicitWritePerm(perms, "owner_corporate_number")) {
+      throw new ApiError(403, "法人番号を扱う権限がありません", "FORBIDDEN");
+    }
 
     const body = (await request.json().catch(() => ({}))) as RequestBody;
     const normalized = normalizeCorporateNumber(
