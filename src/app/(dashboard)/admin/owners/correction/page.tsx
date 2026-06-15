@@ -128,6 +128,7 @@ function parseFilterTypeFromQuery(value: string | null): FilterType {
     case "address_null":
     case "duplicate":
     case "corporate_number":
+    case "registry_address":
     case "all":
       return value;
     default:

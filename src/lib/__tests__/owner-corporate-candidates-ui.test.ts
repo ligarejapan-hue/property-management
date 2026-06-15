@@ -173,6 +173,19 @@ describe("admin/owners/correction page Phase E 法人番号タブ", () => {
     expect(pageSrc).toMatch(/searchParams\?\.get\("cursor"\)/);
   });
 
+  // ---- Codex P3: registry_address タブの URL 復元 ----
+  it("Codex P3: parseFilterTypeFromQuery が registry_address を受理する（タブ URL 復元）", () => {
+    // setFilterType は registry_address タブ選択時に ?tab=registry_address を URL に書く
+    // (sp.set("tab", next))。リロード / ブックマーク / 戻る で復元できるよう、
+    // parseFilterTypeFromQuery の switch に case "registry_address" が必要。
+    const parserMatch = pageSrc.match(
+      /function parseFilterTypeFromQuery\([\s\S]*?\n}/,
+    );
+    expect(parserMatch).not.toBeNull();
+    const parserBody = parserMatch?.[0] ?? "";
+    expect(parserBody).toMatch(/case\s+"registry_address":/);
+  });
+
   it("Phase F: 候補法人番号や PII を URL に載せていない", () => {
     expect(pageSrc).not.toMatch(/sp\.set\("candidate"/);
     expect(pageSrc).not.toMatch(/sp\.set\("corporateNumber"/);
