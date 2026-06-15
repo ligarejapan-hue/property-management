@@ -36,6 +36,7 @@ vi.mock("@/lib/api-helpers", () => {
 import {
   getRegistryFetchProvider,
   isRegistryAutoFetchProviderConfigured,
+  __resetRegistryFetchThrottleForTest,
 } from "../auto-fetch";
 import { OfficialRegistryProvider } from "../official-provider";
 
@@ -44,11 +45,16 @@ const ENV_KEYS = [
   "REGISTRY_FETCH_PASSWORD",
   "REGISTRY_FETCH_BASE_URL",
   "REGISTRY_FETCH_TIMEOUT_MS",
+  "REGISTRY_FETCH_PROVIDER",
+  "REGISTRY_FETCH_SELECTORS_CALIBRATED",
+  "REGISTRY_FETCH_MIN_INTERVAL_MS",
 ] as const;
 
 let saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
+  // 共有 throttle シングルトンの状態がテスト間で漏れないようリセットする。
+  __resetRegistryFetchThrottleForTest();
   saved = {};
   for (const k of ENV_KEYS) {
     saved[k] = process.env[k];
@@ -81,11 +87,44 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
 
-  it("CodexP2: LOGIN_ID + PASSWORD が揃っても browserFactory 未配線なら null（capability false・501維持）", () => {
-    // env を設定しても、PR-1 では browserFactory が配線されていないため実取得は不可能。
-    // readiness=false ゆえ provider は解決されず（null）、capability も false に保つ。
+  it("CodexP2: 資格情報のみ（opt-in env なし）では null（capability false・501維持・本番挙動不変）", () => {
+    // PR-2: 既定 factory は明示 opt-in（REGISTRY_FETCH_PROVIDER=official）でのみ配線される。
+    // 資格情報だけ設定して chromium 未配置のまま capability=true で常に失敗する操作を露出しない
+    // ため、opt-in env が無ければ readiness=false → null（現本番は当 env 未設定ゆえ 501 維持）。
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    expect(getRegistryFetchProvider()).toBeNull();
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
+  });
+
+  it("CodexP1: 資格情報 + opt-in env のみ（校正フラグ無し）では null（誤セレクタ露出防止・501 維持）", () => {
+    // CodexP1: REGISTRY_SELECTORS は TODO プレースホルダのまま。opt-in だけで capability=true に
+    // すると実サイトを誤セレクタで操作してしまう。REGISTRY_FETCH_SELECTORS_CALIBRATED=true が
+    // 無ければ readiness=false → null（= 501 維持）。
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    expect(getRegistryFetchProvider()).toBeNull();
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
+  });
+
+  it("PR-2 live: 資格情報 + opt-in env + 校正フラグ で OfficialRegistryProvider を返す（capability true）", () => {
+    // 運用 runbook で playwright/chromium を配置 + セレクタを実サイトに校正後、
+    // REGISTRY_FETCH_PROVIDER=official かつ REGISTRY_FETCH_SELECTORS_CALIBRATED=true を設定すると、
+    // 既定 factory が配線され（実 chromium 起動は fetch 実行時の動的 import まで遅延）、provider が
+    // 解決される。ここでは provider 解決のみを検証し、実ブラウザは起動しない（factory 未呼び出し）。
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_SELECTORS_CALIBRATED = "true";
+    const provider = getRegistryFetchProvider();
+    expect(provider).toBeInstanceOf(OfficialRegistryProvider);
+    expect(provider?.name).toBe("official");
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(true);
+  });
+
+  it("PR-2 live: opt-in env のみ（資格情報欠落）では null（資格情報も必須）", () => {
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
     expect(getRegistryFetchProvider()).toBeNull();
     expect(isRegistryAutoFetchProviderConfigured()).toBe(false);
   });
@@ -96,8 +135,14 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
     const browserFactory = async () => ({
-      async goto() {
+      async login() {
         /* no-op */
+      },
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF");
       },
       async close() {
         /* no-op */
@@ -109,10 +154,86 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     expect(isRegistryAutoFetchProviderConfigured({ browserFactory })).toBe(true);
   });
 
+  // CodexP2: 本番 provider 生成時に throttle（REGISTRY_FETCH_MIN_INTERVAL_MS）を配線する。
+  // 配線が無いと live route で getRegistryFetchProvider() が throttle 無し provider を作り、
+  // 同時 POST がレート制御をすり抜けて公式へ複数同時アクセスしてしまう。
+  it("CodexP2: live 解決した provider は throttle を持つ（連続 fetch の 2 回目が rate_limited）", async () => {
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_MIN_INTERVAL_MS = "60000";
+
+    // 実ブラウザを起動しない fake factory を注入（解決経路は本番と同じ getRegistryFetchProvider）。
+    const browserFactory = async () => ({
+      async login() {
+        /* no-op */
+      },
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF-1.4 dl");
+      },
+      async close() {
+        /* no-op */
+      },
+    });
+    const provider = getRegistryFetchProvider({ browserFactory });
+    expect(provider).not.toBeNull();
+    // 1 回目は許可。
+    await provider!.fetchRegistryPdf({
+      realEstateNumber: "1234567890123",
+      ref: "p1",
+    });
+    // 同一プロセス内・最小間隔未満の 2 回目は throttle で rate_limited。
+    await expect(
+      provider!.fetchRegistryPdf({
+        realEstateNumber: "1234567890123",
+        ref: "p2",
+      }),
+    ).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
+  it("CodexP2: throttle は別 provider インスタンス間で共有される（同時 POST 直列化）", async () => {
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_MIN_INTERVAL_MS = "60000";
+
+    const browserFactory = async () => ({
+      async login() {
+        /* no-op */
+      },
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF-1.4 dl");
+      },
+      async close() {
+        /* no-op */
+      },
+    });
+    // route が別リクエストで getRegistryFetchProvider() を 2 回呼ぶケースを模す。
+    const p1 = getRegistryFetchProvider({ browserFactory });
+    const p2 = getRegistryFetchProvider({ browserFactory });
+    await p1!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p1" });
+    // 別インスタンスでも共有 throttle が効き 2 回目は rate_limited。
+    await expect(
+      p2!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p2" }),
+    ).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
   it("（将来）browserFactory を注入しても env 未設定なら null（資格情報も必須・両方揃って初めて解決）", () => {
     const browserFactory = async () => ({
-      async goto() {
+      async login() {
         /* no-op */
+      },
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF");
       },
       async close() {
         /* no-op */

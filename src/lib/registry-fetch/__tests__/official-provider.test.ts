@@ -1,27 +1,87 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import {
   OfficialRegistryProvider,
   type RegistryBrowserPage,
+  type RegistryBrowserFactory,
 } from "../official-provider";
+import { createRegistryFetchThrottle } from "../throttle";
 import { RegistryFetchError } from "../errors";
-import type { RegistryFetchProvider } from "../types";
+import type { RegistryFetchProvider, RegistryFetchErrorCode } from "../types";
 
-// テスト用の最小ブラウザページ（実 Playwright を起動しない注入境界の確認用）。
-function makeFakePage(): RegistryBrowserPage {
+const VALID_PDF = Buffer.from("%PDF-1.4 mock registry bytes");
+
+/**
+ * テスト用の最小ブラウザページ。実 Playwright を起動せず、各メソッドの戻り/throw を
+ * 注入で制御し、呼び出し順序を calls に記録する（注入境界の検証用）。
+ */
+function makeFakePage(
+  over: Partial<{
+    login: (input: { loginId: string; password: string; baseUrl?: string }) => Promise<void>;
+    searchByRealEstateNumber: (n: string) => Promise<{ found: boolean }>;
+    downloadRegistryPdf: () => Promise<Buffer>;
+  }> = {},
+): RegistryBrowserPage & { calls: string[]; closed: boolean } {
+  const state = { calls: [] as string[], closed: false };
   return {
-    async goto() {
-      /* no-op */
+    calls: state.calls,
+    get closed() {
+      return state.closed;
+    },
+    async login(input) {
+      state.calls.push("login");
+      if (over.login) await over.login(input);
+    },
+    async searchByRealEstateNumber(n: string) {
+      state.calls.push("search");
+      if (over.searchByRealEstateNumber)
+        return over.searchByRealEstateNumber(n);
+      return { found: true };
+    },
+    async downloadRegistryPdf() {
+      state.calls.push("download");
+      if (over.downloadRegistryPdf) return over.downloadRegistryPdf();
+      return VALID_PDF;
     },
     async close() {
-      /* no-op */
+      state.calls.push("close");
+      state.closed = true;
     },
   };
 }
 
-describe("OfficialRegistryProvider（PR-1 scaffold・外部接続なし）", () => {
-  it("RegistryFetchProvider に準拠し name='official'", () => {
+function makeProvider(opts: {
+  page?: RegistryBrowserPage & { calls: string[]; closed: boolean };
+  factory?: RegistryBrowserFactory;
+  baseUrl?: string;
+  timeoutMs?: number;
+  throttle?: ReturnType<typeof createRegistryFetchThrottle>;
+  now?: () => Date;
+}) {
+  const page = opts.page ?? makeFakePage();
+  let factoryCalls = 0;
+  const factory: RegistryBrowserFactory =
+    opts.factory ??
+    (async () => {
+      factoryCalls++;
+      return page;
+    });
+  const provider = new OfficialRegistryProvider({
+    loginId: "SECRET_ID",
+    password: "SECRET_PW",
+    baseUrl: opts.baseUrl,
+    timeoutMs: opts.timeoutMs,
+    browserFactory: factory,
+    throttle: opts.throttle,
+    now: opts.now ?? (() => new Date(0)),
+    requestIdFactory: () => "req-fixed",
+  });
+  return { provider, page, factoryCalls: () => factoryCalls };
+}
+
+describe("OfficialRegistryProvider（PR-2 実フロー・fake page 注入・外部接続なし）", () => {
+  it("A1: RegistryFetchProvider に準拠し name='official'", () => {
     const provider: RegistryFetchProvider = new OfficialRegistryProvider({
       loginId: "id",
       password: "pw",
@@ -30,41 +90,262 @@ describe("OfficialRegistryProvider（PR-1 scaffold・外部接続なし）", () 
     expect(typeof provider.fetchRegistryPdf).toBe("function");
   });
 
-  it("browserFactory 未注入なら provider_error で安全停止（外部接続不能）", async () => {
+  it("A2: browserFactory 未注入なら provider_error で安全停止（外部接続不能・fail-closed）", async () => {
     const provider = new OfficialRegistryProvider({
       loginId: "id",
       password: "pw",
     });
     await expect(
       provider.fetchRegistryPdf({ realEstateNumber: "0123", ref: "prop-1" }),
-    ).rejects.toBeInstanceOf(RegistryFetchError);
-    await expect(
-      provider.fetchRegistryPdf({ realEstateNumber: "0123", ref: "prop-1" }),
     ).rejects.toMatchObject({ code: "provider_error" });
   });
 
-  it("browserFactory を注入しても PR-1 では実操作未実装ゆえ provider_error（実取得は走らない）", async () => {
-    let factoryCalled = false;
+  it("A2b: browserFactory が生エラーで reject したら provider_error に正規化（生メッセージ非露出）", async () => {
+    // 動的 Playwright import / chromium.launch / newContext / newPage 失敗を模す。
+    // 例: 依存未導入ホストで raw Error（パス/内部情報混入しうる）が出るケース。
+    const factory: RegistryBrowserFactory = async () => {
+      throw new Error(
+        "Cannot find module 'playwright' at C:/secret/path SECRET_TOKEN",
+      );
+    };
+    const provider = new OfficialRegistryProvider({
+      loginId: "SECRET_ID",
+      password: "SECRET_PW",
+      browserFactory: factory,
+    });
+    try {
+      await provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RegistryFetchError);
+      expect((err as RegistryFetchError).code).toBe("provider_error");
+      const serialized = `${(err as Error).message} ${(err as Error).stack ?? ""}`;
+      expect(serialized).not.toContain("playwright");
+      expect(serialized).not.toContain("secret/path");
+      expect(serialized).not.toContain("SECRET_TOKEN");
+    }
+  });
+
+  it("A2c: browserFactory が RegistryFetchError(rate_limited) で reject したら同 code を伝播", async () => {
+    // 既存の例外正規化方針と統一: RegistryFetchError は分類コードを保ったまま伝播する。
+    const factory: RegistryBrowserFactory = async () => {
+      throw new RegistryFetchError("rate_limited");
+    };
     const provider = new OfficialRegistryProvider({
       loginId: "id",
       password: "pw",
-      browserFactory: async () => {
-        factoryCalled = true;
-        return makeFakePage();
+      browserFactory: factory,
+    });
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+    ).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
+  it("A3: 成功フロー — login→search→download→close の順で実行し RegistryFetchResult を返す", async () => {
+    const { provider, page } = makeProvider({ baseUrl: "https://reg.test" });
+    const res = await provider.fetchRegistryPdf({
+      realEstateNumber: "1234567890123",
+      ref: "prop-1",
+    });
+    expect(res.pdfBuffer).toBe(VALID_PDF);
+    expect(res.fileName).toBe("registry-auto-req-fixed.pdf"); // 非PII の generic filename
+    expect(res.source).toBe("official");
+    expect(res.providerRequestId).toBe("req-fixed");
+    expect(res.fetchedAt.getTime()).toBe(0);
+    expect(page.calls).toEqual(["login", "search", "download", "close"]);
+    expect(page.closed).toBe(true);
+  });
+
+  it("A3b: login に baseUrl と資格情報が渡る（page 側に保持させない契約）", async () => {
+    const loginSpy = vi.fn(async () => {});
+    const page = makeFakePage({ login: loginSpy });
+    const { provider } = makeProvider({ page, baseUrl: "https://reg.test" });
+    await provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" });
+    expect(loginSpy).toHaveBeenCalledWith({
+      loginId: "SECRET_ID",
+      password: "SECRET_PW",
+      baseUrl: "https://reg.test",
+    });
+  });
+
+  it("A3c: search に渡すのは非PII の不動産番号のみ（所有者名/住所/ref を渡さない）", async () => {
+    const searchSpy = vi.fn(async () => ({ found: true }));
+    const page = makeFakePage({ searchByRealEstateNumber: searchSpy });
+    const { provider } = makeProvider({ page });
+    await provider.fetchRegistryPdf({
+      realEstateNumber: "1234567890123",
+      ref: "prop-uuid",
+    });
+    expect(searchSpy).toHaveBeenCalledTimes(1);
+    expect(searchSpy).toHaveBeenCalledWith("1234567890123");
+  });
+
+  it("A4: realEstateNumber が無ければ not_found（所在系 PII 検索は PR-2b・factory 未呼び出し）", async () => {
+    const { provider, factoryCalls } = makeProvider({});
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: null, ref: "p" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "   ", ref: "p" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(factoryCalls()).toBe(0);
+  });
+
+  it("A5: 検索ヒットなし（found=false）→ not_found・download せず close する", async () => {
+    const page = makeFakePage({
+      searchByRealEstateNumber: async () => ({ found: false }),
+    });
+    const { provider } = makeProvider({ page });
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(page.closed).toBe(true);
+    expect(page.calls).not.toContain("download");
+  });
+
+  const CLASSIFY: RegistryFetchErrorCode[] = [
+    "auth_failed",
+    "timeout",
+    "rate_limited",
+    "provider_error",
+  ];
+  for (const code of CLASSIFY) {
+    it(`A6: page が RegistryFetchError(${code}) を投げたら同 code を伝播し close する`, async () => {
+      const page = makeFakePage({
+        login: async () => {
+          throw new RegistryFetchError(code);
+        },
+      });
+      const { provider } = makeProvider({ page });
+      await expect(
+        provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+      ).rejects.toMatchObject({ code });
+      expect(page.closed).toBe(true);
+    });
+  }
+
+  it("A7: page が RegistryFetchError 以外を投げたら provider_error に正規化（生メッセージ非含有）", async () => {
+    const page = makeFakePage({
+      searchByRealEstateNumber: async () => {
+        throw new Error("RAW selector .login-xyz at https://reg.test/secret");
       },
     });
-    await expect(
-      provider.fetchRegistryPdf({ realEstateNumber: "0123", ref: "prop-1" }),
-    ).rejects.toMatchObject({ code: "provider_error" });
-    // PR-1 では実ブラウザ操作（factory 呼び出し含む実取得）に到達しない設計。
-    expect(factoryCalled).toBe(false);
+    const { provider } = makeProvider({ page });
+    try {
+      await provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RegistryFetchError);
+      expect((err as RegistryFetchError).code).toBe("provider_error");
+      const serialized = `${(err as Error).message} ${(err as Error).stack ?? ""}`;
+      expect(serialized).not.toContain("selector");
+      expect(serialized).not.toContain("reg.test");
+    }
+    expect(page.closed).toBe(true);
   });
 
-  it("C-1. official-provider.ts は Playwright を静的 import / require しない（バンドル混入防止）", () => {
-    // 契約: Playwright は将来 resolveDefaultRegistryBrowserFactory() 内の動的 import で
-    // のみ読み込む。OfficialRegistryProvider クラス自体が playwright を静的 import しない
-    // 構造を保つことで、value import 連鎖（auto-fetch → me/permissions route）での
-    // サーバーバンドル混入を防ぐ。
+  it("A8: timeoutMs を超えるフローは timeout で打ち切られ close される", async () => {
+    const page = makeFakePage({
+      // login が解決しない（ハング）→ timeout race で打ち切る
+      login: () => new Promise<void>(() => {}),
+    });
+    const { provider } = makeProvider({ page, timeoutMs: 10 });
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+    ).rejects.toMatchObject({ code: "timeout" });
+    expect(page.closed).toBe(true);
+  });
+
+  it("A8b: timeoutMs を超えるブラウザ起動（factory ハング）も timeout で打ち切られる", async () => {
+    // CodexP2: factory（動的 import / chromium.launch / newContext / newPage）が解決しない
+    // = 起動ハング。timeout は login/search/download だけでなく **起動全体** に効く必要がある
+    // （効かないと runRegistryAutoFetch が scheduled のまま catch へ到達せず物件が固着する）。
+    const factory: RegistryBrowserFactory = () =>
+      new Promise<RegistryBrowserPage>(() => {
+        /* 永遠に解決しない（起動ハング） */
+      });
+    const provider = new OfficialRegistryProvider({
+      loginId: "id",
+      password: "pw",
+      timeoutMs: 10,
+      browserFactory: factory,
+    });
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+    ).rejects.toMatchObject({ code: "timeout" });
+  });
+
+  it("A8c: factory が timeout 後に遅れて page を返したら、その page を close する（リーク防止）", async () => {
+    // 起動が timeout を超えた後に factory が解決した場合、宙に浮いた page を確実に閉じる。
+    const lateClose = vi.fn(async () => {});
+    let resolveFactory: ((p: RegistryBrowserPage) => void) | undefined;
+    const factory: RegistryBrowserFactory = () =>
+      new Promise<RegistryBrowserPage>((resolve) => {
+        resolveFactory = resolve;
+      });
+    const provider = new OfficialRegistryProvider({
+      loginId: "id",
+      password: "pw",
+      timeoutMs: 10,
+      browserFactory: factory,
+    });
+    const promise = provider.fetchRegistryPdf({
+      realEstateNumber: "1",
+      ref: "p",
+    });
+    await expect(promise).rejects.toMatchObject({ code: "timeout" });
+    // timeout 後に factory が遅れて page を返す。
+    const latePage = makeFakePage();
+    latePage.close = lateClose;
+    resolveFactory?.(latePage);
+    // microtask を一巡させて late-close が走るのを待つ。
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(lateClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("A9: download が失敗しても close される（リーク防止）", async () => {
+    const page = makeFakePage({
+      downloadRegistryPdf: async () => {
+        throw new RegistryFetchError("provider_error");
+      },
+    });
+    const { provider } = makeProvider({ page });
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(page.closed).toBe(true);
+  });
+
+  it("T1: throttle が拒否したら rate_limited で停止し factory を呼ばない（公式を叩く前に止まる）", async () => {
+    const throttle = createRegistryFetchThrottle({ minIntervalMs: 60_000 });
+    let t = 1_000_000;
+    const { provider, factoryCalls } = makeProvider({
+      throttle,
+      now: () => new Date(t),
+    });
+    await provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }); // 1 回目 OK
+    t += 1; // 間隔未満
+    await expect(
+      provider.fetchRegistryPdf({ realEstateNumber: "1", ref: "p" }),
+    ).rejects.toMatchObject({ code: "rate_limited" });
+    expect(factoryCalls()).toBe(1); // 2 回目は factory 未呼び出し
+  });
+
+  it("P2: 戻り値 RegistryFetchResult に secret/PII を含まない", async () => {
+    const { provider } = makeProvider({ baseUrl: "https://secret-base.test" });
+    const res = await provider.fetchRegistryPdf({
+      realEstateNumber: "1234567890123",
+      ref: "owner-pii-ref",
+    });
+    const json = JSON.stringify({ ...res, pdfBuffer: undefined });
+    expect(json).not.toContain("SECRET_ID");
+    expect(json).not.toContain("SECRET_PW");
+    expect(json).not.toContain("secret-base.test");
+    expect(json).not.toContain("1234567890123");
+  });
+
+  it("A11/C-1. official-provider.ts は Playwright を静的 import / require しない（バンドル混入防止）", () => {
     const src = fs.readFileSync(
       path.resolve(__dirname, "../official-provider.ts"),
       "utf8",
@@ -80,7 +361,7 @@ describe("OfficialRegistryProvider（PR-1 scaffold・外部接続なし）", () 
     );
   });
 
-  it("失敗例外（RegistryFetchError）に secret/PII を載せない", async () => {
+  it("A10: 失敗例外（RegistryFetchError）に secret/PII/baseUrl を載せない", async () => {
     const SECRET_ID = "SUPER_SECRET_LOGIN_ID";
     const SECRET_PW = "SUPER_SECRET_PASSWORD";
     const provider = new OfficialRegistryProvider({
