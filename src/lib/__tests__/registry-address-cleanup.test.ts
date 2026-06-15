@@ -142,4 +142,49 @@ describe("decideRegistryAddressCleanup", () => {
     expect(p.action).toBe("cleanup");
     expect(p.cleanedAddress).toBe("東京都港区六本木1-2-3");
   });
+
+  // --- MUST-FIX #1: 受付番号 regex の過検出防止（正当な「受付N号館/棟」を消さない） ---
+  it("『受付3号館』は受付番号として検出しない（第なし＝住所の建物名を温存）", () => {
+    const p = decideRegistryAddressCleanup({ address: "東京都中央区銀座1-1 受付3号館" });
+    expect(p.action).toBe("none");
+    expect(p.cleanedAddress).toBe("東京都中央区銀座1-1 受付3号館");
+    expect(p.detectedTypes).not.toContain("receipt_number");
+  });
+
+  it("『受付1号棟』も温存（受付アンカー単独+第なしでは除去しない）", () => {
+    const p = decideRegistryAddressCleanup({ address: "○○市1-2 受付1号棟 301" });
+    expect(p.action).toBe("none");
+    expect(p.cleanedAddress).toBe("○○市1-2 受付1号棟 301");
+  });
+
+  it("『受付 第12345 号』（第+号あり）は従来どおり除去", () => {
+    const p = decideRegistryAddressCleanup({ address: "○○市1-2 受付 第12345 号" });
+    expect(p.action).toBe("cleanup");
+    expect(p.detectedTypes).toContain("receipt_number");
+    expect(p.cleanedAddress).toBe("○○市1-2");
+  });
+
+  // --- SHOULD-FIX #4: 登記原因スパンは registration_date と二重計上しない ---
+  it("登記原因スパンは registration_cause のみ（registration_date と二重検出しない）", () => {
+    const p = decideRegistryAddressCleanup({
+      address: "札幌市中央区北1条西2 令和3年10月15日売買",
+    });
+    expect(p.detectedTypes).toContain("registration_cause");
+    expect(p.detectedTypes).not.toContain("registration_date");
+  });
+
+  it("日付単独（原因語なし）は registration_date を検出", () => {
+    const p = decideRegistryAddressCleanup({
+      address: "新宿区西新宿2-8-1 令和3年10月15日",
+    });
+    expect(p.detectedTypes).toContain("registration_date");
+    expect(p.detectedTypes).not.toContain("registration_cause");
+  });
+
+  // --- SHOULD-FIX #5: 床面積は「床面積」アンカー必須（無アンカーの平米は拾わない） ---
+  it("『80平米のマンション』は床面積として検出しない（無アンカー抑止）", () => {
+    const p = decideRegistryAddressCleanup({ address: "東京都港区1-2 80平米のマンション" });
+    expect(p.detectedTypes).not.toContain("structure_area");
+    expect(p.action).toBe("none");
+  });
 });

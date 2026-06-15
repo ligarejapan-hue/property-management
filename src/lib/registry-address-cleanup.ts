@@ -69,7 +69,10 @@ const CAUSE = "(?:売買|相続|贈与|所有権移転|所有権保存|移転|�
 
 // 除去可能パターン（順序が重要: 登記原因[日付+原因]を日付単独より先に除去し、原因語の孤立を防ぐ）。
 const REMOVABLE_PATTERNS: { type: RegistryStringType; re: () => RegExp }[] = [
-  { type: "receipt_number", re: () => new RegExp(`受付(?:番号)?\\s*第?\\s*${D}+\\s*号?`, "g") },
+  // 受付番号: 過検出防止のため 2 分岐に厳格化（MUST-FIX #1）。
+  //  - 完全ラベル「受付番号」: 第/号 は任意（受付番号 自体が強アンカー＝住所に出ない）。
+  //  - 短縮「受付」: **第 + 末尾号を必須**（さもないと「受付3号館」「受付1号棟」の正当住所を消す）。
+  { type: "receipt_number", re: () => new RegExp(`受付番号\\s*第?\\s*${D}+\\s*号?|受付\\s*第\\s*${D}+\\s*号`, "g") },
   { type: "registration_cause", re: () => new RegExp(`${WAREKI_DATE}\\s*${CAUSE}`, "g") },
   { type: "registration_date", re: () => new RegExp(WAREKI_DATE, "g") },
   { type: "share_fraction", re: () => new RegExp(`持分\\s*${D}+\\s*分の\\s*${D}+`, "g") },
@@ -86,7 +89,8 @@ const AUDIT_ONLY_PATTERNS: { type: RegistryStringType; re: () => RegExp }[] = [
   { type: "real_estate_number", re: () => new RegExp(`不動産番号\\s*${D}{13}`, "g") },
   { type: "parcel_label", re: () => new RegExp(`地番\\s*${D}[${"0-9０-９番号の丁目\\-－"}]*`, "g") },
   { type: "building_number", re: () => new RegExp(`家屋番号\\s*${D}[${"0-9０-９番号の丁目\\-－"}]*`, "g") },
-  { type: "structure_area", re: () => new RegExp(`${D}+(?:[.．]${D}+)?\\s*(?:㎡|平方メートル|平米)`, "g") },
+  // 床面積: 「床面積」アンカー必須（無アンカーだと「80平米のマンション」等を誤検出する・SHOULD-FIX #5）。
+  { type: "structure_area", re: () => new RegExp(`床面積\\s*${D}+(?:[.．]${D}+)?\\s*(?:㎡|平方メートル|平米)`, "g") },
   // 順位番号は **ラベル付きのみ**（裸の小整数は番地と区別不能ゆえ検出しない）。
   { type: "rank_number", re: () => new RegExp(`順位番号\\s*${D}+|付記\\s*${D}+\\s*号`, "g") },
 ];
@@ -135,10 +139,32 @@ export function decideRegistryAddressCleanup(
   const detected: RegistryStringDetectionItem[] = [];
 
   // 1. 検出（removable / audit-only を原文に対して収集。除去はまだしない）。
+  //    スパン（start/end）を持たせ、登記原因が覆う登記日付は二重計上しない（SHOULD-FIX #4）。
+  interface Span {
+    type: RegistryStringType;
+    text: string;
+    start: number;
+    end: number;
+  }
+  const removableSpans: Span[] = [];
   for (const { type, re } of REMOVABLE_PATTERNS) {
     for (const m of address.matchAll(re())) {
-      if (m[0]) detected.push({ type, text: m[0], removable: true });
+      if (m[0] && m.index != null) {
+        removableSpans.push({ type, text: m[0], start: m.index, end: m.index + m[0].length });
+      }
     }
+  }
+  const causeSpans = removableSpans.filter((s) => s.type === "registration_cause");
+  for (const s of removableSpans) {
+    // registration_date が registration_cause スパンに内包される場合は date を捨てる
+    // （同一スパンを「登記原因」と「登記日付」で二重にバッジ表示しない）。
+    if (
+      s.type === "registration_date" &&
+      causeSpans.some((c) => c.start <= s.start && s.end <= c.end)
+    ) {
+      continue;
+    }
+    detected.push({ type: s.type, text: s.text, removable: true });
   }
   for (const { type, re } of AUDIT_ONLY_PATTERNS) {
     for (const m of address.matchAll(re())) {
