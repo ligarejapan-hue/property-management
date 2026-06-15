@@ -481,9 +481,11 @@ describe("GET /api/admin/display-name-audit — スキャン上限（DQ-01 と�
     expect(res.status).toBe(200);
     const csv = await res.text();
     const lines = csv.split("\r\n").filter((l) => l.length > 0);
-    // ヘッダ1 + 先頭 MAX_SCAN 件のバリアント行（単一群・全件 distinct）= 1 + MAX_SCAN。
-    // 超過分1件は scan 上限で捨てられるため 1 + (MAX_SCAN+1) にはならない。
-    expect(lines).toHaveLength(1 + MAX_SCAN);
+    // ヘッダ1 + 先頭 MAX_SCAN 件のバリアント行（単一群・全件 distinct）+ 打ち切りマーカー行1
+    // = 1 + MAX_SCAN + 1。超過分1件は scan 上限で捨てられるため
+    // 1 + (MAX_SCAN+1) のバリアント行にはならない。truncated ゆえ末尾にマーカー行が付く。
+    expect(lines).toHaveLength(1 + MAX_SCAN + 1);
+    expect(csv).toContain("打ち切り");
     expect(lastAudit().detail).toMatchObject({ ownerTruncated: true });
   });
 });
@@ -820,6 +822,66 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     expect(csv).toContain("建物");
     expect(csv).toContain("ABC");
     expect(writeAuditLog).toHaveBeenCalledTimes(1);
+  });
+
+  // ---- Codex 追加 P2: truncated 時は CSV に打ち切りマーカーを入れる ----
+  // owner / building の truncated が true（scan 上限超過・群数上限超過）のとき、
+  // JSON はフラグで伝えるが CSV には何の表示も無く、直接ダウンロードした不完全な CSV を
+  // 「網羅済み（clean）」と利用者が誤認する（silent truncation）。CSV に明示の打ち切り
+  // マーカー行を入れ、列構成（5列）を壊さず利用者に truncated を伝える。
+
+  // route の MAX_SCAN（10000）と一致。scan 超過で truncated を発生させる。
+  const MAX_SCAN_FOR_MARKER = 10_000;
+  function manyDistinctVariants(count: number) {
+    const rows: Array<{ id: string; name: string }> = [];
+    for (let i = 0; i < count; i++) {
+      rows.push({ id: `x${i}`, name: `山田${" ".repeat(i + 1)}太郎` });
+    }
+    return rows;
+  }
+
+  it("CSV: owner truncated 時は打ち切りマーカー行が出る（列構成は5列のまま）", async () => {
+    pm.owner.findMany.mockResolvedValue(
+      manyDistinctVariants(MAX_SCAN_FOR_MARKER + 1),
+    );
+    pm.building.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest("?format=csv&entity=owner"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    // 打ち切りを示す明示マーカー（種別列に「打ち切り」を含む注記行）。
+    expect(csv).toContain("打ち切り");
+    // ヘッダ列は壊さない（5列ヘッダはそのまま存在する）。
+    expect(csv).toContain("種別");
+    expect(csv).toContain("正規化キー");
+    // 全データ行・マーカー行とも 5 列（カンマ4個）を維持する。
+    const lines = csv.split("\r\n").filter((l) => l.length > 0);
+    for (const line of lines) {
+      const commaCount = (line.match(/,/g) ?? []).length;
+      expect(commaCount).toBe(4);
+    }
+  });
+
+  it("CSV: building truncated 時も打ち切りマーカー行が出る", async () => {
+    pm.owner.findMany.mockResolvedValue([]);
+    pm.building.findMany.mockResolvedValue(
+      manyDistinctVariants(MAX_SCAN_FOR_MARKER + 1),
+    );
+
+    const res = await GET(makeRequest("?format=csv&entity=building"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    expect(csv).toContain("打ち切り");
+  });
+
+  it("CSV: 非 truncated（通常）時は打ち切りマーカーを入れない", async () => {
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv"));
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    expect(csv).not.toContain("打ち切り");
   });
 });
 

@@ -83,6 +83,25 @@ const ENTITY_LABEL: Record<Entity, string> = {
   building: "建物",
 };
 
+// 打ち切り（truncated）時に CSV 末尾へ追加する明示マーカー行。
+// JSON は truncated フラグで打ち切りを伝えるが、CSV は何の表示も無いと
+// 直接ダウンロードした不完全な CSV を「網羅済み（clean）」と誤認させる（silent truncation）。
+// 列構成（CSV_HEADERS の5列）は壊さず、種別列に注記であることが分かる値、
+// 正規化キー列にどの区分が打ち切られたかの説明を入れ、残り列は空にする。
+// sanitizeCsvCellForExcel は CSV 生成側で全セルに適用されるため、ここでは素の文字列で返す。
+function buildTruncationMarkerRow(
+  truncatedEntities: Entity[],
+): Record<string, string> {
+  const labels = truncatedEntities.map((e) => ENTITY_LABEL[e]).join("・");
+  return {
+    種別: "※打ち切り",
+    正規化キー: `安全上限により結果が打ち切られました（対象: ${labels}）。この CSV は全件を網羅していません。`,
+    表示名: "",
+    件数: "",
+    対象ID: "",
+  };
+}
+
 // AuditResult を CSV 行（バリアント1行ずつ）に展開する。
 function auditResultToRows(
   entity: Entity,
@@ -295,6 +314,16 @@ export async function GET(request: NextRequest) {
       if (ownerResult) rows.push(...auditResultToRows("owner", ownerResult));
       if (buildingResult)
         rows.push(...auditResultToRows("building", buildingResult));
+
+      // 打ち切り（truncated）時は末尾に明示マーカー行を追加する。CSV は JSON と違い
+      // truncated フラグを表現できず、無印だと不完全な CSV を網羅済みと誤認させるため
+      // （silent truncation の是正）。どの区分が打ち切られたかも併記する。
+      const truncatedEntities: Entity[] = [];
+      if (ownerResult?.truncated) truncatedEntities.push("owner");
+      if (buildingResult?.truncated) truncatedEntities.push("building");
+      if (truncatedEntities.length > 0) {
+        rows.push(buildTruncationMarkerRow(truncatedEntities));
+      }
 
       // formula injection 対策: 全セル値を sanitize（先頭 = + - @ tab CR LF に ' 付与）。
       const sanitizedRows = rows.map((row) =>
