@@ -595,7 +595,10 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     expect(body.owner.groups).toHaveLength(1);
   });
 
-  it("CSV: owner 群が表示レベル不足なら building のみ出力される", async () => {
+  it("CSV 既定（all）: owner 表示レベル不足（masked）なら owner unavailable → 403（部分 CSV を返さない）", async () => {
+    // 旧挙動は building のみの部分 CSV を返していたが、CSV は unavailable を表現できず
+    // 部分 CSV が clean/網羅済みと区別できないため、all-entity でも片方 unavailable なら
+    // 403 で拒否する（Codex P2 是正）。
     vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
       ...FULL_DISPLAY,
       name: "masked",
@@ -604,10 +607,10 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
     const res = await GET(makeRequest("?format=csv"));
-    const csv = await res.text();
-    // owner の生 name は出ない、building は出る
-    expect(csv).not.toContain("田中");
-    expect(csv).toContain("ABC");
+    expect(res.status).toBe(403);
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   // ---- Codex 追加 P2: CSV 出力は entity を問わず csv_export:read を一般ゲートとして要求する ----
@@ -768,22 +771,55 @@ describe("GET /api/admin/display-name-audit — CSV 出力", () => {
     expect(pm.building.findMany).toHaveBeenCalledTimes(1);
   });
 
-  it("CSV 既定（all）: owner unavailable でも building available なら 403 にせず出力（entity 単独でないため）", async () => {
-    // 既定（両 entity）CSV は entity 単独ではない。owner が unavailable でも
-    // building が出力されるため空ヘッダ CSV にはならず、403 にはしない（JSON と異なり
-    // CSV では unavailable を表現できないが、出力行があれば clean と区別可能）。
-    // owner:read 欠如だが building は property:read で取得できる。
+  // ---- Codex 追加 P2: all-entity CSV でも要求 entity のいずれかが unavailable なら 403 ----
+  // 既定（entity 無し＝owner+building 両方要求）CSV で、片方でも権限不足の未スキャン
+  // （unavailable）になる場合、CSV は JSON と違い unavailable フラグを表現できないため、
+  // 「未スキャンの entity が省かれた部分 CSV」と「実際に指摘ゼロ（clean）」が区別できず
+  // 不完全/誤解を招く。よって要求 entity のいずれかが unavailable なら 403 で拒否する
+  // （部分 CSV を返さない・entity 単独 unavailable 403 と整合・fail-closed）。
+
+  it("CSV 既定（all）: owner unavailable（owner:read 欠如）なら 403（部分 CSV を返さない）", async () => {
+    // owner:read 欠如＝owner 群は unavailable。building は property:read で取得可能だが、
+    // all-entity CSV では片方 unavailable で 403（building のみの部分 CSV を返さない）。
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_NO_OWNER);
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv"));
+    expect(res.status).toBe(403);
+    // 403 ゆえ DB 取得・CSV 生成・AuditLog 書き込みは一切行わない（fail-closed）
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("CSV 既定（all）: building unavailable（property:read 欠如）なら 403（部分 CSV を返さない）", async () => {
+    // property:read 欠如＝building 群は unavailable。owner は available だが、
+    // all-entity CSV では片方 unavailable で 403（owner のみの部分 CSV を返さない）。
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ADMIN_OWNER_NO_PROPERTY);
+    pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
+    pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
+
+    const res = await GET(makeRequest("?format=csv"));
+    expect(res.status).toBe(403);
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+    expect(pm.building.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("CSV 既定（all）: owner・building 両方 available なら従来どおり 200 で両方出力（回帰維持）", async () => {
+    // 権限が全て揃う（どちらも unavailable でない）all-entity CSV は従来どおり出力。
     pm.owner.findMany.mockResolvedValue(OWNER_VARIANTS);
     pm.building.findMany.mockResolvedValue(BUILDING_VARIANTS);
 
     const res = await GET(makeRequest("?format=csv"));
     expect(res.status).toBe(200);
     const csv = await res.text();
-    // owner（PII）は出ない、building は出る
-    expect(csv).not.toContain("田中");
+    expect(csv).toContain("所有者");
+    expect(csv).toContain("田中");
     expect(csv).toContain("建物");
     expect(csv).toContain("ABC");
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
   });
 });
 
