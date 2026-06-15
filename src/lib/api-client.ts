@@ -24,6 +24,9 @@ import {
 // 候補の型のみ取得する type-only import（runtime には何も import されない＝
 // server 専用の provider/orchestrator や住所補完の APIキー(secret env) は client bundle に入らない）。
 import type { AddressLookupCandidate } from "./address-lookup/types";
+// 法人番号 lookup の候補型のみ取得する type-only import（runtime import なし＝
+// server 専用 orchestrator や NTA の appId(secret env) は client bundle に入らない）。
+import type { CorporateLookupRecord } from "./corporate-lookup/types";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -2463,6 +2466,47 @@ export async function fetchAddressCandidates(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address }),
+    },
+  );
+}
+
+// ---------- Corporate lookup (法人番号 → 法人名・本店所在地) ----------
+// APIキー(CORPORATE_NUMBER_API_APP_ID)は server-side route (/api/corporate/lookup) と server lib
+// (@/lib/corporate-lookup) 内でのみ使う。client はここから route を叩くだけで appId(secret env)
+// には一切触れない（外部 NTA API を client から直接呼ばない＝server-side proxy 経由に統一）。
+
+/**
+ * 法人番号 → 法人名・本店所在地の候補。route 経由で取得する。
+ * 法人番号は URL に載せず POST body で送る（PR-2b の教訓: 識別子を browser history /
+ * proxy / access log に残さない）。0件は candidates:[]、廃止法人も record を候補に含める。
+ */
+export async function fetchCorporateLookup(
+  corporateNumber: string,
+): Promise<{ candidates: CorporateLookupRecord[] }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      candidates: [
+        {
+          corporateNumber,
+          name: "モック株式会社",
+          furigana: "モックカブシキガイシャ",
+          address: "東京都千代田区丸の内１−１−１",
+          prefectureName: "東京都",
+          cityName: "千代田区",
+          streetNumber: "丸の内１−１−１",
+          postCode: "1000005",
+          updateDate: "2025-04-01",
+        },
+      ],
+    };
+  }
+  return apiFetch<{ candidates: CorporateLookupRecord[] }>(
+    "/api/corporate/lookup",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ corporateNumber }),
     },
   );
 }
