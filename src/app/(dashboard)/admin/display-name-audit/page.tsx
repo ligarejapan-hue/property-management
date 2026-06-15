@@ -148,14 +148,18 @@ export default function DisplayNameAuditPage() {
           </div>
         ) : !current || current.groups.length === 0 ? (
           <div className="px-6 py-8 text-center text-sm text-gray-400">
-            {/* 3 状態を区別する:
+            {/* 4 状態を区別する（群ゼロの空状態）:
                  - data[tab] === undefined: API がこの区分を返していない（区分非表示）
                  - current.unavailable: 権限不足で未スキャン（clean ではない）
+                 - current.truncated: scan が上限に達し全件未走査（上限到達分の表記ゆれは
+                   未確認＝clean ではない）。capped subset に群が無くても「指摘ゼロ」とは言えない。
                  - それ以外: 実スキャン済みで指摘ゼロ（clean）
-                未認可を「表記ゆれなし」と誤認させない（Codex P2 是正）。 */}
+                未認可・打ち切りを「表記ゆれなし（clean）」と誤認させない（Codex P2 是正）。 */}
             {data[tab] === undefined || current?.unavailable
               ? "権限が不足しているため、この区分は確認できませんでした（表記ゆれの有無は不明です）。"
-              : "表記ゆれは見つかりませんでした。"}
+              : current?.truncated
+                ? "走査が上限に達したため、全件は確認できていません（上限到達分の表記ゆれは未確認です）。"
+                : "表記ゆれは見つかりませんでした。"}
           </div>
         ) : (
           <table className="min-w-full divide-y divide-gray-200">
