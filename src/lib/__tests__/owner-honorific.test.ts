@@ -13,6 +13,13 @@
  * 既存挙動との後方互換:
  * - 法人番号が非空なら（名称に関係なく）"corp" -> 御中（dm-export.ts:54 honorific と一致）。
  * - 法人番号が空で組織名でもない通常の個人名は "様"（従来どおり）。
+ *
+ * 重要（pre-review P1#2）: 旧 honorific(corporateNumber) は
+ *   `typeof === "string" && length > 0`（**trim しない**）で判定する。
+ *   よって空白のみの法人番号（"   "）は length>0 -> 御中。本ライブラリの
+ *   法人番号判定はこの旧挙動の **ドロップイン上位互換**（同じ corporateNumber 入力には
+ *   同じ敬称を返す。新挙動は「法人番号なし＋組織名」の救済のみ）であることを
+ *   parity テストで固定する。
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -30,11 +37,17 @@ describe("classifyHonorificKind — 法人番号シグナル（判定順 1）", 
     expect(classifyHonorificKind("", "1234567890123")).toBe("corp");
   });
 
-  it("法人番号が空 / null / undefined / 空白のみは corp 判定にしない", () => {
+  it("法人番号が空 / null / undefined は corp 判定にしない（旧 honorific=様 と一致）", () => {
     expect(classifyHonorificKind("山田太郎", "")).toBe("person");
     expect(classifyHonorificKind("山田太郎", null)).toBe("person");
     expect(classifyHonorificKind("山田太郎", undefined)).toBe("person");
-    expect(classifyHonorificKind("山田太郎", "   ")).toBe("person");
+  });
+
+  it("空白のみの法人番号は corp（旧 honorific は trim せず length>0 -> 御中 ＝上位互換）", () => {
+    // 旧 honorific("   ") は length 3 > 0 -> 御中。本ライブラリも同値（corp）にする。
+    expect(classifyHonorificKind("山田太郎", "   ")).toBe("corp");
+    expect(classifyHonorificKind("山田太郎", "\t")).toBe("corp");
+    expect(classifyHonorificKind("○○管理組合", "   ")).toBe("corp");
   });
 
   it("法人番号シグナルは組織名サフィックスより優先（後方互換: 法人番号ありは常に corp）", () => {
@@ -65,6 +78,9 @@ describe("classifyHonorificKind — 組織名サフィックス（判定順 2）
     ["宗教法人", "○○宗教法人"],
     ["医療法人", "○○医療法人"],
     ["学校法人", "○○学校法人"],
+    // pre-review P1#1: 裸の 財団法人 / 社団法人（一般/公益 等の接頭なし）も org。
+    ["財団法人（後置）", "○○財団法人"],
+    ["社団法人（後置）", "○○社団法人"],
     ["協同組合", "○○協同組合"],
     ["連合会", "○○連合会"],
     ["商店会", "○○商店会"],
@@ -88,6 +104,44 @@ describe("classifyHonorificKind — 組織名サフィックス（判定順 2）
     expect(classifyHonorificKind("○○（株）", null)).toBe("org");
     expect(classifyHonorificKind("○○(株)", null)).toBe("org");
     expect(classifyHonorificKind("○○㈱", null)).toBe("org");
+  });
+});
+
+describe("classifyHonorificKind — pre-review P1#1: 財団法人 / 社団法人 / ㈳ / ㈶ 取りこぼし修正", () => {
+  // バグ: 裸の「財団法人」「社団法人」と記号 ㈳/㈶ がマーカ語彙に無く、
+  // 「財団法人○○」「○○社団法人」が person（様）に誤判定されていた。
+  it("前置「財団法人○○」も org（強マーカは語中含有）", () => {
+    expect(classifyHonorificKind("財団法人○○記念会", null)).toBe("org");
+  });
+
+  it("前置「社団法人○○」も org", () => {
+    expect(classifyHonorificKind("社団法人○○協会", null)).toBe("org");
+  });
+
+  it("後置「○○財団法人」「○○社団法人」も org", () => {
+    expect(classifyHonorificKind("○○財団法人", null)).toBe("org");
+    expect(classifyHonorificKind("○○社団法人", null)).toBe("org");
+  });
+
+  it("㈳（NFKC -> (社)）を含む名称は org", () => {
+    expect(classifyHonorificKind("㈳○○協会", null)).toBe("org");
+    expect(classifyHonorificKind("○○㈳", null)).toBe("org");
+  });
+
+  it("㈶（NFKC -> (財)）を含む名称は org", () => {
+    expect(classifyHonorificKind("㈶○○記念会", null)).toBe("org");
+    expect(classifyHonorificKind("○○㈶", null)).toBe("org");
+  });
+
+  it("(社) / (財)（既に NFKC 後の半角括弧形）も org", () => {
+    expect(classifyHonorificKind("(社)○○協会", null)).toBe("org");
+    expect(classifyHonorificKind("(財)○○記念会", null)).toBe("org");
+  });
+
+  it("学校法人 / 医療法人 / 宗教法人 は前置でも org（語中含有）", () => {
+    expect(classifyHonorificKind("学校法人○○学園", null)).toBe("org");
+    expect(classifyHonorificKind("医療法人○○会", null)).toBe("org");
+    expect(classifyHonorificKind("宗教法人○○寺", null)).toBe("org");
   });
 });
 
@@ -127,6 +181,15 @@ describe("classifyHonorificKind — 誤検出回避（no false positive）", () 
 
   it("「組合せ」のような語は組合サフィックス扱いしない（語尾の閉じた語彙のみ）", () => {
     expect(classifyHonorificKind("パズル組合せ", null)).toBe("person");
+  });
+
+  it("pre-review P1#1 ガード: 「社」「財」を含むが法人格語でない個人名は person", () => {
+    // 「財前」姓・「社」単体などは org マーカ（財団法人/社団法人/(社)/(財)）に
+    // マッチしないので person のまま（個人名 false positive を作らない）。
+    expect(classifyHonorificKind("財前 五郎", null)).toBe("person");
+    expect(classifyHonorificKind("社本 太郎", null)).toBe("person");
+    expect(classifyHonorificKind("財団", null)).toBe("person");
+    expect(classifyHonorificKind("社団", null)).toBe("person");
   });
 });
 
@@ -215,5 +278,72 @@ describe("既存 honorific(corporateNumber) との後方互換", () => {
   });
   it("法人番号なし通常個人名: 旧=様 と一致", () => {
     expect(honorificForOwner("山田太郎", false)).toBe("様");
+  });
+});
+
+describe("pre-review P2(a): 旧 honorific(corporateNumber) との完全 parity", () => {
+  // 旧実装の **正確な複製**（dm-export.ts:54-58 / property-dm-export.ts:53-57）。
+  // 重要: trim しない。`typeof === "string" && length > 0` のみで判定する。
+  function oldHonorific(corporateNumber: string | null | undefined): string {
+    return typeof corporateNumber === "string" && corporateNumber.length > 0
+      ? "御中"
+      : "様";
+  }
+
+  // 代表的な corporateNumber 入力（空・空白のみ・有効13桁・記号混じり・null/undefined）。
+  const corpNumberCases: Array<string | null | undefined> = [
+    "",
+    " ",
+    "   ",
+    "\t",
+    "\n",
+    "　", // 全角スペース（length 1 > 0 -> 旧=御中）
+    "1234567890123",
+    "9876543210987",
+    "12345", // 桁数不問（旧は length>0 のみ）
+    "abc",
+    null,
+    undefined,
+  ];
+
+  // 法人番号判定が名称に依らず旧と一致することを示すため、複数の name で確認する
+  // （個人名・組織名・空名のいずれでも、corporateNumber 由来の敬称は旧と同値）。
+  const names: Array<string | null | undefined> = ["山田太郎", "○○管理組合", "", null];
+
+  for (const cn of corpNumberCases) {
+    for (const nm of names) {
+      it(`corporateNumber=${JSON.stringify(cn)} / name=${JSON.stringify(
+        nm,
+      )} は旧 honorific と一致`, () => {
+        const expected = oldHonorific(cn);
+        // classifyHonorificKind -> honorificFor 経路。
+        const viaClassify = honorificFor(classifyHonorificKind(nm, cn));
+        // honorificForOwner(name, hasCorporateNumber) 経路（hasCorporateNumber は
+        // 旧の「corporateNumber 非空」シグナルそのもの）。
+        const viaOwner = honorificForOwner(nm, oldHonorific(cn) === "御中");
+
+        if (expected === "御中") {
+          // 旧が御中になる入力（法人番号非空）は、名称に関係なく必ず御中。
+          // ＝ corp 判定が org/person 名称判定より優先（ドロップイン上位互換）。
+          expect(viaClassify).toBe("御中");
+          expect(viaOwner).toBe("御中");
+        } else {
+          // 旧が様になる入力（法人番号が空/null/undefined）でのみ、新挙動
+          // （名称ベースの org 救済）が効く。個人名・空名は旧どおり様、
+          // 組織名は新たに御中（＝意図した唯一の上位拡張）。両経路とも
+          // classifyHonorificKind(name, ...) を通るので同じ判定になる。
+          const nameIsOrg = classifyHonorificKind(nm, null) === "org";
+          const want = nameIsOrg ? "御中" : expected;
+          expect(viaClassify).toBe(want);
+          expect(viaOwner).toBe(want);
+        }
+      });
+    }
+  }
+
+  it("空白のみ corporateNumber は旧と同様 御中（trim しない＝ドロップイン上位互換）", () => {
+    expect(oldHonorific("   ")).toBe("御中");
+    expect(honorificFor(classifyHonorificKind("山田太郎", "   "))).toBe("御中");
+    expect(honorificForOwner("山田太郎", true)).toBe("御中");
   });
 });

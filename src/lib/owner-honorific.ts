@@ -39,15 +39,25 @@ export const HONORIFIC_ORG = "御中";
 /**
  * 法人格を明示する強いマーカ語。これらは個人名にほぼ現れない閉じた語彙のため、
  * 前株/後株の双方に対応するよう **語中含有** で判定する（例: 「株式会社○○」「○○株式会社」）。
- * NFKC 正規化後に判定するため、（株）/ (株) は「株式会社」相当の㈱・株とは別に
- * 明示パターンとして併記する（NFKC で ㈱ -> (株)、全角括弧 -> 半角括弧へ畳まれる）。
+ * NFKC 正規化後に判定するため、括弧記号は NFKC 後の半角括弧形で併記する
+ * （NFKC で ㈱ -> (株)、㈲ -> (有)、㈳ -> (社)、㈶ -> (財)、全角括弧 -> 半角括弧へ畳まれる）。
+ * 記号リテラル（㈱/㈲/㈳/㈶）は NFKC 後には現れないため実マッチには寄与しないが、
+ * 設計意図の文書化として半角括弧形と併記する。実際にマッチするのは半角括弧形
+ * （\(株\)/\(有\)/\(社\)/\(財\)）。
+ *
+ * pre-review P1#1: 裸の「財団法人」「社団法人」と記号 ㈳/㈶（-> (社)/(財)）が
+ * 欠けていたため「財団法人○○」「○○社団法人」が person に誤判定されていた。
+ * sibling owner-name-quality.ts の CORP_WORD_RE（財団法人 等を含む）と語彙を揃え、
+ * 財団法人/社団法人/学校法人/医療法人/宗教法人 と (社)/(財) を補う。
+ * 接頭付き（一般/公益）の長い語は裸の財団法人/社団法人を部分文字列として含むため、
+ * boolean な .test() では裸形だけでも吸収されるが、可読性のため明示形も残す。
  *
  * 注: owner-name-quality.ts の CORP_WORD_RE と語彙を揃えつつ、DQ-05 用に
  * 連合会・商店会・管理会社・各種「会」型団体を design の ORG_NAME_SUFFIXES に従い拡張する。
  * （本ライブラリは独立した純関数で、当該定数を import しない＝共有ファイル無改変。）
  */
 const CORP_MARKER_RE =
-  /(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|\(有\)|㈱|㈲|一般社団法人|一般財団法人|公益社団法人|公益財団法人|社会福祉法人|宗教法人|医療法人|学校法人|特定非営利活動法人|独立行政法人|国立大学法人|地方独立行政法人)/u;
+  /(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|\(有\)|\(社\)|\(財\)|㈱|㈲|㈳|㈶|財団法人|社団法人|一般社団法人|一般財団法人|公益社団法人|公益財団法人|社会福祉法人|宗教法人|医療法人|学校法人|特定非営利活動法人|独立行政法人|国立大学法人|地方独立行政法人)/u;
 
 /**
  * 組織種別を示す **語尾サフィックス**（語尾一致のみで判定）。
@@ -98,14 +108,22 @@ function endsWithOrgSuffix(normalized: string): boolean {
 }
 
 /**
- * 法人番号シグナルが立っているか（非空文字列か）。
- * 既存 honorific(corporateNumber) の「typeof string かつ length>0」と整合させつつ、
- * 空白のみの法人番号は無効として扱う（trim 後に空なら false）。
+ * 法人番号シグナルが立っているか。
+ *
+ * 既存 honorific(corporateNumber)（dm-export.ts:54-58 / property-dm-export.ts:53-57）の
+ * 判定式 `typeof corporateNumber === "string" && corporateNumber.length > 0` を
+ * **そのまま複製** する（pre-review P1#2）。
+ *
+ * 重要 — trim しない: 旧実装は trim せず length のみ見るため、空白のみの法人番号
+ * （例 "   " / "\t" / 全角スペース）は length>0 で「御中」になる。本ライブラリは
+ * 旧挙動の **ドロップイン上位互換** であるべきなので、同じ corporateNumber 入力には
+ * 同じ判定を返す（唯一の新挙動は「法人番号なし＋組織名」の救済）。trim を入れると
+ * 空白のみのケースで旧と挙動が割れて回帰になるため、意図的に length のみで判定する。
  */
 function hasCorporateNumberSignal(
   corporateNumber: string | null | undefined,
 ): boolean {
-  return typeof corporateNumber === "string" && corporateNumber.trim().length > 0;
+  return typeof corporateNumber === "string" && corporateNumber.length > 0;
 }
 
 /**
@@ -117,7 +135,9 @@ function hasCorporateNumberSignal(
  * 保守的: 名称が空/null/空白のみ、または個人名は "person"（誤って組織に倒さない）。
  *
  * @param name 所有者名（生値）。null/undefined/空可。
- * @param corporateNumber 法人番号など法人シグナル（13桁/12桁いずれも非空なら corp）。
+ * @param corporateNumber 法人番号など法人シグナル。**桁数・数字内容は検証しない**。
+ *   旧 honorific(corporateNumber) と同じく `typeof string && length>0`（trim せず）で
+ *   非空なら corp（御中）にする（空白のみも非空なので corp）。pre-review P1#2 参照。
  */
 export function classifyHonorificKind(
   name: string | null | undefined,
