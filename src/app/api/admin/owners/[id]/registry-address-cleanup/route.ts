@@ -201,8 +201,12 @@ export async function POST(
 
     return apiResponse({ ok: true, owner: { id, version: body.version + 1 } });
   } catch (error) {
-    if (auditUserId && auditOwnerId && error instanceof Error && "status" in error) {
-      auditHttpStatus = (error as ApiError).status;
+    // #6: 素の 500（ApiError 以外）でも失敗監査を残す（status は 500 とみなす）。
+    if (auditUserId && auditOwnerId) {
+      auditHttpStatus =
+        error instanceof Error && "status" in error
+          ? (error as ApiError).status
+          : 500;
       try {
         await writeAuditLog({
           userId: auditUserId,
