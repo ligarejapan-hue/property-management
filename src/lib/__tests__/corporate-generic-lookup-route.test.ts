@@ -237,6 +237,18 @@ describe("POST /api/corporate/lookup — 異常系", () => {
     expect(res.status).toBe(400);
   });
 
+  it("JSON null body は 400（500 にしない・Codex P2）", async () => {
+    const res = await POST(makeRequest(null));
+    expect(res.status).toBe(400);
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+  });
+
+  it("非オブジェクト body（文字列）は 400", async () => {
+    const res = await POST(makeRequest("just-a-string"));
+    expect(res.status).toBe(400);
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+  });
+
   it("NOT_CONFIGURED で 503", async () => {
     vi.mocked(lookupCorporateNumber).mockRejectedValueOnce(
       new CorporateLookupError("NOT_CONFIGURED", "未設定"),

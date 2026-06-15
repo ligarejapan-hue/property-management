@@ -66,7 +66,14 @@ export async function POST(request: NextRequest) {
       throw new ApiError(403, "法人番号を扱う権限がありません", "FORBIDDEN");
     }
 
-    const body = (await request.json().catch(() => ({}))) as RequestBody;
+    // JSON `null` や非オブジェクト body でも安全に 400 にする。body.corporateNumber を
+    // 参照する前にオブジェクトであることを保証する（`null` を直接読むと TypeError → 500 に
+    // なるため。parse 失敗だけでなく parsed===null / プリミティブも空扱いにする・Codex P2）。
+    const parsed = (await request.json().catch(() => null)) as unknown;
+    const body: RequestBody =
+      parsed !== null && typeof parsed === "object"
+        ? (parsed as RequestBody)
+        : {};
     const normalized = normalizeCorporateNumber(
       typeof body.corporateNumber === "string" ? body.corporateNumber : null,
     );
