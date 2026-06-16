@@ -119,6 +119,14 @@ export default function QualityAuditPage() {
   const [busy, setBusy] = useState(false);
   // 競合 load の stale 応答ガード（tab/type 切替が重なっても最新の応答のみ反映）。
   const loadIdRef = useRef(0);
+  // apply 後の reload が「現在の」tab/type を参照するための ref。handleApply のクロージャは
+  // click 時点の tab/type を捕捉するため、apply 実行中にタブ/フィルタが切り替わると古いタブを
+  // reload してしまい、それが reqId 競争に勝って view.tab 不一致（空表・誤ページング）を起こす
+  // （Codex P2）。最新値を ref に保持し reload は常に現タブ/現フィルタを対象にする。
+  const tabRef = useRef(tab);
+  const typeRef = useRef(type);
+  tabRef.current = tab;
+  typeRef.current = type;
 
   const load = useCallback(
     async (
@@ -278,11 +286,11 @@ export default function QualityAuditPage() {
         );
       }
       setPreview(null);
-      await load(tab, type, null, false); // version 変化・行消失を反映
+      await load(tabRef.current, typeRef.current, null, false); // 現タブを再取得（version 変化・行消失反映）
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "適用に失敗しました");
       setPreview(null);
-      await load(tab, type, null, false); // 409 後は version がずれるため再取得
+      await load(tabRef.current, typeRef.current, null, false); // 現タブを再取得（409 後の version ズレ対応）
     } finally {
       setBusy(false);
     }
