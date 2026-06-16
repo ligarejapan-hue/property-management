@@ -67,38 +67,49 @@ export default function AttachmentSearchPage() {
   const [dateTo, setDateTo] = useState("");
   const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
 
-  const fetchResults = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      if (applied.type) params.set("type", applied.type);
-      if (applied.fileName.trim()) params.set("fileName", applied.fileName.trim());
-      if (applied.targetType) params.set("targetType", applied.targetType);
-      if (applied.targetId.trim()) params.set("targetId", applied.targetId.trim());
-      if (applied.from) params.set("from", applied.from);
-      if (applied.to) params.set("to", applied.to);
+  const fetchResults = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams();
+        if (applied.type) params.set("type", applied.type);
+        if (applied.fileName.trim()) params.set("fileName", applied.fileName.trim());
+        if (applied.targetType) params.set("targetType", applied.targetType);
+        if (applied.targetId.trim()) params.set("targetId", applied.targetId.trim());
+        if (applied.from) params.set("from", applied.from);
+        if (applied.to) params.set("to", applied.to);
 
-      const res = await fetch(`/api/attachments/search?${params}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error?.message ?? `取得に失敗しました (${res.status})`);
+        const res = await fetch(`/api/attachments/search?${params}`, { signal });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error?.message ?? `取得に失敗しました (${res.status})`);
+        }
+        const json = await res.json();
+        setResults(json.data ?? []);
+        setCount(json.count ?? json.data?.length ?? 0);
+        setLimit(json.limit ?? 0);
+        setLoading(false);
+      } catch (err) {
+        // 後発リクエストに置き換えられた古い fetch（abort 済み）は state を触らない。
+        // loading も解除しない（最新リクエストが進行中のため）。
+        if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : "検索に失敗しました");
+        setResults([]);
+        setLoading(false);
       }
-      const json = await res.json();
-      setResults(json.data ?? []);
-      setCount(json.count ?? json.data?.length ?? 0);
-      setLimit(json.limit ?? 0);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "検索に失敗しました");
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [applied]);
+    },
+    [applied],
+  );
 
-  // 初回 + applied 確定時のみ取得（入力中は再取得しない）。
+  // 初回 + applied 確定時のみ取得（入力中は再取得しない）。filter 変更で前リクエストを
+  // abort し、遅延した古いレスポンスが新しい結果を上書きしないようにする。
   useEffect(() => {
-    void fetchResults();
+    const controller = new AbortController();
+    void fetchResults(controller.signal);
+    return () => controller.abort();
   }, [fetchResults]);
 
   function handleSearch() {

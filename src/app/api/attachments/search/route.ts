@@ -17,7 +17,8 @@ import { writeAuditLog } from "@/lib/audit";
  * （targetType・targetId）で横断検索する admin 専用エンドポイント。既存
  * Attachment.@@index([targetType, targetId]) を活用する。schema 変更なし。
  *
- *  - 認証必須・実効権限 audit_log:read を要求（オーバーライド反映・権限なしは 403）。
+ *  - 認証必須・実効権限 user_management:read かつ property:read かつ owner:read を要求
+ *    （オーバーライド反映・いずれか欠落/剥奪で 403）。
  *  - 既定で isDeleted=false（削除済みは除外）。
  *  - 返却は **メタデータのみ**（id / fileName / type / createdAt / targetType /
  *    targetId）。**ファイル本体 URL(fileUrl)は select せず結果に一切載せない**
@@ -52,11 +53,16 @@ export async function GET(request: Request) {
     // 認可は実効権限で判定する。getUserPermissions は DB から role 由来テンプレートと
     // ユーザー個別オーバーライドをマージした現在の権限を返すため、JWT 上の role や DB
     // role 単独に依存せず、ログイン後の降格・権限剥奪も尊重する。本検索は全添付のメタ
-    // （ファイル名・targetId 等、PII を含み得る）を横断露出するため、管理オーバーサイトの
-    // 監査閲覧と同じ権限（audit_log:read）を要求する。dedicated な attachment 権限は
-    // seed/template 変更を要し本PR範囲外のため、既存 audit_log:read を再利用する。
+    // （ファイル名・targetId 等、PII を含み得る）を横断露出するため、管理者能力
+    // (user_management:read) に加えて、添付が紐づくデータの read 権限（property:read・
+    // owner:read）も要求する。これにより audit ログ閲覧権限だけ／データ権限を剥奪された
+    // アカウントは弾かれる。いずれかを欠く/オーバーライドで剥奪された場合は 403。
     const perms = await getUserPermissions(session.id);
-    if (!hasPermission(perms, "audit_log", "read")) {
+    const allowed =
+      hasPermission(perms, "user_management", "read") &&
+      hasPermission(perms, "property", "read") &&
+      hasPermission(perms, "owner", "read");
+    if (!allowed) {
       throw new ApiError(403, "この操作の権限がありません", "FORBIDDEN");
     }
 

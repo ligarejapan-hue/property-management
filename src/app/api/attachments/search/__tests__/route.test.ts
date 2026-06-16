@@ -2,9 +2,11 @@
  * GET /api/attachments/search — 添付横断検索（admin オーバーサイト・ISO-SAFE・schema 無改変）。
  *
  *  - 認可は **実効権限**で判定する：getUserPermissions(session.id)（DB 由来・テンプレート＋
- *    ユーザー個別オーバーライドを反映）+ hasPermission(perms, "audit_log", "read")。
- *    JWT 上の role や DB role 単独には依存しない（降格・権限剥奪を尊重）。
- *  - 権限なしは 403 / 未認証は 401。
+ *    ユーザー個別オーバーライドを反映）+ hasPermission。本検索は全添付のメタ（fileName・
+ *    targetId 等、PII を含み得る）を横断露出するため、管理者能力 user_management:read に
+ *    加えて、添付が紐づくデータの read 権限 property:read・owner:read も要求する。
+ *    いずれかを欠く/剥奪された場合は 403（JWT role には依存しない）。
+ *  - 未認証は 401。
  *  - query: type / fileName(部分一致) / from・to(期間) / targetType・targetId。
  *  - 既定 isDeleted=false。
  *  - 返却はメタ（id/fileName/type/createdAt/targetType/targetId）のみ。
@@ -65,7 +67,13 @@ const mockedGetPerms = getUserPermissions as unknown as Mock;
 const mockedAudit = writeAuditLog as unknown as Mock;
 
 const UUID = "11111111-1111-4111-8111-111111111111";
-const ALLOWED = [{ resource: "audit_log", action: "read", granted: true }];
+
+// 認可に必要な実効権限（admin 能力 + データ read）が全て揃った状態。
+const FULL_PERMS = [
+  { resource: "user_management", action: "read", granted: true },
+  { resource: "property", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
+];
 
 function req(qs = ""): Request {
   return new Request(`http://localhost/api/attachments/search${qs}`);
@@ -79,14 +87,13 @@ function lastWhere(): Record<string, unknown> {
 describe("GET /api/attachments/search", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // 既定: 認証済み & 実効権限 audit_log:read を保持。
     mockedGetSession.mockResolvedValue({
       id: "admin-1",
       email: "a@a",
       name: "Admin",
       role: "admin",
     });
-    mockedGetPerms.mockResolvedValue(ALLOWED);
+    mockedGetPerms.mockResolvedValue(FULL_PERMS);
     pm.attachment.findMany.mockResolvedValue([]);
   });
 
@@ -101,8 +108,11 @@ describe("GET /api/attachments/search", () => {
     expect(pm.attachment.findMany).not.toHaveBeenCalled();
   });
 
-  it("実効権限 audit_log:read が無ければ 403（DB&audit を呼ばない）", async () => {
-    mockedGetPerms.mockResolvedValueOnce([]);
+  it("user_management:read が無ければ 403（DB&audit を呼ばない）", async () => {
+    mockedGetPerms.mockResolvedValueOnce([
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+    ]);
 
     const res = await GET(req());
 
@@ -111,9 +121,23 @@ describe("GET /api/attachments/search", () => {
     expect(mockedAudit).not.toHaveBeenCalled();
   });
 
-  it("オーバーライドで granted:false に剥奪されていれば 403", async () => {
+  it("property:read が無ければ 403", async () => {
     mockedGetPerms.mockResolvedValueOnce([
-      { resource: "audit_log", action: "read", granted: false },
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+    ]);
+
+    const res = await GET(req());
+
+    expect(res.status).toBe(403);
+    expect(pm.attachment.findMany).not.toHaveBeenCalled();
+  });
+
+  it("owner:read がオーバーライドで granted:false に剥奪されていれば 403", async () => {
+    mockedGetPerms.mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: false },
     ]);
 
     const res = await GET(req());
@@ -129,7 +153,7 @@ describe("GET /api/attachments/search", () => {
     expect(mockedGetPerms.mock.calls[0][0]).toBe("admin-1");
   });
 
-  it("権限ありで 200・メタのみ返す（fileUrl を select せず結果に載せない）", async () => {
+  it("必要権限が揃えば 200・メタのみ返す（fileUrl を select せず結果に載せない）", async () => {
     pm.attachment.findMany.mockResolvedValueOnce([
       {
         id: "att-1",
