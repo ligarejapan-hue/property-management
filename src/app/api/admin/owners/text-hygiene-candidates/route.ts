@@ -114,16 +114,19 @@ function isRawVisible(level: string): boolean {
 }
 
 /**
- * owner の fields（issue を持つフィールドのみ）が type フィルタに一致するか。
- * DQ-04 の issue はすべて warning/error（info なし）ゆえ "all" は issue 行があれば一致。
+ * owner の fieldReports を選択 type に絞る。
+ * - "all": issue を持つ全フィールドを返す（DQ-04 の issue はすべて warning/error・info なし）。
+ * - 個別 type: **その issue を含むフィールドだけ**を返す。owner 単位で「どれか一致」させて全
+ *   フィールドを返すと、page が fields[] を行へ展開する際に選択 type と無関係なフィールド行
+ *   （例: type=control_chars なのに replacement_char だけの address 行）が偽陽性として表示
+ *   される（Codex P2）。per-field で絞ることで監査タブの行が必ず選択 type に一致する。
  */
-function matchesFilter(
+function filterFieldsByType(
   fields: FieldHygieneReport[],
   filter: FilterType,
-): boolean {
-  if (fields.length === 0) return false;
-  if (filter === "all") return true;
-  return fields.some((f) => f.issues.includes(filter));
+): FieldHygieneReport[] {
+  if (filter === "all") return fields;
+  return fields.filter((f) => f.issues.includes(filter));
 }
 
 export async function GET(request: NextRequest) {
@@ -209,12 +212,14 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      if (!matchesFilter(fieldReports, type)) continue;
+      // type フィルタは per-field で適用する（選択 type を含むフィールド行のみ表示）。
+      const displayFields = filterFieldsByType(fieldReports, type);
+      if (displayFields.length === 0) continue;
 
       matchedRows.push({
         ownerId: owner.id,
         version: owner.version,
-        fields: fieldReports,
+        fields: displayFields,
         detailUrl: `/admin/owners/${owner.id}`,
       });
     }

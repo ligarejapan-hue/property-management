@@ -201,6 +201,23 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "hasNextPage",
     "truncated",
   ]),
+  // DQ-04: テキスト衛生（制御文字/文字化け）一覧 dry-run の監査メタデータ。すべて非PIIの
+  // 数値カウンタ / boolean。summary は ALWAYS_SAFE コンテナだが、子キー（種別ごとの件数）は
+  // 再帰でこの allowlist に照合されるためここに登録する（type / resultCount は ALWAYS_SAFE）。
+  // 生値（name / address / note 等）は allowlist 外 + denylist で引き続き [REDACTED]。
+  owner_text_hygiene_candidates_list: new Set([
+    "summary",
+    "hasNextPage",
+    "truncated",
+    "controlChars",
+    "zeroWidth",
+    "bidi",
+    "replacementChar",
+    "mojibake",
+    "removableCandidates",
+    "auditOnlyCandidates",
+    "totalCandidates",
+  ]),
 };
 
 /**

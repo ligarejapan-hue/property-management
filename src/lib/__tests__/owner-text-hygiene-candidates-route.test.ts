@@ -260,6 +260,29 @@ describe("複数フィールド同居", () => {
     expect(fieldsByName.name.issues).toContain("control_chars");
     expect(fieldsByName.address.issues).toContain("zero_width");
   });
+
+  it("type フィルタは per-field（複数フィールド owner で選択 type のフィールドのみ・偽陽性なし・Codex P2）", async () => {
+    // name=control_chars(removable) / address=replacement_char(audit-only) を持つ owner。
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", name: `山田${SOH}太郎`, address: `住所${FFFD}` }),
+    ]);
+    // type=control_chars: address(replacement_char のみ)の偽陽性行を出さず name だけ。
+    const c = await (await GET(url("?type=control_chars"))).json();
+    expect(c.candidates).toHaveLength(1);
+    expect(
+      c.candidates[0].fields.map((f: Row["fields"][number]) => f.field),
+    ).toEqual(["name"]);
+    // type=replacement_char: address だけ。
+    const r = await (await GET(url("?type=replacement_char"))).json();
+    expect(
+      r.candidates[0].fields.map((f: Row["fields"][number]) => f.field),
+    ).toEqual(["address"]);
+    // type=all: 両フィールドを返す。
+    const a = await (await GET(url())).json();
+    expect(
+      a.candidates[0].fields.map((f: Row["fields"][number]) => f.field).sort(),
+    ).toEqual(["address", "name"]);
+  });
 });
 
 describe("archived 除外", () => {
