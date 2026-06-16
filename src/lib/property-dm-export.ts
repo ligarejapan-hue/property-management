@@ -8,7 +8,7 @@
  * 送付方針(21-D タスク7):
  *  - 宛先は Property.postalCode + Property.address(物件の物理住所宛)。
  *    郵便番号は Property.postalCode → Building.postalCode → 空欄 の優先順位でフォールバックする。
- *  - 宛名は代表所有者名 + 敬称(個人=様 / 法人=御中)。複数所有者は「<敬称> 他共有者様」。
+ *  - 宛名は代表所有者名 + 敬称(個人=様 / 法人・法人番号なしの組織名=御中)。複数所有者は「<敬称> 他共有者様」。
  *  - 所有者の郵便番号・住所は出力しない(宛先は物件住所のため)。
  *    これにより owner zip/address の表示レベルゲートは不要(氏名のみ生値を要求)。
  *
@@ -23,6 +23,7 @@
 import { maskValue } from "@/lib/permissions";
 import { PROPERTY_TYPE_LABELS, DM_STATUS_LABELS } from "@/lib/property-types";
 import { formatPostalCode, isValidPostalCode } from "@/lib/address-lookup/normalize";
+import { honorificForOwner } from "@/lib/owner-honorific";
 import type { OwnerDisplayConfig } from "@/lib/api-helpers";
 
 // CSV ヘッダ(差込テンプレートの列順に厳密一致させること)。
@@ -45,16 +46,6 @@ export const MAX_PROPERTY_DM_EXPORT_ROWS = 10000;
 
 // 複数所有者を 1 通にまとめた行の宛名で、代表者の敬称の後ろに付ける文言。
 export const OTHER_CO_OWNERS_SUFFIX = "他共有者様";
-
-/**
- * 敬称を返す。法人番号が非空文字列なら法人とみなして「御中」、それ以外は「様」。
- * 注: 法人番号が未登録の任意団体・管理組合等は「様」になる(判定材料が法人番号のみ)。
- */
-export function honorific(corporateNumber: string | null | undefined): string {
-  return typeof corporateNumber === "string" && corporateNumber.length > 0
-    ? "御中"
-    : "様";
-}
 
 /**
  * maskValue が「生値」をそのまま返す表示レベルの集合(氏名ゲート用)。
@@ -156,7 +147,13 @@ export function buildPropertyDmRow(
 ): Record<(typeof PROPERTY_DM_EXPORT_HEADERS)[number], string> {
   const representative = selectRepresentative(owners);
   const repOwner = representative.owner;
-  const baseHonorific = honorific(repOwner.corporateNumber);
+  // DQ-05: 敬称は owner-honorific へ委譲（所有者宛 dm-export.ts と同方針）。法人番号シグナルは
+  // 旧 honorific と同式（typeof string && length>0・trim しない）で算出し parity を保持。
+  // 法人番号なしの組織名（管理組合・自治会・法人格名）も名称ベースで御中になる。
+  const hasCorporateNumber =
+    typeof repOwner.corporateNumber === "string" &&
+    repOwner.corporateNumber.length > 0;
+  const baseHonorific = honorificForOwner(repOwner.name, hasCorporateNumber);
   const isShared = owners.length > 1;
 
   const names = owners

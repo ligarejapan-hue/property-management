@@ -17,6 +17,7 @@
  */
 import { maskValue } from "@/lib/permissions";
 import { PROPERTY_TYPE_LABELS, DM_STATUS_LABELS } from "@/lib/property-types";
+import { honorificForOwner } from "@/lib/owner-honorific";
 import type { OwnerDisplayConfig } from "@/lib/api-helpers";
 
 // CSV ヘッダ（差込テンプレートの列順に厳密一致させること）。
@@ -47,15 +48,6 @@ export const MAX_DM_EXPORT_ROWS = 10000;
 
 // 複数共有者を 1 通にまとめた行の宛名で、代表者の後ろに付ける文言。
 export const OTHER_CO_OWNERS_SUFFIX = "他共有者様";
-
-/**
- * 敬称を返す。法人番号が非空文字列なら法人とみなして「御中」、それ以外は「様」。
- */
-export function honorific(corporateNumber: string | null | undefined): string {
-  return typeof corporateNumber === "string" && corporateNumber.length > 0
-    ? "御中"
-    : "様";
-}
 
 /**
  * maskValue が「生値」をそのまま返す表示レベルの集合。
@@ -205,7 +197,13 @@ export function buildDmRow(
 ): Record<(typeof DM_EXPORT_HEADERS)[number], string> {
   const representative = selectGroupRepresentative(group);
   const repOwner = representative.owner;
-  const baseHonorific = honorific(repOwner.corporateNumber);
+  // DQ-05: 敬称は owner-honorific へ委譲。法人番号シグナルは旧 honorific と同式
+  //（typeof string && length>0・trim しない）で算出し、法人番号あり=御中 / 個人=様 の
+  // parity を保持。新たに法人番号なしの組織名（管理組合・自治会・法人格名）も御中になる。
+  const hasCorporateNumber =
+    typeof repOwner.corporateNumber === "string" &&
+    repOwner.corporateNumber.length > 0;
+  const baseHonorific = honorificForOwner(repOwner.name, hasCorporateNumber);
   const isShared = group.length > 1;
 
   const names = group

@@ -280,6 +280,69 @@ describe("buildDmRow（1 グループ = 1 行）", () => {
   });
 });
 
+// DQ-05: 敬称を owner-honorific（honorificForOwner）へ委譲した配線の挙動を固定する。
+// 旧 inline honorific(corporateNumber) は法人番号の有無だけで判定したため、法人番号を
+// 持たない組織（管理組合・自治会・法人格名）は「様」になっていた。配線後は名称ベースの
+// 組織判定が効いて「御中」になる（法人番号あり=御中 / 個人=様 の parity は保持）。
+describe("buildDmRow — DQ-05 敬称配線（法人番号なしの組織名 → 御中）", () => {
+  it("法人番号なし「○○管理組合」単独 → 御中（旧挙動の 様 から変更）", () => {
+    const row = buildDmRow(
+      PROP,
+      [po({ owner: { name: "○○マンション管理組合", corporateNumber: null } })],
+      FULL,
+      "",
+    );
+    expect(row["所有者名"]).toBe("○○マンション管理組合");
+    expect(row["敬称"]).toBe("御中");
+  });
+
+  it("法人番号なし「○○商事株式会社」（法人格マーカ）単独 → 御中", () => {
+    const row = buildDmRow(
+      PROP,
+      [po({ owner: { name: "○○商事株式会社", corporateNumber: null } })],
+      FULL,
+      "",
+    );
+    expect(row["敬称"]).toBe("御中");
+  });
+
+  it("法人番号なし組織名が代表 + 共有者 → 『御中 他共有者様』", () => {
+    const row = buildDmRow(
+      PROP,
+      [
+        po({ owner: { name: "○○自治会", corporateNumber: null }, isPrimary: true }),
+        po({
+          owner: { name: "個人 次郎", address: "東京都港区9-9", corporateNumber: null },
+          isPrimary: false,
+          relationship: "他",
+        }),
+      ],
+      FULL,
+      "",
+    );
+    expect(row["所有者名"]).toBe("○○自治会");
+    expect(row["敬称"]).toBe("御中 他共有者様");
+    expect(row["共有者数"]).toBe("2");
+  });
+
+  it("parity 保持: 法人番号ありは名称に関係なく御中・個人名は様", () => {
+    const corp = buildDmRow(
+      PROP,
+      [po({ owner: { name: "山田太郎", corporateNumber: "1234567890123" } })],
+      FULL,
+      "",
+    );
+    expect(corp["敬称"]).toBe("御中");
+    const person = buildDmRow(
+      PROP,
+      [po({ owner: { name: "山田太郎", corporateNumber: null } })],
+      FULL,
+      "",
+    );
+    expect(person["敬称"]).toBe("様");
+  });
+});
+
 describe("DM_EXPORT_HEADERS（列順・末尾追加列）", () => {
   it("部屋番号を除いた既存 11 列を順序通り維持し、末尾に送付先所有者名一覧・共有者数を追加（計 13 列）", () => {
     expect(DM_EXPORT_HEADERS).toEqual([
