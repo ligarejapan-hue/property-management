@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { Loader2, AlertTriangle, Wand2, ExternalLink } from "lucide-react";
+import { visualizeTextHygiene } from "@/lib/text-hygiene-display";
 
 // route（text-hygiene-candidates）の応答に対応するクライアント表示用の型。
 type IssueCode =
@@ -102,9 +103,13 @@ export default function TextHygieneAuditPage() {
   // 二段階のインライン確認（${ownerId}:${field}）。誤クリックでの自動補正を避ける。
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  // 競合する load の stale 応答ガード（type 切替 / 再読込が重なったとき、古い応答で
+  // 新しい選択の結果を上書きしないため＝Codex P2）。各 load で採番し、最新 id の応答のみ反映。
+  const loadIdRef = useRef(0);
 
   const load = useCallback(
     async (t: string, cursor: string | null, append: boolean) => {
+      const reqId = ++loadIdRef.current;
       if (append) setLoadingMore(true);
       else {
         setLoading(true);
@@ -123,6 +128,7 @@ export default function TextHygieneAuditPage() {
           );
         }
         const json: ApiResponse = await res.json();
+        if (reqId !== loadIdRef.current) return; // stale 応答は破棄（新しい load が進行中）
         setCandidates((prev) =>
           append ? [...prev, ...json.candidates] : json.candidates,
         );
@@ -134,14 +140,19 @@ export default function TextHygieneAuditPage() {
           truncated: json.truncated,
         });
       } catch (err) {
+        if (reqId !== loadIdRef.current) return; // stale な失敗も無視
         setError(
           err instanceof Error
             ? err.message
             : "テキスト衛生監査の取得に失敗しました",
         );
       } finally {
-        if (append) setLoadingMore(false);
-        else setLoading(false);
+        // 最新リクエストのみ loading 状態を解除する（stale な finally で新リクエストの
+        // スピナーを消さない）。
+        if (reqId === loadIdRef.current) {
+          if (append) setLoadingMore(false);
+          else setLoading(false);
+        }
       }
     },
     [],
@@ -302,8 +313,12 @@ export default function TextHygieneAuditPage() {
                       {FIELD_LABEL[report.field]}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all">
-                      {report.valueMasked ?? (
+                      {report.valueMasked == null ? (
                         <span className="text-gray-400">（非表示）</span>
+                      ) : (
+                        // 生値ではなくエスケープ表記で描画（不可視文字を可視化し、
+                        // bidi RLO 等が監査セルの表示順を改変するのを防ぐ＝Codex P2）。
+                        visualizeTextHygiene(report.valueMasked)
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm">
