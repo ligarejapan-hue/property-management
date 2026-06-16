@@ -57,6 +57,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => ({
   default: {
+    property: { findUnique: vi.fn() },
     propertyDmLog: { findMany: vi.fn(), count: vi.fn() },
   },
 }));
@@ -73,6 +74,7 @@ import { GET } from "../../app/api/properties/[id]/dm-logs/route";
 const PROPERTY_ID = "11111111-1111-4111-8111-111111111111";
 
 const pm = prisma as unknown as {
+  property: { findUnique: Mock };
   propertyDmLog: { findMany: Mock; count: Mock };
 };
 
@@ -135,6 +137,11 @@ beforeEach(() => {
   vi.mocked(getApiSession).mockResolvedValue(SESSION);
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
   vi.mocked(getOwnerDisplayConfig).mockResolvedValue(FULL_DISPLAY);
+  pm.property.findUnique.mockResolvedValue({
+    id: PROPERTY_ID,
+    createdBy: "user-admin",
+    assignedTo: null,
+  });
   pm.propertyDmLog.findMany.mockResolvedValue([]);
   pm.propertyDmLog.count.mockResolvedValue(0);
 });
@@ -157,6 +164,61 @@ describe("GET /api/properties/[id]/dm-logs — 認可", () => {
   });
 });
 
+describe("GET /api/properties/[id]/dm-logs — record-scope（field_staff・物件詳細 API と同方針）", () => {
+  it("物件が存在しない → 404（findMany / audit 未実行）", async () => {
+    pm.property.findUnique.mockResolvedValue(null);
+    const res = await GET(makeRequest(), makeParams());
+    expect(res.status).toBe(404);
+    expect(pm.propertyDmLog.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("field_staff が担当外（createdBy / assignedTo 不一致）→ 403（findMany / audit 未実行）", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({
+      ...SESSION,
+      id: "fs1",
+      role: "field_staff",
+    });
+    pm.property.findUnique.mockResolvedValue({
+      id: PROPERTY_ID,
+      createdBy: "other-user",
+      assignedTo: "another-user",
+    });
+    const res = await GET(makeRequest(), makeParams());
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.findMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("field_staff が担当（createdBy 一致）→ 200（取得・監査実行）", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({
+      ...SESSION,
+      id: "fs1",
+      role: "field_staff",
+    });
+    pm.property.findUnique.mockResolvedValue({
+      id: PROPERTY_ID,
+      createdBy: "fs1",
+      assignedTo: null,
+    });
+    pm.propertyDmLog.findMany.mockResolvedValue([makeLog()]);
+    pm.propertyDmLog.count.mockResolvedValue(1);
+    const res = await GET(makeRequest(), makeParams());
+    expect(res.status).toBe(200);
+    expect(writeAuditLog).toHaveBeenCalled();
+  });
+
+  it("admin は record-scope に関係なく 200（別ユーザー作成物件でも可）", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      id: PROPERTY_ID,
+      createdBy: "someone-else",
+      assignedTo: null,
+    });
+    const res = await GET(makeRequest(), makeParams());
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("GET /api/properties/[id]/dm-logs — 一覧 / 整形", () => {
   it("当該物件の送付履歴を新しい順で返す（where=propertyId, orderBy sentAt desc → createdAt desc）", async () => {
     pm.propertyDmLog.findMany.mockResolvedValue([
@@ -171,6 +233,7 @@ describe("GET /api/properties/[id]/dm-logs — 一覧 / 整形", () => {
     expect(json.data[0].id).toBe("l1");
     expect(json.data[0].method).toBe("郵送");
     expect(json.data[0].sentBy).toEqual({ id: "u1", name: "担当 太郎" });
+    expect(json.data[0].sentAt).toBe("2026-06-01"); // @db.Date は日付のみ文字列（TZ シフトなし）
     expect(json.pagination.total).toBe(1);
 
     const arg = pm.propertyDmLog.findMany.mock.calls[0][0];

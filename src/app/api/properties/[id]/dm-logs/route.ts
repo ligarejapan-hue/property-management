@@ -9,6 +9,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
 
 // ---------- GET /api/properties/:id/dm-logs ----------
@@ -38,6 +39,20 @@ export async function GET(
     }
     if (!hasPermission(permissions, "owner", "read")) {
       throw new ApiError(403, "所有者情報の閲覧権限がありません", "FORBIDDEN");
+    }
+
+    // レコード単位のアクセス制御（物件詳細 API GET /api/properties/[id] と同方針）。
+    // field_staff は createdBy / assignedTo の物件のみ閲覧可。propertyId だけで DM 履歴を
+    // 引けると担当外物件の送付履歴（および note）が読めてしまうため、ログ取得・監査の前に弾く。
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { id: true, createdBy: true, assignedTo: true },
+    });
+    if (!property) {
+      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+    if (!canAccessPropertyRecord(session, property)) {
+      throw new ApiError(403, "この物件を閲覧する権限がありません", "FORBIDDEN");
     }
 
     // note のマスクに使う表示レベル（owner_note）。取得済み permissions を再利用して二重解決を避ける。
@@ -70,7 +85,9 @@ export async function GET(
     // note は所有者備考と同じ表示レベルで server-side マスク（生値を返さない）。
     const data = logs.map((log) => ({
       id: log.id,
-      sentAt: log.sentAt,
+      // sentAt は @db.Date（日付のみ）。UTC 基準の YYYY-MM-DD 文字列で返し、
+      // クライアントでの TZ 依存の日付ずれ（負オフセットで前日表示）を防ぐ。
+      sentAt: log.sentAt.toISOString().slice(0, 10),
       method: log.method,
       note: maskValue(log.note, ownerDisplayConfig.note),
       sentBy: { id: log.sender.id, name: log.sender.name },

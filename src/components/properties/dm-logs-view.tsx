@@ -119,7 +119,8 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                 {logs.map((log) => (
                   <tr key={log.id} className="hover:bg-gray-50">
                     <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-600">
-                      {new Date(log.sentAt).toLocaleDateString("ja-JP")}
+                      {/* sentAt は API が UTC 基準の YYYY-MM-DD で返す（日付のみ・TZ ずれ防止）。 */}
+                      {log.sentAt}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
                       {log.method ?? <span className="text-gray-300">-</span>}
