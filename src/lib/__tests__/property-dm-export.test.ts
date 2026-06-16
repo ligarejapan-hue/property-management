@@ -7,7 +7,7 @@
  *  1. 代表者選定は #169(owner DM export)の selectGroupRepresentative と同一基準。
  *     → 同一入力で同一要素を返すパリティを本テストで固定する。
  *  2. 敬称の複合ケース(法人代表+複数=「〇〇 御中 他共有者様」/個人代表+複数/
- *     法人単独/個人単独/法人番号なし団体=様)を明示テスト化する。
+ *     法人単独/個人単独/法人番号なし団体(管理組合等)=御中[DQ-05 配線])を明示テスト化する。
  */
 import { describe, it, expect } from "vitest";
 // 条件1: 代表者選定基準を #169 と一致させるためのパリティ検証用 import(読み取りのみ)。
@@ -16,7 +16,6 @@ import {
   PROPERTY_DM_EXPORT_HEADERS,
   MAX_PROPERTY_DM_EXPORT_ROWS,
   OTHER_CO_OWNERS_SUFFIX,
-  honorific,
   isPlainOwnerLevel,
   pickPropertyDmPostalSource,
   toPropertyDmPostalCell,
@@ -25,6 +24,7 @@ import {
   type PropertyDmRowProperty,
   type PropertyDmRowPropertyOwner,
 } from "../property-dm-export";
+import type { OwnerDisplayConfig } from "@/lib/api-helpers";
 
 const FULL_DISPLAY = {
   name: "full",
@@ -36,6 +36,9 @@ const FULL_DISPLAY = {
   email: "full",
   corporateNumber: "full",
 } as const;
+
+// 敬称配線テスト用の型付き表示設定（no-explicit-any を増やさないため as unknown 経由でキャスト）。
+const FULL_CFG = FULL_DISPLAY as unknown as OwnerDisplayConfig;
 
 function po(
   over: Partial<{ isPrimary: boolean; name: string | null; corporateNumber: string | null }> = {},
@@ -83,17 +86,6 @@ describe("property-dm-export ヘッダ・定数", () => {
   it("上限は10000・共有者接尾辞は『他共有者様』", () => {
     expect(MAX_PROPERTY_DM_EXPORT_ROWS).toBe(10000);
     expect(OTHER_CO_OWNERS_SUFFIX).toBe("他共有者様");
-  });
-});
-
-describe("honorific(敬称の基本)", () => {
-  it("法人番号ありは御中", () => {
-    expect(honorific("1234567890123")).toBe("御中");
-  });
-  it("法人番号なし(null/undefined/空)は様", () => {
-    expect(honorific(null)).toBe("様");
-    expect(honorific(undefined)).toBe("様");
-    expect(honorific("")).toBe("様");
   });
 });
 
@@ -243,15 +235,37 @@ describe("buildPropertyDmRow 敬称の複合ケース(個人=様 / 法人=御中
     expect(row["敬称"]).toBe("御中");
   });
 
-  it("法人番号なし団体(任意団体・管理組合等)→ 敬称『様』", () => {
+  it("法人番号なし団体(任意団体・管理組合等)→ 敬称『御中』(DQ-05 配線: 様→御中)", () => {
     const row = buildPropertyDmRow(
       prop(),
       [po({ name: "〇〇管理組合", corporateNumber: null })],
-      FULL_DISPLAY as any,
+      FULL_CFG,
       "",
     );
     expect(row["所有者名"]).toBe("〇〇管理組合");
-    expect(row["敬称"]).toBe("様");
+    expect(row["敬称"]).toBe("御中");
+  });
+
+  it("法人番号なし『〇〇株式会社』(法人格マーカ)→ 敬称『御中』", () => {
+    const row = buildPropertyDmRow(
+      prop(),
+      [po({ name: "〇〇株式会社", corporateNumber: null })],
+      FULL_CFG,
+      "",
+    );
+    expect(row["敬称"]).toBe("御中");
+  });
+
+  it("法人番号なし組織名が代表 + 複数所有者 → 敬称『御中 他共有者様』", () => {
+    const owners = [
+      po({ isPrimary: true, name: "〇〇自治会", corporateNumber: null }),
+      po({ isPrimary: false, name: "共有 個人", corporateNumber: null }),
+    ];
+    const row = buildPropertyDmRow(prop(), owners, FULL_CFG, "");
+    expect(row["所有者名"]).toBe("〇〇自治会");
+    expect(row["敬称"]).toBe("御中 他共有者様");
+    expect(row["送付先所有者名一覧"]).toBe("〇〇自治会、共有 個人");
+    expect(row["共有者数"]).toBe("2");
   });
 
   it("個人代表 + 複数所有者 → 敬称『様 他共有者様』", () => {

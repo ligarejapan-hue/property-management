@@ -230,6 +230,22 @@ describe("GET /api/properties/property-dm-export", () => {
     expect(cells[headerIndex(csv, "敬称")]).toBe("御中 他共有者様");
   });
 
+  it("04c. 法人番号なしの組織名（管理組合）→ 御中（DQ-05 配線・名称ベース判定で 様→御中）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({
+            owner: { name: "〇〇マンション管理組合", corporateNumber: null },
+          }),
+        ],
+      }),
+    ]);
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const cells = rowCells(csv, "〇〇マンション管理組合");
+    expect(cells[headerIndex(csv, "敬称")]).toBe("御中");
+  });
+
   it("05. 非アーカイブ所有者0件の物件は出力されず skippedCount に反映", async () => {
     // some 述語で fetch 対象外だが、race 防御で空所有者が返っても行にしない。
     pm.property.findMany.mockResolvedValue([makeProp({ propertyOwners: [] })]);

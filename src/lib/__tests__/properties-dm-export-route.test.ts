@@ -533,6 +533,31 @@ describe("GET /api/properties/dm-export", () => {
     expect(indivLine).not.toContain("御中");
   });
 
+  it("20b. 法人番号なしの組織名（管理組合）→ 御中（DQ-05 配線・名称ベース判定で 様→御中）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        id: "p1",
+        propertyOwners: [
+          makePropertyOwner({
+            owner: {
+              name: "○○マンション管理組合",
+              corporateNumber: null,
+              address: "東京都中央区1-1",
+            },
+          }),
+        ],
+      }),
+    ]);
+
+    const res = await GET(makeRequest());
+    const csv = await readCsv(res);
+    const line = csv
+      .split("\r\n")
+      .find((l) => l.includes("○○マンション管理組合"))!;
+    expect(line).toContain("御中");
+    expect(line).not.toContain("様");
+  });
+
   it("21. レスポンスヘッダ（Content-Type / Content-Disposition / Cache-Control）", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     const res = await GET(makeRequest());
