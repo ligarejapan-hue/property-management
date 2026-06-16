@@ -21,6 +21,7 @@ import {
   MapPinned,
   Map as MapIcon,
   ScanSearch,
+  ScanText,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -112,6 +113,11 @@ const adminNavItems: NavItem[] = [
     label: "郵便番号×住所チェック",
     href: "/admin/postal-code-audit",
     icon: <MapPinned className="h-5 w-5" />,
+  },
+  {
+    label: "テキスト衛生監査",
+    href: "/admin/owners/text-hygiene",
+    icon: <ScanText className="h-5 w-5" />,
   },
 ];
 
