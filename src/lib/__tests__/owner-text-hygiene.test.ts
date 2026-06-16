@@ -45,6 +45,9 @@ const RLO = String.fromCharCode(0x202E); // U+202E bidi (override; most abused)
 const PDF = String.fromCharCode(0x202C); // U+202C bidi pop
 const LRI = String.fromCharCode(0x2066); // U+2066 bidi isolate
 const PDI = String.fromCharCode(0x2069); // U+2069 bidi isolate pop
+const ALM = String.fromCharCode(0x061c); // U+061C Arabic Letter Mark (bidi)
+const LRM = String.fromCharCode(0x200e); // U+200E Left-To-Right Mark (bidi)
+const RLM = String.fromCharCode(0x200f); // U+200F Right-To-Left Mark (bidi)
 const FFFD = String.fromCharCode(0xFFFD); // U+FFFD replacement char (decode-failure signal)
 const NBSP = String.fromCharCode(0x00A0); // U+00A0 no-break space
 const IDSP = String.fromCharCode(0x3000); // U+3000 ideographic (full-width) space
@@ -103,6 +106,22 @@ describe("inspectText — 検出（read-only）", () => {
     expect(inspectText(`a${RLO}b${PDF}`).hasBidi).toBe(true);
     expect(inspectText(`a${LRI}b${PDI}`).hasBidi).toBe(true);
     expect(inspectText(`${RLO}${LRE}`).bidiCount).toBe(2);
+  });
+
+  it("bidi マーク（ALM U+061C / LRM U+200E / RLM U+200F）を bidi として検出する", () => {
+    // 表示方向マークも bidi 制御として hasBidi=true（埋め込み/isolate と同分類）。
+    // U+200E/U+200F はゼロ幅域 U+200B-U+200D の直後だが ZERO_WIDTH ではなく bidi へ計上する。
+    expect(inspectText(`a${ALM}b`).hasBidi).toBe(true);
+    expect(inspectText(`a${LRM}b`).hasBidi).toBe(true);
+    expect(inspectText(`a${RLM}b`).hasBidi).toBe(true);
+    // bidi として数える（zero-width には数えない＝種別の取り違いを固定）。
+    const lrm = inspectText(`a${LRM}b`);
+    expect(lrm.bidiCount).toBe(1);
+    expect(lrm.hasZeroWidth).toBe(false);
+    const rlm = inspectText(`a${RLM}b`);
+    expect(rlm.bidiCount).toBe(1);
+    expect(rlm.hasZeroWidth).toBe(false);
+    expect(inspectText(`${ALM}${LRM}${RLM}`).bidiCount).toBe(3);
   });
 
   it("U+FFFD（置換文字）を文字化けシグナルとして検出する", () => {
@@ -274,6 +293,17 @@ describe("sanitizeControlChars — removable のみ除去（U+FFFD は残す）"
     expect(sanitizeControlChars(`a${LRI}b${PDI}c`)).toBe("abc");
   });
 
+  it("bidi マーク（ALM/LRM/RLM）も除去する（REMOVABLE_ALL に含む）", () => {
+    expect(sanitizeControlChars(`a${ALM}b`)).toBe("ab");
+    expect(sanitizeControlChars(`a${LRM}b`)).toBe("ab");
+    expect(sanitizeControlChars(`a${RLM}b`)).toBe("ab");
+    expect(sanitizeControlChars(`${ALM}田${LRM}中${RLM}`)).toBe("田中");
+    // hasRemovableControlChars 経由でも removable と判定される。
+    expect(hasRemovableControlChars(`a${ALM}b`)).toBe(true);
+    expect(hasRemovableControlChars(`a${LRM}b`)).toBe(true);
+    expect(hasRemovableControlChars(`a${RLM}b`)).toBe(true);
+  });
+
   it("U+FFFD は除去しない（欠損を隠さない＝audit-only）", () => {
     expect(sanitizeControlChars(`住所${FFFD}番地`)).toBe(`住所${FFFD}番地`);
     // 制御文字は除去しつつ U+FFFD は温存
@@ -361,7 +391,8 @@ describe("REMOVABLE_ALL の集合不変条件（drift 防止）", () => {
   // 構成要素は owner-text-hygiene.ts の定義と同一に再構成する（仕様の二重記述で乖離検知）。
   const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/; // \t\n\r 除外
   const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/;
-  const BIDI = /[\u202A-\u202E\u2066-\u2069]/;
+  // bidi マーク（ALM/LRM/RLM）を含めて source の BIDI_RE_G と同一に再構成する。
+  const BIDI = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/;
   const unionMatches = (cp: number): boolean => {
     const ch = String.fromCharCode(cp);
     return CONTROL.test(ch) || ZERO_WIDTH.test(ch) || BIDI.test(ch);
@@ -496,11 +527,65 @@ describe("decideTextHygieneFix — preview（sanitize / manual / none）", () =>
     expect(p.cleanedValue).toBeNull();
   });
 
-  it("元から空 / null → none（DQ なし）", () => {
-    expect(decideTextHygieneFix("").action).toBe("none");
+  it("trim() が空白扱いする不可視制御のみの値（VT/FF/BOM）→ manual/would_be_empty（none に滑り込ませない・Codex 指摘）", () => {
+    // Codex 指摘の芯: JS の trim() は U+000B(VT)/U+000C(FF)/U+FEFF(BOM) を空白扱いするため、
+    // それら不可視制御 **のみ** の値は original.trim()==="" となり、旧条件
+    // `cleaned==="" && original.trim()!==""` では would_be_empty 分岐が発火せず none へ
+    // 滑り込んでいた（全不可視制御の値を黙殺）。新条件 `cleaned==="" && hasAnyIssue` で必ず
+    // manual/would_be_empty へ振り分けられ、かつ空値を自動書込しない（cleanedValue=null）。
+    const cases: Array<[string, string]> = [
+      [`${VT}`, "VT のみ"],
+      [`${FF}`, "FF のみ"],
+      [`${VT}${FF}`, "VT+FF のみ"],
+      [`${BOM}`, "BOM のみ（trim で空）"],
+    ];
+    for (const [input] of cases) {
+      const p = decideTextHygieneFix(input);
+      expect(p.action).toBe("manual");
+      expect(p.manualReason).toBe("would_be_empty");
+      expect(p.cleanedValue).toBeNull();
+      expect(p.changedFields).toEqual([]);
+      // 退行ガード: 旧バグでは none/cleanedValue 非 null になっていた。
+      expect(p.action).not.toBe("none");
+    }
+  });
+
+  it("ゼロ幅のみ / bidi のみ（新規 ALM/LRM/RLM 含む）→ manual/would_be_empty", () => {
+    // ゼロ幅のみ・bidi のみ（埋め込み RLO や、FIX で追加した ALM/LRM/RLM）の不可視値も
+    // 空へ潰れるため would_be_empty（自動空書込なし）。hasAnyIssue 駆動で一貫。
+    const inputs = [`${ZWSP}`, `${ZWJ}`, `${RLO}`, `${ALM}`, `${LRM}`, `${RLM}`];
+    for (const input of inputs) {
+      const p = decideTextHygieneFix(input);
+      expect(p.action).toBe("manual");
+      expect(p.manualReason).toBe("would_be_empty");
+      expect(p.cleanedValue).toBeNull();
+    }
+  });
+
+  it("removable のみで空へ潰れる混在値 → manual/would_be_empty", () => {
+    // 異種 removable（ゼロ幅 + C0 + bidi マーク）の混在でも、sanitize 後に空なら would_be_empty。
+    const p = decideTextHygieneFix(`${ZWSP}${VT}${LRM}${RLO}`);
+    expect(p.action).toBe("manual");
+    expect(p.manualReason).toBe("would_be_empty");
+    expect(p.cleanedValue).toBeNull();
+    expect(p.changedFields).toEqual([]);
+  });
+
+  it("元から空 / null / 通常 ASCII 空白のみ → none（DQ なし・FIX で退行しないこと）", () => {
+    // 既存仕様の固定 + FIX 非退行: 「issue を持たない」純粋な空/空白は none を維持する。
+    // 空文字 "" と半角空白のみ " " は hasAnyIssue=false ゆえ would_be_empty には **入らない**。
+    for (const empty of ["", "   ", " "]) {
+      const p = decideTextHygieneFix(empty);
+      expect(p.action).toBe("none");
+      expect(p.manualReason).toBeNull();
+    }
     expect(decideTextHygieneFix(null).action).toBe("none");
     expect(decideTextHygieneFix(undefined).action).toBe("none");
-    expect(decideTextHygieneFix("   ").action).toBe("none");
+    // 念のため: "" と " " は issue を持たない（would_be_empty 化の対象外であることを明示）。
+    expect(inspectText("").hasAnyIssue).toBe(false);
+    expect(inspectText(" ").hasAnyIssue).toBe(false);
+    // 一方、VT のみは issue を持つ（前テストで manual/would_be_empty 化される根拠）。
+    expect(inspectText(VT).hasAnyIssue).toBe(true);
   });
 });
 

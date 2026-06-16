@@ -40,8 +40,10 @@ const REMOVABLE_CONTROL_RE_G =
 // ゼロ幅・BOM（U+200B ZWSP / U+200C ZWNJ / U+200D ZWJ / U+2060 WJ / U+FEFF BOM）。
 const ZERO_WIDTH_RE_G = /[\u200B-\u200D\u2060\uFEFF]/g;
 
-// bidi 制御（U+202A-U+202E 埋め込み/上書き / U+2066-U+2069 isolate）。表示偽装防止で除去。
-const BIDI_RE_G = /[\u202A-\u202E\u2066-\u2069]/g;
+// bidi 制御（U+061C ALM / U+200E LRM / U+200F RLM の bidi マーク + U+202A-U+202E 埋め込み/上書き
+// / U+2066-U+2069 isolate）。表示偽装防止で除去。U+200E/U+200F はゼロ幅域 U+200B-U+200D の直後だが
+// ZERO_WIDTH_RE_G には含めず bidi 側で扱う（表示方向マークゆえ bidi 分類が妥当）。
+const BIDI_RE_G = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 
 // U+FFFD（置換文字）。audit-only（除去しない）。
 const REPLACEMENT_CHAR = "\uFFFD";
@@ -50,7 +52,7 @@ const REPLACEMENT_CHAR_RE_G = /\uFFFD/g;
 // removable 全体（control + zero-width + bidi）。sanitize / hasRemovable 判定で使う。
 // U+FFFD は **含めない**（audit-only）。
 const REMOVABLE_ALL_RE_G =
-  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g;
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200B-\u200F\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g;
 const REMOVABLE_ALL_RE = new RegExp(REMOVABLE_ALL_RE_G.source);
 
 // 連続空白（半角/タブ/改行/各種空白 + 全角空白 U+3000）の畳み用。owner-name-quality と同方針。
@@ -285,8 +287,9 @@ export interface TextHygieneFixProposal {
  * - audit-only（U+FFFD / mojibake）を含むなら **action=manual**（自動除去しない・要原本確認）。
  *   removable が同居しても安全側で manual（人手判断に委ねる）。
  * - removable のみで sanitize により値が変わる → action=sanitize（cleanedValue 提示）。
- * - sanitize で（非空→）空になる → manual（would_be_empty・空書込を避ける）。
- * - 変化なし / 元から空 → action=none。
+ * - sanitize で空へ潰れ かつ issue を持つ（不可視制御のみの値含む）→ manual（would_be_empty・
+ *   空書込を避ける）。判定は trim() に依存せず hasAnyIssue で行う（VT/FF/BOM のみの値も捕捉）。
+ * - 変化なし / 元から空 / issue なしの空白専用値 → action=none。
  */
 export function decideTextHygieneFix(
   input: string | null | undefined,
@@ -319,8 +322,13 @@ export function decideTextHygieneFix(
   }
 
   // ここに来るのは removable 除去 or 空白畳みで値が変わるケース。
-  // 非空だったものが除去で空になる場合は空書込を避けて manual。
-  if (cleaned === "" && original.trim() !== "") {
+  // sanitize 後に空へ潰れ **かつ** 何らかの検出 issue を持つ（＝removable が実在した）なら、
+  // 空書込を避けて manual（would_be_empty）。判定は `original.trim()` に依存しない:
+  // JS の trim() は U+000B(VT)/U+000C(FF)/U+FEFF(BOM) 等を空白扱いするため、それら不可視
+  // 制御のみの値は `original.trim()===""` となり、旧条件では would_be_empty 分岐が発火せず
+  // none へ滑り込んでいた（不可視制御のみの値を黙殺＝Codex 指摘）。hasAnyIssue で判定すれば
+  // 不可視制御のみ（VT/FF/ゼロ幅/bidi/BOM）でも必ず manual/would_be_empty へ振り分けられる。
+  if (cleaned === "" && r.hasAnyIssue) {
     return {
       action: "manual",
       manualReason: "would_be_empty",
@@ -329,7 +337,9 @@ export function decideTextHygieneFix(
     };
   }
 
-  // 元から実質空（空白/不可視のみで trim 後も空）→ DQ なし扱い（none）。
+  // 元から実質空（issue を持たない通常 ASCII 空白のみ等で sanitize 後も空）→ DQ なし扱い（none）。
+  // 空文字 "" は上の cleaned===original で既に none 返し済み。ここは " "（半角空白のみ）など
+  // **issue を持たない** 空白専用値だけが到達する（不可視制御のみは hasAnyIssue で上で捕捉済み）。
   if (cleaned === "") {
     return {
       action: "none",
