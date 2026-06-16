@@ -1,0 +1,462 @@
+/**
+ * owner-text-hygiene.ts (DQ-04)
+ *
+ * 制御文字 / 文字化け（U+FFFD 等）を検出・無害化する純関数群（I/O なし・ユニットテスト可）。
+ * 既存 owner-name-quality.ts (DQ-01) / owner-contact-format.ts (DQ-02) /
+ * corporate-number-cleanup.ts と同スタイルで、戻り値は **コード/件数のみ**
+ * （生値を返さない＝AuditLog / API 安全）。
+ *
+ * 設計（22B-dq-02-04-05-design.md DQ-04）の芯:
+ * - **removable（自動除去が安全）**: C0/C1/DEL 制御文字（\t\n\r 以外）・ゼロ幅・BOM・bidi 制御。
+ *   表示不能・不可視で **意味を持たない**＝除去しても情報は失われない。
+ * - **audit-only（自動除去しない）**:
+ *   - U+FFFD（置換文字）= デコード失敗の痕跡＝**元文字が不明**。除去すると欠損が見えなくなり、
+ *     正しいエンコーディングでの再取込による修復機会を失う。原本からの取り直しを促す。
+ *   - mojibake 残骸（誤デコードの逆変換は曖昧）= ヒューリスティック検出のみ。自動変換しない。
+ *
+ * 注意（誤検出回避）:
+ * - `\t \n \r` と通常の全角文字は除去対象に含めない（正規の改行・住所の全角を保持）。
+ *   sanitizeControlChars は連続空白（タブ/改行/全角空白含む）を 1 個の半角空白へ畳むのみ。
+ * - 絵文字本体（surrogate pair）は壊さない。ゼロ幅 U+200D(ZWJ) は除去対象だが、これは
+ *   owner の氏名/住所フィールドでの不可視ノイズ対策（配線は呼び出し側責任）。
+ * - mojibake は「ラテン拡張が少数混じる正規名」を誤検出しないよう、誤デコード特有の
+ *   連続シグネチャ（高位ラテン補助が 2 文字以上連続）に限定する。
+ *
+ * I/O 不使用（DB / next/server / AuditLog いずれにも依存しない）。配線は後続タスク。
+ */
+
+// ---------------------------------------------------------------------------
+// 文字クラス（すべて \uXXXX エスケープで記述。owner-name-quality.ts と同様に
+// \u エスケープで書くことで lint の no-control-regex に抵触させず、ソースに
+// リテラルの制御文字（NUL 等）を埋め込まない＝git でテキスト扱いを維持する）。
+// 範囲はすべて BMP のため u フラグ不要（ES2017 ターゲット安全）。
+// ---------------------------------------------------------------------------
+
+// C0 制御（U+0000-U+001F）から \t(U+0009)\n(U+000A)\r(U+000D) を除外、
+// DEL(U+007F) と C1 制御（U+0080-U+009F）を含む。これらは removable。
+const REMOVABLE_CONTROL_RE_G =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
+
+// ゼロ幅・BOM（U+200B ZWSP / U+200C ZWNJ / U+200D ZWJ / U+2060 WJ / U+FEFF BOM）。
+const ZERO_WIDTH_RE_G = /[\u200B-\u200D\u2060\uFEFF]/g;
+
+// bidi 制御（U+061C ALM / U+200E LRM / U+200F RLM の bidi マーク + U+202A-U+202E 埋め込み/上書き
+// / U+2066-U+2069 isolate）。表示偽装防止で除去。U+200E/U+200F はゼロ幅域 U+200B-U+200D の直後だが
+// ZERO_WIDTH_RE_G には含めず bidi 側で扱う（表示方向マークゆえ bidi 分類が妥当）。
+const BIDI_RE_G = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
+// U+FFFD（置換文字）。audit-only（除去しない）。
+const REPLACEMENT_CHAR = "\uFFFD";
+const REPLACEMENT_CHAR_RE_G = /\uFFFD/g;
+
+// removable 全体（control + zero-width + bidi）。sanitize / hasRemovable 判定で使う。
+// U+FFFD は **含めない**（audit-only）。
+const REMOVABLE_ALL_RE_G =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200B-\u200F\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g;
+const REMOVABLE_ALL_RE = new RegExp(REMOVABLE_ALL_RE_G.source);
+
+// 連続空白（半角/タブ/改行/各種空白 + 全角空白 U+3000）の畳み用。owner-name-quality と同方針。
+const WHITESPACE_RUN_RE_G = /[\s　]+/g;
+
+// mojibake ヒューリスティック（UTF-8 を Latin-1/CP1252 として誤読した残骸）。
+//
+// 判別の芯（Codex P2）= **継続文字の種別**で化けと正規アクセント名を分ける。
+// UTF-8 マルチバイト列を 1 バイトずつ Latin-1/CP1252 として解釈すると、高位ラテン
+// （U+00A1-U+00FF）と「化け特有の隣接相手」が連鎖する。一方、正規のラテン拡張名では
+// 高位ラテン文字は **別の文字**（ASCII 字 / 別の高位ラテン**文字** U+00C0-U+00FF）に隣接する。
+// よって *高位ラテン文字が何に隣接するか* で判別する:
+//   - 高位ラテン(U+00A1-U+00FF) が **GARBLE-NEIGHBOR** に隣接 → mojibake
+//   - 高位ラテン(U+00A1-U+00FF) が **別の高位ラテン文字**（アクセント文字 U+00C0-U+00FF:
+//     ó ð å é ü þ …）に隣接 → 正規のアクセント名（NOT フラグ）
+// GARBLE-NEIGHBOR = 次のいずれか:
+//   - C1 制御            U+0080-U+009F
+//   - CP1252 記号・約物   U+00A0-U+00BF（±/°/¤/§/¢/£/¥ 等。Â£ の £、å± の ± 等が該当）
+//   - CP1252 スマート約物 U+2013-U+2122（"/"/–/—/€/™ 等）
+// 順不同の 2 alternation（[高位ラテン][garble] と [garble][高位ラテン]）で両並び順を拾う。
+//
+// この 1 本が旧 3 分岐を **包含**する:
+//   - 旧 [ÂÃâ][…]: Â£ = Â(U+00C2,高位ラテン) + £(U+00A3 ∈ U+00A0-U+00BF=garble) で一致。
+//   - 旧 C1 隣接 [¡-ÿ][C1] / [C1][¡-ÿ]: C1(U+0080-U+009F) は garble に含まれるので一致。
+//     （'あ' を CP1252 誤読 = 'ã'(U+00E3) + C1 U+0081/U+0082 ＝ Codex P1 の日本語化けも継続。）
+// さらに **C1 を含まない CP1252 日本語化け**（Codex P2: 山田→å±±ç"° / 大谷→å¤§è°·。継続文字が
+// ±/°/¤/§/" 等の CP1252 **記号**で C1 を 1 つも含まない）も拾えるようになる＝旧版の検出漏れを解消。
+//
+// KEY PROPERTY（正規名を守る）: 高位ラテン**文字**（U+00C0-U+00FF: 北欧名 Þórð の ó/ð、
+// Ååå の Å/å、àé、Café の é、Müller の ü）は garble-neighbor の **どの範囲にも入らない**
+// （garble は U+0080-U+00BF と U+2013-U+2122 のみ＝アクセント**文字**域 U+00C0-U+00FF を外す）。
+// よって「文字＋文字」の正規アクセント名は非フラグのまま。
+//
+// ACCEPTED 過検出: 本ルールは「高位ラテン + スマート約物」（ü€ の ü+U+20AC[EURO] 等）も拾う。
+// mojibake は **audit-only**（自動 sanitize されない・apply-gate ブロッカーでもない）ゆえ、
+// これは無害な手動レビュー行が増えるだけで、データ破損は起き得ない（許容済み）。
+//
+// すべて BMP・\uXXXX エスケープで記述し no-control-regex に抵触させない（C1 範囲含む）。
+const MOJIBAKE_RE =
+  /[\u00A1-\u00FF][\u0080-\u00BF\u2013-\u2122]|[\u0080-\u00BF\u2013-\u2122][\u00A1-\u00FF]/;
+
+// ---------------------------------------------------------------------------
+// inspectText: 検出のみ（read-only）。生値は返さない。
+// ---------------------------------------------------------------------------
+
+export interface TextHygieneReport {
+  /** C0/C1/DEL 制御文字（\t\n\r 以外）を含むか。removable。 */
+  hasControl: boolean;
+  /** ゼロ幅 / BOM を含むか。removable。 */
+  hasZeroWidth: boolean;
+  /** bidi 制御を含むか。removable。 */
+  hasBidi: boolean;
+  /** U+FFFD（文字化け確定シグナル）を含むか。**audit-only**。 */
+  hasReplacementChar: boolean;
+  /** mojibake 残骸ヒューリスティックに一致したか。**audit-only**。 */
+  hasMojibake: boolean;
+
+  controlCount: number;
+  zeroWidthCount: number;
+  bidiCount: number;
+  replacementCount: number;
+
+  /** removable（control/zero-width/bidi）が 1 つでもあるか。 */
+  hasRemovable: boolean;
+  /** audit-only（U+FFFD / mojibake）が 1 つでもあるか。 */
+  hasAuditOnly: boolean;
+  /** 何らかの問題があるか（removable または audit-only）。 */
+  hasAnyIssue: boolean;
+}
+
+function countMatches(input: string, re: RegExp): number {
+  const m = input.match(re);
+  return m ? m.length : 0;
+}
+
+/**
+ * 文字列を検査して制御文字 / 文字化けの種別と件数を返す（read-only）。
+ * 戻り値はブール / 数値のみで生値を含まない。
+ */
+export function inspectText(
+  input: string | null | undefined,
+): TextHygieneReport {
+  const s = input ?? "";
+
+  const controlCount = countMatches(s, REMOVABLE_CONTROL_RE_G);
+  const zeroWidthCount = countMatches(s, ZERO_WIDTH_RE_G);
+  const bidiCount = countMatches(s, BIDI_RE_G);
+  const replacementCount = countMatches(s, REPLACEMENT_CHAR_RE_G);
+
+  const hasControl = controlCount > 0;
+  const hasZeroWidth = zeroWidthCount > 0;
+  const hasBidi = bidiCount > 0;
+  const hasReplacementChar = replacementCount > 0;
+  const hasMojibake = MOJIBAKE_RE.test(s);
+
+  const hasRemovable = hasControl || hasZeroWidth || hasBidi;
+  const hasAuditOnly = hasReplacementChar || hasMojibake;
+
+  return {
+    hasControl,
+    hasZeroWidth,
+    hasBidi,
+    hasReplacementChar,
+    hasMojibake,
+    controlCount,
+    zeroWidthCount,
+    bidiCount,
+    replacementCount,
+    hasRemovable,
+    hasAuditOnly,
+    hasAnyIssue: hasRemovable || hasAuditOnly,
+  };
+}
+
+/** removable（control/zero-width/bidi）を 1 つでも含むか（U+FFFD は対象外）。 */
+export function hasRemovableControlChars(
+  input: string | null | undefined,
+): boolean {
+  if (!input) return false;
+  return REMOVABLE_ALL_RE.test(input);
+}
+
+// ---------------------------------------------------------------------------
+// sanitizeControlChars: removable のみ除去（U+FFFD は温存）+ 空白畳み + trim。
+// ---------------------------------------------------------------------------
+
+/**
+ * removable な制御文字（C0/C1/DEL/ゼロ幅/BOM/bidi）を除去し、連続空白
+ * （\t\n\r/半角/全角空白）を 1 個の半角空白へ畳んで trim する。
+ *
+ * **U+FFFD は除去しない**（欠損を隠さない＝audit-only）。正規の全角文字・絵文字本体は保持。
+ * 冪等（2 回適用しても結果は変わらない）。
+ */
+export function sanitizeControlChars(input: string | null | undefined): string {
+  if (!input) return "";
+  return input
+    .replace(REMOVABLE_ALL_RE_G, "")
+    .replace(WHITESPACE_RUN_RE_G, " ")
+    .trim();
+}
+
+// ---------------------------------------------------------------------------
+// classifyTextHygiene: 監査用分類（removable vs audit-only を明示分離）。
+// ---------------------------------------------------------------------------
+
+export type TextHygieneIssueCode =
+  | "control_chars"
+  | "zero_width"
+  | "bidi"
+  | "replacement_char"
+  | "mojibake";
+
+export type TextHygieneSeverity = "error" | "warning" | "info";
+
+export interface TextHygieneResult {
+  issues: TextHygieneIssueCode[];
+  /** removable（自動 sanitize 可）な issue を含むか。 */
+  removable: boolean;
+  /** audit-only（自動除去しない）な issue を含むか。 */
+  auditOnly: boolean;
+  severity: TextHygieneSeverity | null;
+}
+
+// audit-only（U+FFFD / mojibake）= error（文字化け確定／要原本確認）。
+// removable（control/zero-width/bidi）= warning（自動無害化で解消可）。
+const ISSUE_SEVERITY: Record<TextHygieneIssueCode, TextHygieneSeverity> = {
+  control_chars: "warning",
+  zero_width: "warning",
+  bidi: "warning",
+  replacement_char: "error",
+  mojibake: "error",
+};
+
+const AUDIT_ONLY_ISSUES = new Set<TextHygieneIssueCode>([
+  "replacement_char",
+  "mojibake",
+]);
+
+function maxSeverity(
+  issues: TextHygieneIssueCode[],
+): TextHygieneSeverity | null {
+  const levels = new Set(issues.map((i) => ISSUE_SEVERITY[i]));
+  if (levels.has("error")) return "error";
+  if (levels.has("warning")) return "warning";
+  if (levels.has("info")) return "info";
+  return null;
+}
+
+/**
+ * テキストの衛生品質を分類する。issue が無ければ issues 空・severity=null。
+ * removable / auditOnly フラグで「自動 sanitize 可」と「人手要（除去しない）」を分離する。
+ */
+export function classifyTextHygiene(
+  input: string | null | undefined,
+): TextHygieneResult {
+  const r = inspectText(input);
+  const issues: TextHygieneIssueCode[] = [];
+  if (r.hasControl) issues.push("control_chars");
+  if (r.hasZeroWidth) issues.push("zero_width");
+  if (r.hasBidi) issues.push("bidi");
+  if (r.hasReplacementChar) issues.push("replacement_char");
+  if (r.hasMojibake) issues.push("mojibake");
+
+  const removable = issues.some((i) => !AUDIT_ONLY_ISSUES.has(i));
+  const auditOnly = issues.some((i) => AUDIT_ONLY_ISSUES.has(i));
+
+  return { issues, removable, auditOnly, severity: maxSeverity(issues) };
+}
+
+// ---------------------------------------------------------------------------
+// decideTextHygieneFix: preview（sanitize / manual / none）。
+// corporate-cleanup / name-fix / contact-fix と同型。
+// ---------------------------------------------------------------------------
+
+export type TextHygieneFixAction = "none" | "sanitize" | "manual";
+export type TextHygieneFixManualReason =
+  | "replacement_char"
+  | "mojibake"
+  | "would_be_empty"
+  | null;
+
+export interface TextHygieneFixProposal {
+  action: TextHygieneFixAction;
+  manualReason: TextHygieneFixManualReason;
+  /** sanitize 時の機械補正後の値（route 側でマスクして返す）。それ以外は null。 */
+  cleanedValue: string | null;
+  changedFields: Array<"value">;
+}
+
+/**
+ * テキストの自動補正可否を判定する。
+ * - audit-only（U+FFFD / mojibake）を含むなら **action=manual**（自動除去しない・要原本確認）。
+ *   removable が同居しても安全側で manual（人手判断に委ねる）。
+ * - removable のみで sanitize により値が変わる → action=sanitize（cleanedValue 提示）。
+ * - sanitize で空へ潰れ かつ issue を持つ（不可視制御のみの値含む）→ manual（would_be_empty・
+ *   空書込を避ける）。判定は trim() に依存せず hasAnyIssue で行う（VT/FF/BOM のみの値も捕捉）。
+ * - 変化なし / 元から空 / issue なしの空白専用値 → action=none。
+ */
+export function decideTextHygieneFix(
+  input: string | null | undefined,
+): TextHygieneFixProposal {
+  const original = input ?? "";
+  const r = inspectText(original);
+
+  // audit-only が混じる場合は自動補正しない（U+FFFD を優先理由に、無ければ mojibake）。
+  if (r.hasReplacementChar || r.hasMojibake) {
+    const manualReason: TextHygieneFixManualReason = r.hasReplacementChar
+      ? "replacement_char"
+      : "mojibake";
+    return {
+      action: "manual",
+      manualReason,
+      cleanedValue: null,
+      changedFields: [],
+    };
+  }
+
+  const cleaned = sanitizeControlChars(original);
+
+  if (cleaned === original) {
+    return {
+      action: "none",
+      manualReason: null,
+      cleanedValue: original,
+      changedFields: [],
+    };
+  }
+
+  // ここに来るのは removable 除去 or 空白畳みで値が変わるケース。
+  // sanitize 後に空へ潰れ **かつ** 何らかの検出 issue を持つ（＝removable が実在した）なら、
+  // 空書込を避けて manual（would_be_empty）。判定は `original.trim()` に依存しない:
+  // JS の trim() は U+000B(VT)/U+000C(FF)/U+FEFF(BOM) 等を空白扱いするため、それら不可視
+  // 制御のみの値は `original.trim()===""` となり、旧条件では would_be_empty 分岐が発火せず
+  // none へ滑り込んでいた（不可視制御のみの値を黙殺＝Codex 指摘）。hasAnyIssue で判定すれば
+  // 不可視制御のみ（VT/FF/ゼロ幅/bidi/BOM）でも必ず manual/would_be_empty へ振り分けられる。
+  if (cleaned === "" && r.hasAnyIssue) {
+    return {
+      action: "manual",
+      manualReason: "would_be_empty",
+      cleanedValue: null,
+      changedFields: [],
+    };
+  }
+
+  // 元から実質空（issue を持たない通常 ASCII 空白のみ等で sanitize 後も空）→ DQ なし扱い（none）。
+  // 空文字 "" は上の cleaned===original で既に none 返し済み。ここは " "（半角空白のみ）など
+  // **issue を持たない** 空白専用値だけが到達する（不可視制御のみは hasAnyIssue で上で捕捉済み）。
+  if (cleaned === "") {
+    return {
+      action: "none",
+      manualReason: null,
+      cleanedValue: original,
+      changedFields: [],
+    };
+  }
+
+  return {
+    action: "sanitize",
+    manualReason: null,
+    cleanedValue: cleaned,
+    changedFields: ["value"],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// checkTextHygieneFixSafety: apply gate（enum コードのみ。contact-fix と同型）。
+// ---------------------------------------------------------------------------
+
+export type TextHygieneFixBlockReason =
+  | "owner_archived"
+  | "version_mismatch"
+  | "no_change"
+  | "would_be_empty"
+  | "forbidden_value";
+
+export interface TextHygieneFixSafetyInput {
+  isArchived: boolean;
+  versionMatches: boolean;
+  currentValue: string | null;
+  newValue: string | null;
+}
+
+export type TextHygieneFixSafetyResult =
+  | { ok: true; newValue: string }
+  | { ok: false; reasons: TextHygieneFixBlockReason[] };
+
+/**
+ * テキスト補正の安全条件チェック。複数違反は全件返す。
+ * - 新値が空（trim 後）→ would_be_empty（空書込を許可しない）。
+ * - 新値に removable 制御文字 / U+FFFD が残る → forbidden_value
+ *   （apply は品質を必ず改善する方向に限定。再び DQ になる値を書かせない）。
+ *   mojibake ヒューリスティックはここでは **適用しない**（人手承認済みの値が連続アクセントの
+ *   正規名 = 例: 北欧名 "Þórð" を含むと誤検出で弾かれ、当該所有者が修正不能になるため）。
+ */
+export function checkTextHygieneFixSafety(
+  input: TextHygieneFixSafetyInput,
+): TextHygieneFixSafetyResult {
+  const reasons: TextHygieneFixBlockReason[] = [];
+
+  if (input.isArchived) reasons.push("owner_archived");
+  if (!input.versionMatches) reasons.push("version_mismatch");
+  if (input.newValue === input.currentValue) reasons.push("no_change");
+
+  const nv = input.newValue ?? "";
+  if (nv.trim() === "") {
+    reasons.push("would_be_empty");
+  } else if (hasRemovableControlChars(nv) || nv.includes(REPLACEMENT_CHAR)) {
+    reasons.push("forbidden_value");
+  }
+
+  if (reasons.length > 0) return { ok: false, reasons };
+  return { ok: true, newValue: nv };
+}
+
+// ---------------------------------------------------------------------------
+// summary 集計（route の dry-run サマリ用）。
+// ---------------------------------------------------------------------------
+
+export interface TextHygieneSummary {
+  controlChars: number;
+  zeroWidth: number;
+  bidi: number;
+  replacementChar: number;
+  mojibake: number;
+  /** removable issue を持つ候補件数。 */
+  removableCandidates: number;
+  /** audit-only issue を持つ候補件数。 */
+  auditOnlyCandidates: number;
+  /** 何らかの issue を持つ候補件数。 */
+  totalCandidates: number;
+}
+
+export function emptyTextHygieneSummary(): TextHygieneSummary {
+  return {
+    controlChars: 0,
+    zeroWidth: 0,
+    bidi: 0,
+    replacementChar: 0,
+    mojibake: 0,
+    removableCandidates: 0,
+    auditOnlyCandidates: 0,
+    totalCandidates: 0,
+  };
+}
+
+const ISSUE_TO_SUMMARY: Record<
+  TextHygieneIssueCode,
+  keyof TextHygieneSummary
+> = {
+  control_chars: "controlChars",
+  zero_width: "zeroWidth",
+  bidi: "bidi",
+  replacement_char: "replacementChar",
+  mojibake: "mojibake",
+};
+
+/** result に 1 つでも issue があれば種別ごとに加算し removable/auditOnly/total を更新する。 */
+export function tallyTextHygiene(
+  summary: TextHygieneSummary,
+  result: TextHygieneResult,
+): void {
+  if (result.issues.length === 0) return;
+  for (const issue of result.issues) summary[ISSUE_TO_SUMMARY[issue]]++;
+  if (result.removable) summary.removableCandidates++;
+  if (result.auditOnly) summary.auditOnlyCandidates++;
+  summary.totalCandidates++;
+}
