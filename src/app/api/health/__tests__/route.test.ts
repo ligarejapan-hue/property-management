@@ -4,6 +4,7 @@
  *  - DB へ軽量疎通（SELECT 1）し、成功で 200 / ok:true、失敗・timeout で 503 / ok:false。
  *  - 応答は { ok, buildId } のみ（PII・secret・接続文字列を一切返さない）。
  *  - buildId は env BUILD_ID（未設定時 "unknown"）。
+ *  - DB プローブは Prisma トランザクションの maxWait/timeout で有界化する。
  *
  * prisma はモックして実 DB 非依存でテストする（既存 lib テストの mock 規約に準拠）。
  */
@@ -18,13 +19,13 @@ import {
 } from "vitest";
 
 vi.mock("@/lib/prisma", () => ({
-  default: { $queryRaw: vi.fn() },
+  default: { $transaction: vi.fn() },
 }));
 
 import prisma from "@/lib/prisma";
 import { GET } from "../route";
 
-const pm = prisma as unknown as { $queryRaw: Mock };
+const pm = prisma as unknown as { $transaction: Mock };
 
 describe("GET /api/health", () => {
   const ORIGINAL_BUILD_ID = process.env.BUILD_ID;
@@ -35,7 +36,6 @@ describe("GET /api/health", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     if (ORIGINAL_BUILD_ID === undefined) {
       delete process.env.BUILD_ID;
     } else {
@@ -44,7 +44,7 @@ describe("GET /api/health", () => {
   });
 
   it("DB 疎通成功で 200 / ok:true / buildId(string) を返す", async () => {
-    pm.$queryRaw.mockResolvedValueOnce([{ "?column?": 1 }]);
+    pm.$transaction.mockResolvedValueOnce(undefined);
 
     const res = await GET();
 
@@ -54,8 +54,8 @@ describe("GET /api/health", () => {
     expect(typeof body.buildId).toBe("string");
   });
 
-  it("DB 例外時は 503 / ok:false を返す", async () => {
-    pm.$queryRaw.mockRejectedValueOnce(new Error("connection refused"));
+  it("DB 例外・timeout 時は 503 / ok:false を返す", async () => {
+    pm.$transaction.mockRejectedValueOnce(new Error("connection refused"));
 
     const res = await GET();
 
@@ -64,8 +64,23 @@ describe("GET /api/health", () => {
     expect(body.ok).toBe(false);
   });
 
+  it("DB プローブを transaction の maxWait/timeout で有界化する（stall 時に接続を解放）", async () => {
+    pm.$transaction.mockResolvedValueOnce(undefined);
+
+    await GET();
+
+    expect(pm.$transaction).toHaveBeenCalledTimes(1);
+    const options = pm.$transaction.mock.calls[0]?.[1] as
+      | { maxWait?: number; timeout?: number }
+      | undefined;
+    expect(typeof options?.maxWait).toBe("number");
+    expect(options?.maxWait).toBeGreaterThan(0);
+    expect(typeof options?.timeout).toBe("number");
+    expect(options?.timeout).toBeGreaterThan(0);
+  });
+
   it("応答は { ok, buildId } の 2 キーのみ（余計な情報を漏らさない）", async () => {
-    pm.$queryRaw.mockResolvedValueOnce([{ "?column?": 1 }]);
+    pm.$transaction.mockResolvedValueOnce(undefined);
 
     const res = await GET();
 
@@ -74,7 +89,7 @@ describe("GET /api/health", () => {
   });
 
   it("buildId は env BUILD_ID を反映し、未設定時は 'unknown'", async () => {
-    pm.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
+    pm.$transaction.mockResolvedValue(undefined);
 
     const resUnset = await GET();
     expect((await resUnset.json()).buildId).toBe("unknown");
@@ -84,21 +99,8 @@ describe("GET /api/health", () => {
     expect((await resSet.json()).buildId).toBe("deadbeef");
   });
 
-  it("DB 応答が timeout を超えたら 503 / ok:false", async () => {
-    // 解決しない promise を返し、timeout 経路を発火させる。
-    pm.$queryRaw.mockReturnValueOnce(new Promise(() => {}));
-    vi.useFakeTimers();
-
-    const pending = GET();
-    await vi.advanceTimersByTimeAsync(60_000);
-    const res = await pending;
-
-    expect(res.status).toBe(503);
-    expect((await res.json()).ok).toBe(false);
-  });
-
   it("Cache-Control: no-store を付与する", async () => {
-    pm.$queryRaw.mockResolvedValueOnce([{ "?column?": 1 }]);
+    pm.$transaction.mockResolvedValueOnce(undefined);
 
     const res = await GET();
 
