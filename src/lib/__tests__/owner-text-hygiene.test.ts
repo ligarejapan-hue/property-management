@@ -150,11 +150,41 @@ describe("inspectText — mojibake ヒューリスティック（audit-only）",
     // 先頭クラスを [ÂÃâ] に限定したことで、連続するアクセント付き北欧/ラテン文字を
     // 持つ正規名を mojibake と誤検出しない（誤デコード残骸のみを拾う）。
     // Þórð（北欧名）/ café's / ü€ / àé / Ååå（連続 Å）はいずれも非フラグ。
+    // 重要: これらは **C1 制御（U+0080-U+009F）を一切含まない** ため、後述の
+    // 「高位ラテン ⇄ C1 制御 隣接」シグナルにも一致しない（誤検出ゼロ）。
     expect(inspectText("Þórð").hasMojibake).toBe(false);
     expect(inspectText("café's").hasMojibake).toBe(false);
     expect(inspectText("ü€").hasMojibake).toBe(false);
     expect(inspectText("àé").hasMojibake).toBe(false);
     expect(inspectText("Ååå").hasMojibake).toBe(false);
+    expect(inspectText("Café").hasMojibake).toBe(false);
+    expect(inspectText("Müller").hasMojibake).toBe(false);
+  });
+
+  it("日本語 mojibake（高位ラテン + 隣接 C1 制御）を検出し audit-only(manual) へ回す", () => {
+    // Codex P1: 日本語 'あ'（UTF-8 = E3 81 82）を Latin-1/CP1252 として誤デコードすると
+    // 'ã'(U+00E3) + C1 制御 U+0081 + U+0082 になる。先導 'ã' は [ÂÃâ] に含まれないため
+    // 旧 MOJIBAKE_RE では hasMojibake=false となり、C1 制御が removable 集合に属するため
+    // decideTextHygieneFix が **sanitize** 経路で C1 を剥がして 'ã' に潰す＝PII 二次破損。
+    // 高位ラテン(U+00A1-U+00FF)が C1 制御(U+0080-U+009F)に隣接するシグナルを mojibake と
+    // 判定することで、これを audit-only（手動・再取込）へ正しく振り分ける。
+    const jpMojibake = String.fromCharCode(0x00e3, 0x0081, 0x0082); // 'あ' as CP1252
+    expect(inspectText(jpMojibake).hasMojibake).toBe(true);
+
+    // end-to-end: action は manual（mojibake 短絡）であり sanitize ではない＝C1 は自動除去されない。
+    const decided = decideTextHygieneFix(jpMojibake);
+    expect(decided.action).toBe("manual");
+    expect(decided.manualReason).toBe("mojibake");
+    expect(decided.cleanedValue).toBeNull();
+    expect(decided.changedFields).toEqual([]);
+  });
+
+  it("C1 制御が先・高位ラテンが後の隣接順でも mojibake として検出する（双方向）", () => {
+    // 隣接シグナルは順不同（[¡-ÿ][C1] と [C1][¡-ÿ] の両 alternation）。
+    // 例: U+0082 + 'à'(U+00E0) のように C1 が先行するケースも拾う。
+    const c1First = String.fromCharCode(0x0082, 0x00e0);
+    expect(inspectText(c1First).hasMojibake).toBe(true);
+    expect(decideTextHygieneFix(c1First).action).toBe("manual");
   });
 });
 
@@ -471,20 +501,30 @@ describe("checkTextHygieneFixSafety — apply gate", () => {
     if (r.ok) expect(r.newValue).toBe("Þórð");
   });
 
-  it("北欧名 + 除去可能制御文字を sanitize した値が apply-gate を通る（end-to-end）", () => {
-    // 制御文字 U+0085(NEL) を伴う北欧名を decide/sanitize でクリーニングし、
-    // その cleanedValue が forbidden_value で弾かれないこと（実フロー再現）。
+  it("北欧名 + 隣接 C1 制御は fail-safe で manual（自動 sanitize しない）／クリーン北欧名は apply-gate を通る（end-to-end）", () => {
+    // Codex P1（fail-safe / Option 1）: この日本向けアプリでは、アクセント付きラテン文字が
+    // C1 制御に隣接した並びは、日本語 mojibake（高位ラテン + C1。例 'あ' の CP1252 誤読 =
+    // 'ã' + C1）とバイト上区別がつかない。よって "Þórð" + U+0085(NEL) のように
+    // 高位ラテン ð(U+00F0) が C1 制御 NEL(U+0085) と隣接するケースは、自動 sanitize で C1 を
+    // 剥がして PII を二次破損させるリスクを避け、**常に manual（再取込）へ fail-safe** する。
+    // まれな正当ケース（アクセント名 + 迷い込んだ C1 制御）も、原本からの再取込で容易に回復できる。
     const original = `Þórð${NEL}`;
     const decided = decideTextHygieneFix(original);
-    expect(decided.action).toBe("sanitize");
-    expect(decided.cleanedValue).toBe("Þórð");
-    expect(sanitizeControlChars(original)).toBe("Þórð");
+    expect(decided.action).toBe("manual");
+    expect(decided.manualReason).toBe("mojibake");
+    expect(decided.cleanedValue).toBeNull();
+    expect(decided.changedFields).toEqual([]);
 
+    // apply-gate の本来意図は保持する: **クリーンな**北欧名（C1 制御を含まない "Þórð"）は
+    // mojibake ヒューリスティックで弾かれず、人手承認後の新値として ok:true で通ること。
+    // （apply-gate がクリーンなアクセント名/北欧名を罠にかけてはならない＝修正不能化の防止。）
+    const cleanName = "Þórð";
+    expect(inspectText(cleanName).hasMojibake).toBe(false);
     const r = checkTextHygieneFixSafety({
       isArchived: false,
       versionMatches: true,
       currentValue: original,
-      newValue: decided.cleanedValue,
+      newValue: cleanName,
     });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.newValue).toBe("Þórð");
