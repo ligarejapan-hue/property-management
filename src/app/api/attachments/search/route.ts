@@ -47,7 +47,14 @@ const QUERY_KEYS = [
 export async function GET(request: Request) {
   try {
     const session = await getApiSession();
-    if (session.role !== "admin") {
+    // 認可は JWT 上の role ではなく DB の現在値で判定する。ログイン後に降格/無効化
+    // された管理者は、トークンが有効でもここで弾く（本検索は全添付のメタ＝ファイル名・
+    // targetId を横断露出するため、stale なトークン権限に依存しない）。
+    const actor = await prisma.user.findUnique({
+      where: { id: session.id },
+      select: { role: true, isActive: true },
+    });
+    if (!actor || !actor.isActive || actor.role !== "admin") {
       throw new ApiError(403, "この操作は管理者のみ利用できます", "FORBIDDEN");
     }
 

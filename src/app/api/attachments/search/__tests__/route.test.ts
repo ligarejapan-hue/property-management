@@ -1,6 +1,8 @@
 /**
  * GET /api/attachments/search — 添付横断検索（admin 限定・ISO-SAFE・schema 無改変）。
  *
+ *  - 認可は **DB の現在値**で判定（JWT 上の role に依存しない）。ログイン後に降格/
+ *    無効化された管理者は、トークンが有効でも 403。
  *  - admin 以外は 403 / 未認証は 401。
  *  - query: type / fileName(部分一致) / from・to(期間) / targetType・targetId。
  *  - 既定 isDeleted=false。
@@ -47,7 +49,10 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => ({
-  default: { attachment: { findMany: vi.fn() } },
+  default: {
+    attachment: { findMany: vi.fn() },
+    user: { findUnique: vi.fn() },
+  },
 }));
 
 import prisma from "@/lib/prisma";
@@ -55,7 +60,10 @@ import { getApiSession, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { GET } from "../route";
 
-const pm = prisma as unknown as { attachment: { findMany: Mock } };
+const pm = prisma as unknown as {
+  attachment: { findMany: Mock };
+  user: { findUnique: Mock };
+};
 const mockedGetSession = getApiSession as unknown as Mock;
 const mockedAudit = writeAuditLog as unknown as Mock;
 
@@ -73,12 +81,14 @@ function lastWhere(): Record<string, unknown> {
 describe("GET /api/attachments/search", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // 既定: 認証済み & DB 上も有効な admin。
     mockedGetSession.mockResolvedValue({
       id: "admin-1",
       email: "a@a",
       name: "Admin",
       role: "admin",
     });
+    pm.user.findUnique.mockResolvedValue({ role: "admin", isActive: true });
     pm.attachment.findMany.mockResolvedValue([]);
   });
 
@@ -93,19 +103,41 @@ describe("GET /api/attachments/search", () => {
     expect(pm.attachment.findMany).not.toHaveBeenCalled();
   });
 
-  it("admin 以外は 403（DB も audit も呼ばない）", async () => {
-    mockedGetSession.mockResolvedValueOnce({
-      id: "u2",
-      email: "o@o",
-      name: "Office",
-      role: "office_staff",
-    });
+  it("DB 上 admin でなければ 403（JWT が admin でも DB の降格を検知）", async () => {
+    // トークン上は admin（stale）だが、DB では office_staff に降格済み。
+    pm.user.findUnique.mockResolvedValueOnce({ role: "office_staff", isActive: true });
 
     const res = await GET(req());
 
     expect(res.status).toBe(403);
     expect(pm.attachment.findMany).not.toHaveBeenCalled();
     expect(mockedAudit).not.toHaveBeenCalled();
+  });
+
+  it("無効化された admin は 403", async () => {
+    pm.user.findUnique.mockResolvedValueOnce({ role: "admin", isActive: false });
+
+    const res = await GET(req());
+
+    expect(res.status).toBe(403);
+    expect(pm.attachment.findMany).not.toHaveBeenCalled();
+  });
+
+  it("DB にユーザーが存在しなければ 403", async () => {
+    pm.user.findUnique.mockResolvedValueOnce(null);
+
+    const res = await GET(req());
+
+    expect(res.status).toBe(403);
+    expect(pm.attachment.findMany).not.toHaveBeenCalled();
+  });
+
+  it("認可は DB を再読込して判定する（session.id で findUnique）", async () => {
+    await GET(req());
+
+    expect(pm.user.findUnique).toHaveBeenCalledTimes(1);
+    const arg = pm.user.findUnique.mock.calls[0][0];
+    expect(arg.where).toEqual({ id: "admin-1" });
   });
 
   it("admin は 200・メタのみ返す（fileUrl を select せず結果に載せない）", async () => {
@@ -128,7 +160,6 @@ describe("GET /api/attachments/search", () => {
     expect(body.data[0]).not.toHaveProperty("fileUrl");
 
     const call = pm.attachment.findMany.mock.calls[0][0];
-    // select はメタ6項目のみ・fileUrl 非選択・include 不使用
     expect(call.select).toEqual({
       id: true,
       fileName: true,
@@ -174,12 +205,11 @@ describe("GET /api/attachments/search", () => {
     const arg = mockedAudit.mock.calls[0][0];
     expect(arg.action).toBe("attachment_search");
     expect(arg.userId).toBe("admin-1");
-    // 検索語の生値が audit detail に混入しない（PII 漏えい防止）
     expect(JSON.stringify(arg.detail)).not.toContain("zzsecretterm");
     expect(arg.detail.filters.hasFileName).toBe(true);
   });
 
-  it("不正な query は 400（DB を呼ばない）", async () => {
+  it("不正な query は 400（DB 検索を呼ばない）", async () => {
     const res = await GET(req(`?type=bogus`));
 
     expect(res.status).toBe(400);
