@@ -308,12 +308,18 @@ describe("AuditLog 非PII", () => {
   });
 });
 
-describe("ページング", () => {
+describe("ページング（DB カーソル）", () => {
   beforeEach(() => {
-    pm.owner.findMany.mockResolvedValue(
-      Array.from({ length: 5 }, (_, i) =>
-        owner({ id: `o-${i}`, zip: "123" }),
-      ),
+    // cursor は DB の where:{id:{gt:cursor}} で適用されるため mock も尊重する。
+    const fixtures = Array.from({ length: 5 }, (_, i) =>
+      owner({ id: `o-${i}`, zip: "123" }),
+    );
+    pm.owner.findMany.mockImplementation(
+      (args: { where?: { id?: { gt?: string } }; take?: number }) => {
+        const gt = args?.where?.id?.gt ?? null;
+        const rows = gt ? fixtures.filter((o) => o.id > gt) : fixtures;
+        return Promise.resolve(rows.slice(0, args?.take ?? rows.length));
+      },
     );
   });
   it("limit=2 で 2 件 + hasNextPage", async () => {
@@ -323,11 +329,93 @@ describe("ページング", () => {
     expect(json.hasNextPage).toBe(true);
     expect(json.nextCursor).toBe(json.candidates[1].ownerId);
   });
-  it("cursor で続き", async () => {
+  it("cursor は DB クエリの where に id.gt として渡る（先頭固定スキャンにしない）", async () => {
+    await GET(url("?type=zip_suspicious&limit=2&cursor=o-1"));
+    expect(pm.owner.findMany.mock.calls[0][0].where).toEqual({
+      isArchived: false,
+      id: { gt: "o-1" },
+    });
+  });
+  it("cursor 無しのときは where に id 条件を付けない", async () => {
+    await GET(url("?type=zip_suspicious&limit=2"));
+    expect(pm.owner.findMany.mock.calls[0][0].where).toEqual({
+      isArchived: false,
+    });
+  });
+  it("cursor で続きを取得", async () => {
     const res1 = await GET(url("?type=zip_suspicious&limit=2"));
     const json1 = await res1.json();
-    const res2 = await GET(url(`?type=zip_suspicious&limit=2&cursor=${json1.nextCursor}`));
+    const res2 = await GET(
+      url(`?type=zip_suspicious&limit=2&cursor=${json1.nextCursor}`),
+    );
     const json2 = await res2.json();
     expect(json2.candidates[0].ownerId > json1.nextCursor).toBe(true);
+  });
+});
+
+// MAX_SCAN(10k) 超でも取りこぼさないこと（Codex P2 対応）。旧 in-memory cursor は先頭
+// MAX_SCAN 窓しか走査できず、truncated:true/hasNextPage:false で >10k の候補を黙殺していた。
+// DB カーソル化により、truncated 窓で matched を使い切っても nextCursor を窓末尾へ前進させ
+// 次窓を走査できる（name-quality-candidates と同契約）。
+describe("scan cap 超のページング前進（取りこぼし防止・Codex P2）", () => {
+  function generateOwners(
+    cursorId: string | null,
+    total: number,
+    take: number,
+  ) {
+    const all = Array.from({ length: total }, (_, i) =>
+      owner({
+        id: `o-${String(i).padStart(6, "0")}`,
+        // 末尾にだけ zip_suspicious ゴミ（窓内で matched が枯渇する状況を作る）。
+        zip: i >= total - 1 ? "123" : "123-4567",
+      }),
+    );
+    const startIdx = cursorId ? all.findIndex((o) => o.id > cursorId) : 0;
+    const from = startIdx < 0 ? all.length : startIdx;
+    return all.slice(from, from + take);
+  }
+
+  it("truncated 窓で matched 枯渇 → hasNextPage=true・nextCursor は窓末尾へ前進", async () => {
+    const TOTAL = 10_005;
+    pm.owner.findMany.mockImplementation(
+      (args: { where?: { id?: { gt?: string } }; take?: number }) =>
+        Promise.resolve(
+          generateOwners(
+            args?.where?.id?.gt ?? null,
+            TOTAL,
+            args?.take ?? 10_001,
+          ),
+        ),
+    );
+    const res = await GET(url("?type=zip_suspicious&limit=2"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(0);
+    expect(json.truncated).toBe(true);
+    expect(json.hasNextPage).toBe(true);
+    expect(json.nextCursor).toBe(`o-${String(9999).padStart(6, "0")}`);
+  });
+
+  it("前進した cursor で次窓の scan cap 超候補へ到達できる", async () => {
+    const TOTAL = 10_005;
+    pm.owner.findMany.mockImplementation(
+      (args: { where?: { id?: { gt?: string } }; take?: number }) =>
+        Promise.resolve(
+          generateOwners(
+            args?.where?.id?.gt ?? null,
+            TOTAL,
+            args?.take ?? 10_001,
+          ),
+        ),
+    );
+    const res1 = await GET(url("?type=zip_suspicious&limit=2"));
+    const json1 = await res1.json();
+    const res2 = await GET(
+      url(`?type=zip_suspicious&limit=2&cursor=${json1.nextCursor}`),
+    );
+    const json2 = await res2.json();
+    expect(json2.candidates.length).toBeGreaterThan(0);
+    expect(json2.candidates[0].ownerId).toBe(
+      `o-${String(10004).padStart(6, "0")}`,
+    );
   });
 });

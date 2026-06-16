@@ -127,8 +127,13 @@ export async function GET(request: NextRequest) {
     const limit = parseLimit(searchParams.get("limit"));
     const cursor = searchParams.get("cursor");
 
+    // cursor は DB の where:{id:{gt}} に渡し、MAX_SCAN を「1 リクエストのスキャン窓サイズ」と
+    // する（name-quality-candidates と同じ DB カーソル設計＝10k 超も窓単位で到達可能）。
     const owners = await prisma.owner.findMany({
-      where: { isArchived: false },
+      where: {
+        isArchived: false,
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
       select: {
         id: true,
         zip: true,
@@ -238,14 +243,20 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const startIndex = cursor
-      ? matchedRows.findIndex((r) => r.ownerId > cursor)
-      : 0;
-    const offset = startIndex < 0 ? matchedRows.length : startIndex;
-    const page = matchedRows.slice(offset, offset + limit);
-    const hasNextPage = offset + limit < matchedRows.length;
-    const nextCursor =
-      hasNextPage && page.length > 0 ? page[page.length - 1].ownerId : null;
+    // ページング（cursor は DB の where:{id:{gt}} で適用済み。matchedRows はこのスキャン窓内の
+    // id 昇順マッチ）。name-quality-candidates と同じ前進ロジックで、truncated 窓の先へも
+    // nextCursor を進めて取りこぼさない（旧 in-memory cursor は >MAX_SCAN を走査できなかった）。
+    const page = matchedRows.slice(0, limit);
+    const hasMoreInWindow = matchedRows.length > page.length;
+    const hasNextPage = hasMoreInWindow || truncated;
+
+    let nextCursor: string | null = null;
+    if (hasMoreInWindow && page.length > 0) {
+      nextCursor = page[page.length - 1].ownerId;
+    } else if (hasNextPage && scanned.length > 0) {
+      // 窓内マッチを使い切ったが窓が truncated → 窓末尾まで前進。
+      nextCursor = scanned[scanned.length - 1].id;
+    }
 
     await writeAuditLog({
       userId: session.id,
