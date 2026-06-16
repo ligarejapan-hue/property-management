@@ -46,6 +46,8 @@ const PDF = String.fromCharCode(0x202C); // U+202C bidi pop
 const LRI = String.fromCharCode(0x2066); // U+2066 bidi isolate
 const PDI = String.fromCharCode(0x2069); // U+2069 bidi isolate pop
 const FFFD = String.fromCharCode(0xFFFD); // U+FFFD replacement char (decode-failure signal)
+const NBSP = String.fromCharCode(0x00A0); // U+00A0 no-break space
+const IDSP = String.fromCharCode(0x3000); // U+3000 ideographic (full-width) space
 
 describe("inspectText — 検出（read-only）", () => {
   it("クリーンな日本語テキストはすべて false", () => {
@@ -143,6 +145,17 @@ describe("inspectText — mojibake ヒューリスティック（audit-only）",
     expect(inspectText("Café").hasMojibake).toBe(false);
     expect(inspectText("Müller").hasMojibake).toBe(false);
   });
+
+  it("正当なアクセント/北欧名（連続濁点含む）は mojibake と誤判定しない", () => {
+    // 先頭クラスを [ÂÃâ] に限定したことで、連続するアクセント付き北欧/ラテン文字を
+    // 持つ正規名を mojibake と誤検出しない（誤デコード残骸のみを拾う）。
+    // Þórð（北欧名）/ café's / ü€ / àé / Ååå（連続 Å）はいずれも非フラグ。
+    expect(inspectText("Þórð").hasMojibake).toBe(false);
+    expect(inspectText("café's").hasMojibake).toBe(false);
+    expect(inspectText("ü€").hasMojibake).toBe(false);
+    expect(inspectText("àé").hasMojibake).toBe(false);
+    expect(inspectText("Ååå").hasMojibake).toBe(false);
+  });
 });
 
 describe("sanitizeControlChars — removable のみ除去（U+FFFD は残す）", () => {
@@ -176,6 +189,19 @@ describe("sanitizeControlChars — removable のみ除去（U+FFFD は残す）"
   it("全角空白(U+3000)も畳み対象（正規の全角文字は保持）", () => {
     expect(sanitizeControlChars("田中　　太郎")).toBe("田中 太郎");
     expect(sanitizeControlChars("東京都")).toBe("東京都"); // 全角文字本体は不変
+  });
+
+  it("NBSP(U+00A0) / 全角空白(U+3000) の正規化契約を固定する", () => {
+    // 契約: NBSP・全角空白はいずれも空白として畳まれ半角空白 1 個へ正規化される
+    // （\s に NBSP/U+3000 は含まれるが、明示的にここで挙動を pin して drift を防ぐ）。
+    expect(sanitizeControlChars(`田中${NBSP}太郎`)).toBe("田中 太郎");
+    expect(sanitizeControlChars(`田中${IDSP}太郎`)).toBe("田中 太郎");
+    // 連続・混在も 1 個へ畳む
+    expect(sanitizeControlChars(`A${NBSP}${IDSP} B`)).toBe("A B");
+    // 前後の NBSP / 全角空白は trim 同様に除去される
+    expect(sanitizeControlChars(`${NBSP}田中${IDSP}`)).toBe("田中");
+    // NBSP / 全角空白のみは空文字
+    expect(sanitizeControlChars(`${NBSP}${IDSP}`)).toBe("");
   });
 
   it("クリーンな文字列は不変（trim のみ）", () => {
@@ -223,6 +249,39 @@ describe("hasRemovableControlChars — 除去対象の有無", () => {
     expect(hasRemovableControlChars("行1\n行2")).toBe(false); // \n は removable 扱いしない
     expect(hasRemovableControlChars(null)).toBe(false);
     expect(hasRemovableControlChars("")).toBe(false);
+  });
+});
+
+describe("REMOVABLE_ALL の集合不変条件（drift 防止）", () => {
+  // REMOVABLE_ALL_RE_G は内部定数（非 export）だが、hasRemovableControlChars が
+  // それに駆動される。ここでは control / zero-width / bidi の各構成正規表現の **和集合**
+  // と hasRemovableControlChars の判定が全コードポイントで一致することを固定し、
+  // REMOVABLE_ALL のレンジが構成要素から静かにずれる（drift する）のを検出する。
+  // 構成要素は owner-text-hygiene.ts の定義と同一に再構成する（仕様の二重記述で乖離検知）。
+  const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/; // \t\n\r 除外
+  const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/;
+  const BIDI = /[\u202A-\u202E\u2066-\u2069]/;
+  const unionMatches = (cp: number): boolean => {
+    const ch = String.fromCharCode(cp);
+    return CONTROL.test(ch) || ZERO_WIDTH.test(ch) || BIDI.test(ch);
+  };
+
+  it("REMOVABLE_ALL == control ∪ zero-width ∪ bidi（U+0000–U+FFFF 全域）", () => {
+    const mismatches: number[] = [];
+    for (let cp = 0x0000; cp <= 0xffff; cp++) {
+      // surrogate 単独は String 構成が不定なので比較から除外（実害なし）。
+      if (cp >= 0xd800 && cp <= 0xdfff) continue;
+      const ch = String.fromCharCode(cp);
+      const viaLib = hasRemovableControlChars(ch);
+      const viaUnion = unionMatches(cp);
+      if (viaLib !== viaUnion) mismatches.push(cp);
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it("U+FFFD は removable 和集合に含まれない（audit-only）", () => {
+    expect(unionMatches(0xfffd)).toBe(false);
+    expect(hasRemovableControlChars(FFFD)).toBe(false);
   });
 });
 
@@ -397,6 +456,38 @@ describe("checkTextHygieneFixSafety — apply gate", () => {
     const r = checkTextHygieneFixSafety({ ...base, newValue: "   " });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reasons).toContain("would_be_empty");
+  });
+
+  it("人手承認後の正当な北欧名（連続濁点）を新値として許可する（un-fixable 化しない）", () => {
+    // 連続アクセント文字を含む正規名（Þórð）は mojibake ではない。apply-gate が
+    // mojibake ヒューリスティックで弾くと、こうした所有者が修正不能になる（P1-1）。
+    const r = checkTextHygieneFixSafety({
+      isArchived: false,
+      versionMatches: true,
+      currentValue: `Þórð${NEL}`, // 除去すべき制御文字を持つ（要クリーニング）
+      newValue: "Þórð", // 人手確認済みのクリーン値
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.newValue).toBe("Þórð");
+  });
+
+  it("北欧名 + 除去可能制御文字を sanitize した値が apply-gate を通る（end-to-end）", () => {
+    // 制御文字 U+0085(NEL) を伴う北欧名を decide/sanitize でクリーニングし、
+    // その cleanedValue が forbidden_value で弾かれないこと（実フロー再現）。
+    const original = `Þórð${NEL}`;
+    const decided = decideTextHygieneFix(original);
+    expect(decided.action).toBe("sanitize");
+    expect(decided.cleanedValue).toBe("Þórð");
+    expect(sanitizeControlChars(original)).toBe("Þórð");
+
+    const r = checkTextHygieneFixSafety({
+      isArchived: false,
+      versionMatches: true,
+      currentValue: original,
+      newValue: decided.cleanedValue,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.newValue).toBe("Þórð");
   });
 });
 

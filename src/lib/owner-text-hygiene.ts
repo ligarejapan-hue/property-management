@@ -57,14 +57,17 @@ const REMOVABLE_ALL_RE = new RegExp(REMOVABLE_ALL_RE_G.source);
 const WHITESPACE_RUN_RE_G = /[\s　]+/g;
 
 // mojibake ヒューリスティック（UTF-8 を Latin-1/CP1252 として誤読した残骸）。
-// UTF-8 マルチバイト列を 1 バイトずつ Latin-1 として解釈すると、高位ラテン補助文字
-// （U+00C3 / U+00C2 / U+00E3 等）が **連続** する（例: 日本語 3 バイトの誤読は高位ラテンが連鎖）。
-// 一方、正規のラテン拡張名は高位ラテン文字が **単発**（Cafe の e-acute / Muller の u-umlaut /
-// naive の i-diaeresis）で前後を ASCII に挟まれる。よって判定を「U+00A1-U+00FF の高位ラテン補助が
-// 2 文字以上連続」に限定する（NBSP U+00A0 は正規の連結利用があり先頭から除外）。CP1252 のスマート
-// 記号（U+2013-U+2122）が後続するパターンも誤デコードで出るため後続側に含める。これにより
-// 単発アクセント名の誤検出を避け、誤デコード特有の連鎖だけを拾う。
-const MOJIBAKE_RE = /[\u00A1-\u00FF][\u00A1-\u00FF\u2013-\u2122]/;
+// UTF-8 マルチバイト列を 1 バイトずつ Latin-1 として解釈すると、**先導バイト** が
+// Â(U+00C2) / Ã(U+00C3) / â(U+00E2) のいずれかになり、その直後に高位ラテン補助
+// （U+00A1-U+00FF）や CP1252 スマート記号（U+2013-U+2122）が続く連鎖になる（日本語等の
+// マルチバイト誤読で頻出）。一方、正規のラテン拡張名は高位ラテン文字が **単発**（Cafe の
+// e-acute / Muller の u-umlaut / naive の i-diaeresis）や、誤デコード由来でない連続
+// （北欧名の Þórð / Ååå、café's / ü€ / àé 等）で、Â/Ã/â 先導を伴わない。
+// よって **先導クラスを [ÂÃâ]（Â Ã â）に限定** し、後続クラスは U+00A1-U+00FF +
+// CP1252 スマート記号（U+2013-U+2122）のまま据え置く。これにより連続アクセントの正規名を
+// 誤検出せず、誤デコード特有の連鎖だけを拾う。
+// 注意: Å(U+00C5) は **含めない**（北欧名 "Ååå" の先頭と衝突し正規名を誤検出するため）。
+const MOJIBAKE_RE = /[\u00C2\u00C3\u00E2][\u00A1-\u00FF\u2013-\u2122]/;
 
 // ---------------------------------------------------------------------------
 // inspectText: 検出のみ（read-only）。生値は返さない。
@@ -346,8 +349,10 @@ export type TextHygieneFixSafetyResult =
 /**
  * テキスト補正の安全条件チェック。複数違反は全件返す。
  * - 新値が空（trim 後）→ would_be_empty（空書込を許可しない）。
- * - 新値に removable 制御文字 / U+FFFD / mojibake が残る → forbidden_value
+ * - 新値に removable 制御文字 / U+FFFD が残る → forbidden_value
  *   （apply は品質を必ず改善する方向に限定。再び DQ になる値を書かせない）。
+ *   mojibake ヒューリスティックはここでは **適用しない**（人手承認済みの値が連続アクセントの
+ *   正規名 = 例: 北欧名 "Þórð" を含むと誤検出で弾かれ、当該所有者が修正不能になるため）。
  */
 export function checkTextHygieneFixSafety(
   input: TextHygieneFixSafetyInput,
@@ -361,11 +366,7 @@ export function checkTextHygieneFixSafety(
   const nv = input.newValue ?? "";
   if (nv.trim() === "") {
     reasons.push("would_be_empty");
-  } else if (
-    hasRemovableControlChars(nv) ||
-    nv.includes(REPLACEMENT_CHAR) ||
-    MOJIBAKE_RE.test(nv)
-  ) {
+  } else if (hasRemovableControlChars(nv) || nv.includes(REPLACEMENT_CHAR)) {
     reasons.push("forbidden_value");
   }
 
