@@ -113,6 +113,10 @@ export default function TextHygieneAuditPage() {
       if (append) setLoadingMore(true);
       else {
         setLoading(true);
+        // 非append（全リロード）開始時は loadingMore を明示クリアする。進行中の load-more を
+        // 中断した場合、その stale append は reqId 不一致で finally の解除を skip するため、
+        // ここでクリアしないと「もっと読み込む」が無効/スピナーのまま固着する（Codex P3）。
+        setLoadingMore(false);
         setError(null);
       }
       try {
