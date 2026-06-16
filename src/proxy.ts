@@ -3,7 +3,12 @@ import type { NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads"];
 
+// 完全一致で公開するパス。前方一致（startsWith）だと /api/health-xxx 等まで認証免除が
+// 広がってしまうため、死活確認の /api/health だけを必要最小の範囲で公開する。
+const PUBLIC_EXACT_PATHS = ["/api/health"];
+
 function isPublicPath(pathname: string): boolean {
+  if (PUBLIC_EXACT_PATHS.includes(pathname)) return true;
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 }
 
