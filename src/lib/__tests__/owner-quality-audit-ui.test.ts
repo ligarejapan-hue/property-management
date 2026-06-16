@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   formatFixableFields,
   escapeControlForAudit,
+  effectiveRecommendedAction,
   NAME_ISSUE_LABEL,
   CONTACT_ISSUE_LABEL,
   NAME_TYPE_OPTIONS,
@@ -104,5 +105,36 @@ describe("ラベル / フィルタ種別 drift ガード", () => {
     expect(
       CONTACT_TYPE_OPTIONS.find((o) => o.value === "all")?.summaryKey,
     ).toBeNull();
+  });
+});
+
+describe("effectiveRecommendedAction（blockReasons gate）", () => {
+  it("blockReasons 非空の format_candidate は review へ降格（Codex P2）", () => {
+    expect(
+      effectiveRecommendedAction("format_candidate", ["import_source_unknown"]),
+    ).toBe("review");
+    expect(
+      effectiveRecommendedAction("format_candidate", ["import_row_not_success"]),
+    ).toBe("review");
+  });
+  it("blockReasons 非空の sanitize_candidate も review へ降格", () => {
+    expect(
+      effectiveRecommendedAction("sanitize_candidate", ["import_source_unknown"]),
+    ).toBe("review");
+  });
+  it("blockReasons 空の候補はそのまま保持", () => {
+    expect(effectiveRecommendedAction("format_candidate", [])).toBe(
+      "format_candidate",
+    );
+    expect(effectiveRecommendedAction("sanitize_candidate", [])).toBe(
+      "sanitize_candidate",
+    );
+  });
+  it("review / hold は blockReasons 有無に関わらず不変", () => {
+    expect(effectiveRecommendedAction("review", ["x"])).toBe("review");
+    expect(effectiveRecommendedAction("hold", ["property_owner_exists"])).toBe(
+      "hold",
+    );
+    expect(effectiveRecommendedAction("hold", [])).toBe("hold");
   });
 });

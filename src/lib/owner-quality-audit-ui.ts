@@ -145,3 +145,34 @@ export function escapeControlForAudit(
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// recommendedAction の UI 降格。blockReasons 非空の auto-fix 候補は review へ落とす。
+// ---------------------------------------------------------------------------
+
+export type RecommendedAction =
+  | "hold"
+  | "review"
+  | "sanitize_candidate"
+  | "format_candidate";
+
+/**
+ * blockReasons が非空の auto-fix 候補（sanitize_candidate / format_candidate）を review へ降格する。
+ * contact-quality-candidates は import_source_unknown / import_row_not_success を hasSafeguard に
+ * 含めず format_candidate を返し、contact-fix もそれら list-blockReasons を再チェックしないため、
+ * UI が recommendedAction だけで apply を出すと list が blocked とした owner（手動作成 / 取込失敗）の
+ * zip/phone を変更できてしまう（Codex P2）。blockReasons を gate して auto-fix を隠す。
+ * name の sanitize_candidate は元々成功取込必須で blockReasons 空ゆえ実質 no-op（両タブ一貫適用）。
+ */
+export function effectiveRecommendedAction(
+  rec: RecommendedAction,
+  blockReasons: string[],
+): RecommendedAction {
+  if (
+    (rec === "sanitize_candidate" || rec === "format_candidate") &&
+    blockReasons.length > 0
+  ) {
+    return "review";
+  }
+  return rec;
+}

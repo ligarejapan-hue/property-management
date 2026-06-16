@@ -19,6 +19,7 @@ import {
   CONTACT_ISSUE_LABEL,
   formatFixableFields,
   escapeControlForAudit,
+  effectiveRecommendedAction,
   type NameFilterType,
   type ContactFilterType,
   type ContactField,
@@ -546,10 +547,20 @@ export default function QualityAuditPage() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm">{renderRecBadge(row.recommendedAction)}</td>
+                  <td className="px-4 py-3 text-sm">
+                    {renderRecBadge(
+                      effectiveRecommendedAction(
+                        row.recommendedAction,
+                        row.blockReasons,
+                      ),
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-3">
-                      {row.recommendedAction === "sanitize_candidate" &&
+                      {effectiveRecommendedAction(
+                        row.recommendedAction,
+                        row.blockReasons,
+                      ) === "sanitize_candidate" &&
                         renderFixCell(
                           { kind: "name", ownerId: row.ownerId, version: row.version },
                           "サニタイズ",
@@ -609,10 +620,20 @@ export default function QualityAuditPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm">{renderRecBadge(row.recommendedAction)}</td>
+                    <td className="px-4 py-3 text-sm">
+                    {renderRecBadge(
+                      effectiveRecommendedAction(
+                        row.recommendedAction,
+                        row.blockReasons,
+                      ),
+                    )}
+                  </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex flex-wrap items-center gap-3">
-                        {row.recommendedAction === "format_candidate" &&
+                        {effectiveRecommendedAction(
+                          row.recommendedAction,
+                          row.blockReasons,
+                        ) === "format_candidate" &&
                           fixableFields.map((field) => (
                             <Fragment key={field}>
                               {renderFixCell(
