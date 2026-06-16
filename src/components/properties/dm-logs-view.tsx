@@ -75,7 +75,7 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
   }, [fetchLogs]);
 
   return (
-    <div data-pii-protected data-pii-surface="dm-logs">
+    <div data-pii-protected data-pii-surface="property">
       <div className="mb-6 flex items-center gap-2">
         <Mail className="h-5 w-5 text-gray-500" />
         <h1 className="text-xl font-bold text-gray-800">DM 送付履歴</h1>
