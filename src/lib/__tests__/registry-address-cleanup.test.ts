@@ -164,6 +164,23 @@ describe("decideRegistryAddressCleanup", () => {
     expect(p.cleanedAddress).toBe("○○市1-2");
   });
 
+  // レビュー指摘: 受付番号 ブランチも末尾「号」を必須に（号なしで正当な番地を消さない）。
+  it("『受付番号5階』（号なし）は除去しない＝番地を温存（保守的）", () => {
+    const p = decideRegistryAddressCleanup({ address: "○○市1-2 受付番号5階" });
+    expect(p.action).toBe("none");
+    expect(p.detectedTypes).not.toContain("receipt_number");
+    expect(p.cleanedAddress).toBe("○○市1-2 受付番号5階");
+  });
+
+  it("『受付番号第12345号』『受付番号12345号』（号あり）は従来どおり除去", () => {
+    expect(
+      decideRegistryAddressCleanup({ address: "○○市1-2 受付番号第12345号" }).cleanedAddress,
+    ).toBe("○○市1-2");
+    expect(
+      decideRegistryAddressCleanup({ address: "○○市1-2 受付番号12345号" }).cleanedAddress,
+    ).toBe("○○市1-2");
+  });
+
   // --- SHOULD-FIX #4: 登記原因スパンは registration_date と二重計上しない ---
   it("登記原因スパンは registration_cause のみ（registration_date と二重検出しない）", () => {
     const p = decideRegistryAddressCleanup({

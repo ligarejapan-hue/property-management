@@ -69,10 +69,10 @@ const CAUSE = "(?:売買|相続|贈与|所有権移転|所有権保存|移転|�
 
 // 除去可能パターン（順序が重要: 登記原因[日付+原因]を日付単独より先に除去し、原因語の孤立を防ぐ）。
 const REMOVABLE_PATTERNS: { type: RegistryStringType; re: () => RegExp }[] = [
-  // 受付番号: 過検出防止のため 2 分岐に厳格化（MUST-FIX #1）。
-  //  - 完全ラベル「受付番号」: 第/号 は任意（受付番号 自体が強アンカー＝住所に出ない）。
+  // 受付番号: 過検出防止のため 2 分岐に厳格化（MUST-FIX #1 + レビュー指摘）。
+  //  - 完全ラベル「受付番号」: 第 は任意だが **末尾号を必須**（「受付番号5階」等の番地を消さない）。
   //  - 短縮「受付」: **第 + 末尾号を必須**（さもないと「受付3号館」「受付1号棟」の正当住所を消す）。
-  { type: "receipt_number", re: () => new RegExp(`受付番号\\s*第?\\s*${D}+\\s*号?|受付\\s*第\\s*${D}+\\s*号`, "g") },
+  { type: "receipt_number", re: () => new RegExp(`受付番号\\s*第?\\s*${D}+\\s*号|受付\\s*第\\s*${D}+\\s*号`, "g") },
   { type: "registration_cause", re: () => new RegExp(`${WAREKI_DATE}\\s*${CAUSE}`, "g") },
   { type: "registration_date", re: () => new RegExp(WAREKI_DATE, "g") },
   { type: "share_fraction", re: () => new RegExp(`持分\\s*${D}+\\s*分の\\s*${D}+`, "g") },
