@@ -25,22 +25,28 @@ export const dynamic = "force-dynamic";
 
 // DB 疎通プローブの上限（ミリ秒）。接続取得(maxWait)と実行(timeout)の双方に適用する。
 const DB_PING_TIMEOUT_MS = 2000;
+// DB プローブ結果の保持時間（ミリ秒）。公開エンドポイントゆえ、濫用（高頻度アクセス）
+// 時でも DB プローブを最大 1 回 / この期間に集約し、共有 pg プールを枯渇させない。
+// 死活情報の陳腐化は最大でこの期間に収まる。
+const HEALTH_CACHE_TTL_MS = 1000;
+
+let cachedResult: { ok: boolean; at: number } | null = null;
+let inFlightProbe: Promise<boolean> | null = null;
 
 function getBuildId(): string {
   return process.env.BUILD_ID ?? "unknown";
 }
 
 /**
- * DB へ SELECT 1 を投げ、疎通できれば true を返す。例外・timeout はすべて false
- * に倒す（エラー詳細は応答に載せない）。
+ * DB へ SELECT 1 を投げ、疎通できれば true。例外・timeout はすべて false に倒す
+ * （エラー詳細は応答に載せない）。
  *
  * インタラクティブトランザクションの maxWait（接続取得）と timeout（実行）で
  * プローブ自体に上限を設ける。タイムアウト時は Prisma がトランザクションを
  * キャンセル＆ロールバックして接続を解放するため、DB/ネットワーク stall 時に
- * クエリ／接続を握り続けて pg プールを枯渇させることがない（HTTP レスポンス
- * だけでなくプローブ自体が有界）。
+ * クエリ／接続を握り続けて pg プールを枯渇させない。
  */
-async function pingDatabase(): Promise<boolean> {
+async function probeDatabase(): Promise<boolean> {
   try {
     await prisma.$transaction(
       async (tx) => {
@@ -54,8 +60,34 @@ async function pingDatabase(): Promise<boolean> {
   }
 }
 
+/**
+ * DB 疎通を確認する。TTL 内はキャッシュ結果を返し、進行中のプローブには相乗りさせる
+ * ことで、公開エンドポイントへの高頻度アクセスでも DB プローブ／接続が多重化せず、
+ * pg プールを枯渇させない（HTTP 前段の rate limit を補完する app 層の防御）。
+ */
+async function checkDatabase(): Promise<boolean> {
+  const now = Date.now();
+
+  if (cachedResult && now - cachedResult.at < HEALTH_CACHE_TTL_MS) {
+    return cachedResult.ok;
+  }
+
+  if (!inFlightProbe) {
+    inFlightProbe = probeDatabase()
+      .then((ok) => {
+        cachedResult = { ok, at: Date.now() };
+        return ok;
+      })
+      .finally(() => {
+        inFlightProbe = null;
+      });
+  }
+
+  return inFlightProbe;
+}
+
 export async function GET() {
-  const ok = await pingDatabase();
+  const ok = await checkDatabase();
 
   return Response.json(
     { ok, buildId: getBuildId() },
