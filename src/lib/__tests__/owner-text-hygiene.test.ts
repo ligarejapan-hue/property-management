@@ -146,15 +146,17 @@ describe("inspectText — mojibake ヒューリスティック（audit-only）",
     expect(inspectText("Müller").hasMojibake).toBe(false);
   });
 
-  it("正当なアクセント/北欧名（連続濁点含む）は mojibake と誤判定しない", () => {
-    // 先頭クラスを [ÂÃâ] に限定したことで、連続するアクセント付き北欧/ラテン文字を
-    // 持つ正規名を mojibake と誤検出しない（誤デコード残骸のみを拾う）。
-    // Þórð（北欧名）/ café's / ü€ / àé / Ååå（連続 Å）はいずれも非フラグ。
-    // 重要: これらは **C1 制御（U+0080-U+009F）を一切含まない** ため、後述の
-    // 「高位ラテン ⇄ C1 制御 隣接」シグナルにも一致しない（誤検出ゼロ）。
+  it("正当なアクセント/北欧名（連続濁点含む・文字＋文字）は mojibake と誤判定しない", () => {
+    // 判別基準を「**継続文字種別**」へ変更（Codex P2）: 高位ラテン(U+00A1-U+00FF)が
+    //   - GARBLE-NEIGHBOR（C1 制御 U+0080-U+009F / CP1252 記号・約物 U+00A0-U+00BF /
+    //     CP1252 スマート約物 U+2013-U+2122）に隣接 → mojibake
+    //   - **別の高位ラテン文字**（アクセント文字 U+00C0-U+00FF: ó ð å é ü þ …）に隣接 → 正規名
+    // よって連続するアクセント付き北欧/ラテン文字を持つ正規名は **文字＋文字** で非フラグ。
+    // Þórð（北欧名・ð はアクセント文字 ó/r に隣接）/ café's（é はアクセント e と ASCII 区切りに
+    // 隣接＝記号でも約物でもない）/ àé / Ååå（連続アクセント Å/å）/ Café / Müller は全て非フラグ。
+    // これらは GARBLE-NEIGHBOR（C1 / CP1252 記号 / スマート約物）に一切隣接しない（誤検出ゼロ）。
     expect(inspectText("Þórð").hasMojibake).toBe(false);
     expect(inspectText("café's").hasMojibake).toBe(false);
-    expect(inspectText("ü€").hasMojibake).toBe(false);
     expect(inspectText("àé").hasMojibake).toBe(false);
     expect(inspectText("Ååå").hasMojibake).toBe(false);
     expect(inspectText("Café").hasMojibake).toBe(false);
@@ -180,11 +182,80 @@ describe("inspectText — mojibake ヒューリスティック（audit-only）",
   });
 
   it("C1 制御が先・高位ラテンが後の隣接順でも mojibake として検出する（双方向）", () => {
-    // 隣接シグナルは順不同（[¡-ÿ][C1] と [C1][¡-ÿ] の両 alternation）。
+    // 隣接シグナルは順不同（[¡-ÿ][garble] と [garble][¡-ÿ] の両 alternation）。
     // 例: U+0082 + 'à'(U+00E0) のように C1 が先行するケースも拾う。
     const c1First = String.fromCharCode(0x0082, 0x00e0);
     expect(inspectText(c1First).hasMojibake).toBe(true);
     expect(decideTextHygieneFix(c1First).action).toBe("manual");
+  });
+
+  it("CP1252 で誤デコードされた日本語化け（C1 制御なし・継続文字が記号）も検出する（Codex P2）", () => {
+    // Codex P2: CP1252 で誤デコードされた日本語 mojibake のうち **C1 制御を 1 つも含まない**
+    // ものは、旧 MOJIBAKE_RE（先導 [ÂÃâ] か C1 隣接のみ）では取りこぼされていた。これらの継続
+    // 文字は CP1252 の **記号**（±/°/¤/§/" 等＝U+00A0-U+00BF や U+2013-U+2122）であって C1 では
+    // ないため、inspectText が hasMojibake=false を返し DQ-04 が実在の化けを黙って見逃していた。
+    // 継続文字種別での判別（高位ラテン + GARBLE-NEIGHBOR[C1/CP1252記号/スマート約物]）により拾う。
+    //
+    // 山田（UTF-8 を CP1252 として誤読）→ å±±ç"° :
+    //   U+00E5 U+00B1 U+00B1 U+00E7 U+201D U+00B0（C1 制御は皆無・記号と高位ラテンの連鎖）。
+    const yamadaMojibake = String.fromCharCode(
+      0x00e5,
+      0x00b1,
+      0x00b1,
+      0x00e7,
+      0x201d,
+      0x00b0,
+    );
+    // 大谷 → å¤§è°· : U+00E5 U+00A4 U+00A7 U+00E8 U+00B0 U+00B7（同上・C1 なし）。
+    const otaniMojibake = String.fromCharCode(
+      0x00e5,
+      0x00a4,
+      0x00a7,
+      0x00e8,
+      0x00b0,
+      0x00b7,
+    );
+
+    expect(inspectText(yamadaMojibake).hasMojibake).toBe(true);
+    expect(inspectText(otaniMojibake).hasMojibake).toBe(true);
+
+    // end-to-end: 黙って見逃さず（none ではない）、かつ自動 sanitize もせず（sanitize ではない）、
+    // audit-only として manual（再取込）へ振り分けられること＝PII を二次破損しない。
+    for (const m of [yamadaMojibake, otaniMojibake]) {
+      const decided = decideTextHygieneFix(m);
+      expect(decided.action).toBe("manual");
+      expect(decided.manualReason).toBe("mojibake");
+      expect(decided.cleanedValue).toBeNull();
+      expect(decided.changedFields).toEqual([]);
+    }
+  });
+
+  it("高位ラテン + スマート約物（例 ü€ = ü+U+20AC）も flag する＝許容済みの無害な過検出（audit-only）", () => {
+    // ACCEPTED behavior change（Codex P2）: 継続文字種別ルールは「高位ラテン + スマート約物
+    // （U+2013-U+2122）」も mojibake として拾う。例えば ü€（U+00FC + U+20AC[EURO SIGN]）。
+    // mojibake は **audit-only**（自動 sanitize されない・apply-gate のブロッカーでもない）ため、
+    // これは「人手レビュー行が 1 件増える」だけの **無害な過検出**であり、矛盾ではない。
+    // （以前は非フラグだったが、CP1252 日本語化けを取りこぼさないための意図的な広げ。）
+    const uEuro = String.fromCharCode(0x00fc, 0x20ac); // ü€
+    expect(inspectText(uEuro).hasMojibake).toBe(true);
+
+    // データ破損が起きないことを固定: manual（自動除去なし）・cleanedValue は null。
+    const decided = decideTextHygieneFix(uEuro);
+    expect(decided.action).toBe("manual");
+    expect(decided.manualReason).toBe("mojibake");
+    expect(decided.cleanedValue).toBeNull();
+    expect(decided.changedFields).toEqual([]);
+
+    // apply-gate（checkTextHygieneFixSafety）は mojibake ヒューリスティックを適用しない方針なので
+    // 過検出があってもクリーンな新値は通る＝当該所有者を修正不能化しない。
+    const r = checkTextHygieneFixSafety({
+      isArchived: false,
+      versionMatches: true,
+      currentValue: `${uEuro}社`,
+      newValue: "クリーンな値",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.newValue).toBe("クリーンな値");
   });
 });
 
