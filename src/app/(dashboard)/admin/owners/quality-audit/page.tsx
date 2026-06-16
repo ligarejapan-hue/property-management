@@ -199,6 +199,13 @@ export default function QualityAuditPage() {
       } catch (err) {
         if (reqId !== loadIdRef.current) return;
         setError(err instanceof Error ? err.message : "取得に失敗しました");
+        if (!append) {
+          // 全リロード（type/tab 切替）失敗時は古い view/meta を残さない。残すと新フィルタ下に
+          // 旧候補と旧 cursor が再表示され、stale な結果から preview/apply できてしまう（Codex P2）。
+          // append（もっと読み込む）失敗時は既存行が有効なので view は保持する。
+          setView(null);
+          setMeta({ hasNextPage: false, nextCursor: null, truncated: false });
+        }
       } finally {
         if (reqId === loadIdRef.current) {
           if (append) setLoadingMore(false);
