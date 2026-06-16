@@ -19,13 +19,26 @@ import {
   applyMasterSelection,
   applySourceSelection,
 } from "@/lib/owner-merge-pair";
+import {
+  fetchRegistryAddressCandidates,
+  applyRegistryAddressCleanup,
+  RegistryAddressCleanupClientError,
+  type RegistryAddressCandidateFilter,
+  type RegistryAddressCandidateRow,
+  type RegistryAddressCandidatesResponse,
+} from "@/lib/registry-address-cleanup-client";
+import type { RegistryStringType } from "@/lib/registry-address-cleanup";
 
 type FilterType =
   | "all"
   | "orphan"
   | "address_null"
   | "duplicate"
-  | "corporate_number";
+  | "corporate_number"
+  | "registry_address";
+
+// DQ-03: 自前 API で self-fetch するタブ（上位の data 駆動 fetch/描画から除外する）。
+const SELF_FETCH_TABS: FilterType[] = ["corporate_number", "registry_address"];
 
 // Phase 2-A: duplicate タブ内のサブフィルタ。matchedBy で絞り込む。
 // "all" は経路を問わず duplicate 全件、各 matchedBy はそれぞれの経路のみ。
@@ -115,6 +128,7 @@ function parseFilterTypeFromQuery(value: string | null): FilterType {
     case "address_null":
     case "duplicate":
     case "corporate_number":
+    case "registry_address":
     case "all":
       return value;
     default:
@@ -220,9 +234,9 @@ function OwnerCorrectionPageInner() {
   );
 
   const load = useCallback(async (type: FilterType) => {
-    // Phase E: 法人番号タブは別 API なので、ここでは何もしない
-    // （CorporateNumberCandidatesPanel が自前で fetch する）。
-    if (type === "corporate_number") {
+    // Phase E / DQ-03: self-fetch タブ（法人番号・住所の登記文字列）は別 API なので
+    // ここでは何もしない（各 Panel が自前で fetch する）。
+    if (SELF_FETCH_TABS.includes(type)) {
       setLoading(false);
       setError(null);
       return;
@@ -260,6 +274,8 @@ function OwnerCorrectionPageInner() {
     },
     // Phase E: 法人番号タブ。件数は子コンポーネント側 fetch のため上位では表示しない。
     { key: "corporate_number", label: "法人番号" },
+    // DQ-03: 住所の登記文字列タブ。件数は子コンポーネント側 fetch。
+    { key: "registry_address", label: "住所の登記文字列" },
   ];
 
   return (
@@ -295,18 +311,19 @@ function OwnerCorrectionPageInner() {
         ))}
       </div>
 
-      {loading && filterType !== "corporate_number" && (
+      {loading && !SELF_FETCH_TABS.includes(filterType) && (
         <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
       )}
-      {error && filterType !== "corporate_number" && (
+      {error && !SELF_FETCH_TABS.includes(filterType) && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
 
       {filterType === "corporate_number" && <CorporateNumberCandidatesPanel />}
+      {filterType === "registry_address" && <RegistryAddressCandidatesPanel />}
 
-      {filterType !== "corporate_number" && data && !loading && (
+      {!SELF_FETCH_TABS.includes(filterType) && data && !loading && (
         <>
           {/* Phase 2-A: duplicate タブ専用のサブフィルタ。matchedBy で絞り込む。
               client-side フィルタ（API 再 fetch なし、PII / 法人番号生値を URL に載せない）。 */}
@@ -1167,6 +1184,293 @@ function CorporateNumberCandidatesPanel() {
                 setCursor(data.nextCursor);
                 updateUrlQuery(subFilter, data.nextCursor);
                 load(apiType, data.nextCursor);
+              }}
+              disabled={!data.hasNextPage || !data.nextCursor}
+              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+            >
+              次へ
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// DQ-03: 住所の登記由来文字列（受付番号/和暦日付/登記原因/持分/証明書定型文 = 除去可能、
+// 地番ラベル/不動産番号/床面積 等 = 監査専用）の dry-run 一覧 + 明示 apply パネル。
+// 自前 API（/api/admin/owners/correction/registry-address-candidates・
+// /api/admin/owners/[id]/registry-address-cleanup）を叩く。corporate-cleanup と同型の preview→apply。
+const REGISTRY_TYPE_LABEL: Record<RegistryStringType, string> = {
+  receipt_number: "受付番号",
+  registration_cause: "登記原因",
+  registration_date: "登記日付",
+  share_fraction: "持分",
+  certificate_meta: "証明書定型文",
+  real_estate_number: "不動産番号",
+  parcel_label: "地番ラベル",
+  building_number: "家屋番号",
+  structure_area: "床面積",
+  rank_number: "順位番号",
+};
+
+function RegistryAddressCandidatesPanel() {
+  const [subFilter, setSubFilter] =
+    useState<RegistryAddressCandidateFilter>("all");
+  const [data, setData] = useState<RegistryAddressCandidatesResponse | null>(
+    null,
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [rowMsg, setRowMsg] = useState<{ id: string; text: string; ok: boolean } | null>(
+    null,
+  );
+
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const load = useCallback(
+    async (type: RegistryAddressCandidateFilter, cur: string | null) => {
+      const myReqId = ++requestIdRef.current;
+      setLoading(true);
+      setError(null);
+      setData(null);
+      try {
+        const res = await fetchRegistryAddressCandidates(type, {
+          cursor: cur ?? undefined,
+        });
+        if (!mountedRef.current || myReqId !== requestIdRef.current) return;
+        setData(res);
+      } catch (e) {
+        if (!mountedRef.current || myReqId !== requestIdRef.current) return;
+        setError(e instanceof Error ? e.message : "エラーが発生しました");
+        setData(null);
+      } finally {
+        if (mountedRef.current && myReqId === requestIdRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setCursor(null);
+    setCursorStack([]);
+    load(subFilter, null);
+  }, [subFilter, load]);
+
+  const onApply = useCallback(
+    async (row: RegistryAddressCandidateRow) => {
+      setApplyingId(row.ownerId);
+      setRowMsg(null);
+      try {
+        await applyRegistryAddressCleanup(row.ownerId, {
+          version: row.version,
+          apply: { address: true },
+        });
+        if (!mountedRef.current) return;
+        setRowMsg({ id: row.ownerId, text: "適用しました", ok: true });
+        // 反映後に現在ページを再取得（version 更新・除去済み行の消去を反映）。
+        load(subFilter, cursor);
+      } catch (e) {
+        if (!mountedRef.current) return;
+        const msg =
+          e instanceof RegistryAddressCleanupClientError
+            ? e.message
+            : e instanceof Error
+              ? e.message
+              : "適用に失敗しました";
+        setRowMsg({ id: row.ownerId, text: msg, ok: false });
+      } finally {
+        if (mountedRef.current) setApplyingId(null);
+      }
+    },
+    [subFilter, cursor, load],
+  );
+
+  const subTabs: { key: RegistryAddressCandidateFilter; label: string }[] = [
+    { key: "all", label: "すべて" },
+    { key: "cleanup", label: "除去可能" },
+    { key: "manual", label: "監査専用（手動確認）" },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+        所有者住所に混入した登記由来文字列（受付番号・和暦日付・登記原因・持分・証明書定型文）を
+        検出して dry-run で表示します。「除去可能」は各行の「適用」で住所から除去できます（住所の
+        書込権限が必要）。地番ラベル・不動産番号・床面積などは誤って番地を消さないため
+        <strong>監査専用（自動除去しない）</strong>です。Owner 詳細で手動確認してください。
+      </p>
+
+      <div className="flex flex-wrap gap-1">
+        {subTabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setSubFilter(tab.key)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              subFilter === tab.key
+                ? "border-blue-500 bg-blue-100 text-blue-800"
+                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {loading && (
+        <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
+      )}
+      {error && (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
+      {data && !loading && !error && (
+        <>
+          <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+            <span>合計 {data.summary.total} 件</span>
+            <span>/ 除去可能 {data.summary.cleanup}</span>
+            <span>/ 監査専用 {data.summary.manual}</span>
+            {data.truncated && (
+              <span className="rounded-full bg-orange-100 px-2 py-0.5 text-orange-700">
+                スキャン上限到達（一部のみ表示）
+              </span>
+            )}
+          </div>
+
+          {data.candidates.length === 0 ? (
+            <p className="py-8 text-center text-sm text-gray-400">
+              該当する候補はありません
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-gray-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">氏名</th>
+                    <th className="px-3 py-2 text-left font-medium">住所（現在）</th>
+                    <th className="px-3 py-2 text-left font-medium">補正後（予定）</th>
+                    <th className="px-3 py-2 text-left font-medium">検出種別</th>
+                    <th className="px-3 py-2 text-left font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {data.candidates.map((c) => (
+                    <tr key={c.ownerId} className="hover:bg-gray-50 align-top">
+                      <td className="px-3 py-2 font-medium text-gray-900">
+                        {c.ownerNameMasked ?? (
+                          <span className="text-gray-400">***</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">
+                        {c.addressBeforeMasked ?? (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">
+                        {c.action === "cleanup" ? (
+                          c.addressAfterMasked ?? (
+                            <span className="text-gray-400">（空欄）</span>
+                          )
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {c.detectedTypes.map((t) => (
+                            <span
+                              key={t}
+                              className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                                c.removableTypes.includes(t)
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-amber-100 text-amber-700"
+                              }`}
+                            >
+                              {REGISTRY_TYPE_LABEL[t]}
+                            </span>
+                          ))}
+                        </div>
+                        {c.manualReviewRequired && c.action === "cleanup" && (
+                          <p className="mt-1 text-[10px] text-amber-600">
+                            ※監査専用の検出あり（手動確認）
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-col gap-1">
+                          {c.action === "cleanup" ? (
+                            <button
+                              type="button"
+                              onClick={() => onApply(c)}
+                              disabled={applyingId === c.ownerId}
+                              className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-100"
+                            >
+                              {applyingId === c.ownerId ? "適用中..." : "適用"}
+                            </button>
+                          ) : (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-center text-[10px] text-amber-700">
+                              監査専用（手動確認）
+                            </span>
+                          )}
+                          <Link
+                            href={c.detailUrl}
+                            className="rounded-md border border-gray-300 px-2 py-1 text-center text-xs text-gray-700 hover:bg-gray-50"
+                          >
+                            Owner 詳細
+                          </Link>
+                          {rowMsg && rowMsg.id === c.ownerId && (
+                            <span
+                              className={`text-[10px] ${rowMsg.ok ? "text-emerald-600" : "text-red-600"}`}
+                            >
+                              {rowMsg.text}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                if (cursorStack.length === 0) return;
+                const prev = cursorStack[cursorStack.length - 1] ?? null;
+                setCursorStack((s) => s.slice(0, -1));
+                setCursor(prev);
+                load(subFilter, prev);
+              }}
+              disabled={cursorStack.length === 0}
+              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+            >
+              前へ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!data.hasNextPage || !data.nextCursor) return;
+                setCursorStack((s) => [...s, cursor]);
+                setCursor(data.nextCursor);
+                load(subFilter, data.nextCursor);
               }}
               disabled={!data.hasNextPage || !data.nextCursor}
               className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"

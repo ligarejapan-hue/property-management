@@ -177,6 +177,30 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "timeBudgetExhausted",
     "summary",
   ]),
+  // DQ-03: 住所登記文字列 cleanup の監査メタデータ（非PII: 検出 type 配列・件数・boolean・
+  // 結果コード・HTTP ステータス）。住所本文・検出文字列の生値は route 側で記録せず、
+  // 混入しても allowlist 外 + denylist(/addr/i 等) で引き続き [REDACTED]。
+  owner_registry_address_cleanup_preview: new Set([
+    "detectedTypes",
+    "removableTypeCount",
+    "auditOnlyTypeCount",
+    "manualReviewRequired",
+  ]),
+  owner_registry_address_cleanup_apply: new Set([
+    "detectedTypes",
+    "removableTypeCount",
+    "manualReviewRequired",
+    "httpStatus",
+  ]),
+  // 一覧 dry-run。summary は ALWAYS_SAFE コンテナだが、子キー cleanup/manual を再帰許可するため
+  // ここにも登録する（total は ALWAYS_SAFE）。hasNextPage/truncated は非PIIメタデータ。
+  owner_registry_address_candidates_list: new Set([
+    "summary",
+    "cleanup",
+    "manual",
+    "hasNextPage",
+    "truncated",
+  ]),
 };
 
 /**
