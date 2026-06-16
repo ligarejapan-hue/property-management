@@ -84,16 +84,25 @@ describe("ラベル / フィルタ種別 drift ガード", () => {
     const labelKeys = Object.keys(CONTACT_ISSUE_LABEL).sort();
     expect(optValues).toEqual(labelKeys);
   });
-  it("各 NAME_TYPE_OPTIONS.summaryKey は実在の name summary キー", () => {
+  it("各 NAME_TYPE_OPTIONS の非 null summaryKey は実在の name summary キー（all は件数非表示=null）", () => {
     const summary = emptyOwnerNameQualitySummary();
     for (const opt of NAME_TYPE_OPTIONS) {
+      if (opt.summaryKey == null) continue;
       expect(summary).toHaveProperty(opt.summaryKey);
     }
+    // Codex P2: all は backend 述語と totalCandidates が不一致ゆえ件数非表示（null）。
+    expect(
+      NAME_TYPE_OPTIONS.find((o) => o.value === "all")?.summaryKey,
+    ).toBeNull();
   });
-  it("各 CONTACT_TYPE_OPTIONS.summaryKey は実在の contact summary キー", () => {
+  it("各 CONTACT_TYPE_OPTIONS の非 null summaryKey は実在の contact summary キー（all は件数非表示=null）", () => {
     const summary = emptyOwnerContactSummary();
     for (const opt of CONTACT_TYPE_OPTIONS) {
+      if (opt.summaryKey == null) continue;
       expect(summary).toHaveProperty(opt.summaryKey);
     }
+    expect(
+      CONTACT_TYPE_OPTIONS.find((o) => o.value === "all")?.summaryKey,
+    ).toBeNull();
   });
 });

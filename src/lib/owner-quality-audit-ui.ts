@@ -55,19 +55,23 @@ export const CONTACT_ISSUE_LABEL: Record<OwnerContactIssueCode, string> = {
 // route の ALL_TYPES と一致させる（drift はテストで検出）。
 // ---------------------------------------------------------------------------
 
+// summaryKey=null は件数バッジを出さない。"all" は backend の type=all 述語（warning 級のみ・
+// info 級 zip_unformatted / mostly_digits 等は除外）と totalCandidates（全 issue 行を数える）が
+// 一致しないため、誤誘導（badge は N だが表は warning 行のみ）を避けて件数非表示にする（Codex P2）。
+// 個別 type は per-issue 件数（filter 結果と一致）で正確に表示する。
 export interface NameTypeOption {
   value: NameFilterType;
   label: string;
-  summaryKey: keyof OwnerNameQualitySummary;
+  summaryKey: keyof OwnerNameQualitySummary | null;
 }
 export interface ContactTypeOption {
   value: ContactFilterType;
   label: string;
-  summaryKey: keyof OwnerContactSummary;
+  summaryKey: keyof OwnerContactSummary | null;
 }
 
 export const NAME_TYPE_OPTIONS: NameTypeOption[] = [
-  { value: "all", label: "すべて", summaryKey: "totalCandidates" },
+  { value: "all", label: "すべて", summaryKey: null }, // 件数非表示（Codex P2: all 述語と totalCandidates 不一致）
   { value: "numeric_only", label: "数字のみ", summaryKey: "numericOnly" },
   { value: "symbol_only", label: "記号のみ", summaryKey: "symbolOnly" },
   { value: "whitespace_only", label: "空白のみ", summaryKey: "whitespaceOnly" },
@@ -79,7 +83,7 @@ export const NAME_TYPE_OPTIONS: NameTypeOption[] = [
 ];
 
 export const CONTACT_TYPE_OPTIONS: ContactTypeOption[] = [
-  { value: "all", label: "すべて", summaryKey: "totalCandidates" },
+  { value: "all", label: "すべて", summaryKey: null }, // 件数非表示（Codex P2: all 述語と totalCandidates 不一致）
   { value: "zip_suspicious", label: "郵便番号 不正", summaryKey: "zipSuspicious" },
   { value: "zip_unformatted", label: "郵便番号 未整形", summaryKey: "zipUnformatted" },
   { value: "phone_suspicious", label: "電話 不正", summaryKey: "phoneSuspicious" },

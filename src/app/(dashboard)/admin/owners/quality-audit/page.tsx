@@ -385,10 +385,14 @@ export default function QualityAuditPage() {
 
   const nameRows = view?.tab === "name" ? view.candidates : [];
   const contactRows = view?.tab === "contact" ? view.candidates : [];
+  const viewMatches = view?.tab === tab;
+  const currentRowCount = tab === "name" ? nameRows.length : contactRows.length;
+  // 空表示は「全件確認済みで該当ゼロ」のときだけ。truncated 窓で候補ゼロ + hasNextPage の
+  // ときは「該当なし」ではなく continue-scanning（Codex P2: 後続窓を見落とさせない）。
+  const showContinue =
+    !loading && viewMatches && currentRowCount === 0 && meta.hasNextPage;
   const isEmpty =
-    !loading &&
-    ((tab === "name" && view?.tab === "name" && nameRows.length === 0) ||
-      (tab === "contact" && view?.tab === "contact" && contactRows.length === 0));
+    !loading && viewMatches && currentRowCount === 0 && !meta.hasNextPage;
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -439,7 +443,8 @@ export default function QualityAuditPage() {
       {/* 種別フィルタ（件数は最新スキャン窓の集計） */}
       <div className="mb-4 flex flex-wrap gap-1">
         {typeOptions.map((opt) => {
-          const count = summaryCount(opt.summaryKey);
+          const count =
+            opt.summaryKey != null ? summaryCount(opt.summaryKey) : null;
           return (
             <button
               key={opt.value}
@@ -475,6 +480,10 @@ export default function QualityAuditPage() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          </div>
+        ) : showContinue ? (
+          <div className="px-6 py-8 text-center text-sm text-gray-500">
+            この走査窓には該当がありませんでした。後続の走査窓が残っています。下の「もっと読み込む」で続きを確認してください。
           </div>
         ) : isEmpty ? (
           <div className="px-6 py-8 text-center text-sm text-gray-400">
