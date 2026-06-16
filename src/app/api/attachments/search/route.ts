@@ -2,10 +2,12 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
+  getUserPermissions,
   ApiError,
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
+import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 
 /**
@@ -15,7 +17,7 @@ import { writeAuditLog } from "@/lib/audit";
  * （targetType・targetId）で横断検索する admin 専用エンドポイント。既存
  * Attachment.@@index([targetType, targetId]) を活用する。schema 変更なし。
  *
- *  - 認証必須・admin 限定（admin 以外は 403）。
+ *  - 認証必須・実効権限 audit_log:read を要求（オーバーライド反映・権限なしは 403）。
  *  - 既定で isDeleted=false（削除済みは除外）。
  *  - 返却は **メタデータのみ**（id / fileName / type / createdAt / targetType /
  *    targetId）。**ファイル本体 URL(fileUrl)は select せず結果に一切載せない**
@@ -47,15 +49,15 @@ const QUERY_KEYS = [
 export async function GET(request: Request) {
   try {
     const session = await getApiSession();
-    // 認可は JWT 上の role ではなく DB の現在値で判定する。ログイン後に降格/無効化
-    // された管理者は、トークンが有効でもここで弾く（本検索は全添付のメタ＝ファイル名・
-    // targetId を横断露出するため、stale なトークン権限に依存しない）。
-    const actor = await prisma.user.findUnique({
-      where: { id: session.id },
-      select: { role: true, isActive: true },
-    });
-    if (!actor || !actor.isActive || actor.role !== "admin") {
-      throw new ApiError(403, "この操作は管理者のみ利用できます", "FORBIDDEN");
+    // 認可は実効権限で判定する。getUserPermissions は DB から role 由来テンプレートと
+    // ユーザー個別オーバーライドをマージした現在の権限を返すため、JWT 上の role や DB
+    // role 単独に依存せず、ログイン後の降格・権限剥奪も尊重する。本検索は全添付のメタ
+    // （ファイル名・targetId 等、PII を含み得る）を横断露出するため、管理オーバーサイトの
+    // 監査閲覧と同じ権限（audit_log:read）を要求する。dedicated な attachment 権限は
+    // seed/template 変更を要し本PR範囲外のため、既存 audit_log:read を再利用する。
+    const perms = await getUserPermissions(session.id);
+    if (!hasPermission(perms, "audit_log", "read")) {
+      throw new ApiError(403, "この操作の権限がありません", "FORBIDDEN");
     }
 
     // 空文字パラメータは未指定扱いにしてから検証する。
