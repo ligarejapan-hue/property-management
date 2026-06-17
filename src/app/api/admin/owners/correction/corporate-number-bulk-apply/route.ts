@@ -132,6 +132,16 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
+    // Codex P1: 本 route は admin correction surface（/api/admin/owners/correction/*）。
+    // 隣接の candidates 一覧 / address-fill と同じ admin/read 認可境界を先に課す。
+    // これが無いと user_management:read を持たない非 admin role が owner_corporate_number
+    // 書込権限だけで admin の補正ワークフローを直叩きできてしまう。
+    if (!hasPermission(perms, "user_management", "read")) {
+      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
+    if (!hasPermission(perms, "owner", "read")) {
+      throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
+    }
     if (!hasPermission(perms, "owner", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }

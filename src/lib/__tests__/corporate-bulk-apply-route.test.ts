@@ -99,6 +99,8 @@ const lookupMock = lookupCorporateNumber as unknown as Mock;
 const recordChangesMock = recordChanges as unknown as Mock;
 
 const OWNER_WRITE: PermissionEntry[] = [
+  { resource: "user_management", action: "read", granted: true },
+  { resource: "owner", action: "read", granted: true },
   { resource: "owner", action: "write", granted: true },
   { resource: "owner_corporate_number", action: "full", granted: true },
 ];
@@ -144,9 +146,28 @@ describe("corporate-number bulk apply", () => {
     permsMock.mockResolvedValue([]);
     expect((await POST(req())).status).toBe(403);
   });
+  it("user_management:read 無 → 403（admin 認可境界・Codex P1）", async () => {
+    permsMock.mockResolvedValue([
+      { resource: "owner", action: "read", granted: true },
+      { resource: "owner", action: "write", granted: true },
+      { resource: "owner_corporate_number", action: "full", granted: true },
+    ]);
+    expect((await POST(req())).status).toBe(403);
+  });
+  it("owner:read 無 → 403（admin 認可境界・Codex P1）", async () => {
+    permsMock.mockResolvedValue([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "write", granted: true },
+      { resource: "owner_corporate_number", action: "full", granted: true },
+    ]);
+    expect((await POST(req())).status).toBe(403);
+  });
   it("owner_corporate_number field 権限 無 → 403（field-level bypass 防止）", async () => {
     permsMock.mockResolvedValue([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
       { resource: "owner", action: "write", granted: true },
+      // owner_corporate_number は付与しない → field gate で 403
     ]);
     expect((await POST(req())).status).toBe(403);
   });
