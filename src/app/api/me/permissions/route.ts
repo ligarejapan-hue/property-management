@@ -6,6 +6,7 @@ import {
 } from "@/lib/api-helpers";
 import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
 import { isRegistryAutoFetchProviderConfigured } from "@/lib/registry-fetch/auto-fetch";
+import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 
 // ---------- GET /api/me/permissions ----------
 // 現在ログイン中のユーザーの権限一覧を返す。
@@ -20,6 +21,10 @@ export async function GET() {
       corporateLookup: isCorporateLookupConfigured(),
       // 謄本自動取得 provider が設定済みか（boolean のみ）。secret・設定値そのものは返さない。
       registryAutoFetch: isRegistryAutoFetchProviderConfigured(),
+      // scanned 謄本の OCR 下書き生成が「この利用者に」使えるか。
+      // OCR サービス設定済み（localhost allowlist 通過）かつ admin のときだけ true。
+      registryOcrDraft:
+        isRegistryOcrConfigured() && session.role === "admin",
     };
     return apiResponse({ permissions, capabilities });
   } catch (error) {

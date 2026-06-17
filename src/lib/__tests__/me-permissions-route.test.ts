@@ -68,6 +68,10 @@ vi.mock("@/lib/registry-fetch/auto-fetch", () => ({
   isRegistryAutoFetchProviderConfigured: vi.fn(),
 }));
 
+vi.mock("@/lib/registry-ocr/client", () => ({
+  isRegistryOcrConfigured: vi.fn(),
+}));
+
 import {
   ApiError,
   getApiSession,
@@ -76,6 +80,7 @@ import {
 } from "@/lib/api-helpers";
 import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
 import { isRegistryAutoFetchProviderConfigured } from "@/lib/registry-fetch/auto-fetch";
+import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { GET } from "@/app/api/me/permissions/route";
 
 const SESSION = {
@@ -97,6 +102,7 @@ beforeEach(() => {
   (getUserPermissions as Mock).mockResolvedValue(PERMS);
   (isCorporateLookupConfigured as Mock).mockReturnValue(true);
   (isRegistryAutoFetchProviderConfigured as Mock).mockReturnValue(false);
+  (isRegistryOcrConfigured as Mock).mockReturnValue(false);
 });
 
 describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
@@ -113,6 +119,8 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(body.capabilities).toEqual({
       corporateLookup: true,
       registryAutoFetch: false,
+      // office_staff（非 admin）かつ OCR 未設定 → false
+      registryOcrDraft: false,
     });
     expect(isCorporateLookupConfigured).toHaveBeenCalledTimes(1);
     expect(isRegistryAutoFetchProviderConfigured).toHaveBeenCalledTimes(1);
@@ -125,7 +133,25 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(body.capabilities).toEqual({
       corporateLookup: true,
       registryAutoFetch: true,
+      registryOcrDraft: false,
     });
+  });
+
+  it("registryOcrDraft は OCR 設定済み かつ admin のときだけ true", async () => {
+    (isRegistryOcrConfigured as Mock).mockReturnValue(true);
+    // 設定済みでも office_staff なら false
+    let body = await (await GET()).json();
+    expect(body.capabilities.registryOcrDraft).toBe(false);
+
+    // admin かつ設定済みで true
+    (getApiSession as Mock).mockResolvedValue({ ...SESSION, role: "admin" });
+    body = await (await GET()).json();
+    expect(body.capabilities.registryOcrDraft).toBe(true);
+
+    // admin でも未設定なら false
+    (isRegistryOcrConfigured as Mock).mockReturnValue(false);
+    body = await (await GET()).json();
+    expect(body.capabilities.registryOcrDraft).toBe(false);
   });
 
   it("レスポンス body のトップレベルは permissions / capabilities の 2 キーのみ（client/provider が依存するキー名の固定）", async () => {
@@ -135,6 +161,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(Object.keys(body.capabilities).sort()).toEqual([
       "corporateLookup",
       "registryAutoFetch",
+      "registryOcrDraft",
     ]);
   });
 
