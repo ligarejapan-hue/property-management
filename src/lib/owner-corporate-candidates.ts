@@ -81,7 +81,7 @@ export interface CandidateDisplayConfig {
  *
  * Codex P1/P2 対応で note / name / address いずれにも適用する。
  */
-function isRawVisible(
+export function isRawVisible(
   level: CandidateDisplayConfig[keyof CandidateDisplayConfig],
 ): boolean {
   return level === "full" || level === "read" || level === "edit";

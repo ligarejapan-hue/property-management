@@ -27,6 +27,7 @@ vi.mock("@/lib/api-helpers", () => {
     ApiError: MockApiError,
     getApiSession: vi.fn(),
     getUserPermissions: vi.fn(),
+    getOwnerDisplayConfig: vi.fn(),
     apiResponse: vi.fn((data: unknown, status = 200) =>
       Response.json(data, { status }),
     ),
@@ -62,7 +63,11 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import prisma from "@/lib/prisma";
-import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import {
+  getApiSession,
+  getUserPermissions,
+  getOwnerDisplayConfig,
+} from "@/lib/api-helpers";
 import { detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import {
   isCorporateLookupConfigured,
@@ -79,6 +84,15 @@ const p = prisma as unknown as {
 };
 const sessionMock = getApiSession as unknown as Mock;
 const permsMock = getUserPermissions as unknown as Mock;
+const displayConfigMock = getOwnerDisplayConfig as unknown as Mock;
+
+/** raw-visible（full）の display config。name/address/note すべて検出対象。 */
+const FULL_DISPLAY = {
+  name: "full",
+  address: "full",
+  note: "full",
+  corporateNumber: "full",
+} as const;
 const detectMock = detectCorporateNumberInOwnerLike as unknown as Mock;
 const configuredMock = isCorporateLookupConfigured as unknown as Mock;
 const lookupMock = lookupCorporateNumber as unknown as Mock;
@@ -108,6 +122,7 @@ beforeEach(() => {
     role: "admin",
   } as ApiSession);
   permsMock.mockResolvedValue(OWNER_WRITE);
+  displayConfigMock.mockResolvedValue(FULL_DISPLAY);
   configuredMock.mockReturnValue(true);
   // 既定: missing(null cn, version 1)・単一検出・found∧非廃止・update ok
   p.owner.findUnique.mockResolvedValue({
@@ -154,11 +169,48 @@ describe("corporate-number bulk apply", () => {
     expect(body.applied).toBe(1);
     expect(p.owner.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: OWNER, version: 1 },
+        // Codex P2: corporateNumber: null を where に含め、missing のときだけ書き込む
+        where: { id: OWNER, version: 1, corporateNumber: null },
         data: expect.objectContaining({ corporateNumber: NUM }),
       }),
     );
     expect(recordChangesMock).toHaveBeenCalled();
+  });
+
+  it("field-visibility: name がマスク（raw-visible でない）→ name 由来の番号は検出しない（P1 bypass 防止）", async () => {
+    // owner_corporate_number は full（書込可）だが name は masked。
+    displayConfigMock.mockResolvedValue({
+      name: "masked",
+      address: "full",
+      note: "full",
+      corporateNumber: "full",
+    });
+    // 番号は name にのみ混入。detect は実際に渡された raw 値に基づいて返す。
+    p.owner.findUnique.mockResolvedValue({
+      id: OWNER,
+      name: `法人番号 ${NUM}`,
+      address: null,
+      note: null,
+      corporateNumber: null,
+      version: 1,
+      isArchived: false,
+    });
+    detectMock.mockImplementation(
+      (o: { name?: string | null; address?: string | null; note?: string | null }) => {
+        const text = [o.name, o.address, o.note].filter(Boolean).join(" ");
+        return text.includes(NUM)
+          ? { candidates: [NUM], detectedIn: ["name"] }
+          : { candidates: [], detectedIn: [] };
+      },
+    );
+    const body = await (await POST(req())).json();
+    // masked name は null 化されて detect に渡る → 検出なし → skip
+    expect(detectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: null }),
+    );
+    expect(body.results[0].status).toBe("no_single_detection");
+    expect(lookupMock).not.toHaveBeenCalled();
+    expect(p.owner.updateMany).not.toHaveBeenCalled();
   });
 
   it("already_set: 既存 corporateNumber 有 → skip（lookup/update しない）", async () => {

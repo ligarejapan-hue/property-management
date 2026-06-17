@@ -16,6 +16,7 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
@@ -27,6 +28,7 @@ import {
   isCorporateLookupConfigured,
   lookupCorporateNumber,
 } from "@/lib/corporate-lookup";
+import { isRawVisible } from "@/lib/owner-corporate-candidates";
 import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 
 export const runtime = "nodejs";
@@ -55,10 +57,13 @@ type ItemStatus =
   | "closed"
   | "lookup_error";
 
+type OwnerDisplayConfig = Awaited<ReturnType<typeof getOwnerDisplayConfig>>;
+
 async function applyOne(
   ownerId: string,
   version: number,
   changedBy: string,
+  displayConfig: OwnerDisplayConfig,
 ): Promise<ItemStatus> {
   const owner = await prisma.owner.findUnique({
     where: { id: ownerId },
@@ -77,10 +82,15 @@ async function applyOne(
   if (owner.corporateNumber) return "already_set"; // missing 限定（既存値は触らない）
   if (owner.version !== version) return "version_conflict";
 
+  // Codex P1: candidates 一覧と同じく field-level display 権限を尊重する。
+  // raw-visible (full/read/edit) でない name/address/note からは 13桁を検出しない。
+  // これにより「owner_corporate_number は書けるが name/note はマスク」という role が、
+  // 閲覧できないフィールドに混入した番号を反映する field-level bypass を防ぐ
+  // （isRawVisible は owner-corporate-candidates.ts と単一の source of truth）。
   const detect = detectCorporateNumberInOwnerLike({
-    name: owner.name,
-    address: owner.address,
-    note: owner.note,
+    name: isRawVisible(displayConfig.name) ? owner.name : null,
+    address: isRawVisible(displayConfig.address) ? owner.address : null,
+    note: isRawVisible(displayConfig.note) ? owner.note : null,
   });
   if (detect.candidates.length !== 1) return "no_single_detection"; // 0=未検出 / 2+=多重は手動
 
@@ -95,11 +105,16 @@ async function applyOne(
   if (!lookup.found) return "lookup_no_result";
   if (lookup.isClosed) return "closed"; // 廃止法人 skip
 
+  // Codex P2: where に corporateNumber: null を含める。
+  // import/registry 等の再利用パスは `where: { id, corporateNumber: null }` で
+  // version を bump せず corporateNumber を埋めるため、read→write の隙間でそれが
+  // 走ると version 一致のままになり missing 前提が崩れる。null 条件を付けることで
+  // 「依然 missing のときだけ」書き込み、他パスが入れた値を上書きしない（count 0=skip）。
   const updated = await prisma.owner.updateMany({
-    where: { id: ownerId, version },
+    where: { id: ownerId, version, corporateNumber: null },
     data: { corporateNumber: num, version: { increment: 1 } },
   });
-  if (updated.count === 0) return "version_conflict"; // race（直前に他者更新）
+  if (updated.count === 0) return "version_conflict"; // race（version 変化 or 既に他パスが set）
 
   await recordChanges({
     targetTable: "owners",
@@ -129,6 +144,11 @@ export async function POST(request: NextRequest) {
       throw new ApiError(503, "法人番号APIが設定されていません", "NOT_CONFIGURED");
     }
 
+    // Codex P1: 検出に使う field-level display 権限。candidates 一覧と同じ source。
+    // owner_corporate_number=hidden は書込権限ゲートで既に弾かれているが、
+    // name/address/note の可視性は別なので detect 時に尊重する。
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+
     const json = await request.json().catch(() => null);
     const parsed = bodySchema.safeParse(json);
     if (!parsed.success) {
@@ -137,7 +157,12 @@ export async function POST(request: NextRequest) {
 
     const results: Array<{ ownerId: string; status: ItemStatus }> = [];
     for (const item of parsed.data.owners) {
-      const status = await applyOne(item.ownerId, item.version, session.id);
+      const status = await applyOne(
+        item.ownerId,
+        item.version,
+        session.id,
+        displayConfig,
+      );
       results.push({ ownerId: item.ownerId, status });
     }
 
