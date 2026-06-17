@@ -232,6 +232,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "previewGenerated",
     "errorCode",
   ]),
+  // 法人番号 一括反映: 件数のみ（owner.id 配列・法人番号・生値は載せない）。
+  owner_correction_corporate_bulk_apply: new Set([
+    "requested",
+    "applied",
+    "skipped",
+  ]),
 };
 
 /**
