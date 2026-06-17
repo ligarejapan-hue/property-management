@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 
@@ -39,12 +40,8 @@ export async function DELETE(
       throw new ApiError(404, "写真が見つかりません", "NOT_FOUND");
     }
 
-    // field_staff scope check
-    if (
-      session.role === "field_staff" &&
-      photo.property.createdBy !== session.id &&
-      photo.property.assignedTo !== session.id
-    ) {
+    // field_staff scope check（物件詳細 API と同一判定を共有）
+    if (!canAccessPropertyRecord(session, photo.property)) {
       throw new ApiError(403, "この写真を削除する権限がありません", "FORBIDDEN");
     }
 
@@ -108,11 +105,7 @@ export async function PATCH(
       throw new ApiError(404, "写真が見つかりません", "NOT_FOUND");
     }
 
-    if (
-      session.role === "field_staff" &&
-      photo.property.createdBy !== session.id &&
-      photo.property.assignedTo !== session.id
-    ) {
+    if (!canAccessPropertyRecord(session, photo.property)) {
       throw new ApiError(403, "この写真を編集する権限がありません", "FORBIDDEN");
     }
 

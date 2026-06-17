@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 // ---------- DELETE /api/properties/:id/attachments/:attachmentId ----------
 // Soft-delete (sets isDeleted = true)
@@ -42,12 +43,11 @@ export async function DELETE(
       throw new ApiError(404, "添付ファイルが見つかりません", "NOT_FOUND");
     }
 
-    // field_staff スコープ: 担当外の物件の添付ファイルは削除不可
+    // field_staff スコープ: 担当外の物件の添付ファイルは削除不可（物件詳細 API と同一判定を共有）。
+    // attachment.property は nullable のため、存在するときだけ判定する（=旧 inline と同等）。
     if (
-      session.role === "field_staff" &&
       attachment.property &&
-      attachment.property.createdBy !== session.id &&
-      attachment.property.assignedTo !== session.id
+      !canAccessPropertyRecord(session, attachment.property)
     ) {
       throw new ApiError(403, "この添付ファイルを削除する権限がありません", "FORBIDDEN");
     }
