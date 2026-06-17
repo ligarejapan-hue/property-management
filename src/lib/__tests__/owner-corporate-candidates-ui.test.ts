@@ -92,6 +92,28 @@ describe("admin/owners/correction page Phase E 法人番号タブ", () => {
     expect(body).not.toMatch(/bulkApplyCorporateNumbers\([\s\S]{0,120}ownerName/);
   });
 
+  it("Codex P2: 一括反映中はサブフィルタ/ページ送りを無効化する（navigation race 防止）", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // サブフィルタ tab を bulkSubmitting 中 disable
+    expect(body).toMatch(/disabled=\{bulkSubmitting\}/);
+    // 前へ / 次へ も bulkSubmitting を disabled に含める
+    expect(body).toMatch(/disabled=\{cursorStack\.length === 0 \|\| bulkSubmitting\}/);
+    expect(body).toMatch(/!data\.nextCursor \|\| bulkSubmitting\}/);
+  });
+
+  it("Codex P2: bulkResult/bulkError は hasEligible の外で描画する（全件反映後も結果表示）", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    expect(body).toMatch(/hasEligible の外で描画/);
+    expect(body).toMatch(/\{bulkResult && \(/);
+    expect(body).toMatch(/\{bulkError && \(/);
+  });
+
   it("表示に使う列は *Masked フィールドで、生 corporateNumber を直参照しない", () => {
     const panelMatch = pageSrc.match(
       /function CorporateNumberCandidatesPanel[\s\S]*$/,

@@ -1140,7 +1140,11 @@ function CorporateNumberCandidatesPanel() {
             key={tab.key}
             type="button"
             onClick={() => setSubFilter(tab.key)}
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+            // Codex P2: 一括反映 POST 実行中はフィルタ切替を無効化。
+            // 反映後の load(apiType, cursor) が、その間に切り替えた新しい表示を
+            // 上書きしてしまう race を防ぐ（ページ送りも同様に無効化）。
+            disabled={bulkSubmitting}
+            className={`rounded-full border px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
               subFilter === tab.key
                 ? "border-blue-500 bg-blue-100 text-blue-800"
                 : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
@@ -1248,29 +1252,30 @@ function CorporateNumberCandidatesPanel() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
 
-              {bulkError && (
-                <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700">
-                  {bulkError}
-                </p>
-              )}
-
-              {/* 結果（件数のみ・PII なし）。apply 後 refresh しても保持される。 */}
-              {bulkResult && (
-                <div className="mt-2 rounded-md border border-emerald-300 bg-white px-3 py-2 text-gray-700">
-                  <p className="font-medium text-emerald-800">
-                    反映 {bulkResult.applied} 件 / スキップ {bulkResult.skipped}{" "}
-                    件
-                  </p>
-                  <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
-                    {bulkResult.byStatus.map((s) => (
-                      <li key={s.status}>
-                        {BULK_STATUS_LABEL[s.status]}: {s.count}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+          {/* Codex P2: bulkError / bulkResult は hasEligible の外で描画する。
+              ページ内の未登録を全件反映すると、その行は missing から外れ（例: same 化で
+              既定フィルタから除外）hasEligible=false になり、toolbar ごと結果サマリが
+              消えてオペレーターが反映/スキップ件数を確認できない問題を防ぐ。 */}
+          {bulkError && (
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {bulkError}
+            </p>
+          )}
+          {bulkResult && (
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-gray-700">
+              <p className="font-medium text-emerald-800">
+                反映 {bulkResult.applied} 件 / スキップ {bulkResult.skipped} 件
+              </p>
+              <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
+                {bulkResult.byStatus.map((s) => (
+                  <li key={s.status}>
+                    {BULK_STATUS_LABEL[s.status]}: {s.count}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -1394,7 +1399,8 @@ function CorporateNumberCandidatesPanel() {
                 updateUrlQuery(subFilter, prev);
                 load(apiType, prev);
               }}
-              disabled={cursorStack.length === 0}
+              // Codex P2: 一括反映 POST 実行中はページ送りを無効化（race 防止）。
+              disabled={cursorStack.length === 0 || bulkSubmitting}
               className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
             >
               前へ
@@ -1408,7 +1414,7 @@ function CorporateNumberCandidatesPanel() {
                 updateUrlQuery(subFilter, data.nextCursor);
                 load(apiType, data.nextCursor);
               }}
-              disabled={!data.hasNextPage || !data.nextCursor}
+              disabled={!data.hasNextPage || !data.nextCursor || bulkSubmitting}
               className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
             >
               次へ
