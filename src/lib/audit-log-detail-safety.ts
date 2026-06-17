@@ -218,6 +218,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "auditOnlyCandidates",
     "totalCandidates",
   ]),
+  // 添付横断検索（GET /api/attachments/search）の非PII フィルタメタデータ。
+  // targetType=対象種別(enum) / from・to=期間(ISO日付)。type / targetId / resultCount は
+  // ALWAYS_SAFE。hasFileName は /name/i denylist ゆえ ACTION_FORCE_SAFE_KEYS 側で保持する。
+  // 検索語（fileName 等）の生値は route 側で記録しないため対象外。
+  attachment_search: new Set(["targetType", "from", "to"]),
 };
 
 /**
@@ -235,6 +240,9 @@ const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // boolean 監査情報。force-safe で保持する（値は boolean ゆえ PII 流入余地なし）。
   // ownerGroupCount（件数）は数値限定の numeric-force-safe 側で許可する。
   display_name_audit_view: new Set(["ownerTruncated", "ownerNameVisible"]),
+  // attachment_search: hasFileName は /name/i denylist に当たるが「ファイル名フィルタを
+  // 使ったか」の boolean ゆえ PII 流入余地なし。force-safe で保持する。
+  attachment_search: new Set(["hasFileName"]),
 };
 
 /**
