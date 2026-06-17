@@ -7,7 +7,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, getOwnerFieldLevel } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 
 /**
@@ -17,8 +17,9 @@ import { writeAuditLog } from "@/lib/audit";
  * （targetType・targetId）で横断検索する admin 専用エンドポイント。既存
  * Attachment.@@index([targetType, targetId]) を活用する。schema 変更なし。
  *
- *  - 認証必須・実効権限 user_management:read かつ property:read かつ owner:read を要求
- *    （オーバーライド反映・いずれか欠落/剥奪で 403）。
+ *  - 認証必須・実効権限を要求（オーバーライド反映・いずれか欠落/剥奪/マスクで 403）:
+ *    user_management:read かつ property:read かつ owner:read、加えてファイル名に混入し得る
+ *    owner PII の field-level 可視性（owner_name・owner_address が edit/full/read）。
  *  - 既定で isDeleted=false（削除済みは除外）。
  *  - 返却は **メタデータのみ**（id / fileName / type / createdAt / targetType /
  *    targetId）。**ファイル本体 URL(fileUrl)は select せず結果に一切載せない**
@@ -28,6 +29,14 @@ import { writeAuditLog } from "@/lib/audit";
  */
 
 const RESULT_LIMIT = 200;
+
+// owner PII フィールドを「生値で閲覧できる」とみなす field-level 可視性。
+// partial/masked/hidden は不可（ファイル名に混入し得る owner 氏名・住所の保護）。
+const OWNER_PII_VISIBLE_LEVELS: ReadonlySet<string> = new Set([
+  "edit",
+  "full",
+  "read",
+]);
 
 const querySchema = z.object({
   type: z.enum(["general", "registry"]).optional(),
@@ -58,10 +67,22 @@ export async function GET(request: Request) {
     // owner:read）も要求する。これにより audit ログ閲覧権限だけ／データ権限を剥奪された
     // アカウントは弾かれる。いずれかを欠く/オーバーライドで剥奪された場合は 403。
     const perms = await getUserPermissions(session.id);
+    // さらに、ファイル名は owner 氏名・住所等の PII を含み得るため、owner PII フィールドの
+    // field-level 可視性（owner_name・owner_address が edit/full/read）も要求する。
+    // masked/hidden の利用者に生ファイル名を横断検索/閲覧させず、既存の field-level
+    // マスキングを本経由で回避できないようにする。
+    const ownerNameVisible = OWNER_PII_VISIBLE_LEVELS.has(
+      getOwnerFieldLevel(perms, "owner_name"),
+    );
+    const ownerAddressVisible = OWNER_PII_VISIBLE_LEVELS.has(
+      getOwnerFieldLevel(perms, "owner_address"),
+    );
     const allowed =
       hasPermission(perms, "user_management", "read") &&
       hasPermission(perms, "property", "read") &&
-      hasPermission(perms, "owner", "read");
+      hasPermission(perms, "owner", "read") &&
+      ownerNameVisible &&
+      ownerAddressVisible;
     if (!allowed) {
       throw new ApiError(403, "この操作の権限がありません", "FORBIDDEN");
     }
