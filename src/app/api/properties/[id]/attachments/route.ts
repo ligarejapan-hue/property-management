@@ -11,6 +11,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import {
   getStorage,
   validateFile,
@@ -51,7 +52,7 @@ export async function GET(
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    // field_staff スコープ: 担当外の物件は閲覧不可（photos と同じ振る舞い）
+    // field_staff スコープ: 担当外の物件は閲覧不可（物件詳細 API と同じ判定を共有）
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
       select: { id: true, createdBy: true, assignedTo: true },
@@ -59,11 +60,7 @@ export async function GET(
     if (!property) {
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
     }
-    if (
-      session.role === "field_staff" &&
-      property.createdBy !== session.id &&
-      property.assignedTo !== session.id
-    ) {
+    if (!canAccessPropertyRecord(session, property)) {
       throw new ApiError(403, "この物件を閲覧する権限がありません", "FORBIDDEN");
     }
 
@@ -109,11 +106,7 @@ export async function POST(
     if (!property) {
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
     }
-    if (
-      session.role === "field_staff" &&
-      property.createdBy !== session.id &&
-      property.assignedTo !== session.id
-    ) {
+    if (!canAccessPropertyRecord(session, property)) {
       throw new ApiError(403, "この物件を編集する権限がありません", "FORBIDDEN");
     }
 
