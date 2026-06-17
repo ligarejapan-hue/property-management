@@ -17,14 +17,18 @@ import {
   ExternalLink,
   Circle,
   Info,
+  Wand2,
 } from "lucide-react";
 import {
   importRegistryPdf,
   importRegistryPdfFile,
   parseRegistryPdfFile,
   parseRegistryPdfText,
+  requestRegistryOcrDraft,
   searchProperties,
 } from "@/lib/api-client";
+import { shouldOfferOcrDraft } from "@/lib/registry-ocr/visibility";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import ImportSwitcher from "@/components/import/import-switcher";
 
 // ---------------------------------------------------------------------------
@@ -330,6 +334,16 @@ export default function RegistryPdfPage() {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // OCR 下書き（scanned 謄本のみ・admin かつ OCR 設定済みのとき）
+  const [ocrGenerating, setOcrGenerating] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+
+  // capabilities.registryOcrDraft（OCR 設定済み ∧ admin）は ScreenProtectionProvider が
+  // 配布する /api/me/permissions の結果から得る（page で直接 fetch しない＝19-A 方針）。
+  // 未取得・取得失敗時は false（fail-safe = OCR 導線を出さない）。
+  const { capabilities } = useScreenProtection();
+  const ocrDraftAvailable = capabilities?.registryOcrDraft === true;
+
   // -------------------------------------------------------------------------
   // Handlers
   // -------------------------------------------------------------------------
@@ -420,6 +434,56 @@ export default function RegistryPdfPage() {
       setParsing(false);
     }
   }, [uploadTab, selectedFile, text]);
+
+  // OCR 下書き生成: scanned PDF を localhost OCR へ送り、得た下書きで extract step の
+  // フィールドを埋める（DB 書込なし・自動確定なし・必ず admin が確認して confirm）。
+  const handleOcrDraft = useCallback(async () => {
+    if (!selectedFile) return;
+    setOcrGenerating(true);
+    setOcrError(null);
+    try {
+      const result = (await requestRegistryOcrDraft(selectedFile)) as ParseResponse & {
+        ocrWarnings?: string[];
+      };
+      const parsed = result.parsed;
+      const toField = (v: string | null) => ({
+        value: v ?? "",
+        confidence: assignConfidence(v ?? ""),
+      });
+      setFields({
+        realEstateNumber: toField(parsed.realEstateNumber),
+        address: toField(parsed.address),
+        lotNumber: toField(parsed.lotNumber),
+        buildingNumber: toField(parsed.buildingNumber),
+        landCategory: toField(parsed.landCategory),
+        area: toField(parsed.area),
+      });
+      setOwners(
+        parsed.owners.map((o) => ({
+          name: o.name,
+          address: o.address ?? "",
+          share: o.share ?? "",
+        })),
+      );
+      setWarnings([
+        "OCRで生成した下書きです。登記の確定値として扱わず、必ず内容を確認してください。",
+        // OCR エンジン由来の警告（ページスキップ・低品質等）も admin に見せる。
+        ...(result.ocrWarnings ?? []),
+        ...parsed.warnings,
+      ]);
+    } catch (err) {
+      setOcrError(
+        err instanceof Error
+          ? err.message
+          : "OCRに失敗しました。テキスト貼り付けをご利用ください。",
+      );
+    } finally {
+      setOcrGenerating(false);
+    }
+  }, [selectedFile]);
+
+  // OCR 下書き導線を出すか（digital-native には絶対に出さない＝非回帰）。
+  const ocrOffered = shouldOfferOcrDraft({ isLikelyScanned, ocrDraftAvailable });
 
   const updateField = (key: string, value: string) => {
     setFields((prev) => ({
@@ -624,14 +688,14 @@ export default function RegistryPdfPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,.txt"
+                  accept=".pdf"
                   className="hidden"
                   onChange={handleFileSelect}
                 />
               </div>
               <p className="mt-2 text-xs text-gray-400">
                 <Info className="mr-1 inline h-3 w-3" />
-                現在はテキスト読み込みのみ対応（PDF直接解析は今後対応予定）
+                PDFファイルをサーバー側で抽出します。テキストは「テキスト貼り付け」タブを、画像化された謄本PDFは「OCRで下書き生成」または手動貼付をご利用ください。
               </p>
             </div>
           )}
@@ -666,7 +730,9 @@ export default function RegistryPdfPage() {
           <div className="mt-6 flex justify-end">
             <button
               onClick={handleParse}
-              disabled={!text.trim() || parsing}
+              disabled={
+                (uploadTab === "file" ? !selectedFile : !text.trim()) || parsing
+              }
               className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {parsing ? (
@@ -699,17 +765,41 @@ export default function RegistryPdfPage() {
             >
               <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-red-700">
                 <AlertTriangle className="h-4 w-4" />
-                画像化された謄本PDFの可能性があります（OCR未対応）
+                画像化された謄本PDFの可能性があります
+                {ocrOffered ? "" : "（OCR未対応）"}
               </h4>
               <p className="text-sm text-red-700">
                 PDF本文をほとんど抽出できませんでした
                 {embeddedTextLength !== null && (
                   <>（抽出文字数: {embeddedTextLength} 文字）</>
                 )}
-                。本システムはOCR未対応のため、画像化PDFのテキストは取得できません。
-                外部のOCRツールやテキストエディタで本文をテキスト化し、下のボタンから「テキスト貼り付け」へ切り替えて手動で投入してください。
+                。
+                {ocrOffered
+                  ? "「OCRで下書き生成」で画像からテキストの下書きを生成できます（結果は必ず内容を確認してください）。または「テキスト貼り付け」で手動投入もできます。"
+                  : "本システムはOCR未対応のため、画像化PDFのテキストは取得できません。外部のOCRツールやテキストエディタで本文をテキスト化し、下のボタンから「テキスト貼り付け」へ切り替えて手動で投入してください。"}
               </p>
+              {ocrError && (
+                <p className="mt-2 text-xs text-red-700" role="alert">
+                  {ocrError}
+                </p>
+              )}
               <div className="mt-3 flex flex-wrap items-center gap-3">
+                {ocrOffered && (
+                  <button
+                    type="button"
+                    data-testid="scanned-pdf-ocr-draft"
+                    onClick={handleOcrDraft}
+                    disabled={ocrGenerating || !selectedFile}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500 bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {ocrGenerating ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="h-3.5 w-3.5" />
+                    )}
+                    OCRで下書き生成
+                  </button>
+                )}
                 <button
                   type="button"
                   data-testid="scanned-pdf-switch-to-paste"
@@ -731,7 +821,9 @@ export default function RegistryPdfPage() {
                   テキストを貼り付けるモードに切り替える
                 </button>
                 <span className="text-[11px] text-red-700">
-                  ※ OCRは未実装です。自動テキスト化は行われません。
+                  {ocrOffered
+                    ? "※ OCR結果は下書きです。確定値として扱わず、必ず内容を確認してください。"
+                    : "※ OCRは未実装です。自動テキスト化は行われません。"}
                 </span>
               </div>
             </div>

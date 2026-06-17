@@ -75,10 +75,11 @@ describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2�
     );
   });
 
-  it("MeCapabilities は corporateLookup / registryAutoFetch の boolean（route 契約と同名）", () => {
-    expect(providerSrc).toMatch(
-      /export interface MeCapabilities \{\s*corporateLookup:\s*boolean;\s*registryAutoFetch:\s*boolean;\s*\}/,
-    );
+  it("MeCapabilities は corporateLookup / registryAutoFetch / registryOcrDraft の boolean（route 契約と同名）", () => {
+    expect(providerSrc).toMatch(/export interface MeCapabilities \{/);
+    expect(providerSrc).toMatch(/corporateLookup:\s*boolean;/);
+    expect(providerSrc).toMatch(/registryAutoFetch:\s*boolean;/);
+    expect(providerSrc).toMatch(/registryOcrDraft:\s*boolean;/);
   });
 
   it("capabilities は === true の厳格判定（boolean 以外を広く許可しない）", () => {

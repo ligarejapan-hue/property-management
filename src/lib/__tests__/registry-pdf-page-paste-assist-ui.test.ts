@@ -56,11 +56,12 @@ describe("registry-pdf page Phase F-2a 強化 UI", () => {
     expect(pageSrc).not.toMatch(/result\.rawText/);
   });
 
-  it("F-2a: 実装範囲外（OCR / tesseract / sharp / 外部 OCR SDK）の依存・実行を含まない", () => {
+  it("ローカル OCR エンジン（tesseract/sharp）はページに同梱せず、OCR は localhost サービスへ委譲する", () => {
+    // ブラウザ内 OCR 実行や OCR エンジンの同梱はしない（PII egress 防止・bundle 肥大回避）。
     expect(pageSrc).not.toMatch(/tesseract/i);
     expect(pageSrc).not.toMatch(/from\s+"sharp"/);
-    expect(pageSrc).not.toMatch(/\/api\/[^"]*\/ocr/);
-    expect(pageSrc).not.toMatch(/runOcr|performOcr|tryOcr/);
+    // OCR は gated client(requestRegistryOcrDraft)経由でサーバ route へ委譲する。
+    expect(pageSrc).toMatch(/requestRegistryOcrDraft/);
   });
 
   it("F-2a: 既存 isLikelyScanned 後方互換読みも残す", () => {

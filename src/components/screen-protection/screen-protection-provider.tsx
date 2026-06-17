@@ -49,6 +49,8 @@ import ScreenProtectionGuard from "./screen-protection-guard";
 export interface MeCapabilities {
   corporateLookup: boolean;
   registryAutoFetch: boolean;
+  /** scanned 謄本の OCR 下書き生成が使えるか（OCR 設定済み ∧ admin を server 側で束ねた値）。 */
+  registryOcrDraft: boolean;
 }
 
 interface ScreenProtectionState {
@@ -144,6 +146,7 @@ export default function ScreenProtectionProvider({
         setCapabilities({
           corporateLookup: json.capabilities?.corporateLookup === true,
           registryAutoFetch: json.capabilities?.registryAutoFetch === true,
+          registryOcrDraft: json.capabilities?.registryOcrDraft === true,
         });
         setPermissionsError(false);
         setPermissionsLoading(false);

@@ -3,40 +3,19 @@ import { shouldOfferOcrDraft } from "../visibility";
 import { reliabilityFromConfidence } from "../types";
 
 describe("shouldOfferOcrDraft", () => {
-  it("likely_scanned ∧ configured ∧ admin → true", () => {
+  it("likely_scanned ∧ ocrDraftAvailable → true", () => {
     expect(
-      shouldOfferOcrDraft({
-        isLikelyScanned: true,
-        ocrConfigured: true,
-        isAdmin: true,
-      }),
+      shouldOfferOcrDraft({ isLikelyScanned: true, ocrDraftAvailable: true }),
     ).toBe(true);
   });
   it("digital-native(!likely_scanned) → false（非回帰の要）", () => {
     expect(
-      shouldOfferOcrDraft({
-        isLikelyScanned: false,
-        ocrConfigured: true,
-        isAdmin: true,
-      }),
+      shouldOfferOcrDraft({ isLikelyScanned: false, ocrDraftAvailable: true }),
     ).toBe(false);
   });
-  it("OCR 未設定 → false", () => {
+  it("capability false（未設定 or 非admin）→ false", () => {
     expect(
-      shouldOfferOcrDraft({
-        isLikelyScanned: true,
-        ocrConfigured: false,
-        isAdmin: true,
-      }),
-    ).toBe(false);
-  });
-  it("非 admin → false", () => {
-    expect(
-      shouldOfferOcrDraft({
-        isLikelyScanned: true,
-        ocrConfigured: true,
-        isAdmin: false,
-      }),
+      shouldOfferOcrDraft({ isLikelyScanned: true, ocrDraftAvailable: false }),
     ).toBe(false);
   });
 });

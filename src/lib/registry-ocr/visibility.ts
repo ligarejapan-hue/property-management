@@ -7,14 +7,11 @@
  */
 export interface OcrDraftVisibilityInput {
   isLikelyScanned: boolean;
-  ocrConfigured: boolean;
-  isAdmin: boolean;
+  // /api/me/permissions の capabilities.registryOcrDraft
+  // （OCR 設定済み ∧ admin を server 側で束ねた値）。
+  ocrDraftAvailable: boolean;
 }
 
 export function shouldOfferOcrDraft(input: OcrDraftVisibilityInput): boolean {
-  return (
-    input.isLikelyScanned === true &&
-    input.ocrConfigured === true &&
-    input.isAdmin === true
-  );
+  return input.isLikelyScanned === true && input.ocrDraftAvailable === true;
 }

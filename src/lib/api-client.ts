@@ -1251,6 +1251,19 @@ export async function parseRegistryPdfFile(file: File) {
   });
 }
 
+/**
+ * scanned 謄本の OCR 下書き生成（preview 形を返す・DB 書込なし）。
+ * admin 限定・OCR 未設定で 501・失敗は throw（呼び出し側で手動貼付 fallback）。
+ */
+export async function requestRegistryOcrDraft(file: File) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return apiFetch("/api/import/registry-pdf/ocr-draft", {
+    method: "POST",
+    body: form,
+  });
+}
+
 /** テキスト貼り付けプレビュー専用 (DB書き込みなし) */
 export async function parseRegistryPdfText(text: string, fileName?: string) {
   if (USE_MOCK) {
