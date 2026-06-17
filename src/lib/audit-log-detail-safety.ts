@@ -223,6 +223,15 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // ALWAYS_SAFE。hasFileName は /name/i denylist ゆえ ACTION_FORCE_SAFE_KEYS 側で保持する。
   // 検索語（fileName 等）の生値は route 側で記録しないため対象外。
   attachment_search: new Set(["targetType", "from", "to"]),
+  // registry_ocr_draft: OCR 下書き生成の非PII メタ（実行結果/件数のみ）。
+  // raw OCR text・PDF 本文・氏名・住所等は route 側で一切載せない。
+  registry_ocr_draft: new Set([
+    "status",
+    "pages",
+    "charCount",
+    "previewGenerated",
+    "errorCode",
+  ]),
 };
 
 /**
