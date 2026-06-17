@@ -22,6 +22,8 @@ import {
   Map as MapIcon,
   ScanSearch,
   ScanText,
+  ClipboardCheck,
+  FileSearch,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -118,6 +120,16 @@ const adminNavItems: NavItem[] = [
     label: "テキスト衛生監査",
     href: "/admin/owners/text-hygiene",
     icon: <ScanText className="h-5 w-5" />,
+  },
+  {
+    label: "品質監査",
+    href: "/admin/owners/quality-audit",
+    icon: <ClipboardCheck className="h-5 w-5" />,
+  },
+  {
+    label: "添付検索",
+    href: "/admin/attachments",
+    icon: <FileSearch className="h-5 w-5" />,
   },
 ];
 
