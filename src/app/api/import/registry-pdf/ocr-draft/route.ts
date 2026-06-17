@@ -30,6 +30,10 @@ import { reliabilityFromConfidence } from "@/lib/registry-ocr/types";
 
 export const runtime = "nodejs";
 
+// multipart envelope（boundary/ヘッダ）の許容オーバーヘッド。
+// formData() でバッファする前の粗いガード。厳密な 8MB は file.size で別途見る。
+const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
+
 // PDF magic header（%PDF-）。非 PDF を OCR へ送らない。
 function looksLikePdf(bytes: Uint8Array): boolean {
   return (
@@ -87,6 +91,15 @@ export async function POST(request: NextRequest) {
     const contentType = request.headers.get("content-type") ?? "";
     if (!contentType.includes("multipart/form-data")) {
       throw new ApiError(400, "PDF ファイルが必要です", "VALIDATION_ERROR");
+    }
+    // formData() で body 全体をバッファする前に Content-Length で過大 body を弾く
+    // （過大アップロードの memory/CPU 圧迫を防ぐ）。post-parse の file.size は fallback。
+    const contentLength = Number(request.headers.get("content-length") ?? "");
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > MAX_PDF_BYTES + MULTIPART_OVERHEAD_BYTES
+    ) {
+      throw new ApiError(413, "PDF が大きすぎます", "PAYLOAD_TOO_LARGE");
     }
     const formData = await request.formData();
     const file = formData.get("file");

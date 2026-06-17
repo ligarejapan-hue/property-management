@@ -171,4 +171,22 @@ describe("POST ocr-draft", () => {
       }),
     );
   });
+
+  it("Content-Length 過大 → 413（formData を呼ばずに弾く）", async () => {
+    const formDataSpy = vi.fn();
+    const req = {
+      headers: {
+        get: (k: string) =>
+          k === "content-type"
+            ? "multipart/form-data; boundary=x"
+            : k === "content-length"
+              ? String(9 * 1024 * 1024) // 9MB > 8MB + 64KB
+              : null,
+      },
+      formData: formDataSpy,
+    } as never;
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
 });
