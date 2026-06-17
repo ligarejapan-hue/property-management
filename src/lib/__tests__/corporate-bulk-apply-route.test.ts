@@ -86,6 +86,7 @@ const recordChangesMock = recordChanges as unknown as Mock;
 
 const OWNER_WRITE: PermissionEntry[] = [
   { resource: "owner", action: "write", granted: true },
+  { resource: "owner_corporate_number", action: "full", granted: true },
 ];
 
 function req(owners: Array<{ ownerId: string; version: number }> = [
@@ -116,6 +117,7 @@ beforeEach(() => {
     note: null,
     corporateNumber: null,
     version: 1,
+    isArchived: false,
   });
   detectMock.mockReturnValue({ candidates: [NUM], detectedIn: ["name"] });
   lookupMock.mockResolvedValue({ found: true, isClosed: false, record: {} });
@@ -125,6 +127,12 @@ beforeEach(() => {
 describe("corporate-number bulk apply", () => {
   it("owner:write 無 → 403", async () => {
     permsMock.mockResolvedValue([]);
+    expect((await POST(req())).status).toBe(403);
+  });
+  it("owner_corporate_number field 権限 無 → 403（field-level bypass 防止）", async () => {
+    permsMock.mockResolvedValue([
+      { resource: "owner", action: "write", granted: true },
+    ]);
     expect((await POST(req())).status).toBe(403);
   });
   it("lookup 未設定 → 503", async () => {
@@ -214,5 +222,20 @@ describe("corporate-number bulk apply", () => {
     const body = await (await POST(req())).json();
     expect(body.results[0].status).toBe("version_conflict");
     expect(recordChangesMock).not.toHaveBeenCalled();
+  });
+
+  it("archived owner → not_found（mutate しない）", async () => {
+    p.owner.findUnique.mockResolvedValue({
+      id: OWNER,
+      name: "x",
+      address: null,
+      note: null,
+      corporateNumber: null,
+      version: 1,
+      isArchived: true,
+    });
+    const body = await (await POST(req())).json();
+    expect(body.results[0].status).toBe("not_found");
+    expect(p.owner.updateMany).not.toHaveBeenCalled();
   });
 });

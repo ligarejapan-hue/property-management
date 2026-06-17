@@ -20,7 +20,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import {
@@ -69,9 +69,11 @@ async function applyOne(
       note: true,
       corporateNumber: true,
       version: true,
+      isArchived: true,
     },
   });
-  if (!owner) return "not_found";
+  // archived は per-owner corporate-apply と同じく not_found 扱い（mutate しない）。
+  if (!owner || owner.isArchived) return "not_found";
   if (owner.corporateNumber) return "already_set"; // missing 限定（既存値は触らない）
   if (owner.version !== version) return "version_conflict";
 
@@ -117,6 +119,11 @@ export async function POST(request: NextRequest) {
     const perms = await getUserPermissions(session.id);
     if (!hasPermission(perms, "owner", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
+    // 本 route は corporateNumber のみ更新するため、field-level の owner_corporate_number
+    // 書込権限を要求する（per-owner corporate-apply と同じゲート＝field-level bypass 防止）。
+    if (!hasExplicitWritePerm(perms, "owner_corporate_number")) {
+      throw new ApiError(403, "法人番号を更新する権限がありません", "FORBIDDEN");
     }
     if (!isCorporateLookupConfigured()) {
       throw new ApiError(503, "法人番号APIが設定されていません", "NOT_CONFIGURED");
