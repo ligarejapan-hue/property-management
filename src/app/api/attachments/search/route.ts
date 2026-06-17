@@ -3,11 +3,12 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission, getOwnerFieldLevel } from "@/lib/permissions";
+import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 
 /**
@@ -18,8 +19,9 @@ import { writeAuditLog } from "@/lib/audit";
  * Attachment.@@index([targetType, targetId]) を活用する。schema 変更なし。
  *
  *  - 認証必須・実効権限を要求（オーバーライド反映・いずれか欠落/剥奪/マスクで 403）:
- *    user_management:read かつ property:read かつ owner:read、加えてファイル名に混入し得る
- *    owner PII の field-level 可視性（owner_name・owner_address が edit/full/read）。
+ *    user_management:read かつ property:read かつ owner:read、加えてファイル名は自由テキストで
+ *    任意の owner PII を含み得るため owner PII 全フィールド（name/kana/phone/zip/address/note/
+ *    email/corporate_number）が edit/full/read（getOwnerDisplayConfig で解決）。
  *  - 既定で isDeleted=false（削除済みは除外）。
  *  - 返却は **メタデータのみ**（id / fileName / type / createdAt / targetType /
  *    targetId）。**ファイル本体 URL(fileUrl)は select せず結果に一切載せない**
@@ -31,7 +33,7 @@ import { writeAuditLog } from "@/lib/audit";
 const RESULT_LIMIT = 200;
 
 // owner PII フィールドを「生値で閲覧できる」とみなす field-level 可視性。
-// partial/masked/hidden は不可（ファイル名に混入し得る owner 氏名・住所の保護）。
+// partial/masked/hidden は不可（ファイル名に混入し得る owner PII の保護のため fail-closed）。
 const OWNER_PII_VISIBLE_LEVELS: ReadonlySet<string> = new Set([
   "edit",
   "full",
@@ -67,22 +69,21 @@ export async function GET(request: Request) {
     // owner:read）も要求する。これにより audit ログ閲覧権限だけ／データ権限を剥奪された
     // アカウントは弾かれる。いずれかを欠く/オーバーライドで剥奪された場合は 403。
     const perms = await getUserPermissions(session.id);
-    // さらに、ファイル名は owner 氏名・住所等の PII を含み得るため、owner PII フィールドの
-    // field-level 可視性（owner_name・owner_address が edit/full/read）も要求する。
-    // masked/hidden の利用者に生ファイル名を横断検索/閲覧させず、既存の field-level
-    // マスキングを本経由で回避できないようにする。
-    const ownerNameVisible = OWNER_PII_VISIBLE_LEVELS.has(
-      getOwnerFieldLevel(perms, "owner_name"),
-    );
-    const ownerAddressVisible = OWNER_PII_VISIBLE_LEVELS.has(
-      getOwnerFieldLevel(perms, "owner_address"),
+    // ファイル名は利用者がアップロード時に付ける自由テキストで、owner の氏名・住所・電話・
+    // メール・郵便番号等あらゆる PII を含み得る。したがって owner PII 全フィールドの実効
+    // 可視性（edit/full/read）を要求し、いずれかが partial/masked/hidden の利用者には
+    // 生ファイル名を横断検索/閲覧させない（field-level マスキングを本経由で回避させない）。
+    // 実効レベルは getOwnerDisplayConfig（email→phone / corporate_number→name の
+    // fallback を反映）で解決する。
+    const ownerDisplay = await getOwnerDisplayConfig(session.id, perms);
+    const allOwnerPiiVisible = Object.values(ownerDisplay).every((level) =>
+      OWNER_PII_VISIBLE_LEVELS.has(level),
     );
     const allowed =
       hasPermission(perms, "user_management", "read") &&
       hasPermission(perms, "property", "read") &&
       hasPermission(perms, "owner", "read") &&
-      ownerNameVisible &&
-      ownerAddressVisible;
+      allOwnerPiiVisible;
     if (!allowed) {
       throw new ApiError(403, "この操作の権限がありません", "FORBIDDEN");
     }

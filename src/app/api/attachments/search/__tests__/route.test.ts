@@ -2,11 +2,13 @@
  * GET /api/attachments/search — 添付横断検索（admin オーバーサイト・ISO-SAFE・schema 無改変）。
  *
  *  - 認可は **実効権限**で判定する：getUserPermissions(session.id)（DB 由来・テンプレート＋
- *    ユーザー個別オーバーライドを反映）+ hasPermission / getOwnerFieldLevel。
+ *    ユーザー個別オーバーライドを反映）+ hasPermission + getOwnerDisplayConfig。
  *    本検索は全添付のメタ（fileName・targetId 等、PII を含み得る）を横断露出するため:
  *      - 管理者能力 user_management:read
  *      - 添付が紐づくデータ read 権限 property:read・owner:read
- *      - ファイル名に混入し得る owner PII（owner_name・owner_address）の field-level 可視性
+ *      - ファイル名は自由テキストで任意の owner PII を含み得るため、**owner PII 全
+ *        フィールド（name/kana/phone/zip/address/note/email/corporate_number）の実効
+ *        可視性（edit/full/read）**
  *    をすべて要求する。いずれかを欠く/剥奪/マスクされた場合は 403（JWT role 非依存）。
  *  - 未認証は 401。
  *  - query: type / fileName(部分一致) / from・to(期間) / targetType・targetId。
@@ -15,7 +17,7 @@
  *    **ファイル本体 URL(fileUrl)は select せず=結果に載せない**。
  *  - 非PII audit（検索語の生値は記録せず hasFileName 真偽のみ）。
  *
- * api-helpers / audit / prisma はモック。hasPermission / getOwnerFieldLevel は純関数のため実物を使う。
+ * api-helpers / audit / prisma はモック。hasPermission は純関数のため実物を使う。
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
@@ -33,6 +35,7 @@ vi.mock("@/lib/api-helpers", () => {
     ApiError: MockApiError,
     getApiSession: vi.fn(),
     getUserPermissions: vi.fn(),
+    getOwnerDisplayConfig: vi.fn(),
     handleApiError: vi.fn((error: unknown) => {
       const e = error as { status?: number; message?: string; code?: string };
       if (typeof e?.status === "number") {
@@ -59,26 +62,41 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import prisma from "@/lib/prisma";
-import { getApiSession, getUserPermissions, ApiError } from "@/lib/api-helpers";
+import {
+  getApiSession,
+  getUserPermissions,
+  getOwnerDisplayConfig,
+  ApiError,
+} from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { GET } from "../route";
 
 const pm = prisma as unknown as { attachment: { findMany: Mock } };
 const mockedGetSession = getApiSession as unknown as Mock;
 const mockedGetPerms = getUserPermissions as unknown as Mock;
+const mockedGetDisplay = getOwnerDisplayConfig as unknown as Mock;
 const mockedAudit = writeAuditLog as unknown as Mock;
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 
-// 認可に必要な実効権限（admin 能力 + データ read + owner PII field-level 可視性）が
-// すべて揃った状態。
-const FULL_PERMS = [
+// admin 能力 + データ read。owner PII の field-level 可視性は getOwnerDisplayConfig 側で表現。
+const BASE_PERMS = [
   { resource: "user_management", action: "read", granted: true },
   { resource: "property", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
-  { resource: "owner_name", action: "full", granted: true },
-  { resource: "owner_address", action: "full", granted: true },
 ];
+
+// owner PII 全フィールドが可視（full）の表示設定。
+const ALL_VISIBLE = {
+  name: "full",
+  nameKana: "full",
+  phone: "full",
+  zip: "full",
+  address: "full",
+  note: "full",
+  email: "full",
+  corporateNumber: "full",
+} as const;
 
 function req(qs = ""): Request {
   return new Request(`http://localhost/api/attachments/search${qs}`);
@@ -98,7 +116,8 @@ describe("GET /api/attachments/search", () => {
       name: "Admin",
       role: "admin",
     });
-    mockedGetPerms.mockResolvedValue(FULL_PERMS);
+    mockedGetPerms.mockResolvedValue(BASE_PERMS);
+    mockedGetDisplay.mockResolvedValue({ ...ALL_VISIBLE });
     pm.attachment.findMany.mockResolvedValue([]);
   });
 
@@ -115,7 +134,7 @@ describe("GET /api/attachments/search", () => {
 
   it("user_management:read が無ければ 403（DB&audit を呼ばない）", async () => {
     mockedGetPerms.mockResolvedValueOnce(
-      FULL_PERMS.filter((p) => p.resource !== "user_management"),
+      BASE_PERMS.filter((p) => p.resource !== "user_management"),
     );
 
     const res = await GET(req());
@@ -127,7 +146,7 @@ describe("GET /api/attachments/search", () => {
 
   it("property:read が無ければ 403", async () => {
     mockedGetPerms.mockResolvedValueOnce(
-      FULL_PERMS.filter((p) => p.resource !== "property"),
+      BASE_PERMS.filter((p) => p.resource !== "property"),
     );
 
     const res = await GET(req());
@@ -141,8 +160,6 @@ describe("GET /api/attachments/search", () => {
       { resource: "user_management", action: "read", granted: true },
       { resource: "property", action: "read", granted: true },
       { resource: "owner", action: "read", granted: false },
-      { resource: "owner_name", action: "full", granted: true },
-      { resource: "owner_address", action: "full", granted: true },
     ]);
 
     const res = await GET(req());
@@ -151,11 +168,8 @@ describe("GET /api/attachments/search", () => {
     expect(pm.attachment.findMany).not.toHaveBeenCalled();
   });
 
-  it("owner_name の field-level 可視性が無ければ 403（ファイル名 PII 保護）", async () => {
-    // owner_name エントリ無し → 可視レベル hidden → 403。
-    mockedGetPerms.mockResolvedValueOnce(
-      FULL_PERMS.filter((p) => p.resource !== "owner_name"),
-    );
+  it("owner PII のうち phone が masked なら 403（ファイル名 PII 保護）", async () => {
+    mockedGetDisplay.mockResolvedValueOnce({ ...ALL_VISIBLE, phone: "masked" });
 
     const res = await GET(req());
 
@@ -163,14 +177,17 @@ describe("GET /api/attachments/search", () => {
     expect(pm.attachment.findMany).not.toHaveBeenCalled();
   });
 
-  it("owner_address が masked なら 403（ファイル名 PII 保護）", async () => {
-    mockedGetPerms.mockResolvedValueOnce([
-      { resource: "user_management", action: "read", granted: true },
-      { resource: "property", action: "read", granted: true },
-      { resource: "owner", action: "read", granted: true },
-      { resource: "owner_name", action: "full", granted: true },
-      { resource: "owner_address", action: "masked", granted: true },
-    ]);
+  it("owner PII のうち email が hidden なら 403（name/address 以外も要求）", async () => {
+    mockedGetDisplay.mockResolvedValueOnce({ ...ALL_VISIBLE, email: "hidden" });
+
+    const res = await GET(req());
+
+    expect(res.status).toBe(403);
+    expect(pm.attachment.findMany).not.toHaveBeenCalled();
+  });
+
+  it("partial（部分マスク）は不可視扱いで 403", async () => {
+    mockedGetDisplay.mockResolvedValueOnce({ ...ALL_VISIBLE, address: "partial" });
 
     const res = await GET(req());
 
