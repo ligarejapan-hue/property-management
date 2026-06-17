@@ -442,9 +442,9 @@ export default function RegistryPdfPage() {
     setOcrGenerating(true);
     setOcrError(null);
     try {
-      const result = (await requestRegistryOcrDraft(
-        selectedFile,
-      )) as ParseResponse;
+      const result = (await requestRegistryOcrDraft(selectedFile)) as ParseResponse & {
+        ocrWarnings?: string[];
+      };
       const parsed = result.parsed;
       const toField = (v: string | null) => ({
         value: v ?? "",
@@ -467,6 +467,8 @@ export default function RegistryPdfPage() {
       );
       setWarnings([
         "OCRで生成した下書きです。登記の確定値として扱わず、必ず内容を確認してください。",
+        // OCR エンジン由来の警告（ページスキップ・低品質等）も admin に見せる。
+        ...(result.ocrWarnings ?? []),
         ...parsed.warnings,
       ]);
     } catch (err) {
@@ -693,7 +695,7 @@ export default function RegistryPdfPage() {
               </div>
               <p className="mt-2 text-xs text-gray-400">
                 <Info className="mr-1 inline h-3 w-3" />
-                現在はテキスト読み込みのみ対応（PDF直接解析は今後対応予定）
+                PDF / テキストファイルをサーバー側で抽出します。画像化された謄本PDFは「OCRで下書き生成」または手動貼付をご利用ください。
               </p>
             </div>
           )}
@@ -728,7 +730,9 @@ export default function RegistryPdfPage() {
           <div className="mt-6 flex justify-end">
             <button
               onClick={handleParse}
-              disabled={!text.trim() || parsing}
+              disabled={
+                (uploadTab === "file" ? !selectedFile : !text.trim()) || parsing
+              }
               className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {parsing ? (
