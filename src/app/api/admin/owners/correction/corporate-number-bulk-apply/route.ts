@@ -35,6 +35,16 @@ export const runtime = "nodejs";
 
 const MAX_BULK = 50;
 
+/**
+ * Codex P1: バッチ全体の時間予算（ms）。
+ * 各 owner の国税庁 lookup は provider 既定で最大 ~8s 待つことがあり、MAX_BULK=50 を
+ * 直列処理すると nginx の proxy_read_timeout(60s) を超えてプロキシタイムアウトになり得る
+ * （クライアントは結果を 1 件も受け取れないのに、先頭の owner は既に更新済という分かりにくい
+ * 部分状態になる）。隣接の postal-code-audit が同種の lookup ループを 45s で打ち切るのに倣い、
+ * 予算超過後の owner は lookup/書込せず "not_processed" を返してその場でレスポンスする。
+ */
+const BULK_TIME_BUDGET_MS = 45_000;
+
 const bodySchema = z.object({
   owners: z
     .array(
@@ -55,7 +65,8 @@ type ItemStatus =
   | "no_single_detection"
   | "lookup_no_result"
   | "closed"
-  | "lookup_error";
+  | "lookup_error"
+  | "not_processed"; // 時間予算超過で未処理（lookup/書込せず）。再送で処理。
 
 type OwnerDisplayConfig = Awaited<ReturnType<typeof getOwnerDisplayConfig>>;
 
@@ -165,8 +176,16 @@ export async function POST(request: NextRequest) {
       throw new ApiError(400, "リクエストが不正です", "VALIDATION_ERROR");
     }
 
+    // Codex P1: 時間予算。deadline を超えたら残りは lookup/書込せず not_processed。
+    // これでバッチ全体の wall-clock を「予算 + 進行中 1 件分の lookup」に抑え、
+    // proxy timeout による「結果ゼロ＋部分更新」を防ぐ。
+    const deadline = Date.now() + BULK_TIME_BUDGET_MS;
     const results: Array<{ ownerId: string; status: ItemStatus }> = [];
     for (const item of parsed.data.owners) {
+      if (Date.now() >= deadline) {
+        results.push({ ownerId: item.ownerId, status: "not_processed" });
+        continue;
+      }
       const status = await applyOne(
         item.ownerId,
         item.version,

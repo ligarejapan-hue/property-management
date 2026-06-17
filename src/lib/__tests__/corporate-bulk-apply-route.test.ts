@@ -77,6 +77,7 @@ import { recordChanges } from "@/lib/change-log";
 import { POST } from "../../app/api/admin/owners/correction/corporate-number-bulk-apply/route";
 
 const OWNER = "11111111-1111-4111-8111-111111111111";
+const OWNER2 = "22222222-2222-4222-8222-222222222222";
 const NUM = "1234567890123";
 
 const p = prisma as unknown as {
@@ -295,6 +296,32 @@ describe("corporate-number bulk apply", () => {
     const body = await (await POST(req())).json();
     expect(body.results[0].status).toBe("version_conflict");
     expect(recordChangesMock).not.toHaveBeenCalled();
+  });
+
+  it("時間予算超過: deadline 後の owner は not_processed（lookup/書込しない・Codex P1）", async () => {
+    // Date.now シーケンス: [deadline 計算用, iter1 判定, iter2 判定]。
+    // BULK_TIME_BUDGET_MS=45000。iter2 で予算超過させ 2 件目を not_processed にする。
+    const nowValues = [1000, 1000, 1000 + 45_000 + 1];
+    let i = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      const v = nowValues[i] ?? nowValues[nowValues.length - 1];
+      i += 1;
+      return v;
+    });
+    const body = await (
+      await POST(
+        req([
+          { ownerId: OWNER, version: 1 },
+          { ownerId: OWNER2, version: 1 },
+        ]),
+      )
+    ).json();
+    expect(body.results[0].status).toBe("applied");
+    expect(body.results[1].status).toBe("not_processed");
+    // 2 件目は applyOne に入らない → lookup は 1 回だけ
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+    expect(body.applied).toBe(1);
+    nowSpy.mockRestore();
   });
 
   it("archived owner → not_found（mutate しない）", async () => {
