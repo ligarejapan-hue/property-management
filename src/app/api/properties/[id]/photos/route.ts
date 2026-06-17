@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import {
   getStorage,
   validateFile,
@@ -41,11 +42,7 @@ export async function GET(
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
     }
 
-    if (
-      session.role === "field_staff" &&
-      property.createdBy !== session.id &&
-      property.assignedTo !== session.id
-    ) {
+    if (!canAccessPropertyRecord(session, property)) {
       throw new ApiError(403, "この物件を閲覧する権限がありません", "FORBIDDEN");
     }
 
@@ -88,11 +85,7 @@ export async function POST(
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
     }
 
-    if (
-      session.role === "field_staff" &&
-      property.createdBy !== session.id &&
-      property.assignedTo !== session.id
-    ) {
+    if (!canAccessPropertyRecord(session, property)) {
       throw new ApiError(403, "この物件を編集する権限がありません", "FORBIDDEN");
     }
 
