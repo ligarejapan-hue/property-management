@@ -9,6 +9,7 @@ import {
   Building2,
   Edit,
   Loader2,
+  Mail,
   Trash2,
   UserPlus,
 } from "lucide-react";
@@ -404,6 +405,20 @@ export default function PropertyDetailPage({
           </h2>
         </div>
         <div className="flex items-center gap-2">
+          {/* DM 送付履歴ページ(/properties/[id]/dm-logs)への導線。route 新設なし・既存ページへのリンク。
+              dm-logs ページは property:read + owner:read + record-scope を要するため、既存導出済みの
+              canReadOwner でゲートして 403 dead-end を避ける（新ロジック追加なし・既存 state 利用）。 */}
+          {canReadOwner && (
+            <Link
+              href={`/properties/${property.id}/dm-logs`}
+              aria-label="DM送付履歴を見る"
+              title="この物件の DM 送付履歴"
+              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <Mail className="h-4 w-4" />
+              DM送付履歴
+            </Link>
+          )}
           <button
             onClick={() => setShowEditForm(true)}
             aria-label="物件を編集"
