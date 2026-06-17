@@ -32,6 +32,15 @@ describe("parseLocalhostOcrUrl / isLocalhostOcrUrl (strict localhost allowlist)"
   it("資格情報埋め込みは拒否", () => {
     expect(isLocalhostOcrUrl("http://user:pass@127.0.0.1:8089/ocr")).toBe(false);
   });
+  it("path が /ocr 以外は拒否（env typo で別サービスへ送らない）", () => {
+    expect(isLocalhostOcrUrl("http://127.0.0.1:3000/anything")).toBe(false);
+    expect(isLocalhostOcrUrl("http://127.0.0.1:8089/")).toBe(false);
+    expect(isLocalhostOcrUrl("http://127.0.0.1:8089/ocr/extra")).toBe(false);
+  });
+  it("query / hash 付きは拒否", () => {
+    expect(isLocalhostOcrUrl("http://127.0.0.1:8089/ocr?x=1")).toBe(false);
+    expect(isLocalhostOcrUrl("http://127.0.0.1:8089/ocr#h")).toBe(false);
+  });
   it("空 / 不正 / null / undefined は null", () => {
     expect(parseLocalhostOcrUrl("")).toBeNull();
     expect(parseLocalhostOcrUrl("   ")).toBeNull();

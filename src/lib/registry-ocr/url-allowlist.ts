@@ -33,6 +33,10 @@ export function parseLocalhostOcrUrl(raw: string | null | undefined): URL | null
   if (url.username !== "" || url.password !== "") return null;
   // URL.hostname は IPv6 を角括弧なしで返す。許可集合との完全一致のみ通す。
   if (!ALLOWED_HOSTNAMES.has(url.hostname)) return null;
+  // 契約は POST /ocr のみ。env typo で同一ホスト上の別サービス（例: アプリ自身の
+  // http://127.0.0.1:3000/...）へ謄本 PDF を送らないよう path を固定し、query/hash も拒否する。
+  if (url.pathname !== "/ocr") return null;
+  if (url.search !== "" || url.hash !== "") return null;
   return url;
 }
 
