@@ -57,6 +57,7 @@ export const BULK_STATUS_LABEL: Record<BulkCorporateApplyStatus, string> = {
   lookup_no_result: "国税庁に該当なし",
   closed: "廃止法人のため除外",
   lookup_error: "lookup エラー",
+  not_processed: "未処理（時間切れ・再実行してください）",
 };
 
 export interface BulkResultSummary {

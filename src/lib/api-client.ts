@@ -2434,7 +2434,8 @@ export type BulkCorporateApplyStatus =
   | "no_single_detection"
   | "lookup_no_result"
   | "closed"
-  | "lookup_error";
+  | "lookup_error"
+  | "not_processed";
 
 export interface BulkCorporateApplyItem {
   ownerId: string;
