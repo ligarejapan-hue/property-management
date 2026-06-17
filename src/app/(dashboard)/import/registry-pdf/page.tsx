@@ -688,14 +688,14 @@ export default function RegistryPdfPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,.txt"
+                  accept=".pdf"
                   className="hidden"
                   onChange={handleFileSelect}
                 />
               </div>
               <p className="mt-2 text-xs text-gray-400">
                 <Info className="mr-1 inline h-3 w-3" />
-                PDF / テキストファイルをサーバー側で抽出します。画像化された謄本PDFは「OCRで下書き生成」または手動貼付をご利用ください。
+                PDFファイルをサーバー側で抽出します。テキストは「テキスト貼り付け」タブを、画像化された謄本PDFは「OCRで下書き生成」または手動貼付をご利用ください。
               </p>
             </div>
           )}
