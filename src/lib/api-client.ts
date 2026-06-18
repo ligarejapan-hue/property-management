@@ -1946,7 +1946,7 @@ export async function lookupOwnerCorporateNumber(
         },
       };
     }
-    if (corporateNumber === "8888888888888") {
+    if (corporateNumber === "9888888888888") {
       return {
         lookup: {
           found: true,
