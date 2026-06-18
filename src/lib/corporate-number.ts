@@ -343,3 +343,121 @@ export function detectCorporateNumberInOwnerLike(
     detectedIn,
   };
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// 会社法人等番号(12桁) ⇔ 法人番号(13桁) の変換・検証・分類。
+//
+// 別物として扱う:
+//  - 12桁 = 会社法人等番号(不動産登記の番号)。
+//  - 13桁 = 法人番号(国税庁)。先頭1桁はチェックデジット、残り12桁が会社法人等番号(基礎番号)。
+//
+// 国税庁チェックデジット算法(基礎番号=12桁):
+//  - 基礎番号を右端から数える(右端=1桁目)。
+//  - 奇数桁(1,3,5…) ×1、偶数桁(2,4,6…) ×2 の総和 s。
+//  - r = s mod 9。 checkDigit = 9 - r (∴ 1..9。先頭に付与して13桁法人番号にする)。
+//  例: 700110005901 → 8700110005901 / 326405515335 → 8326405515335。
+//
+// これらは既存の normalizeCorporateNumber(13桁) / normalizeCompanyRegistryNumber(12桁) を
+// 置き換えない(検出/移送ロジックには干渉しない)。lookup 入口で「入力を13桁に解決する」用途。
+// ───────────────────────────────────────────────────────────────────────────
+
+/** classifyCorporateIdentifier の戻り値。 */
+export type CorporateIdentifierKind =
+  | "company_corporate_number_12"
+  | "corporate_number_13"
+  | "invalid";
+
+/**
+ * 任意入力を「半角数字のみ」に正規化する(全角数字→半角、ハイフン類・空白を除去)。
+ * - null / undefined / 空 → null
+ * - 除去後に数字以外を含む / 空になる → null
+ * 桁数は判定しない(12/13桁の判定は classify 側)。
+ */
+export function normalizeCorporateIdentifier(
+  input: string | null | undefined,
+): string | null {
+  if (input == null) return null;
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+  const digits = toHalfwidthDigitsOnly(trimmed);
+  if (digits === "" || !/^\d+$/.test(digits)) return null;
+  return digits;
+}
+
+/**
+ * 12桁基礎番号からチェックデジット(1..9)を算出する。
+ * 入力がちょうど12桁の半角数字でなければ null。
+ */
+function computeCorporateCheckDigit(base12: string): number | null {
+  if (!/^\d{12}$/.test(base12)) return null;
+  let sum = 0;
+  for (let i = 0; i < COMPANY_REGISTRY_NUMBER_LENGTH; i++) {
+    // base12 の右端を 1 桁目とする。i=0 が右端。
+    const digit = base12.charCodeAt(COMPANY_REGISTRY_NUMBER_LENGTH - 1 - i) - 48;
+    const positionFromRight = i + 1; // 1-indexed
+    const weight = positionFromRight % 2 === 1 ? 1 : 2; // 奇数桁×1 / 偶数桁×2
+    sum += digit * weight;
+  }
+  return 9 - (sum % 9); // r=s%9 ∈ 0..8 → 9-r ∈ 1..9
+}
+
+/**
+ * 12桁会社法人等番号 → 13桁法人番号を算出する(チェックデジットを先頭に付与)。
+ * - 入力を正規化(全角/ハイフン/空白吸収)後、ちょうど12桁数字でなければ null。
+ * - 戻り値は normalizeCorporateNumber / lookup にそのまま渡せる 13桁文字列。
+ */
+export function calculateCorporateNumberFromCompanyNumber(
+  companyNumber12: string | null | undefined,
+): string | null {
+  const normalized = normalizeCorporateIdentifier(companyNumber12);
+  if (normalized == null || normalized.length !== COMPANY_REGISTRY_NUMBER_LENGTH) {
+    return null;
+  }
+  const checkDigit = computeCorporateCheckDigit(normalized);
+  if (checkDigit == null) return null;
+  return `${checkDigit}${normalized}`;
+}
+
+/**
+ * 13桁法人番号のチェックデジットを検証する。
+ * - 正規化後ちょうど13桁数字 かつ 先頭桁が基礎番号(残り12桁)から算出した値に一致 → true
+ * - それ以外(桁数違い・数字以外・チェックデジット不一致) → false
+ */
+export function isValidCorporateNumber13(
+  corporateNumber13: string | null | undefined,
+): boolean {
+  const normalized = normalizeCorporateIdentifier(corporateNumber13);
+  if (normalized == null || normalized.length !== CORPORATE_NUMBER_LENGTH) {
+    return false;
+  }
+  const checkDigit = normalized.charCodeAt(0) - 48;
+  const base12 = normalized.slice(1);
+  const computed = computeCorporateCheckDigit(base12);
+  return computed != null && computed === checkDigit;
+}
+
+/**
+ * 入力を会社法人等番号(12桁) / 法人番号(13桁) / invalid に分類する。
+ *  - 正規化後 12桁数字 → "company_corporate_number_12"
+ *  - 正規化後 13桁数字 かつ チェックデジット妥当 → "corporate_number_13"
+ *  - それ以外(11/14桁・13桁CD不正・数字以外・空) → "invalid"
+ *
+ * 12桁は会社法人等番号(自己検証桁を持たない)ため桁数で判定する。
+ * 13桁はチェックデジットまで検証する(不正な13桁は invalid に倒す)。
+ */
+export function classifyCorporateIdentifier(
+  input: string | null | undefined,
+): CorporateIdentifierKind {
+  const normalized = normalizeCorporateIdentifier(input);
+  if (normalized == null) return "invalid";
+  if (normalized.length === COMPANY_REGISTRY_NUMBER_LENGTH) {
+    return "company_corporate_number_12";
+  }
+  if (
+    normalized.length === CORPORATE_NUMBER_LENGTH &&
+    isValidCorporateNumber13(normalized)
+  ) {
+    return "corporate_number_13";
+  }
+  return "invalid";
+}
