@@ -60,9 +60,27 @@ describe("corporate-lookup-panel.tsx", () => {
     expect(panelSrc).toMatch(/法人番号API未設定/);
   });
 
-  it("13桁正規化できない時はボタンを disabled にする", () => {
-    expect(panelSrc).toMatch(/normalizeCorporateNumber\(rawCorporateNumber\)/);
-    expect(panelSrc).toMatch(/canSearch\s*=/);
+  it("12桁/13桁の分類で検索可否を決める（invalid は disabled）", () => {
+    // classifyCorporateIdentifier ベースの活性化（12桁=会社法人等番号も検索可）。
+    expect(panelSrc).toMatch(/classifyCorporateIdentifier\(rawCorporateNumber\)/);
+    expect(panelSrc).toMatch(/canSearch\s*=[\s\S]{0,80}kind\s*!==\s*"invalid"/);
+  });
+
+  it("12桁入力時に算出13桁の事前ヒント / invalid 入力時に理由を表示する", () => {
+    expect(panelSrc).toMatch(/calculateCorporateNumberFromCompanyNumber\(rawCorporateNumber\)/);
+    expect(panelSrc).toMatch(/derived13/);
+    expect(panelSrc).toMatch(/invalidHint/);
+  });
+
+  it("preview に入力種別 + 算出/検証済み13桁を表示する", () => {
+    expect(panelSrc).toMatch(/meta\?\.inputKind/);
+    expect(panelSrc).toMatch(/会社法人等番号/);
+    expect(panelSrc).toMatch(/resolvedCorporateNumber13/);
+  });
+
+  it("conflict(明らかな不一致)の事前警告バナーを表示する", () => {
+    expect(panelSrc).toMatch(/meta\?\.conflict\s*===\s*"conflict"/);
+    expect(panelSrc).toMatch(/大きく異なります/);
   });
 
   it("useEffect 等で自動 lookup していない（mount 時に lookup が走らない）", () => {
@@ -79,9 +97,9 @@ describe("corporate-lookup-panel.tsx", () => {
   it("検索結果に searchedFor を紐づけ、現在入力と一致しないと preview / error を出さない", () => {
     // 検索開始時に searchedFor を確定する
     expect(panelSrc).toMatch(/setSearchedFor\(/);
-    // showResult / showError ガードがあり、normalized と searchedFor の一致を要求する
-    expect(panelSrc).toMatch(/const\s+showResult\s*=[\s\S]{0,200}searchedFor\s*===\s*normalized/);
-    expect(panelSrc).toMatch(/const\s+showError\s*=[\s\S]{0,200}searchedFor\s*===\s*normalized/);
+    // showResult / showError ガードがあり、identifierKey と searchedFor の一致を要求する
+    expect(panelSrc).toMatch(/const\s+showResult\s*=[\s\S]{0,200}searchedFor\s*===\s*identifierKey/);
+    expect(panelSrc).toMatch(/const\s+showError\s*=[\s\S]{0,200}searchedFor\s*===\s*identifierKey/);
     // 描画側で showResult / showError を使っている（生 result / error を直接条件にしない）
     const previewRender = panelSrc.match(/\{showResult\s*&&\s*result[\s\S]*?data-testid="corporate-lookup-preview"/);
     expect(previewRender).not.toBeNull();
@@ -89,10 +107,10 @@ describe("corporate-lookup-panel.tsx", () => {
     expect(errorRender).not.toBeNull();
   });
 
-  it("rawCorporateNumber が変わる = normalized が変わると古い preview が見えなくなる（ガード経由）", () => {
-    // 「searchedFor !== normalized なら showResult が false」になる構造
+  it("rawCorporateNumber が変わる = identifierKey が変わると古い preview が見えなくなる（ガード経由）", () => {
+    // 「searchedFor !== identifierKey なら showResult が false」になる構造
     expect(panelSrc).toMatch(
-      /showResult\s*=\s*result\s*!==\s*null\s*&&\s*searchedFor\s*!==\s*null\s*&&\s*searchedFor\s*===\s*normalized/,
+      /showResult\s*=\s*result\s*!==\s*null\s*&&\s*searchedFor\s*!==\s*null\s*&&\s*searchedFor\s*===\s*identifierKey/,
     );
   });
 
