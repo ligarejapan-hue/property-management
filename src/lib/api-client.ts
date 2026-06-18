@@ -2422,6 +2422,61 @@ export async function fetchCorporateCandidates(
   );
 }
 
+// ---------- 法人番号 一括反映（missing 候補 → 検出番号 lookup → 番号のみ反映） ----------
+// server route: POST /api/admin/owners/correction/corporate-number-bulk-apply
+// client は {ownerId, version} のみ送る。検出 / 国税庁 lookup / 廃止判定は server が再実行する。
+// version は楽観ロック用（stale でも server 側で version_conflict として安全に skip）。
+export type BulkCorporateApplyStatus =
+  | "applied"
+  | "already_set"
+  | "not_found"
+  | "version_conflict"
+  | "no_single_detection"
+  | "lookup_no_result"
+  | "closed"
+  | "lookup_error"
+  | "not_processed";
+
+export interface BulkCorporateApplyItem {
+  ownerId: string;
+  version: number;
+}
+
+export interface BulkCorporateApplyResultRow {
+  ownerId: string;
+  status: BulkCorporateApplyStatus;
+}
+
+export interface BulkCorporateApplyResponse {
+  results: BulkCorporateApplyResultRow[];
+  requested: number;
+  applied: number;
+}
+
+export async function bulkApplyCorporateNumbers(
+  owners: BulkCorporateApplyItem[],
+): Promise<BulkCorporateApplyResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      results: owners.map((o) => ({
+        ownerId: o.ownerId,
+        status: "applied" as const,
+      })),
+      requested: owners.length,
+      applied: owners.length,
+    };
+  }
+  return apiFetch<BulkCorporateApplyResponse>(
+    "/api/admin/owners/correction/corporate-number-bulk-apply",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owners }),
+    },
+  );
+}
+
 // ---------- Address lookup (郵便番号 / 住所補完) ----------
 // APIキーは server-side route (/api/address/lookup/*) と server lib 内でのみ使う。
 // client はここから route を叩くだけで APIキー(secret env) には一切触れない
