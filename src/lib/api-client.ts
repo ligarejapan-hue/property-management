@@ -1889,7 +1889,22 @@ export async function updateOwner(
 
 // 法人番号 lookup preview（Phase B）。Owner 行は更新しない。
 // mock モードでは MockCorporateLookupProvider 相当のレスポンスを返す。
+/** 入力種別。12桁=会社法人等番号 / 13桁=法人番号 / invalid。 */
+export type CorporateIdentifierKindDTO =
+  | "company_corporate_number_12"
+  | "corporate_number_13"
+  | "invalid";
+
+/** 国税庁結果 vs 既存 Owner の不一致分類(生値ではなくフラグ)。 */
+export type CorporateLookupConflictDTO = "match" | "conflict" | "unknown";
+
 export interface CorporateLookupApiResponse {
+  /** 入力種別(12桁/13桁)。route が server 側で解決。古い server では undefined。 */
+  inputKind?: CorporateIdentifierKindDTO;
+  /** 12桁入力時に算出した、または13桁入力をそのまま採用した解決済み13桁法人番号。 */
+  resolvedCorporateNumber13?: string;
+  /** 国税庁結果と既存 Owner 名/住所の不一致分類。 */
+  conflict?: CorporateLookupConflictDTO;
   lookup: {
     found: boolean;
     isClosed: boolean;
@@ -1931,7 +1946,7 @@ export async function lookupOwnerCorporateNumber(
         },
       };
     }
-    if (corporateNumber === "8888888888888") {
+    if (corporateNumber === "9888888888888") {
       return {
         lookup: {
           found: true,
@@ -2006,6 +2021,8 @@ export interface CorporateApplyRequest {
     updateDate: string | null;
   };
   allowClosed?: boolean;
+  /** conflict("明らかな不一致")時に反映を許可する確認フラグ(allowClosed と同型)。 */
+  acknowledgeConflict?: boolean;
 }
 
 export interface CorporateApplyResponse {

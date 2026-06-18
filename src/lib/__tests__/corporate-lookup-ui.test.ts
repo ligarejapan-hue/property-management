@@ -110,8 +110,18 @@ describe("corporate-lookup-panel.tsx", () => {
   it("Phase C: apply は再 lookup 結果を信用するため expectedRecord を送る", () => {
     expect(panelSrc).toMatch(/expectedRecord/);
     // postCode / updateDate を比較スナップショットとして送る
-    expect(panelSrc).toMatch(/postCode:\s*result\.record\.postCode/);
-    expect(panelSrc).toMatch(/updateDate:\s*result\.record\.updateDate/);
+    // (conflict ack 再送のため result.record を const record に取り出して使う)
+    expect(panelSrc).toMatch(/postCode:\s*record\.postCode/);
+    expect(panelSrc).toMatch(/updateDate:\s*record\.updateDate/);
+  });
+
+  it("conflict(明らかな不一致)は確認のうえ acknowledgeConflict=true で再送する", () => {
+    expect(panelSrc).toMatch(/CONFLICT_NOT_ACKNOWLEDGED/);
+    expect(panelSrc).toMatch(/acknowledgeConflict/);
+    // generic CONFLICT(楽観ロック)より先に判定する
+    expect(panelSrc).toMatch(
+      /CONFLICT_NOT_ACKNOWLEDGED[\s\S]{0,400}window\.confirm/,
+    );
   });
 });
 

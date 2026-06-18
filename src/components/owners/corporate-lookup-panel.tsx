@@ -129,28 +129,60 @@ export default function CorporateLookupPanel({
       );
       if (!confirmed) return;
     }
-    setApplying(true);
-    setApplyError(null);
-    try {
-      await applyOwnerCorporate(ownerId, {
-        corporateNumber: result.record.corporateNumber,
+    const record = result.record;
+    const closed = result.isClosed;
+    const submit = (acknowledgeConflict?: boolean) =>
+      applyOwnerCorporate(ownerId, {
+        corporateNumber: record.corporateNumber,
         version: ownerVersion,
         apply: applyTargets,
         expectedRecord: {
-          corporateNumber: result.record.corporateNumber,
-          name: result.record.name,
-          address: result.record.address,
-          postCode: result.record.postCode,
-          updateDate: result.record.updateDate,
+          corporateNumber: record.corporateNumber,
+          name: record.name,
+          address: record.address,
+          postCode: record.postCode,
+          updateDate: record.updateDate,
         },
-        allowClosed: result.isClosed ? true : undefined,
+        allowClosed: closed ? true : undefined,
+        acknowledgeConflict,
       });
+    setApplying(true);
+    setApplyError(null);
+    try {
+      await submit();
       setApplied(true);
       if (onApplied) {
         await onApplied();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "反映に失敗しました";
+      // 「明らかな不一致(conflict)」は確認のうえ acknowledgeConflict=true で再送する
+      // （allowClosed と同型）。generic CONFLICT(楽観ロック)より先に判定する
+      // ＝CONFLICT_NOT_ACKNOWLEDGED は "CONFLICT" を含むため順序が重要。
+      if (
+        msg.includes("CONFLICT_NOT_ACKNOWLEDGED") ||
+        msg.includes("大きく異なります")
+      ) {
+        const ok = window.confirm(
+          "国税庁の法人情報が既存の所有者情報と大きく異なります。内容を確認のうえ反映しますか？",
+        );
+        if (!ok) {
+          setApplyError("情報の不一致を確認してください（反映を中止しました）。");
+          return;
+        }
+        try {
+          await submit(true);
+          setApplied(true);
+          if (onApplied) {
+            await onApplied();
+          }
+        } catch (err2) {
+          setApplyError(
+            err2 instanceof Error ? err2.message : "反映に失敗しました",
+          );
+        }
+        return;
+      }
       if (msg.includes("FETCH_STALE") || msg.includes("プレビュー")) {
         setApplyError(
           "プレビュー後に法人情報が更新されています。検索し直してください。",
