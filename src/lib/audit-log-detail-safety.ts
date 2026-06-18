@@ -238,6 +238,19 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "applied",
     "skipped",
   ]),
+  // 法人番号 lookup/apply の監査メタデータ(全て非PII enum/boolean)。
+  //   found/isClosed = boolean、source = provider 名 enum、httpStatus/result は base 許可。
+  //   inputKind = company_corporate_number_12 / corporate_number_13 / invalid の enum。
+  //   conflict = match / conflict / unknown の enum(法人名/住所の生値ではなく分類フラグ)。
+  // 法人番号生値・会社名・住所は route 側で記録せず、混入しても allowlist 外 + denylist で [REDACTED]。
+  owner_corporate_lookup: new Set([
+    "found",
+    "isClosed",
+    "source",
+    "inputKind",
+    "conflict",
+  ]),
+  owner_corporate_apply: new Set(["isClosed", "source", "conflict"]),
 };
 
 /**

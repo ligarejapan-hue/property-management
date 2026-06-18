@@ -16,6 +16,7 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
@@ -29,6 +30,11 @@ import {
   lookupCorporateNumber,
   type CorporateLookupRecord,
 } from "@/lib/corporate-lookup";
+import {
+  assessCorporateLookupConflict,
+  type CorporateLookupConflict,
+} from "@/lib/corporate-lookup/conflict";
+import { isRawVisible } from "@/lib/owner-corporate-candidates";
 
 const expectedRecordSchema = z.object({
   corporateNumber: z.string(),
@@ -51,6 +57,9 @@ const applyRequestSchema = z.object({
   apply: applyFlagsSchema,
   expectedRecord: expectedRecordSchema,
   allowClosed: z.boolean().optional(),
+  // 国税庁結果と既存 Owner 名/住所が「明らかに不一致(conflict)」のとき、
+  // この確認フラグが無ければ反映を止める(allowClosed と同型のゲート)。
+  acknowledgeConflict: z.boolean().optional(),
 });
 
 type ApplyFlags = z.infer<typeof applyFlagsSchema>;
@@ -60,6 +69,7 @@ type ApplyResult =
   | "version_conflict"
   | "not_found"
   | "closed_blocked"
+  | "conflict_blocked"
   | "validation_error"
   | "forbidden"
   | "upstream_error";
@@ -115,6 +125,7 @@ export async function POST(
   let auditSource: string | null = null;
   let auditResult: ApplyResult = "validation_error";
   let auditHttpStatus: number | null = null;
+  let auditConflict: CorporateLookupConflict | null = null;
 
   try {
     const { id } = await params;
@@ -254,6 +265,30 @@ export async function POST(
       );
     }
 
+    // ---- conflict ゲート ----
+    // 国税庁結果の法人名/所在地と既存 Owner 名/住所が「明らかに不一致」のとき、
+    // acknowledgeConflict=true が無ければ 409 で止める(明らかな別法人を無確認で反映させない)。
+    // field 可視性を尊重し、raw-visible でない項目は null(=その信号 unknown)で渡す。
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+    const conflict = assessCorporateLookupConflict(
+      {
+        name: isRawVisible(displayConfig.name) ? currentOwner.name : null,
+        address: isRawVisible(displayConfig.address)
+          ? currentOwner.address
+          : null,
+      },
+      { name: fresh.record.name, address: fresh.record.address },
+    );
+    auditConflict = conflict;
+    if (conflict === "conflict" && body.acknowledgeConflict !== true) {
+      auditResult = "conflict_blocked";
+      throw new ApiError(
+        409,
+        "国税庁の法人情報と既存の所有者情報が大きく異なります。内容を確認のうえ acknowledgeConflict=true を指定してください",
+        "CONFLICT_NOT_ACKNOWLEDGED",
+      );
+    }
+
     // ---- 反映フィールド組み立て ----
     const updateFields: Record<string, unknown> = {};
     if (body.apply.name) updateFields.name = fresh.record.name;
@@ -311,6 +346,7 @@ export async function POST(
         source: auditSource,
         result: auditResult,
         httpStatus: auditHttpStatus,
+        conflict: auditConflict,
       },
     });
 
@@ -342,6 +378,7 @@ export async function POST(
             source: auditSource,
             result: auditResult,
             httpStatus: auditHttpStatus,
+            conflict: auditConflict,
           },
         });
       } catch {

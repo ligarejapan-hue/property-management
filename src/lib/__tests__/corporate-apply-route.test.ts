@@ -42,6 +42,7 @@ vi.mock("@/lib/api-helpers", () => {
       role: "admin",
     }),
     getUserPermissions: vi.fn(),
+    getOwnerDisplayConfig: vi.fn(),
     handleApiError: vi.fn((error: unknown) => {
       if (error instanceof MockApiError) {
         return Response.json(
@@ -93,7 +94,7 @@ vi.mock("@/lib/corporate-lookup", async () => {
 });
 
 import prisma from "@/lib/prisma";
-import { getUserPermissions } from "@/lib/api-helpers";
+import { getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges } from "@/lib/change-log";
 import {
@@ -185,12 +186,18 @@ function payload(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
+  // 既定: name/address raw-visible(full)。owner 名/住所は record と一致 → conflict="match"
+  // （conflict ゲートは既定でブロックしない。conflict は専用テストで検証する）。
+  vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+    name: "full",
+    address: "full",
+  } as unknown as Awaited<ReturnType<typeof getOwnerDisplayConfig>>);
   pm.owner.findUnique.mockResolvedValue({
     id: OWNER_ID,
     isArchived: false,
     version: 1,
-    name: "旧名称",
-    address: "旧住所",
+    name: RAW_NAME,
+    address: RAW_ADDRESS,
     zip: "999-9999",
     corporateNumber: null,
   });
@@ -523,6 +530,58 @@ describe("POST /api/owners/[id]/corporate-apply — 上流エラー", () => {
     );
     const res = await POST(makeRequest(payload()), makeParams());
     expect(res.status).toBe(429);
+  });
+});
+
+describe("POST /api/owners/[id]/corporate-apply — conflict ゲート", () => {
+  const MISMATCH_OWNER = {
+    id: OWNER_ID,
+    isArchived: false,
+    version: 1,
+    name: "まったく別の株式会社",
+    address: "大阪府大阪市北区梅田2-2-2",
+    zip: "999-9999",
+    corporateNumber: null,
+  };
+
+  it("明らかな不一致 + acknowledgeConflict 無で 409 CONFLICT_NOT_ACKNOWLEDGED", async () => {
+    pm.owner.findUnique.mockResolvedValueOnce(MISMATCH_OWNER);
+    const res = await POST(makeRequest(payload()), makeParams());
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe("CONFLICT_NOT_ACKNOWLEDGED");
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("明らかな不一致でも acknowledgeConflict=true なら反映可(200)", async () => {
+    pm.owner.findUnique.mockResolvedValueOnce(MISMATCH_OWNER);
+    const res = await POST(
+      makeRequest(payload({ acknowledgeConflict: true })),
+      makeParams(),
+    );
+    expect(res.status).toBe(200);
+    expect(pm.owner.updateMany).toHaveBeenCalledOnce();
+  });
+
+  it("name/address が field 不可視(hidden)なら conflict 判定せず通る(unknown)", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({
+      name: "hidden",
+      address: "hidden",
+    } as unknown as Awaited<ReturnType<typeof getOwnerDisplayConfig>>);
+    pm.owner.findUnique.mockResolvedValueOnce(MISMATCH_OWNER);
+    const res = await POST(makeRequest(payload()), makeParams());
+    expect(res.status).toBe(200);
+  });
+
+  it("conflict ゲートは廃止/stale チェックの後段(closed が先に 409 CLOSED_NOT_ALLOWED)", async () => {
+    pm.owner.findUnique.mockResolvedValueOnce(MISMATCH_OWNER);
+    vi.mocked(lookupCorporateNumber).mockResolvedValueOnce(
+      freshLookupOk({ isClosed: true }),
+    );
+    const res = await POST(makeRequest(payload()), makeParams());
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error.code).toBe("CLOSED_NOT_ALLOWED");
   });
 });
 

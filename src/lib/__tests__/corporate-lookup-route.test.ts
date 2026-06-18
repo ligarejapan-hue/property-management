@@ -43,6 +43,7 @@ vi.mock("@/lib/api-helpers", () => {
       role: "admin",
     }),
     getUserPermissions: vi.fn(),
+    getOwnerDisplayConfig: vi.fn(),
     handleApiError: vi.fn((error: unknown) => {
       if (error instanceof MockApiError) {
         return Response.json(
@@ -85,7 +86,7 @@ vi.mock("@/lib/corporate-lookup", async () => {
 });
 
 import prisma from "@/lib/prisma";
-import { getUserPermissions } from "@/lib/api-helpers";
+import { getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import {
   lookupCorporateNumber,
@@ -103,7 +104,10 @@ const pm = prisma as unknown as {
 };
 
 const OWNER_ID = "aaaaaaaa-0000-0000-0000-000000000001";
-const RAW_NUMBER = "1234567890123";
+// チェックデジット妥当な13桁(700110005901 → 8700110005901)。
+const RAW_NUMBER = "8700110005901";
+// 12桁会社法人等番号 → 上の13桁に算出される。
+const COMPANY_12 = "700110005901";
 const RAW_NAME = "○○株式会社";
 const RAW_ADDRESS = "東京都千代田区丸の内１−１−１";
 
@@ -131,7 +135,18 @@ const makeParams = () => ({ params: Promise.resolve({ id: OWNER_ID }) });
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
-  pm.owner.findUnique.mockResolvedValue({ id: OWNER_ID, isArchived: false });
+  // name/address は raw-visible(full) 既定。conflict 判定で owner と record を比較する。
+  vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+    name: "full",
+    address: "full",
+  } as unknown as Awaited<ReturnType<typeof getOwnerDisplayConfig>>);
+  // 既定の owner 名/住所は record と一致 → conflict="match"。
+  pm.owner.findUnique.mockResolvedValue({
+    id: OWNER_ID,
+    isArchived: false,
+    name: RAW_NAME,
+    address: RAW_ADDRESS,
+  });
   vi.mocked(lookupCorporateNumber).mockResolvedValue({
     found: true,
     isClosed: false,
@@ -162,25 +177,55 @@ describe("POST /api/owners/[id]/corporate-lookup — 正常系", () => {
     expect(json.lookup.record.name).toBe(RAW_NAME);
   });
 
-  it("ハイフン混じりを正規化して lookup", async () => {
-    await POST(makeRequest({ corporateNumber: "1234-5678-9012-3" }), makeParams());
+  it("ハイフン混じり(13桁)を正規化して lookup", async () => {
+    await POST(makeRequest({ corporateNumber: "8700-1100-05901" }), makeParams());
     expect(vi.mocked(lookupCorporateNumber)).toHaveBeenCalledWith(RAW_NUMBER);
   });
 
-  it("全角数字を正規化して lookup", async () => {
+  it("全角数字(13桁)を正規化して lookup", async () => {
     await POST(
-      makeRequest({ corporateNumber: "１２３４５６７８９０１２３" }),
+      makeRequest({ corporateNumber: "８７００１１０００５９０１" }),
       makeParams(),
     );
     expect(vi.mocked(lookupCorporateNumber)).toHaveBeenCalledWith(RAW_NUMBER);
   });
 
-  it("空白混じりを正規化して lookup", async () => {
+  it("空白混じり(13桁)を正規化して lookup", async () => {
     await POST(
-      makeRequest({ corporateNumber: " 1234 5678 9012 3 " }),
+      makeRequest({ corporateNumber: " 8700 1100 05901 " }),
       makeParams(),
     );
     expect(vi.mocked(lookupCorporateNumber)).toHaveBeenCalledWith(RAW_NUMBER);
+  });
+
+  it("12桁(会社法人等番号)→13桁を算出して lookup・inputKind/resolved を返す", async () => {
+    const res = await POST(makeRequest({ corporateNumber: COMPANY_12 }), makeParams());
+    expect(res.status).toBe(200);
+    // 算出した13桁で lookup される
+    expect(vi.mocked(lookupCorporateNumber)).toHaveBeenCalledWith(RAW_NUMBER);
+    const json = await res.json();
+    expect(json.inputKind).toBe("company_corporate_number_12");
+    expect(json.resolvedCorporateNumber13).toBe(RAW_NUMBER);
+  });
+
+  it("13桁(CD正)は inputKind=corporate_number_13 / conflict を返す", async () => {
+    const res = await POST(makeRequest({ corporateNumber: RAW_NUMBER }), makeParams());
+    const json = await res.json();
+    expect(json.inputKind).toBe("corporate_number_13");
+    expect(json.resolvedCorporateNumber13).toBe(RAW_NUMBER);
+    expect(json.conflict).toBe("match"); // owner 名/住所 == record
+  });
+
+  it("国税庁結果が既存 Owner 名と明らかに別なら conflict=conflict", async () => {
+    pm.owner.findUnique.mockResolvedValueOnce({
+      id: OWNER_ID,
+      isArchived: false,
+      name: "まったく別の株式会社",
+      address: "大阪府大阪市北区梅田2-2-2",
+    });
+    const res = await POST(makeRequest({ corporateNumber: RAW_NUMBER }), makeParams());
+    const json = await res.json();
+    expect(json.conflict).toBe("conflict");
   });
 
   it("found=false (0件) を 200 で返す", async () => {
@@ -261,8 +306,18 @@ describe("POST /api/owners/[id]/corporate-lookup — 正常系", () => {
 });
 
 describe("POST /api/owners/[id]/corporate-lookup — 異常系", () => {
-  it("12桁は 422", async () => {
-    const res = await POST(makeRequest({ corporateNumber: "123456789012" }), makeParams());
+  it("13桁チェックデジット不正は 422(lookup しない)", async () => {
+    // 1234567890123 は CD 不正(基礎番号234567890123 の正CD=9)。
+    const res = await POST(
+      makeRequest({ corporateNumber: "1234567890123" }),
+      makeParams(),
+    );
+    expect(res.status).toBe(422);
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+  });
+
+  it("11桁は 422", async () => {
+    const res = await POST(makeRequest({ corporateNumber: "12345678901" }), makeParams());
     expect(res.status).toBe(422);
     expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
   });

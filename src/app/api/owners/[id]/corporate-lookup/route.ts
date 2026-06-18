@@ -9,14 +9,25 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
-import { normalizeCorporateNumber } from "@/lib/corporate-number";
+import {
+  classifyCorporateIdentifier,
+  calculateCorporateNumberFromCompanyNumber,
+  normalizeCorporateIdentifier,
+  type CorporateIdentifierKind,
+} from "@/lib/corporate-number";
 import { CorporateLookupError, lookupCorporateNumber } from "@/lib/corporate-lookup";
+import {
+  assessCorporateLookupConflict,
+  type CorporateLookupConflict,
+} from "@/lib/corporate-lookup/conflict";
+import { isRawVisible } from "@/lib/owner-corporate-candidates";
 
 interface RequestBody {
   corporateNumber?: unknown;
@@ -46,6 +57,8 @@ export async function POST(
   let auditHttpStatus: number | null = null;
   let auditUserId: string | null = null;
   let auditOwnerId: string | null = null;
+  let auditInputKind: CorporateIdentifierKind | null = null;
+  let auditConflict: CorporateLookupConflict | null = null;
 
   try {
     const { id } = await params;
@@ -66,21 +79,33 @@ export async function POST(
     }
 
     const body = (await request.json().catch(() => ({}))) as RequestBody;
-    const normalized = normalizeCorporateNumber(
-      typeof body.corporateNumber === "string" ? body.corporateNumber : null,
-    );
-    if (!normalized) {
+    // 12桁(会社法人等番号) / 13桁(法人番号) を受け付け、13桁に解決する(server を正)。
+    //  - 12桁 → チェックデジット付与で13桁算出
+    //  - 13桁(CD正) → そのまま採用
+    //  - それ以外(13桁CD不正/11/14桁/数字以外) → 422
+    const rawInput =
+      typeof body.corporateNumber === "string" ? body.corporateNumber : null;
+    const inputKind = classifyCorporateIdentifier(rawInput);
+    auditInputKind = inputKind;
+    const resolved =
+      inputKind === "company_corporate_number_12"
+        ? calculateCorporateNumberFromCompanyNumber(rawInput)
+        : inputKind === "corporate_number_13"
+          ? normalizeCorporateIdentifier(rawInput)
+          : null;
+    if (!resolved) {
       throw new ApiError(
         422,
-        "法人番号は13桁の数字で指定してください",
+        "12桁の会社法人等番号、または13桁の法人番号(チェックデジット正)で指定してください",
         "VALIDATION_ERROR",
       );
     }
 
-    // Owner 実在 + archived チェック。Owner.name / address 等は読まない（必要なし）。
+    // Owner 実在 + archived チェック。conflict 判定のため name/address も読む
+    // (返すのは分類フラグのみ。生値はログ/audit/エラーに出さない)。
     const owner = await prisma.owner.findUnique({
       where: { id },
-      select: { id: true, isArchived: true },
+      select: { id: true, isArchived: true, name: true, address: true },
     });
     if (!owner || owner.isArchived) {
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
@@ -88,7 +113,7 @@ export async function POST(
 
     let result;
     try {
-      result = await lookupCorporateNumber(normalized);
+      result = await lookupCorporateNumber(resolved);
     } catch (err) {
       if (err instanceof CorporateLookupError) {
         throw mapLookupErrorToApi(err);
@@ -96,10 +121,26 @@ export async function POST(
       throw err;
     }
 
+    // conflict 判定: 国税庁結果の名称/所在地 vs 既存 Owner 名/住所。
+    // field-level 可視性を尊重し、raw-visible でない項目は null(=その信号 unknown)で渡す
+    // (一括反映の field-visibility と同型。マスク項目から不一致を推測させない)。
+    let conflict: CorporateLookupConflict = "unknown";
+    if (result.found && result.record) {
+      const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+      conflict = assessCorporateLookupConflict(
+        {
+          name: isRawVisible(displayConfig.name) ? owner.name : null,
+          address: isRawVisible(displayConfig.address) ? owner.address : null,
+        },
+        { name: result.record.name, address: result.record.address },
+      );
+    }
+    auditConflict = conflict;
+
     auditCode = result.found ? (result.isClosed ? "found_closed" : "found") : "not_found";
     auditHttpStatus = 200;
 
-    // AuditLog の detail には生値・会社名・住所等を一切入れない。
+    // AuditLog の detail には生値・会社名・住所等を一切入れない(分類フラグのみ)。
     await writeAuditLog({
       userId: session.id,
       action: "owner_corporate_lookup",
@@ -111,10 +152,15 @@ export async function POST(
         source: result.source,
         result: auditCode,
         httpStatus: auditHttpStatus,
+        inputKind,
+        conflict,
       },
     });
 
     return apiResponse({
+      inputKind,
+      resolvedCorporateNumber13: resolved,
+      conflict,
       lookup: {
         found: result.found,
         isClosed: result.isClosed,
@@ -143,6 +189,8 @@ export async function POST(
             source: null,
             result: auditCode,
             httpStatus: auditHttpStatus,
+            inputKind: auditInputKind,
+            conflict: auditConflict,
           },
         });
       } catch {
