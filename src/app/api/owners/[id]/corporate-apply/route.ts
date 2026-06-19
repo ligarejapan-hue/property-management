@@ -24,7 +24,10 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
-import { normalizeCorporateNumber } from "@/lib/corporate-number";
+import {
+  normalizeCorporateNumber,
+  normalizeCompanyRegistryNumber,
+} from "@/lib/corporate-number";
 import {
   CorporateLookupError,
   lookupCorporateNumber,
@@ -60,6 +63,9 @@ const applyRequestSchema = z.object({
   // 国税庁結果と既存 Owner 名/住所が「明らかに不一致(conflict)」のとき、
   // この確認フラグが無ければ反映を止める(allowClosed と同型のゲート)。
   acknowledgeConflict: z.boolean().optional(),
+  // 12桁で lookup した場合の元の会社法人等番号(12桁)。apply.corporateNumber=true のとき、
+  // 検出13桁(corporateNumber)と一緒に companyRegistryNumber 列へ保存する(案2)。
+  companyRegistryNumber: z.string().optional(),
 });
 
 type ApplyFlags = z.infer<typeof applyFlagsSchema>;
@@ -307,6 +313,20 @@ export async function POST(
     }
     if (body.apply.corporateNumber) {
       updateFields.corporateNumber = fresh.record.corporateNumber;
+      // 案2: 12桁で lookup した場合、元の会社法人等番号(12桁)も別カラムへ保存する。
+      // 権限は apply.corporateNumber の owner_corporate_number ゲートで担保済（同一権限）。
+      if (body.companyRegistryNumber != null && body.companyRegistryNumber.trim() !== "") {
+        const normalizedReg = normalizeCompanyRegistryNumber(body.companyRegistryNumber);
+        if (normalizedReg === null) {
+          auditResult = "validation_error";
+          throw new ApiError(
+            422,
+            "会社法人等番号は12桁の数字で指定してください",
+            "VALIDATION_ERROR",
+          );
+        }
+        updateFields.companyRegistryNumber = normalizedReg;
+      }
     }
 
     // ---- optimistic lock update ----

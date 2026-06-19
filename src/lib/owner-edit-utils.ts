@@ -28,6 +28,8 @@ export type OwnerFormValues = {
   address: string;
   email: string;
   corporateNumber: string;
+  /** 会社法人等番号(12桁)。corporateNumber(13桁) と同じ owner_corporate_number 権限で編集。 */
+  companyRegistryNumber: string;
 };
 
 /**
@@ -72,6 +74,9 @@ export function buildOwnerUpdatePayload(
   // 空文字をクライアントから送れば null として扱われる。
   if (fields.corporateNumber) {
     payload.corporateNumber = form.corporateNumber.trim() || null;
+    // 会社法人等番号(12桁)も同じ owner_corporate_number 権限で編集する。
+    // 空文字は null（クリア）。正規化/検証はサーバ側 companyRegistryNumberInputSchema。
+    payload.companyRegistryNumber = form.companyRegistryNumber.trim() || null;
   }
   return payload;
 }

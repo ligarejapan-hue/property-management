@@ -169,6 +169,12 @@ export default function CorporateLookupPanel({
     }
     const record = result.record;
     const closed = result.isClosed;
+    // 案2: 12桁で検索した場合、元の会社法人等番号(12桁)を apply に同梱して保存させる
+    // (searchedFor は検索時の正規化入力。inputKind=12 のとき 12桁)。
+    const companyRegistry12 =
+      meta?.inputKind === "company_corporate_number_12"
+        ? searchedFor ?? undefined
+        : undefined;
     const submit = (acknowledgeConflict?: boolean) =>
       applyOwnerCorporate(ownerId, {
         corporateNumber: record.corporateNumber,
@@ -183,6 +189,7 @@ export default function CorporateLookupPanel({
         },
         allowClosed: closed ? true : undefined,
         acknowledgeConflict,
+        companyRegistryNumber: companyRegistry12,
       });
     setApplying(true);
     setApplyError(null);
@@ -429,6 +436,17 @@ export default function CorporateLookupPanel({
                     onChange={() => toggleTarget("corporateNumber")}
                   />
                 </div>
+
+                {/* 案2: 12桁検索で法人番号を反映する場合、元の12桁も会社法人等番号として保存される旨。 */}
+                {meta?.inputKind === "company_corporate_number_12" &&
+                  applyTargets.corporateNumber &&
+                  searchedFor && (
+                    <p className="text-[10px] text-gray-500">
+                      会社法人等番号（
+                      <span className="font-mono">{searchedFor}</span>
+                      ・12桁）も併せて保存されます
+                    </p>
+                  )}
 
                 {applyError && (
                   <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-700">

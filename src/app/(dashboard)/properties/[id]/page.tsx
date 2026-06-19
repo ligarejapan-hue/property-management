@@ -31,7 +31,12 @@ import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { canShowAddOwner } from "@/lib/owner-link-utils";
-import { normalizeCorporateNumber, detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
+import {
+  normalizeCorporateNumber,
+  normalizeCompanyRegistryNumber,
+  classifyCorporateIdentifier,
+  detectCorporateNumberInOwnerLike,
+} from "@/lib/corporate-number";
 import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
 import { OwnerLinkModal } from "@/components/owners/owner-link-modal";
@@ -104,6 +109,8 @@ interface ApiOwner {
   email?: string | null;
   /** 法人番号（13桁数字、display-level に応じて masked/hidden される）。 */
   corporateNumber?: string | null;
+  /** 会社法人等番号（12桁、corporateNumber と同じ display-level でマスク/非表示）。 */
+  companyRegistryNumber?: string | null;
   /** owner:read がない場合は API レスポンスが { id } のみになるため optional。 */
   version?: number;
 }
@@ -850,6 +857,7 @@ function OwnerCard({
     address: po.owner.address ?? "",
     email: po.owner.email ?? "",
     corporateNumber: po.owner.corporateNumber ?? "",
+    companyRegistryNumber: po.owner.companyRegistryNumber ?? "",
   });
 
   const handleEdit = () => {
@@ -861,6 +869,7 @@ function OwnerCard({
       address: po.owner.address ?? "",
       email: po.owner.email ?? "",
       corporateNumber: po.owner.corporateNumber ?? "",
+      companyRegistryNumber: po.owner.companyRegistryNumber ?? "",
     });
     // 保存値ロードは user-edit ではない＝signal をリセット（開いただけでは検索しない）。
     setAddressEdited(false);
@@ -1090,10 +1099,15 @@ function OwnerCard({
                   placeholder="例: 1234567890123"
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
+                {/* 赤エラーは「保存ガード/サーバ検証(normalizeCorporateNumber=13桁)で弾かれる入力」と
+                    一致させる。13桁は CD 検証せず受理する既存仕様に揃え、有効な12桁(会社法人等番号)は
+                    検索/専用欄へ誘導するため赤を出さない。 */}
                 {form.corporateNumber.trim() !== "" &&
+                  classifyCorporateIdentifier(form.corporateNumber) !==
+                    "company_corporate_number_12" &&
                   normalizeCorporateNumber(form.corporateNumber) === null && (
                     <p className="text-xs text-red-600">
-                      法人番号は13桁の数字で入力してください（ハイフン・空白・全角数字は自動で除去されます）
+                      法人番号は13桁の数字で入力してください（12桁の会社法人等番号は下の欄、または「法人情報を検索」をご利用ください）
                     </p>
                   )}
                 {/* 法人情報を検索（国税庁 法人番号 Web-API / preview のみ）。
@@ -1118,6 +1132,39 @@ function OwnerCard({
                 />
               </div>
             )}
+
+            {/* 会社法人等番号（12桁・登記の番号）。法人番号(13桁)とは別カラム。
+                権限は corporateNumber と同じ owner_corporate_number を共用。 */}
+            {editableFields.corporateNumber && (
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-medium text-gray-700">
+                  会社法人等番号（任意 / 12桁・登記の番号）
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={form.companyRegistryNumber}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      companyRegistryNumber: e.target.value,
+                    }))
+                  }
+                  placeholder="例: 123456789012"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                {form.companyRegistryNumber.trim() !== "" &&
+                  normalizeCompanyRegistryNumber(form.companyRegistryNumber) ===
+                    null && (
+                    <p className="text-xs text-red-600">
+                      会社法人等番号は12桁の数字で入力してください（ハイフン・空白・全角数字は自動で除去されます）
+                    </p>
+                  )}
+                <p className="text-[10px] text-gray-500">
+                  法人番号（13桁）とは別物です。不動産登記の12桁番号をそのまま入力してください。
+                </p>
+              </div>
+            )}
           </div>
 
           {saveError && (
@@ -1133,7 +1180,11 @@ function OwnerCard({
                 (editableFields.name && !form.name.trim()) ||
                 (editableFields.corporateNumber &&
                   form.corporateNumber.trim() !== "" &&
-                  normalizeCorporateNumber(form.corporateNumber) === null)
+                  normalizeCorporateNumber(form.corporateNumber) === null) ||
+                (editableFields.corporateNumber &&
+                  form.companyRegistryNumber.trim() !== "" &&
+                  normalizeCompanyRegistryNumber(form.companyRegistryNumber) ===
+                    null)
               }
               className="rounded-md bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
@@ -1166,6 +1217,16 @@ function OwnerCard({
           {po.owner.corporateNumber !== undefined && (
             <div className="md:col-span-2">
               <OwnerField label="法人番号" value={po.owner.corporateNumber ?? null} mono />
+            </div>
+          )}
+          {/* 会社法人等番号(12桁): corporateNumber と同じ display-level でマスク/非表示。 */}
+          {po.owner.companyRegistryNumber !== undefined && (
+            <div className="md:col-span-2">
+              <OwnerField
+                label="会社法人等番号"
+                value={po.owner.companyRegistryNumber ?? null}
+                mono
+              />
             </div>
           )}
           {/* 候補検出: corporateNumber 未設定 + name/address に法人番号らしき文字列が含まれる場合のみ表示。
