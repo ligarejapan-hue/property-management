@@ -679,3 +679,45 @@ describe("POST /api/owners/[id]/corporate-apply — 正常系", () => {
     expect(updateArg.data.name).toBe(RAW_NAME);
   });
 });
+
+describe("POST /api/owners/[id]/corporate-apply — companyRegistryNumber(12桁) 案2", () => {
+  it("apply.corporateNumber=true + companyRegistryNumber(12桁) を別カラムへ正規化保存", async () => {
+    await POST(
+      makeRequest(payload({ companyRegistryNumber: "1234-5678-9012" })),
+      makeParams(),
+    );
+    const updateArg = pm.owner.updateMany.mock.calls[0][0];
+    expect(updateArg.data.corporateNumber).toBe(RAW_NUMBER);
+    expect(updateArg.data.companyRegistryNumber).toBe("123456789012");
+  });
+
+  it("apply.corporateNumber=false なら companyRegistryNumber を保存しない", async () => {
+    await POST(
+      makeRequest(
+        payload({
+          apply: { name: true, address: false, zip: false, corporateNumber: false },
+          companyRegistryNumber: "123456789012",
+        }),
+      ),
+      makeParams(),
+    );
+    const updateArg = pm.owner.updateMany.mock.calls[0][0];
+    expect(updateArg.data).not.toHaveProperty("companyRegistryNumber");
+  });
+
+  it("companyRegistryNumber が12桁でない(13桁)→ 422・書込しない", async () => {
+    const res = await POST(
+      makeRequest(payload({ companyRegistryNumber: "1234567890123" })),
+      makeParams(),
+    );
+    expect(res.status).toBe(422);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("companyRegistryNumber 未指定なら corporateNumber のみ保存（後方互換）", async () => {
+    await POST(makeRequest(payload()), makeParams());
+    const updateArg = pm.owner.updateMany.mock.calls[0][0];
+    expect(updateArg.data.corporateNumber).toBe(RAW_NUMBER);
+    expect(updateArg.data).not.toHaveProperty("companyRegistryNumber");
+  });
+});

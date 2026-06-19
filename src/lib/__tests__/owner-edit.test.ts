@@ -623,6 +623,7 @@ const fullForm = {
   address: "東京都渋谷区1-1",
   email: "yamada@example.com",
   corporateNumber: "",
+  companyRegistryNumber: "",
 };
 
 describe("buildOwnerUpdatePayload — field-level full guard", () => {
@@ -635,6 +636,27 @@ describe("buildOwnerUpdatePayload — field-level full guard", () => {
     expect(payload.address).toBe("東京都渋谷区1-1");
     expect(payload.email).toBe("yamada@example.com");
     expect(payload.version).toBe(3);
+  });
+
+  it("fields.corporateNumber=true で companyRegistryNumber(12桁) も payload に含まれる", () => {
+    const form = { ...fullForm, companyRegistryNumber: "123456789012" };
+    const payload = buildOwnerUpdatePayload(form, allEditable, 1);
+    expect(payload.companyRegistryNumber).toBe("123456789012");
+  });
+
+  it("fields.corporateNumber=false で companyRegistryNumber は payload に含まれない", () => {
+    const form = { ...fullForm, companyRegistryNumber: "123456789012" };
+    const payload = buildOwnerUpdatePayload(form, noneEditable, 1);
+    expect(payload).not.toHaveProperty("companyRegistryNumber");
+  });
+
+  it("companyRegistryNumber 空文字は null（クリア）として送信", () => {
+    const payload = buildOwnerUpdatePayload(
+      { ...fullForm, companyRegistryNumber: "" },
+      allEditable,
+      1,
+    );
+    expect(payload.companyRegistryNumber).toBeNull();
   });
 
   it("owner_phone:masked の場合、phone が payload に含まれない", () => {

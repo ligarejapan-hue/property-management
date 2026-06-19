@@ -12,6 +12,8 @@ interface OwnerData {
   note: string | null;
   /** 法人番号（13桁、表示権限に応じて masked/hidden の場合もある）。 */
   corporateNumber?: string | null;
+  /** 会社法人等番号（12桁、corporateNumber と同じ表示権限でマスク/非表示）。 */
+  companyRegistryNumber?: string | null;
 }
 
 interface OwnerDetailPanelProps {
@@ -80,6 +82,11 @@ export default function OwnerDetailPanel({ owner }: OwnerDetailPanelProps) {
         {owner.corporateNumber !== undefined && (
           <div className="md:col-span-2">
             {renderField("法人番号", owner.corporateNumber)}
+          </div>
+        )}
+        {owner.companyRegistryNumber !== undefined && (
+          <div className="md:col-span-2">
+            {renderField("会社法人等番号", owner.companyRegistryNumber)}
           </div>
         )}
         {showCorporateSuspect && (

@@ -2023,6 +2023,8 @@ export interface CorporateApplyRequest {
   allowClosed?: boolean;
   /** conflict("明らかな不一致")時に反映を許可する確認フラグ(allowClosed と同型)。 */
   acknowledgeConflict?: boolean;
+  /** 12桁で lookup した場合の元の会社法人等番号(12桁)。apply.corporateNumber=true 時に併せて保存。 */
+  companyRegistryNumber?: string;
 }
 
 export interface CorporateApplyResponse {
