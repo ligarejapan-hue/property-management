@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { PROPERTY_TYPE_VALUES, CASE_STATUS_VALUES, INTRODUCTION_ROUTE_VALUES } from "@/lib/property-types";
-import { normalizeCorporateNumber } from "@/lib/corporate-number";
+import {
+  normalizeCorporateNumber,
+  normalizeCompanyRegistryNumber,
+} from "@/lib/corporate-number";
 import {
   FIELD_SURVEY_MEMO_MAX_LEN,
   FIELD_SURVEY_PIN_TYPES,
@@ -29,6 +32,31 @@ const corporateNumberInputSchema = z
     }
   })
   .transform((v) => (v === null ? null : normalizeCorporateNumber(v)));
+
+// 会社法人等番号(12桁)入力フィールド共通スキーマ:
+// - 空文字 / null / undefined → null（保存しない）
+// - 12桁数字に正規化できる入力（全角・ハイフン・空白混じり許容）→ 正規化済 12桁
+// - それ以外（13桁 / 11桁 / 数字以外混入）→ validation error
+// 13桁法人番号(corporateNumberInputSchema)とは別物。互いに上書きしない。
+const companyRegistryNumberInputSchema = z
+  .union([z.string(), z.null(), z.undefined()])
+  .transform((v) => {
+    if (v == null) return null;
+    const trimmed = v.trim();
+    if (trimmed === "") return null;
+    return v;
+  })
+  .superRefine((v, ctx) => {
+    if (v === null) return;
+    const normalized = normalizeCompanyRegistryNumber(v);
+    if (normalized === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "会社法人等番号は12桁の数字で入力してください",
+      });
+    }
+  })
+  .transform((v) => (v === null ? null : normalizeCompanyRegistryNumber(v)));
 
 // ---------- Property list query ----------
 
@@ -127,6 +155,7 @@ export const createOwnerSchema = z.object({
   email: z.string().email("メールアドレスの形式が正しくありません").optional().nullable(),
   externalLinkKey: z.string().optional().nullable(),
   corporateNumber: corporateNumberInputSchema.optional(),
+  companyRegistryNumber: companyRegistryNumberInputSchema.optional(),
 });
 
 export const updateOwnerSchema = z.object({
@@ -138,6 +167,7 @@ export const updateOwnerSchema = z.object({
   note: z.string().optional().nullable(),
   email: z.string().email("メールアドレスの形式が正しくありません").optional().nullable(),
   corporateNumber: corporateNumberInputSchema.optional(),
+  companyRegistryNumber: companyRegistryNumberInputSchema.optional(),
   version: z.number().int(),
 });
 

@@ -52,6 +52,7 @@ export const OWNER_TRACKED_FIELDS = [
   "note",
   "email",
   "corporateNumber",
+  "companyRegistryNumber",
 ];
 
 /** Building 編集時に ChangeLog に記録する追跡対象 field 名。 */

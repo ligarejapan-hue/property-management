@@ -101,6 +101,8 @@ export async function PATCH(
       { requestKey: "email", resource: "owner_email" },
       { requestKey: "note", resource: "owner_note" },
       { requestKey: "corporateNumber", resource: "owner_corporate_number" },
+      // 会社法人等番号(12桁)は法人番号(13桁)と同じ field-level 権限で扱う。
+      { requestKey: "companyRegistryNumber", resource: "owner_corporate_number" },
     ];
     for (const { requestKey, resource } of fieldWriteChecks) {
       if (requestKey in updateFields && !hasExplicitWritePerm(perms, resource)) {
