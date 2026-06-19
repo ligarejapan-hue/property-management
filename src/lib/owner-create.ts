@@ -17,6 +17,7 @@ export interface OwnerCreateData {
   note?: string | null;
   email?: string | null;
   corporateNumber?: string | null;
+  companyRegistryNumber?: string | null;
   externalLinkKey?: string | null;
 }
 
@@ -34,6 +35,8 @@ const OWNER_FIELD_WRITE_RESOURCES: Array<{
   { key: "email", resource: "owner_email", label: "email" },
   { key: "note", resource: "owner_note", label: "note" },
   { key: "corporateNumber", resource: "owner_corporate_number", label: "corporateNumber" },
+  // 会社法人等番号(12桁)は法人番号(13桁)と同じ field-level 権限で扱う。
+  { key: "companyRegistryNumber", resource: "owner_corporate_number", label: "companyRegistryNumber" },
 ];
 
 /**
