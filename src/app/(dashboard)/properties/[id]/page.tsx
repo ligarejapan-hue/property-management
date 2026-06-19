@@ -1099,11 +1099,13 @@ function OwnerCard({
                   placeholder="例: 1234567890123"
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
-                {/* 12桁(会社法人等番号)は「法人情報を検索」で解決でき、下の専用欄でも入力できる。
-                    赤エラーは真に不正な入力(11桁/14桁/CD不正13桁/数字以外)のときだけ出す。 */}
+                {/* 赤エラーは「保存ガード/サーバ検証(normalizeCorporateNumber=13桁)で弾かれる入力」と
+                    一致させる。13桁は CD 検証せず受理する既存仕様に揃え、有効な12桁(会社法人等番号)は
+                    検索/専用欄へ誘導するため赤を出さない。 */}
                 {form.corporateNumber.trim() !== "" &&
-                  classifyCorporateIdentifier(form.corporateNumber) ===
-                    "invalid" && (
+                  classifyCorporateIdentifier(form.corporateNumber) !==
+                    "company_corporate_number_12" &&
+                  normalizeCorporateNumber(form.corporateNumber) === null && (
                     <p className="text-xs text-red-600">
                       法人番号は13桁の数字で入力してください（12桁の会社法人等番号は下の欄、または「法人情報を検索」をご利用ください）
                     </p>

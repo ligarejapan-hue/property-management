@@ -222,3 +222,30 @@ describe("api-client.ts — lookupOwnerCorporateNumber", () => {
     expect(apiClientSrc).toMatch(/corporate-lookup/);
   });
 });
+
+describe("Phase 3b: 会社法人等番号(12桁) UI 配線", () => {
+  it("Codex P1: /api/properties/[id] の owner select に companyRegistryNumber が含まれる（保存時消失防止）", () => {
+    const routeSrc = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/api/properties/[id]/route.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/companyRegistryNumber:\s*true/);
+  });
+
+  it("properties 編集フォームに会社法人等番号(12桁)入力欄がある", () => {
+    expect(pageSrc).toMatch(/会社法人等番号/);
+    expect(pageSrc).toMatch(/form\.companyRegistryNumber/);
+    expect(pageSrc).toMatch(/companyRegistryNumber:\s*e\.target\.value/);
+  });
+
+  it("Codex P2: 法人番号欄の赤エラーは normalizeCorporateNumber(保存ガード)と整合し、有効12桁では出さない", () => {
+    expect(pageSrc).toMatch(
+      /classifyCorporateIdentifier\(form\.corporateNumber\)\s*!==\s*\n?\s*"company_corporate_number_12"[\s\S]{0,120}normalizeCorporateNumber\(form\.corporateNumber\)\s*===\s*null/,
+    );
+  });
+
+  it("panel: 12桁(inputKind)検索の apply に companyRegistryNumber を同梱する", () => {
+    expect(panelSrc).toMatch(/company_corporate_number_12/);
+    expect(panelSrc).toMatch(/companyRegistryNumber:\s*companyRegistry12/);
+  });
+});
