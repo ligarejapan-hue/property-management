@@ -36,6 +36,7 @@ import {
   normalizeCompanyRegistryNumber,
   classifyCorporateIdentifier,
   detectCorporateNumberInOwnerLike,
+  detectCompanyRegistryNumberInOwnerLike,
 } from "@/lib/corporate-number";
 import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
@@ -1137,6 +1138,17 @@ function OwnerCard({
                 権限は corporateNumber と同じ owner_corporate_number を共用。 */}
             {editableFields.corporateNumber && (
               <div className="space-y-1 md:col-span-2">
+                <CompanyRegistryNumberCandidateBanner
+                  owner={po.owner}
+                  currentRegistryInput={form.companyRegistryNumber}
+                  currentSearchInput={form.corporateNumber}
+                  onTransferRegistry={(candidate) =>
+                    setForm((f) => ({ ...f, companyRegistryNumber: candidate }))
+                  }
+                  onTransferSearch={(candidate) =>
+                    setForm((f) => ({ ...f, corporateNumber: candidate }))
+                  }
+                />
                 <label className="text-xs font-medium text-gray-700">
                   会社法人等番号（任意 / 12桁・登記の番号）
                 </label>
@@ -1234,6 +1246,8 @@ function OwnerCard({
               注: po.owner.name / address はマスク済の値が来る可能性があるが、本ヘルパーは
               13桁数字の完全一致パターンを見るのでマスク済値では誤検出しにくい。 */}
           <CorporateNumberSuspectBanner owner={po.owner} />
+          {/* 会社法人等番号(12桁) の候補検出（ラベル付きのみ）。値は表示しない。 */}
+          <CompanyRegistrySuspectBanner owner={po.owner} />
         </dl>
       )}
 
@@ -1615,6 +1629,102 @@ function CorporateNumberCandidateBanner({
           >
             {c} を法人番号欄に転記
           </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 会社法人等番号(12桁) 検出の display バナー。
+ * owner.companyRegistryNumber が未設定 + name/address/note にラベル付き12桁が含まれる場合のみ警告。
+ * 候補値そのものは表示しない（自動上書きしないユーザー確定方針）。
+ */
+function CompanyRegistrySuspectBanner({ owner }: { owner: ApiOwner }) {
+  if (owner.companyRegistryNumber) return null;
+  const detection = detectCompanyRegistryNumberInOwnerLike({
+    name: owner.name,
+    address: owner.address,
+    note: owner.note,
+  });
+  if (detection.candidates.length === 0) return null;
+  return (
+    <div className="md:col-span-2">
+      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <div>
+          氏名・現住所・備考欄に会社法人等番号（12桁）らしき文字列が含まれています。
+          編集モードで「会社法人等番号」欄に転記してください（自動上書きはしません）。
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 編集モード内で、Owner の name/address/note から検出した会社法人等番号(12桁)候補を
+ * ユーザー操作で転記/検索するためのバナー（13桁バナーと同方針）。
+ *
+ * - 候補が無い / owner 本体に会社法人等番号がある / 入力欄に既に値がある → 描画しない。
+ * - 候補は最大 3 件（ラベル付き12桁・dedup 済）。候補値そのものは表示する（編集者の確認用）。
+ * - 「会社法人等番号欄に転記」: form.companyRegistryNumber を埋める（保存はユーザー操作）。
+ * - 「この番号で検索」: 検索欄(form.corporateNumber)に渡す。12桁は lookup で 13桁算出→国税庁検索でき、
+ *   反映時に会社法人等番号も保存される（案2）。自動 lookup/保存はしない。
+ */
+function CompanyRegistryNumberCandidateBanner({
+  owner,
+  currentRegistryInput,
+  currentSearchInput,
+  onTransferRegistry,
+  onTransferSearch,
+}: {
+  owner: ApiOwner;
+  currentRegistryInput: string;
+  /** 検索欄(法人番号 input)の現在値。値があるときは「検索」転記で上書きしない。 */
+  currentSearchInput: string;
+  onTransferRegistry: (candidate: string) => void;
+  onTransferSearch: (candidate: string) => void;
+}) {
+  if (owner.companyRegistryNumber) return null;
+  if (currentRegistryInput.trim() !== "") return null;
+  const detection = detectCompanyRegistryNumberInOwnerLike({
+    name: owner.name,
+    address: owner.address,
+    note: owner.note,
+  });
+  const candidates = detection.candidates.slice(0, 3);
+  if (candidates.length === 0) return null;
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800">
+      <div className="mb-1 flex items-start gap-1.5">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          氏名・現住所・備考欄から会社法人等番号（12桁）らしき値を検出しました。
+          「転記」で会社法人等番号欄へ、「検索」で法人情報の検索（12桁→法人番号13桁）に使えます
+          （自動上書き・自動保存・自動検索はしません）。
+        </span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {candidates.map((c) => (
+          <div key={c} className="flex flex-wrap items-center gap-1.5">
+            <span className="font-mono text-[11px] text-amber-900">{c}</span>
+            <button
+              type="button"
+              onClick={() => onTransferRegistry(c)}
+              className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100"
+            >
+              会社法人等番号欄に転記
+            </button>
+            {currentSearchInput.trim() === "" && (
+              <button
+                type="button"
+                onClick={() => onTransferSearch(c)}
+                className="rounded-md border border-blue-300 bg-white px-2 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100"
+              >
+                この番号で検索
+              </button>
+            )}
+          </div>
         ))}
       </div>
     </div>

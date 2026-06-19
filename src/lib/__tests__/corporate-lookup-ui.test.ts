@@ -249,3 +249,29 @@ describe("Phase 3b: 会社法人等番号(12桁) UI 配線", () => {
     expect(panelSrc).toMatch(/companyRegistryNumber:\s*companyRegistry12/);
   });
 });
+
+describe("会社法人等番号(12桁) 候補検出バナー", () => {
+  it("検出バナー(suspect/candidate)が定義・マウントされている", () => {
+    expect(pageSrc).toMatch(/detectCompanyRegistryNumberInOwnerLike/);
+    expect(pageSrc).toMatch(/function CompanyRegistrySuspectBanner/);
+    expect(pageSrc).toMatch(/function CompanyRegistryNumberCandidateBanner/);
+    expect(pageSrc).toMatch(/<CompanyRegistrySuspectBanner/);
+    expect(pageSrc).toMatch(/<CompanyRegistryNumberCandidateBanner/);
+  });
+
+  it("候補バナーは転記(会社法人等番号欄)と検索(法人番号欄)の2導線を持つ", () => {
+    // 転記 → form.companyRegistryNumber、検索 → form.corporateNumber(lookup欄)
+    expect(pageSrc).toMatch(/onTransferRegistry=\{[\s\S]{0,120}companyRegistryNumber:\s*candidate/);
+    expect(pageSrc).toMatch(/onTransferSearch=\{[\s\S]{0,120}corporateNumber:\s*candidate/);
+    expect(pageSrc).toMatch(/会社法人等番号欄に転記/);
+    expect(pageSrc).toMatch(/この番号で検索/);
+  });
+
+  it("既存値あり/入力欄に値ありでは候補バナーを出さない(自動上書き防止)", () => {
+    // currentRegistryInput は候補バナー固有なので pageSrc 直で十分一意。
+    expect(pageSrc).toMatch(/if \(owner\.companyRegistryNumber\) return null;/);
+    expect(pageSrc).toMatch(
+      /if \(currentRegistryInput\.trim\(\) !== ""\) return null;/,
+    );
+  });
+});

@@ -344,6 +344,47 @@ export function detectCorporateNumberInOwnerLike(
   };
 }
 
+export interface CompanyRegistryNumberDetectionInOwner {
+  /** 検出された 12桁会社法人等番号（dedup 済）。 */
+  candidates: string[];
+  /** どのフィールドで 1 件以上検出されたか。 */
+  detectedIn: Array<"name" | "address" | "note">;
+}
+
+/**
+ * Owner-like の name / address / note から会社法人等番号(12桁)候補を検出する。
+ *
+ * - ラベル付き(「会社法人等番号」「法人等番号」)のみ抽出する
+ *   (extractCompanyRegistryNumbersFromText)。裸 12桁は誤検出回避で対象外。
+ * - 13桁(法人番号)とは別物。detect 結果は UI 上の「候補転記/検索」用途のみで、
+ *   自動で Owner.companyRegistryNumber を書き換えることはしない。
+ */
+export function detectCompanyRegistryNumberInOwnerLike(
+  owner: OwnerLikeForCorporateDetection,
+): CompanyRegistryNumberDetectionInOwner {
+  const detectedIn: Array<"name" | "address" | "note"> = [];
+  const candidates = new Set<string>();
+
+  const fields: Array<["name" | "address" | "note", string | null | undefined]> = [
+    ["name", owner.name],
+    ["address", owner.address],
+    ["note", owner.note],
+  ];
+
+  for (const [field, value] of fields) {
+    const hits = extractCompanyRegistryNumbersFromText(value);
+    if (hits.length > 0) {
+      detectedIn.push(field);
+      for (const h of hits) candidates.add(h);
+    }
+  }
+
+  return {
+    candidates: Array.from(candidates),
+    detectedIn,
+  };
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // 会社法人等番号(12桁) ⇔ 法人番号(13桁) の変換・検証・分類。
 //
