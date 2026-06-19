@@ -394,6 +394,10 @@ model Owner {
   /// nullable: 個人所有者には設定しない。表記揺れ吸収のため取込・編集時に
   /// 13桁数字へ正規化してから保存する（ハイフン・空白・全角数字を除去）。
   corporateNumber  String?  @map("corporate_number") @db.VarChar(13)
+  /// 会社法人等番号（不動産登記の番号、12桁）。法人番号(13桁)とは別物として保存する。
+  /// nullable。12桁数字へ正規化してから保存する（normalizeCompanyRegistryNumber）。
+  /// corporateNumber(13桁) を 12桁で上書きしない（別カラム・別 validator）。
+  companyRegistryNumber String? @map("company_registry_number") @db.VarChar(12)
   version          Int      @default(1)
   isArchived       Boolean  @default(false) @map("is_archived")
   createdAt        DateTime @default(now()) @map("created_at")

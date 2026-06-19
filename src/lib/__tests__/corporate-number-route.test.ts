@@ -235,6 +235,48 @@ describe("PATCH /api/owners/[id] — corporateNumber", () => {
     expect(pm.owner.updateMany).not.toHaveBeenCalled();
   });
 
+  it("companyRegistryNumber(12桁) を別カラムへ正規化保存する", async () => {
+    await PATCH(
+      makeRequest({ version: 1, companyRegistryNumber: "1234-5678-9012" }),
+      makeParams(),
+    );
+    const updateCall = pm.owner.updateMany.mock.calls[0][0];
+    expect(updateCall.data.companyRegistryNumber).toBe("123456789012");
+  });
+
+  it("companyRegistryNumber に13桁を入れると 422", async () => {
+    const res = await PATCH(
+      makeRequest({ version: 1, companyRegistryNumber: "1234567890123" }),
+      makeParams(),
+    );
+    expect(res.status).toBe(422);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("companyRegistryNumber は owner_corporate_number 権限が無いと 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce(PERMS_NO_CORP_WRITE);
+    const res = await PATCH(
+      makeRequest({ version: 1, companyRegistryNumber: "123456789012" }),
+      makeParams(),
+    );
+    expect(res.status).toBe(403);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("corporateNumber(13桁) と companyRegistryNumber(12桁) を別カラムへ同時保存（互いに上書きしない）", async () => {
+    await PATCH(
+      makeRequest({
+        version: 1,
+        corporateNumber: "1234567890123",
+        companyRegistryNumber: "123456789012",
+      }),
+      makeParams(),
+    );
+    const updateCall = pm.owner.updateMany.mock.calls[0][0];
+    expect(updateCall.data.corporateNumber).toBe("1234567890123");
+    expect(updateCall.data.companyRegistryNumber).toBe("123456789012");
+  });
+
   it("owner_corporate_number 書込権限なしで 403", async () => {
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_CORP_WRITE);
     const res = await PATCH(
@@ -421,6 +463,31 @@ describe("POST /api/owners — corporateNumber", () => {
     vi.mocked(getUserPermissions).mockResolvedValue(POST_PERMS_NO_OWNER_WRITE);
     const res = await OWNERS_POST(
       makePostRequest({ name: "株式会社○○", corporateNumber: "1234567890123" }),
+    );
+    expect(res.status).toBe(403);
+    expect(pm.owner.create).not.toHaveBeenCalled();
+  });
+
+  it("companyRegistryNumber(12桁) を create data に含める（normalize）", async () => {
+    await OWNERS_POST(
+      makePostRequest({ name: "株式会社○○", companyRegistryNumber: "1234-5678-9012" }),
+    );
+    const data = pm.owner.create.mock.calls[0][0].data;
+    expect(data.companyRegistryNumber).toBe("123456789012");
+  });
+
+  it("companyRegistryNumber に13桁は 422 で create は呼ばれない", async () => {
+    const res = await OWNERS_POST(
+      makePostRequest({ name: "株式会社○○", companyRegistryNumber: "1234567890123" }),
+    );
+    expect(res.status).toBe(422);
+    expect(pm.owner.create).not.toHaveBeenCalled();
+  });
+
+  it("companyRegistryNumber は owner_corporate_number 権限なしで 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(POST_PERMS_NO_CORP);
+    const res = await OWNERS_POST(
+      makePostRequest({ name: "株式会社○○", companyRegistryNumber: "123456789012" }),
     );
     expect(res.status).toBe(403);
     expect(pm.owner.create).not.toHaveBeenCalled();

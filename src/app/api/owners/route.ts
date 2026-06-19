@@ -135,6 +135,8 @@ export async function POST(request: NextRequest) {
       { value: data.email, resource: "owner_email", label: "email" },
       { value: data.note, resource: "owner_note", label: "note" },
       { value: data.corporateNumber, resource: "owner_corporate_number", label: "corporateNumber" },
+      // 会社法人等番号(12桁)は法人番号(13桁)と同じ field-level 権限(owner_corporate_number)で扱う。
+      { value: data.companyRegistryNumber, resource: "owner_corporate_number", label: "companyRegistryNumber" },
     ];
     for (const { value, resource, label } of createFieldWriteChecks) {
       if (value != null && !hasExplicitWritePerm(perms, resource)) {
@@ -176,6 +178,9 @@ export async function POST(request: NextRequest) {
         // corporateNumber は createOwnerSchema (corporateNumberInputSchema) で
         // 13桁正規化済 or null。生値は AuditLog detail に含めない（既存方針通り）。
         corporateNumber: data.corporateNumber ?? null,
+        // companyRegistryNumber(12桁) は companyRegistryNumberInputSchema で 12桁正規化済 or null。
+        // corporateNumber(13桁) とは別カラム（12桁で13桁を上書きしない）。
+        companyRegistryNumber: data.companyRegistryNumber ?? null,
       },
     });
 

@@ -334,6 +334,45 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
     expect("email" in result).toBe(false);
   });
 
+  // Codex P1: companyRegistryNumber(12桁) は corporateNumber(13桁) と同じ display level
+  // でマスク/非表示される（owner_corporate_number 共用）。生値を漏らさない。
+  const ownerWithReg = {
+    ...owner,
+    corporateNumber: "1234567890123",
+    companyRegistryNumber: "123456789012",
+  };
+  it("corporateNumber:masked — companyRegistryNumber も同じ level でマスクされる", () => {
+    const config = {
+      name: "full" as const, nameKana: "full" as const,
+      phone: "full" as const, zip: "full" as const,
+      address: "full" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "masked" as const,
+    };
+    const result = applyDisplayToOwner(ownerWithReg, config);
+    expect(result.companyRegistryNumber).toMatch(/\*\*\*/);
+    expect(result.companyRegistryNumber).not.toBe("123456789012");
+  });
+  it("corporateNumber:hidden — companyRegistryNumber も result から削除される", () => {
+    const config = {
+      name: "full" as const, nameKana: "full" as const,
+      phone: "full" as const, zip: "full" as const,
+      address: "full" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "hidden" as const,
+    };
+    const result = applyDisplayToOwner(ownerWithReg, config);
+    expect("companyRegistryNumber" in result).toBe(false);
+  });
+  it("corporateNumber:full — companyRegistryNumber は平文", () => {
+    const config = {
+      name: "full" as const, nameKana: "full" as const,
+      phone: "full" as const, zip: "full" as const,
+      address: "full" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "full" as const,
+    };
+    const result = applyDisplayToOwner(ownerWithReg, config);
+    expect(result.companyRegistryNumber).toBe("123456789012");
+  });
+
   it("field_staff 相当の混合 config — phone/zip masked, address partial, email masked", () => {
     const config = {
       name: "full" as const, nameKana: "full" as const,

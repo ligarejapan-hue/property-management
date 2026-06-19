@@ -142,6 +142,37 @@ describe("POST /api/properties/[id]/owners/create-and-link — atomic create + l
     expect(pm.owner.create).not.toHaveBeenCalled();
   });
 
+  it("companyRegistryNumber(12桁) を tx.owner.create に保存する（Codex P2・取りこぼし防止）", async () => {
+    (getUserPermissions as Mock).mockResolvedValue([
+      { resource: "owner", action: "write", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_corporate_number", action: "full", granted: true },
+    ]);
+    pm._tx.owner.create.mockResolvedValue({ id: "owner-new", name: "山田太郎" });
+    pm._tx.propertyOwner.create.mockResolvedValue({
+      id: "po-1",
+      propertyId: PROPERTY_ID,
+      ownerId: "owner-new",
+      isPrimary: false,
+    });
+    const res = await POST(
+      makeRequest({ name: "山田太郎", companyRegistryNumber: "1234-5678-9012" }),
+      makeParams(),
+    );
+    expect(res.status).toBe(201);
+    const data = pm._tx.owner.create.mock.calls[0][0].data;
+    expect(data.companyRegistryNumber).toBe("123456789012");
+  });
+
+  it("companyRegistryNumber は owner_corporate_number 権限が無いと 403（既定 perms）", async () => {
+    const res = await POST(
+      makeRequest({ name: "山田太郎", companyRegistryNumber: "123456789012" }),
+      makeParams(),
+    );
+    expect(res.status).toBe(403);
+    expect(pm.$transaction).not.toHaveBeenCalled();
+  });
+
   it("orphan 防止: link 作成が失敗すると transaction 全体が reject（owner だけ残らない）", async () => {
     pm._tx.owner.create.mockResolvedValue({ id: "owner-new", name: "山田太郎" });
     pm._tx.propertyOwner.create.mockRejectedValue(new Error("link failed"));
