@@ -1,8 +1,8 @@
 /**
  * canAccessPropertyRecord へ統一した後の field_staff スコープ挙動を route で検証。
  * 対象: photos GET / attachments[attachmentId] DELETE。
- * 特に attachment.property=null のとき field_staff が許可される
- * （旧 inline の `&& attachment.property` と同等＝null は判定対象外）ことを固定する。
+ * 特に attachment.property=null（孤立レコード/物件削除済み）のとき DELETE/restore とも 403 になる
+ * （targetType=property 必須 ＋ property 関連必須＝scope を skip しない。restore とのガード parity）ことを固定する。
  *
  * permissions / property-access は実物。prisma / api-helpers / audit / storage は mock。
  */
