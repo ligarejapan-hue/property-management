@@ -29,7 +29,7 @@ const TYPE_LABELS: Record<string, string> = {
   registry: "謄本",
 };
 
-function daysLeft(deletedAt: string | null, type: string): string {
+function daysLeft(deletedAt: string | null, type: TrashItem["type"]): string {
   if (type === "registry") return "対象外（残す）";
   if (!deletedAt) return "-";
   const purgeAt = new Date(deletedAt).getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -88,14 +88,14 @@ export default function AttachmentTrashPage() {
           const body = await res.json().catch(() => null);
           throw new Error(body?.error?.message ?? `復元に失敗しました (${res.status})`);
         }
-        await load();
+        setItems((prev) => prev.filter((i) => i.id !== item.id));
       } catch (e) {
         setError(e instanceof Error ? e.message : "復元に失敗しました");
       } finally {
         setBusyId(null);
       }
     },
-    [load],
+    [],
   );
 
   return (
@@ -173,6 +173,7 @@ export default function AttachmentTrashPage() {
                       <button
                         type="button"
                         disabled={busyId === it.id}
+                        aria-busy={busyId === it.id}
                         onClick={() => void restore(it)}
                         className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                       >
