@@ -54,7 +54,7 @@ export async function DELETE(
 
     await prisma.attachment.update({
       where: { id: attachmentId },
-      data: { isDeleted: true },
+      data: { isDeleted: true, deletedAt: new Date() },
     });
 
     await writeAuditLog({
