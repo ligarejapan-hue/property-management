@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { purgeSpy } = vi.hoisted(() => ({ purgeSpy: vi.fn() }));
 vi.mock("@/lib/attachment-cleanup", () => ({ purgeExpiredAttachments: purgeSpy }));
@@ -46,7 +46,7 @@ describe("POST /api/attachments/cleanup-run", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ scanned: 3, purged: 3, dryRun: false });
-    expect(purgeSpy).toHaveBeenCalledWith(expect.objectContaining({ dryRun: false, limit: 200 }));
+    expect(purgeSpy).toHaveBeenCalledWith(expect.objectContaining({ dryRun: false, limit: 200, now: expect.any(Date) }));
   });
 
   it("?dryRun=1 は dryRun:true で呼ぶ", async () => {
@@ -55,6 +55,6 @@ describe("POST /api/attachments/cleanup-run", () => {
     const res = await POST(req({ secret: SECRET, dryRun: true }));
     const body = await res.json();
     expect(body).toMatchObject({ scanned: 5, purged: 0, dryRun: true });
-    expect(purgeSpy).toHaveBeenCalledWith(expect.objectContaining({ dryRun: true }));
+    expect(purgeSpy).toHaveBeenCalledWith(expect.objectContaining({ dryRun: true, now: expect.any(Date) }));
   });
 });

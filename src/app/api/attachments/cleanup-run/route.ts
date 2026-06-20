@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "crypto";
 import { ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { purgeExpiredAttachments } from "@/lib/attachment-cleanup";
 
@@ -16,7 +17,10 @@ export async function POST(request: Request) {
     if (!secret) {
       throw new ApiError(503, "添付お掃除は未設定です", "NOT_CONFIGURED");
     }
-    if (request.headers.get("x-cleanup-secret") !== secret) {
+    const headerSecret = request.headers.get("x-cleanup-secret") ?? "";
+    const secretBuf = Buffer.from(secret);
+    const headerBuf = Buffer.from(headerSecret);
+    if (secretBuf.length !== headerBuf.length || !timingSafeEqual(secretBuf, headerBuf)) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
     const dryRun = new URL(request.url).searchParams.get("dryRun") === "1";
