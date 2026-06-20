@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
+import { escapePrismaLikePattern } from "@/lib/uploads-authorization";
 
 /** 一般書類の保持期間（日）。謄本(type="registry")は対象外＝自動削除しない。 */
 export const ATTACHMENT_RETENTION_DAYS = 90;
@@ -33,25 +34,59 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
 }
 
 /**
+ * storage key が他の添付行（active / soft-delete 問わず）からまだ参照されているか。
+ * 重複/呼び出し側指定の fileUrl は同一 storage object を複数行が指し得る
+ * （uploads-authorization 参照）。他行が参照中なら実体を消してはならない。
+ * authz 層と同じく `contains`（LIKE はエスケープ）で粗く絞り、JS 側で
+ * extractStorageKeyFromUrl の完全一致で判定する（完全一致が正・粗絞りは superset）。
+ */
+async function isStorageKeyStillReferenced(key: string): Promise<boolean> {
+  const candidates = await prisma.attachment.findMany({
+    where: { fileUrl: { contains: escapePrismaLikePattern(key) } },
+    select: { fileUrl: true },
+  });
+  return candidates.some((c) => extractStorageKeyFromUrl(c.fileUrl) === key);
+}
+
+/**
  * 猶予超過の一般添付を物理削除する。
  * - dryRun: 件数のみ（storage/DB 不変）。
- * - 自前 storage key のみ storage.delete（冪等）。外部/不正 URL は storage を触らず行だけ削除。
+ * - 各行は「まだ purge 対象である場合のみ」条件付き deleteMany で原子的に確保してから削除
+ *   （選択〜削除間に復元/並行 purge されたら count=0 でスキップ＝復元行を消さない・P2025 を出さない）。
+ * - storage 実体は、他行が同一 key を参照していない場合のみ削除（共有 object 保護）。
+ *   外部/不正 URL は storage を触らず行のみ削除。storage 失敗はログして継続（バッチを止めない）。
  */
 export async function purgeExpiredAttachments(opts: {
   now: Date;
   limit: number;
   dryRun?: boolean;
 }): Promise<PurgeResult> {
+  const cutoff = purgeableCutoff(opts.now);
   const rows = await findPurgeableAttachments(opts.now, opts.limit);
   if (opts.dryRun) return { scanned: rows.length, purged: 0 };
 
   let purged = 0;
   for (const row of rows) {
+    // 条件付き確保: まだ purge 適格な場合のみ削除（復元/並行 purge ガード）。
+    const { count } = await prisma.attachment.deleteMany({
+      where: {
+        id: row.id,
+        isDeleted: true,
+        type: { not: "registry" },
+        deletedAt: { not: null, lte: cutoff },
+      },
+    });
+    if (count === 0) continue; // 復元済み or 並行 purge 済み → storage も触らない
+
     const key = extractStorageKeyFromUrl(row.fileUrl);
-    if (key) {
-      await getStorage().delete(key); // 冪等（404/NoSuchKey は握りつぶし）
+    if (key && !(await isStorageKeyStillReferenced(key))) {
+      try {
+        await getStorage().delete(key); // 冪等（404/NoSuchKey は握りつぶし）
+      } catch (err) {
+        // 行は既に削除済み。storage 失敗で残りバッチを止めない（次回/運用で回収）。
+        console.error(`[attachment-cleanup] storage delete failed for key=${key}`, err);
+      }
     }
-    await prisma.attachment.delete({ where: { id: row.id } });
     purged++;
   }
   return { scanned: rows.length, purged };
