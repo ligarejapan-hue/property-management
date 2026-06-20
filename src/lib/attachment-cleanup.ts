@@ -34,19 +34,49 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
 }
 
 /**
- * storage key が他の添付行（active / soft-delete 問わず）からまだ参照されているか。
- * 重複/呼び出し側指定の fileUrl は同一 storage object を複数行が指し得る
- * （uploads-authorization 参照）。他行が参照中なら実体を消してはならない。
- * authz 層と同じく `contains`（LIKE はエスケープ）で粗く絞り、JS 側で
- * extractStorageKeyFromUrl の完全一致で判定する（完全一致が正・粗絞りは superset）。
+ * storage key が他の upload-backed レコードからまだ参照されているか。
+ * /uploads namespace は attachment と PropertyPhoto / BuildingPhoto /
+ * FieldSurveyPinPhoto が共有し、caller-supplied fileUrl で key 共有が起こり得る
+ * （uploads-authorization が同 4 テーブルを参照として扱うのと同じ前提）。
+ * いずれかがまだ参照していれば実体を消してはならない。authz 層と同じく
+ * contains（LIKE はエスケープ）で粗く絞り、JS 側で extractStorageKeyFromFileUrl の
+ * 完全一致で判定する。※ 参照テーブル集合は uploads-authorization と一致させること。
  */
 async function isStorageKeyStillReferenced(key: string): Promise<boolean> {
-  const candidates = await prisma.attachment.findMany({
-    where: { fileUrl: { contains: escapePrismaLikePattern(key) } },
+  const escaped = escapePrismaLikePattern(key);
+  const matchesKey = (fileUrl: string | null | undefined) =>
+    extractStorageKeyFromFileUrl(fileUrl) === key;
+
+  const attachments = await prisma.attachment.findMany({
+    where: { fileUrl: { contains: escaped } },
     select: { fileUrl: true },
   });
-  // legacy-aware so a sibling using a legacy absolute /uploads URL is still detected.
-  return candidates.some((c) => extractStorageKeyFromFileUrl(c.fileUrl) === key);
+  if (attachments.some((a) => matchesKey(a.fileUrl))) return true;
+
+  const propertyPhotos = await prisma.propertyPhoto.findMany({
+    where: { fileUrl: { contains: escaped } },
+    select: { fileUrl: true },
+  });
+  if (propertyPhotos.some((p) => matchesKey(p.fileUrl))) return true;
+
+  const buildingPhotos = await prisma.buildingPhoto.findMany({
+    where: { fileUrl: { contains: escaped } },
+    select: { fileUrl: true },
+  });
+  if (buildingPhotos.some((b) => matchesKey(b.fileUrl))) return true;
+
+  const pinPhotos = await prisma.fieldSurveyPinPhoto.findMany({
+    where: {
+      OR: [
+        { fileUrl: { contains: escaped } },
+        { thumbnailUrl: { contains: escaped } },
+      ],
+    },
+    select: { fileUrl: true, thumbnailUrl: true },
+  });
+  if (pinPhotos.some((pp) => matchesKey(pp.fileUrl) || matchesKey(pp.thumbnailUrl))) return true;
+
+  return false;
 }
 
 /**

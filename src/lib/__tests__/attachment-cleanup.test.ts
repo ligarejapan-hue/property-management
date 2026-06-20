@@ -3,7 +3,12 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 const { deleteSpy } = vi.hoisted(() => ({ deleteSpy: vi.fn() }));
 vi.mock("@/lib/storage", () => ({ getStorage: () => ({ delete: deleteSpy }) }));
 vi.mock("@/lib/prisma", () => ({
-  default: { attachment: { findMany: vi.fn(), deleteMany: vi.fn() } },
+  default: {
+    attachment: { findMany: vi.fn(), deleteMany: vi.fn() },
+    propertyPhoto: { findMany: vi.fn() },
+    buildingPhoto: { findMany: vi.fn() },
+    fieldSurveyPinPhoto: { findMany: vi.fn() },
+  },
 }));
 // escapePrismaLikePattern is pure & tested elsewhere; mock as identity to avoid pulling its deps.
 // extractStorageKeyFromFileUrl: legacy-aware — handles relative /uploads/ and absolute http(s)://host/uploads/.
@@ -27,6 +32,9 @@ import {
 
 const pm = prisma as unknown as {
   attachment: { findMany: Mock; deleteMany: Mock };
+  propertyPhoto: { findMany: Mock };
+  buildingPhoto: { findMany: Mock };
+  fieldSurveyPinPhoto: { findMany: Mock };
 };
 const NOW = new Date("2026-06-20T00:00:00Z");
 
@@ -45,6 +53,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   deleteSpy.mockResolvedValue(undefined);
   pm.attachment.deleteMany.mockResolvedValue({ count: 1 });
+  pm.propertyPhoto.findMany.mockResolvedValue([]);
+  pm.buildingPhoto.findMany.mockResolvedValue([]);
+  pm.fieldSurveyPinPhoto.findMany.mockResolvedValue([]);
   wireFindMany([]);
 });
 
@@ -125,6 +136,36 @@ describe("purgeExpiredAttachments", () => {
     const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
     expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
     expect(deleteSpy).not.toHaveBeenCalled(); // storage preserved — legacy sibling detected
+    expect(r.purged).toBe(1);
+  });
+
+  it("アクティブな PropertyPhoto が同一 key を参照 → storage を消さない（写真保護）", async () => {
+    const key = "/uploads/properties/p/attachments/shared.pdf";
+    wireFindMany([{ id: "c1", fileUrl: key }], []); // attachment shared-key check returns []
+    pm.attachment.deleteMany.mockResolvedValue({ count: 1 });
+    pm.propertyPhoto.findMany.mockResolvedValue([{ fileUrl: key }]);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(r.purged).toBe(1);
+  });
+
+  it("アクティブな BuildingPhoto が同一 key を参照 → storage を消さない（写真保護）", async () => {
+    const key = "/uploads/properties/p/attachments/shared.pdf";
+    wireFindMany([{ id: "c2", fileUrl: key }], []);
+    pm.attachment.deleteMany.mockResolvedValue({ count: 1 });
+    pm.buildingPhoto.findMany.mockResolvedValue([{ fileUrl: key }]);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(r.purged).toBe(1);
+  });
+
+  it("FieldSurveyPinPhoto が thumbnailUrl で同一 key を参照 → storage を消さない（サムネイル保護）", async () => {
+    const key = "/uploads/properties/p/attachments/shared.pdf";
+    wireFindMany([{ id: "c3", fileUrl: key }], []);
+    pm.attachment.deleteMany.mockResolvedValue({ count: 1 });
+    pm.fieldSurveyPinPhoto.findMany.mockResolvedValue([{ fileUrl: null, thumbnailUrl: key }]);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).not.toHaveBeenCalled();
     expect(r.purged).toBe(1);
   });
 
