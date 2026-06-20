@@ -1,6 +1,15 @@
 import type { Metadata } from "next";
+import dynamic from "next/dynamic";
 import { Geist_Mono, Noto_Sans_JP, Schibsted_Grotesk } from "next/font/google";
+import type { ComponentType } from "react";
 import "./globals.css";
+
+// dev限定 テーマ調整パネル。本番ビルドでは三項が定数畳み込みされて
+// `() => null` になり、dynamic import ごと除去される（クライアントバンドル非同梱）。
+const DevThemeTuner: ComponentType =
+  process.env.NODE_ENV === "development"
+    ? dynamic(() => import("@/components/dev/theme-tuner/ThemeTunerPanel"))
+    : () => null;
 
 // UIトーン統一 v2: 欧文・数字 = Schibsted Grotesk / 和文 = Noto Sans JP。
 // 等幅(ID・コード表示)は従来どおり Geist Mono を維持。
@@ -34,7 +43,10 @@ export default function RootLayout({
       lang="en"
       className={`${appSans.variable} ${appSansJp.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <DevThemeTuner />
+      </body>
     </html>
   );
 }
