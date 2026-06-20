@@ -1,7 +1,7 @@
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
-import { escapePrismaLikePattern } from "@/lib/uploads-authorization";
+import { escapePrismaLikePattern, extractStorageKeyFromFileUrl } from "@/lib/uploads-authorization";
 
 /** 一般書類の保持期間（日）。謄本(type="registry")は対象外＝自動削除しない。 */
 export const ATTACHMENT_RETENTION_DAYS = 90;
@@ -45,7 +45,8 @@ async function isStorageKeyStillReferenced(key: string): Promise<boolean> {
     where: { fileUrl: { contains: escapePrismaLikePattern(key) } },
     select: { fileUrl: true },
   });
-  return candidates.some((c) => extractStorageKeyFromUrl(c.fileUrl) === key);
+  // legacy-aware so a sibling using a legacy absolute /uploads URL is still detected.
+  return candidates.some((c) => extractStorageKeyFromFileUrl(c.fileUrl) === key);
 }
 
 /**

@@ -143,6 +143,7 @@ describe("attachments[attachmentId] DELETE — field_staff スコープ + null p
   ) {
     return {
       id: ATT,
+      targetType: "property",
       targetId: PROP,
       isDeleted: false,
       fileName: "f.pdf",
@@ -173,13 +174,14 @@ describe("attachments[attachmentId] DELETE — field_staff スコープ + null p
     expect(res.status).toBe(200);
     expect(p.attachment.update).toHaveBeenCalled();
   });
-  it("field_staff・property=null → 200（旧 inline の && property と等価＝許可）", async () => {
+  it("field_staff・property=null → 403（property relation 必須・restore との parity）", async () => {
     sessionMock.mockResolvedValue(session("field_staff"));
     p.attachment.findUnique.mockResolvedValue(att(null));
     const res = await attachmentDelete(
       new Request("http://t/", { method: "DELETE" }) as never,
       attCtx(),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(p.attachment.update).not.toHaveBeenCalled();
   });
 });

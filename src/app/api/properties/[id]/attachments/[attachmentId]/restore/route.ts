@@ -21,10 +21,10 @@ export async function POST(
       where: { id: attachmentId },
       include: { property: { select: { createdBy: true, assignedTo: true } } },
     });
-    if (!attachment || attachment.targetId !== propertyId || !attachment.isDeleted) {
+    if (!attachment || attachment.targetType !== "property" || attachment.targetId !== propertyId || !attachment.isDeleted) {
       throw new ApiError(404, "添付ファイルが見つかりません", "NOT_FOUND");
     }
-    if (attachment.property && !canAccessPropertyRecord(session, attachment.property)) {
+    if (!attachment.property || !canAccessPropertyRecord(session, attachment.property)) {
       throw new ApiError(403, "この添付ファイルを復元する権限がありません", "FORBIDDEN");
     }
     await prisma.attachment.update({

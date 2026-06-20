@@ -30,7 +30,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as unknown as Mock).mockResolvedValue({ id: "u1", role: "admin" });
   (getUserPermissions as unknown as Mock).mockResolvedValue([{ resource: "property", action: "write", granted: true }]);
-  pm.attachment.findUnique.mockResolvedValue({ id: ATT, targetId: PROP, isDeleted: true, property: { createdBy: "u1", assignedTo: null } });
+  pm.attachment.findUnique.mockResolvedValue({ id: ATT, targetType: "property", targetId: PROP, isDeleted: true, property: { createdBy: "u1", assignedTo: null } });
   pm.attachment.update.mockResolvedValue({});
 });
 
@@ -43,7 +43,7 @@ describe("POST restore attachment", () => {
   });
 
   it("未削除（isDeleted=false）の添付は 404", async () => {
-    pm.attachment.findUnique.mockResolvedValueOnce({ id: ATT, targetId: PROP, isDeleted: false, property: { createdBy: "u1", assignedTo: null } });
+    pm.attachment.findUnique.mockResolvedValueOnce({ id: ATT, targetType: "property", targetId: PROP, isDeleted: false, property: { createdBy: "u1", assignedTo: null } });
     const res = await POST({} as never, ctx() as never);
     expect(res.status).toBe(404);
   });
@@ -59,5 +59,19 @@ describe("POST restore attachment", () => {
     const res = await POST({} as never, ctx() as never);
     expect(res.status).toBe(200);
     expect(pm.attachment.update.mock.calls[0][0].data).toEqual({ isDeleted: false, deletedAt: null });
+  });
+
+  it("owner 添付（targetType=owner）を property URL で restore → 404・update 不呼び出し", async () => {
+    pm.attachment.findUnique.mockResolvedValueOnce({ id: ATT, targetType: "owner", targetId: PROP, isDeleted: true, property: null });
+    const res = await POST({} as never, ctx() as never);
+    expect(res.status).toBe(404);
+    expect(pm.attachment.update).not.toHaveBeenCalled();
+  });
+
+  it("property 添付だが property relation が null → 403・update 不呼び出し", async () => {
+    pm.attachment.findUnique.mockResolvedValueOnce({ id: ATT, targetType: "property", targetId: PROP, isDeleted: true, property: null });
+    const res = await POST({} as never, ctx() as never);
+    expect(res.status).toBe(403);
+    expect(pm.attachment.update).not.toHaveBeenCalled();
   });
 });

@@ -37,6 +37,7 @@ export async function DELETE(
     });
     if (
       !attachment ||
+      attachment.targetType !== "property" ||
       attachment.targetId !== propertyId ||
       attachment.isDeleted
     ) {
@@ -44,9 +45,9 @@ export async function DELETE(
     }
 
     // field_staff スコープ: 担当外の物件の添付ファイルは削除不可（物件詳細 API と同一判定を共有）。
-    // attachment.property は nullable のため、存在するときだけ判定する（=旧 inline と同等）。
+    // property relation が null（=owner/comment 添付等）は parity 上 403 とする。
     if (
-      attachment.property &&
+      !attachment.property ||
       !canAccessPropertyRecord(session, attachment.property)
     ) {
       throw new ApiError(403, "この添付ファイルを削除する権限がありません", "FORBIDDEN");

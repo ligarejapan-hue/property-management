@@ -6,8 +6,15 @@ vi.mock("@/lib/prisma", () => ({
   default: { attachment: { findMany: vi.fn(), deleteMany: vi.fn() } },
 }));
 // escapePrismaLikePattern is pure & tested elsewhere; mock as identity to avoid pulling its deps.
+// extractStorageKeyFromFileUrl: legacy-aware — handles relative /uploads/ and absolute http(s)://host/uploads/.
 vi.mock("@/lib/uploads-authorization", () => ({
   escapePrismaLikePattern: (s: string) => s,
+  extractStorageKeyFromFileUrl: (u: string | null | undefined) => {
+    if (typeof u !== "string") return null;
+    const i = u.indexOf("/uploads/");
+    if (i === -1) return null;
+    return u.slice(i + "/uploads/".length).split(/[?#]/)[0] || null;
+  },
 }));
 
 import prisma from "@/lib/prisma";
@@ -106,6 +113,18 @@ describe("purgeExpiredAttachments", () => {
     const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
     expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
     expect(deleteSpy).not.toHaveBeenCalled();
+    expect(r.purged).toBe(1);
+  });
+
+  it("sibling が legacy 絶対URL で同一 key を参照 → storage を消さない（legacy-aware 共有key検出）", async () => {
+    // purge 対象は相対 URL、sibling は同一 key への legacy 絶対 URL
+    wireFindMany(
+      [{ id: "a5", fileUrl: "/uploads/properties/p/attachments/4.pdf" }],
+      [{ fileUrl: "http://localhost:3000/uploads/properties/p/attachments/4.pdf" }],
+    );
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).not.toHaveBeenCalled(); // storage preserved — legacy sibling detected
     expect(r.purged).toBe(1);
   });
 

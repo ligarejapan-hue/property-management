@@ -32,7 +32,7 @@ describe("DELETE attachment soft-delete", () => {
     vi.clearAllMocks();
     (getApiSession as unknown as Mock).mockResolvedValue({ id: "u1", role: "admin" });
     (getUserPermissions as unknown as Mock).mockResolvedValue([{ resource: "property", action: "write", granted: true }]);
-    pm.attachment.findUnique.mockResolvedValue({ id: ATT, targetId: PROP, isDeleted: false, fileName: "a.pdf", property: { createdBy: "u1", assignedTo: null } });
+    pm.attachment.findUnique.mockResolvedValue({ id: ATT, targetType: "property", targetId: PROP, isDeleted: false, fileName: "a.pdf", property: { createdBy: "u1", assignedTo: null } });
     pm.attachment.update.mockResolvedValue({});
   });
 
@@ -42,5 +42,19 @@ describe("DELETE attachment soft-delete", () => {
     const arg = pm.attachment.update.mock.calls[0][0];
     expect(arg.data.isDeleted).toBe(true);
     expect(arg.data.deletedAt).toBeInstanceOf(Date);
+  });
+
+  it("owner 添付（targetType=owner）を property URL で delete → 404・update 不呼び出し", async () => {
+    pm.attachment.findUnique.mockResolvedValueOnce({ id: ATT, targetType: "owner", targetId: PROP, isDeleted: false, fileName: "a.pdf", property: null });
+    const res = await DELETE({} as never, ctx() as never);
+    expect(res.status).toBe(404);
+    expect(pm.attachment.update).not.toHaveBeenCalled();
+  });
+
+  it("property 添付だが property relation が null → 403・update 不呼び出し", async () => {
+    pm.attachment.findUnique.mockResolvedValueOnce({ id: ATT, targetType: "property", targetId: PROP, isDeleted: false, fileName: "a.pdf", property: null });
+    const res = await DELETE({} as never, ctx() as never);
+    expect(res.status).toBe(403);
+    expect(pm.attachment.update).not.toHaveBeenCalled();
   });
 });
