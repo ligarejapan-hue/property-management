@@ -1,6 +1,5 @@
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
-import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 import { escapePrismaLikePattern, extractStorageKeyFromFileUrl } from "@/lib/uploads-authorization";
 
 /** 一般書類の保持期間（日）。謄本(type="registry")は対象外＝自動削除しない。 */
@@ -85,7 +84,9 @@ async function isStorageKeyStillReferenced(key: string): Promise<boolean> {
  * - 各行は「まだ purge 対象である場合のみ」条件付き deleteMany で原子的に確保してから削除
  *   （選択〜削除間に復元/並行 purge されたら count=0 でスキップ＝復元行を消さない・P2025 を出さない）。
  * - storage 実体は、他行が同一 key を参照していない場合のみ削除（共有 object 保護）。
- *   外部/不正 URL は storage を触らず行のみ削除。storage 失敗はログして継続（バッチを止めない）。
+ *   /uploads URL は host 有無に関わらず legacy-aware に key 抽出（他参照が無ければ実体も削除）。
+ *   非/uploads・不正 URL（data:/blob: 等）は key 抽出不可で storage を触らず行のみ削除。
+ *   storage 失敗はログして継続（バッチを止めない）。
  */
 export async function purgeExpiredAttachments(opts: {
   now: Date;
@@ -109,7 +110,10 @@ export async function purgeExpiredAttachments(opts: {
     });
     if (count === 0) continue; // 復元済み or 並行 purge 済み → storage も触らない
 
-    const key = extractStorageKeyFromUrl(row.fileUrl);
+    // Legacy-aware extractor (same as sibling check / authz / retro-exif): strips host so
+    // legacy absolute /uploads/ URLs are reclaimed. isStorageKeyStillReferenced is what
+    // prevents collateral — we never delete a key another row still references.
+    const key = extractStorageKeyFromFileUrl(row.fileUrl);
     if (key && !(await isStorageKeyStillReferenced(key))) {
       try {
         await getStorage().delete(key); // 冪等（404/NoSuchKey は握りつぶし）

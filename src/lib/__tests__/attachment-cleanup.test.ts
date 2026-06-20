@@ -101,10 +101,23 @@ describe("purgeExpiredAttachments", () => {
   });
 
   it("外部URL/不正URL は storage を消さず行のみ削除（誤爆防止）", async () => {
-    wireFindMany([{ id: "a2", fileUrl: "https://evil.example/uploads/x.pdf" }]);
+    // data: URI has no /uploads/ path — extractor returns null → skip storage, purge row only
+    wireFindMany([{ id: "a2", fileUrl: "data:application/pdf;base64,AAAA" }]);
     const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
     expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
     expect(deleteSpy).not.toHaveBeenCalled();
+    expect(r.purged).toBe(1);
+  });
+
+  it("legacy 絶対 /uploads URL は storage blob を回収する（legacy-aware ターゲット抽出）", async () => {
+    // fileUrl stored as absolute same-host URL (legacy); extractor strips host → key resolved
+    wireFindMany([
+      { id: "a6", fileUrl: "http://localhost:3000/uploads/properties/p/attachments/legacy.pdf" },
+    ]);
+    // no other row references this key (all shared-key checks return [])
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).toHaveBeenCalledWith("properties/p/attachments/legacy.pdf");
     expect(r.purged).toBe(1);
   });
 
