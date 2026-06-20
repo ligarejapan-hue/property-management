@@ -180,4 +180,32 @@ describe("purgeExpiredAttachments", () => {
     expect(deleteSpy).toHaveBeenCalledTimes(2);
     expect(r).toEqual({ scanned: 2, purged: 2 });
   });
+
+  it("storage.delete 失敗ログに PII (storage key) を含まず attachment id のみ記録", async () => {
+    // PII-like token in fileUrl that is NOT a substring of the id
+    wireFindMany([
+      { id: "att-id-1", fileUrl: "/uploads/properties/p/attachments/PRIVATE-owner-name.pdf" },
+      { id: "att-id-2", fileUrl: "/uploads/properties/p/attachments/safe.pdf" },
+    ]);
+    deleteSpy.mockRejectedValueOnce(new Error("storage failure")).mockResolvedValue(undefined);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    // batch continues
+    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(2);
+    expect(deleteSpy).toHaveBeenCalledTimes(2);
+    expect(r).toEqual({ scanned: 2, purged: 2 });
+    // error was logged
+    expect(errSpy).toHaveBeenCalled();
+    // concatenate all args of every call to check content
+    const logged = errSpy.mock.calls
+      .flatMap((args) => args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))))
+      .join(" ");
+    // PII token must NOT appear
+    expect(logged).not.toContain("PRIVATE-owner-name");
+    // full key path must NOT appear
+    expect(logged).not.toContain("properties/p/attachments/PRIVATE-owner-name.pdf");
+    // attachment id MUST appear
+    expect(logged).toContain("att-id-1");
+    errSpy.mockRestore();
+  });
 });

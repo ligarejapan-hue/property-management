@@ -115,7 +115,9 @@ export async function purgeExpiredAttachments(opts: {
         await getStorage().delete(key); // 冪等（404/NoSuchKey は握りつぶし）
       } catch (err) {
         // 行は既に削除済み。storage 失敗で残りバッチを止めない（次回/運用で回収）。
-        console.error(`[attachment-cleanup] storage delete failed for key=${key}`, err);
+        console.error(
+          `[attachment-cleanup] storage delete failed for attachment=${row.id} (${err instanceof Error ? err.name : "UnknownError"})`,
+        );
       }
     }
     purged++;
