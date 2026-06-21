@@ -13,7 +13,7 @@ describe("globals.css ダークmode(class方式)", () => {
     expect(css).toContain("@custom-variant dark");
   });
   it(".dark で --foreground を切替える", () => {
-    expect(css).toMatch(/\.dark\s*\{[^}]*--foreground/s);
+    expect(css).toMatch(/\.dark\s*\{[\s\S]*?--foreground/);
   });
   it("壊れた @media (prefers-color-scheme: dark) は使わない", () => {
     expect(css).not.toContain("@media (prefers-color-scheme: dark)");
