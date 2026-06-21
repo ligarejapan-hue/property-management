@@ -25,6 +25,7 @@ import {
   buildGrayScale,
   DEFAULT_TUNER_STATE,
   GRAY_STOPS,
+  normalizeHexColor,
   type RadiusKey,
   type TunerState,
 } from "./theme-tokens";
@@ -342,10 +343,23 @@ function ColorRow({
         onChange={(e) => {
           const next = e.target.value;
           setDraft(next);
-          const v = next.trim();
-          if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v)) onChange(v);
+          // 入力中は 6 桁完成時のみ即反映する。3桁を途中で展開すると 6桁入力の
+          // 打鍵途中（#abc→#abcdef）でカーソルが乱れるため、展開は blur で行う。
+          if (/^#[0-9a-fA-F]{6}$/.test(next.trim())) {
+            onChange(next.trim().toLowerCase());
+          }
         }}
-        onBlur={() => setDraft(value)}
+        onBlur={() => {
+          // 確定時に正規化（3桁ショートハンド→6桁へ展開）。color input は #rrggbb のみ
+          // 受理するため確定値は常に 6桁。無効な打ちかけは直近の確定値へ戻す。
+          const normalized = normalizeHexColor(draft);
+          if (normalized) {
+            onChange(normalized);
+            setDraft(normalized);
+          } else {
+            setDraft(value);
+          }
+        }}
       />
     </label>
   );

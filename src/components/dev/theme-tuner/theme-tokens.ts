@@ -93,6 +93,22 @@ function num(value: number, decimals: number): string {
 }
 
 /**
+ * HEX 文字列を確定可能なら 6 桁小文字へ正規化（不可なら null）。
+ * 3 桁ショートハンド（#abc）は 6 桁（#aabbcc）へ展開する。
+ * `<input type="color">` は #rrggbb のみ受理するため、確定値は常に 6 桁へ揃え、
+ * テキスト欄とカラーピッカーの不整合を防ぐ。
+ */
+export function normalizeHexColor(input: string): string | null {
+  const v = input.trim().toLowerCase();
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/.exec(v);
+  if (short) {
+    const [, r, g, b] = short;
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return /^#[0-9a-f]{6}$/.test(v) ? v : null;
+}
+
+/**
  * グレー階調 11 段を OKLCH 文字列で生成。
  * 既定（hueShift 0 / chromaScale 1）で globals.css の値と完全一致する。
  */

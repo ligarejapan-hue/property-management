@@ -6,6 +6,7 @@ import {
   buildGrayScale,
   buildRadiusScale,
   DEFAULT_TUNER_STATE,
+  normalizeHexColor,
   type TunerState,
 } from "@/components/dev/theme-tuner/theme-tokens";
 
@@ -100,5 +101,27 @@ describe("buildExportCss", () => {
   it("emits root font-size only when changed from the default", () => {
     const css = buildExportCss({ ...DEFAULT_TUNER_STATE, fontSize: 18 });
     expect(css).toContain("font-size: 18px;");
+  });
+});
+
+describe("normalizeHexColor", () => {
+  it("expands 3-digit shorthand to 6-digit (so the color picker can show it)", () => {
+    expect(normalizeHexColor("#abc")).toBe("#aabbcc");
+    expect(normalizeHexColor("#fff")).toBe("#ffffff");
+  });
+
+  it("passes through 6-digit hex, lowercased", () => {
+    expect(normalizeHexColor("#AABBCC")).toBe("#aabbcc");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(normalizeHexColor("  #FfF  ")).toBe("#ffffff");
+  });
+
+  it("returns null for incomplete or invalid input", () => {
+    expect(normalizeHexColor("#ff")).toBeNull();
+    expect(normalizeHexColor("#fffff")).toBeNull();
+    expect(normalizeHexColor("fff")).toBeNull();
+    expect(normalizeHexColor("#gggggg")).toBeNull();
   });
 });
