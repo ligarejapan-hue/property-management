@@ -83,7 +83,13 @@ export default function ThemeTunerPanel() {
     const root = document.documentElement;
     const vars = buildCssVariables(state, mode);
     Object.entries(vars).forEach(([k, v]) => root.style.setProperty(k, v));
-    root.style.fontSize = `${state.fontSize}px`;
+    // font-size も既定(16px)から変えた時だけ上書き。既定では root font-size を
+    // 設定せず、ブラウザ既定（アクセシビリティ設定）を尊重する（export と一致）。
+    if (state.fontSize !== DEFAULT_TUNER_STATE.fontSize) {
+      root.style.fontSize = `${state.fontSize}px`;
+    } else {
+      root.style.removeProperty("font-size");
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ state, mode }));
     } catch {

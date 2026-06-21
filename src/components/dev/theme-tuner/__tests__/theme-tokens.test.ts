@@ -91,4 +91,14 @@ describe("buildExportCss", () => {
     expect(css).toContain("--spacing: 0.25rem;");
     expect(css).toContain("--radius-md: 0.375rem;");
   });
+
+  it("omits root font-size at the default (honors browser/a11y default)", () => {
+    const css = buildExportCss(DEFAULT_TUNER_STATE);
+    expect(css).not.toContain("font-size");
+  });
+
+  it("emits root font-size only when changed from the default", () => {
+    const css = buildExportCss({ ...DEFAULT_TUNER_STATE, fontSize: 18 });
+    expect(css).toContain("font-size: 18px;");
+  });
 });

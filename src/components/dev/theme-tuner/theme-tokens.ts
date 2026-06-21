@@ -150,13 +150,18 @@ export function buildExportCss(state: TunerState): string {
   const radiusLines = (Object.keys(radius) as RadiusKey[])
     .map((key) => `  --radius-${key}: ${radius[key]}rem;`)
     .join("\n");
+  // 文字サイズは「既定(16px)から変えた時だけ」出力する。常に :root へ font-size を
+  // 焼き込むと、ユーザーのブラウザ既定フォントサイズ（アクセシビリティ設定）を上書きし、
+  // globals.css の現状（root font-size 無し）とも乖離するため。
+  const fontSizeLine =
+    state.fontSize !== DEFAULT_TUNER_STATE.fontSize
+      ? `\n  /* 基本文字サイズ（rem基準＝全体に影響・任意） */\n  font-size: ${state.fontSize}px;`
+      : "";
 
   return `/* テーマ調整ツールの出力 — src/app/globals.css に反映してください（自動反映なし） */
 :root {
   --background: ${state.light.bg};
-  --foreground: ${state.light.fg};
-  /* 基本文字サイズ（rem基準＝全体に影響・任意） */
-  font-size: ${state.fontSize}px;
+  --foreground: ${state.light.fg};${fontSizeLine}
 }
 
 @media (prefers-color-scheme: dark) {
