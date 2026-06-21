@@ -4,8 +4,12 @@ import type { NextRequest } from "next/server";
 const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads"];
 
 // 完全一致で公開するパス。前方一致（startsWith）だと /api/health-xxx 等まで認証免除が
-// 広がってしまうため、死活確認の /api/health だけを必要最小の範囲で公開する。
-const PUBLIC_EXACT_PATHS = ["/api/health"];
+// 広がってしまうため、必要最小の範囲（完全一致）でのみ公開する。
+// - /api/health: 死活確認の公開エンドポイント。
+// - /api/attachments/cleanup-run: cron 駆動の添付お掃除。人間 auth は持たず、
+//   ルート側の x-cleanup-secret で保護する（secret 未設定なら 503 で dormant）。
+//   ここで素通しできないと、合言葉付きの cron 呼び出しも /login へ redirect され実行されない。
+const PUBLIC_EXACT_PATHS = ["/api/health", "/api/attachments/cleanup-run"];
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_EXACT_PATHS.includes(pathname)) return true;
