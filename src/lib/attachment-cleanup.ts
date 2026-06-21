@@ -5,6 +5,13 @@ import { escapePrismaLikePattern } from "@/lib/uploads-authorization";
 /** 一般書類の保持期間（日）。謄本(type="registry")は対象外＝自動削除しない。 */
 export const ATTACHMENT_RETENTION_DAYS = 90;
 
+/**
+ * purge claim のリース時間。purgeStartedAt がこれより古い行は、クラッシュ等で
+ * 取り残された stale claim とみなして再取得(reclaim)する。単一行の purge
+ * (claim→storage.delete→finalize)所要より十分長く、放置(=leak)より十分短い値。
+ */
+export const STALE_PURGE_CLAIM_MS = 60 * 60 * 1000; // 1 hour
+
 export interface PurgeResult {
   scanned: number;
   purged: number;
@@ -21,9 +28,9 @@ export function purgeableCutoff(
 }
 
 /**
- * purge 対象（soft-delete 済み・謄本以外・猶予超過・未 claimed）を最大 limit 件。
- * purgeStartedAt: null を条件に含めることで、クラッシュ等で stale になった claim 済み行を
- * 除外し、batch スロットを新規 eligible 行に確保する（stale-claim starvation 防止）。
+ * purge 対象（soft-delete 済み・謄本以外・猶予超過・未 claimed または stale claim）を最大 limit 件。
+ * FRESH claim（purgeStartedAt が STALE_PURGE_CLAIM_MS 以内）は除外し batch スロットを確保する。
+ * STALE claim（purgeStartedAt が STALE_PURGE_CLAIM_MS より古い）は再取得対象として含める。
  * 行ごとの claim updateMany と finalize deleteMany の各ガードは別途維持。
  */
 export async function findPurgeableAttachments(now: Date, limit: number) {
@@ -32,7 +39,10 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
       isDeleted: true,
       type: { not: "registry" }, // 謄本は自動削除しない
       deletedAt: { not: null, lte: purgeableCutoff(now) },
-      purgeStartedAt: null, // 既に claim 済み(stale含む)は除外 → batch を専有して新規を starve させない
+      OR: [
+        { purgeStartedAt: null },
+        { purgeStartedAt: { lte: new Date(now.getTime() - STALE_PURGE_CLAIM_MS) } },
+      ],
     },
     select: { id: true, fileUrl: true },
     orderBy: { deletedAt: "asc" },
@@ -131,6 +141,7 @@ export async function purgeExpiredAttachments(opts: {
   dryRun?: boolean;
 }): Promise<PurgeResult> {
   const cutoff = purgeableCutoff(opts.now);
+  const staleClaimCutoff = new Date(opts.now.getTime() - STALE_PURGE_CLAIM_MS);
   const rows = await findPurgeableAttachments(opts.now, opts.limit);
   if (opts.dryRun) {
     return { scanned: rows.length, purged: 0, failed: 0, skipped: 0 };
@@ -141,7 +152,9 @@ export async function purgeExpiredAttachments(opts: {
   let skipped = 0;
 
   for (const row of rows) {
-    // (1) Atomically CLAIM: set the marker only if still eligible AND not already claimed.
+    // (1) Atomically CLAIM: set the marker only if still eligible AND (unclaimed OR stale-claimed).
+    //     FRESH claims (purgeStartedAt within lease) get count=0 → skipped (alive run protected).
+    //     STALE claims (purgeStartedAt older than STALE_PURGE_CLAIM_MS) are re-claimed (recovery).
     //     Mutually exclusive with restore (which only un-deletes when purgeStartedAt is null).
     const claim = await prisma.attachment.updateMany({
       where: {
@@ -149,7 +162,10 @@ export async function purgeExpiredAttachments(opts: {
         isDeleted: true,
         type: { not: "registry" },
         deletedAt: { not: null, lte: cutoff },
-        purgeStartedAt: null,
+        OR: [
+          { purgeStartedAt: null },
+          { purgeStartedAt: { lte: staleClaimCutoff } },
+        ],
       },
       data: { purgeStartedAt: opts.now },
     });

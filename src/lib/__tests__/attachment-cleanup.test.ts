@@ -48,6 +48,7 @@ import {
   findPurgeableAttachments,
   purgeExpiredAttachments,
   ATTACHMENT_RETENTION_DAYS,
+  STALE_PURGE_CLAIM_MS,
 } from "../attachment-cleanup";
 
 const pm = prisma as unknown as {
@@ -91,14 +92,18 @@ describe("purgeableCutoff", () => {
 });
 
 describe("findPurgeableAttachments", () => {
-  it("isDeleted=true / type≠registry / deletedAt<=cutoff / purgeStartedAt=null / 件数上限 を where に反映", async () => {
+  it("isDeleted=true / type≠registry / deletedAt<=cutoff / OR[purgeStartedAt:null|stale] / 件数上限 を where に反映", async () => {
     await findPurgeableAttachments(NOW, 200);
     const arg = pm.attachment.findMany.mock.calls[0][0];
     expect(arg.where.isDeleted).toBe(true);
     expect(arg.where.type).toEqual({ not: "registry" });
     expect(arg.where.deletedAt.not).toBe(null);
     expect(arg.where.deletedAt.lte).toBeInstanceOf(Date);
-    expect(arg.where.purgeStartedAt).toBe(null); // stale-claim starvation 防止: 既 claimed 行を除外
+    // stale-claim lease: null OR stale (lte staleClaimCutoff) — fresh claims excluded
+    expect(arg.where.OR).toEqual([
+      { purgeStartedAt: null },
+      { purgeStartedAt: { lte: expect.any(Date) } },
+    ]);
     expect(arg.take).toBe(200);
     expect(arg.select).toEqual({ id: true, fileUrl: true });
   });
@@ -119,16 +124,17 @@ describe("purgeExpiredAttachments", () => {
   it("CLAIM成功 → storage削除 → finalize deleteMany → purged:1 failed:0", async () => {
     wireFindMany([{ id: "a1", fileUrl: "/uploads/properties/p/attachments/1.pdf" }], []);
     const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
-    // claim updateMany called with purgeStartedAt:null in where and purgeStartedAt:<Date> in data
+    // claim updateMany where: OR[purgeStartedAt:null | stale lte] — fresh claims not re-claimable
     const claimCall = pm.attachment.updateMany.mock.calls[0][0];
-    expect(claimCall.where).toMatchObject({
-      id: "a1",
-      isDeleted: true,
-      type: { not: "registry" },
-      purgeStartedAt: null,
-    });
+    expect(claimCall.where.id).toBe("a1");
+    expect(claimCall.where.isDeleted).toBe(true);
+    expect(claimCall.where.type).toEqual({ not: "registry" });
     expect(claimCall.where.deletedAt.not).toBe(null);
     expect(claimCall.where.deletedAt.lte).toBeInstanceOf(Date);
+    expect(claimCall.where.OR).toEqual([
+      { purgeStartedAt: null },
+      { purgeStartedAt: { lte: expect.any(Date) } },
+    ]);
     expect(claimCall.data.purgeStartedAt).toBeInstanceOf(Date);
     // storage deleted
     expect(deleteSpy).toHaveBeenCalledWith("properties/p/attachments/1.pdf");
@@ -372,5 +378,39 @@ describe("purgeExpiredAttachments", () => {
     expect(deleteSpy).not.toHaveBeenCalled();
     expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
     expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
+  });
+
+  // ─── 23. stale-claimed row is RECLAIMED (claim updateMany returns count:1) ─
+  it("stale claim（purgeStartedAt が STALE_PURGE_CLAIM_MS より古い）→ 再 claim され purge される", async () => {
+    // A stale-claimed row appears in findPurgeableAttachments results (OR condition allows it).
+    // The claim updateMany returns count:1 (we atomically re-claimed it).
+    wireFindMany([{ id: "st1", fileUrl: "/uploads/properties/p/attachments/stale.pdf" }], []);
+    // default mock: updateMany count:1, deleteMany count:1
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    // CLAIM where has OR with stale lte
+    const claimCall = pm.attachment.updateMany.mock.calls[0][0];
+    expect(claimCall.where.OR).toEqual([
+      { purgeStartedAt: null },
+      { purgeStartedAt: { lte: expect.any(Date) } },
+    ]);
+    // staleClaimCutoff = now - STALE_PURGE_CLAIM_MS
+    const staleClaimCutoff = new Date(NOW.getTime() - STALE_PURGE_CLAIM_MS);
+    expect(claimCall.where.OR[1].purgeStartedAt.lte.getTime()).toBe(staleClaimCutoff.getTime());
+    // proceeds to storage delete and finalize
+    expect(deleteSpy).toHaveBeenCalledWith("properties/p/attachments/stale.pdf");
+    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
+  });
+
+  // ─── 24. FRESH-claimed row → CLAIM count:0 → skipped (lease respected) ──
+  it("FRESH claim（purgeStartedAt が lease 内）→ claim count:0 → skipped:1、storage/finalize 未呼", async () => {
+    // A fresh-claimed row's claim updateMany returns count:0 (we did NOT re-claim it —
+    // the OR condition excludes it because purgeStartedAt > staleClaimCutoff).
+    wireFindMany([{ id: "fr1", fileUrl: "/uploads/properties/p/attachments/fresh.pdf" }], []);
+    pm.attachment.updateMany.mockResolvedValueOnce({ count: 0 }); // lease alive, not re-claimable
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
+    expect(r).toEqual({ scanned: 1, purged: 0, failed: 0, skipped: 1 });
   });
 });
