@@ -131,3 +131,50 @@ describe("ServerStorageAdapter.delete traversal handling", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ServerStorageAdapter.keyFromUrl", () => {
+  it("server backend URL /:bucket/:key → key 抽出", () => {
+    const adapter = new ServerStorageAdapter();
+    expect(adapter.keyFromUrl("http://srv:9000/test-bucket/a/b.pdf")).toBe("a/b.pdf");
+  });
+
+  it("server backend URL で複数セグメントの key", () => {
+    const adapter = new ServerStorageAdapter();
+    expect(
+      adapter.keyFromUrl("http://srv:9000/test-bucket/properties/p/attachments/x.pdf"),
+    ).toBe("properties/p/attachments/x.pdf");
+  });
+
+  it("legacy /uploads/{key} もサポート（フォールバック）", () => {
+    const adapter = new ServerStorageAdapter();
+    expect(adapter.keyFromUrl("/uploads/a/b.jpg")).toBe("a/b.jpg");
+  });
+
+  it("legacy 絶対 /uploads URL もサポート", () => {
+    const adapter = new ServerStorageAdapter();
+    expect(
+      adapter.keyFromUrl("http://localhost:3000/uploads/properties/p/attachments/legacy.pdf"),
+    ).toBe("properties/p/attachments/legacy.pdf");
+  });
+
+  it("data: → null", () => {
+    const adapter = new ServerStorageAdapter();
+    expect(adapter.keyFromUrl("data:application/pdf;base64,AAAA")).toBeNull();
+  });
+
+  it("null → null", () => {
+    const adapter = new ServerStorageAdapter();
+    expect(adapter.keyFromUrl(null)).toBeNull();
+  });
+
+  it("異なる bucket の URL → null（他の bucket prefix にも /uploads/ にも一致しない）", () => {
+    const adapter = new ServerStorageAdapter();
+    // /other-bucket/key は test-bucket prefix に一致せず、/uploads/ にも一致しない
+    expect(adapter.keyFromUrl("http://srv:9000/other-bucket/a/b.pdf")).toBeNull();
+  });
+
+  it("traversal key は isValidStorageKey で拒否 → null", () => {
+    const adapter = new ServerStorageAdapter();
+    expect(adapter.keyFromUrl("http://srv:9000/test-bucket/../etc/passwd")).toBeNull();
+  });
+});

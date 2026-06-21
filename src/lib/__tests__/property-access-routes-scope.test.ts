@@ -1,8 +1,8 @@
 /**
  * canAccessPropertyRecord へ統一した後の field_staff スコープ挙動を route で検証。
  * 対象: photos GET / attachments[attachmentId] DELETE。
- * 特に attachment.property=null のとき field_staff が許可される
- * （旧 inline の `&& attachment.property` と同等＝null は判定対象外）ことを固定する。
+ * 特に attachment.property=null（孤立レコード/物件削除済み）のとき DELETE/restore とも 403 になる
+ * （targetType=property 必須 ＋ property 関連必須＝scope を skip しない。restore とのガード parity）ことを固定する。
  *
  * permissions / property-access は実物。prisma / api-helpers / audit / storage は mock。
  */
@@ -143,6 +143,7 @@ describe("attachments[attachmentId] DELETE — field_staff スコープ + null p
   ) {
     return {
       id: ATT,
+      targetType: "property",
       targetId: PROP,
       isDeleted: false,
       fileName: "f.pdf",
@@ -173,13 +174,14 @@ describe("attachments[attachmentId] DELETE — field_staff スコープ + null p
     expect(res.status).toBe(200);
     expect(p.attachment.update).toHaveBeenCalled();
   });
-  it("field_staff・property=null → 200（旧 inline の && property と等価＝許可）", async () => {
+  it("field_staff・property=null → 403（property relation 必須・restore との parity）", async () => {
     sessionMock.mockResolvedValue(session("field_staff"));
     p.attachment.findUnique.mockResolvedValue(att(null));
     const res = await attachmentDelete(
       new Request("http://t/", { method: "DELETE" }) as never,
       attCtx(),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(p.attachment.update).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractStorageKeyFromUrl } from "../url-to-key";
+import { extractStorageKeyFromUrl, extractStorageKeyFromAnyUploadsUrl } from "../url-to-key";
 
 describe("extractStorageKeyFromUrl", () => {
   describe("null / 空入力", () => {
@@ -115,6 +115,61 @@ describe("extractStorageKeyFromUrl", () => {
       expect(
         extractStorageKeyFromUrl({} as unknown as string),
       ).toBeNull();
+    });
+  });
+});
+
+describe("extractStorageKeyFromAnyUploadsUrl", () => {
+  describe("相対パス /uploads/{key}", () => {
+    it("通常の相対パス → key 抽出", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("/uploads/a/b.jpg")).toBe("a/b.jpg");
+    });
+    it("?query は除去", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("/uploads/a/b.jpg?x=1")).toBe("a/b.jpg");
+    });
+    it("#hash は除去", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("/uploads/a/b.jpg#h")).toBe("a/b.jpg");
+    });
+  });
+
+  describe("絶対 URL の /uploads/{key}", () => {
+    it("任意 host の絶対 URL → pathname から key 抽出", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("http://h/uploads/a/b.jpg")).toBe("a/b.jpg");
+    });
+    it("localhost 絶対 URL", () => {
+      expect(
+        extractStorageKeyFromAnyUploadsUrl("http://localhost:3000/uploads/properties/p/attachments/legacy.pdf"),
+      ).toBe("properties/p/attachments/legacy.pdf");
+    });
+  });
+
+  describe("対象外（null 化）", () => {
+    it("data: → null", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("data:text/plain,x")).toBeNull();
+    });
+    it("blob: → null", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("blob:https://example.com/abc")).toBeNull();
+    });
+    it("file: → null", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("file:///etc/passwd")).toBeNull();
+    });
+    it("/api/x → null（/uploads/ なし）", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("/api/x")).toBeNull();
+    });
+    it("traversal /uploads/../etc/passwd → null", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("/uploads/../etc/passwd")).toBeNull();
+    });
+    it("null → null", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl(null)).toBeNull();
+    });
+    it("undefined → null", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl(undefined)).toBeNull();
+    });
+    it("空文字 → null", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("")).toBeNull();
+    });
+    it("/uploads/ のみ（key なし）→ null", () => {
+      expect(extractStorageKeyFromAnyUploadsUrl("/uploads/")).toBeNull();
     });
   });
 });

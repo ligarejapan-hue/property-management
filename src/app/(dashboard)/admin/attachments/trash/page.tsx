@@ -1,0 +1,201 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { Loader2 } from "lucide-react";
+
+/**
+ * ゴミ箱画面（管理者限定）。
+ *
+ * GET /api/attachments/trash で削除済み添付一覧を取得し表示する。
+ * 謄本は自動削除対象外（お掃除まで「対象外（残す）」）。
+ * property スコープの行のみ「元に戻す」で復元できる。
+ */
+
+interface TrashItem {
+  id: string;
+  fileName: string;
+  type: "general" | "registry";
+  createdAt: string;
+  deletedAt: string | null;
+  targetType: "property" | "owner" | "comment";
+  targetId: string;
+}
+
+const RETENTION_DAYS = 90;
+
+const TYPE_LABELS: Record<string, string> = {
+  general: "一般",
+  registry: "謄本",
+};
+
+function daysLeft(deletedAt: string | null, type: TrashItem["type"]): string {
+  if (type === "registry") return "対象外（残す）";
+  if (!deletedAt) return "-";
+  const purgeAt = new Date(deletedAt).getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const left = Math.ceil((purgeAt - Date.now()) / (24 * 60 * 60 * 1000));
+  return left > 0 ? `あと約${left}日` : "まもなくお掃除";
+}
+
+export default function AttachmentTrashPage() {
+  const [items, setItems] = useState<TrashItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/attachments/trash", { signal });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error?.message ?? `一覧の取得に失敗しました (${res.status})`);
+      }
+      const json = await res.json();
+      setItems(json.data ?? []);
+      setLoading(false);
+    } catch (err) {
+      if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+        return;
+      }
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+      setItems([]);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  const restore = useCallback(
+    async (item: TrashItem) => {
+      if (item.targetType !== "property") {
+        setError("この添付は現在この画面から復元できません");
+        return;
+      }
+      setBusyId(item.id);
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/properties/${item.targetId}/attachments/${item.id}/restore`,
+          { method: "POST" },
+        );
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error?.message ?? `復元に失敗しました (${res.status})`);
+        }
+        setItems((prev) => prev.filter((i) => i.id !== item.id));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "復元に失敗しました");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [],
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <nav className="mb-4 text-sm text-gray-500">
+        <Link href="/admin" className="hover:text-gray-700">
+          管理
+        </Link>
+        <span className="mx-2">/</span>
+        <Link href="/admin/attachments" className="hover:text-gray-700">
+          添付横断検索
+        </Link>
+        <span className="mx-2">/</span>
+        <span className="text-gray-900">ゴミ箱</span>
+      </nav>
+
+      <h1 className="text-2xl font-bold text-gray-900 mb-2">ゴミ箱（削除した添付）</h1>
+      <p className="text-sm text-gray-500 mb-6">
+        一般の書類は削除から{RETENTION_DAYS}日でお掃除されます。謄本は残ります。期間内は「元に戻す」で復元できます。
+      </p>
+
+      {error && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          </div>
+        ) : (
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  ファイル名
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  種類
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  削除日
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  お掃除まで
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                  操作
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {items.map((it) => (
+                <tr key={it.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-xs truncate">
+                    {it.fileName}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm">
+                    <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                      {TYPE_LABELS[it.type] ?? it.type}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 font-mono">
+                    {it.deletedAt
+                      ? new Date(it.deletedAt).toLocaleDateString("ja-JP")
+                      : "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
+                    {daysLeft(it.deletedAt, it.type)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm">
+                    {it.targetType === "property" ? (
+                      <button
+                        type="button"
+                        disabled={busyId === it.id}
+                        aria-busy={busyId === it.id}
+                        onClick={() => void restore(it)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        {busyId === it.id ? "復元中…" : "元に戻す"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">この画面では復元できません</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400">
+                    ゴミ箱は空です。
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}

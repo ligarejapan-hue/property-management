@@ -42,6 +42,7 @@ import { DEFAULT_BINARY_MIME } from "./mime";
 // Codex P1: traversal validation を全 adapter 共通 helper に統一。
 // 個別 helper を抱えると挙動が分岐するため import に置換。
 import { assertValidStorageKey, isValidStorageKey } from "./key-validation";
+import { extractStorageKeyFromAnyUploadsUrl } from "./url-to-key";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -114,6 +115,10 @@ export class S3Adapter implements StorageAdapter {
   async getUrl(key: string): Promise<string> {
     // signed URL は Phase 2 非対応。proxy 配信前提で /uploads/{key} を返す。
     return `/uploads/${key.replace(/\\/g, "/")}`;
+  }
+
+  keyFromUrl(fileUrl: string | null | undefined): string | null {
+    return extractStorageKeyFromAnyUploadsUrl(fileUrl);
   }
 
   async read(key: string): Promise<StorageReadResult | null> {
