@@ -48,4 +48,25 @@ describe("proxy public paths", () => {
     expect(res.status).toBe(307);
     expect(res.headers.get("location") ?? "").toContain("/login");
   });
+
+  it("未認証でも /api/attachments/cleanup-run は素通しする（cron 駆動・x-cleanup-secret で保護）", async () => {
+    const res = await proxy(requestFor("/api/attachments/cleanup-run"));
+
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).toBe(200);
+  });
+
+  it("/api/attachments/cleanup-run はクエリ付き(?dryRun=1)でも素通しする（pathname 完全一致）", async () => {
+    const res = await proxy(requestFor("/api/attachments/cleanup-run?dryRun=1"));
+
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).toBe(200);
+  });
+
+  it("/api/attachments/cleanup-run の完全一致のみ公開（前方一致 /api/attachments/cleanup-run-x は保護）", async () => {
+    const res = await proxy(requestFor("/api/attachments/cleanup-run-x"));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location") ?? "").toContain("/login");
+  });
 });
