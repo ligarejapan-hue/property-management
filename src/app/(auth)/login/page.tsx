@@ -53,13 +53,13 @@ export default function LoginPage() {
 
   return (
     <div className="w-full max-w-sm">
-      <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
+      <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50">
             <FileText className="h-6 w-6 text-indigo-600" />
           </div>
-          <h1 className="text-xl font-bold text-gray-800">物件管理システム</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">物件管理システム</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             アカウントにログインしてください
           </p>
         </div>
@@ -68,7 +68,7 @@ export default function LoginPage() {
           <div>
             <label
               htmlFor="email"
-              className="mb-1 block text-sm font-medium text-gray-700"
+              className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
             >
               メールアドレス
             </label>
@@ -77,7 +77,7 @@ export default function LoginPage() {
               type="email"
               autoComplete="email"
               {...register("email")}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
               placeholder="user@example.com"
             />
             {errors.email && (
@@ -90,7 +90,7 @@ export default function LoginPage() {
           <div>
             <label
               htmlFor="password"
-              className="mb-1 block text-sm font-medium text-gray-700"
+              className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
             >
               パスワード
             </label>
@@ -99,7 +99,7 @@ export default function LoginPage() {
               type="password"
               autoComplete="current-password"
               {...register("password")}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
               placeholder="パスワードを入力"
             />
             {errors.password && (

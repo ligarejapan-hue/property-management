@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { Geist_Mono, Noto_Sans_JP, Schibsted_Grotesk } from "next/font/google";
 import type { ComponentType } from "react";
 import "./globals.css";
+import { ThemeProvider } from "@/components/theme/theme-provider";
 
 // dev限定 テーマ調整パネル。本番ビルドでは三項が定数畳み込みされて
 // `() => null` になり、dynamic import ごと除去される（クライアントバンドル非同梱）。
@@ -41,10 +42,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${appSans.variable} ${appSansJp.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {children}
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          {children}
+        </ThemeProvider>
         <DevThemeTuner />
       </body>
     </html>
