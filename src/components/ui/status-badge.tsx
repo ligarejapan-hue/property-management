@@ -28,32 +28,32 @@ export type BadgeIntent =
 
 const INTENT_STYLES: Record<BadgeIntent, { box: string; dot: string }> = {
   success: {
-    box: "bg-green-50 text-green-700 ring-green-600/20",
-    dot: "bg-green-600",
+    box: "bg-green-50 text-green-700 ring-green-600/20 dark:bg-green-500/10 dark:text-green-300 dark:ring-green-400/20",
+    dot: "bg-green-600 dark:bg-green-500",
   },
   warning: {
-    box: "bg-amber-50 text-amber-700 ring-amber-600/25",
-    dot: "bg-amber-600",
+    box: "bg-amber-50 text-amber-700 ring-amber-600/25 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/25",
+    dot: "bg-amber-600 dark:bg-amber-500",
   },
   error: {
-    box: "bg-red-50 text-red-700 ring-red-600/20",
-    dot: "bg-red-600",
+    box: "bg-red-50 text-red-700 ring-red-600/20 dark:bg-red-500/10 dark:text-red-300 dark:ring-red-400/20",
+    dot: "bg-red-600 dark:bg-red-500",
   },
   info: {
-    box: "bg-blue-50 text-blue-700 ring-blue-600/20",
-    dot: "bg-blue-600",
+    box: "bg-blue-50 text-blue-700 ring-blue-600/20 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-blue-400/20",
+    dot: "bg-blue-600 dark:bg-blue-500",
   },
   neutral: {
-    box: "bg-gray-50 text-gray-600 ring-gray-500/20",
-    dot: "bg-gray-400",
+    box: "bg-gray-50 text-gray-600 ring-gray-500/20 dark:bg-gray-400/10 dark:text-gray-300 dark:ring-gray-400/20",
+    dot: "bg-gray-400 dark:bg-gray-500",
   },
   violet: {
-    box: "bg-violet-50 text-violet-700 ring-violet-600/20",
-    dot: "bg-violet-600",
+    box: "bg-violet-50 text-violet-700 ring-violet-600/20 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-400/20",
+    dot: "bg-violet-600 dark:bg-violet-500",
   },
   sky: {
-    box: "bg-sky-50 text-sky-700 ring-sky-600/20",
-    dot: "bg-sky-600",
+    box: "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/20",
+    dot: "bg-sky-600 dark:bg-sky-500",
   },
 };
 
