@@ -312,6 +312,15 @@ function ColorRow({
   value: string;
   onChange: (v: string) => void;
 }) {
+  // 入力途中（#fff など不完全な値）も打てるよう下書きを別管理し、完全な HEX に
+  // なった時だけ親へ確定する。value が外部要因（モード切替/リセット/カラーピッカー）
+  // で変わったら下書きを同期する（render 中で同期＝effect は使わない）。
+  const [draft, setDraft] = useState(value);
+  const [lastValue, setLastValue] = useState(value);
+  if (value !== lastValue) {
+    setLastValue(value);
+    setDraft(value);
+  }
   return (
     <label className="pmtt-colorrow">
       <span>{label}</span>
@@ -322,12 +331,15 @@ function ColorRow({
       />
       <input
         type="text"
-        value={value}
+        value={draft}
         spellCheck={false}
         onChange={(e) => {
-          const v = e.target.value.trim();
+          const next = e.target.value;
+          setDraft(next);
+          const v = next.trim();
           if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v)) onChange(v);
         }}
+        onBlur={() => setDraft(value)}
       />
     </label>
   );
