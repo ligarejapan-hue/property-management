@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { DEFAULT_BINARY_MIME } from "./mime";
 import { assertValidStorageKey, isValidStorageKey } from "./key-validation";
+import { extractStorageKeyFromAnyUploadsUrl } from "./url-to-key";
 
 export class ServerStorageAdapter implements StorageAdapter {
   private serverUrl: string;
@@ -131,6 +132,25 @@ export class ServerStorageAdapter implements StorageAdapter {
 
     const data = (await res.json()) as { url: string };
     return data.url;
+  }
+
+  keyFromUrl(fileUrl: string | null | undefined): string | null {
+    if (typeof fileUrl !== "string") return null;
+    const s = fileUrl.trim();
+    if (s === "") return null;
+    let pathname: string;
+    try {
+      pathname = s.startsWith("/") ? s.split(/[?#]/)[0] : new URL(s).pathname;
+    } catch {
+      return null;
+    }
+    const prefix = `/${this.bucket}/`;
+    if (pathname.startsWith(prefix)) {
+      const key = pathname.slice(prefix.length);
+      if (key !== "" && isValidStorageKey(key)) return key;
+    }
+    // legacy（未移行）/uploads/{key} もサポート
+    return extractStorageKeyFromAnyUploadsUrl(fileUrl);
   }
 
   /**

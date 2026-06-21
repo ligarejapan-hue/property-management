@@ -1,6 +1,6 @@
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
-import { escapePrismaLikePattern, extractStorageKeyFromFileUrl } from "@/lib/uploads-authorization";
+import { escapePrismaLikePattern } from "@/lib/uploads-authorization";
 
 /** 一般書類の保持期間（日）。謄本(type="registry")は対象外＝自動削除しない。 */
 export const ATTACHMENT_RETENTION_DAYS = 90;
@@ -46,7 +46,7 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
  * FieldSurveyPinPhoto が共有し、caller-supplied fileUrl で key 共有が起こり得る
  * （uploads-authorization が同 4 テーブルを参照として扱うのと同じ前提）。
  * いずれかがまだ参照していれば実体を消してはならない。authz 層と同じく
- * contains（LIKE はエスケープ）で粗く絞り、JS 側で extractStorageKeyFromFileUrl の
+ * contains（LIKE はエスケープ）で粗く絞り、JS 側で active backend の keyFromUrl の
  * 完全一致で判定する。※ 参照テーブル集合は uploads-authorization と一致させること。
  * purge チェックは全フォトテーブル（PropertyPhoto / BuildingPhoto / FieldSurveyPinPhoto）で
  * fileUrl AND thumbnailUrl の両列を確認する（authz の fileUrl-only より広いスーパーセット）。
@@ -61,8 +61,9 @@ async function isStorageKeyStillReferenced(
   excludeAttachmentId?: string,
 ): Promise<boolean> {
   const escaped = escapePrismaLikePattern(key);
+  const storage = getStorage();
   const matchesKey = (fileUrl: string | null | undefined) =>
-    extractStorageKeyFromFileUrl(fileUrl) === key;
+    storage.keyFromUrl(fileUrl) === key;
 
   const attachments = await prisma.attachment.findMany({
     where: {
@@ -159,10 +160,12 @@ export async function purgeExpiredAttachments(opts: {
 
     // (2) Delete the storage object first (claimed row can no longer be restored).
     //     Only our own self-excluded key, and only if no other row references it.
-    const key = extractStorageKeyFromFileUrl(row.fileUrl);
+    //     active backend の keyFromUrl で URL 形式（local /uploads/ / server /:bucket/）を解決する。
+    const storage = getStorage();
+    const key = storage.keyFromUrl(row.fileUrl);
     if (key && !(await isStorageKeyStillReferenced(key, row.id))) {
       try {
-        await getStorage().delete(key);
+        await storage.delete(key);
       } catch {
         // Storage failed → RELEASE the claim so the row is retried next run. Not counted as purged.
         // key/err can contain PII → never logged; only counts are aggregated.

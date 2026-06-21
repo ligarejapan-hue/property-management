@@ -227,3 +227,30 @@ describe("S3Adapter.getUrl", () => {
     expect(url).toBe("/uploads/properties/a/photos/b.jpg");
   });
 });
+
+describe("S3Adapter.keyFromUrl", () => {
+  it("相対 /uploads/{key} → key 抽出", () => {
+    const adapter = new S3Adapter();
+    expect(adapter.keyFromUrl("/uploads/a/b.jpg")).toBe("a/b.jpg");
+  });
+
+  it("絶対 URL の /uploads/{key} → key 抽出", () => {
+    const adapter = new S3Adapter();
+    expect(adapter.keyFromUrl("http://localhost:3000/uploads/a/b.jpg")).toBe("a/b.jpg");
+  });
+
+  it("/api/x など /uploads/ でない → null", () => {
+    const adapter = new S3Adapter();
+    expect(adapter.keyFromUrl("/api/x")).toBeNull();
+  });
+
+  it("data: → null", () => {
+    const adapter = new S3Adapter();
+    expect(adapter.keyFromUrl("data:application/pdf;base64,AAAA")).toBeNull();
+  });
+
+  it("null → null", () => {
+    const adapter = new S3Adapter();
+    expect(adapter.keyFromUrl(null)).toBeNull();
+  });
+});

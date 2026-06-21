@@ -1,7 +1,34 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 const { deleteSpy } = vi.hoisted(() => ({ deleteSpy: vi.fn() }));
-vi.mock("@/lib/storage", () => ({ getStorage: () => ({ delete: deleteSpy }) }));
+
+// keyFromUrl: resolves /uploads/{key} (any host) and /:bucket/{key} for server backend.
+// The test bucket is "testbucket" (matches server URLs used in tests).
+function testKeyFromUrl(u: string | null | undefined): string | null {
+  if (typeof u !== "string") return null;
+  let p: string;
+  try {
+    p = u.startsWith("/") ? u.split(/[?#]/)[0] : new URL(u).pathname;
+  } catch {
+    return u.split(/[?#]/)[0];
+  }
+  // data:/blob:/file: → null
+  if (/^(data|blob|file):/i.test(u)) return null;
+  // server backend URL /:bucket/{key}
+  const bp = "/testbucket/";
+  if (p.startsWith(bp)) return p.slice(bp.length) || null;
+  // local/s3/legacy /uploads/{key}
+  const up = p.indexOf("/uploads/");
+  if (up !== -1) return p.slice(up + "/uploads/".length) || null;
+  return null;
+}
+
+vi.mock("@/lib/storage", () => ({
+  getStorage: () => ({
+    delete: deleteSpy,
+    keyFromUrl: testKeyFromUrl,
+  }),
+}));
 vi.mock("@/lib/prisma", () => ({
   default: {
     attachment: { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
@@ -11,15 +38,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 // escapePrismaLikePattern is pure & tested elsewhere; mock as identity to avoid pulling its deps.
-// extractStorageKeyFromFileUrl: legacy-aware — handles relative /uploads/ and absolute http(s)://host/uploads/.
 vi.mock("@/lib/uploads-authorization", () => ({
   escapePrismaLikePattern: (s: string) => s,
-  extractStorageKeyFromFileUrl: (u: string | null | undefined) => {
-    if (typeof u !== "string") return null;
-    const i = u.indexOf("/uploads/");
-    if (i === -1) return null;
-    return u.slice(i + "/uploads/".length).split(/[?#]/)[0] || null;
-  },
 }));
 
 import prisma from "@/lib/prisma";
@@ -333,5 +353,24 @@ describe("purgeExpiredAttachments", () => {
     errSpy.mockRestore();
     warnSpy.mockRestore();
     logSpy.mockRestore();
+  });
+
+  // ─── 21. server-backend URL reclaim (codex round-12 B-fix) ────────────
+  it("server backend URL /:bucket/{key} → keyFromUrl で key 解決 → storage.delete 呼ばれる（blob 回収）", async () => {
+    const serverUrl = "http://srv:9000/testbucket/properties/p/attachments/x.pdf";
+    wireFindMany([{ id: "s1", fileUrl: serverUrl }], []);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).toHaveBeenCalledWith("properties/p/attachments/x.pdf");
+    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
+  });
+
+  // ─── 22. data: URL → no storage delete, row still finalized ──────────
+  it("data: URL → keyFromUrl が null → storage 未削除・行は finalize される", async () => {
+    wireFindMany([{ id: "d1", fileUrl: "data:application/pdf;base64,AAAA" }], []);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
   });
 });
