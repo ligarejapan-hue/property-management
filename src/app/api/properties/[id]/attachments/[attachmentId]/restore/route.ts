@@ -27,10 +27,19 @@ export async function POST(
     if (!attachment.property || !canAccessPropertyRecord(session, attachment.property)) {
       throw new ApiError(403, "この添付ファイルを復元する権限がありません", "FORBIDDEN");
     }
-    await prisma.attachment.update({
-      where: { id: attachmentId },
+    const restored = await prisma.attachment.updateMany({
+      where: {
+        id: attachmentId,
+        targetType: "property",
+        isDeleted: true,
+        purgeStartedAt: null,
+      },
       data: { isDeleted: false, deletedAt: null },
     });
+    if (restored.count === 0) {
+      // Concurrently purged/claimed by cleanup between the check and the update.
+      throw new ApiError(404, "添付ファイルが見つかりません", "NOT_FOUND");
+    }
     await writeAuditLog({
       userId: session.id,
       action: "restore",

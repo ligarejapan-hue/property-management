@@ -46,7 +46,7 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
  * fileUrl AND thumbnailUrl の両列を確認する（authz の fileUrl-only より広いスーパーセット）。
  * オブジェクトを物理削除するため、サムネイル参照も含むすべての参照を検出しなければならない。
  *
- * excludeAttachmentId: storage-first フローでは DB 行を先に消さないため、
+ * excludeAttachmentId: 2-phase claim フローでは DB 行を先に消さないため、
  * purge 対象行自身の fileUrl が attachment クエリにヒットして常に参照あり判定になる。
  * 自身の行を除外するためにこの引数を渡す（photo テーブルは対象外・変更なし）。
  */
@@ -104,14 +104,19 @@ async function isStorageKeyStillReferenced(
 }
 
 /**
- * 猶予超過の一般添付を物理削除する。storage-first: blob を先に消してから DB 行を削除。
- * - dryRun: 件数のみ（storage/DB 不変）。
- * - 各行は削除直前に再確認（復元/並行 purge レースを最小化）。適格外なら skipped。
- * - storage 実体は、他行が同一 key を参照していない場合のみ削除（共有 object 保護）。
- *   自身の行は参照チェックから除外（storage-first では DB 行がまだ存在するため）。
- * - storage 削除失敗: DB 行を保持し次回 cleanup で再試行可能にする（failed カウント）。
- *   key/err は PII を含み得るためログ・レスポンスに出力しない（件数のみ集計）。
- * - DB 行削除は storage 成功後のみ（または storage 不要の場合）。deleteMany で race ガード。
+ * 猶予超過の一般添付を物理削除する。2-phase claim: purgeStartedAt マーカーで
+ * purge と restore を DB レベルで相互排他にする。
+ *
+ * フロー（行ごと）:
+ *   1. CLAIM: updateMany で purgeStartedAt をセット（まだ eligible かつ未 claimed の行のみ）。
+ *      count=0 なら restore 済み／並行 claimed → skipped。
+ *   2. STORAGE DELETE: blob を先に削除（claimed 行はもう restore 不可）。
+ *      自身の行は参照チェックから除外。storage 失敗なら RELEASE（purgeStartedAt を null 戻し）
+ *      → failed。key/err は PII を含み得るためログ・レスポンスに出さない（件数のみ集計）。
+ *   3. FINALIZE: deleteMany で DB 行を削除（purgeStartedAt:{not:null} ガード込み）。
+ *      count=0 は defensive skip。
+ *
+ * dryRun: 件数のみ（storage/DB 不変）。
  */
 export async function purgeExpiredAttachments(opts: {
   now: Date;
@@ -129,47 +134,53 @@ export async function purgeExpiredAttachments(opts: {
   let skipped = 0;
 
   for (const row of rows) {
-    // 削除直前に現在の適格性を再確認（選択〜削除間の復元/並行 purge レースを最小化）。
-    const current = await prisma.attachment.findUnique({
-      where: { id: row.id },
-      select: { isDeleted: true, type: true, deletedAt: true, fileUrl: true },
-    });
-    if (
-      !current ||
-      !current.isDeleted ||
-      current.type === "registry" ||
-      current.deletedAt === null ||
-      current.deletedAt > cutoff
-    ) {
-      skipped++;
-      continue;
-    }
-
-    // storage を先に削除（自前 key かつ他行が参照していない場合のみ。自身の行は除外）。
-    const key = extractStorageKeyFromFileUrl(current.fileUrl);
-    if (key && !(await isStorageKeyStillReferenced(key, row.id))) {
-      try {
-        await getStorage().delete(key);
-      } catch {
-        // storage 削除失敗: DB 行は残し次回 cleanup で再試行可能にする。成功扱いにしない。
-        // key/err は PII を含み得るためログ・レスポンスに出さない（件数のみ集計）。
-        failed++;
-        continue;
-      }
-    }
-
-    // storage 成功（または共有 key / 非 storage URL）後にのみ DB 行を削除。
-    // 同じ適格条件を再指定し、race で条件が変わった行は消さない。
-    const { count } = await prisma.attachment.deleteMany({
+    // (1) Atomically CLAIM: set the marker only if still eligible AND not already claimed.
+    //     Mutually exclusive with restore (which only un-deletes when purgeStartedAt is null).
+    const claim = await prisma.attachment.updateMany({
       where: {
         id: row.id,
         isDeleted: true,
         type: { not: "registry" },
         deletedAt: { not: null, lte: cutoff },
+        purgeStartedAt: null,
+      },
+      data: { purgeStartedAt: opts.now },
+    });
+    if (claim.count === 0) {
+      skipped++; // restored / changed / already claimed by a concurrent run
+      continue;
+    }
+
+    // (2) Delete the storage object first (claimed row can no longer be restored).
+    //     Only our own self-excluded key, and only if no other row references it.
+    const key = extractStorageKeyFromFileUrl(row.fileUrl);
+    if (key && !(await isStorageKeyStillReferenced(key, row.id))) {
+      try {
+        await getStorage().delete(key);
+      } catch {
+        // Storage failed → RELEASE the claim so the row is retried next run. Not counted as purged.
+        // key/err can contain PII → never logged; only counts are aggregated.
+        await prisma.attachment.updateMany({
+          where: { id: row.id },
+          data: { purgeStartedAt: null },
+        });
+        failed++;
+        continue;
+      }
+    }
+
+    // (3) Finalize: delete the claimed DB row (re-specify the guard incl. purgeStartedAt not null).
+    const del = await prisma.attachment.deleteMany({
+      where: {
+        id: row.id,
+        isDeleted: true,
+        type: { not: "registry" },
+        deletedAt: { not: null, lte: cutoff },
+        purgeStartedAt: { not: null },
       },
     });
-    if (count === 0) {
-      skipped++;
+    if (del.count === 0) {
+      skipped++; // defensive: should not happen since we own the claim
       continue;
     }
     purged++;

@@ -643,7 +643,8 @@ model Attachment {
   mimeType   String   @map("mime_type")
   uploadedBy String   @map("uploaded_by") @db.Uuid
   isDeleted  Boolean  @default(false) @map("is_deleted")
-  deletedAt  DateTime? @map("deleted_at")
+  deletedAt      DateTime? @map("deleted_at")
+  purgeStartedAt DateTime? @map("purge_started_at")
   createdAt  DateTime @default(now()) @map("created_at")
 
   uploader   User      @relation(fields: [uploadedBy], references: [id])
