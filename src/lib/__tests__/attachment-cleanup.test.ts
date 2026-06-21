@@ -71,13 +71,14 @@ describe("purgeableCutoff", () => {
 });
 
 describe("findPurgeableAttachments", () => {
-  it("isDeleted=true / type≠registry / deletedAt<=cutoff / 件数上限 を where に反映", async () => {
+  it("isDeleted=true / type≠registry / deletedAt<=cutoff / purgeStartedAt=null / 件数上限 を where に反映", async () => {
     await findPurgeableAttachments(NOW, 200);
     const arg = pm.attachment.findMany.mock.calls[0][0];
     expect(arg.where.isDeleted).toBe(true);
     expect(arg.where.type).toEqual({ not: "registry" });
     expect(arg.where.deletedAt.not).toBe(null);
     expect(arg.where.deletedAt.lte).toBeInstanceOf(Date);
+    expect(arg.where.purgeStartedAt).toBe(null); // stale-claim starvation 防止: 既 claimed 行を除外
     expect(arg.take).toBe(200);
     expect(arg.select).toEqual({ id: true, fileUrl: true });
   });

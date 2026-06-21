@@ -20,13 +20,19 @@ export function purgeableCutoff(
   return new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
 }
 
-/** purge 対象（soft-delete 済み・謄本以外・猶予超過）を最大 limit 件。 */
+/**
+ * purge 対象（soft-delete 済み・謄本以外・猶予超過・未 claimed）を最大 limit 件。
+ * purgeStartedAt: null を条件に含めることで、クラッシュ等で stale になった claim 済み行を
+ * 除外し、batch スロットを新規 eligible 行に確保する（stale-claim starvation 防止）。
+ * 行ごとの claim updateMany と finalize deleteMany の各ガードは別途維持。
+ */
 export async function findPurgeableAttachments(now: Date, limit: number) {
   return prisma.attachment.findMany({
     where: {
       isDeleted: true,
       type: { not: "registry" }, // 謄本は自動削除しない
       deletedAt: { not: null, lte: purgeableCutoff(now) },
+      purgeStartedAt: null, // 既に claim 済み(stale含む)は除外 → batch を専有して新規を starve させない
     },
     select: { id: true, fileUrl: true },
     orderBy: { deletedAt: "asc" },
