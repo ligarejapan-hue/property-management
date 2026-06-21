@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const dryRun = new URL(request.url).searchParams.get("dryRun") === "1";
     const result = await purgeExpiredAttachments({ now: new Date(), limit: BATCH_LIMIT, dryRun });
     // 非PII の運用ログ（件数のみ）。journald に残す。
-    console.log(`[attachment-cleanup] scanned=${result.scanned} purged=${result.purged} dryRun=${dryRun}`);
+    console.log(`[attachment-cleanup] scanned=${result.scanned} purged=${result.purged} failed=${result.failed} skipped=${result.skipped} dryRun=${dryRun}`);
     return apiResponse({ ...result, dryRun });
   } catch (error) {
     return handleApiError(error);

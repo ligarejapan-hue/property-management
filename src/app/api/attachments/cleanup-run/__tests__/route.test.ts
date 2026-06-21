@@ -24,7 +24,7 @@ function req(opts: { secret?: string; dryRun?: boolean } = {}) {
   return new Request(`http://localhost/api/attachments/cleanup-run${opts.dryRun ? "?dryRun=1" : ""}`, { method: "POST", headers });
 }
 
-beforeEach(() => { vi.clearAllMocks(); delete process.env.ATTACHMENT_CLEANUP_SECRET; purgeSpy.mockResolvedValue({ scanned: 3, purged: 3 }); });
+beforeEach(() => { vi.clearAllMocks(); delete process.env.ATTACHMENT_CLEANUP_SECRET; purgeSpy.mockResolvedValue({ scanned: 3, purged: 3, failed: 0, skipped: 0 }); });
 
 describe("POST /api/attachments/cleanup-run", () => {
   it("秘密鍵 env 未設定なら 503（dormant・purge を呼ばない）", async () => {

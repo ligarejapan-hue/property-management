@@ -8,6 +8,8 @@ export const ATTACHMENT_RETENTION_DAYS = 90;
 export interface PurgeResult {
   scanned: number;
   purged: number;
+  failed: number;   // storage delete failed → DB row kept for retry (NOT counted as purged)
+  skipped: number;  // no longer eligible at delete time (restored / concurrently purged)
 }
 
 /** now から retentionDays 日前（この時刻以前に削除された行が purge 対象）。 */
@@ -43,14 +45,24 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
  * purge チェックは全フォトテーブル（PropertyPhoto / BuildingPhoto / FieldSurveyPinPhoto）で
  * fileUrl AND thumbnailUrl の両列を確認する（authz の fileUrl-only より広いスーパーセット）。
  * オブジェクトを物理削除するため、サムネイル参照も含むすべての参照を検出しなければならない。
+ *
+ * excludeAttachmentId: storage-first フローでは DB 行を先に消さないため、
+ * purge 対象行自身の fileUrl が attachment クエリにヒットして常に参照あり判定になる。
+ * 自身の行を除外するためにこの引数を渡す（photo テーブルは対象外・変更なし）。
  */
-async function isStorageKeyStillReferenced(key: string): Promise<boolean> {
+async function isStorageKeyStillReferenced(
+  key: string,
+  excludeAttachmentId?: string,
+): Promise<boolean> {
   const escaped = escapePrismaLikePattern(key);
   const matchesKey = (fileUrl: string | null | undefined) =>
     extractStorageKeyFromFileUrl(fileUrl) === key;
 
   const attachments = await prisma.attachment.findMany({
-    where: { fileUrl: { contains: escaped } },
+    where: {
+      fileUrl: { contains: escaped },
+      ...(excludeAttachmentId ? { id: { not: excludeAttachmentId } } : {}),
+    },
     select: { fileUrl: true },
   });
   if (attachments.some((a) => matchesKey(a.fileUrl))) return true;
@@ -92,14 +104,14 @@ async function isStorageKeyStillReferenced(key: string): Promise<boolean> {
 }
 
 /**
- * 猶予超過の一般添付を物理削除する。
+ * 猶予超過の一般添付を物理削除する。storage-first: blob を先に消してから DB 行を削除。
  * - dryRun: 件数のみ（storage/DB 不変）。
- * - 各行は「まだ purge 対象である場合のみ」条件付き deleteMany で原子的に確保してから削除
- *   （選択〜削除間に復元/並行 purge されたら count=0 でスキップ＝復元行を消さない・P2025 を出さない）。
+ * - 各行は削除直前に再確認（復元/並行 purge レースを最小化）。適格外なら skipped。
  * - storage 実体は、他行が同一 key を参照していない場合のみ削除（共有 object 保護）。
- *   /uploads URL は host 有無に関わらず legacy-aware に key 抽出（他参照が無ければ実体も削除）。
- *   非/uploads・不正 URL（data:/blob: 等）は key 抽出不可で storage を触らず行のみ削除。
- *   storage 失敗はログして継続（バッチを止めない）。
+ *   自身の行は参照チェックから除外（storage-first では DB 行がまだ存在するため）。
+ * - storage 削除失敗: DB 行を保持し次回 cleanup で再試行可能にする（failed カウント）。
+ *   key/err は PII を含み得るためログ・レスポンスに出力しない（件数のみ集計）。
+ * - DB 行削除は storage 成功後のみ（または storage 不要の場合）。deleteMany で race ガード。
  */
 export async function purgeExpiredAttachments(opts: {
   now: Date;
@@ -108,11 +120,46 @@ export async function purgeExpiredAttachments(opts: {
 }): Promise<PurgeResult> {
   const cutoff = purgeableCutoff(opts.now);
   const rows = await findPurgeableAttachments(opts.now, opts.limit);
-  if (opts.dryRun) return { scanned: rows.length, purged: 0 };
+  if (opts.dryRun) {
+    return { scanned: rows.length, purged: 0, failed: 0, skipped: 0 };
+  }
 
   let purged = 0;
+  let failed = 0;
+  let skipped = 0;
+
   for (const row of rows) {
-    // 条件付き確保: まだ purge 適格な場合のみ削除（復元/並行 purge ガード）。
+    // 削除直前に現在の適格性を再確認（選択〜削除間の復元/並行 purge レースを最小化）。
+    const current = await prisma.attachment.findUnique({
+      where: { id: row.id },
+      select: { isDeleted: true, type: true, deletedAt: true, fileUrl: true },
+    });
+    if (
+      !current ||
+      !current.isDeleted ||
+      current.type === "registry" ||
+      current.deletedAt === null ||
+      current.deletedAt > cutoff
+    ) {
+      skipped++;
+      continue;
+    }
+
+    // storage を先に削除（自前 key かつ他行が参照していない場合のみ。自身の行は除外）。
+    const key = extractStorageKeyFromFileUrl(current.fileUrl);
+    if (key && !(await isStorageKeyStillReferenced(key, row.id))) {
+      try {
+        await getStorage().delete(key);
+      } catch {
+        // storage 削除失敗: DB 行は残し次回 cleanup で再試行可能にする。成功扱いにしない。
+        // key/err は PII を含み得るためログ・レスポンスに出さない（件数のみ集計）。
+        failed++;
+        continue;
+      }
+    }
+
+    // storage 成功（または共有 key / 非 storage URL）後にのみ DB 行を削除。
+    // 同じ適格条件を再指定し、race で条件が変わった行は消さない。
     const { count } = await prisma.attachment.deleteMany({
       where: {
         id: row.id,
@@ -121,23 +168,12 @@ export async function purgeExpiredAttachments(opts: {
         deletedAt: { not: null, lte: cutoff },
       },
     });
-    if (count === 0) continue; // 復元済み or 並行 purge 済み → storage も触らない
-
-    // Legacy-aware extractor (same as sibling check / authz / retro-exif): strips host so
-    // legacy absolute /uploads/ URLs are reclaimed. isStorageKeyStillReferenced is what
-    // prevents collateral — we never delete a key another row still references.
-    const key = extractStorageKeyFromFileUrl(row.fileUrl);
-    if (key && !(await isStorageKeyStillReferenced(key))) {
-      try {
-        await getStorage().delete(key); // 冪等（404/NoSuchKey は握りつぶし）
-      } catch (err) {
-        // 行は既に削除済み。storage 失敗で残りバッチを止めない（次回/運用で回収）。
-        console.error(
-          `[attachment-cleanup] storage delete failed for attachment=${row.id} (${err instanceof Error ? err.name : "UnknownError"})`,
-        );
-      }
+    if (count === 0) {
+      skipped++;
+      continue;
     }
     purged++;
   }
-  return { scanned: rows.length, purged };
+
+  return { scanned: rows.length, purged, failed, skipped };
 }
