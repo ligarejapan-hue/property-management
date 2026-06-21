@@ -1,11 +1,12 @@
 "use client";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { Monitor, Sun, Moon } from "lucide-react";
 
 const OPTIONS = [
-  { value: "system", label: "自動" },
-  { value: "light", label: "明るい" },
-  { value: "dark", label: "暗い" },
+  { value: "system", label: "自動", Icon: Monitor },
+  { value: "light", label: "明るい", Icon: Sun },
+  { value: "dark", label: "暗い", Icon: Moon },
 ] as const;
 
 export function ThemeToggle() {
@@ -27,14 +28,17 @@ export function ThemeToggle() {
           key={o.value}
           type="button"
           aria-pressed={current === o.value}
+          aria-label={o.label}
+          title={o.label}
           onClick={() => setTheme(o.value)}
-          className={`min-h-[40px] px-3 text-sm ${
+          className={`min-h-[40px] px-3 text-sm flex items-center gap-1 ${
             current === o.value
               ? "bg-indigo-600 text-white"
               : "bg-white text-gray-700 dark:bg-gray-900 dark:text-gray-200"
           }`}
         >
-          {o.label}
+          <o.Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="hidden sm:inline">{o.label}</span>
         </button>
       ))}
     </div>
