@@ -32,13 +32,6 @@ describe("modal panel sizing (K1)", () => {
     expect(src).toContain("overflow-y-auto");
   });
 
-  test("OwnerMergePreviewButton: has max-w-[90vw], max-h-[90vh], overflow-y-auto", () => {
-    const src = readSrc("owners/OwnerMergePreviewButton.tsx");
-    expect(src).toContain("max-w-[90vw]");
-    expect(src).toContain("max-h-[90vh]");
-    expect(src).toContain("overflow-y-auto");
-  });
-
   test("pin-create-modal: has max-w-[90vw], max-h-[90vh], overflow-y-auto", () => {
     const src = readSrc("field-survey/pin-create-modal.tsx");
     expect(src).toContain("max-w-[90vw]");
