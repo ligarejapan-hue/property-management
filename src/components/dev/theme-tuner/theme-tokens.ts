@@ -194,7 +194,9 @@ ${grayLines}
   /* 余白の基準（Tailwind の spacing 全体に効く・既定 0.25rem） */
   --spacing: ${state.spacing}rem;
 
-  /* 角丸スケール（rounded-* 全体に効く・新規上書き／任意） */
+  /* 角丸スケール（rounded-* 全体に効く・新規上書き／任意）
+     注: 素の rounded は Tailwind v4 では 0.25rem 固定リテラルのため調整対象外。
+     rounded-md / rounded-lg / rounded-xl 等は反映されます。 */
 ${radiusLines}
 }
 `;

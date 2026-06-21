@@ -102,6 +102,11 @@ describe("buildExportCss", () => {
     const css = buildExportCss({ ...DEFAULT_TUNER_STATE, fontSize: 18 });
     expect(css).toContain("font-size: 18px;");
   });
+
+  it("documents that the bare rounded utility is out of scope", () => {
+    const css = buildExportCss(DEFAULT_TUNER_STATE);
+    expect(css).toContain("対象外");
+  });
 });
 
 describe("normalizeHexColor", () => {

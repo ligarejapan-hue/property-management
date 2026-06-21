@@ -237,6 +237,9 @@ export default function ThemeTunerPanel() {
                 fmt={(v) => `×${v.toFixed(1)}`}
                 onChange={(v) => patch({ radiusScale: v })}
               />
+              <p className="pmtt-hint">
+                ※ 素の rounded（0.25rem固定）は対象外 / rounded-md・lg 等は反映
+              </p>
               <Slider
                 label="余白"
                 min={0.18}
@@ -443,6 +446,7 @@ const PANEL_CSS = `
    （filter だけだと .pmtt-btn:hover の薄灰背景が残り、白文字が見えなくなる） */
 .pmtt-primary:hover { background: #4338ca; border-color: #4338ca; }
 .pmtt-note { font-size: 11px; color: #57534e; margin: 0 0 8px; }
+.pmtt-hint { font-size: 10px; color: #a8a29e; margin: -2px 0 8px; }
 .pmtt-overlay { position: fixed; inset: 0; z-index: 2147483001; background: rgba(28,25,23,.45); display: flex; align-items: center; justify-content: center; padding: 24px; }
 .pmtt-modal { background: #fff; color: #1c1917; border-radius: 12px; width: min(680px, 100%); max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,.3); overflow: hidden; }
 .pmtt-modal-body { padding: 12px; overflow: auto; }
