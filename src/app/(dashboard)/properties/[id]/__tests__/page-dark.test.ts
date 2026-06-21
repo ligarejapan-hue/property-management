@@ -30,11 +30,29 @@ describe("properties/[id]/page.tsx dark: 配色 (T3)", () => {
   it("枠線に dark:border-gray-800 がある", () => {
     expect(src).toContain("dark:border-gray-800");
   });
+  it("入力欄枠線に dark:border-gray-700 がある", () => {
+    expect(src).toContain("dark:border-gray-700");
+  });
+
+  // --- 文字（追加担保） ---
+  it("見出し・ラベルに dark:text-gray-200 がある（text-gray-700 対応）", () => {
+    expect(src).toContain("dark:text-gray-200");
+  });
 
   // --- 入力欄 ---
   it("入力欄面に dark:bg-gray-900 がある (input の dark 面)", () => {
     // カード面と兼用の dark:bg-gray-900 でカバーされる
     expect(src).toContain("dark:bg-gray-900");
+  });
+  it("入力欄文字に dark:text-gray-100 がある", () => {
+    expect(src).toContain("dark:text-gray-100");
+  });
+
+  // --- accent dark は 2a のスコープ外（revert 担保） ---
+  it("タブバッジに accent dark が混入していない（2b へ先送り）", () => {
+    // note: 検索対象語はコメントに書かない
+    const token = ["dark:bg-blue-900", "40"].join("/");
+    expect(src).not.toContain(token);
   });
 
   // --- ライト側のクラスが依然存在する（不変担保） ---

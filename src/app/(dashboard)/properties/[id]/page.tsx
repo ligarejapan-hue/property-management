@@ -496,7 +496,7 @@ export default function PropertyDetailPage({
             >
               {tab.label}
               {tab.key === "owner" && property.propertyOwners.length > 0 && (
-                <span className="ml-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                <span className="ml-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700">
                   {property.propertyOwners.length}
                 </span>
               )}
