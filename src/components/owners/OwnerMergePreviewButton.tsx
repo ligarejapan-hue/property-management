@@ -255,7 +255,7 @@ export function OwnerMergePreviewButton({
 
       {result && (
         <div
-          className={`rounded-md border p-2 text-xs ${
+          className={`w-full max-w-[90vw] sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-md border p-2 text-xs ${
             result.eligible
               ? "border-green-200 bg-green-50"
               : "border-red-200 bg-red-50"
