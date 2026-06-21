@@ -183,10 +183,12 @@ export async function purgeExpiredAttachments(opts: {
       try {
         await storage.delete(key);
       } catch {
-        // Storage failed → RELEASE the claim so the row is retried next run. Not counted as purged.
+        // Storage failed → release OUR claim so the row is retried next run. Not counted as purged.
+        // Guard by our claim token (purgeStartedAt: opts.now): if our claim went stale and another
+        // worker re-claimed the row, this no-ops (count 0) and does NOT unlock that worker's active purge.
         // key/err can contain PII → never logged; only counts are aggregated.
         await prisma.attachment.updateMany({
-          where: { id: row.id },
+          where: { id: row.id, purgeStartedAt: opts.now },
           data: { purgeStartedAt: null },
         });
         failed++;

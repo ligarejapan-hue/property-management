@@ -163,7 +163,9 @@ describe("purgeExpiredAttachments", () => {
     // RELEASE call: updateMany called twice — first CLAIM, second RELEASE
     expect(pm.attachment.updateMany).toHaveBeenCalledTimes(2);
     const releaseCall = pm.attachment.updateMany.mock.calls[1][0];
-    expect(releaseCall.where).toMatchObject({ id: "a1" });
+    // Guard by claim token: where must include purgeStartedAt: opts.now so a stale worker
+    // cannot unlock another worker's fresh claim (r13 lease + concurrent reclaim edge).
+    expect(releaseCall.where).toEqual({ id: "a1", purgeStartedAt: NOW });
     expect(releaseCall.data).toEqual({ purgeStartedAt: null });
     // finalize deleteMany NOT called
     expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
