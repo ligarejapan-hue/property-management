@@ -172,6 +172,30 @@ describe("purgeExpiredAttachments", () => {
     expect(r.purged).toBe(1);
   });
 
+  it("アクティブな PropertyPhoto が thumbnailUrl で同一 key を参照 → storage を消さない（サムネイル保護）", async () => {
+    const key = "/uploads/properties/p/attachments/shared.pdf";
+    wireFindMany([{ id: "c4", fileUrl: key }], []);
+    pm.attachment.deleteMany.mockResolvedValue({ count: 1 });
+    pm.propertyPhoto.findMany.mockResolvedValue([
+      { fileUrl: "/uploads/properties/p/photos/other.jpg", thumbnailUrl: key },
+    ]);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(r.purged).toBe(1);
+  });
+
+  it("アクティブな BuildingPhoto が thumbnailUrl で同一 key を参照 → storage を消さない（サムネイル保護）", async () => {
+    const key = "/uploads/properties/p/attachments/shared.pdf";
+    wireFindMany([{ id: "c5", fileUrl: key }], []);
+    pm.attachment.deleteMany.mockResolvedValue({ count: 1 });
+    pm.buildingPhoto.findMany.mockResolvedValue([
+      { fileUrl: "/uploads/properties/p/photos/other.jpg", thumbnailUrl: key },
+    ]);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(r.purged).toBe(1);
+  });
+
   it("FieldSurveyPinPhoto が thumbnailUrl で同一 key を参照 → storage を消さない（サムネイル保護）", async () => {
     const key = "/uploads/properties/p/attachments/shared.pdf";
     wireFindMany([{ id: "c3", fileUrl: key }], []);

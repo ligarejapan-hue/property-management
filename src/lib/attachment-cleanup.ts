@@ -40,6 +40,9 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
  * いずれかがまだ参照していれば実体を消してはならない。authz 層と同じく
  * contains（LIKE はエスケープ）で粗く絞り、JS 側で extractStorageKeyFromFileUrl の
  * 完全一致で判定する。※ 参照テーブル集合は uploads-authorization と一致させること。
+ * purge チェックは全フォトテーブル（PropertyPhoto / BuildingPhoto / FieldSurveyPinPhoto）で
+ * fileUrl AND thumbnailUrl の両列を確認する（authz の fileUrl-only より広いスーパーセット）。
+ * オブジェクトを物理削除するため、サムネイル参照も含むすべての参照を検出しなければならない。
  */
 async function isStorageKeyStillReferenced(key: string): Promise<boolean> {
   const escaped = escapePrismaLikePattern(key);
@@ -53,16 +56,26 @@ async function isStorageKeyStillReferenced(key: string): Promise<boolean> {
   if (attachments.some((a) => matchesKey(a.fileUrl))) return true;
 
   const propertyPhotos = await prisma.propertyPhoto.findMany({
-    where: { fileUrl: { contains: escaped } },
-    select: { fileUrl: true },
+    where: {
+      OR: [
+        { fileUrl: { contains: escaped } },
+        { thumbnailUrl: { contains: escaped } },
+      ],
+    },
+    select: { fileUrl: true, thumbnailUrl: true },
   });
-  if (propertyPhotos.some((p) => matchesKey(p.fileUrl))) return true;
+  if (propertyPhotos.some((p) => matchesKey(p.fileUrl) || matchesKey(p.thumbnailUrl))) return true;
 
   const buildingPhotos = await prisma.buildingPhoto.findMany({
-    where: { fileUrl: { contains: escaped } },
-    select: { fileUrl: true },
+    where: {
+      OR: [
+        { fileUrl: { contains: escaped } },
+        { thumbnailUrl: { contains: escaped } },
+      ],
+    },
+    select: { fileUrl: true, thumbnailUrl: true },
   });
-  if (buildingPhotos.some((b) => matchesKey(b.fileUrl))) return true;
+  if (buildingPhotos.some((b) => matchesKey(b.fileUrl) || matchesKey(b.thumbnailUrl))) return true;
 
   const pinPhotos = await prisma.fieldSurveyPinPhoto.findMany({
     where: {
