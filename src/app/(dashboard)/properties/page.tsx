@@ -133,6 +133,9 @@ function PropertiesPageInner() {
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
   const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
 
+  // モバイル用フィルタ折りたたみ
+  const [showFilters, setShowFilters] = useState(false);
+
   // CSVエクスポートの列ピッカー。既定=全列選択。ゼロ列選択時は出力ボタンを無効化する。
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [selectedExportColumns, setSelectedExportColumns] = useState<Set<string>>(
@@ -522,6 +525,12 @@ function PropertiesPageInner() {
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || sort !== "updatedAt:desc";
 
+  // アクティブなフィルタ条件数（モバイルトグルバッジ用）
+  const activeFilterCount = [
+    searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
+    introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter,
+  ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== "updatedAt:desc" ? 1 : 0);
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -637,7 +646,7 @@ function PropertiesPageInner() {
   };
 
   return (
-    <div>
+    <div className="pt-2">
       <div className="mb-4">
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">物件一覧</h2>
       </div>
@@ -745,8 +754,20 @@ function PropertiesPageInner() {
         <NewPropertyModal onClose={() => setShowNewModal(false)} />
       )}
 
+      {/* Filter toggle (mobile only) */}
+      <div className="mb-2 md:hidden">
+        <button
+          type="button"
+          onClick={() => setShowFilters((v) => !v)}
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+        >
+          絞り込み{activeFilterCount > 0 ? `（${activeFilterCount}）` : ""}
+          {showFilters ? " ▴" : " ▾"}
+        </button>
+      </div>
+
       {/* Filter bar */}
-      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+      <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 ${showFilters ? "block" : "hidden"} md:block`}>
         <select
           value={typeFilter}
           onChange={handleFilterChange(setTypeFilter)}
@@ -1148,9 +1169,10 @@ function PropertiesPageInner() {
                 return (
                 <tr
                   key={property.id}
-                  className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
+                  className="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
+                  onClick={() => router.push(`/properties/${property.id}`)}
                 >
-                  <td className="whitespace-nowrap px-2 py-3">
+                  <td className="whitespace-nowrap px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedIds.has(property.id)}
@@ -1231,7 +1253,7 @@ function PropertiesPageInner() {
                   <td className="whitespace-nowrap px-4 py-3 text-gray-500 dark:text-gray-400">
                     {new Date(property.updatedAt).toLocaleDateString("ja-JP")}
                   </td>
-                  <td className="whitespace-nowrap px-2 py-3">
+                  <td className="whitespace-nowrap px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
                       title="この物件を削除"
@@ -1267,7 +1289,7 @@ function PropertiesPageInner() {
       </div>
 
       {/* Pagination */}
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-4 w-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pb-8">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {pagination.total} 件中{" "}
           {pagination.total > 0
@@ -1279,7 +1301,7 @@ function PropertiesPageInner() {
           <button
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className={`flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 ${
+            className={`flex min-h-[44px] items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 ${
               page <= 1
                 ? "text-gray-400 cursor-not-allowed dark:text-gray-500"
                 : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -1299,7 +1321,7 @@ function PropertiesPageInner() {
           <button
             disabled={page >= pagination.totalPages}
             onClick={() => setPage((p) => p + 1)}
-            className={`flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 ${
+            className={`flex min-h-[44px] items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 ${
               page >= pagination.totalPages
                 ? "text-gray-400 cursor-not-allowed dark:text-gray-500"
                 : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
