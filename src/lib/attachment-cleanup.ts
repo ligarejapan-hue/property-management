@@ -65,6 +65,10 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
  * excludeAttachmentId: 2-phase claim フローでは DB 行を先に消さないため、
  * purge 対象行自身の fileUrl が attachment クエリにヒットして常に参照あり判定になる。
  * 自身の行を除外するためにこの引数を渡す（photo テーブルは対象外・変更なし）。
+ * また、purgeStartedAt が set されている（＝並行 worker に claimed されている）兄弟行も
+ * 除外する。これを除外しないと、同一 key を共有する 2 行を別々の worker が処理する際に
+ * お互いの claimed 行を「生きた参照」と誤判定して両者が storage.delete をスキップし、
+ * blob が永久に孤立（orphan）してしまう。
  */
 async function isStorageKeyStillReferenced(
   key: string,
@@ -79,6 +83,7 @@ async function isStorageKeyStillReferenced(
     where: {
       fileUrl: { contains: escaped },
       ...(excludeAttachmentId ? { id: { not: excludeAttachmentId } } : {}),
+      purgeStartedAt: null,
     },
     select: { fileUrl: true },
   });

@@ -225,15 +225,15 @@ describe("purgeExpiredAttachments", () => {
     expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
   });
 
-  // ─── 9. self-exclusion: findMany where includes id:{not: <row id>} ────
-  it("isStorageKeyStillReferenced の attachment findMany where に id:{not: row.id} が含まれる（自己参照排除）", async () => {
+  // ─── 9. self-exclusion: findMany where includes id:{not: <row id>} AND purgeStartedAt:null ────
+  it("isStorageKeyStillReferenced の attachment findMany where に id:{not: row.id} と purgeStartedAt:null が含まれる（自己参照排除＋並行claimed排除）", async () => {
     wireFindMany([{ id: "a1", fileUrl: "/uploads/properties/p/attachments/1.pdf" }], []);
     await purgeExpiredAttachments({ now: NOW, limit: 200 });
     const sharedKeyCall = pm.attachment.findMany.mock.calls.find(
       (c: unknown[]) => (c[0] as { where?: { fileUrl?: { contains?: string } } } | undefined)?.where?.fileUrl?.contains !== undefined
     );
     expect(sharedKeyCall).toBeDefined();
-    expect(sharedKeyCall![0].where).toMatchObject({ id: { not: "a1" } });
+    expect(sharedKeyCall![0].where).toMatchObject({ id: { not: "a1" }, purgeStartedAt: null });
   });
 
   // ─── 10. 外部URL/不正URL: storage skip, row deleted ──────────────────
@@ -414,5 +414,25 @@ describe("purgeExpiredAttachments", () => {
     expect(deleteSpy).not.toHaveBeenCalled();
     expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
     expect(r).toEqual({ scanned: 1, purged: 0, failed: 0, skipped: 1 });
+  });
+
+  // ─── 25. concurrent orphan prevention: being-purged sibling does NOT block delete ──
+  it("並行 purge 中の sibling（purgeStartedAt set）は共有key参照に含まれない → storage.delete 呼ばれ purged:1（blob orphan 防止）", async () => {
+    // Scenario: two workers, two attachments sharing the same key.
+    // Worker A is processing row "a1". Worker B has already claimed row "a2" (same key).
+    // ref-check for "a1" excludes itself (id:not a1) AND excludes being-purged siblings
+    // (purgeStartedAt:null filter). So the ref-check attachment.findMany returns [] for the key.
+    // No photo references either. Worker A must proceed to storage.delete (idempotent) → purged:1.
+    wireFindMany(
+      [{ id: "a1", fileUrl: "/uploads/properties/p/attachments/shared-key.pdf" }],
+      [], // ref-check returns [] because sibling "a2" has purgeStartedAt set → filtered out
+    );
+    pm.propertyPhoto.findMany.mockResolvedValue([]);
+    pm.buildingPhoto.findMany.mockResolvedValue([]);
+    pm.fieldSurveyPinPhoto.findMany.mockResolvedValue([]);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).toHaveBeenCalledWith("properties/p/attachments/shared-key.pdf");
+    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
   });
 });
