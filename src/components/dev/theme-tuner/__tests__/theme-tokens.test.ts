@@ -81,10 +81,11 @@ describe("buildExportCss", () => {
     expect(css).toContain("--color-gray-950:");
   });
 
-  it("emits the dark-mode media block", () => {
+  it("emits the dark-mode class block (not media query)", () => {
     const css = buildExportCss(state);
-    expect(css).toContain("@media (prefers-color-scheme: dark)");
+    expect(css).toContain(".dark {");
     expect(css).toContain(`--background: ${DEFAULT_TUNER_STATE.dark.bg};`);
+    expect(css).not.toContain("@media (prefers-color-scheme: dark)");
   });
 
   it("emits spacing and radius tokens", () => {

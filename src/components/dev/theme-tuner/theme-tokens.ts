@@ -180,11 +180,9 @@ export function buildExportCss(state: TunerState): string {
   --foreground: ${state.light.fg};${fontSizeLine}
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: ${state.dark.bg};
-    --foreground: ${state.dark.fg};
-  }
+.dark {
+  --background: ${state.dark.bg};
+  --foreground: ${state.dark.fg};
 }
 
 @theme {
