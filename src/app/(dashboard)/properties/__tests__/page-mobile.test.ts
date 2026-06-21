@@ -14,8 +14,8 @@ describe("properties/page.tsx モバイル UI (M1)", () => {
   it("§8-2: モバイル専用トグルに md:hidden がある", () => {
     expect(src).toContain("md:hidden");
   });
-  it("§8-2: フィルタ panel の条件表示に md:block がある", () => {
-    expect(src).toContain("md:block");
+  it("§8-2: フィルタ panel の条件表示に md:flex がある", () => {
+    expect(src).toContain("md:flex");
   });
 
   // §8-3 ページネーション縦積み → 横

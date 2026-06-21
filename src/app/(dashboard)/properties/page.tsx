@@ -767,7 +767,7 @@ function PropertiesPageInner() {
       </div>
 
       {/* Filter bar */}
-      <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 ${showFilters ? "block" : "hidden"} md:block`}>
+      <div className={`mb-4 flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 ${showFilters ? "flex" : "hidden"} md:flex`}>
         <select
           value={typeFilter}
           onChange={handleFilterChange(setTypeFilter)}
