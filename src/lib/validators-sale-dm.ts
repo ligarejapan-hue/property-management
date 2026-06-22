@@ -27,3 +27,20 @@ export const saleDmCampaignBodySchema = z.object({
 });
 
 export type SaleDmCampaignBody = z.infer<typeof saleDmCampaignBodySchema>;
+
+// 型(DmVariant)= 設定一式。sender は型に持たせない(差出人はキャンペーン/env 既定)。
+const variantOptionsSchema = saleDmOptionsSchema.omit({ senderName: true, senderContact: true });
+
+export const saleDmVariantCreateSchema = z.object({
+  label: z.string().min(1).max(40),
+  options: variantOptionsSchema,
+});
+
+// 更新は label・options をそれぞれ任意指定(部分更新)。
+export const saleDmVariantUpdateSchema = z.object({
+  label: z.string().min(1).max(40).optional(),
+  options: variantOptionsSchema.partial().optional(),
+});
+
+export type SaleDmVariantCreate = z.infer<typeof saleDmVariantCreateSchema>;
+export type SaleDmVariantUpdate = z.infer<typeof saleDmVariantUpdateSchema>;
