@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SalesSheetRenderer } from "../SalesSheetRenderer";
 import { sampleDocument } from "@/lib/sales-sheet/__fixtures__/sample-document";
-import type { SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import { A4_LANDSCAPE } from "@/lib/sales-sheet/document-schema";
 
 describe("SalesSheetRenderer", () => {
@@ -24,12 +23,13 @@ describe("SalesSheetRenderer", () => {
 
 });
 
-describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
-  /** ; を除去することで CSS宣言注入が成立しないことを検証する。
-   *  注入ベクタは `;` (宣言区切り)。除去後の文字列はプロパティ値として無害に埋め込まれる。 */
+describe("SalesSheetRenderer — スキーマ検証で不正ドキュメントを拒否 (P2)", () => {
+  /** コンポーネント入口で parseSalesSheetDocument を呼ぶため、
+   *  スキーマ違反ドキュメントを渡すと ZodError がスローされる。
+   *  sanitizeCssValue は有効なデータに対する多層防御として残存する（no-op になる）。 */
 
-  it("theme.fontFamily に ; ペイロードが含まれていても ; が除去され注入不成立", () => {
-    const maliciousDoc: SalesSheetDocument = {
+  it("theme.fontFamily に ; ペイロードが含まれていると ZodError でスローされる", () => {
+    const badDoc = {
       page: A4_LANDSCAPE,
       theme: {
         fontFamily: 'sans-serif;background-image:url(http://169.254.169.254/)',
@@ -37,15 +37,11 @@ describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
       },
       elements: [],
     };
-    const html = renderToStaticMarkup(<SalesSheetRenderer document={maliciousDoc} />);
-    // ; が除去されているので独立したCSSプロパティとして注入されていない
-    expect(html).not.toContain('sans-serif;');
-    // font-family 値の中に埋め込まれているだけ（無害）
-    expect(html).toContain("sans-serifbackground-image");
+    expect(() => renderToStaticMarkup(<SalesSheetRenderer document={badDoc as never} />)).toThrow();
   });
 
-  it("text color に ; ペイロードが含まれていても ; が除去され注入不成立", () => {
-    const maliciousDoc: SalesSheetDocument = {
+  it("text color に ; ペイロードが含まれていると ZodError でスローされる", () => {
+    const badDoc = {
       page: A4_LANDSCAPE,
       theme: { fontFamily: "sans-serif", accentColor: "#000" },
       elements: [
@@ -56,14 +52,11 @@ describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
         },
       ],
     };
-    const html = renderToStaticMarkup(<SalesSheetRenderer document={maliciousDoc} />);
-    // ; が除去されているので "color:red" から独立した background-image 宣言にならない
-    expect(html).not.toContain("red;");
-    expect(html).toContain("redbackground-image");
+    expect(() => renderToStaticMarkup(<SalesSheetRenderer document={badDoc as never} />)).toThrow();
   });
 
-  it("badge bg/fg に ; ペイロードが含まれていても ; が除去される", () => {
-    const maliciousDoc: SalesSheetDocument = {
+  it("badge bg に ; ペイロードが含まれていると ZodError でスローされる", () => {
+    const badDoc = {
       page: A4_LANDSCAPE,
       theme: { fontFamily: "sans-serif", accentColor: "#000" },
       elements: [
@@ -76,13 +69,11 @@ describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
         },
       ],
     };
-    const html = renderToStaticMarkup(<SalesSheetRenderer document={maliciousDoc} />);
-    expect(html).not.toContain("red;");
-    expect(html).toContain("redbackground-image");
+    expect(() => renderToStaticMarkup(<SalesSheetRenderer document={badDoc as never} />)).toThrow();
   });
 
-  it("table borderColor に ; ペイロードが含まれていても ; が除去される", () => {
-    const maliciousDoc: SalesSheetDocument = {
+  it("table borderColor に ; ペイロードが含まれていると ZodError でスローされる", () => {
+    const badDoc = {
       page: A4_LANDSCAPE,
       theme: { fontFamily: "sans-serif", accentColor: "#000" },
       elements: [
@@ -93,13 +84,11 @@ describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
         },
       ],
     };
-    const html = renderToStaticMarkup(<SalesSheetRenderer document={maliciousDoc} />);
-    expect(html).not.toContain("#ccc;");
-    expect(html).toContain("#cccbackground-image");
+    expect(() => renderToStaticMarkup(<SalesSheetRenderer document={badDoc as never} />)).toThrow();
   });
 
-  it("shape fill に ; ペイロードが含まれていても ; が除去される", () => {
-    const maliciousDoc: SalesSheetDocument = {
+  it("shape fill に ; ペイロードが含まれていると ZodError でスローされる", () => {
+    const badDoc = {
       page: A4_LANDSCAPE,
       theme: { fontFamily: "sans-serif", accentColor: "#000" },
       elements: [
@@ -110,9 +99,7 @@ describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
         },
       ],
     };
-    const html = renderToStaticMarkup(<SalesSheetRenderer document={maliciousDoc} />);
-    expect(html).not.toContain("blue;");
-    expect(html).toContain("bluebackground-image");
+    expect(() => renderToStaticMarkup(<SalesSheetRenderer document={badDoc as never} />)).toThrow();
   });
 
   it("サンプルドキュメントの正常な画像(data:image/)はそのまま描画される", () => {
@@ -125,8 +112,8 @@ describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
     expect(html).toContain("#d0331a");
   });
 
-  it("badge bg に url(http://169.254.169.254/) が含まれていても url( が除去される (SSRF防止)", () => {
-    const maliciousDoc: SalesSheetDocument = {
+  it("badge bg に url(http://169.254.169.254/) があると ZodError でスローされる (SSRF防止 P2)", () => {
+    const badDoc = {
       page: A4_LANDSCAPE,
       theme: { fontFamily: "sans-serif", accentColor: "#000" },
       elements: [
@@ -139,8 +126,35 @@ describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
         },
       ],
     };
-    const html = renderToStaticMarkup(<SalesSheetRenderer document={maliciousDoc} />);
-    expect(html).not.toContain("url(http");
-    expect(html).not.toContain("url(http://169.254.169.254");
+    expect(() => renderToStaticMarkup(<SalesSheetRenderer document={badDoc as never} />)).toThrow();
+  });
+
+  it("image src に http://169.254.169.254/ があるとスローされる (preview-guard / SSRF防止)", () => {
+    const badDoc = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        {
+          id: "img1", type: "image", x: 0, y: 0, w: 80, h: 60, z: 1,
+          src: "http://169.254.169.254/",
+          fit: "cover",
+        },
+      ],
+    };
+    expect(() => renderToStaticMarkup(<SalesSheetRenderer document={badDoc as never} />)).toThrow();
+  });
+
+  it("qr dataUrl が http:// で始まるとスローされる (preview-guard)", () => {
+    const badDoc = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        {
+          id: "qr1", type: "qr", x: 0, y: 0, w: 30, h: 30, z: 1,
+          dataUrl: "http://169.254.169.254/metadata",
+        },
+      ],
+    };
+    expect(() => renderToStaticMarkup(<SalesSheetRenderer document={badDoc as never} />)).toThrow();
   });
 });

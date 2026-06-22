@@ -9,6 +9,7 @@ import type {
   ShapeElement,
   QrElement,
 } from "@/lib/sales-sheet/document-schema";
+import { parseSalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import { sanitizeCssValue } from "@/lib/sales-sheet/css-safety";
 
 const mm = (v: number) => `${v}mm`;
@@ -152,7 +153,8 @@ function ElementView({ el }: { el: SalesSheetElement }) {
   }
 }
 
-export function SalesSheetRenderer({ document: doc }: { document: SalesSheetDocument }) {
+export function SalesSheetRenderer({ document }: { document: SalesSheetDocument }) {
+  const doc = parseSalesSheetDocument(document);
   const pageStyle: CSSProperties = {
     position: "relative",
     width: mm(doc.page.width),
