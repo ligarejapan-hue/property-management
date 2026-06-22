@@ -91,12 +91,12 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
         type="button"
         onClick={onCheck}
         disabled={loading}
-        className="rounded bg-slate-100 px-3 py-1"
+        className="rounded bg-slate-100 px-3 py-1 text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
       >
         {loading ? "確認中…" : "法人番号の混入をチェック"}
       </button>
 
-      {done && <p className="mt-2 text-emerald-700">混入を除去しました</p>}
+      {done && <p className="mt-2 text-emerald-700 dark:text-emerald-400">混入を除去しました</p>}
       {error && <p className="mt-2 text-red-600">{error}</p>}
 
       {preview && preview.action === "none" && (

@@ -72,6 +72,25 @@ describe("CorporateCleanupPanel dark: 配色 (P2-1)", () => {
   it("純 accent ボタン（bg-blue-600）は dark: 据え置き", () => {
     expect(cleanupSrc).toContain("bg-blue-600");
   });
+  // --- P2 追加: 清掃チェックボタンの dark 可読化 ---
+  it("清掃チェックボタンに dark:bg-gray-800 がある（暗背景地）", () => {
+    expect(cleanupSrc).toContain("dark:bg-gray-800");
+  });
+  it("清掃チェックボタンに dark:text-gray-200 がある（暗背景文字）", () => {
+    expect(cleanupSrc).toContain("dark:text-gray-200");
+  });
+  it("清掃チェックボタンに dark:hover:bg-gray-700 がある（hover 可読化）", () => {
+    expect(cleanupSrc).toContain("dark:hover:bg-gray-700");
+  });
+  it("完了メッセージ（混入除去）に dark:text-emerald-400 がある", () => {
+    expect(cleanupSrc).toContain("dark:text-emerald-400");
+  });
+  it("ライトモード bg-slate-100 は残っている", () => {
+    expect(cleanupSrc).toContain("bg-slate-100");
+  });
+  it("ライトモード text-slate-700 は残っている", () => {
+    expect(cleanupSrc).toContain("text-slate-700");
+  });
 });
 
 // -----------------------------------------------------------------------

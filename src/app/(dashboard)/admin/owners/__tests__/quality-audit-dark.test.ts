@@ -68,6 +68,19 @@ describe("owners/quality-audit/page.tsx dark: 配色 (O2)", () => {
   it("タブ非選択に dark:text-gray-400 がある", () => {
     expect(src).toContain("dark:text-gray-400");
   });
+  // --- P2 追加: アクティブタブの accent 暗背景可読化 ---
+  it("アクティブタブに dark:text-indigo-400 がある", () => {
+    expect(src).toContain("dark:text-indigo-400");
+  });
+  it("アクティブタブ下線に dark:border-indigo-400 がある", () => {
+    expect(src).toContain("dark:border-indigo-400");
+  });
+  it("ライトモード text-indigo-700 は残っている（アクティブタブ文字）", () => {
+    expect(src).toContain("text-indigo-700");
+  });
+  it("ライトモード border-indigo-600 は残っている（アクティブタブ下線）", () => {
+    expect(src).toContain("border-indigo-600");
+  });
 
   // --- SEVERITY_CLASS info (neutral) に dark: がある ---
   it("SEVERITY_CLASS info に dark:bg-gray-800 がある", () => {

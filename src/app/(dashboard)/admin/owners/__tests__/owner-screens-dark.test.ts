@@ -9,6 +9,10 @@ const hygieneSrc = readFileSync(
   join(dir, "..", "text-hygiene", "page.tsx"),
   "utf8",
 );
+const correctionSrc = readFileSync(
+  join(dir, "..", "correction", "page.tsx"),
+  "utf8",
+);
 
 // -----------------------------------------------------------------------
 // owners/[id]/page.tsx (所有者詳細) dark: 配色 (O1)
@@ -145,5 +149,31 @@ describe("owners/text-hygiene/page.tsx dark: 配色 (O1)", () => {
   });
   it("ライトモード divide-gray-200 は残っている", () => {
     expect(hygieneSrc).toContain("divide-gray-200");
+  });
+});
+
+// -----------------------------------------------------------------------
+// owners/correction/page.tsx (補正候補) アクティブタブ dark: P2 (O3)
+// -----------------------------------------------------------------------
+describe("owners/correction/page.tsx アクティブタブ dark: (O3-P2)", () => {
+  // --- P2: アクティブタブの accent 暗背景可読化 ---
+  it("アクティブタブに dark:text-indigo-400 がある", () => {
+    expect(correctionSrc).toContain("dark:text-indigo-400");
+  });
+  it("アクティブタブ下線に dark:border-indigo-400 がある", () => {
+    expect(correctionSrc).toContain("dark:border-indigo-400");
+  });
+  it("タブ非選択に dark:text-gray-400 がある（横展開）", () => {
+    expect(correctionSrc).toContain("dark:text-gray-400");
+  });
+  it("タブ非選択 hover に dark:hover:text-gray-200 がある（横展開）", () => {
+    expect(correctionSrc).toContain("dark:hover:text-gray-200");
+  });
+  // --- ライト側不変担保 ---
+  it("ライトモード text-indigo-700 は残っている（アクティブタブ文字）", () => {
+    expect(correctionSrc).toContain("text-indigo-700");
+  });
+  it("ライトモード border-indigo-600 は残っている（アクティブタブ下線）", () => {
+    expect(correctionSrc).toContain("border-indigo-600");
   });
 });
