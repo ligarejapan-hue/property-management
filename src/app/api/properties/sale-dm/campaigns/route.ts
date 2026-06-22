@@ -10,7 +10,7 @@ import { buildPropertyListWhere, buildPropertyListOrderBy } from "@/lib/property
 import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
-import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS } from "@/lib/sale-dm-letter";
+import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, DEFAULT_MODEL } from "@/lib/sale-dm-letter";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
 import { randomBytes } from "crypto";
 
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
             representativeOwnerId: sliced[i].representativeOwnerId,
             recipientName: sliced[i].recipientName, recipientZip: sliced[i].recipientZip,
             recipientAddress: sliced[i].recipientAddress, honorific: sliced[i].honorific,
-            body: d.body ?? "", model: process.env.SALE_DM_LETTER_MODEL ?? "claude-sonnet-4-6",
+            body: d.body ?? "", model: process.env.SALE_DM_LETTER_MODEL ?? DEFAULT_MODEL,
             outcomeNote: d.error ? `生成失敗(${d.error})` : null,
             trackingToken: randomBytes(8).toString("base64url"),
             generatedBy: session.id,

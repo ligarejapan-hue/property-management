@@ -8,7 +8,7 @@ import { ClaudeLetterProvider } from "./providers/claude";
 
 export const MAX_GENERATE_ITEMS = 50;
 const DEFAULT_CONCURRENCY = 5;
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 export function isSaleDmConfigured(): boolean {
   if (process.env.NEXT_PUBLIC_USE_MOCK === "true") return true;
