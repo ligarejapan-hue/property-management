@@ -113,6 +113,19 @@ describe("attachment-tab.tsx dark: 配色 (phase2b 2b-3)", () => {
     expect(attachmentTabSrc).toContain("max-w-[90vw]");
   });
 
+  // --- P2-1: プレビュー可能ファイル名リンク暗背景色 ---
+  it("プレビュー可能ファイル名ボタンに dark:text-indigo-400 がある", () => {
+    expect(attachmentTabSrc).toContain("dark:text-indigo-400");
+  });
+
+  // --- P2-2: ドロップゾーン drag-active 暗背景 ---
+  it("general ドロップゾーン active 分岐に dark:bg-blue-500/15 がある", () => {
+    expect(attachmentTabSrc).toContain("dark:bg-blue-500/15");
+  });
+  it("registry ドロップゾーン active 分岐に dark:bg-amber-500/15 がある", () => {
+    expect(attachmentTabSrc).toContain("dark:bg-amber-500/15");
+  });
+
   // --- 既存 lint ワーニング（pre-existing: line 383 付近 static-components）は放置 ---
   // このテストでは hook lint の有無を assert しない（変更対象外）
 });

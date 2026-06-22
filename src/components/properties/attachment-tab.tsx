@@ -206,7 +206,7 @@ export default function AttachmentTab({
           onClick={() => fileInputRefGeneral.current?.click()}
           className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
             dragOverGeneral
-              ? "border-blue-400 bg-blue-50"
+              ? "border-blue-400 bg-blue-50 dark:border-blue-400/40 dark:bg-blue-500/15"
               : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600 dark:hover:bg-gray-800"
           }`}
         >
@@ -273,7 +273,7 @@ export default function AttachmentTab({
           onClick={() => fileInputRefRegistry.current?.click()}
           className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
             dragOverRegistry
-              ? "border-amber-400 bg-amber-50"
+              ? "border-amber-400 bg-amber-50 dark:border-amber-400/40 dark:bg-amber-500/15"
               : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600 dark:hover:bg-gray-800"
           }`}
         >
@@ -395,7 +395,7 @@ function AttachmentRow({
           <button
             type="button"
             onClick={onPreviewClick}
-            className="block w-full truncate text-left text-sm font-medium text-indigo-600 hover:underline"
+            className="block w-full truncate text-left text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
             title="プレビュー"
           >
             {displayName}
