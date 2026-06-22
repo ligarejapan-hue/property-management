@@ -50,4 +50,8 @@ describe('quality-check page dark mode', () => {
     expect(src).toContain('dark:text-gray-200')
     expect(src).toContain('dark:hover:bg-gray-800')
   })
+
+  it('neutral summary card count has dark text supplement', () => {
+    expect(src).toContain('text-gray-800 dark:text-gray-100')
+  })
 })

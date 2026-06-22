@@ -143,7 +143,7 @@ export default function QualityCheckPage() {
           <SummaryCard
             label="チェック物件数"
             count={summary.propertiesChecked}
-            color="text-gray-800"
+            color="text-gray-800 dark:text-gray-100"
           />
           <SummaryCard
             label="エラー"
