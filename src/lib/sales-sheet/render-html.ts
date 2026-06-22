@@ -6,6 +6,11 @@ import { sanitizeCssValue } from "./css-safety";
  * document を完全なHTML文書に直列化する。
  * react-dom/server を避けて純関数でHTML文字列を生成することで、
  * Next.js App Router の react-server バンドルグラフと互換性を保つ。
+ *
+ * WYSIWYG 保証: SalesSheetRenderer との出力一致は
+ * render-html-parity.test.ts のパリティガードテストで継続的に検証する。
+ * Plan 3 では react-dom/server をサーバー外 (standalone script / worker) に移動し
+ * 単一レンダラに収束させることを推奨する。
  */
 
 function mm(v: number): string {

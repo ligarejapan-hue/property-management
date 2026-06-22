@@ -1,40 +1,48 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { SaleLandSheetButton } from "../SaleLandSheetButton";
+import { SaleLandSheetButton, buildPreviewRequest } from "../SaleLandSheetButton";
 
-// Node environment: test SSR output (closed state) + fetch body construction.
+// Node environment: test SSR output (closed state) + pure request-builder.
 // Interactive click/state tests require jsdom which is not in this project's vitest setup.
 
 describe("SaleLandSheetButton", () => {
-  beforeEach(() => { vi.restoreAllMocks(); });
-
   it("ボタン押下でフォーム（価格入力）が開く — SSR: 初期状態でトリガーボタンが描画される", () => {
     const html = renderToStaticMarkup(createElement(SaleLandSheetButton, { propertyId: "p1" }));
     expect(html).toContain("販売図面を作成");
     // モーダルは初期状態で非表示
     expect(html).not.toContain("価格");
   });
+});
 
-  it("生成押下で preview API を正しいURL・POSTで呼ぶ — fetch body 組立を検証", async () => {
-    const blob = new Blob(["%PDF-"], { type: "application/pdf" });
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(blob, { status: 200, headers: { "Content-Type": "application/pdf" } }),
-    );
+describe("buildPreviewRequest", () => {
+  it("正しいURL・POST・JSON bodyを返す", () => {
+    const values = {
+      price: "3,480万円",
+      access: "渋谷駅徒歩5分",
+      landArea: "",
+      landCategory: "",
+      transactionType: "",
+      deliveryTiming: "",
+    };
+    const { url, init } = buildPreviewRequest("prop-42", values);
 
-    // Simulate what the component does on generate(): POST with the values object
-    const propertyId = "p1";
-    const values = { price: "3,480万円", access: "", landArea: "", landCategory: "", transactionType: "", deliveryTiming: "" };
-    await fetch(`/api/properties/${propertyId}/sales-sheet/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(values),
-    });
+    expect(url).toBe("/api/properties/prop-42/sales-sheet/preview");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    const parsed = JSON.parse(init.body as string);
+    expect(parsed.price).toBe("3,480万円");
+    expect(parsed.access).toBe("渋谷駅徒歩5分");
+    expect(parsed.landArea).toBe("");
+  });
 
-    expect(fetchMock).toHaveBeenCalled();
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/properties/p1/sales-sheet/preview");
-    expect((init as RequestInit).method).toBe("POST");
-    expect(JSON.parse((init as RequestInit).body as string).price).toBe("3,480万円");
+  it("propertyId がURLに正しく埋め込まれる", () => {
+    const { url } = buildPreviewRequest("abc-123", {});
+    expect(url).toBe("/api/properties/abc-123/sales-sheet/preview");
+  });
+
+  it("valuesが空オブジェクトでも空のJSONオブジェクトをbodyに返す", () => {
+    const { init } = buildPreviewRequest("p1", {});
+    expect(JSON.parse(init.body as string)).toEqual({});
   });
 });

@@ -11,6 +11,24 @@ const FIELDS: { key: string; label: string }[] = [
   { key: "deliveryTiming", label: "引渡" },
 ];
 
+/**
+ * preview API へのリクエスト内容を組み立てる純関数。
+ * コンポーネントから独立させることでテスト可能にする。
+ */
+export function buildPreviewRequest(
+  propertyId: string,
+  values: Record<string, string>,
+): { url: string; init: RequestInit } {
+  return {
+    url: `/api/properties/${propertyId}/sales-sheet/preview`,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    },
+  };
+}
+
 export function SaleLandSheetButton({ propertyId }: { propertyId: string }) {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -21,22 +39,19 @@ export function SaleLandSheetButton({ propertyId }: { propertyId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/properties/${propertyId}/sales-sheet/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
+      const { url, init } = buildPreviewRequest(propertyId, values);
+      const res = await fetch(url, init);
       if (!res.ok) {
         setError("PDFの作成に失敗しました");
         return;
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = objectUrl;
       a.download = "販売図面.pdf";
       a.click();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(objectUrl);
       setOpen(false);
     } finally {
       setBusy(false);
