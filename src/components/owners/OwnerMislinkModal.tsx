@@ -362,7 +362,7 @@ export function OwnerMislinkModal({
                     }`}
                     onClick={() => setSelectedTarget(h)}
                   >
-                    <div className="font-medium dark:text-gray-100">{h.name}</div>
+                    <div className="font-medium text-gray-900 dark:text-gray-100">{h.name}</div>
                     <div className="font-mono text-[10px] text-gray-500 dark:text-gray-400">
                       {h.id.slice(0, 8)}…
                     </div>
