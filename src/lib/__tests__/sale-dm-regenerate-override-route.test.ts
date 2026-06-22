@@ -18,7 +18,10 @@ vi.mock("@/lib/prisma", () => ({
   default: { dmRecipientDraft: { findUnique: vi.fn(), update: vi.fn() } },
 }));
 // generateLetters を spy して、resolveDraftOptions の結果(override 反映済み options)が渡ることを検証する。
-const generateSpy = vi.fn(async (..._args: unknown[]) => ({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false }));
+const generateSpy = vi.fn(async (...args: unknown[]) => {
+  void args; // 呼び出し引数は mock.calls で検証する(本体では未使用)。
+  return { drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false };
+});
 vi.mock("@/lib/sale-dm-letter", () => ({
   generateLetters: (...args: unknown[]) => generateSpy(...args),
   isSaleDmConfigured: () => true,
