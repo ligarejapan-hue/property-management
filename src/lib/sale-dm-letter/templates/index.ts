@@ -93,4 +93,46 @@ export function renderLetterHtml(input: LetterRenderInput): string {
 </div>`;
 }
 
+// 確定済みの全通を1ドキュメントへ連結する(ブラウザ印刷 = PDF 化の入力)。
+// 各通は A4 1枚。通と通の間だけ page-break-after:always を入れ、最後の通には付けない
+// (末尾に空白ページが1枚増えるのを防ぐ)。<style> の @page で余白とサイズを固定。
+export function renderLetterSheetHtml(
+  title: string,
+  letters: LetterRenderInput[],
+): string {
+  const items = letters
+    .map((letter, i) => {
+      const isLast = i === letters.length - 1;
+      const wrapCls = isLast
+        ? "letter-sheet-item"
+        : "letter-sheet-item letter-sheet-item--break";
+      const style = isLast
+        ? ""
+        : ' style="page-break-after: always; break-after: page;"';
+      return `<div class="${wrapCls}"${style}>${renderLetterHtml(letter)}</div>`;
+    })
+    .join("\n");
+
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="robots" content="noindex,nofollow" />
+<title>${escapeHtml(title)}</title>
+<style>
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  .letter-sheet-item { break-inside: avoid; }
+  @media screen {
+    body { background: #eee; }
+    .letter-sheet-item { width: 210mm; margin: 8mm auto; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,.2); }
+  }
+</style>
+</head>
+<body>
+${items}
+</body>
+</html>`;
+}
+
 export type { LetterRenderInput } from "./types";

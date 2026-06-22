@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   renderLetterHtml,
+  renderLetterSheetHtml,
   escapeHtml,
   DESIGN_TEMPLATES,
   resolveDesignTemplate,
@@ -80,5 +81,40 @@ describe("renderLetterHtml", () => {
   it("未知の designTemplate でも落ちず formal にフォールバックして描画する", () => {
     const html = renderLetterHtml({ ...base, designTemplate: "nope" });
     expect(html).toContain("letter-page--formal");
+  });
+});
+
+describe("renderLetterSheetHtml", () => {
+  const make = (name: string): LetterRenderInput => ({ ...base, addresseeName: name });
+
+  it("完全な HTML ドキュメント(doctype + @page)を返す", () => {
+    const html = renderLetterSheetHtml("テストキャンペーン", [make("田中"), make("佐藤")]);
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).toContain("<title>テストキャンペーン</title>");
+    expect(html).toContain("@page");
+    expect(html).toContain("page-break-after");
+  });
+
+  it("通数ぶんの letter-page を連結する", () => {
+    const html = renderLetterSheetHtml("c", [make("A"), make("B"), make("C")]);
+    const count = (html.match(/class="letter-page /g) ?? []).length;
+    expect(count).toBe(3);
+  });
+
+  it("最後の通は page-break を付けない(末尾空白ページ回避)", () => {
+    const html = renderLetterSheetHtml("c", [make("A"), make("B")]);
+    const breaks = (html.match(/letter-sheet-item--break/g) ?? []).length;
+    expect(breaks).toBe(1); // 2通中、区切りは1つ
+  });
+
+  it("0通でも落ちず空ドキュメントを返す", () => {
+    const html = renderLetterSheetHtml("空", []);
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).not.toContain("class=\"letter-page ");
+  });
+
+  it("タイトルも HTML エスケープされる", () => {
+    const html = renderLetterSheetHtml("<b>x</b>", []);
+    expect(html).toContain("<title>&lt;b&gt;x&lt;/b&gt;</title>");
   });
 });
