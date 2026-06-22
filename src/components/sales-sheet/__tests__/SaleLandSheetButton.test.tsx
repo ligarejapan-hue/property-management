@@ -7,7 +7,7 @@ import { SaleLandSheetButton, buildPreviewRequest } from "../SaleLandSheetButton
 // Interactive click/state tests require jsdom which is not in this project's vitest setup.
 
 describe("SaleLandSheetButton", () => {
-  it("ボタン押下でフォーム（価格入力）が開く — SSR: 初期状態でトリガーボタンが描画される", () => {
+  it("初期状態でトリガーボタン（販売図面を作成）が描画される", () => {
     const html = renderToStaticMarkup(createElement(SaleLandSheetButton, { propertyId: "p1" }));
     expect(html).toContain("販売図面を作成");
     // モーダルは初期状態で非表示

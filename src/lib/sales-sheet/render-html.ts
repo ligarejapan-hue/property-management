@@ -158,7 +158,7 @@ export function renderDocumentToHtml(doc: SalesSheetDocument): string {
   const css = [
     "*{margin:0;padding:0;box-sizing:border-box}",
     `html,body{width:${validDoc.page.width}mm;height:${validDoc.page.height}mm}`,
-    `body{font-family:${safeFontFamily}}`,
+    `body{font-family:${esc(safeFontFamily)}}`,
     `@page{size:${validDoc.page.width}mm ${validDoc.page.height}mm;margin:0}`,
   ].join("");
 
