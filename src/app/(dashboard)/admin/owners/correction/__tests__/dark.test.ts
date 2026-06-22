@@ -104,6 +104,15 @@ describe("correction page dark mode", () => {
     expect(src).toContain("bg-gray-50");
   });
 
+  // --- bulk result banner dark bg ---
+  it("bulk result banner has dark:bg-emerald-500/15 for dark-bg readability", () => {
+    expect(src).toContain("dark:bg-emerald-500/15");
+  });
+
+  it("bulk result banner has dark:border-emerald-500/30 for dark-bg border", () => {
+    expect(src).toContain("dark:border-emerald-500/30");
+  });
+
   // --- color-locked classification tag non-touch checks ---
   // orphan tag uses orange; must NOT have dark:bg-orange or dark:text-orange
   it("does not add dark: to orange (orphan) classification tag", () => {
