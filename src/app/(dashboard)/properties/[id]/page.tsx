@@ -44,6 +44,7 @@ import { OwnerLinkModal } from "@/components/owners/owner-link-modal";
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { SaleLandSheetButton } from "@/components/sales-sheet/SaleLandSheetButton";
 
 // ---------- Label maps ----------
 
@@ -474,6 +475,7 @@ export default function PropertyDetailPage({
               DM送付履歴
             </Link>
           )}
+          <SaleLandSheetButton propertyId={property.id} />
           <button
             onClick={() => setShowEditForm(true)}
             aria-label="物件を編集"
