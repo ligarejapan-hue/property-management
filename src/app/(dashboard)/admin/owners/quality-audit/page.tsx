@@ -391,7 +391,7 @@ export default function QualityAuditPage() {
     return (
       <Link
         href={href}
-        className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+        className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
       >
         <ExternalLink className="h-3 w-3" />
         詳細
@@ -525,7 +525,7 @@ export default function QualityAuditPage() {
                   <td className="px-4 py-3 text-sm">
                     <Link
                       href={row.detailUrl}
-                      className="font-mono text-indigo-600 hover:text-indigo-800"
+                      className="font-mono text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                     >
                       {row.ownerId.slice(0, 8)}
                     </Link>
@@ -601,7 +601,7 @@ export default function QualityAuditPage() {
                     <td className="px-4 py-3 text-sm">
                       <Link
                         href={row.detailUrl}
-                        className="font-mono text-indigo-600 hover:text-indigo-800"
+                        className="font-mono text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                       >
                         {row.ownerId.slice(0, 8)}
                       </Link>

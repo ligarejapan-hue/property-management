@@ -298,18 +298,18 @@ export default function CorporateLookupPanel({
           )}
         </button>
         {!configured && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             法人番号API未設定（管理者に env 設定を依頼してください）
           </span>
         )}
         {disabledReason && (
-          <span className="text-xs text-gray-500">{disabledReason}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">{disabledReason}</span>
         )}
       </div>
 
       {/* 入力種別の事前ヒント（server を正としつつ即時フィードバック）。 */}
       {!disabledReason && configured && derived13 && (
-        <p className="text-[11px] text-gray-500">
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
           12桁 会社法人等番号 → 法人番号{" "}
           <span className="font-mono">{derived13}</span> を検索します
         </p>
@@ -326,7 +326,7 @@ export default function CorporateLookupPanel({
       )}
 
       {showResult && result && !result.found && (
-        <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+        <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
           該当する法人が見つかりませんでした（法人番号:{" "}
           {meta?.resolvedCorporateNumber13 ?? searchedFor}）
         </div>
@@ -345,21 +345,21 @@ export default function CorporateLookupPanel({
       {showResult && result && result.found && result.record && (
         <div
           data-testid="corporate-lookup-preview"
-          className="space-y-2 rounded-md border border-blue-200 bg-blue-50/40 px-3 py-3 text-xs text-gray-800"
+          className="space-y-2 rounded-md border border-blue-200 bg-blue-50/40 px-3 py-3 text-xs text-gray-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-gray-200"
         >
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-gray-700">国税庁データ</span>
+            <span className="font-semibold text-gray-700 dark:text-gray-200">国税庁データ</span>
             {result.isClosed && (
               <span className="rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
                 廃止法人
               </span>
             )}
-            <span className="ml-auto text-[10px] text-gray-500">
+            <span className="ml-auto text-[10px] text-gray-500 dark:text-gray-400">
               取得: {result.fetchedAt.slice(0, 10)} / {result.source}
             </span>
           </div>
           {meta?.inputKind && meta.inputKind !== "invalid" && (
-            <p className="text-[10px] text-gray-500">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400">
               入力:{" "}
               {meta.inputKind === "company_corporate_number_12"
                 ? "12桁 会社法人等番号"
@@ -407,10 +407,10 @@ export default function CorporateLookupPanel({
               </div>
             ) : (
               <>
-                <div className="text-[11px] font-medium text-gray-700">
+                <div className="text-[11px] font-medium text-gray-700 dark:text-gray-200">
                   反映対象を選択
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-700">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-700 dark:text-gray-200">
                   <ApplyCheckbox
                     label="会社名 → 所有者名"
                     checked={applyTargets.name}
@@ -441,7 +441,7 @@ export default function CorporateLookupPanel({
                 {meta?.inputKind === "company_corporate_number_12" &&
                   applyTargets.corporateNumber &&
                   searchedFor && (
-                    <p className="text-[10px] text-gray-500">
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400">
                       会社法人等番号（
                       <span className="font-mono">{searchedFor}</span>
                       ・12桁）も併せて保存されます
@@ -471,12 +471,12 @@ export default function CorporateLookupPanel({
                   )}
                 </button>
                 {typeof ownerVersion !== "number" && (
-                  <p className="text-[10px] text-gray-500">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400">
                     所有者バージョンが取得できていないため反映できません
                   </p>
                 )}
                 {!canApplyAny && fieldEditable && (
-                  <p className="text-[10px] text-gray-500">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400">
                     反映に必要な編集権限がありません
                   </p>
                 )}
@@ -500,8 +500,8 @@ function PreviewField({
 }) {
   return (
     <div>
-      <dt className="text-[10px] font-medium uppercase tracking-wider text-gray-500">{label}</dt>
-      <dd className={mono ? "font-mono text-gray-900" : "text-gray-900"}>{value ?? "-"}</dd>
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</dt>
+      <dd className={mono ? "font-mono text-gray-900 dark:text-gray-100" : "text-gray-900 dark:text-gray-100"}>{value ?? "-"}</dd>
     </div>
   );
 }
