@@ -268,7 +268,7 @@ export default function UsersPage() {
                               setActionUser(u);
                               setActionType("deactivate");
                             }}
-                            className="flex items-center gap-0.5 text-amber-600 hover:text-amber-800"
+                            className="flex items-center gap-0.5 text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
                             title="無効化"
                           >
                             <UserX className="h-3.5 w-3.5" />
@@ -280,7 +280,7 @@ export default function UsersPage() {
                               setActionUser(u);
                               setActionType("activate");
                             }}
-                            className="flex items-center gap-0.5 text-emerald-600 hover:text-emerald-800"
+                            className="flex items-center gap-0.5 text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300"
                             title="有効化"
                           >
                             <UserCheck className="h-3.5 w-3.5" />
@@ -304,7 +304,7 @@ export default function UsersPage() {
                               setActionUser(u);
                               setActionType("unlock");
                             }}
-                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800"
+                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                             title="ロック解除"
                           >
                             <LockOpen className="h-3.5 w-3.5" />
@@ -325,7 +325,7 @@ export default function UsersPage() {
                               setActionUser(u);
                               setActionType("delete");
                             }}
-                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800"
+                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                             title="削除"
                           >
                             <Trash2 className="h-3.5 w-3.5" />

@@ -327,7 +327,7 @@ export default function UserPermissionsPage({
       <div className="flex items-center justify-end gap-4">
         {message && (
           <span
-            className={`text-sm ${message.includes("失敗") ? "text-red-600" : "text-green-600"}`}
+            className={`text-sm ${message.includes("失敗") ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}
           >
             {message}
           </span>

@@ -60,9 +60,20 @@ describe("admin/templates/page.tsx dark: 配色 (A2)", () => {
     expect(listPage).toContain("dark:placeholder:text-gray-500");
   });
 
+  // --- デフォルトチップ暗クラス ---
+  it("デフォルトチップ（bg-indigo-100）に dark:bg-indigo-500/15 がある", () => {
+    expect(listPage).toContain("dark:bg-indigo-500/15");
+  });
+  it("デフォルトチップに dark:text-indigo-300 がある", () => {
+    expect(listPage).toContain("dark:text-indigo-300");
+  });
+
   // --- hover 可読化 ---
   it("アクセントリンクに dark:text-indigo-400 がある", () => {
     expect(listPage).toContain("dark:text-indigo-400");
+  });
+  it("削除ボタンに dark:text-red-400 がある", () => {
+    expect(listPage).toContain("dark:text-red-400");
   });
 
   // --- モーダルパネル ---
@@ -151,7 +162,13 @@ describe("admin/templates/[id]/page.tsx dark: 配色 (A2)", () => {
     expect(textareaSection).toContain("dark:bg-gray-900");
   });
 
-  // --- 未選択バッジ（条件分岐内） ---
+  // --- 権限チップ両分岐の暗クラス（@codex P2） ---
+  it("許可チップ（granted分岐）に dark:bg-indigo-500/15 がある", () => {
+    expect(editPage).toContain("dark:bg-indigo-500/15");
+  });
+  it("許可チップ（granted分岐）に dark:text-indigo-300 がある", () => {
+    expect(editPage).toContain("dark:text-indigo-300");
+  });
   it("未許可バッジ（bg-gray-100）に dark:bg-gray-800 がある", () => {
     expect(editPage).toContain("dark:bg-gray-800");
   });

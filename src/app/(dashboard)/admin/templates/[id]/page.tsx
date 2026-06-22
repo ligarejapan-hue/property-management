@@ -225,7 +225,7 @@ export default function TemplateEditPage({
                             key={action}
                             className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors ${
                               granted
-                                ? "bg-indigo-100 text-indigo-800"
+                                ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300"
                                 : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                             }`}
                           >

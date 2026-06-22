@@ -230,7 +230,7 @@ export default function TemplatesPage() {
                   <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100">
                     {tpl.name}
                     {tpl.isDefault && (
-                      <span className="ml-2 inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
+                      <span className="ml-2 inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300">
                         デフォルト
                       </span>
                     )}
@@ -256,7 +256,7 @@ export default function TemplatesPage() {
                         <button
                           type="button"
                           onClick={() => setDeleteTarget(tpl)}
-                          className="inline-flex items-center gap-1 text-red-600 hover:text-red-900"
+                          className="inline-flex items-center gap-1 text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           削除

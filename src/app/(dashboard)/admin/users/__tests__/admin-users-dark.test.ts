@@ -63,6 +63,17 @@ describe("admin/users/page.tsx dark: 配色 (A1)", () => {
     expect(usersPage).toContain("dark:placeholder:text-gray-500");
   });
 
+  // --- アクションボタン暗クラス ---
+  it("無効化ボタン（amber）に dark:text-amber-400 がある", () => {
+    expect(usersPage).toContain("dark:text-amber-400");
+  });
+  it("有効化ボタン（emerald）に dark:text-emerald-400 がある", () => {
+    expect(usersPage).toContain("dark:text-emerald-400");
+  });
+  it("削除/解除ボタン（red）に dark:text-red-400 がある", () => {
+    expect(usersPage).toContain("dark:text-red-400");
+  });
+
   // --- hover 可読化 ---
   it("アクセントリンクに暗テキストクラスがある", () => {
     expect(usersPage).toContain("dark:text-indigo-400");
@@ -150,6 +161,14 @@ describe("admin/users/[id]/permissions/page.tsx dark: 配色 (A1)", () => {
       permissionsPage.includes("dark:border-gray-700") &&
       permissionsPage.includes("dark:text-gray-100");
     expect(hasSelectDark).toBe(true);
+  });
+
+  // --- 保存メッセージ暗クラス ---
+  it("保存エラーメッセージに dark:text-red-400 がある", () => {
+    expect(permissionsPage).toContain("dark:text-red-400");
+  });
+  it("保存成功メッセージに dark:text-green-400 がある", () => {
+    expect(permissionsPage).toContain("dark:text-green-400");
   });
 
   // --- 権限バッジ（アクションボタン）の暗クラス ---
