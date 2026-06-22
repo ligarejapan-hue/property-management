@@ -1,0 +1,94 @@
+import { vi } from "vitest";
+vi.mock("next/server", () => {
+  class MockNextRequest extends Request {}
+  class MockNextResponse extends Response { static json = (b: unknown, init?: ResponseInit) => Response.json(b, init); }
+  return { NextRequest: MockNextRequest, NextResponse: MockNextResponse };
+});
+vi.mock("@/lib/api-helpers", () => {
+  class MockApiError extends Error { status: number; code: string; constructor(s: number, m: string, c = "ERROR") { super(m); this.status = s; this.code = c; } }
+  return {
+    ApiError: MockApiError,
+    getApiSession: vi.fn(), getUserPermissions: vi.fn(), getOwnerDisplayConfig: vi.fn(),
+    parseJsonBody: vi.fn(async (r: Request) => { const t = await r.text(); return t ? JSON.parse(t) : {}; }),
+    handleApiError: vi.fn((e: unknown) => e instanceof MockApiError ? Response.json({ error: { message: e.message, code: e.code } }, { status: e.status }) : Response.json({ error: { code: "INTERNAL_ERROR" } }, { status: 500 })),
+  };
+});
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    dmVariant: { findMany: vi.fn() },
+    dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
+  },
+}));
+
+import { describe, it, expect, beforeEach } from "vitest";
+import prismaMock from "@/lib/prisma";
+import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
+import { POST as assign } from "../../app/api/properties/sale-dm/campaigns/[id]/assign/route";
+
+const pm = prismaMock as never as {
+  dmVariant: { findMany: ReturnType<typeof vi.fn> };
+  dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
+};
+const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
+const grant = (...keys: string[]) =>
+  (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(ALL.map((r) => ({ resource: r, action: "read", granted: keys.includes(r) })));
+const ctxC = { params: Promise.resolve({ id: "c1" }) };
+const post = (b: unknown) => new Request("http://x", { method: "POST", body: JSON.stringify(b) });
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
+  (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
+  grant(...ALL);
+  pm.dmVariant.findMany.mockResolvedValue([{ id: "vA" }, { id: "vB" }]);
+  pm.dmRecipientDraft.findMany.mockResolvedValue([{ id: "r1" }, { id: "r2" }, { id: "r3" }, { id: "r4" }]);
+  pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 2 });
+});
+
+describe("POST assign (auto)", () => {
+  it("自動均等割りで型ごとに updateMany を呼び 200", async () => {
+    const res = await assign(post({ mode: "auto", order: "sequential" }) as never, ctxC);
+    expect(res.status).toBe(200);
+    // 2型なので updateMany は最大2回(型ごと)
+    expect(pm.dmRecipientDraft.updateMany.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const allUpdates = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
+    // すべて campaignId で縛る
+    for (const u of allUpdates) expect(u.where.campaignId).toBe("c1");
+    const json = await res.json();
+    expect(json.assigned).toBe(4);
+  });
+
+  it("権限不足で 403・更新しない", async () => {
+    grant("property");
+    const res = await assign(post({ mode: "auto" }) as never, ctxC);
+    expect(res.status).toBe(403);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("型が0件なら 409・更新しない", async () => {
+    pm.dmVariant.findMany.mockResolvedValue([]);
+    const res = await assign(post({ mode: "auto" }) as never, ctxC);
+    expect(res.status).toBe(409);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST assign (manual)", () => {
+  it("手動指定を反映し 200", async () => {
+    const res = await assign(post({ mode: "manual", assignments: [{ recipientId: "r1", variantId: "vB" }] }) as never, ctxC);
+    expect(res.status).toBe(200);
+    // vB に r1 を含む updateMany が呼ばれる
+    const calls = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
+    const vBcall = calls.find((c) => c.data.variantId === "vB");
+    expect(vBcall.where.id.in).toContain("r1");
+  });
+
+  it("不正な variant の手動指定は無視される(均等割りの型になる)", async () => {
+    const res = await assign(post({ mode: "manual", assignments: [{ recipientId: "r1", variantId: "ZZZ" }] }) as never, ctxC);
+    expect(res.status).toBe(200);
+    const calls = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
+    // ZZZ への更新は発行されない
+    expect(calls.find((c) => c.data.variantId === "ZZZ")).toBeUndefined();
+  });
+});

@@ -44,3 +44,13 @@ export const saleDmVariantUpdateSchema = z.object({
 
 export type SaleDmVariantCreate = z.infer<typeof saleDmVariantCreateSchema>;
 export type SaleDmVariantUpdate = z.infer<typeof saleDmVariantUpdateSchema>;
+
+export const saleDmAssignSchema = z.object({
+  mode: z.enum(["auto", "manual"]),
+  order: z.enum(["sequential", "random"]).optional(),
+  assignments: z
+    .array(z.object({ recipientId: z.string(), variantId: z.string() }))
+    .optional(),
+});
+
+export type SaleDmAssign = z.infer<typeof saleDmAssignSchema>;
