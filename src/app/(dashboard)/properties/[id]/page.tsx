@@ -28,7 +28,7 @@ import ActionBar from "@/components/properties/action-bar";
 import RegistryAutoFetchButton from "@/components/properties/registry-auto-fetch-button";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner, fetchQualityCheck } from "@/lib/api-client";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { canShowAddOwner } from "@/lib/owner-link-utils";
 import {
@@ -214,6 +214,12 @@ export default function PropertyDetailPage({
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // 品質警告 (§8-6): 一覧と同じ fetchQualityCheck の scoped モードで当該物件分のみ取得。
+  // severity=info は対象外。取得失敗時はセクション非表示（fail-safe: 詳細全体を壊さない）。
+  const [qualityIssues, setQualityIssues] = useState<
+    Array<{ severity: "error" | "warning"; message: string }>
+  >([]);
+
   const handleDelete = async () => {
     if (!property) return;
     const ok = window.confirm(
@@ -249,6 +255,40 @@ export default function PropertyDetailPage({
   useEffect(() => {
     fetchProperty();
   }, [fetchProperty]);
+
+  // 品質警告取得: 物件 id が確定したタイミングで 1 回取得。
+  // 取得失敗はサイレントに握りつぶし (best-effort / fail-safe)。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const json = await fetchQualityCheck({ propertyIds: [id] });
+        if (cancelled) return;
+        const data = (
+          json as {
+            data?: Array<{
+              propertyId: string;
+              severity: "error" | "warning" | "info";
+              message: string;
+            }>;
+          }
+        ).data ?? [];
+        setQualityIssues(
+          data
+            .filter((i) => i.severity !== "info")
+            .map((i) => ({
+              severity: i.severity as "error" | "warning",
+              message: i.message,
+            })),
+        );
+      } catch {
+        // fail-safe: 取得失敗時はセクション非表示のまま
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // F12 展開(19-A 第3実装): permissions / capabilities は ScreenProtectionProvider
   //（dashboard 全体を覆う）が mount 時に 1 回取得して context 配布するため、本ページ独自の
@@ -478,6 +518,31 @@ export default function PropertyDetailPage({
           <span className="text-sm text-amber-800">
             調査情報が未確認です。最新の情報を取得してください。
           </span>
+        </div>
+      )}
+
+      {/* 品質警告セクション (§8-6): 一覧から外した警告を詳細で表示。ゼロ件=非表示。 */}
+      {qualityIssues.length > 0 && (
+        <div className="mb-4 space-y-1.5">
+          {qualityIssues.map((issue, idx) => (
+            <div
+              key={idx}
+              className={`flex items-start gap-2 rounded-md border px-4 py-2 text-sm ${
+                issue.severity === "error"
+                  ? "border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+                  : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+              }`}
+            >
+              <AlertTriangle
+                className={`mt-0.5 h-4 w-4 shrink-0 ${
+                  issue.severity === "error"
+                    ? "text-red-500 dark:text-red-400"
+                    : "text-amber-500 dark:text-amber-400"
+                }`}
+              />
+              <span>{issue.message}</span>
+            </div>
+          ))}
         </div>
       )}
 
