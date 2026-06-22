@@ -131,27 +131,60 @@ describe("correction page dark mode", () => {
   });
 
   // --- color-locked classification tag non-touch checks ---
-  // orphan tag uses orange; must NOT have dark:bg-orange or dark:text-orange
-  it("does not add dark: to orange (orphan) classification tag", () => {
-    const forbiddenOrBg = "dark:bg-" + "orange";
-    const forbiddenOrText = "dark:text-" + "orange";
-    expect(src).not.toContain(forbiddenOrBg);
-    expect(src).not.toContain(forbiddenOrText);
+  // TYPE_BADGE and ACTION_BADGE constants must not gain dark: variants on their color-lock classes.
+  // We verify the badge constant strings stay unchanged (no dark: prefix inserted).
+
+  // orphan classification badge = "bg-orange-100 text-orange-700" — must remain exactly as-is
+  it("TYPE_BADGE orphan stays color-locked (no dark: prefix on the badge string)", () => {
+    // The constant line must still contain the original badge value without dark: additions.
+    expect(src).toContain('orphan: "bg-orange-100 text-orange-700"');
   });
 
-  // address_null tag uses yellow; must NOT have dark:bg-yellow or dark:text-yellow
-  it("does not add dark: to yellow (address_null) classification tag", () => {
-    const forbiddenYBg = "dark:bg-" + "yellow";
-    const forbiddenYText = "dark:text-" + "yellow";
-    expect(src).not.toContain(forbiddenYBg);
-    expect(src).not.toContain(forbiddenYText);
+  // address_null classification badge = "bg-yellow-100 text-yellow-700" — must remain exactly as-is
+  it("TYPE_BADGE address_null stays color-locked (no dark: prefix on the badge string)", () => {
+    expect(src).toContain('address_null: "bg-yellow-100 text-yellow-700"');
   });
 
-  // duplicate tag uses purple; must NOT have dark:bg-purple or dark:text-purple
-  it("does not add dark: to purple (duplicate) classification tag", () => {
-    const forbiddenPBg = "dark:bg-" + "purple";
-    const forbiddenPText = "dark:text-" + "purple";
-    expect(src).not.toContain(forbiddenPBg);
-    expect(src).not.toContain(forbiddenPText);
+  // duplicate classification badge in TYPE_BADGE = "bg-purple-100 text-purple-700" — must remain as-is
+  it("TYPE_BADGE duplicate stays color-locked (no dark: prefix on the badge string)", () => {
+    expect(src).toContain('duplicate: "bg-purple-100 text-purple-700"');
+  });
+
+  // ACTION_BADGE merge_candidate badge = "bg-purple-100 text-purple-700" — must remain as-is
+  it("ACTION_BADGE merge_candidate stays color-locked (no dark: prefix on the badge string)", () => {
+    expect(src).toContain('merge_candidate: "bg-purple-100 text-purple-700"');
+  });
+
+  // --- accent-on-dark readability fixes (P2) ---
+  // duplicate group label text should be readable on dark card bg
+  it("duplicate group label has dark:text-purple-300 for readability on dark bg", () => {
+    expect(src).toContain("text-purple-700 dark:text-purple-300");
+  });
+
+  // matched-by chip inside duplicate group card should be readable on dark bg
+  it("matched-by chip has dark:bg-purple-500/20 for dark bg", () => {
+    expect(src).toContain("dark:bg-purple-500/20");
+  });
+
+  // DuplicateGroupSummary container should have dark bg
+  it("DuplicateGroupSummary container has dark:bg-purple-500/10", () => {
+    expect(src).toContain("dark:bg-purple-500/10");
+  });
+
+  // bulk select all/deselect button has dark hover bg to prevent bright emerald flash
+  it("bulk select button has dark:hover:bg-emerald-500/20", () => {
+    expect(src).toContain("dark:hover:bg-emerald-500/20");
+  });
+
+  // registry type chips (removable) readable on dark bg
+  it("registry removable type chip has dark:bg-emerald-500/20 dark:text-emerald-300", () => {
+    expect(src).toContain("dark:bg-emerald-500/20");
+    expect(src).toContain("dark:text-emerald-300");
+  });
+
+  // registry manual review chip readable on dark bg
+  it("registry manual review chip has dark:bg-amber-500/20 dark:text-amber-300", () => {
+    expect(src).toContain("dark:bg-amber-500/20");
+    expect(src).toContain("dark:text-amber-300");
   });
 });

@@ -484,7 +484,7 @@ function OwnerCorrectionPageInner() {
                           {c.addressIsWhitespaceOnly && (
                             <span
                               data-testid="whitespace-only-address-badge"
-                              className="rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700"
+                              className="rounded-full bg-orange-100 dark:bg-orange-500/20 px-1.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300"
                             >
                               空白のみ
                             </span>
@@ -628,7 +628,7 @@ function DuplicateSubFilterBar({
           onClick={() => onChange(tab.key)}
           className={`rounded-full border px-3 py-1 text-xs font-medium ${
             value === tab.key
-              ? "border-purple-500 bg-purple-100 text-purple-800"
+              ? "border-purple-500 dark:border-purple-400 bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-300"
               : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
           }`}
         >
@@ -674,11 +674,11 @@ function DuplicateGroupSummary({
   if (groupList.length === 0) return null;
 
   return (
-    <div className="mb-6 rounded-md border border-purple-200 bg-purple-50 p-3">
-      <h2 className="mb-2 text-sm font-semibold text-purple-900">
+    <div className="mb-6 rounded-md border border-purple-200 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-500/10 p-3">
+      <h2 className="mb-2 text-sm font-semibold text-purple-900 dark:text-purple-200">
         重複グループ ({groupList.length} 件)
       </h2>
-      <p className="mb-3 text-xs text-purple-700">
+      <p className="mb-3 text-xs text-purple-700 dark:text-purple-300">
         重複候補をグループごとに表示しています。<strong>氏名住所一致</strong>グループのみ master / source を選んで統合プレビュー（dryRun）を取得できます。<strong>法人番号一致 / リンクキー一致</strong>は表示のみで、統合プレビュー / 実行は別 phase で対応予定です。
       </p>
       <div className="space-y-3">
@@ -751,11 +751,11 @@ function DuplicateGroupCard({
   return (
     <div className="rounded-md border border-purple-200 bg-white dark:bg-gray-900 p-3">
       <div className="mb-2 flex items-baseline gap-2">
-        <span className="text-xs font-medium text-purple-700">
+        <span className="text-xs font-medium text-purple-700 dark:text-purple-300">
           グループ {groupIndex}
         </span>
         {matchedBy && (
-          <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
+          <span className="rounded-full bg-purple-100 dark:bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">
             {DUPLICATE_MATCHED_BY_LABEL[matchedBy]}
           </span>
         )}
@@ -805,7 +805,7 @@ function DuplicateGroupCard({
                 </td>
               )}
               {supportsMerge && (
-                <td className="px-2 py-1 text-purple-700">
+                <td className="px-2 py-1 text-purple-700 dark:text-purple-300">
                   {m.id === recommendedMaster.id ? "master 推奨" : ""}
                 </td>
               )}
@@ -1146,7 +1146,7 @@ function CorporateNumberCandidatesPanel() {
             disabled={bulkSubmitting}
             className={`rounded-full border px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
               subFilter === tab.key
-                ? "border-blue-500 bg-blue-100 text-blue-800"
+                ? "border-blue-500 dark:border-blue-400 bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300"
                 : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
@@ -1176,7 +1176,7 @@ function CorporateNumberCandidatesPanel() {
             <span>/ 複数候補 {data.summary.multi}</span>
             <span>/ 一致 {data.summary.same}</span>
             {data.truncated && (
-              <span className="rounded-full bg-orange-100 px-2 py-0.5 text-orange-700">
+              <span className="rounded-full bg-orange-100 dark:bg-orange-500/20 px-2 py-0.5 text-orange-700 dark:text-orange-300">
                 スキャン上限到達（一部のみ表示）
               </span>
             )}
@@ -1184,12 +1184,12 @@ function CorporateNumberCandidatesPanel() {
 
           {/* 一括反映ツールバー（このページに未登録候補がある場合のみ） */}
           {hasEligible && (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs">
+            <div className="rounded-md border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2 text-xs">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="font-medium text-emerald-800">
+                <span className="font-medium text-emerald-800 dark:text-emerald-300">
                   未登録 {eligibleIds.length} 件中 {selectedCount} 件を選択
                   {atSelectionCap && (
-                    <span className="ml-1 text-emerald-600">
+                    <span className="ml-1 text-emerald-600 dark:text-emerald-400">
                       （1 回の上限 {MAX_CORPORATE_BULK} 件に到達）
                     </span>
                   )}
@@ -1197,7 +1197,7 @@ function CorporateNumberCandidatesPanel() {
                 <button
                   type="button"
                   onClick={toggleAllEligible}
-                  className="rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-2 py-1 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:text-emerald-300"
+                  className="rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-2 py-1 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-300"
                 >
                   {allSelectableSelected
                     ? "このページの選択を全解除"
@@ -1216,7 +1216,7 @@ function CorporateNumberCandidatesPanel() {
               </div>
 
               {eligibleIds.length > MAX_CORPORATE_BULK && (
-                <p className="mt-1 text-[11px] text-emerald-600">
+                <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
                   ※ このページの未登録は {eligibleIds.length} 件あります。1 回で反映できるのは
                   {MAX_CORPORATE_BULK} 件までです。反映後に再度選択してください。
                 </p>
@@ -1550,7 +1550,7 @@ function RegistryAddressCandidatesPanel() {
             onClick={() => setSubFilter(tab.key)}
             className={`rounded-full border px-3 py-1 text-xs font-medium ${
               subFilter === tab.key
-                ? "border-blue-500 bg-blue-100 text-blue-800"
+                ? "border-blue-500 dark:border-blue-400 bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300"
                 : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
@@ -1575,7 +1575,7 @@ function RegistryAddressCandidatesPanel() {
             <span>/ 除去可能 {data.summary.cleanup}</span>
             <span>/ 監査専用 {data.summary.manual}</span>
             {data.truncated && (
-              <span className="rounded-full bg-orange-100 px-2 py-0.5 text-orange-700">
+              <span className="rounded-full bg-orange-100 dark:bg-orange-500/20 px-2 py-0.5 text-orange-700 dark:text-orange-300">
                 スキャン上限到達（一部のみ表示）
               </span>
             )}
@@ -1626,8 +1626,8 @@ function RegistryAddressCandidatesPanel() {
                               key={t}
                               className={`rounded-full px-1.5 py-0.5 text-[10px] ${
                                 c.removableTypes.includes(t)
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-amber-100 text-amber-700"
+                                  ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                                  : "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300"
                               }`}
                             >
                               {REGISTRY_TYPE_LABEL[t]}
@@ -1635,7 +1635,7 @@ function RegistryAddressCandidatesPanel() {
                           ))}
                         </div>
                         {c.manualReviewRequired && c.action === "cleanup" && (
-                          <p className="mt-1 text-[10px] text-amber-600">
+                          <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
                             ※監査専用の検出あり（手動確認）
                           </p>
                         )}
@@ -1647,12 +1647,12 @@ function RegistryAddressCandidatesPanel() {
                               type="button"
                               onClick={() => onApply(c)}
                               disabled={applyingId === c.ownerId}
-                              className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-100"
+                              className="rounded-md border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/15 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
                             >
                               {applyingId === c.ownerId ? "適用中..." : "適用"}
                             </button>
                           ) : (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-center text-[10px] text-amber-700">
+                            <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-0.5 text-center text-[10px] text-amber-700 dark:text-amber-300">
                               監査専用（手動確認）
                             </span>
                           )}
