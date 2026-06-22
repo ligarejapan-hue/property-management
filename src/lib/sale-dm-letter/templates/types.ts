@@ -10,5 +10,8 @@ export interface LetterRenderInput {
   recipientAddress: string | null;
   senderName: string;
   senderContact: string;
-  trackingToken: string; // Plan 5 で QR/短縮URL に使う。本プランでは枠のみ。
+  trackingToken: string; // 宛先固有の opaque トークン(slot の data 属性に出す)。
+  // 追跡枠に差し込む HTML 断片(renderTrackingSlotHtml の出力=QR+短縮URL)。
+  // 呼び出し側(印刷route)が確定済み draft から生成して渡す。未指定なら枠は空。
+  trackingSlotHtml?: string;
 }

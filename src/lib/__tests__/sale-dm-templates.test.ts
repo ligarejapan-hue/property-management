@@ -73,9 +73,17 @@ describe("renderLetterHtml", () => {
   it("追跡リンクの差し込み枠(プレースホルダ)を持つが URL/QR は描かない", () => {
     const html = renderLetterHtml(base);
     expect(html).toContain("tracking-slot");
-    // Plan 5 まで実 URL は載せない(トークンを生の URL として出さない)
+    // trackingSlotHtml 未指定なら実 URL は載せない(トークンを生の URL として出さない)
     expect(html).not.toContain("http://");
     expect(html).not.toContain("https://");
+  });
+
+  it("trackingSlotHtml を渡すと追跡枠に差し込まれる(印刷route の配線)", () => {
+    const html = renderLetterHtml({
+      ...base,
+      trackingSlotHtml: '<div class="sale-dm-tracking">QRここ</div>',
+    });
+    expect(html).toContain('<div class="sale-dm-tracking">QRここ</div>');
   });
 
   it("未知の designTemplate でも落ちず formal にフォールバックして描画する", () => {

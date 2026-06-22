@@ -83,12 +83,13 @@ export function renderLetterHtml(input: LetterRenderInput): string {
     <div class="letter-sender-contact">${contact}</div>
   </div>
   <!--
-    TRACKING SLOT (Plan 5): 宛先固有の追跡QR/短縮URL をここに差し込む。
-    data-tracking-token は Plan 5 のレンダラ拡張が参照する識別子。
-    本プランでは枠のみで、URL/QR は描画しない(opaque トークンを生URLとして載せない)。
+    TRACKING SLOT: 宛先固有の追跡QR/短縮URL を差し込む枠。
+    data-tracking-token は opaque トークン(PII 非含有)。中身 trackingSlotHtml は
+    呼び出し側(印刷route)が renderTrackingSlotHtml で生成した信頼済み HTML 断片。
+    未指定なら空(URL/QR を描かない=単体レンダリング時は生URLを載せない)。
   -->
   <div class="tracking-slot" data-tracking-token="${escapeHtml(input.trackingToken)}">
-    [ 追跡QR / 短縮URL は後日掲載 ]
+    ${input.trackingSlotHtml ?? ""}
   </div>
 </div>`;
 }

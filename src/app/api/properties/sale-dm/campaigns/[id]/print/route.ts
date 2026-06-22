@@ -7,6 +7,9 @@ import {
   type LetterRenderInput,
 } from "@/lib/sale-dm-letter/templates";
 import { resolveSender } from "@/lib/sale-dm-letter/sender";
+import { resolveTrackingBaseUrl } from "@/lib/sale-dm-letter/tracking";
+import { buildTrackingArtifacts } from "@/lib/sale-dm-letter/qr";
+import { renderTrackingSlotHtml } from "@/lib/sale-dm-letter/tracking-slot";
 
 // 確定済み(status=confirmed)の全通をページ区切りで連結した印刷用 HTML を返す。
 // PII(本文・宛名・住所)を含むため no-store。本文は AuditLog に残さない。
@@ -31,18 +34,26 @@ export async function GET(
     });
 
     const { senderName, senderContact } = resolveSender();
+    // 追跡QR/短縮URL は宛先固有の opaque トークンから生成(base 未設定なら相対 /t/<token>)。
+    const trackingBaseUrl = resolveTrackingBaseUrl();
 
-    const letters: LetterRenderInput[] = drafts.map((d) => ({
-      designTemplate: d.variant.designTemplate,
-      body: d.body,
-      addresseeName: d.recipientName,
-      honorific: d.honorific,
-      recipientZip: d.recipientZip,
-      recipientAddress: d.recipientAddress,
-      senderName,
-      senderContact,
-      trackingToken: d.trackingToken,
-    }));
+    const letters: LetterRenderInput[] = await Promise.all(
+      drafts.map(async (d) => {
+        const artifacts = await buildTrackingArtifacts(d.trackingToken, trackingBaseUrl);
+        return {
+          designTemplate: d.variant.designTemplate,
+          body: d.body,
+          addresseeName: d.recipientName,
+          honorific: d.honorific,
+          recipientZip: d.recipientZip,
+          recipientAddress: d.recipientAddress,
+          senderName,
+          senderContact,
+          trackingToken: d.trackingToken,
+          trackingSlotHtml: renderTrackingSlotHtml(artifacts, { caption: "スマホで読み取り(無料査定)" }),
+        };
+      }),
+    );
 
     const html = renderLetterSheetHtml(campaign.name, letters);
 

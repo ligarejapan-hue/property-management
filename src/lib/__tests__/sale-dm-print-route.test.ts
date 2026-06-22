@@ -91,6 +91,9 @@ describe("GET .../campaigns/[id]/print", () => {
     expect(html.startsWith("<!doctype html>")).toBe(true);
     expect(html).toContain("田中 一郎");
     expect(html).toContain("本文です");
+    // 追跡QR/短縮URL が印刷HTMLへ配線されている(P5 slot 連携・宛先固有 /t/<token>)
+    expect(html).toContain("sale-dm-tracking");
+    expect(html).toContain("/t/tok1");
     // confirmed のみを問い合わせていること(status フィルタ)
     const arg = pm.dmRecipientDraft.findMany.mock.calls[0][0];
     expect(arg.where.campaignId).toBe("c1");
