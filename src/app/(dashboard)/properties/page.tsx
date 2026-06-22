@@ -49,6 +49,7 @@ interface ApiProperty {
   realEstateNumber: string | null;
   registryStatus: string;
   dmStatus: string;
+  dmUndeliverableAt?: string | null;
   caseStatus: string;
   introductionRoute?: string | null;
   isArchived: boolean;
@@ -129,6 +130,7 @@ function PropertiesPageInner() {
   const [updatedFromFilter, setUpdatedFromFilter] = useState(() => sp.get("updatedFrom") ?? "");
   const [updatedToFilter, setUpdatedToFilter] = useState(() => sp.get("updatedTo") ?? "");
   const [warningOnly, setWarningOnly] = useState(() => sp.get("hasWarning") === "true");
+  const [undeliverableOnly, setUndeliverableOnly] = useState(() => sp.get("undeliverable") === "1");
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
   const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
@@ -268,11 +270,12 @@ function PropertiesPageInner() {
     if (updatedFromFilter) params.updatedFrom = updatedFromFilter;
     if (updatedToFilter) params.updatedTo = updatedToFilter;
     if (warningOnly) params.hasWarning = "true";
+    if (undeliverableOnly) params.undeliverable = "1";
     const [sortBy, sortOrder] = sort.split(":");
     if (sortBy) params.sortBy = sortBy;
     if (sortOrder) params.sortOrder = sortOrder;
     return params;
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sort]);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -363,11 +366,12 @@ function PropertiesPageInner() {
     if (updatedFromFilter) params.set("updatedFrom", updatedFromFilter);
     if (updatedToFilter) params.set("updatedTo", updatedToFilter);
     if (warningOnly) params.set("hasWarning", "true");
+    if (undeliverableOnly) params.set("undeliverable", "1");
     if (sort !== "updatedAt:desc") params.set("sort", sort);
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort, page, pathname, router]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sort, page, pathname, router]);
 
   // 警告バッジは「現在ページに表示中の物件」だけに scope して取得する（17-C F2）。
   // properties が変わるたび（page/filter/sort 変更・mutation 後の再取得）に追従するため、
@@ -512,6 +516,7 @@ function PropertiesPageInner() {
     setUpdatedFromFilter("");
     setUpdatedToFilter("");
     setWarningOnly(false);
+    setUndeliverableOnly(false);
     setSort("updatedAt:desc");
     setPage(1);
   };
@@ -520,7 +525,7 @@ function PropertiesPageInner() {
   const hasActiveFilter =
     !!searchInput || !!searchText || !!searchDraft || !!mgmtIdText || !!mgmtIdDraft || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
-    warningOnly || sort !== "updatedAt:desc";
+    warningOnly || undeliverableOnly || sort !== "updatedAt:desc";
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -896,6 +901,19 @@ function PropertiesPageInner() {
           )}
         </label>
 
+        <label className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+          <input
+            type="checkbox"
+            checked={undeliverableOnly}
+            onChange={(e) => {
+              setUndeliverableOnly(e.target.checked);
+              setPage(1);
+            }}
+            className="rounded border-red-300"
+          />
+          宛先不明のみ
+        </label>
+
         <select
           value={caseFilter}
           onChange={handleFilterChange(setCaseFilter)}
@@ -1218,6 +1236,12 @@ function PropertiesPageInner() {
                       {DM_STATUS_LABELS[property.dmStatus] ??
                         property.dmStatus}
                     </StatusBadge>
+                    {/* 返送(宛先不明)連動で立った dmUndeliverableAt の可視化 */}
+                    {property.dmUndeliverableAt && (
+                      <span className="ml-1 inline-block rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                        宛先不明
+                      </span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span className="text-xs text-gray-600">
