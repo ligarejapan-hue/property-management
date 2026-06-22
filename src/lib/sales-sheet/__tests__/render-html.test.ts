@@ -64,3 +64,15 @@ describe("renderDocumentToHtml — font-family XSSエスケープ (CSS breakout�
     expect(cssBlock).toContain("sans-serifbodycolor:red");
   });
 });
+
+describe("renderDocumentToHtml — スキーマ検証 (codex P2)", () => {
+  it("検証を通っていない不正なdoc(危険なimage src)は描画時に弾く", () => {
+    const bad = {
+      page: { width: 297, height: 210, orientation: "landscape" },
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [{ id: "i", type: "image", x: 0, y: 0, w: 10, h: 10, z: 1, src: "http://169.254.169.254/" }],
+    };
+    // @ts-expect-error intentionally passing an unvalidated/unsafe document
+    expect(() => renderDocumentToHtml(bad)).toThrow();
+  });
+});
