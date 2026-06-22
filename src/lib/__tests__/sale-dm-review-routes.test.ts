@@ -9,7 +9,14 @@ vi.mock("@/lib/api-helpers", () => {
   return {
     ApiError: MockApiError,
     getApiSession: vi.fn(), getUserPermissions: vi.fn(), getOwnerDisplayConfig: vi.fn(),
-    handleApiError: vi.fn((e: unknown) => e instanceof MockApiError ? Response.json({ error: { message: e.message, code: e.code } }, { status: e.status }) : Response.json({ error: { code: "INTERNAL_ERROR" } }, { status: 500 })),
+    parseJsonBody: vi.fn(async (r: Request) => { const t = await r.text(); return t ? JSON.parse(t) : {}; }),
+    handleApiError: vi.fn((e: unknown) => {
+      if (e instanceof MockApiError) return Response.json({ error: { message: e.message, code: e.code } }, { status: e.status });
+      if (e !== null && typeof e === "object" && "issues" in e && Array.isArray((e as Record<string, unknown>).issues)) {
+        return Response.json({ error: { code: "VALIDATION_ERROR" } }, { status: 422 });
+      }
+      return Response.json({ error: { code: "INTERNAL_ERROR" } }, { status: 500 });
+    }),
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
