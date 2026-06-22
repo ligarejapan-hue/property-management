@@ -134,4 +134,10 @@ describe("properties/[id]/page.tsx 品質警告セクション (§8-6 C2)", () =
     // fetchProperty の deps に loadQualityIssues が含まれている
     expect(src).toContain("[id, loadQualityIssues]");
   });
+
+  // --- @codex P2（新規）: 取得失敗時に stale 警告をクリアする（seq guard 付き）---
+  it("catch で最新リクエストの場合のみ setQualityIssues([]) を呼んで stale をクリアしている", () => {
+    // seq === qualityReqSeq.current の比較付きで、失敗時に警告をクリアする
+    expect(src).toContain("if (seq === qualityReqSeq.current) setQualityIssues([])");
+  });
 });

@@ -265,7 +265,8 @@ export default function PropertyDetailPage({
           })),
       );
     } catch {
-      // fail-safe: 取得失敗時はセクション非表示のまま
+      // 取得失敗時は stale 警告を残さずクリア（最新リクエストの場合のみ＝古い失敗が新しい成功を消さない）
+      if (seq === qualityReqSeq.current) setQualityIssues([]);
     }
   }, [id]);
 
