@@ -136,6 +136,37 @@ export async function postComment(
   });
 }
 
+// ---------- Sale DM (売却促進DM) ----------
+
+export interface CreateSaleDmCampaignBody {
+  name: string;
+  // 差出人(senderName/senderContact)は送らない。route が env 既定で補完する。
+  options: {
+    designTemplate: string;
+    tone: string;
+    length: string;
+    appeal: string;
+    strength: string;
+    extraInstruction?: string;
+  };
+  filters?: Record<string, string>;
+}
+
+export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { campaignId: "mock-campaign", generated: 0, failed: 0, truncated: false };
+  }
+  return apiFetch<{ campaignId: string; generated: number; failed: number; truncated: boolean }>(
+    "/api/properties/sale-dm/campaigns",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 // ---------- Next Actions ----------
 
 export async function fetchNextActions(

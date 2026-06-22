@@ -10,6 +10,7 @@ import { buildPropertyListWhere, buildPropertyListOrderBy } from "@/lib/property
 import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
+import { resolveSender } from "@/lib/sale-dm-letter/sender";
 import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, DEFAULT_MODEL } from "@/lib/sale-dm-letter";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
 import { randomBytes } from "crypto";
@@ -62,8 +63,17 @@ export async function POST(request: NextRequest) {
       ownerDisplayConfig,
     );
 
+    // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)を補完(body 指定があればそれを優先)。
+    // 集計・型は variant 基準のため sender は letter 生成にのみ使う(再生成 route と同方針)。
+    const sender = resolveSender();
+    const genOptions = {
+      ...body.options,
+      senderName: body.options.senderName ?? sender.senderName,
+      senderContact: body.options.senderContact ?? sender.senderContact,
+    };
+
     const { drafts, truncated } = await generateLetters(
-      recipients.map((r) => ({ recipient: r, options: body.options })),
+      recipients.map((r) => ({ recipient: r, options: genOptions })),
     );
 
     // キャンペーン + 既定型(1つ)+ 宛先下書きを保存(生成成功分のみ body 入り。失敗分は空+メモ)。

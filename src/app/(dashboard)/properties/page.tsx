@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "rea
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
-import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
+import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign } from "@/lib/api-client";
+import { canCreateSaleDm } from "@/lib/sale-dm-letter/list-ui";
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
 import NewPropertyModal from "@/components/properties/new-property-modal";
@@ -206,7 +207,7 @@ function PropertiesPageInner() {
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
   // DM差込CSV の出力可否。dm-export API は csv_export:read / csv_export_personal:read に
   // 加えて owner:read（所有者個人情報を含むため）を必須にする。UI も同条件で判定する。
-  const { canExportCsv, canExportDm } = useMemo(() => {
+  const { canExportCsv, canExportDm, canCreateDm } = useMemo(() => {
     // F12-2 Codex 対応(3): 進入時 refresh 中（pending）・provider 取得中（loading）は
     // stale な granted permissions を使わず空配列に倒す＝ボタン非表示（fail-safe 側）。
     // refresh 完了後の最新 permissions からのみ true になり得る。
@@ -222,6 +223,8 @@ function PropertiesPageInner() {
     return {
       canExportCsv: canCsv,
       canExportDm: canCsv && has("owner"),
+      // 売却DM作成の表示可否(csv_export + csv_export_personal + owner=canExportDm と同条件)。
+      canCreateDm: canCreateSaleDm(effectivePermissions),
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions]);
 
@@ -276,6 +279,33 @@ function PropertiesPageInner() {
     if (sortOrder) params.sortOrder = sortOrder;
     return params;
   }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sort]);
+
+  // 売却促進DM: 現在の検索条件で「送付可」物件から下書きを作成し、作業画面へ遷移する。
+  // 差出人は env 既定を route が補完(初版・調整は作業画面)。集計・型は variant 基準。
+  const [creatingDm, setCreatingDm] = useState(false);
+  const handleCreateSaleDm = async () => {
+    if (creatingDm) return;
+    setCreatingDm(true);
+    setError(null);
+    try {
+      const res = await createSaleDmCampaign({
+        name: `売却DM ${new Date().toLocaleDateString("ja-JP")}`,
+        options: {
+          designTemplate: "formal",
+          tone: "formal",
+          length: "medium",
+          appeal: "price",
+          strength: "low",
+        },
+        filters: buildFilterParams(),
+      });
+      router.push(`/properties/sale-dm/${res.campaignId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "売却DMの作成に失敗しました");
+    } finally {
+      setCreatingDm(false);
+    }
+  };
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -734,6 +764,18 @@ function PropertiesPageInner() {
           >
             <Download className="h-4 w-4" />
             DM差込CSV出力
+          </button>
+        )}
+        {canCreateDm && (
+          <button
+            type="button"
+            onClick={handleCreateSaleDm}
+            disabled={creatingDm}
+            className="inline-flex items-center gap-2 rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+            title="現在の検索条件で送付可の物件から売却DM下書きを作成"
+          >
+            {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            売却DMを作成
           </button>
         )}
         <button

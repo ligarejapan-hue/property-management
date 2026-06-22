@@ -6,8 +6,10 @@ export const saleDmOptionsSchema = z.object({
   length: z.enum(["short", "medium", "long"]),
   appeal: z.enum(["price", "inheritance", "vacant", "buyer"]),
   strength: z.enum(["low", "medium", "high"]),
-  senderName: z.string().min(1),
-  senderContact: z.string().min(1),
+  // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)を route が補完するため任意。
+  // 指定された場合のみ 1 文字以上を要求(空文字は不可)。
+  senderName: z.string().min(1).optional(),
+  senderContact: z.string().min(1).optional(),
   extraInstruction: z.string().optional(),
 });
 
