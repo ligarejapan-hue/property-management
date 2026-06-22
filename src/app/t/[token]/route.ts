@@ -24,12 +24,15 @@ export async function GET(
     matched = false;
   }
 
-  // AuditLog は非PIIメタのみ。token/氏名/住所は残さない(matched 真偽のみ)。
-  await writeAuditLog({
-    action: "sale_dm_tracking_hit",
-    targetTable: "dm_recipient_drafts",
-    detail: { matched, at: new Date().toISOString() },
-  });
+  // マッチした実ヒットのみ監査する。未認証の公開エンドポイントゆえ、未マッチ/bot/
+  // 列挙トークンで audit_logs を肥大化させない(書込増幅の防止)。非PIIメタのみ。
+  if (matched) {
+    await writeAuditLog({
+      action: "sale_dm_tracking_hit",
+      targetTable: "dm_recipient_drafts",
+      detail: { matched: true, at: new Date().toISOString() },
+    });
+  }
 
   // 転送先 LP 未設定なら fail-closed(404)。未知トークンでも、LP 設定済みなら
   // 列挙耐性・受け手体験のため LP へ 302(本文でトークンの有無を示さない)。

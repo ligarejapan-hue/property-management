@@ -66,6 +66,7 @@ describe("recordTrackingHit", () => {
 
 import { describe as d2, it as i2, expect as e2, beforeEach as b2 } from "vitest";
 import prismaMock from "@/lib/prisma";
+import { writeAuditLog } from "@/lib/audit";
 import { GET } from "../../app/t/[token]/route";
 
 const ctx = (token: string) => ({ params: Promise.resolve({ token }) });
@@ -81,6 +82,8 @@ d2("GET /t/[token]", () => {
     e2(res.headers.get("Cache-Control")).toBe("no-store");
     const pm = prismaMock as never as { dmRecipientDraft: { update: ReturnType<typeof vi.fn> } };
     e2(pm.dmRecipientDraft.update).toHaveBeenCalledOnce();
+    // マッチした実ヒットのみ監査する。
+    e2(writeAuditLog).toHaveBeenCalledOnce();
   });
 
   i2("LP 未設定なら 404(fail-closed)", async () => {
@@ -96,5 +99,7 @@ d2("GET /t/[token]", () => {
     const res = await GET(new Request("http://x/t/nope") as never, ctx("nope"));
     e2(res.status).toBe(302);
     e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    // 未マッチ(bot/列挙)では audit_logs に書かない=書込増幅の防止。
+    e2(writeAuditLog).not.toHaveBeenCalled();
   });
 });
