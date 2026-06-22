@@ -167,6 +167,65 @@ export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
   );
 }
 
+export interface SaleDmDraft {
+  id: string;
+  variantId: string;
+  propertyId: string;
+  recipientName: string;
+  recipientZip: string | null;
+  recipientAddress: string | null;
+  honorific: string;
+  body: string;
+  status: string;
+  outcome: string;
+  deliveryStatus: string;
+  lpFirstAccessAt: string | null;
+  phoneInquiryAt: string | null;
+}
+
+export interface SaleDmVariant {
+  id: string;
+  label: string;
+  designTemplate: string;
+  tone: string;
+  length: string;
+  appeal: string;
+  strength: string;
+  extraInstruction: string | null;
+}
+
+export interface SaleDmCampaign {
+  id: string;
+  name: string;
+  status: string;
+  variants: SaleDmVariant[];
+  recipients: SaleDmDraft[];
+}
+
+export async function fetchSaleDmCampaign(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { campaign: { id, name: "モック売却DM", status: "draft", variants: [], recipients: [] } as SaleDmCampaign };
+  }
+  return apiFetch<{ campaign: SaleDmCampaign }>(`/api/properties/sale-dm/campaigns/${id}`);
+}
+
+// outcome PATCH(配達結果 / 電話反響)。payload 型はインライン(循環 import 回避)。
+export async function updateSaleDmOutcome(
+  id: string,
+  payload: { deliveryStatus?: string; phoneInquiry?: boolean },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id };
+  }
+  return apiFetch<{ id: string }>(`/api/properties/sale-dm/drafts/${id}/outcome`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 // ---------- Next Actions ----------
 
 export async function fetchNextActions(
