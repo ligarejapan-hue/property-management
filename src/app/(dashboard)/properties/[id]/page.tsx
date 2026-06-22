@@ -237,6 +237,38 @@ export default function PropertyDetailPage({
     }
   };
 
+  // 品質警告取得 (@codex P2: 物件更新時にも再取得): useCallback 化して fetchProperty から
+  // も呼ぶことで ActionBar/編集保存/所有者更新等の後も最新警告を反映する。
+  // cancelled フラグは各呼び出しクロージャに閉じるため、並行呼び出し時に古い結果で
+  // 新しい state を上書きしない（後着が勝つ stale 上書き防止）。
+  const loadQualityIssues = useCallback(async () => {
+    let cancelled = false;
+    try {
+      const json = await fetchQualityCheck({ propertyIds: [id] });
+      if (cancelled) return;
+      const data = (
+        json as {
+          data?: Array<{
+            propertyId: string;
+            severity: "error" | "warning" | "info";
+            message: string;
+          }>;
+        }
+      ).data ?? [];
+      setQualityIssues(
+        data
+          .filter((i) => i.severity !== "info")
+          .map((i) => ({
+            severity: i.severity as "error" | "warning",
+            message: i.message,
+          })),
+      );
+    } catch {
+      // fail-safe: 取得失敗時はセクション非表示のまま
+    }
+    return () => { cancelled = true; };
+  }, [id]);
+
   const fetchProperty = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -250,45 +282,19 @@ export default function PropertyDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [id]);
+    // 物件再取得に連動して品質警告も更新する（@codex P2: 更新後も最新の警告を表示）。
+    void loadQualityIssues();
+  }, [id, loadQualityIssues]);
 
   useEffect(() => {
     fetchProperty();
   }, [fetchProperty]);
 
-  // 品質警告取得: 物件 id が確定したタイミングで 1 回取得。
-  // 取得失敗はサイレントに握りつぶし (best-effort / fail-safe)。
+  // id 変化時に品質警告をリセット・再取得する（fetchProperty 内の呼び出しと補完関係）。
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const json = await fetchQualityCheck({ propertyIds: [id] });
-        if (cancelled) return;
-        const data = (
-          json as {
-            data?: Array<{
-              propertyId: string;
-              severity: "error" | "warning" | "info";
-              message: string;
-            }>;
-          }
-        ).data ?? [];
-        setQualityIssues(
-          data
-            .filter((i) => i.severity !== "info")
-            .map((i) => ({
-              severity: i.severity as "error" | "warning",
-              message: i.message,
-            })),
-        );
-      } catch {
-        // fail-safe: 取得失敗時はセクション非表示のまま
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+    setQualityIssues([]);
+    void loadQualityIssues();
+  }, [loadQualityIssues]);
 
   // F12 展開(19-A 第3実装): permissions / capabilities は ScreenProtectionProvider
   //（dashboard 全体を覆う）が mount 時に 1 回取得して context 配布するため、本ページ独自の

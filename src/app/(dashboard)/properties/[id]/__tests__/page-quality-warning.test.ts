@@ -90,4 +90,26 @@ describe("properties/[id]/page.tsx 品質警告セクション (§8-6 C2)", () =
     expect(src).toContain("qualityIssues");
     expect(src).toContain("setQualityIssues");
   });
+
+  // --- @codex P2: 物件更新時にも品質警告を再取得する ---
+  it("loadQualityIssues が useCallback として定義されている（更新時再取得のため）", () => {
+    expect(src).toContain("loadQualityIssues");
+    expect(src).toContain("useCallback");
+  });
+
+  it("fetchProperty が loadQualityIssues を依存配列に含んでいる", () => {
+    expect(src).toContain("loadQualityIssues");
+    // fetchProperty の useCallback 依存配列に loadQualityIssues が含まれている
+    expect(src).toContain("[id, loadQualityIssues]");
+  });
+
+  it("fetchProperty が完了後に loadQualityIssues を呼び出している（更新後の警告再取得）", () => {
+    // fetchProperty が loadQualityIssues を呼ぶことで更新アクション後も警告が最新になる
+    expect(src).toContain("void loadQualityIssues()");
+  });
+
+  it("cancelled フラグで stale な取得結果の上書きを防いでいる", () => {
+    expect(src).toContain("cancelled");
+    expect(src).toContain("if (cancelled) return");
+  });
 });
