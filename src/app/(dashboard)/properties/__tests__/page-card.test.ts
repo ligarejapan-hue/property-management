@@ -78,6 +78,10 @@ describe("properties/page.tsx §8-5 C1: モバイルカード表示", () => {
     expect(src).toContain("stopPropagation");
   });
 
+  it("「他N名 ▾」展開ボタンのタップ領域が 44px 以上（min-h-[44px]）", () => {
+    expect(src).toContain("min-h-[44px]");
+  });
+
   // --- 選択チェックボックス ---
   it("カードにチェックボックスの selectedIds 参照がある", () => {
     expect(src).toContain("selectedIds");

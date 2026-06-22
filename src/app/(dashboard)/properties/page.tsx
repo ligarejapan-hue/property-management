@@ -1378,7 +1378,7 @@ function PropertiesPageInner() {
                                 return next;
                               });
                             }}
-                            className="mt-1 text-xs text-indigo-600 hover:underline"
+                            className="mt-1 inline-flex items-center min-h-[44px] py-2 text-xs text-indigo-600 hover:underline"
                           >
                             {isExpanded
                               ? "▴ 折りたたむ"
