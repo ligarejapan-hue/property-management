@@ -132,4 +132,15 @@ describe("modal dark mode (D1)", () => {
     const src = readSrc("owners/owner-link-modal.tsx");
     expect(src).toContain("max-w-[90vw]");
   });
+
+  // Dark-mode readability on search result rows (D1 fix)
+  test("owner-link-modal: selectable row hover has dark variant", () => {
+    const src = readSrc("owners/owner-link-modal.tsx");
+    expect(src).toContain("dark:hover:bg-gray-800");
+  });
+
+  test("owner-link-modal: selected row has dark variant", () => {
+    const src = readSrc("owners/owner-link-modal.tsx");
+    expect(src).toContain("dark:bg-indigo-500/25");
+  });
 });

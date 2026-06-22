@@ -265,8 +265,8 @@ export function OwnerLinkModal({
                       className={`border-b border-gray-100 dark:border-gray-800 px-2 py-1.5 text-xs last:border-b-0 ${
                         linked
                           ? "cursor-not-allowed bg-gray-50 dark:bg-gray-800 text-gray-400 dark:text-gray-500"
-                          : `cursor-pointer hover:bg-indigo-50 ${
-                              selected?.id === h.id ? "bg-indigo-100" : ""
+                          : `cursor-pointer hover:bg-indigo-50 dark:hover:bg-gray-800 ${
+                              selected?.id === h.id ? "bg-indigo-100 dark:bg-indigo-500/25" : ""
                             }`
                       }`}
                     >
