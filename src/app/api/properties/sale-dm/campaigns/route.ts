@@ -71,6 +71,10 @@ export async function POST(request: NextRequest) {
       const campaign = await tx.dmCampaign.create({
         data: { name: body.name, createdBy: session.id, filterSnapshot: body.filters ?? {} },
       });
+      // 初期型 A を1つ作り、全宛先をこの型に割り当てる(初期=均等割り済みの1型)。
+      // 複数型(B/C)の追加と再割当は POST /campaigns/[id]/variants(型 CRUD)+
+      // POST /campaigns/[id]/assign(割当)で行う。生成 route は「初期1型」を保証するのみ。
+      // A/B 純度は割り当てられた variantId 基準(個別 override は本文の微修正で集計に影響しない)。
       const variant = await tx.dmVariant.create({
         data: {
           campaignId: campaign.id, label: "A",

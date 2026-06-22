@@ -4,6 +4,7 @@ import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { isSaleDmConfigured, generateLetters } from "@/lib/sale-dm-letter";
 import { resolveSender } from "@/lib/sale-dm-letter/sender";
+import { resolveDraftOptions } from "@/lib/sale-dm-letter/override";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -20,7 +21,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         representativeName: draft.recipientName, honorific: draft.honorific, coOwnerCount: draft.coOwnerCount,
         propertyAddress: draft.property.address, propertyTypeLabel: PROPERTY_TYPE_LABELS[draft.property.propertyType] ?? draft.property.propertyType, roomNo: draft.property.roomNo,
       },
-      options: { designTemplate: v.designTemplate, tone: v.tone, length: v.length, appeal: v.appeal, strength: v.strength, senderName: sender.senderName, senderContact: sender.senderContact, extraInstruction: v.extraInstruction ?? undefined },
+      // 割り当てられた型(variant)の設定に、この通だけの個別上書き(overrideJson)を
+      // merge して options を組み立てる(集計は variantId 基準・override は本文の微修正のみ)。
+      options: resolveDraftOptions(
+        { designTemplate: v.designTemplate, tone: v.tone, length: v.length, appeal: v.appeal, strength: v.strength, extraInstruction: v.extraInstruction },
+        draft.overrideJson as Parameters<typeof resolveDraftOptions>[1],
+        sender,
+      ),
     }]);
     const body = drafts[0]?.body;
     if (!body) throw new ApiError(502, "再生成に失敗しました", "GENERATION_FAILED");
