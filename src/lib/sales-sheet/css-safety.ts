@@ -12,3 +12,17 @@ export function sanitizeCssValue(value: string): string {
 export function isSafeImageSrc(src: string): boolean {
   return src.startsWith("data:image/");
 }
+
+const HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/;
+const FN_COLOR = /^(?:rgb|rgba|hsl|hsla)\([0-9.,%/\s]+\)$/i; // only numeric content inside the parens
+const KEYWORD_COLOR = /^[a-zA-Z]+$/; // named color / transparent / currentColor (inert, cannot fetch)
+/** CSS色として安全か（許可リスト）: hex / rgb()/rgba()/hsl()/hsla()(数値のみ) / 単語キーワード のみ許可。url()/image-set()/宣言区切り等は拒否。 */
+export function isCssColor(v: string): boolean {
+  return HEX_COLOR.test(v) || FN_COLOR.test(v) || KEYWORD_COLOR.test(v);
+}
+
+/** font-family として安全か（許可リスト）: 英数/空白/カンマ/ハイフン/アンダースコア/引用符/日本語 のみ。括弧・コロン・スラッシュ・タグ・宣言区切りを許さない（url()/image-set()/</style>を拒否）。 */
+const SAFE_FONT = /^[A-Za-z0-9 ,\-_'"　-ヿ一-鿿＀-￯]+$/;
+export function isSafeFontFamily(v: string): boolean {
+  return SAFE_FONT.test(v);
+}

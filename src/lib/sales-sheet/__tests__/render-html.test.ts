@@ -29,12 +29,10 @@ describe("renderDocumentToHtml — font-family XSSエスケープ (CSS breakout�
     };
   }
 
-  it("XSSペイロード '</style><script>alert(1)</script>' をブレイクアウトさせない", () => {
+  it("XSSペイロード '</style><script>alert(1)</script>' はスキーマで拒否される", () => {
+    // スキーマ許可リスト(isSafeFontFamily)が < > を含む値を拒否するため、描画前に throw する
     const malicious = '"Yu Gothic", </style><scrip' + 't>alert(1)</scrip' + 't>';
-    const html = renderDocumentToHtml(makeDocWithFontFamily(malicious));
-    // ブレイクアウト文字が除去されていること
-    expect(html).not.toContain("</style><scrip");
-    expect(html).not.toContain("<scrip");
+    expect(() => renderDocumentToHtml(makeDocWithFontFamily(malicious))).toThrow();
   });
 
   it("通常のfontFamily ('Meiryo' 等) は保持される", () => {
@@ -50,18 +48,10 @@ describe("renderDocumentToHtml — font-family XSSエスケープ (CSS breakout�
     expect(html).toContain("Yu Gothic");
   });
 
-  it("中括弧 } によるCSSブレイクアウトを防ぐ（<style>ブロック内）", () => {
-    // 攻撃: font-family から抜け出して body{color:red} ルールを注入しようとする
+  it("中括弧 } によるCSSブレイクアウトはスキーマで拒否される", () => {
+    // スキーマ許可リスト(isSafeFontFamily)が { } を含む値を拒否するため、描画前に throw する
     const malicious = 'sans-serif}body{color:red';
-    const html = renderDocumentToHtml(makeDocWithFontFamily(malicious));
-    // styleタグ内のCSSのみを抜き出してチェック
-    const styleMatch = html.match(/<style>([\s\S]*?)<\/style>/);
-    expect(styleMatch).not.toBeNull();
-    const cssBlock = styleMatch![1];
-    // { } が除去されているのでペイロードの {color:red} という独立ルールにならない
-    expect(cssBlock).not.toContain("{color:red}");
-    // ブレイクアウト文字 { } は除去されてfont-family値に埋め込まれているはず（: は無害なので残る）
-    expect(cssBlock).toContain("sans-serifbodycolor:red");
+    expect(() => renderDocumentToHtml(makeDocWithFontFamily(malicious))).toThrow();
   });
 });
 

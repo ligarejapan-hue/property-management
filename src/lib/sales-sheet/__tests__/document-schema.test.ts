@@ -41,6 +41,51 @@ describe("salesSheetDocumentSchema", () => {
   });
 });
 
+describe("色/フォント許可リスト (codex P2 SSRF根治)", () => {
+  const base = { page: A4_LANDSCAPE, elements: [] };
+
+  it("badgeのbgにimage-set()を含む値は拒否する (SSRF)", () => {
+    const r = salesSheetDocumentSchema.safeParse({
+      ...base,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        { id: "b1", type: "badge", x: 0, y: 0, w: 20, h: 8, z: 1, label: "test", bg: 'image-set("http://169.254.169.254/" 1x)', fg: "#fff" },
+      ],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("badgeのbgに有効なhex色(#0e9f6e)は受理する", () => {
+    const r = salesSheetDocumentSchema.safeParse({
+      ...base,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        { id: "b1", type: "badge", x: 0, y: 0, w: 20, h: 8, z: 1, label: "test", bg: "#0e9f6e", fg: "#fff" },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("themeのfontFamilyに</style>を含む値は拒否する", () => {
+    const r = salesSheetDocumentSchema.safeParse({
+      ...base,
+      theme: { fontFamily: "a</style>b", accentColor: "#000" },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("フィクスチャのフォント/色はそのまま受理される", () => {
+    const r = salesSheetDocumentSchema.safeParse({
+      ...base,
+      theme: { fontFamily: '"Yu Gothic UI","Meiryo",sans-serif', accentColor: "#1f4e79" },
+      elements: [
+        { id: "b1", type: "badge", x: 0, y: 0, w: 20, h: 8, z: 1, label: "test", bg: "#0e9f6e", fg: "#ffffff" },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
 describe("isSafeImageSrc (SSRF防止 ユニットテスト — Plan1: data:image/ のみ)", () => {
   it("data:image/ URL を許可する", () => {
     expect(isSafeImageSrc("data:image/png;base64,AAAA")).toBe(true);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeCssValue, isSafeImageSrc } from "../css-safety";
+import { sanitizeCssValue, isSafeImageSrc, isCssColor, isSafeFontFamily } from "../css-safety";
 
 describe("sanitizeCssValue", () => {
   it("; を除去する（CSS宣言注入防止）", () => {
@@ -58,6 +58,34 @@ describe("sanitizeCssValue", () => {
     const result = sanitizeCssValue("@import 'http://evil'");
     expect(result).not.toContain("@import");
   });
+});
+
+describe("isCssColor (許可リスト)", () => {
+  it.each(["#d0331a", "#fff", "rgb(0,0,0)", "rgba(0,0,0,0.5)", "hsl(0,0%,0%)", "red", "transparent", "currentColor"])(
+    "%s を許可する",
+    (v) => expect(isCssColor(v)).toBe(true),
+  );
+
+  it.each([
+    "url(http://x)",
+    'image-set("http://169.254.169.254/latest" 1x)',
+    "red;background:url(x)",
+    "a:b",
+    "#xyz",
+    "",
+  ])("%s を拒否する", (v) => expect(isCssColor(v)).toBe(false));
+});
+
+describe("isSafeFontFamily (許可リスト)", () => {
+  it.each(['"Yu Gothic UI","Meiryo",sans-serif', "sans-serif"])(
+    "%s を許可する",
+    (v) => expect(isSafeFontFamily(v)).toBe(true),
+  );
+
+  it.each(['image-set("http://x")', "a</style>b", "x:y", "f/g"])(
+    "%s を拒否する",
+    (v) => expect(isSafeFontFamily(v)).toBe(false),
+  );
 });
 
 describe("isSafeImageSrc (Plan1: data:image/ のみ)", () => {

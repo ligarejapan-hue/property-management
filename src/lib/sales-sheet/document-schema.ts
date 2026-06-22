@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isSafeImageSrc } from "./css-safety";
+import { isSafeImageSrc, isCssColor, isSafeFontFamily } from "./css-safety";
 
 export { isSafeImageSrc };
 
@@ -20,8 +20,8 @@ export const textElementSchema = z.object({
   style: z
     .object({
       fontSizePt: z.number().positive().optional(),
-      fontFamily: z.string().optional(),
-      color: z.string().optional(),
+      fontFamily: z.string().refine(isSafeFontFamily, "unsafe font-family").optional(),
+      color: z.string().refine(isCssColor, "unsafe color").optional(),
       bold: z.boolean().optional(),
       italic: z.boolean().optional(),
       underline: z.boolean().optional(),
@@ -47,9 +47,9 @@ export const tableElementSchema = z.object({
   style: z
     .object({
       fontSizePt: z.number().positive().optional(),
-      labelColor: z.string().optional(),
-      valueColor: z.string().optional(),
-      borderColor: z.string().optional(),
+      labelColor: z.string().refine(isCssColor, "unsafe color").optional(),
+      valueColor: z.string().refine(isCssColor, "unsafe color").optional(),
+      borderColor: z.string().refine(isCssColor, "unsafe color").optional(),
     })
     .default({}),
 });
@@ -59,8 +59,8 @@ export const badgeElementSchema = z.object({
   type: z.literal("badge"),
   label: z.string(),
   shape: z.enum(["rounded", "pill", "ribbon"]).default("rounded"),
-  bg: z.string(),
-  fg: z.string(),
+  bg: z.string().refine(isCssColor, "unsafe color"),
+  fg: z.string().refine(isCssColor, "unsafe color"),
   fontSizePt: z.number().positive().optional(),
 });
 
@@ -68,8 +68,8 @@ export const shapeElementSchema = z.object({
   ...baseElement,
   type: z.literal("shape"),
   shape: z.enum(["rect", "line"]).default("rect"),
-  fill: z.string().optional(),
-  stroke: z.string().optional(),
+  fill: z.string().refine(isCssColor, "unsafe color").optional(),
+  stroke: z.string().refine(isCssColor, "unsafe color").optional(),
   strokeWidthMm: z.number().nonnegative().optional(),
   radiusMm: z.number().nonnegative().optional(),
 });
@@ -97,8 +97,8 @@ export const pageSchema = z.object({
 });
 
 export const themeSchema = z.object({
-  fontFamily: z.string(),
-  accentColor: z.string(),
+  fontFamily: z.string().refine(isSafeFontFamily, "unsafe font-family"),
+  accentColor: z.string().refine(isCssColor, "unsafe color"),
 });
 
 export const salesSheetDocumentSchema = z.object({
