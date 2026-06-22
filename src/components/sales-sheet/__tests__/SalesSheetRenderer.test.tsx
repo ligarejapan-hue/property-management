@@ -124,4 +124,23 @@ describe("SalesSheetRenderer — CSS injection 防止 (P1)", () => {
     const html = renderToStaticMarkup(<SalesSheetRenderer document={sampleDocument} />);
     expect(html).toContain("#d0331a");
   });
+
+  it("badge bg に url(http://169.254.169.254/) が含まれていても url( が除去される (SSRF防止)", () => {
+    const maliciousDoc: SalesSheetDocument = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        {
+          id: "b1", type: "badge", x: 10, y: 10, w: 30, h: 8, z: 1,
+          label: "test",
+          shape: "rounded",
+          bg: "url(http://169.254.169.254/)",
+          fg: "#fff",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(<SalesSheetRenderer document={maliciousDoc} />);
+    expect(html).not.toContain("url(http");
+    expect(html).not.toContain("url(http://169.254.169.254");
+  });
 });

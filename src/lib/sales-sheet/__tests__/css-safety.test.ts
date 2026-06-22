@@ -3,7 +3,7 @@ import { sanitizeCssValue, isSafeImageSrc } from "../css-safety";
 
 describe("sanitizeCssValue", () => {
   it("; を除去する（CSS宣言注入防止）", () => {
-    expect(sanitizeCssValue("red;background-image:url(http://evil/)")).toBe("redbackground-image:url(http://evil/)");
+    expect(sanitizeCssValue("red;background-image:url(http://evil/)")).toBe("redbackground-image:http://evil/)");
   });
 
   it("{ } を除去する（ブロック注入防止）", () => {
@@ -41,6 +41,22 @@ describe("sanitizeCssValue", () => {
 
   it("複数の注入文字を同時に除去する", () => {
     expect(sanitizeCssValue("red;background:url(x)")).not.toContain(";");
+  });
+
+  it('url(http://169.254.169.254/) から url( を除去する (SSRF防止)', () => {
+    const result = sanitizeCssValue("url(http://169.254.169.254/)");
+    expect(result).not.toContain("url(");
+    expect(result).not.toContain("url (");
+  });
+
+  it("URL ( ... ) (大文字＋スペース) からも url( を除去する", () => {
+    const result = sanitizeCssValue("URL ( http://x )");
+    expect(result.toLowerCase()).not.toContain("url(");
+  });
+
+  it("@import 'http://evil' から @import を除去する", () => {
+    const result = sanitizeCssValue("@import 'http://evil'");
+    expect(result).not.toContain("@import");
   });
 });
 

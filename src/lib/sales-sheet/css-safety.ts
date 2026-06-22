@@ -2,7 +2,10 @@
  *  正当な色(#fff, rgb(0,0,0), red)・フォント("Yu Gothic UI",sans-serif)は保持する。 */
 export function sanitizeCssValue(value: string): string {
   // 除去: ; { } < > \\ と制御文字（これらが宣言区切り/タグ閉じ/ブロック閉じを可能にする）
-  return value.replace(/[;{}<>\\\x00-\x1f]/g, "");
+  return value
+    .replace(/[;{}<>\\\x00-\x1f]/g, "")
+    .replace(/url\s*\(/gi, "")   // neutralize background:url(...) fetch (SSRF); no legit color/font uses url()
+    .replace(/@import/gi, "");
 }
 
 /** 画像srcとして安全か（Plan1）: data:image URL のみ許可。/uploads/ 等の root-relative は Plan2 で対応。 */
