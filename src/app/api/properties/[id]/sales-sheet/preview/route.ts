@@ -21,6 +21,7 @@ const overridesSchema = z.object({
   landCategory: z.string().max(200).optional(),
   transactionType: z.string().max(200).optional(),
   deliveryTiming: z.string().max(200).optional(),
+  remarks: z.string().max(1000).optional(),
 });
 
 function s(v: unknown): string | null {
@@ -47,6 +48,9 @@ export async function POST(
     if (!canAccessPropertyRecord(session, property)) {
       throw new ApiError(403, "この物件にアクセスできません", "FORBIDDEN");
     }
+    if (property.propertyType !== "land") {
+      throw new ApiError(400, "売土地の販売図面は土地物件のみ作成できます", "NOT_LAND");
+    }
 
     const overrides = overridesSchema.parse(await parseJsonBody(request));
 
@@ -64,7 +68,6 @@ export async function POST(
         roadType: s(property.roadType),
         roadWidth: s(property.roadWidth),
         occupancyStatus: s(property.occupancyStatus),
-        note: s(property.note),
       },
       photo,
       overrides,

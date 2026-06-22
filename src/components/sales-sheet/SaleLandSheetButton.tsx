@@ -9,6 +9,7 @@ const FIELDS: { key: string; label: string }[] = [
   { key: "landCategory", label: "地目" },
   { key: "transactionType", label: "取引態様" },
   { key: "deliveryTiming", label: "引渡" },
+  { key: "remarks", label: "備考（公開）" },
 ];
 
 /**

@@ -32,7 +32,7 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     property: {
       findUnique: vi.fn(async () =>
-        ({ id: "p1", address: "addr", createdBy: "u1", assignedTo: null, building: null, photos: [] }),
+        ({ id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null, photos: [] }),
       ),
     },
   },
@@ -61,7 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as unknown as Mock).mockResolvedValue({ id: "u1", role: "admin" });
   (getUserPermissions as unknown as Mock).mockResolvedValue([{ resource: "property", action: "read", granted: true }]);
-  pm.property.findUnique.mockResolvedValue({ id: "p1", address: "addr", createdBy: "u1", assignedTo: null, building: null, photos: [] });
+  pm.property.findUnique.mockResolvedValue({ id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null, photos: [] });
   (renderDocumentToPdf as unknown as Mock).mockResolvedValue(Buffer.from("%PDF-1.4 test"));
 });
 
@@ -80,6 +80,13 @@ describe("POST sales-sheet/preview", () => {
     (getApiSession as unknown as Mock).mockResolvedValue({ id: "other", role: "field_staff" });
     const res = await POST(req(), ctx);
     expect(res.status).toBe(403);
+  });
+  it("土地以外の物件は400(NOT_LAND)", async () => {
+    pm.property.findUnique.mockResolvedValue({ id: "p1", address: "addr", propertyType: "house", createdBy: "u1", assignedTo: null, building: null, photos: [] });
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("NOT_LAND");
   });
   it("成功時は application/pdf を返す", async () => {
     const res = await POST(req({ price: "3,480万円" }), ctx);

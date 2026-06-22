@@ -12,6 +12,7 @@ export interface SaleLandOverrides {
   landCategory?: string;
   transactionType?: string;
   deliveryTiming?: string;
+  remarks?: string;
 }
 
 export interface SaleLandInput {
@@ -23,7 +24,6 @@ export interface SaleLandInput {
     roadType?: string | null;
     roadWidth?: string | null;
     occupancyStatus?: string | null;
-    note?: string | null;
   };
   owner?: { name?: string | null } | null;
   photo?: { fileUrl: string } | null;
@@ -68,7 +68,7 @@ export function buildSaleLandDocument(input: SaleLandInput): SalesSheetDocument 
         row("現況", p.occupancyStatus),
         row("引渡", o.deliveryTiming),
         row("取引態様", o.transactionType),
-        row("備考", p.note),
+        row("備考", o.remarks),
       ],
       style: { fontSizePt: 9, borderColor: "#cccccc", labelColor: NAVY } },
     { id: "company", type: "text", x: 10, y: 192, w: 277, h: 10, z: 2,

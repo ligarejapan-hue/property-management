@@ -475,7 +475,9 @@ export default function PropertyDetailPage({
               DM送付履歴
             </Link>
           )}
-          <SaleLandSheetButton propertyId={property.id} />
+          {property.propertyType === "land" && (
+            <SaleLandSheetButton propertyId={property.id} />
+          )}
           <button
             onClick={() => setShowEditForm(true)}
             aria-label="物件を編集"

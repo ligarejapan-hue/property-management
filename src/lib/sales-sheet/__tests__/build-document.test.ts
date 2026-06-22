@@ -19,7 +19,6 @@ const input = {
     roadType: "公道",
     roadWidth: "4.0",
     occupancyStatus: "更地",
-    note: "南西角地",
   },
   owner: null,
   photo: { fileUrl: "/uploads/properties/a/1.jpg" },
@@ -30,16 +29,18 @@ const input = {
     landCategory: "宅地",
     transactionType: "仲介",
     deliveryTiming: "相談",
+    remarks: "南西角地・整形地",
   },
 };
 
 describe("buildSaleLandDocument", () => {
-  it("価格(override)と所在地(DB)を含む要素を生成する", () => {
+  it("価格(override)と所在地(DB)と公開備考(remarks)を含む要素を生成する", () => {
     const doc = buildSaleLandDocument(input);
     const texts = doc.elements.filter((e) => e.type === "text").map((e) => (e.type === "text" ? e.content : ""));
     expect(texts.join("\n")).toContain("3,480万円");
     expect(JSON.stringify(doc.elements)).toContain("東京都世田谷区上馬４丁目");
     expect(JSON.stringify(doc.elements)).toContain("仲介");
+    expect(JSON.stringify(doc.elements)).toContain("南西角地・整形地");
     expect(doc.page.orientation).toBe("landscape");
   });
 });
