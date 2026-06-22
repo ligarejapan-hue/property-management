@@ -133,7 +133,7 @@ export default function PinCreateModal({
       data-testid="pin-create-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
     >
-      <div className="w-full max-w-md rounded-md bg-white p-4 text-sm shadow-lg">
+      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[90vh] overflow-y-auto rounded-md bg-white p-4 text-sm shadow-lg">
         <h3 className="mb-3 text-base font-semibold text-gray-800">
           調査ピンを追加
         </h3>

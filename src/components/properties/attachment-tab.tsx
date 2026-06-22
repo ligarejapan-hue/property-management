@@ -464,7 +464,7 @@ function PreviewModal({
       onClick={onClose}
     >
       <div
-        className="relative flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
+        className="relative flex h-full w-full max-w-[90vw] sm:max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

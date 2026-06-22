@@ -284,7 +284,7 @@ export function OwnerMislinkModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg bg-white p-4 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-[90vw] sm:max-w-xl overflow-y-auto rounded-lg bg-white p-4 shadow-xl">
         <div className="mb-3 flex items-baseline justify-between">
           <h3 className="text-sm font-semibold text-gray-900">
             誤紐づき修正
