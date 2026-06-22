@@ -110,8 +110,15 @@ describe("properties/page.tsx §8-5 C1: モバイルカード表示", () => {
   });
 
   // --- キーボード/新規タブ導線（a11y §8-5 P2） ---
-  it("カードの主要導線に Link(href=/properties/) がある（キーボード・新規タブ対応）", () => {
-    expect(src).toContain("href={`/properties/${property.id}`}");
+  it("カード節にスコープした Link(href=/properties/) がある（テーブル行でなくカード固有・キーボード・新規タブ対応）", () => {
+    // "Card list" コメント以降をカード節として切り出し、その範囲内に Link と
+    // href=詳細遷移が存在することを確認する。テーブル行の Link だけでは pass
+    // しないため、カード側 Link 削除を回帰ガードとして検出できる。
+    const cardSectionStart = src.indexOf("Card list");
+    expect(cardSectionStart).toBeGreaterThan(-1); // マーカー自体の存在確認
+    const cardSection = src.slice(cardSectionStart);
+    expect(cardSection).toContain("<Link");
+    expect(cardSection).toContain("href={`/properties/${property.id}`}");
   });
 
   // --- PC テーブル不変（回帰） ---
