@@ -49,13 +49,13 @@ describe("admin/users/page.tsx dark: 配色 (A1)", () => {
 
   // --- 入力欄 3点セット ---
   it("入力欄に暗背景クラスがある", () => {
-    expect(usersPage).toContain("dark:bg-gray-800");
+    expect(usersPage).toContain("dark:bg-gray-900");
   });
   it("入力欄に暗テキストクラスがある", () => {
     // 入力欄の text-gray-900 に対応
     const hasInputDark =
       usersPage.includes("dark:text-gray-100") &&
-      usersPage.includes("dark:bg-gray-800") &&
+      usersPage.includes("dark:bg-gray-900") &&
       usersPage.includes("dark:border-gray-700");
     expect(hasInputDark).toBe(true);
   });

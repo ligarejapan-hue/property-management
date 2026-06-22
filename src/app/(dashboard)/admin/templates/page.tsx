@@ -248,7 +248,7 @@ export default function TemplatesPage() {
                     <div className="flex gap-3">
                       <Link
                         href={`/admin/templates/${tpl.id}`}
-                        className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400"
+                        className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
                       >
                         編集
                       </Link>
