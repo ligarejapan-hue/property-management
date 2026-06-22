@@ -28,7 +28,15 @@ vi.mock("@/lib/property-access", () => ({
     return property.createdBy === session.id || property.assignedTo === session.id;
   }),
 }));
-vi.mock("@/lib/prisma", () => ({ default: { property: { findUnique: vi.fn() } } }));
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    property: {
+      findUnique: vi.fn(async () =>
+        ({ id: "p1", address: "addr", createdBy: "u1", assignedTo: null, building: null, photos: [] }),
+      ),
+    },
+  },
+}));
 vi.mock("@/lib/sales-sheet/render-to-output", () => ({ renderDocumentToPdf: vi.fn() }));
 vi.mock("@/lib/sales-sheet/output", () => ({ isChromiumAvailable: vi.fn(() => true) }));
 vi.mock("@/lib/sales-sheet/build-document", () => ({ buildInitialSalesSheetDocument: vi.fn(async () => ({ ok: true })) }));
@@ -77,5 +85,12 @@ describe("POST sales-sheet/preview", () => {
     const res = await POST(req({ price: "3,480万円" }), ctx);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/pdf");
+    // Verify the photo-fallback query shape: orderBy with isPrimary desc, sortOrder asc, take 1
+    const call = pm.property.findUnique.mock.calls[0][0];
+    expect(call.include.photos.orderBy).toEqual([
+      { isPrimary: "desc" },
+      { sortOrder: "asc" },
+    ]);
+    expect(call.include.photos.take).toBe(1);
   });
 });

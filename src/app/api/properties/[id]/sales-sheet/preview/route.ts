@@ -41,7 +41,7 @@ export async function POST(
 
     const property = await prisma.property.findUnique({
       where: { id },
-      include: { building: true, photos: { where: { isPrimary: true }, take: 1 } },
+      include: { building: true, photos: { orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }], take: 1 } },
     });
     if (!property) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
     if (!canAccessPropertyRecord(session, property)) {
