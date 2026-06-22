@@ -16,10 +16,26 @@ function mmToPx(mm: number): number {
   return Math.round((mm * 96) / 25.4);
 }
 
+/** export 時にChromiumが取得してよいURLか。data:/about:/blob: のみ許可し、
+ *  http(s)/file 等の外部取得を遮断する（生HTML SSRF/ローカル資源露出の根治）。 */
+const ALLOWED_REQUEST_SCHEMES = ["data:", "about:", "blob:"];
+export function isAllowedRequestUrl(url: string): boolean {
+  return ALLOWED_REQUEST_SCHEMES.some((s) => url.startsWith(s));
+}
+
+/** page の全リクエストに遮断ルールを適用する。 */
+async function applyNetworkGuard(page: Page): Promise<void> {
+  await page.route("**/*", (route) => {
+    if (isAllowedRequestUrl(route.request().url())) route.continue();
+    else route.abort();
+  });
+}
+
 async function withPage<T>(html: string, fn: (page: Page) => Promise<T>): Promise<T> {
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
+    await applyNetworkGuard(page);
     await page.setContent(html, { waitUntil: "networkidle" });
     return await fn(page);
   } finally {
@@ -59,6 +75,7 @@ export async function renderHtmlToImage(
       deviceScaleFactor,
     });
     const page = await context.newPage();
+    await applyNetworkGuard(page);
     try {
       await page.setContent(html, { waitUntil: "networkidle" });
       const sheetLocator = page.locator("[data-sales-sheet-page]");
