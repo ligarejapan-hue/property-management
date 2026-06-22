@@ -53,6 +53,7 @@ CREATE TABLE "dm_recipient_drafts" (
     "recipient_zip" TEXT,
     "recipient_address" TEXT,
     "honorific" TEXT NOT NULL,
+    "co_owner_count" INTEGER NOT NULL DEFAULT 1,
     "body" TEXT NOT NULL,
     "model" TEXT,
     "status" "DmDraftStatus" NOT NULL DEFAULT 'draft',

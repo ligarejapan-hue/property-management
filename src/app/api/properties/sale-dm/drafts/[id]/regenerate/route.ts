@@ -17,7 +17,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const sender = resolveSender();
     const { drafts } = await generateLetters([{
       recipient: {
-        representativeName: draft.recipientName, honorific: draft.honorific, coOwnerCount: 1,
+        representativeName: draft.recipientName, honorific: draft.honorific, coOwnerCount: draft.coOwnerCount,
         propertyAddress: draft.property.address, propertyTypeLabel: PROPERTY_TYPE_LABELS[draft.property.propertyType] ?? draft.property.propertyType, roomNo: draft.property.roomNo,
       },
       options: { designTemplate: v.designTemplate, tone: v.tone, length: v.length, appeal: v.appeal, strength: v.strength, senderName: sender.senderName, senderContact: sender.senderContact, extraInstruction: v.extraInstruction ?? undefined },

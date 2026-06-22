@@ -51,6 +51,7 @@ describe("buildRecipientsFromProperties", () => {
     expect(recipients[0].propertyTypeLabel).toBeTruthy();
     expect(meta[0].propertyId).toBe("p1");
     expect(meta[0].recipientAddress).toBe("東京都〇〇区△△1-2-3");
+    expect(meta[0].coOwnerCount).toBe(1);
   });
 });
 

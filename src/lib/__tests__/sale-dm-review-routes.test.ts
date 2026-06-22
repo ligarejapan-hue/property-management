@@ -94,6 +94,7 @@ describe("POST regenerate draft (再生成)", () => {
     id: "r1",
     recipientName: "田中 一郎",
     honorific: "様",
+    coOwnerCount: 1,
     property: { address: "東京都〇〇区", propertyType: "land", roomNo: null },
     variant: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
   };

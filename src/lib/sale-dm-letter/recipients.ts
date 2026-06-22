@@ -15,6 +15,7 @@ export interface RecipientMeta {
   recipientZip: string | null;
   recipientAddress: string | null;
   honorific: string;
+  coOwnerCount: number;
 }
 
 // route の select は owner.id も取得するが、DmRowPropertyOwner の owner 型は id を含まないため widen する。
@@ -60,6 +61,7 @@ export function buildRecipientsFromProperties(
         recipientZip: repOwner.zip ?? null,
         recipientAddress: repOwner.address ?? null,
         honorific,
+        coOwnerCount: group.length,
       });
     }
   }

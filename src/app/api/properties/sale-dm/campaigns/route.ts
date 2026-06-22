@@ -88,6 +88,7 @@ export async function POST(request: NextRequest) {
             representativeOwnerId: sliced[i].representativeOwnerId,
             recipientName: sliced[i].recipientName, recipientZip: sliced[i].recipientZip,
             recipientAddress: sliced[i].recipientAddress, honorific: sliced[i].honorific,
+            coOwnerCount: sliced[i].coOwnerCount,
             body: d.body ?? "", model: process.env.SALE_DM_LETTER_MODEL ?? DEFAULT_MODEL,
             outcomeNote: d.error ? `生成失敗(${d.error})` : null,
             trackingToken: randomBytes(8).toString("base64url"),

@@ -982,6 +982,7 @@ model DmRecipientDraft {
   recipientZip          String?          @map("recipient_zip")
   recipientAddress      String?          @map("recipient_address")
   honorific             String
+  coOwnerCount          Int              @default(1) @map("co_owner_count")
   body                  String
   model                 String?
   status                DmDraftStatus    @default(draft)
