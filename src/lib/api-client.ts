@@ -226,6 +226,30 @@ export async function updateSaleDmOutcome(
   });
 }
 
+// 下書きの本文 / 割当型(variantId)の部分更新。
+export async function patchSaleDmDraft(id: string, patch: { body?: string; variantId?: string }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id };
+  }
+  return apiFetch<{ id: string }>(`/api/properties/sale-dm/drafts/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+// 割当型 + 個別上書きで本文を AI 再生成する。
+export async function regenerateSaleDmDraft(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id, body: "（mock再生成）本文" };
+  }
+  return apiFetch<{ id: string; body: string }>(`/api/properties/sale-dm/drafts/${id}/regenerate`, {
+    method: "POST",
+  });
+}
+
 // ---------- Next Actions ----------
 
 export async function fetchNextActions(
