@@ -845,7 +845,7 @@ function PropertiesPageInner() {
                       setSuggestOpen(false);
                       router.push(`/properties/${item.id}`);
                     }}
-                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50"
+                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50 dark:hover:bg-gray-800"
                   >
                     <div className="flex items-center gap-2">
                       <span className="flex-1 font-medium text-gray-800 truncate dark:text-gray-100">{item.address}</span>
