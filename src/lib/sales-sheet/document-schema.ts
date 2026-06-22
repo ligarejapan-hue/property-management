@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+/**
+ * 画像srcとして安全か（SSRF防止）: data:image URL か ルート相対パス(/uploads/ 等)のみ許可。
+ * 絶対URL/scheme付きは拒否。
+ */
+export function isSafeImageSrc(src: string): boolean {
+  if (src.startsWith("data:image/")) return true;
+  if (src.startsWith("/") && !src.startsWith("//")) return true; // root-relative, not protocol-relative
+  return false;
+}
+
 /** 幾何は mm。フォントサイズのみ pt。z は重ね順(整数)。 */
 const baseElement = {
   id: z.string().min(1),
@@ -31,7 +41,7 @@ export const textElementSchema = z.object({
 export const imageElementSchema = z.object({
   ...baseElement,
   type: z.literal("image"),
-  src: z.string().min(1),
+  src: z.string().min(1).refine(isSafeImageSrc, "unsafe image src"),
   fit: z.enum(["cover", "contain"]).default("cover"),
   radiusMm: z.number().nonnegative().optional(),
   alt: z.string().optional(),
@@ -75,7 +85,7 @@ export const qrElementSchema = z.object({
   ...baseElement,
   type: z.literal("qr"),
   /** 生成済みQR画像の data URL（生成は後続Plan）。 */
-  dataUrl: z.string().min(1),
+  dataUrl: z.string().min(1).refine((s) => s.startsWith("data:image/"), "qr dataUrl must be a data:image URL"),
 });
 
 export const elementSchema = z.discriminatedUnion("type", [
