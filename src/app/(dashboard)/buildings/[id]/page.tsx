@@ -686,7 +686,7 @@ function AddUnitModal({
             <select
               value={form.occupancyStatus}
               onChange={(e) => setField("occupancyStatus", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="unknown">不明</option>
               <option value="vacant">空室</option>

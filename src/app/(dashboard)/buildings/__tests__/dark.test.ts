@@ -94,6 +94,17 @@ describe("buildings/[id]/page.tsx (棟詳細) dark: 配色", () => {
   it("入力欄に dark:bg-gray-900 がある", () => {
     expect(detailSrc).toContain("dark:bg-gray-900");
   });
+  it("AddUnitModal の入居状況 select が dark 入力3点セットを持つ", () => {
+    // occupancyStatus select の className ブロックを抽出して3点セットを確認
+    // className="..." の文字列でなく、select タグ開始からオプションまでの範囲で確認
+    const occupancySection = detailSrc.slice(
+      detailSrc.indexOf("入居状況"),
+      detailSrc.indexOf("</select>", detailSrc.indexOf("入居状況")),
+    );
+    expect(occupancySection).toContain("dark:border-gray-700");
+    expect(occupancySection).toContain("dark:bg-gray-900");
+    expect(occupancySection).toContain("dark:text-gray-100");
+  });
 
   // --- ライト側不変担保 ---
   it("ライトモード bg-white は残っている", () => {
