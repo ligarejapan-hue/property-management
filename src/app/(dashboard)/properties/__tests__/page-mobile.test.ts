@@ -36,6 +36,18 @@ describe("properties/page.tsx モバイル UI (M1)", () => {
   it("§8-4: stopPropagation で誤遷移を防止している", () => {
     expect(src).toContain("stopPropagation");
   });
+  it("§8-4: 修飾クリック (metaKey) のガードがある", () => {
+    expect(src).toContain("e.metaKey");
+  });
+  it("§8-4: 修飾クリック (ctrlKey) のガードがある", () => {
+    expect(src).toContain("e.ctrlKey");
+  });
+  it("§8-4: リンク/インタラクティブ要素由来クリックのガードがある", () => {
+    expect(src).toContain('closest("a, button, input, label, select, textarea")');
+  });
+  it("§8-4: defaultPrevented チェックがある", () => {
+    expect(src).toContain("e.defaultPrevented");
+  });
 
   // §8-7 上下余白
   it("§8-7: ページ上部に pt-2 がある", () => {

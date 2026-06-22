@@ -1170,7 +1170,11 @@ function PropertiesPageInner() {
                 <tr
                   key={property.id}
                   className="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
-                  onClick={() => router.push(`/properties/${property.id}`)}
+                  onClick={(e) => {
+                    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if ((e.target as HTMLElement).closest("a, button, input, label, select, textarea")) return;
+                    router.push(`/properties/${property.id}`);
+                  }}
                 >
                   <td className="whitespace-nowrap px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
