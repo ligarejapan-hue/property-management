@@ -1,0 +1,100 @@
+import { vi } from "vitest";
+vi.mock("next/server", () => {
+  class MockNextResponse extends Response {
+    static redirect = (url: string, init?: number | ResponseInit) => {
+      const status = typeof init === "number" ? init : (init?.status ?? 307);
+      const headers = typeof init === "object" && init && "headers" in init ? (init.headers as HeadersInit) : undefined;
+      return new Response(null, { status, headers: { ...(headers as Record<string, string>), Location: url } });
+    };
+  }
+  return { NextResponse: MockNextResponse };
+});
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    dmRecipientDraft: {
+      findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null })),
+      update: vi.fn(async () => ({ id: "r1" })),
+    },
+  },
+}));
+
+import { describe, it, expect } from "vitest";
+import { recordTrackingHit } from "../sale-dm-letter/tracking-record";
+
+function makeTx(existing: { id: string; lpFirstAccessAt: Date | null } | null) {
+  return {
+    dmRecipientDraft: {
+      findUnique: vi.fn(async () => existing),
+      update: vi.fn(async (args: unknown) => {
+        void args; // 呼び出し引数は mock.calls で検証する(本体では未使用)。
+        return { id: existing?.id };
+      }),
+    },
+  };
+}
+
+describe("recordTrackingHit", () => {
+  it("未知トークンは matched=false・更新しない", async () => {
+    const tx = makeTx(null);
+    const r = await recordTrackingHit(tx as never, "nope");
+    expect(r.matched).toBe(false);
+    expect(tx.dmRecipientDraft.update).not.toHaveBeenCalled();
+  });
+
+  it("初回アクセスは lpFirstAccessAt をセット + count++", async () => {
+    const tx = makeTx({ id: "r1", lpFirstAccessAt: null });
+    const r = await recordTrackingHit(tx as never, "tok");
+    expect(r.matched).toBe(true);
+    const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
+      data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number } };
+    };
+    expect(arg.data.lpFirstAccessAt).toBeInstanceOf(Date);
+    expect(arg.data.lpAccessCount).toEqual({ increment: 1 });
+  });
+
+  it("2回目以降は lpFirstAccessAt を上書きしない(冪等)・count は ++", async () => {
+    const tx = makeTx({ id: "r1", lpFirstAccessAt: new Date("2020-01-01") });
+    await recordTrackingHit(tx as never, "tok");
+    const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
+      data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number } };
+    };
+    expect(arg.data.lpFirstAccessAt).toBeUndefined();
+    expect(arg.data.lpAccessCount).toEqual({ increment: 1 });
+  });
+});
+
+import { describe as d2, it as i2, expect as e2, beforeEach as b2 } from "vitest";
+import prismaMock from "@/lib/prisma";
+import { GET } from "../../app/t/[token]/route";
+
+const ctx = (token: string) => ({ params: Promise.resolve({ token }) });
+const ENV = process.env;
+b2(() => { vi.clearAllMocks(); process.env = { ...ENV }; });
+
+d2("GET /t/[token]", () => {
+  i2("既知トークン + LP 設定で 302 → LP・記録する・no-store", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(302);
+    e2(res.headers.get("Location")).toBe("https://lp.example.com/sell");
+    e2(res.headers.get("Cache-Control")).toBe("no-store");
+    const pm = prismaMock as never as { dmRecipientDraft: { update: ReturnType<typeof vi.fn> } };
+    e2(pm.dmRecipientDraft.update).toHaveBeenCalledOnce();
+  });
+
+  i2("LP 未設定なら 404(fail-closed)", async () => {
+    delete process.env.SALE_DM_LP_URL;
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(404);
+  });
+
+  i2("未知トークンでも LP 設定済みなら 302(列挙耐性)・記録は更新しない", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> } };
+    pm.dmRecipientDraft.findUnique.mockResolvedValueOnce(null);
+    const res = await GET(new Request("http://x/t/nope") as never, ctx("nope"));
+    e2(res.status).toBe(302);
+    e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+  });
+});
