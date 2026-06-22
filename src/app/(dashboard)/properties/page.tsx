@@ -1339,14 +1339,16 @@ function PropertiesPageInner() {
                     />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-medium text-indigo-600">
-                        {PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-900 dark:text-gray-100 break-all">
-                      {property.address}
-                    </p>
+                    <Link href={`/properties/${property.id}`} className="block">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium text-indigo-600">
+                          {PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-900 dark:text-gray-100 break-all">
+                        {property.address}
+                      </p>
+                    </Link>
                   </div>
                 </div>
 

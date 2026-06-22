@@ -109,6 +109,11 @@ describe("properties/page.tsx §8-5 C1: モバイルカード表示", () => {
     expect(src).toContain("data-pii-protected");
   });
 
+  // --- キーボード/新規タブ導線（a11y §8-5 P2） ---
+  it("カードの主要導線に Link(href=/properties/) がある（キーボード・新規タブ対応）", () => {
+    expect(src).toContain("href={`/properties/${property.id}`}");
+  });
+
   // --- PC テーブル不変（回帰） ---
   it("回帰: PC テーブルの <table> 要素が依然存在する", () => {
     expect(src).toContain("<table");
