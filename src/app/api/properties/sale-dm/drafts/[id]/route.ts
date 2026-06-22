@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
@@ -45,8 +46,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       data.variantId = parsed.variantId;
     }
 
-    // override は明示 null で消去、object で保存。undefined は不変。
-    if (parsed.override !== undefined) data.overrideJson = parsed.override;
+    // override は明示 null で消去(DB NULL=Prisma.DbNull)、object で保存。undefined は不変。
+    // 注: nullable Json フィールドへ素の JS null を渡すと Prisma は実行時に拒否するため
+    //     消去は必ず Prisma.DbNull を使う(read 時は overrideJson: null として返る)。
+    if (parsed.override !== undefined) {
+      data.overrideJson = parsed.override === null ? Prisma.DbNull : parsed.override;
+    }
 
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

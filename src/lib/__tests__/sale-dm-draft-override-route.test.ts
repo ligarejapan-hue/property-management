@@ -32,6 +32,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { PATCH as patchDraft } from "../../app/api/properties/sale-dm/drafts/[id]/route";
+import { Prisma } from "@/generated/prisma";
 
 const pm = prismaMock as never as {
   dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
@@ -65,10 +66,11 @@ describe("PATCH draft (拡張)", () => {
     expect(pm.dmRecipientDraft.update.mock.calls[0][0].data.overrideJson).toEqual({ tone: "soft" });
   });
 
-  it("override: null で上書きを消去できる", async () => {
+  it("override: null で上書きを消去できる(DB NULL=Prisma.DbNull)", async () => {
     const res = await patchDraft(patch({ override: null }) as never, ctx);
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.update.mock.calls[0][0].data.overrideJson).toBeNull();
+    // nullable Json の消去は Prisma.DbNull で行う(素の null は実行時に拒否される)。
+    expect(pm.dmRecipientDraft.update.mock.calls[0][0].data.overrideJson).toBe(Prisma.DbNull);
   });
 
   it("variantId 付け替えは当該 campaign の型のみ許可(検証 OK で 200)", async () => {
