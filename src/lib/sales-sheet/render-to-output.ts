@@ -15,5 +15,9 @@ export async function renderDocumentToImage(
   doc: SalesSheetDocument,
   format: "png" | "jpeg" = "png",
 ): Promise<Buffer> {
-  return renderHtmlToImage(renderDocumentToHtml(doc), { format });
+  return renderHtmlToImage(renderDocumentToHtml(doc), {
+    format,
+    widthMm: doc.page.width,
+    heightMm: doc.page.height,
+  });
 }

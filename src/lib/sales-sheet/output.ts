@@ -11,6 +11,11 @@ export function isChromiumAvailable(): boolean {
   }
 }
 
+/** mm → px（96 dpi 基準）。 */
+function mmToPx(mm: number): number {
+  return Math.round((mm * 96) / 25.4);
+}
+
 async function withPage<T>(html: string, fn: (page: Page) => Promise<T>): Promise<T> {
   const browser = await chromium.launch();
   try {
@@ -35,8 +40,37 @@ export async function renderHtmlToPdf(
 
 export async function renderHtmlToImage(
   html: string,
-  opts: { format?: "png" | "jpeg" } = {},
+  opts: {
+    format?: "png" | "jpeg";
+    widthMm?: number;
+    heightMm?: number;
+    scale?: number;
+  } = {},
 ): Promise<Buffer> {
   const type = opts.format ?? "png";
-  return withPage(html, (page) => page.screenshot({ type, fullPage: true }));
+  const widthPx = mmToPx(opts.widthMm ?? 297);
+  const heightPx = mmToPx(opts.heightMm ?? 210);
+  const deviceScaleFactor = opts.scale ?? 2;
+
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: widthPx, height: heightPx },
+      deviceScaleFactor,
+    });
+    const page = await context.newPage();
+    try {
+      await page.setContent(html, { waitUntil: "networkidle" });
+      const sheetLocator = page.locator("[data-sales-sheet-page]");
+      const count = await sheetLocator.count();
+      if (count > 0) {
+        return await sheetLocator.first().screenshot({ type });
+      }
+      return await page.screenshot({ type });
+    } finally {
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
 }
