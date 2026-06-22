@@ -184,7 +184,7 @@ export default function AttachmentTab({
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-        <span className="ml-2 text-sm text-gray-500">読み込み中...</span>
+        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
       </div>
     );
   }
@@ -196,7 +196,7 @@ export default function AttachmentTab({
     <div className="space-y-8">
       {/* ============================== 通常添付 ============================== */}
       <section>
-        <h3 className="mb-2 text-sm font-semibold text-gray-700">添付ファイル</h3>
+        <h3 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">添付ファイル</h3>
 
         {/* Upload area: general */}
         <div
@@ -206,22 +206,22 @@ export default function AttachmentTab({
           onClick={() => fileInputRefGeneral.current?.click()}
           className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
             dragOverGeneral
-              ? "border-blue-400 bg-blue-50"
-              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+              ? "border-blue-400 bg-blue-50 dark:border-blue-400/40 dark:bg-blue-500/15"
+              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600 dark:hover:bg-gray-800"
           }`}
         >
           {uploadingGeneral ? (
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-              <span className="text-sm text-gray-600">アップロード中...</span>
+              <span className="text-sm text-gray-600 dark:text-gray-300">アップロード中...</span>
             </div>
           ) : (
             <>
-              <Upload className="mx-auto mb-2 h-8 w-8 text-gray-400" />
-              <p className="text-sm text-gray-600">
+              <Upload className="mx-auto mb-2 h-8 w-8 text-gray-400 dark:text-gray-500" />
+              <p className="text-sm text-gray-600 dark:text-gray-300">
                 ファイルをドラッグ＆ドロップ、またはクリックして選択
               </p>
-              <p className="mt-1 text-xs text-gray-400">
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                 上限 {MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像
               </p>
             </>
@@ -243,7 +243,7 @@ export default function AttachmentTab({
         )}
 
         {generalAttachments.length === 0 ? (
-          <div className="flex flex-col items-center py-6 text-gray-400">
+          <div className="flex flex-col items-center py-6 text-gray-400 dark:text-gray-500">
             <Paperclip className="mb-2 h-8 w-8" />
             <p className="text-sm">添付ファイルはまだありません</p>
           </div>
@@ -263,7 +263,7 @@ export default function AttachmentTab({
 
       {/* ============================== 謄本PDF ============================== */}
       <section>
-        <h3 className="mb-2 text-sm font-semibold text-gray-700">謄本PDF</h3>
+        <h3 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">謄本PDF</h3>
 
         {/* Upload area: registry */}
         <div
@@ -273,22 +273,22 @@ export default function AttachmentTab({
           onClick={() => fileInputRefRegistry.current?.click()}
           className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
             dragOverRegistry
-              ? "border-amber-400 bg-amber-50"
-              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+              ? "border-amber-400 bg-amber-50 dark:border-amber-400/40 dark:bg-amber-500/15"
+              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600 dark:hover:bg-gray-800"
           }`}
         >
           {uploadingRegistry ? (
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
-              <span className="text-sm text-gray-600">アップロード中...</span>
+              <span className="text-sm text-gray-600 dark:text-gray-300">アップロード中...</span>
             </div>
           ) : (
             <>
               <FileText className="mx-auto mb-2 h-8 w-8 text-amber-500" />
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 dark:text-gray-300">
                 謄本PDFをドラッグ＆ドロップ、またはクリックして選択
               </p>
-              <p className="mt-1 text-xs text-gray-400">
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                 PDF のみ / 上限 {MAX_SIZE_MB}MB
               </p>
             </>
@@ -310,7 +310,7 @@ export default function AttachmentTab({
         )}
 
         {registryAttachments.length === 0 ? (
-          <div className="flex flex-col items-center py-6 text-gray-400">
+          <div className="flex flex-col items-center py-6 text-gray-400 dark:text-gray-500">
             <FileText className="mb-2 h-8 w-8" />
             <p className="text-sm">謄本PDFはまだありません</p>
           </div>
@@ -342,17 +342,17 @@ export default function AttachmentTab({
       {/* Delete confirmation dialog */}
       {deleteTargetId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="mx-4 w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
-            <h4 className="text-base font-semibold text-gray-900">
+          <div className="mx-4 w-full max-w-sm rounded-lg bg-white dark:bg-gray-900 p-6 shadow-xl">
+            <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
               ファイルを削除しますか？
             </h4>
-            <p className="mt-2 text-sm text-gray-500">
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
               この操作は取り消せません。
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setDeleteTargetId(null)}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
               >
                 キャンセル
               </button>
@@ -388,24 +388,24 @@ function AttachmentRow({
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
   const displayName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
   return (
-    <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-white p-3">
-      <Icon className="h-5 w-5 shrink-0 text-gray-500" />
+    <div className="flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+      <Icon className="h-5 w-5 shrink-0 text-gray-500 dark:text-gray-400" />
       <div className="min-w-0 flex-1">
         {previewable ? (
           <button
             type="button"
             onClick={onPreviewClick}
-            className="block w-full truncate text-left text-sm font-medium text-indigo-600 hover:underline"
+            className="block w-full truncate text-left text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
             title="プレビュー"
           >
             {displayName}
           </button>
         ) : (
-          <p className="truncate text-sm font-medium text-gray-800">
+          <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">
             {displayName}
           </p>
         )}
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           {formatFileSize(att.fileSize)} ·{" "}
           {att.uploader.name} ·{" "}
           {new Date(att.createdAt).toLocaleDateString("ja-JP")}
@@ -414,7 +414,7 @@ function AttachmentRow({
       {previewable && (
         <button
           onClick={onPreviewClick}
-          className="shrink-0 rounded p-1 text-gray-400 hover:bg-indigo-50 hover:text-indigo-500"
+          className="shrink-0 rounded p-1 text-gray-400 dark:text-gray-500 hover:bg-indigo-50 hover:text-indigo-500 dark:hover:bg-gray-800"
           title="プレビュー"
         >
           <Eye className="h-4 w-4" />
@@ -425,14 +425,14 @@ function AttachmentRow({
         target="_blank"
         rel="noopener noreferrer"
         download={displayName}
-        className="shrink-0 rounded p-1 text-gray-400 hover:bg-indigo-50 hover:text-indigo-500"
+        className="shrink-0 rounded p-1 text-gray-400 dark:text-gray-500 hover:bg-indigo-50 hover:text-indigo-500 dark:hover:bg-gray-800"
         title="ダウンロード"
       >
         <Download className="h-4 w-4" />
       </a>
       <button
         onClick={onDeleteClick}
-        className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+        className="shrink-0 rounded p-1 text-gray-400 dark:text-gray-500 hover:bg-red-50 hover:text-red-500"
         title="削除"
       >
         <Trash2 className="h-4 w-4" />
@@ -464,12 +464,12 @@ function PreviewModal({
       onClick={onClose}
     >
       <div
-        className="relative flex h-full w-full max-w-[90vw] sm:max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
+        className="relative flex h-full w-full max-w-[90vw] sm:max-w-5xl flex-col overflow-hidden rounded-lg bg-white dark:bg-gray-900 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2">
-          <p className="truncate text-sm font-medium text-gray-800" title={displayName}>
+        <div className="flex items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-4 py-2">
+          <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-100" title={displayName}>
             {displayName}
           </p>
           <div className="flex shrink-0 items-center gap-1">
@@ -478,14 +478,14 @@ function PreviewModal({
               target="_blank"
               rel="noopener noreferrer"
               download={displayName}
-              className="rounded p-1 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600"
+              className="rounded p-1 text-gray-500 dark:text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-gray-800"
               title="ダウンロード"
             >
               <Download className="h-4 w-4" />
             </a>
             <button
               onClick={onClose}
-              className="rounded p-1 text-gray-500 hover:bg-gray-200"
+              className="rounded p-1 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
               title="閉じる"
             >
               <X className="h-5 w-5" />
@@ -493,7 +493,7 @@ function PreviewModal({
           </div>
         </div>
         {/* Body */}
-        <div className="min-h-0 flex-1 overflow-auto bg-gray-100">
+        <div className="min-h-0 flex-1 overflow-auto bg-gray-100 dark:bg-gray-800">
           {kind === "image" && (
             <div className="flex h-full w-full items-center justify-center p-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -518,8 +518,8 @@ function PreviewModal({
             />
           )}
           {kind === null && (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-gray-600">
-              <FileText className="h-12 w-12 text-gray-400" />
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-gray-600 dark:text-gray-300">
+              <FileText className="h-12 w-12 text-gray-400 dark:text-gray-500" />
               <p>このファイル形式はブラウザ内プレビュー非対応です。</p>
               <a
                 href={safeUrl}
