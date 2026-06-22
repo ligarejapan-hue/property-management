@@ -22,7 +22,7 @@ export default defineConfig({
   plugins: [stripShebangFromMjs],
   test: {
     environment: "node",
-    include: ["src/**/__tests__/**/*.test.ts"],
+    include: ["src/**/__tests__/**/*.test.ts?(x)"],
   },
   resolve: {
     alias: {
