@@ -106,6 +106,12 @@ describe("PATCH variant (更新)", () => {
     expect(arg.data.tone).toBe("soft");
     expect(arg.data.label).toBe("A2");
   });
+  it("権限不足で 403", async () => {
+    grant("property");
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "x" }) }) as never, ctxV);
+    expect(res.status).toBe(403);
+    expect(pm.dmVariant.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE variant (削除ガード)", () => {
@@ -120,6 +126,12 @@ describe("DELETE variant (削除ガード)", () => {
     pm.dmRecipientDraft.count.mockResolvedValue(3);
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(409);
+    expect(pm.dmVariant.delete).not.toHaveBeenCalled();
+  });
+  it("権限不足で 403", async () => {
+    grant("property");
+    const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
+    expect(res.status).toBe(403);
     expect(pm.dmVariant.delete).not.toHaveBeenCalled();
   });
 });
