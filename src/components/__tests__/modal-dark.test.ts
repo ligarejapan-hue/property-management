@@ -144,3 +144,116 @@ describe("modal dark mode (D1)", () => {
     expect(src).toContain("dark:bg-indigo-500/25");
   });
 });
+
+describe("modal dark mode (D2)", () => {
+  // ── OwnerMislinkModal ───────────────────────────────────────────────────
+
+  test("OwnerMislinkModal: panel has dark background", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("dark:bg-gray-900");
+  });
+
+  test("OwnerMislinkModal: heading has dark text (100-level)", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("dark:text-gray-100");
+  });
+
+  test("OwnerMislinkModal: body text has dark variant (300-level)", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("dark:text-gray-300");
+  });
+
+  test("OwnerMislinkModal: border has dark variant (800-level)", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("dark:border-gray-800");
+  });
+
+  test("OwnerMislinkModal: input has dark 3-point set", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    // bg
+    expect(src).toContain("dark:bg-gray-900");
+    // text
+    expect(src).toContain("dark:text-gray-100");
+    // border
+    expect(src).toContain("dark:border-gray-700");
+  });
+
+  test("OwnerMislinkModal: input has dark placeholder", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("dark:placeholder:text-gray-500");
+  });
+
+  test("OwnerMislinkModal: search result row hover has dark variant", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("dark:hover:bg-gray-800");
+  });
+
+  test("OwnerMislinkModal: selected search row has dark variant", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("dark:bg-indigo-500/25");
+  });
+
+  // Light-mode classes must remain intact
+  test("OwnerMislinkModal: light bg-white preserved", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("bg-white");
+  });
+
+  test("OwnerMislinkModal: light border-gray-200 preserved", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("border-gray-200");
+  });
+
+  test("OwnerMislinkModal: light text-gray-600 preserved", () => {
+    const src = readSrc("owners/OwnerMislinkModal.tsx");
+    expect(src).toContain("text-gray-600");
+  });
+
+  // ── address-lookup-controls ─────────────────────────────────────────────
+
+  test("address-lookup-controls: candidates list has dark border (800-level)", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("dark:border-gray-800");
+  });
+
+  test("address-lookup-controls: candidate button has dark text (100-level)", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("dark:text-gray-100");
+  });
+
+  test("address-lookup-controls: candidate button hover has dark variant", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("dark:hover:bg-gray-800");
+  });
+
+  test("address-lookup-controls: hint text has dark variant (500-level)", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("dark:text-gray-500");
+  });
+
+  test("address-lookup-controls: loading text has dark variant (400-level)", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("dark:text-gray-400");
+  });
+
+  test("address-lookup-controls: cancel button has dark border", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("dark:border-gray-700");
+  });
+
+  // Light-mode classes must remain intact
+  test("address-lookup-controls: light border-gray-200 preserved", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("border-gray-200");
+  });
+
+  test("address-lookup-controls: light text-gray-400 preserved", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("text-gray-400");
+  });
+
+  test("address-lookup-controls: light text-gray-500 preserved", () => {
+    const src = readSrc("address/address-lookup-controls.tsx");
+    expect(src).toContain("text-gray-500");
+  });
+});

@@ -263,13 +263,13 @@ export function AddressLookupControls({
       )}
 
       {showSearch && !disabled && (
-        <p className="text-gray-400">
+        <p className="text-gray-400 dark:text-gray-500">
           住所を入力すると郵便番号候補を検索します
         </p>
       )}
 
       {loading && (
-        <p className="flex items-center gap-1 text-gray-500">
+        <p className="flex items-center gap-1 text-gray-500 dark:text-gray-400">
           <Loader2 className="h-3 w-3 animate-spin" />
           検索中...
         </p>
@@ -280,21 +280,21 @@ export function AddressLookupControls({
       )}
 
       {!loading && showCandidates && requiresCandidateSelection(candidates) && (
-        <p className="text-gray-500">複数の候補があります。選択してください。</p>
+        <p className="text-gray-500 dark:text-gray-400">複数の候補があります。選択してください。</p>
       )}
 
       {!loading && showCandidates && (
-        <ul className="max-h-40 overflow-y-auto rounded border border-gray-200">
+        <ul className="max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-800">
           {candidates.map((candidate, i) => (
             <li
               key={`${candidate.source}-${candidate.postalCode ?? ""}-${i}`}
-              className="border-b border-gray-100 last:border-b-0"
+              className="border-b border-gray-100 dark:border-gray-800 last:border-b-0"
             >
               <button
                 type="button"
                 onClick={() => applyCandidate(candidate)}
                 disabled={disabled}
-                className="block w-full px-2 py-1 text-left hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="block w-full px-2 py-1 text-left text-gray-900 dark:text-gray-100 hover:bg-indigo-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {formatCandidateLabel(candidate)}
               </button>
@@ -328,7 +328,7 @@ export function AddressLookupControls({
             <button
               type="button"
               onClick={clearPending}
-              className="rounded border border-gray-300 px-2 py-0.5 text-gray-600 hover:bg-gray-50"
+              className="rounded border border-gray-300 dark:border-gray-700 px-2 py-0.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               キャンセル
             </button>
@@ -337,7 +337,7 @@ export function AddressLookupControls({
       )}
 
       {showNoResult && (
-        <p className="text-gray-500">該当する住所が見つかりません。</p>
+        <p className="text-gray-500 dark:text-gray-400">該当する住所が見つかりません。</p>
       )}
     </div>
   );

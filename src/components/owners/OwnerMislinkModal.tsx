@@ -284,28 +284,28 @@ export function OwnerMislinkModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-[90vw] sm:max-w-xl overflow-y-auto rounded-lg bg-white p-4 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-[90vw] sm:max-w-xl overflow-y-auto rounded-lg bg-white dark:bg-gray-900 p-4 shadow-xl">
         <div className="mb-3 flex items-baseline justify-between">
-          <h3 className="text-sm font-semibold text-gray-900">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
             誤紐づき修正
           </h3>
           <button
             type="button"
             onClick={onClose}
-            className="text-xs text-gray-500 hover:text-gray-700"
+            className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
           >
             閉じる
           </button>
         </div>
 
-        <div className="mb-3 text-xs text-gray-600">
+        <div className="mb-3 text-xs text-gray-600 dark:text-gray-300">
           現在の所有者:{" "}
           <span className="font-mono">{currentOwnerLabel}</span>
         </div>
 
         {/* 操作選択 */}
-        <fieldset className="mb-3 rounded border border-gray-200 p-2 text-xs">
-          <legend className="px-1 text-gray-500">操作</legend>
+        <fieldset className="mb-3 rounded border border-gray-200 dark:border-gray-800 p-2 text-xs">
+          <legend className="px-1 text-gray-500 dark:text-gray-400">操作</legend>
           <label className="mr-3">
             <input
               type="radio"
@@ -335,8 +335,8 @@ export function OwnerMislinkModal({
 
         {/* target 検索 */}
         {operation === "relink" && (
-          <div className="mb-3 rounded border border-gray-200 p-2">
-            <label className="mb-1 block text-xs text-gray-600">
+          <div className="mb-3 rounded border border-gray-200 dark:border-gray-800 p-2">
+            <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
               付け替え先の所有者を検索
             </label>
             <input
@@ -344,26 +344,26 @@ export function OwnerMislinkModal({
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
               placeholder="氏名 / 電話 / 住所 / リンクキー で検索"
-              className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+              className="w-full rounded border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             />
             {searchLoading && (
-              <p className="mt-1 text-xs text-gray-500">検索中...</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">検索中...</p>
             )}
             {searchError && (
               <p className="mt-1 text-xs text-red-600">{searchError}</p>
             )}
             {!searchLoading && searchHits.length > 0 && (
-              <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200">
+              <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-800">
                 {searchHits.map((h) => (
                   <li
                     key={h.id}
-                    className={`cursor-pointer border-b border-gray-100 px-2 py-1 text-xs last:border-b-0 hover:bg-indigo-50 ${
-                      selectedTarget?.id === h.id ? "bg-indigo-100" : ""
+                    className={`cursor-pointer border-b border-gray-100 dark:border-gray-800 px-2 py-1 text-xs last:border-b-0 hover:bg-indigo-50 dark:hover:bg-gray-800 ${
+                      selectedTarget?.id === h.id ? "bg-indigo-100 dark:bg-indigo-500/25" : ""
                     }`}
                     onClick={() => setSelectedTarget(h)}
                   >
-                    <div className="font-medium">{h.name}</div>
-                    <div className="font-mono text-[10px] text-gray-500">
+                    <div className="font-medium dark:text-gray-100">{h.name}</div>
+                    <div className="font-mono text-[10px] text-gray-500 dark:text-gray-400">
                       {h.id.slice(0, 8)}…
                     </div>
                   </li>
@@ -421,7 +421,7 @@ export function OwnerMislinkModal({
             >
               {previewResult.eligible ? "✓ 修正可能" : "✗ 修正不可"}
             </p>
-            <p className="mb-1 text-gray-600">
+            <p className="mb-1 text-gray-600 dark:text-gray-300">
               操作:{" "}
               <span className="font-mono">
                 {previewResult.operation === "remove" ? "remove" : "relink"}
@@ -445,7 +445,7 @@ export function OwnerMislinkModal({
               </div>
             )}
 
-            <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-gray-700">
+            <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-gray-700 dark:text-gray-200">
               <dt>currentOwner archived</dt>
               <dd className="font-mono">
                 {previewResult.summary.currentOwnerArchived ? "yes" : "no"}
@@ -524,7 +524,7 @@ export function OwnerMislinkModal({
                     <button
                       type="button"
                       onClick={() => setExecuteState("idle")}
-                      className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50"
+                      className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       キャンセル
                     </button>
@@ -548,7 +548,7 @@ export function OwnerMislinkModal({
                     <button
                       type="button"
                       onClick={() => setExecuteState("idle")}
-                      className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50"
+                      className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       キャンセル
                     </button>
@@ -557,7 +557,7 @@ export function OwnerMislinkModal({
               )}
 
               {executeState === "executing" && (
-                <p className="text-xs text-gray-600">修正中...</p>
+                <p className="text-xs text-gray-600 dark:text-gray-300">修正中...</p>
               )}
 
               {executeState === "execute_error" && (
