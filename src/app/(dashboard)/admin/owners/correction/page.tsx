@@ -109,7 +109,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const ACTION_BADGE: Record<string, string> = {
-  hold: "bg-gray-100 text-gray-500",
+  hold: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
   review: "bg-blue-100 text-blue-700",
   delete_candidate: "bg-red-100 text-red-700",
   merge_candidate: "bg-purple-100 text-purple-700",
@@ -152,7 +152,7 @@ function parseFilterTypeFromQuery(value: string | null): FilterType {
 export default function OwnerCorrectionPage() {
   return (
     <Suspense
-      fallback={<div className="p-6 text-sm text-gray-500">読み込み中...</div>}
+      fallback={<div className="p-6 text-sm text-gray-500 dark:text-gray-400">読み込み中...</div>}
     >
       <OwnerCorrectionPageInner />
     </Suspense>
@@ -292,7 +292,7 @@ function OwnerCorrectionPageInner() {
   return (
     <div className="p-6">
       <div className="mb-1">
-        <h1 className="text-xl font-bold text-gray-900">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
           所有者補正候補 (dry-run)
         </h1>
       </div>
@@ -301,7 +301,7 @@ function OwnerCorrectionPageInner() {
       </p>
 
       {/* Filter tabs */}
-      <div className="mb-4 flex gap-0 border-b border-gray-200">
+      <div className="mb-4 flex gap-0 border-b border-gray-200 dark:border-gray-800">
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -309,12 +309,12 @@ function OwnerCorrectionPageInner() {
             className={`-mb-px px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               filterType === tab.key
                 ? "border-indigo-600 text-indigo-700"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700"
             }`}
           >
             {tab.label}
             {tab.count !== undefined && (
-              <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+              <span className="ml-1.5 rounded-full bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
                 {tab.count}
               </span>
             )}
@@ -323,7 +323,7 @@ function OwnerCorrectionPageInner() {
       </div>
 
       {loading && !SELF_FETCH_TABS.includes(filterType) && (
-        <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && !SELF_FETCH_TABS.includes(filterType) && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -375,7 +375,7 @@ function OwnerCorrectionPageInner() {
 
             return (
               <>
-                <p className="mb-3 text-sm text-gray-500">
+                <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
                   {visibleCandidates.length} 件の確認候補
                   {filterType === "duplicate" &&
                     duplicateSubFilter !== "all" &&
@@ -393,13 +393,13 @@ function OwnerCorrectionPageInner() {
                 )}
 
                 {visibleCandidates.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-gray-400">
+                  <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
                     該当する候補はありません
                   </p>
                 ) : (
-                  <div className="overflow-x-auto rounded-md border border-gray-200">
+                  <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
                     <table className="min-w-full text-sm">
-                      <thead className="bg-gray-50 text-xs text-gray-500">
+                      <thead className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
                         <tr>
                           <th className="px-3 py-2 text-left font-medium">氏名</th>
                           <th className="px-3 py-2 text-left font-medium">住所</th>
@@ -424,23 +424,23 @@ function OwnerCorrectionPageInner() {
                           <th className="px-3 py-2 text-left font-medium">操作</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-100">
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                         {visibleCandidates.map((c: OwnerCorrectionCandidate) => (
-                    <tr key={c.id} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium text-gray-900">
+                    <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
                         {c.name ?? (
-                          <span className="text-gray-400">***</span>
+                          <span className="text-gray-400 dark:text-gray-500">***</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.address ?? (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.zip ?? "—"}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.phone ?? "—"}
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -448,23 +448,23 @@ function OwnerCorrectionPageInner() {
                           className={
                             c.propertyOwnerCount === 0
                               ? "font-medium text-orange-600"
-                              : "text-gray-700"
+                              : "text-gray-700 dark:text-gray-200"
                           }
                         >
                           {c.propertyOwnerCount}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-center text-gray-700">
+                      <td className="px-3 py-2 text-center text-gray-700 dark:text-gray-200">
                         {c.changeLogCount}
                       </td>
-                      <td className="px-3 py-2 text-center text-gray-700">
+                      <td className="px-3 py-2 text-center text-gray-700 dark:text-gray-200">
                         {c.version}
                       </td>
-                      <td className="px-3 py-2 font-mono text-[11px] text-gray-500">
+                      <td className="px-3 py-2 font-mono text-[11px] text-gray-500 dark:text-gray-400">
                         {c.importFileName ? (
                           `${c.importFileName}:${c.importRowNumber}行`
                         ) : (
-                          <span className="text-gray-400">不明</span>
+                          <span className="text-gray-400 dark:text-gray-500">不明</span>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -473,7 +473,7 @@ function OwnerCorrectionPageInner() {
                             <span
                               key={t}
                               className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                TYPE_BADGE[t] ?? "bg-gray-100 text-gray-600"
+                                TYPE_BADGE[t] ?? "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
                               }`}
                             >
                               {TYPE_LABELS[t] ?? t}
@@ -496,7 +496,7 @@ function OwnerCorrectionPageInner() {
                           {c.blockReasons.map((r) => (
                             <span
                               key={r}
-                              className="rounded-full bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500"
+                              className="rounded-full bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-500 dark:text-gray-400"
                             >
                               {BLOCK_REASON_LABELS[r] ?? r}
                             </span>
@@ -507,14 +507,14 @@ function OwnerCorrectionPageInner() {
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                             ACTION_BADGE[c.recommendedAction] ??
-                            "bg-gray-100 text-gray-600"
+                            "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
                           }`}
                         >
                           {ACTION_LABELS[c.recommendedAction] ??
                             c.recommendedAction}
                         </span>
                       </td>
-                      <td className="px-3 py-2 font-mono text-[10px] text-gray-400">
+                      <td className="px-3 py-2 font-mono text-[10px] text-gray-400 dark:text-gray-500">
                         {c.id.slice(0, 8)}…
                       </td>
                       <td className="px-3 py-2">
@@ -553,7 +553,7 @@ function OwnerCorrectionPageInner() {
                 );
               })()}
 
-          <p className="mt-4 text-xs text-gray-400">
+          <p className="mt-4 text-xs text-gray-400 dark:text-gray-500">
             ※ 統合実行・再リンクの実行機能は Phase 2-B-β 以降で対応予定です。
             （重複候補の dryRun preview のみ Phase 2-B-α で利用可能）
           </p>
@@ -629,11 +629,11 @@ function DuplicateSubFilterBar({
           className={`rounded-full border px-3 py-1 text-xs font-medium ${
             value === tab.key
               ? "border-purple-500 bg-purple-100 text-purple-800"
-              : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+              : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
           }`}
         >
           {tab.label}
-          <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
+          <span className="ml-1.5 rounded-full bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-gray-300">
             {tab.count}
           </span>
         </button>
@@ -749,7 +749,7 @@ function DuplicateGroupCard({
   };
 
   return (
-    <div className="rounded-md border border-purple-200 bg-white p-3">
+    <div className="rounded-md border border-purple-200 bg-white dark:bg-gray-900 p-3">
       <div className="mb-2 flex items-baseline gap-2">
         <span className="text-xs font-medium text-purple-700">
           グループ {groupIndex}
@@ -759,14 +759,14 @@ function DuplicateGroupCard({
             {DUPLICATE_MATCHED_BY_LABEL[matchedBy]}
           </span>
         )}
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-gray-500 dark:text-gray-400">
           氏名: {sample.name ?? "***"} / 住所: {sample.address ?? "—"} （
           {members.length} 件）
         </span>
       </div>
 
       <table className="mb-3 w-full text-xs">
-        <thead className="bg-gray-50 text-gray-500">
+        <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
           <tr>
             {/* Codex P2-round-2: master/source/推奨 列は merge 可能な
                 name_address group のみ表示。corporate_number / external_link_key
@@ -781,9 +781,9 @@ function DuplicateGroupCard({
             <th className="px-2 py-1 text-left">取込元</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
           {members.map((m) => (
-            <tr key={m.id} className="hover:bg-gray-50">
+            <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
               {supportsMerge && (
                 <td className="px-2 py-1">
                   <input
@@ -809,13 +809,13 @@ function DuplicateGroupCard({
                   {m.id === recommendedMaster.id ? "master 推奨" : ""}
                 </td>
               )}
-              <td className="px-2 py-1 font-mono text-[10px] text-gray-400">
+              <td className="px-2 py-1 font-mono text-[10px] text-gray-400 dark:text-gray-500">
                 {m.id.slice(0, 8)}…
               </td>
               <td className="px-2 py-1 text-center">{m.propertyOwnerCount}</td>
               <td className="px-2 py-1 text-center">{m.changeLogCount}</td>
               <td className="px-2 py-1 text-center">{m.version}</td>
-              <td className="px-2 py-1 font-mono text-[10px] text-gray-500">
+              <td className="px-2 py-1 font-mono text-[10px] text-gray-500 dark:text-gray-400">
                 {m.importFileName
                   ? `${m.importFileName}:${m.importRowNumber}行`
                   : "—"}
@@ -839,7 +839,7 @@ function DuplicateGroupCard({
             onExecuted={onExecuted}
           />
         ) : (
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
             master と source をそれぞれ選択してください
           </p>
         )
@@ -887,7 +887,7 @@ const CORPORATE_TYPE_BADGE: Record<
 > = {
   missing: "bg-yellow-100 text-yellow-800",
   conflict: "bg-red-100 text-red-700",
-  multi: "bg-gray-100 text-gray-700",
+  multi: "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200",
   same: "bg-green-100 text-green-700",
 };
 
@@ -1125,7 +1125,7 @@ function CorporateNumberCandidatesPanel() {
 
   return (
     <div className="space-y-3">
-      <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+      <p className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
         所有者の氏名・住所・メモから法人番号候補を検出して dry-run で表示します。
         <strong>未登録</strong>（既存の法人番号が空・候補が 1 件）の行はチェックして
         「一括反映」できます（確認のうえ実行・最大 {MAX_CORPORATE_BULK} 件）。検出番号で
@@ -1147,7 +1147,7 @@ function CorporateNumberCandidatesPanel() {
             className={`rounded-full border px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
               subFilter === tab.key
                 ? "border-blue-500 bg-blue-100 text-blue-800"
-                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
             {tab.label}
@@ -1156,7 +1156,7 @@ function CorporateNumberCandidatesPanel() {
       </div>
 
       {loading && (
-        <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1169,7 +1169,7 @@ function CorporateNumberCandidatesPanel() {
           stale rows が画面に残らないことを保証する。 */}
       {data && !loading && !error && (
         <>
-          <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+          <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
             <span>合計 {data.summary.totalCandidates} 件</span>
             <span>/ 未登録 {data.summary.missing}</span>
             <span>/ 競合 {data.summary.conflict}</span>
@@ -1197,7 +1197,7 @@ function CorporateNumberCandidatesPanel() {
                 <button
                   type="button"
                   onClick={toggleAllEligible}
-                  className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-emerald-700 hover:bg-emerald-100"
+                  className="rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-2 py-1 text-emerald-700 hover:bg-emerald-100"
                 >
                   {allSelectableSelected
                     ? "このページの選択を全解除"
@@ -1224,8 +1224,8 @@ function CorporateNumberCandidatesPanel() {
 
               {/* preview → confirm: 実行前の最終確認 */}
               {bulkPhase === "confirm" && (
-                <div className="mt-2 rounded-md border border-emerald-300 bg-white px-3 py-2">
-                  <p className="text-gray-700">
+                <div className="mt-2 rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-3 py-2">
+                  <p className="text-gray-700 dark:text-gray-200">
                     選択した <strong>{selectedCount} 件</strong>{" "}
                     について、検出された法人番号で国税庁 lookup を行い、該当する法人のみ
                     <strong>法人番号欄だけ</strong>
@@ -1245,7 +1245,7 @@ function CorporateNumberCandidatesPanel() {
                       type="button"
                       onClick={() => setBulkPhase("idle")}
                       disabled={bulkSubmitting}
-                      className="rounded-md border border-gray-300 bg-white px-3 py-1 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
+                      className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       キャンセル
                     </button>
@@ -1265,11 +1265,11 @@ function CorporateNumberCandidatesPanel() {
             </p>
           )}
           {bulkResult && (
-            <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-gray-700">
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-gray-700 dark:text-gray-200">
               <p className="font-medium text-emerald-800">
                 反映 {bulkResult.applied} 件 / スキップ {bulkResult.skipped} 件
               </p>
-              <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
+              <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-600 dark:text-gray-300">
                 {bulkResult.byStatus.map((s) => (
                   <li key={s.status}>
                     {BULK_STATUS_LABEL[s.status]}: {s.count}
@@ -1280,13 +1280,13 @@ function CorporateNumberCandidatesPanel() {
           )}
 
           {data.candidates.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-400">
+            <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
               該当する候補はありません
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-md border border-gray-200">
+            <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
               <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-xs text-gray-500">
+                <thead className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
                   <tr>
                     <th className="w-8 px-3 py-2 text-left font-medium">
                       <input
@@ -1313,9 +1313,9 @@ function CorporateNumberCandidatesPanel() {
                     <th className="px-3 py-2 text-left font-medium">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {data.candidates.map((c) => (
-                    <tr key={c.ownerId} className="hover:bg-gray-50">
+                    <tr key={c.ownerId} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                       <td className="px-3 py-2">
                         {isBulkEligible(c) ? (
                           <input
@@ -1327,27 +1327,27 @@ function CorporateNumberCandidatesPanel() {
                             className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                           />
                         ) : (
-                          <span className="text-gray-300">—</span>
+                          <span className="text-gray-300 dark:text-gray-600">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 font-medium text-gray-900">
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
                         {c.ownerNameMasked ?? (
-                          <span className="text-gray-400">***</span>
+                          <span className="text-gray-400 dark:text-gray-500">***</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.ownerAddressMasked ?? (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700">
+                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700 dark:text-gray-200">
                         {c.existingCorporateNumberMasked ?? (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700">
+                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700 dark:text-gray-200">
                         {c.candidateCorporateNumberMasked ?? (
-                          <span className="text-gray-400">
+                          <span className="text-gray-400 dark:text-gray-500">
                             {c.candidateCount === "many" ? "複数" : "—"}
                           </span>
                         )}
@@ -1364,7 +1364,7 @@ function CorporateNumberCandidatesPanel() {
                           {c.detectedIn.map((f) => (
                             <span
                               key={f}
-                              className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600"
+                              className="rounded-full bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-gray-300"
                             >
                               {DETECTED_IN_LABEL[f]}
                             </span>
@@ -1374,7 +1374,7 @@ function CorporateNumberCandidatesPanel() {
                       <td className="px-3 py-2">
                         <Link
                           href={c.detailUrl}
-                          className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                          className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                         >
                           Owner 詳細を開く
                         </Link>
@@ -1401,7 +1401,7 @@ function CorporateNumberCandidatesPanel() {
               }}
               // Codex P2: 一括反映 POST 実行中はページ送りを無効化（race 防止）。
               disabled={cursorStack.length === 0 || bulkSubmitting}
-              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               前へ
             </button>
@@ -1415,7 +1415,7 @@ function CorporateNumberCandidatesPanel() {
                 load(apiType, data.nextCursor);
               }}
               disabled={!data.hasNextPage || !data.nextCursor || bulkSubmitting}
-              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               次へ
             </button>
@@ -1535,7 +1535,7 @@ function RegistryAddressCandidatesPanel() {
 
   return (
     <div className="space-y-3">
-      <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+      <p className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
         所有者住所に混入した登記由来文字列（受付番号・和暦日付・登記原因・持分・証明書定型文）を
         検出して dry-run で表示します。「除去可能」は各行の「適用」で住所から除去できます（住所の
         書込権限が必要）。地番ラベル・不動産番号・床面積などは誤って番地を消さないため
@@ -1551,7 +1551,7 @@ function RegistryAddressCandidatesPanel() {
             className={`rounded-full border px-3 py-1 text-xs font-medium ${
               subFilter === tab.key
                 ? "border-blue-500 bg-blue-100 text-blue-800"
-                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
             {tab.label}
@@ -1560,7 +1560,7 @@ function RegistryAddressCandidatesPanel() {
       </div>
 
       {loading && (
-        <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1570,7 +1570,7 @@ function RegistryAddressCandidatesPanel() {
 
       {data && !loading && !error && (
         <>
-          <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+          <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
             <span>合計 {data.summary.total} 件</span>
             <span>/ 除去可能 {data.summary.cleanup}</span>
             <span>/ 監査専用 {data.summary.manual}</span>
@@ -1582,13 +1582,13 @@ function RegistryAddressCandidatesPanel() {
           </div>
 
           {data.candidates.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-400">
+            <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
               該当する候補はありません
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-md border border-gray-200">
+            <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
               <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-xs text-gray-500">
+                <thead className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">氏名</th>
                     <th className="px-3 py-2 text-left font-medium">住所（現在）</th>
@@ -1597,26 +1597,26 @@ function RegistryAddressCandidatesPanel() {
                     <th className="px-3 py-2 text-left font-medium">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {data.candidates.map((c) => (
-                    <tr key={c.ownerId} className="hover:bg-gray-50 align-top">
-                      <td className="px-3 py-2 font-medium text-gray-900">
+                    <tr key={c.ownerId} className="hover:bg-gray-50 dark:hover:bg-gray-800 align-top">
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
                         {c.ownerNameMasked ?? (
-                          <span className="text-gray-400">***</span>
+                          <span className="text-gray-400 dark:text-gray-500">***</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.addressBeforeMasked ?? (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.action === "cleanup" ? (
                           c.addressAfterMasked ?? (
-                            <span className="text-gray-400">（空欄）</span>
+                            <span className="text-gray-400 dark:text-gray-500">（空欄）</span>
                           )
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -1658,7 +1658,7 @@ function RegistryAddressCandidatesPanel() {
                           )}
                           <Link
                             href={c.detailUrl}
-                            className="rounded-md border border-gray-300 px-2 py-1 text-center text-xs text-gray-700 hover:bg-gray-50"
+                            className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-center text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                           >
                             Owner 詳細
                           </Link>
@@ -1689,7 +1689,7 @@ function RegistryAddressCandidatesPanel() {
                 load(subFilter, prev);
               }}
               disabled={cursorStack.length === 0}
-              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               前へ
             </button>
@@ -1702,7 +1702,7 @@ function RegistryAddressCandidatesPanel() {
                 load(subFilter, data.nextCursor);
               }}
               disabled={!data.hasNextPage || !data.nextCursor}
-              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               次へ
             </button>
