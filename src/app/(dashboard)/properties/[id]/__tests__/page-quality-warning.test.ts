@@ -108,8 +108,30 @@ describe("properties/[id]/page.tsx 品質警告セクション (§8-6 C2)", () =
     expect(src).toContain("void loadQualityIssues()");
   });
 
-  it("cancelled フラグで stale な取得結果の上書きを防いでいる", () => {
-    expect(src).toContain("cancelled");
-    expect(src).toContain("if (cancelled) return");
+  it("qualityReqSeq ref で stale な取得結果の上書きを防いでいる（seq guard）", () => {
+    // useRef によるシーケンス番号で後着リクエスト勝ちの stale 上書き防止を実装している
+    expect(src).toContain("qualityReqSeq");
+    expect(src).toContain("qualityReqSeq.current");
+  });
+
+  it("seq 比較で古いリクエストの結果を破棄している", () => {
+    // seq !== qualityReqSeq.current の比較で後発リクエストが来たら先着を破棄
+    expect(src).toContain("seq !== qualityReqSeq.current");
+  });
+
+  it("id 変化時のリセット useEffect は loadQualityIssues を呼ばない（二重 fetch 防止）", () => {
+    // setQualityIssues([]) のリセットのみ行い、fetch は fetchProperty 経由の一本に絞る。
+    // reset effect は [id] を deps に持ち loadQualityIssues への依存を持たない。
+    expect(src).toContain("setQualityIssues([])");
+    // リセット専用 useEffect は [id] deps で定義されている
+    expect(src).toContain("}, [id]);");
+  });
+
+  it("fetchProperty が唯一の loadQualityIssues 呼び出し元である（二重 fetch なし）", () => {
+    // fetchProperty 内で void loadQualityIssues() を呼ぶ構造を確認する。
+    // id 変化 useEffect は reset のみで fetch しない。
+    expect(src).toContain("void loadQualityIssues()");
+    // fetchProperty の deps に loadQualityIssues が含まれている
+    expect(src).toContain("[id, loadQualityIssues]");
   });
 });

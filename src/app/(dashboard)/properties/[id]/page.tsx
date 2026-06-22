@@ -239,13 +239,14 @@ export default function PropertyDetailPage({
 
   // 品質警告取得 (@codex P2: 物件更新時にも再取得): useCallback 化して fetchProperty から
   // も呼ぶことで ActionBar/編集保存/所有者更新等の後も最新警告を反映する。
-  // cancelled フラグは各呼び出しクロージャに閉じるため、並行呼び出し時に古い結果で
-  // 新しい state を上書きしない（後着が勝つ stale 上書き防止）。
+  // seq guard: fire-and-forget でも後着リクエストが先着の stale 結果で state を上書きしない。
+  // void 呼び出しでも cancelled フラグを誰も true にしない問題を解消（ref シーケンス方式）。
+  const qualityReqSeq = useRef(0);
   const loadQualityIssues = useCallback(async () => {
-    let cancelled = false;
+    const seq = ++qualityReqSeq.current;
     try {
       const json = await fetchQualityCheck({ propertyIds: [id] });
-      if (cancelled) return;
+      if (seq !== qualityReqSeq.current) return; // 後発リクエストが来ていたら破棄（後着勝ち）
       const data = (
         json as {
           data?: Array<{
@@ -266,7 +267,6 @@ export default function PropertyDetailPage({
     } catch {
       // fail-safe: 取得失敗時はセクション非表示のまま
     }
-    return () => { cancelled = true; };
   }, [id]);
 
   const fetchProperty = useCallback(async () => {
@@ -290,11 +290,11 @@ export default function PropertyDetailPage({
     fetchProperty();
   }, [fetchProperty]);
 
-  // id 変化時に品質警告をリセット・再取得する（fetchProperty 内の呼び出しと補完関係）。
+  // id 変化時に品質警告をリセットする（再取得は fetchProperty 内の loadQualityIssues 呼び出しが行う）。
+  // このエフェクトは reset のみ: fetchProperty も同じ id 変化で走るため二重 fetch しない。
   useEffect(() => {
     setQualityIssues([]);
-    void loadQualityIssues();
-  }, [loadQualityIssues]);
+  }, [id]);
 
   // F12 展開(19-A 第3実装): permissions / capabilities は ScreenProtectionProvider
   //（dashboard 全体を覆う）が mount 時に 1 回取得して context 配布するため、本ページ独自の
