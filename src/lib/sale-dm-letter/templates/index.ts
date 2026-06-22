@@ -20,7 +20,9 @@ export function escapeHtml(value: string | null | undefined): string {
     .replace(/'/g, "&#39;");
 }
 
-// 改行を <br /> へ。先に escapeHtml 済みの文字列に対して適用する。
+// 生の本文を受け取り、まず内部で escapeHtml で1回だけエスケープしてから改行を
+// <br /> へ変換する(呼び出し側で事前エスケープしないこと=二重エスケープ防止)。
+// 唯一の HTML はエスケープ後に足す <br /> のみ(AI 生成本文を生 HTML として出さない)。
 function escapedBodyToHtml(body: string): string {
   return escapeHtml(body).replace(/\r\n|\r|\n/g, "<br />\n");
 }
