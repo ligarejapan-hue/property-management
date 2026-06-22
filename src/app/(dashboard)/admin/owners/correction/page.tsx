@@ -308,7 +308,7 @@ function OwnerCorrectionPageInner() {
             onClick={() => setFilterType(tab.key)}
             className={`-mb-px px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               filterType === tab.key
-                ? "border-indigo-600 text-indigo-700"
+                ? "border-indigo-600 dark:border-indigo-400 text-indigo-700 dark:text-indigo-400"
                 : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700"
             }`}
           >
@@ -1197,7 +1197,7 @@ function CorporateNumberCandidatesPanel() {
                 <button
                   type="button"
                   onClick={toggleAllEligible}
-                  className="rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-2 py-1 text-emerald-700 hover:bg-emerald-100"
+                  className="rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-2 py-1 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:text-emerald-300"
                 >
                   {allSelectableSelected
                     ? "このページの選択を全解除"
@@ -1266,7 +1266,7 @@ function CorporateNumberCandidatesPanel() {
           )}
           {bulkResult && (
             <div className="rounded-md border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-3 py-2 text-xs text-gray-700 dark:text-gray-200">
-              <p className="font-medium text-emerald-800">
+              <p className="font-medium text-emerald-800 dark:text-emerald-300">
                 反映 {bulkResult.applied} 件 / スキップ {bulkResult.skipped} 件
               </p>
               <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-600 dark:text-gray-300">

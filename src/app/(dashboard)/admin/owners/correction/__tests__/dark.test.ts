@@ -113,6 +113,23 @@ describe("correction page dark mode", () => {
     expect(src).toContain("dark:border-emerald-500/30");
   });
 
+  // --- accent readability on dark backgrounds (P2) ---
+  it("active tab has dark:text-indigo-400 for readability on dark bg", () => {
+    expect(src).toContain("dark:text-indigo-400");
+  });
+
+  it("active tab border has dark:border-indigo-400 for readability on dark bg", () => {
+    expect(src).toContain("dark:border-indigo-400");
+  });
+
+  it("select-all button has dark:text-emerald-400 for readability on dark bg", () => {
+    expect(src).toContain("dark:text-emerald-400");
+  });
+
+  it("bulk result heading has dark:text-emerald-300 for readability on dark bg", () => {
+    expect(src).toContain("dark:text-emerald-300");
+  });
+
   // --- color-locked classification tag non-touch checks ---
   // orphan tag uses orange; must NOT have dark:bg-orange or dark:text-orange
   it("does not add dark: to orange (orphan) classification tag", () => {
