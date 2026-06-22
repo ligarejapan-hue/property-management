@@ -1,14 +1,7 @@
 import { z } from "zod";
+import { isSafeImageSrc } from "./css-safety";
 
-/**
- * 画像srcとして安全か（SSRF防止）: data:image URL か ルート相対パス(/uploads/ 等)のみ許可。
- * 絶対URL/scheme付きは拒否。
- */
-export function isSafeImageSrc(src: string): boolean {
-  if (src.startsWith("data:image/")) return true;
-  if (src.startsWith("/") && !src.startsWith("//")) return true; // root-relative, not protocol-relative
-  return false;
-}
+export { isSafeImageSrc };
 
 /** 幾何は mm。フォントサイズのみ pt。z は重ね順(整数)。 */
 const baseElement = {

@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   parseSalesSheetDocument,
   salesSheetDocumentSchema,
-  isSafeImageSrc,
   A4_LANDSCAPE,
 } from "../document-schema";
+import { isSafeImageSrc } from "../css-safety";
 
 describe("salesSheetDocumentSchema", () => {
   it("最小の有効documentを受理し、styleの既定({})を補完する", () => {
@@ -41,15 +41,15 @@ describe("salesSheetDocumentSchema", () => {
   });
 });
 
-describe("isSafeImageSrc (SSRF防止 ユニットテスト)", () => {
+describe("isSafeImageSrc (SSRF防止 ユニットテスト — Plan1: data:image/ のみ)", () => {
   it("data:image/ URL を許可する", () => {
     expect(isSafeImageSrc("data:image/png;base64,AAAA")).toBe(true);
     expect(isSafeImageSrc("data:image/jpeg;base64,/9j/")).toBe(true);
   });
 
-  it("ルート相対パス(/uploads/... 等)を許可する", () => {
-    expect(isSafeImageSrc("/uploads/p/1.jpg")).toBe(true);
-    expect(isSafeImageSrc("/images/photo.png")).toBe(true);
+  it("ルート相対パス(/uploads/...)は Plan2 で対応するため Plan1 では拒否する", () => {
+    expect(isSafeImageSrc("/uploads/p/1.jpg")).toBe(false);
+    expect(isSafeImageSrc("/images/photo.png")).toBe(false);
   });
 
   it("http:// 絶対URLを拒否する（SSRF）", () => {
@@ -100,13 +100,13 @@ describe("imageElementSchema — srcバリデーション (SSRF防止)", () => {
     expect(r.success).toBe(true);
   });
 
-  it("/uploads/p/1.jpg を受理する", () => {
+  it("/uploads/p/1.jpg を拒否する（Plan1: root-relative は Plan2 で対応）", () => {
     const r = salesSheetDocumentSchema.safeParse({
       page: A4_LANDSCAPE,
       theme: { fontFamily: "sans-serif", accentColor: "#000" },
       elements: [{ ...baseImg, src: "/uploads/p/1.jpg" }],
     });
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
   });
 });
 

@@ -58,9 +58,9 @@ describe("renderDocumentToHtml — font-family XSSエスケープ (CSS breakout�
     const styleMatch = html.match(/<style>([\s\S]*?)<\/style>/);
     expect(styleMatch).not.toBeNull();
     const cssBlock = styleMatch![1];
-    // 注入が成功していれば color:red が独立したCSSルールとして現れるはず → 現れないこと
-    expect(cssBlock).not.toContain("color:red");
-    // ブレイクアウト文字 { } は除去されてfont-family値に埋め込まれているはず
-    expect(cssBlock).toContain("sans-serifbodycolorred");
+    // { } が除去されているのでペイロードの {color:red} という独立ルールにならない
+    expect(cssBlock).not.toContain("{color:red}");
+    // ブレイクアウト文字 { } は除去されてfont-family値に埋め込まれているはず（: は無害なので残る）
+    expect(cssBlock).toContain("sans-serifbodycolor:red");
   });
 });

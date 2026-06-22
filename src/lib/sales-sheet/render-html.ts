@@ -2,15 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SalesSheetRenderer } from "@/components/sales-sheet/SalesSheetRenderer";
 import type { SalesSheetDocument } from "./document-schema";
-
-/**
- * font-family を <style> に埋め込む前に CSS/HTML ブレイクアウト文字を除去。
- * 正当な値("Yu Gothic UI","Meiryo",sans-serif 等)は保持。
- * < > { } ; : \ 等を削除し </style> や } によるブレイクアウトを防止。
- */
-function sanitizeFontFamily(ff: string): string {
-  return ff.replace(/[^A-Za-z0-9 ,\-_'"().　-ヿ一-鿿＀-￯]/g, "");
-}
+import { sanitizeCssValue } from "./css-safety";
 
 /**
  * document を、ブラウザ・サーバー共通の Renderer で完全なHTML文書に描画する。
@@ -18,7 +10,7 @@ function sanitizeFontFamily(ff: string): string {
  */
 export function renderDocumentToHtml(doc: SalesSheetDocument): string {
   const body = renderToStaticMarkup(createElement(SalesSheetRenderer, { document: doc }));
-  const safeFontFamily = sanitizeFontFamily(doc.theme.fontFamily);
+  const safeFontFamily = sanitizeCssValue(doc.theme.fontFamily);
   const css = [
     "*{margin:0;padding:0;box-sizing:border-box}",
     `html,body{width:${doc.page.width}mm;height:${doc.page.height}mm}`,

@@ -9,6 +9,7 @@ import type {
   ShapeElement,
   QrElement,
 } from "@/lib/sales-sheet/document-schema";
+import { sanitizeCssValue } from "@/lib/sales-sheet/css-safety";
 
 const mm = (v: number) => `${v}mm`;
 
@@ -30,8 +31,8 @@ function TextEl({ el }: { el: TextElement }) {
   const style: CSSProperties = {
     ...boxStyle(el),
     fontSize: s.fontSizePt ? `${s.fontSizePt}pt` : undefined,
-    fontFamily: s.fontFamily,
-    color: s.color,
+    fontFamily: s.fontFamily ? sanitizeCssValue(s.fontFamily) : undefined,
+    color: s.color ? sanitizeCssValue(s.color) : undefined,
     fontWeight: s.bold ? 700 : undefined,
     fontStyle: s.italic ? "italic" : undefined,
     textDecoration: s.underline ? "underline" : undefined,
@@ -57,7 +58,10 @@ function ImageEl({ el }: { el: ImageElement }) {
 
 function TableEl({ el }: { el: TableElement }) {
   const s = el.style;
-  const border = `0.2mm solid ${s.borderColor ?? "#cccccc"}`;
+  const safeBorderColor = sanitizeCssValue(s.borderColor ?? "#cccccc");
+  const border = `0.2mm solid ${safeBorderColor}`;
+  const safeLabelColor = s.labelColor ? sanitizeCssValue(s.labelColor) : undefined;
+  const safeValueColor = s.valueColor ? sanitizeCssValue(s.valueColor) : undefined;
   return (
     <table
       style={{
@@ -70,10 +74,10 @@ function TableEl({ el }: { el: TableElement }) {
       <tbody>
         {el.rows.map((r, i) => (
           <tr key={i}>
-            <td style={{ border, color: s.labelColor, padding: "0.5mm 1mm", width: "32%", fontWeight: 600, verticalAlign: "top" }}>
+            <td style={{ border, color: safeLabelColor, padding: "0.5mm 1mm", width: "32%", fontWeight: 600, verticalAlign: "top" }}>
               {r.label}
             </td>
-            <td style={{ border, color: s.valueColor, padding: "0.5mm 1mm", verticalAlign: "top" }}>
+            <td style={{ border, color: safeValueColor, padding: "0.5mm 1mm", verticalAlign: "top" }}>
               {r.value}
             </td>
           </tr>
@@ -90,8 +94,8 @@ function BadgeEl({ el }: { el: BadgeElement }) {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: el.bg,
-    color: el.fg,
+    background: sanitizeCssValue(el.bg),
+    color: sanitizeCssValue(el.fg),
     borderRadius: radius,
     fontWeight: 700,
     fontSize: el.fontSizePt ? `${el.fontSizePt}pt` : undefined,
@@ -101,10 +105,12 @@ function BadgeEl({ el }: { el: BadgeElement }) {
 }
 
 function ShapeEl({ el }: { el: ShapeElement }) {
+  const safeStroke = el.stroke ? sanitizeCssValue(el.stroke) : undefined;
+  const safeFill = el.fill ? sanitizeCssValue(el.fill) : undefined;
   if (el.shape === "line") {
     return (
       <div
-        style={{ ...boxStyle(el), background: el.stroke ?? "#000000", height: el.strokeWidthMm ? mm(el.strokeWidthMm) : "0.3mm" }}
+        style={{ ...boxStyle(el), background: safeStroke ?? "#000000", height: el.strokeWidthMm ? mm(el.strokeWidthMm) : "0.3mm" }}
       />
     );
   }
@@ -112,8 +118,8 @@ function ShapeEl({ el }: { el: ShapeElement }) {
     <div
       style={{
         ...boxStyle(el),
-        background: el.fill,
-        border: el.stroke ? `${el.strokeWidthMm ?? 0.3}mm solid ${el.stroke}` : undefined,
+        background: safeFill,
+        border: safeStroke ? `${el.strokeWidthMm ?? 0.3}mm solid ${safeStroke}` : undefined,
         borderRadius: el.radiusMm ? mm(el.radiusMm) : undefined,
       }}
     />
@@ -152,7 +158,7 @@ export function SalesSheetRenderer({ document: doc }: { document: SalesSheetDocu
     width: mm(doc.page.width),
     height: mm(doc.page.height),
     background: "#ffffff",
-    fontFamily: doc.theme.fontFamily,
+    fontFamily: sanitizeCssValue(doc.theme.fontFamily),
     overflow: "hidden",
   };
   return (
