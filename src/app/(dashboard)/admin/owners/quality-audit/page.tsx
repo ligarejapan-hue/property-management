@@ -88,14 +88,14 @@ function fixKey(f: PendingFix): string {
 const SEVERITY_CLASS: Record<NameSeverity, string> = {
   error: "bg-red-100 text-red-700",
   warning: "bg-amber-100 text-amber-700",
-  info: "bg-gray-100 text-gray-600",
+  info: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
 };
 
 const REC_BADGE: Record<NameRec | ContactRec, { label: string; cls: string }> = {
   sanitize_candidate: { label: "自動補正可", cls: "bg-emerald-100 text-emerald-700" },
   format_candidate: { label: "整形可", cls: "bg-emerald-100 text-emerald-700" },
   review: { label: "要確認", cls: "bg-amber-100 text-amber-700" },
-  hold: { label: "保留", cls: "bg-gray-100 text-gray-600" },
+  hold: { label: "保留", cls: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300" },
 };
 
 export default function QualityAuditPage() {
@@ -354,7 +354,7 @@ export default function QualityAuditPage() {
               type="button"
               disabled={busy}
               onClick={() => setPreview(null)}
-              className="text-xs text-gray-500 hover:text-gray-700"
+              className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               取消
             </button>
@@ -367,7 +367,7 @@ export default function QualityAuditPage() {
           <button
             type="button"
             onClick={() => setPreview(null)}
-            className="text-gray-500 hover:text-gray-700"
+            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             取消
           </button>
@@ -379,7 +379,7 @@ export default function QualityAuditPage() {
         type="button"
         disabled={busy}
         onClick={() => handlePreview(fix)}
-        className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
       >
         <Wand2 className="h-3 w-3" />
         {label}
@@ -411,24 +411,24 @@ export default function QualityAuditPage() {
     !loading && viewMatches && currentRowCount === 0 && !meta.hasNextPage;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <nav className="mb-4 text-sm text-gray-500">
-        <Link href="/admin/users" className="hover:text-gray-700">
+    <div className="min-h-screen bg-gray-50 p-6 dark:bg-gray-900">
+      <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        <Link href="/admin/users" className="hover:text-gray-700 dark:hover:text-gray-200">
           管理
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900">所有者品質監査</span>
+        <span className="text-gray-900 dark:text-gray-100">所有者品質監査</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">所有者品質監査</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">所有者品質監査</h1>
+      <p className="text-sm text-gray-500 mb-6 dark:text-gray-400">
         所有者の氏名・氏名カナ（DQ-01）と郵便番号・電話（DQ-02）について、品質に問題がある値を
         一覧します。サーバ側でマスクされた値のみ表示します。各行はプレビュー→適用で補正できます
         （自動補正できないものは「詳細」から手当てしてください）。
       </p>
 
       {/* タブ */}
-      <div className="mb-4 flex gap-1 border-b border-gray-200">
+      <div className="mb-4 flex gap-1 border-b border-gray-200 dark:border-gray-800">
         {(["name", "contact"] as Tab[]).map((t) => (
           <button
             key={t}
@@ -437,7 +437,7 @@ export default function QualityAuditPage() {
             className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               tab === t
                 ? "border-indigo-600 text-indigo-700"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             }`}
           >
             {t === "name" ? "氏名品質（DQ-01）" : "連絡先（DQ-02）"}
@@ -469,7 +469,7 @@ export default function QualityAuditPage() {
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 type === opt.value
                   ? "bg-indigo-600 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-100"
+                  : "bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
               }`}
             >
               {opt.label}
@@ -489,39 +489,39 @@ export default function QualityAuditPage() {
       )}
 
       <div
-        className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
+        className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
         data-pii-protected
         data-pii-surface="owner"
       >
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
           </div>
         ) : showContinue ? (
-          <div className="px-6 py-8 text-center text-sm text-gray-500">
+          <div className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
             この走査窓には該当がありませんでした。後続の走査窓が残っています。下の「もっと読み込む」で続きを確認してください。
           </div>
         ) : isEmpty ? (
-          <div className="px-6 py-8 text-center text-sm text-gray-400">
+          <div className="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">
             品質に問題のある値は見つかりませんでした（権限により一部フィールドは監査対象外の場合があります）。
           </div>
         ) : tab === "name" ? (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
                 {["所有者", "氏名", "氏名カナ", "検出", "推奨", "操作"].map((h) => (
                   <th
                     key={h}
-                    className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
+                    className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400"
                   >
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+            <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-800 dark:bg-gray-900">
               {nameRows.map((row) => (
-                <tr key={row.ownerId} className="align-top hover:bg-gray-50">
+                <tr key={row.ownerId} className="align-top hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="px-4 py-3 text-sm">
                     <Link
                       href={row.detailUrl}
@@ -530,16 +530,16 @@ export default function QualityAuditPage() {
                       {row.ownerId.slice(0, 8)}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all">
+                  <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all dark:text-gray-100">
                     {row.ownerNameMasked == null ? (
-                      <span className="text-gray-400">（非表示）</span>
+                      <span className="text-gray-400 dark:text-gray-500">（非表示）</span>
                     ) : (
                       escapeControlForAudit(row.ownerNameMasked)
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm font-mono text-gray-700 break-all">
+                  <td className="px-4 py-3 text-sm font-mono text-gray-700 break-all dark:text-gray-200">
                     {row.nameKanaMasked == null ? (
-                      <span className="text-gray-300">—</span>
+                      <span className="text-gray-300 dark:text-gray-600">—</span>
                     ) : (
                       escapeControlForAudit(row.nameKanaMasked)
                     )}
@@ -580,24 +580,24 @@ export default function QualityAuditPage() {
             </tbody>
           </table>
         ) : (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
                 {["所有者", "郵便番号", "電話", "検出", "推奨", "操作"].map((h) => (
                   <th
                     key={h}
-                    className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
+                    className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400"
                   >
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+            <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-800 dark:bg-gray-900">
               {contactRows.map((row) => {
                 const fixableFields = formatFixableFields(row.issues);
                 return (
-                  <tr key={row.ownerId} className="align-top hover:bg-gray-50">
+                  <tr key={row.ownerId} className="align-top hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="px-4 py-3 text-sm">
                       <Link
                         href={row.detailUrl}
@@ -606,16 +606,16 @@ export default function QualityAuditPage() {
                         {row.ownerId.slice(0, 8)}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all">
+                    <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all dark:text-gray-100">
                       {row.zipMasked == null ? (
-                        <span className="text-gray-300">—</span>
+                        <span className="text-gray-300 dark:text-gray-600">—</span>
                       ) : (
                         escapeControlForAudit(row.zipMasked)
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all">
+                    <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all dark:text-gray-100">
                       {row.phoneMasked == null ? (
-                        <span className="text-gray-300">—</span>
+                        <span className="text-gray-300 dark:text-gray-600">—</span>
                       ) : (
                         escapeControlForAudit(row.phoneMasked)
                       )}
@@ -671,7 +671,7 @@ export default function QualityAuditPage() {
             type="button"
             disabled={loadingMore}
             onClick={() => load(tab, type, meta.nextCursor, true)}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
             もっと読み込む
