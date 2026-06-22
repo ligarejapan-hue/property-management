@@ -190,7 +190,7 @@ export default function BuildingDetailPage({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
       </div>
     );
   }
@@ -212,20 +212,20 @@ export default function BuildingDetailPage({
       <div className="mb-6 flex items-center gap-3">
         <Link
           href="/buildings"
-          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
           <ArrowLeft className="h-4 w-4" />
           棟一覧
         </Link>
-        <span className="text-gray-300">/</span>
+        <span className="text-gray-300 dark:text-gray-600">/</span>
         <Building className="h-5 w-5 text-blue-500" />
-        <h2 className="text-xl font-bold text-gray-800">{building.name}</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">{building.name}</h2>
         <div className="ml-auto flex items-center gap-2">
           {!editing && (
             <>
               <button
                 onClick={startEdit}
-                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 <Edit className="h-4 w-4" />
                 編集
@@ -253,7 +253,7 @@ export default function BuildingDetailPage({
       </div>
 
       {/* Building info */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6">
+      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         {editing ? (
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -268,7 +268,7 @@ export default function BuildingDetailPage({
                 { key: "managementCompany", label: "管理会社" },
               ].map((f) => (
                 <div key={f.key}>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">
+                  <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                     {f.label}
                     {f.required && <span className="text-red-500">*</span>}
                   </label>
@@ -280,7 +280,7 @@ export default function BuildingDetailPage({
                       if (f.key === "address") setAddressEdited(true);
                       setEditForm((p) => ({ ...p, [f.key]: e.target.value }));
                     }}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
                   />
                   {f.key === "address" && (
                     <div className="mt-1.5">
@@ -303,7 +303,7 @@ export default function BuildingDetailPage({
               ))}
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 備考
               </label>
               <textarea
@@ -312,7 +312,7 @@ export default function BuildingDetailPage({
                   setEditForm((p) => ({ ...p, note: e.target.value }))
                 }
                 rows={2}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
             <div className="flex gap-2 pt-2">
@@ -330,7 +330,7 @@ export default function BuildingDetailPage({
               </button>
               <button
                 onClick={() => setEditing(false)}
-                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 <X className="h-4 w-4" />
                 キャンセル
@@ -360,15 +360,15 @@ export default function BuildingDetailPage({
       </div>
 
       {/* Building photos */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6">
+      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         <BuildingPhotoTab buildingId={building.id} />
       </div>
 
       {/* Units list */}
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-lg font-bold text-gray-800">
+        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">
           部屋一覧
-          <span className="ml-2 text-sm font-normal text-gray-500">
+          <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
             ({units.length}戸)
           </span>
         </h3>
@@ -382,52 +382,52 @@ export default function BuildingDetailPage({
       </div>
 
       {units.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white py-12 text-center">
-          <Home className="mx-auto mb-3 h-8 w-8 text-gray-300" />
-          <p className="text-sm text-gray-500">部屋がまだ登録されていません</p>
+        <div className="rounded-lg border border-gray-200 bg-white py-12 text-center dark:border-gray-800 dark:bg-gray-900">
+          <Home className="mx-auto mb-3 h-8 w-8 text-gray-300 dark:text-gray-600" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">部屋がまだ登録されていません</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr className="border-b border-gray-200">
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+            <thead className="bg-gray-50 dark:bg-gray-800">
+              <tr className="border-b border-gray-200 dark:border-gray-700">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   部屋
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   階
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   間取り
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   専有面積
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   入居状況
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   所有者
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   ステータス
                 </th>
                 <th className="w-10" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {units.map((u) => (
-                <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-800">
+                <tr key={u.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-100">
                     {u.roomNo || "-"}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
                     {u.floorNo != null ? `${u.floorNo}F` : "-"}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
                     {u.layoutType || "-"}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
                     {u.exclusiveArea != null
                       ? `${Number(u.exclusiveArea).toFixed(2)}m²`
                       : "-"}
@@ -445,7 +445,7 @@ export default function BuildingDetailPage({
                       "-"
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
                     {u.propertyOwners.length > 0 ? (
                       <span className="flex items-center gap-1">
                         <Users className="h-3 w-3" />
@@ -456,7 +456,7 @@ export default function BuildingDetailPage({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
                       {CASE_LABELS[u.caseStatus] ?? u.caseStatus}
                     </span>
                   </td>
@@ -496,9 +496,9 @@ export default function BuildingDetailPage({
 function InfoField({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
-      <span className="text-xs text-gray-500">{label}</span>
-      <div className="mt-0.5 font-medium text-gray-800">
-        {value || <span className="text-gray-300">-</span>}
+      <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
+      <div className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">
+        {value || <span className="text-gray-300 dark:text-gray-600">-</span>}
       </div>
     </div>
   );
@@ -562,8 +562,8 @@ function AddUnitModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-white p-6 shadow-lg">
-        <h3 className="mb-4 text-lg font-bold text-gray-800">部屋を追加</h3>
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
+        <h3 className="mb-4 text-lg font-bold text-gray-800 dark:text-gray-100">部屋を追加</h3>
         {error && (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">
             {error}
@@ -572,7 +572,7 @@ function AddUnitModal({
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 部屋番号
               </label>
               <input
@@ -580,24 +580,24 @@ function AddUnitModal({
                 value={form.roomNo}
                 onChange={(e) => setField("roomNo", e.target.value)}
                 placeholder="101"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder:text-gray-500"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 階数
               </label>
               <input
                 type="number"
                 value={form.floorNo}
                 onChange={(e) => setField("floorNo", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 専有面積 (m²)
               </label>
               <input
@@ -605,11 +605,11 @@ function AddUnitModal({
                 step="0.01"
                 value={form.exclusiveArea}
                 onChange={(e) => setField("exclusiveArea", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 バルコニー面積 (m²)
               </label>
               <input
@@ -617,13 +617,13 @@ function AddUnitModal({
                 step="0.01"
                 value={form.balconyArea}
                 onChange={(e) => setField("balconyArea", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 間取り
               </label>
               <input
@@ -631,17 +631,17 @@ function AddUnitModal({
                 value={form.layoutType}
                 onChange={(e) => setField("layoutType", e.target.value)}
                 placeholder="3LDK"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder:text-gray-500"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 向き
               </label>
               <select
                 value={form.orientation}
                 onChange={(e) => setField("orientation", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               >
                 <option value="">-</option>
                 <option value="北">北</option>
@@ -657,30 +657,30 @@ function AddUnitModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 管理費 (円/月)
               </label>
               <input
                 type="number"
                 value={form.managementFee}
                 onChange={(e) => setField("managementFee", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 修繕積立金 (円/月)
               </label>
               <input
                 type="number"
                 value={form.repairReserveFee}
                 onChange={(e) => setField("repairReserveFee", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               入居状況
             </label>
             <select
@@ -694,21 +694,21 @@ function AddUnitModal({
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               備考
             </label>
             <textarea
               value={form.note}
               onChange={(e) => setField("note", e.target.value)}
               rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               キャンセル
             </button>
