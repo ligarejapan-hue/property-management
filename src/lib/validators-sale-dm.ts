@@ -11,6 +11,15 @@ export const saleDmOptionsSchema = z.object({
   extraInstruction: z.string().optional(),
 });
 
+// 個別上書き(overrideJson)用: options の部分集合のみ許可する。
+// designTemplate/tone/length/appeal/strength/extraInstruction を任意指定可能。
+// senderName/senderContact は上書き対象外なので omit する(余剰キーは無視)。
+export const saleDmOptionsOverrideSchema = saleDmOptionsSchema
+  .omit({ senderName: true, senderContact: true })
+  .partial();
+
+export type SaleDmOptionsOverride = z.infer<typeof saleDmOptionsOverrideSchema>;
+
 export const saleDmCampaignBodySchema = z.object({
   name: z.string().min(1),
   options: saleDmOptionsSchema,
