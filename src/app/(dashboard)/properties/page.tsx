@@ -242,6 +242,9 @@ function PropertiesPageInner() {
   // 「警告ありのみ」チップに出す全体件数（warningPropertiesTotal=警告あり物件の実数）。
   const [warningPropertyCount, setWarningPropertyCount] = useState(0);
 
+  // モバイルカード: 所有者展開状態（property.id の Set）
+  const [expandedOwners, setExpandedOwners] = useState<Set<string>>(new Set());
+
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
@@ -1109,8 +1112,8 @@ function PropertiesPageInner() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+      {/* Table (PC のみ: md: 以上) */}
+      <div className="hidden md:block overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
@@ -1289,6 +1292,123 @@ function PropertiesPageInner() {
               )}
             </tbody>
           </table>
+        )}
+      </div>
+
+      {/* Card list (モバイル専用: md: 未満) */}
+      <div className="md:hidden mt-2 flex flex-col gap-3">
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+            <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
+          </div>
+        ) : visibleProperties.length === 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 px-4 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+            {warningOnly
+              ? "警告ありの物件はありません"
+              : "該当する物件が見つかりません"}
+          </div>
+        ) : (
+          visibleProperties.map((property) => {
+            const owners = property.ownerNames ?? [];
+            const OWNER_PREVIEW = 3;
+            const hasMore = owners.length > OWNER_PREVIEW;
+            const isExpanded = expandedOwners.has(property.id);
+            const visibleOwners = isExpanded ? owners : owners.slice(0, OWNER_PREVIEW);
+            return (
+              <div
+                key={property.id}
+                className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
+                onClick={(e) => {
+                  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if ((e.target as HTMLElement).closest("a, button, input, label, select, textarea")) return;
+                  router.push(`/properties/${property.id}`);
+                }}
+              >
+                {/* カード上部: チェックボックス + 種別 + 住所 */}
+                <div className="flex items-start gap-3 px-4 pt-4 pb-2">
+                  <div
+                    className="mt-0.5 shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(property.id)}
+                      onChange={() => toggleSelect(property.id)}
+                      className="rounded border-gray-300"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-medium text-indigo-600">
+                        {PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-900 dark:text-gray-100 break-all">
+                      {property.address}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 所有者 */}
+                <div className="px-4 pb-2">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">所有者</p>
+                  <div
+                    data-pii-protected
+                    data-pii-surface="owner"
+                  >
+                    {owners.length === 0 ? (
+                      <span className="text-sm text-gray-500 dark:text-gray-400">—</span>
+                    ) : (
+                      <>
+                        {visibleOwners.map((name, i) => (
+                          <p key={i} className="text-sm text-gray-900 dark:text-gray-100">
+                            {name}
+                          </p>
+                        ))}
+                        {hasMore && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedOwners((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(property.id)) next.delete(property.id);
+                                else next.add(property.id);
+                                return next;
+                              });
+                            }}
+                            className="mt-1 text-xs text-indigo-600 hover:underline"
+                          >
+                            {isExpanded
+                              ? "▴ 折りたたむ"
+                              : `他${owners.length - OWNER_PREVIEW}名 ▾`}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* 状況: 登記 / DM / 案件 */}
+                <div className="px-4 pb-4 flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    intent={REGISTRY_STATUS_INTENT[property.registryStatus] ?? "neutral"}
+                  >
+                    {REGISTRY_STATUS_LABELS[property.registryStatus] ?? property.registryStatus}
+                  </StatusBadge>
+                  <StatusBadge
+                    intent={DM_STATUS_INTENT[property.dmStatus] ?? "neutral"}
+                  >
+                    {DM_STATUS_LABELS[property.dmStatus] ?? property.dmStatus}
+                  </StatusBadge>
+                  <span className="text-xs text-gray-600 dark:text-gray-300">
+                    {CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus}
+                  </span>
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
 
