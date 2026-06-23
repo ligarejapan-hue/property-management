@@ -127,32 +127,32 @@ export default function AttachmentSearchPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <nav className="mb-4 text-sm text-gray-500">
-        <Link href="/admin" className="hover:text-gray-700">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+      <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-300">
           管理
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900">添付横断検索</span>
+        <span className="text-gray-900 dark:text-gray-100">添付横断検索</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">添付横断検索</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">添付横断検索</h1>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
         添付のメタデータ（ファイル名・種別・対象・登録日時）のみを横断検索します。
         ファイル本体のダウンロードはこの画面では提供しません。
       </p>
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-4 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
 
       {/* Filter bar */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div>
-            <label htmlFor="file-name" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="file-name" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               ファイル名（部分一致）
             </label>
             <input
@@ -164,18 +164,18 @@ export default function AttachmentSearchPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSearch();
               }}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
             />
           </div>
           <div>
-            <label htmlFor="type-filter" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="type-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               種別
             </label>
             <select
               id="type-filter"
               value={type}
               onChange={(e) => setType(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">すべて</option>
               <option value="general">一般</option>
@@ -183,14 +183,14 @@ export default function AttachmentSearchPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="target-type-filter" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="target-type-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               対象種別
             </label>
             <select
               id="target-type-filter"
               value={targetType}
               onChange={(e) => setTargetType(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">すべて</option>
               <option value="property">物件</option>
@@ -199,7 +199,7 @@ export default function AttachmentSearchPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="target-id" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="target-id" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               対象 ID（任意）
             </label>
             <input
@@ -211,11 +211,11 @@ export default function AttachmentSearchPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSearch();
               }}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
             />
           </div>
           <div>
-            <label htmlFor="date-from" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="date-from" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               登録日（開始）
             </label>
             <input
@@ -223,11 +223,11 @@ export default function AttachmentSearchPage() {
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label htmlFor="date-to" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="date-to" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               登録日（終了）
             </label>
             <input
@@ -235,7 +235,7 @@ export default function AttachmentSearchPage() {
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div className="flex items-end gap-2">
@@ -250,7 +250,7 @@ export default function AttachmentSearchPage() {
             <button
               type="button"
               onClick={handleReset}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               <RotateCcw className="h-4 w-4" />
               リセット
@@ -260,52 +260,52 @@ export default function AttachmentSearchPage() {
       </div>
 
       {/* Table */}
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
           </div>
         ) : (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   登録日時
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   ファイル名
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   種別
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   対象
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-900">
               {results.map((hit) => (
-                <tr key={hit.id} className="hover:bg-gray-50">
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 font-mono">
+                <tr key={hit.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">
                     {new Date(hit.createdAt).toLocaleString("ja-JP")}
                   </td>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-md truncate">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 max-w-md truncate">
                     {hit.fileName}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm">
-                    <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                    <span className="inline-flex rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-0.5 text-xs font-medium text-gray-800 dark:text-gray-200">
                       {TYPE_LABELS[hit.type] ?? hit.type}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                     {TARGET_TYPE_LABELS[hit.targetType] ?? hit.targetType}
-                    <span className="text-gray-400 ml-1">#{hit.targetId.slice(0, 8)}</span>
+                    <span className="text-gray-400 dark:text-gray-500 ml-1">#{hit.targetId.slice(0, 8)}</span>
                   </td>
                 </tr>
               ))}
               {results.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-400">
+                  <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">
                     該当する添付が見つかりません。
                   </td>
                 </tr>
@@ -315,10 +315,10 @@ export default function AttachmentSearchPage() {
         )}
       </div>
 
-      <p className="mt-4 text-sm text-gray-500">
+      <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
         {count} 件
         {limit > 0 && count >= limit && (
-          <span className="text-amber-600">
+          <span className="text-amber-600 dark:text-amber-400">
             （上限 {limit} 件まで表示。条件を絞ってください）
           </span>
         )}
