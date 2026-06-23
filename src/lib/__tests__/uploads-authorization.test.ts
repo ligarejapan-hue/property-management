@@ -5,12 +5,13 @@
  * 既存 Property API のスコープと整合していることを確認する。
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   authorizeUploadAccess,
   resolveRegistryServeMeta,
   escapePrismaLikePattern,
 } from "@/lib/uploads-authorization";
+import { __resetStorageForTest } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
 
 type Photo = { fileUrl: string; propertyId: string };
@@ -977,5 +978,140 @@ describe("resolveRegistryServeMeta (S1b-4)", () => {
   it("invalid key(traversal) → null", async () => {
     const prisma = makeDb({});
     expect(await resolveRegistryServeMeta("../etc/passwd", prisma)).toBeNull();
+  });
+});
+
+// ============================================================
+// Codex Finding A: SERVER backend の /{bucket}/{key} 形式 fileUrl 認可
+// resolveStoredFileUrlToKey が server adapter にフォールバックして
+// /uploads/ 以外の fileUrl も正しく解決できることを検証する。
+// ============================================================
+describe("authorizeUploadAccess — server backend fileUrl 解決 (Codex A)", () => {
+  const SERVER_URL = "https://files.example.test";
+  const BUCKET = "test-bucket";
+  const key = "properties/p1/photos/srv.jpg";
+  // server backend が保存する fileUrl 形式: /{bucket}/{key} または絶対 URL
+  const serverFileUrl = `${SERVER_URL}/${BUCKET}/${key}`;
+
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+
+  beforeEach(() => {
+    // server adapter が throw しないよう env を設定し、singleton をリセット
+    process.env.STORAGE_BACKEND = "server";
+    process.env.STORAGE_SERVER_URL = SERVER_URL;
+    process.env.STORAGE_SERVER_API_KEY = "test-key";
+    process.env.STORAGE_SERVER_BUCKET = BUCKET;
+    __resetStorageForTest();
+  });
+
+  afterEach(() => {
+    // env / singleton を元に戻す
+    delete process.env.STORAGE_BACKEND;
+    delete process.env.STORAGE_SERVER_URL;
+    delete process.env.STORAGE_SERVER_API_KEY;
+    delete process.env.STORAGE_SERVER_BUCKET;
+    __resetStorageForTest();
+  });
+
+  it("server backend fileUrl (絶対 URL) を持つ PropertyPhoto → ok（セッションがアクセス可能な物件）", async () => {
+    // このテストが修正前は not_found を返していたことを確認するバグ再現ケース
+    const prisma = makeDb({
+      photos: [{ fileUrl: serverFileUrl, propertyId: "p1" }],
+      properties: [prop],
+    });
+    const decision = await authorizeUploadAccess({
+      key,
+      session: officeStaff,
+      permissions: permsWithPropertyRead,
+      prisma,
+    });
+    expect(decision).toBe("ok");
+  });
+
+  it("server backend fileUrl で物件にアクセス不可の field_staff → forbidden（クロス物件改ざん防止）", async () => {
+    const prisma = makeDb({
+      photos: [{ fileUrl: serverFileUrl, propertyId: "p1" }],
+      // p1 は field_staff が担当していない物件
+      properties: [{ id: "p1", createdBy: "u-someone", assignedTo: null }],
+    });
+    const decision = await authorizeUploadAccess({
+      key,
+      session: fieldStaff,
+      permissions: permsWithPropertyRead,
+      prisma,
+    });
+    expect(decision).toBe("forbidden");
+  });
+
+  it("server backend fileUrl が別の key に解決される場合はカウントしない（false ok 禁止）", async () => {
+    // fileUrl の key が リクエストされた key と一致しない → not_found (スキップされる)
+    const differentKey = "properties/p1/photos/other.jpg";
+    const differentServerUrl = `${SERVER_URL}/${BUCKET}/${differentKey}`;
+    const prisma = makeDb({
+      // fileUrl は different key を指すが、リクエストは key
+      // makeDb の contains mock は key が URL に含まれるかで絞る。
+      // differentServerUrl には key が含まれないため findMany 結果は空 → not_found
+      photos: [{ fileUrl: differentServerUrl, propertyId: "p1" }],
+      properties: [prop],
+    });
+    const decision = await authorizeUploadAccess({
+      key,
+      session: officeStaff,
+      permissions: permsWithPropertyRead,
+      prisma,
+    });
+    expect(decision).toBe("not_found");
+  });
+
+  it("data: fileUrl は server backend でも絶対に key として解決されない", async () => {
+    const prisma = makeDb({
+      photos: [
+        // data: URL を fileUrl として持つレコード（key を部分含む不正ケース）
+        { fileUrl: `data:image/jpeg;base64,${key}xxx`, propertyId: "p1" },
+      ],
+      properties: [prop],
+    });
+    const decision = await authorizeUploadAccess({
+      key,
+      session: officeStaff,
+      permissions: permsWithPropertyRead,
+      prisma,
+    });
+    expect(decision).toBe("not_found");
+  });
+
+  it("blob: fileUrl は server backend でも絶対に key として解決されない", async () => {
+    const prisma = makeDb({
+      photos: [
+        { fileUrl: `blob:https://example.com/${key}`, propertyId: "p1" },
+      ],
+      properties: [prop],
+    });
+    const decision = await authorizeUploadAccess({
+      key,
+      session: officeStaff,
+      permissions: permsWithPropertyRead,
+      prisma,
+    });
+    expect(decision).toBe("not_found");
+  });
+
+  it("getStorage() が throw した場合（env 未設定）は fail-closed で not_found", async () => {
+    // STORAGE_SERVER_URL を消して ServerStorageAdapter constructor が throw するようにする
+    delete process.env.STORAGE_SERVER_URL;
+    __resetStorageForTest();
+
+    const prisma = makeDb({
+      photos: [{ fileUrl: serverFileUrl, propertyId: "p1" }],
+      properties: [prop],
+    });
+    const decision = await authorizeUploadAccess({
+      key,
+      session: officeStaff,
+      permissions: permsWithPropertyRead,
+      prisma,
+    });
+    // getStorage() が throw → viaAdapter = null → step 2 は null → not_found
+    expect(decision).toBe("not_found");
   });
 });
