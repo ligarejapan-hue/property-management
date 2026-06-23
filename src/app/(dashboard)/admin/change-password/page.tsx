@@ -60,11 +60,11 @@ export default function ChangePasswordPage() {
   if (success) {
     return (
       <div className="mx-auto max-w-md">
-        <div className="rounded-lg border border-green-200 bg-green-50 p-6 text-center">
-          <h2 className="mb-2 text-lg font-bold text-green-800">
+        <div className="rounded-lg border border-green-200 bg-green-50 p-6 text-center dark:border-green-500/20 dark:bg-green-500/10">
+          <h2 className="mb-2 text-lg font-bold text-green-800 dark:text-green-300">
             パスワードを変更しました
           </h2>
-          <p className="text-sm text-green-700">
+          <p className="text-sm text-green-700 dark:text-green-300">
             再ログインが必要です。ログイン画面に移動します...
           </p>
         </div>
@@ -75,19 +75,19 @@ export default function ChangePasswordPage() {
   return (
     <div className="mx-auto max-w-md">
       <div className="mb-6 flex items-center gap-2">
-        <KeyRound className="h-6 w-6 text-gray-700" />
-        <h2 className="text-2xl font-bold text-gray-800">パスワード変更</h2>
+        <KeyRound className="h-6 w-6 text-gray-700 dark:text-gray-200" />
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">パスワード変更</h2>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         {error && (
-          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
             {error}
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               現在のパスワード <span className="text-red-500">*</span>
             </label>
             <input
@@ -96,11 +96,11 @@ export default function ChangePasswordPage() {
               autoComplete="current-password"
               value={form.currentPassword}
               onChange={(e) => setField("currentPassword", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               新しいパスワード <span className="text-red-500">*</span>
             </label>
             <input
@@ -111,11 +111,11 @@ export default function ChangePasswordPage() {
               value={form.newPassword}
               onChange={(e) => setField("newPassword", e.target.value)}
               placeholder="8文字以上"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder:text-gray-500"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               新しいパスワード（確認） <span className="text-red-500">*</span>
             </label>
             <input
@@ -125,10 +125,10 @@ export default function ChangePasswordPage() {
               autoComplete="new-password"
               value={form.confirmPassword}
               onChange={(e) => setField("confirmPassword", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
             />
           </div>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
             変更後は再ログインが必要になります。
           </p>
           <div className="pt-2">
