@@ -12,8 +12,8 @@ import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import {
   authorizeUploadAccess,
-  extractStorageKeyFromFileUrl,
 } from "@/lib/uploads-authorization";
+import { getStorage } from "@/lib/storage";
 import { buildInitialSalesSheetDocument } from "@/lib/sales-sheet/build-document";
 import { renderDocumentToPdf } from "@/lib/sales-sheet/render-to-output";
 import { isChromiumAvailable } from "@/lib/sales-sheet/output";
@@ -70,7 +70,7 @@ export async function POST(
     let photo: { fileUrl: string } | null = null;
     if (property.photos[0]) {
       const rawPhoto = property.photos[0];
-      const photoKey = extractStorageKeyFromFileUrl(rawPhoto.fileUrl);
+      const photoKey = getStorage().keyFromUrl(rawPhoto.fileUrl);
       if (photoKey) {
         const decision = await authorizeUploadAccess({
           key: photoKey,

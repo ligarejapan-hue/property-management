@@ -42,12 +42,20 @@ vi.mock("@/lib/sales-sheet/output", () => ({ isChromiumAvailable: vi.fn(() => tr
 vi.mock("@/lib/sales-sheet/build-document", () => ({ buildInitialSalesSheetDocument: vi.fn(async () => ({ ok: true })) }));
 vi.mock("@/lib/uploads-authorization", () => ({
   authorizeUploadAccess: vi.fn(async () => "ok"),
-  extractStorageKeyFromFileUrl: vi.fn((url: string | null | undefined) => {
-    if (typeof url !== "string") return null;
-    const prefix = "/uploads/";
-    if (url.startsWith(prefix)) return url.slice(prefix.length);
-    return null;
-  }),
+}));
+
+// Backend-aware keyFromUrl: handles both /uploads/{key} (local) and /{bucket}/{key} (server)
+const mockKeyFromUrl = vi.fn((url: string | null | undefined): string | null => {
+  if (typeof url !== "string") return null;
+  const uploadsPrefix = "/uploads/";
+  if (url.startsWith(uploadsPrefix)) return url.slice(uploadsPrefix.length);
+  // server backend: /{bucket}/{key}
+  const serverMatch = /^\/[^/]+\/(.+)$/.exec(url);
+  if (serverMatch) return serverMatch[1];
+  return null;
+});
+vi.mock("@/lib/storage", () => ({
+  getStorage: vi.fn(() => ({ keyFromUrl: mockKeyFromUrl })),
 }));
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -55,6 +63,7 @@ import prisma from "@/lib/prisma";
 import { renderDocumentToPdf } from "@/lib/sales-sheet/render-to-output";
 import { buildInitialSalesSheetDocument } from "@/lib/sales-sheet/build-document";
 import { authorizeUploadAccess } from "@/lib/uploads-authorization";
+import { getStorage } from "@/lib/storage";
 import { POST } from "../route";
 
 type PrismaMock = { property: { findUnique: Mock } };
@@ -75,6 +84,16 @@ beforeEach(() => {
   pm.property.findUnique.mockResolvedValue({ id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null, photos: [] });
   (renderDocumentToPdf as unknown as Mock).mockResolvedValue(Buffer.from("%PDF-1.4 test"));
   (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+  // Restore backend-aware keyFromUrl implementation after vi.clearAllMocks()
+  mockKeyFromUrl.mockImplementation((url: string | null | undefined): string | null => {
+    if (typeof url !== "string") return null;
+    const uploadsPrefix = "/uploads/";
+    if (url.startsWith(uploadsPrefix)) return url.slice(uploadsPrefix.length);
+    const serverMatch = /^\/[^/]+\/(.+)$/.exec(url);
+    if (serverMatch) return serverMatch[1];
+    return null;
+  });
+  (getStorage as unknown as Mock).mockReturnValue({ keyFromUrl: mockKeyFromUrl });
 });
 
 describe("POST sales-sheet/preview", () => {
@@ -161,11 +180,46 @@ describe("POST sales-sheet/preview", () => {
       id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null,
       photos: [{ fileUrl: "data:image/jpeg;base64,AAAA" }],
     });
+    // data: URI resolves to null in all backends
+    mockKeyFromUrl.mockReturnValue(null);
     const res = await POST(req(), ctx);
     expect(res.status).toBe(200);
     const buildCall = (buildInitialSalesSheetDocument as unknown as Mock).mock.calls[0][0];
     expect(buildCall.photo).toBeNull();
     // authorizeUploadAccess must NOT be called when key is unresolvable
     expect(authorizeUploadAccess as unknown as Mock).not.toHaveBeenCalled();
+  });
+
+  // P2 server backend: /{bucket}/{key} URL形式の写真鍵をbackend対応keyFromUrlで解決する
+  it("server backend形式 /{bucket}/{key} のfileUrlも認可され写真付きでドキュメントを構築する (P2)", async () => {
+    const serverFileUrl = "/property-management/properties/p1/x.jpg";
+    pm.property.findUnique.mockResolvedValue({
+      id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null,
+      photos: [{ fileUrl: serverFileUrl }],
+    });
+    // server backend keyFromUrl resolves /{bucket}/{key} → key
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    const buildCall = (buildInitialSalesSheetDocument as unknown as Mock).mock.calls[0][0];
+    // photo is included because keyFromUrl resolved the server-style URL
+    expect(buildCall.photo).toEqual({ fileUrl: serverFileUrl });
+    // authorizeUploadAccess was called with the extracted key (without bucket prefix)
+    expect(authorizeUploadAccess as unknown as Mock).toHaveBeenCalledWith(
+      expect.objectContaining({ key: "properties/p1/x.jpg" }),
+    );
+  });
+
+  it("server backend形式 /{bucket}/{key} でauthorize forbidden なら photo:null (P2)", async () => {
+    const serverFileUrl = "/property-management/properties/OTHER/x.jpg";
+    pm.property.findUnique.mockResolvedValue({
+      id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null,
+      photos: [{ fileUrl: serverFileUrl }],
+    });
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("forbidden");
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    const buildCall = (buildInitialSalesSheetDocument as unknown as Mock).mock.calls[0][0];
+    expect(buildCall.photo).toBeNull();
   });
 });
