@@ -177,35 +177,35 @@ export default function UserPermissionsPage({
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400 dark:text-gray-500" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <nav className="mb-4 text-sm text-gray-500">
-        <Link href="/admin" className="hover:text-gray-700">管理</Link>
+    <div className="min-h-screen bg-gray-50 p-6 dark:bg-gray-900">
+      <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-200">管理</Link>
         <span className="mx-2">/</span>
-        <Link href="/admin/users" className="hover:text-gray-700">ユーザー管理</Link>
+        <Link href="/admin/users" className="hover:text-gray-700 dark:hover:text-gray-200">ユーザー管理</Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900">権限編集</span>
+        <span className="text-gray-900 dark:text-gray-100">権限編集</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">ユーザー権限編集</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">ユーザー権限編集</h1>
 
       {/* User info */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
-            <dt className="text-xs font-medium text-gray-500">ユーザー名</dt>
-            <dd className="mt-1 text-sm font-semibold text-gray-900">
+            <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">ユーザー名</dt>
+            <dd className="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
               {user?.name ?? "不明"}
             </dd>
           </div>
           <div>
-            <dt className="text-xs font-medium text-gray-500">ロール</dt>
-            <dd className="mt-1 text-sm font-semibold text-gray-900">
+            <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">ロール</dt>
+            <dd className="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
               {user?.role ?? "不明"}
             </dd>
           </div>
@@ -214,14 +214,14 @@ export default function UserPermissionsPage({
 
       {/* Template reference */}
       <section className="mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">
+        <h2 className="text-lg font-semibold text-gray-900 mb-3 dark:text-gray-100">
           テンプレート参照（比較用）
         </h2>
-        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <select
             value={selectedTemplateId}
             onChange={(e) => setSelectedTemplateId(e.target.value)}
-            className="block w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+            className="block w-full max-w-xs rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="">テンプレートを選択して比較</option>
             {templates.map((t) => (
@@ -235,51 +235,51 @@ export default function UserPermissionsPage({
 
       {/* Individual overrides */}
       <section className="mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">個別権限上書き</h2>
-        <p className="text-xs text-gray-500 mb-3">
+        <h2 className="text-lg font-semibold text-gray-900 mb-3 dark:text-gray-100">個別権限上書き</h2>
+        <p className="text-xs text-gray-500 mb-3 dark:text-gray-400">
           クリックで切り替え: 未設定 → 許可（上書き） → 拒否（上書き） → 未設定（テンプレートに従う）
         </p>
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   リソース
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500" colSpan={8}>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400" colSpan={8}>
                   アクション
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
               {RESOURCES.map((res) => (
-                <tr key={res.key} className="hover:bg-gray-50">
-                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
+                <tr key={res.key} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                     {res.label}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">
                       {res.actions.map((action) => {
                         const resolved = getResolved(res.key, action);
-                        let bgColor = "bg-gray-100 text-gray-500";
+                        let bgColor = "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400";
                         let indicator = "";
                         if (
                           resolved.granted &&
                           resolved.source === "template"
                         ) {
-                          bgColor = "bg-blue-100 text-blue-800";
+                          bgColor = "bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-300";
                           indicator = " [T]";
                         } else if (
                           resolved.granted &&
                           resolved.source === "override"
                         ) {
-                          bgColor = "bg-green-100 text-green-800";
+                          bgColor = "bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300";
                           indicator = " [O]";
                         } else if (
                           !resolved.granted &&
                           resolved.source === "override"
                         ) {
-                          bgColor = "bg-red-100 text-red-800 line-through";
+                          bgColor = "bg-red-100 text-red-800 line-through dark:bg-red-500/15 dark:text-red-300";
                           indicator = " [O]";
                         }
                         return (
@@ -303,21 +303,21 @@ export default function UserPermissionsPage({
         </div>
 
         {/* Legend */}
-        <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-600">
+        <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-600 dark:text-gray-300">
           <span className="flex items-center gap-1">
-            <span className="inline-block h-3 w-3 rounded bg-blue-100 border border-blue-300" />
+            <span className="inline-block h-3 w-3 rounded bg-blue-100 border border-blue-300 dark:bg-blue-500/15 dark:border-blue-500/30" />
             テンプレートで許可 [T]
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block h-3 w-3 rounded bg-green-100 border border-green-300" />
+            <span className="inline-block h-3 w-3 rounded bg-green-100 border border-green-300 dark:bg-green-500/15 dark:border-green-500/30" />
             上書きで許可 [O]
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block h-3 w-3 rounded bg-red-100 border border-red-300" />
+            <span className="inline-block h-3 w-3 rounded bg-red-100 border border-red-300 dark:bg-red-500/15 dark:border-red-500/30" />
             上書きで拒否 [O]
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block h-3 w-3 rounded bg-gray-100 border border-gray-300" />
+            <span className="inline-block h-3 w-3 rounded bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-700" />
             未許可
           </span>
         </div>
@@ -327,7 +327,7 @@ export default function UserPermissionsPage({
       <div className="flex items-center justify-end gap-4">
         {message && (
           <span
-            className={`text-sm ${message.includes("失敗") ? "text-red-600" : "text-green-600"}`}
+            className={`text-sm ${message.includes("失敗") ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}
           >
             {message}
           </span>
