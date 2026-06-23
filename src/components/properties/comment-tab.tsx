@@ -44,14 +44,14 @@ export default function CommentTab({ propertyId }: { propertyId: string }) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-        <span className="ml-2 text-sm text-gray-500">読み込み中...</span>
+        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+      <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
         {error}
       </div>
     );
@@ -62,7 +62,7 @@ export default function CommentTab({ propertyId }: { propertyId: string }) {
       <CommentForm propertyId={propertyId} onPosted={fetchCommentsData} />
 
       {comments.length === 0 ? (
-        <div className="flex flex-col items-center py-12 text-gray-400">
+        <div className="flex flex-col items-center py-12 text-gray-400 dark:text-gray-500">
           <MessageCircle className="h-8 w-8 mb-2" />
           <p className="text-sm">コメントはまだありません</p>
         </div>
@@ -127,7 +127,7 @@ function CommentForm({
           onChange={(e) => setBody(e.target.value)}
           placeholder={placeholder}
           rows={2}
-          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-none"
+          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         />
         <div className="flex flex-col gap-1">
           <button
@@ -145,7 +145,7 @@ function CommentForm({
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               取消
             </button>
@@ -153,7 +153,7 @@ function CommentForm({
         </div>
       </div>
       {error && (
-        <p className="mt-1 text-xs text-red-600">{error}</p>
+        <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
       )}
     </form>
   );
@@ -173,21 +173,21 @@ function CommentItem({
   const [showReplyForm, setShowReplyForm] = useState(false);
 
   return (
-    <div className="rounded-md border border-gray-200 bg-white p-4">
+    <div className="rounded-md border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-sm font-medium text-gray-800">
+        <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
           {comment.author.name}
         </span>
-        <span className="text-xs text-gray-400">
+        <span className="text-xs text-gray-400 dark:text-gray-500">
           {new Date(comment.createdAt).toLocaleString("ja-JP")}
         </span>
       </div>
-      <p className="text-sm text-gray-700 whitespace-pre-wrap">
+      <p className="text-sm text-gray-700 whitespace-pre-wrap dark:text-gray-200">
         {comment.body}
       </p>
       <button
         onClick={() => setShowReplyForm(!showReplyForm)}
-        className="mt-2 flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+        className="mt-2 flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
       >
         <CornerDownRight className="h-3 w-3" />
         返信
@@ -195,18 +195,18 @@ function CommentItem({
 
       {/* Replies */}
       {comment.replies?.length > 0 && (
-        <div className="mt-3 ml-4 space-y-3 border-l-2 border-gray-100 pl-4">
+        <div className="mt-3 ml-4 space-y-3 border-l-2 border-gray-100 pl-4 dark:border-gray-800">
           {comment.replies.map((reply) => (
             <div key={reply.id}>
               <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-sm font-medium text-gray-700">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
                   {reply.author.name}
                 </span>
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-gray-400 dark:text-gray-500">
                   {new Date(reply.createdAt).toLocaleString("ja-JP")}
                 </span>
               </div>
-              <p className="text-sm text-gray-600 whitespace-pre-wrap">
+              <p className="text-sm text-gray-600 whitespace-pre-wrap dark:text-gray-300">
                 {reply.body}
               </p>
             </div>

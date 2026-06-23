@@ -86,7 +86,7 @@ export default function NextActionTab({
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-        <span className="ml-2 text-sm text-gray-500">読み込み中...</span>
+        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
       </div>
     );
   }
@@ -103,12 +103,12 @@ export default function NextActionTab({
             <Plus className="h-4 w-4" />
             追加
           </button>
-          <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
             <input
               type="checkbox"
               checked={showCompleted}
               onChange={(e) => setShowCompleted(e.target.checked)}
-              className="rounded border-gray-300"
+              className="rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             />
             完了済みも表示
           </label>
@@ -116,7 +116,7 @@ export default function NextActionTab({
       </div>
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
           {error}
         </div>
       )}
@@ -133,7 +133,7 @@ export default function NextActionTab({
       )}
 
       {actions.length === 0 ? (
-        <div className="flex flex-col items-center py-12 text-gray-400">
+        <div className="flex flex-col items-center py-12 text-gray-400 dark:text-gray-500">
           <ClipboardList className="h-8 w-8 mb-2" />
           <p className="text-sm">アクションはまだありません</p>
         </div>
@@ -148,10 +148,10 @@ export default function NextActionTab({
                 key={action.id}
                 className={`flex items-start gap-3 rounded-md border p-3 ${
                   action.isCompleted
-                    ? "border-gray-200 bg-gray-50 opacity-60"
+                    ? "border-gray-200 bg-gray-50 opacity-60 dark:border-gray-800 dark:bg-gray-900"
                     : isOverdue
-                      ? "border-red-200 bg-red-50"
-                      : "border-gray-200 bg-white"
+                      ? "border-red-200 bg-red-50 dark:border-red-500/20 dark:bg-red-500/10"
+                      : "border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
                 }`}
               >
                 <button
@@ -159,7 +159,7 @@ export default function NextActionTab({
                   className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                     action.isCompleted
                       ? "border-green-500 bg-green-500 text-white"
-                      : "border-gray-300 hover:border-blue-400"
+                      : "border-gray-300 hover:border-blue-400 dark:border-gray-700"
                   }`}
                 >
                   {action.isCompleted && <Check className="h-3 w-3" />}
@@ -168,15 +168,15 @@ export default function NextActionTab({
                   <p
                     className={`text-sm ${
                       action.isCompleted
-                        ? "line-through text-gray-500"
-                        : "text-gray-800"
+                        ? "line-through text-gray-500 dark:text-gray-400"
+                        : "text-gray-800 dark:text-gray-100"
                     }`}
                   >
                     {action.content}
                   </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     {action.actionType && (
-                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-700">
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
                         {action.actionType}
                       </span>
                     )}
@@ -189,7 +189,7 @@ export default function NextActionTab({
                 </div>
                 <button
                   onClick={() => handleDeleteAction(action.id)}
-                  className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                  className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:text-gray-500 dark:hover:bg-red-500/10"
                   title="削除"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -266,7 +266,7 @@ function CreateActionForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-4"
+      className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/40 dark:bg-blue-500/20"
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2">
@@ -275,7 +275,7 @@ function CreateActionForm({
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="アクション内容"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         </div>
         <div>
@@ -284,7 +284,7 @@ function CreateActionForm({
             value={actionType}
             onChange={(e) => setActionType(e.target.value)}
             placeholder="種別 (任意: 電話, 訪問, 確認 等)"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         </div>
         <div>
@@ -292,14 +292,14 @@ function CreateActionForm({
             type="date"
             value={scheduledAt}
             onChange={(e) => setScheduledAt(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         </div>
         <div>
           <select
             value={assignedTo}
             onChange={(e) => setAssignedTo(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="">担当者を選択</option>
             {users.map((u) => (
@@ -310,7 +310,7 @@ function CreateActionForm({
           </select>
         </div>
       </div>
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
       <div className="mt-3 flex gap-2">
         <button
           type="submit"
@@ -322,7 +322,7 @@ function CreateActionForm({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+          className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           キャンセル
         </button>
