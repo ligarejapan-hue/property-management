@@ -15,6 +15,7 @@ import {
 } from "@/lib/uploads-authorization";
 import { getStorage } from "@/lib/storage";
 import { buildInitialSalesSheetDocument } from "@/lib/sales-sheet/build-document";
+import { OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
 import { renderDocumentToPdf } from "@/lib/sales-sheet/render-to-output";
 import { isChromiumAvailable } from "@/lib/sales-sheet/output";
 
@@ -92,7 +93,9 @@ export async function POST(
         floorAreaRatio: s(property.floorAreaRatio),
         roadType: s(property.roadType),
         roadWidth: s(property.roadWidth),
-        occupancyStatus: s(property.occupancyStatus),
+        occupancyStatus: property.occupancyStatus != null
+          ? (OCCUPANCY_STATUS_LABELS[property.occupancyStatus] ?? s(property.occupancyStatus))
+          : null,
       },
       photo,
       overrides,

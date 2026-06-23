@@ -54,6 +54,7 @@ import {
   CASE_STATUS_OPTIONS,
   INTRODUCTION_ROUTE_LABELS,
   INTRODUCTION_ROUTE_OPTIONS,
+  OCCUPANCY_STATUS_LABELS,
 } from "@/lib/property-types";
 
 const REGISTRY_STATUS_LABELS: Record<string, string> = {
@@ -644,11 +645,8 @@ function BasicTab({
   const isUnit =
     property.propertyType === "apartment_unit" ||
     property.propertyType === "unit";
-  const OCCUPANCY_LABELS: Record<string, string> = {
-    vacant: "空室",
-    occupied: "入居中",
-    unknown: "不明",
-  };
+  // 現況ラベルは shared 定数 (src/lib/property-types.ts) から参照
+  const OCCUPANCY_LABELS = OCCUPANCY_STATUS_LABELS;
 
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">

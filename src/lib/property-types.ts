@@ -290,3 +290,14 @@ export const DM_STATUS_LABELS: Record<string, string> = {
   hold: "未判断",
   no_send: "送付不可",
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// 現況 (OccupancyStatus) 表示ラベル
+//   物件詳細画面・棟詳細画面・販売図面 route で共有する。
+// ════════════════════════════════════════════════════════════════════════════
+
+export const OCCUPANCY_STATUS_LABELS: Record<string, string> = {
+  vacant:   "空室",
+  occupied: "入居中",
+  unknown:  "不明",
+};

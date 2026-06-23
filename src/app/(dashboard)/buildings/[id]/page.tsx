@@ -25,7 +25,7 @@ import {
 } from "@/lib/api-client";
 import BuildingPhotoTab from "@/components/buildings/building-photo-tab";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
-import { CASE_STATUS_LABELS as CASE_LABELS } from "@/lib/property-types";
+import { CASE_STATUS_LABELS as CASE_LABELS, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
 
 // ---------- Types ----------
 
@@ -67,11 +67,8 @@ interface UnitProperty {
   }>;
 }
 
-const OCCUPANCY_LABELS: Record<string, string> = {
-  vacant: "空室",
-  occupied: "入居中",
-  unknown: "不明",
-};
+// 現況ラベルは shared 定数 (src/lib/property-types.ts) から参照
+const OCCUPANCY_LABELS = OCCUPANCY_STATUS_LABELS;
 
 const OCCUPANCY_COLORS: Record<string, string> = {
   vacant: "bg-green-100 text-green-800",
