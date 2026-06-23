@@ -249,8 +249,8 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-        <span className="ml-2 text-sm text-gray-500">読み込み中...</span>
+        <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
+        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
       </div>
     );
   }
@@ -259,7 +259,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
     <div className="space-y-4">
       {/* Inline error (アップロード失敗等) — 全画面置換しないことで再試行可能 */}
       {error && (
-        <div className="flex items-start justify-between gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="flex items-start justify-between gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
           <span>{error}</span>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -281,16 +281,16 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
             <Image className="h-5 w-5" />
             物件写真
             {photos.length > 0 && (
-              <span className="text-sm font-normal text-gray-500">
+              <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
                 ({photos.length})
               </span>
             )}
           </h3>
-          <p className="mt-0.5 text-xs text-gray-500">
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             この物件単体の写真です。共用部・外観などの棟全体写真は棟詳細「棟写真」をご利用ください。
           </p>
         </div>
@@ -301,7 +301,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
               className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
                 reorderMode
                   ? "border-blue-300 bg-blue-50 text-blue-700"
-                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               }`}
             >
               <GripVertical className="h-4 w-4" />
@@ -340,8 +340,8 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
         onClick={handleUploadClick}
         className={`flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
           isDragging
-            ? "border-blue-400 bg-blue-50"
-            : "border-gray-300 hover:border-gray-400"
+            ? "border-blue-400 bg-blue-50 dark:bg-blue-500/15"
+            : "border-gray-300 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-600"
         } ${photos.length === 0 ? "flex-col py-16" : "gap-2 py-3"}`}
       >
         {photos.length === 0 ? (
@@ -385,7 +385,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
             return (
               <div
                 key={photo.id}
-                className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+                className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
               >
                 {/* Thumbnail */}
                 <button
@@ -393,7 +393,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                   onClick={() => {
                     if (!reorderMode) setLightboxPhoto(photo);
                   }}
-                  className={`block aspect-square w-full overflow-hidden ${isPlaceholder ? getPlaceholderColor(index) : "bg-gray-100"} cursor-pointer`}
+                  className={`block aspect-square w-full overflow-hidden ${isPlaceholder ? getPlaceholderColor(index) : "bg-gray-100 dark:bg-gray-800"} cursor-pointer`}
                 >
                   {!isPlaceholder ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -444,7 +444,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                   ) : (
                     <div className="flex items-start justify-between gap-1">
                       <p
-                        className="truncate text-sm font-medium text-gray-800"
+                        className="truncate text-sm font-medium text-gray-800 dark:text-gray-100"
                         title={photo.caption ?? "無題"}
                       >
                         {photo.caption ?? (
@@ -454,7 +454,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                       {!reorderMode && (
                         <button
                           onClick={() => startCaptionEdit(photo)}
-                          className="shrink-0 text-gray-300 hover:text-gray-600"
+                          className="shrink-0 text-gray-300 hover:text-gray-600 dark:text-gray-600 dark:hover:text-gray-300"
                           title="キャプション編集"
                         >
                           <Pencil className="h-3 w-3" />
@@ -462,7 +462,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                       )}
                     </div>
                   )}
-                  <p className="mt-0.5 text-xs text-gray-400">
+                  <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
                     {formatDate(photo.createdAt)}
                   </p>
                 </div>
@@ -473,7 +473,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                     <button
                       onClick={() => handleMove(index, "up")}
                       disabled={index === 0}
-                      className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30"
+                      className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30 dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-700"
                       title="上へ"
                     >
                       ▲
@@ -481,7 +481,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                     <button
                       onClick={() => handleMove(index, "down")}
                       disabled={index === photos.length - 1}
-                      className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30"
+                      className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30 dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-700"
                       title="下へ"
                     >
                       ▼
@@ -497,7 +497,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                       className={`rounded-full p-1 shadow backdrop-blur transition-colors ${
                         photo.isPrimary
                           ? "bg-yellow-400 text-yellow-900"
-                          : "bg-white/80 text-gray-400 hover:bg-white hover:text-yellow-500"
+                          : "bg-white/80 text-gray-400 hover:bg-white hover:text-yellow-500 dark:bg-gray-800/80 dark:text-gray-500 dark:hover:bg-gray-700"
                       }`}
                       title={photo.isPrimary ? "代表解除" : "代表に設定"}
                     >
@@ -505,7 +505,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                     </button>
                     <button
                       onClick={() => setDeleteTargetId(photo.id)}
-                      className="rounded-full bg-white/80 p-1 text-gray-400 shadow backdrop-blur hover:bg-white hover:text-red-600"
+                      className="rounded-full bg-white/80 p-1 text-gray-400 shadow backdrop-blur hover:bg-white hover:text-red-600 dark:bg-gray-800/80 dark:text-gray-500 dark:hover:bg-gray-700"
                       title="削除"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -521,17 +521,17 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
       {/* Delete confirmation dialog */}
       {deleteTargetId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="mx-4 w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
-            <h4 className="text-base font-semibold text-gray-900">
+          <div className="mx-4 w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-gray-900">
+            <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
               写真を削除しますか？
             </h4>
-            <p className="mt-2 text-sm text-gray-500">
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
               この操作は取り消せません。
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setDeleteTargetId(null)}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 キャンセル
               </button>
@@ -558,11 +558,11 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
           >
             <button
               onClick={() => setLightboxPhoto(null)}
-              className="absolute -right-2 -top-2 z-10 rounded-full bg-white p-1.5 text-gray-600 shadow-lg hover:text-gray-900"
+              className="absolute -right-2 -top-2 z-10 rounded-full bg-white p-1.5 text-gray-600 shadow-lg hover:text-gray-900 dark:bg-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
             >
               <X className="h-5 w-5" />
             </button>
-            <div className="overflow-hidden rounded-lg bg-white shadow-2xl">
+            <div className="overflow-hidden rounded-lg bg-white shadow-2xl dark:bg-gray-900">
               {(() => {
                 const url = getPhotoUrl(lightboxPhoto);
                 const isReal = !!url && !url.startsWith("/mock/");
@@ -584,10 +584,10 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                 );
               })()}
               <div className="p-4">
-                <p className="text-base font-medium text-gray-900">
+                <p className="text-base font-medium text-gray-900 dark:text-gray-100">
                   {lightboxPhoto.caption ?? "無題"}
                 </p>
-                <p className="mt-1 text-sm text-gray-400">
+                <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">
                   {formatDate(lightboxPhoto.createdAt)}
                 </p>
               </div>
