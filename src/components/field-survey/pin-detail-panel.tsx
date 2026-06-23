@@ -180,20 +180,20 @@ export default function PinDetailPanel({
       aria-label="調査ピン詳細"
       data-testid="pin-detail-panel"
       className={
-        "fixed z-40 bg-white shadow-xl border border-gray-200 " +
+        "fixed z-40 bg-white dark:bg-gray-900 shadow-xl border border-gray-200 dark:border-gray-700 " +
         // mobile: bottom sheet
         "inset-x-0 bottom-0 max-h-[70vh] overflow-y-auto rounded-t-lg " +
         // desktop: 右側固定パネル
         "md:inset-y-0 md:right-0 md:bottom-auto md:left-auto md:w-96 md:max-h-none md:rounded-none md:rounded-l-lg"
       }
     >
-      <div className="flex items-center justify-between border-b border-gray-200 p-3">
-        <h2 className="text-sm font-semibold text-gray-800">調査ピン詳細</h2>
+      <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 p-3">
+        <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">調査ピン詳細</h2>
         <button
           type="button"
           onClick={onClose}
           aria-label="閉じる"
-          className="text-gray-500 hover:text-gray-800"
+          className="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100"
         >
           ×
         </button>
@@ -201,12 +201,12 @@ export default function PinDetailPanel({
 
       <div className="p-3 text-sm">
         {mutations.detailLoading && (
-          <p className="text-[11px] text-gray-500">読み込み中…</p>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">読み込み中…</p>
         )}
         {mutations.detailError && (
           <p
             role="status"
-            className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+            className="rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
           >
             {mutations.detailError}
           </p>
@@ -265,13 +265,13 @@ export default function PinDetailPanel({
         )}
 
         {canDelete && !editing && (
-          <div className="mt-4 border-t border-gray-200 pt-3">
+          <div className="mt-4 border-t border-gray-200 dark:border-gray-800 pt-3">
             {!confirmingDelete ? (
               <button
                 type="button"
                 data-testid="pin-detail-delete-button"
                 onClick={() => setConfirmingDelete(true)}
-                className="w-full rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+                className="w-full rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 px-2 py-1 text-xs font-semibold text-red-700 dark:text-red-300 hover:bg-red-100"
               >
                 削除
               </button>
@@ -280,7 +280,7 @@ export default function PinDetailPanel({
                 role="alertdialog"
                 aria-modal="true"
                 data-testid="pin-detail-delete-confirm"
-                className="rounded border border-red-300 bg-red-50 p-2 text-[12px] text-red-900"
+                className="rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 p-2 text-[12px] text-red-900 dark:text-red-300"
               >
                 <p className="font-semibold">この調査ピンを削除しますか？</p>
                 <p className="mt-1 text-[11px]">
@@ -289,7 +289,7 @@ export default function PinDetailPanel({
                 {deleteErrorMessage(mutations.deleteError) && (
                   <p
                     role="status"
-                    className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+                    className="mt-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
                   >
                     {deleteErrorMessage(mutations.deleteError)}
                   </p>
@@ -299,7 +299,7 @@ export default function PinDetailPanel({
                     type="button"
                     onClick={() => setConfirmingDelete(false)}
                     disabled={mutations.deleteLoading}
-                    className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
                   >
                     キャンセル
                   </button>
@@ -399,22 +399,22 @@ function PinPhotoSection({
 
   return (
     <section data-testid="pin-detail-photos" className="mt-4">
-      <div className="mb-1 text-[11px] text-gray-500">写真</div>
+      <div className="mb-1 text-[11px] text-gray-500 dark:text-gray-400">写真</div>
 
       {photoMutations.listLoading && (
-        <p className="text-[11px] text-gray-500">読み込み中…</p>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">読み込み中…</p>
       )}
       {photoMutations.listError && (
         <p
           role="status"
-          className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+          className="rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
         >
           {photoMutations.listError}
         </p>
       )}
 
       {photos.length === 0 && !photoMutations.listLoading ? (
-        <p className="text-[12px] text-gray-500">(写真なし)</p>
+        <p className="text-[12px] text-gray-500 dark:text-gray-400">(写真なし)</p>
       ) : (
         <ul className="grid grid-cols-3 gap-2">
           {photos.map((p) => (
@@ -423,10 +423,10 @@ function PinPhotoSection({
                 type="button"
                 onClick={() => setPreviewId(p.id)}
                 data-testid="pin-photo-thumb"
-                className="block h-20 w-full overflow-hidden rounded border border-gray-200"
+                className="block h-20 w-full overflow-hidden rounded border border-gray-200 dark:border-gray-800"
               >
                 {brokenIds.has(p.id) ? (
-                  <span className="flex h-full w-full items-center justify-center bg-gray-50 text-center text-[10px] text-gray-500">
+                  <span className="flex h-full w-full items-center justify-center bg-gray-50 dark:bg-gray-800 text-center text-[10px] text-gray-500 dark:text-gray-400">
                     プレビューを表示できません
                   </span>
                 ) : (
@@ -464,7 +464,7 @@ function PinPhotoSection({
       {preview && !brokenIds.has(preview.id) && (
         <div
           data-testid="pin-photo-preview"
-          className="mt-2 rounded border border-gray-200 p-1"
+          className="mt-2 rounded border border-gray-200 dark:border-gray-800 p-1"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -476,7 +476,7 @@ function PinPhotoSection({
           <button
             type="button"
             onClick={() => setPreviewId(null)}
-            className="mt-1 text-[11px] text-gray-500 underline hover:text-gray-800"
+            className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 underline hover:text-gray-800 dark:hover:text-gray-100"
           >
             閉じる
           </button>
@@ -512,7 +512,7 @@ function PinPhotoSection({
               onClick={() => cameraInputRef.current?.click()}
               disabled={photoMutations.uploadLoading}
               data-testid="pin-photo-camera"
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
             >
               写真を撮る
             </button>
@@ -521,7 +521,7 @@ function PinPhotoSection({
               onClick={() => galleryInputRef.current?.click()}
               disabled={photoMutations.uploadLoading}
               data-testid="pin-photo-add"
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
             >
               写真を追加
             </button>
@@ -529,7 +529,7 @@ function PinPhotoSection({
           {photoMutations.uploadError && (
             <p
               role="status"
-              className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+              className="mt-1 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
             >
               {photoMutations.uploadError}
             </p>
@@ -537,7 +537,7 @@ function PinPhotoSection({
           {photoMutations.deleteError && (
             <p
               role="status"
-              className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+              className="mt-1 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
             >
               {photoMutations.deleteError}
             </p>
@@ -561,21 +561,21 @@ function ReadOnlyView({
 }) {
   return (
     <>
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-[12px] text-gray-800">
-        <dt className="text-gray-500">種類</dt>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-[12px] text-gray-800 dark:text-gray-100">
+        <dt className="text-gray-500 dark:text-gray-400">種類</dt>
         <dd>{formatPinType(detail.pinType)}</dd>
-        <dt className="text-gray-500">状態</dt>
+        <dt className="text-gray-500 dark:text-gray-400">状態</dt>
         <dd>{formatPinStatus(detail.status)}</dd>
-        <dt className="text-gray-500">作成者</dt>
+        <dt className="text-gray-500 dark:text-gray-400">作成者</dt>
         <dd>{isOwn ? "あなた" : "他スタッフ"}</dd>
-        <dt className="text-gray-500">作成日時</dt>
+        <dt className="text-gray-500 dark:text-gray-400">作成日時</dt>
         <dd>{formatPinCreatedAt(detail.createdAt)}</dd>
-        <dt className="text-gray-500">物件</dt>
+        <dt className="text-gray-500 dark:text-gray-400">物件</dt>
         <dd>
           {detail.propertyId ? (
             <a
               href={`/properties/${detail.propertyId}`}
-              className="text-indigo-600 hover:underline"
+              className="text-indigo-600 dark:text-indigo-400 hover:underline"
             >
               紐付け済 →
             </a>
@@ -585,11 +585,11 @@ function ReadOnlyView({
         </dd>
       </dl>
       <div className="mt-3">
-        <div className="mb-1 text-[11px] text-gray-500">メモ</div>
+        <div className="mb-1 text-[11px] text-gray-500 dark:text-gray-400">メモ</div>
         {/* React text node のみで描画する (raw HTML 描画は使わない)。 */}
         <div
           data-testid="pin-detail-memo"
-          className="whitespace-pre-wrap rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[12px] text-gray-800"
+          className="whitespace-pre-wrap rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 px-2 py-1 text-[12px] text-gray-800 dark:text-gray-100"
         >
           {detail.memo && detail.memo.length > 0 ? detail.memo : "(なし)"}
         </div>
@@ -599,7 +599,7 @@ function ReadOnlyView({
           type="button"
           onClick={onEdit}
           data-testid="pin-detail-edit-button"
-          className="mt-3 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+          className="mt-3 w-full rounded border border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/20 px-2 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-500/30"
         >
           編集
         </button>
@@ -636,7 +636,7 @@ function EditView({
   return (
     <>
       <fieldset className="mb-3" disabled={saving}>
-        <legend className="mb-1 text-xs font-semibold text-gray-700">
+        <legend className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
           種類
         </legend>
         <div className="grid grid-cols-2 gap-1">
@@ -657,7 +657,7 @@ function EditView({
       </fieldset>
 
       <fieldset className="mb-3" disabled={saving}>
-        <legend className="mb-1 text-xs font-semibold text-gray-700">
+        <legend className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
           状態
         </legend>
         <div className="flex flex-wrap gap-2">
@@ -678,7 +678,7 @@ function EditView({
       </fieldset>
 
       <label className="mb-3 block">
-        <span className="mb-1 block text-xs font-semibold text-gray-700">
+        <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
           メモ
         </span>
         <textarea
@@ -688,9 +688,9 @@ function EditView({
           maxLength={FIELD_SURVEY_MEMO_MAX_LEN}
           rows={3}
           data-testid="pin-edit-memo"
-          className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+          className="w-full rounded border border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
         />
-        <span className="mt-1 block text-right text-[10px] text-gray-400">
+        <span className="mt-1 block text-right text-[10px] text-gray-400 dark:text-gray-500">
           {draftMemo.length} / {FIELD_SURVEY_MEMO_MAX_LEN}
         </span>
       </label>
@@ -698,7 +698,7 @@ function EditView({
       {serverError && (
         <p
           role="status"
-          className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+          className="mb-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
         >
           {serverError}
         </p>
@@ -709,7 +709,7 @@ function EditView({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
         >
           キャンセル
         </button>
@@ -724,7 +724,7 @@ function EditView({
         </button>
       </div>
       {/* updatedAt の表示はしない (UI 上の Hint としては不要) */}
-      <p className="mt-2 text-[10px] text-gray-400">
+      <p className="mt-2 text-[10px] text-gray-400 dark:text-gray-500">
         ID: {detail.id.slice(0, 8)}
       </p>
     </>
