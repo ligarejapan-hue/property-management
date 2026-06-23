@@ -39,8 +39,8 @@ export default function LocationRecorderControls({
   const recording = status === "recording" || status === "preparing";
 
   return (
-    <div className="mt-2 border-t border-gray-200 pt-2">
-      <div className="mb-1 text-xs font-semibold text-gray-600">位置記録</div>
+    <div className="mt-2 border-t border-gray-200 dark:border-gray-800 pt-2">
+      <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">位置記録</div>
       <StatusLine status={status} isFlushing={isFlushing} />
       <Counters
         saved={savedCount}
@@ -49,7 +49,7 @@ export default function LocationRecorderControls({
       />
       {isLowAccuracyNow && (
         <p
-          className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-800"
+          className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
           data-testid="location-record-accuracy-warning"
         >
           GPS 精度が低い状態です。屋内・地下では精度が落ちます。
@@ -60,7 +60,7 @@ export default function LocationRecorderControls({
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="mt-2 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+          className="mt-2 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
           data-testid="location-record-start-button"
         >
           位置記録開始
@@ -71,7 +71,7 @@ export default function LocationRecorderControls({
           type="button"
           onClick={() => onStop()}
           disabled={status === "stopping"}
-          className="mt-2 w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-2 w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
           data-testid="location-record-stop-button"
         >
           位置記録停止
@@ -81,7 +81,7 @@ export default function LocationRecorderControls({
       {error && (
         <p
           role="status"
-          className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+          className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
         >
           {error}
         </p>
@@ -148,7 +148,7 @@ function Counters({
   lastFlushAt: Date | null;
 }) {
   return (
-    <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700">
+    <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700 dark:text-gray-200">
       <dt>保存済</dt>
       <dd>{saved}</dd>
       <dt>未送信</dt>
@@ -178,11 +178,11 @@ function ConsentModal({
       data-testid="location-record-consent-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
     >
-      <div className="w-full max-w-md rounded-md bg-white p-4 text-sm shadow-lg">
-        <h3 className="mb-2 text-base font-semibold text-gray-800">
+      <div className="w-full max-w-md rounded-md bg-white p-4 text-sm shadow-lg dark:bg-gray-900">
+        <h3 className="mb-2 text-base font-semibold text-gray-800 dark:text-gray-100">
           📍 位置記録の確認
         </h3>
-        <ul className="mb-3 ml-4 list-disc space-y-1 text-[11px] text-gray-700">
+        <ul className="mb-3 ml-4 list-disc space-y-1 text-[11px] text-gray-700 dark:text-gray-200">
           <li>
             業務 (巡回) 中のみ位置情報を記録します。常時監視ではありません。
           </li>
@@ -202,7 +202,7 @@ function ConsentModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             キャンセル
           </button>
