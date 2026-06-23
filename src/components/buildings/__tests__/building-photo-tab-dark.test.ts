@@ -31,6 +31,14 @@ describe("building-photo-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
     expect(src).toContain("dark:hover:bg-gray-800");
   });
 
+  // --- reorder active (T1レビュー対応) ---
+  it("並び替えボタン active 状態に dark:border-blue-500/40 がある", () => {
+    expect(src).toContain("dark:border-blue-500/40");
+  });
+  it("並び替えボタン active 状態に dark:bg-blue-500/20 がある", () => {
+    expect(src).toContain("dark:bg-blue-500/20");
+  });
+
   // --- 文字 ---
   it("text-gray-900 に dark:text-gray-100 がある", () => {
     expect(src).toContain("dark:text-gray-100");

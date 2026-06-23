@@ -230,7 +230,7 @@ export default function BuildingPhotoTab({
               onClick={() => setReorderMode((v) => !v)}
               className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
                 reorderMode
-                  ? "border-blue-300 bg-blue-50 text-blue-700"
+                  ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300"
                   : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               }`}
             >
@@ -309,7 +309,7 @@ export default function BuildingPhotoTab({
                         if (e.key === "Enter") saveCaptionEdit(photo.id);
                         if (e.key === "Escape") setEditingCaptionId(null);
                       }}
-                      className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-xs focus:outline-none"
+                      className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-xs focus:outline-none dark:bg-gray-900 dark:text-gray-100"
                       placeholder="キャプション"
                     />
                     <button
