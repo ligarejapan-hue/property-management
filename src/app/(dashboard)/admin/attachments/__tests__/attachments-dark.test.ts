@@ -8,14 +8,7 @@ const src = readFileSync(join(dir, "..", "page.tsx"), "utf8");
 
 describe("admin/attachments/page.tsx dark: 配色 (admin残)", () => {
   // --- 面（背景） ---
-  it("ページ背景に dark:bg-gray-900 がある", () => {
-    expect(src).toContain("dark:bg-gray-900");
-  });
-  it("フィルタカード背景に dark:bg-gray-900 がある", () => {
-    // bg-white のカード面に dark:bg-gray-900 を追加
-    expect(src).toContain("dark:bg-gray-900");
-  });
-  it("テーブル背景に dark:bg-gray-900 がある", () => {
+  it("dark:bg-gray-900 がある（ページ背景/フィルタ/テーブル）", () => {
     expect(src).toContain("dark:bg-gray-900");
   });
   it("thead(bg-gray-50)に dark:bg-gray-800/50 がある", () => {

@@ -8,18 +8,15 @@ const src = readFileSync(join(dir, "..", "page.tsx"), "utf8");
 
 describe("admin/attachments/trash/page.tsx dark: 配色 (admin残)", () => {
   // --- 面（背景） ---
-  it("ページ背景に dark:bg-gray-900 がある", () => {
+  it("dark:bg-gray-900 がある（ページ背景/テーブルカード/tbody）", () => {
     expect(src).toContain("dark:bg-gray-900");
   });
-  it("テーブルカード背景に dark:bg-gray-900 がある", () => {
-    // overflow-hidden カード(bg-white)に dark:bg-gray-900 を追加
-    expect(src).toContain("dark:bg-gray-900");
+  it("dark:bg-gray-900 が複数箇所にある（ページ背景・テーブルカード・tbody を含む）", () => {
+    const count = (src.match(/dark:bg-gray-900/g) ?? []).length;
+    expect(count).toBeGreaterThanOrEqual(2);
   });
   it("thead(bg-gray-50)に dark:bg-gray-800/50 がある", () => {
     expect(src).toContain("dark:bg-gray-800/50");
-  });
-  it("tbody 背景に dark:bg-gray-900 がある", () => {
-    expect(src).toContain("dark:bg-gray-900");
   });
   it("行ホバーに dark:hover:bg-gray-800 がある", () => {
     expect(src).toContain("dark:hover:bg-gray-800");

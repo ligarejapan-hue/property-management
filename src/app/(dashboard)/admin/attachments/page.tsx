@@ -263,7 +263,7 @@ export default function AttachmentSearchPage() {
       <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
           </div>
         ) : (
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">

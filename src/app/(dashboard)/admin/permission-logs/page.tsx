@@ -101,7 +101,7 @@ export default function PermissionLogsPage() {
                   <td className="whitespace-nowrap px-4 py-3 text-sm">
                     <span
                       className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        CHANGE_TYPE_COLORS[log.changeType] ?? "bg-gray-100 text-gray-800"
+                        CHANGE_TYPE_COLORS[log.changeType] ?? "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
                       }`}
                     >
                       {CHANGE_TYPE_LABELS[log.changeType] ?? log.changeType}

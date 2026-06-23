@@ -11,12 +11,12 @@ const src = readFileSync(join(dir, "..", "page.tsx"), "utf8");
 // -----------------------------------------------------------------------
 describe("display-name-audit/page.tsx dark: 配色", () => {
   // --- 面（背景） ---
-  it("ページ背景に dark:bg-gray-900 がある", () => {
+  it("dark:bg-gray-900 がある（ページ背景/テーブルパネル/CSV ボタン）", () => {
     expect(src).toContain("dark:bg-gray-900");
   });
-  it("テーブルパネル bg-white に dark:bg-gray-900 がある", () => {
+  it("dark:bg-gray-900 が複数箇所にある（ページ背景・テーブルパネル・CSV ボタンを含む）", () => {
     const count = (src.match(/dark:bg-gray-900/g) ?? []).length;
-    expect(count).toBeGreaterThanOrEqual(1);
+    expect(count).toBeGreaterThanOrEqual(2);
   });
   it("テーブルヘッダ面に dark:bg-gray-800/50 がある", () => {
     expect(src).toContain("dark:bg-gray-800/50");
@@ -78,9 +78,6 @@ describe("display-name-audit/page.tsx dark: 配色", () => {
   });
 
   // --- CSV ボタン bg-white のアウトラインボタン ---
-  it("CSV ダウンロードボタンに dark:bg-gray-900 がある", () => {
-    expect(src).toContain("dark:bg-gray-900");
-  });
   it("CSV ボタン文字に dark:text-gray-200 がある", () => {
     expect(src).toContain("dark:text-gray-200");
   });

@@ -8,13 +8,10 @@ const src = readFileSync(join(dir, "..", "page.tsx"), "utf8");
 
 describe("admin/audit-logs/page.tsx dark: 配色 (admin残)", () => {
   // --- 面（背景） ---
-  it("ページ背景に dark:bg-gray-900 がある", () => {
+  it("dark:bg-gray-900 がある（ページ背景/フィルタ/テーブル/tbody/pre）", () => {
     expect(src).toContain("dark:bg-gray-900");
   });
-  it("フィルタパネルに dark:bg-gray-900 がある", () => {
-    expect(src).toContain("dark:bg-gray-900");
-  });
-  it("テーブルコンテナに dark:bg-gray-900 がある", () => {
+  it("dark:bg-gray-900 が複数箇所にある（ページ背景・フィルタ・テーブル・pre を含む）", () => {
     // bg-white コンテナが dark:bg-gray-900 になる
     const count = (src.match(/dark:bg-gray-900/g) ?? []).length;
     expect(count).toBeGreaterThanOrEqual(3);
@@ -22,14 +19,8 @@ describe("admin/audit-logs/page.tsx dark: 配色 (admin残)", () => {
   it("thead に dark:bg-gray-800/50 がある", () => {
     expect(src).toContain("dark:bg-gray-800/50");
   });
-  it("tbody に dark:bg-gray-900 がある", () => {
-    expect(src).toContain("dark:bg-gray-900");
-  });
   it("展開行に dark:bg-gray-800/50 がある", () => {
     expect(src).toContain("dark:bg-gray-800/50");
-  });
-  it("展開内の pre に dark:bg-gray-900 がある", () => {
-    expect(src).toContain("dark:bg-gray-900");
   });
   it("行ホバーに dark:hover:bg-gray-800 がある", () => {
     expect(src).toContain("dark:hover:bg-gray-800");
@@ -101,9 +92,6 @@ describe("admin/audit-logs/page.tsx dark: 配色 (admin残)", () => {
   });
 
   // --- ページネーション ---
-  it("ページネーションボタンに dark:bg-gray-900 がある", () => {
-    expect(src).toContain("dark:bg-gray-900");
-  });
   it("ページネーションボタン枠線に dark:border-gray-700 がある", () => {
     expect(src).toContain("dark:border-gray-700");
   });

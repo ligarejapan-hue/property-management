@@ -36,6 +36,11 @@ describe("admin/permission-logs/page.tsx dark: 配色 (admin残)", () => {
     expect(src).toContain("dark:text-gray-500");
   });
 
+  // --- neutral フォールバック dark 化 ---
+  it("neutralフォールバックバッジに dark:bg-gray-800 dark:text-gray-200 がある", () => {
+    expect(src).toContain("bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200");
+  });
+
   // --- accent 可読化（ChangeDetail diff badges） ---
   it("追加バッジ（bg-green-50）に dark:bg-green-500/10 がある", () => {
     expect(src).toContain("dark:bg-green-500/10");
