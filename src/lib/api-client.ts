@@ -250,6 +250,38 @@ export async function regenerateSaleDmDraft(id: string) {
   });
 }
 
+// 下書き(draft)を一括で確定(confirmed)にする。印刷対象は confirmed のみ。
+export async function confirmSaleDmDrafts(ids: string[]) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { count: ids.length };
+  }
+  return apiFetch<{ count: number }>("/api/properties/sale-dm/drafts/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+}
+
+// 確定済み(confirmed)の下書きを送付済み(sent)にする(配達結果/反響の入力が解禁)。
+export async function markSaleDmDraftSent(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id, status: "sent" };
+  }
+  return apiFetch<{ id: string; status: string }>(`/api/properties/sale-dm/drafts/${id}/mark-sent`, {
+    method: "POST",
+  });
+}
+
+// 印刷用 HTML / DM差込CSV の URL(GET・別タブ/ダウンロード)。
+export function saleDmPrintUrl(campaignId: string): string {
+  return `/api/properties/sale-dm/campaigns/${campaignId}/print`;
+}
+export function saleDmExportUrl(campaignId: string): string {
+  return `/api/properties/sale-dm/campaigns/${campaignId}/export`;
+}
+
 // ---------- Next Actions ----------
 
 export async function fetchNextActions(
