@@ -40,10 +40,21 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/sales-sheet/render-to-output", () => ({ renderDocumentToPdf: vi.fn() }));
 vi.mock("@/lib/sales-sheet/output", () => ({ isChromiumAvailable: vi.fn(() => true) }));
 vi.mock("@/lib/sales-sheet/build-document", () => ({ buildInitialSalesSheetDocument: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/lib/uploads-authorization", () => ({
+  authorizeUploadAccess: vi.fn(async () => "ok"),
+  extractStorageKeyFromFileUrl: vi.fn((url: string | null | undefined) => {
+    if (typeof url !== "string") return null;
+    const prefix = "/uploads/";
+    if (url.startsWith(prefix)) return url.slice(prefix.length);
+    return null;
+  }),
+}));
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { renderDocumentToPdf } from "@/lib/sales-sheet/render-to-output";
+import { buildInitialSalesSheetDocument } from "@/lib/sales-sheet/build-document";
+import { authorizeUploadAccess } from "@/lib/uploads-authorization";
 import { POST } from "../route";
 
 type PrismaMock = { property: { findUnique: Mock } };
@@ -63,6 +74,7 @@ beforeEach(() => {
   (getUserPermissions as unknown as Mock).mockResolvedValue([{ resource: "property", action: "read", granted: true }]);
   pm.property.findUnique.mockResolvedValue({ id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null, photos: [] });
   (renderDocumentToPdf as unknown as Mock).mockResolvedValue(Buffer.from("%PDF-1.4 test"));
+  (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
 });
 
 describe("POST sales-sheet/preview", () => {
@@ -99,5 +111,61 @@ describe("POST sales-sheet/preview", () => {
       { sortOrder: "asc" },
     ]);
     expect(call.include.photos.take).toBe(1);
+  });
+
+  // P1 IDOR photo authorization tests
+  it("写真のストレージキーが認可済みなら写真付きでドキュメントを構築する", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null,
+      photos: [{ fileUrl: "/uploads/properties/p1/photo.jpg" }],
+    });
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    const buildCall = (buildInitialSalesSheetDocument as unknown as Mock).mock.calls[0][0];
+    expect(buildCall.photo).toEqual({ fileUrl: "/uploads/properties/p1/photo.jpg" });
+    // authorizeUploadAccess was called for the photo key
+    expect(authorizeUploadAccess as unknown as Mock).toHaveBeenCalledWith(
+      expect.objectContaining({ key: "properties/p1/photo.jpg" }),
+    );
+  });
+
+  it("写真キーが forbidden なら photo:null でドキュメントを構築し、バイトを読み込まない (P1 IDOR)", async () => {
+    // Simulate: photo fileUrl resolves to another property's key → authorizeUploadAccess returns forbidden
+    pm.property.findUnique.mockResolvedValue({
+      id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null,
+      photos: [{ fileUrl: "/uploads/properties/OTHER/photo.jpg" }],
+    });
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("forbidden");
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    const buildCall = (buildInitialSalesSheetDocument as unknown as Mock).mock.calls[0][0];
+    // photo must be null — unauthorized bytes must NOT be embedded
+    expect(buildCall.photo).toBeNull();
+  });
+
+  it("写真キーが not_found なら photo:null でドキュメントを構築する", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null,
+      photos: [{ fileUrl: "/uploads/properties/p1/missing.jpg" }],
+    });
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("not_found");
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    const buildCall = (buildInitialSalesSheetDocument as unknown as Mock).mock.calls[0][0];
+    expect(buildCall.photo).toBeNull();
+  });
+
+  it("写真 fileUrl からキーが解決できない場合は photo:null でドキュメントを構築する", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null, building: null,
+      photos: [{ fileUrl: "data:image/jpeg;base64,AAAA" }],
+    });
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    const buildCall = (buildInitialSalesSheetDocument as unknown as Mock).mock.calls[0][0];
+    expect(buildCall.photo).toBeNull();
+    // authorizeUploadAccess must NOT be called when key is unresolvable
+    expect(authorizeUploadAccess as unknown as Mock).not.toHaveBeenCalled();
   });
 });

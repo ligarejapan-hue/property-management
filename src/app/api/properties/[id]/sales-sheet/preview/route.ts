@@ -10,6 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import {
+  authorizeUploadAccess,
+  extractStorageKeyFromFileUrl,
+} from "@/lib/uploads-authorization";
 import { buildInitialSalesSheetDocument } from "@/lib/sales-sheet/build-document";
 import { renderDocumentToPdf } from "@/lib/sales-sheet/render-to-output";
 import { isChromiumAvailable } from "@/lib/sales-sheet/output";
@@ -58,7 +62,28 @@ export async function POST(
       throw new ApiError(503, "PDF生成が利用できません（サーバー未設定）", "PDF_UNAVAILABLE");
     }
 
-    const photo = property.photos[0] ? { fileUrl: property.photos[0].fileUrl } : null;
+    // P1 IDOR: PropertyPhoto.fileUrl is a mutable string — verify the resolved
+    // storage key is authorized for this session before embedding bytes.
+    // Reuse the canonical authorizeUploadAccess used by /uploads/[...path].
+    // If authorization fails (forbidden / not_found / key unresolvable) → photo: null.
+    // No key, error detail, or PII leaks in logs/response.
+    let photo: { fileUrl: string } | null = null;
+    if (property.photos[0]) {
+      const rawPhoto = property.photos[0];
+      const photoKey = extractStorageKeyFromFileUrl(rawPhoto.fileUrl);
+      if (photoKey) {
+        const decision = await authorizeUploadAccess({
+          key: photoKey,
+          session,
+          permissions,
+        });
+        if (decision === "ok") {
+          photo = { fileUrl: rawPhoto.fileUrl };
+        }
+        // forbidden / not_found → photo remains null; do not read or embed bytes
+      }
+      // key unresolvable → photo remains null
+    }
     const doc = await buildInitialSalesSheetDocument({
       property: {
         address: property.address,
