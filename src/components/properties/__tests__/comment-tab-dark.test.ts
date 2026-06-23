@@ -18,7 +18,7 @@ describe("comment-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
   });
   it("返信インデント枠線に dark:border-gray-800 がある (border-gray-100 対応)", () => {
     // border-gray-100 も dark:border-gray-800 へ
-    expect(src).toContain("dark:border-gray-800");
+    expect(src).toContain("border-gray-100 pl-4 dark:border-gray-800");
   });
   it("入力欄枠線に dark:border-gray-700 がある (border-gray-300 対応)", () => {
     expect(src).toContain("dark:border-gray-700");

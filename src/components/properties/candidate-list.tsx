@@ -271,7 +271,7 @@ export default function CandidateList({
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-4">
-        <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+        <Loader2 className="h-4 w-4 animate-spin text-gray-400 dark:text-gray-500" />
         <span className="text-xs text-gray-400 dark:text-gray-500">候補を検索中...</span>
       </div>
     );

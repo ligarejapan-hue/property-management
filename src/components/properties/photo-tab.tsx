@@ -354,7 +354,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
             >
               写真をドラッグ＆ドロップ、またはクリックして選択
             </p>
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               JPEG / PNG / WebP / HEIC（最大 {MAX_PHOTO_SIZE_MB}MB）
             </p>
           </>
@@ -448,7 +448,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
                         title={photo.caption ?? "無題"}
                       >
                         {photo.caption ?? (
-                          <span className="text-gray-400">無題</span>
+                          <span className="text-gray-400 dark:text-gray-500">無題</span>
                         )}
                       </p>
                       {!reorderMode && (

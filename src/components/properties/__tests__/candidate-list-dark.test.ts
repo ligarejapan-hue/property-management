@@ -31,7 +31,7 @@ describe("candidate-list.tsx dark: 配色 (物件詳細タブ群)", () => {
     expect(src).toContain("dark:text-gray-500");
   });
   it("text-gray-600 (保留ボタン) に dark:text-gray-300 がある", () => {
-    expect(src).toContain("dark:text-gray-300");
+    expect(src).toContain("text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700");
   });
 
   // --- 枠線 ---

@@ -326,7 +326,7 @@ export default function BuildingPhotoTab({
                       title={photo.caption ?? photo.fileName}
                     >
                       {photo.caption || (
-                        <span className="text-gray-400">{photo.fileName}</span>
+                        <span className="text-gray-400 dark:text-gray-500">{photo.fileName}</span>
                       )}
                     </p>
                     {!reorderMode && (

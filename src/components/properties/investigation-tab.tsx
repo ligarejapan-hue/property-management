@@ -307,7 +307,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-10">
-        <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+        <Loader2 className="h-5 w-5 animate-spin text-gray-400 dark:text-gray-500" />
       </div>
     );
   }
@@ -470,7 +470,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
                   variant === "absent"
                     ? "text-gray-400 italic dark:text-gray-500"         // 該当なし → 薄いグレー
                     : variant === "caution"
-                    ? "text-amber-600 font-medium dark:text-amber-400"  // 要確認 → アンバー
+                    ? "text-amber-600 font-medium dark:text-amber-400"   // 要確認 → アンバー
                     : "text-gray-700 dark:text-gray-200";               // 通常 / default
 
                 return (
