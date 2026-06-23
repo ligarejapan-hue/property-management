@@ -99,4 +99,20 @@ describe("POST clear-dm-undeliverable", () => {
     expect(res.status).toBe(403);
     expect(pm.property.update).not.toHaveBeenCalled();
   });
+
+  it("field_staff が作成/担当でない物件を操作すると 403・更新しない", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" } });
+    pm.property.findUnique.mockResolvedValue({ id: "p1", dmUndeliverableAt: new Date(), dmStatus: "no_send", createdBy: "other", assignedTo: "other" });
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(403);
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("field_staff でも担当物件なら 200", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" } });
+    pm.property.findUnique.mockResolvedValue({ id: "p1", dmUndeliverableAt: new Date(), dmStatus: "no_send", createdBy: "other", assignedTo: "u1" });
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(200);
+    expect(pm.property.update).toHaveBeenCalled();
+  });
 });

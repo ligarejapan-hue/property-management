@@ -22,9 +22,18 @@ export async function POST(
 
     const property = await prisma.property.findUnique({
       where: { id },
-      select: { id: true, dmUndeliverableAt: true, dmStatus: true },
+      select: { id: true, dmUndeliverableAt: true, dmStatus: true, createdBy: true, assignedTo: true },
     });
     if (!property) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+
+    // field_staff は作成 or 担当の物件のみ操作可(既存 PATCH /properties/[id] と同じ可視範囲)。
+    if (
+      session.role === "field_staff" &&
+      property.createdBy !== session.id &&
+      property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この物件を操作する権限がありません", "FORBIDDEN");
+    }
 
     const data: { dmUndeliverableAt: null; dmStatus?: "send" | "hold" } = {
       dmUndeliverableAt: null,
