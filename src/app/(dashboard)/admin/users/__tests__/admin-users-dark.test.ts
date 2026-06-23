@@ -152,14 +152,23 @@ describe("admin/users/[id]/permissions/page.tsx dark: 配色 (A1)", () => {
   });
 
   // --- select 入力欄 3点セット ---
-  it("select に暗背景クラスがある", () => {
-    expect(permissionsPage).toContain("dark:bg-gray-800");
+  it("select に暗背景クラスがある（gray-900）", () => {
+    // <select> 要素の className から dark:bg-gray-900 を確認する
+    const selectClassMatch = permissionsPage.match(
+      /<select[\s\S]*?className="([^"]*dark:bg-[^"]+)"/
+    );
+    const selectClassName = selectClassMatch?.[1] ?? "";
+    expect(selectClassName).toContain("dark:bg-gray-900");
   });
-  it("select に暗テキストクラスがある", () => {
+  it("select に暗テキスト・暗枠クラスがある（3点セット）", () => {
+    const selectClassMatch = permissionsPage.match(
+      /<select[\s\S]*?className="([^"]+)"/
+    );
+    const selectClassName = selectClassMatch?.[1] ?? "";
     const hasSelectDark =
-      permissionsPage.includes("dark:bg-gray-800") &&
-      permissionsPage.includes("dark:border-gray-700") &&
-      permissionsPage.includes("dark:text-gray-100");
+      selectClassName.includes("dark:bg-gray-900") &&
+      selectClassName.includes("dark:border-gray-700") &&
+      selectClassName.includes("dark:text-gray-100");
     expect(hasSelectDark).toBe(true);
   });
 
