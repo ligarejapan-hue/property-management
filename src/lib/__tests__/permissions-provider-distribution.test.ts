@@ -204,7 +204,7 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
 
   it("useScreenProtection() の permissions から CSV/DM 出力可否を導出する", () => {
     expect(pageSrc).toMatch(
-      /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*refetchPermissions,\s*\} = useScreenProtection\(\)/,
+      /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*refetchPermissions,\s*capabilities,\s*\} = useScreenProtection\(\)/,
     );
     expect(pageSrc).toMatch(/const \{ canExportCsv, canExportDm, canCreateDm \} = useMemo\(/);
   });

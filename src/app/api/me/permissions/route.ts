@@ -7,6 +7,7 @@ import {
 import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
 import { isRegistryAutoFetchProviderConfigured } from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
+import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 
 // ---------- GET /api/me/permissions ----------
 // 現在ログイン中のユーザーの権限一覧を返す。
@@ -25,6 +26,9 @@ export async function GET() {
       // OCR サービス設定済み（localhost allowlist 通過）かつ admin のときだけ true。
       registryOcrDraft:
         isRegistryOcrConfigured() && session.role === "admin",
+      // 売却促進DM の文面生成 provider が設定済みか（boolean のみ）。
+      // 未設定なら一覧の「売却DMを作成」導線を出さない（押すと 503 になるのを防ぐ）。
+      saleDmLetter: isSaleDmConfigured(),
     };
     return apiResponse({ permissions, capabilities });
   } catch (error) {

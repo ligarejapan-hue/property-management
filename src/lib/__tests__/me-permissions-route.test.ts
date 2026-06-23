@@ -72,6 +72,10 @@ vi.mock("@/lib/registry-ocr/client", () => ({
   isRegistryOcrConfigured: vi.fn(),
 }));
 
+vi.mock("@/lib/sale-dm-letter", () => ({
+  isSaleDmConfigured: vi.fn(),
+}));
+
 import {
   ApiError,
   getApiSession,
@@ -81,6 +85,7 @@ import {
 import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
 import { isRegistryAutoFetchProviderConfigured } from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
+import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { GET } from "@/app/api/me/permissions/route";
 
 const SESSION = {
@@ -103,6 +108,7 @@ beforeEach(() => {
   (isCorporateLookupConfigured as Mock).mockReturnValue(true);
   (isRegistryAutoFetchProviderConfigured as Mock).mockReturnValue(false);
   (isRegistryOcrConfigured as Mock).mockReturnValue(false);
+  (isSaleDmConfigured as Mock).mockReturnValue(false);
 });
 
 describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
@@ -121,6 +127,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       registryAutoFetch: false,
       // office_staff（非 admin）かつ OCR 未設定 → false
       registryOcrDraft: false,
+      saleDmLetter: false,
     });
     expect(isCorporateLookupConfigured).toHaveBeenCalledTimes(1);
     expect(isRegistryAutoFetchProviderConfigured).toHaveBeenCalledTimes(1);
@@ -134,6 +141,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       corporateLookup: true,
       registryAutoFetch: true,
       registryOcrDraft: false,
+      saleDmLetter: false,
     });
   });
 
@@ -162,6 +170,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       "corporateLookup",
       "registryAutoFetch",
       "registryOcrDraft",
+      "saleDmLetter",
     ]);
   });
 

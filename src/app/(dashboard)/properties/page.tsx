@@ -153,6 +153,7 @@ function PropertiesPageInner() {
     permissions: mePermissions,
     permissionsLoading,
     refetchPermissions,
+    capabilities,
   } = useScreenProtection();
 
   // F12-2 Codex 対応(2): 権限鮮度の再確認。App Router の layout は client navigation で
@@ -766,7 +767,9 @@ function PropertiesPageInner() {
             DM差込CSV出力
           </button>
         )}
-        {canCreateDm && (
+        {/* 権限(canCreateDm)に加え、文面生成が設定済み(capabilities.saleDmLetter)のときだけ出す。
+            未設定だと押しても 503 になるため導線自体を隠す。 */}
+        {canCreateDm && capabilities?.saleDmLetter && (
           <button
             type="button"
             onClick={handleCreateSaleDm}

@@ -51,6 +51,8 @@ export interface MeCapabilities {
   registryAutoFetch: boolean;
   /** scanned 謄本の OCR 下書き生成が使えるか（OCR 設定済み ∧ admin を server 側で束ねた値）。 */
   registryOcrDraft: boolean;
+  /** 売却促進DM の文面生成 provider が設定済みか（未設定なら作成導線を出さない）。 */
+  saleDmLetter: boolean;
 }
 
 interface ScreenProtectionState {
@@ -147,6 +149,7 @@ export default function ScreenProtectionProvider({
           corporateLookup: json.capabilities?.corporateLookup === true,
           registryAutoFetch: json.capabilities?.registryAutoFetch === true,
           registryOcrDraft: json.capabilities?.registryOcrDraft === true,
+          saleDmLetter: json.capabilities?.saleDmLetter === true,
         });
         setPermissionsError(false);
         setPermissionsLoading(false);
