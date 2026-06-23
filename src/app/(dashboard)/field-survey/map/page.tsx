@@ -28,12 +28,12 @@ export default async function FieldSurveyMapPage() {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
-      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
+      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
         <div>
-          <h1 className="text-lg font-semibold text-gray-800">
+          <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
             現地調査マップ
           </h1>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
             既存物件と調査ピンを地図上で確認します。
             巡回開始 / 終了は本フェーズ (Phase 1-F-1) で UI のみ追加されます。
             位置情報の記録は次フェーズで追加予定。
@@ -63,13 +63,13 @@ function PermissionDeniedNotice() {
     <div
       role="alert"
       data-testid="field-survey-permission-denied"
-      className="flex h-full items-center justify-center bg-gray-50 p-6"
+      className="flex h-full items-center justify-center bg-gray-50 p-6 dark:bg-gray-900"
     >
-      <div className="max-w-xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900">
+      <div className="max-w-xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
         <h2 className="mb-2 text-base font-semibold">
           現地調査マップの閲覧権限がありません
         </h2>
-        <p className="text-xs text-amber-800">
+        <p className="text-xs text-amber-800 dark:text-amber-300">
           管理者に field_survey:read 権限を確認してください。
         </p>
       </div>

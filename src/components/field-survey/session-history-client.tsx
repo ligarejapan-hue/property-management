@@ -123,12 +123,12 @@ export default function SessionHistoryClient({
       <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
         {canSeeAll && (
           <label className="flex items-center gap-1">
-            <span className="text-gray-600">範囲</span>
+            <span className="text-gray-600 dark:text-gray-300">範囲</span>
             <select
               data-testid="session-history-scope"
               value={scope}
               onChange={(e) => onScopeChange(e.target.value as Scope)}
-              className="rounded border border-gray-300 px-2 py-1"
+              className="rounded border border-gray-300 px-2 py-1 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="mine">自分</option>
               <option value="all">全員</option>
@@ -136,12 +136,12 @@ export default function SessionHistoryClient({
           </label>
         )}
         <label className="flex items-center gap-1">
-          <span className="text-gray-600">状態</span>
+          <span className="text-gray-600 dark:text-gray-300">状態</span>
           <select
             data-testid="session-history-status"
             value={status}
             onChange={(e) => onStatusChange(e.target.value as StatusFilter)}
-            className="rounded border border-gray-300 px-2 py-1"
+            className="rounded border border-gray-300 px-2 py-1 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="ended">終了</option>
             <option value="active">記録中</option>
@@ -154,15 +154,15 @@ export default function SessionHistoryClient({
       {error && (
         <p
           role="status"
-          className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900"
+          className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
         >
           {error}
         </p>
       )}
 
-      <div className="overflow-x-auto rounded border border-gray-200">
-        <table className="min-w-full divide-y divide-gray-200 text-xs">
-          <thead className="bg-gray-50 text-gray-600">
+      <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
+        <table className="min-w-full divide-y divide-gray-200 text-xs dark:divide-gray-800">
+          <thead className="bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
             <tr>
               <th className="px-2 py-2 text-left">開始</th>
               <th className="px-2 py-2 text-left">終了</th>
@@ -174,7 +174,7 @@ export default function SessionHistoryClient({
               <th className="px-2 py-2 text-left"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 bg-white">
+          <tbody className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-gray-900">
             {rows.map((r) => (
               <tr key={r.id} data-testid="session-history-row">
                 <td className="px-2 py-2">{formatDateTime(r.startedAt)}</td>
@@ -192,7 +192,7 @@ export default function SessionHistoryClient({
                   <Link
                     href={`/field-survey/map?sessionId=${encodeURIComponent(r.id)}`}
                     data-testid="session-history-view-map"
-                    className="text-indigo-600 hover:underline"
+                    className="text-indigo-600 hover:underline dark:text-indigo-400"
                   >
                     地図で見る
                   </Link>
@@ -201,7 +201,7 @@ export default function SessionHistoryClient({
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-2 py-6 text-center text-gray-500">
+                <td colSpan={8} className="px-2 py-6 text-center text-gray-500 dark:text-gray-400">
                   巡回履歴がありません。
                 </td>
               </tr>
@@ -211,7 +211,7 @@ export default function SessionHistoryClient({
       </div>
 
       <div className="mt-3 flex items-center justify-between text-xs">
-        <span className="text-gray-500">
+        <span className="text-gray-500 dark:text-gray-400">
           {loading ? "読み込み中…" : `ページ ${page} / ${totalPages}`}
         </span>
         <div className="flex gap-2">
@@ -219,7 +219,7 @@ export default function SessionHistoryClient({
             type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={loading || page <= 1}
-            className="rounded border border-gray-300 bg-white px-3 py-1 disabled:opacity-50"
+            className="rounded border border-gray-300 bg-white px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             前へ
           </button>
@@ -227,7 +227,7 @@ export default function SessionHistoryClient({
             type="button"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={loading || page >= totalPages}
-            className="rounded border border-gray-300 bg-white px-3 py-1 disabled:opacity-50"
+            className="rounded border border-gray-300 bg-white px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             次へ
           </button>
