@@ -206,7 +206,7 @@ export default function PostalCodeAuditPage() {
                   </tr>
                 ) : (
                   filteredRows.map((r) => (
-                    <tr key={r.ownerId} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <tr key={r.ownerId}>
                       <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{r.nameMasked ?? "—"}</td>
                       <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{r.zipMasked ?? "—"}</td>
                       <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{r.addressMasked ?? "—"}</td>
