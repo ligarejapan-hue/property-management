@@ -116,7 +116,7 @@ export default function HistoryTab({
 
   if (error) {
     return (
-      <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+      <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
         {error}
       </div>
     );
@@ -125,16 +125,16 @@ export default function HistoryTab({
   return (
     <div data-pii-protected data-pii-surface="history">
       {/* Filter bar */}
-      <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-800/50">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div>
-            <label className="block text-[11px] font-medium text-gray-500 mb-0.5">
+            <label className="block text-[11px] font-medium text-gray-500 mb-0.5 dark:text-gray-400">
               フィールド
             </label>
             <select
               value={fieldNameFilter}
               onChange={(e) => { setFieldNameFilter(e.target.value); setPage(1); }}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">すべて</option>
               {fieldNames.map((f) => (
@@ -143,13 +143,13 @@ export default function HistoryTab({
             </select>
           </div>
           <div>
-            <label className="block text-[11px] font-medium text-gray-500 mb-0.5">
+            <label className="block text-[11px] font-medium text-gray-500 mb-0.5 dark:text-gray-400">
               変更元
             </label>
             <select
               value={sourceFilter}
               onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">すべて</option>
               {sources.map((s) => (
@@ -158,25 +158,25 @@ export default function HistoryTab({
             </select>
           </div>
           <div>
-            <label className="block text-[11px] font-medium text-gray-500 mb-0.5">
+            <label className="block text-[11px] font-medium text-gray-500 mb-0.5 dark:text-gray-400">
               日付（開始）
             </label>
             <input
               type="date"
               value={dateFrom}
               onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label className="block text-[11px] font-medium text-gray-500 mb-0.5">
+            <label className="block text-[11px] font-medium text-gray-500 mb-0.5 dark:text-gray-400">
               日付（終了）
             </label>
             <input
               type="date"
               value={dateTo}
               onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div className="flex items-end">
@@ -189,7 +189,7 @@ export default function HistoryTab({
                 setDateTo("");
                 setPage(1);
               }}
-              className="rounded border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+              className="rounded border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               リセット
             </button>
@@ -200,10 +200,10 @@ export default function HistoryTab({
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-          <span className="ml-2 text-sm text-gray-500">読み込み中...</span>
+          <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
         </div>
       ) : logs.length === 0 ? (
-        <div className="flex flex-col items-center py-12 text-gray-400">
+        <div className="flex flex-col items-center py-12 text-gray-400 dark:text-gray-500">
           <History className="h-8 w-8 mb-2" />
           <p className="text-sm">
             {fieldNameFilter || sourceFilter || dateFrom || dateTo
@@ -215,39 +215,39 @@ export default function HistoryTab({
         <>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50">
+              <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800/50">
                 <tr>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600">
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     日時
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600">
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     変更者
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600">
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     変更元
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600">
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     フィールド
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600">
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     変更前
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600">
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     変更後
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-gray-50">
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-500 text-xs">
+                  <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <td className="whitespace-nowrap px-3 py-2 text-gray-500 text-xs dark:text-gray-400">
                       {new Date(log.changedAt).toLocaleString("ja-JP")}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
                       {log.changer.name}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-xs">
-                      <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                      <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                         {SOURCE_LABELS[log.source] ?? log.source}
                       </span>
                     </td>
@@ -256,20 +256,20 @@ export default function HistoryTab({
                     </td>
                     <td className="px-3 py-2 max-w-[200px] truncate">
                       {log.oldValue != null ? (
-                        <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-700">
+                        <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-400">
                           {log.oldValue}
                         </span>
                       ) : (
-                        <span className="text-gray-300">-</span>
+                        <span className="text-gray-300 dark:text-gray-600">-</span>
                       )}
                     </td>
                     <td className="px-3 py-2 max-w-[200px] truncate">
                       {log.newValue != null ? (
-                        <span className="rounded bg-green-50 px-1.5 py-0.5 text-xs text-green-700">
+                        <span className="rounded bg-green-50 px-1.5 py-0.5 text-xs text-green-700 dark:bg-green-500/10 dark:text-green-400">
                           {log.newValue}
                         </span>
                       ) : (
-                        <span className="text-gray-300">-</span>
+                        <span className="text-gray-300 dark:text-gray-600">-</span>
                       )}
                     </td>
                   </tr>
@@ -281,25 +281,25 @@ export default function HistoryTab({
           {/* Pagination */}
           {pagination.totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between">
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
                 全 {pagination.total} 件{pagination.total > 0 && `中 ${(page - 1) * 50 + 1}〜${Math.min(page * 50, pagination.total)} 件`}
               </p>
               <div className="flex items-center gap-2">
                 <button
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40"
+                  className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
                 >
                   <ChevronLeft className="h-3 w-3" />
                   前へ
                 </button>
-                <span className="text-xs text-gray-600">
+                <span className="text-xs text-gray-600 dark:text-gray-300">
                   {page} / {pagination.totalPages}
                 </span>
                 <button
                   disabled={page >= pagination.totalPages}
                   onClick={() => setPage((p) => p + 1)}
-                  className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40"
+                  className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
                 >
                   次へ
                   <ChevronRight className="h-3 w-3" />
