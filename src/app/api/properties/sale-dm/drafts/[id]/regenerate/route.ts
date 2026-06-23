@@ -9,11 +9,14 @@ import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireSaleDmAccess();
+    const { session } = await requireSaleDmAccess();
     if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
     const { id } = await params;
-    const draft = await prisma.dmRecipientDraft.findUnique({ where: { id }, include: { variant: true, property: { select: { address: true, propertyType: true, roomNo: true } } } });
-    if (!draft) throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    const draft = await prisma.dmRecipientDraft.findUnique({ where: { id }, include: { variant: true, property: { select: { address: true, propertyType: true, roomNo: true } }, campaign: { select: { createdBy: true } } } });
+    // 作成者本人のキャンペーン配下のみ(横断アクセス防止)。not-found/not-owned は同じ 404。
+    if (!draft || draft.campaign.createdBy !== session.id) throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    // 送付済み(sent)の宛先は再生成(本文書き換え)できない(送った内容/集計の改竄防止)。
+    if (draft.status === "sent") throw new ApiError(409, "送付済みの宛先は再生成できません", "ALREADY_SENT");
     const v = draft.variant;
     const sender = resolveSender();
     const { drafts } = await generateLetters([{

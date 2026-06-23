@@ -75,7 +75,7 @@ const req = () => new Request("http://x/api/properties/sale-dm/campaigns/c1/expo
 beforeEach(() => {
   vi.clearAllMocks();
   requireSaleDmAccess.mockResolvedValue({ session: { id: "u1" } });
-  pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト" });
+  pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト", createdBy: "u1" });
   pm.dmRecipientDraft.findMany.mockResolvedValue([draft]);
 });
 

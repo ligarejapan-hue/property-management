@@ -41,9 +41,19 @@ export async function PATCH(
         deliveryStatus: true,
         lpFirstAccessAt: true,
         phoneInquiryAt: true,
+        status: true,
+        campaign: { select: { createdBy: true } },
       },
     });
-    if (!draft) throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    // 作成者本人のキャンペーン配下の下書きのみ操作可(他人UUIDでの横断アクセス防止)。
+    // 存在を漏らさないため not-found / not-owned は同じ 404。
+    if (!draft || draft.campaign.createdBy !== session.id) {
+      throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    }
+    // 配達結果/反響は送付済み(sent)の宛先にのみ記録できる(未送付物件を no_send に汚染しない)。
+    if (draft.status !== "sent") {
+      throw new ApiError(409, "送付済みの宛先のみ結果を記録できます", "INVALID_STATE");
+    }
 
     const now = new Date();
 

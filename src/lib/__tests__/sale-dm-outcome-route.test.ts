@@ -81,6 +81,8 @@ beforeEach(() => {
     deliveryStatus: "unknown",
     lpFirstAccessAt: null,
     phoneInquiryAt: null,
+    status: "sent",
+    campaign: { createdBy: "u1" },
   });
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
   pm.property.update.mockResolvedValue({ id: "p1" });
@@ -113,6 +115,8 @@ describe("PATCH outcome", () => {
       deliveryStatus: "delivered",
       lpFirstAccessAt: null,
       phoneInquiryAt: new Date(),
+      status: "sent",
+      campaign: { createdBy: "u1" },
     });
     const res = await PATCH(req({ phoneInquiry: false }) as never, ctx());
     expect(res.status).toBe(200);
@@ -151,6 +155,28 @@ describe("PATCH outcome", () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue(null);
     const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
     expect(res.status).toBe(404);
+  });
+
+  it("他人のキャンペーン配下の draft は 404・副作用なし(横断アクセス防止)", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneInquiryAt: null,
+      status: "sent", campaign: { createdBy: "other-user" },
+    });
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(404);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("未送付(status!=sent)の draft への記録は 409・物件を触らない", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneInquiryAt: null,
+      status: "confirmed", campaign: { createdBy: "u1" },
+    });
+    const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
+    expect(res.status).toBe(409);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
   });
 
   it("権限不足(requireSaleDmAccess が 403 throw)で 403・副作用なし", async () => {

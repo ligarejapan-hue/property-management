@@ -50,6 +50,7 @@ describe("POST regenerate (override 反映)", () => {
   it("variant 設定に overrideJson を merge した options で生成する", async () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue({
       id: "r1", recipientName: "田中 一郎", honorific: "様", coOwnerCount: 1,
+      status: "confirmed", campaign: { createdBy: "u1" },
       overrideJson: { tone: "soft" },
       variant: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
       property: { address: "東京都〇〇区", propertyType: "land", roomNo: null },
@@ -65,6 +66,7 @@ describe("POST regenerate (override 反映)", () => {
   it("overrideJson が null なら variant 設定そのままで生成する", async () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue({
       id: "r1", recipientName: "田中 一郎", honorific: "様", coOwnerCount: 1,
+      status: "confirmed", campaign: { createdBy: "u1" },
       overrideJson: null,
       variant: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
       property: { address: "東京都〇〇区", propertyType: "land", roomNo: null },

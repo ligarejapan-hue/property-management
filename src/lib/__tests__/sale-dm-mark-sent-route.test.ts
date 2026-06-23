@@ -69,7 +69,7 @@ const ctx = (id = "r1") => ({ params: Promise.resolve({ id }) });
 beforeEach(() => {
   vi.clearAllMocks();
   (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" } });
-  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "confirmed" });
+  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" } });
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
   pm.propertyDmLog.create.mockResolvedValue({ id: "log1" });
 });
@@ -90,7 +90,7 @@ describe("POST mark-sent", () => {
   });
 
   it("既に sent の draft は冪等(再 create しない)で 200", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "sent" });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "sent", campaign: { createdBy: "u1" } });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(200);
     expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe("POST mark-sent", () => {
   });
 
   it("draft が draft(未確定)状態なら 409", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "draft" });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "draft", campaign: { createdBy: "u1" } });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(409);
     expect(pm.propertyDmLog.create).not.toHaveBeenCalled();

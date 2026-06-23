@@ -23,7 +23,7 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
-    dmCampaign: { findUnique: vi.fn() },
+    dmCampaign: { findUnique: vi.fn(), findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), findFirst: vi.fn() },
     dmRecipientDraft: { count: vi.fn() },
   },
@@ -36,7 +36,7 @@ import { GET as listVariants, POST as createVariant } from "../../app/api/proper
 import { PATCH as updateVariant, DELETE as deleteVariant } from "../../app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route";
 
 const pm = prismaMock as never as {
-  dmCampaign: { findUnique: ReturnType<typeof vi.fn> };
+  dmCampaign: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
   dmVariant: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { count: ReturnType<typeof vi.fn> };
 };
@@ -54,6 +54,8 @@ beforeEach(() => {
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
   grant(...ALL);
+  // assertSaleDmCampaignOwned 用: 既定で作成者本人のキャンペーン(owned)。
+  pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
 });
 
 describe("GET variants", () => {
@@ -74,7 +76,7 @@ describe("GET variants", () => {
 
 describe("POST variant (作成)", () => {
   it("label + options 一式で作成し 200", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
     pm.dmVariant.create.mockResolvedValue({ id: "v2", label: "B", ...optionFields });
     const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields }) }) as never, ctxC);
     expect(res.status).toBe(200);
@@ -90,7 +92,7 @@ describe("POST variant (作成)", () => {
     expect(res.status).toBe(404);
   });
   it("不正な options で 422(zod)", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
     const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: { ...optionFields, tone: "loud" } }) }) as never, ctxC);
     expect(res.status).toBe(422);
   });

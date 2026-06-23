@@ -49,7 +49,7 @@ beforeEach(() => {
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
   grant(...ALL);
-  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1" });
+  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", campaign: { createdBy: "u1" } });
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
 });
 
@@ -98,5 +98,19 @@ describe("PATCH draft (拡張)", () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue(null);
     const res = await patchDraft(patch({ body: "x" }) as never, ctx);
     expect(res.status).toBe(404);
+  });
+
+  it("他人のキャンペーン配下の draft は 404・更新しない(横断アクセス防止)", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", campaign: { createdBy: "other-user" } });
+    const res = await patchDraft(patch({ body: "x" }) as never, ctx);
+    expect(res.status).toBe(404);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+  });
+
+  it("送付済み(sent)の draft の編集は 409・更新しない", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "sent", campaign: { createdBy: "u1" } });
+    const res = await patchDraft(patch({ body: "x" }) as never, ctx);
+    expect(res.status).toBe(409);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
   });
 });

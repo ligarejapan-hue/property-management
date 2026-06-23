@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmVariantCreateSchema } from "@/lib/validators-sale-dm";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireSaleDmAccess();
+    const { session } = await requireSaleDmAccess();
     const { id } = await params;
+    await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ一覧。
     const variants = await prisma.dmVariant.findMany({
       where: { campaignId: id },
       orderBy: { label: "asc" },
@@ -25,8 +26,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     const { label, options } = saleDmVariantCreateSchema.parse(await parseJsonBody(request));
 
-    const campaign = await prisma.dmCampaign.findUnique({ where: { id }, select: { id: true } });
-    if (!campaign) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
+    const campaign = await prisma.dmCampaign.findUnique({ where: { id }, select: { id: true, createdBy: true } });
+    // 作成者本人のキャンペーンにのみ型を作成可(横断アクセス防止)。not-found/not-owned は 404。
+    if (!campaign || campaign.createdBy !== session.id) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
 
     const variant = await prisma.dmVariant.create({
       data: {

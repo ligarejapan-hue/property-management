@@ -9,14 +9,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireSaleDmAccess();
+    const { session } = await requireSaleDmAccess();
     const { id } = await params;
 
     const campaign = await prisma.dmCampaign.findUnique({
       where: { id },
-      select: { id: true, name: true },
+      select: { id: true, name: true, createdBy: true },
     });
-    if (!campaign) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
+    // 作成者本人のキャンペーンのみ(横断アクセス防止)。not-found/not-owned は同じ 404。
+    if (!campaign || campaign.createdBy !== session.id) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
 
     // 集計入力は反響シグナルの生値から計算する(outcome カラムに依存しない)。
     const [variants, drafts] = await Promise.all([

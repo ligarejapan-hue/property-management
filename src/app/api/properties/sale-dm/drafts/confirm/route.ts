@@ -11,8 +11,9 @@ export async function POST(request: NextRequest) {
   try {
     const { session } = await requireSaleDmAccess();
     const { ids } = confirmSchema.parse(await request.json());
+    // 作成者本人のキャンペーン配下の draft のみ確定(他人のキャンペーンの draft は対象外)。
     const result = await prisma.dmRecipientDraft.updateMany({
-      where: { id: { in: ids }, status: "draft" },
+      where: { id: { in: ids }, status: "draft", campaign: { createdBy: session.id } },
       data: { status: "confirmed", confirmedAt: new Date() },
     });
     await writeAuditLog({ userId: session.id, action: "sale_dm_drafts_confirm", targetTable: "dm_recipient_drafts", detail: { count: result.count, confirmedAt: new Date().toISOString() } });

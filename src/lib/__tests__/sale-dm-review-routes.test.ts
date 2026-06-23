@@ -55,7 +55,7 @@ beforeEach(() => {
 describe("GET campaign", () => {
   it("権限ありで 200・no-store・campaign+drafts を返す", async () => {
     grant(...ALL);
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "x", variants: [], recipients: [{ id: "r1", body: "本文" }] });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "x", createdBy: "u1", variants: [], recipients: [{ id: "r1", body: "本文" }] });
     const res = await getCampaign(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
@@ -70,7 +70,7 @@ describe("GET campaign", () => {
 describe("PATCH draft (本文編集)", () => {
   it("body を更新し 200", async () => {
     grant(...ALL);
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", body: "既存" });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", body: "既存", campaignId: "c1", status: "draft", campaign: { createdBy: "u1" } });
     pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1", body: "編集後" });
     const res = await patchDraft(new Request("http://x", { method: "PATCH", body: JSON.stringify({ body: "編集後" }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(200);
@@ -102,6 +102,8 @@ describe("POST regenerate draft (再生成)", () => {
     recipientName: "田中 一郎",
     honorific: "様",
     coOwnerCount: 1,
+    status: "confirmed",
+    campaign: { createdBy: "u1" },
     property: { address: "東京都〇〇区", propertyType: "land", roomNo: null },
     variant: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
   };

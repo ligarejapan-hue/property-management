@@ -27,9 +27,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const draft = await prisma.dmRecipientDraft.findUnique({
       where: { id },
-      select: { id: true, campaignId: true },
+      select: { id: true, campaignId: true, status: true, campaign: { select: { createdBy: true } } },
     });
-    if (!draft) throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    // 作成者本人のキャンペーン配下のみ操作可(横断アクセス防止)。not-found/not-owned は同じ 404。
+    if (!draft || draft.campaign.createdBy !== session.id) {
+      throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    }
+    // 送付済み(sent)の宛先は本文・型・上書きを編集できない(送った内容/集計の改竄防止)。
+    if (draft.status === "sent") {
+      throw new ApiError(409, "送付済みの宛先は編集できません", "ALREADY_SENT");
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: Record<string, any> = {};

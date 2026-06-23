@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmAssignSchema } from "@/lib/validators-sale-dm";
 import { assignVariantsEvenly, applyManualAssignment } from "@/lib/sale-dm-letter/assign";
 
@@ -10,6 +10,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const { session } = await requireSaleDmAccess();
     const { id } = await params;
+    await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンのみ割当可。
     const body = saleDmAssignSchema.parse(await parseJsonBody(request));
 
     const [variants, recipients] = await Promise.all([

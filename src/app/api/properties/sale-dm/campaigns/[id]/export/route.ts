@@ -21,7 +21,8 @@ export async function GET(
     const { id } = await params;
 
     const campaign = await prisma.dmCampaign.findUnique({ where: { id } });
-    if (!campaign) {
+    // 作成者本人のキャンペーンのみ出力可(横断アクセス=範囲外PII漏洩防止)。not-found/not-owned は 404。
+    if (!campaign || campaign.createdBy !== session.id) {
       throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
     }
 

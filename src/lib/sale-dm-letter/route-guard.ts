@@ -1,6 +1,17 @@
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig, ApiError } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { isPlainOwnerLevel } from "@/lib/dm-export";
+import prisma from "@/lib/prisma";
+
+// キャンペーンが作成者本人のものか確認する(他人の UUID での横断アクセス=範囲外PII閲覧/改竄を防ぐ)。
+// 見つからない/他人のものは同じ 404 にして存在を漏らさない。campaign を別途ロードしない route 向け。
+export async function assertSaleDmCampaignOwned(campaignId: string, sessionId: string): Promise<void> {
+  const owned = await prisma.dmCampaign.findFirst({
+    where: { id: campaignId, createdBy: sessionId },
+    select: { id: true },
+  });
+  if (!owned) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
+}
 
 export async function requireSaleDmAccess() {
   const session = await getApiSession();

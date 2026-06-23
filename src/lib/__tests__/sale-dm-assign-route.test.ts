@@ -16,6 +16,7 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
+    dmCampaign: { findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn() },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
   },
@@ -27,6 +28,7 @@ import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/
 import { POST as assign } from "../../app/api/properties/sale-dm/campaigns/[id]/assign/route";
 
 const pm = prismaMock as never as {
+  dmCampaign: { findFirst: ReturnType<typeof vi.fn> };
   dmVariant: { findMany: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
 };
@@ -41,6 +43,8 @@ beforeEach(() => {
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
   grant(...ALL);
+  // assertSaleDmCampaignOwned 用: 既定で作成者本人のキャンペーン(owned)。
+  pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
   pm.dmVariant.findMany.mockResolvedValue([{ id: "vA" }, { id: "vB" }]);
   pm.dmRecipientDraft.findMany.mockResolvedValue([{ id: "r1" }, { id: "r2" }, { id: "r3" }, { id: "r4" }]);
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 2 });

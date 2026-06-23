@@ -57,7 +57,7 @@ const ctx = (id = "c1") => ({ params: Promise.resolve({ id }) });
 beforeEach(() => {
   vi.clearAllMocks();
   (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" } });
-  pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト" });
+  pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト", createdBy: "u1" });
   pm.dmVariant.findMany.mockResolvedValue([
     { id: "vA", label: "A" },
     { id: "vB", label: "B" },

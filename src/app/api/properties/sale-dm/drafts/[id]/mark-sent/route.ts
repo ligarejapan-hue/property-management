@@ -16,9 +16,10 @@ export async function POST(
 
     const draft = await prisma.dmRecipientDraft.findUnique({
       where: { id },
-      select: { id: true, propertyId: true, status: true },
+      select: { id: true, propertyId: true, status: true, campaign: { select: { createdBy: true } } },
     });
-    if (!draft) throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    // 作成者本人のキャンペーン配下のみ(横断アクセス防止)。not-found/not-owned は同じ 404。
+    if (!draft || draft.campaign.createdBy !== session.id) throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
 
     // 既に送付済みなら何もしない(冪等)。
     if (draft.status === "sent") {
