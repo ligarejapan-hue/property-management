@@ -42,3 +42,27 @@ describe("import/page.tsx dark: 配色", () => {
   it("ライト hover:bg-gray-50 は残っている", () => { expect(src).toContain("hover:bg-gray-50"); });
   it("ライト text-blue-700 は残っている", () => { expect(src).toContain("text-blue-700"); });
 });
+
+// 事前敵対レビューで「取込履歴テーブルが丸ごと未ダーク化」だった回帰を固定する。
+// 上の汎用 token 断言は panel 側に同 token があると素通りするため、テーブル固有の
+// 結合文字列で「テーブル自体がダーク化されている」ことを直接ピン留めする。
+describe("import/page.tsx dark: 取込履歴テーブル(Job History) カバレッジ固定", () => {
+  it("thead 淡面に dark:bg-gray-800/50 が付く", () => {
+    expect(src).toContain("dark:bg-gray-800/50");
+  });
+  it("tbody 区切りが divide-gray-100 dark:divide-gray-800", () => {
+    expect(src).toContain("divide-y divide-gray-100 dark:divide-gray-800");
+  });
+  it("件数列(新規/更新/要レビュー/エラー)の文字に dark: が付く", () => {
+    expect(src).toContain("text-green-700 dark:text-green-300 font-medium");
+    expect(src).toContain("text-blue-700 dark:text-blue-300 font-medium");
+    expect(src).toContain("text-amber-700 dark:text-amber-300 font-medium");
+    expect(src).toContain("text-red-700 dark:text-red-300 font-medium");
+  });
+  it("ファイル名リンクに text-indigo-600 dark:text-indigo-400 が付く", () => {
+    expect(src).toContain("text-indigo-600 dark:text-indigo-400");
+  });
+  it("件数プレースホルダに text-gray-300 dark:text-gray-600 が付く", () => {
+    expect(src).toContain("text-gray-300 dark:text-gray-600");
+  });
+});

@@ -1102,7 +1102,7 @@ export default function ImportPage() {
         </p>
       </div>
 
-      {/* ===== legacy 汎用取込UI: 利用者には非表示（削除せず保持） ===== */}
+      {/* ===== legacy 汎用取込UI: 利用者には非表示（削除せず保持・hidden ゆえダーク化は意図的に対象外） ===== */}
       <div className="hidden">
       <h2 className="mb-6 text-2xl font-bold text-gray-800 dark:text-gray-100">受付帳CSV / Excel(.xlsx) 取込</h2>
 
@@ -1811,7 +1811,7 @@ export default function ImportPage() {
             />
           </div>
           {rpFile && (
-            <div className="mt-1 text-xs text-green-700">
+            <div className="mt-1 text-xs text-green-700 dark:text-green-300">
               <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
               {rpFile.name}
             </div>
@@ -1914,16 +1914,16 @@ export default function ImportPage() {
             <p className="mb-2 text-sm font-semibold text-green-800 dark:text-green-300">取込完了</p>
             <div className="grid grid-cols-3 gap-2 text-sm">
               <div className="text-center">
-                <div className="text-xl font-bold text-green-700">{rpResult.successCount}</div>
-                <div className="text-xs text-green-600">作成成功</div>
+                <div className="text-xl font-bold text-green-700 dark:text-green-300">{rpResult.successCount}</div>
+                <div className="text-xs text-green-600 dark:text-green-300">作成成功</div>
               </div>
               <div className="text-center">
-                <div className="text-xl font-bold text-yellow-700">{rpResult.needsReviewCount}</div>
-                <div className="text-xs text-yellow-600">要レビュー</div>
+                <div className="text-xl font-bold text-yellow-700 dark:text-amber-300">{rpResult.needsReviewCount}</div>
+                <div className="text-xs text-yellow-600 dark:text-amber-300">要レビュー</div>
               </div>
               <div className="text-center">
-                <div className="text-xl font-bold text-red-700">{rpResult.errorCount}</div>
-                <div className="text-xs text-red-600">エラー</div>
+                <div className="text-xl font-bold text-red-700 dark:text-red-300">{rpResult.errorCount}</div>
+                <div className="text-xs text-red-600 dark:text-red-300">エラー</div>
               </div>
             </div>
           </div>
@@ -2021,7 +2021,7 @@ export default function ImportPage() {
               />
             </div>
             {receptionFile && (
-              <div className="mt-1 text-xs text-green-700">
+              <div className="mt-1 text-xs text-green-700 dark:text-green-300">
                 <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
                 {receptionFile.name}
               </div>
@@ -2056,7 +2056,7 @@ export default function ImportPage() {
               />
             </div>
             {ownerFile && (
-              <div className="mt-1 text-xs text-green-700">
+              <div className="mt-1 text-xs text-green-700 dark:text-green-300">
                 <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
                 {ownerFile.name}
               </div>
@@ -2297,7 +2297,7 @@ export default function ImportPage() {
                       <button
                         onClick={() => handleMarkStuckFailed(job.jobId)}
                         disabled={markingJobId === job.jobId}
-                        className="inline-flex items-center gap-1 rounded border border-red-300 bg-white px-2 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded border border-red-300 dark:border-red-400/40 bg-white dark:bg-gray-900 px-2 py-0.5 text-[11px] font-medium text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
                       >
                         {markingJobId === job.jobId ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -2478,53 +2478,53 @@ export default function ImportPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50">
+              <thead className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
                 <tr>
-                  <th className="px-3 py-2 font-medium text-gray-600">状態</th>
-                  <th className="px-3 py-2 font-medium text-gray-600">
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">状態</th>
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     ファイル名
                   </th>
-                  <th className="px-3 py-2 font-medium text-gray-600">種別</th>
-                  <th className="px-3 py-2 font-medium text-gray-600">行数</th>
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">種別</th>
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">行数</th>
                   {/* 段階A: ImportJobRow から動的に算出した 5 区分。
                       旧データや行が空のジョブでは summary が無いので "-" 表示。 */}
                   <th
-                    className="px-3 py-2 font-medium text-green-700"
+                    className="px-3 py-2 font-medium text-green-700 dark:text-green-300"
                     title="新規作成（success かつ「更新」プレフィックス無し）"
                   >
                     新規
                   </th>
                   <th
-                    className="px-3 py-2 font-medium text-blue-700"
+                    className="px-3 py-2 font-medium text-blue-700 dark:text-blue-300"
                     title="既存レコード更新（success かつ errorMessage が「更新...」）"
                   >
                     更新
                   </th>
                   <th
-                    className="px-3 py-2 font-medium text-gray-600"
+                    className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300"
                     title="スキップ（status === skipped）"
                   >
                     スキップ
                   </th>
                   <th
-                    className="px-3 py-2 font-medium text-amber-700"
+                    className="px-3 py-2 font-medium text-amber-700 dark:text-amber-300"
                     title="要レビュー（status === needs_review）"
                   >
                     要レビュー
                   </th>
                   <th
-                    className="px-3 py-2 font-medium text-red-700"
+                    className="px-3 py-2 font-medium text-red-700 dark:text-red-300"
                     title="純エラー（status === error。要レビューを含まない）"
                   >
                     エラー
                   </th>
-                  <th className="px-3 py-2 font-medium text-gray-600">
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     実行者
                   </th>
-                  <th className="px-3 py-2 font-medium text-gray-600">日時</th>
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">日時</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {jobs.map((job) => {
                   const config =
                     STATUS_CONFIG[job.status] ?? STATUS_CONFIG.pending;
@@ -2532,16 +2532,16 @@ export default function ImportPage() {
                   const summary = job.summary;
                   const cell = (n: number | undefined, color: string) =>
                     summary ? (
-                      <span className={n && n > 0 ? color : "text-gray-300"}>
+                      <span className={n && n > 0 ? color : "text-gray-300 dark:text-gray-600"}>
                         {n ?? 0}
                       </span>
                     ) : (
-                      <span className="text-gray-300">-</span>
+                      <span className="text-gray-300 dark:text-gray-600">-</span>
                     );
                   return (
                     <tr
                       key={job.id}
-                      className="hover:bg-gray-50 cursor-pointer"
+                      className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                       onClick={() =>
                         (window.location.href = `/import/jobs/${job.id}`)
                       }
@@ -2565,34 +2565,34 @@ export default function ImportPage() {
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-indigo-600 hover:underline">
+                      <td className="px-3 py-2 text-indigo-600 dark:text-indigo-400 hover:underline">
                         {job.fileName}
                       </td>
-                      <td className="px-3 py-2 text-xs text-gray-500">
+                      <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                         {getImportTypeLabel(job.jobType)}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {job.totalRows ?? "-"}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {cell(summary?.createdCount, "text-green-700 font-medium")}
+                        {cell(summary?.createdCount, "text-green-700 dark:text-green-300 font-medium")}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {cell(summary?.updatedCount, "text-blue-700 font-medium")}
+                        {cell(summary?.updatedCount, "text-blue-700 dark:text-blue-300 font-medium")}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {cell(summary?.skippedCount, "text-gray-700")}
+                        {cell(summary?.skippedCount, "text-gray-700 dark:text-gray-200")}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {cell(summary?.needsReviewCount, "text-amber-700 font-medium")}
+                        {cell(summary?.needsReviewCount, "text-amber-700 dark:text-amber-300 font-medium")}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {cell(summary?.errorCount, "text-red-700 font-medium")}
+                        {cell(summary?.errorCount, "text-red-700 dark:text-red-300 font-medium")}
                       </td>
-                      <td className="px-3 py-2 text-gray-500">
+                      <td className="px-3 py-2 text-gray-500 dark:text-gray-400">
                         {job.executor.name}
                       </td>
-                      <td className="px-3 py-2 text-xs text-gray-500">
+                      <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                         {new Date(job.createdAt).toLocaleString("ja-JP")}
                       </td>
                     </tr>
