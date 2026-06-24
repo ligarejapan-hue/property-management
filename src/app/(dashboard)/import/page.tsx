@@ -360,8 +360,8 @@ function RoStat({
     gray: "text-gray-600",
   }[tone];
   return (
-    <div className="rounded bg-white px-3 py-2 shadow-sm">
-      <div className="text-[11px] text-gray-500">{label}</div>
+    <div className="rounded bg-white dark:bg-gray-900 px-3 py-2 shadow-sm">
+      <div className="text-[11px] text-gray-500 dark:text-gray-400">{label}</div>
       <div className={`text-lg font-semibold ${toneClass}`}>{value}</div>
     </div>
   );
@@ -380,9 +380,9 @@ function ReviewActionHint({
       // 物件は特定できているが、所有者CSV側に同キーの行が無い → 所有者CSVのC列を確認
       return (
         <div className="space-y-1">
-          <div className="text-gray-700">
+          <div className="text-gray-700 dark:text-gray-200">
             所有者CSV C列のキー
-            <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+            <code className="mx-1 rounded bg-gray-100 dark:bg-gray-800 px-1 font-mono text-[10px]">
               {sample.matchKey || "(空)"}
             </code>
             と一致する行を確認
@@ -403,12 +403,12 @@ function ReviewActionHint({
       // 物件未特定: DBに該当物件なし。新規登録 or 既存物件側を修正
       return (
         <div className="space-y-1">
-          <div className="text-gray-700">
+          <div className="text-gray-700 dark:text-gray-200">
             該当物件が未登録
             {sample.lotNumber && (
               <>
                 （地番:
-                <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+                <code className="mx-1 rounded bg-gray-100 dark:bg-gray-800 px-1 font-mono text-[10px]">
                   {sample.lotNumber}
                 </code>
                 ）
@@ -417,7 +417,7 @@ function ReviewActionHint({
             {sample.buildingNumber && (
               <>
                 （家屋番号:
-                <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+                <code className="mx-1 rounded bg-gray-100 dark:bg-gray-800 px-1 font-mono text-[10px]">
                   {sample.buildingNumber}
                 </code>
                 ）
@@ -438,7 +438,7 @@ function ReviewActionHint({
       // 候補複数: いずれかを正として確定する必要がある
       return (
         <div className="space-y-1">
-          <div className="text-gray-700">
+          <div className="text-gray-700 dark:text-gray-200">
             候補が {sample.candidateCount} 件あります。正しい物件を選んで直接更新してください。
           </div>
           {sample.candidatePropertyIds.length > 0 && (
@@ -462,13 +462,13 @@ function ReviewActionHint({
       // 受付帳側に地番/家屋番号が抽出できていない → F列(区分)とK列を確認
       return (
         <div className="space-y-1">
-          <div className="text-gray-700">
+          <div className="text-gray-700 dark:text-gray-200">
             受付帳の地番/家屋番号が空。F列(区分=
-            <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+            <code className="mx-1 rounded bg-gray-100 dark:bg-gray-800 px-1 font-mono text-[10px]">
               {sample.fColumn || "(空)"}
             </code>
             )とK列(=
-            <code className="mx-1 rounded bg-gray-100 px-1 font-mono text-[10px]">
+            <code className="mx-1 rounded bg-gray-100 dark:bg-gray-800 px-1 font-mono text-[10px]">
               {sample.kColumn || "(空)"}
             </code>
             )を確認してください。
@@ -476,7 +476,7 @@ function ReviewActionHint({
         </div>
       );
     default:
-      return <span className="text-gray-400">-</span>;
+      return <span className="text-gray-400 dark:text-gray-500">-</span>;
   }
 }
 
@@ -1082,29 +1082,29 @@ export default function ImportPage() {
       <ImportSwitcher />
 
       {/* 利用者向け操作ガイド: 取込の順番と各CSVの役割を説明 */}
-      <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm">
-        <p className="mb-2 font-semibold text-blue-900">取込の進め方</p>
-        <ol className="ml-4 list-decimal space-y-1 text-blue-900">
+      <div className="mb-6 rounded-lg border border-blue-200 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10 p-4 text-sm">
+        <p className="mb-2 font-semibold text-blue-900 dark:text-blue-300">取込の進め方</p>
+        <ol className="ml-4 list-decimal space-y-1 text-blue-900 dark:text-blue-300">
           <li>
             <span className="font-medium">① 受付帳CSVから物件を新規作成</span>
-            <span className="ml-1 text-blue-700">— DL〇かつ既存の受付帳行から住所・地番・区分で物件レコードを作成します</span>
+            <span className="ml-1 text-blue-700 dark:text-blue-300">— DL〇かつ既存の受付帳行から住所・地番・区分で物件レコードを作成します</span>
           </li>
           <li>
             <span className="font-medium">② 受付帳×所有者CSVで既存物件に所有者を紐づける</span>
-            <span className="ml-1 text-blue-700">— ①で作成した物件に所有者情報を紐づけます</span>
+            <span className="ml-1 text-blue-700 dark:text-blue-300">— ①で作成した物件に所有者情報を紐づけます</span>
           </li>
           <li>
             <span className="font-medium">③ 謄本PDF</span> は物件詳細または専用ページから登録します
           </li>
         </ol>
-        <p className="mt-2 text-xs text-blue-700">
+        <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">
           物件が未登録の状態で所有者CSVを取り込んでも、所有者は物件に紐づきません。①を先に実行してください。
         </p>
       </div>
 
       {/* ===== legacy 汎用取込UI: 利用者には非表示（削除せず保持） ===== */}
       <div className="hidden">
-      <h2 className="mb-6 text-2xl font-bold text-gray-800">受付帳CSV / Excel(.xlsx) 取込</h2>
+      <h2 className="mb-6 text-2xl font-bold text-gray-800 dark:text-gray-100">受付帳CSV / Excel(.xlsx) 取込</h2>
 
       {/* ============ Step Indicator ============ */}
       <div className="mb-8 flex items-center justify-center gap-0">
@@ -1149,21 +1149,21 @@ export default function ImportPage() {
 
       {/* ============ Step 1: File Upload ============ */}
       {step === 1 && (
-        <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
-          <h3 className="mb-4 text-lg font-semibold text-gray-700">
+        <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-700 dark:text-gray-200">
             ファイル選択
           </h3>
 
           {/* Template selection */}
           <div className="mb-5">
-            <label className="mb-1 block text-sm font-medium text-gray-600">
+            <label className="mb-1 block text-sm font-medium text-gray-600 dark:text-gray-300">
               テンプレート
             </label>
             <div className="relative inline-block">
               <select
                 value={template}
                 onChange={(e) => setTemplate(e.target.value)}
-                className="appearance-none rounded-md border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="appearance-none rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 py-2 pl-3 pr-9 text-sm text-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               >
                 {Object.entries(TEMPLATES).map(([key, t]) => (
                   <option key={key} value={key}>
@@ -1171,10 +1171,10 @@ export default function ImportPage() {
                   </option>
                 ))}
               </select>
-              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
             </div>
-            <div className="mt-2 rounded bg-gray-50 p-3 text-xs text-gray-500">
-              <span className="font-medium text-gray-600">対応カラム: </span>
+            <div className="mt-2 rounded bg-gray-50 dark:bg-gray-800/50 p-3 text-xs text-gray-500 dark:text-gray-400">
+              <span className="font-medium text-gray-600 dark:text-gray-300">対応カラム: </span>
               {TEMPLATES[template].columns.join(", ")}
             </div>
           </div>
@@ -1188,19 +1188,19 @@ export default function ImportPage() {
             onClick={() => fileInputRef.current?.click()}
             className={`group cursor-pointer rounded-lg border-2 border-dashed p-12 text-center transition-colors ${
               dragActive
-                ? "border-blue-500 bg-blue-50"
-                : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+                ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
+                : "border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-400 dark:hover:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800"
             }`}
           >
             <Upload
               className={`mx-auto mb-3 h-10 w-10 ${
-                dragActive ? "text-blue-500" : "text-gray-400"
+                dragActive ? "text-blue-500" : "text-gray-400 dark:text-gray-500"
               }`}
             />
-            <p className="mb-1 text-sm font-medium text-gray-700">
+            <p className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-200">
               CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ
             </p>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-400 dark:text-gray-500">
               またはクリックしてファイルを選択
             </p>
             <input
@@ -1214,10 +1214,10 @@ export default function ImportPage() {
 
           {fileName && (
             <div className="mt-4 space-y-2">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
+              <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                 <FileText className="h-4 w-4" />
                 <span>{fileName}</span>
-                <span className="text-gray-400">
+                <span className="text-gray-400 dark:text-gray-500">
                   ({rows.length} 行)
                 </span>
               </div>
@@ -1248,46 +1248,46 @@ export default function ImportPage() {
 
       {/* ============ Step 2: Column Mapping ============ */}
       {step === 2 && (
-        <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
-          <h3 className="mb-4 text-lg font-semibold text-gray-700">
+        <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-700 dark:text-gray-200">
             カラム対応設定
           </h3>
-          <p className="mb-4 text-sm text-gray-500">
+          <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
             CSVのヘッダーと取込先フィールドを対応させてください。
           </p>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50">
+              <thead className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
                 <tr>
-                  <th className="px-3 py-2 font-medium text-gray-600 w-8"></th>
-                  <th className="px-3 py-2 font-medium text-gray-600">
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 w-8"></th>
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     CSVヘッダー
                   </th>
-                  <th className="px-3 py-2 font-medium text-gray-600 w-8">
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 w-8">
                     <ArrowRight className="h-4 w-4" />
                   </th>
-                  <th className="px-3 py-2 font-medium text-gray-600">
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     取込先フィールド
                   </th>
-                  <th className="px-3 py-2 font-medium text-gray-600 w-12">
+                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 w-12">
                     状態
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {headers.map((header) => {
                   const mapped = columnMapping[header] ?? "";
                   const isMapped = mapped !== "";
                   return (
-                    <tr key={header} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 text-gray-300">
+                    <tr key={header} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="px-3 py-2 text-gray-300 dark:text-gray-600">
                         <GripVertical className="h-4 w-4" />
                       </td>
-                      <td className="px-3 py-2 font-mono text-gray-800">
+                      <td className="px-3 py-2 font-mono text-gray-800 dark:text-gray-100">
                         {header}
                       </td>
-                      <td className="px-3 py-2 text-gray-300">
+                      <td className="px-3 py-2 text-gray-300 dark:text-gray-600">
                         <ArrowRight className="h-4 w-4" />
                       </td>
                       <td className="px-3 py-2">
@@ -1297,7 +1297,7 @@ export default function ImportPage() {
                             onChange={(e) =>
                               updateMapping(header, e.target.value)
                             }
-                            className="appearance-none rounded border border-gray-300 bg-white py-1 pl-2 pr-7 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="appearance-none rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 py-1 pl-2 pr-7 text-sm dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           >
                             <option value="">-- 未設定 --</option>
                             {TARGET_FIELDS.map((f) => (
@@ -1315,7 +1315,7 @@ export default function ImportPage() {
                               </option>
                             ))}
                           </select>
-                          <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                          <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                         </div>
                       </td>
                       <td className="px-3 py-2">
@@ -1332,7 +1332,7 @@ export default function ImportPage() {
             </table>
           </div>
 
-          <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+          <div className="mt-4 flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
             {/* Excel の使用範囲が 1024 列まで広がっているケースで「N / 1024 カラム対応済」と
                 出るのが利用者には意味不明だったため、分母を撤去して割当数のみ表示する。 */}
             <span>{Object.keys(columnMapping).length} 項目を割当済み</span>
@@ -1347,7 +1347,7 @@ export default function ImportPage() {
           <div className="mt-6 flex gap-3">
             <button
               onClick={() => setStep(1)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               戻る
             </button>
@@ -1381,18 +1381,18 @@ export default function ImportPage() {
 
       {/* ============ Step 3: Preview & Validate ============ */}
       {step === 3 && (
-        <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
-          <h3 className="mb-4 text-lg font-semibold text-gray-700">
+        <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-700 dark:text-gray-200">
             プレビュー・検証
           </h3>
 
           {/* Summary cards */}
           <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-center">
-              <div className="text-2xl font-bold text-gray-800">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3 text-center">
+              <div className="text-2xl font-bold text-gray-800 dark:text-gray-100">
                 {rows.length}
               </div>
-              <div className="text-xs text-gray-500">総行数</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">総行数</div>
             </div>
             <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center">
               <div className="text-2xl font-bold text-green-700">
@@ -1415,23 +1415,23 @@ export default function ImportPage() {
           </div>
 
           {/* Preview table (first 5 rows) */}
-          <p className="mb-2 text-sm font-medium text-gray-600">
+          <p className="mb-2 text-sm font-medium text-gray-600 dark:text-gray-300">
             先頭5行プレビュー
           </p>
-          <div className="overflow-x-auto rounded border border-gray-200">
+          <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
             <table className="w-full text-left text-xs">
-              <thead className="border-b border-gray-200 bg-gray-50">
+              <thead className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
                 <tr>
-                  <th className="px-2 py-1.5 font-medium text-gray-500 w-8">
+                  <th className="px-2 py-1.5 font-medium text-gray-500 dark:text-gray-400 w-8">
                     #
                   </th>
-                  <th className="px-2 py-1.5 font-medium text-gray-500 w-10">
+                  <th className="px-2 py-1.5 font-medium text-gray-500 dark:text-gray-400 w-10">
                     状態
                   </th>
                   {headers.map((h) => (
                     <th
                       key={h}
-                      className="px-2 py-1.5 font-medium text-gray-600 whitespace-nowrap"
+                      className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap"
                     >
                       {h}
                       {columnMapping[h] && (
@@ -1443,12 +1443,12 @@ export default function ImportPage() {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {rows.slice(0, 5).map((row, i) => {
                   const v = validationSummary.rowStatuses[i];
                   return (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-2 py-1.5 text-gray-400">{i + 1}</td>
+                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="px-2 py-1.5 text-gray-400 dark:text-gray-500">{i + 1}</td>
                       <td className="px-2 py-1.5">
                         <div className="flex items-center gap-1">
                           {statusIcon(v?.status ?? "valid")}
@@ -1457,7 +1457,7 @@ export default function ImportPage() {
                       {headers.map((h, j) => (
                         <td
                           key={j}
-                          className="px-2 py-1.5 text-gray-700 max-w-[200px] truncate whitespace-nowrap"
+                          className="px-2 py-1.5 text-gray-700 dark:text-gray-200 max-w-[200px] truncate whitespace-nowrap"
                           title={row[j] ?? ""}
                         >
                           {row[j] ?? ""}
@@ -1470,14 +1470,14 @@ export default function ImportPage() {
             </table>
           </div>
           {rows.length > 5 && (
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               ...他 {rows.length - 5} 行
             </p>
           )}
 
           {/* Duplicate preview section */}
           {previewLoading && (
-            <div className="mt-4 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">
+            <div className="mt-4 flex items-center gap-2 rounded-md border border-blue-200 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10 p-4 text-sm text-blue-700 dark:text-blue-300">
               <Loader2 className="h-4 w-4 animate-spin" />
               重複チェック中...
             </div>
@@ -1507,9 +1507,9 @@ export default function ImportPage() {
                 </div>
               )}
               <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-center">
-                  <div className="text-lg font-bold text-gray-800">{duplicatePreview.totalRows}</div>
-                  <div className="text-xs text-gray-500">総行数(サーバー)</div>
+                <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-2 text-center">
+                  <div className="text-lg font-bold text-gray-800 dark:text-gray-100">{duplicatePreview.totalRows}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">総行数(サーバー)</div>
                 </div>
                 <div className="rounded-lg border border-green-200 bg-green-50 p-2 text-center">
                   <div className="text-lg font-bold text-green-700">{duplicatePreview.validRows}</div>
@@ -1530,30 +1530,30 @@ export default function ImportPage() {
               </div>
 
               {duplicatePreview.updates && duplicatePreview.updates.length > 0 && (
-                <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-4">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-800">
+                <div className="mb-3 rounded-md border border-blue-200 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-300">
                     <RefreshCw className="h-4 w-4" />
                     更新候補 ({duplicatePreview.updateCount ?? 0}件)
                   </div>
-                  <p className="mb-3 text-xs text-blue-600">
+                  <p className="mb-3 text-xs text-blue-600 dark:text-blue-300">
                     以下の行は既存物件に一致する識別子/棟内部屋番号があるため、取込実行時に既存レコードを更新します（空欄の値は上書きしません）。
                   </p>
-                  <div className="overflow-x-auto rounded border border-blue-200 bg-white">
+                  <div className="overflow-x-auto rounded border border-blue-200 dark:border-blue-400/20 bg-white dark:bg-gray-900">
                     <table className="w-full text-left text-xs">
-                      <thead className="border-b border-blue-100 bg-blue-50">
+                      <thead className="border-b border-blue-100 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10">
                         <tr>
-                          <th className="px-2 py-1.5 font-medium text-blue-700">行番号</th>
-                          <th className="px-2 py-1.5 font-medium text-blue-700">CSV住所</th>
-                          <th className="px-2 py-1.5 font-medium text-blue-700">既存物件住所</th>
-                          <th className="px-2 py-1.5 font-medium text-blue-700">一致理由</th>
+                          <th className="px-2 py-1.5 font-medium text-blue-700 dark:text-blue-300">行番号</th>
+                          <th className="px-2 py-1.5 font-medium text-blue-700 dark:text-blue-300">CSV住所</th>
+                          <th className="px-2 py-1.5 font-medium text-blue-700 dark:text-blue-300">既存物件住所</th>
+                          <th className="px-2 py-1.5 font-medium text-blue-700 dark:text-blue-300">一致理由</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-blue-50">
+                      <tbody className="divide-y divide-blue-50 dark:divide-blue-400/10">
                         {duplicatePreview.updates.map((d, i) => (
-                          <tr key={i} className="hover:bg-blue-50/50">
-                            <td className="px-2 py-1.5 text-gray-600">{d.rowNumber}</td>
-                            <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.address}>{d.address}</td>
-                            <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
+                          <tr key={i} className="hover:bg-blue-50/50 dark:hover:bg-blue-500/10">
+                            <td className="px-2 py-1.5 text-gray-600 dark:text-gray-300">{d.rowNumber}</td>
+                            <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100 max-w-[200px] truncate" title={d.address}>{d.address}</td>
+                            <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
                             <td className="px-2 py-1.5">
                               <span className={`rounded px-1.5 py-0.5 ${badgeIntentClass("info")}`}>{d.matchReason}</span>
                             </td>
@@ -1563,7 +1563,7 @@ export default function ImportPage() {
                     </table>
                   </div>
                   {(duplicatePreview.updateCount ?? 0) > 20 && (
-                    <p className="mt-2 text-xs text-blue-500">
+                    <p className="mt-2 text-xs text-blue-500 dark:text-blue-300">
                       ※ 上位20件のみ表示（全{duplicatePreview.updateCount}件）
                     </p>
                   )}
@@ -1571,30 +1571,30 @@ export default function ImportPage() {
               )}
 
               {duplicatePreview.duplicates.length > 0 && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-800">
+                <div className="rounded-md border border-amber-200 dark:border-amber-400/25 bg-amber-50 dark:bg-amber-500/10 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-300">
                     <AlertTriangle className="h-4 w-4" />
                     重複スキップ候補 ({duplicatePreview.duplicateCount}件)
                   </div>
-                  <p className="mb-3 text-xs text-amber-600">
+                  <p className="mb-3 text-xs text-amber-600 dark:text-amber-300">
                     以下の行は住所一致のみなど取り違えリスクがあるため、取込実行時は「要レビュー」として記録し、既存レコードを更新しません。
                   </p>
-                  <div className="overflow-x-auto rounded border border-amber-200 bg-white">
+                  <div className="overflow-x-auto rounded border border-amber-200 dark:border-amber-400/25 bg-white dark:bg-gray-900">
                     <table className="w-full text-left text-xs">
-                      <thead className="border-b border-amber-100 bg-amber-50">
+                      <thead className="border-b border-amber-100 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-500/10">
                         <tr>
-                          <th className="px-2 py-1.5 font-medium text-amber-700">行番号</th>
-                          <th className="px-2 py-1.5 font-medium text-amber-700">CSV住所</th>
-                          <th className="px-2 py-1.5 font-medium text-amber-700">既存物件住所</th>
-                          <th className="px-2 py-1.5 font-medium text-amber-700">一致理由</th>
+                          <th className="px-2 py-1.5 font-medium text-amber-700 dark:text-amber-300">行番号</th>
+                          <th className="px-2 py-1.5 font-medium text-amber-700 dark:text-amber-300">CSV住所</th>
+                          <th className="px-2 py-1.5 font-medium text-amber-700 dark:text-amber-300">既存物件住所</th>
+                          <th className="px-2 py-1.5 font-medium text-amber-700 dark:text-amber-300">一致理由</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-amber-50">
+                      <tbody className="divide-y divide-amber-50 dark:divide-amber-400/10">
                         {duplicatePreview.duplicates.map((d, i) => (
-                          <tr key={i} className="hover:bg-amber-50/50">
-                            <td className="px-2 py-1.5 text-gray-600">{d.rowNumber}</td>
-                            <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.address}>{d.address}</td>
-                            <td className="px-2 py-1.5 text-gray-800 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
+                          <tr key={i} className="hover:bg-amber-50/50 dark:hover:bg-amber-500/10">
+                            <td className="px-2 py-1.5 text-gray-600 dark:text-gray-300">{d.rowNumber}</td>
+                            <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100 max-w-[200px] truncate" title={d.address}>{d.address}</td>
+                            <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
                             <td className="px-2 py-1.5">
                               <span className={`rounded px-1.5 py-0.5 ${badgeIntentClass("warning")}`}>{d.matchReason}</span>
                             </td>
@@ -1604,7 +1604,7 @@ export default function ImportPage() {
                     </table>
                   </div>
                   {duplicatePreview.duplicateCount > 20 && (
-                    <p className="mt-2 text-xs text-amber-500">
+                    <p className="mt-2 text-xs text-amber-500 dark:text-amber-300">
                       ※ 上位20件のみ表示（全{duplicatePreview.duplicateCount}件）
                     </p>
                   )}
@@ -1612,7 +1612,7 @@ export default function ImportPage() {
               )}
 
               {duplicatePreview.duplicates.length === 0 && duplicatePreview.duplicateCount === 0 && (
-                <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center gap-2">
+                <div className="rounded-md border border-green-200 dark:border-green-400/20 bg-green-50 dark:bg-green-500/10 p-3 text-sm text-green-700 dark:text-green-300 flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4" />
                   重複候補はありません
                 </div>
@@ -1621,7 +1621,7 @@ export default function ImportPage() {
           )}
 
           {error && (
-            <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="mt-4 rounded-md border border-red-200 dark:border-red-400/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
               {error}
             </div>
           )}
@@ -1629,7 +1629,7 @@ export default function ImportPage() {
           <div className="mt-6 flex gap-3">
             <button
               onClick={() => setStep(2)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               戻る
             </button>
@@ -1656,19 +1656,19 @@ export default function ImportPage() {
 
       {/* ============ Step 4: Import Result ============ */}
       {step === 4 && result && (
-        <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
-          <h3 className="mb-4 text-lg font-semibold text-gray-700">
+        <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-700 dark:text-gray-200">
             取込結果
           </h3>
 
-          <div className="mb-6 rounded-md border border-green-200 bg-green-50 p-5">
-            <div className="mb-3 flex items-center gap-2 text-green-800">
+          <div className="mb-6 rounded-md border border-green-200 dark:border-green-400/20 bg-green-50 dark:bg-green-500/10 p-5">
+            <div className="mb-3 flex items-center gap-2 text-green-800 dark:text-green-300">
               <CheckCircle2 className="h-5 w-5" />
               <span className="font-semibold">取込が完了しました</span>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
               <div>
-                <span className="text-gray-600">総行数:</span>{" "}
+                <span className="text-gray-600 dark:text-gray-300">総行数:</span>{" "}
                 <strong>{result.totalRows}</strong>
               </div>
               <div>
@@ -1711,7 +1711,7 @@ export default function ImportPage() {
           <div className="flex gap-3">
             <Link
               href={`/import/jobs/${result.jobId}`}
-              className="flex items-center gap-2 rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
+              className="flex items-center gap-2 rounded-md border border-indigo-300 dark:border-indigo-400 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
             >
               <Eye className="h-4 w-4" />
               ジョブ詳細を見る
@@ -1729,50 +1729,50 @@ export default function ImportPage() {
       </div>{/* /legacy 汎用取込UI */}
 
       {/* ============ ① 受付帳CSVから物件を新規作成 ============ */}
-      <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
+      <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="mb-4 flex items-center gap-2">
           <FileUp className="h-5 w-5 text-green-600" />
-          <h3 className="text-lg font-semibold text-gray-700">
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
             ① 受付帳CSVから物件を新規作成（CSV / Excel(.xlsx) 対応）
           </h3>
-          <span className="ml-2 rounded bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
+          <span className="ml-2 rounded bg-green-50 dark:bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-300">
             物件を新規作成
           </span>
         </div>
-        <p className="mb-3 text-sm text-gray-500">
+        <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
           受付帳CSVを読み込み、住所が既存物件と重複しない行だけ物件レコードを新規作成します。
           地番・家屋番号・区分も自動で設定します。所有者の紐づけは②で行います。
         </p>
-        <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600">
+        <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600 dark:text-gray-300">
           <li>受付帳CSV を選択</li>
           <li>「プレビュー」で新規作成予定・重複・住所なし件数を確認</li>
           <li>「取り込む」で物件を作成</li>
         </ol>
 
         {/* 取込条件 */}
-        <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
-          <div className="mb-2 text-xs font-semibold text-gray-700">取込条件</div>
+        <div className="mb-4 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3">
+          <div className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">取込条件</div>
           <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-xs text-gray-500">取込物件選択（DL）</span>
+            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+              <span className="text-xs text-gray-500 dark:text-gray-400">取込物件選択（DL）</span>
               <select
                 value={rpDlFilter}
                 onChange={(e) => { setRpDlFilter(e.target.value as typeof rpDlFilter); setRpPreview(null); }}
                 disabled={rpLoading}
-                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+                className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
               >
                 <option value="marked">DLに〇がついている物件のみ</option>
                 <option value="unmarked">DLに〇がついていない物件のみ</option>
                 <option value="all">両方</option>
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-xs text-gray-500">新既</span>
+            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+              <span className="text-xs text-gray-500 dark:text-gray-400">新既</span>
               <select
                 value={rpShinkiFilter}
                 onChange={(e) => { setRpShinkiFilter(e.target.value as typeof rpShinkiFilter); setRpPreview(null); }}
                 disabled={rpLoading}
-                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+                className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
               >
                 <option value="existing">既存のみ</option>
                 <option value="new">新規のみ</option>
@@ -1795,13 +1795,13 @@ export default function ImportPage() {
             }}
             onClick={() => rpFileInputRef.current?.click()}
             className={`cursor-pointer rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
-              rpDragActive ? "border-blue-400 bg-blue-50" : "border-gray-300 bg-white hover:border-gray-400"
+              rpDragActive ? "border-blue-400 bg-blue-50 dark:bg-blue-500/10" : "border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-400 dark:hover:border-gray-600"
             }`}
           >
-            <Upload className="mx-auto mb-2 h-7 w-7 text-gray-400" />
-            <p className="text-sm text-gray-600">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
-            <p className="mt-1 text-xs text-gray-400">またはクリックしてファイルを選択</p>
-            <p className="mt-0.5 text-xs text-gray-400">（ファイル名に「受付帳」を含める）</p>
+            <Upload className="mx-auto mb-2 h-7 w-7 text-gray-400 dark:text-gray-500" />
+            <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
+            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（ファイル名に「受付帳」を含める）</p>
             <input
               ref={rpFileInputRef}
               type="file"
@@ -1823,7 +1823,7 @@ export default function ImportPage() {
           <button
             onClick={handleRpPreview}
             disabled={!rpFile || rpLoading}
-            className="flex items-center gap-1.5 rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md bg-gray-100 dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
           >
             {rpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
             プレビュー
@@ -1840,7 +1840,7 @@ export default function ImportPage() {
             <button
               onClick={handleRpReset}
               disabled={rpLoading}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
             >
               <RefreshCw className="h-4 w-4" />
               リセット
@@ -1850,7 +1850,7 @@ export default function ImportPage() {
 
         {/* エラー */}
         {rpError && (
-          <div className="mb-4 flex items-start gap-2 rounded-md bg-red-50 p-3 text-sm text-red-700">
+          <div className="mb-4 flex items-start gap-2 rounded-md bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
             <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
             {rpError}
           </div>
@@ -1858,46 +1858,46 @@ export default function ImportPage() {
 
         {/* プレビュー結果 */}
         {rpPreview && !rpResult && (
-          <div className="rounded-md border border-gray-200 p-4">
-            <p className="mb-2 text-sm font-semibold text-gray-700">プレビュー結果</p>
+          <div className="rounded-md border border-gray-200 dark:border-gray-800 p-4">
+            <p className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">プレビュー結果</p>
             <div className="mb-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-              <div className="rounded bg-green-50 p-2 text-center">
-                <div className="text-xl font-bold text-green-700">{rpPreview.summary.toCreateCount}</div>
-                <div className="text-xs text-green-600">新規作成</div>
+              <div className="rounded bg-green-50 dark:bg-green-500/10 p-2 text-center">
+                <div className="text-xl font-bold text-green-700 dark:text-green-300">{rpPreview.summary.toCreateCount}</div>
+                <div className="text-xs text-green-600 dark:text-green-300">新規作成</div>
               </div>
-              <div className="rounded bg-amber-50 p-2 text-center">
-                <div className="text-xl font-bold text-amber-700">{rpPreview.summary.duplicateCount}</div>
-                <div className="text-xs text-amber-600">既存と重複</div>
+              <div className="rounded bg-amber-50 dark:bg-amber-500/10 p-2 text-center">
+                <div className="text-xl font-bold text-amber-700 dark:text-amber-300">{rpPreview.summary.duplicateCount}</div>
+                <div className="text-xs text-amber-600 dark:text-amber-300">既存と重複</div>
               </div>
-              <div className="rounded bg-gray-50 p-2 text-center">
-                <div className="text-xl font-bold text-gray-600">{rpPreview.summary.noAddressCount}</div>
-                <div className="text-xs text-gray-500">住所なし</div>
+              <div className="rounded bg-gray-50 dark:bg-gray-800/50 p-2 text-center">
+                <div className="text-xl font-bold text-gray-600 dark:text-gray-300">{rpPreview.summary.noAddressCount}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">住所なし</div>
               </div>
-              <div className="rounded bg-gray-50 p-2 text-center">
-                <div className="text-xl font-bold text-gray-600">{rpPreview.summary.filteredCount}</div>
-                <div className="text-xs text-gray-500">フィルタ除外</div>
+              <div className="rounded bg-gray-50 dark:bg-gray-800/50 p-2 text-center">
+                <div className="text-xl font-bold text-gray-600 dark:text-gray-300">{rpPreview.summary.filteredCount}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">フィルタ除外</div>
               </div>
             </div>
             {rpPreview.toCreateSamples.length > 0 && (
               <div className="mb-2">
-                <p className="mb-1 text-xs font-medium text-gray-600">新規作成サンプル（最大5件）</p>
-                <div className="overflow-auto rounded border border-gray-100">
+                <p className="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">新規作成サンプル（最大5件）</p>
+                <div className="overflow-auto rounded border border-gray-100 dark:border-gray-800">
                   <table className="w-full text-xs">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-gray-50 dark:bg-gray-800/50">
                       <tr>
-                        <th className="px-2 py-1 text-left font-medium text-gray-500">行</th>
-                        <th className="px-2 py-1 text-left font-medium text-gray-500">区分</th>
-                        <th className="px-2 py-1 text-left font-medium text-gray-500">住所</th>
-                        <th className="px-2 py-1 text-left font-medium text-gray-500">地番</th>
+                        <th className="px-2 py-1 text-left font-medium text-gray-500 dark:text-gray-400">行</th>
+                        <th className="px-2 py-1 text-left font-medium text-gray-500 dark:text-gray-400">区分</th>
+                        <th className="px-2 py-1 text-left font-medium text-gray-500 dark:text-gray-400">住所</th>
+                        <th className="px-2 py-1 text-left font-medium text-gray-500 dark:text-gray-400">地番</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                       {rpPreview.toCreateSamples.map((s) => (
                         <tr key={s.rowNumber}>
-                          <td className="px-2 py-1 text-gray-500">{s.rowNumber}</td>
-                          <td className="px-2 py-1">{s.fColumn || "—"}</td>
-                          <td className="px-2 py-1">{s.propertyAddress}</td>
-                          <td className="px-2 py-1 text-gray-500">{s.lotNumber ?? "—"}</td>
+                          <td className="px-2 py-1 text-gray-500 dark:text-gray-400">{s.rowNumber}</td>
+                          <td className="px-2 py-1 dark:text-gray-200">{s.fColumn || "—"}</td>
+                          <td className="px-2 py-1 dark:text-gray-200">{s.propertyAddress}</td>
+                          <td className="px-2 py-1 text-gray-500 dark:text-gray-400">{s.lotNumber ?? "—"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1910,8 +1910,8 @@ export default function ImportPage() {
 
         {/* 取込結果 */}
         {rpResult && (
-          <div className="rounded-md border border-green-200 bg-green-50 p-4">
-            <p className="mb-2 text-sm font-semibold text-green-800">取込完了</p>
+          <div className="rounded-md border border-green-200 dark:border-green-400/20 bg-green-50 dark:bg-green-500/10 p-4">
+            <p className="mb-2 text-sm font-semibold text-green-800 dark:text-green-300">取込完了</p>
             <div className="grid grid-cols-3 gap-2 text-sm">
               <div className="text-center">
                 <div className="text-xl font-bold text-green-700">{rpResult.successCount}</div>
@@ -1931,21 +1931,21 @@ export default function ImportPage() {
       </div>
 
       {/* ============ ② 受付帳 × 所有者 2ファイル突合 ============ */}
-      <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6">
+      <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="mb-4 flex items-center gap-2">
           <FileUp className="h-5 w-5 text-blue-600" />
-          <h3 className="text-lg font-semibold text-gray-700">
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
             ② 受付帳 × 所有者 2ファイル突合（CSV / Excel(.xlsx) 対応）
           </h3>
-          <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+          <span className="ml-2 rounded bg-blue-50 dark:bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
             既存物件に反映
           </span>
         </div>
-        <p className="mb-3 text-sm text-gray-500">
+        <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
           受付帳CSVと所有者CSVをキーで突合し、一意に特定できた行だけを既存物件に反映します。
           共有名義人は複数行のまま残します。空値では既存データを上書きしません。
         </p>
-        <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600">
+        <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600 dark:text-gray-300">
           <li>受付帳CSV を選択（受付帳の情報を読み込みます）</li>
           <li>所有者CSV を選択（所有者名・住所などを読み込みます）</li>
           <li>「突合結果をプレビュー」で突合成功・未突合・要レビューを確認</li>
@@ -1953,29 +1953,29 @@ export default function ImportPage() {
         </ol>
 
         {/* 取込条件: DL / 新既 のフィルタ。プレビュー・取込の両方に同じ条件が適用される */}
-        <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
-          <div className="mb-2 text-xs font-semibold text-gray-700">取込条件</div>
+        <div className="mb-4 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3">
+          <div className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">取込条件</div>
           <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-xs text-gray-500">取込物件選択（DL）</span>
+            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+              <span className="text-xs text-gray-500 dark:text-gray-400">取込物件選択（DL）</span>
               <select
                 value={dlFilter}
                 onChange={(e) => setDlFilter(e.target.value as typeof dlFilter)}
                 disabled={roLoading}
-                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+                className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
               >
                 <option value="marked">DLに〇がついている物件のみ</option>
                 <option value="unmarked">DLに〇がついていない物件のみ</option>
                 <option value="all">両方</option>
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-xs text-gray-500">新既</span>
+            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+              <span className="text-xs text-gray-500 dark:text-gray-400">新既</span>
               <select
                 value={shinkiFilter}
                 onChange={(e) => setShinkiFilter(e.target.value as typeof shinkiFilter)}
                 disabled={roLoading}
-                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+                className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
               >
                 <option value="existing">既存のみ</option>
                 <option value="new">新規のみ</option>
@@ -1983,10 +1983,10 @@ export default function ImportPage() {
               </select>
             </label>
           </div>
-          <p className="mt-2 text-xs text-gray-500">
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
             条件はプレビュー・取り込み実行の両方に同じものが適用されます。物件住所は「都道府県＋区＋住所＋番地」から作成されます。受付番号は取り込まず、「他」列は共有名義人の有無として扱います。
           </p>
-          <p className="mt-1 text-xs text-gray-500">
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             所有者CSVの「物件住所」が、受付帳CSVの物件住所と一致した場合のみ紐づけます。所有者住所は「都道府県＋所有者市区郡＋所有者住所＋建物名」を連結し、〒は別フィールドとして郵便番号に保存します。No / DL / 受付番号 / 「他」は紐づけキーに使いません。
           </p>
         </div>
@@ -2005,13 +2005,13 @@ export default function ImportPage() {
               }}
               onClick={() => roReceptionInputRef.current?.click()}
               className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-                roDragActiveReception ? "border-blue-400 bg-blue-50" : "border-gray-300 bg-white hover:border-gray-400"
+                roDragActiveReception ? "border-blue-400 bg-blue-50 dark:bg-blue-500/10" : "border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-400 dark:hover:border-gray-600"
               }`}
             >
-              <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400" />
-              <p className="text-sm text-gray-600">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
-              <p className="mt-0.5 text-xs text-gray-400">またはクリックしてファイルを選択</p>
-              <p className="mt-0.5 text-xs text-gray-400">（受付帳 — ファイル名に「受付帳」を含める）</p>
+              <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400 dark:text-gray-500" />
+              <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（受付帳 — ファイル名に「受付帳」を含める）</p>
               <input
                 ref={roReceptionInputRef}
                 type="file"
@@ -2040,13 +2040,13 @@ export default function ImportPage() {
               }}
               onClick={() => roOwnerInputRef.current?.click()}
               className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-                roDragActiveOwner ? "border-blue-400 bg-blue-50" : "border-gray-300 bg-white hover:border-gray-400"
+                roDragActiveOwner ? "border-blue-400 bg-blue-50 dark:bg-blue-500/10" : "border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-400 dark:hover:border-gray-600"
               }`}
             >
-              <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400" />
-              <p className="text-sm text-gray-600">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
-              <p className="mt-0.5 text-xs text-gray-400">またはクリックしてファイルを選択</p>
-              <p className="mt-0.5 text-xs text-gray-400">（所有者 — ファイル名に「所有者」を含める）</p>
+              <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400 dark:text-gray-500" />
+              <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（所有者 — ファイル名に「所有者」を含める）</p>
               <input
                 ref={roOwnerInputRef}
                 type="file"
@@ -2084,7 +2084,7 @@ export default function ImportPage() {
           <button
             onClick={handleRoReset}
             disabled={roLoading}
-            className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             <RefreshCw className="h-4 w-4" />
             選択をクリア
@@ -2092,15 +2092,15 @@ export default function ImportPage() {
         </div>
 
         {roError && (
-          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mb-4 rounded-md border border-red-200 dark:border-red-400/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
             <AlertTriangle className="mr-1 inline h-4 w-4" />
             {roError}
           </div>
         )}
 
         {roPreview && (
-          <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-4">
-            <div className="mb-3 text-sm font-semibold text-gray-700">突合結果サマリ</div>
+          <div className="mb-4 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-4">
+            <div className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">突合結果サマリ</div>
             <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
               <RoStat label="受付帳件数" value={roPreview.summary.receptionCount} />
               <RoStat label="所有者件数" value={roPreview.summary.ownerCount} />
@@ -2115,7 +2115,7 @@ export default function ImportPage() {
               <RoStat label="新既条件で除外" value={roPreview.summary.filteredByShinkiCount} tone="gray" />
             </div>
             {roPreview.summary.excludedCount > 0 && (
-              <div className="mt-2 text-[11px] text-gray-500">
+              <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
                 内訳: 空行 {roPreview.summary.excludedEmptyCount} / ヘッダ反復{" "}
                 {roPreview.summary.excludedHeaderRepeatCount} / 集計行{" "}
                 {roPreview.summary.excludedAggregateCount} / 共担{" "}
@@ -2126,12 +2126,12 @@ export default function ImportPage() {
 
             {roPreview.matchedSamples.length > 0 && (
               <div className="mt-4">
-                <div className="mb-1 text-xs font-semibold text-gray-600">
+                <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">
                   反映対象サンプル（最大20件）
                 </div>
-                <div className="max-h-52 overflow-auto rounded border border-gray-200 bg-white">
+                <div className="max-h-52 overflow-auto rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-gray-50 text-gray-600">
+                    <thead className="bg-gray-50 dark:bg-gray-800/50 text-gray-600 dark:text-gray-300">
                       <tr>
                         <th className="px-2 py-1">行</th>
                         <th className="px-2 py-1">物件住所</th>
@@ -2139,13 +2139,13 @@ export default function ImportPage() {
                         <th className="px-2 py-1">所有者名</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                       {roPreview.matchedSamples.map((s) => (
                         <tr key={s.rowNumber}>
-                          <td className="px-2 py-1 text-gray-600">{s.rowNumber}</td>
-                          <td className="px-2 py-1 text-gray-800">{s.propertyAddress}</td>
-                          <td className="px-2 py-1 text-gray-600">{s.ownerCount}</td>
-                          <td className="px-2 py-1 text-gray-600">{s.ownerNames.join(", ")}</td>
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{s.rowNumber}</td>
+                          <td className="px-2 py-1 text-gray-800 dark:text-gray-100">{s.propertyAddress}</td>
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{s.ownerCount}</td>
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{s.ownerNames.join(", ")}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2157,16 +2157,16 @@ export default function ImportPage() {
             {roPreview.reviewSamples.length > 0 && (
               <div className="mt-4">
                 <div className="mb-1 flex items-center justify-between">
-                  <div className="text-xs font-semibold text-amber-700">
+                  <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">
                     要レビューサンプル（最大20件）
                   </div>
-                  <div className="text-[10px] text-gray-500">
+                  <div className="text-[10px] text-gray-500 dark:text-gray-400">
                     理由ごとに「次にどこを直せばよいか」を右端に表示します
                   </div>
                 </div>
-                <div className="max-h-72 overflow-auto rounded border border-amber-200 bg-white">
+                <div className="max-h-72 overflow-auto rounded border border-amber-200 dark:border-amber-400/25 bg-white dark:bg-gray-900">
                   <table className="w-full text-left text-xs">
-                    <thead className="sticky top-0 bg-amber-50 text-amber-700">
+                    <thead className="sticky top-0 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300">
                       <tr>
                         <th className="px-2 py-1">行</th>
                         <th className="px-2 py-1">理由</th>
@@ -2178,12 +2178,12 @@ export default function ImportPage() {
                         <th className="px-2 py-1">次のアクション</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                       {roPreview.reviewSamples.map((s) => (
                         <tr key={s.rowNumber} className="align-top">
-                          <td className="px-2 py-1 text-gray-600">{s.rowNumber}</td>
-                          <td className="px-2 py-1 text-amber-700">{s.reasonLabel}</td>
-                          <td className="px-2 py-1 text-gray-600">
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{s.rowNumber}</td>
+                          <td className="px-2 py-1 text-amber-700 dark:text-amber-300">{s.reasonLabel}</td>
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">
                             {{
                               matched: "既存あり",
                               not_found: "未特定",
@@ -2191,10 +2191,10 @@ export default function ImportPage() {
                               no_key: "キー不足",
                             }[s.propertyStatus]}
                           </td>
-                          <td className="px-2 py-1 text-gray-600">{s.fColumn}</td>
-                          <td className="px-2 py-1 text-gray-600">{s.kColumn}</td>
-                          <td className="px-2 py-1 text-gray-600">{s.candidateCount}</td>
-                          <td className="px-2 py-1 text-gray-600">{s.ownerCount}</td>
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{s.fColumn}</td>
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{s.kColumn}</td>
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{s.candidateCount}</td>
+                          <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{s.ownerCount}</td>
                           <td className="px-2 py-1">
                             <ReviewActionHint sample={s} />
                           </td>
@@ -2209,7 +2209,7 @@ export default function ImportPage() {
         )}
 
         {roResult && (
-          <div className="rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+          <div className="rounded-md border border-green-200 dark:border-green-400/20 bg-green-50 dark:bg-green-500/10 p-4 text-sm text-green-800 dark:text-green-300">
             <div className="mb-2 flex items-center gap-2 font-semibold">
               <CheckCircle2 className="h-4 w-4" />
               取込完了（ジョブID: {roResult.jobId}）
@@ -2230,22 +2230,22 @@ export default function ImportPage() {
           過去の不具合で残ったスタックジョブを可視化する運用セクション。
           件数 0 のときは丸ごと非表示。1 件以上あるときだけ警告色の枠で表示する。 */}
       {stuckJobs.length > 0 && (
-        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-5">
+        <div className="mb-6 rounded-lg border border-amber-300 dark:border-amber-400/25 bg-amber-50 dark:bg-amber-500/10 p-5">
           <div className="mb-3 flex items-start justify-between gap-3">
             <div>
-              <h3 className="flex items-center gap-2 text-base font-semibold text-amber-900">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-amber-900 dark:text-amber-300">
                 <AlertTriangle className="h-4 w-4" />
                 異常ジョブ（{stuckJobs.length} 件）
               </h3>
-              <p className="mt-0.5 text-xs text-amber-800">
-                {stuckThresholdMin} 分以上 <code className="rounded bg-white/70 px-1 font-mono text-[11px]">processing</code>{" "}
+              <p className="mt-0.5 text-xs text-amber-800 dark:text-amber-300">
+                {stuckThresholdMin} 分以上 <code className="rounded bg-white/70 dark:bg-gray-900/50 px-1 font-mono text-[11px]">processing</code>{" "}
                 のまま残っているジョブです。「失敗にする」を押して整理してください（自動修復はされません）。
               </p>
             </div>
             <button
               onClick={fetchStuck}
               disabled={stuckLoading}
-              className="rounded p-1 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+              className="rounded p-1 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-50"
               title="再読み込み"
             >
               <RefreshCw
@@ -2254,9 +2254,9 @@ export default function ImportPage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded border border-amber-200 bg-white">
+          <div className="overflow-x-auto rounded border border-amber-200 dark:border-amber-400/25 bg-white dark:bg-gray-900">
             <table className="w-full text-left text-xs">
-              <thead className="border-b border-amber-200 bg-amber-100/50 text-amber-900">
+              <thead className="border-b border-amber-200 dark:border-amber-400/25 bg-amber-100/50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-300">
                 <tr>
                   <th className="px-2 py-1.5 font-medium">種別</th>
                   <th className="px-2 py-1.5 font-medium">ファイル名</th>
@@ -2267,30 +2267,30 @@ export default function ImportPage() {
                   <th className="px-2 py-1.5 font-medium text-right">操作</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-amber-100">
+              <tbody className="divide-y divide-amber-100 dark:divide-amber-400/15">
                 {stuckJobs.map((job) => (
-                  <tr key={job.jobId} className="hover:bg-amber-50/50">
-                    <td className="px-2 py-1.5 text-gray-700 text-[11px]">
+                  <tr key={job.jobId} className="hover:bg-amber-50/50 dark:hover:bg-amber-500/10">
+                    <td className="px-2 py-1.5 text-gray-700 dark:text-gray-200 text-[11px]">
                       {getImportTypeLabel(job.jobType)}
                     </td>
-                    <td className="px-2 py-1.5 text-gray-800">
+                    <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100">
                       <Link
                         href={`/import/jobs/${job.jobId}`}
-                        className="text-indigo-600 hover:underline"
+                        className="text-indigo-600 dark:text-indigo-400 hover:underline"
                       >
                         {job.fileName}
                       </Link>
                     </td>
-                    <td className="px-2 py-1.5 text-gray-600">
+                    <td className="px-2 py-1.5 text-gray-600 dark:text-gray-300">
                       {job.executor.name}
                     </td>
-                    <td className="px-2 py-1.5 text-gray-500">
+                    <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400">
                       {new Date(job.createdAt).toLocaleString("ja-JP")}
                     </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-amber-800">
+                    <td className="px-2 py-1.5 text-right tabular-nums text-amber-800 dark:text-amber-300">
                       {job.elapsedMinutes}分
                     </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">
+                    <td className="px-2 py-1.5 text-right tabular-nums text-gray-600 dark:text-gray-300">
                       {job.rowCount}
                     </td>
                     <td className="px-2 py-1.5 text-right">
@@ -2316,12 +2316,12 @@ export default function ImportPage() {
       )}
 
       {/* ============ Job History ============ */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-700">取込履歴</h3>
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">取込履歴</h3>
           <button
             onClick={fetchJobs}
-            className="rounded p-1 text-gray-400 hover:text-gray-600"
+            className="rounded p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
             title="再読み込み"
           >
             <RefreshCw className="h-4 w-4" />
@@ -2329,15 +2329,15 @@ export default function ImportPage() {
         </div>
 
         {/* ---- フィルタ UI（段階A: 取込種別 / 実行者 / 日付範囲） ---- */}
-        <div className="mb-4 grid grid-cols-1 gap-3 rounded-md border border-gray-200 bg-gray-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mb-4 grid grid-cols-1 gap-3 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3 sm:grid-cols-2 lg:grid-cols-5">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               種別
             </label>
             <select
               value={jobFilters.jobType}
               onChange={(e) => updateJobFilter("jobType", e.target.value)}
-              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               {JOB_TYPE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -2347,13 +2347,13 @@ export default function ImportPage() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               実行者
             </label>
             <select
               value={jobFilters.executedBy}
               onChange={(e) => updateJobFilter("executedBy", e.target.value)}
-              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="">すべての実行者</option>
               {executorOptions.map((u) => (
@@ -2364,31 +2364,31 @@ export default function ImportPage() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               日付（開始）
             </label>
             <input
               type="date"
               value={jobFilters.from}
               onChange={(e) => updateJobFilter("from", e.target.value)}
-              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               日付（終了）
             </label>
             <input
               type="date"
               value={jobFilters.to}
               onChange={(e) => updateJobFilter("to", e.target.value)}
-              className="w-full rounded border border-gray-300 bg-white py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div className="flex items-end">
             <button
               onClick={handleResetJobFilters}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-sm text-gray-600 hover:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               フィルタをクリア
             </button>
