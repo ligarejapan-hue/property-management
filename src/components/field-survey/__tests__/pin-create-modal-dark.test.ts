@@ -200,4 +200,9 @@ describe("pin-create-modal dark mode", () => {
   test("light text-emerald-700 preserved", () => {
     expect(readSrc()).toContain("text-emerald-700");
   });
+
+  // 事前敵対レビュー対応: ピン種類ラジオラベル(無色span)に dark:text-gray-200
+  test("pin-type radio label span has dark:text-gray-200", () => {
+    expect(readSrc()).toContain('dark:text-gray-200">{formatPinType');
+  });
 });

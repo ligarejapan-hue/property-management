@@ -213,4 +213,12 @@ describe("pin-detail-panel dark mode", () => {
   test("light text-blue-700 preserved", () => {
     expect(readSrc()).toContain("text-blue-700");
   });
+
+  // 事前敵対レビュー対応: EditView 種類/状態ラジオラベル(無色span)に dark:text-gray-200
+  test("edit pin-type radio label span has dark:text-gray-200", () => {
+    expect(readSrc()).toContain('dark:text-gray-200">{formatPinType');
+  });
+  test("edit pin-status radio label span has dark:text-gray-200", () => {
+    expect(readSrc()).toContain('dark:text-gray-200">{formatPinStatus');
+  });
 });

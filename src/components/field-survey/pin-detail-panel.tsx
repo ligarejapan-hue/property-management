@@ -650,7 +650,7 @@ function EditView({
                 onChange={() => onChangePinType(t)}
                 data-testid={`pin-edit-type-${t}`}
               />
-              <span>{formatPinType(t)}</span>
+              <span className="dark:text-gray-200">{formatPinType(t)}</span>
             </label>
           ))}
         </div>
@@ -671,7 +671,7 @@ function EditView({
                 onChange={() => onChangeStatus(s)}
                 data-testid={`pin-edit-status-${s}`}
               />
-              <span>{formatPinStatus(s)}</span>
+              <span className="dark:text-gray-200">{formatPinStatus(s)}</span>
             </label>
           ))}
         </div>

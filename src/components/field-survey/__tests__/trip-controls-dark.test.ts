@@ -112,4 +112,9 @@ describe("trip-controls.tsx dark: 配色 (field-survey phase)", () => {
   it("ライトモード bg-indigo-600 solid ボタンは残っている (ModalActions agree)", () => {
     expect(src).toContain("bg-indigo-600");
   });
+
+  // --- 事前敵対レビュー対応: ● 巡回中 status を StatusLine と整合 (dark:text-red-400) ---
+  it("ActiveSessionView の ● 巡回中 status に text-red-600 dark:text-red-400 がある", () => {
+    expect(src).toContain("text-red-600 dark:text-red-400");
+  });
 });

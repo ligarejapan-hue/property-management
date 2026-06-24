@@ -180,7 +180,7 @@ export default function PinCreateModal({
                   onChange={() => setPinType(t)}
                   data-testid={`pin-create-type-${t}`}
                 />
-                <span>{formatPinType(t)}</span>
+                <span className="dark:text-gray-200">{formatPinType(t)}</span>
               </label>
             ))}
           </div>
