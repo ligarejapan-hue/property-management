@@ -58,6 +58,17 @@ describe("location-recorder-controls.tsx dark: 配色 (field-survey phase)", () 
     expect(src).toContain("dark:border-blue-500/40");
   });
 
+  // --- StatusLine 暗所可読化（最終レビュー対応・WCAG: amber-700 は暗背景で <4.5:1）---
+  it("StatusLine エラー状態に text-amber-700 dark:text-amber-400 がある", () => {
+    expect(src).toContain("text-amber-700 dark:text-amber-400");
+  });
+  it("StatusLine 記録中状態に text-red-600 dark:text-red-400 がある", () => {
+    expect(src).toContain("text-red-600 dark:text-red-400");
+  });
+  it("StatusLine 既定状態に text-gray-600 dark:text-gray-300 がある", () => {
+    expect(src).toContain("text-gray-600 dark:text-gray-300");
+  });
+
   // --- ライト不変担保 ---
   it("ライトモード bg-white は残っている", () => {
     expect(src).toContain("bg-white");

@@ -271,7 +271,7 @@ export default function PinDetailPanel({
                 type="button"
                 data-testid="pin-detail-delete-button"
                 onClick={() => setConfirmingDelete(true)}
-                className="w-full rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 px-2 py-1 text-xs font-semibold text-red-700 dark:text-red-300 hover:bg-red-100"
+                className="w-full rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 px-2 py-1 text-xs font-semibold text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-500/20"
               >
                 削除
               </button>

@@ -124,10 +124,10 @@ function StatusLine({
   })();
   const color =
     status === "recording"
-      ? "text-red-600"
+      ? "text-red-600 dark:text-red-400"
       : status === "error"
-        ? "text-amber-700"
-        : "text-gray-600";
+        ? "text-amber-700 dark:text-amber-400"
+        : "text-gray-600 dark:text-gray-300";
   return (
     <p
       className={`text-[11px] leading-snug ${color}`}
