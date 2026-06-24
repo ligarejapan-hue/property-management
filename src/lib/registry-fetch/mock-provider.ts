@@ -11,6 +11,8 @@ import type {
   RegistryFetchRequest,
   RegistryFetchResult,
   RegistryFetchErrorCode,
+  RegistrySearchRequest,
+  RegistryCandidate,
 } from "./types";
 import { RegistryFetchError } from "./errors";
 
@@ -56,6 +58,13 @@ export interface MockRegistryFetchOptions {
   now?: Date;
   /** providerRequestId をテストから固定するための注入。 */
   providerRequestId?: string;
+  /** searchCandidates が返す候補を注入できる（未指定なら request から決定的に導出）。 */
+  candidates?: RegistryCandidate[];
+  /**
+   * 指定すると searchCandidates が常にこの分類コードの RegistryFetchError を投げる。
+   * 検索エラー経路のテスト用（fetch の failWith とは独立）。
+   */
+  searchFailWith?: RegistryFetchErrorCode;
 }
 
 /**
@@ -90,5 +99,31 @@ export class MockRegistryFetchProvider implements RegistryFetchProvider {
       fetchedAt: this.options.now ?? new Date(),
       providerRequestId,
     };
+  }
+
+  /**
+   * 所在検索の mock（PR-2b・外部 I/O なし）。注入された候補、または request から決定的に
+   * 1 候補を導出して返す。秘匿情報（所在/地番/家屋番号）はそのまま echo するだけで、log 等には出さない。
+   */
+  async searchCandidates(
+    request: RegistrySearchRequest,
+  ): Promise<RegistryCandidate[]> {
+    if (this.options.searchFailWith) {
+      throw new RegistryFetchError(this.options.searchFailWith);
+    }
+    if (this.options.candidates) {
+      return this.options.candidates;
+    }
+    // request から決定的に導出（同一入力 → 同一候補）。ref（非PII）を候補参照に使う。
+    const ref = request.ref ?? "default";
+    return [
+      {
+        candidateRef: `mock-candidate-${ref}`,
+        address: request.address,
+        lotNumber: request.lotNumber ?? null,
+        buildingNumber: request.buildingNumber ?? null,
+        realEstateNumber: `MOCK-${ref}`,
+      },
+    ];
   }
 }
