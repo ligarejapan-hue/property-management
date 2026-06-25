@@ -567,7 +567,7 @@ export default function FieldSurveyMap({
         {error && (
           <div
             role="alert"
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 shadow"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 shadow dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
           >
             {error}
           </div>
@@ -603,8 +603,8 @@ function ControlPanel({
   onPanToCurrent: () => void;
 }) {
   return (
-    <div className="absolute right-3 top-3 w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow">
-      <div className="mb-2 text-xs font-semibold text-gray-600">表示切替</div>
+    <div className="absolute right-3 top-3 w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900">
+      <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">表示切替</div>
       <label className="mb-1 flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
@@ -921,7 +921,7 @@ function MapDataLayer({
       )}
 
       {loading && (
-        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-white/90 px-3 py-1 text-xs text-gray-700 shadow">
+        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-white/90 px-3 py-1 text-xs text-gray-700 shadow dark:bg-gray-900/90 dark:text-gray-300">
           読み込み中…
         </div>
       )}

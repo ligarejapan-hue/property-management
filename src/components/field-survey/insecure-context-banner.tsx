@@ -34,12 +34,12 @@ export default function InsecureContextBanner() {
     <div
       role="alert"
       data-testid="field-survey-insecure-context-banner"
-      className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-900"
+      className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300"
     >
       <p className="font-semibold">
         この URL は HTTPS ではありません（位置情報・カメラが動作しない場合があります）
       </p>
-      <p className="mt-0.5 text-amber-800">
+      <p className="mt-0.5 text-amber-800 dark:text-amber-400">
         現地調査の位置情報・カメラは HTTPS または localhost でのみ安定動作します。
         LAN IP（例: http のローカルアドレス）では現在地を取得できないことがあります。
         本番・実機検証では HTTPS の URL を使用してください。

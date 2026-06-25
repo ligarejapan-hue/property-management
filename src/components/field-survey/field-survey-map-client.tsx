@@ -75,9 +75,9 @@ function MissingMapIdFallback() {
     <div
       role="alert"
       data-testid="gmaps-mapid-fallback"
-      className="flex h-full items-center justify-center bg-gray-50 p-6"
+      className="flex h-full items-center justify-center bg-gray-50 p-6 dark:bg-gray-800/50"
     >
-      <div className="max-w-2xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900">
+      <div className="max-w-2xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300">
         <h2 className="mb-2 text-base font-semibold">
           地図の Map ID が未設定です
         </h2>
@@ -88,12 +88,12 @@ function MissingMapIdFallback() {
         </p>
         <p className="mb-2 text-xs">
           Google Cloud Console の「Map Management」で Map ID を作成し、{" "}
-          <code className="rounded bg-white px-1">
+          <code className="rounded bg-white px-1 dark:bg-gray-800">
             NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID
           </code>{" "}
           に設定して build / restart してください。
         </p>
-        <p className="text-xs text-amber-800">
+        <p className="text-xs text-amber-800 dark:text-amber-400">
           Map ID 未設定で地図を描画すると、マーカーが一切表示されない
           壊れた UI になります。
         </p>
@@ -111,9 +111,9 @@ function BillingNotAcknowledgedFallback() {
     <div
       role="alert"
       data-testid="gmaps-billing-fallback"
-      className="flex h-full items-center justify-center bg-gray-50 p-6"
+      className="flex h-full items-center justify-center bg-gray-50 p-6 dark:bg-gray-800/50"
     >
-      <div className="max-w-2xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900">
+      <div className="max-w-2xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300">
         <h2 className="mb-2 text-base font-semibold">
           地図の読み込みを停止しています
         </h2>
@@ -130,12 +130,12 @@ function BillingNotAcknowledgedFallback() {
         </ul>
         <p className="mb-2 text-xs">
           上記を全て確認した上で{" "}
-          <code className="rounded bg-white px-1">
+          <code className="rounded bg-white px-1 dark:bg-gray-800">
             NEXT_PUBLIC_GOOGLE_MAPS_BILLING_ACKNOWLEDGED=true
           </code>{" "}
           を設定し、build / restart してください。
         </p>
-        <p className="text-xs text-amber-800">
+        <p className="text-xs text-amber-800 dark:text-amber-400">
           Budget alert は通知のみで課金を停止しません。
           実際に上限で止めるには quota 制限が別途必要です。
         </p>
@@ -148,20 +148,20 @@ function MissingKeyNotice() {
   return (
     <div
       role="alert"
-      className="flex h-full items-center justify-center bg-gray-50 p-6"
+      className="flex h-full items-center justify-center bg-gray-50 p-6 dark:bg-gray-800/50"
     >
-      <div className="max-w-xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900">
+      <div className="max-w-xl rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300">
         <h2 className="mb-2 text-base font-semibold">
           Google Maps APIキーが未設定です
         </h2>
         <p className="mb-2">
           現地調査マップを表示するには、環境変数{" "}
-          <code className="rounded bg-white px-1">
+          <code className="rounded bg-white px-1 dark:bg-gray-800">
             NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
           </code>{" "}
           を設定してください。
         </p>
-        <p className="text-xs text-amber-800">
+        <p className="text-xs text-amber-800 dark:text-amber-400">
           APIキーは client 側に出るため、Google Cloud Console で必ず HTTP
           referrer 制限と API 制限 (Maps JavaScript API のみ) を設定してください。
         </p>

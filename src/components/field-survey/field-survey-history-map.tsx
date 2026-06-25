@@ -322,7 +322,7 @@ export default function FieldSurveyHistoryMap({
       {/* 履歴閲覧中バナー + 通常マップへ戻る導線 */}
       <div
         data-testid="history-mode-banner"
-        className="flex items-center justify-between gap-2 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-900"
+        className="flex items-center justify-between gap-2 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-900 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300"
       >
         <span>
           履歴閲覧中（read-only）
@@ -331,7 +331,7 @@ export default function FieldSurveyHistoryMap({
         <Link
           href="/field-survey/map"
           data-testid="history-back-to-map"
-          className="rounded border border-blue-300 bg-white px-2 py-1 text-blue-700 hover:bg-blue-100"
+          className="rounded border border-blue-300 bg-white px-2 py-1 text-blue-700 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-gray-900 dark:text-blue-400 dark:hover:bg-gray-800"
         >
           通常マップに戻る
         </Link>
@@ -340,13 +340,13 @@ export default function FieldSurveyHistoryMap({
       {error && (
         <div
           role="alert"
-          className="absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow"
+          className="absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300"
         >
           {error}
         </div>
       )}
       {loading && !error && (
-        <div className="pointer-events-none absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-md bg-white/90 px-3 py-1 text-xs text-gray-700 shadow">
+        <div className="pointer-events-none absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-md bg-white/90 px-3 py-1 text-xs text-gray-700 shadow dark:bg-gray-900/90 dark:text-gray-300">
           読み込み中…
         </div>
       )}
@@ -354,7 +354,7 @@ export default function FieldSurveyHistoryMap({
         <div
           role="status"
           data-testid="history-pins-truncated"
-          className="absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-900 shadow"
+          className="absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-900 shadow dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300"
         >
           ピンが多いため一部のみ表示されています。
         </div>

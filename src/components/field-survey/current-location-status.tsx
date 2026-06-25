@@ -59,11 +59,11 @@ export default function CurrentLocationStatus({
 
   return (
     <div
-      className="mt-2 border-t border-gray-200 pt-2"
+      className="mt-2 border-t border-gray-200 dark:border-gray-800 pt-2"
       data-testid="current-location-section"
     >
-      <div className="mb-1 text-xs font-semibold text-gray-600">現在地</div>
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700">
+      <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">現在地</div>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700 dark:text-gray-200">
         <dt>状態</dt>
         <dd data-testid="current-location-state">{statusText}</dd>
         <dt>最終取得</dt>
@@ -80,7 +80,7 @@ export default function CurrentLocationStatus({
 
       {lowAccuracy && (
         <p
-          className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-800"
+          className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
           data-testid="current-location-low-accuracy-warning"
         >
           低精度です。屋外や窓際で再度お試しください。
@@ -89,7 +89,7 @@ export default function CurrentLocationStatus({
 
       {isWaitingForFirstLocation && !lowAccuracy && (
         <p
-          className="mt-1 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] text-gray-700"
+          className="mt-1 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] text-gray-700 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-200"
           data-testid="current-location-waiting"
         >
           現在地を取得中です。屋外や窓際で数十秒お待ちください。
@@ -99,7 +99,7 @@ export default function CurrentLocationStatus({
       {lastLocationErrorForDisplay && (
         <p
           role="status"
-          className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+          className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
           data-testid="current-location-error"
         >
           {lastLocationErrorForDisplay}
@@ -110,7 +110,7 @@ export default function CurrentLocationStatus({
         type="button"
         onClick={() => onPanToCurrent()}
         disabled={!canPanToCurrent}
-        className="mt-2 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+        className="mt-2 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
         data-testid="current-location-pan-button"
       >
         現在地へ移動
