@@ -99,73 +99,73 @@ export default function AttachmentTrashPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <nav className="mb-4 text-sm text-gray-500">
-        <Link href="/admin" className="hover:text-gray-700">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+      <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-300">
           管理
         </Link>
         <span className="mx-2">/</span>
-        <Link href="/admin/attachments" className="hover:text-gray-700">
+        <Link href="/admin/attachments" className="hover:text-gray-700 dark:hover:text-gray-300">
           添付横断検索
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900">ゴミ箱</span>
+        <span className="text-gray-900 dark:text-gray-100">ゴミ箱</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">ゴミ箱（削除した添付）</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">ゴミ箱（削除した添付）</h1>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
         一般の書類は削除から{RETENTION_DAYS}日でお掃除されます。謄本は残ります。期間内は「元に戻す」で復元できます。
       </p>
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-4 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
           </div>
         ) : (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   ファイル名
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   種類
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   削除日
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   お掃除まで
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   操作
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-900">
               {items.map((it) => (
-                <tr key={it.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-xs truncate">
+                <tr key={it.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 max-w-xs truncate">
                     {it.fileName}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm">
-                    <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                    <span className="inline-flex rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-0.5 text-xs font-medium text-gray-800 dark:text-gray-200">
                       {TYPE_LABELS[it.type] ?? it.type}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 font-mono">
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">
                     {it.deletedAt
                       ? new Date(it.deletedAt).toLocaleDateString("ja-JP")
                       : "-"}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                     {daysLeft(it.deletedAt, it.type)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm">
@@ -175,19 +175,19 @@ export default function AttachmentTrashPage() {
                         disabled={busyId === it.id}
                         aria-busy={busyId === it.id}
                         onClick={() => void restore(it)}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
                       >
                         {busyId === it.id ? "復元中…" : "元に戻す"}
                       </button>
                     ) : (
-                      <span className="text-xs text-gray-400">この画面では復元できません</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500">この画面では復元できません</span>
                     )}
                   </td>
                 </tr>
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400">
+                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">
                     ゴミ箱は空です。
                   </td>
                 </tr>
