@@ -28,6 +28,8 @@ import type {
   RegistryFetchProvider,
   RegistryFetchRequest,
   RegistryFetchResult,
+  RegistrySearchRequest,
+  RegistryCandidate,
 } from "./types";
 import { RegistryFetchError } from "./errors";
 import type { RegistryFetchThrottle } from "./throttle";
@@ -57,6 +59,16 @@ export interface RegistryBrowserPage {
   searchByRealEstateNumber(
     realEstateNumber: string,
   ): Promise<RegistrySearchOutcome>;
+  /**
+   * 所在/地番/家屋番号で候補検索する（PR-2b seam・任意実装）。
+   * 実 Playwright 実装（セレクタ・本番接続）は本 PR では提供しない（optional のまま）。
+   * 実装されていない adapter では provider 側が provider_error に分類する。
+   */
+  searchByLocation?(input: {
+    address: string;
+    lotNumber?: string | null;
+    buildingNumber?: string | null;
+  }): Promise<RegistryCandidate[]>;
   /** 検索ヒット後、謄本PDFを取得して Buffer で返す。 */
   downloadRegistryPdf(): Promise<Buffer>;
   /** ページ/コンテキスト/ブラウザを閉じて中間成果物を破棄する（best-effort）。 */
@@ -200,6 +212,65 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       throw classifyRegistryFetchError(err);
     } finally {
       // 例外経路でも必ず close（Cookie/セッション/DL ファイル等の中間成果物を残さない）。
+      try {
+        await page.close();
+      } catch {
+        // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+      }
+    }
+  }
+
+  /**
+   * 所在検索（PR-2b seam）。fetchRegistryPdf と同じ安全構造（throttle → browserFactory →
+   * 起動 timeout → login → 検索 → 必ず close）を踏襲する。
+   *
+   * 重要: 実 Playwright 所在検索（page.searchByLocation の実体・セレクタ）は本 PR では未実装。
+   * 実 adapter は searchByLocation を持たないため provider_error に分類する。本番は provider 未設定
+   * （getRegistryFetchProvider()==null → route 501）ゆえ、この経路はテスト（fake page 注入）でのみ
+   * 到達し、本番外部接続は発生しない。候補（秘匿情報）は呼び出し側が log/Audit/error response に出さない。
+   */
+  async searchCandidates(
+    request: RegistrySearchRequest,
+  ): Promise<RegistryCandidate[]> {
+    if (
+      this.throttle &&
+      !this.throttle.tryAcquire(this.name, this.now().getTime())
+    ) {
+      throw new RegistryFetchError("rate_limited");
+    }
+    if (!this.browserFactory) {
+      throw new RegistryFetchError("provider_error");
+    }
+
+    let page: RegistryBrowserPage;
+    try {
+      page = await this.withStartupTimeout(() => this.browserFactory!());
+    } catch (err) {
+      throw classifyRegistryFetchError(err);
+    }
+
+    try {
+      // 実 adapter は searchByLocation 未実装（seam）。login（実外部接続）の前に fail-fast し、
+      // 無駄な実ログインを避ける → provider_error（本番は provider 未設定=501 ゆえ非到達）。
+      const searchByLocation = page.searchByLocation;
+      if (!searchByLocation) {
+        throw new RegistryFetchError("provider_error");
+      }
+      return await this.withTimeout(async () => {
+        await page.login({
+          loginId: this.loginId,
+          password: this.password,
+          baseUrl: this.baseUrl,
+        });
+        return searchByLocation.call(page, {
+          address: request.address,
+          lotNumber: request.lotNumber,
+          buildingNumber: request.buildingNumber,
+        });
+      });
+    } catch (err) {
+      throw classifyRegistryFetchError(err);
+    } finally {
       try {
         await page.close();
       } catch {
