@@ -1672,26 +1672,26 @@ export default function ImportPage() {
                 <strong>{result.totalRows}</strong>
               </div>
               <div>
-                <span className="text-green-600">成功:</span>{" "}
-                <strong className="text-green-700">
+                <span className="text-green-600 dark:text-green-300">成功:</span>{" "}
+                <strong className="text-green-700 dark:text-green-300">
                   {result.successCount}
                 </strong>
               </div>
               <div>
-                <span className="text-blue-600">うち更新:</span>{" "}
-                <strong className="text-blue-700">
+                <span className="text-blue-600 dark:text-blue-300">うち更新:</span>{" "}
+                <strong className="text-blue-700 dark:text-blue-300">
                   {result.updateCount ?? 0}
                 </strong>
               </div>
               <div>
-                <span className="text-amber-600">要レビュー:</span>{" "}
-                <strong className="text-amber-700">
+                <span className="text-amber-600 dark:text-amber-300">要レビュー:</span>{" "}
+                <strong className="text-amber-700 dark:text-amber-300">
                   {result.needsReviewCount}
                 </strong>
               </div>
               <div>
-                <span className="text-red-600">エラー:</span>{" "}
-                <strong className="text-red-700">{result.errorCount}</strong>
+                <span className="text-red-600 dark:text-red-300">エラー:</span>{" "}
+                <strong className="text-red-700 dark:text-red-300">{result.errorCount}</strong>
               </div>
             </div>
             {result.parseErrors.length > 0 && (
@@ -2411,7 +2411,7 @@ export default function ImportPage() {
           const canPrev = currentPage > 1 && !jobsLoading;
           const canNext = currentPage < totalPages && !jobsLoading;
           return (
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-300">
               <div>
                 {total === 0 ? (
                   <span>全 0 件</span>
@@ -2424,13 +2424,13 @@ export default function ImportPage() {
               </div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-1">
-                  <span className="text-gray-500">1ページあたり</span>
+                  <span className="text-gray-500 dark:text-gray-400">1ページあたり</span>
                   <select
                     value={jobLimit}
                     onChange={(e) =>
                       updateJobLimit(Number(e.target.value) as 20 | 50 | 100)
                     }
-                    className="rounded border border-gray-300 bg-white py-0.5 px-1.5 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="rounded border border-gray-300 bg-white py-0.5 px-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   >
                     <option value={20}>20件</option>
                     <option value={50}>50件</option>
@@ -2441,7 +2441,7 @@ export default function ImportPage() {
                   <button
                     onClick={() => setJobPage((p) => Math.max(1, p - 1))}
                     disabled={!canPrev}
-                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
                     前へ
@@ -2456,7 +2456,7 @@ export default function ImportPage() {
                       )
                     }
                     disabled={!canNext}
-                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     次へ
                     <ChevronRight className="h-3.5 w-3.5" />

@@ -78,3 +78,26 @@ describe("import/page.tsx dark: RoStat 集計カード tone カバレッジ固�
     expect(src).toContain('gray: "text-gray-600 dark:text-gray-300"');
   });
 });
+
+// @codex #231 round2: 取込履歴カード(dark:bg-gray-900)内のページネーション一式と、
+// 取込完了バナー(dark:bg-green-500/10)内の色付き集計文字が暗面で未dark→低コントラストだった。
+describe("import/page.tsx dark: ページネーション/取込完了集計の暗面可読性（@codex round2）", () => {
+  it("ページネーション件数文(text-gray-600)に dark:text-gray-300", () => {
+    expect(src).toContain("justify-between gap-2 text-xs text-gray-600 dark:text-gray-300");
+  });
+  it("「1ページあたり」ラベル(text-gray-500)に dark:text-gray-400", () => {
+    expect(src).toContain('text-gray-500 dark:text-gray-400">1ページあたり');
+  });
+  it("limit select に dark の border/bg/text", () => {
+    expect(src).toContain("px-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100");
+  });
+  it("前へ/次へボタンに dark の border/bg/text/hover", () => {
+    expect(src).toContain("text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800");
+  });
+  it("取込完了バナーの集計ラベルに dark:text-*-300（成功/うち更新/要レビュー/エラー）", () => {
+    expect(src).toContain('text-green-600 dark:text-green-300">成功:');
+    expect(src).toContain('text-blue-600 dark:text-blue-300">うち更新:');
+    expect(src).toContain('text-amber-600 dark:text-amber-300">要レビュー:');
+    expect(src).toContain('text-red-600 dark:text-red-300">エラー:');
+  });
+});
