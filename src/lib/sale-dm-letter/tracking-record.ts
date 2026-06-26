@@ -5,8 +5,8 @@ type TrackingTxLike = {
   dmRecipientDraft: {
     findUnique: (args: {
       where: { trackingToken: string };
-      select: { id: true; lpFirstAccessAt: true };
-    }) => Promise<{ id: string; lpFirstAccessAt: Date | null } | null>;
+      select: { id: true; lpFirstAccessAt: true; status: true };
+    }) => Promise<{ id: string; lpFirstAccessAt: Date | null; status: string } | null>;
     update: (args: {
       where: { id: string };
       data: Prisma.DmRecipientDraftUpdateInput;
@@ -17,6 +17,7 @@ type TrackingTxLike = {
 /**
  * 追跡トークンのヒットを記録する。
  *  - 該当 draft が無ければ matched=false(更新しない)。
+ *  - draft が未送付(status != sent)なら matched=false(送付前ヒットは計上しない)。
  *  - 初回(lpFirstAccessAt == null)のみ lpFirstAccessAt = now をセット。
  *  - lpAccessCount は常に increment(+1)。
  *
@@ -32,9 +33,12 @@ export async function recordTrackingHit(
 ): Promise<{ matched: boolean }> {
   const draft = await tx.dmRecipientDraft.findUnique({
     where: { trackingToken: token },
-    select: { id: true, lpFirstAccessAt: true },
+    select: { id: true, lpFirstAccessAt: true, status: true },
   });
   if (!draft) return { matched: false };
+  // 送付確定(sent)前のヒット(印刷プレビューからの内部スキャン/クリック等)は
+  // A/B 反響を汚すため計上しない。送付済みになって初めて追跡を有効化する。
+  if (draft.status !== "sent") return { matched: false };
 
   await tx.dmRecipientDraft.update({
     where: { id: draft.id },

@@ -38,15 +38,16 @@ vi.mock("@/lib/sale-dm-letter/route-guard", () => ({ requireSaleDmAccess: vi.fn(
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const draftUpdate = vi.fn();
+  const draftUpdateMany = vi.fn();
   const dmLogCreate = vi.fn();
   const draftFindUnique = vi.fn();
   return {
     default: {
-      dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate },
+      dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, updateMany: draftUpdateMany },
       propertyDmLog: { create: dmLogCreate },
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
         fn({
-          dmRecipientDraft: { update: draftUpdate },
+          dmRecipientDraft: { update: draftUpdate, updateMany: draftUpdateMany },
           propertyDmLog: { create: dmLogCreate },
         }),
       ),
@@ -60,7 +61,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { POST } from "../../app/api/properties/sale-dm/drafts/[id]/mark-sent/route";
 
 const pm = prismaMock as never as {
-  dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+  dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   propertyDmLog: { create: ReturnType<typeof vi.fn> };
 };
 const req = () => new Request("http://x", { method: "POST", body: "{}" });
@@ -71,6 +72,7 @@ beforeEach(() => {
   (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" } });
   pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" } });
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
+  pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
   pm.propertyDmLog.create.mockResolvedValue({ id: "log1" });
 });
 
@@ -79,7 +81,9 @@ describe("POST mark-sent", () => {
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
-    const draftArg = pm.dmRecipientDraft.update.mock.calls[0][0];
+    // 状態遷移は condition 付き updateMany(where status=confirmed)でアトミックに行う。
+    const draftArg = pm.dmRecipientDraft.updateMany.mock.calls[0][0];
+    expect(draftArg.where).toEqual({ id: "r1", status: "confirmed" });
     expect(draftArg.data.status).toBe("sent");
     expect(draftArg.data.sentAt).toBeInstanceOf(Date);
     const logArg = pm.propertyDmLog.create.mock.calls[0][0];
@@ -87,6 +91,16 @@ describe("POST mark-sent", () => {
     expect(logArg.data.sentBy).toBe("u1");
     expect(logArg.data.method).toBe("sale_dm");
     expect(writeAuditLog).toHaveBeenCalled();
+  });
+
+  it("並行POSTで遷移に敗北(updateMany count=0)なら再ログ/再監査しない・200 alreadySent(冪等)", async () => {
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.alreadySent).toBe(true);
+    expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("既に sent の draft は冪等(再 create しない)で 200", async () => {

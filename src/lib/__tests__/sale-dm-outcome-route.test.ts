@@ -146,6 +146,32 @@ describe("PATCH outcome", () => {
     expect(pm.property.update).not.toHaveBeenCalled();
   });
 
+  it("宛先不明から配達済み等へ訂正すると物件の dmUndeliverableAt を null クリア(dmStatus は据え置き)・監査", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "returned_undeliverable",
+      lpFirstAccessAt: null, phoneInquiryAt: null, status: "sent", campaign: { createdBy: "u1" },
+    });
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(200);
+    const propArg = pm.property.update.mock.calls[0][0];
+    expect(propArg.where.id).toBe("p1");
+    expect(propArg.data.dmUndeliverableAt).toBeNull();
+    // dmStatus は人の判断で戻す(clear-undeliverable と同じ方針)ため自動では触らない。
+    expect(propArg.data.dmStatus).toBeUndefined();
+    const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(audit.detail.undeliverableCleared).toBe(true);
+  });
+
+  it("宛先不明のまま(unchanged)や他状態間の訂正では物件を触らない", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "delivered",
+      lpFirstAccessAt: null, phoneInquiryAt: null, status: "sent", campaign: { createdBy: "u1" },
+    });
+    const res = await PATCH(req({ deliveryStatus: "unknown" }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
   it("不正な deliveryStatus は 422", async () => {
     const res = await PATCH(req({ deliveryStatus: "bogus" }) as never, ctx());
     expect(res.status).toBe(422);

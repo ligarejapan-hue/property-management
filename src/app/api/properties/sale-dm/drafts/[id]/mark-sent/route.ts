@@ -34,11 +34,15 @@ export async function POST(
     }
 
     const now = new Date();
-    await prisma.$transaction(async (tx) => {
-      await tx.dmRecipientDraft.update({
-        where: { id },
+    // 状態遷移を condition 付き updateMany(where status=confirmed)でアトミックに行い、
+    // 勝った(count===1)リクエストだけが PropertyDmLog を作る。並行 POST が両方とも
+    // pre-check(confirmed 読取)を通過しても、二重送付・送付履歴の二重作成を防ぐ。
+    const won = await prisma.$transaction(async (tx) => {
+      const transitioned = await tx.dmRecipientDraft.updateMany({
+        where: { id, status: "confirmed" },
         data: { status: "sent", sentAt: now },
       });
+      if (transitioned.count === 0) return false;
       // PropertyDmLog.sentAt は @db.Date(日付のみ)。method で売却DM由来と分かるようにする。
       await tx.propertyDmLog.create({
         data: {
@@ -48,7 +52,17 @@ export async function POST(
           sentBy: session.id,
         },
       });
+      return true;
     });
+
+    // 並行リクエストに遷移を奪われた(既に他リクエストが confirmed→sent を確定し
+    // ログも作成済み)場合は、再ログ/再監査せず冪等応答を返す。
+    if (!won) {
+      return NextResponse.json(
+        { id, status: "sent", alreadySent: true },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
 
     await writeAuditLog({
       userId: session.id,

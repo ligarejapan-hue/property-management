@@ -75,6 +75,13 @@ export async function PATCH(
     const becameUndeliverable =
       input.deliveryStatus === "returned_undeliverable" &&
       draft.deliveryStatus !== "returned_undeliverable";
+    // 宛先不明から他状態へ訂正したら、自動連動で立てた物件の宛先不明フラグ
+    // (dmUndeliverableAt)を解除する(物件一覧バッジ/フィルタは dmUndeliverableAt 基準)。
+    // dmStatus は人の判断で戻す(手動 clear-undeliverable と同方針)ため自動では触らない。
+    const clearedUndeliverable =
+      input.deliveryStatus !== undefined &&
+      input.deliveryStatus !== "returned_undeliverable" &&
+      draft.deliveryStatus === "returned_undeliverable";
 
     const draftData: Record<string, unknown> = {
       phoneInquiryAt: nextPhoneInquiryAt,
@@ -101,6 +108,11 @@ export async function PATCH(
           where: { id: draft.propertyId },
           data: { dmStatus: "no_send", dmUndeliverableAt: now },
         });
+      } else if (clearedUndeliverable) {
+        await tx.property.update({
+          where: { id: draft.propertyId },
+          data: { dmUndeliverableAt: null },
+        });
       }
     });
 
@@ -115,12 +127,13 @@ export async function PATCH(
         deliveryStatus: nextDeliveryStatus,
         outcome: nextOutcome,
         undeliverableLinked: becameUndeliverable,
+        undeliverableCleared: clearedUndeliverable,
         updatedAt: now.toISOString(),
       },
     });
 
     return NextResponse.json(
-      { id, deliveryStatus: nextDeliveryStatus, outcome: nextOutcome, undeliverableLinked: becameUndeliverable },
+      { id, deliveryStatus: nextDeliveryStatus, outcome: nextOutcome, undeliverableLinked: becameUndeliverable, undeliverableCleared: clearedUndeliverable },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

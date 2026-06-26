@@ -13,7 +13,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     dmRecipientDraft: {
-      findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null })),
+      findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null, status: "sent" })),
       update: vi.fn(async () => ({ id: "r1" })),
     },
   },
@@ -22,7 +22,7 @@ vi.mock("@/lib/prisma", () => ({
 import { describe, it, expect } from "vitest";
 import { recordTrackingHit } from "../sale-dm-letter/tracking-record";
 
-function makeTx(existing: { id: string; lpFirstAccessAt: Date | null } | null) {
+function makeTx(existing: { id: string; lpFirstAccessAt: Date | null; status?: string } | null) {
   return {
     dmRecipientDraft: {
       findUnique: vi.fn(async () => existing),
@@ -42,8 +42,15 @@ describe("recordTrackingHit", () => {
     expect(tx.dmRecipientDraft.update).not.toHaveBeenCalled();
   });
 
+  it("送付前(confirmed)のヒットは matched=false・更新しない(送付前プレビュー由来でA/Bを汚さない)", async () => {
+    const tx = makeTx({ id: "r1", lpFirstAccessAt: null, status: "confirmed" });
+    const r = await recordTrackingHit(tx as never, "tok");
+    expect(r.matched).toBe(false);
+    expect(tx.dmRecipientDraft.update).not.toHaveBeenCalled();
+  });
+
   it("初回アクセスは lpFirstAccessAt をセット + count++", async () => {
-    const tx = makeTx({ id: "r1", lpFirstAccessAt: null });
+    const tx = makeTx({ id: "r1", lpFirstAccessAt: null, status: "sent" });
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.matched).toBe(true);
     const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
@@ -54,7 +61,7 @@ describe("recordTrackingHit", () => {
   });
 
   it("2回目以降は lpFirstAccessAt を上書きしない(冪等)・count は ++", async () => {
-    const tx = makeTx({ id: "r1", lpFirstAccessAt: new Date("2020-01-01") });
+    const tx = makeTx({ id: "r1", lpFirstAccessAt: new Date("2020-01-01"), status: "sent" });
     await recordTrackingHit(tx as never, "tok");
     const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
       data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number } };
@@ -100,6 +107,16 @@ d2("GET /t/[token]", () => {
     e2(res.status).toBe(302);
     e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
     // 未マッチ(bot/列挙)では audit_logs に書かない=書込増幅の防止。
+    e2(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  i2("送付前(confirmed)トークンは 302 だが記録・監査しない", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> } };
+    pm.dmRecipientDraft.findUnique.mockResolvedValueOnce({ id: "r1", lpFirstAccessAt: null, status: "confirmed" });
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(302);
+    e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
     e2(writeAuditLog).not.toHaveBeenCalled();
   });
 });

@@ -786,7 +786,7 @@ function PropertiesPageInner() {
             type="button"
             onClick={handleCreateSaleDm}
             disabled={creatingDm}
-            className="inline-flex items-center gap-2 rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             title="現在の検索条件で送付可の物件から売却DM下書きを作成"
           >
             {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
