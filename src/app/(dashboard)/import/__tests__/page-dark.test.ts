@@ -66,3 +66,15 @@ describe("import/page.tsx dark: 取込履歴テーブル(Job History) カバレ�
     expect(src).toContain("text-gray-300 dark:text-gray-600");
   });
 });
+
+// RoStat 集計カード（受付帳/所有者 突合プレビュー summary）の tone 値は dark:bg-gray-900 面に乗るため、
+// tone 文字色に dark: が無いと暗背景で集計数値が低コントラスト（@codex #231 P2 指摘）。
+// 汎用 token 断言は panel 側に同 token があると素通りするため、toneClass の結合文字列で直接ピン留めする。
+describe("import/page.tsx dark: RoStat 集計カード tone カバレッジ固定", () => {
+  it("toneClass の各 tone に dark:text-* が付く（暗面で集計数値が読める）", () => {
+    expect(src).toContain('blue: "text-blue-700 dark:text-blue-300"');
+    expect(src).toContain('green: "text-green-700 dark:text-green-300"');
+    expect(src).toContain('amber: "text-amber-700 dark:text-amber-300"');
+    expect(src).toContain('gray: "text-gray-600 dark:text-gray-300"');
+  });
+});

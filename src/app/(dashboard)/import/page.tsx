@@ -354,10 +354,10 @@ function RoStat({
   tone?: "blue" | "green" | "amber" | "gray";
 }) {
   const toneClass = {
-    blue: "text-blue-700",
-    green: "text-green-700",
-    amber: "text-amber-700",
-    gray: "text-gray-600",
+    blue: "text-blue-700 dark:text-blue-300",
+    green: "text-green-700 dark:text-green-300",
+    amber: "text-amber-700 dark:text-amber-300",
+    gray: "text-gray-600 dark:text-gray-300",
   }[tone];
   return (
     <div className="rounded bg-white dark:bg-gray-900 px-3 py-2 shadow-sm">
