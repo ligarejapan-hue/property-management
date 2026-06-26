@@ -40,17 +40,17 @@ const strengthConfig: Record<
   strong: {
     label: "強",
     badge: "bg-red-100 text-red-800",
-    border: "border-l-red-500",
+    border: "border-l-red-500 dark:border-l-red-400",
   },
   medium: {
     label: "中",
     badge: "bg-amber-100 text-amber-800",
-    border: "border-l-amber-500",
+    border: "border-l-amber-500 dark:border-l-amber-400",
   },
   weak: {
     label: "弱",
     badge: "bg-blue-100 text-blue-800",
-    border: "border-l-blue-500",
+    border: "border-l-blue-500 dark:border-l-blue-400",
   },
 };
 

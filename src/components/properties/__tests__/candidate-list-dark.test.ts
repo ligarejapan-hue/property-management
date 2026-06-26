@@ -43,6 +43,19 @@ describe("candidate-list.tsx dark: 配色 (物件詳細タブ群)", () => {
     expect(src).toContain("dark:border-gray-800");
   });
 
+  // --- 強度ボーダー(左色)のダーク保全 ---
+  // dark:border-gray-800 は全辺のborder-colorを塗るため、dark:border-l-* が無いと
+  // ダークで左の強度色(赤/橙/青)が上書きされ消える（@codex P3 / add-only違反）。回帰防止。
+  it("強(border-l-red-500) の左色に dark:border-l-red-400 がある", () => {
+    expect(src).toContain("dark:border-l-red-400");
+  });
+  it("中(border-l-amber-500) の左色に dark:border-l-amber-400 がある", () => {
+    expect(src).toContain("dark:border-l-amber-400");
+  });
+  it("弱(border-l-blue-500) の左色に dark:border-l-blue-400 がある", () => {
+    expect(src).toContain("dark:border-l-blue-400");
+  });
+
   // --- リンク文字 accent 可読化 ---
   it("text-indigo-600 リンクに dark:text-indigo-400 がある", () => {
     expect(src).toContain("dark:text-indigo-400");
@@ -70,6 +83,15 @@ describe("candidate-list.tsx dark: 配色 (物件詳細タブ群)", () => {
   });
   it("ライトモード border-gray-100 は残っている", () => {
     expect(src).toContain("border-gray-100");
+  });
+  it("ライトモード 強度色 border-l-red-500 は残っている", () => {
+    expect(src).toContain("border-l-red-500");
+  });
+  it("ライトモード 強度色 border-l-amber-500 は残っている", () => {
+    expect(src).toContain("border-l-amber-500");
+  });
+  it("ライトモード 強度色 border-l-blue-500 は残っている", () => {
+    expect(src).toContain("border-l-blue-500");
   });
   it("ライトモード text-gray-600 は残っている", () => {
     expect(src).toContain("text-gray-600");
