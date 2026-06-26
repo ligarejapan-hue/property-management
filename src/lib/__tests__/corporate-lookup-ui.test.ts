@@ -60,9 +60,27 @@ describe("corporate-lookup-panel.tsx", () => {
     expect(panelSrc).toMatch(/法人番号API未設定/);
   });
 
-  it("13桁正規化できない時はボタンを disabled にする", () => {
-    expect(panelSrc).toMatch(/normalizeCorporateNumber\(rawCorporateNumber\)/);
-    expect(panelSrc).toMatch(/canSearch\s*=/);
+  it("12桁/13桁の分類で検索可否を決める（invalid は disabled）", () => {
+    // classifyCorporateIdentifier ベースの活性化（12桁=会社法人等番号も検索可）。
+    expect(panelSrc).toMatch(/classifyCorporateIdentifier\(rawCorporateNumber\)/);
+    expect(panelSrc).toMatch(/canSearch\s*=[\s\S]{0,80}kind\s*!==\s*"invalid"/);
+  });
+
+  it("12桁入力時に算出13桁の事前ヒント / invalid 入力時に理由を表示する", () => {
+    expect(panelSrc).toMatch(/calculateCorporateNumberFromCompanyNumber\(rawCorporateNumber\)/);
+    expect(panelSrc).toMatch(/derived13/);
+    expect(panelSrc).toMatch(/invalidHint/);
+  });
+
+  it("preview に入力種別 + 算出/検証済み13桁を表示する", () => {
+    expect(panelSrc).toMatch(/meta\?\.inputKind/);
+    expect(panelSrc).toMatch(/会社法人等番号/);
+    expect(panelSrc).toMatch(/resolvedCorporateNumber13/);
+  });
+
+  it("conflict(明らかな不一致)の事前警告バナーを表示する", () => {
+    expect(panelSrc).toMatch(/meta\?\.conflict\s*===\s*"conflict"/);
+    expect(panelSrc).toMatch(/大きく異なります/);
   });
 
   it("useEffect 等で自動 lookup していない（mount 時に lookup が走らない）", () => {
@@ -79,9 +97,9 @@ describe("corporate-lookup-panel.tsx", () => {
   it("検索結果に searchedFor を紐づけ、現在入力と一致しないと preview / error を出さない", () => {
     // 検索開始時に searchedFor を確定する
     expect(panelSrc).toMatch(/setSearchedFor\(/);
-    // showResult / showError ガードがあり、normalized と searchedFor の一致を要求する
-    expect(panelSrc).toMatch(/const\s+showResult\s*=[\s\S]{0,200}searchedFor\s*===\s*normalized/);
-    expect(panelSrc).toMatch(/const\s+showError\s*=[\s\S]{0,200}searchedFor\s*===\s*normalized/);
+    // showResult / showError ガードがあり、identifierKey と searchedFor の一致を要求する
+    expect(panelSrc).toMatch(/const\s+showResult\s*=[\s\S]{0,200}searchedFor\s*===\s*identifierKey/);
+    expect(panelSrc).toMatch(/const\s+showError\s*=[\s\S]{0,200}searchedFor\s*===\s*identifierKey/);
     // 描画側で showResult / showError を使っている（生 result / error を直接条件にしない）
     const previewRender = panelSrc.match(/\{showResult\s*&&\s*result[\s\S]*?data-testid="corporate-lookup-preview"/);
     expect(previewRender).not.toBeNull();
@@ -89,10 +107,10 @@ describe("corporate-lookup-panel.tsx", () => {
     expect(errorRender).not.toBeNull();
   });
 
-  it("rawCorporateNumber が変わる = normalized が変わると古い preview が見えなくなる（ガード経由）", () => {
-    // 「searchedFor !== normalized なら showResult が false」になる構造
+  it("rawCorporateNumber が変わる = identifierKey が変わると古い preview が見えなくなる（ガード経由）", () => {
+    // 「searchedFor !== identifierKey なら showResult が false」になる構造
     expect(panelSrc).toMatch(
-      /showResult\s*=\s*result\s*!==\s*null\s*&&\s*searchedFor\s*!==\s*null\s*&&\s*searchedFor\s*===\s*normalized/,
+      /showResult\s*=\s*result\s*!==\s*null\s*&&\s*searchedFor\s*!==\s*null\s*&&\s*searchedFor\s*===\s*identifierKey/,
     );
   });
 
@@ -110,8 +128,18 @@ describe("corporate-lookup-panel.tsx", () => {
   it("Phase C: apply は再 lookup 結果を信用するため expectedRecord を送る", () => {
     expect(panelSrc).toMatch(/expectedRecord/);
     // postCode / updateDate を比較スナップショットとして送る
-    expect(panelSrc).toMatch(/postCode:\s*result\.record\.postCode/);
-    expect(panelSrc).toMatch(/updateDate:\s*result\.record\.updateDate/);
+    // (conflict ack 再送のため result.record を const record に取り出して使う)
+    expect(panelSrc).toMatch(/postCode:\s*record\.postCode/);
+    expect(panelSrc).toMatch(/updateDate:\s*record\.updateDate/);
+  });
+
+  it("conflict(明らかな不一致)は確認のうえ acknowledgeConflict=true で再送する", () => {
+    expect(panelSrc).toMatch(/CONFLICT_NOT_ACKNOWLEDGED/);
+    expect(panelSrc).toMatch(/acknowledgeConflict/);
+    // generic CONFLICT(楽観ロック)より先に判定する
+    expect(panelSrc).toMatch(
+      /CONFLICT_NOT_ACKNOWLEDGED[\s\S]{0,400}window\.confirm/,
+    );
   });
 });
 
@@ -192,5 +220,58 @@ describe("api-client.ts — lookupOwnerCorporateNumber", () => {
     );
     expect(apiClientSrc).toMatch(/export async function lookupOwnerCorporateNumber/);
     expect(apiClientSrc).toMatch(/corporate-lookup/);
+  });
+});
+
+describe("Phase 3b: 会社法人等番号(12桁) UI 配線", () => {
+  it("Codex P1: /api/properties/[id] の owner select に companyRegistryNumber が含まれる（保存時消失防止）", () => {
+    const routeSrc = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/api/properties/[id]/route.ts"),
+      "utf8",
+    );
+    expect(routeSrc).toMatch(/companyRegistryNumber:\s*true/);
+  });
+
+  it("properties 編集フォームに会社法人等番号(12桁)入力欄がある", () => {
+    expect(pageSrc).toMatch(/会社法人等番号/);
+    expect(pageSrc).toMatch(/form\.companyRegistryNumber/);
+    expect(pageSrc).toMatch(/companyRegistryNumber:\s*e\.target\.value/);
+  });
+
+  it("Codex P2: 法人番号欄の赤エラーは normalizeCorporateNumber(保存ガード)と整合し、有効12桁では出さない", () => {
+    expect(pageSrc).toMatch(
+      /classifyCorporateIdentifier\(form\.corporateNumber\)\s*!==\s*\n?\s*"company_corporate_number_12"[\s\S]{0,120}normalizeCorporateNumber\(form\.corporateNumber\)\s*===\s*null/,
+    );
+  });
+
+  it("panel: 12桁(inputKind)検索の apply に companyRegistryNumber を同梱する", () => {
+    expect(panelSrc).toMatch(/company_corporate_number_12/);
+    expect(panelSrc).toMatch(/companyRegistryNumber:\s*companyRegistry12/);
+  });
+});
+
+describe("会社法人等番号(12桁) 候補検出バナー", () => {
+  it("検出バナー(suspect/candidate)が定義・マウントされている", () => {
+    expect(pageSrc).toMatch(/detectCompanyRegistryNumberInOwnerLike/);
+    expect(pageSrc).toMatch(/function CompanyRegistrySuspectBanner/);
+    expect(pageSrc).toMatch(/function CompanyRegistryNumberCandidateBanner/);
+    expect(pageSrc).toMatch(/<CompanyRegistrySuspectBanner/);
+    expect(pageSrc).toMatch(/<CompanyRegistryNumberCandidateBanner/);
+  });
+
+  it("候補バナーは転記(会社法人等番号欄)と検索(法人番号欄)の2導線を持つ", () => {
+    // 転記 → form.companyRegistryNumber、検索 → form.corporateNumber(lookup欄)
+    expect(pageSrc).toMatch(/onTransferRegistry=\{[\s\S]{0,120}companyRegistryNumber:\s*candidate/);
+    expect(pageSrc).toMatch(/onTransferSearch=\{[\s\S]{0,120}corporateNumber:\s*candidate/);
+    expect(pageSrc).toMatch(/会社法人等番号欄に転記/);
+    expect(pageSrc).toMatch(/この番号で検索/);
+  });
+
+  it("既存値あり/入力欄に値ありでは候補バナーを出さない(自動上書き防止)", () => {
+    // currentRegistryInput は候補バナー固有なので pageSrc 直で十分一意。
+    expect(pageSrc).toMatch(/if \(owner\.companyRegistryNumber\) return null;/);
+    expect(pageSrc).toMatch(
+      /if \(currentRegistryInput\.trim\(\) !== ""\) return null;/,
+    );
   });
 });

@@ -57,14 +57,14 @@ export default function NewPropertyModal({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
+      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[90vh] overflow-y-auto rounded-xl bg-white dark:bg-gray-900 shadow-xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-          <h2 className="text-base font-semibold text-gray-800">新規物件登録</h2>
+        <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
+          <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">新規物件登録</h2>
           <button
             onClick={onClose}
             disabled={submitting}
-            className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+            className="rounded-md p-1 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50"
           >
             <X className="h-5 w-5" />
           </button>
@@ -81,14 +81,14 @@ export default function NewPropertyModal({ onClose }: Props) {
 
           {/* 物件種別 */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
               物件種別 <span className="text-red-500">*</span>
             </label>
             <select
               value={propertyType}
               onChange={(e) => setPropertyType(e.target.value)}
               disabled={submitting}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             >
               <option value="">選択してください</option>
               {PROPERTY_TYPE_OPTIONS.filter(
@@ -103,8 +103,8 @@ export default function NewPropertyModal({ onClose }: Props) {
 
           {/* 郵便番号 */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              郵便番号 <span className="text-xs text-gray-400">任意</span>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+              郵便番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
             </label>
             <input
               type="text"
@@ -113,13 +113,13 @@ export default function NewPropertyModal({ onClose }: Props) {
               onChange={(e) => setPostalCode(e.target.value)}
               disabled={submitting}
               placeholder="例: 1000005"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
           </div>
 
           {/* 住所 */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
               住所 <span className="text-red-500">*</span>
             </label>
             <input
@@ -132,7 +132,7 @@ export default function NewPropertyModal({ onClose }: Props) {
               }}
               disabled={submitting}
               placeholder="例: 東京都千代田区丸の内1-1-1"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
             {/* 郵便番号⇄住所 補完。onZipChange/onAddressChange は state 更新のみ＝
                 addressEdited は立てない（候補 apply で再検索しない）。 */}
@@ -151,8 +151,8 @@ export default function NewPropertyModal({ onClose }: Props) {
 
           {/* 地番 */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              地番 <span className="text-xs text-gray-400">任意</span>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+              地番 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
             </label>
             <input
               type="text"
@@ -160,20 +160,20 @@ export default function NewPropertyModal({ onClose }: Props) {
               onChange={(e) => setLotNumber(e.target.value)}
               disabled={submitting}
               placeholder="例: 1番1"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
           </div>
 
           {/* 導入ルート */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              導入ルート <span className="text-xs text-gray-400">任意</span>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+              導入ルート <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
             </label>
             <select
               value={introductionRoute}
               onChange={(e) => setIntroductionRoute(e.target.value)}
               disabled={submitting}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             >
               <option value="">未設定</option>
               {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
@@ -186,8 +186,8 @@ export default function NewPropertyModal({ onClose }: Props) {
 
           {/* メモ */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              メモ <span className="text-xs text-gray-400">任意</span>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+              メモ <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
             </label>
             <textarea
               value={note}
@@ -195,17 +195,17 @@ export default function NewPropertyModal({ onClose }: Props) {
               disabled={submitting}
               rows={3}
               placeholder="登録メモがあれば入力してください"
-              className="w-full resize-y rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+              className="w-full resize-y rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
           </div>
 
           {/* Buttons */}
-          <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
+          <div className="flex items-center justify-end gap-3 border-t border-gray-100 dark:border-gray-800 pt-4">
             <button
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
             >
               キャンセル
             </button>

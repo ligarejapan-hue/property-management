@@ -2035,7 +2035,22 @@ export async function updateOwner(
 
 // 法人番号 lookup preview（Phase B）。Owner 行は更新しない。
 // mock モードでは MockCorporateLookupProvider 相当のレスポンスを返す。
+/** 入力種別。12桁=会社法人等番号 / 13桁=法人番号 / invalid。 */
+export type CorporateIdentifierKindDTO =
+  | "company_corporate_number_12"
+  | "corporate_number_13"
+  | "invalid";
+
+/** 国税庁結果 vs 既存 Owner の不一致分類(生値ではなくフラグ)。 */
+export type CorporateLookupConflictDTO = "match" | "conflict" | "unknown";
+
 export interface CorporateLookupApiResponse {
+  /** 入力種別(12桁/13桁)。route が server 側で解決。古い server では undefined。 */
+  inputKind?: CorporateIdentifierKindDTO;
+  /** 12桁入力時に算出した、または13桁入力をそのまま採用した解決済み13桁法人番号。 */
+  resolvedCorporateNumber13?: string;
+  /** 国税庁結果と既存 Owner 名/住所の不一致分類。 */
+  conflict?: CorporateLookupConflictDTO;
   lookup: {
     found: boolean;
     isClosed: boolean;
@@ -2077,7 +2092,7 @@ export async function lookupOwnerCorporateNumber(
         },
       };
     }
-    if (corporateNumber === "8888888888888") {
+    if (corporateNumber === "9888888888888") {
       return {
         lookup: {
           found: true,
@@ -2152,6 +2167,10 @@ export interface CorporateApplyRequest {
     updateDate: string | null;
   };
   allowClosed?: boolean;
+  /** conflict("明らかな不一致")時に反映を許可する確認フラグ(allowClosed と同型)。 */
+  acknowledgeConflict?: boolean;
+  /** 12桁で lookup した場合の元の会社法人等番号(12桁)。apply.corporateNumber=true 時に併せて保存。 */
+  companyRegistryNumber?: string;
 }
 
 export interface CorporateApplyResponse {
@@ -2565,6 +2584,61 @@ export async function fetchCorporateCandidates(
   if (options?.cursor) params.set("cursor", options.cursor);
   return apiFetch<CorporateCandidatesResponse>(
     `/api/admin/owners/correction/corporate-number-candidates?${params.toString()}`,
+  );
+}
+
+// ---------- 法人番号 一括反映（missing 候補 → 検出番号 lookup → 番号のみ反映） ----------
+// server route: POST /api/admin/owners/correction/corporate-number-bulk-apply
+// client は {ownerId, version} のみ送る。検出 / 国税庁 lookup / 廃止判定は server が再実行する。
+// version は楽観ロック用（stale でも server 側で version_conflict として安全に skip）。
+export type BulkCorporateApplyStatus =
+  | "applied"
+  | "already_set"
+  | "not_found"
+  | "version_conflict"
+  | "no_single_detection"
+  | "lookup_no_result"
+  | "closed"
+  | "lookup_error"
+  | "not_processed";
+
+export interface BulkCorporateApplyItem {
+  ownerId: string;
+  version: number;
+}
+
+export interface BulkCorporateApplyResultRow {
+  ownerId: string;
+  status: BulkCorporateApplyStatus;
+}
+
+export interface BulkCorporateApplyResponse {
+  results: BulkCorporateApplyResultRow[];
+  requested: number;
+  applied: number;
+}
+
+export async function bulkApplyCorporateNumbers(
+  owners: BulkCorporateApplyItem[],
+): Promise<BulkCorporateApplyResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      results: owners.map((o) => ({
+        ownerId: o.ownerId,
+        status: "applied" as const,
+      })),
+      requested: owners.length,
+      applied: owners.length,
+    };
+  }
+  return apiFetch<BulkCorporateApplyResponse>(
+    "/api/admin/owners/correction/corporate-number-bulk-apply",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owners }),
+    },
   );
 }
 

@@ -63,7 +63,7 @@ export default function BuildingsPage() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">マンション棟一覧</h2>
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">マンション棟一覧</h2>
         <button
           onClick={() => setShowCreate(true)}
           className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
@@ -75,7 +75,7 @@ export default function BuildingsPage() {
 
       {/* Search */}
       <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
         <input
           type="text"
           value={keywordDraft}
@@ -85,18 +85,18 @@ export default function BuildingsPage() {
             commitKeyword(value);
           }}
           placeholder="マンション名・住所で検索..."
-          className="w-full rounded-md border border-gray-300 py-2.5 pl-9 pr-3 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          className="w-full rounded-md border border-gray-300 py-2.5 pl-9 pr-3 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder:text-gray-500"
         />
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
         </div>
       ) : buildings.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white py-16 text-center">
-          <Building className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-          <p className="text-sm text-gray-500">マンション棟がありません</p>
+        <div className="rounded-lg border border-gray-200 bg-white py-16 text-center dark:border-gray-800 dark:bg-gray-900">
+          <Building className="mx-auto mb-3 h-10 w-10 text-gray-300 dark:text-gray-600" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">マンション棟がありません</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -104,21 +104,21 @@ export default function BuildingsPage() {
             <Link
               key={b.id}
               href={`/buildings/${b.id}`}
-              className="flex items-center gap-4 rounded-lg border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 transition-colors"
+              className="flex items-center gap-4 rounded-lg border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 transition-colors dark:border-gray-800 dark:bg-gray-900 dark:hover:bg-gray-800"
             >
               <Building className="h-6 w-6 shrink-0 text-blue-500" />
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-800">{b.name}</p>
-                <p className="text-sm text-gray-500 truncate">{b.address}</p>
+                <p className="font-medium text-gray-800 dark:text-gray-100">{b.name}</p>
+                <p className="text-sm text-gray-500 truncate dark:text-gray-400">{b.address}</p>
               </div>
-              <div className="hidden sm:flex items-center gap-6 text-xs text-gray-500">
+              <div className="hidden sm:flex items-center gap-6 text-xs text-gray-500 dark:text-gray-400">
                 {b.totalFloors && <span>{b.totalFloors}階建</span>}
                 {b.builtYear && <span>{b.builtYear}年築</span>}
-                <span className="font-medium text-gray-700">
+                <span className="font-medium text-gray-700 dark:text-gray-200">
                   {b._count.properties}戸
                 </span>
               </div>
-              <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
+              <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
             </Link>
           ))}
         </div>
@@ -190,8 +190,8 @@ function CreateBuildingModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg">
-        <h3 className="mb-4 text-lg font-bold text-gray-800">新規マンション棟</h3>
+      <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
+        <h3 className="mb-4 text-lg font-bold text-gray-800 dark:text-gray-100">新規マンション棟</h3>
         {error && (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">
             {error}
@@ -199,7 +199,7 @@ function CreateBuildingModal({
         )}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               マンション名 <span className="text-red-500">*</span>
             </label>
             <input
@@ -207,12 +207,12 @@ function CreateBuildingModal({
               required
               value={form.name}
               onChange={(e) => setField("name", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
-              郵便番号 <span className="text-gray-400">任意</span>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              郵便番号 <span className="text-gray-400 dark:text-gray-500">任意</span>
             </label>
             <input
               type="text"
@@ -220,11 +220,11 @@ function CreateBuildingModal({
               value={form.postalCode}
               onChange={(e) => setField("postalCode", e.target.value)}
               placeholder="例: 1000005"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder:text-gray-500"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               住所 <span className="text-red-500">*</span>
             </label>
             <input
@@ -235,7 +235,7 @@ function CreateBuildingModal({
                 setAddressEdited(true);
                 setField("address", e.target.value);
               }}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
             />
             <div className="mt-1.5">
               <AddressLookupControls
@@ -251,42 +251,42 @@ function CreateBuildingModal({
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 階数
               </label>
               <input
                 type="number"
                 value={form.totalFloors}
                 onChange={(e) => setField("totalFloors", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 総戸数
               </label>
               <input
                 type="number"
                 value={form.totalUnits}
                 onChange={(e) => setField("totalUnits", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 築年
               </label>
               <input
                 type="number"
                 value={form.builtYear}
                 onChange={(e) => setField("builtYear", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 構造
               </label>
               <input
@@ -294,37 +294,37 @@ function CreateBuildingModal({
                 value={form.structureType}
                 onChange={(e) => setField("structureType", e.target.value)}
                 placeholder="RC造、SRC造 等"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder:text-gray-500"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
                 管理会社
               </label>
               <input
                 type="text"
                 value={form.managementCompany}
                 onChange={(e) => setField("managementCompany", e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
               />
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               備考
             </label>
             <textarea
               value={form.note}
               onChange={(e) => setField("note", e.target.value)}
               rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               キャンセル
             </button>

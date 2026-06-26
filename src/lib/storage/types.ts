@@ -59,6 +59,13 @@ export interface StorageAdapter {
    * - I/O / API エラー → 例外を throw
    */
   read(key: string): Promise<StorageReadResult | null>;
+
+  /**
+   * DB 保存 fileUrl から、この backend の URL 形式に基づく storage key を取り出す
+   * （この backend の管理対象でなければ null）。cleanup が削除対象 blob を特定するのに使う。
+   * 各 backend が自分の url↔key 対応を持つ（同期・純粋）。
+   */
+  keyFromUrl(fileUrl: string | null | undefined): string | null;
 }
 
 // ---------------------------------------------------------------

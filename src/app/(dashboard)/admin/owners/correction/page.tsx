@@ -6,12 +6,23 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   fetchOwnerCorrectionCandidates,
   fetchCorporateCandidates,
+  bulkApplyCorporateNumbers,
   type OwnerCorrectionCandidate,
   type OwnerCorrectionCandidatesResponse,
   type CorporateCandidateFilterType,
   type CorporateCandidateRowDTO,
   type CorporateCandidatesResponse,
 } from "@/lib/api-client";
+import {
+  MAX_CORPORATE_BULK,
+  isBulkEligible,
+  eligibleOwnerIds,
+  canSubmitBulk,
+  buildBulkPayload,
+  summarizeBulkResults,
+  BULK_STATUS_LABEL,
+  type BulkResultSummary,
+} from "@/lib/corporate-bulk-ui";
 import { AddressFillButton } from "@/components/owners/AddressFillButton";
 import { OwnerArchiveButton } from "@/components/owners/OwnerArchiveButton";
 import { OwnerMergePreviewButton } from "@/components/owners/OwnerMergePreviewButton";
@@ -98,7 +109,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const ACTION_BADGE: Record<string, string> = {
-  hold: "bg-gray-100 text-gray-500",
+  hold: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
   review: "bg-blue-100 text-blue-700",
   delete_candidate: "bg-red-100 text-red-700",
   merge_candidate: "bg-purple-100 text-purple-700",
@@ -141,7 +152,7 @@ function parseFilterTypeFromQuery(value: string | null): FilterType {
 export default function OwnerCorrectionPage() {
   return (
     <Suspense
-      fallback={<div className="p-6 text-sm text-gray-500">読み込み中...</div>}
+      fallback={<div className="p-6 text-sm text-gray-500 dark:text-gray-400">読み込み中...</div>}
     >
       <OwnerCorrectionPageInner />
     </Suspense>
@@ -281,7 +292,7 @@ function OwnerCorrectionPageInner() {
   return (
     <div className="p-6">
       <div className="mb-1">
-        <h1 className="text-xl font-bold text-gray-900">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
           所有者補正候補 (dry-run)
         </h1>
       </div>
@@ -290,20 +301,20 @@ function OwnerCorrectionPageInner() {
       </p>
 
       {/* Filter tabs */}
-      <div className="mb-4 flex gap-0 border-b border-gray-200">
+      <div className="mb-4 flex gap-0 border-b border-gray-200 dark:border-gray-800">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setFilterType(tab.key)}
             className={`-mb-px px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               filterType === tab.key
-                ? "border-indigo-600 text-indigo-700"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                ? "border-indigo-600 dark:border-indigo-400 text-indigo-700 dark:text-indigo-400"
+                : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700"
             }`}
           >
             {tab.label}
             {tab.count !== undefined && (
-              <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+              <span className="ml-1.5 rounded-full bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
                 {tab.count}
               </span>
             )}
@@ -312,7 +323,7 @@ function OwnerCorrectionPageInner() {
       </div>
 
       {loading && !SELF_FETCH_TABS.includes(filterType) && (
-        <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && !SELF_FETCH_TABS.includes(filterType) && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -364,7 +375,7 @@ function OwnerCorrectionPageInner() {
 
             return (
               <>
-                <p className="mb-3 text-sm text-gray-500">
+                <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
                   {visibleCandidates.length} 件の確認候補
                   {filterType === "duplicate" &&
                     duplicateSubFilter !== "all" &&
@@ -382,13 +393,13 @@ function OwnerCorrectionPageInner() {
                 )}
 
                 {visibleCandidates.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-gray-400">
+                  <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
                     該当する候補はありません
                   </p>
                 ) : (
-                  <div className="overflow-x-auto rounded-md border border-gray-200">
+                  <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
                     <table className="min-w-full text-sm">
-                      <thead className="bg-gray-50 text-xs text-gray-500">
+                      <thead className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
                         <tr>
                           <th className="px-3 py-2 text-left font-medium">氏名</th>
                           <th className="px-3 py-2 text-left font-medium">住所</th>
@@ -413,23 +424,23 @@ function OwnerCorrectionPageInner() {
                           <th className="px-3 py-2 text-left font-medium">操作</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-100">
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                         {visibleCandidates.map((c: OwnerCorrectionCandidate) => (
-                    <tr key={c.id} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium text-gray-900">
+                    <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
                         {c.name ?? (
-                          <span className="text-gray-400">***</span>
+                          <span className="text-gray-400 dark:text-gray-500">***</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.address ?? (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.zip ?? "—"}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.phone ?? "—"}
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -437,23 +448,23 @@ function OwnerCorrectionPageInner() {
                           className={
                             c.propertyOwnerCount === 0
                               ? "font-medium text-orange-600"
-                              : "text-gray-700"
+                              : "text-gray-700 dark:text-gray-200"
                           }
                         >
                           {c.propertyOwnerCount}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-center text-gray-700">
+                      <td className="px-3 py-2 text-center text-gray-700 dark:text-gray-200">
                         {c.changeLogCount}
                       </td>
-                      <td className="px-3 py-2 text-center text-gray-700">
+                      <td className="px-3 py-2 text-center text-gray-700 dark:text-gray-200">
                         {c.version}
                       </td>
-                      <td className="px-3 py-2 font-mono text-[11px] text-gray-500">
+                      <td className="px-3 py-2 font-mono text-[11px] text-gray-500 dark:text-gray-400">
                         {c.importFileName ? (
                           `${c.importFileName}:${c.importRowNumber}行`
                         ) : (
-                          <span className="text-gray-400">不明</span>
+                          <span className="text-gray-400 dark:text-gray-500">不明</span>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -462,7 +473,7 @@ function OwnerCorrectionPageInner() {
                             <span
                               key={t}
                               className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                TYPE_BADGE[t] ?? "bg-gray-100 text-gray-600"
+                                TYPE_BADGE[t] ?? "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
                               }`}
                             >
                               {TYPE_LABELS[t] ?? t}
@@ -473,7 +484,7 @@ function OwnerCorrectionPageInner() {
                           {c.addressIsWhitespaceOnly && (
                             <span
                               data-testid="whitespace-only-address-badge"
-                              className="rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700"
+                              className="rounded-full bg-orange-100 dark:bg-orange-500/20 px-1.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300"
                             >
                               空白のみ
                             </span>
@@ -485,7 +496,7 @@ function OwnerCorrectionPageInner() {
                           {c.blockReasons.map((r) => (
                             <span
                               key={r}
-                              className="rounded-full bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500"
+                              className="rounded-full bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-500 dark:text-gray-400"
                             >
                               {BLOCK_REASON_LABELS[r] ?? r}
                             </span>
@@ -496,14 +507,14 @@ function OwnerCorrectionPageInner() {
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                             ACTION_BADGE[c.recommendedAction] ??
-                            "bg-gray-100 text-gray-600"
+                            "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
                           }`}
                         >
                           {ACTION_LABELS[c.recommendedAction] ??
                             c.recommendedAction}
                         </span>
                       </td>
-                      <td className="px-3 py-2 font-mono text-[10px] text-gray-400">
+                      <td className="px-3 py-2 font-mono text-[10px] text-gray-400 dark:text-gray-500">
                         {c.id.slice(0, 8)}…
                       </td>
                       <td className="px-3 py-2">
@@ -542,7 +553,7 @@ function OwnerCorrectionPageInner() {
                 );
               })()}
 
-          <p className="mt-4 text-xs text-gray-400">
+          <p className="mt-4 text-xs text-gray-400 dark:text-gray-500">
             ※ 統合実行・再リンクの実行機能は Phase 2-B-β 以降で対応予定です。
             （重複候補の dryRun preview のみ Phase 2-B-α で利用可能）
           </p>
@@ -617,12 +628,12 @@ function DuplicateSubFilterBar({
           onClick={() => onChange(tab.key)}
           className={`rounded-full border px-3 py-1 text-xs font-medium ${
             value === tab.key
-              ? "border-purple-500 bg-purple-100 text-purple-800"
-              : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+              ? "border-purple-500 dark:border-purple-400 bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-300"
+              : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
           }`}
         >
           {tab.label}
-          <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
+          <span className="ml-1.5 rounded-full bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-gray-300">
             {tab.count}
           </span>
         </button>
@@ -663,11 +674,11 @@ function DuplicateGroupSummary({
   if (groupList.length === 0) return null;
 
   return (
-    <div className="mb-6 rounded-md border border-purple-200 bg-purple-50 p-3">
-      <h2 className="mb-2 text-sm font-semibold text-purple-900">
+    <div className="mb-6 rounded-md border border-purple-200 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-500/10 p-3">
+      <h2 className="mb-2 text-sm font-semibold text-purple-900 dark:text-purple-200">
         重複グループ ({groupList.length} 件)
       </h2>
-      <p className="mb-3 text-xs text-purple-700">
+      <p className="mb-3 text-xs text-purple-700 dark:text-purple-300">
         重複候補をグループごとに表示しています。<strong>氏名住所一致</strong>グループのみ master / source を選んで統合プレビュー（dryRun）を取得できます。<strong>法人番号一致 / リンクキー一致</strong>は表示のみで、統合プレビュー / 実行は別 phase で対応予定です。
       </p>
       <div className="space-y-3">
@@ -738,24 +749,24 @@ function DuplicateGroupCard({
   };
 
   return (
-    <div className="rounded-md border border-purple-200 bg-white p-3">
+    <div className="rounded-md border border-purple-200 bg-white dark:bg-gray-900 p-3">
       <div className="mb-2 flex items-baseline gap-2">
-        <span className="text-xs font-medium text-purple-700">
+        <span className="text-xs font-medium text-purple-700 dark:text-purple-300">
           グループ {groupIndex}
         </span>
         {matchedBy && (
-          <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
+          <span className="rounded-full bg-purple-100 dark:bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">
             {DUPLICATE_MATCHED_BY_LABEL[matchedBy]}
           </span>
         )}
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-gray-500 dark:text-gray-400">
           氏名: {sample.name ?? "***"} / 住所: {sample.address ?? "—"} （
           {members.length} 件）
         </span>
       </div>
 
       <table className="mb-3 w-full text-xs">
-        <thead className="bg-gray-50 text-gray-500">
+        <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
           <tr>
             {/* Codex P2-round-2: master/source/推奨 列は merge 可能な
                 name_address group のみ表示。corporate_number / external_link_key
@@ -770,9 +781,9 @@ function DuplicateGroupCard({
             <th className="px-2 py-1 text-left">取込元</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
           {members.map((m) => (
-            <tr key={m.id} className="hover:bg-gray-50">
+            <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
               {supportsMerge && (
                 <td className="px-2 py-1">
                   <input
@@ -794,17 +805,17 @@ function DuplicateGroupCard({
                 </td>
               )}
               {supportsMerge && (
-                <td className="px-2 py-1 text-purple-700">
+                <td className="px-2 py-1 text-purple-700 dark:text-purple-300">
                   {m.id === recommendedMaster.id ? "master 推奨" : ""}
                 </td>
               )}
-              <td className="px-2 py-1 font-mono text-[10px] text-gray-400">
+              <td className="px-2 py-1 font-mono text-[10px] text-gray-400 dark:text-gray-500">
                 {m.id.slice(0, 8)}…
               </td>
               <td className="px-2 py-1 text-center">{m.propertyOwnerCount}</td>
               <td className="px-2 py-1 text-center">{m.changeLogCount}</td>
               <td className="px-2 py-1 text-center">{m.version}</td>
-              <td className="px-2 py-1 font-mono text-[10px] text-gray-500">
+              <td className="px-2 py-1 font-mono text-[10px] text-gray-500 dark:text-gray-400">
                 {m.importFileName
                   ? `${m.importFileName}:${m.importRowNumber}行`
                   : "—"}
@@ -828,7 +839,7 @@ function DuplicateGroupCard({
             onExecuted={onExecuted}
           />
         ) : (
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
             master と source をそれぞれ選択してください
           </p>
         )
@@ -876,7 +887,7 @@ const CORPORATE_TYPE_BADGE: Record<
 > = {
   missing: "bg-yellow-100 text-yellow-800",
   conflict: "bg-red-100 text-red-700",
-  multi: "bg-gray-100 text-gray-700",
+  multi: "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200",
   same: "bg-green-100 text-green-700",
 };
 
@@ -913,6 +924,21 @@ function CorporateNumberCandidatesPanel() {
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(initialCursor);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
+
+  // 一括反映（missing 候補のみ）。選択は ownerId(uuid=非PII) のみ保持する。
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkPhase, setBulkPhase] = useState<"idle" | "confirm">("idle");
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkResultSummary | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
+  // 選択・確認・結果は「現在表示中の行」に紐づくため、ページ/フィルタ切替時にリセットする。
+  const resetBulkState = useCallback(() => {
+    setSelectedIds(new Set());
+    setBulkPhase("idle");
+    setBulkError(null);
+    setBulkResult(null);
+  }, []);
 
   const updateUrlQuery = useCallback(
     (nextSub: CorporateSubFilter, nextCursor: string | null) => {
@@ -971,6 +997,9 @@ function CorporateNumberCandidatesPanel() {
       // 古いフィルタの行が新フィルタ下に表示されてオペレーターが誤った候補を
       // 開くリスクを排除する。
       setData(null);
+      // 選択・確認・結果は表示中の行に紐づくのでページ切替で必ずクリアする。
+      // （apply 後の refresh では handler が load 完了後に結果を再セットして保持する）
+      resetBulkState();
       try {
         const res = await fetchCorporateCandidates(type, {
           cursor: cur ?? undefined,
@@ -989,7 +1018,7 @@ function CorporateNumberCandidatesPanel() {
         }
       }
     },
-    [],
+    [resetBulkState],
   );
 
   // Codex P2 追加修正: 初回マウント時は URL query の cursor を尊重して fetch する。
@@ -1023,12 +1052,86 @@ function CorporateNumberCandidatesPanel() {
     { key: "same", label: "一致（参考）" },
   ];
 
+  // --- 一括反映（missing のみ）の派生値・ハンドラ ---
+  const eligibleIds = data ? eligibleOwnerIds(data.candidates) : [];
+  const hasEligible = eligibleIds.length > 0;
+  // 「全選択」で選べる集合は上限件数まで（候補は最大 100 件/ページだが 1 バッチ上限は MAX）。
+  const pageSelectableIds = eligibleIds.slice(0, MAX_CORPORATE_BULK);
+  const allSelectableSelected =
+    pageSelectableIds.length > 0 &&
+    pageSelectableIds.every((id) => selectedIds.has(id));
+  // このページで選択済みの eligible 件数（cap 前の実数）。表示・送信可否・cap 判定に使う。
+  const selectedCount = data
+    ? data.candidates.filter(
+        (c) => isBulkEligible(c) && selectedIds.has(c.ownerId),
+      ).length
+    : 0;
+  const atSelectionCap = selectedCount >= MAX_CORPORATE_BULK;
+  // 送信ペイロード（eligible かつ選択済み・保険で上限 cap）。UI 側でも cap 済なので等しい。
+  const bulkPayload = data ? buildBulkPayload(data.candidates, selectedIds) : [];
+
+  const toggleRow = (ownerId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(ownerId)) {
+        next.delete(ownerId);
+      } else if (!atSelectionCap) {
+        next.add(ownerId); // 上限到達後は追加しない（silent truncation 防止）
+      }
+      return next;
+    });
+    // 選択を変えたら確認・前回結果は破棄する。
+    setBulkPhase("idle");
+    setBulkResult(null);
+  };
+
+  const toggleAllEligible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (
+        pageSelectableIds.length > 0 &&
+        pageSelectableIds.every((id) => next.has(id))
+      ) {
+        for (const id of pageSelectableIds) next.delete(id); // 全解除
+      } else {
+        for (const id of pageSelectableIds) next.add(id); // 上限まで全選択
+      }
+      return next;
+    });
+    setBulkPhase("idle");
+    setBulkResult(null);
+  };
+
+  const onConfirmBulk = async () => {
+    if (!data || !canSubmitBulk(bulkPayload.length)) return;
+    setBulkSubmitting(true);
+    setBulkError(null);
+    try {
+      const res = await bulkApplyCorporateNumbers(bulkPayload);
+      const summary = summarizeBulkResults(res.results);
+      // 反映後は現在ページを再取得（load が selection/phase/result を一旦クリアする）。
+      await load(apiType, cursor);
+      if (!mountedRef.current) return;
+      setBulkResult(summary); // load 後にセットするので結果は残る
+    } catch (e) {
+      if (!mountedRef.current) return;
+      // 503（API キー未設定）や権限エラーもここで文言表示する（fail-closed）。
+      setBulkError(e instanceof Error ? e.message : "一括反映に失敗しました");
+      setBulkPhase("idle");
+    } finally {
+      if (mountedRef.current) setBulkSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
-      <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+      <p className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
         所有者の氏名・住所・メモから法人番号候補を検出して dry-run で表示します。
-        反映は各 Owner 詳細画面（Phase B/C UI）から手動で確認のうえ実行してください。
-        この画面では一括操作は提供しません。
+        <strong>未登録</strong>（既存の法人番号が空・候補が 1 件）の行はチェックして
+        「一括反映」できます（確認のうえ実行・最大 {MAX_CORPORATE_BULK} 件）。検出番号で
+        国税庁 lookup を行い、該当する法人のみ <strong>法人番号欄だけ</strong>を反映します
+        （氏名・住所は変更しません。廃止法人・該当なし・競合・複数候補はスキップ）。
+        競合・複数候補など個別判断が必要な行は各 Owner 詳細画面で確認してください。
       </p>
 
       <div className="flex flex-wrap gap-1">
@@ -1037,10 +1140,14 @@ function CorporateNumberCandidatesPanel() {
             key={tab.key}
             type="button"
             onClick={() => setSubFilter(tab.key)}
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+            // Codex P2: 一括反映 POST 実行中はフィルタ切替を無効化。
+            // 反映後の load(apiType, cursor) が、その間に切り替えた新しい表示を
+            // 上書きしてしまう race を防ぐ（ページ送りも同様に無効化）。
+            disabled={bulkSubmitting}
+            className={`rounded-full border px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
               subFilter === tab.key
-                ? "border-blue-500 bg-blue-100 text-blue-800"
-                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                ? "border-blue-500 dark:border-blue-400 bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300"
+                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
             {tab.label}
@@ -1049,7 +1156,7 @@ function CorporateNumberCandidatesPanel() {
       </div>
 
       {loading && (
-        <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1062,28 +1169,135 @@ function CorporateNumberCandidatesPanel() {
           stale rows が画面に残らないことを保証する。 */}
       {data && !loading && !error && (
         <>
-          <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+          <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
             <span>合計 {data.summary.totalCandidates} 件</span>
             <span>/ 未登録 {data.summary.missing}</span>
             <span>/ 競合 {data.summary.conflict}</span>
             <span>/ 複数候補 {data.summary.multi}</span>
             <span>/ 一致 {data.summary.same}</span>
             {data.truncated && (
-              <span className="rounded-full bg-orange-100 px-2 py-0.5 text-orange-700">
+              <span className="rounded-full bg-orange-100 dark:bg-orange-500/20 px-2 py-0.5 text-orange-700 dark:text-orange-300">
                 スキャン上限到達（一部のみ表示）
               </span>
             )}
           </div>
 
+          {/* 一括反映ツールバー（このページに未登録候補がある場合のみ） */}
+          {hasEligible && (
+            <div className="rounded-md border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2 text-xs">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-medium text-emerald-800 dark:text-emerald-300">
+                  未登録 {eligibleIds.length} 件中 {selectedCount} 件を選択
+                  {atSelectionCap && (
+                    <span className="ml-1 text-emerald-600 dark:text-emerald-400">
+                      （1 回の上限 {MAX_CORPORATE_BULK} 件に到達）
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleAllEligible}
+                  className="rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-2 py-1 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-300"
+                >
+                  {allSelectableSelected
+                    ? "このページの選択を全解除"
+                    : `このページの未登録を全選択（最大 ${MAX_CORPORATE_BULK}）`}
+                </button>
+                {bulkPhase === "idle" && (
+                  <button
+                    type="button"
+                    onClick={() => setBulkPhase("confirm")}
+                    disabled={!canSubmitBulk(selectedCount) || bulkSubmitting}
+                    className="rounded-md border border-emerald-600 bg-emerald-600 px-3 py-1 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-700"
+                  >
+                    選択した {selectedCount} 件を一括反映
+                  </button>
+                )}
+              </div>
+
+              {eligibleIds.length > MAX_CORPORATE_BULK && (
+                <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                  ※ このページの未登録は {eligibleIds.length} 件あります。1 回で反映できるのは
+                  {MAX_CORPORATE_BULK} 件までです。反映後に再度選択してください。
+                </p>
+              )}
+
+              {/* preview → confirm: 実行前の最終確認 */}
+              {bulkPhase === "confirm" && (
+                <div className="mt-2 rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-3 py-2">
+                  <p className="text-gray-700 dark:text-gray-200">
+                    選択した <strong>{selectedCount} 件</strong>{" "}
+                    について、検出された法人番号で国税庁 lookup を行い、該当する法人のみ
+                    <strong>法人番号欄だけ</strong>
+                    を反映します。氏名・住所は変更しません。
+                    廃止法人・該当なし・競合・複数候補・既設定はスキップされます。
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={onConfirmBulk}
+                      disabled={bulkSubmitting || !canSubmitBulk(selectedCount)}
+                      className="rounded-md border border-emerald-600 bg-emerald-600 px-3 py-1 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-700"
+                    >
+                      {bulkSubmitting ? "反映中..." : "実行する"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBulkPhase("idle")}
+                      disabled={bulkSubmitting}
+                      className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Codex P2: bulkError / bulkResult は hasEligible の外で描画する。
+              ページ内の未登録を全件反映すると、その行は missing から外れ（例: same 化で
+              既定フィルタから除外）hasEligible=false になり、toolbar ごと結果サマリが
+              消えてオペレーターが反映/スキップ件数を確認できない問題を防ぐ。 */}
+          {bulkError && (
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {bulkError}
+            </p>
+          )}
+          {bulkResult && (
+            <div className="rounded-md border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-3 py-2 text-xs text-gray-700 dark:text-gray-200">
+              <p className="font-medium text-emerald-800 dark:text-emerald-300">
+                反映 {bulkResult.applied} 件 / スキップ {bulkResult.skipped} 件
+              </p>
+              <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-600 dark:text-gray-300">
+                {bulkResult.byStatus.map((s) => (
+                  <li key={s.status}>
+                    {BULK_STATUS_LABEL[s.status]}: {s.count}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {data.candidates.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-400">
+            <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
               該当する候補はありません
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-md border border-gray-200">
+            <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
               <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-xs text-gray-500">
+                <thead className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
                   <tr>
+                    <th className="w-8 px-3 py-2 text-left font-medium">
+                      <input
+                        type="checkbox"
+                        aria-label="このページの未登録を全選択"
+                        checked={allSelectableSelected}
+                        disabled={!hasEligible}
+                        onChange={toggleAllEligible}
+                        className="cursor-pointer disabled:cursor-not-allowed"
+                      />
+                    </th>
                     <th className="px-3 py-2 text-left font-medium">氏名</th>
                     <th className="px-3 py-2 text-left font-medium">住所</th>
                     <th className="px-3 py-2 text-left font-medium">
@@ -1099,27 +1313,41 @@ function CorporateNumberCandidatesPanel() {
                     <th className="px-3 py-2 text-left font-medium">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {data.candidates.map((c) => (
-                    <tr key={c.ownerId} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium text-gray-900">
+                    <tr key={c.ownerId} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="px-3 py-2">
+                        {isBulkEligible(c) ? (
+                          <input
+                            type="checkbox"
+                            aria-label="一括反映に含める"
+                            checked={selectedIds.has(c.ownerId)}
+                            disabled={!selectedIds.has(c.ownerId) && atSelectionCap}
+                            onChange={() => toggleRow(c.ownerId)}
+                            className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                          />
+                        ) : (
+                          <span className="text-gray-300 dark:text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
                         {c.ownerNameMasked ?? (
-                          <span className="text-gray-400">***</span>
+                          <span className="text-gray-400 dark:text-gray-500">***</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.ownerAddressMasked ?? (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700">
+                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700 dark:text-gray-200">
                         {c.existingCorporateNumberMasked ?? (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700">
+                      <td className="px-3 py-2 font-mono text-[11px] text-gray-700 dark:text-gray-200">
                         {c.candidateCorporateNumberMasked ?? (
-                          <span className="text-gray-400">
+                          <span className="text-gray-400 dark:text-gray-500">
                             {c.candidateCount === "many" ? "複数" : "—"}
                           </span>
                         )}
@@ -1136,7 +1364,7 @@ function CorporateNumberCandidatesPanel() {
                           {c.detectedIn.map((f) => (
                             <span
                               key={f}
-                              className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600"
+                              className="rounded-full bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-gray-300"
                             >
                               {DETECTED_IN_LABEL[f]}
                             </span>
@@ -1146,7 +1374,7 @@ function CorporateNumberCandidatesPanel() {
                       <td className="px-3 py-2">
                         <Link
                           href={c.detailUrl}
-                          className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                          className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                         >
                           Owner 詳細を開く
                         </Link>
@@ -1171,8 +1399,9 @@ function CorporateNumberCandidatesPanel() {
                 updateUrlQuery(subFilter, prev);
                 load(apiType, prev);
               }}
-              disabled={cursorStack.length === 0}
-              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              // Codex P2: 一括反映 POST 実行中はページ送りを無効化（race 防止）。
+              disabled={cursorStack.length === 0 || bulkSubmitting}
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               前へ
             </button>
@@ -1185,8 +1414,8 @@ function CorporateNumberCandidatesPanel() {
                 updateUrlQuery(subFilter, data.nextCursor);
                 load(apiType, data.nextCursor);
               }}
-              disabled={!data.hasNextPage || !data.nextCursor}
-              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              disabled={!data.hasNextPage || !data.nextCursor || bulkSubmitting}
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               次へ
             </button>
@@ -1306,7 +1535,7 @@ function RegistryAddressCandidatesPanel() {
 
   return (
     <div className="space-y-3">
-      <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+      <p className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
         所有者住所に混入した登記由来文字列（受付番号・和暦日付・登記原因・持分・証明書定型文）を
         検出して dry-run で表示します。「除去可能」は各行の「適用」で住所から除去できます（住所の
         書込権限が必要）。地番ラベル・不動産番号・床面積などは誤って番地を消さないため
@@ -1321,8 +1550,8 @@ function RegistryAddressCandidatesPanel() {
             onClick={() => setSubFilter(tab.key)}
             className={`rounded-full border px-3 py-1 text-xs font-medium ${
               subFilter === tab.key
-                ? "border-blue-500 bg-blue-100 text-blue-800"
-                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                ? "border-blue-500 dark:border-blue-400 bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300"
+                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
             {tab.label}
@@ -1331,7 +1560,7 @@ function RegistryAddressCandidatesPanel() {
       </div>
 
       {loading && (
-        <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1341,25 +1570,25 @@ function RegistryAddressCandidatesPanel() {
 
       {data && !loading && !error && (
         <>
-          <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+          <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
             <span>合計 {data.summary.total} 件</span>
             <span>/ 除去可能 {data.summary.cleanup}</span>
             <span>/ 監査専用 {data.summary.manual}</span>
             {data.truncated && (
-              <span className="rounded-full bg-orange-100 px-2 py-0.5 text-orange-700">
+              <span className="rounded-full bg-orange-100 dark:bg-orange-500/20 px-2 py-0.5 text-orange-700 dark:text-orange-300">
                 スキャン上限到達（一部のみ表示）
               </span>
             )}
           </div>
 
           {data.candidates.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-400">
+            <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
               該当する候補はありません
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-md border border-gray-200">
+            <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
               <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-xs text-gray-500">
+                <thead className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">氏名</th>
                     <th className="px-3 py-2 text-left font-medium">住所（現在）</th>
@@ -1368,26 +1597,26 @@ function RegistryAddressCandidatesPanel() {
                     <th className="px-3 py-2 text-left font-medium">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {data.candidates.map((c) => (
-                    <tr key={c.ownerId} className="hover:bg-gray-50 align-top">
-                      <td className="px-3 py-2 font-medium text-gray-900">
+                    <tr key={c.ownerId} className="hover:bg-gray-50 dark:hover:bg-gray-800 align-top">
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
                         {c.ownerNameMasked ?? (
-                          <span className="text-gray-400">***</span>
+                          <span className="text-gray-400 dark:text-gray-500">***</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.addressBeforeMasked ?? (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
                         {c.action === "cleanup" ? (
                           c.addressAfterMasked ?? (
-                            <span className="text-gray-400">（空欄）</span>
+                            <span className="text-gray-400 dark:text-gray-500">（空欄）</span>
                           )
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 dark:text-gray-500">—</span>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -1397,8 +1626,8 @@ function RegistryAddressCandidatesPanel() {
                               key={t}
                               className={`rounded-full px-1.5 py-0.5 text-[10px] ${
                                 c.removableTypes.includes(t)
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-amber-100 text-amber-700"
+                                  ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                                  : "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300"
                               }`}
                             >
                               {REGISTRY_TYPE_LABEL[t]}
@@ -1406,7 +1635,7 @@ function RegistryAddressCandidatesPanel() {
                           ))}
                         </div>
                         {c.manualReviewRequired && c.action === "cleanup" && (
-                          <p className="mt-1 text-[10px] text-amber-600">
+                          <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
                             ※監査専用の検出あり（手動確認）
                           </p>
                         )}
@@ -1418,18 +1647,18 @@ function RegistryAddressCandidatesPanel() {
                               type="button"
                               onClick={() => onApply(c)}
                               disabled={applyingId === c.ownerId}
-                              className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-100"
+                              className="rounded-md border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/15 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
                             >
                               {applyingId === c.ownerId ? "適用中..." : "適用"}
                             </button>
                           ) : (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-center text-[10px] text-amber-700">
+                            <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-0.5 text-center text-[10px] text-amber-700 dark:text-amber-300">
                               監査専用（手動確認）
                             </span>
                           )}
                           <Link
                             href={c.detailUrl}
-                            className="rounded-md border border-gray-300 px-2 py-1 text-center text-xs text-gray-700 hover:bg-gray-50"
+                            className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-center text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                           >
                             Owner 詳細
                           </Link>
@@ -1460,7 +1689,7 @@ function RegistryAddressCandidatesPanel() {
                 load(subFilter, prev);
               }}
               disabled={cursorStack.length === 0}
-              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               前へ
             </button>
@@ -1473,7 +1702,7 @@ function RegistryAddressCandidatesPanel() {
                 load(subFilter, data.nextCursor);
               }}
               disabled={!data.hasNextPage || !data.nextCursor}
-              className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               次へ
             </button>

@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { resolveSafeUploadPath } from "./local-paths";
 import { getMimeFromExtension } from "./mime";
+import { extractStorageKeyFromAnyUploadsUrl } from "./url-to-key";
 
 export class LocalStorageAdapter implements StorageAdapter {
   async upload(
@@ -47,6 +48,10 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getUrl(key: string): Promise<string> {
     return `/uploads/${key.replace(/\\/g, "/")}`;
+  }
+
+  keyFromUrl(fileUrl: string | null | undefined): string | null {
+    return extractStorageKeyFromAnyUploadsUrl(fileUrl);
   }
 
   /**

@@ -83,7 +83,7 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
     // プレビューの before/after は raw-visible な owner 氏名/住所/備考(PII)を含み得るため、
     // 既存の screen-protection guard(copy/cut/contextmenu 抑止)が効くよう PII 保護領域にする。
     <div
-      className="rounded border p-3 text-sm"
+      className="rounded border border-gray-200 p-3 text-sm dark:border-gray-800 dark:bg-gray-900"
       data-pii-protected
       data-pii-surface="owner"
     >
@@ -91,16 +91,16 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
         type="button"
         onClick={onCheck}
         disabled={loading}
-        className="rounded bg-slate-100 px-3 py-1"
+        className="rounded bg-slate-100 px-3 py-1 text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
       >
         {loading ? "確認中…" : "法人番号の混入をチェック"}
       </button>
 
-      {done && <p className="mt-2 text-emerald-700">混入を除去しました</p>}
+      {done && <p className="mt-2 text-emerald-700 dark:text-emerald-400">混入を除去しました</p>}
       {error && <p className="mt-2 text-red-600">{error}</p>}
 
       {preview && preview.action === "none" && (
-        <p className="mt-2 text-slate-500">混入は検出されませんでした</p>
+        <p className="mt-2 text-slate-500 dark:text-slate-400">混入は検出されませんでした</p>
       )}
 
       {preview && preview.action === "manual" && (
@@ -114,7 +114,7 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
 
       {preview && preview.action === "cleanup" && (
         <div className="mt-2 space-y-2">
-          <div className="text-slate-600 space-y-1">
+          <div className="text-slate-600 space-y-1 dark:text-gray-300">
             {(["name", "address", "note"] as const)
               .filter((f) => preview.changedFields.includes(f))
               .map((f) => {

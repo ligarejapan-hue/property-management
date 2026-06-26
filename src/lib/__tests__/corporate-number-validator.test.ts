@@ -123,4 +123,55 @@ describe("OWNER_TRACKED_FIELDS — corporateNumber", () => {
   it("corporateNumber が tracked field に含まれる", () => {
     expect(OWNER_TRACKED_FIELDS).toContain("corporateNumber");
   });
+  it("companyRegistryNumber が tracked field に含まれる", () => {
+    expect(OWNER_TRACKED_FIELDS).toContain("companyRegistryNumber");
+  });
+});
+
+describe("updateOwnerSchema — companyRegistryNumber(12桁)", () => {
+  it("null / 空文字 → null", () => {
+    const a = updateOwnerSchema.safeParse({ companyRegistryNumber: null, version: 1 });
+    const b = updateOwnerSchema.safeParse({ companyRegistryNumber: "", version: 1 });
+    expect(a.success && a.data.companyRegistryNumber).toBeNull();
+    expect(b.success && b.data.companyRegistryNumber).toBeNull();
+  });
+  it("12桁数字を accept（ハイフン/全角/空白を正規化）", () => {
+    for (const input of ["123456789012", "1234-5678-9012", "１２３４５６７８９０１２", " 1234 5678 9012 "]) {
+      const r = updateOwnerSchema.safeParse({ companyRegistryNumber: input, version: 1 });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.companyRegistryNumber).toBe("123456789012");
+    }
+  });
+  it("13桁(法人番号)は reject（別物）", () => {
+    const r = updateOwnerSchema.safeParse({ companyRegistryNumber: "1234567890123", version: 1 });
+    expect(r.success).toBe(false);
+  });
+  it("11桁 / 数字以外は reject", () => {
+    expect(updateOwnerSchema.safeParse({ companyRegistryNumber: "12345678901", version: 1 }).success).toBe(false);
+    expect(updateOwnerSchema.safeParse({ companyRegistryNumber: "12345678901A", version: 1 }).success).toBe(false);
+  });
+  it("corporateNumber(13桁) と companyRegistryNumber(12桁) は独立に保持される", () => {
+    const r = updateOwnerSchema.safeParse({
+      corporateNumber: "1234567890123",
+      companyRegistryNumber: "123456789012",
+      version: 1,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.corporateNumber).toBe("1234567890123");
+      expect(r.data.companyRegistryNumber).toBe("123456789012");
+    }
+  });
+});
+
+describe("createOwnerSchema — companyRegistryNumber(12桁)", () => {
+  it("name + companyRegistryNumber=12桁 を accept", () => {
+    const r = createOwnerSchema.safeParse({ name: "株式会社○○", companyRegistryNumber: "123456789012" });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.companyRegistryNumber).toBe("123456789012");
+  });
+  it("13桁 を companyRegistryNumber に入れると reject", () => {
+    const r = createOwnerSchema.safeParse({ name: "x", companyRegistryNumber: "1234567890123" });
+    expect(r.success).toBe(false);
+  });
 });

@@ -3,7 +3,7 @@
  *
  * - /admin/owners/correction に「法人番号」タブ + サブフィルタが存在
  * - Owner 詳細リンクが描画される
- * - バルク操作（ボタン）を持たない
+ * - missing 候補のみ「一括反映」できる（checkbox + 確認 + ownerId/version のみ送信）
  * - fetchCorporateCandidates を呼ぶ
  * - API レスポンスに含まれる法人番号フィールドの参照名が *Masked のみで生 corporateNumber を直接表示していない
  */
@@ -54,14 +54,64 @@ describe("admin/owners/correction page Phase E 法人番号タブ", () => {
     expect(pageSrc).toMatch(/Owner\s+詳細を開く/);
   });
 
-  it("バルク操作の checkbox / 「一括反映」ボタンが無い", () => {
-    // CorporateNumberCandidatesPanel 内に bulk 系トークンが存在しないこと
+  it("missing 候補のみ checkbox + 「一括反映」ボタンを提供する", () => {
     const panelMatch = pageSrc.match(
       /function CorporateNumberCandidatesPanel[\s\S]*$/,
     );
     expect(panelMatch).not.toBeNull();
     const body = panelMatch?.[0] ?? "";
-    expect(body).not.toMatch(/一括反映|bulk[A-Za-z]*Apply|<input[^>]*type="checkbox"/i);
+    // 一括反映ボタン・checkbox・bulk API 呼び出しが存在する
+    expect(body).toMatch(/一括反映/);
+    expect(body).toMatch(/type="checkbox"/);
+    expect(body).toMatch(/bulkApplyCorporateNumbers/);
+    // 対象は missing のみ（eligibility helper でゲート）
+    expect(body).toMatch(/isBulkEligible/);
+  });
+
+  it("一括反映は preview→confirm（確認フェーズ）を挟む", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // bulkPhase confirm を経て実行する（いきなり POST しない）
+    expect(body).toMatch(/bulkPhase/);
+    expect(body).toMatch(/setBulkPhase\("confirm"\)/);
+    expect(body).toMatch(/実行する/);
+  });
+
+  it("一括反映の送信は buildBulkPayload（ownerId/version のみ）で、PII/法人番号生値を送らない", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // 送信ペイロードは helper 経由（{ownerId, version} のみ）
+    expect(body).toMatch(/buildBulkPayload\(/);
+    expect(body).toMatch(/bulkApplyCorporateNumbers\(bulkPayload\)/);
+    // 候補法人番号・氏名・住所を bulk 送信に組み立てていない
+    expect(body).not.toMatch(/bulkApplyCorporateNumbers\([\s\S]{0,120}candidateCorporateNumber/);
+    expect(body).not.toMatch(/bulkApplyCorporateNumbers\([\s\S]{0,120}ownerName/);
+  });
+
+  it("Codex P2: 一括反映中はサブフィルタ/ページ送りを無効化する（navigation race 防止）", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    // サブフィルタ tab を bulkSubmitting 中 disable
+    expect(body).toMatch(/disabled=\{bulkSubmitting\}/);
+    // 前へ / 次へ も bulkSubmitting を disabled に含める
+    expect(body).toMatch(/disabled=\{cursorStack\.length === 0 \|\| bulkSubmitting\}/);
+    expect(body).toMatch(/!data\.nextCursor \|\| bulkSubmitting\}/);
+  });
+
+  it("Codex P2: bulkResult/bulkError は hasEligible の外で描画する（全件反映後も結果表示）", () => {
+    const panelMatch = pageSrc.match(
+      /function CorporateNumberCandidatesPanel[\s\S]*$/,
+    );
+    const body = panelMatch?.[0] ?? "";
+    expect(body).toMatch(/hasEligible の外で描画/);
+    expect(body).toMatch(/\{bulkResult && \(/);
+    expect(body).toMatch(/\{bulkError && \(/);
   });
 
   it("表示に使う列は *Masked フィールドで、生 corporateNumber を直参照しない", () => {

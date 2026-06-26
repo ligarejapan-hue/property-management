@@ -27,8 +27,8 @@ export default function PinAddModeToggle({
 }: PinAddModeToggleProps) {
   const disabled = canWrite === false;
   return (
-    <div className="mt-2 border-t border-gray-200 pt-2">
-      <div className="mb-1 text-xs font-semibold text-gray-600">調査ピン</div>
+    <div className="mt-2 border-t border-gray-200 dark:border-gray-800 pt-2">
+      <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">調査ピン</div>
       <button
         type="button"
         onClick={onToggle}
@@ -39,19 +39,19 @@ export default function PinAddModeToggle({
           "w-full rounded border px-2 py-1 text-xs font-semibold " +
           (active
             ? "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
-            : "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100") +
+            : "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30") +
           " disabled:cursor-not-allowed disabled:opacity-60"
         }
       >
         {active ? "ピン追加モード: ON" : "ピン追加モード"}
       </button>
-      <p className="mt-1 text-[10px] leading-tight text-gray-500">
+      <p className="mt-1 text-[10px] leading-tight text-gray-500 dark:text-gray-400">
         {active
           ? "地図をタップした位置にピンを追加します。"
           : "巡回中の地点に調査ピンを残せます。"}
       </p>
       {disabled && (
-        <p className="mt-1 text-[10px] text-amber-700">
+        <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">
           ピン追加の権限がありません。
         </p>
       )}

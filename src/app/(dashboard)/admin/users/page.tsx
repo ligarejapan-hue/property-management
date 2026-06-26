@@ -144,7 +144,7 @@ export default function UsersPage() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">ユーザー管理</h2>
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">ユーザー管理</h2>
         <button
           onClick={() => setShowCreate(true)}
           className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
@@ -156,7 +156,7 @@ export default function UsersPage() {
 
       {message && (
         <div
-          className={`mb-4 rounded-md border p-3 text-sm ${message.type === "ok" ? "border-green-200 bg-green-50 text-green-700" : "border-red-200 bg-red-50 text-red-700"}`}
+          className={`mb-4 rounded-md border p-3 text-sm ${message.type === "ok" ? "border-green-200 bg-green-50 text-green-700 dark:bg-green-500/15 dark:border-green-500/30 dark:text-green-300" : "border-red-200 bg-red-50 text-red-700 dark:bg-red-500/15 dark:border-red-500/30 dark:text-red-300"}`}
         >
           {message.text}
         </div>
@@ -165,21 +165,21 @@ export default function UsersPage() {
       {/* Filters */}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="名前・メールで検索..."
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
         </div>
-        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
           <input
             type="checkbox"
             checked={showInactive}
             onChange={(e) => setShowInactive(e.target.checked)}
-            className="rounded border-gray-300"
+            className="rounded border-gray-300 dark:border-gray-700"
           />
           無効ユーザーも表示
         </label>
@@ -188,46 +188,46 @@ export default function UsersPage() {
       {/* Table */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                   名前
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                   メール
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                   ロール
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                   最終ログイン
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                   状態
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
                   操作
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
               {users.map((u) => {
                 const isLocked =
                   u.lockedUntil && new Date(u.lockedUntil) > new Date();
                 return (
                   <tr
                     key={u.id}
-                    className={`hover:bg-gray-50 ${!u.isActive ? "opacity-50" : ""}`}
+                    className={`hover:bg-gray-50 dark:hover:bg-gray-800 ${!u.isActive ? "opacity-50" : ""}`}
                   >
-                    <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
+                    <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                       {u.name}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
+                    <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                       {u.email}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-sm">
@@ -235,7 +235,7 @@ export default function UsersPage() {
                         {ROLE_LABELS[u.role] ?? u.role}
                       </StatusBadge>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
+                    <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                       {u.lastLoginAt
                         ? new Date(u.lastLoginAt).toLocaleString("ja-JP")
                         : "-"}
@@ -256,7 +256,7 @@ export default function UsersPage() {
                       <div className="flex items-center gap-2">
                         <Link
                           href={`/admin/users/${u.id}/permissions`}
-                          className="flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800"
+                          className="flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                           title="権限編集"
                         >
                           <Shield className="h-3.5 w-3.5" />
@@ -268,7 +268,7 @@ export default function UsersPage() {
                               setActionUser(u);
                               setActionType("deactivate");
                             }}
-                            className="flex items-center gap-0.5 text-amber-600 hover:text-amber-800"
+                            className="flex items-center gap-0.5 text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
                             title="無効化"
                           >
                             <UserX className="h-3.5 w-3.5" />
@@ -280,7 +280,7 @@ export default function UsersPage() {
                               setActionUser(u);
                               setActionType("activate");
                             }}
-                            className="flex items-center gap-0.5 text-emerald-600 hover:text-emerald-800"
+                            className="flex items-center gap-0.5 text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300"
                             title="有効化"
                           >
                             <UserCheck className="h-3.5 w-3.5" />
@@ -292,7 +292,7 @@ export default function UsersPage() {
                             setActionUser(u);
                             setActionType("resetPw");
                           }}
-                          className="flex items-center gap-0.5 text-gray-600 hover:text-gray-800"
+                          className="flex items-center gap-0.5 text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
                           title="パスワードリセット"
                         >
                           <KeyRound className="h-3.5 w-3.5" />
@@ -304,7 +304,7 @@ export default function UsersPage() {
                               setActionUser(u);
                               setActionType("unlock");
                             }}
-                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800"
+                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                             title="ロック解除"
                           >
                             <LockOpen className="h-3.5 w-3.5" />
@@ -313,7 +313,7 @@ export default function UsersPage() {
                         )}
                         {selfId === u.id ? (
                           <span
-                            className="flex items-center gap-0.5 text-gray-300"
+                            className="flex items-center gap-0.5 text-gray-300 dark:text-gray-600"
                             title="自分自身は削除できません"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -325,7 +325,7 @@ export default function UsersPage() {
                               setActionUser(u);
                               setActionType("delete");
                             }}
-                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800"
+                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                             title="削除"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -334,7 +334,7 @@ export default function UsersPage() {
                         )}
                         <Link
                           href={`/admin/users/${u.id}/permissions`}
-                          className="text-gray-400 hover:text-gray-600"
+                          className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                         >
                           <ChevronRight className="h-4 w-4" />
                         </Link>
@@ -347,7 +347,7 @@ export default function UsersPage() {
                 <tr>
                   <td
                     colSpan={6}
-                    className="py-12 text-center text-sm text-gray-500"
+                    className="py-12 text-center text-sm text-gray-500 dark:text-gray-400"
                   >
                     ユーザーが見つかりません
                   </td>
@@ -361,9 +361,9 @@ export default function UsersPage() {
       {/* Confirm dialog */}
       {actionUser && actionType && actionType !== "resetPw" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-lg">
-            <h3 className="mb-2 text-lg font-bold text-gray-800">確認</h3>
-            <p className="mb-4 text-sm text-gray-600">
+          <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
+            <h3 className="mb-2 text-lg font-bold text-gray-800 dark:text-gray-100">確認</h3>
+            <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">
               {actionType === "deactivate" &&
                 `${actionUser.name} を無効化しますか？ログインできなくなります。`}
               {actionType === "activate" &&
@@ -379,7 +379,7 @@ export default function UsersPage() {
                   setActionUser(null);
                   setActionType(null);
                 }}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 キャンセル
               </button>
@@ -462,18 +462,18 @@ function CreateUserModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
-        <h3 className="mb-4 text-lg font-bold text-gray-800">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
+        <h3 className="mb-4 text-lg font-bold text-gray-800 dark:text-gray-100">
           新規ユーザー作成
         </h3>
         {error && (
-          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-300">
             {error}
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               名前 <span className="text-red-500">*</span>
             </label>
             <input
@@ -481,11 +481,11 @@ function CreateUserModal({
               required
               value={form.name}
               onChange={(e) => setField("name", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               メールアドレス <span className="text-red-500">*</span>
             </label>
             <input
@@ -493,17 +493,17 @@ function CreateUserModal({
               required
               value={form.email}
               onChange={(e) => setField("email", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               ロール <span className="text-red-500">*</span>
             </label>
             <select
               value={form.role}
               onChange={(e) => setField("role", e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="field_staff">現地担当</option>
               <option value="office_staff">事務担当</option>
@@ -511,7 +511,7 @@ function CreateUserModal({
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               初期パスワード <span className="text-red-500">*</span>
             </label>
             <input
@@ -521,9 +521,9 @@ function CreateUserModal({
               value={form.password}
               onChange={(e) => setField("password", e.target.value)}
               placeholder="8文字以上"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
             />
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               初回ログイン時にパスワード変更を要求されます
             </p>
           </div>
@@ -531,7 +531,7 @@ function CreateUserModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               キャンセル
             </button>

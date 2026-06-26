@@ -86,7 +86,7 @@ interface Pagination {
 // 包む必要がある。インナーに本体を置き、default export 側で Suspense ラップする。
 export default function PropertiesPage() {
   return (
-    <Suspense fallback={<div className="p-6 text-sm text-gray-500">読み込み中...</div>}>
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500 dark:text-gray-400">読み込み中...</div>}>
       <PropertiesPageInner />
     </Suspense>
   );
@@ -135,6 +135,9 @@ function PropertiesPageInner() {
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
   const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
+
+  // モバイル用フィルタ折りたたみ
+  const [showFilters, setShowFilters] = useState(false);
 
   // CSVエクスポートの列ピッカー。既定=全列選択。ゼロ列選択時は出力ボタンを無効化する。
   const [showColumnPicker, setShowColumnPicker] = useState(false);
@@ -244,6 +247,9 @@ function PropertiesPageInner() {
   >(new Map());
   // 「警告ありのみ」チップに出す全体件数（warningPropertiesTotal=警告あり物件の実数）。
   const [warningPropertyCount, setWarningPropertyCount] = useState(0);
+
+  // モバイルカード: 所有者展開状態（property.id の Set）
+  const [expandedOwners, setExpandedOwners] = useState<Set<string>>(new Set());
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -558,6 +564,12 @@ function PropertiesPageInner() {
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || undeliverableOnly || sort !== "updatedAt:desc";
 
+  // アクティブなフィルタ条件数（モバイルトグルバッジ用）
+  const activeFilterCount = [
+    searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
+    introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter,
+  ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== "updatedAt:desc" ? 1 : 0);
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -673,9 +685,9 @@ function PropertiesPageInner() {
   };
 
   return (
-    <div>
+    <div className="pt-2">
       <div className="mb-4">
-        <h2 className="text-2xl font-bold text-gray-800">物件一覧</h2>
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">物件一覧</h2>
       </div>
 
       {/* Action row */}
@@ -687,7 +699,7 @@ function PropertiesPageInner() {
               onClick={() => setShowColumnPicker((v) => !v)}
               aria-haspopup="true"
               aria-expanded={showColumnPicker}
-              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               title="出力する列を選んでCSV出力"
             >
               <Download className="h-4 w-4" />
@@ -695,12 +707,12 @@ function PropertiesPageInner() {
             </button>
             {showColumnPicker && (
               <div
-                className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-gray-200 bg-white p-3 shadow-lg"
+                className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-800 dark:bg-gray-900"
                 role="dialog"
                 aria-label="CSV出力する列の選択"
               >
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-600">出力する列</span>
+                  <span className="text-xs font-medium text-gray-600 dark:text-gray-300">出力する列</span>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -726,13 +738,13 @@ function PropertiesPageInner() {
                   {EXPORT_COLUMNS.map((c) => (
                     <label
                       key={c.key}
-                      className="flex cursor-pointer items-center gap-2 py-1 text-sm text-gray-700"
+                      className="flex cursor-pointer items-center gap-2 py-1 text-sm text-gray-700 dark:text-gray-200"
                     >
                       <input
                         type="checkbox"
                         checked={selectedExportColumns.has(c.key)}
                         onChange={() => toggleExportColumn(c.key)}
-                        className="h-4 w-4 rounded border-gray-300"
+                        className="h-4 w-4 rounded border-gray-300 dark:border-gray-700"
                       />
                       {c.header}
                     </label>
@@ -760,7 +772,7 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleExportDm}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
             title="現在の検索条件で送付可の物件をDM差込CSV出力"
           >
             <Download className="h-4 w-4" />
@@ -795,12 +807,24 @@ function PropertiesPageInner() {
         <NewPropertyModal onClose={() => setShowNewModal(false)} />
       )}
 
+      {/* Filter toggle (mobile only) */}
+      <div className="mb-2 md:hidden">
+        <button
+          type="button"
+          onClick={() => setShowFilters((v) => !v)}
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+        >
+          絞り込み{activeFilterCount > 0 ? `（${activeFilterCount}）` : ""}
+          {showFilters ? " ▴" : " ▾"}
+        </button>
+      </div>
+
       {/* Filter bar */}
-      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4">
+      <div className={`mb-4 flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 ${showFilters ? "flex" : "hidden"} md:flex`}>
         <select
           value={typeFilter}
           onChange={handleFilterChange(setTypeFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">種別: すべて</option>
           {PROPERTY_TYPE_OPTIONS.map((o) => (
@@ -813,7 +837,7 @@ function PropertiesPageInner() {
         <select
           value={registryFilter}
           onChange={handleFilterChange(setRegistryFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">登記状況: すべて</option>
           <option value="obtained">取得済</option>
@@ -824,7 +848,7 @@ function PropertiesPageInner() {
         <select
           value={dmFilter}
           onChange={handleFilterChange(setDmFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">DM判断: すべて</option>
           <option value="send">送付可</option>
@@ -833,7 +857,7 @@ function PropertiesPageInner() {
         </select>
 
         <div className="relative min-w-[220px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
             placeholder="物件住所・地番・家屋番号で一覧検索"
@@ -843,12 +867,12 @@ function PropertiesPageInner() {
               setSearchDraft(value);
               commitKeyword(value);
             }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
         </div>
 
         <div className="relative min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
             placeholder="管理IDで検索（例: 受付帳.xlsx:120行 / 120行）"
@@ -858,12 +882,12 @@ function PropertiesPageInner() {
               setMgmtIdDraft(value);
               commitMgmtId(value);
             }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
         </div>
 
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
             placeholder="所有者名・電話番号で候補を選択して物件を開く"
@@ -882,10 +906,10 @@ function PropertiesPageInner() {
             }}
             onBlur={() => setSuggestOpen(false)}
             onFocus={() => { if (suggestResults.length > 0) setSuggestOpen(true); }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
           {suggestOpen && suggestResults.length > 0 && (
-            <ul className="absolute left-0 top-full z-50 mt-1 w-full min-w-[320px] rounded-md border border-gray-200 bg-white shadow-lg">
+            <ul className="absolute left-0 top-full z-50 mt-1 w-full min-w-[320px] rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900">
               {suggestResults.map((item) => (
                 <li key={item.id}>
                   <button
@@ -895,23 +919,23 @@ function PropertiesPageInner() {
                       setSuggestOpen(false);
                       router.push(`/properties/${item.id}`);
                     }}
-                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50"
+                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50 dark:hover:bg-gray-800"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="flex-1 font-medium text-gray-800 truncate">{item.address}</span>
+                      <span className="flex-1 font-medium text-gray-800 truncate dark:text-gray-100">{item.address}</span>
                       <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${dmStatusStyles[item.dmStatus] ?? badgeIntentClass("neutral")}`}>
                         {DM_STATUS_LABELS[item.dmStatus] ?? item.dmStatus}
                       </span>
                     </div>
                     {item.importSource && (
-                      <span className="font-mono text-[11px] text-gray-400">{item.importSource}</span>
+                      <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">{item.importSource}</span>
                     )}
                     {item.owners.filter((o) => o.name || o.phone || o.address).map((o, i) => (
                       // 17-A/Codex P2: suggestion 内の所有者PII(name/phone/address)を owner surface に。
                       // button 全体ではなく PII 行(div)のみを最小限で保護する（guard 側で button 祖先でも有効）。
                       <div
                         key={i}
-                        className="flex flex-wrap gap-x-2 text-[11px] text-gray-500"
+                        className="flex flex-wrap gap-x-2 text-[11px] text-gray-500 dark:text-gray-400"
                         data-pii-protected
                         data-pii-surface="owner"
                       >
@@ -962,7 +986,7 @@ function PropertiesPageInner() {
         <select
           value={caseFilter}
           onChange={handleFilterChange(setCaseFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">案件ステータス: すべて</option>
           {CASE_STATUS_OPTIONS.map(({ value: v, label }) => (
@@ -975,7 +999,7 @@ function PropertiesPageInner() {
         <select
           value={introductionRouteFilter}
           onChange={handleFilterChange(setIntroductionRouteFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">導入ルート: すべて</option>
           {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
@@ -991,7 +1015,7 @@ function PropertiesPageInner() {
             setSort(e.target.value);
             setPage(1);
           }}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           title="並び替え"
         >
           <option value="updatedAt:desc">更新日 新しい順</option>
@@ -1003,7 +1027,7 @@ function PropertiesPageInner() {
         <select
           value={assigneeFilter}
           onChange={handleFilterChange(setAssigneeFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           title="担当者"
         >
           <option value="">担当者: すべて</option>
@@ -1014,21 +1038,21 @@ function PropertiesPageInner() {
           ))}
         </select>
 
-        <label className="flex items-center gap-1 text-sm text-gray-600">
+        <label className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
           更新日:
           <input
             type="date"
             value={updatedFromFilter}
             onChange={handleFilterChange(setUpdatedFromFilter)}
-            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             title="更新日（開始）"
           />
-          <span className="text-gray-400">〜</span>
+          <span className="text-gray-400 dark:text-gray-500">〜</span>
           <input
             type="date"
             value={updatedToFilter}
             onChange={handleFilterChange(setUpdatedToFilter)}
-            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             title="更新日（終了）"
           />
         </label>
@@ -1037,7 +1061,7 @@ function PropertiesPageInner() {
           type="button"
           onClick={handleResetFilters}
           disabled={!hasActiveFilter}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
           title="全フィルタをリセット"
         >
           <RotateCcw className="h-3.5 w-3.5" />
@@ -1151,16 +1175,16 @@ function PropertiesPageInner() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+      {/* Table (PC のみ: md: 以上) */}
+      <div className="hidden md:block overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-            <span className="ml-2 text-sm text-gray-500">読み込み中...</span>
+            <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
           </div>
         ) : (
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50">
+            <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
               <tr>
                 <th className="whitespace-nowrap px-2 py-3">
                   <input
@@ -1173,47 +1197,52 @@ function PropertiesPageInner() {
                     className="rounded border-gray-300"
                   />
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   種別
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   所有者
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   住所
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   地番
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   登記状況
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   DM判断
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   案件状況
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   担当者
                 </th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
                   更新日
                 </th>
-                <th className="whitespace-nowrap px-2 py-3 font-medium text-gray-600">
+                <th className="whitespace-nowrap px-2 py-3 font-medium text-gray-600 dark:text-gray-300">
                   操作
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {visibleProperties.map((property) => {
                 const warning = warningsByProperty.get(property.id);
                 return (
                 <tr
                   key={property.id}
-                  className="transition-colors hover:bg-gray-50"
+                  className="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
+                  onClick={(e) => {
+                    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if ((e.target as HTMLElement).closest("a, button, input, label, select, textarea")) return;
+                    router.push(`/properties/${property.id}`);
+                  }}
                 >
-                  <td className="whitespace-nowrap px-2 py-3">
+                  <td className="whitespace-nowrap px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedIds.has(property.id)}
@@ -1230,7 +1259,7 @@ function PropertiesPageInner() {
                         property.propertyType}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
                     {/* 17-A: 所有者名 PII を copy/cut/contextmenu 抑止＋監査の対象に含める。
                         行全体ではなく所有者名セルの表示範囲のみ最小限で囲む。 */}
                     <span data-pii-protected data-pii-surface="owner">
@@ -1289,7 +1318,7 @@ function PropertiesPageInner() {
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    <span className="text-xs text-gray-600">
+                    <span className="text-xs text-gray-600 dark:text-gray-300">
                       {CASE_STATUS_LABELS[property.caseStatus] ??
                         property.caseStatus}
                     </span>
@@ -1297,10 +1326,10 @@ function PropertiesPageInner() {
                   <td className="whitespace-nowrap px-4 py-3">
                     {property.assignee?.name ?? "-"}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-gray-500">
+                  <td className="whitespace-nowrap px-4 py-3 text-gray-500 dark:text-gray-400">
                     {new Date(property.updatedAt).toLocaleDateString("ja-JP")}
                   </td>
-                  <td className="whitespace-nowrap px-2 py-3">
+                  <td className="whitespace-nowrap px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
                       title="この物件を削除"
@@ -1322,7 +1351,7 @@ function PropertiesPageInner() {
                 <tr>
                   <td
                     colSpan={11}
-                    className="px-4 py-8 text-center text-gray-500"
+                    className="px-4 py-8 text-center text-gray-500 dark:text-gray-400"
                   >
                     {warningOnly
                       ? "警告ありの物件はありません"
@@ -1335,9 +1364,128 @@ function PropertiesPageInner() {
         )}
       </div>
 
+      {/* Card list (モバイル専用: md: 未満) */}
+      <div className="md:hidden mt-2 flex flex-col gap-3">
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+            <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
+          </div>
+        ) : visibleProperties.length === 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 px-4 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+            {warningOnly
+              ? "警告ありの物件はありません"
+              : "該当する物件が見つかりません"}
+          </div>
+        ) : (
+          visibleProperties.map((property) => {
+            const owners = property.ownerNames ?? [];
+            const OWNER_PREVIEW = 3;
+            const hasMore = owners.length > OWNER_PREVIEW;
+            const isExpanded = expandedOwners.has(property.id);
+            const visibleOwners = isExpanded ? owners : owners.slice(0, OWNER_PREVIEW);
+            return (
+              <div
+                key={property.id}
+                className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
+                onClick={(e) => {
+                  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if ((e.target as HTMLElement).closest("a, button, input, label, select, textarea")) return;
+                  router.push(`/properties/${property.id}`);
+                }}
+              >
+                {/* カード上部: チェックボックス + 種別 + 住所 */}
+                <div className="flex items-start gap-3 px-4 pt-4 pb-2">
+                  <div
+                    className="mt-0.5 shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(property.id)}
+                      onChange={() => toggleSelect(property.id)}
+                      className="rounded border-gray-300"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <Link href={`/properties/${property.id}`} className="block">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium text-indigo-600">
+                          {PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-900 dark:text-gray-100 break-all">
+                        {property.address}
+                      </p>
+                    </Link>
+                  </div>
+                </div>
+
+                {/* 所有者 */}
+                <div className="px-4 pb-2">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">所有者</p>
+                  <div
+                    data-pii-protected
+                    data-pii-surface="owner"
+                  >
+                    {owners.length === 0 ? (
+                      <span className="text-sm text-gray-500 dark:text-gray-400">—</span>
+                    ) : (
+                      <>
+                        {visibleOwners.map((name, i) => (
+                          <p key={i} className="text-sm text-gray-900 dark:text-gray-100">
+                            {name}
+                          </p>
+                        ))}
+                        {hasMore && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedOwners((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(property.id)) next.delete(property.id);
+                                else next.add(property.id);
+                                return next;
+                              });
+                            }}
+                            className="mt-1 inline-flex items-center min-h-[44px] py-2 text-xs text-indigo-600 hover:underline"
+                          >
+                            {isExpanded
+                              ? "▴ 折りたたむ"
+                              : `他${owners.length - OWNER_PREVIEW}名 ▾`}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* 状況: 登記 / DM / 案件 */}
+                <div className="px-4 pb-4 flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    intent={REGISTRY_STATUS_INTENT[property.registryStatus] ?? "neutral"}
+                  >
+                    {REGISTRY_STATUS_LABELS[property.registryStatus] ?? property.registryStatus}
+                  </StatusBadge>
+                  <StatusBadge
+                    intent={DM_STATUS_INTENT[property.dmStatus] ?? "neutral"}
+                  >
+                    {DM_STATUS_LABELS[property.dmStatus] ?? property.dmStatus}
+                  </StatusBadge>
+                  <span className="text-xs text-gray-600 dark:text-gray-300">
+                    {CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus}
+                  </span>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
       {/* Pagination */}
-      <div className="mt-4 flex items-center justify-between">
-        <p className="text-sm text-gray-500">
+      <div className="mt-4 w-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pb-8">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           {pagination.total} 件中{" "}
           {pagination.total > 0
             ? `${(pagination.page - 1) * pagination.limit + 1}〜${Math.min(pagination.page * pagination.limit, pagination.total)}`
@@ -1348,10 +1496,10 @@ function PropertiesPageInner() {
           <button
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className={`flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm ${
+            className={`flex min-h-[44px] items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 ${
               page <= 1
-                ? "text-gray-400 cursor-not-allowed"
-                : "text-gray-700 hover:bg-gray-50"
+                ? "text-gray-400 cursor-not-allowed dark:text-gray-500"
+                : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
             }`}
           >
             <ChevronLeft className="h-4 w-4" />
@@ -1361,17 +1509,17 @@ function PropertiesPageInner() {
             {page}
           </span>
           {pagination.totalPages > 1 && (
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
               / {pagination.totalPages}
             </span>
           )}
           <button
             disabled={page >= pagination.totalPages}
             onClick={() => setPage((p) => p + 1)}
-            className={`flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm ${
+            className={`flex min-h-[44px] items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 ${
               page >= pagination.totalPages
-                ? "text-gray-400 cursor-not-allowed"
-                : "text-gray-700 hover:bg-gray-50"
+                ? "text-gray-400 cursor-not-allowed dark:text-gray-500"
+                : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
             }`}
           >
             次へ

@@ -334,6 +334,45 @@ describe("applyDisplayToOwner — フィールドレベル config", () => {
     expect("email" in result).toBe(false);
   });
 
+  // Codex P1: companyRegistryNumber(12桁) は corporateNumber(13桁) と同じ display level
+  // でマスク/非表示される（owner_corporate_number 共用）。生値を漏らさない。
+  const ownerWithReg = {
+    ...owner,
+    corporateNumber: "1234567890123",
+    companyRegistryNumber: "123456789012",
+  };
+  it("corporateNumber:masked — companyRegistryNumber も同じ level でマスクされる", () => {
+    const config = {
+      name: "full" as const, nameKana: "full" as const,
+      phone: "full" as const, zip: "full" as const,
+      address: "full" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "masked" as const,
+    };
+    const result = applyDisplayToOwner(ownerWithReg, config);
+    expect(result.companyRegistryNumber).toMatch(/\*\*\*/);
+    expect(result.companyRegistryNumber).not.toBe("123456789012");
+  });
+  it("corporateNumber:hidden — companyRegistryNumber も result から削除される", () => {
+    const config = {
+      name: "full" as const, nameKana: "full" as const,
+      phone: "full" as const, zip: "full" as const,
+      address: "full" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "hidden" as const,
+    };
+    const result = applyDisplayToOwner(ownerWithReg, config);
+    expect("companyRegistryNumber" in result).toBe(false);
+  });
+  it("corporateNumber:full — companyRegistryNumber は平文", () => {
+    const config = {
+      name: "full" as const, nameKana: "full" as const,
+      phone: "full" as const, zip: "full" as const,
+      address: "full" as const, note: "full" as const, email: "full" as const,
+      corporateNumber: "full" as const,
+    };
+    const result = applyDisplayToOwner(ownerWithReg, config);
+    expect(result.companyRegistryNumber).toBe("123456789012");
+  });
+
   it("field_staff 相当の混合 config — phone/zip masked, address partial, email masked", () => {
     const config = {
       name: "full" as const, nameKana: "full" as const,
@@ -584,6 +623,7 @@ const fullForm = {
   address: "東京都渋谷区1-1",
   email: "yamada@example.com",
   corporateNumber: "",
+  companyRegistryNumber: "",
 };
 
 describe("buildOwnerUpdatePayload — field-level full guard", () => {
@@ -596,6 +636,27 @@ describe("buildOwnerUpdatePayload — field-level full guard", () => {
     expect(payload.address).toBe("東京都渋谷区1-1");
     expect(payload.email).toBe("yamada@example.com");
     expect(payload.version).toBe(3);
+  });
+
+  it("fields.corporateNumber=true で companyRegistryNumber(12桁) も payload に含まれる", () => {
+    const form = { ...fullForm, companyRegistryNumber: "123456789012" };
+    const payload = buildOwnerUpdatePayload(form, allEditable, 1);
+    expect(payload.companyRegistryNumber).toBe("123456789012");
+  });
+
+  it("fields.corporateNumber=false で companyRegistryNumber は payload に含まれない", () => {
+    const form = { ...fullForm, companyRegistryNumber: "123456789012" };
+    const payload = buildOwnerUpdatePayload(form, noneEditable, 1);
+    expect(payload).not.toHaveProperty("companyRegistryNumber");
+  });
+
+  it("companyRegistryNumber 空文字は null（クリア）として送信", () => {
+    const payload = buildOwnerUpdatePayload(
+      { ...fullForm, companyRegistryNumber: "" },
+      allEditable,
+      1,
+    );
+    expect(payload.companyRegistryNumber).toBeNull();
   });
 
   it("owner_phone:masked の場合、phone が payload に含まれない", () => {

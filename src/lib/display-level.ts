@@ -27,6 +27,7 @@ interface OwnerRecord {
   note?: string | null;
   email?: string | null;
   corporateNumber?: string | null;
+  companyRegistryNumber?: string | null;
   [key: string]: unknown;
 }
 
@@ -217,6 +218,13 @@ export function applyOwnerDisplayLevel(
       config.corporateNumber,
       maskCorporateNumber,
     ),
+    // 会社法人等番号(12桁)は法人番号(13桁)と同じ field-level 権限で扱うため、
+    // corporateNumber と同じ display level でマスクする。
+    companyRegistryNumber: applyLevel(
+      owner.companyRegistryNumber ?? null,
+      config.corporateNumber,
+      maskCorporateNumber,
+    ),
   };
 }
 
@@ -239,6 +247,7 @@ export function applyDisplayToOwner(
     note?: string | null;
     email?: string | null;
     corporateNumber?: string | null;
+    companyRegistryNumber?: string | null;
     [key: string]: unknown;
   },
   config: OwnerDisplayConfig,
@@ -258,6 +267,8 @@ export function applyDisplayToOwner(
     { key: "note", configKey: "note" },
     { key: "email", configKey: "email", maskFn: maskEmail },
     { key: "corporateNumber", configKey: "corporateNumber", maskFn: maskCorporateNumber },
+    // 会社法人等番号(12桁)は corporateNumber と同じ display level でマスクする。
+    { key: "companyRegistryNumber", configKey: "corporateNumber", maskFn: maskCorporateNumber },
   ];
 
   for (const { key, configKey, maskFn } of fieldMap) {

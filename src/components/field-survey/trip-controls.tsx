@@ -267,15 +267,15 @@ export default function TripControls({
   if (phase === "loading") {
     return (
       <Panel>
-        <div className="mb-1 text-xs font-semibold text-gray-600">巡回操作</div>
-        <p className="text-[11px] text-gray-500">状態を取得中…</p>
+        <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">巡回操作</div>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">状態を取得中…</p>
       </Panel>
     );
   }
 
   return (
     <Panel>
-      <div className="mb-1 text-xs font-semibold text-gray-600">巡回操作</div>
+      <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">巡回操作</div>
 
       {session ? (
         <ActiveSessionView
@@ -294,7 +294,7 @@ export default function TripControls({
       {error && (
         <p
           role="status"
-          className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+          className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
         >
           {error}
         </p>
@@ -318,7 +318,7 @@ export default function TripControls({
 }
 
 function Panel({ children }: { children: React.ReactNode }) {
-  return <div className="border-t border-gray-200 pt-2">{children}</div>;
+  return <div className="border-t border-gray-200 dark:border-gray-800 pt-2">{children}</div>;
 }
 
 function IdleView({
@@ -330,19 +330,19 @@ function IdleView({
 }) {
   return (
     <>
-      <p className="mb-2 text-[11px] leading-snug text-gray-500">
+      <p className="mb-2 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
         巡回未開始
       </p>
       <button
         type="button"
         onClick={onStart}
         disabled={disabled}
-        className="mb-1 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+        className="mb-1 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
         data-testid="trip-start-button"
       >
         巡回開始
       </button>
-      <p className="text-[10px] leading-tight text-gray-400">
+      <p className="text-[10px] leading-tight text-gray-400 dark:text-gray-500">
         ※ 位置情報の記録は別途「位置記録開始」を押した時のみ行われます。
         巡回開始だけでは GPS は使われません。
       </p>
@@ -365,10 +365,10 @@ function ActiveSessionView({
   const elapsed = formatElapsed(startedAt, now);
   return (
     <>
-      <p className="mb-1 text-[11px] leading-snug text-red-600">
+      <p className="mb-1 text-[11px] leading-snug text-red-600 dark:text-red-400">
         ● 巡回中
       </p>
-      <dl className="mb-2 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700">
+      <dl className="mb-2 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700 dark:text-gray-200">
         <dt>経過</dt>
         <dd>{elapsed}</dd>
         <dt>取得点数</dt>
@@ -378,12 +378,12 @@ function ActiveSessionView({
         type="button"
         onClick={onEnd}
         disabled={disabled}
-        className="w-full rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/40 dark:bg-red-500/20 dark:text-red-300 dark:hover:bg-red-500/30"
         data-testid="trip-end-button"
       >
         巡回終了
       </button>
-      <p className="mt-1 text-[10px] leading-tight text-gray-400">
+      <p className="mt-1 text-[10px] leading-tight text-gray-400 dark:text-gray-500">
         ※ 巡回終了時に位置記録は自動停止します。未送信点は失われる場合があります。
       </p>
     </>
@@ -399,7 +399,7 @@ function ConfirmStartModal({
 }) {
   return (
     <ModalShell title="🗺 巡回開始の確認" testId="trip-confirm-start-modal">
-      <ul className="mb-3 ml-4 list-disc space-y-1 text-[11px] text-gray-700">
+      <ul className="mb-3 ml-4 list-disc space-y-1 text-[11px] text-gray-700 dark:text-gray-200">
         <li>
           本機能は「巡回開始」を押してから「巡回終了」を押すまでの間のみ、
           業務上の位置情報を扱う前提です。
@@ -432,7 +432,7 @@ function ConfirmEndModal({
 }) {
   return (
     <ModalShell title="巡回終了の確認" testId="trip-confirm-end-modal">
-      <p className="mb-3 text-[12px] text-gray-700">
+      <p className="mb-3 text-[12px] text-gray-700 dark:text-gray-200">
         巡回を終了します。よろしいですか?
       </p>
       <ModalActions onCancel={onCancel} onAgree={onAgree} agreeLabel="終了する" />
@@ -456,8 +456,8 @@ function ModalShell({
       data-testid={testId}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
     >
-      <div className="w-full max-w-md rounded-md bg-white p-4 text-sm shadow-lg">
-        <h3 className="mb-2 text-base font-semibold text-gray-800">{title}</h3>
+      <div className="w-full max-w-md rounded-md bg-white p-4 text-sm shadow-lg dark:bg-gray-900">
+        <h3 className="mb-2 text-base font-semibold text-gray-800 dark:text-gray-100">{title}</h3>
         {children}
       </div>
     </div>
@@ -478,7 +478,7 @@ function ModalActions({
       <button
         type="button"
         onClick={onCancel}
-        className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50"
+        className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
       >
         キャンセル
       </button>

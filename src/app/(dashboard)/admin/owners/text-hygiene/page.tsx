@@ -84,7 +84,7 @@ const FIELD_LABEL: Record<FieldKey, string> = {
 const SEVERITY_CLASS: Record<Severity, string> = {
   error: "bg-red-100 text-red-700",
   warning: "bg-amber-100 text-amber-700",
-  info: "bg-gray-100 text-gray-600",
+  info: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
 };
 
 export default function TextHygieneAuditPage() {
@@ -204,19 +204,19 @@ export default function TextHygieneAuditPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <nav className="mb-4 text-sm text-gray-500">
-        <Link href="/admin/users" className="hover:text-gray-700">
+    <div className="min-h-screen bg-gray-50 p-6 dark:bg-gray-900">
+      <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        <Link href="/admin/users" className="hover:text-gray-700 dark:hover:text-gray-200">
           管理
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900">テキスト衛生監査</span>
+        <span className="text-gray-900 dark:text-gray-100">テキスト衛生監査</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">
+      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">
         テキスト衛生監査（制御文字・文字化け）
       </h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-gray-500 mb-6 dark:text-gray-400">
         所有者の氏名・氏名カナ・住所・備考に紛れた制御文字・ゼロ幅・双方向制御・文字化け（U+FFFD /
         mojibake）を検出します。
         <span className="font-medium">不可視の制御文字のみ</span>
@@ -237,7 +237,7 @@ export default function TextHygieneAuditPage() {
       )}
 
       {/* 種別フィルタ（件数は最新スキャン窓の集計） */}
-      <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200 pb-2">
+      <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200 pb-2 dark:border-gray-800">
         {TYPE_OPTIONS.map((opt) => (
           <button
             key={opt.value}
@@ -246,7 +246,7 @@ export default function TextHygieneAuditPage() {
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
               type === opt.value
                 ? "bg-indigo-600 text-white"
-                : "bg-white text-gray-600 hover:bg-gray-100"
+                : "bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
             }`}
           >
             {TYPE_LABEL[opt.value]}
@@ -265,60 +265,60 @@ export default function TextHygieneAuditPage() {
       )}
 
       <div
-        className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
+        className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
         data-pii-protected
         data-pii-surface="owner"
       >
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
           </div>
         ) : rows.length === 0 ? (
-          <div className="px-6 py-8 text-center text-sm text-gray-400">
+          <div className="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">
             対象の制御文字・文字化けは見つかりませんでした（権限により一部のフィールドは監査対象外の場合があります）。
           </div>
         ) : (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   所有者
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   フィールド
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   値
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   検出
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   操作
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+            <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-800 dark:bg-gray-900">
               {rows.map(({ owner, report }) => {
                 const key = `${owner.ownerId}:${report.field}`;
                 const canSanitize =
                   report.recommendedAction === "sanitize_candidate";
                 return (
-                  <tr key={key} className="align-top hover:bg-gray-50">
+                  <tr key={key} className="align-top hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="px-4 py-3 text-sm">
                       <Link
                         href={owner.detailUrl}
-                        className="font-mono text-indigo-600 hover:text-indigo-800"
+                        className="font-mono text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                       >
                         {owner.ownerId.slice(0, 8)}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
                       {FIELD_LABEL[report.field]}
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all">
+                    <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all dark:text-gray-100">
                       {report.valueMasked == null ? (
-                        <span className="text-gray-400">（非表示）</span>
+                        <span className="text-gray-400 dark:text-gray-500">（非表示）</span>
                       ) : (
                         // 生値ではなくエスケープ表記で描画（不可視文字を可視化し、
                         // bidi RLO 等が監査セルの表示順を改変するのを防ぐ＝Codex P2）。
@@ -339,7 +339,7 @@ export default function TextHygieneAuditPage() {
                             {ISSUE_LABEL[code]}
                           </span>
                         ))}
-                        <span className="ml-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        <span className="ml-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                           {canSanitize ? "自動除去可" : "要確認"}
                         </span>
                       </div>
@@ -370,7 +370,7 @@ export default function TextHygieneAuditPage() {
                                 type="button"
                                 disabled={busyKey === key}
                                 onClick={() => setConfirmKey(null)}
-                                className="text-xs text-gray-500 hover:text-gray-700"
+                                className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                               >
                                 取消
                               </button>
@@ -379,7 +379,7 @@ export default function TextHygieneAuditPage() {
                             <button
                               type="button"
                               onClick={() => setConfirmKey(key)}
-                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
                             >
                               <Wand2 className="h-3 w-3" />
                               不可視文字を除去
@@ -387,7 +387,7 @@ export default function TextHygieneAuditPage() {
                           ))}
                         <Link
                           href={owner.detailUrl}
-                          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+                          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                         >
                           <ExternalLink className="h-3 w-3" />
                           詳細
@@ -408,7 +408,7 @@ export default function TextHygieneAuditPage() {
             type="button"
             disabled={loadingMore}
             onClick={() => load(type, meta.nextCursor, true)}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
             もっと読み込む

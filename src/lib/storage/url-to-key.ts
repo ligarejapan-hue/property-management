@@ -20,7 +20,7 @@
 
 import { isValidStorageKey } from "./key-validation";
 
-const UPLOADS_PREFIX = "/uploads/";
+export const UPLOADS_PREFIX = "/uploads/";
 // RFC 3986 scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.\-]*:/;
 
@@ -45,5 +45,44 @@ export function extractStorageKeyFromUrl(
 
   if (key === "") return null;
   if (!isValidStorageKey(key)) return null;
+  return key;
+}
+
+/**
+ * /uploads/{key} 形式の URL からキーを取り出す、backend 非依存の lenient parser。
+ *
+ * extractStorageKeyFromUrl との違い:
+ *   - 絶対 URL（任意 host）でも pathname に /uploads/{key} があれば抽出する。
+ *   - data: / blob: / file: のみ対象外。
+ *
+ * 使用目的: cleanup が /uploads/ 形式で保存された fileUrl を持つ backend
+ *   （local / s3）の keyFromUrl 実装に使う。
+ *
+ * null になる代表ケース:
+ *   - null / undefined / 空 / whitespace のみ
+ *   - data: / blob: / file:
+ *   - pathname に /uploads/ が無い
+ *   - traversal などで isValidStorageKey が拒否する key
+ */
+export function extractStorageKeyFromAnyUploadsUrl(
+  fileUrl: string | null | undefined,
+): string | null {
+  if (typeof fileUrl !== "string") return null;
+  const s = fileUrl.trim();
+  if (s === "") return null;
+  if (/^(data|blob|file):/i.test(s)) return null;
+  let pathPart: string;
+  if (s.startsWith("/")) {
+    pathPart = s.split(/[?#]/)[0];
+  } else {
+    try {
+      pathPart = new URL(s).pathname;
+    } catch {
+      return null;
+    }
+  }
+  if (!pathPart.startsWith(UPLOADS_PREFIX)) return null;
+  const key = pathPart.slice(UPLOADS_PREFIX.length);
+  if (key === "" || !isValidStorageKey(key)) return null;
   return key;
 }

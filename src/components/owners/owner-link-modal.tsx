@@ -181,13 +181,13 @@ export function OwnerLinkModal({
   };
 
   const inputClass =
-    "w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
+    "w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg bg-white p-4 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-[90vw] sm:max-w-xl overflow-y-auto rounded-lg bg-white dark:bg-gray-900 p-4 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-gray-100">
             <UserPlus className="h-4 w-4" />
             所有者を追加
           </h3>
@@ -195,21 +195,21 @@ export function OwnerLinkModal({
             type="button"
             onClick={onClose}
             aria-label="閉じる"
-            className="text-gray-400 hover:text-gray-600"
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* モード切替 */}
-        <div className="mb-3 flex gap-1 rounded-md border border-gray-200 p-1 text-xs">
+        <div className="mb-3 flex gap-1 rounded-md border border-gray-200 dark:border-gray-800 p-1 text-xs">
           <button
             type="button"
             onClick={() => setMode("search")}
             className={`flex-1 rounded px-2 py-1 font-medium ${
               mode === "search"
                 ? "bg-indigo-600 text-white"
-                : "text-gray-600 hover:bg-gray-50"
+                : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
             既存の所有者を紐付け
@@ -220,7 +220,7 @@ export function OwnerLinkModal({
             className={`flex-1 rounded px-2 py-1 font-medium ${
               mode === "create"
                 ? "bg-indigo-600 text-white"
-                : "text-gray-600 hover:bg-gray-50"
+                : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
             新規作成して紐付け
@@ -229,9 +229,9 @@ export function OwnerLinkModal({
 
         {mode === "search" ? (
           <div className="space-y-2">
-            <label className="block text-xs text-gray-600">所有者を検索</label>
+            <label className="block text-xs text-gray-600 dark:text-gray-300">所有者を検索</label>
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
               <input
                 type="text"
                 value={searchQ}
@@ -241,7 +241,7 @@ export function OwnerLinkModal({
               />
             </div>
             {searchLoading && (
-              <p className="flex items-center gap-1 text-xs text-gray-500">
+              <p className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 検索中...
               </p>
@@ -250,7 +250,7 @@ export function OwnerLinkModal({
             {!searchLoading && searchHits.length > 0 && (
               <ul
                 role="listbox"
-                className="max-h-48 overflow-y-auto rounded border border-gray-200"
+                className="max-h-48 overflow-y-auto rounded border border-gray-200 dark:border-gray-800"
               >
                 {searchHits.map((h) => {
                   // 既にこの物件へ紐付け済みの owner は選択不可（@@unique 違反 500 を UI で防ぐ・Codex）。
@@ -262,29 +262,29 @@ export function OwnerLinkModal({
                       aria-selected={selected?.id === h.id}
                       onClick={linked ? undefined : () => setSelected(h)}
                       aria-disabled={linked || undefined}
-                      className={`border-b border-gray-100 px-2 py-1.5 text-xs last:border-b-0 ${
+                      className={`border-b border-gray-100 dark:border-gray-800 px-2 py-1.5 text-xs last:border-b-0 ${
                         linked
-                          ? "cursor-not-allowed bg-gray-50 text-gray-400"
-                          : `cursor-pointer hover:bg-indigo-50 ${
-                              selected?.id === h.id ? "bg-indigo-100" : ""
+                          ? "cursor-not-allowed bg-gray-50 dark:bg-gray-800 text-gray-400 dark:text-gray-500"
+                          : `cursor-pointer hover:bg-indigo-50 dark:hover:bg-gray-800 ${
+                              selected?.id === h.id ? "bg-indigo-100 dark:bg-indigo-500/25" : ""
                             }`
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div
                           className={`font-medium ${
-                            linked ? "text-gray-400" : "text-gray-900"
+                            linked ? "text-gray-400 dark:text-gray-500" : "text-gray-900 dark:text-gray-100"
                           }`}
                         >
                           {h.name}
                         </div>
                         {linked && (
-                          <span className="shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
+                          <span className="shrink-0 rounded bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400">
                             既に紐付け済み
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-gray-500">
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400">
                         {[h.nameKana, h.address].filter(Boolean).join(" ")}
                       </div>
                     </li>
@@ -296,7 +296,7 @@ export function OwnerLinkModal({
               searchQ.trim() !== "" &&
               searchHits.length === 0 &&
               !searchError && (
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
                   該当する所有者が見つかりません。「新規作成して紐付け」もご利用ください。
                 </p>
               )}
@@ -309,7 +309,7 @@ export function OwnerLinkModal({
         ) : (
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-gray-700">
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
                 氏名 <span className="text-red-500">*</span>
               </label>
               <input
@@ -320,7 +320,7 @@ export function OwnerLinkModal({
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-700">氏名カナ</label>
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">氏名カナ</label>
               <input
                 type="text"
                 value={form.nameKana}
@@ -331,7 +331,7 @@ export function OwnerLinkModal({
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-700">電話番号</label>
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">電話番号</label>
               <input
                 type="tel"
                 value={form.phone}
@@ -340,7 +340,7 @@ export function OwnerLinkModal({
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-700">郵便番号</label>
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">郵便番号</label>
               <input
                 type="text"
                 value={form.zip}
@@ -349,7 +349,7 @@ export function OwnerLinkModal({
               />
             </div>
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-gray-700">現住所</label>
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">現住所</label>
               <input
                 type="text"
                 value={form.address}
@@ -373,7 +373,7 @@ export function OwnerLinkModal({
               />
             </div>
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-gray-700">
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
                 メールアドレス
               </label>
               <input
@@ -387,9 +387,9 @@ export function OwnerLinkModal({
         )}
 
         {/* 共通: 続柄 / 主所有者 */}
-        <div className="mt-3 grid grid-cols-1 gap-2 border-t border-gray-100 pt-3 md:grid-cols-2">
+        <div className="mt-3 grid grid-cols-1 gap-2 border-t border-gray-100 dark:border-gray-800 pt-3 md:grid-cols-2">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-700">
+            <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
               続柄・関係（任意）
             </label>
             <input
@@ -400,7 +400,7 @@ export function OwnerLinkModal({
               className={inputClass}
             />
           </div>
-          <label className="flex items-center gap-1.5 self-end pb-1.5 text-xs text-gray-700">
+          <label className="flex items-center gap-1.5 self-end pb-1.5 text-xs text-gray-700 dark:text-gray-200">
             <input
               type="checkbox"
               checked={isPrimary}
@@ -417,7 +417,7 @@ export function OwnerLinkModal({
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
           >
             キャンセル
           </button>

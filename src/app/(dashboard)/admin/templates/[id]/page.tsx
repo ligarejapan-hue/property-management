@@ -147,29 +147,29 @@ export default function TemplateEditPage({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      <div className="flex items-center justify-center min-h-screen dark:bg-gray-900">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400 dark:text-gray-500" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <nav className="mb-4 text-sm text-gray-500">
-        <Link href="/admin" className="hover:text-gray-700">管理</Link>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+      <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-200">管理</Link>
         <span className="mx-2">/</span>
-        <Link href="/admin/templates" className="hover:text-gray-700">権限テンプレート一覧</Link>
+        <Link href="/admin/templates" className="hover:text-gray-700 dark:hover:text-gray-200">権限テンプレート一覧</Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900">テンプレート編集</span>
+        <span className="text-gray-900 dark:text-gray-100">テンプレート編集</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">権限テンプレート編集</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">権限テンプレート編集</h1>
 
       {/* Template info */}
-      <div className="mb-8 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor="tpl-name" className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="tpl-name" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
               テンプレート名 *
             </label>
             <input
@@ -177,11 +177,11 @@ export default function TemplateEditPage({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
             />
           </div>
           <div className="sm:col-span-2">
-            <label htmlFor="tpl-desc" className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="tpl-desc" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
               説明
             </label>
             <textarea
@@ -189,7 +189,7 @@ export default function TemplateEditPage({
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
             />
           </div>
         </div>
@@ -197,23 +197,23 @@ export default function TemplateEditPage({
 
       {/* Permission matrix */}
       <section className="mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">権限マトリクス</h2>
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">権限マトリクス</h2>
+        <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   リソース
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500" colSpan={8}>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400" colSpan={8}>
                   アクション
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
               {RESOURCES.map((res) => (
-                <tr key={res.key} className="hover:bg-gray-50">
-                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
+                <tr key={res.key} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                     {res.label}
                   </td>
                   <td className="px-4 py-3">
@@ -225,15 +225,15 @@ export default function TemplateEditPage({
                             key={action}
                             className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors ${
                               granted
-                                ? "bg-indigo-100 text-indigo-800"
-                                : "bg-gray-100 text-gray-500"
+                                ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300"
+                                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                             }`}
                           >
                             <input
                               type="checkbox"
                               checked={granted}
                               onChange={() => togglePermission(res.key, action)}
-                              className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                              className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-700 text-indigo-600 focus:ring-indigo-500"
                             />
                             {ACTION_LABELS[action] ?? action}
                           </label>
@@ -252,7 +252,7 @@ export default function TemplateEditPage({
       <div className="flex items-center justify-end gap-4">
         {message && (
           <span
-            className={`text-sm ${message.includes("失敗") || message.includes("必須") ? "text-red-600" : "text-green-600"}`}
+            className={`text-sm ${message.includes("失敗") || message.includes("必須") ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}
           >
             {message}
           </span>

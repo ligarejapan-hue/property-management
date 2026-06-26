@@ -90,6 +90,8 @@ export async function POST(
           externalLinkKey: ownerData.externalLinkKey,
           // corporateNumber は createOwnerSchema で 13桁正規化済 or null（生値はログに残さない）。
           corporateNumber: ownerData.corporateNumber ?? null,
+          // companyRegistryNumber(12桁) も /api/owners POST と同様に保存する（取りこぼし防止）。
+          companyRegistryNumber: ownerData.companyRegistryNumber ?? null,
         },
       });
       // isPrimary なら既存の主所有者を解除してから link（/api/properties/[id]/owners POST と同方針）。

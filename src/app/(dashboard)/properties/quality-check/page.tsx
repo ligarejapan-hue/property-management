@@ -126,7 +126,7 @@ export default function QualityCheckPage() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">データ品質チェック</h2>
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">データ品質チェック</h2>
         <button
           onClick={runCheck}
           disabled={loading}
@@ -143,7 +143,7 @@ export default function QualityCheckPage() {
           <SummaryCard
             label="チェック物件数"
             count={summary.propertiesChecked}
-            color="text-gray-800"
+            color="text-gray-800 dark:text-gray-100"
           />
           <SummaryCard
             label="エラー"
@@ -168,7 +168,7 @@ export default function QualityCheckPage() {
         <select
           value={filterSeverity}
           onChange={(e) => setFilterSeverity(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700"
         >
           <option value="">すべての重要度</option>
           <option value="error">エラーのみ</option>
@@ -186,7 +186,7 @@ export default function QualityCheckPage() {
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-          <span className="ml-2 text-sm text-gray-500">チェック中...</span>
+          <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">チェック中...</span>
         </div>
       ) : filteredIssues.length === 0 ? (
         <div className="rounded-lg border border-green-200 bg-green-50 p-8 text-center">
@@ -212,7 +212,7 @@ export default function QualityCheckPage() {
                     >
                       {config.label}
                     </span>
-                    <span className="text-xs text-gray-500 font-mono">
+                    <span className="text-xs text-gray-500 font-mono dark:text-gray-400">
                       {issue.code}
                     </span>
                   </div>
@@ -232,7 +232,7 @@ export default function QualityCheckPage() {
 
       {!loading && hasMore && (
         <div className="mt-4 flex items-center justify-center gap-3">
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             {summary
               ? `全 ${summary.total} 件中 ${issues.length} 件を表示（上限のため一部のみ）`
               : ""}
@@ -241,7 +241,7 @@ export default function QualityCheckPage() {
             type="button"
             onClick={loadMore}
             disabled={loadingMore}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             {loadingMore ? "読み込み中…" : "さらに読み込む"}
           </button>
@@ -261,9 +261,9 @@ function SummaryCard({
   color: string;
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 text-center">
+    <div className="rounded-lg border border-gray-200 bg-white p-4 text-center dark:border-gray-800 dark:bg-gray-900">
       <p className={`text-2xl font-bold ${color}`}>{count}</p>
-      <p className="text-xs text-gray-500 mt-1">{label}</p>
+      <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">{label}</p>
     </div>
   );
 }

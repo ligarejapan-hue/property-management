@@ -1,10 +1,10 @@
 // 開発・テスト用の法人番号 lookup mock。
 // NEXT_PUBLIC_USE_MOCK=true のときに使う。DB 更新は当然なし。
 //
-// 既定ケース:
-//   - 1234567890123 → found
+// 既定ケース(いずれもチェックデジット妥当な13桁。owner-scoped route が CD 検証するため):
+//   - 8700110005901 (CD妥当な任意13桁) → found
 //   - 9999999999999 → not found
-//   - 8888888888888 → closed
+//   - 9888888888888 → closed
 
 import type {
   CorporateLookupProvider,
@@ -31,7 +31,7 @@ export class MockCorporateLookupProvider implements CorporateLookupProvider {
       };
     }
 
-    if (corporateNumber13 === "8888888888888") {
+    if (corporateNumber13 === "9888888888888") {
       return {
         found: true,
         isClosed: true,

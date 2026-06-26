@@ -42,7 +42,7 @@ const TYPE_LABEL: Record<string, string> = {
 const TYPE_BADGE: Record<string, string> = {
   missing: "bg-yellow-100 text-yellow-800 border-yellow-300",
   conflict: "bg-red-100 text-red-700 border-red-300",
-  multi: "bg-gray-100 text-gray-700 border-gray-300",
+  multi: "bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700",
   same: "bg-green-100 text-green-700 border-green-300",
 };
 
@@ -210,22 +210,22 @@ export default function AdminOwnerDetailPage() {
       <div className="mb-4 flex items-center gap-3">
         <Link
           href="/admin/owners/correction?tab=corporate_number"
-          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
           <ArrowLeft className="h-4 w-4" />
           補正候補に戻る
         </Link>
-        <span className="text-gray-300">/</span>
-        <h1 className="text-lg font-bold text-gray-900">Owner 詳細</h1>
+        <span className="text-gray-300 dark:text-gray-700">/</span>
+        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Owner 詳細</h1>
         {owner && (
-          <span className="font-mono text-[11px] text-gray-400">
+          <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">
             {owner.ownerId.slice(0, 8)}…
           </span>
         )}
       </div>
 
       {loading && (
-        <p className="flex items-center gap-2 py-8 text-sm text-gray-500">
+        <p className="flex items-center gap-2 py-8 text-sm text-gray-500 dark:text-gray-400">
           <Loader2 className="h-4 w-4 animate-spin" />
           読み込み中...
         </p>
@@ -240,8 +240,8 @@ export default function AdminOwnerDetailPage() {
       {!loading && !error && owner && (
         <div className="space-y-6">
           {/* Owner 概要カード */}
-          <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-3 text-sm font-semibold text-gray-700">
+          <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
               Owner 概要
             </h2>
             {/* 17-A: masked 値であっても所有者 PII 面として copy/cut/contextmenu 抑止＋監査の対象にする。 */}
@@ -269,8 +269,8 @@ export default function AdminOwnerDetailPage() {
           </section>
 
           {/* 法人番号補正セクション */}
-          <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-3 text-sm font-semibold text-gray-700">
+          <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
               法人番号補正
             </h2>
 
@@ -322,14 +322,14 @@ export default function AdminOwnerDetailPage() {
                     </div>
                   )}
                   {candidate.type === "multi" && (
-                    <div className="text-[11px] text-gray-700">
+                    <div className="text-[11px] text-gray-700 dark:text-gray-200">
                       複数候補が検出されたため、自動転記できません。
                     </div>
                   )}
                 </div>
               </div>
             ) : (
-              <p className="mb-3 text-xs text-gray-500">
+              <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
                 法人番号候補は検出されませんでした。
               </p>
             )}
@@ -337,7 +337,7 @@ export default function AdminOwnerDetailPage() {
             {/* 法人番号入力欄 + CorporateLookupPanel */}
             {fieldEditable.corporateNumber ? (
               <div className="space-y-2">
-                <label className="text-xs font-medium text-gray-700">
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
                   法人番号（13桁）
                 </label>
                 <input
@@ -346,7 +346,7 @@ export default function AdminOwnerDetailPage() {
                   value={corporateInput}
                   onChange={(e) => setCorporateInput(e.target.value)}
                   placeholder="例: 1234567890123"
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 md:w-80"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 md:w-80 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder:text-gray-500"
                 />
                 <CorporateLookupPanel
                   ownerId={owner.ownerId}
@@ -366,7 +366,7 @@ export default function AdminOwnerDetailPage() {
                 />
               </div>
             ) : (
-              <p className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              <p className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
                 法人番号の編集権限がありません。
               </p>
             )}
@@ -388,14 +388,14 @@ function Field({
 }) {
   return (
     <div>
-      <dt className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         {label}
       </dt>
       <dd
-        className={mono ? "font-mono text-gray-900" : "text-gray-900"}
+        className={mono ? "font-mono text-gray-900 dark:text-gray-100" : "text-gray-900 dark:text-gray-100"}
         data-field={label}
       >
-        {value ?? <span className="text-gray-400">—</span>}
+        {value ?? <span className="text-gray-400 dark:text-gray-500">—</span>}
       </dd>
     </div>
   );

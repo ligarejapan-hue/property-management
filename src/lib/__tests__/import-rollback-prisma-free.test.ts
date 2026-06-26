@@ -102,7 +102,7 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
     ]);
   });
 
-  it("OWNER_TRACKED_FIELDS の中身は既存と同一 (8 項目)", () => {
+  it("OWNER_TRACKED_FIELDS の中身 (9 項目・21-D Phase3 で companyRegistryNumber 追加)", () => {
     expect(OWNER_TRACKED_FIELDS).toEqual([
       "name",
       "nameKana",
@@ -112,6 +112,7 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
       "note",
       "email",
       "corporateNumber",
+      "companyRegistryNumber",
     ]);
   });
 

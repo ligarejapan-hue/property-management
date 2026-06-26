@@ -19,8 +19,14 @@ import {
   lookupOwnerCorporateNumber,
   applyOwnerCorporate,
   type CorporateLookupApiResponse,
+  type CorporateIdentifierKindDTO,
+  type CorporateLookupConflictDTO,
 } from "@/lib/api-client";
-import { normalizeCorporateNumber } from "@/lib/corporate-number";
+import {
+  classifyCorporateIdentifier,
+  normalizeCorporateIdentifier,
+  calculateCorporateNumberFromCompanyNumber,
+} from "@/lib/corporate-number";
 
 interface CorporateLookupPanelProps {
   ownerId: string;
@@ -58,7 +64,13 @@ export default function CorporateLookupPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CorporateLookupApiResponse["lookup"] | null>(null);
-  // この result / error が「どの 13桁正規化値」に対するものか。
+  // 入力種別 / 解決済み13桁 / conflict 分類（route が server 側で解決した結果）。
+  const [meta, setMeta] = useState<{
+    inputKind?: CorporateIdentifierKindDTO;
+    resolvedCorporateNumber13?: string;
+    conflict?: CorporateLookupConflictDTO;
+  } | null>(null);
+  // この result / error が「どの正規化入力(12/13桁)」に対するものか。
   // 現在の入力値と一致しなくなったら preview / error を出さない（古い検索結果が
   // 別の入力値に対して表示されないことを保証）。
   const [searchedFor, setSearchedFor] = useState<string | null>(null);
@@ -74,31 +86,57 @@ export default function CorporateLookupPanel({
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applied, setApplied] = useState(false);
 
-  const normalized = normalizeCorporateNumber(rawCorporateNumber);
-  const canSearch = !!normalized && !loading && configured && !disabledReason;
+  // 12桁(会社法人等番号) / 13桁(法人番号・CD正) を受け付ける。invalid は検索不可。
+  const kind = classifyCorporateIdentifier(rawCorporateNumber);
+  // 検索キー兼 route 送信値（正規化済み 12/13桁。route が server 側で 13桁に解決）。
+  const identifierKey = normalizeCorporateIdentifier(rawCorporateNumber);
+  const canSearch =
+    kind !== "invalid" && !loading && configured && !disabledReason;
+  // 12桁入力時にクライアント側で算出した13桁（事前ヒント表示用。server を正とする）。
+  const derived13 =
+    kind === "company_corporate_number_12"
+      ? calculateCorporateNumberFromCompanyNumber(rawCorporateNumber)
+      : null;
+  // 入力が非空 だが invalid のときだけ理由を出す（空入力では出さない）。
+  const invalidHint =
+    rawCorporateNumber.trim() !== "" && kind === "invalid"
+      ? "12桁の会社法人等番号、または13桁の法人番号（チェックデジット正）を入力してください"
+      : null;
 
   // 検索結果と現在の入力が一致している場合のみ表示する。
-  const showResult = result !== null && searchedFor !== null && searchedFor === normalized;
-  const showError = error !== null && searchedFor !== null && searchedFor === normalized;
+  const showResult =
+    result !== null && searchedFor !== null && searchedFor === identifierKey;
+  const showError =
+    error !== null && searchedFor !== null && searchedFor === identifierKey;
 
   const handleSearch = async () => {
-    if (!normalized) {
-      setError("法人番号は13桁の数字で入力してください");
-      setSearchedFor(normalized);
+    if (kind === "invalid" || !identifierKey) {
+      setError(
+        "12桁の会社法人等番号、または13桁の法人番号（チェックデジット正）を入力してください",
+      );
+      setSearchedFor(identifierKey);
       setResult(null);
+      setMeta(null);
       return;
     }
     setLoading(true);
     setError(null);
     setResult(null);
+    setMeta(null);
     setApplied(false);
     setApplyError(null);
     setApplyTargets({ name: false, address: false, zip: false, corporateNumber: false });
-    const searchTarget = normalized;
+    const searchTarget = identifierKey;
     setSearchedFor(searchTarget);
     try {
+      // 12桁/13桁いずれもそのまま送り、route 側で 13桁へ解決して lookup する。
       const res = await lookupOwnerCorporateNumber(ownerId, searchTarget);
       setResult(res.lookup);
+      setMeta({
+        inputKind: res.inputKind,
+        resolvedCorporateNumber13: res.resolvedCorporateNumber13,
+        conflict: res.conflict,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "検索に失敗しました";
       setError(msg);
@@ -129,28 +167,67 @@ export default function CorporateLookupPanel({
       );
       if (!confirmed) return;
     }
-    setApplying(true);
-    setApplyError(null);
-    try {
-      await applyOwnerCorporate(ownerId, {
-        corporateNumber: result.record.corporateNumber,
+    const record = result.record;
+    const closed = result.isClosed;
+    // 案2: 12桁で検索した場合、元の会社法人等番号(12桁)を apply に同梱して保存させる
+    // (searchedFor は検索時の正規化入力。inputKind=12 のとき 12桁)。
+    const companyRegistry12 =
+      meta?.inputKind === "company_corporate_number_12"
+        ? searchedFor ?? undefined
+        : undefined;
+    const submit = (acknowledgeConflict?: boolean) =>
+      applyOwnerCorporate(ownerId, {
+        corporateNumber: record.corporateNumber,
         version: ownerVersion,
         apply: applyTargets,
         expectedRecord: {
-          corporateNumber: result.record.corporateNumber,
-          name: result.record.name,
-          address: result.record.address,
-          postCode: result.record.postCode,
-          updateDate: result.record.updateDate,
+          corporateNumber: record.corporateNumber,
+          name: record.name,
+          address: record.address,
+          postCode: record.postCode,
+          updateDate: record.updateDate,
         },
-        allowClosed: result.isClosed ? true : undefined,
+        allowClosed: closed ? true : undefined,
+        acknowledgeConflict,
+        companyRegistryNumber: companyRegistry12,
       });
+    setApplying(true);
+    setApplyError(null);
+    try {
+      await submit();
       setApplied(true);
       if (onApplied) {
         await onApplied();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "反映に失敗しました";
+      // 「明らかな不一致(conflict)」は確認のうえ acknowledgeConflict=true で再送する
+      // （allowClosed と同型）。generic CONFLICT(楽観ロック)より先に判定する
+      // ＝CONFLICT_NOT_ACKNOWLEDGED は "CONFLICT" を含むため順序が重要。
+      if (
+        msg.includes("CONFLICT_NOT_ACKNOWLEDGED") ||
+        msg.includes("大きく異なります")
+      ) {
+        const ok = window.confirm(
+          "国税庁の法人情報が既存の所有者情報と大きく異なります。内容を確認のうえ反映しますか？",
+        );
+        if (!ok) {
+          setApplyError("情報の不一致を確認してください（反映を中止しました）。");
+          return;
+        }
+        try {
+          await submit(true);
+          setApplied(true);
+          if (onApplied) {
+            await onApplied();
+          }
+        } catch (err2) {
+          setApplyError(
+            err2 instanceof Error ? err2.message : "反映に失敗しました",
+          );
+        }
+        return;
+      }
       if (msg.includes("FETCH_STALE") || msg.includes("プレビュー")) {
         setApplyError(
           "プレビュー後に法人情報が更新されています。検索し直してください。",
@@ -221,14 +298,25 @@ export default function CorporateLookupPanel({
           )}
         </button>
         {!configured && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             法人番号API未設定（管理者に env 設定を依頼してください）
           </span>
         )}
         {disabledReason && (
-          <span className="text-xs text-gray-500">{disabledReason}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">{disabledReason}</span>
         )}
       </div>
+
+      {/* 入力種別の事前ヒント（server を正としつつ即時フィードバック）。 */}
+      {!disabledReason && configured && derived13 && (
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          12桁 会社法人等番号 → 法人番号{" "}
+          <span className="font-mono">{derived13}</span> を検索します
+        </p>
+      )}
+      {!disabledReason && configured && invalidHint && (
+        <p className="text-[11px] text-amber-600">{invalidHint}</p>
+      )}
 
       {showError && (
         <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -238,27 +326,56 @@ export default function CorporateLookupPanel({
       )}
 
       {showResult && result && !result.found && (
-        <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-          該当する法人が見つかりませんでした（法人番号: {searchedFor}）
+        <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+          該当する法人が見つかりませんでした（法人番号:{" "}
+          {meta?.resolvedCorporateNumber13 ?? searchedFor}）
+        </div>
+      )}
+
+      {/* conflict: 国税庁結果と既存所有者情報が明らかに別物のときの事前警告。 */}
+      {showResult && result && result.found && meta?.conflict === "conflict" && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div>
+            国税庁の法人情報が既存の所有者情報と大きく異なります。別法人の可能性がないか確認のうえ反映してください。
+          </div>
         </div>
       )}
 
       {showResult && result && result.found && result.record && (
         <div
           data-testid="corporate-lookup-preview"
-          className="space-y-2 rounded-md border border-blue-200 bg-blue-50/40 px-3 py-3 text-xs text-gray-800"
+          className="space-y-2 rounded-md border border-blue-200 bg-blue-50/40 px-3 py-3 text-xs text-gray-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-gray-200"
         >
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-gray-700">国税庁データ</span>
+            <span className="font-semibold text-gray-700 dark:text-gray-200">国税庁データ</span>
             {result.isClosed && (
               <span className="rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
                 廃止法人
               </span>
             )}
-            <span className="ml-auto text-[10px] text-gray-500">
+            <span className="ml-auto text-[10px] text-gray-500 dark:text-gray-400">
               取得: {result.fetchedAt.slice(0, 10)} / {result.source}
             </span>
           </div>
+          {meta?.inputKind && meta.inputKind !== "invalid" && (
+            <p className="text-[10px] text-gray-500 dark:text-gray-400">
+              入力:{" "}
+              {meta.inputKind === "company_corporate_number_12"
+                ? "12桁 会社法人等番号"
+                : "13桁 法人番号"}
+              {meta.inputKind === "company_corporate_number_12" &&
+                meta.resolvedCorporateNumber13 && (
+                  <>
+                    {" "}
+                    → 算出した法人番号{" "}
+                    <span className="font-mono">
+                      {meta.resolvedCorporateNumber13}
+                    </span>
+                  </>
+                )}
+            </p>
+          )}
           <dl className="grid grid-cols-1 gap-x-4 gap-y-1 md:grid-cols-2">
             <PreviewField label="法人番号" value={result.record.corporateNumber} mono />
             <PreviewField label="更新年月日" value={result.record.updateDate} mono />
@@ -290,10 +407,10 @@ export default function CorporateLookupPanel({
               </div>
             ) : (
               <>
-                <div className="text-[11px] font-medium text-gray-700">
+                <div className="text-[11px] font-medium text-gray-700 dark:text-gray-200">
                   反映対象を選択
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-700">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-700 dark:text-gray-200">
                   <ApplyCheckbox
                     label="会社名 → 所有者名"
                     checked={applyTargets.name}
@@ -320,6 +437,17 @@ export default function CorporateLookupPanel({
                   />
                 </div>
 
+                {/* 案2: 12桁検索で法人番号を反映する場合、元の12桁も会社法人等番号として保存される旨。 */}
+                {meta?.inputKind === "company_corporate_number_12" &&
+                  applyTargets.corporateNumber &&
+                  searchedFor && (
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                      会社法人等番号（
+                      <span className="font-mono">{searchedFor}</span>
+                      ・12桁）も併せて保存されます
+                    </p>
+                  )}
+
                 {applyError && (
                   <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-700">
                     <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -343,12 +471,12 @@ export default function CorporateLookupPanel({
                   )}
                 </button>
                 {typeof ownerVersion !== "number" && (
-                  <p className="text-[10px] text-gray-500">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400">
                     所有者バージョンが取得できていないため反映できません
                   </p>
                 )}
                 {!canApplyAny && fieldEditable && (
-                  <p className="text-[10px] text-gray-500">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400">
                     反映に必要な編集権限がありません
                   </p>
                 )}
@@ -372,8 +500,8 @@ function PreviewField({
 }) {
   return (
     <div>
-      <dt className="text-[10px] font-medium uppercase tracking-wider text-gray-500">{label}</dt>
-      <dd className={mono ? "font-mono text-gray-900" : "text-gray-900"}>{value ?? "-"}</dd>
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</dt>
+      <dd className={mono ? "font-mono text-gray-900 dark:text-gray-100" : "text-gray-900 dark:text-gray-100"}>{value ?? "-"}</dd>
     </div>
   );
 }

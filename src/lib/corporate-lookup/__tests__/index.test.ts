@@ -3,7 +3,7 @@
  *
  * - env 未設定 → CorporateLookupError("NOT_CONFIGURED")
  * - NEXT_PUBLIC_USE_MOCK=true → MockCorporateLookupProvider が呼ばれる
- * - mock provider: 1234567890123 found / 9999999999999 not found / 8888888888888 closed
+ * - mock provider: 8700110005901 found / 9999999999999 not found / 9888888888888 closed
  * - capability flag: env 状況で適切に true/false
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -81,8 +81,8 @@ describe("MockCorporateLookupProvider", () => {
     expect(r.record).toBeNull();
   });
 
-  it("8888888888888 → closed", async () => {
-    const r = await new MockCorporateLookupProvider().lookup("8888888888888");
+  it("9888888888888 → closed", async () => {
+    const r = await new MockCorporateLookupProvider().lookup("9888888888888");
     expect(r.found).toBe(true);
     expect(r.isClosed).toBe(true);
     expect(r.closeDate).toBe("2024-12-31");

@@ -133,12 +133,12 @@ export default function PinCreateModal({
       data-testid="pin-create-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
     >
-      <div className="w-full max-w-md rounded-md bg-white p-4 text-sm shadow-lg">
-        <h3 className="mb-3 text-base font-semibold text-gray-800">
+      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[90vh] overflow-y-auto rounded-md bg-white dark:bg-gray-900 p-4 text-sm shadow-lg">
+        <h3 className="mb-3 text-base font-semibold text-gray-800 dark:text-gray-100">
           調査ピンを追加
         </h3>
 
-        <dl className="mb-3 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-1 text-[11px] text-gray-700">
+        <dl className="mb-3 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-1 text-[11px] text-gray-700 dark:text-gray-200">
           <dt>緯度</dt>
           <dd data-testid="pin-create-lat">{formatCoord(initialLat)}</dd>
           <dt>経度</dt>
@@ -150,7 +150,7 @@ export default function PinCreateModal({
             type="button"
             onClick={onUseCurrentLocation}
             disabled={currentLocationLoading}
-            className="rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
             data-testid="pin-create-use-current-location"
           >
             {currentLocationLoading ? "現在地を取得中…" : "現在地を使う"}
@@ -158,7 +158,7 @@ export default function PinCreateModal({
           {currentLocationError && (
             <p
               role="status"
-              className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+              className="mt-1 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
             >
               {currentLocationError}
             </p>
@@ -166,7 +166,7 @@ export default function PinCreateModal({
         </div>
 
         <fieldset className="mb-3" disabled={busy}>
-          <legend className="mb-1 text-xs font-semibold text-gray-700">
+          <legend className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
             種類
           </legend>
           <div className="grid grid-cols-2 gap-1">
@@ -180,14 +180,14 @@ export default function PinCreateModal({
                   onChange={() => setPinType(t)}
                   data-testid={`pin-create-type-${t}`}
                 />
-                <span>{formatPinType(t)}</span>
+                <span className="dark:text-gray-200">{formatPinType(t)}</span>
               </label>
             ))}
           </div>
         </fieldset>
 
         <label className="mb-3 block">
-          <span className="mb-1 block text-xs font-semibold text-gray-700">
+          <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
             メモ (任意)
           </span>
           <textarea
@@ -196,18 +196,18 @@ export default function PinCreateModal({
             maxLength={FIELD_SURVEY_MEMO_MAX_LEN}
             rows={3}
             disabled={busy}
-            className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
+            className="w-full rounded border border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 px-2 py-1 text-[12px] focus:border-indigo-500 focus:outline-none"
             data-testid="pin-create-memo"
             placeholder="例: 解体予定の張り紙あり"
           />
-          <span className="mt-1 block text-right text-[10px] text-gray-400">
+          <span className="mt-1 block text-right text-[10px] text-gray-400 dark:text-gray-500">
             {memo.length} / {FIELD_SURVEY_MEMO_MAX_LEN}
           </span>
         </label>
 
         {/* 写真 (任意 / 1 枚)。撮影 = 単発の写真取得。動画 / 連続撮影はしない。 */}
         <div className="mb-3">
-          <span className="mb-1 block text-xs font-semibold text-gray-700">
+          <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
             写真 (任意)
           </span>
           <input
@@ -233,7 +233,7 @@ export default function PinCreateModal({
               onClick={() => cameraInputRef.current?.click()}
               disabled={busy || photoUploadFailed}
               data-testid="pin-create-photo-camera"
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               写真を撮る
             </button>
@@ -242,7 +242,7 @@ export default function PinCreateModal({
               onClick={() => galleryInputRef.current?.click()}
               disabled={busy || photoUploadFailed}
               data-testid="pin-create-photo-add"
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               写真を追加
             </button>
@@ -255,14 +255,14 @@ export default function PinCreateModal({
                 src={photoPreviewUrl}
                 alt="選択した写真のサムネイル"
                 data-testid="pin-create-photo-thumb"
-                className="h-16 w-16 rounded border border-gray-200 object-cover"
+                className="h-16 w-16 rounded border border-gray-200 dark:border-gray-800 object-cover"
               />
               <button
                 type="button"
                 onClick={clearPhoto}
                 disabled={busy || photoUploadFailed}
                 data-testid="pin-create-photo-clear"
-                className="text-[11px] text-gray-500 underline hover:text-gray-800 disabled:opacity-60"
+                className="text-[11px] text-gray-500 dark:text-gray-400 underline hover:text-gray-800 dark:hover:text-gray-100 disabled:opacity-60"
               >
                 写真を取り消す
               </button>
@@ -273,7 +273,7 @@ export default function PinCreateModal({
         {!sessionId && (
           <p
             role="status"
-            className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+            className="mb-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
           >
             巡回 session が無いため保存できません。巡回を開始してください。
           </p>
@@ -282,7 +282,7 @@ export default function PinCreateModal({
         {serverError && (
           <p
             role="status"
-            className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+            className="mb-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
           >
             {serverError}
           </p>
@@ -292,9 +292,9 @@ export default function PinCreateModal({
           // pin は保存済み。ゼロから作り直させず、写真だけ再試行 / 写真なし完了に誘導。
           <div
             data-testid="pin-create-photo-failed"
-            className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900"
+            className="rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 p-2 text-[11px] text-amber-900 dark:text-amber-300"
           >
-            <p className="font-semibold text-emerald-700">ピンは保存されました</p>
+            <p className="font-semibold text-emerald-700 dark:text-emerald-400">ピンは保存されました</p>
             <p className="mt-1">写真の保存に失敗しました</p>
             <div className="mt-2 flex justify-end gap-2">
               <button
@@ -302,7 +302,7 @@ export default function PinCreateModal({
                 onClick={onFinishWithoutPhoto}
                 disabled={photoUploading}
                 data-testid="pin-create-photo-finish-without"
-                className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
               >
                 写真なしで完了
               </button>
@@ -323,7 +323,7 @@ export default function PinCreateModal({
               type="button"
               onClick={onCancel}
               disabled={busy}
-              className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
             >
               キャンセル
             </button>

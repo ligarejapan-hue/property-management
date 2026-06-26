@@ -151,8 +151,8 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const linkClasses = (href: string) =>
     `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
       isActive(href)
-        ? "bg-indigo-50 text-indigo-700"
-        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+        ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300"
+        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
     }`;
 
   const isAdmin = userRole === "admin" || userRole === "ADMIN";
@@ -160,7 +160,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const navContent = (
     <nav className="flex flex-col gap-1 p-4">
       <div className="mb-2">
-        <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500">
+        <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
           メニュー
         </p>
       </div>
@@ -181,7 +181,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
           <div className="mt-4 mb-1">
             <button
               onClick={() => setAdminOpen(!adminOpen)}
-              className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700"
+              className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               {adminOpen ? (
                 <ChevronDown className="h-3 w-3" />
@@ -213,13 +213,13 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
       {/* Mobile toggle button */}
       <button
         onClick={() => setMobileOpen(!mobileOpen)}
-        className="fixed top-3 left-3 z-50 rounded-md bg-white p-2 shadow-md lg:hidden"
+        className="fixed top-3 left-3 z-50 rounded-md bg-white dark:bg-gray-900 p-2 shadow-md lg:hidden"
         aria-label="メニューを開く"
       >
         {mobileOpen ? (
-          <X className="h-5 w-5 text-gray-700" />
+          <X className="h-5 w-5 text-gray-700 dark:text-gray-300" />
         ) : (
-          <Menu className="h-5 w-5 text-gray-700" />
+          <Menu className="h-5 w-5 text-gray-700 dark:text-gray-300" />
         )}
       </button>
 
@@ -233,13 +233,13 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 transform border-r border-gray-200 bg-white transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 w-60 transform border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 transition-transform duration-200 lg:static lg:translate-x-0 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex h-14 items-center border-b border-gray-200 px-4">
+        <div className="flex h-14 items-center border-b border-gray-200 dark:border-gray-700 px-4">
           <FileText className="mr-2 h-5 w-5 text-indigo-600" />
-          <span className="text-sm font-bold text-gray-800">物件管理</span>
+          <span className="text-sm font-bold text-gray-800 dark:text-gray-100">物件管理</span>
         </div>
         <div className="overflow-y-auto">{navContent}</div>
       </aside>

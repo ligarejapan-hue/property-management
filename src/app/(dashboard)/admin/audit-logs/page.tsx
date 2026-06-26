@@ -151,29 +151,29 @@ export default function AuditLogsPage() {
   const totalPages = Math.ceil(total / limit);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <nav className="mb-4 text-sm text-gray-500">
-        <Link href="/admin" className="hover:text-gray-700">管理</Link>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+      <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-300">管理</Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900">監査ログ</span>
+        <span className="text-gray-900 dark:text-gray-100">監査ログ</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">監査ログ</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">監査ログ</h1>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
         監査ログは閲覧のみです。編集・削除はできません。
       </p>
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-4 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
 
       {/* Filter bar */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div>
-            <label htmlFor="date-from" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="date-from" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               日付範囲（開始）
             </label>
             <input
@@ -181,11 +181,11 @@ export default function AuditLogsPage() {
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label htmlFor="date-to" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="date-to" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               日付範囲（終了）
             </label>
             <input
@@ -193,11 +193,11 @@ export default function AuditLogsPage() {
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
-            <label htmlFor="user-name-filter" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="user-name-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               ユーザー名
             </label>
             <input
@@ -209,18 +209,18 @@ export default function AuditLogsPage() {
                 setUserNameInput(e.target.value);
                 commitUserName(e.target.value);
               }}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
             />
           </div>
           <div>
-            <label htmlFor="action-filter" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="action-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               操作種別
             </label>
             <select
               id="action-filter"
               value={actionFilter}
               onChange={(e) => setActionFilter(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">すべて</option>
               {actions.map((a) => (
@@ -229,14 +229,14 @@ export default function AuditLogsPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="target-table-filter" className="block text-xs font-medium text-gray-700 mb-1">
+            <label htmlFor="target-table-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               対象テーブル
             </label>
             <select
               id="target-table-filter"
               value={targetTableFilter}
               onChange={(e) => setTargetTableFilter(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">すべて</option>
               {targetTables.map((t) => (
@@ -256,7 +256,7 @@ export default function AuditLogsPage() {
             <button
               type="button"
               onClick={handleReset}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               <RotateCcw className="h-4 w-4" />
               リセット
@@ -266,58 +266,58 @@ export default function AuditLogsPage() {
       </div>
 
       {/* Table */}
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
           </div>
         ) : (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+            <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">日時</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">ユーザー</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">操作</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">対象</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">詳細</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">日時</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">ユーザー</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">操作</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">対象</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">詳細</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-900">
               {logs.map((log) => {
                 const expanded = expandedId === log.id;
                 const hasDetail = log.detail != null;
                 return (
                   <Fragment key={log.id}>
                     <tr
-                      className={`hover:bg-gray-50 ${hasDetail ? "cursor-pointer" : ""}`}
+                      className={`hover:bg-gray-50 dark:hover:bg-gray-800 ${hasDetail ? "cursor-pointer" : ""}`}
                       onClick={() =>
                         hasDetail && setExpandedId(expanded ? null : log.id)
                       }
                     >
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 font-mono">
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">
                         {new Date(log.createdAt).toLocaleString("ja-JP")}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
+                      <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                         {log.user?.name ?? "不明"}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm">
-                        <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                        <span className="inline-flex rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-0.5 text-xs font-medium text-gray-800 dark:text-gray-200">
                           {ACTION_LABELS[log.action] ?? log.action}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                         {log.targetTable && (
                           <span>
                             {TARGET_TABLE_LABELS[log.targetTable] ?? log.targetTable}
                             {log.targetId && (
-                              <span className="text-gray-400 ml-1">#{log.targetId.slice(0, 8)}</span>
+                              <span className="text-gray-400 dark:text-gray-500 ml-1">#{log.targetId.slice(0, 8)}</span>
                             )}
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate">
+                      <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate">
                         {hasDetail ? (
-                          <span className="text-indigo-600">
+                          <span className="text-indigo-600 dark:text-indigo-400">
                             {expanded ? "▼ 折りたたむ" : "▶ 展開"}
                           </span>
                         ) : (
@@ -326,9 +326,9 @@ export default function AuditLogsPage() {
                       </td>
                     </tr>
                     {expanded && hasDetail && (
-                      <tr className="bg-gray-50">
+                      <tr className="bg-gray-50 dark:bg-gray-800/50">
                         <td colSpan={5} className="px-4 py-3">
-                          <pre className="max-h-80 overflow-auto rounded border border-gray-200 bg-white p-3 text-xs text-gray-700">
+                          <pre className="max-h-80 overflow-auto rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 text-xs text-gray-700 dark:text-gray-200">
                             {JSON.stringify(log.detail, null, 2)}
                           </pre>
                         </td>
@@ -339,7 +339,7 @@ export default function AuditLogsPage() {
               })}
               {logs.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400">
+                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">
                     該当するログが見つかりません。
                   </td>
                 </tr>
@@ -351,7 +351,7 @@ export default function AuditLogsPage() {
 
       {/* Pagination */}
       <div className="mt-4 flex items-center justify-between">
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           全 {total} 件{total > 0 && `中 ${(page - 1) * limit + 1}〜${Math.min(page * limit, total)} 件`}
         </p>
         <div className="flex gap-2">
@@ -359,18 +359,18 @@ export default function AuditLogsPage() {
             type="button"
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+            className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed"
           >
             前へ
           </button>
-          <span className="flex items-center px-2 text-sm text-gray-500">
+          <span className="flex items-center px-2 text-sm text-gray-500 dark:text-gray-400">
             {page} / {totalPages || 1}
           </span>
           <button
             type="button"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+            className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed"
           >
             次へ
           </button>

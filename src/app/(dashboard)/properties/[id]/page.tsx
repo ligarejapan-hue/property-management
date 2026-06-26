@@ -28,10 +28,16 @@ import ActionBar from "@/components/properties/action-bar";
 import RegistryAutoFetchButton from "@/components/properties/registry-auto-fetch-button";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner, fetchQualityCheck } from "@/lib/api-client";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { canShowAddOwner } from "@/lib/owner-link-utils";
-import { normalizeCorporateNumber, detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
+import {
+  normalizeCorporateNumber,
+  normalizeCompanyRegistryNumber,
+  classifyCorporateIdentifier,
+  detectCorporateNumberInOwnerLike,
+  detectCompanyRegistryNumberInOwnerLike,
+} from "@/lib/corporate-number";
 import { OwnerMemoHistory } from "@/components/owners/OwnerMemoHistory";
 import { OwnerMislinkModal } from "@/components/owners/OwnerMislinkModal";
 import { OwnerLinkModal } from "@/components/owners/owner-link-modal";
@@ -104,6 +110,8 @@ interface ApiOwner {
   email?: string | null;
   /** 法人番号（13桁数字、display-level に応じて masked/hidden される）。 */
   corporateNumber?: string | null;
+  /** 会社法人等番号（12桁、corporateNumber と同じ display-level でマスク/非表示）。 */
+  companyRegistryNumber?: string | null;
   /** owner:read がない場合は API レスポンスが { id } のみになるため optional。 */
   version?: number;
 }
@@ -206,6 +214,12 @@ export default function PropertyDetailPage({
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // 品質警告 (§8-6): 一覧と同じ fetchQualityCheck の scoped モードで当該物件分のみ取得。
+  // severity=info は対象外。取得失敗時はセクション非表示（fail-safe: 詳細全体を壊さない）。
+  const [qualityIssues, setQualityIssues] = useState<
+    Array<{ severity: "error" | "warning"; message: string }>
+  >([]);
+
   const handleDelete = async () => {
     if (!property) return;
     const ok = window.confirm(
@@ -223,6 +237,39 @@ export default function PropertyDetailPage({
     }
   };
 
+  // 品質警告取得 (@codex P2: 物件更新時にも再取得): useCallback 化して fetchProperty から
+  // も呼ぶことで ActionBar/編集保存/所有者更新等の後も最新警告を反映する。
+  // seq guard: fire-and-forget でも後着リクエストが先着の stale 結果で state を上書きしない。
+  // void 呼び出しでも cancelled フラグを誰も true にしない問題を解消（ref シーケンス方式）。
+  const qualityReqSeq = useRef(0);
+  const loadQualityIssues = useCallback(async () => {
+    const seq = ++qualityReqSeq.current;
+    try {
+      const json = await fetchQualityCheck({ propertyIds: [id] });
+      if (seq !== qualityReqSeq.current) return; // 後発リクエストが来ていたら破棄（後着勝ち）
+      const data = (
+        json as {
+          data?: Array<{
+            propertyId: string;
+            severity: "error" | "warning" | "info";
+            message: string;
+          }>;
+        }
+      ).data ?? [];
+      setQualityIssues(
+        data
+          .filter((i) => i.severity !== "info")
+          .map((i) => ({
+            severity: i.severity as "error" | "warning",
+            message: i.message,
+          })),
+      );
+    } catch {
+      // 取得失敗時は stale 警告を残さずクリア（最新リクエストの場合のみ＝古い失敗が新しい成功を消さない）
+      if (seq === qualityReqSeq.current) setQualityIssues([]);
+    }
+  }, [id]);
+
   const fetchProperty = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -236,11 +283,19 @@ export default function PropertyDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [id]);
+    // 物件再取得に連動して品質警告も更新する（@codex P2: 更新後も最新の警告を表示）。
+    void loadQualityIssues();
+  }, [id, loadQualityIssues]);
 
   useEffect(() => {
     fetchProperty();
   }, [fetchProperty]);
+
+  // id 変化時に品質警告をリセットする（再取得は fetchProperty 内の loadQualityIssues 呼び出しが行う）。
+  // このエフェクトは reset のみ: fetchProperty も同じ id 変化で走るため二重 fetch しない。
+  useEffect(() => {
+    setQualityIssues([]);
+  }, [id]);
 
   // F12 展開(19-A 第3実装): permissions / capabilities は ScreenProtectionProvider
   //（dashboard 全体を覆う）が mount 時に 1 回取得して context 配布するため、本ページ独自の
@@ -366,7 +421,7 @@ export default function PropertyDetailPage({
     return (
       <div className="flex items-center justify-center py-24">
         <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-        <span className="ml-2 text-sm text-gray-500">読み込み中...</span>
+        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
       </div>
     );
   }
@@ -394,13 +449,13 @@ export default function PropertyDetailPage({
         <div className="flex items-center gap-3">
           <Link
             href="/properties"
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             <ArrowLeft className="h-4 w-4" />
             物件一覧
           </Link>
-          <span className="text-gray-300">/</span>
-          <h2 className="text-xl font-bold text-gray-800">
+          <span className="text-gray-300 dark:text-gray-600">/</span>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
             {property.address}
           </h2>
         </div>
@@ -413,7 +468,7 @@ export default function PropertyDetailPage({
               href={`/properties/${property.id}/dm-logs`}
               aria-label="DM送付履歴を見る"
               title="この物件の DM 送付履歴"
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               <Mail className="h-4 w-4" />
               DM送付履歴
@@ -423,7 +478,7 @@ export default function PropertyDetailPage({
             onClick={() => setShowEditForm(true)}
             aria-label="物件を編集"
             title="物件情報を編集"
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             <Edit className="h-4 w-4" />
             物件を編集
@@ -473,8 +528,33 @@ export default function PropertyDetailPage({
         </div>
       )}
 
+      {/* 品質警告セクション (§8-6): 一覧から外した警告を詳細で表示。ゼロ件=非表示。 */}
+      {qualityIssues.length > 0 && (
+        <div className="mb-4 space-y-1.5">
+          {qualityIssues.map((issue, idx) => (
+            <div
+              key={idx}
+              className={`flex items-start gap-2 rounded-md border px-4 py-2 text-sm ${
+                issue.severity === "error"
+                  ? "border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+                  : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+              }`}
+            >
+              <AlertTriangle
+                className={`mt-0.5 h-4 w-4 shrink-0 ${
+                  issue.severity === "error"
+                    ? "text-red-500 dark:text-red-400"
+                    : "text-amber-500 dark:text-amber-400"
+                }`}
+              />
+              <span>{issue.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Tabs */}
-      <div className="mb-4 border-b border-gray-200">
+      <div className="mb-4 border-b border-gray-200 dark:border-gray-800">
         <nav className="-mb-px flex gap-0 overflow-x-auto">
           {tabs.map((tab) => (
             <button
@@ -483,7 +563,7 @@ export default function PropertyDetailPage({
               className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? "border-indigo-600 text-indigo-600"
-                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-gray-700 dark:hover:text-gray-200"
               }`}
             >
               {tab.label}
@@ -498,7 +578,7 @@ export default function PropertyDetailPage({
       </div>
 
       {/* Tab content */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         {activeTab === "basic" && <BasicTab property={property} onRefresh={fetchProperty} canWrite={canWriteProperty} />}
         {activeTab === "owner" && (
           <OwnerTab
@@ -578,7 +658,7 @@ function BasicTab({
       {/* Building link for units */}
       {isUnit && property.building && (
         <div className="md:col-span-2">
-          <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+          <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
             所属マンション
           </dt>
           <dd>
@@ -666,7 +746,7 @@ function BasicTab({
 
       {/* Candidates */}
       <div className="md:col-span-2 mt-2">
-        <dt className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+        <dt className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
           候補物件
         </dt>
         <CandidateList propertyId={property.id} />
@@ -704,7 +784,7 @@ function OwnerTab({
   // 編集ボタンも出さない（OwnerCard 側の canEditOwner でも防御するが、ここで早期に閉じる）。
   if (!canRead) {
     return (
-      <p className="py-8 text-center text-sm text-gray-500">
+      <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
         所有者情報を閲覧する権限がありません
       </p>
     );
@@ -734,8 +814,8 @@ function OwnerTab({
       )}
 
       {owners.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 py-10 text-center">
-          <p className="text-sm text-gray-500">所有者が紐付けされていません</p>
+        <div className="rounded-lg border border-dashed border-gray-300 py-10 text-center dark:border-gray-700">
+          <p className="text-sm text-gray-500 dark:text-gray-400">所有者が紐付けされていません</p>
           {showAdd ? (
             <button
               type="button"
@@ -747,7 +827,7 @@ function OwnerTab({
               所有者を追加
             </button>
           ) : (
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               所有者を追加するには所有者の編集権限（owner:write）が必要です。
             </p>
           )}
@@ -755,7 +835,7 @@ function OwnerTab({
       ) : (
         <>
           {isShared && (
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               共有名義: {owners.length} 名（メモは所有者ごと・物件単位で保持されます）
             </p>
           )}
@@ -850,6 +930,7 @@ function OwnerCard({
     address: po.owner.address ?? "",
     email: po.owner.email ?? "",
     corporateNumber: po.owner.corporateNumber ?? "",
+    companyRegistryNumber: po.owner.companyRegistryNumber ?? "",
   });
 
   const handleEdit = () => {
@@ -861,6 +942,7 @@ function OwnerCard({
       address: po.owner.address ?? "",
       email: po.owner.email ?? "",
       corporateNumber: po.owner.corporateNumber ?? "",
+      companyRegistryNumber: po.owner.companyRegistryNumber ?? "",
     });
     // 保存値ロードは user-edit ではない＝signal をリセット（開いただけでは検索しない）。
     setAddressEdited(false);
@@ -898,14 +980,14 @@ function OwnerCard({
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       {/* 見出し: 番号 + 氏名 + バッジ */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-100 pb-3">
-        <span className="text-xs font-medium text-gray-500">
+      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-100 pb-3 dark:border-gray-800">
+        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
           所有者 {idx + 1}
           {total > 1 ? ` / ${total}` : ""}
         </span>
-        <h3 className="text-base font-semibold text-gray-900">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
           {po.owner.name ?? "（氏名未登録）"}
         </h3>
         {po.isPrimary && (
@@ -914,7 +996,7 @@ function OwnerCard({
           </span>
         )}
         {po.relationship && (
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700">
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">
             {po.relationship}
           </span>
         )}
@@ -925,7 +1007,7 @@ function OwnerCard({
             onClick={handleEdit}
             aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}の所有者情報を編集`}
             title="所有者情報を編集"
-            className="ml-auto flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            className="ml-auto flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
           >
             <Edit className="h-3 w-3" />
             所有者情報を編集
@@ -975,55 +1057,55 @@ function OwnerCard({
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {editableFields.name && (
               <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-700">
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
                   所有者名 <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
                 />
               </div>
             )}
             {editableFields.nameKana && (
               <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-700">
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
                   氏名カナ（任意）
                 </label>
                 <input
                   type="text"
                   value={form.nameKana}
                   onChange={(e) => setForm((f) => ({ ...f, nameKana: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
               </div>
             )}
             {editableFields.phone && (
               <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-700">電話番号</label>
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">電話番号</label>
                 <input
                   type="tel"
                   value={form.phone}
                   onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
               </div>
             )}
             {editableFields.zip && (
               <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-700">郵便番号</label>
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">郵便番号</label>
                 <input
                   type="text"
                   value={form.zip}
                   onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
               </div>
             )}
             {editableFields.address && (
               <div className="space-y-1 md:col-span-2">
-                <label className="text-xs font-medium text-gray-700">現住所</label>
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">現住所</label>
                 <input
                   type="text"
                   value={form.address}
@@ -1032,7 +1114,7 @@ function OwnerCard({
                     setAddressEdited(true);
                     setForm((f) => ({ ...f, address: e.target.value }));
                   }}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
                 {/* 郵便番号⇄住所 補完。zip と address の双方が編集可能なときだけ表示
                     （候補確定で zip/address をペア反映するため）。onZipChange/onAddressChange は
@@ -1055,12 +1137,12 @@ function OwnerCard({
             {/* email は full 権限かつ API レスポンスに含まれる場合のみ入力フィールドを表示 */}
             {editableFields.email && emailReturned && (
               <div className="space-y-1 md:col-span-2">
-                <label className="text-xs font-medium text-gray-700">メールアドレス</label>
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">メールアドレス</label>
                 <input
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
               </div>
             )}
@@ -1077,7 +1159,7 @@ function OwnerCard({
                     setForm((f) => ({ ...f, corporateNumber: candidate }))
                   }
                 />
-                <label className="text-xs font-medium text-gray-700">
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
                   法人番号（任意 / 13桁）
                 </label>
                 <input
@@ -1088,12 +1170,17 @@ function OwnerCard({
                     setForm((f) => ({ ...f, corporateNumber: e.target.value }))
                   }
                   placeholder="例: 1234567890123"
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
                 />
+                {/* 赤エラーは「保存ガード/サーバ検証(normalizeCorporateNumber=13桁)で弾かれる入力」と
+                    一致させる。13桁は CD 検証せず受理する既存仕様に揃え、有効な12桁(会社法人等番号)は
+                    検索/専用欄へ誘導するため赤を出さない。 */}
                 {form.corporateNumber.trim() !== "" &&
+                  classifyCorporateIdentifier(form.corporateNumber) !==
+                    "company_corporate_number_12" &&
                   normalizeCorporateNumber(form.corporateNumber) === null && (
                     <p className="text-xs text-red-600">
-                      法人番号は13桁の数字で入力してください（ハイフン・空白・全角数字は自動で除去されます）
+                      法人番号は13桁の数字で入力してください（12桁の会社法人等番号は下の欄、または「法人情報を検索」をご利用ください）
                     </p>
                   )}
                 {/* 法人情報を検索（国税庁 法人番号 Web-API / preview のみ）。
@@ -1118,6 +1205,50 @@ function OwnerCard({
                 />
               </div>
             )}
+
+            {/* 会社法人等番号（12桁・登記の番号）。法人番号(13桁)とは別カラム。
+                権限は corporateNumber と同じ owner_corporate_number を共用。 */}
+            {editableFields.corporateNumber && (
+              <div className="space-y-1 md:col-span-2">
+                <CompanyRegistryNumberCandidateBanner
+                  owner={po.owner}
+                  currentRegistryInput={form.companyRegistryNumber}
+                  currentSearchInput={form.corporateNumber}
+                  onTransferRegistry={(candidate) =>
+                    setForm((f) => ({ ...f, companyRegistryNumber: candidate }))
+                  }
+                  onTransferSearch={(candidate) =>
+                    setForm((f) => ({ ...f, corporateNumber: candidate }))
+                  }
+                />
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                  会社法人等番号（任意 / 12桁・登記の番号）
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={form.companyRegistryNumber}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      companyRegistryNumber: e.target.value,
+                    }))
+                  }
+                  placeholder="例: 123456789012"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
+                />
+                {form.companyRegistryNumber.trim() !== "" &&
+                  normalizeCompanyRegistryNumber(form.companyRegistryNumber) ===
+                    null && (
+                    <p className="text-xs text-red-600">
+                      会社法人等番号は12桁の数字で入力してください（ハイフン・空白・全角数字は自動で除去されます）
+                    </p>
+                  )}
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                  法人番号（13桁）とは別物です。不動産登記の12桁番号をそのまま入力してください。
+                </p>
+              </div>
+            )}
           </div>
 
           {saveError && (
@@ -1133,7 +1264,11 @@ function OwnerCard({
                 (editableFields.name && !form.name.trim()) ||
                 (editableFields.corporateNumber &&
                   form.corporateNumber.trim() !== "" &&
-                  normalizeCorporateNumber(form.corporateNumber) === null)
+                  normalizeCorporateNumber(form.corporateNumber) === null) ||
+                (editableFields.corporateNumber &&
+                  form.companyRegistryNumber.trim() !== "" &&
+                  normalizeCompanyRegistryNumber(form.companyRegistryNumber) ===
+                    null)
               }
               className="rounded-md bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
@@ -1143,7 +1278,7 @@ function OwnerCard({
               type="button"
               onClick={handleCancel}
               disabled={saving}
-              className="rounded-md border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed"
+              className="rounded-md border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               キャンセル
             </button>
@@ -1168,22 +1303,34 @@ function OwnerCard({
               <OwnerField label="法人番号" value={po.owner.corporateNumber ?? null} mono />
             </div>
           )}
+          {/* 会社法人等番号(12桁): corporateNumber と同じ display-level でマスク/非表示。 */}
+          {po.owner.companyRegistryNumber !== undefined && (
+            <div className="md:col-span-2">
+              <OwnerField
+                label="会社法人等番号"
+                value={po.owner.companyRegistryNumber ?? null}
+                mono
+              />
+            </div>
+          )}
           {/* 候補検出: corporateNumber 未設定 + name/address に法人番号らしき文字列が含まれる場合のみ表示。
               候補値そのものは表示せず「含まれている」事実のみ伝える（自動上書きはしない）。
               注: po.owner.name / address はマスク済の値が来る可能性があるが、本ヘルパーは
               13桁数字の完全一致パターンを見るのでマスク済値では誤検出しにくい。 */}
           <CorporateNumberSuspectBanner owner={po.owner} />
+          {/* 会社法人等番号(12桁) の候補検出（ラベル付きのみ）。値は表示しない。 */}
+          <CompanyRegistrySuspectBanner owner={po.owner} />
         </dl>
       )}
 
       {/* メモ: PropertyOwner 単位（常時表示） */}
-      <div className="mt-5 border-t border-gray-100 pt-4">
+      <div className="mt-5 border-t border-gray-100 pt-4 dark:border-gray-800">
         <PropertyOwnerNoteEditor po={po} />
       </div>
 
       {/* メモ履歴: Owner 単位（追記のみ） */}
       {canRead && (
-        <div className="mt-5 border-t border-gray-100 pt-4">
+        <div className="mt-5 border-t border-gray-100 pt-4 dark:border-gray-800">
           <OwnerMemoHistory
             ownerId={po.ownerId}
             propertyId={propertyId}
@@ -1225,7 +1372,7 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
 
   return (
     <div>
-      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         メモ（この物件における所有者メモ）
       </dt>
       <textarea
@@ -1233,7 +1380,7 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
         onChange={(e) => setValue(e.target.value)}
         rows={3}
         placeholder="例: 連絡時間帯、相続関係、現地でのやり取りなど"
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
       />
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -1248,7 +1395,7 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
           type="button"
           disabled={saving || (savedValue === "" && value === "")}
           onClick={() => persist(null)}
-          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
         >
           削除
         </button>
@@ -1301,10 +1448,10 @@ function CaseStatusField({
   if (!canWrite) {
     return (
       <div>
-        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
           案件ステータス
         </dt>
-        <dd className="text-sm text-gray-900">{label}</dd>
+        <dd className="text-sm text-gray-900 dark:text-gray-100">{label}</dd>
       </div>
     );
   }
@@ -1319,7 +1466,7 @@ function CaseStatusField({
 
   return (
     <div>
-      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         案件ステータス
       </dt>
       <dd>
@@ -1327,7 +1474,7 @@ function CaseStatusField({
           value={property.caseStatus}
           onChange={(e) => handleChange(e.target.value)}
           disabled={saving}
-          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           {options.map((o) => (
             <option key={o.value} value={o.value}>
@@ -1335,7 +1482,7 @@ function CaseStatusField({
             </option>
           ))}
         </select>
-        {saving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-gray-400" />}
+        {saving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-gray-400 dark:text-gray-500" />}
         {error && <span className="ml-2 text-xs text-red-600">{error}</span>}
       </dd>
     </div>
@@ -1384,17 +1531,17 @@ function IntroductionRouteField({
   if (!canWrite) {
     return (
       <div>
-        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
           導入ルート
         </dt>
-        <dd className="text-sm text-gray-900">{label}</dd>
+        <dd className="text-sm text-gray-900 dark:text-gray-100">{label}</dd>
       </div>
     );
   }
 
   return (
     <div>
-      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         導入ルート
       </dt>
       <dd>
@@ -1402,7 +1549,7 @@ function IntroductionRouteField({
           value={property.introductionRoute ?? ""}
           onChange={(e) => handleChange(e.target.value)}
           disabled={saving}
-          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">未設定</option>
           {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
@@ -1411,7 +1558,7 @@ function IntroductionRouteField({
             </option>
           ))}
         </select>
-        {saving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-gray-400" />}
+        {saving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-gray-400 dark:text-gray-500" />}
         {error && <span className="ml-2 text-xs text-red-600">{error}</span>}
       </dd>
     </div>
@@ -1435,10 +1582,10 @@ function Field({
 }) {
   return (
     <div>
-      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         {label}
       </dt>
-      <dd className={`text-sm text-gray-900 ${mono ? "font-mono" : ""}`}>
+      <dd className={`text-sm text-gray-900 dark:text-gray-100 ${mono ? "font-mono" : ""}`}>
         {badgeStyle ? (
           <span
             className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeStyle}`}
@@ -1465,11 +1612,11 @@ function OwnerField({
   const hasValue = value != null && String(value).trim() !== "";
   return (
     <div>
-      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         {label}
       </dt>
       <dd
-        className={`text-sm ${hasValue ? "text-gray-900" : "text-gray-400"} ${
+        className={`text-sm ${hasValue ? "text-gray-900 dark:text-gray-100" : "text-gray-400 dark:text-gray-500"} ${
           mono ? "font-mono" : ""
         }`}
       >
@@ -1554,6 +1701,102 @@ function CorporateNumberCandidateBanner({
           >
             {c} を法人番号欄に転記
           </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 会社法人等番号(12桁) 検出の display バナー。
+ * owner.companyRegistryNumber が未設定 + name/address/note にラベル付き12桁が含まれる場合のみ警告。
+ * 候補値そのものは表示しない（自動上書きしないユーザー確定方針）。
+ */
+function CompanyRegistrySuspectBanner({ owner }: { owner: ApiOwner }) {
+  if (owner.companyRegistryNumber) return null;
+  const detection = detectCompanyRegistryNumberInOwnerLike({
+    name: owner.name,
+    address: owner.address,
+    note: owner.note,
+  });
+  if (detection.candidates.length === 0) return null;
+  return (
+    <div className="md:col-span-2">
+      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <div>
+          氏名・現住所・備考欄に会社法人等番号（12桁）らしき文字列が含まれています。
+          編集モードで「会社法人等番号」欄に転記してください（自動上書きはしません）。
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 編集モード内で、Owner の name/address/note から検出した会社法人等番号(12桁)候補を
+ * ユーザー操作で転記/検索するためのバナー（13桁バナーと同方針）。
+ *
+ * - 候補が無い / owner 本体に会社法人等番号がある / 入力欄に既に値がある → 描画しない。
+ * - 候補は最大 3 件（ラベル付き12桁・dedup 済）。候補値そのものは表示する（編集者の確認用）。
+ * - 「会社法人等番号欄に転記」: form.companyRegistryNumber を埋める（保存はユーザー操作）。
+ * - 「この番号で検索」: 検索欄(form.corporateNumber)に渡す。12桁は lookup で 13桁算出→国税庁検索でき、
+ *   反映時に会社法人等番号も保存される（案2）。自動 lookup/保存はしない。
+ */
+function CompanyRegistryNumberCandidateBanner({
+  owner,
+  currentRegistryInput,
+  currentSearchInput,
+  onTransferRegistry,
+  onTransferSearch,
+}: {
+  owner: ApiOwner;
+  currentRegistryInput: string;
+  /** 検索欄(法人番号 input)の現在値。値があるときは「検索」転記で上書きしない。 */
+  currentSearchInput: string;
+  onTransferRegistry: (candidate: string) => void;
+  onTransferSearch: (candidate: string) => void;
+}) {
+  if (owner.companyRegistryNumber) return null;
+  if (currentRegistryInput.trim() !== "") return null;
+  const detection = detectCompanyRegistryNumberInOwnerLike({
+    name: owner.name,
+    address: owner.address,
+    note: owner.note,
+  });
+  const candidates = detection.candidates.slice(0, 3);
+  if (candidates.length === 0) return null;
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800">
+      <div className="mb-1 flex items-start gap-1.5">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          氏名・現住所・備考欄から会社法人等番号（12桁）らしき値を検出しました。
+          「転記」で会社法人等番号欄へ、「検索」で法人情報の検索（12桁→法人番号13桁）に使えます
+          （自動上書き・自動保存・自動検索はしません）。
+        </span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {candidates.map((c) => (
+          <div key={c} className="flex flex-wrap items-center gap-1.5">
+            <span className="font-mono text-[11px] text-amber-900">{c}</span>
+            <button
+              type="button"
+              onClick={() => onTransferRegistry(c)}
+              className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100"
+            >
+              会社法人等番号欄に転記
+            </button>
+            {currentSearchInput.trim() === "" && (
+              <button
+                type="button"
+                onClick={() => onTransferSearch(c)}
+                className="rounded-md border border-blue-300 bg-white px-2 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100"
+              >
+                この番号で検索
+              </button>
+            )}
+          </div>
         ))}
       </div>
     </div>
