@@ -96,3 +96,19 @@ describe("import/jobs/[jobId]/page.tsx dark: 配色", () => {
     expect(src).toContain("text-red-700");
   });
 });
+
+// 破壊系アウトラインボタン（ロールバック / 全件エラー確定 / 重複候補のみスキップ）は
+// dark 背景・枠は付いたが文字色 dark が無く、暗背景で低コントラストだった（@codex #234 P2）。
+// 汎用 dark:text-red/amber token は他のステータス文字でも通るため、各ボタン固有の
+// light→dark クラス並びでピン留めして「そのボタンが直っている」ことを直接担保する。
+describe("import/jobs/[jobId]/page.tsx dark: 破壊系アウトラインボタンの文字可読性", () => {
+  it("ロールバックボタン(text-red-700)に dark:text-red-400 が付く", () => {
+    expect(src).toMatch(/text-red-700 hover:bg-red-50 dark:bg-gray-900 dark:border-red-700 dark:text-red-400/);
+  });
+  it("一括「全件エラー確定」(text-red-600)に dark:text-red-400 が付く", () => {
+    expect(src).toMatch(/text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:text-red-400/);
+  });
+  it("一括「重複候補のみスキップ」(text-amber-700)に dark:text-amber-400 が付く", () => {
+    expect(src).toMatch(/text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:text-amber-400/);
+  });
+});

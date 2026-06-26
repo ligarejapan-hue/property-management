@@ -607,7 +607,7 @@ export default function ImportJobDetailPage() {
         {job.jobType === "property_csv" && job.status === "completed" && (
           <button
             onClick={openRollbackDialog}
-            className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:bg-gray-900 dark:border-red-700 dark:hover:bg-red-900/20"
+            className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:bg-gray-900 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
             title="この取込で作成された物件を削除します"
           >
             <RotateCcw className="h-4 w-4" />
@@ -954,7 +954,7 @@ export default function ImportJobDetailPage() {
                   <button
                     onClick={() => handleBatchResolve("mark_error")}
                     disabled={actionLoading === "batch"}
-                    className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:hover:bg-red-900/20"
+                    className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
                   >
                     <Ban className="h-3 w-3" />
                     全件エラー確定
@@ -967,7 +967,7 @@ export default function ImportJobDetailPage() {
                         onClick={handleBulkResolveDuplicates}
                         disabled={actionLoading === "batch"}
                         title="取込時に検出された重複候補（要レビューの内数）だけをスキップします。非重複の要レビュー行は残ります。"
-                        className="flex items-center gap-1 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:hover:bg-amber-900/20"
+                        className="flex items-center gap-1 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
                       >
                         <AlertTriangle className="h-3 w-3" />
                         重複候補のみスキップ（{counts.duplicateActionable}件）
