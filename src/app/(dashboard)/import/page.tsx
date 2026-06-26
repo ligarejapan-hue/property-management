@@ -252,10 +252,10 @@ const STATUS_CONFIG: Record<
   string,
   { label: string; icon: typeof CheckCircle2; color: string }
 > = {
-  completed: { label: "完了", icon: CheckCircle2, color: "text-green-600" },
-  failed: { label: "エラーあり", icon: XCircle, color: "text-red-600" },
-  processing: { label: "処理中", icon: Loader2, color: "text-blue-600" },
-  pending: { label: "待機中", icon: AlertTriangle, color: "text-amber-600" },
+  completed: { label: "完了", icon: CheckCircle2, color: "text-green-600 dark:text-green-400" },
+  failed: { label: "エラーあり", icon: XCircle, color: "text-red-600 dark:text-red-400" },
+  processing: { label: "処理中", icon: Loader2, color: "text-blue-600 dark:text-blue-400" },
+  pending: { label: "待機中", icon: AlertTriangle, color: "text-amber-600 dark:text-amber-400" },
 };
 
 const STEP_META: Record<Step, { label: string; icon: typeof Upload }> = {

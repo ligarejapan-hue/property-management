@@ -101,3 +101,15 @@ describe("import/page.tsx dark: ページネーション/取込完了集計の�
     expect(src).toContain('text-red-600 dark:text-red-300">エラー:');
   });
 });
+
+// 取込履歴テーブルの行ステータスは STATUS_CONFIG.color を dark:bg-gray-900 カード上の className に
+// 展開するため、light限定色(text-*-600)のままだと processing/failed 等が暗面で低コントラスト
+// （@codex #231 P2 round3）。ジョブ詳細のステータス色と同じく dark:text-*-400 を付与。
+describe("import/page.tsx dark: 取込履歴 行ステータス色(STATUS_CONFIG)", () => {
+  it("STATUS_CONFIG の各 status color に dark:text-*-400 が付く", () => {
+    expect(src).toContain('color: "text-green-600 dark:text-green-400"');
+    expect(src).toContain('color: "text-red-600 dark:text-red-400"');
+    expect(src).toContain('color: "text-blue-600 dark:text-blue-400"');
+    expect(src).toContain('color: "text-amber-600 dark:text-amber-400"');
+  });
+});
