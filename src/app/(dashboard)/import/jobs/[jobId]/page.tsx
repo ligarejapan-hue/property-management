@@ -644,7 +644,7 @@ export default function ImportJobDetailPage() {
                 <span className="text-amber-600 dark:text-amber-400">待機中</span>
               )}
               {job.status === "rolled_back" && (
-                <span className="text-purple-700">ロールバック済み</span>
+                <span className="text-purple-700 dark:text-purple-400">ロールバック済み</span>
               )}
             </div>
           </div>

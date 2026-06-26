@@ -112,3 +112,11 @@ describe("import/jobs/[jobId]/page.tsx dark: 破壊系アウトラインボタ�
     expect(src).toMatch(/text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:text-amber-400/);
   });
 });
+
+// rolled_back ステータスの purple 文字は、他ステータス分岐(green/red/blue/amber)が dark 化された
+// のに取り残され、dark:bg-gray-900 のサマリカード上で低コントラストだった（@codex #234 P2 round2）。
+describe("import/jobs/[jobId]/page.tsx dark: rolled_back ステータス文字の可読性", () => {
+  it("ロールバック済みステータス(text-purple-700)に dark:text-purple-400 が付く", () => {
+    expect(src).toContain("text-purple-700 dark:text-purple-400");
+  });
+});
