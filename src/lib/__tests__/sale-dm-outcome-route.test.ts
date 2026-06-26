@@ -43,15 +43,16 @@ vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const draftUpdate = vi.fn();
+  const draftCount = vi.fn();
   const propertyUpdate = vi.fn();
   const draftFindUnique = vi.fn();
   return {
     default: {
-      dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate },
+      dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, count: draftCount },
       property: { update: propertyUpdate },
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
         fn({
-          dmRecipientDraft: { update: draftUpdate },
+          dmRecipientDraft: { update: draftUpdate, count: draftCount },
           property: { update: propertyUpdate },
         }),
       ),
@@ -65,7 +66,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { PATCH } from "../../app/api/properties/sale-dm/drafts/[id]/outcome/route";
 
 const pm = prismaMock as never as {
-  dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+  dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
   property: { update: ReturnType<typeof vi.fn> };
 };
 const req = (b: unknown) =>
@@ -85,6 +86,7 @@ beforeEach(() => {
     campaign: { createdBy: "u1" },
   });
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
+  pm.dmRecipientDraft.count.mockResolvedValue(0);
   pm.property.update.mockResolvedValue({ id: "p1" });
 });
 
@@ -160,6 +162,19 @@ describe("PATCH outcome", () => {
     expect(propArg.data.dmStatus).toBeUndefined();
     const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(audit.detail.undeliverableCleared).toBe(true);
+  });
+
+  it("同じ物件に未解決の宛先不明が他に残る場合は物件フラグを消さない(undeliverableCleared=false)", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "returned_undeliverable",
+      lpFirstAccessAt: null, phoneInquiryAt: null, status: "sent", campaign: { createdBy: "u1" },
+    });
+    pm.dmRecipientDraft.count.mockResolvedValue(1); // 他に1件 returned_undeliverable が残存
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(pm.property.update).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.undeliverableCleared).toBe(false);
   });
 
   it("宛先不明のまま(unchanged)や他状態間の訂正では物件を触らない", async () => {

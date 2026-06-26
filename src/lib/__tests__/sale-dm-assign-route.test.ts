@@ -63,6 +63,17 @@ describe("POST assign (auto)", () => {
     expect(json.assigned).toBe(4);
   });
 
+  it("送付済み(sent)の宛先は再割当対象から除外する(取得・更新の両方で status!=sent)", async () => {
+    const res = await assign(post({ mode: "auto", order: "sequential" }) as never, ctxC);
+    expect(res.status).toBe(200);
+    // 割当対象の取得時点で sent を除外
+    const findArg = pm.dmRecipientDraft.findMany.mock.calls[0][0];
+    expect(findArg.where.status).toEqual({ not: "sent" });
+    // 更新時も sent を弾く(防御・送付済みの A/B バケットを書き換えない)
+    const updates = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
+    for (const u of updates) expect(u.where.status).toEqual({ not: "sent" });
+  });
+
   it("権限不足で 403・更新しない", async () => {
     grant("property");
     const res = await assign(post({ mode: "auto" }) as never, ctxC);

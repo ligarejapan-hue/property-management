@@ -100,20 +100,38 @@ export async function PATCH(
       draftData.outcomeNote = input.outcomeNote;
     }
 
-    // 下書き更新と(宛先不明なら)物件連動を 1 トランザクションで行う。
-    await prisma.$transaction(async (tx) => {
+    // 下書き更新と物件連動を 1 トランザクションで行う。宛先不明の解除は、同じ物件に
+    // 他の未解決(returned_undeliverable)送付済み宛先が残らない場合のみ実施する。
+    const undeliverableCleared = await prisma.$transaction(async (tx) => {
       await tx.dmRecipientDraft.update({ where: { id }, data: draftData });
       if (becameUndeliverable) {
         await tx.property.update({
           where: { id: draft.propertyId },
           data: { dmStatus: "no_send", dmUndeliverableAt: now },
         });
-      } else if (clearedUndeliverable) {
-        await tx.property.update({
-          where: { id: draft.propertyId },
-          data: { dmUndeliverableAt: null },
-        });
+        return false;
       }
+      if (clearedUndeliverable) {
+        // 同一物件に「宛先不明」のまま残る他の送付済み宛先(別の所有者住所グループや
+        // 別キャンペーン)がなければ物件フラグを解除。残っていれば物件はまだ宛先不明なので
+        // 一覧バッジ/フィルタ(dmUndeliverableAt 基準)を誤って消さない。
+        const stillUndeliverable = await tx.dmRecipientDraft.count({
+          where: {
+            propertyId: draft.propertyId,
+            status: "sent",
+            deliveryStatus: "returned_undeliverable",
+            id: { not: id },
+          },
+        });
+        if (stillUndeliverable === 0) {
+          await tx.property.update({
+            where: { id: draft.propertyId },
+            data: { dmUndeliverableAt: null },
+          });
+          return true;
+        }
+      }
+      return false;
     });
 
     // 非PII の監査(本文・宛名・住所・メモは残さない)。
@@ -127,13 +145,13 @@ export async function PATCH(
         deliveryStatus: nextDeliveryStatus,
         outcome: nextOutcome,
         undeliverableLinked: becameUndeliverable,
-        undeliverableCleared: clearedUndeliverable,
+        undeliverableCleared,
         updatedAt: now.toISOString(),
       },
     });
 
     return NextResponse.json(
-      { id, deliveryStatus: nextDeliveryStatus, outcome: nextOutcome, undeliverableLinked: becameUndeliverable, undeliverableCleared: clearedUndeliverable },
+      { id, deliveryStatus: nextDeliveryStatus, outcome: nextOutcome, undeliverableLinked: becameUndeliverable, undeliverableCleared },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

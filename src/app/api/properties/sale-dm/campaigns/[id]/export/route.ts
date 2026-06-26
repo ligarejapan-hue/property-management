@@ -9,6 +9,7 @@ import {
   buildSaleDmCsvRow,
   type SaleDmCsvRecord,
 } from "@/lib/sale-dm-letter/csv";
+import { composeAddresseeHonorific } from "@/lib/sale-dm-letter/recipients";
 
 // キャンペーンの全下書きを「設定一式 + 宛名 + 本文 + 状態」の CSV にして返す。
 // PII(本文・宛名・住所)を含むため no-store。AuditLog には件数等の非PIIメタのみ残す。
@@ -40,7 +41,7 @@ export async function GET(
       appeal: d.variant.appeal,
       strength: d.variant.strength,
       recipientName: d.recipientName,
-      honorific: d.honorific,
+      honorific: composeAddresseeHonorific(d.honorific, d.coOwnerCount),
       recipientZip: d.recipientZip,
       recipientAddress: d.recipientAddress,
       status: d.status,

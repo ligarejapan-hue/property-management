@@ -100,6 +100,7 @@ describe("POST variant (作成)", () => {
 
 describe("PATCH variant (更新)", () => {
   it("設定一式の部分更新で 200・campaignId で縛る", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0); // 送付済みの宛先なし
     pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A2", ...optionFields });
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "A2", options: { tone: "soft" } }) }) as never, ctxV);
     expect(res.status).toBe(200);
@@ -107,6 +108,15 @@ describe("PATCH variant (更新)", () => {
     expect(arg.where).toEqual({ id: "v1", campaignId: "c1" });
     expect(arg.data.tone).toBe("soft");
     expect(arg.data.label).toBe("A2");
+  });
+
+  it("送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(2); // この型を使った送付済みドラフトが存在
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
+    expect(res.status).toBe(409);
+    expect(pm.dmVariant.update).not.toHaveBeenCalled();
+    const countArg = pm.dmRecipientDraft.count.mock.calls[0][0];
+    expect(countArg.where).toMatchObject({ campaignId: "c1", variantId: "v1", status: "sent" });
   });
   it("権限不足で 403", async () => {
     grant("property");

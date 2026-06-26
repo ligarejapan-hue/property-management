@@ -95,6 +95,13 @@ describe("GET .../campaigns/[id]/export", () => {
     expect(csv).toContain("\r\n"); // CRLF
   });
 
+  it("複数共有者(coOwnerCount>1)は敬称が『様 他共有者様』になる", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ ...draft, coOwnerCount: 2 }]);
+    const res = await GET(req() as never, ctx);
+    const csv = await res.text();
+    expect(csv).toContain("様 他共有者様");
+  });
+
   it("formula injection: 先頭 = で始まる値は ' でエスケープされる", async () => {
     pm.dmRecipientDraft.findMany.mockResolvedValue([
       { ...draft, recipientName: "=HYPERLINK(1)" },

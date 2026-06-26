@@ -15,7 +15,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const [variants, recipients] = await Promise.all([
       prisma.dmVariant.findMany({ where: { campaignId: id }, select: { id: true }, orderBy: { label: "asc" } }),
-      prisma.dmRecipientDraft.findMany({ where: { campaignId: id }, select: { id: true }, orderBy: { id: "asc" } }),
+      // 送付済み(sent)は A/B バケットを再割当しない(送付済みの配達/反響結果が別型へ移るのを防ぐ)。
+      prisma.dmRecipientDraft.findMany({ where: { campaignId: id, status: { not: "sent" } }, select: { id: true }, orderBy: { id: "asc" } }),
     ]);
 
     if (variants.length === 0) {
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     for (const [variantId, ids] of byVariant) {
       if (ids.length === 0) continue;
       const result = await prisma.dmRecipientDraft.updateMany({
-        where: { id: { in: ids }, campaignId: id },
+        where: { id: { in: ids }, campaignId: id, status: { not: "sent" } },
         data: { variantId },
       });
       assigned += result.count;

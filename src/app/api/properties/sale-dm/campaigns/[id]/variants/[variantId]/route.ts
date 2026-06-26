@@ -13,6 +13,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ更新可。
     const parsed = saleDmVariantUpdateSchema.parse(await parseJsonBody(request));
 
+    // 送付済みの宛先が使っている型は設定変更不可。送付後に設計/トーン/訴求やラベルを
+    // 変えると、CSV・送付履歴・A/B 集計が実際に送った構成と食い違うため凍結する。
+    const sentCount = await prisma.dmRecipientDraft.count({
+      where: { campaignId: id, variantId, status: "sent" },
+    });
+    if (sentCount > 0) {
+      throw new ApiError(409, "送付済みの宛先がある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");
+    }
+
     const data: Prisma.DmVariantUpdateInput = {};
     if (parsed.label !== undefined) data.label = parsed.label;
     if (parsed.options) {

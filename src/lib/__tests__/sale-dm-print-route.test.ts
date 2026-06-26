@@ -100,6 +100,20 @@ describe("GET .../campaigns/[id]/print", () => {
     expect(arg.where.status).toBe("confirmed");
   });
 
+  it("複数共有者(coOwnerCount>1)は宛名に『他共有者様』が付く", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ ...draft, coOwnerCount: 2 }]);
+    const res = await GET(req() as never, ctx);
+    const html = await res.text();
+    expect(html).toContain("他共有者様");
+  });
+
+  it("単独所有者(coOwnerCount=1)は『他共有者様』が付かない", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ ...draft, coOwnerCount: 1 }]);
+    const res = await GET(req() as never, ctx);
+    const html = await res.text();
+    expect(html).not.toContain("他共有者様");
+  });
+
   it("確定 0 件でも 200(空ドキュメント)", async () => {
     pm.dmRecipientDraft.findMany.mockResolvedValue([]);
     const res = await GET(req() as never, ctx);
