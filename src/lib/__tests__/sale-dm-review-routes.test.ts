@@ -68,25 +68,33 @@ describe("GET campaign", () => {
 });
 
 describe("PATCH draft (本文編集)", () => {
-  it("body を更新し 200", async () => {
+  it("body を更新し 200(条件付き updateMany で status!=sent をアトミックに)", async () => {
     grant(...ALL);
     pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", body: "既存", campaignId: "c1", status: "draft", campaign: { createdBy: "u1" } });
-    pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1", body: "編集後" });
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
     const res = await patchDraft(new Request("http://x", { method: "PATCH", body: JSON.stringify({ body: "編集後" }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.update).toHaveBeenCalled();
+    const where = pm.dmRecipientDraft.updateMany.mock.calls[0][0].where;
+    expect(where).toEqual({ id: "r1", status: { not: "sent" } });
+  });
+  it("並行で sent 確定(updateMany count=0)なら 409・上書きしない", async () => {
+    grant(...ALL);
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", body: "既存", campaignId: "c1", status: "draft", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
+    const res = await patchDraft(new Request("http://x", { method: "PATCH", body: JSON.stringify({ body: "編集後" }) }) as never, { params: Promise.resolve({ id: "r1" }) });
+    expect(res.status).toBe(409);
   });
   it("存在しない draft は 404", async () => {
     grant(...ALL);
     pm.dmRecipientDraft.findUnique.mockResolvedValue(null);
     const res = await patchDraft(new Request("http://x", { method: "PATCH", body: JSON.stringify({ body: "編集後" }) }) as never, { params: Promise.resolve({ id: "no-such" }) });
     expect(res.status).toBe(404);
-    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 });
 
 describe("POST confirm (bulk)", () => {
-  it("指定 id を confirmed にし 200", async () => {
+  it("指定 id を confirmed にし 200(生成失敗=空bodyは確定対象から除外)", async () => {
     grant(...ALL);
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 2 });
     const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
@@ -94,6 +102,10 @@ describe("POST confirm (bulk)", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.count).toBe(2);
+    // 生成失敗(body="")の下書きは確定しない(空letterの確定→印刷→送付を防ぐ)。
+    const where = pm.dmRecipientDraft.updateMany.mock.calls[0][0].where;
+    expect(where.status).toBe("draft");
+    expect(where.body).toEqual({ not: "" });
   });
 
   it("不正な JSON ボディは 400(500 でなく)・更新しない", async () => {

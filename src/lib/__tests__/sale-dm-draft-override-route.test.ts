@@ -23,7 +23,7 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
-    dmRecipientDraft: { findUnique: vi.fn(), update: vi.fn() },
+    dmRecipientDraft: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     dmVariant: { findFirst: vi.fn() },
   },
 }));
@@ -35,7 +35,7 @@ import { PATCH as patchDraft } from "../../app/api/properties/sale-dm/drafts/[id
 import { Prisma } from "@/generated/prisma";
 
 const pm = prismaMock as never as {
-  dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+  dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   dmVariant: { findFirst: ReturnType<typeof vi.fn> };
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
@@ -51,26 +51,27 @@ beforeEach(() => {
   grant(...ALL);
   pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", campaign: { createdBy: "u1" } });
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
+  pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe("PATCH draft (拡張)", () => {
   it("body だけ更新できる(Plan 1 互換)", async () => {
     const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.update.mock.calls[0][0].data.body).toBe("編集後");
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.body).toBe("編集後");
   });
 
   it("override を保存できる", async () => {
     const res = await patchDraft(patch({ override: { tone: "soft" } }) as never, ctx);
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.update.mock.calls[0][0].data.overrideJson).toEqual({ tone: "soft" });
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.overrideJson).toEqual({ tone: "soft" });
   });
 
   it("override: null で上書きを消去できる(DB NULL=Prisma.DbNull)", async () => {
     const res = await patchDraft(patch({ override: null }) as never, ctx);
     expect(res.status).toBe(200);
     // nullable Json の消去は Prisma.DbNull で行う(素の null は実行時に拒否される)。
-    expect(pm.dmRecipientDraft.update.mock.calls[0][0].data.overrideJson).toBe(Prisma.DbNull);
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.overrideJson).toBe(Prisma.DbNull);
   });
 
   it("variantId 付け替えは当該 campaign の型のみ許可(検証 OK で 200)", async () => {
@@ -78,20 +79,20 @@ describe("PATCH draft (拡張)", () => {
     const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }) as never, ctx);
     expect(res.status).toBe(200);
     expect(pm.dmVariant.findFirst).toHaveBeenCalled();
-    expect(pm.dmRecipientDraft.update.mock.calls[0][0].data.variantId).toBe("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.variantId).toBe("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
   });
 
   it("他キャンペーンの variantId は 404/400(更新しない)", async () => {
     pm.dmVariant.findFirst.mockResolvedValue(null);
     const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }) as never, ctx);
     expect([400, 404]).toContain(res.status);
-    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("空 body(更新フィールドなし)で 422", async () => {
     const res = await patchDraft(patch({}) as never, ctx);
     expect(res.status).toBe(422);
-    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("存在しない draft で 404", async () => {
@@ -104,13 +105,13 @@ describe("PATCH draft (拡張)", () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", campaign: { createdBy: "other-user" } });
     const res = await patchDraft(patch({ body: "x" }) as never, ctx);
     expect(res.status).toBe(404);
-    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("送付済み(sent)の draft の編集は 409・更新しない", async () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "sent", campaign: { createdBy: "u1" } });
     const res = await patchDraft(patch({ body: "x" }) as never, ctx);
     expect(res.status).toBe(409);
-    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 });

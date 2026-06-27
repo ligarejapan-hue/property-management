@@ -61,8 +61,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
 
+    // 状態遷移をアトミックに行う: pre-check 後に並行で sent 確定した場合(別タブ/一括送付)は
+    // 0 行となり stale 編集を弾く(送信済みの本文/型/上書き=A/B割付・集計の不変性を守る)。
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updated = await prisma.dmRecipientDraft.update({ where: { id }, data: data as any });
+    const result = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: data as any });
+    if (result.count === 0) {
+      throw new ApiError(409, "送付済みの宛先は編集できません", "ALREADY_SENT");
+    }
 
     await writeAuditLog({
       userId: session.id,
@@ -73,7 +78,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       detail: { campaignId: draft.campaignId, fields: Object.keys(data), updatedAt: new Date().toISOString() },
     });
 
-    return NextResponse.json({ id: updated.id }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ id }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

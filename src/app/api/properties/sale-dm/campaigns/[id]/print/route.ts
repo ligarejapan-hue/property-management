@@ -31,7 +31,8 @@ export async function GET(
 
     // 確定分のみ・作成順。variant は設定一式(designTemplate 等)を引くために include。
     const drafts = await prisma.dmRecipientDraft.findMany({
-      where: { campaignId: id, status: "confirmed" },
+      // confirmed かつ body あり(生成失敗の空letterは印刷しない=空の郵送物を防ぐ)。
+      where: { campaignId: id, status: "confirmed", body: { not: "" } },
       orderBy: { createdAt: "asc" },
       include: { variant: true },
     });

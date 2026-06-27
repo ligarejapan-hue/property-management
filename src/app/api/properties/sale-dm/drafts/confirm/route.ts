@@ -14,7 +14,8 @@ export async function POST(request: NextRequest) {
     const { ids } = confirmSchema.parse(await parseJsonBody(request));
     // 作成者本人のキャンペーン配下の draft のみ確定(他人のキャンペーンの draft は対象外)。
     const result = await prisma.dmRecipientDraft.updateMany({
-      where: { id: { in: ids }, status: "draft", campaign: { createdBy: session.id } },
+      // 生成失敗(body="")は確定対象から除外(空letterの確定→印刷→送付を防ぐ)。
+      where: { id: { in: ids }, status: "draft", body: { not: "" }, campaign: { createdBy: session.id } },
       data: { status: "confirmed", confirmedAt: new Date() },
     });
     await writeAuditLog({ userId: session.id, action: "sale_dm_drafts_confirm", targetTable: "dm_recipient_drafts", detail: { count: result.count, confirmedAt: new Date().toISOString() } });

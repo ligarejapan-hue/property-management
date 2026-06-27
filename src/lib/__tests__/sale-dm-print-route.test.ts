@@ -98,10 +98,11 @@ describe("GET .../campaigns/[id]/print", () => {
     // 追跡QR/短縮URL が印刷HTMLへ配線されている(P5 slot 連携・宛先固有 /t/<token>)
     expect(html).toContain("sale-dm-tracking");
     expect(html).toContain("https://dm.example.com/t/tok1");
-    // confirmed のみを問い合わせていること(status フィルタ)
+    // confirmed かつ body あり(生成失敗の空letterは印刷しない)のみ問い合わせること。
     const arg = pm.dmRecipientDraft.findMany.mock.calls[0][0];
     expect(arg.where.campaignId).toBe("c1");
     expect(arg.where.status).toBe("confirmed");
+    expect(arg.where.body).toEqual({ not: "" });
   });
 
   it("追跡baseURL(SALE_DM_TRACKING_BASE_URL)未設定なら 503(郵送QRが相対パスで機能しないため fail-closed)", async () => {
