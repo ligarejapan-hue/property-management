@@ -140,26 +140,26 @@ const ROW_STATUS_CONFIG: Record<
 > = {
   success: {
     label: "成功",
-    color: "text-green-700",
-    bg: "bg-green-50 border-green-200",
+    color: "text-green-700 dark:text-green-300",
+    bg: "bg-green-50 border-green-200 dark:bg-green-500/10 dark:border-green-400/20",
     icon: CheckCircle2,
   },
   error: {
     label: "エラー",
-    color: "text-red-700",
-    bg: "bg-red-50 border-red-200",
+    color: "text-red-700 dark:text-red-300",
+    bg: "bg-red-50 border-red-200 dark:bg-red-500/10 dark:border-red-400/20",
     icon: XCircle,
   },
   needs_review: {
     label: "要レビュー",
-    color: "text-amber-700",
-    bg: "bg-amber-50 border-amber-200",
+    color: "text-amber-700 dark:text-amber-300",
+    bg: "bg-amber-50 border-amber-200 dark:bg-amber-500/10 dark:border-amber-400/20",
     icon: AlertTriangle,
   },
   skipped: {
     label: "スキップ",
-    color: "text-gray-500",
-    bg: "bg-gray-50 border-gray-200",
+    color: "text-gray-500 dark:text-gray-400",
+    bg: "bg-gray-50 border-gray-200 dark:bg-gray-800/50 dark:border-gray-800",
     icon: SkipForward,
   },
 };
@@ -559,7 +559,7 @@ export default function ImportJobDetailPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
       </div>
     );
   }
@@ -567,10 +567,10 @@ export default function ImportJobDetailPage() {
   if (error || !job) {
     return (
       <div className="py-10 text-center">
-        <p className="mb-4 text-red-600">{error ?? "ジョブが見つかりません"}</p>
+        <p className="mb-4 text-red-600 dark:text-red-400">{error ?? "ジョブが見つかりません"}</p>
         <button
           onClick={() => router.back()}
-          className="text-sm text-indigo-600 hover:underline"
+          className="text-sm text-indigo-600 hover:underline dark:text-indigo-400"
         >
           戻る
         </button>
@@ -593,13 +593,13 @@ export default function ImportJobDetailPage() {
       <div className="mb-6 flex items-center gap-3">
         <Link
           href="/import"
-          className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
         >
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <div className="flex-1">
-          <h2 className="text-2xl font-bold text-gray-800">取込ジョブ詳細</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">取込ジョブ詳細</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             {getImportTypeLabel(job.jobType)} - {job.fileName}
           </p>
         </div>
@@ -607,7 +607,7 @@ export default function ImportJobDetailPage() {
         {job.jobType === "property_csv" && job.status === "completed" && (
           <button
             onClick={openRollbackDialog}
-            className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:bg-gray-900 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
             title="この取込で作成された物件を削除します"
           >
             <RotateCcw className="h-4 w-4" />
@@ -626,89 +626,89 @@ export default function ImportJobDetailPage() {
           段階A: 既存の job.successCount / job.errorCount は使用せず、
           ImportJobRow から動的に再計算した 5 区分 (新規/更新/スキップ/要レビュー/エラー)
           を表示する。これは行単位 resolve 後の最新状態と整合させるため。 */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
+      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
         <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4 lg:grid-cols-9">
           <div>
-            <span className="text-gray-500">ステータス</span>
-            <div className="mt-0.5 font-medium text-gray-800">
+            <span className="text-gray-500 dark:text-gray-400">ステータス</span>
+            <div className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">
               {job.status === "completed" && (
-                <span className="text-green-600">完了</span>
+                <span className="text-green-600 dark:text-green-400">完了</span>
               )}
               {job.status === "failed" && (
-                <span className="text-red-600">エラーあり</span>
+                <span className="text-red-600 dark:text-red-400">エラーあり</span>
               )}
               {job.status === "processing" && (
-                <span className="text-blue-600">処理中</span>
+                <span className="text-blue-600 dark:text-blue-400">処理中</span>
               )}
               {job.status === "pending" && (
-                <span className="text-amber-600">待機中</span>
+                <span className="text-amber-600 dark:text-amber-400">待機中</span>
               )}
               {job.status === "rolled_back" && (
-                <span className="text-purple-700">ロールバック済み</span>
+                <span className="text-purple-700 dark:text-purple-400">ロールバック済み</span>
               )}
             </div>
           </div>
           <div>
-            <span className="text-gray-500">総行数</span>
-            <div className="mt-0.5 font-medium text-gray-800">
+            <span className="text-gray-500 dark:text-gray-400">総行数</span>
+            <div className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">
               {job.totalRows ?? job.rows.length ?? "-"}
             </div>
           </div>
           <div>
-            <span className="text-gray-500" title="success かつ「更新」プレフィックス無し">
+            <span className="text-gray-500 dark:text-gray-400" title="success かつ「更新」プレフィックス無し">
               新規
             </span>
-            <div className="mt-0.5 font-medium text-green-600">
+            <div className="mt-0.5 font-medium text-green-600 dark:text-green-400">
               {summary.createdCount}
             </div>
           </div>
           <div>
             <span
-              className="text-gray-500"
+              className="text-gray-500 dark:text-gray-400"
               title="success かつ errorMessage が「更新...」"
             >
               更新
             </span>
-            <div className="mt-0.5 font-medium text-blue-600">
+            <div className="mt-0.5 font-medium text-blue-600 dark:text-blue-400">
               {summary.updatedCount}
             </div>
           </div>
           <div>
-            <span className="text-gray-500" title="status === skipped">
+            <span className="text-gray-500 dark:text-gray-400" title="status === skipped">
               スキップ
             </span>
-            <div className="mt-0.5 font-medium text-gray-700">
+            <div className="mt-0.5 font-medium text-gray-700 dark:text-gray-200">
               {summary.skippedCount}
             </div>
           </div>
           <div>
-            <span className="text-gray-500" title="status === needs_review">
+            <span className="text-gray-500 dark:text-gray-400" title="status === needs_review">
               要レビュー
             </span>
-            <div className="mt-0.5 font-medium text-amber-600">
+            <div className="mt-0.5 font-medium text-amber-600 dark:text-amber-400">
               {summary.needsReviewCount}
             </div>
           </div>
           <div>
             <span
-              className="text-gray-500"
+              className="text-gray-500 dark:text-gray-400"
               title="status === error（要レビューを含まない純エラー）"
             >
               エラー
             </span>
-            <div className="mt-0.5 font-medium text-red-600">
+            <div className="mt-0.5 font-medium text-red-600 dark:text-red-400">
               {summary.errorCount}
             </div>
           </div>
           <div>
-            <span className="text-gray-500">実行者</span>
-            <div className="mt-0.5 font-medium text-gray-800">
+            <span className="text-gray-500 dark:text-gray-400">実行者</span>
+            <div className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">
               {job.executor.name}
             </div>
           </div>
           <div>
-            <span className="text-gray-500">実行日時</span>
-            <div className="mt-0.5 font-medium text-gray-800">
+            <span className="text-gray-500 dark:text-gray-400">実行日時</span>
+            <div className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">
               {job.createdAt
                 ? new Date(job.createdAt).toLocaleString("ja-JP")
                 : "-"}
@@ -717,7 +717,7 @@ export default function ImportJobDetailPage() {
         </div>
         {/* 補助情報: 重複候補（表示ヒント。要レビュー/スキップ件数の内数） */}
         {counts.duplicate > 0 && (
-          <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-amber-700">
+          <div className="mt-3 border-t border-gray-100 dark:border-gray-800 pt-2 text-xs text-amber-700 dark:text-amber-400">
             <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
             上記のうち <strong>{counts.duplicate} 件</strong>{" "}
             は重複検知（要レビュー / スキップ の内数）です
@@ -733,24 +733,24 @@ export default function ImportJobDetailPage() {
           - 一覧表示では isUpdate でバッジを切替（新規/更新）
           - 物件が削除済みの場合は found=false で「削除済み」バッジ */}
       {affected && (
-        <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5">
+        <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-base font-semibold text-gray-700">
+            <h3 className="text-base font-semibold text-gray-700 dark:text-gray-200">
               この取込で作成・更新された物件
             </h3>
             {affected.applicable && affected.affected.length > 0 && (
               <div className="flex items-center gap-3 text-xs">
-                <span className="text-gray-500">
+                <span className="text-gray-500 dark:text-gray-400">
                   全 <strong>{affected.affected.length}</strong> 件
                 </span>
-                <span className="text-green-700">
+                <span className="text-green-700 dark:text-green-300">
                   新規 <strong>{affected.createdCount}</strong>
                 </span>
-                <span className="text-blue-700">
+                <span className="text-blue-700 dark:text-blue-300">
                   更新 <strong>{affected.updatedCount}</strong>
                 </span>
                 {affected.missingCount > 0 && (
-                  <span className="text-gray-400">
+                  <span className="text-gray-400 dark:text-gray-500">
                     削除済み <strong>{affected.missingCount}</strong>
                   </span>
                 )}
@@ -759,57 +759,57 @@ export default function ImportJobDetailPage() {
           </div>
 
           {!affected.applicable ? (
-            <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+            <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-400">
               このジョブ種別 ({getImportTypeLabel(affected.jobType)}) は物件の作成・更新一覧表示に対応していません。受付帳CSV取込ジョブで確認できます。
             </p>
           ) : affected.affected.length === 0 ? (
-            <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+            <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-400">
               この取込で作成・更新された物件はありません（成功行に createdId が無いか、対象が見つかりません）。
             </p>
           ) : (
-            <div className="overflow-x-auto rounded border border-gray-200">
+            <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-700">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-gray-200 bg-gray-50">
+                <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
                   <tr>
-                    <th className="px-2 py-1.5 font-medium text-gray-600 w-12">行</th>
-                    <th className="px-2 py-1.5 font-medium text-gray-600 w-16">区分</th>
-                    <th className="px-2 py-1.5 font-medium text-gray-600">住所</th>
-                    <th className="px-2 py-1.5 font-medium text-gray-600">識別</th>
-                    <th className="px-2 py-1.5 font-medium text-gray-600">管理ID</th>
-                    <th className="px-2 py-1.5 font-medium text-gray-600">棟</th>
-                    <th className="px-2 py-1.5 font-medium text-gray-600 w-20">詳細</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 w-12 dark:text-gray-300">行</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 w-16 dark:text-gray-300">区分</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300">住所</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300">識別</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300">管理ID</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300">棟</th>
+                    <th className="px-2 py-1.5 font-medium text-gray-600 w-20 dark:text-gray-300">詳細</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {affected.affected.map((p) => (
                     <tr
                       key={`${p.rowNumber}-${p.propertyId}`}
-                      className="hover:bg-gray-50"
+                      className="hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
-                      <td className="px-2 py-1.5 font-mono text-gray-500">
+                      <td className="px-2 py-1.5 font-mono text-gray-500 dark:text-gray-400">
                         #{p.rowNumber}
                       </td>
                       <td className="px-2 py-1.5">
                         {!p.found ? (
-                          <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                          <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                             削除済み
                           </span>
                         ) : p.isUpdate ? (
-                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-800">
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-500/10 dark:text-blue-300">
                             更新
                           </span>
                         ) : (
-                          <span className="rounded bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-800">
+                          <span className="rounded bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-800 dark:bg-green-500/10 dark:text-green-300">
                             新規
                           </span>
                         )}
                       </td>
-                      <td className="px-2 py-1.5 text-gray-700">
+                      <td className="px-2 py-1.5 text-gray-700 dark:text-gray-200">
                         {p.address ?? (
-                          <span className="text-gray-400">-</span>
+                          <span className="text-gray-400 dark:text-gray-500">-</span>
                         )}
                       </td>
-                      <td className="px-2 py-1.5 text-gray-600">
+                      <td className="px-2 py-1.5 text-gray-600 dark:text-gray-300">
                         {[
                           p.lotNumber && `地番 ${p.lotNumber}`,
                           p.buildingNumber && `家屋 ${p.buildingNumber}`,
@@ -817,35 +817,35 @@ export default function ImportJobDetailPage() {
                         ]
                           .filter(Boolean)
                           .join(" / ") || (
-                          <span className="text-gray-400">-</span>
+                          <span className="text-gray-400 dark:text-gray-500">-</span>
                         )}
                       </td>
-                      <td className="px-2 py-1.5 font-mono text-[11px] text-gray-500">
+                      <td className="px-2 py-1.5 font-mono text-[11px] text-gray-500 dark:text-gray-400">
                         {p.importSource ?? "—"}
                       </td>
-                      <td className="px-2 py-1.5 text-gray-600">
+                      <td className="px-2 py-1.5 text-gray-600 dark:text-gray-300">
                         {p.buildingName ? (
                           <Link
                             href={`/buildings/${p.buildingId}`}
-                            className="text-indigo-600 hover:underline"
+                            className="text-indigo-600 hover:underline dark:text-indigo-400"
                           >
                             {p.buildingName}
                           </Link>
                         ) : (
-                          <span className="text-gray-400">-</span>
+                          <span className="text-gray-400 dark:text-gray-500">-</span>
                         )}
                       </td>
                       <td className="px-2 py-1.5">
                         {p.found ? (
                           <Link
                             href={`/properties/${p.propertyId}`}
-                            className="inline-flex items-center gap-0.5 text-indigo-600 hover:underline"
+                            className="inline-flex items-center gap-0.5 text-indigo-600 hover:underline dark:text-indigo-400"
                           >
                             開く
                             <ChevronRight className="h-3 w-3" />
                           </Link>
                         ) : (
-                          <span className="text-gray-400">-</span>
+                          <span className="text-gray-400 dark:text-gray-500">-</span>
                         )}
                       </td>
                     </tr>
@@ -859,16 +859,16 @@ export default function ImportJobDetailPage() {
 
       {/* Completion guidance */}
       {job.status === "completed" && counts.needs_review === 0 && counts.error === 0 && (
-        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-400/20 dark:bg-green-500/10 dark:text-green-300">
           <CheckCircle2 className="mr-1.5 inline h-4 w-4" />
           すべての行が処理済みです。
-          <Link href="/properties" className="ml-2 font-medium text-green-700 underline hover:text-green-900">
+          <Link href="/properties" className="ml-2 font-medium text-green-700 underline hover:text-green-900 dark:text-green-300">
             物件一覧へ
           </Link>
         </div>
       )}
       {counts.needs_review > 0 && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-300">
           <AlertTriangle className="mr-1.5 inline h-4 w-4" />
           <strong>{counts.needs_review} 件</strong>の行がレビュー待ちです
           {counts.duplicate > 0 && (
@@ -878,7 +878,7 @@ export default function ImportJobDetailPage() {
         </div>
       )}
       {counts.updated > 0 && (
-        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300">
           <RefreshCw className="mr-1.5 inline h-4 w-4" />
           <strong>{counts.updated} 件</strong>の行が既存レコードを更新しました（識別子/棟内部屋番号の強い一致のみ）。空欄の値は上書きしていません。
         </div>
@@ -901,7 +901,7 @@ export default function ImportJobDetailPage() {
             className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
               filter === tab.key
                 ? "bg-indigo-600 text-white"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
             }`}
           >
             {tab.label}
@@ -912,12 +912,12 @@ export default function ImportJobDetailPage() {
         {/* 理由別 filter（Phase 2）: 閲覧用・全タブで表示。変更時は changeReason で page=1。
             token は server VALID_ROW_REASONS と一致（B4 scope="duplicate" と衝突しない命名）。 */}
         <label className="flex items-center gap-1">
-          <span className="text-xs text-gray-500">理由</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">理由</span>
           <select
             value={reason}
             onChange={(e) => changeReason(e.target.value as ReasonFilter)}
             disabled={loading}
-            className="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
+            className="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             aria-label="理由で絞り込み"
           >
             <option value="all">すべての理由</option>
@@ -946,7 +946,7 @@ export default function ImportJobDetailPage() {
                   <button
                     onClick={() => handleBatchResolve("skip")}
                     disabled={actionLoading === "batch"}
-                    className="flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    className="flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
                     <SkipForward className="h-3 w-3" />
                     全件スキップ
@@ -954,7 +954,7 @@ export default function ImportJobDetailPage() {
                   <button
                     onClick={() => handleBatchResolve("mark_error")}
                     disabled={actionLoading === "batch"}
-                    className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
                   >
                     <Ban className="h-3 w-3" />
                     全件エラー確定
@@ -967,7 +967,7 @@ export default function ImportJobDetailPage() {
                         onClick={handleBulkResolveDuplicates}
                         disabled={actionLoading === "batch"}
                         title="取込時に検出された重複候補（要レビューの内数）だけをスキップします。非重複の要レビュー行は残ります。"
-                        className="flex items-center gap-1 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                        className="flex items-center gap-1 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
                       >
                         <AlertTriangle className="h-3 w-3" />
                         重複候補のみスキップ（{counts.duplicateActionable}件）
@@ -980,7 +980,7 @@ export default function ImportJobDetailPage() {
             {reason !== "all" &&
               (filter === "needs_review" || filter === "error") &&
               counts[filter] > 0 && (
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
                   理由フィルタ解除後に一括操作できます
                 </span>
               )}
@@ -992,7 +992,7 @@ export default function ImportJobDetailPage() {
               <a
                 href={`/api/import/jobs/${jobId}/export-errors`}
                 download={`import-errors-${jobId}.csv`}
-                className="flex items-center gap-1 rounded-md border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
+                className="flex items-center gap-1 rounded-md border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 dark:border-indigo-700 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800"
                 title="error / needs_review 行を CSV でダウンロード（Excel 互換 / UTF-8 BOM 付き）"
               >
                 <Download className="h-3 w-3" />
@@ -1005,7 +1005,7 @@ export default function ImportJobDetailPage() {
 
       {/* B2 + 候補5: ページネーション（server pagination メタ）＋ 表示件数切替 / ページジャンプ */}
       {job?.pagination && job.pagination.totalRows > 0 && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600 dark:text-gray-300">
           <span>
             {job.pagination.totalRows} 件中{" "}
             {(page - 1) * job.pagination.limit + 1}–
@@ -1015,12 +1015,12 @@ export default function ImportJobDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             {/* 候補5: 表示件数（limit）切替。変更時は changeLimit で page=1 に戻る。 */}
             <label className="flex items-center gap-1">
-              <span className="text-xs text-gray-500">表示件数</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">表示件数</span>
               <select
                 value={limit}
                 onChange={(e) => changeLimit(Number(e.target.value))}
                 disabled={loading}
-                className="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
+                className="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 aria-label="1ページあたりの表示件数"
               >
                 {ROW_LIMIT_OPTIONS.map((opt) => (
@@ -1041,15 +1041,15 @@ export default function ImportJobDetailPage() {
                   onChange={(e) => setGotoPage(e.target.value)}
                   placeholder={String(page)}
                   aria-label="移動先ページ番号"
-                  className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                  className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-gray-400 dark:text-gray-500">
                   / {job.pagination.totalPages}
                 </span>
                 <button
                   type="submit"
                   disabled={loading || gotoPage === ""}
-                  className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50"
+                  className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
                 >
                   移動
                 </button>
@@ -1058,14 +1058,14 @@ export default function ImportJobDetailPage() {
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={!job.pagination.hasPrevPage || loading}
-              className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50"
+              className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
             >
               前へ
             </button>
             <button
               onClick={() => setPage((p) => p + 1)}
               disabled={!job.pagination.hasNextPage || loading}
-              className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50"
+              className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
             >
               次へ
             </button>
@@ -1076,7 +1076,7 @@ export default function ImportJobDetailPage() {
       {/* Rows list */}
       <div className="space-y-2">
         {filteredRows.length === 0 ? (
-          <div className="rounded-lg border border-gray-200 bg-white py-10 text-center text-sm text-gray-400">
+          <div className="rounded-lg border border-gray-200 bg-white py-10 text-center text-sm text-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-500">
             該当する行はありません
           </div>
         ) : (
@@ -1107,7 +1107,7 @@ export default function ImportJobDetailPage() {
                   }
                   className="flex w-full items-center gap-3 px-4 py-3 text-left"
                 >
-                  <span className="w-8 text-xs font-mono text-gray-400">
+                  <span className="w-8 text-xs font-mono text-gray-400 dark:text-gray-500">
                     #{row.rowNumber}
                   </span>
                   <Icon className={`h-4 w-4 shrink-0 ${config.color}`} />
@@ -1116,7 +1116,7 @@ export default function ImportJobDetailPage() {
                   </span>
                   {isDuplicateMessage(row.errorMessage) && (
                     <span
-                      className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800"
+                      className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
                       title={row.errorMessage ?? ""}
                     >
                       重複{extractDuplicateReason(row.errorMessage) ? `・${extractDuplicateReason(row.errorMessage)}` : ""}
@@ -1124,7 +1124,7 @@ export default function ImportJobDetailPage() {
                   )}
                   {isUpdateMessage(row.errorMessage) && (
                     <span
-                      className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-800"
+                      className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-500/10 dark:text-blue-300"
                       title={row.errorMessage ?? ""}
                     >
                       更新{extractUpdateReason(row.errorMessage) ? `・${extractUpdateReason(row.errorMessage)}` : ""}
@@ -1134,7 +1134,7 @@ export default function ImportJobDetailPage() {
                       })()}
                     </span>
                   )}
-                  <span className="flex-1 truncate text-sm text-gray-600">
+                  <span className="flex-1 truncate text-sm text-gray-600 dark:text-gray-300">
                     {rawData["住所"] ||
                       rawData["address"] ||
                       rawData["氏名"] ||
@@ -1144,32 +1144,32 @@ export default function ImportJobDetailPage() {
                   {row.errorMessage &&
                     !isDuplicateMessage(row.errorMessage) &&
                     !isUpdateMessage(row.errorMessage) && (
-                      <span className="hidden max-w-[200px] truncate text-xs text-red-500 sm:inline">
+                      <span className="hidden max-w-[200px] truncate text-xs text-red-500 sm:inline dark:text-red-400">
                         {row.errorMessage}
                       </span>
                     )}
                   {isExpanded ? (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />
+                    <ChevronDown className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
                   ) : (
-                    <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
                   )}
                 </button>
 
                 {/* Expanded detail */}
                 {isExpanded && (
-                  <div className="border-t border-gray-200 bg-white px-4 py-4">
+                  <div className="border-t border-gray-200 bg-white px-4 py-4 dark:border-gray-700 dark:bg-gray-900">
                     {/* Update summary (success + update) */}
                     {row.status === "success" && isUpdateMessage(row.errorMessage) && (
-                      <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                      <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300">
                         <strong>更新:</strong>{" "}
                         {extractUpdateReason(row.errorMessage) ?? "既存レコード更新"}
                         {(() => {
                           const fields = extractUpdatedFields(row.errorMessage);
                           if (fields.length === 0) {
-                            return <span className="ml-2 text-blue-600">（差分なし）</span>;
+                            return <span className="ml-2 text-blue-600 dark:text-blue-400">（差分なし）</span>;
                           }
                           return (
-                            <span className="ml-2 text-blue-700">
+                            <span className="ml-2 text-blue-700 dark:text-blue-300">
                               更新項目: {fields.join(", ")}
                             </span>
                           );
@@ -1183,16 +1183,16 @@ export default function ImportJobDetailPage() {
                       <div
                         className={`mb-4 overflow-hidden rounded-md border ${
                           row.status === "needs_review"
-                            ? "border-amber-300 bg-amber-50"
-                            : "border-red-300 bg-red-50"
+                            ? "border-amber-300 bg-amber-50 dark:border-amber-400/20 dark:bg-amber-500/10"
+                            : "border-red-300 bg-red-50 dark:border-red-400/20 dark:bg-red-500/10"
                         }`}
                       >
                         {/* ① エラー内容（大きく） */}
                         <div
                           className={`flex items-center gap-2 px-4 py-2.5 text-base font-semibold ${
                             row.status === "needs_review"
-                              ? "bg-amber-100 text-amber-900"
-                              : "bg-red-100 text-red-900"
+                              ? "bg-amber-100 text-amber-900 dark:bg-amber-900/20 dark:text-amber-300"
+                              : "bg-red-100 text-red-900 dark:bg-red-900/20 dark:text-red-300"
                           }`}
                         >
                           {row.status === "needs_review" ? (
@@ -1211,12 +1211,12 @@ export default function ImportJobDetailPage() {
                           <div
                             className={`px-4 py-1.5 text-xs ${
                               row.status === "needs_review"
-                                ? "text-amber-800"
-                                : "text-red-800"
+                                ? "text-amber-800 dark:text-amber-300"
+                                : "text-red-800 dark:text-red-300"
                             }`}
                           >
                             <span className="font-medium">対象列:</span>{" "}
-                            <code className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px]">
+                            <code className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px] dark:bg-gray-900/70">
                               {classified.field}
                             </code>
                             <span className="ml-1 text-[11px] opacity-75">
@@ -1229,8 +1229,8 @@ export default function ImportJobDetailPage() {
                         <div
                           className={`flex items-start gap-2 px-4 py-2 text-sm ${
                             row.status === "needs_review"
-                              ? "border-t border-amber-200 text-amber-900"
-                              : "border-t border-red-200 text-red-900"
+                              ? "border-t border-amber-200 text-amber-900 dark:border-amber-400/20 dark:text-amber-300"
+                              : "border-t border-red-200 text-red-900 dark:border-red-400/20 dark:text-red-300"
                           }`}
                         >
                           <span className="mt-0.5 shrink-0 font-semibold">
@@ -1244,8 +1244,8 @@ export default function ImportJobDetailPage() {
                           <details
                             className={`border-t px-4 py-1.5 text-[11px] ${
                               row.status === "needs_review"
-                                ? "border-amber-200 text-amber-700"
-                                : "border-red-200 text-red-700"
+                                ? "border-amber-200 text-amber-700 dark:border-amber-400/20 dark:text-amber-400"
+                                : "border-red-200 text-red-700 dark:border-red-400/20 dark:text-red-400"
                             }`}
                           >
                             <summary className="cursor-pointer select-none">
@@ -1261,7 +1261,7 @@ export default function ImportJobDetailPage() {
 
                     {/* Created ID */}
                     {row.createdId && (
-                      <div className="mb-4 flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                      <div className="mb-4 flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-400/20 dark:bg-green-500/10 dark:text-green-300">
                         <CheckCircle2 className="h-4 w-4" />
                         <span>
                           作成済ID:{" "}
@@ -1298,7 +1298,7 @@ export default function ImportJobDetailPage() {
                     {/* Raw data display / edit */}
                     <div className="mb-4">
                       <div className="mb-2 flex items-center justify-between">
-                        <h4 className="text-sm font-medium text-gray-700">
+                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-200">
                           元データ
                         </h4>
                         {(row.status === "error" ||
@@ -1306,7 +1306,7 @@ export default function ImportJobDetailPage() {
                           !isEditing && (
                             <button
                               onClick={() => startEdit(row)}
-                              className="flex items-center gap-1 text-xs text-indigo-600 hover:underline"
+                              className="flex items-center gap-1 text-xs text-indigo-600 hover:underline dark:text-indigo-400"
                             >
                               編集
                             </button>
@@ -1314,15 +1314,15 @@ export default function ImportJobDetailPage() {
                         {isEditing && (
                           <button
                             onClick={cancelEdit}
-                            className="text-xs text-gray-500 hover:underline"
+                            className="text-xs text-gray-500 hover:underline dark:text-gray-400"
                           >
                             キャンセル
                           </button>
                         )}
                       </div>
-                      <div className="overflow-x-auto rounded border border-gray-200">
+                      <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-700">
                         <table className="w-full text-xs">
-                          <tbody className="divide-y divide-gray-100">
+                          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                             {Object.entries(
                               isEditing ? editedData : rawData,
                             ).filter(([key]) => !key.startsWith("__")).map(([key, value]) => {
@@ -1335,28 +1335,28 @@ export default function ImportJobDetailPage() {
                                 key={key}
                                 className={
                                   isErrorField
-                                    ? "bg-red-50/70 hover:bg-red-100"
-                                    : "hover:bg-gray-50"
+                                    ? "bg-red-50/70 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20"
+                                    : "hover:bg-gray-50 dark:hover:bg-gray-800"
                                 }
                                 title={isErrorField ? "この列でエラー" : undefined}
                               >
                                 <td
                                   className={`w-[120px] whitespace-nowrap px-3 py-1.5 font-medium ${
                                     isErrorField
-                                      ? "text-red-800"
-                                      : "text-gray-600"
+                                      ? "text-red-800 dark:text-red-300"
+                                      : "text-gray-600 dark:text-gray-300"
                                   }`}
                                 >
                                   {isErrorField && (
-                                    <XCircle className="mr-1 inline h-3.5 w-3.5 -translate-y-px text-red-500" />
+                                    <XCircle className="mr-1 inline h-3.5 w-3.5 -translate-y-px text-red-500 dark:text-red-400" />
                                   )}
                                   {key}
                                 </td>
                                 <td
                                   className={`px-3 py-1.5 ${
                                     isErrorField
-                                      ? "bg-red-100 text-red-900 ring-1 ring-inset ring-red-300"
-                                      : "text-gray-800"
+                                      ? "bg-red-100 text-red-900 ring-1 ring-inset ring-red-300 dark:bg-red-500/10 dark:text-red-300"
+                                      : "text-gray-800 dark:text-gray-100"
                                   }`}
                                 >
                                   {isEditing ? (
@@ -1371,15 +1371,15 @@ export default function ImportJobDetailPage() {
                                       }
                                       className={`w-full rounded border px-2 py-0.5 text-xs focus:outline-none focus:ring-1 ${
                                         isErrorField
-                                          ? "border-red-400 bg-white focus:border-red-500 focus:ring-red-500"
-                                          : "border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                                          ? "border-red-400 bg-white focus:border-red-500 focus:ring-red-500 dark:border-red-500 dark:bg-gray-900"
+                                          : "border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                                       }`}
                                       autoFocus={isErrorField}
                                     />
                                   ) : (
                                     <span>
                                       {value === "" || value == null ? (
-                                        <span className="text-gray-400">
+                                        <span className="text-gray-400 dark:text-gray-500">
                                           (未入力)
                                         </span>
                                       ) : (
@@ -1402,12 +1402,12 @@ export default function ImportJobDetailPage() {
                       <div className="space-y-3">
                         {/* Search & link existing */}
                         {row.status === "needs_review" && (
-                          <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                            <p className="mb-2 text-xs font-medium text-gray-600">
+                          <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                            <p className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
                               既存{isOwnerJob ? "所有者" : "物件"}を検索して紐付け
                             </p>
                             <div className="relative">
-                              <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" />
+                              <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
                               <input
                                 type="text"
                                 value={searchQuery}
@@ -1419,19 +1419,19 @@ export default function ImportJobDetailPage() {
                                     ? "氏名・電話番号・住所で検索..."
                                     : "住所・地番・不動産番号で検索..."
                                 }
-                                className="w-full rounded border border-gray-300 py-1.5 pl-8 pr-2 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="w-full rounded border border-gray-300 py-1.5 pl-8 pr-2 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                               />
                             </div>
 
                             {/* Search results */}
                             {searchLoading && (
-                              <div className="mt-2 flex items-center gap-1 text-xs text-gray-400">
+                              <div className="mt-2 flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
                                 <Loader2 className="h-3 w-3 animate-spin" />
                                 検索中...
                               </div>
                             )}
                             {searchResults.length > 0 && (
-                              <div className="mt-2 max-h-[200px] overflow-y-auto rounded border border-gray-200 bg-white">
+                              <div className="mt-2 max-h-[200px] overflow-y-auto rounded border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
                                 {searchResults.map((result) => (
                                   <button
                                     key={result.id}
@@ -1444,19 +1444,19 @@ export default function ImportJobDetailPage() {
                                           result.id,
                                       );
                                     }}
-                                    className={`flex w-full items-start gap-2 border-b border-gray-100 px-3 py-2 text-left text-xs hover:bg-indigo-50 last:border-b-0 ${
+                                    className={`flex w-full items-start gap-2 border-b border-gray-100 px-3 py-2 text-left text-xs hover:bg-indigo-50 last:border-b-0 dark:border-gray-800 dark:hover:bg-gray-800 ${
                                       selectedTarget?.id === result.id
-                                        ? "bg-indigo-50"
+                                        ? "bg-indigo-50 dark:bg-gray-800"
                                         : ""
                                     }`}
                                   >
                                     <div className="flex-1 min-w-0">
-                                      <p className="font-medium text-gray-800 truncate">
+                                      <p className="font-medium text-gray-800 truncate dark:text-gray-100">
                                         {isOwnerJob
                                           ? result.name
                                           : result.address}
                                       </p>
-                                      <p className="text-gray-500 truncate">
+                                      <p className="text-gray-500 truncate dark:text-gray-400">
                                         {isOwnerJob
                                           ? [
                                               result.nameKana,
@@ -1475,7 +1475,7 @@ export default function ImportJobDetailPage() {
                                               .join(" / ")}
                                       </p>
                                     </div>
-                                    <span className="shrink-0 font-mono text-[10px] text-gray-400">
+                                    <span className="shrink-0 font-mono text-[10px] text-gray-400 dark:text-gray-500">
                                       {result.id.slice(0, 8)}
                                     </span>
                                   </button>
@@ -1486,7 +1486,7 @@ export default function ImportJobDetailPage() {
                             {/* Selected target */}
                             {selectedTarget && (
                               <div className="mt-2 flex items-center gap-2">
-                                <div className="flex-1 rounded border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700">
+                                <div className="flex-1 rounded border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300">
                                   <Link2 className="mr-1 inline h-3 w-3" />
                                   紐付け先:{" "}
                                   {isOwnerJob
@@ -1548,7 +1548,7 @@ export default function ImportJobDetailPage() {
                           <button
                             onClick={() => handleResolve(row.id, "skip")}
                             disabled={isLoading}
-                            className="flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            className="flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
                           >
                             <SkipForward className="h-3 w-3" />
                             スキップ
@@ -1559,7 +1559,7 @@ export default function ImportJobDetailPage() {
                               handleResolve(row.id, "mark_error")
                             }
                             disabled={isLoading}
-                            className="flex items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            className="flex items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-900/20"
                           >
                             <Ban className="h-3 w-3" />
                             エラー確定
@@ -1578,46 +1578,46 @@ export default function ImportJobDetailPage() {
       {/* Rollback dialog */}
       {rollbackOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
-            <div className="border-b border-gray-200 px-5 py-3">
-              <h3 className="flex items-center gap-2 text-base font-semibold text-gray-800">
-                <RotateCcw className="h-4 w-4 text-red-600" />
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl dark:bg-gray-900">
+            <div className="border-b border-gray-200 px-5 py-3 dark:border-gray-800">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100">
+                <RotateCcw className="h-4 w-4 text-red-600 dark:text-red-400" />
                 取込ロールバック
               </h3>
             </div>
             <div className="space-y-3 px-5 py-4 text-sm">
               {rollbackLoading && !rollbackPreview && !rollbackResult && (
-                <div className="flex items-center gap-2 text-gray-500">
+                <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   対象を確認中...
                 </div>
               )}
               {rollbackError && (
-                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-700">
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-700 dark:border-red-400/20 dark:bg-red-500/10 dark:text-red-300">
                   {rollbackError}
                 </div>
               )}
               {rollbackResult ? (
                 <div className="space-y-2">
-                  <div className="rounded-md border border-green-200 bg-green-50 p-3 text-green-800">
+                  <div className="rounded-md border border-green-200 bg-green-50 p-3 text-green-800 dark:border-green-400/20 dark:bg-green-500/10 dark:text-green-300">
                     ロールバック完了: {rollbackResult.deletedCount ?? 0} 件削除 /
                     {" "}
                     {rollbackResult.restoredPropertyCount ?? 0} 件復元
                     {(rollbackResult.restoredFieldCount ?? 0) > 0 && (
-                      <span className="ml-1 text-xs text-green-700">
+                      <span className="ml-1 text-xs text-green-700 dark:text-green-300">
                         （{rollbackResult.restoredFieldCount} 項目）
                       </span>
                     )}
                   </div>
                   {rollbackResult.restoreDetails &&
                     rollbackResult.restoreDetails.length > 0 && (
-                      <details className="text-xs text-gray-600">
-                        <summary className="cursor-pointer text-gray-700">
+                      <details className="text-xs text-gray-600 dark:text-gray-300">
+                        <summary className="cursor-pointer text-gray-700 dark:text-gray-200">
                           復元したフィールドの内訳を表示
                         </summary>
                         <ul
                           data-testid="rollback-restore-result-list"
-                          className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2"
+                          className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-800/50"
                         >
                           {rollbackResult.restoreDetails.map((r) => (
                             <li key={`${r.rowNumber}-${r.propertyId}`}>
@@ -1631,8 +1631,8 @@ export default function ImportJobDetailPage() {
                     )}
                   {rollbackResult.blockedDetails.length > 0 && (
                     <div>
-                      <p className="font-medium text-gray-700">対応できなかった行 ({rollbackResult.blockedDetails.length}):</p>
-                      <ul className="mt-1 max-h-48 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600">
+                      <p className="font-medium text-gray-700 dark:text-gray-200">対応できなかった行 ({rollbackResult.blockedDetails.length}):</p>
+                      <ul className="mt-1 max-h-48 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-300">
                         {rollbackResult.blockedDetails.map((b) => (
                           <li key={`${b.rowNumber}-${b.action}`}>
                             行 {b.rowNumber} ({b.action === "delete" ? "削除" : "復元"}): {b.reason}
@@ -1644,38 +1644,38 @@ export default function ImportJobDetailPage() {
                 </div>
               ) : rollbackPreview && rollbackPreview.eligible ? (
                 <>
-                  <p className="text-gray-700">
+                  <p className="text-gray-700 dark:text-gray-200">
                     この取込で作成された物件を削除し、更新された物件は変更ログに基づいて復元します。
                     この操作は取り消せません。
                   </p>
-                  <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-800/50">
                     <div className="grid grid-cols-4 gap-2 text-xs">
                       <div>
-                        <div className="text-gray-500">削除対象 (新規)</div>
-                        <div className="text-base font-semibold text-red-600">
+                        <div className="text-gray-500 dark:text-gray-400">削除対象 (新規)</div>
+                        <div className="text-base font-semibold text-red-600 dark:text-red-400">
                           {rollbackPreview.summary.deletable}
                         </div>
                       </div>
                       <div>
-                        <div className="text-gray-500">復元対象 (更新)</div>
-                        <div className="text-base font-semibold text-blue-600">
+                        <div className="text-gray-500 dark:text-gray-400">復元対象 (更新)</div>
+                        <div className="text-base font-semibold text-blue-600 dark:text-blue-400">
                           {rollbackPreview.summary.restorable}
                           {(rollbackPreview.summary.restorableFieldCount ?? 0) > 0 && (
-                            <span className="ml-1 text-xs text-blue-500">
+                            <span className="ml-1 text-xs text-blue-500 dark:text-blue-400">
                               ({rollbackPreview.summary.restorableFieldCount}項目)
                             </span>
                           )}
                         </div>
                       </div>
                       <div>
-                        <div className="text-gray-500">ロールバック不可</div>
-                        <div className="text-base font-semibold text-amber-600">
+                        <div className="text-gray-500 dark:text-gray-400">ロールバック不可</div>
+                        <div className="text-base font-semibold text-amber-600 dark:text-amber-400">
                           {rollbackPreview.summary.blocked}
                         </div>
                       </div>
                       <div>
-                        <div className="text-gray-500">対象外 (skip/error 等)</div>
-                        <div className="text-base font-semibold text-gray-700">
+                        <div className="text-gray-500 dark:text-gray-400">対象外 (skip/error 等)</div>
+                        <div className="text-base font-semibold text-gray-700 dark:text-gray-200">
                           {rollbackPreview.summary.skipped}
                         </div>
                       </div>
@@ -1683,13 +1683,13 @@ export default function ImportJobDetailPage() {
                   </div>
                   {rollbackPreview.restoreDetails &&
                     rollbackPreview.restoreDetails.length > 0 && (
-                      <details className="text-xs text-gray-600">
-                        <summary className="cursor-pointer text-gray-700">
+                      <details className="text-xs text-gray-600 dark:text-gray-300">
+                        <summary className="cursor-pointer text-gray-700 dark:text-gray-200">
                           復元するフィールドの内訳を表示
                         </summary>
                         <ul
                           data-testid="rollback-restore-preview-list"
-                          className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2"
+                          className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-800/50"
                         >
                           {rollbackPreview.restoreDetails.map((r) => (
                             <li key={`${r.rowNumber}-${r.propertyId}`}>
@@ -1702,11 +1702,11 @@ export default function ImportJobDetailPage() {
                       </details>
                     )}
                   {rollbackPreview.blockedDetails.length > 0 && (
-                    <details className="text-xs text-gray-600">
-                      <summary className="cursor-pointer text-gray-700">
+                    <details className="text-xs text-gray-600 dark:text-gray-300">
+                      <summary className="cursor-pointer text-gray-700 dark:text-gray-200">
                         ロールバック不可の内訳を表示
                       </summary>
-                      <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2">
+                      <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-800/50">
                         {rollbackPreview.blockedDetails.map((b) => (
                           <li key={`${b.rowNumber}-${b.action}`}>
                             行 {b.rowNumber} ({b.action === "delete" ? "削除" : "復元"}): {b.reason}
@@ -1717,16 +1717,16 @@ export default function ImportJobDetailPage() {
                   )}
                 </>
               ) : rollbackPreview && !rollbackPreview.eligible ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-300">
                   {rollbackPreview.ineligibleReason ?? "ロールバックできません"}
                 </div>
               ) : null}
             </div>
-            <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-3">
+            <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-3 dark:border-gray-800">
               <button
                 onClick={closeRollbackDialog}
                 disabled={rollbackLoading}
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 {rollbackResult ? "閉じる" : "キャンセル"}
               </button>
@@ -1777,8 +1777,8 @@ function BuildingCandidates({
   if (candidates.length === 0) return null;
 
   return (
-    <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3">
-      <p className="mb-2 text-xs font-medium text-blue-800">
+    <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-400/20 dark:bg-blue-500/10">
+      <p className="mb-2 text-xs font-medium text-blue-800 dark:text-blue-300">
         棟候補が見つかりました。正しい棟を選択してください:
       </p>
       <div className="space-y-1">
@@ -1787,11 +1787,11 @@ function BuildingCandidates({
             key={c.id}
             type="button"
             onClick={() => onSelect(c.id)}
-            className="flex w-full items-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-left text-xs hover:bg-blue-100 transition-colors"
+            className="flex w-full items-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-left text-xs hover:bg-blue-100 transition-colors dark:border-blue-400/20 dark:bg-gray-900 dark:hover:bg-gray-800"
           >
-            <span className="font-medium text-gray-800">{c.name}</span>
-            <span className="text-gray-500">{c.address}</span>
-            <span className="ml-auto shrink-0 font-mono text-[10px] text-gray-400">
+            <span className="font-medium text-gray-800 dark:text-gray-100">{c.name}</span>
+            <span className="text-gray-500 dark:text-gray-400">{c.address}</span>
+            <span className="ml-auto shrink-0 font-mono text-[10px] text-gray-400 dark:text-gray-500">
               {c.id.slice(0, 8)}...
             </span>
           </button>
