@@ -113,3 +113,28 @@ describe("import/page.tsx dark: 取込履歴 行ステータス色(STATUS_CONFIG
     expect(src).toContain('color: "text-amber-600 dark:text-amber-400"');
   });
 });
+
+// 要レビュー行の ReviewActionHint CTA リンク（owner_unmatched/property_not_found）は、
+// 暗い要レビュー表(dark:bg-gray-900)上で text-indigo-600 のままだと 12px 文字が低コントラスト
+// （@codex #231 P2 round4）。他のindigoリンク同様 dark:text-indigo-400 を付与。
+describe("import/page.tsx dark: ReviewActionHint CTA リンクの暗面可読性", () => {
+  it("ReviewActionHint の indigo CTA に dark:text-indigo-400 が付く", () => {
+    expect(src).toContain("inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline");
+  });
+});
+
+// 最終掃き出し: 暗カード/暗ヘッダ上に残っていた bare 色文字（@codex round4 indigo CTA 指摘を機に全件点検）。
+describe("import/page.tsx dark: 暗面上の残り bare 色文字（最終掃き出し）", () => {
+  it("列対応の住所推奨 amber 警告に dark:text-amber-400", () => {
+    expect(src).toContain("text-amber-600 dark:text-amber-400 font-medium");
+  });
+  it("プレビュー表ヘッダの対応列注記(blue)に dark:text-blue-400", () => {
+    expect(src).toContain("text-blue-500 dark:text-blue-400 font-normal");
+  });
+  it("取込結果のパースエラー見出し(red-600)に dark:text-red-400", () => {
+    expect(src).toContain("text-xs font-medium text-red-600 dark:text-red-400");
+  });
+  it("取込結果のパースエラー明細(red-500)に dark:text-red-400", () => {
+    expect(src).toContain("text-xs text-red-500 dark:text-red-400");
+  });
+});

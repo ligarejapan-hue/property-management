@@ -392,7 +392,7 @@ function ReviewActionHint({
               href={`/properties/${sample.propertyId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
+              className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
             >
               対象物件を開く <ArrowRight className="h-3 w-3" />
             </Link>
@@ -428,7 +428,7 @@ function ReviewActionHint({
             href="/properties"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
+            className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
           >
             物件一覧で確認 / 新規登録 <ArrowRight className="h-3 w-3" />
           </Link>
@@ -1337,7 +1337,7 @@ export default function ImportPage() {
                 出るのが利用者には意味不明だったため、分母を撤去して割当数のみ表示する。 */}
             <span>{Object.keys(columnMapping).length} 項目を割当済み</span>
             {!mappedFields.has("住所") && (
-              <span className="text-amber-600 font-medium">
+              <span className="text-amber-600 dark:text-amber-400 font-medium">
                 <AlertTriangle className="mr-1 inline h-4 w-4" />
                 住所フィールドの対応を推奨
               </span>
@@ -1435,7 +1435,7 @@ export default function ImportPage() {
                     >
                       {h}
                       {columnMapping[h] && (
-                        <span className="ml-1 text-blue-500 font-normal">
+                        <span className="ml-1 text-blue-500 dark:text-blue-400 font-normal">
                           ({columnMapping[h]})
                         </span>
                       )}
@@ -1696,11 +1696,11 @@ export default function ImportPage() {
             </div>
             {result.parseErrors.length > 0 && (
               <div className="mt-3 border-t border-green-200 pt-3">
-                <p className="mb-1 text-xs font-medium text-red-600">
+                <p className="mb-1 text-xs font-medium text-red-600 dark:text-red-400">
                   パースエラー:
                 </p>
                 {result.parseErrors.map((e, i) => (
-                  <p key={i} className="text-xs text-red-500">
+                  <p key={i} className="text-xs text-red-500 dark:text-red-400">
                     行 {e.row}: {e.message}
                   </p>
                 ))}
