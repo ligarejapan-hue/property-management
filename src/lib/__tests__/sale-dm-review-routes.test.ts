@@ -169,6 +169,19 @@ describe("POST regenerate draft (再生成)", () => {
     expect(res.status).toBe(404);
   });
 
+  it("field_staff が作成/担当でない物件の再生成は 403(record scope)", async () => {
+    grant(...ALL);
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
+    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      ...mockDraft,
+      property: { address: "東京都〇〇区", propertyType: "land", roomNo: null, createdBy: "other", assignedTo: "other" },
+    });
+    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    expect(res.status).toBe(403);
+  });
+
   it("正常に再生成し 200・条件付き updateMany(status!=sent)で書き込む", async () => {
     grant(...ALL);
     (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });

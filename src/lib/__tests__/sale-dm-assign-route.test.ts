@@ -80,8 +80,23 @@ describe("POST assign (auto)", () => {
     const updates = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
     for (const u of updates) {
       expect(u.data.body).toBe("");                          // 不一致になる本文をクリア
+      expect(u.data.status).toBe("draft");                   // confirmed のまま空 body にしない(再確定を強制)
+      expect(u.data.confirmedAt).toBeNull();
       expect(u.where.variantId).toEqual({ not: u.data.variantId }); // 型が変わる宛先のみ
     }
+  });
+
+  it("field_staff は担当外物件の宛先を割当対象にしない(本文を勝手にクリア/再割当しない)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([
+      { id: "r1", property: { createdBy: "u1", assignedTo: "x" } }, // 担当内
+      { id: "r2", property: { createdBy: "x", assignedTo: "x" } },  // 担当外→除外
+    ]);
+    const res = await assign(post({ mode: "auto", order: "sequential" }) as never, ctxC);
+    expect(res.status).toBe(200);
+    const allIds = pm.dmRecipientDraft.updateMany.mock.calls.flatMap((c) => c[0].where.id.in as string[]);
+    expect(allIds).toContain("r1");
+    expect(allIds).not.toContain("r2");
   });
 
   it("権限不足で 403・更新しない", async () => {

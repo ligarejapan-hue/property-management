@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmAccess, assertSaleDmCampaignOwned, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmAssignSchema } from "@/lib/validators-sale-dm";
 import { assignVariantsEvenly, applyManualAssignment } from "@/lib/sale-dm-letter/assign";
 
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const [variants, recipients] = await Promise.all([
       prisma.dmVariant.findMany({ where: { campaignId: id }, select: { id: true }, orderBy: { label: "asc" } }),
       // 送付済み(sent)は A/B バケットを再割当しない(送付済みの配達/反響結果が別型へ移るのを防ぐ)。
-      prisma.dmRecipientDraft.findMany({ where: { campaignId: id, status: { not: "sent" } }, select: { id: true }, orderBy: { id: "asc" } }),
+      prisma.dmRecipientDraft.findMany({ where: { campaignId: id, status: { not: "sent" } }, select: { id: true, property: { select: { createdBy: true, assignedTo: true } } }, orderBy: { id: "asc" } }),
     ]);
 
     if (variants.length === 0) {
@@ -24,7 +24,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const variantIds = variants.map((v) => v.id);
-    const recipientIds = recipients.map((r) => r.id);
+    // field_staff は現在の物件 record scope の宛先のみ割当対象にする(担当外物件の本文を
+    // 勝手にクリア/再割当しない・GET campaign / print / export と統一)。
+    const recipientIds = filterDraftsByFieldStaffScope(recipients, session).map((r) => r.id);
 
     const assignment =
       body.mode === "manual"
@@ -48,7 +50,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         // まま確定/印刷/送付されるのを防ぐ(空 body は confirm/print から除外済み)。再生成すると
         // 現在の型の作風で本文が入り確定可能になる。既に同じ型の宛先は触らない(本文を保全)。
         where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, variantId: { not: variantId } },
-        data: { variantId, body: "" },
+        // 本文クリア時は status も draft に戻し confirmedAt を消す(confirmed のまま空 body だと
+        // mark-sent が空 letter を送付済みにし得るため)。再生成→再確定の lifecycle を強制。
+        data: { variantId, body: "", status: "draft", confirmedAt: null },
       });
       assigned += result.count;
       perVariant[variantId] = result.count;

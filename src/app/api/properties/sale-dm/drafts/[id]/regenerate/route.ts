@@ -12,9 +12,18 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const { session } = await requireSaleDmAccess();
     if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
     const { id } = await params;
-    const draft = await prisma.dmRecipientDraft.findUnique({ where: { id }, include: { variant: true, property: { select: { address: true, propertyType: true, roomNo: true } }, campaign: { select: { createdBy: true } } } });
+    const draft = await prisma.dmRecipientDraft.findUnique({ where: { id }, include: { variant: true, property: { select: { address: true, propertyType: true, roomNo: true, createdBy: true, assignedTo: true } }, campaign: { select: { createdBy: true } } } });
     // 作成者本人のキャンペーン配下のみ(横断アクセス防止)。not-found/not-owned は同じ 404。
     if (!draft || draft.campaign.createdBy !== session.id) throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    // field_staff は作成 or 担当の物件のみ操作可(物件APIと同じ record scope。再割当で範囲外に
+    // なった物件の宛先PIIを生成器へ渡させない)。GET/print/export の絞り込みと整合。
+    if (
+      session.role === "field_staff" &&
+      draft.property.createdBy !== session.id &&
+      draft.property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この物件を操作する権限がありません", "FORBIDDEN");
+    }
     // 送付済み(sent)の宛先は再生成(本文書き換え)できない(送った内容/集計の改竄防止)。
     if (draft.status === "sent") throw new ApiError(409, "送付済みの宛先は再生成できません", "ALREADY_SENT");
     const v = draft.variant;
