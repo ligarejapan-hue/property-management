@@ -32,7 +32,11 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
 // requireSaleDmAccess は Plan 1 の route-guard。ここではゲートを mock し、許可/403 を切り替える。
 const { requireSaleDmAccess } = vi.hoisted(() => ({ requireSaleDmAccess: vi.fn() }));
-vi.mock("@/lib/sale-dm-letter/route-guard", () => ({ requireSaleDmAccess }));
+vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
+  requireSaleDmAccess,
+  filterDraftsByFieldStaffScope: (drafts: Array<{ property: { createdBy: string | null; assignedTo: string | null } }>, session: { id: string; role?: string }) =>
+    session.role === "field_staff" ? drafts.filter((d) => d.property.createdBy === session.id || d.property.assignedTo === session.id) : drafts,
+}));
 
 vi.mock("@/lib/prisma", () => ({
   default: {
@@ -155,6 +159,18 @@ describe("GET .../campaigns/[id]/print", () => {
     const html = await res.text();
     expect(html.startsWith("<!doctype html>")).toBe(true);
     expect(html).not.toContain("letter-page ");
+  });
+
+  it("field_staff は担当外物件の宛先を印刷しない(record scope・GET campaign / CSV と統一)", async () => {
+    requireSaleDmAccess.mockResolvedValue({ session: { id: "u1", role: "field_staff" } });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([
+      { ...draft, recipientName: "担当内オーナー", property: { createdBy: "u1", assignedTo: "x" } },
+      { ...draft, id: "r2", trackingToken: "tok2", recipientName: "担当外オーナー", property: { createdBy: "x", assignedTo: "x" } },
+    ]);
+    const res = await GET(req() as never, ctx);
+    const html = await res.text();
+    expect(html).toContain("担当内オーナー");
+    expect(html).not.toContain("担当外オーナー");
   });
 
   it("campaign 不在は 404", async () => {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { encodeCsv, sanitizeCsvCellForExcel } from "@/lib/csv-encode";
 import {
   SALE_DM_CSV_HEADERS,
@@ -30,10 +30,12 @@ export async function GET(
     const drafts = await prisma.dmRecipientDraft.findMany({
       where: { campaignId: id },
       orderBy: { createdAt: "asc" },
-      include: { variant: true },
+      include: { variant: true, property: { select: { createdBy: true, assignedTo: true } } },
     });
+    // field_staff は現在の物件 record scope の宛先のみ出力(GET campaign と統一)。
+    const visibleDrafts = filterDraftsByFieldStaffScope(drafts, session);
 
-    const records: SaleDmCsvRecord[] = drafts.map((d) => ({
+    const records: SaleDmCsvRecord[] = visibleDrafts.map((d) => ({
       variantLabel: d.variant.label,
       designTemplate: d.variant.designTemplate,
       tone: d.variant.tone,

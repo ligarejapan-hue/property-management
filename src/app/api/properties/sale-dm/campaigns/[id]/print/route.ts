@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { writeAuditLog } from "@/lib/audit";
 import {
   renderLetterSheetHtml,
@@ -34,8 +34,10 @@ export async function GET(
       // confirmed かつ body あり(生成失敗の空letterは印刷しない=空の郵送物を防ぐ)。
       where: { campaignId: id, status: "confirmed", body: { not: "" } },
       orderBy: { createdAt: "asc" },
-      include: { variant: true },
+      include: { variant: true, property: { select: { createdBy: true, assignedTo: true } } },
     });
+    // field_staff は現在の物件 record scope の宛先のみ印刷(GET campaign / CSV と統一)。
+    const visibleDrafts = filterDraftsByFieldStaffScope(drafts, session);
 
     const { senderName, senderContact } = resolveSender();
     // 追跡QR/短縮URL は宛先固有の opaque トークンから生成する。郵送物(印刷)の QR は
@@ -52,7 +54,7 @@ export async function GET(
     }
 
     const letters: LetterRenderInput[] = await Promise.all(
-      drafts.map(async (d) => {
+      visibleDrafts.map(async (d) => {
         const artifacts = await buildTrackingArtifacts(d.trackingToken, trackingBaseUrl);
         return {
           designTemplate: d.variant.designTemplate,

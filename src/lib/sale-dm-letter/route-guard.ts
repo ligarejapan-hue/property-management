@@ -30,3 +30,15 @@ export async function requireSaleDmAccess() {
   }
   return { session, permissions, ownerDisplayConfig: cfg };
 }
+
+// field_staff は現在の物件 record scope(作成 or 担当)の宛先のみ可視にする。物件が別担当へ
+// 再割当されたら、自分が作成したキャンペーンでもその宛先PII(氏名/住所/本文)を出さない。
+// 非 field_staff(admin/office)は全件。GET campaign / CSV出力 / 印刷 で共通利用する。
+export function filterDraftsByFieldStaffScope<
+  T extends { property: { createdBy: string | null; assignedTo: string | null } },
+>(drafts: T[], session: { id: string; role?: string | null }): T[] {
+  if (session.role !== "field_staff") return drafts;
+  return drafts.filter(
+    (d) => d.property.createdBy === session.id || d.property.assignedTo === session.id,
+  );
+}

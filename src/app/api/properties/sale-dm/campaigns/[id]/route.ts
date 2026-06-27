@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError } from "@/lib/api-helpers";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -24,12 +24,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
     // field_staff は現在の物件 record scope(作成/担当)の宛先PIIのみ返す。物件が別担当へ
     // 再割当されたら、自分が作成したキャンペーンでもその宛先(氏名/住所/本文)は出さない。
-    const visible =
-      session.role === "field_staff"
-        ? campaign.recipients.filter(
-            (r) => r.property.createdBy === session.id || r.property.assignedTo === session.id,
-          )
-        : campaign.recipients;
+    const visible = filterDraftsByFieldStaffScope(campaign.recipients, session);
     // scope 判定用に引いた property は応答に載せない(元の recipient 形へ戻す)。
     const recipients = visible.map((r) => {
       const { property, ...rest } = r;

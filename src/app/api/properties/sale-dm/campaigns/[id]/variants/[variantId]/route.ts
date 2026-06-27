@@ -13,6 +13,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ更新可。
     const parsed = saleDmVariantUpdateSchema.parse(await parseJsonBody(request));
 
+    // 当該キャンペーンに存在する型のみ更新可。stale/削除済み id は Prisma P2025→500 でなく 404 に。
+    const exists = await prisma.dmVariant.findFirst({ where: { id: variantId, campaignId: id }, select: { id: true } });
+    if (!exists) {
+      throw new ApiError(404, "指定された型が見つかりません", "VARIANT_NOT_FOUND");
+    }
+
     // 送付済みの宛先が使っている型は設定変更不可。送付後に設計/トーン/訴求やラベルを
     // 変えると、CSV・送付履歴・A/B 集計が実際に送った構成と食い違うため凍結する。
     const sentCount = await prisma.dmRecipientDraft.count({
@@ -59,6 +65,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const { session } = await requireSaleDmAccess();
     const { id, variantId } = await params;
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ削除可。
+
+    // 当該キャンペーンに存在する型のみ削除可。stale/削除済み id は Prisma P2025→500 でなく 404 に。
+    const exists = await prisma.dmVariant.findFirst({ where: { id: variantId, campaignId: id }, select: { id: true } });
+    if (!exists) {
+      throw new ApiError(404, "指定された型が見つかりません", "VARIANT_NOT_FOUND");
+    }
 
     // A/B 純度: 割当済みの下書きがある型は削除できない(別型へ移してから)。
     const inUse = await prisma.dmRecipientDraft.count({ where: { campaignId: id, variantId } });

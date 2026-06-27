@@ -56,6 +56,8 @@ beforeEach(() => {
   grant(...ALL);
   // assertSaleDmCampaignOwned 用: 既定で作成者本人のキャンペーン(owned)。
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
+  // 既定で型は当該キャンペーンに存在する(存在チェック通過)。
+  pm.dmVariant.findFirst.mockResolvedValue({ id: "v1" });
 });
 
 describe("GET variants", () => {
@@ -124,6 +126,12 @@ describe("PATCH variant (更新)", () => {
     expect(res.status).toBe(403);
     expect(pm.dmVariant.update).not.toHaveBeenCalled();
   });
+  it("存在しない/別campaignの型IDは 404(P2025→500 でなく)・更新しない", async () => {
+    pm.dmVariant.findFirst.mockResolvedValue(null);
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "x" }) }) as never, ctxV);
+    expect(res.status).toBe(404);
+    expect(pm.dmVariant.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE variant (削除ガード)", () => {
@@ -144,6 +152,12 @@ describe("DELETE variant (削除ガード)", () => {
     grant("property");
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(403);
+    expect(pm.dmVariant.delete).not.toHaveBeenCalled();
+  });
+  it("存在しない型IDの削除は 404(P2025→500 でなく)・削除しない", async () => {
+    pm.dmVariant.findFirst.mockResolvedValue(null);
+    const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
+    expect(res.status).toBe(404);
     expect(pm.dmVariant.delete).not.toHaveBeenCalled();
   });
 });

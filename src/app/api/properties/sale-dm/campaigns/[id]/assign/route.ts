@@ -44,8 +44,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     for (const [variantId, ids] of byVariant) {
       if (ids.length === 0) continue;
       const result = await prisma.dmRecipientDraft.updateMany({
-        where: { id: { in: ids }, campaignId: id, status: { not: "sent" } },
-        data: { variantId },
+        // 型が実際に変わる宛先のみ更新し、本文をクリア(=要再生成)。型と本文の作風が不一致の
+        // まま確定/印刷/送付されるのを防ぐ(空 body は confirm/print から除外済み)。再生成すると
+        // 現在の型の作風で本文が入り確定可能になる。既に同じ型の宛先は触らない(本文を保全)。
+        where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, variantId: { not: variantId } },
+        data: { variantId, body: "" },
       });
       assigned += result.count;
       perVariant[variantId] = result.count;

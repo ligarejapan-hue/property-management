@@ -74,6 +74,16 @@ describe("POST assign (auto)", () => {
     for (const u of updates) expect(u.where.status).toEqual({ not: "sent" });
   });
 
+  it("型を変える宛先は本文をクリア(=要再生成)し、変更分のみに限定する(A/Bコピー不一致の送付防止)", async () => {
+    const res = await assign(post({ mode: "auto", order: "sequential" }) as never, ctxC);
+    expect(res.status).toBe(200);
+    const updates = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
+    for (const u of updates) {
+      expect(u.data.body).toBe("");                          // 不一致になる本文をクリア
+      expect(u.where.variantId).toEqual({ not: u.data.variantId }); // 型が変わる宛先のみ
+    }
+  });
+
   it("権限不足で 403・更新しない", async () => {
     grant("property");
     const res = await assign(post({ mode: "auto" }) as never, ctxC);
