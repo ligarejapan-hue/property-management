@@ -113,7 +113,7 @@ export function OwnerMemoHistory({
 
   return (
     <div>
-      <dt className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <dt className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         メモ履歴（所有者単位・追記のみ）
       </dt>
 
@@ -124,13 +124,13 @@ export function OwnerMemoHistory({
             onChange={(e) => setInput(e.target.value)}
             rows={3}
             placeholder="例: 連絡時の様子、相続関係の補足、次回の確認事項など"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             disabled={submitting}
             maxLength={OWNER_MEMO_BODY_MAX_LENGTH + 100}
           />
           <div className="mt-1 flex items-center justify-between">
             <span
-              className={`text-xs ${overLimit ? "text-red-600" : "text-gray-500"}`}
+              className={`text-xs ${overLimit ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}
             >
               {trimmed.length} / {OWNER_MEMO_BODY_MAX_LENGTH}
             </span>
@@ -138,36 +138,36 @@ export function OwnerMemoHistory({
               type="button"
               onClick={handleSubmit}
               disabled={!canSubmit}
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
             >
               {submitting ? "保存中..." : "メモを追加"}
             </button>
           </div>
           {submitError && (
-            <p className="mt-1 text-xs text-red-600">{submitError}</p>
+            <p className="mt-1 text-xs text-red-600 dark:text-red-400">{submitError}</p>
           )}
         </div>
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 py-4 text-xs text-gray-500">
+        <div className="flex items-center gap-2 py-4 text-xs text-gray-500 dark:text-gray-400">
           <Loader2 className="h-4 w-4 animate-spin" />
           読み込み中...
         </div>
       ) : loadError ? (
-        <p className="py-2 text-xs text-red-600">{loadError}</p>
+        <p className="py-2 text-xs text-red-600 dark:text-red-400">{loadError}</p>
       ) : memos.length === 0 ? (
-        <p className="py-2 text-xs text-gray-500">メモ履歴はまだありません</p>
+        <p className="py-2 text-xs text-gray-500 dark:text-gray-400">メモ履歴はまだありません</p>
       ) : (
         <ul className="space-y-2">
           {memos.map((m) => (
             <li
               key={m.id}
-              className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
+              className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-800/50"
             >
-              <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
+              <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
                 <span className="font-mono">{formatTimestamp(m.createdAt)}</span>
-                <span className="text-gray-700">
+                <span className="text-gray-700 dark:text-gray-200">
                   {formatMemoCreatorName(m.creator)}
                 </span>
               </div>
@@ -179,27 +179,27 @@ export function OwnerMemoHistory({
                       address 等 PII は持たず「表示権限なし」だけを表示する。
                   - propertyId なし: 何も表示しない（所有者単体メモ）。 */}
               {m.property ? (
-                <div className="mb-1 text-xs text-gray-600">
-                  <span className="mr-1 text-gray-500">関連物件:</span>
+                <div className="mb-1 text-xs text-gray-600 dark:text-gray-300">
+                  <span className="mr-1 text-gray-500 dark:text-gray-400">関連物件:</span>
                   <Link
                     href={`/properties/${m.property.id}`}
-                    className="text-indigo-600 hover:underline break-all"
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline break-all"
                   >
                     {m.property.address}
                   </Link>
                 </div>
               ) : m.propertyId ? (
-                <div className="mb-1 text-xs text-gray-400">
-                  <span className="mr-1 text-gray-500">関連物件:</span>
+                <div className="mb-1 text-xs text-gray-400 dark:text-gray-500">
+                  <span className="mr-1 text-gray-500 dark:text-gray-400">関連物件:</span>
                   <span className="italic">表示権限なし</span>
                 </div>
               ) : null}
               {m.body ? (
-                <p className="whitespace-pre-wrap break-words text-sm text-gray-800">
+                <p className="whitespace-pre-wrap break-words text-sm text-gray-800 dark:text-gray-100">
                   {m.body}
                 </p>
               ) : (
-                <p className="text-xs italic text-gray-400">
+                <p className="text-xs italic text-gray-400 dark:text-gray-500">
                   （本文の閲覧権限がありません）
                 </p>
               )}

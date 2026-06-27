@@ -112,7 +112,7 @@ export function OwnerArchiveButton({
 
   if (state === "done") {
     return (
-      <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-700">
+      <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-200">
         アーカイブ済み
       </span>
     );
@@ -131,11 +131,11 @@ export function OwnerArchiveButton({
       )}
 
       {state === "previewing" && (
-        <span className="text-[11px] text-gray-500">判定中...</span>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">判定中...</span>
       )}
 
       {state === "error" && (errorMsg || blockReasons.length > 0) && (
-        <div className="flex flex-col gap-0.5 rounded border border-red-200 bg-red-50 p-1.5 text-[11px] text-red-700">
+        <div className="flex flex-col gap-0.5 rounded border border-red-200 bg-red-50 p-1.5 text-[11px] text-red-700 dark:border-red-400/20 dark:bg-red-500/10 dark:text-red-300">
           {errorMsg && <p>{errorMsg}</p>}
           {blockReasons.length > 0 && (
             <ul className="list-disc pl-4">
@@ -147,7 +147,7 @@ export function OwnerArchiveButton({
           <button
             type="button"
             onClick={reset}
-            className="mt-0.5 self-start text-[11px] text-red-600 underline"
+            className="mt-0.5 self-start text-[11px] text-red-600 underline dark:text-red-300"
           >
             閉じる
           </button>
@@ -155,11 +155,11 @@ export function OwnerArchiveButton({
       )}
 
       {state === "confirming" && (
-        <div className="flex flex-col gap-1 rounded border border-amber-200 bg-amber-50 p-2 text-xs">
-          <p className="font-medium text-amber-800">
+        <div className="flex flex-col gap-1 rounded border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-400/20 dark:bg-amber-500/10">
+          <p className="font-medium text-amber-800 dark:text-amber-300">
             この所有者をアーカイブしますか？
           </p>
-          <p className="text-amber-700">
+          <p className="text-amber-700 dark:text-amber-300">
             通常の一覧・検索・所有者選択から除外されます。
           </p>
           <div className="mt-1 flex gap-1">
@@ -173,7 +173,7 @@ export function OwnerArchiveButton({
             <button
               type="button"
               onClick={reset}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50"
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               キャンセル
             </button>
@@ -182,7 +182,7 @@ export function OwnerArchiveButton({
       )}
 
       {state === "submitting" && (
-        <span className="text-[11px] text-gray-500">アーカイブ中...</span>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">アーカイブ中...</span>
       )}
     </div>
   );
