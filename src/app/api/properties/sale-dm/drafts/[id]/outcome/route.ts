@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { handleApiError, ApiError } from "@/lib/api-helpers";
+import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
@@ -32,7 +32,8 @@ export async function PATCH(
   try {
     const { session, permissions } = await requireSaleDmAccess();
     const { id } = await params;
-    const input = outcomeSchema.parse(await request.json());
+    // 不正JSON は parseJsonBody で 400(request.json() の素の 500 を避ける。他 mutation route と統一)。
+    const input = outcomeSchema.parse(await parseJsonBody(request));
 
     const draft = await prisma.dmRecipientDraft.findUnique({
       where: { id },

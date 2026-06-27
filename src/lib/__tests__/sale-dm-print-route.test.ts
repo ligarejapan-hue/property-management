@@ -171,6 +171,9 @@ describe("GET .../campaigns/[id]/print", () => {
     const html = await res.text();
     expect(html).toContain("担当内オーナー");
     expect(html).not.toContain("担当外オーナー");
+    // 監査件数は実際に印刷した可視分のみ(担当内1件)。drafts 全体(2件)で過大計上しない。
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.count).toBe(1);
   });
 
   it("campaign 不在は 404", async () => {

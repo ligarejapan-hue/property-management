@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { handleApiError, ApiError } from "@/lib/api-helpers";
+import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
@@ -24,7 +24,9 @@ export async function POST(
       throw new ApiError(403, "物件を更新する権限(write)がありません", "FORBIDDEN");
     }
     const { id } = await params;
-    const { restoreDmStatus } = clearSchema.parse(await request.json());
+    // 既定の「解除のみ」呼び出しは空ボディで来る。request.json() は空ボディで例外(→500)に
+    // なるため parseJsonBody を使う(空→{}・不正JSON→400)。restoreDmStatus は任意。
+    const { restoreDmStatus } = clearSchema.parse(await parseJsonBody(request));
 
     const property = await prisma.property.findUnique({
       where: { id },

@@ -22,6 +22,16 @@ vi.mock("@/lib/api-helpers", () => {
   // zod の ZodError(issues 配列)は 422、それ以外は 500。
   return {
     ApiError: MockApiError,
+    // 実 parseJsonBody を模倣: 空ボディ→{}・不正JSON→ApiError(400)。
+    parseJsonBody: vi.fn(async (r: Request) => {
+      const t = await r.text();
+      if (t.trim() === "") return {};
+      try {
+        return JSON.parse(t);
+      } catch {
+        throw new MockApiError(400, "リクエストボディが不正な JSON です", "INVALID_JSON");
+      }
+    }),
     handleApiError: vi.fn((e: unknown) => {
       if (e && typeof e === "object") {
         const x = e as { status?: unknown; code?: unknown; message?: unknown; issues?: unknown };
@@ -190,6 +200,12 @@ describe("PATCH outcome", () => {
   it("不正な deliveryStatus は 422", async () => {
     const res = await PATCH(req({ deliveryStatus: "bogus" }) as never, ctx());
     expect(res.status).toBe(422);
+  });
+
+  it("不正な JSON ボディは 400(500 でなく)・更新しない", async () => {
+    const res = await PATCH(new Request("http://x", { method: "PATCH", body: "{ broken" }) as never, ctx());
+    expect(res.status).toBe(400);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
   });
 
   it("存在しない draft は 404", async () => {

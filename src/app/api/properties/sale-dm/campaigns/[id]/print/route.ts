@@ -78,7 +78,9 @@ export async function GET(
       userId: session.id,
       action: "sale_dm_campaign_print",
       targetTable: "dm_campaigns",
-      detail: { campaignId: id, count: drafts.length, printedAt: new Date().toISOString() },
+      // field_staff は visibleDrafts のみ印刷されるため、監査件数も実際に出力した可視分を記録する
+      // (drafts.length だと担当外で隠れた宛先まで数えて実出力数を過大計上する)。
+      detail: { campaignId: id, count: visibleDrafts.length, printedAt: new Date().toISOString() },
     });
 
     return new NextResponse(html, {

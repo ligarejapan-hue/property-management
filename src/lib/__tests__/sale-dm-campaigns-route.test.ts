@@ -9,6 +9,7 @@ vi.mock("@/lib/api-helpers", () => {
   return {
     ApiError: MockApiError,
     getApiSession: vi.fn(), getUserPermissions: vi.fn(), getOwnerDisplayConfig: vi.fn(),
+    parseJsonBody: vi.fn(async (r: Request) => { const t = await r.text(); if (t.trim() === "") return {}; try { return JSON.parse(t); } catch { throw new MockApiError(400, "リクエストボディが不正な JSON です", "INVALID_JSON"); } }),
     handleApiError: vi.fn((e: unknown) => e instanceof MockApiError ? Response.json({ error: { message: e.message, code: e.code } }, { status: e.status }) : Response.json({ error: { code: "INTERNAL_ERROR" } }, { status: 500 })),
   };
 });
@@ -99,6 +100,13 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const res = await POST(req(validBody) as never);
     expect(res.status).toBe(503);
     expect(writeAuditLog).not.toHaveBeenCalled();
+    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
+
+  it("不正な JSON ボディは 400(500 でなく)・生成も保存もしない", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner");
+    const res = await POST(new Request("http://x", { method: "POST", body: "{ broken" }) as never);
+    expect(res.status).toBe(400);
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
   });
 });

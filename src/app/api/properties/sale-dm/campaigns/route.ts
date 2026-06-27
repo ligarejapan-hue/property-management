@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import {
-  getApiSession, getUserPermissions, getOwnerDisplayConfig, handleApiError, ApiError,
+  getApiSession, getUserPermissions, getOwnerDisplayConfig, handleApiError, ApiError, parseJsonBody,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
@@ -34,7 +34,8 @@ export async function POST(request: NextRequest) {
     // env 未設定なら fail-closed(503)。DB に何も書かない。
     if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
 
-    const body = saleDmCampaignBodySchema.parse(await request.json());
+    // 不正JSON は parseJsonBody で 400(request.json() の素の 500 を避ける。他 mutation route と統一)。
+    const body = saleDmCampaignBodySchema.parse(await parseJsonBody(request));
     const query = propertyListQuerySchema.parse(body.filters ?? {});
     const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
     where.dmStatus = "send";

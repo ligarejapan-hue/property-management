@@ -20,6 +20,16 @@ vi.mock("@/lib/api-helpers", () => {
   // 実 handleApiError を模倣: status を持つ error はその status、zod(issues)は 422、他は 500。
   return {
     ApiError: MockApiError,
+    // 実 parseJsonBody を模倣: 空ボディ→{}・不正JSON→ApiError(400)。
+    parseJsonBody: vi.fn(async (r: Request) => {
+      const t = await r.text();
+      if (t.trim() === "") return {};
+      try {
+        return JSON.parse(t);
+      } catch {
+        throw new MockApiError(400, "リクエストボディが不正な JSON です", "INVALID_JSON");
+      }
+    }),
     handleApiError: vi.fn((e: unknown) => {
       if (e && typeof e === "object") {
         const x = e as { status?: unknown; code?: unknown; message?: unknown; issues?: unknown };
@@ -70,6 +80,20 @@ describe("POST clear-dm-undeliverable", () => {
     expect(arg.data.dmUndeliverableAt).toBeNull();
     expect(arg.data.dmStatus).toBeUndefined();
     expect(writeAuditLog).toHaveBeenCalled();
+  });
+
+  it("空ボディ(解除のみの既定呼び出し)でも 200・dmUndeliverableAt を解除(request.json の 500 回避)", async () => {
+    const res = await POST(new Request("http://x", { method: "POST" }) as never, ctx());
+    expect(res.status).toBe(200);
+    const arg = pm.property.update.mock.calls[0][0];
+    expect(arg.data.dmUndeliverableAt).toBeNull();
+    expect(arg.data.dmStatus).toBeUndefined();
+  });
+
+  it("不正な JSON ボディは 400(500 でなく)・更新しない", async () => {
+    const res = await POST(new Request("http://x", { method: "POST", body: "{ broken" }) as never, ctx());
+    expect(res.status).toBe(400);
+    expect(pm.property.update).not.toHaveBeenCalled();
   });
 
   it("restoreDmStatus=send 指定時は dmStatus も戻す", async () => {
