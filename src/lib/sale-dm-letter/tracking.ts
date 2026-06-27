@@ -3,11 +3,19 @@
 
 export const TRACKING_PATH_PREFIX = "/t/";
 
-// 環境変数 SALE_DM_TRACKING_BASE_URL を既定 base として読む薄いラッパ。
-// 印刷物・QR には絶対URLが必要だが、base 未設定でも相対パスで動く(本番は設定必須)。
+// 環境変数 SALE_DM_TRACKING_BASE_URL を既定 base として読む。郵送物・QR には絶対 http(s) URL が
+// 必須なので、未設定/非絶対URL(scheme/host 無し・非http)は undefined(=未設定扱い)を返し、
+// print route を 503 fail-closed させる(本番は絶対URL設定必須)。
 export function resolveTrackingBaseUrl(): string | undefined {
   const base = process.env.SALE_DM_TRACKING_BASE_URL;
-  return base && base.trim().length > 0 ? base.trim() : undefined;
+  if (!base || base.trim().length === 0) return undefined;
+  const trimmed = base.trim();
+  try {
+    const u = new URL(trimmed);
+    return u.protocol === "http:" || u.protocol === "https:" ? trimmed : undefined;
+  } catch {
+    return undefined; // scheme/host の無い相対値(example.com, /app 等)は使えない。
+  }
 }
 
 /**

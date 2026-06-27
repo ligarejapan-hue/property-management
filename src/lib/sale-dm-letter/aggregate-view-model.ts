@@ -12,8 +12,8 @@ export interface VariantRow {
   sent: number;          // 送付数(= その型に割当たった宛先数)
   delivered: number;     // 到達数(deliveryStatus=delivered)
   undeliverable: number; // 宛先不明数(deliveryStatus=returned_undeliverable)
-  inquiries: number;     // 反響数(LP∪電話)
-  inquiryRate: string;   // 反響 / 到達
+  inquiries: number;     // 反響数(LP∪電話・総数)
+  inquiryRate: string;   // 到達かつ反響 / 到達(>100%にしないため分子は到達者に限定)
   undeliverableRate: string; // 宛先不明 / 送付
 }
 
@@ -25,6 +25,9 @@ export function buildVariantRows(campaign: SaleDmCampaign): VariantRow[] {
     const delivered = drafts.filter((r) => r.deliveryStatus === "delivered").length;
     const undeliverable = drafts.filter((r) => r.deliveryStatus === "returned_undeliverable").length;
     const inquiries = drafts.filter((r) => isInquiry(r)).length;
+    // 反響率の分子は「到達かつ反響」(サーバ集計 aggregate.ts と同義)。未到達(returned 等)の
+    // 反響を分子に入れると率が100%を超え得るため除外する。inquiries(総数)は表示用に保持。
+    const deliveredInquiries = drafts.filter((r) => r.deliveryStatus === "delivered" && isInquiry(r)).length;
     return {
       variantId: v.id,
       label: v.label,
@@ -32,7 +35,7 @@ export function buildVariantRows(campaign: SaleDmCampaign): VariantRow[] {
       delivered,
       undeliverable,
       inquiries,
-      inquiryRate: formatRate(inquiries, delivered),
+      inquiryRate: formatRate(deliveredInquiries, delivered),
       undeliverableRate: formatRate(undeliverable, sent),
     };
   });

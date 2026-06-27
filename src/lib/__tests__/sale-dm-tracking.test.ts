@@ -1,5 +1,24 @@
-import { describe, it, expect } from "vitest";
-import { buildTrackingUrl, TRACKING_PATH_PREFIX, isInquiryResponded } from "../sale-dm-letter/tracking";
+import { describe, it, expect, afterEach } from "vitest";
+import { buildTrackingUrl, TRACKING_PATH_PREFIX, isInquiryResponded, resolveTrackingBaseUrl } from "../sale-dm-letter/tracking";
+
+describe("resolveTrackingBaseUrl (郵送QRは絶対http(s)必須)", () => {
+  const ENV = process.env;
+  afterEach(() => { process.env = ENV; });
+  const withBase = (v?: string) => {
+    process.env = { ...ENV };
+    if (v === undefined) delete process.env.SALE_DM_TRACKING_BASE_URL;
+    else process.env.SALE_DM_TRACKING_BASE_URL = v;
+    return resolveTrackingBaseUrl();
+  };
+  it("未設定なら undefined", () => { expect(withBase(undefined)).toBeUndefined(); });
+  it("絶対 https/http はそのまま返す", () => {
+    expect(withBase("https://dm.example.com")).toBe("https://dm.example.com");
+    expect(withBase("http://dm.example.com")).toBe("http://dm.example.com");
+  });
+  it("scheme 無し(example.com)は undefined(郵送QRで機能しない)", () => { expect(withBase("example.com")).toBeUndefined(); });
+  it("相対パス(/app)は undefined", () => { expect(withBase("/app")).toBeUndefined(); });
+  it("非http(ftp://x)は undefined", () => { expect(withBase("ftp://x")).toBeUndefined(); });
+});
 
 describe("buildTrackingUrl", () => {
   it("base 指定時は絶対URL(末尾スラッシュ重複なし)", () => {

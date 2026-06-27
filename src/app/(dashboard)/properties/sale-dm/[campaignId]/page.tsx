@@ -184,6 +184,8 @@ export default function SaleDmWorkspacePage() {
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           {selected ? (
             <div
+              data-pii-protected
+              data-pii-surface="owner"
               className="sale-dm-preview mx-auto max-w-[640px]"
               dangerouslySetInnerHTML={{ __html: previewHtml }}
             />

@@ -44,6 +44,7 @@ export async function PATCH(
         phoneInquiryAt: true,
         status: true,
         campaign: { select: { createdBy: true } },
+        property: { select: { createdBy: true, assignedTo: true } },
       },
     });
     // 作成者本人のキャンペーン配下の下書きのみ操作可(他人UUIDでの横断アクセス防止)。
@@ -86,8 +87,19 @@ export async function PATCH(
 
     // 物件(properties)テーブルを変更する分岐(宛先不明の設定/解除)は、他の物件APIと
     // 同様に property:write を要求する。read 系の DM アクセス権だけで物件状態を書き換えさせない。
-    if ((becameUndeliverable || clearedUndeliverable) && !hasPermission(permissions, "property", "write")) {
-      throw new ApiError(403, "物件の宛先不明状態を更新する権限(write)がありません", "FORBIDDEN");
+    if (becameUndeliverable || clearedUndeliverable) {
+      if (!hasPermission(permissions, "property", "write")) {
+        throw new ApiError(403, "物件の宛先不明状態を更新する権限(write)がありません", "FORBIDDEN");
+      }
+      // field_staff は作成 or 担当の物件のみ操作可(物件APIと同じ record scope。
+      // clear-dm-undeliverable と統一。campaign 作成後に物件が別担当へ再割当されても他人の物件を触らせない)。
+      if (
+        session.role === "field_staff" &&
+        draft.property.createdBy !== session.id &&
+        draft.property.assignedTo !== session.id
+      ) {
+        throw new ApiError(403, "この物件を操作する権限がありません", "FORBIDDEN");
+      }
     }
 
     const draftData: Record<string, unknown> = {

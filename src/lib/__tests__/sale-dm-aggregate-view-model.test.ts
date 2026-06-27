@@ -44,4 +44,18 @@ describe("buildVariantRows", () => {
     expect(a.inquiryRate).toBe("50.0%");        // 反響1 / 到達2
     expect(a.undeliverableRate).toBe("33.3%");  // 宛先不明1 / 送付3
   });
+
+  it("未到達の反響は反響率の分子から除外する(率が100%超にならない・反響総数は維持)", () => {
+    const c: SaleDmCampaign = {
+      ...campaign,
+      recipients: [
+        draft({ deliveryStatus: "delivered", lpFirstAccessAt: "2026-06-20T00:00:00Z" }),               // 到達+反響
+        draft({ deliveryStatus: "returned_undeliverable", lpFirstAccessAt: "2026-06-20T00:00:00Z" }),  // 未到達だが反響
+      ],
+    };
+    const a = buildVariantRows(c)[0];
+    expect(a.delivered).toBe(1);
+    expect(a.inquiries).toBe(2);          // 反響総数(表示用)は到達状況に関わらず維持
+    expect(a.inquiryRate).toBe("100.0%"); // 率の分子=到達かつ反響=1 / 到達1 → 100%(>100%にならない)
+  });
 });
