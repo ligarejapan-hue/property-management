@@ -34,7 +34,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }]);
     const body = drafts[0]?.body;
     if (!body) throw new ApiError(502, "再生成に失敗しました", "GENERATION_FAILED");
-    await prisma.dmRecipientDraft.update({ where: { id }, data: { body } });
+    // 生成は外部呼び出しで時間がかかるため、pre-check 後に並行で sent 確定し得る。
+    // 条件付き updateMany で送付済みの本文を上書きしない(送信済み内容/集計の不変性)。0 行なら 409。
+    const updated = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: { body } });
+    if (updated.count === 0) {
+      throw new ApiError(409, "送付済みの宛先は再生成できません", "ALREADY_SENT");
+    }
     return NextResponse.json({ id, body }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return handleApiError(error); }
 }

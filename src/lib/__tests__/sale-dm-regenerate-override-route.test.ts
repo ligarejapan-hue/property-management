@@ -15,7 +15,7 @@ vi.mock("@/lib/api-helpers", () => {
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
-  default: { dmRecipientDraft: { findUnique: vi.fn(), update: vi.fn() } },
+  default: { dmRecipientDraft: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() } },
 }));
 // generateLetters を spy して、resolveDraftOptions の結果(override 反映済み options)が渡ることを検証する。
 const generateSpy = vi.fn(async (...args: unknown[]) => {
@@ -32,7 +32,7 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { POST as regenerate } from "../../app/api/properties/sale-dm/drafts/[id]/regenerate/route";
 
-const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> } };
+const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> } };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
 const grant = (...keys: string[]) =>
   (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(keys.map((k) => ({ resource: k, action: "read", granted: true })));
@@ -44,6 +44,7 @@ beforeEach(() => {
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
   grant(...ALL);
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1", body: "再生成本文" });
+  pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe("POST regenerate (override 反映)", () => {

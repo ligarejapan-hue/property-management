@@ -169,15 +169,26 @@ describe("POST regenerate draft (再生成)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("正常に再生成し 200・update が呼ばれる", async () => {
+  it("正常に再生成し 200・条件付き updateMany(status!=sent)で書き込む", async () => {
     grant(...ALL);
     (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
     (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
     pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
     (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
-    pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1", body: "再生成本文" });
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
     const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "r1" }, data: { body: "再生成本文" } }));
+    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "r1", status: { not: "sent" } }, data: { body: "再生成本文" } }));
+  });
+
+  it("生成中に並行で sent 確定(updateMany count=0)なら 409・本文を上書きしない", async () => {
+    grant(...ALL);
+    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
+    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
+    (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
+    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    expect(res.status).toBe(409);
   });
 });
