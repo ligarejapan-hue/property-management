@@ -20,6 +20,7 @@
 import prismaDefault from "@/lib/prisma";
 import { hasPermission } from "@/lib/permissions";
 import { isValidStorageKey } from "@/lib/storage/key-validation";
+import { getStorage } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
 
 type PrismaLike = typeof prismaDefault;
@@ -105,6 +106,34 @@ export function extractStorageKeyFromFileUrl(
   return key;
 }
 
+/**
+ * DB 保存された fileUrl から storage key を解決する。backend 非依存の統合ヘルパ。
+ *
+ * 優先順序:
+ *   1. /uploads/... 形式 (local / s3 / legacy) → extractStorageKeyFromFileUrl で処理
+ *   2. その他 (例: server backend の /{bucket}/{key}) → アクティブ adapter の keyFromUrl
+ *
+ * data: / blob: / file: スキームは step 1 で null になり、step 2 でもスキームガードで
+ * null を返すため、不正なスキーム URL は絶対に key として扱われない。
+ * getStorage() が throw した場合は null (fail-closed = no match) とする。
+ */
+function resolveStoredFileUrlToKey(fileUrl: string | null | undefined): string | null {
+  // step 1: /uploads/ 形式の既存動作を完全に維持
+  const viaUploads = extractStorageKeyFromFileUrl(fileUrl);
+  if (viaUploads !== null) return viaUploads;
+  // step 2: backend-aware フォールバック (server の /{bucket}/{key} 等)
+  if (typeof fileUrl !== "string") return null;
+  if (/^(data|blob|file):/i.test(fileUrl.trim())) return null;
+  let viaAdapter: string | null = null;
+  try {
+    viaAdapter = getStorage().keyFromUrl(fileUrl);
+  } catch {
+    viaAdapter = null;
+  }
+  if (viaAdapter != null && isValidStorageKey(viaAdapter)) return viaAdapter;
+  return null;
+}
+
 export async function authorizeUploadAccess(
   args: AuthorizeUploadAccessArgs,
 ): Promise<UploadAuthDecision> {
@@ -124,7 +153,7 @@ export async function authorizeUploadAccess(
     select: { propertyId: true, fileUrl: true },
   });
   for (const p of photos) {
-    if (extractStorageKeyFromFileUrl(p.fileUrl) !== key) continue;
+    if (resolveStoredFileUrlToKey(p.fileUrl) !== key) continue;
     decisions.push(
       await authorizePropertyAccess(p.propertyId, session, permissions, db),
     );
@@ -135,7 +164,7 @@ export async function authorizeUploadAccess(
     select: { buildingId: true, fileUrl: true },
   });
   for (const b of buildingPhotos) {
-    if (extractStorageKeyFromFileUrl(b.fileUrl) !== key) continue;
+    if (resolveStoredFileUrlToKey(b.fileUrl) !== key) continue;
     decisions.push(
       hasPermission(permissions, "property", "read") ? "ok" : "forbidden",
     );
@@ -159,8 +188,8 @@ export async function authorizeUploadAccess(
   });
   for (const pp of pinPhotos) {
     const matches =
-      extractStorageKeyFromFileUrl(pp.fileUrl) === key ||
-      extractStorageKeyFromFileUrl(pp.thumbnailUrl) === key;
+      resolveStoredFileUrlToKey(pp.fileUrl) === key ||
+      resolveStoredFileUrlToKey(pp.thumbnailUrl) === key;
     if (!matches) continue;
     decisions.push(authorizeFieldSurveyPinPhoto(pp.pin, session, permissions));
   }
@@ -177,7 +206,7 @@ export async function authorizeUploadAccess(
     },
   });
   for (const a of attachments) {
-    if (extractStorageKeyFromFileUrl(a.fileUrl) !== key) continue;
+    if (resolveStoredFileUrlToKey(a.fileUrl) !== key) continue;
     if (a.isDeleted) {
       decisions.push("not_found");
       continue;
@@ -297,7 +326,7 @@ export async function resolveRegistryServeMeta(
   });
   for (const a of attachments) {
     if (a.isDeleted) continue;
-    if (extractStorageKeyFromFileUrl(a.fileUrl) !== key) continue;
+    if (resolveStoredFileUrlToKey(a.fileUrl) !== key) continue;
     if (a.type === "registry") {
       return {
         isRegistry: true,
