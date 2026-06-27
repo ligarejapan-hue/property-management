@@ -25,7 +25,7 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     dmCampaign: { findUnique: vi.fn(), findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), findFirst: vi.fn() },
-    dmRecipientDraft: { count: vi.fn() },
+    dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn() },
   },
 }));
 
@@ -38,7 +38,7 @@ import { PATCH as updateVariant, DELETE as deleteVariant } from "../../app/api/p
 const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
   dmVariant: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
-  dmRecipientDraft: { count: ReturnType<typeof vi.fn> };
+  dmRecipientDraft: { count: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
 const grant = (...keys: string[]) =>
@@ -58,6 +58,7 @@ beforeEach(() => {
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
   // 既定で型は当該キャンペーンに存在する(存在チェック通過)。
   pm.dmVariant.findFirst.mockResolvedValue({ id: "v1" });
+  pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
 });
 
 describe("GET variants", () => {
@@ -110,6 +111,24 @@ describe("PATCH variant (更新)", () => {
     expect(arg.where).toEqual({ id: "v1", campaignId: "c1" });
     expect(arg.data.tone).toBe("soft");
     expect(arg.data.label).toBe("A2");
+  });
+
+  it("options 変更時はこの型を使う未送付下書きを無効化(本文クリア→draft・要再生成)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+    const inval = pm.dmRecipientDraft.updateMany.mock.calls[0][0];
+    expect(inval.where).toMatchObject({ campaignId: "c1", variantId: "v1", status: { not: "sent" }, body: { not: "" } });
+    expect(inval.data).toMatchObject({ body: "", status: "draft", confirmedAt: null });
+  });
+
+  it("label のみ変更は下書きを無効化しない(本文に影響しない)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A2", ...optionFields });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "A2" }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {

@@ -46,6 +46,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       data,
     });
 
+    // options(design/tone/length/appeal/strength/extraInstruction)を変えたら、この型を使う未送付の
+    // 下書きは旧設定で生成済みのため無効化(本文クリア→draft へ・要再生成)。label のみ変更は本文に影響しない。
+    if (parsed.options) {
+      await prisma.dmRecipientDraft.updateMany({
+        where: { campaignId: id, variantId, status: { not: "sent" }, body: { not: "" } },
+        data: { body: "", status: "draft", confirmedAt: null },
+      });
+    }
+
     await writeAuditLog({
       userId: session.id,
       action: "sale_dm_variant_update",

@@ -74,12 +74,36 @@ describe("PATCH draft (拡張)", () => {
     expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.overrideJson).toBe(Prisma.DbNull);
   });
 
-  it("variantId 付け替えは当該 campaign の型のみ許可(検証 OK で 200)", async () => {
+  it("variantId 付け替え(本文未指定)は当該 campaign の型のみ許可+本文クリア=要再生成", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v-old", campaign: { createdBy: "u1" } });
     pm.dmVariant.findFirst.mockResolvedValue({ id: "vB" });
     const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }) as never, ctx);
     expect(res.status).toBe(200);
     expect(pm.dmVariant.findFirst).toHaveBeenCalled();
-    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.variantId).toBe("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
+    const data = pm.dmRecipientDraft.updateMany.mock.calls[0][0].data;
+    expect(data.variantId).toBe("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
+    // 旧 variant の作風のまま新ラベルで送る A/B 不一致を防ぐため本文をクリア・draft へ戻す。
+    expect(data.body).toBe("");
+    expect(data.status).toBe("draft");
+    expect(data.confirmedAt).toBeNull();
+  });
+
+  it("variantId 付け替えでも本文を同時指定すればその本文を保持(クリアしない)", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v-old", campaign: { createdBy: "u1" } });
+    pm.dmVariant.findFirst.mockResolvedValue({ id: "vB" });
+    const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", body: "新本文" }) as never, ctx);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.body).toBe("新本文");
+  });
+
+  it("同一 variantId への付け替え(実質変更なし)は本文をクリアしない", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", campaign: { createdBy: "u1" } });
+    pm.dmVariant.findFirst.mockResolvedValue({ id: "vB" });
+    const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }) as never, ctx);
+    expect(res.status).toBe(200);
+    const data = pm.dmRecipientDraft.updateMany.mock.calls[0][0].data;
+    expect(data.body).toBeUndefined();
+    expect(data.status).toBeUndefined();
   });
 
   it("他キャンペーンの variantId は 404/400(更新しない)", async () => {

@@ -27,7 +27,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const draft = await prisma.dmRecipientDraft.findUnique({
       where: { id },
-      select: { id: true, campaignId: true, status: true, campaign: { select: { createdBy: true } } },
+      select: { id: true, campaignId: true, status: true, variantId: true, campaign: { select: { createdBy: true } } },
     });
     // 作成者本人のキャンペーン配下のみ操作可(横断アクセス防止)。not-found/not-owned は同じ 404。
     if (!draft || draft.campaign.createdBy !== session.id) {
@@ -60,6 +60,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       data.overrideJson = parsed.override === null ? Prisma.DbNull : parsed.override;
     }
 
+    // 型を別 variant へ変える際、本文を同時指定していなければ本文をクリア(=要再生成・status を
+    // draft へ・confirmedAt 消去)。旧 variant の作風のまま新ラベルで送る A/B 不一致を防ぐ(bulk assign と統一)。
+    if (parsed.variantId !== undefined && parsed.variantId !== draft.variantId && parsed.body === undefined) {
+      data.body = "";
+      data.status = "draft";
+      data.confirmedAt = null;
+    }
 
     // 状態遷移をアトミックに行う: pre-check 後に並行で sent 確定した場合(別タブ/一括送付)は
     // 0 行となり stale 編集を弾く(送信済みの本文/型/上書き=A/B割付・集計の不変性を守る)。
