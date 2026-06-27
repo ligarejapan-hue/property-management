@@ -21,19 +21,23 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     dmCampaign: { findUnique: vi.fn(), findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), findFirst: vi.fn() },
     dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn() },
-  },
-}));
+  };
+  // $transaction はコールバックに同じ db を tx として渡す(tx.* === pm.* なので既存アサーションがそのまま効く)。
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
+});
 
 import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { GET as listVariants, POST as createVariant } from "../../app/api/properties/sale-dm/campaigns/[id]/variants/route";
 import { PATCH as updateVariant, DELETE as deleteVariant } from "../../app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route";
+import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 
 const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
@@ -147,6 +151,15 @@ describe("PATCH variant (更新)", () => {
     const countArg = pm.dmRecipientDraft.count.mock.calls[0][0];
     expect(countArg.where).toMatchObject({ campaignId: "c1", variantId: "v1", status: "sent" });
   });
+
+  it("更新中に別requestがこの型の宛先をsent化したら 409(TOCTOU・トランザクション前後でsentチェック)", async () => {
+    // sentBefore=0(通過)→ update → sentAfter=2(競合検出)→ ロールバックして 409。
+    pm.dmRecipientDraft.count.mockResolvedValueOnce(0).mockResolvedValueOnce(2);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
+    expect(res.status).toBe(409);
+    expect(pm.dmRecipientDraft.count).toHaveBeenCalledTimes(2);
+  });
   it("権限不足で 403", async () => {
     grant("property");
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "x" }) }) as never, ctxV);
@@ -186,5 +199,19 @@ describe("DELETE variant (削除ガード)", () => {
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(404);
     expect(pm.dmVariant.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("自由記述フィールドの最大長(有料AI fan-out 前のガード)", () => {
+  const base = { name: "x", options: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low" } } as const;
+  const reject = (opts: Record<string, unknown>) =>
+    saleDmCampaignBodySchema.safeParse({ ...base, options: { ...base.options, ...opts } }).success;
+  it("senderName>100 / senderContact>200 / extraInstruction>1000 は弾く", () => {
+    expect(reject({ senderName: "あ".repeat(101) })).toBe(false);
+    expect(reject({ senderContact: "あ".repeat(201) })).toBe(false);
+    expect(reject({ extraInstruction: "あ".repeat(1001) })).toBe(false);
+  });
+  it("上限内は通る", () => {
+    expect(reject({ senderName: "差出人", senderContact: "連絡先", extraInstruction: "あ".repeat(1000) })).toBe(true);
   });
 });

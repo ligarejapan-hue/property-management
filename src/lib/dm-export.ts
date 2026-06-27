@@ -19,6 +19,7 @@ import { maskValue } from "@/lib/permissions";
 import { PROPERTY_TYPE_LABELS, DM_STATUS_LABELS } from "@/lib/property-types";
 import { honorificForOwner } from "@/lib/owner-honorific";
 import type { OwnerDisplayConfig } from "@/lib/api-helpers";
+import { OTHER_CO_OWNERS_SUFFIX } from "@/lib/sale-dm-letter/addressee";
 
 // CSV ヘッダ（差込テンプレートの列順に厳密一致させること）。
 // 先頭 11 列は従来の差込テンプレ互換（列順・列名を変えない）。
@@ -47,7 +48,9 @@ export const DM_EXPORT_HEADERS = [
 export const MAX_DM_EXPORT_ROWS = 10000;
 
 // 複数共有者を 1 通にまとめた行の宛名で、代表者の後ろに付ける文言。
-export const OTHER_CO_OWNERS_SUFFIX = "他共有者様";
+// 正本は client/server 共有のリーフモジュール(addressee.ts)。ここでは re-export して
+// 既存の import 元(dm-export)を維持しつつ、承認プレビュー等がサーバー依存を読み込まずに同整形を使える。
+export { OTHER_CO_OWNERS_SUFFIX };
 
 /**
  * maskValue が「生値」をそのまま返す表示レベルの集合。

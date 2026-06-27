@@ -8,9 +8,11 @@ export const saleDmOptionsSchema = z.object({
   strength: z.enum(["low", "medium", "high"]),
   // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)を route が補完するため任意。
   // 指定された場合のみ 1 文字以上を要求(空文字は不可)。
-  senderName: z.string().min(1).optional(),
-  senderContact: z.string().min(1).optional(),
-  extraInstruction: z.string().optional(),
+  // 各自由記述は最大長で上限する: これらは宛先ごとの prompt に展開され、1キャンペーンで最大50通の
+  // 有料AI呼び出しに fan-out するため、巨大入力でのトークン浪費/タイムアウト/生成失敗を防ぐ(送信前に弾く)。
+  senderName: z.string().min(1).max(100).optional(),
+  senderContact: z.string().min(1).max(200).optional(),
+  extraInstruction: z.string().max(1000).optional(),
 });
 
 // 個別上書き(overrideJson)用: options の部分集合のみ許可する。

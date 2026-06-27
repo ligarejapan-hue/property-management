@@ -18,4 +18,9 @@ describe("sale-dm キャンペーン画面 PII 保護", () => {
     expect(tag).not.toBeNull();
     expect(tag![0]).toContain("data-pii-protected");
   });
+
+  it("プレビューの宛名敬称は composeAddresseeHonorific で合成(共有者は『他共有者様』=印刷/CSVと一致)", () => {
+    // base honorific を直接渡すと、代表者のみ宛ての見た目で承認 → 実際は「他共有者様」で郵送、の食い違いになる。
+    expect(src).toContain("composeAddresseeHonorific(selected.honorific, selected.coOwnerCount)");
+  });
 });

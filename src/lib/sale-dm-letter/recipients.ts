@@ -4,7 +4,6 @@ import { honorificForOwner } from "@/lib/owner-honorific";
 import {
   groupPropertyOwnersByAddress,
   selectGroupRepresentative,
-  OTHER_CO_OWNERS_SUFFIX,
   type DmRowPropertyOwner,
 } from "@/lib/dm-export";
 import type { LetterRecipient } from "./types";
@@ -30,15 +29,9 @@ type PropertyForRecipients = {
   propertyOwners: DmRowPropertyOwner[];
 };
 
-/**
- * 印刷/CSV 用の宛名敬称を組み立てる。送付先が複数共有者(coOwnerCount>1)なら
- * 代表者の base 敬称に「他共有者様」を付す(prompt.ts と同整形・dm-export の敬称列と一致)。
- * draft は base 敬称(様/御中)と coOwnerCount を別々に保存し、表示(print/CSV)時に合成する。
- * base のまま保存するのは prompt 側が coOwnerCount から宛名を再合成するため(二重付与防止)。
- */
-export function composeAddresseeHonorific(honorific: string, coOwnerCount: number): string {
-  return coOwnerCount > 1 ? `${honorific} ${OTHER_CO_OWNERS_SUFFIX}` : honorific;
-}
+// 宛名敬称の合成は client/server 共有のリーフモジュール(addressee.ts)へ移設。
+// 既存の import 元(recipients)を維持するため re-export する(print/export route は変更不要)。
+export { composeAddresseeHonorific } from "./addressee";
 
 // dm-export の「1送付先住所=1通」グルーピングを再利用。groups は DmRowPropertyOwner[][]。
 // 各グループの代表は selectGroupRepresentative で取り、敬称は honorificForOwner(name, hasCorporateNumber)。

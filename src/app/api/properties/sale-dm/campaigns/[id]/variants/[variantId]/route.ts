@@ -19,15 +19,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       throw new ApiError(404, "指定された型が見つかりません", "VARIANT_NOT_FOUND");
     }
 
-    // 送付済みの宛先が使っている型は設定変更不可。送付後に設計/トーン/訴求やラベルを
-    // 変えると、CSV・送付履歴・A/B 集計が実際に送った構成と食い違うため凍結する。
-    const sentCount = await prisma.dmRecipientDraft.count({
-      where: { campaignId: id, variantId, status: "sent" },
-    });
-    if (sentCount > 0) {
-      throw new ApiError(409, "送付済みの宛先がある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");
-    }
-
     const data: Prisma.DmVariantUpdateInput = {};
     if (parsed.label !== undefined) data.label = parsed.label;
     // options 内で実際に指定された項目だけ反映し、1項目でも変われば true。
@@ -43,20 +34,32 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (o.extraInstruction !== undefined) { data.extraInstruction = o.extraInstruction ?? null; optionFieldChanged = true; }
     }
 
-    // campaignId で縛り、他キャンペーンの型を更新させない。
-    const result = await prisma.dmVariant.update({
-      where: { id: variantId, campaignId: id },
-      data,
+    // 送付済みの宛先が使っている型は設定変更不可(送付後に設計/トーン/訴求やラベルを変えると CSV・送付履歴・
+    // A/B 集計が実際に送った構成と食い違う)。sent チェック→型更新→下書き無効化を 1 トランザクションにまとめ、
+    // 前後で sent を数えることで mark-sent との競合(TOCTOU=チェック後に別 request が sent 化)を検出し
+    // ロールバックする(凍結=送った構成の不変性を守る)。
+    const result = await prisma.$transaction(async (tx) => {
+      const sentBefore = await tx.dmRecipientDraft.count({ where: { campaignId: id, variantId, status: "sent" } });
+      if (sentBefore > 0) {
+        throw new ApiError(409, "送付済みの宛先がある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");
+      }
+      // campaignId で縛り、他キャンペーンの型を更新させない。
+      const updated = await tx.dmVariant.update({ where: { id: variantId, campaignId: id }, data });
+      // options(design/tone/length/appeal/strength/extraInstruction)を実際に変えたら、この型を使う未送付の
+      // 下書きは旧設定で生成済みのため無効化(本文クリア→draft へ・要再生成)。label のみ/空 options は本文不変。
+      if (optionFieldChanged) {
+        await tx.dmRecipientDraft.updateMany({
+          where: { campaignId: id, variantId, status: { not: "sent" }, body: { not: "" } },
+          data: { body: "", status: "draft", confirmedAt: null },
+        });
+      }
+      // 更新中に別 request がこの型の宛先を sent 化していたら、送った構成を書き換えたことになる → ロールバック。
+      const sentAfter = await tx.dmRecipientDraft.count({ where: { campaignId: id, variantId, status: "sent" } });
+      if (sentAfter > 0) {
+        throw new ApiError(409, "送付済みの宛先がある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");
+      }
+      return updated;
     });
-
-    // options(design/tone/length/appeal/strength/extraInstruction)を実際に変えたら、この型を使う未送付の
-    // 下書きは旧設定で生成済みのため無効化(本文クリア→draft へ・要再生成)。label のみ/空 options は本文に影響しない。
-    if (optionFieldChanged) {
-      await prisma.dmRecipientDraft.updateMany({
-        where: { campaignId: id, variantId, status: { not: "sent" }, body: { not: "" } },
-        data: { body: "", status: "draft", confirmedAt: null },
-      });
-    }
 
     await writeAuditLog({
       userId: session.id,

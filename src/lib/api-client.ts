@@ -175,6 +175,7 @@ export interface SaleDmDraft {
   recipientZip: string | null;
   recipientAddress: string | null;
   honorific: string;
+  coOwnerCount: number; // 同送付先の共有者数(>1 で宛名に「他共有者様」を付す)
   body: string;
   status: string;
   outcome: string;

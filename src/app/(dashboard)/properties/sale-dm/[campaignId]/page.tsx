@@ -13,6 +13,7 @@ import {
   type SaleDmDraft,
 } from "@/lib/api-client";
 import { renderLetterHtml } from "@/lib/sale-dm-letter/templates";
+import { composeAddresseeHonorific } from "@/lib/sale-dm-letter/addressee";
 import SaleDmAdjustPanel from "@/components/sale-dm/adjust-panel";
 import SaleDmRecipientList from "@/components/sale-dm/recipient-list";
 import SaleDmAggregateView from "@/components/sale-dm/aggregate-view";
@@ -62,7 +63,9 @@ export default function SaleDmWorkspacePage() {
       designTemplate: selectedVariant.designTemplate,
       body: selected.body,
       addresseeName: selected.recipientName,
-      honorific: selected.honorific,
+      // 印刷/CSV と同じ合成: 複数共有者なら「他共有者様」を付す。承認プレビューと郵送物の宛名を一致させ、
+      // 代表者のみ宛ての見た目で承認 → 実際は「他共有者様」で郵送、という食い違いを防ぐ。
+      honorific: composeAddresseeHonorific(selected.honorific, selected.coOwnerCount),
       recipientZip: selected.recipientZip,
       recipientAddress: selected.recipientAddress,
       senderName: "",

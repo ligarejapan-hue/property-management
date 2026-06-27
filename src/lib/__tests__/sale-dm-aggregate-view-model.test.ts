@@ -5,7 +5,7 @@ import type { SaleDmCampaign } from "@/lib/api-client";
 function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampaign["recipients"][number] {
   return {
     id: Math.random().toString(36), variantId: "v1", propertyId: "p", recipientName: "x", recipientZip: null,
-    recipientAddress: null, honorific: "様", body: "", status: "sent", outcome: "none",
+    recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "", status: "sent", outcome: "none",
     deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, ...over,
   };
 }
