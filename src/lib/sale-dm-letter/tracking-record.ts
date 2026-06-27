@@ -46,6 +46,9 @@ export async function recordTrackingHit(
       lpAccessCount: { increment: 1 },
       // 初回のみセット(2回目以降は undefined=既存値を上書きしない)。
       ...(draft.lpFirstAccessAt ? {} : { lpFirstAccessAt: new Date() }),
+      // outcome 永続キャッシュを同期: LP アクセス ⇒ inquiry(deriveOutcome の正準定義と一致)。
+      // outcome 列を直接読む consumer/レポートが LP-only 反響を取りこぼさないようにする(冪等)。
+      outcome: "inquiry",
     },
   });
   return { matched: true };

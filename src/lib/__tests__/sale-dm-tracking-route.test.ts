@@ -54,20 +54,22 @@ describe("recordTrackingHit", () => {
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.matched).toBe(true);
     const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
-      data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number } };
+      data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number }; outcome?: string };
     };
     expect(arg.data.lpFirstAccessAt).toBeInstanceOf(Date);
     expect(arg.data.lpAccessCount).toEqual({ increment: 1 });
+    expect(arg.data.outcome).toBe("inquiry"); // outcome 永続キャッシュを LP アクセスで同期
   });
 
   it("2回目以降は lpFirstAccessAt を上書きしない(冪等)・count は ++", async () => {
     const tx = makeTx({ id: "r1", lpFirstAccessAt: new Date("2020-01-01"), status: "sent" });
     await recordTrackingHit(tx as never, "tok");
     const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
-      data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number } };
+      data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number }; outcome?: string };
     };
     expect(arg.data.lpFirstAccessAt).toBeUndefined();
     expect(arg.data.lpAccessCount).toEqual({ increment: 1 });
+    expect(arg.data.outcome).toBe("inquiry"); // 2回目以降も冪等に inquiry を維持
   });
 });
 
