@@ -283,7 +283,7 @@ export default function CorporateLookupPanel({
           onClick={handleSearch}
           disabled={!canSearch}
           aria-label="法人情報を検索"
-          className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
+          className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400 dark:disabled:border-gray-700 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
         >
           {loading ? (
             <>
@@ -315,11 +315,11 @@ export default function CorporateLookupPanel({
         </p>
       )}
       {!disabledReason && configured && invalidHint && (
-        <p className="text-[11px] text-amber-600">{invalidHint}</p>
+        <p className="text-[11px] text-amber-600 dark:text-amber-400">{invalidHint}</p>
       )}
 
       {showError && (
-        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/20 dark:bg-red-500/10 dark:text-red-300">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div>{error}</div>
         </div>
@@ -401,7 +401,7 @@ export default function CorporateLookupPanel({
           {/* Phase C: 反映対象選択 + 反映ボタン */}
           <div className="space-y-2 border-t border-blue-100 pt-2">
             {applied ? (
-              <div className="flex items-center gap-1.5 rounded-md border border-green-200 bg-green-50 px-2.5 py-1.5 text-[11px] text-green-700">
+              <div className="flex items-center gap-1.5 rounded-md border border-green-200 bg-green-50 px-2.5 py-1.5 text-[11px] text-green-700 dark:border-green-400/20 dark:bg-green-500/10 dark:text-green-300">
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 <span>所有者情報に反映しました</span>
               </div>
@@ -449,7 +449,7 @@ export default function CorporateLookupPanel({
                   )}
 
                 {applyError && (
-                  <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-700">
+                  <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-700 dark:border-red-400/20 dark:bg-red-500/10 dark:text-red-300">
                     <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                     <div>{applyError}</div>
                   </div>
@@ -459,7 +459,7 @@ export default function CorporateLookupPanel({
                   type="button"
                   onClick={handleApply}
                   disabled={!applyButtonEnabled}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-400 bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-300"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-400 bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-300 dark:disabled:border-gray-700 dark:disabled:bg-gray-700"
                 >
                   {applying ? (
                     <>
@@ -520,7 +520,7 @@ function ApplyCheckbox({
   return (
     <label
       className={`inline-flex items-center gap-1 ${
-        editable ? "cursor-pointer" : "cursor-not-allowed text-gray-400"
+        editable ? "cursor-pointer" : "cursor-not-allowed text-gray-400 dark:text-gray-500"
       }`}
       title={editable ? undefined : "編集権限がないか反映可能な値がありません"}
     >
@@ -529,7 +529,7 @@ function ApplyCheckbox({
         checked={checked}
         disabled={!editable}
         onChange={onChange}
-        className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+        className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 dark:border-gray-700"
       />
       <span>{label}</span>
     </label>

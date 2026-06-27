@@ -45,6 +45,39 @@ describe("CorporateLookupPanel dark: 配色 (P2-1)", () => {
   it("純 accent ボタン（bg-indigo-600）は dark: 据え置き", () => {
     expect(lookupSrc).toContain("bg-indigo-600");
   });
+
+  // --- T4 追加: 取りこぼし darken（generic error/success/neutral）---
+  it("検索ボタン(blue outline)に dark の bg/border/text/hover", () => {
+    expect(lookupSrc).toContain(
+      "text-blue-700 hover:bg-blue-100 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20",
+    );
+  });
+  it("検索エラーパネル(red)に dark", () => {
+    expect(lookupSrc).toContain(
+      "bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/20 dark:bg-red-500/10 dark:text-red-300",
+    );
+  });
+  it("反映成功(green)に dark", () => {
+    expect(lookupSrc).toContain(
+      "bg-green-50 px-2.5 py-1.5 text-[11px] text-green-700 dark:border-green-400/20 dark:bg-green-500/10 dark:text-green-300",
+    );
+  });
+  it("入力ヒント(amber)に dark:text-amber-400", () => {
+    expect(lookupSrc).toContain("text-amber-600 dark:text-amber-400");
+  });
+  it("反映チェックボックスの枠に dark:border-gray-700", () => {
+    expect(lookupSrc).toContain(
+      "border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 dark:border-gray-700",
+    );
+  });
+
+  // --- CORPORATE 色ロック（conflict 警告 / 廃止法人 バッジ）は非接触＝light維持 ---
+  it("conflict 警告(amber)は light のまま据え置き（color-lock 非接触）", () => {
+    expect(lookupSrc).toContain("border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800");
+  });
+  it("廃止法人バッジ(red)は light のまま据え置き（color-lock 非接触）", () => {
+    expect(lookupSrc).toContain("border border-red-300 bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700");
+  });
 });
 
 // -----------------------------------------------------------------------
@@ -90,6 +123,14 @@ describe("CorporateCleanupPanel dark: 配色 (P2-1)", () => {
   });
   it("ライトモード text-slate-700 は残っている", () => {
     expect(cleanupSrc).toContain("text-slate-700");
+  });
+
+  // --- T4 追加: 取りこぼし darken ---
+  it("エラー文(red)に dark:text-red-400", () => {
+    expect(cleanupSrc).toContain("text-red-600 dark:text-red-400");
+  });
+  it("手動対応 amber に dark:text-amber-400", () => {
+    expect(cleanupSrc).toContain("text-amber-700 dark:text-amber-400");
   });
 });
 
