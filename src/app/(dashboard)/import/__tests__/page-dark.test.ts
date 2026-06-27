@@ -1,0 +1,140 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const dir = dirname(fileURLToPath(import.meta.url));
+const src = readFileSync(join(dir, "..", "page.tsx"), "utf8");
+
+describe("import/page.tsx dark: 配色", () => {
+  // 面
+  it("カード/パネル面に dark:bg-gray-900 がある", () => {
+    expect(src).toContain("dark:bg-gray-900");
+  });
+  it("淡面に dark:bg-gray-800/50 または dark:bg-gray-800 がある", () => {
+    expect(src.includes("dark:bg-gray-800/50") || src.includes("dark:bg-gray-800")).toBe(true);
+  });
+  it("行/ボタンhoverに dark:hover:bg-gray-800 がある", () => {
+    expect(src).toContain("dark:hover:bg-gray-800");
+  });
+  // 文字
+  it("本文に dark:text-gray-100 がある", () => { expect(src).toContain("dark:text-gray-100"); });
+  it("本文に dark:text-gray-200 がある", () => { expect(src).toContain("dark:text-gray-200"); });
+  it("本文に dark:text-gray-300 がある", () => { expect(src).toContain("dark:text-gray-300"); });
+  it("薄文字に dark:text-gray-400 がある", () => { expect(src).toContain("dark:text-gray-400"); });
+  // 枠線
+  it("枠線に dark:border-gray-800 がある", () => { expect(src).toContain("dark:border-gray-800"); });
+  it("枠線に dark:border-gray-700 がある", () => { expect(src).toContain("dark:border-gray-700"); });
+  it("区切りに dark:divide-gray-800 がある", () => { expect(src).toContain("dark:divide-gray-800"); });
+  // accent: アクティブタブ
+  it("アクティブタブに dark:text-indigo-400 がある", () => { expect(src).toContain("dark:text-indigo-400"); });
+  it("アクティブタブ枠線に dark:border-indigo-400 がある", () => { expect(src).toContain("dark:border-indigo-400"); });
+  // accent: 色付きメッセージpanel（情報/警告/成功/エラー）
+  it("情報panel(blue)に dark:text-blue-300 がある", () => { expect(src).toContain("dark:text-blue-300"); });
+  it("警告panel(amber)に dark:text-amber-300 がある", () => { expect(src).toContain("dark:text-amber-300"); });
+  it("成功panel(green)に dark:text-green-300 がある", () => { expect(src).toContain("dark:text-green-300"); });
+  it("エラーpanel(red)に dark:text-red-300 がある", () => { expect(src).toContain("dark:text-red-300"); });
+  it("色付きpanel地に dark:bg-blue-500/10 がある", () => { expect(src).toContain("dark:bg-blue-500/10"); });
+  // ライト不変ガード
+  it("ライト bg-white は残っている", () => { expect(src).toContain("bg-white"); });
+  it("ライト text-gray-600 は残っている", () => { expect(src).toContain("text-gray-600"); });
+  it("ライト border-gray-300 は残っている", () => { expect(src).toContain("border-gray-300"); });
+  it("ライト hover:bg-gray-50 は残っている", () => { expect(src).toContain("hover:bg-gray-50"); });
+  it("ライト text-blue-700 は残っている", () => { expect(src).toContain("text-blue-700"); });
+});
+
+// 事前敵対レビューで「取込履歴テーブルが丸ごと未ダーク化」だった回帰を固定する。
+// 上の汎用 token 断言は panel 側に同 token があると素通りするため、テーブル固有の
+// 結合文字列で「テーブル自体がダーク化されている」ことを直接ピン留めする。
+describe("import/page.tsx dark: 取込履歴テーブル(Job History) カバレッジ固定", () => {
+  it("thead 淡面に dark:bg-gray-800/50 が付く", () => {
+    expect(src).toContain("dark:bg-gray-800/50");
+  });
+  it("tbody 区切りが divide-gray-100 dark:divide-gray-800", () => {
+    expect(src).toContain("divide-y divide-gray-100 dark:divide-gray-800");
+  });
+  it("件数列(新規/更新/要レビュー/エラー)の文字に dark: が付く", () => {
+    expect(src).toContain("text-green-700 dark:text-green-300 font-medium");
+    expect(src).toContain("text-blue-700 dark:text-blue-300 font-medium");
+    expect(src).toContain("text-amber-700 dark:text-amber-300 font-medium");
+    expect(src).toContain("text-red-700 dark:text-red-300 font-medium");
+  });
+  it("ファイル名リンクに text-indigo-600 dark:text-indigo-400 が付く", () => {
+    expect(src).toContain("text-indigo-600 dark:text-indigo-400");
+  });
+  it("件数プレースホルダに text-gray-300 dark:text-gray-600 が付く", () => {
+    expect(src).toContain("text-gray-300 dark:text-gray-600");
+  });
+});
+
+// RoStat 集計カード（受付帳/所有者 突合プレビュー summary）の tone 値は dark:bg-gray-900 面に乗るため、
+// tone 文字色に dark: が無いと暗背景で集計数値が低コントラスト（@codex #231 P2 指摘）。
+// 汎用 token 断言は panel 側に同 token があると素通りするため、toneClass の結合文字列で直接ピン留めする。
+describe("import/page.tsx dark: RoStat 集計カード tone カバレッジ固定", () => {
+  it("toneClass の各 tone に dark:text-* が付く（暗面で集計数値が読める）", () => {
+    expect(src).toContain('blue: "text-blue-700 dark:text-blue-300"');
+    expect(src).toContain('green: "text-green-700 dark:text-green-300"');
+    expect(src).toContain('amber: "text-amber-700 dark:text-amber-300"');
+    expect(src).toContain('gray: "text-gray-600 dark:text-gray-300"');
+  });
+});
+
+// @codex #231 round2: 取込履歴カード(dark:bg-gray-900)内のページネーション一式と、
+// 取込完了バナー(dark:bg-green-500/10)内の色付き集計文字が暗面で未dark→低コントラストだった。
+describe("import/page.tsx dark: ページネーション/取込完了集計の暗面可読性（@codex round2）", () => {
+  it("ページネーション件数文(text-gray-600)に dark:text-gray-300", () => {
+    expect(src).toContain("justify-between gap-2 text-xs text-gray-600 dark:text-gray-300");
+  });
+  it("「1ページあたり」ラベル(text-gray-500)に dark:text-gray-400", () => {
+    expect(src).toContain('text-gray-500 dark:text-gray-400">1ページあたり');
+  });
+  it("limit select に dark の border/bg/text", () => {
+    expect(src).toContain("px-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100");
+  });
+  it("前へ/次へボタンに dark の border/bg/text/hover", () => {
+    expect(src).toContain("text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800");
+  });
+  it("取込完了バナーの集計ラベルに dark:text-*-300（成功/うち更新/要レビュー/エラー）", () => {
+    expect(src).toContain('text-green-600 dark:text-green-300">成功:');
+    expect(src).toContain('text-blue-600 dark:text-blue-300">うち更新:');
+    expect(src).toContain('text-amber-600 dark:text-amber-300">要レビュー:');
+    expect(src).toContain('text-red-600 dark:text-red-300">エラー:');
+  });
+});
+
+// 取込履歴テーブルの行ステータスは STATUS_CONFIG.color を dark:bg-gray-900 カード上の className に
+// 展開するため、light限定色(text-*-600)のままだと processing/failed 等が暗面で低コントラスト
+// （@codex #231 P2 round3）。ジョブ詳細のステータス色と同じく dark:text-*-400 を付与。
+describe("import/page.tsx dark: 取込履歴 行ステータス色(STATUS_CONFIG)", () => {
+  it("STATUS_CONFIG の各 status color に dark:text-*-400 が付く", () => {
+    expect(src).toContain('color: "text-green-600 dark:text-green-400"');
+    expect(src).toContain('color: "text-red-600 dark:text-red-400"');
+    expect(src).toContain('color: "text-blue-600 dark:text-blue-400"');
+    expect(src).toContain('color: "text-amber-600 dark:text-amber-400"');
+  });
+});
+
+// 要レビュー行の ReviewActionHint CTA リンク（owner_unmatched/property_not_found）は、
+// 暗い要レビュー表(dark:bg-gray-900)上で text-indigo-600 のままだと 12px 文字が低コントラスト
+// （@codex #231 P2 round4）。他のindigoリンク同様 dark:text-indigo-400 を付与。
+describe("import/page.tsx dark: ReviewActionHint CTA リンクの暗面可読性", () => {
+  it("ReviewActionHint の indigo CTA に dark:text-indigo-400 が付く", () => {
+    expect(src).toContain("inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline");
+  });
+});
+
+// 最終掃き出し: 暗カード/暗ヘッダ上に残っていた bare 色文字（@codex round4 indigo CTA 指摘を機に全件点検）。
+describe("import/page.tsx dark: 暗面上の残り bare 色文字（最終掃き出し）", () => {
+  it("列対応の住所推奨 amber 警告に dark:text-amber-400", () => {
+    expect(src).toContain("text-amber-600 dark:text-amber-400 font-medium");
+  });
+  it("プレビュー表ヘッダの対応列注記(blue)に dark:text-blue-400", () => {
+    expect(src).toContain("text-blue-500 dark:text-blue-400 font-normal");
+  });
+  it("取込結果のパースエラー見出し(red-600)に dark:text-red-400", () => {
+    expect(src).toContain("text-xs font-medium text-red-600 dark:text-red-400");
+  });
+  it("取込結果のパースエラー明細(red-500)に dark:text-red-400", () => {
+    expect(src).toContain("text-xs text-red-500 dark:text-red-400");
+  });
+});
