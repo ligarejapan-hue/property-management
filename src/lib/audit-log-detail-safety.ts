@@ -251,6 +251,18 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "conflict",
   ]),
   owner_corporate_apply: new Set(["isClosed", "source", "conflict"]),
+  // PR-2b-2: 謄本 所在検索の監査メタデータ（非PII enum / 件数 / boolean のみ）。
+  //   status = success/skipped/failed、reason = has_real_estate_number/insufficient_location、
+  //   candidateCount = 候補件数、providerErrorCode = 失敗分類コード、confirmed = boolean。
+  // 所在/地番/家屋番号/不動産番号/所有者PII は orchestration 側で載せず、混入しても
+  // allowlist 外 + denylist（/addr/i 等）で引き続き [REDACTED]。
+  registry_search: new Set([
+    "status",
+    "reason",
+    "candidateCount",
+    "providerErrorCode",
+    "confirmed",
+  ]),
 };
 
 /**
