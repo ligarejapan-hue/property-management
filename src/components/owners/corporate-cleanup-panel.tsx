@@ -97,14 +97,14 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
       </button>
 
       {done && <p className="mt-2 text-emerald-700 dark:text-emerald-400">混入を除去しました</p>}
-      {error && <p className="mt-2 text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-red-600 dark:text-red-400">{error}</p>}
 
       {preview && preview.action === "none" && (
         <p className="mt-2 text-slate-500 dark:text-slate-400">混入は検出されませんでした</p>
       )}
 
       {preview && preview.action === "manual" && (
-        <p className="mt-2 text-amber-700">
+        <p className="mt-2 text-amber-700 dark:text-amber-400">
           自動除去できません(手動対応が必要):{" "}
           {preview.manualReason === "multi"
             ? "複数候補"
