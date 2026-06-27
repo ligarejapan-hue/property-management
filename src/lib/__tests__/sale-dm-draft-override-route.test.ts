@@ -138,4 +138,20 @@ describe("PATCH draft (拡張)", () => {
     expect(res.status).toBe(409);
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
+
+  it("field_staff は担当外物件の宛先(再割当で隠れた)を編集できない・403・更新しない(record scope)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v1", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "other" } });
+    const res = await patchDraft(patch({ body: "x" }) as never, ctx);
+    expect(res.status).toBe(403);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("field_staff でも作成 or 担当の物件の宛先なら編集できる(200)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v1", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "u1" } });
+    const res = await patchDraft(patch({ body: "x" }) as never, ctx);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.body).toBe("x");
+  });
 });

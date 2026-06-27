@@ -138,6 +138,25 @@ describe("POST confirm (bulk)", () => {
     expect(res.status).toBe(422);
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
+
+  it("field_staff は作成/担当の物件の宛先のみ確定(where に property record scope を付与)", async () => {
+    grant(...ALL);
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(200);
+    const where = pm.dmRecipientDraft.updateMany.mock.calls[0][0].where;
+    // 担当外(再割当で隠れた)宛先は DB 側で確定対象から除外される。
+    expect(where.property).toEqual({ OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] });
+  });
+
+  it("非 field_staff(管理者等)は confirm に property scope を付与しない", async () => {
+    grant(...ALL);
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].where.property).toBeUndefined();
+  });
 });
 
 describe("POST regenerate draft (再生成)", () => {

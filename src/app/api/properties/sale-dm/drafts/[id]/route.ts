@@ -27,11 +27,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const draft = await prisma.dmRecipientDraft.findUnique({
       where: { id },
-      select: { id: true, campaignId: true, status: true, variantId: true, campaign: { select: { createdBy: true } } },
+      select: {
+        id: true,
+        campaignId: true,
+        status: true,
+        variantId: true,
+        campaign: { select: { createdBy: true } },
+        property: { select: { createdBy: true, assignedTo: true } },
+      },
     });
     // 作成者本人のキャンペーン配下のみ操作可(横断アクセス防止)。not-found/not-owned は同じ 404。
     if (!draft || draft.campaign.createdBy !== session.id) {
       throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+    }
+    // field_staff は作成 or 担当の物件の宛先のみ編集可(regenerate/mark-sent/outcome と同じ record scope)。
+    // campaign 作成後に物件が別担当へ再割当されると GET/print/export では隠れるため、本文/型/上書きの
+    // 直接編集も同様に塞ぐ(stale な draft id での隠れ宛先改変を防ぐ)。
+    if (
+      session.role === "field_staff" &&
+      draft.property.createdBy !== session.id &&
+      draft.property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この宛先を操作する権限がありません", "FORBIDDEN");
     }
     // 送付済み(sent)の宛先は本文・型・上書きを編集できない(送った内容/集計の改竄防止)。
     if (draft.status === "sent") {

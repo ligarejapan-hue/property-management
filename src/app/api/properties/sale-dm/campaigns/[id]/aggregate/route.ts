@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { aggregateByVariant } from "@/lib/sale-dm-letter/aggregate";
 
 export async function GET(
@@ -32,11 +32,16 @@ export async function GET(
           deliveryStatus: true,
           lpFirstAccessAt: true,
           phoneInquiryAt: true,
+          property: { select: { createdBy: true, assignedTo: true } },
         },
       }),
     ]);
 
-    const aggregate = aggregateByVariant(drafts);
+    // field_staff は作成 or 担当の物件の宛先のみ集計対象(GET campaign/print/export と同じ
+    // filterDraftsByFieldStaffScope)。campaign 作成後に物件が別担当へ再割当された宛先の到達/反響/宛先不明数を
+    // 混ぜず、可視の宛先リストと指標を一致させる。非 field_staff は全件。
+    const visibleDrafts = filterDraftsByFieldStaffScope(drafts, session);
+    const aggregate = aggregateByVariant(visibleDrafts);
     const labelByVariantId = new Map(variants.map((v) => [v.id, v.label]));
 
     return NextResponse.json(

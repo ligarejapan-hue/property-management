@@ -15,7 +15,17 @@ export async function POST(request: NextRequest) {
     // 作成者本人のキャンペーン配下の draft のみ確定(他人のキャンペーンの draft は対象外)。
     const result = await prisma.dmRecipientDraft.updateMany({
       // 生成失敗(body="")は確定対象から除外(空letterの確定→印刷→送付を防ぐ)。
-      where: { id: { in: ids }, status: "draft", body: { not: "" }, campaign: { createdBy: session.id } },
+      // field_staff は作成 or 担当の物件の宛先のみ確定可(他 route と同じ record scope)。campaign 作成後に
+      // 物件が別担当へ再割当された宛先は GET/print/export で隠れるため、stale id での一括確定も DB 側で除外。
+      where: {
+        id: { in: ids },
+        status: "draft",
+        body: { not: "" },
+        campaign: { createdBy: session.id },
+        ...(session.role === "field_staff"
+          ? { property: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } }
+          : {}),
+      },
       data: { status: "confirmed", confirmedAt: new Date() },
     });
     await writeAuditLog({ userId: session.id, action: "sale_dm_drafts_confirm", targetTable: "dm_recipient_drafts", detail: { count: result.count, confirmedAt: new Date().toISOString() } });

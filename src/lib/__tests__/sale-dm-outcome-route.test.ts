@@ -272,4 +272,38 @@ describe("PATCH outcome", () => {
     expect(res.status).toBe(200);
     expect(pm.property.update).toHaveBeenCalled();
   });
+
+  it("field_staff は担当外物件の宛先には配達結果も記録できない(403・record scope を全 outcome 更新に適用)", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" }, permissions: [{ resource: "property", action: "write", granted: true }] });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneInquiryAt: null,
+      status: "sent", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "other" },
+    });
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(403);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("field_staff は担当外物件の宛先には電話反響も記録できない(403)", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" }, permissions: [{ resource: "property", action: "write", granted: true }] });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneInquiryAt: null,
+      status: "sent", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "other" },
+    });
+    const res = await PATCH(req({ phoneInquiry: true }) as never, ctx());
+    expect(res.status).toBe(403);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+  });
+
+  it("field_staff でも担当物件なら配達結果を記録できる(200)", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" }, permissions: [{ resource: "property", action: "write", granted: true }] });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneInquiryAt: null,
+      status: "sent", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "u1" },
+    });
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.update).toHaveBeenCalled();
+  });
 });

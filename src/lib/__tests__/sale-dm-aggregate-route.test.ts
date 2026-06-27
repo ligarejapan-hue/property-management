@@ -34,7 +34,17 @@ vi.mock("@/lib/api-helpers", () => {
     }),
   };
 });
-vi.mock("@/lib/sale-dm-letter/route-guard", () => ({ requireSaleDmAccess: vi.fn() }));
+vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
+  requireSaleDmAccess: vi.fn(),
+  // 実 filterDraftsByFieldStaffScope と同じ挙動を再現(field_staff は作成/担当物件のみ・他は全件)。
+  filterDraftsByFieldStaffScope: (
+    drafts: Array<{ property?: { createdBy?: string | null; assignedTo?: string | null } }>,
+    session: { id: string; role?: string },
+  ) =>
+    session?.role === "field_staff"
+      ? drafts.filter((d) => d.property?.createdBy === session.id || d.property?.assignedTo === session.id)
+      : drafts,
+}));
 vi.mock("@/lib/prisma", () => ({
   default: {
     dmCampaign: { findUnique: vi.fn() },
@@ -106,5 +116,32 @@ describe("GET aggregate", () => {
     );
     const res = await GET(new Request("http://x") as never, ctx());
     expect(res.status).toBe(403);
+  });
+
+  it("field_staff は担当外物件(再割当で隠れた)の宛先を集計から除外する", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" } });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([
+      { variantId: "vA", deliveryStatus: "delivered", lpFirstAccessAt: new Date(), phoneInquiryAt: null, property: { createdBy: "u1", assignedTo: null } },
+      { variantId: "vA", deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, property: { createdBy: "other", assignedTo: "other" } },
+      { variantId: "vB", deliveryStatus: "returned_undeliverable", lpFirstAccessAt: null, phoneInquiryAt: null, property: { createdBy: "other", assignedTo: "u1" } },
+    ]);
+    const res = await GET(new Request("http://x") as never, ctx());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // 担当外(other/other)の1件を除外 → sent=2(自作1+担当1)、delivered=1、undeliverable=1。
+    expect(json.total.sent).toBe(2);
+    expect(json.total.delivered).toBe(1);
+    expect(json.total.undeliverable).toBe(1);
+  });
+
+  it("非 field_staff(管理者等)は property scope を適用せず全件集計", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([
+      { variantId: "vA", deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, property: { createdBy: "other", assignedTo: "other" } },
+      { variantId: "vB", deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, property: { createdBy: "other", assignedTo: "other" } },
+    ]);
+    const res = await GET(new Request("http://x") as never, ctx());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.total.sent).toBe(2);
   });
 });
