@@ -3,6 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { deriveOutcome } from "@/lib/sale-dm-letter/outcome";
 
@@ -29,7 +30,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session, permissions } = await requireSaleDmAccess();
     const { id } = await params;
     const input = outcomeSchema.parse(await request.json());
 
@@ -82,6 +83,12 @@ export async function PATCH(
       input.deliveryStatus !== undefined &&
       input.deliveryStatus !== "returned_undeliverable" &&
       draft.deliveryStatus === "returned_undeliverable";
+
+    // 物件(properties)テーブルを変更する分岐(宛先不明の設定/解除)は、他の物件APIと
+    // 同様に property:write を要求する。read 系の DM アクセス権だけで物件状態を書き換えさせない。
+    if ((becameUndeliverable || clearedUndeliverable) && !hasPermission(permissions, "property", "write")) {
+      throw new ApiError(403, "物件の宛先不明状態を更新する権限(write)がありません", "FORBIDDEN");
+    }
 
     const draftData: Record<string, unknown> = {
       phoneInquiryAt: nextPhoneInquiryAt,

@@ -75,7 +75,7 @@ const ctx = (id = "r1") => ({ params: Promise.resolve({ id }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" } });
+  (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: true }] });
   pm.dmRecipientDraft.findUnique.mockResolvedValue({
     id: "r1",
     propertyId: "p1",
@@ -231,6 +231,22 @@ describe("PATCH outcome", () => {
     const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
     expect(res.status).toBe(403);
     expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("property:write 不足だと宛先不明連動(returned_undeliverable)は 403・副作用なし", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: false }] });
+    const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
+    expect(res.status).toBe(403);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("property:write 不足でも物件連動しない記録(delivered/電話)は 200(下書きのみ更新)", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: false }] });
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.update).toHaveBeenCalled();
     expect(pm.property.update).not.toHaveBeenCalled();
   });
 });

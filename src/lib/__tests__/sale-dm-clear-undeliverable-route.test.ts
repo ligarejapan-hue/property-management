@@ -56,7 +56,7 @@ const ctx = (id = "p1") => ({ params: Promise.resolve({ id }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" } });
+  (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: true }] });
   pm.property.findUnique.mockResolvedValue({ id: "p1", dmUndeliverableAt: new Date(), dmStatus: "no_send" });
   pm.property.update.mockResolvedValue({ id: "p1" });
 });
@@ -100,8 +100,15 @@ describe("POST clear-dm-undeliverable", () => {
     expect(pm.property.update).not.toHaveBeenCalled();
   });
 
+  it("property:write 不足で 403・更新しない(物件書込はwrite権限必須)", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: false }] });
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(403);
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
   it("field_staff が作成/担当でない物件を操作すると 403・更新しない", async () => {
-    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" } });
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" }, permissions: [{ resource: "property", action: "write", granted: true }] });
     pm.property.findUnique.mockResolvedValue({ id: "p1", dmUndeliverableAt: new Date(), dmStatus: "no_send", createdBy: "other", assignedTo: "other" });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(403);
@@ -109,7 +116,7 @@ describe("POST clear-dm-undeliverable", () => {
   });
 
   it("field_staff でも担当物件なら 200", async () => {
-    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" } });
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" }, permissions: [{ resource: "property", action: "write", granted: true }] });
     pm.property.findUnique.mockResolvedValue({ id: "p1", dmUndeliverableAt: new Date(), dmStatus: "no_send", createdBy: "other", assignedTo: "u1" });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(200);

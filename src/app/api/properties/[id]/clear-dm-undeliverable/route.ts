@@ -3,6 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 
 // 宛先不明フラグ(dmUndeliverableAt)の手動解除。dmStatus は人の判断で戻すため、
@@ -16,7 +17,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session, permissions } = await requireSaleDmAccess();
+    // この route は物件(properties)の宛先不明フラグ/DM判断を書き換えるため property:write 必須。
+    // read 系の DM アクセス権だけで物件状態を書き換えさせない(他の物件APIと同じ write ゲート)。
+    if (!hasPermission(permissions, "property", "write")) {
+      throw new ApiError(403, "物件を更新する権限(write)がありません", "FORBIDDEN");
+    }
     const { id } = await params;
     const { restoreDmStatus } = clearSchema.parse(await request.json());
 

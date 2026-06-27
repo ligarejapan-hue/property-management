@@ -93,10 +93,13 @@ d2("GET /t/[token]", () => {
     e2(writeAuditLog).toHaveBeenCalledOnce();
   });
 
-  i2("LP 未設定なら 404(fail-closed)", async () => {
+  i2("LP 未設定なら 404(fail-closed)・記録も監査もしない(LP未到達を反響計上しない)", async () => {
     delete process.env.SALE_DM_LP_URL;
+    const pm = prismaMock as never as { dmRecipientDraft: { update: ReturnType<typeof vi.fn> } };
     const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
     e2(res.status).toBe(404);
+    e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    e2(writeAuditLog).not.toHaveBeenCalled();
   });
 
   i2("未知トークンでも LP 設定済みなら 302(列挙耐性)・記録は更新しない", async () => {

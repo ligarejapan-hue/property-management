@@ -14,13 +14,19 @@ export async function GET(
   const { token } = await params;
   const lpUrl = process.env.SALE_DM_LP_URL;
 
+  // 転送先 LP 未設定なら fail-closed(404)。受け手は LP に到達できないため、トラッキングも
+  // 記録しない(到達しない閲覧を反響として A/B に計上しない)。記録より前に判定する。
+  if (!lpUrl) {
+    return new NextResponse(null, { status: 404, headers: { "Cache-Control": "no-store" } });
+  }
+
   // 記録は best-effort(失敗しても受け手体験=LP転送を止めない)。
   let matched = false;
   try {
     const r = await recordTrackingHit(prisma, token);
     matched = r.matched;
   } catch {
-    // 記録失敗はログのみ(下の 302/404 判定には影響させない)。
+    // 記録失敗はログのみ(下の 302 判定には影響させない)。
     matched = false;
   }
 
@@ -34,10 +40,6 @@ export async function GET(
     });
   }
 
-  // 転送先 LP 未設定なら fail-closed(404)。未知トークンでも、LP 設定済みなら
-  // 列挙耐性・受け手体験のため LP へ 302(本文でトークンの有無を示さない)。
-  if (!lpUrl) {
-    return new NextResponse(null, { status: 404, headers: { "Cache-Control": "no-store" } });
-  }
+  // 未知トークンでも、LP 設定済みなら列挙耐性・受け手体験のため LP へ 302(本文でトークンの有無を示さない)。
   return NextResponse.redirect(lpUrl, { status: 302, headers: { "Cache-Control": "no-store" } });
 }
