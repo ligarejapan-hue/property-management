@@ -69,8 +69,8 @@ const ctx = (id = "r1") => ({ params: Promise.resolve({ id }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" } });
-  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" } });
+  (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: true }] });
+  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" }, property: { createdBy: "u1", assignedTo: "u1" } });
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
   pm.propertyDmLog.create.mockResolvedValue({ id: "log1" });
@@ -128,6 +128,21 @@ describe("POST mark-sent", () => {
     (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockRejectedValue(
       Object.assign(new Error("x"), { status: 403, code: "FORBIDDEN" }),
     );
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
+  });
+
+  it("property:write 不足で 403・送付しない(送付履歴を read 権限だけで作らせない)", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: false }] });
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
+  });
+
+  it("field_staff が作成/担当でない物件の送付は 403・副作用なし", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" }, permissions: [{ resource: "property", action: "write", granted: true }] });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "other" } });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(403);
     expect(pm.propertyDmLog.create).not.toHaveBeenCalled();

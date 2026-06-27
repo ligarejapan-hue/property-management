@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 
 // 送付確定: 確定済み(confirmed)の下書きを sent にし、既存「送付履歴」(PropertyDmLog)へ
@@ -11,15 +12,29 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session, permissions } = await requireSaleDmAccess();
     const { id } = await params;
 
     const draft = await prisma.dmRecipientDraft.findUnique({
       where: { id },
-      select: { id: true, propertyId: true, status: true, campaign: { select: { createdBy: true } } },
+      select: { id: true, propertyId: true, status: true, campaign: { select: { createdBy: true } }, property: { select: { createdBy: true, assignedTo: true } } },
     });
     // 作成者本人のキャンペーン配下のみ(横断アクセス防止)。not-found/not-owned は同じ 404。
     if (!draft || draft.campaign.createdBy !== session.id) throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
+
+    // 送付確定は PropertyDmLog(物件の送付履歴)を作り追跡も有効化するため property:write 必須
+    // (outcome/clear-dm-undeliverable と統一)。read/export 系の権限だけでは送付できない。
+    if (!hasPermission(permissions, "property", "write")) {
+      throw new ApiError(403, "送付を記録する権限(物件 write)がありません", "FORBIDDEN");
+    }
+    // field_staff は作成 or 担当の物件のみ操作可(物件APIと同じ record scope)。
+    if (
+      session.role === "field_staff" &&
+      draft.property.createdBy !== session.id &&
+      draft.property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この物件を操作する権限がありません", "FORBIDDEN");
+    }
 
     // 既に送付済みなら何もしない(冪等)。
     if (draft.status === "sent") {

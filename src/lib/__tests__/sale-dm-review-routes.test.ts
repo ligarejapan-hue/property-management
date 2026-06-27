@@ -60,6 +60,23 @@ describe("GET campaign", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
+  it("field_staff は担当外物件の宛先PIIを返さない・scope判定用propertyは応答に載せない", async () => {
+    grant(...ALL);
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmCampaign.findUnique.mockResolvedValue({
+      id: "c1", name: "x", createdBy: "u1", variants: [],
+      recipients: [
+        { id: "r1", body: "b1", property: { createdBy: "u1", assignedTo: "x" } }, // 作成者=自分
+        { id: "r2", body: "b2", property: { createdBy: "x", assignedTo: "u1" } }, // 担当=自分
+        { id: "r3", body: "b3", property: { createdBy: "x", assignedTo: "x" } },  // 担当外→除外
+      ],
+    });
+    const res = await getCampaign(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.campaign.recipients.map((r: { id: string }) => r.id)).toEqual(["r1", "r2"]);
+    expect(json.campaign.recipients[0].property).toBeUndefined();
+  });
   it("権限不足で 403", async () => {
     grant("property");
     const res = await getCampaign(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
