@@ -9,7 +9,7 @@ vi.mock("@/lib/api-helpers", () => {
   return {
     ApiError: MockApiError,
     getApiSession: vi.fn(), getUserPermissions: vi.fn(), getOwnerDisplayConfig: vi.fn(),
-    parseJsonBody: vi.fn(async (r: Request) => { const t = await r.text(); return t ? JSON.parse(t) : {}; }),
+    parseJsonBody: vi.fn(async (r: Request) => { const t = await r.text(); if (t.trim() === "") return {}; try { return JSON.parse(t); } catch { throw new MockApiError(400, "リクエストボディが不正な JSON です", "INVALID_JSON"); } }),
     handleApiError: vi.fn((e: unknown) => {
       if (e instanceof MockApiError) return Response.json({ error: { message: e.message, code: e.code } }, { status: e.status });
       if (e !== null && typeof e === "object" && "issues" in e && Array.isArray((e as Record<string, unknown>).issues)) {
@@ -89,10 +89,25 @@ describe("POST confirm (bulk)", () => {
   it("指定 id を confirmed にし 200", async () => {
     grant(...ALL);
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 2 });
-    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["r1", "r2"] }) }) as never);
+    const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids }) }) as never);
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.count).toBe(2);
+  });
+
+  it("不正な JSON ボディは 400(500 でなく)・更新しない", async () => {
+    grant(...ALL);
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: "{ broken" }) as never);
+    expect(res.status).toBe(400);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("UUID でない id は 422(更新しない)", async () => {
+    grant(...ALL);
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["not-a-uuid"] }) }) as never);
+    expect(res.status).toBe(422);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 });
 

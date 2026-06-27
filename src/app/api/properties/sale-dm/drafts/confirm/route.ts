@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { handleApiError } from "@/lib/api-helpers";
+import { handleApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 
-const confirmSchema = z.object({ ids: z.array(z.string()).min(1) });
+// id は UUID 厳格検証(非UUIDを Prisma に渡して 500 にしない=422)。上限で巨大配列も弾く。
+const confirmSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) });
 
 export async function POST(request: NextRequest) {
   try {
     const { session } = await requireSaleDmAccess();
-    const { ids } = confirmSchema.parse(await request.json());
+    const { ids } = confirmSchema.parse(await parseJsonBody(request));
     // 作成者本人のキャンペーン配下の draft のみ確定(他人のキャンペーンの draft は対象外)。
     const result = await prisma.dmRecipientDraft.updateMany({
       where: { id: { in: ids }, status: "draft", campaign: { createdBy: session.id } },
