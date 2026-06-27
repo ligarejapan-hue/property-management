@@ -55,16 +55,23 @@ beforeEach(() => {
 });
 
 describe("PATCH draft (拡張)", () => {
-  it("body だけ更新できる(Plan 1 互換)", async () => {
+  it("body 編集で 200・確定を解除(本文変更→draft へ・confirmedAt 消去=再承認必須)", async () => {
     const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.body).toBe("編集後");
+    const data = pm.dmRecipientDraft.updateMany.mock.calls[0][0].data;
+    expect(data.body).toBe("編集後");
+    // 確定済みの本文を編集したら確定解除(承認した文面と印刷/送付する文面を一致させる)。
+    expect(data.status).toBe("draft");
+    expect(data.confirmedAt).toBeNull();
   });
 
-  it("override を保存できる", async () => {
+  it("override 単独編集(本文不変)は確定を解除しない(印刷/送付の承認を保持)", async () => {
     const res = await patchDraft(patch({ override: { tone: "soft" } }) as never, ctx);
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.overrideJson).toEqual({ tone: "soft" });
+    const data = pm.dmRecipientDraft.updateMany.mock.calls[0][0].data;
+    expect(data.overrideJson).toEqual({ tone: "soft" });
+    expect(data.status).toBeUndefined();
+    expect(data.confirmedAt).toBeUndefined();
   });
 
   it("override: null で上書きを消去できる(DB NULL=Prisma.DbNull)", async () => {

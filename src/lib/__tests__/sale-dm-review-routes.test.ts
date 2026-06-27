@@ -201,7 +201,7 @@ describe("POST regenerate draft (再生成)", () => {
     expect(res.status).toBe(403);
   });
 
-  it("正常に再生成し 200・条件付き updateMany(status!=sent)で書き込む", async () => {
+  it("正常に再生成し 200・条件付き updateMany(status!=sent)で本文書込+確定解除(draft へ)", async () => {
     grant(...ALL);
     (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
     (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
@@ -210,7 +210,8 @@ describe("POST regenerate draft (再生成)", () => {
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
     const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "r1", status: { not: "sent" } }, data: { body: "再生成本文" } }));
+    // 本文が変わるため確定を解除=再生成後の新文面を再確認なしで印刷/送付させない(承認ゲート維持)。
+    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "r1", status: { not: "sent" } }, data: { body: "再生成本文", status: "draft", confirmedAt: null } }));
   });
 
   it("生成中に並行で sent 確定(updateMany count=0)なら 409・本文を上書きしない", async () => {

@@ -45,7 +45,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (!body) throw new ApiError(502, "再生成に失敗しました", "GENERATION_FAILED");
     // 生成は外部呼び出しで時間がかかるため、pre-check 後に並行で sent 確定し得る。
     // 条件付き updateMany で送付済みの本文を上書きしない(送信済み内容/集計の不変性)。0 行なら 409。
-    const updated = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: { body } });
+    // 本文が変わるため確定も解除(draft へ・confirmedAt 消去)。再生成後の新文面を再確認なしで
+    // 印刷/送付させない("OK→確定→印刷/送付"の承認ゲートを維持・確定済み再生成の素通り防止)。
+    const updated = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: { body, status: "draft", confirmedAt: null } });
     if (updated.count === 0) {
       throw new ApiError(409, "送付済みの宛先は再生成できません", "ALREADY_SENT");
     }

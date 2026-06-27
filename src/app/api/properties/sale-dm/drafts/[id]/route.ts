@@ -58,7 +58,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: Record<string, any> = {};
 
-    if (parsed.body !== undefined) data.body = parsed.body;
+    if (parsed.body !== undefined) {
+      data.body = parsed.body;
+      // 確定済みの本文を直接編集したら確定を解除(draft へ・confirmedAt 消去)。承認した文面と
+      // 実際に印刷/送付する文面を一致させ、本文変更で "OK→確定→印刷/送付" の承認ゲートを迂回させない。
+      data.status = "draft";
+      data.confirmedAt = null;
+    }
 
     if (parsed.variantId !== undefined) {
       // 付け替え先は同一 campaign の型に限る(他キャンペーンの型を割り当てさせない)。
