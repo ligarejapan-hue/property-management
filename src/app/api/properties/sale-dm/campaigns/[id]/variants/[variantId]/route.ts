@@ -30,14 +30,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const data: Prisma.DmVariantUpdateInput = {};
     if (parsed.label !== undefined) data.label = parsed.label;
+    // options 内で実際に指定された項目だけ反映し、1項目でも変われば true。
+    // 空 options(例: {"options":{}})は設定変更なし扱い=下書き無効化を起こさない(no-op を本文消去にしない)。
+    let optionFieldChanged = false;
     if (parsed.options) {
       const o = parsed.options;
-      if (o.designTemplate !== undefined) data.designTemplate = o.designTemplate;
-      if (o.tone !== undefined) data.tone = o.tone;
-      if (o.length !== undefined) data.length = o.length;
-      if (o.appeal !== undefined) data.appeal = o.appeal;
-      if (o.strength !== undefined) data.strength = o.strength;
-      if (o.extraInstruction !== undefined) data.extraInstruction = o.extraInstruction ?? null;
+      if (o.designTemplate !== undefined) { data.designTemplate = o.designTemplate; optionFieldChanged = true; }
+      if (o.tone !== undefined) { data.tone = o.tone; optionFieldChanged = true; }
+      if (o.length !== undefined) { data.length = o.length; optionFieldChanged = true; }
+      if (o.appeal !== undefined) { data.appeal = o.appeal; optionFieldChanged = true; }
+      if (o.strength !== undefined) { data.strength = o.strength; optionFieldChanged = true; }
+      if (o.extraInstruction !== undefined) { data.extraInstruction = o.extraInstruction ?? null; optionFieldChanged = true; }
     }
 
     // campaignId で縛り、他キャンペーンの型を更新させない。
@@ -46,9 +49,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       data,
     });
 
-    // options(design/tone/length/appeal/strength/extraInstruction)を変えたら、この型を使う未送付の
-    // 下書きは旧設定で生成済みのため無効化(本文クリア→draft へ・要再生成)。label のみ変更は本文に影響しない。
-    if (parsed.options) {
+    // options(design/tone/length/appeal/strength/extraInstruction)を実際に変えたら、この型を使う未送付の
+    // 下書きは旧設定で生成済みのため無効化(本文クリア→draft へ・要再生成)。label のみ/空 options は本文に影響しない。
+    if (optionFieldChanged) {
       await prisma.dmRecipientDraft.updateMany({
         where: { campaignId: id, variantId, status: { not: "sent" }, body: { not: "" } },
         data: { body: "", status: "draft", confirmedAt: null },

@@ -131,6 +131,14 @@ describe("PATCH variant (更新)", () => {
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
+  it("空の options({})は設定変更なし扱い=下書きを無効化しない(no-op を本文消去に変えない)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: {} }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
   it("送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {
     pm.dmRecipientDraft.count.mockResolvedValue(2); // この型を使った送付済みドラフトが存在
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
