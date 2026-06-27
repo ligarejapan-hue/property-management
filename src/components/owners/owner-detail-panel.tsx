@@ -24,10 +24,10 @@ function renderField(label: string, value: string | null): React.ReactNode {
   if (value === null || value === undefined) {
     return (
       <div key={label}>
-        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+        <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
           {label}
         </dt>
-        <dd className="flex items-center gap-1.5 text-sm text-gray-400">
+        <dd className="flex items-center gap-1.5 text-sm text-gray-400 dark:text-gray-500">
           <Lock className="h-3.5 w-3.5" />
           非表示
         </dd>
@@ -37,10 +37,10 @@ function renderField(label: string, value: string | null): React.ReactNode {
 
   return (
     <div key={label}>
-      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         {label}
       </dt>
-      <dd className="text-sm text-gray-900">{value || "-"}</dd>
+      <dd className="text-sm text-gray-900 dark:text-gray-100">{value || "-"}</dd>
     </div>
   );
 }
@@ -64,7 +64,7 @@ export default function OwnerDetailPanel({ owner }: OwnerDetailPanelProps) {
 
   return (
     <div
-      className="rounded-lg border border-gray-200 bg-gray-50 p-5"
+      className="rounded-lg border border-gray-200 bg-gray-50 p-5 dark:border-gray-800 dark:bg-gray-900"
       data-pii-protected
       data-pii-surface="owner"
     >
@@ -91,7 +91,7 @@ export default function OwnerDetailPanel({ owner }: OwnerDetailPanelProps) {
         )}
         {showCorporateSuspect && (
           <div className="md:col-span-2">
-            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-300">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <div>
                 所有者の氏名・現住所・備考欄に法人番号らしき文字列が含まれています。
