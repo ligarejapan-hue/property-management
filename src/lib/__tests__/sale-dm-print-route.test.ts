@@ -44,6 +44,7 @@ vi.mock("@/lib/prisma", () => ({
 import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
+import { writeAuditLog } from "@/lib/audit";
 import { GET } from "../../app/api/properties/sale-dm/campaigns/[id]/print/route";
 
 const pm = prismaMock as never as {
@@ -78,7 +79,7 @@ const ENV = process.env;
 beforeEach(() => {
   vi.clearAllMocks();
   // 郵送QRには絶対URLが必須。通常系は追跡baseを設定して通す。
-  process.env = { ...ENV, SALE_DM_TRACKING_BASE_URL: "https://dm.example.com" };
+  process.env = { ...ENV, SALE_DM_TRACKING_BASE_URL: "https://dm.example.com", SALE_DM_LP_URL: "https://lp.example.com" };
   requireSaleDmAccess.mockResolvedValue({ session: { id: "u1" } });
   pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト", createdBy: "u1" });
   pm.dmRecipientDraft.findMany.mockResolvedValue([draft]);
@@ -107,6 +108,29 @@ describe("GET .../campaigns/[id]/print", () => {
     delete process.env.SALE_DM_TRACKING_BASE_URL;
     const res = await GET(req() as never, ctx);
     expect(res.status).toBe(503);
+  });
+
+  it("LP URL(SALE_DM_LP_URL)未設定なら 503(郵送QRの遷移先が無く dead-link になるため)", async () => {
+    delete process.env.SALE_DM_LP_URL;
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(503);
+  });
+
+  it("非絶対の LP URL(lp.example.com)も 503(未設定扱い)", async () => {
+    process.env.SALE_DM_LP_URL = "lp.example.com";
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(503);
+  });
+
+  it("印刷出力を非PIIメタで監査する(本文・宛名を含まない・直GETも追跡可能に)", async () => {
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(200);
+    expect(writeAuditLog).toHaveBeenCalled();
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.campaignId).toBe("c1");
+    expect(detail.count).toBe(1);
+    expect(JSON.stringify(detail)).not.toContain("田中");
+    expect(JSON.stringify(detail)).not.toContain("本文");
   });
 
   it("複数共有者(coOwnerCount>1)は宛名に『他共有者様』が付く", async () => {

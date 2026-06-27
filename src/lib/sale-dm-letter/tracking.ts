@@ -3,19 +3,27 @@
 
 export const TRACKING_PATH_PREFIX = "/t/";
 
-// 環境変数 SALE_DM_TRACKING_BASE_URL を既定 base として読む。郵送物・QR には絶対 http(s) URL が
-// 必須なので、未設定/非絶対URL(scheme/host 無し・非http)は undefined(=未設定扱い)を返し、
-// print route を 503 fail-closed させる(本番は絶対URL設定必須)。
-export function resolveTrackingBaseUrl(): string | undefined {
-  const base = process.env.SALE_DM_TRACKING_BASE_URL;
-  if (!base || base.trim().length === 0) return undefined;
-  const trimmed = base.trim();
+// 絶対 http(s) URL のみ有効として返す共有ヘルパ。空/相対/非http は undefined(=未設定扱い)。
+// 郵送QRの base も /t/ の遷移先 LP も、郵送先で機能するには絶対URLが必須なため共通化する。
+function resolveAbsoluteHttpEnv(raw: string | undefined): string | undefined {
+  if (!raw || raw.trim().length === 0) return undefined;
+  const trimmed = raw.trim();
   try {
     const u = new URL(trimmed);
     return u.protocol === "http:" || u.protocol === "https:" ? trimmed : undefined;
   } catch {
     return undefined; // scheme/host の無い相対値(example.com, /app 等)は使えない。
   }
+}
+
+// 郵送QRの base(SALE_DM_TRACKING_BASE_URL)。未設定/非絶対は undefined → print が 503 fail-closed。
+export function resolveTrackingBaseUrl(): string | undefined {
+  return resolveAbsoluteHttpEnv(process.env.SALE_DM_TRACKING_BASE_URL);
+}
+
+// 短縮URL /t/ の遷移先 LP(SALE_DM_LP_URL)。未設定/非絶対は undefined → /t/ は 404・print は 503。
+export function resolveLpUrl(): string | undefined {
+  return resolveAbsoluteHttpEnv(process.env.SALE_DM_LP_URL);
 }
 
 /**

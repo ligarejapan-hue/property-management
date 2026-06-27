@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { writeAuditLog } from "@/lib/audit";
 import {
   renderLetterSheetHtml,
   type LetterRenderInput,
 } from "@/lib/sale-dm-letter/templates";
 import { resolveSender } from "@/lib/sale-dm-letter/sender";
-import { resolveTrackingBaseUrl } from "@/lib/sale-dm-letter/tracking";
+import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { buildTrackingArtifacts } from "@/lib/sale-dm-letter/qr";
 import { renderTrackingSlotHtml } from "@/lib/sale-dm-letter/tracking-slot";
 import { composeAddresseeHonorific } from "@/lib/sale-dm-letter/recipients";
@@ -43,6 +44,11 @@ export async function GET(
     if (!trackingBaseUrl) {
       throw new ApiError(503, "追跡用URL(SALE_DM_TRACKING_BASE_URL)が未設定です。郵送QRには絶対URLが必要です", "TRACKING_NOT_CONFIGURED");
     }
+    // 郵送QRの遷移先 LP も絶対URL必須。未設定/非絶対だと QR を踏んでも /t/ が 404 になり郵送物が
+    // dead-link になるため、印刷前に fail-closed(503)。
+    if (!resolveLpUrl()) {
+      throw new ApiError(503, "LP URL(SALE_DM_LP_URL)が未設定/不正です。郵送QRの遷移先に絶対URLが必要です", "LP_NOT_CONFIGURED");
+    }
 
     const letters: LetterRenderInput[] = await Promise.all(
       drafts.map(async (d) => {
@@ -63,6 +69,14 @@ export async function GET(
     );
 
     const html = renderLetterSheetHtml(campaign.name, letters);
+
+    // 印刷出力(PII含むHTML)を非PIIメタで監査(CSV出力 route と統一・dashboard 外の直GETも追跡可能に)。
+    await writeAuditLog({
+      userId: session.id,
+      action: "sale_dm_campaign_print",
+      targetTable: "dm_campaigns",
+      detail: { campaignId: id, count: drafts.length, printedAt: new Date().toISOString() },
+    });
 
     return new NextResponse(html, {
       status: 200,

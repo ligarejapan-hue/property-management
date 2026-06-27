@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { recordTrackingHit } from "@/lib/sale-dm-letter/tracking-record";
+import { resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 
 // 認証不要の公開エンドポイント(proxy.ts の PUBLIC_PATHS に "/t/" を追加済み)。
 // 受け手(所有者)は本システムのログインユーザーではないため認証免除が必須。
@@ -12,7 +13,7 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  const lpUrl = process.env.SALE_DM_LP_URL;
+  const lpUrl = resolveLpUrl();
 
   // 転送先 LP 未設定なら fail-closed(404)。受け手は LP に到達できないため、トラッキングも
   // 記録しない(到達しない閲覧を反響として A/B に計上しない)。記録より前に判定する。
