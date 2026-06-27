@@ -255,6 +255,23 @@ describe("PR-2b-2: runRegistrySearch（provider 注入）", () => {
     });
   });
 
+  it("searchCandidates はあるが所在検索未対応(supportsLocationSearch!==true)なら 501・呼ばない", async () => {
+    // official は searchCandidates を持つが searchByLocation 未実装 → supportsLocationSearch=false。
+    // メソッド有無だけで通すと throttle/ブラウザを消費し provider_error(502) になるため、
+    // 呼ぶ前に 501 で fail-closed する（cond⑦・@codex P2）。
+    const sc = vi.fn(async () => []);
+    const provider = {
+      name: "official-like",
+      supportsLocationSearch: false,
+      searchCandidates: sc,
+    } as unknown as RegistryFetchProvider;
+    await expect(runSearch({ provider })).rejects.toMatchObject({
+      status: 501,
+      code: "REGISTRY_SEARCH_PROVIDER_NOT_CONFIGURED",
+    });
+    expect(sc).not.toHaveBeenCalled();
+  });
+
   it("成功 AuditLog は非PII（status/candidateCount のみ・所在/不動産番号を含まない）", async () => {
     await runSearch();
     const call = searchAuditCall();
@@ -326,6 +343,23 @@ describe("PR-2b-2: route POST（権限ゲート / provider 未設定で 501）",
     // エラー応答に PII を含まない
     const json = JSON.stringify(body);
     expect(json).not.toMatch(/owner|所有者|住所|郵便/);
+  });
+
+  it("body が JSON null でも 500 でなく 400（confirmed 必須）", async () => {
+    // parseJsonBody は body 'null' で null を返す。null.confirmed は TypeError→500 になるため、
+    // 非null object ガードで 400 REGISTRY_SEARCH_CONFIRMATION_REQUIRED を返す（@codex P3）。
+    const req = new Request(
+      `http://test/api/properties/${PROP_ID}/registry/search`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "null",
+      },
+    ) as never;
+    const res = await POST(req, { params: Promise.resolve({ id: PROP_ID }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("REGISTRY_SEARCH_CONFIRMATION_REQUIRED");
   });
 });
 

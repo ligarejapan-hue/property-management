@@ -46,7 +46,9 @@ export async function POST(
 
     // 確認フラグ。空ボディ / JSON 不正は parseJsonBody が安全に処理する。
     const body = await parseJsonBody(request);
-    const confirmed = (body as { confirmed?: unknown }).confirmed === true;
+    // body が null / 非 object（JSON 'null' 等）でも安全に false 扱いし、500 でなく 400 を返す。
+    const confirmed =
+      (body as { confirmed?: unknown } | null)?.confirmed === true;
     if (!confirmed) {
       throw new ApiError(
         400,

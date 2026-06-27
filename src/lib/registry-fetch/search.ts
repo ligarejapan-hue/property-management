@@ -114,9 +114,16 @@ export async function runRegistrySearch(
     return { searchable: false, reason: built.reason };
   }
 
-  // 5. searchable: provider が検索に対応しなければ 501（型安全ガード）。
-  //    本番は getRegistryFetchProvider() が null ゆえ route 側で先に 501 になる。
-  if (typeof provider.searchCandidates !== "function") {
+  // 5. searchable: provider が所在検索に実際に対応していなければ 501（型安全ガード）。
+  //    method 有無だけでなく supportsLocationSearch===true を要求する。official は
+  //    searchCandidates を持つが searchByLocation 未実装ゆえ未対応 → ここで 501 にして、
+  //    searchCandidates を呼んで throttle/ブラウザを消費し provider_error(502) を返すのを
+  //    避ける（cond⑦ fail-closed・@codex P2）。本番は getRegistryFetchProvider() が null ゆえ
+  //    route 側で先に 501 になる。
+  if (
+    typeof provider.searchCandidates !== "function" ||
+    provider.supportsLocationSearch !== true
+  ) {
     throw new ApiError(
       501,
       "謄本所在検索プロバイダは未設定です",

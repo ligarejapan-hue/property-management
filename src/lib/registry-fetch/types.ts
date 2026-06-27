@@ -108,4 +108,12 @@ export interface RegistryFetchProvider {
    * 返す候補（秘匿情報）は呼び出し側が log / AuditLog / error response に出さない契約。
    */
   searchCandidates?(request: RegistrySearchRequest): Promise<RegistryCandidate[]>;
+  /**
+   * 所在検索（searchCandidates）が実際に利用可能かの宣言（PR-2b-2）。
+   * searchCandidates メソッドが存在しても、実 adapter の searchByLocation が未実装の provider
+   * （official・本 PR 時点）は true にしない。呼び出し側（runRegistrySearch）はこれが true の
+   * ときだけ searchCandidates を呼ぶ。false / undefined で呼ぶと throttle/ブラウザを消費して
+   * provider_error(502) になり、所在検索の fail-closed 501 を破るため（cond⑦）。
+   */
+  readonly supportsLocationSearch?: boolean;
 }

@@ -73,6 +73,9 @@ export interface MockRegistryFetchOptions {
 export class MockRegistryFetchProvider implements RegistryFetchProvider {
   readonly name = "mock";
 
+  /** mock は所在検索に対応する（searchCandidates が決定的に候補を返す）。 */
+  readonly supportsLocationSearch = true;
+
   private readonly options: MockRegistryFetchOptions;
 
   constructor(options: MockRegistryFetchOptions = {}) {
