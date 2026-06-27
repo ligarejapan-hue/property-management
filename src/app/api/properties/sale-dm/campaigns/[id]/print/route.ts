@@ -36,8 +36,13 @@ export async function GET(
     });
 
     const { senderName, senderContact } = resolveSender();
-    // 追跡QR/短縮URL は宛先固有の opaque トークンから生成(base 未設定なら相対 /t/<token>)。
+    // 追跡QR/短縮URL は宛先固有の opaque トークンから生成する。郵送物(印刷)の QR は
+    // 絶対URLが必須(相対パスは scheme/host が無く郵送先で機能しない)ため、base 未設定は
+    // fail-closed(503)。本番は SALE_DM_TRACKING_BASE_URL 設定必須。
     const trackingBaseUrl = resolveTrackingBaseUrl();
+    if (!trackingBaseUrl) {
+      throw new ApiError(503, "追跡用URL(SALE_DM_TRACKING_BASE_URL)が未設定です。郵送QRには絶対URLが必要です", "TRACKING_NOT_CONFIGURED");
+    }
 
     const letters: LetterRenderInput[] = await Promise.all(
       drafts.map(async (d) => {

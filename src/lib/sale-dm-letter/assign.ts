@@ -51,7 +51,8 @@ export function assignVariantsEvenly(
 }
 
 /**
- * 手動割当: まず均等割り(sequential)をベースにし、指定された (recipientId→variantId) で上書きする。
+ * 手動割当: 指定された (recipientId→variantId) の宛先「のみ」を割り当てる。
+ * 未指定の宛先は現状の型を維持(再割当しない=既存 A/B バケットを保全)。
  * 対象 recipientIds / variantIds の集合外の指定は無視する(不正 id を取り込まない)。
  */
 export function applyManualAssignment(
@@ -59,7 +60,8 @@ export function applyManualAssignment(
   variantIds: string[],
   assignments: ManualAssignment[],
 ): Map<string, string> {
-  const map = assignVariantsEvenly(recipientIds, variantIds, { order: "sequential" });
+  // 1件の手動変更で他宛先の A/B バケットを書き換えないよう、空 Map から指定分だけ積む。
+  const map = new Map<string, string>();
   const recipientSet = new Set(recipientIds);
   const variantSet = new Set(variantIds);
   for (const a of assignments) {

@@ -74,8 +74,11 @@ const draft = {
 const ctx = { params: Promise.resolve({ id: "c1" }) };
 const req = () => new Request("http://x/api/properties/sale-dm/campaigns/c1/print");
 
+const ENV = process.env;
 beforeEach(() => {
   vi.clearAllMocks();
+  // 郵送QRには絶対URLが必須。通常系は追跡baseを設定して通す。
+  process.env = { ...ENV, SALE_DM_TRACKING_BASE_URL: "https://dm.example.com" };
   requireSaleDmAccess.mockResolvedValue({ session: { id: "u1" } });
   pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト", createdBy: "u1" });
   pm.dmRecipientDraft.findMany.mockResolvedValue([draft]);
@@ -93,11 +96,17 @@ describe("GET .../campaigns/[id]/print", () => {
     expect(html).toContain("本文です");
     // 追跡QR/短縮URL が印刷HTMLへ配線されている(P5 slot 連携・宛先固有 /t/<token>)
     expect(html).toContain("sale-dm-tracking");
-    expect(html).toContain("/t/tok1");
+    expect(html).toContain("https://dm.example.com/t/tok1");
     // confirmed のみを問い合わせていること(status フィルタ)
     const arg = pm.dmRecipientDraft.findMany.mock.calls[0][0];
     expect(arg.where.campaignId).toBe("c1");
     expect(arg.where.status).toBe("confirmed");
+  });
+
+  it("追跡baseURL(SALE_DM_TRACKING_BASE_URL)未設定なら 503(郵送QRが相対パスで機能しないため fail-closed)", async () => {
+    delete process.env.SALE_DM_TRACKING_BASE_URL;
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(503);
   });
 
   it("複数共有者(coOwnerCount>1)は宛名に『他共有者様』が付く", async () => {

@@ -53,25 +53,34 @@ describe("空入力", () => {
 });
 
 describe("applyManualAssignment", () => {
-  it("指定された recipient だけ上書き・未指定は残す(既定 = 先頭型)", () => {
-    // ベースは sequential 均等割り → 一部を手動上書き
+  it("指定された宛先だけを割り当て・未指定は Map に含めない(現状の型を維持=再割当しない)", () => {
     const map = applyManualAssignment(ids(3), ["A", "B"], [{ recipientId: "r2", variantId: "B" }]);
     expect(map.get("r2")).toBe("B");
-    expect(map.size).toBe(3);
-    // 手動指定外の r1/r3 も型を持つ(空にしない)
-    expect(map.get("r1")).toBeTruthy();
-    expect(map.get("r3")).toBeTruthy();
+    expect(map.size).toBe(1);
+    // 手動指定外の r1/r3 は Map に含めない(route は触らない=既存の A/B バケットを保全)。
+    expect(map.has("r1")).toBe(false);
+    expect(map.has("r3")).toBe(false);
   });
 
-  it("対象 recipientIds に無い id の指定は無視する", () => {
-    const map = applyManualAssignment(ids(2), ["A", "B"], [{ recipientId: "zzz", variantId: "A" }]);
-    expect(map.has("zzz")).toBe(false);
+  it("複数指定はすべて反映し、未指定は含めない", () => {
+    const map = applyManualAssignment(ids(4), ["A", "B"], [
+      { recipientId: "r1", variantId: "B" },
+      { recipientId: "r3", variantId: "A" },
+    ]);
+    expect(map.get("r1")).toBe("B");
+    expect(map.get("r3")).toBe("A");
     expect(map.size).toBe(2);
   });
 
-  it("対象 variantIds に無い variant の指定は無視する", () => {
+  it("対象 recipientIds に無い id の指定は無視する(空 Map)", () => {
+    const map = applyManualAssignment(ids(2), ["A", "B"], [{ recipientId: "zzz", variantId: "A" }]);
+    expect(map.has("zzz")).toBe(false);
+    expect(map.size).toBe(0);
+  });
+
+  it("対象 variantIds に無い variant の指定は無視する(その宛先は Map に含めない)", () => {
     const map = applyManualAssignment(ids(2), ["A", "B"], [{ recipientId: "r1", variantId: "ZZZ" }]);
-    expect(map.get("r1")).not.toBe("ZZZ");
-    expect(["A", "B"]).toContain(map.get("r1"));
+    expect(map.has("r1")).toBe(false);
+    expect(map.size).toBe(0);
   });
 });

@@ -90,20 +90,21 @@ describe("POST assign (auto)", () => {
 });
 
 describe("POST assign (manual)", () => {
-  it("手動指定を反映し 200", async () => {
+  it("手動指定した宛先のみ更新し、未指定の宛先の型は書き換えない(A/Bバケット保全)", async () => {
     const res = await assign(post({ mode: "manual", assignments: [{ recipientId: "r1", variantId: "vB" }] }) as never, ctxC);
     expect(res.status).toBe(200);
-    // vB に r1 を含む updateMany が呼ばれる
     const calls = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
+    // 指定した r1 のみ vB へ割り当てる。
     const vBcall = calls.find((c) => c.data.variantId === "vB");
-    expect(vBcall.where.id.in).toContain("r1");
+    expect(vBcall.where.id.in).toEqual(["r1"]);
+    // 未指定の r2/r3/r4 はどの updateMany にも含まれない(既存の型を維持＝再割当しない)。
+    const allIds = calls.flatMap((c) => c.where.id.in);
+    expect(allIds).toEqual(["r1"]);
   });
 
-  it("不正な variant の手動指定は無視される(均等割りの型になる)", async () => {
+  it("不正な variant/recipient の手動指定は無視し、何も更新しない(未指定も書き換えない)", async () => {
     const res = await assign(post({ mode: "manual", assignments: [{ recipientId: "r1", variantId: "ZZZ" }] }) as never, ctxC);
     expect(res.status).toBe(200);
-    const calls = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
-    // ZZZ への更新は発行されない
-    expect(calls.find((c) => c.data.variantId === "ZZZ")).toBeUndefined();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 });
