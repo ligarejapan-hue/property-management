@@ -103,27 +103,27 @@ export default function RegistryAutoFetchButton({
       )}
 
       {providerDisabled && (
-        <p className="text-[11px] text-amber-700">
+        <p className="text-[11px] text-amber-700 dark:text-amber-400">
           謄本自動取得プロバイダが未設定のため現在実行できません。
         </p>
       )}
 
       {state === "done" && (
-        <p className="text-[11px] text-green-600">謄本を取得しました。</p>
+        <p className="text-[11px] text-green-600 dark:text-green-400">謄本を取得しました。</p>
       )}
 
       {state === "error" && errorMsg && (
-        <p className="text-[11px] text-red-600">{errorMsg}</p>
+        <p className="text-[11px] text-red-600 dark:text-red-400">{errorMsg}</p>
       )}
 
       {state === "confirming" && (
-        <div className="flex flex-col gap-1 rounded border border-indigo-200 bg-indigo-50 p-2 text-xs">
-          <p className="font-medium text-indigo-800">謄本を自動取得しますか？</p>
-          <p className="text-indigo-700">
+        <div className="flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-2 text-xs">
+          <p className="font-medium text-indigo-800 dark:text-indigo-300">謄本を自動取得しますか？</p>
+          <p className="text-indigo-700 dark:text-indigo-300">
             登記情報の取得は有料処理になり得ます。実行には明示的な確認が必要です。
           </p>
           {alreadyObtained && (
-            <p className="text-amber-700">
+            <p className="text-amber-700 dark:text-amber-400">
               この物件は既に取得済みです。再取得すると最新の謄本で上書きされます。
             </p>
           )}
@@ -138,7 +138,7 @@ export default function RegistryAutoFetchButton({
             <button
               type="button"
               onClick={handleCancel}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50"
+              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               キャンセル
             </button>
@@ -147,7 +147,7 @@ export default function RegistryAutoFetchButton({
       )}
 
       {state === "submitting" && (
-        <span className="flex items-center gap-1 text-[11px] text-gray-500">
+        <span className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
           <Loader2 className="h-3 w-3 animate-spin" />
           取得中...
         </span>

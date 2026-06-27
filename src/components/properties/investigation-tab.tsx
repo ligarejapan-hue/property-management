@@ -35,27 +35,27 @@ const STATUS_CONFIG: Record<
 > = {
   draft: {
     label: "未取得",
-    badge: "bg-gray-100 text-gray-600",
+    badge: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
     icon: Clock,
   },
   fetching: {
     label: "取得中",
-    badge: "bg-blue-100 text-blue-800",
+    badge: "bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300",
     icon: Loader2,
   },
   needs_review: {
     label: "要確認",
-    badge: "bg-amber-100 text-amber-800",
+    badge: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300",
     icon: AlertTriangle,
   },
   confirmed: {
     label: "確認済み",
-    badge: "bg-green-100 text-green-800",
+    badge: "bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300",
     icon: CheckCircle2,
   },
   failed: {
     label: "取得失敗",
-    badge: "bg-red-100 text-red-800",
+    badge: "bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-300",
     icon: AlertTriangle,
   },
 };
@@ -307,7 +307,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-10">
-        <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+        <Loader2 className="h-5 w-5 animate-spin text-gray-400 dark:text-gray-500" />
       </div>
     );
   }
@@ -332,12 +332,12 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
         </span>
 
         {investigation?.fetchedAt && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             取得: {new Date(investigation.fetchedAt).toLocaleString("ja-JP")}
           </span>
         )}
         {investigation?.confirmedAt && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             確認: {new Date(investigation.confirmedAt).toLocaleString("ja-JP")}
             {investigation.confirmedBy && ` (${investigation.confirmedBy.name})`}
           </span>
@@ -347,7 +347,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
           <button
             onClick={handleFetch}
             disabled={fetching}
-            className="flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
           >
             {fetching ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -360,7 +360,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
           {!isConfirmed && !editMode && investigation && (
             <button
               onClick={handleStartEdit}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               <Edit className="h-3.5 w-3.5" />
               編集
@@ -371,12 +371,12 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
 
       {/* --- Error alert --- */}
       {error && (
-        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           {error}
           <button
             onClick={() => setError(null)}
-            className="ml-auto text-red-500 hover:text-red-700"
+            className="ml-auto text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
           >
             <X className="h-4 w-4" />
           </button>
@@ -388,8 +388,8 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
         <div
           className={`rounded-md border p-2.5 text-xs ${
             message.type === "error"
-              ? "border-red-200 bg-red-50 text-red-700"
-              : "border-green-200 bg-green-50 text-green-700"
+              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
+              : "border-green-200 bg-green-50 text-green-700 dark:border-green-500/20 dark:bg-green-500/10 dark:text-green-300"
           }`}
         >
           {message.type === "error" ? (
@@ -403,11 +403,11 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
 
       {/* --- No record yet --- */}
       {!investigation && (
-        <div className="rounded-md border border-dashed border-gray-300 py-10 text-center">
-          <p className="text-sm text-gray-500">
+        <div className="rounded-md border border-dashed border-gray-300 py-10 text-center dark:border-gray-700">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             調査情報はまだ取得されていません。
           </p>
-          <p className="mt-1 text-xs text-gray-400">
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
             「調査情報を取得」ボタンを押してデータを取得してください。
           </p>
         </div>
@@ -415,11 +415,11 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
 
       {/* --- Server-side fetch error (lastFetchError from DB) --- */}
       {investigation?.lastFetchError && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-500/20 dark:bg-amber-500/15">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <div className="min-w-0">
-            <p className="text-xs font-medium text-amber-800">前回の取得エラー</p>
-            <p className="mt-0.5 break-all font-mono text-xs text-amber-700">
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-300">前回の取得エラー</p>
+            <p className="mt-0.5 break-all font-mono text-xs text-amber-700 dark:text-amber-400">
               {investigation.lastFetchError}
             </p>
           </div>
@@ -428,24 +428,24 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
 
       {/* --- Data table --- */}
       {investigation && (
-        <div className="overflow-x-auto rounded-md border border-gray-200">
+        <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr className="border-b border-gray-200">
-                <th className="w-40 px-3 py-2 text-left text-xs font-medium text-gray-500">
+            <thead className="bg-gray-50 dark:bg-gray-800/50">
+              <tr className="border-b border-gray-200 dark:border-gray-800">
+                <th className="w-40 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   項目
                 </th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   {editMode ? "現在値" : "値"}
                 </th>
                 {editMode && (
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                     編集値
                   </th>
                 )}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {FIELDS.map((f) => {
                 const val = investigation[f.key];
 
@@ -468,26 +468,26 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
                 // variant に応じてセル文字色を変える
                 const cellTextClass =
                   variant === "absent"
-                    ? "text-gray-400 italic"         // 該当なし → 薄いグレー
+                    ? "text-gray-400 italic dark:text-gray-500"         // 該当なし → 薄いグレー
                     : variant === "caution"
-                    ? "text-amber-600 font-medium"   // 要確認 → アンバー
-                    : "text-gray-700";               // 通常 / default
+                    ? "text-amber-600 font-medium dark:text-amber-400"   // 要確認 → アンバー
+                    : "text-gray-700 dark:text-gray-200";               // 通常 / default
 
                 return (
                   <React.Fragment key={f.key}>
                     {/* セクション見出し行 */}
                     {f.sectionLabel && (
-                      <tr className="border-t-2 border-gray-200 bg-gray-50">
+                      <tr className="border-t-2 border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800/50">
                         <td
                           colSpan={editMode ? 3 : 2}
-                          className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                          className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400"
                         >
                           {f.sectionLabel}
                         </td>
                       </tr>
                     )}
                     <tr>
-                      <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-gray-600">
+                      <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300">
                         {f.label}
                       </td>
                       <td className={`px-3 py-2 text-xs ${cellTextClass}`}>
@@ -509,7 +509,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
                                 }))
                               }
                               rows={3}
-                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                             />
                           ) : (
                             <input
@@ -522,7 +522,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
                                   [f.key]: e.target.value,
                                 }))
                               }
-                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                             />
                           )}
                         </td>
@@ -538,7 +538,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
 
       {/* --- Edit mode action bar --- */}
       {editMode && (
-        <div className="flex items-center gap-2 border-t border-gray-200 pt-4">
+        <div className="flex items-center gap-2 border-t border-gray-200 pt-4 dark:border-gray-800">
           <button
             onClick={handleSave}
             disabled={saving}
@@ -565,7 +565,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
           </button>
           <button
             onClick={() => setEditMode(false)}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             キャンセル
           </button>
@@ -592,18 +592,18 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
 
       {/* --- 参考情報・出典表示 --- */}
       {investigation && !editMode && (
-        <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700">
+        <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/15 dark:text-blue-300">
           <p className="font-medium">※ 参考情報</p>
-          <p className="mt-0.5 text-blue-600">
+          <p className="mt-0.5 text-blue-600 dark:text-blue-300">
             この調査情報は自動取得した参考情報です。実際の規制内容は各自治体・法務局等でご確認ください。
           </p>
           {investigation.sourceSummary && (
-            <p className="mt-1 text-blue-500">
+            <p className="mt-1 text-blue-500 dark:text-blue-400">
               出典: {investigation.sourceSummary}（加工して表示）
             </p>
           )}
           {!investigation.sourceSummary && (
-            <p className="mt-1 text-blue-500">
+            <p className="mt-1 text-blue-500 dark:text-blue-400">
               出典: 国土交通省 不動産情報ライブラリ（加工して表示）
             </p>
           )}
@@ -612,18 +612,18 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
 
       {/* --- Source summary + auto fetch info (display mode) --- */}
       {investigation?.autoFetchSummary && !editMode && (
-        <div className="rounded-md bg-gray-50 p-3 text-xs text-gray-500">
-          <p className="font-medium text-gray-600">プロバイダ実行結果</p>
+        <div className="rounded-md bg-gray-50 p-3 text-xs text-gray-500 dark:bg-gray-800/50 dark:text-gray-400">
+          <p className="font-medium text-gray-600 dark:text-gray-300">プロバイダ実行結果</p>
           <pre className="mt-1 whitespace-pre-wrap">{investigation.autoFetchSummary}</pre>
         </div>
       )}
 
       {/* --- Audit log --- */}
       {investigation && (investigation.auditLogs?.length ?? 0) > 0 && (
-        <div className="border-t border-gray-100 pt-4">
+        <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
           <button
             onClick={() => setShowAuditLog(!showAuditLog)}
-            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700"
+            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             {showAuditLog ? (
               <ChevronUp className="h-3.5 w-3.5" />
@@ -638,16 +638,16 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
               {investigation.auditLogs.map((log) => (
                 <div
                   key={log.id}
-                  className="flex items-start gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs"
+                  className="flex items-start gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs dark:border-gray-800 dark:bg-gray-800/50"
                 >
-                  <span className="mt-0.5 rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">
+                  <span className="mt-0.5 rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                     {ACTION_LABELS[log.action] ?? log.action}
                   </span>
                   <div className="min-w-0 flex-1">
                     {log.note && (
-                      <p className="text-gray-700">{log.note}</p>
+                      <p className="text-gray-700 dark:text-gray-200">{log.note}</p>
                     )}
-                    <p className="text-gray-400">
+                    <p className="text-gray-400 dark:text-gray-500">
                       {log.creator.name} •{" "}
                       {new Date(log.createdAt).toLocaleString("ja-JP")}
                     </p>

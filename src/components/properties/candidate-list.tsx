@@ -40,17 +40,17 @@ const strengthConfig: Record<
   strong: {
     label: "強",
     badge: "bg-red-100 text-red-800",
-    border: "border-l-red-500",
+    border: "border-l-red-500 dark:border-l-red-400",
   },
   medium: {
     label: "中",
     badge: "bg-amber-100 text-amber-800",
-    border: "border-l-amber-500",
+    border: "border-l-amber-500 dark:border-l-amber-400",
   },
   weak: {
     label: "弱",
     badge: "bg-blue-100 text-blue-800",
-    border: "border-l-blue-500",
+    border: "border-l-blue-500 dark:border-l-blue-400",
   },
 };
 
@@ -74,9 +74,9 @@ const judgmentConfig: Record<
   Judgment,
   { label: string; icon: typeof Check; color: string }
 > = {
-  same: { label: "同一物件", icon: Check, color: "text-green-600" },
-  different: { label: "別物件", icon: X, color: "text-red-600" },
-  pending: { label: "保留", icon: Minus, color: "text-gray-500" },
+  same: { label: "同一物件", icon: Check, color: "text-green-600 dark:text-green-400" },
+  different: { label: "別物件", icon: X, color: "text-red-600 dark:text-red-400" },
+  pending: { label: "保留", icon: Minus, color: "text-gray-500 dark:text-gray-400" },
 };
 
 function getMatchReason(candidate: Candidate): string {
@@ -115,11 +115,11 @@ function CandidateCard({
 
   return (
     <div
-      className={`rounded-lg border border-gray-200 border-l-4 ${sConfig.border} bg-white shadow-sm transition-all duration-200 hover:shadow-md`}
+      className={`rounded-lg border border-gray-200 dark:border-gray-800 border-l-4 ${sConfig.border} bg-white dark:bg-gray-900 shadow-sm transition-all duration-200 hover:shadow-md`}
     >
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3">
-        <span className="shrink-0 flex items-center gap-1 text-gray-500">
+        <span className="shrink-0 flex items-center gap-1 text-gray-500 dark:text-gray-400">
           <MatchIcon className="h-4 w-4" />
         </span>
         <span
@@ -129,7 +129,7 @@ function CandidateCard({
         </span>
         <Link
           href={`/properties/${candidate.id}`}
-          className="flex-1 min-w-0 flex items-center gap-1 text-sm text-indigo-600 hover:underline font-medium truncate"
+          className="flex-1 min-w-0 flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:underline font-medium truncate"
         >
           <Link2 className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{candidate.address}</span>
@@ -137,7 +137,7 @@ function CandidateCard({
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+          className="shrink-0 rounded p-1 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
           aria-label={expanded ? "詳細を閉じる" : "詳細を開く"}
         >
           {expanded ? (
@@ -150,11 +150,11 @@ function CandidateCard({
 
       {/* Body */}
       <div className="px-4 pb-2">
-        <p className="text-xs text-gray-600 mb-2">
-          <span className="font-medium text-gray-700">一致理由:</span>{" "}
+        <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
+          <span className="font-medium text-gray-700 dark:text-gray-200">一致理由:</span>{" "}
           {matchReason}
         </p>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
           <span>
             種別:{" "}
             {PROPERTY_TYPE_LABELS[candidate.propertyType] ??
@@ -177,7 +177,7 @@ function CandidateCard({
           expanded ? "max-h-40 opacity-100" : "max-h-0 opacity-0"
         }`}
       >
-        <div className="border-t border-gray-100 px-4 py-2 text-[11px] text-gray-500 space-y-1">
+        <div className="border-t border-gray-100 dark:border-gray-800 px-4 py-2 text-[11px] text-gray-500 dark:text-gray-400 space-y-1">
           <div>ID: {candidate.id}</div>
           {candidate.realEstateNumber && (
             <div>不動産番号: {candidate.realEstateNumber}</div>
@@ -194,7 +194,7 @@ function CandidateCard({
       </div>
 
       {/* Footer: judgment buttons / result */}
-      <div className="border-t border-gray-100 px-4 py-2">
+      <div className="border-t border-gray-100 dark:border-gray-800 px-4 py-2">
         {judgment ? (
           <div
             className={`flex items-center gap-1.5 text-xs font-medium ${jConfig!.color}`}
@@ -221,7 +221,7 @@ function CandidateCard({
             <button
               type="button"
               onClick={() => onJudge(candidate.id, "pending")}
-              className="rounded px-3 py-1 text-xs font-medium text-gray-600 bg-gray-200 hover:bg-gray-300 transition-colors"
+              className="rounded px-3 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
             >
               保留
             </button>
@@ -271,26 +271,26 @@ export default function CandidateList({
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-4">
-        <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
-        <span className="text-xs text-gray-400">候補を検索中...</span>
+        <Loader2 className="h-4 w-4 animate-spin text-gray-400 dark:text-gray-500" />
+        <span className="text-xs text-gray-400 dark:text-gray-500">候補を検索中...</span>
       </div>
     );
   }
 
   if (message) {
-    return <p className="text-xs text-gray-400 py-4">{message}</p>;
+    return <p className="text-xs text-gray-400 dark:text-gray-500 py-4">{message}</p>;
   }
 
   if (candidates.length === 0) {
     return (
-      <p className="text-xs text-gray-400 py-4">候補物件はありません</p>
+      <p className="text-xs text-gray-400 dark:text-gray-500 py-4">候補物件はありません</p>
     );
   }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           {candidates.length}件中 {judgedCount}件判定済み
         </p>
       </div>

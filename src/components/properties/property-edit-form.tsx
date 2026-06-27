@@ -194,15 +194,15 @@ export default function PropertyEditForm({
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-8">
       <div
-        className="mx-4 w-full max-w-3xl rounded-lg bg-white shadow-xl"
+        className="mx-4 w-full max-w-3xl rounded-lg bg-white dark:bg-gray-900 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-          <h3 className="text-lg font-bold text-gray-800">物件情報を編集</h3>
+        <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
+          <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">物件情報を編集</h3>
           <button
             onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:text-gray-600"
+            className="rounded p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
           >
             <X className="h-5 w-5" />
           </button>
@@ -211,7 +211,7 @@ export default function PropertyEditForm({
         {/* Body */}
         <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
           {error && (
-            <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               {error}
             </div>
@@ -219,7 +219,7 @@ export default function PropertyEditForm({
 
           {sections.map((section) => (
             <div key={section} className="mb-6">
-              <h4 className="mb-3 border-b border-gray-100 pb-1 text-sm font-semibold text-gray-600">
+              <h4 className="mb-3 border-b border-gray-100 dark:border-gray-800 pb-1 text-sm font-semibold text-gray-600 dark:text-gray-300">
                 {section}情報
               </h4>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -231,7 +231,7 @@ export default function PropertyEditForm({
                         field.type === "textarea" ? "md:col-span-2" : ""
                       }
                     >
-                      <label className="mb-1 block text-xs font-medium text-gray-500">
+                      <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
                         {field.label}
                       </label>
                       {field.type === "select" ? (
@@ -243,7 +243,7 @@ export default function PropertyEditForm({
                           disabled={
                             field.key === "assignedTo" && usersLoading
                           }
-                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none disabled:bg-gray-100"
+                          className="w-full rounded-md border border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none disabled:bg-gray-100 dark:disabled:bg-gray-800"
                         >
                           {field.key === "assignedTo" ? (
                             <>
@@ -269,7 +269,7 @@ export default function PropertyEditForm({
                             handleChange(field.key, e.target.value)
                           }
                           rows={3}
-                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-y"
+                          className="w-full rounded-md border border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-y"
                         />
                       ) : (
                         <input
@@ -281,7 +281,7 @@ export default function PropertyEditForm({
                             handleChange(field.key, e.target.value);
                           }}
                           step={field.type === "number" ? "any" : undefined}
-                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                          className="w-full rounded-md border border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                         />
                       )}
                       {field.key === "address" && (
@@ -308,13 +308,13 @@ export default function PropertyEditForm({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
-          <span className="mr-auto text-xs text-gray-400">
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 dark:border-gray-800 px-6 py-4">
+          <span className="mr-auto text-xs text-gray-400 dark:text-gray-500">
             バージョン: {property.version}
           </span>
           <button
             onClick={onClose}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             キャンセル
           </button>
