@@ -26,8 +26,8 @@
 
 - `src/lib/sales-sheet/document-schema.ts`: `SalesSheetDocument`（page+theme+elements[]）, 要素 discriminated union（text/image/table/badge/shape/qr。各 `id,x,y,w,h,z` mm/pt/int）, `parseSalesSheetDocument(input): SalesSheetDocument`（境界検証）, `A4_LANDSCAPE`/`A4_PORTRAIT`。
 - `src/components/sales-sheet/SalesSheetRenderer.tsx`: `<SalesSheetRenderer document={doc} />`（"use client" 無し・先頭で `parseSalesSheetDocument`・要素別描画・全 style 値 `sanitizeCssValue`）。ブラウザ/サーバー共通。プレビューにそのまま使う。
-- `src/lib/sales-sheet/css-safety.ts`: `isSafeImageSrc`(data:image限定), `isCssColor`, `isSafeFontFamily`, `sanitizeCssValue`。
-- `src/lib/sales-sheet/build-document.ts`: `buildSaleLandDocument(input): SalesSheetDocument`（純・写真 src は /uploads キーの**未インライン**）, `buildInitialSalesSheetDocument(input): Promise<SalesSheetDocument>`（= 写真を data: にインライン）, `SaleLandInput`, `SaleLandOverrides`(price/access/landArea/landCategory/transactionType/deliveryTiming/remarks)。**計画③では「未インライン版（/uploas キー）」を編集に使う**。
+- `src/lib/sales-sheet/css-safety.ts`: `isSafeImageSrc`(**data:image** ＋ root-relative **`/uploads/`** を許可＝計画③実装で拡張[@codex P1反映]。`//host`/scheme/`..`/`%2e`/制御文字は拒否), `isCssColor`, `isSafeFontFamily`, `sanitizeCssValue`。
+- `src/lib/sales-sheet/build-document.ts`: `buildSaleLandDocument(input): SalesSheetDocument`（純・写真 src は /uploads キーの**未インライン**）, `buildInitialSalesSheetDocument(input): Promise<SalesSheetDocument>`（= 写真を data: にインライン）, `SaleLandInput`, `SaleLandOverrides`(price/access/landArea/landCategory/transactionType/deliveryTiming/remarks)。**計画③では「未インライン版（/uploads キー）」を保存・編集に使う**（`isSafeImageSrc` が `/uploads/` を許可するので保存境界の `parseSalesSheetDocument` を通る＝写真あり土地でも保存OK。出力時に Task C が都度認可して data: 化。@codex P1反映）。
 - `src/lib/sales-sheet/inline-images.ts`: `inlineDocumentImages(doc): Promise<SalesSheetDocument>`（非data: img src → `getStorage().keyFromUrl`→read→data:。解決不能はドロップ）。**計画③では認可付きの派生版を作る（下記 Task C）**。
 - `src/lib/sales-sheet/render-to-output.ts`: `renderDocumentToPdf(doc)` / `renderDocumentToImage(doc, {format})` / 内部 `isChromiumAvailable()`。
 - `src/lib/uploads-authorization.ts`: `authorizeUploadAccess({key, session, permissions}): Promise<"ok"|"forbidden"|"not_found">`（backend 対応 key 解決済み）。
@@ -170,13 +170,18 @@ export async function updateDesign(
   db: PrismaLike = prismaDefault,
 ) {
   const current = await getDesign(propertyId, sheetId, db);
-  if (!current) return { ok: false as const, reason: "not_found" as const };
-  if (new Date(current.updatedAt).getTime() !== new Date(patch.expectedUpdatedAt).getTime())
-    return { ok: false as const, reason: "conflict" as const };
+  if (!current) return { ok: false as const, reason: "not_found" as const }; // 404
   const data: Record<string, unknown> = { updatedBy: userId };
   if (patch.title !== undefined) data.title = patch.title.trim() || "無題の販売図面";
-  if (patch.document !== undefined) data.document = parseSalesSheetDocument(patch.document);
-  const updated = await db.salesSheetDesign.update({ where: { id: sheetId }, data });
+  if (patch.document !== undefined) data.document = parseSalesSheetDocument(patch.document); // throw→422（書込前）
+  // 楽観ロックはアトミックに（@codex P2反映）: expectedUpdatedAt を WHERE に入れた updateMany で
+  // read→compare→update の TOCTOU（同時保存の後勝ち=lost update）を防ぐ。
+  const result = await db.salesSheetDesign.updateMany({
+    where: { id: sheetId, propertyId, updatedAt: new Date(patch.expectedUpdatedAt) },
+    data,
+  });
+  if (result.count === 0) return { ok: false as const, reason: "conflict" as const }; // 409
+  const updated = await db.salesSheetDesign.findUnique({ where: { id: sheetId } });
   return { ok: true as const, design: updated };
 }
 export async function deleteDesign(propertyId: string, sheetId: string, db: PrismaLike = prismaDefault) {
@@ -272,7 +277,9 @@ export async function authorizeAndInlineDocumentImages(
   }));
   return { ...doc, elements };
 }
-// dropImage: image 要素を「空のプレースホルダ」化（src を空にして描画スキップ）。レイアウト維持のため要素自体は残す方針を推奨（要素削除だと重ね順がずれる）。
+// dropImage: image 要素の src を **有効な data: 透明1pxプレースホルダ** に差し替える（@codex P2反映）。
+//   空 src は不可＝`isSafeImageSrc`/`parseSalesSheetDocument` を通らず出力が検証で落ちるため。
+//   要素自体は残してレイアウト/重ね順を維持（要素削除だと重ね順がずれる）。
 ```
 （`getStorage().read` の戻り型・mime 取得は計画②の inline-images 実装に合わせる。data: 化 util を共通化してよい。）
 
