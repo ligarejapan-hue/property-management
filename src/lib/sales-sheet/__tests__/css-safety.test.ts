@@ -88,7 +88,8 @@ describe("isSafeFontFamily (許可リスト)", () => {
   );
 });
 
-describe("isSafeImageSrc (Plan1: data:image/ のみ)", () => {
+describe("isSafeImageSrc (Plan3: data:image/ と /uploads/ を許可)", () => {
+  // --- 許可すべき src ---
   it("data:image/png;base64,AAAA を許可する", () => {
     expect(isSafeImageSrc("data:image/png;base64,AAAA")).toBe(true);
   });
@@ -97,11 +98,60 @@ describe("isSafeImageSrc (Plan1: data:image/ のみ)", () => {
     expect(isSafeImageSrc("data:image/jpeg;base64,/9j/")).toBe(true);
   });
 
-  it("/uploads/p/1.jpg を拒否する (Plan2 で対応)", () => {
-    expect(isSafeImageSrc("/uploads/p/1.jpg")).toBe(false);
+  it("/uploads/abc.jpg を許可する（アプリ内蔵ストレージ）", () => {
+    expect(isSafeImageSrc("/uploads/abc.jpg")).toBe(true);
   });
 
-  it("/images/photo.png を拒否する (root-relative は Plan2)", () => {
+  it("/uploads/p/1.jpg を許可する（アプリ内蔵ストレージ・サブディレクトリ）", () => {
+    expect(isSafeImageSrc("/uploads/p/1.jpg")).toBe(true);
+  });
+
+  it("/uploads/sub/dir/photo.png を許可する（ネストパス）", () => {
+    expect(isSafeImageSrc("/uploads/sub/dir/photo.png")).toBe(true);
+  });
+
+  // --- 拒否すべき src（セキュリティ境界の網羅テスト）---
+  it("//evil.com/x.jpg を拒否する（プロトコル相対URL）", () => {
+    expect(isSafeImageSrc("//evil.com/x.jpg")).toBe(false);
+  });
+
+  it("/uploads/../../etc/passwd を拒否する（パストラバーサル）", () => {
+    expect(isSafeImageSrc("/uploads/../../etc/passwd")).toBe(false);
+  });
+
+  it("http://x/y.jpg を拒否する（SSRF: http scheme）", () => {
+    expect(isSafeImageSrc("http://x/y.jpg")).toBe(false);
+  });
+
+  it("https://x/y.jpg を拒否する（SSRF: https scheme）", () => {
+    expect(isSafeImageSrc("https://x/y.jpg")).toBe(false);
+  });
+
+  it("javascript:alert(1) を拒否する（XSS）", () => {
+    expect(isSafeImageSrc("javascript:alert(1)")).toBe(false);
+  });
+
+  it("\\uploads\\x を拒否する（バックスラッシュ区切り）", () => {
+    expect(isSafeImageSrc("\\uploads\\x")).toBe(false);
+  });
+
+  it("/uploadsX/y を拒否する（/uploads/ 接頭辞の部分一致は不可）", () => {
+    expect(isSafeImageSrc("/uploadsX/y")).toBe(false);
+  });
+
+  it("/uploads/<script> を拒否する（< を含む）", () => {
+    expect(isSafeImageSrc("/uploads/<script>")).toBe(false);
+  });
+
+  it("/uploads/foo bar.jpg を拒否する（空白を含む）", () => {
+    expect(isSafeImageSrc("/uploads/foo bar.jpg")).toBe(false);
+  });
+
+  it("data:text/html,<script> を拒否する（data:image/ でない data: URL）", () => {
+    expect(isSafeImageSrc("data:text/html,<script>")).toBe(false);
+  });
+
+  it("/images/photo.png を拒否する（/uploads/ 以外の root-relative）", () => {
     expect(isSafeImageSrc("/images/photo.png")).toBe(false);
   });
 
@@ -109,16 +159,12 @@ describe("isSafeImageSrc (Plan1: data:image/ のみ)", () => {
     expect(isSafeImageSrc("http://internal/x")).toBe(false);
   });
 
-  it("http://169.254.169.254/metadata を拒否する（SSRF）", () => {
+  it("http://169.254.169.254/metadata を拒否する（SSRF: IMDSv1）", () => {
     expect(isSafeImageSrc("http://169.254.169.254/metadata")).toBe(false);
   });
 
-  it("https://evil.example.com/x を拒否する", () => {
+  it("https://evil.example.com/x を拒否する（外部URL）", () => {
     expect(isSafeImageSrc("https://evil.example.com/x")).toBe(false);
-  });
-
-  it("javascript:alert(1) を拒否する（XSS）", () => {
-    expect(isSafeImageSrc("javascript:alert(1)")).toBe(false);
   });
 
   it("//evil.com/x を拒否する（プロトコル相対）", () => {

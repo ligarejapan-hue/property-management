@@ -8,9 +8,43 @@ export function sanitizeCssValue(value: string): string {
     .replace(/@import/gi, "");
 }
 
-/** 画像srcとして安全か（Plan1）: data:image URL のみ許可。/uploads/ 等の root-relative は Plan2 で対応。 */
+/**
+ * 画像srcとして安全か（Plan3確定版）: 以下の2種のみ許可。
+ *
+ * 1. data:image/ — base64埋め込み画像。
+ * 2. /uploads/ ルート相対パス — アプリ内蔵ストレージへの参照。
+ *    安全な理由:
+ *      - アプリ専用パス。外部ホストへのSSRF/exfilは起こらない。
+ *      - `/uploads/[...path]` route がサーブ時にアクセス権を確認する（認可バイパスは是正済）。
+ *      - エクスポート経路(Task C)でサーバーが再認可＋data:展開してからChromiumに渡す。
+ *      - 非data: srcをChromiumがネットワークレベルでブロックする追加防御もある。
+ *
+ * 拒否する代表ケース:
+ *   // (プロトコル相対) / http: https: javascript: など任意scheme /
+ *   バックスラッシュ / .. (パストラバーサル) / 空白・制御文字 / < > 引用符 /
+ *   /uploads で終わるだけで / がない接頭辞一致 / data:image/ 以外の data:
+ */
+
+/**
+ * /uploads/ ルート相対パスの検証正規表現。
+ *   ^ \/uploads\/  — 先頭が必ず "/uploads/"（単一スラッシュ＋"uploads/"）
+ *   [^\x00-\x20\x7f\\<>"']+  — 残りは制御文字・空白(U+0000–U+0020)・DEL・
+ *                               バックスラッシュ・山括弧・引用符を含まない1文字以上
+ *   $
+ * ".." チェックは別途 !src.includes("..") で行う（正規表現で書くより明確）。
+ */
+const UPLOADS_SRC_RE = /^\/uploads\/[^\x00-\x20\x7f\\<>"']+$/;
+
 export function isSafeImageSrc(src: string): boolean {
-  return src.startsWith("data:image/");
+  // 1. data:image/ （既存の許可: base64埋め込み画像）
+  if (src.startsWith("data:image/")) return true;
+
+  // 2. /uploads/ ルート相対パス
+  //    UPLOADS_SRC_RE が先頭の "//" (プロトコル相対) を拒否する点に注意:
+  //    "^\/uploads\/" は単一の "/" から始まるため "//..." にはマッチしない。
+  if (UPLOADS_SRC_RE.test(src) && !src.includes("..")) return true;
+
+  return false;
 }
 
 const HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/;

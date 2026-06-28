@@ -86,17 +86,21 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-vi.mock("@/lib/sales-sheet/design-service", () => ({
-  createDesign: vi.fn(async () => ({ id: "sheet-1" })),
-}));
+// createDesign: DB書き込みはモック。ただし parseSalesSheetDocument を通じた
+// document 検証は実行する（旧 data:only バリデータでは /uploads/ src が 422 を返す
+// ことをこのテストで検出できるようにするため）。
+vi.mock("@/lib/sales-sheet/design-service", async () => {
+  const { parseSalesSheetDocument } = await import("@/lib/sales-sheet/document-schema");
+  return {
+    createDesign: vi.fn(async (input: { document: unknown }) => {
+      parseSalesSheetDocument(input.document); // invalid document は throw → handleApiError が 422 を返す
+      return { id: "sheet-1" };
+    }),
+  };
+});
 
-vi.mock("@/lib/sales-sheet/build-document", () => ({
-  buildSaleLandDocument: vi.fn(() => ({
-    page: { width: 297, height: 210 },
-    theme: {},
-    elements: [],
-  })),
-}));
+// buildSaleLandDocument はモックしない — 実関数でドキュメントを組むことで
+// /uploads/ src が document に含まれるパスを実際にバリデーション経路に通す。
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
@@ -124,7 +128,8 @@ beforeEach(() => {
   pm.property.findUnique.mockResolvedValue(LAND_PROPERTY);
   pm.propertyOwner.findFirst.mockResolvedValue(null);
   pm.propertyPhoto.findFirst.mockResolvedValue(null);
-  (createDesign as Mock).mockResolvedValue({ id: "sheet-1" });
+  // createDesign: vi.clearAllMocks() でコール履歴はリセットされるが
+  // vi.mock ファクトリで設定した実装（parseSalesSheetDocument 検証）は保持される。
 });
 
 describe("POST /api/properties/[id]/sales-sheets/new", () => {

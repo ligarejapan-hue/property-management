@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS "sales_sheet_designs" (
+CREATE TABLE "sales_sheet_designs" (
   "id" TEXT NOT NULL,
   "property_id" UUID NOT NULL,
   "title" TEXT NOT NULL DEFAULT '無題の販売図面',
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS "sales_sheet_designs" (
   "updated_at" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "sales_sheet_designs_pkey" PRIMARY KEY ("id")
 );
-CREATE INDEX IF NOT EXISTS "sales_sheet_designs_property_id_idx" ON "sales_sheet_designs"("property_id");
+CREATE INDEX "sales_sheet_designs_property_id_idx" ON "sales_sheet_designs"("property_id");
 ALTER TABLE "sales_sheet_designs" ADD CONSTRAINT "sales_sheet_designs_property_id_fkey"
   FOREIGN KEY ("property_id") REFERENCES "properties"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "sales_sheet_designs" ADD CONSTRAINT "sales_sheet_designs_created_by_fkey"
