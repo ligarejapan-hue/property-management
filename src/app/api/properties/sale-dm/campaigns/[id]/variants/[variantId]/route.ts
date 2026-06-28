@@ -112,13 +112,16 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       throw new ApiError(404, "指定された型が見つかりません", "VARIANT_NOT_FOUND");
     }
 
-    // A/B 純度: 割当済みの下書きがある型は削除できない(別型へ移してから)。
-    const inUse = await prisma.dmRecipientDraft.count({ where: { campaignId: id, variantId } });
-    if (inUse > 0) {
+    // A/B 純度: 割当済みの下書きがある型は削除できない(別型へ移してから)。count→delete の TOCTOU
+    // (チェックと削除の間に assign が下書きをこの型へ割り当てると、削除済み variant を参照する孤児 draft が
+    // 残り A/B 集計から恒久的に消える)を避けるため、関係フィルタ `recipients: { none: {} }` で「下書きを
+    // 1件も持たない場合のみ削除」をアトミックに実行する。0 行 = 割当済み(または並行割当の発生)→ 409。
+    const deleted = await prisma.dmVariant.deleteMany({
+      where: { id: variantId, campaignId: id, recipients: { none: {} } },
+    });
+    if (deleted.count === 0) {
       throw new ApiError(409, "この型は宛先に割り当てられているため削除できません", "VARIANT_IN_USE");
     }
-
-    await prisma.dmVariant.delete({ where: { id: variantId, campaignId: id } });
 
     await writeAuditLog({
       userId: session.id,

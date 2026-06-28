@@ -665,4 +665,28 @@ describe("sanitizeAuditDetail: 売却促進DM の識別子は管理画面で追�
     expect(out.ownerName).toBe(REDACTED);
     expect(out.address).toBe(REDACTED);
   });
+
+  it("sale_dm_* の操作メタ(件数/enum/boolean/ISO日時)は action 固有 allowlist で残す", () => {
+    const create = sanitizeAuditDetail("sale_dm_campaign_create", {
+      campaignId: "c", requested: 10, generated: 9, failed: 1, truncated: false, createdAt: "2026-06-28T00:00:00Z",
+    }) as Record<string, unknown>;
+    expect(create.requested).toBe(10);
+    expect(create.generated).toBe(9);
+    expect(create.truncated).toBe(false);
+    expect(create.createdAt).toBe("2026-06-28T00:00:00Z");
+
+    const outcome = sanitizeAuditDetail("sale_dm_draft_outcome_update", {
+      propertyId: "p", deliveryStatus: "delivered", outcome: "inquiry",
+      undeliverableLinked: false, undeliverableCleared: true, updatedAt: "2026-06-28T00:00:00Z",
+    }) as Record<string, unknown>;
+    expect(outcome.deliveryStatus).toBe("delivered");
+    expect(outcome.outcome).toBe("inquiry");
+    expect(outcome.undeliverableCleared).toBe(true);
+  });
+
+  it("action 固有 allowlist はスコープされる: 未登録 action では sale_dm の操作メタは残らない", () => {
+    const out = sanitizeAuditDetail("unknown_action", { generated: 9, regeneratedAt: "x" }) as Record<string, unknown>;
+    expect(out.generated).toBe(REDACTED);
+    expect(out.regeneratedAt).toBe(REDACTED);
+  });
 });

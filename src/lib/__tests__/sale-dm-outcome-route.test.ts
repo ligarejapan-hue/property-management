@@ -296,6 +296,18 @@ describe("PATCH outcome", () => {
     expect(pm.property.update).toHaveBeenCalled();
   });
 
+  it("field_staff の担当外宛先は status(409)より先に 403(未送付の送付状態を漏らさない・順序統一)", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" }, permissions: [{ resource: "property", action: "write", granted: true }] });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneInquiryAt: null,
+      status: "draft", // 未送付=従来は status チェックが先で 409 を返し、担当外でも送付状態を漏らしていた
+      campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "other" },
+    });
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(403); // 409 ではない(認可を状態より先に判定)
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+  });
+
   it("field_staff は担当外物件の宛先には配達結果も記録できない(403・record scope を全 outcome 更新に適用)", async () => {
     (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1", role: "field_staff" }, permissions: [{ resource: "property", action: "write", granted: true }] });
     pm.dmRecipientDraft.findUnique.mockResolvedValue({

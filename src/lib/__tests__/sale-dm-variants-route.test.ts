@@ -24,7 +24,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findUnique: vi.fn(), findFirst: vi.fn() },
-    dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), findFirst: vi.fn() },
+    dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn(), findFirst: vi.fn() },
     dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn() },
   };
   // $transaction はコールバックに同じ db を tx として渡す(tx.* === pm.* なので既存アサーションがそのまま効く)。
@@ -41,7 +41,7 @@ import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 
 const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
-  dmVariant: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
+  dmVariant: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { count: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
@@ -213,30 +213,29 @@ describe("PATCH variant (更新)", () => {
 });
 
 describe("DELETE variant (削除ガード)", () => {
-  it("割当済みドラフトが無ければ削除し 200", async () => {
-    pm.dmRecipientDraft.count.mockResolvedValue(0);
-    pm.dmVariant.delete.mockResolvedValue({ id: "v1" });
+  it("割当済みドラフトが無ければ削除し 200(下書きを持たない場合のみのアトミック条件付き削除)", async () => {
+    pm.dmVariant.deleteMany.mockResolvedValue({ count: 1 });
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(200);
-    expect(pm.dmVariant.delete).toHaveBeenCalledWith({ where: { id: "v1", campaignId: "c1" } });
+    // count→delete の TOCTOU を避けるため recipients:{none:{}} 条件のアトミック deleteMany を使う。
+    expect(pm.dmVariant.deleteMany).toHaveBeenCalledWith({ where: { id: "v1", campaignId: "c1", recipients: { none: {} } } });
   });
-  it("割当済みドラフトがあれば 409・削除しない", async () => {
-    pm.dmRecipientDraft.count.mockResolvedValue(3);
+  it("割当済みドラフトがあれば 409・削除しない(count=0)", async () => {
+    pm.dmVariant.deleteMany.mockResolvedValue({ count: 0 }); // 下書きが存在=条件不一致で 0 行
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(409);
-    expect(pm.dmVariant.delete).not.toHaveBeenCalled();
   });
   it("権限不足で 403", async () => {
     grant("property");
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(403);
-    expect(pm.dmVariant.delete).not.toHaveBeenCalled();
+    expect(pm.dmVariant.deleteMany).not.toHaveBeenCalled();
   });
   it("存在しない型IDの削除は 404(P2025→500 でなく)・削除しない", async () => {
     pm.dmVariant.findFirst.mockResolvedValue(null);
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(404);
-    expect(pm.dmVariant.delete).not.toHaveBeenCalled();
+    expect(pm.dmVariant.deleteMany).not.toHaveBeenCalled();
   });
 });
 
@@ -248,6 +247,10 @@ describe("自由記述フィールドの最大長(有料AI fan-out 前のガー�
     expect(reject({ senderName: "あ".repeat(101) })).toBe(false);
     expect(reject({ senderContact: "あ".repeat(201) })).toBe(false);
     expect(reject({ extraInstruction: "あ".repeat(1001) })).toBe(false);
+  });
+  it("キャンペーン名は >100 で弾く・<=100 は通る", () => {
+    expect(saleDmCampaignBodySchema.safeParse({ ...base, name: "あ".repeat(101) }).success).toBe(false);
+    expect(saleDmCampaignBodySchema.safeParse({ ...base, name: "あ".repeat(100) }).success).toBe(true);
   });
   it("上限内は通る", () => {
     expect(reject({ senderName: "差出人", senderContact: "連絡先", extraInstruction: "あ".repeat(1000) })).toBe(true);

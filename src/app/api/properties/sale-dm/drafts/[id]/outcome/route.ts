@@ -53,6 +53,16 @@ export async function PATCH(
     if (!draft || draft.campaign.createdBy !== session.id) {
       throw new ApiError(404, "下書きが見つかりません", "NOT_FOUND");
     }
+    // field_staff は作成 or 担当の物件の宛先のみ操作可(物件APIと同じ record scope)。状態(409)より先に
+    // 認可(403)を判定し、担当外(再割当で隠れた)下書きの送付状態を 409 vs 403 で漏らさない
+    // (他の draft route=PATCH/regenerate/mark-sent と順序を統一)。
+    if (
+      session.role === "field_staff" &&
+      draft.property.createdBy !== session.id &&
+      draft.property.assignedTo !== session.id
+    ) {
+      throw new ApiError(403, "この宛先を操作する権限がありません", "FORBIDDEN");
+    }
     // 配達結果/反響は送付済み(sent)の宛先にのみ記録できる(未送付物件を no_send に汚染しない)。
     if (draft.status !== "sent") {
       throw new ApiError(409, "送付済みの宛先のみ結果を記録できます", "INVALID_STATE");
@@ -85,17 +95,6 @@ export async function PATCH(
       input.deliveryStatus !== undefined &&
       input.deliveryStatus !== "returned_undeliverable" &&
       draft.deliveryStatus === "returned_undeliverable";
-
-    // field_staff は作成 or 担当の物件の宛先のみ結果を記録できる(物件APIと同じ record scope)。
-    // 配達結果/反響/メモのいずれの outcome 更新も対象。campaign 作成後に物件が別担当へ再割当されると
-    // GET/print/export では隠れるため、隠れた宛先の結果も書き換えさせない(物件mutationの有無に依らず常時適用)。
-    if (
-      session.role === "field_staff" &&
-      draft.property.createdBy !== session.id &&
-      draft.property.assignedTo !== session.id
-    ) {
-      throw new ApiError(403, "この宛先を操作する権限がありません", "FORBIDDEN");
-    }
 
     // outcome 更新は配達/反響/メモいずれも下書きの delivery/response 記録を書き換え、A/B 集計に反映される。
     // 権限失効後に送付済みの結果を改竄(集計汚染)させないため、全 outcome 更新に property:write を要求する
