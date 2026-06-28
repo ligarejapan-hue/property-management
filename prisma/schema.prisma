@@ -189,6 +189,8 @@ model User {
   fieldSurveySessions     FieldSurveySession[]
   fieldSurveyPins         FieldSurveyPin[]
   fieldSurveyPinPhotos    FieldSurveyPinPhoto[]
+  salesSheetDesignsCreated SalesSheetDesign[]     @relation("SalesSheetDesignCreatedBy")
+  salesSheetDesignsUpdated SalesSheetDesign[]     @relation("SalesSheetDesignUpdatedBy")
 
   @@map("users")
 }
@@ -942,16 +944,19 @@ model FieldSurveyPinPhoto {
 
 model SalesSheetDesign {
   id           String   @id @default(cuid())
-  propertyId   String   @db.Uuid
-  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId   String   @map("property_id") @db.Uuid
   title        String   @default("無題の販売図面")
   document     Json
-  templateId   String?
-  thumbnailUrl String?
-  createdBy    String
-  updatedBy    String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  templateId   String?  @map("template_id")
+  thumbnailUrl String?  @map("thumbnail_url")
+  createdBy    String   @map("created_by") @db.Uuid
+  updatedBy    String   @map("updated_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  creator  User     @relation("SalesSheetDesignCreatedBy", fields: [createdBy], references: [id])
+  updater  User     @relation("SalesSheetDesignUpdatedBy", fields: [updatedBy], references: [id])
 
   @@index([propertyId])
   @@map("sales_sheet_designs")
