@@ -52,12 +52,19 @@ export async function POST(
     // 状態遷移を condition 付き updateMany(where status=confirmed)でアトミックに行い、
     // 勝った(count===1)リクエストだけが PropertyDmLog を作る。並行 POST が両方とも
     // pre-check(confirmed 読取)を通過しても、二重送付・送付履歴の二重作成を防ぐ。
-    const won = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const transitioned = await tx.dmRecipientDraft.updateMany({
         where: { id, status: "confirmed" },
         data: { status: "sent", sentAt: now },
       });
-      if (transitioned.count === 0) return false;
+      if (transitioned.count === 0) {
+        // confirmed→sent を取れなかった理由は2通り: (a) 他リクエストが先に sent 化済み(=本当に既送)、
+        // (b) 並行編集(本文編集/再生成/再割当/型変更)で confirmed→draft へ戻った(=未送付)。
+        // count=0 を一律「既送」とすると、未送付なのに sent と誤応答してしまう(PropertyDmLog も無い)。
+        // 現在の status を読み直して厳密に判別する。
+        const current = await tx.dmRecipientDraft.findUnique({ where: { id }, select: { status: true } });
+        return current?.status === "sent" ? "already_sent" : "not_sent";
+      }
       // PropertyDmLog.sentAt は @db.Date(日付のみ)。method で売却DM由来と分かるようにする。
       await tx.propertyDmLog.create({
         data: {
@@ -67,12 +74,15 @@ export async function POST(
           sentBy: session.id,
         },
       });
-      return true;
+      return "won" as const;
     });
 
-    // 並行リクエストに遷移を奪われた(既に他リクエストが confirmed→sent を確定し
-    // ログも作成済み)場合は、再ログ/再監査せず冪等応答を返す。
-    if (!won) {
+    // 並行編集で確定が解除された(未送付)場合は「送付済み」と誤って返さない。再ログ/再監査もしない。
+    if (result === "not_sent") {
+      throw new ApiError(409, "この宛先は送付できる状態ではありません(編集等で確定が解除された可能性があります)", "NOT_CONFIRMED");
+    }
+    // 他リクエストが既に confirmed→sent を確定しログ作成済み。再ログ/再監査せず冪等応答を返す。
+    if (result === "already_sent") {
       return NextResponse.json(
         { id, status: "sent", alreadySent: true },
         { headers: { "Cache-Control": "no-store" } },

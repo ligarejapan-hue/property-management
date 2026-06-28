@@ -47,7 +47,7 @@ vi.mock("@/lib/prisma", () => {
       propertyDmLog: { create: dmLogCreate },
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
         fn({
-          dmRecipientDraft: { update: draftUpdate, updateMany: draftUpdateMany },
+          dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, updateMany: draftUpdateMany },
           propertyDmLog: { create: dmLogCreate },
         }),
       ),
@@ -93,12 +93,28 @@ describe("POST mark-sent", () => {
     expect(writeAuditLog).toHaveBeenCalled();
   });
 
-  it("並行POSTで遷移に敗北(updateMany count=0)なら再ログ/再監査しない・200 alreadySent(冪等)", async () => {
+  it("並行POSTで他リクエストが先に送付(count=0 かつ tx 内 re-read が sent)なら 200 alreadySent(冪等)", async () => {
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
+    // 開始 read=confirmed(遷移を試みる)→ tx 内 re-read=sent(他リクエストが先に確定済み)。
+    pm.dmRecipientDraft.findUnique
+      .mockResolvedValueOnce({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" }, property: { createdBy: "u1", assignedTo: "u1" } })
+      .mockResolvedValueOnce({ status: "sent" });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.alreadySent).toBe(true);
+    expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("並行編集で確定解除(count=0 かつ tx 内 re-read が draft)なら 409・送付済みと誤応答しない", async () => {
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
+    // 開始 read=confirmed → tx 内 re-read=draft(本文編集/再生成等で確定が解除された=未送付)。
+    pm.dmRecipientDraft.findUnique
+      .mockResolvedValueOnce({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" }, property: { createdBy: "u1", assignedTo: "u1" } })
+      .mockResolvedValueOnce({ status: "draft" });
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(409); // sent ではない=冪等成功にしない
     expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
