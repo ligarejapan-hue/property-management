@@ -43,7 +43,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           campaignId: id,
           variantId,
           status: { not: "sent" },
-          property: { createdBy: { not: session.id }, assignedTo: { not: session.id } },
+          // 「担当外」= 可視条件(createdBy==me OR assignedTo==me)の否定。assignedTo が NULL の未割当物件も
+          // 担当外として数える必要があるため、`{not}` の AND ではなく NOT(OR) を使う(SQL では `assignedTo != me`
+          // が NULL にマッチせず取りこぼす)。filterDraftsByFieldStaffScope の可視判定と厳密に一致させる。
+          property: { NOT: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } },
         },
       });
       if (outOfScope > 0) {

@@ -152,7 +152,8 @@ describe("PATCH variant (更新)", () => {
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
     const where = pm.dmRecipientDraft.count.mock.calls[0][0].where;
     expect(where).toMatchObject({ campaignId: "c1", variantId: "v1", status: { not: "sent" } });
-    expect(where.property).toEqual({ createdBy: { not: "u1" }, assignedTo: { not: "u1" } });
+    // 担当外 = 可視条件の否定。未割当(assignedTo=NULL)も取りこぼさないため NOT(OR) を使う。
+    expect(where.property).toEqual({ NOT: { OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] } });
   });
 
   it("field_staff でも担当内のみの型なら options 変更できる(200)", async () => {
