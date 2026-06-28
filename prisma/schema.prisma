@@ -362,6 +362,7 @@ model Property {
   attachments        Attachment[]
   ownerMemos         OwnerMemo[]               @relation("OwnerMemoProperty")
   fieldSurveyPins    FieldSurveyPin[]
+  salesSheetDesigns  SalesSheetDesign[]
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -933,4 +934,25 @@ model FieldSurveyPinPhoto {
 
   @@index([pinId])
   @@map("field_survey_pin_photos")
+}
+
+// ============================================================
+// 販売図面エディタ (Plan 3)
+// ============================================================
+
+model SalesSheetDesign {
+  id           String   @id @default(cuid())
+  propertyId   String   @db.Uuid
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  title        String   @default("無題の販売図面")
+  document     Json
+  templateId   String?
+  thumbnailUrl String?
+  createdBy    String
+  updatedBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([propertyId])
+  @@map("sales_sheet_designs")
 }
