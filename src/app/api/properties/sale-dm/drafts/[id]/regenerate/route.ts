@@ -47,13 +47,28 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }]);
     const body = drafts[0]?.body;
     if (!body) throw new ApiError(502, "再生成に失敗しました", "GENERATION_FAILED");
-    // 生成は外部呼び出しで時間がかかるため、pre-check 後に並行で sent 確定し得る。
-    // 条件付き updateMany で送付済みの本文を上書きしない(送信済み内容/集計の不変性)。0 行なら 409。
-    // 本文が変わるため確定も解除(draft へ・confirmedAt 消去)。再生成後の新文面を再確認なしで
-    // 印刷/送付させない("OK→確定→印刷/送付"の承認ゲートを維持・確定済み再生成の素通り防止)。
-    const updated = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: { body, status: "draft", confirmedAt: null } });
+    // 生成は外部呼び出しで時間がかかり、その間に並行で (a) sent 確定 / (b) 割当 variant の設定変更 が起こり得る。
+    // 条件付き updateMany でアトミックに弾く: status!=sent に加え、draft の variant が「生成時と同一 options」で
+    // あることを relational filter で要求する。生成中に型が変わっていれば 0 行となり、旧設定の本文で書き戻して
+    // variant 更新 route の無効化(A/B 整合)を打ち消すことを防ぐ。本文が変わるため確定も解除(draft へ・
+    // confirmedAt 消去)し、再生成後の新文面を再確認なしで印刷/送付させない(承認ゲート維持)。
+    const updated = await prisma.dmRecipientDraft.updateMany({
+      where: {
+        id,
+        status: { not: "sent" },
+        variant: {
+          designTemplate: v.designTemplate,
+          tone: v.tone,
+          length: v.length,
+          appeal: v.appeal,
+          strength: v.strength,
+          extraInstruction: v.extraInstruction,
+        },
+      },
+      data: { body, status: "draft", confirmedAt: null },
+    });
     if (updated.count === 0) {
-      throw new ApiError(409, "送付済みの宛先は再生成できません", "ALREADY_SENT");
+      throw new ApiError(409, "送付済み、または生成中に型の設定が変更されました。最新の設定で再生成してください", "STALE_REGENERATION");
     }
     // 再生成も有料AI呼び出し+オーナーPII の外部送信を伴うため、campaign 作成/下書き編集と同様に
     // 非PII の監査を残す(初回作成以降の課金/PII外部送信を管理画面で追跡可能に)。本文・宛名は残さない。

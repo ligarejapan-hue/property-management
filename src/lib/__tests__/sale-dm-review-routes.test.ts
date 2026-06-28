@@ -215,7 +215,27 @@ describe("POST regenerate draft (再生成)", () => {
     const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(200);
     // 本文が変わるため確定を解除=再生成後の新文面を再確認なしで印刷/送付させない(承認ゲート維持)。
-    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "r1", status: { not: "sent" } }, data: { body: "再生成本文", status: "draft", confirmedAt: null } }));
+    // where は status!=sent に加え、生成時の variant options を relational filter で要求する(生成中の型変更で
+    // 旧設定本文を書き戻さない=variant 無効化を打ち消さない)。
+    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "r1",
+        status: { not: "sent" },
+        variant: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
+      },
+      data: { body: "再生成本文", status: "draft", confirmedAt: null },
+    }));
+  });
+
+  it("生成中に割当 variant が変更された場合は 409・旧設定本文を書き戻さない(updateMany count=0)", async () => {
+    grant(...ALL);
+    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
+    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
+    (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 }); // variant options 不一致 or sent 化で 0 行
+    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    expect(res.status).toBe(409);
   });
 
   it("生成中に並行で sent 確定(updateMany count=0)なら 409・本文を上書きしない", async () => {
