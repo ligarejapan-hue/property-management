@@ -9,8 +9,12 @@ import {
   resizeElement,
   bringToFront,
   sendToBack,
+  editText,
+  deleteElement,
 } from "@/lib/sales-sheet/editor-document";
 import { EditorCanvas } from "./EditorCanvas";
+import { ElementPanel } from "./ElementPanel";
+import type { ElementPanelChange } from "./ElementPanel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,16 +53,17 @@ const MM_TO_PX = 96 / 25.4;
 // ---------------------------------------------------------------------------
 
 /**
- * SalesSheetEditor — "use client" shell (plan-3 Task E + Task F)
+ * SalesSheetEditor — "use client" shell (plan-3 Task E + Task F + Task G)
  *
  * Holds EditorState (document + selectedId + dirty) via useState.
  * Renders the EditorCanvas in a scrollable, scale-transformed stage.
  *
- * Task F additions:
- * - Wires drag/resize callbacks → pure Task D reducers (moveElement /
- *   resizeElement / bringToFront / sendToBack).
- * - Renders z-order buttons (前面 / 背面) in the properties panel when an
- *   element is selected.
+ * Task F: wires drag/resize callbacks → moveElement / resizeElement /
+ *   bringToFront / sendToBack reducers.
+ *
+ * Task G: mounts ElementPanel in the right panel — geometry (x/y/w/h in mm),
+ *   z-order, delete, and text editing (content / font / size / color).
+ *   All panel changes flow through handleElementPanelChange → Task-D reducers.
  */
 export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   const [editorState, setEditorState] = useState<EditorState>({
@@ -83,14 +88,26 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) => resizeElement(prev, id, size));
   }
 
-  /** Raises the selected element above all others. */
-  function handleBringToFront(): void {
-    setEditorState((prev) => (prev.selectedId ? bringToFront(prev, prev.selectedId) : prev));
-  }
-
-  /** Lowers the selected element below all others. */
-  function handleSendToBack(): void {
-    setEditorState((prev) => (prev.selectedId ? sendToBack(prev, prev.selectedId) : prev));
+  /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */
+  function handleElementPanelChange(change: ElementPanelChange): void {
+    setEditorState((prev) => {
+      const id = prev.selectedId;
+      if (!id) return prev;
+      switch (change.type) {
+        case "move":
+          return moveElement(prev, id, { x: change.x, y: change.y });
+        case "resize":
+          return resizeElement(prev, id, { w: change.w, h: change.h });
+        case "bringToFront":
+          return bringToFront(prev, id);
+        case "sendToBack":
+          return sendToBack(prev, id);
+        case "delete":
+          return deleteElement(prev, id);
+        case "editText":
+          return editText(prev, id, change.patch);
+      }
+    });
   }
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -100,7 +117,11 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   const scaledW = page.width * MM_TO_PX * DEFAULT_ZOOM;
   const scaledH = page.height * MM_TO_PX * DEFAULT_ZOOM;
 
-  const hasSelection = editorState.selectedId !== null;
+  /** Selected element object (null when nothing is selected). */
+  const selectedElement =
+    editorState.selectedId != null
+      ? (editorState.document.elements.find((e) => e.id === editorState.selectedId) ?? null)
+      : null;
 
   return (
     <div className="flex flex-col h-full bg-neutral-200 dark:bg-zinc-900">
@@ -151,37 +172,16 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           </div>
         </div>
 
-        {/* Properties panel — Task F z-order controls */}
+        {/* Properties panel — Task G: ElementPanel (geometry + text editor) */}
         <div
           data-properties-panel
-          className="w-64 shrink-0 border-l border-neutral-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 flex flex-col"
+          className="w-64 shrink-0 border-l border-neutral-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 overflow-y-auto"
           aria-label="properties panel"
         >
-          {hasSelection && (
-            <div className="p-3 border-b border-neutral-200 dark:border-zinc-700">
-              <p className="text-xs font-medium text-neutral-500 dark:text-zinc-400 mb-2">
-                重ね順
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleBringToFront}
-                  className="flex-1 rounded border border-neutral-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-2 py-1 text-xs text-neutral-700 dark:text-zinc-200 hover:bg-neutral-50 dark:hover:bg-zinc-600 transition-colors"
-                  aria-label="前面に移動"
-                >
-                  前面
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSendToBack}
-                  className="flex-1 rounded border border-neutral-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-2 py-1 text-xs text-neutral-700 dark:text-zinc-200 hover:bg-neutral-50 dark:hover:bg-zinc-600 transition-colors"
-                  aria-label="背面に移動"
-                >
-                  背面
-                </button>
-              </div>
-            </div>
-          )}
+          <ElementPanel
+            element={selectedElement}
+            onChange={handleElementPanelChange}
+          />
         </div>
       </div>
     </div>
