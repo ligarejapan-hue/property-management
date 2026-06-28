@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "rea
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
-import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign } from "@/lib/api-client";
+import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable } from "@/lib/api-client";
 import { canCreateSaleDm } from "@/lib/sale-dm-letter/list-ui";
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
@@ -211,7 +211,7 @@ function PropertiesPageInner() {
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
   // DM差込CSV の出力可否。dm-export API は csv_export:read / csv_export_personal:read に
   // 加えて owner:read（所有者個人情報を含むため）を必須にする。UI も同条件で判定する。
-  const { canExportCsv, canExportDm, canCreateDm } = useMemo(() => {
+  const { canExportCsv, canExportDm, canCreateDm, canWriteProperty } = useMemo(() => {
     // F12-2 Codex 対応(3): 進入時 refresh 中（pending）・provider 取得中（loading）は
     // stale な granted permissions を使わず空配列に倒す＝ボタン非表示（fail-safe 側）。
     // refresh 完了後の最新 permissions からのみ true になり得る。
@@ -223,12 +223,18 @@ function PropertiesPageInner() {
       effectivePermissions.some(
         (p) => p.resource === resource && p.action === "read" && p.granted,
       );
+    const hasWrite = (resource: string) =>
+      effectivePermissions.some(
+        (p) => p.resource === resource && p.action === "write" && p.granted,
+      );
     const canCsv = has("csv_export") && has("csv_export_personal");
     return {
       canExportCsv: canCsv,
       canExportDm: canCsv && has("owner"),
       // 売却DM作成の表示可否(csv_export + csv_export_personal + owner=canExportDm と同条件)。
       canCreateDm: canCreateSaleDm(effectivePermissions),
+      // 宛先不明の手動解除は物件を書き換えるため property:write 必須(server も 403 で要求)。
+      canWriteProperty: hasWrite("property"),
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions]);
 
@@ -315,6 +321,27 @@ function PropertiesPageInner() {
       setError(err instanceof Error ? err.message : "売却DMの作成に失敗しました");
     } finally {
       setCreatingDm(false);
+    }
+  };
+
+  // 宛先不明(dmUndeliverableAt)の手動解除。任意で DM 状態を「送付可」に戻す(差し戻し)。物件を書き換えるため
+  // property:write 必須(server も 403 で要求)。実行後に一覧を再取得して反映する。
+  const [clearingUndelivId, setClearingUndelivId] = useState<string | null>(null);
+  const handleClearUndeliverable = async (propertyId: string) => {
+    if (clearingUndelivId) return;
+    const restore = window.confirm(
+      "この物件の「宛先不明」を解除します。\nOK = 解除して「送付可」に戻す / キャンセルを押すと解除しません。",
+    );
+    if (!restore) return;
+    setClearingUndelivId(propertyId);
+    setError(null);
+    try {
+      await clearSaleDmUndeliverable(propertyId, { restoreDmStatus: "send" });
+      await fetchProperties();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "宛先不明の解除に失敗しました");
+    } finally {
+      setClearingUndelivId(null);
     }
   };
 
@@ -1314,10 +1341,23 @@ function PropertiesPageInner() {
                       {DM_STATUS_LABELS[property.dmStatus] ??
                         property.dmStatus}
                     </StatusBadge>
-                    {/* 返送(宛先不明)連動で立った dmUndeliverableAt の可視化 */}
+                    {/* 返送(宛先不明)連動で立った dmUndeliverableAt の可視化 + 手動解除(write 権限時) */}
                     {property.dmUndeliverableAt && (
-                      <span className="ml-1 inline-block rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300">
-                        宛先不明
+                      <span className="ml-1 inline-flex items-center gap-1">
+                        <span className="inline-block rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                          宛先不明
+                        </span>
+                        {canWriteProperty && (
+                          <button
+                            type="button"
+                            onClick={() => handleClearUndeliverable(property.id)}
+                            disabled={clearingUndelivId === property.id}
+                            aria-label="宛先不明を解除"
+                            className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                          >
+                            解除
+                          </button>
+                        )}
                       </span>
                     )}
                   </td>

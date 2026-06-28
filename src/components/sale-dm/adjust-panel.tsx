@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { Loader2, RotateCcw } from "lucide-react";
 import type { SaleDmCampaign, SaleDmDraft } from "@/lib/api-client";
 import { patchSaleDmDraft, regenerateSaleDmDraft } from "@/lib/api-client";
@@ -44,6 +44,21 @@ export default function SaleDmAdjustPanel({
     setBusy(true);
     try {
       await patchSaleDmDraft(selected.id, buildDraftPatch({ body: bodyDraft }));
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // この宛先の型(variant)を手動で付け替える。型が変わると本文はクリアされ作り直しが必要(サーバー側 R14-2)。
+  const changeVariant = async (e: ChangeEvent<HTMLSelectElement>) => {
+    if (!selected) return;
+    const variantId = e.target.value;
+    if (variantId === selected.variantId) return;
+    if (!window.confirm("この宛先の型を変えると、手紙の本文はクリアされ作り直し(再生成)が必要になります。続けますか？")) return;
+    setBusy(true);
+    try {
+      await patchSaleDmDraft(selected.id, buildDraftPatch({ variantId }));
       onChanged();
     } finally {
       setBusy(false);
@@ -96,6 +111,23 @@ export default function SaleDmAdjustPanel({
 
       {target.scope === "draft" && selected ? (
         <div className="space-y-2">
+          {campaign.variants.length > 1 && (
+            <label className="flex items-center gap-2 text-xs text-gray-500">
+              この宛先の型
+              <select
+                value={selected.variantId}
+                onChange={changeVariant}
+                disabled={busy}
+                className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700 disabled:opacity-50"
+              >
+                {campaign.variants.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <textarea
             value={bodyDraft}
             onChange={(e) => setBodyDraft(e.target.value)}

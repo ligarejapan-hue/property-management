@@ -255,6 +255,83 @@ export async function regenerateSaleDmDraft(id: string) {
   });
 }
 
+// ---------- A/B 型(variant)管理 + 割当 + 宛先不明の手動解除 ----------
+
+export interface SaleDmVariantOptions {
+  designTemplate: string;
+  tone: string;
+  length: string;
+  appeal: string;
+  strength: string;
+  extraInstruction?: string;
+}
+
+// A/B 型(B案/C案 等)を作成。label + options 一式。
+export async function createSaleDmVariant(campaignId: string, body: { label: string; options: SaleDmVariantOptions }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { variant: { id: `mock-${body.label}`, label: body.label, ...body.options, extraInstruction: body.options.extraInstruction ?? null } as SaleDmVariant };
+  }
+  return apiFetch<{ variant: SaleDmVariant }>(`/api/properties/sale-dm/campaigns/${campaignId}/variants`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// A/B 型のラベル/設定を部分更新。options を実際に変えると、この型を使う未送付下書きは無効化(要再生成)。
+export async function updateSaleDmVariant(campaignId: string, variantId: string, body: { label?: string; options?: Partial<SaleDmVariantOptions> }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { variant: { id: variantId } as SaleDmVariant };
+  }
+  return apiFetch<{ variant: SaleDmVariant }>(`/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// A/B 型を削除。割当済みの下書きがある型は 409(別型へ移してから)。
+export async function deleteSaleDmVariant(campaignId: string, variantId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { deleted: variantId };
+  }
+  return apiFetch<{ deleted: string }>(`/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}`, {
+    method: "DELETE",
+  });
+}
+
+// 宛先を型へ割り当て。auto=均等割り(sequential/random)、manual=指定(recipientId→variantId)。送付済みは対象外。
+export async function assignSaleDmVariants(
+  campaignId: string,
+  body: { mode: "auto" | "manual"; order?: "sequential" | "random"; assignments?: { recipientId: string; variantId: string }[] },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { assigned: 0, perVariant: {} as Record<string, number> };
+  }
+  return apiFetch<{ assigned: number; perVariant: Record<string, number> }>(`/api/properties/sale-dm/campaigns/${campaignId}/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// 物件の「宛先不明」フラグを手動解除(任意で dmStatus を send/hold へ戻す)。
+export async function clearSaleDmUndeliverable(propertyId: string, body?: { restoreDmStatus?: "send" | "hold" }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: propertyId, dmStatus: body?.restoreDmStatus ?? "no_send" };
+  }
+  return apiFetch<{ id: string; dmStatus: string }>(`/api/properties/${propertyId}/clear-dm-undeliverable`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
 // 下書き(draft)を一括で確定(confirmed)にする。印刷対象は confirmed のみ。
 export async function confirmSaleDmDrafts(ids: string[]) {
   if (USE_MOCK) {
