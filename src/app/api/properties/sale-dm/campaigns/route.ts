@@ -25,6 +25,9 @@ export async function POST(request: NextRequest) {
     if (!hasPermission(permissions, "csv_export", "read")) throw new ApiError(403, "CSV エクスポートの権限がありません", "FORBIDDEN");
     if (!hasPermission(permissions, "csv_export_personal", "read")) throw new ApiError(403, "個人情報を含む出力の権限がありません", "FORBIDDEN");
     if (!hasPermission(permissions, "owner", "read")) throw new ApiError(403, "所有者情報の閲覧権限がありません", "FORBIDDEN");
+    // AI生成は課金 + オーナーPII を外部AIへ送るため、専用権限 sale_dm:generate を必須化(謄本自動取得と同方針)。
+    // read系/CSV権限だけで誰でも有料生成を実行できないようにする(admin が明示付与する高リスク操作)。
+    if (!hasPermission(permissions, "sale_dm", "generate")) throw new ApiError(403, "AIによるDM生成の権限がありません", "FORBIDDEN");
 
     const ownerDisplayConfig = await getOwnerDisplayConfig(session.id, permissions);
     if (!isPlainOwnerLevel(ownerDisplayConfig.name) || !isPlainOwnerLevel(ownerDisplayConfig.zip) || !isPlainOwnerLevel(ownerDisplayConfig.address)) {
@@ -36,6 +39,11 @@ export async function POST(request: NextRequest) {
 
     // 不正JSON は parseJsonBody で 400(request.json() の素の 500 を避ける。他 mutation route と統一)。
     const body = saleDmCampaignBodySchema.parse(await parseJsonBody(request));
+    // 課金確認: 最大50通の有料AI呼び出し + オーナーPII の外部送信を伴うため、明示確認(confirmed:true)を要求。
+    // 謄本自動取得の confirmed ゲートと同方針(UI は実行前に確認ダイアログを出してから true を送る)。
+    if (body.confirmed !== true) {
+      throw new ApiError(400, "AI生成には課金確認(confirmed:true)が必要です", "SALE_DM_CONFIRMATION_REQUIRED");
+    }
     const query = propertyListQuerySchema.parse(body.filters ?? {});
     const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
     where.dmStatus = "send";

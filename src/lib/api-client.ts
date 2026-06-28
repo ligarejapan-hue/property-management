@@ -150,6 +150,7 @@ export interface CreateSaleDmCampaignBody {
     extraInstruction?: string;
   };
   filters?: Record<string, string>;
+  confirmed: boolean; // 課金確認(AI生成は有料+オーナーPII外部送信)。UI は確認後 true を送る。
 }
 
 export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {

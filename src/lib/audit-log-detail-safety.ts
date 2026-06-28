@@ -35,6 +35,10 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "propertyId",
   "ownerId",
   "buildingId",
+  // 売却促進DM の監査(create/export/print/update/variant)は campaignId/variantId で対象を辿る。
+  // UUID 識別子(名称・住所ではない)なので他の *Id と同様に安全キーとして残す(管理画面で追跡可能に)。
+  "campaignId",
+  "variantId",
   "userId",
   "targetId",
   "targetTable",

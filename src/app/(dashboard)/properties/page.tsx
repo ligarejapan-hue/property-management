@@ -292,6 +292,9 @@ function PropertiesPageInner() {
   const [creatingDm, setCreatingDm] = useState(false);
   const handleCreateSaleDm = async () => {
     if (creatingDm) return;
+    // 課金確認: 現在の絞り込み対象の宛先ごとに AI が手紙を生成し、AI利用料金が発生する(オーナー情報を
+    // AI提供元へ送信)。実行前に明示確認を取り、サーバーへ confirmed:true を送る(サーバー側でも必須)。
+    if (!window.confirm("現在の絞り込み対象に、AIで宛先ごとの手紙を生成します。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？")) return;
     setCreatingDm(true);
     setError(null);
     try {
@@ -305,6 +308,7 @@ function PropertiesPageInner() {
           strength: "low",
         },
         filters: buildFilterParams(),
+        confirmed: true,
       });
       router.push(`/properties/sale-dm/${res.campaignId}`);
     } catch (err) {

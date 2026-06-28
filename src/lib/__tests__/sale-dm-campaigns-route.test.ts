@@ -61,12 +61,14 @@ import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/
 import { POST } from "../../app/api/properties/sale-dm/campaigns/route";
 
 // getUserPermissions は { resource, action, granted } の配列を返す(dm-export route test と同形)。
-const grant = (...keys: string[]) => (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(
-  ["property", "csv_export", "csv_export_personal", "owner"].map((r) => ({ resource: r, action: "read", granted: keys.includes(r) })),
-);
+const grant = (...keys: string[]) => (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
+  ...["property", "csv_export", "csv_export_personal", "owner"].map((r) => ({ resource: r, action: "read", granted: keys.includes(r) })),
+  // 有料AI生成の専用権限(action=generate)。明示的に "sale_dm" を渡したときだけ付与。
+  { resource: "sale_dm", action: "generate", granted: keys.includes("sale_dm") },
+]);
 const plain = { name: "full", zip: "full", address: "full", nameKana: "full" };
 const req = (b: unknown) => new Request("http://x", { method: "POST", body: JSON.stringify(b) });
-const validBody = { name: "テスト", options: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", senderName: "△△", senderContact: "000" } };
+const validBody = { name: "テスト", confirmed: true, options: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", senderName: "△△", senderContact: "000" } };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -86,7 +88,7 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
   });
 
   it("0件対象でも 200・campaignId を返す", async () => {
-    grant("property", "csv_export", "csv_export_personal", "owner");
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const res = await POST(req(validBody) as never);
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -96,7 +98,7 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
 
   it("env 未設定(mock off + provider 未設定)で 503", async () => {
     delete process.env.NEXT_PUBLIC_USE_MOCK;
-    grant("property", "csv_export", "csv_export_personal", "owner");
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const res = await POST(req(validBody) as never);
     expect(res.status).toBe(503);
     expect(writeAuditLog).not.toHaveBeenCalled();
@@ -104,8 +106,25 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
   });
 
   it("不正な JSON ボディは 400(500 でなく)・生成も保存もしない", async () => {
-    grant("property", "csv_export", "csv_export_personal", "owner");
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const res = await POST(new Request("http://x", { method: "POST", body: "{ broken" }) as never);
+    expect(res.status).toBe(400);
+    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
+
+  it("sale_dm:generate なし(read系のみ)では 403・生成も保存もしない(有料AIの専用権限を必須化)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner"); // sale_dm を渡さない
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(403);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
+
+  it("課金確認なし(confirmed 未指定)で 400・生成も保存もしない", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const { confirmed, ...noConfirm } = validBody; // confirmed を外す
+    void confirmed;
+    const res = await POST(req(noConfirm) as never);
     expect(res.status).toBe(400);
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
   });

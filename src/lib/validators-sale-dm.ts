@@ -28,6 +28,8 @@ export const saleDmCampaignBodySchema = z.object({
   name: z.string().min(1),
   options: saleDmOptionsSchema,
   filters: z.record(z.string(), z.string()).optional(), // 物件一覧と同じ検索条件
+  // 課金確認(最大50通の有料AI呼び出し+オーナーPII外部送信)。route が === true を要求する。
+  confirmed: z.boolean().optional(),
 });
 
 export type SaleDmCampaignBody = z.infer<typeof saleDmCampaignBodySchema>;

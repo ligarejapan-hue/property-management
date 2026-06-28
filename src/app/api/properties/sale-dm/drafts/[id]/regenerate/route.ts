@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { hasPermission } from "@/lib/permissions";
 import { isSaleDmConfigured, generateLetters } from "@/lib/sale-dm-letter";
 import { resolveSender } from "@/lib/sale-dm-letter/sender";
 import { resolveDraftOptions } from "@/lib/sale-dm-letter/override";
@@ -9,7 +10,9 @@ import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session, permissions } = await requireSaleDmAccess();
+    // 再生成も有料AI呼び出し(1通)+ オーナーPII の外部送信のため sale_dm:generate を必須化(campaign 作成と統一)。
+    if (!hasPermission(permissions, "sale_dm", "generate")) throw new ApiError(403, "AIによるDM生成の権限がありません", "FORBIDDEN");
     if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
     const { id } = await params;
     const draft = await prisma.dmRecipientDraft.findUnique({ where: { id }, include: { variant: true, property: { select: { address: true, propertyType: true, roomNo: true, createdBy: true, assignedTo: true } }, campaign: { select: { createdBy: true } } } });

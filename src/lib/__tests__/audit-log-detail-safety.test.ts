@@ -642,3 +642,27 @@ describe("display_name_audit_view: 操作メタデータ allowlist（Codex P2）
     expect(out.viewedAt).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: 売却促進DM の識別子は管理画面で追跡可能に保持", () => {
+  it("campaignId / variantId は ALWAYS_SAFE(UUID識別子)として残す", () => {
+    const out = sanitizeAuditDetail("sale_dm_variant_update", {
+      campaignId: "c-uuid",
+      variantId: "v-uuid",
+      fields: ["tone"],
+    }) as Record<string, unknown>;
+    expect(out.campaignId).toBe("c-uuid");
+    expect(out.variantId).toBe("v-uuid");
+    expect(out.fields).toEqual(["tone"]);
+  });
+
+  it("識別子を残しても PII キー(ownerName/address)は引き続き [REDACTED]", () => {
+    const out = sanitizeAuditDetail("sale_dm_campaign_create", {
+      campaignId: "c-uuid",
+      ownerName: "田中 一郎",
+      address: "東京都〇〇区",
+    }) as Record<string, unknown>;
+    expect(out.campaignId).toBe("c-uuid");
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.address).toBe(REDACTED);
+  });
+});

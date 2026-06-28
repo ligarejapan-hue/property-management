@@ -33,9 +33,11 @@ import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/
 import { POST as regenerate } from "../../app/api/properties/sale-dm/drafts/[id]/regenerate/route";
 
 const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> } };
-const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
+const ALL = ["property", "csv_export", "csv_export_personal", "owner", "sale_dm"];
 const grant = (...keys: string[]) =>
-  (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(keys.map((k) => ({ resource: k, action: "read", granted: true })));
+  (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(
+    keys.map((k) => ({ resource: k, action: k === "sale_dm" ? "generate" : "read", granted: true })),
+  );
 const ctx = { params: Promise.resolve({ id: "r1" }) };
 
 beforeEach(() => {
@@ -76,5 +78,13 @@ describe("POST regenerate (override 反映)", () => {
     expect(res.status).toBe(200);
     const passed = generateSpy.mock.calls[0][0] as { options: { tone: string; senderName: string } }[];
     expect(passed[0].options.tone).toBe("formal");
+  });
+
+  it("sale_dm:generate なしでは 403・生成しない(有料AIの専用権限を必須化)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner"); // sale_dm を渡さない
+    const res = await regenerate(new Request("http://x", { method: "POST" }) as never, ctx);
+    expect(res.status).toBe(403);
+    expect(generateSpy).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 });
