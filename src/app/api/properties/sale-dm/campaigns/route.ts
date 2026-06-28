@@ -12,6 +12,7 @@ import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
 import { resolveSender } from "@/lib/sale-dm-letter/sender";
 import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, DEFAULT_MODEL } from "@/lib/sale-dm-letter";
+import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
 import { randomBytes } from "crypto";
 
@@ -36,6 +37,12 @@ export async function POST(request: NextRequest) {
 
     // env 未設定なら fail-closed(503)。DB に何も書かない。
     if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
+    // 印刷の郵送QRには絶対URL(SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL)が必須。これらが未設定/不正だと、
+    // 生成(課金)しても印刷 route が 503 で出力できず、印刷不能な下書きに課金されるだけになる。有料生成の前に
+    // 印刷必須URLも確認し、揃っていなければ生成を始めずに fail-closed(503)する(印刷 route と同じ前提)。
+    if (!resolveTrackingBaseUrl() || !resolveLpUrl()) {
+      throw new ApiError(503, "印刷に必要なURL(SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL)が未設定です", "PRINT_URL_NOT_CONFIGURED");
+    }
 
     // 不正JSON は parseJsonBody で 400(request.json() の素の 500 を避ける。他 mutation route と統一)。
     const body = saleDmCampaignBodySchema.parse(await parseJsonBody(request));

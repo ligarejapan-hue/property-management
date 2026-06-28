@@ -73,6 +73,9 @@ const validBody = { name: "テスト", confirmed: true, options: { designTemplat
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.NEXT_PUBLIC_USE_MOCK = "true"; // generation を mock provider + 設定済みに
+  // 印刷必須URL(郵送QRの絶対URL)。未設定だと生成前に 503(印刷不能な下書きへの課金を防ぐ)。
+  process.env.SALE_DM_TRACKING_BASE_URL = "https://app.example.com";
+  process.env.SALE_DM_LP_URL = "https://lp.example.com";
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue(plain);
   (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([]);
@@ -133,6 +136,14 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const res = await POST(req({ ...validBody, filters: { dmStatus: "hold" } }) as never);
     expect(res.status).toBe(400);
+    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
+
+  it("印刷必須URL(SALE_DM_TRACKING_BASE_URL/LP)未設定では生成前に 503・課金しない", async () => {
+    delete process.env.SALE_DM_TRACKING_BASE_URL; // 郵送QRの絶対URLが無い=印刷不能
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(503);
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
   });
 });
