@@ -76,8 +76,10 @@ export default function SaleDmWorkspacePage() {
   }, [selected, selectedVariant]);
 
   // 送付フローの対象件数: draft=確定対象 / confirmed=送付済みにする対象。
+  // 本文が空(生成失敗 or 型変更で要再生成)の下書きは confirm route が確定対象から除外するため、
+  // 「確定(N)」の件数も本文ありに限定し、ボタン件数と実際に確定される件数を一致させる。
   const draftIds = useMemo(
-    () => (campaign?.recipients ?? []).filter((r) => r.status === "draft").map((r) => r.id),
+    () => (campaign?.recipients ?? []).filter((r) => r.status === "draft" && r.body !== "").map((r) => r.id),
     [campaign],
   );
   const confirmedIds = useMemo(

@@ -30,6 +30,7 @@ export default function SaleDmAdjustPanel({
   const [tab, setTab] = useState<AdjustTab>("campaign");
   const [bodyDraft, setBodyDraft] = useState(selected?.body ?? "");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setBodyDraft(selected?.body ?? "");
@@ -42,9 +43,12 @@ export default function SaleDmAdjustPanel({
   const saveBody = async () => {
     if (!selected) return;
     setBusy(true);
+    setError(null);
     try {
       await patchSaleDmDraft(selected.id, buildDraftPatch({ body: bodyDraft }));
       onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存に失敗しました");
     } finally {
       setBusy(false);
     }
@@ -57,9 +61,12 @@ export default function SaleDmAdjustPanel({
     if (variantId === selected.variantId) return;
     if (!window.confirm("この宛先の型を変えると、手紙の本文はクリアされ作り直し(再生成)が必要になります。続けますか？")) return;
     setBusy(true);
+    setError(null);
     try {
       await patchSaleDmDraft(selected.id, buildDraftPatch({ variantId }));
       onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "型の変更に失敗しました");
     } finally {
       setBusy(false);
     }
@@ -71,9 +78,12 @@ export default function SaleDmAdjustPanel({
     // (キャンペーン作成と同方針)。サーバーも confirmed:true を必須にしている。
     if (!window.confirm("この宛先の手紙をAIで作り直します。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？")) return;
     setBusy(true);
+    setError(null);
     try {
       await regenerateSaleDmDraft(selected.id);
       onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "再生成に失敗しました");
     } finally {
       setBusy(false);
     }
@@ -97,6 +107,8 @@ export default function SaleDmAdjustPanel({
           この通
         </button>
       </div>
+
+      {error && <p className="text-xs text-red-600">{error}</p>}
 
       {variant && (
         <dl className="space-y-1 text-xs text-gray-600">

@@ -89,8 +89,19 @@ export default function SaleDmVariantManager({
         return;
       }
       if (editing) {
-        // options を変えるとこの型を使う未送付下書きは無効化(本文クリア+確定解除=要再生成)。確認する。
-        if (!window.confirm("型の設定を変更すると、この型を使う未送付の手紙は作り直しが必要になります(確定も解除されます)。続けますか？")) {
+        // options を「実際に」変えたときだけ未送付下書きが無効化(本文クリア+確定解除=要再生成)される
+        // (サーバー側 R24: label のみ/同値は無効化しない)。option が変わる場合のみ確認ダイアログを出す
+        // (label だけの変更で誤った「作り直し」警告を出さない)。
+        const cur = campaign.variants.find((v) => v.id === editing);
+        const optionChanged =
+          !cur ||
+          form.options.designTemplate !== cur.designTemplate ||
+          form.options.tone !== cur.tone ||
+          form.options.length !== cur.length ||
+          form.options.appeal !== cur.appeal ||
+          form.options.strength !== cur.strength ||
+          (form.options.extraInstruction ?? "") !== (cur.extraInstruction ?? "");
+        if (optionChanged && !window.confirm("型の設定を変更すると、この型を使う未送付の手紙は作り直しが必要になります(確定も解除されます)。続けますか？")) {
           return;
         }
         await updateSaleDmVariant(campaign.id, editing, { label: form.label, options: form.options });

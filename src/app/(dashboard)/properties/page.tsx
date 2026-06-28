@@ -329,14 +329,16 @@ function PropertiesPageInner() {
   const [clearingUndelivId, setClearingUndelivId] = useState<string | null>(null);
   const handleClearUndeliverable = async (propertyId: string) => {
     if (clearingUndelivId) return;
+    if (!window.confirm("この物件の「宛先不明」を解除しますか？")) return;
+    // 解除後の DM 状態は選択式。backend は restoreDmStatus 省略時に dmStatus を据え置く(現状維持)。
+    // send を渡したときだけ「送付可」に戻す(再送可能にする)。
     const restore = window.confirm(
-      "この物件の「宛先不明」を解除します。\nOK = 解除して「送付可」に戻す / キャンセルを押すと解除しません。",
+      "解除後、この物件のDM状態を「送付可」に戻しますか？\nOK = 送付可に戻す / キャンセル = 現状(送付しない)のまま解除",
     );
-    if (!restore) return;
     setClearingUndelivId(propertyId);
     setError(null);
     try {
-      await clearSaleDmUndeliverable(propertyId, { restoreDmStatus: "send" });
+      await clearSaleDmUndeliverable(propertyId, restore ? { restoreDmStatus: "send" } : undefined);
       await fetchProperties();
     } catch (err) {
       setError(err instanceof Error ? err.message : "宛先不明の解除に失敗しました");
@@ -1517,6 +1519,25 @@ function PropertiesPageInner() {
                   >
                     {DM_STATUS_LABELS[property.dmStatus] ?? property.dmStatus}
                   </StatusBadge>
+                  {/* 宛先不明バッジ + 手動解除(モバイルカードでも表示・write 権限時にボタン) */}
+                  {property.dmUndeliverableAt && (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-block rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                        宛先不明
+                      </span>
+                      {canWriteProperty && (
+                        <button
+                          type="button"
+                          onClick={() => handleClearUndeliverable(property.id)}
+                          disabled={clearingUndelivId === property.id}
+                          aria-label="宛先不明を解除"
+                          className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                        >
+                          解除
+                        </button>
+                      )}
+                    </span>
+                  )}
                   <span className="text-xs text-gray-600 dark:text-gray-300">
                     {CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus}
                   </span>
