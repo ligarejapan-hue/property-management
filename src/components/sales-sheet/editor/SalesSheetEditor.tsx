@@ -1,0 +1,127 @@
+"use client";
+
+import { useState } from "react";
+import type { SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
+import type { EditorState } from "@/lib/sales-sheet/editor-document";
+import { selectElement } from "@/lib/sales-sheet/editor-document";
+import { EditorCanvas } from "./EditorCanvas";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface SalesSheetEditorInitial {
+  /** 初期ドキュメント（スキーマ検証済み） */
+  document: SalesSheetDocument;
+  /** DB 上のシート ID */
+  sheetId: string;
+  /** 紐付く物件 ID */
+  propertyId: string;
+  /** 最終保存日時（ISO 文字列） */
+  updatedAt: string;
+}
+
+export interface SalesSheetEditorProps {
+  initial: SalesSheetEditorInitial;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Default canvas zoom (0.75 = 75%).
+ * Task G will add zoom-in/out controls and convert this to useState.
+ */
+const DEFAULT_ZOOM = 0.75;
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * SalesSheetEditor — "use client" shell (plan-3 Task E)
+ *
+ * Holds EditorState (document + selectedId + dirty) via useState.
+ * Renders the EditorCanvas in a scrollable, scale-transformed stage.
+ *
+ * Slot placeholders for future tasks:
+ *   - Toolbar    → Task G/H mounts at the top
+ *   - Properties panel → Task F mounts on the right
+ */
+export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
+  const [editorState, setEditorState] = useState<EditorState>({
+    document: initial.document,
+    selectedId: null,
+    dirty: false,
+  });
+
+  // ── Handlers ────────────────────────────────────────────────────────────
+  function handleSelect(id: string | null): void {
+    setEditorState((prev) => selectElement(prev, id));
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────
+  const { page } = editorState.document;
+
+  // Paper pixel dimensions at zoom (3.7795 px/mm at 96 dpi)
+  const MM_TO_PX = 3.7795;
+  const scaledW = page.width * MM_TO_PX * DEFAULT_ZOOM;
+  const scaledH = page.height * MM_TO_PX * DEFAULT_ZOOM;
+
+  return (
+    <div className="flex flex-col h-full bg-neutral-200 dark:bg-zinc-900">
+      {/* ── Toolbar placeholder — Task G/H ───────────────────────────── */}
+
+      {/* ── Main split ───────────────────────────────────────────────── */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+
+        {/* Canvas stage (scrollable, paper scaled to DEFAULT_ZOOM) */}
+        <div className="flex-1 overflow-auto">
+          <div
+            className="flex items-start justify-center p-8"
+            style={{ minWidth: scaledW + 64, minHeight: scaledH + 64 }}
+          >
+            {/*
+             * Scale wrapper: keeps layout footprint equal to the scaled paper
+             * while transform:scale renders the full-mm canvas at zoom ratio.
+             */}
+            <div
+              data-canvas-stage
+              style={{
+                width: scaledW,
+                height: scaledH,
+                position: "relative",
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  transformOrigin: "top left",
+                  transform: `scale(${DEFAULT_ZOOM})`,
+                }}
+              >
+                <EditorCanvas
+                  document={editorState.document}
+                  selectedId={editorState.selectedId}
+                  onSelect={handleSelect}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Properties panel placeholder — Task F */}
+        <div
+          data-properties-panel
+          className="w-64 shrink-0 border-l border-neutral-300 dark:border-zinc-700 bg-white dark:bg-zinc-800"
+          aria-label="properties panel"
+        />
+      </div>
+    </div>
+  );
+}
+
+export default SalesSheetEditor;
