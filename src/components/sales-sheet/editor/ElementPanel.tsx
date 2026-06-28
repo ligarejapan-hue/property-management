@@ -14,7 +14,7 @@
  * Font options are a static allow-list verified against `isSafeFontFamily`.
  */
 
-import { isCssColor } from "@/lib/sales-sheet/css-safety";
+import { isCssColor, isSafeFontFamily } from "@/lib/sales-sheet/css-safety";
 import type { EditTextPatch } from "@/lib/sales-sheet/editor-document";
 import type { SalesSheetElement, TextElement } from "@/lib/sales-sheet/document-schema";
 
@@ -132,6 +132,7 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
   }
 
   function onFontFamily(e: React.ChangeEvent<HTMLSelectElement>): void {
+    if (!isSafeFontFamily(e.target.value)) return;
     onChange({ type: "editText", patch: { fontFamily: e.target.value } });
   }
 
@@ -253,6 +254,7 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
                 onChange={onFontFamily}
                 className={inputCls}
               >
+                <option value="">(デフォルト)</option>
                 {PANEL_FONT_OPTIONS.map((f) => (
                   <option key={f.value} value={f.value}>
                     {f.label}

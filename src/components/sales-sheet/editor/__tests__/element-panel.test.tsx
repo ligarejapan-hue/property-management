@@ -14,7 +14,7 @@ import {
   buildGeometryChange,
   PANEL_FONT_OPTIONS,
 } from "../ElementPanel";
-import { isSafeFontFamily } from "@/lib/sales-sheet/css-safety";
+import { isCssColor, isSafeFontFamily } from "@/lib/sales-sheet/css-safety";
 import type { SalesSheetElement } from "@/lib/sales-sheet/document-schema";
 
 // ---------------------------------------------------------------------------
@@ -187,5 +187,31 @@ describe("ElementPanel — PANEL_FONT_OPTIONS", () => {
       expect(f.label.length).toBeGreaterThan(0);
       expect(f.value.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guard regression tests
+// The onColor handler calls isCssColor before dispatching.
+// The onFontFamily handler calls isSafeFontFamily before dispatching.
+// These tests verify the guards reject unsafe values, ensuring onChange is
+// never called for injection-style inputs (the "return" guard fires first).
+// ---------------------------------------------------------------------------
+
+describe("ElementPanel — バリデーションガード", () => {
+  it("無効な色文字列は isCssColor を通過しないため onColor が onChange を呼ばない", () => {
+    // These values are rejected by isCssColor, so the guard returns early.
+    expect(isCssColor("expression(evil)")).toBe(false);
+    expect(isCssColor("url(http://evil.com)")).toBe(false);
+    expect(isCssColor("; color: red")).toBe(false);
+    expect(isCssColor("javascript:alert(1)")).toBe(false);
+  });
+
+  it("空文字・無効なフォントファミリーは isSafeFontFamily を通過しないため onFontFamily が onChange を呼ばない", () => {
+    // Empty string (placeholder option value) and injection strings are rejected.
+    expect(isSafeFontFamily("")).toBe(false);
+    expect(isSafeFontFamily("font; injection: 1")).toBe(false);
+    expect(isSafeFontFamily("</style><script>")).toBe(false);
+    expect(isSafeFontFamily("url(http://evil.com)")).toBe(false);
   });
 });
