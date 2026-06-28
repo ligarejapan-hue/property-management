@@ -119,6 +119,11 @@ describe("isSafeImageSrc (Plan3: data:image/ と /uploads/ を許可)", () => {
     expect(isSafeImageSrc("/uploads/../../etc/passwd")).toBe(false);
   });
 
+  it("/uploads/%2e%2e/etc/passwd を拒否する（パーセントエンコードされた traversal）", () => {
+    expect(isSafeImageSrc("/uploads/%2e%2e/etc/passwd")).toBe(false);
+    expect(isSafeImageSrc("/uploads/%2E%2E/x")).toBe(false); // 大文字エンコードも拒否
+  });
+
   it("http://x/y.jpg を拒否する（SSRF: http scheme）", () => {
     expect(isSafeImageSrc("http://x/y.jpg")).toBe(false);
   });

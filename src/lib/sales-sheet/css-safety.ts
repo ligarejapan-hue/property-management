@@ -31,7 +31,8 @@ export function sanitizeCssValue(value: string): string {
  *   [^\x00-\x20\x7f\\<>"']+  — 残りは制御文字・空白(U+0000–U+0020)・DEL・
  *                               バックスラッシュ・山括弧・引用符を含まない1文字以上
  *   $
- * ".." チェックは別途 !src.includes("..") で行う（正規表現で書くより明確）。
+ * traversal チェックは別途行う: リテラル ".." と、パーセントエンコードされた
+ * "%2e"(=".") の両方を拒否する（正規表現で書くより明確）。
  */
 const UPLOADS_SRC_RE = /^\/uploads\/[^\x00-\x20\x7f\\<>"']+$/;
 
@@ -42,7 +43,14 @@ export function isSafeImageSrc(src: string): boolean {
   // 2. /uploads/ ルート相対パス
   //    UPLOADS_SRC_RE が先頭の "//" (プロトコル相対) を拒否する点に注意:
   //    "^\/uploads\/" は単一の "/" から始まるため "//..." にはマッチしない。
-  if (UPLOADS_SRC_RE.test(src) && !src.includes("..")) return true;
+  //    traversal は ".." と %2e(エンコード版) の両方を検証器層で塞ぐ（下流にも
+  //    多重防御があるが、ここでも閉じておく）。
+  if (
+    UPLOADS_SRC_RE.test(src) &&
+    !src.includes("..") &&
+    !src.toLowerCase().includes("%2e")
+  )
+    return true;
 
   return false;
 }
