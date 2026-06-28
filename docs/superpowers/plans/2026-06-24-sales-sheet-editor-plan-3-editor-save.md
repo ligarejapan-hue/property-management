@@ -1,0 +1,415 @@
+# 販売図面エディタ 計画③：保存＋エディタ土台（自由配置・文字編集） 実装計画
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 生成済みの図面ドキュメントをアプリ内エディタに読み込み、自由配置（選択/移動/拡縮/重ね順/削除）と文字編集（内容/フォント/サイズ/色）で調整し、再編集可能な「保存デザイン」として永続化し、保存デザインを PDF/画像で再出力できるようにする。
+
+**Architecture:** 計画①のドキュメントモデル＋共通レンダラ（`SalesSheetRenderer`）を土台に、(1) `SalesSheetDesign` テーブルで document を永続化、(2) ブラウザでは `SalesSheetRenderer` を描画しその上に編集オーバーレイ（Moveable）を載せて document(client state) を更新＝即時 WYSIWYG プレビュー、(3) 保存は /uploads キー参照の軽量 document、(4) **出力時のみ**サーバーが保存 document の全画像キーを `authorizeUploadAccess` で認可→data: 化→計画①/②の出力パイプラインで PDF/画像化。編集ロジックは純関数 reducer に集約し単体テスト可能にする。
+
+**Tech Stack:** Next.js(App Router)/React 19/TypeScript/Prisma(PostgreSQL)/zod/Vitest(env=node)/Tailwind v4/playwright(既存)。新規依存: **react-moveable**（ドラッグ/拡縮オーバーレイ）。
+
+## Global Constraints
+
+- **マージ/＠codexトリガ/VPS反映/本番 `playwright install chromium`/migration 適用/新規npm依存の追加＝ユーザー承認後**（既存運用）。実装中は worktree 内でゲートを緑にするところまで。
+- **新規テーブル `SalesSheetDesign` の migration は1本**（このプランで初出。`prisma migrate deploy` 適用は本番反映時にユーザー承認）。
+- **新規依存は `react-moveable` のみ**。追加は package.json/lockfile 変更＝ユーザー承認。代替で自作する場合も承認。導入前に context7/公式 docs で当該バージョンの props を確認すること（推測でAPIを書かない）。
+- **権限**: 閲覧/一覧/出力＝`property:read` ＋ `canAccessPropertyRecord`（field_staff は自分の物件のみ）。作成/更新/削除＝`property:write` ＋同アクセス判定。新権限リソースは作らない。
+- **document 検証**: 保存・読込・出力の各境界で `parseSalesSheetDocument`（計画①）を必ず通す。レンダラ（コンポーネント）は不正 document で throw する既存挙動を維持。
+- **画像セキュリティ（最重要）**: 出力時、document 内の全 image 要素について、その src が /uploads/ 形式（自前 storage）なら **`authorizeUploadAccess` で認可してから** data: 化して埋め込む。認可されない/解決不能な src は**画像を落とす**（描画しない・バイトを読まない）。data: src はそのまま可（スキーマで data:image 限定済み）。`http(s)://` 等の外部 src はスキーマ（計画① `isSafeImageSrc`）で既に拒否。出力ブラウザのネットワーク遮断（計画②ガード）は維持。
+- **PII/blob キーをログ・レスポンスに出さない**。
+- **楽観ロック**: 更新は `updatedAt` 一致を要求し、競合は 409。
+- 既存のテスト規約（co-located `__tests__/`・env=node）に従う。`.claude/settings.local.json` 非接触。force-push 禁止。
+
+---
+
+## 計画①/②から利用するインターフェース（既存・このプランで変更しない）
+
+- `src/lib/sales-sheet/document-schema.ts`: `SalesSheetDocument`（page+theme+elements[]）, 要素 discriminated union（text/image/table/badge/shape/qr。各 `id,x,y,w,h,z` mm/pt/int）, `parseSalesSheetDocument(input): SalesSheetDocument`（境界検証）, `A4_LANDSCAPE`/`A4_PORTRAIT`。
+- `src/components/sales-sheet/SalesSheetRenderer.tsx`: `<SalesSheetRenderer document={doc} />`（"use client" 無し・先頭で `parseSalesSheetDocument`・要素別描画・全 style 値 `sanitizeCssValue`）。ブラウザ/サーバー共通。プレビューにそのまま使う。
+- `src/lib/sales-sheet/css-safety.ts`: `isSafeImageSrc`(data:image限定), `isCssColor`, `isSafeFontFamily`, `sanitizeCssValue`。
+- `src/lib/sales-sheet/build-document.ts`: `buildSaleLandDocument(input): SalesSheetDocument`（純・写真 src は /uploads キーの**未インライン**）, `buildInitialSalesSheetDocument(input): Promise<SalesSheetDocument>`（= 写真を data: にインライン）, `SaleLandInput`, `SaleLandOverrides`(price/access/landArea/landCategory/transactionType/deliveryTiming/remarks)。**計画③では「未インライン版（/uploas キー）」を編集に使う**。
+- `src/lib/sales-sheet/inline-images.ts`: `inlineDocumentImages(doc): Promise<SalesSheetDocument>`（非data: img src → `getStorage().keyFromUrl`→read→data:。解決不能はドロップ）。**計画③では認可付きの派生版を作る（下記 Task C）**。
+- `src/lib/sales-sheet/render-to-output.ts`: `renderDocumentToPdf(doc)` / `renderDocumentToImage(doc, {format})` / 内部 `isChromiumAvailable()`。
+- `src/lib/uploads-authorization.ts`: `authorizeUploadAccess({key, session, permissions}): Promise<"ok"|"forbidden"|"not_found">`（backend 対応 key 解決済み）。
+- `src/lib/storage/*`: `getStorage().keyFromUrl(url)`（backend対応）, `isValidStorageKey`。
+- `src/lib/api-helpers.ts`: `getApiSession()`, `ApiSession`, `PermissionEntry`, `handleApiError`, `ApiError`。
+- `src/lib/permissions.ts`: `hasPermission(perms, resource, action)`。
+- `src/lib/property-access.ts`: `canAccessPropertyRecord(property, session)`（要確認・計画②で使用）。
+
+---
+
+## ファイル構成（作成/変更）
+
+- `prisma/schema.prisma`（変更：model `SalesSheetDesign` 追加）
+- `prisma/migrations/<ts>_add_sales_sheet_design/migration.sql`（作成）
+- `src/lib/sales-sheet/design-service.ts`（作成：DB CRUD＋検証＋アクセス判定の薄いサービス）
+- `src/lib/sales-sheet/__tests__/design-service.test.ts`（作成）
+- `src/lib/sales-sheet/authorize-document-images.ts`（作成：document 全 image 認可→data: 化）
+- `src/lib/sales-sheet/__tests__/authorize-document-images.test.ts`（作成）
+- `src/app/api/properties/[id]/sales-sheets/route.ts`（作成：POST 作成 / GET 一覧）
+- `src/app/api/properties/[id]/sales-sheets/[sheetId]/route.ts`（作成：GET 取得 / PUT 更新 / DELETE 削除）
+- `src/app/api/properties/[id]/sales-sheets/[sheetId]/export/route.ts`（作成：POST 出力）
+- `src/app/api/properties/[id]/sales-sheets/**/__tests__/route.test.ts`（作成）
+- `src/lib/sales-sheet/editor-document.ts`（作成：純 reducer 群＝選択/移動/拡縮/重ね順/削除/文字編集/dirty）
+- `src/lib/sales-sheet/__tests__/editor-document.test.ts`（作成）
+- `src/components/sales-sheet/editor/SalesSheetEditor.tsx`（作成：エディタ shell＝canvas＋overlay＋panel＋toolbar 統合）
+- `src/components/sales-sheet/editor/EditorCanvas.tsx`（作成：`SalesSheetRenderer`＋選択オーバーレイ＋Moveable）
+- `src/components/sales-sheet/editor/ElementPanel.tsx`（作成：右パネル＝geometry＋文字編集）
+- `src/components/sales-sheet/editor/EditorToolbar.tsx`（作成：保存/出力/削除）
+- `src/components/sales-sheet/editor/__tests__/*.test.tsx`（作成：可能な範囲。重いDOMはスキップ可・ロジックは editor-document でカバー）
+- `src/app/(dashboard)/properties/[id]/sales-sheets/[sheetId]/edit/page.tsx`（作成：エディタ画面ルート）
+- `src/app/(dashboard)/properties/[id]/sales-sheets/new/route.ts` または server action（作成：新規作成→編集へ）
+- `src/components/sales-sheet/SaleLandSheetButton.tsx`（変更：直接PDF→「販売図面を作成」＝新規作成→エディタ遷移。計画②の直出力はエディタ内「出力」に統合）
+- `src/app/(dashboard)/properties/[id]/page.tsx`（変更：ボタンの意味変更に追従。土地物件のみ表示は維持）
+- `package.json` / `package-lock.json`（変更：`react-moveable` 追加・**ユーザー承認**）
+
+---
+
+## Task A: SalesSheetDesign モデル＋migration＋検証サービス
+
+**Files:**
+- Modify: `prisma/schema.prisma`
+- Create: `prisma/migrations/<ts>_add_sales_sheet_design/migration.sql`
+- Create: `src/lib/sales-sheet/design-service.ts`
+- Test: `src/lib/sales-sheet/__tests__/design-service.test.ts`
+
+**Interfaces:**
+- Produces: `createDesign`, `getDesign`, `listDesigns`, `updateDesign`, `deleteDesign`（下記シグネチャ）。document は保存前後で `parseSalesSheetDocument` を通す。
+
+- [ ] **Step 1: schema 追加**
+
+```prisma
+model SalesSheetDesign {
+  id           String   @id @default(cuid())
+  propertyId   String
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  title        String   @default("無題の販売図面")
+  document     Json
+  templateId   String?
+  thumbnailUrl String?
+  createdBy    String
+  updatedBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([propertyId])
+  @@map("sales_sheet_designs")
+}
+```
+`Property` model に `salesSheetDesigns SalesSheetDesign[]` を追記（リレーション逆側）。
+
+- [ ] **Step 2: migration SQL を生成**（devDB 不要・SQL 手書きで冪等に）
+
+```sql
+CREATE TABLE IF NOT EXISTS "sales_sheet_designs" (
+  "id" TEXT NOT NULL,
+  "propertyId" TEXT NOT NULL,
+  "title" TEXT NOT NULL DEFAULT '無題の販売図面',
+  "document" JSONB NOT NULL,
+  "templateId" TEXT,
+  "thumbnailUrl" TEXT,
+  "createdBy" TEXT NOT NULL,
+  "updatedBy" TEXT NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "sales_sheet_designs_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX IF NOT EXISTS "sales_sheet_designs_propertyId_idx" ON "sales_sheet_designs"("propertyId");
+ALTER TABLE "sales_sheet_designs" ADD CONSTRAINT "sales_sheet_designs_propertyId_fkey"
+  FOREIGN KEY ("propertyId") REFERENCES "properties"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+```
+（`properties` の実テーブル名・PK 名は既存 schema を確認して合わせる。FK 重複追加を避けるため適用は migrate deploy に委ねる＝手動 ALTER は冪等 guard 付き。）
+
+- [ ] **Step 3: `npx prisma generate`** でクライアント再生成（tsc が新モデルを認識）。
+
+- [ ] **Step 4: 失敗するテストを書く（design-service）**
+
+```ts
+// createDesign: document を検証して保存、不正 document は throw
+// getDesign: 他物件の design は返さない（propertyId スコープ）
+// updateDesign: updatedAt 不一致は OPTIMISTIC_LOCK で reject
+```
+prisma はモック注入（計画②の route テスト同様 `db` 引数で注入可能にする）。
+
+- [ ] **Step 5: design-service 実装**
+
+```ts
+import prismaDefault from "@/lib/prisma";
+import { parseSalesSheetDocument } from "./document-schema";
+type PrismaLike = typeof prismaDefault;
+
+export interface SaveDesignInput {
+  propertyId: string; title?: string; document: unknown; templateId?: string | null; userId: string;
+}
+export async function createDesign(input: SaveDesignInput, db: PrismaLike = prismaDefault) {
+  const document = parseSalesSheetDocument(input.document); // 不正は throw
+  return db.salesSheetDesign.create({
+    data: {
+      propertyId: input.propertyId,
+      title: input.title?.trim() || "無題の販売図面",
+      document,
+      templateId: input.templateId ?? null,
+      createdBy: input.userId, updatedBy: input.userId,
+    },
+  });
+}
+export async function getDesign(propertyId: string, sheetId: string, db: PrismaLike = prismaDefault) {
+  const d = await db.salesSheetDesign.findUnique({ where: { id: sheetId } });
+  if (!d || d.propertyId !== propertyId) return null; // スコープ外は null
+  return d;
+}
+export async function listDesigns(propertyId: string, db: PrismaLike = prismaDefault) {
+  return db.salesSheetDesign.findMany({
+    where: { propertyId }, orderBy: { updatedAt: "desc" },
+    select: { id: true, title: true, updatedAt: true, createdAt: true, thumbnailUrl: true },
+  });
+}
+export async function updateDesign(
+  propertyId: string, sheetId: string,
+  patch: { title?: string; document?: unknown; expectedUpdatedAt: string | Date }, userId: string,
+  db: PrismaLike = prismaDefault,
+) {
+  const current = await getDesign(propertyId, sheetId, db);
+  if (!current) return { ok: false as const, reason: "not_found" as const };
+  if (new Date(current.updatedAt).getTime() !== new Date(patch.expectedUpdatedAt).getTime())
+    return { ok: false as const, reason: "conflict" as const };
+  const data: Record<string, unknown> = { updatedBy: userId };
+  if (patch.title !== undefined) data.title = patch.title.trim() || "無題の販売図面";
+  if (patch.document !== undefined) data.document = parseSalesSheetDocument(patch.document);
+  const updated = await db.salesSheetDesign.update({ where: { id: sheetId }, data });
+  return { ok: true as const, design: updated };
+}
+export async function deleteDesign(propertyId: string, sheetId: string, db: PrismaLike = prismaDefault) {
+  const current = await getDesign(propertyId, sheetId, db);
+  if (!current) return false;
+  await db.salesSheetDesign.delete({ where: { id: sheetId } });
+  return true;
+}
+```
+
+- [ ] **Step 6: テスト緑 / tsc / eslint** を確認しコミット。
+
+---
+
+## Task B: 保存/読込 API（CRUD）
+
+**Files:**
+- Create: `src/app/api/properties/[id]/sales-sheets/route.ts`（POST/GET）
+- Create: `src/app/api/properties/[id]/sales-sheets/[sheetId]/route.ts`（GET/PUT/DELETE）
+- Test: 各 `__tests__/route.test.ts`
+
+**Interfaces:**
+- Consumes: design-service（Task A）, `getApiSession`, `hasPermission`, `canAccessPropertyRecord`, `handleApiError`/`ApiError`。
+- 契約: 401(未認証)/403(権限・物件アクセス不可)/404(物件 or design 無)/409(更新競合)/422(document/入力不正)/200。
+
+- [ ] **Step 1-2: 失敗するテスト→実装（POST 作成 / GET 一覧）**
+
+共通ガード（計画②の preview route と同型）:
+```ts
+const session = await getApiSession(req); if (!session) -> 401
+if (!hasPermission(session.permissions, "property", "read")) -> 403   // GET
+// POST/PUT/DELETE は "property","write"
+const property = await prisma.property.findUnique({ where: { id }, select: {…canAccessに必要…} });
+if (!property) -> 404
+if (!canAccessPropertyRecord(property, session)) -> 403
+```
+POST body は zod: `{ title?: string(max 120), document: unknown, templateId?: string }`。`createDesign` 呼び出し（document 不正は `parseSalesSheetDocument` が throw → `handleApiError` で 422）。レスポンス `{ id }`（201）。
+GET 一覧は `listDesigns` の結果を返す（200）。
+
+- [ ] **Step 3-4: 失敗するテスト→実装（GET 取得 / PUT 更新 / DELETE）**
+
+GET `[sheetId]`: `getDesign`（スコープ外/無は 404）→ `{ id,title,document,updatedAt,... }`。
+PUT `[sheetId]`: write 権限。body `{ title?, document?, expectedUpdatedAt: string }`。`updateDesign` の戻りで not_found→404 / conflict→409 / ok→200`{ updatedAt }`。
+DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
+
+- [ ] **Step 5: 全テスト緑 / tsc / eslint→コミット。**
+（注: route の prisma は計画②同様テストでモック。`canAccessPropertyRecord` の正確なシグネチャ・property select は計画②の preview route を参照して合わせる。）
+
+---
+
+## Task C: 出力（保存デザインの認可付きレンダリング）
+
+**Files:**
+- Create: `src/lib/sales-sheet/authorize-document-images.ts`
+- Test: `src/lib/sales-sheet/__tests__/authorize-document-images.test.ts`
+- Create: `src/app/api/properties/[id]/sales-sheets/[sheetId]/export/route.ts`
+- Test: `.../export/__tests__/route.test.ts`
+
+**Interfaces:**
+- Produces: `authorizeAndInlineDocumentImages(doc, {session, permissions}): Promise<SalesSheetDocument>`。
+
+- [ ] **Step 1: 失敗するテスト（authorize-document-images）**
+
+```ts
+// 1) src が data: の image はそのまま保持
+// 2) src が /uploads/<key> で authorizeUploadAccess="ok" → data: にインライン
+// 3) authz="forbidden"/"not_found" の image → 要素から画像を除去（src を落とす or 要素削除）= バイト未読込
+// 4) PII/key を返り値・ログに出さない（immutable・新 document を返す）
+```
+
+- [ ] **Step 2: 実装**
+
+```ts
+import type { SalesSheetDocument } from "./document-schema";
+import { authorizeUploadAccess } from "@/lib/uploads-authorization";
+import { getStorage } from "@/lib/storage";
+import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
+
+export async function authorizeAndInlineDocumentImages(
+  doc: SalesSheetDocument,
+  ctx: { session: ApiSession; permissions: PermissionEntry[] },
+): Promise<SalesSheetDocument> {
+  const elements = await Promise.all(doc.elements.map(async (el) => {
+    if (el.type !== "image") return el;
+    if (el.src.startsWith("data:")) return el;                 // 既に安全（スキーマで data:image 限定）
+    const key = getStorage().keyFromUrl(el.src);               // backend 対応
+    if (!key) return dropImage(el);
+    const decision = await authorizeUploadAccess({ key, session: ctx.session, permissions: ctx.permissions });
+    if (decision !== "ok") return dropImage(el);               // 認可外は描画しない・バイト未読込
+    const bytes = await getStorage().read(key).catch(() => null);
+    if (!bytes) return dropImage(el);
+    return { ...el, src: toDataUrl(bytes) };                   // mime は read 結果 or 既存 util
+  }));
+  return { ...doc, elements };
+}
+// dropImage: image 要素を「空のプレースホルダ」化（src を空にして描画スキップ）。レイアウト維持のため要素自体は残す方針を推奨（要素削除だと重ね順がずれる）。
+```
+（`getStorage().read` の戻り型・mime 取得は計画②の inline-images 実装に合わせる。data: 化 util を共通化してよい。）
+
+- [ ] **Step 3-4: 失敗するテスト→実装（export route）**
+
+```ts
+// POST /api/properties/[id]/sales-sheets/[sheetId]/export?format=pdf|png
+// 認証→property:read→property取得→canAccessPropertyRecord→getDesign(404)→
+// parseSalesSheetDocument(design.document)→authorizeAndInlineDocumentImages→
+// isChromiumAvailable() 無→503→renderDocumentToPdf|Image→bytes 返却(no-store)
+```
+契約: 401/403/404/422(document破損)/503(chromium無)/200(application/pdf | image/png)。format 既定 pdf。
+
+- [ ] **Step 5: 全テスト緑 / tsc / eslint→コミット。**
+
+---
+
+## Task D: エディタ document reducer（純ロジック・UI 無し）
+
+**Files:**
+- Create: `src/lib/sales-sheet/editor-document.ts`
+- Test: `src/lib/sales-sheet/__tests__/editor-document.test.ts`
+
+**Interfaces:**
+- Produces: `EditorState`（`{ document, selectedId: string|null, dirty: boolean }`）と純 reducer:
+  - `selectElement(state, id|null)`
+  - `moveElement(state, id, {x,y})`（mm・ページ境界クランプ）
+  - `resizeElement(state, id, {w,h})`（最小サイズ guard）
+  - `bringToFront(state,id)` / `sendToBack(state,id)` / `setZ(state,id,z)`
+  - `deleteElement(state,id)`
+  - `editText(state, id, patch:{content?:string; fontSizePt?:number; color?:string; fontFamily?:string})`（text 要素のみ・色/フォントは `isCssColor`/`isSafeFontFamily` で弾く）
+  - `markSaved(state)`（dirty=false）
+- すべて新 state を返す（immutable）。各操作後 document は依然 `parseSalesSheetDocument` を通せる形を保つ（テストで検証）。
+
+- [ ] **Step 1: 失敗するテスト**（代表）
+
+```ts
+// moveElement: x,y 更新 + dirty=true + ページ外は 0..(page-size - element-size) にクランプ
+// resizeElement: w,h 最小(例 5mm)以上にクランプ
+// bringToFront: 当該 z が最大+1
+// deleteElement: 要素消滅 + selectedId が当該なら null
+// editText: 不正 color("expression(...)") は無視 or throw（弾く）。content 反映。非 text 要素には no-op
+// 各操作で parseSalesSheetDocument(result.document) が成功する
+```
+
+- [ ] **Step 2: 実装**（純関数群。document-schema の型・mm/pt 規約に従う。色/フォントは css-safety を再利用）。
+
+- [ ] **Step 3: テスト緑 / tsc / eslint→コミット。**
+
+---
+
+## Task E: エディタ canvas（レンダラ＋選択オーバーレイ）
+
+**Files:**
+- Create: `src/components/sales-sheet/editor/EditorCanvas.tsx`
+- Create: `src/components/sales-sheet/editor/SalesSheetEditor.tsx`（shell 骨組み・以降のタスクで肉付け）
+- Test: `src/components/sales-sheet/editor/__tests__/editor-canvas.test.tsx`（軽量。重い DOM は skip 可・ロジックは Task D でカバー済）
+
+**Interfaces:**
+- `<EditorCanvas document selectedId onSelect />`：`<SalesSheetRenderer document />` を mm→px スケールの台紙（A4横）に載せ、各要素の当たり判定枠を重ね、クリックで `onSelect(id)`。選択要素に枠線ハイライト。
+- `<SalesSheetEditor initial={{document,sheetId,propertyId,updatedAt}} />`："use client"。`useReducer`/`useState` で `EditorState`（Task D）を保持。canvas＋（後続で panel/toolbar）を配置。
+
+- [ ] **Step 1-3:** canvas 実装（mm→px は 1mm=約3.78px @96dpi。A4横=297×210mm。台紙 transform: scale で画面に収める）。選択は要素の絶対座標枠を被せてクリック取得（Moveable 導入前の素の選択）。テストは「要素枠が要素数ぶん描画」「クリックで onSelect 呼ぶ」程度。`SalesSheetRenderer` は計画①のまま流用。
+
+- [ ] **Step 4: コミット。**
+
+---
+
+## Task F: Moveable によるドラッグ/拡縮/重ね順（承認: 新規依存）
+
+**Files:**
+- Modify: `package.json` / `package-lock.json`（`react-moveable` 追加・**ユーザー承認**）
+- Modify: `EditorCanvas.tsx`（選択要素に `<Moveable>` を装着）
+- Modify: `SalesSheetEditor.tsx`（drag/resize/z を Task D reducer に接続）
+- Test: 既存の editor-document テストで論理は担保。Moveable のDOM挙動はE2E領域＝単体では薄く。
+
+**Interfaces:**
+- Consumes: Task D reducer（`moveElement`/`resizeElement`/`bringToFront` 等）。
+
+- [ ] **Step 1: 依存追加の承認を取得**（コントローラがユーザーに確認）。承認後 `npm i react-moveable`。**導入バージョンの props を context7/公式 docs で確認**（`onDrag`/`onResize`/`target`/`bounds`/`snappable` 等）。
+- [ ] **Step 2-4:** 選択要素へ Moveable を装着。`onDragEnd`/`onResizeEnd`（px）→ mm に逆変換 → `moveElement`/`resizeElement`。重ね順ボタン（前面/背面）→ `bringToFront`/`sendToBack`。bounds=台紙でページ外移動を抑制（reducer 側クランプと二重防御）。
+- [ ] **Step 5: ゲート（tsc/eslint/build）→コミット。**（build はバンドルに新依存が乗るので必須。）
+
+---
+
+## Task G: 右パネル（geometry＋文字編集）
+
+**Files:**
+- Create: `src/components/sales-sheet/editor/ElementPanel.tsx`
+- Modify: `SalesSheetEditor.tsx`（パネル接続）
+- Test: `__tests__/element-panel.test.tsx`（軽量）
+
+**Interfaces:**
+- `<ElementPanel element selected onChange />`：選択要素の編集 UI。
+  - 全要素: x/y/w/h（数値入力・mm）/ 重ね順（前面/背面）/ 削除。
+  - text 要素: 内容（textarea）/ フォント（許可リストの select）/ サイズ（pt）/ 色（color picker・`isCssColor` で検証）。
+  - 変更は `onChange(patch)` → `SalesSheetEditor` が Task D reducer（`moveElement`/`resizeElement`/`editText`/`setZ`/`deleteElement`）へ。
+
+- [ ] **Step 1-3:** 実装。色/フォントは css-safety の許可リストに準拠（不正値は適用しない）。テストは「text 選択時に文字編集 UI が出る」「数値変更で onChange」程度。
+- [ ] **Step 4: コミット。**
+
+---
+
+## Task H: ツールバー（保存/出力/削除）＋導線切替
+
+**Files:**
+- Create: `src/components/sales-sheet/editor/EditorToolbar.tsx`
+- Modify: `SalesSheetEditor.tsx`（保存/出力 API 配線・dirty 表示）
+- Create: `src/app/(dashboard)/properties/[id]/sales-sheets/[sheetId]/edit/page.tsx`（エディタ画面：認証/権限/物件アクセス→design 読込→`<SalesSheetEditor initial=.../>`）
+- Create: 新規作成導線（`.../sales-sheets/new` route or server action）：`buildSaleLandDocument`（**未インライン**）で初期 document を作り `createDesign`→ `[sheetId]/edit` へ redirect。
+- Modify: `src/components/sales-sheet/SaleLandSheetButton.tsx`（「販売図面を作成」→ 新規作成導線へ。直接PDFは廃止しエディタ内「出力」に統合）
+- Modify: `src/app/(dashboard)/properties/[id]/page.tsx`（ボタン意味変更に追従・土地物件のみ表示は維持）
+- Test: toolbar/保存配線の薄いテスト＋ route(new) のテスト。
+
+**Interfaces:**
+- `<EditorToolbar dirty onSave onExport onDelete />`。
+- 保存: `PUT .../[sheetId]`（`expectedUpdatedAt` 同送）→ 200 で `markSaved`＋updatedAt 更新 / 409 で「他で更新されました。再読込してください」。
+- 出力: 未保存があれば先に保存→ `POST .../[sheetId]/export?format=pdf|png` → blob ダウンロード。chromium 無は 503 を「PDF生成エンジン未準備」と表示。
+- 削除: `DELETE .../[sheetId]`→一覧 or 物件詳細へ。
+
+- [ ] **Step 1-5:** 実装＋配線。新規作成は土地物件のみ（計画②の land ゲート流用）。`getApiSession`/権限/`canAccessPropertyRecord` を edit page と new route の双方で課す（サーバー側で防御）。
+- [ ] **Step 6: 全ゲート（vitest/tsc/eslint/build）→コミット。**
+
+---
+
+## 完了基準（このプランの「動く増分」）
+
+- 土地物件で「販売図面を作成」→ 物件データ＋写真が入った状態でエディタが開く。
+- 要素を選択し、ドラッグ移動／拡縮／重ね順変更／削除、文字の内容・フォント・サイズ・色を編集できる（即時プレビュー）。
+- 「保存」で再編集可能なデザインとして永続化（再訪で続きを編集）。
+- 「出力」で保存デザインを PDF/画像ダウンロード（サーバーが全画像を認可してから描画＝他物件画像は出ない）。
+- 全ゲート緑（vitest/tsc/eslint/build）。新規依存＝react-moveable のみ。migration＝SalesSheetDesign 1本（適用は本番反映時にユーザー承認）。
+
+## 申し送り（後続プランへ）
+
+- 単一レンダラ収束（出力の文字列 serializer ↔ プレビュー `SalesSheetRenderer`。計画②からの繰越・standalone worker 化）はこのプランでも未対応。エディタプレビューはブラウザ側 `SalesSheetRenderer`、出力はサーバー側パイプラインのまま（parity テストで漂流検知）。
+- 写真の追加/差し替え/トリミング/パノラマ＝計画④。テンプレ・ギャラリー＝計画⑤。自動レイアウト＝計画⑥。バッジ＝計画⑦。QR/テーマ/表示項目/複製＝計画⑧。
+- thumbnailUrl 生成（一覧サムネ）は任意。出力 PNG を縮小保存する形で後続可。
+- undo/redo は v1 範囲外（reducer 設計上は履歴スタックを後付け可能）。
+- モーダル/エディタの a11y（フォーカス/キーボード操作）は UI 実装時に最低限を入れ、本格対応は仕上げ計画で。
