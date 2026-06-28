@@ -25,12 +25,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // field_staff は現在の物件 record scope(作成/担当)の宛先PIIのみ返す。物件が別担当へ
     // 再割当されたら、自分が作成したキャンペーンでもその宛先(氏名/住所/本文)は出さない。
     const visible = filterDraftsByFieldStaffScope(campaign.recipients, session);
-    // scope 判定用に引いた property は応答に載せない(元の recipient 形へ戻す)。
-    const recipients = visible.map((r) => {
-      const { property, ...rest } = r;
-      void property;
-      return rest;
-    });
+    // 応答は client が使う列だけに絞る(whitelist)。特に trackingToken は返さない: 公開 /t/<token> を直接
+    // 叩いて LP 反響(lpAccessCount / outcome=inquiry)を property:write ゲート無しに捏造でき、A/B 集計を
+    // 改竄できるため。scope 判定用に引いた property も載せない。印刷 route は token をサーバー側で使う(非露出)。
+    const recipients = visible.map((r) => ({
+      id: r.id,
+      variantId: r.variantId,
+      propertyId: r.propertyId,
+      recipientName: r.recipientName,
+      recipientZip: r.recipientZip,
+      recipientAddress: r.recipientAddress,
+      honorific: r.honorific,
+      coOwnerCount: r.coOwnerCount,
+      body: r.body,
+      status: r.status,
+      outcome: r.outcome,
+      deliveryStatus: r.deliveryStatus,
+      lpFirstAccessAt: r.lpFirstAccessAt,
+      phoneInquiryAt: r.phoneInquiryAt,
+    }));
     return NextResponse.json(
       { campaign: { ...campaign, recipients } },
       { headers: { "Cache-Control": "no-store" } },
