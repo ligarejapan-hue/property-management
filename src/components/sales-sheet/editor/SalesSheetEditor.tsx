@@ -35,6 +35,9 @@ export interface SalesSheetEditorProps {
  */
 const DEFAULT_ZOOM = 0.75;
 
+/** Millimetres to pixels at 96 dpi (96 / 25.4). */
+const MM_TO_PX = 3.7795;
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -64,14 +67,14 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   // ── Render ──────────────────────────────────────────────────────────────
   const { page } = editorState.document;
 
-  // Paper pixel dimensions at zoom (3.7795 px/mm at 96 dpi)
-  const MM_TO_PX = 3.7795;
+  // Paper pixel dimensions at zoom
   const scaledW = page.width * MM_TO_PX * DEFAULT_ZOOM;
   const scaledH = page.height * MM_TO_PX * DEFAULT_ZOOM;
 
   return (
     <div className="flex flex-col h-full bg-neutral-200 dark:bg-zinc-900">
       {/* ── Toolbar placeholder — Task G/H ───────────────────────────── */}
+      <div data-toolbar-placeholder />
 
       {/* ── Main split ───────────────────────────────────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">

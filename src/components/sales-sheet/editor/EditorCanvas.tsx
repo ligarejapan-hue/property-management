@@ -78,11 +78,20 @@ export function EditorCanvas({ document, selectedId, onSelect }: EditorCanvasPro
           <div
             key={el.id}
             data-hit-box={el.id}
+            data-selected={isSelected ? "true" : undefined}
+            role="button"
+            tabIndex={0}
             aria-label={`select element ${el.id}`}
             style={hitBoxStyle(el, isSelected)}
             onClick={(e) => {
               e.stopPropagation();
               onSelect(el.id);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(el.id);
+              }
             }}
           />
         );

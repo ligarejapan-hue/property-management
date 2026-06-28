@@ -62,11 +62,19 @@ describe("EditorCanvas — 選択ハイライト", () => {
     expect(html).toContain("#2563eb");
   });
 
-  it("選択なし時はハイライト色 (#2563eb) が現れない", () => {
+  it("選択中要素の hit-box に data-selected=\"true\" が付く", () => {
+    const firstId = sampleDocument.elements[0].id;
+    const html = renderToStaticMarkup(
+      <EditorCanvas document={sampleDocument} selectedId={firstId} onSelect={() => {}} />,
+    );
+    expect(html).toContain(`data-hit-box="${firstId}" data-selected="true"`);
+  });
+
+  it("選択なし時は data-selected=\"true\" が現れない", () => {
     const html = renderToStaticMarkup(
       <EditorCanvas document={sampleDocument} selectedId={null} onSelect={() => {}} />,
     );
-    expect(html).not.toContain("#2563eb");
+    expect(html).not.toContain('data-selected="true"');
   });
 
   it("選択されていない要素の hit-box は transparent ボーダーを持つ", () => {
