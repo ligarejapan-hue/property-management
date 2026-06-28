@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
 import { isSaleDmConfigured, generateLetters } from "@/lib/sale-dm-letter";
 import { resolveSender } from "@/lib/sale-dm-letter/sender";
 import { resolveDraftOptions } from "@/lib/sale-dm-letter/override";
@@ -54,6 +55,15 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (updated.count === 0) {
       throw new ApiError(409, "送付済みの宛先は再生成できません", "ALREADY_SENT");
     }
+    // 再生成も有料AI呼び出し+オーナーPII の外部送信を伴うため、campaign 作成/下書き編集と同様に
+    // 非PII の監査を残す(初回作成以降の課金/PII外部送信を管理画面で追跡可能に)。本文・宛名は残さない。
+    await writeAuditLog({
+      userId: session.id,
+      action: "sale_dm_draft_regenerate",
+      targetTable: "dm_recipient_drafts",
+      targetId: id,
+      detail: { campaignId: draft.campaignId, propertyId: draft.propertyId, regeneratedAt: new Date().toISOString() },
+    });
     return NextResponse.json({ id, body }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return handleApiError(error); }
 }

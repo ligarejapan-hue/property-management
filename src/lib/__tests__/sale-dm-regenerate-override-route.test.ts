@@ -30,6 +30,7 @@ vi.mock("@/lib/sale-dm-letter", () => ({
 import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
+import { writeAuditLog } from "@/lib/audit";
 import { POST as regenerate } from "../../app/api/properties/sale-dm/drafts/[id]/regenerate/route";
 
 const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> } };
@@ -64,6 +65,9 @@ describe("POST regenerate (override 反映)", () => {
     // override の tone=soft が反映され、未指定 appeal は variant の price のまま
     expect(passed[0].options.tone).toBe("soft");
     expect(passed[0].options.appeal).toBe("price");
+    // 有料AI+PII外部送信のため非PII監査を残す(初回作成以降の課金/送信も追跡可能に)。
+    expect(writeAuditLog).toHaveBeenCalled();
+    expect((writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].action).toBe("sale_dm_draft_regenerate");
   });
 
   it("overrideJson が null なら variant 設定そのままで生成する", async () => {
