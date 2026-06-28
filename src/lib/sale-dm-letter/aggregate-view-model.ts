@@ -20,7 +20,9 @@ export interface VariantRow {
 // 集計の母数: 反響率=到達数 / 宛先不明率=送付数(設計書の定義に一致)。
 export function buildVariantRows(campaign: SaleDmCampaign): VariantRow[] {
   return campaign.variants.map((v) => {
-    const drafts = campaign.recipients.filter((r) => r.variantId === v.id);
+    // 送付済み(status==="sent")の宛先のみ集計対象。draft/confirmed(未送付)は配達/反響結果を持てないため、
+    // 送付数の母数に含めると未送付を送付済みと誤計上し、宛先不明率/反響率を希釈する(サーバ集計と一致)。
+    const drafts = campaign.recipients.filter((r) => r.variantId === v.id && r.status === "sent");
     const sent = drafts.length;
     const delivered = drafts.filter((r) => r.deliveryStatus === "delivered").length;
     const undeliverable = drafts.filter((r) => r.deliveryStatus === "returned_undeliverable").length;

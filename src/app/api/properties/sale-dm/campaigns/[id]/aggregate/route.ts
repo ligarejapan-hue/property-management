@@ -26,7 +26,9 @@ export async function GET(
         select: { id: true, label: true },
       }),
       prisma.dmRecipientDraft.findMany({
-        where: { campaignId: id },
+        // 送付済み(sent)のみ集計。未送付(draft/confirmed)は配達/反響結果を持てず、送付数の母数に
+        // 入れると宛先不明率/反響率を希釈するため除外する(aggregateByVariant は渡された draft を全て sent 計上)。
+        where: { campaignId: id, status: "sent" },
         select: {
           variantId: true,
           deliveryStatus: true,

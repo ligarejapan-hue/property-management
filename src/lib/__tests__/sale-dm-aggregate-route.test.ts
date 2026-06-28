@@ -104,6 +104,12 @@ describe("GET aggregate", () => {
     expect(json.total.responseRate).toBeNull();
   });
 
+  it("集計対象は status:sent の宛先のみ(未送付を送付数の母数に入れない)", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([]);
+    await GET(new Request("http://x") as never, ctx());
+    expect(pm.dmRecipientDraft.findMany.mock.calls[0][0].where).toMatchObject({ campaignId: "c1", status: "sent" });
+  });
+
   it("存在しない campaign は 404", async () => {
     pm.dmCampaign.findUnique.mockResolvedValue(null);
     const res = await GET(new Request("http://x") as never, ctx());

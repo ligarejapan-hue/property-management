@@ -60,8 +60,8 @@ beforeEach(() => {
   grant(...ALL);
   // assertSaleDmCampaignOwned 用: 既定で作成者本人のキャンペーン(owned)。
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
-  // 既定で型は当該キャンペーンに存在する(存在チェック通過)。
-  pm.dmVariant.findFirst.mockResolvedValue({ id: "v1" });
+  // 既定で型は当該キャンペーンに存在する(存在チェック通過)。既存 option 値も返す(送信値との差分判定用)。
+  pm.dmVariant.findFirst.mockResolvedValue({ id: "v1", ...optionFields, extraInstruction: null });
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
 });
 
@@ -139,6 +139,15 @@ describe("PATCH variant (更新)", () => {
     pm.dmRecipientDraft.count.mockResolvedValue(0);
     pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: {} }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("現在値と同じ options を送る full-form 保存は無効化しない(値が変わらなければ本文を消さない)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
+    // 既存 = optionFields(beforeEach の findFirst)と同値を送信。1項目も変わらない。
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { ...optionFields } }) }) as never, ctxV);
     expect(res.status).toBe(200);
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });

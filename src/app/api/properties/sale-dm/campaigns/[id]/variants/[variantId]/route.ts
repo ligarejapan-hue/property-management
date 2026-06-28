@@ -14,24 +14,29 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const parsed = saleDmVariantUpdateSchema.parse(await parseJsonBody(request));
 
     // 当該キャンペーンに存在する型のみ更新可。stale/削除済み id は Prisma P2025→500 でなく 404 に。
-    const exists = await prisma.dmVariant.findFirst({ where: { id: variantId, campaignId: id }, select: { id: true } });
-    if (!exists) {
+    // 既存の option 値も取得し、送信値と比較して「実際に変わった」ときだけ無効化する(下記)。
+    const existing = await prisma.dmVariant.findFirst({
+      where: { id: variantId, campaignId: id },
+      select: { id: true, designTemplate: true, tone: true, length: true, appeal: true, strength: true, extraInstruction: true },
+    });
+    if (!existing) {
       throw new ApiError(404, "指定された型が見つかりません", "VARIANT_NOT_FOUND");
     }
 
     const data: Prisma.DmVariantUpdateInput = {};
     if (parsed.label !== undefined) data.label = parsed.label;
-    // options 内で実際に指定された項目だけ反映し、1項目でも変われば true。
-    // 空 options(例: {"options":{}})は設定変更なし扱い=下書き無効化を起こさない(no-op を本文消去にしない)。
+    // options は指定項目を反映しつつ、既存値と異なる場合のみ optionFieldChanged=true にする。
+    // full-form UI が現在値ごと再送する no-op 保存(や空 options)で生成/承認済みの本文を消さないため、
+    // 「項目が来たか」ではなく「値が実際に変わったか」で無効化を判定する。
     let optionFieldChanged = false;
     if (parsed.options) {
       const o = parsed.options;
-      if (o.designTemplate !== undefined) { data.designTemplate = o.designTemplate; optionFieldChanged = true; }
-      if (o.tone !== undefined) { data.tone = o.tone; optionFieldChanged = true; }
-      if (o.length !== undefined) { data.length = o.length; optionFieldChanged = true; }
-      if (o.appeal !== undefined) { data.appeal = o.appeal; optionFieldChanged = true; }
-      if (o.strength !== undefined) { data.strength = o.strength; optionFieldChanged = true; }
-      if (o.extraInstruction !== undefined) { data.extraInstruction = o.extraInstruction ?? null; optionFieldChanged = true; }
+      if (o.designTemplate !== undefined) { data.designTemplate = o.designTemplate; if (o.designTemplate !== existing.designTemplate) optionFieldChanged = true; }
+      if (o.tone !== undefined) { data.tone = o.tone; if (o.tone !== existing.tone) optionFieldChanged = true; }
+      if (o.length !== undefined) { data.length = o.length; if (o.length !== existing.length) optionFieldChanged = true; }
+      if (o.appeal !== undefined) { data.appeal = o.appeal; if (o.appeal !== existing.appeal) optionFieldChanged = true; }
+      if (o.strength !== undefined) { data.strength = o.strength; if (o.strength !== existing.strength) optionFieldChanged = true; }
+      if (o.extraInstruction !== undefined) { const next = o.extraInstruction ?? null; data.extraInstruction = next; if (next !== existing.extraInstruction) optionFieldChanged = true; }
     }
 
     // field_staff は campaign-level の型 options 変更で「担当外(再割当で隠れた)の未送付下書き」の本文まで

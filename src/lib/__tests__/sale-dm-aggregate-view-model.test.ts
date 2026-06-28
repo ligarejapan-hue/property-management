@@ -58,4 +58,18 @@ describe("buildVariantRows", () => {
     expect(a.inquiries).toBe(2);          // 反響総数(表示用)は到達状況に関わらず維持
     expect(a.inquiryRate).toBe("100.0%"); // 率の分子=到達かつ反響=1 / 到達1 → 100%(>100%にならない)
   });
+
+  it("未送付(draft/confirmed)は送付数・各指標の母数に含めない(送付済みのみ集計)", () => {
+    const c: SaleDmCampaign = {
+      ...campaign,
+      recipients: [
+        draft({ variantId: "v1", status: "sent", deliveryStatus: "delivered" }),
+        draft({ variantId: "v1", status: "draft", deliveryStatus: "unknown" }),     // 未送付
+        draft({ variantId: "v1", status: "confirmed", deliveryStatus: "unknown" }), // 未送付
+      ],
+    };
+    const a = buildVariantRows(c).find((r) => r.variantId === "v1")!;
+    expect(a.sent).toBe(1); // 送付済み 1 件のみ(未送付 2 件は除外)
+    expect(a.delivered).toBe(1);
+  });
 });
