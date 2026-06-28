@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
 import dynamic from "next/dynamic";
-import type { OnDrag, OnDragEnd, OnResize, OnResizeEnd } from "react-moveable";
+import type { OnDrag, OnDragEnd, OnResize, OnResizeEnd, MoveableProps } from "react-moveable";
 import type { SalesSheetDocument, SalesSheetElement } from "@/lib/sales-sheet/document-schema";
 import { SalesSheetRenderer } from "../SalesSheetRenderer";
 import { pxToMm, mmToViewportPx } from "./geometry";
@@ -13,8 +13,7 @@ import { pxToMm, mmToViewportPx } from "./geometry";
 // ssr: false ensures it is never evaluated during server rendering / build.
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const MoveableNoSSR = dynamic<any>(() => import("react-moveable"), { ssr: false });
+const MoveableNoSSR = dynamic<MoveableProps>(() => import("react-moveable"), { ssr: false });
 
 // ---------------------------------------------------------------------------
 // Types
@@ -149,7 +148,10 @@ export function EditorCanvas({
 
   /**
    * Resize committed: convert viewport-px → mm, dispatch to reducers.
-   * Dispatches both resize (size) and move (origin shift for top/left handles).
+   * Dispatches resize (size) always; dispatches move only when the element
+   * origin actually shifted (top/left-handle resize). A bottom/right-handle
+   * resize leaves the origin unchanged, so skipping the move dispatch avoids
+   * a redundant setEditorState and a spurious dirty-mark.
    */
   function handleResizeEnd({ target, isDrag, lastEvent }: OnResizeEnd) {
     const el = target as HTMLElement;
@@ -159,11 +161,21 @@ export function EditorCanvas({
       if (onResize) {
         onResize(selectedId, { w, h });
       }
-      // If the resize dragged the element origin (top/left handle), also move.
+      // Only dispatch a move when the origin actually shifted (top/left-handle
+      // resize). Compare converted mm values against the stored position using a
+      // small epsilon to tolerate float conversion noise.
       if (onMove) {
         const x = pxToMm(lastEvent.drag.left, mmToPx, zoom);
         const y = pxToMm(lastEvent.drag.top, mmToPx, zoom);
-        onMove(selectedId, { x, y });
+        const currentEl = elements.find((e) => e.id === selectedId);
+        const ORIGIN_EPSILON = 0.01; // mm
+        if (
+          !currentEl ||
+          Math.abs(x - currentEl.x) > ORIGIN_EPSILON ||
+          Math.abs(y - currentEl.y) > ORIGIN_EPSILON
+        ) {
+          onMove(selectedId, { x, y });
+        }
       }
     }
     // Reset inline styles.
@@ -223,7 +235,7 @@ export function EditorCanvas({
       })}
 
       {/* ── Moveable: drag/resize handles for the selected element ───── */}
-      {moveableTarget && onMove && (
+      {moveableTarget && (onMove || onResize) && (
         <MoveableNoSSR
           target={moveableTarget}
           draggable={true}

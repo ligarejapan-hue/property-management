@@ -85,16 +85,12 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
 
   /** Raises the selected element above all others. */
   function handleBringToFront(): void {
-    if (editorState.selectedId) {
-      setEditorState((prev) => bringToFront(prev, prev.selectedId!));
-    }
+    setEditorState((prev) => (prev.selectedId ? bringToFront(prev, prev.selectedId) : prev));
   }
 
   /** Lowers the selected element below all others. */
   function handleSendToBack(): void {
-    if (editorState.selectedId) {
-      setEditorState((prev) => sendToBack(prev, prev.selectedId!));
-    }
+    setEditorState((prev) => (prev.selectedId ? sendToBack(prev, prev.selectedId) : prev));
   }
 
   // ── Render ──────────────────────────────────────────────────────────────
