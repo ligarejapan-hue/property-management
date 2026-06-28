@@ -25,6 +25,7 @@ function makeDb(overrides?: Partial<{
   findUnique: Mock;
   findMany: Mock;
   update: Mock;
+  updateMany: Mock;
   delete: Mock;
 }>) {
   return {
@@ -33,6 +34,7 @@ function makeDb(overrides?: Partial<{
       findUnique: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
       ...overrides,
     },
@@ -152,8 +154,11 @@ describe("updateDesign", () => {
   it("updatedAt が一致する場合は更新成功を返す", async () => {
     const updated = { ...storedDesign, title: "新タイトル", updatedBy: "user2" };
     const db = makeDb({
-      findUnique: vi.fn().mockResolvedValue(storedDesign),
-      update: vi.fn().mockResolvedValue(updated),
+      // findUnique is called twice: once inside getDesign, once for post-write re-read
+      findUnique: vi.fn()
+        .mockResolvedValueOnce(storedDesign) // getDesign
+        .mockResolvedValueOnce(updated),     // post-write re-read
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     });
     const result = await updateDesign(
       "prop1", "sheet1",
@@ -162,10 +167,15 @@ describe("updateDesign", () => {
       db,
     );
     expect(result).toEqual({ ok: true, design: updated });
+    expect(db.salesSheetDesign.updateMany).toHaveBeenCalledOnce();
   });
 
   it("updatedAt が不一致の場合は conflict を返す（楽観ロック）", async () => {
-    const db = makeDb({ findUnique: vi.fn().mockResolvedValue(storedDesign) });
+    // updateMany returns count=0 because the stale timestamp doesn't match the DB row
+    const db = makeDb({
+      findUnique: vi.fn().mockResolvedValue(storedDesign),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    });
     const staleDate = new Date("2026-01-01T00:00:00.000Z");
     const result = await updateDesign(
       "prop1", "sheet1",
@@ -174,7 +184,29 @@ describe("updateDesign", () => {
       db,
     );
     expect(result).toEqual({ ok: false, reason: "conflict" });
-    expect(db.salesSheetDesign.update).not.toHaveBeenCalled();
+    // conflict is now driven by the atomic updateMany result, not a pre-read compare
+    expect(db.salesSheetDesign.updateMany).toHaveBeenCalledOnce();
+  });
+
+  it("同時書き込み競合: updateMany が count:0 を返す場合 conflict を返す（アトミックガード）", async () => {
+    // Scenario: timestamps match at read-time, but a concurrent writer commits between
+    // our read and our write. The DB-side WHERE on updatedAt catches the race.
+    const db = makeDb({
+      findUnique: vi.fn().mockResolvedValue(storedDesign), // read succeeds (timestamps match)
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }), // concurrent writer already wrote
+    });
+    const result = await updateDesign(
+      "prop1", "sheet1",
+      { title: "新タイトル", expectedUpdatedAt: NOW },
+      "user2",
+      db,
+    );
+    expect(result).toEqual({ ok: false, reason: "conflict" });
+    // Assert the write predicate included updatedAt — that is the atomic guard
+    const whereArg = (db.salesSheetDesign.updateMany as Mock).mock.calls[0][0].where;
+    expect(whereArg).toMatchObject({ id: "sheet1", propertyId: "prop1", updatedAt: NOW });
+    // No post-write re-read on conflict
+    expect(db.salesSheetDesign.findUnique).toHaveBeenCalledTimes(1); // only the getDesign read
   });
 
   it("design が存在しない場合は not_found を返す", async () => {
@@ -186,6 +218,7 @@ describe("updateDesign", () => {
       db,
     );
     expect(result).toEqual({ ok: false, reason: "not_found" });
+    expect(db.salesSheetDesign.updateMany).not.toHaveBeenCalled();
   });
 
   it("他物件の design 更新は not_found を返す", async () => {
@@ -197,17 +230,19 @@ describe("updateDesign", () => {
       db,
     );
     expect(result).toEqual({ ok: false, reason: "not_found" });
+    expect(db.salesSheetDesign.updateMany).not.toHaveBeenCalled();
   });
 
   it("patch に不正な document が含まれる場合は ZodError を throw する", async () => {
     const db = makeDb({
       findUnique: vi.fn().mockResolvedValue(storedDesign),
-      update: vi.fn(),
+      updateMany: vi.fn(),
     });
     await expect(
       updateDesign("prop1", "sheet1", { document: invalidDocument, expectedUpdatedAt: NOW }, "user1", db),
     ).rejects.toThrow();
-    expect(db.salesSheetDesign.update).not.toHaveBeenCalled();
+    // parseSalesSheetDocument throws before the write — DB is untouched
+    expect(db.salesSheetDesign.updateMany).not.toHaveBeenCalled();
   });
 });
 

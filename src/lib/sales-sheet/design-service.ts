@@ -48,12 +48,19 @@ export async function updateDesign(
 ) {
   const current = await getDesign(propertyId, sheetId, db);
   if (!current) return { ok: false as const, reason: "not_found" as const };
-  if (new Date(current.updatedAt).getTime() !== new Date(patch.expectedUpdatedAt).getTime())
-    return { ok: false as const, reason: "conflict" as const };
   const data: Record<string, unknown> = { updatedBy: userId };
   if (patch.title !== undefined) data.title = patch.title.trim() || "無題の販売図面";
-  if (patch.document !== undefined) data.document = parseSalesSheetDocument(patch.document);
-  const updated = await db.salesSheetDesign.update({ where: { id: sheetId }, data });
+  if (patch.document !== undefined) data.document = parseSalesSheetDocument(patch.document); // throws -> 422, before write
+  // Atomic optimistic-lock: timestamp check + write in one operation.
+  // updateMany guards the WHERE on updatedAt so two concurrent saves with the
+  // same expectedUpdatedAt cannot both succeed — the second gets count=0.
+  const result = await db.salesSheetDesign.updateMany({
+    where: { id: sheetId, propertyId, updatedAt: new Date(patch.expectedUpdatedAt) },
+    data,
+  });
+  if (result.count === 0) return { ok: false as const, reason: "conflict" as const };
+  // count > 0 guarantees the row exists; the non-null assertion is safe here.
+  const updated = (await db.salesSheetDesign.findUnique({ where: { id: sheetId } }))!;
   return { ok: true as const, design: updated };
 }
 
