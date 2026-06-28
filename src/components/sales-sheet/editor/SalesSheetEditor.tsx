@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import type { EditorState } from "@/lib/sales-sheet/editor-document";
 import {
@@ -11,10 +12,12 @@ import {
   sendToBack,
   editText,
   deleteElement,
+  markSaved,
 } from "@/lib/sales-sheet/editor-document";
 import { EditorCanvas } from "./EditorCanvas";
 import { ElementPanel } from "./ElementPanel";
 import type { ElementPanelChange } from "./ElementPanel";
+import { EditorToolbar } from "./EditorToolbar";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,7 +56,7 @@ const MM_TO_PX = 96 / 25.4;
 // ---------------------------------------------------------------------------
 
 /**
- * SalesSheetEditor — "use client" shell (plan-3 Task E + Task F + Task G)
+ * SalesSheetEditor — "use client" shell (plan-3 Task E + Task F + Task G + Task H)
  *
  * Holds EditorState (document + selectedId + dirty) via useState.
  * Renders the EditorCanvas in a scrollable, scale-transformed stage.
@@ -64,13 +67,18 @@ const MM_TO_PX = 96 / 25.4;
  * Task G: mounts ElementPanel in the right panel — geometry (x/y/w/h in mm),
  *   z-order, delete, and text editing (content / font / size / color).
  *   All panel changes flow through handleElementPanelChange → Task-D reducers.
+ *
+ * Task H: EditorToolbar with save (PUT + optimistic lock), export (POST blob),
+ *   delete (DELETE + navigate). Dirty indicator.
  */
 export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
+  const router = useRouter();
   const [editorState, setEditorState] = useState<EditorState>({
     document: initial.document,
     selectedId: null,
     dirty: false,
   });
+  const [savedAt, setSavedAt] = useState(initial.updatedAt);
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
@@ -110,6 +118,51 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     });
   }
 
+  /** Save current document via PUT; handles optimistic-lock 409. */
+  async function handleSave(): Promise<void> {
+    const res = await fetch(
+      `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document: editorState.document, expectedUpdatedAt: savedAt }),
+      },
+    );
+    if (res.status === 409) throw new Error("他で更新されました。再読込してください");
+    if (!res.ok) throw new Error("保存に失敗しました");
+    const data = (await res.json()) as { updatedAt: string };
+    setSavedAt(data.updatedAt);
+    setEditorState((prev) => markSaved(prev));
+  }
+
+  /** Export as PDF or PNG. Auto-saves first when dirty. */
+  async function handleExport(format: "pdf" | "png"): Promise<void> {
+    if (editorState.dirty) await handleSave();
+    const res = await fetch(
+      `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}/export?format=${format}`,
+      { method: "POST" },
+    );
+    if (res.status === 503) throw new Error("PDF生成エンジン未準備");
+    if (!res.ok) throw new Error("出力に失敗しました");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = format === "pdf" ? "販売図面.pdf" : "販売図面.png";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** Delete design and navigate back to the property detail page. */
+  async function handleDelete(): Promise<void> {
+    const res = await fetch(
+      `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) throw new Error("削除に失敗しました");
+    router.push(`/properties/${initial.propertyId}`);
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────
   const { page } = editorState.document;
 
@@ -125,8 +178,13 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
 
   return (
     <div className="flex flex-col h-full bg-neutral-200 dark:bg-zinc-900">
-      {/* ── Toolbar placeholder — Task G/H ───────────────────────────── */}
-      <div data-toolbar-placeholder />
+      {/* ── Toolbar — Task H ─────────────────────────────────────────── */}
+      <EditorToolbar
+        dirty={editorState.dirty}
+        onSave={handleSave}
+        onExport={handleExport}
+        onDelete={handleDelete}
+      />
 
       {/* ── Main split ───────────────────────────────────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
