@@ -34,6 +34,23 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (o.extraInstruction !== undefined) { data.extraInstruction = o.extraInstruction ?? null; optionFieldChanged = true; }
     }
 
+    // field_staff は campaign-level の型 options 変更で「担当外(再割当で隠れた)の未送付下書き」の本文まで
+    // 無効化してしまう(型は campaign 横断で多数の宛先に共有)。GET/print/export/aggregate の scope 絞り込みと
+    // 整合させるため、担当外の未送付下書きが1件でもあれば options 変更を拒否する(label のみ=本文不変は許可)。
+    if (optionFieldChanged && session.role === "field_staff") {
+      const outOfScope = await prisma.dmRecipientDraft.count({
+        where: {
+          campaignId: id,
+          variantId,
+          status: { not: "sent" },
+          property: { createdBy: { not: session.id }, assignedTo: { not: session.id } },
+        },
+      });
+      if (outOfScope > 0) {
+        throw new ApiError(403, "担当外の宛先を含む型は設定を変更できません", "FORBIDDEN");
+      }
+    }
+
     // 送付済みの宛先が使っている型は設定変更不可(送付後に設計/トーン/訴求やラベルを変えると CSV・送付履歴・
     // A/B 集計が実際に送った構成と食い違う)。sent チェック→型更新→下書き無効化を 1 トランザクションにまとめ、
     // 前後で sent を数えることで mark-sent との競合(TOCTOU=チェック後に別 request が sent 化)を検出し

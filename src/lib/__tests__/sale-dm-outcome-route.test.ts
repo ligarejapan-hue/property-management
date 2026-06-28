@@ -258,12 +258,19 @@ describe("PATCH outcome", () => {
     expect(pm.property.update).not.toHaveBeenCalled();
   });
 
-  it("property:write 不足でも物件連動しない記録(delivered/電話)は 200(下書きのみ更新)", async () => {
+  it("property:write 不足は物件連動しない記録(delivered/電話)も 403(全outcome更新にwrite必須=権限失効後の集計汚染防止)", async () => {
     (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: false }] });
     const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
-    expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.update).toHaveBeenCalled();
+    expect(res.status).toBe(403);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
     expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("property:write 不足は電話反響の記録も 403(下書きの delivery/response 書込を許さない)", async () => {
+    (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: false }] });
+    const res = await PATCH(req({ phoneInquiry: true }) as never, ctx());
+    expect(res.status).toBe(403);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
   });
 
   it("field_staff が作成/担当でない物件への宛先不明連動は 403・副作用なし(物件 record scope)", async () => {

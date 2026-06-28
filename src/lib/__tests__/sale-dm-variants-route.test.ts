@@ -143,6 +143,34 @@ describe("PATCH variant (更新)", () => {
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
+  it("field_staff は担当外の未送付下書きを含む型の options 変更を拒否(403・本文消去させない)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.count.mockResolvedValue(2); // 担当外(再割当で隠れた)の未送付下書きが存在
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
+    expect(res.status).toBe(403);
+    expect(pm.dmVariant.update).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    const where = pm.dmRecipientDraft.count.mock.calls[0][0].where;
+    expect(where).toMatchObject({ campaignId: "c1", variantId: "v1", status: { not: "sent" } });
+    expect(where.property).toEqual({ createdBy: { not: "u1" }, assignedTo: { not: "u1" } });
+  });
+
+  it("field_staff でも担当内のみの型なら options 変更できる(200)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.count.mockResolvedValue(0); // 担当外なし & sent なし
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+  });
+
+  it("field_staff の label のみ変更(本文不変)は担当外チェックをかけず許可(200)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A2", ...optionFields });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "A2" }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+  });
+
   it("送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {
     pm.dmRecipientDraft.count.mockResolvedValue(2); // この型を使った送付済みドラフトが存在
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);

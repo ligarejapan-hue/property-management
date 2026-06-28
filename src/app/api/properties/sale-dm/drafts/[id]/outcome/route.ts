@@ -97,12 +97,11 @@ export async function PATCH(
       throw new ApiError(403, "この宛先を操作する権限がありません", "FORBIDDEN");
     }
 
-    // 物件(properties)テーブルを変更する分岐(宛先不明の設定/解除)は、他の物件APIと
-    // 同様に property:write を要求する。read 系の DM アクセス権だけで物件状態を書き換えさせない。
-    if (becameUndeliverable || clearedUndeliverable) {
-      if (!hasPermission(permissions, "property", "write")) {
-        throw new ApiError(403, "物件の宛先不明状態を更新する権限(write)がありません", "FORBIDDEN");
-      }
+    // outcome 更新は配達/反響/メモいずれも下書きの delivery/response 記録を書き換え、A/B 集計に反映される。
+    // 権限失効後に送付済みの結果を改竄(集計汚染)させないため、全 outcome 更新に property:write を要求する
+    // (従来は宛先不明の設定/解除=properties 書込時のみ。mark-sent と同じ write ゲートに統一)。
+    if (!hasPermission(permissions, "property", "write")) {
+      throw new ApiError(403, "配達結果・反響を更新する権限(write)がありません", "FORBIDDEN");
     }
 
     const draftData: Record<string, unknown> = {
