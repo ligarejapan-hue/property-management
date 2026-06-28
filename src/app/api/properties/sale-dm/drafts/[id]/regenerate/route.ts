@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { handleApiError, ApiError } from "@/lib/api-helpers";
+import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
@@ -9,12 +9,18 @@ import { resolveSender } from "@/lib/sale-dm-letter/sender";
 import { resolveDraftOptions } from "@/lib/sale-dm-letter/override";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { session, permissions } = await requireSaleDmAccess();
     // 再生成も有料AI呼び出し(1通)+ オーナーPII の外部送信のため sale_dm:generate を必須化(campaign 作成と統一)。
     if (!hasPermission(permissions, "sale_dm", "generate")) throw new ApiError(403, "AIによるDM生成の権限がありません", "FORBIDDEN");
     if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
+    // 課金確認: 再生成も有料AI+PII外部送信のため、campaign 作成と同じく明示確認(confirmed:true)を要求する。
+    // stale tab/誤クリックの1クリックで無確認の課金・PII送信が起きないようにする(UI は確認後 true を送る)。
+    const requestBody = await parseJsonBody(request);
+    if ((requestBody as { confirmed?: unknown }).confirmed !== true) {
+      throw new ApiError(400, "再生成には課金確認(confirmed:true)が必要です", "SALE_DM_CONFIRMATION_REQUIRED");
+    }
     const { id } = await params;
     const draft = await prisma.dmRecipientDraft.findUnique({ where: { id }, include: { variant: true, property: { select: { address: true, propertyType: true, roomNo: true, createdBy: true, assignedTo: true } }, campaign: { select: { createdBy: true } } } });
     // 作成者本人のキャンペーン配下のみ(横断アクセス防止)。not-found/not-owned は同じ 404。

@@ -48,7 +48,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       action: "sale_dm_variant_create",
       targetTable: "dm_variants",
       targetId: variant.id,
-      detail: { campaignId: id, label, createdAt: new Date().toISOString() },
+      // label は operator 自由記述(PII混入し得る)。AuditLog detail には保存しない(redact でなく非保存)。
+      // 追跡は campaignId + targetId(=variant.id)で足りる。
+      detail: { campaignId: id, createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json({ variant }, { headers: { "Cache-Control": "no-store" } });

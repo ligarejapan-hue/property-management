@@ -45,6 +45,12 @@ export async function POST(request: NextRequest) {
       throw new ApiError(400, "AI生成には課金確認(confirmed:true)が必要です", "SALE_DM_CONFIRMATION_REQUIRED");
     }
     const query = propertyListQuerySchema.parse(body.filters ?? {});
+    // DM は送付可(dmStatus=send)の物件にのみ生成する。ユーザーの絞り込みが明示的に send 以外(hold/no_send)を
+    // 指している場合、send へ黙って上書きすると、確認ダイアログの「現在の絞り込み対象」と実際の生成対象がずれ、
+    // 意図しない物件へオーナーPII送信+課金が起きる。上書きせず 400 で弾き、確認した対象と一致させる。
+    if (query.dmStatus !== undefined && query.dmStatus !== "send") {
+      throw new ApiError(400, "送付可(dmStatus=send)以外の絞り込みではDMを作成できません", "INVALID_DM_STATUS_FILTER");
+    }
     const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
     where.dmStatus = "send";
     where.isArchived = false;

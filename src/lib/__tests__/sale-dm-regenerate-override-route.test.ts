@@ -9,7 +9,7 @@ vi.mock("@/lib/api-helpers", () => {
   return {
     ApiError: MockApiError,
     getApiSession: vi.fn(), getUserPermissions: vi.fn(), getOwnerDisplayConfig: vi.fn(),
-    parseJsonBody: vi.fn(async () => ({})),
+    parseJsonBody: vi.fn(async () => ({ confirmed: true })), // 再生成は confirmed:true 必須(課金確認)
     handleApiError: vi.fn((e: unknown) => e instanceof MockApiError ? Response.json({ error: { message: e.message, code: e.code } }, { status: e.status }) : Response.json({ error: { code: "INTERNAL_ERROR" } }, { status: 500 })),
   };
 });

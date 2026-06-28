@@ -183,8 +183,18 @@ describe("POST regenerate draft (再生成)", () => {
     grant(...ALL);
     (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
     (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(503);
+  });
+
+  it("課金確認なし(confirmed 未指定)の再生成は 400・生成しない(campaign 作成と同じ確認ゲート)", async () => {
+    grant(...ALL);
+    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
+    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    expect(res.status).toBe(400);
+    expect(generateLetters).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("draft が存在しない場合 404", async () => {
@@ -192,7 +202,7 @@ describe("POST regenerate draft (再生成)", () => {
     (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
     (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
     pm.dmRecipientDraft.findUnique.mockResolvedValue(null);
-    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(404);
   });
 
@@ -205,7 +215,7 @@ describe("POST regenerate draft (再生成)", () => {
       ...mockDraft,
       property: { address: "東京都〇〇区", propertyType: "land", roomNo: null, createdBy: "other", assignedTo: "other" },
     });
-    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(403);
   });
 
@@ -216,7 +226,7 @@ describe("POST regenerate draft (再生成)", () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
     (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
-    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(200);
     // 本文が変わるため確定を解除=再生成後の新文面を再確認なしで印刷/送付させない(承認ゲート維持)。
     // where は status!=sent に加え、生成時の variant options を relational filter で要求する(生成中の型変更で
@@ -238,7 +248,7 @@ describe("POST regenerate draft (再生成)", () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
     (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 }); // variant options 不一致 or sent 化で 0 行
-    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(409);
   });
 
@@ -249,7 +259,7 @@ describe("POST regenerate draft (再生成)", () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
     (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
-    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
+    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(409);
   });
 });

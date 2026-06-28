@@ -128,4 +128,11 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(res.status).toBe(400);
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
   });
+
+  it("送付可(send)以外の dmStatus 絞り込みでは 400・生成しない(確認対象と実際の生成対象のズレを防ぐ)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const res = await POST(req({ ...validBody, filters: { dmStatus: "hold" } }) as never);
+    expect(res.status).toBe(400);
+    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
 });

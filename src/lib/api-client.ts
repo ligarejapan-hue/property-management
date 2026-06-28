@@ -249,6 +249,9 @@ export async function regenerateSaleDmDraft(id: string) {
   }
   return apiFetch<{ id: string; body: string }>(`/api/properties/sale-dm/drafts/${id}/regenerate`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // 課金確認(有料AI+オーナーPII外部送信)。UI が確認ダイアログの後に呼ぶ。サーバーも必須。
+    body: JSON.stringify({ confirmed: true }),
   });
 }
 

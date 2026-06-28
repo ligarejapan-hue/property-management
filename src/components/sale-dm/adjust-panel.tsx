@@ -52,6 +52,9 @@ export default function SaleDmAdjustPanel({
 
   const regenerate = async () => {
     if (!selected) return;
+    // 課金確認: 再生成は AI 呼び出し(有料)+ オーナー情報の外部送信を伴うため、実行前に確認する
+    // (キャンペーン作成と同方針)。サーバーも confirmed:true を必須にしている。
+    if (!window.confirm("この宛先の手紙をAIで作り直します。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？")) return;
     setBusy(true);
     try {
       await regenerateSaleDmDraft(selected.id);

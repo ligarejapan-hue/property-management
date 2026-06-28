@@ -34,6 +34,7 @@ vi.mock("@/lib/prisma", () => {
 
 import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
+import { writeAuditLog } from "@/lib/audit";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { GET as listVariants, POST as createVariant } from "../../app/api/properties/sale-dm/campaigns/[id]/variants/route";
 import { PATCH as updateVariant, DELETE as deleteVariant } from "../../app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route";
@@ -97,6 +98,14 @@ describe("POST variant (作成)", () => {
     pm.dmCampaign.findUnique.mockResolvedValue(null);
     const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields }) }) as never, ctxC);
     expect(res.status).toBe(404);
+  });
+  it("作成の監査 detail に label(自由記述)を保存しない(PII混入防止・targetId で追跡)", async () => {
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmVariant.create.mockResolvedValue({ id: "v2", label: "田中一郎", ...optionFields });
+    await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "田中一郎", options: optionFields }) }) as never, ctxC);
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.label).toBeUndefined();
+    expect(detail.campaignId).toBe("c1");
   });
   it("不正な options で 422(zod)", async () => {
     pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
