@@ -4,6 +4,7 @@ import {
   type SalesSheetElement,
 } from "./document-schema";
 import { inlineDocumentImages } from "./inline-images";
+import { isSafeImageSrc } from "./css-safety";
 import { getStorage } from "@/lib/storage";
 import type { StorageAdapter } from "@/lib/storage/types";
 
@@ -45,7 +46,12 @@ export function toCanonicalUploadsSrc(
   storage: Pick<StorageAdapter, "keyFromUrl"> = getStorage(),
 ): string | null {
   const key = storage.keyFromUrl(fileUrl ?? null);
-  return key ? `/uploads/${key}` : null;
+  if (!key) return null;
+  const candidate = `/uploads/${key}`;
+  // key は storage 的に有効でも image src として不正なことがある（空白/%2e 等）。
+  // その場合は写真を落とす（src を返さない）。さもないと保存境界の parseSalesSheetDocument が
+  // 図面全体を 422 で弾く。
+  return isSafeImageSrc(candidate) ? candidate : null;
 }
 
 const NAVY = "#15324f";

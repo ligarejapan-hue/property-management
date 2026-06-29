@@ -1,7 +1,33 @@
 import prismaDefault from "@/lib/prisma";
-import { parseSalesSheetDocument } from "./document-schema";
+import { z } from "zod";
+import { parseSalesSheetDocument, type SalesSheetDocument } from "./document-schema";
 
 type PrismaLike = typeof prismaDefault;
+
+// 保存境界での data: 埋め込み画像の上限（src 文字数）。1px プレースホルダ等の極小のみ許容し、
+// 写真サイズの base64 blob を document JSON に直接保存して DB を肥大化させるのを防ぐ。
+// 通常の保存 doc は /uploads キー参照のみ（data: 化は出力時 authorizeAndInlineDocumentImages だけ）。
+const MAX_INLINE_IMAGE_SRC_LEN = 8192;
+
+function assertNoLargeInlineImages(document: SalesSheetDocument): void {
+  for (const el of document.elements) {
+    if (
+      el.type === "image" &&
+      el.src.startsWith("data:") &&
+      el.src.length > MAX_INLINE_IMAGE_SRC_LEN
+    ) {
+      // ZodError として投げる＝既存の parse エラーと同様 handleApiError が 422 に変換する
+      // （api-helpers の ApiError は next/server を引き込み node テスト環境で解決不可なため）。
+      throw new z.ZodError([
+        {
+          code: z.ZodIssueCode.custom,
+          message: "保存する図面の埋め込み画像が大きすぎます（画像はアップロードして使用してください）",
+          path: ["elements"],
+        },
+      ]);
+    }
+  }
+}
 
 export interface SaveDesignInput {
   propertyId: string;
@@ -13,6 +39,7 @@ export interface SaveDesignInput {
 
 export async function createDesign(input: SaveDesignInput, db: PrismaLike = prismaDefault) {
   const document = parseSalesSheetDocument(input.document); // 不正は throw
+  assertNoLargeInlineImages(document); // 大きな data: 画像は拒否（DB 肥大化防止）
   return db.salesSheetDesign.create({
     data: {
       propertyId: input.propertyId,
@@ -50,7 +77,11 @@ export async function updateDesign(
   if (!current) return { ok: false as const, reason: "not_found" as const };
   const data: Record<string, unknown> = { updatedBy: userId };
   if (patch.title !== undefined) data.title = patch.title.trim() || "無題の販売図面";
-  if (patch.document !== undefined) data.document = parseSalesSheetDocument(patch.document); // throws -> 422, before write
+  if (patch.document !== undefined) {
+    const parsed = parseSalesSheetDocument(patch.document); // throws -> 422, before write
+    assertNoLargeInlineImages(parsed); // 大きな data: 画像は拒否（DB 肥大化防止）
+    data.document = parsed;
+  }
   // Atomic optimistic-lock: timestamp check + write in one operation.
   // updateMany guards the WHERE on updatedAt so two concurrent saves with the
   // same expectedUpdatedAt cannot both succeed — the second gets count=0.

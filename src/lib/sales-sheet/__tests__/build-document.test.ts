@@ -72,4 +72,11 @@ describe("toCanonicalUploadsSrc", () => {
     const storage = { keyFromUrl: () => null };
     expect(toCanonicalUploadsSrc("https://evil.example/x.jpg", storage)).toBeNull();
   });
+
+  it("returns null when the resolved key yields a src that fails isSafeImageSrc (drop, not 422)", () => {
+    // key valid for storage but unsafe as an image src (space → rejected by isSafeImageSrc)
+    const storage = { keyFromUrl: () => "a b.jpg" };
+    const src = toCanonicalUploadsSrc("/property-management/a b.jpg", storage);
+    expect(src).toBeNull();
+  });
 });

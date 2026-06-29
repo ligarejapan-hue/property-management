@@ -100,6 +100,18 @@ describe("createDesign", () => {
     await expect(createDesign({ ...validInput, document: invalidDocument }, db)).rejects.toThrow();
     expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
   });
+
+  it("大きすぎる data: 埋め込み画像は拒否し、DB は呼ばれない（保存はリンク参照のみ・data:化は出力時）", async () => {
+    const db = makeDb({ create: vi.fn() });
+    const bigDataDoc = {
+      ...sampleDocument,
+      elements: sampleDocument.elements.map((el) =>
+        el.id === "photo1" ? { ...el, src: "data:image/png;base64," + "A".repeat(9000) } : el,
+      ),
+    };
+    await expect(createDesign({ ...validInput, document: bigDataDoc }, db)).rejects.toThrow();
+    expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

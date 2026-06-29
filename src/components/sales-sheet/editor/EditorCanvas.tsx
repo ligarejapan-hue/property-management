@@ -238,7 +238,10 @@ export function EditorCanvas({
       })}
 
       {/* ── Moveable: drag/resize handles for the selected element ───── */}
-      {moveableTarget && (onMove || onResize) && (
+      {/* Gate on a live selectedId: when selection clears (e.g. the selected
+          element is deleted from the panel), the prop becomes null and the
+          handles are removed even though the local moveableTarget ref is stale. */}
+      {selectedId !== null && moveableTarget && (onMove || onResize) && (
         <MoveableNoSSR
           target={moveableTarget}
           draggable={true}
