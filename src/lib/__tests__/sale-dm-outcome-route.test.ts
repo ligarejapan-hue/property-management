@@ -56,14 +56,17 @@ vi.mock("@/lib/prisma", () => {
   const draftCount = vi.fn();
   const propertyUpdate = vi.fn();
   const draftFindUnique = vi.fn();
+  const txQueryRaw = vi.fn(async () => []); // FOR UPDATE ロック(結果は使わない)。tx 内の再読込・直列化用。
   return {
     default: {
       dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, count: draftCount },
       property: { update: propertyUpdate },
+      $queryRaw: txQueryRaw,
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
         fn({
-          dmRecipientDraft: { update: draftUpdate, count: draftCount },
+          dmRecipientDraft: { update: draftUpdate, count: draftCount, findUnique: draftFindUnique },
           property: { update: propertyUpdate },
+          $queryRaw: txQueryRaw,
         }),
       ),
     },
@@ -78,6 +81,7 @@ import { PATCH } from "../../app/api/properties/sale-dm/drafts/[id]/outcome/rout
 const pm = prismaMock as never as {
   dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
   property: { update: ReturnType<typeof vi.fn> };
+  $queryRaw: ReturnType<typeof vi.fn>;
 };
 const req = (b: unknown) =>
   new Request("http://x", { method: "PATCH", body: JSON.stringify(b) });
@@ -137,6 +141,21 @@ describe("PATCH outcome", () => {
     expect(arg.data.outcome).toBe("none");
   });
 
+  it("更新中に公開LPヒットが入っても tx内の最新再読込(FOR UPDATE)で outcome を inquiry に確定する(古いsnapshotのnoneで上書きしない・C3)", async () => {
+    // 進入時 snapshot は lpFirstAccessAt=null。だが tx 内の最新再読込では、同時 /t/ ヒットで lpFirstAccessAt が
+    // セット済み(=inquiry)。古い null snapshot 由来の outcome=none で上書きしてはならない。
+    pm.dmRecipientDraft.findUnique
+      .mockResolvedValueOnce({ id: "r1", propertyId: "p1", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneInquiryAt: null, status: "sent", campaign: { createdBy: "u1" } })
+      .mockResolvedValueOnce({ lpFirstAccessAt: new Date(), phoneInquiryAt: null }); // tx 内ロック下の最新値
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.findUnique).toHaveBeenCalledTimes(2); // 進入時 + tx 内の最新再読込
+    const arg = pm.dmRecipientDraft.update.mock.calls[0][0];
+    expect(arg.data.outcome).toBe("inquiry"); // 最新の inquiry(古い snapshot の none ではない)
+    const body = await res.json();
+    expect(body.outcome).toBe("inquiry");
+  });
+
   it("returned_undeliverable を記録すると物件を no_send + dmUndeliverableAt にし監査する", async () => {
     const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
     expect(res.status).toBe(200);
@@ -165,6 +184,8 @@ describe("PATCH outcome", () => {
     });
     const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
     expect(res.status).toBe(200);
+    // C2: 解除分岐では下書き行ロック + 物件行ロックの2回 FOR UPDATE(兄弟カウント前に物件を直列化)。
+    expect(pm.$queryRaw).toHaveBeenCalledTimes(2);
     const propArg = pm.property.update.mock.calls[0][0];
     expect(propArg.where.id).toBe("p1");
     expect(propArg.data.dmUndeliverableAt).toBeNull();

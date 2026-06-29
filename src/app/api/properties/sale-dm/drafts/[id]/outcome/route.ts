@@ -120,21 +120,35 @@ export async function PATCH(
       draftData.outcomeNote = input.outcomeNote;
     }
 
-    // 下書き更新と物件連動を 1 トランザクションで行う。宛先不明の解除は、同じ物件に
-    // 他の未解決(returned_undeliverable)送付済み宛先が残らない場合のみ実施する。
-    const undeliverableCleared = await prisma.$transaction(async (tx) => {
-      await tx.dmRecipientDraft.update({ where: { id }, data: draftData });
+    // 下書き更新と物件連動を 1 トランザクションで行う。並行(同一下書きへの公開/t/ヒット、同一物件への別宛先の
+    // 同時 outcome 更新)に備え、関係行を FOR UPDATE でロックしてから最新値で判定する(R34 残レース対応)。
+    const txResult = await prisma.$transaction(async (tx) => {
+      // C3(レース): 下書き行をロックして lpFirstAccessAt/phoneInquiryAt を最新で読み直し outcome を再導出する。
+      // 公開 /t/ の同時ヒットが lpFirstAccessAt+outcome=inquiry を書いた直後に、進入時の古い snapshot 由来の
+      // outcome(none)で上書きして自己矛盾(lpあり/outcome=none)になるのを防ぐ(/t/ の UPDATE と直列化)。
+      await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE id = ${id}::uuid FOR UPDATE`;
+      const fresh = await tx.dmRecipientDraft.findUnique({ where: { id }, select: { lpFirstAccessAt: true, phoneInquiryAt: true } });
+      const freshPhoneInquiryAt =
+        input.phoneInquiry === undefined
+          ? (fresh?.phoneInquiryAt ?? null)
+          : input.phoneInquiry
+            ? (fresh?.phoneInquiryAt ?? now)
+            : null;
+      const freshOutcome = deriveOutcome({ lpFirstAccessAt: fresh?.lpFirstAccessAt ?? null, phoneInquiryAt: freshPhoneInquiryAt });
+
+      await tx.dmRecipientDraft.update({ where: { id }, data: { ...draftData, phoneInquiryAt: freshPhoneInquiryAt, outcome: freshOutcome } });
+
+      let cleared = false;
       if (becameUndeliverable) {
         await tx.property.update({
           where: { id: draft.propertyId },
           data: { dmStatus: "no_send", dmUndeliverableAt: now },
         });
-        return false;
-      }
-      if (clearedUndeliverable) {
-        // 同一物件に「宛先不明」のまま残る他の送付済み宛先(別の所有者住所グループや
-        // 別キャンペーン)がなければ物件フラグを解除。残っていれば物件はまだ宛先不明なので
-        // 一覧バッジ/フィルタ(dmUndeliverableAt 基準)を誤って消さない。
+      } else if (clearedUndeliverable) {
+        // C2(レース): 物件行をロックしてから兄弟下書きを数える。同一物件への同時 outcome 更新を直列化し、互いの
+        // 未コミット変更を見落として「宛先不明」フラグを取り残す/誤って消すのを防ぐ。同一物件に「宛先不明」のまま
+        // 残る他の送付済み宛先(別の所有者住所グループや別キャンペーン)がなければ物件フラグを解除する。
+        await tx.$queryRaw`SELECT id FROM properties WHERE id = ${draft.propertyId}::uuid FOR UPDATE`;
         const stillUndeliverable = await tx.dmRecipientDraft.count({
           where: {
             propertyId: draft.propertyId,
@@ -148,11 +162,13 @@ export async function PATCH(
             where: { id: draft.propertyId },
             data: { dmUndeliverableAt: null },
           });
-          return true;
+          cleared = true;
         }
       }
-      return false;
+      return { cleared, outcome: freshOutcome };
     });
+    const undeliverableCleared = txResult.cleared;
+    const finalOutcome = txResult.outcome;
 
     // 非PII の監査(本文・宛名・住所・メモは残さない)。
     await writeAuditLog({
@@ -163,7 +179,7 @@ export async function PATCH(
       detail: {
         propertyId: draft.propertyId,
         deliveryStatus: nextDeliveryStatus,
-        outcome: nextOutcome,
+        outcome: finalOutcome,
         undeliverableLinked: becameUndeliverable,
         undeliverableCleared,
         updatedAt: now.toISOString(),
@@ -171,7 +187,7 @@ export async function PATCH(
     });
 
     return NextResponse.json(
-      { id, deliveryStatus: nextDeliveryStatus, outcome: nextOutcome, undeliverableLinked: becameUndeliverable, undeliverableCleared },
+      { id, deliveryStatus: nextDeliveryStatus, outcome: finalOutcome, undeliverableLinked: becameUndeliverable, undeliverableCleared },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
