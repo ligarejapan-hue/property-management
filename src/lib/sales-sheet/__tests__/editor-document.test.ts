@@ -17,6 +17,7 @@ import {
   deleteElement,
   editText,
   markSaved,
+  markSavedIfCurrent,
 } from "../editor-document";
 import {
   parseSalesSheetDocument,
@@ -476,5 +477,25 @@ describe("markSaved", () => {
   it("is idempotent when already clean", () => {
     const state = makeState(undefined, { dirty: false });
     expect(markSaved(state).dirty).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markSavedIfCurrent
+// ---------------------------------------------------------------------------
+
+describe("markSavedIfCurrent", () => {
+  it("clears dirty when the document is unchanged since the save started", () => {
+    const state = makeState(undefined, { dirty: true });
+    const next = markSavedIfCurrent(state, state.document);
+    expect(next.dirty).toBe(false);
+  });
+
+  it("keeps dirty (and the same state) when the document changed mid-save", () => {
+    const sent = makeDoc(); // a different document reference than state.document
+    const state = makeState(undefined, { dirty: true });
+    const next = markSavedIfCurrent(state, sent);
+    expect(next.dirty).toBe(true);
+    expect(next).toBe(state);
   });
 });

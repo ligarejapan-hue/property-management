@@ -301,3 +301,14 @@ export const OCCUPANCY_STATUS_LABELS: Record<string, string> = {
   occupied: "入居中",
   unknown:  "不明",
 };
+
+/**
+ * 現況(OccupancyStatus)を表示ラベルへ変換する。
+ * - null / undefined → null
+ * - 既知の enum 値 → 日本語ラベル（空室 / 入居中 / 不明）
+ * - 未知の値 → そのまま返す（既に表示用文字列が入っているケース）
+ */
+export function localizeOccupancy(status: string | null | undefined): string | null {
+  if (status == null) return null;
+  return OCCUPANCY_STATUS_LABELS[status] ?? status;
+}

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  parseJsonBody,
   ApiError,
   handleApiError,
 } from "@/lib/api-helpers";
@@ -10,12 +12,24 @@ import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { createDesign } from "@/lib/sales-sheet/design-service";
 import { buildSaleLandDocument, type SaleLandInput } from "@/lib/sales-sheet/build-document";
+import { localizeOccupancy } from "@/lib/property-types";
+
+// 作成ダイアログが収集する任意の上書き項目（売土地でシステムに無い値）。
+const overridesSchema = z.object({
+  price: z.string().max(200).optional(),
+  access: z.string().max(500).optional(),
+  landArea: z.string().max(200).optional(),
+  landCategory: z.string().max(200).optional(),
+  transactionType: z.string().max(200).optional(),
+  deliveryTiming: z.string().max(200).optional(),
+  remarks: z.string().max(1000).optional(),
+});
 
 // POST /api/properties/[id]/sales-sheets/new
 // 売土地専用: property データから初期 document を生成して design を作成し { id } を返す。
 // 土地物件以外は 422。
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -53,6 +67,9 @@ export async function POST(
       throw new ApiError(422, "売土地のみ販売図面を作成できます", "INVALID_PROPERTY_TYPE");
     }
 
+    // 作成ダイアログの上書き項目（空ボディ → {}・不正 JSON → 400）。
+    const overrides = overridesSchema.parse(await parseJsonBody(request));
+
     // Owner + photo (separate queries to avoid Prisma select/include mixing issues)
     const ownerRel = await prisma.propertyOwner.findFirst({
       where: { propertyId: id },
@@ -60,7 +77,7 @@ export async function POST(
     });
     const photo = await prisma.propertyPhoto.findFirst({
       where: { propertyId: id },
-      orderBy: { sortOrder: "asc" },
+      orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
       select: { fileUrl: true },
     });
 
@@ -72,10 +89,11 @@ export async function POST(
         floorAreaRatio: property.floorAreaRatio?.toString() ?? null,
         roadType: property.roadType,
         roadWidth: property.roadWidth?.toString() ?? null,
-        occupancyStatus: property.occupancyStatus,
+        occupancyStatus: localizeOccupancy(property.occupancyStatus),
       },
       owner: ownerRel?.owner ?? null,
       photo: photo ?? null,
+      overrides,
     };
 
     const document = buildSaleLandDocument(input);

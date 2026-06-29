@@ -198,6 +198,23 @@ export function markSaved(state: EditorState): EditorState {
   return { ...state, dirty: false };
 }
 
+/**
+ * Clear the dirty flag ONLY if `savedDocument` is still the current document.
+ *
+ * Guards the in-flight-save race: if the user edits the canvas while a save (or
+ * export auto-save) request is in flight, `state.document` becomes a newer
+ * reference than the document that was actually persisted, so those later edits
+ * must stay dirty. Reducers always return a new document reference on a change,
+ * so identity comparison is sufficient.
+ */
+export function markSavedIfCurrent(
+  state: EditorState,
+  savedDocument: SalesSheetDocument,
+): EditorState {
+  if (state.document !== savedDocument) return state;
+  return markSaved(state);
+}
+
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------

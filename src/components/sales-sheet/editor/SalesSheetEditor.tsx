@@ -12,7 +12,7 @@ import {
   sendToBack,
   editText,
   deleteElement,
-  markSaved,
+  markSavedIfCurrent,
 } from "@/lib/sales-sheet/editor-document";
 import { EditorCanvas } from "./EditorCanvas";
 import { ElementPanel } from "./ElementPanel";
@@ -120,19 +120,22 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
 
   /** Save current document via PUT; handles optimistic-lock 409. */
   async function handleSave(): Promise<void> {
+    // Capture the exact document being persisted so edits made while this
+    // request is in flight are NOT marked clean when the response returns.
+    const sentDocument = editorState.document;
     const res = await fetch(
       `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}`,
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document: editorState.document, expectedUpdatedAt: savedAt }),
+        body: JSON.stringify({ document: sentDocument, expectedUpdatedAt: savedAt }),
       },
     );
     if (res.status === 409) throw new Error("他で更新されました。再読込してください");
     if (!res.ok) throw new Error("保存に失敗しました");
     const data = (await res.json()) as { updatedAt: string };
     setSavedAt(data.updatedAt);
-    setEditorState((prev) => markSaved(prev));
+    setEditorState((prev) => markSavedIfCurrent(prev, sentDocument));
   }
 
   /** Export as PDF or PNG. Auto-saves first when dirty. */
