@@ -19,6 +19,7 @@ vi.mock("@/lib/uploads-authorization", () => ({
 import {
   authorizeAndInlineDocumentImages,
   assertDocumentImagesAuthorized,
+  isImageKeyAuthorizedForProperty,
 } from "../authorize-document-images";
 import { authorizeUploadAccess, isUploadKeyOwnedByProperty } from "@/lib/uploads-authorization";
 
@@ -347,5 +348,27 @@ describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", (
       async (key: string) => key.startsWith("properties/p1/"),
     );
     await expect(assertDocumentImagesAuthorized(doc, CTX)).rejects.toThrow();
+  });
+});
+
+describe("isImageKeyAuthorizedForProperty（保存境界・サーバ生成共用の認可ヘルパ）", () => {
+  const CTX = { session: SESSION, permissions: PERMS, propertyId: "p1" };
+
+  it("caller 認可（ok）かつ物件所属（true）なら true", async () => {
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    (isUploadKeyOwnedByProperty as unknown as Mock).mockResolvedValue(true);
+    expect(await isImageKeyAuthorizedForProperty("properties/p1/a.jpg", CTX)).toBe(true);
+  });
+
+  it("caller 未認可（forbidden）なら false（所属判定を呼ばない）", async () => {
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("forbidden");
+    expect(await isImageKeyAuthorizedForProperty("properties/other/a.jpg", CTX)).toBe(false);
+    expect(isUploadKeyOwnedByProperty).not.toHaveBeenCalled();
+  });
+
+  it("別物件（所属 false）なら false", async () => {
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    (isUploadKeyOwnedByProperty as unknown as Mock).mockResolvedValue(false);
+    expect(await isImageKeyAuthorizedForProperty("properties/B/a.jpg", CTX)).toBe(false);
   });
 });

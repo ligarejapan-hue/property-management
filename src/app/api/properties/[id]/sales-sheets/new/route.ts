@@ -12,6 +12,8 @@ import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { createDesign } from "@/lib/sales-sheet/design-service";
 import { buildSaleLandDocument, toCanonicalUploadsSrc, type SaleLandInput } from "@/lib/sales-sheet/build-document";
+import { isImageKeyAuthorizedForProperty } from "@/lib/sales-sheet/authorize-document-images";
+import { getStorage } from "@/lib/storage";
 import { localizeOccupancy } from "@/lib/property-types";
 
 // 作成ダイアログが収集する任意の上書き項目（売土地でシステムに無い値）。
@@ -80,7 +82,19 @@ export async function POST(
     // passes isSafeImageSrc on every storage backend (server backend may
     // persist /{bucket}/{key} or absolute URLs). Export re-resolves the key via
     // keyFromUrl. Unresolvable key → drop the photo.
-    const photoSrc = toCanonicalUploadsSrc(photoRow?.fileUrl);
+    let photoSrc = toCanonicalUploadsSrc(photoRow?.fileUrl);
+    // 代表写真も保存前に認可（caller が読める＋この物件に属する）。NG / 解決不能 / 別物件は
+    // 写真なしで初期図面を作成（サーバ生成は 422 ではなく drop 方針）。未認可 key を document に
+    // 入れない＝GET で未認可 raw key を返さないことを保証する。
+    if (photoSrc) {
+      const photoKey = getStorage().keyFromUrl(photoSrc);
+      if (
+        !photoKey ||
+        !(await isImageKeyAuthorizedForProperty(photoKey, { session, permissions, propertyId: id }))
+      ) {
+        photoSrc = null;
+      }
+    }
 
     const input: SaleLandInput = {
       property: {

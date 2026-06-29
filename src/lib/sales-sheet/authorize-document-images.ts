@@ -125,12 +125,7 @@ export async function assertDocumentImagesAuthorized(
     if (el.type !== "image") continue;
     if (el.src.startsWith("data:")) continue; // インライン bytes（サイズ上限で別途制限）
     const key = storage.keyFromUrl(el.src);
-    const decision = key
-      ? await authorizeUploadAccess({ key, session: ctx.session, permissions: ctx.permissions })
-      : null;
-    const owned =
-      decision === "ok" && key ? await isUploadKeyOwnedByProperty(key, ctx.propertyId) : false;
-    if (decision !== "ok" || !owned) {
+    if (!key || !(await isImageKeyAuthorizedForProperty(key, ctx))) {
       throw new z.ZodError([
         {
           code: z.ZodIssueCode.custom,
@@ -140,4 +135,23 @@ export async function assertDocumentImagesAuthorized(
       ]);
     }
   }
+}
+
+/**
+ * /uploads key が **(1) caller に読める**（authorizeUploadAccess === "ok"）かつ
+ * **(2) `propertyId` に属する**（isUploadKeyOwnedByProperty）かを判定する共通ヘルパ。
+ * 保存境界（assertDocumentImagesAuthorized＝NG は throw）と、サーバ生成の初期 document
+ * の代表写真認可（NG は写真 drop）で共用する。key/URL は呼び出し側でログ・レスポンスに出さない。
+ */
+export async function isImageKeyAuthorizedForProperty(
+  key: string,
+  ctx: { session: ApiSession; permissions: PermissionEntry[]; propertyId: string },
+): Promise<boolean> {
+  const decision = await authorizeUploadAccess({
+    key,
+    session: ctx.session,
+    permissions: ctx.permissions,
+  });
+  if (decision !== "ok") return false;
+  return isUploadKeyOwnedByProperty(key, ctx.propertyId);
 }

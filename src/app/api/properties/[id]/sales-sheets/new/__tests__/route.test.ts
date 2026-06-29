@@ -104,12 +104,18 @@ vi.mock("@/lib/sales-sheet/design-service", async () => {
   };
 });
 
+// 代表写真の保存前認可（caller 認可＋物件所属）。既定 true、テストで上書き。
+vi.mock("@/lib/sales-sheet/authorize-document-images", () => ({
+  isImageKeyAuthorizedForProperty: vi.fn(async () => true),
+}));
+
 // buildSaleLandDocument はモックしない — 実関数でドキュメントを組むことで
 // /uploads/ src が document に含まれるパスを実際にバリデーション経路に通す。
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { createDesign } from "@/lib/sales-sheet/design-service";
+import { isImageKeyAuthorizedForProperty } from "@/lib/sales-sheet/authorize-document-images";
 import { POST } from "../route";
 
 type PrismaMock = {
@@ -133,6 +139,7 @@ beforeEach(() => {
   pm.property.findUnique.mockResolvedValue(LAND_PROPERTY);
   pm.propertyOwner.findFirst.mockResolvedValue(null);
   pm.propertyPhoto.findFirst.mockResolvedValue(null);
+  (isImageKeyAuthorizedForProperty as Mock).mockResolvedValue(true);
   // createDesign: vi.clearAllMocks() でコール履歴はリセットされるが
   // vi.mock ファクトリで設定した実装（parseSalesSheetDocument 検証）は保持される。
 });
@@ -186,10 +193,22 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(createDesign).toHaveBeenCalledOnce();
   });
 
-  it("201 — owner・photo が存在する物件でも成功する", async () => {
+  it("201 — owner・photo が存在する物件でも成功する（認可OKの写真は入る）", async () => {
     pm.propertyOwner.findFirst.mockResolvedValue({ owner: { name: "田中太郎" } });
     pm.propertyPhoto.findFirst.mockResolvedValue({ fileUrl: "/uploads/photo.jpg" });
+    (isImageKeyAuthorizedForProperty as Mock).mockResolvedValue(true);
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(201);
+    const doc = (createDesign as Mock).mock.calls[0][0].document as { elements: { type: string }[] };
+    expect(doc.elements.some((e) => e.type === "image")).toBe(true); // 写真が入る
+  });
+
+  it("201 — 認可NG/別物件の写真は document に入れず「写真なし初期図面」で作成", async () => {
+    pm.propertyPhoto.findFirst.mockResolvedValue({ fileUrl: "/uploads/photo.jpg" });
+    (isImageKeyAuthorizedForProperty as Mock).mockResolvedValue(false); // caller NG または別物件
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201); // 拒否ではなく写真 drop で作成
+    const doc = (createDesign as Mock).mock.calls[0][0].document as { elements: { type: string }[] };
+    expect(doc.elements.some((e) => e.type === "image")).toBe(false); // 写真は入っていない
   });
 });
