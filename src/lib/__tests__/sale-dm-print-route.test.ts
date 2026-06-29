@@ -83,7 +83,7 @@ const ENV = process.env;
 beforeEach(() => {
   vi.clearAllMocks();
   // 郵送QRには絶対URLが必須。通常系は追跡baseを設定して通す。
-  process.env = { ...ENV, SALE_DM_TRACKING_BASE_URL: "https://dm.example.com", SALE_DM_LP_URL: "https://lp.example.com" };
+  process.env = { ...ENV, SALE_DM_TRACKING_BASE_URL: "https://dm.example.com", SALE_DM_LP_URL: "https://lp.example.com", SALE_DM_SENDER_NAME: "△△不動産", SALE_DM_SENDER_CONTACT: "03-0000-0000" };
   requireSaleDmAccess.mockResolvedValue({ session: { id: "u1" } });
   pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト", createdBy: "u1" });
   pm.dmRecipientDraft.findMany.mockResolvedValue([draft]);
@@ -123,6 +123,12 @@ describe("GET .../campaigns/[id]/print", () => {
 
   it("非絶対の LP URL(lp.example.com)も 503(未設定扱い)", async () => {
     process.env.SALE_DM_LP_URL = "lp.example.com";
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(503);
+  });
+
+  it("差出人(SALE_DM_SENDER_NAME/CONTACT)未設定なら 503(差出人欄が不正な郵送物を印刷しない・生成/再生成と統一・Codex)", async () => {
+    delete process.env.SALE_DM_SENDER_NAME;
     const res = await GET(req() as never, ctx);
     expect(res.status).toBe(503);
   });

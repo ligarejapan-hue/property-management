@@ -7,7 +7,7 @@ import {
   renderLetterSheetHtml,
   type LetterRenderInput,
 } from "@/lib/sale-dm-letter/templates";
-import { resolveSender } from "@/lib/sale-dm-letter/sender";
+import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { buildTrackingArtifacts } from "@/lib/sale-dm-letter/qr";
 import { renderTrackingSlotHtml } from "@/lib/sale-dm-letter/tracking-slot";
@@ -51,6 +51,11 @@ export async function GET(
     // dead-link になるため、印刷前に fail-closed(503)。
     if (!resolveLpUrl()) {
       throw new ApiError(503, "LP URL(SALE_DM_LP_URL)が未設定/不正です。郵送QRの遷移先に絶対URLが必要です", "LP_NOT_CONFIGURED");
+    }
+    // 差出人 env が外れていると resolveSender が "(差出人名 未設定)"/空 を返し、差出人欄が不正な郵送物になる。
+    // 生成/再生成と同様、印刷も差出人未設定なら fail-closed(503)する(郵送前に止める・Codex)。
+    if (!isSenderConfigured()) {
+      throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
     }
 
     const letters: LetterRenderInput[] = await Promise.all(
