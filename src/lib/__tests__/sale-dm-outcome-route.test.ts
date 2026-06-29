@@ -156,6 +156,19 @@ describe("PATCH outcome", () => {
     expect(body.outcome).toBe("inquiry");
   });
 
+  it("配達遷移もロック下の最新 deliveryStatus で判定する(並行解除後の再設定で no_send 連動を取りこぼさない・Codex)", async () => {
+    // 進入時 snapshot は returned_undeliverable だが、tx 内ロック下の最新では別 PATCH が delivered に解除済み。
+    // この request が returned_undeliverable を再設定 → 最新基準で becameUndeliverable=true → 物件を no_send 連動。
+    pm.dmRecipientDraft.findUnique
+      .mockResolvedValueOnce({ id: "r1", propertyId: "p1", deliveryStatus: "returned_undeliverable", lpFirstAccessAt: null, phoneInquiryAt: null, status: "sent", campaign: { createdBy: "u1" } })
+      .mockResolvedValueOnce({ lpFirstAccessAt: null, phoneInquiryAt: null, deliveryStatus: "delivered" });
+    const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
+    expect(res.status).toBe(200);
+    const propArg = pm.property.update.mock.calls[0][0];
+    expect(propArg.data.dmStatus).toBe("no_send"); // 古い snapshot だと取りこぼす連動を、最新基準で実施
+    expect(propArg.data.dmUndeliverableAt).toBeInstanceOf(Date);
+  });
+
   it("returned_undeliverable を記録すると物件を no_send + dmUndeliverableAt にし監査する", async () => {
     const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
     expect(res.status).toBe(200);

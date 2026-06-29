@@ -84,17 +84,8 @@ export async function PATCH(
       phoneInquiryAt: nextPhoneInquiryAt,
     });
 
-    const nextDeliveryStatus = input.deliveryStatus ?? draft.deliveryStatus;
-    const becameUndeliverable =
-      input.deliveryStatus === "returned_undeliverable" &&
-      draft.deliveryStatus !== "returned_undeliverable";
-    // 宛先不明から他状態へ訂正したら、自動連動で立てた物件の宛先不明フラグ
-    // (dmUndeliverableAt)を解除する(物件一覧バッジ/フィルタは dmUndeliverableAt 基準)。
-    // dmStatus は人の判断で戻す(手動 clear-undeliverable と同方針)ため自動では触らない。
-    const clearedUndeliverable =
-      input.deliveryStatus !== undefined &&
-      input.deliveryStatus !== "returned_undeliverable" &&
-      draft.deliveryStatus === "returned_undeliverable";
+    // 配達状態の遷移(宛先不明への変化/宛先不明からの訂正)は、並行 PATCH で stale にならないよう、tx 内で
+    // ロック下の最新 deliveryStatus から判定する(下記)。ここでは先に権限を確認する。
 
     // outcome 更新は配達/反響/メモいずれも下書きの delivery/response 記録を書き換え、A/B 集計に反映される。
     // 権限失効後に送付済みの結果を改竄(集計汚染)させないため、全 outcome 更新に property:write を要求する
@@ -127,7 +118,7 @@ export async function PATCH(
       // 公開 /t/ の同時ヒットが lpFirstAccessAt+outcome=inquiry を書いた直後に、進入時の古い snapshot 由来の
       // outcome(none)で上書きして自己矛盾(lpあり/outcome=none)になるのを防ぐ(/t/ の UPDATE と直列化)。
       await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE id = ${id}::uuid FOR UPDATE`;
-      const fresh = await tx.dmRecipientDraft.findUnique({ where: { id }, select: { lpFirstAccessAt: true, phoneInquiryAt: true } });
+      const fresh = await tx.dmRecipientDraft.findUnique({ where: { id }, select: { lpFirstAccessAt: true, phoneInquiryAt: true, deliveryStatus: true } });
       const freshPhoneInquiryAt =
         input.phoneInquiry === undefined
           ? (fresh?.phoneInquiryAt ?? null)
@@ -135,6 +126,19 @@ export async function PATCH(
             ? (fresh?.phoneInquiryAt ?? now)
             : null;
       const freshOutcome = deriveOutcome({ lpFirstAccessAt: fresh?.lpFirstAccessAt ?? null, phoneInquiryAt: freshPhoneInquiryAt });
+
+      // 配達状態の遷移もロック下の最新 deliveryStatus から判定する。進入時 snapshot だと、別 PATCH が
+      // returned_undeliverable を解除/再設定した結果を見落とし、物件の dmUndeliverableAt/dmStatus 連動を誤る
+      // (例: 並行で delivered に解除された後にこの request が再設定→ becameUndeliverable を取りこぼし no_send 復帰を skip)。
+      const currentDeliveryStatus = fresh?.deliveryStatus ?? draft.deliveryStatus;
+      const nextDeliveryStatus = input.deliveryStatus ?? currentDeliveryStatus;
+      const becameUndeliverable =
+        input.deliveryStatus === "returned_undeliverable" && currentDeliveryStatus !== "returned_undeliverable";
+      // 宛先不明から他状態へ訂正したら自動連動の物件フラグ(dmUndeliverableAt)を解除(dmStatus は人の判断で戻す)。
+      const clearedUndeliverable =
+        input.deliveryStatus !== undefined &&
+        input.deliveryStatus !== "returned_undeliverable" &&
+        currentDeliveryStatus === "returned_undeliverable";
 
       await tx.dmRecipientDraft.update({ where: { id }, data: { ...draftData, phoneInquiryAt: freshPhoneInquiryAt, outcome: freshOutcome } });
 
@@ -165,10 +169,12 @@ export async function PATCH(
           cleared = true;
         }
       }
-      return { cleared, outcome: freshOutcome };
+      return { cleared, outcome: freshOutcome, becameUndeliverable, nextDeliveryStatus };
     });
     const undeliverableCleared = txResult.cleared;
     const finalOutcome = txResult.outcome;
+    const finalBecameUndeliverable = txResult.becameUndeliverable;
+    const finalDeliveryStatus = txResult.nextDeliveryStatus;
 
     // 非PII の監査(本文・宛名・住所・メモは残さない)。
     await writeAuditLog({
@@ -178,16 +184,16 @@ export async function PATCH(
       targetId: id,
       detail: {
         propertyId: draft.propertyId,
-        deliveryStatus: nextDeliveryStatus,
+        deliveryStatus: finalDeliveryStatus,
         outcome: finalOutcome,
-        undeliverableLinked: becameUndeliverable,
+        undeliverableLinked: finalBecameUndeliverable,
         undeliverableCleared,
         updatedAt: now.toISOString(),
       },
     });
 
     return NextResponse.json(
-      { id, deliveryStatus: nextDeliveryStatus, outcome: finalOutcome, undeliverableLinked: becameUndeliverable, undeliverableCleared },
+      { id, deliveryStatus: finalDeliveryStatus, outcome: finalOutcome, undeliverableLinked: finalBecameUndeliverable, undeliverableCleared },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
