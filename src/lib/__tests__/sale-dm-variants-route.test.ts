@@ -161,6 +161,31 @@ describe("PATCH variant (更新)", () => {
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
+  it("既存 extraInstruction=null に空文字 '' を送る label 変更は無効化しない(null↔'' は無指示で等価)", async () => {
+    // beforeEach の findFirst は extraInstruction=null。フォームは label のみ変更でも
+    // extraInstruction:"" を送る(編集フォームが v.extraInstruction ?? "" で初期化するため)。
+    // "" と null を「変更」とみなして生成/確定済みの本文を消すとデータ損失+有料再生成になる(Codex R31 P1)。
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A2", ...optionFields });
+    const res = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "A2", options: { ...optionFields, extraInstruction: "" } }) }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("extraInstruction を null から実テキストへ変えると無効化する(実変更は確実に検出)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
+    const res = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { extraInstruction: "丁寧な文面で" } }) }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalled();
+  });
+
   it("field_staff は担当外の未送付下書きを含む型の options 変更を拒否(403・本文消去させない)", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
     pm.dmRecipientDraft.count.mockResolvedValue(2); // 担当外(再割当で隠れた)の未送付下書きが存在

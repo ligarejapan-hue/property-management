@@ -36,7 +36,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (o.length !== undefined) { data.length = o.length; if (o.length !== existing.length) optionFieldChanged = true; }
       if (o.appeal !== undefined) { data.appeal = o.appeal; if (o.appeal !== existing.appeal) optionFieldChanged = true; }
       if (o.strength !== undefined) { data.strength = o.strength; if (o.strength !== existing.strength) optionFieldChanged = true; }
-      if (o.extraInstruction !== undefined) { const next = o.extraInstruction ?? null; data.extraInstruction = next; if (next !== existing.extraInstruction) optionFieldChanged = true; }
+      // 空文字と null は「追加指示なし」で等価。label のみ変更でもフォームは extraInstruction:"" を送るため、
+      // ""↔null の差を「変更」とみなして生成/確定済みの本文を消さない(両辺を "" に正規化して比較)。
+      if (o.extraInstruction !== undefined) { const next = o.extraInstruction ?? null; data.extraInstruction = next; if ((next ?? "") !== (existing.extraInstruction ?? "")) optionFieldChanged = true; }
     }
 
     // field_staff は campaign-level の型 options 変更で「担当外(再割当で隠れた)の未送付下書き」の本文まで

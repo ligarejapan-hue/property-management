@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { handleApiError, ApiError, parseJsonBody, getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 
@@ -17,9 +16,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { session, permissions } = await requireSaleDmAccess();
-    // この route は物件(properties)の宛先不明フラグ/DM判断を書き換えるため property:write 必須。
-    // read 系の DM アクセス権だけで物件状態を書き換えさせない(他の物件APIと同じ write ゲート)。
+    // 宛先不明フラグの解除は物件(properties)の書き換えで、PII は返さない。よって DM の CSV/owner 読取権限を
+    // 要求する requireSaleDmAccess ではなく、他の物件変更 API(PATCH /properties/[id])と同じ property:write
+    // ゲートのみを使う。UI も property:write で「解除」ボタンを出すため権限セットを一致させる(Codex R31 P2)。
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
     if (!hasPermission(permissions, "property", "write")) {
       throw new ApiError(403, "物件を更新する権限(write)がありません", "FORBIDDEN");
     }

@@ -55,6 +55,13 @@ export default function SaleDmRecipientList({
                 <span className="shrink-0 rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-700">
                   型 {variantLabel(campaign.variants, r.variantId)}
                 </span>
+                {/* 型変更/均等割り当てで本文がクリアされた下書きは「要再生成」= 確定/印刷/送付の対象外。
+                    一括クリア後に半分空の A/B バッチを完了と誤認しないよう、各宛先で明示する。 */}
+                {r.status === "draft" && r.body === "" && (
+                  <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                    要再生成
+                  </span>
+                )}
                 {inquiry && (
                   <span className="shrink-0 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
                     反響あり

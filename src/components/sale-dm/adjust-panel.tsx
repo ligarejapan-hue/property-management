@@ -34,6 +34,8 @@ export default function SaleDmAdjustPanel({
 
   useEffect(() => {
     setBodyDraft(selected?.body ?? "");
+    // 宛先を切り替えたら前の宛先で出たエラー表示を消す(別宛先に古いエラーが残らないように)。
+    setError(null);
   }, [selected?.id, selected?.body]);
 
   const variant =

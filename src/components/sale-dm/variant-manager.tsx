@@ -64,10 +64,12 @@ export default function SaleDmVariantManager({
   };
 
   const startNew = () => {
+    setError(null);
     setForm({ label: "", options: { ...DEFAULT_OPTIONS } });
     setEditing("new");
   };
   const startEdit = (v: SaleDmVariant) => {
+    setError(null);
     setForm({
       label: v.label,
       options: {
@@ -173,7 +175,7 @@ export default function SaleDmVariantManager({
           form={form}
           setForm={setForm}
           onSubmit={submit}
-          onCancel={() => setEditing(null)}
+          onCancel={() => { setError(null); setEditing(null); }}
           busy={busy}
           isNew={editing === "new"}
         />
@@ -183,6 +185,7 @@ export default function SaleDmVariantManager({
         <span className="text-xs text-gray-500">未送付の宛先を</span>
         <select
           value={assignOrder}
+          aria-label="割り当て順"
           onChange={(e) => setAssignOrder(e.target.value as "sequential" | "random")}
           disabled={busy}
           className="rounded-md border border-gray-300 px-2 py-1 text-xs"
@@ -227,6 +230,7 @@ function VariantForm({
       <input
         type="text"
         value={form.label}
+        aria-label="型の名前"
         onChange={(e) => setForm({ ...form, label: e.target.value })}
         placeholder="型の名前(例: B案)"
         maxLength={40}

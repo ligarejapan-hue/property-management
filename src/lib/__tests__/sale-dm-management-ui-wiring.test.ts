@@ -59,6 +59,24 @@ describe("売却DM 管理UI の配線", () => {
     expect(list).toContain('restore ? { restoreDmStatus: "send" } : undefined');
   });
 
+  it("Codex R31 + 追加自己レビューの修正が入っている(空下書き可視化 / a11y / 解除文言)", () => {
+    // 宛先リスト: 本文が空(型変更/auto割当でクリア)= 要再生成 と分かるバッジを出す。一括クリア後に
+    // 「半分空の A/B バッチ」を完了と誤認しないため(サーバーは空letterの郵送を防ぐが UI も明示する)。
+    const recipientList = read("../../components/sale-dm/recipient-list.tsx");
+    expect(recipientList).toContain("要再生成");
+    expect(recipientList).toContain('r.status === "draft" && r.body === ""');
+
+    // A/B型管理: 並び順 select と 型名 input にアクセシブルなラベルを付ける(icon/placeholder のみに頼らない)。
+    const vm = read("../../components/sale-dm/variant-manager.tsx");
+    expect(vm).toContain('aria-label="割り当て順"');
+    expect(vm).toContain('aria-label="型の名前"');
+
+    // 宛先不明 解除の確認文言: dmStatus は独立に編集可ゆえ「(送付しない)」と断定しない(現状維持と表現)。
+    const list = read("../../app/(dashboard)/properties/page.tsx");
+    expect(list).toContain("現在のDM状態のまま");
+    expect(list).not.toContain("送付しない)のまま");
+  });
+
   it("client に A/B管理 + 宛先不明解除の関数が存在する", () => {
     const src = read("../api-client.ts");
     for (const fn of [

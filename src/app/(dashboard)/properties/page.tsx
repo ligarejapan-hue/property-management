@@ -333,7 +333,7 @@ function PropertiesPageInner() {
     // 解除後の DM 状態は選択式。backend は restoreDmStatus 省略時に dmStatus を据え置く(現状維持)。
     // send を渡したときだけ「送付可」に戻す(再送可能にする)。
     const restore = window.confirm(
-      "解除後、この物件のDM状態を「送付可」に戻しますか？\nOK = 送付可に戻す / キャンセル = 現状(送付しない)のまま解除",
+      "解除後、この物件のDM状態を「送付可」に戻しますか？\nOK = 送付可に戻す / キャンセル = 現在のDM状態のまま解除",
     );
     setClearingUndelivId(propertyId);
     setError(null);
