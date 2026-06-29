@@ -51,11 +51,10 @@ export async function POST(request: NextRequest) {
     if (body.confirmed !== true) {
       throw new ApiError(400, "AI生成には課金確認(confirmed:true)が必要です", "SALE_DM_CONFIRMATION_REQUIRED");
     }
-    // 差出人(差出人名・連絡先)が env 既定にも body 指定にも無いと、resolveSender が "(差出人名 未設定)"/空 を
-    // 返し、差出人欄が使えない手紙を有料生成してしまう(UI は差出人を送らず env 既定に依存)。生成の前に確認し、
-    // 揃っていなければ fail-closed(503)する(印刷URL チェックと同方針)。
-    const senderInBody = !!body.options.senderName?.trim() && !!body.options.senderContact?.trim();
-    if (!isSenderConfigured() && !senderInBody) {
+    // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)のみを使う。印刷・再生成も resolveSender(env)を使い、
+    // body 指定の差出人は保存されず印刷で env 既定にズレる(不整合)ため、body の抜け道は塞ぎ env を必須にする。
+    // 未設定なら使えない手紙を有料生成しないよう生成前に fail-closed(503・印刷URL チェックと同方針・Codex R33)。
+    if (!isSenderConfigured()) {
       throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
     }
     // 冪等性: client が作成試行ごとに安定生成したキー。同キーで既に作成済みなら、有料生成を再実行せず
@@ -102,13 +101,13 @@ export async function POST(request: NextRequest) {
       ownerDisplayConfig,
     );
 
-    // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)を補完(body 指定があればそれを優先)。
-    // 集計・型は variant 基準のため sender は letter 生成にのみ使う(再生成 route と同方針)。
+    // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)のみ。印刷・再生成も resolveSender(env)を使うため、
+    // 生成も env 差出人で揃える(body 指定は非永続ゆえ使わない=印刷とのズレを防ぐ・Codex R33)。
     const sender = resolveSender();
     const genOptions = {
       ...body.options,
-      senderName: body.options.senderName ?? sender.senderName,
-      senderContact: body.options.senderContact ?? sender.senderContact,
+      senderName: sender.senderName,
+      senderContact: sender.senderContact,
     };
 
     // 生成(課金)の前に campaign をクレーム(idempotencyKey の一意制約で同キーの二重生成を弾く)。
@@ -130,49 +129,51 @@ export async function POST(request: NextRequest) {
       throw e;
     }
 
-    // クレーム確保後に生成。総失敗(provider throw 等)時はクレームを削除し、孤児 campaign を残さない
-    // (リトライで再クレームできるように)。
+    // クレーム確保後に生成+保存。途中で失敗(生成の総失敗 / 保存トランザクション失敗=対象物件の削除・FK・DB
+    // エラー等)したらクレームを削除し、孤児 campaign(空)を残さない。UI は失敗後に同じ idempotencyKey で再試行
+    // するため、空 campaign が残ると壊れた空キャンペーンに遷移してしまう。削除すれば再クレーム→再生成できる(R33)。
     let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
     let truncated: boolean;
     try {
       const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })));
       drafts = result.drafts;
       truncated = result.truncated;
+
+      // 既定型 A(1つ)+ 宛先下書きを、クレーム済み campaign 配下に保存(生成成功分のみ body 入り。失敗分は空+メモ)。
+      // 複数型(B/C)の追加と再割当は variants / assign route で行う。生成 route は「初期1型」を保証するのみ。
+      // A/B 純度は割り当てられた variantId 基準(個別 override は本文の微修正で集計に影響しない)。
+      await prisma.$transaction(async (tx) => {
+        const variant = await tx.dmVariant.create({
+          data: {
+            campaignId: claimed.id, label: "A",
+            designTemplate: body.options.designTemplate, tone: body.options.tone,
+            length: body.options.length, appeal: body.options.appeal,
+            strength: body.options.strength, extraInstruction: body.options.extraInstruction ?? null,
+          },
+        });
+        const sliced = meta.slice(0, drafts.length);
+        for (let i = 0; i < sliced.length; i++) {
+          const d = drafts[i];
+          await tx.dmRecipientDraft.create({
+            data: {
+              campaignId: claimed.id, variantId: variant.id, propertyId: sliced[i].propertyId,
+              representativeOwnerId: sliced[i].representativeOwnerId,
+              recipientName: sliced[i].recipientName, recipientZip: sliced[i].recipientZip,
+              recipientAddress: sliced[i].recipientAddress, honorific: sliced[i].honorific,
+              coOwnerCount: sliced[i].coOwnerCount,
+              body: d.body ?? "", model: process.env.SALE_DM_LETTER_MODEL ?? DEFAULT_MODEL,
+              outcomeNote: d.error ? `生成失敗(${d.error})` : null,
+              trackingToken: randomBytes(8).toString("base64url"),
+              generatedBy: session.id,
+            },
+          });
+        }
+      });
     } catch (e) {
+      // 生成 or 保存の失敗 → クレームを削除(孤児の空 campaign を残さない。再試行で再クレームできる)。
       await prisma.dmCampaign.delete({ where: { id: claimed.id } }).catch(() => {});
       throw e;
     }
-
-    // 既定型 A(1つ)+ 宛先下書きを、クレーム済み campaign 配下に保存(生成成功分のみ body 入り。失敗分は空+メモ)。
-    // 複数型(B/C)の追加と再割当は variants / assign route で行う。生成 route は「初期1型」を保証するのみ。
-    // A/B 純度は割り当てられた variantId 基準(個別 override は本文の微修正で集計に影響しない)。
-    await prisma.$transaction(async (tx) => {
-      const variant = await tx.dmVariant.create({
-        data: {
-          campaignId: claimed.id, label: "A",
-          designTemplate: body.options.designTemplate, tone: body.options.tone,
-          length: body.options.length, appeal: body.options.appeal,
-          strength: body.options.strength, extraInstruction: body.options.extraInstruction ?? null,
-        },
-      });
-      const sliced = meta.slice(0, drafts.length);
-      for (let i = 0; i < sliced.length; i++) {
-        const d = drafts[i];
-        await tx.dmRecipientDraft.create({
-          data: {
-            campaignId: claimed.id, variantId: variant.id, propertyId: sliced[i].propertyId,
-            representativeOwnerId: sliced[i].representativeOwnerId,
-            recipientName: sliced[i].recipientName, recipientZip: sliced[i].recipientZip,
-            recipientAddress: sliced[i].recipientAddress, honorific: sliced[i].honorific,
-            coOwnerCount: sliced[i].coOwnerCount,
-            body: d.body ?? "", model: process.env.SALE_DM_LETTER_MODEL ?? DEFAULT_MODEL,
-            outcomeNote: d.error ? `生成失敗(${d.error})` : null,
-            trackingToken: randomBytes(8).toString("base64url"),
-            generatedBy: session.id,
-          },
-        });
-      }
-    });
 
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({

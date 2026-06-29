@@ -77,6 +77,8 @@ beforeEach(() => {
   // 印刷必須URL(郵送QRの絶対URL)。未設定だと生成前に 503(印刷不能な下書きへの課金を防ぐ)。
   process.env.SALE_DM_TRACKING_BASE_URL = "https://app.example.com";
   process.env.SALE_DM_LP_URL = "https://lp.example.com";
+  process.env.SALE_DM_SENDER_NAME = "△△不動産"; // 差出人 env(R33: 差出人は env 必須・body は使わない)
+  process.env.SALE_DM_SENDER_CONTACT = "03-0000-0000";
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue(plain);
   (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([]);
@@ -158,6 +160,26 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const res = await POST(req(noSender) as never);
     expect(res.status).toBe(503);
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
+
+  it("差出人を body で渡しても env 未設定なら 503(body 差出人は保存されず印刷とズレる→env 必須・Codex R33)", async () => {
+    delete process.env.SALE_DM_SENDER_NAME;
+    delete process.env.SALE_DM_SENDER_CONTACT;
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    // validBody は options に senderName/senderContact(=body 差出人)を含む。それでも env 未設定なら 503。
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(503);
+    expect((prismaMock as never as { dmCampaign: { create: ReturnType<typeof vi.fn> } }).dmCampaign.create).not.toHaveBeenCalled();
+  });
+
+  it("生成成功後の保存(transaction)失敗ならクレームを削除する(孤児の空 campaign を残さない・Codex R33)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const pmc = prismaMock as never as { dmCampaign: { create: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn>; property: { findMany: ReturnType<typeof vi.fn> } };
+    pmc.property.findMany.mockResolvedValue([property]); // 1件→生成→保存トランザクションに到達
+    pmc.$transaction.mockRejectedValueOnce(new Error("FK write failed"));
+    const res = await POST(req({ ...validBody, idempotencyKey: "key-tx" }) as never);
+    expect(res.status).toBe(500);
+    expect(pmc.dmCampaign.delete).toHaveBeenCalledWith({ where: { id: "c1" } }); // クレームを削除して孤児を残さない
   });
 
   it("冪等性キー: 同キーで既に作成済みなら再生成せず既存を返す(二重課金・二重作成の防止)", async () => {
