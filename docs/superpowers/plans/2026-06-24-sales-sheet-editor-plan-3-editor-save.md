@@ -267,6 +267,7 @@ export async function deleteDesign(propertyId: string, sheetId: string, db: Pris
 **Interfaces:**
 - Consumes: design-service（Task A）, `getApiSession`, `hasPermission`, `canAccessPropertyRecord`, `handleApiError`/`ApiError`。
 - 契約: 401(未認証)/403(権限・物件アクセス不可)/404(物件 or design 無)/409(更新競合)/422(document/入力不正)/200。
+- 監査: create / update / delete の**成功時のみ** `writeAuditLog`（他の property mutation と同方式）。**非PIIメタのみ**＝action=`sales_sheet_design_{create,update,delete}`・targetTable=`sales_sheet_designs`・targetId=sheetId（create は新 design.id）・detail=`{ propertyId }`。document 本文・画像 key/URL・overrides・物件住所・顧客情報等の PII は**入れない**。403/404/409/422 等の失敗時は記録しない（delete 対象なしでも存在情報を出さない）。新規作成 route（Task H）の create も同様に記録。
 
 - [ ] **Step 1-2: 失敗するテスト→実装（POST 作成 / GET 一覧）**
 
@@ -288,7 +289,7 @@ GET `[sheetId]`: `getDesign`（スコープ外/無は 404）→ **read 境界で
 PUT `[sheetId]`: write 権限。body `{ title?, document?, expectedUpdatedAt: string(ISO datetime・`z.string().datetime()` で検証＝不正値は 400) }`。**document 提供時は保存前に `parseSalesSheetDocument` → `assertDocumentImagesAuthorized`（propertyId を渡し /uploads が caller 認可かつその物件に属するか検証・別物件/未認可/解決不能は 422）**。`updateDesign` の戻りで not_found→404 / conflict→409 / ok→200`{ updatedAt }`。
 DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 
-**API テスト（抜粋）:** POST/PUT で **別 property の /uploads key（caller は読めるが物件スコープ外）→422** / **`authorizeUploadAccess` ok でも property ownership 不一致→422** / 解決不能 key→422 / 422 に blob key 実値を出さない / **GET は壊れた DB document を raw JSON で返さず 422**（read 境界 parse）。
+**API テスト（抜粋）:** POST/PUT で **別 property の /uploads key（caller は読めるが物件スコープ外）→422** / **`authorizeUploadAccess` ok でも property ownership 不一致→422** / 解決不能 key→422 / 422 に blob key 実値を出さない / **GET は壊れた DB document を raw JSON で返さず 422**（read 境界 parse）/ **create・update・delete の成功で `writeAuditLog` が1件・detail は `{ propertyId }` のみ（document 本文・画像 key を含めない）/ 403・404・409 では記録しない**。
 
 - [ ] **Step 5: 全テスト緑 / tsc / eslint→コミット。**
 （注: route の prisma は計画②同様テストでモック。`canAccessPropertyRecord` の正確なシグネチャ・property select は計画②の preview route を参照して合わせる。）
@@ -304,7 +305,7 @@ DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 - Test: `.../export/__tests__/route.test.ts`
 
 **Interfaces:**
-- Produces: `authorizeAndInlineDocumentImages(doc, {session, permissions}): Promise<SalesSheetDocument>`（出力時：/uploads を認可→data:化、未認可/非画像MIMEは透明プレースホルダ。**DoS 上限：画像数が上限超なら read 前に出力拒否(422)・逐次処理＋同一 key dedup で storage.read は1回・data 化後の合計バイト上限超過は drop。同一画像を複数回参照しても data URL は出現回数分 HTML に直列化されるため、cache 再利用時も出現ごとに serialized data URL サイズを合計 budget に加算し、超過する出現は drop**。Chromium fail-fast 順序は不変）。
+- Produces: `authorizeAndInlineDocumentImages(doc, {session, permissions}): Promise<SalesSheetDocument>`（出力時：/uploads を認可→data:化、未認可/非画像MIMEは透明プレースホルダ。**DoS 上限：画像数が上限超なら read 前に出力拒否(422)・逐次処理＋同一 key dedup で storage.read は1回・**合計 budget は raw bytes ではなく実際に HTML へ直列化される data URL サイズ（base64 膨張込み）で計上**（初回 read も cache 再利用も同じ）し上限超過は drop。同一画像を複数回参照しても data URL は出現回数分 HTML に直列化されるため、cache 再利用も出現ごとに serialized サイズを加算し超過する出現は drop**。Chromium fail-fast 順序は不変）。
 - Produces: `assertDocumentImagesAuthorized(doc, {session, permissions, propertyId}): Promise<void>`（**保存境界**：各 /uploads 画像について **(1) caller が読める（`authorizeUploadAccess`==="ok"）かつ (2) key がその図面の物件 `propertyId` に属する（`isUploadKeyOwnedByProperty`＝DB逆引き・key 形式から物件推定しない）** の両方を要求。別物件/未認可/存在しない/解決不能なら `ZodError`→422。`data:` はスキップ。CRUD POST/PUT が propertyId を渡し保存前に呼ぶ。key/URL はエラーに出さない。(2) が無いと複数物件を読める管理者が他物件 key を保存→GET echo するため必須）。
 - Produces: `isImageKeyAuthorizedForProperty(key, {session, permissions, propertyId}): Promise<boolean>`（上記 (1)＋(2) を判定する共通ヘルパ。保存境界（`assertDocumentImagesAuthorized`＝false で throw）と、新規作成 API の代表写真認可（false で写真 drop）で共用。テスト: 正常な代表写真は初期 document に入る / 別物件・解決不能 key の代表写真は drop し「写真なし初期図面」を作成 / drop 時に key 実値を log・error に出さない）。
 
@@ -361,9 +362,11 @@ export async function authorizeAndInlineDocumentImages(
     const bytes = await getStorage().read(key).catch(() => null);
     if (!bytes) { elements.push(dropImage(el)); continue; }
     if (!bytes.contentType.startsWith("image/")) { elements.push(dropImage(el)); continue; } // 非画像MIMEは data:image/ 検証に弾かれ全体422→該当のみdrop
-    if (totalBytes + bytes.size > MAX_TOTAL_INLINE_BYTES) { elements.push(dropImage(el)); continue; } // 合計バイト上限超過→drop
-    totalBytes += bytes.size;
+    // budget は raw bytes ではなく、実際に HTML へ直列化される data URL のサイズで数える
+    // （base64 で約 4/3 + prefix 分膨らむ）。初回も cache 再利用も同じ serialized 長で計上。
     const dataUrl = toDataUrl(bytes);                          // mime は read 結果 or 既存 util
+    if (totalBytes + dataUrl.length > MAX_TOTAL_INLINE_BYTES) { elements.push(dropImage(el)); continue; } // serialized 合計上限超過→drop
+    totalBytes += dataUrl.length;
     cache.set(key, dataUrl);
     elements.push({ ...el, src: dataUrl });
   }
@@ -485,8 +488,8 @@ export async function authorizeAndInlineDocumentImages(
 - Create: `src/app/(dashboard)/properties/[id]/sales-sheets/[sheetId]/edit/page.tsx`（エディタ画面：認証/権限/物件アクセス→design 読込→`<SalesSheetEditor initial=.../>`）
 - Create: 新規作成 API（`src/app/api/properties/[id]/sales-sheets/new/route.ts`）：`property:write`＋`canAccessPropertyRecord`＋土地ゲート→**作成フォームの上書き項目を `overridesSchema`(zod)＋`parseJsonBody` で受領**→写真は **`orderBy:[{isPrimary:desc},{sortOrder:asc}]`** で代表優先取得し **`toCanonicalUploadsSrc`** で `/uploads/{key}` 正規化（server backend の `/{bucket}/{key}`/絶対URL も /uploads 形へ・key 解決不可/src 不適合なら写真なし）→**保存前に `isImageKeyAuthorizedForProperty`（caller 認可＋この物件所属）で認可し、NG/別物件/存在しないなら写真を document に入れない（サーバ生成は 422 でなく drop＝未認可 raw key を保存/GET echo させない）**→**現況は `localizeOccupancy`**（enum→空室/入居中/不明）→`buildSaleLandDocument`（**未インライン**・overrides 反映）で初期 document→`createDesign`→`{ id }`(201)。
 - Modify: `src/components/sales-sheet/SaleLandSheetButton.tsx`（「販売図面を作成（売土地）」→ **入力フォーム（価格/交通/土地面積/地目/取引態様/引渡/備考＝システムに無い項目）をモーダルで収集**し `buildCreateRequest` で `POST .../sales-sheets/new` へ送信→成功後 `[sheetId]/edit` へ遷移。直接PDFは廃止しエディタ内「出力」に統合。※これら6項目は table 行ゆえ**作成時のみ入力可**＝エディタでの table セル編集は計画④以降）
-- Modify: `src/app/(dashboard)/properties/[id]/page.tsx`（ボタン意味変更に追従・土地物件のみ表示は維持）
-- Test: toolbar/保存配線の薄いテスト＋ route(new) のテスト。
+- Modify: `src/app/(dashboard)/properties/[id]/page.tsx`（ボタン意味変更に追従・土地物件のみ表示は維持。**`property:write` を持たない read-only ユーザーには作成ボタンを表示しない**＝`SaleLandSheetButton` に `canWrite`（=`canWriteProperty`）を渡し false なら `null` 描画。`/sales-sheets/new` は write 必須ゆえ 403 dead-end を防ぐ・route 側の write チェックは維持）
+- Test: toolbar/保存配線の薄いテスト＋ route(new) のテスト。**`SaleLandSheetButton` は `canWrite=false`（read-only）で何も描画しない／`canWrite=true` で作成ボタンを描画／土地以外は page 側で非表示**。
 
 **Interfaces:**
 - `<EditorToolbar dirty onSave onExport onDelete />`。
