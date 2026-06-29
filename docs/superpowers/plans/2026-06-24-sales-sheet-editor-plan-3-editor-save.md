@@ -281,6 +281,7 @@ DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 **Interfaces:**
 - Produces: `authorizeAndInlineDocumentImages(doc, {session, permissions}): Promise<SalesSheetDocument>`（出力時：/uploads を認可→data:化、未認可/非画像MIMEは透明プレースホルダ。**DoS 上限：画像数が上限超なら read 前に出力拒否(422)・逐次処理＋同一 key dedup で fan-out 排除・data 化後の合計バイト上限超過は drop**。Chromium fail-fast 順序は不変）。
 - Produces: `assertDocumentImagesAuthorized(doc, {session, permissions, propertyId}): Promise<void>`（**保存境界**：各 /uploads 画像について **(1) caller が読める（`authorizeUploadAccess`==="ok"）かつ (2) key がその図面の物件 `propertyId` に属する（`isUploadKeyOwnedByProperty`＝DB逆引き・key 形式から物件推定しない）** の両方を要求。別物件/未認可/存在しない/解決不能なら `ZodError`→422。`data:` はスキップ。CRUD POST/PUT が propertyId を渡し保存前に呼ぶ。key/URL はエラーに出さない。(2) が無いと複数物件を読める管理者が他物件 key を保存→GET echo するため必須）。
+- Produces: `isImageKeyAuthorizedForProperty(key, {session, permissions, propertyId}): Promise<boolean>`（上記 (1)＋(2) を判定する共通ヘルパ。保存境界（`assertDocumentImagesAuthorized`＝false で throw）と、新規作成 API の代表写真認可（false で写真 drop）で共用）。
 
 - [ ] **Step 1: 失敗するテスト（authorize-document-images）**
 
@@ -294,27 +295,47 @@ DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 - [ ] **Step 2: 実装**
 
 ```ts
-import type { SalesSheetDocument } from "./document-schema";
+import { z } from "zod";
+import type { SalesSheetDocument, SalesSheetElement } from "./document-schema";
 import { authorizeUploadAccess } from "@/lib/uploads-authorization";
 import { getStorage } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
+
+const MAX_INLINE_IMAGES = 50;                    // /uploads 画像数の上限（超過は出力拒否）
+const MAX_TOTAL_INLINE_BYTES = 32 * 1024 * 1024; // data 化後の合計バイト上限（超過分は drop）
 
 export async function authorizeAndInlineDocumentImages(
   doc: SalesSheetDocument,
   ctx: { session: ApiSession; permissions: PermissionEntry[] },
 ): Promise<SalesSheetDocument> {
-  const elements = await Promise.all(doc.elements.map(async (el) => {
-    if (el.type !== "image") return el;
-    if (el.src.startsWith("data:")) return el;                 // 既に安全（スキーマで data:image 限定）
+  // DoS 防止: 出力対象（data: 以外の image）が多すぎる document は read 前に出力拒否（fail-fast）。
+  // ZodError → handleApiError で 422。key/URL はメッセージに出さない。
+  const inlineCount = doc.elements.filter((el) => el.type === "image" && !el.src.startsWith("data:")).length;
+  if (inlineCount > MAX_INLINE_IMAGES) {
+    throw new z.ZodError([{ code: z.ZodIssueCode.custom, message: "図面に含まれる画像が多すぎます", path: ["elements"] }]);
+  }
+  // 逐次処理（並列 read の fan-out を避ける）＋ 同一 key の重複 read を cache で排除。
+  // 合計バイト上限を超えたら以降の画像は drop。
+  const cache = new Map<string, string>();
+  let totalBytes = 0;
+  const elements: SalesSheetElement[] = [];
+  for (const el of doc.elements) {
+    if (el.type !== "image" || el.src.startsWith("data:")) { elements.push(el); continue; } // data: は安全（スキーマで限定）
     const key = getStorage().keyFromUrl(el.src);               // backend 対応
-    if (!key) return dropImage(el);
+    if (!key) { elements.push(dropImage(el)); continue; }
+    const cached = cache.get(key);
+    if (cached) { elements.push({ ...el, src: cached }); continue; } // 同一 key は read せず再利用（dedup）
     const decision = await authorizeUploadAccess({ key, session: ctx.session, permissions: ctx.permissions });
-    if (decision !== "ok") return dropImage(el);               // 認可外は描画しない・バイト未読込
+    if (decision !== "ok") { elements.push(dropImage(el)); continue; } // 認可外は描画しない・バイト未読込
     const bytes = await getStorage().read(key).catch(() => null);
-    if (!bytes) return dropImage(el);
-    if (!bytes.contentType.startsWith("image/")) return dropImage(el); // 非画像MIME(.jfif等→octet-stream)は出力の再parseで data:image/ 検証に弾かれ図面全体が422→該当画像のみdrop
-    return { ...el, src: toDataUrl(bytes) };                   // mime は read 結果 or 既存 util
-  }));
+    if (!bytes) { elements.push(dropImage(el)); continue; }
+    if (!bytes.contentType.startsWith("image/")) { elements.push(dropImage(el)); continue; } // 非画像MIMEは data:image/ 検証に弾かれ全体422→該当のみdrop
+    if (totalBytes + bytes.size > MAX_TOTAL_INLINE_BYTES) { elements.push(dropImage(el)); continue; } // 合計バイト上限超過→drop
+    totalBytes += bytes.size;
+    const dataUrl = toDataUrl(bytes);                          // mime は read 結果 or 既存 util
+    cache.set(key, dataUrl);
+    elements.push({ ...el, src: dataUrl });
+  }
   return { ...doc, elements };
 }
 // dropImage: image 要素の src を **有効な data: 透明1pxプレースホルダ** に差し替える（@codex P2反映）。
@@ -431,7 +452,7 @@ export async function authorizeAndInlineDocumentImages(
 - Create: `src/components/sales-sheet/editor/EditorToolbar.tsx`
 - Modify: `SalesSheetEditor.tsx`（保存/出力 API 配線・dirty 表示）
 - Create: `src/app/(dashboard)/properties/[id]/sales-sheets/[sheetId]/edit/page.tsx`（エディタ画面：認証/権限/物件アクセス→design 読込→`<SalesSheetEditor initial=.../>`）
-- Create: 新規作成 API（`src/app/api/properties/[id]/sales-sheets/new/route.ts`）：`property:write`＋`canAccessPropertyRecord`＋土地ゲート→**作成フォームの上書き項目を `overridesSchema`(zod)＋`parseJsonBody` で受領**→写真は **`orderBy:[{isPrimary:desc},{sortOrder:asc}]`** で代表優先取得し **`toCanonicalUploadsSrc`** で `/uploads/{key}` 正規化（server backend の `/{bucket}/{key}`/絶対URL も /uploads 形へ・key 解決不可/正規化後 src が isSafeImageSrc 不適合なら写真なし）→**現況は `localizeOccupancy`**（enum→空室/入居中/不明）→`buildSaleLandDocument`（**未インライン**・overrides 反映）で初期 document→`createDesign`→`{ id }`(201)。
+- Create: 新規作成 API（`src/app/api/properties/[id]/sales-sheets/new/route.ts`）：`property:write`＋`canAccessPropertyRecord`＋土地ゲート→**作成フォームの上書き項目を `overridesSchema`(zod)＋`parseJsonBody` で受領**→写真は **`orderBy:[{isPrimary:desc},{sortOrder:asc}]`** で代表優先取得し **`toCanonicalUploadsSrc`** で `/uploads/{key}` 正規化（server backend の `/{bucket}/{key}`/絶対URL も /uploads 形へ・key 解決不可/src 不適合なら写真なし）→**保存前に `isImageKeyAuthorizedForProperty`（caller 認可＋この物件所属）で認可し、NG/別物件/存在しないなら写真を document に入れない（サーバ生成は 422 でなく drop＝未認可 raw key を保存/GET echo させない）**→**現況は `localizeOccupancy`**（enum→空室/入居中/不明）→`buildSaleLandDocument`（**未インライン**・overrides 反映）で初期 document→`createDesign`→`{ id }`(201)。
 - Modify: `src/components/sales-sheet/SaleLandSheetButton.tsx`（「販売図面を作成（売土地）」→ **入力フォーム（価格/交通/土地面積/地目/取引態様/引渡/備考＝システムに無い項目）をモーダルで収集**し `buildCreateRequest` で `POST .../sales-sheets/new` へ送信→成功後 `[sheetId]/edit` へ遷移。直接PDFは廃止しエディタ内「出力」に統合。※これら6項目は table 行ゆえ**作成時のみ入力可**＝エディタでの table セル編集は計画④以降）
 - Modify: `src/app/(dashboard)/properties/[id]/page.tsx`（ボタン意味変更に追従・土地物件のみ表示は維持）
 - Test: toolbar/保存配線の薄いテスト＋ route(new) のテスト。
