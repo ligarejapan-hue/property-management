@@ -104,7 +104,10 @@ export default function SaleDmWorkspacePage() {
     [load],
   );
 
-  if (loading) {
+  // 全画面スピナーは初回ロード(まだ campaign が無い)時だけ。再取得(onChanged→load)では workspace を
+  // アンマウントせず据え置き、操作中パネルのエラー握り潰し/入力中フォーム消失を防ぐ(更新はツールバーの
+  // スピナー、一時エラーは下の非破壊バナーで示す)。
+  if (loading && !campaign) {
     return (
       <div className="flex items-center justify-center py-16">
         <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
@@ -113,7 +116,9 @@ export default function SaleDmWorkspacePage() {
     );
   }
 
-  if (error || !campaign) {
+  // campaign が無い(初回ロード失敗等)ときだけ全画面エラー。読み込み済みなら再取得/操作の一時エラーで
+  // workspace を消さず、下の非破壊バナー(role=alert)で表示する。
+  if (!campaign) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
         {error ?? "キャンペーンが見つかりません"}
@@ -128,6 +133,14 @@ export default function SaleDmWorkspacePage() {
         <h2 className="text-2xl font-bold text-gray-800">{campaign.name}</h2>
         <span className="text-sm text-gray-500">{campaign.recipients.length} 通</span>
       </div>
+
+      {/* 再取得/操作の一時エラーは workspace を消さず非破壊的に表示(初回ロード失敗は上の全画面分岐)。
+          パネルが据え置かれるので、操作中パネル自身のエラーはパネル内に出る。ここはページ全体(load/送付フロー)用。 */}
+      {error && (
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       {/* 送付フロー: 確定(draft→confirmed)→ 印刷/CSV → 送付済み(confirmed→sent・反響入力解禁) */}
       <div className="flex flex-wrap items-center gap-2">
@@ -175,7 +188,7 @@ export default function SaleDmWorkspacePage() {
             確定分を送付済みに({confirmedIds.length})
           </button>
         )}
-        {actionBusy && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
+        {(actionBusy || loading) && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
       </div>
 
       <SaleDmAggregateView campaign={campaign} />

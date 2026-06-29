@@ -77,6 +77,16 @@ describe("売却DM 管理UI の配線", () => {
     expect(list).not.toContain("送付しない)のまま");
   });
 
+  it("作業画面の全画面スピナーは初回ロードのみ(再取得でパネル据え置き=同時操作で裏エラーを握り潰さない)", () => {
+    // 再取得(onChanged→load)で loading=true になっても、campaign がある限りパネルをアンマウントしない。
+    // これにより、再生成(有料・低速)中に別パネルで均等割り当てを実行しても、遅れて返る 409 等のエラーが
+    // アンマウント済みコンポーネントへの setError で握り潰されず、画面に表示される(subagent Important)。
+    const workspace = read("../../app/(dashboard)/properties/sale-dm/[campaignId]/page.tsx");
+    expect(workspace).toContain("loading && !campaign");
+    // 初回ロード失敗のみ全画面エラー。読み込み済みでの一時エラーは workspace を消さず非破壊バナー(alert)で表示。
+    expect(workspace).toContain('role="alert"');
+  });
+
   it("client に A/B管理 + 宛先不明解除の関数が存在する", () => {
     const src = read("../api-client.ts");
     for (const fn of [
