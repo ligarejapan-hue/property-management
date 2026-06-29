@@ -34,11 +34,14 @@ describe("buildLetterPrompt", () => {
     expect(user).toContain("他共有者");
   });
 
-  it("差出人・物件情報・補足指示を user に含める", () => {
+  it("物件情報・補足指示を user に含める(差出人は本文に焼き込まないため AI へ渡さない)", () => {
     const { user } = buildLetterPrompt(recipient, options);
-    expect(user).toContain("△△不動産");
     expect(user).toContain("東京都〇〇区△△1-2-3");
     expect(user).toContain("地域の成約事例にも触れて");
+    // @codex(635e952): 差出人は印刷側(env)が唯一の出所。本文への二重化・env 変更時の不一致を防ぐため、
+    // 差出人名/連絡先は user プロンプトに含めない(prompt は「本文に書かない」と system で明示)。
+    expect(user).not.toContain("△△不動産");
+    expect(user).not.toContain("000-000-0000");
   });
 
   it("system にコンプライアンス制約(誇大広告/断定価格)を含める", () => {

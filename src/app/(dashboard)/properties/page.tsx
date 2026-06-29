@@ -5,7 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable } from "@/lib/api-client";
-import { canCreateSaleDm } from "@/lib/sale-dm-letter/list-ui";
+import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
 import NewPropertyModal from "@/components/properties/new-property-modal";
@@ -328,6 +328,10 @@ function PropertiesPageInner() {
         idempotencyKey: saleDmIdemKeyRef.current,
       });
       saleDmIdemKeyRef.current = null; // 成功 → 次の作成は新しいキー
+      // 部分生成(上限超で先頭のみ=truncated / 一部失敗で空本文=failed)は遷移前に明示する。
+      // 確認文は「現在の絞り込み対象を生成」と言うため、サブセットのみ生成/空letter を見落とさせない。
+      const partialNotice = buildSaleDmPartialNotice(res);
+      if (partialNotice) window.alert(partialNotice);
       router.push(`/properties/sale-dm/${res.campaignId}`);
     } catch (err) {
       // 失敗 → キーは保持(同キーで再試行すればサーバーが二重生成しない)。

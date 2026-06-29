@@ -31,7 +31,9 @@ function buildSystem(options: LetterOptions): string {
     "- 価格や売却の確実性を断定しない(「必ず高く売れます」等は禁止)。",
     "- 宅地建物取引業法に照らして問題となる断定・誇張をしない。",
     "- 敬称は宛名の指定に厳密に従う(個人=様 / 法人=御中)。",
-    "- 差出人(会社名・連絡先)を本文末尾に明示する。",
+    // 差出人の署名・連絡先は印刷側(env 由来の差出人欄)が末尾に付与する。本文にも書くと二重表示になり、
+    // 生成後に差出人 env が変わると本文と差出人欄が食い違うため、本文には書かせない。
+    "- 差出人の署名・会社名・連絡先は本文に書かない(末尾の差出人欄は印刷側で付与するため)。自社に触れる場合も「弊社」等にとどめ、社名・電話・住所は本文に含めない。",
     "- 無料査定など、相手の負担なく行動できる導線を1つ入れる。",
     `文体の方針: トーン=${TONE_JA[options.tone] ?? options.tone} / 長さ=${LENGTH_JA[options.length] ?? options.length} / 訴求の軸=${APPEAL_JA[options.appeal] ?? options.appeal} / 押しの強さ=${STRENGTH_JA[options.strength] ?? options.strength}。`,
     "出力は手紙本文のみ。前置きや説明・マークダウン記法は付けない。",
@@ -49,9 +51,10 @@ export function buildLetterPrompt(recipient: LetterRecipient, options: LetterOpt
     `物件の所在地: ${recipient.propertyAddress}`,
     recipient.roomNo ? `部屋番号: ${recipient.roomNo}` : null,
     `物件種別: ${recipient.propertyTypeLabel}`,
-    `差出人: ${options.senderName}(連絡先: ${options.senderContact})`,
+    // 差出人名・連絡先は AI に渡さない(本文に書かせない方針＝印刷側 env が唯一の出所。
+    // 渡すと本文に焼き込まれ、生成後の env 変更で差出人欄と食い違うため)。
     options.extraInstruction ? `補足指示: ${options.extraInstruction}` : null,
-    "上記の宛名・物件情報・差出人で、売却を促すダイレクトメール本文を作成してください。",
+    "上記の宛名・物件情報をもとに、売却を促すダイレクトメール本文を作成してください。",
   ]
     .filter((line): line is string => line != null)
     .join("\n");

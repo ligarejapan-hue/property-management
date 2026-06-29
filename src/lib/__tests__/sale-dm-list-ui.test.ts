@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isDmUndeliverable, canCreateSaleDm } from "../sale-dm-letter/list-ui";
+import { isDmUndeliverable, canCreateSaleDm, buildSaleDmPartialNotice } from "../sale-dm-letter/list-ui";
 
 const perm = (resource: string) => ({ resource, action: "read", granted: true });
 const genPerm = { resource: "sale_dm", action: "generate", granted: true };
@@ -33,5 +33,35 @@ describe("canCreateSaleDm", () => {
   });
   it("null(取得失敗)は false(fail-safe)", () => {
     expect(canCreateSaleDm(null)).toBe(false);
+  });
+});
+
+describe("buildSaleDmPartialNotice", () => {
+  it("全件生成(truncated=false / failed=0)は null(通知不要)", () => {
+    expect(buildSaleDmPartialNotice({ generated: 10, failed: 0, truncated: false })).toBeNull();
+  });
+
+  it("truncated=true なら上限超で一部のみ生成した旨(生成件数つき)を返す", () => {
+    const msg = buildSaleDmPartialNotice({ generated: 50, failed: 0, truncated: true });
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("50");
+    expect(msg).toMatch(/上限|未生成/);
+  });
+
+  it("failed>0 なら空本文の件数を再生成案内つきで返す", () => {
+    const msg = buildSaleDmPartialNotice({ generated: 8, failed: 2, truncated: false });
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("2");
+    expect(msg).toMatch(/失敗|空|再生成/);
+  });
+
+  it("truncated と failed の両方なら両方の行を含む", () => {
+    const msg = buildSaleDmPartialNotice({ generated: 50, failed: 3, truncated: true }) ?? "";
+    expect(msg).toMatch(/上限|未生成/);
+    expect(msg).toMatch(/失敗|空|再生成/);
+  });
+
+  it("フィールド未定義(古い/mock レスポンス)は安全側で null", () => {
+    expect(buildSaleDmPartialNotice({})).toBeNull();
   });
 });
