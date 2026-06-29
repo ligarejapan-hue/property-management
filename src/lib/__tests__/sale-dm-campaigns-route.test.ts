@@ -59,6 +59,7 @@ describe("buildRecipientsFromProperties", () => {
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { POST } from "../../app/api/properties/sale-dm/campaigns/route";
+import { isSenderConfigured } from "../sale-dm-letter/sender";
 
 // getUserPermissions は { resource, action, granted } の配列を返す(dm-export route test と同形)。
 const grant = (...keys: string[]) => (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -145,5 +146,29 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const res = await POST(req(validBody) as never);
     expect(res.status).toBe(503);
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
+
+  it("差出人(SALE_DM_SENDER_NAME/CONTACT)が body・env とも未設定なら生成前に 503・課金しない", async () => {
+    delete process.env.SALE_DM_SENDER_NAME;
+    delete process.env.SALE_DM_SENDER_CONTACT;
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    // body も差出人を持たない(UI は差出人を送らない=env 既定に依存)。env も無いと「差出人名 未設定」入りの
+    // 使えない手紙を有料生成してしまうため、生成前に fail-closed する(印刷URL チェックと同方針)。
+    const noSender = { name: "テスト", confirmed: true, options: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low" } };
+    const res = await POST(req(noSender) as never);
+    expect(res.status).toBe(503);
+    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("isSenderConfigured", () => {
+  it("env(SALE_DM_SENDER_NAME/CONTACT)が両方あれば true・片方でも欠ければ false", () => {
+    process.env.SALE_DM_SENDER_NAME = "△△不動産";
+    process.env.SALE_DM_SENDER_CONTACT = "03-0000-0000";
+    expect(isSenderConfigured()).toBe(true);
+    delete process.env.SALE_DM_SENDER_CONTACT;
+    expect(isSenderConfigured()).toBe(false);
+    delete process.env.SALE_DM_SENDER_NAME;
+    expect(isSenderConfigured()).toBe(false);
   });
 });

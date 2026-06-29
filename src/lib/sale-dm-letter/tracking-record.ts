@@ -30,15 +30,18 @@ type TrackingTxLike = {
 export async function recordTrackingHit(
   tx: TrackingTxLike,
   token: string,
-): Promise<{ matched: boolean }> {
+): Promise<{ matched: boolean; firstHit: boolean }> {
   const draft = await tx.dmRecipientDraft.findUnique({
     where: { trackingToken: token },
     select: { id: true, lpFirstAccessAt: true, status: true },
   });
-  if (!draft) return { matched: false };
+  if (!draft) return { matched: false, firstHit: false };
   // 送付確定(sent)前のヒット(印刷プレビューからの内部スキャン/クリック等)は
   // A/B 反響を汚すため計上しない。送付済みになって初めて追跡を有効化する。
-  if (draft.status !== "sent") return { matched: false };
+  if (draft.status !== "sent") return { matched: false, firstHit: false };
+
+  // 初回ヒット(lpFirstAccessAt が未設定)か否か。公開 GET の監査を初回だけに絞るため呼び出し側へ返す。
+  const firstHit = draft.lpFirstAccessAt == null;
 
   await tx.dmRecipientDraft.update({
     where: { id: draft.id },
@@ -51,5 +54,5 @@ export async function recordTrackingHit(
       outcome: "inquiry",
     },
   });
-  return { matched: true };
+  return { matched: true, firstHit };
 }

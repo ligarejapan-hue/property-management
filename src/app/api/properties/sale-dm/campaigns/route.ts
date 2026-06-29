@@ -10,7 +10,7 @@ import { buildPropertyListWhere, buildPropertyListOrderBy } from "@/lib/property
 import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
-import { resolveSender } from "@/lib/sale-dm-letter/sender";
+import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, DEFAULT_MODEL } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
@@ -50,6 +50,13 @@ export async function POST(request: NextRequest) {
     // 謄本自動取得の confirmed ゲートと同方針(UI は実行前に確認ダイアログを出してから true を送る)。
     if (body.confirmed !== true) {
       throw new ApiError(400, "AI生成には課金確認(confirmed:true)が必要です", "SALE_DM_CONFIRMATION_REQUIRED");
+    }
+    // 差出人(差出人名・連絡先)が env 既定にも body 指定にも無いと、resolveSender が "(差出人名 未設定)"/空 を
+    // 返し、差出人欄が使えない手紙を有料生成してしまう(UI は差出人を送らず env 既定に依存)。生成の前に確認し、
+    // 揃っていなければ fail-closed(503)する(印刷URL チェックと同方針)。
+    const senderInBody = !!body.options.senderName?.trim() && !!body.options.senderContact?.trim();
+    if (!isSenderConfigured() && !senderInBody) {
+      throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
     }
     const query = propertyListQuerySchema.parse(body.filters ?? {});
     // DM は送付可(dmStatus=send)の物件にのみ生成する。ユーザーの絞り込みが明示的に send 以外(hold/no_send)を

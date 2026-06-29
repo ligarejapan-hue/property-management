@@ -5,7 +5,7 @@ import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { isSaleDmConfigured, generateLetters } from "@/lib/sale-dm-letter";
-import { resolveSender } from "@/lib/sale-dm-letter/sender";
+import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { resolveDraftOptions } from "@/lib/sale-dm-letter/override";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
@@ -15,6 +15,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // 再生成も有料AI呼び出し(1通)+ オーナーPII の外部送信のため sale_dm:generate を必須化(campaign 作成と統一)。
     if (!hasPermission(permissions, "sale_dm", "generate")) throw new ApiError(403, "AIによるDM生成の権限がありません", "FORBIDDEN");
     if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
+    // 差出人(env)未設定なら fail-closed。resolveSender の "(差出人名 未設定)"/空 で再生成すると
+    // 差出人欄が使えない手紙になるため、有料生成の前に弾く(campaign 作成と同方針)。
+    if (!isSenderConfigured()) throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
     // 課金確認: 再生成も有料AI+PII外部送信のため、campaign 作成と同じく明示確認(confirmed:true)を要求する。
     // stale tab/誤クリックの1クリックで無確認の課金・PII送信が起きないようにする(UI は確認後 true を送る)。
     const requestBody = await parseJsonBody(request);

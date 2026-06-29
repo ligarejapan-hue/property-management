@@ -28,12 +28,13 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/sale-dm-letter", () => ({ isSaleDmConfigured: vi.fn(), generateLetters: vi.fn() }));
-vi.mock("@/lib/sale-dm-letter/sender", () => ({ resolveSender: vi.fn(() => ({ senderName: "△△不動産", senderContact: "000" })) }));
+vi.mock("@/lib/sale-dm-letter/sender", () => ({ resolveSender: vi.fn(() => ({ senderName: "△△不動産", senderContact: "000" })), isSenderConfigured: vi.fn(() => true) }));
 
 import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { isSaleDmConfigured, generateLetters } from "@/lib/sale-dm-letter";
+import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { GET as getCampaign } from "../../app/api/properties/sale-dm/campaigns/[id]/route";
 import { PATCH as patchDraft } from "../../app/api/properties/sale-dm/drafts/[id]/route";
 import { POST as confirmDrafts } from "../../app/api/properties/sale-dm/drafts/confirm/route";
@@ -54,6 +55,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
+  // 差出人ゲートの既定は「設定済み」。clearAllMocks は実装(mockReturnValue)を戻さないため、
+  // 個別テストで false にした後も他テストへ漏れないよう毎回 true に戻す。
+  (isSenderConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
 });
 
 describe("GET campaign", () => {
@@ -185,6 +189,15 @@ describe("POST regenerate draft (再生成)", () => {
     (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(false);
     const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(503);
+  });
+
+  it("差出人(env)未設定なら 503・生成しない(差出人名/連絡先が空の使えない手紙を有料生成しない)", async () => {
+    grant(...ALL);
+    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (isSenderConfigured as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
+    expect(res.status).toBe(503);
+    expect(generateLetters).not.toHaveBeenCalled();
   });
 
   it("課金確認なし(confirmed 未指定)の再生成は 400・生成しない(campaign 作成と同じ確認ゲート)", async () => {

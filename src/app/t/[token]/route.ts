@@ -22,22 +22,22 @@ export async function GET(
   }
 
   // 記録は best-effort(失敗しても受け手体験=LP転送を止めない)。
-  let matched = false;
+  let firstHit = false;
   try {
     const r = await recordTrackingHit(prisma, token);
-    matched = r.matched;
+    firstHit = r.firstHit;
   } catch {
     // 記録失敗はログのみ(下の 302 判定には影響させない)。
-    matched = false;
+    firstHit = false;
   }
 
-  // マッチした実ヒットのみ監査する。未認証の公開エンドポイントゆえ、未マッチ/bot/
-  // 列挙トークンで audit_logs を肥大化させない(書込増幅の防止)。非PIIメタのみ。
-  if (matched) {
+  // 初回ヒットのみ監査する。公開(未認証)エンドポイントゆえ、再訪/クローラ/プレビューや未マッチ/列挙
+  // トークンで audit_logs を肥大化させない(2回目以降のアクセスは lpAccessCount で計上済み)。非PIIメタのみ。
+  if (firstHit) {
     await writeAuditLog({
       action: "sale_dm_tracking_hit",
       targetTable: "dm_recipient_drafts",
-      detail: { matched: true, at: new Date().toISOString() },
+      detail: { firstHit: true, at: new Date().toISOString() },
     });
   }
 

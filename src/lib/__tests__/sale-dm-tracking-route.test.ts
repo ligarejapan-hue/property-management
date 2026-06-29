@@ -53,6 +53,7 @@ describe("recordTrackingHit", () => {
     const tx = makeTx({ id: "r1", lpFirstAccessAt: null, status: "sent" });
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.matched).toBe(true);
+    expect(r.firstHit).toBe(true); // 初回ヒット(lpFirstAccessAt が null→セット)
     const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
       data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number }; outcome?: string };
     };
@@ -61,9 +62,10 @@ describe("recordTrackingHit", () => {
     expect(arg.data.outcome).toBe("inquiry"); // outcome 永続キャッシュを LP アクセスで同期
   });
 
-  it("2回目以降は lpFirstAccessAt を上書きしない(冪等)・count は ++", async () => {
+  it("2回目以降は lpFirstAccessAt を上書きしない(冪等)・count は ++・firstHit=false", async () => {
     const tx = makeTx({ id: "r1", lpFirstAccessAt: new Date("2020-01-01"), status: "sent" });
-    await recordTrackingHit(tx as never, "tok");
+    const r = await recordTrackingHit(tx as never, "tok");
+    expect(r.firstHit).toBe(false); // 再訪は初回でない → 監査しない判定に使う
     const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
       data: { lpFirstAccessAt?: Date; lpAccessCount: { increment: number }; outcome?: string };
     };
@@ -91,8 +93,19 @@ d2("GET /t/[token]", () => {
     e2(res.headers.get("Cache-Control")).toBe("no-store");
     const pm = prismaMock as never as { dmRecipientDraft: { update: ReturnType<typeof vi.fn> } };
     e2(pm.dmRecipientDraft.update).toHaveBeenCalledOnce();
-    // マッチした実ヒットのみ監査する。
+    // 初回ヒットのみ監査する。
     e2(writeAuditLog).toHaveBeenCalledOnce();
+  });
+
+  i2("送付済みトークンの再訪(2回目以降)は 302・記録(count++)するが監査しない(公開ヒットで audit_logs を肥大化させない)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> } };
+    // 既に LP アクセス済み(lpFirstAccessAt がセット済み)= 再訪。
+    pm.dmRecipientDraft.findUnique.mockResolvedValueOnce({ id: "r1", lpFirstAccessAt: new Date("2020-01-01"), status: "sent" });
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(302);
+    e2(pm.dmRecipientDraft.update).toHaveBeenCalledOnce(); // lpAccessCount の ++ は継続する
+    e2(writeAuditLog).not.toHaveBeenCalled(); // 初回のみ監査 → 再訪では監査しない(無制限増加の防止)
   });
 
   i2("LP 未設定なら 404(fail-closed)・記録も監査もしない(LP未到達を反響計上しない)", async () => {
