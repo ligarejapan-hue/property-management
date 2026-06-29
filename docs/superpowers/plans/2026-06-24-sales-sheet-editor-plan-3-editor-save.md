@@ -27,7 +27,7 @@
 - `src/lib/sales-sheet/document-schema.ts`: `SalesSheetDocument`（page+theme+elements[]）, 要素 discriminated union（text/image/table/badge/shape/qr。各 `id,x,y,w,h,z` mm/pt/int）, `parseSalesSheetDocument(input): SalesSheetDocument`（境界検証）, `A4_LANDSCAPE`/`A4_PORTRAIT`。
 - `src/components/sales-sheet/SalesSheetRenderer.tsx`: `<SalesSheetRenderer document={doc} />`（"use client" 無し・先頭で `parseSalesSheetDocument`・要素別描画・全 style 値 `sanitizeCssValue`）。ブラウザ/サーバー共通。プレビューにそのまま使う。
 - `src/lib/sales-sheet/css-safety.ts`: `isCssColor`, `isSafeFontFamily`, `sanitizeCssValue`（不変）。⚠`isSafeImageSrc` は**本プランで変更**するため「変更しない」例外＝既存は `data:image` のみ受理だったところに root-relative **`/uploads/`** 受理を追加（`//host`/scheme/`..`/`%2e`/制御文字は拒否）。変更詳細は下記「ファイル構成（作成/変更）」と「Task A Step 0」を参照。[@codex P1反映]
-- `src/lib/sales-sheet/build-document.ts`: `buildSaleLandDocument(input): SalesSheetDocument`（純・写真 src は /uploads キーの**未インライン**）, `buildInitialSalesSheetDocument(input): Promise<SalesSheetDocument>`（= 写真を data: にインライン）, `SaleLandInput`, `SaleLandOverrides`(price/access/landArea/landCategory/transactionType/deliveryTiming/remarks)。**計画③では「未インライン版（/uploads キー）」を保存・編集に使う**（`isSafeImageSrc` が `/uploads/` を許可するので保存境界の `parseSalesSheetDocument` を通る＝写真あり土地でも保存OK。出力時に Task C が都度認可して data: 化。@codex P1反映）。
+- `src/lib/sales-sheet/build-document.ts`: `buildSaleLandDocument(input): SalesSheetDocument`（純・写真 src は /uploads キーの**未インライン**）, `buildInitialSalesSheetDocument(input): Promise<SalesSheetDocument>`（= 写真を data: にインライン）, `SaleLandInput`, `SaleLandOverrides`(price/access/landArea/landCategory/transactionType/deliveryTiming/remarks)。**計画③では「未インライン版（/uploads キー）」を保存・編集に使う**（`isSafeImageSrc` が `/uploads/` を許可するので保存境界の `parseSalesSheetDocument` を通る＝写真あり土地でも保存OK。出力時に Task C が都度認可して data: 化。@codex P1反映）。⚠本プランで **`toCanonicalUploadsSrc(fileUrl, storage?)` を追加**（保存画像 src を全 storage backend 共通の `/uploads/{key}` へ正規化＝server backend の `/{bucket}/{key}`/絶対URL でも保存境界 `isSafeImageSrc` を通す。下記「ファイル構成（作成/変更）」「Task H 新規作成 API」参照）。
 - `src/lib/sales-sheet/inline-images.ts`: `inlineDocumentImages(doc): Promise<SalesSheetDocument>`（非data: img src → `getStorage().keyFromUrl`→read→data:。解決不能はドロップ）。**計画③では認可付きの派生版を作る（下記 Task C）**。
 - `src/lib/sales-sheet/render-to-output.ts`: `renderDocumentToPdf(doc)` / `renderDocumentToImage(doc, {format})` / 内部 `isChromiumAvailable()`。
 - `src/lib/uploads-authorization.ts`: `authorizeUploadAccess({key, session, permissions}): Promise<"ok"|"forbidden"|"not_found">`（backend 対応 key 解決済み）。
@@ -60,8 +60,10 @@
 - `src/components/sales-sheet/editor/EditorToolbar.tsx`（作成：保存/出力/削除）
 - `src/components/sales-sheet/editor/__tests__/*.test.tsx`（作成：可能な範囲。重いDOMはスキップ可・ロジックは editor-document でカバー）
 - `src/app/(dashboard)/properties/[id]/sales-sheets/[sheetId]/edit/page.tsx`（作成：エディタ画面ルート）
-- `src/app/(dashboard)/properties/[id]/sales-sheets/new/route.ts` または server action（作成：新規作成→編集へ）
-- `src/components/sales-sheet/SaleLandSheetButton.tsx`（変更：直接PDF→「販売図面を作成」＝新規作成→エディタ遷移。計画②の直出力はエディタ内「出力」に統合）
+- `src/app/api/properties/[id]/sales-sheets/new/route.ts`（作成：作成フォームの上書き項目受領＋代表写真取得＋`toCanonicalUploadsSrc` 正規化＋`localizeOccupancy`→`buildSaleLandDocument`→`createDesign`→`{id}`）
+- `src/lib/sales-sheet/build-document.ts`（**変更**：`toCanonicalUploadsSrc` 追加＝保存画像 src を全 backend 共通の `/uploads/{key}` へ正規化）
+- `src/lib/property-types.ts`（**変更**：`localizeOccupancy` 追加＝現況 enum→日本語ラベル）
+- `src/components/sales-sheet/SaleLandSheetButton.tsx`（変更：直接PDF→「販売図面を作成（売土地）」＝上書き項目フォーム→新規作成→エディタ遷移。計画②の直出力はエディタ内「出力」に統合）
 - `src/app/(dashboard)/properties/[id]/page.tsx`（変更：ボタンの意味変更に追従。土地物件のみ表示は維持）
 - `package.json` / `package-lock.json`（変更：`react-moveable` 追加・**ユーザー承認**）
 
@@ -299,8 +301,9 @@ export async function authorizeAndInlineDocumentImages(
 ```ts
 // POST /api/properties/[id]/sales-sheets/[sheetId]/export?format=pdf|png
 // 認証→property:read→property取得→canAccessPropertyRecord→getDesign(404)→
-// parseSalesSheetDocument(design.document)→authorizeAndInlineDocumentImages→
-// isChromiumAvailable() 無→503→renderDocumentToPdf|Image→bytes 返却(no-store)
+// parseSalesSheetDocument(design.document)→isChromiumAvailable() 無→503
+//   （fail-fast: storage 読込・画像認可の前に判定。preview route と同順＝503 経路で storage を読まない）→
+// authorizeAndInlineDocumentImages→renderDocumentToPdf|Image→bytes 返却(no-store)
 ```
 契約: 401/403/404/422(document破損)/503(chromium無)/200(application/pdf | image/png)。format 既定 pdf。
 
@@ -323,6 +326,7 @@ export async function authorizeAndInlineDocumentImages(
   - `deleteElement(state,id)`
   - `editText(state, id, patch:{content?:string; fontSizePt?:number; color?:string; fontFamily?:string})`（text 要素のみ・色/フォントは `isCssColor`/`isSafeFontFamily` で弾く）
   - `markSaved(state)`（dirty=false）
+  - `markSavedIfCurrent(state, savedDocument)`（保存応答時に呼ぶ＝`state.document === savedDocument` のときのみ dirty=false。保存 in-flight 中に編集された新 document は別参照ゆえ dirty 維持＝保存中の編集を取りこぼさない）
 - すべて新 state を返す（immutable）。各操作後 document は依然 `parseSalesSheetDocument` を通せる形を保つ（テストで検証）。
 
 - [ ] **Step 1: 失敗するテスト**（代表）
@@ -371,7 +375,7 @@ export async function authorizeAndInlineDocumentImages(
 - Consumes: Task D reducer（`moveElement`/`resizeElement`/`bringToFront` 等）。
 
 - [ ] **Step 1: 依存追加の承認を取得**（コントローラがユーザーに確認）。承認後 `npm i react-moveable`。**導入バージョンの props を context7/公式 docs で確認**（`onDrag`/`onResize`/`target`/`bounds`/`snappable` 等）。
-- [ ] **Step 2-4:** 選択要素へ Moveable を装着。`onDragEnd`/`onResizeEnd`（px）→ mm に逆変換 → `moveElement`/`resizeElement`。重ね順ボタン（前面/背面）→ `bringToFront`/`sendToBack`。bounds=台紙でページ外移動を抑制（reducer 側クランプと二重防御）。
+- [ ] **Step 2-4:** 選択要素へ Moveable を装着。`onDragEnd`/`onResizeEnd`（px）→ mm に逆変換 → `moveElement`/`resizeElement`。重ね順ボタン（前面/背面）→ `bringToFront`/`sendToBack`。bounds=台紙でページ外移動を抑制（reducer 側クランプと二重防御）。**クリックとキーボード（Enter/Space）の双方で当該 hit-box を Moveable target にセット**（キーボード選択でもハンドルが正しい要素に付く＝a11y）。
 - [ ] **Step 5: ゲート（tsc/eslint/build）→コミット。**（build はバンドルに新依存が乗るので必須。）
 
 ---
@@ -400,8 +404,8 @@ export async function authorizeAndInlineDocumentImages(
 - Create: `src/components/sales-sheet/editor/EditorToolbar.tsx`
 - Modify: `SalesSheetEditor.tsx`（保存/出力 API 配線・dirty 表示）
 - Create: `src/app/(dashboard)/properties/[id]/sales-sheets/[sheetId]/edit/page.tsx`（エディタ画面：認証/権限/物件アクセス→design 読込→`<SalesSheetEditor initial=.../>`）
-- Create: 新規作成導線（`.../sales-sheets/new` route or server action）：`buildSaleLandDocument`（**未インライン**）で初期 document を作り `createDesign`→ `[sheetId]/edit` へ redirect。
-- Modify: `src/components/sales-sheet/SaleLandSheetButton.tsx`（「販売図面を作成」→ 新規作成導線へ。直接PDFは廃止しエディタ内「出力」に統合）
+- Create: 新規作成 API（`src/app/api/properties/[id]/sales-sheets/new/route.ts`）：`property:write`＋`canAccessPropertyRecord`＋土地ゲート→**作成フォームの上書き項目を `overridesSchema`(zod)＋`parseJsonBody` で受領**→写真は **`orderBy:[{isPrimary:desc},{sortOrder:asc}]`** で代表優先取得し **`toCanonicalUploadsSrc`** で `/uploads/{key}` 正規化（server backend の `/{bucket}/{key}`/絶対URL も /uploads 形へ・解決不可は写真なし）→**現況は `localizeOccupancy`**（enum→空室/入居中/不明）→`buildSaleLandDocument`（**未インライン**・overrides 反映）で初期 document→`createDesign`→`{ id }`(201)。
+- Modify: `src/components/sales-sheet/SaleLandSheetButton.tsx`（「販売図面を作成（売土地）」→ **入力フォーム（価格/交通/土地面積/地目/取引態様/引渡/備考＝システムに無い項目）をモーダルで収集**し `buildCreateRequest` で `POST .../sales-sheets/new` へ送信→成功後 `[sheetId]/edit` へ遷移。直接PDFは廃止しエディタ内「出力」に統合。※これら6項目は table 行ゆえ**作成時のみ入力可**＝エディタでの table セル編集は計画④以降）
 - Modify: `src/app/(dashboard)/properties/[id]/page.tsx`（ボタン意味変更に追従・土地物件のみ表示は維持）
 - Test: toolbar/保存配線の薄いテスト＋ route(new) のテスト。
 
