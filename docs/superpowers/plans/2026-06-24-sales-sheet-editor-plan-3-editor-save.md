@@ -148,14 +148,33 @@ prisma はモック注入（計画②の route テスト同様 `db` 引数で注
 
 ```ts
 import prismaDefault from "@/lib/prisma";
-import { parseSalesSheetDocument } from "./document-schema";
+import { z } from "zod";
+import { parseSalesSheetDocument, type SalesSheetDocument } from "./document-schema";
 type PrismaLike = typeof prismaDefault;
+
+// 保存境界の bloat ガード: 文書全体の JSON 長と、個別 data: 埋め込み画像(image.src / qr.dataUrl)を
+// 上限で弾く（保存 doc は /uploads 参照のみ・data: 化は出力時のみ）。ZodError で投げ handleApiError が 422 化
+// （ApiError は next/server を引き込み node テストで解決不可なため ZodError を使う）。
+const MAX_INLINE_IMAGE_SRC_LEN = 8192;       // 個別 data: 画像
+const MAX_DOCUMENT_JSON_LEN = 512 * 1024;    // 文書全体の JSON 文字数
+function assertSavableDocument(document: SalesSheetDocument): void {
+  if (JSON.stringify(document).length > MAX_DOCUMENT_JSON_LEN) {
+    throw new z.ZodError([{ code: z.ZodIssueCode.custom, message: "図面データが大きすぎます", path: ["elements"] }]);
+  }
+  for (const el of document.elements) {
+    const inlineSrc = el.type === "image" ? el.src : el.type === "qr" ? el.dataUrl : null;
+    if (inlineSrc && inlineSrc.startsWith("data:") && inlineSrc.length > MAX_INLINE_IMAGE_SRC_LEN) {
+      throw new z.ZodError([{ code: z.ZodIssueCode.custom, message: "埋め込み画像が大きすぎます", path: ["elements"] }]);
+    }
+  }
+}
 
 export interface SaveDesignInput {
   propertyId: string; title?: string; document: unknown; templateId?: string | null; userId: string;
 }
 export async function createDesign(input: SaveDesignInput, db: PrismaLike = prismaDefault) {
   const document = parseSalesSheetDocument(input.document); // 不正は throw
+  assertSavableDocument(document);                          // サイズ上限（DB 肥大化防止）
   return db.salesSheetDesign.create({
     data: {
       propertyId: input.propertyId,
@@ -186,7 +205,11 @@ export async function updateDesign(
   if (!current) return { ok: false as const, reason: "not_found" as const }; // 404
   const data: Record<string, unknown> = { updatedBy: userId };
   if (patch.title !== undefined) data.title = patch.title.trim() || "無題の販売図面";
-  if (patch.document !== undefined) data.document = parseSalesSheetDocument(patch.document); // throw→422（書込前）
+  if (patch.document !== undefined) {
+    const parsed = parseSalesSheetDocument(patch.document); // throw→422（書込前）
+    assertSavableDocument(parsed);                          // サイズ上限
+    data.document = parsed;
+  }
   // 楽観ロックはアトミックに（@codex P2反映）: expectedUpdatedAt を WHERE に入れた updateMany で
   // read→compare→update の TOCTOU（同時保存の後勝ち=lost update）を防ぐ。
   const result = await db.salesSheetDesign.updateMany({
@@ -194,14 +217,16 @@ export async function updateDesign(
     data,
   });
   if (result.count === 0) return { ok: false as const, reason: "conflict" as const }; // 409
+  // 並行 DELETE で再 read が null になり得る → conflict 扱い（500 回避）。
   const updated = await db.salesSheetDesign.findUnique({ where: { id: sheetId } });
+  if (!updated) return { ok: false as const, reason: "conflict" as const };
   return { ok: true as const, design: updated };
 }
 export async function deleteDesign(propertyId: string, sheetId: string, db: PrismaLike = prismaDefault) {
-  const current = await getDesign(propertyId, sheetId, db);
-  if (!current) return false;
-  await db.salesSheetDesign.delete({ where: { id: sheetId } });
-  return true;
+  // scope 付きアトミック削除: id と propertyId が一致する行だけ消す。
+  // getDesign→delete の TOCTOU（並行二重削除の Prisma P2025→500）を避け、該当無しは count=0→false。
+  const result = await db.salesSheetDesign.deleteMany({ where: { id: sheetId, propertyId } });
+  return result.count > 0;
 }
 ```
 
@@ -237,7 +262,7 @@ GET 一覧は `listDesigns` の結果を返す（200）。
 - [ ] **Step 3-4: 失敗するテスト→実装（GET 取得 / PUT 更新 / DELETE）**
 
 GET `[sheetId]`: `getDesign`（スコープ外/無は 404）→ `{ id,title,document,updatedAt,... }`。
-PUT `[sheetId]`: write 権限。body `{ title?, document?, expectedUpdatedAt: string }`。`updateDesign` の戻りで not_found→404 / conflict→409 / ok→200`{ updatedAt }`。
+PUT `[sheetId]`: write 権限。body `{ title?, document?, expectedUpdatedAt: string(ISO datetime・`z.string().datetime()` で検証＝不正値は 400) }`。`updateDesign` の戻りで not_found→404 / conflict→409 / ok→200`{ updatedAt }`。
 DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 
 - [ ] **Step 5: 全テスト緑 / tsc / eslint→コミット。**
@@ -286,6 +311,7 @@ export async function authorizeAndInlineDocumentImages(
     if (decision !== "ok") return dropImage(el);               // 認可外は描画しない・バイト未読込
     const bytes = await getStorage().read(key).catch(() => null);
     if (!bytes) return dropImage(el);
+    if (!bytes.contentType.startsWith("image/")) return dropImage(el); // 非画像MIME(.jfif等→octet-stream)は出力の再parseで data:image/ 検証に弾かれ図面全体が422→該当画像のみdrop
     return { ...el, src: toDataUrl(bytes) };                   // mime は read 結果 or 既存 util
   }));
   return { ...doc, elements };
@@ -404,14 +430,14 @@ export async function authorizeAndInlineDocumentImages(
 - Create: `src/components/sales-sheet/editor/EditorToolbar.tsx`
 - Modify: `SalesSheetEditor.tsx`（保存/出力 API 配線・dirty 表示）
 - Create: `src/app/(dashboard)/properties/[id]/sales-sheets/[sheetId]/edit/page.tsx`（エディタ画面：認証/権限/物件アクセス→design 読込→`<SalesSheetEditor initial=.../>`）
-- Create: 新規作成 API（`src/app/api/properties/[id]/sales-sheets/new/route.ts`）：`property:write`＋`canAccessPropertyRecord`＋土地ゲート→**作成フォームの上書き項目を `overridesSchema`(zod)＋`parseJsonBody` で受領**→写真は **`orderBy:[{isPrimary:desc},{sortOrder:asc}]`** で代表優先取得し **`toCanonicalUploadsSrc`** で `/uploads/{key}` 正規化（server backend の `/{bucket}/{key}`/絶対URL も /uploads 形へ・解決不可は写真なし）→**現況は `localizeOccupancy`**（enum→空室/入居中/不明）→`buildSaleLandDocument`（**未インライン**・overrides 反映）で初期 document→`createDesign`→`{ id }`(201)。
+- Create: 新規作成 API（`src/app/api/properties/[id]/sales-sheets/new/route.ts`）：`property:write`＋`canAccessPropertyRecord`＋土地ゲート→**作成フォームの上書き項目を `overridesSchema`(zod)＋`parseJsonBody` で受領**→写真は **`orderBy:[{isPrimary:desc},{sortOrder:asc}]`** で代表優先取得し **`toCanonicalUploadsSrc`** で `/uploads/{key}` 正規化（server backend の `/{bucket}/{key}`/絶対URL も /uploads 形へ・key 解決不可/正規化後 src が isSafeImageSrc 不適合なら写真なし）→**現況は `localizeOccupancy`**（enum→空室/入居中/不明）→`buildSaleLandDocument`（**未インライン**・overrides 反映）で初期 document→`createDesign`→`{ id }`(201)。
 - Modify: `src/components/sales-sheet/SaleLandSheetButton.tsx`（「販売図面を作成（売土地）」→ **入力フォーム（価格/交通/土地面積/地目/取引態様/引渡/備考＝システムに無い項目）をモーダルで収集**し `buildCreateRequest` で `POST .../sales-sheets/new` へ送信→成功後 `[sheetId]/edit` へ遷移。直接PDFは廃止しエディタ内「出力」に統合。※これら6項目は table 行ゆえ**作成時のみ入力可**＝エディタでの table セル編集は計画④以降）
 - Modify: `src/app/(dashboard)/properties/[id]/page.tsx`（ボタン意味変更に追従・土地物件のみ表示は維持）
 - Test: toolbar/保存配線の薄いテスト＋ route(new) のテスト。
 
 **Interfaces:**
 - `<EditorToolbar dirty onSave onExport onDelete />`。
-- 保存: `PUT .../[sheetId]`（`expectedUpdatedAt` 同送）→ 200 で `markSaved`＋updatedAt 更新 / 409 で「他で更新されました。再読込してください」。
+- 保存: `PUT .../[sheetId]`（`expectedUpdatedAt` 同送）→ 200 で `markSavedIfCurrent`（送信時 document と一致時のみ dirty 解除＝保存 in-flight 中の編集を取りこぼさない）＋updatedAt 更新 / 409 で「他で更新されました。再読込してください」。
 - 出力: 未保存があれば先に保存→ `POST .../[sheetId]/export?format=pdf|png` → blob ダウンロード。chromium 無は 503 を「PDF生成エンジン未準備」と表示。
 - 削除: `DELETE .../[sheetId]`→一覧 or 物件詳細へ。
 
