@@ -46,6 +46,10 @@ beforeEach(() => {
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
   grant(...ALL);
+  // 差出人ゲート(R32): 再生成も差出人未設定なら生成前に 503。実 isSenderConfigured(env 判定)が
+  // true を返すよう差出人 env を設定する(この test は sender を mock せず実体を使う)。
+  process.env.SALE_DM_SENDER_NAME = "△△不動産";
+  process.env.SALE_DM_SENDER_CONTACT = "03-0000-0000";
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1", body: "再生成本文" });
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
 });

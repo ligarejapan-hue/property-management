@@ -950,6 +950,9 @@ model DmCampaign {
   name           String
   status         DmCampaignStatus @default(draft)
   filterSnapshot Json?            @map("filter_snapshot")
+  // 二重作成(再送信/別タブ/連打)防止の冪等性キー。client が作成試行ごとに安定生成し、生成(課金)の前に
+  // この値で campaign をクレームする(一意制約で同キーの二重生成を弾く)。任意(未指定=従来通り)。
+  idempotencyKey String?          @unique @map("idempotency_key")
   createdBy      String           @map("created_by") @db.Uuid
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")

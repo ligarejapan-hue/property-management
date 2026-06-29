@@ -296,11 +296,21 @@ function PropertiesPageInner() {
   // 売却促進DM: 現在の検索条件で「送付可」物件から下書きを作成し、作業画面へ遷移する。
   // 差出人は env 既定を route が補完(初版・調整は作業画面)。集計・型は variant 基準。
   const [creatingDm, setCreatingDm] = useState(false);
+  // 二重作成(再送信/別タブ/連打)防止の冪等性キー。1回の作成試行で1つ生成し、失敗時は再利用(同キーで
+  // 再送=サーバーが二重生成しない)、成功で破棄して次の作成は新しいキーにする。
+  const saleDmIdemKeyRef = useRef<string | null>(null);
   const handleCreateSaleDm = async () => {
     if (creatingDm) return;
     // 課金確認: 現在の絞り込み対象の宛先ごとに AI が手紙を生成し、AI利用料金が発生する(オーナー情報を
     // AI提供元へ送信)。実行前に明示確認を取り、サーバーへ confirmed:true を送る(サーバー側でも必須)。
     if (!window.confirm("現在の絞り込み対象に、AIで宛先ごとの手紙を生成します。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？")) return;
+    // 作成試行ごとに安定したキーを用意(secure context 外では randomUUID 不在ゆえ簡易フォールバック)。
+    if (!saleDmIdemKeyRef.current) {
+      saleDmIdemKeyRef.current =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
     setCreatingDm(true);
     setError(null);
     try {
@@ -315,9 +325,12 @@ function PropertiesPageInner() {
         },
         filters: buildFilterParams(),
         confirmed: true,
+        idempotencyKey: saleDmIdemKeyRef.current,
       });
+      saleDmIdemKeyRef.current = null; // 成功 → 次の作成は新しいキー
       router.push(`/properties/sale-dm/${res.campaignId}`);
     } catch (err) {
+      // 失敗 → キーは保持(同キーで再試行すればサーバーが二重生成しない)。
       setError(err instanceof Error ? err.message : "売却DMの作成に失敗しました");
     } finally {
       setCreatingDm(false);

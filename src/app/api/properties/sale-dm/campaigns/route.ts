@@ -58,6 +58,16 @@ export async function POST(request: NextRequest) {
     if (!isSenderConfigured() && !senderInBody) {
       throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
     }
+    // 冪等性: client が作成試行ごとに安定生成したキー。同キーで既に作成済みなら、有料生成を再実行せず
+    // 既存 campaign を返す(再送信/別タブ/連打での二重課金・二重作成を防ぐ)。キー未指定なら従来通り。
+    const idempotencyKey = body.idempotencyKey;
+    if (idempotencyKey) {
+      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true } });
+      if (existing) {
+        if (existing.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
+        return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+      }
+    }
     const query = propertyListQuerySchema.parse(body.filters ?? {});
     // DM は送付可(dmStatus=send)の物件にのみ生成する。ユーザーの絞り込みが明示的に send 以外(hold/no_send)を
     // 指している場合、send へ黙って上書きすると、確認ダイアログの「現在の絞り込み対象」と実際の生成対象がずれ、
@@ -101,22 +111,45 @@ export async function POST(request: NextRequest) {
       senderContact: body.options.senderContact ?? sender.senderContact,
     };
 
-    const { drafts, truncated } = await generateLetters(
-      recipients.map((r) => ({ recipient: r, options: genOptions })),
-    );
-
-    // キャンペーン + 既定型(1つ)+ 宛先下書きを保存(生成成功分のみ body 入り。失敗分は空+メモ)。
-    const created = await prisma.$transaction(async (tx) => {
-      const campaign = await tx.dmCampaign.create({
-        data: { name: body.name, createdBy: session.id, filterSnapshot: body.filters ?? {} },
+    // 生成(課金)の前に campaign をクレーム(idempotencyKey の一意制約で同キーの二重生成を弾く)。
+    // 並行リクエストは P2002 で1つに収束し、敗者は生成せず既存を返す(二重課金の防止)。
+    let claimed: { id: string };
+    try {
+      claimed = await prisma.dmCampaign.create({
+        data: { name: body.name, createdBy: session.id, filterSnapshot: body.filters ?? {}, idempotencyKey: idempotencyKey ?? null },
+        select: { id: true },
       });
-      // 初期型 A を1つ作り、全宛先をこの型に割り当てる(初期=均等割り済みの1型)。
-      // 複数型(B/C)の追加と再割当は POST /campaigns/[id]/variants(型 CRUD)+
-      // POST /campaigns/[id]/assign(割当)で行う。生成 route は「初期1型」を保証するのみ。
-      // A/B 純度は割り当てられた variantId 基準(個別 override は本文の微修正で集計に影響しない)。
+    } catch (e) {
+      if (idempotencyKey && e && typeof e === "object" && (e as { code?: unknown }).code === "P2002") {
+        const won = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true } });
+        if (won) {
+          if (won.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
+          return NextResponse.json({ campaignId: won.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+        }
+      }
+      throw e;
+    }
+
+    // クレーム確保後に生成。総失敗(provider throw 等)時はクレームを削除し、孤児 campaign を残さない
+    // (リトライで再クレームできるように)。
+    let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
+    let truncated: boolean;
+    try {
+      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })));
+      drafts = result.drafts;
+      truncated = result.truncated;
+    } catch (e) {
+      await prisma.dmCampaign.delete({ where: { id: claimed.id } }).catch(() => {});
+      throw e;
+    }
+
+    // 既定型 A(1つ)+ 宛先下書きを、クレーム済み campaign 配下に保存(生成成功分のみ body 入り。失敗分は空+メモ)。
+    // 複数型(B/C)の追加と再割当は variants / assign route で行う。生成 route は「初期1型」を保証するのみ。
+    // A/B 純度は割り当てられた variantId 基準(個別 override は本文の微修正で集計に影響しない)。
+    await prisma.$transaction(async (tx) => {
       const variant = await tx.dmVariant.create({
         data: {
-          campaignId: campaign.id, label: "A",
+          campaignId: claimed.id, label: "A",
           designTemplate: body.options.designTemplate, tone: body.options.tone,
           length: body.options.length, appeal: body.options.appeal,
           strength: body.options.strength, extraInstruction: body.options.extraInstruction ?? null,
@@ -127,7 +160,7 @@ export async function POST(request: NextRequest) {
         const d = drafts[i];
         await tx.dmRecipientDraft.create({
           data: {
-            campaignId: campaign.id, variantId: variant.id, propertyId: sliced[i].propertyId,
+            campaignId: claimed.id, variantId: variant.id, propertyId: sliced[i].propertyId,
             representativeOwnerId: sliced[i].representativeOwnerId,
             recipientName: sliced[i].recipientName, recipientZip: sliced[i].recipientZip,
             recipientAddress: sliced[i].recipientAddress, honorific: sliced[i].honorific,
@@ -139,17 +172,16 @@ export async function POST(request: NextRequest) {
           },
         });
       }
-      return campaign;
     });
 
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({
       userId: session.id, action: "sale_dm_campaign_create", targetTable: "dm_campaigns",
-      detail: { campaignId: created.id, requested: recipients.length, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated, createdAt: new Date().toISOString() },
+      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated, createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json(
-      { campaignId: created.id, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
+      { campaignId: claimed.id, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

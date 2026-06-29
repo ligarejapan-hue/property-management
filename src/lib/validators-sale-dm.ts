@@ -30,6 +30,9 @@ export const saleDmCampaignBodySchema = z.object({
   filters: z.record(z.string(), z.string()).optional(), // 物件一覧と同じ検索条件
   // 課金確認(最大50通の有料AI呼び出し+オーナーPII外部送信)。route が === true を要求する。
   confirmed: z.boolean().optional(),
+  // 二重作成(再送信/別タブ/連打)防止の冪等性キー。client が作成試行ごとに安定生成し、成功で更新する。
+  // route は生成の前にこのキーで campaign をクレームし、同キーの再実行は既存を返す(有料生成を二重に走らせない)。
+  idempotencyKey: z.string().min(1).max(100).optional(),
 });
 
 export type SaleDmCampaignBody = z.infer<typeof saleDmCampaignBodySchema>;

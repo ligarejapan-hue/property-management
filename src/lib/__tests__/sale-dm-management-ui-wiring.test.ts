@@ -99,4 +99,12 @@ describe("売却DM 管理UI の配線", () => {
       expect(src).toContain(fn);
     }
   });
+
+  it("売却DM作成は冪等性キーを生成して送る(再送信/別タブ/連打の二重作成・二重課金を防ぐ)", () => {
+    const list = read("../../app/(dashboard)/properties/page.tsx");
+    expect(list).toContain("saleDmIdemKeyRef"); // 作成試行ごとに安定キーを保持(成功で破棄・失敗で再利用)
+    expect(list).toContain("idempotencyKey");
+    const client = read("../api-client.ts");
+    expect(client).toContain("idempotencyKey");
+  });
 });
