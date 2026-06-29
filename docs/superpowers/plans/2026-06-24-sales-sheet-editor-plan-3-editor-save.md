@@ -26,7 +26,7 @@
 
 - `src/lib/sales-sheet/document-schema.ts`: `SalesSheetDocument`（page+theme+elements[]）, 要素 discriminated union（text/image/table/badge/shape/qr。各 `id,x,y,w,h,z` mm/pt/int）, `parseSalesSheetDocument(input): SalesSheetDocument`（境界検証）, `A4_LANDSCAPE`/`A4_PORTRAIT`。
 - `src/components/sales-sheet/SalesSheetRenderer.tsx`: `<SalesSheetRenderer document={doc} />`（"use client" 無し・先頭で `parseSalesSheetDocument`・要素別描画・全 style 値 `sanitizeCssValue`）。ブラウザ/サーバー共通。プレビューにそのまま使う。
-- `src/lib/sales-sheet/css-safety.ts`: `isSafeImageSrc`(**data:image** ＋ root-relative **`/uploads/`** を許可＝計画③実装で拡張[@codex P1反映]。`//host`/scheme/`..`/`%2e`/制御文字は拒否), `isCssColor`, `isSafeFontFamily`, `sanitizeCssValue`。
+- `src/lib/sales-sheet/css-safety.ts`: `isCssColor`, `isSafeFontFamily`, `sanitizeCssValue`（不変）。⚠`isSafeImageSrc` は**本プランで変更**するため「変更しない」例外＝既存は `data:image` のみ受理だったところに root-relative **`/uploads/`** 受理を追加（`//host`/scheme/`..`/`%2e`/制御文字は拒否）。変更詳細は下記「ファイル構成（作成/変更）」と「Task A Step 0」を参照。[@codex P1反映]
 - `src/lib/sales-sheet/build-document.ts`: `buildSaleLandDocument(input): SalesSheetDocument`（純・写真 src は /uploads キーの**未インライン**）, `buildInitialSalesSheetDocument(input): Promise<SalesSheetDocument>`（= 写真を data: にインライン）, `SaleLandInput`, `SaleLandOverrides`(price/access/landArea/landCategory/transactionType/deliveryTiming/remarks)。**計画③では「未インライン版（/uploads キー）」を保存・編集に使う**（`isSafeImageSrc` が `/uploads/` を許可するので保存境界の `parseSalesSheetDocument` を通る＝写真あり土地でも保存OK。出力時に Task C が都度認可して data: 化。@codex P1反映）。
 - `src/lib/sales-sheet/inline-images.ts`: `inlineDocumentImages(doc): Promise<SalesSheetDocument>`（非data: img src → `getStorage().keyFromUrl`→read→data:。解決不能はドロップ）。**計画③では認可付きの派生版を作る（下記 Task C）**。
 - `src/lib/sales-sheet/render-to-output.ts`: `renderDocumentToPdf(doc)` / `renderDocumentToImage(doc, {format})` / 内部 `isChromiumAvailable()`。
@@ -46,6 +46,8 @@
 - `src/lib/sales-sheet/__tests__/design-service.test.ts`（作成）
 - `src/lib/sales-sheet/authorize-document-images.ts`（作成：document 全 image 認可→data: 化）
 - `src/lib/sales-sheet/__tests__/authorize-document-images.test.ts`（作成）
+- `src/lib/sales-sheet/css-safety.ts`（**変更**：`isSafeImageSrc` に root-relative `/uploads/` 受理を追加。`//host`/scheme/`..`/`%2e`/制御文字は拒否）
+- `src/lib/sales-sheet/__tests__/css-safety.test.ts`（**変更**：`/uploads/` 受理・traversal/`%2e`/scheme 拒否のテストを追加）
 - `src/app/api/properties/[id]/sales-sheets/route.ts`（作成：POST 作成 / GET 一覧）
 - `src/app/api/properties/[id]/sales-sheets/[sheetId]/route.ts`（作成：GET 取得 / PUT 更新 / DELETE 削除）
 - `src/app/api/properties/[id]/sales-sheets/[sheetId]/export/route.ts`（作成：POST 出力）
@@ -76,47 +78,56 @@
 **Interfaces:**
 - Produces: `createDesign`, `getDesign`, `listDesigns`, `updateDesign`, `deleteDesign`（下記シグネチャ）。document は保存前後で `parseSalesSheetDocument` を通す。
 
+- [ ] **Step 0: `isSafeImageSrc` を `/uploads/` 受理に拡張**（`src/lib/sales-sheet/css-safety.ts`）。既存は `data:image` のみ受理 → root-relative `/uploads/` も受理（`//host`/scheme/`..`/`%2e`/制御文字は拒否）。保存 document の写真 src は /uploads キー（未インライン）なので、これが無いと保存境界の `parseSalesSheetDocument` が「写真あり土地図面」を弾く。`__tests__/css-safety.test.ts` に `/uploads/` 受理＋traversal/`%2e`/scheme 拒否のテストを失敗先行で追加。[@codex P1反映]
+
 - [ ] **Step 1: schema 追加**
 
 ```prisma
 model SalesSheetDesign {
   id           String   @id @default(cuid())
-  propertyId   String
-  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId   String   @map("property_id") @db.Uuid
   title        String   @default("無題の販売図面")
   document     Json
-  templateId   String?
-  thumbnailUrl String?
-  createdBy    String
-  updatedBy    String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  templateId   String?  @map("template_id")
+  thumbnailUrl String?  @map("thumbnail_url")
+  createdBy    String   @map("created_by") @db.Uuid
+  updatedBy    String   @map("updated_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  creator  User     @relation("SalesSheetDesignCreatedBy", fields: [createdBy], references: [id])
+  updater  User     @relation("SalesSheetDesignUpdatedBy", fields: [updatedBy], references: [id])
 
   @@index([propertyId])
   @@map("sales_sheet_designs")
 }
 ```
-`Property` model に `salesSheetDesigns SalesSheetDesign[]` を追記（リレーション逆側）。
+`Property` model に `salesSheetDesigns SalesSheetDesign[]`、`User` model に作成者/更新者の逆リレーション（`@relation("SalesSheetDesignCreatedBy")` / `@relation("SalesSheetDesignUpdatedBy")`）を追記。**`propertyId`/`createdBy`/`updatedBy` は参照先（`Property.id` / `User.id` が `@db.Uuid`）に合わせて必ず `@db.Uuid`**（`String` のまま＝`text` だと PostgreSQL が FK を `text→uuid` で張れず migration が失敗する）。
 
 - [ ] **Step 2: migration SQL を生成**（devDB 不要・SQL 手書きで冪等に）
 
 ```sql
 CREATE TABLE IF NOT EXISTS "sales_sheet_designs" (
   "id" TEXT NOT NULL,
-  "propertyId" TEXT NOT NULL,
+  "property_id" UUID NOT NULL,
   "title" TEXT NOT NULL DEFAULT '無題の販売図面',
   "document" JSONB NOT NULL,
-  "templateId" TEXT,
-  "thumbnailUrl" TEXT,
-  "createdBy" TEXT NOT NULL,
-  "updatedBy" TEXT NOT NULL,
-  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updatedAt" TIMESTAMP(3) NOT NULL,
+  "template_id" TEXT,
+  "thumbnail_url" TEXT,
+  "created_by" UUID NOT NULL,
+  "updated_by" UUID NOT NULL,
+  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "sales_sheet_designs_pkey" PRIMARY KEY ("id")
 );
-CREATE INDEX IF NOT EXISTS "sales_sheet_designs_propertyId_idx" ON "sales_sheet_designs"("propertyId");
-ALTER TABLE "sales_sheet_designs" ADD CONSTRAINT "sales_sheet_designs_propertyId_fkey"
-  FOREIGN KEY ("propertyId") REFERENCES "properties"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX IF NOT EXISTS "sales_sheet_designs_property_id_idx" ON "sales_sheet_designs"("property_id");
+ALTER TABLE "sales_sheet_designs" ADD CONSTRAINT "sales_sheet_designs_property_id_fkey"
+  FOREIGN KEY ("property_id") REFERENCES "properties"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "sales_sheet_designs" ADD CONSTRAINT "sales_sheet_designs_created_by_fkey"
+  FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "sales_sheet_designs" ADD CONSTRAINT "sales_sheet_designs_updated_by_fkey"
+  FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ```
 （`properties` の実テーブル名・PK 名は既存 schema を確認して合わせる。FK 重複追加を避けるため適用は migrate deploy に委ねる＝手動 ALTER は冪等 guard 付き。）
 
