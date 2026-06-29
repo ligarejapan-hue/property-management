@@ -109,6 +109,8 @@ vi.mock("@/lib/sales-sheet/authorize-document-images", () => ({
   isImageKeyAuthorizedForProperty: vi.fn(async () => true),
 }));
 
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+
 // buildSaleLandDocument はモックしない — 実関数でドキュメントを組むことで
 // /uploads/ src が document に含まれるパスを実際にバリデーション経路に通す。
 
@@ -116,6 +118,7 @@ import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { createDesign } from "@/lib/sales-sheet/design-service";
 import { isImageKeyAuthorizedForProperty } from "@/lib/sales-sheet/authorize-document-images";
+import { writeAuditLog } from "@/lib/audit";
 import { POST } from "../route";
 
 type PrismaMock = {
@@ -210,5 +213,30 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(res.status).toBe(201); // 拒否ではなく写真 drop で作成
     const doc = (createDesign as Mock).mock.calls[0][0].document as { elements: { type: string }[] };
     expect(doc.elements.some((e) => e.type === "image")).toBe(false); // 写真は入っていない
+  });
+
+  it("作成成功時に AuditLog を1件記録する（非PIIメタのみ）", async () => {
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const arg = (writeAuditLog as Mock).mock.calls[0][0];
+    expect(arg).toMatchObject({
+      userId: "u1",
+      action: "sales_sheet_design_create",
+      targetTable: "sales_sheet_designs",
+      targetId: "sheet-1",
+      detail: { propertyId: "p1" },
+    });
+    // detail に document 本文・画像 key/URL・overrides 等の PII を含めない（propertyId のみ）。
+    expect(Object.keys(arg.detail as object)).toEqual(["propertyId"]);
+    expect(JSON.stringify(arg.detail)).not.toContain("data:");
+    expect(JSON.stringify(arg.detail)).not.toContain("uploads");
+  });
+
+  it("土地以外（422）では AuditLog を記録しない", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_unit" });
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(422);
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 });

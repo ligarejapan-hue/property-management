@@ -95,12 +95,15 @@ export async function authorizeAndInlineDocumentImages(
       elements.push(dropImage(el));
       continue;
     }
-    if (totalBytes + result.size > MAX_TOTAL_INLINE_BYTES) {
-      elements.push(dropImage(el)); // 合計バイト上限超過 → drop（メモリ枯渇防止）
+    // budget は raw bytes ではなく、実際に HTML へ直列化される data URL のサイズで数える
+    // （base64 化で raw の約 4/3 + prefix 分膨らみ、Chromium へ渡るのは data URL 文字列のため）。
+    // 初回画像も cache 再利用も同じ「serialized data URL 長」で budget を消費する。
+    const dataUrl = `data:${result.contentType};base64,${result.body.toString("base64")}`;
+    if (totalBytes + dataUrl.length > MAX_TOTAL_INLINE_BYTES) {
+      elements.push(dropImage(el)); // serialized 合計上限超過 → drop（メモリ枯渇防止）
       continue;
     }
-    totalBytes += result.size;
-    const dataUrl = `data:${result.contentType};base64,${result.body.toString("base64")}`;
+    totalBytes += dataUrl.length;
     cache.set(key, dataUrl);
     elements.push({ ...el, src: dataUrl });
   }

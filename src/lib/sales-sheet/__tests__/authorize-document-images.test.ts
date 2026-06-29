@@ -222,11 +222,14 @@ describe("authorizeAndInlineDocumentImages", () => {
     expect(read).not.toHaveBeenCalled(); // fail-fast: 1 件も read しない
   });
 
-  it("[DoS] 合計バイトが上限を超えると以降の画像は drop（プレースホルダ化）", async () => {
+  it("[DoS] data URL 直列化後の合計が上限超で以降 drop（raw bytes ではなく serialized size で計上）", async () => {
     keyFromUrl.mockImplementation((url: string) => url.replace("/uploads/", ""));
     (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
-    const big = 20 * 1024 * 1024; // 20MB ×2 = 40MB > 32MB 上限
-    read.mockResolvedValue({ body: Buffer.from([1]), contentType: "image/jpeg", size: big });
+    // raw 15MB ×2 = 30MB は raw 上限(32MB)以下だが、base64 化で各 ≈20MB → 計 ≈40MB が上限超。
+    // raw bytes で数えれば 2枚とも通るが、実際に Chromium へ渡る serialized data URL サイズで
+    // 数えるので 2枚目が drop される（base64 膨張を勘定に入れる）。
+    const body = Buffer.alloc(15 * 1024 * 1024);
+    read.mockResolvedValue({ body, contentType: "image/jpeg", size: body.length });
     const doc: SalesSheetDocument = {
       page: A4_LANDSCAPE,
       theme: { fontFamily: "sans-serif", accentColor: "#000" },
@@ -237,8 +240,8 @@ describe("authorizeAndInlineDocumentImages", () => {
     };
     const out = await authorizeAndInlineDocumentImages(doc, { session: SESSION, permissions: PERMS });
     const imgs = out.elements.filter((e) => e.type === "image");
-    expect(imgs[0].type === "image" && imgs[0].src.startsWith("data:image/jpeg")).toBe(true); // 1枚目はinline
-    expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/gif")).toBe(true); // 2枚目はplaceholder(透明gif)
+    expect(imgs[0].type === "image" && imgs[0].src.startsWith("data:image/jpeg")).toBe(true); // 1枚目 inline
+    expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/gif")).toBe(true); // 2枚目 placeholder（serialized 超過）
   });
 
   it("[dedup] 同一 key を参照する複数画像は read を1回だけ行う", async () => {
@@ -260,14 +263,14 @@ describe("authorizeAndInlineDocumentImages", () => {
     expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/png")).toBe(true);
   });
 
-  it("[DoS] 同一画像の繰り返し参照は read 1回だが、出現ごとに budget 加算し超過分は drop", async () => {
+  it("[DoS] 同一画像の繰り返し参照は read 1回だが、初回も cache 再利用も serialized size を budget 加算し超過分 drop", async () => {
     // 同じ /uploads 画像を複数回参照する document。data URL は HTML に出現回数分直列化されるため、
-    // cache 再利用でも serialized size を budget に加算し、合計上限超過分は drop する。
+    // 初回画像も cache 再利用も同じ「serialized data URL サイズ」で budget を消費し、上限超過分は drop。
     keyFromUrl.mockReturnValue("properties/p1/same.jpg");
     (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
-    // body 15MB → data URL(base64) ≈ 20MB。size は小さく設定し「初回 read バイト + 再利用 serialized」を検証。
-    const body = Buffer.alloc(15 * 1024 * 1024);
-    read.mockResolvedValue({ body, contentType: "image/jpeg", size: 1 });
+    // body 9MB → data URL(base64) ≈ 12MB。1枚目+2枚目 ≈24MB は上限内、3枚目で ≈36MB>32MB 超過。
+    const body = Buffer.alloc(9 * 1024 * 1024);
+    read.mockResolvedValue({ body, contentType: "image/jpeg", size: body.length });
     const ref = "/uploads/properties/p1/same.jpg";
     const doc: SalesSheetDocument = {
       page: A4_LANDSCAPE,
@@ -281,8 +284,8 @@ describe("authorizeAndInlineDocumentImages", () => {
     const out = await authorizeAndInlineDocumentImages(doc, { session: SESSION, permissions: PERMS });
     expect(read).toHaveBeenCalledTimes(1); // dedup: read は1回だけ
     const imgs = out.elements.filter((e) => e.type === "image");
-    expect(imgs[0].type === "image" && imgs[0].src.startsWith("data:image/jpeg")).toBe(true); // 1枚目 inline
-    expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/jpeg")).toBe(true); // 2枚目 cache 再利用
+    expect(imgs[0].type === "image" && imgs[0].src.startsWith("data:image/jpeg")).toBe(true); // 1枚目 inline（read・serialized 計上）
+    expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/jpeg")).toBe(true); // 2枚目 cache 再利用（budget内）
     expect(imgs[2].type === "image" && imgs[2].src.startsWith("data:image/gif")).toBe(true); // 3枚目 budget 超過で placeholder
   });
 });

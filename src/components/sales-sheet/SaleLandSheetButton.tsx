@@ -31,7 +31,13 @@ export function buildCreateRequest(
   };
 }
 
-export function SaleLandSheetButton({ propertyId }: { propertyId: string }) {
+export function SaleLandSheetButton({
+  propertyId,
+  canWrite,
+}: {
+  propertyId: string;
+  canWrite: boolean;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -59,6 +65,10 @@ export function SaleLandSheetButton({ propertyId }: { propertyId: string }) {
       setBusy(false);
     }
   }
+
+  // /sales-sheets/new は property:write を要求するため、read-only ユーザーには作成導線を出さない
+  // （表示してもクリックで 403 dead-end になる）。route 側の property:write チェックは別途維持。
+  if (!canWrite) return null;
 
   return (
     <div>

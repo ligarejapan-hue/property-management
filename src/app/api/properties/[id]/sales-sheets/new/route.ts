@@ -15,6 +15,7 @@ import { buildSaleLandDocument, toCanonicalUploadsSrc, type SaleLandInput } from
 import { isImageKeyAuthorizedForProperty } from "@/lib/sales-sheet/authorize-document-images";
 import { getStorage } from "@/lib/storage";
 import { localizeOccupancy } from "@/lib/property-types";
+import { writeAuditLog } from "@/lib/audit";
 
 // 作成ダイアログが収集する任意の上書き項目（売土地でシステムに無い値）。
 const overridesSchema = z.object({
@@ -112,6 +113,15 @@ export async function POST(
 
     const document = buildSaleLandDocument(input);
     const design = await createDesign({ propertyId: id, document, userId: session.id });
+
+    // 監査ログ（非PIIメタのみ: document 本文・画像 key・overrides・住所等は記録しない）。
+    await writeAuditLog({
+      userId: session.id,
+      action: "sales_sheet_design_create",
+      targetTable: "sales_sheet_designs",
+      targetId: design.id,
+      detail: { propertyId: id },
+    });
 
     return NextResponse.json({ id: design.id }, { status: 201 });
   } catch (error) {

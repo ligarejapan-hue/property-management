@@ -61,9 +61,12 @@ vi.mock("@/lib/sales-sheet/design-service", () => ({
   listDesigns: vi.fn(),
 }));
 
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { createDesign, listDesigns } from "@/lib/sales-sheet/design-service";
+import { writeAuditLog } from "@/lib/audit";
 import { GET, POST } from "../route";
 
 type PrismaMock = { property: { findUnique: Mock } };
@@ -207,5 +210,29 @@ describe("POST /sales-sheets (create)", () => {
         userId: "u1",
       }),
     );
+  });
+
+  it("作成成功時に AuditLog を1件記録する（非PIIメタのみ）", async () => {
+    const res = await POST(postReq({ document: VALID_DOCUMENT, title: "テスト図面" }), ctx);
+    expect(res.status).toBe(201);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const arg = (writeAuditLog as unknown as Mock).mock.calls[0][0];
+    expect(arg).toMatchObject({
+      userId: "u1",
+      action: "sales_sheet_design_create",
+      targetTable: "sales_sheet_designs",
+      targetId: "design-1",
+      detail: { propertyId: "p1" },
+    });
+    expect(Object.keys(arg.detail as object)).toEqual(["propertyId"]);
+  });
+
+  it("権限なし(403)では AuditLog を記録しない", async () => {
+    (getUserPermissions as unknown as Mock).mockResolvedValue([
+      { resource: "property", action: "read", granted: true },
+    ]);
+    const res = await POST(postReq({ document: VALID_DOCUMENT }), ctx);
+    expect(res.status).toBe(403);
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 });

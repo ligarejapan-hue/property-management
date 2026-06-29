@@ -13,6 +13,7 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 import { getDesign, updateDesign, deleteDesign } from "@/lib/sales-sheet/design-service";
 import { parseSalesSheetDocument, type SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import { assertDocumentImagesAuthorized } from "@/lib/sales-sheet/authorize-document-images";
+import { writeAuditLog } from "@/lib/audit";
 
 const updateBodySchema = z.object({
   title: z.string().max(120).optional(),
@@ -91,6 +92,14 @@ export async function PUT(
         throw new ApiError(409, "他の操作と競合しています。最新データを取得してから再試行してください", "CONFLICT");
       }
     }
+    // 監査ログ（成功時のみ・非PIIメタのみ: document 本文・画像 key/URL は記録しない）。
+    await writeAuditLog({
+      userId: session.id,
+      action: "sales_sheet_design_update",
+      targetTable: "sales_sheet_designs",
+      targetId: sheetId,
+      detail: { propertyId: id },
+    });
     return NextResponse.json({ updatedAt: result.design.updatedAt });
   } catch (error) {
     return handleApiError(error);
@@ -111,6 +120,14 @@ export async function DELETE(
     await getPropertyOrThrow(id, session);
     const deleted = await deleteDesign(id, sheetId);
     if (!deleted) throw new ApiError(404, "販売図面が見つかりません", "NOT_FOUND");
+    // 監査ログ（削除成功時のみ・非PIIメタのみ）。対象なし(404)では記録せず存在情報を出さない。
+    await writeAuditLog({
+      userId: session.id,
+      action: "sales_sheet_design_delete",
+      targetTable: "sales_sheet_designs",
+      targetId: sheetId,
+      detail: { propertyId: id },
+    });
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return handleApiError(error);

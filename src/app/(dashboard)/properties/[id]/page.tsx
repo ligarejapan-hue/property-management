@@ -477,7 +477,7 @@ export default function PropertyDetailPage({
             </Link>
           )}
           {property.propertyType === "land" && (
-            <SaleLandSheetButton propertyId={property.id} />
+            <SaleLandSheetButton propertyId={property.id} canWrite={canWriteProperty} />
           )}
           <button
             onClick={() => setShowEditForm(true)}

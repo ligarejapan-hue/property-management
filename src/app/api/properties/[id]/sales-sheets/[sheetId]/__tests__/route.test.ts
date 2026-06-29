@@ -62,9 +62,12 @@ vi.mock("@/lib/sales-sheet/design-service", () => ({
   deleteDesign: vi.fn(),
 }));
 
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { getDesign, updateDesign, deleteDesign } from "@/lib/sales-sheet/design-service";
+import { writeAuditLog } from "@/lib/audit";
 import { GET, PUT, DELETE } from "../route";
 
 type PrismaMock = { property: { findUnique: Mock } };
@@ -253,6 +256,27 @@ describe("PUT /sales-sheets/[sheetId]", () => {
       "u1",
     );
   });
+
+  it("更新成功時に AuditLog を1件記録する（非PIIメタのみ）", async () => {
+    await PUT(makeReq("PUT", validPatch), ctx);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const arg = (writeAuditLog as unknown as Mock).mock.calls[0][0];
+    expect(arg).toMatchObject({
+      userId: "u1",
+      action: "sales_sheet_design_update",
+      targetTable: "sales_sheet_designs",
+      targetId: "sheet-1",
+      detail: { propertyId: "p1" },
+    });
+    // document 本文・画像 key/URL を detail に含めない（propertyId のみ）。
+    expect(Object.keys(arg.detail as object)).toEqual(["propertyId"]);
+  });
+
+  it("競合(409)時は AuditLog を記録しない", async () => {
+    (updateDesign as unknown as Mock).mockResolvedValue({ ok: false, reason: "conflict" });
+    await PUT(makeReq("PUT", validPatch), ctx);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
 });
 
 // ─── DELETE [sheetId] ────────────────────────────────────────────────────────
@@ -300,5 +324,25 @@ describe("DELETE /sales-sheets/[sheetId]", () => {
   it("deleteDesign に propertyId と sheetId を渡す", async () => {
     await DELETE(makeReq("DELETE"), ctx);
     expect(deleteDesign).toHaveBeenCalledWith("p1", "sheet-1");
+  });
+
+  it("削除成功時に AuditLog を1件記録する（非PIIメタのみ）", async () => {
+    await DELETE(makeReq("DELETE"), ctx);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const arg = (writeAuditLog as unknown as Mock).mock.calls[0][0];
+    expect(arg).toMatchObject({
+      userId: "u1",
+      action: "sales_sheet_design_delete",
+      targetTable: "sales_sheet_designs",
+      targetId: "sheet-1",
+      detail: { propertyId: "p1" },
+    });
+    expect(Object.keys(arg.detail as object)).toEqual(["propertyId"]);
+  });
+
+  it("削除対象なし(404)では AuditLog を記録しない（存在情報を出さない）", async () => {
+    (deleteDesign as unknown as Mock).mockResolvedValue(false);
+    await DELETE(makeReq("DELETE"), ctx);
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 });
