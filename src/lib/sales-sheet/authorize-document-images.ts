@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getStorage } from "@/lib/storage";
 import { authorizeUploadAccess } from "@/lib/uploads-authorization";
 import type { SalesSheetDocument, SalesSheetElement } from "./document-schema";
@@ -57,4 +58,38 @@ export async function authorizeAndInlineDocumentImages(
   );
 
   return { ...doc, elements };
+}
+
+/**
+ * 保存境界の画像認可ガード（user-supplied document 用）。各 image 要素の src について:
+ *  - `data:` src → スキップ（インライン bytes はサイズ上限で別途制限）
+ *  - `/uploads/` src → storage key を解決し authorizeUploadAccess で判定。
+ *    "ok" 以外（forbidden / not_found / 他物件 / key 解決不能）は throw して保存を拒否する。
+ *
+ * 未認可の /uploads 参照が sales_sheet_designs.document に保存され GET で echo されるのを防ぐ
+ * 多層防御（バイト自体は export の認可インライン化と /uploads 配信ルートで別途保護されている）。
+ * ZodError として投げ handleApiError が 422 化する。key/URL はメッセージに出さない（漏洩防止）。
+ */
+export async function assertDocumentImagesAuthorized(
+  doc: SalesSheetDocument,
+  ctx: { session: ApiSession; permissions: PermissionEntry[] },
+): Promise<void> {
+  const storage = getStorage();
+  for (const el of doc.elements) {
+    if (el.type !== "image") continue;
+    if (el.src.startsWith("data:")) continue; // インライン bytes（サイズ上限で別途制限）
+    const key = storage.keyFromUrl(el.src);
+    const decision = key
+      ? await authorizeUploadAccess({ key, session: ctx.session, permissions: ctx.permissions })
+      : null;
+    if (decision !== "ok") {
+      throw new z.ZodError([
+        {
+          code: z.ZodIssueCode.custom,
+          message: "保存できない画像が含まれています（アクセス権限のない画像）",
+          path: ["elements"],
+        },
+      ]);
+    }
+  }
 }

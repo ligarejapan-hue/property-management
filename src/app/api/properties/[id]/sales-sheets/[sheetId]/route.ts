@@ -11,6 +11,8 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { getDesign, updateDesign, deleteDesign } from "@/lib/sales-sheet/design-service";
+import { parseSalesSheetDocument, type SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
+import { assertDocumentImagesAuthorized } from "@/lib/sales-sheet/authorize-document-images";
 
 const updateBodySchema = z.object({
   title: z.string().max(120).optional(),
@@ -66,10 +68,16 @@ export async function PUT(
     }
     await getPropertyOrThrow(id, session);
     const body = updateBodySchema.parse(await parseJsonBody(request));
+    // document 更新時は保存前に /uploads 画像を認可（未認可/解決不能は 422 で拒否）。
+    let document: SalesSheetDocument | undefined;
+    if (body.document !== undefined) {
+      document = parseSalesSheetDocument(body.document);
+      await assertDocumentImagesAuthorized(document, { session, permissions });
+    }
     const result = await updateDesign(
       id,
       sheetId,
-      { title: body.title, document: body.document, expectedUpdatedAt: body.expectedUpdatedAt },
+      { title: body.title, document, expectedUpdatedAt: body.expectedUpdatedAt },
       session.id,
     );
     if (!result.ok) {

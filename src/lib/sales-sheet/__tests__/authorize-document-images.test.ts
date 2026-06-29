@@ -15,7 +15,10 @@ vi.mock("@/lib/uploads-authorization", () => ({
   authorizeUploadAccess: vi.fn(),
 }));
 
-import { authorizeAndInlineDocumentImages } from "../authorize-document-images";
+import {
+  authorizeAndInlineDocumentImages,
+  assertDocumentImagesAuthorized,
+} from "../authorize-document-images";
 import { authorizeUploadAccess } from "@/lib/uploads-authorization";
 
 const SESSION = { id: "u1", email: "u@x.com", name: "U", role: "admin" };
@@ -197,5 +200,94 @@ describe("authorizeAndInlineDocumentImages", () => {
     expect(out.elements).toHaveLength(2);
     expect(read).not.toHaveBeenCalled();
     expect(authorizeUploadAccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", () => {
+  it("認可済み /uploads 画像のみなら解決する（throwしない）", async () => {
+    keyFromUrl.mockReturnValue("properties/p1/photo.jpg");
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    await expect(
+      assertDocumentImagesAuthorized(docWith("/uploads/properties/p1/photo.jpg"), {
+        session: SESSION,
+        permissions: PERMS,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("未認可(forbidden) /uploads を含むと throw（保存拒否）", async () => {
+    keyFromUrl.mockReturnValue("properties/other/secret.jpg");
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("forbidden");
+    await expect(
+      assertDocumentImagesAuthorized(docWith("/uploads/properties/other/secret.jpg"), {
+        session: SESSION,
+        permissions: PERMS,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("存在しない(not_found) /uploads を含むと throw", async () => {
+    keyFromUrl.mockReturnValue("properties/p1/deleted.jpg");
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("not_found");
+    await expect(
+      assertDocumentImagesAuthorized(docWith("/uploads/properties/p1/deleted.jpg"), {
+        session: SESSION,
+        permissions: PERMS,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("解決不能な /uploads key は throw（authorizeUploadAccess を呼ばない）", async () => {
+    keyFromUrl.mockReturnValue(null);
+    await expect(
+      assertDocumentImagesAuthorized(docWith("/uploads/bad/path"), { session: SESSION, permissions: PERMS }),
+    ).rejects.toThrow();
+    expect(authorizeUploadAccess).not.toHaveBeenCalled();
+  });
+
+  it("data: 画像は認可不要でスキップ（throwしない・storage/authzを呼ばない）", async () => {
+    await expect(
+      assertDocumentImagesAuthorized(docWith("data:image/png;base64,AAAA"), {
+        session: SESSION,
+        permissions: PERMS,
+      }),
+    ).resolves.toBeUndefined();
+    expect(keyFromUrl).not.toHaveBeenCalled();
+    expect(authorizeUploadAccess).not.toHaveBeenCalled();
+  });
+
+  it("エラーに storage key/URL を含めない（漏洩防止）", async () => {
+    keyFromUrl.mockReturnValue("properties/other/secret.jpg");
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("forbidden");
+    let caught: unknown;
+    try {
+      await assertDocumentImagesAuthorized(docWith("/uploads/properties/other/secret.jpg"), {
+        session: SESSION,
+        permissions: PERMS,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeDefined();
+    expect(JSON.stringify(caught)).not.toContain("secret");
+    expect(JSON.stringify(caught)).not.toContain("properties/other");
+  });
+
+  it("複数画像で1つでも未認可なら throw", async () => {
+    const doc: SalesSheetDocument = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        { id: "i1", type: "image", x: 0, y: 0, w: 10, h: 10, z: 1, src: "/uploads/properties/p1/a.jpg", fit: "cover" },
+        { id: "i2", type: "image", x: 0, y: 20, w: 10, h: 10, z: 2, src: "/uploads/properties/other/b.jpg", fit: "cover" },
+      ],
+    };
+    keyFromUrl.mockImplementation((url: string) => url.replace("/uploads/", ""));
+    (authorizeUploadAccess as unknown as Mock).mockImplementation(
+      async ({ key }: { key: string }) => (key.startsWith("properties/p1/") ? "ok" : "forbidden"),
+    );
+    await expect(
+      assertDocumentImagesAuthorized(doc, { session: SESSION, permissions: PERMS }),
+    ).rejects.toThrow();
   });
 });

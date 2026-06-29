@@ -11,6 +11,8 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { createDesign, listDesigns } from "@/lib/sales-sheet/design-service";
+import { parseSalesSheetDocument } from "@/lib/sales-sheet/document-schema";
+import { assertDocumentImagesAuthorized } from "@/lib/sales-sheet/authorize-document-images";
 
 const createBodySchema = z.object({
   title: z.string().max(120).optional(),
@@ -65,10 +67,13 @@ export async function POST(
     }
     await getPropertyOrThrow(id, session);
     const body = createBodySchema.parse(await parseJsonBody(request));
+    // 保存前に document 内の /uploads 画像を認可（未認可/解決不能は 422 で拒否）。
+    const document = parseSalesSheetDocument(body.document);
+    await assertDocumentImagesAuthorized(document, { session, permissions });
     const design = await createDesign({
       propertyId: id,
       title: body.title,
-      document: body.document,
+      document,
       templateId: body.templateId,
       userId: session.id,
     });
