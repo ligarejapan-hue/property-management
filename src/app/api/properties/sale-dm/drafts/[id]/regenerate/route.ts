@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { isSaleDmConfigured, generateLetters } from "@/lib/sale-dm-letter";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
+import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { resolveDraftOptions } from "@/lib/sale-dm-letter/override";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
@@ -18,6 +19,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // 差出人(env)未設定なら fail-closed。resolveSender の "(差出人名 未設定)"/空 で再生成すると
     // 差出人欄が使えない手紙になるため、有料生成の前に弾く(campaign 作成と同方針)。
     if (!isSenderConfigured()) throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
+    // 印刷の郵送QRには絶対URL(SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL)が必須。未設定だと再生成(課金)しても
+    // 印刷 route が 503 で出力できず、印刷不能な下書きに課金されるだけになる。生成前に確認し fail-closed
+    // (campaign POST の R28 ゲートと統一・Codex R34 で再生成側の欠落を是正)。
+    if (!resolveTrackingBaseUrl() || !resolveLpUrl()) throw new ApiError(503, "印刷に必要なURL(SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL)が未設定です", "PRINT_URL_NOT_CONFIGURED");
     // 課金確認: 再生成も有料AI+PII外部送信のため、campaign 作成と同じく明示確認(confirmed:true)を要求する。
     // stale tab/誤クリックの1クリックで無確認の課金・PII送信が起きないようにする(UI は確認後 true を送る)。
     const requestBody = await parseJsonBody(request);

@@ -17,9 +17,9 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findMany: vi.fn() },
-    dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), findUnique: vi.fn(async () => null), delete: vi.fn() }, dmVariant: { create: vi.fn() }, dmRecipientDraft: { create: vi.fn() },
+    dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), findUnique: vi.fn(async () => null), delete: vi.fn(async () => ({ id: "deleted" })) }, dmVariant: { create: vi.fn() }, dmRecipientDraft: { create: vi.fn() },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
-      dmCampaign: { create: vi.fn(async () => ({ id: "c1" })) },
+      dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), update: vi.fn() },
       dmVariant: { create: vi.fn(async () => ({ id: "v1" })) },
       dmRecipientDraft: { create: vi.fn() },
     })),
@@ -185,7 +185,7 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
   it("冪等性キー: 同キーで既に作成済みなら再生成せず既存を返す(二重課金・二重作成の防止)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn> };
-    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-existing", createdBy: "u1" });
+    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-existing", createdBy: "u1", status: "ready" });
     const res = await POST(req({ ...validBody, idempotencyKey: "key-1" }) as never);
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -200,13 +200,26 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn> };
     pmc.dmCampaign.findUnique
       .mockResolvedValueOnce(null) // 事前チェック: まだ無い
-      .mockResolvedValueOnce({ id: "c-won", createdBy: "u1" }); // P2002 後の再取得=勝者
+      .mockResolvedValueOnce({ id: "c-won", createdBy: "u1", status: "ready" }); // P2002 後の再取得=勝者(完了済み)
     pmc.dmCampaign.create.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }));
     const res = await POST(req({ ...validBody, idempotencyKey: "key-2" }) as never);
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.campaignId).toBe("c-won");
     expect(pmc.$transaction).not.toHaveBeenCalled(); // 敗者は生成・保存しない
+  });
+
+  it("冪等性キー: 孤児(status=draft の空 campaign)が見つかれば削除して作り直す(空キャンペーン固着を防ぐ・R34)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> } };
+    // クレーム後・保存完了前にプロセスが落ちた孤児(status=draft)が残っている。
+    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-orphan", createdBy: "u1", status: "draft" });
+    const res = await POST(req({ ...validBody, idempotencyKey: "key-orphan" }) as never);
+    expect(res.status).toBe(200);
+    expect(pmc.dmCampaign.delete).toHaveBeenCalledWith({ where: { id: "c-orphan" } }); // 孤児を削除して
+    expect(pmc.dmCampaign.create).toHaveBeenCalled(); // 作り直す(再クレーム+生成+保存)
+    const json = await res.json();
+    expect(json.campaignId).toBe("c1");
   });
 
   it("冪等性キー: 新規キーはクレーム→生成→保存し、キーを campaign に保存する", async () => {

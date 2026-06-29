@@ -24,12 +24,18 @@ export default function SaleDmRecipientList({
   onChanged: () => void;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const patchOutcome = async (id: string, input: { deliveryStatus?: string; phoneInquiry?: boolean }) => {
     setBusyId(id);
+    setError(null);
     try {
       await updateSaleDmOutcome(id, buildOutcomePayload(input));
       onChanged();
+    } catch (e) {
+      // 失敗を握り潰さず表示する(他の sale-dm 画面と同方針)。コントロールは onChanged 不発で旧値に戻るため、
+      // 記録できたか分からない無言失敗を避ける。
+      setError(e instanceof Error ? e.message : "配達結果の更新に失敗しました");
     } finally {
       setBusyId(null);
     }
@@ -38,6 +44,7 @@ export default function SaleDmRecipientList({
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-semibold text-gray-700">宛先リスト</h3>
+      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
       <ul className="divide-y divide-gray-100">
         {campaign.recipients.map((r) => {
           const inquiry = isInquiry(r);

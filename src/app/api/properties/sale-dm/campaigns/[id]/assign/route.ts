@@ -43,20 +43,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     let assigned = 0;
     const perVariant: Record<string, number> = {};
-    for (const [variantId, ids] of byVariant) {
-      if (ids.length === 0) continue;
-      const result = await prisma.dmRecipientDraft.updateMany({
-        // 型が実際に変わる宛先のみ更新し、本文をクリア(=要再生成)。型と本文の作風が不一致の
-        // まま確定/印刷/送付されるのを防ぐ(空 body は confirm/print から除外済み)。再生成すると
-        // 現在の型の作風で本文が入り確定可能になる。既に同じ型の宛先は触らない(本文を保全)。
-        where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, variantId: { not: variantId } },
-        // 本文クリア時は status も draft に戻し confirmedAt を消す(confirmed のまま空 body だと
-        // mark-sent が空 letter を送付済みにし得るため)。再生成→再確定の lifecycle を強制。
-        data: { variantId, body: "", status: "draft", confirmedAt: null },
-      });
-      assigned += result.count;
-      perVariant[variantId] = result.count;
-    }
+    // 型ごとの updateMany を1トランザクションにまとめる。途中失敗(例: 対象 variant が並行削除されFK違反)で
+    // 一部の宛先だけ本文がクリアされる部分破壊(=一部だけ要再生成の半端な状態)を防ぐ(all-or-nothing)。
+    await prisma.$transaction(async (tx) => {
+      for (const [variantId, ids] of byVariant) {
+        if (ids.length === 0) continue;
+        const result = await tx.dmRecipientDraft.updateMany({
+          // 型が実際に変わる宛先のみ更新し、本文をクリア(=要再生成)。型と本文の作風が不一致の
+          // まま確定/印刷/送付されるのを防ぐ(空 body は confirm/print から除外済み)。再生成すると
+          // 現在の型の作風で本文が入り確定可能になる。既に同じ型の宛先は触らない(本文を保全)。
+          where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, variantId: { not: variantId } },
+          // 本文クリア時は status も draft に戻し confirmedAt を消す(confirmed のまま空 body だと
+          // mark-sent が空 letter を送付済みにし得るため)。再生成→再確定の lifecycle を強制。
+          data: { variantId, body: "", status: "draft", confirmedAt: null },
+        });
+        assigned += result.count;
+        perVariant[variantId] = result.count;
+      }
+    });
 
     await writeAuditLog({
       userId: session.id,

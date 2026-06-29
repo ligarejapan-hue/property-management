@@ -58,6 +58,9 @@ beforeEach(() => {
   // 差出人ゲートの既定は「設定済み」。clearAllMocks は実装(mockReturnValue)を戻さないため、
   // 個別テストで false にした後も他テストへ漏れないよう毎回 true に戻す。
   (isSenderConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+  // 再生成の印刷URLゲート(R34)。この test は tracking を mock せず実体(env 判定)を使うため env を設定。
+  process.env.SALE_DM_TRACKING_BASE_URL = "https://app.example.com";
+  process.env.SALE_DM_LP_URL = "https://lp.example.com";
 });
 
 describe("GET campaign", () => {
@@ -195,6 +198,16 @@ describe("POST regenerate draft (再生成)", () => {
     grant(...ALL);
     (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
     (isSenderConfigured as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
+    expect(res.status).toBe(503);
+    expect(generateLetters).not.toHaveBeenCalled();
+  });
+
+  it("印刷必須URL(env)未設定なら 503・生成しない(印刷不能な下書きへの課金防止・campaign POST と統一・R34)", async () => {
+    grant(...ALL);
+    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (isSenderConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    delete process.env.SALE_DM_TRACKING_BASE_URL; // 郵送QRの絶対URLが無い=印刷不能
     const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
     expect(res.status).toBe(503);
     expect(generateLetters).not.toHaveBeenCalled();

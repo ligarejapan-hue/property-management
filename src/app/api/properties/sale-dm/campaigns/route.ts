@@ -61,10 +61,17 @@ export async function POST(request: NextRequest) {
     // 既存 campaign を返す(再送信/別タブ/連打での二重課金・二重作成を防ぐ)。キー未指定なら従来通り。
     const idempotencyKey = body.idempotencyKey;
     if (idempotencyKey) {
-      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true } });
+      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true } });
       if (existing) {
         if (existing.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
-        return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+        // status!=="draft"(=ready 以降)= 生成+保存が完了済み → そのまま返す(冪等)。
+        if (existing.status !== "draft") {
+          return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+        }
+        // status==="draft" = クレーム後・生成/保存の完了前にプロセスが落ちた孤児(変種無し空 campaign)。
+        // pre-check で見つかる=本リクエストより前から存在する(並行勝者は create で P2002 になり pre-check に
+        // は現れない)ため、安全に削除して作り直す(再試行が空キャンペーンに固着するのを防ぐ・R34)。
+        await prisma.dmCampaign.delete({ where: { id: existing.id } }).catch(() => {});
       }
     }
     const query = propertyListQuerySchema.parse(body.filters ?? {});
@@ -120,10 +127,15 @@ export async function POST(request: NextRequest) {
       });
     } catch (e) {
       if (idempotencyKey && e && typeof e === "object" && (e as { code?: unknown }).code === "P2002") {
-        const won = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true } });
+        const won = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true } });
         if (won) {
           if (won.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
-          return NextResponse.json({ campaignId: won.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+          // 完了済み(ready 以降)なら冪等返却。status==="draft"=並行勝者が生成中(未完)→ 勝者の生成を壊さない
+          // よう削除せず、少し待っての再試行を促す(完了すれば ready で冪等返却される・R34)。
+          if (won.status !== "draft") {
+            return NextResponse.json({ campaignId: won.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+          }
+          throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
       }
       throw e;
@@ -168,6 +180,10 @@ export async function POST(request: NextRequest) {
             },
           });
         }
+        // 生成+保存が完了したのでキャンペーンを ready にする(drafts と同一トランザクションでアトミックに確定)。
+        // idempotency の pre-check / P2002 はこの完了マーカーで「冪等返却(ready)」と「孤児削除→作り直し(draft)」
+        // を区別する。途中でプロセスが落ちれば status は draft のままで孤児として検出・回収される(R34)。
+        await tx.dmCampaign.update({ where: { id: claimed.id }, data: { status: "ready" } });
       });
     } catch (e) {
       // 生成 or 保存の失敗 → クレームを削除(孤児の空 campaign を残さない。再試行で再クレームできる)。

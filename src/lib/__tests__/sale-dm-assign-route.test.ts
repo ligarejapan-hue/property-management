@@ -14,13 +14,16 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     dmCampaign: { findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn() },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
-  },
-}));
+  };
+  // 型ごとの updateMany を1トランザクションにまとめる(部分破壊防止)。tx=同db委譲ゆえ既存アサーション維持。
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
+});
 
 import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
@@ -54,6 +57,8 @@ describe("POST assign (auto)", () => {
   it("自動均等割りで型ごとに updateMany を呼び 200", async () => {
     const res = await assign(post({ mode: "auto", order: "sequential" }) as never, ctxC);
     expect(res.status).toBe(200);
+    // 型ごとの updateMany は1トランザクションにまとめる(部分破壊防止)。
+    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).toHaveBeenCalled();
     // 2型なので updateMany は最大2回(型ごと)
     expect(pm.dmRecipientDraft.updateMany.mock.calls.length).toBeGreaterThanOrEqual(1);
     const allUpdates = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);

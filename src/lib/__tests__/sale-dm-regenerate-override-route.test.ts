@@ -50,6 +50,9 @@ beforeEach(() => {
   // true を返すよう差出人 env を設定する(この test は sender を mock せず実体を使う)。
   process.env.SALE_DM_SENDER_NAME = "△△不動産";
   process.env.SALE_DM_SENDER_CONTACT = "03-0000-0000";
+  // 印刷URLゲート(R34): 実 resolveTrackingBaseUrl/resolveLpUrl(env 判定)が値を返すよう設定。
+  process.env.SALE_DM_TRACKING_BASE_URL = "https://app.example.com";
+  process.env.SALE_DM_LP_URL = "https://lp.example.com";
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1", body: "再生成本文" });
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
 });

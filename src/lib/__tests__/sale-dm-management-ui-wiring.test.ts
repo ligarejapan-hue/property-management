@@ -65,6 +65,9 @@ describe("売却DM 管理UI の配線", () => {
     const recipientList = read("../../components/sale-dm/recipient-list.tsx");
     expect(recipientList).toContain("要再生成");
     expect(recipientList).toContain('r.status === "draft" && r.body === ""');
+    // 配達結果(outcome)更新の失敗を握り潰さず表示する(他の sale-dm 画面と同方針)。
+    expect(recipientList).toContain("setError");
+    expect(recipientList).toContain('role="alert"');
 
     // A/B型管理: 並び順 select と 型名 input にアクセシブルなラベルを付ける(icon/placeholder のみに頼らない)。
     const vm = read("../../components/sale-dm/variant-manager.tsx");
