@@ -15,7 +15,7 @@ import { getDesign, updateDesign, deleteDesign } from "@/lib/sales-sheet/design-
 const updateBodySchema = z.object({
   title: z.string().max(120).optional(),
   document: z.unknown().optional(),
-  expectedUpdatedAt: z.string(),
+  expectedUpdatedAt: z.string().datetime(),
 });
 
 async function getPropertyOrThrow(

@@ -47,6 +47,9 @@ export async function authorizeAndInlineDocumentImages(
 
       const result = await storage.read(key).catch(() => null);
       if (!result) return dropImage(el);
+      // 非画像 MIME（拡張子推定で application/octet-stream 等）は `data:image/` 検証を通らず、
+      // 出力の再 parse で図面全体が 422 になる。該当画像だけプレースホルダ化して全体破綻を防ぐ。
+      if (!result.contentType.startsWith("image/")) return dropImage(el);
 
       const b64 = result.body.toString("base64");
       return { ...el, src: `data:${result.contentType};base64,${b64}` };

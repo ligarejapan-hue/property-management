@@ -70,11 +70,7 @@ export async function POST(
     // 作成ダイアログの上書き項目（空ボディ → {}・不正 JSON → 400）。
     const overrides = overridesSchema.parse(await parseJsonBody(request));
 
-    // Owner + photo (separate queries to avoid Prisma select/include mixing issues)
-    const ownerRel = await prisma.propertyOwner.findFirst({
-      where: { propertyId: id },
-      select: { owner: { select: { name: true } } },
-    });
+    // 代表写真（buildSaleLandDocument は owner を使わないため owner 取得は行わない）。
     const photoRow = await prisma.propertyPhoto.findFirst({
       where: { propertyId: id },
       orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
@@ -96,7 +92,6 @@ export async function POST(
         roadWidth: property.roadWidth?.toString() ?? null,
         occupancyStatus: localizeOccupancy(property.occupancyStatus),
       },
-      owner: ownerRel?.owner ?? null,
       photo: photoSrc ? { fileUrl: photoSrc } : null,
       overrides,
     };

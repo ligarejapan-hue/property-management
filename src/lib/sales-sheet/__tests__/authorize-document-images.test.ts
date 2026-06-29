@@ -61,6 +61,23 @@ describe("authorizeAndInlineDocumentImages", () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 
+  it("非画像 MIME（octet-stream 等）は data: 化せずプレースホルダ化（出力全体の 422 を防ぐ）", async () => {
+    keyFromUrl.mockReturnValue("properties/p1/photo.jfif");
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    read.mockResolvedValue({ body: Buffer.from([1, 2, 3]), contentType: "application/octet-stream", size: 3 });
+
+    const out = await authorizeAndInlineDocumentImages(docWith("/uploads/properties/p1/photo.jfif"), {
+      session: SESSION,
+      permissions: PERMS,
+    });
+
+    const img = out.elements.find((e) => e.type === "image");
+    // data:application/octet-stream にならず、安全な data:image/ プレースホルダに差し替え
+    expect(img && img.type === "image" && img.src.startsWith("data:image/")).toBe(true);
+    expect(img && img.type === "image" && img.src.includes("octet-stream")).toBe(false);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
   it("[セキュリティ] authz=forbidden → プレースホルダ化し、storage.read を呼ばない", async () => {
     keyFromUrl.mockReturnValue("properties/other/secret.jpg");
     (authorizeUploadAccess as unknown as Mock).mockResolvedValue("forbidden");

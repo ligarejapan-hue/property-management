@@ -27,6 +27,7 @@ function makeDb(overrides?: Partial<{
   update: Mock;
   updateMany: Mock;
   delete: Mock;
+  deleteMany: Mock;
 }>) {
   return {
     salesSheetDesign: {
@@ -36,6 +37,7 @@ function makeDb(overrides?: Partial<{
       update: vi.fn(),
       updateMany: vi.fn(),
       delete: vi.fn(),
+      deleteMany: vi.fn(),
       ...overrides,
     },
   } as unknown as PrismaClient;
@@ -110,6 +112,31 @@ describe("createDesign", () => {
       ),
     };
     await expect(createDesign({ ...validInput, document: bigDataDoc }, db)).rejects.toThrow();
+    expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
+  });
+
+  it("文書全体が大きすぎる場合は拒否し、DB は呼ばれない（DB 肥大化防止）", async () => {
+    const db = makeDb({ create: vi.fn() });
+    const hugeDoc = {
+      ...sampleDocument,
+      elements: sampleDocument.elements.map((el) =>
+        el.id === "title" && el.type === "text" ? { ...el, content: "あ".repeat(600000) } : el,
+      ),
+    };
+    await expect(createDesign({ ...validInput, document: hugeDoc }, db)).rejects.toThrow();
+    expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
+  });
+
+  it("qr.dataUrl が大きすぎる場合も拒否（image だけでなく qr も上限対象）", async () => {
+    const db = makeDb({ create: vi.fn() });
+    const qrDoc = {
+      ...sampleDocument,
+      elements: [
+        ...sampleDocument.elements,
+        { id: "qr1", type: "qr", x: 0, y: 0, w: 20, h: 20, z: 5, dataUrl: "data:image/png;base64," + "A".repeat(9000) },
+      ],
+    };
+    await expect(createDesign({ ...validInput, document: qrDoc }, db)).rejects.toThrow();
     expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
   });
 });
@@ -263,30 +290,17 @@ describe("updateDesign", () => {
 // ---------------------------------------------------------------------------
 
 describe("deleteDesign", () => {
-  it("存在する自物件の design を削除して true を返す", async () => {
-    const db = makeDb({
-      findUnique: vi.fn().mockResolvedValue(storedDesign),
-      delete: vi.fn().mockResolvedValue(storedDesign),
-    });
+  it("存在する自物件の design を削除して true を返す（scope は deleteMany の WHERE で保証）", async () => {
+    const db = makeDb({ deleteMany: vi.fn().mockResolvedValue({ count: 1 }) });
     const result = await deleteDesign("prop1", "sheet1", db);
     expect(result).toBe(true);
-    expect(db.salesSheetDesign.delete).toHaveBeenCalledOnce();
+    const where = (db.salesSheetDesign.deleteMany as Mock).mock.calls[0][0].where;
+    expect(where).toEqual({ id: "sheet1", propertyId: "prop1" });
   });
 
-  it("他物件の design は削除せず false を返す", async () => {
-    const db = makeDb({
-      findUnique: vi.fn().mockResolvedValue({ ...storedDesign, propertyId: "OTHER_PROP" }),
-      delete: vi.fn(),
-    });
+  it("他物件 / 存在しない design は count=0 → false（並行二重削除でも例外を投げない）", async () => {
+    const db = makeDb({ deleteMany: vi.fn().mockResolvedValue({ count: 0 }) });
     const result = await deleteDesign("prop1", "sheet1", db);
     expect(result).toBe(false);
-    expect(db.salesSheetDesign.delete).not.toHaveBeenCalled();
-  });
-
-  it("design が存在しない場合は false を返す", async () => {
-    const db = makeDb({ findUnique: vi.fn().mockResolvedValue(null), delete: vi.fn() });
-    const result = await deleteDesign("prop1", "no-such-sheet", db);
-    expect(result).toBe(false);
-    expect(db.salesSheetDesign.delete).not.toHaveBeenCalled();
   });
 });
