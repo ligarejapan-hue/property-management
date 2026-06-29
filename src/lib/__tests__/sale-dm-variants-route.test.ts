@@ -29,6 +29,8 @@ vi.mock("@/lib/prisma", () => {
   };
   // $transaction はコールバックに同じ db を tx として渡す(tx.* === pm.* なので既存アサーションがそのまま効く)。
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  // mark-sent との直列化用の行ロック(FOR UPDATE)。結果は使わない。
+  db.$queryRaw = vi.fn(async () => []);
   return { default: db };
 });
 
@@ -44,6 +46,7 @@ const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
   dmVariant: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { count: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
+  $queryRaw: ReturnType<typeof vi.fn>;
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
 const grant = (...keys: string[]) =>
@@ -120,6 +123,7 @@ describe("PATCH variant (更新)", () => {
     pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A2", ...optionFields });
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "A2", options: { tone: "soft" } }) }) as never, ctxV);
     expect(res.status).toBe(200);
+    expect(pm.$queryRaw).toHaveBeenCalled(); // mark-sent と直列化する FOR UPDATE 行ロック(TOCTOU 防止)
     const arg = pm.dmVariant.update.mock.calls[0][0];
     expect(arg.where).toEqual({ id: "v1", campaignId: "c1" });
     expect(arg.data.tone).toBe("soft");

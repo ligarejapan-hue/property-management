@@ -66,6 +66,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // 前後で sent を数えることで mark-sent との競合(TOCTOU=チェック後に別 request が sent 化)を検出し
     // ロールバックする(凍結=送った構成の不変性を守る)。
     const result = await prisma.$transaction(async (tx) => {
+      // mark-sent との TOCTOU(label/設定変更が送付確定と競合し、送付後に型が変わって A/B 履歴・送付履歴が
+      // 食い違う)を防ぐため、この型の宛先行を FOR UPDATE でロックして mark-sent と直列化する。sentBefore/
+      // sentAfter のみでは mark-sent の未コミット更新を見落とす(label のみ編集は下書き行に触れずロックもしない)。
+      // ロック後はどちらの順序でも整合(編集→送付=送付時点の型で送る / 送付→編集=sent検知で VARIANT_LOCKED)。
+      await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE campaign_id = ${id}::uuid AND variant_id = ${variantId}::uuid FOR UPDATE`;
       const sentBefore = await tx.dmRecipientDraft.count({ where: { campaignId: id, variantId, status: "sent" } });
       if (sentBefore > 0) {
         throw new ApiError(409, "送付済みの宛先がある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");

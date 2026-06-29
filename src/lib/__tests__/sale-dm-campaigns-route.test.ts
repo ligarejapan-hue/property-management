@@ -212,14 +212,26 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
   it("冪等性キー: 孤児(status=draft の空 campaign)が見つかれば削除して作り直す(空キャンペーン固着を防ぐ・R34)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> } };
-    // クレーム後・保存完了前にプロセスが落ちた孤児(status=draft)が残っている。
-    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-orphan", createdBy: "u1", status: "draft" });
+    // クレーム後・保存完了前にプロセスが落ちた孤児(status=draft かつ生成時間を大きく超えて古い)が残っている。
+    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-orphan", createdBy: "u1", status: "draft", createdAt: new Date("2020-01-01T00:00:00Z") });
     const res = await POST(req({ ...validBody, idempotencyKey: "key-orphan" }) as never);
     expect(res.status).toBe(200);
-    expect(pmc.dmCampaign.delete).toHaveBeenCalledWith({ where: { id: "c-orphan" } }); // 孤児を削除して
+    expect(pmc.dmCampaign.delete).toHaveBeenCalledWith({ where: { id: "c-orphan" } }); // 古い孤児を削除して
     expect(pmc.dmCampaign.create).toHaveBeenCalled(); // 作り直す(再クレーム+生成+保存)
     const json = await res.json();
     expect(json.campaignId).toBe("c1");
+  });
+
+  it("冪等性キー: 進行中(新しい draft)のクレームは削除せず 409(ライブの並行生成を壊さず二重課金を防ぐ・Codex)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn> };
+    // 新しい draft = 別リクエストが今まさに生成中。削除すると同キーで二重生成になるため、消さず 409 で再試行を促す。
+    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-live", createdBy: "u1", status: "draft", createdAt: new Date() });
+    const res = await POST(req({ ...validBody, idempotencyKey: "key-live" }) as never);
+    expect(res.status).toBe(409);
+    expect(pmc.dmCampaign.delete).not.toHaveBeenCalled(); // ライブのクレームを消さない
+    expect(pmc.dmCampaign.create).not.toHaveBeenCalled(); // 二重生成しない
+    expect(pmc.$transaction).not.toHaveBeenCalled();
   });
 
   it("冪等性キー: 新規キーはクレーム→生成→保存し、キーを campaign に保存する", async () => {

@@ -61,16 +61,21 @@ export async function POST(request: NextRequest) {
     // 既存 campaign を返す(再送信/別タブ/連打での二重課金・二重作成を防ぐ)。キー未指定なら従来通り。
     const idempotencyKey = body.idempotencyKey;
     if (idempotencyKey) {
-      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true } });
+      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true, createdAt: true } });
       if (existing) {
         if (existing.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
         // status!=="draft"(=ready 以降)= 生成+保存が完了済み → そのまま返す(冪等)。
         if (existing.status !== "draft") {
           return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
         }
-        // status==="draft" = クレーム後・生成/保存の完了前にプロセスが落ちた孤児(変種無し空 campaign)。
-        // pre-check で見つかる=本リクエストより前から存在する(並行勝者は create で P2002 になり pre-check に
-        // は現れない)ため、安全に削除して作り直す(再試行が空キャンペーンに固着するのを防ぐ・R34)。
+        // status==="draft" = クレーム後・保存完了前。並行生成中(ライブ)か、プロセス死の孤児か区別が要る。
+        // 生成は数分以内に完了するため、生成時間を大きく超えて古い(STALE_MS 超)draft のみ孤児として削除し作り直す。
+        // まだ新しい draft は並行生成中とみなし削除せず 409(再試行を促す。完了すれば ready で冪等返却)。ライブの
+        // クレームを消すと同キーの2リクエストが二重に有料生成し冪等性が破れる(Codex 指摘)ため、必ず新旧を判定する。
+        const STALE_MS = 10 * 60 * 1000;
+        if (Date.now() - new Date(existing.createdAt).getTime() < STALE_MS) {
+          throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
+        }
         await prisma.dmCampaign.delete({ where: { id: existing.id } }).catch(() => {});
       }
     }
