@@ -11,7 +11,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { createDesign } from "@/lib/sales-sheet/design-service";
-import { buildSaleLandDocument, type SaleLandInput } from "@/lib/sales-sheet/build-document";
+import { buildSaleLandDocument, toCanonicalUploadsSrc, type SaleLandInput } from "@/lib/sales-sheet/build-document";
 import { localizeOccupancy } from "@/lib/property-types";
 
 // 作成ダイアログが収集する任意の上書き項目（売土地でシステムに無い値）。
@@ -75,11 +75,16 @@ export async function POST(
       where: { propertyId: id },
       select: { owner: { select: { name: true } } },
     });
-    const photo = await prisma.propertyPhoto.findFirst({
+    const photoRow = await prisma.propertyPhoto.findFirst({
       where: { propertyId: id },
       orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
       select: { fileUrl: true },
     });
+    // Normalize to the canonical /uploads/{key} form so the saved image src
+    // passes isSafeImageSrc on every storage backend (server backend may
+    // persist /{bucket}/{key} or absolute URLs). Export re-resolves the key via
+    // keyFromUrl. Unresolvable key → drop the photo.
+    const photoSrc = toCanonicalUploadsSrc(photoRow?.fileUrl);
 
     const input: SaleLandInput = {
       property: {
@@ -92,7 +97,7 @@ export async function POST(
         occupancyStatus: localizeOccupancy(property.occupancyStatus),
       },
       owner: ownerRel?.owner ?? null,
-      photo: photo ?? null,
+      photo: photoSrc ? { fileUrl: photoSrc } : null,
       overrides,
     };
 

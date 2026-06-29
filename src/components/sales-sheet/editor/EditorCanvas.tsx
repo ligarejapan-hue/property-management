@@ -227,6 +227,9 @@ export function EditorCanvas({
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
+                // Mirror the click path: capture the Moveable target so keyboard
+                // selection shows handles on (and operates) the correct element.
+                setMoveableTarget(e.currentTarget as HTMLDivElement);
                 onSelect(el.id);
               }
             }}

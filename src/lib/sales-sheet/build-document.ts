@@ -4,6 +4,8 @@ import {
   type SalesSheetElement,
 } from "./document-schema";
 import { inlineDocumentImages } from "./inline-images";
+import { getStorage } from "@/lib/storage";
+import type { StorageAdapter } from "@/lib/storage/types";
 
 export interface SaleLandOverrides {
   price?: string;
@@ -28,6 +30,22 @@ export interface SaleLandInput {
   owner?: { name?: string | null } | null;
   photo?: { fileUrl: string } | null;
   overrides?: SaleLandOverrides;
+}
+
+/**
+ * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
+ * よって `/uploads/{key}`（local）や `/{bucket}/{key}` / 絶対URL（server）など
+ * 形が異なる。storage key を解決して常に正規の `/uploads/{key}` 形へ揃えることで、
+ * 保存時の `isSafeImageSrc`（`/uploads/` か `data:` のみ許可）を通り、出力時に
+ * `authorizeAndInlineDocumentImages` が `keyFromUrl` で再解決できる。
+ * key を解決できない場合は null（呼び出し側で写真を落とす）。
+ */
+export function toCanonicalUploadsSrc(
+  fileUrl: string | null | undefined,
+  storage: Pick<StorageAdapter, "keyFromUrl"> = getStorage(),
+): string | null {
+  const key = storage.keyFromUrl(fileUrl ?? null);
+  return key ? `/uploads/${key}` : null;
 }
 
 const NAVY = "#15324f";
