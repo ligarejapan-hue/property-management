@@ -69,7 +69,7 @@ export async function POST(
     const body = createBodySchema.parse(await parseJsonBody(request));
     // 保存前に document 内の /uploads 画像を認可（未認可/解決不能は 422 で拒否）。
     const document = parseSalesSheetDocument(body.document);
-    await assertDocumentImagesAuthorized(document, { session, permissions });
+    await assertDocumentImagesAuthorized(document, { session, permissions, propertyId: id });
     const design = await createDesign({
       propertyId: id,
       title: body.title,

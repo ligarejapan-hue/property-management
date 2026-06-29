@@ -249,6 +249,27 @@ export async function authorizeUploadAccess(
   return "not_found";
 }
 
+/**
+ * 指定 storage key が `propertyId` の物件写真(PropertyPhoto)に属するかを DB 逆引きで判定する。
+ * key 形式から物件を推定せず（authorizeUploadAccess と同方針）、fileUrl を正規化した
+ * 完全一致のみを採用する。販売図面の保存境界で「他物件の /uploads key を保存させない」
+ * 物件スコープ判定に使う（caller 権限判定は authorizeUploadAccess 側で別途行う）。
+ */
+export async function isUploadKeyOwnedByProperty(
+  key: string,
+  propertyId: string,
+  prisma?: PrismaLike,
+): Promise<boolean> {
+  const db: PrismaLike = prisma ?? prismaDefault;
+  if (!isValidStorageKey(key)) return false;
+  const escapedKey = escapePrismaLikePattern(key);
+  const photos = await db.propertyPhoto.findMany({
+    where: { propertyId, fileUrl: { contains: escapedKey } },
+    select: { fileUrl: true },
+  });
+  return photos.some((p) => resolveStoredFileUrlToKey(p.fileUrl) === key);
+}
+
 function authorizeFieldSurveyPinPhoto(
   pin: { staffUserId: string } | null,
   session: ApiSession,

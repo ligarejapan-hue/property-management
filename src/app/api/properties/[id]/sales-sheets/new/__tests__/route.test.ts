@@ -14,6 +14,11 @@ vi.mock("@/lib/api-helpers", () => {
     ApiError: MockApiError,
     getApiSession: vi.fn(),
     getUserPermissions: vi.fn(),
+    // 実 parseJsonBody と同じ挙動: 空ボディ→{} / 不正JSON→throw。
+    parseJsonBody: vi.fn(async (req: Request) => {
+      const text = await req.text();
+      return text.trim() === "" ? {} : JSON.parse(text);
+    }),
     handleApiError: vi.fn((e: unknown) => {
       const err = e as { status?: number; message?: string; code?: string; issues?: unknown[] };
       if (typeof err?.status === "number") {

@@ -13,13 +13,14 @@ vi.mock("@/lib/storage", () => ({
 // to avoid Temporal Dead Zone when vi.mock is hoisted before const declarations.
 vi.mock("@/lib/uploads-authorization", () => ({
   authorizeUploadAccess: vi.fn(),
+  isUploadKeyOwnedByProperty: vi.fn(),
 }));
 
 import {
   authorizeAndInlineDocumentImages,
   assertDocumentImagesAuthorized,
 } from "../authorize-document-images";
-import { authorizeUploadAccess } from "@/lib/uploads-authorization";
+import { authorizeUploadAccess, isUploadKeyOwnedByProperty } from "@/lib/uploads-authorization";
 
 const SESSION = { id: "u1", email: "u@x.com", name: "U", role: "admin" };
 const PERMS = [{ resource: "property", action: "read", granted: true }];
@@ -37,6 +38,8 @@ beforeEach(() => {
   read.mockReset();
   keyFromUrl.mockReset();
   (authorizeUploadAccess as unknown as Mock).mockReset();
+  (isUploadKeyOwnedByProperty as unknown as Mock).mockReset();
+  (isUploadKeyOwnedByProperty as unknown as Mock).mockResolvedValue(true);
 });
 
 describe("authorizeAndInlineDocumentImages", () => {
@@ -201,17 +204,71 @@ describe("authorizeAndInlineDocumentImages", () => {
     expect(read).not.toHaveBeenCalled();
     expect(authorizeUploadAccess).not.toHaveBeenCalled();
   });
+
+  it("[DoS] /uploads 画像が上限を超える document は出力拒否（read 前に throw）", async () => {
+    const images = Array.from({ length: 51 }, (_, i) => ({
+      id: `i${i}`, type: "image" as const, x: 0, y: 0, w: 5, h: 5, z: 1,
+      src: `/uploads/properties/p1/${i}.jpg`, fit: "cover" as const,
+    }));
+    const doc: SalesSheetDocument = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: images,
+    };
+    await expect(
+      authorizeAndInlineDocumentImages(doc, { session: SESSION, permissions: PERMS }),
+    ).rejects.toThrow();
+    expect(read).not.toHaveBeenCalled(); // fail-fast: 1 件も read しない
+  });
+
+  it("[DoS] 合計バイトが上限を超えると以降の画像は drop（プレースホルダ化）", async () => {
+    keyFromUrl.mockImplementation((url: string) => url.replace("/uploads/", ""));
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    const big = 20 * 1024 * 1024; // 20MB ×2 = 40MB > 32MB 上限
+    read.mockResolvedValue({ body: Buffer.from([1]), contentType: "image/jpeg", size: big });
+    const doc: SalesSheetDocument = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        { id: "i1", type: "image", x: 0, y: 0, w: 5, h: 5, z: 1, src: "/uploads/properties/p1/a.jpg", fit: "cover" },
+        { id: "i2", type: "image", x: 0, y: 10, w: 5, h: 5, z: 2, src: "/uploads/properties/p1/b.jpg", fit: "cover" },
+      ],
+    };
+    const out = await authorizeAndInlineDocumentImages(doc, { session: SESSION, permissions: PERMS });
+    const imgs = out.elements.filter((e) => e.type === "image");
+    expect(imgs[0].type === "image" && imgs[0].src.startsWith("data:image/jpeg")).toBe(true); // 1枚目はinline
+    expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/gif")).toBe(true); // 2枚目はplaceholder(透明gif)
+  });
+
+  it("[dedup] 同一 key を参照する複数画像は read を1回だけ行う", async () => {
+    keyFromUrl.mockReturnValue("properties/p1/same.jpg");
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    read.mockResolvedValue({ body: Buffer.from([1, 2]), contentType: "image/png", size: 2 });
+    const doc: SalesSheetDocument = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        { id: "i1", type: "image", x: 0, y: 0, w: 5, h: 5, z: 1, src: "/uploads/properties/p1/same.jpg", fit: "cover" },
+        { id: "i2", type: "image", x: 0, y: 10, w: 5, h: 5, z: 2, src: "/uploads/properties/p1/same.jpg", fit: "cover" },
+      ],
+    };
+    const out = await authorizeAndInlineDocumentImages(doc, { session: SESSION, permissions: PERMS });
+    expect(read).toHaveBeenCalledTimes(1); // 重複 read なし
+    const imgs = out.elements.filter((e) => e.type === "image");
+    expect(imgs[0].type === "image" && imgs[0].src.startsWith("data:image/png")).toBe(true);
+    expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/png")).toBe(true);
+  });
 });
 
 describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", () => {
-  it("認可済み /uploads 画像のみなら解決する（throwしない）", async () => {
+  const CTX = { session: SESSION, permissions: PERMS, propertyId: "p1" };
+
+  it("認可済み かつ 自物件の /uploads 画像なら解決する（throwしない）", async () => {
     keyFromUrl.mockReturnValue("properties/p1/photo.jpg");
     (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    (isUploadKeyOwnedByProperty as unknown as Mock).mockResolvedValue(true);
     await expect(
-      assertDocumentImagesAuthorized(docWith("/uploads/properties/p1/photo.jpg"), {
-        session: SESSION,
-        permissions: PERMS,
-      }),
+      assertDocumentImagesAuthorized(docWith("/uploads/properties/p1/photo.jpg"), CTX),
     ).resolves.toBeUndefined();
   });
 
@@ -219,10 +276,7 @@ describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", (
     keyFromUrl.mockReturnValue("properties/other/secret.jpg");
     (authorizeUploadAccess as unknown as Mock).mockResolvedValue("forbidden");
     await expect(
-      assertDocumentImagesAuthorized(docWith("/uploads/properties/other/secret.jpg"), {
-        session: SESSION,
-        permissions: PERMS,
-      }),
+      assertDocumentImagesAuthorized(docWith("/uploads/properties/other/secret.jpg"), CTX),
     ).rejects.toThrow();
   });
 
@@ -230,30 +284,36 @@ describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", (
     keyFromUrl.mockReturnValue("properties/p1/deleted.jpg");
     (authorizeUploadAccess as unknown as Mock).mockResolvedValue("not_found");
     await expect(
-      assertDocumentImagesAuthorized(docWith("/uploads/properties/p1/deleted.jpg"), {
-        session: SESSION,
-        permissions: PERMS,
-      }),
+      assertDocumentImagesAuthorized(docWith("/uploads/properties/p1/deleted.jpg"), CTX),
     ).rejects.toThrow();
   });
 
-  it("解決不能な /uploads key は throw（authorizeUploadAccess を呼ばない）", async () => {
+  it("別物件の /uploads key（caller は読めるが図面の物件スコープ外）は throw", async () => {
+    // 複数物件を読める管理者が物件Bのkeyを物件Aの図面に保存しようとするケース
+    keyFromUrl.mockReturnValue("properties/B/photo.jpg");
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok"); // caller は読める
+    (isUploadKeyOwnedByProperty as unknown as Mock).mockResolvedValue(false); // だが物件p1のものではない
+    await expect(
+      assertDocumentImagesAuthorized(docWith("/uploads/properties/B/photo.jpg"), CTX),
+    ).rejects.toThrow();
+  });
+
+  it("解決不能な /uploads key は throw（authz/所属判定を呼ばない）", async () => {
     keyFromUrl.mockReturnValue(null);
     await expect(
-      assertDocumentImagesAuthorized(docWith("/uploads/bad/path"), { session: SESSION, permissions: PERMS }),
+      assertDocumentImagesAuthorized(docWith("/uploads/bad/path"), CTX),
     ).rejects.toThrow();
     expect(authorizeUploadAccess).not.toHaveBeenCalled();
+    expect(isUploadKeyOwnedByProperty).not.toHaveBeenCalled();
   });
 
-  it("data: 画像は認可不要でスキップ（throwしない・storage/authzを呼ばない）", async () => {
+  it("data: 画像は認可不要でスキップ（throwしない・storage/authz/所属判定を呼ばない）", async () => {
     await expect(
-      assertDocumentImagesAuthorized(docWith("data:image/png;base64,AAAA"), {
-        session: SESSION,
-        permissions: PERMS,
-      }),
+      assertDocumentImagesAuthorized(docWith("data:image/png;base64,AAAA"), CTX),
     ).resolves.toBeUndefined();
     expect(keyFromUrl).not.toHaveBeenCalled();
     expect(authorizeUploadAccess).not.toHaveBeenCalled();
+    expect(isUploadKeyOwnedByProperty).not.toHaveBeenCalled();
   });
 
   it("エラーに storage key/URL を含めない（漏洩防止）", async () => {
@@ -261,10 +321,7 @@ describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", (
     (authorizeUploadAccess as unknown as Mock).mockResolvedValue("forbidden");
     let caught: unknown;
     try {
-      await assertDocumentImagesAuthorized(docWith("/uploads/properties/other/secret.jpg"), {
-        session: SESSION,
-        permissions: PERMS,
-      });
+      await assertDocumentImagesAuthorized(docWith("/uploads/properties/other/secret.jpg"), CTX);
     } catch (e) {
       caught = e;
     }
@@ -286,8 +343,9 @@ describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", (
     (authorizeUploadAccess as unknown as Mock).mockImplementation(
       async ({ key }: { key: string }) => (key.startsWith("properties/p1/") ? "ok" : "forbidden"),
     );
-    await expect(
-      assertDocumentImagesAuthorized(doc, { session: SESSION, permissions: PERMS }),
-    ).rejects.toThrow();
+    (isUploadKeyOwnedByProperty as unknown as Mock).mockImplementation(
+      async (key: string) => key.startsWith("properties/p1/"),
+    );
+    await expect(assertDocumentImagesAuthorized(doc, CTX)).rejects.toThrow();
   });
 });

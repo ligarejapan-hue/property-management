@@ -72,7 +72,7 @@ export async function PUT(
     let document: SalesSheetDocument | undefined;
     if (body.document !== undefined) {
       document = parseSalesSheetDocument(body.document);
-      await assertDocumentImagesAuthorized(document, { session, permissions });
+      await assertDocumentImagesAuthorized(document, { session, permissions, propertyId: id });
     }
     const result = await updateDesign(
       id,
