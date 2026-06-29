@@ -15,7 +15,7 @@
 - **新規依存は `react-moveable` のみ**。追加は package.json/lockfile 変更＝ユーザー承認。代替で自作する場合も承認。導入前に context7/公式 docs で当該バージョンの props を確認すること（推測でAPIを書かない）。
 - **権限**: 閲覧/一覧/出力＝`property:read` ＋ `canAccessPropertyRecord`（field_staff は自分の物件のみ）。作成/更新/削除＝`property:write` ＋同アクセス判定。新権限リソースは作らない。
 - **document 検証**: 保存・読込・出力の各境界で `parseSalesSheetDocument`（計画①）を必ず通す。レンダラ（コンポーネント）は不正 document で throw する既存挙動を維持。
-- **画像セキュリティ（最重要）**: 出力時、document 内の全 image 要素について、その src が /uploads/ 形式（自前 storage）なら **`authorizeUploadAccess` で認可してから** data: 化して埋め込む。認可されない/解決不能な src は**画像を落とす**（描画しない・バイトを読まない）。data: src はスキーマ上は data:image 限定で可だが、**保存境界（create/update）では `data:` 画像を src 文字数で上限制限**（極小プレースホルダのみ許容＝巨大 base64 blob を document JSON に直書きして DB を肥大化させるのを防止。`data:` 化は出力時 `authorizeAndInlineDocumentImages` のみ）。`http(s)://` 等の外部 src はスキーマ（計画① `isSafeImageSrc`）で既に拒否。出力ブラウザのネットワーク遮断（計画②ガード）は維持。
+- **画像セキュリティ（最重要）**: 出力時、document 内の全 image 要素について、その src が /uploads/ 形式（自前 storage）なら **`authorizeUploadAccess` で認可してから** data: 化して埋め込む。認可されない/解決不能な src は**画像を落とす**（描画しない・バイトを読まない）。data: src はスキーマ上は data:image 限定で可だが、**保存境界（create/update）では `data:` 画像を src 文字数で上限制限**（極小プレースホルダのみ許容＝巨大 base64 blob を document JSON に直書きして DB を肥大化させるのを防止。`data:` 化は出力時 `authorizeAndInlineDocumentImages` のみ）。**保存境界（create/update の user-supplied document）では `/uploads` 画像も `assertDocumentImagesAuthorized` で認可し、未認可/解決不能（他物件/forbidden/not_found/key解決不能）を含む document は 422 で保存拒否**（未認可キーが保存され GET で echo されるのを防ぐ多層防御＝バイトは export＋配信ルートで別途保護。サーバー生成の初期 document は自物件写真ベース＝認可済で解決不能のみ drop）。`http(s)://` 等の外部 src はスキーマ（計画① `isSafeImageSrc`）で既に拒否。出力ブラウザのネットワーク遮断（計画②ガード）は維持。
 - **PII/blob キーをログ・レスポンスに出さない**。
 - **楽観ロック**: 更新は `updatedAt` 一致を要求し、競合は 409。
 - 既存のテスト規約（co-located `__tests__/`・env=node）に従う。`.claude/settings.local.json` 非接触。force-push 禁止。
@@ -78,7 +78,7 @@
 - Test: `src/lib/sales-sheet/__tests__/design-service.test.ts`
 
 **Interfaces:**
-- Produces: `createDesign`, `getDesign`, `listDesigns`, `updateDesign`, `deleteDesign`（下記シグネチャ）。document は保存前後で `parseSalesSheetDocument` を通す。create/update は保存前に `data:` 画像が極小上限（src 文字数）を超えないか検証し、超過は 422 で拒否（巨大 base64 blob の DB 直書き防止・保存は /uploads 参照のみ）。
+- Produces: `createDesign`, `getDesign`, `listDesigns`, `updateDesign`, `deleteDesign`（下記シグネチャ）。document は保存前後で `parseSalesSheetDocument` を通す。create/update は保存前に `data:` 画像が極小上限（src 文字数）を超えないか検証し、超過は 422 で拒否（巨大 base64 blob の DB 直書き防止・保存は /uploads 参照のみ）。**`/uploads` 参照の認可は route 層（Task B）が `assertDocumentImagesAuthorized` で create/updateDesign 呼び出し前に実施**（design-service は session を持たないため。未認可/解決不能は 422）。
 
 - [ ] **Step 0: `isSafeImageSrc` を `/uploads/` 受理に拡張**（`src/lib/sales-sheet/css-safety.ts`）。既存は `data:image` のみ受理 → root-relative `/uploads/` も受理（`//host`/scheme/`..`/`%2e`/制御文字は拒否）。保存 document の写真 src は /uploads キー（未インライン）なので、これが無いと保存境界の `parseSalesSheetDocument` が「写真あり土地図面」を弾く。`__tests__/css-safety.test.ts` に `/uploads/` 受理＋traversal/`%2e`/scheme 拒否のテストを失敗先行で追加。[@codex P1反映]
 
@@ -256,13 +256,13 @@ const property = await prisma.property.findUnique({ where: { id }, select: {…c
 if (!property) -> 404
 if (!canAccessPropertyRecord(property, session)) -> 403
 ```
-POST body は zod: `{ title?: string(max 120), document: unknown, templateId?: string }`。`createDesign` 呼び出し（document 不正は `parseSalesSheetDocument` が throw → `handleApiError` で 422）。レスポンス `{ id }`（201）。
+POST body は zod: `{ title?: string(max 120), document: unknown, templateId?: string }`。**保存前に `parseSalesSheetDocument` → `assertDocumentImagesAuthorized`（document の /uploads 画像を認可・未認可/解決不能は 422）** → `createDesign` 呼び出し（document 不正も `parseSalesSheetDocument` throw → 422）。レスポンス `{ id }`（201）。
 GET 一覧は `listDesigns` の結果を返す（200）。
 
 - [ ] **Step 3-4: 失敗するテスト→実装（GET 取得 / PUT 更新 / DELETE）**
 
 GET `[sheetId]`: `getDesign`（スコープ外/無は 404）→ `{ id,title,document,updatedAt,... }`。
-PUT `[sheetId]`: write 権限。body `{ title?, document?, expectedUpdatedAt: string(ISO datetime・`z.string().datetime()` で検証＝不正値は 400) }`。`updateDesign` の戻りで not_found→404 / conflict→409 / ok→200`{ updatedAt }`。
+PUT `[sheetId]`: write 権限。body `{ title?, document?, expectedUpdatedAt: string(ISO datetime・`z.string().datetime()` で検証＝不正値は 400) }`。**document 提供時は保存前に `parseSalesSheetDocument` → `assertDocumentImagesAuthorized`（/uploads 認可・未認可/解決不能は 422）**。`updateDesign` の戻りで not_found→404 / conflict→409 / ok→200`{ updatedAt }`。
 DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 
 - [ ] **Step 5: 全テスト緑 / tsc / eslint→コミット。**
@@ -279,7 +279,8 @@ DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 - Test: `.../export/__tests__/route.test.ts`
 
 **Interfaces:**
-- Produces: `authorizeAndInlineDocumentImages(doc, {session, permissions}): Promise<SalesSheetDocument>`。
+- Produces: `authorizeAndInlineDocumentImages(doc, {session, permissions}): Promise<SalesSheetDocument>`（出力時：/uploads を認可→data:化、未認可/非画像MIMEは透明プレースホルダ）。
+- Produces: `assertDocumentImagesAuthorized(doc, {session, permissions}): Promise<void>`（**保存境界**：user-supplied document の /uploads 画像を認可し、未認可/解決不能なら `ZodError`→422。`data:` はスキップ。CRUD POST/PUT が保存前に呼ぶ。key/URL はエラーに出さない）。
 
 - [ ] **Step 1: 失敗するテスト（authorize-document-images）**
 
