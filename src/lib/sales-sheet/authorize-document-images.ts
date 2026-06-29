@@ -64,6 +64,14 @@ export async function authorizeAndInlineDocumentImages(
     }
     const cached = cache.get(key);
     if (cached) {
+      // 同一画像でも出現回数分 data URL が HTML に直列化される（Chromium 入力が膨らむ）。
+      // storage read は dedup（1回のみ）するが、budget は出現ごとに serialized size を加算し、
+      // 合計上限を超える出現は drop する（メモリ枯渇防止）。
+      if (totalBytes + cached.length > MAX_TOTAL_INLINE_BYTES) {
+        elements.push(dropImage(el));
+        continue;
+      }
+      totalBytes += cached.length;
       elements.push({ ...el, src: cached });
       continue;
     }

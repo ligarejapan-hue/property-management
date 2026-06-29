@@ -49,7 +49,10 @@ export async function GET(
     await getPropertyOrThrow(id, session);
     const design = await getDesign(id, sheetId);
     if (!design) throw new ApiError(404, "販売図面が見つかりません", "NOT_FOUND");
-    return NextResponse.json(design);
+    // read 境界でも document を検証する。古いバグ・手動修復・partial deploy 等で壊れた JSON が
+    // 保存されていても raw JSON を echo しない（不正は ZodError → handleApiError で 422）。
+    const document = parseSalesSheetDocument(design.document);
+    return NextResponse.json({ ...design, document });
   } catch (error) {
     return handleApiError(error);
   }

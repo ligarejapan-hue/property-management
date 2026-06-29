@@ -1,6 +1,12 @@
 import prismaDefault from "@/lib/prisma";
 import { z } from "zod";
-import { parseSalesSheetDocument, type SalesSheetDocument } from "./document-schema";
+import {
+  parseSalesSheetDocument,
+  A4_PORTRAIT,
+  A4_LANDSCAPE,
+  type SalesSheetDocument,
+  type SalesSheetPage,
+} from "./document-schema";
 
 type PrismaLike = typeof prismaDefault;
 
@@ -9,6 +15,18 @@ type PrismaLike = typeof prismaDefault;
 // 肥大化させるのを防ぐため、(1) 文書全体のサイズと (2) 個別の data: 埋め込み画像 を上限で弾く。
 const MAX_INLINE_IMAGE_SRC_LEN = 8192; // 個別 data: 画像（image.src / qr.dataUrl）
 const MAX_DOCUMENT_JSON_LEN = 512 * 1024; // 文書全体（text.content・長い /uploads パス・要素数等の総和）
+
+// geometry の DoS ガード（保存境界）。サイズ/data: 上限を満たしても、巨大な page 寸法や
+// element 座標を保存できると export 時に Chromium へ巨大な PDF/PNG 寸法・レイアウトが渡り
+// CPU/メモリ枯渇する。販売図面は A4 想定なので page は A4(縦/横)のみ・element は合理的範囲に限定する。
+const MAX_GEOMETRY_MM = 10000; // x/y/w/h(mm) の絶対上限（A4=297mm に対し十分広く、極端値のみ弾く）
+
+/** page が許可サイズ（A4 縦 / A4 横）かを判定する。 */
+function isAllowedPage(page: SalesSheetPage): boolean {
+  return [A4_PORTRAIT, A4_LANDSCAPE].some(
+    (a4) => page.width === a4.width && page.height === a4.height && page.orientation === a4.orientation,
+  );
+}
 
 function makeDocumentError(message: string): z.ZodError {
   // ZodError として投げる＝既存の parse エラーと同様 handleApiError が 422 に変換する
@@ -20,6 +38,10 @@ function assertSavableDocument(document: SalesSheetDocument): void {
   if (JSON.stringify(document).length > MAX_DOCUMENT_JSON_LEN) {
     throw makeDocumentError("保存する図面のデータが大きすぎます");
   }
+  // ページは A4（縦/横）のみ。巨大ページは export で Chromium に巨大寸法が渡り DoS。
+  if (!isAllowedPage(document.page)) {
+    throw makeDocumentError("ページサイズが不正です（A4のみ対応しています）");
+  }
   for (const el of document.elements) {
     // image.src と qr.dataUrl はどちらも data:image を持ち得る（保存では極小のみ許容）。
     const inlineSrc = el.type === "image" ? el.src : el.type === "qr" ? el.dataUrl : null;
@@ -27,6 +49,16 @@ function assertSavableDocument(document: SalesSheetDocument): void {
       throw makeDocumentError(
         "保存する図面の埋め込み画像が大きすぎます（画像はアップロードして使用してください）",
       );
+    }
+    // 要素の位置・サイズ(mm)が合理的範囲か。w/h は正数(スキーマ保証)かつ上限内、x/y は絶対値上限内。
+    if (
+      !Number.isFinite(el.x) || !Number.isFinite(el.y) ||
+      !Number.isFinite(el.w) || !Number.isFinite(el.h) ||
+      el.w <= 0 || el.h <= 0 ||
+      Math.abs(el.x) > MAX_GEOMETRY_MM || Math.abs(el.y) > MAX_GEOMETRY_MM ||
+      el.w > MAX_GEOMETRY_MM || el.h > MAX_GEOMETRY_MM
+    ) {
+      throw makeDocumentError("図面の要素サイズ・位置が範囲外です");
     }
   }
 }

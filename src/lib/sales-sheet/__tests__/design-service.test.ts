@@ -304,3 +304,67 @@ describe("deleteDesign", () => {
     expect(result).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// geometry 制限（保存境界の DoS ガード: page は A4 のみ・element は合理的範囲）
+// ---------------------------------------------------------------------------
+
+describe("保存境界の geometry 制限", () => {
+  const a4Portrait = { width: 210, height: 297, orientation: "portrait" as const };
+  const hugePage = { width: 100000, height: 100000, orientation: "landscape" as const };
+
+  it("A4 portrait ページは保存できる", async () => {
+    const db = makeDb({ create: vi.fn().mockResolvedValue(storedDesign) });
+    const doc = { ...sampleDocument, page: a4Portrait };
+    await expect(createDesign({ ...validInput, document: doc }, db)).resolves.toBeDefined();
+    expect(db.salesSheetDesign.create).toHaveBeenCalledOnce();
+  });
+
+  it("A4 landscape の通常 document は保存できる（既存図面を壊さない）", async () => {
+    const db = makeDb({ create: vi.fn().mockResolvedValue(storedDesign) });
+    await expect(createDesign(validInput, db)).resolves.toBeDefined(); // sampleDocument は A4_LANDSCAPE
+  });
+
+  it("巨大ページは create で 422（DB 未呼出）", async () => {
+    const db = makeDb({ create: vi.fn() });
+    const doc = { ...sampleDocument, page: hugePage };
+    await expect(createDesign({ ...validInput, document: doc }, db)).rejects.toThrow();
+    expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
+  });
+
+  it("巨大な要素サイズ（w/h）は create で 422（DB 未呼出）", async () => {
+    const db = makeDb({ create: vi.fn() });
+    const doc = {
+      ...sampleDocument,
+      elements: sampleDocument.elements.map((el) =>
+        el.id === "title" ? { ...el, w: 1_000_000_000 } : el,
+      ),
+    };
+    await expect(createDesign({ ...validInput, document: doc }, db)).rejects.toThrow();
+    expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
+  });
+
+  it("極端にページ外へ飛ぶ位置（x/y）は create で 422（DB 未呼出）", async () => {
+    const db = makeDb({ create: vi.fn() });
+    const doc = {
+      ...sampleDocument,
+      elements: sampleDocument.elements.map((el) =>
+        el.id === "title" ? { ...el, x: 1_000_000_000 } : el,
+      ),
+    };
+    await expect(createDesign({ ...validInput, document: doc }, db)).rejects.toThrow();
+    expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
+  });
+
+  it("巨大ページは update でも 422（DB 未呼出）", async () => {
+    const db = makeDb({
+      findUnique: vi.fn().mockResolvedValue(storedDesign),
+      updateMany: vi.fn(),
+    });
+    const doc = { ...sampleDocument, page: hugePage };
+    await expect(
+      updateDesign("prop1", "sheet1", { document: doc, expectedUpdatedAt: NOW }, "user1", db),
+    ).rejects.toThrow();
+    expect(db.salesSheetDesign.updateMany).not.toHaveBeenCalled();
+  });
+});

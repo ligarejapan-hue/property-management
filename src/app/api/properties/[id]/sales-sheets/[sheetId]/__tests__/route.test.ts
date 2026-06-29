@@ -161,6 +161,16 @@ describe("GET /sales-sheets/[sheetId]", () => {
     await GET(makeReq("GET"), ctx);
     expect(getDesign).toHaveBeenCalledWith("p1", "sheet-1");
   });
+
+  it("破損した DB document は raw JSON を返さず 422 で安全に失敗する（read 境界 parse）", async () => {
+    // 古いバグ・手動修復・partial deploy 等で不正 JSON が保存されていたケース。
+    (getDesign as unknown as Mock).mockResolvedValue({ ...MOCK_DESIGN, document: { bad: "data" } });
+    const res = await GET(makeReq("GET"), ctx);
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    // 壊れた document を raw で echo しない（検証エラーの一般メッセージのみ）。
+    expect(JSON.stringify(body)).not.toContain("bad");
+  });
 });
 
 // ─── PUT [sheetId] ───────────────────────────────────────────────────────────

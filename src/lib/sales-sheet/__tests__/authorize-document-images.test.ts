@@ -259,6 +259,32 @@ describe("authorizeAndInlineDocumentImages", () => {
     expect(imgs[0].type === "image" && imgs[0].src.startsWith("data:image/png")).toBe(true);
     expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/png")).toBe(true);
   });
+
+  it("[DoS] 同一画像の繰り返し参照は read 1回だが、出現ごとに budget 加算し超過分は drop", async () => {
+    // 同じ /uploads 画像を複数回参照する document。data URL は HTML に出現回数分直列化されるため、
+    // cache 再利用でも serialized size を budget に加算し、合計上限超過分は drop する。
+    keyFromUrl.mockReturnValue("properties/p1/same.jpg");
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    // body 15MB → data URL(base64) ≈ 20MB。size は小さく設定し「初回 read バイト + 再利用 serialized」を検証。
+    const body = Buffer.alloc(15 * 1024 * 1024);
+    read.mockResolvedValue({ body, contentType: "image/jpeg", size: 1 });
+    const ref = "/uploads/properties/p1/same.jpg";
+    const doc: SalesSheetDocument = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        { id: "i1", type: "image", x: 0, y: 0, w: 5, h: 5, z: 1, src: ref, fit: "cover" },
+        { id: "i2", type: "image", x: 0, y: 10, w: 5, h: 5, z: 2, src: ref, fit: "cover" },
+        { id: "i3", type: "image", x: 0, y: 20, w: 5, h: 5, z: 3, src: ref, fit: "cover" },
+      ],
+    };
+    const out = await authorizeAndInlineDocumentImages(doc, { session: SESSION, permissions: PERMS });
+    expect(read).toHaveBeenCalledTimes(1); // dedup: read は1回だけ
+    const imgs = out.elements.filter((e) => e.type === "image");
+    expect(imgs[0].type === "image" && imgs[0].src.startsWith("data:image/jpeg")).toBe(true); // 1枚目 inline
+    expect(imgs[1].type === "image" && imgs[1].src.startsWith("data:image/jpeg")).toBe(true); // 2枚目 cache 再利用
+    expect(imgs[2].type === "image" && imgs[2].src.startsWith("data:image/gif")).toBe(true); // 3枚目 budget 超過で placeholder
+  });
 });
 
 describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", () => {
