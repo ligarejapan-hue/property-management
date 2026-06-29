@@ -149,22 +149,43 @@ prisma はモック注入（計画②の route テスト同様 `db` 引数で注
 ```ts
 import prismaDefault from "@/lib/prisma";
 import { z } from "zod";
-import { parseSalesSheetDocument, type SalesSheetDocument } from "./document-schema";
+import {
+  parseSalesSheetDocument, A4_PORTRAIT, A4_LANDSCAPE,
+  type SalesSheetDocument, type SalesSheetPage,
+} from "./document-schema";
 type PrismaLike = typeof prismaDefault;
 
-// 保存境界の bloat ガード: 文書全体の JSON 長と、個別 data: 埋め込み画像(image.src / qr.dataUrl)を
-// 上限で弾く（保存 doc は /uploads 参照のみ・data: 化は出力時のみ）。ZodError で投げ handleApiError が 422 化
-// （ApiError は next/server を引き込み node テストで解決不可なため ZodError を使う）。
+// 保存境界の bloat / DoS ガード: (1) 文書全体の JSON 長、(2) 個別 data: 埋め込み画像(image.src / qr.dataUrl)、
+// (3) page サイズ（A4 縦/横のみ）、(4) element geometry(x/y/w/h mm) を上限で弾く（保存 doc は /uploads 参照のみ・
+// data: 化は出力時のみ）。(3)(4) が無いと巨大 page/element を保存でき、export で Chromium に巨大寸法/レイアウトが
+// 渡り CPU/メモリ DoS。ZodError で投げ handleApiError が 422 化（ApiError は next/server を引き込み node テストで
+// 解決不可なため ZodError を使う）。
 const MAX_INLINE_IMAGE_SRC_LEN = 8192;       // 個別 data: 画像
 const MAX_DOCUMENT_JSON_LEN = 512 * 1024;    // 文書全体の JSON 文字数
+const MAX_GEOMETRY_MM = 10000;               // x/y/w/h(mm) の絶対上限（A4=297mm に対し十分広く、極端値のみ弾く）
+const makeDocumentError = (m: string) =>
+  new z.ZodError([{ code: z.ZodIssueCode.custom, message: m, path: ["elements"] }]);
+function isAllowedPage(page: SalesSheetPage): boolean { // A4 縦/横のみ許可
+  return [A4_PORTRAIT, A4_LANDSCAPE].some(
+    (a4) => page.width === a4.width && page.height === a4.height && page.orientation === a4.orientation,
+  );
+}
 function assertSavableDocument(document: SalesSheetDocument): void {
-  if (JSON.stringify(document).length > MAX_DOCUMENT_JSON_LEN) {
-    throw new z.ZodError([{ code: z.ZodIssueCode.custom, message: "図面データが大きすぎます", path: ["elements"] }]);
-  }
+  if (JSON.stringify(document).length > MAX_DOCUMENT_JSON_LEN) throw makeDocumentError("図面データが大きすぎます");
+  if (!isAllowedPage(document.page)) throw makeDocumentError("ページサイズが不正です（A4のみ対応）"); // 巨大ページ→422
   for (const el of document.elements) {
     const inlineSrc = el.type === "image" ? el.src : el.type === "qr" ? el.dataUrl : null;
     if (inlineSrc && inlineSrc.startsWith("data:") && inlineSrc.length > MAX_INLINE_IMAGE_SRC_LEN) {
-      throw new z.ZodError([{ code: z.ZodIssueCode.custom, message: "埋め込み画像が大きすぎます", path: ["elements"] }]);
+      throw makeDocumentError("埋め込み画像が大きすぎます");
+    }
+    // element geometry(mm): w/h は正数かつ上限内・x/y は絶対値上限内。極端値は export レンダリングの DoS。
+    if (
+      !Number.isFinite(el.x) || !Number.isFinite(el.y) || !Number.isFinite(el.w) || !Number.isFinite(el.h) ||
+      el.w <= 0 || el.h <= 0 ||
+      Math.abs(el.x) > MAX_GEOMETRY_MM || Math.abs(el.y) > MAX_GEOMETRY_MM ||
+      el.w > MAX_GEOMETRY_MM || el.h > MAX_GEOMETRY_MM
+    ) {
+      throw makeDocumentError("要素サイズ・位置が範囲外です");
     }
   }
 }
@@ -230,6 +251,8 @@ export async function deleteDesign(propertyId: string, sheetId: string, db: Pris
 }
 ```
 
+**保存境界テスト（抜粋）:** 不正 document→422 / 文書JSON長・data:画像(image.src・qr.dataUrl)超過→422 / **page が A4 以外（巨大ページ）→ create・update で 422（DB 未呼出）** / **element の w/h 巨大・x/y 極端なページ外→422** / 正常な A4 既存図面（縦・横）は保存可。
+
 - [ ] **Step 6: テスト緑 / tsc / eslint** を確認しコミット。
 
 ---
@@ -261,9 +284,11 @@ GET 一覧は `listDesigns` の結果を返す（200）。
 
 - [ ] **Step 3-4: 失敗するテスト→実装（GET 取得 / PUT 更新 / DELETE）**
 
-GET `[sheetId]`: `getDesign`（スコープ外/無は 404）→ `{ id,title,document,updatedAt,... }`。
+GET `[sheetId]`: `getDesign`（スコープ外/無は 404）→ **read 境界でも `parseSalesSheetDocument(design.document)` を必ず通す**（古いバグ・手動修復・partial deploy で壊れた DB document を raw JSON で echo しない・不正は `ZodError`→422）→ `{ id,title,document(検証済),updatedAt,... }`。export route / edit server-component も同様に read 境界で parse 済。
 PUT `[sheetId]`: write 権限。body `{ title?, document?, expectedUpdatedAt: string(ISO datetime・`z.string().datetime()` で検証＝不正値は 400) }`。**document 提供時は保存前に `parseSalesSheetDocument` → `assertDocumentImagesAuthorized`（propertyId を渡し /uploads が caller 認可かつその物件に属するか検証・別物件/未認可/解決不能は 422）**。`updateDesign` の戻りで not_found→404 / conflict→409 / ok→200`{ updatedAt }`。
 DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
+
+**API テスト（抜粋）:** POST/PUT で **別 property の /uploads key（caller は読めるが物件スコープ外）→422** / **`authorizeUploadAccess` ok でも property ownership 不一致→422** / 解決不能 key→422 / 422 に blob key 実値を出さない / **GET は壊れた DB document を raw JSON で返さず 422**（read 境界 parse）。
 
 - [ ] **Step 5: 全テスト緑 / tsc / eslint→コミット。**
 （注: route の prisma は計画②同様テストでモック。`canAccessPropertyRecord` の正確なシグネチャ・property select は計画②の preview route を参照して合わせる。）
@@ -279,9 +304,9 @@ DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 - Test: `.../export/__tests__/route.test.ts`
 
 **Interfaces:**
-- Produces: `authorizeAndInlineDocumentImages(doc, {session, permissions}): Promise<SalesSheetDocument>`（出力時：/uploads を認可→data:化、未認可/非画像MIMEは透明プレースホルダ。**DoS 上限：画像数が上限超なら read 前に出力拒否(422)・逐次処理＋同一 key dedup で fan-out 排除・data 化後の合計バイト上限超過は drop**。Chromium fail-fast 順序は不変）。
+- Produces: `authorizeAndInlineDocumentImages(doc, {session, permissions}): Promise<SalesSheetDocument>`（出力時：/uploads を認可→data:化、未認可/非画像MIMEは透明プレースホルダ。**DoS 上限：画像数が上限超なら read 前に出力拒否(422)・逐次処理＋同一 key dedup で storage.read は1回・data 化後の合計バイト上限超過は drop。同一画像を複数回参照しても data URL は出現回数分 HTML に直列化されるため、cache 再利用時も出現ごとに serialized data URL サイズを合計 budget に加算し、超過する出現は drop**。Chromium fail-fast 順序は不変）。
 - Produces: `assertDocumentImagesAuthorized(doc, {session, permissions, propertyId}): Promise<void>`（**保存境界**：各 /uploads 画像について **(1) caller が読める（`authorizeUploadAccess`==="ok"）かつ (2) key がその図面の物件 `propertyId` に属する（`isUploadKeyOwnedByProperty`＝DB逆引き・key 形式から物件推定しない）** の両方を要求。別物件/未認可/存在しない/解決不能なら `ZodError`→422。`data:` はスキップ。CRUD POST/PUT が propertyId を渡し保存前に呼ぶ。key/URL はエラーに出さない。(2) が無いと複数物件を読める管理者が他物件 key を保存→GET echo するため必須）。
-- Produces: `isImageKeyAuthorizedForProperty(key, {session, permissions, propertyId}): Promise<boolean>`（上記 (1)＋(2) を判定する共通ヘルパ。保存境界（`assertDocumentImagesAuthorized`＝false で throw）と、新規作成 API の代表写真認可（false で写真 drop）で共用）。
+- Produces: `isImageKeyAuthorizedForProperty(key, {session, permissions, propertyId}): Promise<boolean>`（上記 (1)＋(2) を判定する共通ヘルパ。保存境界（`assertDocumentImagesAuthorized`＝false で throw）と、新規作成 API の代表写真認可（false で写真 drop）で共用。テスト: 正常な代表写真は初期 document に入る / 別物件・解決不能 key の代表写真は drop し「写真なし初期図面」を作成 / drop 時に key 実値を log・error に出さない）。
 
 - [ ] **Step 1: 失敗するテスト（authorize-document-images）**
 
@@ -290,6 +315,8 @@ DELETE `[sheetId]`: write 権限。`deleteDesign`→ true:204 / false:404。
 // 2) src が /uploads/<key> で authorizeUploadAccess="ok" → data: にインライン
 // 3) authz="forbidden"/"not_found" の image → 要素から画像を除去（src を落とす or 要素削除）= バイト未読込
 // 4) PII/key を返り値・ログに出さない（immutable・新 document を返す）
+// 5) [DoS] 画像数が上限超なら read 前に出力拒否(422)・非画像MIMEはプレースホルダ・合計バイト上限超過は drop
+// 6) [DoS] 同一 key の複数参照は storage.read 1回（dedup）かつ出現ごとに budget 加算し、超過する出現は drop
 ```
 
 - [ ] **Step 2: 実装**
@@ -324,7 +351,11 @@ export async function authorizeAndInlineDocumentImages(
     const key = getStorage().keyFromUrl(el.src);               // backend 対応
     if (!key) { elements.push(dropImage(el)); continue; }
     const cached = cache.get(key);
-    if (cached) { elements.push({ ...el, src: cached }); continue; } // 同一 key は read せず再利用（dedup）
+    if (cached) { // 同一 key は read せず再利用（dedup）。ただし出現ごとに serialized size を budget 加算。
+      if (totalBytes + cached.length > MAX_TOTAL_INLINE_BYTES) { elements.push(dropImage(el)); continue; } // 超過出現は drop
+      totalBytes += cached.length;
+      elements.push({ ...el, src: cached }); continue;
+    }
     const decision = await authorizeUploadAccess({ key, session: ctx.session, permissions: ctx.permissions });
     if (decision !== "ok") { elements.push(dropImage(el)); continue; } // 認可外は描画しない・バイト未読込
     const bytes = await getStorage().read(key).catch(() => null);
