@@ -132,7 +132,8 @@ export default function SaleDmSettingsPage() {
       <div className="space-y-4">
         <Field label="AIの種類(プロバイダ)">
           <select value={provider} onChange={(e) => setProvider(e.target.value)} aria-label="AIの種類" className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
-            <option value="">未選択(停止)</option>
+            <option value="">未設定(サーバー既定に従う)</option>
+            <option value="off">停止(生成しない)</option>
             <option value="claude">Claude(Anthropic)</option>
             <option value="openai">ChatGPT(OpenAI)</option>
             <option value="mock">mock(動作確認用)</option>

@@ -26,6 +26,8 @@ export function resolveLetterModel(cfg: SaleDmResolvedConfig = saleDmConfigFromE
 }
 
 export function isSaleDmConfigured(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): boolean {
+  // 管理者が明示的に「停止(off)」を選んだら、env/useMock より優先で確実に止める(fail-closed)。
+  if (cfg.provider === "off") return false;
   if (cfg.useMock) return true;
   if (cfg.provider === "mock") return true;
   if (cfg.provider === "claude") return Boolean(cfg.anthropicApiKey);
@@ -34,6 +36,10 @@ export function isSaleDmConfigured(cfg: SaleDmResolvedConfig = saleDmConfigFromE
 }
 
 export function resolveProvider(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): LetterProvider {
+  // 明示的な停止(off)は env/useMock より優先(生成側でも確実に止める)。
+  if (cfg.provider === "off") {
+    throw new SaleDmError("NOT_CONFIGURED", "売却DM生成は停止に設定されています");
+  }
   if (cfg.useMock) return new MockLetterProvider();
   if (cfg.provider === "mock") return new MockLetterProvider();
   if (cfg.provider === "claude") {

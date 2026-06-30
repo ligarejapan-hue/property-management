@@ -110,6 +110,13 @@ describe("PUT /api/admin/sale-dm-settings", () => {
     expect("openaiApiKeyEnc" in update).toBe(false);
     expect(update.provider).toBe("openai");
   });
+  it("provider=off(明示的な停止)を受理して保存する", async () => {
+    admin();
+    const res = await PUT(putReq({ provider: "off" }));
+    expect(res.status).toBe(200);
+    expect(pm.saleDmConfig.upsert.mock.calls[0][0].update.provider).toBe("off");
+    expect((await res.json()).data.provider).toBe("off");
+  });
   it("非絶対URL(lpUrl)は422", async () => {
     admin();
     expect((await PUT(putReq({ lpUrl: "relative/path" }))).status).toBe(422);

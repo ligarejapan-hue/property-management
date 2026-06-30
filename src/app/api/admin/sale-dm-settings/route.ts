@@ -45,7 +45,8 @@ const absUrlOrEmpty = z
   );
 
 const putSchema = z.object({
-  provider: z.enum(["claude", "openai", "mock"]).nullable().optional(),
+  // off=明示的な停止(env/useMockより優先で確実に止める)。null/未指定=サーバー既定(env)にフォールバック。
+  provider: z.enum(["claude", "openai", "mock", "off"]).nullable().optional(),
   model: z.string().trim().max(100).optional(),
   trackingBaseUrl: absUrlOrEmpty.optional(),
   lpUrl: absUrlOrEmpty.optional(),
