@@ -5,16 +5,20 @@ import { SaleDmError } from "./types";
 import { buildLetterPrompt } from "./prompt";
 import { MockLetterProvider } from "./providers/mock";
 import { ClaudeLetterProvider } from "./providers/claude";
+import { OpenAiLetterProvider } from "./providers/openai";
 
 export const MAX_GENERATE_ITEMS = 50;
 const DEFAULT_CONCURRENCY = 5;
+// provider 別の既定モデル(SALE_DM_LETTER_MODEL で上書き可)。
 export const DEFAULT_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_OPENAI_MODEL = "gpt-4o";
 
 export function isSaleDmConfigured(): boolean {
   if (process.env.NEXT_PUBLIC_USE_MOCK === "true") return true;
   const provider = process.env.SALE_DM_LETTER_PROVIDER;
   if (provider === "mock") return true;
   if (provider === "claude") return Boolean(process.env.ANTHROPIC_API_KEY);
+  if (provider === "openai") return Boolean(process.env.OPENAI_API_KEY);
   return false;
 }
 
@@ -28,6 +32,13 @@ export function resolveProvider(): LetterProvider {
       throw new SaleDmError("NOT_CONFIGURED", "ANTHROPIC_API_KEY が未設定です");
     }
     return new ClaudeLetterProvider({ apiKey, model: process.env.SALE_DM_LETTER_MODEL ?? DEFAULT_MODEL });
+  }
+  if (provider === "openai") {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new SaleDmError("NOT_CONFIGURED", "OPENAI_API_KEY が未設定です");
+    }
+    return new OpenAiLetterProvider({ apiKey, model: process.env.SALE_DM_LETTER_MODEL ?? DEFAULT_OPENAI_MODEL });
   }
   throw new SaleDmError("NOT_CONFIGURED", "売却DM生成が未設定です(SALE_DM_LETTER_PROVIDER)");
 }
