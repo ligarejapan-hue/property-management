@@ -189,6 +189,8 @@ model User {
   fieldSurveySessions     FieldSurveySession[]
   fieldSurveyPins         FieldSurveyPin[]
   fieldSurveyPinPhotos    FieldSurveyPinPhoto[]
+  salesSheetDesignsCreated SalesSheetDesign[]     @relation("SalesSheetDesignCreatedBy")
+  salesSheetDesignsUpdated SalesSheetDesign[]     @relation("SalesSheetDesignUpdatedBy")
   dmCampaigns             DmCampaign[]            @relation("DmCampaignCreator")
   dmRecipientDrafts       DmRecipientDraft[]      @relation("DmRecipientGenerator")
 
@@ -367,6 +369,7 @@ model Property {
   attachments        Attachment[]
   ownerMemos         OwnerMemo[]               @relation("OwnerMemoProperty")
   fieldSurveyPins    FieldSurveyPin[]
+  salesSheetDesigns  SalesSheetDesign[]
   dmRecipientDrafts  DmRecipientDraft[]
 
   @@index([caseStatus])
@@ -939,6 +942,30 @@ model FieldSurveyPinPhoto {
 
   @@index([pinId])
   @@map("field_survey_pin_photos")
+}
+
+// ============================================================
+// 販売図面エディタ (Plan 3)
+// ============================================================
+
+model SalesSheetDesign {
+  id           String   @id @default(uuid()) @db.Uuid
+  propertyId   String   @map("property_id") @db.Uuid
+  title        String   @default("無題の販売図面")
+  document     Json
+  templateId   String?  @map("template_id")
+  thumbnailUrl String?  @map("thumbnail_url")
+  createdBy    String   @map("created_by") @db.Uuid
+  updatedBy    String   @map("updated_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  creator  User     @relation("SalesSheetDesignCreatedBy", fields: [createdBy], references: [id])
+  updater  User     @relation("SalesSheetDesignUpdatedBy", fields: [updatedBy], references: [id])
+
+  @@index([propertyId])
+  @@map("sales_sheet_designs")
 }
 
 // ============================================================

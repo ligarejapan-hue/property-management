@@ -8,7 +8,12 @@ vi.mock("@/lib/storage", () => ({
   }),
 }));
 
-import { buildSaleLandDocument, buildInitialSalesSheetDocument } from "../build-document";
+import {
+  buildSaleLandDocument,
+  buildInitialSalesSheetDocument,
+  toCanonicalUploadsSrc,
+} from "../build-document";
+import { isSafeImageSrc } from "../css-safety";
 
 const input = {
   property: {
@@ -51,5 +56,27 @@ describe("buildInitialSalesSheetDocument", () => {
     expect(salesSheetDocumentSchema.safeParse(doc).success).toBe(true);
     const img = doc.elements.find((e) => e.type === "image");
     expect(img && img.type === "image" && img.src.startsWith("data:image/")).toBe(true);
+  });
+});
+
+describe("toCanonicalUploadsSrc", () => {
+  it("normalizes a resolvable storage URL to a /uploads/{key} src that passes isSafeImageSrc", () => {
+    // server backend may persist /{bucket}/{key} or absolute URLs; keyFromUrl resolves the key.
+    const storage = { keyFromUrl: () => "properties/abc/1.jpg" };
+    const src = toCanonicalUploadsSrc("/property-management/properties/abc/1.jpg", storage);
+    expect(src).toBe("/uploads/properties/abc/1.jpg");
+    expect(isSafeImageSrc(src!)).toBe(true);
+  });
+
+  it("returns null when the key cannot be resolved (photo is dropped)", () => {
+    const storage = { keyFromUrl: () => null };
+    expect(toCanonicalUploadsSrc("https://evil.example/x.jpg", storage)).toBeNull();
+  });
+
+  it("returns null when the resolved key yields a src that fails isSafeImageSrc (drop, not 422)", () => {
+    // key valid for storage but unsafe as an image src (space → rejected by isSafeImageSrc)
+    const storage = { keyFromUrl: () => "a b.jpg" };
+    const src = toCanonicalUploadsSrc("/property-management/a b.jpg", storage);
+    expect(src).toBeNull();
   });
 });

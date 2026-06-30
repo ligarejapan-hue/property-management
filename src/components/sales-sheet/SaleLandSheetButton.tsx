@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 const FIELDS: { key: string; label: string }[] = [
   { key: "price", label: "価格" },
@@ -13,15 +14,15 @@ const FIELDS: { key: string; label: string }[] = [
 ];
 
 /**
- * preview API へのリクエスト内容を組み立てる純関数。
+ * 新規デザイン作成 API へのリクエスト内容を組み立てる純関数。
  * コンポーネントから独立させることでテスト可能にする。
  */
-export function buildPreviewRequest(
+export function buildCreateRequest(
   propertyId: string,
   values: Record<string, string>,
 ): { url: string; init: RequestInit } {
   return {
-    url: `/api/properties/${propertyId}/sales-sheet/preview`,
+    url: `/api/properties/${propertyId}/sales-sheets/new`,
     init: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -30,34 +31,44 @@ export function buildPreviewRequest(
   };
 }
 
-export function SaleLandSheetButton({ propertyId }: { propertyId: string }) {
+export function SaleLandSheetButton({
+  propertyId,
+  canWrite,
+}: {
+  propertyId: string;
+  canWrite: boolean;
+}) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function generate() {
+  async function create() {
     setBusy(true);
     setError(null);
     try {
-      const { url, init } = buildPreviewRequest(propertyId, values);
+      const { url, init } = buildCreateRequest(propertyId, values);
       const res = await fetch(url, init);
       if (!res.ok) {
-        setError("PDFの作成に失敗しました");
+        const body = (await res.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+        setError(body?.error?.message ?? "販売図面の作成に失敗しました");
         return;
       }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objectUrl;
-      a.download = "販売図面.pdf";
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-      setOpen(false);
+      const { id } = (await res.json()) as { id: string };
+      router.push(`/properties/${propertyId}/sales-sheets/${id}/edit`);
+    } catch {
+      setError("販売図面の作成に失敗しました");
     } finally {
       setBusy(false);
     }
   }
+
+  // /sales-sheets/new は property:write を要求するため、read-only ユーザーには作成導線を出さない
+  // （表示してもクリックで 403 dead-end になる）。route 側の property:write チェックは別途維持。
+  if (!canWrite) return null;
 
   return (
     <div>
@@ -76,7 +87,7 @@ export function SaleLandSheetButton({ propertyId }: { propertyId: string }) {
               販売図面（売土地）の作成
             </h2>
             <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-              システムに無い項目を入力してください（空欄可）。
+              システムに無い項目を入力してください（空欄可）。作成後、配置や文字はエディタで調整できます。
             </p>
             <div className="space-y-2">
               {FIELDS.map((f) => (
@@ -104,17 +115,18 @@ export function SaleLandSheetButton({ propertyId }: { propertyId: string }) {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-neutral-700"
+                disabled={busy}
+                className="rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-neutral-700"
               >
                 キャンセル
               </button>
               <button
                 type="button"
-                onClick={generate}
+                onClick={create}
                 disabled={busy}
                 className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
               >
-                {busy ? "作成中…" : "PDFを作成"}
+                {busy ? "作成中…" : "作成してエディタを開く"}
               </button>
             </div>
           </div>

@@ -145,6 +145,10 @@ export function renderDocumentToHtml(doc: SalesSheetDocument): string {
 
   const pageStyle = inlineStyle({
     position: "relative",
+    // Stacking context: scope element z-indices to the page so a stray negative z
+    // paints above the page background instead of disappearing behind it (parity
+    // with SalesSheetRenderer; defense alongside the non-negative-z save guard).
+    isolation: "isolate",
     width: mm(validDoc.page.width),
     height: mm(validDoc.page.height),
     background: "#ffffff",

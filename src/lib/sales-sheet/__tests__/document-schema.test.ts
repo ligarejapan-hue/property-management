@@ -86,14 +86,18 @@ describe("色/フォント許可リスト (codex P2 SSRF根治)", () => {
   });
 });
 
-describe("isSafeImageSrc (SSRF防止 ユニットテスト — Plan1: data:image/ のみ)", () => {
+describe("isSafeImageSrc (SSRF防止 ユニットテスト — Plan3: data:image/ と /uploads/ を許可)", () => {
   it("data:image/ URL を許可する", () => {
     expect(isSafeImageSrc("data:image/png;base64,AAAA")).toBe(true);
     expect(isSafeImageSrc("data:image/jpeg;base64,/9j/")).toBe(true);
   });
 
-  it("ルート相対パス(/uploads/...)は Plan2 で対応するため Plan1 では拒否する", () => {
-    expect(isSafeImageSrc("/uploads/p/1.jpg")).toBe(false);
+  it("/uploads/... ルート相対パスを許可する（Plan3: アプリ内蔵ストレージ）", () => {
+    expect(isSafeImageSrc("/uploads/p/1.jpg")).toBe(true);
+    expect(isSafeImageSrc("/uploads/sub/dir/photo.png")).toBe(true);
+  });
+
+  it("/uploads/ 以外の root-relative を拒否する", () => {
     expect(isSafeImageSrc("/images/photo.png")).toBe(false);
   });
 
@@ -145,13 +149,13 @@ describe("imageElementSchema — srcバリデーション (SSRF防止)", () => {
     expect(r.success).toBe(true);
   });
 
-  it("/uploads/p/1.jpg を拒否する（Plan1: root-relative は Plan2 で対応）", () => {
+  it("/uploads/p/1.jpg を受理する（Plan3: アプリ内蔵ストレージ・エクスポート時に再認可）", () => {
     const r = salesSheetDocumentSchema.safeParse({
       page: A4_LANDSCAPE,
       theme: { fontFamily: "sans-serif", accentColor: "#000" },
       elements: [{ ...baseImg, src: "/uploads/p/1.jpg" }],
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
   });
 });
 
