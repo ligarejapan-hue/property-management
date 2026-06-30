@@ -17,7 +17,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // 既存の option 値も取得し、送信値と比較して「実際に変わった」ときだけ無効化する(下記)。
     const existing = await prisma.dmVariant.findFirst({
       where: { id: variantId, campaignId: id },
-      select: { id: true, designTemplate: true, tone: true, length: true, appeal: true, strength: true, extraInstruction: true },
+      select: { id: true, designTemplate: true, tone: true, length: true, appeal: true, strength: true, extraInstruction: true, lpUrl: true },
     });
     if (!existing) {
       throw new ApiError(404, "指定された型が見つかりません", "VARIANT_NOT_FOUND");
@@ -43,12 +43,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // 型ごとLP は本文に影響しない(QR は /t/<token> で、遷移先はスキャン時に型の lpUrl から解決)。
     // よって optionFieldChanged にはせず、未送付下書きの本文を消さない(要再生成にしない)。null=既定LPへ戻す。
     // ただし送付済みの型は下の sent チェックで全更新が 409 になり、送付済みの A/B LP 構成も凍結される。
+    // lpUrl が「実際に」変わったか(field_staff scope 判定に使う。lpUrl は公開 /t/ の転送先=この型の全宛先
+    // [担当外の隠れ宛先含む]の遷移先を変えるため、本文非無効化でも option 変更と同じ scope を要求する)。
+    const lpUrlChanged = parsed.lpUrl !== undefined && (parsed.lpUrl ?? null) !== (existing.lpUrl ?? null);
     if (parsed.lpUrl !== undefined) data.lpUrl = parsed.lpUrl;
 
     // field_staff は campaign-level の型 options 変更で「担当外(再割当で隠れた)の未送付下書き」の本文まで
     // 無効化してしまう(型は campaign 横断で多数の宛先に共有)。GET/print/export/aggregate の scope 絞り込みと
     // 整合させるため、担当外の未送付下書きが1件でもあれば options 変更を拒否する(label のみ=本文不変は許可)。
-    if (optionFieldChanged && session.role === "field_staff") {
+    if ((optionFieldChanged || lpUrlChanged) && session.role === "field_staff") {
       const outOfScope = await prisma.dmRecipientDraft.count({
         where: {
           campaignId: id,

@@ -266,6 +266,27 @@ describe("PATCH variant (更新)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("field_staff は担当外の未送付下書きを含む型の lpUrl 変更を拒否(403・隠れ宛先の転送先を変えさせない・Codex)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    // 1回目=担当外チェック(>0)→403。lpUrl 変更でも option 変更と同じ field_staff scope を適用する。
+    pm.dmRecipientDraft.count.mockResolvedValueOnce(1).mockResolvedValue(0);
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never, ctxV);
+    expect(res.status).toBe(403);
+    expect(pm.dmVariant.update).not.toHaveBeenCalled();
+    const where = pm.dmRecipientDraft.count.mock.calls[0][0].where;
+    expect(where).toMatchObject({ campaignId: "c1", variantId: "v1", status: { not: "sent" } });
+    expect(where.property).toEqual({ NOT: { OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] } });
+  });
+
+  it("field_staff でも担当内のみの型なら lpUrl 変更できる(200)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.count.mockResolvedValue(0); // 担当外なし & sent なし
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, lpUrl: "https://lp-new.example.com" });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+    expect(pm.dmVariant.update.mock.calls[0][0].data.lpUrl).toBe("https://lp-new.example.com");
+  });
+
   it("送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {
     pm.dmRecipientDraft.count.mockResolvedValue(2); // この型を使った送付済みドラフトが存在
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
