@@ -40,6 +40,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       // ""↔null の差を「変更」とみなして生成/確定済みの本文を消さない(両辺を "" に正規化して比較)。
       if (o.extraInstruction !== undefined) { const next = o.extraInstruction ?? null; data.extraInstruction = next; if ((next ?? "") !== (existing.extraInstruction ?? "")) optionFieldChanged = true; }
     }
+    // 型ごとLP は本文に影響しない(QR は /t/<token> で、遷移先はスキャン時に型の lpUrl から解決)。
+    // よって optionFieldChanged にはせず、未送付下書きの本文を消さない(要再生成にしない)。null=既定LPへ戻す。
+    // ただし送付済みの型は下の sent チェックで全更新が 409 になり、送付済みの A/B LP 構成も凍結される。
+    if (parsed.lpUrl !== undefined) data.lpUrl = parsed.lpUrl;
 
     // field_staff は campaign-level の型 options 変更で「担当外(再割当で隠れた)の未送付下書き」の本文まで
     // 無効化してしまう(型は campaign 横断で多数の宛先に共有)。GET/print/export/aggregate の scope 絞り込みと

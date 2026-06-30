@@ -115,6 +115,24 @@ describe("POST variant (作成)", () => {
     const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: { ...optionFields, tone: "loud" } }) }) as never, ctxC);
     expect(res.status).toBe(422);
   });
+  it("lpUrl(型ごとのLP)を指定して作成し保存する", async () => {
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmVariant.create.mockResolvedValue({ id: "v2", label: "B", ...optionFields, lpUrl: "https://lp-b.example.com" });
+    const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields, lpUrl: "https://lp-b.example.com" }) }) as never, ctxC);
+    expect(res.status).toBe(200);
+    expect(pm.dmVariant.create.mock.calls[0][0].data.lpUrl).toBe("https://lp-b.example.com");
+  });
+  it("lpUrl 省略時は null で保存(既定LPへフォールバック)", async () => {
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmVariant.create.mockResolvedValue({ id: "v2", label: "B", ...optionFields });
+    await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields }) }) as never, ctxC);
+    expect(pm.dmVariant.create.mock.calls[0][0].data.lpUrl).toBeNull();
+  });
+  it("非絶対の lpUrl(lp.example.com)は 422(郵送QRの遷移先に使えない値を弾く)", async () => {
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields, lpUrl: "lp.example.com" }) }) as never, ctxC);
+    expect(res.status).toBe(422);
+  });
 });
 
 describe("PATCH variant (更新)", () => {
@@ -146,6 +164,35 @@ describe("PATCH variant (更新)", () => {
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ label: "A2" }) }) as never, ctxV);
     expect(res.status).toBe(200);
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("lpUrl の更新を保存・本文は無効化しない(LPは本文に影響しないため要再生成にしない)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, lpUrl: "https://lp-new.example.com" });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+    expect(pm.dmVariant.update.mock.calls[0][0].data.lpUrl).toBe("https://lp-new.example.com");
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("lpUrl=null で型のLPをクリア(既定LPへ戻す)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, lpUrl: null });
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: null }) }) as never, ctxV);
+    expect(res.status).toBe(200);
+    expect(pm.dmVariant.update.mock.calls[0][0].data.lpUrl).toBeNull();
+  });
+
+  it("送付済みの宛先がある型は lpUrl も変更不可(409・送付済みのA/B LP構成を凍結)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(1); // 送付済みあり
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never, ctxV);
+    expect(res.status).toBe(409);
+  });
+
+  it("非絶対の lpUrl 更新は 422", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "/relative/path" }) }) as never, ctxV);
+    expect(res.status).toBe(422);
   });
 
   it("空の options({})は設定変更なし扱い=下書きを無効化しない(no-op を本文消去に変えない)", async () => {

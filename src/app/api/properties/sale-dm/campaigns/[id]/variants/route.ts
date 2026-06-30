@@ -24,7 +24,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const { session } = await requireSaleDmAccess();
     const { id } = await params;
-    const { label, options } = saleDmVariantCreateSchema.parse(await parseJsonBody(request));
+    const { label, options, lpUrl } = saleDmVariantCreateSchema.parse(await parseJsonBody(request));
 
     const campaign = await prisma.dmCampaign.findUnique({ where: { id }, select: { id: true, createdBy: true } });
     // 作成者本人のキャンペーンにのみ型を作成可(横断アクセス防止)。not-found/not-owned は 404。
@@ -40,6 +40,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         appeal: options.appeal,
         strength: options.strength,
         extraInstruction: options.extraInstruction ?? null,
+        // 型ごとLP(未指定は null=既定 SALE_DM_LP_URL へフォールバック)。
+        lpUrl: lpUrl ?? null,
       },
     });
 

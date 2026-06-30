@@ -13,7 +13,7 @@ function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampa
 const campaign: SaleDmCampaign = {
   id: "c1", name: "x", status: "sent",
   variants: [
-    { id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
+    { id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null },
   ],
   recipients: [
     draft({ deliveryStatus: "delivered", lpFirstAccessAt: "2026-06-20T00:00:00Z" }), // 到達+反響

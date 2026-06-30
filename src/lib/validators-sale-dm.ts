@@ -40,15 +40,36 @@ export type SaleDmCampaignBody = z.infer<typeof saleDmCampaignBodySchema>;
 // 型(DmVariant)= 設定一式。sender は型に持たせない(差出人はキャンペーン/env 既定)。
 const variantOptionsSchema = saleDmOptionsSchema.omit({ senderName: true, senderContact: true });
 
+// 型ごとの LP(印刷QR /t/<token> の遷移先)。郵送先で機能するには絶対 http(s) URL が必須。
+// 空/相対/非http は弾く(resolveAbsoluteHttpEnv / isAbsoluteHttpUrl と同じ判定=保存時と redirect 時で一貫)。
+export const saleDmLpUrlSchema = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine(
+    (u) => {
+      try {
+        const x = new URL(u);
+        return x.protocol === "http:" || x.protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    { message: "LP は http(s) の絶対URLを指定してください" },
+  );
+
 export const saleDmVariantCreateSchema = z.object({
   label: z.string().min(1).max(40),
   options: variantOptionsSchema,
+  // 型ごとLP(任意)。未指定の型は SALE_DM_LP_URL(既定)へ。
+  lpUrl: saleDmLpUrlSchema.optional(),
 });
 
-// 更新は label・options をそれぞれ任意指定(部分更新)。
+// 更新は label・options・lpUrl をそれぞれ任意指定(部分更新)。lpUrl は null で「既定LPへ戻す(クリア)」。
 export const saleDmVariantUpdateSchema = z.object({
   label: z.string().min(1).max(40).optional(),
   options: variantOptionsSchema.partial().optional(),
+  lpUrl: saleDmLpUrlSchema.nullable().optional(),
 });
 
 export type SaleDmVariantCreate = z.infer<typeof saleDmVariantCreateSchema>;

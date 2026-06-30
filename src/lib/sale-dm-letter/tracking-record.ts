@@ -5,8 +5,8 @@ type TrackingTxLike = {
   dmRecipientDraft: {
     findUnique: (args: {
       where: { trackingToken: string };
-      select: { id: true; lpFirstAccessAt: true; status: true };
-    }) => Promise<{ id: string; lpFirstAccessAt: Date | null; status: string } | null>;
+      select: { id: true; lpFirstAccessAt: true; status: true; variant: { select: { lpUrl: true } } };
+    }) => Promise<{ id: string; lpFirstAccessAt: Date | null; status: string; variant: { lpUrl: string | null } | null } | null>;
     update: (args: {
       where: { id: string };
       data: Prisma.DmRecipientDraftUpdateInput;
@@ -30,15 +30,16 @@ type TrackingTxLike = {
 export async function recordTrackingHit(
   tx: TrackingTxLike,
   token: string,
-): Promise<{ matched: boolean; firstHit: boolean }> {
+): Promise<{ matched: boolean; firstHit: boolean; variantLpUrl: string | null }> {
   const draft = await tx.dmRecipientDraft.findUnique({
     where: { trackingToken: token },
-    select: { id: true, lpFirstAccessAt: true, status: true },
+    // variant.lpUrl も読む: 型ごとのLP振り分け(QR遷移先を型のLPへ・未設定は既定LPへ)。
+    select: { id: true, lpFirstAccessAt: true, status: true, variant: { select: { lpUrl: true } } },
   });
-  if (!draft) return { matched: false, firstHit: false };
+  if (!draft) return { matched: false, firstHit: false, variantLpUrl: null };
   // 送付確定(sent)前のヒット(印刷プレビューからの内部スキャン/クリック等)は
   // A/B 反響を汚すため計上しない。送付済みになって初めて追跡を有効化する。
-  if (draft.status !== "sent") return { matched: false, firstHit: false };
+  if (draft.status !== "sent") return { matched: false, firstHit: false, variantLpUrl: null };
 
   // 初回ヒット(lpFirstAccessAt が未設定)か否か。公開 GET の監査を初回だけに絞るため呼び出し側へ返す。
   const firstHit = draft.lpFirstAccessAt == null;
@@ -54,5 +55,6 @@ export async function recordTrackingHit(
       outcome: "inquiry",
     },
   });
-  return { matched: true, firstHit };
+  // 型に lpUrl があればそれを返す(route が遷移先に使う)。未設定は null → route が既定LPへ。
+  return { matched: true, firstHit, variantLpUrl: draft.variant?.lpUrl ?? null };
 }

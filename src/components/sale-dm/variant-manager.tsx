@@ -26,7 +26,8 @@ const DEFAULT_OPTIONS: SaleDmVariantOptions = {
   extraInstruction: "",
 };
 
-type FormState = { label: string; options: SaleDmVariantOptions };
+// lpUrl = この型のLP(印刷QRの遷移先)。空欄は既定 SALE_DM_LP_URL へ。型ごとに変えると LP の A/B ができる。
+type FormState = { label: string; options: SaleDmVariantOptions; lpUrl: string };
 
 // A/B の型(variant)を作成・編集・削除し、未送付の宛先を均等に割り当てる管理パネル。
 // バックエンド(variants / assign route)を呼ぶだけで、A/B 純度の保護(送付済み凍結・本文無効化)は
@@ -41,7 +42,7 @@ export default function SaleDmVariantManager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | "new" | null>(null);
-  const [form, setForm] = useState<FormState>({ label: "", options: { ...DEFAULT_OPTIONS } });
+  const [form, setForm] = useState<FormState>({ label: "", options: { ...DEFAULT_OPTIONS }, lpUrl: "" });
   const [assignOrder, setAssignOrder] = useState<"sequential" | "random">("sequential");
 
   const countByVariant = (vid: string) => campaign.recipients.filter((r) => r.variantId === vid).length;
@@ -65,7 +66,7 @@ export default function SaleDmVariantManager({
 
   const startNew = () => {
     setError(null);
-    setForm({ label: "", options: { ...DEFAULT_OPTIONS } });
+    setForm({ label: "", options: { ...DEFAULT_OPTIONS }, lpUrl: "" });
     setEditing("new");
   };
   const startEdit = (v: SaleDmVariant) => {
@@ -80,6 +81,7 @@ export default function SaleDmVariantManager({
         strength: v.strength,
         extraInstruction: v.extraInstruction ?? "",
       },
+      lpUrl: v.lpUrl ?? "",
     });
     setEditing(v.id);
   };
@@ -87,7 +89,7 @@ export default function SaleDmVariantManager({
   const submit = () =>
     run(async () => {
       if (editing === "new") {
-        await createSaleDmVariant(campaign.id, { label: form.label, options: form.options });
+        await createSaleDmVariant(campaign.id, { label: form.label, options: form.options, lpUrl: form.lpUrl.trim() || undefined });
         return;
       }
       if (editing) {
@@ -106,7 +108,8 @@ export default function SaleDmVariantManager({
         if (optionChanged && !window.confirm("型の設定を変更すると、この型を使う未送付の手紙は作り直しが必要になります(確定も解除されます)。続けますか？")) {
           return;
         }
-        await updateSaleDmVariant(campaign.id, editing, { label: form.label, options: form.options });
+        // lpUrl は本文に影響しない(QR遷移先のみ)。空欄は null=既定LPへ戻す。option 変更とは別に常に送る。
+        await updateSaleDmVariant(campaign.id, editing, { label: form.label, options: form.options, lpUrl: form.lpUrl.trim() === "" ? null : form.lpUrl.trim() });
       }
     });
 
@@ -251,6 +254,18 @@ function VariantForm({
         rows={2}
         className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
       />
+      <div className="flex flex-col gap-0.5">
+        <input
+          type="url"
+          value={form.lpUrl}
+          aria-label="この型のLP URL"
+          onChange={(e) => setForm({ ...form, lpUrl: e.target.value })}
+          placeholder="この型のLP URL(任意・例 https://lp.example.com/a)"
+          maxLength={2000}
+          className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+        />
+        <p className="text-[11px] text-gray-400">空欄の型は既定のLPへ。型ごとに変えると LP の A/B（振り分け）ができます。</p>
+      </div>
       <div className="flex gap-2">
         <button
           type="button"

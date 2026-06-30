@@ -974,6 +974,9 @@ model DmVariant {
   appeal           String
   strength         String
   extraInstruction String? @map("extra_instruction")
+  // A/B 型ごとの LP(印刷QR /t/<token> の遷移先)。未設定の型は SALE_DM_LP_URL(既定)へ。
+  // 型A→LP1 / 型B→LP2 のように LP の A/B 振り分けを可能にする。
+  lpUrl            String? @map("lp_url")
 
   campaign   DmCampaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   recipients DmRecipientDraft[]
