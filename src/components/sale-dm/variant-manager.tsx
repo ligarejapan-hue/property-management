@@ -108,8 +108,16 @@ export default function SaleDmVariantManager({
         if (optionChanged && !window.confirm("型の設定を変更すると、この型を使う未送付の手紙は作り直しが必要になります(確定も解除されます)。続けますか？")) {
           return;
         }
-        // lpUrl は本文に影響しない(QR遷移先のみ)。空欄は null=既定LPへ戻す。option 変更とは別に常に送る。
-        await updateSaleDmVariant(campaign.id, editing, { label: form.label, options: form.options, lpUrl: form.lpUrl.trim() === "" ? null : form.lpUrl.trim() });
+        // lpUrl は本文に影響しない(QR遷移先のみ・空欄=null=既定LPへ戻す)が、変更するとサーバー側でこの型の
+        // 確定済み(印刷待ち)宛先が確定解除され再確認が必要になる。option 変更で既に警告済みなら二重に出さない。
+        const nextLp = form.lpUrl.trim() === "" ? null : form.lpUrl.trim();
+        const lpUrlChanged = nextLp !== (cur?.lpUrl ?? null);
+        const confirmedCount = campaign.recipients.filter((r) => r.variantId === editing && r.status === "confirmed").length;
+        if (!optionChanged && lpUrlChanged && confirmedCount > 0 &&
+            !window.confirm(`この型のLPを変更すると、確定済み(印刷待ち)の ${confirmedCount} 件は確定が解除され、再確認が必要になります(本文の作り直しは不要)。続けますか？`)) {
+          return;
+        }
+        await updateSaleDmVariant(campaign.id, editing, { label: form.label, options: form.options, lpUrl: nextLp });
       }
     });
 
