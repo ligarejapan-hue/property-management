@@ -52,9 +52,13 @@ export class OpenAiLetterProvider implements LetterProvider {
       throw new SaleDmError("GENERATION_FAILED", "本文生成に失敗しました");
     }
     const choice = res.choices?.[0];
-    // OpenAI は不適切要求などを content_filter で打ち切る(Claude の stop_reason=refusal 相当)。
+    // content_filter=不適切要求で打ち切り / length=トークン上限で途中切れ。どちらも不完全な手紙ゆえ、
+    // 本文が非空でも生成失敗扱いにし、途中切れの DM を下書き保存・送付しない(Claude の refusal/max_tokens と対称)。
     if (choice?.finish_reason === "content_filter") {
       throw new SaleDmError("GENERATION_FAILED", "本文生成が拒否されました");
+    }
+    if (choice?.finish_reason === "length") {
+      throw new SaleDmError("GENERATION_FAILED", "本文が長さ上限で途中切れしました");
     }
     const text = choice?.message?.content?.trim();
     if (!text) {

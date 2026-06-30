@@ -46,6 +46,10 @@ export class ClaudeLetterProvider implements LetterProvider {
     if (res.stop_reason === "refusal") {
       throw new SaleDmError("GENERATION_FAILED", "本文生成が拒否されました");
     }
+    // max_tokens=トークン上限で途中切れ。非空でも不完全な手紙ゆえ失敗扱い(OpenAI の length と対称)。
+    if (res.stop_reason === "max_tokens") {
+      throw new SaleDmError("GENERATION_FAILED", "本文が長さ上限で途中切れしました");
+    }
     const text = (res.content ?? []).find((b) => b.type === "text")?.text;
     if (!text) {
       throw new SaleDmError("GENERATION_FAILED", "本文が空でした");

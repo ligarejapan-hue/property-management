@@ -28,4 +28,13 @@ describe("ClaudeLetterProvider", () => {
     const p = new ClaudeLetterProvider({ apiKey: "k", model: "claude-sonnet-4-6", createMessage });
     await expect(p.generate({ system: "S", user: "U" })).rejects.toBeInstanceOf(SaleDmError);
   });
+
+  it("stop_reason=max_tokens(トークン上限で途中切れ)は本文が非空でも SaleDmError(不完全な手紙を保存しない・OpenAI の length と対称)", async () => {
+    const createMessage = vi.fn().mockResolvedValue({
+      stop_reason: "max_tokens",
+      content: [{ type: "text", text: "拝啓 …(ここで上限に達し途中で切れた本文" }],
+    });
+    const p = new ClaudeLetterProvider({ apiKey: "k", model: "claude-sonnet-4-6", createMessage });
+    await expect(p.generate({ system: "S", user: "U" })).rejects.toBeInstanceOf(SaleDmError);
+  });
 });

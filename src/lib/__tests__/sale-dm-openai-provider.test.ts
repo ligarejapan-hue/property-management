@@ -39,4 +39,12 @@ describe("OpenAiLetterProvider", () => {
     const p = new OpenAiLetterProvider({ apiKey: "k", model: "gpt-4o", createCompletion });
     await expect(p.generate({ system: "S", user: "U" })).rejects.toBeInstanceOf(SaleDmError);
   });
+
+  it("finish_reason=length(トークン上限で途中切れ)は本文が非空でも SaleDmError(不完全な手紙を保存しない)", async () => {
+    const createCompletion = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: "拝啓 …(ここで上限に達し途中で切れた本文" }, finish_reason: "length" }],
+    });
+    const p = new OpenAiLetterProvider({ apiKey: "k", model: "gpt-4o", createCompletion });
+    await expect(p.generate({ system: "S", user: "U" })).rejects.toBeInstanceOf(SaleDmError);
+  });
 });
