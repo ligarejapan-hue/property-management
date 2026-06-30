@@ -66,23 +66,23 @@ function AccordionItem({
   onToggle: () => void;
 }) {
   return (
-    <div className="border-b border-gray-200 last:border-b-0">
+    <div className="border-b border-gray-200 last:border-b-0 dark:border-gray-800">
       <button
         onClick={onToggle}
-        className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-gray-50"
+        className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
       >
-        <span className="text-sm font-medium text-gray-800">
+        <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
           {section.title}
         </span>
         {isOpen ? (
-          <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" />
+          <ChevronDown className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
         ) : (
-          <ChevronRight className="h-4 w-4 shrink-0 text-gray-500" />
+          <ChevronRight className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
         )}
       </button>
       {isOpen && (
         <div className="px-5 pb-4">
-          <p className="text-sm leading-relaxed text-gray-600">
+          <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-300">
             {section.description}
           </p>
         </div>
@@ -111,13 +111,13 @@ export default function HelpPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">ヘルプ</h2>
-        <p className="mt-1 text-sm text-gray-500">
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">ヘルプ</h2>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           システムの使い方や各機能の説明をご覧いただけます。
         </p>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white">
+      <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         {helpSections.map((section, index) => (
           <AccordionItem
             key={index}
