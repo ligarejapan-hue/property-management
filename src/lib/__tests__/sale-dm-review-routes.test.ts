@@ -27,7 +27,7 @@ vi.mock("@/lib/prisma", () => ({
     dmVariant: { findUnique: vi.fn() },
   },
 }));
-vi.mock("@/lib/sale-dm-letter", () => ({ isSaleDmConfigured: vi.fn(), generateLetters: vi.fn() }));
+vi.mock("@/lib/sale-dm-letter", () => ({ isSaleDmConfigured: vi.fn(), generateLetters: vi.fn(), resolveProvider: vi.fn() }));
 vi.mock("@/lib/sale-dm-letter/sender", () => ({ resolveSender: vi.fn(() => ({ senderName: "△△不動産", senderContact: "000" })), isSenderConfigured: vi.fn(() => true) }));
 
 import { describe, it, expect, beforeEach } from "vitest";

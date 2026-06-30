@@ -10,6 +10,7 @@ import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
+import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 
 // ---------- GET /api/me/permissions ----------
 // 現在ログイン中のユーザーの権限一覧を返す。
@@ -20,6 +21,8 @@ export async function GET() {
   try {
     const session = await getApiSession();
     const permissions = await getUserPermissions(session.id);
+    // 売却促進DM の設定は DB→env で解決(管理画面で設定された値を反映)。
+    const saleDmCfg = await loadSaleDmConfig();
     const capabilities = {
       corporateLookup: isCorporateLookupConfigured(),
       // 謄本自動取得 provider が設定済みか（boolean のみ）。secret・設定値そのものは返さない。
@@ -32,7 +35,7 @@ export async function GET() {
       // 必須の絶対URL（SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL）と差出人（SALE_DM_SENDER_NAME / CONTACT）も
       // 要求する。いずれか未設定だと campaign 作成が 503 になるため「売却DMを作成」導線自体を出さない（生成/印刷の
       // fail-closed と UI を揃え、押して 503 になるのを防ぐ）。
-      saleDmLetter: isSaleDmConfigured() && !!resolveTrackingBaseUrl() && !!resolveLpUrl() && isSenderConfigured(),
+      saleDmLetter: isSaleDmConfigured(saleDmCfg) && !!resolveTrackingBaseUrl(saleDmCfg) && !!resolveLpUrl(saleDmCfg) && isSenderConfigured(saleDmCfg),
     };
     return apiResponse({ permissions, capabilities });
   } catch (error) {

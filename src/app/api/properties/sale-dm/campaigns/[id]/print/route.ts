@@ -9,6 +9,7 @@ import {
 } from "@/lib/sale-dm-letter/templates";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
+import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { buildTrackingArtifacts } from "@/lib/sale-dm-letter/qr";
 import { renderTrackingSlotHtml } from "@/lib/sale-dm-letter/tracking-slot";
 import { composeAddresseeHonorific } from "@/lib/sale-dm-letter/recipients";
@@ -39,23 +40,25 @@ export async function GET(
     // field_staff は現在の物件 record scope の宛先のみ印刷(GET campaign / CSV と統一)。
     const visibleDrafts = filterDraftsByFieldStaffScope(drafts, session);
 
-    const { senderName, senderContact } = resolveSender();
+    // 売却DM 設定は DB→env で解決(管理画面の設定を反映)。
+    const saleDmCfg = await loadSaleDmConfig();
+    const { senderName, senderContact } = resolveSender(saleDmCfg);
     // 追跡QR/短縮URL は宛先固有の opaque トークンから生成する。郵送物(印刷)の QR は
     // 絶対URLが必須(相対パスは scheme/host が無く郵送先で機能しない)ため、base 未設定は
-    // fail-closed(503)。本番は SALE_DM_TRACKING_BASE_URL 設定必須。
-    const trackingBaseUrl = resolveTrackingBaseUrl();
+    // fail-closed(503)。本番は追跡用URLの設定必須。
+    const trackingBaseUrl = resolveTrackingBaseUrl(saleDmCfg);
     if (!trackingBaseUrl) {
-      throw new ApiError(503, "追跡用URL(SALE_DM_TRACKING_BASE_URL)が未設定です。郵送QRには絶対URLが必要です", "TRACKING_NOT_CONFIGURED");
+      throw new ApiError(503, "追跡用URLが未設定です。郵送QRには絶対URLが必要です", "TRACKING_NOT_CONFIGURED");
     }
     // 郵送QRの遷移先 LP も絶対URL必須。未設定/非絶対だと QR を踏んでも /t/ が 404 になり郵送物が
     // dead-link になるため、印刷前に fail-closed(503)。
-    if (!resolveLpUrl()) {
-      throw new ApiError(503, "LP URL(SALE_DM_LP_URL)が未設定/不正です。郵送QRの遷移先に絶対URLが必要です", "LP_NOT_CONFIGURED");
+    if (!resolveLpUrl(saleDmCfg)) {
+      throw new ApiError(503, "LP URLが未設定/不正です。郵送QRの遷移先に絶対URLが必要です", "LP_NOT_CONFIGURED");
     }
-    // 差出人 env が外れていると resolveSender が "(差出人名 未設定)"/空 を返し、差出人欄が不正な郵送物になる。
-    // 生成/再生成と同様、印刷も差出人未設定なら fail-closed(503)する(郵送前に止める・Codex)。
-    if (!isSenderConfigured()) {
-      throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
+    // 差出人が外れていると resolveSender が "(差出人名 未設定)"/空 を返し、差出人欄が不正な郵送物になる。
+    // 生成/再生成と同様、印刷も差出人未設定なら fail-closed(503)する(郵送前に止める)。
+    if (!isSenderConfigured(saleDmCfg)) {
+      throw new ApiError(503, "差出人情報(差出人名 / 連絡先)が未設定です", "SENDER_NOT_CONFIGURED");
     }
 
     const letters: LetterRenderInput[] = await Promise.all(

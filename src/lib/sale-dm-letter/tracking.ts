@@ -1,5 +1,6 @@
 // 追跡リンク(短縮URL/QR)に関する純関数群。
 // URL に載せるのは opaque な trackingToken のみ(氏名・住所・物件ID 等の PII は載せない)。
+import { saleDmConfigFromEnv, type SaleDmResolvedConfig } from "./config";
 
 export const TRACKING_PATH_PREFIX = "/t/";
 
@@ -16,14 +17,15 @@ function resolveAbsoluteHttpEnv(raw: string | undefined): string | undefined {
   }
 }
 
-// 郵送QRの base(SALE_DM_TRACKING_BASE_URL)。未設定/非絶対は undefined → print が 503 fail-closed。
-export function resolveTrackingBaseUrl(): string | undefined {
-  return resolveAbsoluteHttpEnv(process.env.SALE_DM_TRACKING_BASE_URL);
+// 郵送QRの base(設定: trackingBaseUrl)。未設定/非絶対は undefined → print が 503 fail-closed。
+// cfg は DB→env 解決済み。no-arg は env のみ(後方互換)。
+export function resolveTrackingBaseUrl(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): string | undefined {
+  return resolveAbsoluteHttpEnv(cfg.trackingBaseUrl ?? undefined);
 }
 
-// 短縮URL /t/ の遷移先 LP(SALE_DM_LP_URL)。未設定/非絶対は undefined → /t/ は 404・print は 503。
-export function resolveLpUrl(): string | undefined {
-  return resolveAbsoluteHttpEnv(process.env.SALE_DM_LP_URL);
+// 短縮URL /t/ の遷移先 既定LP(設定: lpUrl)。未設定/非絶対は undefined → /t/ は 404・print は 503。
+export function resolveLpUrl(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): string | undefined {
+  return resolveAbsoluteHttpEnv(cfg.lpUrl ?? undefined);
 }
 
 // 型ごとLP(DmVariant.lpUrl)が遷移先として使える絶対http(s) URLか。空/相対/非httpは false →

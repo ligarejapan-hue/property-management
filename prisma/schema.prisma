@@ -1074,3 +1074,22 @@ enum DmDeliveryStatus {
   returned_undeliverable
   returned_other
 }
+
+// 売却促進DM の設定保管(管理画面から編集)。1行のみ(id="singleton")。
+// APIキーは暗号化して保存(平文では持たない)。provider/model/各URL/差出人は平文(非秘匿)。
+// 値が未設定(null/空)の項目は env をフォールバックに使う(loadSaleDmConfig が「DB→env」で解決)。
+model SaleDmConfig {
+  id                 String   @id @default("singleton")
+  provider           String?
+  model              String?
+  trackingBaseUrl    String?  @map("tracking_base_url")
+  lpUrl              String?  @map("lp_url")
+  senderName         String?  @map("sender_name")
+  senderContact      String?  @map("sender_contact")
+  anthropicApiKeyEnc String?  @map("anthropic_api_key_enc")
+  openaiApiKeyEnc    String?  @map("openai_api_key_enc")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  updatedById        String?  @map("updated_by_id") @db.Uuid
+
+  @@map("sale_dm_config")
+}

@@ -11,8 +11,9 @@ import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
-import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, resolveLetterModel } from "@/lib/sale-dm-letter";
+import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, resolveLetterModel, resolveProvider } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
+import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
 import { randomBytes } from "crypto";
 
@@ -35,12 +36,13 @@ export async function POST(request: NextRequest) {
       throw new ApiError(403, "DM作成に必要な所有者情報(氏名・郵便番号・住所)の表示権限がありません", "FORBIDDEN");
     }
 
-    // env 未設定なら fail-closed(503)。DB に何も書かない。
-    if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
-    // 印刷の郵送QRには絶対URL(SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL)が必須。これらが未設定/不正だと、
-    // 生成(課金)しても印刷 route が 503 で出力できず、印刷不能な下書きに課金されるだけになる。有料生成の前に
-    // 印刷必須URLも確認し、揃っていなければ生成を始めずに fail-closed(503)する(印刷 route と同じ前提)。
-    if (!resolveTrackingBaseUrl() || !resolveLpUrl()) {
+    // 売却DM 設定は DB→env で解決(管理画面で設定された値を反映)。未設定なら fail-closed(503)。DB に何も書かない。
+    const saleDmCfg = await loadSaleDmConfig();
+    if (!isSaleDmConfigured(saleDmCfg)) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
+    // 印刷の郵送QRには絶対URL(追跡URL / LP URL)が必須。これらが未設定/不正だと、生成(課金)しても印刷 route が
+    // 503 で出力できず、印刷不能な下書きに課金されるだけになる。有料生成の前に印刷必須URLも確認し、揃っていなければ
+    // 生成を始めずに fail-closed(503)する(印刷 route と同じ前提)。
+    if (!resolveTrackingBaseUrl(saleDmCfg) || !resolveLpUrl(saleDmCfg)) {
       throw new ApiError(503, "印刷に必要なURL(SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL)が未設定です", "PRINT_URL_NOT_CONFIGURED");
     }
 
@@ -54,8 +56,8 @@ export async function POST(request: NextRequest) {
     // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)のみを使う。印刷・再生成も resolveSender(env)を使い、
     // body 指定の差出人は保存されず印刷で env 既定にズレる(不整合)ため、body の抜け道は塞ぎ env を必須にする。
     // 未設定なら使えない手紙を有料生成しないよう生成前に fail-closed(503・印刷URL チェックと同方針・Codex R33)。
-    if (!isSenderConfigured()) {
-      throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
+    if (!isSenderConfigured(saleDmCfg)) {
+      throw new ApiError(503, "差出人情報(差出人名 / 連絡先)が未設定です", "SENDER_NOT_CONFIGURED");
     }
     // 冪等性: client が作成試行ごとに安定生成したキー。同キーで既に作成済みなら、有料生成を再実行せず
     // 既存 campaign を返す(再送信/別タブ/連打での二重課金・二重作成を防ぐ)。キー未指定なら従来通り。
@@ -115,7 +117,7 @@ export async function POST(request: NextRequest) {
 
     // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)のみ。印刷・再生成も resolveSender(env)を使うため、
     // 生成も env 差出人で揃える(body 指定は非永続ゆえ使わない=印刷とのズレを防ぐ・Codex R33)。
-    const sender = resolveSender();
+    const sender = resolveSender(saleDmCfg);
     const genOptions = {
       ...body.options,
       senderName: sender.senderName,
@@ -152,7 +154,7 @@ export async function POST(request: NextRequest) {
     let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
     let truncated: boolean;
     try {
-      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })));
+      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg) });
       drafts = result.drafts;
       truncated = result.truncated;
 
@@ -178,7 +180,7 @@ export async function POST(request: NextRequest) {
               recipientName: sliced[i].recipientName, recipientZip: sliced[i].recipientZip,
               recipientAddress: sliced[i].recipientAddress, honorific: sliced[i].honorific,
               coOwnerCount: sliced[i].coOwnerCount,
-              body: d.body ?? "", model: resolveLetterModel(),
+              body: d.body ?? "", model: resolveLetterModel(saleDmCfg),
               outcomeNote: d.error ? `生成失敗(${d.error})` : null,
               trackingToken: randomBytes(8).toString("base64url"),
               generatedBy: session.id,
