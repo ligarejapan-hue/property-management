@@ -3,8 +3,8 @@ import type { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { recordTrackingHit } from "@/lib/sale-dm-letter/tracking-record";
-import { resolveLpUrl, isAbsoluteHttpUrl } from "@/lib/sale-dm-letter/tracking";
-import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
+import { isAbsoluteHttpUrl } from "@/lib/sale-dm-letter/tracking";
+import { loadSaleDmLpUrl } from "@/lib/sale-dm-letter/config-store";
 
 // 認証不要の公開エンドポイント(proxy.ts の PUBLIC_PATHS に "/t/" を追加済み)。
 // 受け手(所有者)は本システムのログインユーザーではないため認証免除が必須。
@@ -15,8 +15,8 @@ export async function GET(
 ) {
   const { token } = await params;
   // 既定LP は設定(DB→env)から解決する。型ごとLP は recordTrackingHit が返す variantLpUrl が優先。
-  const cfg = await loadSaleDmConfig();
-  const lpUrl = resolveLpUrl(cfg);
+  // 公開・未認証経路ゆえ LP URL だけを読む専用ローダーを使う(課金APIキーを取得/復号しない)。
+  const lpUrl = await loadSaleDmLpUrl();
 
   // 転送先 LP 未設定なら fail-closed(404)。受け手は LP に到達できないため、トラッキングも
   // 記録しない(到達しない閲覧を反響として A/B に計上しない)。記録より前に判定する。

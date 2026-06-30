@@ -5,6 +5,7 @@ import {
   saleDmConfigFromEnv,
   type SaleDmResolvedConfig,
 } from "./config";
+import { resolveLpUrl } from "./tracking";
 
 // 設定は1行のみ(singleton)。管理画面の GET/PUT もこの id を使う。
 export const SALE_DM_CONFIG_ID = "singleton";
@@ -33,4 +34,23 @@ export async function loadSaleDmConfig(): Promise<SaleDmResolvedConfig> {
     }
   };
   return mergeSaleDmConfig(db, dec(db.anthropicApiKeyEnc), dec(db.openaiApiKeyEnc));
+}
+
+// 公開トラッキング(/t/<token>)専用の既定LP解決。未認証・高頻度の公開経路で課金APIキーを
+// 取得・復号しないよう、lpUrl 列だけを select する(暗号化キー列 anthropicApiKeyEnc/openaiApiKeyEnc は
+// 読まない=decryptSecret も呼ばない)。loadSaleDmConfig(全設定+復号)とは意図的に分離。
+// DB→env フォールバック・絶対http(s)検証は resolveLpUrl に委譲(print/t と同一規則)。
+export async function loadSaleDmLpUrl(): Promise<string | undefined> {
+  let dbLp: string | null = null;
+  try {
+    const row = await prisma.saleDmConfig.findUnique({
+      where: { id: SALE_DM_CONFIG_ID },
+      select: { lpUrl: true }, // ← LP URL 列のみ。秘匿(キー)列は取得しない。
+    });
+    dbLp = row?.lpUrl ?? null;
+  } catch {
+    dbLp = null; // DB未接続/テーブル無等は env フォールバック(fail-safe)。
+  }
+  const env = saleDmConfigFromEnv();
+  return resolveLpUrl({ ...env, lpUrl: dbLp && dbLp.trim().length > 0 ? dbLp : env.lpUrl });
 }

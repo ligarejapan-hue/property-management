@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import crypto from "crypto";
 import prismaMock from "@/lib/prisma";
 import { saleDmConfigFromEnv } from "../sale-dm-letter/config";
-import { loadSaleDmConfig } from "../sale-dm-letter/config-store";
+import { loadSaleDmConfig, loadSaleDmLpUrl } from "../sale-dm-letter/config-store";
 import { encryptSecret } from "../sale-dm-letter/secret-crypto";
 
 const pm = prismaMock as never as { saleDmConfig: { findUnique: ReturnType<typeof vi.fn> } };
@@ -89,5 +89,39 @@ describe("loadSaleDmConfig: DB→env 優先で解決", () => {
     });
     const c = await loadSaleDmConfig();
     expect(c.anthropicApiKey).toBe("envkey");
+  });
+});
+
+describe("loadSaleDmLpUrl: 公開/t用・既定LP URLだけ解決(APIキー列は読まない/復号しない)", () => {
+  it("DBのlpUrlを絶対http検証して返す(DB優先)", async () => {
+    process.env.SALE_DM_LP_URL = "https://env-lp.example.com";
+    pm.saleDmConfig.findUnique.mockResolvedValue({ lpUrl: "https://db-lp.example.com" });
+    expect(await loadSaleDmLpUrl()).toBe("https://db-lp.example.com");
+  });
+
+  it("DBにlpUrlが無ければ env lpUrl へフォールバック", async () => {
+    process.env.SALE_DM_LP_URL = "https://env-lp.example.com";
+    pm.saleDmConfig.findUnique.mockResolvedValue({ lpUrl: null });
+    expect(await loadSaleDmLpUrl()).toBe("https://env-lp.example.com");
+  });
+
+  it("非絶対http/未設定は undefined(=/t は404 fail-closed)", async () => {
+    pm.saleDmConfig.findUnique.mockResolvedValue({ lpUrl: "relative/path" });
+    expect(await loadSaleDmLpUrl()).toBeUndefined();
+  });
+
+  it("lpUrl 列だけを select する(公開経路で課金APIキー列を取得/復号しない)", async () => {
+    pm.saleDmConfig.findUnique.mockResolvedValue({ lpUrl: "https://x.example.com" });
+    await loadSaleDmLpUrl();
+    const arg = pm.saleDmConfig.findUnique.mock.calls[0][0] as { select?: Record<string, boolean> };
+    expect(arg.select).toEqual({ lpUrl: true });
+    expect(arg.select?.anthropicApiKeyEnc).toBeUndefined();
+    expect(arg.select?.openaiApiKeyEnc).toBeUndefined();
+  });
+
+  it("DB取得失敗でも env フォールバック(fail-safe・例外を投げない)", async () => {
+    process.env.SALE_DM_LP_URL = "https://env-lp.example.com";
+    pm.saleDmConfig.findUnique.mockRejectedValue(new Error("db down"));
+    expect(await loadSaleDmLpUrl()).toBe("https://env-lp.example.com");
   });
 });
