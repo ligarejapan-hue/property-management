@@ -45,6 +45,7 @@ import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { SaleLandSheetButton } from "@/components/sales-sheet/SaleLandSheetButton";
+import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 
 // ---------- Label maps ----------
 
@@ -504,6 +505,11 @@ export default function PropertyDetailPage({
           </button>
         </div>
       </div>
+
+      {/* 保存済み販売図面の一覧（再オープン導線・土地物件のみ・保存図面が無ければ非表示） */}
+      {property.propertyType === "land" && (
+        <SalesSheetList propertyId={property.id} />
+      )}
 
       {/* Action bar */}
       <ActionBar
