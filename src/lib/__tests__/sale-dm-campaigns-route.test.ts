@@ -14,14 +14,16 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 下書き保存の引数(特に model)を検証するため tx 内の create を共有スパイにする。
+const { draftCreate } = vi.hoisted(() => ({ draftCreate: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findMany: vi.fn() },
-    dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), findUnique: vi.fn(async () => null), delete: vi.fn(async () => ({ id: "deleted" })) }, dmVariant: { create: vi.fn() }, dmRecipientDraft: { create: vi.fn() },
+    dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), findUnique: vi.fn(async () => null), delete: vi.fn(async () => ({ id: "deleted" })) }, dmVariant: { create: vi.fn() }, dmRecipientDraft: { create: draftCreate },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
       dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), update: vi.fn() },
       dmVariant: { create: vi.fn(async () => ({ id: "v1" })) },
-      dmRecipientDraft: { create: vi.fn() },
+      dmRecipientDraft: { create: draftCreate },
     })),
   },
 }));
@@ -100,6 +102,17 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const json = await res.json();
     expect(json.campaignId).toBe("c1");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("provider=openai のとき下書きに保存する model は gpt-4o(生成モデルと一致・claude既定にしない・Codex)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    process.env.SALE_DM_LETTER_PROVIDER = "openai"; // 永続モデルは provider 既定に追従すべき
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([property as never]);
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(200);
+    expect(draftCreate).toHaveBeenCalled();
+    // 旧実装は SALE_DM_LETTER_MODEL ?? DEFAULT_MODEL(=claude-sonnet-4-6)を保存していた(OpenAI生成でも claude記録)。
+    expect(draftCreate.mock.calls[0][0].data.model).toBe("gpt-4o");
   });
 
   it("env 未設定(mock off + provider 未設定)で 503", async () => {
