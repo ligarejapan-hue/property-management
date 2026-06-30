@@ -68,6 +68,8 @@ export const propertyListQuerySchema = z.object({
   propertyType: z.enum(PROPERTY_TYPE_VALUES).optional(),
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
+  // 宛先不明(返送連動)で絞り込む。"1" のときだけ有効(他の一覧フィルタと同じ文字列クエリ規約)。
+  undeliverable: z.enum(["1"]).optional(),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional(),
   assignedTo: z.string().uuid().optional(),

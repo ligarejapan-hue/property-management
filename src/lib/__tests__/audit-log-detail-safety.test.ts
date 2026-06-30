@@ -642,3 +642,69 @@ describe("display_name_audit_view: 操作メタデータ allowlist（Codex P2）
     expect(out.viewedAt).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: 売却促進DM の識別子は管理画面で追跡可能に保持", () => {
+  it("campaignId / variantId は ALWAYS_SAFE(UUID識別子)として残す", () => {
+    const out = sanitizeAuditDetail("sale_dm_variant_update", {
+      campaignId: "c-uuid",
+      variantId: "v-uuid",
+      fields: ["tone"],
+    }) as Record<string, unknown>;
+    expect(out.campaignId).toBe("c-uuid");
+    expect(out.variantId).toBe("v-uuid");
+    expect(out.fields).toEqual(["tone"]);
+  });
+
+  it("識別子を残しても PII キー(ownerName/address)は引き続き [REDACTED]", () => {
+    const out = sanitizeAuditDetail("sale_dm_campaign_create", {
+      campaignId: "c-uuid",
+      ownerName: "田中 一郎",
+      address: "東京都〇〇区",
+    }) as Record<string, unknown>;
+    expect(out.campaignId).toBe("c-uuid");
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.address).toBe(REDACTED);
+  });
+
+  it("sale_dm_* の操作メタ(件数/enum/boolean/ISO日時)は action 固有 allowlist で残す", () => {
+    const create = sanitizeAuditDetail("sale_dm_campaign_create", {
+      campaignId: "c", requested: 10, generated: 9, failed: 1, truncated: false, createdAt: "2026-06-28T00:00:00Z",
+    }) as Record<string, unknown>;
+    expect(create.requested).toBe(10);
+    expect(create.generated).toBe(9);
+    expect(create.truncated).toBe(false);
+    expect(create.createdAt).toBe("2026-06-28T00:00:00Z");
+
+    const outcome = sanitizeAuditDetail("sale_dm_draft_outcome_update", {
+      propertyId: "p", deliveryStatus: "delivered", outcome: "inquiry",
+      undeliverableLinked: false, undeliverableCleared: true, updatedAt: "2026-06-28T00:00:00Z",
+    }) as Record<string, unknown>;
+    expect(outcome.deliveryStatus).toBe("delivered");
+    expect(outcome.outcome).toBe("inquiry");
+    expect(outcome.undeliverableCleared).toBe(true);
+  });
+
+  it("sale_dm_campaign_view(ワークスペース閲覧監査)は campaignId/count/viewedAt を残し PII を [REDACTED]", () => {
+    const view = sanitizeAuditDetail("sale_dm_campaign_view", {
+      campaignId: "c-uuid",
+      count: 12,
+      viewedAt: "2026-06-30T00:00:00Z",
+      recipientName: "田中 一郎",
+      recipientAddress: "東京都〇〇区",
+      body: "本文",
+    }) as Record<string, unknown>;
+    expect(view.campaignId).toBe("c-uuid");
+    expect(view.count).toBe(12);
+    expect(view.viewedAt).toBe("2026-06-30T00:00:00Z");
+    // PII(宛名/住所/本文)は allowlist 外 + denylist で必ずマスク。
+    expect(view.recipientName).toBe(REDACTED);
+    expect(view.recipientAddress).toBe(REDACTED);
+    expect(view.body).toBe(REDACTED);
+  });
+
+  it("action 固有 allowlist はスコープされる: 未登録 action では sale_dm の操作メタは残らない", () => {
+    const out = sanitizeAuditDetail("unknown_action", { generated: 9, regeneratedAt: "x" }) as Record<string, unknown>;
+    expect(out.generated).toBe(REDACTED);
+    expect(out.regeneratedAt).toBe(REDACTED);
+  });
+});

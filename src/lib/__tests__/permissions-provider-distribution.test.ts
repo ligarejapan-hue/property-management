@@ -204,9 +204,9 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
 
   it("useScreenProtection() の permissions から CSV/DM 出力可否を導出する", () => {
     expect(pageSrc).toMatch(
-      /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*refetchPermissions,\s*\} = useScreenProtection\(\)/,
+      /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*refetchPermissions,\s*capabilities,\s*\} = useScreenProtection\(\)/,
     );
-    expect(pageSrc).toMatch(/const \{ canExportCsv, canExportDm \} = useMemo\(/);
+    expect(pageSrc).toMatch(/const \{ canExportCsv, canExportDm, canCreateDm(, canWriteProperty)? \} = useMemo\(/);
   });
 
   it("権限鮮度: properties 進入（mount）あたり最大 1 回だけ refetchPermissions を呼ぶ（Codex 対応2）", () => {

@@ -35,6 +35,10 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "propertyId",
   "ownerId",
   "buildingId",
+  // 売却促進DM の監査(create/export/print/update/variant)は campaignId/variantId で対象を辿る。
+  // UUID 識別子(名称・住所ではない)なので他の *Id と同様に安全キーとして残す(管理画面で追跡可能に)。
+  "campaignId",
+  "variantId",
   "userId",
   "targetId",
   "targetTable",
@@ -145,6 +149,24 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   pii_cut_attempt: new Set(["surface", "trigger"]),
   pii_contextmenu_attempt: new Set(["surface", "trigger"]),
   pii_print_attempt: new Set(["surface", "trigger"]),
+  // 売却促進DM: 操作事実の非PIIメタデータのみ allowlist(件数/enum/boolean/ISO日時)。
+  // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
+  // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
+  sale_dm_campaign_create: new Set(["requested", "generated", "truncated", "createdAt"]),
+  sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedAt"]),
+  sale_dm_campaign_print: new Set(["printedAt"]),
+  sale_dm_variant_create: new Set(["createdAt"]),
+  sale_dm_variant_update: new Set(["updatedAt"]),
+  sale_dm_variant_delete: new Set(["deletedAt"]),
+  sale_dm_drafts_confirm: new Set(["confirmedAt"]),
+  sale_dm_draft_update: new Set(["updatedAt"]),
+  sale_dm_draft_regenerate: new Set(["regeneratedAt"]),
+  sale_dm_draft_mark_sent: new Set(["sentAt"]),
+  sale_dm_draft_outcome_update: new Set(["deliveryStatus", "outcome", "undeliverableLinked", "undeliverableCleared", "updatedAt"]),
+  sale_dm_undeliverable_clear: new Set(["restoredDmStatus", "clearedAt"]),
+  // ワークスペース閲覧(PII の本文/宛名/住所を返す read)の監査。viewedAt=ISO日時のみ action 固有許可。
+  // campaignId/count は ALWAYS_SAFE。recipientName/recipientAddress/body は denylist で [REDACTED]。
+  sale_dm_campaign_view: new Set(["viewedAt"]),
   // 表示名監査（read-only レポート）の閲覧/CSV 出力監査。detail は操作事実の
   // 非PIIメタデータのみ（entity/format=enum・viewedAt=ISO日時・各種件数/真偽）。
   // owner-prefixed な件数/真偽（ownerGroupCount/ownerTruncated/ownerNameVisible）は

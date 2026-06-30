@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "rea
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
-import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions } from "@/lib/api-client";
+import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable } from "@/lib/api-client";
+import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
 import NewPropertyModal from "@/components/properties/new-property-modal";
@@ -49,6 +50,7 @@ interface ApiProperty {
   realEstateNumber: string | null;
   registryStatus: string;
   dmStatus: string;
+  dmUndeliverableAt?: string | null;
   caseStatus: string;
   introductionRoute?: string | null;
   isArchived: boolean;
@@ -129,6 +131,7 @@ function PropertiesPageInner() {
   const [updatedFromFilter, setUpdatedFromFilter] = useState(() => sp.get("updatedFrom") ?? "");
   const [updatedToFilter, setUpdatedToFilter] = useState(() => sp.get("updatedTo") ?? "");
   const [warningOnly, setWarningOnly] = useState(() => sp.get("hasWarning") === "true");
+  const [undeliverableOnly, setUndeliverableOnly] = useState(() => sp.get("undeliverable") === "1");
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
   const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
@@ -153,6 +156,7 @@ function PropertiesPageInner() {
     permissions: mePermissions,
     permissionsLoading,
     refetchPermissions,
+    capabilities,
   } = useScreenProtection();
 
   // F12-2 Codex 対応(2): 権限鮮度の再確認。App Router の layout は client navigation で
@@ -207,7 +211,7 @@ function PropertiesPageInner() {
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
   // DM差込CSV の出力可否。dm-export API は csv_export:read / csv_export_personal:read に
   // 加えて owner:read（所有者個人情報を含むため）を必須にする。UI も同条件で判定する。
-  const { canExportCsv, canExportDm } = useMemo(() => {
+  const { canExportCsv, canExportDm, canCreateDm, canWriteProperty } = useMemo(() => {
     // F12-2 Codex 対応(3): 進入時 refresh 中（pending）・provider 取得中（loading）は
     // stale な granted permissions を使わず空配列に倒す＝ボタン非表示（fail-safe 側）。
     // refresh 完了後の最新 permissions からのみ true になり得る。
@@ -219,10 +223,18 @@ function PropertiesPageInner() {
       effectivePermissions.some(
         (p) => p.resource === resource && p.action === "read" && p.granted,
       );
+    const hasWrite = (resource: string) =>
+      effectivePermissions.some(
+        (p) => p.resource === resource && p.action === "write" && p.granted,
+      );
     const canCsv = has("csv_export") && has("csv_export_personal");
     return {
       canExportCsv: canCsv,
       canExportDm: canCsv && has("owner"),
+      // 売却DM作成の表示可否(csv_export + csv_export_personal + owner=canExportDm と同条件)。
+      canCreateDm: canCreateSaleDm(effectivePermissions),
+      // 宛先不明の手動解除は物件を書き換えるため property:write 必須(server も 403 で要求)。
+      canWriteProperty: hasWrite("property"),
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions]);
 
@@ -274,11 +286,83 @@ function PropertiesPageInner() {
     if (updatedFromFilter) params.updatedFrom = updatedFromFilter;
     if (updatedToFilter) params.updatedTo = updatedToFilter;
     if (warningOnly) params.hasWarning = "true";
+    if (undeliverableOnly) params.undeliverable = "1";
     const [sortBy, sortOrder] = sort.split(":");
     if (sortBy) params.sortBy = sortBy;
     if (sortOrder) params.sortOrder = sortOrder;
     return params;
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sort]);
+
+  // 売却促進DM: 現在の検索条件で「送付可」物件から下書きを作成し、作業画面へ遷移する。
+  // 差出人は env 既定を route が補完(初版・調整は作業画面)。集計・型は variant 基準。
+  const [creatingDm, setCreatingDm] = useState(false);
+  // 二重作成(再送信/別タブ/連打)防止の冪等性キー。1回の作成試行で1つ生成し、失敗時は再利用(同キーで
+  // 再送=サーバーが二重生成しない)、成功で破棄して次の作成は新しいキーにする。
+  const saleDmIdemKeyRef = useRef<string | null>(null);
+  const handleCreateSaleDm = async () => {
+    if (creatingDm) return;
+    // 課金確認: 現在の絞り込み対象の宛先ごとに AI が手紙を生成し、AI利用料金が発生する(オーナー情報を
+    // AI提供元へ送信)。実行前に明示確認を取り、サーバーへ confirmed:true を送る(サーバー側でも必須)。
+    if (!window.confirm("現在の絞り込み対象に、AIで宛先ごとの手紙を生成します。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？")) return;
+    // 作成試行ごとに安定したキーを用意(secure context 外では randomUUID 不在ゆえ簡易フォールバック)。
+    if (!saleDmIdemKeyRef.current) {
+      saleDmIdemKeyRef.current =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    setCreatingDm(true);
+    setError(null);
+    try {
+      const res = await createSaleDmCampaign({
+        name: `売却DM ${new Date().toLocaleDateString("ja-JP")}`,
+        options: {
+          designTemplate: "formal",
+          tone: "formal",
+          length: "medium",
+          appeal: "price",
+          strength: "low",
+        },
+        filters: buildFilterParams(),
+        confirmed: true,
+        idempotencyKey: saleDmIdemKeyRef.current,
+      });
+      saleDmIdemKeyRef.current = null; // 成功 → 次の作成は新しいキー
+      // 部分生成(上限超で先頭のみ=truncated / 一部失敗で空本文=failed)は遷移前に明示する。
+      // 確認文は「現在の絞り込み対象を生成」と言うため、サブセットのみ生成/空letter を見落とさせない。
+      const partialNotice = buildSaleDmPartialNotice(res);
+      if (partialNotice) window.alert(partialNotice);
+      router.push(`/properties/sale-dm/${res.campaignId}`);
+    } catch (err) {
+      // 失敗 → キーは保持(同キーで再試行すればサーバーが二重生成しない)。
+      setError(err instanceof Error ? err.message : "売却DMの作成に失敗しました");
+    } finally {
+      setCreatingDm(false);
+    }
+  };
+
+  // 宛先不明(dmUndeliverableAt)の手動解除。任意で DM 状態を「送付可」に戻す(差し戻し)。物件を書き換えるため
+  // property:write 必須(server も 403 で要求)。実行後に一覧を再取得して反映する。
+  const [clearingUndelivId, setClearingUndelivId] = useState<string | null>(null);
+  const handleClearUndeliverable = async (propertyId: string) => {
+    if (clearingUndelivId) return;
+    if (!window.confirm("この物件の「宛先不明」を解除しますか？")) return;
+    // 解除後の DM 状態は選択式。backend は restoreDmStatus 省略時に dmStatus を据え置く(現状維持)。
+    // send を渡したときだけ「送付可」に戻す(再送可能にする)。
+    const restore = window.confirm(
+      "解除後、この物件のDM状態を「送付可」に戻しますか？\nOK = 送付可に戻す / キャンセル = 現在のDM状態のまま解除",
+    );
+    setClearingUndelivId(propertyId);
+    setError(null);
+    try {
+      await clearSaleDmUndeliverable(propertyId, restore ? { restoreDmStatus: "send" } : undefined);
+      await fetchProperties();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "宛先不明の解除に失敗しました");
+    } finally {
+      setClearingUndelivId(null);
+    }
+  };
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -369,11 +453,12 @@ function PropertiesPageInner() {
     if (updatedFromFilter) params.set("updatedFrom", updatedFromFilter);
     if (updatedToFilter) params.set("updatedTo", updatedToFilter);
     if (warningOnly) params.set("hasWarning", "true");
+    if (undeliverableOnly) params.set("undeliverable", "1");
     if (sort !== "updatedAt:desc") params.set("sort", sort);
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, sort, page, pathname, router]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sort, page, pathname, router]);
 
   // 警告バッジは「現在ページに表示中の物件」だけに scope して取得する（17-C F2）。
   // properties が変わるたび（page/filter/sort 変更・mutation 後の再取得）に追従するため、
@@ -518,6 +603,7 @@ function PropertiesPageInner() {
     setUpdatedFromFilter("");
     setUpdatedToFilter("");
     setWarningOnly(false);
+    setUndeliverableOnly(false);
     setSort("updatedAt:desc");
     setPage(1);
   };
@@ -526,7 +612,7 @@ function PropertiesPageInner() {
   const hasActiveFilter =
     !!searchInput || !!searchText || !!searchDraft || !!mgmtIdText || !!mgmtIdDraft || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
-    warningOnly || sort !== "updatedAt:desc";
+    warningOnly || undeliverableOnly || sort !== "updatedAt:desc";
 
   // アクティブなフィルタ条件数（モバイルトグルバッジ用）
   const activeFilterCount = [
@@ -743,6 +829,20 @@ function PropertiesPageInner() {
             DM差込CSV出力
           </button>
         )}
+        {/* 権限(canCreateDm)に加え、文面生成が設定済み(capabilities.saleDmLetter)のときだけ出す。
+            未設定だと押しても 503 になるため導線自体を隠す。 */}
+        {canCreateDm && capabilities?.saleDmLetter && (
+          <button
+            type="button"
+            onClick={handleCreateSaleDm}
+            disabled={creatingDm}
+            className="inline-flex items-center gap-2 rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            title="現在の検索条件で送付可の物件から売却DM下書きを作成"
+          >
+            {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            売却DMを作成
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowNewModal(true)}
@@ -918,6 +1018,19 @@ function PropertiesPageInner() {
               {warningPropertyCount}
             </span>
           )}
+        </label>
+
+        <label className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+          <input
+            type="checkbox"
+            checked={undeliverableOnly}
+            onChange={(e) => {
+              setUndeliverableOnly(e.target.checked);
+              setPage(1);
+            }}
+            className="rounded border-red-300"
+          />
+          宛先不明のみ
         </label>
 
         <select
@@ -1247,6 +1360,25 @@ function PropertiesPageInner() {
                       {DM_STATUS_LABELS[property.dmStatus] ??
                         property.dmStatus}
                     </StatusBadge>
+                    {/* 返送(宛先不明)連動で立った dmUndeliverableAt の可視化 + 手動解除(write 権限時) */}
+                    {property.dmUndeliverableAt && (
+                      <span className="ml-1 inline-flex items-center gap-1">
+                        <span className="inline-block rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                          宛先不明
+                        </span>
+                        {canWriteProperty && (
+                          <button
+                            type="button"
+                            onClick={() => handleClearUndeliverable(property.id)}
+                            disabled={clearingUndelivId === property.id}
+                            aria-label="宛先不明を解除"
+                            className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                          >
+                            解除
+                          </button>
+                        )}
+                      </span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span className="text-xs text-gray-600 dark:text-gray-300">
@@ -1404,6 +1536,25 @@ function PropertiesPageInner() {
                   >
                     {DM_STATUS_LABELS[property.dmStatus] ?? property.dmStatus}
                   </StatusBadge>
+                  {/* 宛先不明バッジ + 手動解除(モバイルカードでも表示・write 権限時にボタン) */}
+                  {property.dmUndeliverableAt && (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-block rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                        宛先不明
+                      </span>
+                      {canWriteProperty && (
+                        <button
+                          type="button"
+                          onClick={() => handleClearUndeliverable(property.id)}
+                          disabled={clearingUndelivId === property.id}
+                          aria-label="宛先不明を解除"
+                          className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                        >
+                          解除
+                        </button>
+                      )}
+                    </span>
+                  )}
                   <span className="text-xs text-gray-600 dark:text-gray-300">
                     {CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus}
                   </span>

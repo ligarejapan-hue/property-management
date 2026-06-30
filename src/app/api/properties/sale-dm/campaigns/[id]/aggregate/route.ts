@@ -1,0 +1,64 @@
+import { NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { handleApiError, ApiError } from "@/lib/api-helpers";
+import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
+import { aggregateByVariant } from "@/lib/sale-dm-letter/aggregate";
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { session } = await requireSaleDmAccess();
+    const { id } = await params;
+
+    const campaign = await prisma.dmCampaign.findUnique({
+      where: { id },
+      select: { id: true, name: true, createdBy: true },
+    });
+    // 作成者本人のキャンペーンのみ(横断アクセス防止)。not-found/not-owned は同じ 404。
+    if (!campaign || campaign.createdBy !== session.id) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
+
+    // 集計入力は反響シグナルの生値から計算する(outcome カラムに依存しない)。
+    const [variants, drafts] = await Promise.all([
+      prisma.dmVariant.findMany({
+        where: { campaignId: id },
+        select: { id: true, label: true },
+      }),
+      prisma.dmRecipientDraft.findMany({
+        // 送付済み(sent)のみ集計。未送付(draft/confirmed)は配達/反響結果を持てず、送付数の母数に
+        // 入れると宛先不明率/反響率を希釈するため除外する(aggregateByVariant は渡された draft を全て sent 計上)。
+        where: { campaignId: id, status: "sent" },
+        select: {
+          variantId: true,
+          deliveryStatus: true,
+          lpFirstAccessAt: true,
+          phoneInquiryAt: true,
+          property: { select: { createdBy: true, assignedTo: true } },
+        },
+      }),
+    ]);
+
+    // field_staff は作成 or 担当の物件の宛先のみ集計対象(GET campaign/print/export と同じ
+    // filterDraftsByFieldStaffScope)。campaign 作成後に物件が別担当へ再割当された宛先の到達/反響/宛先不明数を
+    // 混ぜず、可視の宛先リストと指標を一致させる。非 field_staff は全件。
+    const visibleDrafts = filterDraftsByFieldStaffScope(drafts, session);
+    const aggregate = aggregateByVariant(visibleDrafts);
+    const labelByVariantId = new Map(variants.map((v) => [v.id, v.label]));
+
+    return NextResponse.json(
+      {
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        byVariant: aggregate.byVariant.map((v) => ({
+          ...v,
+          label: labelByVariantId.get(v.variantId) ?? v.variantId,
+        })),
+        total: aggregate.total,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

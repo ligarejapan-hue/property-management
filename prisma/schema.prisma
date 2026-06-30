@@ -189,6 +189,8 @@ model User {
   fieldSurveySessions     FieldSurveySession[]
   fieldSurveyPins         FieldSurveyPin[]
   fieldSurveyPinPhotos    FieldSurveyPinPhoto[]
+  dmCampaigns             DmCampaign[]            @relation("DmCampaignCreator")
+  dmRecipientDrafts       DmRecipientDraft[]      @relation("DmRecipientGenerator")
 
   @@map("users")
 }
@@ -345,6 +347,9 @@ model Property {
   createdAt                DateTime          @default(now()) @map("created_at")
   updatedAt                DateTime          @updatedAt @map("updated_at")
 
+  // DM
+  dmUndeliverableAt  DateTime?                  @map("dm_undeliverable_at")
+
   // Relations
   creator            User                       @relation("PropertyCreatedBy", fields: [createdBy], references: [id])
   assignee           User?                      @relation("PropertyAssignedTo", fields: [assignedTo], references: [id])
@@ -362,6 +367,7 @@ model Property {
   attachments        Attachment[]
   ownerMemos         OwnerMemo[]               @relation("OwnerMemoProperty")
   fieldSurveyPins    FieldSurveyPin[]
+  dmRecipientDrafts  DmRecipientDraft[]
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -933,4 +939,108 @@ model FieldSurveyPinPhoto {
 
   @@index([pinId])
   @@map("field_survey_pin_photos")
+}
+
+// ============================================================
+// 売却促進DM (Sale DM Letter Assist)
+// ============================================================
+
+model DmCampaign {
+  id             String           @id @default(uuid()) @db.Uuid
+  name           String
+  status         DmCampaignStatus @default(draft)
+  filterSnapshot Json?            @map("filter_snapshot")
+  // 二重作成(再送信/別タブ/連打)防止の冪等性キー。client が作成試行ごとに安定生成し、生成(課金)の前に
+  // この値で campaign をクレームする(一意制約で同キーの二重生成を弾く)。任意(未指定=従来通り)。
+  idempotencyKey String?          @unique @map("idempotency_key")
+  createdBy      String           @map("created_by") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  creator    User              @relation("DmCampaignCreator", fields: [createdBy], references: [id])
+  variants   DmVariant[]
+  recipients DmRecipientDraft[]
+
+  @@map("dm_campaigns")
+}
+
+model DmVariant {
+  id               String  @id @default(uuid()) @db.Uuid
+  campaignId       String  @map("campaign_id") @db.Uuid
+  label            String
+  designTemplate   String  @map("design_template")
+  tone             String
+  length           String
+  appeal           String
+  strength         String
+  extraInstruction String? @map("extra_instruction")
+
+  campaign   DmCampaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipients DmRecipientDraft[]
+
+  @@map("dm_variants")
+}
+
+model DmRecipientDraft {
+  id                    String           @id @default(uuid()) @db.Uuid
+  campaignId            String           @map("campaign_id") @db.Uuid
+  propertyId            String           @map("property_id") @db.Uuid
+  representativeOwnerId String?          @map("representative_owner_id") @db.Uuid
+  variantId             String           @map("variant_id") @db.Uuid
+  overrideJson          Json?            @map("override_json")
+  recipientName         String           @map("recipient_name")
+  recipientZip          String?          @map("recipient_zip")
+  recipientAddress      String?          @map("recipient_address")
+  honorific             String
+  coOwnerCount          Int              @default(1) @map("co_owner_count")
+  body                  String
+  model                 String?
+  status                DmDraftStatus    @default(draft)
+  sentAt                DateTime?        @map("sent_at")
+  deliveryStatus        DmDeliveryStatus @default(unknown) @map("delivery_status")
+  returnedAt            DateTime?        @map("returned_at")
+  trackingToken         String           @unique @map("tracking_token")
+  lpFirstAccessAt       DateTime?        @map("lp_first_access_at")
+  lpAccessCount         Int              @default(0) @map("lp_access_count")
+  phoneInquiryAt        DateTime?        @map("phone_inquiry_at")
+  outcome               DmOutcome        @default(none)
+  outcomeNote           String?          @map("outcome_note")
+  generatedBy           String           @map("generated_by") @db.Uuid
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+  confirmedAt           DateTime?        @map("confirmed_at")
+
+  campaign  DmCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  variant   DmVariant  @relation(fields: [variantId], references: [id])
+  property  Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  generator User       @relation("DmRecipientGenerator", fields: [generatedBy], references: [id])
+
+  @@index([campaignId])
+  @@index([propertyId])
+  @@map("dm_recipient_drafts")
+}
+
+enum DmCampaignStatus {
+  draft
+  ready
+  sent
+  closed
+}
+
+enum DmDraftStatus {
+  draft
+  confirmed
+  sent
+}
+
+enum DmOutcome {
+  none
+  inquiry
+}
+
+enum DmDeliveryStatus {
+  unknown
+  delivered
+  returned_undeliverable
+  returned_other
 }
