@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { RenderBusyError } from "@/lib/sales-sheet/render-gate";
 
 // ---------- Custom error ----------
 
@@ -258,6 +259,13 @@ export function apiResponse(data: unknown, status = 200) {
 }
 
 export function handleApiError(error: unknown) {
+  // 出力(PDF/PNG)の同時実行上限超過は 500 でなく 503(混雑・リトライ可)として返す。
+  if (error instanceof RenderBusyError) {
+    return NextResponse.json(
+      { error: { message: error.message, code: "RENDER_BUSY" } },
+      { status: 503, headers: { "Retry-After": "5" } },
+    );
+  }
   if (error instanceof ApiError) {
     return NextResponse.json(
       { error: { message: error.message, code: error.code } },

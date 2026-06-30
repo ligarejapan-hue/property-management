@@ -1,5 +1,14 @@
 import { existsSync } from "node:fs";
 import { chromium, type Page } from "playwright";
+import { createRenderGate } from "./render-gate";
+
+// 同時に走る chromium 出力数をプロセス内で制限する(複数人の同時PDF/PNG出力で chromium が
+// 多重起動しメモリ/CPU を食い尽くす soft-DoS の防止)。既定2・env で調整可。超過分は短時間だけ
+// 待機し、それでも空かなければ RenderBusyError(handleApiError で 503 に変換)で穏当に断る。
+const RENDER_GATE = createRenderGate({
+  maxConcurrent: Number(process.env.SALES_SHEET_RENDER_CONCURRENCY) || 2,
+  acquireTimeoutMs: Number(process.env.SALES_SHEET_RENDER_QUEUE_TIMEOUT_MS) || 20000,
+});
 
 /** chromium 実体が導入済みか（未導入環境では出力テストを skip するために使う）。 */
 export function isChromiumAvailable(): boolean {
@@ -49,8 +58,10 @@ export async function renderHtmlToPdf(
 ): Promise<Buffer> {
   const width = `${opts.widthMm ?? 297}mm`;
   const height = `${opts.heightMm ?? 210}mm`;
-  return withPage(html, (page) =>
-    page.pdf({ width, height, printBackground: true, pageRanges: "1" }),
+  return RENDER_GATE.run(() =>
+    withPage(html, (page) =>
+      page.pdf({ width, height, printBackground: true, pageRanges: "1" }),
+    ),
   );
 }
 
@@ -68,26 +79,28 @@ export async function renderHtmlToImage(
   const heightPx = mmToPx(opts.heightMm ?? 210);
   const deviceScaleFactor = opts.scale ?? 2;
 
-  const browser = await chromium.launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: widthPx, height: heightPx },
-      deviceScaleFactor,
-    });
-    const page = await context.newPage();
-    await applyNetworkGuard(page);
+  return RENDER_GATE.run(async () => {
+    const browser = await chromium.launch();
     try {
-      await page.setContent(html, { waitUntil: "networkidle" });
-      const sheetLocator = page.locator("[data-sales-sheet-page]");
-      const count = await sheetLocator.count();
-      if (count > 0) {
-        return await sheetLocator.first().screenshot({ type });
+      const context = await browser.newContext({
+        viewport: { width: widthPx, height: heightPx },
+        deviceScaleFactor,
+      });
+      const page = await context.newPage();
+      await applyNetworkGuard(page);
+      try {
+        await page.setContent(html, { waitUntil: "networkidle" });
+        const sheetLocator = page.locator("[data-sales-sheet-page]");
+        const count = await sheetLocator.count();
+        if (count > 0) {
+          return await sheetLocator.first().screenshot({ type });
+        }
+        return await page.screenshot({ type });
+      } finally {
+        await context.close();
       }
-      return await page.screenshot({ type });
     } finally {
-      await context.close();
+      await browser.close();
     }
-  } finally {
-    await browser.close();
-  }
+  });
 }
