@@ -44,6 +44,10 @@ describe("売却DM 管理UI の配線", () => {
     const vm = read("../../components/sale-dm/variant-manager.tsx");
     // 型編集の確認は option が実際に変わったときだけ(label のみで誤った作り直し警告を出さない)。
     expect(vm).toContain("optionChanged");
+    // Codex(e421063): LP のみ変更でも、確定済み(印刷待ち)があればサーバーが確定解除するため UI も警告する。
+    expect(vm).toContain("lpUrlChanged");
+    expect(vm).toContain('r.status === "confirmed"'); // 確定件数を数えて警告判定に使う
+    expect(vm).toContain("確定が解除"); // LP変更時の確認文言
 
     const adjust = read("../../components/sale-dm/adjust-panel.tsx");
     // 保存/型変更/再生成の失敗を握り潰さずパネルに表示する。

@@ -5,8 +5,8 @@ type TrackingTxLike = {
   dmRecipientDraft: {
     findUnique: (args: {
       where: { trackingToken: string };
-      select: { id: true; lpFirstAccessAt: true; status: true };
-    }) => Promise<{ id: string; lpFirstAccessAt: Date | null; status: string } | null>;
+      select: { id: true; lpFirstAccessAt: true; status: true; variant: { select: { lpUrl: true } } };
+    }) => Promise<{ id: string; lpFirstAccessAt: Date | null; status: string; variant: { lpUrl: string | null } | null } | null>;
     update: (args: {
       where: { id: string };
       data: Prisma.DmRecipientDraftUpdateInput;
@@ -30,29 +30,39 @@ type TrackingTxLike = {
 export async function recordTrackingHit(
   tx: TrackingTxLike,
   token: string,
-): Promise<{ matched: boolean; firstHit: boolean }> {
+): Promise<{ matched: boolean; firstHit: boolean; variantLpUrl: string | null }> {
   const draft = await tx.dmRecipientDraft.findUnique({
     where: { trackingToken: token },
-    select: { id: true, lpFirstAccessAt: true, status: true },
+    // variant.lpUrl も読む: 型ごとのLP振り分け(QR遷移先を型のLPへ・未設定は既定LPへ)。
+    select: { id: true, lpFirstAccessAt: true, status: true, variant: { select: { lpUrl: true } } },
   });
-  if (!draft) return { matched: false, firstHit: false };
+  if (!draft) return { matched: false, firstHit: false, variantLpUrl: null };
+  // 型のLPは配達状態に関わらず返す(転送先を型LPに保つ)。印刷QRは confirmed の下書きに対して刷られ、
+  // mark-sent は印刷の後。送付確定前にQRがスキャンされても(計上はしないが)既定LPでなく型LPへ転送する。
+  const variantLpUrl = draft.variant?.lpUrl ?? null;
   // 送付確定(sent)前のヒット(印刷プレビューからの内部スキャン/クリック等)は
-  // A/B 反響を汚すため計上しない。送付済みになって初めて追跡を有効化する。
-  if (draft.status !== "sent") return { matched: false, firstHit: false };
+  // A/B 反響を汚すため計上しない(転送先は型LPにする)。送付済みになって初めて計上を有効化する。
+  if (draft.status !== "sent") return { matched: false, firstHit: false, variantLpUrl };
 
   // 初回ヒット(lpFirstAccessAt が未設定)か否か。公開 GET の監査を初回だけに絞るため呼び出し側へ返す。
   const firstHit = draft.lpFirstAccessAt == null;
 
-  await tx.dmRecipientDraft.update({
-    where: { id: draft.id },
-    data: {
-      lpAccessCount: { increment: 1 },
-      // 初回のみセット(2回目以降は undefined=既存値を上書きしない)。
-      ...(draft.lpFirstAccessAt ? {} : { lpFirstAccessAt: new Date() }),
-      // outcome 永続キャッシュを同期: LP アクセス ⇒ inquiry(deriveOutcome の正準定義と一致)。
-      // outcome 列を直接読む consumer/レポートが LP-only 反響を取りこぼさないようにする(冪等)。
-      outcome: "inquiry",
-    },
-  });
-  return { matched: true, firstHit };
+  try {
+    await tx.dmRecipientDraft.update({
+      where: { id: draft.id },
+      data: {
+        lpAccessCount: { increment: 1 },
+        // 初回のみセット(2回目以降は undefined=既存値を上書きしない)。
+        ...(draft.lpFirstAccessAt ? {} : { lpFirstAccessAt: new Date() }),
+        // outcome 永続キャッシュを同期: LP アクセス ⇒ inquiry(deriveOutcome の正準定義と一致)。
+        // outcome 列を直接読む consumer/レポートが LP-only 反響を取りこぼさないようにする(冪等)。
+        outcome: "inquiry",
+      },
+    });
+  } catch {
+    // 計上(counter/timestamp 更新)は best-effort。ロック競合/DBエラーで失敗しても転送先(variantLpUrl)は
+    // 維持して返す。公開 /t/ が計上失敗で既定LPへフォールバックし型ごとLP振り分けが崩れるのを防ぐ(Codex)。
+    return { matched: false, firstHit: false, variantLpUrl };
+  }
+  return { matched: true, firstHit, variantLpUrl };
 }

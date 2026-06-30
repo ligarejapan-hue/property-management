@@ -196,6 +196,8 @@ export interface SaleDmVariant {
   appeal: string;
   strength: string;
   extraInstruction: string | null;
+  // 型ごとのLP(印刷QRの遷移先)。null=既定 SALE_DM_LP_URL へ。
+  lpUrl: string | null;
 }
 
 export interface SaleDmCampaign {
@@ -268,11 +270,11 @@ export interface SaleDmVariantOptions {
   extraInstruction?: string;
 }
 
-// A/B 型(B案/C案 等)を作成。label + options 一式。
-export async function createSaleDmVariant(campaignId: string, body: { label: string; options: SaleDmVariantOptions }) {
+// A/B 型(B案/C案 等)を作成。label + options 一式 + 任意の lpUrl(型ごとのLP)。
+export async function createSaleDmVariant(campaignId: string, body: { label: string; options: SaleDmVariantOptions; lpUrl?: string }) {
   if (USE_MOCK) {
     await mockDelay();
-    return { variant: { id: `mock-${body.label}`, label: body.label, ...body.options, extraInstruction: body.options.extraInstruction ?? null } as SaleDmVariant };
+    return { variant: { id: `mock-${body.label}`, label: body.label, ...body.options, extraInstruction: body.options.extraInstruction ?? null, lpUrl: body.lpUrl ?? null } as SaleDmVariant };
   }
   return apiFetch<{ variant: SaleDmVariant }>(`/api/properties/sale-dm/campaigns/${campaignId}/variants`, {
     method: "POST",
@@ -282,7 +284,8 @@ export async function createSaleDmVariant(campaignId: string, body: { label: str
 }
 
 // A/B 型のラベル/設定を部分更新。options を実際に変えると、この型を使う未送付下書きは無効化(要再生成)。
-export async function updateSaleDmVariant(campaignId: string, variantId: string, body: { label?: string; options?: Partial<SaleDmVariantOptions> }) {
+// lpUrl は型ごとのLP(本文に影響しない=無効化なし)。null で既定LPへ戻す(クリア)。
+export async function updateSaleDmVariant(campaignId: string, variantId: string, body: { label?: string; options?: Partial<SaleDmVariantOptions>; lpUrl?: string | null }) {
   if (USE_MOCK) {
     await mockDelay();
     return { variant: { id: variantId } as SaleDmVariant };

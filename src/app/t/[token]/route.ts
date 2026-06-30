@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { recordTrackingHit } from "@/lib/sale-dm-letter/tracking-record";
-import { resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
+import { resolveLpUrl, isAbsoluteHttpUrl } from "@/lib/sale-dm-letter/tracking";
 
 // 認証不要の公開エンドポイント(proxy.ts の PUBLIC_PATHS に "/t/" を追加済み)。
 // 受け手(所有者)は本システムのログインユーザーではないため認証免除が必須。
@@ -22,13 +22,17 @@ export async function GET(
   }
 
   // 記録は best-effort(失敗しても受け手体験=LP転送を止めない)。
+  // variantLpUrl = 当該宛先の型の LP(型ごとLP振り分け)。未設定/不正値は既定 LP へフォールバック。
   let firstHit = false;
+  let variantLpUrl: string | null = null;
   try {
     const r = await recordTrackingHit(prisma, token);
     firstHit = r.firstHit;
+    variantLpUrl = r.variantLpUrl;
   } catch {
     // 記録失敗はログのみ(下の 302 判定には影響させない)。
     firstHit = false;
+    variantLpUrl = null;
   }
 
   // 初回ヒットのみ監査する。公開(未認証)エンドポイントゆえ、再訪/クローラ/プレビューや未マッチ/列挙
@@ -41,6 +45,9 @@ export async function GET(
     });
   }
 
-  // 未知トークンでも、LP 設定済みなら列挙耐性・受け手体験のため LP へ 302(本文でトークンの有無を示さない)。
-  return NextResponse.redirect(lpUrl, { status: 302, headers: { "Cache-Control": "no-store" } });
+  // 遷移先: 当該宛先の型に lpUrl があればその型のLPへ(型A→LP1/型B→LP2 の振り分け)、無ければ既定 LP へ。
+  // 型の lpUrl が不正(非絶対http)なら既定へフォールバック(保存時に検証済みだが redirect 直前にも防御)。
+  // 未知トークンは variantLpUrl=null → 既定 LP へ 302(列挙耐性・本文でトークンの有無を示さない)。
+  const target = isAbsoluteHttpUrl(variantLpUrl) ? (variantLpUrl as string) : lpUrl;
+  return NextResponse.redirect(target, { status: 302, headers: { "Cache-Control": "no-store" } });
 }

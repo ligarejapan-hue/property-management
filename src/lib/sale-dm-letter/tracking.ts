@@ -26,6 +26,12 @@ export function resolveLpUrl(): string | undefined {
   return resolveAbsoluteHttpEnv(process.env.SALE_DM_LP_URL);
 }
 
+// 型ごとLP(DmVariant.lpUrl)が遷移先として使える絶対http(s) URLか。空/相対/非httpは false →
+// route は既定LPへフォールバック(不正値で redirect しない・保存時に検証済みだが redirect 直前にも防御)。
+export function isAbsoluteHttpUrl(raw: string | null | undefined): boolean {
+  return resolveAbsoluteHttpEnv(raw ?? undefined) !== undefined;
+}
+
 /**
  * 宛先固有の追跡URLを組み立てる。
  *  - baseUrl 指定時: `<base>/t/<encoded token>`(base 末尾スラッシュは1つに正規化)

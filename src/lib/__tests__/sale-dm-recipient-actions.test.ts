@@ -3,8 +3,8 @@ import { variantLabel, isInquiry, buildOutcomePayload } from "../sale-dm-letter/
 import type { SaleDmDraft, SaleDmVariant } from "@/lib/api-client";
 
 const variants: SaleDmVariant[] = [
-  { id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
-  { id: "v2", label: "B", designTemplate: "impact", tone: "soft", length: "short", appeal: "buyer", strength: "high", extraInstruction: null },
+  { id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null },
+  { id: "v2", label: "B", designTemplate: "impact", tone: "soft", length: "short", appeal: "buyer", strength: "high", extraInstruction: null, lpUrl: null },
 ];
 
 const baseDraft: SaleDmDraft = {
