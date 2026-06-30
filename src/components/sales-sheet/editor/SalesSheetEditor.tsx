@@ -13,6 +13,7 @@ import {
   editText,
   deleteElement,
   markSavedIfCurrent,
+  exportWithSaveGuard,
 } from "@/lib/sales-sheet/editor-document";
 import { EditorCanvas } from "./EditorCanvas";
 import { ElementPanel } from "./ElementPanel";
@@ -118,8 +119,14 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     });
   }
 
-  /** Save current document via PUT; handles optimistic-lock 409. */
-  async function handleSave(): Promise<void> {
+  /**
+   * Save current document via PUT; handles optimistic-lock 409.
+   * Resolves `true` iff the editor ended CLEAN — i.e. no edit raced the in-flight
+   * save (markSavedIfCurrent cleared dirty). Export uses this to avoid emitting a
+   * stale file. The clean flag is read inside the state updater so it reflects the
+   * latest committed state, not the stale render-time closure.
+   */
+  async function handleSave(): Promise<boolean> {
     // Capture the exact document being persisted so edits made while this
     // request is in flight are NOT marked clean when the response returns.
     const sentDocument = editorState.document;
@@ -135,25 +142,36 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     if (!res.ok) throw new Error("保存に失敗しました");
     const data = (await res.json()) as { updatedAt: string };
     setSavedAt(data.updatedAt);
-    setEditorState((prev) => markSavedIfCurrent(prev, sentDocument));
+    return await new Promise<boolean>((resolve) => {
+      setEditorState((prev) => {
+        const next = markSavedIfCurrent(prev, sentDocument);
+        resolve(!next.dirty); // cleaned iff no concurrent edit kept it dirty
+        return next;
+      });
+    });
   }
 
-  /** Export as PDF or PNG. Auto-saves first when dirty. */
+  /** Export as PDF or PNG. Auto-saves first when dirty; aborts on a save race. */
   async function handleExport(format: "pdf" | "png"): Promise<void> {
-    if (editorState.dirty) await handleSave();
-    const res = await fetch(
-      `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}/export?format=${format}`,
-      { method: "POST" },
-    );
-    if (res.status === 503) throw new Error("PDF生成エンジン未準備");
-    if (!res.ok) throw new Error("出力に失敗しました");
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = format === "pdf" ? "販売図面.pdf" : "販売図面.png";
-    a.click();
-    URL.revokeObjectURL(url);
+    await exportWithSaveGuard({
+      dirty: editorState.dirty,
+      save: handleSave,
+      doExport: async () => {
+        const res = await fetch(
+          `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}/export?format=${format}`,
+          { method: "POST" },
+        );
+        if (res.status === 503) throw new Error("PDF生成エンジン未準備");
+        if (!res.ok) throw new Error("出力に失敗しました");
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = format === "pdf" ? "販売図面.pdf" : "販売図面.png";
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+    });
   }
 
   /** Delete design and navigate back to the property detail page. */
@@ -184,7 +202,9 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       {/* ── Toolbar — Task H ─────────────────────────────────────────── */}
       <EditorToolbar
         dirty={editorState.dirty}
-        onSave={handleSave}
+        onSave={async () => {
+          await handleSave();
+        }}
         onExport={handleExport}
         onDelete={handleDelete}
       />

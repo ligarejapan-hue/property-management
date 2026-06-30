@@ -215,6 +215,32 @@ export function markSavedIfCurrent(
   return markSaved(state);
 }
 
+/**
+ * Export orchestration with a save-race guard (plan-3 Task H / @codex).
+ *
+ * Export renders from the persisted (DB) document. If the editor is dirty we save
+ * first, but a concurrent edit during the in-flight save keeps the editor dirty
+ * (see {@link markSavedIfCurrent}) while the DB still holds the pre-edit version.
+ * Exporting then would download a stale file that omits the latest visible edit
+ * (breaks WYSIWYG). So when `save()` reports the editor did NOT end clean, abort
+ * instead of exporting; the user can save again and re-export.
+ *
+ * `save()` MUST resolve `true` iff the editor ended clean (not dirty) after saving.
+ */
+export async function exportWithSaveGuard(opts: {
+  dirty: boolean;
+  save: () => Promise<boolean>;
+  doExport: () => Promise<void>;
+}): Promise<void> {
+  if (opts.dirty) {
+    const cleaned = await opts.save();
+    if (!cleaned) {
+      throw new Error("保存中に編集がありました。もう一度保存してから出力してください");
+    }
+  }
+  await opts.doExport();
+}
+
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------

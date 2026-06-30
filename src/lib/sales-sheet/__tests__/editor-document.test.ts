@@ -4,7 +4,7 @@
  * RED  → run before implementation exists (module not found → all fail)
  * GREEN → after implementation, all tests pass
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   type EditorState,
   MIN_ELEMENT_SIZE_MM,
@@ -18,6 +18,7 @@ import {
   editText,
   markSaved,
   markSavedIfCurrent,
+  exportWithSaveGuard,
 } from "../editor-document";
 import {
   parseSalesSheetDocument,
@@ -497,5 +498,37 @@ describe("markSavedIfCurrent", () => {
     const next = markSavedIfCurrent(state, sent);
     expect(next.dirty).toBe(true);
     expect(next).toBe(state);
+  });
+});
+
+describe("exportWithSaveGuard", () => {
+  it("dirty=false のときは保存せず export する", async () => {
+    const save = vi.fn(async () => true);
+    const doExport = vi.fn(async () => {});
+    await exportWithSaveGuard({ dirty: false, save, doExport });
+    expect(save).not.toHaveBeenCalled();
+    expect(doExport).toHaveBeenCalledOnce();
+  });
+
+  it("dirty=true で保存がクリーン化したら save→export の順に実行", async () => {
+    const calls: string[] = [];
+    const save = vi.fn(async () => {
+      calls.push("save");
+      return true; // クリーンに保存できた
+    });
+    const doExport = vi.fn(async () => {
+      calls.push("export");
+    });
+    await exportWithSaveGuard({ dirty: true, save, doExport });
+    expect(calls).toEqual(["save", "export"]);
+  });
+
+  it("保存中に編集があり dirty のままなら export せず throw（stale 出力防止）", async () => {
+    const save = vi.fn(async () => false); // 競合編集でクリーン化されず
+    const doExport = vi.fn(async () => {});
+    await expect(
+      exportWithSaveGuard({ dirty: true, save, doExport }),
+    ).rejects.toThrow();
+    expect(doExport).not.toHaveBeenCalled();
   });
 });
