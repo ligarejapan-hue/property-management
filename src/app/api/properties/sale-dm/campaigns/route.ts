@@ -11,7 +11,7 @@ import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
-import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, DEFAULT_MODEL } from "@/lib/sale-dm-letter";
+import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, resolveLetterModel } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
 import { randomBytes } from "crypto";
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
               recipientName: sliced[i].recipientName, recipientZip: sliced[i].recipientZip,
               recipientAddress: sliced[i].recipientAddress, honorific: sliced[i].honorific,
               coOwnerCount: sliced[i].coOwnerCount,
-              body: d.body ?? "", model: process.env.SALE_DM_LETTER_MODEL ?? DEFAULT_MODEL,
+              body: d.body ?? "", model: resolveLetterModel(),
               outcomeNote: d.error ? `生成失敗(${d.error})` : null,
               trackingToken: randomBytes(8).toString("base64url"),
               generatedBy: session.id,

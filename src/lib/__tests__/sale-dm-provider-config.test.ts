@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { isSaleDmConfigured, resolveProvider } from "../sale-dm-letter";
+import { isSaleDmConfigured, resolveProvider, resolveLetterModel } from "../sale-dm-letter";
 import { OpenAiLetterProvider } from "../sale-dm-letter/providers/openai";
 import { ClaudeLetterProvider } from "../sale-dm-letter/providers/claude";
 import { MockLetterProvider } from "../sale-dm-letter/providers/mock";
@@ -65,5 +65,27 @@ describe("provider 切替: claude/mock の既存挙動は不変(回帰)", () => 
     process.env.SALE_DM_LETTER_PROVIDER = "gemini";
     expect(isSaleDmConfigured()).toBe(false);
     expect(() => resolveProvider()).toThrow(SaleDmError);
+  });
+});
+
+describe("resolveLetterModel: 永続化するモデル名は provider 既定に追従(生成と一致)", () => {
+  it("provider=openai・上書き無しは gpt-4o(=実際に生成するモデルと一致)", () => {
+    process.env.SALE_DM_LETTER_PROVIDER = "openai";
+    expect(resolveLetterModel()).toBe("gpt-4o");
+  });
+
+  it("provider=claude・上書き無しは claude-sonnet-4-6", () => {
+    process.env.SALE_DM_LETTER_PROVIDER = "claude";
+    expect(resolveLetterModel()).toBe("claude-sonnet-4-6");
+  });
+
+  it("SALE_DM_LETTER_MODEL 上書きは provider に関わらず優先", () => {
+    process.env.SALE_DM_LETTER_PROVIDER = "openai";
+    process.env.SALE_DM_LETTER_MODEL = "gpt-4o-mini";
+    expect(resolveLetterModel()).toBe("gpt-4o-mini");
+  });
+
+  it("provider 未指定(既定)は claude-sonnet-4-6", () => {
+    expect(resolveLetterModel()).toBe("claude-sonnet-4-6");
   });
 });
