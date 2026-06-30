@@ -1,5 +1,5 @@
 CREATE TABLE "sales_sheet_designs" (
-  "id" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "property_id" UUID NOT NULL,
   "title" TEXT NOT NULL DEFAULT '無題の販売図面',
   "document" JSONB NOT NULL,

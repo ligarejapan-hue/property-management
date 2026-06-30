@@ -949,7 +949,7 @@ model FieldSurveyPinPhoto {
 // ============================================================
 
 model SalesSheetDesign {
-  id           String   @id @default(cuid())
+  id           String   @id @default(uuid()) @db.Uuid
   propertyId   String   @map("property_id") @db.Uuid
   title        String   @default("無題の販売図面")
   document     Json
