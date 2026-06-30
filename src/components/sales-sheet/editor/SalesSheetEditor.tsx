@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import type { EditorState } from "@/lib/sales-sheet/editor-document";
@@ -80,6 +80,9 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     dirty: false,
   });
   const [savedAt, setSavedAt] = useState(initial.updatedAt);
+  // Mirror savedAt in a ref so export (which may run right after an auto-save)
+  // sends the LATEST persisted version, not the stale render-time closure.
+  const savedAtRef = useRef(initial.updatedAt);
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
@@ -142,6 +145,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     if (!res.ok) throw new Error("保存に失敗しました");
     const data = (await res.json()) as { updatedAt: string };
     setSavedAt(data.updatedAt);
+    savedAtRef.current = data.updatedAt; // keep the export version check current
     return await new Promise<boolean>((resolve) => {
       setEditorState((prev) => {
         const next = markSavedIfCurrent(prev, sentDocument);
@@ -157,10 +161,14 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       dirty: editorState.dirty,
       save: handleSave,
       doExport: async () => {
+        // Send the loaded version so the route returns 409 if another user saved
+        // since — avoids exporting a newer DB version than the on-screen design.
+        const params = new URLSearchParams({ format, expectedUpdatedAt: savedAtRef.current });
         const res = await fetch(
-          `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}/export?format=${format}`,
+          `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}/export?${params.toString()}`,
           { method: "POST" },
         );
+        if (res.status === 409) throw new Error("他で更新されました。再読込してください");
         if (res.status === 503) throw new Error("PDF生成エンジン未準備");
         if (!res.ok) throw new Error("出力に失敗しました");
         const blob = await res.blob();

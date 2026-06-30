@@ -98,10 +98,12 @@ const MOCK_DESIGN = {
   updatedBy: "u1",
 };
 
-function makeReq(format?: string) {
-  const url = format
-    ? `http://localhost/api/properties/p1/sales-sheets/sheet-1/export?format=${format}`
-    : "http://localhost/api/properties/p1/sales-sheets/sheet-1/export";
+function makeReq(format?: string, expectedUpdatedAt?: string) {
+  const params = new URLSearchParams();
+  if (format) params.set("format", format);
+  if (expectedUpdatedAt) params.set("expectedUpdatedAt", expectedUpdatedAt);
+  const qs = params.toString();
+  const url = `http://localhost/api/properties/p1/sales-sheets/sheet-1/export${qs ? `?${qs}` : ""}`;
   return new Request(url, { method: "POST" });
 }
 
@@ -211,5 +213,15 @@ describe("POST /sales-sheets/[sheetId]/export", () => {
     expect(resPdf.headers.get("Cache-Control")).toBe("no-store");
     const resPng = await POST(makeReq("png"), ctx);
     expect(resPng.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("expectedUpdatedAt が DB の版と一致すれば出力する (200)", async () => {
+    const res = await POST(makeReq("pdf", "2024-01-15T10:00:00.000Z"), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("expectedUpdatedAt が DB の版と不一致なら 409（別ユーザーの保存で画面と異なる版の出力を防ぐ）", async () => {
+    const res = await POST(makeReq("pdf", "2020-01-01T00:00:00.000Z"), ctx);
+    expect(res.status).toBe(409);
   });
 });

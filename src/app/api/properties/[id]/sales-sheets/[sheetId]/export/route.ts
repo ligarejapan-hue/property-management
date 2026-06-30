@@ -40,6 +40,13 @@ export async function POST(
     const design = await getDesign(id, sheetId);
     if (!design) throw new ApiError(404, "販売図面が見つかりません", "NOT_FOUND");
 
+    // 出力も楽観ロック: クライアントが読み込んだ版(expectedUpdatedAt)と DB が一致しない＝別ユーザーが
+    // 後から保存した場合、画面と異なる版を出力してしまうため 409 で再読込を促す。版未指定なら従来どおり出力。
+    const expectedUpdatedAt = new URL(request.url).searchParams.get("expectedUpdatedAt");
+    if (expectedUpdatedAt && design.updatedAt.toISOString() !== expectedUpdatedAt) {
+      throw new ApiError(409, "他で更新されました。最新データを取得してから再試行してください", "CONFLICT");
+    }
+
     // 破損 document は 422（Zod バリデーションエラーが handleApiError で変換される）
     const doc = parseSalesSheetDocument(design.document);
 
