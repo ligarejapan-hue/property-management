@@ -91,6 +91,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           where: { campaignId: id, variantId, status: { not: "sent" }, body: { not: "" } },
           data: { body: "", status: "draft", confirmedAt: null },
         });
+      } else if (lpUrlChanged) {
+        // LP変更は本文を変えないが、確定済み(=印刷対象)の宛先の遷移先(/t/ がスキャン時に解決する先)を変える。
+        // committed バッチが黙って別LPへ飛ぶのを防ぐため確定を解除し再承認を促す(本文は保持=再生成不要・Codex)。
+        await tx.dmRecipientDraft.updateMany({
+          where: { campaignId: id, variantId, status: "confirmed" },
+          data: { status: "draft", confirmedAt: null },
+        });
       }
       // 更新中に別 request がこの型の宛先を sent 化していたら、送った構成を書き換えたことになる → ロールバック。
       const sentAfter = await tx.dmRecipientDraft.count({ where: { campaignId: id, variantId, status: "sent" } });

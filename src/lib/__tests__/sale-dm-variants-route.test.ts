@@ -166,13 +166,17 @@ describe("PATCH variant (更新)", () => {
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
-  it("lpUrl の更新を保存・本文は無効化しない(LPは本文に影響しないため要再生成にしない)", async () => {
+  it("lpUrl 変更は確定を解除するが本文は無効化しない(committedバッチの黙ったLP変更を防ぐ・Codex)", async () => {
     pm.dmRecipientDraft.count.mockResolvedValue(0);
     pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, lpUrl: "https://lp-new.example.com" });
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never, ctxV);
     expect(res.status).toBe(200);
     expect(pm.dmVariant.update.mock.calls[0][0].data.lpUrl).toBe("https://lp-new.example.com");
-    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    // 確定済み(印刷対象)の宛先を確定解除(status confirmed→draft, confirmedAt null)。本文は保持(消さない=再生成不要)。
+    const inval = pm.dmRecipientDraft.updateMany.mock.calls[0][0];
+    expect(inval.where).toMatchObject({ campaignId: "c1", variantId: "v1", status: "confirmed" });
+    expect(inval.data).toMatchObject({ status: "draft", confirmedAt: null });
+    expect(inval.data.body).toBeUndefined(); // 本文は消さない
   });
 
   it("lpUrl=null で型のLPをクリア(既定LPへ戻す)", async () => {

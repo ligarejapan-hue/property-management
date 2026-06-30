@@ -47,16 +47,22 @@ export async function recordTrackingHit(
   // 初回ヒット(lpFirstAccessAt が未設定)か否か。公開 GET の監査を初回だけに絞るため呼び出し側へ返す。
   const firstHit = draft.lpFirstAccessAt == null;
 
-  await tx.dmRecipientDraft.update({
-    where: { id: draft.id },
-    data: {
-      lpAccessCount: { increment: 1 },
-      // 初回のみセット(2回目以降は undefined=既存値を上書きしない)。
-      ...(draft.lpFirstAccessAt ? {} : { lpFirstAccessAt: new Date() }),
-      // outcome 永続キャッシュを同期: LP アクセス ⇒ inquiry(deriveOutcome の正準定義と一致)。
-      // outcome 列を直接読む consumer/レポートが LP-only 反響を取りこぼさないようにする(冪等)。
-      outcome: "inquiry",
-    },
-  });
+  try {
+    await tx.dmRecipientDraft.update({
+      where: { id: draft.id },
+      data: {
+        lpAccessCount: { increment: 1 },
+        // 初回のみセット(2回目以降は undefined=既存値を上書きしない)。
+        ...(draft.lpFirstAccessAt ? {} : { lpFirstAccessAt: new Date() }),
+        // outcome 永続キャッシュを同期: LP アクセス ⇒ inquiry(deriveOutcome の正準定義と一致)。
+        // outcome 列を直接読む consumer/レポートが LP-only 反響を取りこぼさないようにする(冪等)。
+        outcome: "inquiry",
+      },
+    });
+  } catch {
+    // 計上(counter/timestamp 更新)は best-effort。ロック競合/DBエラーで失敗しても転送先(variantLpUrl)は
+    // 維持して返す。公開 /t/ が計上失敗で既定LPへフォールバックし型ごとLP振り分けが崩れるのを防ぐ(Codex)。
+    return { matched: false, firstHit: false, variantLpUrl };
+  }
   return { matched: true, firstHit, variantLpUrl };
 }
