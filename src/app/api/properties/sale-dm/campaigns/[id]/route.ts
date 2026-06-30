@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
+import { writeAuditLog } from "@/lib/audit";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -44,6 +45,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       lpFirstAccessAt: r.lpFirstAccessAt,
       phoneInquiryAt: r.phoneInquiryAt,
     }));
+    // ワークスペース閲覧は宛名・住所・本文(PII)を返す read。print/export と同様、PII アクセスを
+    // 非PIIメタで監査する(AuditLog での PII アクセス追跡。閲覧しただけで痕跡が残らない穴を塞ぐ)。
+    // count は field_staff scope 適用後の可視件数=実際に露出した宛先数(drafts 全体で過大計上しない)。
+    await writeAuditLog({
+      userId: session.id,
+      action: "sale_dm_campaign_view",
+      targetTable: "dm_campaigns",
+      targetId: id,
+      detail: { campaignId: id, count: recipients.length, viewedAt: new Date().toISOString() },
+    });
     return NextResponse.json(
       { campaign: { ...campaign, recipients } },
       { headers: { "Cache-Control": "no-store" } },

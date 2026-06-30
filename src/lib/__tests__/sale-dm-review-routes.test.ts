@@ -35,6 +35,7 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { isSaleDmConfigured, generateLetters } from "@/lib/sale-dm-letter";
 import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
+import { writeAuditLog } from "@/lib/audit";
 import { GET as getCampaign } from "../../app/api/properties/sale-dm/campaigns/[id]/route";
 import { PATCH as patchDraft } from "../../app/api/properties/sale-dm/drafts/[id]/route";
 import { POST as confirmDrafts } from "../../app/api/properties/sale-dm/drafts/confirm/route";
@@ -96,6 +97,43 @@ describe("GET campaign", () => {
     grant("property");
     const res = await getCampaign(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
     expect(res.status).toBe(403);
+  });
+  it("ワークスペース閲覧(宛名/住所/本文PIIを返す)を非PIIメタで監査する(sale_dm_campaign_view・印刷/出力と統一)", async () => {
+    grant(...ALL);
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "x", createdBy: "u1", variants: [], recipients: [
+      { id: "r1", recipientName: "田中 一郎", recipientAddress: "東京都〇〇区", body: "本文です", status: "sent" },
+      { id: "r2", recipientName: "佐藤 花子", recipientAddress: "東京都△△区", body: "本文2", status: "draft" },
+    ] });
+    const res = await getCampaign(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
+    expect(res.status).toBe(200);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const arg = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(arg.action).toBe("sale_dm_campaign_view");
+    expect(arg.targetTable).toBe("dm_campaigns");
+    expect(arg.targetId).toBe("c1");
+    expect(arg.detail.campaignId).toBe("c1");
+    expect(arg.detail.count).toBe(2); // 可視宛先数(PII露出件数)
+    // 非PII: 宛名・住所・本文を監査 detail に残さない。
+    expect(JSON.stringify(arg.detail)).not.toContain("田中");
+    expect(JSON.stringify(arg.detail)).not.toContain("本文");
+    expect(JSON.stringify(arg.detail)).not.toContain("東京都");
+  });
+  it("監査件数は field_staff の可視分のみ(担当外の隠れ宛先を数えない)", async () => {
+    grant(...ALL);
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "x", createdBy: "u1", variants: [], recipients: [
+      { id: "r1", body: "b1", property: { createdBy: "u1", assignedTo: "x" } },
+      { id: "r2", body: "b2", property: { createdBy: "x", assignedTo: "x" } }, // 担当外→不可視
+    ] });
+    const res = await getCampaign(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
+    expect(res.status).toBe(200);
+    const arg = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(arg.detail.count).toBe(1); // r1 のみ可視
+  });
+  it("権限不足(403)ではワークスペース閲覧を監査しない(PII未露出)", async () => {
+    grant("property");
+    await getCampaign(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 });
 

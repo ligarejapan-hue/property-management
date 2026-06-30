@@ -684,6 +684,24 @@ describe("sanitizeAuditDetail: 売却促進DM の識別子は管理画面で追�
     expect(outcome.undeliverableCleared).toBe(true);
   });
 
+  it("sale_dm_campaign_view(ワークスペース閲覧監査)は campaignId/count/viewedAt を残し PII を [REDACTED]", () => {
+    const view = sanitizeAuditDetail("sale_dm_campaign_view", {
+      campaignId: "c-uuid",
+      count: 12,
+      viewedAt: "2026-06-30T00:00:00Z",
+      recipientName: "田中 一郎",
+      recipientAddress: "東京都〇〇区",
+      body: "本文",
+    }) as Record<string, unknown>;
+    expect(view.campaignId).toBe("c-uuid");
+    expect(view.count).toBe(12);
+    expect(view.viewedAt).toBe("2026-06-30T00:00:00Z");
+    // PII(宛名/住所/本文)は allowlist 外 + denylist で必ずマスク。
+    expect(view.recipientName).toBe(REDACTED);
+    expect(view.recipientAddress).toBe(REDACTED);
+    expect(view.body).toBe(REDACTED);
+  });
+
   it("action 固有 allowlist はスコープされる: 未登録 action では sale_dm の操作メタは残らない", () => {
     const out = sanitizeAuditDetail("unknown_action", { generated: 9, regeneratedAt: "x" }) as Record<string, unknown>;
     expect(out.generated).toBe(REDACTED);
