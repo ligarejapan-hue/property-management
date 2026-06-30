@@ -131,6 +131,17 @@ export async function assertDocumentImagesAuthorized(
   doc: SalesSheetDocument,
   ctx: { session: ApiSession; permissions: PermissionEntry[]; propertyId: string },
 ): Promise<void> {
+  // 出力(authorizeAndInlineDocumentImages)と同じ /uploads 画像数上限を保存境界でも課す。
+  // 無いと 51 枚以上の document が保存できてしまい export で必ず 422＝「保存できたのに出力不能」に
+  // なる。認可ループ（storage/authz）を回す前に fail-fast で拒否する。key/URL はメッセージに出さない。
+  const inlineCount = doc.elements.filter(
+    (el) => el.type === "image" && !el.src.startsWith("data:"),
+  ).length;
+  if (inlineCount > MAX_INLINE_IMAGES) {
+    throw new z.ZodError([
+      { code: z.ZodIssueCode.custom, message: "図面に含まれる画像が多すぎます", path: ["elements"] },
+    ]);
+  }
   const storage = getStorage();
   for (const el of doc.elements) {
     if (el.type !== "image") continue;

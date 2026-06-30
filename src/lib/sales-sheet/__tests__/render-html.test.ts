@@ -17,6 +17,11 @@ describe("renderDocumentToHtml", () => {
     expect(html).toContain("size:297mm 210mm");
     expect(html).toContain("3,480万円");
   });
+
+  it("ページに isolation:isolate を付与する（stacking context 化・負zでも背景に隠れない／preview と整合）", () => {
+    const html = renderDocumentToHtml(sampleDocument);
+    expect(html).toMatch(/isolation\s*:\s*isolate/);
+  });
 });
 
 describe("renderDocumentToHtml — font-family XSSエスケープ (CSS breakout防止)", () => {

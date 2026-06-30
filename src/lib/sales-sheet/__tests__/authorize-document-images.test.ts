@@ -378,6 +378,26 @@ describe("assertDocumentImagesAuthorized（保存境界の認可ガード）", (
     );
     await expect(assertDocumentImagesAuthorized(doc, CTX)).rejects.toThrow();
   });
+
+  it("[DoS] /uploads 画像が上限超の document は保存拒否（認可ループ前に fail-fast）", async () => {
+    // export は >50 を 422 で弾くため、保存できても出力不能になる。保存境界でも同じ上限を課し
+    // 「保存できたのに export 不能」を防ぐ。認可（authorizeUploadAccess）を回す前に拒否する。
+    // key 解決・認可は通る前提（=上限チェックが無ければ全件 authorize されて成功してしまう）にする。
+    keyFromUrl.mockImplementation((url: string) => url.replace("/uploads/", ""));
+    (authorizeUploadAccess as unknown as Mock).mockResolvedValue("ok");
+    (isUploadKeyOwnedByProperty as unknown as Mock).mockResolvedValue(true);
+    const images = Array.from({ length: 51 }, (_, i) => ({
+      id: `i${i}`, type: "image" as const, x: 0, y: 0, w: 5, h: 5, z: 1,
+      src: `/uploads/properties/p1/${i}.jpg`, fit: "cover" as const,
+    }));
+    const doc: SalesSheetDocument = {
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: images,
+    };
+    await expect(assertDocumentImagesAuthorized(doc, CTX)).rejects.toThrow();
+    expect(authorizeUploadAccess).not.toHaveBeenCalled(); // fail-fast: 認可前に拒否
+  });
 });
 
 describe("isImageKeyAuthorizedForProperty（保存境界・サーバ生成共用の認可ヘルパ）", () => {

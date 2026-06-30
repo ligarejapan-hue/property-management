@@ -367,4 +367,18 @@ describe("保存境界の geometry 制限", () => {
     ).rejects.toThrow();
     expect(db.salesSheetDesign.updateMany).not.toHaveBeenCalled();
   });
+
+  it("負の z を持つ要素は create で 422（API 直叩き対策・DB 未呼出）", async () => {
+    // エディタの reducer は負 z を作らないが、POST/PUT 直叩きで z:-1 が来得る。
+    // 負 z は export(render-html)で背景裏に隠れるため保存境界で弾く。
+    const db = makeDb({ create: vi.fn() });
+    const doc = {
+      ...sampleDocument,
+      elements: sampleDocument.elements.map((el) =>
+        el.id === "title" ? { ...el, z: -1 } : el,
+      ),
+    };
+    await expect(createDesign({ ...validInput, document: doc }, db)).rejects.toThrow();
+    expect(db.salesSheetDesign.create).not.toHaveBeenCalled();
+  });
 });

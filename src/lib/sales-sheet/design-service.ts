@@ -60,6 +60,11 @@ function assertSavableDocument(document: SalesSheetDocument): void {
     ) {
       throw makeDocumentError("図面の要素サイズ・位置が範囲外です");
     }
+    // z は非負のみ。負だと export(render-html)で白背景の裏に描画され要素が消える。
+    // editor reducer は負 z を作らないが、API 直叩きの document を保存境界で弾く。
+    if (el.z < 0) {
+      throw makeDocumentError("図面の要素の重ね順が不正です");
+    }
   }
 }
 
