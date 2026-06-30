@@ -102,6 +102,19 @@ describe("recordTrackingHit", () => {
     const r = await recordTrackingHit(tx as never, "nope");
     expect(r.variantLpUrl).toBeNull();
   });
+
+  it("送付前(confirmed)でも variant.lpUrl は返す(計上はしないが転送先は型のLPにする・Codex)", async () => {
+    const tx = {
+      dmRecipientDraft: {
+        findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null, status: "confirmed", variant: { lpUrl: "https://lp-b.example.com" } })),
+        update: vi.fn(async () => ({ id: "r1" })),
+      },
+    };
+    const r = await recordTrackingHit(tx as never, "tok");
+    expect(r.matched).toBe(false); // 送付前=計上しない
+    expect(r.variantLpUrl).toBe("https://lp-b.example.com"); // でも型のLPは返す(転送先を型LPに保つ)
+    expect(tx.dmRecipientDraft.update).not.toHaveBeenCalled(); // counting はしない
+  });
 });
 
 import { describe as d2, it as i2, expect as e2, beforeEach as b2 } from "vitest";
@@ -198,5 +211,15 @@ d2("GET /t/[token]", () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValueOnce({ id: "r1", lpFirstAccessAt: null, status: "sent", variant: { lpUrl: "not-a-url" } });
     const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
     e2(res.headers.get("Location")).toBe("https://default-lp.example.com");
+  });
+
+  i2("送付前(confirmed)でも型に lpUrl があればその型のLPへ 302(計上はしないが転送先は型LP・Codex)", async () => {
+    process.env.SALE_DM_LP_URL = "https://default-lp.example.com";
+    const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> } };
+    pm.dmRecipientDraft.findUnique.mockResolvedValueOnce({ id: "r1", lpFirstAccessAt: null, status: "confirmed", variant: { lpUrl: "https://variant-b-lp.example.com" } });
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(302);
+    e2(res.headers.get("Location")).toBe("https://variant-b-lp.example.com"); // 既定でなく型LPへ
+    e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled(); // 送付前は計上しない
   });
 });

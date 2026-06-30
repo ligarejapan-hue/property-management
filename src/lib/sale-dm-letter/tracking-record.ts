@@ -37,9 +37,12 @@ export async function recordTrackingHit(
     select: { id: true, lpFirstAccessAt: true, status: true, variant: { select: { lpUrl: true } } },
   });
   if (!draft) return { matched: false, firstHit: false, variantLpUrl: null };
+  // 型のLPは配達状態に関わらず返す(転送先を型LPに保つ)。印刷QRは confirmed の下書きに対して刷られ、
+  // mark-sent は印刷の後。送付確定前にQRがスキャンされても(計上はしないが)既定LPでなく型LPへ転送する。
+  const variantLpUrl = draft.variant?.lpUrl ?? null;
   // 送付確定(sent)前のヒット(印刷プレビューからの内部スキャン/クリック等)は
-  // A/B 反響を汚すため計上しない。送付済みになって初めて追跡を有効化する。
-  if (draft.status !== "sent") return { matched: false, firstHit: false, variantLpUrl: null };
+  // A/B 反響を汚すため計上しない(転送先は型LPにする)。送付済みになって初めて計上を有効化する。
+  if (draft.status !== "sent") return { matched: false, firstHit: false, variantLpUrl };
 
   // 初回ヒット(lpFirstAccessAt が未設定)か否か。公開 GET の監査を初回だけに絞るため呼び出し側へ返す。
   const firstHit = draft.lpFirstAccessAt == null;
@@ -55,6 +58,5 @@ export async function recordTrackingHit(
       outcome: "inquiry",
     },
   });
-  // 型に lpUrl があればそれを返す(route が遷移先に使う)。未設定は null → route が既定LPへ。
-  return { matched: true, firstHit, variantLpUrl: draft.variant?.lpUrl ?? null };
+  return { matched: true, firstHit, variantLpUrl };
 }
