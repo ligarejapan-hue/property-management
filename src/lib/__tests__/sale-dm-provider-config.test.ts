@@ -68,6 +68,26 @@ describe("provider 切替: claude/mock の既存挙動は不変(回帰)", () => 
   });
 });
 
+describe("provider=off: 管理者の明示的な停止(env/useMock を上書きして確実に止める)", () => {
+  it("provider=off はキーがあっても isSaleDmConfigured=false", () => {
+    process.env.SALE_DM_LETTER_PROVIDER = "off";
+    process.env.ANTHROPIC_API_KEY = "k";
+    expect(isSaleDmConfigured()).toBe(false);
+  });
+
+  it("provider=off は useMock=true より優先で isSaleDmConfigured=false(確実に停止)", () => {
+    process.env.SALE_DM_LETTER_PROVIDER = "off";
+    process.env.NEXT_PUBLIC_USE_MOCK = "true";
+    expect(isSaleDmConfigured()).toBe(false);
+  });
+
+  it("provider=off の resolveProvider は NOT_CONFIGURED(useMock より優先)", () => {
+    process.env.SALE_DM_LETTER_PROVIDER = "off";
+    process.env.NEXT_PUBLIC_USE_MOCK = "true";
+    expect(() => resolveProvider()).toThrow(SaleDmError);
+  });
+});
+
 describe("resolveLetterModel: 永続化するモデル名は provider 既定に追従(生成と一致)", () => {
   it("provider=openai・上書き無しは gpt-4o(=実際に生成するモデルと一致)", () => {
     process.env.SALE_DM_LETTER_PROVIDER = "openai";

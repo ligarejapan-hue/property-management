@@ -4,9 +4,10 @@ import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
-import { isSaleDmConfigured, generateLetters } from "@/lib/sale-dm-letter";
+import { isSaleDmConfigured, generateLetters, resolveProvider } from "@/lib/sale-dm-letter";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
+import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { resolveDraftOptions } from "@/lib/sale-dm-letter/override";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
@@ -15,14 +16,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { session, permissions } = await requireSaleDmAccess();
     // 再生成も有料AI呼び出し(1通)+ オーナーPII の外部送信のため sale_dm:generate を必須化(campaign 作成と統一)。
     if (!hasPermission(permissions, "sale_dm", "generate")) throw new ApiError(403, "AIによるDM生成の権限がありません", "FORBIDDEN");
-    if (!isSaleDmConfigured()) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
-    // 差出人(env)未設定なら fail-closed。resolveSender の "(差出人名 未設定)"/空 で再生成すると
+    // 売却DM 設定は DB→env で解決(管理画面の設定を反映)。
+    const saleDmCfg = await loadSaleDmConfig();
+    if (!isSaleDmConfigured(saleDmCfg)) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
+    // 差出人未設定なら fail-closed。resolveSender の "(差出人名 未設定)"/空 で再生成すると
     // 差出人欄が使えない手紙になるため、有料生成の前に弾く(campaign 作成と同方針)。
-    if (!isSenderConfigured()) throw new ApiError(503, "差出人情報(SALE_DM_SENDER_NAME / SALE_DM_SENDER_CONTACT)が未設定です", "SENDER_NOT_CONFIGURED");
-    // 印刷の郵送QRには絶対URL(SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL)が必須。未設定だと再生成(課金)しても
-    // 印刷 route が 503 で出力できず、印刷不能な下書きに課金されるだけになる。生成前に確認し fail-closed
-    // (campaign POST の R28 ゲートと統一・Codex R34 で再生成側の欠落を是正)。
-    if (!resolveTrackingBaseUrl() || !resolveLpUrl()) throw new ApiError(503, "印刷に必要なURL(SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL)が未設定です", "PRINT_URL_NOT_CONFIGURED");
+    if (!isSenderConfigured(saleDmCfg)) throw new ApiError(503, "差出人情報(差出人名 / 連絡先)が未設定です", "SENDER_NOT_CONFIGURED");
+    // 印刷の郵送QRには絶対URL(追跡URL / LP URL)が必須。未設定だと再生成(課金)しても印刷 route が 503 で
+    // 出力できず、印刷不能な下書きに課金されるだけになる。生成前に確認し fail-closed(campaign POST と統一)。
+    if (!resolveTrackingBaseUrl(saleDmCfg) || !resolveLpUrl(saleDmCfg)) throw new ApiError(503, "印刷に必要なURL(追跡URL / LP URL)が未設定です", "PRINT_URL_NOT_CONFIGURED");
     // 課金確認: 再生成も有料AI+PII外部送信のため、campaign 作成と同じく明示確認(confirmed:true)を要求する。
     // stale tab/誤クリックの1クリックで無確認の課金・PII送信が起きないようにする(UI は確認後 true を送る)。
     const requestBody = await parseJsonBody(request);
@@ -45,7 +47,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // 送付済み(sent)の宛先は再生成(本文書き換え)できない(送った内容/集計の改竄防止)。
     if (draft.status === "sent") throw new ApiError(409, "送付済みの宛先は再生成できません", "ALREADY_SENT");
     const v = draft.variant;
-    const sender = resolveSender();
+    const sender = resolveSender(saleDmCfg);
     const { drafts } = await generateLetters([{
       recipient: {
         representativeName: draft.recipientName, honorific: draft.honorific, coOwnerCount: draft.coOwnerCount,
@@ -58,7 +60,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         draft.overrideJson as Parameters<typeof resolveDraftOptions>[1],
         sender,
       ),
-    }]);
+    }], { provider: resolveProvider(saleDmCfg) });
     const body = drafts[0]?.body;
     if (!body) throw new ApiError(502, "再生成に失敗しました", "GENERATION_FAILED");
     // 生成は外部呼び出しで時間がかかり、その間に並行で (a) sent 確定 / (b) 割当 variant の設定変更 が起こり得る。

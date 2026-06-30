@@ -6,50 +6,55 @@ import { buildLetterPrompt } from "./prompt";
 import { MockLetterProvider } from "./providers/mock";
 import { ClaudeLetterProvider } from "./providers/claude";
 import { OpenAiLetterProvider } from "./providers/openai";
+import { saleDmConfigFromEnv, type SaleDmResolvedConfig } from "./config";
 
 export const MAX_GENERATE_ITEMS = 50;
 const DEFAULT_CONCURRENCY = 5;
-// provider 別の既定モデル(SALE_DM_LETTER_MODEL で上書き可)。
+// provider 別の既定モデル(SALE_DM_LETTER_MODEL / 設定画面で上書き可)。
 export const DEFAULT_MODEL = "claude-sonnet-4-6";
 export const DEFAULT_OPENAI_MODEL = "gpt-4o";
 
-// 生成・永続化で使うモデル名を一元解決する(provider 別の既定・SALE_DM_LETTER_MODEL で上書き)。
+// 各 reader は解決済み設定 cfg(DB→env)を受け取る。no-arg は env のみ=従来挙動(後方互換)。
+// DB 設定を効かせる route は loadSaleDmConfig() の結果を渡す。
+
+// 生成・永続化で使うモデル名を一元解決する(provider 別の既定・上書き優先)。
 // resolveProvider(生成側)と campaign 作成(draft.model 保存側)が同じ値を使うことで、保存した
 // model と実際に生成したモデルがズレない(OpenAI 生成なのに claude を記録、を防ぐ)。
-export function resolveLetterModel(): string {
-  const override = process.env.SALE_DM_LETTER_MODEL;
-  if (override) return override;
-  return process.env.SALE_DM_LETTER_PROVIDER === "openai" ? DEFAULT_OPENAI_MODEL : DEFAULT_MODEL;
+export function resolveLetterModel(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): string {
+  if (cfg.model) return cfg.model;
+  return cfg.provider === "openai" ? DEFAULT_OPENAI_MODEL : DEFAULT_MODEL;
 }
 
-export function isSaleDmConfigured(): boolean {
-  if (process.env.NEXT_PUBLIC_USE_MOCK === "true") return true;
-  const provider = process.env.SALE_DM_LETTER_PROVIDER;
-  if (provider === "mock") return true;
-  if (provider === "claude") return Boolean(process.env.ANTHROPIC_API_KEY);
-  if (provider === "openai") return Boolean(process.env.OPENAI_API_KEY);
+export function isSaleDmConfigured(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): boolean {
+  // 管理者が明示的に「停止(off)」を選んだら、env/useMock より優先で確実に止める(fail-closed)。
+  if (cfg.provider === "off") return false;
+  if (cfg.useMock) return true;
+  if (cfg.provider === "mock") return true;
+  if (cfg.provider === "claude") return Boolean(cfg.anthropicApiKey);
+  if (cfg.provider === "openai") return Boolean(cfg.openaiApiKey);
   return false;
 }
 
-export function resolveProvider(): LetterProvider {
-  if (process.env.NEXT_PUBLIC_USE_MOCK === "true") return new MockLetterProvider();
-  const provider = process.env.SALE_DM_LETTER_PROVIDER;
-  if (provider === "mock") return new MockLetterProvider();
-  if (provider === "claude") {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      throw new SaleDmError("NOT_CONFIGURED", "ANTHROPIC_API_KEY が未設定です");
-    }
-    return new ClaudeLetterProvider({ apiKey, model: resolveLetterModel() });
+export function resolveProvider(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): LetterProvider {
+  // 明示的な停止(off)は env/useMock より優先(生成側でも確実に止める)。
+  if (cfg.provider === "off") {
+    throw new SaleDmError("NOT_CONFIGURED", "売却DM生成は停止に設定されています");
   }
-  if (provider === "openai") {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new SaleDmError("NOT_CONFIGURED", "OPENAI_API_KEY が未設定です");
+  if (cfg.useMock) return new MockLetterProvider();
+  if (cfg.provider === "mock") return new MockLetterProvider();
+  if (cfg.provider === "claude") {
+    if (!cfg.anthropicApiKey) {
+      throw new SaleDmError("NOT_CONFIGURED", "Anthropic(Claude) APIキーが未設定です");
     }
-    return new OpenAiLetterProvider({ apiKey, model: resolveLetterModel() });
+    return new ClaudeLetterProvider({ apiKey: cfg.anthropicApiKey, model: resolveLetterModel(cfg) });
   }
-  throw new SaleDmError("NOT_CONFIGURED", "売却DM生成が未設定です(SALE_DM_LETTER_PROVIDER)");
+  if (cfg.provider === "openai") {
+    if (!cfg.openaiApiKey) {
+      throw new SaleDmError("NOT_CONFIGURED", "OpenAI(ChatGPT) APIキーが未設定です");
+    }
+    return new OpenAiLetterProvider({ apiKey: cfg.openaiApiKey, model: resolveLetterModel(cfg) });
+  }
+  throw new SaleDmError("NOT_CONFIGURED", "売却DM生成が未設定です(プロバイダ未選択)");
 }
 
 export interface GeneratedDraft {

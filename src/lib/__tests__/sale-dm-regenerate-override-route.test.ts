@@ -25,6 +25,7 @@ const generateSpy = vi.fn(async (...args: unknown[]) => {
 vi.mock("@/lib/sale-dm-letter", () => ({
   generateLetters: (...args: unknown[]) => generateSpy(...args),
   isSaleDmConfigured: () => true,
+  resolveProvider: () => ({ name: "mock", generate: async () => ({ body: "x" }) }),
 }));
 
 import { describe, it, expect, beforeEach } from "vitest";

@@ -369,6 +369,57 @@ export function saleDmExportUrl(campaignId: string): string {
   return `/api/properties/sale-dm/campaigns/${campaignId}/export`;
 }
 
+// ---------- 売却DM 設定(管理者) ----------
+// 設定状況。APIキーは値を返さず hasAnthropicKey/hasOpenaiKey(設定済/未設定)のみ。
+export interface SaleDmSettings {
+  provider: string | null;
+  model: string | null;
+  trackingBaseUrl: string | null;
+  lpUrl: string | null;
+  senderName: string | null;
+  senderContact: string | null;
+  hasAnthropicKey: boolean;
+  hasOpenaiKey: boolean;
+  encryptionConfigured: boolean;
+  updatedAt: string | null;
+}
+
+const EMPTY_SALE_DM_SETTINGS: SaleDmSettings = {
+  provider: null, model: null, trackingBaseUrl: null, lpUrl: null,
+  senderName: null, senderContact: null, hasAnthropicKey: false, hasOpenaiKey: false,
+  encryptionConfigured: false, updatedAt: null,
+};
+
+export async function fetchSaleDmSettings(): Promise<{ data: SaleDmSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_SALE_DM_SETTINGS } };
+  }
+  return apiFetch<{ data: SaleDmSettings }>("/api/admin/sale-dm-settings");
+}
+
+// 部分更新。APIキーは指定時のみ送る(空文字=クリア・未指定=現状維持)。
+export async function updateSaleDmSettings(body: {
+  provider?: string | null;
+  model?: string;
+  trackingBaseUrl?: string;
+  lpUrl?: string;
+  senderName?: string;
+  senderContact?: string;
+  anthropicApiKey?: string;
+  openaiApiKey?: string;
+}): Promise<{ data: SaleDmSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_SALE_DM_SETTINGS } };
+  }
+  return apiFetch<{ data: SaleDmSettings }>("/api/admin/sale-dm-settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------- Next Actions ----------
 
 export async function fetchNextActions(
