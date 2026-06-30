@@ -3,6 +3,7 @@ import { decryptSecret } from "./secret-crypto";
 import {
   mergeSaleDmConfig,
   saleDmConfigFromEnv,
+  saleDmLpUrlFromEnv,
   type SaleDmResolvedConfig,
 } from "./config";
 import { resolveLpUrl } from "./tracking";
@@ -51,6 +52,7 @@ export async function loadSaleDmLpUrl(): Promise<string | undefined> {
   } catch {
     dbLp = null; // DB未接続/テーブル無等は env フォールバック(fail-safe)。
   }
-  const env = saleDmConfigFromEnv();
-  return resolveLpUrl({ ...env, lpUrl: dbLp && dbLp.trim().length > 0 ? dbLp : env.lpUrl });
+  // env も LP のみ読む(saleDmConfigFromEnv は使わない=APIキーを request-local に載せない)。
+  const lpUrl = dbLp && dbLp.trim().length > 0 ? dbLp : saleDmLpUrlFromEnv();
+  return resolveLpUrl({ lpUrl });
 }

@@ -1,10 +1,16 @@
 import { vi } from "vitest";
 vi.mock("@/lib/prisma", () => ({ default: { saleDmConfig: { findUnique: vi.fn() } } }));
+// saleDmConfigFromEnv(全 env=APIキー含む を読む)を spy 化(実装は passthrough)。
+// 公開 /t 用 loadSaleDmLpUrl がこれを呼ばない=キーを materialize しないことを検証するため。
+vi.mock("../sale-dm-letter/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../sale-dm-letter/config")>();
+  return { ...actual, saleDmConfigFromEnv: vi.fn(actual.saleDmConfigFromEnv) };
+});
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import crypto from "crypto";
 import prismaMock from "@/lib/prisma";
-import { saleDmConfigFromEnv } from "../sale-dm-letter/config";
+import { saleDmConfigFromEnv, saleDmLpUrlFromEnv } from "../sale-dm-letter/config";
 import { loadSaleDmConfig, loadSaleDmLpUrl } from "../sale-dm-letter/config-store";
 import { encryptSecret } from "../sale-dm-letter/secret-crypto";
 
@@ -123,5 +129,24 @@ describe("loadSaleDmLpUrl: 公開/t用・既定LP URLだけ解決(APIキー列�
     process.env.SALE_DM_LP_URL = "https://env-lp.example.com";
     pm.saleDmConfig.findUnique.mockRejectedValue(new Error("db down"));
     expect(await loadSaleDmLpUrl()).toBe("https://env-lp.example.com");
+  });
+
+  it("全設定env読み込み(saleDmConfigFromEnv=APIキーも読む)を呼ばない(公開経路でキーを materialize しない)", async () => {
+    process.env.SALE_DM_LP_URL = "https://env-lp.example.com";
+    process.env.ANTHROPIC_API_KEY = "sk-should-not-be-read";
+    pm.saleDmConfig.findUnique.mockResolvedValue({ lpUrl: null });
+    await loadSaleDmLpUrl();
+    expect(saleDmConfigFromEnv).not.toHaveBeenCalled();
+  });
+});
+
+describe("saleDmLpUrlFromEnv: LP URL だけを読む env リーダー(秘匿キーを読まない)", () => {
+  it("SALE_DM_LP_URL を trim して返す", () => {
+    process.env.SALE_DM_LP_URL = "  https://lp.example.com  ";
+    expect(saleDmLpUrlFromEnv()).toBe("https://lp.example.com");
+  });
+  it("未設定/空白は null", () => {
+    process.env.SALE_DM_LP_URL = "   ";
+    expect(saleDmLpUrlFromEnv()).toBeNull();
   });
 });

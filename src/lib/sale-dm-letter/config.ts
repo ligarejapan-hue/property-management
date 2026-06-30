@@ -33,6 +33,13 @@ export function saleDmConfigFromEnv(): SaleDmResolvedConfig {
   };
 }
 
+// 公開トラッキング(/t)用: 既定LP URL の env 値だけを読む(APIキー等の秘匿 env は読み込まない)。
+// saleDmConfigFromEnv は ANTHROPIC/OPENAI_API_KEY もオブジェクトに載せてしまうため、未認証の公開
+// 経路で課金キーを request-local に materialize しないよう、LP 専用の最小リーダーを分ける。
+export function saleDmLpUrlFromEnv(): string | null {
+  return trimOrNull(process.env.SALE_DM_LP_URL);
+}
+
 // DB 行(非秘匿項目)+ 復号済みキー + env をマージ。DB 値(非null/非空)が優先・無ければ env。
 // 復号はこの関数の外(config-store)で行い、ここには復号済み(or null)を渡す純関数に保つ。
 export function mergeSaleDmConfig(

@@ -24,7 +24,10 @@ export function resolveTrackingBaseUrl(cfg: SaleDmResolvedConfig = saleDmConfigF
 }
 
 // 短縮URL /t/ の遷移先 既定LP(設定: lpUrl)。未設定/非絶対は undefined → /t/ は 404・print は 503。
-export function resolveLpUrl(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): string | undefined {
+// 参照するのは lpUrl だけ(Pick で受ける)。公開 /t は秘匿キーを含まない最小オブジェクトを渡せる。
+export function resolveLpUrl(
+  cfg: Pick<SaleDmResolvedConfig, "lpUrl"> = saleDmConfigFromEnv(),
+): string | undefined {
   return resolveAbsoluteHttpEnv(cfg.lpUrl ?? undefined);
 }
 
