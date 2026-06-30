@@ -136,6 +136,236 @@ export async function postComment(
   });
 }
 
+// ---------- Sale DM (売却促進DM) ----------
+
+export interface CreateSaleDmCampaignBody {
+  name: string;
+  // 差出人(senderName/senderContact)は送らない。route が env 既定で補完する。
+  options: {
+    designTemplate: string;
+    tone: string;
+    length: string;
+    appeal: string;
+    strength: string;
+    extraInstruction?: string;
+  };
+  filters?: Record<string, string>;
+  confirmed: boolean; // 課金確認(AI生成は有料+オーナーPII外部送信)。UI は確認後 true を送る。
+  // 二重作成(再送信/別タブ/連打)防止の冪等性キー。作成試行ごとに安定生成し、成功で更新する。
+  idempotencyKey?: string;
+}
+
+export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { campaignId: "mock-campaign", generated: 0, failed: 0, truncated: false };
+  }
+  return apiFetch<{ campaignId: string; generated?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
+    "/api/properties/sale-dm/campaigns",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export interface SaleDmDraft {
+  id: string;
+  variantId: string;
+  propertyId: string;
+  recipientName: string;
+  recipientZip: string | null;
+  recipientAddress: string | null;
+  honorific: string;
+  coOwnerCount: number; // 同送付先の共有者数(>1 で宛名に「他共有者様」を付す)
+  body: string;
+  status: string;
+  outcome: string;
+  deliveryStatus: string;
+  lpFirstAccessAt: string | null;
+  phoneInquiryAt: string | null;
+}
+
+export interface SaleDmVariant {
+  id: string;
+  label: string;
+  designTemplate: string;
+  tone: string;
+  length: string;
+  appeal: string;
+  strength: string;
+  extraInstruction: string | null;
+}
+
+export interface SaleDmCampaign {
+  id: string;
+  name: string;
+  status: string;
+  variants: SaleDmVariant[];
+  recipients: SaleDmDraft[];
+}
+
+export async function fetchSaleDmCampaign(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { campaign: { id, name: "モック売却DM", status: "draft", variants: [], recipients: [] } as SaleDmCampaign };
+  }
+  return apiFetch<{ campaign: SaleDmCampaign }>(`/api/properties/sale-dm/campaigns/${id}`);
+}
+
+// outcome PATCH(配達結果 / 電話反響)。payload 型はインライン(循環 import 回避)。
+export async function updateSaleDmOutcome(
+  id: string,
+  payload: { deliveryStatus?: string; phoneInquiry?: boolean },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id };
+  }
+  return apiFetch<{ id: string }>(`/api/properties/sale-dm/drafts/${id}/outcome`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// 下書きの本文 / 割当型(variantId)の部分更新。
+export async function patchSaleDmDraft(id: string, patch: { body?: string; variantId?: string }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id };
+  }
+  return apiFetch<{ id: string }>(`/api/properties/sale-dm/drafts/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+// 割当型 + 個別上書きで本文を AI 再生成する。
+export async function regenerateSaleDmDraft(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id, body: "（mock再生成）本文" };
+  }
+  return apiFetch<{ id: string; body: string }>(`/api/properties/sale-dm/drafts/${id}/regenerate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // 課金確認(有料AI+オーナーPII外部送信)。UI が確認ダイアログの後に呼ぶ。サーバーも必須。
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+// ---------- A/B 型(variant)管理 + 割当 + 宛先不明の手動解除 ----------
+
+export interface SaleDmVariantOptions {
+  designTemplate: string;
+  tone: string;
+  length: string;
+  appeal: string;
+  strength: string;
+  extraInstruction?: string;
+}
+
+// A/B 型(B案/C案 等)を作成。label + options 一式。
+export async function createSaleDmVariant(campaignId: string, body: { label: string; options: SaleDmVariantOptions }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { variant: { id: `mock-${body.label}`, label: body.label, ...body.options, extraInstruction: body.options.extraInstruction ?? null } as SaleDmVariant };
+  }
+  return apiFetch<{ variant: SaleDmVariant }>(`/api/properties/sale-dm/campaigns/${campaignId}/variants`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// A/B 型のラベル/設定を部分更新。options を実際に変えると、この型を使う未送付下書きは無効化(要再生成)。
+export async function updateSaleDmVariant(campaignId: string, variantId: string, body: { label?: string; options?: Partial<SaleDmVariantOptions> }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { variant: { id: variantId } as SaleDmVariant };
+  }
+  return apiFetch<{ variant: SaleDmVariant }>(`/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// A/B 型を削除。割当済みの下書きがある型は 409(別型へ移してから)。
+export async function deleteSaleDmVariant(campaignId: string, variantId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { deleted: variantId };
+  }
+  return apiFetch<{ deleted: string }>(`/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}`, {
+    method: "DELETE",
+  });
+}
+
+// 宛先を型へ割り当て。auto=均等割り(sequential/random)、manual=指定(recipientId→variantId)。送付済みは対象外。
+export async function assignSaleDmVariants(
+  campaignId: string,
+  body: { mode: "auto" | "manual"; order?: "sequential" | "random"; assignments?: { recipientId: string; variantId: string }[] },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { assigned: 0, perVariant: {} as Record<string, number> };
+  }
+  return apiFetch<{ assigned: number; perVariant: Record<string, number> }>(`/api/properties/sale-dm/campaigns/${campaignId}/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// 物件の「宛先不明」フラグを手動解除(任意で dmStatus を send/hold へ戻す)。
+export async function clearSaleDmUndeliverable(propertyId: string, body?: { restoreDmStatus?: "send" | "hold" }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: propertyId, dmStatus: body?.restoreDmStatus ?? "no_send" };
+  }
+  return apiFetch<{ id: string; dmStatus: string }>(`/api/properties/${propertyId}/clear-dm-undeliverable`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+// 下書き(draft)を一括で確定(confirmed)にする。印刷対象は confirmed のみ。
+export async function confirmSaleDmDrafts(ids: string[]) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { count: ids.length };
+  }
+  return apiFetch<{ count: number }>("/api/properties/sale-dm/drafts/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+}
+
+// 確定済み(confirmed)の下書きを送付済み(sent)にする(配達結果/反響の入力が解禁)。
+export async function markSaleDmDraftSent(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id, status: "sent" };
+  }
+  return apiFetch<{ id: string; status: string }>(`/api/properties/sale-dm/drafts/${id}/mark-sent`, {
+    method: "POST",
+  });
+}
+
+// 印刷用 HTML / DM差込CSV の URL(GET・別タブ/ダウンロード)。
+export function saleDmPrintUrl(campaignId: string): string {
+  return `/api/properties/sale-dm/campaigns/${campaignId}/print`;
+}
+export function saleDmExportUrl(campaignId: string): string {
+  return `/api/properties/sale-dm/campaigns/${campaignId}/export`;
+}
+
 // ---------- Next Actions ----------
 
 export async function fetchNextActions(

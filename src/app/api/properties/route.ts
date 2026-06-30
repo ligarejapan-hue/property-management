@@ -67,6 +67,7 @@ export async function GET(request: NextRequest) {
             realEstateNumber: true,
             registryStatus: true,
             dmStatus: true,
+            dmUndeliverableAt: true,
             caseStatus: true,
             introductionRoute: true,
             isArchived: true,

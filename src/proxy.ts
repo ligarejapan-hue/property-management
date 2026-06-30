@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads"];
+// 前方一致（startsWith）で公開するパス。
+// "/t/" = 売却DMの宛先固有 追跡リンク(opaque token のみ・PII を含まない)。受け手(所有者)は
+// 本システムの認証ユーザーではないため認証免除が必須。proxy 本体は単体テストで実行できないため、
+// isPublicPath を export し sale-dm-proxy-public-path.test.ts で /t/ の公開を担保する。
+const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/"];
 
 // 完全一致で公開するパス。前方一致（startsWith）だと /api/health-xxx 等まで認証免除が
 // 広がってしまうため、必要最小の範囲（完全一致）でのみ公開する。
@@ -11,7 +15,7 @@ const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads
 //   ここで素通しできないと、合言葉付きの cron 呼び出しも /login へ redirect され実行されない。
 const PUBLIC_EXACT_PATHS = ["/api/health", "/api/attachments/cleanup-run"];
 
-function isPublicPath(pathname: string): boolean {
+export function isPublicPath(pathname: string): boolean {
   if (PUBLIC_EXACT_PATHS.includes(pathname)) return true;
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 }

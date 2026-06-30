@@ -22,6 +22,9 @@ const RESOURCES = [
   { key: "audit_log", label: "監査ログ", actions: ["read"] },
   // PR2: 謄本自動取得（admin のみ既定付与。実 API/UIボタンは後続 PR）。
   { key: "registry", label: "謄本自動取得", actions: ["auto_fetch"] },
+  // 売却促進DM の AI 生成（課金を伴う高リスク操作。謄本自動取得と同様に専用権限で限定。
+  // テンプレートでも付与できるよう users 編集UI と同じ行を置く＝テンプレート運用環境で 403 を防ぐ）。
+  { key: "sale_dm", label: "売却促進DM(AI生成・課金)", actions: ["generate"] },
   // S1b-1: 画面保護・謄本PDF権限の土台（enforcement は後続 PR）。
   { key: "screen_protection", label: "画面保護", actions: ["bypass"] },
   { key: "registry_pdf", label: "謄本PDF", actions: ["preview", "download"] },

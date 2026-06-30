@@ -49,6 +49,7 @@ export async function buildPropertyListWhere(
     propertyType,
     registryStatus,
     dmStatus,
+    undeliverable,
     caseStatus,
     introductionRoute,
     assignedTo,
@@ -67,6 +68,8 @@ export async function buildPropertyListWhere(
   if (propertyType) where.propertyType = propertyType;
   if (registryStatus) where.registryStatus = registryStatus;
   if (dmStatus) where.dmStatus = dmStatus;
+  // 宛先不明(返送連動で立った dmUndeliverableAt)で絞り込む。
+  if (undeliverable === "1") where.dmUndeliverableAt = { not: null };
   if (caseStatus) where.caseStatus = caseStatus;
   if (introductionRoute) where.introductionRoute = introductionRoute;
   if (assignedTo) where.assignedTo = assignedTo;

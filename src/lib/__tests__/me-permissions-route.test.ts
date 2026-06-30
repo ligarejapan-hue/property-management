@@ -72,6 +72,17 @@ vi.mock("@/lib/registry-ocr/client", () => ({
   isRegistryOcrConfigured: vi.fn(),
 }));
 
+vi.mock("@/lib/sale-dm-letter", () => ({
+  isSaleDmConfigured: vi.fn(),
+}));
+vi.mock("@/lib/sale-dm-letter/tracking", () => ({
+  resolveTrackingBaseUrl: vi.fn(() => "https://app.example.com"),
+  resolveLpUrl: vi.fn(() => "https://lp.example.com"),
+}));
+vi.mock("@/lib/sale-dm-letter/sender", () => ({
+  isSenderConfigured: vi.fn(() => true),
+}));
+
 import {
   ApiError,
   getApiSession,
@@ -81,6 +92,9 @@ import {
 import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
 import { isRegistryAutoFetchProviderConfigured } from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
+import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
+import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
+import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { GET } from "@/app/api/me/permissions/route";
 
 const SESSION = {
@@ -103,6 +117,7 @@ beforeEach(() => {
   (isCorporateLookupConfigured as Mock).mockReturnValue(true);
   (isRegistryAutoFetchProviderConfigured as Mock).mockReturnValue(false);
   (isRegistryOcrConfigured as Mock).mockReturnValue(false);
+  (isSaleDmConfigured as Mock).mockReturnValue(false);
 });
 
 describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
@@ -113,6 +128,25 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(body.permissions).toEqual(PERMS);
   });
 
+  it("saleDmLetter は AI provider + 印刷必須URL(tracking/LP) + 差出人(sender) が揃って初めて true", async () => {
+    (isSaleDmConfigured as Mock).mockReturnValue(true);
+    // provider + 両URL + 差出人 → true
+    let body = await (await GET()).json();
+    expect(body.capabilities.saleDmLetter).toBe(true);
+    // tracking URL 欠落 → false(campaign 作成が 503 になるため一覧の作成導線を出さない)
+    (resolveTrackingBaseUrl as Mock).mockReturnValueOnce(undefined);
+    body = await (await GET()).json();
+    expect(body.capabilities.saleDmLetter).toBe(false);
+    // LP URL 欠落でも false
+    (resolveLpUrl as Mock).mockReturnValueOnce(undefined);
+    body = await (await GET()).json();
+    expect(body.capabilities.saleDmLetter).toBe(false);
+    // 差出人 env 欠落でも false(生成/印刷の fail-closed と UI を揃える・Codex)
+    (isSenderConfigured as Mock).mockReturnValueOnce(false);
+    body = await (await GET()).json();
+    expect(body.capabilities.saleDmLetter).toBe(false);
+  });
+
   it("capabilities は { corporateLookup, registryAutoFetch } の boolean を素通しで返す", async () => {
     const res = await GET();
     const body = await res.json();
@@ -121,6 +155,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       registryAutoFetch: false,
       // office_staff（非 admin）かつ OCR 未設定 → false
       registryOcrDraft: false,
+      saleDmLetter: false,
     });
     expect(isCorporateLookupConfigured).toHaveBeenCalledTimes(1);
     expect(isRegistryAutoFetchProviderConfigured).toHaveBeenCalledTimes(1);
@@ -134,6 +169,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       corporateLookup: true,
       registryAutoFetch: true,
       registryOcrDraft: false,
+      saleDmLetter: false,
     });
   });
 
@@ -162,6 +198,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       "corporateLookup",
       "registryAutoFetch",
       "registryOcrDraft",
+      "saleDmLetter",
     ]);
   });
 
