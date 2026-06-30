@@ -78,6 +78,24 @@ describe("createRenderGate: 同時実行を maxConcurrent に制限(chromium枯�
     expect(await gate.run(async () => "ok")).toBe("ok");
   });
 
+  it("待機列が maxQueue を超えたら即 RenderBusyError(待機列も無制限に積まない=Node側DoS防止)", async () => {
+    const gate = createRenderGate({ maxConcurrent: 1, acquireTimeoutMs: 10000, maxQueue: 2 });
+    const d = deferred<string>();
+    const p1 = gate.run(() => d.promise); // 唯一のslotを保持(active=1)
+    const p2 = gate.run(async () => "q1"); // 待機1
+    const p3 = gate.run(async () => "q2"); // 待機2(満杯)
+    expect(gate.queued()).toBe(2);
+    const overflow = gate.run(async () => "overflow"); // 満杯超
+    overflow.catch(() => {}); // unhandled rejection 抑止
+    expect(gate.queued()).toBe(2); // 満杯超は積み増さない(即時reject)
+    await expect(overflow).rejects.toBeInstanceOf(RenderBusyError);
+    d.resolve("done");
+    expect(await p1).toBe("done");
+    expect(await p2).toBe("q1");
+    expect(await p3).toBe("q2");
+    expect(gate.active()).toBe(0);
+  });
+
   it("maxConcurrent は最低1に丸める(0/負値でも停止しない)", async () => {
     const gate = createRenderGate({ maxConcurrent: 0, acquireTimeoutMs: 1000 });
     expect(await gate.run(async () => "ok")).toBe("ok");

@@ -8,6 +8,8 @@ import { createRenderGate } from "./render-gate";
 const RENDER_GATE = createRenderGate({
   maxConcurrent: Number(process.env.SALES_SHEET_RENDER_CONCURRENCY) || 2,
   acquireTimeoutMs: Number(process.env.SALES_SHEET_RENDER_QUEUE_TIMEOUT_MS) || 20000,
+  // 待機列の上限。超過分は待たせず 503(混雑)で即断る(待機側の無制限増加=Node側DoSの防止)。
+  maxQueue: Number(process.env.SALES_SHEET_RENDER_MAX_QUEUE) || 20,
 });
 
 /** chromium 実体が導入済みか（未導入環境では出力テストを skip するために使う）。 */

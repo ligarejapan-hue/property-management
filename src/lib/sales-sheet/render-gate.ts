@@ -31,9 +31,12 @@ interface Waiter {
 export function createRenderGate(opts: {
   maxConcurrent: number;
   acquireTimeoutMs: number;
+  /** 待機列の上限。超過分は待たせず即 RenderBusyError(待機列の無制限増加=Node側DoSを防ぐ)。既定100。 */
+  maxQueue?: number;
 }): RenderGate {
   const max = Math.max(1, Math.floor(opts.maxConcurrent) || 1);
   const timeoutMs = Math.max(1, opts.acquireTimeoutMs);
+  const maxQueue = Math.max(0, Math.floor(opts.maxQueue ?? 100));
   let active = 0;
   const queue: Waiter[] = [];
 
@@ -41,6 +44,11 @@ export function createRenderGate(opts: {
     if (active < max) {
       active++;
       return Promise.resolve();
+    }
+    // 待機列が上限なら待たせず即断る(待機列の無制限増加=保留タイマー/Promise/ハンドラ滞留による
+    // Node側 soft-DoS の防止)。chromium 同時数だけでなく待機側も有界にする。
+    if (queue.length >= maxQueue) {
+      return Promise.reject(new RenderBusyError());
     }
     return new Promise<void>((resolve, reject) => {
       const waiter: Waiter = { resolve, reject, timer: null };
