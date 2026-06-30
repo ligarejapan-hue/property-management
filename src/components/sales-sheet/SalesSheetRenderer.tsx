@@ -157,6 +157,11 @@ export function SalesSheetRenderer({ document }: { document: SalesSheetDocument 
   const doc = parseSalesSheetDocument(document);
   const pageStyle: CSSProperties = {
     position: "relative",
+    // Establish a stacking context so element z-indices are scoped to the page:
+    // a stray negative z then paints above the page background (between background
+    // and content) instead of disappearing behind it. Defense-in-depth alongside
+    // the non-negative z guards in editor-document (sendToBack / setZ).
+    isolation: "isolate",
     width: mm(doc.page.width),
     height: mm(doc.page.height),
     background: "#ffffff",

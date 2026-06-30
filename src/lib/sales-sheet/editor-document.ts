@@ -120,18 +120,32 @@ export function sendToBack(state: EditorState, id: string): EditorState {
   const idx = findIdx(document, id);
   if (idx === -1) return state;
   const minZ = Math.min(...document.elements.map((e) => e.z));
-  return replaceElement(state, idx, applyGeom(document.elements[idx], { z: minZ - 1 }));
+  const targetZ = minZ - 1;
+  // z must stay non-negative: the renderer uses z directly as a CSS z-index, and a
+  // negative z paints behind the page's own white background (the element vanishes
+  // in the editor and exported PDF/PNG). When going below 0 would be required,
+  // renormalize — put the target at 0 and shift every other element up by the
+  // deficit, preserving relative order.
+  if (targetZ < 0) {
+    const shift = -targetZ;
+    const elements = document.elements.map((e, i) =>
+      i === idx ? applyGeom(e, { z: 0 }) : applyGeom(e, { z: e.z + shift }),
+    );
+    return { ...state, dirty: true, document: { ...document, elements } };
+  }
+  return replaceElement(state, idx, applyGeom(document.elements[idx], { z: targetZ }));
 }
 
 /**
  * Set element z to an explicit integer value (non-integer input is truncated).
+ * Clamped to >= 0 — a negative z renders behind the page background (see sendToBack).
  * Sets dirty=true. No-op if id is not found.
  */
 export function setZ(state: EditorState, id: string, z: number): EditorState {
   const { document } = state;
   const idx = findIdx(document, id);
   if (idx === -1) return state;
-  return replaceElement(state, idx, applyGeom(document.elements[idx], { z: Math.trunc(z) }));
+  return replaceElement(state, idx, applyGeom(document.elements[idx], { z: Math.max(0, Math.trunc(z)) }));
 }
 
 /**

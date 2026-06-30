@@ -261,6 +261,35 @@ describe("sendToBack", () => {
     const state = makeState(doc);
     expect(sendToBack(state, "ghost")).toBe(state);
   });
+
+  it("最小 z が 0 のとき背面操作で負にせず 0 にし、他要素を上へシフト（順序維持・非負）", () => {
+    // z: a=0, b=1, c=2 → 旧実装は min(0)-1=-1 で c が負（背景裏に隠れる）になっていた
+    const d = makeDoc([
+      { id: "a", type: "text", x: 0, y: 0, w: 50, h: 10, z: 0, content: "a" },
+      { id: "b", type: "text", x: 0, y: 20, w: 50, h: 10, z: 1, content: "b" },
+      { id: "c", type: "text", x: 0, y: 40, w: 50, h: 10, z: 2, content: "c" },
+    ]);
+    const next = sendToBack(makeState(d), "c");
+    const z = (id: string) => next.document.elements.find((e) => e.id === id)!.z;
+    expect(z("c")).toBe(0); // 対象は最背面=0（負にしない）
+    expect(next.document.elements.every((e) => e.z >= 0)).toBe(true); // 全て非負
+    expect(z("c")).toBeLessThan(z("a")); // c は厳密に最背面
+    expect(z("c")).toBeLessThan(z("b"));
+    expect(z("a")).toBeLessThan(z("b")); // 既存の相対順序は維持
+  });
+
+  it("背面連打しても z が負にならない（@codex 回帰: 要素が背景に隠れない）", () => {
+    let state = makeState(
+      makeDoc([
+        { id: "a", type: "text", x: 0, y: 0, w: 50, h: 10, z: 1, content: "a" },
+        { id: "b", type: "text", x: 0, y: 20, w: 50, h: 10, z: 2, content: "b" },
+      ]),
+    );
+    state = sendToBack(state, "a");
+    state = sendToBack(state, "b"); // 旧実装はここで z=-1
+    state = sendToBack(state, "a");
+    expect(state.document.elements.every((e) => e.z >= 0)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -293,6 +322,11 @@ describe("setZ", () => {
   it("is a no-op for unknown id", () => {
     const state = makeState(doc);
     expect(setZ(state, "ghost", 5)).toBe(state);
+  });
+
+  it("負の z は 0 にクランプする（背景裏に隠れない）", () => {
+    const next = setZ(makeState(doc), "t1", -5);
+    expect(next.document.elements.find((e) => e.id === "t1")!.z).toBe(0);
   });
 });
 
