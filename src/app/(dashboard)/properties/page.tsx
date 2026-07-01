@@ -1125,7 +1125,7 @@ function PropertiesPageInner() {
           {error}
           <button
             onClick={fetchProperties}
-            className="ml-2 text-red-800 dark:text-red-300 underline hover:no-underline"
+            className="ml-2 text-red-800 underline hover:no-underline"
           >
             再試行
           </button>
@@ -1135,7 +1135,7 @@ function PropertiesPageInner() {
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
-          <span className="text-sm font-medium text-blue-800 dark:text-blue-300">
+          <span className="text-sm font-medium text-blue-800">
             {selectedIds.size} 件選択中
           </span>
           <select

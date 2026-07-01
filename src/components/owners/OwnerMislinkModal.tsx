@@ -483,7 +483,7 @@ export function OwnerMislinkModal({
           previewResult.eligible &&
           executeState !== "executed" && (
             <div className="rounded-md border border-red-300 bg-red-50 p-2">
-              <p className="mb-1 text-xs font-semibold text-red-800 dark:text-red-300">
+              <p className="mb-1 text-xs font-semibold text-red-800">
                 ⚠ この操作は元に戻せません
               </p>
 
@@ -498,7 +498,7 @@ export function OwnerMislinkModal({
               )}
 
               {executeState === "confirm1" && (
-                <div className="flex flex-col gap-1 text-xs text-red-800 dark:text-red-300">
+                <div className="flex flex-col gap-1 text-xs text-red-800">
                   <p>
                     操作:{" "}
                     <span className="font-mono">

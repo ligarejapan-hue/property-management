@@ -190,7 +190,7 @@ export default function QualityCheckPage() {
         </div>
       ) : filteredIssues.length === 0 ? (
         <div className="rounded-lg border border-green-200 bg-green-50 p-8 text-center">
-          <p className="text-sm text-green-700 dark:text-green-400">
+          <p className="text-sm text-green-700">
             問題は検出されませんでした
           </p>
         </div>

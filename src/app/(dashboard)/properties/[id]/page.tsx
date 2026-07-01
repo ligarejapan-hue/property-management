@@ -432,12 +432,12 @@ export default function PropertyDetailPage({
   if (error || !property) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-        <p className="text-sm text-red-700 dark:text-red-400">
+        <p className="text-sm text-red-700">
           {error ?? "物件が見つかりません"}
         </p>
         <Link
           href="/properties"
-          className="mt-3 inline-block text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+          className="mt-3 inline-block text-sm text-indigo-600 hover:underline"
         >
           物件一覧に戻る
         </Link>
@@ -532,8 +532,8 @@ export default function PropertyDetailPage({
       {/* Warning badge */}
       {!property.investigationConfirmedAt && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2">
-          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-          <span className="text-sm text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="h-4 w-4 text-amber-600" />
+          <span className="text-sm text-amber-800">
             調査情報が未確認です。最新の情報を取得してください。
           </span>
         </div>
