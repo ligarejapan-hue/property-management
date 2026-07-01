@@ -231,6 +231,7 @@ export interface SaleMansionOverrides {
 export interface SaleMansionInput {
   property: {
     address: string;
+    roomNo?: string | null;
     exclusiveArea?: string | null;
     balconyArea?: string | null;
     layoutType?: string | null;
@@ -257,6 +258,7 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
   const title = b.name ? `売マンション　${b.name}` : "売マンション";
   const rows = [
     row("所在地", p.address),
+    row("部屋番号", p.roomNo),
     row("交通", o.access),
     row("専有面積", fmtArea(p.exclusiveArea)),
     row("バルコニー面積", fmtArea(p.balconyArea)),

@@ -75,6 +75,7 @@ const LAND_PROPERTY = {
   roadType: null,
   roadWidth: null,
   occupancyStatus: null,
+  roomNo: null,
   exclusiveArea: null,
   balconyArea: null,
   layoutType: null,
@@ -88,6 +89,7 @@ const LAND_PROPERTY = {
 const MANSION_PROPERTY = {
   ...LAND_PROPERTY,
   propertyType: "apartment_unit",
+  roomNo: "301",
   exclusiveArea: "62.45",
   balconyArea: "8.20",
   layoutType: "2LDK",
@@ -229,6 +231,7 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(lastTemplateId()).toBe("sale-mansion");
     expect(JSON.stringify(lastDocument())).toContain("売マンション");
     expect(JSON.stringify(lastDocument())).toContain("テストレジデンス");
+    expect(JSON.stringify(lastDocument())).toContain("301"); // 部屋番号が図面に入る
   });
 
   it("201 — 区分（旧 unit）: sale-mansion（legacy propertyType も対応）", async () => {

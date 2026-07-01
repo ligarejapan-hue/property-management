@@ -37,6 +37,7 @@ describe("buildSaleMansionDocument", () => {
   const input: SaleMansionInput = {
     property: {
       address: "東京都渋谷区神南1-2-3",
+      roomNo: "301",
       exclusiveArea: "62.45",
       balconyArea: "8.20",
       layoutType: "2LDK",
@@ -69,6 +70,7 @@ describe("buildSaleMansionDocument", () => {
     expect(texts(doc)).toContain("売マンション");
     expect(texts(doc)).toContain("神南レジデンス");
     expect(texts(doc)).toContain("4,980万円");
+    expect(tableRow(doc, "部屋番号")).toBe("301");
     expect(tableRow(doc, "専有面積")).toBe("62.45㎡");
     expect(tableRow(doc, "管理費")).toBe("12,000円/月");
     expect(tableRow(doc, "所在階")).toBe("3階 / 全10階");

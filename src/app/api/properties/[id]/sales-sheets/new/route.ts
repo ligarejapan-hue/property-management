@@ -100,6 +100,7 @@ export async function POST(
         roadWidth: true,
         occupancyStatus: true,
         // 区分マンション用
+        roomNo: true,
         exclusiveArea: true,
         balconyArea: true,
         layoutType: true,
@@ -174,6 +175,7 @@ export async function POST(
       document = buildSaleMansionDocument({
         property: {
           address: property.address,
+          roomNo: property.roomNo,
           exclusiveArea: property.exclusiveArea?.toString() ?? null,
           balconyArea: property.balconyArea?.toString() ?? null,
           layoutType: property.layoutType,
