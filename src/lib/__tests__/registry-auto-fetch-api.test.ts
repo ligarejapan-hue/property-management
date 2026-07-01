@@ -281,6 +281,18 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(pm.importJob.create).not.toHaveBeenCalled();
   });
 
+  it("realEstateNumber override（所在検索の候補取得）を fetchRegistryPdf に使う（物件は番号未保持）", async () => {
+    const provider = successProvider();
+    setProperty({ realEstateNumber: null });
+    await runRegistryAutoFetch(
+      { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN-123" },
+      provider,
+    );
+    expect(provider.fetchRegistryPdf).toHaveBeenCalledWith(
+      expect.objectContaining({ realEstateNumber: "CAND-REN-123" }),
+    );
+  });
+
   it("3. property access scope（field_staff・担当外）で 403・provider 未到達", async () => {
     const provider = successProvider();
     setProperty({ createdBy: "someone-else", assignedTo: "another" });

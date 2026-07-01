@@ -52,6 +52,11 @@ export interface RunRegistryAutoFetchArgs {
   propertyId: string;
   /** 課金を伴う操作のため明示確認フラグ。true 以外は実行しない。 */
   confirmed: boolean;
+  /**
+   * 取得キーの上書き（所在検索で server 側再解決した候補の不動産番号／cond③）。
+   * 指定時はこれを fetchRegistryPdf に使う（物件は番号未保持のため）。未指定は物件の realEstateNumber。
+   */
+  realEstateNumber?: string | null;
 }
 
 // provider 失敗（RegistryFetchError）の分類コード → 安全な HTTP ステータス。
@@ -579,8 +584,9 @@ export async function runRegistryAutoFetch(
   //    いずれの失敗でも scheduled で固着させないよう、catch で必ずロック解除する。
   try {
     // 取得キーは非PIIのみ（realEstateNumber / 物件UUID）。所有者名・住所は渡さない。
+    // cond③: 所在検索の候補取得では server 再解決した override を優先（物件は番号未保持）。
     const fetchResult = await provider.fetchRegistryPdf({
-      realEstateNumber: property.realEstateNumber,
+      realEstateNumber: args.realEstateNumber ?? property.realEstateNumber,
       ref: property.id,
     });
 

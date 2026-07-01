@@ -12,6 +12,7 @@ import {
   runRegistryAutoFetch,
   getRegistryFetchProvider,
 } from "@/lib/registry-fetch/auto-fetch";
+import { resolveRegistryCandidate } from "@/lib/registry-fetch/search";
 
 // ---------- POST /api/properties/[id]/registry/auto-fetch ----------
 // 謄本自動取得（PR4・mock provider のみ）。本番外部接続・Playwright・課金・env 追加・
@@ -67,6 +68,34 @@ export async function POST(
         "謄本自動取得プロバイダは未設定です",
         "REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED",
       );
+    }
+
+    // 所在検索の候補を選んで取得する場合（candidateRef 指定）。cond③: client の候補参照は信頼せず、
+    // server 側で当該物件向けに再検索して不動産番号を解決してから取得する。
+    const candidateRefRaw = (body as { candidateRef?: unknown } | null)?.candidateRef;
+    const candidateRef =
+      typeof candidateRefRaw === "string" ? candidateRefRaw.trim() : "";
+
+    if (candidateRef) {
+      const { realEstateNumber } = await resolveRegistryCandidate(
+        {
+          session: { id: session.id, role: session.role },
+          propertyId: id,
+          confirmed,
+          candidateRef,
+        },
+        provider,
+      );
+      const obtained = await runRegistryAutoFetch(
+        {
+          session: { id: session.id, role: session.role },
+          propertyId: id,
+          confirmed,
+          realEstateNumber,
+        },
+        provider,
+      );
+      return apiResponse(obtained, 200);
     }
 
     const result = await runRegistryAutoFetch(

@@ -197,3 +197,128 @@ async function writeRegistrySearchAudit(
     },
   });
 }
+
+export interface ResolveRegistryCandidateArgs {
+  /** 認証済みセッション（id/role のみ）。 */
+  session: RegistryPdfSession;
+  /** 取得対象物件ID（route path の {id}）。 */
+  propertyId: string;
+  /** 課金を伴う可能性があるため明示確認フラグ（cond①）。 */
+  confirmed: boolean;
+  /** client が選択した候補参照。信頼せず server で再解決する（cond③）。 */
+  candidateRef: string;
+}
+
+/**
+ * cond③: 取得時に client の candidateRef を信頼せず、当該物件向けに server 側で再検索し、
+ * candidateRef 一致候補の不動産番号を解決する（改ざん対策）。
+ *
+ * 解決した realEstateNumber は取得キー（fetchRegistryPdf）として内部利用するのみで、
+ * 応答・log・AuditLog には出さない（cond②：秘匿情報）。provider は明示注入し、所在検索非対応 /
+ * 未設定なら 501（cond⑦ fail-closed）。本番は route が provider null で先に 501。
+ */
+export async function resolveRegistryCandidate(
+  args: ResolveRegistryCandidateArgs,
+  provider: RegistryFetchProvider,
+): Promise<{ realEstateNumber: string }> {
+  const { session, propertyId, confirmed, candidateRef } = args;
+
+  // 1. 確認フラグ必須（true 以外は DB / provider に一切到達しない／cond①）。
+  if (confirmed !== true) {
+    throw new ApiError(
+      400,
+      "謄本取得には確認（confirmed:true）が必要です",
+      "REGISTRY_AUTO_FETCH_CONFIRMATION_REQUIRED",
+    );
+  }
+  const ref = typeof candidateRef === "string" ? candidateRef.trim() : "";
+  if (!ref) {
+    throw new ApiError(
+      400,
+      "取得する候補が指定されていません",
+      "REGISTRY_OBTAIN_CANDIDATE_REQUIRED",
+    );
+  }
+
+  // 2. 対象物件（検索キーの最小カラムのみ・所有者PIIは取得しない）。
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: {
+      id: true,
+      createdBy: true,
+      assignedTo: true,
+      address: true,
+      lotNumber: true,
+      buildingNumber: true,
+      realEstateNumber: true,
+    },
+  });
+  if (!property) {
+    throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+  }
+
+  // 3. 物件スコープ（field_staff は担当/作成物件のみ）。
+  if (!canAccessPropertyRecord(session, property)) {
+    throw new ApiError(
+      403,
+      "この物件にアクセスする権限がありません",
+      "FORBIDDEN",
+    );
+  }
+
+  // 4. 検索入力を再構築（純関数）。不動産番号あり / 所在不足なら所在検索取得はできない。
+  const built = buildRegistrySearchRequest({
+    address: property.address,
+    lotNumber: property.lotNumber,
+    buildingNumber: property.buildingNumber,
+    realEstateNumber: property.realEstateNumber,
+    ref: property.id,
+  });
+  if (!built.searchable) {
+    throw new ApiError(
+      409,
+      "この物件は所在検索による取得ができません。再検索してください",
+      "REGISTRY_OBTAIN_NOT_SEARCHABLE",
+    );
+  }
+
+  // 5. provider が所在検索に対応していなければ 501（型安全ガード・cond⑦）。
+  if (
+    typeof provider.searchCandidates !== "function" ||
+    provider.supportsLocationSearch !== true
+  ) {
+    throw new ApiError(
+      501,
+      "謄本所在検索プロバイダは未設定です",
+      "REGISTRY_SEARCH_PROVIDER_NOT_CONFIGURED",
+    );
+  }
+
+  // 6. 再検索して candidateRef 一致候補の不動産番号を解決する（provider を this に保つため直接呼ぶ）。
+  let candidates;
+  try {
+    candidates = await provider.searchCandidates(built.request);
+  } catch (err) {
+    if (err instanceof RegistryFetchError) {
+      throw new ApiError(
+        PROVIDER_ERROR_STATUS[err.code],
+        err.message,
+        "REGISTRY_SEARCH_PROVIDER_ERROR",
+      );
+    }
+    throw err;
+  }
+
+  const match = candidates.find((c) => c.candidateRef === ref);
+  const resolved = match?.realEstateNumber?.trim();
+  if (!match || !resolved) {
+    // 再検索に該当候補が無い（陳腐化 / 改ざん）→ 409。秘匿情報は載せない。
+    throw new ApiError(
+      409,
+      "選択した候補が見つかりません。再検索してください",
+      "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+    );
+  }
+
+  return { realEstateNumber: resolved };
+}
