@@ -157,7 +157,7 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
   // CodexP2: 本番 provider 生成時に throttle（REGISTRY_FETCH_MIN_INTERVAL_MS）を配線する。
   // 配線が無いと live route で getRegistryFetchProvider() が throttle 無し provider を作り、
   // 同時 POST がレート制御をすり抜けて公式へ複数同時アクセスしてしまう。
-  it("CodexP2: live 解決した provider は throttle を持つ（連続 fetch の 2 回目が rate_limited）", async () => {
+  it("CodexP2: live 解決した provider は throttle を持つ（対=2回許容・3回目が rate_limited）", async () => {
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
     process.env.REGISTRY_FETCH_PROVIDER = "official";
@@ -180,17 +180,12 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     });
     const provider = getRegistryFetchProvider({ browserFactory });
     expect(provider).not.toBeNull();
-    // 1 回目は許可。
-    await provider!.fetchRegistryPdf({
-      realEstateNumber: "1234567890123",
-      ref: "p1",
-    });
-    // 同一プロセス内・最小間隔未満の 2 回目は throttle で rate_limited。
+    // @codex P2: burst=2 で「検索→取得」の対に相当する 2 回は許可する。
+    await provider!.fetchRegistryPdf({ realEstateNumber: "1234567890123", ref: "p1" });
+    await provider!.fetchRegistryPdf({ realEstateNumber: "1234567890123", ref: "p2" });
+    // 対を超える 3 回目は最小間隔未満ゆえ throttle で rate_limited（保守的据え置き）。
     await expect(
-      provider!.fetchRegistryPdf({
-        realEstateNumber: "1234567890123",
-        ref: "p2",
-      }),
+      provider!.fetchRegistryPdf({ realEstateNumber: "1234567890123", ref: "p3" }),
     ).rejects.toMatchObject({ code: "rate_limited" });
   });
 
@@ -218,9 +213,11 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     const p1 = getRegistryFetchProvider({ browserFactory });
     const p2 = getRegistryFetchProvider({ browserFactory });
     await p1!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p1" });
-    // 別インスタンスでも共有 throttle が効き 2 回目は rate_limited。
+    // 共有 throttle・burst=2 の対の2回目（別インスタンスでも共有される）=許可。
+    await p2!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p2" });
+    // 3 回目は共有 throttle で rate_limited（インスタンスをまたいで直列化）。
     await expect(
-      p2!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p2" }),
+      p1!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p3" }),
     ).rejects.toMatchObject({ code: "rate_limited" });
   });
 
