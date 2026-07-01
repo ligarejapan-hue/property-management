@@ -432,12 +432,12 @@ export default function PropertyDetailPage({
   if (error || !property) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-        <p className="text-sm text-red-700">
+        <p className="text-sm text-red-700 dark:text-red-400">
           {error ?? "物件が見つかりません"}
         </p>
         <Link
           href="/properties"
-          className="mt-3 inline-block text-sm text-indigo-600 hover:underline"
+          className="mt-3 inline-block text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
         >
           物件一覧に戻る
         </Link>
@@ -532,8 +532,8 @@ export default function PropertyDetailPage({
       {/* Warning badge */}
       {!property.investigationConfirmedAt && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2">
-          <AlertTriangle className="h-4 w-4 text-amber-600" />
-          <span className="text-sm text-amber-800">
+          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <span className="text-sm text-amber-800 dark:text-amber-300">
             調査情報が未確認です。最新の情報を取得してください。
           </span>
         </div>
@@ -573,7 +573,7 @@ export default function PropertyDetailPage({
               onClick={() => setActiveTab(tab.key)}
               className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 activeTab === tab.key
-                  ? "border-indigo-600 text-indigo-600"
+                  ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
                   : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-gray-700 dark:hover:text-gray-200"
               }`}
             >
@@ -1187,7 +1187,7 @@ function OwnerCard({
                   classifyCorporateIdentifier(form.corporateNumber) !==
                     "company_corporate_number_12" &&
                   normalizeCorporateNumber(form.corporateNumber) === null && (
-                    <p className="text-xs text-red-600">
+                    <p className="text-xs text-red-600 dark:text-red-400">
                       法人番号は13桁の数字で入力してください（12桁の会社法人等番号は下の欄、または「法人情報を検索」をご利用ください）
                     </p>
                   )}
@@ -1248,7 +1248,7 @@ function OwnerCard({
                 {form.companyRegistryNumber.trim() !== "" &&
                   normalizeCompanyRegistryNumber(form.companyRegistryNumber) ===
                     null && (
-                    <p className="text-xs text-red-600">
+                    <p className="text-xs text-red-600 dark:text-red-400">
                       会社法人等番号は12桁の数字で入力してください（ハイフン・空白・全角数字は自動で除去されます）
                     </p>
                   )}
@@ -1260,7 +1260,7 @@ function OwnerCard({
           </div>
 
           {saveError && (
-            <p className="text-xs text-red-600">{saveError}</p>
+            <p className="text-xs text-red-600 dark:text-red-400">{saveError}</p>
           )}
 
           <div className="flex gap-2">
@@ -1407,9 +1407,9 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
         >
           削除
         </button>
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        {error && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
         {!error && savedAt && !dirty && !saving && (
-          <span className="text-xs text-green-600">保存しました</span>
+          <span className="text-xs text-green-600 dark:text-green-400">保存しました</span>
         )}
       </div>
     </div>
@@ -1491,7 +1491,7 @@ function CaseStatusField({
           ))}
         </select>
         {saving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-gray-400 dark:text-gray-500" />}
-        {error && <span className="ml-2 text-xs text-red-600">{error}</span>}
+        {error && <span className="ml-2 text-xs text-red-600 dark:text-red-400">{error}</span>}
       </dd>
     </div>
   );
@@ -1567,7 +1567,7 @@ function IntroductionRouteField({
           ))}
         </select>
         {saving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-gray-400 dark:text-gray-500" />}
-        {error && <span className="ml-2 text-xs text-red-600">{error}</span>}
+        {error && <span className="ml-2 text-xs text-red-600 dark:text-red-400">{error}</span>}
       </dd>
     </div>
   );

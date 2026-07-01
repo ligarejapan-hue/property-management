@@ -56,7 +56,7 @@ export default function LoginPage() {
       <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50">
-            <FileText className="h-6 w-6 text-indigo-600" />
+            <FileText className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
           </div>
           <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">物件管理システム</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -81,7 +81,7 @@ export default function LoginPage() {
               placeholder="user@example.com"
             />
             {errors.email && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
                 {errors.email.message}
               </p>
             )}
@@ -103,7 +103,7 @@ export default function LoginPage() {
               placeholder="パスワードを入力"
             />
             {errors.password && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
                 {errors.password.message}
               </p>
             )}
@@ -111,7 +111,7 @@ export default function LoginPage() {
 
           {error && (
             <div className="rounded-md bg-red-50 p-3">
-              <p className="text-sm text-red-700">{error}</p>
+              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
             </div>
           )}
 

@@ -246,7 +246,7 @@ export function OwnerLinkModal({
                 検索中...
               </p>
             )}
-            {searchError && <p className="text-xs text-red-600">{searchError}</p>}
+            {searchError && <p className="text-xs text-red-600 dark:text-red-400">{searchError}</p>}
             {!searchLoading && searchHits.length > 0 && (
               <ul
                 role="listbox"
@@ -410,7 +410,7 @@ export function OwnerLinkModal({
           </label>
         </div>
 
-        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
 
         <div className="mt-4 flex justify-end gap-2">
           <button

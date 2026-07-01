@@ -766,7 +766,7 @@ function PropertiesPageInner() {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      className="text-xs text-indigo-600 hover:underline"
+                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                       onClick={() =>
                         setSelectedExportColumns(
                           new Set(EXPORT_COLUMNS.map((c) => c.key)),
@@ -1125,7 +1125,7 @@ function PropertiesPageInner() {
           {error}
           <button
             onClick={fetchProperties}
-            className="ml-2 text-red-800 underline hover:no-underline"
+            className="ml-2 text-red-800 dark:text-red-300 underline hover:no-underline"
           >
             再試行
           </button>
@@ -1135,7 +1135,7 @@ function PropertiesPageInner() {
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
-          <span className="text-sm font-medium text-blue-800">
+          <span className="text-sm font-medium text-blue-800 dark:text-blue-300">
             {selectedIds.size} 件選択中
           </span>
           <select
@@ -1217,7 +1217,7 @@ function PropertiesPageInner() {
               {bulkDeleteResult.failures.map((f) => (
                 <li key={f.id}>
                   <span className="font-medium">{f.address}</span>
-                  <span className="ml-2 text-amber-700">{f.reason}</span>
+                  <span className="ml-2 text-amber-700 dark:text-amber-400">{f.reason}</span>
                 </li>
               ))}
             </ul>
@@ -1303,7 +1303,7 @@ function PropertiesPageInner() {
                   <td className="whitespace-nowrap px-4 py-3">
                     <Link
                       href={`/properties/${property.id}`}
-                      className="text-indigo-600 hover:underline"
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline"
                     >
                       {PROPERTY_TYPE_LABELS[property.propertyType] ??
                         property.propertyType}
@@ -1473,7 +1473,7 @@ function PropertiesPageInner() {
                   <div className="flex-1 min-w-0">
                     <Link href={`/properties/${property.id}`} className="block">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-medium text-indigo-600">
+                        <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
                           {PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
                         </span>
                       </div>
@@ -1512,7 +1512,7 @@ function PropertiesPageInner() {
                                 return next;
                               });
                             }}
-                            className="mt-1 inline-flex items-center min-h-[44px] py-2 text-xs text-indigo-600 hover:underline"
+                            className="mt-1 inline-flex items-center min-h-[44px] py-2 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                           >
                             {isExpanded
                               ? "▴ 折りたたむ"

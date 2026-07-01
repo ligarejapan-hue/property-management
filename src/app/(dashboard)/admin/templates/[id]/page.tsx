@@ -236,7 +236,7 @@ export default function TemplateEditPage({
                               type="checkbox"
                               checked={granted}
                               onChange={() => togglePermission(res.key, action)}
-                              className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-700 text-indigo-600 focus:ring-indigo-500"
+                              className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-700 text-indigo-600 focus:ring-indigo-500 dark:text-indigo-400"
                             />
                             {ACTION_LABELS[action] ?? action}
                           </label>

@@ -350,7 +350,7 @@ export function OwnerMislinkModal({
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">検索中...</p>
             )}
             {searchError && (
-              <p className="mt-1 text-xs text-red-600">{searchError}</p>
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{searchError}</p>
             )}
             {!searchLoading && searchHits.length > 0 && (
               <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-800">
@@ -416,7 +416,7 @@ export function OwnerMislinkModal({
           >
             <p
               className={`mb-1 font-medium ${
-                previewResult.eligible ? "text-green-800" : "text-red-800"
+                previewResult.eligible ? "text-green-800 dark:text-green-300" : "text-red-800 dark:text-red-300"
               }`}
             >
               {previewResult.eligible ? "✓ 修正可能" : "✗ 修正不可"}
@@ -483,7 +483,7 @@ export function OwnerMislinkModal({
           previewResult.eligible &&
           executeState !== "executed" && (
             <div className="rounded-md border border-red-300 bg-red-50 p-2">
-              <p className="mb-1 text-xs font-semibold text-red-800">
+              <p className="mb-1 text-xs font-semibold text-red-800 dark:text-red-300">
                 ⚠ この操作は元に戻せません
               </p>
 
@@ -498,7 +498,7 @@ export function OwnerMislinkModal({
               )}
 
               {executeState === "confirm1" && (
-                <div className="flex flex-col gap-1 text-xs text-red-800">
+                <div className="flex flex-col gap-1 text-xs text-red-800 dark:text-red-300">
                   <p>
                     操作:{" "}
                     <span className="font-mono">
@@ -533,7 +533,7 @@ export function OwnerMislinkModal({
               )}
 
               {executeState === "confirm2" && (
-                <div className="flex flex-col gap-1 text-xs text-red-800">
+                <div className="flex flex-col gap-1 text-xs text-red-800 dark:text-red-300">
                   <p className="font-semibold">
                     ⚠ この操作は元に戻せません。本当に修正しますか？
                   </p>
@@ -561,7 +561,7 @@ export function OwnerMislinkModal({
               )}
 
               {executeState === "execute_error" && (
-                <div className="flex flex-col gap-0.5 text-xs text-red-700">
+                <div className="flex flex-col gap-0.5 text-xs text-red-700 dark:text-red-400">
                   {executeErrorMsg && <p>{executeErrorMsg}</p>}
                   {executeBlockReasons.length > 0 && (
                     <ul className="list-disc pl-4">
@@ -573,7 +573,7 @@ export function OwnerMislinkModal({
                   <button
                     type="button"
                     onClick={() => setExecuteState("idle")}
-                    className="mt-1 self-start text-[11px] text-red-600 underline"
+                    className="mt-1 self-start text-[11px] text-red-600 dark:text-red-400 underline"
                   >
                     閉じる
                   </button>

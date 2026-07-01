@@ -31,21 +31,21 @@ const severityConfig = {
   error: {
     icon: AlertCircle,
     bg: "bg-red-50 border-red-200",
-    text: "text-red-700",
+    text: "text-red-700 dark:text-red-400",
     badge: "bg-red-100 text-red-800",
     label: "エラー",
   },
   warning: {
     icon: AlertTriangle,
     bg: "bg-amber-50 border-amber-200",
-    text: "text-amber-700",
+    text: "text-amber-700 dark:text-amber-400",
     badge: "bg-amber-100 text-amber-800",
     label: "警告",
   },
   info: {
     icon: Info,
     bg: "bg-blue-50 border-blue-200",
-    text: "text-blue-700",
+    text: "text-blue-700 dark:text-blue-400",
     badge: "bg-blue-100 text-blue-800",
     label: "情報",
   },
@@ -148,17 +148,17 @@ export default function QualityCheckPage() {
           <SummaryCard
             label="エラー"
             count={summary.errors}
-            color="text-red-600"
+            color="text-red-600 dark:text-red-400"
           />
           <SummaryCard
             label="警告"
             count={summary.warnings}
-            color="text-amber-600"
+            color="text-amber-600 dark:text-amber-400"
           />
           <SummaryCard
             label="情報"
             count={summary.info}
-            color="text-blue-600"
+            color="text-blue-600 dark:text-blue-400"
           />
         </div>
       )}
@@ -190,7 +190,7 @@ export default function QualityCheckPage() {
         </div>
       ) : filteredIssues.length === 0 ? (
         <div className="rounded-lg border border-green-200 bg-green-50 p-8 text-center">
-          <p className="text-sm text-green-700">
+          <p className="text-sm text-green-700 dark:text-green-400">
             問題は検出されませんでした
           </p>
         </div>
@@ -219,7 +219,7 @@ export default function QualityCheckPage() {
                   <p className={`text-sm ${config.text}`}>{issue.message}</p>
                   <Link
                     href={`/properties/${issue.propertyId}`}
-                    className="mt-1 inline-block text-xs text-indigo-600 hover:underline"
+                    className="mt-1 inline-block text-xs text-indigo-600 hover:underline dark:text-indigo-400"
                   >
                     {issue.address}
                   </Link>

@@ -978,7 +978,7 @@ export default function RegistryPdfPage() {
                   value="auto"
                   checked={target === "auto"}
                   onChange={() => setTarget("auto")}
-                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500"
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 dark:text-indigo-400"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-200">
                   自動照合（システムが既存物件と照合し、一致なければ新規作成）
@@ -991,7 +991,7 @@ export default function RegistryPdfPage() {
                   value="new"
                   checked={target === "new"}
                   onChange={() => setTarget("new")}
-                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500"
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 dark:text-indigo-400"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-200">
                   新規物件として登録
@@ -1004,7 +1004,7 @@ export default function RegistryPdfPage() {
                   value="existing"
                   checked={target === "existing"}
                   onChange={() => setTarget("existing")}
-                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500"
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 dark:text-indigo-400"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-200">
                   既存物件を更新
@@ -1255,7 +1255,7 @@ export default function RegistryPdfPage() {
             {/* Success header */}
             <div className="mb-6 flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-500/10">
-                <CheckCircle2 className="h-6 w-6 text-green-600" />
+                <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">

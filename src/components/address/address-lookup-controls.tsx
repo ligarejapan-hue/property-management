@@ -276,7 +276,7 @@ export function AddressLookupControls({
       )}
 
       {showError && error && (
-        <p className="text-red-600">{ERROR_MESSAGES[error]}</p>
+        <p className="text-red-600 dark:text-red-400">{ERROR_MESSAGES[error]}</p>
       )}
 
       {!loading && showCandidates && requiresCandidateSelection(candidates) && (

@@ -238,7 +238,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         }`}
       >
         <div className="flex h-14 items-center border-b border-gray-200 dark:border-gray-700 px-4">
-          <FileText className="mr-2 h-5 w-5 text-indigo-600" />
+          <FileText className="mr-2 h-5 w-5 text-indigo-600 dark:text-indigo-400" />
           <span className="text-sm font-bold text-gray-800 dark:text-gray-100">物件管理</span>
         </div>
         <div className="overflow-y-auto">{navContent}</div>

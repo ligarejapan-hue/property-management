@@ -125,10 +125,10 @@ export default function ActionBar(props: ActionBarProps) {
       </div>
 
       {message && (
-        <p className="mt-2 text-xs text-green-600">{message}</p>
+        <p className="mt-2 text-xs text-green-600 dark:text-green-400">{message}</p>
       )}
       {error && (
-        <p className="mt-2 text-xs text-red-600">{error}</p>
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
       )}
     </div>
   );
