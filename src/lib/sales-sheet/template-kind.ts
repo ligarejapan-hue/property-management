@@ -10,6 +10,7 @@ export function salesSheetTemplateKindFor(propertyType: string): SalesSheetTempl
     case "land":
       return "land";
     case "apartment_unit":
+    case "unit": // 区分（旧）: 棟画面から作成した区分は legacy "unit" で保存される
       return "mansion";
     case "house":
       return "house";

@@ -231,6 +231,13 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(JSON.stringify(lastDocument())).toContain("テストレジデンス");
   });
 
+  it("201 — 区分（旧 unit）: sale-mansion（legacy propertyType も対応）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...MANSION_PROPERTY, propertyType: "unit" });
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    expect(lastTemplateId()).toBe("sale-mansion");
+  });
+
   it("201 — 戸建: sale-house", async () => {
     pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "house", layoutType: "4LDK" });
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
