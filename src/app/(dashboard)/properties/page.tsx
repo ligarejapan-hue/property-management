@@ -766,7 +766,7 @@ function PropertiesPageInner() {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      className="text-xs text-indigo-600 hover:underline"
+                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                       onClick={() =>
                         setSelectedExportColumns(
                           new Set(EXPORT_COLUMNS.map((c) => c.key)),
@@ -1303,7 +1303,7 @@ function PropertiesPageInner() {
                   <td className="whitespace-nowrap px-4 py-3">
                     <Link
                       href={`/properties/${property.id}`}
-                      className="text-indigo-600 hover:underline"
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline"
                     >
                       {PROPERTY_TYPE_LABELS[property.propertyType] ??
                         property.propertyType}
@@ -1473,7 +1473,7 @@ function PropertiesPageInner() {
                   <div className="flex-1 min-w-0">
                     <Link href={`/properties/${property.id}`} className="block">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-medium text-indigo-600">
+                        <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
                           {PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
                         </span>
                       </div>
@@ -1512,7 +1512,7 @@ function PropertiesPageInner() {
                                 return next;
                               });
                             }}
-                            className="mt-1 inline-flex items-center min-h-[44px] py-2 text-xs text-indigo-600 hover:underline"
+                            className="mt-1 inline-flex items-center min-h-[44px] py-2 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                           >
                             {isExpanded
                               ? "▴ 折りたたむ"

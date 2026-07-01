@@ -350,7 +350,7 @@ export function OwnerMislinkModal({
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">検索中...</p>
             )}
             {searchError && (
-              <p className="mt-1 text-xs text-red-600">{searchError}</p>
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{searchError}</p>
             )}
             {!searchLoading && searchHits.length > 0 && (
               <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-800">

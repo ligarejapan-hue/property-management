@@ -148,17 +148,17 @@ export default function QualityCheckPage() {
           <SummaryCard
             label="エラー"
             count={summary.errors}
-            color="text-red-600"
+            color="text-red-600 dark:text-red-400"
           />
           <SummaryCard
             label="警告"
             count={summary.warnings}
-            color="text-amber-600"
+            color="text-amber-600 dark:text-amber-400"
           />
           <SummaryCard
             label="情報"
             count={summary.info}
-            color="text-blue-600"
+            color="text-blue-600 dark:text-blue-400"
           />
         </div>
       )}

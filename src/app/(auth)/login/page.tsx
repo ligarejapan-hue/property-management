@@ -81,7 +81,7 @@ export default function LoginPage() {
               placeholder="user@example.com"
             />
             {errors.email && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
                 {errors.email.message}
               </p>
             )}
@@ -103,7 +103,7 @@ export default function LoginPage() {
               placeholder="パスワードを入力"
             />
             {errors.password && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
                 {errors.password.message}
               </p>
             )}
