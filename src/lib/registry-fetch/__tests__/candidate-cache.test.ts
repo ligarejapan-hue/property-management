@@ -9,6 +9,7 @@ import {
   resolveCachedCandidate,
   fingerprintProperty,
   __clearCandidateCacheForTests,
+  __candidateCacheSizeForTests,
 } from "../candidate-cache";
 
 const USER = "user-1";
@@ -57,6 +58,23 @@ describe("candidate-cache", () => {
     rememberSearchCandidates(USER, PROP, FP, [{ candidateRef: "c1", realEstateNumber: "REN-1" }], t0);
     expect(resolveCachedCandidate(USER, PROP, "c1", FP, t0 + 60_000)).toBe("REN-1"); // TTL 内
     expect(resolveCachedCandidate(USER, PROP, "c1", FP, t0 + 60 * 60_000)).toBeNull(); // TTL 超過
+  });
+
+  it("同一ユーザー×同一物件の再検索は旧候補を置き換える（@codex P2: 前回の candidateRef を無効化）", () => {
+    rememberSearchCandidates(USER, PROP, FP, [{ candidateRef: "old", realEstateNumber: "REN-old" }]);
+    rememberSearchCandidates(USER, PROP, FP, [{ candidateRef: "new", realEstateNumber: "REN-new" }]);
+    expect(resolveCachedCandidate(USER, PROP, "old", FP)).toBeNull(); // 前回候補は消える
+    expect(resolveCachedCandidate(USER, PROP, "new", FP)).toBe("REN-new");
+  });
+
+  it("追加時に期限切れエントリを掃除する（@codex P2: Map の際限ない増大を防ぐ）", () => {
+    const t0 = 1_000_000;
+    rememberSearchCandidates(USER, "prop-A", FP, [{ candidateRef: "a", realEstateNumber: "REN-A" }], t0);
+    expect(__candidateCacheSizeForTests()).toBe(1);
+    // TTL 超過後に別物件を検索 → 期限切れの prop-A エントリは掃除され、prop-B のみ残る。
+    rememberSearchCandidates(USER, "prop-B", FP, [{ candidateRef: "b", realEstateNumber: "REN-B" }], t0 + 11 * 60_000);
+    expect(__candidateCacheSizeForTests()).toBe(1);
+    expect(resolveCachedCandidate(USER, "prop-B", "b", FP, t0 + 11 * 60_000)).toBe("REN-B");
   });
 });
 
