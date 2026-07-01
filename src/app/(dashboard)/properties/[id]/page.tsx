@@ -26,6 +26,7 @@ import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import RegistryAutoFetchButton from "@/components/properties/registry-auto-fetch-button";
+import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner, fetchQualityCheck } from "@/lib/api-client";
@@ -524,6 +525,14 @@ export default function PropertyDetailPage({
       <RegistryAutoFetchButton
         propertyId={property.id}
         registryStatus={property.registryStatus}
+        canAutoFetch={canAutoFetchRegistry}
+        providerConfigured={registryAutoFetchConfigured}
+        onComplete={fetchProperty}
+      />
+
+      {/* 謄本 所在検索（PR-2b-3・番号無し物件を所在で検索→候補選択→取得。provider 未設定中は disabled） */}
+      <RegistryLocationSearchButton
+        propertyId={property.id}
         canAutoFetch={canAutoFetchRegistry}
         providerConfigured={registryAutoFetchConfigured}
         onComplete={fetchProperty}
