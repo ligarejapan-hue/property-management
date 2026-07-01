@@ -81,9 +81,11 @@ beforeEach(() => {
 });
 
 describe("resolveRegistryCandidate（cond③: 認可済み検索の mapping から解決・指紋一致が前提）", () => {
-  it("検索直後（指紋一致）は不動産番号を解決して返す", async () => {
+  it("検索直後（指紋一致）は不動産番号＋指紋を解決して返す", async () => {
     seed();
-    await expect(resolve()).resolves.toEqual({ realEstateNumber: EXPECTED_REN });
+    const r = await resolve();
+    expect(r.realEstateNumber).toBe(EXPECTED_REN);
+    expect(typeof r.fingerprint).toBe("string"); // 取得側の TOCTOU 再検証に渡す指紋
   });
 
   it("検索後に物件が編集された（指紋不一致）は 409（@codex P1・別物件の謄本を取らない）", async () => {

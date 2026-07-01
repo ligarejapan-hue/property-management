@@ -131,6 +131,7 @@ import {
   type RegistryFetchProvider,
 } from "@/lib/registry-fetch";
 import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
+import { fingerprintProperty } from "@/lib/registry-fetch/candidate-cache";
 import * as routeModule from "@/app/api/properties/[id]/registry/auto-fetch/route";
 
 const { POST } = routeModule;
@@ -291,6 +292,29 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(provider.fetchRegistryPdf).toHaveBeenCalledWith(
       expect.objectContaining({ realEstateNumber: "CAND-REN-123" }),
     );
+  });
+
+  it("expectedFingerprint が現在の物件指紋と一致すれば override 取得（@codex P2 TOCTOU）", async () => {
+    const provider = successProvider();
+    setProperty({ realEstateNumber: null, address: "所在X", lotNumber: "1", buildingNumber: "2" });
+    const fp = fingerprintProperty({ address: "所在X", lotNumber: "1", buildingNumber: "2", realEstateNumber: null });
+    await runRegistryAutoFetch(
+      { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN", expectedFingerprint: fp },
+      provider,
+    );
+    expect(provider.fetchRegistryPdf).toHaveBeenCalledWith(expect.objectContaining({ realEstateNumber: "CAND-REN" }));
+  });
+
+  it("expectedFingerprint 不一致（resolve 後に物件編集）は 409・取得しない（@codex P2 TOCTOU）", async () => {
+    const provider = successProvider();
+    setProperty({ realEstateNumber: null, address: "編集後の所在", lotNumber: null, buildingNumber: null });
+    await expect(
+      runRegistryAutoFetch(
+        { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN", expectedFingerprint: "stale-fingerprint" },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND" });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
   });
 
   it("3. property access scope（field_staff・担当外）で 403・provider 未到達", async () => {

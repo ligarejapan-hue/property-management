@@ -80,7 +80,7 @@ beforeEach(() => {
     fetchRegistryPdf: vi.fn(),
   });
   (runRegistryAutoFetch as Mock).mockResolvedValue({ status: "obtained" });
-  (resolveRegistryCandidate as Mock).mockResolvedValue({ realEstateNumber: "RESOLVED-REN" });
+  (resolveRegistryCandidate as Mock).mockResolvedValue({ realEstateNumber: "RESOLVED-REN", fingerprint: "FP-RESOLVE" });
 });
 
 describe("auto-fetch route: candidateRef 分岐（cond③ 再解決の配線）", () => {
@@ -91,7 +91,7 @@ describe("auto-fetch route: candidateRef 分岐（cond③ 再解決の配線）"
       expect.objectContaining({ propertyId: PROP_ID, confirmed: true, candidateRef: "cand-1" }),
     );
     expect(runRegistryAutoFetch).toHaveBeenCalledWith(
-      expect.objectContaining({ propertyId: PROP_ID, confirmed: true, realEstateNumber: "RESOLVED-REN" }),
+      expect.objectContaining({ propertyId: PROP_ID, confirmed: true, realEstateNumber: "RESOLVED-REN", expectedFingerprint: "FP-RESOLVE" }),
       expect.anything(),
     );
   });

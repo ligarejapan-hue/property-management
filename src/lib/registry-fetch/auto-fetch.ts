@@ -44,6 +44,7 @@ import {
   createRegistryFetchThrottle,
   type RegistryFetchThrottle,
 } from "@/lib/registry-fetch/throttle";
+import { fingerprintProperty } from "./candidate-cache";
 
 export interface RunRegistryAutoFetchArgs {
   /** 認証済みセッション（route の getApiSession から id/role のみ）。 */
@@ -57,6 +58,11 @@ export interface RunRegistryAutoFetchArgs {
    * 指定時はこれを fetchRegistryPdf に使う（物件は番号未保持のため）。未指定は物件の realEstateNumber。
    */
   realEstateNumber?: string | null;
+  /**
+   * @codex P2: override を使う所在検索取得での TOCTOU 防止。resolve が候補を確定した時点の物件指紋。
+   * ここで version-lock する行の指紋がこれと一致しなければ 409（resolve〜取得の間の編集を弾く）。
+   */
+  expectedFingerprint?: string;
 }
 
 // provider 失敗（RegistryFetchError）の分類コード → 安全な HTTP ステータス。
@@ -552,6 +558,10 @@ export async function runRegistryAutoFetch(
       registryStatus: true,
       version: true,
       realEstateNumber: true,
+      // 所在検索取得の指紋再検証用（@codex P2）。
+      address: true,
+      lotNumber: true,
+      buildingNumber: true,
     },
   });
   if (!property) {
@@ -564,6 +574,20 @@ export async function runRegistryAutoFetch(
       403,
       "この物件にアクセスする権限がありません",
       "FORBIDDEN",
+    );
+  }
+
+  // 3.5 @codex P2: 所在検索取得の override は「今 version-lock する行の指紋」が resolve 時と
+  //     一致する場合だけ使う。resolve のスナップショットとこの read の間に物件が編集されていたら
+  //     429/lock 前に 409 で弾く（この read〜fetch は下の楽観ロックで直列化される）。
+  if (
+    args.expectedFingerprint !== undefined &&
+    fingerprintProperty(property) !== args.expectedFingerprint
+  ) {
+    throw new ApiError(
+      409,
+      "物件情報が変わりました。もう一度検索してから取得してください",
+      "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
     );
   }
 

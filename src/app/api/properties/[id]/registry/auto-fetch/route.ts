@@ -77,7 +77,7 @@ export async function POST(
       typeof candidateRefRaw === "string" ? candidateRefRaw.trim() : "";
 
     if (candidateRef) {
-      const { realEstateNumber } = await resolveRegistryCandidate({
+      const { realEstateNumber, fingerprint } = await resolveRegistryCandidate({
         session: { id: session.id, role: session.role },
         propertyId: id,
         confirmed,
@@ -89,6 +89,8 @@ export async function POST(
           propertyId: id,
           confirmed,
           realEstateNumber,
+          // @codex P2: lock する行の指紋が resolve 時と一致する時だけ override を使う。
+          expectedFingerprint: fingerprint,
         },
         provider,
       );

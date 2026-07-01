@@ -240,7 +240,7 @@ export interface ResolveRegistryCandidateArgs {
  */
 export async function resolveRegistryCandidate(
   args: ResolveRegistryCandidateArgs,
-): Promise<{ realEstateNumber: string }> {
+): Promise<{ realEstateNumber: string; fingerprint: string }> {
   const { session, propertyId, confirmed, candidateRef } = args;
 
   // 確認フラグ必須（true 以外は解決しない／cond①）。
@@ -286,12 +286,8 @@ export async function resolveRegistryCandidate(
 
   // 認可済み検索が覚えた候補からのみ不動産番号を解決する（client の値は一致判定にのみ使う）。
   // @codex P1: 検索時の物件指紋と現在が一致する場合だけ有効（編集後の古い候補は使わせない）。
-  const realEstateNumber = resolveCachedCandidate(
-    session.id,
-    propertyId,
-    ref,
-    fingerprintProperty(property),
-  );
+  const fingerprint = fingerprintProperty(property);
+  const realEstateNumber = resolveCachedCandidate(session.id, propertyId, ref, fingerprint);
   if (!realEstateNumber) {
     // 未検索 / 改ざん / TTL 超過 / 物件編集で指紋不一致 → 409。秘匿情報は載せない。
     throw new ApiError(
@@ -301,5 +297,7 @@ export async function resolveRegistryCandidate(
     );
   }
 
-  return { realEstateNumber };
+  // @codex P2: 取得側(runRegistryAutoFetch)が version-lock する行の指紋とこれが一致する時だけ
+  // override を使うよう、解決に使った指紋も返す（resolve〜取得の間の編集による TOCTOU 防止）。
+  return { realEstateNumber, fingerprint };
 }
