@@ -138,25 +138,29 @@ export async function runRegistrySearch(
   try {
     const candidates = await provider.searchCandidates(built.request);
 
+    // 取得できる候補のみを扱う（@codex P2）。不動産番号の無い候補は取得時に必ず 409 になるため、
+    // UI に出さない・キャッシュもしない（選んで確認後に必ず失敗する導線を作らない）。
+    const obtainable = candidates.filter((c) => !!c.realEstateNumber?.trim());
+
     // 取得側（resolveRegistryCandidate）が provider を再検索せず候補→不動産番号を解決できるよう、
     // 認可済み検索の結果を server 内メモリに覚える（@codex P1: throttle 二重消費の回避）。
     // realEstateNumber は log/応答に出さず、取得キーとして server 内でのみ保持する（cond②/③）。
-    rememberSearchCandidates(session.id, propertyId, candidates);
+    rememberSearchCandidates(session.id, propertyId, obtainable);
 
     // cond③: 応答から realEstateNumber を除外する（候補参照は取得時に server 再解決）。
     // 表示用フィールド（所在/地番/家屋番号）は認可ユーザー向け本文として返すが、
     // log / AuditLog には出さない。
-    const shaped = candidates.map((c) => ({
+    const shaped = obtainable.map((c) => ({
       candidateRef: c.candidateRef,
       address: c.address ?? null,
       lotNumber: c.lotNumber ?? null,
       buildingNumber: c.buildingNumber ?? null,
     }));
 
-    // 成功 AuditLog（非PII: 件数・状態のみ。所在/地番/不動産番号は載せない）。
+    // 成功 AuditLog（非PII: 件数・状態のみ。所在/地番/不動産番号は載せない）。件数は返却分。
     await writeRegistrySearchAudit(session.id, propertyId, {
       status: "success",
-      candidateCount: candidates.length,
+      candidateCount: obtainable.length,
     });
 
     return { searchable: true, candidates: shaped };

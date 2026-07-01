@@ -163,6 +163,19 @@ beforeEach(() => {
 });
 
 describe("PR-2b-2: runRegistrySearch（provider 注入）", () => {
+  it("取得できない候補（realEstateNumber 無し）は応答に含めない（@codex P2）", async () => {
+    const provider = new MockRegistryFetchProvider({
+      candidates: [
+        { candidateRef: "with-ren", address: "所在A", realEstateNumber: "REN-A" },
+        { candidateRef: "no-ren", address: "所在B", realEstateNumber: null },
+      ],
+    });
+    const body = await runSearch({ provider });
+    expect(body.searchable).toBe(true);
+    const candidates = body.candidates as Array<{ candidateRef: string }>;
+    expect(candidates.map((c) => c.candidateRef)).toEqual(["with-ren"]);
+  });
+
   it("正常系: searchable な物件で候補を返し、realEstateNumber は応答に含めない", async () => {
     const body = await runSearch();
     expect(body.searchable).toBe(true);
