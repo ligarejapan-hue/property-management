@@ -361,6 +361,7 @@ export default function PropertyDetailPage({
     corporateLookupConfigured,
     canAutoFetchRegistry,
     registryAutoFetchConfigured,
+    registryLocationSearchConfigured,
     ownerEditableFields,
   } = useMemo(() => {
     const effectivePermissions =
@@ -374,6 +375,10 @@ export default function PropertyDetailPage({
     const registryAutoFetchConfigured = collapseCapabilities
       ? false
       : meCapabilities?.registryAutoFetch === true;
+    // 所在検索は自動取得より厳しい capability（provider が所在検索対応のときのみ）。
+    const registryLocationSearchConfigured = collapseCapabilities
+      ? false
+      : meCapabilities?.registryLocationSearch === true;
     const canAutoFetchRegistry = effectivePermissions.some(
       (p) => p.resource === "registry" && p.action === "auto_fetch" && p.granted,
     );
@@ -417,6 +422,7 @@ export default function PropertyDetailPage({
       corporateLookupConfigured,
       canAutoFetchRegistry,
       registryAutoFetchConfigured,
+      registryLocationSearchConfigured,
       ownerEditableFields,
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions, meCapabilities]);
@@ -530,11 +536,11 @@ export default function PropertyDetailPage({
         onComplete={fetchProperty}
       />
 
-      {/* 謄本 所在検索（PR-2b-3・番号無し物件を所在で検索→候補選択→取得。provider 未設定中は disabled） */}
+      {/* 謄本 所在検索（PR-2b-3・番号無し物件を所在で検索→候補選択→取得。所在検索対応 provider のときのみ有効） */}
       <RegistryLocationSearchButton
         propertyId={property.id}
         canAutoFetch={canAutoFetchRegistry}
-        providerConfigured={registryAutoFetchConfigured}
+        providerConfigured={registryLocationSearchConfigured}
         onComplete={fetchProperty}
       />
 

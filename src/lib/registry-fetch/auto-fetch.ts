@@ -506,6 +506,21 @@ export function isRegistryAutoFetchProviderConfigured(
 }
 
 /**
+ * 所在検索（番号無し物件を所在で検索して取得）が「この環境で使えるか」を boolean で返す。
+ * 自動取得より厳しく、provider が `supportsLocationSearch === true` を宣言している場合のみ true。
+ *
+ * CodexP2: official provider は searchByLocation 未実装ゆえ supportsLocationSearch を宣言しない。
+ * 自動取得は可能でも所在検索は未対応、という状態で「所在で謄本を検索」ボタンを出して確認後に必ず
+ * 501 で失敗する UI を露出しないため、search route の 501 条件（supportsLocationSearch===true）と
+ * 揃えた専用 capability にする。
+ */
+export function isRegistryLocationSearchConfigured(
+  options: ResolveRegistryFetchProviderOptions = {},
+): boolean {
+  return getRegistryFetchProvider(options)?.supportsLocationSearch === true;
+}
+
+/**
  * 自動取得の中核。route から呼ばれ、戻り値がそのまま API レスポンス body になる。
  * ハードエラーは ApiError を throw し、route 側 catch → handleApiError で HTTP 化する。
  *

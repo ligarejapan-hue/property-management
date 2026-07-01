@@ -5,7 +5,10 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
-import { isRegistryAutoFetchProviderConfigured } from "@/lib/registry-fetch/auto-fetch";
+import {
+  isRegistryAutoFetchProviderConfigured,
+  isRegistryLocationSearchConfigured,
+} from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
@@ -27,6 +30,9 @@ export async function GET() {
       corporateLookup: isCorporateLookupConfigured(),
       // 謄本自動取得 provider が設定済みか（boolean のみ）。secret・設定値そのものは返さない。
       registryAutoFetch: isRegistryAutoFetchProviderConfigured(),
+      // 所在検索（番号無し物件を所在で検索して取得）が使えるか。自動取得より厳しく、provider が
+      // supportsLocationSearch を宣言している場合のみ true（未対応で「所在で検索」ボタンを出さない）。
+      registryLocationSearch: isRegistryLocationSearchConfigured(),
       // scanned 謄本の OCR 下書き生成が「この利用者に」使えるか。
       // OCR サービス設定済み（localhost allowlist 通過）かつ admin のときだけ true。
       registryOcrDraft:

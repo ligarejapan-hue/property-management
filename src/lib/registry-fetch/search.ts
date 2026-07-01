@@ -26,6 +26,10 @@ import {
   type RegistryFetchErrorCode,
 } from "@/lib/registry-fetch";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
+import {
+  rememberSearchCandidates,
+  resolveCachedCandidate,
+} from "./candidate-cache";
 
 export interface RunRegistrySearchArgs {
   /** 認証済みセッション（route の getApiSession から id/role のみ）。 */
@@ -134,6 +138,11 @@ export async function runRegistrySearch(
   try {
     const candidates = await provider.searchCandidates(built.request);
 
+    // 取得側（resolveRegistryCandidate）が provider を再検索せず候補→不動産番号を解決できるよう、
+    // 認可済み検索の結果を server 内メモリに覚える（@codex P1: throttle 二重消費の回避）。
+    // realEstateNumber は log/応答に出さず、取得キーとして server 内でのみ保持する（cond②/③）。
+    rememberSearchCandidates(session.id, propertyId, candidates);
+
     // cond③: 応答から realEstateNumber を除外する（候補参照は取得時に server 再解決）。
     // 表示用フィールド（所在/地番/家屋番号）は認可ユーザー向け本文として返すが、
     // log / AuditLog には出さない。
@@ -210,20 +219,20 @@ export interface ResolveRegistryCandidateArgs {
 }
 
 /**
- * cond③: 取得時に client の candidateRef を信頼せず、当該物件向けに server 側で再検索し、
- * candidateRef 一致候補の不動産番号を解決する（改ざん対策）。
+ * cond③: 取得時に client の candidateRef を信頼せず、不動産番号は「認可済み検索が server に残した
+ * マッピング」からのみ解決する（改ざん対策）。取得側で provider を再検索しない（@codex P1: search と
+ * fetch の間で provider throttle を二重に消費して 429 になるのを避ける）。
  *
- * 解決した realEstateNumber は取得キー（fetchRegistryPdf）として内部利用するのみで、
- * 応答・log・AuditLog には出さない（cond②：秘匿情報）。provider は明示注入し、所在検索非対応 /
- * 未設定なら 501（cond⑦ fail-closed）。本番は route が provider null で先に 501。
+ * scope（field_staff 可視範囲）と物件存在・楽観ロックは後続の runRegistryAutoFetch が再確認する。
+ * キャッシュ自体も (userId, propertyId, candidateRef) キーゆえ他ユーザー/他物件の候補は解決しない。
+ * 解決した realEstateNumber は取得キーとして内部利用のみ（応答・log・AuditLog に出さない／cond②）。
  */
-export async function resolveRegistryCandidate(
+export function resolveRegistryCandidate(
   args: ResolveRegistryCandidateArgs,
-  provider: RegistryFetchProvider,
-): Promise<{ realEstateNumber: string }> {
+): { realEstateNumber: string } {
   const { session, propertyId, confirmed, candidateRef } = args;
 
-  // 1. 確認フラグ必須（true 以外は DB / provider に一切到達しない／cond①）。
+  // 確認フラグ必須（true 以外は解決しない／cond①）。
   if (confirmed !== true) {
     throw new ApiError(
       400,
@@ -240,85 +249,16 @@ export async function resolveRegistryCandidate(
     );
   }
 
-  // 2. 対象物件（検索キーの最小カラムのみ・所有者PIIは取得しない）。
-  const property = await prisma.property.findUnique({
-    where: { id: propertyId },
-    select: {
-      id: true,
-      createdBy: true,
-      assignedTo: true,
-      address: true,
-      lotNumber: true,
-      buildingNumber: true,
-      realEstateNumber: true,
-    },
-  });
-  if (!property) {
-    throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
-  }
-
-  // 3. 物件スコープ（field_staff は担当/作成物件のみ）。
-  if (!canAccessPropertyRecord(session, property)) {
-    throw new ApiError(
-      403,
-      "この物件にアクセスする権限がありません",
-      "FORBIDDEN",
-    );
-  }
-
-  // 4. 検索入力を再構築（純関数）。不動産番号あり / 所在不足なら所在検索取得はできない。
-  const built = buildRegistrySearchRequest({
-    address: property.address,
-    lotNumber: property.lotNumber,
-    buildingNumber: property.buildingNumber,
-    realEstateNumber: property.realEstateNumber,
-    ref: property.id,
-  });
-  if (!built.searchable) {
+  // 認可済み検索が覚えた候補からのみ不動産番号を解決する（client の値は一致判定にのみ使う）。
+  const realEstateNumber = resolveCachedCandidate(session.id, propertyId, ref);
+  if (!realEstateNumber) {
+    // 未検索 / 改ざん / TTL 超過 → 409。秘匿情報は載せない。取得前に再検索を促す。
     throw new ApiError(
       409,
-      "この物件は所在検索による取得ができません。再検索してください",
-      "REGISTRY_OBTAIN_NOT_SEARCHABLE",
-    );
-  }
-
-  // 5. provider が所在検索に対応していなければ 501（型安全ガード・cond⑦）。
-  if (
-    typeof provider.searchCandidates !== "function" ||
-    provider.supportsLocationSearch !== true
-  ) {
-    throw new ApiError(
-      501,
-      "謄本所在検索プロバイダは未設定です",
-      "REGISTRY_SEARCH_PROVIDER_NOT_CONFIGURED",
-    );
-  }
-
-  // 6. 再検索して candidateRef 一致候補の不動産番号を解決する（provider を this に保つため直接呼ぶ）。
-  let candidates;
-  try {
-    candidates = await provider.searchCandidates(built.request);
-  } catch (err) {
-    if (err instanceof RegistryFetchError) {
-      throw new ApiError(
-        PROVIDER_ERROR_STATUS[err.code],
-        err.message,
-        "REGISTRY_SEARCH_PROVIDER_ERROR",
-      );
-    }
-    throw err;
-  }
-
-  const match = candidates.find((c) => c.candidateRef === ref);
-  const resolved = match?.realEstateNumber?.trim();
-  if (!match || !resolved) {
-    // 再検索に該当候補が無い（陳腐化 / 改ざん）→ 409。秘匿情報は載せない。
-    throw new ApiError(
-      409,
-      "選択した候補が見つかりません。再検索してください",
+      "選択した候補が見つかりません。もう一度検索してから取得してください",
       "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
     );
   }
 
-  return { realEstateNumber: resolved };
+  return { realEstateNumber };
 }
