@@ -610,10 +610,40 @@ export async function runRegistryAutoFetch(
       id: propertyId,
       version: property.version,
       registryStatus: { not: "scheduled" },
+      // @codex P2: 所在検索取得は「検索キー項目（指紋）」も一致条件に含め、read〜lock の間に
+      //   version を上げない経路（取込・PDF処理等）で編集されていても lock を失敗させる。
+      //   これで override（resolve 時の番号）は「lock した行の指紋 = resolve 時の指紋」の時だけ使う。
+      ...(args.expectedFingerprint !== undefined
+        ? {
+            address: property.address,
+            lotNumber: property.lotNumber,
+            buildingNumber: property.buildingNumber,
+            realEstateNumber: property.realEstateNumber,
+          }
+        : {}),
     },
     data: { registryStatus: "scheduled", version: { increment: 1 } },
   });
   if (lock.count === 0) {
+    // 候補取得で lock 失敗 = 並行取得 or 検索キー項目の変化。指紋が今も一致するか再確認して弁別する。
+    if (args.expectedFingerprint !== undefined) {
+      const fresh = await prisma.property.findUnique({
+        where: { id: propertyId },
+        select: {
+          address: true,
+          lotNumber: true,
+          buildingNumber: true,
+          realEstateNumber: true,
+        },
+      });
+      if (!fresh || fingerprintProperty(fresh) !== args.expectedFingerprint) {
+        throw new ApiError(
+          409,
+          "物件情報が変わりました。もう一度検索してから取得してください",
+          "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+        );
+      }
+    }
     throw new ApiError(
       409,
       "この物件は既に謄本自動取得を実行中です",
