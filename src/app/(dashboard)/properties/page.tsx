@@ -1217,7 +1217,7 @@ function PropertiesPageInner() {
               {bulkDeleteResult.failures.map((f) => (
                 <li key={f.id}>
                   <span className="font-medium">{f.address}</span>
-                  <span className="ml-2 text-amber-700 dark:text-amber-400">{f.reason}</span>
+                  <span className="ml-2 text-amber-700">{f.reason}</span>
                 </li>
               ))}
             </ul>

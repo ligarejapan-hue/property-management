@@ -416,7 +416,7 @@ export function OwnerMislinkModal({
           >
             <p
               className={`mb-1 font-medium ${
-                previewResult.eligible ? "text-green-800 dark:text-green-300" : "text-red-800 dark:text-red-300"
+                previewResult.eligible ? "text-green-800" : "text-red-800"
               }`}
             >
               {previewResult.eligible ? "✓ 修正可能" : "✗ 修正不可"}
@@ -533,7 +533,7 @@ export function OwnerMislinkModal({
               )}
 
               {executeState === "confirm2" && (
-                <div className="flex flex-col gap-1 text-xs text-red-800 dark:text-red-300">
+                <div className="flex flex-col gap-1 text-xs text-red-800">
                   <p className="font-semibold">
                     ⚠ この操作は元に戻せません。本当に修正しますか？
                   </p>
@@ -561,7 +561,7 @@ export function OwnerMislinkModal({
               )}
 
               {executeState === "execute_error" && (
-                <div className="flex flex-col gap-0.5 text-xs text-red-700 dark:text-red-400">
+                <div className="flex flex-col gap-0.5 text-xs text-red-700">
                   {executeErrorMsg && <p>{executeErrorMsg}</p>}
                   {executeBlockReasons.length > 0 && (
                     <ul className="list-disc pl-4">
@@ -573,7 +573,7 @@ export function OwnerMislinkModal({
                   <button
                     type="button"
                     onClick={() => setExecuteState("idle")}
-                    className="mt-1 self-start text-[11px] text-red-600 dark:text-red-400 underline"
+                    className="mt-1 self-start text-[11px] text-red-600 underline"
                   >
                     閉じる
                   </button>

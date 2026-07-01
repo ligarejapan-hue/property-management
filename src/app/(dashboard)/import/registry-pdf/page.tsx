@@ -1255,7 +1255,7 @@ export default function RegistryPdfPage() {
             {/* Success header */}
             <div className="mb-6 flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-500/10">
-                <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
+                <CheckCircle2 className="h-6 w-6 text-green-600" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">

@@ -31,21 +31,21 @@ const severityConfig = {
   error: {
     icon: AlertCircle,
     bg: "bg-red-50 border-red-200",
-    text: "text-red-700 dark:text-red-400",
+    text: "text-red-700",
     badge: "bg-red-100 text-red-800",
     label: "エラー",
   },
   warning: {
     icon: AlertTriangle,
     bg: "bg-amber-50 border-amber-200",
-    text: "text-amber-700 dark:text-amber-400",
+    text: "text-amber-700",
     badge: "bg-amber-100 text-amber-800",
     label: "警告",
   },
   info: {
     icon: Info,
     bg: "bg-blue-50 border-blue-200",
-    text: "text-blue-700 dark:text-blue-400",
+    text: "text-blue-700",
     badge: "bg-blue-100 text-blue-800",
     label: "情報",
   },
@@ -219,7 +219,7 @@ export default function QualityCheckPage() {
                   <p className={`text-sm ${config.text}`}>{issue.message}</p>
                   <Link
                     href={`/properties/${issue.propertyId}`}
-                    className="mt-1 inline-block text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+                    className="mt-1 inline-block text-xs text-indigo-600 hover:underline"
                   >
                     {issue.address}
                   </Link>

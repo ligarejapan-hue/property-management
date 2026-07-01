@@ -317,7 +317,7 @@ export default function AdminOwnerDetailPage() {
                       </button>
                     )}
                   {candidate.type === "conflict" && (
-                    <div className="text-[11px] text-red-700 dark:text-red-400">
+                    <div className="text-[11px] text-red-700">
                       既存値と異なるため、手動で確認してください（自動上書きしません）。
                     </div>
                   )}
