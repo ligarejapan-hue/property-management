@@ -157,7 +157,7 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
   // CodexP2: 本番 provider 生成時に throttle（REGISTRY_FETCH_MIN_INTERVAL_MS）を配線する。
   // 配線が無いと live route で getRegistryFetchProvider() が throttle 無し provider を作り、
   // 同時 POST がレート制御をすり抜けて公式へ複数同時アクセスしてしまう。
-  it("CodexP2: live 解決した provider は throttle を持つ（対=2回許容・3回目が rate_limited）", async () => {
+  it("CodexP2: live 解決した provider は fetch throttle を持つ（連続 fetch の 2 回目が rate_limited）", async () => {
     process.env.REGISTRY_FETCH_LOGIN_ID = "id";
     process.env.REGISTRY_FETCH_PASSWORD = "pw";
     process.env.REGISTRY_FETCH_PROVIDER = "official";
@@ -180,13 +180,37 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     });
     const provider = getRegistryFetchProvider({ browserFactory });
     expect(provider).not.toBeNull();
-    // @codex P2: burst=2 で「検索→取得」の対に相当する 2 回は許可する。
+    // fetch キーは burst=1（1件/分）。連続 fetch の 2 回目は rate_limited。
     await provider!.fetchRegistryPdf({ realEstateNumber: "1234567890123", ref: "p1" });
-    await provider!.fetchRegistryPdf({ realEstateNumber: "1234567890123", ref: "p2" });
-    // 対を超える 3 回目は最小間隔未満ゆえ throttle で rate_limited（保守的据え置き）。
     await expect(
-      provider!.fetchRegistryPdf({ realEstateNumber: "1234567890123", ref: "p3" }),
+      provider!.fetchRegistryPdf({ realEstateNumber: "1234567890123", ref: "p2" }),
     ).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
+  it("CodexP2: 検索(search キー)は取得(fetch キー)の throttle を消費しない＝検索→取得の対が両立", async () => {
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_MIN_INTERVAL_MS = "60000";
+    const browserFactory = async () => ({
+      async login() {},
+      async searchByRealEstateNumber() {
+        return { found: true };
+      },
+      async downloadRegistryPdf() {
+        return Buffer.from("%PDF-1.4 dl");
+      },
+      async close() {},
+    });
+    const provider = getRegistryFetchProvider({ browserFactory });
+    // searchCandidates は search キーを先に消費する（seam 未実装ゆえ最終的に throw するが throttle は通る）。
+    await expect(
+      provider!.searchCandidates!({ address: "所在A", ref: "x" }),
+    ).rejects.toBeDefined();
+    // 直後の fetchRegistryPdf は別キー(fetch)ゆえ許可される（検索→取得の対が 429 にならない）。
+    await expect(
+      provider!.fetchRegistryPdf({ realEstateNumber: "1234567890123", ref: "p1" }),
+    ).resolves.toBeDefined();
   });
 
   it("CodexP2: throttle は別 provider インスタンス間で共有される（同時 POST 直列化）", async () => {
@@ -213,11 +237,9 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     const p1 = getRegistryFetchProvider({ browserFactory });
     const p2 = getRegistryFetchProvider({ browserFactory });
     await p1!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p1" });
-    // 共有 throttle・burst=2 の対の2回目（別インスタンスでも共有される）=許可。
-    await p2!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p2" });
-    // 3 回目は共有 throttle で rate_limited（インスタンスをまたいで直列化）。
+    // 別インスタンスでも共有 throttle（fetch キー）が効き 2 回目は rate_limited。
     await expect(
-      p1!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p3" }),
+      p2!.fetchRegistryPdf({ realEstateNumber: "1", ref: "p2" }),
     ).rejects.toMatchObject({ code: "rate_limited" });
   });
 

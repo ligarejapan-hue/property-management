@@ -424,13 +424,11 @@ function getSharedRegistryFetchThrottle(): RegistryFetchThrottle {
     const parsed = raw ? Number(raw) : undefined;
     const minIntervalMs =
       parsed && Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-    sharedRegistryFetchThrottle = createRegistryFetchThrottle({
-      ...(minIntervalMs ? { minIntervalMs } : {}),
-      // @codex P2: 所在検索の「検索→取得」は連続する1組の操作（searchCandidates と fetchRegistryPdf が
-      // 同一 throttle を消費）。burst=2 で対を許容し、検索直後の取得が即 429 になるのを防ぐ。
-      // 補充は minIntervalMs ごと（=1件/分）に据え置くため、持続レートは保守的なまま（対を1回許すだけ）。
-      burst: 2,
-    });
+    // burst は既定1（1件/分の保守的ガード）。検索→取得の対は official-provider が search/fetch で
+    // 別 throttle キーを使うことで両立させる（@codex P2: burst=2 は直 fetch 連打も許すため不採用）。
+    sharedRegistryFetchThrottle = createRegistryFetchThrottle(
+      minIntervalMs ? { minIntervalMs } : {},
+    );
   }
   return sharedRegistryFetchThrottle;
 }
