@@ -80,8 +80,7 @@ beforeEach(() => {
     fetchRegistryPdf: vi.fn(),
   });
   (runRegistryAutoFetch as Mock).mockResolvedValue({ status: "obtained" });
-  // resolveRegistryCandidate は同期（candidate-cache 参照）ゆえ mockReturnValue。
-  (resolveRegistryCandidate as Mock).mockReturnValue({ realEstateNumber: "RESOLVED-REN" });
+  (resolveRegistryCandidate as Mock).mockResolvedValue({ realEstateNumber: "RESOLVED-REN" });
 });
 
 describe("auto-fetch route: candidateRef 分岐（cond③ 再解決の配線）", () => {
@@ -112,9 +111,9 @@ describe("auto-fetch route: candidateRef 分岐（cond③ 再解決の配線）"
   });
 
   it("再解決で候補が見つからない（resolve が 409）→ 409・取得しない", async () => {
-    (resolveRegistryCandidate as Mock).mockImplementation(() => {
-      throw Object.assign(new Error("not found"), { status: 409, code: "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND" });
-    });
+    (resolveRegistryCandidate as Mock).mockRejectedValue(
+      Object.assign(new Error("not found"), { status: 409, code: "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND" }),
+    );
     const res = await callRoute({ confirmed: true, candidateRef: "cand-x" });
     expect(res.status).toBe(409);
     expect(runRegistryAutoFetch).not.toHaveBeenCalled();

@@ -77,7 +77,7 @@ export async function POST(
       typeof candidateRefRaw === "string" ? candidateRefRaw.trim() : "";
 
     if (candidateRef) {
-      const { realEstateNumber } = resolveRegistryCandidate({
+      const { realEstateNumber } = await resolveRegistryCandidate({
         session: { id: session.id, role: session.role },
         propertyId: id,
         confirmed,

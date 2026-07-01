@@ -29,6 +29,7 @@ import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request"
 import {
   rememberSearchCandidates,
   resolveCachedCandidate,
+  fingerprintProperty,
 } from "./candidate-cache";
 
 export interface RunRegistrySearchArgs {
@@ -145,7 +146,13 @@ export async function runRegistrySearch(
     // 取得側（resolveRegistryCandidate）が provider を再検索せず候補→不動産番号を解決できるよう、
     // 認可済み検索の結果を server 内メモリに覚える（@codex P1: throttle 二重消費の回避）。
     // realEstateNumber は log/応答に出さず、取得キーとして server 内でのみ保持する（cond②/③）。
-    rememberSearchCandidates(session.id, propertyId, obtainable);
+    // 物件指紋も一緒に覚え、取得時に物件が編集されていたら古い候補を無効化する（@codex P1）。
+    rememberSearchCandidates(
+      session.id,
+      propertyId,
+      fingerprintProperty(property),
+      obtainable,
+    );
 
     // cond③: 応答から realEstateNumber を除外する（候補参照は取得時に server 再解決）。
     // 表示用フィールド（所在/地番/家屋番号）は認可ユーザー向け本文として返すが、
@@ -231,9 +238,9 @@ export interface ResolveRegistryCandidateArgs {
  * キャッシュ自体も (userId, propertyId, candidateRef) キーゆえ他ユーザー/他物件の候補は解決しない。
  * 解決した realEstateNumber は取得キーとして内部利用のみ（応答・log・AuditLog に出さない／cond②）。
  */
-export function resolveRegistryCandidate(
+export async function resolveRegistryCandidate(
   args: ResolveRegistryCandidateArgs,
-): { realEstateNumber: string } {
+): Promise<{ realEstateNumber: string }> {
   const { session, propertyId, confirmed, candidateRef } = args;
 
   // 確認フラグ必須（true 以外は解決しない／cond①）。
@@ -253,13 +260,43 @@ export function resolveRegistryCandidate(
     );
   }
 
+  // 現在の物件スナップショット（指紋用・スコープ確認用。所有者PIIは取らない。provider は呼ばない）。
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: {
+      id: true,
+      createdBy: true,
+      assignedTo: true,
+      address: true,
+      lotNumber: true,
+      buildingNumber: true,
+      realEstateNumber: true,
+    },
+  });
+  if (!property) {
+    throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+  }
+  if (!canAccessPropertyRecord(session, property)) {
+    throw new ApiError(
+      403,
+      "この物件にアクセスする権限がありません",
+      "FORBIDDEN",
+    );
+  }
+
   // 認可済み検索が覚えた候補からのみ不動産番号を解決する（client の値は一致判定にのみ使う）。
-  const realEstateNumber = resolveCachedCandidate(session.id, propertyId, ref);
+  // @codex P1: 検索時の物件指紋と現在が一致する場合だけ有効（編集後の古い候補は使わせない）。
+  const realEstateNumber = resolveCachedCandidate(
+    session.id,
+    propertyId,
+    ref,
+    fingerprintProperty(property),
+  );
   if (!realEstateNumber) {
-    // 未検索 / 改ざん / TTL 超過 → 409。秘匿情報は載せない。取得前に再検索を促す。
+    // 未検索 / 改ざん / TTL 超過 / 物件編集で指紋不一致 → 409。秘匿情報は載せない。
     throw new ApiError(
       409,
-      "選択した候補が見つかりません。もう一度検索してから取得してください",
+      "選択した候補が見つかりません。物件情報が変わった可能性があります。もう一度検索してから取得してください",
       "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
     );
   }
