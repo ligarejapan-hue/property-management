@@ -1,0 +1,120 @@
+/**
+ * PR-2b-3 (@codex P1): 所在検索の候補（candidateRef → 不動産番号）を「認可済みユーザーの検索」から
+ * 取得側へ橋渡しする短命 in-memory マップ。
+ *
+ * 目的: 取得時に provider を再検索しない（cond③ の「server 再解決」を、認可済み検索が残した
+ * server 側マッピングの参照で満たす）。これにより search→obtain で provider throttle を
+ * 二重に消費しない（obtain 側の再検索予約を無くす）。
+ *
+ * 前提: 本アプリは単一プロセス（systemd 1サービス）運用ゆえプロセス内 Map で十分。restart で
+ * 消えるが、その場合は再検索で回復する（取得前に必ず「検索」を通る導線のため実害は小）。
+ *
+ * cond②/cond③: 不動産番号は server 内部の取得キーとしてのみ保持し、log/応答には出さない。
+ * キーは (userId, propertyId, candidateRef) で、他ユーザー/他物件の候補は解決できない。
+ */
+interface CachedCandidate {
+  realEstateNumber: string;
+  /** 検索時点の物件スナップショット指紋。取得時に一致しなければ無効（物件が編集された）。 */
+  fingerprint: string;
+  expiresAt: number;
+}
+
+const store = new Map<string, CachedCandidate>();
+const TTL_MS = 10 * 60 * 1000; // 検索→選択→取得の一連操作に十分な短命。
+
+// キー区切り文字。userId/propertyId は UUID ゆえ '/' を含まず、prefix 一致（user+property の
+// 一括削除）が曖昧にならない（candidateRef は末尾のため '/' を含んでも可）。
+// @codex P2: 制御文字リテラルをソースに埋め込まない（ファイルをテキストのまま保つ）。
+const KEY_SEP = "/";
+function key(userId: string, propertyId: string, candidateRef: string): string {
+  return `${userId}${KEY_SEP}${propertyId}${KEY_SEP}${candidateRef}`;
+}
+
+/** 指紋の材料（検索キーに使う物件フィールド）。これらが変われば候補は陳腐化する。 */
+export interface PropertyFingerprintSource {
+  address: string | null;
+  lotNumber: string | null;
+  buildingNumber: string | null;
+  realEstateNumber: string | null;
+}
+
+const normalize = (v: string | null | undefined): string => v?.trim() ?? "";
+
+/**
+ * 検索キーに使う物件フィールド（所在/地番/家屋番号/不動産番号）の指紋。@codex P1: 検索と取得の間に
+ * 物件が編集（所在変更・不動産番号追加 等）されると古い候補で別物件の謄本を取得・紐付けしてしまうため、
+ * 指紋一致を取得の前提にする。
+ */
+export function fingerprintProperty(p: PropertyFingerprintSource): string {
+  return JSON.stringify([
+    normalize(p.address),
+    normalize(p.lotNumber),
+    normalize(p.buildingNumber),
+    normalize(p.realEstateNumber),
+  ]);
+}
+
+/**
+ * 認可済み検索が返した候補を覚える（candidateRef → 不動産番号）。不動産番号を持たない候補は
+ * 取得キーにできないため覚えない。fingerprint は検索時点の物件指紋。now はテスト注入用。
+ */
+export function rememberSearchCandidates(
+  userId: string,
+  propertyId: string,
+  fingerprint: string,
+  candidates: ReadonlyArray<{ candidateRef?: string | null; realEstateNumber?: string | null }>,
+  now: number = Date.now(),
+): void {
+  // @codex P2 ×2: 追加前に掃除する。(a) 期限切れエントリを全体から削除して Map の際限ない増大と
+  // TTL 超過後の秘匿キー滞留を防ぐ。(b) 同一ユーザー×同一物件の旧候補を消して、前回検索の
+  // candidateRef（今回の結果に無い候補）で取得されるのを防ぐ（古いタブ/細工要求対策）。
+  const prefix = `${userId}${KEY_SEP}${propertyId}${KEY_SEP}`;
+  for (const [k, e] of store) {
+    if (e.expiresAt <= now || k.startsWith(prefix)) {
+      store.delete(k);
+    }
+  }
+  for (const c of candidates) {
+    const ref = c.candidateRef?.trim();
+    const ren = c.realEstateNumber?.trim();
+    if (ref && ren) {
+      store.set(key(userId, propertyId, ref), { realEstateNumber: ren, fingerprint, expiresAt: now + TTL_MS });
+    }
+  }
+}
+
+/**
+ * 取得時に candidateRef から不動産番号を解決する。未検索/改ざん/TTL 超過は null（route 側で 409）。
+ * client の candidateRef は「一致するか」だけに使い、番号は server が覚えた値のみ返す（cond③）。
+ */
+export function resolveCachedCandidate(
+  userId: string,
+  propertyId: string,
+  candidateRef: string,
+  fingerprint: string,
+  now: number = Date.now(),
+): string | null {
+  const k = key(userId, propertyId, candidateRef);
+  const entry = store.get(k);
+  if (!entry) return null;
+  if (entry.expiresAt <= now) {
+    store.delete(k);
+    return null;
+  }
+  // @codex P1: 検索後に物件が編集されていたら（指紋不一致）、古い候補は使わせない。
+  if (entry.fingerprint !== fingerprint) {
+    store.delete(k);
+    return null;
+  }
+  return entry.realEstateNumber;
+}
+
+/** テスト用: プロセス内キャッシュを空にする。 */
+export function __clearCandidateCacheForTests(): void {
+  store.clear();
+}
+
+/** テスト用: プロセス内キャッシュの現在のエントリ数（prune 検証用）。 */
+export function __candidateCacheSizeForTests(): number {
+  return store.size;
+}

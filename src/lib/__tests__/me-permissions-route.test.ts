@@ -66,6 +66,7 @@ vi.mock("@/lib/corporate-lookup", () => ({
 
 vi.mock("@/lib/registry-fetch/auto-fetch", () => ({
   isRegistryAutoFetchProviderConfigured: vi.fn(),
+  isRegistryLocationSearchConfigured: vi.fn(),
 }));
 
 vi.mock("@/lib/registry-ocr/client", () => ({
@@ -90,7 +91,10 @@ import {
   handleApiError,
 } from "@/lib/api-helpers";
 import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
-import { isRegistryAutoFetchProviderConfigured } from "@/lib/registry-fetch/auto-fetch";
+import {
+  isRegistryAutoFetchProviderConfigured,
+  isRegistryLocationSearchConfigured,
+} from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
@@ -116,6 +120,7 @@ beforeEach(() => {
   (getUserPermissions as Mock).mockResolvedValue(PERMS);
   (isCorporateLookupConfigured as Mock).mockReturnValue(true);
   (isRegistryAutoFetchProviderConfigured as Mock).mockReturnValue(false);
+  (isRegistryLocationSearchConfigured as Mock).mockReturnValue(false);
   (isRegistryOcrConfigured as Mock).mockReturnValue(false);
   (isSaleDmConfigured as Mock).mockReturnValue(false);
 });
@@ -153,6 +158,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(body.capabilities).toEqual({
       corporateLookup: true,
       registryAutoFetch: false,
+      registryLocationSearch: false,
       // office_staff（非 admin）かつ OCR 未設定 → false
       registryOcrDraft: false,
       saleDmLetter: false,
@@ -168,9 +174,17 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(body.capabilities).toEqual({
       corporateLookup: true,
       registryAutoFetch: true,
+      registryLocationSearch: false,
       registryOcrDraft: false,
       saleDmLetter: false,
     });
+  });
+
+  it("registryLocationSearch は所在検索対応 provider のときだけ true（自動取得より厳しい）", async () => {
+    (isRegistryLocationSearchConfigured as Mock).mockReturnValue(true);
+    const body = await (await GET()).json();
+    expect(body.capabilities.registryLocationSearch).toBe(true);
+    expect(isRegistryLocationSearchConfigured).toHaveBeenCalledTimes(1);
   });
 
   it("registryOcrDraft は OCR 設定済み かつ admin のときだけ true", async () => {
@@ -197,6 +211,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(Object.keys(body.capabilities).sort()).toEqual([
       "corporateLookup",
       "registryAutoFetch",
+      "registryLocationSearch",
       "registryOcrDraft",
       "saleDmLetter",
     ]);
@@ -281,6 +296,9 @@ describe("GET /api/me/permissions — 実装形状（source assertion）", () =>
     );
     expect(routeSrc).toMatch(
       /registryAutoFetch:\s*isRegistryAutoFetchProviderConfigured\(\)/,
+    );
+    expect(routeSrc).toMatch(
+      /registryLocationSearch:\s*isRegistryLocationSearchConfigured\(\)/,
     );
     expect(routeSrc).not.toMatch(/process\.env\./);
   });

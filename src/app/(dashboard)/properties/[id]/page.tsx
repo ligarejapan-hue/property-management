@@ -26,6 +26,7 @@ import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import RegistryAutoFetchButton from "@/components/properties/registry-auto-fetch-button";
+import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner, fetchQualityCheck } from "@/lib/api-client";
@@ -361,6 +362,7 @@ export default function PropertyDetailPage({
     corporateLookupConfigured,
     canAutoFetchRegistry,
     registryAutoFetchConfigured,
+    registryLocationSearchConfigured,
     ownerEditableFields,
   } = useMemo(() => {
     const effectivePermissions =
@@ -374,6 +376,10 @@ export default function PropertyDetailPage({
     const registryAutoFetchConfigured = collapseCapabilities
       ? false
       : meCapabilities?.registryAutoFetch === true;
+    // 所在検索は自動取得より厳しい capability（provider が所在検索対応のときのみ）。
+    const registryLocationSearchConfigured = collapseCapabilities
+      ? false
+      : meCapabilities?.registryLocationSearch === true;
     const canAutoFetchRegistry = effectivePermissions.some(
       (p) => p.resource === "registry" && p.action === "auto_fetch" && p.granted,
     );
@@ -417,6 +423,7 @@ export default function PropertyDetailPage({
       corporateLookupConfigured,
       canAutoFetchRegistry,
       registryAutoFetchConfigured,
+      registryLocationSearchConfigured,
       ownerEditableFields,
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions, meCapabilities]);
@@ -532,6 +539,14 @@ export default function PropertyDetailPage({
         registryStatus={property.registryStatus}
         canAutoFetch={canAutoFetchRegistry}
         providerConfigured={registryAutoFetchConfigured}
+        onComplete={fetchProperty}
+      />
+
+      {/* 謄本 所在検索（PR-2b-3・番号無し物件を所在で検索→候補選択→取得。所在検索対応 provider のときのみ有効） */}
+      <RegistryLocationSearchButton
+        propertyId={property.id}
+        canAutoFetch={canAutoFetchRegistry}
+        providerConfigured={registryLocationSearchConfigured}
         onComplete={fetchProperty}
       />
 

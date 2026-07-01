@@ -131,6 +131,7 @@ import {
   type RegistryFetchProvider,
 } from "@/lib/registry-fetch";
 import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
+import { fingerprintProperty } from "@/lib/registry-fetch/candidate-cache";
 import * as routeModule from "@/app/api/properties/[id]/registry/auto-fetch/route";
 
 const { POST } = routeModule;
@@ -279,6 +280,69 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(pm.property.findUnique).not.toHaveBeenCalled();
     expect(pm.property.updateMany).not.toHaveBeenCalled();
     expect(pm.importJob.create).not.toHaveBeenCalled();
+  });
+
+  it("realEstateNumber override（所在検索の候補取得）を fetchRegistryPdf に使う（物件は番号未保持）", async () => {
+    const provider = successProvider();
+    setProperty({ realEstateNumber: null });
+    await runRegistryAutoFetch(
+      { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN-123" },
+      provider,
+    );
+    expect(provider.fetchRegistryPdf).toHaveBeenCalledWith(
+      expect.objectContaining({ realEstateNumber: "CAND-REN-123" }),
+    );
+  });
+
+  it("expectedFingerprint が現在の物件指紋と一致すれば override 取得（@codex P2 TOCTOU）", async () => {
+    const provider = successProvider();
+    setProperty({ realEstateNumber: null, address: "所在X", lotNumber: "1", buildingNumber: "2" });
+    const fp = fingerprintProperty({ address: "所在X", lotNumber: "1", buildingNumber: "2", realEstateNumber: null });
+    await runRegistryAutoFetch(
+      { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN", expectedFingerprint: fp },
+      provider,
+    );
+    expect(provider.fetchRegistryPdf).toHaveBeenCalledWith(expect.objectContaining({ realEstateNumber: "CAND-REN" }));
+  });
+
+  it("expectedFingerprint 不一致（resolve 後に物件編集）は 409・取得しない（@codex P2 TOCTOU）", async () => {
+    const provider = successProvider();
+    setProperty({ realEstateNumber: null, address: "編集後の所在", lotNumber: null, buildingNumber: null });
+    await expect(
+      runRegistryAutoFetch(
+        { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN", expectedFingerprint: "stale-fingerprint" },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND" });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("expectedFingerprint 指定時は lock の where に指紋フィールドを含める（@codex P2 atomic）", async () => {
+    const provider = successProvider();
+    setProperty({ realEstateNumber: null, address: "所在X", lotNumber: "1", buildingNumber: "2" });
+    const fp = fingerprintProperty({ address: "所在X", lotNumber: "1", buildingNumber: "2", realEstateNumber: null });
+    await runRegistryAutoFetch(
+      { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN", expectedFingerprint: fp },
+      provider,
+    );
+    const lockWhere = (pm.property.updateMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+    expect(lockWhere).toMatchObject({ address: "所在X", lotNumber: "1", buildingNumber: "2", realEstateNumber: null });
+  });
+
+  it("lock 失敗(count=0)で再読込の指紋が不一致なら 409 CANDIDATE_NOT_FOUND（@codex P2）", async () => {
+    const provider = successProvider();
+    pm.property.findUnique
+      .mockResolvedValueOnce({ id: PROP_ID, createdBy: "user-1", assignedTo: null, registryStatus: "unconfirmed", version: 3, realEstateNumber: null, address: "所在X", lotNumber: "1", buildingNumber: "2" })
+      .mockResolvedValueOnce({ address: "編集後", lotNumber: null, buildingNumber: null, realEstateNumber: null });
+    pm.property.updateMany.mockResolvedValue({ count: 0 });
+    const fp = fingerprintProperty({ address: "所在X", lotNumber: "1", buildingNumber: "2", realEstateNumber: null });
+    await expect(
+      runRegistryAutoFetch(
+        { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN", expectedFingerprint: fp },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND" });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
   });
 
   it("3. property access scope（field_staff・担当外）で 403・provider 未到達", async () => {

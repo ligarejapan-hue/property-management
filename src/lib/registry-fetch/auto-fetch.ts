@@ -44,6 +44,7 @@ import {
   createRegistryFetchThrottle,
   type RegistryFetchThrottle,
 } from "@/lib/registry-fetch/throttle";
+import { fingerprintProperty } from "./candidate-cache";
 
 export interface RunRegistryAutoFetchArgs {
   /** 認証済みセッション（route の getApiSession から id/role のみ）。 */
@@ -52,6 +53,16 @@ export interface RunRegistryAutoFetchArgs {
   propertyId: string;
   /** 課金を伴う操作のため明示確認フラグ。true 以外は実行しない。 */
   confirmed: boolean;
+  /**
+   * 取得キーの上書き（所在検索で server 側再解決した候補の不動産番号／cond③）。
+   * 指定時はこれを fetchRegistryPdf に使う（物件は番号未保持のため）。未指定は物件の realEstateNumber。
+   */
+  realEstateNumber?: string | null;
+  /**
+   * @codex P2: override を使う所在検索取得での TOCTOU 防止。resolve が候補を確定した時点の物件指紋。
+   * ここで version-lock する行の指紋がこれと一致しなければ 409（resolve〜取得の間の編集を弾く）。
+   */
+  expectedFingerprint?: string;
 }
 
 // provider 失敗（RegistryFetchError）の分類コード → 安全な HTTP ステータス。
@@ -413,6 +424,8 @@ function getSharedRegistryFetchThrottle(): RegistryFetchThrottle {
     const parsed = raw ? Number(raw) : undefined;
     const minIntervalMs =
       parsed && Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+    // burst は既定1（1件/分の保守的ガード）。検索→取得の対は official-provider が search/fetch で
+    // 別 throttle キーを使うことで両立させる（@codex P2: burst=2 は直 fetch 連打も許すため不採用）。
     sharedRegistryFetchThrottle = createRegistryFetchThrottle(
       minIntervalMs ? { minIntervalMs } : {},
     );
@@ -501,6 +514,21 @@ export function isRegistryAutoFetchProviderConfigured(
 }
 
 /**
+ * 所在検索（番号無し物件を所在で検索して取得）が「この環境で使えるか」を boolean で返す。
+ * 自動取得より厳しく、provider が `supportsLocationSearch === true` を宣言している場合のみ true。
+ *
+ * CodexP2: official provider は searchByLocation 未実装ゆえ supportsLocationSearch を宣言しない。
+ * 自動取得は可能でも所在検索は未対応、という状態で「所在で謄本を検索」ボタンを出して確認後に必ず
+ * 501 で失敗する UI を露出しないため、search route の 501 条件（supportsLocationSearch===true）と
+ * 揃えた専用 capability にする。
+ */
+export function isRegistryLocationSearchConfigured(
+  options: ResolveRegistryFetchProviderOptions = {},
+): boolean {
+  return getRegistryFetchProvider(options)?.supportsLocationSearch === true;
+}
+
+/**
  * 自動取得の中核。route から呼ばれ、戻り値がそのまま API レスポンス body になる。
  * ハードエラーは ApiError を throw し、route 側 catch → handleApiError で HTTP 化する。
  *
@@ -532,6 +560,10 @@ export async function runRegistryAutoFetch(
       registryStatus: true,
       version: true,
       realEstateNumber: true,
+      // 所在検索取得の指紋再検証用（@codex P2）。
+      address: true,
+      lotNumber: true,
+      buildingNumber: true,
     },
   });
   if (!property) {
@@ -544,6 +576,20 @@ export async function runRegistryAutoFetch(
       403,
       "この物件にアクセスする権限がありません",
       "FORBIDDEN",
+    );
+  }
+
+  // 3.5 @codex P2: 所在検索取得の override は「今 version-lock する行の指紋」が resolve 時と
+  //     一致する場合だけ使う。resolve のスナップショットとこの read の間に物件が編集されていたら
+  //     429/lock 前に 409 で弾く（この read〜fetch は下の楽観ロックで直列化される）。
+  if (
+    args.expectedFingerprint !== undefined &&
+    fingerprintProperty(property) !== args.expectedFingerprint
+  ) {
+    throw new ApiError(
+      409,
+      "物件情報が変わりました。もう一度検索してから取得してください",
+      "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
     );
   }
 
@@ -564,10 +610,40 @@ export async function runRegistryAutoFetch(
       id: propertyId,
       version: property.version,
       registryStatus: { not: "scheduled" },
+      // @codex P2: 所在検索取得は「検索キー項目（指紋）」も一致条件に含め、read〜lock の間に
+      //   version を上げない経路（取込・PDF処理等）で編集されていても lock を失敗させる。
+      //   これで override（resolve 時の番号）は「lock した行の指紋 = resolve 時の指紋」の時だけ使う。
+      ...(args.expectedFingerprint !== undefined
+        ? {
+            address: property.address,
+            lotNumber: property.lotNumber,
+            buildingNumber: property.buildingNumber,
+            realEstateNumber: property.realEstateNumber,
+          }
+        : {}),
     },
     data: { registryStatus: "scheduled", version: { increment: 1 } },
   });
   if (lock.count === 0) {
+    // 候補取得で lock 失敗 = 並行取得 or 検索キー項目の変化。指紋が今も一致するか再確認して弁別する。
+    if (args.expectedFingerprint !== undefined) {
+      const fresh = await prisma.property.findUnique({
+        where: { id: propertyId },
+        select: {
+          address: true,
+          lotNumber: true,
+          buildingNumber: true,
+          realEstateNumber: true,
+        },
+      });
+      if (!fresh || fingerprintProperty(fresh) !== args.expectedFingerprint) {
+        throw new ApiError(
+          409,
+          "物件情報が変わりました。もう一度検索してから取得してください",
+          "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+        );
+      }
+    }
     throw new ApiError(
       409,
       "この物件は既に謄本自動取得を実行中です",
@@ -579,8 +655,9 @@ export async function runRegistryAutoFetch(
   //    いずれの失敗でも scheduled で固着させないよう、catch で必ずロック解除する。
   try {
     // 取得キーは非PIIのみ（realEstateNumber / 物件UUID）。所有者名・住所は渡さない。
+    // cond③: 所在検索の候補取得では server 再解決した override を優先（物件は番号未保持）。
     const fetchResult = await provider.fetchRegistryPdf({
-      realEstateNumber: property.realEstateNumber,
+      realEstateNumber: args.realEstateNumber ?? property.realEstateNumber,
       ref: property.id,
     });
 

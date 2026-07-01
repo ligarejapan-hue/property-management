@@ -158,7 +158,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     }
 
     // 2. レート制御（公式へアクセスする前に判定 = 過剰アクセスを物理的に防ぐ）。
-    if (this.throttle && !this.throttle.tryAcquire(this.name, this.now().getTime())) {
+    // @codex P2: fetch は search と別キー。検索→取得の対は両立させつつ、fetch 連打は 1件/分に保つ。
+    if (this.throttle && !this.throttle.tryAcquire(`${this.name}:fetch`, this.now().getTime())) {
       throw new RegistryFetchError("rate_limited");
     }
 
@@ -232,9 +233,10 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
   async searchCandidates(
     request: RegistrySearchRequest,
   ): Promise<RegistryCandidate[]> {
+    // @codex P2: search は fetch と別キー。検索→取得の対は両立させつつ、検索連打は 1件/分に保つ。
     if (
       this.throttle &&
-      !this.throttle.tryAcquire(this.name, this.now().getTime())
+      !this.throttle.tryAcquire(`${this.name}:search`, this.now().getTime())
     ) {
       throw new RegistryFetchError("rate_limited");
     }

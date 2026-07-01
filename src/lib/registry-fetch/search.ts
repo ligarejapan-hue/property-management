@@ -26,6 +26,11 @@ import {
   type RegistryFetchErrorCode,
 } from "@/lib/registry-fetch";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
+import {
+  rememberSearchCandidates,
+  resolveCachedCandidate,
+  fingerprintProperty,
+} from "./candidate-cache";
 
 export interface RunRegistrySearchArgs {
   /** 認証済みセッション（route の getApiSession から id/role のみ）。 */
@@ -134,20 +139,35 @@ export async function runRegistrySearch(
   try {
     const candidates = await provider.searchCandidates(built.request);
 
+    // 取得できる候補のみを扱う（@codex P2）。不動産番号の無い候補は取得時に必ず 409 になるため、
+    // UI に出さない・キャッシュもしない（選んで確認後に必ず失敗する導線を作らない）。
+    const obtainable = candidates.filter((c) => !!c.realEstateNumber?.trim());
+
+    // 取得側（resolveRegistryCandidate）が provider を再検索せず候補→不動産番号を解決できるよう、
+    // 認可済み検索の結果を server 内メモリに覚える（@codex P1: throttle 二重消費の回避）。
+    // realEstateNumber は log/応答に出さず、取得キーとして server 内でのみ保持する（cond②/③）。
+    // 物件指紋も一緒に覚え、取得時に物件が編集されていたら古い候補を無効化する（@codex P1）。
+    rememberSearchCandidates(
+      session.id,
+      propertyId,
+      fingerprintProperty(property),
+      obtainable,
+    );
+
     // cond③: 応答から realEstateNumber を除外する（候補参照は取得時に server 再解決）。
     // 表示用フィールド（所在/地番/家屋番号）は認可ユーザー向け本文として返すが、
     // log / AuditLog には出さない。
-    const shaped = candidates.map((c) => ({
+    const shaped = obtainable.map((c) => ({
       candidateRef: c.candidateRef,
       address: c.address ?? null,
       lotNumber: c.lotNumber ?? null,
       buildingNumber: c.buildingNumber ?? null,
     }));
 
-    // 成功 AuditLog（非PII: 件数・状態のみ。所在/地番/不動産番号は載せない）。
+    // 成功 AuditLog（非PII: 件数・状態のみ。所在/地番/不動産番号は載せない）。件数は返却分。
     await writeRegistrySearchAudit(session.id, propertyId, {
       status: "success",
-      candidateCount: candidates.length,
+      candidateCount: obtainable.length,
     });
 
     return { searchable: true, candidates: shaped };
@@ -196,4 +216,88 @@ async function writeRegistrySearchAudit(
       ...extra,
     },
   });
+}
+
+export interface ResolveRegistryCandidateArgs {
+  /** 認証済みセッション（id/role のみ）。 */
+  session: RegistryPdfSession;
+  /** 取得対象物件ID（route path の {id}）。 */
+  propertyId: string;
+  /** 課金を伴う可能性があるため明示確認フラグ（cond①）。 */
+  confirmed: boolean;
+  /** client が選択した候補参照。信頼せず server で再解決する（cond③）。 */
+  candidateRef: string;
+}
+
+/**
+ * cond③: 取得時に client の candidateRef を信頼せず、不動産番号は「認可済み検索が server に残した
+ * マッピング」からのみ解決する（改ざん対策）。取得側で provider を再検索しない（@codex P1: search と
+ * fetch の間で provider throttle を二重に消費して 429 になるのを避ける）。
+ *
+ * scope（field_staff 可視範囲）と物件存在・楽観ロックは後続の runRegistryAutoFetch が再確認する。
+ * キャッシュ自体も (userId, propertyId, candidateRef) キーゆえ他ユーザー/他物件の候補は解決しない。
+ * 解決した realEstateNumber は取得キーとして内部利用のみ（応答・log・AuditLog に出さない／cond②）。
+ */
+export async function resolveRegistryCandidate(
+  args: ResolveRegistryCandidateArgs,
+): Promise<{ realEstateNumber: string; fingerprint: string }> {
+  const { session, propertyId, confirmed, candidateRef } = args;
+
+  // 確認フラグ必須（true 以外は解決しない／cond①）。
+  if (confirmed !== true) {
+    throw new ApiError(
+      400,
+      "謄本取得には確認（confirmed:true）が必要です",
+      "REGISTRY_AUTO_FETCH_CONFIRMATION_REQUIRED",
+    );
+  }
+  const ref = typeof candidateRef === "string" ? candidateRef.trim() : "";
+  if (!ref) {
+    throw new ApiError(
+      400,
+      "取得する候補が指定されていません",
+      "REGISTRY_OBTAIN_CANDIDATE_REQUIRED",
+    );
+  }
+
+  // 現在の物件スナップショット（指紋用・スコープ確認用。所有者PIIは取らない。provider は呼ばない）。
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: {
+      id: true,
+      createdBy: true,
+      assignedTo: true,
+      address: true,
+      lotNumber: true,
+      buildingNumber: true,
+      realEstateNumber: true,
+    },
+  });
+  if (!property) {
+    throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+  }
+  if (!canAccessPropertyRecord(session, property)) {
+    throw new ApiError(
+      403,
+      "この物件にアクセスする権限がありません",
+      "FORBIDDEN",
+    );
+  }
+
+  // 認可済み検索が覚えた候補からのみ不動産番号を解決する（client の値は一致判定にのみ使う）。
+  // @codex P1: 検索時の物件指紋と現在が一致する場合だけ有効（編集後の古い候補は使わせない）。
+  const fingerprint = fingerprintProperty(property);
+  const realEstateNumber = resolveCachedCandidate(session.id, propertyId, ref, fingerprint);
+  if (!realEstateNumber) {
+    // 未検索 / 改ざん / TTL 超過 / 物件編集で指紋不一致 → 409。秘匿情報は載せない。
+    throw new ApiError(
+      409,
+      "選択した候補が見つかりません。物件情報が変わった可能性があります。もう一度検索してから取得してください",
+      "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+    );
+  }
+
+  // @codex P2: 取得側(runRegistryAutoFetch)が version-lock する行の指紋とこれが一致する時だけ
+  // override を使うよう、解決に使った指紋も返す（resolve〜取得の間の編集による TOCTOU 防止）。
+  return { realEstateNumber, fingerprint };
 }

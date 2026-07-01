@@ -1548,6 +1548,49 @@ export async function requestRegistryOcrDraft(file: File) {
   });
 }
 
+// ---------- 謄本 所在検索（PR-2b: 番号無し物件を所在で検索→候補選択→取得） ----------
+// 応答の候補には不動産番号は含まれない（cond③: 取得時に server 側で再解決する）。
+
+export interface RegistrySearchCandidate {
+  candidateRef: string;
+  address: string | null;
+  lotNumber: string | null;
+  buildingNumber: string | null;
+}
+
+export type RegistrySearchResult =
+  | { searchable: true; candidates: RegistrySearchCandidate[] }
+  | {
+      searchable: false;
+      reason: "has_real_estate_number" | "insufficient_location";
+    };
+
+/** 所在検索: 番号無し物件を所在/地番/家屋番号で謄本候補検索する（confirmed 必須）。 */
+export async function searchRegistryCandidates(
+  propertyId: string,
+): Promise<RegistrySearchResult> {
+  return apiFetch<RegistrySearchResult>(
+    `/api/properties/${propertyId}/registry/search`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmed: true }),
+    },
+  );
+}
+
+/** 候補を選んで謄本取得（cond③: candidateRef は取得時に server 側で再解決）。confirmed 必須。 */
+export async function obtainRegistryByCandidate(
+  propertyId: string,
+  candidateRef: string,
+): Promise<unknown> {
+  return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmed: true, candidateRef }),
+  });
+}
+
 /** テキスト貼り付けプレビュー専用 (DB書き込みなし) */
 export async function parseRegistryPdfText(text: string, fileName?: string) {
   if (USE_MOCK) {
