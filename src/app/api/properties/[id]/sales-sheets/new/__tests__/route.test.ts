@@ -75,6 +75,27 @@ const LAND_PROPERTY = {
   roadType: null,
   roadWidth: null,
   occupancyStatus: null,
+  exclusiveArea: null,
+  balconyArea: null,
+  layoutType: null,
+  floorNo: null,
+  orientation: null,
+  managementFee: null,
+  repairReserveFee: null,
+  building: null,
+};
+
+const MANSION_PROPERTY = {
+  ...LAND_PROPERTY,
+  propertyType: "apartment_unit",
+  exclusiveArea: "62.45",
+  balconyArea: "8.20",
+  layoutType: "2LDK",
+  floorNo: 3,
+  orientation: "南",
+  managementFee: 12000,
+  repairReserveFee: 8500,
+  building: { name: "テストレジデンス", totalFloors: 10, builtYear: 2015, structureType: "RC" },
 };
 
 vi.mock("@/lib/prisma", () => ({
@@ -86,33 +107,32 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: vi.fn(async () => null),
     },
     propertyPhoto: {
-      findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
     },
   },
 }));
 
 // createDesign: DB書き込みはモック。ただし parseSalesSheetDocument を通じた
-// document 検証は実行する（旧 data:only バリデータでは /uploads/ src が 422 を返す
-// ことをこのテストで検出できるようにするため）。
+// document 検証は実行する（無効な document が 422 になることをこのテストで検出できるように）。
 vi.mock("@/lib/sales-sheet/design-service", async () => {
   const { parseSalesSheetDocument } = await import("@/lib/sales-sheet/document-schema");
   return {
     createDesign: vi.fn(async (input: { document: unknown }) => {
-      parseSalesSheetDocument(input.document); // invalid document は throw → handleApiError が 422 を返す
+      parseSalesSheetDocument(input.document); // invalid document は throw → handleApiError が 422
       return { id: "sheet-1" };
     }),
   };
 });
 
-// 代表写真の保存前認可（caller 認可＋物件所属）。既定 true、テストで上書き。
+// 写真の保存前認可（caller 認可＋物件所属）。既定 true、テストで上書き。
 vi.mock("@/lib/sales-sheet/authorize-document-images", () => ({
   isImageKeyAuthorizedForProperty: vi.fn(async () => true),
 }));
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
-// buildSaleLandDocument はモックしない — 実関数でドキュメントを組むことで
-// /uploads/ src が document に含まれるパスを実際にバリデーション経路に通す。
+// build-document はモックしない — 実関数でドキュメントを組むことで /uploads/ src が
+// 実際にバリデーション経路を通る。
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
@@ -124,7 +144,7 @@ import { POST } from "../route";
 type PrismaMock = {
   property: { findUnique: Mock };
   propertyOwner: { findFirst: Mock };
-  propertyPhoto: { findFirst: Mock };
+  propertyPhoto: { findMany: Mock };
 };
 const pm = prisma as unknown as PrismaMock;
 
@@ -135,16 +155,21 @@ function makeRequest() {
   return new Request("http://localhost/api/properties/p1/sales-sheets/new", { method: "POST" });
 }
 
+function lastDocument() {
+  return (createDesign as Mock).mock.calls[0][0].document as { elements: { type: string }[] };
+}
+function lastTemplateId() {
+  return (createDesign as Mock).mock.calls[0][0].templateId as string;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Mock).mockResolvedValue(ADMIN_SESSION);
   (getUserPermissions as Mock).mockResolvedValue(WRITE_PERMS);
   pm.property.findUnique.mockResolvedValue(LAND_PROPERTY);
   pm.propertyOwner.findFirst.mockResolvedValue(null);
-  pm.propertyPhoto.findFirst.mockResolvedValue(null);
+  pm.propertyPhoto.findMany.mockResolvedValue([]);
   (isImageKeyAuthorizedForProperty as Mock).mockResolvedValue(true);
-  // createDesign: vi.clearAllMocks() でコール履歴はリセットされるが
-  // vi.mock ファクトリで設定した実装（parseSalesSheetDocument 検証）は保持される。
 });
 
 describe("POST /api/properties/[id]/sales-sheets/new", () => {
@@ -180,39 +205,75 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(res.status).toBe(403);
   });
 
-  it("422 — 土地以外の物件", async () => {
-    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_unit" });
+  it("422 — 対応外の物件種別（例: 店舗）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "store" });
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(422);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("INVALID_PROPERTY_TYPE");
   });
 
-  it("201 — 土地物件: design 作成して id を返す", async () => {
+  it("201 — 土地物件: sale-land で design 作成して id を返す", async () => {
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { id: string };
     expect(body.id).toBe("sheet-1");
     expect(createDesign).toHaveBeenCalledOnce();
+    expect(lastTemplateId()).toBe("sale-land");
   });
 
-  it("201 — owner・photo が存在する物件でも成功する（認可OKの写真は入る）", async () => {
-    pm.propertyOwner.findFirst.mockResolvedValue({ owner: { name: "田中太郎" } });
-    pm.propertyPhoto.findFirst.mockResolvedValue({ fileUrl: "/uploads/photo.jpg" });
+  it("201 — 区分マンション: sale-mansion（建物名・専有面積を含む）", async () => {
+    pm.property.findUnique.mockResolvedValue(MANSION_PROPERTY);
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    expect(lastTemplateId()).toBe("sale-mansion");
+    expect(JSON.stringify(lastDocument())).toContain("売マンション");
+    expect(JSON.stringify(lastDocument())).toContain("テストレジデンス");
+  });
+
+  it("201 — 戸建: sale-house", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "house", layoutType: "4LDK" });
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    expect(lastTemplateId()).toBe("sale-house");
+    expect(JSON.stringify(lastDocument())).toContain("売戸建");
+  });
+
+  it("201 — 一棟マンション: sale-building（apartment_building）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_building" });
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    expect(lastTemplateId()).toBe("sale-building");
+    expect(JSON.stringify(lastDocument())).toContain("一棟マンション");
+  });
+
+  it("201 — 一棟アパート: 表題は一棟アパート（apartment_block）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_block" });
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    expect(lastTemplateId()).toBe("sale-building");
+    expect(JSON.stringify(lastDocument())).toContain("一棟アパート");
+  });
+
+  it("201 — 認可OKの写真は最大3枚まで document に入る（順序 isPrimary→sortOrder）", async () => {
+    pm.property.findUnique.mockResolvedValue(MANSION_PROPERTY);
+    pm.propertyPhoto.findMany.mockResolvedValue([
+      { fileUrl: "/uploads/a/1.jpg" },
+      { fileUrl: "/uploads/a/2.jpg" },
+      { fileUrl: "/uploads/a/3.jpg" },
+    ]);
     (isImageKeyAuthorizedForProperty as Mock).mockResolvedValue(true);
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(201);
-    const doc = (createDesign as Mock).mock.calls[0][0].document as { elements: { type: string }[] };
-    expect(doc.elements.some((e) => e.type === "image")).toBe(true); // 写真が入る
+    expect(lastDocument().elements.filter((e) => e.type === "image").length).toBe(3);
   });
 
   it("201 — 認可NG/別物件の写真は document に入れず「写真なし初期図面」で作成", async () => {
-    pm.propertyPhoto.findFirst.mockResolvedValue({ fileUrl: "/uploads/photo.jpg" });
+    pm.propertyPhoto.findMany.mockResolvedValue([{ fileUrl: "/uploads/photo.jpg" }]);
     (isImageKeyAuthorizedForProperty as Mock).mockResolvedValue(false); // caller NG または別物件
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(201); // 拒否ではなく写真 drop で作成
-    const doc = (createDesign as Mock).mock.calls[0][0].document as { elements: { type: string }[] };
-    expect(doc.elements.some((e) => e.type === "image")).toBe(false); // 写真は入っていない
+    expect(lastDocument().elements.some((e) => e.type === "image")).toBe(false);
   });
 
   it("作成成功時に AuditLog を1件記録する（非PIIメタのみ）", async () => {
@@ -233,8 +294,8 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(JSON.stringify(arg.detail)).not.toContain("uploads");
   });
 
-  it("土地以外（422）では AuditLog を記録しない", async () => {
-    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_unit" });
+  it("対応外種別（422）では AuditLog を記録しない", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "store" });
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(422);
     expect(writeAuditLog).not.toHaveBeenCalled();

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { salesSheetDocumentSchema } from "../document-schema";
+import { localizeOccupancy } from "@/lib/property-types";
 
 vi.mock("@/lib/storage", () => ({
   getStorage: () => ({
@@ -47,6 +48,16 @@ describe("buildSaleLandDocument", () => {
     expect(JSON.stringify(doc.elements)).toContain("仲介");
     expect(JSON.stringify(doc.elements)).toContain("南西角地・整形地");
     expect(doc.page.orientation).toBe("landscape");
+  });
+
+  it("現況(raw enum)をビルダー内部で日本語化する（呼び出し側の事前変換に依存しない）", () => {
+    const doc = buildSaleLandDocument({
+      ...input,
+      property: { ...input.property, occupancyStatus: "vacant" },
+    });
+    const label = localizeOccupancy("vacant");
+    expect(label).toBe("空室"); // 実際に日本語ラベルへ変換されること
+    expect(JSON.stringify(doc.elements)).toContain("空室");
   });
 });
 

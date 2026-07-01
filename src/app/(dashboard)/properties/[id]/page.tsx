@@ -44,8 +44,9 @@ import { OwnerLinkModal } from "@/components/owners/owner-link-modal";
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
-import { SaleLandSheetButton } from "@/components/sales-sheet/SaleLandSheetButton";
+import { SalesSheetCreateButton } from "@/components/sales-sheet/SalesSheetCreateButton";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
+import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 
 // ---------- Label maps ----------
 
@@ -445,6 +446,9 @@ export default function PropertyDetailPage({
     );
   }
 
+  // 販売図面テンプレの対応種別（土地/区分マンション/戸建/一棟）。対応外は null。
+  const salesSheetKind = salesSheetTemplateKindFor(property.propertyType);
+
   return (
     <div data-pii-protected data-pii-surface="property">
       {/* Header */}
@@ -477,8 +481,12 @@ export default function PropertyDetailPage({
               DM送付履歴
             </Link>
           )}
-          {property.propertyType === "land" && (
-            <SaleLandSheetButton propertyId={property.id} canWrite={canWriteProperty} />
+          {salesSheetKind && (
+            <SalesSheetCreateButton
+              propertyId={property.id}
+              canWrite={canWriteProperty}
+              kind={salesSheetKind}
+            />
           )}
           <button
             onClick={() => setShowEditForm(true)}
@@ -506,10 +514,8 @@ export default function PropertyDetailPage({
         </div>
       </div>
 
-      {/* 保存済み販売図面の一覧（再オープン導線・土地物件のみ・保存図面が無ければ非表示） */}
-      {property.propertyType === "land" && (
-        <SalesSheetList propertyId={property.id} />
-      )}
+      {/* 保存済み販売図面の一覧（再オープン導線・対応種別のみ・保存図面が無ければ非表示） */}
+      {salesSheetKind && <SalesSheetList propertyId={property.id} />}
 
       {/* Action bar */}
       <ActionBar
