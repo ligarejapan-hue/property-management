@@ -18,13 +18,43 @@ export class SheetParseError extends Error {
     | "UNSUPPORTED_FORMAT"
     | "EMPTY_SHEET"
     | "NO_HEADER"
-    | "INVALID_INPUT";
+    | "INVALID_INPUT"
+    | "INPUT_TOO_LARGE"
+    | "UNSAFE_HEADER";
   constructor(
     code: SheetParseError["code"],
     message: string,
   ) {
     super(message);
     this.code = code;
+  }
+}
+
+/**
+ * 取込1ファイルの上限（デコード後バイト）。ReDoS/メモリ枯渇の「増幅」を防ぐ多層防御。
+ * 取込は物件/所有者リスト＝実運用では小さい。既定10MB（数万行相当）で十分。
+ */
+export const MAX_IMPORT_DECODED_BYTES = 10 * 1024 * 1024;
+
+/**
+ * プロトタイプ汚染を招くヘッダ名（列名）。正当な取込ファイルには存在しないため取込を拒否する
+ * （SheetJS 本体の脆弱性はライブラリ更新で修正済／これは多層防御）。
+ */
+const DANGEROUS_HEADER_KEYS: ReadonlySet<string> = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+/** ヘッダに危険なキーが含まれていれば取込を拒否する。 */
+function assertSafeHeaders(headers: readonly string[]): void {
+  for (const h of headers) {
+    if (DANGEROUS_HEADER_KEYS.has(h)) {
+      throw new SheetParseError(
+        "UNSAFE_HEADER",
+        "列名に使用できない予約語（__proto__ など）が含まれています",
+      );
+    }
   }
 }
 
@@ -52,6 +82,11 @@ export interface SheetParseInput {
    * CSV には影響しない（CSV は元々テキスト）。
    */
   formattedTextHeaders?: ReadonlySet<string>;
+  /**
+   * デコード後の上限バイト。これを超える入力は解析前に INPUT_TOO_LARGE で弾く
+   * （ReDoS/メモリ枯渇の増幅防止）。未指定は {@link MAX_IMPORT_DECODED_BYTES}。
+   */
+  maxDecodedBytes?: number;
 }
 
 export interface SheetParseResult extends CsvParseResult {
@@ -61,8 +96,10 @@ export interface SheetParseResult extends CsvParseResult {
 /**
  * CSV/XLSX を共通形状にパースする。
  * 形式判別失敗・空・入力不足は SheetParseError を投げる。
+ * サイズ上限超過（INPUT_TOO_LARGE）・危険ヘッダ（UNSAFE_HEADER）も拒否する。
  */
 export function parseSheet(input: SheetParseInput): SheetParseResult {
+  const maxBytes = input.maxDecodedBytes ?? MAX_IMPORT_DECODED_BYTES;
   const fmt = detectFileFormat(input.fileName);
   if (fmt === "csv") {
     if (typeof input.csvText !== "string" || input.csvText.length === 0) {
@@ -71,10 +108,14 @@ export function parseSheet(input: SheetParseInput): SheetParseResult {
         "CSV本文が空です",
       );
     }
+    if (Buffer.byteLength(input.csvText, "utf8") > maxBytes) {
+      throw new SheetParseError("INPUT_TOO_LARGE", "ファイルが大きすぎます");
+    }
     const r = parseCsv(input.csvText);
     if (r.headers.length === 0) {
       throw new SheetParseError("NO_HEADER", "ヘッダ行を読み取れませんでした");
     }
+    assertSafeHeaders(r.headers);
     return { format: "csv", ...r };
   }
   if (fmt === "xlsx") {
@@ -83,6 +124,11 @@ export function parseSheet(input: SheetParseInput): SheetParseResult {
         "INVALID_INPUT",
         "Excelバイナリが空です",
       );
+    }
+    // base64 長からデコード後サイズを見積もり、巨大入力は XLSX.read 前に弾く。
+    const estimatedBytes = Math.floor((input.xlsxBase64.length * 3) / 4);
+    if (estimatedBytes > maxBytes) {
+      throw new SheetParseError("INPUT_TOO_LARGE", "ファイルが大きすぎます");
     }
     return parseXlsxFromBase64(input.xlsxBase64, input.formattedTextHeaders);
   }
@@ -177,6 +223,8 @@ function parseXlsxFromBase64(
   if (headers.every((h) => h === "")) {
     throw new SheetParseError("NO_HEADER", "Excelの1行目が空です");
   }
+  // プロトタイプ汚染系の危険な列名は行生成前に弾く（多層防御）。
+  assertSafeHeaders(headers);
   // 郵便番号など指定ヘッダ列がある時だけ第2パス（raw:false=.w）を取得する。
   // それ以外は従来通り単一パス＝挙動・性能を変えない。
   const wantFormatted =
