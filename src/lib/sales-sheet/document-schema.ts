@@ -38,6 +38,10 @@ export const imageElementSchema = z.object({
   fit: z.enum(["cover", "contain"]).default("cover"),
   radiusMm: z.number().nonnegative().optional(),
   alt: z.string().optional(),
+  /** 焦点位置(%)。cover トリミング時に見せる位置。既定は中央(50,50)。
+   *  CSS object-position に反映（数値のみ＝注入不可）。 */
+  focalX: z.number().min(0).max(100).optional(),
+  focalY: z.number().min(0).max(100).optional(),
 });
 
 export const tableElementSchema = z.object({

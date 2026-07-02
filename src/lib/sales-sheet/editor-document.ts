@@ -14,11 +14,12 @@
  * API maps these fields into `style` internally.
  */
 
-import { isCssColor, isSafeFontFamily } from "./css-safety";
+import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
   TextElement,
+  ImageElement,
 } from "./document-schema";
 
 // ---------------------------------------------------------------------------
@@ -43,12 +44,29 @@ export interface EditTextPatch {
   readonly fontFamily?: string;
 }
 
+/** Flat patch for image-element fields (editImage). */
+export interface EditImagePatch {
+  /** object-fit。cover=枠を埋めてトリミング / contain=全体表示（余白可）。 */
+  readonly fit?: "cover" | "contain";
+  /** 焦点位置(%)。cover 時に見せる位置。0-100 にクランプ。 */
+  readonly focalX?: number;
+  readonly focalY?: number;
+  /** 角丸(mm)。負値は無視。 */
+  readonly radiusMm?: number;
+  /** 代替テキスト。 */
+  readonly alt?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 /** Minimum element dimension in mm — enforced by resizeElement. */
 export const MIN_ELEMENT_SIZE_MM = 5;
+
+/** ギャラリーから追加する画像の既定サイズ(mm)。 */
+const DEFAULT_IMAGE_W_MM = 90;
+const DEFAULT_IMAGE_H_MM = 60;
 
 // ---------------------------------------------------------------------------
 // Reducers
@@ -201,6 +219,74 @@ export function editText(
 
   const newContent = patch.content !== undefined ? patch.content : textEl.content;
   const newEl: TextElement = { ...textEl, content: newContent, style: newStyle };
+
+  return replaceElement(state, idx, newEl);
+}
+
+/**
+ * ギャラリーで選んだ写真を新しい image 要素として document 末尾に追加する。
+ * - src は保存境界と同じ isSafeImageSrc（/uploads/ か data: のみ）で検証。
+ *   不正なら no-op（同一 state 参照）＝未認可 raw key を document に入れない。
+ * - 既定サイズでページ中央に配置、z は既存最大+1（最前面）、自動選択して dirty=true。
+ * - 実データの認可（この物件に属するか）は保存時 assertDocumentImagesAuthorized が担保。
+ */
+export function addImageElement(
+  state: EditorState,
+  params: { id: string; src: string; alt?: string },
+): EditorState {
+  if (!isSafeImageSrc(params.src)) return state;
+  const { document } = state;
+  const { page } = document;
+  const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_IMAGE_W_MM, page.width - 10));
+  const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_IMAGE_H_MM, page.height - 10));
+  const z = document.elements.length
+    ? Math.max(...document.elements.map((e) => e.z)) + 1
+    : 1;
+  const el: ImageElement = {
+    id: params.id,
+    type: "image",
+    x: (page.width - w) / 2,
+    y: (page.height - h) / 2,
+    w,
+    h,
+    z,
+    src: params.src,
+    fit: "cover",
+    ...(params.alt ? { alt: params.alt } : {}),
+  };
+  return {
+    ...state,
+    dirty: true,
+    selectedId: params.id,
+    document: { ...document, elements: [...document.elements, el] },
+  };
+}
+
+/**
+ * Apply a partial patch to an image element (fit / focal point / radius / alt).
+ * - Non-image elements: no-op (same state reference).
+ * - Unknown id: no-op (same state reference).
+ * - focalX / focalY: clamped to 0-100.
+ * - radiusMm: must be >= 0; negative values are ignored.
+ * Sets dirty=true on success.
+ */
+export function editImage(
+  state: EditorState,
+  id: string,
+  patch: EditImagePatch,
+): EditorState {
+  const { document } = state;
+  const idx = findIdx(document, id);
+  if (idx === -1) return state;
+  const el = document.elements[idx];
+  if (el.type !== "image") return state;
+
+  const newEl: ImageElement = { ...el };
+  if (patch.fit === "cover" || patch.fit === "contain") newEl.fit = patch.fit;
+  if (patch.focalX !== undefined) newEl.focalX = clamp(patch.focalX, 0, 100);
+  if (patch.focalY !== undefined) newEl.focalY = clamp(patch.focalY, 0, 100);
+  if (patch.radiusMm !== undefined && patch.radiusMm >= 0) newEl.radiusMm = patch.radiusMm;
+  if (patch.alt !== undefined) newEl.alt = patch.alt;
 
   return replaceElement(state, idx, newEl);
 }

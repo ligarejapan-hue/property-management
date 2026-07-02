@@ -45,13 +45,18 @@ function TextEl({ el }: { el: TextElement }) {
 }
 
 function ImageEl({ el }: { el: ImageElement }) {
+  // 焦点位置(%)。数値のみ由来ゆえ注入不可。未指定は中央（object-position 省略）。
+  const objectPosition =
+    el.focalX !== undefined || el.focalY !== undefined
+      ? `${el.focalX ?? 50}% ${el.focalY ?? 50}%`
+      : undefined;
   return (
     <div style={{ ...boxStyle(el), borderRadius: el.radiusMm ? mm(el.radiusMm) : undefined }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={el.src}
         alt={el.alt ?? ""}
-        style={{ width: "100%", height: "100%", objectFit: el.fit, display: "block" }}
+        style={{ width: "100%", height: "100%", objectFit: el.fit, objectPosition, display: "block" }}
       />
     </div>
   );

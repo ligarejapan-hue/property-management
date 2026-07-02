@@ -13,6 +13,7 @@ import {
   ElementPanel,
   buildGeometryChange,
   PANEL_FONT_OPTIONS,
+  FOCAL_PRESETS,
 } from "../ElementPanel";
 import { isCssColor, isSafeFontFamily } from "@/lib/sales-sheet/css-safety";
 import type { SalesSheetElement } from "@/lib/sales-sheet/document-schema";
@@ -48,6 +49,35 @@ const imageElement: SalesSheetElement = {
   src: TRANSPARENT_PNG,
   fit: "cover",
 };
+
+describe("ElementPanel — 画像編集（写真管理・計画④）", () => {
+  it("image 要素選択時に data-image-editor / 焦点グリッド / fit 選択 / 角丸 / 代替テキストを描画する", () => {
+    const html = renderToStaticMarkup(<ElementPanel element={imageElement} onChange={() => {}} />);
+    expect(html).toContain("data-image-editor");
+    expect(html).toContain("data-focal-grid");
+    expect(html).toContain("枠を埋める"); // cover
+    expect(html).toContain("全体を表示"); // contain
+    expect(html).toContain("角丸");
+    expect(html).toContain("代替テキスト");
+  });
+
+  it("焦点グリッドは9プリセット（各ボタンに aria-label=焦点 …）", () => {
+    expect(FOCAL_PRESETS).toHaveLength(9);
+    const html = renderToStaticMarkup(<ElementPanel element={imageElement} onChange={() => {}} />);
+    expect((html.match(/aria-label="焦点 /g) ?? []).length).toBe(9);
+  });
+
+  it("text 要素では画像セクションを描画しない", () => {
+    const html = renderToStaticMarkup(<ElementPanel element={textElement} onChange={() => {}} />);
+    expect(html).not.toContain("data-image-editor");
+  });
+
+  it("focalX/focalY 指定時、該当プリセットが aria-pressed=true", () => {
+    const el: SalesSheetElement = { ...imageElement, focalX: 0, focalY: 0 };
+    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} />);
+    expect(html).toMatch(/aria-label="焦点 左上"[^>]*aria-pressed="true"/);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Structure tests (renderToStaticMarkup)

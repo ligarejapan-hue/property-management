@@ -15,8 +15,8 @@
  */
 
 import { isCssColor, isSafeFontFamily } from "@/lib/sales-sheet/css-safety";
-import type { EditTextPatch } from "@/lib/sales-sheet/editor-document";
-import type { SalesSheetElement, TextElement } from "@/lib/sales-sheet/document-schema";
+import type { EditTextPatch, EditImagePatch } from "@/lib/sales-sheet/editor-document";
+import type { SalesSheetElement, TextElement, ImageElement } from "@/lib/sales-sheet/document-schema";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -28,7 +28,8 @@ export type ElementPanelChange =
   | { type: "bringToFront" }
   | { type: "sendToBack" }
   | { type: "delete" }
-  | { type: "editText"; patch: EditTextPatch };
+  | { type: "editText"; patch: EditTextPatch }
+  | { type: "editImage"; patch: EditImagePatch };
 
 export interface ElementPanelProps {
   /** The currently selected element, or null when nothing is selected. */
@@ -55,6 +56,19 @@ export const PANEL_FONT_OPTIONS = [
   { label: "サンセリフ", value: "sans-serif" },
   { label: "セリフ", value: "serif" },
   { label: "等幅", value: "monospace" },
+] as const;
+
+/** 焦点位置プリセット（3×3）。cover トリミング時に写真のどこを見せるか。 */
+export const FOCAL_PRESETS = [
+  { x: 0, y: 0, label: "左上" },
+  { x: 50, y: 0, label: "上" },
+  { x: 100, y: 0, label: "右上" },
+  { x: 0, y: 50, label: "左" },
+  { x: 50, y: 50, label: "中央" },
+  { x: 100, y: 50, label: "右" },
+  { x: 0, y: 100, label: "左下" },
+  { x: 50, y: 100, label: "下" },
+  { x: 100, y: 100, label: "右下" },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -117,6 +131,8 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
 
   // ── Narrow to TextElement when type === "text" ───────────────────────────
   const textEl: TextElement | null = el.type === "text" ? el : null;
+  // ── Narrow to ImageElement when type === "image" ─────────────────────────
+  const imageEl: ImageElement | null = el.type === "image" ? el : null;
 
   // ── Geometry handlers ────────────────────────────────────────────────────
   function onGeomChange(field: "x" | "y" | "w" | "h") {
@@ -145,6 +161,24 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
   function onColor(e: React.ChangeEvent<HTMLInputElement>): void {
     if (!isCssColor(e.target.value)) return;
     onChange({ type: "editText", patch: { color: e.target.value } });
+  }
+
+  // ── Image-edit handlers ──────────────────────────────────────────────────
+  function onFit(e: React.ChangeEvent<HTMLSelectElement>): void {
+    const fit = e.target.value;
+    if (fit === "cover" || fit === "contain") {
+      onChange({ type: "editImage", patch: { fit } });
+    }
+  }
+
+  function onRadiusMm(e: React.ChangeEvent<HTMLInputElement>): void {
+    const v = parseFloat(e.target.value);
+    if (!isFinite(v) || v < 0) return;
+    onChange({ type: "editImage", patch: { radiusMm: v } });
+  }
+
+  function onAlt(e: React.ChangeEvent<HTMLInputElement>): void {
+    onChange({ type: "editImage", patch: { alt: e.target.value } });
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -284,6 +318,80 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
                 value={textEl.style.color ?? "#000000"}
                 onChange={onColor}
                 className="h-8 w-full cursor-pointer rounded border border-neutral-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 p-0.5"
+              />
+            </label>
+          </div>
+        </section>
+      )}
+
+      {/* ── Image editor (image elements only) ────────────────────────── */}
+      {imageEl !== null && (
+        <section className="p-3" data-image-editor>
+          <p className={sectionHeadCls}>写真</p>
+          <div className="flex flex-col gap-2">
+            {/* Fit */}
+            <label className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>表示方法</span>
+              <select
+                aria-label="写真の表示方法"
+                value={imageEl.fit}
+                onChange={onFit}
+                className={inputCls}
+              >
+                <option value="cover">枠を埋める（トリミング）</option>
+                <option value="contain">全体を表示（余白可）</option>
+              </select>
+            </label>
+            {/* Focal point (3×3) */}
+            <div className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>焦点（トリミング時に見せる位置）</span>
+              <div className="grid grid-cols-3 gap-1" data-focal-grid>
+                {FOCAL_PRESETS.map((f) => {
+                  const active =
+                    (imageEl.focalX ?? 50) === f.x && (imageEl.focalY ?? 50) === f.y;
+                  return (
+                    <button
+                      key={`${f.x}-${f.y}`}
+                      type="button"
+                      aria-label={`焦点 ${f.label}`}
+                      aria-pressed={active}
+                      onClick={() =>
+                        onChange({ type: "editImage", patch: { focalX: f.x, focalY: f.y } })
+                      }
+                      className={`flex h-7 items-center justify-center rounded border text-xs transition-colors ${
+                        active
+                          ? "border-blue-500 bg-blue-50 text-blue-600 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300"
+                          : "border-neutral-300 bg-white text-neutral-400 hover:bg-neutral-50 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-600"
+                      }`}
+                    >
+                      ●
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Corner radius */}
+            <label className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>角丸 (mm)</span>
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                aria-label="角丸 (mm)"
+                value={imageEl.radiusMm ?? 0}
+                onChange={onRadiusMm}
+                className={inputCls}
+              />
+            </label>
+            {/* Alt text */}
+            <label className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>代替テキスト</span>
+              <input
+                type="text"
+                aria-label="代替テキスト"
+                value={imageEl.alt ?? ""}
+                onChange={onAlt}
+                className={inputCls}
               />
             </label>
           </div>

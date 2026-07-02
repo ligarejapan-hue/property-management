@@ -68,7 +68,18 @@ function renderElement(el: SalesSheetElement): string {
       ...boxStyle(el),
       "border-radius": el.radiusMm ? mm(el.radiusMm) : null,
     });
-    const imgStyle = inlineStyle({ width: "100%", height: "100%", "object-fit": el.fit, display: "block" });
+    // 焦点位置(%)。数値のみ由来だが sanitizeCssValue で二重防御。未指定は中央（省略）。
+    const objectPosition =
+      el.focalX !== undefined || el.focalY !== undefined
+        ? `${el.focalX ?? 50}% ${el.focalY ?? 50}%`
+        : null;
+    const imgStyle = inlineStyle({
+      width: "100%",
+      height: "100%",
+      "object-fit": el.fit,
+      "object-position": objectPosition ? sanitizeCssValue(objectPosition) : null,
+      display: "block",
+    });
     return `<div style="${esc(containerStyle)}"><img src="${esc(el.src)}" alt="${esc(el.alt ?? "")}" style="${esc(imgStyle)}"/></div>`;
   }
 

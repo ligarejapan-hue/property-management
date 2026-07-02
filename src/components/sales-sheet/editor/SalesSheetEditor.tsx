@@ -11,6 +11,8 @@ import {
   bringToFront,
   sendToBack,
   editText,
+  editImage,
+  addImageElement,
   deleteElement,
   markSavedIfCurrent,
   exportWithSaveGuard,
@@ -19,6 +21,7 @@ import { EditorCanvas } from "./EditorCanvas";
 import { ElementPanel } from "./ElementPanel";
 import type { ElementPanelChange } from "./ElementPanel";
 import { EditorToolbar } from "./EditorToolbar";
+import { PhotoGalleryPanel } from "./PhotoGalleryPanel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -83,6 +86,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   // Mirror savedAt in a ref so export (which may run right after an auto-save)
   // sends the LATEST persisted version, not the stale render-time closure.
   const savedAtRef = useRef(initial.updatedAt);
+  const [galleryOpen, setGalleryOpen] = useState(false);
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
@@ -118,8 +122,15 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           return deleteElement(prev, id);
         case "editText":
           return editText(prev, id, change.patch);
+        case "editImage":
+          return editImage(prev, id, change.patch);
       }
     });
+  }
+
+  /** ギャラリーで選んだ写真を新しい image 要素として追加する。 */
+  function handleAddImage(src: string, alt?: string): void {
+    setEditorState((prev) => addImageElement(prev, { id: crypto.randomUUID(), src, alt }));
   }
 
   /**
@@ -215,7 +226,17 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         }}
         onExport={handleExport}
         onDelete={handleDelete}
+        onAddPhoto={() => setGalleryOpen(true)}
       />
+
+      {/* ── 写真ギャラリー（写真管理・計画④） ─────────────────────────── */}
+      {galleryOpen && (
+        <PhotoGalleryPanel
+          propertyId={initial.propertyId}
+          onClose={() => setGalleryOpen(false)}
+          onAddPhoto={handleAddImage}
+        />
+      )}
 
       {/* ── Main split ───────────────────────────────────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
