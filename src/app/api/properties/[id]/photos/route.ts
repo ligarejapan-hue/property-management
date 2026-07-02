@@ -54,7 +54,18 @@ export async function GET(
       },
     });
 
-    return apiResponse({ data: photos.map(normalizeFileUrlsInRecord) });
+    // fileUrl/thumbnailUrl を同一オリジン相対に正規化しつつ、fileUrl は販売図面エディタが
+    // 受理できるよう /uploads/{key} 形へ正規化する（server backend で /{bucket}/{key} や
+    // 絶対URLでも storage key を解決して揃える。local backend は /uploads/{key} のまま＝挙動不変。
+    // key 解決不能な外部URL等は表示用の正規化のままフォールバック）。
+    const storage = getStorage();
+    return apiResponse({
+      data: photos.map((p) => {
+        const normalized = normalizeFileUrlsInRecord(p);
+        const key = p.fileUrl != null ? storage.keyFromUrl(p.fileUrl) : null;
+        return key ? { ...normalized, fileUrl: `/uploads/${key}` } : normalized;
+      }),
+    });
   } catch (error) {
     return handleApiError(error);
   }
