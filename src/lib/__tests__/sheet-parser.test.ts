@@ -140,6 +140,68 @@ describe("parseSheet (xlsx)", () => {
 
 });
 
+// ---------- security hardening (xlsx 脆弱性 実対応) ----------
+
+describe("parseSheet security hardening", () => {
+  it("xlsx: 上限超過は INPUT_TOO_LARGE（ReDoS/メモリ枯渇の増幅を防ぐ）", () => {
+    const base64 = makeXlsxBase64([["住所"], ["x"]]);
+    try {
+      parseSheet({ fileName: "a.xlsx", xlsxBase64: base64, maxDecodedBytes: 8 });
+      expect.fail("should throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(SheetParseError);
+      expect((e as SheetParseError).code).toBe("INPUT_TOO_LARGE");
+    }
+  });
+
+  it("csv: 上限超過は INPUT_TOO_LARGE", () => {
+    const csv = "住所\n" + "x".repeat(200);
+    try {
+      parseSheet({ fileName: "a.csv", csvText: csv, maxDecodedBytes: 10 });
+      expect.fail("should throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(SheetParseError);
+      expect((e as SheetParseError).code).toBe("INPUT_TOO_LARGE");
+    }
+  });
+
+  it("xlsx: 危険ヘッダ(__proto__)は UNSAFE_HEADER で拒否し prototype を汚染しない", () => {
+    const base64 = makeXlsxBase64([
+      ["__proto__", "地番"],
+      ["polluted", "1-2"],
+    ]);
+    try {
+      parseSheet({ fileName: "a.xlsx", xlsxBase64: base64 });
+      expect.fail("should throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(SheetParseError);
+      expect((e as SheetParseError).code).toBe("UNSAFE_HEADER");
+    }
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("csv: 危険ヘッダ(constructor)も UNSAFE_HEADER で拒否", () => {
+    const csv = "constructor,地番\nx,1-2\n";
+    try {
+      parseSheet({ fileName: "a.csv", csvText: csv });
+      expect.fail("should throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(SheetParseError);
+      expect((e as SheetParseError).code).toBe("UNSAFE_HEADER");
+    }
+  });
+
+  it("正当なヘッダ（prototype 部分一致等）は誤検知しない", () => {
+    const base64 = makeXlsxBase64([
+      ["prototype_memo", "地番"],
+      ["ok", "1-2"],
+    ]);
+    const r = parseSheet({ fileName: "a.xlsx", xlsxBase64: base64 });
+    expect(r.headers).toEqual(["prototype_memo", "地番"]);
+    expect(r.rows[0]["prototype_memo"]).toBe("ok");
+  });
+});
+
 // ---------- parseSheet: UNSUPPORTED_FORMAT ----------
 
 describe("parseSheet (unsupported format)", () => {
