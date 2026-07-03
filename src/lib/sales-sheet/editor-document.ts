@@ -291,6 +291,116 @@ export function editImage(
   return replaceElement(state, idx, newEl);
 }
 
+// ---------------------------------------------------------------------------
+// 自動レイアウト（計画⑥）
+// ---------------------------------------------------------------------------
+
+/** 写真ゾーン: テンプレの左カラム（タイトル/価格帯の下・概要表の左・会社帯の上）。 */
+const PHOTO_ZONE_X_MM = 10;
+const PHOTO_ZONE_Y_MM = 46;
+const PHOTO_ZONE_MAX_W_MM = 130;
+const PHOTO_ZONE_BOTTOM_MARGIN_MM = 24;
+/** 写真間の余白(mm)。テンプレの写真レイアウトと同じ。 */
+const PHOTO_GAP_MM = 4;
+/** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
+const PHOTO_TARGET_ASPECT = 1.5;
+
+interface PhotoCell {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * n 個のセルを W×H の枠へ「行数を選び、各行は幅いっぱい均等割り」で敷き詰める
+ * （穴なし・全行同高）。プロト autolayout-v4 の packCells をベースに 2 点調整:
+ * - 行数の選択は「最悪セルの縦横比の PHOTO_TARGET_ASPECT からの乖離」を最小化
+ *   （ミニマックス）。均等な配分（例: 4枚→2×2）が横長の帯より優先される。
+ * - 端数は後方の行に配る＝先頭行が少列（幅広）になり、代表写真（配列先頭）が
+ *   最上段の大きな枠を得る（テンプレの3枚レイアウトと同じ構造）。
+ * セル寸法が非正になる行数は候補から除外し、全滅する極端な枚数では 1 行へ
+ * フォールバックして MIN_ELEMENT_SIZE_MM でクランプ（非正寸法を返さないことを優先）。
+ */
+function packPhotoCells(n: number, W: number, H: number): PhotoCell[] {
+  const gap = PHOTO_GAP_MM;
+  let best: { rows: number; counts: number[]; score: number } | null = null;
+  for (let rows = 1; rows <= n; rows++) {
+    const base = Math.floor(n / rows);
+    const extra = n % rows;
+    const counts: number[] = [];
+    for (let r = 0; r < rows; r++) counts.push(base + (r >= rows - extra ? 1 : 0));
+    const th = (H - (rows - 1) * gap) / rows;
+    if (th <= 0) continue;
+    let score = 0;
+    for (const cols of counts) {
+      const tw = (W - (cols - 1) * gap) / cols;
+      if (tw <= 0) {
+        score = Number.POSITIVE_INFINITY;
+        break;
+      }
+      score = Math.max(score, Math.abs(Math.log(tw / th / PHOTO_TARGET_ASPECT)));
+    }
+    if (!Number.isFinite(score)) continue;
+    if (!best || score < best.score) best = { rows, counts, score };
+  }
+  if (!best) {
+    const w = Math.max(MIN_ELEMENT_SIZE_MM, (W - (n - 1) * gap) / n);
+    const h = Math.max(MIN_ELEMENT_SIZE_MM, H);
+    return Array.from({ length: n }, (_, c) => ({ x: c * (w + gap), y: 0, w, h }));
+  }
+  const { rows, counts } = best;
+  const th = (H - (rows - 1) * gap) / rows;
+  const cells: PhotoCell[] = [];
+  for (let r = 0; r < rows; r++) {
+    const cols = counts[r];
+    const tw = (W - (cols - 1) * gap) / cols;
+    for (let c = 0; c < cols; c++) {
+      cells.push({ x: c * (tw + gap), y: r * (th + gap), w: tw, h: th });
+    }
+  }
+  return cells;
+}
+
+/**
+ * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト）。
+ * - 対象は image のみ。他要素（テキスト/表/バッジ等）は参照ごと不動。
+ * - 配列順（＝追加順・テンプレは代表写真が先頭）にセルへ流し込む。先頭が左上。
+ * - 幾何(x/y/w/h)のみ更新。src/fit/焦点/z などは保存。
+ * - 決定的: 同じ document からは常に同じ配置。既に整列済みなら no-op（同一参照）。
+ * - 画像が無ければ no-op。変更があれば dirty=true。
+ */
+export function autoArrangePhotos(state: EditorState): EditorState {
+  const { document } = state;
+  const { page } = document;
+  const targets: number[] = [];
+  document.elements.forEach((e, i) => {
+    if (e.type === "image") targets.push(i);
+  });
+  if (targets.length === 0) return state;
+
+  const zoneX = PHOTO_ZONE_X_MM;
+  const zoneY = PHOTO_ZONE_Y_MM;
+  const zoneW = Math.min(PHOTO_ZONE_MAX_W_MM, page.width - 2 * PHOTO_ZONE_X_MM);
+  const zoneH = page.height - PHOTO_ZONE_Y_MM - PHOTO_ZONE_BOTTOM_MARGIN_MM;
+  const cells = packPhotoCells(targets.length, zoneW, zoneH);
+
+  let changed = false;
+  const elements = document.elements.slice() as SalesSheetElement[];
+  targets.forEach((idx, k) => {
+    const el = elements[idx];
+    const cell = cells[k];
+    const x = zoneX + cell.x;
+    const y = zoneY + cell.y;
+    if (el.x !== x || el.y !== y || el.w !== cell.w || el.h !== cell.h) {
+      changed = true;
+      elements[idx] = applyGeom(el, { x, y, w: cell.w, h: cell.h });
+    }
+  });
+  if (!changed) return state;
+  return { ...state, dirty: true, document: { ...document, elements } };
+}
+
 /**
  * Clear the dirty flag (call after a successful save).
  */

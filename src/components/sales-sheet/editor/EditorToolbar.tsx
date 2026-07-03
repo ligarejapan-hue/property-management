@@ -8,9 +8,11 @@ export interface EditorToolbarProps {
   onExport: (format: "pdf" | "png") => Promise<void>;
   onDelete: () => Promise<void>;
   onAddPhoto: () => void;
+  /** 写真（image 要素）を写真ゾーンへワンボタン整列（計画⑥）。 */
+  onAutoArrange: () => void;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -85,6 +87,15 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto }:
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         写真を追加
+      </button>
+      <button
+        type="button"
+        data-toolbar-auto-arrange
+        onClick={onAutoArrange}
+        disabled={busy}
+        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
+      >
+        写真を自動整列
       </button>
       <button
         type="button"

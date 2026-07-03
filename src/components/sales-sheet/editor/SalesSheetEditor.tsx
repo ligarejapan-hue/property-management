@@ -13,6 +13,7 @@ import {
   editText,
   editImage,
   addImageElement,
+  autoArrangePhotos,
   deleteElement,
   markSavedIfCurrent,
   exportWithSaveGuard,
@@ -135,6 +136,11 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) => addImageElement(prev, { id: safeRandomId(), src, alt }));
   }
 
+  /** 写真（image 要素）を写真ゾーンへワンボタン整列する（計画⑥・手動上書き可）。 */
+  function handleAutoArrange(): void {
+    setEditorState((prev) => autoArrangePhotos(prev));
+  }
+
   /**
    * Save current document via PUT; handles optimistic-lock 409.
    * Resolves `true` iff the editor ended CLEAN — i.e. no edit raced the in-flight
@@ -229,6 +235,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onExport={handleExport}
         onDelete={handleDelete}
         onAddPhoto={() => setGalleryOpen(true)}
+        onAutoArrange={handleAutoArrange}
       />
 
       {/* ── 写真ギャラリー（写真管理・計画④） ─────────────────────────── */}
