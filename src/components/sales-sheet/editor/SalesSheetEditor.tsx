@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
-import type { EditorState } from "@/lib/sales-sheet/editor-document";
+import type { EditorState, EditThemePatch } from "@/lib/sales-sheet/editor-document";
 import {
   selectElement,
   moveElement,
@@ -13,8 +13,11 @@ import {
   editText,
   editImage,
   editBadge,
+  editQr,
+  editTheme,
   addImageElement,
   addBadgeElement,
+  addQrElement,
   autoArrangePhotos,
   deleteElement,
   markSavedIfCurrent,
@@ -130,6 +133,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           return editImage(prev, id, change.patch);
         case "editBadge":
           return editBadge(prev, id, change.patch);
+        case "editQr":
+          return editQr(prev, id, change.patch);
       }
     });
   }
@@ -149,6 +154,16 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   function handleAddBadge(): void {
     // crypto.randomUUID は secure context 外(HTTP)で未定義ゆえフォールバック付き ID を使う。
     setEditorState((prev) => addBadgeElement(prev, { id: safeRandomId() }));
+  }
+
+  /** QR コードを追加する（計画⑧）。中身はプレースホルダー＝右パネルで書き換える。 */
+  function handleAddQr(): void {
+    setEditorState((prev) => addQrElement(prev, { id: safeRandomId(), content: "https://" }));
+  }
+
+  /** 文書テーマ（フォント/基調色）を変更する（計画⑧）。 */
+  function handleThemeChange(patch: EditThemePatch): void {
+    setEditorState((prev) => editTheme(prev, patch));
   }
 
   /**
@@ -247,6 +262,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onAddPhoto={() => setGalleryOpen(true)}
         onAutoArrange={handleAutoArrange}
         onAddBadge={handleAddBadge}
+        onAddQr={handleAddQr}
       />
 
       {/* ── 写真ギャラリー（写真管理・計画④） ─────────────────────────── */}
@@ -311,6 +327,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           <ElementPanel
             element={selectedElement}
             onChange={handleElementPanelChange}
+            theme={editorState.document.theme}
+            onThemeChange={handleThemeChange}
           />
         </div>
       </div>

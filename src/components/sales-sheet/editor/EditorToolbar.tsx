@@ -12,9 +12,11 @@ export interface EditorToolbarProps {
   onAutoArrange: () => void;
   /** オリジナルバッジ要素を追加（バッジデザイナー・計画⑦）。 */
   onAddBadge: () => void;
+  /** QR コード要素を追加（計画⑧）。 */
+  onAddQr: () => void;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAddBadge }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAddBadge, onAddQr }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -107,6 +109,15 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         バッジを追加
+      </button>
+      <button
+        type="button"
+        data-toolbar-add-qr
+        onClick={onAddQr}
+        disabled={busy}
+        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
+      >
+        QRを追加
       </button>
       <button
         type="button"

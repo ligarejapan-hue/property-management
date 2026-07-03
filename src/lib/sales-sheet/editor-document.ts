@@ -15,12 +15,14 @@
  */
 
 import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
+import { generateQrDataUrl } from "./qr-code";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
   TextElement,
   ImageElement,
   BadgeElement,
+  QrElement,
 } from "./document-schema";
 
 // ---------------------------------------------------------------------------
@@ -72,6 +74,21 @@ export interface EditBadgePatch {
   readonly fontSizePt?: number;
 }
 
+/** Flat patch for qr-element fields (editQr). */
+export interface EditQrPatch {
+  /** QR の中身（URL 等・半角）。変更すると dataURL を再生成する。
+   *  空・非 ASCII・容量超過など生成不能な値は無視（no-op）。 */
+  readonly content?: string;
+}
+
+/** 文書テーマの patch (editTheme)。 */
+export interface EditThemePatch {
+  /** ページ全体のフォント。isSafeFontFamily で検証（不正は無視）。 */
+  readonly fontFamily?: string;
+  /** 基調色。isCssColor で検証（不正は無視）。新規バッジの既定色等に使われる。 */
+  readonly accentColor?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -90,6 +107,9 @@ const DEFAULT_BADGE_LABEL = "新着";
 /** 追加するバッジの既定文字サイズ(pt)。未設定だとレンダラがページ既定を継承し
  *  パネル表示とズレるため、作成時に明示的に永続化する（WYSIWYG）。 */
 const DEFAULT_BADGE_FONT_SIZE_PT = 10;
+
+/** 追加する QR の既定サイズ(mm・正方形)。 */
+const DEFAULT_QR_SIZE_MM = 30;
 
 // ---------------------------------------------------------------------------
 // Reducers
@@ -385,6 +405,94 @@ export function editBadge(
   }
 
   return replaceElement(state, idx, newEl);
+}
+
+/**
+ * QR コードを新しい qr 要素として document 末尾に追加する。
+ * - content から dataURL をクライアント生成（qrcode-generator・決定的）。
+ *   生成不能（空/非 ASCII/容量超過）なら no-op（同一 state 参照）。
+ * - content も要素に保存し、後からパネルで再編集→再生成できるようにする。
+ * - 既定 30×30mm でページ中央、z は既存最大+1、自動選択して dirty=true。
+ */
+export function addQrElement(
+  state: EditorState,
+  params: { id: string; content: string },
+): EditorState {
+  // trim して保存＝QR に実際にエンコードされる値（generateQrDataUrl 内も trim）
+  // とパネル表示を一致させる。
+  const content = params.content.trim();
+  const dataUrl = generateQrDataUrl(content);
+  if (dataUrl === null) return state;
+  const { document } = state;
+  const { page } = document;
+  const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_QR_SIZE_MM, page.width - 10));
+  const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_QR_SIZE_MM, page.height - 10));
+  const z = document.elements.length
+    ? Math.max(...document.elements.map((e) => e.z)) + 1
+    : 1;
+  const el: QrElement = {
+    id: params.id,
+    type: "qr",
+    x: (page.width - w) / 2,
+    y: (page.height - h) / 2,
+    w,
+    h,
+    z,
+    dataUrl,
+    content,
+  };
+  return {
+    ...state,
+    dirty: true,
+    selectedId: params.id,
+    document: { ...document, elements: [...document.elements, el] },
+  };
+}
+
+/**
+ * QR 要素の中身（content）を変更し dataURL を再生成する。
+ * - Non-qr elements / unknown id: no-op (same state reference).
+ * - 生成不能な content（空/非 ASCII/容量超過）: no-op（元の QR を保持）。
+ * Sets dirty=true on success.
+ */
+export function editQr(
+  state: EditorState,
+  id: string,
+  patch: EditQrPatch,
+): EditorState {
+  const { document } = state;
+  const idx = findIdx(document, id);
+  if (idx === -1) return state;
+  const el = document.elements[idx];
+  if (el.type !== "qr") return state;
+  if (patch.content === undefined) return state;
+
+  const content = patch.content.trim();
+  const dataUrl = generateQrDataUrl(content);
+  if (dataUrl === null) return state;
+  const newEl: QrElement = { ...el, content, dataUrl };
+  return replaceElement(state, idx, newEl);
+}
+
+/**
+ * 文書テーマ（ページ全体のフォント / 基調色）を更新する。
+ * - fontFamily: isSafeFontFamily / accentColor: isCssColor で検証（不正は無視）。
+ * - 要素と選択状態には触れない。Sets dirty=true.
+ */
+export function editTheme(state: EditorState, patch: EditThemePatch): EditorState {
+  const { document } = state;
+  const newTheme = { ...document.theme };
+  if (patch.fontFamily !== undefined && isSafeFontFamily(patch.fontFamily)) {
+    newTheme.fontFamily = patch.fontFamily;
+  }
+  if (patch.accentColor !== undefined && isCssColor(patch.accentColor)) {
+    newTheme.accentColor = patch.accentColor;
+  }
+  return {
+    ...state,
+    dirty: true,
+    document: { ...document, theme: newTheme },
+  };
 }
 
 // ---------------------------------------------------------------------------

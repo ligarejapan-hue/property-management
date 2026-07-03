@@ -51,6 +51,80 @@ const imageElement: SalesSheetElement = {
   fit: "cover",
 };
 
+const qrDataUrl =
+  "data:image/gif;base64,R0lGODdhAQABAIAAAAAAAAAAACwAAAAAAQABAAACAkQBADs=";
+
+const qrElement: SalesSheetElement = {
+  id: "q1",
+  type: "qr",
+  x: 250,
+  y: 160,
+  w: 30,
+  h: 30,
+  z: 4,
+  dataUrl: qrDataUrl,
+  content: "https://example.com/p/1",
+};
+
+const THEME = { fontFamily: "sans-serif", accentColor: "#15324f" };
+
+describe("ElementPanel — QR 編集（計画⑧）", () => {
+  it("qr 要素選択時に data-qr-editor と中身入力を描画する", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={qrElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect(html).toContain("data-qr-editor");
+    expect(html).toContain("QRの中身");
+    expect(html).toContain('value="https://example.com/p/1"');
+  });
+
+  it("content 未保存の既存 QR でも空欄で描画できる（後方互換）", () => {
+    const el: SalesSheetElement = { ...qrElement, content: undefined };
+    const html = renderToStaticMarkup(
+      <ElementPanel element={el} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect(html).toContain("data-qr-editor");
+  });
+
+  it("text 要素では QR セクションを描画しない", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect(html).not.toContain("data-qr-editor");
+  });
+});
+
+describe("ElementPanel — 文書テーマ（計画⑧）", () => {
+  it("要素未選択時にテーマ section（フォント/基調色）を描画する", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={null} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect(html).toContain("data-theme-editor");
+    expect(html).toContain("図面全体のフォント");
+    expect(html).toContain("基調色");
+  });
+
+  it("要素選択時はテーマ section を描画しない", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect(html).not.toContain("data-theme-editor");
+  });
+
+  it("非 hex の基調色はテキスト入力へフォールバック（ColorField 流用）", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel
+        element={null}
+        onChange={() => {}}
+        theme={{ fontFamily: "sans-serif", accentColor: "navy" }}
+        onThemeChange={() => {}}
+      />,
+    );
+    expect(html).toMatch(/aria-label="基調色"[^>]*type="text"|type="text"[^>]*aria-label="基調色"/);
+    expect(html).toContain('value="navy"');
+  });
+});
+
 const badgeElement: SalesSheetElement = {
   id: "b1",
   type: "badge",
@@ -91,7 +165,7 @@ describe("hexColorInputValue — <input type=color> 用の #rrggbb 正規化", (
 describe("ElementPanel — 色入力の表現不能ケース（@codex PR#252）", () => {
   it("hex でないバッジ色（named color）はテキスト入力で正確に表示する", () => {
     const el: SalesSheetElement = { ...badgeElement, bg: "red", fg: "navy" };
-    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     // type=color は red を表現できず #000000 に化けるため、text へフォールバック
     expect(html).toMatch(/aria-label="バッジ背景色"[^>]*type="text"|type="text"[^>]*aria-label="バッジ背景色"/);
     expect(html).toContain('value="red"');
@@ -99,7 +173,7 @@ describe("ElementPanel — 色入力の表現不能ケース（@codex PR#252）"
   });
 
   it("hex のバッジ色は type=color のまま", () => {
-    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).toMatch(/aria-label="バッジ背景色"[^>]*type="color"|type="color"[^>]*aria-label="バッジ背景色"/);
   });
 
@@ -108,7 +182,7 @@ describe("ElementPanel — 色入力の表現不能ケース（@codex PR#252）"
       ...textElement,
       style: { fontSizePt: 14, color: "rgb(51, 51, 51)" },
     };
-    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).toMatch(/aria-label="文字色"[^>]*type="text"|type="text"[^>]*aria-label="文字色"/);
     expect(html).toContain('value="rgb(51, 51, 51)"');
   });
@@ -116,7 +190,7 @@ describe("ElementPanel — 色入力の表現不能ケース（@codex PR#252）"
 
 describe("ElementPanel — バッジ編集（バッジデザイナー・計画⑦）", () => {
   it("badge 要素選択時に data-badge-editor / 文言 / 形 / 背景色 / 文字色 / サイズを描画する", () => {
-    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).toContain("data-badge-editor");
     expect(html).toContain("文言");
     expect(html).toContain("角丸");
@@ -128,18 +202,18 @@ describe("ElementPanel — バッジ編集（バッジデザイナー・計画�
   });
 
   it("現在の label が入力に、shape が選択状態で表示される", () => {
-    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).toContain('value="新着"');
     expect(html).toMatch(/value="rounded"[^>]*selected|selected[^>]*value="rounded"/);
   });
 
   it("text 要素ではバッジセクションを描画しない", () => {
-    const html = renderToStaticMarkup(<ElementPanel element={textElement} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).not.toContain("data-badge-editor");
   });
 
   it("badge 要素ではテキスト/画像セクションを描画しない", () => {
-    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).not.toContain("data-text-editor");
     expect(html).not.toContain("data-image-editor");
   });
@@ -147,7 +221,7 @@ describe("ElementPanel — バッジ編集（バッジデザイナー・計画�
 
 describe("ElementPanel — 画像編集（写真管理・計画④）", () => {
   it("image 要素選択時に data-image-editor / 焦点グリッド / fit 選択 / 角丸 / 代替テキストを描画する", () => {
-    const html = renderToStaticMarkup(<ElementPanel element={imageElement} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={imageElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).toContain("data-image-editor");
     expect(html).toContain("data-focal-grid");
     expect(html).toContain("枠を埋める"); // cover
@@ -158,18 +232,18 @@ describe("ElementPanel — 画像編集（写真管理・計画④）", () => {
 
   it("焦点グリッドは9プリセット（各ボタンに aria-label=焦点 …）", () => {
     expect(FOCAL_PRESETS).toHaveLength(9);
-    const html = renderToStaticMarkup(<ElementPanel element={imageElement} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={imageElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect((html.match(/aria-label="焦点 /g) ?? []).length).toBe(9);
   });
 
   it("text 要素では画像セクションを描画しない", () => {
-    const html = renderToStaticMarkup(<ElementPanel element={textElement} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).not.toContain("data-image-editor");
   });
 
   it("focalX/focalY 指定時、該当プリセットが aria-pressed=true", () => {
     const el: SalesSheetElement = { ...imageElement, focalX: 0, focalY: 0 };
-    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).toMatch(/aria-label="焦点 左上"[^>]*aria-pressed="true"/);
   });
 });
@@ -180,7 +254,7 @@ describe("ElementPanel — 画像編集（写真管理・計画④）", () => {
 
 describe("ElementPanel — 構造", () => {
   it("element=null のとき空状態を描画し data-element-panel= 属性は存在しない", () => {
-    const html = renderToStaticMarkup(<ElementPanel element={null} onChange={() => {}} />);
+    const html = renderToStaticMarkup(<ElementPanel element={null} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).toContain("data-element-panel-empty");
     // "data-element-panel=" does NOT appear in "data-element-panel-empty=…"
     // (the empty-state wrapper has only the -empty variant, not the panel wrapper)
@@ -189,35 +263,35 @@ describe("ElementPanel — 構造", () => {
 
   it("要素選択時に data-element-panel が存在する", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={textElement} onChange={() => {}} />,
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).toContain("data-element-panel");
   });
 
   it("text 要素選択時に data-text-editor セクションが存在する", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={textElement} onChange={() => {}} />,
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).toContain("data-text-editor");
   });
 
   it("text 要素選択時に textarea が存在する", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={textElement} onChange={() => {}} />,
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).toContain("<textarea");
   });
 
   it("text 要素選択時に font-family select が存在する", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={textElement} onChange={() => {}} />,
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).toContain("<select");
   });
 
   it("非 text 要素（image）選択時は text editor が存在しない", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={imageElement} onChange={() => {}} />,
+      <ElementPanel element={imageElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).not.toContain("data-text-editor");
     expect(html).not.toContain("<textarea");
@@ -225,7 +299,7 @@ describe("ElementPanel — 構造", () => {
 
   it("重ね順ボタン（前面・背面）が存在する", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={textElement} onChange={() => {}} />,
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).toContain("前面");
     expect(html).toContain("背面");
@@ -233,14 +307,14 @@ describe("ElementPanel — 構造", () => {
 
   it("削除ボタンが存在する", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={textElement} onChange={() => {}} />,
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).toContain("削除");
   });
 
   it("geometry 値が input の value 属性として出力される", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={textElement} onChange={() => {}} />,
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     // Controlled inputs render value= in SSR output
     expect(html).toContain('value="10"'); // x
@@ -251,7 +325,7 @@ describe("ElementPanel — 構造", () => {
 
   it("text 要素の content が textarea の value として出力される", () => {
     const html = renderToStaticMarkup(
-      <ElementPanel element={textElement} onChange={() => {}} />,
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).toContain("Hello");
   });
