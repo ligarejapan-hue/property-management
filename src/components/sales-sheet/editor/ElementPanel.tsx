@@ -19,12 +19,16 @@ import type {
   EditTextPatch,
   EditImagePatch,
   EditBadgePatch,
+  EditQrPatch,
+  EditThemePatch,
 } from "@/lib/sales-sheet/editor-document";
 import type {
   SalesSheetElement,
   TextElement,
   ImageElement,
   BadgeElement,
+  QrElement,
+  SalesSheetTheme,
 } from "@/lib/sales-sheet/document-schema";
 
 // ---------------------------------------------------------------------------
@@ -39,12 +43,16 @@ export type ElementPanelChange =
   | { type: "delete" }
   | { type: "editText"; patch: EditTextPatch }
   | { type: "editImage"; patch: EditImagePatch }
-  | { type: "editBadge"; patch: EditBadgePatch };
+  | { type: "editBadge"; patch: EditBadgePatch }
+  | { type: "editQr"; patch: EditQrPatch };
 
 export interface ElementPanelProps {
   /** The currently selected element, or null when nothing is selected. */
   element: SalesSheetElement | null;
   onChange: (change: ElementPanelChange) => void;
+  /** 文書テーマ。要素未選択時にテーマ編集 section を表示する（計画⑧）。 */
+  theme: SalesSheetTheme;
+  onThemeChange: (patch: EditThemePatch) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,15 +200,50 @@ function ColorField({
 // Component
 // ---------------------------------------------------------------------------
 
-export function ElementPanel({ element, onChange }: ElementPanelProps) {
-  // ── Empty state ─────────────────────────────────────────────────────────
+export function ElementPanel({ element, onChange, theme, onThemeChange }: ElementPanelProps) {
+  // ── Empty state: 文書テーマ（計画⑧） ─────────────────────────────────────
+  // 要素を選択していないときは、図面全体の設定（フォント/基調色）を編集できる。
   if (!element) {
     return (
       <div
         data-element-panel-empty
-        className="p-4 text-xs text-neutral-400 dark:text-zinc-500"
+        className="flex flex-col divide-y divide-neutral-200 dark:divide-zinc-700 text-xs"
       >
-        要素を選択してください
+        <section className="p-3" data-theme-editor>
+          <p className={sectionHeadCls}>図面全体（テーマ）</p>
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>図面全体のフォント</span>
+              <select
+                aria-label="図面全体のフォント"
+                value={theme.fontFamily}
+                onChange={(e) => {
+                  if (!isSafeFontFamily(e.target.value)) return;
+                  onThemeChange({ fontFamily: e.target.value });
+                }}
+                className={inputCls}
+              >
+                {PANEL_FONT_OPTIONS.every((f) => f.value !== theme.fontFamily) && (
+                  <option value={theme.fontFamily}>(現在の設定)</option>
+                )}
+                {PANEL_FONT_OPTIONS.map((f) => (
+                  <option key={f.value} value={f.value}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <ColorField
+              label="基調色（新しいバッジの既定色）"
+              ariaLabel="基調色"
+              value={theme.accentColor}
+              onSafeChange={(accentColor) => onThemeChange({ accentColor })}
+            />
+          </div>
+        </section>
+        <p className="p-4 text-xs text-neutral-400 dark:text-zinc-500">
+          要素を選択すると個別の編集ができます
+        </p>
       </div>
     );
   }
@@ -216,6 +259,8 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
   const imageEl: ImageElement | null = el.type === "image" ? el : null;
   // ── Narrow to BadgeElement when type === "badge" ─────────────────────────
   const badgeEl: BadgeElement | null = el.type === "badge" ? el : null;
+  // ── Narrow to QrElement when type === "qr" ───────────────────────────────
+  const qrEl: QrElement | null = el.type === "qr" ? el : null;
 
   // ── Geometry handlers ────────────────────────────────────────────────────
   function onGeomChange(field: "x" | "y" | "w" | "h") {
@@ -550,6 +595,37 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
                 className={inputCls}
               />
             </label>
+          </div>
+        </section>
+      )}
+
+      {/* ── QR editor (qr elements only) ───────────────────────────────── */}
+      {qrEl !== null && (
+        <section className="p-3" data-qr-editor>
+          <p className={sectionHeadCls}>QRコード</p>
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>QRの中身（URL等・半角）</span>
+              {/* 非制御: controlled + ガードだと打ちかけの値で入力が固まるため、
+                  確定（blur）時に有効な値だけ反映して QR を再生成する。 */}
+              <input
+                key={qrEl.id}
+                type="text"
+                aria-label="QRの中身"
+                defaultValue={qrEl.content ?? ""}
+                onBlur={(e) => {
+                  // 値が変わっていない blur（コピーのためのクリック等）では
+                  // editQr を発行しない＝不要な dirty 化を避ける。
+                  const next = e.target.value.trim();
+                  if (next === (qrEl.content ?? "")) return;
+                  onChange({ type: "editQr", patch: { content: next } });
+                }}
+                className={inputCls}
+              />
+            </label>
+            <p className="text-[10px] text-neutral-400 dark:text-zinc-500">
+              半角の URL 等のみ。空欄・全角文字は反映されません（欄外クリックで確定）
+            </p>
           </div>
         </section>
       )}

@@ -81,8 +81,10 @@ export const shapeElementSchema = z.object({
 export const qrElementSchema = z.object({
   ...baseElement,
   type: z.literal("qr"),
-  /** 生成済みQR画像の data URL（生成は後続Plan）。 */
+  /** 生成済みQR画像の data URL。 */
   dataUrl: z.string().min(1).refine((s) => s.startsWith("data:image/"), "qr dataUrl must be a data:image URL"),
+  /** QR の中身（URL 等）。エディタでの再編集→再生成用の元テキスト（任意・後方互換）。 */
+  content: z.string().optional(),
 });
 
 export const elementSchema = z.discriminatedUnion("type", [
