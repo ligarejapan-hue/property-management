@@ -57,10 +57,13 @@ export function PhotoGrid({
                 : "cursor-not-allowed border-neutral-200 opacity-40"
             }`}
           >
+            {/* thumbnailUrl は /uploads 認可(PropertyPhoto は fileUrl のみ逆引き)対象外ゆえ
+                proxy せず、認可済みの fileUrl で表示。多数写真での一括取得を避け lazy 読み込み。 */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={p.thumbnailUrl ?? p.fileUrl}
+              src={p.fileUrl}
               alt={photoAlt(p) ?? ""}
+              loading="lazy"
               className="h-full w-full object-cover"
             />
           </button>

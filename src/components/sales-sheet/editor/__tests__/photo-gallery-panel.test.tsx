@@ -37,11 +37,14 @@ describe("PhotoGalleryPanel — SSR構造", () => {
 });
 
 describe("PhotoGrid — 追加可否（@codex対応）", () => {
-  it("data-photo-grid を描画する", () => {
+  it("data-photo-grid を描画し、画像は認可済み fileUrl を lazy 読み込みする", () => {
     const html = renderToStaticMarkup(
-      <PhotoGrid photos={[galleryPhoto({})]} onPick={() => {}} />,
+      <PhotoGrid photos={[galleryPhoto({ fileUrl: "/uploads/a/1.jpg", thumbnailUrl: "/property-management/x/t.jpg" })]} onPick={() => {}} />,
     );
     expect(html).toContain("data-photo-grid");
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain("/uploads/a/1.jpg"); // fileUrl を表示（thumbnailUrl は使わない）
+    expect(html).not.toContain("/property-management/x/t.jpg"); // 未認可 thumbnail を出さない
   });
 
   it("/uploads/ の写真は追加可能（disabled でない）", () => {

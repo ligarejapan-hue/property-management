@@ -54,19 +54,25 @@ export async function GET(
       },
     });
 
-    // fileUrl / thumbnailUrl を storage key から /uploads/{key} 形へ正規化する。
+    // fileUrl のみ storage key から /uploads/{key} 形へ canonical 化する。
     // 販売図面エディタは /uploads/ か data: のみ受理し、ギャラリー表示も同一オリジンの
-    // /uploads/ を叩く必要があるため、両方を canonical に揃える（server backend で
-    // /{bucket}/{key} や絶対URLでも key を解決。local backend は /uploads/{key} のまま＝挙動不変。
-    // key 解決不能な外部URL等は表示用の normalizeFileUrl にフォールバック）。
+    // 認可済み /uploads/ を叩く必要があるため（server backend で /{bucket}/{key} や絶対URL
+    // でも key を解決。local backend は /uploads/{key} のまま＝挙動不変。解決不能な外部URLは
+    // 表示用 normalizeFileUrl にフォールバック）。
+    // thumbnailUrl は /uploads 認可が PropertyPhoto では fileUrl しか逆引きしない（thumbnail
+    // key は 404）ため /uploads/ へは proxy せず表示用正規化のまま。ギャラリーのサムネ表示は
+    // 認可済みの fileUrl を用いる（PhotoGrid・@codex 対応）。
     const storage = getStorage();
-    const canon = (url: string | null | undefined): string | null | undefined => {
+    const canonFileUrl = (url: string | null | undefined): string | null | undefined => {
       if (url == null) return url;
       const key = storage.keyFromUrl(url);
       return key ? `/uploads/${key}` : normalizeFileUrl(url);
     };
     return apiResponse({
-      data: photos.map((p) => ({ ...p, fileUrl: canon(p.fileUrl), thumbnailUrl: canon(p.thumbnailUrl) })),
+      data: photos.map((p) => {
+        const normalized = normalizeFileUrlsInRecord(p);
+        return { ...normalized, fileUrl: canonFileUrl(p.fileUrl) };
+      }),
     });
   } catch (error) {
     return handleApiError(error);

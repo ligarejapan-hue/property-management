@@ -97,7 +97,7 @@ describe("GET /api/properties/[id]/photos — fileUrl 正規化", () => {
     expect(data[0].fileUrl).toBe("/uploads/properties/p1/1.jpg");
   });
 
-  it("thumbnailUrl も /uploads/{key} に揃える（server backend）", async () => {
+  it("thumbnailUrl は /uploads/ へ proxy しない（PropertyPhoto authz が thumbnail key を逆引きせず 404 になるため・表示用正規化のまま）", async () => {
     pm.propertyPhoto.findMany.mockResolvedValue([
       photo({
         fileUrl: "/property-management/properties/p1/1.jpg",
@@ -106,7 +106,7 @@ describe("GET /api/properties/[id]/photos — fileUrl 正規化", () => {
     ]);
     const data = await getData();
     expect(data[0].fileUrl).toBe("/uploads/properties/p1/1.jpg");
-    expect(data[0].thumbnailUrl).toBe("/uploads/properties/p1/thumb/1.jpg");
+    expect(data[0].thumbnailUrl).not.toContain("/uploads/");
   });
 
   it("key 解決不能な外部URLは表示用正規化のままフォールバック（/uploads/化しない）", async () => {
