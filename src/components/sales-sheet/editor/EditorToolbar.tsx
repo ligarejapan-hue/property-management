@@ -7,9 +7,10 @@ export interface EditorToolbarProps {
   onSave: () => Promise<void>;
   onExport: (format: "pdf" | "png") => Promise<void>;
   onDelete: () => Promise<void>;
+  onAddPhoto: () => void;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -75,6 +76,15 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete }: EditorToolb
         className="rounded px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
       >
         {saving ? "保存中…" : "保存"}
+      </button>
+      <button
+        type="button"
+        data-toolbar-add-photo
+        onClick={onAddPhoto}
+        disabled={busy}
+        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
+      >
+        写真を追加
       </button>
       <button
         type="button"

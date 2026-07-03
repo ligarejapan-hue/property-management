@@ -18,6 +18,11 @@ import { createElement } from "react";
 import { SalesSheetRenderer } from "@/components/sales-sheet/SalesSheetRenderer";
 import { renderDocumentToHtml } from "../render-html";
 import { sampleDocument } from "../__fixtures__/sample-document";
+import { parseSalesSheetDocument, A4_LANDSCAPE } from "../document-schema";
+
+/** 1×1 transparent PNG — offline; no external fetch */
+const TINY_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 /**
  * 両レンダラが持つべき「意味的シグナル」のリスト。
@@ -82,6 +87,37 @@ describe("renderDocumentToHtml — SalesSheetRenderer パリティガード", ()
       ],
     };
     expect(() => renderDocumentToHtml(bad)).toThrow();
+  });
+
+  it("両レンダラが焦点位置(focalX/focalY)を object-position に反映する（写真管理・計画④）", () => {
+    const doc = parseSalesSheetDocument({
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        { id: "i1", type: "image" as const, x: 0, y: 0, w: 50, h: 40, z: 1,
+          src: TINY_PNG, fit: "cover" as const, focalX: 25, focalY: 75 },
+      ],
+    });
+    const ser = renderDocumentToHtml(doc);
+    const rend = renderToStaticMarkup(createElement(SalesSheetRenderer, { document: doc }));
+    expect(ser).toContain("object-position");
+    expect(ser).toContain("25% 75%");
+    expect(rend).toContain("25% 75%"); // React inline style も同じ値
+  });
+
+  it("焦点未指定なら object-position を出さない（既定=中央）", () => {
+    const doc = parseSalesSheetDocument({
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#000" },
+      elements: [
+        { id: "i1", type: "image" as const, x: 0, y: 0, w: 50, h: 40, z: 1,
+          src: TINY_PNG, fit: "cover" as const },
+      ],
+    });
+    expect(renderDocumentToHtml(doc)).not.toContain("object-position");
+    // React 側も同様に省略（両レンダラ対称）
+    const rend = renderToStaticMarkup(createElement(SalesSheetRenderer, { document: doc }));
+    expect(rend).not.toContain("object-position");
   });
 
   it("Renderer もスキーマ検証でSSRFペイロードを拒否する", () => {
