@@ -16,6 +16,8 @@
 # next.js
 /.next/
 /out/
+# deploy時のロールバック用退避ディレクトリ(本番VPSでgit statusを汚さない)
+/.next.bak*/
 
 # production
 /build
