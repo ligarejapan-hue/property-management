@@ -22,6 +22,7 @@ import { ElementPanel } from "./ElementPanel";
 import type { ElementPanelChange } from "./ElementPanel";
 import { EditorToolbar } from "./EditorToolbar";
 import { PhotoGalleryPanel } from "./PhotoGalleryPanel";
+import { safeRandomId } from "@/lib/random-id";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -130,7 +131,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
 
   /** ギャラリーで選んだ写真を新しい image 要素として追加する。 */
   function handleAddImage(src: string, alt?: string): void {
-    setEditorState((prev) => addImageElement(prev, { id: crypto.randomUUID(), src, alt }));
+    // crypto.randomUUID は secure context 外(HTTP)で未定義ゆえフォールバック付き ID を使う。
+    setEditorState((prev) => addImageElement(prev, { id: safeRandomId(), src, alt }));
   }
 
   /**

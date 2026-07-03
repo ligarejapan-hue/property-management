@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { isSafeImageSrc } from "@/lib/sales-sheet/css-safety";
 
 export interface GalleryPhoto {
   id: string;
@@ -22,6 +23,51 @@ export interface GalleryPhoto {
 /** 写真の alt テキスト（caption 優先、無ければファイル名）。 */
 export function photoAlt(p: { caption: string | null; fileName: string | null }): string | undefined {
   return p.caption ?? p.fileName ?? undefined;
+}
+
+/**
+ * 写真サムネのグリッド（プレゼンテーション・SSRテスト可）。
+ * 図面に追加できるのは /uploads/ か data: の src のみ。追加不可の写真
+ * （server backend で key 解決不能な外部URL等）はボタンを無効化し、
+ * クリックしても無反応（silent no-op）にならないようにする。
+ */
+export function PhotoGrid({
+  photos,
+  onPick,
+}: {
+  photos: GalleryPhoto[];
+  onPick: (photo: GalleryPhoto) => void;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-2" data-photo-grid>
+      {photos.map((p) => {
+        const addable = isSafeImageSrc(p.fileUrl);
+        return (
+          <button
+            key={p.id}
+            type="button"
+            disabled={!addable}
+            title={addable ? (photoAlt(p) ?? "写真を追加") : "この写真は現在の保存形式では図面に追加できません"}
+            onClick={() => {
+              if (addable) onPick(p);
+            }}
+            className={`relative aspect-[4/3] overflow-hidden rounded border dark:border-zinc-700 ${
+              addable
+                ? "border-neutral-200 hover:border-blue-500"
+                : "cursor-not-allowed border-neutral-200 opacity-40"
+            }`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={p.thumbnailUrl ?? p.fileUrl}
+              alt={photoAlt(p) ?? ""}
+              className="h-full w-full object-cover"
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export function PhotoGalleryPanel({
@@ -85,27 +131,13 @@ export function PhotoGalleryPanel({
           </p>
         )}
         {photos !== null && photos.length > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            {photos.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                title={photoAlt(p) ?? "写真を追加"}
-                onClick={() => {
-                  onAddPhoto(p.fileUrl, photoAlt(p));
-                  onClose();
-                }}
-                className="relative aspect-[4/3] overflow-hidden rounded border border-neutral-200 hover:border-blue-500 dark:border-zinc-700"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={p.thumbnailUrl ?? p.fileUrl}
-                  alt={photoAlt(p) ?? ""}
-                  className="h-full w-full object-cover"
-                />
-              </button>
-            ))}
-          </div>
+          <PhotoGrid
+            photos={photos}
+            onPick={(p) => {
+              onAddPhoto(p.fileUrl, photoAlt(p));
+              onClose();
+            }}
+          />
         )}
       </div>
     </div>

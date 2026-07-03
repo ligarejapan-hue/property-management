@@ -70,7 +70,7 @@ async function getData() {
     { } as unknown as Parameters<typeof GET>[0],
     { params: Promise.resolve({ id: "p1" }) },
   );
-  return ((await res.json()) as { data: { fileUrl: string }[] }).data;
+  return ((await res.json()) as { data: { fileUrl: string; thumbnailUrl: string | null }[] }).data;
 }
 
 beforeEach(() => {
@@ -95,6 +95,18 @@ describe("GET /api/properties/[id]/photos — fileUrl 正規化", () => {
     ]);
     const data = await getData();
     expect(data[0].fileUrl).toBe("/uploads/properties/p1/1.jpg");
+  });
+
+  it("thumbnailUrl も /uploads/{key} に揃える（server backend）", async () => {
+    pm.propertyPhoto.findMany.mockResolvedValue([
+      photo({
+        fileUrl: "/property-management/properties/p1/1.jpg",
+        thumbnailUrl: "/property-management/properties/p1/thumb/1.jpg",
+      }),
+    ]);
+    const data = await getData();
+    expect(data[0].fileUrl).toBe("/uploads/properties/p1/1.jpg");
+    expect(data[0].thumbnailUrl).toBe("/uploads/properties/p1/thumb/1.jpg");
   });
 
   it("key 解決不能な外部URLは表示用正規化のままフォールバック（/uploads/化しない）", async () => {

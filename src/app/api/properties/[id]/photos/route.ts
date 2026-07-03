@@ -16,7 +16,7 @@ import {
   validateFile,
   ALLOWED_PHOTO_MIMES,
 } from "@/lib/storage";
-import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
+import { normalizeFileUrlsInRecord, normalizeFileUrl } from "@/lib/url-normalize";
 
 // ---------- GET /api/properties/[id]/photos ----------
 
@@ -54,17 +54,19 @@ export async function GET(
       },
     });
 
-    // fileUrl/thumbnailUrl を同一オリジン相対に正規化しつつ、fileUrl は販売図面エディタが
-    // 受理できるよう /uploads/{key} 形へ正規化する（server backend で /{bucket}/{key} や
-    // 絶対URLでも storage key を解決して揃える。local backend は /uploads/{key} のまま＝挙動不変。
-    // key 解決不能な外部URL等は表示用の正規化のままフォールバック）。
+    // fileUrl / thumbnailUrl を storage key から /uploads/{key} 形へ正規化する。
+    // 販売図面エディタは /uploads/ か data: のみ受理し、ギャラリー表示も同一オリジンの
+    // /uploads/ を叩く必要があるため、両方を canonical に揃える（server backend で
+    // /{bucket}/{key} や絶対URLでも key を解決。local backend は /uploads/{key} のまま＝挙動不変。
+    // key 解決不能な外部URL等は表示用の normalizeFileUrl にフォールバック）。
     const storage = getStorage();
+    const canon = (url: string | null | undefined): string | null | undefined => {
+      if (url == null) return url;
+      const key = storage.keyFromUrl(url);
+      return key ? `/uploads/${key}` : normalizeFileUrl(url);
+    };
     return apiResponse({
-      data: photos.map((p) => {
-        const normalized = normalizeFileUrlsInRecord(p);
-        const key = p.fileUrl != null ? storage.keyFromUrl(p.fileUrl) : null;
-        return key ? { ...normalized, fileUrl: `/uploads/${key}` } : normalized;
-      }),
+      data: photos.map((p) => ({ ...p, fileUrl: canon(p.fileUrl), thumbnailUrl: canon(p.thumbnailUrl) })),
     });
   } catch (error) {
     return handleApiError(error);
