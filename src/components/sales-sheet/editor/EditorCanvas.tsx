@@ -99,8 +99,16 @@ export function EditorCanvas({
   const { page, elements } = document;
 
   // ── Moveable target ───────────────────────────────────────────────────────
-  // Captured from the click event so we never read a ref during render.
-  // Reset to null whenever selection is cleared.
+  // The selected element's hit-box DOM node, captured by a callback ref on
+  // whichever hit-box is currently selected. Deriving the target from the
+  // selection (instead of from click events) keeps programmatic selection
+  // working too — 「写真を追加」/「バッジを追加」 auto-select the new element.
+  // Click-time capture alone would leave the handles attached to the
+  // previously clicked node (dragging them would move the NEW element using
+  // the OLD element's coordinates) and give a never-clicked element no
+  // handles at all (@codex PR#252).
+  // After deselection the last node may linger here; the render gate below
+  // requires a live selectedId, so a stale node is never handed to Moveable.
   const [moveableTarget, setMoveableTarget] = useState<HTMLDivElement | null>(null);
 
   // ── Moveable bounds (paper boundary in viewport px) ──────────────────────
@@ -197,10 +205,7 @@ export function EditorCanvas({
         boxShadow: "0 2px 16px rgba(0,0,0,0.18)",
         userSelect: "none",
       }}
-      onClick={() => {
-        onSelect(null);
-        setMoveableTarget(null);
-      }}
+      onClick={() => onSelect(null)}
     >
       {/* ── Visual preview (plan-① renderer, unmodified) ─────────────── */}
       <SalesSheetRenderer document={document} />
@@ -216,20 +221,21 @@ export function EditorCanvas({
             role="button"
             tabIndex={0}
             aria-label={`select element ${el.id}`}
+            ref={(node) => {
+              // Callback ref keeps moveableTarget in sync with the selection
+              // (React bails out on same-node sets, so no render cascade).
+              if (isSelected && node !== null) setMoveableTarget(node);
+            }}
             style={hitBoxStyle(el, isSelected)}
             onClick={(e) => {
               e.stopPropagation();
-              // Capture the DOM element now (in the event handler) so we can
-              // pass it to Moveable without reading a ref during render.
-              setMoveableTarget(e.currentTarget as HTMLDivElement);
+              // Selection is the single source of truth — the effect above
+              // resolves the Moveable target from selectedId after commit.
               onSelect(el.id);
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                // Mirror the click path: capture the Moveable target so keyboard
-                // selection shows handles on (and operates) the correct element.
-                setMoveableTarget(e.currentTarget as HTMLDivElement);
                 onSelect(el.id);
               }
             }}
@@ -238,9 +244,10 @@ export function EditorCanvas({
       })}
 
       {/* ── Moveable: drag/resize handles for the selected element ───── */}
-      {/* Gate on a live selectedId: when selection clears (e.g. the selected
-          element is deleted from the panel), the prop becomes null and the
-          handles are removed even though the local moveableTarget ref is stale. */}
+      {/* moveableTarget lags selection by one commit (effect-synced), so gate
+          on selectedId too: when selection clears (e.g. the selected element
+          is deleted from the panel), the handles disappear immediately even
+          before the effect nulls the stale target. */}
       {selectedId !== null && moveableTarget && (onMove || onResize) && (
         <MoveableNoSSR
           target={moveableTarget}

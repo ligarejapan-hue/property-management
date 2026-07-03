@@ -15,8 +15,17 @@
  */
 
 import { isCssColor, isSafeFontFamily } from "@/lib/sales-sheet/css-safety";
-import type { EditTextPatch, EditImagePatch } from "@/lib/sales-sheet/editor-document";
-import type { SalesSheetElement, TextElement, ImageElement } from "@/lib/sales-sheet/document-schema";
+import type {
+  EditTextPatch,
+  EditImagePatch,
+  EditBadgePatch,
+} from "@/lib/sales-sheet/editor-document";
+import type {
+  SalesSheetElement,
+  TextElement,
+  ImageElement,
+  BadgeElement,
+} from "@/lib/sales-sheet/document-schema";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -29,7 +38,8 @@ export type ElementPanelChange =
   | { type: "sendToBack" }
   | { type: "delete" }
   | { type: "editText"; patch: EditTextPatch }
-  | { type: "editImage"; patch: EditImagePatch };
+  | { type: "editImage"; patch: EditImagePatch }
+  | { type: "editBadge"; patch: EditBadgePatch };
 
 export interface ElementPanelProps {
   /** The currently selected element, or null when nothing is selected. */
@@ -94,6 +104,22 @@ export function buildGeometryChange(
   return { type: "resize", w: element.w, h: v };
 }
 
+/**
+ * CSS 色を <input type="color"> が表現できる #rrggbb へ正規化する。
+ * hex 系（#rgb / #rgba / #rrggbb / #rrggbbaa）は #rrggbb に展開/切詰め、
+ * それ以外（named color / rgb() 等、isCssColor が許容する形式）は null。
+ * null の場合はテキスト入力へフォールバックする — type=color に非 hex を
+ * 渡すとブラウザが #000000 へ黙って化かし、表示も書き戻しも誤った色になる
+ * ため（@codex PR#252）。
+ */
+export function hexColorInputValue(color: string): string | null {
+  const v = color.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/.test(v)) return v.slice(0, 7);
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])[0-9a-f]?$/.exec(v);
+  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`;
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Shared style helpers
 // ---------------------------------------------------------------------------
@@ -106,6 +132,61 @@ const inputCls =
 const labelSpanCls = "text-[10px] text-neutral-400 dark:text-zinc-500";
 
 const sectionHeadCls = "text-xs font-medium text-neutral-500 dark:text-zinc-400 mb-2";
+
+const colorInputCls =
+  "h-8 w-full cursor-pointer rounded border border-neutral-300 dark:border-zinc-600 " +
+  "bg-white dark:bg-zinc-700 p-0.5";
+
+// ---------------------------------------------------------------------------
+// ColorField — 色入力（#rrggbb 表現可能なら type=color、それ以外は type=text）
+// ---------------------------------------------------------------------------
+
+/**
+ * <input type="color"> は #rrggbb しか表現できないため、hex 系は正規化して
+ * ピッカーで、それ以外の正当な CSS 色（named / rgb() 等）は値を化かさない
+ * text 入力で編集する（@codex PR#252）。text 側は controlled にすると
+ * isCssColor を通らない打ちかけの値で入力が固まるため、非制御
+ * （defaultValue）にして有効値になった時だけ emit する。
+ */
+function ColorField({
+  label,
+  ariaLabel,
+  value,
+  onSafeChange,
+}: {
+  label: string;
+  ariaLabel: string;
+  value: string;
+  onSafeChange: (color: string) => void;
+}) {
+  const hex = hexColorInputValue(value);
+  function handle(e: React.ChangeEvent<HTMLInputElement>): void {
+    if (!isCssColor(e.target.value)) return;
+    onSafeChange(e.target.value);
+  }
+  return (
+    <label className="flex flex-col gap-0.5">
+      <span className={labelSpanCls}>{label}</span>
+      {hex !== null ? (
+        <input
+          type="color"
+          aria-label={ariaLabel}
+          value={hex}
+          onChange={handle}
+          className={colorInputCls}
+        />
+      ) : (
+        <input
+          type="text"
+          aria-label={ariaLabel}
+          defaultValue={value}
+          onChange={handle}
+          className={inputCls}
+        />
+      )}
+    </label>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -133,6 +214,8 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
   const textEl: TextElement | null = el.type === "text" ? el : null;
   // ── Narrow to ImageElement when type === "image" ─────────────────────────
   const imageEl: ImageElement | null = el.type === "image" ? el : null;
+  // ── Narrow to BadgeElement when type === "badge" ─────────────────────────
+  const badgeEl: BadgeElement | null = el.type === "badge" ? el : null;
 
   // ── Geometry handlers ────────────────────────────────────────────────────
   function onGeomChange(field: "x" | "y" | "w" | "h") {
@@ -158,11 +241,6 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
     onChange({ type: "editText", patch: { fontSizePt: v } });
   }
 
-  function onColor(e: React.ChangeEvent<HTMLInputElement>): void {
-    if (!isCssColor(e.target.value)) return;
-    onChange({ type: "editText", patch: { color: e.target.value } });
-  }
-
   // ── Image-edit handlers ──────────────────────────────────────────────────
   function onFit(e: React.ChangeEvent<HTMLSelectElement>): void {
     const fit = e.target.value;
@@ -179,6 +257,24 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
 
   function onAlt(e: React.ChangeEvent<HTMLInputElement>): void {
     onChange({ type: "editImage", patch: { alt: e.target.value } });
+  }
+
+  // ── Badge-edit handlers ──────────────────────────────────────────────────
+  function onBadgeLabel(e: React.ChangeEvent<HTMLInputElement>): void {
+    onChange({ type: "editBadge", patch: { label: e.target.value } });
+  }
+
+  function onBadgeShape(e: React.ChangeEvent<HTMLSelectElement>): void {
+    const shape = e.target.value;
+    if (shape === "rounded" || shape === "pill" || shape === "ribbon") {
+      onChange({ type: "editBadge", patch: { shape } });
+    }
+  }
+
+  function onBadgeFontSize(e: React.ChangeEvent<HTMLInputElement>): void {
+    const v = parseFloat(e.target.value);
+    if (!isFinite(v) || v <= 0) return;
+    onChange({ type: "editBadge", patch: { fontSizePt: v } });
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -310,16 +406,13 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
               />
             </label>
             {/* Color */}
-            <label className="flex flex-col gap-0.5">
-              <span className={labelSpanCls}>色</span>
-              <input
-                type="color"
-                aria-label="文字色"
-                value={textEl.style.color ?? "#000000"}
-                onChange={onColor}
-                className="h-8 w-full cursor-pointer rounded border border-neutral-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 p-0.5"
-              />
-            </label>
+            <ColorField
+              key={`text-color-${textEl.id}`}
+              label="色"
+              ariaLabel="文字色"
+              value={textEl.style.color ?? "#000000"}
+              onSafeChange={(color) => onChange({ type: "editText", patch: { color } })}
+            />
           </div>
         </section>
       )}
@@ -391,6 +484,69 @@ export function ElementPanel({ element, onChange }: ElementPanelProps) {
                 aria-label="代替テキスト"
                 value={imageEl.alt ?? ""}
                 onChange={onAlt}
+                className={inputCls}
+              />
+            </label>
+          </div>
+        </section>
+      )}
+
+      {/* ── Badge editor (badge elements only) ────────────────────────── */}
+      {badgeEl !== null && (
+        <section className="p-3" data-badge-editor>
+          <p className={sectionHeadCls}>バッジ</p>
+          <div className="flex flex-col gap-2">
+            {/* Label */}
+            <label className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>文言</span>
+              <input
+                type="text"
+                aria-label="バッジの文言"
+                value={badgeEl.label}
+                onChange={onBadgeLabel}
+                className={inputCls}
+              />
+            </label>
+            {/* Shape */}
+            <label className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>形</span>
+              <select
+                aria-label="バッジの形"
+                value={badgeEl.shape}
+                onChange={onBadgeShape}
+                className={inputCls}
+              >
+                <option value="rounded">角丸</option>
+                <option value="pill">ピル（丸端）</option>
+                <option value="ribbon">リボン</option>
+              </select>
+            </label>
+            {/* Background color */}
+            <ColorField
+              key={`badge-bg-${badgeEl.id}`}
+              label="背景色"
+              ariaLabel="バッジ背景色"
+              value={badgeEl.bg}
+              onSafeChange={(bg) => onChange({ type: "editBadge", patch: { bg } })}
+            />
+            {/* Foreground color */}
+            <ColorField
+              key={`badge-fg-${badgeEl.id}`}
+              label="文字色"
+              ariaLabel="バッジ文字色"
+              value={badgeEl.fg}
+              onSafeChange={(fg) => onChange({ type: "editBadge", patch: { fg } })}
+            />
+            {/* Font size */}
+            <label className="flex flex-col gap-0.5">
+              <span className={labelSpanCls}>サイズ (pt)</span>
+              <input
+                type="number"
+                step="0.5"
+                min="1"
+                aria-label="バッジ文字サイズ (pt)"
+                value={badgeEl.fontSizePt ?? 10}
+                onChange={onBadgeFontSize}
                 className={inputCls}
               />
             </label>

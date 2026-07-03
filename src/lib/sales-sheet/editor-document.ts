@@ -20,6 +20,7 @@ import type {
   SalesSheetElement,
   TextElement,
   ImageElement,
+  BadgeElement,
 } from "./document-schema";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,20 @@ export interface EditImagePatch {
   readonly alt?: string;
 }
 
+/** Flat patch for badge-element fields (editBadge). */
+export interface EditBadgePatch {
+  /** バッジの文言。 */
+  readonly label?: string;
+  /** 形状。rounded=角丸 / pill=ピル / ribbon=リボン。 */
+  readonly shape?: "rounded" | "pill" | "ribbon";
+  /** 背景色。isCssColor で検証（不正は無視）。 */
+  readonly bg?: string;
+  /** 文字色。isCssColor で検証（不正は無視）。 */
+  readonly fg?: string;
+  /** フォントサイズ(pt)。0 以下は無視。 */
+  readonly fontSizePt?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -67,6 +82,14 @@ export const MIN_ELEMENT_SIZE_MM = 5;
 /** ギャラリーから追加する画像の既定サイズ(mm)。 */
 const DEFAULT_IMAGE_W_MM = 90;
 const DEFAULT_IMAGE_H_MM = 60;
+
+/** 追加するバッジの既定サイズ(mm)と既定ラベル。 */
+const DEFAULT_BADGE_W_MM = 40;
+const DEFAULT_BADGE_H_MM = 12;
+const DEFAULT_BADGE_LABEL = "新着";
+/** 追加するバッジの既定文字サイズ(pt)。未設定だとレンダラがページ既定を継承し
+ *  パネル表示とズレるため、作成時に明示的に永続化する（WYSIWYG）。 */
+const DEFAULT_BADGE_FONT_SIZE_PT = 10;
 
 // ---------------------------------------------------------------------------
 // Reducers
@@ -287,6 +310,79 @@ export function editImage(
   if (patch.focalY !== undefined) newEl.focalY = clamp(patch.focalY, 0, 100);
   if (patch.radiusMm !== undefined && patch.radiusMm >= 0) newEl.radiusMm = patch.radiusMm;
   if (patch.alt !== undefined) newEl.alt = patch.alt;
+
+  return replaceElement(state, idx, newEl);
+}
+
+/**
+ * オリジナルバッジを新しい badge 要素として document 末尾に追加する。
+ * - 既定色はテーマ accent（背景）×白（文字）。テーマ色は schema の isCssColor
+ *   検証済みのため、そのまま badge の bg に使って安全。
+ * - 既定サイズでページ中央に配置、z は既存最大+1（最前面）、自動選択して dirty=true。
+ */
+export function addBadgeElement(
+  state: EditorState,
+  params: { id: string; label?: string },
+): EditorState {
+  const { document } = state;
+  const { page } = document;
+  const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_BADGE_W_MM, page.width - 10));
+  const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_BADGE_H_MM, page.height - 10));
+  const z = document.elements.length
+    ? Math.max(...document.elements.map((e) => e.z)) + 1
+    : 1;
+  const el: BadgeElement = {
+    id: params.id,
+    type: "badge",
+    x: (page.width - w) / 2,
+    y: (page.height - h) / 2,
+    w,
+    h,
+    z,
+    label: params.label ?? DEFAULT_BADGE_LABEL,
+    shape: "rounded",
+    bg: document.theme.accentColor,
+    fg: "#ffffff",
+    fontSizePt: DEFAULT_BADGE_FONT_SIZE_PT,
+  };
+  return {
+    ...state,
+    dirty: true,
+    selectedId: params.id,
+    document: { ...document, elements: [...document.elements, el] },
+  };
+}
+
+/**
+ * Apply a partial patch to a badge element (label / shape / colors / font size).
+ * - Non-badge elements: no-op (same state reference).
+ * - Unknown id: no-op (same state reference).
+ * - bg / fg: validated via isCssColor; invalid values are silently ignored.
+ * - shape: only rounded / pill / ribbon are accepted.
+ * - fontSizePt: must be > 0; non-positive values are silently ignored.
+ * Sets dirty=true on success.
+ */
+export function editBadge(
+  state: EditorState,
+  id: string,
+  patch: EditBadgePatch,
+): EditorState {
+  const { document } = state;
+  const idx = findIdx(document, id);
+  if (idx === -1) return state;
+  const el = document.elements[idx];
+  if (el.type !== "badge") return state;
+
+  const newEl: BadgeElement = { ...el };
+  if (patch.label !== undefined) newEl.label = patch.label;
+  if (patch.shape === "rounded" || patch.shape === "pill" || patch.shape === "ribbon") {
+    newEl.shape = patch.shape;
+  }
+  if (patch.bg !== undefined && isCssColor(patch.bg)) newEl.bg = patch.bg;
+  if (patch.fg !== undefined && isCssColor(patch.fg)) newEl.fg = patch.fg;
+  if (patch.fontSizePt !== undefined && patch.fontSizePt > 0) {
+    newEl.fontSizePt = patch.fontSizePt;
+  }
 
   return replaceElement(state, idx, newEl);
 }
