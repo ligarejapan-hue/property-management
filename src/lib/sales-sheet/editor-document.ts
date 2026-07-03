@@ -87,6 +87,9 @@ const DEFAULT_IMAGE_H_MM = 60;
 const DEFAULT_BADGE_W_MM = 40;
 const DEFAULT_BADGE_H_MM = 12;
 const DEFAULT_BADGE_LABEL = "新着";
+/** 追加するバッジの既定文字サイズ(pt)。未設定だとレンダラがページ既定を継承し
+ *  パネル表示とズレるため、作成時に明示的に永続化する（WYSIWYG）。 */
+const DEFAULT_BADGE_FONT_SIZE_PT = 10;
 
 // ---------------------------------------------------------------------------
 // Reducers
@@ -340,6 +343,7 @@ export function addBadgeElement(
     shape: "rounded",
     bg: document.theme.accentColor,
     fg: "#ffffff",
+    fontSizePt: DEFAULT_BADGE_FONT_SIZE_PT,
   };
   return {
     ...state,

@@ -52,6 +52,14 @@ describe("addBadgeElement", () => {
     expect(added.label.length).toBeGreaterThan(0);
   });
 
+  it("fontSizePt を明示的に持つ（パネル表示とレンダラ描画の WYSIWYG 一致）", () => {
+    // レンダラは fontSizePt 未設定だと font-size を出力せずページ既定を継承する。
+    // パネルの表示値と実描画がズレないよう、作成時に既定 pt を永続化する。
+    const s = addBadgeElement(makeState(), { id: "new-1" });
+    const added = s.document.elements.at(-1) as BadgeElement;
+    expect(added.fontSizePt).toBe(10);
+  });
+
   it("label を指定できる", () => {
     const s = addBadgeElement(makeState(), { id: "new-1", label: "価格改定" });
     const added = s.document.elements.at(-1) as BadgeElement;
