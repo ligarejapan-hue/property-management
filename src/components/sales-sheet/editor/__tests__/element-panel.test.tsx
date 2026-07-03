@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   ElementPanel,
   buildGeometryChange,
+  hexColorInputValue,
   PANEL_FONT_OPTIONS,
   FOCAL_PRESETS,
 } from "../ElementPanel";
@@ -63,6 +64,55 @@ const badgeElement: SalesSheetElement = {
   bg: "#15324f",
   fg: "#ffffff",
 };
+
+describe("hexColorInputValue — <input type=color> 用の #rrggbb 正規化", () => {
+  it("6桁 hex はそのまま（小文字化）", () => {
+    expect(hexColorInputValue("#15324f")).toBe("#15324f");
+    expect(hexColorInputValue("#D0331A")).toBe("#d0331a");
+  });
+
+  it("3桁/4桁 hex は 6桁へ展開（アルファは落とす）", () => {
+    expect(hexColorInputValue("#f00")).toBe("#ff0000");
+    expect(hexColorInputValue("#f008")).toBe("#ff0000");
+  });
+
+  it("8桁 hex はアルファを落として 6桁", () => {
+    expect(hexColorInputValue("#15324f80")).toBe("#15324f");
+  });
+
+  it("named color / rgb() / 不正値は null（テキスト入力へフォールバック）", () => {
+    expect(hexColorInputValue("red")).toBeNull();
+    expect(hexColorInputValue("rgb(255, 0, 0)")).toBeNull();
+    expect(hexColorInputValue("#12")).toBeNull();
+    expect(hexColorInputValue("")).toBeNull();
+  });
+});
+
+describe("ElementPanel — 色入力の表現不能ケース（@codex PR#252）", () => {
+  it("hex でないバッジ色（named color）はテキスト入力で正確に表示する", () => {
+    const el: SalesSheetElement = { ...badgeElement, bg: "red", fg: "navy" };
+    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} />);
+    // type=color は red を表現できず #000000 に化けるため、text へフォールバック
+    expect(html).toMatch(/aria-label="バッジ背景色"[^>]*type="text"|type="text"[^>]*aria-label="バッジ背景色"/);
+    expect(html).toContain('value="red"');
+    expect(html).toContain('value="navy"');
+  });
+
+  it("hex のバッジ色は type=color のまま", () => {
+    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} />);
+    expect(html).toMatch(/aria-label="バッジ背景色"[^>]*type="color"|type="color"[^>]*aria-label="バッジ背景色"/);
+  });
+
+  it("hex でないテキスト文字色もテキスト入力へフォールバック", () => {
+    const el: SalesSheetElement = {
+      ...textElement,
+      style: { fontSizePt: 14, color: "rgb(51, 51, 51)" },
+    };
+    const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} />);
+    expect(html).toMatch(/aria-label="文字色"[^>]*type="text"|type="text"[^>]*aria-label="文字色"/);
+    expect(html).toContain('value="rgb(51, 51, 51)"');
+  });
+});
 
 describe("ElementPanel — バッジ編集（バッジデザイナー・計画⑦）", () => {
   it("badge 要素選択時に data-badge-editor / 文言 / 形 / 背景色 / 文字色 / サイズを描画する", () => {
