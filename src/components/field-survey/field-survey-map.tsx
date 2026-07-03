@@ -602,8 +602,22 @@ function ControlPanel({
   canWritePin: boolean | null;
   onPanToCurrent: () => void;
 }) {
+  // モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
+  // パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
+  const [panelOpen, setPanelOpen] = useState(false);
   return (
-    <div className="absolute right-3 top-3 w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900">
+    <div className="absolute right-3 top-3 md:w-56">
+      <button
+        type="button"
+        onClick={() => setPanelOpen((v) => !v)}
+        aria-expanded={panelOpen}
+        className="ml-auto flex items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 md:hidden"
+      >
+        表示切替{hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
+      </button>
+      <div
+        className={`${panelOpen ? "mt-2 block" : "hidden"} w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900 md:mt-0 md:block`}
+      >
       <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">表示切替</div>
       <label className="mb-1 flex cursor-pointer items-center gap-2">
         <input
@@ -671,6 +685,7 @@ function ControlPanel({
           canWrite={canWritePin}
         />
       )}
+      </div>
     </div>
   );
 }

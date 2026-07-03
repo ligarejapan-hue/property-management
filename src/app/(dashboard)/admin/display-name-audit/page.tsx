@@ -162,6 +162,7 @@ export default function DisplayNameAuditPage() {
                 : "表記ゆれは見つかりませんでした。"}
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
             <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
@@ -204,6 +205,7 @@ export default function DisplayNameAuditPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

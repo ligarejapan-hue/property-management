@@ -25,6 +25,7 @@ import {
   ClipboardCheck,
   FileSearch,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 interface SidebarProps {
   userRole: string;
@@ -233,15 +234,21 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 transform border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-60 transform flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 transition-transform duration-200 lg:static lg:translate-x-0 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex h-14 items-center border-b border-gray-200 dark:border-gray-700 px-4">
+        {/* pl-14: モバイルの固定「×」ボタン(left-3 + 36px)がタイトルに重ならない位置から始める */}
+        <div className="flex h-14 shrink-0 items-center border-b border-gray-200 dark:border-gray-700 pl-14 pr-4 lg:pl-4">
           <FileText className="mr-2 h-5 w-5 text-indigo-600 dark:text-indigo-400" />
           <span className="text-sm font-bold text-gray-800 dark:text-gray-100">物件管理</span>
         </div>
-        <div className="overflow-y-auto">{navContent}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{navContent}</div>
+        {/* モバイルではヘッダーからテーマ切替をここへ移動(ヘッダーの詰まり解消) */}
+        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 lg:hidden">
+          <div className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">表示テーマ</div>
+          <ThemeToggle />
+        </div>
       </aside>
     </>
   );

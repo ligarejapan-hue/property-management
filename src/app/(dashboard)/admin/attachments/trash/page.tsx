@@ -129,6 +129,7 @@ export default function AttachmentTrashPage() {
             <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
             <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
@@ -194,6 +195,7 @@ export default function AttachmentTrashPage() {
               )}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

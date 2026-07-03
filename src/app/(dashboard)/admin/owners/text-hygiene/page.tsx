@@ -278,6 +278,7 @@ export default function TextHygieneAuditPage() {
             対象の制御文字・文字化けは見つかりませんでした（権限により一部のフィールドは監査対象外の場合があります）。
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
             <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
@@ -399,6 +400,7 @@ export default function TextHygieneAuditPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
