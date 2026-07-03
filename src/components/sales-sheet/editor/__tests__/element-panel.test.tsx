@@ -50,6 +50,51 @@ const imageElement: SalesSheetElement = {
   fit: "cover",
 };
 
+const badgeElement: SalesSheetElement = {
+  id: "b1",
+  type: "badge",
+  x: 5,
+  y: 5,
+  w: 40,
+  h: 12,
+  z: 3,
+  label: "新着",
+  shape: "rounded",
+  bg: "#15324f",
+  fg: "#ffffff",
+};
+
+describe("ElementPanel — バッジ編集（バッジデザイナー・計画⑦）", () => {
+  it("badge 要素選択時に data-badge-editor / 文言 / 形 / 背景色 / 文字色 / サイズを描画する", () => {
+    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} />);
+    expect(html).toContain("data-badge-editor");
+    expect(html).toContain("文言");
+    expect(html).toContain("角丸");
+    expect(html).toContain("ピル");
+    expect(html).toContain("リボン");
+    expect(html).toContain("背景色");
+    expect(html).toContain("文字色");
+    expect(html).toContain("サイズ (pt)");
+  });
+
+  it("現在の label が入力に、shape が選択状態で表示される", () => {
+    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} />);
+    expect(html).toContain('value="新着"');
+    expect(html).toMatch(/value="rounded"[^>]*selected|selected[^>]*value="rounded"/);
+  });
+
+  it("text 要素ではバッジセクションを描画しない", () => {
+    const html = renderToStaticMarkup(<ElementPanel element={textElement} onChange={() => {}} />);
+    expect(html).not.toContain("data-badge-editor");
+  });
+
+  it("badge 要素ではテキスト/画像セクションを描画しない", () => {
+    const html = renderToStaticMarkup(<ElementPanel element={badgeElement} onChange={() => {}} />);
+    expect(html).not.toContain("data-text-editor");
+    expect(html).not.toContain("data-image-editor");
+  });
+});
+
 describe("ElementPanel — 画像編集（写真管理・計画④）", () => {
   it("image 要素選択時に data-image-editor / 焦点グリッド / fit 選択 / 角丸 / 代替テキストを描画する", () => {
     const html = renderToStaticMarkup(<ElementPanel element={imageElement} onChange={() => {}} />);

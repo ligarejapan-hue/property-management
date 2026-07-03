@@ -12,7 +12,9 @@ import {
   sendToBack,
   editText,
   editImage,
+  editBadge,
   addImageElement,
+  addBadgeElement,
   autoArrangePhotos,
   deleteElement,
   markSavedIfCurrent,
@@ -126,6 +128,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           return editText(prev, id, change.patch);
         case "editImage":
           return editImage(prev, id, change.patch);
+        case "editBadge":
+          return editBadge(prev, id, change.patch);
       }
     });
   }
@@ -139,6 +143,12 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   /** 写真（image 要素）を写真ゾーンへワンボタン整列する（計画⑥・手動上書き可）。 */
   function handleAutoArrange(): void {
     setEditorState((prev) => autoArrangePhotos(prev));
+  }
+
+  /** オリジナルバッジを追加する（バッジデザイナー・計画⑦）。 */
+  function handleAddBadge(): void {
+    // crypto.randomUUID は secure context 外(HTTP)で未定義ゆえフォールバック付き ID を使う。
+    setEditorState((prev) => addBadgeElement(prev, { id: safeRandomId() }));
   }
 
   /**
@@ -236,6 +246,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onDelete={handleDelete}
         onAddPhoto={() => setGalleryOpen(true)}
         onAutoArrange={handleAutoArrange}
+        onAddBadge={handleAddBadge}
       />
 
       {/* ── 写真ギャラリー（写真管理・計画④） ─────────────────────────── */}
