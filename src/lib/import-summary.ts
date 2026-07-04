@@ -19,7 +19,10 @@
 import { isUpdateMessage } from "./import-row-display";
 
 export interface ImportRowLike {
-  status: "success" | "error" | "skipped" | "needs_review";
+  // pending（registry_pdf_bulk 由来の「未処理」行）も型として受け取れるように
+  // する。calcImportSummary の switch は pending 用の分岐で明示的に無視する
+  // （5区分の集計対象外・totalCount にも含めない）ので挙動は変わらない。
+  status: "success" | "error" | "skipped" | "needs_review" | "pending";
   errorMessage: string | null;
 }
 
@@ -66,6 +69,10 @@ export function calcImportSummary(rows: ImportRowLike[]): ImportSummary {
         break;
       case "error":
         errorCount++;
+        break;
+      // pending（registry_pdf_bulk 由来の「未処理」行）は意図的に集計対象外
+      // （5区分・totalCount のいずれにも含めない。summaryFromStatusCounts と同じ方針）。
+      case "pending":
         break;
       // unknown status は集計対象外（段階Bで actionType を追加した際の
       // 旧データ互換も含めて、サイレントに無視するのが安全）

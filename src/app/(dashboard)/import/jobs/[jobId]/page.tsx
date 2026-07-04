@@ -24,6 +24,7 @@ import {
   Search,
   Download,
   RotateCcw,
+  Clock,
 } from "lucide-react";
 import {
   fetchImportJobDetail,
@@ -62,7 +63,7 @@ interface ImportJobRow {
   id: string;
   jobId: string;
   rowNumber: number;
-  status: "success" | "error" | "skipped" | "needs_review";
+  status: "success" | "error" | "skipped" | "needs_review" | "pending";
   rawData: Record<string, string> | null;
   errorMessage: string | null;
   createdId: string | null;
@@ -91,6 +92,10 @@ interface ImportJob {
   duplicateCount?: number;
   // B4(Codex P2): bulk-resolve scope="duplicate" の対象件数（needs_review のみ・「重複」始まり）。
   duplicateActionableCount?: number;
+  // registry_pdf_bulk 等・pending 行数（status/reason フィルタ非依存・ジョブ全体）。
+  // Task 11 のウィザード進捗ポーリング/再開ボタンが依存する additive フィールド。
+  pendingCount?: number;
+  isRegistryPdfBulkJob?: boolean;
   pagination?: {
     page: number;
     limit: number;
@@ -114,7 +119,13 @@ interface SearchResult {
   externalLinkKey?: string | null;
 }
 
-type FilterStatus = "all" | "needs_review" | "error" | "success" | "skipped";
+type FilterStatus =
+  | "all"
+  | "needs_review"
+  | "error"
+  | "success"
+  | "skipped"
+  | "pending";
 
 // 理由別 filter（Phase 2）: token は server の VALID_ROW_REASONS と一致させる
 // （URL-safe な英語 enum・PII なし）。B4 bulk-resolve の scope="duplicate" と
@@ -162,6 +173,12 @@ const ROW_STATUS_CONFIG: Record<
     bg: "bg-gray-50 border-gray-200 dark:bg-gray-800/50 dark:border-gray-800",
     icon: SkipForward,
   },
+  pending: {
+    label: "未処理",
+    color: "text-blue-600 dark:text-blue-400",
+    bg: "bg-blue-50 border-blue-200 dark:bg-blue-500/10 dark:border-blue-400/20",
+    icon: Clock,
+  },
 };
 
 // 取込種別ラベルは共通定義 (src/lib/import-labels.ts) を使用
@@ -183,7 +200,8 @@ export default function ImportJobDetailPage() {
     return s === "needs_review" ||
       s === "error" ||
       s === "success" ||
-      s === "skipped"
+      s === "skipped" ||
+      s === "pending"
       ? s
       : "all";
   })();
@@ -418,6 +436,9 @@ export default function ImportJobDetailPage() {
     error: summary.errorCount,
     success: summary.createdCount + summary.updatedCount,
     skipped: summary.skippedCount,
+    // registry_pdf_bulk 等・未処理（pending）行数。サーバ確定の job.pendingCount
+    // を使う（ジョブ全体・status/reason フィルタ非依存・ページ分に化けない）。
+    pending: job?.pendingCount ?? 0,
     // 重複候補（B2: サーバ確定の duplicateCount=ジョブ全体・ページ分に化けない）。
     // 表示ヒント用（needs_review + skipped の内数・従来表示/互換）。
     duplicate: job?.duplicateCount ?? 0,
@@ -893,6 +914,7 @@ export default function ImportJobDetailPage() {
             { key: "error", label: "エラー" },
             { key: "success", label: "成功" },
             { key: "skipped", label: "スキップ" },
+            { key: "pending", label: "未処理" },
           ] as { key: FilterStatus; label: string }[]
         ).map((tab) => (
           <button
