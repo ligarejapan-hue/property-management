@@ -13,6 +13,7 @@ export const IMPORT_TYPE_LABELS: Record<string, string> = {
   registry_pdf: "謄本PDF",
   dm_history_csv: "DM履歴CSV",
   investigation_csv: "調査CSV",
+  registry_pdf_bulk: "所有者事項PDF一括",
 };
 
 /**
@@ -37,4 +38,5 @@ export const IMPORT_TYPE_FILTER_OPTIONS: ReadonlyArray<{
   { value: "property_pdf", label: IMPORT_TYPE_LABELS.property_pdf },
   { value: "dm_history_csv", label: IMPORT_TYPE_LABELS.dm_history_csv },
   { value: "investigation_csv", label: IMPORT_TYPE_LABELS.investigation_csv },
+  { value: "registry_pdf_bulk", label: IMPORT_TYPE_LABELS.registry_pdf_bulk },
 ];
