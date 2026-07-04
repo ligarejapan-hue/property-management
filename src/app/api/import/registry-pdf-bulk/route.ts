@@ -26,6 +26,30 @@ const MAX_BULK_TOTAL_BYTES = 100 * 1024 * 1024;
 // multipart envelope(boundary/ヘッダ)の許容オーバーヘッド(100ファイル分)
 const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 
+// 同時実行ガード(OOM対策): 1リクエストで最大100MBを formData() でメモリに
+// バッファするため、無制限だと複数人の同時アップロードでメモリを食い尽くす
+// (sales-sheet の render-gate と同じ思想)。本ルートは即時に202/503を返す
+// 単発処理のため、待機列は持たず超過分を即503で断る簡易版とする。
+// HMR(next dev)でモジュールが再評価されてもカウンタを失わないよう、
+// prisma.ts / worker.ts と同じ globalThis singleton イディオムを使う。
+const MAX_CONCURRENT_BULK_UPLOADS = 2;
+const globalForBulkUpload = globalThis as unknown as {
+  __registryPdfBulkUploadInFlight?: number;
+};
+function bulkUploadInFlightCount(): number {
+  return globalForBulkUpload.__registryPdfBulkUploadInFlight ?? 0;
+}
+function incrementBulkUploadInFlight(): void {
+  globalForBulkUpload.__registryPdfBulkUploadInFlight =
+    bulkUploadInFlightCount() + 1;
+}
+function decrementBulkUploadInFlight(): void {
+  globalForBulkUpload.__registryPdfBulkUploadInFlight = Math.max(
+    0,
+    bulkUploadInFlightCount() - 1,
+  );
+}
+
 interface RowSeed {
   rowNumber: number;
   status: "pending" | "error";
@@ -34,6 +58,19 @@ interface RowSeed {
 }
 
 export async function POST(request: NextRequest) {
+  // 同時実行ガード: formData()(最大100MBのメモリバッファ)を呼ぶ前に判定する。
+  // 認可チェックより前に置くのは、認可チェック自体はメモリを消費しないため
+  // (=ガードの目的はメモリ枯渇の防止)、判定を早期化して不要な作業を避けるため。
+  if (bulkUploadInFlightCount() >= MAX_CONCURRENT_BULK_UPLOADS) {
+    return handleApiError(
+      new ApiError(
+        503,
+        "アップロードが混み合っています。しばらく待って再実行してください",
+        "UPLOAD_BUSY",
+      ),
+    );
+  }
+  incrementBulkUploadInFlight();
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -221,5 +258,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     return handleApiError(error);
+  } finally {
+    decrementBulkUploadInFlight();
   }
 }

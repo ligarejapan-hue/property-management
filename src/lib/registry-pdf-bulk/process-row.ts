@@ -62,6 +62,25 @@ function cleanExtractedAddress(input: string | null | undefined): string | null 
   return idx === -1 ? trimmed : trimmed.slice(0, idx);
 }
 
+/**
+ * staging(所有者事項PDF・PII)のbest-effort削除。
+ *
+ * 行がerrorで確定するとき、その添付は手動添付対象外の袋小路になる
+ * (needs_review と違い、ユーザーが後から手動添付できる導線が無い)ため、
+ * stagingを保持しておく理由が無い。失敗は握りつぶしてログのみ(呼び出し側の
+ * 確定処理を妨げない)。
+ */
+async function deleteStagedBestEffort(
+  storage: ReturnType<typeof getStorage>,
+  key: string,
+): Promise<void> {
+  try {
+    await storage.delete(key);
+  } catch (e) {
+    console.error("registry-pdf-bulk: staging delete failed:", e);
+  }
+}
+
 async function finalizeRow(
   rowId: string,
   data: {
@@ -125,6 +144,10 @@ export async function processRegistryPdfBulkRow(args: {
           type: "registry",
           isDeleted: false,
           fileName: { contains: requestNumber },
+          // 物件削除で propertyId=null になった孤児添付は対象から除外する。
+          // 除外しないと、削除済み物件の孤児添付が永久にヒットし続け、
+          // 再取込のたびに「取込済み」と偽スキップされてしまう。
+          propertyId: { not: null },
         },
         select: { id: true, propertyId: true },
       });
@@ -249,6 +272,9 @@ export async function processRegistryPdfBulkRow(args: {
         createdId: null,
         rawData: { ...raw, reason: "validation_failed" },
       });
+      // この時点で staged は読み取り済み(実体あり)。error行は手動添付対象外の
+      // 袋小路なので保持理由が無く、best-effortで削除する。
+      await deleteStagedBestEffort(storage, stagedKey);
       return "error";
     }
     let uploadedKey: string | null = null;
@@ -332,6 +358,11 @@ export async function processRegistryPdfBulkRow(args: {
       });
     } catch (finalizeErr) {
       console.error("registry-pdf-bulk: finalize failed:", finalizeErr);
+    }
+    // 予期しないエラーで確定した行も手動添付対象外の袋小路。stagedKeyが
+    // わかっていれば(=不完全データで早期returnした経路ではない)best-effortで削除する。
+    if (stagedKey) {
+      await deleteStagedBestEffort(storage, stagedKey);
     }
     return "error";
   }

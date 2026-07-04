@@ -35,6 +35,11 @@ interface RequestBody {
   propertyId?: string;
 }
 
+// Prisma の @db.Uuid カラムに不正形式を渡すと P2023(500)になるため、
+// DBに問い合わせる前にUUID形式を検証し、不正入力は422で弾く。
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string; rowId: string }> },
@@ -51,6 +56,9 @@ export async function POST(
     const propertyId = body.propertyId?.trim();
     if (!propertyId) {
       throw new ApiError(422, "propertyId は必須です", "VALIDATION_ERROR");
+    }
+    if (!UUID_RE.test(propertyId)) {
+      throw new ApiError(422, "propertyId の形式が不正です", "VALIDATION_ERROR");
     }
 
     const row = await prisma.importJobRow.findUnique({

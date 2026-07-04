@@ -43,9 +43,14 @@ vi.mock("@/lib/prisma", () => ({
     owner: { findUnique: vi.fn(), create: vi.fn() },
   },
 }));
+vi.mock("@/lib/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/storage")>();
+  return { ...actual, getStorage: vi.fn() };
+});
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
+import { getStorage } from "@/lib/storage";
 import { PATCH } from "../route";
 
 type PM = {
@@ -54,6 +59,8 @@ type PM = {
   owner: { findUnique: Mock; create: Mock };
 };
 const pm = prisma as unknown as PM;
+
+const storageMock = { read: vi.fn(), upload: vi.fn(), delete: vi.fn() };
 
 function call(body: unknown, jobId = "j1", rowId = "r1") {
   const req = new Request("http://localhost/x", {
@@ -68,6 +75,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "admin" });
   (getUserPermissions as Mock).mockResolvedValue([]);
+  (getStorage as Mock).mockReturnValue(storageMock);
+  storageMock.delete.mockResolvedValue(undefined);
   pm.importJobRow.update.mockResolvedValue({});
 });
 
@@ -100,5 +109,65 @@ describe("PATCH .../rows/[rowId] (汎用行解決)", () => {
     });
     const res = await call({ action: "skip" });
     expect(res.status).toBe(200);
+  });
+
+  it("registry_pdf_bulk 行の skip 確定後、staging(所有者PII)をbest-effortで削除する", async () => {
+    pm.importJobRow.findUnique.mockResolvedValue({
+      id: "r1",
+      jobId: "j1",
+      rowNumber: 1,
+      status: "needs_review",
+      rawData: { stagedKey: "import-staging/registry-pdf/j1/1.pdf" },
+      job: { id: "j1", jobType: "registry_pdf_bulk" },
+    });
+    const res = await call({ action: "skip" });
+    expect(res.status).toBe(200);
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "import-staging/registry-pdf/j1/1.pdf",
+    );
+  });
+
+  it("registry_pdf_bulk 行の mark_error 確定後、staging をbest-effortで削除する", async () => {
+    pm.importJobRow.findUnique.mockResolvedValue({
+      id: "r1",
+      jobId: "j1",
+      rowNumber: 1,
+      status: "error",
+      rawData: { stagedKey: "import-staging/registry-pdf/j1/2.pdf" },
+      job: { id: "j1", jobType: "registry_pdf_bulk" },
+    });
+    const res = await call({ action: "mark_error" });
+    expect(res.status).toBe(200);
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "import-staging/registry-pdf/j1/2.pdf",
+    );
+  });
+
+  it("registry_pdf_bulk 以外(owner_csv)の skip は staging 削除を試みない", async () => {
+    pm.importJobRow.findUnique.mockResolvedValue({
+      id: "r1",
+      jobId: "j1",
+      rowNumber: 1,
+      status: "needs_review",
+      rawData: { stagedKey: "should-not-be-used" },
+      job: { id: "j1", jobType: "owner_csv" },
+    });
+    const res = await call({ action: "skip" });
+    expect(res.status).toBe(200);
+    expect(storageMock.delete).not.toHaveBeenCalled();
+  });
+
+  it("stagedKeyが文字列でない場合は削除を試みない", async () => {
+    pm.importJobRow.findUnique.mockResolvedValue({
+      id: "r1",
+      jobId: "j1",
+      rowNumber: 1,
+      status: "needs_review",
+      rawData: {},
+      job: { id: "j1", jobType: "registry_pdf_bulk" },
+    });
+    const res = await call({ action: "skip" });
+    expect(res.status).toBe(200);
+    expect(storageMock.delete).not.toHaveBeenCalled();
   });
 });

@@ -134,6 +134,25 @@ describe("processRegistryPdfBulkRow", () => {
     );
   });
 
+  it("請求番号dup-checkは所属物件のある添付のみを対象とする(物件削除済みの孤児添付を永久ヒットさせない)", async () => {
+    pm.importJobRow.findUnique.mockResolvedValue(
+      makeRow({
+        fileName: "世田谷区上馬２丁目７５２－３不動産登記（建物所有者事項）2024121200118150.PDF",
+        stagedKey: "import-staging/registry-pdf/j1/1.pdf",
+        requestNumber: "2024121200118150",
+        location: "世田谷区上馬２丁目７５２－３",
+      }),
+    );
+    await processRegistryPdfBulkRow({
+      jobId: "j1", rowId: "r1", index: INDEX, executor: EXEC,
+    });
+    expect(pm.attachment.findFirst).toHaveBeenCalledTimes(1);
+    const arg = pm.attachment.findFirst.mock.calls[0][0];
+    expect(arg.where).toEqual(
+      expect.objectContaining({ propertyId: { not: null } }),
+    );
+  });
+
   it("請求番号が既存添付にあれば skipped(重複)でstagingも削除", async () => {
     pm.attachment.findFirst.mockResolvedValue({ id: "old", propertyId: "p1" });
     pm.importJobRow.findUnique.mockResolvedValue(
@@ -274,7 +293,7 @@ describe("processRegistryPdfBulkRow", () => {
     );
   });
 
-  it("staging読取不能は error", async () => {
+  it("staging読取不能は error(実体が無い可能性のためstagingは削除しない)", async () => {
     storageMock.read.mockResolvedValue(null);
     pm.importJobRow.findUnique.mockResolvedValue(
       makeRow({
@@ -290,6 +309,78 @@ describe("processRegistryPdfBulkRow", () => {
       jobId: "j1", rowId: "r1", index: INDEX, executor: EXEC,
     });
     expect(outcome).toBe("error");
+    expect(storageMock.delete).not.toHaveBeenCalled();
+  });
+
+  it("取込データ不完全(stagedKeyなし)は error(削除対象キーが無いのでdeleteは呼ばれない)", async () => {
+    pm.importJobRow.findUnique.mockResolvedValue(
+      makeRow({
+        fileName: "世田谷区上馬２丁目７５２－３不動産登記（建物所有者事項）2024121200118152.PDF",
+        requestNumber: "2024121200118152",
+        location: "世田谷区上馬２丁目７５２－３",
+        // stagedKey無し
+      }),
+    );
+    const outcome = await processRegistryPdfBulkRow({
+      jobId: "j1", rowId: "r1", index: INDEX, executor: EXEC,
+    });
+    expect(outcome).toBe("error");
+    expect(storageMock.delete).not.toHaveBeenCalled();
+  });
+
+  it("バリデーション失敗(ファイルサイズ超過)は error で確定しstagingも削除する", async () => {
+    storageMock.read.mockResolvedValue({
+      body: Buffer.alloc(8 * 1024 * 1024 + 1),
+      contentType: "application/pdf",
+      size: 8 * 1024 * 1024 + 1,
+    });
+    pm.importJobRow.findUnique.mockResolvedValue(
+      makeRow({
+        fileName: "世田谷区上馬２丁目７５２－３不動産登記（建物所有者事項）2024121200118153.PDF",
+        stagedKey: "import-staging/registry-pdf/j1/1.pdf",
+        requestNumber: "2024121200118153",
+        location: "世田谷区上馬２丁目７５２－３",
+      }),
+    );
+    const outcome = await processRegistryPdfBulkRow({
+      jobId: "j1", rowId: "r1", index: INDEX, executor: EXEC,
+    });
+    expect(outcome).toBe("error");
+    const finalize = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
+    expect(finalize.data.rawData).toEqual(
+      expect.objectContaining({ reason: "validation_failed" }),
+    );
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "import-staging/registry-pdf/j1/1.pdf",
+    );
+  });
+
+  it("予期しないエラー(添付レコード作成失敗)は error で確定しstaging・孤児アップロード先の両方を削除する", async () => {
+    pm.attachment.create.mockRejectedValue(new Error("db down"));
+    pm.importJobRow.findUnique.mockResolvedValue(
+      makeRow({
+        fileName: "世田谷区上馬２丁目７５２－３不動産登記（建物所有者事項）2024121200118154.PDF",
+        stagedKey: "import-staging/registry-pdf/j1/1.pdf",
+        requestNumber: "2024121200118154",
+        location: "世田谷区上馬２丁目７５２－３",
+      }),
+    );
+    const outcome = await processRegistryPdfBulkRow({
+      jobId: "j1", rowId: "r1", index: INDEX, executor: EXEC,
+    });
+    expect(outcome).toBe("error");
+    const finalize = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
+    expect(finalize.data.rawData).toEqual(
+      expect.objectContaining({ reason: "unexpected_error" }),
+    );
+    // staging(未処理の所有者PII)は保持理由が無いので削除する
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "import-staging/registry-pdf/j1/1.pdf",
+    );
+    // 孤児化したアップロード先も既存動作で削除される
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "properties/p1/registry/x.pdf",
+    );
   });
 
   it("pending以外の行は noop(再enqueue耐性)", async () => {

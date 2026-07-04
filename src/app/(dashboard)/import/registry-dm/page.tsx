@@ -19,7 +19,10 @@ import {
   type ReceptionShinkiFilter,
   type RegistryPdfBulkUploadResponse,
 } from "@/lib/api-client";
-import { summarizeBulkJobProgress } from "@/lib/registry-pdf-bulk/wizard-progress";
+import {
+  summarizeBulkJobProgress,
+  validateBulkSelection,
+} from "@/lib/registry-pdf-bulk/wizard-progress";
 
 // ============================================================
 // 登記DM取込ウィザード
@@ -57,7 +60,8 @@ export default function RegistryDmImportPage() {
   // --- step1: 受付帳→物件 ---
   const [rpFile, setRpFile] = useState<SheetFile | null>(null);
   const [rpDl, setRpDl] = useState<ReceptionDlFilter>("marked");
-  const [rpShinki, setRpShinki] = useState<ReceptionShinkiFilter>("all");
+  // 既存単独画面(import/page.tsx の rpShinkiFilter)の既定値に合わせる("existing")。
+  const [rpShinki, setRpShinki] = useState<ReceptionShinkiFilter>("existing");
   const [rpPreview, setRpPreview] =
     useState<ReceptionPropertyPreviewResponse | null>(null);
   const [rpResult, setRpResult] =
@@ -74,6 +78,12 @@ export default function RegistryDmImportPage() {
 
   // --- step3: PDF一括 ---
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
+  const [pdfSelectionError, setPdfSelectionError] = useState<string | null>(
+    null,
+  );
+  // ファイル<input>を強制remountして選択表示をクリアするためのkey
+  // ("別のバッチを投入"でネイティブinputの表示ファイル名も確実にリセットする)。
+  const [pdfInputKey, setPdfInputKey] = useState(0);
   const [bulkUpload, setBulkUpload] =
     useState<RegistryPdfBulkUploadResponse | null>(null);
   const [bulkJob, setBulkJob] = useState<BulkJobView | null>(null);
@@ -180,6 +190,10 @@ export default function RegistryDmImportPage() {
                 setRpFile(await readFileForImport(f));
                 setRpPreview(null);
                 setRpResult(null);
+                // ②(所有者Excel)は①と同じ受付帳ファイルを使うため、こちらの
+                // プレビュー/結果も古いファイルのままにしない(step2側の対称対応)。
+                setRoPreview(null);
+                setRoResult(null);
               });
             }}
             className="block text-sm"
@@ -189,7 +203,11 @@ export default function RegistryDmImportPage() {
               DL列:
               <select
                 value={rpDl}
-                onChange={(e) => setRpDl(e.target.value as ReceptionDlFilter)}
+                onChange={(e) => {
+                  setRpDl(e.target.value as ReceptionDlFilter);
+                  setRpPreview(null);
+                  setRpResult(null);
+                }}
                 className="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700"
               >
                 <option value="marked">〇のみ</option>
@@ -201,9 +219,11 @@ export default function RegistryDmImportPage() {
               新既:
               <select
                 value={rpShinki}
-                onChange={(e) =>
-                  setRpShinki(e.target.value as ReceptionShinkiFilter)
-                }
+                onChange={(e) => {
+                  setRpShinki(e.target.value as ReceptionShinkiFilter);
+                  setRpPreview(null);
+                  setRpResult(null);
+                }}
                 className="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700"
               >
                 <option value="all">すべて</option>
@@ -339,7 +359,11 @@ export default function RegistryDmImportPage() {
               DL列:
               <select
                 value={roDl}
-                onChange={(e) => setRoDl(e.target.value as ReceptionDlFilter)}
+                onChange={(e) => {
+                  setRoDl(e.target.value as ReceptionDlFilter);
+                  setRoPreview(null);
+                  setRoResult(null);
+                }}
                 className="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700"
               >
                 <option value="marked">〇のみ</option>
@@ -351,9 +375,11 @@ export default function RegistryDmImportPage() {
               新既:
               <select
                 value={roShinki}
-                onChange={(e) =>
-                  setRoShinki(e.target.value as ReceptionShinkiFilter)
-                }
+                onChange={(e) => {
+                  setRoShinki(e.target.value as ReceptionShinkiFilter);
+                  setRoPreview(null);
+                  setRoResult(null);
+                }}
                 className="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700"
               >
                 <option value="existing">既存のみ</option>
@@ -460,10 +486,15 @@ export default function RegistryDmImportPage() {
             「取得済みPDF」フォルダの所有者事項PDFをまとめて選択してください(最大100件・合計100MB)。アップロード後の処理はサーバ側で進むため、この画面を閉じても構いません。
           </p>
           <input
+            key={pdfInputKey}
             type="file"
             accept=".pdf,application/pdf"
             multiple
-            onChange={(e) => setPdfFiles(Array.from(e.target.files ?? []))}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              setPdfFiles(files);
+              setPdfSelectionError(validateBulkSelection(files));
+            }}
             className="block text-sm"
           />
           {pdfFiles.length > 0 && !bulkUpload && (
@@ -473,9 +504,19 @@ export default function RegistryDmImportPage() {
               MB)
             </p>
           )}
+          {pdfSelectionError && (
+            <p className="text-sm text-red-700 dark:text-red-400">
+              {pdfSelectionError}
+            </p>
+          )}
           <button
             type="button"
-            disabled={pdfFiles.length === 0 || loading || !!bulkUpload}
+            disabled={
+              pdfFiles.length === 0 ||
+              loading ||
+              !!bulkUpload ||
+              !!pdfSelectionError
+            }
             onClick={() =>
               run(async () => {
                 setBulkUpload(await uploadRegistryPdfBulk(pdfFiles));
@@ -500,6 +541,24 @@ export default function RegistryDmImportPage() {
                 >
                   ジョブ詳細(要確認の手動添付はこちら)
                 </Link>
+              </p>
+              <p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBulkUpload(null);
+                    setBulkJob(null);
+                    setPdfFiles([]);
+                    setPdfSelectionError(null);
+                    setPdfInputKey((k) => k + 1);
+                  }}
+                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300"
+                >
+                  別のバッチを投入
+                </button>
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                ※直前のバッチの処理状況は上記のジョブ詳細リンクから確認できます(100件を超える月は分割して投入してください)。
               </p>
             </div>
           )}
@@ -564,6 +623,9 @@ export default function RegistryDmImportPage() {
               取込履歴を見る
             </Link>
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            ※売却DMの対象は、所有者Excelで DM列が〇 だった物件のみです(それ以外は送付対象になりません)。
+          </p>
           <div>
             <button
               type="button"

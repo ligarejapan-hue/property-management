@@ -65,19 +65,26 @@ vi.mock("@/lib/import-job-counts", () => ({ recalculateJobCounts }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     importJob: { findUnique: vi.fn() },
-    importJobRow: { updateMany: vi.fn() },
+    importJobRow: { updateMany: vi.fn(), findMany: vi.fn() },
   },
 }));
+vi.mock("@/lib/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/storage")>();
+  return { ...actual, getStorage: vi.fn() };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { getStorage } from "@/lib/storage";
 import { POST } from "@/app/api/import/jobs/[jobId]/rows/bulk-resolve/route";
 
 const pm = prisma as unknown as {
   importJob: { findUnique: Mock };
-  importJobRow: { updateMany: Mock };
+  importJobRow: { updateMany: Mock; findMany: Mock };
 };
+
+const storageMock = { read: vi.fn(), upload: vi.fn(), delete: vi.fn() };
 
 const JOB_ID = "job-1";
 
@@ -101,8 +108,11 @@ beforeEach(() => {
     { resource: "import", action: "write", granted: true },
   ]);
   (hasPermission as Mock).mockReturnValue(true);
+  (getStorage as Mock).mockReturnValue(storageMock);
+  storageMock.delete.mockResolvedValue(undefined);
   pm.importJob.findUnique.mockResolvedValue({ id: JOB_ID });
   pm.importJobRow.updateMany.mockResolvedValue({ count: 0 });
+  pm.importJobRow.findMany.mockResolvedValue([]);
   recalculateJobCounts.mockResolvedValue(undefined);
 });
 
@@ -326,5 +336,94 @@ describe("POST bulk-resolve — B4 duplicate scope", () => {
     ]);
     // status は文字列 "needs_review"（"duplicate" を直接渡していない／detail の actionable と一致）。
     expect(arg.where.status).toBe("needs_review");
+  });
+});
+
+describe("POST bulk-resolve — registry_pdf_bulk の staging(所有者PII)一括削除", () => {
+  it("registry_pdf_bulk ジョブの一括skipで対象行のstagingをbest-effort削除する", async () => {
+    pm.importJob.findUnique.mockResolvedValue({
+      id: JOB_ID,
+      jobType: "registry_pdf_bulk",
+    });
+    pm.importJobRow.findMany.mockResolvedValue([
+      { rawData: { stagedKey: "import-staging/registry-pdf/job-1/1.pdf" } },
+      { rawData: { stagedKey: "import-staging/registry-pdf/job-1/2.pdf" } },
+    ]);
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 2 });
+    const { status } = await callPost({ action: "skip", scope: "needs_review" });
+    expect(status).toBe(200);
+    // 削除対象は status 変更前(where はupdateMany前と同じ条件)で確定するrows取得から
+    expect(pm.importJobRow.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { jobId: JOB_ID, status: "needs_review" },
+        select: { rawData: true },
+      }),
+    );
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "import-staging/registry-pdf/job-1/1.pdf",
+    );
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "import-staging/registry-pdf/job-1/2.pdf",
+    );
+    expect(storageMock.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it("registry_pdf_bulk ジョブの一括mark_errorでもstagingを削除する", async () => {
+    pm.importJob.findUnique.mockResolvedValue({
+      id: JOB_ID,
+      jobType: "registry_pdf_bulk",
+    });
+    pm.importJobRow.findMany.mockResolvedValue([
+      { rawData: { stagedKey: "import-staging/registry-pdf/job-1/3.pdf" } },
+    ]);
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 1 });
+    const { status } = await callPost({ action: "mark_error", scope: "error" });
+    expect(status).toBe(200);
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "import-staging/registry-pdf/job-1/3.pdf",
+    );
+  });
+
+  it("registry_pdf_bulk 以外(owner_csv等)のジョブでは行検索/staging削除を行わない", async () => {
+    pm.importJob.findUnique.mockResolvedValue({
+      id: JOB_ID,
+      jobType: "owner_csv",
+    });
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 3 });
+    const { status } = await callPost({ action: "skip", scope: "needs_review" });
+    expect(status).toBe(200);
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+    expect(storageMock.delete).not.toHaveBeenCalled();
+  });
+
+  it("stagedKeyが無い/文字列でない行はスキップし、他の行だけ削除する", async () => {
+    pm.importJob.findUnique.mockResolvedValue({
+      id: JOB_ID,
+      jobType: "registry_pdf_bulk",
+    });
+    pm.importJobRow.findMany.mockResolvedValue([
+      { rawData: {} },
+      { rawData: null },
+      { rawData: { stagedKey: "import-staging/registry-pdf/job-1/4.pdf" } },
+    ]);
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 3 });
+    const { status } = await callPost({ action: "skip", scope: "needs_review" });
+    expect(status).toBe(200);
+    expect(storageMock.delete).toHaveBeenCalledTimes(1);
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "import-staging/registry-pdf/job-1/4.pdf",
+    );
+  });
+
+  it("削除対象行が0件ならstorage.deleteを呼ばない", async () => {
+    pm.importJob.findUnique.mockResolvedValue({
+      id: JOB_ID,
+      jobType: "registry_pdf_bulk",
+    });
+    pm.importJobRow.findMany.mockResolvedValue([]);
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 0 });
+    const { status } = await callPost({ action: "skip", scope: "needs_review" });
+    expect(status).toBe(200);
+    expect(storageMock.delete).not.toHaveBeenCalled();
   });
 });

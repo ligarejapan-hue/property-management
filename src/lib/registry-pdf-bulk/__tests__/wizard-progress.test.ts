@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { summarizeBulkJobProgress } from "../wizard-progress";
+import { summarizeBulkJobProgress, validateBulkSelection } from "../wizard-progress";
 
 describe("summarizeBulkJobProgress", () => {
   it("処理中: done = total - pending", () => {
@@ -48,5 +48,37 @@ describe("summarizeBulkJobProgress", () => {
     });
     expect(p.total).toBe(0);
     expect(p.finished).toBe(false);
+  });
+});
+
+describe("validateBulkSelection", () => {
+  function filesOfSize(count: number, size: number): Array<{ size: number }> {
+    return Array.from({ length: count }, () => ({ size }));
+  }
+
+  it("100件ちょうどはOK(null)", () => {
+    expect(validateBulkSelection(filesOfSize(100, 1024))).toBeNull();
+  });
+
+  it("101件はエラー", () => {
+    const msg = validateBulkSelection(filesOfSize(101, 1024));
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("100");
+  });
+
+  it("合計サイズが100MBちょうどはOK(null)", () => {
+    const files = [{ size: 100 * 1024 * 1024 }];
+    expect(validateBulkSelection(files)).toBeNull();
+  });
+
+  it("合計サイズが100MBを1バイトでも超えるとエラー", () => {
+    const files = [{ size: 100 * 1024 * 1024 + 1 }];
+    const msg = validateBulkSelection(files);
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("100MB");
+  });
+
+  it("0件はOK(null・別の理由でボタンはdisabledにする想定)", () => {
+    expect(validateBulkSelection([])).toBeNull();
   });
 });

@@ -222,4 +222,40 @@ describe("POST /api/import/registry-pdf-bulk", () => {
     );
     expect(enqueueRegistryPdfBulkJob).not.toHaveBeenCalled();
   });
+
+  it("同時アップロードが2件を超えると3件目は503(UPLOAD_BUSY・formDataを呼ばない)", async () => {
+    const req1 = await makeRequest([pdfFile("a.pdf")]);
+    const req2 = await makeRequest([pdfFile("b.pdf")]);
+    const formDataSpy = vi.fn();
+    const req3 = {
+      headers: new Headers({ "content-length": "10" }),
+      formData: formDataSpy,
+    };
+
+    // 1・2件目はまだ完了させない(=in-flightのまま)。同期実行される
+    // ガード判定+カウンタ加算の後、最初の await で中断される。
+    const p1 = POST(req1 as never);
+    const p2 = POST(req2 as never);
+    const res3 = await POST(req3 as never);
+
+    expect(res3.status).toBe(503);
+    const body3 = (await res3.json()) as { error: { message: string; code: string } };
+    expect(body3.error.code).toBe("UPLOAD_BUSY");
+    expect(formDataSpy).not.toHaveBeenCalled();
+
+    // 後片付け: 1・2件目を完了させてカウンタを0に戻す(他テストを汚染しない)
+    const [res1, res2] = await Promise.all([p1, p2]);
+    expect(res1.status).toBe(202);
+    expect(res2.status).toBe(202);
+  });
+
+  it("処理完了後はカウンタが戻り、次のリクエストを受け付けられる(finallyで減算)", async () => {
+    const res1 = await POST((await makeRequest([pdfFile("a.pdf")])) as never);
+    const res2 = await POST((await makeRequest([pdfFile("b.pdf")])) as never);
+    expect(res1.status).toBe(202);
+    expect(res2.status).toBe(202);
+    // 直列に2件完了させた後(finallyで都度減算)なので、3件目も通常どおり受け付けられる。
+    const res3 = await POST((await makeRequest([pdfFile("c.pdf")])) as never);
+    expect(res3.status).toBe(202);
+  });
 });

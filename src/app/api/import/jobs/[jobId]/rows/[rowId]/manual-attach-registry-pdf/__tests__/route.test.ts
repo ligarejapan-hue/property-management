@@ -121,15 +121,15 @@ beforeEach(() => {
     size: PDF_BUF.length,
   });
   storageMock.upload.mockResolvedValue({
-    url: "/uploads/properties/p9/registry/x.pdf",
-    key: "properties/p9/registry/x.pdf",
+    url: "/uploads/properties/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/registry/x.pdf",
+    key: "properties/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/registry/x.pdf",
   });
   storageMock.delete.mockResolvedValue(undefined);
 });
 
 describe("POST .../manual-attach-registry-pdf", () => {
   it("指定物件に添付し、行をsuccessに確定・staging削除・カウンタ再計算", async () => {
-    const res = await call({ propertyId: "p9" });
+    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; attachmentId: string };
     expect(body.ok).toBe(true);
@@ -147,7 +147,7 @@ describe("POST .../manual-attach-registry-pdf", () => {
     expect(pm.attachment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          propertyId: "p9",
+          propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           type: "registry",
           uploadedBy: "u1",
         }),
@@ -165,9 +165,17 @@ describe("POST .../manual-attach-registry-pdf", () => {
     expect(res.status).toBe(422);
   });
 
+  it("propertyId がUUID形式でない場合は422(DBに問い合わせない)", async () => {
+    const res = await call({ propertyId: "not-a-uuid" });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(pm.property.findUnique).not.toHaveBeenCalled();
+  });
+
   it("claim競合(count=0)は 409", async () => {
     pm.importJobRow.updateMany.mockResolvedValue({ count: 0 });
-    const res = await call({ propertyId: "p9" });
+    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(409);
   });
 
@@ -181,13 +189,13 @@ describe("POST .../manual-attach-registry-pdf", () => {
       rawData: {},
       job: { id: "j1", jobType: "owner_csv" },
     });
-    const res = await call({ propertyId: "p9" });
+    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(422);
   });
 
   it("stagedファイル消失は 422 でclaimを戻す", async () => {
     storageMock.read.mockResolvedValue(null);
-    const res = await call({ propertyId: "p9" });
+    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(422);
     // claim復帰(createdId を null に戻す)
     const revert = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
@@ -196,19 +204,19 @@ describe("POST .../manual-attach-registry-pdf", () => {
 
   it("アクセス権なしの物件は 403", async () => {
     (canAccessPropertyRecord as Mock).mockReturnValue(false);
-    const res = await call({ propertyId: "p9" });
+    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(403);
   });
 
   it("行確定失敗時は添付を取り消しclaimを戻して500", async () => {
     pm.importJobRow.update.mockRejectedValueOnce(new Error("db down"));
-    const res = await call({ propertyId: "p9" });
+    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(500);
     expect(pm.attachment.delete).toHaveBeenCalledWith({
       where: { id: "att1" },
     });
     expect(storageMock.delete).toHaveBeenCalledWith(
-      "properties/p9/registry/x.pdf",
+      "properties/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/registry/x.pdf",
     );
     expect(storageMock.delete).not.toHaveBeenCalledWith(
       "import-staging/registry-pdf/j1/1.pdf",
@@ -225,13 +233,13 @@ describe("POST .../manual-attach-registry-pdf", () => {
     // 再現できないため、③の失敗が③自体の reject で表現されていることのみ検証する
     // (undo対象=添付/blob/claimであり、行確定自体の巻き戻りはmock対象外)。
     pm.importJob.update.mockRejectedValueOnce(new Error("db down"));
-    const res = await call({ propertyId: "p9" });
+    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(500);
     expect(pm.attachment.delete).toHaveBeenCalledWith({
       where: { id: "att1" },
     });
     expect(storageMock.delete).toHaveBeenCalledWith(
-      "properties/p9/registry/x.pdf",
+      "properties/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/registry/x.pdf",
     );
     expect(storageMock.delete).not.toHaveBeenCalledWith(
       "import-staging/registry-pdf/j1/1.pdf",
