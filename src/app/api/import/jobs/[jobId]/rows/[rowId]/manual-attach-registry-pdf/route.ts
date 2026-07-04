@@ -185,38 +185,42 @@ export async function POST(
       throw err;
     }
 
-    // 行確定 + ジョブカウンタ再計算。ここが失敗すると「claim済み+添付済みなのに
-    // 行はneeds_review」の再試行不能スタックになるため、失敗時は添付を取り消して
-    // 元の状態(再試行可能)へ復元する。
+    // 行確定 + ジョブカウンタ再計算(原子化)。
+    // $transaction により、途中失敗時は行確定(①)ごとロールバックされるため、
+    // catch 到達時は常に「行=needs_review + claim保持」= 下のundo(添付取消→claim復元)が
+    // 全ケースで正しく、正当な添付を壊す経路が存在しない。
     try {
-      await prisma.importJobRow.update({
-        where: { id: rowId },
-        data: { status: "success", errorMessage: "手動添付" },
-      });
-      const allRows = await prisma.importJobRow.findMany({
-        where: { jobId },
-        select: { status: true },
-      });
-      const successCount = allRows.filter(
-        (r) => r.status === "success",
-      ).length;
-      const errorRows = allRows.filter((r) => r.status === "error").length;
-      const reviewRows = allRows.filter(
-        (r) => r.status === "needs_review",
-      ).length;
-      const pendingRows = allRows.filter(
-        (r) => r.status === "pending",
-      ).length;
-      const hasUnresolved = errorRows > 0 || reviewRows > 0 || pendingRows > 0;
-      await prisma.importJob.update({
-        where: { id: jobId },
-        data: {
-          successCount,
-          errorCount: errorRows + reviewRows,
-          ...(hasUnresolved
-            ? {}
-            : { status: "completed", completedAt: new Date() }),
-        },
+      await prisma.$transaction(async (tx) => {
+        await tx.importJobRow.update({
+          where: { id: rowId },
+          data: { status: "success", errorMessage: "手動添付" },
+        });
+        const allRows = await tx.importJobRow.findMany({
+          where: { jobId },
+          select: { status: true },
+        });
+        const successCount = allRows.filter(
+          (r) => r.status === "success",
+        ).length;
+        const errorRows = allRows.filter((r) => r.status === "error").length;
+        const reviewRows = allRows.filter(
+          (r) => r.status === "needs_review",
+        ).length;
+        const pendingRows = allRows.filter(
+          (r) => r.status === "pending",
+        ).length;
+        const hasUnresolved =
+          errorRows > 0 || reviewRows > 0 || pendingRows > 0;
+        await tx.importJob.update({
+          where: { id: jobId },
+          data: {
+            successCount,
+            errorCount: errorRows + reviewRows,
+            ...(hasUnresolved
+              ? {}
+              : { status: "completed", completedAt: new Date() }),
+          },
+        });
       });
     } catch (finalizeErr) {
       // best-effort undo: 添付レコード→storage実体→claim の順に戻す

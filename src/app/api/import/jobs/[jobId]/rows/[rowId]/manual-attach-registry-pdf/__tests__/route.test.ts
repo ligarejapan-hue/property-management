@@ -39,6 +39,7 @@ vi.mock("@/lib/prisma", () => ({
     importJob: { update: vi.fn() },
     property: { findUnique: vi.fn() },
     attachment: { create: vi.fn(), delete: vi.fn() },
+    $transaction: vi.fn(),
   },
 }));
 vi.mock("@/lib/storage", async (importOriginal) => {
@@ -62,6 +63,7 @@ type PM = {
   importJob: { update: Mock };
   property: { findUnique: Mock };
   attachment: { create: Mock; delete: Mock };
+  $transaction: Mock;
 };
 const pm = prisma as unknown as PM;
 
@@ -107,6 +109,12 @@ beforeEach(() => {
   pm.property.findUnique.mockResolvedValue({ createdBy: "u1", assignedTo: null });
   pm.attachment.create.mockResolvedValue({ id: "att1" });
   pm.attachment.delete.mockResolvedValue({});
+  // $transaction(fn) は同一 prisma mock を tx として渡す。既存の
+  // pm.importJobRow.update / findMany / pm.importJob.update への
+  // アサーションはそのまま tx 経由呼び出しとして検証できる。
+  pm.$transaction.mockImplementation(
+    async (fn: (tx: typeof pm) => unknown) => fn(pm),
+  );
   storageMock.read.mockResolvedValue({
     body: PDF_BUF,
     contentType: "application/pdf",
@@ -208,5 +216,27 @@ describe("POST .../manual-attach-registry-pdf", () => {
     const revert = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
     expect(revert.data.createdId).toBeNull();
     expect(pm.importJob.update).not.toHaveBeenCalled();
+  });
+
+  it("カウンタ更新(③)失敗でも添付undo+claim復元(500)", async () => {
+    // 実DBでは $transaction が①(行確定)をロールバックするため、catch到達時は
+    // 常に「行=needs_review + claim保持」= 添付undoが正当に成立する。
+    // このmockでは $transaction を `fn(pm)` で代替しており実ロールバックは
+    // 再現できないため、③の失敗が③自体の reject で表現されていることのみ検証する
+    // (undo対象=添付/blob/claimであり、行確定自体の巻き戻りはmock対象外)。
+    pm.importJob.update.mockRejectedValueOnce(new Error("db down"));
+    const res = await call({ propertyId: "p9" });
+    expect(res.status).toBe(500);
+    expect(pm.attachment.delete).toHaveBeenCalledWith({
+      where: { id: "att1" },
+    });
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "properties/p9/registry/x.pdf",
+    );
+    expect(storageMock.delete).not.toHaveBeenCalledWith(
+      "import-staging/registry-pdf/j1/1.pdf",
+    );
+    const revert = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
+    expect(revert.data.createdId).toBeNull();
   });
 });
