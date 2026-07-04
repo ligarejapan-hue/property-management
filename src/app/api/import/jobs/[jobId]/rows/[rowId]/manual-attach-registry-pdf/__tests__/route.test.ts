@@ -38,7 +38,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     importJob: { update: vi.fn() },
     property: { findUnique: vi.fn() },
-    attachment: { create: vi.fn() },
+    attachment: { create: vi.fn(), delete: vi.fn() },
   },
 }));
 vi.mock("@/lib/storage", async (importOriginal) => {
@@ -61,7 +61,7 @@ type PM = {
   };
   importJob: { update: Mock };
   property: { findUnique: Mock };
-  attachment: { create: Mock };
+  attachment: { create: Mock; delete: Mock };
 };
 const pm = prisma as unknown as PM;
 
@@ -106,6 +106,7 @@ beforeEach(() => {
   pm.importJob.update.mockResolvedValue({});
   pm.property.findUnique.mockResolvedValue({ createdBy: "u1", assignedTo: null });
   pm.attachment.create.mockResolvedValue({ id: "att1" });
+  pm.attachment.delete.mockResolvedValue({});
   storageMock.read.mockResolvedValue({
     body: PDF_BUF,
     contentType: "application/pdf",
@@ -189,5 +190,23 @@ describe("POST .../manual-attach-registry-pdf", () => {
     (canAccessPropertyRecord as Mock).mockReturnValue(false);
     const res = await call({ propertyId: "p9" });
     expect(res.status).toBe(403);
+  });
+
+  it("行確定失敗時は添付を取り消しclaimを戻して500", async () => {
+    pm.importJobRow.update.mockRejectedValueOnce(new Error("db down"));
+    const res = await call({ propertyId: "p9" });
+    expect(res.status).toBe(500);
+    expect(pm.attachment.delete).toHaveBeenCalledWith({
+      where: { id: "att1" },
+    });
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "properties/p9/registry/x.pdf",
+    );
+    expect(storageMock.delete).not.toHaveBeenCalledWith(
+      "import-staging/registry-pdf/j1/1.pdf",
+    );
+    const revert = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
+    expect(revert.data.createdId).toBeNull();
+    expect(pm.importJob.update).not.toHaveBeenCalled();
   });
 });

@@ -185,32 +185,60 @@ export async function POST(
       throw err;
     }
 
-    // 行確定 + ジョブカウンタ再計算(manual-link と同じ規約 + pending も未解決扱い)
-    await prisma.importJobRow.update({
-      where: { id: rowId },
-      data: { status: "success", errorMessage: "手動添付" },
-    });
-    const allRows = await prisma.importJobRow.findMany({
-      where: { jobId },
-      select: { status: true },
-    });
-    const successCount = allRows.filter((r) => r.status === "success").length;
-    const errorRows = allRows.filter((r) => r.status === "error").length;
-    const reviewRows = allRows.filter(
-      (r) => r.status === "needs_review",
-    ).length;
-    const pendingRows = allRows.filter((r) => r.status === "pending").length;
-    const hasUnresolved = errorRows > 0 || reviewRows > 0 || pendingRows > 0;
-    await prisma.importJob.update({
-      where: { id: jobId },
-      data: {
-        successCount,
-        errorCount: errorRows + reviewRows,
-        ...(hasUnresolved
-          ? {}
-          : { status: "completed", completedAt: new Date() }),
-      },
-    });
+    // 行確定 + ジョブカウンタ再計算。ここが失敗すると「claim済み+添付済みなのに
+    // 行はneeds_review」の再試行不能スタックになるため、失敗時は添付を取り消して
+    // 元の状態(再試行可能)へ復元する。
+    try {
+      await prisma.importJobRow.update({
+        where: { id: rowId },
+        data: { status: "success", errorMessage: "手動添付" },
+      });
+      const allRows = await prisma.importJobRow.findMany({
+        where: { jobId },
+        select: { status: true },
+      });
+      const successCount = allRows.filter(
+        (r) => r.status === "success",
+      ).length;
+      const errorRows = allRows.filter((r) => r.status === "error").length;
+      const reviewRows = allRows.filter(
+        (r) => r.status === "needs_review",
+      ).length;
+      const pendingRows = allRows.filter(
+        (r) => r.status === "pending",
+      ).length;
+      const hasUnresolved = errorRows > 0 || reviewRows > 0 || pendingRows > 0;
+      await prisma.importJob.update({
+        where: { id: jobId },
+        data: {
+          successCount,
+          errorCount: errorRows + reviewRows,
+          ...(hasUnresolved
+            ? {}
+            : { status: "completed", completedAt: new Date() }),
+        },
+      });
+    } catch (finalizeErr) {
+      // best-effort undo: 添付レコード→storage実体→claim の順に戻す
+      try {
+        await prisma.attachment.delete({ where: { id: attachmentId } });
+      } catch (e) {
+        console.error(
+          "manual-attach-registry-pdf: attachment undo failed:",
+          e,
+        );
+      }
+      try {
+        await storage.delete(uploadedKey!);
+      } catch (e) {
+        console.error(
+          "manual-attach-registry-pdf: uploaded blob undo failed:",
+          e,
+        );
+      }
+      await revertClaim();
+      throw finalizeErr;
+    }
 
     try {
       await storage.delete(stagedKey);
