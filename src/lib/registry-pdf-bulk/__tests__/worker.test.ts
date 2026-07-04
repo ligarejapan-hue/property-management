@@ -142,4 +142,44 @@ describe("registry-pdf-bulk worker", () => {
     const last = pm.importJob.update.mock.calls.at(-1)![0];
     expect(last.data.status).toBe("failed");
   });
+
+  it("idle後の再enqueueが正常に処理される(取り残し活性レース回帰)", async () => {
+    pm.importJob.findUnique.mockResolvedValueOnce({
+      id: "j1",
+      jobType: "registry_pdf_bulk",
+      status: "pending",
+      executedBy: "u1",
+    });
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([{ id: "r1", rowNumber: 1 }])
+      .mockResolvedValueOnce([{ status: "success" }]);
+    (processRegistryPdfBulkRow as Mock).mockResolvedValue("success");
+
+    enqueueRegistryPdfBulkJob("j1");
+    await waitForIdle();
+
+    expect(isRegistryPdfBulkWorkerBusy()).toBe(false);
+    expect(pm.importJob.findUnique).toHaveBeenCalledTimes(1);
+
+    // 2ジョブ目用にmockを再設定してから、idle後に再enqueueする。
+    pm.importJob.findUnique.mockResolvedValueOnce({
+      id: "j2",
+      jobType: "registry_pdf_bulk",
+      status: "pending",
+      executedBy: "u1",
+    });
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([{ id: "r2", rowNumber: 1 }])
+      .mockResolvedValueOnce([{ status: "success" }]);
+
+    enqueueRegistryPdfBulkJob("j2");
+    await waitForIdle();
+
+    // idle後の再enqueueがループを起動し、j2も処理されたことを確認する。
+    expect(pm.importJob.findUnique).toHaveBeenCalledTimes(2);
+    expect(processRegistryPdfBulkRow).toHaveBeenCalledTimes(2);
+    expect((processRegistryPdfBulkRow as Mock).mock.calls[1][0].rowId).toBe(
+      "r2",
+    );
+  });
 });

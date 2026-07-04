@@ -37,9 +37,7 @@ export function enqueueRegistryPdfBulkJob(jobId: string): void {
   if (!s.running) {
     s.running = true;
     // fire-and-forget: route ハンドラは 202 を即返す。
-    void runLoop().finally(() => {
-      state().running = false;
-    });
+    void runLoop();
   }
 }
 
@@ -54,32 +52,39 @@ export function __resetRegistryPdfBulkWorkerForTest(): void {
 
 async function runLoop(): Promise<void> {
   const s = state();
-  while (s.queue.length > 0) {
-    // 先頭を覗くだけで、まだ配列から取り除かない。processJob は最初の
-    // await で同期実行が中断されるため、ここで即 shift() すると
-    // 「処理中だが待機列上は空」の瞬間が生じ、その隙に入った重複enqueueが
-    // 再度 push されて二重処理されてしまう(このジョブの完了までは
-    // includes() チェックに引っかからせて重複を弾く必要がある)。
-    const jobId = s.queue[0];
-    try {
-      await processJob(jobId);
-    } catch (err) {
-      console.error(`registry-pdf-bulk worker: job ${jobId} failed:`, err);
+  try {
+    while (s.queue.length > 0) {
+      // 先頭を覗くだけで、まだ配列から取り除かない。processJob は最初の
+      // await で同期実行が中断されるため、ここで即 shift() すると
+      // 「処理中だが待機列上は空」の瞬間が生じ、その隙に入った重複enqueueが
+      // 再度 push されて二重処理されてしまう(このジョブの完了までは
+      // includes() チェックに引っかからせて重複を弾く必要がある)。
+      const jobId = s.queue[0];
       try {
-        await prisma.importJob.update({
-          where: { id: jobId },
-          data: { status: "failed", completedAt: new Date() },
-        });
-      } catch (updateErr) {
-        console.error(
-          "registry-pdf-bulk worker: job finalize failed:",
-          updateErr,
-        );
+        await processJob(jobId);
+      } catch (err) {
+        console.error(`registry-pdf-bulk worker: job ${jobId} failed:`, err);
+        try {
+          await prisma.importJob.update({
+            where: { id: jobId },
+            data: { status: "failed", completedAt: new Date() },
+          });
+        } catch (updateErr) {
+          console.error(
+            "registry-pdf-bulk worker: job finalize failed:",
+            updateErr,
+          );
+        }
+      } finally {
+        // 処理が完了(成功/失敗いずれも)してから待機列から取り除く。
+        s.queue.shift();
       }
-    } finally {
-      // 処理が完了(成功/失敗いずれも)してから待機列から取り除く。
-      s.queue.shift();
     }
+  } finally {
+    // while脱出と同一の同期継続内で解除する(外付け.finallyだと
+    // マイクロタスク1個分の隙間ができ、その間のenqueueがループ未起動のまま
+    // 取り残される=活性レース)。
+    s.running = false;
   }
 }
 
