@@ -289,6 +289,7 @@ const OWNER_HEADER_TO_FIELD: Record<string, OwnerField> = {
   "物件住所": "propertyAddress",
   "都道府県": "prefecture",
   "所有者市区郡": "city",
+  "所有者区": "city",
   "所有者住所": "streetAddress",
   "住所": "streetAddress",
   "建物名": "buildingName",

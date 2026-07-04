@@ -215,6 +215,22 @@ describe("parseOwnerRows", () => {
     expect(o.dm).toBeNull();
   });
 
+  it("ヘッダ「所有者区」(現行exeの実データ形式)でも city として取り込み、表示用住所に区が含まれる", () => {
+    // 現行exeの所有者Excelヘッダは「所有者区」(「所有者市区郡」ではない)。
+    // これまで OWNER_HEADER_TO_FIELD に無く city が捨てられていた。
+    const headers = [
+      "No", "DM", "物件住所", "〒", "都道府県",
+      "所有者区", "所有者住所", "建物名", "所有者名",
+    ];
+    const rows = [[
+      "1", "〇", "東京都世田谷区1-2-3", "154-0001", "東京都",
+      "世田谷区", "1-2-3", "サンプル荘", "山田 花子",
+    ]];
+    const [o] = parseOwnerRows(headers, rows);
+    expect(o.city).toBe("世田谷区");
+    expect(o.address).toBe("東京都世田谷区1-2-3サンプル荘");
+  });
+
   it("No 列はマッピング対象外（紐づけキーにも使われない）", () => {
     const headers = ["No", "物件住所", "所有者名"];
     const rows = [["999", "東京都中央区1-1", "佐藤 太郎"]];
