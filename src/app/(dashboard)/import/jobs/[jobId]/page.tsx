@@ -36,6 +36,8 @@ import {
   searchProperties,
   searchOwners,
   manualLinkReceptionOwnerRow,
+  resumeRegistryPdfBulk,
+  manualAttachRegistryPdfRow,
   type AffectedPropertiesResponse,
   type RollbackResponse,
 } from "@/lib/api-client";
@@ -252,6 +254,9 @@ export default function ImportJobDetailPage() {
   const [rollbackResult, setRollbackResult] = useState<RollbackResponse | null>(null);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
 
+  // Task 11: registry_pdf_bulk の未処理(pending)行を再開するボタンの読み込み状態。
+  const [resuming, setResuming] = useState(false);
+
   // Search-and-link state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -388,6 +393,8 @@ export default function ImportJobDetailPage() {
   // B2: 全体判定はサーバ確定値（job.isReceptionOwnerJob）を使う。
   // ページング後に現ページ分の rows.some(...) で誤判定しないため。
   const isReceptionOwnerJob = job?.isReceptionOwnerJob ?? false;
+  // Task 11: 所有者事項PDF一括ジョブかどうか(再開ボタン・手動添付の分岐に使う)。
+  const isRegistryPdfBulkJob = job?.jobType === "registry_pdf_bulk";
   // 既存の owner_csv 単独取込のときだけ Owner 検索モード。
   const useOwnerSearch = job?.jobType === "owner_csv" && !isReceptionOwnerJob;
 
@@ -464,9 +471,14 @@ export default function ImportJobDetailPage() {
         action === "create_new" && editingRow === rowId
           ? editedData
           : undefined;
-      // 受付帳×所有者ジョブの link_existing は新 API を呼び、Property 補完 +
-      // Owner upsert + PropertyOwner link を transaction でまとめて実行する。
-      if (action === "link_existing" && isReceptionOwnerJob && targetId) {
+      // 所有者事項PDF一括ジョブの link_existing は、needs_review 行(未突合PDF)を
+      // ユーザが選んだ物件に手動添付する専用 API を呼ぶ(汎用 PATCH は create_new/retry 同様
+      // このジョブ種別に非対応のため)。
+      if (action === "link_existing" && isRegistryPdfBulkJob && targetId) {
+        await manualAttachRegistryPdfRow(jobId, rowId, targetId);
+      } else if (action === "link_existing" && isReceptionOwnerJob && targetId) {
+        // 受付帳×所有者ジョブの link_existing は新 API を呼び、Property 補完 +
+        // Owner upsert + PropertyOwner link を transaction でまとめて実行する。
         await manualLinkReceptionOwnerRow(jobId, rowId, targetId);
       } else {
         await resolveImportRow(jobId, rowId, action, targetId, edited);
@@ -633,6 +645,28 @@ export default function ImportJobDetailPage() {
           >
             <RotateCcw className="h-4 w-4" />
             ロールバック
+          </button>
+        )}
+        {/* Task 11: 所有者事項PDF一括ジョブの未処理(pending)行を再開するボタン。
+            サーバ再起動でインプロセスワーカーの待機列が消えたときの復旧口。 */}
+        {isRegistryPdfBulkJob && (job?.pendingCount ?? 0) > 0 && (
+          <button
+            type="button"
+            onClick={async () => {
+              setResuming(true);
+              try {
+                await resumeRegistryPdfBulk(jobId);
+                await fetchJob();
+              } catch (e) {
+                alert(e instanceof Error ? e.message : "再開に失敗しました");
+              } finally {
+                setResuming(false);
+              }
+            }}
+            disabled={resuming}
+            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+          >
+            {resuming ? "再開中..." : `未処理 ${job?.pendingCount}件を再開`}
           </button>
         )}
         {job.status === "rolled_back" && (
@@ -1426,7 +1460,8 @@ export default function ImportJobDetailPage() {
                         {row.status === "needs_review" && (
                           <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
                             <p className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
-                              既存{isOwnerJob ? "所有者" : "物件"}を検索して紐付け
+                              既存{isOwnerJob ? "所有者" : "物件"}を検索して
+                              {isRegistryPdfBulkJob ? "添付" : "紐付け"}
                             </p>
                             <div className="relative">
                               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
@@ -1528,7 +1563,7 @@ export default function ImportJobDetailPage() {
                                   ) : (
                                     <Link2 className="h-3 w-3" />
                                   )}
-                                  紐付け確定
+                                  {isRegistryPdfBulkJob ? "この物件に添付" : "紐付け確定"}
                                 </button>
                               </div>
                             )}
@@ -1537,22 +1572,26 @@ export default function ImportJobDetailPage() {
 
                         {/* Action buttons row */}
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() =>
-                              handleResolve(row.id, "create_new")
-                            }
-                            disabled={isLoading}
-                            className="flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                          >
-                            {isLoading ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <Plus className="h-3 w-3" />
-                            )}
-                            {isEditing ? "修正して新規作成" : "新規作成"}
-                          </button>
+                          {/* 所有者事項PDF一括ジョブは create_new/retry 未対応(サーバ側で
+                              422になる)ため、検索&添付・スキップ・エラー確定のみを出す。 */}
+                          {!isRegistryPdfBulkJob && (
+                            <button
+                              onClick={() =>
+                                handleResolve(row.id, "create_new")
+                              }
+                              disabled={isLoading}
+                              className="flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                            >
+                              {isLoading ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Plus className="h-3 w-3" />
+                              )}
+                              {isEditing ? "修正して新規作成" : "新規作成"}
+                            </button>
+                          )}
 
-                          {row.status === "error" && (
+                          {row.status === "error" && !isRegistryPdfBulkJob && (
                             <button
                               onClick={() => handleRetry(row.id)}
                               disabled={isLoading}
