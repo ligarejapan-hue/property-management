@@ -44,6 +44,24 @@ interface BulkRawData {
   [key: string]: unknown;
 }
 
+/**
+ * PDF内容から抽出した所在のクリーンアップ。
+ *
+ * pdf-registry-parser の所在フォールバックは、都道府県で始まる行を丸ごと
+ * 候補として拾うため「東京都世田谷区上馬２丁目７５２－３ 所有者一覧表
+ * （建物）」のように次行のタイトルが付着することがある。突合キーとして
+ * 使う前に、最初の空白(半角/全角)で切って所在部分だけを残す。
+ * 都道府県接頭辞/「外N」接尾辞の除去は matchProperty(canonicalAddressKey)
+ * 側で行うのでここでは触らない。
+ */
+function cleanExtractedAddress(input: string | null | undefined): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+  const idx = trimmed.search(/\s/);
+  return idx === -1 ? trimmed : trimmed.slice(0, idx);
+}
+
 async function finalizeRow(
   rowId: string,
   data: {
@@ -138,7 +156,11 @@ export async function processRegistryPdfBulkRow(args: {
 
     let match = matchProperty(index, { location });
     let matchedVia: "filename" | "content" = "filename";
-    if (match.status === "not_found") {
+    // multiple(同一所在に土地+建物2物件など)でも、PDF内容の不動産番号があれば
+    // 一意化できる余地があるため、matched 以外は必ず内容フォールバックを試す。
+    // フォールバックが matched のときのみ採用し、だめなら元の結果(multiple/
+    // not_found)で確定する(内容側が multiple/not_found を返しても改悪しない)。
+    if (match.status !== "matched") {
       const buf = await readStaged();
       if (!buf) {
         await finalizeRow(rowId, {
@@ -154,15 +176,15 @@ export async function processRegistryPdfBulkRow(args: {
         const text = await extractTextFromPdf(buf);
         const parsed = parseRegistryText(text);
         const fallback = matchProperty(index, {
-          location: parsed.address,
+          location: cleanExtractedAddress(parsed.address),
           realEstateNumber: parsed.realEstateNumber,
         });
-        if (fallback.status !== "not_found") {
+        if (fallback.status === "matched") {
           match = fallback;
           matchedVia = "content";
         }
       } catch (e) {
-        // 内容フォールバックの失敗は「一致なし」として扱う(下の needs_review へ)
+        // 内容フォールバックの失敗は元の結果を維持する(下の multiple/needs_review へ)
         console.error("registry-pdf-bulk: content fallback failed:", e);
       }
     }

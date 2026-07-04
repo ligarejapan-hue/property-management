@@ -182,7 +182,9 @@ describe("processRegistryPdfBulkRow", () => {
   it("所在不一致でもPDF内容フォールバックが一致すれば success(matchedVia=content)", async () => {
     (extractTextFromPdf as Mock).mockResolvedValue("dummy text");
     (parseRegistryText as Mock).mockReturnValue({
-      address: "世田谷区上馬２丁目７５２－３",
+      // 実データでは次行のタイトルが付着する(「所有者一覧表 （建物）」)。
+      // process-row 側のクリーンアップ(最初の空白で切る)で所在部分だけ残るはず。
+      address: "世田谷区上馬２丁目７５２－３ 所有者一覧表 （建物）",
       realEstateNumber: null,
     });
     pm.importJobRow.findUnique.mockResolvedValue(
@@ -211,7 +213,14 @@ describe("processRegistryPdfBulkRow", () => {
     );
   });
 
-  it("複数候補は needs_review(候補件数を記録)", async () => {
+  it("複数候補は、内容フォールバックも一意化できなければ needs_review(候補件数を記録)", async () => {
+    // multiple でも内容フォールバックを試みる仕様のため、明示的に「一致しない」内容を
+    // 返すモックを設定する(未設定だと偶発的な例外に依存してしまうため)。
+    (extractTextFromPdf as Mock).mockResolvedValue("dummy text");
+    (parseRegistryText as Mock).mockReturnValue({
+      address: null,
+      realEstateNumber: null,
+    });
     pm.importJobRow.findUnique.mockResolvedValue(
       makeRow({
         fileName: "世田谷区等々力２丁目３４－７３不動産登記（土地所有者事項）2024121100711621.PDF",
@@ -226,6 +235,43 @@ describe("processRegistryPdfBulkRow", () => {
     expect(outcome).toBe("needs_review");
     const finalize = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
     expect(String(finalize.data.errorMessage)).toContain("複数");
+  });
+
+  it("複数候補でもPDF内容の不動産番号で一意化されれば success(matchedVia=content)", async () => {
+    const idx = buildPropertyIndex([
+      { id: "p3", address: "世田谷区等々力２丁目３４－７３", realEstateNumber: "9998887776665" },
+      { id: "p4", address: "世田谷区等々力２丁目３４－７３", realEstateNumber: null },
+    ]);
+    (extractTextFromPdf as Mock).mockResolvedValue("dummy text");
+    (parseRegistryText as Mock).mockReturnValue({
+      address: "世田谷区等々力２丁目３４－７３ 所有者一覧表 （土地）",
+      realEstateNumber: "9998887776665",
+    });
+    pm.importJobRow.findUnique.mockResolvedValue(
+      makeRow({
+        fileName: "世田谷区等々力２丁目３４－７３不動産登記（土地所有者事項）2024121100711699.PDF",
+        stagedKey: "import-staging/registry-pdf/j1/1.pdf",
+        requestNumber: "2024121100711699",
+        location: "世田谷区等々力２丁目３４－７３",
+      }),
+    );
+    const outcome = await processRegistryPdfBulkRow({
+      jobId: "j1", rowId: "r1", index: idx, executor: EXEC,
+    });
+    expect(outcome).toBe("success");
+    expect(pm.attachment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ propertyId: "p3" }),
+        select: { id: true },
+      }),
+    );
+    const finalize = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
+    expect(finalize.data.rawData).toEqual(
+      expect.objectContaining({
+        matchedVia: "content",
+        matchedBy: "real_estate_number",
+      }),
+    );
   });
 
   it("staging読取不能は error", async () => {
