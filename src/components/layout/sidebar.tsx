@@ -76,6 +76,7 @@ const mainNavItems: NavItem[] = [
   },
 ];
 
+/** 管理者メニュー: アカウント/権限/ログ/添付の運用系(案2で2グループに整理)。 */
 const adminNavItems: NavItem[] = [
   {
     label: "ユーザー管理",
@@ -103,6 +104,15 @@ const adminNavItems: NavItem[] = [
     icon: <KeyRound className="h-5 w-5" />,
   },
   {
+    label: "添付検索",
+    href: "/admin/attachments",
+    icon: <FileSearch className="h-5 w-5" />,
+  },
+];
+
+/** データ品質チェック: 所有者データの一括点検/補正ツール群。 */
+const dataQualityNavItems: NavItem[] = [
+  {
     label: "所有者補正候補",
     href: "/admin/owners/correction",
     icon: <UserCog className="h-5 w-5" />,
@@ -127,16 +137,10 @@ const adminNavItems: NavItem[] = [
     href: "/admin/owners/quality-audit",
     icon: <ClipboardCheck className="h-5 w-5" />,
   },
-  {
-    label: "添付検索",
-    href: "/admin/attachments",
-    icon: <FileSearch className="h-5 w-5" />,
-  },
 ];
 
 export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(true);
 
   const isActive = (href: string) => {
     if (href === "/properties") {
@@ -149,6 +153,16 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
     return currentPath === href || currentPath.startsWith(href + "/");
   };
 
+  // 管理者系グループは既定で閉じる(18項目が常時展開されるとモバイルで
+  // ドロワーが縦に収まらない)。ただし現在地がグループ内のページなら
+  // 開いた状態で初期化し、現在地を見失わないようにする。
+  const [adminOpen, setAdminOpen] = useState(() =>
+    adminNavItems.some((i) => isActive(i.href)),
+  );
+  const [qualityOpen, setQualityOpen] = useState(() =>
+    dataQualityNavItems.some((i) => isActive(i.href)),
+  );
+
   const linkClasses = (href: string) =>
     `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
       isActive(href)
@@ -157,6 +171,43 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
     }`;
 
   const isAdmin = userRole === "admin" || userRole === "ADMIN";
+
+  /** 折りたたみ可能なメニューグループ(見出しボタン+開時のみ項目を描画)。 */
+  const navGroup = (
+    label: string,
+    items: NavItem[],
+    open: boolean,
+    toggle: () => void,
+  ) => (
+    <>
+      <div className="mt-4 mb-1">
+        <button
+          onClick={toggle}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          {open ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronRight className="h-3 w-3" />
+          )}
+          {label}
+        </button>
+      </div>
+      {open &&
+        items.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={linkClasses(item.href)}
+            onClick={() => setMobileOpen(false)}
+          >
+            {item.icon}
+            {item.label}
+          </Link>
+        ))}
+    </>
+  );
 
   const navContent = (
     <nav className="flex flex-col gap-1 p-4">
@@ -179,31 +230,10 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
 
       {isAdmin && (
         <>
-          <div className="mt-4 mb-1">
-            <button
-              onClick={() => setAdminOpen(!adminOpen)}
-              className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-            >
-              {adminOpen ? (
-                <ChevronDown className="h-3 w-3" />
-              ) : (
-                <ChevronRight className="h-3 w-3" />
-              )}
-              管理者メニュー
-            </button>
-          </div>
-          {adminOpen &&
-            adminNavItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={linkClasses(item.href)}
-                onClick={() => setMobileOpen(false)}
-              >
-                {item.icon}
-                {item.label}
-              </Link>
-            ))}
+          {navGroup("管理", adminNavItems, adminOpen, () => setAdminOpen(!adminOpen))}
+          {navGroup("データ品質チェック", dataQualityNavItems, qualityOpen, () =>
+            setQualityOpen(!qualityOpen),
+          )}
         </>
       )}
     </nav>
@@ -244,8 +274,10 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
           <span className="text-sm font-bold text-gray-800 dark:text-gray-100">物件管理</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{navContent}</div>
-        {/* モバイルではヘッダーからテーマ切替をここへ移動(ヘッダーの詰まり解消) */}
-        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 lg:hidden">
+        {/* モバイルではヘッダーからテーマ切替をここへ移動(ヘッダーの詰まり解消)。
+            pb の env(safe-area-inset-bottom): iPhone のホームインジケータ/下部バーに
+            最下部の操作が隠れないための追加余白(非対応環境では 0 で無害)。 */}
+        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] lg:hidden">
           <div className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">表示テーマ</div>
           <ThemeToggle />
         </div>

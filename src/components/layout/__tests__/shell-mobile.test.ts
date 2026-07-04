@@ -57,6 +57,24 @@ describe("sidebar(ドロワー) — ×ボタン被り解消 + モバイル用テ
   });
 });
 
+describe("sidebar — 管理者メニューの整理(2グループ・既定閉)", () => {
+  it("「管理」と「データ品質チェック」の2グループに分割", () => {
+    expect(sidebar).toContain('navGroup("管理"');
+    expect(sidebar).toContain('navGroup("データ品質チェック"');
+    expect(sidebar).toContain("dataQualityNavItems");
+  });
+  it("両グループとも現在地ベースで初期化(グループ外なら閉)", () => {
+    expect(sidebar).toMatch(/useState\(\(\) =>\s*adminNavItems\.some/);
+    expect(sidebar).toMatch(/useState\(\(\) =>\s*dataQualityNavItems\.some/);
+  });
+  it("グループ見出しは aria-expanded を持つ", () => {
+    expect(sidebar).toMatch(/aria-expanded=\{open\}/);
+  });
+  it("ドロワー最下部はホームインジケータを避ける safe-area 余白", () => {
+    expect(sidebar).toContain("env(safe-area-inset-bottom)");
+  });
+});
+
 describe("dashboard-layout — 下部ツールバー被り解消", () => {
   it("main はモバイルで pb-24（lg では従来の pb-6）", () => {
     expect(dashboardLayout).toContain("p-4 pb-24 lg:p-6 lg:pb-6");
