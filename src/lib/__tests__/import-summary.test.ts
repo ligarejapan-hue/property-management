@@ -299,4 +299,31 @@ describe("summaryFromStatusCounts — 単体仕様", () => {
     expect(s.createdCount).toBe(3);
     expect(s.totalCount).toBe(3);
   });
+
+  it("pending は5区分の集計に含まれない（registry_pdf_bulk 由来の未処理行として無視）", () => {
+    const s = summaryFromStatusCounts(
+      { success: 3, skipped: 1, needs_review: 1, error: 1, pending: 4 },
+      0,
+    );
+    expect(s).toEqual({
+      createdCount: 3,
+      updatedCount: 0,
+      skippedCount: 1,
+      needsReviewCount: 1,
+      errorCount: 1,
+      totalCount: 6, // pending の4件は含まれない
+    });
+  });
+
+  it("pending のみ（他 status 0件）は全項目 0", () => {
+    const s = summaryFromStatusCounts({ pending: 5 }, 0);
+    expect(s).toEqual({
+      createdCount: 0,
+      updatedCount: 0,
+      skippedCount: 0,
+      needsReviewCount: 0,
+      errorCount: 0,
+      totalCount: 0,
+    });
+  });
 });

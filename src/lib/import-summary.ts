@@ -87,17 +87,24 @@ export function calcImportSummary(rows: ImportRowLike[]): ImportSummary {
 
 /**
  * status 別件数のマップ。ImportRowStatus（success / error / skipped /
- * needs_review）と一致するキーを持つ。Prisma 依存を避けるため enum を
+ * needs_review / pending）と一致するキーを持つ。Prisma 依存を避けるため enum を
  * import せず、リテラルキーの optional interface として定義する。
  *
  * groupBy は該当 0 件の status を行として返さないため、未指定キーは
  * `undefined`（= 0 件）として扱う。
+ *
+ * pending（registry_pdf_bulk 由来の「未処理」行）はキーとして受け取れるように
+ * するが、summaryFromStatusCounts の 5 区分（新規/更新/スキップ/要レビュー/
+ * エラー）はいずれも完了済みステータスのみを対象にしており、pending は意図的に
+ * 集計対象外（totalCount にも含めない）とする。ImportSummary の形状・意味は
+ * 変えない。
  */
 export interface StatusCounts {
   success?: number;
   error?: number;
   skipped?: number;
   needs_review?: number;
+  pending?: number;
 }
 
 /**

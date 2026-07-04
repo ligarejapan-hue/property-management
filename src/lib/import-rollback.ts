@@ -18,7 +18,10 @@ export type RollbackCategory = "delete" | "restore" | "skip";
 interface RowInput {
   id: string;
   rowNumber: number;
-  status: "success" | "error" | "skipped" | "needs_review";
+  // "pending"（registry_pdf_bulk 由来の「未処理」行）は rollback 対象の
+  // property_csv ジョブでは発生しないが、Prisma の ImportRowStatus enum 全体を
+  // 受け取れるよう union に含める（classifyRowsForRollback 側で明示的に skip 扱い）。
+  status: "success" | "error" | "skipped" | "needs_review" | "pending";
   errorMessage: string | null;
   createdId: string | null;
 }
@@ -33,7 +36,11 @@ export interface ClassifiedRow {
 /**
  * - delete: success + 新規作成 (errorMessage が「更新」で始まらない) + createdId あり
  * - restore: success + 更新 (isUpdateMessage true) + createdId あり
- * - skip: 上記以外（needs_review / error / skipped、または createdId なし）
+ * - skip: 上記以外（needs_review / error / skipped / pending、または createdId なし）
+ *   pending は「未処理」行（registry_pdf_bulk 由来）を表す。rollback 対応は
+ *   property_csv ジョブのみで、現状 pending 行がこの関数に渡ることはないが、
+ *   万一渡っても作成物が無い（createdId なし）ため自然に skip 分類され、かつ
+ *   ここでも意図的に安全側（skip）へ倒すことを明示しておく。
  */
 export function classifyRowsForRollback(rows: RowInput[]): ClassifiedRow[] {
   return rows.map((r) => {
@@ -45,6 +52,8 @@ export function classifyRowsForRollback(rows: RowInput[]): ClassifiedRow[] {
         category: isUpdateMessage(r.errorMessage) ? "restore" : "delete",
       };
     }
+    // r.status が "pending"（未処理）を含む success 以外のケースはすべてここに
+    // 到達し、skip 分類になる。
     return {
       rowId: r.id,
       rowNumber: r.rowNumber,
