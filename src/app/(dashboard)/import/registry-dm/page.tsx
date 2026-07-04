@@ -279,7 +279,7 @@ export default function RegistryDmImportPage() {
             <button
               type="button"
               onClick={() => setStep(2)}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-600"
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300"
             >
               次へ(所有者Excel) →
             </button>
@@ -309,6 +309,10 @@ export default function RegistryDmImportPage() {
                     setRpFile(await readFileForImport(f));
                     setRoPreview(null);
                     setRoResult(null);
+                    // 旧ファイルの step1 プレビュー/結果が残ったまま戻って
+                    // 古い状態で取込実行できてしまわないよう、こちらもリセットする。
+                    setRpPreview(null);
+                    setRpResult(null);
                   });
                 }}
               />
@@ -431,14 +435,14 @@ export default function RegistryDmImportPage() {
             <button
               type="button"
               onClick={() => setStep(1)}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-600"
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300"
             >
               ← 戻る
             </button>
             <button
               type="button"
               onClick={() => setStep(3)}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-600"
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300"
             >
               次へ(PDF一括) →
             </button>
@@ -503,14 +507,14 @@ export default function RegistryDmImportPage() {
             <button
               type="button"
               onClick={() => setStep(2)}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-600"
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300"
             >
               ← 戻る
             </button>
             <button
               type="button"
               onClick={() => setStep(4)}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-600"
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300"
             >
               次へ(結果) →
             </button>
@@ -564,7 +568,7 @@ export default function RegistryDmImportPage() {
             <button
               type="button"
               onClick={() => setStep(3)}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-600"
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300"
             >
               ← 戻る
             </button>
