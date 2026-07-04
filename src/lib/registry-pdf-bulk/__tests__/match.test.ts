@@ -64,6 +64,15 @@ describe("canonicalAddressKey", () => {
     );
   });
 
+  it("「外N」の前に空白があっても末尾空白を残さない", () => {
+    expect(canonicalAddressKey("世田谷区上馬２丁目７５２－３ 外２")).toBe(
+      "世田谷区上馬2丁目752-3",
+    );
+    expect(canonicalAddressKey("東京都世田谷区上馬２丁目７５２－３　外３")).toBe(
+      "世田谷区上馬2丁目752-3",
+    );
+  });
+
   it("都道府県接頭辞+外N の両方を除去する", () => {
     expect(
       canonicalAddressKey("東京都世田谷区上馬２丁目７５２－３外２"),

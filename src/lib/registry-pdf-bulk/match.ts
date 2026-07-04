@@ -32,7 +32,8 @@ const SOTO_SUFFIX = /外\d+$/;
 export function canonicalAddressKey(input: string | null | undefined): string {
   const base = normalizeAddress(input ?? "");
   if (base === "") return "";
-  return base.replace(PREFECTURE_PREFIX, "").replace(SOTO_SUFFIX, "");
+  // 「外N」の前に空白がある表記(「…752-3 外3」)でも末尾空白を残さない
+  return base.replace(PREFECTURE_PREFIX, "").replace(SOTO_SUFFIX, "").trim();
 }
 
 /** realEstateNumber の突合用正規化(全角数字対策で NFKC も適用)。 */
