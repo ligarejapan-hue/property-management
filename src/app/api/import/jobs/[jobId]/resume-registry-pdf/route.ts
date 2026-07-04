@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
 import { enqueueRegistryPdfBulkJob } from "@/lib/registry-pdf-bulk/worker";
 
 // ============================================================
@@ -51,6 +52,17 @@ export async function POST(
     });
     if (pendingCount > 0) {
       enqueueRegistryPdfBulkJob(jobId);
+      try {
+        await writeAuditLog({
+          userId: session.id,
+          action: "registry_pdf_bulk_resume",
+          targetTable: "import_jobs",
+          targetId: jobId,
+          detail: { pendingCount },
+        });
+      } catch (auditError) {
+        console.error("registry-pdf-bulk: resume audit log failed:", auditError);
+      }
     }
     return apiResponse({ ok: true, pendingCount });
   } catch (error) {

@@ -179,6 +179,38 @@ describe("processRegistryPdfBulkRow", () => {
     expect(finalize.data.status).toBe("needs_review");
   });
 
+  it("所在不一致でもPDF内容フォールバックが一致すれば success(matchedVia=content)", async () => {
+    (extractTextFromPdf as Mock).mockResolvedValue("dummy text");
+    (parseRegistryText as Mock).mockReturnValue({
+      address: "世田谷区上馬２丁目７５２－３",
+      realEstateNumber: null,
+    });
+    pm.importJobRow.findUnique.mockResolvedValue(
+      makeRow({
+        fileName: "杉並区高円寺南１丁目１－１不動産登記（土地所有者事項）2024121200999998.PDF",
+        stagedKey: "import-staging/registry-pdf/j1/1.pdf",
+        requestNumber: "2024121200999998",
+        location: "杉並区高円寺南１丁目１－１",
+      }),
+    );
+    const outcome = await processRegistryPdfBulkRow({
+      jobId: "j1", rowId: "r1", index: INDEX, executor: EXEC,
+    });
+    expect(outcome).toBe("success");
+    expect(pm.attachment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          propertyId: "p1",
+        }),
+        select: { id: true },
+      }),
+    );
+    const finalize = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
+    expect(finalize.data.rawData).toEqual(
+      expect.objectContaining({ matchedVia: "content" }),
+    );
+  });
+
   it("複数候補は needs_review(候補件数を記録)", async () => {
     pm.importJobRow.findUnique.mockResolvedValue(
       makeRow({

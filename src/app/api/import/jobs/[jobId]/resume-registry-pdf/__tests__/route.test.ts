@@ -33,10 +33,12 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/registry-pdf-bulk/worker", () => ({
   enqueueRegistryPdfBulkJob: vi.fn(),
 }));
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { enqueueRegistryPdfBulkJob } from "@/lib/registry-pdf-bulk/worker";
+import { writeAuditLog } from "@/lib/audit";
 import { POST } from "../route";
 
 type PM = {
@@ -68,12 +70,31 @@ describe("POST /api/import/jobs/[jobId]/resume-registry-pdf", () => {
     expect(enqueueRegistryPdfBulkJob).toHaveBeenCalledWith("j1");
   });
 
+  it("pending行があれば監査ログを書き込む", async () => {
+    await call();
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        action: "registry_pdf_bulk_resume",
+        targetTable: "import_jobs",
+        targetId: "j1",
+        detail: { pendingCount: 3 },
+      }),
+    );
+  });
+
   it("pending行が0ならenqueueしない", async () => {
     pm.importJobRow.count.mockResolvedValue(0);
     const res = await call();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, pendingCount: 0 });
     expect(enqueueRegistryPdfBulkJob).not.toHaveBeenCalled();
+  });
+
+  it("pending行が0なら監査ログを書き込まない", async () => {
+    pm.importJobRow.count.mockResolvedValue(0);
+    await call();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("ジョブが無ければ404", async () => {

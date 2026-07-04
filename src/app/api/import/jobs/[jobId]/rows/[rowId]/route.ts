@@ -266,6 +266,12 @@ export async function PATCH(
         if (!owner) {
           throw new ApiError(404, "指定された所有者が見つかりません", "NOT_FOUND");
         }
+      } else if (row.job.jobType === "registry_pdf_bulk") {
+        throw new ApiError(
+          422,
+          "このジョブの行は専用の手動添付APIを使用してください",
+          "VALIDATION_ERROR",
+        );
       }
 
       updatedRow = await prisma.importJobRow.update({
