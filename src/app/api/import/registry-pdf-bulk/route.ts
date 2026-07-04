@@ -42,11 +42,14 @@ export async function POST(request: NextRequest) {
     }
 
     // formData() で body 全体をバッファする前に Content-Length で過大 body を弾く
-    const contentLength = Number(request.headers.get("content-length") ?? "");
-    if (
-      Number.isFinite(contentLength) &&
-      contentLength > MAX_BULK_TOTAL_BYTES + MULTIPART_OVERHEAD_BYTES
-    ) {
+    // ヘッダ欠落/非数値(chunked 等でガードを回避しうる)は 411 で拒否する。
+    // ブラウザの fetch+FormData は必ず Content-Length を付けるため正規クライアントに影響なし。
+    const contentLengthHeader = request.headers.get("content-length");
+    const contentLength = Number(contentLengthHeader);
+    if (contentLengthHeader === null || !Number.isFinite(contentLength)) {
+      throw new ApiError(411, "Content-Length ヘッダが必要です", "LENGTH_REQUIRED");
+    }
+    if (contentLength > MAX_BULK_TOTAL_BYTES + MULTIPART_OVERHEAD_BYTES) {
       throw new ApiError(
         413,
         "アップロード合計サイズが上限(100MB)を超えています。分割して投入してください",
@@ -91,6 +94,7 @@ export async function POST(request: NextRequest) {
 
     const storage = getStorage();
     const rows: RowSeed[] = [];
+    const stagedKeys: string[] = [];
     let acceptedCount = 0;
     let rejectedCount = 0;
 
@@ -140,6 +144,7 @@ export async function POST(request: NextRequest) {
         rejectedCount++;
         continue;
       }
+      stagedKeys.push(stagedKey);
       rows.push({
         rowNumber,
         status: "pending",
@@ -159,17 +164,39 @@ export async function POST(request: NextRequest) {
       acceptedCount++;
     }
 
-    await prisma.importJobRow.createMany({
-      data: rows.map((r) => ({
-        jobId: job.id,
-        rowNumber: r.rowNumber,
-        status: r.status,
-        rawData: r.rawData as Prisma.InputJsonValue,
-        errorMessage: r.errorMessage,
-      })),
-    });
+    try {
+      await prisma.importJobRow.createMany({
+        data: rows.map((r) => ({
+          jobId: job.id,
+          rowNumber: r.rowNumber,
+          status: r.status,
+          rawData: r.rawData as Prisma.InputJsonValue,
+          errorMessage: r.errorMessage,
+        })),
+      });
 
-    enqueueRegistryPdfBulkJob(job.id);
+      enqueueRegistryPdfBulkJob(job.id);
+    } catch (err) {
+      // 行作成(またはenqueue)に失敗すると、ジョブが status:"pending"・行0件のまま
+      // 孤児化し(stuck検知はprocessingのみ対象で不可視)、アップ済みstagingも
+      // 参照されず残る。best-effort で掃除してからジョブを failed にし、元の例外を rethrow する。
+      for (const key of stagedKeys) {
+        try {
+          await storage.delete(key);
+        } catch (delErr) {
+          console.error("registry-pdf-bulk: orphaned staging cleanup failed:", key, delErr);
+        }
+      }
+      try {
+        await prisma.importJob.update({
+          where: { id: job.id },
+          data: { status: "failed", completedAt: new Date() },
+        });
+      } catch (updateErr) {
+        console.error("registry-pdf-bulk: failed-status update failed:", updateErr);
+      }
+      throw err;
+    }
 
     try {
       await writeAuditLog({
