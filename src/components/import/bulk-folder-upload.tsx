@@ -36,8 +36,15 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// webkitdirectory では別サブフォルダに同名ファイルが有り得る。規約外ファイル名の
+// 再開キーが basename だけだと衝突して取りこぼすため、相対パスがあればそれを使う
+// (通常の複数ファイル選択では webkitRelativePath は空なので basename にフォールバック)。
+function fileKeyName(f: File): string {
+  return f.webkitRelativePath || f.name;
+}
+
 function toMetas(files: File[]): BulkFileMeta[] {
-  return files.map((f) => ({ name: f.name, size: f.size }));
+  return files.map((f) => ({ name: fileKeyName(f), size: f.size }));
 }
 
 export default function BulkFolderUpload({
@@ -139,7 +146,7 @@ export default function BulkFolderUpload({
         // 避けるため、拒否ゼロのバッチだけ送信済みとして記録する。拒否ありのバッチは
         // 再開時に再送され、受理済みはサーバの請求番号dedупでスキップ、拒否分だけ再試行される。
         if (res.rejectedCount === 0) {
-          recordSentKeys(batch.map((i) => bulkFileKey(files[i].name)));
+          recordSentKeys(batch.map((i) => bulkFileKey(fileKeyName(files[i]))));
         }
         sent += batch.length;
         setSentCount(sent);
