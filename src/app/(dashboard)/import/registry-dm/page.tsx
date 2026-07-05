@@ -1,28 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import ImportSwitcher from "@/components/import/import-switcher";
+import BulkFolderUpload, {
+  type BulkUploadSummary,
+} from "@/components/import/bulk-folder-upload";
 import {
   readFileForImport,
   previewReceptionPropertyCsv,
   importReceptionPropertyCsv,
   previewReceptionOwnerCsv,
   importReceptionOwnerCsv,
-  uploadRegistryPdfBulk,
-  fetchImportJobDetail,
   type ReceptionPropertyPreviewResponse,
   type ReceptionPropertyImportResponse,
   type ReceptionOwnerPreviewResponse,
   type ReceptionOwnerImportResponse,
   type ReceptionDlFilter,
   type ReceptionShinkiFilter,
-  type RegistryPdfBulkUploadResponse,
 } from "@/lib/api-client";
-import {
-  summarizeBulkJobProgress,
-  validateBulkSelection,
-} from "@/lib/registry-pdf-bulk/wizard-progress";
 
 // ============================================================
 // 登記DM取込ウィザード
@@ -38,14 +34,6 @@ import {
 // readFileForImport の実戻り値は { fileName, csvText?, xlsxBase64? }
 // (api-client.ts 実物のプロパティ名は fileName であり name ではない)。
 type SheetFile = { fileName: string; csvText?: string; xlsxBase64?: string };
-
-interface BulkJobView {
-  totalRows: number | null;
-  pendingCount?: number;
-  successCount: number | null;
-  errorCount: number | null;
-  status: string;
-}
 
 const STEPS = [
   { n: 1, title: "受付帳Excel(物件作成)" },
@@ -77,52 +65,10 @@ export default function RegistryDmImportPage() {
     useState<ReceptionOwnerImportResponse | null>(null);
 
   // --- step3: PDF一括 ---
-  const [pdfFiles, setPdfFiles] = useState<File[]>([]);
-  const [pdfSelectionError, setPdfSelectionError] = useState<string | null>(
-    null,
-  );
-  // ファイル<input>を強制remountして選択表示をクリアするためのkey
-  // ("別のバッチを投入"でネイティブinputの表示ファイル名も確実にリセットする)。
-  const [pdfInputKey, setPdfInputKey] = useState(0);
-  const [bulkUpload, setBulkUpload] =
-    useState<RegistryPdfBulkUploadResponse | null>(null);
-  const [bulkJob, setBulkJob] = useState<BulkJobView | null>(null);
+  const [bulkSummary, setBulkSummary] = useState<BulkUploadSummary | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // step3 のジョブ進捗ポーリング(2秒間隔・完了で停止・unmountで停止)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (!bulkUpload) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const job = (await fetchImportJobDetail(bulkUpload.jobId, {
-          page: 1,
-          limit: 1,
-        })) as unknown as BulkJobView;
-        if (cancelled) return;
-        setBulkJob(job);
-        const progress = summarizeBulkJobProgress(job);
-        if (progress.finished && pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-      } catch {
-        // ポーリング失敗は無視(次のtickで再試行)
-      }
-    };
-    void tick();
-    pollRef.current = setInterval(tick, 2000);
-    return () => {
-      cancelled = true;
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, [bulkUpload]);
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     setLoading(true);
@@ -135,8 +81,6 @@ export default function RegistryDmImportPage() {
       setLoading(false);
     }
   }, []);
-
-  const progress = bulkJob ? summarizeBulkJobProgress(bulkJob) : null;
 
   return (
     <div data-pii-protected data-pii-surface="import" className="space-y-6">
@@ -482,86 +426,7 @@ export default function RegistryDmImportPage() {
           <h2 className="font-medium text-gray-900 dark:text-gray-100">
             ③ 取得済みPDFを一括で物件に添付
           </h2>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            「取得済みPDF」フォルダの所有者事項PDFをまとめて選択してください(最大100件・合計100MB)。アップロード後の処理はサーバ側で進むため、この画面を閉じても構いません。
-          </p>
-          <input
-            key={pdfInputKey}
-            type="file"
-            accept=".pdf,application/pdf"
-            multiple
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              setPdfFiles(files);
-              setPdfSelectionError(validateBulkSelection(files));
-            }}
-            className="block text-sm"
-          />
-          {pdfFiles.length > 0 && !bulkUpload && (
-            <p className="text-sm text-gray-700 dark:text-gray-300">
-              {pdfFiles.length}件選択中(合計{" "}
-              {(pdfFiles.reduce((s, f) => s + f.size, 0) / 1024 / 1024).toFixed(1)}
-              MB)
-            </p>
-          )}
-          {pdfSelectionError && (
-            <p className="text-sm text-red-700 dark:text-red-400">
-              {pdfSelectionError}
-            </p>
-          )}
-          <button
-            type="button"
-            disabled={
-              pdfFiles.length === 0 ||
-              loading ||
-              !!bulkUpload ||
-              !!pdfSelectionError
-            }
-            onClick={() =>
-              run(async () => {
-                setBulkUpload(await uploadRegistryPdfBulk(pdfFiles));
-              })
-            }
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            アップロードして処理開始
-          </button>
-          {bulkUpload && (
-            <div className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
-              <p>
-                受付: {bulkUpload.acceptedCount}件
-                {bulkUpload.rejectedCount > 0 &&
-                  ` / 受付不可 ${bulkUpload.rejectedCount}件`}
-              </p>
-              <p>{progress ? progress.label : "処理待ち..."}</p>
-              <p>
-                <Link
-                  href={`/import/jobs/${bulkUpload.jobId}`}
-                  className="underline"
-                >
-                  ジョブ詳細(要確認の手動添付はこちら)
-                </Link>
-              </p>
-              <p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBulkUpload(null);
-                    setBulkJob(null);
-                    setPdfFiles([]);
-                    setPdfSelectionError(null);
-                    setPdfInputKey((k) => k + 1);
-                  }}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300"
-                >
-                  別のバッチを投入
-                </button>
-              </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                ※直前のバッチの処理状況は上記のジョブ詳細リンクから確認できます(100件を超える月は分割して投入してください)。
-              </p>
-            </div>
-          )}
+          <BulkFolderUpload onUploaded={setBulkSummary} />
           <div className="flex justify-between">
             <button
               type="button"
@@ -602,11 +467,13 @@ export default function RegistryDmImportPage() {
             </li>
             <li>
               PDF添付:{" "}
-              {bulkJob && progress
-                ? `${progress.label}(成功 ${bulkJob.successCount ?? 0}件 / 要対応 ${bulkJob.errorCount ?? 0}件)`
-                : bulkUpload
-                  ? "処理中"
-                  : "未実行"}
+              {bulkSummary
+                ? `${bulkSummary.acceptedTotal}件を受付（${bulkSummary.batchCount}バッチ${
+                    bulkSummary.excludedTotal > 0
+                      ? ` / 除外 ${bulkSummary.excludedTotal}件`
+                      : ""
+                  }）`
+                : "未実行"}
             </li>
           </ul>
           <div className="flex flex-wrap gap-2">
