@@ -81,6 +81,29 @@ async function deleteStagedBestEffort(
   }
 }
 
+/**
+ * 行確定に失敗した(または並行確定で確定できなかった)場合の添付取り消し。
+ * レコード→blob の順に best-effort で戻す(手動添付routeのundoと同じ規約)。
+ */
+async function undoAttachmentBestEffort(
+  storage: ReturnType<typeof getStorage>,
+  attachmentId: string,
+  uploadedKey: string | null,
+): Promise<void> {
+  try {
+    await prisma.attachment.delete({ where: { id: attachmentId } });
+  } catch (e) {
+    console.error("registry-pdf-bulk: attachment undo failed:", e);
+  }
+  if (uploadedKey) {
+    try {
+      await storage.delete(uploadedKey);
+    } catch (e) {
+      console.error("registry-pdf-bulk: uploaded blob undo failed:", e);
+    }
+  }
+}
+
 async function finalizeRow(
   rowId: string,
   data: {
@@ -316,17 +339,32 @@ export async function processRegistryPdfBulkRow(args: {
       throw err;
     }
 
-    const finalized = await finalizeRow(rowId, {
-      status: "success",
-      errorMessage: null,
-      createdId: match.propertyId,
-      rawData: {
-        ...raw,
-        attachmentId,
-        matchedBy: match.matchedBy,
-        matchedVia,
-      },
-    });
+    // 行確定。添付作成済みのままここで失敗すると「行はerror/pendingなのに
+    // 添付だけ存在する」不整合になるため、失敗時は添付を取り消して
+    // 元の状態に戻す(@codex PR#256 P2・手動添付routeのundoと同じ規約)。
+    let finalized: boolean;
+    try {
+      finalized = await finalizeRow(rowId, {
+        status: "success",
+        errorMessage: null,
+        createdId: match.propertyId,
+        rawData: {
+          ...raw,
+          attachmentId,
+          matchedBy: match.matchedBy,
+          matchedVia,
+        },
+      });
+    } catch (finalizeErr) {
+      await undoAttachmentBestEffort(storage, attachmentId, uploadedKey);
+      throw finalizeErr;
+    }
+    if (!finalized) {
+      // 行が既に pending でない(再enqueue等で並行確定済み)。この試行で作った
+      // 添付は二重になるため取り消し、行状態には触れない。
+      await undoAttachmentBestEffort(storage, attachmentId, uploadedKey);
+      return "noop";
+    }
     if (finalized) {
       try {
         await storage.delete(stagedKey);

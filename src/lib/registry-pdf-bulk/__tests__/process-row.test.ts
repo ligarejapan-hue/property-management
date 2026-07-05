@@ -9,6 +9,7 @@ vi.mock("@/lib/prisma", () => ({
     attachment: {
       findFirst: vi.fn(),
       create: vi.fn(),
+      delete: vi.fn(),
     },
     property: {
       findUnique: vi.fn(),
@@ -44,7 +45,7 @@ import { buildPropertyIndex } from "../match";
 
 type PM = {
   importJobRow: { findUnique: Mock; updateMany: Mock };
-  attachment: { findFirst: Mock; create: Mock };
+  attachment: { findFirst: Mock; create: Mock; delete: Mock };
   property: { findUnique: Mock };
 };
 const pm = prisma as unknown as PM;
@@ -140,6 +141,68 @@ describe("processRegistryPdfBulkRow", () => {
         targetId: "att1",
         detail: { propertyId: "p1", jobId: "j1", rowId: "r1" },
       }),
+    );
+  });
+
+  it("行確定が失敗したら添付を取り消してから error 確定する(@codex PR#256 P2)", async () => {
+    pm.importJobRow.findUnique.mockResolvedValue(
+      makeRow({
+        fileName:
+          "世田谷区上馬２丁目７５２－３不動産登記（建物所有者事項）2024121200118150.PDF",
+        stagedKey: "import-staging/registry-pdf/j1/1.pdf",
+        requestNumber: "2024121200118150",
+        location: "世田谷区上馬２丁目７５２－３",
+      }),
+    );
+    // 1回目(success確定)=DB瞬断で失敗・以降(error確定)=成功
+    pm.importJobRow.updateMany.mockRejectedValueOnce(new Error("db down"));
+    const outcome = await processRegistryPdfBulkRow({
+      jobId: "j1",
+      rowId: "r1",
+      index: INDEX,
+      executor: EXEC,
+    });
+    expect(outcome).toBe("error");
+    // 添付undo(レコード→blob の順・uploadedKey側のみ)
+    expect(pm.attachment.delete).toHaveBeenCalledWith({
+      where: { id: "att1" },
+    });
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "properties/p1/registry/x.pdf",
+    );
+    // error確定は outer catch 経由で実施される
+    const finalize = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
+    expect(finalize.data.status).toBe("error");
+  });
+
+  it("並行確定済み(count=0)なら添付を取り消して noop(行状態には触れない)", async () => {
+    pm.importJobRow.findUnique.mockResolvedValue(
+      makeRow({
+        fileName:
+          "世田谷区上馬２丁目７５２－３不動産登記（建物所有者事項）2024121200118151.PDF",
+        stagedKey: "import-staging/registry-pdf/j1/1.pdf",
+        requestNumber: "2024121200118151",
+        location: "世田谷区上馬２丁目７５２－３",
+      }),
+    );
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 0 });
+    const outcome = await processRegistryPdfBulkRow({
+      jobId: "j1",
+      rowId: "r1",
+      index: INDEX,
+      executor: EXEC,
+    });
+    expect(outcome).toBe("noop");
+    expect(pm.attachment.delete).toHaveBeenCalledWith({
+      where: { id: "att1" },
+    });
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "properties/p1/registry/x.pdf",
+    );
+    // 行状態・stagingには触れない(確定は1回試行のみ・staging削除なし)
+    expect(pm.importJobRow.updateMany).toHaveBeenCalledTimes(1);
+    expect(storageMock.delete).not.toHaveBeenCalledWith(
+      "import-staging/registry-pdf/j1/1.pdf",
     );
   });
 
