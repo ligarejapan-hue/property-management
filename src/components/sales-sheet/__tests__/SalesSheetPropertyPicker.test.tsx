@@ -75,6 +75,33 @@ describe("SalesSheetPropertyPicker", () => {
   });
 });
 
+describe("SalesSheetPropertyPicker — エラー時の表示ガード（@codex P3）", () => {
+  it("error 時は空の枠線ボックス（空 ul）も空状態文言も出さない", () => {
+    const html = renderToStaticMarkup(
+      createElement(SalesSheetPropertyPicker, {
+        ...baseProps,
+        error: "物件一覧の取得に失敗しました",
+      }),
+    );
+    expect(html).not.toContain("<ul");
+    expect(html).not.toContain("対象の物件が見つかりません");
+  });
+
+  it("error 時はページ送りを出さない（古い totalPages が残っていても）", () => {
+    const html = renderToStaticMarkup(
+      createElement(SalesSheetPropertyPicker, {
+        ...baseProps,
+        error: "物件一覧の取得に失敗しました",
+        total: 120,
+        totalPages: 3,
+        page: 2,
+      }),
+    );
+    expect(html).not.toContain("次へ");
+    expect(html).not.toContain("前へ");
+  });
+});
+
 describe("SalesSheetPropertyPicker — PII 画面保護（@codex P2）", () => {
   it("住所スパンを行ごとの data-pii-protected fragment で保護する（button 行でも有効な方式）", () => {
     const html = renderToStaticMarkup(

@@ -78,15 +78,18 @@ export function SalesSheetPropertyPicker({
           <Loader2 className="h-5 w-5 animate-spin" />
           読み込み中…
         </div>
-      ) : rows.length === 0 && !error ? (
-        <div className="mt-8 rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-          <p>対象の物件が見つかりません。</p>
-          {canWrite && (
-            <p className="mt-2">
-              「新しい物件を登録して作成」から物件を登録すると、そのまま図面を作成できます。
-            </p>
-          )}
-        </div>
+      ) : rows.length === 0 ? (
+        // エラー時は上のエラーボックスのみ（空の枠線ボックスや空状態文言を重ねない）。
+        !error && (
+          <div className="mt-8 rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            <p>対象の物件が見つかりません。</p>
+            {canWrite && (
+              <p className="mt-2">
+                「新しい物件を登録して作成」から物件を登録すると、そのまま図面を作成できます。
+              </p>
+            )}
+          </div>
+        )
       ) : (
         <ul className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           {rows.map((row) => {
@@ -135,7 +138,8 @@ export function SalesSheetPropertyPicker({
         </ul>
       )}
 
-      {!loading && totalPages > 1 && (
+      {/* エラー時はページ送りを出さない（古い件数/ページ数での操作防止・@codex P3 の表示側ガード）。 */}
+      {!loading && !error && totalPages > 1 && (
         <div className="mt-4 flex items-center justify-center gap-3 text-sm text-gray-600 dark:text-gray-300">
           <button
             type="button"

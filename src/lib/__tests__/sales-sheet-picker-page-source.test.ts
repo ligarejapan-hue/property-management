@@ -49,4 +49,8 @@ describe("sales-sheets/new page — 配線", () => {
   it("作成ダイアログは key={selected.id} で remount（入力値の物件間持ち越し防止）", () => {
     expect(PAGE_SRC).toMatch(/key=\{selected\.id\}/);
   });
+
+  it("取得失敗時に件数/ページ数もリセットする（古いページ送りを残さない・@codex P3）", () => {
+    expect(PAGE_SRC).toMatch(/setRows\(\[\]\);[\s\S]{0,200}setTotal\(0\);\s*setTotalPages\(1\);/);
+  });
 });

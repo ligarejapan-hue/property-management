@@ -111,6 +111,9 @@ export default function SalesSheetNewEntryPage() {
       .catch((err: unknown) => {
         if (seq !== requestSeqRef.current) return;
         setRows([]);
+        // 失敗時は前回成功時の件数/ページ数も破棄する（古いページ送りを出さない・@codex P3）。
+        setTotal(0);
+        setTotalPages(1);
         setError(err instanceof Error ? err.message : "物件一覧の取得に失敗しました");
       })
       .finally(() => {
