@@ -38,6 +38,7 @@ import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { writeAuditLog } from "@/lib/audit";
 import { processRegistryPdfBulkRow } from "../process-row";
 import { buildPropertyIndex } from "../match";
 
@@ -131,6 +132,14 @@ describe("processRegistryPdfBulkRow", () => {
     expect(finalize.data.createdId).toBe("p1");
     expect(storageMock.delete).toHaveBeenCalledWith(
       "import-staging/registry-pdf/j1/1.pdf",
+    );
+    // 監査detailはID系のみ(fileName=所在入りは記録しない・@codex PR#256 P1)
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetTable: "attachments",
+        targetId: "att1",
+        detail: { propertyId: "p1", jobId: "j1", rowId: "r1" },
+      }),
     );
   });
 

@@ -334,12 +334,14 @@ export async function processRegistryPdfBulkRow(args: {
         console.error("registry-pdf-bulk: staging delete failed:", e);
       }
       try {
+        // 監査detailはID系のみ。fileNameは所在(住所)を含むため入れない
+        // (@codex PR#256 P1・手動添付routeのdetail規約とも整合)
         await writeAuditLog({
           userId: executor.id,
           action: "create",
           targetTable: "attachments",
           targetId: attachmentId,
-          detail: { propertyId: match.propertyId, fileName, jobId },
+          detail: { propertyId: match.propertyId, jobId, rowId },
         });
       } catch (e) {
         console.error("registry-pdf-bulk: audit failed (non-fatal):", e);
