@@ -99,6 +99,7 @@ beforeEach(() => {
     },
     job: { id: "j1", jobType: "registry_pdf_bulk" },
   });
+  // 確定(claim)は最後の $transaction 内で1回だけ呼ばれる想定。既定はcount:1(成功)。
   pm.importJobRow.updateMany.mockResolvedValue({ count: 1 });
   pm.importJobRow.update.mockResolvedValue({});
   pm.importJobRow.findMany.mockResolvedValue([
@@ -110,7 +111,7 @@ beforeEach(() => {
   pm.attachment.create.mockResolvedValue({ id: "att1" });
   pm.attachment.delete.mockResolvedValue({});
   // $transaction(fn) は同一 prisma mock を tx として渡す。既存の
-  // pm.importJobRow.update / findMany / pm.importJob.update への
+  // pm.importJobRow.updateMany(確定claim) / findMany / pm.importJob.update への
   // アサーションはそのまま tx 経由呼び出しとして検証できる。
   pm.$transaction.mockImplementation(
     async (fn: (tx: typeof pm) => unknown) => fn(pm),
@@ -134,16 +135,22 @@ describe("POST .../manual-attach-registry-pdf", () => {
     const body = (await res.json()) as { ok: boolean; attachmentId: string };
     expect(body.ok).toBe(true);
     expect(body.attachmentId).toBe("att1");
-    // atomic claim
-    expect(pm.importJobRow.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: "r1",
-          status: "needs_review",
-          createdId: null,
-        }),
-      }),
-    );
+    // 確定(claim)は最後の1回のみ: where=needs_review+createdId null,
+    // data=success/手動添付/createdId=propertyId
+    expect(pm.importJobRow.updateMany).toHaveBeenCalledTimes(1);
+    expect(pm.importJobRow.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "r1",
+        jobId: "j1",
+        status: "needs_review",
+        createdId: null,
+      },
+      data: {
+        status: "success",
+        errorMessage: "手動添付",
+        createdId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+    });
     expect(pm.attachment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -173,12 +180,6 @@ describe("POST .../manual-attach-registry-pdf", () => {
     expect(pm.property.findUnique).not.toHaveBeenCalled();
   });
 
-  it("claim競合(count=0)は 409", async () => {
-    pm.importJobRow.updateMany.mockResolvedValue({ count: 0 });
-    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
-    expect(res.status).toBe(409);
-  });
-
   it("種別違いのジョブは 422", async () => {
     pm.importJobRow.findUnique.mockResolvedValue({
       id: "r1",
@@ -193,13 +194,13 @@ describe("POST .../manual-attach-registry-pdf", () => {
     expect(res.status).toBe(422);
   });
 
-  it("stagedファイル消失は 422 でclaimを戻す", async () => {
+  it("stagedファイル消失は 422(claimは一切行われない=行は無傷のまま再試行可能)", async () => {
     storageMock.read.mockResolvedValue(null);
     const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(422);
-    // claim復帰(createdId を null に戻す)
-    const revert = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
-    expect(revert.data.createdId).toBeNull();
+    // 確定(claim)は storage/attachment 作成が終わった後にしか行わないため、
+    // storage.read の時点で失敗する本ケースでは一度も呼ばれない。
+    expect(pm.importJobRow.updateMany).not.toHaveBeenCalled();
   });
 
   it("アクセス権なしの物件は 403", async () => {
@@ -208,8 +209,23 @@ describe("POST .../manual-attach-registry-pdf", () => {
     expect(res.status).toBe(403);
   });
 
-  it("行確定失敗時は添付を取り消しclaimを戻して500", async () => {
-    pm.importJobRow.update.mockRejectedValueOnce(new Error("db down"));
+  it("claim競合(count=0)は 409 で添付をundo(claimは未成立=行はそのまま)", async () => {
+    pm.importJobRow.updateMany.mockResolvedValue({ count: 0 });
+    const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
+    expect(res.status).toBe(409);
+    // undo: 作成済みの添付レコードとアップロード済みblobを取り消す
+    expect(pm.attachment.delete).toHaveBeenCalledWith({ where: { id: "att1" } });
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      "properties/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/registry/x.pdf",
+    );
+    // stagingは行が確定していないので削除しない
+    expect(storageMock.delete).not.toHaveBeenCalledWith(
+      "import-staging/registry-pdf/j1/1.pdf",
+    );
+  });
+
+  it("確定(claim)がDB例外で失敗しても500・添付undo・stagedKeyは温存", async () => {
+    pm.importJobRow.updateMany.mockRejectedValueOnce(new Error("db down"));
     const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(500);
     expect(pm.attachment.delete).toHaveBeenCalledWith({
@@ -221,17 +237,16 @@ describe("POST .../manual-attach-registry-pdf", () => {
     expect(storageMock.delete).not.toHaveBeenCalledWith(
       "import-staging/registry-pdf/j1/1.pdf",
     );
-    const revert = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
-    expect(revert.data.createdId).toBeNull();
+    // claim例外でtxは中断しているため、カウンタ更新まで到達しない
     expect(pm.importJob.update).not.toHaveBeenCalled();
   });
 
-  it("カウンタ更新(③)失敗でも添付undo+claim復元(500)", async () => {
-    // 実DBでは $transaction が①(行確定)をロールバックするため、catch到達時は
-    // 常に「行=needs_review + claim保持」= 添付undoが正当に成立する。
-    // このmockでは $transaction を `fn(pm)` で代替しており実ロールバックは
-    // 再現できないため、③の失敗が③自体の reject で表現されていることのみ検証する
-    // (undo対象=添付/blob/claimであり、行確定自体の巻き戻りはmock対象外)。
+  it("カウンタ更新(tx内)失敗でも添付undo(500)・stagedKeyは温存", async () => {
+    // 実DBでは interactive $transaction が例外時にtx全体(claimの更新含む)を
+    // ロールバックするため、catch到達時は常に「行=needs_review + claim無し」=
+    // 添付undoのみで整合する(claim自体のrevertは不要)。このmockでは
+    // $transaction を `fn(pm)` で代替しており実ロールバックは再現できないため、
+    // ここではtx内の後段(カウンタ更新)がrejectすることのみ検証する。
     pm.importJob.update.mockRejectedValueOnce(new Error("db down"));
     const res = await call({ propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(res.status).toBe(500);
@@ -244,7 +259,5 @@ describe("POST .../manual-attach-registry-pdf", () => {
     expect(storageMock.delete).not.toHaveBeenCalledWith(
       "import-staging/registry-pdf/j1/1.pdf",
     );
-    const revert = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
-    expect(revert.data.createdId).toBeNull();
   });
 });
