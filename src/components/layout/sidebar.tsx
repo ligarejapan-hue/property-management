@@ -24,6 +24,7 @@ import {
   ScanText,
   ClipboardCheck,
   FileSearch,
+  BookOpen,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 
@@ -239,6 +240,35 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
           )}
         </>
       )}
+
+      {/* 資料（使い方ガイド・取り扱いマニュアル）— メニュー最下部・全ユーザーに表示。
+          public/docs の静的HTML。認証の内側(proxy 非公開パス)ゆえログイン中のみ閲覧可。
+          別タブで開き、作業中の画面を失わないようにする。 */}
+      <div className="mt-4 mb-1">
+        <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+          資料
+        </p>
+      </div>
+      <a
+        href="/docs/guide.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        className={linkClasses("/docs/guide.html")}
+        onClick={() => setMobileOpen(false)}
+      >
+        <BookOpen className="h-5 w-5" />
+        使い方ガイド
+      </a>
+      <a
+        href="/docs/manual.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        className={linkClasses("/docs/manual.html")}
+        onClick={() => setMobileOpen(false)}
+      >
+        <FileText className="h-5 w-5" />
+        取り扱いマニュアル
+      </a>
     </nav>
   );
 

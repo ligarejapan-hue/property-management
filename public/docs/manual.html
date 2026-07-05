@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>物件管理システム 取り扱いマニュアル（図解版）</title>
+<style>
+  :root{
+    --bg:#eceff4; --card:#ffffff; --soft:#f5f7fb; --ink:#1b2130; --muted:#586173; --line:#e2e6ee;
+    --accent:#4f46e5; --accent-soft:#eeeffe;
+    --warn:#98600a; --warn-bg:#fbf1da; --warn-line:#e6b34d;
+    --tip:#1f6aa8; --tip-bg:#e8f1fb; --tip-line:#7db0e0;
+    --memo:#1f7a4d; --memo-bg:#e9f6ee; --memo-line:#8ecfa8;
+    --live:#1f7a4d; --live-bg:#e7f6ee; --red:#b3402f; --red-bg:#fbece9;
+    --mapg:#dbe8d6; --sheet:#fbfbfd;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0f1218; --card:#191d27; --soft:#141821; --ink:#e6eaf1; --muted:#96a0b1; --line:#262c37;
+      --accent:#93a4e8; --accent-soft:#1b2033;
+      --warn:#e2b558; --warn-bg:#2f2711; --warn-line:#6b5620;
+      --tip:#7fb0e6; --tip-bg:#122031; --tip-line:#2f4a68;
+      --memo:#63d29a; --memo-bg:#0f2c1d; --memo-line:#24603f;
+      --live:#63d29a; --live-bg:#0f2c1d; --red:#e8897c; --red-bg:#331b17; --mapg:#22301f; --sheet:#12151c;}
+  }
+  :root[data-theme="light"]{--bg:#eceff4;--card:#fff;--soft:#f5f7fb;--ink:#1b2130;--muted:#586173;--line:#e2e6ee;--accent:#4f46e5;--accent-soft:#eeeffe;--warn:#98600a;--warn-bg:#fbf1da;--warn-line:#e6b34d;--tip:#1f6aa8;--tip-bg:#e8f1fb;--tip-line:#7db0e0;--memo:#1f7a4d;--memo-bg:#e9f6ee;--memo-line:#8ecfa8;--live:#1f7a4d;--live-bg:#e7f6ee;--red:#b3402f;--red-bg:#fbece9;--mapg:#dbe8d6;--sheet:#fbfbfd;}
+  :root[data-theme="dark"]{--bg:#0f1218;--card:#191d27;--soft:#141821;--ink:#e6eaf1;--muted:#96a0b1;--line:#262c37;--accent:#93a4e8;--accent-soft:#1b2033;--warn:#e2b558;--warn-bg:#2f2711;--warn-line:#6b5620;--tip:#7fb0e6;--tip-bg:#122031;--tip-line:#2f4a68;--memo:#63d29a;--memo-bg:#0f2c1d;--memo-line:#24603f;--live:#63d29a;--live-bg:#0f2c1d;--red:#e8897c;--red-bg:#331b17;--mapg:#22301f;--sheet:#12151c;}
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP",sans-serif;
+    font-size:15.5px;padding:0 16px 80px;-webkit-text-size-adjust:100%}
+  main{max-width:1000px;margin:0 auto}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  b{font-weight:700}
+
+  .hero{padding:40px 0 22px;border-bottom:1px solid var(--line);margin-bottom:22px}
+  .hero .kicker{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  .hero h1{font-size:28px;line-height:1.3;margin:8px 0 8px;text-wrap:balance}
+  .hero p{margin:0;color:var(--muted);font-size:14.5px;max-width:62ch}
+  .hero .meta{margin-top:14px;font-size:12.5px;color:var(--muted)}
+
+  .symkey{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin-bottom:14px;font-size:13.5px;display:flex;flex-wrap:wrap;gap:14px}
+  .symkey b{color:var(--ink)}
+
+  nav.toc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:30px}
+  nav.toc h2{font-size:14px;margin:0 0 10px;color:var(--muted);letter-spacing:.04em}
+  nav.toc ol{margin:0;padding-left:22px;columns:2;column-gap:28px;font-size:14px}
+  @media(max-width:560px){nav.toc ol{columns:1}}
+  nav.toc li{margin:3px 0;break-inside:avoid}
+
+  section{margin:0 0 34px;scroll-margin-top:16px}
+  h2.sec{font-size:20px;margin:0 0 4px;padding-top:8px;display:flex;align-items:baseline;gap:10px;text-wrap:balance}
+  h2.sec .sn{font-size:13px;font-weight:800;color:var(--accent)}
+  .whatis{background:var(--accent-soft);border-radius:10px;padding:9px 14px;margin:6px 0 14px;font-size:14px}
+  .whatis::before{content:"この画面は？　";font-weight:700;color:var(--accent)}
+  h3{font-size:16px;margin:22px 0 6px}
+  p{margin:0 0 12px}
+  ul{margin:6px 0 12px;padding-left:22px} li{margin:5px 0}
+
+  .word{color:var(--accent);font-weight:700;border-bottom:1.5px dotted var(--accent);cursor:help}
+
+  .proc{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 18px 16px;margin:12px 0}
+  .proc .t{font-weight:700;font-size:15px;margin:0 0 10px}
+  ol.steps{margin:0;padding:0;counter-reset:s;list-style:none}
+  ol.steps li{counter-increment:s;position:relative;padding:0 0 11px 34px;font-size:14.5px}
+  ol.steps li:last-child{padding-bottom:0}
+  ol.steps li::before{content:counter(s);position:absolute;left:0;top:2px;width:23px;height:23px;border-radius:50%;
+    background:var(--accent-soft);color:var(--accent);font-size:12.5px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ol.steps li .see{display:block;color:var(--muted);font-size:12.8px;margin-top:1px}
+  ol.steps li .see::before{content:"→ ";color:var(--accent)}
+  .btn{display:inline-block;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:0 7px;font-size:13px;font-weight:600;white-space:nowrap}
+
+  .box{border-radius:0 10px 10px 0;padding:11px 15px;margin:12px 0;font-size:13.8px}
+  .warn{background:var(--warn-bg);border-left:4px solid var(--warn-line);color:var(--warn)}
+  .tip{background:var(--tip-bg);border-left:4px solid var(--tip-line);color:var(--tip)}
+  .memo{background:var(--memo-bg);border-left:4px solid var(--memo-line);color:var(--memo)}
+  .box .lbl{font-weight:800;margin-right:4px}
+
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin:10px 0}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--soft);color:var(--muted);font-weight:600;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .yes{color:var(--live);font-weight:700} .no{color:var(--muted)}
+
+  .qa{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin:10px 0}
+  .qa .q{font-weight:700;font-size:14.5px;margin:0 0 4px}
+  .qa .q::before{content:"こんなとき：";color:var(--accent);font-weight:700}
+  .qa .a{font-size:14px;margin:0}
+  .qa .a::before{content:"こうする：";color:var(--muted);font-weight:700}
+
+  /* 業務フロー */
+  .pipe{display:flex;flex-direction:column;gap:0;margin:14px 0}
+  .pstep{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px;display:flex;gap:12px;align-items:flex-start}
+  .pstep .pi{font-size:26px;line-height:1;flex-shrink:0}
+  .pstep .pn{font-size:10.5px;font-weight:800;color:var(--accent);letter-spacing:.08em}
+  .pstep h4{margin:2px 0 3px;font-size:15px}
+  .pstep p{margin:0;font-size:12.8px;color:var(--muted)}
+  .pstep .use{display:inline-block;margin-top:5px;font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:1px 8px}
+  .parr{align-self:center;color:var(--muted);font-size:19px;line-height:1;padding:5px 0}
+  .parr .h{display:none}
+  @media(min-width:660px){
+    .pipe{flex-direction:row;align-items:stretch;overflow-x:auto;padding-bottom:4px}
+    .pstep{flex-direction:column;min-width:140px;flex:1}
+    .pstep .pi{font-size:24px}
+    .parr{padding:0 3px} .parr .v{display:none} .parr .h{display:inline}
+  }
+  .routes{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;justify-content:center;margin:12px 0 2px}
+  .route{flex:1;min-width:150px;max-width:330px;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 13px;display:flex;gap:10px;align-items:center}
+  .route .pi{font-size:22px;flex-shrink:0}
+  .route b{font-size:13.5px} .route p{margin:2px 0 0;font-size:11.5px;color:var(--muted)}
+  .route .use{display:inline-block;margin-top:4px;font-size:10.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:1px 7px}
+  .rplus{align-self:center;color:var(--muted);font-weight:800;font-size:16px}
+  .mergearr{text-align:center;color:var(--muted);font-size:12.5px;margin:8px 0 2px}
+
+  /* 画面モックアップ */
+  figure{margin:14px 0}
+  figure figcaption{font-size:12px;color:var(--muted);margin:6px 2px 0;text-align:center}
+  .mock{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--soft);font-size:12.5px}
+  .mhd{display:flex;align-items:center;gap:8px;background:var(--card);border-bottom:1px solid var(--line);padding:8px 10px}
+  .mhd .burg{width:24px;height:24px;border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;justify-content:center;background:var(--soft)}
+  .mhd .ttl{font-weight:700} .mhd .sp{flex:1}
+  .mhd .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .mhd .seg span{padding:2px 6px;background:var(--card)} .mhd .seg .on{background:var(--accent);color:#fff}
+  .mhd .rl{border:1px solid var(--line);border-radius:999px;padding:0 8px;color:var(--muted)}
+  .mbd{padding:12px}
+  .mbtn{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:3px 8px;background:var(--card);font-weight:600;margin:2px 2px}
+  .mbtn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .mbtn.dl{color:var(--red);border-color:var(--red)} .mbtn.ac{color:var(--accent);border-color:var(--accent)}
+  .mrow{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+  .mcard{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:7px 0}
+  .mtype{color:var(--accent);font-weight:700} .muted{color:var(--muted)}
+  .chip{display:inline-block;border-radius:999px;padding:0 8px;font-size:10.5px;font-weight:700;margin-right:3px}
+  .chip.r{background:var(--red-bg);color:var(--red)} .chip.g{background:var(--live-bg);color:var(--live)} .chip.n{background:var(--soft);color:var(--muted);border:1px solid var(--line)}
+  .mtabs{display:flex;gap:14px;border-bottom:1px solid var(--line);margin:8px 0 4px}
+  .mtabs span{padding:5px 0;color:var(--muted)} .mtabs .on{color:var(--accent);border-bottom:2px solid var(--accent);font-weight:700}
+  .cnum,.cnb{display:inline-flex;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:10.5px;font-weight:700;align-items:center;justify-content:center;vertical-align:middle}
+  .cnum{margin-right:4px}
+  .cleg{list-style:none;padding:0;margin:9px 0 0;font-size:13px;display:flex;flex-direction:column;gap:5px}
+  .cleg li{display:flex;gap:7px;align-items:flex-start;margin:0}
+  .cleg .cnb{flex-shrink:0;margin-top:2px}
+  .sheet{background:var(--sheet);border:1px solid var(--line);border-radius:6px;padding:9px;display:grid;grid-template-columns:1.1fr .9fr;gap:7px;min-height:120px}
+  .sbox{background:var(--card);border:1px dashed var(--line);border-radius:5px;padding:6px 8px;font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:center;text-align:center}
+  .sbox.big{min-height:52px} .sbox.pr{color:var(--red);font-weight:700;border-style:solid}
+  .editor{display:grid;grid-template-columns:1fr 92px;gap:8px}
+  .rp{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px;font-size:10.5px;color:var(--muted)}
+  .rp .rpi{height:8px;background:var(--soft);border-radius:3px;margin:5px 0}
+  .map{position:relative;background:var(--mapg);border-radius:7px;height:150px;overflow:hidden}
+  .map .seg2{position:absolute;left:8px;top:8px;display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;font-size:11px}
+  .map .seg2 span{padding:3px 8px;background:var(--card)} .map .seg2 .on{background:var(--card);font-weight:700}
+  .map .panel{position:absolute;right:8px;top:8px;width:130px;background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px;font-size:10.5px}
+  .map .pin{position:absolute;width:12px;height:12px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:1.5px solid #fff}
+  .map .pin.a{background:var(--accent);left:34%;top:64%} .map .pin.b{background:var(--live);left:22%;top:44%} .map .pin.c{background:var(--red);left:55%;top:72%}
+
+  .foot{border-top:1px solid var(--line);margin-top:34px;padding-top:18px;color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <div class="kicker">Operations Manual · 図解版</div>
+    <h1>物件管理システム 取り扱いマニュアル</h1>
+    <p>初めてこのシステムを使う人のために、専門用語をなるべく使わず、ひとつひとつ手順を追って説明します。「この画面は何をするところか」「なぜその操作をするのか」「ボタンを押すと何が起きるか」が分かるように書いています。</p>
+    <div class="meta">対象: どなたでも（予備知識は不要です）　／　最終更新: 2026-07-05　／　画面の図はダミー（見本）です。実際のボタン名は画面の表示に従ってください。</div>
+  </div>
+
+  <div class="symkey">
+    <span><b>⚠ 注意</b>＝気をつけること</span>
+    <span><b>💡 ヒント</b>＝知っておくと便利</span>
+    <span><b>✅ ひとことメモ</b>＝なぜそうするかの説明</span>
+    <span><span class="btn">これ</span>＝画面のボタンや文字</span>
+    <span><span class="word">用語</span>＝難しい言葉（意味を横に書いています）</span>
+  </div>
+
+  <nav class="toc">
+    <h2>目次</h2>
+    <ol>
+      <li><a href="#basic">はじめに：基本の使い方</a></li>
+      <li><a href="#flow">仕事の全体の流れ</a></li>
+      <li><a href="#s1">ログインと画面の見方</a></li>
+      <li><a href="#s2">物件（ぶっけん）の操作</a></li>
+      <li><a href="#s3">所有者（持ち主）の操作</a></li>
+      <li><a href="#s4">写真の追加</a></li>
+      <li><a href="#s5">販売図面（チラシ）を作る</a></li>
+      <li><a href="#s6">現地調査（スマホで現場記録）</a></li>
+      <li><a href="#s7">データを書き出す（CSV）</a></li>
+      <li><a href="#s8">データを取り込む</a></li>
+      <li><a href="#s9">営業のお手紙（DM）</a></li>
+      <li><a href="#s10">管理者の操作</a></li>
+      <li><a href="#s11">やってはいけないこと・注意</a></li>
+      <li><a href="#s12">困ったときは</a></li>
+      <li><a href="#s13">誰が何をできる？（権限の表）</a></li>
+      <li><a href="#s14">用語辞典</a></li>
+    </ol>
+  </nav>
+
+  <!-- 基本 -->
+  <section id="basic">
+    <h2 class="sec"><span class="sn">◆</span>はじめに：基本の使い方</h2>
+    <p>このシステムは、パソコンやスマホの<b>ブラウザ</b>（インターネットを見るアプリ。ChromeやSafariなど）で使います。アプリを新しく入れる必要はありません。配られたアドレス（URL）を開くだけです。</p>
+    <p>どの画面でも、操作は次の4つが基本です。これさえ分かれば大丈夫です。</p>
+    <ul>
+      <li><b>選ぶ（タップ／クリック）</b>：見たいものや押したいボタンを指またはマウスで押します。</li>
+      <li><b>入力する</b>：白い枠をタップすると文字が打てます。住所や名前などを入れます。</li>
+      <li><b>保存する</b>：入力しただけでは消えることがあります。<span class="btn">保存</span>ボタンを押して初めて記録されます。</li>
+      <li><b>戻る</b>：前の画面に戻りたいときは、画面内の「◁ 一覧」などの戻る文字を使います（ブラウザの戻るより安全です）。</li>
+    </ul>
+    <div class="memo box"><span class="lbl">✅ ひとことメモ</span>「保存」を押し忘れると、せっかく入力した内容が消えてしまいます。何かを書いたら、こまめに保存するクセをつけましょう。</div>
+  </section>
+
+  <!-- 業務フロー -->
+  <section id="flow">
+    <h2 class="sec"><span class="sn">◆</span>仕事の全体の流れ</h2>
+    <p>このシステムは、不動産（土地や家）を売るお手伝いをする仕事の、はじめから終わりまでを支えます。まず流れの全体を見てみましょう。<b>青いラベルが「そのとき使う画面・機能」</b>です。</p>
+
+    <div class="pn" style="text-align:center;font-size:11px;font-weight:800;color:var(--accent);letter-spacing:.08em;margin-bottom:4px">STEP 1 ・ 物件を登録する（入口は2つ）</div>
+    <div class="routes">
+      <div class="route"><div class="pi">📥</div><div><b>① 受付帳（うけつけちょう）から</b><p>もらった一覧表（CSVファイル）を読み込んで登録</p><span class="use">受付帳CSV取込</span></div></div>
+      <div class="rplus">＋</div>
+      <div class="route"><div class="pi">📸</div><div><b>② 現地で写真を撮って</b><p>実際に現場に行って撮影し、その物件を登録</p><span class="use">現地で撮影 → 物件一覧</span></div></div>
+    </div>
+    <div class="mergearr">↓ どちらのやり方でも「物件を登録する」ことがスタートです</div>
+
+    <div class="pipe">
+      <div class="pstep"><div class="pi">🏢</div><div><div class="pn">STEP 1</div><h4>物件を登録</h4><p>上の2つのどちらかで、扱う土地や家をシステムに登録します。</p><span class="use">物件一覧 / 取込</span></div></div>
+      <div class="parr"><span class="v">↓</span><span class="h">→</span></div>
+      <div class="pstep"><div class="pi">📄</div><div><div class="pn">STEP 2</div><h4>謄本を取る</h4><p>その土地・家の「持ち主が誰か」を役所の公式書類で確かめます。</p><span class="use">謄本PDF取込 / 自動取得（準備中）</span></div></div>
+      <div class="parr"><span class="v">↓</span><span class="h">→</span></div>
+      <div class="pstep"><div class="pi">✉️</div><div><div class="pn">STEP 3</div><h4>お手紙で営業</h4><p>持ち主へ「売りませんか？」とお手紙（DM）を送ります。文章はAIが下書き。</p><span class="use">売却促進DM（準備中）</span></div></div>
+      <div class="parr"><span class="v">↓</span><span class="h">→</span></div>
+      <div class="pstep"><div class="pi">🗺️</div><div><div class="pn">STEP 4</div><h4>現地を調べる</h4><p>「売りたい」と返事が来たら、現場に行って詳しく調査します。</p><span class="use">現地調査マップ</span></div></div>
+      <div class="parr"><span class="v">↓</span><span class="h">→</span></div>
+      <div class="pstep"><div class="pi">🖼️</div><div><div class="pn">STEP 5</div><h4>チラシを作る</h4><p>売り出し用の1枚チラシを作り、PDFや画像で書き出します。</p><span class="use">販売図面エディタ</span></div></div>
+    </div>
+    <div class="memo box"><span class="lbl">✅ なぜこの順番？</span>先にお手紙（STEP 3）で「売りませんか」と提案し、興味を持ってもらえてから（STEP 4・5で）詳しく調べてチラシを作ります。全部の物件をいきなり調べるのは大変なので、<b>反応があったものだけ詳しく進める</b>ため、この順番になっています。</div>
+    <div class="tip box"><span class="lbl">💡</span>いまは「謄本の自動取得」と「お手紙（DM）」の一部は<b>準備中</b>（設定すれば使えます）です。手作業の「謄本PDF取込」や「DM差込CSV書き出し」は今も使えます。</div>
+  </section>
+
+  <!-- 1 -->
+  <section id="s1">
+    <h2 class="sec"><span class="sn">1</span>ログインと画面の見方</h2>
+    <p class="whatis">自分の名前とパスワードを入れて、システムに入る（＝ログインする）ところです。</p>
+    <div class="proc">
+      <p class="t">ログインする</p>
+      <ol class="steps">
+        <li>配られたアドレス（URL）をブラウザで開きます。<span class="see">ログイン画面（名前とパスワードの入力欄）が出ます。</span></li>
+        <li>自分のユーザー名とパスワードを入力します。<span class="see">打ち間違いに注意。パスワードは記号が「●」で隠れて表示されます。</span></li>
+        <li>ログインのボタンを押します。<span class="see">「物件一覧」の画面が開けば成功です。</span></li>
+      </ol>
+    </div>
+
+    <p>ログインすると、画面の一番上に<b>ヘッダー</b>（どの画面でも共通の帯）があります。ここの見方を覚えましょう。</p>
+    <figure>
+      <div class="mock">
+        <div class="mhd"><span class="burg">≡</span><span class="ttl">物件管理システム</span><span class="sp"></span><span class="seg"><span>🖥</span><span class="on">☀</span><span>🌙</span></span><span class="rl">● 管理者</span></div>
+        <div class="mbd muted">↑ この帯は、どの画面でも一番上にあります</div>
+      </div>
+      <figcaption>ヘッダー（画面の一番上の帯）</figcaption>
+    </figure>
+    <ul class="cleg">
+      <li><span class="cnb">1</span><span><b>≡（三本線）＝メニュー</b>：押すと、行きたい画面の一覧が出ます。スマホでは押すたびに開いたり閉じたりします。</span></li>
+      <li><span class="cnb">2</span><span><b>🖥 ☀ 🌙 ＝画面の明るさ切り替え</b>：自動／明るい／暗い の3つ。目が疲れにくい方を選べます（スマホではメニューの下の方にあります）。</span></li>
+      <li><span class="cnb">3</span><span><b>● 管理者 ＝あなたの役割とログアウト</b>：いまログインしている人の権限（できることの範囲）が出ます。となりの記号でログアウト（システムから出る）できます。</span></li>
+    </ul>
+
+    <h3>メニューには何がある？</h3>
+    <p><span class="btn">≡</span> を押すと出てくる、各画面への入口の一覧です。</p>
+    <div class="scroll"><table>
+      <tr><th>メニューの名前</th><th>どんな画面？</th></tr>
+      <tr><td>物件一覧</td><td>扱う土地や家を一覧で見る・探す・登録する（いちばんよく使う）</td></tr>
+      <tr><td>マンション棟</td><td>マンションを「建物ごと」に管理する</td></tr>
+      <tr><td>現地調査マップ / 巡回履歴</td><td>地図で現場を調べる・過去に回った記録を見る</td></tr>
+      <tr><td>受付帳CSV取込 / 謄本PDF取込</td><td>外部の資料（一覧表や書類）を読み込む</td></tr>
+      <tr><td>ヘルプ</td><td>操作のヒント</td></tr>
+      <tr><td>管理者メニュー</td><td>利用者や設定の管理（管理者だけに表示）</td></tr>
+    </table></div>
+    <div class="tip box"><span class="lbl">💡</span>役割によって、見えるメニューが違います。あるはずの項目が見えないときは、その操作をする権限がないだけかもしれません。管理者に相談しましょう。</div>
+  </section>
+
+  <!-- 2 -->
+  <section id="s2">
+    <h2 class="sec"><span class="sn">2</span>物件（ぶっけん）の操作</h2>
+    <p class="whatis">扱う土地や家を1件ずつ管理する画面です。<span class="word">物件（ぶっけん）</span>＝この仕事で扱う不動産（土地・家・マンションの一部屋など）1件のことです。</p>
+
+    <figure>
+      <div class="mock">
+        <div class="mhd"><span class="burg">≡</span><span class="ttl">物件一覧</span><span class="sp"></span><span class="rl">● 管理者</span></div>
+        <div class="mbd">
+          <div class="mrow"><span class="cnb">1</span><span class="mbtn">⬇ CSV出力</span><span class="mbtn">⬇ DM差込CSV出力</span><span class="mbtn pri">＋ 新規物件登録</span></div>
+          <div class="mrow"><span class="cnb">2</span><span class="mbtn">絞り込み ▾</span></div>
+          <div class="mcard"><span class="cnb">3</span> <span class="mtype">土地</span><br><span class="muted">○○区○○町 1-2-3（見本の住所）</span><br>所有者: —　<span class="chip r">● 未取得</span><span class="chip r">● 送付不可</span><span class="chip n">新規</span></div>
+          <div class="mcard"><span class="mtype">区分マンション</span><br><span class="muted">○○区○○ 4-5-6-201</span><br>所有者: （会社）　<span class="chip r">● 未取得</span><span class="chip g">● 送付可</span></div>
+        </div>
+      </div>
+      <figcaption>物件一覧の画面（見本）</figcaption>
+    </figure>
+    <ul class="cleg">
+      <li><span class="cnb">1</span><span><b>書き出し・新しく登録するボタン</b>（右上）。いちばん右の<span class="btn">＋ 新規物件登録</span>で物件を新しく追加します。</span></li>
+      <li><span class="cnb">2</span><span><b>絞り込み</b>：たくさんある中から、種類や条件で絞って探せます。</span></li>
+      <li><span class="cnb">3</span><span><b>物件カード</b>：1件ごとの箱。押すと、その物件の詳しい画面が開きます。色つきの丸（未取得・送付可など）は、その物件の今の状態を表します。</span></li>
+    </ul>
+
+    <div class="proc">
+      <p class="t">物件を探す</p>
+      <ol class="steps">
+        <li>メニューから <span class="btn">物件一覧</span> を開きます。</li>
+        <li><span class="btn">絞り込み ▾</span> を押して、種類（土地・マンションなど）や条件を選びます。<span class="see">条件に合う物件だけが表示されます。スマホでは絞り込みは折りたたまれているので、まず開きます。</span></li>
+        <li>探している物件のカードを押します。<span class="see">その物件の詳しい画面が開きます。</span></li>
+      </ol>
+    </div>
+    <div class="proc">
+      <p class="t">物件を新しく登録する</p>
+      <ol class="steps">
+        <li>物件一覧の <span class="btn">＋ 新規物件登録</span> を押します。<span class="see">入力フォーム（記入用紙のような画面）が開きます。</span></li>
+        <li>住所などを入力します。<span class="see">分かる範囲でOK。空いていても後から足せます。</span></li>
+        <li>保存します。<span class="see">一覧に新しい物件が増えます。</span></li>
+      </ol>
+    </div>
+
+    <figure>
+      <div class="mock">
+        <div class="mbd">
+          <div class="muted" style="font-size:11px"><span class="cnb">1</span> ◁ 物件一覧 ／ ○○区○○町 1-2-3（見本）</div>
+          <div class="mrow" style="margin-top:8px"><span class="cnb">2</span><span class="mbtn">✉ DM送付履歴</span><span class="mbtn ac">販売図面を作成</span><span class="mbtn">✎ 物件を編集</span><span class="mbtn dl">🗑 物件を削除</span></div>
+          <div class="mrow"><span class="cnb">3</span><span class="mbtn pri">登記取得済</span><span class="mbtn">✈ DM送付可</span><span class="mbtn">自分を担当に</span></div>
+          <div class="mtabs"><span class="cnb">4</span> <span class="on">基本情報</span><span>所有者情報</span><span>写真</span><span>調査情報</span></div>
+        </div>
+      </div>
+      <figcaption>物件の詳しい画面（見本）</figcaption>
+    </figure>
+    <ul class="cleg">
+      <li><span class="cnb">1</span><span><b>◁ 物件一覧</b>：ここを押すと一覧に戻れます。</span></li>
+      <li><span class="cnb">2</span><span><b>操作ボタン</b>：<span class="btn">物件を編集</span>で内容を直す、<span class="btn">物件を削除</span>で消す、<span class="btn">販売図面を作成</span>でチラシ作りへ。</span></li>
+      <li><span class="cnb">3</span><span><b>状態・担当</b>：<span class="btn">自分を担当に</span>を押すと、この物件の担当が自分になります。</span></li>
+      <li><span class="cnb">4</span><span><b>タブ</b>：見出しを押して「基本情報／所有者／写真／調査」を切り替えます（1枚の紙をめくるイメージ）。</span></li>
+    </ul>
+    <div class="warn box"><span class="lbl">⚠ 注意</span><b>「物件を削除」は元に戻せません。</b>本当に消していいか、必ず確かめてから押してください。</div>
+  </section>
+
+  <!-- 3 -->
+  <section id="s3">
+    <h2 class="sec"><span class="sn">3</span>所有者（持ち主）の操作</h2>
+    <p class="whatis">その物件の<b>持ち主</b>の情報を見たり直したりする画面です。<span class="word">所有者（しょゆうしゃ）</span>＝その土地や家を持っている人・会社のことです。</p>
+    <div class="proc">
+      <p class="t">持ち主の情報を直す・メモを残す</p>
+      <ol class="steps">
+        <li>物件の詳しい画面で「所有者情報」タブを押します。</li>
+        <li>郵便番号・住所などを確認し、必要なら直します。<span class="see">会社が持ち主のときは「法人番号」などの欄もあります。</span></li>
+        <li>この物件についての<b>メモ</b>（例：連絡がつきやすい時間帯、相続の事情など）を書き、<span class="btn">保存</span>を押します。<span class="see">メモの履歴は消えずに積み重なります（あとで経緯を追えます）。</span></li>
+      </ol>
+    </div>
+    <div class="warn box"><span class="lbl">⚠ 大切</span>名前・住所・電話番号・メモは<b>個人情報</b>です。画面を人に見せたり、写真に撮って外に出したりしないよう、特に気をつけてください。</div>
+  </section>
+
+  <!-- 4 -->
+  <section id="s4">
+    <h2 class="sec"><span class="sn">4</span>写真の追加</h2>
+    <p class="whatis">物件の写真を登録する画面です。登録した写真は、あとでチラシ作りにも使えます。</p>
+    <div class="proc">
+      <p class="t">物件に写真を載せる</p>
+      <ol class="steps">
+        <li>物件の詳しい画面で「写真」タブを押します。</li>
+        <li>写真を<b>アップロード</b>（自分のスマホ・パソコンの写真をシステムに送ること）します。<span class="see">代表の1枚を選ぶこともできます。</span></li>
+      </ol>
+    </div>
+    <div class="memo box"><span class="lbl">✅ ひとことメモ</span>写真には、撮った場所（GPSの位置）がこっそり記録されていることがあります。このシステムは<b>保存するときに自動でその位置情報を消す</b>ので、うっかり現場の場所が外に伝わる心配が減ります。</div>
+  </section>
+
+  <!-- 5 -->
+  <section id="s5">
+    <h2 class="sec"><span class="sn">5</span>販売図面（チラシ）を作る</h2>
+    <p class="whatis">物件を売り出すときの「1枚チラシ」を作る画面です。<span class="word">販売図面（はんばいずめん）＝マイソク</span>＝写真・値段・間取り・地図などを1枚にまとめた、売り出し用のチラシのことです。</p>
+
+    <figure>
+      <div class="mock">
+        <div class="mbd">
+          <div class="mrow"><span class="cnb">1</span><span class="mbtn pri">保存</span><span class="mbtn">写真を追加</span><span class="mbtn">写真を自動整列</span><span class="mbtn">バッジを追加</span><span class="mbtn">QRを追加</span><span class="mbtn">PDF出力</span><span class="mbtn">PNG出力</span></div>
+          <div class="editor" style="margin-top:8px">
+            <div>
+              <span class="cnb">2</span> <span class="muted" style="font-size:11px">チラシの中身（見たままが出力されます）</span>
+              <div class="sheet" style="margin-top:5px">
+                <div class="sbox">タイトル・<span style="color:var(--red)">価格</span></div>
+                <div class="sbox pr">🏷 バッジ</div>
+                <div class="sbox big">📷 写真</div>
+                <div class="sbox big">物件の表<br>（交通・広さ…）</div>
+                <div class="sbox">会社の名前の帯</div>
+                <div class="sbox">▦ QR</div>
+              </div>
+            </div>
+            <div class="rp"><span class="cnb">3</span> えらんだ部品の設定<div class="rpi"></div><div class="rpi"></div><div class="rpi" style="width:60%"></div><div class="muted" style="margin-top:4px">位置・大きさ・色・文字</div></div>
+          </div>
+        </div>
+      </div>
+      <figcaption>チラシを作る画面（見本）</figcaption>
+    </figure>
+    <ul class="cleg">
+      <li><span class="cnb">1</span><span><b>ツールバー（道具の並び）</b>：写真やバッジ・QRを足したり、最後に<span class="btn">PDF出力</span>／<span class="btn">PNG出力</span>で書き出したりします。<span class="btn">保存</span>もここ。</span></li>
+      <li><span class="cnb">2</span><span><b>チラシ本体</b>：ここに部品を並べます。ここで見えているとおりに、そのまま印刷・画像になります。</span></li>
+      <li><span class="cnb">3</span><span><b>右の設定パネル</b>：部品を1つ選ぶと、その部品の色や文字をここで変えられます。</span></li>
+    </ul>
+
+    <div class="proc">
+      <p class="t">チラシを作る流れ</p>
+      <ol class="steps">
+        <li>物件の詳しい画面で <span class="btn">販売図面を作成</span> を押します。<span class="see">足りない情報（値段・最寄り駅など）を聞かれるので入力すると、下書きが自動でできてこの画面が開きます。</span></li>
+        <li><span class="btn">写真を追加</span> で写真を入れ、<span class="btn">写真を自動整列</span> を押すときれいに並びます。<span class="see">「新着」などの目立つ札は<span class="btn">バッジを追加</span>、スマホで読み取れるQRは<span class="btn">QRを追加</span>で足せます。</span></li>
+        <li>直したい部品を押して、右のパネルで文字や色を整えます。<span class="see">何も選ばずにいると、チラシ全体の色や文字の種類を変えられます。</span></li>
+        <li><span class="btn">保存</span> を押してから、<span class="btn">PDF出力</span>（印刷用）または<span class="btn">PNG出力</span>（画像）で書き出します。<span class="see">できたファイルがダウンロードされます。</span></li>
+      </ol>
+    </div>
+    <div class="tip box"><span class="lbl">💡</span>保存したチラシは、あとで物件の画面から開いて、何度でも直せます。</div>
+    <div class="warn box"><span class="lbl">⚠ 注意</span>もし「PDF生成エンジン未準備」と表示されて書き出せないときは、システム側の準備待ちです。管理者に伝えてください（ふだんは使えます）。</div>
+  </section>
+
+  <!-- 6 -->
+  <section id="s6">
+    <h2 class="sec"><span class="sn">6</span>現地調査（スマホで現場記録）</h2>
+    <p class="whatis">実際に現場へ行って、地図の上に印をつけ、写真やメモを残す画面です。<span class="word">現地調査（げんちちょうさ）</span>＝現場に行って、その場の様子を見て記録することです。スマホで使うと便利です。</p>
+
+    <figure>
+      <div class="mock"><div class="mbd">
+        <div class="map">
+          <div class="seg2"><span class="on">地図</span><span>航空写真</span></div>
+          <div class="panel"><b class="muted">表示切替</b><br>☑ 既存物件<br>☑ 調査ピン<br><span class="mbtn ac" style="margin-top:5px;font-size:11px">巡回開始</span></div>
+          <span class="pin a"></span><span class="pin b"></span><span class="pin c"></span>
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:6px"><span class="cnb">1</span> 地図↔航空写真の切替　<span class="cnb">2</span> 表示のオン/オフ・巡回開始　<span class="cnb">3</span> ピン（物件や調べた地点の印）</div>
+      </div></div>
+      <figcaption>現地調査マップ（見本）</figcaption>
+    </figure>
+
+    <div class="proc">
+      <p class="t">現場を回って記録する</p>
+      <ol class="steps">
+        <li>メニューから「現地調査マップ」を開きます。<span class="see">地図が表示されます。</span></li>
+        <li>右上の <span class="btn">表示切替</span> で、地図に出すもの（既存物件・調査ピン）を選べます。<span class="see">スマホでは折りたたまれているので、まず押して開きます。</span></li>
+        <li><span class="btn">巡回開始</span> を押して記録を始めます。<span class="see"><span class="word">巡回（じゅんかい）</span>＝担当エリアを見て回ること。</span></li>
+        <li>現場で地図に<b>ピン</b>（印）を立て、写真やメモを残します。</li>
+        <li>回り終わったら巡回を終わりにします。<span class="see">記録は「巡回履歴」で後から見られます。</span></li>
+      </ol>
+    </div>
+    <div class="warn box"><span class="lbl">⚠ 位置情報について</span>「今いる場所（GPS）」は、安全な接続方法（HTTPS）だと安定します。今の接続方法だと、うまく取れないことがあります（これから改善予定）。画面の上に出る「安全ではありません」という表示も、この接続方法が理由で、社内で使う分には問題ありません。</div>
+    <div class="tip box"><span class="lbl">💡</span>今いる場所が記録されるのは「位置記録開始」を押したときだけです。巡回開始しただけではGPSは使われません。</div>
+  </section>
+
+  <!-- 7 -->
+  <section id="s7">
+    <h2 class="sec"><span class="sn">7</span>データを書き出す（CSV）</h2>
+    <p class="whatis">物件の一覧を、表計算ソフトで開けるファイルとして書き出す画面です。<span class="word">CSV（シーエスブイ）</span>＝ExcelやGoogleスプレッドシートなどのCSVで開ける、表の形のデータファイルです。</p>
+    <div class="proc">
+      <p class="t">CSVを書き出す</p>
+      <ol class="steps">
+        <li>物件一覧で <span class="btn">CSV出力</span> を押します。</li>
+        <li>書き出したい項目（列）を選んで書き出します。<span class="see">絞り込んでいる場合は、その条件に合う物件だけが書き出されます。</span></li>
+      </ol>
+    </div>
+    <div class="proc">
+      <p class="t">お手紙の宛名用のCSVを書き出す</p>
+      <ol class="steps">
+        <li>物件一覧で <span class="btn">DM差込CSV出力</span> を押します。<span class="see"><span class="word">差込（さしこみ）</span>＝お手紙の宛名や住所を、名簿から自動で入れる仕組みのこと。</span></li>
+        <li>お手紙を送ってよい物件をまとめたCSVが書き出されます。</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section id="s8">
+    <h2 class="sec"><span class="sn">8</span>データを取り込む</h2>
+    <p class="whatis">外部の資料（一覧表や書類）をシステムに読み込ませて、手入力を減らす画面です。<span class="word">取り込む（とりこむ）</span>＝外のデータをシステムの中に読み込むことです。</p>
+    <div class="proc">
+      <p class="t">受付帳のCSVや、謄本のPDFを読み込む</p>
+      <ol class="steps">
+        <li>メニューから「受付帳CSV取込」または「謄本PDF取込」を開きます。<span class="see"><span class="word">謄本（とうほん）</span>＝土地や家の「持ち主が誰か」を役所が証明する公式の書類。</span></li>
+        <li>ファイルを選んで読み込みます。<span class="see">読み込んだ結果や中身は、あとで一覧で確認できます。</span></li>
+      </ol>
+    </div>
+    <div class="tip box"><span class="lbl">💡</span>「登記の情報から、お手紙の宛先をまとめて取り込む」新しい機能が、まもなく使えるようになります（今は準備中）。</div>
+  </section>
+
+  <!-- 9 -->
+  <section id="s9">
+    <h2 class="sec"><span class="sn">9</span>営業のお手紙（DM）</h2>
+    <p class="whatis">物件の持ち主へ「売りませんか？」と提案するお手紙を作る画面です。<span class="word">DM（ディーエム）</span>＝ダイレクトメール。特定の相手へ送る営業のお手紙・チラシのことです。</p>
+    <p><b>この機能は今「準備中」です。</b>管理者が、文章を作るサービスや差出人などを設定すると使えるようになります。</p>
+    <div class="proc">
+      <p class="t">お手紙の下書きを作る（使えるようになった後）</p>
+      <ol class="steps">
+        <li>物件一覧で、お手紙を送ってよい物件を絞り込みます。</li>
+        <li><span class="btn">売却DMを作成</span> を押すと、宛先ごとの文章をAIが下書きします。</li>
+        <li>内容を確かめて手直しし、案内するページなどを選びます。</li>
+      </ol>
+    </div>
+    <div class="warn box"><span class="lbl">⚠</span>準備ができていないと「利用できません」と出ます。そのときは管理者に設定を頼んでください。</div>
+  </section>
+
+  <!-- 10 -->
+  <section id="s10">
+    <h2 class="sec"><span class="sn">10</span>管理者の操作</h2>
+    <p class="whatis">利用する人や設定を管理する、<b>管理者だけ</b>が使う画面です。<span class="word">管理者（かんりしゃ）</span>＝システム全体の設定や、他の人の使える範囲を決められる人のことです。</p>
+    <div class="proc">
+      <p class="t">利用者を追加して、できることを決める</p>
+      <ol class="steps">
+        <li>管理者メニューから「ユーザー管理」を開きます。</li>
+        <li>新しい利用者を追加し、役割や「権限テンプレート」（できることのセット）を割り当てます。</li>
+      </ol>
+    </div>
+    <h3>そのほかの管理の画面</h3>
+    <ul>
+      <li><b>監査ログ（かんさログ）</b>：誰がいつ何をしたかの記録。あとから確認できる台帳です。</li>
+      <li><b>データ品質チェック</b>：住所の間違いや表記のゆれなどを見つけて直すための道具です。</li>
+      <li><b>添付検索・パスワード変更</b>など。</li>
+    </ul>
+  </section>
+
+  <!-- 11 -->
+  <section id="s11">
+    <h2 class="sec"><span class="sn">11</span>やってはいけないこと・注意</h2>
+    <div class="warn box"><span class="lbl">⚠ いちばん大切</span><b>個人情報を外に出さない。</b>名前・住所・電話番号・メモは大切な個人情報です。画面を人に見せたり、写真に撮って外部（SNSやチャットなど）に送ったりしてはいけません。</div>
+    <ul>
+      <li><b>「削除」は慎重に。</b>物件やチラシを消すと元に戻せません。押す前に必ず確認を。</li>
+      <li><b>見えないものは触らない。</b>権限で表示されない機能は、あなたが使う必要のないものです。必要なときは管理者へ。</li>
+      <li><b>パスワードは秘密に。</b>他の人に教えたり、他のサービスと同じものを使い回したりしないでください。</li>
+    </ul>
+  </section>
+
+  <!-- 12 -->
+  <section id="s12">
+    <h2 class="sec"><span class="sn">12</span>困ったときは</h2>
+    <div class="qa"><p class="q">ログインできない</p><p class="a">名前とパスワードをもう一度確かめます。それでもダメなら、管理者にパスワードの再設定をお願いします。</p></div>
+    <div class="qa"><p class="q">「今いる場所」が取れない／「安全ではありません」と出る</p><p class="a">今の接続方法（HTTPS未対応）が理由です。社内で使う分には安全ですが、GPSが不安定になることがあります。これから改善されます。</p></div>
+    <div class="qa"><p class="q">チラシ（PDF・画像）が書き出せない</p><p class="a">「PDF生成エンジン未準備」と出たら、システム側の準備待ちです。管理者に伝えてください（ふだんは使えます）。</p></div>
+    <div class="qa"><p class="q">「謄本を自動取得」「所在で謄本を検索」が使えない</p><p class="a">外部サービスがまだ設定されていないためです。設定が済むと使えるようになります（今は準備中）。</p></div>
+    <div class="qa"><p class="q">「売却DMを作成」で使えないと出る</p><p class="a">お手紙を作るサービスが未設定です。管理者が設定すると使えます。</p></div>
+    <div class="qa"><p class="q">スマホで表示が崩れる</p><p class="a">画面をスマホ向けに直す作業が、まもなく反映されます。気になる場所は、写真（スクリーンショット）を撮って管理者に知らせてください。</p></div>
+  </section>
+
+  <!-- 13 -->
+  <section id="s13">
+    <h2 class="sec"><span class="sn">13</span>誰が何をできる？（権限の表）</h2>
+    <p class="whatis"><span class="word">権限（けんげん）</span>＝その人がシステムでできることの範囲です。役割によって変わります（下は目安）。</p>
+    <div class="scroll"><table>
+      <tr><th>やりたいこと</th><th>閲覧者<br>（見るだけ）</th><th>一般<br>（担当者）</th><th>管理者</th></tr>
+      <tr><td>物件・持ち主を見る</td><td class="yes">できる</td><td class="yes">できる</td><td class="yes">できる</td></tr>
+      <tr><td>物件を登録・直す・消す</td><td class="no">—</td><td class="yes">できる</td><td class="yes">できる</td></tr>
+      <tr><td>チラシを作る・書き出す</td><td class="no">見る/出力のみ</td><td class="yes">できる</td><td class="yes">できる</td></tr>
+      <tr><td>現地調査・巡回</td><td class="no">—</td><td class="yes">できる</td><td class="yes">できる</td></tr>
+      <tr><td>CSV・お手紙の書き出し</td><td class="no">権限による</td><td class="no">権限による</td><td class="yes">できる</td></tr>
+      <tr><td>利用者や設定の管理</td><td class="no">—</td><td class="no">—</td><td class="yes">できる</td></tr>
+    </table></div>
+    <div class="tip box"><span class="lbl">💡</span>この表は目安です。実際にできることは、あなたに割り当てられた設定で決まります。</div>
+  </section>
+
+  <!-- 14 -->
+  <section id="s14">
+    <h2 class="sec"><span class="sn">14</span>用語辞典</h2>
+    <div class="scroll"><table>
+      <tr><th>用語</th><th>意味</th></tr>
+      <tr><td>物件（ぶっけん）</td><td>この仕事で扱う土地や家、マンションの一部屋など、1件ごとの不動産。</td></tr>
+      <tr><td>所有者（しょゆうしゃ）</td><td>その土地や家を持っている人・会社。持ち主。</td></tr>
+      <tr><td>謄本（とうほん）</td><td>土地や家の「持ち主が誰か」を役所が証明する公式の書類。</td></tr>
+      <tr><td>マイソク／販売図面</td><td>物件を売り出すときの1枚チラシ。写真・値段・地図などをまとめたもの。</td></tr>
+      <tr><td>DM（ディーエム）</td><td>持ち主などへ送る営業のお手紙・チラシ。</td></tr>
+      <tr><td>CSV（シーエスブイ）</td><td>ExcelやGoogleスプレッドシートで開ける、表の形のデータファイル。</td></tr>
+      <tr><td>差込（さしこみ）</td><td>お手紙の宛名や住所を、名簿から自動で入れる仕組み。</td></tr>
+      <tr><td>アップロード</td><td>自分のスマホ・パソコンの写真やファイルを、システムに送ること。</td></tr>
+      <tr><td>タブ</td><td>画面上部の見出し。押すと表示が切り替わる（紙をめくるイメージ）。</td></tr>
+      <tr><td>権限（けんげん）</td><td>その人がシステムでできることの範囲。</td></tr>
+      <tr><td>監査ログ（かんさログ）</td><td>誰がいつ何をしたかの記録。安全を確かめるための台帳。</td></tr>
+      <tr><td>QRコード</td><td>スマホのカメラで読み取ると、決めたページへ飛べる四角い模様。</td></tr>
+      <tr><td>GPS（ジーピーエス）</td><td>今いる場所を調べる仕組み。地図で現在地を出すのに使う。</td></tr>
+    </table></div>
+  </section>
+
+  <div class="foot">
+    画面の図はダミー（見本）で、実際のデータではありません。「準備中／まもなく」の機能は今後変わります。全体像は別紙「使い方ガイド」も参考にしてください。分からないことは、遠慮なく管理者に聞いてください。<br>
+    最終更新: 2026-07-05
+  </div>
+</main>
+</body>
+</html>

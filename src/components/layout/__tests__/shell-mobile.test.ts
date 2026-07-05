@@ -78,6 +78,25 @@ describe("sidebar — 管理者メニューの整理(2グループ・既定閉)"
   });
 });
 
+describe("sidebar — メニュー最下部の資料リンク(ガイド/マニュアル)", () => {
+  it("使い方ガイドと取り扱いマニュアルへのリンクがある", () => {
+    expect(sidebar).toContain('href="/docs/guide.html"');
+    expect(sidebar).toContain('href="/docs/manual.html"');
+    expect(sidebar).toContain("使い方ガイド");
+    expect(sidebar).toContain("取り扱いマニュアル");
+  });
+  it("両リンクとも別タブで開く(target=_blank + rel=noopener)", () => {
+    expect(sidebar).toMatch(/href="\/docs\/guide\.html"[\s\S]{0,120}target="_blank"[\s\S]{0,60}rel="noopener/);
+    expect(sidebar).toMatch(/href="\/docs\/manual\.html"[\s\S]{0,120}target="_blank"[\s\S]{0,60}rel="noopener/);
+  });
+  it("資料リンクは管理者グループより後(メニュー最下部)に置かれる", () => {
+    const admin = sidebar.indexOf('navGroup("データ品質チェック"');
+    const docs = sidebar.indexOf('href="/docs/guide.html"');
+    expect(admin).toBeGreaterThan(-1);
+    expect(docs).toBeGreaterThan(admin);
+  });
+});
+
 describe("dashboard-layout — 下部ツールバー被り解消", () => {
   it("main はモバイルで pb-24（lg では従来の pb-6）", () => {
     expect(dashboardLayout).toContain("p-4 pb-24 lg:p-6 lg:pb-6");
