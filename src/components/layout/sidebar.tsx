@@ -242,7 +242,10 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
       )}
 
       {/* 資料（使い方ガイド・取り扱いマニュアル）— メニュー最下部・全ユーザーに表示。
-          public/docs の静的HTML。認証の内側(proxy 非公開パス)ゆえログイン中のみ閲覧可。
+          public/docs の静的HTML（個人情報を含まない一般資料）。未ログインは proxy が
+          /login へ誘導するが、静的ファイルのため厳密なセッション検証は行わない
+          （＝機密情報は載せない前提のドキュメントのみを置く）。将来 機密を含む資料が
+          必要になったら auth() で検証する route 経由に切り替えること。
           別タブで開き、作業中の画面を失わないようにする。 */}
       <div className="mt-4 mb-1">
         <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
