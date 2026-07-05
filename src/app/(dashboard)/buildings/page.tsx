@@ -189,8 +189,8 @@ function CreateBuildingModal({
     setForm((prev) => ({ ...prev, [key]: value }));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
         <h3 className="mb-4 text-lg font-bold text-gray-800 dark:text-gray-100">新規マンション棟</h3>
         {error && (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">

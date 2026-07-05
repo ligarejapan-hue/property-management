@@ -35,7 +35,9 @@ export default function DashboardLayout({
            * 従来どおり解決させるために必要。縦に長いページは main の
            * overflow-y-auto がスクロールを担う(挙動不変)。
            */}
-          <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+          {/* pb-24(モバイルのみ): iOS Safari の下部ツールバーに最下部の
+              コンテンツが隠れないよう、スクロール末尾に余白を確保する */}
+          <main className="flex-1 overflow-y-auto p-4 pb-24 lg:p-6 lg:pb-6">
             <div className="mx-auto h-full w-full max-w-[1536px]">{children}</div>
           </main>
         </div>

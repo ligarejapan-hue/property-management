@@ -460,10 +460,10 @@ export default function PropertyDetailPage({
     <div data-pii-protected data-pii-surface="property">
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           <Link
             href="/properties"
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             <ArrowLeft className="h-4 w-4" />
             物件一覧
@@ -473,7 +473,7 @@ export default function PropertyDetailPage({
             {property.address}
           </h2>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* DM 送付履歴ページ(/properties/[id]/dm-logs)への導線。route 新設なし・既存ページへのリンク。
               dm-logs ページは property:read + owner:read + record-scope を要するため、既存導出済みの
               canReadOwner でゲートして 403 dead-end を避ける（新ロジック追加なし・既存 state 利用）。 */}
@@ -482,7 +482,7 @@ export default function PropertyDetailPage({
               href={`/properties/${property.id}/dm-logs`}
               aria-label="DM送付履歴を見る"
               title="この物件の DM 送付履歴"
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               <Mail className="h-4 w-4" />
               DM送付履歴
@@ -499,7 +499,7 @@ export default function PropertyDetailPage({
             onClick={() => setShowEditForm(true)}
             aria-label="物件を編集"
             title="物件情報を編集"
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             <Edit className="h-4 w-4" />
             物件を編集
@@ -509,7 +509,7 @@ export default function PropertyDetailPage({
             disabled={deleting}
             aria-label="物件を削除"
             title="この物件を削除"
-            className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
           >
             {deleting ? (
               <Loader2 className="h-4 w-4 animate-spin" />

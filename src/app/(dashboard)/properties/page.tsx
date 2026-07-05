@@ -741,7 +741,7 @@ function PropertiesPageInner() {
       </div>
 
       {/* Action row */}
-      <div className="mb-4 flex justify-end gap-2">
+      <div className="mb-4 flex flex-wrap justify-end gap-2">
         {canExportCsv && (
           <div className="relative">
             <button
@@ -749,7 +749,7 @@ function PropertiesPageInner() {
               onClick={() => setShowColumnPicker((v) => !v)}
               aria-haspopup="true"
               aria-expanded={showColumnPicker}
-              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+              className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               title="出力する列を選んでCSV出力"
             >
               <Download className="h-4 w-4" />
@@ -822,7 +822,7 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleExportDm}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
             title="現在の検索条件で送付可の物件をDM差込CSV出力"
           >
             <Download className="h-4 w-4" />
@@ -836,7 +836,7 @@ function PropertiesPageInner() {
             type="button"
             onClick={handleCreateSaleDm}
             disabled={creatingDm}
-            className="inline-flex items-center gap-2 rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             title="現在の検索条件で送付可の物件から売却DM下書きを作成"
           >
             {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -846,7 +846,7 @@ function PropertiesPageInner() {
         <button
           type="button"
           onClick={() => setShowNewModal(true)}
-          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          className="inline-flex items-center gap-2 whitespace-nowrap rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
         >
           <Plus className="h-4 w-4" />
           新規物件登録

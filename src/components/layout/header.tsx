@@ -23,15 +23,20 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
   const roleLabel = roleLabels[userRole] ?? userRole;
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 lg:px-6">
-      <h1 className="text-lg font-bold text-gray-800 dark:text-gray-100 pl-10 lg:pl-0">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 lg:px-6">
+      {/* pl-12: モバイルの固定ハンバーガー(left-3 + 36px)を確実に避ける。
+          min-w-0 + truncate: 右側より優先して縮み、折り返さず 1 行を保つ。 */}
+      <h1 className="min-w-0 truncate text-lg font-bold text-gray-800 dark:text-gray-100 pl-12 lg:pl-0">
         物件管理システム
       </h1>
 
-      <div className="flex items-center gap-4">
-        <ThemeToggle />
+      <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        {/* モバイルではテーマ切替をメニュー(ドロワー)下部へ移し、ヘッダーを 1 行に保つ */}
+        <div className="hidden sm:block">
+          <ThemeToggle />
+        </div>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-700 dark:text-gray-300">{userName}</span>
+          <span className="hidden md:inline text-sm text-gray-700 dark:text-gray-300">{userName}</span>
           <StatusBadge intent={roleIntent}>{roleLabel}</StatusBadge>
         </div>
         <button

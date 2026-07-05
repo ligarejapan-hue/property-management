@@ -139,14 +139,14 @@ export function SalesSheetCreateButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 rounded-md border border-indigo-300 px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-900/20"
+        className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-indigo-300 px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-900/20"
       >
         販売図面を作成（{cfg.label}）
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-[420px] rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-[420px] overflow-y-auto rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-800">
             <h2 className="mb-3 text-base font-bold text-gray-900 dark:text-gray-100">
               販売図面（{cfg.label}）の作成
             </h2>

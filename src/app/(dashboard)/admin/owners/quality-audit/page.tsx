@@ -506,6 +506,7 @@ export default function QualityAuditPage() {
             品質に問題のある値は見つかりませんでした（権限により一部フィールドは監査対象外の場合があります）。
           </div>
         ) : tab === "name" ? (
+          <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
             <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
@@ -579,7 +580,9 @@ export default function QualityAuditPage() {
               ))}
             </tbody>
           </table>
+          </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
             <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
@@ -662,6 +665,7 @@ export default function QualityAuditPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
