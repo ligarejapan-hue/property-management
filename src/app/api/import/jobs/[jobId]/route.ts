@@ -41,6 +41,7 @@ const VALID_ROW_STATUSES = [
   "error",
   "skipped",
   "needs_review",
+  "pending",
 ] as const;
 
 // 理由別 filter（Phase 2）: 閲覧用の行絞り込み token（URL-safe な英語 enum・PII なし）。
@@ -265,6 +266,13 @@ export async function GET(
       reason,
     };
 
+    // pending 行数（registry_pdf_bulk 等・status/reason フィルタ非依存・ジョブ全体）。
+    // Task 11 のウィザード進捗ポーリング/再開ボタンが依存する additive フィールド。
+    const pendingCount = await prisma.importJobRow.count({
+      where: { jobId, status: "pending" },
+    });
+    const isRegistryPdfBulkJob = job.jobType === "registry_pdf_bulk";
+
     return apiResponse({
       ...job,
       rows,
@@ -273,6 +281,8 @@ export async function GET(
       duplicateCount,
       duplicateActionableCount,
       pagination,
+      pendingCount,
+      isRegistryPdfBulkJob,
     });
   } catch (error) {
     return handleApiError(error);

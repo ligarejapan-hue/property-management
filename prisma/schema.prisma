@@ -119,6 +119,7 @@ enum ImportJobType {
   dm_history_csv
   investigation_csv
   property_pdf
+  registry_pdf_bulk
 }
 
 enum ImportRowStatus {
@@ -126,6 +127,7 @@ enum ImportRowStatus {
   error
   skipped
   needs_review
+  pending
 }
 
 enum ChangeSource {

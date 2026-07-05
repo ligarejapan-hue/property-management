@@ -19,7 +19,10 @@
 import { isUpdateMessage } from "./import-row-display";
 
 export interface ImportRowLike {
-  status: "success" | "error" | "skipped" | "needs_review";
+  // pending（registry_pdf_bulk 由来の「未処理」行）も型として受け取れるように
+  // する。calcImportSummary の switch は pending 用の分岐で明示的に無視する
+  // （5区分の集計対象外・totalCount にも含めない）ので挙動は変わらない。
+  status: "success" | "error" | "skipped" | "needs_review" | "pending";
   errorMessage: string | null;
 }
 
@@ -67,6 +70,10 @@ export function calcImportSummary(rows: ImportRowLike[]): ImportSummary {
       case "error":
         errorCount++;
         break;
+      // pending（registry_pdf_bulk 由来の「未処理」行）は意図的に集計対象外
+      // （5区分・totalCount のいずれにも含めない。summaryFromStatusCounts と同じ方針）。
+      case "pending":
+        break;
       // unknown status は集計対象外（段階Bで actionType を追加した際の
       // 旧データ互換も含めて、サイレントに無視するのが安全）
       default:
@@ -87,17 +94,24 @@ export function calcImportSummary(rows: ImportRowLike[]): ImportSummary {
 
 /**
  * status 別件数のマップ。ImportRowStatus（success / error / skipped /
- * needs_review）と一致するキーを持つ。Prisma 依存を避けるため enum を
+ * needs_review / pending）と一致するキーを持つ。Prisma 依存を避けるため enum を
  * import せず、リテラルキーの optional interface として定義する。
  *
  * groupBy は該当 0 件の status を行として返さないため、未指定キーは
  * `undefined`（= 0 件）として扱う。
+ *
+ * pending（registry_pdf_bulk 由来の「未処理」行）はキーとして受け取れるように
+ * するが、summaryFromStatusCounts の 5 区分（新規/更新/スキップ/要レビュー/
+ * エラー）はいずれも完了済みステータスのみを対象にしており、pending は意図的に
+ * 集計対象外（totalCount にも含めない）とする。ImportSummary の形状・意味は
+ * 変えない。
  */
 export interface StatusCounts {
   success?: number;
   error?: number;
   skipped?: number;
   needs_review?: number;
+  pending?: number;
 }
 
 /**

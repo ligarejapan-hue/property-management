@@ -12,6 +12,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
 import { findDuplicateOwner } from "@/lib/owner-dedup";
 import { recalculateJobCounts } from "@/lib/import-job-counts";
+import { getStorage } from "@/lib/storage";
 
 /** Map Japanese CSV header names to property model field names. */
 const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -266,6 +267,12 @@ export async function PATCH(
         if (!owner) {
           throw new ApiError(404, "指定された所有者が見つかりません", "NOT_FOUND");
         }
+      } else if (row.job.jobType === "registry_pdf_bulk") {
+        throw new ApiError(
+          422,
+          "このジョブの行は専用の手動添付APIを使用してください",
+          "VALIDATION_ERROR",
+        );
       }
 
       updatedRow = await prisma.importJobRow.update({
@@ -294,6 +301,24 @@ export async function PATCH(
       });
     } else {
       throw new ApiError(422, "無効な action です", "VALIDATION_ERROR");
+    }
+
+    // registry_pdf_bulk 行が skip/mark_error で確定した場合、staging(所有者PII)を
+    // best-effortで削除する。この種の行はneeds_review/errorのまま放置されず
+    // 手動添付対象からも外れる袋小路のため、保管しておく理由が無い。
+    if (
+      row.job.jobType === "registry_pdf_bulk" &&
+      (action === "skip" || action === "mark_error")
+    ) {
+      const raw = (row.rawData ?? {}) as Record<string, unknown>;
+      const stagedKey = typeof raw.stagedKey === "string" ? raw.stagedKey : "";
+      if (stagedKey) {
+        try {
+          await getStorage().delete(stagedKey);
+        } catch (e) {
+          console.error("import row resolve: staging delete failed:", e);
+        }
+      }
     }
 
     // Recalculate job counts

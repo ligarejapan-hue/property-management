@@ -5,7 +5,7 @@
  * status 単位の groupBy で行う。挙動は従来実装と一致させる:
  *   - successCount       … success 行数
  *   - errorCount(保存値) … error + needs_review 行数
- *   - 未解決(error / needs_review)が無ければ status="completed" / completedAt をセット
+ *   - 未解決(error / needs_review / pending)が無ければ status="completed" / completedAt をセット
  * groupBy は該当 0 件の status を行として返さないため、0 埋めされることも検証する。
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
@@ -121,5 +121,22 @@ describe("recalculateJobCounts (groupBy)", () => {
     expect(arg.data.errorCount).toBe(0);
     expect(arg.data.status).toBe("completed");
     expect(arg.data.completedAt).toBeInstanceOf(Date);
+  });
+
+  it("error/needs_review が0でも pending 行が残っていれば completed にしない（手動添付ジョブの resume 待ち）", async () => {
+    pm.importJobRow.groupBy.mockResolvedValue([
+      { status: "success", _count: { _all: 2 } },
+      { status: "pending", _count: { _all: 3 } },
+    ]);
+
+    await recalculateJobCounts(JOB_ID);
+
+    const arg = pm.importJob.update.mock.calls[0][0];
+    expect(arg.data.successCount).toBe(2);
+    // pending は errorCount(保存値)には含めない（従来どおり error + needs_review のみ）
+    expect(arg.data.errorCount).toBe(0);
+    // pending が残っているので未解決 → completed 化しない
+    expect(arg.data.status).toBeUndefined();
+    expect(arg.data.completedAt).toBeUndefined();
   });
 });

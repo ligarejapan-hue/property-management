@@ -1,0 +1,293 @@
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+
+vi.mock("@/lib/api-helpers", () => ({
+  ApiError: class extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, message: string, code = "ERROR") {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  },
+  getApiSession: vi.fn(),
+  getUserPermissions: vi.fn(),
+  apiResponse: vi.fn((body: unknown, status = 200) =>
+    Response.json(body as object, { status }),
+  ),
+  handleApiError: vi.fn(
+    (e: { status?: number; message?: string; code?: string }) =>
+      Response.json(
+        { error: { message: e?.message, code: e?.code } },
+        { status: e?.status ?? 500 },
+      ),
+  ),
+}));
+vi.mock("@/lib/permissions", () => ({ hasPermission: vi.fn(() => true) }));
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    importJob: { create: vi.fn(), update: vi.fn() },
+    importJobRow: { createMany: vi.fn() },
+  },
+}));
+vi.mock("@/lib/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/storage")>();
+  return { ...actual, getStorage: vi.fn() };
+});
+vi.mock("@/lib/registry-pdf-bulk/worker", () => ({
+  enqueueRegistryPdfBulkJob: vi.fn(),
+}));
+
+import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { hasPermission } from "@/lib/permissions";
+import prisma from "@/lib/prisma";
+import { getStorage } from "@/lib/storage";
+import { enqueueRegistryPdfBulkJob } from "@/lib/registry-pdf-bulk/worker";
+import { POST } from "../route";
+
+type PM = {
+  importJob: { create: Mock; update: Mock };
+  importJobRow: { createMany: Mock };
+};
+const pm = prisma as unknown as PM;
+
+const storageMock = { upload: vi.fn(), delete: vi.fn() };
+
+function pdfFile(name: string, size = 1024): File {
+  const body = Buffer.concat([
+    Buffer.from("%PDF-1.4\n"),
+    Buffer.alloc(Math.max(0, size - 9), 0x20),
+  ]);
+  return new File([body], name, { type: "application/pdf" });
+}
+
+function textFile(name: string): File {
+  return new File([Buffer.from("not a pdf")], name, { type: "text/plain" });
+}
+
+// 実ブラウザの fetch+FormData は必ず Content-Length を送出するが、undici の
+// Request は FormData/Blob body を積んだだけでは(送出時まで遅延計算のため)
+// headers.get("content-length") が null のまま。ブラウザ相当の挙動を再現する
+// ため、multipart body を Blob 化してサイズを確定させ、明示的にヘッダを積む。
+async function makeRequest(files: File[]): Promise<Request> {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+  const blob = await new Response(fd).blob();
+  return new Request("http://localhost/api/import/registry-pdf-bulk", {
+    method: "POST",
+    body: blob,
+    headers: { "content-length": String(blob.size) },
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "admin" });
+  (getUserPermissions as Mock).mockResolvedValue([]);
+  (hasPermission as Mock).mockReturnValue(true);
+  (getStorage as Mock).mockReturnValue(storageMock);
+  storageMock.upload.mockResolvedValue({ url: "/uploads/x", key: "x" });
+  pm.importJob.create.mockResolvedValue({ id: "11111111-2222-3333-4444-555555555555" });
+  pm.importJob.update.mockResolvedValue({ id: "11111111-2222-3333-4444-555555555555" });
+  pm.importJobRow.createMany.mockResolvedValue({ count: 1 });
+});
+
+describe("POST /api/import/registry-pdf-bulk", () => {
+  it("PDFを受け付けてジョブ+pending行を作り、ワーカーにenqueueして202", async () => {
+    const res = await POST(
+      (await makeRequest([
+        pdfFile(
+          "世田谷区上馬２丁目７５２－３不動産登記（建物所有者事項）2024121200118150.PDF",
+        ),
+      ])) as never,
+    );
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as {
+      jobId: string;
+      totalRows: number;
+      acceptedCount: number;
+      rejectedCount: number;
+    };
+    expect(body.totalRows).toBe(1);
+    expect(body.acceptedCount).toBe(1);
+    expect(body.rejectedCount).toBe(0);
+    expect(pm.importJob.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          jobType: "registry_pdf_bulk",
+          status: "pending",
+          totalRows: 1,
+          executedBy: "u1",
+        }),
+      }),
+    );
+    const rows = pm.importJobRow.createMany.mock.calls[0][0].data as Array<{
+      status: string;
+      rawData: Record<string, string>;
+    }>;
+    expect(rows[0].status).toBe("pending");
+    expect(rows[0].rawData.requestNumber).toBe("2024121200118150");
+    expect(rows[0].rawData.location).toBe("世田谷区上馬２丁目７５２－３");
+    expect(rows[0].rawData.stagedKey).toContain("import-staging/registry-pdf/");
+    expect(storageMock.upload).toHaveBeenCalledTimes(1);
+    expect(enqueueRegistryPdfBulkJob).toHaveBeenCalledWith(
+      "11111111-2222-3333-4444-555555555555",
+    );
+  });
+
+  it("非PDFは当該ファイルのみ error 行として記録(全体は202)", async () => {
+    const res = await POST(
+      (await makeRequest([
+        pdfFile(
+          "世田谷区弦巻１丁目３２－３１不動産登記（土地所有者事項）2024121100710215.pdf",
+        ),
+        textFile("メモ.txt"),
+      ])) as never,
+    );
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { acceptedCount: number; rejectedCount: number };
+    expect(body.acceptedCount).toBe(1);
+    expect(body.rejectedCount).toBe(1);
+    const rows = pm.importJobRow.createMany.mock.calls[0][0].data as Array<{
+      status: string;
+    }>;
+    expect(rows.filter((r) => r.status === "error")).toHaveLength(1);
+    // 非PDFはstagingに保存しない
+    expect(storageMock.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("全件非PDF(2件)は即時失敗確定(enqueueせずジョブをfailedに更新)", async () => {
+    const res = await POST(
+      (await makeRequest([textFile("メモ1.txt"), textFile("メモ2.txt")])) as never,
+    );
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { acceptedCount: number; rejectedCount: number };
+    expect(body.acceptedCount).toBe(0);
+    expect(body.rejectedCount).toBe(2);
+    const rows = pm.importJobRow.createMany.mock.calls[0][0].data as Array<{
+      status: string;
+    }>;
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.status === "error")).toBe(true);
+    // staging(PDFのみ)にはアップロードしない
+    expect(storageMock.upload).not.toHaveBeenCalled();
+    expect(pm.importJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "11111111-2222-3333-4444-555555555555" },
+        data: expect.objectContaining({
+          status: "failed",
+          successCount: 0,
+          errorCount: 2,
+        }),
+      }),
+    );
+    const updateData = pm.importJob.update.mock.calls[0][0].data as {
+      completedAt: Date;
+    };
+    expect(updateData.completedAt).toBeInstanceOf(Date);
+    expect(enqueueRegistryPdfBulkJob).not.toHaveBeenCalled();
+  });
+
+  it("ファイル0件は 400 NO_FILE", async () => {
+    const res = await POST((await makeRequest([])) as never);
+    expect(res.status).toBe(400);
+  });
+
+  it("100件超は 422 TOO_MANY_FILES", async () => {
+    const files = Array.from({ length: 101 }, (_, i) =>
+      pdfFile(`世田谷区上馬２丁目７５２－${i}不動産登記（建物所有者事項）20241212001181${String(i).padStart(2, "0")}.pdf`),
+    );
+    const res = await POST((await makeRequest(files)) as never);
+    expect(res.status).toBe(422);
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+  });
+
+  it("権限なしは 403", async () => {
+    (hasPermission as Mock).mockReturnValue(false);
+    const res = await POST((await makeRequest([pdfFile("a.pdf")])) as never);
+    expect(res.status).toBe(403);
+  });
+
+  it("Content-Length が上限超過なら 413(formDataを読む前)", async () => {
+    // 実Requestは undici が content-length を管理するため、route が使う
+    // インターフェース(headers.get / formData)だけ持つ stub を渡す
+    const formDataSpy = vi.fn();
+    const req = {
+      headers: new Headers({ "content-length": String(200 * 1024 * 1024) }),
+      formData: formDataSpy,
+    };
+    const res = await POST(req as never);
+    expect(res.status).toBe(413);
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  it("Content-Length 欠落は 411 で formData を読まない", async () => {
+    const formDataSpy = vi.fn();
+    const req = {
+      headers: new Headers({}),
+      formData: formDataSpy,
+    };
+    const res = await POST(req as never);
+    expect(res.status).toBe(411);
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  it("行作成失敗時は staging を掃除しジョブを failed にして 500", async () => {
+    pm.importJobRow.createMany.mockRejectedValue(new Error("db down"));
+    const res = await POST(
+      (await makeRequest([pdfFile("a.pdf"), pdfFile("b.pdf")])) as never,
+    );
+    expect(res.status).toBe(500);
+    expect(storageMock.upload).toHaveBeenCalledTimes(2);
+    const uploadedKeys = storageMock.upload.mock.calls.map(
+      (call) => (call[1] as { key: string }).key,
+    );
+    expect(storageMock.delete).toHaveBeenCalledTimes(2);
+    const deletedKeys = storageMock.delete.mock.calls.map((call) => call[0]);
+    expect(deletedKeys.sort()).toEqual(uploadedKeys.sort());
+    expect(pm.importJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "11111111-2222-3333-4444-555555555555" },
+        data: expect.objectContaining({ status: "failed" }),
+      }),
+    );
+    expect(enqueueRegistryPdfBulkJob).not.toHaveBeenCalled();
+  });
+
+  it("同時アップロードが2件を超えると3件目は503(UPLOAD_BUSY・formDataを呼ばない)", async () => {
+    const req1 = await makeRequest([pdfFile("a.pdf")]);
+    const req2 = await makeRequest([pdfFile("b.pdf")]);
+    const formDataSpy = vi.fn();
+    const req3 = {
+      headers: new Headers({ "content-length": "10" }),
+      formData: formDataSpy,
+    };
+
+    // 1・2件目はまだ完了させない(=in-flightのまま)。同期実行される
+    // ガード判定+カウンタ加算の後、最初の await で中断される。
+    const p1 = POST(req1 as never);
+    const p2 = POST(req2 as never);
+    const res3 = await POST(req3 as never);
+
+    expect(res3.status).toBe(503);
+    const body3 = (await res3.json()) as { error: { message: string; code: string } };
+    expect(body3.error.code).toBe("UPLOAD_BUSY");
+    expect(formDataSpy).not.toHaveBeenCalled();
+
+    // 後片付け: 1・2件目を完了させてカウンタを0に戻す(他テストを汚染しない)
+    const [res1, res2] = await Promise.all([p1, p2]);
+    expect(res1.status).toBe(202);
+    expect(res2.status).toBe(202);
+  });
+
+  it("処理完了後はカウンタが戻り、次のリクエストを受け付けられる(finallyで減算)", async () => {
+    const res1 = await POST((await makeRequest([pdfFile("a.pdf")])) as never);
+    const res2 = await POST((await makeRequest([pdfFile("b.pdf")])) as never);
+    expect(res1.status).toBe(202);
+    expect(res2.status).toBe(202);
+    // 直列に2件完了させた後(finallyで都度減算)なので、3件目も通常どおり受け付けられる。
+    const res3 = await POST((await makeRequest([pdfFile("c.pdf")])) as never);
+    expect(res3.status).toBe(202);
+  });
+});

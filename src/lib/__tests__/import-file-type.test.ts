@@ -90,6 +90,33 @@ describe("buildReceptionMatchKey / buildOwnerMatchKey", () => {
       "xy",
     );
   });
+
+  it("末尾の「外N」(正規化後)を除去する(受付帳側・実データ形式)", () => {
+    // 実データ: K列に地番+「外N」(共同担保等の付随物件数)が付く
+    const key = buildReceptionMatchKey({
+      h: "東京都",
+      i: "世田谷区",
+      j: "上馬２丁目",
+      k: "７５２－３外２",
+    });
+    expect(key).toBe("東京都世田谷区上馬2丁目752-3");
+  });
+
+  it("受付帳「…外２」× 所有者「…」(外Nなし)が一致する", () => {
+    const reception = buildReceptionMatchKey({
+      h: "東京都",
+      i: "世田谷区",
+      j: "上馬２丁目",
+      k: "７５２－３外２",
+    });
+    const owner = buildOwnerMatchKey("東京都世田谷区上馬2丁目752-3");
+    expect(reception).toBe(owner);
+  });
+
+  it("所有者側に「外N」が付いていても同様に除去する", () => {
+    const owner = buildOwnerMatchKey("東京都世田谷区上馬2丁目752-3外2");
+    expect(owner).toBe("東京都世田谷区上馬2丁目752-3");
+  });
 });
 
 describe("classifyReceptionKColumn / splitReceptionK", () => {

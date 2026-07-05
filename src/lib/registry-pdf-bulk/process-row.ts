@@ -1,0 +1,409 @@
+import { randomUUID } from "node:crypto";
+import type { Prisma } from "@/generated/prisma";
+import prisma from "@/lib/prisma";
+import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
+import { extractTextFromPdf } from "@/lib/pdf-extract";
+import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { canAccessPropertyRecord } from "@/lib/property-access";
+import { writeAuditLog } from "@/lib/audit";
+import { matchProperty, type PropertyIndex } from "./match";
+
+/**
+ * 所有者事項PDF一括取込: 1行(=1ファイル)の処理。
+ *
+ * 流れ: pending確認 → 請求番号の重複スキップ → 物件突合
+ *       (ファイル名の所在 → だめならPDF内容の所在/不動産番号) →
+ *       Attachment(type=registry)作成 → 行を atomic に確定。
+ *
+ * - 確定は必ず `updateMany({ where: { id, status: "pending" } })` で行う。
+ *   ワーカーは単一直列だが、再開の二重enqueueや再起動後の残骸に対して
+ *   「pending の行だけが確定できる」ことで冪等性を担保する。
+ * - クラッシュで「添付済みなのに行がpendingのまま」になった場合も、
+ *   再処理時に請求番号の重複チェックが skipped に倒すので二重添付されない。
+ * - rawData/エラーメッセージに所有者の氏名・住所は入れない(PII規律)。
+ */
+
+export interface BulkRowExecutor {
+  id: string;
+  role: string;
+}
+
+export type BulkRowOutcome =
+  | "success"
+  | "skipped"
+  | "needs_review"
+  | "error"
+  | "noop";
+
+interface BulkRawData {
+  fileName?: string;
+  stagedKey?: string;
+  requestNumber?: string;
+  location?: string;
+  kind?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * PDF内容から抽出した所在のクリーンアップ。
+ *
+ * pdf-registry-parser の所在フォールバックは、都道府県で始まる行を丸ごと
+ * 候補として拾うため「東京都世田谷区上馬２丁目７５２－３ 所有者一覧表
+ * （建物）」のように次行のタイトルが付着することがある。突合キーとして
+ * 使う前に、最初の空白(半角/全角)で切って所在部分だけを残す。
+ * 都道府県接頭辞/「外N」接尾辞の除去は matchProperty(canonicalAddressKey)
+ * 側で行うのでここでは触らない。
+ */
+function cleanExtractedAddress(input: string | null | undefined): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+  const idx = trimmed.search(/\s/);
+  return idx === -1 ? trimmed : trimmed.slice(0, idx);
+}
+
+/**
+ * staging(所有者事項PDF・PII)のbest-effort削除。
+ *
+ * 行がerrorで確定するとき、その添付は手動添付対象外の袋小路になる
+ * (needs_review と違い、ユーザーが後から手動添付できる導線が無い)ため、
+ * stagingを保持しておく理由が無い。失敗は握りつぶしてログのみ(呼び出し側の
+ * 確定処理を妨げない)。
+ */
+async function deleteStagedBestEffort(
+  storage: ReturnType<typeof getStorage>,
+  key: string,
+): Promise<void> {
+  try {
+    await storage.delete(key);
+  } catch (e) {
+    console.error("registry-pdf-bulk: staging delete failed:", e);
+  }
+}
+
+/**
+ * 行確定に失敗した(または並行確定で確定できなかった)場合の添付取り消し。
+ * レコード→blob の順に best-effort で戻す(手動添付routeのundoと同じ規約)。
+ */
+async function undoAttachmentBestEffort(
+  storage: ReturnType<typeof getStorage>,
+  attachmentId: string,
+  uploadedKey: string | null,
+): Promise<void> {
+  try {
+    await prisma.attachment.delete({ where: { id: attachmentId } });
+  } catch (e) {
+    console.error("registry-pdf-bulk: attachment undo failed:", e);
+  }
+  if (uploadedKey) {
+    try {
+      await storage.delete(uploadedKey);
+    } catch (e) {
+      console.error("registry-pdf-bulk: uploaded blob undo failed:", e);
+    }
+  }
+}
+
+async function finalizeRow(
+  rowId: string,
+  data: {
+    status: "success" | "skipped" | "needs_review" | "error";
+    errorMessage: string | null;
+    createdId: string | null;
+    rawData: Record<string, unknown>;
+  },
+): Promise<boolean> {
+  const res = await prisma.importJobRow.updateMany({
+    where: { id: rowId, status: "pending" },
+    data: {
+      ...data,
+      // Prisma の JSON カラムは InputJsonValue を要求する。呼び出し側では
+      // 可読性のため Record<string, unknown> で組み立て、書き込み境界でのみ cast する。
+      rawData: data.rawData as Prisma.InputJsonValue,
+    },
+  });
+  return res.count === 1;
+}
+
+export async function processRegistryPdfBulkRow(args: {
+  jobId: string;
+  rowId: string;
+  index: PropertyIndex;
+  executor: BulkRowExecutor;
+}): Promise<BulkRowOutcome> {
+  const { jobId, rowId, index, executor } = args;
+  const row = await prisma.importJobRow.findUnique({ where: { id: rowId } });
+  if (!row || row.jobId !== jobId || row.status !== "pending") {
+    return "noop";
+  }
+  const raw = ((row.rawData ?? {}) as BulkRawData) ?? {};
+  const fileName = typeof raw.fileName === "string" ? raw.fileName : "";
+  const stagedKey = typeof raw.stagedKey === "string" ? raw.stagedKey : "";
+  const requestNumber =
+    typeof raw.requestNumber === "string" && raw.requestNumber !== ""
+      ? raw.requestNumber
+      : null;
+  const location =
+    typeof raw.location === "string" && raw.location !== ""
+      ? raw.location
+      : null;
+  const storage = getStorage();
+
+  try {
+    if (!stagedKey) {
+      await finalizeRow(rowId, {
+        status: "error",
+        errorMessage: "取込データが不完全です(保管キーなし)",
+        createdId: null,
+        rawData: { ...raw, reason: "no_staged_key" },
+      });
+      return "error";
+    }
+
+    // 1. 請求番号による重複スキップ(exeの「取得済みはスキップ」と同発想)
+    if (requestNumber) {
+      const dup = await prisma.attachment.findFirst({
+        where: {
+          type: "registry",
+          isDeleted: false,
+          fileName: { contains: requestNumber },
+          // 物件削除で propertyId=null になった孤児添付は対象から除外する。
+          // 除外しないと、削除済み物件の孤児添付が永久にヒットし続け、
+          // 再取込のたびに「取込済み」と偽スキップされてしまう。
+          propertyId: { not: null },
+        },
+        select: { id: true, propertyId: true },
+      });
+      if (dup) {
+        await finalizeRow(rowId, {
+          status: "skipped",
+          errorMessage: `重複: 請求番号 ${requestNumber} は取込済みです`,
+          createdId: dup.propertyId,
+          rawData: { ...raw, reason: "duplicate_request_number" },
+        });
+        try {
+          await storage.delete(stagedKey);
+        } catch (e) {
+          console.error("registry-pdf-bulk: staging delete failed:", e);
+        }
+        return "skipped";
+      }
+    }
+
+    // 2. 物件突合: まずファイル名の所在、だめならPDF内容でフォールバック
+    let buffer: Buffer | null = null;
+    const readStaged = async (): Promise<Buffer | null> => {
+      if (buffer) return buffer;
+      const res = await storage.read(stagedKey);
+      if (!res) return null;
+      buffer = res.body;
+      return buffer;
+    };
+
+    let match = matchProperty(index, { location });
+    let matchedVia: "filename" | "content" = "filename";
+    // multiple(同一所在に土地+建物2物件など)でも、PDF内容の不動産番号があれば
+    // 一意化できる余地があるため、matched 以外は必ず内容フォールバックを試す。
+    // フォールバックが matched のときのみ採用し、だめなら元の結果(multiple/
+    // not_found)で確定する(内容側が multiple/not_found を返しても改悪しない)。
+    if (match.status !== "matched") {
+      const buf = await readStaged();
+      if (!buf) {
+        await finalizeRow(rowId, {
+          status: "error",
+          errorMessage:
+            "保管中のPDFを読み取れませんでした(整理済みの可能性があります)",
+          createdId: null,
+          rawData: { ...raw, reason: "staged_file_missing" },
+        });
+        return "error";
+      }
+      try {
+        const text = await extractTextFromPdf(buf);
+        const parsed = parseRegistryText(text);
+        const fallback = matchProperty(index, {
+          location: cleanExtractedAddress(parsed.address),
+          realEstateNumber: parsed.realEstateNumber,
+        });
+        if (fallback.status === "matched") {
+          match = fallback;
+          matchedVia = "content";
+        }
+      } catch (e) {
+        // 内容フォールバックの失敗は元の結果を維持する(下の multiple/needs_review へ)
+        console.error("registry-pdf-bulk: content fallback failed:", e);
+      }
+    }
+
+    if (match.status === "multiple") {
+      await finalizeRow(rowId, {
+        status: "needs_review",
+        errorMessage: `候補が複数あります(${match.count}件)。物件を指定して添付してください`,
+        createdId: null,
+        rawData: { ...raw, reason: "multiple_candidates" },
+      });
+      return "needs_review";
+    }
+    if (match.status === "not_found") {
+      await finalizeRow(rowId, {
+        status: "needs_review",
+        errorMessage:
+          "一致する物件が見つかりません。物件を指定して添付してください",
+        createdId: null,
+        rawData: { ...raw, reason: "not_found" },
+      });
+      return "needs_review";
+    }
+
+    // 3. アクセス権(既存 A-2b と同じ: 書込直前に対象物件の権限を確認)
+    const target = await prisma.property.findUnique({
+      where: { id: match.propertyId },
+      select: { createdBy: true, assignedTo: true },
+    });
+    if (!target || !canAccessPropertyRecord(executor, target)) {
+      await finalizeRow(rowId, {
+        status: "needs_review",
+        errorMessage:
+          "一致した物件へのアクセス権が無いため添付できません。物件を指定して添付してください",
+        createdId: null,
+        rawData: { ...raw, reason: "no_access" },
+      });
+      return "needs_review";
+    }
+
+    // 4. 添付(既存 A-2b パターン: validate → upload → create → 失敗時は孤児削除)
+    const buf = await readStaged();
+    if (!buf) {
+      await finalizeRow(rowId, {
+        status: "error",
+        errorMessage:
+          "保管中のPDFを読み取れませんでした(整理済みの可能性があります)",
+        createdId: null,
+        rawData: { ...raw, reason: "staged_file_missing" },
+      });
+      return "error";
+    }
+    const validationError = validateFile(
+      buf.length,
+      "application/pdf",
+      ALLOWED_ATTACHMENT_MIMES,
+    );
+    if (validationError) {
+      await finalizeRow(rowId, {
+        status: "error",
+        errorMessage: validationError,
+        createdId: null,
+        rawData: { ...raw, reason: "validation_failed" },
+      });
+      // この時点で staged は読み取り済み(実体あり)。error行は手動添付対象外の
+      // 袋小路なので保持理由が無く、best-effortで削除する。
+      await deleteStagedBestEffort(storage, stagedKey);
+      return "error";
+    }
+    let uploadedKey: string | null = null;
+    let attachmentId: string;
+    try {
+      const key = `properties/${match.propertyId}/registry/${Date.now()}-${randomUUID()}.pdf`;
+      const uploaded = await storage.upload(buf, {
+        key,
+        mimeType: "application/pdf",
+        fileName: fileName || "registry.pdf",
+      });
+      uploadedKey = uploaded.key;
+      const attachment = await prisma.attachment.create({
+        data: {
+          targetType: "property",
+          targetId: match.propertyId,
+          propertyId: match.propertyId,
+          type: "registry",
+          fileName: fileName || "registry.pdf",
+          fileUrl: uploaded.url,
+          fileSize: buf.length,
+          mimeType: "application/pdf",
+          uploadedBy: executor.id,
+        },
+        select: { id: true },
+      });
+      attachmentId = attachment.id;
+    } catch (err) {
+      if (uploadedKey) {
+        try {
+          await storage.delete(uploadedKey);
+        } catch (delErr) {
+          console.error(
+            "registry-pdf-bulk: orphan cleanup failed:",
+            delErr,
+          );
+        }
+      }
+      throw err;
+    }
+
+    // 行確定。添付作成済みのままここで失敗すると「行はerror/pendingなのに
+    // 添付だけ存在する」不整合になるため、失敗時は添付を取り消して
+    // 元の状態に戻す(@codex PR#256 P2・手動添付routeのundoと同じ規約)。
+    let finalized: boolean;
+    try {
+      finalized = await finalizeRow(rowId, {
+        status: "success",
+        errorMessage: null,
+        createdId: match.propertyId,
+        rawData: {
+          ...raw,
+          attachmentId,
+          matchedBy: match.matchedBy,
+          matchedVia,
+        },
+      });
+    } catch (finalizeErr) {
+      await undoAttachmentBestEffort(storage, attachmentId, uploadedKey);
+      throw finalizeErr;
+    }
+    if (!finalized) {
+      // 行が既に pending でない(再enqueue等で並行確定済み)。この試行で作った
+      // 添付は二重になるため取り消し、行状態には触れない。
+      await undoAttachmentBestEffort(storage, attachmentId, uploadedKey);
+      return "noop";
+    }
+    if (finalized) {
+      try {
+        await storage.delete(stagedKey);
+      } catch (e) {
+        console.error("registry-pdf-bulk: staging delete failed:", e);
+      }
+      try {
+        // 監査detailはID系のみ。fileNameは所在(住所)を含むため入れない
+        // (@codex PR#256 P1・手動添付routeのdetail規約とも整合)
+        await writeAuditLog({
+          userId: executor.id,
+          action: "create",
+          targetTable: "attachments",
+          targetId: attachmentId,
+          detail: { propertyId: match.propertyId, jobId, rowId },
+        });
+      } catch (e) {
+        console.error("registry-pdf-bulk: audit failed (non-fatal):", e);
+      }
+    }
+    return "success";
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "PDF処理中に不明なエラーが発生しました";
+    try {
+      await finalizeRow(rowId, {
+        status: "error",
+        errorMessage: message.slice(0, 500),
+        createdId: null,
+        rawData: { ...raw, reason: "unexpected_error" },
+      });
+    } catch (finalizeErr) {
+      console.error("registry-pdf-bulk: finalize failed:", finalizeErr);
+    }
+    // 予期しないエラーで確定した行も手動添付対象外の袋小路。stagedKeyが
+    // わかっていれば(=不完全データで早期returnした経路ではない)best-effortで削除する。
+    if (stagedKey) {
+      await deleteStagedBestEffort(storage, stagedKey);
+    }
+    return "error";
+  }
+}

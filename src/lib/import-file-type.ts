@@ -85,6 +85,17 @@ export function normalizeReceptionKeyPart(
     .trim();
 }
 
+// 実データでは受付帳由来の Property.address に共同担保等を示す「外N」が
+// 末尾に付くことがあるが、所有者側の物件住所には付かない。
+// 都道府県接頭辞はここでは除去しない(実データは両側に付いており、
+// 除去すると既存挙動への影響が不要に広がるため)。
+const SOTO_SUFFIX = /外\d+$/;
+
+/** 正規化済みキーの末尾から「外N」を除去する(両側で同じ処理を適用)。 */
+function stripSotoSuffix(key: string): string {
+  return key.replace(SOTO_SUFFIX, "");
+}
+
 /**
  * 受付帳 1 行から H/I/J/K を区切りなし単純連結してキー化。
  * 所有者 C 列と突合する用途で、別物衝突は要件上考慮不要。
@@ -95,19 +106,19 @@ export function buildReceptionMatchKey(parts: {
   j?: string | null;
   k?: string | null;
 }): string {
-  return (
+  const key =
     normalizeReceptionKeyPart(parts.h) +
     normalizeReceptionKeyPart(parts.i) +
     normalizeReceptionKeyPart(parts.j) +
-    normalizeReceptionKeyPart(parts.k)
-  );
+    normalizeReceptionKeyPart(parts.k);
+  return stripSotoSuffix(key);
 }
 
 /** 所有者 C 列を受付帳キーと同じルールで正規化。 */
 export function buildOwnerMatchKey(
   cValue: string | null | undefined,
 ): string {
-  return normalizeReceptionKeyPart(cValue);
+  return stripSotoSuffix(normalizeReceptionKeyPart(cValue));
 }
 
 // ---------------------------------------------------------------------------

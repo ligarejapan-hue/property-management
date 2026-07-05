@@ -1433,6 +1433,83 @@ export async function importReceptionPropertyCsv(input: {
   });
 }
 
+// ============================================================
+// 所有者事項PDF一括取込(registry_pdf_bulk)
+// ============================================================
+
+export interface RegistryPdfBulkUploadResponse {
+  jobId: string;
+  totalRows: number;
+  acceptedCount: number;
+  rejectedCount: number;
+}
+
+export async function uploadRegistryPdfBulk(
+  files: File[],
+): Promise<RegistryPdfBulkUploadResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      jobId: "ij-mock-" + Date.now(),
+      totalRows: files.length,
+      acceptedCount: files.length,
+      rejectedCount: 0,
+    };
+  }
+  const formData = new FormData();
+  for (const f of files) formData.append("files", f);
+  const res = await fetch("/api/import/registry-pdf-bulk", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error?.message ?? `Error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function resumeRegistryPdfBulk(
+  jobId: string,
+): Promise<{ ok: boolean; pendingCount: number }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { ok: true, pendingCount: 0 };
+  }
+  return apiFetch(`/api/import/jobs/${jobId}/resume-registry-pdf`, {
+    method: "POST",
+  });
+}
+
+export async function manualAttachRegistryPdfRow(
+  jobId: string,
+  rowId: string,
+  propertyId: string,
+): Promise<{
+  ok: boolean;
+  rowId: string;
+  propertyId: string;
+  attachmentId: string;
+}> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      ok: true,
+      rowId,
+      propertyId,
+      attachmentId: "att-mock-" + Date.now(),
+    };
+  }
+  return apiFetch(
+    `/api/import/jobs/${jobId}/rows/${rowId}/manual-attach-registry-pdf`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ propertyId }),
+    },
+  );
+}
+
 /** テキスト貼り付けモード (後方互換) */
 export async function importRegistryPdf(
   text: string,

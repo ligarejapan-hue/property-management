@@ -24,6 +24,7 @@ import {
   Search,
   Download,
   RotateCcw,
+  Clock,
 } from "lucide-react";
 import {
   fetchImportJobDetail,
@@ -35,6 +36,8 @@ import {
   searchProperties,
   searchOwners,
   manualLinkReceptionOwnerRow,
+  resumeRegistryPdfBulk,
+  manualAttachRegistryPdfRow,
   type AffectedPropertiesResponse,
   type RollbackResponse,
 } from "@/lib/api-client";
@@ -62,7 +65,7 @@ interface ImportJobRow {
   id: string;
   jobId: string;
   rowNumber: number;
-  status: "success" | "error" | "skipped" | "needs_review";
+  status: "success" | "error" | "skipped" | "needs_review" | "pending";
   rawData: Record<string, string> | null;
   errorMessage: string | null;
   createdId: string | null;
@@ -91,6 +94,10 @@ interface ImportJob {
   duplicateCount?: number;
   // B4(Codex P2): bulk-resolve scope="duplicate" の対象件数（needs_review のみ・「重複」始まり）。
   duplicateActionableCount?: number;
+  // registry_pdf_bulk 等・pending 行数（status/reason フィルタ非依存・ジョブ全体）。
+  // Task 11 のウィザード進捗ポーリング/再開ボタンが依存する additive フィールド。
+  pendingCount?: number;
+  isRegistryPdfBulkJob?: boolean;
   pagination?: {
     page: number;
     limit: number;
@@ -114,7 +121,13 @@ interface SearchResult {
   externalLinkKey?: string | null;
 }
 
-type FilterStatus = "all" | "needs_review" | "error" | "success" | "skipped";
+type FilterStatus =
+  | "all"
+  | "needs_review"
+  | "error"
+  | "success"
+  | "skipped"
+  | "pending";
 
 // 理由別 filter（Phase 2）: token は server の VALID_ROW_REASONS と一致させる
 // （URL-safe な英語 enum・PII なし）。B4 bulk-resolve の scope="duplicate" と
@@ -162,6 +175,12 @@ const ROW_STATUS_CONFIG: Record<
     bg: "bg-gray-50 border-gray-200 dark:bg-gray-800/50 dark:border-gray-800",
     icon: SkipForward,
   },
+  pending: {
+    label: "未処理",
+    color: "text-blue-600 dark:text-blue-400",
+    bg: "bg-blue-50 border-blue-200 dark:bg-blue-500/10 dark:border-blue-400/20",
+    icon: Clock,
+  },
 };
 
 // 取込種別ラベルは共通定義 (src/lib/import-labels.ts) を使用
@@ -183,7 +202,8 @@ export default function ImportJobDetailPage() {
     return s === "needs_review" ||
       s === "error" ||
       s === "success" ||
-      s === "skipped"
+      s === "skipped" ||
+      s === "pending"
       ? s
       : "all";
   })();
@@ -233,6 +253,9 @@ export default function ImportJobDetailPage() {
   const [rollbackPreview, setRollbackPreview] = useState<RollbackResponse | null>(null);
   const [rollbackResult, setRollbackResult] = useState<RollbackResponse | null>(null);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
+
+  // Task 11: registry_pdf_bulk の未処理(pending)行を再開するボタンの読み込み状態。
+  const [resuming, setResuming] = useState(false);
 
   // Search-and-link state
   const [searchQuery, setSearchQuery] = useState("");
@@ -370,6 +393,8 @@ export default function ImportJobDetailPage() {
   // B2: 全体判定はサーバ確定値（job.isReceptionOwnerJob）を使う。
   // ページング後に現ページ分の rows.some(...) で誤判定しないため。
   const isReceptionOwnerJob = job?.isReceptionOwnerJob ?? false;
+  // Task 11: 所有者事項PDF一括ジョブかどうか(再開ボタン・手動添付の分岐に使う)。
+  const isRegistryPdfBulkJob = job?.jobType === "registry_pdf_bulk";
   // 既存の owner_csv 単独取込のときだけ Owner 検索モード。
   const useOwnerSearch = job?.jobType === "owner_csv" && !isReceptionOwnerJob;
 
@@ -418,6 +443,9 @@ export default function ImportJobDetailPage() {
     error: summary.errorCount,
     success: summary.createdCount + summary.updatedCount,
     skipped: summary.skippedCount,
+    // registry_pdf_bulk 等・未処理（pending）行数。サーバ確定の job.pendingCount
+    // を使う（ジョブ全体・status/reason フィルタ非依存・ページ分に化けない）。
+    pending: job?.pendingCount ?? 0,
     // 重複候補（B2: サーバ確定の duplicateCount=ジョブ全体・ページ分に化けない）。
     // 表示ヒント用（needs_review + skipped の内数・従来表示/互換）。
     duplicate: job?.duplicateCount ?? 0,
@@ -443,9 +471,14 @@ export default function ImportJobDetailPage() {
         action === "create_new" && editingRow === rowId
           ? editedData
           : undefined;
-      // 受付帳×所有者ジョブの link_existing は新 API を呼び、Property 補完 +
-      // Owner upsert + PropertyOwner link を transaction でまとめて実行する。
-      if (action === "link_existing" && isReceptionOwnerJob && targetId) {
+      // 所有者事項PDF一括ジョブの link_existing は、needs_review 行(未突合PDF)を
+      // ユーザが選んだ物件に手動添付する専用 API を呼ぶ(汎用 PATCH は create_new/retry 同様
+      // このジョブ種別に非対応のため)。
+      if (action === "link_existing" && isRegistryPdfBulkJob && targetId) {
+        await manualAttachRegistryPdfRow(jobId, rowId, targetId);
+      } else if (action === "link_existing" && isReceptionOwnerJob && targetId) {
+        // 受付帳×所有者ジョブの link_existing は新 API を呼び、Property 補完 +
+        // Owner upsert + PropertyOwner link を transaction でまとめて実行する。
         await manualLinkReceptionOwnerRow(jobId, rowId, targetId);
       } else {
         await resolveImportRow(jobId, rowId, action, targetId, edited);
@@ -614,6 +647,38 @@ export default function ImportJobDetailPage() {
             ロールバック
           </button>
         )}
+        {/* Task 11: 所有者事項PDF一括ジョブの未処理(pending)行を再開するボタン。
+            サーバ再起動でインプロセスワーカーの待機列が消えたときの復旧口。
+            pendingCount=0でもジョブが非終端(pending/processing)なら表示する
+            (@codex指摘: 全件却下ジョブや、最終行処理後〜カウンタ確定前クラッシュの
+            processing+pending0が pendingCount>0 条件のみだと永久にスタックするため)。 */}
+        {isRegistryPdfBulkJob &&
+          ((job?.pendingCount ?? 0) > 0 ||
+            job?.status === "pending" ||
+            job?.status === "processing") && (
+            <button
+              type="button"
+              onClick={async () => {
+                setResuming(true);
+                try {
+                  await resumeRegistryPdfBulk(jobId);
+                  await fetchJob();
+                } catch (e) {
+                  alert(e instanceof Error ? e.message : "再開に失敗しました");
+                } finally {
+                  setResuming(false);
+                }
+              }}
+              disabled={resuming}
+              className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+            >
+              {resuming
+                ? "再開中..."
+                : (job?.pendingCount ?? 0) > 0
+                  ? `未処理 ${job?.pendingCount}件を再開`
+                  : "処理を再開(集計を確定)"}
+            </button>
+          )}
         {job.status === "rolled_back" && (
           <span className="inline-flex items-center gap-1.5 rounded-md border border-purple-300 bg-purple-50 px-3 py-1.5 text-sm font-medium text-purple-700">
             <RotateCcw className="h-4 w-4" />
@@ -893,6 +958,7 @@ export default function ImportJobDetailPage() {
             { key: "error", label: "エラー" },
             { key: "success", label: "成功" },
             { key: "skipped", label: "スキップ" },
+            { key: "pending", label: "未処理" },
           ] as { key: FilterStatus; label: string }[]
         ).map((tab) => (
           <button
@@ -1404,7 +1470,8 @@ export default function ImportJobDetailPage() {
                         {row.status === "needs_review" && (
                           <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
                             <p className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
-                              既存{isOwnerJob ? "所有者" : "物件"}を検索して紐付け
+                              既存{isOwnerJob ? "所有者" : "物件"}を検索して
+                              {isRegistryPdfBulkJob ? "添付" : "紐付け"}
                             </p>
                             <div className="relative">
                               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
@@ -1506,7 +1573,7 @@ export default function ImportJobDetailPage() {
                                   ) : (
                                     <Link2 className="h-3 w-3" />
                                   )}
-                                  紐付け確定
+                                  {isRegistryPdfBulkJob ? "この物件に添付" : "紐付け確定"}
                                 </button>
                               </div>
                             )}
@@ -1515,22 +1582,26 @@ export default function ImportJobDetailPage() {
 
                         {/* Action buttons row */}
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() =>
-                              handleResolve(row.id, "create_new")
-                            }
-                            disabled={isLoading}
-                            className="flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                          >
-                            {isLoading ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <Plus className="h-3 w-3" />
-                            )}
-                            {isEditing ? "修正して新規作成" : "新規作成"}
-                          </button>
+                          {/* 所有者事項PDF一括ジョブは create_new/retry 未対応(サーバ側で
+                              422になる)ため、検索&添付・スキップ・エラー確定のみを出す。 */}
+                          {!isRegistryPdfBulkJob && (
+                            <button
+                              onClick={() =>
+                                handleResolve(row.id, "create_new")
+                              }
+                              disabled={isLoading}
+                              className="flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                            >
+                              {isLoading ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Plus className="h-3 w-3" />
+                              )}
+                              {isEditing ? "修正して新規作成" : "新規作成"}
+                            </button>
+                          )}
 
-                          {row.status === "error" && (
+                          {row.status === "error" && !isRegistryPdfBulkJob && (
                             <button
                               onClick={() => handleRetry(row.id)}
                               disabled={isLoading}

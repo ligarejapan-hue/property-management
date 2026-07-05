@@ -80,6 +80,19 @@ describe("classifyRowsForRollback", () => {
     expect(result[0].category).toBe("skip");
   });
 
+  it("status=pending → skip（未処理行。property_csv では現状発生しないが安全側の分類として明示）", () => {
+    const result = classifyRowsForRollback([
+      {
+        id: "r7",
+        rowNumber: 7,
+        status: "pending",
+        errorMessage: null,
+        createdId: null,
+      },
+    ]);
+    expect(result[0].category).toBe("skip");
+  });
+
   it("複数行を一度に分類できる", () => {
     const result = classifyRowsForRollback([
       { id: "a", rowNumber: 1, status: "success", errorMessage: null, createdId: "p1" },

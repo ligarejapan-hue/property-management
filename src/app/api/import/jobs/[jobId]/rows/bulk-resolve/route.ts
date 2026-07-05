@@ -11,6 +11,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { recalculateJobCounts } from "@/lib/import-job-counts";
+import { getStorage } from "@/lib/storage";
 
 // ---------- POST /api/import/jobs/:jobId/rows/bulk-resolve ----------
 //
@@ -73,10 +74,10 @@ export async function POST(
     const bulkAction = action as BulkAction;
     const bulkScope = scope as BulkScope;
 
-    // ジョブ存在確認（404）。
+    // ジョブ存在確認（404）。jobType は registry_pdf_bulk の staging 一括削除判定に使う。
     const job = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true },
+      select: { id: true, jobType: true },
     });
     if (!job) {
       throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
@@ -94,6 +95,20 @@ export async function POST(
           }
         : { jobId, status: bulkScope };
 
+    // registry_pdf_bulk ジョブの一括 skip/mark_error は、確定後に staging(所有者PII)を
+    // best-effortで削除する。updateMany後は where(status条件)が対象行にヒットしなく
+    // なるため、更新前にこの where で対象行の stagedKey を先取りしておく。
+    let stagedKeysToDelete: string[] = [];
+    if (job.jobType === "registry_pdf_bulk") {
+      const targetRows = await prisma.importJobRow.findMany({
+        where,
+        select: { rawData: true },
+      });
+      stagedKeysToDelete = targetRows
+        .map((r) => (r.rawData as Record<string, unknown> | null)?.stagedKey)
+        .filter((key): key is string => typeof key === "string");
+    }
+
     // scope に一致する actionable 行のみを一括更新（success/skipped 等は where で除外）。
     const result = await prisma.importJobRow.updateMany({
       where,
@@ -103,6 +118,17 @@ export async function POST(
           : { status: "error", errorMessage: "手動エラー確定" },
     });
     const affectedCount = result.count;
+
+    if (stagedKeysToDelete.length > 0) {
+      const storage = getStorage();
+      for (const key of stagedKeysToDelete) {
+        try {
+          await storage.delete(key);
+        } catch (e) {
+          console.error("bulk-resolve: staging delete failed:", e);
+        }
+      }
+    }
 
     // ジョブ集計を再計算（既存 per-row と同じ・非 transaction）。
     await recalculateJobCounts(jobId);

@@ -39,6 +39,7 @@ const VALID_JOB_TYPES: readonly ImportJobType[] = [
   "dm_history_csv",
   "investigation_csv",
   "property_pdf",
+  "registry_pdf_bulk",
 ] as const;
 
 function parseDateOrNull(value: string | null): Date | null {
