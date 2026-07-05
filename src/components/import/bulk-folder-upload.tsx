@@ -43,7 +43,7 @@ function toMetas(files: File[]): BulkFileMeta[] {
 export default function BulkFolderUpload({
   onUploaded,
 }: {
-  onUploaded?: (summary: BulkUploadSummary) => void;
+  onUploaded?: (summary: BulkUploadSummary | null) => void;
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const [plan, setPlan] = useState<UploadPlan | null>(null);
@@ -66,6 +66,8 @@ export default function BulkFolderUpload({
     );
     // 同じフォルダ/ファイルを選び直しても onChange が再発火するよう value をクリア。
     input.value = "";
+    // 新しい選択に切り替わったら、親(Step4)の前回サマリを消して未実行に戻す。
+    onUploaded?.(null);
     if (picked.length === 0) {
       // PDFが1件も無い選択(誤ったフォルダ等)。前回の選択が残ったまま送信できて
       // しまわないよう状態をクリアし、その旨をフィードバックする。
@@ -85,7 +87,7 @@ export default function BulkFolderUpload({
     setError(null);
     setSummary(null);
     setShowExcluded(false);
-  }, []);
+  }, [onUploaded]);
 
   const start = useCallback(async () => {
     if (files.length === 0) return;
@@ -171,7 +173,8 @@ export default function BulkFolderUpload({
     setError(null);
     setSummary(null);
     setShowExcluded(false);
-  }, []);
+    onUploaded?.(null);
+  }, [onUploaded]);
 
   const clearRecord = useCallback(() => {
     clearSentKeys();
@@ -186,10 +189,11 @@ export default function BulkFolderUpload({
     setSentCount(0);
     setBatchDone(0);
     setError(null);
+    onUploaded?.(null);
     if (files.length > 0) {
       setPlan(buildUploadPlan(toMetas(files), loadSentKeys()));
     }
-  }, [files]);
+  }, [files, onUploaded]);
 
   const total = plan?.sendableTotal ?? 0;
   const batchTotal = plan?.batches.length ?? 0;
