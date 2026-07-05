@@ -25,6 +25,7 @@ import {
   ClipboardCheck,
   FileSearch,
   BookOpen,
+  Newspaper,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 
@@ -49,6 +50,11 @@ const mainNavItems: NavItem[] = [
     label: "マンション棟",
     href: "/buildings",
     icon: <Building className="h-5 w-5" />,
+  },
+  {
+    label: "販売図面を作成",
+    href: "/sales-sheets/new",
+    icon: <Newspaper className="h-5 w-5" />,
   },
   {
     label: "現地調査マップ",

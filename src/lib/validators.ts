@@ -66,6 +66,17 @@ export const propertyListQuerySchema = z.object({
   keyword: z.string().optional(),
   mgmtId: z.string().optional(),
   propertyType: z.enum(PROPERTY_TYPE_VALUES).optional(),
+  // 複数種別まとめ絞り(カンマ区切り)。販売図面ピッカーが使用。空文字/空要素のみは未指定扱い。
+  // 単一 propertyType と併用された場合は単一を優先する(後方互換・property-list-query 側で実装)。
+  propertyTypes: z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      const items = v.split(",").map((s) => s.trim()).filter((s) => s !== "");
+      return items.length === 0 ? undefined : items;
+    })
+    .pipe(z.array(z.enum(PROPERTY_TYPE_VALUES)).optional()),
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   // 宛先不明(返送連動)で絞り込む。"1" のときだけ有効(他の一覧フィルタと同じ文字列クエリ規約)。

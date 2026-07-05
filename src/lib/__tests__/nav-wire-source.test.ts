@@ -45,3 +45,15 @@ describe("properties/[id]/page.tsx — dm-logs 導線（既存ページへのリ
     expect(PROPERTY_DETAIL_SRC).toMatch(/\/properties\/\$\{[^}]*\}\/dm-logs/);
   });
 });
+
+describe("sidebar.tsx — 販売図面を作成 nav エントリ（メニュー化）", () => {
+  it("販売図面を作成 → /sales-sheets/new の nav item がある", () => {
+    expect(SIDEBAR_SRC).toMatch(/href:\s*"\/sales-sheets\/new"/);
+    expect(SIDEBAR_SRC).toMatch(/販売図面を作成/);
+  });
+
+  it("重複追加しない（/sales-sheets/new は 1 回のみ）", () => {
+    const matches = SIDEBAR_SRC.match(/\/sales-sheets\/new/g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+});

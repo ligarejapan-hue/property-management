@@ -6,7 +6,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-import { SalesSheetCreateButton } from "../SalesSheetCreateButton";
+import { SalesSheetCreateButton, SalesSheetCreateDialog } from "../SalesSheetCreateButton";
 
 // Node environment: closed-state SSR のみ検証（クリック/モーダル操作は jsdom 非導入のため対象外）。
 describe("SalesSheetCreateButton", () => {
@@ -36,5 +36,33 @@ describe("SalesSheetCreateButton", () => {
     // モーダルは既定で閉じているため、一棟固有の入力ラベルは出ない。
     expect(html).not.toContain("想定利回り");
     expect(html).not.toContain("総戸数");
+  });
+});
+
+describe("SalesSheetCreateDialog（切り出し・制御コンポーネント）", () => {
+  it("open=true で種別ラベル・入力項目・作成ボタンを描画する", () => {
+    const html = renderToStaticMarkup(
+      createElement(SalesSheetCreateDialog, {
+        propertyId: "p1",
+        kind: "building",
+        open: true,
+        onClose: () => {},
+      }),
+    );
+    expect(html).toContain("販売図面（一棟）の作成");
+    expect(html).toContain("想定利回り");
+    expect(html).toContain("作成してエディタを開く");
+  });
+
+  it("open=false は何も描画しない", () => {
+    const html = renderToStaticMarkup(
+      createElement(SalesSheetCreateDialog, {
+        propertyId: "p1",
+        kind: "land",
+        open: false,
+        onClose: () => {},
+      }),
+    );
+    expect(html).toBe("");
   });
 });

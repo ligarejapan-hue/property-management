@@ -47,6 +47,7 @@ export async function buildPropertyListWhere(
     keyword,
     mgmtId,
     propertyType,
+    propertyTypes,
     registryStatus,
     dmStatus,
     undeliverable,
@@ -65,7 +66,12 @@ export async function buildPropertyListWhere(
     where.isArchived = false;
   }
 
-  if (propertyType) where.propertyType = propertyType;
+  if (propertyType) {
+    where.propertyType = propertyType;
+  } else if (propertyTypes && propertyTypes.length > 0) {
+    // 複数種別まとめ絞り(販売図面ピッカー)。単一 propertyType 指定時はそちらを優先。
+    where.propertyType = { in: propertyTypes };
+  }
   if (registryStatus) where.registryStatus = registryStatus;
   if (dmStatus) where.dmStatus = dmStatus;
   // 宛先不明(返送連動で立った dmUndeliverableAt)で絞り込む。
