@@ -23,6 +23,7 @@ import type {
   ImageElement,
   BadgeElement,
   QrElement,
+  TableElement,
 } from "./document-schema";
 
 // ---------------------------------------------------------------------------
@@ -493,6 +494,81 @@ export function editTheme(state: EditorState, patch: EditThemePatch): EditorStat
     dirty: true,
     document: { ...document, theme: newTheme },
   };
+}
+
+// ---------------------------------------------------------------------------
+// 概要表の編集（計画⑧ 第2弾）
+// 作成時にしか表へ入力できなかった制限（方式A）を解消する。
+// ---------------------------------------------------------------------------
+
+/** 行 patch (editTableRow)。undefined のフィールドは据え置き。 */
+export interface EditTableRowPatch {
+  readonly label?: string;
+  readonly value?: string;
+}
+
+/**
+ * 概要表の 1 行（label / value）を更新する。
+ * - Non-table elements / unknown id / out-of-range index: no-op (same reference).
+ * Sets dirty=true on success.
+ */
+export function editTableRow(
+  state: EditorState,
+  id: string,
+  index: number,
+  patch: EditTableRowPatch,
+): EditorState {
+  const { document } = state;
+  const idx = findIdx(document, id);
+  if (idx === -1) return state;
+  const el = document.elements[idx];
+  if (el.type !== "table") return state;
+  if (!Number.isInteger(index) || index < 0 || index >= el.rows.length) return state;
+
+  const rows = el.rows.slice();
+  rows[index] = {
+    label: patch.label !== undefined ? patch.label : rows[index].label,
+    value: patch.value !== undefined ? patch.value : rows[index].value,
+  };
+  const newEl: TableElement = { ...el, rows };
+  return replaceElement(state, idx, newEl);
+}
+
+/**
+ * 概要表の末尾に空行を追加する。
+ * - Non-table elements / unknown id: no-op (same reference).
+ * Sets dirty=true on success.
+ */
+export function addTableRow(state: EditorState, id: string): EditorState {
+  const { document } = state;
+  const idx = findIdx(document, id);
+  if (idx === -1) return state;
+  const el = document.elements[idx];
+  if (el.type !== "table") return state;
+
+  const newEl: TableElement = { ...el, rows: [...el.rows, { label: "", value: "" }] };
+  return replaceElement(state, idx, newEl);
+}
+
+/**
+ * 概要表の行を削除する（空の表になることも許容＝schema 上有効）。
+ * - Non-table elements / unknown id / out-of-range index: no-op (same reference).
+ * Sets dirty=true on success.
+ */
+export function removeTableRow(
+  state: EditorState,
+  id: string,
+  index: number,
+): EditorState {
+  const { document } = state;
+  const idx = findIdx(document, id);
+  if (idx === -1) return state;
+  const el = document.elements[idx];
+  if (el.type !== "table") return state;
+  if (!Number.isInteger(index) || index < 0 || index >= el.rows.length) return state;
+
+  const newEl: TableElement = { ...el, rows: el.rows.filter((_, i) => i !== index) };
+  return replaceElement(state, idx, newEl);
 }
 
 // ---------------------------------------------------------------------------

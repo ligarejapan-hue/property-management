@@ -3,15 +3,11 @@
  *
  * Test approach: matches existing component-test style (env=node).
  * All structural assertions use renderToStaticMarkup + string checks.
- *
- * The `buildGeometryChange` pure helper is tested directly to cover
- * "numeric change → correct patch" without needing jsdom/event firing.
  */
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   ElementPanel,
-  buildGeometryChange,
   hexColorInputValue,
   PANEL_FONT_OPTIONS,
   FOCAL_PRESETS,
@@ -67,6 +63,50 @@ const qrElement: SalesSheetElement = {
 };
 
 const THEME = { fontFamily: "sans-serif", accentColor: "#15324f" };
+
+const tableElement: SalesSheetElement = {
+  id: "tab1",
+  type: "table",
+  x: 150,
+  y: 22,
+  w: 137,
+  h: 160,
+  z: 1,
+  rows: [
+    { label: "所在地", value: "東京都" },
+    { label: "価格", value: "5,000万円" },
+  ],
+  style: {},
+};
+
+describe("ElementPanel — 概要表の編集（計画⑧ 第2弾）", () => {
+  it("table 要素選択時に data-table-editor / 各行の入力 / 行追加ボタンを描画する", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={tableElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect(html).toContain("data-table-editor");
+    expect(html).toContain('value="所在地"');
+    expect(html).toContain('value="東京都"');
+    expect(html).toContain('value="価格"');
+    expect(html).toContain('value="5,000万円"');
+    expect(html).toContain("data-table-add-row");
+    expect(html).toContain("行を追加");
+  });
+
+  it("行ごとに削除ボタンがある", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={tableElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect((html.match(/aria-label="行\d+ を削除"/g) ?? []).length).toBe(2);
+  });
+
+  it("text 要素では表セクションを描画しない", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect(html).not.toContain("data-table-editor");
+  });
+});
 
 describe("ElementPanel — QR 編集（計画⑧）", () => {
   it("qr 要素選択時に data-qr-editor と中身入力を描画する", () => {
@@ -328,43 +368,6 @@ describe("ElementPanel — 構造", () => {
       <ElementPanel element={textElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
     );
     expect(html).toContain("Hello");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Pure-helper tests: buildGeometryChange
-// (tests "numeric change → onChange fires with the right patch" without jsdom)
-// ---------------------------------------------------------------------------
-
-describe("ElementPanel — buildGeometryChange", () => {
-  it("x フィールド変更で move パッチ（新 x・既存 y）が生成される", () => {
-    const change = buildGeometryChange("x", "42.5", textElement);
-    expect(change).toEqual({ type: "move", x: 42.5, y: 20 });
-  });
-
-  it("y フィールド変更で move パッチ（既存 x・新 y）が生成される", () => {
-    const change = buildGeometryChange("y", "15", textElement);
-    expect(change).toEqual({ type: "move", x: 10, y: 15 });
-  });
-
-  it("w フィールド変更で resize パッチ（新 w・既存 h）が生成される", () => {
-    const change = buildGeometryChange("w", "80", textElement);
-    expect(change).toEqual({ type: "resize", w: 80, h: 30 });
-  });
-
-  it("h フィールド変更で resize パッチ（既存 w・新 h）が生成される", () => {
-    const change = buildGeometryChange("h", "40", textElement);
-    expect(change).toEqual({ type: "resize", w: 100, h: 40 });
-  });
-
-  it("非数値は null を返す", () => {
-    expect(buildGeometryChange("x", "abc", textElement)).toBeNull();
-    expect(buildGeometryChange("y", "", textElement)).toBeNull();
-  });
-
-  it("整数値も正しく変換される", () => {
-    const change = buildGeometryChange("x", "0", textElement);
-    expect(change).toEqual({ type: "move", x: 0, y: 20 });
   });
 });
 

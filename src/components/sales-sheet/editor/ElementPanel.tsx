@@ -21,6 +21,7 @@ import type {
   EditBadgePatch,
   EditQrPatch,
   EditThemePatch,
+  EditTableRowPatch,
 } from "@/lib/sales-sheet/editor-document";
 import type {
   SalesSheetElement,
@@ -28,6 +29,7 @@ import type {
   ImageElement,
   BadgeElement,
   QrElement,
+  TableElement,
   SalesSheetTheme,
 } from "@/lib/sales-sheet/document-schema";
 
@@ -44,7 +46,10 @@ export type ElementPanelChange =
   | { type: "editText"; patch: EditTextPatch }
   | { type: "editImage"; patch: EditImagePatch }
   | { type: "editBadge"; patch: EditBadgePatch }
-  | { type: "editQr"; patch: EditQrPatch };
+  | { type: "editQr"; patch: EditQrPatch }
+  | { type: "editTableRow"; index: number; patch: EditTableRowPatch }
+  | { type: "addTableRow" }
+  | { type: "removeTableRow"; index: number };
 
 export interface ElementPanelProps {
   /** The currently selected element, or null when nothing is selected. */
@@ -92,25 +97,6 @@ export const FOCAL_PRESETS = [
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for env=node unit tests)
 // ---------------------------------------------------------------------------
-
-/**
- * Build an ElementPanelChange for a geometry-field value change.
- * Returns null when rawValue is not a finite number.
- *
- * Exported so tests can verify patch shape without needing jsdom.
- */
-export function buildGeometryChange(
-  field: "x" | "y" | "w" | "h",
-  rawValue: string,
-  element: SalesSheetElement,
-): ElementPanelChange | null {
-  const v = parseFloat(rawValue);
-  if (!isFinite(v)) return null;
-  if (field === "x") return { type: "move", x: v, y: element.y };
-  if (field === "y") return { type: "move", x: element.x, y: v };
-  if (field === "w") return { type: "resize", w: v, h: element.h };
-  return { type: "resize", w: element.w, h: v };
-}
 
 /**
  * CSS 色を <input type="color"> が表現できる #rrggbb へ正規化する。
@@ -197,6 +183,64 @@ function ColorField({
 }
 
 // ---------------------------------------------------------------------------
+// NumberField — 数値入力（draft 方式・blur/Enter で確定）
+// ---------------------------------------------------------------------------
+
+/**
+ * controlled + onChange 即時確定だと「12.」のような打ちかけの小数が
+ * parseFloat で「12」に確定されて入力が乱れる（計画③からの既知 minor）。
+ * 非制御（defaultValue）でタイプは自由にし、blur / Enter で確定する。
+ * key={value} により、canvas のドラッグ等で外部から値が変わったときは
+ * 再マウントして表示を同期する（フォーカス中は value が変わらないため
+ * 入力が中断されることはない）。値が変わらない blur は emit しない。
+ */
+function NumberField({
+  label,
+  ariaLabel,
+  value,
+  min,
+  step = 0.5,
+  onCommit,
+}: {
+  label: string;
+  ariaLabel: string;
+  value: number;
+  min?: number;
+  step?: number;
+  onCommit: (v: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-0.5">
+      <span className={labelSpanCls}>{label}</span>
+      <input
+        key={value}
+        type="number"
+        step={step}
+        min={min}
+        aria-label={ariaLabel}
+        defaultValue={value}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        onBlur={(e) => {
+          const v = parseFloat(e.target.value);
+          if (isFinite(v) && v !== value && (min === undefined || v >= min)) {
+            onCommit(v);
+          }
+          // 表示を document の現在値へ戻す（snap back）。無効値・範囲外値や、
+          // commit が reducer 側の clamp で現在値と同値に解決されたときは
+          // key(=value) が変わらず再マウントされないため、これが無いと
+          // 打った生の値が表示に残って document とずれる。値が変わる正常
+          // commit では直後の再マウントが新値表示で上書きする。
+          e.target.value = String(value);
+        }}
+        className={inputCls}
+      />
+    </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -261,14 +305,8 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
   const badgeEl: BadgeElement | null = el.type === "badge" ? el : null;
   // ── Narrow to QrElement when type === "qr" ───────────────────────────────
   const qrEl: QrElement | null = el.type === "qr" ? el : null;
-
-  // ── Geometry handlers ────────────────────────────────────────────────────
-  function onGeomChange(field: "x" | "y" | "w" | "h") {
-    return (e: React.ChangeEvent<HTMLInputElement>) => {
-      const change = buildGeometryChange(field, e.target.value, el);
-      if (change) onChange(change);
-    };
-  }
+  // ── Narrow to TableElement when type === "table" ─────────────────────────
+  const tableEl: TableElement | null = el.type === "table" ? el : null;
 
   // ── Text-edit handlers ───────────────────────────────────────────────────
   function onContent(e: React.ChangeEvent<HTMLTextAreaElement>): void {
@@ -280,24 +318,12 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
     onChange({ type: "editText", patch: { fontFamily: e.target.value } });
   }
 
-  function onFontSize(e: React.ChangeEvent<HTMLInputElement>): void {
-    const v = parseFloat(e.target.value);
-    if (!isFinite(v) || v <= 0) return;
-    onChange({ type: "editText", patch: { fontSizePt: v } });
-  }
-
   // ── Image-edit handlers ──────────────────────────────────────────────────
   function onFit(e: React.ChangeEvent<HTMLSelectElement>): void {
     const fit = e.target.value;
     if (fit === "cover" || fit === "contain") {
       onChange({ type: "editImage", patch: { fit } });
     }
-  }
-
-  function onRadiusMm(e: React.ChangeEvent<HTMLInputElement>): void {
-    const v = parseFloat(e.target.value);
-    if (!isFinite(v) || v < 0) return;
-    onChange({ type: "editImage", patch: { radiusMm: v } });
   }
 
   function onAlt(e: React.ChangeEvent<HTMLInputElement>): void {
@@ -316,68 +342,42 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
     }
   }
 
-  function onBadgeFontSize(e: React.ChangeEvent<HTMLInputElement>): void {
-    const v = parseFloat(e.target.value);
-    if (!isFinite(v) || v <= 0) return;
-    onChange({ type: "editBadge", patch: { fontSizePt: v } });
-  }
-
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div
       data-element-panel
       className="flex flex-col divide-y divide-neutral-200 dark:divide-zinc-700 text-xs"
     >
-      {/* ── Geometry ──────────────────────────────────────────────────── */}
+      {/* ── Geometry（draft 方式・blur/Enter 確定＝小数の打ちかけで乱れない） */}
       <section className="p-3">
         <p className={sectionHeadCls}>位置・サイズ (mm)</p>
         <div className="grid grid-cols-2 gap-2">
-          <label className="flex flex-col gap-0.5">
-            <span className={labelSpanCls}>X</span>
-            <input
-              type="number"
-              step="0.5"
-              aria-label="X位置 (mm)"
-              value={el.x}
-              onChange={onGeomChange("x")}
-              className={inputCls}
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className={labelSpanCls}>Y</span>
-            <input
-              type="number"
-              step="0.5"
-              aria-label="Y位置 (mm)"
-              value={el.y}
-              onChange={onGeomChange("y")}
-              className={inputCls}
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className={labelSpanCls}>幅</span>
-            <input
-              type="number"
-              step="0.5"
-              min="5"
-              aria-label="幅 (mm)"
-              value={el.w}
-              onChange={onGeomChange("w")}
-              className={inputCls}
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className={labelSpanCls}>高さ</span>
-            <input
-              type="number"
-              step="0.5"
-              min="5"
-              aria-label="高さ (mm)"
-              value={el.h}
-              onChange={onGeomChange("h")}
-              className={inputCls}
-            />
-          </label>
+          <NumberField
+            label="X"
+            ariaLabel="X位置 (mm)"
+            value={el.x}
+            onCommit={(x) => onChange({ type: "move", x, y: el.y })}
+          />
+          <NumberField
+            label="Y"
+            ariaLabel="Y位置 (mm)"
+            value={el.y}
+            onCommit={(y) => onChange({ type: "move", x: el.x, y })}
+          />
+          <NumberField
+            label="幅"
+            ariaLabel="幅 (mm)"
+            value={el.w}
+            min={5}
+            onCommit={(w) => onChange({ type: "resize", w, h: el.h })}
+          />
+          <NumberField
+            label="高さ"
+            ariaLabel="高さ (mm)"
+            value={el.h}
+            min={5}
+            onCommit={(h) => onChange({ type: "resize", w: el.w, h })}
+          />
         </div>
       </section>
 
@@ -438,18 +438,13 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
               </select>
             </label>
             {/* Font size */}
-            <label className="flex flex-col gap-0.5">
-              <span className={labelSpanCls}>サイズ (pt)</span>
-              <input
-                type="number"
-                step="0.5"
-                min="1"
-                aria-label="フォントサイズ (pt)"
-                value={textEl.style.fontSizePt ?? 12}
-                onChange={onFontSize}
-                className={inputCls}
-              />
-            </label>
+            <NumberField
+              label="サイズ (pt)"
+              ariaLabel="フォントサイズ (pt)"
+              value={textEl.style.fontSizePt ?? 12}
+              min={1}
+              onCommit={(fontSizePt) => onChange({ type: "editText", patch: { fontSizePt } })}
+            />
             {/* Color */}
             <ColorField
               key={`text-color-${textEl.id}`}
@@ -509,18 +504,13 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
               </div>
             </div>
             {/* Corner radius */}
-            <label className="flex flex-col gap-0.5">
-              <span className={labelSpanCls}>角丸 (mm)</span>
-              <input
-                type="number"
-                step="0.5"
-                min="0"
-                aria-label="角丸 (mm)"
-                value={imageEl.radiusMm ?? 0}
-                onChange={onRadiusMm}
-                className={inputCls}
-              />
-            </label>
+            <NumberField
+              label="角丸 (mm)"
+              ariaLabel="角丸 (mm)"
+              value={imageEl.radiusMm ?? 0}
+              min={0}
+              onCommit={(radiusMm) => onChange({ type: "editImage", patch: { radiusMm } })}
+            />
             {/* Alt text */}
             <label className="flex flex-col gap-0.5">
               <span className={labelSpanCls}>代替テキスト</span>
@@ -583,18 +573,60 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
               onSafeChange={(fg) => onChange({ type: "editBadge", patch: { fg } })}
             />
             {/* Font size */}
-            <label className="flex flex-col gap-0.5">
-              <span className={labelSpanCls}>サイズ (pt)</span>
-              <input
-                type="number"
-                step="0.5"
-                min="1"
-                aria-label="バッジ文字サイズ (pt)"
-                value={badgeEl.fontSizePt ?? 10}
-                onChange={onBadgeFontSize}
-                className={inputCls}
-              />
-            </label>
+            <NumberField
+              label="サイズ (pt)"
+              ariaLabel="バッジ文字サイズ (pt)"
+              value={badgeEl.fontSizePt ?? 10}
+              min={1}
+              onCommit={(fontSizePt) => onChange({ type: "editBadge", patch: { fontSizePt } })}
+            />
+          </div>
+        </section>
+      )}
+
+      {/* ── Table editor (table elements only・計画⑧第2弾) ─────────────── */}
+      {tableEl !== null && (
+        <section className="p-3" data-table-editor>
+          <p className={sectionHeadCls}>概要表</p>
+          <div className="flex flex-col gap-2">
+            {tableEl.rows.map((row, i) => (
+              <div key={i} className="flex items-center gap-1" data-table-row-editor>
+                <input
+                  type="text"
+                  aria-label={`行${i + 1} 項目名`}
+                  value={row.label}
+                  onChange={(e) =>
+                    onChange({ type: "editTableRow", index: i, patch: { label: e.target.value } })
+                  }
+                  className={`${inputCls} w-20 shrink-0`}
+                />
+                <input
+                  type="text"
+                  aria-label={`行${i + 1} 内容`}
+                  value={row.value}
+                  onChange={(e) =>
+                    onChange({ type: "editTableRow", index: i, patch: { value: e.target.value } })
+                  }
+                  className={inputCls}
+                />
+                <button
+                  type="button"
+                  aria-label={`行${i + 1} を削除`}
+                  onClick={() => onChange({ type: "removeTableRow", index: i })}
+                  className="shrink-0 rounded border border-neutral-300 dark:border-zinc-600 px-1.5 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              data-table-add-row
+              onClick={() => onChange({ type: "addTableRow" })}
+              className="rounded border border-neutral-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-2 py-1 text-xs text-neutral-700 dark:text-zinc-200 hover:bg-neutral-50 dark:hover:bg-zinc-600 transition-colors"
+            >
+              行を追加
+            </button>
           </div>
         </section>
       )}

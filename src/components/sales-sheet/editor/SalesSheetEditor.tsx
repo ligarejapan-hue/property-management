@@ -15,6 +15,9 @@ import {
   editBadge,
   editQr,
   editTheme,
+  editTableRow,
+  addTableRow,
+  removeTableRow,
   addImageElement,
   addBadgeElement,
   addQrElement,
@@ -135,6 +138,12 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           return editBadge(prev, id, change.patch);
         case "editQr":
           return editQr(prev, id, change.patch);
+        case "editTableRow":
+          return editTableRow(prev, id, change.index, change.patch);
+        case "addTableRow":
+          return addTableRow(prev, id);
+        case "removeTableRow":
+          return removeTableRow(prev, id, change.index);
       }
     });
   }
