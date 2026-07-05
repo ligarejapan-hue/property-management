@@ -91,19 +91,24 @@ export function buildCreateRequest(
   };
 }
 
-/** 物件種別に応じた販売図面の作成ボタン＋作成フォーム（作成後エディタへ遷移）。 */
-export function SalesSheetCreateButton({
+/**
+ * 販売図面の作成ダイアログ（制御コンポーネント）。
+ * 物件詳細の作成ボタンと、販売図面ピッカー（/sales-sheets/new）の両方から使う。
+ * 呼び出し側は物件が変わるたび key={propertyId} で remount して入力値の持ち越しを防ぐ。
+ */
+export function SalesSheetCreateDialog({
   propertyId,
-  canWrite,
   kind,
+  open,
+  onClose,
 }: {
   propertyId: string;
-  canWrite: boolean;
   kind: SalesSheetTemplateKind;
+  open: boolean;
+  onClose: () => void;
 }) {
   const router = useRouter();
   const cfg = FIELD_SETS[kind];
-  const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +135,75 @@ export function SalesSheetCreateButton({
     }
   }
 
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-[420px] overflow-y-auto rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-800">
+        <h2 className="mb-3 text-base font-bold text-gray-900 dark:text-gray-100">
+          販売図面（{cfg.label}）の作成
+        </h2>
+        <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
+          システムに無い項目を入力してください（空欄可）。作成後、配置や文字はエディタで調整できます。
+        </p>
+        <div className="space-y-2">
+          {cfg.fields.map((f) => (
+            <div key={f.key} className="flex items-center gap-2">
+              <label
+                htmlFor={`ss-${f.key}`}
+                className="w-24 shrink-0 text-sm text-gray-700 dark:text-gray-300"
+              >
+                {f.label}
+              </label>
+              <input
+                id={`ss-${f.key}`}
+                aria-label={f.label}
+                className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+                value={values[f.key] ?? ""}
+                onChange={(e) =>
+                  setValues((v) => ({ ...v, [f.key]: e.target.value }))
+                }
+              />
+            </div>
+          ))}
+        </div>
+        {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-neutral-700"
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            onClick={create}
+            disabled={busy}
+            className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {busy ? "作成中…" : "作成してエディタを開く"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 物件種別に応じた販売図面の作成ボタン＋作成フォーム（作成後エディタへ遷移）。 */
+export function SalesSheetCreateButton({
+  propertyId,
+  canWrite,
+  kind,
+}: {
+  propertyId: string;
+  canWrite: boolean;
+  kind: SalesSheetTemplateKind;
+}) {
+  const cfg = FIELD_SETS[kind];
+  const [open, setOpen] = useState(false);
+
   // /sales-sheets/new は property:write を要求するため、read-only ユーザーには作成導線を出さない
   // （表示してもクリックで 403 dead-end になる）。route 側の property:write チェックは別途維持。
   if (!canWrite) return null;
@@ -143,59 +217,12 @@ export function SalesSheetCreateButton({
       >
         販売図面を作成（{cfg.label}）
       </button>
-
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-[420px] overflow-y-auto rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-800">
-            <h2 className="mb-3 text-base font-bold text-gray-900 dark:text-gray-100">
-              販売図面（{cfg.label}）の作成
-            </h2>
-            <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-              システムに無い項目を入力してください（空欄可）。作成後、配置や文字はエディタで調整できます。
-            </p>
-            <div className="space-y-2">
-              {cfg.fields.map((f) => (
-                <div key={f.key} className="flex items-center gap-2">
-                  <label
-                    htmlFor={`ss-${f.key}`}
-                    className="w-24 shrink-0 text-sm text-gray-700 dark:text-gray-300"
-                  >
-                    {f.label}
-                  </label>
-                  <input
-                    id={`ss-${f.key}`}
-                    aria-label={f.label}
-                    className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
-                    value={values[f.key] ?? ""}
-                    onChange={(e) =>
-                      setValues((v) => ({ ...v, [f.key]: e.target.value }))
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-            {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                disabled={busy}
-                className="rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-neutral-700"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                onClick={create}
-                disabled={busy}
-                className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-              >
-                {busy ? "作成中…" : "作成してエディタを開く"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SalesSheetCreateDialog
+        propertyId={propertyId}
+        kind={kind}
+        open={open}
+        onClose={() => setOpen(false)}
+      />
     </div>
   );
 }
