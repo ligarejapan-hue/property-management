@@ -172,23 +172,37 @@ export default function BulkFolderUpload({
       </p>
 
       <div className="flex flex-wrap items-center gap-3">
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+        <label
+          className={`inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white ${
+            uploading
+              ? "cursor-not-allowed opacity-50"
+              : "cursor-pointer hover:bg-indigo-700"
+          }`}
+        >
           フォルダを選択
           <input
             ref={folderRefCb}
             type="file"
             accept=".pdf,application/pdf"
             multiple
+            disabled={uploading}
             onChange={onPick}
             className="hidden"
           />
         </label>
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">
+        <label
+          className={`inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200 ${
+            uploading
+              ? "cursor-not-allowed opacity-50"
+              : "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
+          }`}
+        >
           ファイルを選択（複数可）
           <input
             type="file"
             accept=".pdf,application/pdf"
             multiple
+            disabled={uploading}
             onChange={onPick}
             className="hidden"
           />
