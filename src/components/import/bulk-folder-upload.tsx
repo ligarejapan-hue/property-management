@@ -66,7 +66,18 @@ export default function BulkFolderUpload({
     );
     // 同じフォルダ/ファイルを選び直しても onChange が再発火するよう value をクリア。
     input.value = "";
-    if (picked.length === 0) return;
+    if (picked.length === 0) {
+      // PDFが1件も無い選択(誤ったフォルダ等)。前回の選択が残ったまま送信できて
+      // しまわないよう状態をクリアし、その旨をフィードバックする。
+      setFiles([]);
+      setPlan(null);
+      setSummary(null);
+      setSentCount(0);
+      setBatchDone(0);
+      setShowExcluded(false);
+      setError("選択した場所にPDFファイルが見つかりませんでした。フォルダをご確認ください。");
+      return;
+    }
     setFiles(picked);
     setPlan(buildUploadPlan(toMetas(picked), loadSentKeys()));
     setSentCount(0);
@@ -166,6 +177,19 @@ export default function BulkFolderUpload({
     clearSentKeys();
     reset();
   }, [reset]);
+
+  const resendAll = useCallback(() => {
+    // 送信済み記録が古い/誤っているとき、現在の選択を消さずに記録だけ消して
+    // 全件を再送可能にする(localStorageを手動で消さずに復帰できるようにする)。
+    clearSentKeys();
+    setSummary(null);
+    setSentCount(0);
+    setBatchDone(0);
+    setError(null);
+    if (files.length > 0) {
+      setPlan(buildUploadPlan(toMetas(files), loadSentKeys()));
+    }
+  }, [files]);
 
   const total = plan?.sendableTotal ?? 0;
   const batchTotal = plan?.batches.length ?? 0;
@@ -289,9 +313,18 @@ export default function BulkFolderUpload({
 
       {plan && plan.batches.length === 0 && !summary && files.length > 0 && (
         plan.alreadySentCount > 0 ? (
-          <p className="text-sm text-emerald-700 dark:text-emerald-400">
-            選択したPDFはすべて送信済みです。
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm text-emerald-700 dark:text-emerald-400">
+              選択したPDFはすべて送信済みです。
+            </p>
+            <button
+              type="button"
+              onClick={resendAll}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400"
+            >
+              送信記録をリセットして再送する
+            </button>
+          </div>
         ) : (
           <p className="text-sm text-amber-700 dark:text-amber-400">
             送信できるPDFがありませんでした（除外 {plan.excluded.length}件）。1ファイル5MB以下のPDFかご確認ください。
