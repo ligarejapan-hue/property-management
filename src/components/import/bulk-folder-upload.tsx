@@ -10,6 +10,7 @@ import {
   buildUploadPlan,
   bulkFileKey,
   type BulkFileMeta,
+  type ExcludeReason,
   type UploadPlan,
 } from "@/lib/registry-pdf-bulk/bulk-upload-plan";
 import {
@@ -26,7 +27,7 @@ export interface BulkUploadSummary {
   jobIds: string[];
 }
 
-const REASON_LABEL: Record<string, string> = {
+const REASON_LABEL: Record<ExcludeReason, string> = {
   too_large: "5MB超過",
   not_pdf: "PDF以外",
 };
@@ -221,7 +222,7 @@ export default function BulkFolderUpload({
                 <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto text-xs text-gray-600 dark:text-gray-400">
                   {plan.excluded.map((x) => (
                     <li key={x.index} className="break-all">
-                      {REASON_LABEL[x.reason] ?? x.reason}: {x.name}
+                      {REASON_LABEL[x.reason]}: {x.name}
                     </li>
                   ))}
                 </ul>
@@ -233,7 +234,13 @@ export default function BulkFolderUpload({
 
       {(uploading || (sentCount > 0 && !summary)) && (
         <div className="space-y-1">
-          <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+          <div
+            className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
+            role="progressbar"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <div
               className="h-full bg-emerald-500 transition-all"
               style={{ width: `${pct}%` }}
@@ -261,9 +268,15 @@ export default function BulkFolderUpload({
       )}
 
       {plan && plan.batches.length === 0 && !summary && files.length > 0 && (
-        <p className="text-sm text-emerald-700 dark:text-emerald-400">
-          選択したPDFはすべて送信済みです。
-        </p>
+        plan.alreadySentCount > 0 ? (
+          <p className="text-sm text-emerald-700 dark:text-emerald-400">
+            選択したPDFはすべて送信済みです。
+          </p>
+        ) : (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            送信できるPDFがありませんでした（除外 {plan.excluded.length}件）。1ファイル5MB以下のPDFかご確認ください。
+          </p>
+        )
       )}
 
       {error && <p className="text-sm text-red-700 dark:text-red-400">{error}</p>}
