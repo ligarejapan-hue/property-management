@@ -121,7 +121,13 @@ export default function BulkFolderUpload({
         accepted += res.acceptedCount;
         rejected += res.rejectedCount;
         jobIds.push(res.jobId);
-        recordSentKeys(batch.map((i) => bulkFileKey(files[i].name)));
+        // 受付拒否(サーバのPDF実体検査/一時保存失敗など)が1件でもあると、
+        // どのファイルが拒否されたかは応答(件数のみ)から特定できない。取りこぼしを
+        // 避けるため、拒否ゼロのバッチだけ送信済みとして記録する。拒否ありのバッチは
+        // 再開時に再送され、受理済みはサーバの請求番号dedупでスキップ、拒否分だけ再試行される。
+        if (res.rejectedCount === 0) {
+          recordSentKeys(batch.map((i) => bulkFileKey(files[i].name)));
+        }
         sent += batch.length;
         setSentCount(sent);
         setBatchDone(b + 1);
@@ -302,6 +308,12 @@ export default function BulkFolderUpload({
             {summary.batchCount > 0 && `（${summary.batchCount}バッチ）`}
             {summary.excludedTotal > 0 && ` / 除外 ${summary.excludedTotal}件`}
           </p>
+          {summary.rejectedTotal > 0 && (
+            <p className="text-amber-700 dark:text-amber-400">
+              受付できなかったファイルが {summary.rejectedTotal}
+              件あります(PDFとして読めない等)。取込履歴で確認し、必要なら選び直して再アップロードしてください。
+            </p>
+          )}
           <p className="text-gray-700 dark:text-gray-300">
             添付結果（添付済 / 既取得スキップ / 要確認）は取込履歴で確認できます。
           </p>
