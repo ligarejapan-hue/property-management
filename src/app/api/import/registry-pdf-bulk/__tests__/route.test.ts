@@ -157,6 +157,38 @@ describe("POST /api/import/registry-pdf-bulk", () => {
     expect(storageMock.upload).toHaveBeenCalledTimes(1);
   });
 
+  it("全件非PDF(2件)は即時失敗確定(enqueueせずジョブをfailedに更新)", async () => {
+    const res = await POST(
+      (await makeRequest([textFile("メモ1.txt"), textFile("メモ2.txt")])) as never,
+    );
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { acceptedCount: number; rejectedCount: number };
+    expect(body.acceptedCount).toBe(0);
+    expect(body.rejectedCount).toBe(2);
+    const rows = pm.importJobRow.createMany.mock.calls[0][0].data as Array<{
+      status: string;
+    }>;
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.status === "error")).toBe(true);
+    // staging(PDFのみ)にはアップロードしない
+    expect(storageMock.upload).not.toHaveBeenCalled();
+    expect(pm.importJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "11111111-2222-3333-4444-555555555555" },
+        data: expect.objectContaining({
+          status: "failed",
+          successCount: 0,
+          errorCount: 2,
+        }),
+      }),
+    );
+    const updateData = pm.importJob.update.mock.calls[0][0].data as {
+      completedAt: Date;
+    };
+    expect(updateData.completedAt).toBeInstanceOf(Date);
+    expect(enqueueRegistryPdfBulkJob).not.toHaveBeenCalled();
+  });
+
   it("ファイル0件は 400 NO_FILE", async () => {
     const res = await POST((await makeRequest([])) as never);
     expect(res.status).toBe(400);

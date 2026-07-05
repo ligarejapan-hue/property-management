@@ -34,7 +34,7 @@ export async function POST(
 
     const job = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true, jobType: true },
+      select: { id: true, jobType: true, status: true },
     });
     if (!job) {
       throw new ApiError(404, "取込ジョブが見つかりません", "NOT_FOUND");
@@ -50,7 +50,14 @@ export async function POST(
     const pendingCount = await prisma.importJobRow.count({
       where: { jobId, status: "pending" },
     });
-    if (pendingCount > 0) {
+    // pending行が0でも、ジョブが非終端(pending/processing)ならenqueueする。
+    // 全件却下ジョブや、最終行処理後〜カウンタ確定前のクラッシュ(processing・
+    // pending0)はpendingCount>0のみを条件にすると永久に確定されず取り残される
+    // (@codex指摘)。worker側のprocessJobはpending行が無くてもカウンタを
+    // 再計算してstatusを確定する冪等実装のため、非終端ジョブは呼び直して良い。
+    const shouldEnqueue =
+      pendingCount > 0 || job.status === "pending" || job.status === "processing";
+    if (shouldEnqueue) {
       enqueueRegistryPdfBulkJob(jobId);
       try {
         await writeAuditLog({

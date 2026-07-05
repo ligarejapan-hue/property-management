@@ -212,7 +212,23 @@ export async function POST(request: NextRequest) {
         })),
       });
 
-      enqueueRegistryPdfBulkJob(job.id);
+      if (acceptedCount === 0) {
+        // 全件却下: enqueueするpending行が無い。fire-and-forgetのworker起動を
+        // 待たずにその場でジョブを確定する(@codex指摘)。ここでenqueueだけして
+        // 確定をworker側に委ねると、worker起動前にプロセス再起動が起きた場合
+        // status:pending・pendingCount:0のまま永久に取り残されてしまう。
+        await prisma.importJob.update({
+          where: { id: job.id },
+          data: {
+            status: "failed",
+            successCount: 0,
+            errorCount: rejectedCount,
+            completedAt: new Date(),
+          },
+        });
+      } else {
+        enqueueRegistryPdfBulkJob(job.id);
+      }
     } catch (err) {
       // 行作成(またはenqueue)に失敗すると、ジョブが status:"pending"・行0件のまま
       // 孤児化し(stuck検知はprocessingのみ対象で不可視)、アップ済みstagingも

@@ -648,27 +648,37 @@ export default function ImportJobDetailPage() {
           </button>
         )}
         {/* Task 11: 所有者事項PDF一括ジョブの未処理(pending)行を再開するボタン。
-            サーバ再起動でインプロセスワーカーの待機列が消えたときの復旧口。 */}
-        {isRegistryPdfBulkJob && (job?.pendingCount ?? 0) > 0 && (
-          <button
-            type="button"
-            onClick={async () => {
-              setResuming(true);
-              try {
-                await resumeRegistryPdfBulk(jobId);
-                await fetchJob();
-              } catch (e) {
-                alert(e instanceof Error ? e.message : "再開に失敗しました");
-              } finally {
-                setResuming(false);
-              }
-            }}
-            disabled={resuming}
-            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
-          >
-            {resuming ? "再開中..." : `未処理 ${job?.pendingCount}件を再開`}
-          </button>
-        )}
+            サーバ再起動でインプロセスワーカーの待機列が消えたときの復旧口。
+            pendingCount=0でもジョブが非終端(pending/processing)なら表示する
+            (@codex指摘: 全件却下ジョブや、最終行処理後〜カウンタ確定前クラッシュの
+            processing+pending0が pendingCount>0 条件のみだと永久にスタックするため)。 */}
+        {isRegistryPdfBulkJob &&
+          ((job?.pendingCount ?? 0) > 0 ||
+            job?.status === "pending" ||
+            job?.status === "processing") && (
+            <button
+              type="button"
+              onClick={async () => {
+                setResuming(true);
+                try {
+                  await resumeRegistryPdfBulk(jobId);
+                  await fetchJob();
+                } catch (e) {
+                  alert(e instanceof Error ? e.message : "再開に失敗しました");
+                } finally {
+                  setResuming(false);
+                }
+              }}
+              disabled={resuming}
+              className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+            >
+              {resuming
+                ? "再開中..."
+                : (job?.pendingCount ?? 0) > 0
+                  ? `未処理 ${job?.pendingCount}件を再開`
+                  : "処理を再開(集計を確定)"}
+            </button>
+          )}
         {job.status === "rolled_back" && (
           <span className="inline-flex items-center gap-1.5 rounded-md border border-purple-300 bg-purple-50 px-3 py-1.5 text-sm font-medium text-purple-700">
             <RotateCcw className="h-4 w-4" />
