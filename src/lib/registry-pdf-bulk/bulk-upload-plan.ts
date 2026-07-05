@@ -26,7 +26,7 @@ export interface UploadPlan {
   sendableTotal: number;
 }
 
-// サーバ route.ts / wizard-progress.ts と同じ上限(正本はサーバ側)。
+// サーバ route.ts と同じ上限(正本はサーバ側)。
 export const MAX_BULK_FILES = 100;
 export const MAX_BULK_FILE_BYTES = 5 * 1024 * 1024;
 // 1バッチのバイト目標。サーバ上限100MBに余裕を持たせる。
