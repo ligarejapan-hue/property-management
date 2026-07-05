@@ -96,7 +96,14 @@ export function SalesSheetPropertyPicker({
                 <span className="shrink-0 rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
                   {row.typeLabel}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-gray-900 dark:text-gray-100">
+                {/* 住所は行が button でも保護が効くよう、行内の明示 fragment として
+                    data-pii-protected を付ける（広い container 方式は button 除外で無効・
+                    sale-dm recipient-list と同方式）。 */}
+                <span
+                  data-pii-protected
+                  data-pii-surface="property"
+                  className="min-w-0 flex-1 truncate text-sm text-gray-900 dark:text-gray-100"
+                >
                   {row.address}
                 </span>
                 <span className="hidden text-xs text-gray-400 dark:text-gray-500 sm:inline">

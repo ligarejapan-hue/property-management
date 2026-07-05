@@ -74,3 +74,15 @@ describe("SalesSheetPropertyPicker", () => {
     expect(multi).toContain("全 120 件");
   });
 });
+
+describe("SalesSheetPropertyPicker — PII 画面保護（@codex P2）", () => {
+  it("住所スパンを行ごとの data-pii-protected fragment で保護する（button 行でも有効な方式）", () => {
+    const html = renderToStaticMarkup(
+      createElement(SalesSheetPropertyPicker, { ...baseProps, rows, total: 2 }),
+    );
+    // 行数分の fragment（actionable な button 行・非 actionable な div 行の両方）。
+    const marks = html.match(/data-pii-protected/g) ?? [];
+    expect(marks.length).toBe(2);
+    expect(html).toContain('data-pii-surface="property"');
+  });
+});
