@@ -9,9 +9,22 @@ import { AddressLookupControls } from "@/components/address/address-lookup-contr
 
 interface Props {
   onClose: () => void;
+  /** 種別選択肢を制限する（販売図面ピッカー等）。未指定は従来どおり（旧値除く全種別）。 */
+  typeFilter?: string[];
+  /** 登録成功時の遷移を差し替える。未指定は従来どおり物件詳細へ router.push。 */
+  onCreated?: (id: string, propertyType: string) => void;
 }
 
-export default function NewPropertyModal({ onClose }: Props) {
+/** 登録成功後のアクション（onCreated 指定時はそれ・未指定は物件詳細へ遷移）を返す純関数。 */
+export function resolvePostCreate(
+  onCreated: ((id: string, propertyType: string) => void) | undefined,
+  router: { push: (url: string) => void },
+): (id: string, propertyType: string) => void {
+  if (onCreated) return onCreated;
+  return (id) => router.push(`/properties/${id}`);
+}
+
+export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Props) {
   const router = useRouter();
 
   const [propertyType, setPropertyType] = useState("");
@@ -48,7 +61,7 @@ export default function NewPropertyModal({ onClose }: Props) {
         introductionRoute: introductionRoute || null,
         note: note.trim() || null,
       });
-      router.push(`/properties/${result.id}`);
+      resolvePostCreate(onCreated, router)(result.id, propertyType);
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
       setSubmitting(false);
@@ -93,7 +106,9 @@ export default function NewPropertyModal({ onClose }: Props) {
               <option value="">選択してください</option>
               {PROPERTY_TYPE_OPTIONS.filter(
                 (o) => !["building", "unit"].includes(o.value),
-              ).map((o) => (
+              )
+                .filter((o) => !typeFilter || typeFilter.includes(o.value))
+                .map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>
