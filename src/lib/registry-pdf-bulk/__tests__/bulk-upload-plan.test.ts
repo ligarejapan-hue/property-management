@@ -66,11 +66,18 @@ describe("planBatches", () => {
 });
 
 describe("bulkFileKey", () => {
-  it("規約ファイル名は請求番号、非規約はファイル名", () => {
+  it("規約ファイル名は請求番号(非PII)", () => {
     expect(
       bulkFileKey("渋谷区A不動産登記（建物所有者事項）2024121200118150.PDF"),
     ).toBe("2024121200118150");
-    expect(bulkFileKey("random.pdf")).toBe("random.pdf");
+  });
+
+  it("規約外ファイル名は逆算不能な安定ハッシュ(所在PIIを平文保持しない)", () => {
+    const name = "所有者PDF 渋谷区神南1-2-3.pdf";
+    const key = bulkFileKey(name);
+    expect(key).toMatch(/^h:[0-9a-f]{8}$/);
+    expect(key).not.toContain("渋谷"); // 所在(PII)を鍵に残さない
+    expect(bulkFileKey(name)).toBe(key); // 決定的(同入力→同鍵=再開スキップが安定)
   });
 });
 

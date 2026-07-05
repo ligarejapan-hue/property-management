@@ -76,10 +76,27 @@ export function planBatches(
   return batches;
 }
 
-/** 再開キー: 請求番号が取れればそれ、無ければ正規化したファイル名。 */
+/**
+ * 逆算不能な決定的32bitハッシュ(FNV-1a)。規約外ファイル名を localStorage に
+ * 平文保存しないための鍵生成に使う(暗号用途ではない)。
+ */
+function fnv1aHex(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * 再開キー: 請求番号が取れればそれ(非PII)。取れない規約外ファイル名は所在(PII)を
+ * 含み得るため、平文でなく逆算不能なハッシュを鍵にする(再開スキップの安定性は保つ)。
+ */
 export function bulkFileKey(name: string): string {
   const parsed = parseRegistryPdfBulkFilename(name);
-  return parsed ? parsed.requestNumber : name.normalize("NFC").trim();
+  if (parsed) return parsed.requestNumber;
+  return "h:" + fnv1aHex(name.normalize("NFC").trim());
 }
 
 /** 送信済みキー集合に含まれる index を除外。 */
