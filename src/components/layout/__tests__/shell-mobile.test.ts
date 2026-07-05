@@ -63,9 +63,12 @@ describe("sidebar — 管理者メニューの整理(2グループ・既定閉)"
     expect(sidebar).toContain('navGroup("データ品質チェック"');
     expect(sidebar).toContain("dataQualityNavItems");
   });
-  it("両グループとも現在地ベースで初期化(グループ外なら閉)", () => {
-    expect(sidebar).toMatch(/useState\(\(\) =>\s*adminNavItems\.some/);
-    expect(sidebar).toMatch(/useState\(\(\) =>\s*dataQualityNavItems\.some/);
+  it("開閉は現在地＋手動トグルから毎レンダー導出(client-side遷移に追従)", () => {
+    // useState初期化のみだと永続layoutで再マウントされず遷移に追従しない(@codex P3)。
+    // トグル(null=未操作)が無ければ現在地(isActive)から開くよう導出する。
+    expect(sidebar).toMatch(/adminToggle \?\? adminNavItems\.some/);
+    expect(sidebar).toMatch(/qualityToggle \?\? dataQualityNavItems\.some/);
+    expect(sidebar).not.toMatch(/useState\(\(\) =>\s*adminNavItems\.some/);
   });
   it("グループ見出しは aria-expanded を持つ", () => {
     expect(sidebar).toMatch(/aria-expanded=\{open\}/);

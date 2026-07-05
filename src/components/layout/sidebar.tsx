@@ -154,14 +154,17 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   };
 
   // 管理者系グループは既定で閉じる(18項目が常時展開されるとモバイルで
-  // ドロワーが縦に収まらない)。ただし現在地がグループ内のページなら
-  // 開いた状態で初期化し、現在地を見失わないようにする。
-  const [adminOpen, setAdminOpen] = useState(() =>
-    adminNavItems.some((i) => isActive(i.href)),
-  );
-  const [qualityOpen, setQualityOpen] = useState(() =>
-    dataQualityNavItems.some((i) => isActive(i.href)),
-  );
+  // ドロワーが縦に収まらない)。開閉は「現在地(currentPath)＋ユーザーの手動操作」
+  // から毎レンダー導出する: 手動トグル(null=未操作)が無ければ、現在地がグループ内
+  // なら自動で開く。dashboard layout は永続で Sidebar が再マウントされないため、
+  // useState 初期化だけだと client-side 遷移で別グループへ入っても開かず現在地が
+  // サイドバーから消える。導出式にすることで遷移のたび追従する(effect 不要=
+  // react-hooks/set-state-in-effect も踏まない)。
+  const [adminToggle, setAdminToggle] = useState<boolean | null>(null);
+  const [qualityToggle, setQualityToggle] = useState<boolean | null>(null);
+  const adminOpen = adminToggle ?? adminNavItems.some((i) => isActive(i.href));
+  const qualityOpen =
+    qualityToggle ?? dataQualityNavItems.some((i) => isActive(i.href));
 
   const linkClasses = (href: string) =>
     `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
@@ -230,9 +233,9 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
 
       {isAdmin && (
         <>
-          {navGroup("管理", adminNavItems, adminOpen, () => setAdminOpen(!adminOpen))}
+          {navGroup("管理", adminNavItems, adminOpen, () => setAdminToggle(!adminOpen))}
           {navGroup("データ品質チェック", dataQualityNavItems, qualityOpen, () =>
-            setQualityOpen(!qualityOpen),
+            setQualityToggle(!qualityOpen),
           )}
         </>
       )}
