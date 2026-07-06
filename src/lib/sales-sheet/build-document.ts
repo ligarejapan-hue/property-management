@@ -386,17 +386,36 @@ function mansionFooterDetails(o: SaleMansionOverrides): string {
     .join("　");
 }
 
-export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDocument {
-  const o = input.overrides ?? {};
-  const p = input.property;
-  const b = input.building ?? {};
+/**
+ * 種別非依存の版面パーツ。自社マイソク様式（キャッチ帯/見出し+価格/全項目スペック表/
+ * セールスポイント/会社フッター2行/写真/間取り枠）の入力を型で表す。
+ * `buildSpecSheetDocument` の唯一の引数（[F2-A Task1] buildSaleMansionDocument から抽出）。
+ */
+export interface SpecSheetParts {
+  /** 左上見出し（建物名+号室 / 「売土地」等）。 */
+  heading: string;
+  /** 例 "6590万円"（空可）。 */
+  priceText: string;
+  /** スペック表の行。 */
+  rows: { label: string; value: string }[];
+  photos?: { fileUrl: string }[];
+  catchCopy?: string;
+  /** ◆区切りで結合して sales-points 要素に表示。 */
+  salesPoints?: string[];
+  /** 会社フッター2行目（取引態様/報酬/…）。 */
+  footerDetails?: string;
+  /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を置く。 */
+  floorPlanImage?: { fileUrl: string } | null;
+}
 
-  const values = buildMansionValues(input);
-  const rows = buildSheetRows(MANSION_SPEC_FIELDS, values);
-
-  const heading = [b.name, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join("　");
-  const priceText = o.price ? `${o.price}万円` : "";
-  const salesPointsText = (o.salesPoints ?? [])
+/**
+ * A4横 自社マイソク様式の版面レイアウトを種別非依存に組む純関数（[F2-A Task1]）。
+ * catch-band/catch-copy/heading/price/overview表/sales-points/company/company-details/
+ * photos/floor-plan の要素構成・座標・スタイルは、抽出前の buildSaleMansionDocument と
+ * 同一（出力不変・build-mansion.test.ts の特性化テストで固定）。
+ */
+export function buildSpecSheetDocument(parts: SpecSheetParts): SalesSheetDocument {
+  const salesPointsText = (parts.salesPoints ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => `◆${s}`)
@@ -407,35 +426,58 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
     { id: "catch-band", type: "shape", x: 10, y: 8, w: 277, h: 16, z: 1,
       shape: "rect", fill: NAVY },
     { id: "catch-copy", type: "text", x: 16, y: 8, w: 265, h: 16, z: 2,
-      content: o.catchCopy ?? "", style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" } },
-    // 左上: 建物名+号室 / 価格（大）
+      content: parts.catchCopy ?? "", style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" } },
+    // 左上: 見出し（建物名+号室 等） / 価格（大）
     { id: "heading", type: "text", x: 10, y: 26, w: 94, h: 7, z: 2,
-      content: heading, style: { fontSizePt: 11, bold: true, color: NAVY } },
+      content: parts.heading, style: { fontSizePt: 11, bold: true, color: NAVY } },
     { id: "price", type: "text", x: 10, y: 33, w: 94, h: 12, z: 2,
-      content: priceText, style: { fontSizePt: 20, bold: true, color: RED } },
+      content: parts.priceText, style: { fontSizePt: 20, bold: true, color: RED } },
     // 右: 全項目スペック表（行が多いため fontSize を下げ h を拡大）
     { id: "overview", type: "table", x: 150, y: 26, w: 137, h: 167, z: 1,
-      rows, style: { fontSizePt: 7, borderColor: "#cccccc", labelColor: NAVY } },
+      rows: parts.rows, style: { fontSizePt: 7, borderColor: "#cccccc", labelColor: NAVY } },
     // 写真下: セールスポイント（◆区切り）
     { id: "sales-points", type: "text", x: 10, y: 187, w: 136, h: 7, z: 2,
       content: salesPointsText, style: { fontSizePt: 9, bold: true, color: NAVY } },
-    // 会社フッター（下部帯・全幅）: 1行目=会社定数、2行目=取引態様/報酬/広告/担当/取引士/特記
+    // 会社フッター（下部帯・全幅）: 1行目=会社定数、2行目=種別ごとの詳細（取引態様/報酬/…）
     { id: "company", type: "text", x: 10, y: 195, w: 277, h: 6, z: 2,
       content: COMPANY, style: { fontSizePt: 9, color: NAVY } },
     { id: "company-details", type: "text", x: 10, y: 201, w: 277, h: 7, z: 2,
-      content: mansionFooterDetails(o), style: { fontSizePt: 8, color: NAVY } },
-    ...photoElements(input.photos),
+      content: parts.footerDetails ?? "", style: { fontSizePt: 8, color: NAVY } },
+    ...photoElements(parts.photos),
   ];
 
   // 間取り枠: 提供時のみ、キャッチ帯下・写真上の隙間にプレースホルダ画像を置く（任意）。
-  if (input.floorPlanImage?.fileUrl) {
+  if (parts.floorPlanImage?.fileUrl) {
     elements.push({
       id: "floor-plan", type: "image", x: 108, y: 26, w: 32, h: 18, z: 1,
-      src: input.floorPlanImage.fileUrl, fit: "contain", alt: "間取り図",
+      src: parts.floorPlanImage.fileUrl, fit: "contain", alt: "間取り図",
     });
   }
 
   return { page: A4_LANDSCAPE, theme: { fontFamily: FONT, accentColor: NAVY }, elements };
+}
+
+export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDocument {
+  const o = input.overrides ?? {};
+  const p = input.property;
+  const b = input.building ?? {};
+
+  const values = buildMansionValues(input);
+  const rows = buildSheetRows(MANSION_SPEC_FIELDS, values);
+
+  const heading = [b.name, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join("　");
+  const priceText = o.price ? `${o.price}万円` : "";
+
+  return buildSpecSheetDocument({
+    heading,
+    priceText,
+    rows,
+    photos: input.photos,
+    catchCopy: o.catchCopy,
+    salesPoints: o.salesPoints,
+    footerDetails: mansionFooterDetails(o),
+    floorPlanImage: input.floorPlanImage,
+  });
 }
 
 // ---- 売戸建 ----
