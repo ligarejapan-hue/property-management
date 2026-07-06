@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
-import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 import { buildPropertyPhotoDataFromPinPhoto } from "@/lib/field-survey-convert";
 
 const MIME_TO_EXT: Record<string, string> = {
@@ -25,6 +24,7 @@ interface CarryoverDb {
 }
 
 interface CarryoverStorage {
+  keyFromUrl: (fileUrl: string) => string | null;
   read: (key: string) => Promise<{ body: Buffer } | null>;
   upload: (
     buf: Buffer,
@@ -73,7 +73,10 @@ export async function copyPinPhotosToProperty(
   let failed = 0;
   for (const p of pinPhotos) {
     try {
-      const key = extractStorageKeyFromUrl(p.fileUrl);
+      // active adapter の keyFromUrl で解決する。旧データの絶対 URL(server backend)も
+      // lenient に解決して取りこぼさない(@codex 指摘対応。厳格な extractStorageKeyFromUrl は
+      // /uploads 相対のみ受理し絶対 URL を弾くため使わない)。
+      const key = storage.keyFromUrl(p.fileUrl);
       if (!key) {
         failed++;
         continue;

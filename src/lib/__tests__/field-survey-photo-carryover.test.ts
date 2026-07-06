@@ -24,8 +24,9 @@ function makeDeps(pinPhotos: PhotoRow[], reads: (Buffer | null)[]) {
       key: opts.key,
     }),
   );
+  const keyFromUrl = vi.fn((url: string): string | null => url.replace(/^.*\/uploads\//, "") || null);
   const db = { fieldSurveyPinPhoto: { findMany }, propertyPhoto: { create } };
-  const storage = { read, upload };
+  const storage = { keyFromUrl, read, upload };
   let n = 0;
   const deps = { db, storage, uuid: () => `uuid${n++}`, now: () => 1000 };
   return { deps, create, read, upload, findMany };
@@ -71,5 +72,15 @@ describe("copyPinPhotosToProperty", () => {
     const r = await copyPinPhotosToProperty("p1", "prop-1", deps);
     expect(r).toEqual({ copied: 0, failed: 0 });
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("旧データの絶対 URL も keyFromUrl で解決して複製する(取りこぼさない)", async () => {
+    const { deps, create } = makeDeps(
+      [photo({ fileUrl: "https://legacy.example/uploads/field-survey/pins/p1/photos/z.jpg" })],
+      [Buffer.from("z")],
+    );
+    const r = await copyPinPhotosToProperty("p1", "prop-1", deps);
+    expect(r).toEqual({ copied: 1, failed: 0 });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });
