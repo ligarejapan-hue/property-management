@@ -90,8 +90,11 @@ export async function copyPinPhotosToProperty(
         mimeType: p.mimeType,
         fileName: p.fileName,
       });
+      // 常に proxy 相対 URL(/uploads/{key})で保存する(server backend が返し得る
+      // 絶対 URL を持ち込まない。pins photo route と同方針)。
+      const newFileUrl = `/uploads/${result.key}`;
       await db.propertyPhoto.create({
-        data: buildPropertyPhotoDataFromPinPhoto(p, propertyId, result.url),
+        data: buildPropertyPhotoDataFromPinPhoto(p, propertyId, newFileUrl),
       });
       copied++;
     } catch {
