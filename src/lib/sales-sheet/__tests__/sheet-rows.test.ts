@@ -34,3 +34,27 @@ it("空値は空文字・単位を付けない", () => {
   expect(rows.find((r) => r.label === "価格")?.value).toBe("");
   expect(rows.find((r) => r.label === "用途地域")?.value).toBe("");
 });
+
+it("すでに末尾が unit と一致する値は付け直さない(二重単位防止・万円)", () => {
+  const priceFields: SheetField[] = [
+    { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
+  ];
+  expect(buildSheetRows(priceFields, { price: "3,480万円" })[0].value).toBe("3,480万円");
+  expect(buildSheetRows(priceFields, { price: "3480" })[0].value).toBe("3480万円");
+});
+
+it("すでに末尾が unit と一致する値は付け直さない(二重単位防止・m)", () => {
+  const widthFields: SheetField[] = [
+    { key: "roadWidth", label: "接道幅員", widget: "number", section: "法令", unit: "m" },
+  ];
+  expect(buildSheetRows(widthFields, { roadWidth: "5.5m" })[0].value).toBe("5.5m");
+  expect(buildSheetRows(widthFields, { roadWidth: "5.5" })[0].value).toBe("5.5m");
+});
+
+it("unit ありでも空値は空文字のまま", () => {
+  const priceFields: SheetField[] = [
+    { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
+  ];
+  expect(buildSheetRows(priceFields, { price: "" })[0].value).toBe("");
+  expect(buildSheetRows(priceFields, {})[0].value).toBe("");
+});
