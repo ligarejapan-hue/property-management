@@ -33,9 +33,13 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: vi.fn(),
   },
 }));
+vi.mock("@/lib/field-survey-photo-carryover", () => ({
+  copyPinPhotosToProperty: vi.fn(async () => ({ copied: 0, failed: 0 })),
+}));
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { copyPinPhotosToProperty } from "@/lib/field-survey-photo-carryover";
 import { POST } from "../route";
 
 const pm = prisma as unknown as {
@@ -175,6 +179,20 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
   it("他人の pin でも manage があれば変換できる(201)", async () => {
     (getUserPermissions as Mock).mockResolvedValue(WRITE_MANAGE);
     pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ staffUserId: "someone-else" }));
+    const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
+    expect(res.status).toBe(201);
+  });
+
+  it("変換成功後に写真複製 copyPinPhotosToProperty を呼ぶ", async () => {
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin());
+    const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
+    expect(res.status).toBe(201);
+    expect(copyPinPhotosToProperty as unknown as Mock).toHaveBeenCalledWith(PIN_ID, "new-prop");
+  });
+
+  it("写真複製が throw しても変換は 201(非致命)", async () => {
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin());
+    (copyPinPhotosToProperty as unknown as Mock).mockRejectedValueOnce(new Error("storage down"));
     const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
     expect(res.status).toBe(201);
   });

@@ -12,6 +12,7 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { convertPinToPropertySchema } from "@/lib/validators";
 import { buildPropertyDataFromPin } from "@/lib/field-survey-convert";
+import { copyPinPhotosToProperty } from "@/lib/field-survey-photo-carryover";
 
 // ============================================================
 // POST /api/field-survey/pins/[id]/convert-to-property
@@ -100,6 +101,14 @@ export async function POST(
       }
       return created;
     });
+
+    // 物件化候補ピンの写真を新物件へ複製(ベストエフォート・非致命・I/O は tx 外)。
+    // 失敗しても物件は作成済みなので変換は成功扱い(写真が空になるだけ)。
+    try {
+      await copyPinPhotosToProperty(pin.id, property.id);
+    } catch {
+      // 写真複製の失敗は変換成功を妨げない。
+    }
 
     await writeAuditLog({
       userId: session.id,
