@@ -43,6 +43,11 @@ describe("mapOccupancyStatusToLandOccupancy（現況→売土地語彙の決定�
     expect(mapOccupancyStatusToLandOccupancy(undefined)).toBeUndefined();
   });
 
+  it("旧 preview route が事前に日本語ラベル化した値（空室/入居中）も許容する（@codex P2: でないと同route経由の土地物件で現況欄が空欄化する）", () => {
+    expect(mapOccupancyStatusToLandOccupancy("空室")).toBe("更地");
+    expect(mapOccupancyStatusToLandOccupancy("入居中")).toBe("上物有");
+  });
+
   it("同じ入力に対し常に同じ値を返す（タイミング非依存＝決定的であることの直接検証）", () => {
     const a = mapOccupancyStatusToLandOccupancy("vacant");
     const b = mapOccupancyStatusToLandOccupancy("vacant");

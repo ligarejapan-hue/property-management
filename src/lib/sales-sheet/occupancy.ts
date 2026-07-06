@@ -44,11 +44,16 @@ export function mapOccupancyStatusToMansionOccupancy(
  *   マンション版と異なり localizeOccupancy へはフォールバックしない: 土地の現況語彙
  *   (更地/上物有)は一般の入居状況語彙（空室/入居中 等）と意味がずれるため、無理に
  *   丸めず空欄のままにする方が安全（プランの確定仕様どおり）。
+ *
+ * - 互換: 旧 `POST /api/properties/[id]/sales-sheet/preview` route は本関数を呼ぶ前に
+ *   occupancyStatus を OCCUPANCY_STATUS_LABELS で日本語ラベル（"空室"/"入居中"）へ
+ *   先に変換してしまうため、その済ラベルも許容する（"空室"→"更地"／"入居中"→"上物有"）。
+ *   でないと同route経由の土地物件で現況欄が空欄化する退行になる（@codex P2 review）。
  */
 export function mapOccupancyStatusToLandOccupancy(
   status: string | null | undefined,
 ): string | undefined {
-  if (status === "vacant") return "更地";
-  if (status === "occupied") return "上物有";
+  if (status === "vacant" || status === "空室") return "更地";
+  if (status === "occupied" || status === "入居中") return "上物有";
   return undefined;
 }
