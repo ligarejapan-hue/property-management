@@ -11,12 +11,12 @@ describe("pin-detail-panel: 物件化ボタン配線", () => {
     expect(src).toMatch(/canWriteProperty\??\s*:/);
   });
 
-  it("candidate かつ propertyId 未設定 かつ 未アーカイブ かつ canWriteProperty のときだけ変換可の条件を持つ", () => {
+  it("candidate かつ propertyId 未設定 かつ open かつ canWriteProperty のときだけ変換可の条件を持つ", () => {
     expect(src).toContain('pinType === "candidate"');
     expect(src).toContain("propertyId == null");
     expect(src).toContain("canWriteProperty === true");
-    // canConvert 条件に archived 除外が含まれる(canDelete と同様)。
-    expect(src).toMatch(/canConvert =[\s\S]*?status !== "archived"[\s\S]*?canWriteProperty/);
+    // canConvert 条件が open のみ(closed/archived を除外)。
+    expect(src).toMatch(/canConvert =[\s\S]*?status === "open"[\s\S]*?canWriteProperty/);
   });
 
   it("ConvertPinToPropertyModal を import・使用し、ボタン文言を持つ", () => {

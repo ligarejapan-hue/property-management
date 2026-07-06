@@ -43,13 +43,17 @@ const pm = prisma as unknown as {
   property: { create: Mock };
   $transaction: Mock;
 };
-const WRITE = [{ resource: "property", action: "write", granted: true }];
+const FS_READ = { resource: "field_survey", action: "read", granted: true };
+const WRITE = [{ resource: "property", action: "write", granted: true }, FS_READ];
+const WRITE_ONLY = [{ resource: "property", action: "write", granted: true }];
 const WRITE_MANAGE = [
   { resource: "property", action: "write", granted: true },
+  FS_READ,
   { resource: "field_survey", action: "manage", granted: true },
 ];
 const WRITE_READ_ALL = [
   { resource: "property", action: "write", granted: true },
+  FS_READ,
   { resource: "field_survey", action: "read_all", granted: true },
 ];
 const PIN_ID = "11111111-1111-1111-1111-111111111111";
@@ -94,6 +98,13 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
     expect(pm.fieldSurveyPin.findUnique).not.toHaveBeenCalled();
   });
 
+  it("field_survey:read が無ければ 403(pin を読まない)", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(WRITE_ONLY);
+    const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
+    expect(res.status).toBe(403);
+    expect(pm.fieldSurveyPin.findUnique).not.toHaveBeenCalled();
+  });
+
   it("pin が無ければ 404", async () => {
     pm.fieldSurveyPin.findUnique.mockResolvedValue(null);
     const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
@@ -114,6 +125,13 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
     expect(pm.property.create).not.toHaveBeenCalled();
   });
 
+  it("closed(対応済み)候補は 409(作成しない)", async () => {
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ status: "closed" }));
+    const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
+    expect(res.status).toBe(409);
+    expect(pm.property.create).not.toHaveBeenCalled();
+  });
+
   it("既に propertyId があれば 409(作成しない)", async () => {
     pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ propertyId: "p-x" }));
     const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
@@ -129,7 +147,7 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
     expect(pm.property.create.mock.calls[0][0].data.gpsLat).toBe(35.5);
     expect(pm.property.create.mock.calls[0][0].data.introductionRoute).toBe("field_survey");
     const upd = pm.fieldSurveyPin.updateMany.mock.calls[0][0];
-    expect(upd.where).toEqual({ id: PIN_ID, propertyId: null, pinType: "candidate", status: { not: "archived" } });
+    expect(upd.where).toEqual({ id: PIN_ID, propertyId: null, pinType: "candidate", status: "open" });
     expect(upd.data).toEqual({ propertyId: "new-prop", status: "closed" });
   });
 

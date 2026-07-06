@@ -37,6 +37,11 @@ export async function POST(
     if (!hasPermission(permissions, "property", "write")) {
       throw new ApiError(403, "物件登録の権限がありません", "FORBIDDEN");
     }
+    // 現地調査ピンを読む/変える操作なので、他の pin API と同様に field_survey:read も必須。
+    // (property:write のユーザー個別付与で field_survey が剥がされていても迂回させない)
+    if (!hasPermission(permissions, "field_survey", "read")) {
+      throw new ApiError(403, "現地調査の閲覧権限がありません", "FORBIDDEN");
+    }
 
     const pin = await prisma.fieldSurveyPin.findUnique({
       where: { id },
@@ -62,9 +67,10 @@ export async function POST(
       throw new ApiError(422, "物件化候補ではないため物件化できません", "NOT_CANDIDATE");
     }
 
-    // アーカイブ(論理削除)済みピンは物件化しない。削除相当のピンを物件へ復活させない。
-    if (pin.status === "archived") {
-      throw new ApiError(409, "アーカイブ済みの調査ピンは物件化できません", "PIN_ARCHIVED");
+    // 未対応(open)の候補のみ物件化する。closed(対応済み=別処理済み)や
+    // archived(論理削除)を物件へ復活させない。完成待ち一覧(open のみ)とも一致。
+    if (pin.status !== "open") {
+      throw new ApiError(409, "未対応の候補ピンのみ物件化できます", "PIN_NOT_OPEN");
     }
 
     if (pin.propertyId) {
@@ -86,7 +92,7 @@ export async function POST(
       const linked = await tx.fieldSurveyPin.updateMany({
         // 前チェック後〜書込みの間の並行編集(アーカイブ / 種別変更 / 別変換)にも耐える:
         // 候補 × 未アーカイブ × 未紐付け が書込み時点でも真のときだけ紐付ける。
-        where: { id: pin.id, propertyId: null, pinType: "candidate", status: { not: "archived" } },
+        where: { id: pin.id, propertyId: null, pinType: "candidate", status: "open" },
         data: { propertyId: created.id, status: "closed" },
       });
       if (linked.count === 0) {
