@@ -120,6 +120,11 @@ const adminNavItems: NavItem[] = [
     href: "/admin/attachments",
     icon: <FileSearch className="h-5 w-5" />,
   },
+  {
+    label: "謄本取得の資格情報",
+    href: "/admin/registry-settings",
+    icon: <FileText className="h-5 w-5" />,
+  },
 ];
 
 /** データ品質チェック: 所有者データの一括点検/補正ツール群。 */
