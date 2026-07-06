@@ -440,6 +440,49 @@ export async function updateSaleDmSettings(body: {
   });
 }
 
+// ---------- 謄本取得の資格情報(登記情報提供サービス・管理者設定) ----------
+
+export interface RegistrySettings {
+  hasLoginId: boolean;
+  hasPassword: boolean;
+  baseUrl: string | null;
+  encryptionConfigured: boolean;
+  updatedAt: string | null;
+}
+
+const EMPTY_REGISTRY_SETTINGS: RegistrySettings = {
+  hasLoginId: false,
+  hasPassword: false,
+  baseUrl: null,
+  encryptionConfigured: false,
+  updatedAt: null,
+};
+
+export async function fetchRegistrySettings(): Promise<RegistrySettings> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { ...EMPTY_REGISTRY_SETTINGS };
+  }
+  return apiFetch<RegistrySettings>("/api/admin/registry-settings");
+}
+
+// 部分更新。資格情報(loginId/password)は指定時のみ送る(空文字=クリア・未指定=現状維持)。
+export async function updateRegistrySettings(body: {
+  loginId?: string;
+  password?: string;
+  baseUrl?: string | null;
+}): Promise<{ ok: boolean }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { ok: true };
+  }
+  return apiFetch<{ ok: boolean }>("/api/admin/registry-settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------- Next Actions ----------
 
 export async function fetchNextActions(
