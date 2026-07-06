@@ -35,7 +35,22 @@ export async function GET(
       include: {
         assignee: { select: { id: true, name: true } },
         creator: { select: { id: true, name: true } },
-        building: { select: { id: true, name: true } },
+        // id/name に加えて、売マンション作成ダイアログの自動反映プレビュー
+        // （構造/地上階/総戸数/管理会社/築年）が読む列を追加する（@codex P2 fix）。
+        // 図面自体は new/route.ts が building から直接同じ列を fetch して生成しており
+        // 内容は変わらない＝ここは「ダイアログのプレビューが見えるようにする」ための
+        // 追加のみ（既存の id/name 消費者に対しては後方互換）。
+        building: {
+          select: {
+            id: true,
+            name: true,
+            structureType: true,
+            totalFloors: true,
+            totalUnits: true,
+            managementCompany: true,
+            builtYear: true,
+          },
+        },
         propertyOwners: {
           include: {
             owner: {

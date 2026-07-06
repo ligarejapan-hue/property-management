@@ -177,6 +177,16 @@ interface MansionAutoValues {
   occupancySeed?: string;
   /** 用途地域チェック群の上に出す「自動反映済み」ヒント文言。 */
   zoningDistrictAuto?: string;
+  /**
+   * 築年月(builtYearMonth)の上に出す「自動反映済み」ヒント文言（building.builtYear、年精度）。
+   * useDistrict と同じ「表示専用ヒント」方式（values へは書き込まない）。builtYearMonth は
+   * MANSION_AUTO_ONLY_KEYS に含まれない通常の編集可能フィールドのため、occupancy のように
+   * displayValue を差し替えて seed すると、ユーザーが最初の1文字を打った瞬間にブラウザの
+   * 現在表示値（ヒント文字列）と結合されてしまう（select と異なりテキスト入力は
+   * onChange が「現在の表示内容+入力」を返すため）。それを避けるため、useDistrict と同様に
+   * 値そのものではなく hint 文言のみを表示し、月まで分かる場合の入力を促す。
+   */
+  builtYearAuto?: string;
 }
 
 function toPreviewString(v: string | number | null | undefined): string {
@@ -204,6 +214,7 @@ function computeMansionAutoValues(data: MansionAutoSource): MansionAutoValues {
     },
     occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),
     zoningDistrictAuto: data.zoningDistrict ?? undefined,
+    builtYearAuto: b?.builtYear != null ? `${b.builtYear}年` : undefined,
   };
 }
 
@@ -372,6 +383,7 @@ export function MansionFieldModelForm({
   autoPreview,
   zoningDistrictAuto,
   occupancySeed,
+  builtYearAuto,
 }: {
   values: MansionValues;
   onChange: (key: string, value: MansionFieldValue) => void;
@@ -379,6 +391,8 @@ export function MansionFieldModelForm({
   zoningDistrictAuto?: string;
   /** occupancy(現況) select の表示専用の初期値ヒント（未編集時のみ使う。詳細は MansionAutoValues 参照）。 */
   occupancySeed?: string;
+  /** 築年月(builtYearMonth)の上に出す自動反映ヒント（詳細は MansionAutoValues.builtYearAuto 参照）。 */
+  builtYearAuto?: string;
 }) {
   return (
     <>
@@ -415,6 +429,11 @@ export function MansionFieldModelForm({
                 {f.key === "useDistrict" && zoningDistrictAuto && (
                   <p className="mb-1 text-[11px] text-neutral-400">
                     自動反映: {zoningDistrictAuto}（追加の用途地域があれば選択してください）
+                  </p>
+                )}
+                {f.key === "builtYearMonth" && builtYearAuto && (
+                  <p className="mb-1 text-[11px] text-neutral-400">
+                    自動反映: {builtYearAuto}（月まで分かる場合は入力してください）
                   </p>
                 )}
                 <MansionFieldWidget
@@ -513,6 +532,7 @@ export function SalesSheetCreateDialog({
   const [mansionAutoPreview, setMansionAutoPreview] = useState<Record<string, string>>({});
   const [mansionZoningAuto, setMansionZoningAuto] = useState<string | undefined>(undefined);
   const [mansionOccupancySeed, setMansionOccupancySeed] = useState<string | undefined>(undefined);
+  const [mansionBuiltYearAuto, setMansionBuiltYearAuto] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -540,6 +560,7 @@ export function SalesSheetCreateDialog({
         setMansionAutoPreview(auto.preview);
         setMansionZoningAuto(auto.zoningDistrictAuto);
         setMansionOccupancySeed(auto.occupancySeed);
+        setMansionBuiltYearAuto(auto.builtYearAuto);
       })
       .catch(() => {
         /* ベストエフォート。取得失敗時は自動反映プレビュー無しで継続する。 */
@@ -591,6 +612,7 @@ export function SalesSheetCreateDialog({
               autoPreview={mansionAutoPreview}
               zoningDistrictAuto={mansionZoningAuto}
               occupancySeed={mansionOccupancySeed}
+              builtYearAuto={mansionBuiltYearAuto}
             />
             <MansionExtraFields
               values={mansionValues}

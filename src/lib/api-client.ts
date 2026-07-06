@@ -82,14 +82,34 @@ export async function fetchProperties(params: Record<string, string> = {}) {
   );
 }
 
-export async function fetchPropertyDetail(id: string) {
+/**
+ * GET /api/properties/[id] の building 部分（id/name に加え、売マンション作成
+ * ダイアログの自動反映プレビュー/ヒントが読む列を含む・@codex P2 fix）。
+ * MOCK_PROPERTIES は building を持たない（mansion 種別の mock 未整備）ため、
+ * 実レスポンス型は MOCK_PROPERTIES の形に building を追加で交差させる。
+ */
+export interface PropertyDetailBuildingSummary {
+  id: string;
+  name: string;
+  structureType: string | null;
+  totalFloors: number | null;
+  totalUnits: number | null;
+  managementCompany: string | null;
+  builtYear: number | null;
+}
+
+export type PropertyDetailResult = (typeof MOCK_PROPERTIES)[0] & {
+  building?: PropertyDetailBuildingSummary | null;
+};
+
+export async function fetchPropertyDetail(id: string): Promise<PropertyDetailResult> {
   if (USE_MOCK) {
     await mockDelay();
     const property = MOCK_PROPERTIES.find((p) => p.id === id);
     if (!property) throw new Error("物件が見つかりません");
     return property;
   }
-  return apiFetch<(typeof MOCK_PROPERTIES)[0]>(`/api/properties/${id}`);
+  return apiFetch<PropertyDetailResult>(`/api/properties/${id}`);
 }
 
 export async function deleteProperty(id: string) {
