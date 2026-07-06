@@ -34,14 +34,53 @@ const landOverridesSchema = z.object({
   deliveryTiming: z.string().max(200).optional(),
   remarks: z.string().max(1000).optional(),
 });
+// field-model(MANSION_FIELDS) の手入力キー全域 + レイアウト専用(catchCopy/salesPoints) に
+// 対応させる（[T4→T5] 総入れ替え）。キー名は build-document.ts の SaleMansionOverrides と
+// 一致させること。multiselect(用途地域/セールスポイント)のみ string[]、他は string。
+// `structure`（構造）は自動反映専用（building.structureType が正）で上書き機構を持たない
+// ため、旧スキーマにあった stale なキーとして削除。`deliveryTiming` は builder 側のキー名
+// `delivery` へ改称（field-model の "引渡時期" と一致させる）。
 const mansionOverridesSchema = z.object({
+  // 価格・費用（DB enum と語彙が1:1対応しないため propertyType は常に手入力）
+  propertyType: z.string().max(50).optional(),
   price: z.string().max(200).optional(),
+  unitPrice: z.string().max(200).optional(),
+  tax: z.string().max(50).optional(),
+  taxAmount: z.string().max(200).optional(),
+  // 所在・交通
   access: z.string().max(500).optional(),
+  // 土地・権利
+  siteArea: z.string().max(200).optional(),
+  siteRightRatio: z.string().max(200).optional(),
+  landRight: z.string().max(100).optional(),
+  useDistrict: z.array(z.string().max(100)).max(20).optional(),
+  areaMethod: z.string().max(50).optional(),
+  // 建物
+  basementFloors: z.string().max(50).optional(),
   builtYearMonth: z.string().max(100).optional(),
-  structure: z.string().max(200).optional(),
-  transactionType: z.string().max(200).optional(),
-  deliveryTiming: z.string().max(200).optional(),
+  parking: z.string().max(100).optional(),
+  parkingFee: z.string().max(200).optional(),
+  // 設備・現況・管理
+  equipment: z.string().max(1000).optional(),
+  legalRestriction: z.string().max(1000).optional(),
+  managementUnion: z.string().max(50).optional(),
+  managementForm: z.string().max(50).optional(),
+  managerStatus: z.string().max(50).optional(),
+  developer: z.string().max(200).optional(),
+  builder: z.string().max(200).optional(),
+  occupancy: z.string().max(50).optional(),
+  delivery: z.string().max(100).optional(),
   remarks: z.string().max(1000).optional(),
+  // 会社（フッター）
+  transactionType: z.string().max(200).optional(),
+  compensation: z.string().max(200).optional(),
+  adType: z.string().max(200).optional(),
+  staff: z.string().max(200).optional(),
+  agent: z.string().max(200).optional(),
+  specialNotes: z.string().max(1000).optional(),
+  // レイアウト専用（field-model の行ではない・キャッチ帯/セールスポイント見出し）
+  catchCopy: z.string().max(200).optional(),
+  salesPoints: z.array(z.string().max(200)).max(20).optional(),
 });
 const houseOverridesSchema = z.object({
   price: z.string().max(200).optional(),
@@ -109,7 +148,14 @@ export async function POST(
         managementFee: true,
         repairReserveFee: true,
         building: {
-          select: { name: true, totalFloors: true, builtYear: true, structureType: true },
+          select: {
+            name: true,
+            totalFloors: true,
+            builtYear: true,
+            structureType: true,
+            managementCompany: true,
+            totalUnits: true,
+          },
         },
       },
     });
@@ -192,6 +238,8 @@ export async function POST(
               totalFloors: property.building.totalFloors,
               builtYear: property.building.builtYear,
               structureType: property.building.structureType,
+              managementCompany: property.building.managementCompany,
+              totalUnits: property.building.totalUnits,
             }
           : null,
         photos,
