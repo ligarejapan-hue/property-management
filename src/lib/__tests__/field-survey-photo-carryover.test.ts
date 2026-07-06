@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
+vi.mock("@/lib/field-survey/exif-strip", () => ({
+  stripFieldSurveyPhotoMetadata: vi.fn((buf: Buffer) => ({ ok: true, buffer: buf, changed: false })),
+}));
 import { copyPinPhotosToProperty } from "../field-survey-photo-carryover";
+import { stripFieldSurveyPhotoMetadata } from "@/lib/field-survey/exif-strip";
 
 interface PhotoRow {
   fileUrl: string;
@@ -81,6 +85,17 @@ describe("copyPinPhotosToProperty", () => {
     );
     const r = await copyPinPhotosToProperty("p1", "prop-1", deps);
     expect(r).toEqual({ copied: 1, failed: 0 });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("EXIF strip 不可(unsupported/malformed)の写真はスキップ(failed)", async () => {
+    const { deps, create } = makeDeps(
+      [photo(), photo({ sortOrder: 1 })],
+      [Buffer.from("x"), Buffer.from("y")],
+    );
+    (stripFieldSurveyPhotoMetadata as unknown as Mock).mockReturnValueOnce({ ok: false, reason: "unsupported_mime" });
+    const r = await copyPinPhotosToProperty("p1", "prop-1", deps);
+    expect(r).toEqual({ copied: 1, failed: 1 });
     expect(create).toHaveBeenCalledTimes(1);
   });
 });
