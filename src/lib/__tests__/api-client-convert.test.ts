@@ -36,10 +36,10 @@ describe("api-client: convertPinToProperty / listCandidatePins", () => {
     expect(JSON.parse(init?.body as string)).toMatchObject({ propertyType: "land", address: "A" });
   });
 
-  it("listCandidatePins は candidate×open を map 射影で取得する", async () => {
+  it("listCandidatePins は座標なし専用エンドポイントを叩く", async () => {
     const fetchMock = vi.fn(
       async (_url: string, _init?: RequestInit) =>
-        new Response(JSON.stringify({ data: [], nextCursor: null }), {
+        new Response(JSON.stringify({ data: [] }), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
@@ -49,10 +49,9 @@ describe("api-client: convertPinToProperty / listCandidatePins", () => {
     const { listCandidatePins } = await import("../api-client");
     const r = await listCandidatePins();
 
-    expect(r).toEqual({ data: [], nextCursor: null });
+    expect(r).toEqual({ data: [] });
     const [url] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain("pinType=candidate");
-    expect(String(url)).toContain("status=open");
-    expect(String(url)).toContain("view=map");
+    expect(String(url)).toContain("/api/field-survey/pins/candidates");
+    expect(String(url)).not.toContain("view=map");
   });
 });

@@ -46,9 +46,14 @@ export async function POST(
       throw new ApiError(404, "調査ピンが見つかりません", "NOT_FOUND");
     }
 
+    // 変換は「一覧で見える候補」に対して行える＝完成待ち一覧の可視スコープに合わせる。
+    // 自分の pin か、field_survey:read_all / manage を持つ場合(他スタッフの候補も
+    // 一覧で拾える office_staff 等)に許可。物件作成の property:write は上で必須。
     const isOwn = pin.staffUserId === session.id;
-    const hasManage = hasPermission(permissions, "field_survey", "manage");
-    if (!isOwn && !hasManage) {
+    const canSeeOthers =
+      hasPermission(permissions, "field_survey", "read_all") ||
+      hasPermission(permissions, "field_survey", "manage");
+    if (!isOwn && !canSeeOthers) {
       throw new ApiError(403, "この調査ピンを物件化する権限がありません", "FORBIDDEN");
     }
 
@@ -79,7 +84,9 @@ export async function POST(
     const property = await prisma.$transaction(async (tx) => {
       const created = await tx.property.create({ data, select: { id: true } });
       const linked = await tx.fieldSurveyPin.updateMany({
-        where: { id: pin.id, propertyId: null },
+        // 前チェック後〜書込みの間の並行編集(アーカイブ / 種別変更 / 別変換)にも耐える:
+        // 候補 × 未アーカイブ × 未紐付け が書込み時点でも真のときだけ紐付ける。
+        where: { id: pin.id, propertyId: null, pinType: "candidate", status: { not: "archived" } },
         data: { propertyId: created.id, status: "closed" },
       });
       if (linked.count === 0) {
@@ -93,7 +100,7 @@ export async function POST(
       action: "create",
       targetTable: "properties",
       targetId: property.id,
-      detail: { propertyType: input.propertyType, address: input.address, fromPin: pin.id },
+      detail: { propertyType: input.propertyType, fromPin: pin.id },
     });
 
     return apiResponse({ id: property.id }, 201);

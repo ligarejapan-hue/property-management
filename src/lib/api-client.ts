@@ -2658,22 +2658,20 @@ export async function convertPinToProperty(
 export interface CandidatePinRow {
   id: string;
   staffUserId: string;
-  propertyId: string | null;
-  pinType: string;
-  status: string;
   createdAt: string;
   hasMemo?: boolean;
 }
 
-/** 物件化前の候補(candidate×open)を取得する。座標・memo は view=map 射影で除外される。 */
-export async function listCandidatePins(): Promise<{ data: CandidatePinRow[]; nextCursor: string | null }> {
+/**
+ * 物件化前の候補(candidate×open)を取得する。
+ * 専用エンドポイントが座標・memo 本文を除外して返す(一覧は表示しない=非PII)。
+ */
+export async function listCandidatePins(): Promise<{ data: CandidatePinRow[] }> {
   if (USE_MOCK) {
     await mockDelay();
-    return { data: [], nextCursor: null };
+    return { data: [] };
   }
-  return apiFetch<{ data: CandidatePinRow[]; nextCursor: string | null }>(
-    "/api/field-survey/pins?pinType=candidate&status=open&limit=100&view=map",
-  );
+  return apiFetch<{ data: CandidatePinRow[] }>("/api/field-survey/pins/candidates");
 }
 
 // ---------- Audit Logs ----------

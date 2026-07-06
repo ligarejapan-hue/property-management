@@ -48,6 +48,10 @@ const WRITE_MANAGE = [
   { resource: "property", action: "write", granted: true },
   { resource: "field_survey", action: "manage", granted: true },
 ];
+const WRITE_READ_ALL = [
+  { resource: "property", action: "write", granted: true },
+  { resource: "field_survey", action: "read_all", granted: true },
+];
 const PIN_ID = "11111111-1111-1111-1111-111111111111";
 
 function req(body: unknown) {
@@ -125,7 +129,7 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
     expect(pm.property.create.mock.calls[0][0].data.gpsLat).toBe(35.5);
     expect(pm.property.create.mock.calls[0][0].data.introductionRoute).toBe("field_survey");
     const upd = pm.fieldSurveyPin.updateMany.mock.calls[0][0];
-    expect(upd.where).toEqual({ id: PIN_ID, propertyId: null });
+    expect(upd.where).toEqual({ id: PIN_ID, propertyId: null, pinType: "candidate", status: { not: "archived" } });
     expect(upd.data).toEqual({ propertyId: "new-prop", status: "closed" });
   });
 
@@ -136,11 +140,18 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
     expect(res.status).toBe(409);
   });
 
-  it("他人の pin は manage が無ければ 403(作成しない)", async () => {
+  it("他人の pin は read_all/manage が無ければ 403(作成しない)", async () => {
     pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ staffUserId: "someone-else" }));
     const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
     expect(res.status).toBe(403);
     expect(pm.property.create).not.toHaveBeenCalled();
+  });
+
+  it("他人の pin でも read_all があれば変換できる(office_staff・201)", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(WRITE_READ_ALL);
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ staffUserId: "someone-else" }));
+    const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
+    expect(res.status).toBe(201);
   });
 
   it("他人の pin でも manage があれば変換できる(201)", async () => {
