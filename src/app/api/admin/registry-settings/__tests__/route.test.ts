@@ -128,4 +128,12 @@ describe("admin registry-settings route", () => {
     expect(audit.detail.changed).toContain("loginId");
     expect(JSON.stringify(audit.detail)).not.toContain("user9");
   });
+
+  it("監査は targetId(UUID列)に singleton を入れない(無記録化を防ぐ)", async () => {
+    await PUT(put({ loginId: "user9" }));
+    const audit = (writeAuditLog as unknown as Mock).mock.calls[0]![0];
+    expect(audit.targetId).toBeUndefined();
+    expect(audit.targetTable).toBe("registry_fetch_config");
+    expect(audit.detail.target).toBe("singleton");
+  });
 });

@@ -102,12 +102,14 @@ export async function PUT(request: NextRequest) {
       update: { ...data, updatedById: session.id },
     });
     // 監査は変更フィールド名のみ(値=資格情報は絶対に出さない)。
+    // targetId は UUID 列(@db.Uuid)。singleton は UUID でないため付けない(付けると Postgres が
+    // 弾き writeAuditLog が握って高リスク変更の監査が無記録になる。@codex 指摘対応)。
+    // 対象は targetTable + detail.target で表す。
     await writeAuditLog({
       userId: session.id,
-      action: "update",
+      action: "registry_settings_update",
       targetTable: "registry_fetch_config",
-      targetId: CONFIG_ID,
-      detail: { changed },
+      detail: { target: CONFIG_ID, changed },
     });
     return apiResponse({ ok: true });
   } catch (error) {
