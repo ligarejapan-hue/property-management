@@ -26,6 +26,7 @@ import {
   FileSearch,
   BookOpen,
   Newspaper,
+  ClipboardCheck,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 
@@ -65,6 +66,11 @@ const mainNavItems: NavItem[] = [
     label: "巡回履歴",
     href: "/field-survey/sessions",
     icon: <History className="h-5 w-5" />,
+  },
+  {
+    label: "物件化の完成待ち",
+    href: "/field-survey/candidates",
+    icon: <ClipboardCheck className="h-5 w-5" />,
   },
   {
     label: "受付帳CSV取込",
