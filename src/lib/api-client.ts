@@ -2632,6 +2632,50 @@ export async function createProperty(data: {
   });
 }
 
+// ---------- Convert field-survey pin to property ----------
+
+export async function convertPinToProperty(
+  pinId: string,
+  data: {
+    propertyType: string;
+    address: string;
+    postalCode?: string | null;
+    lotNumber?: string | null;
+    buildingNumber?: string | null;
+    realEstateNumber?: string | null;
+  },
+): Promise<{ id: string }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-converted-property-id" };
+  }
+  return apiFetch<{ id: string }>(
+    `/api/field-survey/pins/${encodeURIComponent(pinId)}/convert-to-property`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) },
+  );
+}
+
+export interface CandidatePinRow {
+  id: string;
+  staffUserId: string;
+  propertyId: string | null;
+  pinType: string;
+  status: string;
+  createdAt: string;
+  hasMemo?: boolean;
+}
+
+/** 物件化前の候補(candidate×open)を取得する。座標・memo は view=map 射影で除外される。 */
+export async function listCandidatePins(): Promise<{ data: CandidatePinRow[]; nextCursor: string | null }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: [], nextCursor: null };
+  }
+  return apiFetch<{ data: CandidatePinRow[]; nextCursor: string | null }>(
+    "/api/field-survey/pins?pinType=candidate&status=open&limit=100&view=map",
+  );
+}
+
 // ---------- Audit Logs ----------
 
 export async function fetchAuditLogs() {
