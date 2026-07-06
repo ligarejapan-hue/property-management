@@ -104,18 +104,24 @@ export async function POST(
 
     // 物件化候補ピンの写真を新物件へ複製(ベストエフォート・非致命・I/O は tx 外)。
     // 失敗しても物件は作成済みなので変換は成功扱い(写真が空になるだけ)。
+    let photosCopied = 0;
+    let photosFailed = 0;
     try {
-      await copyPinPhotosToProperty(pin.id, property.id);
+      const photoResult = await copyPinPhotosToProperty(pin.id, property.id);
+      photosCopied = photoResult.copied;
+      photosFailed = photoResult.failed;
     } catch {
       // 写真複製の失敗は変換成功を妨げない。
     }
 
+    // 監査に複製件数を記録(非PII=件数のみ)。自動 upload/storage 経路の追跡性のため
+    // (通常の写真 upload は photo_upload 監査を残す。@codex 指摘対応)。
     await writeAuditLog({
       userId: session.id,
       action: "create",
       targetTable: "properties",
       targetId: property.id,
-      detail: { propertyType: input.propertyType, fromPin: pin.id },
+      detail: { propertyType: input.propertyType, fromPin: pin.id, photosCopied, photosFailed },
     });
 
     return apiResponse({ id: property.id }, 201);
