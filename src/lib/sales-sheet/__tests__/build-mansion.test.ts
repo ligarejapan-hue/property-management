@@ -123,6 +123,31 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(tableRow(doc, "現況")).toBe("入居中");
   });
 
+  it("物件種目(propertyType)は自動反映元が無く、overrideのみで反映される([T4→T5]で新規配線)", () => {
+    const withOverride = buildSaleMansionDocument({
+      ...base,
+      overrides: { propertyType: "中古マンション" },
+    });
+    expect(tableRow(withOverride, "物件種目")).toBe("中古マンション");
+    const withoutOverride = buildSaleMansionDocument({ ...base, overrides: {} });
+    expect(tableRow(withoutOverride, "物件種目")).toBe("");
+  });
+
+  it("現況(occupancy)はoverride優先、無ければ従来どおりlocalizeOccupancyの自動値([T4→T5]語彙整合)", () => {
+    const overridden = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, occupancyStatus: "vacant" },
+      overrides: { occupancy: "賃貸中" },
+    });
+    expect(tableRow(overridden, "現況")).toBe("賃貸中");
+    const auto = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, occupancyStatus: "vacant" },
+      overrides: {},
+    });
+    expect(tableRow(auto, "現況")).toBe("空室"); // localizeOccupancy(vacant) = "空室"（既存の慣例のまま）
+  });
+
   it("写真3枚→image要素3、0枚→0", () => {
     const photos3 = [
       { fileUrl: "/uploads/1.jpg" },

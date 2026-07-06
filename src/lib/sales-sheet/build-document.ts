@@ -209,6 +209,12 @@ function baseSheet(
 // 自社マイソク様式（キャッチ帯/写真+セールスポイント/間取り枠/全項目スペック表/会社フッター）。
 // スペック表の行は field-model(MANSION_FIELDS) + sheet-rows(buildSheetRows) に委譲する。
 export interface SaleMansionOverrides {
+  /**
+   * 物件種目（新築マンション/中古マンション等）。field-model 上は autoFrom:"propertyType"
+   * だが、DB の propertyType enum（apartment_unit 等）は新築/中古・種別軸が異なり
+   * 1:1 で写像できないため自動反映せず、常に手入力のみ（Task4 で判断を持ち越し・Task5 で確定）。
+   */
+  propertyType?: string;
   // 価格
   price?: string;
   unitPrice?: string;
@@ -237,6 +243,13 @@ export interface SaleMansionOverrides {
   managerStatus?: string;
   developer?: string;
   builder?: string;
+  /**
+   * 現況（居住中/空家/賃貸中/未完成）。自動値（occupancyStatus→localizeOccupancy）は
+   * vacant/occupied/unknown の粗い3値のため、マイソクのより細かい語彙と一致しないことがある
+   * （特に occupied は「居住中」「賃貸中」のどちらもあり得ず判別できない）。override があれば
+   * それを優先し、無ければ従来どおり localizeOccupancy の自動値にフォールバックする。
+   */
+  occupancy?: string;
   delivery?: string;
   remarks?: string;
   // 会社（フッター。MANSION_FIELDS の section:"会社" と対応）
@@ -294,6 +307,8 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
 
   return {
     // 価格・費用（管理費/修繕積立金は自動反映のみ・price/unitPrice/tax/taxAmountは手入力のみ）
+    // propertyType: 自動反映元なし（DB enum が語彙不一致のため常に手入力=override のみ）。
+    propertyType: o.propertyType,
     buildingName: b.name ?? undefined,
     price: o.price,
     unitPrice: o.unitPrice,
@@ -332,7 +347,8 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     managementCompany: b.managementCompany ?? undefined,
     developer: o.developer,
     builder: o.builder,
-    occupancy: localizeOccupancy(p.occupancyStatus) ?? undefined,
+    // 現況: override 優先（マイソク語彙での手動選択/訂正）、無ければ従来どおり自動値。
+    occupancy: o.occupancy ?? localizeOccupancy(p.occupancyStatus) ?? undefined,
     delivery: o.delivery,
     remarks: o.remarks,
   };

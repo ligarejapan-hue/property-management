@@ -97,7 +97,14 @@ const MANSION_PROPERTY = {
   orientation: "南",
   managementFee: 12000,
   repairReserveFee: 8500,
-  building: { name: "テストレジデンス", totalFloors: 10, builtYear: 2015, structureType: "RC" },
+  building: {
+    name: "テストレジデンス",
+    totalFloors: 10,
+    builtYear: 2015,
+    structureType: "RC",
+    managementCompany: "テスト管理サービス",
+    totalUnits: 45,
+  },
 };
 
 vi.mock("@/lib/prisma", () => ({
@@ -158,7 +165,9 @@ function makeRequest() {
 }
 
 function lastDocument() {
-  return (createDesign as Mock).mock.calls[0][0].document as { elements: { type: string }[] };
+  return (createDesign as Mock).mock.calls[0][0].document as {
+    elements: { type: string; id?: string; content?: string }[];
+  };
 }
 function lastTemplateId() {
   return (createDesign as Mock).mock.calls[0][0].templateId as string;
@@ -229,9 +238,19 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(201);
     expect(lastTemplateId()).toBe("sale-mansion");
-    expect(JSON.stringify(lastDocument())).toContain("売マンション");
+    // 自社マイソク様式（Task4 rework）は冗長な種別ラベル「売マンション」を印字せず、
+    // 建物名+号室の見出し要素を出す（意図的な仕様変更・[T4→T5] carry-forward 参照）。
+    // 見出し要素そのものを検証することで、単なる文字列の偶然の一致ではないことを担保する。
+    const heading = lastDocument().elements.find((e) => e.id === "heading");
+    expect(heading?.content).toContain("テストレジデンス");
+    expect(heading?.content).toContain("301号室");
     expect(JSON.stringify(lastDocument())).toContain("テストレジデンス");
     expect(JSON.stringify(lastDocument())).toContain("301"); // 部屋番号が図面に入る
+    // route.ts の building select に managementCompany/totalUnits を追加し、builder へ
+    // 渡していることをこの route レベルのテストでも確認する（builder 単体は
+    // build-mansion.test.ts で既に検証済み・ここでは配線の回帰を検知する）。
+    expect(JSON.stringify(lastDocument())).toContain("テスト管理サービス");
+    expect(JSON.stringify(lastDocument())).toContain("45戸");
   });
 
   it("201 — 区分（旧 unit）: sale-mansion（legacy propertyType も対応）", async () => {
