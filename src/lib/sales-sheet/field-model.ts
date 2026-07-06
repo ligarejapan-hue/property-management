@@ -76,3 +76,56 @@ export const MANSION_FIELDS: readonly SheetField[] = [
   { key: "agent", label: "取引士", widget: "text", section: "会社" },
   { key: "specialNotes", label: "特記事項", widget: "text", section: "会社" },
 ];
+
+/**
+ * 売土地のスペック表フィールド定義([F2-A Task3])。マンションと異なり消費税欄は
+ * 持たない(土地は非課税)。地目/接道方向/都市計画/用途地域/地域地区は複数選択(併記)。
+ */
+export const LAND_FIELDS: readonly SheetField[] = [
+  // 価格
+  { key: "propertyType", label: "物件種目", widget: "select", section: "価格", options: M.PROPERTY_TYPE_LAND },
+  { key: "bestUse", label: "最適用途", widget: "select", section: "価格", options: M.BEST_USE_LAND },
+  { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
+  { key: "unitPrice", label: "坪/㎡単価", widget: "number", section: "価格", unit: "万円" },
+  // 所在・交通
+  { key: "address", label: "所在地", widget: "text", section: "所在", autoFrom: "address" },
+  { key: "access", label: "交通", widget: "text", section: "所在" },
+  // 土地
+  // unit は持たせない: buildLandValues が面積計測方式(公簿/実測)と合わせて "150.5㎡（実測）"
+  // 形にあらかじめ合成した文字列を渡すため、sheet-rows 側で ㎡ を二重付与しない
+  // （MANSION_FIELDS.exclusiveArea と同じ理由・build-document.ts の fmtAreaWithMethod 参照）。
+  { key: "landArea", label: "土地面積", widget: "number", section: "土地" },
+  { key: "areaMethod", label: "面積計測方式", widget: "select", section: "土地", options: M.AREA_METHOD_LAND, controlOnly: true },
+  { key: "landCategory", label: "地目", widget: "multiselect", section: "土地", options: M.LAND_CATEGORY },
+  { key: "privateRoad", label: "私道負担", widget: "number", section: "土地", unit: "㎡" },
+  { key: "terrain", label: "地勢", widget: "select", section: "土地", options: M.TERRAIN },
+  // unit は持たせない: セットバック単位(m/㎡)と合成した文字列を buildLandValues が渡す
+  // （build-document.ts の fmtValueWithUnit 参照）。
+  { key: "setback", label: "セットバック", widget: "number", section: "土地" },
+  { key: "setbackUnit", label: "セットバック単位", widget: "select", section: "土地", options: M.SETBACK_UNIT, controlOnly: true },
+  { key: "buildCondition", label: "建築条件", widget: "select", section: "土地", options: M.PRESENCE },
+  // 法令
+  { key: "roadKind", label: "接道種別", widget: "select", section: "法令", options: M.ROAD_KIND, autoFrom: "roadType" },
+  { key: "roadWidth", label: "接道幅員", widget: "text", section: "法令", unit: "m", autoFrom: "roadWidth" },
+  { key: "roadDirections", label: "接道方向", widget: "multiselect", section: "法令", options: M.DIRECTION },
+  { key: "cityPlanning", label: "都市計画", widget: "multiselect", section: "法令", options: M.CITY_PLANNING },
+  { key: "landPermit", label: "国土法届出", widget: "select", section: "法令", options: M.LAND_ACT_NOTICE },
+  { key: "useDistrict", label: "用途地域", widget: "multiselect", section: "法令", options: M.USE_DISTRICT, autoFrom: "zoningDistrict" },
+  { key: "areaZone", label: "地域地区", widget: "multiselect", section: "法令", options: M.AREA_ZONE },
+  { key: "coverageRatio", label: "建蔽率", widget: "number", section: "法令", unit: "％", autoFrom: "buildingCoverageRatio" },
+  { key: "floorRatio", label: "容積率", widget: "number", section: "法令", unit: "％", autoFrom: "floorAreaRatio" },
+  { key: "legalRestriction", label: "その他法令上の制限", widget: "text", section: "法令" },
+  // 設備・現況
+  { key: "equipment", label: "設備・条件", widget: "text", section: "設備" },
+  { key: "occupancy", label: "現況", widget: "select", section: "設備", options: M.OCCUPANCY_LAND, autoFrom: "occupancyStatus" },
+  { key: "delivery", label: "引渡時期", widget: "select", section: "設備", options: M.DELIVERY_TIMING },
+  { key: "remarks", label: "備考", widget: "text", section: "設備" },
+  // 会社（フッター・手入力のみ・自動反映元なし。MANSION_FIELDS と同一のキー・ラベル・
+  // 選択肢のため、ビルダー側の会社フッター組み立て(companyFooterDetails)を共有できる）
+  { key: "transactionType", label: "取引態様", widget: "select", section: "会社", options: M.TRANSACTION_TYPE },
+  { key: "compensation", label: "報酬", widget: "select", section: "会社", options: M.COMPENSATION },
+  { key: "adType", label: "広告", widget: "select", section: "会社", options: M.AD_TYPE },
+  { key: "staff", label: "担当者", widget: "text", section: "会社" },
+  { key: "agent", label: "取引士", widget: "text", section: "会社" },
+  { key: "specialNotes", label: "特記事項", widget: "text", section: "会社" },
+];

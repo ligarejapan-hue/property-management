@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { mapOccupancyStatusToMansionOccupancy } from "../occupancy";
+import {
+  mapOccupancyStatusToMansionOccupancy,
+  mapOccupancyStatusToLandOccupancy,
+} from "../occupancy";
 
 describe("mapOccupancyStatusToMansionOccupancy（現況→売マンション語彙の決定的写像）", () => {
   it("vacant → 空家、occupied → 居住中（MANSION_FIELDS.occupancy の選択肢語彙）", () => {
@@ -25,5 +28,25 @@ describe("mapOccupancyStatusToMansionOccupancy（現況→売マンション語�
     const b = mapOccupancyStatusToMansionOccupancy("vacant");
     expect(a).toBe(b);
     expect(a).toBe("空家");
+  });
+});
+
+describe("mapOccupancyStatusToLandOccupancy（現況→売土地語彙の決定的写像・[F2-A Task3]）", () => {
+  it("vacant → 更地、occupied → 上物有（LAND_FIELDS.occupancy の選択肢語彙）", () => {
+    expect(mapOccupancyStatusToLandOccupancy("vacant")).toBe("更地");
+    expect(mapOccupancyStatusToLandOccupancy("occupied")).toBe("上物有");
+  });
+
+  it("上記2値以外(unknown・null・undefined)はundefined（手動選択に委ねる。マンション版と異なりlocalizeOccupancyへはフォールバックしない）", () => {
+    expect(mapOccupancyStatusToLandOccupancy("unknown")).toBeUndefined();
+    expect(mapOccupancyStatusToLandOccupancy(null)).toBeUndefined();
+    expect(mapOccupancyStatusToLandOccupancy(undefined)).toBeUndefined();
+  });
+
+  it("同じ入力に対し常に同じ値を返す（タイミング非依存＝決定的であることの直接検証）", () => {
+    const a = mapOccupancyStatusToLandOccupancy("vacant");
+    const b = mapOccupancyStatusToLandOccupancy("vacant");
+    expect(a).toBe(b);
+    expect(a).toBe("更地");
   });
 });
