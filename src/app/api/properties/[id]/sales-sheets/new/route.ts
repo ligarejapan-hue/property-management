@@ -25,14 +25,56 @@ import { getStorage } from "@/lib/storage";
 import { writeAuditLog } from "@/lib/audit";
 
 // 作成ダイアログが収集する任意の上書き項目（システムに無い値）。種別ごとに異なる。
+// [F2-A Task4] LAND_FIELDS(field-model) の手入力キー全域 + レイアウト専用(catchCopy/
+// salesPoints) に対応させる総入れ替え（mansionOverridesSchema と同じ方針。旧スキーマの
+// price/access/landArea/landCategory:string/transactionType/deliveryTiming/remarks の
+// 固定7項目を置換）。キー名は build-document.ts の SaleLandOverrides と一致させること。
+// multiselect(地目/接道方向/都市計画/用途地域/地域地区/セールスポイント)のみ string[]、他は
+// string。`deliveryTiming`（旧キー名の@deprecated別名）は新ダイアログが送らないため対象外。
 const landOverridesSchema = z.object({
+  // 価格（DB の propertyType/land は単一 enum で「売地/借地権/底地権」と1:1対応しないため
+  // propertyType は常に手入力。bestUse も自動反映元なし）
+  propertyType: z.string().max(50).optional(),
+  bestUse: z.string().max(50).optional(),
   price: z.string().max(200).optional(),
+  unitPrice: z.string().max(200).optional(),
+  // 所在・交通
   access: z.string().max(500).optional(),
+  // 土地
   landArea: z.string().max(200).optional(),
-  landCategory: z.string().max(200).optional(),
-  transactionType: z.string().max(200).optional(),
-  deliveryTiming: z.string().max(200).optional(),
+  areaMethod: z.string().max(50).optional(),
+  landCategory: z.array(z.string().max(100)).max(20).optional(),
+  privateRoad: z.string().max(200).optional(),
+  terrain: z.string().max(50).optional(),
+  setback: z.string().max(200).optional(),
+  setbackUnit: z.string().max(10).optional(),
+  buildCondition: z.string().max(50).optional(),
+  // 法令（roadKind は自動反映専用のため override キー無し。roadWidth は auto より精度の
+  // 高い値を手入力したい場合に優先される override＝builtYearMonth と同じ「override優先＋
+  // auto fallback」）
+  roadWidth: z.string().max(100).optional(),
+  roadDirections: z.array(z.string().max(100)).max(20).optional(),
+  cityPlanning: z.array(z.string().max(100)).max(20).optional(),
+  landPermit: z.string().max(50).optional(),
+  useDistrict: z.array(z.string().max(100)).max(20).optional(),
+  areaZone: z.array(z.string().max(100)).max(20).optional(),
+  legalRestriction: z.string().max(1000).optional(),
+  // 設備・現況
+  equipment: z.string().max(1000).optional(),
+  occupancy: z.string().max(50).optional(),
+  delivery: z.string().max(100).optional(),
   remarks: z.string().max(1000).optional(),
+  // 会社（フッター。MANSION_FIELDS と同一のキー・選択肢のため mansionOverridesSchema の
+  // 対応キーと揃える）
+  transactionType: z.string().max(200).optional(),
+  compensation: z.string().max(200).optional(),
+  adType: z.string().max(200).optional(),
+  staff: z.string().max(200).optional(),
+  agent: z.string().max(200).optional(),
+  specialNotes: z.string().max(1000).optional(),
+  // レイアウト専用（field-model の行ではない・キャッチ帯/セールスポイント見出し）
+  catchCopy: z.string().max(200).optional(),
+  salesPoints: z.array(z.string().max(200)).max(20).optional(),
 });
 // field-model(MANSION_FIELDS) の手入力キー全域 + レイアウト専用(catchCopy/salesPoints) に
 // 対応させる（[T4→T5] 総入れ替え）。キー名は build-document.ts の SaleMansionOverrides と
@@ -194,7 +236,9 @@ export async function POST(
       }
       return out;
     };
-    const photos = await seedPhotos(kind === "land" ? 1 : 3);
+    // 土地も自社マイソク様式の複数写真レイアウトに合わせ3枚に統一
+    // （[F2-A Task4]・旧は土地のみ1枚 baseSheet 時代の名残）。
+    const photos = await seedPhotos(3);
 
     let document: SalesSheetDocument;
     let templateId: string;
@@ -212,7 +256,7 @@ export async function POST(
           // 現況の日本語化は各ビルダー内部で行う（全テンプレで統一）。
           occupancyStatus: property.occupancyStatus,
         },
-        photo: photos[0] ?? null,
+        photos,
         overrides: o,
       });
       templateId = "sale-land";

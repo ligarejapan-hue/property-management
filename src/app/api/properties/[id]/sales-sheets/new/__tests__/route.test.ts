@@ -166,8 +166,18 @@ function makeRequest() {
 
 function lastDocument() {
   return (createDesign as Mock).mock.calls[0][0].document as {
-    elements: { type: string; id?: string; content?: string }[];
+    elements: {
+      type: string;
+      id?: string;
+      content?: string;
+      rows?: { label: string; value: string }[];
+    }[];
   };
+}
+// [F2-A Task4] 売土地スペック表（overview テーブル要素）の行を label で引く小道具。
+function landOverviewRow(label: string): string | undefined {
+  const overview = lastDocument().elements.find((e) => e.id === "overview");
+  return overview?.rows?.find((r) => r.label === label)?.value;
 }
 function lastTemplateId() {
   return (createDesign as Mock).mock.calls[0][0].templateId as string;
@@ -231,6 +241,68 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(body.id).toBe("sheet-1");
     expect(createDesign).toHaveBeenCalledOnce();
     expect(lastTemplateId()).toBe("sale-land");
+  });
+
+  // [F2-A Task4] landOverridesSchema を LAND_FIELDS 駆動へ総入れ替え（旧: price/access/
+  // landArea/landCategory:string/transactionType/deliveryTiming/remarks の固定7項目）。
+  function makeLandRequest(body: unknown) {
+    return new Request("http://localhost/api/properties/p1/sales-sheets/new", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("201 — 土地: 新schemaの multiselect（地目）を受理し、生成documentのスペック表に併記される", async () => {
+    const res = await POST(makeLandRequest({ landCategory: ["宅地", "雑種地"] }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(landOverviewRow("地目")).toBe("宅地 / 雑種地");
+  });
+
+  it("201 — 土地: 用途地域は自動反映(zoningDistrict)+overrideの追加選択を併記する", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, zoningDistrict: "商業地域" });
+    const res = await POST(makeLandRequest({ useDistrict: ["近隣商業地域"] }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(landOverviewRow("用途地域")).toBe("商業地域 / 近隣商業地域");
+  });
+
+  it("201 — 土地: 消費税の行は生成されない（土地は非課税・LAND_FIELDS に tax 系キーが無い）", async () => {
+    const res = await POST(makeLandRequest({ price: "3480" }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    const overview = lastDocument().elements.find((e) => e.id === "overview");
+    expect(overview?.rows?.some((r) => r.label.includes("消費税"))).toBe(false);
+    expect(JSON.stringify(lastDocument())).not.toContain("消費税");
+  });
+
+  it("201 — 土地: 所在地（自動反映専用）がスペック表の実在の行として入る", async () => {
+    const res = await POST(makeLandRequest({}), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    expect(landOverviewRow("所在地")).toBe(LAND_PROPERTY.address);
+  });
+
+  it("201 — 土地: 見出し要素は「売土地」固定（自社マイソク様式・field-model駆動の証跡）", async () => {
+    const res = await POST(makeLandRequest({}), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    const heading = lastDocument().elements.find((e) => e.id === "heading");
+    expect(heading?.content).toBe("売土地");
+  });
+
+  it("201 — 土地: 写真は最大3枚まで seed される（旧: 土地のみ1枚 → mansion/house/buildingと統一）", async () => {
+    pm.propertyPhoto.findMany.mockResolvedValue([
+      { fileUrl: "/uploads/a/1.jpg" },
+      { fileUrl: "/uploads/a/2.jpg" },
+      { fileUrl: "/uploads/a/3.jpg" },
+    ]);
+    (isImageKeyAuthorizedForProperty as Mock).mockResolvedValue(true);
+    const res = await POST(makeLandRequest({}), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    expect(lastDocument().elements.filter((e) => e.type === "image").length).toBe(3);
   });
 
   it("201 — 区分マンション: sale-mansion（建物名・専有面積を含む）", async () => {
