@@ -272,6 +272,19 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(landOverviewRow("地目")).toBe("宅地");
   });
 
+  // @codex P2: deliveryTiming は旧（F2以前）ダイアログが「引渡時期」に送っていたキー名
+  // （新ダイアログは delivery を送る）。デプロイ直後のブラウザキャッシュ由来の旧クライアントが
+  // delivery を送らず deliveryTiming のみを POST しても、schema に剥がされて builder に届かず
+  // 「引渡時期」が空欄になる回帰が無いことを確認する（buildLandValues 側の
+  // `o.delivery ?? o.deliveryTiming` フォールバックが機能する前提の schema 側テスト）。
+  it("201 — 土地: 旧クライアント互換の deliveryTiming（delivery 無し）も 400 にならず引渡時期に反映される", async () => {
+    const res = await POST(makeLandRequest({ deliveryTiming: "即時" }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(landOverviewRow("引渡時期")).toBe("即時");
+  });
+
   it("201 — 土地: 用途地域は自動反映(zoningDistrict)+overrideの追加選択を併記する", async () => {
     pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, zoningDistrict: "商業地域" });
     const res = await POST(makeLandRequest({ useDistrict: ["近隣商業地域"] }), {
