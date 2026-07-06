@@ -143,7 +143,7 @@ export default function PinDetailPanel({
     detail!.propertyId == null &&
     canWriteProperty === true;
 
-  const handleConverted = async (_propertyId: string) => {
+  const handleConverted = async () => {
     setShowConvert(false);
     // 変換後は pin が closed + propertyId 付きに変わる。再取得して表示を更新し、
     // 親に通知して marker を再 fetch させる。
