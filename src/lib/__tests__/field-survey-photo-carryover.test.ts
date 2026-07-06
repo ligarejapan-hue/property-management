@@ -11,7 +11,7 @@ interface PhotoRow {
 }
 
 function makeDeps(pinPhotos: PhotoRow[], reads: (Buffer | null)[]) {
-  const create = vi.fn(async () => ({ id: "pp" }));
+  const create = vi.fn(async (_arg: unknown) => ({ id: "pp" }));
   const findMany = vi.fn(async () => pinPhotos);
   let readIdx = 0;
   const read = vi.fn(async (_key: string) => {
@@ -49,10 +49,11 @@ describe("copyPinPhotosToProperty", () => {
     );
     const r = await copyPinPhotosToProperty("p1", "prop-1", deps);
     expect(r).toEqual({ copied: 2, failed: 0 });
-    expect(upload.mock.calls[0][1].key).toMatch(/^properties\/prop-1\/photos\/1000-uuid0\.jpg$/);
-    expect(create.mock.calls[0][0].data.propertyId).toBe("prop-1");
-    expect(create.mock.calls[0][0].data.takenBy).toBe("u1");
-    expect(create.mock.calls[0][0].data.fileUrl).toBe("/uploads/properties/prop-1/photos/1000-uuid0.jpg");
+    expect(upload.mock.calls[0]![1].key).toMatch(/^properties\/prop-1\/photos\/1000-uuid0\.jpg$/);
+    const created0 = (create.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(created0.propertyId).toBe("prop-1");
+    expect(created0.takenBy).toBe("u1");
+    expect(created0.fileUrl).toBe("/uploads/properties/prop-1/photos/1000-uuid0.jpg");
   });
 
   it("read が null の写真はスキップし failed に数える(残りは複製)", async () => {
