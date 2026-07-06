@@ -116,6 +116,12 @@ describe("admin registry-settings route", () => {
     expect(args.update.loginIdEnc).toBeNull();
   });
 
+  it("秘匿値は trim せずそのまま暗号化(前後空白を保持)", async () => {
+    await PUT(put({ password: "  spaced pw  " }));
+    const args = pm.registryFetchConfig.upsert.mock.calls[0]![0];
+    expect(args.update.passwordEnc).toBe("enc(  spaced pw  )");
+  });
+
   it("監査は変更フィールド名のみ(値を出さない)", async () => {
     await PUT(put({ loginId: "user9" }));
     const audit = (writeAuditLog as unknown as Mock).mock.calls[0]![0];

@@ -50,11 +50,12 @@ export default function RegistrySettingsPage() {
     setMessage(null);
     try {
       const body: Parameters<typeof updateRegistrySettings>[0] = { baseUrl };
-      // 資格情報は「クリア指定なら空文字」「新規入力があればその値」「どちらも無ければ送らない=現状維持」。
+      // 資格情報は「クリア指定なら空文字」「入力があればその値をそのまま(trim しない=前後空白を保持)」
+      // 「どちらも無ければ送らない=現状維持」。値の trim は正当な資格情報を壊し得る(@codex 指摘対応)。
       if (clearLoginId) body.loginId = "";
-      else if (loginId.trim() !== "") body.loginId = loginId.trim();
+      else if (loginId !== "") body.loginId = loginId;
       if (clearPassword) body.password = "";
-      else if (password.trim() !== "") body.password = password.trim();
+      else if (password !== "") body.password = password;
 
       await updateRegistrySettings(body);
       applySettings(await fetchRegistrySettings());

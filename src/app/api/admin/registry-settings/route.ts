@@ -72,7 +72,9 @@ export async function PUT(request: NextRequest) {
       label: string,
     ) => {
       if (raw === undefined) return;
-      if (raw.trim() === "") {
+      // クリアは「空文字ちょうど」で判定。値は trim せずそのまま暗号化する
+      // (前後に空白を含む正当な資格情報を別物に変えない。@codex 指摘対応)。
+      if (raw === "") {
         data[field] = null;
         changed.push(`${label}(clear)`);
         return;
@@ -84,7 +86,7 @@ export async function PUT(request: NextRequest) {
           "ENCRYPTION_NOT_CONFIGURED",
         );
       }
-      data[field] = encryptRegistrySecret(raw.trim());
+      data[field] = encryptRegistrySecret(raw);
       changed.push(label);
     };
     applySecret(body.loginId, "loginIdEnc", "loginId");
