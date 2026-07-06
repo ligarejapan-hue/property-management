@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SalesSheetTemplateKind } from "@/lib/sales-sheet/template-kind";
 import { fetchPropertyDetail } from "@/lib/api-client";
-import { MANSION_FIELDS, LAND_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
+import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
 import {
   mapOccupancyStatusToMansionOccupancy,
   mapOccupancyStatusToLandOccupancy,
@@ -21,9 +21,10 @@ interface FieldConfig {
 
 // 種別ごとの作成フォーム項目。key は new route の per-type overridesSchema と揃える。
 // （テンプレの実データはサーバ側で物件レコードから補完し、ここでは「システムに無い値」だけ集める）
-// mansion・land は FIELDS_BY_KIND(field-model) 駆動のダイアログへ差し替え済みのため
-// fields は未使用（label はボタン/見出し表示に引き続き使う・land は [F2-A Task4] で追加）。
-// house/building は当面この旧 FIELD_SETS.fields の自由入力のまま（F2-B/C で field-model 化）。
+// mansion・land・house は FIELDS_BY_KIND(field-model) 駆動のダイアログへ差し替え済みのため
+// fields は未使用（label はボタン/見出し表示に引き続き使う・land は [F2-A Task4]、house は
+// [F2-B Task3] で追加）。building は当面この旧 FIELD_SETS.fields の自由入力のまま
+// （F2-C で field-model 化）。
 const FIELD_SETS: Record<SalesSheetTemplateKind, FieldConfig> = {
   land: {
     label: "売土地",
@@ -35,17 +36,7 @@ const FIELD_SETS: Record<SalesSheetTemplateKind, FieldConfig> = {
   },
   house: {
     label: "売戸建",
-    fields: [
-      { key: "price", label: "価格" },
-      { key: "access", label: "交通" },
-      { key: "landArea", label: "土地面積" },
-      { key: "buildingArea", label: "建物面積" },
-      { key: "builtYearMonth", label: "築年月" },
-      { key: "structure", label: "構造" },
-      { key: "transactionType", label: "取引態様" },
-      { key: "deliveryTiming", label: "引渡" },
-      { key: "remarks", label: "備考（公開）" },
-    ],
+    fields: [],
   },
   building: {
     label: "一棟",
@@ -86,20 +77,21 @@ export function buildCreateRequest(
 }
 
 // ============================================================================
-// field-model(FIELDS_BY_KIND) 駆動の作成ダイアログ（売マンション/売土地 共通の汎用 widget 描画）
+// field-model(FIELDS_BY_KIND) 駆動の作成ダイアログ（売マンション/売土地/売戸建 共通の汎用 widget 描画）
 // [F2-A Task4] F1 で確立した売マンション専用の描画（MansionFieldModelForm 等）を、
-// LAND_FIELDS を持つ売土地でも再利用できるよう一般化した。house/building は当面 null＝
-// 旧 FIELD_SETS の自由入力のまま（F2-B/C で LAND_FIELDS と同様に field-model 化する）。
+// LAND_FIELDS を持つ売土地でも再利用できるよう一般化した。[F2-B Task3] HOUSE_FIELDS を持つ
+// 売戸建も同じ汎用レンダラへ配線した。building は当面 null＝旧 FIELD_SETS の自由入力のまま
+// （F2-C で field-model 化する）。
 // ============================================================================
 
 export type FieldModelValue = string | string[];
 export type FieldModelValues = Record<string, FieldModelValue>;
 
-/** field-model を持つ種別のみ非 null。house/building は当面 null（上記参照）。 */
+/** field-model を持つ種別のみ非 null。building は当面 null（上記参照）。 */
 const FIELDS_BY_KIND: Record<SalesSheetTemplateKind, readonly SheetField[] | null> = {
   land: LAND_FIELDS,
   mansion: MANSION_FIELDS,
-  house: null,
+  house: HOUSE_FIELDS,
   building: null,
 };
 
@@ -141,13 +133,32 @@ const MANSION_AUTO_ONLY_KEYS = new Set<string>([
  */
 const LAND_AUTO_ONLY_KEYS = new Set<string>(["address", "roadKind", "coverageRatio", "floorRatio"]);
 
-/** house/building は field-model が無いため参照されない共有の空集合。 */
+/**
+ * HOUSE_FIELDS のうち、物件レコードが正のため上書き機構を持たない自動反映専用キー
+ * （LAND_AUTO_ONLY_KEYS と同じ考え方・[F2-B Task3]）。house も building relation を
+ * 配線しないため、自動反映元は物件スカラ（address/layoutType/roadType/
+ * buildingCoverageRatio/floorAreaRatio）のみ。layout は SaleHouseOverrides に対応する
+ * キーが無い（MANSION_AUTO_ONLY_KEYS の layout と同じ理由）ため、LAND_AUTO_ONLY_KEYS と
+ * 同じ4キーに加えて layout も自動反映専用に含める。useDistrict（zoningDistrict 自動反映＋
+ * 追加選択）・roadWidth（override優先＋auto fallback）・occupancy（seedのみ・明示編集時のみ
+ * 送信）は SaleHouseOverrides に対応するキーがあるため対象外＝通常の編集可能フィールドとして
+ * 扱う（land と同じ基準・hints/occupancySeed 経由）。
+ */
+const HOUSE_AUTO_ONLY_KEYS = new Set<string>([
+  "address",
+  "layout",
+  "roadKind",
+  "coverageRatio",
+  "floorRatio",
+]);
+
+/** building は field-model が無いため参照されない専用の空集合。 */
 const EMPTY_AUTO_ONLY_KEYS = new Set<string>();
 
 const AUTO_ONLY_KEYS_BY_KIND: Record<SalesSheetTemplateKind, ReadonlySet<string>> = {
   land: LAND_AUTO_ONLY_KEYS,
   mansion: MANSION_AUTO_ONLY_KEYS,
-  house: EMPTY_AUTO_ONLY_KEYS,
+  house: HOUSE_AUTO_ONLY_KEYS,
   building: EMPTY_AUTO_ONLY_KEYS,
 };
 
@@ -165,12 +176,12 @@ function groupBySection(
   }
   return order.map((s) => [s, bySection.get(s)!] as const);
 }
-// LAND_FIELDS/MANSION_FIELDS は静的なためモジュール読み込み時に一度だけ section 分けする。
-// house/building は field-model が無いため空（参照されない）。
+// LAND_FIELDS/MANSION_FIELDS/HOUSE_FIELDS は静的なためモジュール読み込み時に一度だけ
+// section 分けする。building は field-model が無いため空（参照されない）。
 const SECTIONS_BY_KIND: Record<SalesSheetTemplateKind, (readonly [string, SheetField[]])[]> = {
   land: groupBySection(LAND_FIELDS),
   mansion: groupBySection(MANSION_FIELDS),
-  house: [],
+  house: groupBySection(HOUSE_FIELDS),
   building: [],
 };
 
@@ -208,6 +219,23 @@ interface LandAutoSource {
   address?: string | null;
   occupancyStatus?: string | null;
   zoningDistrict?: string | null;
+  buildingCoverageRatio?: number | string | null;
+  floorAreaRatio?: number | string | null;
+  roadType?: string | null;
+  roadWidth?: number | string | null;
+}
+
+/**
+ * 売戸建版の MansionAutoSource（[F2-B Task3]）。house も building relation を配線しないため、
+ * LandAutoSource と同じく物件スカラのみを防御的に（すべて任意で）読む。layoutType のみ
+ * LandAutoSource には無い追加フィールド（土地は間取りを持たないが house は持つ＝
+ * HOUSE_AUTO_ONLY_KEYS の layout に対応）。
+ */
+interface HouseAutoSource {
+  address?: string | null;
+  occupancyStatus?: string | null;
+  zoningDistrict?: string | null;
+  layoutType?: string | null;
   buildingCoverageRatio?: number | string | null;
   floorAreaRatio?: number | string | null;
   roadType?: string | null;
@@ -295,7 +323,36 @@ function computeLandAutoValues(data: LandAutoSource): FieldModelAutoValues {
 }
 
 /**
- * kind → 自動反映プレビュー計算関数。house/building は field-model が無いため対象外
+ * HOUSE_FIELDS 向けの自動反映プレビュー計算（computeLandAutoValues と同じ役割・
+ * [F2-B Task3]）。house も building relation を配線しないため、物件スカラのみを読む。
+ * LAND_AUTO_ONLY_KEYS と異なり layout（layoutType 由来）もプレビュー対象に含む
+ * （HOUSE_AUTO_ONLY_KEYS 参照）。occupancySeed は戸建の現況語彙がマンションと同一のため
+ * mapOccupancyStatusToMansionOccupancy を再利用する（build-document.ts の buildHouseValues
+ * と同じ関数＝作成ダイアログと図面ビルダーで写像がずれない）。
+ */
+function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
+  const hints: Record<string, string> = {};
+  if (data.zoningDistrict) {
+    hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
+  }
+  if (data.roadWidth != null && data.roadWidth !== "") {
+    hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
+  }
+  return {
+    preview: {
+      address: toPreviewString(data.address),
+      layout: toPreviewString(data.layoutType),
+      roadKind: toPreviewString(data.roadType),
+      coverageRatio: toPreviewString(data.buildingCoverageRatio),
+      floorRatio: toPreviewString(data.floorAreaRatio),
+    },
+    occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),
+    hints,
+  };
+}
+
+/**
+ * kind → 自動反映プレビュー計算関数。building は field-model が無いため対象外
  * （Partial・キー無し＝ダイアログの effect が fetch 自体をスキップする）。
  */
 const AUTO_COMPUTE_BY_KIND: Partial<
@@ -303,6 +360,7 @@ const AUTO_COMPUTE_BY_KIND: Partial<
 > = {
   mansion: (raw) => computeMansionAutoValues(raw as MansionAutoSource),
   land: (raw) => computeLandAutoValues(raw as LandAutoSource),
+  house: (raw) => computeHouseAutoValues(raw as HouseAutoSource),
 };
 
 /**

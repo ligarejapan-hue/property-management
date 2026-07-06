@@ -124,16 +124,75 @@ const mansionOverridesSchema = z.object({
   catchCopy: z.string().max(200).optional(),
   salesPoints: z.array(z.string().max(200)).max(20).optional(),
 });
+// [F2-B Task3] HOUSE_FIELDS(field-model) の手入力キー全域 + レイアウト専用(catchCopy/
+// salesPoints) に対応させる総入れ替え（landOverridesSchema と同じ方針。旧スキーマの
+// price/access/landArea/buildingArea/builtYearMonth/structure/transactionType/
+// deliveryTiming/remarks の固定8項目を置換）。キー名は build-document.ts の
+// SaleHouseOverrides と一致させること。multiselect(地目/接道方向/都市計画/用途地域/
+// 地域地区/セールスポイント)のみ string[]、他は string。旧 house スキーマには
+// landCategory が無かったため、land と異なり string|string[] の後方互換ユニオンは
+// 不要（配列のみ）。`deliveryTiming` は旧スキーマのキー名で、旧ダイアログが実際に
+// 送信していたため後方互換として受理し続ける（builder 側で delivery ?? deliveryTiming に
+// フォールバック・land の @deprecated deliveryTiming と同じ経緯・キャッシュ済み
+// クライアント対応の先回り）。
 const houseOverridesSchema = z.object({
+  propertyType: z.string().max(50).optional(),
+  // 価格
   price: z.string().max(200).optional(),
+  tax: z.string().max(50).optional(),
+  taxAmount: z.string().max(200).optional(),
+  // 所在・交通
   access: z.string().max(500).optional(),
+  // 土地
   landArea: z.string().max(200).optional(),
+  areaMethod: z.string().max(50).optional(),
+  landRight: z.string().max(100).optional(),
+  privateRoad: z.string().max(200).optional(),
+  landCategory: z.array(z.string().max(100)).max(20).optional(),
+  setback: z.string().max(200).optional(),
+  setbackUnit: z.string().max(10).optional(),
+  terrain: z.string().max(50).optional(),
+  // 建物（house は building relation を配線しないため常に手入力）
   buildingArea: z.string().max(200).optional(),
-  builtYearMonth: z.string().max(100).optional(),
+  floor1Area: z.string().max(200).optional(),
+  floor2Area: z.string().max(200).optional(),
+  floor3Area: z.string().max(200).optional(),
   structure: z.string().max(200).optional(),
-  transactionType: z.string().max(200).optional(),
+  aboveFloors: z.string().max(50).optional(),
+  basementFloors: z.string().max(50).optional(),
+  parking: z.string().max(100).optional(),
+  builtYearMonth: z.string().max(100).optional(),
+  renovYearMonth: z.string().max(100).optional(),
+  // 法令（roadKind は自動反映専用のため override キー無し。roadWidth は auto より精度の
+  // 高い値を手入力したい場合に優先される override＝LAND_FIELDS と同じ「override優先＋
+  // auto fallback」）
+  roadWidth: z.string().max(100).optional(),
+  roadDirections: z.array(z.string().max(100)).max(20).optional(),
+  cityPlanning: z.array(z.string().max(100)).max(20).optional(),
+  useDistrict: z.array(z.string().max(100)).max(20).optional(),
+  areaZone: z.array(z.string().max(100)).max(20).optional(),
+  buildingConfirm: z.string().max(50).optional(),
+  rebuild: z.string().max(50).optional(),
+  legalRestriction: z.string().max(1000).optional(),
+  // 設備・現況
+  equipment: z.string().max(1000).optional(),
+  occupancy: z.string().max(50).optional(),
+  delivery: z.string().max(100).optional(),
+  // @deprecated 旧キー名。`delivery` の別名として後方互換のみに残す（land の
+  // deliveryTiming と同じ経緯・こちらは事前対応＝旧 house ダイアログが実際に送っていた
+  // キー名）。
   deliveryTiming: z.string().max(200).optional(),
   remarks: z.string().max(1000).optional(),
+  // 会社（フッター。MANSION_FIELDS/LAND_FIELDS と同一のキー・選択肢のため対応キーを揃える）
+  transactionType: z.string().max(200).optional(),
+  compensation: z.string().max(200).optional(),
+  adType: z.string().max(200).optional(),
+  staff: z.string().max(200).optional(),
+  agent: z.string().max(200).optional(),
+  specialNotes: z.string().max(1000).optional(),
+  // レイアウト専用（field-model の行ではない・キャッチ帯/セールスポイント見出し）
+  catchCopy: z.string().max(200).optional(),
+  salesPoints: z.array(z.string().max(200)).max(20).optional(),
 });
 const buildingOverridesSchema = z.object({
   price: z.string().max(200).optional(),
