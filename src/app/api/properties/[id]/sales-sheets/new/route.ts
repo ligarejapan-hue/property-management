@@ -31,6 +31,12 @@ import { writeAuditLog } from "@/lib/audit";
 // 固定7項目を置換）。キー名は build-document.ts の SaleLandOverrides と一致させること。
 // multiselect(地目/接道方向/都市計画/用途地域/地域地区/セールスポイント)のみ string[]、他は
 // string。`deliveryTiming`（旧キー名の@deprecated別名）は新ダイアログが送らないため対象外。
+// `landCategory` のみ string も受理する（@codex P2）: 旧（F2 以前）の作成ダイアログは
+// landCategory を単一 string で送っていたため、デプロイ直後にブラウザキャッシュが効いた
+// 旧クライアントが string を POST すると schema で 400 になり得る。buildLandValues
+// （build-document.ts）が string | string[] を受けて配列へ正規化する実装は元々あるため、
+// schema 側を string も許容するよう緩めるだけで足りる。roadDirections/cityPlanning/
+// useDistrict/areaZone は F2 で新設のキーであり旧クライアントは送らないため array のまま。
 const landOverridesSchema = z.object({
   // 価格（DB の propertyType/land は単一 enum で「売地/借地権/底地権」と1:1対応しないため
   // propertyType は常に手入力。bestUse も自動反映元なし）
@@ -43,7 +49,7 @@ const landOverridesSchema = z.object({
   // 土地
   landArea: z.string().max(200).optional(),
   areaMethod: z.string().max(50).optional(),
-  landCategory: z.array(z.string().max(100)).max(20).optional(),
+  landCategory: z.union([z.array(z.string().max(100)).max(20), z.string().max(100)]).optional(),
   privateRoad: z.string().max(200).optional(),
   terrain: z.string().max(50).optional(),
   setback: z.string().max(200).optional(),

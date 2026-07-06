@@ -261,6 +261,17 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(landOverviewRow("地目")).toBe("宅地 / 雑種地");
   });
 
+  // @codex P2: landCategory は旧（F2以前）ダイアログが単一 string で送っていたキー。
+  // デプロイ直後のブラウザキャッシュ由来の旧クライアントが string を POST しても
+  // 400 にならず、buildLandValues 側の正規化で配列と同じ表示になることを確認する。
+  it("201 — 土地: 旧クライアント互換の landCategory（単一 string）も 400 にならず受理される", async () => {
+    const res = await POST(makeLandRequest({ landCategory: "宅地" }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(landOverviewRow("地目")).toBe("宅地");
+  });
+
   it("201 — 土地: 用途地域は自動反映(zoningDistrict)+overrideの追加選択を併記する", async () => {
     pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, zoningDistrict: "商業地域" });
     const res = await POST(makeLandRequest({ useDistrict: ["近隣商業地域"] }), {
