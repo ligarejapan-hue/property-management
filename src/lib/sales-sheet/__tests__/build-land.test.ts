@@ -203,6 +203,39 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     expect(findEl(doc, "price")).toMatchObject({ content: "3480万円" });
   });
 
+  it("価格にすでに「万円」が付いていても二重化しない(現行の売土地ダイアログは自由入力のため単位まで入力されうる・@codex Important fix)", () => {
+    const doc = buildSaleLandDocument({ ...base, overrides: { price: "3,480万円" } });
+    expect(findEl(doc, "price")).toMatchObject({ content: "3,480万円" });
+  });
+
+  it("土地面積にすでに「㎡」が付いていても二重化しない(@codex Important fix)", () => {
+    const withoutMethod = buildSaleLandDocument({ ...base, overrides: { landArea: "120.50㎡" } });
+    expect(tableRow(withoutMethod, "土地面積")).toBe("120.50㎡");
+
+    const withMethod = buildSaleLandDocument({
+      ...base,
+      overrides: { landArea: "120.50㎡", areaMethod: "実測" },
+    });
+    expect(tableRow(withMethod, "土地面積")).toBe("120.50㎡（実測）");
+  });
+
+  it("セットバックにすでに単位が付いていても二重化しない(@codex Important fix)", () => {
+    const doc = buildSaleLandDocument({
+      ...base,
+      overrides: { setback: "0.5m", setbackUnit: "m" },
+    });
+    expect(tableRow(doc, "セットバック")).toBe("0.5m");
+  });
+
+  it("raw入力(単位なし)は従来どおり単位が1つ付く(回帰防止)", () => {
+    const doc = buildSaleLandDocument({
+      ...base,
+      overrides: { price: "3480", landArea: "150.5", areaMethod: "実測" },
+    });
+    expect(findEl(doc, "price")).toMatchObject({ content: "3480万円" });
+    expect(tableRow(doc, "土地面積")).toBe("150.5㎡（実測）");
+  });
+
   it("価格未入力ならprice要素のcontentは空文字", () => {
     const doc = buildSaleLandDocument({ ...base, overrides: {} });
     expect(findEl(doc, "price")).toMatchObject({ content: "" });

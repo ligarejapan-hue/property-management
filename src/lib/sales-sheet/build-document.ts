@@ -81,10 +81,14 @@ function fmtUnits(v?: string | null): string {
  * field-model の面積系フィールド（マンション専有面積/売土地土地面積）は unit を持たせず、
  * この関数が ㎡ を組み立てる（sheet-rows での二重付与を防ぐ・@codex P2 fix。
  * [F2-A Task3] fmtExclusiveArea を汎用化・マンション/土地共通ヘルパー）。
+ * 現行の売土地ダイアログ（FIELD_SETS.land、Task4で作り込むまではプレーン自由入力）は
+ * 単位付きで入力されうるため、合成前に末尾の「㎡」を一度剥がして二重付与を防ぐ
+ * （@codex Important fix: "120.50㎡" → "120.50㎡㎡" になっていた）。
  */
 function fmtAreaWithMethod(area?: string | null, method?: string | null): string {
-  const s = typeof area === "string" ? area.trim() : "";
-  if (!s) return "";
+  const trimmed = typeof area === "string" ? area.trim() : "";
+  if (!trimmed) return "";
+  const s = trimmed.endsWith("㎡") ? trimmed.slice(0, -"㎡".length) : trimmed;
   const m = typeof method === "string" ? method.trim() : "";
   return `${s}㎡${m ? `（${m}）` : ""}`;
 }
@@ -92,12 +96,31 @@ function fmtAreaWithMethod(area?: string | null, method?: string | null): string
 /**
  * 値 + 単位 → "0.5m"/"12.3㎡"（値が無ければ ""）。単位そのものが選択式で意味が変わる
  * 項目（売土地のセットバック=m/㎡）に使う汎用ヘルパー（[F2-A Task3]）。
+ * 値がすでに指定の単位で終わっている場合は付け直さない（@codex Important fix:
+ * 現行の売土地ダイアログの自由入力で単位まで入力されると "0.5m" + "m" → "0.5mm" に
+ * 二重化していた。unit の厳密な末尾一致のみで判定し、それ以外は従来どおり付与する）。
  */
 function fmtValueWithUnit(value?: string | null, unit?: string | null): string {
   const s = typeof value === "string" ? value.trim() : "";
   if (!s) return "";
   const u = typeof unit === "string" ? unit.trim() : "";
+  if (u && s.endsWith(u)) return s;
   return `${s}${u}`;
+}
+
+/**
+ * 価格文字列 → "3480万円"（すでに末尾が「万円」ならそのまま／付け直さない、空なら ""）。
+ * 桁区切りカンマ等は付与しない＝price は自由入力文字列のまま扱う従来仕様を維持する
+ * （"3480"→"3480万円"、"3,480"→"3,480万円"）。売マンション/売土地の priceText で
+ * 共通利用し、両者の挙動を一致させる（@codex Important fix: 現行の売土地ダイアログは
+ * プレーン自由入力のため "3,480万円" と単位まで入力されると "3,480万円万円" に
+ * 二重化していた）。
+ */
+function fmtManYen(price?: string): string {
+  const s = typeof price === "string" ? price.trim() : "";
+  if (!s) return "";
+  const stripped = s.endsWith("万円") ? s.slice(0, -"万円".length) : s;
+  return `${stripped}万円`;
 }
 
 /**
@@ -427,7 +450,7 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
   const rows = buildSheetRows(MANSION_SPEC_FIELDS, values);
 
   const heading = [b.name, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join("　");
-  const priceText = o.price ? `${o.price}万円` : "";
+  const priceText = fmtManYen(o.price);
 
   return buildSpecSheetDocument({
     heading,
@@ -591,7 +614,7 @@ export function buildSaleLandDocument(input: SaleLandInput): SalesSheetDocument 
   const values = buildLandValues(input);
   const rows = buildSheetRows(LAND_SPEC_FIELDS, values);
 
-  const priceText = o.price ? `${o.price}万円` : "";
+  const priceText = fmtManYen(o.price);
   // photos(複数)優先・無ければ legacy な photo(単数)を1枚配列として扱う。
   const photos = input.photos ?? (input.photo ? [input.photo] : undefined);
 

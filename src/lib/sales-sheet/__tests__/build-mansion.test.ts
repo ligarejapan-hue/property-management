@@ -237,6 +237,11 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(JSON.stringify(doc.elements)).toContain("株式会社リガーレジャパン");
   });
 
+  it("価格にすでに「万円」が付いていても二重化しない(売土地と共有するfmtManYenのガード・@codex Important fix)", () => {
+    const doc = buildSaleMansionDocument({ ...base, overrides: { price: "6590万円" } });
+    expect(findEl(doc, "price")).toMatchObject({ content: "6590万円" });
+  });
+
   // 版面レイアウトを buildSpecSheetDocument へ抽出する前の固定（特性化テスト）。
   // catch-band/catch-copy/heading/price/overview/sales-points/company/company-details の
   // id・座標(x/y/w/h/z)・スタイルが既知値であることを固定し、抽出後もこの値が
