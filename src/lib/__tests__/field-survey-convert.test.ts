@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPropertyDataFromPin } from "../field-survey-convert";
+import { buildPropertyDataFromPin, buildPropertyPhotoDataFromPinPhoto } from "../field-survey-convert";
 
 describe("buildPropertyDataFromPin", () => {
   const pin = { lat: 35.1234567, lng: 139.7654321 };
@@ -27,5 +27,31 @@ describe("buildPropertyDataFromPin", () => {
     expect(data.registryStatus).toBe("unconfirmed");
     expect(data.dmStatus).toBe("hold");
     expect(data.caseStatus).toBe("new_case");
+  });
+});
+
+describe("buildPropertyPhotoDataFromPinPhoto", () => {
+  const pinPhoto = {
+    fileName: "site.jpg",
+    fileSize: 12345,
+    mimeType: "image/jpeg",
+    uploadedByUserId: "staff-9",
+    sortOrder: 2,
+  };
+
+  it("takenBy=撮影者(uploadedByUserId)・sortOrder保持・GPS/caption/thumbnailは付けない", () => {
+    const data = buildPropertyPhotoDataFromPinPhoto(pinPhoto, "prop-1", "/uploads/properties/prop-1/photos/x.jpg");
+    expect(data).toEqual({
+      propertyId: "prop-1",
+      fileUrl: "/uploads/properties/prop-1/photos/x.jpg",
+      fileName: "site.jpg",
+      fileSize: 12345,
+      mimeType: "image/jpeg",
+      takenBy: "staff-9",
+      sortOrder: 2,
+    });
+    expect(data).not.toHaveProperty("gpsLat");
+    expect(data).not.toHaveProperty("caption");
+    expect(data).not.toHaveProperty("thumbnailUrl");
   });
 });

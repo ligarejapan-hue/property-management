@@ -33,3 +33,31 @@ export function buildPropertyDataFromPin(
     createdBy,
   };
 }
+
+/** 物件化候補ピンの写真 1 枚から PropertyPhoto 作成 data を組み立てる純関数。 */
+export interface PinPhotoSource {
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedByUserId: string;
+  sortOrder: number;
+}
+
+export function buildPropertyPhotoDataFromPinPhoto(
+  pinPhoto: PinPhotoSource,
+  propertyId: string,
+  newFileUrl: string,
+) {
+  return {
+    propertyId,
+    fileUrl: newFileUrl,
+    fileName: pinPhoto.fileName,
+    fileSize: pinPhoto.fileSize,
+    mimeType: pinPhoto.mimeType,
+    // 撮影者は元の現地担当を保持(pin の uploadedByUserId → property の takenBy)。
+    takenBy: pinPhoto.uploadedByUserId,
+    sortOrder: pinPhoto.sortOrder,
+    // thumbnailUrl / caption / gpsLat / gpsLng / takenAt / isPrimary は付けない
+    // (ピンに対応列なし・GPS は引き継がない=PII安全・既定値に委ねる)。
+  };
+}
