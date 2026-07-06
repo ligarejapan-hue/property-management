@@ -6,6 +6,7 @@ import ImportSwitcher from "@/components/import/import-switcher";
 import BulkFolderUpload, {
   type BulkUploadSummary,
 } from "@/components/import/bulk-folder-upload";
+import FilePickerButton from "@/components/import/file-picker-button";
 import {
   readFileForImport,
   previewReceptionPropertyCsv,
@@ -124,9 +125,11 @@ export default function RegistryDmImportPage() {
           <h2 className="font-medium text-gray-900 dark:text-gray-100">
             ① 受付帳Excelから物件を作成
           </h2>
-          <input
-            type="file"
+          <FilePickerButton
             accept=".xlsx,.csv"
+            label="受付帳を選択"
+            hint="Excel(.xlsx) または CSV"
+            fileName={rpFile?.fileName ?? null}
             onChange={async (e) => {
               const f = e.target.files?.[0];
               if (!f) return;
@@ -140,7 +143,6 @@ export default function RegistryDmImportPage() {
                 setRoResult(null);
               });
             }}
-            className="block text-sm"
           />
           <div className="flex flex-wrap gap-4 text-sm">
             <label className="flex items-center gap-2">
@@ -260,12 +262,15 @@ export default function RegistryDmImportPage() {
           <p className="text-sm text-gray-600 dark:text-gray-400">
             受付帳Excel(①と同じファイル)と所有者Excelの2つを指定します。
           </p>
-          <div className="space-y-2 text-sm">
-            <div>
-              受付帳: {rpFile ? rpFile.fileName : "未選択"}{" "}
-              <input
-                type="file"
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">
+                受付帳Excel(①と同じ)
+              </span>
+              <FilePickerButton
                 accept=".xlsx,.csv"
+                label="受付帳を選択"
+                fileName={rpFile?.fileName ?? null}
                 onChange={async (e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
@@ -281,11 +286,14 @@ export default function RegistryDmImportPage() {
                 }}
               />
             </div>
-            <div>
-              所有者: {ownerFile ? ownerFile.fileName : "未選択"}{" "}
-              <input
-                type="file"
+            <div className="space-y-1">
+              <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">
+                所有者Excel
+              </span>
+              <FilePickerButton
                 accept=".xlsx,.csv"
+                label="所有者を選択"
+                fileName={ownerFile?.fileName ?? null}
                 onChange={async (e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
