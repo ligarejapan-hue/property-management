@@ -28,7 +28,7 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
-    fieldSurveyPin: { findUnique: vi.fn(), update: vi.fn() },
+    fieldSurveyPin: { findUnique: vi.fn(), updateMany: vi.fn() },
     property: { create: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -39,7 +39,7 @@ import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { POST } from "../route";
 
 const pm = prisma as unknown as {
-  fieldSurveyPin: { findUnique: Mock; update: Mock };
+  fieldSurveyPin: { findUnique: Mock; updateMany: Mock };
   property: { create: Mock };
   $transaction: Mock;
 };
@@ -58,14 +58,29 @@ function req(body: unknown) {
 }
 const ctx = { params: Promise.resolve({ id: PIN_ID }) };
 
+function candidatePin(overrides: Record<string, unknown> = {}) {
+  return {
+    id: PIN_ID,
+    staffUserId: "user-1",
+    propertyId: null,
+    pinType: "candidate",
+    lat: 35.5,
+    lng: 139.5,
+    status: "open",
+    ...overrides,
+  };
+}
+
 describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (getApiSession as Mock).mockResolvedValue({ id: "user-1", role: "member" });
     (getUserPermissions as Mock).mockResolvedValue(WRITE);
     pm.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
-      cb({ property: { create: pm.property.create }, fieldSurveyPin: { update: pm.fieldSurveyPin.update } }),
+      cb({ property: { create: pm.property.create }, fieldSurveyPin: { updateMany: pm.fieldSurveyPin.updateMany } }),
     );
+    pm.property.create.mockResolvedValue({ id: "new-prop" });
+    pm.fieldSurveyPin.updateMany.mockResolvedValue({ count: 1 });
   });
 
   it("property:write が無ければ 403(pin を読まない)", async () => {
@@ -81,27 +96,41 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
     expect(res.status).toBe(404);
   });
 
+  it("候補ピンでなければ 422(作成しない)", async () => {
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ pinType: "blocked" }));
+    const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
+    expect(res.status).toBe(422);
+    expect(pm.property.create).not.toHaveBeenCalled();
+  });
+
   it("既に propertyId があれば 409(作成しない)", async () => {
-    pm.fieldSurveyPin.findUnique.mockResolvedValue({ id: PIN_ID, staffUserId: "user-1", propertyId: "p-x", lat: 35, lng: 139, status: "open" });
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ propertyId: "p-x" }));
     const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
     expect(res.status).toBe(409);
     expect(pm.property.create).not.toHaveBeenCalled();
   });
 
-  it("成功: property 作成 + pin に propertyId/closed 紐付け・GPS はピン継承・201", async () => {
-    pm.fieldSurveyPin.findUnique.mockResolvedValue({ id: PIN_ID, staffUserId: "user-1", propertyId: null, lat: 35.5, lng: 139.5, status: "open" });
-    pm.property.create.mockResolvedValue({ id: "new-prop" });
-    pm.fieldSurveyPin.update.mockResolvedValue({ id: PIN_ID });
+  it("成功: property 作成 + pin を propertyId=null 条件で closed 紐付け・GPS 継承・201", async () => {
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin());
     const res = await POST(req({ propertyType: "land", address: "東京都..." }), ctx);
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ id: "new-prop" });
     expect(pm.property.create.mock.calls[0][0].data.gpsLat).toBe(35.5);
     expect(pm.property.create.mock.calls[0][0].data.introductionRoute).toBe("field_survey");
-    expect(pm.fieldSurveyPin.update.mock.calls[0][0].data).toEqual({ propertyId: "new-prop", status: "closed" });
+    const upd = pm.fieldSurveyPin.updateMany.mock.calls[0][0];
+    expect(upd.where).toEqual({ id: PIN_ID, propertyId: null });
+    expect(upd.data).toEqual({ propertyId: "new-prop", status: "closed" });
+  });
+
+  it("競合で pin が先に紐付いていたら 409(updateMany count=0 でロールバック)", async () => {
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin());
+    pm.fieldSurveyPin.updateMany.mockResolvedValue({ count: 0 });
+    const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
+    expect(res.status).toBe(409);
   });
 
   it("他人の pin は manage が無ければ 403(作成しない)", async () => {
-    pm.fieldSurveyPin.findUnique.mockResolvedValue({ id: PIN_ID, staffUserId: "someone-else", propertyId: null, lat: 35, lng: 139, status: "open" });
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ staffUserId: "someone-else" }));
     const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
     expect(res.status).toBe(403);
     expect(pm.property.create).not.toHaveBeenCalled();
@@ -109,9 +138,7 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
 
   it("他人の pin でも manage があれば変換できる(201)", async () => {
     (getUserPermissions as Mock).mockResolvedValue(WRITE_MANAGE);
-    pm.fieldSurveyPin.findUnique.mockResolvedValue({ id: PIN_ID, staffUserId: "someone-else", propertyId: null, lat: 1, lng: 2, status: "open" });
-    pm.property.create.mockResolvedValue({ id: "np" });
-    pm.fieldSurveyPin.update.mockResolvedValue({ id: PIN_ID });
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ staffUserId: "someone-else" }));
     const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
     expect(res.status).toBe(201);
   });

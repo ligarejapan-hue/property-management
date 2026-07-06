@@ -40,7 +40,7 @@ export async function POST(
 
     const pin = await prisma.fieldSurveyPin.findUnique({
       where: { id },
-      select: { id: true, staffUserId: true, propertyId: true, lat: true, lng: true, status: true },
+      select: { id: true, staffUserId: true, propertyId: true, pinType: true, lat: true, lng: true, status: true },
     });
     if (!pin) {
       throw new ApiError(404, "調査ピンが見つかりません", "NOT_FOUND");
@@ -50,6 +50,11 @@ export async function POST(
     const hasManage = hasPermission(permissions, "field_survey", "manage");
     if (!isOwn && !hasManage) {
       throw new ApiError(403, "この調査ピンを物件化する権限がありません", "FORBIDDEN");
+    }
+
+    // UI と同じく「物件化候補」ピンのみ対象(サーバー側でも強制)。
+    if (pin.pinType !== "candidate") {
+      throw new ApiError(422, "物件化候補ではないため物件化できません", "NOT_CANDIDATE");
     }
 
     if (pin.propertyId) {
@@ -64,12 +69,17 @@ export async function POST(
       session.id,
     );
 
+    // property 作成 + pin リンクを原子的に。リンクは propertyId=null 条件付き
+    // (updateMany の count)にして、同一 pin の同時変換による二重物件化を防ぐ。
     const property = await prisma.$transaction(async (tx) => {
       const created = await tx.property.create({ data, select: { id: true } });
-      await tx.fieldSurveyPin.update({
-        where: { id: pin.id },
+      const linked = await tx.fieldSurveyPin.updateMany({
+        where: { id: pin.id, propertyId: null },
         data: { propertyId: created.id, status: "closed" },
       });
+      if (linked.count === 0) {
+        throw new ApiError(409, "この調査ピンは既に物件化済みです", "ALREADY_CONVERTED");
+      }
       return created;
     });
 
