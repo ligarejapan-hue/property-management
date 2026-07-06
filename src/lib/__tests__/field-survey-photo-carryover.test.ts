@@ -29,11 +29,12 @@ function makeDeps(pinPhotos: PhotoRow[], reads: (Buffer | null)[]) {
     }),
   );
   const keyFromUrl = vi.fn((url: string): string | null => url.replace(/^.*\/uploads\//, "") || null);
+  const del = vi.fn(async (_key: string) => {});
   const db = { fieldSurveyPinPhoto: { findMany }, propertyPhoto: { create } };
-  const storage = { keyFromUrl, read, upload };
+  const storage = { keyFromUrl, read, upload, delete: del };
   let n = 0;
   const deps = { db, storage, uuid: () => `uuid${n++}`, now: () => 1000 };
-  return { deps, create, read, upload, findMany };
+  return { deps, create, read, upload, findMany, del };
 }
 
 const photo = (o: Partial<PhotoRow> = {}): PhotoRow => ({
@@ -97,5 +98,13 @@ describe("copyPinPhotosToProperty", () => {
     const r = await copyPinPhotosToProperty("p1", "prop-1", deps);
     expect(r).toEqual({ copied: 1, failed: 1 });
     expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("upload 成功後に create 失敗なら孤児 blob を削除(failed)", async () => {
+    const { deps, create, del } = makeDeps([photo()], [Buffer.from("x")]);
+    (create as unknown as Mock).mockRejectedValueOnce(new Error("db down"));
+    const r = await copyPinPhotosToProperty("p1", "prop-1", deps);
+    expect(r).toEqual({ copied: 0, failed: 1 });
+    expect(del).toHaveBeenCalledWith(expect.stringMatching(/^properties\/prop-1\/photos\//));
   });
 });

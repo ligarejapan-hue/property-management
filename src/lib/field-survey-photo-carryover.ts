@@ -31,6 +31,7 @@ interface CarryoverStorage {
     buf: Buffer,
     opts: { key: string; mimeType: string; fileName: string },
   ) => Promise<{ url: string; key: string }>;
+  delete: (key: string) => Promise<void>;
 }
 
 interface CarryoverDeps {
@@ -73,6 +74,8 @@ export async function copyPinPhotosToProperty(
   let copied = 0;
   let failed = 0;
   for (const p of pinPhotos) {
+    // upload 済みだが create 未完のキー。create 失敗時に孤児 blob を掃除するため保持。
+    let orphanKey: string | null = null;
     try {
       // active adapter の keyFromUrl で解決する。旧データの絶対 URL(server backend)も
       // lenient に解決して取りこぼさない(@codex 指摘対応。厳格な extractStorageKeyFromUrl は
@@ -103,15 +106,26 @@ export async function copyPinPhotosToProperty(
         mimeType: p.mimeType,
         fileName: p.fileName,
       });
+      orphanKey = result.key; // create が成功するまでは孤児候補
       // 常に proxy 相対 URL(/uploads/{key})で保存(server backend の絶対 URL を持ち込まない)。
       const newFileUrl = `/uploads/${result.key}`;
       await db.propertyPhoto.create({
         // fileSize は strip 後の実バイト数(pins upload と同方針)。
         data: { ...buildPropertyPhotoDataFromPinPhoto(p, propertyId, newFileUrl), fileSize: uploadBuffer.length },
       });
+      orphanKey = null; // DB 行が出来たので孤児ではない
       copied++;
     } catch {
       failed++;
+      // upload 成功後に create が失敗した場合、DB 行の無い孤児 blob を掃除する(削除は DB 行駆動の
+      // ため放置すると通常フローで回収不能。@codex 指摘対応。掃除失敗は握る=best-effort)。
+      if (orphanKey) {
+        try {
+          await storage.delete(orphanKey);
+        } catch {
+          // 掃除失敗は無視(元の失敗を優先)。
+        }
+      }
     }
   }
   return { copied, failed };
