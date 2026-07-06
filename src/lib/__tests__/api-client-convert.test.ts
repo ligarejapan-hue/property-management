@@ -18,7 +18,7 @@ describe("api-client: convertPinToProperty / listCandidatePins", () => {
 
   it("convertPinToProperty は変換エンドポイントへ POST する", async () => {
     const fetchMock = vi.fn(
-      async () =>
+      async (_url: string, _init?: RequestInit) =>
         new Response(JSON.stringify({ id: "p1" }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -38,7 +38,7 @@ describe("api-client: convertPinToProperty / listCandidatePins", () => {
 
   it("listCandidatePins は candidate×open を map 射影で取得する", async () => {
     const fetchMock = vi.fn(
-      async () =>
+      async (_url: string, _init?: RequestInit) =>
         new Response(JSON.stringify({ data: [], nextCursor: null }), {
           status: 200,
           headers: { "content-type": "application/json" },

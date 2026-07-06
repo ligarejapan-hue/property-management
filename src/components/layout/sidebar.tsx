@@ -26,7 +26,6 @@ import {
   FileSearch,
   BookOpen,
   Newspaper,
-  ClipboardCheck,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 
