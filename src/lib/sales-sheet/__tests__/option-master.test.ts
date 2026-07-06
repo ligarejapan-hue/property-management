@@ -19,4 +19,17 @@ describe("option-master", () => {
     expect(M.CITY_PLANNING).toContain("市街化区域");
     expect(M.AREA_ZONE).toContain("防火");
   });
+
+  it("F2売土地分の選択肢を持つ", () => {
+    expect(M.PROPERTY_TYPE_LAND).toEqual(["売地", "借地権", "底地権"]);
+    expect(M.BEST_USE_LAND).toEqual([
+      "住宅用地", "マンション用地", "店舗用地", "事務所用地", "工業用地", "その他",
+    ]);
+    expect(M.AREA_METHOD_LAND).toEqual(["公簿", "実測"]);
+    expect(M.SETBACK_UNIT).toEqual(["m", "㎡"]);
+    expect(M.DIRECTION).toEqual(["北", "北東", "東", "南東", "南", "南西", "西", "北西"]);
+    expect(M.DIRECTION.length).toBe(8);
+    expect(M.LAND_ACT_NOTICE).toEqual(["要", "届出中", "不要"]);
+    expect(M.OCCUPANCY_LAND).toEqual(["更地", "上物有"]);
+  });
 });
