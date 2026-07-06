@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { it, expect } from "vitest";
 import { buildSheetRows, type SheetValues } from "../sheet-rows";
 import type { SheetField } from "../field-model";
 
