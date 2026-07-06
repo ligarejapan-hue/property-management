@@ -40,7 +40,10 @@ export const MANSION_FIELDS: readonly SheetField[] = [
   { key: "useDistrict", label: "用途地域", widget: "multiselect", section: "土地", options: M.USE_DISTRICT, autoFrom: "zoningDistrict" },
   // 建物
   { key: "areaMethod", label: "面積計測方式", widget: "select", section: "建物", options: M.AREA_METHOD_MANSION, controlOnly: true },
-  { key: "exclusiveArea", label: "専有面積", widget: "number", section: "建物", unit: "㎡", autoFrom: "exclusiveArea" },
+  // unit(㎡) は持たせない: buildMansionValues が面積計測方式(壁芯/内法)と合わせて
+  // "67.21㎡（壁芯）" 形にあらかじめ合成した文字列を渡すため、sheet-rows 側で
+  // ㎡ を二重付与しないようにする（@codex P2 fix）。
+  { key: "exclusiveArea", label: "専有面積", widget: "number", section: "建物", autoFrom: "exclusiveArea" },
   { key: "balconyArea", label: "バルコニー面積", widget: "number", section: "建物", unit: "㎡", autoFrom: "balconyArea" },
   { key: "balconyDir", label: "バルコニー向き", widget: "select", section: "建物", options: M.BALCONY_DIRECTION, autoFrom: "orientation" },
   { key: "layout", label: "間取り", widget: "text", section: "建物", autoFrom: "layoutType" },

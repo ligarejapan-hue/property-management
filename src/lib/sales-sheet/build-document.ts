@@ -8,6 +8,7 @@ import { isSafeImageSrc } from "./css-safety";
 import { getStorage } from "@/lib/storage";
 import type { StorageAdapter } from "@/lib/storage/types";
 import { localizeOccupancy } from "@/lib/property-types";
+import { mapOccupancyStatusToMansionOccupancy } from "./occupancy";
 import { MANSION_FIELDS } from "./field-model";
 import { buildSheetRows, type SheetValues } from "./sheet-rows";
 
@@ -150,6 +151,17 @@ function fmtBuiltYear(override?: string | null, builtYear?: number | null): stri
 function fmtUnits(v?: string | null): string {
   return v ? `${v}戸` : "";
 }
+/**
+ * 専有面積 + 面積計測方式(壁芯/内法) → "67.21㎡（壁芯）"。
+ * 方式未選択なら "67.21㎡"、面積が無ければ ""。field-model の exclusiveArea は
+ * unit を持たないため、㎡ もここで組み立てる（sheet-rows での二重付与を防ぐ・@codex P2 fix）。
+ */
+function fmtExclusiveArea(area?: string | null, method?: string | null): string {
+  const s = typeof area === "string" ? area.trim() : "";
+  if (!s) return "";
+  const m = typeof method === "string" ? method.trim() : "";
+  return `${s}㎡${m ? `（${m}）` : ""}`;
+}
 
 /** 左カラム（表題・価格の下）に写真を最大3枚レイアウトする位置。 */
 const PHOTO_LAYOUTS: Record<number, { x: number; y: number; w: number; h: number }[]> = {
@@ -244,10 +256,12 @@ export interface SaleMansionOverrides {
   developer?: string;
   builder?: string;
   /**
-   * 現況（居住中/空家/賃貸中/未完成）。自動値（occupancyStatus→localizeOccupancy）は
-   * vacant/occupied/unknown の粗い3値のため、マイソクのより細かい語彙と一致しないことがある
-   * （特に occupied は「居住中」「賃貸中」のどちらもあり得ず判別できない）。override があれば
-   * それを優先し、無ければ従来どおり localizeOccupancy の自動値にフォールバックする。
+   * 現況（居住中/空家/賃貸中/未完成）。override が無い場合のデフォルトは
+   * `mapOccupancyStatusToMansionOccupancy`（occupancy.ts）が occupancyStatus から
+   * 決定的に写像する（vacant→空家/occupied→居住中、他は localizeOccupancy 相当）。
+   * 作成ダイアログの自動反映プレビューも同じ関数を使うため、フェッチの成否・
+   * タイミングに関わらず override 未指定時は常に同じ現況になる（@codex P2 fix）。
+   * override があれば常にそれを優先する。
    */
   occupancy?: string;
   delivery?: string;
@@ -326,7 +340,9 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     useDistrict,
     // 建物
     areaMethod: o.areaMethod,
-    exclusiveArea: p.exclusiveArea ?? undefined,
+    // 専有面積: 面積計測方式(壁芯/内法)を括弧書きで併記して1つの表示値に合成する
+    // （field-model.exclusiveArea は unit を持たないため ㎡ もここで付与する）。
+    exclusiveArea: fmtExclusiveArea(p.exclusiveArea, o.areaMethod),
     balconyArea: p.balconyArea ?? undefined,
     balconyDir: p.orientation ?? undefined,
     layout: p.layoutType ?? undefined,
@@ -347,8 +363,10 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     managementCompany: b.managementCompany ?? undefined,
     developer: o.developer,
     builder: o.builder,
-    // 現況: override 優先（マイソク語彙での手動選択/訂正）、無ければ従来どおり自動値。
-    occupancy: o.occupancy ?? localizeOccupancy(p.occupancyStatus) ?? undefined,
+    // 現況: override 優先（マイソク語彙での手動選択/訂正）、無ければ occupancyStatus からの
+    // 決定的写像（作成ダイアログの自動反映プレビューと同一関数＝フェッチのタイミングに
+    // 依存しない・@codex P2 fix）。
+    occupancy: o.occupancy ?? mapOccupancyStatusToMansionOccupancy(p.occupancyStatus),
     delivery: o.delivery,
     remarks: o.remarks,
   };

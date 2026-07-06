@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { SalesSheetTemplateKind } from "@/lib/sales-sheet/template-kind";
 import { fetchPropertyDetail } from "@/lib/api-client";
 import { MANSION_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
+import { mapOccupancyStatusToMansionOccupancy } from "@/lib/sales-sheet/occupancy";
 
 export type { SalesSheetTemplateKind };
 
@@ -138,24 +139,6 @@ function groupBySection(
 const MANSION_SECTIONS = groupBySection(MANSION_FIELDS);
 
 /**
- * DB の occupancyStatus（vacant/occupied/unknown）を MANSION_FIELDS の occupancy
- * select 選択肢語彙（居住中/空家/賃貸中/未完成）へ写像する
- * （[T4→T5] carry-forward: 語彙不一致の整合）。
- * - vacant → 空家 / occupied → 居住中（DB は「居住中」と「賃貸中」を区別しないため
- *   より一般的な自己居住側へ寄せる初期値とし、誤りなら手動で選び直せる）。
- * - unknown・null・未知の値 → 写像しない（空欄のまま＝手動選択に委ねる）。
- * builder 側（build-document.ts の buildMansionValues）は override 優先・フォールバックは
- * 既存の localizeOccupancy のまま（他テンプレとの慣例＝他ビルダー全て localizeOccupancy を崩さない）。
- */
-function mapOccupancyStatusToMansionOption(
-  status: string | null | undefined,
-): string | undefined {
-  if (status === "vacant") return "空家";
-  if (status === "occupied") return "居住中";
-  return undefined;
-}
-
-/**
  * ダイアログが自動反映の元データとして読む、物件詳細フェッチ結果の最小限の形。
  * 実レスポンス（GET /api/properties/[id]）はこれより広いフィールドを持つが、
  * ここでは使う分だけを防御的に（すべて任意で）読む。
@@ -184,7 +167,13 @@ interface MansionAutoSource {
 interface MansionAutoValues {
   /** 自動反映専用フィールドの参照表示値（disabled input に表示）。 */
   preview: Record<string, string>;
-  /** occupancy(現況) select の初期選択（写像できた場合のみ）。 */
+  /**
+   * occupancy(現況) select の「表示専用」初期値ヒント（mapOccupancyStatusToMansionOccupancy
+   * で決定的に写像・写像できない場合もフォールバック値を返すため常に何かしら入る）。
+   * mansionValues.occupancy 自体には書き込まない＝ユーザーが select を操作しない限り
+   * 送信ペイロードに occupancy は含まれず、サーバ側の同一関数によるデフォルトに委ねる
+   * （フェッチの成否・タイミングに依存させないための設計・@codex P2 fix）。
+   */
   occupancySeed?: string;
   /** 用途地域チェック群の上に出す「自動反映済み」ヒント文言。 */
   zoningDistrictAuto?: string;
@@ -213,7 +202,7 @@ function computeMansionAutoValues(data: MansionAutoSource): MansionAutoValues {
       totalUnits: toPreviewString(b?.totalUnits),
       managementCompany: toPreviewString(b?.managementCompany),
     },
-    occupancySeed: mapOccupancyStatusToMansionOption(data.occupancyStatus),
+    occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),
     zoningDistrictAuto: data.zoningDistrict ?? undefined,
   };
 }
@@ -382,11 +371,14 @@ export function MansionFieldModelForm({
   onChange,
   autoPreview,
   zoningDistrictAuto,
+  occupancySeed,
 }: {
   values: MansionValues;
   onChange: (key: string, value: MansionFieldValue) => void;
   autoPreview: Record<string, string>;
   zoningDistrictAuto?: string;
+  /** occupancy(現況) select の表示専用の初期値ヒント（未編集時のみ使う。詳細は MansionAutoValues 参照）。 */
+  occupancySeed?: string;
 }) {
   return (
     <>
@@ -411,6 +403,13 @@ export function MansionFieldModelForm({
                 <MansionAutoPreviewField key={f.key} field={f} value={autoPreview[f.key] ?? ""} />
               );
             }
+            // occupancy(現況): 未編集時は自動反映ヒント(occupancySeed)を表示専用の初期値として
+            // 見せるが、values(=送信payload の元)は書き換えない。ユーザーが select を実際に
+            // 操作(onChange)しない限り occupancy は送信されず、サーバ側の決定的デフォルト
+            // （mapOccupancyStatusToMansionOccupancy）に委ねる（@codex P2 fix: フェッチの
+            // タイミングに依存して現況が変わる不具合の解消）。
+            const displayValue =
+              f.key === "occupancy" && values[f.key] === undefined ? occupancySeed : values[f.key];
             return (
               <div key={f.key}>
                 {f.key === "useDistrict" && zoningDistrictAuto && (
@@ -420,7 +419,7 @@ export function MansionFieldModelForm({
                 )}
                 <MansionFieldWidget
                   field={f}
-                  value={values[f.key]}
+                  value={displayValue}
                   onChange={(v) => onChange(f.key, v)}
                 />
               </div>
@@ -513,14 +512,23 @@ export function SalesSheetCreateDialog({
   const [mansionValues, setMansionValues] = useState<MansionValues>({});
   const [mansionAutoPreview, setMansionAutoPreview] = useState<Record<string, string>>({});
   const [mansionZoningAuto, setMansionZoningAuto] = useState<string | undefined>(undefined);
+  const [mansionOccupancySeed, setMansionOccupancySeed] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 売マンションのみ: 開いたときに物件/建物データを取得し、自動反映専用フィールドの
-  // プレビューと occupancy(現況) select の初期選択を用意する（ベストエフォート・
+  // プレビューと occupancy(現況) select の表示ヒントを用意する（ベストエフォート・
   // 取得失敗時は自動反映無しでダイアログ自体は使用可能なまま）。
   // SSR（renderToStaticMarkup）は effect を実行しないため、この fetch は
   // 静的マークアップ（widget構造）の検証には影響しない。
+  //
+  // occupancy は意図的に mansionValues へ書き込まない（@codex P2 fix）: 以前はここで
+  // setMansionValues して occupancy を送信payloadへ混入させていたため、fetch が
+  // submit に間に合うかどうかのタイミングだけで、同じ物件から異なる現況が生成される
+  // 不具合があった。mansionOccupancySeed は MansionFieldModelForm の表示専用ヒントに
+  // しか使わない＝ユーザーが select を実際に操作しない限り occupancy は送信されず、
+  // buildMansionValues 側の決定的デフォルト（mapOccupancyStatusToMansionOccupancy、
+  // これと同一関数）に委ねられる。
   useEffect(() => {
     if (!open || kind !== "mansion") return;
     let cancelled = false;
@@ -531,10 +539,7 @@ export function SalesSheetCreateDialog({
         const auto = computeMansionAutoValues(data);
         setMansionAutoPreview(auto.preview);
         setMansionZoningAuto(auto.zoningDistrictAuto);
-        const seed = auto.occupancySeed;
-        if (seed) {
-          setMansionValues((v) => (v.occupancy !== undefined ? v : { ...v, occupancy: seed }));
-        }
+        setMansionOccupancySeed(auto.occupancySeed);
       })
       .catch(() => {
         /* ベストエフォート。取得失敗時は自動反映プレビュー無しで継続する。 */
@@ -585,6 +590,7 @@ export function SalesSheetCreateDialog({
               onChange={(key, v) => setMansionValues((prev) => ({ ...prev, [key]: v }))}
               autoPreview={mansionAutoPreview}
               zoningDistrictAuto={mansionZoningAuto}
+              occupancySeed={mansionOccupancySeed}
             />
             <MansionExtraFields
               values={mansionValues}

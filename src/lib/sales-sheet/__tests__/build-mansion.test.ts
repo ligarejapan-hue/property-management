@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSaleMansionDocument } from "../build-document";
 import { salesSheetDocumentSchema } from "../document-schema";
+import { mapOccupancyStatusToMansionOccupancy } from "../occupancy";
 
 const base = {
   property: {
@@ -120,7 +121,9 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(tableRow(doc, "地上階")).toBe("7階");
     expect(tableRow(doc, "総戸数")).toBe("24戸");
     expect(tableRow(doc, "管理会社")).toBe("リガーレ管理");
-    expect(tableRow(doc, "現況")).toBe("入居中");
+    // mapOccupancyStatusToMansionOccupancy(occupied) = "居住中"（売マンションの選択肢語彙。
+    // 旧: localizeOccupancy(occupied) = "入居中" だった → @codex P2 fix で語彙を統一）。
+    expect(tableRow(doc, "現況")).toBe("居住中");
   });
 
   it("物件種目(propertyType)は自動反映元が無く、overrideのみで反映される([T4→T5]で新規配線)", () => {
@@ -133,7 +136,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(tableRow(withoutOverride, "物件種目")).toBe("");
   });
 
-  it("現況(occupancy)はoverride優先、無ければ従来どおりlocalizeOccupancyの自動値([T4→T5]語彙整合)", () => {
+  it("現況(occupancy)はoverride優先、無ければmapOccupancyStatusToMansionOccupancyの決定的デフォルト(@codex P2 fix: 売マンションの選択肢語彙に統一)", () => {
     const overridden = buildSaleMansionDocument({
       ...base,
       property: { ...base.property, occupancyStatus: "vacant" },
@@ -145,7 +148,62 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
       property: { ...base.property, occupancyStatus: "vacant" },
       overrides: {},
     });
-    expect(tableRow(auto, "現況")).toBe("空室"); // localizeOccupancy(vacant) = "空室"（既存の慣例のまま）
+    // mapOccupancyStatusToMansionOccupancy(vacant) = "空家"。
+    // 旧: localizeOccupancy(vacant) = "空室"（マイソクの選択肢[居住中/空家/賃貸中/未完成]に無い語彙だった）。
+    expect(tableRow(auto, "現況")).toBe("空家");
+  });
+
+  it.each([
+    ["vacant", "空家"],
+    ["occupied", "居住中"],
+  ] as const)(
+    "現況(%s): overrideを省略した作成は、作成ダイアログが自動反映値をoverrideとして明示送信した場合と同じ現況(%s)になる(@codex P2: フェッチのタイミング非依存の直接検証)",
+    (occupancyStatus, expected) => {
+      // 「フェッチが submit に間に合わなかった/未指定」ケース = overrides.occupancy 省略。
+      const withoutOverride = buildSaleMansionDocument({
+        ...base,
+        property: { ...base.property, occupancyStatus },
+        overrides: {},
+      });
+      // 「フェッチが submit に間に合い、ダイアログが自動反映値をoverrideとして送った」ケース
+      // = 作成ダイアログ(SalesSheetCreateButton.tsx)と同一の共有関数で求めた値を明示的に送る。
+      const withAutoSeededOverride = buildSaleMansionDocument({
+        ...base,
+        property: { ...base.property, occupancyStatus },
+        overrides: { occupancy: mapOccupancyStatusToMansionOccupancy(occupancyStatus) },
+      });
+      expect(tableRow(withoutOverride, "現況")).toBe(expected);
+      // タイミングに関わらず同一物件は同一の現況になる（本 P2 fix の核心）。
+      expect(tableRow(withoutOverride, "現況")).toBe(tableRow(withAutoSeededOverride, "現況"));
+    },
+  );
+
+  it("専有面積は面積計測方式(壁芯/内法)を括弧書きで併記する(@codex P2 fix: 従来はcontrolOnlyのため選択値が図面から消えていた)", () => {
+    const withMethod = buildSaleMansionDocument({
+      ...base,
+      overrides: { areaMethod: "壁芯" },
+    });
+    expect(tableRow(withMethod, "専有面積")).toBe("67.21㎡（壁芯）");
+
+    const withOtherMethod = buildSaleMansionDocument({
+      ...base,
+      overrides: { areaMethod: "内法" },
+    });
+    expect(tableRow(withOtherMethod, "専有面積")).toBe("67.21㎡（内法）");
+  });
+
+  it("専有面積は面積計測方式が未選択なら括弧を付けない", () => {
+    const withoutMethod = buildSaleMansionDocument({ ...base, overrides: {} });
+    expect(tableRow(withoutMethod, "専有面積")).toBe("67.21㎡");
+  });
+
+  it("専有面積が無ければ、面積計測方式の指定有無に関わらず空文字", () => {
+    const noArea = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, exclusiveArea: null },
+      overrides: { areaMethod: "内法" },
+    });
+    expect(tableRow(noArea, "専有面積")).toBe("");
   });
 
   it("写真3枚→image要素3、0枚→0", () => {
