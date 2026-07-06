@@ -57,6 +57,11 @@ export async function POST(
       throw new ApiError(422, "物件化候補ではないため物件化できません", "NOT_CANDIDATE");
     }
 
+    // アーカイブ(論理削除)済みピンは物件化しない。削除相当のピンを物件へ復活させない。
+    if (pin.status === "archived") {
+      throw new ApiError(409, "アーカイブ済みの調査ピンは物件化できません", "PIN_ARCHIVED");
+    }
+
     if (pin.propertyId) {
       throw new ApiError(409, "この調査ピンは既に物件化済みです", "ALREADY_CONVERTED");
     }

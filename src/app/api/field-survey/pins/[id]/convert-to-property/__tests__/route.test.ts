@@ -103,6 +103,13 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
     expect(pm.property.create).not.toHaveBeenCalled();
   });
 
+  it("アーカイブ済みピンは 409(作成しない)", async () => {
+    pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ status: "archived" }));
+    const res = await POST(req({ propertyType: "land", address: "A" }), ctx);
+    expect(res.status).toBe(409);
+    expect(pm.property.create).not.toHaveBeenCalled();
+  });
+
   it("既に propertyId があれば 409(作成しない)", async () => {
     pm.fieldSurveyPin.findUnique.mockResolvedValue(candidatePin({ propertyId: "p-x" }));
     const res = await POST(req({ propertyType: "land", address: "A" }), ctx);

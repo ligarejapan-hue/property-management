@@ -141,6 +141,7 @@ export default function PinDetailPanel({
     isFresh &&
     detail!.pinType === "candidate" &&
     detail!.propertyId == null &&
+    detail!.status !== "archived" &&
     canWriteProperty === true;
 
   const handleConverted = async () => {
