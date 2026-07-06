@@ -1095,3 +1095,17 @@ model SaleDmConfig {
 
   @@map("sale_dm_config")
 }
+
+// 登記情報提供サービスの資格情報(フェーズ2 設定画面)。
+// 利用者識別番号/パスワードは暗号化して保存(平文列なし)。baseUrl は非秘匿。
+// 実際に読むのはフェーズ3(内蔵エンジン + 約款確認後)= 本フェーズは受け皿(未使用)。
+model RegistryFetchConfig {
+  id          String   @id @default("singleton")
+  loginIdEnc  String?  @map("login_id_enc")
+  passwordEnc String?  @map("password_enc")
+  baseUrl     String?  @map("base_url")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id") @db.Uuid
+
+  @@map("registry_fetch_config")
+}
