@@ -119,6 +119,18 @@ export const createPropertySchema = z.object({
   assignedTo: z.string().uuid().optional().nullable(),
 });
 
+// ---------- Convert field-survey pin to property ----------
+
+export const convertPinToPropertySchema = z.object({
+  propertyType: z.enum(PROPERTY_TYPE_VALUES),
+  address: z.string().min(1, "住所は必須です"),
+  postalCode: z.string().optional().nullable(),
+  lotNumber: z.string().optional().nullable(),
+  buildingNumber: z.string().optional().nullable(),
+  realEstateNumber: z.string().optional().nullable(),
+});
+export type ConvertPinToPropertyInput = z.infer<typeof convertPinToPropertySchema>;
+
 // ---------- Update property ----------
 
 export const updatePropertySchema = z.object({

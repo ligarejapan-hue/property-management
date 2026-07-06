@@ -217,9 +217,10 @@ export default function FieldSurveyMap({
   // （pending）・provider 取得中（loading）・取得失敗（error）・未取得（null）は判定不能
   // null（= API 403 委譲）に倒す。ここで [] や false に倒すと PinAddModeToggle が
   // 「権限がありません」を誤表示するため、tristate の null を維持して stale 権限表示を防ぐ。
-  const { canWritePin, canManagePin } = useMemo<{
+  const { canWritePin, canManagePin, canWriteProperty } = useMemo<{
     canWritePin: boolean | null;
     canManagePin: boolean | null;
+    canWriteProperty: boolean | null;
   }>(() => {
     if (
       permissionsRefreshPending ||
@@ -227,7 +228,7 @@ export default function FieldSurveyMap({
       permissionsError ||
       mePermissions === null
     ) {
-      return { canWritePin: null, canManagePin: null };
+      return { canWritePin: null, canManagePin: null, canWriteProperty: null };
     }
     // granted===true のみ許可（明示 deny / 欠損 entry は false）。
     const canWrite = mePermissions.some(
@@ -243,7 +244,14 @@ export default function FieldSurveyMap({
         p.action === "manage" &&
         p.granted === true,
     );
-    return { canWritePin: canWrite, canManagePin: canManage };
+    // 候補ピンの「物件にする」ボタン用: property:write の granted===true のみ。
+    const canWriteProp = mePermissions.some(
+      (p) =>
+        p.resource === "property" &&
+        p.action === "write" &&
+        p.granted === true,
+    );
+    return { canWritePin: canWrite, canManagePin: canManage, canWriteProperty: canWriteProp };
   }, [permissionsRefreshPending, permissionsLoading, permissionsError, mePermissions]);
 
   const [pinAddMode, setPinAddMode] = useState(false);
@@ -555,6 +563,7 @@ export default function FieldSurveyMap({
             pinId={detailPinId}
             currentUserId={currentUserId}
             canManage={canManagePin === true}
+            canWriteProperty={canWriteProperty === true}
             onClose={() => setDetailPinId(null)}
             onUpdated={() => bumpRefetch()}
             onDeleted={() => {

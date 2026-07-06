@@ -2632,6 +2632,48 @@ export async function createProperty(data: {
   });
 }
 
+// ---------- Convert field-survey pin to property ----------
+
+export async function convertPinToProperty(
+  pinId: string,
+  data: {
+    propertyType: string;
+    address: string;
+    postalCode?: string | null;
+    lotNumber?: string | null;
+    buildingNumber?: string | null;
+    realEstateNumber?: string | null;
+  },
+): Promise<{ id: string }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-converted-property-id" };
+  }
+  return apiFetch<{ id: string }>(
+    `/api/field-survey/pins/${encodeURIComponent(pinId)}/convert-to-property`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) },
+  );
+}
+
+export interface CandidatePinRow {
+  id: string;
+  staffUserId: string;
+  createdAt: string;
+  hasMemo?: boolean;
+}
+
+/**
+ * 物件化前の候補(candidate×open)を取得する。
+ * 専用エンドポイントが座標・memo 本文を除外して返す(一覧は表示しない=非PII)。
+ */
+export async function listCandidatePins(): Promise<{ data: CandidatePinRow[] }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: [] };
+  }
+  return apiFetch<{ data: CandidatePinRow[] }>("/api/field-survey/pins/candidates");
+}
+
 // ---------- Audit Logs ----------
 
 export async function fetchAuditLogs() {

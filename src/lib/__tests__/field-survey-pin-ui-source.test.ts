@@ -460,12 +460,12 @@ describe("F12 展開(19-A) — field-survey-map は provider 経由で権限を�
       /permissionsRefreshPending \|\|\s*\n?\s*permissionsLoading \|\|\s*\n?\s*permissionsError \|\|\s*\n?\s*mePermissions === null/,
     );
     expect(MAP_SRC).toMatch(
-      /return \{ canWritePin: null, canManagePin: null \}/,
+      /return \{ canWritePin: null, canManagePin: null, canWriteProperty: null \}/,
     );
   });
 
   it("導出は useMemo の純関数で context 値の派生（setter / state 持ち越しなし）", () => {
-    expect(MAP_SRC).toMatch(/const \{ canWritePin, canManagePin \} = useMemo/);
+    expect(MAP_SRC).toMatch(/const \{ canWritePin, canManagePin, canWriteProperty \} = useMemo/);
     expect(MAP_SRC).toMatch(
       /\[permissionsRefreshPending,\s*permissionsLoading,\s*permissionsError,\s*mePermissions\]/,
     );

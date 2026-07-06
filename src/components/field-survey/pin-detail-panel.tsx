@@ -34,6 +34,7 @@ import {
   useFieldSurveyPinPhotoMutations,
   type PinPhoto,
 } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
+import ConvertPinToPropertyModal from "@/components/field-survey/convert-pin-to-property-modal";
 
 interface PinDetailPanelProps {
   pinId: string;
@@ -41,6 +42,8 @@ interface PinDetailPanelProps {
   currentUserId: string;
   /** field_survey:manage を granted で持つか。他人 pin の削除ボタン表示に使う。 */
   canManage?: boolean;
+  /** property:write を持つか。候補ピンの「物件にする」ボタン表示に使う。 */
+  canWriteProperty?: boolean;
   /** Phase 1-J: 履歴閲覧など完全 read-only 表示。編集/削除/写真追加削除を出さない。 */
   readOnly?: boolean;
   onClose: () => void;
@@ -54,6 +57,7 @@ export default function PinDetailPanel({
   pinId,
   currentUserId,
   canManage = false,
+  canWriteProperty = false,
   readOnly = false,
   onClose,
   onUpdated,
@@ -66,6 +70,7 @@ export default function PinDetailPanel({
   const [draftStatus, setDraftStatus] = useState<FieldSurveyPinStatus>("open");
   const [draftMemo, setDraftMemo] = useState<string>("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showConvert, setShowConvert] = useState(false);
 
   // Codex P2 (本 fix): props.pinId は handleSave 内で stale closure になりうる。
   // PATCH レスポンス到達時に「現在表示中の pinId」と一致するかを ref で再確認
@@ -128,6 +133,27 @@ export default function PinDetailPanel({
     isFresh &&
     (isOwn || canManage) &&
     detail!.status !== "archived";
+
+  // 候補ピンの物件化ボタン: 未変換 (propertyId 無し) の candidate で
+  // property:write を持つときのみ。サーバー側 (convert endpoint) が認可の正。
+  const canConvert =
+    !readOnly &&
+    isFresh &&
+    detail!.pinType === "candidate" &&
+    detail!.propertyId == null &&
+    detail!.status === "open" &&
+    canWriteProperty === true;
+
+  const handleConverted = async () => {
+    setShowConvert(false);
+    // 変換後は pin が closed + propertyId 付きに変わる。再取得して表示を更新し、
+    // 親に通知して marker を再 fetch させる。
+    const refreshed = await mutations.fetchPinDetail(pinId);
+    if (refreshed.ok && refreshed.data && refreshed.data.id === pinId) {
+      setDetail(refreshed.data);
+      onUpdated?.(refreshed.data);
+    }
+  };
 
   const handleDelete = async () => {
     if (!detail) return;
@@ -218,6 +244,8 @@ export default function PinDetailPanel({
             isOwn={isOwn}
             canEdit={canEditOwn}
             onEdit={() => setEditing(true)}
+            canConvert={canConvert}
+            onConvert={() => setShowConvert(true)}
           />
         )}
 
@@ -318,6 +346,13 @@ export default function PinDetailPanel({
               </div>
             )}
           </div>
+        )}
+        {showConvert && (
+          <ConvertPinToPropertyModal
+            pinId={pinId}
+            onClose={() => setShowConvert(false)}
+            onConverted={handleConverted}
+          />
         )}
       </div>
     </aside>
@@ -553,11 +588,15 @@ function ReadOnlyView({
   isOwn,
   canEdit,
   onEdit,
+  canConvert,
+  onConvert,
 }: {
   detail: PinDetail;
   isOwn: boolean;
   canEdit: boolean;
   onEdit: () => void;
+  canConvert?: boolean;
+  onConvert?: () => void;
 }) {
   return (
     <>
@@ -579,6 +618,15 @@ function ReadOnlyView({
             >
               紐付け済 →
             </a>
+          ) : canConvert ? (
+            <button
+              type="button"
+              onClick={onConvert}
+              data-testid="pin-detail-convert-button"
+              className="rounded border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
+            >
+              この場所を物件にする
+            </button>
           ) : (
             "—"
           )}

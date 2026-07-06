@@ -67,6 +67,11 @@ const mainNavItems: NavItem[] = [
     icon: <History className="h-5 w-5" />,
   },
   {
+    label: "物件化の完成待ち",
+    href: "/field-survey/candidates",
+    icon: <ClipboardCheck className="h-5 w-5" />,
+  },
+  {
     label: "受付帳CSV取込",
     href: "/import",
     icon: <Upload className="h-5 w-5" />,
