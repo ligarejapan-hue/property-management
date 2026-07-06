@@ -14,13 +14,14 @@ vi.mock("@/lib/api-helpers", () => {
     ApiError: MockApiError,
     getApiSession: vi.fn(),
     getUserPermissions: vi.fn(),
-    parseJsonBody: vi.fn(async (req: any) => req.json()),
-    handleApiError: vi.fn((e: any) =>
-      Response.json(
-        { error: { message: e?.message, code: e?.code } },
-        { status: typeof e?.status === "number" ? e.status : 500 },
-      ),
-    ),
+    parseJsonBody: vi.fn(async (req: Request) => req.json()),
+    handleApiError: vi.fn((error: unknown) => {
+      const e = error as { status?: number; message?: string; code?: string };
+      return Response.json(
+        { error: { message: e.message, code: e.code } },
+        { status: typeof e.status === "number" ? e.status : 500 },
+      );
+    }),
     apiResponse: vi.fn((data: unknown, status = 200) => Response.json(data, { status })),
   };
 });
@@ -62,7 +63,7 @@ describe("POST /api/field-survey/pins/[id]/convert-to-property", () => {
     vi.clearAllMocks();
     (getApiSession as Mock).mockResolvedValue({ id: "user-1", role: "member" });
     (getUserPermissions as Mock).mockResolvedValue(WRITE);
-    pm.$transaction.mockImplementation(async (cb: any) =>
+    pm.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
       cb({ property: { create: pm.property.create }, fieldSurveyPin: { update: pm.fieldSurveyPin.update } }),
     );
   });
