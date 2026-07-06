@@ -8,6 +8,8 @@ import { isSafeImageSrc } from "./css-safety";
 import { getStorage } from "@/lib/storage";
 import type { StorageAdapter } from "@/lib/storage/types";
 import { localizeOccupancy } from "@/lib/property-types";
+import { MANSION_FIELDS } from "./field-model";
+import { buildSheetRows, type SheetValues } from "./sheet-rows";
 
 export interface SaleLandOverrides {
   price?: string;
@@ -134,24 +136,9 @@ export async function buildInitialSalesSheetDocument(
 // src のまま（認可・data:化は呼び出し側 route / 出力時に実施）。
 // ---------------------------------------------------------------------------
 
-/** 面積（Decimal 文字列）→ "62.45㎡"（空は ""）。 */
-function fmtArea(v?: string | null): string {
-  return v ? `${v}㎡` : "";
-}
 /** 整数 → 3桁区切り（"12000" → "12,000"）。 */
 function fmtYen(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-/** 月額（円）→ "12,000円/月"（null は ""）。 */
-function fmtYenMonth(n?: number | null): string {
-  return n != null ? `${fmtYen(n)}円/月` : "";
-}
-/** 所在階 → "3階 / 全10階" などに整形。 */
-function fmtFloor(floorNo?: number | null, totalFloors?: number | null): string {
-  if (floorNo != null && totalFloors != null) return `${floorNo}階 / 全${totalFloors}階`;
-  if (floorNo != null) return `${floorNo}階`;
-  if (totalFloors != null) return `全${totalFloors}階`;
-  return "";
 }
 /** 築年月：override（月精度）優先、無ければ建物の築年（"2015年"）。 */
 function fmtBuiltYear(override?: string | null, builtYear?: number | null): string {
@@ -219,14 +206,49 @@ function baseSheet(
 }
 
 // ---- 売マンション（区分） ----
+// 自社マイソク様式（キャッチ帯/写真+セールスポイント/間取り枠/全項目スペック表/会社フッター）。
+// スペック表の行は field-model(MANSION_FIELDS) + sheet-rows(buildSheetRows) に委譲する。
 export interface SaleMansionOverrides {
+  // 価格
   price?: string;
+  unitPrice?: string;
+  tax?: string;
+  taxAmount?: string;
+  // 所在・交通
   access?: string;
+  // 土地・権利
+  siteArea?: string;
+  siteRightRatio?: string;
+  landRight?: string;
+  /** 用途地域の追加選択（自動反映=zoningDistrict 1件 + これ）。 */
+  useDistrict?: string[];
+  areaMethod?: string;
+  // 建物
+  basementFloors?: string;
+  /** 築年月（月精度）。無ければ building.builtYear（年精度）へフォールバック。 */
   builtYearMonth?: string;
-  structure?: string;
-  transactionType?: string;
-  deliveryTiming?: string;
+  parking?: string;
+  parkingFee?: string;
+  // 設備・現況・管理
+  equipment?: string;
+  legalRestriction?: string;
+  managementUnion?: string;
+  managementForm?: string;
+  managerStatus?: string;
+  developer?: string;
+  builder?: string;
+  delivery?: string;
   remarks?: string;
+  // 会社（フッター。MANSION_FIELDS の section:"会社" と対応）
+  transactionType?: string;
+  compensation?: string;
+  adType?: string;
+  staff?: string;
+  agent?: string;
+  specialNotes?: string;
+  // レイアウト専用（field-model の行ではない、キャッチ帯/セールスポイントの見出し文言）
+  catchCopy?: string;
+  salesPoints?: string[];
 }
 export interface SaleMansionInput {
   property: {
@@ -247,35 +269,139 @@ export interface SaleMansionInput {
     totalFloors?: number | null;
     builtYear?: number | null;
     structureType?: string | null;
+    managementCompany?: string | null;
+    totalUnits?: number | null;
   } | null;
   photos?: { fileUrl: string }[];
+  /** 間取り図（任意）。指定時のみ中央にプレースホルダ画像を配置する。 */
+  floorPlanImage?: { fileUrl: string } | null;
   overrides?: SaleMansionOverrides;
 }
+
+/** MANSION_FIELDS の会社セクション（フッター用）を除いたスペック表用フィールド。 */
+const MANSION_SPEC_FIELDS = MANSION_FIELDS.filter((f) => f.section !== "会社");
+
+/** property/building の自動反映値 + overrides から sheet-rows 用の values を組む。 */
+function buildMansionValues(input: SaleMansionInput): SheetValues {
+  const o = input.overrides ?? {};
+  const p = input.property;
+  const b = input.building ?? {};
+
+  // 用途地域: 自動反映(zoningDistrict) 1件 + overrides の追加選択（空は除外）。
+  const useDistrict = [p.zoningDistrict, ...(o.useDistrict ?? [])].filter(
+    (v): v is string => typeof v === "string" && v.trim() !== "",
+  );
+
+  return {
+    // 価格・費用（管理費/修繕積立金は自動反映のみ・price/unitPrice/tax/taxAmountは手入力のみ）
+    buildingName: b.name ?? undefined,
+    price: o.price,
+    unitPrice: o.unitPrice,
+    tax: o.tax,
+    taxAmount: o.taxAmount,
+    managementFee: p.managementFee != null ? fmtYen(p.managementFee) : undefined,
+    repairFee: p.repairReserveFee != null ? fmtYen(p.repairReserveFee) : undefined,
+    // 所在・交通
+    address: p.address,
+    access: o.access,
+    // 土地・権利
+    siteArea: o.siteArea,
+    siteRightRatio: o.siteRightRatio,
+    landRight: o.landRight,
+    useDistrict,
+    // 建物
+    areaMethod: o.areaMethod,
+    exclusiveArea: p.exclusiveArea ?? undefined,
+    balconyArea: p.balconyArea ?? undefined,
+    balconyDir: p.orientation ?? undefined,
+    layout: p.layoutType ?? undefined,
+    structure: b.structureType ?? undefined,
+    floorNo: p.floorNo != null ? String(p.floorNo) : undefined,
+    totalFloors: b.totalFloors != null ? String(b.totalFloors) : undefined,
+    basementFloors: o.basementFloors,
+    builtYearMonth: fmtBuiltYear(o.builtYearMonth, b.builtYear),
+    totalUnits: b.totalUnits != null ? String(b.totalUnits) : undefined,
+    parking: o.parking,
+    parkingFee: o.parkingFee,
+    // 設備・現況・管理
+    equipment: o.equipment,
+    legalRestriction: o.legalRestriction,
+    managementUnion: o.managementUnion,
+    managementForm: o.managementForm,
+    managerStatus: o.managerStatus,
+    managementCompany: b.managementCompany ?? undefined,
+    developer: o.developer,
+    builder: o.builder,
+    occupancy: localizeOccupancy(p.occupancyStatus) ?? undefined,
+    delivery: o.delivery,
+    remarks: o.remarks,
+  };
+}
+
+/** 会社フッター2行目（取引態様/報酬/広告/担当/取引士/特記）。未入力の項目は落とす。 */
+function mansionFooterDetails(o: SaleMansionOverrides): string {
+  return [
+    o.transactionType && `取引態様：${o.transactionType}`,
+    o.compensation && `報酬：${o.compensation}`,
+    o.adType && `広告：${o.adType}`,
+    o.staff && `担当：${o.staff}`,
+    o.agent && `取引士：${o.agent}`,
+    o.specialNotes && `特記：${o.specialNotes}`,
+  ]
+    .filter(Boolean)
+    .join("　");
+}
+
 export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDocument {
   const o = input.overrides ?? {};
   const p = input.property;
   const b = input.building ?? {};
-  const title = b.name ? `売マンション　${b.name}` : "売マンション";
-  const rows = [
-    row("所在地", p.address),
-    row("部屋番号", p.roomNo),
-    row("交通", o.access),
-    row("専有面積", fmtArea(p.exclusiveArea)),
-    row("バルコニー面積", fmtArea(p.balconyArea)),
-    row("間取り", p.layoutType),
-    row("所在階", fmtFloor(p.floorNo, b.totalFloors)),
-    row("向き", p.orientation),
-    row("築年月", fmtBuiltYear(o.builtYearMonth, b.builtYear)),
-    row("構造", o.structure ?? b.structureType),
-    row("管理費", fmtYenMonth(p.managementFee)),
-    row("修繕積立金", fmtYenMonth(p.repairReserveFee)),
-    row("用途地域", p.zoningDistrict),
-    row("現況", localizeOccupancy(p.occupancyStatus)),
-    row("引渡", o.deliveryTiming),
-    row("取引態様", o.transactionType),
-    row("備考", o.remarks),
+
+  const values = buildMansionValues(input);
+  const rows = buildSheetRows(MANSION_SPEC_FIELDS, values);
+
+  const heading = [b.name, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join("　");
+  const priceText = o.price ? `${o.price}万円` : "";
+  const salesPointsText = (o.salesPoints ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => `◆${s}`)
+    .join("　");
+
+  const elements: SalesSheetElement[] = [
+    // キャッチ帯（全幅の上部バナー）。右スペック表はこの帯の下から始まるため重ならない。
+    { id: "catch-band", type: "shape", x: 10, y: 8, w: 277, h: 16, z: 1,
+      shape: "rect", fill: NAVY },
+    { id: "catch-copy", type: "text", x: 16, y: 8, w: 265, h: 16, z: 2,
+      content: o.catchCopy ?? "", style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" } },
+    // 左上: 建物名+号室 / 価格（大）
+    { id: "heading", type: "text", x: 10, y: 26, w: 94, h: 7, z: 2,
+      content: heading, style: { fontSizePt: 11, bold: true, color: NAVY } },
+    { id: "price", type: "text", x: 10, y: 33, w: 94, h: 12, z: 2,
+      content: priceText, style: { fontSizePt: 20, bold: true, color: RED } },
+    // 右: 全項目スペック表（行が多いため fontSize を下げ h を拡大）
+    { id: "overview", type: "table", x: 150, y: 26, w: 137, h: 167, z: 1,
+      rows, style: { fontSizePt: 7, borderColor: "#cccccc", labelColor: NAVY } },
+    // 写真下: セールスポイント（◆区切り）
+    { id: "sales-points", type: "text", x: 10, y: 187, w: 136, h: 7, z: 2,
+      content: salesPointsText, style: { fontSizePt: 9, bold: true, color: NAVY } },
+    // 会社フッター（下部帯・全幅）: 1行目=会社定数、2行目=取引態様/報酬/広告/担当/取引士/特記
+    { id: "company", type: "text", x: 10, y: 195, w: 277, h: 6, z: 2,
+      content: COMPANY, style: { fontSizePt: 9, color: NAVY } },
+    { id: "company-details", type: "text", x: 10, y: 201, w: 277, h: 7, z: 2,
+      content: mansionFooterDetails(o), style: { fontSizePt: 8, color: NAVY } },
+    ...photoElements(input.photos),
   ];
-  return baseSheet(title, o.price, rows, input.photos);
+
+  // 間取り枠: 提供時のみ、キャッチ帯下・写真上の隙間にプレースホルダ画像を置く（任意）。
+  if (input.floorPlanImage?.fileUrl) {
+    elements.push({
+      id: "floor-plan", type: "image", x: 108, y: 26, w: 32, h: 18, z: 1,
+      src: input.floorPlanImage.fileUrl, fit: "contain", alt: "間取り図",
+    });
+  }
+
+  return { page: A4_LANDSCAPE, theme: { fontFamily: FONT, accentColor: NAVY }, elements };
 }
 
 // ---- 売戸建 ----

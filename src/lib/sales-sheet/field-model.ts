@@ -64,4 +64,12 @@ export const MANSION_FIELDS: readonly SheetField[] = [
   { key: "occupancy", label: "現況", widget: "select", section: "設備", options: M.OCCUPANCY, autoFrom: "occupancyStatus" },
   { key: "delivery", label: "引渡時期", widget: "select", section: "設備", options: M.DELIVERY_TIMING },
   { key: "remarks", label: "備考", widget: "text", section: "設備" },
+  // 会社（フッター・手入力のみ・自動反映元なし。ビルダーはこのセクションを
+  // スペック表から除外し、会社フッター帯の組み立てにのみ使う）
+  { key: "transactionType", label: "取引態様", widget: "select", section: "会社", options: M.TRANSACTION_TYPE },
+  { key: "compensation", label: "報酬", widget: "select", section: "会社", options: M.COMPENSATION },
+  { key: "adType", label: "広告", widget: "select", section: "会社", options: M.AD_TYPE },
+  { key: "staff", label: "担当者", widget: "text", section: "会社" },
+  { key: "agent", label: "取引士", widget: "text", section: "会社" },
+  { key: "specialNotes", label: "特記事項", widget: "text", section: "会社" },
 ];

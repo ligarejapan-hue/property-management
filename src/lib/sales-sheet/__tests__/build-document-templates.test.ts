@@ -1,11 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { salesSheetDocumentSchema } from "../document-schema";
-import { localizeOccupancy } from "@/lib/property-types";
 import {
-  buildSaleMansionDocument,
   buildSaleHouseDocument,
   buildSaleBuildingDocument,
-  type SaleMansionInput,
   type SaleHouseInput,
   type SaleBuildingInput,
 } from "../build-document";
@@ -32,57 +29,9 @@ const tableRow = (doc: { elements: unknown[] }, label: string): string | undefin
 const imageCount = (doc: { elements: { type: string }[] }) =>
   doc.elements.filter((e) => e.type === "image").length;
 
-// ---------------- 売マンション（区分） ----------------
-describe("buildSaleMansionDocument", () => {
-  const input: SaleMansionInput = {
-    property: {
-      address: "東京都渋谷区神南1-2-3",
-      roomNo: "301",
-      exclusiveArea: "62.45",
-      balconyArea: "8.20",
-      layoutType: "2LDK",
-      floorNo: 3,
-      orientation: "南",
-      managementFee: 12000,
-      repairReserveFee: 8500,
-      zoningDistrict: "商業地域",
-      occupancyStatus: "occupied",
-    },
-    building: { name: "神南レジデンス", totalFloors: 10, builtYear: 2015, structureType: "RC" },
-    photos: photos3,
-    overrides: {
-      price: "4,980万円",
-      access: "JR山手線「渋谷」駅 徒歩5分",
-      transactionType: "仲介",
-      deliveryTiming: "即時",
-      remarks: "リノベ済・ペット可",
-    },
-  };
-
-  it("A4横で schema 検証を通る（保存可能な document）", () => {
-    const doc = buildSaleMansionDocument(input);
-    expect(doc.page.orientation).toBe("landscape");
-    expect(salesSheetDocumentSchema.safeParse(doc).success).toBe(true);
-  });
-
-  it("表題に売マンション＋建物名、価格は override、専有/管理費/所在階/現況を整形して含む", () => {
-    const doc = buildSaleMansionDocument(input);
-    expect(texts(doc)).toContain("売マンション");
-    expect(texts(doc)).toContain("神南レジデンス");
-    expect(texts(doc)).toContain("4,980万円");
-    expect(tableRow(doc, "部屋番号")).toBe("301");
-    expect(tableRow(doc, "専有面積")).toBe("62.45㎡");
-    expect(tableRow(doc, "管理費")).toBe("12,000円/月");
-    expect(tableRow(doc, "所在階")).toBe("3階 / 全10階");
-    expect(tableRow(doc, "現況")).toBe(localizeOccupancy("occupied"));
-    expect(tableRow(doc, "築年月")).toContain("2015");
-  });
-
-  it("写真3枚 → image 要素3つ、0枚 → 0", () => {
-    expect(imageCount(buildSaleMansionDocument(input))).toBe(3);
-    expect(imageCount(buildSaleMansionDocument({ ...input, photos: [] }))).toBe(0);
-  });
-});
+// 売マンション（区分）は自社マイソク様式に作り直し、専用テスト
+// build-mansion.test.ts に移設（field-model/sheet-rows 駆動のスペック表・
+// キャッチ帯・会社フッターを検証）。ここでは他種別のみを扱う。
 
 // ---------------- 売戸建 ----------------
 describe("buildSaleHouseDocument", () => {
