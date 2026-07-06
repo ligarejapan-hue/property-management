@@ -32,4 +32,13 @@ describe("option-master", () => {
     expect(M.LAND_ACT_NOTICE).toEqual(["要", "届出中", "不要"]);
     expect(M.OCCUPANCY_LAND).toEqual(["更地", "上物有"]);
   });
+
+  it("F2売戸建分の選択肢を持つ", () => {
+    expect(M.PROPERTY_TYPE_HOUSE).toEqual([
+      "新築戸建", "中古戸建", "新築テラスハウス", "中古テラスハウス",
+    ]);
+    expect(M.BUILDING_CONFIRM).toEqual(["済", "申請中"]);
+    expect(M.PARKING_HOUSE).toEqual(["有", "無", "近隣確保"]);
+    expect(M.REBUILD_STATUS).toEqual(["再建築可", "再建築不可"]);
+  });
 });
