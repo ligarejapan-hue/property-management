@@ -37,3 +37,12 @@ export const COMPENSATION = ["分かれ","当方不払","当方片手","代理�
 export const AD_TYPE = ["広告可","一部可ネット","一部可新聞チラシ","広告可要連絡","不可"] as const;
 export const TAX = ["課税","不課税"] as const;
 export const PRESENCE = ["あり","なし"] as const;
+
+/** F2: 売土地で使う分。 */
+export const PROPERTY_TYPE_LAND = ["売地","借地権","底地権"] as const;
+export const BEST_USE_LAND = ["住宅用地","マンション用地","店舗用地","事務所用地","工業用地","その他"] as const;
+export const AREA_METHOD_LAND = ["公簿","実測"] as const;
+export const SETBACK_UNIT = ["m","㎡"] as const;
+export const DIRECTION = ["北","北東","東","南東","南","南西","西","北西"] as const;
+export const LAND_ACT_NOTICE = ["要","届出中","不要"] as const;
+export const OCCUPANCY_LAND = ["更地","上物有"] as const;

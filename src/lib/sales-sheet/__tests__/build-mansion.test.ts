@@ -35,6 +35,9 @@ const tableLabels = (doc: { elements: unknown[] }): string[] => {
 const imageCount = (doc: { elements: { type: string }[] }) =>
   doc.elements.filter((e) => e.type === "image").length;
 
+const findEl = (doc: { elements: unknown[] }, id: string) =>
+  (doc.elements as { id: string }[]).find((e) => e.id === id);
+
 describe("buildSaleMansionDocument（自社マイソク様式）", () => {
   it("スペック表に主要行が入り、キャッチ帯要素を含む", () => {
     const doc = buildSaleMansionDocument({
@@ -232,6 +235,114 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
   it("会社定数(COMPANY)がフッターに含まれる", () => {
     const doc = buildSaleMansionDocument({ ...base });
     expect(JSON.stringify(doc.elements)).toContain("株式会社リガーレジャパン");
+  });
+
+  it("価格にすでに「万円」が付いていても二重化しない(売土地と共有するfmtManYenのガード・@codex Important fix)", () => {
+    const doc = buildSaleMansionDocument({ ...base, overrides: { price: "6590万円" } });
+    expect(findEl(doc, "price")).toMatchObject({ content: "6590万円" });
+  });
+
+  // 版面レイアウトを buildSpecSheetDocument へ抽出する前の固定（特性化テスト）。
+  // catch-band/catch-copy/heading/price/overview/sales-points/company/company-details の
+  // id・座標(x/y/w/h/z)・スタイルが既知値であることを固定し、抽出後もこの値が
+  // 変わらないことを保証する（[F2-A Task1]）。
+  it("レイアウト: catch-band/heading/price/overview/sales-points/company/company-details のid・座標・スタイルが既知値(抽出前の固定・リグレッション用)", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      overrides: {
+        price: "6590",
+        catchCopy: "北東角部屋",
+        salesPoints: ["リノベ済"],
+        transactionType: "専任媒介",
+      },
+    });
+
+    expect(findEl(doc, "catch-band")).toMatchObject({
+      type: "shape",
+      x: 10,
+      y: 8,
+      w: 277,
+      h: 16,
+      z: 1,
+      shape: "rect",
+      fill: "#15324f",
+    });
+
+    expect(findEl(doc, "catch-copy")).toMatchObject({
+      type: "text",
+      x: 16,
+      y: 8,
+      w: 265,
+      h: 16,
+      z: 2,
+      content: "北東角部屋",
+      style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" },
+    });
+
+    expect(findEl(doc, "heading")).toMatchObject({
+      type: "text",
+      x: 10,
+      y: 26,
+      w: 94,
+      h: 7,
+      z: 2,
+      content: "西荻リリエンハイム",
+      style: { fontSizePt: 11, bold: true, color: "#15324f" },
+    });
+
+    expect(findEl(doc, "price")).toMatchObject({
+      type: "text",
+      x: 10,
+      y: 33,
+      w: 94,
+      h: 12,
+      z: 2,
+      content: "6590万円",
+      style: { fontSizePt: 20, bold: true, color: "#d0331a" },
+    });
+
+    expect(findEl(doc, "overview")).toMatchObject({
+      type: "table",
+      x: 150,
+      y: 26,
+      w: 137,
+      h: 167,
+      z: 1,
+      style: { fontSizePt: 7, borderColor: "#cccccc", labelColor: "#15324f" },
+    });
+
+    expect(findEl(doc, "sales-points")).toMatchObject({
+      type: "text",
+      x: 10,
+      y: 187,
+      w: 136,
+      h: 7,
+      z: 2,
+      content: "◆リノベ済",
+      style: { fontSizePt: 9, bold: true, color: "#15324f" },
+    });
+
+    expect(findEl(doc, "company")).toMatchObject({
+      type: "text",
+      x: 10,
+      y: 195,
+      w: 277,
+      h: 6,
+      z: 2,
+      content: "株式会社リガーレジャパン Ligare Japan　TEL 03-6823-2760",
+      style: { fontSizePt: 9, color: "#15324f" },
+    });
+
+    expect(findEl(doc, "company-details")).toMatchObject({
+      type: "text",
+      x: 10,
+      y: 201,
+      w: 277,
+      h: 7,
+      z: 2,
+      content: "取引態様：専任媒介",
+      style: { fontSizePt: 8, color: "#15324f" },
+    });
   });
 
   it("A4横で schema 検証を通る（保存可能な document）", () => {

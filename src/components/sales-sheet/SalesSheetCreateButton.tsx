@@ -4,8 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SalesSheetTemplateKind } from "@/lib/sales-sheet/template-kind";
 import { fetchPropertyDetail } from "@/lib/api-client";
-import { MANSION_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
-import { mapOccupancyStatusToMansionOccupancy } from "@/lib/sales-sheet/occupancy";
+import { MANSION_FIELDS, LAND_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
+import {
+  mapOccupancyStatusToMansionOccupancy,
+  mapOccupancyStatusToLandOccupancy,
+} from "@/lib/sales-sheet/occupancy";
 
 export type { SalesSheetTemplateKind };
 
@@ -18,20 +21,13 @@ interface FieldConfig {
 
 // 種別ごとの作成フォーム項目。key は new route の per-type overridesSchema と揃える。
 // （テンプレの実データはサーバ側で物件レコードから補完し、ここでは「システムに無い値」だけ集める）
-// mansion のみ MANSION_FIELDS(field-model) 駆動のダイアログへ差し替え済みのため
-// fields は未使用（label はボタン/見出し表示に引き続き使う）。
+// mansion・land は FIELDS_BY_KIND(field-model) 駆動のダイアログへ差し替え済みのため
+// fields は未使用（label はボタン/見出し表示に引き続き使う・land は [F2-A Task4] で追加）。
+// house/building は当面この旧 FIELD_SETS.fields の自由入力のまま（F2-B/C で field-model 化）。
 const FIELD_SETS: Record<SalesSheetTemplateKind, FieldConfig> = {
   land: {
     label: "売土地",
-    fields: [
-      { key: "price", label: "価格" },
-      { key: "access", label: "交通" },
-      { key: "landArea", label: "土地面積" },
-      { key: "landCategory", label: "地目" },
-      { key: "transactionType", label: "取引態様" },
-      { key: "deliveryTiming", label: "引渡" },
-      { key: "remarks", label: "備考（公開）" },
-    ],
+    fields: [],
   },
   mansion: {
     label: "売マンション",
@@ -73,7 +69,7 @@ const FIELD_SETS: Record<SalesSheetTemplateKind, FieldConfig> = {
 /**
  * 新規デザイン作成 API へのリクエスト内容を組み立てる純関数。
  * テンプレ種別はサーバ側で物件種別から判定するため body には含めない（上書き項目のみ）。
- * mansion は multiselect（用途地域/セールスポイント）があるため string[] も許容する。
+ * mansion/land は multiselect（用途地域/地目 等）があるため string[] も許容する。
  */
 export function buildCreateRequest(
   propertyId: string,
@@ -90,11 +86,22 @@ export function buildCreateRequest(
 }
 
 // ============================================================================
-// 売マンション: field-model(MANSION_FIELDS) 駆動の作成ダイアログ
+// field-model(FIELDS_BY_KIND) 駆動の作成ダイアログ（売マンション/売土地 共通の汎用 widget 描画）
+// [F2-A Task4] F1 で確立した売マンション専用の描画（MansionFieldModelForm 等）を、
+// LAND_FIELDS を持つ売土地でも再利用できるよう一般化した。house/building は当面 null＝
+// 旧 FIELD_SETS の自由入力のまま（F2-B/C で LAND_FIELDS と同様に field-model 化する）。
 // ============================================================================
 
-export type MansionFieldValue = string | string[];
-export type MansionValues = Record<string, MansionFieldValue>;
+export type FieldModelValue = string | string[];
+export type FieldModelValues = Record<string, FieldModelValue>;
+
+/** field-model を持つ種別のみ非 null。house/building は当面 null（上記参照）。 */
+const FIELDS_BY_KIND: Record<SalesSheetTemplateKind, readonly SheetField[] | null> = {
+  land: LAND_FIELDS,
+  mansion: MANSION_FIELDS,
+  house: null,
+  building: null,
+};
 
 /**
  * MANSION_FIELDS のうち、物件/建物レコードが正のため上書き機構を持たない自動反映専用キー。
@@ -104,6 +111,8 @@ export type MansionValues = Record<string, MansionFieldValue>;
  * 対象外。buildingName/address 等の他の自動反映専用フィールドも同じ理由＝
  * 単一ソースの事実値であり、シート単位で個別に上書きする設計にはしない）。
  * propertyType・occupancy は本タスクで新規に上書き可能へ昇格したためここには含めない。
+ * （[F2-A Task4]: 同じ考え方の LAND_AUTO_ONLY_KEYS を追加。両者は AUTO_ONLY_KEYS_BY_KIND
+ * 経由で種別ごとに参照する。）
  */
 const MANSION_AUTO_ONLY_KEYS = new Set<string>([
   "buildingName",
@@ -121,6 +130,27 @@ const MANSION_AUTO_ONLY_KEYS = new Set<string>([
   "managementCompany",
 ]);
 
+/**
+ * LAND_FIELDS のうち、物件レコードが正のため上書き機構を持たない自動反映専用キー
+ * （MANSION_AUTO_ONLY_KEYS と同じ考え方・[F2-A Task4]）。土地は建物 relation を持たないため
+ * 自動反映元は物件スカラ（address/roadType/buildingCoverageRatio/floorAreaRatio）のみ。
+ * useDistrict（zoningDistrict 自動反映＋追加選択）・roadWidth（自動反映＋より精度の高い値を
+ * 上書き可能＝builtYearMonth と同じ「override優先＋auto fallback」）・occupancy（現況、
+ * mansion の occupancy と同じく seed のみ・明示編集時のみ送信）は SaleLandOverrides に
+ * 対応するキーがあるため対象外＝通常の編集可能フィールドとして扱う（hints/occupancySeed 経由）。
+ */
+const LAND_AUTO_ONLY_KEYS = new Set<string>(["address", "roadKind", "coverageRatio", "floorRatio"]);
+
+/** house/building は field-model が無いため参照されない共有の空集合。 */
+const EMPTY_AUTO_ONLY_KEYS = new Set<string>();
+
+const AUTO_ONLY_KEYS_BY_KIND: Record<SalesSheetTemplateKind, ReadonlySet<string>> = {
+  land: LAND_AUTO_ONLY_KEYS,
+  mansion: MANSION_AUTO_ONLY_KEYS,
+  house: EMPTY_AUTO_ONLY_KEYS,
+  building: EMPTY_AUTO_ONLY_KEYS,
+};
+
 function groupBySection(
   fields: readonly SheetField[],
 ): (readonly [string, SheetField[]])[] {
@@ -135,11 +165,17 @@ function groupBySection(
   }
   return order.map((s) => [s, bySection.get(s)!] as const);
 }
-// MANSION_FIELDS は静的なためモジュール読み込み時に一度だけ計算する。
-const MANSION_SECTIONS = groupBySection(MANSION_FIELDS);
+// LAND_FIELDS/MANSION_FIELDS は静的なためモジュール読み込み時に一度だけ section 分けする。
+// house/building は field-model が無いため空（参照されない）。
+const SECTIONS_BY_KIND: Record<SalesSheetTemplateKind, (readonly [string, SheetField[]])[]> = {
+  land: groupBySection(LAND_FIELDS),
+  mansion: groupBySection(MANSION_FIELDS),
+  house: [],
+  building: [],
+};
 
 /**
- * ダイアログが自動反映の元データとして読む、物件詳細フェッチ結果の最小限の形。
+ * ダイアログが自動反映の元データとして読む、物件詳細フェッチ結果の最小限の形（mansion 版）。
  * 実レスポンス（GET /api/properties/[id]）はこれより広いフィールドを持つが、
  * ここでは使う分だけを防御的に（すべて任意で）読む。
  */
@@ -164,38 +200,55 @@ interface MansionAutoSource {
   } | null;
 }
 
-interface MansionAutoValues {
-  /** 自動反映専用フィールドの参照表示値（disabled input に表示）。 */
+/**
+ * 売土地版の MansionAutoSource（[F2-A Task4]）。土地は building relation を持たないため、
+ * 物件スカラのみを防御的に（すべて任意で）読む。
+ */
+interface LandAutoSource {
+  address?: string | null;
+  occupancyStatus?: string | null;
+  zoningDistrict?: string | null;
+  buildingCoverageRatio?: number | string | null;
+  floorAreaRatio?: number | string | null;
+  roadType?: string | null;
+  roadWidth?: number | string | null;
+}
+
+/**
+ * ダイアログが使う「自動反映専用プレビュー値・occupancy(現況)初期選択ヒント・テキスト系の
+ * 自動反映ヒント」をまとめた種別非依存の形（[F2-A Task4]・旧 MansionAutoValues を一般化）。
+ * mansion/land それぞれの compute*AutoValues がこの形へ populate する。
+ * - preview: 自動反映専用（disabled、AUTO_ONLY_KEYS_BY_KIND）フィールドの表示値
+ *   （キー=field.key）。
+ * - occupancySeed: occupancy(現況) select の「表示専用」の初期値ヒント。mansionValues/
+ *   landValues 自体には書き込まない＝ユーザーが select を操作しない限り送信ペイロードに
+ *   occupancy は含まれず、サーバ側の同一写像関数によるデフォルトに委ねる
+ *   （フェッチの成否・タイミングに依存させないための設計・@codex P2 fix・mansion から継承）。
+ * - hints: useDistrict/builtYearMonth/roadWidth 等、override 可能だが自動反映元もある
+ *   テキスト系フィールドの上に出す案内文言（キー=field.key、値=「自動反映: 」に続けて表示
+ *   する完成文字列＝末尾の案内文言も compute 側で組み立て済み）。自動反映値が無い
+ *   フィールドはキー自体を持たない。
+ */
+interface FieldModelAutoValues {
   preview: Record<string, string>;
-  /**
-   * occupancy(現況) select の「表示専用」初期値ヒント（mapOccupancyStatusToMansionOccupancy
-   * で決定的に写像・写像できない場合もフォールバック値を返すため常に何かしら入る）。
-   * mansionValues.occupancy 自体には書き込まない＝ユーザーが select を操作しない限り
-   * 送信ペイロードに occupancy は含まれず、サーバ側の同一関数によるデフォルトに委ねる
-   * （フェッチの成否・タイミングに依存させないための設計・@codex P2 fix）。
-   */
   occupancySeed?: string;
-  /** 用途地域チェック群の上に出す「自動反映済み」ヒント文言。 */
-  zoningDistrictAuto?: string;
-  /**
-   * 築年月(builtYearMonth)の上に出す「自動反映済み」ヒント文言（building.builtYear、年精度）。
-   * useDistrict と同じ「表示専用ヒント」方式（values へは書き込まない）。builtYearMonth は
-   * MANSION_AUTO_ONLY_KEYS に含まれない通常の編集可能フィールドのため、occupancy のように
-   * displayValue を差し替えて seed すると、ユーザーが最初の1文字を打った瞬間にブラウザの
-   * 現在表示値（ヒント文字列）と結合されてしまう（select と異なりテキスト入力は
-   * onChange が「現在の表示内容+入力」を返すため）。それを避けるため、useDistrict と同様に
-   * 値そのものではなく hint 文言のみを表示し、月まで分かる場合の入力を促す。
-   */
-  builtYearAuto?: string;
+  hints: Record<string, string>;
 }
 
 function toPreviewString(v: string | number | null | undefined): string {
   return v === null || v === undefined ? "" : String(v);
 }
 
-/** 物件詳細フェッチ結果 → 自動反映専用プレビュー値・occupancy初期選択・用途地域ヒント。 */
-function computeMansionAutoValues(data: MansionAutoSource): MansionAutoValues {
+/** 物件詳細フェッチ結果 → 自動反映専用プレビュー値・occupancy初期選択・テキスト系ヒント。 */
+function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues {
   const b = data.building ?? undefined;
+  const hints: Record<string, string> = {};
+  if (data.zoningDistrict) {
+    hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
+  }
+  if (b?.builtYear != null) {
+    hints.builtYearMonth = `${b.builtYear}年（月まで分かる場合は入力してください）`;
+  }
   return {
     preview: {
       buildingName: toPreviewString(b?.name),
@@ -213,20 +266,56 @@ function computeMansionAutoValues(data: MansionAutoSource): MansionAutoValues {
       managementCompany: toPreviewString(b?.managementCompany),
     },
     occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),
-    zoningDistrictAuto: data.zoningDistrict ?? undefined,
-    builtYearAuto: b?.builtYear != null ? `${b.builtYear}年` : undefined,
+    hints,
   };
 }
 
 /**
- * 送信直前に mansionValues → overrides payload へ変換する。
+ * LAND_FIELDS 向けの自動反映プレビュー計算（computeMansionAutoValues と同じ役割・
+ * [F2-A Task4]）。土地は建物 relation を持たないため、物件スカラのみを読む。
+ */
+function computeLandAutoValues(data: LandAutoSource): FieldModelAutoValues {
+  const hints: Record<string, string> = {};
+  if (data.zoningDistrict) {
+    hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
+  }
+  if (data.roadWidth != null && data.roadWidth !== "") {
+    hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
+  }
+  return {
+    preview: {
+      address: toPreviewString(data.address),
+      roadKind: toPreviewString(data.roadType),
+      coverageRatio: toPreviewString(data.buildingCoverageRatio),
+      floorRatio: toPreviewString(data.floorAreaRatio),
+    },
+    occupancySeed: mapOccupancyStatusToLandOccupancy(data.occupancyStatus),
+    hints,
+  };
+}
+
+/**
+ * kind → 自動反映プレビュー計算関数。house/building は field-model が無いため対象外
+ * （Partial・キー無し＝ダイアログの effect が fetch 自体をスキップする）。
+ */
+const AUTO_COMPUTE_BY_KIND: Partial<
+  Record<SalesSheetTemplateKind, (raw: unknown) => FieldModelAutoValues>
+> = {
+  mansion: (raw) => computeMansionAutoValues(raw as MansionAutoSource),
+  land: (raw) => computeLandAutoValues(raw as LandAutoSource),
+};
+
+/**
+ * 送信直前に field-model の values → overrides payload へ変換する（[F2-A Task4] 汎用化・
+ * mansion/land 共通＝両者とも salesPoints をレイアウト専用の1行1つ文字列として同じ規約で
+ * 扱うため kind 分岐は不要）。
  * - salesPoints は編集中「1行に1つ」の文字列として保持し、ここで初めて改行区切り→配列化
  *   する（controlled textarea の value を都度フィルタ済み配列から再構成すると、入力中の
  *   末尾の空行/改行が消えて改行を打てなくなるため、編集中は文字列のまま保持する設計）。
  * - 空文字列・空配列のキーは省略する（未入力=undefined と等価に扱う既存規約に合わせる）。
  */
-function buildMansionOverridePayload(
-  values: MansionValues,
+function buildFieldModelOverridePayload(
+  values: FieldModelValues,
 ): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   for (const [key, v] of Object.entries(values)) {
@@ -248,17 +337,20 @@ function buildMansionOverridePayload(
   return out;
 }
 
-/** 1フィールド分の入力ウィジェット（select/multiselect/number/text）。 */
-function MansionFieldWidget({
+/** 1フィールド分の入力ウィジェット（select/multiselect/number/text）。mansion/land 共通
+ * （[F2-A Task4] 汎用化・idPrefix で DOM id の名前空間を種別ごとに分ける）。 */
+function FieldModelWidget({
   field,
   value,
   onChange,
+  idPrefix,
 }: {
   field: SheetField;
-  value: MansionFieldValue | undefined;
-  onChange: (v: MansionFieldValue) => void;
+  value: FieldModelValue | undefined;
+  onChange: (v: FieldModelValue) => void;
+  idPrefix: string;
 }) {
-  const id = `ss-mansion-${field.key}`;
+  const id = `ss-${idPrefix}-${field.key}`;
 
   if (field.widget === "multiselect") {
     const selected = Array.isArray(value) ? value : [];
@@ -350,9 +442,18 @@ function MansionFieldWidget({
   );
 }
 
-/** 自動反映専用フィールドの参照表示（disabled・編集不可＝物件/建物レコードが正）。 */
-function MansionAutoPreviewField({ field, value }: { field: SheetField; value: string }) {
-  const id = `ss-mansion-${field.key}`;
+/** 自動反映専用フィールドの参照表示（disabled・編集不可＝物件/建物レコードが正）。
+ * mansion/land 共通（[F2-A Task4] 汎用化）。 */
+function AutoPreviewField({
+  field,
+  value,
+  idPrefix,
+}: {
+  field: SheetField;
+  value: string;
+  idPrefix: string;
+}) {
+  const id = `ss-${idPrefix}-${field.key}`;
   return (
     <div className="flex items-center gap-2">
       <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-500 dark:text-gray-400">
@@ -373,30 +474,39 @@ function MansionAutoPreviewField({ field, value }: { field: SheetField; value: s
 }
 
 /**
- * 売マンション作成ダイアログの入力本体（MANSION_FIELDS 由来・section 別にグルーピングして描画）。
- * 状態を持たない提示コンポーネントとして切り出し、SSR（renderToStaticMarkup）で構造を
- * 検証できるようにする（親の SalesSheetCreateDialog が state / 自動反映フェッチを保持する）。
+ * field-model 駆動の作成ダイアログ入力本体（section 別にグルーピングして描画）。mansion/land
+ * 共通の汎用レンダラ（[F2-A Task4]: 旧 MansionFieldModelForm を一般化。house/building は
+ * field-model が無いため呼ばれない）。状態を持たない提示コンポーネントとして切り出し、
+ * SSR（renderToStaticMarkup）で構造を検証できるようにする（親の SalesSheetCreateDialog が
+ * state / 自動反映フェッチを保持する）。
  */
-export function MansionFieldModelForm({
+export function FieldModelForm({
+  kind,
+  sections,
+  autoOnlyKeys,
   values,
   onChange,
   autoPreview,
-  zoningDistrictAuto,
   occupancySeed,
-  builtYearAuto,
+  hints,
 }: {
-  values: MansionValues;
-  onChange: (key: string, value: MansionFieldValue) => void;
+  kind: SalesSheetTemplateKind;
+  /** SECTIONS_BY_KIND[kind]（groupBySection(FIELDS_BY_KIND[kind]) 済み）。 */
+  sections: (readonly [string, SheetField[]])[];
+  /** AUTO_ONLY_KEYS_BY_KIND[kind]。 */
+  autoOnlyKeys: ReadonlySet<string>;
+  values: FieldModelValues;
+  onChange: (key: string, value: FieldModelValue) => void;
   autoPreview: Record<string, string>;
-  zoningDistrictAuto?: string;
-  /** occupancy(現況) select の表示専用の初期値ヒント（未編集時のみ使う。詳細は MansionAutoValues 参照）。 */
+  /** occupancy(現況) select の表示専用の初期値ヒント（未編集時のみ使う。詳細は
+   * FieldModelAutoValues 参照）。 */
   occupancySeed?: string;
-  /** 築年月(builtYearMonth)の上に出す自動反映ヒント（詳細は MansionAutoValues.builtYearAuto 参照）。 */
-  builtYearAuto?: string;
+  /** useDistrict/builtYearMonth/roadWidth 等の自動反映ヒント（詳細は FieldModelAutoValues.hints 参照）。 */
+  hints: Record<string, string>;
 }) {
   return (
     <>
-      {MANSION_SECTIONS.map(([section, fields]) => (
+      {sections.map(([section, fields]) => (
         <fieldset
           key={section}
           className="mb-3 space-y-2 border-t border-neutral-200 pt-2 first:border-t-0 first:pt-0 dark:border-neutral-700"
@@ -412,31 +522,31 @@ export function MansionFieldModelForm({
               const ctrlStr = typeof ctrl === "string" ? ctrl : "";
               if (ctrlStr !== f.showWhen.equals) return null;
             }
-            if (MANSION_AUTO_ONLY_KEYS.has(f.key)) {
+            if (autoOnlyKeys.has(f.key)) {
               return (
-                <MansionAutoPreviewField key={f.key} field={f} value={autoPreview[f.key] ?? ""} />
+                <AutoPreviewField
+                  key={f.key}
+                  idPrefix={kind}
+                  field={f}
+                  value={autoPreview[f.key] ?? ""}
+                />
               );
             }
             // occupancy(現況): 未編集時は自動反映ヒント(occupancySeed)を表示専用の初期値として
             // 見せるが、values(=送信payload の元)は書き換えない。ユーザーが select を実際に
             // 操作(onChange)しない限り occupancy は送信されず、サーバ側の決定的デフォルト
-            // （mapOccupancyStatusToMansionOccupancy）に委ねる（@codex P2 fix: フェッチの
-            // タイミングに依存して現況が変わる不具合の解消）。
+            // （mapOccupancyStatusToMansionOccupancy/mapOccupancyStatusToLandOccupancy）に
+            // 委ねる（@codex P2 fix: フェッチのタイミングに依存して現況が変わる不具合の解消。
+            // mansion/land 共通のパターン）。
             const displayValue =
               f.key === "occupancy" && values[f.key] === undefined ? occupancySeed : values[f.key];
             return (
               <div key={f.key}>
-                {f.key === "useDistrict" && zoningDistrictAuto && (
-                  <p className="mb-1 text-[11px] text-neutral-400">
-                    自動反映: {zoningDistrictAuto}（追加の用途地域があれば選択してください）
-                  </p>
+                {hints[f.key] && (
+                  <p className="mb-1 text-[11px] text-neutral-400">自動反映: {hints[f.key]}</p>
                 )}
-                {f.key === "builtYearMonth" && builtYearAuto && (
-                  <p className="mb-1 text-[11px] text-neutral-400">
-                    自動反映: {builtYearAuto}（月まで分かる場合は入力してください）
-                  </p>
-                )}
-                <MansionFieldWidget
+                <FieldModelWidget
+                  idPrefix={kind}
                   field={f}
                   value={displayValue}
                   onChange={(v) => onChange(f.key, v)}
@@ -452,15 +562,18 @@ export function MansionFieldModelForm({
 
 /**
  * キャッチコピー／セールスポイント（field-model の行ではない、レイアウト専用の上書き）。
- * salesPoints は「1行に1つ」の文字列として編集し、送信直前に buildMansionOverridePayload
- * が配列化する。
+ * mansion/land 共通（[F2-A Task4] 汎用化。両ビルダーとも buildSpecSheetDocument へ同じ
+ * catchCopy/salesPoints を渡す＝レイアウトが共有のため入力欄も共有できる）。salesPoints は
+ * 「1行に1つ」の文字列として編集し、送信直前に buildFieldModelOverridePayload が配列化する。
  */
-export function MansionExtraFields({
+export function CatchCopyFields({
+  kind,
   values,
   onChange,
 }: {
-  values: MansionValues;
-  onChange: (key: string, value: MansionFieldValue) => void;
+  kind: SalesSheetTemplateKind;
+  values: FieldModelValues;
+  onChange: (key: string, value: FieldModelValue) => void;
 }) {
   const salesPointsText =
     typeof values.salesPoints === "string"
@@ -475,13 +588,13 @@ export function MansionExtraFields({
       </legend>
       <div className="flex items-center gap-2">
         <label
-          htmlFor="ss-mansion-catchCopy"
+          htmlFor={`ss-${kind}-catchCopy`}
           className="w-28 shrink-0 text-sm text-gray-700 dark:text-gray-300"
         >
           キャッチコピー
         </label>
         <input
-          id="ss-mansion-catchCopy"
+          id={`ss-${kind}-catchCopy`}
           aria-label="キャッチコピー"
           value={typeof values.catchCopy === "string" ? values.catchCopy : ""}
           onChange={(e) => onChange("catchCopy", e.target.value)}
@@ -490,13 +603,13 @@ export function MansionExtraFields({
       </div>
       <div className="flex items-start gap-2">
         <label
-          htmlFor="ss-mansion-salesPoints"
+          htmlFor={`ss-${kind}-salesPoints`}
           className="w-28 shrink-0 pt-1 text-sm text-gray-700 dark:text-gray-300"
         >
           セールスポイント
         </label>
         <textarea
-          id="ss-mansion-salesPoints"
+          id={`ss-${kind}-salesPoints`}
           aria-label="セールスポイント"
           value={salesPointsText}
           onChange={(e) => onChange("salesPoints", e.target.value)}
@@ -527,40 +640,41 @@ export function SalesSheetCreateDialog({
 }) {
   const router = useRouter();
   const cfg = FIELD_SETS[kind];
+  const fieldModel = FIELDS_BY_KIND[kind];
   const [values, setValues] = useState<Record<string, string>>({});
-  const [mansionValues, setMansionValues] = useState<MansionValues>({});
-  const [mansionAutoPreview, setMansionAutoPreview] = useState<Record<string, string>>({});
-  const [mansionZoningAuto, setMansionZoningAuto] = useState<string | undefined>(undefined);
-  const [mansionOccupancySeed, setMansionOccupancySeed] = useState<string | undefined>(undefined);
-  const [mansionBuiltYearAuto, setMansionBuiltYearAuto] = useState<string | undefined>(undefined);
+  const [fieldModelValues, setFieldModelValues] = useState<FieldModelValues>({});
+  const [autoPreview, setAutoPreview] = useState<Record<string, string>>({});
+  const [occupancySeed, setOccupancySeed] = useState<string | undefined>(undefined);
+  const [hints, setHints] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 売マンションのみ: 開いたときに物件/建物データを取得し、自動反映専用フィールドの
-  // プレビューと occupancy(現況) select の表示ヒントを用意する（ベストエフォート・
-  // 取得失敗時は自動反映無しでダイアログ自体は使用可能なまま）。
-  // SSR（renderToStaticMarkup）は effect を実行しないため、この fetch は
-  // 静的マークアップ（widget構造）の検証には影響しない。
+  // field-model がある種別(mansion/land)のみ: 開いたときに物件（＋建物、mansionのみ）データを
+  // 取得し、自動反映専用フィールドのプレビューと occupancy(現況) select の表示ヒント、
+  // useDistrict/roadWidth/builtYearMonth 等のテキスト系ヒントを用意する（ベストエフォート・
+  // 取得失敗時は自動反映無しでダイアログ自体は使用可能なまま）。SSR
+  // （renderToStaticMarkup）は effect を実行しないため、この fetch は静的マークアップ
+  // （widget構造）の検証には影響しない。
   //
-  // occupancy は意図的に mansionValues へ書き込まない（@codex P2 fix）: 以前はここで
-  // setMansionValues して occupancy を送信payloadへ混入させていたため、fetch が
-  // submit に間に合うかどうかのタイミングだけで、同じ物件から異なる現況が生成される
-  // 不具合があった。mansionOccupancySeed は MansionFieldModelForm の表示専用ヒントに
-  // しか使わない＝ユーザーが select を実際に操作しない限り occupancy は送信されず、
-  // buildMansionValues 側の決定的デフォルト（mapOccupancyStatusToMansionOccupancy、
-  // これと同一関数）に委ねられる。
+  // occupancy は意図的に fieldModelValues へ書き込まない（@codex P2 fix・mansion から
+  // 継承した設計）: 以前はここで setMansionValues して occupancy を送信payloadへ混入させて
+  // いたため、fetch が submit に間に合うかどうかのタイミングだけで、同じ物件から異なる
+  // 現況が生成される不具合があった。occupancySeed は FieldModelForm の表示専用ヒントにしか
+  // 使わない＝ユーザーが select を実際に操作しない限り occupancy は送信されず、
+  // buildMansionValues/buildLandValues 側の決定的デフォルト
+  // （mapOccupancyStatusToMansionOccupancy/mapOccupancyStatusToLandOccupancy、これらと
+  // 同一関数）に委ねられる。
   useEffect(() => {
-    if (!open || kind !== "mansion") return;
+    const compute = AUTO_COMPUTE_BY_KIND[kind];
+    if (!open || !compute) return;
     let cancelled = false;
     fetchPropertyDetail(propertyId)
       .then((raw) => {
         if (cancelled) return;
-        const data = raw as unknown as MansionAutoSource;
-        const auto = computeMansionAutoValues(data);
-        setMansionAutoPreview(auto.preview);
-        setMansionZoningAuto(auto.zoningDistrictAuto);
-        setMansionOccupancySeed(auto.occupancySeed);
-        setMansionBuiltYearAuto(auto.builtYearAuto);
+        const auto = compute(raw);
+        setAutoPreview(auto.preview);
+        setOccupancySeed(auto.occupancySeed);
+        setHints(auto.hints);
       })
       .catch(() => {
         /* ベストエフォート。取得失敗時は自動反映プレビュー無しで継続する。 */
@@ -574,7 +688,7 @@ export function SalesSheetCreateDialog({
     setBusy(true);
     setError(null);
     try {
-      const body = kind === "mansion" ? buildMansionOverridePayload(mansionValues) : values;
+      const body = fieldModel ? buildFieldModelOverridePayload(fieldModelValues) : values;
       const { url, init } = buildCreateRequest(propertyId, body);
       const res = await fetch(url, init);
       if (!res.ok) {
@@ -604,19 +718,22 @@ export function SalesSheetCreateDialog({
         <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
           システムに無い項目を入力してください（空欄可）。作成後、配置や文字はエディタで調整できます。
         </p>
-        {kind === "mansion" ? (
+        {fieldModel ? (
           <div>
-            <MansionFieldModelForm
-              values={mansionValues}
-              onChange={(key, v) => setMansionValues((prev) => ({ ...prev, [key]: v }))}
-              autoPreview={mansionAutoPreview}
-              zoningDistrictAuto={mansionZoningAuto}
-              occupancySeed={mansionOccupancySeed}
-              builtYearAuto={mansionBuiltYearAuto}
+            <FieldModelForm
+              kind={kind}
+              sections={SECTIONS_BY_KIND[kind]}
+              autoOnlyKeys={AUTO_ONLY_KEYS_BY_KIND[kind]}
+              values={fieldModelValues}
+              onChange={(key, v) => setFieldModelValues((prev) => ({ ...prev, [key]: v }))}
+              autoPreview={autoPreview}
+              occupancySeed={occupancySeed}
+              hints={hints}
             />
-            <MansionExtraFields
-              values={mansionValues}
-              onChange={(key, v) => setMansionValues((prev) => ({ ...prev, [key]: v }))}
+            <CatchCopyFields
+              kind={kind}
+              values={fieldModelValues}
+              onChange={(key, v) => setFieldModelValues((prev) => ({ ...prev, [key]: v }))}
             />
           </div>
         ) : (

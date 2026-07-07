@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { salesSheetDocumentSchema } from "../document-schema";
-import { localizeOccupancy } from "@/lib/property-types";
 
 vi.mock("@/lib/storage", () => ({
   getStorage: () => ({
@@ -9,13 +8,12 @@ vi.mock("@/lib/storage", () => ({
   }),
 }));
 
-import {
-  buildSaleLandDocument,
-  buildInitialSalesSheetDocument,
-  toCanonicalUploadsSrc,
-} from "../build-document";
+import { buildInitialSalesSheetDocument, toCanonicalUploadsSrc } from "../build-document";
 import { isSafeImageSrc } from "../css-safety";
 
+// 売土地は自社マイソク様式に作り直し、専用テスト build-land.test.ts に移設した
+// （[F2-A Task3]・build-mansion.test.ts への移設と同じ経緯）。ここでは
+// buildInitialSalesSheetDocument（写真の data: 展開）と toCanonicalUploadsSrc のみを扱う。
 const input = {
   property: {
     address: "東京都世田谷区上馬４丁目",
@@ -26,7 +24,6 @@ const input = {
     roadWidth: "4.0",
     occupancyStatus: "更地",
   },
-  owner: null,
   photo: { fileUrl: "/uploads/properties/a/1.jpg" },
   overrides: {
     price: "3,480万円",
@@ -38,28 +35,6 @@ const input = {
     remarks: "南西角地・整形地",
   },
 };
-
-describe("buildSaleLandDocument", () => {
-  it("価格(override)と所在地(DB)と公開備考(remarks)を含む要素を生成する", () => {
-    const doc = buildSaleLandDocument(input);
-    const texts = doc.elements.filter((e) => e.type === "text").map((e) => (e.type === "text" ? e.content : ""));
-    expect(texts.join("\n")).toContain("3,480万円");
-    expect(JSON.stringify(doc.elements)).toContain("東京都世田谷区上馬４丁目");
-    expect(JSON.stringify(doc.elements)).toContain("仲介");
-    expect(JSON.stringify(doc.elements)).toContain("南西角地・整形地");
-    expect(doc.page.orientation).toBe("landscape");
-  });
-
-  it("現況(raw enum)をビルダー内部で日本語化する（呼び出し側の事前変換に依存しない）", () => {
-    const doc = buildSaleLandDocument({
-      ...input,
-      property: { ...input.property, occupancyStatus: "vacant" },
-    });
-    const label = localizeOccupancy("vacant");
-    expect(label).toBe("空室"); // 実際に日本語ラベルへ変換されること
-    expect(JSON.stringify(doc.elements)).toContain("空室");
-  });
-});
 
 describe("buildInitialSalesSheetDocument", () => {
   it("写真を data: 化し、schema 検証を通る doc を返す", async () => {

@@ -30,3 +30,30 @@ export function mapOccupancyStatusToMansionOccupancy(
   if (status === "occupied") return "居住中";
   return localizeOccupancy(status) ?? undefined;
 }
+
+/**
+ * 物件の現況(occupancyStatus)を、売土地の現況(occupancy)フィールドの選択肢語彙
+ * （field-model.LAND_FIELDS / option-master.OCCUPANCY_LAND = 更地/上物有）へ決定的に
+ * 写像する単一のソース（[F2-A Task3]）。理由は mapOccupancyStatusToMansionOccupancy と同じ:
+ * 作成ダイアログの自動反映プレビューと図面ビルダー（build-document.ts の
+ * buildLandValues・override 未指定時のデフォルト）が同じ関数を参照することで、
+ * フェッチの成否・タイミングに関わらず常に同じ現況が決定されることを保証する。
+ *
+ * - vacant → "更地" / occupied → "上物有"
+ * - 上記2値以外（unknown・null・undefined・未知の値）→ undefined（手動選択に委ねる）。
+ *   マンション版と異なり localizeOccupancy へはフォールバックしない: 土地の現況語彙
+ *   (更地/上物有)は一般の入居状況語彙（空室/入居中 等）と意味がずれるため、無理に
+ *   丸めず空欄のままにする方が安全（プランの確定仕様どおり）。
+ *
+ * - 互換: 旧 `POST /api/properties/[id]/sales-sheet/preview` route は本関数を呼ぶ前に
+ *   occupancyStatus を OCCUPANCY_STATUS_LABELS で日本語ラベル（"空室"/"入居中"）へ
+ *   先に変換してしまうため、その済ラベルも許容する（"空室"→"更地"／"入居中"→"上物有"）。
+ *   でないと同route経由の土地物件で現況欄が空欄化する退行になる（@codex P2 review）。
+ */
+export function mapOccupancyStatusToLandOccupancy(
+  status: string | null | undefined,
+): string | undefined {
+  if (status === "vacant" || status === "空室") return "更地";
+  if (status === "occupied" || status === "入居中") return "上物有";
+  return undefined;
+}
