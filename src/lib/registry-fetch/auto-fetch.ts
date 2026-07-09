@@ -22,6 +22,7 @@
  */
 import type { RegistryStatus } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
+import type { ResolvedRegistryCredentials } from "@/lib/registry-fetch/config-store";
 import { ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -106,6 +107,11 @@ export interface ResolveRegistryFetchProviderOptions {
    * 「実際に実取得が可能」= provider 解決可能とみなす。PR-2 でここに実 adapter を配線する。
    */
   browserFactory?: RegistryBrowserFactory;
+  /**
+   * DB（復号）優先・env フォールバックで解決した資格情報。呼び出し側（async route）が
+   * loadRegistryFetchCredentials() で解決して注入する。未注入時は env を直接読む（後方互換）。
+   */
+  credentials?: Partial<ResolvedRegistryCredentials>;
 }
 
 // ---------------------------------------------------------------------------
@@ -461,8 +467,10 @@ export function __resetRegistryFetchThrottleForTest(): void {
 export function getRegistryFetchProvider(
   options: ResolveRegistryFetchProviderOptions = {},
 ): RegistryFetchProvider | null {
-  const loginId = process.env.REGISTRY_FETCH_LOGIN_ID;
-  const password = process.env.REGISTRY_FETCH_PASSWORD;
+  // credentials 注入があれば優先（DB-over-env は呼び出し側が loadRegistryFetchCredentials で解決）。
+  // 未注入時は env を直接読む（後方互換 = 既存テスト/env 経路は不変）。
+  const loginId = options.credentials?.loginId ?? process.env.REGISTRY_FETCH_LOGIN_ID;
+  const password = options.credentials?.password ?? process.env.REGISTRY_FETCH_PASSWORD;
 
   // 資格情報のいずれか欠落 → null（= route 501 維持 = 本番挙動不変）。
   if (!loginId || !password) {
@@ -477,7 +485,8 @@ export function getRegistryFetchProvider(
     return null;
   }
 
-  const baseUrl = process.env.REGISTRY_FETCH_BASE_URL || undefined;
+  const baseUrl =
+    options.credentials?.baseUrl || process.env.REGISTRY_FETCH_BASE_URL || undefined;
   const timeoutRaw = process.env.REGISTRY_FETCH_TIMEOUT_MS;
   const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
 
