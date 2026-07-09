@@ -151,7 +151,7 @@ describe("/api/me/permissions — registryAutoFetch capability (source assertion
   it("capabilities に registryAutoFetch を boolean helper で含める", () => {
     expect(permRouteSrc).toMatch(/isRegistryAutoFetchProviderConfigured/);
     expect(permRouteSrc).toMatch(
-      /registryAutoFetch:\s*isRegistryAutoFetchProviderConfigured\(\)/,
+      /registryAutoFetch:\s*isRegistryAutoFetchProviderConfigured\(\{\s*credentials:/,
     );
   });
 });

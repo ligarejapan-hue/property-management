@@ -14,6 +14,7 @@ import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
+import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 
 // ---------- GET /api/me/permissions ----------
 // 現在ログイン中のユーザーの権限一覧を返す。
@@ -26,13 +27,16 @@ export async function GET() {
     const permissions = await getUserPermissions(session.id);
     // 売却促進DM の設定は DB→env で解決(管理画面で設定された値を反映)。
     const saleDmCfg = await loadSaleDmConfig();
+    // 謄本取得の資格情報も DB→env で解決(設定画面で保存した値を capability に反映)。
+    // ※ credentials があっても readiness(セレクタ校正)未達なら provider は null=false のまま。
+    const registryCreds = await loadRegistryFetchCredentials();
     const capabilities = {
       corporateLookup: isCorporateLookupConfigured(),
       // 謄本自動取得 provider が設定済みか（boolean のみ）。secret・設定値そのものは返さない。
-      registryAutoFetch: isRegistryAutoFetchProviderConfigured(),
+      registryAutoFetch: isRegistryAutoFetchProviderConfigured({ credentials: registryCreds }),
       // 所在検索（番号無し物件を所在で検索して取得）が使えるか。自動取得より厳しく、provider が
       // supportsLocationSearch を宣言している場合のみ true（未対応で「所在で検索」ボタンを出さない）。
-      registryLocationSearch: isRegistryLocationSearchConfigured(),
+      registryLocationSearch: isRegistryLocationSearchConfigured({ credentials: registryCreds }),
       // scanned 謄本の OCR 下書き生成が「この利用者に」使えるか。
       // OCR サービス設定済み（localhost allowlist 通過）かつ admin のときだけ true。
       registryOcrDraft:
