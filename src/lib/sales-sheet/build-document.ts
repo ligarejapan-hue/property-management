@@ -118,6 +118,19 @@ function fmtPercent(v?: string | null): string {
 }
 
 /**
+ * 満室想定収入 → "980万円"（末尾の「万円/年」「万円」「/年」を一度剥がして二重付与を防ぐ・
+ * 空なら ""）。number フィールドだが、本番稼働中の旧一棟ダイアログは "980万円/年" 形式で送る
+ * ため（キャッシュ済みクライアント後方互換）合成側で正規化する。年額であることは field-model
+ * のラベル「満室想定収入(年額)」で表す（@codex P2 fix・fmtPercent/fmtManYen と同方針）。
+ */
+function fmtAnnualIncome(v?: string | null): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!s) return "";
+  const stripped = s.replace(/(万円\s*\/\s*年|万円|\/\s*年)\s*$/, "").trim();
+  return stripped ? `${stripped}万円` : "";
+}
+
+/**
  * 専有面積 + 面積計測方式(壁芯/内法) → "67.21㎡（壁芯）"。fmtAreaWithMethod のマンション向け
  * 別名（呼び出し箇所 buildMansionValues の意図を保つため名前を残す・[F2-A Task3] 汎用化）。
  */
@@ -938,7 +951,7 @@ function buildBuildingValues(input: SaleBuildingInput): SheetValues {
     // sheet-rows が付与する（旧 fmtUnits 相当）。
     totalUnits: o.totalUnits,
     grossYield: fmtPercent(o.grossYield),
-    expectedIncome: fmtManYen(o.expectedIncome),
+    expectedIncome: fmtAnnualIncome(o.expectedIncome),
     // 法令
     roadKind: p.roadType ?? undefined,
     roadWidth: o.roadWidth ?? p.roadWidth ?? undefined,

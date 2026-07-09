@@ -101,6 +101,18 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
     ).toBe("980万円");
   });
 
+  it("満室想定収入: 旧ダイアログの「万円/年」形式でも二重化しない（本番稼働中の旧ダイアログ後方互換・@codex P2）", () => {
+    // 一棟の旧フラットダイアログは expectedIncome を "980万円/年" 形式で送る（削除した
+    // build-document-templates.test.ts が使っていた形）。年額は field-model のラベルで表すため
+    // 値側は "980万円" に正規化する（末尾の「万円/年」「/年」も剥がして二重付与を防ぐ）。
+    expect(
+      tableRow(buildSaleBuildingDocument({ ...base, overrides: { expectedIncome: "980万円/年" } }), "満室想定収入(年額)"),
+    ).toBe("980万円");
+    expect(
+      tableRow(buildSaleBuildingDocument({ ...base, overrides: { expectedIncome: "980/年" } }), "満室想定収入(年額)"),
+    ).toBe("980万円");
+  });
+
   it("地目/接道方向の複数選択は「 / 」で併記される", () => {
     const doc = buildSaleBuildingDocument({
       ...base,
