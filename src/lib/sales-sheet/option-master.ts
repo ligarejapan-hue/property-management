@@ -52,3 +52,8 @@ export const PROPERTY_TYPE_HOUSE = ["新築戸建","中古戸建","新築テラ�
 export const BUILDING_CONFIRM = ["済","申請中"] as const;
 export const PARKING_HOUSE = ["有","無","近隣確保"] as const;
 export const REBUILD_STATUS = ["再建築可","再建築不可"] as const;
+
+/** F2: 一棟(building)で使う分。付帯権利は LAND_RIGHT を再利用する。 */
+export const PROPERTY_TYPE_BUILDING = [
+  "新築一棟マンション","中古一棟マンション","新築一棟アパート","中古一棟アパート","一棟ビル","その他",
+] as const;
