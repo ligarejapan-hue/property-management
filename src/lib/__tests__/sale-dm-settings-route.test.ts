@@ -140,5 +140,10 @@ describe("PUT /api/admin/sale-dm-settings", () => {
     expect(audit.detail.fields).toContain("provider");
     expect(audit.detail.fields).toContain("anthropicApiKey");
     expect(JSON.stringify(audit.detail)).not.toContain("sk-secret"); // 値は監査に残さない
+    // targetId(UUID列 @db.Uuid)に非UUIDの "singleton" を渡すと Postgres が弾き writeAuditLog が
+    // 握って設定変更の監査が無記録になるため付けない。対象は targetTable + detail.target で表す。
+    expect(audit.targetId).toBeUndefined();
+    expect(audit.targetTable).toBe("sale_dm_config");
+    expect(audit.detail.target).toBe("singleton");
   });
 });

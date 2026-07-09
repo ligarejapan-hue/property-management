@@ -124,12 +124,13 @@ export async function PUT(request: NextRequest) {
     });
 
     // 監査は非PIIメタのみ: 変更フィールド名・provider・更新時刻。キー値・URL値・差出人値は残さない。
+    // targetId は UUID 列(@db.Uuid)。singleton は UUID でないため付けない(付けると Postgres が
+    // 弾き writeAuditLog が握って設定変更の監査が無記録になる)。対象は targetTable + detail.target で表す。
     await writeAuditLog({
       userId: session.id,
       action: "sale_dm_settings_update",
       targetTable: "sale_dm_config",
-      targetId: SALE_DM_CONFIG_ID,
-      detail: { fields: changed, provider: row.provider, updatedAt: new Date().toISOString() },
+      detail: { target: SALE_DM_CONFIG_ID, fields: changed, provider: row.provider, updatedAt: new Date().toISOString() },
     });
 
     // 応答も GET と同じく秘匿値は返さない(設定済/未設定のみ)。
