@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, type SheetField } from "../field-model";
+import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS, type SheetField } from "../field-model";
 import {
   USE_DISTRICT,
   TAX,
@@ -9,13 +9,16 @@ import {
   LAND_CATEGORY,
   AREA_METHOD_LAND,
   SETBACK_UNIT,
+  LAND_RIGHT,
   PROPERTY_TYPE_LAND,
   PROPERTY_TYPE_HOUSE,
+  PROPERTY_TYPE_BUILDING,
 } from "../option-master";
 
 const byKey = (k: string): SheetField | undefined => MANSION_FIELDS.find((f) => f.key === k);
 const byLandKey = (k: string): SheetField | undefined => LAND_FIELDS.find((f) => f.key === k);
 const byHouseKey = (k: string): SheetField | undefined => HOUSE_FIELDS.find((f) => f.key === k);
+const byBuildingKey = (k: string): SheetField | undefined => BUILDING_FIELDS.find((f) => f.key === k);
 
 describe("MANSION_FIELDS", () => {
   it("価格は number・万円固定", () => {
@@ -227,6 +230,73 @@ describe("HOUSE_FIELDS（[F2-B Task2]）", () => {
       const f = byHouseKey(k);
       expect(f?.widget, k).toBe("text");
       expect(f?.section, k).toBe("会社");
+    }
+  });
+});
+
+describe("BUILDING_FIELDS（[F2-C Task2]）", () => {
+  it("物件種目は select・一棟用の選択肢マスタ", () => {
+    const t = byBuildingKey("propertyType");
+    expect(t?.widget).toBe("select");
+    expect(t?.options).toEqual(PROPERTY_TYPE_BUILDING);
+    expect(t?.section).toBe("価格");
+  });
+  it("価格は number・万円固定、消費税(課税/不課税)欄を持つ(house/mansionと同じ)", () => {
+    expect(byBuildingKey("price")?.unit).toBe("万円");
+    const tax = byBuildingKey("tax");
+    expect(tax?.options).toEqual(TAX);
+    expect(tax?.controlOnly).toBe(true);
+    expect(byBuildingKey("taxAmount")?.showWhen).toEqual({ field: "tax", equals: "課税" });
+  });
+  it("付帯権利は select・LAND_RIGHTを再利用(ラベルのみ差し替え)", () => {
+    const r = byBuildingKey("landRight");
+    expect(r?.label).toBe("付帯権利");
+    expect(r?.widget).toBe("select");
+    expect(r?.options).toEqual(LAND_RIGHT);
+    expect(r?.section).toBe("土地");
+  });
+  it("収益セクション: 総戸数は number・戸、想定利回り/満室想定収入は unit を持たず合成される", () => {
+    const units = byBuildingKey("totalUnits");
+    expect(units?.widget).toBe("number");
+    expect(units?.unit).toBe("戸");
+    expect(units?.section).toBe("収益");
+    // 想定利回り(%/％)・満室想定収入(万円)は buildBuildingValues が合成する（キャッシュ済み
+    // クライアントの単位付き自由入力での二重付与を防ぐ・landArea/setback と同じ方式）。
+    expect(byBuildingKey("grossYield")?.unit).toBeUndefined();
+    expect(byBuildingKey("grossYield")?.section).toBe("収益");
+    expect(byBuildingKey("expectedIncome")?.unit).toBeUndefined();
+    expect(byBuildingKey("expectedIncome")?.label).toBe("満室想定収入(年額)");
+  });
+  it("延床面積は number・㎡、各階面積(1階/2階/3階)は持たない(一棟は延床で表す)", () => {
+    expect(byBuildingKey("totalFloorArea")?.unit).toBe("㎡");
+    expect(byBuildingKey("floor1Area")).toBeUndefined();
+  });
+  it("複数選択は地目/接道方向/都市計画/用途地域/地域地区の5項目", () => {
+    for (const k of ["landCategory", "roadDirections", "cityPlanning", "useDistrict", "areaZone"]) {
+      expect(byBuildingKey(k)?.widget, k).toBe("multiselect");
+    }
+  });
+  it("構造/築年月/総戸数/想定利回り/満室想定収入は自動反映元を持たない(building relation非配線・手入力)", () => {
+    for (const k of ["structure", "builtYearMonth", "totalUnits", "grossYield", "expectedIncome"]) {
+      expect(byBuildingKey(k)?.autoFrom, k).toBeUndefined();
+    }
+  });
+  it("所在地/建蔽率/容積率/接道種別/接道幅員/用途地域/現況は自動反映元を持つ(間取りは持たない=一棟にlayout無し)", () => {
+    expect(byBuildingKey("address")?.autoFrom).toBe("address");
+    expect(byBuildingKey("coverageRatio")?.autoFrom).toBe("buildingCoverageRatio");
+    expect(byBuildingKey("floorRatio")?.autoFrom).toBe("floorAreaRatio");
+    expect(byBuildingKey("roadKind")?.autoFrom).toBe("roadType");
+    expect(byBuildingKey("roadWidth")?.autoFrom).toBe("roadWidth");
+    expect(byBuildingKey("useDistrict")?.autoFrom).toBe("zoningDistrict");
+    expect(byBuildingKey("occupancy")?.autoFrom).toBe("occupancyStatus");
+    expect(byBuildingKey("layout")).toBeUndefined();
+  });
+  it("会社セクション(取引態様/報酬/広告=select, 担当者/取引士/特記=text)を持つ", () => {
+    expect(byBuildingKey("transactionType")?.options).toEqual(TRANSACTION_TYPE);
+    expect(byBuildingKey("transactionType")?.section).toBe("会社");
+    for (const k of ["staff", "agent", "specialNotes"]) {
+      expect(byBuildingKey(k)?.widget, k).toBe("text");
+      expect(byBuildingKey(k)?.section, k).toBe("会社");
     }
   });
 });
