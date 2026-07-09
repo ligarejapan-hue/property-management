@@ -207,19 +207,57 @@ const houseOverridesSchema = z.object({
   catchCopy: z.string().max(200).optional(),
   salesPoints: z.array(z.string().max(200)).max(20).optional(),
 });
+// [F2-C Task3] 一棟(building)を BUILDING_FIELDS 駆動に総入れ替え。旧フラットスキーマの12キー
+// (price/access/landArea/totalFloorArea/totalUnits/builtYearMonth/structure/grossYield/
+// expectedIncome/transactionType/deliveryTiming/remarks) はキー名を保持し、キャッシュ済みの
+// 旧ダイアログからの POST を弾かない/落とさない（house/land と同じ後方互換方針だが、一棟は
+// 唯一まだ旧フラットダイアログが本番稼働中のため必須）。deliveryTiming は delivery の別名。
 const buildingOverridesSchema = z.object({
+  propertyType: z.string().max(50).optional(),
   price: z.string().max(200).optional(),
+  tax: z.string().max(50).optional(),
+  taxAmount: z.string().max(200).optional(),
   access: z.string().max(500).optional(),
   landArea: z.string().max(200).optional(),
+  areaMethod: z.string().max(50).optional(),
+  landRight: z.string().max(100).optional(),
+  privateRoad: z.string().max(200).optional(),
+  landCategory: z.array(z.string().max(100)).max(20).optional(),
+  setback: z.string().max(200).optional(),
+  setbackUnit: z.string().max(10).optional(),
+  terrain: z.string().max(50).optional(),
   totalFloorArea: z.string().max(200).optional(),
-  totalUnits: z.string().max(50).optional(),
-  builtYearMonth: z.string().max(100).optional(),
   structure: z.string().max(200).optional(),
+  aboveFloors: z.string().max(50).optional(),
+  basementFloors: z.string().max(50).optional(),
+  builtYearMonth: z.string().max(100).optional(),
+  renovYearMonth: z.string().max(100).optional(),
+  parking: z.string().max(100).optional(),
+  totalUnits: z.string().max(50).optional(),
   grossYield: z.string().max(100).optional(),
   expectedIncome: z.string().max(200).optional(),
-  transactionType: z.string().max(200).optional(),
+  roadWidth: z.string().max(100).optional(),
+  roadDirections: z.array(z.string().max(100)).max(20).optional(),
+  cityPlanning: z.array(z.string().max(100)).max(20).optional(),
+  useDistrict: z.array(z.string().max(100)).max(20).optional(),
+  areaZone: z.array(z.string().max(100)).max(20).optional(),
+  buildingConfirm: z.string().max(50).optional(),
+  rebuild: z.string().max(50).optional(),
+  legalRestriction: z.string().max(1000).optional(),
+  equipment: z.string().max(1000).optional(),
+  occupancy: z.string().max(50).optional(),
+  delivery: z.string().max(100).optional(),
+  /** @deprecated 旧キー名。`delivery` の別名として後方互換のみに残す（本番稼働中の旧ダイアログ対応）。 */
   deliveryTiming: z.string().max(200).optional(),
   remarks: z.string().max(1000).optional(),
+  transactionType: z.string().max(200).optional(),
+  compensation: z.string().max(200).optional(),
+  adType: z.string().max(200).optional(),
+  staff: z.string().max(200).optional(),
+  agent: z.string().max(200).optional(),
+  specialNotes: z.string().max(1000).optional(),
+  catchCopy: z.string().max(200).optional(),
+  salesPoints: z.array(z.string().max(200)).max(20).optional(),
 });
 
 // POST /api/properties/[id]/sales-sheets/new

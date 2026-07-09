@@ -444,6 +444,61 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(JSON.stringify(lastDocument())).toContain("一棟アパート");
   });
 
+  // [F2-C Task3] buildingOverridesSchema を BUILDING_FIELDS(field-model) 駆動へ総入れ替え
+  // （旧: price/access/landArea/totalFloorArea/totalUnits/builtYearMonth/structure/grossYield/
+  // expectedIncome/transactionType/deliveryTiming/remarks の固定12項目）。house と同じ検証形。
+  function makeBuildingRequest(body: unknown) {
+    return new Request("http://localhost/api/properties/p1/sales-sheets/new", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+  function buildingOverviewRow(label: string): string | undefined {
+    const overview = lastDocument().elements.find((e) => e.id === "overview");
+    return overview?.rows?.find((r) => r.label === label)?.value;
+  }
+
+  it("201 — 一棟: 新schemaの multiselect（地目）を受理し、スペック表に併記される", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_building" });
+    const res = await POST(makeBuildingRequest({ landCategory: ["宅地", "雑種地"] }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(buildingOverviewRow("地目")).toBe("宅地 / 雑種地");
+  });
+
+  it("201 — 一棟: 収益系（総戸数/想定利回り/満室想定収入）と付帯権利を受理する", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_building" });
+    const res = await POST(
+      makeBuildingRequest({ totalUnits: "12", grossYield: "7.8", expectedIncome: "980", landRight: "所有権" }),
+      { params: Promise.resolve({ id: "p1" }) },
+    );
+    expect(res.status).toBe(201);
+    expect(buildingOverviewRow("総戸数")).toBe("12戸");
+    expect(buildingOverviewRow("想定利回り")).toBe("7.8％");
+    expect(buildingOverviewRow("満室想定収入(年額)")).toBe("980万円");
+    expect(buildingOverviewRow("付帯権利")).toBe("所有権");
+  });
+
+  it("201 — 一棟: 課税指定で「うち消費税」行が入る（house/mansion と同じ tax/taxAmount 欄）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_building" });
+    const res = await POST(makeBuildingRequest({ tax: "課税", taxAmount: "1200" }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(buildingOverviewRow("うち消費税")).toBe("1200万円");
+  });
+
+  it("201 — 一棟: 旧キー名 deliveryTiming を後方互換で受理し、引渡時期欄に入る（本番稼働中の旧ダイアログ対応）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_building" });
+    const res = await POST(makeBuildingRequest({ deliveryTiming: "相談" }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(buildingOverviewRow("引渡時期")).toBe("相談");
+  });
+
   it("201 — 認可OKの写真は最大3枚まで document に入る（順序 isPrimary→sortOrder）", async () => {
     pm.property.findUnique.mockResolvedValue(MANSION_PROPERTY);
     pm.propertyPhoto.findMany.mockResolvedValue([
