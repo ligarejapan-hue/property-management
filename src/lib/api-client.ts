@@ -445,7 +445,6 @@ export async function updateSaleDmSettings(body: {
 export interface RegistrySettings {
   hasLoginId: boolean;
   hasPassword: boolean;
-  baseUrl: string | null;
   encryptionConfigured: boolean;
   updatedAt: string | null;
 }
@@ -453,7 +452,6 @@ export interface RegistrySettings {
 const EMPTY_REGISTRY_SETTINGS: RegistrySettings = {
   hasLoginId: false,
   hasPassword: false,
-  baseUrl: null,
   encryptionConfigured: false,
   updatedAt: null,
 };
@@ -470,7 +468,6 @@ export async function fetchRegistrySettings(): Promise<RegistrySettings> {
 export async function updateRegistrySettings(body: {
   loginId?: string;
   password?: string;
-  baseUrl?: string | null;
 }): Promise<{ ok: boolean }> {
   if (USE_MOCK) {
     await mockDelay();

@@ -17,7 +17,6 @@ export default function RegistrySettingsPage() {
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [s, setS] = useState<RegistrySettings | null>(null);
 
-  const [baseUrl, setBaseUrl] = useState("");
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
   const [clearLoginId, setClearLoginId] = useState(false);
@@ -25,7 +24,6 @@ export default function RegistrySettingsPage() {
 
   const applySettings = (data: RegistrySettings) => {
     setS(data);
-    setBaseUrl(data.baseUrl ?? "");
     setLoginId("");
     setPassword("");
     setClearLoginId(false);
@@ -49,7 +47,7 @@ export default function RegistrySettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const body: Parameters<typeof updateRegistrySettings>[0] = { baseUrl };
+      const body: Parameters<typeof updateRegistrySettings>[0] = {};
       // 資格情報は「クリア指定なら空文字」「入力があればその値をそのまま(trim しない=前後空白を保持)」
       // 「どちらも無ければ送らない=現状維持」。値の trim は正当な資格情報を壊し得る(@codex 指摘対応)。
       if (clearLoginId) body.loginId = "";
@@ -121,9 +119,6 @@ export default function RegistrySettingsPage() {
           onClear={() => { setClearPassword((c) => !c); setPassword(""); }}
           disabled={!s?.encryptionConfigured}
         />
-        <Field label="ベースURL(任意・空欄で既定)">
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="例: https://www1.touki.or.jp" maxLength={500} className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
-        </Field>
       </div>
 
       <button type="button" onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
@@ -131,15 +126,6 @@ export default function RegistrySettingsPage() {
         保存
       </button>
     </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{label}</span>
-      {children}
-    </label>
   );
 }
 

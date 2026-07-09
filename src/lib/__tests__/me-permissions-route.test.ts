@@ -68,6 +68,13 @@ vi.mock("@/lib/registry-fetch/auto-fetch", () => ({
   isRegistryAutoFetchProviderConfigured: vi.fn(),
   isRegistryLocationSearchConfigured: vi.fn(),
 }));
+vi.mock("@/lib/registry-fetch/config-store", () => ({
+  loadRegistryFetchCredentials: vi.fn(async () => ({
+    loginId: null,
+    password: null,
+    baseUrl: null,
+  })),
+}));
 
 vi.mock("@/lib/registry-ocr/client", () => ({
   isRegistryOcrConfigured: vi.fn(),
@@ -99,6 +106,7 @@ import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
+import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 import { GET } from "@/app/api/me/permissions/route";
 
 const SESSION = {
@@ -178,6 +186,15 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       registryOcrDraft: false,
       saleDmLetter: false,
     });
+  });
+
+  it("registry 資格情報を DB→env で解決し credentials として capability に注入する", async () => {
+    await GET();
+    expect(loadRegistryFetchCredentials).toHaveBeenCalledTimes(1);
+    const autoArg = (isRegistryAutoFetchProviderConfigured as Mock).mock.calls[0]![0];
+    const searchArg = (isRegistryLocationSearchConfigured as Mock).mock.calls[0]![0];
+    expect(autoArg).toHaveProperty("credentials");
+    expect(searchArg).toHaveProperty("credentials");
   });
 
   it("registryLocationSearch は所在検索対応 provider のときだけ true（自動取得より厳しい）", async () => {
@@ -295,10 +312,10 @@ describe("GET /api/me/permissions — 実装形状（source assertion）", () =>
       /corporateLookup:\s*isCorporateLookupConfigured\(\)/,
     );
     expect(routeSrc).toMatch(
-      /registryAutoFetch:\s*isRegistryAutoFetchProviderConfigured\(\)/,
+      /registryAutoFetch:\s*isRegistryAutoFetchProviderConfigured\(\{\s*credentials:/,
     );
     expect(routeSrc).toMatch(
-      /registryLocationSearch:\s*isRegistryLocationSearchConfigured\(\)/,
+      /registryLocationSearch:\s*isRegistryLocationSearchConfigured\(\{\s*credentials:/,
     );
     expect(routeSrc).not.toMatch(/process\.env\./);
   });

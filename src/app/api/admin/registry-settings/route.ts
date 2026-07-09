@@ -43,7 +43,6 @@ export async function GET() {
     return apiResponse({
       hasLoginId: !!row?.loginIdEnc,
       hasPassword: !!row?.passwordEnc,
-      baseUrl: row?.baseUrl ?? null,
       encryptionConfigured: isRegistrySecretCryptoConfigured(),
       updatedAt: row?.updatedAt ?? null,
     });
@@ -52,10 +51,11 @@ export async function GET() {
   }
 }
 
+// baseUrl(ログイン先 origin)は admin 設定不可(env のみ=ops 管理)。設定画面から任意 origin に
+// 変えられると保存済み資格情報を攻撃者 origin へ送信させ得るため受け付けない(@codex P1)。
 const putSchema = z.object({
   loginId: z.string().max(500).optional(),
   password: z.string().max(500).optional(),
-  baseUrl: z.string().max(500).optional().nullable(),
 });
 
 export async function PUT(request: NextRequest) {
@@ -91,10 +91,6 @@ export async function PUT(request: NextRequest) {
     };
     applySecret(body.loginId, "loginIdEnc", "loginId");
     applySecret(body.password, "passwordEnc", "password");
-    if (body.baseUrl !== undefined) {
-      data.baseUrl = body.baseUrl?.trim() || null;
-      changed.push("baseUrl");
-    }
 
     await prisma.registryFetchConfig.upsert({
       where: { id: CONFIG_ID },

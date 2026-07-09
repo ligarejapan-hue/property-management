@@ -12,6 +12,7 @@ import {
   runRegistryAutoFetch,
   getRegistryFetchProvider,
 } from "@/lib/registry-fetch/auto-fetch";
+import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 import { resolveRegistryCandidate } from "@/lib/registry-fetch/search";
 
 // ---------- POST /api/properties/[id]/registry/auto-fetch ----------
@@ -61,7 +62,10 @@ export async function POST(
     // provider が無ければ 501 で安全停止する。これにより mock 固定PDFで本番 DB
     // （registryStatus / ImportJob / Attachment）を更新する事故を防ぐ（mock 呼び出し・
     // DB 副作用は一切発生しない）。将来 PR で実 provider 実装後にこの経路が有効化される。
-    const provider = getRegistryFetchProvider();
+    // 資格情報は DB(設定画面)→env で解決して provider へ注入する。readiness(セレクタ校正)
+    // 未達なら provider は null のまま=501(本番挙動不変・実サイトアクセスは起きない)。
+    const credentials = await loadRegistryFetchCredentials();
+    const provider = getRegistryFetchProvider({ credentials });
     if (!provider) {
       throw new ApiError(
         501,
