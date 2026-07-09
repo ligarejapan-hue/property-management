@@ -12,7 +12,7 @@ import {
   mapOccupancyStatusToMansionOccupancy,
   mapOccupancyStatusToLandOccupancy,
 } from "./occupancy";
-import { MANSION_FIELDS, LAND_FIELDS } from "./field-model";
+import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS } from "./field-model";
 import { buildSheetRows, type SheetValues } from "./sheet-rows";
 
 /**
@@ -638,17 +638,83 @@ export async function buildInitialSalesSheetDocument(
 }
 
 // ---- 売戸建 ----
+// 自社マイソク様式（キャッチ帯/写真+セールスポイント/全項目スペック表/会社フッター）。
+// スペック表の行は field-model(HOUSE_FIELDS) + sheet-rows(buildSheetRows) に委譲する
+// （[F2-B Task2] 旧 baseSheet 版の buildSaleHouseDocument を置換）。マンションと同じく
+// 消費税(課税/不課税)欄を持つ（土地と異なり戸建は課税対象）。house は building relation を
+// 配線しない(現行踏襲)ため、建物構造/築年月/増改築年月/各階面積/地上階・地下階は
+// 常に手入力（mansion のような building フォールバックを持たない）。
 export interface SaleHouseOverrides {
+  /** 物件種目（新築戸建/中古戸建等）。DB propertyType は house 単一 enum で非1:1のため常に手入力。 */
+  propertyType?: string;
+  // 価格
   price?: string;
+  tax?: string;
+  taxAmount?: string;
+  // 所在・交通
   access?: string;
+  // 土地
   landArea?: string;
+  areaMethod?: string;
+  landRight?: string;
+  privateRoad?: string;
+  /** 地目（複数選択）。field-model 上は multiselect(string[])。 */
+  landCategory?: string[];
+  setback?: string;
+  setbackUnit?: string;
+  terrain?: string;
+  // 建物
   buildingArea?: string;
-  builtYearMonth?: string;
+  floor1Area?: string;
+  floor2Area?: string;
+  floor3Area?: string;
+  /** 建物構造。house に building relation を配線しないため常に手入力（現行踏襲）。 */
   structure?: string;
-  transactionType?: string;
+  aboveFloors?: string;
+  basementFloors?: string;
+  parking?: string;
+  /** 築年月。house に building relation を配線しないため常に手入力（現行踏襲）。 */
+  builtYearMonth?: string;
+  renovYearMonth?: string;
+  // 法令
+  roadDirections?: string[];
+  /**
+   * 接道幅員（override）。property.roadWidth（自動反映）より精度の高い値を手入力したい
+   * 場合に優先される（LAND_FIELDS.roadWidth と同じ「override優先＋auto fallback」）。
+   */
+  roadWidth?: string;
+  cityPlanning?: string[];
+  /** 用途地域の追加選択（自動反映=zoningDistrict 1件 + これ）。 */
+  useDistrict?: string[];
+  areaZone?: string[];
+  buildingConfirm?: string;
+  rebuild?: string;
+  legalRestriction?: string;
+  // 設備・現況
+  equipment?: string;
+  /**
+   * 現況（居住中/空家/賃貸中/未完成）。override が無い場合のデフォルトは
+   * `mapOccupancyStatusToMansionOccupancy`（occupancy.ts）が occupancyStatus から
+   * 決定的に写像する（戸建の現況語彙はマンションと同一のため再利用）。
+   * override があれば常にそれを優先する。
+   */
+  occupancy?: string;
+  delivery?: string;
+  /** @deprecated 旧キー名。`delivery` の別名として後方互換のみに残す（LAND_FIELDS と同じ経緯）。 */
   deliveryTiming?: string;
   remarks?: string;
+  // 会社（フッター。HOUSE_FIELDS の section:"会社" と対応）
+  transactionType?: string;
+  compensation?: string;
+  adType?: string;
+  staff?: string;
+  agent?: string;
+  specialNotes?: string;
+  // レイアウト専用（field-model の行ではない、キャッチ帯/セールスポイントの見出し文言）
+  catchCopy?: string;
+  salesPoints?: string[];
 }
+
 export interface SaleHouseInput {
   property: {
     address: string;
@@ -661,28 +727,106 @@ export interface SaleHouseInput {
     occupancyStatus?: string | null;
   };
   photos?: { fileUrl: string }[];
+  /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を配置する。 */
+  floorPlanImage?: { fileUrl: string } | null;
   overrides?: SaleHouseOverrides;
 }
-export function buildSaleHouseDocument(input: SaleHouseInput): SalesSheetDocument {
+
+/** HOUSE_FIELDS の会社セクション（フッター用）を除いたスペック表用フィールド。 */
+const HOUSE_SPEC_FIELDS = HOUSE_FIELDS.filter((f) => f.section !== "会社");
+
+/** property の自動反映値 + overrides から sheet-rows 用の values を組む。 */
+function buildHouseValues(input: SaleHouseInput): SheetValues {
   const o = input.overrides ?? {};
   const p = input.property;
-  const rows = [
-    row("所在地", p.address),
-    row("交通", o.access),
-    row("土地面積", o.landArea),
-    row("建物面積", o.buildingArea),
-    row("間取り", p.layoutType),
-    row("築年月", o.builtYearMonth),
-    row("構造", o.structure),
-    row("用途地域", p.zoningDistrict),
-    row("建蔽率・容積率", formatRatio(p.buildingCoverageRatio, p.floorAreaRatio)),
-    row("接道", formatRoad(p.roadType, p.roadWidth)),
-    row("現況", localizeOccupancy(p.occupancyStatus)),
-    row("引渡", o.deliveryTiming),
-    row("取引態様", o.transactionType),
-    row("備考", o.remarks),
-  ];
-  return baseSheet("売戸建", o.price, rows, input.photos);
+
+  // 用途地域: 自動反映(zoningDistrict) 1件 + overrides の追加選択（空は除外・mansion/land と同方式）。
+  const useDistrict = [p.zoningDistrict, ...(o.useDistrict ?? [])].filter(
+    (v): v is string => typeof v === "string" && v.trim() !== "",
+  );
+
+  return {
+    // 価格
+    propertyType: o.propertyType,
+    price: o.price,
+    tax: o.tax,
+    taxAmount: o.taxAmount,
+    // 所在・交通
+    address: p.address,
+    access: o.access,
+    // 土地: 土地面積は面積計測方式(公簿/実測)と、セットバックは単位(m/㎡)と合成した
+    // 1つの表示値に組み立てる（field-model の landArea/setback は unit を持たないため、
+    // sheet-rows 側での二重付与を防ぐ・buildLandValues と同じ理由）。
+    landArea: fmtAreaWithMethod(o.landArea, o.areaMethod),
+    areaMethod: o.areaMethod,
+    landRight: o.landRight,
+    privateRoad: o.privateRoad,
+    landCategory: o.landCategory,
+    setback: fmtValueWithUnit(o.setback, o.setbackUnit),
+    setbackUnit: o.setbackUnit,
+    terrain: o.terrain,
+    // 建物: house は building relation を配線しない（現行踏襲）ため、建物構造/築年月/
+    // 増改築年月/各階面積/地上階・地下階は常に手入力（mansion のような building
+    // フォールバックを持たない）。
+    buildingArea: o.buildingArea,
+    floor1Area: o.floor1Area,
+    floor2Area: o.floor2Area,
+    floor3Area: o.floor3Area,
+    structure: o.structure,
+    aboveFloors: o.aboveFloors,
+    basementFloors: o.basementFloors,
+    layout: p.layoutType ?? undefined,
+    parking: o.parking,
+    builtYearMonth: o.builtYearMonth,
+    renovYearMonth: o.renovYearMonth,
+    // 法令
+    roadKind: p.roadType ?? undefined,
+    roadWidth: o.roadWidth ?? p.roadWidth ?? undefined,
+    roadDirections: o.roadDirections,
+    cityPlanning: o.cityPlanning,
+    useDistrict,
+    areaZone: o.areaZone,
+    coverageRatio: p.buildingCoverageRatio ?? undefined,
+    floorRatio: p.floorAreaRatio ?? undefined,
+    buildingConfirm: o.buildingConfirm,
+    rebuild: o.rebuild,
+    legalRestriction: o.legalRestriction,
+    // 設備・現況
+    equipment: o.equipment,
+    // 現況: override 優先、無ければ occupancyStatus からの決定的写像（戸建の現況語彙は
+    // マンションと同一のため mapOccupancyStatusToMansionOccupancy を再利用。作成ダイアログの
+    // 自動反映プレビューと同一関数＝フェッチのタイミングに依存しない）。
+    occupancy: o.occupancy ?? mapOccupancyStatusToMansionOccupancy(p.occupancyStatus),
+    delivery: o.delivery ?? o.deliveryTiming,
+    remarks: o.remarks,
+    // 会社（フッター）
+    transactionType: o.transactionType,
+    compensation: o.compensation,
+    adType: o.adType,
+    staff: o.staff,
+    agent: o.agent,
+    specialNotes: o.specialNotes,
+  };
+}
+
+export function buildSaleHouseDocument(input: SaleHouseInput): SalesSheetDocument {
+  const o = input.overrides ?? {};
+
+  const values = buildHouseValues(input);
+  const rows = buildSheetRows(HOUSE_SPEC_FIELDS, values);
+
+  const priceText = fmtManYen(o.price);
+
+  return buildSpecSheetDocument({
+    heading: "売戸建",
+    priceText,
+    rows,
+    photos: input.photos,
+    catchCopy: o.catchCopy,
+    salesPoints: o.salesPoints,
+    footerDetails: companyFooterDetails(o),
+    floorPlanImage: input.floorPlanImage,
+  });
 }
 
 // ---- 一棟（マンション / アパート） ----

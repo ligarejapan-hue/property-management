@@ -1,9 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { salesSheetDocumentSchema } from "../document-schema";
 import {
-  buildSaleHouseDocument,
   buildSaleBuildingDocument,
-  type SaleHouseInput,
   type SaleBuildingInput,
 } from "../build-document";
 
@@ -26,61 +24,11 @@ const tableRow = (doc: { elements: unknown[] }, label: string): string | undefin
   return undefined;
 };
 
-const imageCount = (doc: { elements: { type: string }[] }) =>
-  doc.elements.filter((e) => e.type === "image").length;
-
-// 売マンション（区分）は自社マイソク様式に作り直し、専用テスト
-// build-mansion.test.ts に移設（field-model/sheet-rows 駆動のスペック表・
-// キャッチ帯・会社フッターを検証）。ここでは他種別のみを扱う。
-
-// ---------------- 売戸建 ----------------
-describe("buildSaleHouseDocument", () => {
-  const input: SaleHouseInput = {
-    property: {
-      address: "神奈川県横浜市港北区日吉4-5-6",
-      layoutType: "4LDK",
-      zoningDistrict: "第一種低層住居専用地域",
-      buildingCoverageRatio: "50",
-      floorAreaRatio: "100",
-      roadType: "公道",
-      roadWidth: "4.0",
-      occupancyStatus: "vacant",
-    },
-    photos: [photos3[0]],
-    overrides: {
-      price: "5,280万円",
-      access: "東急東横線「日吉」駅 徒歩10分",
-      landArea: "110.25㎡",
-      buildingArea: "95.60㎡",
-      builtYearMonth: "2018年6月",
-      structure: "木造2階建",
-      transactionType: "専任媒介",
-      deliveryTiming: "相談",
-      remarks: "南向き・車庫2台",
-    },
-  };
-
-  it("A4横で schema 検証を通る", () => {
-    const doc = buildSaleHouseDocument(input);
-    expect(doc.page.orientation).toBe("landscape");
-    expect(salesSheetDocumentSchema.safeParse(doc).success).toBe(true);
-  });
-
-  it("表題売戸建、土地/建物面積・構造・建蔽率容積率・接道を含む", () => {
-    const doc = buildSaleHouseDocument(input);
-    expect(texts(doc)).toContain("売戸建");
-    expect(tableRow(doc, "土地面積")).toBe("110.25㎡");
-    expect(tableRow(doc, "建物面積")).toBe("95.60㎡");
-    expect(tableRow(doc, "構造")).toBe("木造2階建");
-    expect(tableRow(doc, "建蔽率・容積率")).toContain("50");
-    expect(tableRow(doc, "接道")).toContain("公道");
-    expect(tableRow(doc, "現況")).toBe("空室"); // localizeOccupancy("vacant")
-  });
-
-  it("写真1枚 → image 要素1つ", () => {
-    expect(imageCount(buildSaleHouseDocument(input))).toBe(1);
-  });
-});
+// 売マンション（区分）/ 売土地 / 売戸建は自社マイソク様式に作り直し、専用テスト
+// build-mansion.test.ts / build-land.test.ts / build-house.test.ts に移設
+// （field-model/sheet-rows 駆動のスペック表・キャッチ帯・会社フッターを検証）。
+// ここでは他種別（一棟）のみを扱う（[F2-B Task2]・build-mansion/build-land への
+// 移設と同じ経緯）。
 
 // ---------------- 一棟 ----------------
 describe("buildSaleBuildingDocument", () => {

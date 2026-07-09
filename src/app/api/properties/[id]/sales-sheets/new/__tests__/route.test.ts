@@ -364,6 +364,70 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(JSON.stringify(lastDocument())).toContain("売戸建");
   });
 
+  // [F2-B Task3] houseOverridesSchema を HOUSE_FIELDS(field-model) 駆動へ総入れ替え（旧:
+  // price/access/landArea/buildingArea/builtYearMonth/structure/transactionType/
+  // deliveryTiming/remarks の固定8項目）。landOverridesSchema の検証パターン
+  // （makeLandRequest/landOverviewRow）と同じ形で戸建にも用意する。
+  function makeHouseRequest(body: unknown) {
+    return new Request("http://localhost/api/properties/p1/sales-sheets/new", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+  function houseOverviewRow(label: string): string | undefined {
+    const overview = lastDocument().elements.find((e) => e.id === "overview");
+    return overview?.rows?.find((r) => r.label === label)?.value;
+  }
+
+  it("201 — 戸建: 新schemaの multiselect（地目）を受理し、生成documentのスペック表に併記される", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "house" });
+    const res = await POST(makeHouseRequest({ landCategory: ["宅地", "雑種地"] }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(houseOverviewRow("地目")).toBe("宅地 / 雑種地");
+  });
+
+  it("201 — 戸建: 用途地域は自動反映(zoningDistrict)+overrideの追加選択を併記する", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      ...LAND_PROPERTY,
+      propertyType: "house",
+      zoningDistrict: "商業地域",
+    });
+    const res = await POST(makeHouseRequest({ useDistrict: ["近隣商業地域"] }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(houseOverviewRow("用途地域")).toBe("商業地域 / 近隣商業地域");
+  });
+
+  it("201 — 戸建: 課税指定で「うち消費税」行が入る（マンションと同じ tax/taxAmount 欄）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "house" });
+    const res = await POST(makeHouseRequest({ tax: "課税", taxAmount: "180" }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(houseOverviewRow("うち消費税")).toBe("180万円");
+  });
+
+  it("201 — 戸建: 旧キー名 deliveryTiming を後方互換で受理し、引渡時期欄に入る（キャッシュ済みクライアント対応）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "house" });
+    const res = await POST(makeHouseRequest({ deliveryTiming: "即時" }), {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(201);
+    expect(houseOverviewRow("引渡時期")).toBe("即時");
+  });
+
+  it("201 — 戸建: 見出し要素は「売戸建」固定（自社マイソク様式・field-model駆動の証跡）", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "house" });
+    const res = await POST(makeHouseRequest({}), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(201);
+    const heading = lastDocument().elements.find((e) => e.id === "heading");
+    expect(heading?.content).toBe("売戸建");
+  });
+
   it("201 — 一棟マンション: sale-building（apartment_building）", async () => {
     pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_building" });
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: "p1" }) });

@@ -46,3 +46,9 @@ export const SETBACK_UNIT = ["m","㎡"] as const;
 export const DIRECTION = ["北","北東","東","南東","南","南西","西","北西"] as const;
 export const LAND_ACT_NOTICE = ["要","届出中","不要"] as const;
 export const OCCUPANCY_LAND = ["更地","上物有"] as const;
+
+/** F2: 売戸建で使う分。 */
+export const PROPERTY_TYPE_HOUSE = ["新築戸建","中古戸建","新築テラスハウス","中古テラスハウス"] as const;
+export const BUILDING_CONFIRM = ["済","申請中"] as const;
+export const PARKING_HOUSE = ["有","無","近隣確保"] as const;
+export const REBUILD_STATUS = ["再建築可","再建築不可"] as const;
