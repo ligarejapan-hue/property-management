@@ -485,8 +485,9 @@ export function getRegistryFetchProvider(
     return null;
   }
 
-  const baseUrl =
-    options.credentials?.baseUrl || process.env.REGISTRY_FETCH_BASE_URL || undefined;
+  // baseUrl(ログイン先 origin)は env のみ(ops 管理)。credentials(DB=設定画面 admin)からは
+  // 受け取らない=保存済み資格情報を攻撃者 origin へ送信させる経路を作らない(@codex P1)。
+  const baseUrl = process.env.REGISTRY_FETCH_BASE_URL || undefined;
   const timeoutRaw = process.env.REGISTRY_FETCH_TIMEOUT_MS;
   const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
 

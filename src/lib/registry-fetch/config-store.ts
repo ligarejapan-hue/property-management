@@ -4,7 +4,6 @@ import { decryptRegistrySecret } from "@/lib/registry-fetch/secret-crypto";
 export interface ResolvedRegistryCredentials {
   loginId: string | null;
   password: string | null;
-  baseUrl: string | null;
 }
 
 const CONFIG_ID = "singleton";
@@ -34,20 +33,21 @@ function envOrNull(v: string | undefined): string | null {
  *   readiness(browserFactory=セレクタ校正)に依存し、本番は未校正ゆえ 501 休眠のまま(挙動不変)。
  */
 export async function loadRegistryFetchCredentials(): Promise<ResolvedRegistryCredentials> {
-  let db:
-    | { loginIdEnc: string | null; passwordEnc: string | null; baseUrl: string | null }
-    | null = null;
+  let db: { loginIdEnc: string | null; passwordEnc: string | null } | null = null;
   try {
     db = await prisma.registryFetchConfig.findUnique({
       where: { id: CONFIG_ID },
-      select: { loginIdEnc: true, passwordEnc: true, baseUrl: true },
+      select: { loginIdEnc: true, passwordEnc: true },
     });
   } catch {
     db = null;
   }
+  // ⚠ baseUrl(ログイン先 origin)は DB から読まない=env のみ(ops 管理)。設定画面
+  // (user_management:write)で baseUrl を任意 origin に変えられると、校正済み時に保存済み
+  // 資格情報を攻撃者 origin へ送信させ得る(@codex P1)。target URL は REGISTRY_FETCH_BASE_URL /
+  // provider 既定(公式サービス)に限定する。
   return {
     loginId: decOrNull(db?.loginIdEnc) ?? envOrNull(process.env.REGISTRY_FETCH_LOGIN_ID),
     password: decOrNull(db?.passwordEnc) ?? envOrNull(process.env.REGISTRY_FETCH_PASSWORD),
-    baseUrl: (db?.baseUrl?.trim() || null) ?? envOrNull(process.env.REGISTRY_FETCH_BASE_URL),
   };
 }

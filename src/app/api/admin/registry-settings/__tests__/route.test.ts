@@ -81,7 +81,6 @@ describe("admin registry-settings route", () => {
     pm.registryFetchConfig.findUnique.mockResolvedValue({
       loginIdEnc: "enc-abc",
       passwordEnc: null,
-      baseUrl: "https://x",
       updatedAt: new Date(),
     });
     const res = await GET();
@@ -89,18 +88,16 @@ describe("admin registry-settings route", () => {
     expect(body).toMatchObject({
       hasLoginId: true,
       hasPassword: false,
-      baseUrl: "https://x",
       encryptionConfigured: true,
     });
     expect(JSON.stringify(body)).not.toContain("enc-abc");
   });
 
-  it("PUT は loginId/password を暗号化して upsert・baseUrl は平文", async () => {
-    await PUT(put({ loginId: "user9", password: "pass9", baseUrl: "https://touki" }));
+  it("PUT は loginId/password を暗号化して upsert", async () => {
+    await PUT(put({ loginId: "user9", password: "pass9" }));
     const args = pm.registryFetchConfig.upsert.mock.calls[0]![0];
     expect(args.update.loginIdEnc).toBe("enc(user9)");
     expect(args.update.passwordEnc).toBe("enc(pass9)");
-    expect(args.update.baseUrl).toBe("https://touki");
   });
 
   it("鍵未設定で秘匿値保存は 503(平文保存しない)", async () => {

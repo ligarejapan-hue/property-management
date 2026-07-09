@@ -67,13 +67,13 @@ describe("getRegistryFetchProvider: credentials 注入(DB-over-env 配線)", () 
   it("env 未設定でも credentials 注入があれば provider を解決(DB 由来資格情報を使う)", () => {
     const provider = getRegistryFetchProvider({
       browserFactory: fakeBrowserFactory,
-      credentials: { loginId: "db-id", password: "db-pw", baseUrl: "https://db" },
+      credentials: { loginId: "db-id", password: "db-pw" },
     });
     expect(provider).toBeInstanceOf(OfficialRegistryProvider);
     expect(
       isRegistryAutoFetchProviderConfigured({
         browserFactory: fakeBrowserFactory,
-        credentials: { loginId: "db-id", password: "db-pw", baseUrl: null },
+        credentials: { loginId: "db-id", password: "db-pw" },
       }),
     ).toBe(true);
   });
@@ -81,13 +81,13 @@ describe("getRegistryFetchProvider: credentials 注入(DB-over-env 配線)", () 
   it("credentials が null(DB空・env空)なら null(501 維持)", () => {
     const provider = getRegistryFetchProvider({
       browserFactory: fakeBrowserFactory,
-      credentials: { loginId: null, password: null, baseUrl: null },
+      credentials: { loginId: null, password: null },
     });
     expect(provider).toBeNull();
     expect(
       isRegistryAutoFetchProviderConfigured({
         browserFactory: fakeBrowserFactory,
-        credentials: { loginId: null, password: null, baseUrl: null },
+        credentials: { loginId: null, password: null },
       }),
     ).toBe(false);
   });
@@ -101,7 +101,7 @@ describe("getRegistryFetchProvider: credentials 注入(DB-over-env 配線)", () 
 
   it("credentials 注入があっても browserFactory 無しなら null(readiness 据え置き=本番501維持)", () => {
     const provider = getRegistryFetchProvider({
-      credentials: { loginId: "db-id", password: "db-pw", baseUrl: null },
+      credentials: { loginId: "db-id", password: "db-pw" },
     });
     expect(provider).toBeNull();
   });

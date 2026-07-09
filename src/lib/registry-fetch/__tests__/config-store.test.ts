@@ -35,7 +35,7 @@ describe("loadRegistryFetchCredentials", () => {
       baseUrl: "https://db",
     });
     const r = await loadRegistryFetchCredentials();
-    expect(r).toEqual({ loginId: "db-id", password: "db-pw", baseUrl: "https://db" });
+    expect(r).toEqual({ loginId: "db-id", password: "db-pw" });
   });
 
   it("DB が空の項目は env にフォールバック", async () => {
@@ -48,7 +48,7 @@ describe("loadRegistryFetchCredentials", () => {
       baseUrl: null,
     });
     const r = await loadRegistryFetchCredentials();
-    expect(r).toEqual({ loginId: "env-id", password: "env-pw", baseUrl: "https://env" });
+    expect(r).toEqual({ loginId: "env-id", password: "env-pw" });
   });
 
   it("DB 行なし(null)は env", async () => {
@@ -83,6 +83,6 @@ describe("loadRegistryFetchCredentials", () => {
   it("全て未設定は null", async () => {
     pm.registryFetchConfig.findUnique.mockResolvedValue(null);
     const r = await loadRegistryFetchCredentials();
-    expect(r).toEqual({ loginId: null, password: null, baseUrl: null });
+    expect(r).toEqual({ loginId: null, password: null });
   });
 });
