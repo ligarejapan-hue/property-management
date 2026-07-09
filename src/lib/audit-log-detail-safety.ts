@@ -168,8 +168,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // campaignId/count は ALWAYS_SAFE。recipientName/recipientAddress/body は denylist で [REDACTED]。
   sale_dm_campaign_view: new Set(["viewedAt"]),
   // 売却DM 設定更新(管理画面)。fields=変更したフィールド名の配列(値ではない・ALWAYS_SAFE)。
-  // provider=enum / updatedAt=ISO日時。APIキー値・URL値・差出人値は detail に載せず、混入しても denylist で [REDACTED]。
-  sale_dm_settings_update: new Set(["provider", "updatedAt"]),
+  // provider=enum / updatedAt=ISO日時 / target=対象識別子("singleton"・非PII・UUID列に載せられない
+  // singleton の代替表現)。APIキー値・URL値・差出人値は detail に載せず、混入しても denylist で [REDACTED]。
+  sale_dm_settings_update: new Set(["provider", "updatedAt", "target"]),
+  // 謄本取得の資格情報 設定更新(管理画面)。target=対象識別子("singleton")・changed=変更した
+  // フィールド名の配列(値ではない)。資格情報(ID/PW)の値は detail に載せず、混入しても denylist で [REDACTED]。
+  registry_settings_update: new Set(["target", "changed"]),
   // 表示名監査（read-only レポート）の閲覧/CSV 出力監査。detail は操作事実の
   // 非PIIメタデータのみ（entity/format=enum・viewedAt=ISO日時・各種件数/真偽）。
   // owner-prefixed な件数/真偽（ownerGroupCount/ownerTruncated/ownerNameVisible）は
