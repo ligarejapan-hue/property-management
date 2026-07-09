@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { getRegistryFetchProvider } from "@/lib/registry-fetch/auto-fetch";
+import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 import { runRegistrySearch } from "@/lib/registry-fetch/search";
 
 // ---------- POST /api/properties/[id]/registry/search ----------
@@ -59,7 +60,10 @@ export async function POST(
 
     // 本番 provider は未実装。route は mock を直接 new せず、解決した provider が
     // 無ければ 501 で安全停止する（本番 DB・外部接続に一切触れない fail-closed）。
-    const provider = getRegistryFetchProvider();
+    // 資格情報は DB(設定画面)→env で解決して provider へ注入する。readiness 未達なら
+    // provider は null のまま=501(本番挙動不変・実サイトアクセスは起きない)。
+    const credentials = await loadRegistryFetchCredentials();
+    const provider = getRegistryFetchProvider({ credentials });
     if (!provider) {
       throw new ApiError(
         501,
