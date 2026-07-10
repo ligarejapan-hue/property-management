@@ -16,7 +16,7 @@
 
 import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
 import { generateQrDataUrl } from "./qr-code";
-import { computeSpecSheetLayout, DEFAULT_FOOTER_H } from "./layout-engine";
+import { computeSpecSheetLayout, DEFAULT_FOOTER_H, packPhotoCells } from "./layout-engine";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
@@ -581,67 +581,6 @@ const PHOTO_ZONE_X_MM = 10;
 const PHOTO_ZONE_Y_MM = 46;
 const PHOTO_ZONE_MAX_W_MM = 130;
 const PHOTO_ZONE_BOTTOM_MARGIN_MM = 24;
-/** 写真間の余白(mm)。テンプレの写真レイアウトと同じ。 */
-const PHOTO_GAP_MM = 4;
-/** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
-const PHOTO_TARGET_ASPECT = 1.5;
-
-export interface PhotoCell {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-/**
- * n 個のセルを W×H の枠へ「行数を選び、各行は幅いっぱい均等割り」で敷き詰める
- * （穴なし・全行同高）。プロト autolayout-v4 の packCells をベースに 2 点調整:
- * - 行数の選択は「最悪セルの縦横比の PHOTO_TARGET_ASPECT からの乖離」を最小化
- *   （ミニマックス）。均等な配分（例: 4枚→2×2）が横長の帯より優先される。
- * - 端数は後方の行に配る＝先頭行が少列（幅広）になり、代表写真（配列先頭）が
- *   最上段の大きな枠を得る（テンプレの3枚レイアウトと同じ構造）。
- * セル寸法が非正になる行数は候補から除外し、全滅する極端な枚数では 1 行へ
- * フォールバックして MIN_ELEMENT_SIZE_MM でクランプ（非正寸法を返さないことを優先）。
- */
-export function packPhotoCells(n: number, W: number, H: number): PhotoCell[] {
-  const gap = PHOTO_GAP_MM;
-  let best: { rows: number; counts: number[]; score: number } | null = null;
-  for (let rows = 1; rows <= n; rows++) {
-    const base = Math.floor(n / rows);
-    const extra = n % rows;
-    const counts: number[] = [];
-    for (let r = 0; r < rows; r++) counts.push(base + (r >= rows - extra ? 1 : 0));
-    const th = (H - (rows - 1) * gap) / rows;
-    if (th <= 0) continue;
-    let score = 0;
-    for (const cols of counts) {
-      const tw = (W - (cols - 1) * gap) / cols;
-      if (tw <= 0) {
-        score = Number.POSITIVE_INFINITY;
-        break;
-      }
-      score = Math.max(score, Math.abs(Math.log(tw / th / PHOTO_TARGET_ASPECT)));
-    }
-    if (!Number.isFinite(score)) continue;
-    if (!best || score < best.score) best = { rows, counts, score };
-  }
-  if (!best) {
-    const w = Math.max(MIN_ELEMENT_SIZE_MM, (W - (n - 1) * gap) / n);
-    const h = Math.max(MIN_ELEMENT_SIZE_MM, H);
-    return Array.from({ length: n }, (_, c) => ({ x: c * (w + gap), y: 0, w, h }));
-  }
-  const { rows, counts } = best;
-  const th = (H - (rows - 1) * gap) / rows;
-  const cells: PhotoCell[] = [];
-  for (let r = 0; r < rows; r++) {
-    const cols = counts[r];
-    const tw = (W - (cols - 1) * gap) / cols;
-    for (let c = 0; c < cols; c++) {
-      cells.push({ x: c * (tw + gap), y: r * (th + gap), w: tw, h: th });
-    }
-  }
-  return cells;
-}
 
 /**
  * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト）。
