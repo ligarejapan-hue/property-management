@@ -45,6 +45,9 @@ export interface SpecSheetLayout {
   salesPoints: Rect;
   company: Rect;
   companyDetails: Rect;
+  /** 下部会社帯（buildFooterBand に渡す領域）。company/companyDetails と同じ原点・全幅だが
+   *  高さは footerHeight そのもの（帯全体を1矩形で表す・[Task3] エンジン結線）。 */
+  footer: Rect;
   floorPlan: Rect | null;
   photoArea: Rect;
   photoSlots: Rect[];
@@ -55,12 +58,13 @@ export interface SpecSheetLayout {
 // ---------------------------------------------------------------------------
 
 /**
- * 会社帯（company/company-details 要素）の高さ(mm)の既定値。`footerHeight` 入力の既定として
+ * 会社帯（buildFooterBand が描く下部帯）の高さ(mm)の既定値。`footerHeight` 入力の既定として
  * build-document.ts（作成時）と editor-document.ts（autoBalanceLayout・再バランス時）の
- * 両方が使う共有定数（会社帯自体の内容/行数は現状固定なので暫定値。将来Bで可変化）。
+ * 両方が使う共有定数。帯の中身（社名行＋情報3行＋取引条件/担当テーブル）が収まる高さとして
+ * 16→24 へ引き上げ（[Task3] 会社帯エンジン結線・調整可）。
  * 他の定数と違い、この値だけは呼び出し側の footerHeight 引数の既定値として外部公開する。
  */
-export const DEFAULT_FOOTER_H = 16;
+export const DEFAULT_FOOTER_H = 24;
 
 /** ページ高さ(mm)。mainBottom(=メイン領域の下端)の起点。 */
 const PAGE_H_MM = 210;
@@ -305,6 +309,7 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     w: COMPANY_W_MM,
     h: COMPANY_DETAILS_H_MM,
   };
+  const footer: Rect = { x: COMPANY_X_MM, y: mainBottom, w: COMPANY_W_MM, h: footerHeight };
 
   return {
     catchBand: { ...CATCH_BAND },
@@ -315,6 +320,7 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     salesPoints,
     company,
     companyDetails,
+    footer,
     floorPlan,
     photoArea,
     photoSlots,
