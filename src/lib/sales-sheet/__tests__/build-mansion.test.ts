@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { buildSaleMansionDocument } from "../build-document";
 import { salesSheetDocumentSchema } from "../document-schema";
 import { mapOccupancyStatusToMansionOccupancy } from "../occupancy";
-import { computeSpecSheetLayout } from "../layout-engine";
+import { computeSpecSheetLayout, DEFAULT_FOOTER_H } from "../layout-engine";
+import { buildFooterBand } from "../footer-band";
 
 const base = {
   property: {
@@ -248,7 +249,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
   // 座標とoverviewのfontSizePtはエンジンの出力(L)を期待値として使う＝
   // buildSaleMansionDocument→buildSpecSheetDocument が L.* を正しい要素へ配線している
   // ことを検証する（決め打ち座標ではなくエンジン契約に対するリグレッション）。
-  it("レイアウト: catch-band/heading/price/overview/sales-points/company/company-details のid・座標・スタイルがエンジン出力どおりに配線される", () => {
+  it("レイアウト: catch-band/heading/price/overview/sales-points/会社帯(footer-*) のid・座標・スタイルがエンジン出力どおりに配線される", () => {
     const doc = buildSaleMansionDocument({
       ...base,
       overrides: {
@@ -266,7 +267,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
       photoCount: 1,
       specRowCount: overviewEl?.rows.length ?? 0,
       hasFloorPlan: false,
-      footerHeight: 16, // build-document.ts の DEFAULT_FOOTER_H と同値
+      footerHeight: DEFAULT_FOOTER_H, // build-document.ts の DEFAULT_FOOTER_H と同値
     });
 
     expect(findEl(doc, "catch-band")).toMatchObject({
@@ -334,27 +335,16 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
       style: { fontSizePt: 9, bold: true, color: "#15324f" },
     });
 
-    expect(findEl(doc, "company")).toMatchObject({
-      type: "text",
-      x: L.company.x,
-      y: L.company.y,
-      w: L.company.w,
-      h: L.company.h,
-      z: 2,
-      content: "株式会社リガーレジャパン Ligare Japan　TEL 03-6823-2760",
-      style: { fontSizePt: 9, color: "#15324f" },
-    });
-
-    expect(findEl(doc, "company-details")).toMatchObject({
-      type: "text",
-      x: L.companyDetails.x,
-      y: L.companyDetails.y,
-      w: L.companyDetails.w,
-      h: L.companyDetails.h,
-      z: 2,
-      content: "取引態様：専任媒介",
-      style: { fontSizePt: 8, color: "#15324f" },
-    });
+    // 会社帯（buildFooterBand）: overrides.transactionType のみ指定＝担当/取引士/特記事項は
+    // 全空なのでコンパクト版（footer-staff-table 省略）。エンジンの footer 矩形 + 同じ
+    // FooterBandData を渡した buildFooterBand の出力と厳密に一致することを検証する
+    // （[Task3] company/company-details の2text要素から置換）。
+    const expectedFooterEls = buildFooterBand(L.footer, { transactionType: "専任媒介" });
+    expect(expectedFooterEls.length).toBeGreaterThan(0);
+    for (const expectedEl of expectedFooterEls) {
+      expect(findEl(doc, expectedEl.id)).toEqual(expectedEl);
+    }
+    expect(findEl(doc, "footer-staff-table")).toBeUndefined();
   });
 
   it("A4横で schema 検証を通る（保存可能な document）", () => {

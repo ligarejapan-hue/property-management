@@ -14,6 +14,7 @@ import {
 import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS } from "./field-model";
 import { buildSheetRows, type SheetValues } from "./sheet-rows";
 import { computeSpecSheetLayout, DEFAULT_FOOTER_H, type Rect } from "./layout-engine";
+import { buildFooterBand, type FooterBandData } from "./footer-band";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -39,7 +40,6 @@ export function toCanonicalUploadsSrc(
 const NAVY = "#15324f";
 const RED = "#d0331a";
 const FONT = '"Yu Gothic UI","Meiryo",sans-serif';
-const COMPANY = "株式会社リガーレジャパン Ligare Japan　TEL 03-6823-2760";
 
 // ---------------------------------------------------------------------------
 // 全種別(売マンション/売土地/売戸建/一棟)を自社マイソク様式（buildSpecSheetDocument・
@@ -318,38 +318,8 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
 }
 
 /**
- * 会社フッター2行目（取引態様/報酬/広告/担当/取引士/特記）。未入力の項目は落とす。
- * マンション/土地など、section:"会社" のキー・ラベルが共通のビルダー間で共有する
- * 汎用ヘルパー（[F2-A Task3] 汎用化）。
- */
-function companyFooterDetails(o: {
-  transactionType?: string;
-  compensation?: string;
-  adType?: string;
-  staff?: string;
-  agent?: string;
-  specialNotes?: string;
-}): string {
-  return [
-    o.transactionType && `取引態様：${o.transactionType}`,
-    o.compensation && `報酬：${o.compensation}`,
-    o.adType && `広告：${o.adType}`,
-    o.staff && `担当：${o.staff}`,
-    o.agent && `取引士：${o.agent}`,
-    o.specialNotes && `特記：${o.specialNotes}`,
-  ]
-    .filter(Boolean)
-    .join("　");
-}
-
-/** SaleMansionOverrides 向けの companyFooterDetails 別名（呼び出し箇所の意図を保つため名前を残す）。 */
-function mansionFooterDetails(o: SaleMansionOverrides): string {
-  return companyFooterDetails(o);
-}
-
-/**
  * 種別非依存の版面パーツ。自社マイソク様式（キャッチ帯/見出し+価格/全項目スペック表/
- * セールスポイント/会社フッター2行/写真/間取り枠）の入力を型で表す。
+ * セールスポイント/会社帯/写真/間取り枠）の入力を型で表す。
  * `buildSpecSheetDocument` の唯一の引数（[F2-A Task1] buildSaleMansionDocument から抽出）。
  */
 export interface SpecSheetParts {
@@ -363,20 +333,21 @@ export interface SpecSheetParts {
   catchCopy?: string;
   /** ◆区切りで結合して sales-points 要素に表示。 */
   salesPoints?: string[];
-  /** 会社フッター2行目（取引態様/報酬/…）。 */
-  footerDetails?: string;
+  /** 会社帯（取引態様/広告/報酬/担当/取引士/特記事項）。buildFooterBand(L.footer, …) へ渡す
+   *  （[Task3] 旧 footerDetails:string を構造化・会社定数自体は COMPANY_INFO 固定）。 */
+  footer?: FooterBandData;
   /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を置く。 */
   floorPlanImage?: { fileUrl: string } | null;
 }
 
 /**
  * A4横 自社マイソク様式の版面レイアウトを種別非依存に組む純関数（[F2-A Task1]）。
- * catch-band/catch-copy/heading/price/overview表/sales-points/company/company-details/
- * photos/floor-plan の要素構成・id・type・style種別・theme は不変（[Task2] で座標算出を
- * computeSpecSheetLayout へ委譲した後も同一）。座標(x/y/w/h)と overview表の
- * style.fontSizePt は、写真枚数・スペック表行数・間取り図有無からエンジンが決定的に
- * 算出する（build-mansion.test.ts 等のレイアウトテストはこのエンジン出力を期待値として
- * 検証しており、固定値の特性化テストではない）。
+ * catch-band/catch-copy/heading/price/overview表/sales-points/会社帯(footer-*・
+ * buildFooterBand)/photos/floor-plan の要素構成・id・type・style種別・theme は不変
+ * （[Task2] で座標算出を computeSpecSheetLayout へ委譲した後も同一。[Task3] でフッター2要素
+ * →会社帯へ置換）。座標(x/y/w/h)と overview表の style.fontSizePt は、写真枚数・スペック表
+ * 行数・間取り図有無からエンジンが決定的に算出する（build-mansion.test.ts 等のレイアウト
+ * テストはこのエンジン出力を期待値として検証しており、固定値の特性化テストではない）。
  */
 export function buildSpecSheetDocument(parts: SpecSheetParts): SalesSheetDocument {
   // レイアウト（座標/概要表フォント）は最適化エンジンに委譲する（[Task2]）。
@@ -412,11 +383,9 @@ export function buildSpecSheetDocument(parts: SpecSheetParts): SalesSheetDocumen
     // 写真下: セールスポイント（◆区切り）
     { id: "sales-points", type: "text", x: L.salesPoints.x, y: L.salesPoints.y, w: L.salesPoints.w, h: L.salesPoints.h, z: 2,
       content: salesPointsText, style: { fontSizePt: 9, bold: true, color: NAVY } },
-    // 会社フッター（下部帯・全幅）: 1行目=会社定数、2行目=種別ごとの詳細（取引態様/報酬/…）
-    { id: "company", type: "text", x: L.company.x, y: L.company.y, w: L.company.w, h: L.company.h, z: 2,
-      content: COMPANY, style: { fontSizePt: 9, color: NAVY } },
-    { id: "company-details", type: "text", x: L.companyDetails.x, y: L.companyDetails.y, w: L.companyDetails.w, h: L.companyDetails.h, z: 2,
-      content: parts.footerDetails ?? "", style: { fontSizePt: 8, color: NAVY } },
+    // 会社帯（下部・全幅）: 会社ブロック(COMPANY_INFO固定)＋取引条件/担当テーブル（[Task3]
+    // 旧2text要素(company/company-details)から置換・~15要素は帯矩形 L.footer 内に収まる）。
+    ...buildFooterBand(L.footer, parts.footer ?? {}),
     ...photoElements(photos, L.photoSlots),
   ];
 
@@ -449,7 +418,14 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
     photos: input.photos,
     catchCopy: o.catchCopy,
     salesPoints: o.salesPoints,
-    footerDetails: mansionFooterDetails(o),
+    footer: {
+      transactionType: o.transactionType,
+      adType: o.adType,
+      compensation: o.compensation,
+      staff: o.staff,
+      agent: o.agent,
+      specialNotes: o.specialNotes,
+    },
     floorPlanImage: input.floorPlanImage,
   });
 }
@@ -615,7 +591,14 @@ export function buildSaleLandDocument(input: SaleLandInput): SalesSheetDocument 
     photos,
     catchCopy: o.catchCopy,
     salesPoints: o.salesPoints,
-    footerDetails: companyFooterDetails(o),
+    footer: {
+      transactionType: o.transactionType,
+      adType: o.adType,
+      compensation: o.compensation,
+      staff: o.staff,
+      agent: o.agent,
+      specialNotes: o.specialNotes,
+    },
     floorPlanImage: input.floorPlanImage,
   });
 }
@@ -814,7 +797,14 @@ export function buildSaleHouseDocument(input: SaleHouseInput): SalesSheetDocumen
     photos: input.photos,
     catchCopy: o.catchCopy,
     salesPoints: o.salesPoints,
-    footerDetails: companyFooterDetails(o),
+    footer: {
+      transactionType: o.transactionType,
+      adType: o.adType,
+      compensation: o.compensation,
+      staff: o.staff,
+      agent: o.agent,
+      specialNotes: o.specialNotes,
+    },
     floorPlanImage: input.floorPlanImage,
   });
 }
@@ -1005,7 +995,14 @@ export function buildSaleBuildingDocument(input: SaleBuildingInput): SalesSheetD
     photos: input.photos,
     catchCopy: o.catchCopy,
     salesPoints: o.salesPoints,
-    footerDetails: companyFooterDetails(o),
+    footer: {
+      transactionType: o.transactionType,
+      adType: o.adType,
+      compensation: o.compensation,
+      staff: o.staff,
+      agent: o.agent,
+      specialNotes: o.specialNotes,
+    },
     floorPlanImage: input.floorPlanImage,
   });
 }

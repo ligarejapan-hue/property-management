@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { buildSpecSheetDocument, type SpecSheetParts } from "../build-document";
 import { salesSheetDocumentSchema } from "../document-schema";
-import { computeSpecSheetLayout } from "../layout-engine";
+import { computeSpecSheetLayout, DEFAULT_FOOTER_H } from "../layout-engine";
+import { buildFooterBand } from "../footer-band";
+import { COMPANY_INFO } from "../company-info";
 
 const findEl = (doc: { elements: unknown[] }, id: string) =>
   (doc.elements as { id: string }[]).find((e) => e.id === id);
@@ -30,9 +32,9 @@ const baseParts: SpecSheetParts = {
  * ため、決め打ち値ではなくエンジンの出力を期待値として使う（＝buildSpecSheetDocument が
  * L.* を正しい要素へ配線しているかを検証する）。baseParts は photos/floorPlanImage
  * 未指定＝photoCount:0・hasFloorPlan:false。footerHeight はビルダー内の
- * DEFAULT_FOOTER_H(=16) と同値（暫定・将来Bで可変化）。
+ * DEFAULT_FOOTER_H と同値（インポートして直接使う＝定数がズレても追従する）。
  */
-const FOOTER_H = 16;
+const FOOTER_H = DEFAULT_FOOTER_H;
 const L0 = computeSpecSheetLayout({
   photoCount: 0,
   specRowCount: baseParts.rows.length,
@@ -151,31 +153,19 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
     expect(findEl(doc, "sales-points")).toMatchObject({ content: "◆リノベ済　◆南向き" });
   });
 
-  it("company は会社定数、company-details は footerDetails(未指定なら空文字)が入る", () => {
-    const doc = buildSpecSheetDocument({ ...baseParts, footerDetails: "取引態様：専任媒介" });
-    expect(findEl(doc, "company")).toMatchObject({
-      type: "text",
-      x: L0.company.x,
-      y: L0.company.y,
-      w: L0.company.w,
-      h: L0.company.h,
-      z: 2,
-      content: "株式会社リガーレジャパン Ligare Japan　TEL 03-6823-2760",
-      style: { fontSizePt: 9, color: "#15324f" },
-    });
-    expect(findEl(doc, "company-details")).toMatchObject({
-      type: "text",
-      x: L0.companyDetails.x,
-      y: L0.companyDetails.y,
-      w: L0.companyDetails.w,
-      h: L0.companyDetails.h,
-      z: 2,
-      content: "取引態様：専任媒介",
-      style: { fontSizePt: 8, color: "#15324f" },
-    });
+  it("footer は buildFooterBand(L.footer, parts.footer) の展開がそのまま入る（[Task3] company/company-detailsから置換）", () => {
+    const doc = buildSpecSheetDocument({ ...baseParts, footer: { transactionType: "専任媒介" } });
+    const expectedFooterEls = buildFooterBand(L0.footer, { transactionType: "専任媒介" });
+    expect(expectedFooterEls.length).toBeGreaterThan(0);
+    for (const expectedEl of expectedFooterEls) {
+      expect(findEl(doc, expectedEl.id)).toEqual(expectedEl);
+    }
+  });
 
+  it("footer未指定でも会社ブロック(COMPANY_INFO固定)は出る。取引条件/担当が全空なら担当テーブルは省略", () => {
     const withoutFooter = buildSpecSheetDocument(baseParts);
-    expect(findEl(withoutFooter, "company-details")).toMatchObject({ content: "" });
+    expect(findEl(withoutFooter, "footer-name-ja")).toMatchObject({ content: COMPANY_INFO.nameJa });
+    expect(findEl(withoutFooter, "footer-staff-table")).toBeUndefined();
   });
 
   it("floorPlanImage を指定したときのみ floor-plan の image 要素が追加される", () => {
@@ -220,7 +210,7 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
       ...baseParts,
       catchCopy: "駅近角部屋",
       salesPoints: ["リノベ済", "南向き"],
-      footerDetails: "取引態様：専任媒介",
+      footer: { transactionType: "専任媒介" },
       photos: [{ fileUrl: "/uploads/1.jpg" }],
       floorPlanImage: { fileUrl: "/uploads/plan.jpg" },
     });

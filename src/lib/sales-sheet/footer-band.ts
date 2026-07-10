@@ -129,7 +129,7 @@ function mkDivider(id: string, rect: Rect): SalesSheetElement {
   };
 }
 
-/** 値のある行だけ残す（build-document.ts の companyFooterDetails と同じ falsy 落とし）。 */
+/** 値のある行だけ残す（build-document.ts の各 buildSale*Document と同じ falsy 落とし）。 */
 function pickRows(pairs: [string, string | undefined][]): { label: string; value: string }[] {
   return pairs.filter((pair): pair is [string, string] => !!pair[1]).map(([label, value]) => ({ label, value }));
 }
