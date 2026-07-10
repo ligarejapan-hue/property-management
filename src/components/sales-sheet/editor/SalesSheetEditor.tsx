@@ -66,6 +66,24 @@ const DEFAULT_ZOOM = 0.75;
 /** Millimetres to pixels at 96 dpi (96 / 25.4). */
 const MM_TO_PX = 96 / 25.4;
 
+/**
+ * buildSpecSheetDocument が組む既知のテンプレ要素 id（@review Fix2）。文字サイズ変更時の
+ * 自動再バランス(autoBalanceLayout)は、この集合に含まれる要素の変更時のみ発火する
+ * （ユーザーが足した独自テキストの文字サイズ変更でテンプレ全体を崩さないため）。
+ * editor-document.ts の autoBalanceLayout 側の TEMPLATE_ELEMENT_IDS と同じ集合。
+ */
+const TEMPLATE_ELEMENT_IDS = new Set([
+  "catch-band",
+  "catch-copy",
+  "heading",
+  "price",
+  "overview",
+  "sales-points",
+  "company",
+  "company-details",
+  "floor-plan",
+]);
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -133,9 +151,13 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           return deleteElement(prev, id);
         case "editText": {
           const next = editText(prev, id, change.patch);
-          // 機能A②: 文字サイズ変更は枠バランスへ波及（周りも連動再バランス）。
+          // 機能A②: 文字サイズ変更は枠バランスへ波及（周りも連動再バランス）。ただし
+          // テンプレ既知idの要素の変更時のみ（@review Fix2）— ユーザーが足した独自要素の
+          // 文字サイズ変更でテンプレを崩さない（手で動かした要素がグリッドへ戻ってしまう）。
           // 内容/色/フォント種別だけの変更は据え置き（サイズ変更時のみ）。
-          return change.patch.fontSizePt !== undefined ? autoBalanceLayout(next) : next;
+          return change.patch.fontSizePt !== undefined && TEMPLATE_ELEMENT_IDS.has(id)
+            ? autoBalanceLayout(next)
+            : next;
         }
         case "editImage":
           return editImage(prev, id, change.patch);

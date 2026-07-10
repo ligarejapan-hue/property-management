@@ -120,8 +120,16 @@ const COMPANY_DETAILS_H_MM = 7;
 /** companyDetails.y = mainBottom + この値（= company.h）。 */
 const COMPANY_DETAILS_Y_OFFSET_MM = 6;
 
-/** floorPlan（間取り図・hasFloorPlan 時のみ）。 */
-const FLOOR_PLAN_RECT: Rect = { x: 108, y: 26, w: 32, h: 18 };
+/**
+ * floorPlan（間取り図・hasFloorPlan 時のみ）。写真域(左カラム)の上端に置き、写真は
+ * その下に敷き詰める（@review Fix1）。splitX が写真枚数で可変になったため、固定座標
+ * だと overview(x=splitX+5起点) や heading/price(右端=splitX-16起点) と重なり得る —
+ * 写真域の原点に置けば、写真域自体が既に他領域と重ならない設計（splitX 左側）ため安全。
+ */
+const FLOOR_PLAN_W_MM = 32;
+const FLOOR_PLAN_H_MM = 18;
+/** floorPlan と、その下の写真敷詰め領域の間の余白(mm)。 */
+const FLOOR_PLAN_GAP_MM = 4;
 
 // ---------------------------------------------------------------------------
 // Local math helpers (pure)
@@ -231,7 +239,9 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
 
   const overviewX = splitX + OVERVIEW_X_OFFSET_MM;
   const overviewW = OVERVIEW_RIGHT_MM - overviewX;
-  const overviewH = mainBottom - MAIN_TOP_MM;
+  // footerHeight が将来可変化しても負の高さを返さないようガード（@review Fix3・現状の
+  // DEFAULT_FOOTER_H=16 では mainBottom > MAIN_TOP_MM が常に成り立ち挙動不変）。
+  const overviewH = Math.max(0, mainBottom - MAIN_TOP_MM);
   const overviewFontSizePt =
     overviewFontPt ??
     clamp(
@@ -249,12 +259,25 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
   };
 
   const photoAreaW = Math.max(0, splitX - PHOTO_AREA_X_MM - COLUMN_GAP_MM);
-  const photoAreaH = mainBottom - PHOTO_AREA_Y_MM;
+  // footerHeight が将来可変化しても負の高さを返さないようガード（@review Fix3）。
+  const photoAreaH = Math.max(0, mainBottom - PHOTO_AREA_Y_MM);
   const photoArea: Rect = { x: PHOTO_AREA_X_MM, y: PHOTO_AREA_Y_MM, w: photoAreaW, h: photoAreaH };
 
-  const photoSlots: Rect[] = packPhotoCells(photoCount, photoArea.w, photoArea.h).map((cell) => ({
+  // 間取り図は写真域(左カラム)の上端に置き、写真はその下に敷く（@review Fix1・重なり回避）。
+  const floorPlan: Rect | null = hasFloorPlan
+    ? {
+        x: PHOTO_AREA_X_MM,
+        y: PHOTO_AREA_Y_MM,
+        w: Math.min(FLOOR_PLAN_W_MM, photoArea.w),
+        h: FLOOR_PLAN_H_MM,
+      }
+    : null;
+
+  const photoPackY = hasFloorPlan ? PHOTO_AREA_Y_MM + FLOOR_PLAN_H_MM + FLOOR_PLAN_GAP_MM : PHOTO_AREA_Y_MM;
+  const photoPackH = Math.max(0, mainBottom - photoPackY);
+  const photoSlots: Rect[] = packPhotoCells(photoCount, photoArea.w, photoPackH).map((cell) => ({
     x: photoArea.x + cell.x,
-    y: photoArea.y + cell.y,
+    y: photoPackY + cell.y,
     w: cell.w,
     h: cell.h,
   }));
@@ -277,8 +300,6 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     w: COMPANY_W_MM,
     h: COMPANY_DETAILS_H_MM,
   };
-
-  const floorPlan: Rect | null = hasFloorPlan ? { ...FLOOR_PLAN_RECT } : null;
 
   return {
     catchBand: { ...CATCH_BAND },

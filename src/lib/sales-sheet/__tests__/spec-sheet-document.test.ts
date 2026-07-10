@@ -39,6 +39,14 @@ const L0 = computeSpecSheetLayout({
   hasFloorPlan: false,
   footerHeight: FOOTER_H,
 });
+/** floorPlanImage 指定時（hasFloorPlan:true）の期待値。座標は [@review Fix1] でエンジンが
+ * 決定的に算出する（写真域の上端＝固定値ではない）ため、固定値ではなくエンジン出力を使う。 */
+const L0Plan = computeSpecSheetLayout({
+  photoCount: 0,
+  specRowCount: baseParts.rows.length,
+  hasFloorPlan: true,
+  footerHeight: FOOTER_H,
+});
 
 describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レイアウト・[F2-A Task1]）", () => {
   it("与えた rows がそのままスペック表(overview)要素に入る", () => {
@@ -175,12 +183,14 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
       ...baseParts,
       floorPlanImage: { fileUrl: "/uploads/plan.jpg" },
     });
+    expect(L0Plan.floorPlan).not.toBeNull();
+    const fp = L0Plan.floorPlan!;
     expect(findEl(withPlan, "floor-plan")).toMatchObject({
       type: "image",
-      x: 108,
-      y: 26,
-      w: 32,
-      h: 18,
+      x: fp.x,
+      y: fp.y,
+      w: fp.w,
+      h: fp.h,
       z: 1,
       src: "/uploads/plan.jpg",
       fit: "contain",
