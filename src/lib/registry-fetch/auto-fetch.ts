@@ -139,6 +139,11 @@ interface RegistryPageLike {
   click(selector: string): Promise<void>;
   waitForSelector(selector: string, options?: unknown): Promise<unknown>;
   waitForEvent(event: string, options?: unknown): Promise<RegistryDownloadLike>;
+  // 所在検索の結果行を DOM から抽出する（実 Playwright は $$eval で各行のセルを読む）。
+  $$eval(
+    selector: string,
+    pageFunction: (elements: Element[]) => unknown[],
+  ): Promise<unknown[]>;
 }
 interface RegistryContextLike {
   newPage(): Promise<RegistryPageLike>;
@@ -188,6 +193,13 @@ const REGISTRY_SELECTORS = {
   searchSubmit: "#search-submit", // TODO(calibrate)
   searchResult: "#registry-result", // TODO(calibrate): 謄本ヒットを示す要素
   downloadButton: "#download-pdf", // TODO(calibrate)
+  // 所在検索（PR-3・所在/地番/家屋番号→候補。TODO(calibrate): 実サイトの所在検索画面に合わせる）
+  locationSearchAddress: "#loc-address", // TODO(calibrate): 所在(住所)入力
+  locationSearchLot: "#loc-lot", // TODO(calibrate): 地番入力
+  locationSearchBuilding: "#loc-building", // TODO(calibrate): 家屋番号入力
+  locationSearchSubmit: "#loc-search-submit", // TODO(calibrate): 検索実行
+  locationSearchResult: "#loc-results", // TODO(calibrate): 結果コンテナ(0件でも表示)
+  locationSearchRow: "#loc-results .candidate-row", // TODO(calibrate): 各候補行
 } as const;
 
 /**
@@ -274,6 +286,58 @@ function createPlaywrightRegistryPage(
         // 結果待ちの TimeoutError は連携不備（リトライ可能）= timeout。not_found にしない。
         if (isTimeoutError(err)) throw new RegistryFetchError("timeout");
         // それ以外（非 timeout の生例外）は provider_error。
+        throw new RegistryFetchError("provider_error");
+      }
+    },
+    async searchByLocation(input) {
+      // 入力(fill)・検索(click)のセットアップ由来失敗は provider_error(校正ズレ/未準備)。
+      try {
+        await page.fill(REGISTRY_SELECTORS.locationSearchAddress, input.address);
+        if (input.lotNumber) {
+          await page.fill(REGISTRY_SELECTORS.locationSearchLot, input.lotNumber);
+        }
+        if (input.buildingNumber) {
+          await page.fill(
+            REGISTRY_SELECTORS.locationSearchBuilding,
+            input.buildingNumber,
+          );
+        }
+        await page.click(REGISTRY_SELECTORS.locationSearchSubmit);
+      } catch {
+        throw new RegistryFetchError("provider_error");
+      }
+      try {
+        // 結果コンテナを待つ(0件でも表示される想定)。行は 0..n → 候補配列。
+        // 結果待ちの TimeoutError は連携不備(リトライ可)= timeout。「候補ゼロ」とは区別する。
+        await page.waitForSelector(REGISTRY_SELECTORS.locationSearchResult);
+        const rows = await page.$$eval(
+          REGISTRY_SELECTORS.locationSearchRow,
+          // ブラウザ内で各行のセルを読む(TODO(calibrate): 実サイトの行構造に合わせる)。
+          (els) =>
+            els.map((el) => {
+              const q = (sel: string) =>
+                (el.querySelector(sel)?.textContent ?? "").trim() || null;
+              return {
+                candidateRef: q("[data-ref]") ?? "",
+                address: q(".address"), // TODO(calibrate)
+                lotNumber: q(".lot"), // TODO(calibrate)
+                buildingNumber: q(".building"), // TODO(calibrate)
+                realEstateNumber: q(".ren"), // TODO(calibrate)
+              };
+            }),
+        );
+        // candidateRef が空なら行 index でフォールバック(非PII参照・取得時に server 側で再解決)。
+        return (rows as Array<Record<string, string | null>>).map((r, i) => ({
+          candidateRef:
+            r.candidateRef && r.candidateRef.length > 0 ? r.candidateRef : `row-${i}`,
+          address: r.address ?? null,
+          lotNumber: r.lotNumber ?? null,
+          buildingNumber: r.buildingNumber ?? null,
+          realEstateNumber: r.realEstateNumber ?? null,
+        }));
+      } catch (err) {
+        if (err instanceof RegistryFetchError) throw err;
+        if (isTimeoutError(err)) throw new RegistryFetchError("timeout");
         throw new RegistryFetchError("provider_error");
       }
     },
