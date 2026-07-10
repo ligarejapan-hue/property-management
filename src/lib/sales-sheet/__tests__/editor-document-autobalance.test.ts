@@ -7,8 +7,9 @@
  *   参照ごと不動。autoArrangePhotos と同じ no-op（変更ゼロ→同一 state 参照）規約。
  */
 import { describe, it, expect } from "vitest";
-import { type EditorState, autoBalanceLayout } from "../editor-document";
+import { type EditorState, autoBalanceLayout, autoArrangePhotos } from "../editor-document";
 import { buildSaleHouseDocument } from "../build-document";
+import { buildFooterBand } from "../footer-band";
 import { computeSpecSheetLayout, DEFAULT_FOOTER_H } from "../layout-engine";
 import {
   salesSheetDocumentSchema,
@@ -196,5 +197,47 @@ describe("autoBalanceLayout", () => {
     const before: EditorState = { document: shifted, selectedId: "overview", dirty: false };
     const after = autoBalanceLayout(before);
     expect(after.selectedId).toBe("overview");
+  });
+
+  it("手で動かした会社帯要素(footer-*)を再バランスで正規位置へ戻す（@codex）", () => {
+    const built = buildSaleHouseDocument({
+      ...baseHouseInput,
+      overrides: { price: "5280", transactionType: "専任媒介", staff: "村山廉太郎" },
+    });
+    // 帯要素(社名)を手でドラッグしてずらした状態を作る
+    const shifted = moveEl(built, "footer-name-ja", 200, 60);
+    expect(findEl(shifted, "footer-name-ja")).toMatchObject({ x: 200, y: 60 });
+    const out = autoBalanceLayout(makeState(shifted));
+    // computeSpecSheetLayout の footer から buildFooterBand が置く正規座標へ戻る
+    const L = computeSpecSheetLayout({
+      photoCount: images(built).length,
+      specRowCount: (findEl(built, "overview") as TableElement).rows.length,
+      hasFloorPlan: built.elements.some((e) => e.id === "floor-plan"),
+      footerHeight: DEFAULT_FOOTER_H,
+    });
+    const expected = buildFooterBand(L.footer, {
+      transactionType: "-",
+      adType: "-",
+      compensation: "-",
+      staff: "-",
+      agent: "-",
+      specialNotes: "-",
+    }).find((e) => e.id === "footer-name-ja")!;
+    const after = findEl(out.document, "footer-name-ja")!;
+    expect(after.x).toBeCloseTo(expected.x, 6);
+    expect(after.y).toBeCloseTo(expected.y, 6);
+  });
+});
+
+describe("autoArrangePhotos × 会社帯", () => {
+  it("写真自動整列後、写真は会社帯の上端(mainBottom=210-DEFAULT_FOOTER_H-2)を越えない（@codex）", () => {
+    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
+    const out = autoArrangePhotos(makeState(built));
+    const bandTop = 210 - DEFAULT_FOOTER_H - 2;
+    const imgs = images(out.document);
+    expect(imgs.length).toBeGreaterThan(0);
+    for (const img of imgs) {
+      expect(img.y + img.h).toBeLessThanOrEqual(bandTop + 0.001);
+    }
   });
 });

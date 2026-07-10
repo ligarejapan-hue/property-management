@@ -242,8 +242,8 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
 
   const overviewX = splitX + OVERVIEW_X_OFFSET_MM;
   const overviewW = OVERVIEW_RIGHT_MM - overviewX;
-  // footerHeight が将来可変化しても負の高さを返さないようガード（@review Fix3・現状の
-  // DEFAULT_FOOTER_H=16 では mainBottom > MAIN_TOP_MM が常に成り立ち挙動不変）。
+  // footerHeight が将来さらに変わっても負の高さを返さないようガード（@review Fix3・現状の
+  // DEFAULT_FOOTER_H=24 では mainBottom > MAIN_TOP_MM が常に成り立つ）。
   const overviewH = Math.max(0, mainBottom - MAIN_TOP_MM);
   const overviewFontSizePt =
     overviewFontPt ??

@@ -17,6 +17,7 @@
 import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
 import { generateQrDataUrl } from "./qr-code";
 import { computeSpecSheetLayout, DEFAULT_FOOTER_H, packPhotoCells } from "./layout-engine";
+import { buildFooterBand } from "./footer-band";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
@@ -580,7 +581,10 @@ export function removeTableRow(
 const PHOTO_ZONE_X_MM = 10;
 const PHOTO_ZONE_Y_MM = 46;
 const PHOTO_ZONE_MAX_W_MM = 130;
-const PHOTO_ZONE_BOTTOM_MARGIN_MM = 24;
+// 会社帯（下部フッター）の占有高さ分を確保する＝写真ゾーン下端を帯上端
+// （mainBottom = 210 − DEFAULT_FOOTER_H − 2）まで。DEFAULT_FOOTER_H に追従させ、
+// 帯高さが変わっても「写真を自動整列」で写真が帯へ食い込まないようにする（+2=engine の main 下余白）。
+const PHOTO_ZONE_BOTTOM_MARGIN_MM = DEFAULT_FOOTER_H + 2;
 
 /**
  * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト）。
@@ -706,6 +710,20 @@ export function autoBalanceLayout(state: EditorState): EditorState {
     company: L.company,
     "company-details": L.companyDetails,
   };
+  // 会社帯(footer-*)も再バランス対象に含める：手で動かした帯要素を正規位置へ戻す
+  // （@codex）。帯要素の座標は data 非依存ゆえ、全項目を埋めた probe で全 footer-* の
+  // 正規座標を得て合流する（content は使わず座標のみ利用）。doc に無い id は下の
+  // ループが idx===-1 で skip する。
+  for (const el of buildFooterBand(L.footer, {
+    transactionType: "-",
+    adType: "-",
+    compensation: "-",
+    staff: "-",
+    agent: "-",
+    specialNotes: "-",
+  })) {
+    templateRects[el.id] = { x: el.x, y: el.y, w: el.w, h: el.h };
+  }
 
   let changed = false;
   const next = document.elements.slice() as SalesSheetElement[];
