@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SalesSheetTemplateKind } from "@/lib/sales-sheet/template-kind";
 import { fetchPropertyDetail } from "@/lib/api-client";
-import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
+import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
 import {
   mapOccupancyStatusToMansionOccupancy,
   mapOccupancyStatusToLandOccupancy,
@@ -21,10 +21,9 @@ interface FieldConfig {
 
 // 種別ごとの作成フォーム項目。key は new route の per-type overridesSchema と揃える。
 // （テンプレの実データはサーバ側で物件レコードから補完し、ここでは「システムに無い値」だけ集める）
-// mansion・land・house は FIELDS_BY_KIND(field-model) 駆動のダイアログへ差し替え済みのため
-// fields は未使用（label はボタン/見出し表示に引き続き使う・land は [F2-A Task4]、house は
-// [F2-B Task3] で追加）。building は当面この旧 FIELD_SETS.fields の自由入力のまま
-// （F2-C で field-model 化）。
+// 全種別が FIELDS_BY_KIND(field-model) 駆動のダイアログへ差し替え済みのため fields は未使用
+// （label はボタン/見出し表示に引き続き使う・land は [F2-A Task4]、house は [F2-B Task3]、
+// building は [F2-C Task3] で追加）。
 const FIELD_SETS: Record<SalesSheetTemplateKind, FieldConfig> = {
   land: {
     label: "売土地",
@@ -40,20 +39,7 @@ const FIELD_SETS: Record<SalesSheetTemplateKind, FieldConfig> = {
   },
   building: {
     label: "一棟",
-    fields: [
-      { key: "price", label: "価格" },
-      { key: "access", label: "交通" },
-      { key: "landArea", label: "土地面積" },
-      { key: "totalFloorArea", label: "延床面積" },
-      { key: "totalUnits", label: "総戸数" },
-      { key: "builtYearMonth", label: "築年月" },
-      { key: "structure", label: "構造" },
-      { key: "grossYield", label: "想定利回り" },
-      { key: "expectedIncome", label: "満室想定収入" },
-      { key: "transactionType", label: "取引態様" },
-      { key: "deliveryTiming", label: "引渡" },
-      { key: "remarks", label: "備考（公開）" },
-    ],
+    fields: [],
   },
 };
 
@@ -79,20 +65,19 @@ export function buildCreateRequest(
 // ============================================================================
 // field-model(FIELDS_BY_KIND) 駆動の作成ダイアログ（売マンション/売土地/売戸建 共通の汎用 widget 描画）
 // [F2-A Task4] F1 で確立した売マンション専用の描画（MansionFieldModelForm 等）を、
-// LAND_FIELDS を持つ売土地でも再利用できるよう一般化した。[F2-B Task3] HOUSE_FIELDS を持つ
-// 売戸建も同じ汎用レンダラへ配線した。building は当面 null＝旧 FIELD_SETS の自由入力のまま
-// （F2-C で field-model 化する）。
+// LAND_FIELDS を持つ売土地でも再利用できるよう一般化した。[F2-B Task3] 売戸建、[F2-C Task3]
+// 一棟も同じ汎用レンダラへ配線した（全種別 field-model 駆動）。
 // ============================================================================
 
 export type FieldModelValue = string | string[];
 export type FieldModelValues = Record<string, FieldModelValue>;
 
-/** field-model を持つ種別のみ非 null。building は当面 null（上記参照）。 */
+/** 全種別が field-model 駆動（[F2-C Task3] で building も配線）。型は既存互換のため null 許容を残す。 */
 const FIELDS_BY_KIND: Record<SalesSheetTemplateKind, readonly SheetField[] | null> = {
   land: LAND_FIELDS,
   mansion: MANSION_FIELDS,
   house: HOUSE_FIELDS,
-  building: null,
+  building: BUILDING_FIELDS,
 };
 
 /**
@@ -152,14 +137,17 @@ const HOUSE_AUTO_ONLY_KEYS = new Set<string>([
   "floorRatio",
 ]);
 
-/** building は field-model が無いため参照されない専用の空集合。 */
-const EMPTY_AUTO_ONLY_KEYS = new Set<string>();
+/**
+ * BUILDING_FIELDS の自動反映専用キー（LAND_AUTO_ONLY_KEYS と同一・[F2-C Task3]）。一棟も
+ * building relation を配線せず layoutType も持たないため、land と同じ4キー（layout 無し）。
+ */
+const BUILDING_AUTO_ONLY_KEYS = new Set<string>(["address", "roadKind", "coverageRatio", "floorRatio"]);
 
 const AUTO_ONLY_KEYS_BY_KIND: Record<SalesSheetTemplateKind, ReadonlySet<string>> = {
   land: LAND_AUTO_ONLY_KEYS,
   mansion: MANSION_AUTO_ONLY_KEYS,
   house: HOUSE_AUTO_ONLY_KEYS,
-  building: EMPTY_AUTO_ONLY_KEYS,
+  building: BUILDING_AUTO_ONLY_KEYS,
 };
 
 function groupBySection(
@@ -176,13 +164,12 @@ function groupBySection(
   }
   return order.map((s) => [s, bySection.get(s)!] as const);
 }
-// LAND_FIELDS/MANSION_FIELDS/HOUSE_FIELDS は静的なためモジュール読み込み時に一度だけ
-// section 分けする。building は field-model が無いため空（参照されない）。
+// 各種別の FIELDS は静的なためモジュール読み込み時に一度だけ section 分けする（全種別）。
 const SECTIONS_BY_KIND: Record<SalesSheetTemplateKind, (readonly [string, SheetField[]])[]> = {
   land: groupBySection(LAND_FIELDS),
   mansion: groupBySection(MANSION_FIELDS),
   house: groupBySection(HOUSE_FIELDS),
-  building: [],
+  building: groupBySection(BUILDING_FIELDS),
 };
 
 /**
@@ -236,6 +223,20 @@ interface HouseAutoSource {
   occupancyStatus?: string | null;
   zoningDistrict?: string | null;
   layoutType?: string | null;
+  buildingCoverageRatio?: number | string | null;
+  floorAreaRatio?: number | string | null;
+  roadType?: string | null;
+  roadWidth?: number | string | null;
+}
+
+/**
+ * 一棟(building)版の自動反映ソース（[F2-C Task3]）。building relation は配線せず layoutType も
+ * 持たないため LandAutoSource と同一形。occupancy 語彙のみ house/mansion と同じ（下記 compute 参照）。
+ */
+interface BuildingAutoSource {
+  address?: string | null;
+  occupancyStatus?: string | null;
+  zoningDistrict?: string | null;
   buildingCoverageRatio?: number | string | null;
   floorAreaRatio?: number | string | null;
   roadType?: string | null;
@@ -352,8 +353,33 @@ function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
 }
 
 /**
- * kind → 自動反映プレビュー計算関数。building は field-model が無いため対象外
- * （Partial・キー無し＝ダイアログの effect が fetch 自体をスキップする）。
+ * BUILDING_FIELDS 向けの自動反映プレビュー計算（[F2-C Task3]）。building relation は配線せず
+ * layoutType も持たないため preview は land と同じ4キー（layout 無し）。occupancySeed は一棟の
+ * 現況語彙がマンション/戸建と同一のため mapOccupancyStatusToMansionOccupancy を再利用する
+ * （build-document.ts の buildBuildingValues と同じ関数＝ダイアログと図面ビルダーで写像がずれない）。
+ */
+function computeBuildingAutoValues(data: BuildingAutoSource): FieldModelAutoValues {
+  const hints: Record<string, string> = {};
+  if (data.zoningDistrict) {
+    hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
+  }
+  if (data.roadWidth != null && data.roadWidth !== "") {
+    hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
+  }
+  return {
+    preview: {
+      address: toPreviewString(data.address),
+      roadKind: toPreviewString(data.roadType),
+      coverageRatio: toPreviewString(data.buildingCoverageRatio),
+      floorRatio: toPreviewString(data.floorAreaRatio),
+    },
+    occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),
+    hints,
+  };
+}
+
+/**
+ * kind → 自動反映プレビュー計算関数（[F2-C Task3] で building も追加＝全種別）。
  */
 const AUTO_COMPUTE_BY_KIND: Partial<
   Record<SalesSheetTemplateKind, (raw: unknown) => FieldModelAutoValues>
@@ -361,6 +387,7 @@ const AUTO_COMPUTE_BY_KIND: Partial<
   mansion: (raw) => computeMansionAutoValues(raw as MansionAutoSource),
   land: (raw) => computeLandAutoValues(raw as LandAutoSource),
   house: (raw) => computeHouseAutoValues(raw as HouseAutoSource),
+  building: (raw) => computeBuildingAutoValues(raw as BuildingAutoSource),
 };
 
 /**

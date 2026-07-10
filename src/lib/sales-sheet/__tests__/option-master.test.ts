@@ -41,4 +41,10 @@ describe("option-master", () => {
     expect(M.PARKING_HOUSE).toEqual(["有", "無", "近隣確保"]);
     expect(M.REBUILD_STATUS).toEqual(["再建築可", "再建築不可"]);
   });
+
+  it("F2一棟分の選択肢を持つ", () => {
+    expect(M.PROPERTY_TYPE_BUILDING).toEqual([
+      "新築一棟マンション", "中古一棟マンション", "新築一棟アパート", "中古一棟アパート", "一棟ビル", "その他",
+    ]);
+  });
 });

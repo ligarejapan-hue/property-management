@@ -199,3 +199,72 @@ export const HOUSE_FIELDS: readonly SheetField[] = [
   { key: "agent", label: "取引士", widget: "text", section: "会社" },
   { key: "specialNotes", label: "特記事項", widget: "text", section: "会社" },
 ];
+
+/**
+ * 一棟(building)のスペック表フィールド定義([F2-C Task2])。売戸建(HOUSE_FIELDS)にほぼ準拠
+ * しつつ、収益系(総戸数/想定利回り/満室想定収入)と付帯権利を持つ。見出しは kind により
+ * 一棟マンション/一棟アパートに二分岐する(build-document 側で決定)。house 同様 building
+ * relation は配線しない(現行踏襲)ため、構造/築年月/総戸数/想定利回り/満室想定収入は常に
+ * 手入力。各階面積は持たず延床面積で表す(一棟)。現況語彙は house/mansion と同一
+ * (mapOccupancyStatusToMansionOccupancy 再利用)。付帯権利は LAND_RIGHT を再利用しラベルのみ
+ * 差し替え。想定利回り(%)/満室想定収入(万円)は unit を持たせず、buildBuildingValues が
+ * 合成する(キャッシュ済みクライアントの単位付き自由入力での二重付与を防ぐ)。
+ */
+export const BUILDING_FIELDS: readonly SheetField[] = [
+  // 価格
+  { key: "propertyType", label: "物件種目", widget: "select", section: "価格", options: M.PROPERTY_TYPE_BUILDING },
+  { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
+  { key: "tax", label: "消費税", widget: "select", section: "価格", options: M.TAX, controlOnly: true },
+  { key: "taxAmount", label: "うち消費税", widget: "number", section: "価格", unit: "万円", showWhen: { field: "tax", equals: "課税" } },
+  // 所在・交通
+  { key: "address", label: "所在地", widget: "text", section: "所在", autoFrom: "address" },
+  { key: "access", label: "交通", widget: "text", section: "所在" },
+  // 土地
+  // landArea/setback は unit を持たせない: buildBuildingValues が面積計測方式(公簿/実測)・
+  // 単位(m/㎡)と合成する（HOUSE_FIELDS.landArea/setback と同じ理由）。
+  { key: "landArea", label: "土地面積", widget: "number", section: "土地" },
+  { key: "areaMethod", label: "面積計測方式", widget: "select", section: "土地", options: M.AREA_METHOD_LAND, controlOnly: true },
+  { key: "landRight", label: "付帯権利", widget: "select", section: "土地", options: M.LAND_RIGHT },
+  { key: "privateRoad", label: "私道負担", widget: "number", section: "土地", unit: "㎡" },
+  { key: "landCategory", label: "地目", widget: "multiselect", section: "土地", options: M.LAND_CATEGORY },
+  { key: "setback", label: "セットバック", widget: "number", section: "土地" },
+  { key: "setbackUnit", label: "単位", widget: "select", section: "土地", options: M.SETBACK_UNIT, controlOnly: true },
+  { key: "terrain", label: "地勢", widget: "select", section: "土地", options: M.TERRAIN },
+  // 建物（building relation は配線しない=現行踏襲のため構造/築年月は手入力。各階面積は
+  // 持たず延床面積で表す＝一棟）
+  { key: "totalFloorArea", label: "延床面積", widget: "number", section: "建物", unit: "㎡" },
+  { key: "structure", label: "構造", widget: "select", section: "建物", options: M.BUILDING_STRUCTURE },
+  { key: "aboveFloors", label: "地上階", widget: "number", section: "建物", unit: "階" },
+  { key: "basementFloors", label: "地下階", widget: "number", section: "建物", unit: "階" },
+  { key: "builtYearMonth", label: "築年月", widget: "text", section: "建物" },
+  { key: "renovYearMonth", label: "増改築年月", widget: "text", section: "建物" },
+  { key: "parking", label: "駐車場", widget: "select", section: "建物", options: M.PARKING_HOUSE },
+  // 収益（一棟固有・手入力）
+  { key: "totalUnits", label: "総戸数", widget: "number", section: "収益", unit: "戸" },
+  { key: "grossYield", label: "想定利回り", widget: "number", section: "収益" },
+  { key: "expectedIncome", label: "満室想定収入(年額)", widget: "number", section: "収益" },
+  // 法令
+  { key: "roadKind", label: "接道種別", widget: "select", section: "法令", options: M.ROAD_KIND, autoFrom: "roadType" },
+  { key: "roadWidth", label: "接道幅員", widget: "text", section: "法令", unit: "m", autoFrom: "roadWidth" },
+  { key: "roadDirections", label: "接道方向", widget: "multiselect", section: "法令", options: M.DIRECTION },
+  { key: "cityPlanning", label: "都市計画", widget: "multiselect", section: "法令", options: M.CITY_PLANNING },
+  { key: "useDistrict", label: "用途地域", widget: "multiselect", section: "法令", options: M.USE_DISTRICT, autoFrom: "zoningDistrict" },
+  { key: "areaZone", label: "地域地区", widget: "multiselect", section: "法令", options: M.AREA_ZONE },
+  { key: "coverageRatio", label: "建蔽率", widget: "number", section: "法令", unit: "％", autoFrom: "buildingCoverageRatio" },
+  { key: "floorRatio", label: "容積率", widget: "number", section: "法令", unit: "％", autoFrom: "floorAreaRatio" },
+  { key: "buildingConfirm", label: "建築確認区分", widget: "select", section: "法令", options: M.BUILDING_CONFIRM },
+  { key: "rebuild", label: "再建築", widget: "select", section: "法令", options: M.REBUILD_STATUS },
+  { key: "legalRestriction", label: "その他法令上の制限", widget: "text", section: "法令" },
+  // 設備・現況
+  { key: "equipment", label: "設備・条件", widget: "text", section: "設備" },
+  { key: "occupancy", label: "現況", widget: "select", section: "設備", options: M.OCCUPANCY, autoFrom: "occupancyStatus" },
+  { key: "delivery", label: "引渡時期", widget: "select", section: "設備", options: M.DELIVERY_TIMING },
+  { key: "remarks", label: "備考", widget: "text", section: "設備" },
+  // 会社（フッター）
+  { key: "transactionType", label: "取引態様", widget: "select", section: "会社", options: M.TRANSACTION_TYPE },
+  { key: "compensation", label: "報酬", widget: "select", section: "会社", options: M.COMPENSATION },
+  { key: "adType", label: "広告", widget: "select", section: "会社", options: M.AD_TYPE },
+  { key: "staff", label: "担当者", widget: "text", section: "会社" },
+  { key: "agent", label: "取引士", widget: "text", section: "会社" },
+  { key: "specialNotes", label: "特記事項", widget: "text", section: "会社" },
+];

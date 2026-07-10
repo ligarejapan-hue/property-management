@@ -40,20 +40,9 @@ describe("SalesSheetCreateButton", () => {
 });
 
 describe("SalesSheetCreateDialog（切り出し・制御コンポーネント）", () => {
-  it("open=true で種別ラベル・入力項目・作成ボタンを描画する", () => {
-    const html = renderToStaticMarkup(
-      createElement(SalesSheetCreateDialog, {
-        propertyId: "p1",
-        kind: "building",
-        open: true,
-        onClose: () => {},
-      }),
-    );
-    expect(html).toContain("販売図面（一棟）の作成");
-    expect(html).toContain("想定利回り");
-    expect(html).toContain("作成してエディタを開く");
-  });
-
+  // 一棟 open=true の field-model 駆動レンダリングは building-dialog.test.tsx へ移設
+  // （[F2-C Task3]・house/land/mansion と同じ dialog テスト形）。ここでは種別非依存の
+  // open=false 挙動のみ確認する。
   it("open=false は何も描画しない", () => {
     const html = renderToStaticMarkup(
       createElement(SalesSheetCreateDialog, {
