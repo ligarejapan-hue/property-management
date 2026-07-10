@@ -56,6 +56,14 @@ export interface SpecSheetLayout {
 // Constants (A4 landscape mm; see feature plan's algorithm design memo)
 // ---------------------------------------------------------------------------
 
+/**
+ * 会社帯（company/company-details 要素）の高さ(mm)の既定値。`footerHeight` 入力の既定として
+ * build-document.ts（作成時）と editor-document.ts（autoBalanceLayout・再バランス時）の
+ * 両方が使う共有定数（会社帯自体の内容/行数は現状固定なので暫定値。将来Bで可変化）。
+ * 他の定数と違い、この値だけは呼び出し側の footerHeight 引数の既定値として外部公開する。
+ */
+export const DEFAULT_FOOTER_H = 16;
+
 /** ページ高さ(mm)。mainBottom(=メイン領域の下端)の起点。 */
 const PAGE_H_MM = 210;
 

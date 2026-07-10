@@ -16,6 +16,7 @@
 
 import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
 import { generateQrDataUrl } from "./qr-code";
+import { computeSpecSheetLayout, DEFAULT_FOOTER_H } from "./layout-engine";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
@@ -679,6 +680,149 @@ export function autoArrangePhotos(state: EditorState): EditorState {
   });
   if (!changed) return state;
   return { ...state, dirty: true, document: { ...document, elements } };
+}
+
+// ---------------------------------------------------------------------------
+// レイアウト自動再バランス（写真枚数/概要表行数/間取り有無に応じて、テンプレ枠と写真を
+// computeSpecSheetLayout の算出値へ再配置するワンボタン操作）。
+// ---------------------------------------------------------------------------
+
+/**
+ * buildSpecSheetDocument が組む既知のテンプレ要素 id。これらの id を持つ要素だけを
+ * 「テンプレ枠」として動かす（type==="image" 判定より優先）。floor-plan は type="image"
+ * だが、この集合に含めることで写真ゾーン（L.photoSlots）ではなく専用の L.floorPlan で
+ * 扱われるようにする（写真カウントに混入させない）。
+ */
+const TEMPLATE_ELEMENT_IDS = new Set([
+  "catch-band",
+  "catch-copy",
+  "heading",
+  "price",
+  "overview",
+  "sales-points",
+  "company",
+  "company-details",
+  "floor-plan",
+]);
+
+/** x/y/w/h がすべて等しいか（幾何の変更検知用）。 */
+function geomEquals(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+}
+
+/**
+ * document を computeSpecSheetLayout（自社マイソク版面の最適化エンジン）で再バランスする。
+ * autoArrangePhotos と同じ流儀（純・変更ゼロは同一 state 参照・変更あれば dirty=true）。
+ *
+ * - 動かすのは「既知idのテンプレ枠」（catch-band/catch-copy/heading/price/overview/
+ *   sales-points/company/company-details/floor-plan）と「type==="image" の写真要素
+ *   （既知id以外・配列順・枚数は任意）」のみ。未知idの非image要素（ユーザーが手で足した
+ *   独自要素）は参照ごと不動。
+ * - overview（id="overview" かつ type="table"）が存在すれば、その行数を specRowCount に、
+ *   現在の style.fontSizePt を overviewFontPt としてエンジンへ渡す（ユーザーが変えた
+ *   文字サイズを尊重する）。存在しなければ specRowCount=0・フォントはエンジンの自動計算
+ *   （行数からの clamp）に委ねる。
+ * - floor-plan は該当要素が存在する（hasFloorPlan）ときのみ、エンジンが返す非nullの
+ *   L.floorPlan へ更新する。
+ * - 写真（配列順）は L.photoSlots[k] の x/y/w/h へ更新する。src/fit/焦点/z/角丸/alt と
+ *   配列内の位置は保持する。slots が足りない分（通常発生しない）は不動。
+ * - 幾何(x/y/w/h)以外は一切変更しない（overview の style.fontSizePt のみ例外）。
+ */
+export function autoBalanceLayout(state: EditorState): EditorState {
+  const { document } = state;
+  const { elements } = document;
+
+  const overviewIdx = elements.findIndex((e) => e.id === "overview" && e.type === "table");
+  const overviewEl = overviewIdx === -1 ? null : (elements[overviewIdx] as TableElement);
+  const specRowCount = overviewEl ? overviewEl.rows.length : 0;
+  const overviewFontPt = overviewEl ? overviewEl.style.fontSizePt : undefined;
+
+  const hasFloorPlan = elements.some((e) => e.id === "floor-plan");
+
+  const photoIdxs: number[] = [];
+  elements.forEach((e, i) => {
+    if (e.type === "image" && !TEMPLATE_ELEMENT_IDS.has(e.id)) photoIdxs.push(i);
+  });
+
+  const L = computeSpecSheetLayout({
+    photoCount: photoIdxs.length,
+    specRowCount,
+    hasFloorPlan,
+    footerHeight: DEFAULT_FOOTER_H,
+    overviewFontPt,
+  });
+
+  const templateRects: Record<string, { x: number; y: number; w: number; h: number }> = {
+    "catch-band": L.catchBand,
+    "catch-copy": L.catchCopy,
+    heading: L.heading,
+    price: L.price,
+    "sales-points": L.salesPoints,
+    company: L.company,
+    "company-details": L.companyDetails,
+  };
+
+  let changed = false;
+  const next = document.elements.slice() as SalesSheetElement[];
+
+  for (const [id, rect] of Object.entries(templateRects)) {
+    const idx = next.findIndex((e) => e.id === id);
+    if (idx === -1) continue;
+    const el = next[idx];
+    if (!geomEquals(el, rect)) {
+      changed = true;
+      next[idx] = applyGeom(el, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+    }
+  }
+
+  if (overviewIdx !== -1) {
+    const el = next[overviewIdx] as TableElement;
+    const rect = L.overview;
+    if (!geomEquals(el, rect) || el.style.fontSizePt !== rect.fontSizePt) {
+      changed = true;
+      next[overviewIdx] = {
+        ...el,
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+        style: { ...el.style, fontSizePt: rect.fontSizePt },
+      };
+    }
+  }
+
+  if (L.floorPlan) {
+    const floorPlanRect = L.floorPlan;
+    const idx = next.findIndex((e) => e.id === "floor-plan");
+    if (idx !== -1) {
+      const el = next[idx];
+      if (!geomEquals(el, floorPlanRect)) {
+        changed = true;
+        next[idx] = applyGeom(el, {
+          x: floorPlanRect.x,
+          y: floorPlanRect.y,
+          w: floorPlanRect.w,
+          h: floorPlanRect.h,
+        });
+      }
+    }
+  }
+
+  photoIdxs.forEach((idx, k) => {
+    if (k >= L.photoSlots.length) return;
+    const el = next[idx];
+    const rect = L.photoSlots[k];
+    if (!geomEquals(el, rect)) {
+      changed = true;
+      next[idx] = applyGeom(el, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+    }
+  });
+
+  if (!changed) return state;
+  return { ...state, dirty: true, document: { ...document, elements: next } };
 }
 
 /**

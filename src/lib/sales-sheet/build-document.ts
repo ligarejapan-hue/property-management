@@ -13,7 +13,7 @@ import {
 } from "./occupancy";
 import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS } from "./field-model";
 import { buildSheetRows, type SheetValues } from "./sheet-rows";
-import { computeSpecSheetLayout, type Rect } from "./layout-engine";
+import { computeSpecSheetLayout, DEFAULT_FOOTER_H, type Rect } from "./layout-engine";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -138,13 +138,6 @@ function fmtAnnualIncome(v?: string | null): string {
 function fmtExclusiveArea(area?: string | null, method?: string | null): string {
   return fmtAreaWithMethod(area, method);
 }
-
-/**
- * 会社帯（company/company-details 要素）の高さ(mm)。現状は固定値で、
- * `computeSpecSheetLayout` の `footerHeight` 入力として使う（[Task2]・
- * 会社帯自体の内容/行数は現状固定なので暫定値。将来Bで可変化する）。
- */
-const DEFAULT_FOOTER_H = 16;
 
 /** 左カラム（表題・価格の下）に写真を最大3枚レイアウトする位置。座標は
  *  `computeSpecSheetLayout` が返す `photoSlots`（写真枚数・左右分割幅から決定的に
