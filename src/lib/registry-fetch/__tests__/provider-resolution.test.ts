@@ -36,6 +36,7 @@ vi.mock("@/lib/api-helpers", () => {
 import {
   getRegistryFetchProvider,
   isRegistryAutoFetchProviderConfigured,
+  isRegistryLocationSearchConfigured,
   __resetRegistryFetchThrottleForTest,
 } from "../auto-fetch";
 import { OfficialRegistryProvider } from "../official-provider";
@@ -47,6 +48,7 @@ const ENV_KEYS = [
   "REGISTRY_FETCH_TIMEOUT_MS",
   "REGISTRY_FETCH_PROVIDER",
   "REGISTRY_FETCH_SELECTORS_CALIBRATED",
+  "REGISTRY_FETCH_LOCATION_SEARCH_CALIBRATED",
   "REGISTRY_FETCH_MIN_INTERVAL_MS",
 ] as const;
 
@@ -121,6 +123,24 @@ describe("getRegistryFetchProvider（PR-1 解決ロジック・readiness ベー�
     expect(provider).toBeInstanceOf(OfficialRegistryProvider);
     expect(provider?.name).toBe("official");
     expect(isRegistryAutoFetchProviderConfigured()).toBe(true);
+  });
+
+  it("PR-3: LOCATION_SEARCH_CALIBRATED=true かつ校正揃いで所在検索 capability=true", () => {
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_SELECTORS_CALIBRATED = "true";
+    process.env.REGISTRY_FETCH_LOCATION_SEARCH_CALIBRATED = "true";
+    expect(isRegistryLocationSearchConfigured()).toBe(true);
+  });
+
+  it("PR-3: LOCATION フラグ無しなら自動取得が有効でも所在検索は false（独立ゲート）", () => {
+    process.env.REGISTRY_FETCH_LOGIN_ID = "id";
+    process.env.REGISTRY_FETCH_PASSWORD = "pw";
+    process.env.REGISTRY_FETCH_PROVIDER = "official";
+    process.env.REGISTRY_FETCH_SELECTORS_CALIBRATED = "true";
+    expect(isRegistryAutoFetchProviderConfigured()).toBe(true);
+    expect(isRegistryLocationSearchConfigured()).toBe(false);
   });
 
   it("PR-2 live: opt-in env のみ（資格情報欠落）では null（資格情報も必須）", () => {

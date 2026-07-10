@@ -105,6 +105,8 @@ export interface OfficialRegistryProviderOptions {
   now?: () => Date;
   /** providerRequestId をテストから固定/生成するための注入（非PII）。 */
   requestIdFactory?: () => string;
+  /** 所在検索の実装/セレクタが校正済みか(専用フラグ)。true のときだけ supportsLocationSearch。 */
+  supportsLocationSearch?: boolean;
 }
 
 /** 未分類の例外を provider_error に潰す（生メッセージ＝secret/PII を例外に載せない）。 */
@@ -133,6 +135,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
   private readonly throttle?: RegistryFetchThrottle;
   private readonly now: () => Date;
   private readonly requestIdFactory: () => string;
+  /** 所在検索が使えるか(専用校正フラグ由来)。isRegistryLocationSearchConfigured が参照。 */
+  readonly supportsLocationSearch: boolean;
 
   constructor(options: OfficialRegistryProviderOptions) {
     this.loginId = options.loginId;
@@ -145,6 +149,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     this.requestIdFactory =
       options.requestIdFactory ??
       (() => `official-${Math.random().toString(36).slice(2, 10)}`);
+    this.supportsLocationSearch = options.supportsLocationSearch === true;
   }
 
   async fetchRegistryPdf(

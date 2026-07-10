@@ -562,6 +562,9 @@ export function getRegistryFetchProvider(
   // CodexP2: 本番 provider に共有 throttle（REGISTRY_FETCH_MIN_INTERVAL_MS）を配線する。
   //   これが無いと live route の同時 POST がレート制御をすり抜けて公式へ複数同時アクセスして
   //   しまう。プロセス全体で 1 つの throttle を共有し、provider をまたいで直列化する。
+  // 所在検索は自動取得と独立の校正フラグ。両方 true でのみ所在検索が露出(誤露出防止)。
+  const locationSearchCalibrated =
+    process.env.REGISTRY_FETCH_LOCATION_SEARCH_CALIBRATED === "true";
   return createOfficialRegistryProvider({
     loginId,
     password,
@@ -569,6 +572,7 @@ export function getRegistryFetchProvider(
     timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
     browserFactory,
     throttle: getSharedRegistryFetchThrottle(),
+    supportsLocationSearch: locationSearchCalibrated,
   });
 }
 
