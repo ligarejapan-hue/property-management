@@ -68,8 +68,8 @@ const MAIN_TOP_MM = 26;
 /** footer 帯とメイン領域の間の余白(mm)。mainBottom = 210 − footerHeight − この値。 */
 const MAIN_BOTTOM_MARGIN_MM = 2;
 
-/** 左右分割線 splitX の可動域。写真0枚→84寄り（overview 広め）／3枚→145寄り（写真域広め）。 */
-const SPLIT_X_MIN_MM = 84;
+/** 左右分割線 splitX の可動域。写真0枚→94寄り（overview を広く＝写真少なら表広く）／3枚→145寄り（写真域広め）。 */
+const SPLIT_X_MIN_MM = 94;
 const SPLIT_X_MAX_MM = 145;
 /** splitX 補間の t を作るための photoCount 正規化の分母（0..3枚 → 0..1）。 */
 const SPLIT_X_PHOTO_COUNT_DIVISOR = 3;
@@ -137,12 +137,12 @@ function clamp(value: number, lo: number, hi: number): number {
  * A4横(297×210mm)のマイソク版面レイアウトを、写真枚数・概要表行数・間取り図
  * 有無・footer 高さから決定的に計算する純関数。
  *
- * - 左右分割線 splitX は写真枚数に応じて 84..145mm を線形補間: 写真が多いほど
- *   右へ寄り、写真域（左）が広く／overview=概要表（右）が狭くなる。
+ * - 左右分割線 splitX は写真枚数に応じて 94..145mm を線形補間: 写真が多いほど
+ *   右へ寄り、写真域（左）が広く／overview=概要表（右）が狭くなる（写真が少ないほど
+ *   表が広い＝写真0枚で最も広い）。
  * - overview のフォントサイズは省略時、高さと行数から自動計算し 5..9pt にクランプ。
- * - photoCount=0 のときは photoArea の幅を明示的に 0 とする（写真がないので域を
- *   確保しない）。heading/price/overview 等の左右分割自体は splitX ベースのまま
- *   連続的に変化する。
+ * - photoCount=0 では packPhotoCells が空配列を返し写真は置かれない（photoArea の幅は
+ *   予約値のまま・写真が無いので使われない）。左右分割は splitX ベースで連続変化する。
  * - photoSlots は packPhotoCells（既存の写真敷詰めアルゴリズム）を再利用し、
  *   photoArea 原点からの相対セルを絶対座標へ変換したもの。
  */
@@ -173,7 +173,7 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     fontSizePt: overviewFontSizePt,
   };
 
-  const photoAreaW = photoCount === 0 ? 0 : Math.max(0, splitX - PHOTO_AREA_X_MM - COLUMN_GAP_MM);
+  const photoAreaW = Math.max(0, splitX - PHOTO_AREA_X_MM - COLUMN_GAP_MM);
   const photoAreaH = mainBottom - PHOTO_AREA_Y_MM;
   const photoArea: Rect = { x: PHOTO_AREA_X_MM, y: PHOTO_AREA_Y_MM, w: photoAreaW, h: photoAreaH };
 

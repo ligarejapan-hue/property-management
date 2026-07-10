@@ -17,7 +17,7 @@ describe("computeSpecSheetLayout", () => {
     const few = computeSpecSheetLayout({ ...base, photoCount: 0 });
     const many = computeSpecSheetLayout({ ...base, photoCount: 3 });
     expect(few.overview.w).toBeGreaterThan(many.overview.w);
-    expect(few.photoArea.w).toBe(0);
+    expect(few.photoSlots).toHaveLength(0);
   });
   it("行数が多いほど概要表フォントが小さい（5..9 pt）", () => {
     const dense = computeSpecSheetLayout({ ...base, specRowCount: 45 });
