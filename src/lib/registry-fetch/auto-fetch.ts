@@ -227,6 +227,35 @@ function isTimeoutError(err: unknown): boolean {
 }
 
 /**
+ * 所在検索の結果行(DOM)から候補の生フィールドを抽出する。page.$$eval に渡してブラウザ内で
+ * 実行するため **self-contained/serializable**(モジュールスコープ非参照)にする。TODO(calibrate):
+ * 実サイトの1行の要素構造に合わせる。
+ * - candidateRef は **data-ref 属性値**(textContent ではない=同一ラベル行での重複を避ける
+ *   ユニークな非PII参照。@codex 指摘対応)。行要素自身 → 子要素 [data-ref] の順に属性を読む。
+ * - address/lotNumber/buildingNumber/realEstateNumber は各セルの textContent(秘匿情報)。
+ */
+export function extractLocationCandidateRows(
+  els: Element[],
+): Array<Record<string, string | null>> {
+  return els.map((el) => {
+    const txt = (sel: string) =>
+      (el.querySelector(sel)?.textContent ?? "").trim() || null;
+    const candidateRef = (
+      el.getAttribute("data-ref") ??
+      el.querySelector("[data-ref]")?.getAttribute("data-ref") ??
+      ""
+    ).trim();
+    return {
+      candidateRef,
+      address: txt(".address"), // TODO(calibrate)
+      lotNumber: txt(".lot"), // TODO(calibrate)
+      buildingNumber: txt(".building"), // TODO(calibrate)
+      realEstateNumber: txt(".ren"), // TODO(calibrate)
+    };
+  });
+}
+
+/**
  * 生 Playwright Page を RegistryBrowserPage（高水準セッション抽象）へ適合させる adapter。
  * 失敗は **RegistryFetchError（分類コードのみ）** に正規化し、生メッセージ（URL/入力/selector が
  * 混入しうる）を例外に載せない。中間成果物（Cookie/DL）は close() で破棄する。
@@ -310,21 +339,10 @@ function createPlaywrightRegistryPage(
         // 結果コンテナを待つ(0件でも表示される想定)。行は 0..n → 候補配列。
         // 結果待ちの TimeoutError は連携不備(リトライ可)= timeout。「候補ゼロ」とは区別する。
         await page.waitForSelector(REGISTRY_SELECTORS.locationSearchResult);
+        // ブラウザ内で各行のセルを読む(extractLocationCandidateRows は self-contained/serializable)。
         const rows = await page.$$eval(
           REGISTRY_SELECTORS.locationSearchRow,
-          // ブラウザ内で各行のセルを読む(TODO(calibrate): 実サイトの行構造に合わせる)。
-          (els) =>
-            els.map((el) => {
-              const q = (sel: string) =>
-                (el.querySelector(sel)?.textContent ?? "").trim() || null;
-              return {
-                candidateRef: q("[data-ref]") ?? "",
-                address: q(".address"), // TODO(calibrate)
-                lotNumber: q(".lot"), // TODO(calibrate)
-                buildingNumber: q(".building"), // TODO(calibrate)
-                realEstateNumber: q(".ren"), // TODO(calibrate)
-              };
-            }),
+          extractLocationCandidateRows,
         );
         // candidateRef が空なら行 index でフォールバック(非PII参照・取得時に server 側で再解決)。
         return (rows as Array<Record<string, string | null>>).map((r, i) => ({

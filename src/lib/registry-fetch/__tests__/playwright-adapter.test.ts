@@ -29,6 +29,7 @@ import {
   resolveDefaultRegistryBrowserFactory,
   DEFAULT_REGISTRY_BASE_URL,
   DEFAULT_REGISTRY_LOGIN_PATH,
+  extractLocationCandidateRows,
 } from "../auto-fetch";
 import { RegistryFetchError } from "../errors";
 
@@ -245,6 +246,29 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await expect(page.searchByLocation!({ address: "x" })).rejects.toMatchObject({
       code: "timeout",
     });
+  });
+
+  it("C11: extractLocationCandidateRows は candidateRef を data-ref 属性から読む(textContent でない)", () => {
+    const makeEl = (dataRef: string | null, cells: Record<string, string>): Element =>
+      ({
+        getAttribute: (name: string) => (name === "data-ref" ? dataRef : null),
+        querySelector: (sel: string) =>
+          sel === "[data-ref]"
+            ? null
+            : cells[sel] !== undefined
+              ? ({ textContent: cells[sel] } as unknown as Element)
+              : null,
+      }) as unknown as Element;
+    const rows = extractLocationCandidateRows([
+      makeEl("ref-abc", { ".address": "東京都千代田区丸の内1-1", ".ren": "1234567890123" }),
+      makeEl(null, { ".address": "東京都千代田区丸の内1-2" }),
+    ]);
+    // candidateRef はラベルの textContent ではなく data-ref 属性値。
+    expect(rows[0].candidateRef).toBe("ref-abc");
+    expect(rows[0].address).toBe("東京都千代田区丸の内1-1");
+    expect(rows[0].realEstateNumber).toBe("1234567890123");
+    // data-ref 無しは空(呼び出し側で row-index フォールバック)。
+    expect(rows[1].candidateRef).toBe("");
   });
 
   // CodexP2-1: baseUrl 省略時は documented default を使い、相対 URL へ遷移しない。
