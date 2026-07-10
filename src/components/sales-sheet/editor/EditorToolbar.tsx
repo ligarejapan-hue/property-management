@@ -10,13 +10,15 @@ export interface EditorToolbarProps {
   onAddPhoto: () => void;
   /** 写真（image 要素）を写真ゾーンへワンボタン整列（計画⑥）。 */
   onAutoArrange: () => void;
+  /** テンプレ全体を内容に合わせてワンボタン再バランス（機能A）。 */
+  onAutoBalance: () => void;
   /** オリジナルバッジ要素を追加（バッジデザイナー・計画⑦）。 */
   onAddBadge: () => void;
   /** QR コード要素を追加（計画⑧）。 */
   onAddQr: () => void;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAddBadge, onAddQr }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -100,6 +102,15 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         写真を自動整列
+      </button>
+      <button
+        type="button"
+        data-toolbar-auto-balance
+        onClick={onAutoBalance}
+        disabled={busy}
+        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
+      >
+        レイアウト自動調整
       </button>
       <button
         type="button"

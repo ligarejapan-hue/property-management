@@ -22,6 +22,7 @@ import {
   addBadgeElement,
   addQrElement,
   autoArrangePhotos,
+  autoBalanceLayout,
   deleteElement,
   markSavedIfCurrent,
   exportWithSaveGuard,
@@ -130,8 +131,12 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           return sendToBack(prev, id);
         case "delete":
           return deleteElement(prev, id);
-        case "editText":
-          return editText(prev, id, change.patch);
+        case "editText": {
+          const next = editText(prev, id, change.patch);
+          // 機能A②: 文字サイズ変更は枠バランスへ波及（周りも連動再バランス）。
+          // 内容/色/フォント種別だけの変更は据え置き（サイズ変更時のみ）。
+          return change.patch.fontSizePt !== undefined ? autoBalanceLayout(next) : next;
+        }
         case "editImage":
           return editImage(prev, id, change.patch);
         case "editBadge":
@@ -157,6 +162,11 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   /** 写真（image 要素）を写真ゾーンへワンボタン整列する（計画⑥・手動上書き可）。 */
   function handleAutoArrange(): void {
     setEditorState((prev) => autoArrangePhotos(prev));
+  }
+
+  /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。 */
+  function handleAutoBalance(): void {
+    setEditorState((prev) => autoBalanceLayout(prev));
   }
 
   /** オリジナルバッジを追加する（バッジデザイナー・計画⑦）。 */
@@ -270,6 +280,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onDelete={handleDelete}
         onAddPhoto={() => setGalleryOpen(true)}
         onAutoArrange={handleAutoArrange}
+        onAutoBalance={handleAutoBalance}
         onAddBadge={handleAddBadge}
         onAddQr={handleAddQr}
       />
