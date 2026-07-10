@@ -66,24 +66,6 @@ const DEFAULT_ZOOM = 0.75;
 /** Millimetres to pixels at 96 dpi (96 / 25.4). */
 const MM_TO_PX = 96 / 25.4;
 
-/**
- * buildSpecSheetDocument が組む既知のテンプレ要素 id（@review Fix2）。文字サイズ変更時の
- * 自動再バランス(autoBalanceLayout)は、この集合に含まれる要素の変更時のみ発火する
- * （ユーザーが足した独自テキストの文字サイズ変更でテンプレ全体を崩さないため）。
- * editor-document.ts の autoBalanceLayout 側の TEMPLATE_ELEMENT_IDS と同じ集合。
- */
-const TEMPLATE_ELEMENT_IDS = new Set([
-  "catch-band",
-  "catch-copy",
-  "heading",
-  "price",
-  "overview",
-  "sales-points",
-  "company",
-  "company-details",
-  "floor-plan",
-]);
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -149,16 +131,13 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           return sendToBack(prev, id);
         case "delete":
           return deleteElement(prev, id);
-        case "editText": {
-          const next = editText(prev, id, change.patch);
-          // 機能A②: 文字サイズ変更は枠バランスへ波及（周りも連動再バランス）。ただし
-          // テンプレ既知idの要素の変更時のみ（@review Fix2）— ユーザーが足した独自要素の
-          // 文字サイズ変更でテンプレを崩さない（手で動かした要素がグリッドへ戻ってしまう）。
-          // 内容/色/フォント種別だけの変更は据え置き（サイズ変更時のみ）。
-          return change.patch.fontSizePt !== undefined && TEMPLATE_ELEMENT_IDS.has(id)
-            ? autoBalanceLayout(next)
-            : next;
-        }
+        case "editText":
+          // 文字サイズ変更での自動再バランスは撤去（@codex P2 / review 3件が指摘）: レイアウトを
+          // 駆動する概要表フォントは editText 対象外ゆえ、見出し等の text フォント変更では枠が
+          // 最適化されず（固定高で見切れる）・手で動かした要素がグリッドへ戻る害だけが残るため。
+          // 内容に合わせた再配置は明示的な「レイアウト自動調整」ボタン(handleAutoBalance)で行う。
+          // ②(文字→枠最適化)を本来の形にするにはエンジンが text フォントを考慮する追加設計が要る（follow-up）。
+          return editText(prev, id, change.patch);
         case "editImage":
           return editImage(prev, id, change.patch);
         case "editBadge":
