@@ -708,3 +708,29 @@ describe("sanitizeAuditDetail: 売却促進DM の識別子は管理画面で追�
     expect(out.regeneratedAt).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: 設定更新監査の target/changed を保持(@codex)", () => {
+  it("sale_dm_settings_update は target(singleton)/fields を保持・値混入は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("sale_dm_settings_update", {
+      target: "singleton",
+      fields: ["provider", "anthropicApiKey"],
+      provider: "claude",
+      anthropicApiKey: "sk-secret",
+    }) as Record<string, unknown>;
+    expect(out.target).toBe("singleton");
+    expect(out.fields).toEqual(["provider", "anthropicApiKey"]);
+    expect(out.provider).toBe("claude");
+    expect(out.anthropicApiKey).toBe(REDACTED);
+  });
+
+  it("registry_settings_update は target(singleton)/changed を保持・値混入は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("registry_settings_update", {
+      target: "singleton",
+      changed: ["loginId", "password"],
+      password: "hunter2",
+    }) as Record<string, unknown>;
+    expect(out.target).toBe("singleton");
+    expect(out.changed).toEqual(["loginId", "password"]);
+    expect(out.password).toBe(REDACTED);
+  });
+});
