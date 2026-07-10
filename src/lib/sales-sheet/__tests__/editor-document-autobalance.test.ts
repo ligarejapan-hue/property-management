@@ -10,7 +10,13 @@ import { describe, it, expect } from "vitest";
 import { type EditorState, autoBalanceLayout, autoArrangePhotos } from "../editor-document";
 import { buildSaleHouseDocument } from "../build-document";
 import { buildFooterBand } from "../footer-band";
-import { computeSpecSheetLayout, DEFAULT_FOOTER_H } from "../layout-engine";
+import {
+  computeSpecSheetLayout,
+  DEFAULT_FOOTER_H,
+  MAIN_BOTTOM_MARGIN_MM,
+  SALES_POINTS_H_MM,
+  PHOTO_GAP_MM,
+} from "../layout-engine";
 import {
   salesSheetDocumentSchema,
   type SalesSheetDocument,
@@ -229,15 +235,17 @@ describe("autoBalanceLayout", () => {
   });
 });
 
-describe("autoArrangePhotos × 会社帯", () => {
-  it("写真自動整列後、写真は会社帯の上端(mainBottom=210-DEFAULT_FOOTER_H-2)を越えない（@codex）", () => {
+describe("autoArrangePhotos × 会社帯 / salesPoints", () => {
+  it("写真自動整列後、写真は salesPoints帯・会社帯を侵さない（@codex R1/R2）", () => {
     const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
     const out = autoArrangePhotos(makeState(built));
-    const bandTop = 210 - DEFAULT_FOOTER_H - 2;
+    // エンジンが写真敷詰めを止める下端＝mainBottom − salesPoints − gap（写真はこの上まで）。
+    const photoPackBottom =
+      210 - DEFAULT_FOOTER_H - MAIN_BOTTOM_MARGIN_MM - SALES_POINTS_H_MM - PHOTO_GAP_MM;
     const imgs = images(out.document);
     expect(imgs.length).toBeGreaterThan(0);
     for (const img of imgs) {
-      expect(img.y + img.h).toBeLessThanOrEqual(bandTop + 0.001);
+      expect(img.y + img.h).toBeLessThanOrEqual(photoPackBottom + 0.001);
     }
   });
 });

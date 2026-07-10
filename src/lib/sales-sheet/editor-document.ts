@@ -16,7 +16,14 @@
 
 import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
 import { generateQrDataUrl } from "./qr-code";
-import { computeSpecSheetLayout, DEFAULT_FOOTER_H, packPhotoCells } from "./layout-engine";
+import {
+  computeSpecSheetLayout,
+  DEFAULT_FOOTER_H,
+  MAIN_BOTTOM_MARGIN_MM,
+  SALES_POINTS_H_MM,
+  PHOTO_GAP_MM,
+  packPhotoCells,
+} from "./layout-engine";
 import { buildFooterBand } from "./footer-band";
 import type {
   SalesSheetDocument,
@@ -581,10 +588,11 @@ export function removeTableRow(
 const PHOTO_ZONE_X_MM = 10;
 const PHOTO_ZONE_Y_MM = 46;
 const PHOTO_ZONE_MAX_W_MM = 130;
-// 会社帯（下部フッター）の占有高さ分を確保する＝写真ゾーン下端を帯上端
-// （mainBottom = 210 − DEFAULT_FOOTER_H − 2）まで。DEFAULT_FOOTER_H に追従させ、
-// 帯高さが変わっても「写真を自動整列」で写真が帯へ食い込まないようにする（+2=engine の main 下余白）。
-const PHOTO_ZONE_BOTTOM_MARGIN_MM = DEFAULT_FOOTER_H + 2;
+// 写真ゾーン下端を、エンジンが写真敷詰めを止める位置（photoPackBottom = mainBottom −
+// salesPoints帯 − gap）に合わせる（@codex R1/R2）。会社帯だけでなく salesPoints 帯も避け、
+// 作成/再バランス経路と同じ予約にする。page 下端からの余白＝帯高 + main下余白 + salesPoints高 + gap。
+const PHOTO_ZONE_BOTTOM_MARGIN_MM =
+  DEFAULT_FOOTER_H + MAIN_BOTTOM_MARGIN_MM + SALES_POINTS_H_MM + PHOTO_GAP_MM;
 
 /**
  * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト）。

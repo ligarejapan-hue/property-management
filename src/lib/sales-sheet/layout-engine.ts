@@ -76,7 +76,7 @@ const CATCH_COPY: Rect = { x: 16, y: 8, w: 265, h: 16 };
 /** メイン領域の上端。 */
 const MAIN_TOP_MM = 26;
 /** footer 帯とメイン領域の間の余白(mm)。mainBottom = 210 − footerHeight − この値。 */
-const MAIN_BOTTOM_MARGIN_MM = 2;
+export const MAIN_BOTTOM_MARGIN_MM = 2;
 
 /** 左右分割線 splitX の可動域。写真0枚→94寄り（overview を広く＝写真少なら表広く）／3枚→145寄り（写真域広め）。 */
 const SPLIT_X_MIN_MM = 94;
@@ -111,7 +111,7 @@ const LEFT_COLUMN_WIDTH_MARGIN_MM = 16;
 
 /** salesPoints（写真域の下端付近の帯）。w は左カラム幅 leftColumnW を使う（@review Fix A）。 */
 const SALES_POINTS_X_MM = 10;
-const SALES_POINTS_H_MM = 7;
+export const SALES_POINTS_H_MM = 7;
 /** salesPoints.y = mainBottom − この値。 */
 const SALES_POINTS_BOTTOM_OFFSET_MM = 7;
 
@@ -152,7 +152,7 @@ function clamp(value: number, lo: number, hi: number): number {
 // ---------------------------------------------------------------------------
 
 /** 写真間の余白(mm)。テンプレの写真レイアウトと同じ。 */
-const PHOTO_GAP_MM = 4;
+export const PHOTO_GAP_MM = 4;
 /** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
 const PHOTO_TARGET_ASPECT = 1.5;
 /** セル寸法の下限(mm)。editor の MIN_ELEMENT_SIZE_MM と同値（循環import回避のためローカル定義）。 */
