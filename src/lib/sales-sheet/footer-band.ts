@@ -52,13 +52,14 @@ const DIVIDER_W_MM = 0.3;
 /** 帯外周の枠線太さ(mm)。 */
 const FRAME_STROKE_W_MM = 0.3;
 
-/** 社名JPブロックの幅(mm)。 */
-const NAME_JA_W_MM = 44;
+/** 社名JPブロックの幅(mm)。社名は11文字×13pt≈50mm＝clip回避のため余裕を持たせる
+ *  （render-html は overflow:hidden で box をはみ出す文字を切る）。 */
+const NAME_JA_W_MM = 58;
 /** 社名EN は社名JP（COMPANY_INFO.nameJa・定数長）の右に固定オフセット(mm)＝決定的。 */
-const NAME_EN_OFFSET_MM = 46;
-const NAME_EN_W_MM = 30;
-/** TEL/FAX（社名の右）の x オフセット・幅(mm)。 */
-const CONTACT_X_OFFSET_MM = 80;
+const NAME_EN_OFFSET_MM = 60;
+const NAME_EN_W_MM = 32;
+/** TEL/FAX（社名の右）の x オフセット・幅(mm)。社名ブロックの右端に置く。 */
+const CONTACT_X_OFFSET_MM = 96;
 const CONTACT_W_MM = 46;
 /** 社名行の高さ(mm)。TEL/FAX 2行はこの行の中で均等割りする。 */
 const NAME_ROW_H_MM = 6;
