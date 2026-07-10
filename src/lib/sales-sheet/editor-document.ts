@@ -660,10 +660,12 @@ function geomEquals(
  *   sales-points/company/company-details/floor-plan）と「type==="image" の写真要素
  *   （既知id以外・配列順・枚数は任意）」のみ。未知idの非image要素（ユーザーが手で足した
  *   独自要素）は参照ごと不動。
- * - overview（id="overview" かつ type="table"）が存在すれば、その行数を specRowCount に、
- *   現在の style.fontSizePt を overviewFontPt としてエンジンへ渡す（ユーザーが変えた
- *   文字サイズを尊重する）。存在しなければ specRowCount=0・フォントはエンジンの自動計算
- *   （行数からの clamp）に委ねる。
+ * - overview（id="overview" かつ type="table"）が存在すれば、その行数を specRowCount として
+ *   エンジンへ渡す。フォント(style.fontSizePt)は overviewFontPt を渡さず、常にエンジンの
+ *   自動計算（行数からの clamp）に委ねる — overview は table 要素で editText の対象外
+ *   （ユーザーが直接フォントを変更する手段が無い）ため「ユーザー選択の保持」は成立せず、
+ *   行数変化に追従した再計算が正しい（@review Fix B・build-document.ts のビルダー側も
+ *   overviewFontPt を渡していないので一貫）。存在しなければ specRowCount=0。
  * - floor-plan は該当要素が存在する（hasFloorPlan）ときのみ、エンジンが返す非nullの
  *   L.floorPlan へ更新する。
  * - 写真（配列順）は L.photoSlots[k] の x/y/w/h へ更新する。src/fit/焦点/z/角丸/alt と
@@ -677,7 +679,6 @@ export function autoBalanceLayout(state: EditorState): EditorState {
   const overviewIdx = elements.findIndex((e) => e.id === "overview" && e.type === "table");
   const overviewEl = overviewIdx === -1 ? null : (elements[overviewIdx] as TableElement);
   const specRowCount = overviewEl ? overviewEl.rows.length : 0;
-  const overviewFontPt = overviewEl ? overviewEl.style.fontSizePt : undefined;
 
   const hasFloorPlan = elements.some((e) => e.id === "floor-plan");
 
@@ -686,12 +687,14 @@ export function autoBalanceLayout(state: EditorState): EditorState {
     if (e.type === "image" && !TEMPLATE_ELEMENT_IDS.has(e.id)) photoIdxs.push(i);
   });
 
+  // overviewFontPt は渡さない＝エンジンに specRowCount からフォントを再計算させる
+  // （@review Fix B・table フォントは editText 対象外でユーザーが直接変更できないため、
+  // 既存値の「保持」を優先する理由が無い）。
   const L = computeSpecSheetLayout({
     photoCount: photoIdxs.length,
     specRowCount,
     hasFloorPlan,
     footerHeight: DEFAULT_FOOTER_H,
-    overviewFontPt,
   });
 
   const templateRects: Record<string, { x: number; y: number; w: number; h: number }> = {

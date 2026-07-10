@@ -105,9 +105,8 @@ const PRICE_H_MM = 12;
 /** heading.w = price.w = splitX − この値。 */
 const LEFT_COLUMN_WIDTH_MARGIN_MM = 16;
 
-/** salesPoints（写真域の下端付近の帯）。 */
+/** salesPoints（写真域の下端付近の帯）。w は左カラム幅 leftColumnW を使う（@review Fix A）。 */
 const SALES_POINTS_X_MM = 10;
-const SALES_POINTS_W_MM = 136;
 const SALES_POINTS_H_MM = 7;
 /** salesPoints.y = mainBottom − この値。 */
 const SALES_POINTS_BOTTOM_OFFSET_MM = 7;
@@ -274,7 +273,10 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     : null;
 
   const photoPackY = hasFloorPlan ? PHOTO_AREA_Y_MM + FLOOR_PLAN_H_MM + FLOOR_PLAN_GAP_MM : PHOTO_AREA_Y_MM;
-  const photoPackH = Math.max(0, mainBottom - photoPackY);
+  // 写真敷詰めの下端は salesPoints 帯の上まで（@review Fix A・写真スロット下端が mainBottom
+  // と一致し得て salesPoints(y=mainBottom−SALES_POINTS_H_MM..mainBottom) と重なっていた）。
+  const photoPackBottom = mainBottom - SALES_POINTS_H_MM - PHOTO_GAP_MM;
+  const photoPackH = Math.max(0, photoPackBottom - photoPackY);
   const photoSlots: Rect[] = packPhotoCells(photoCount, photoArea.w, photoPackH).map((cell) => ({
     x: photoArea.x + cell.x,
     y: photoPackY + cell.y,
@@ -289,7 +291,10 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
   const salesPoints: Rect = {
     x: SALES_POINTS_X_MM,
     y: mainBottom - SALES_POINTS_BOTTOM_OFFSET_MM,
-    w: SALES_POINTS_W_MM,
+    // w は固定値でなく左カラム幅 leftColumnW（splitX 連動）＝右端(10+leftColumnW=splitX−6)が
+    // overview.x(=splitX+5) を超えない（@review Fix A・写真0-2枚で splitX が左寄りになると
+    // 固定幅では overview 表と重なっていた）。
+    w: leftColumnW,
     h: SALES_POINTS_H_MM,
   };
 

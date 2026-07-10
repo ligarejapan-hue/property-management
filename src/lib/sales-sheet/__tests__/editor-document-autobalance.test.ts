@@ -46,6 +46,20 @@ function moveEl(doc: SalesSheetDocument, id: string, x: number, y: number): Sale
   };
 }
 
+/** overview（table）の style.fontSizePt だけを差し替える（行を増減しても現状の reducer は
+ *  フォントを自動更新しないため、現在の行数と整合しない「古い」値が残った状態を模す）。
+ *  他フィールドは保持。 */
+function setOverviewFontPt(doc: SalesSheetDocument, fontSizePt: number): SalesSheetDocument {
+  return {
+    ...doc,
+    elements: doc.elements.map((el) =>
+      el.id === "overview"
+        ? ({ ...el, style: { ...(el as TableElement).style, fontSizePt } } as unknown as SalesSheetElement)
+        : el,
+    ),
+  };
+}
+
 function findEl(doc: SalesSheetDocument, id: string): SalesSheetElement | undefined {
   return doc.elements.find((e) => e.id === id);
 }
@@ -89,6 +103,29 @@ describe("autoBalanceLayout", () => {
       expect(img.h).toBeCloseTo(L.photoSlots[k].h, 6);
     });
     expect(state.dirty).toBe(true);
+  });
+
+  it("overviewの古い(現在の行数に整合しない)フォントを、行数から再計算した値で上書きする（overviewFontPtを渡さない・@review Fix B）", () => {
+    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
+    const rows = (findEl(built, "overview") as TableElement).rows;
+    const freshFontPt = computeSpecSheetLayout({
+      photoCount: images(built).length,
+      specRowCount: rows.length,
+      hasFloorPlan: !!findEl(built, "floor-plan"),
+      footerHeight: DEFAULT_FOOTER_H,
+    }).overview.fontSizePt;
+
+    // 行数はそのまま、フォントだけ現在の行数に整合しない「古い」値へ差し替える
+    // （必ず freshFontPt と異なる値になる）。
+    const staleFontPt = freshFontPt === 5 ? 9 : 5;
+    const doc = setOverviewFontPt(built, staleFontPt);
+
+    const state = autoBalanceLayout(makeState(doc));
+    const overview = findEl(state.document, "overview") as TableElement;
+
+    // 古い値をそのまま素通しするのではなく、行数から再計算した値になる。
+    expect(overview.style.fontSizePt).toBeCloseTo(freshFontPt, 6);
+    expect(overview.style.fontSizePt).not.toBe(staleFontPt);
   });
 
   it("未知idのtext要素（ユーザーが手で足した独自要素）は参照ごと不動", () => {

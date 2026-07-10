@@ -59,3 +59,25 @@ describe("computeSpecSheetLayout — floorPlan（間取り図）の重なり回�
     },
   );
 });
+
+describe("computeSpecSheetLayout — salesPoints（セールスポイント帯）の重なり回避 [@review Fix A]", () => {
+  it.each([
+    [0, false],
+    [1, false],
+    [2, false],
+    [3, false],
+    [0, true],
+    [1, true],
+    [2, true],
+    [3, true],
+  ])(
+    "photoCount=%i・hasFloorPlan=%s で salesPoints が overview / 写真スロットのいずれとも重ならない",
+    (photoCount, hasFloorPlan) => {
+      const L = computeSpecSheetLayout({ ...base, photoCount, hasFloorPlan });
+      expect(overlaps(L.salesPoints, L.overview), "overview と重なっている").toBe(false);
+      for (const slot of L.photoSlots) {
+        expect(overlaps(L.salesPoints, slot), "写真スロットと重なっている").toBe(false);
+      }
+    },
+  );
+});
