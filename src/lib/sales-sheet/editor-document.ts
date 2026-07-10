@@ -585,7 +585,7 @@ const PHOTO_GAP_MM = 4;
 /** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
 const PHOTO_TARGET_ASPECT = 1.5;
 
-interface PhotoCell {
+export interface PhotoCell {
   x: number;
   y: number;
   w: number;
@@ -602,7 +602,7 @@ interface PhotoCell {
  * セル寸法が非正になる行数は候補から除外し、全滅する極端な枚数では 1 行へ
  * フォールバックして MIN_ELEMENT_SIZE_MM でクランプ（非正寸法を返さないことを優先）。
  */
-function packPhotoCells(n: number, W: number, H: number): PhotoCell[] {
+export function packPhotoCells(n: number, W: number, H: number): PhotoCell[] {
   const gap = PHOTO_GAP_MM;
   let best: { rows: number; counts: number[]; score: number } | null = null;
   for (let rows = 1; rows <= n; rows++) {
