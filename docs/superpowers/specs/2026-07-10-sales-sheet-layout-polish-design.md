@@ -12,7 +12,7 @@
 ## 機能A：レイアウト最適化エンジン（要望①＋②）
 
 ### 決まったこと（ブレスト）
-- **起動タイミング**：(1)図面の**作成時に自動**、(2)エディタの**「レイアウト自動調整」ボタン**、(3)**文字サイズ変更時**（変更した枠＋周りの枠も連動して再バランス）。
+- **起動タイミング**：(1)図面の**作成時に自動**、(2)エディタの**「レイアウト自動調整」ボタン**。〔実装時の変更〕(3)**文字サイズ変更時の自動発火は見送り**（下記②注記）＝再バランスはボタンで明示的に行う。
 - **目標**：ページ（A4横）を気持ちよく埋める。写真が少ない→項目表を広く、写真が多い→写真域を広く。余白/間抜けを出さない。
 
 ### アーキテクチャ
@@ -21,7 +21,7 @@
 - **入力** `SpecSheetLayoutInput`：
   - `photoCount`（0–3）、`floorPlanPresent`（bool）
   - `specRowCount`（スペック表の行数＝`buildSheetRows` の結果長）
-  - `fontSizes`（任意・省略時は既定）：`{ overview?, heading?, price?, ... }`（②で変更された値を渡す）
+  - `overviewFontPt`（任意・省略時は行数から算出）：概要表フォント。〔実装時の変更〕当初案の `fontSizes:{overview?,heading?,price?}` は、レイアウトを駆動する概要表フォントのみ（`overviewFontPt`）に縮小。`heading`/`price` 等 text 要素フォントを入力に取り込むのは②follow-up（下記注記）。
   - `hasCatchCopy` / `hasSalesPoints` / `footerHeight`（Bの帯の高さ・下記）
 - **出力** `SpecSheetLayout`：各領域の矩形＋文字サイズ
   - `photoArea`（左カラム矩形）＋ `photoSlots[]`（枚数に応じた各写真の x/y/w/h）
@@ -36,7 +36,7 @@
 1. **ビルダー（作成時）**：`buildSpecSheetDocument(parts)` が先頭で `computeSpecSheetLayout` を呼び、固定座標の代わりに算出値で要素を置く。**出力の要素種別・id は不変**（`catch-band`/`heading`/`price`/`overview`/`photo-N`/`sales-points`/`company*`/`floor-plan`）＝二重レンダラ・保存境界に影響なし。
 2. **エディタ（ボタン＋文字変更）**：純reducer `autoBalanceLayout(document): document` を新設（既存 `autoArrangePhotos` と同じ流儀）。**id で役割を判定**した既存テンプレ要素のみを対象に、現在の各要素 `style.fontSizePt` を入力へ渡して `computeSpecSheetLayout` で再計算→座標/サイズ更新。**ユーザーが手で足した独自要素は触らない**。no-op時は同一参照（dirtyにしない）。
    - ボタン：toolbarに「レイアウト自動調整」（`autoArrangePhotos` の隣）。
-   - 文字変更：ElementPanel の fontSizePt 変更ハンドラが、変更後に `autoBalanceLayout` を続けて呼ぶ（②「周りも連動」）。※驚き回避のため undo 可能・変更は1操作にまとめる。
+   - 文字変更：〔実装時に見送り〕テンプレ text 要素の文字サイズ変更では `autoBalanceLayout` を**自動発火しない**。理由＝レイアウトを駆動するのは概要表フォント（editText 対象外）で、見出し等 text フォントはエンジン未考慮＝自動発火しても枠は最適化されず、手で動かした要素がグリッドへ戻る害だけが残るため（@codex P2/レビュー3件が指摘）。②「文字→枠の最適化」を本来の形にするには**エンジンが text 要素フォントを考慮する追加設計**が必要（follow-up）。当面は「レイアウト自動調整」ボタンで内容に合わせ再配置する。
 
 ### テスト（TDD）
 - `computeSpecSheetLayout`：純関数。ケース＝写真0/1/2/3×項目 少/多、文字大/小。検証＝重なり無し・A4内・帯高さ非侵食・「写真少→表広い」等の比例が満たされる（矩形の不変条件をassert）。
