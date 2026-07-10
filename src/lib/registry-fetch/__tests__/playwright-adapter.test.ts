@@ -29,6 +29,7 @@ import {
   resolveDefaultRegistryBrowserFactory,
   DEFAULT_REGISTRY_BASE_URL,
   DEFAULT_REGISTRY_LOGIN_PATH,
+  extractLocationCandidateRows,
 } from "../auto-fetch";
 import { RegistryFetchError } from "../errors";
 
@@ -53,6 +54,7 @@ function makeFakeChromium() {
     waitForEvent: vi.fn(async () => ({
       createReadStream: async () => Readable.from([Buffer.from("%PDF-1.4 dl")]),
     })),
+    $$eval: vi.fn(async () => [] as unknown[]),
   };
   const context = {
     newPage: vi.fn(async () => page),
@@ -211,6 +213,62 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await page.close();
     expect(f.context.close).toHaveBeenCalledTimes(1);
     expect(f.browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("C9: searchByLocation は 所在/地番/家屋番号 を fill→検索 click→結果行を候補へ変換", async () => {
+    const f = makeFakeChromium();
+    f.page.$$eval = vi.fn(async () => [
+      { candidateRef: "c1", address: "東京都千代田区丸の内1-1", lotNumber: "1番1", buildingNumber: null, realEstateNumber: "1234567890123" },
+      { candidateRef: "", address: "東京都千代田区丸の内1-2", lotNumber: "1番2", buildingNumber: null, realEstateNumber: null },
+    ]);
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    const candidates = await page.searchByLocation!({
+      address: "東京都千代田区丸の内1",
+      lotNumber: "1番",
+      buildingNumber: null,
+    });
+    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "東京都千代田区丸の内1");
+    expect(f.page.click).toHaveBeenCalled();
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0].realEstateNumber).toBe("1234567890123");
+    // candidateRef 空は row-index フォールバックで必ず非空。
+    expect(candidates[1].candidateRef).not.toBe("");
+  });
+
+  it("C10: searchByLocation の結果待ちタイムアウトは timeout(not_found にしない)", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async () => {
+      throw makeTimeoutError();
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await expect(page.searchByLocation!({ address: "x" })).rejects.toMatchObject({
+      code: "timeout",
+    });
+  });
+
+  it("C11: extractLocationCandidateRows は candidateRef を data-ref 属性から読む(textContent でない)", () => {
+    const makeEl = (dataRef: string | null, cells: Record<string, string>): Element =>
+      ({
+        getAttribute: (name: string) => (name === "data-ref" ? dataRef : null),
+        querySelector: (sel: string) =>
+          sel === "[data-ref]"
+            ? null
+            : cells[sel] !== undefined
+              ? ({ textContent: cells[sel] } as unknown as Element)
+              : null,
+      }) as unknown as Element;
+    const rows = extractLocationCandidateRows([
+      makeEl("ref-abc", { ".address": "東京都千代田区丸の内1-1", ".ren": "1234567890123" }),
+      makeEl(null, { ".address": "東京都千代田区丸の内1-2" }),
+    ]);
+    // candidateRef はラベルの textContent ではなく data-ref 属性値。
+    expect(rows[0].candidateRef).toBe("ref-abc");
+    expect(rows[0].address).toBe("東京都千代田区丸の内1-1");
+    expect(rows[0].realEstateNumber).toBe("1234567890123");
+    // data-ref 無しは空(呼び出し側で row-index フォールバック)。
+    expect(rows[1].candidateRef).toBe("");
   });
 
   // CodexP2-1: baseUrl 省略時は documented default を使い、相対 URL へ遷移しない。

@@ -386,3 +386,18 @@ describe("OfficialRegistryProvider（PR-2 実フロー・fake page 注入・外�
     }
   });
 });
+
+describe("OfficialRegistryProvider: supportsLocationSearch(所在検索の専用ゲート)", () => {
+  it("option 既定は false・true 指定で true(所在検索の露出を独立に制御)", () => {
+    expect(
+      new OfficialRegistryProvider({ loginId: "id", password: "pw" }).supportsLocationSearch,
+    ).toBe(false);
+    expect(
+      new OfficialRegistryProvider({
+        loginId: "id",
+        password: "pw",
+        supportsLocationSearch: true,
+      }).supportsLocationSearch,
+    ).toBe(true);
+  });
+});
