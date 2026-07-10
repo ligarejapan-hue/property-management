@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildSaleMansionDocument } from "../build-document";
 import { salesSheetDocumentSchema } from "../document-schema";
 import { mapOccupancyStatusToMansionOccupancy } from "../occupancy";
+import { computeSpecSheetLayout } from "../layout-engine";
 
 const base = {
   property: {
@@ -242,11 +243,12 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(findEl(doc, "price")).toMatchObject({ content: "6590万円" });
   });
 
-  // 版面レイアウトを buildSpecSheetDocument へ抽出する前の固定（特性化テスト）。
-  // catch-band/catch-copy/heading/price/overview/sales-points/company/company-details の
-  // id・座標(x/y/w/h/z)・スタイルが既知値であることを固定し、抽出後もこの値が
-  // 変わらないことを保証する（[F2-A Task1]）。
-  it("レイアウト: catch-band/heading/price/overview/sales-points/company/company-details のid・座標・スタイルが既知値(抽出前の固定・リグレッション用)", () => {
+  // 版面レイアウトは computeSpecSheetLayout（最適化エンジン）に委譲されている
+  // （[Task2]）。id・content・スタイル(フォント種別/太字/色)は不変であることを固定しつつ、
+  // 座標とoverviewのfontSizePtはエンジンの出力(L)を期待値として使う＝
+  // buildSaleMansionDocument→buildSpecSheetDocument が L.* を正しい要素へ配線している
+  // ことを検証する（決め打ち座標ではなくエンジン契約に対するリグレッション）。
+  it("レイアウト: catch-band/heading/price/overview/sales-points/company/company-details のid・座標・スタイルがエンジン出力どおりに配線される", () => {
     const doc = buildSaleMansionDocument({
       ...base,
       overrides: {
@@ -257,12 +259,22 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
       },
     });
 
+    // base.photos は1枚・floorPlanImage未指定＝hasFloorPlan false。行数はスペック表の
+    // 実際の行から取得する（field-model側の項目数に依存させない）。
+    const overviewEl = findEl(doc, "overview") as { rows: unknown[] } | undefined;
+    const L = computeSpecSheetLayout({
+      photoCount: 1,
+      specRowCount: overviewEl?.rows.length ?? 0,
+      hasFloorPlan: false,
+      footerHeight: 16, // build-document.ts の DEFAULT_FOOTER_H と同値
+    });
+
     expect(findEl(doc, "catch-band")).toMatchObject({
       type: "shape",
-      x: 10,
-      y: 8,
-      w: 277,
-      h: 16,
+      x: L.catchBand.x,
+      y: L.catchBand.y,
+      w: L.catchBand.w,
+      h: L.catchBand.h,
       z: 1,
       shape: "rect",
       fill: "#15324f",
@@ -270,10 +282,10 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
 
     expect(findEl(doc, "catch-copy")).toMatchObject({
       type: "text",
-      x: 16,
-      y: 8,
-      w: 265,
-      h: 16,
+      x: L.catchCopy.x,
+      y: L.catchCopy.y,
+      w: L.catchCopy.w,
+      h: L.catchCopy.h,
       z: 2,
       content: "北東角部屋",
       style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" },
@@ -281,10 +293,10 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
 
     expect(findEl(doc, "heading")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 26,
-      w: 94,
-      h: 7,
+      x: L.heading.x,
+      y: L.heading.y,
+      w: L.heading.w,
+      h: L.heading.h,
       z: 2,
       content: "西荻リリエンハイム",
       style: { fontSizePt: 11, bold: true, color: "#15324f" },
@@ -292,10 +304,10 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
 
     expect(findEl(doc, "price")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 33,
-      w: 94,
-      h: 12,
+      x: L.price.x,
+      y: L.price.y,
+      w: L.price.w,
+      h: L.price.h,
       z: 2,
       content: "6590万円",
       style: { fontSizePt: 20, bold: true, color: "#d0331a" },
@@ -303,20 +315,20 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
 
     expect(findEl(doc, "overview")).toMatchObject({
       type: "table",
-      x: 150,
-      y: 26,
-      w: 137,
-      h: 167,
+      x: L.overview.x,
+      y: L.overview.y,
+      w: L.overview.w,
+      h: L.overview.h,
       z: 1,
-      style: { fontSizePt: 7, borderColor: "#cccccc", labelColor: "#15324f" },
+      style: { fontSizePt: L.overview.fontSizePt, borderColor: "#cccccc", labelColor: "#15324f" },
     });
 
     expect(findEl(doc, "sales-points")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 187,
-      w: 136,
-      h: 7,
+      x: L.salesPoints.x,
+      y: L.salesPoints.y,
+      w: L.salesPoints.w,
+      h: L.salesPoints.h,
       z: 2,
       content: "◆リノベ済",
       style: { fontSizePt: 9, bold: true, color: "#15324f" },
@@ -324,10 +336,10 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
 
     expect(findEl(doc, "company")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 195,
-      w: 277,
-      h: 6,
+      x: L.company.x,
+      y: L.company.y,
+      w: L.company.w,
+      h: L.company.h,
       z: 2,
       content: "株式会社リガーレジャパン Ligare Japan　TEL 03-6823-2760",
       style: { fontSizePt: 9, color: "#15324f" },
@@ -335,10 +347,10 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
 
     expect(findEl(doc, "company-details")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 201,
-      w: 277,
-      h: 7,
+      x: L.companyDetails.x,
+      y: L.companyDetails.y,
+      w: L.companyDetails.w,
+      h: L.companyDetails.h,
       z: 2,
       content: "取引態様：専任媒介",
       style: { fontSizePt: 8, color: "#15324f" },
