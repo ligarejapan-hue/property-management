@@ -41,4 +41,16 @@ describe("buildFooterBand", () => {
       expect(e.y + e.h).toBeLessThanOrEqual(FOOTER.y + FOOTER.h + 0.01);
     }
   });
+  it("極端に小さい footer でも全要素の w/h は正（document-schema 準拠）かつ内側に収まる", () => {
+    // 実運用の footer は 277×24。ここでは想定外に小さい矩形でも w:0/h:0 を出さない
+    // （schema は w/h を正数必須＝保存時 422 回避）ことを固定する。
+    const tiny = { x: 10, y: 200, w: 60, h: 8 };
+    const els = buildFooterBand(tiny, { transactionType: "仲介", staff: "村山廉太郎", specialNotes: "注意" });
+    for (const e of els) {
+      expect(e.w).toBeGreaterThan(0);
+      expect(e.h).toBeGreaterThan(0);
+      expect(e.x + e.w).toBeLessThanOrEqual(tiny.x + tiny.w + 0.01);
+      expect(e.y + e.h).toBeLessThanOrEqual(tiny.y + tiny.h + 0.01);
+    }
+  });
 });

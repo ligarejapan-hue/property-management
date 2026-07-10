@@ -12,6 +12,10 @@ import { COMPANY_INFO } from "./company-info";
  * おり、このモジュールはレイアウト（座標算出）のみを担う。エンジンへの結線
  * （`layout-engine.ts`/`build-document.ts` の改修）は別タスク。
  *
+ * 前提: `footer` は実運用サイズ（≈幅277×高24mm＝`COMPANY_W_MM`×`DEFAULT_FOOTER_H`）を想定。
+ * それより極端に小さい矩形では各スロットが縮退しうるが、出力要素の w/h は常に正（schema
+ * 準拠＝保存時 422 回避）に保つ（`clampRect` の `MIN_DIM_MM` ハネ止め）。
+ *
  * 二重レンダラ（render-html.ts / SalesSheetRenderer.tsx）は無改修が制約のため、縦の
  * 区切り線は `shape:"line"` でなく `shape:"rect"`（細幅の塗り矩形）で表す。両レンダラの
  * "line" 実装は CSS の height を常に `strokeWidthMm`（既定0.3mm）へ強制上書きする横線
@@ -72,12 +76,27 @@ const FONT_PT = {
   table: 7,
 } as const;
 
-/** 矩形を `footer` の内側へクランプする（幾何不変条件の最終防波堤・PAD計算の丸め誤差対策）。 */
+/** w/h の下限(mm)。document-schema は w/h を「正数」必須とするため、想定外に小さい footer
+ *  でも 0 を出さないハネ止め（実運用の footer=277×24 では発火しない）。 */
+const MIN_DIM_MM = 0.1;
+
+/** 矩形を `footer` の内側へクランプする（幾何不変条件の最終防波堤・PAD計算の丸め誤差対策）。
+ *  w/h は schema 準拠のため厳密に正へ丸め、その分 x/y を内側へ引いて footer をはみ出さない。 */
 function clampRect(r: Rect, footer: Rect): Rect {
-  const x = Math.min(Math.max(r.x, footer.x), footer.x + footer.w);
-  const y = Math.min(Math.max(r.y, footer.y), footer.y + footer.h);
-  const w = Math.max(0, Math.min(r.w, footer.x + footer.w - x));
-  const h = Math.max(0, Math.min(r.h, footer.y + footer.h - y));
+  const right = footer.x + footer.w;
+  const bottom = footer.y + footer.h;
+  let x = Math.min(Math.max(r.x, footer.x), right);
+  let y = Math.min(Math.max(r.y, footer.y), bottom);
+  let w = Math.max(0, Math.min(r.w, right - x));
+  let h = Math.max(0, Math.min(r.h, bottom - y));
+  if (w < MIN_DIM_MM) {
+    w = Math.min(MIN_DIM_MM, footer.w);
+    x = Math.min(x, right - w);
+  }
+  if (h < MIN_DIM_MM) {
+    h = Math.min(MIN_DIM_MM, footer.h);
+    y = Math.min(y, bottom - h);
+  }
   return { x, y, w, h };
 }
 
