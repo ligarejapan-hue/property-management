@@ -108,14 +108,14 @@ describe("JapanPostAddressProvider.lookupByPostalCode（searchcode）", () => {
 });
 
 describe("JapanPostAddressProvider.searchByAddress（addresszip）", () => {
-  it("POST /api/v1/addresszip を呼ぶ（searchcode は呼ばない）", async () => {
+  it("POST /api/v2/addresszip を呼ぶ（searchcode は呼ばない）", async () => {
     const { provider, calls } = makeProvider({
       addresszipBody: { addresses: [SAMPLE_ADDRESS] },
     });
     await provider.searchByAddress("東京都千代田区丸の内");
     const azCall = calls.find((c) => c.url.includes("/addresszip"));
     expect(azCall).toBeTruthy();
-    expect(azCall?.url).toContain("/api/v1/addresszip");
+    expect(azCall?.url).toContain("/api/v2/addresszip");
     expect(azCall?.init?.method).toBe("POST");
     // searchcode は使わない
     expect(calls.some((c) => c.url.includes("/searchcode/"))).toBe(false);
