@@ -296,6 +296,63 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(JSON.stringify(doc.elements)).toContain("株式会社リガーレジャパン");
   });
 
+  it("概要表フォントは行数に応じてエンジンが決める(多行=小さめ)", () => {
+    // [Task2] overview.style.fontSizePt はもう決め打ち(7pt固定)ではなく、
+    // computeSpecSheetLayout が行数(specRowCount)から算出する。行を多く埋めても
+    // クランプ範囲(5..9pt)に収まっている＝エンジン駆動であることの証跡。
+    const doc = buildSaleHouseDocument({
+      ...base,
+      overrides: {
+        propertyType: "中古戸建",
+        price: "5280",
+        tax: "課税",
+        taxAmount: "480",
+        access: "東急東横線 日吉駅 徒歩10分",
+        landArea: "120.5",
+        areaMethod: "実測",
+        landRight: "所有権",
+        privateRoad: "5",
+        landCategory: ["宅地"],
+        setback: "0.5",
+        setbackUnit: "m",
+        terrain: "平坦",
+        buildingArea: "95.60",
+        floor1Area: "55.30",
+        floor2Area: "40.30",
+        floor3Area: "0",
+        structure: "木造",
+        aboveFloors: "2",
+        basementFloors: "0",
+        parking: "有",
+        builtYearMonth: "2010年5月",
+        renovYearMonth: "2020年3月",
+        roadDirections: ["南", "東"],
+        roadWidth: "5.5",
+        cityPlanning: ["市街化区域"],
+        useDistrict: ["近隣商業地域"],
+        areaZone: ["準防火"],
+        buildingConfirm: "済",
+        rebuild: "再建築可",
+        legalRestriction: "なし",
+        equipment: "オール電化・宅配ボックス",
+        occupancy: "空家",
+        delivery: "相談",
+        remarks: "リフォーム済・車庫2台",
+        catchCopy: "南向き陽当り良好",
+        salesPoints: ["リフォーム済", "車庫2台", "南向き"],
+        transactionType: "専任媒介",
+        compensation: "分かれ",
+        adType: "広告可",
+        staff: "山田",
+        agent: "佐藤",
+        specialNotes: "即入居可",
+      },
+    });
+    const ov = findEl(doc, "overview") as { style?: { fontSizePt?: number } } | undefined;
+    expect(ov?.style?.fontSizePt).toBeGreaterThanOrEqual(5);
+    expect(ov?.style?.fontSizePt).toBeLessThanOrEqual(9);
+  });
+
   it("A4横でschema検証を通る（保存可能なdocument）", () => {
     const doc = buildSaleHouseDocument({
       ...base,

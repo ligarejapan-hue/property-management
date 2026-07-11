@@ -16,6 +16,7 @@
 
 import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
 import { generateQrDataUrl } from "./qr-code";
+import { computeSpecSheetLayout, DEFAULT_FOOTER_H, packPhotoCells } from "./layout-engine";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
@@ -580,67 +581,6 @@ const PHOTO_ZONE_X_MM = 10;
 const PHOTO_ZONE_Y_MM = 46;
 const PHOTO_ZONE_MAX_W_MM = 130;
 const PHOTO_ZONE_BOTTOM_MARGIN_MM = 24;
-/** 写真間の余白(mm)。テンプレの写真レイアウトと同じ。 */
-const PHOTO_GAP_MM = 4;
-/** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
-const PHOTO_TARGET_ASPECT = 1.5;
-
-interface PhotoCell {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-/**
- * n 個のセルを W×H の枠へ「行数を選び、各行は幅いっぱい均等割り」で敷き詰める
- * （穴なし・全行同高）。プロト autolayout-v4 の packCells をベースに 2 点調整:
- * - 行数の選択は「最悪セルの縦横比の PHOTO_TARGET_ASPECT からの乖離」を最小化
- *   （ミニマックス）。均等な配分（例: 4枚→2×2）が横長の帯より優先される。
- * - 端数は後方の行に配る＝先頭行が少列（幅広）になり、代表写真（配列先頭）が
- *   最上段の大きな枠を得る（テンプレの3枚レイアウトと同じ構造）。
- * セル寸法が非正になる行数は候補から除外し、全滅する極端な枚数では 1 行へ
- * フォールバックして MIN_ELEMENT_SIZE_MM でクランプ（非正寸法を返さないことを優先）。
- */
-function packPhotoCells(n: number, W: number, H: number): PhotoCell[] {
-  const gap = PHOTO_GAP_MM;
-  let best: { rows: number; counts: number[]; score: number } | null = null;
-  for (let rows = 1; rows <= n; rows++) {
-    const base = Math.floor(n / rows);
-    const extra = n % rows;
-    const counts: number[] = [];
-    for (let r = 0; r < rows; r++) counts.push(base + (r >= rows - extra ? 1 : 0));
-    const th = (H - (rows - 1) * gap) / rows;
-    if (th <= 0) continue;
-    let score = 0;
-    for (const cols of counts) {
-      const tw = (W - (cols - 1) * gap) / cols;
-      if (tw <= 0) {
-        score = Number.POSITIVE_INFINITY;
-        break;
-      }
-      score = Math.max(score, Math.abs(Math.log(tw / th / PHOTO_TARGET_ASPECT)));
-    }
-    if (!Number.isFinite(score)) continue;
-    if (!best || score < best.score) best = { rows, counts, score };
-  }
-  if (!best) {
-    const w = Math.max(MIN_ELEMENT_SIZE_MM, (W - (n - 1) * gap) / n);
-    const h = Math.max(MIN_ELEMENT_SIZE_MM, H);
-    return Array.from({ length: n }, (_, c) => ({ x: c * (w + gap), y: 0, w, h }));
-  }
-  const { rows, counts } = best;
-  const th = (H - (rows - 1) * gap) / rows;
-  const cells: PhotoCell[] = [];
-  for (let r = 0; r < rows; r++) {
-    const cols = counts[r];
-    const tw = (W - (cols - 1) * gap) / cols;
-    for (let c = 0; c < cols; c++) {
-      cells.push({ x: c * (tw + gap), y: r * (th + gap), w: tw, h: th });
-    }
-  }
-  return cells;
-}
 
 /**
  * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト）。
@@ -679,6 +619,152 @@ export function autoArrangePhotos(state: EditorState): EditorState {
   });
   if (!changed) return state;
   return { ...state, dirty: true, document: { ...document, elements } };
+}
+
+// ---------------------------------------------------------------------------
+// レイアウト自動再バランス（写真枚数/概要表行数/間取り有無に応じて、テンプレ枠と写真を
+// computeSpecSheetLayout の算出値へ再配置するワンボタン操作）。
+// ---------------------------------------------------------------------------
+
+/**
+ * buildSpecSheetDocument が組む既知のテンプレ要素 id。これらの id を持つ要素だけを
+ * 「テンプレ枠」として動かす（type==="image" 判定より優先）。floor-plan は type="image"
+ * だが、この集合に含めることで写真ゾーン（L.photoSlots）ではなく専用の L.floorPlan で
+ * 扱われるようにする（写真カウントに混入させない）。
+ */
+const TEMPLATE_ELEMENT_IDS = new Set([
+  "catch-band",
+  "catch-copy",
+  "heading",
+  "price",
+  "overview",
+  "sales-points",
+  "company",
+  "company-details",
+  "floor-plan",
+]);
+
+/** x/y/w/h がすべて等しいか（幾何の変更検知用）。 */
+function geomEquals(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+}
+
+/**
+ * document を computeSpecSheetLayout（自社マイソク版面の最適化エンジン）で再バランスする。
+ * autoArrangePhotos と同じ流儀（純・変更ゼロは同一 state 参照・変更あれば dirty=true）。
+ *
+ * - 動かすのは「既知idのテンプレ枠」（catch-band/catch-copy/heading/price/overview/
+ *   sales-points/company/company-details/floor-plan）と「type==="image" の写真要素
+ *   （既知id以外・配列順・枚数は任意）」のみ。未知idの非image要素（ユーザーが手で足した
+ *   独自要素）は参照ごと不動。
+ * - overview（id="overview" かつ type="table"）が存在すれば、その行数を specRowCount として
+ *   エンジンへ渡す。フォント(style.fontSizePt)は overviewFontPt を渡さず、常にエンジンの
+ *   自動計算（行数からの clamp）に委ねる — overview は table 要素で editText の対象外
+ *   （ユーザーが直接フォントを変更する手段が無い）ため「ユーザー選択の保持」は成立せず、
+ *   行数変化に追従した再計算が正しい（@review Fix B・build-document.ts のビルダー側も
+ *   overviewFontPt を渡していないので一貫）。存在しなければ specRowCount=0。
+ * - floor-plan は該当要素が存在する（hasFloorPlan）ときのみ、エンジンが返す非nullの
+ *   L.floorPlan へ更新する。
+ * - 写真（配列順）は L.photoSlots[k] の x/y/w/h へ更新する。src/fit/焦点/z/角丸/alt と
+ *   配列内の位置は保持する。slots が足りない分（通常発生しない）は不動。
+ * - 幾何(x/y/w/h)以外は一切変更しない（overview の style.fontSizePt のみ例外）。
+ */
+export function autoBalanceLayout(state: EditorState): EditorState {
+  const { document } = state;
+  const { elements } = document;
+
+  const overviewIdx = elements.findIndex((e) => e.id === "overview" && e.type === "table");
+  const overviewEl = overviewIdx === -1 ? null : (elements[overviewIdx] as TableElement);
+  const specRowCount = overviewEl ? overviewEl.rows.length : 0;
+
+  const hasFloorPlan = elements.some((e) => e.id === "floor-plan");
+
+  const photoIdxs: number[] = [];
+  elements.forEach((e, i) => {
+    if (e.type === "image" && !TEMPLATE_ELEMENT_IDS.has(e.id)) photoIdxs.push(i);
+  });
+
+  // overviewFontPt は渡さない＝エンジンに specRowCount からフォントを再計算させる
+  // （@review Fix B・table フォントは editText 対象外でユーザーが直接変更できないため、
+  // 既存値の「保持」を優先する理由が無い）。
+  const L = computeSpecSheetLayout({
+    photoCount: photoIdxs.length,
+    specRowCount,
+    hasFloorPlan,
+    footerHeight: DEFAULT_FOOTER_H,
+  });
+
+  const templateRects: Record<string, { x: number; y: number; w: number; h: number }> = {
+    "catch-band": L.catchBand,
+    "catch-copy": L.catchCopy,
+    heading: L.heading,
+    price: L.price,
+    "sales-points": L.salesPoints,
+    company: L.company,
+    "company-details": L.companyDetails,
+  };
+
+  let changed = false;
+  const next = document.elements.slice() as SalesSheetElement[];
+
+  for (const [id, rect] of Object.entries(templateRects)) {
+    const idx = next.findIndex((e) => e.id === id);
+    if (idx === -1) continue;
+    const el = next[idx];
+    if (!geomEquals(el, rect)) {
+      changed = true;
+      next[idx] = applyGeom(el, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+    }
+  }
+
+  if (overviewIdx !== -1) {
+    const el = next[overviewIdx] as TableElement;
+    const rect = L.overview;
+    if (!geomEquals(el, rect) || el.style.fontSizePt !== rect.fontSizePt) {
+      changed = true;
+      next[overviewIdx] = {
+        ...el,
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+        style: { ...el.style, fontSizePt: rect.fontSizePt },
+      };
+    }
+  }
+
+  if (L.floorPlan) {
+    const floorPlanRect = L.floorPlan;
+    const idx = next.findIndex((e) => e.id === "floor-plan");
+    if (idx !== -1) {
+      const el = next[idx];
+      if (!geomEquals(el, floorPlanRect)) {
+        changed = true;
+        next[idx] = applyGeom(el, {
+          x: floorPlanRect.x,
+          y: floorPlanRect.y,
+          w: floorPlanRect.w,
+          h: floorPlanRect.h,
+        });
+      }
+    }
+  }
+
+  photoIdxs.forEach((idx, k) => {
+    if (k >= L.photoSlots.length) return;
+    const el = next[idx];
+    const rect = L.photoSlots[k];
+    if (!geomEquals(el, rect)) {
+      changed = true;
+      next[idx] = applyGeom(el, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+    }
+  });
+
+  if (!changed) return state;
+  return { ...state, dirty: true, document: { ...document, elements: next } };
 }
 
 /**

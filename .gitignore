@@ -55,3 +55,6 @@ next-env.d.ts
 
 # claude worktrees (do not commit; .claude/ 全体は ignore しない)
 .claude/worktrees/
+
+# superpowers SDD scratch ledger (agent進捗の作業ファイル・do not commit)
+/.superpowers/

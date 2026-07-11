@@ -13,6 +13,7 @@ import {
 } from "./occupancy";
 import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS } from "./field-model";
 import { buildSheetRows, type SheetValues } from "./sheet-rows";
+import { computeSpecSheetLayout, DEFAULT_FOOTER_H, type Rect } from "./layout-engine";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -138,29 +139,21 @@ function fmtExclusiveArea(area?: string | null, method?: string | null): string 
   return fmtAreaWithMethod(area, method);
 }
 
-/** 左カラム（表題・価格の下）に写真を最大3枚レイアウトする位置。 */
-const PHOTO_LAYOUTS: Record<number, { x: number; y: number; w: number; h: number }[]> = {
-  1: [{ x: 10, y: 46, w: 130, h: 110 }],
-  2: [
-    { x: 10, y: 46, w: 130, h: 74 },
-    { x: 10, y: 124, w: 130, h: 62 },
-  ],
-  3: [
-    { x: 10, y: 46, w: 130, h: 88 },
-    { x: 10, y: 138, w: 63, h: 48 },
-    { x: 77, y: 138, w: 63, h: 48 },
-  ],
-};
-function photoElements(photos: { fileUrl: string }[] | undefined): SalesSheetElement[] {
+/** 左カラム（表題・価格の下）に写真を最大3枚レイアウトする位置。座標は
+ *  `computeSpecSheetLayout` が返す `photoSlots`（写真枚数・左右分割幅から決定的に
+ *  算出）を使う（[Task2] 固定 PHOTO_LAYOUTS テーブルから移行）。 */
+function photoElements(
+  photos: { fileUrl: string }[] | undefined,
+  slots: Rect[],
+): SalesSheetElement[] {
   const list = (photos ?? []).slice(0, 3);
-  const layout = PHOTO_LAYOUTS[list.length] ?? [];
   return list.map((ph, i) => ({
     id: `photo-${i + 1}`,
     type: "image" as const,
-    x: layout[i].x,
-    y: layout[i].y,
-    w: layout[i].w,
-    h: layout[i].h,
+    x: slots[i].x,
+    y: slots[i].y,
+    w: slots[i].w,
+    h: slots[i].h,
     z: 1,
     src: ph.fileUrl,
     fit: "cover" as const,
@@ -379,10 +372,23 @@ export interface SpecSheetParts {
 /**
  * A4横 自社マイソク様式の版面レイアウトを種別非依存に組む純関数（[F2-A Task1]）。
  * catch-band/catch-copy/heading/price/overview表/sales-points/company/company-details/
- * photos/floor-plan の要素構成・座標・スタイルは、抽出前の buildSaleMansionDocument と
- * 同一（出力不変・build-mansion.test.ts の特性化テストで固定）。
+ * photos/floor-plan の要素構成・id・type・style種別・theme は不変（[Task2] で座標算出を
+ * computeSpecSheetLayout へ委譲した後も同一）。座標(x/y/w/h)と overview表の
+ * style.fontSizePt は、写真枚数・スペック表行数・間取り図有無からエンジンが決定的に
+ * 算出する（build-mansion.test.ts 等のレイアウトテストはこのエンジン出力を期待値として
+ * 検証しており、固定値の特性化テストではない）。
  */
 export function buildSpecSheetDocument(parts: SpecSheetParts): SalesSheetDocument {
+  // レイアウト（座標/概要表フォント）は最適化エンジンに委譲する（[Task2]）。
+  // 要素構成・id・type・style種別・themeは不変（このエンジン化の前後で同一）。
+  const photos = (parts.photos ?? []).slice(0, 3);
+  const L = computeSpecSheetLayout({
+    photoCount: photos.length,
+    specRowCount: parts.rows.length,
+    hasFloorPlan: !!parts.floorPlanImage?.fileUrl,
+    footerHeight: DEFAULT_FOOTER_H,
+  });
+
   const salesPointsText = (parts.salesPoints ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
@@ -391,33 +397,33 @@ export function buildSpecSheetDocument(parts: SpecSheetParts): SalesSheetDocumen
 
   const elements: SalesSheetElement[] = [
     // キャッチ帯（全幅の上部バナー）。右スペック表はこの帯の下から始まるため重ならない。
-    { id: "catch-band", type: "shape", x: 10, y: 8, w: 277, h: 16, z: 1,
+    { id: "catch-band", type: "shape", x: L.catchBand.x, y: L.catchBand.y, w: L.catchBand.w, h: L.catchBand.h, z: 1,
       shape: "rect", fill: NAVY },
-    { id: "catch-copy", type: "text", x: 16, y: 8, w: 265, h: 16, z: 2,
+    { id: "catch-copy", type: "text", x: L.catchCopy.x, y: L.catchCopy.y, w: L.catchCopy.w, h: L.catchCopy.h, z: 2,
       content: parts.catchCopy ?? "", style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" } },
     // 左上: 見出し（建物名+号室 等） / 価格（大）
-    { id: "heading", type: "text", x: 10, y: 26, w: 94, h: 7, z: 2,
+    { id: "heading", type: "text", x: L.heading.x, y: L.heading.y, w: L.heading.w, h: L.heading.h, z: 2,
       content: parts.heading, style: { fontSizePt: 11, bold: true, color: NAVY } },
-    { id: "price", type: "text", x: 10, y: 33, w: 94, h: 12, z: 2,
+    { id: "price", type: "text", x: L.price.x, y: L.price.y, w: L.price.w, h: L.price.h, z: 2,
       content: parts.priceText, style: { fontSizePt: 20, bold: true, color: RED } },
-    // 右: 全項目スペック表（行が多いため fontSize を下げ h を拡大）
-    { id: "overview", type: "table", x: 150, y: 26, w: 137, h: 167, z: 1,
-      rows: parts.rows, style: { fontSizePt: 7, borderColor: "#cccccc", labelColor: NAVY } },
+    // 右: 全項目スペック表（行が多いほどエンジンが fontSize を下げ h を拡大）
+    { id: "overview", type: "table", x: L.overview.x, y: L.overview.y, w: L.overview.w, h: L.overview.h, z: 1,
+      rows: parts.rows, style: { fontSizePt: L.overview.fontSizePt, borderColor: "#cccccc", labelColor: NAVY } },
     // 写真下: セールスポイント（◆区切り）
-    { id: "sales-points", type: "text", x: 10, y: 187, w: 136, h: 7, z: 2,
+    { id: "sales-points", type: "text", x: L.salesPoints.x, y: L.salesPoints.y, w: L.salesPoints.w, h: L.salesPoints.h, z: 2,
       content: salesPointsText, style: { fontSizePt: 9, bold: true, color: NAVY } },
     // 会社フッター（下部帯・全幅）: 1行目=会社定数、2行目=種別ごとの詳細（取引態様/報酬/…）
-    { id: "company", type: "text", x: 10, y: 195, w: 277, h: 6, z: 2,
+    { id: "company", type: "text", x: L.company.x, y: L.company.y, w: L.company.w, h: L.company.h, z: 2,
       content: COMPANY, style: { fontSizePt: 9, color: NAVY } },
-    { id: "company-details", type: "text", x: 10, y: 201, w: 277, h: 7, z: 2,
+    { id: "company-details", type: "text", x: L.companyDetails.x, y: L.companyDetails.y, w: L.companyDetails.w, h: L.companyDetails.h, z: 2,
       content: parts.footerDetails ?? "", style: { fontSizePt: 8, color: NAVY } },
-    ...photoElements(parts.photos),
+    ...photoElements(photos, L.photoSlots),
   ];
 
   // 間取り枠: 提供時のみ、キャッチ帯下・写真上の隙間にプレースホルダ画像を置く（任意）。
-  if (parts.floorPlanImage?.fileUrl) {
+  if (parts.floorPlanImage?.fileUrl && L.floorPlan) {
     elements.push({
-      id: "floor-plan", type: "image", x: 108, y: 26, w: 32, h: 18, z: 1,
+      id: "floor-plan", type: "image", x: L.floorPlan.x, y: L.floorPlan.y, w: L.floorPlan.w, h: L.floorPlan.h, z: 1,
       src: parts.floorPlanImage.fileUrl, fit: "contain", alt: "間取り図",
     });
   }

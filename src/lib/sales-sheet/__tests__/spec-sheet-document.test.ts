@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSpecSheetDocument, type SpecSheetParts } from "../build-document";
 import { salesSheetDocumentSchema } from "../document-schema";
+import { computeSpecSheetLayout } from "../layout-engine";
 
 const findEl = (doc: { elements: unknown[] }, id: string) =>
   (doc.elements as { id: string }[]).find((e) => e.id === id);
@@ -24,6 +25,29 @@ const baseParts: SpecSheetParts = {
   ],
 };
 
+/**
+ * [Task2] 座標/概要表フォントは computeSpecSheetLayout（最適化エンジン）に委譲された
+ * ため、決め打ち値ではなくエンジンの出力を期待値として使う（＝buildSpecSheetDocument が
+ * L.* を正しい要素へ配線しているかを検証する）。baseParts は photos/floorPlanImage
+ * 未指定＝photoCount:0・hasFloorPlan:false。footerHeight はビルダー内の
+ * DEFAULT_FOOTER_H(=16) と同値（暫定・将来Bで可変化）。
+ */
+const FOOTER_H = 16;
+const L0 = computeSpecSheetLayout({
+  photoCount: 0,
+  specRowCount: baseParts.rows.length,
+  hasFloorPlan: false,
+  footerHeight: FOOTER_H,
+});
+/** floorPlanImage 指定時（hasFloorPlan:true）の期待値。座標は [@review Fix1] でエンジンが
+ * 決定的に算出する（写真域の上端＝固定値ではない）ため、固定値ではなくエンジン出力を使う。 */
+const L0Plan = computeSpecSheetLayout({
+  photoCount: 0,
+  specRowCount: baseParts.rows.length,
+  hasFloorPlan: true,
+  footerHeight: FOOTER_H,
+});
+
 describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レイアウト・[F2-A Task1]）", () => {
   it("与えた rows がそのままスペック表(overview)要素に入る", () => {
     const doc = buildSpecSheetDocument(baseParts);
@@ -31,13 +55,13 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
     expect(labels).toEqual(["所在地", "用途地域"]);
     expect(findEl(doc, "overview")).toMatchObject({
       type: "table",
-      x: 150,
-      y: 26,
-      w: 137,
-      h: 167,
+      x: L0.overview.x,
+      y: L0.overview.y,
+      w: L0.overview.w,
+      h: L0.overview.h,
       z: 1,
       rows: baseParts.rows,
-      style: { fontSizePt: 7, borderColor: "#cccccc", labelColor: "#15324f" },
+      style: { fontSizePt: L0.overview.fontSizePt, borderColor: "#cccccc", labelColor: "#15324f" },
     });
   });
 
@@ -74,20 +98,20 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
     const doc = buildSpecSheetDocument(baseParts);
     expect(findEl(doc, "heading")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 26,
-      w: 94,
-      h: 7,
+      x: L0.heading.x,
+      y: L0.heading.y,
+      w: L0.heading.w,
+      h: L0.heading.h,
       z: 2,
       content: "西荻リリエンハイム　4号室",
       style: { fontSizePt: 11, bold: true, color: "#15324f" },
     });
     expect(findEl(doc, "price")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 33,
-      w: 94,
-      h: 12,
+      x: L0.price.x,
+      y: L0.price.y,
+      w: L0.price.w,
+      h: L0.price.h,
       z: 2,
       content: "6590万円",
       style: { fontSizePt: 20, bold: true, color: "#d0331a" },
@@ -106,10 +130,10 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
     });
     expect(findEl(withPoints, "sales-points")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 187,
-      w: 136,
-      h: 7,
+      x: L0.salesPoints.x,
+      y: L0.salesPoints.y,
+      w: L0.salesPoints.w,
+      h: L0.salesPoints.h,
       z: 2,
       content: "◆リノベ済　◆南向き　◆即入居可",
       style: { fontSizePt: 9, bold: true, color: "#15324f" },
@@ -131,20 +155,20 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
     const doc = buildSpecSheetDocument({ ...baseParts, footerDetails: "取引態様：専任媒介" });
     expect(findEl(doc, "company")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 195,
-      w: 277,
-      h: 6,
+      x: L0.company.x,
+      y: L0.company.y,
+      w: L0.company.w,
+      h: L0.company.h,
       z: 2,
       content: "株式会社リガーレジャパン Ligare Japan　TEL 03-6823-2760",
       style: { fontSizePt: 9, color: "#15324f" },
     });
     expect(findEl(doc, "company-details")).toMatchObject({
       type: "text",
-      x: 10,
-      y: 201,
-      w: 277,
-      h: 7,
+      x: L0.companyDetails.x,
+      y: L0.companyDetails.y,
+      w: L0.companyDetails.w,
+      h: L0.companyDetails.h,
       z: 2,
       content: "取引態様：専任媒介",
       style: { fontSizePt: 8, color: "#15324f" },
@@ -159,12 +183,14 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
       ...baseParts,
       floorPlanImage: { fileUrl: "/uploads/plan.jpg" },
     });
+    expect(L0Plan.floorPlan).not.toBeNull();
+    const fp = L0Plan.floorPlan!;
     expect(findEl(withPlan, "floor-plan")).toMatchObject({
       type: "image",
-      x: 108,
-      y: 26,
-      w: 32,
-      h: 18,
+      x: fp.x,
+      y: fp.y,
+      w: fp.w,
+      h: fp.h,
       z: 1,
       src: "/uploads/plan.jpg",
       fit: "contain",

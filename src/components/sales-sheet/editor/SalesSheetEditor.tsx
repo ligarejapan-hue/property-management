@@ -22,6 +22,7 @@ import {
   addBadgeElement,
   addQrElement,
   autoArrangePhotos,
+  autoBalanceLayout,
   deleteElement,
   markSavedIfCurrent,
   exportWithSaveGuard,
@@ -131,6 +132,11 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         case "delete":
           return deleteElement(prev, id);
         case "editText":
+          // 文字サイズ変更での自動再バランスは撤去（@codex P2 / review 3件が指摘）: レイアウトを
+          // 駆動する概要表フォントは editText 対象外ゆえ、見出し等の text フォント変更では枠が
+          // 最適化されず（固定高で見切れる）・手で動かした要素がグリッドへ戻る害だけが残るため。
+          // 内容に合わせた再配置は明示的な「レイアウト自動調整」ボタン(handleAutoBalance)で行う。
+          // ②(文字→枠最適化)を本来の形にするにはエンジンが text フォントを考慮する追加設計が要る（follow-up）。
           return editText(prev, id, change.patch);
         case "editImage":
           return editImage(prev, id, change.patch);
@@ -157,6 +163,11 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   /** 写真（image 要素）を写真ゾーンへワンボタン整列する（計画⑥・手動上書き可）。 */
   function handleAutoArrange(): void {
     setEditorState((prev) => autoArrangePhotos(prev));
+  }
+
+  /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。 */
+  function handleAutoBalance(): void {
+    setEditorState((prev) => autoBalanceLayout(prev));
   }
 
   /** オリジナルバッジを追加する（バッジデザイナー・計画⑦）。 */
@@ -270,6 +281,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onDelete={handleDelete}
         onAddPhoto={() => setGalleryOpen(true)}
         onAutoArrange={handleAutoArrange}
+        onAutoBalance={handleAutoBalance}
         onAddBadge={handleAddBadge}
         onAddQr={handleAddQr}
       />
