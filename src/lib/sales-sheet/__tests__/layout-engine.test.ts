@@ -11,10 +11,15 @@ const overlaps = (a: Rect, b: Rect) =>
 describe("computeSpecSheetLayout", () => {
   it("全要素がA4内、overviewと写真域が重ならない", () => {
     const L = computeSpecSheetLayout(base);
-    for (const r of [L.catchBand, L.heading, L.price, L.overview, L.photoArea, L.company, L.companyDetails]) {
+    for (const r of [L.catchBand, L.heading, L.price, L.overview, L.photoArea, L.company, L.companyDetails, L.footer]) {
       expect(within(r), JSON.stringify(r)).toBe(true);
     }
     expect(L.overview.x).toBeGreaterThanOrEqual(L.photoArea.x + L.photoArea.w);
+  });
+  it("footer は company と同じ原点/全幅・高さは footerHeight そのもの（[Task3] 会社帯の領域）", () => {
+    const L = computeSpecSheetLayout(base);
+    expect(L.footer).toEqual({ x: L.company.x, y: L.company.y, w: L.company.w, h: base.footerHeight });
+    expect(overlaps(L.footer, L.salesPoints), "salesPoints と重なっている").toBe(false);
   });
   it("写真が少ないほど概要表が広い（写真0枚は表がほぼ全幅）", () => {
     const few = computeSpecSheetLayout({ ...base, photoCount: 0 });

@@ -45,6 +45,9 @@ export interface SpecSheetLayout {
   salesPoints: Rect;
   company: Rect;
   companyDetails: Rect;
+  /** 下部会社帯（buildFooterBand に渡す領域）。company/companyDetails と同じ原点・全幅だが
+   *  高さは footerHeight そのもの（帯全体を1矩形で表す・[Task3] エンジン結線）。 */
+  footer: Rect;
   floorPlan: Rect | null;
   photoArea: Rect;
   photoSlots: Rect[];
@@ -55,12 +58,13 @@ export interface SpecSheetLayout {
 // ---------------------------------------------------------------------------
 
 /**
- * 会社帯（company/company-details 要素）の高さ(mm)の既定値。`footerHeight` 入力の既定として
+ * 会社帯（buildFooterBand が描く下部帯）の高さ(mm)の既定値。`footerHeight` 入力の既定として
  * build-document.ts（作成時）と editor-document.ts（autoBalanceLayout・再バランス時）の
- * 両方が使う共有定数（会社帯自体の内容/行数は現状固定なので暫定値。将来Bで可変化）。
+ * 両方が使う共有定数。帯の中身（社名行＋情報3行＋取引条件/担当テーブル）が収まる高さとして
+ * 16→24 へ引き上げ（[Task3] 会社帯エンジン結線・調整可）。
  * 他の定数と違い、この値だけは呼び出し側の footerHeight 引数の既定値として外部公開する。
  */
-export const DEFAULT_FOOTER_H = 16;
+export const DEFAULT_FOOTER_H = 24;
 
 /** ページ高さ(mm)。mainBottom(=メイン領域の下端)の起点。 */
 const PAGE_H_MM = 210;
@@ -72,7 +76,7 @@ const CATCH_COPY: Rect = { x: 16, y: 8, w: 265, h: 16 };
 /** メイン領域の上端。 */
 const MAIN_TOP_MM = 26;
 /** footer 帯とメイン領域の間の余白(mm)。mainBottom = 210 − footerHeight − この値。 */
-const MAIN_BOTTOM_MARGIN_MM = 2;
+export const MAIN_BOTTOM_MARGIN_MM = 2;
 
 /** 左右分割線 splitX の可動域。写真0枚→94寄り（overview を広く＝写真少なら表広く）／3枚→145寄り（写真域広め）。 */
 const SPLIT_X_MIN_MM = 94;
@@ -107,7 +111,7 @@ const LEFT_COLUMN_WIDTH_MARGIN_MM = 16;
 
 /** salesPoints（写真域の下端付近の帯）。w は左カラム幅 leftColumnW を使う（@review Fix A）。 */
 const SALES_POINTS_X_MM = 10;
-const SALES_POINTS_H_MM = 7;
+export const SALES_POINTS_H_MM = 7;
 /** salesPoints.y = mainBottom − この値。 */
 const SALES_POINTS_BOTTOM_OFFSET_MM = 7;
 
@@ -148,7 +152,7 @@ function clamp(value: number, lo: number, hi: number): number {
 // ---------------------------------------------------------------------------
 
 /** 写真間の余白(mm)。テンプレの写真レイアウトと同じ。 */
-const PHOTO_GAP_MM = 4;
+export const PHOTO_GAP_MM = 4;
 /** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
 const PHOTO_TARGET_ASPECT = 1.5;
 /** セル寸法の下限(mm)。editor の MIN_ELEMENT_SIZE_MM と同値（循環import回避のためローカル定義）。 */
@@ -238,8 +242,8 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
 
   const overviewX = splitX + OVERVIEW_X_OFFSET_MM;
   const overviewW = OVERVIEW_RIGHT_MM - overviewX;
-  // footerHeight が将来可変化しても負の高さを返さないようガード（@review Fix3・現状の
-  // DEFAULT_FOOTER_H=16 では mainBottom > MAIN_TOP_MM が常に成り立ち挙動不変）。
+  // footerHeight が将来さらに変わっても負の高さを返さないようガード（@review Fix3・現状の
+  // DEFAULT_FOOTER_H=24 では mainBottom > MAIN_TOP_MM が常に成り立つ）。
   const overviewH = Math.max(0, mainBottom - MAIN_TOP_MM);
   const overviewFontSizePt =
     overviewFontPt ??
@@ -305,6 +309,7 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     w: COMPANY_W_MM,
     h: COMPANY_DETAILS_H_MM,
   };
+  const footer: Rect = { x: COMPANY_X_MM, y: mainBottom, w: COMPANY_W_MM, h: footerHeight };
 
   return {
     catchBand: { ...CATCH_BAND },
@@ -315,6 +320,7 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     salesPoints,
     company,
     companyDetails,
+    footer,
     floorPlan,
     photoArea,
     photoSlots,

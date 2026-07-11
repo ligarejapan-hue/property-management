@@ -19,6 +19,8 @@ import { SalesSheetRenderer } from "@/components/sales-sheet/SalesSheetRenderer"
 import { renderDocumentToHtml } from "../render-html";
 import { sampleDocument } from "../__fixtures__/sample-document";
 import { parseSalesSheetDocument, A4_LANDSCAPE } from "../document-schema";
+import { buildSaleMansionDocument } from "../build-document";
+import { COMPANY_INFO } from "../company-info";
 
 /** 1×1 transparent PNG — offline; no external fetch */
 const TINY_PNG =
@@ -62,6 +64,22 @@ describe("renderDocumentToHtml — SalesSheetRenderer パリティガード", ()
       }
     });
   }
+
+  // sampleDocument（上の KEY_SIGNALS が使う手組みfixture）は会社帯(buildFooterBand)を
+  // 含まないため、実際のビルダー(buildSaleMansionDocument)が組む帯付きdocで別途1件
+  // 担保する（[Task3] footerDetails:string → footer:FooterBandData 移行後のパリティ）。
+  it("会社帯（buildFooterBand）の会社名が両レンダラの出力に含まれる", () => {
+    const doc = buildSaleMansionDocument({
+      property: { address: "東京都世田谷区上馬４丁目" },
+      overrides: { transactionType: "専任媒介" },
+    });
+    const ser = renderDocumentToHtml(doc);
+    const rend = renderToStaticMarkup(createElement(SalesSheetRenderer, { document: doc }));
+    expect(ser).toContain(COMPANY_INFO.nameJa);
+    expect(rend).toContain(COMPANY_INFO.nameJa);
+    expect(ser).toContain("専任媒介");
+    expect(rend).toContain("専任媒介");
+  });
 
   it("シリアライザ出力は完全な HTML 文書である", () => {
     expect(serializerHtml.startsWith("<!doctype html>")).toBe(true);

@@ -79,8 +79,9 @@ function expectNoOverlaps(imgs: ImageElement[]): void {
   }
 }
 
-/** 写真ゾーン(A4横): テンプレの左カラム x10-140 / y46-186（概要表・会社帯を避ける既定）。 */
-const ZONE = { x: 10, y: 46, right: 140, bottom: 186 };
+/** 写真ゾーン(A4横): テンプレの左カラム x10-140 / y46-173（概要表・salesPoints帯・会社帯を
+ *  避ける既定。下端＝エンジンの photoPackBottom = mainBottom(184) − salesPoints(7) − gap(4) = 173）。 */
+const ZONE = { x: 10, y: 46, right: 140, bottom: 173 };
 
 describe("autoArrangePhotos", () => {
   it("画像が無ければ no-op（同一参照）", () => {
