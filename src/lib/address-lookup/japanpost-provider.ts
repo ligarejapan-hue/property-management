@@ -6,8 +6,8 @@
  * - token 取得には登録済み送信元 IP を `x-forwarded-for` で送る（日本郵便の IP ベース認可）。
  *   IP は inbound request の XFF ではなく、サーバの登録 IP を env から渡す（sourceIp）。
  * - 検索エンドポイントは用途で分ける（混線防止）:
- *     郵便番号/デジタルアドレスコード → GET  /api/v1/searchcode/{code}
- *     住所（フリーワード）            → POST /api/v1/addresszip
+ *     郵便番号/デジタルアドレスコード → GET  /api/v2/searchcode/{code}
+ *     住所（フリーワード）            → POST /api/v2/addresszip
  * - base URL は env（ADDRESS_LOOKUP_BASE_URL）で差し替える（組織/サービス配下 systems）。
  * - raw response は返さず {@link AddressLookupCandidate} へ整形する。
  * - 失敗時は {@link AddressLookupError}（分類コードのみの安全な例外）を throw。
@@ -73,7 +73,7 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
   /** 郵便番号/デジタルアドレスコード → searchcode（GET）。 */
   async lookupByPostalCode(postalCode7: string): Promise<AddressLookupCandidate[]> {
     const token = await this.getToken();
-    const url = `${this.baseUrl}/api/v1/searchcode/${encodeURIComponent(postalCode7)}`;
+    const url = `${this.baseUrl}/api/v2/searchcode/${encodeURIComponent(postalCode7)}`;
     const res = await this.doFetch(
       url,
       { method: "GET", headers: { Authorization: `Bearer ${token}` } },
@@ -88,7 +88,7 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
   /** 住所（フリーワード）→ addresszip（POST）。code 検索とは別経路。 */
   async searchByAddress(address: string): Promise<AddressLookupCandidate[]> {
     const token = await this.getToken();
-    const url = `${this.baseUrl}/api/v1/addresszip`;
+    const url = `${this.baseUrl}/api/v2/addresszip`;
     const res = await this.doFetch(
       url,
       {
@@ -111,7 +111,7 @@ export class JapanPostAddressProvider implements AddressLookupProvider {
   // ---- internal ----
 
   private async getToken(): Promise<string> {
-    const url = `${this.baseUrl}/api/v1/j/token`;
+    const url = `${this.baseUrl}/api/v2/j/token`;
     const res = await this.doFetch(
       url,
       {
