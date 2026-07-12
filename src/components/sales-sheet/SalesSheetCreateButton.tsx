@@ -10,6 +10,13 @@ import {
   mapOccupancyStatusToLandOccupancy,
 } from "@/lib/sales-sheet/occupancy";
 import { computeTsuboUnitPrice } from "@/lib/sales-sheet/tsubo";
+import {
+  OTHER_OPTION,
+  hasOtherOption,
+  selectOtherState,
+  multiOtherState,
+  setMultiFreeText,
+} from "@/lib/sales-sheet/other-input";
 
 export type { SalesSheetTemplateKind };
 
@@ -444,52 +451,105 @@ function FieldModelWidget({
 
   if (field.widget === "multiselect") {
     const selected = Array.isArray(value) ? value : [];
+    const options = field.options ?? [];
+    // [Task2] options に「その他」を含む欄のみ、その他モード（自由入力）を判定する。
+    // 持たない欄は従来どおり（optionSelections=selected・isOther=false）。
+    const other = hasOtherOption(options)
+      ? multiOtherState(selected, options)
+      : { isOther: false, freeText: "", optionSelections: selected };
     return (
       <fieldset className="space-y-1">
         <legend className="mb-1 text-sm text-gray-700 dark:text-gray-300">{field.label}</legend>
         <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-          {(field.options ?? []).map((opt) => (
-            <label key={opt} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
-              <input
-                type="checkbox"
-                aria-label={opt}
-                checked={selected.includes(opt)}
-                onChange={(e) => {
-                  const next = e.target.checked
-                    ? [...selected, opt]
-                    : selected.filter((s) => s !== opt);
-                  onChange(next);
-                }}
-              />
-              {opt}
-            </label>
-          ))}
+          {options.map((opt) =>
+            opt === OTHER_OPTION ? (
+              // 「その他」チェックボックス: 自由入力(options外要素)の有無も含めて isOther で判定する
+              // （raw の selected.includes("その他") だけだと、自由入力テキストが入っている間は
+              // 配列にリテラル「その他」が無いため見た目上チェックが外れてしまう＝isOther を使う）。
+              <label key={opt} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  aria-label={opt}
+                  checked={other.isOther}
+                  onChange={(e) => {
+                    onChange(
+                      e.target.checked ? [...other.optionSelections, OTHER_OPTION] : other.optionSelections,
+                    );
+                  }}
+                />
+                {opt}
+              </label>
+            ) : (
+              <label key={opt} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  aria-label={opt}
+                  checked={selected.includes(opt)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...selected, opt]
+                      : selected.filter((s) => s !== opt);
+                    onChange(next);
+                  }}
+                />
+                {opt}
+              </label>
+            ),
+          )}
         </div>
+        {other.isOther && (
+          <input
+            aria-label={`${field.label}（その他）`}
+            value={other.freeText}
+            onChange={(e) => onChange(setMultiFreeText(selected, options, e.target.value))}
+            placeholder="その他の内容を入力"
+            className="w-full rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+          />
+        )}
       </fieldset>
     );
   }
 
   if (field.widget === "select") {
     const v = typeof value === "string" ? value : "";
+    const options = field.options ?? [];
+    // [Task2] options に「その他」を含む欄のみ、その他モード（自由入力）を判定する。
+    // 持たない欄は従来どおり（isOther=false・select の value は v のまま）。
+    const other = hasOtherOption(options) ? selectOtherState(v, options) : { isOther: false, freeText: "" };
+    const selectValue = other.isOther ? OTHER_OPTION : v;
     return (
-      <div className="flex items-center gap-2">
-        <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-700 dark:text-gray-300">
-          {field.label}
-        </label>
-        <select
-          id={id}
-          aria-label={field.label}
-          value={v}
-          onChange={(e) => onChange(e.target.value)}
-          className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
-        >
-          <option value="">選択してください</option>
-          {(field.options ?? []).map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-700 dark:text-gray-300">
+            {field.label}
+          </label>
+          <select
+            id={id}
+            aria-label={field.label}
+            value={selectValue}
+            onChange={(e) => onChange(e.target.value)}
+            className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+          >
+            <option value="">選択してください</option>
+            {options.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+        {other.isOther && (
+          <div className="flex items-center gap-2">
+            <span className="w-28 shrink-0" aria-hidden="true" />
+            <input
+              aria-label={`${field.label}（その他）`}
+              value={other.freeText}
+              onChange={(e) => onChange(e.target.value.trim() === "" ? OTHER_OPTION : e.target.value)}
+              placeholder="その他の内容を入力"
+              className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+            />
+          </div>
+        )}
       </div>
     );
   }
