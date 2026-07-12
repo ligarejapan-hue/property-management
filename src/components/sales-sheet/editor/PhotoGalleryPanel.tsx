@@ -84,15 +84,33 @@ async function extractErrorMessage(res: Response): Promise<string | null> {
   }
 }
 
+// ファイル選択ダイアログで「すべてのファイル」を選ぶと非画像や0バイトファイルも渡って来る。
+// サーバ route は空/非画像の Content-Type を image/jpeg に既定化し size===0 も弾かないため、
+// クライアント側で送信前に検証しないと壊れた PropertyPhoto 行が作られてしまう（@codex #275 P2）。
+// 基準は photo-tab.tsx の uploadFiles と同じ（このファイル内 client 定数・server storage barrel は import しない）。
+const MAX_PHOTO_SIZE_MB = 8;
+
+function isValidPhotoFile(file: File): boolean {
+  return (
+    file.type.startsWith("image/") &&
+    file.size > 0 &&
+    file.size <= MAX_PHOTO_SIZE_MB * 1024 * 1024
+  );
+}
+
 export interface UploadPhotosResult {
   succeededCount: number;
   failedCount: number;
+  /** クライアント検証（非画像・0バイト・サイズ超過）で除外した件数。POST 自体を行っていない。 */
+  rejectedCount: number;
   /** 失敗時、最初の失敗のエラーメッセージ（拾えれば）。UI の定型文に添える用途。 */
   firstErrorMessage: string | null;
 }
 
 /**
  * 選択ファイルを1枚ずつ既存 POST /api/properties/{id}/photos（multipart）へ送る（純関数）。
+ * 送信前に画像MIME/サイズをクライアント側で検証し（isValidPhotoFile）、無効ファイルは
+ * fetchImpl を呼ばず rejectedCount に計上する。
  * 呼び出し側は完了後に loadPhotos() で再取得すること（本関数自体は state を持たない）。
  * fetchImpl を注入可能にし、jsdom 無しの env=node でもユニットテストできるようにする。
  */
@@ -103,9 +121,14 @@ export async function uploadPhotoFiles(
 ): Promise<UploadPhotosResult> {
   let succeededCount = 0;
   let failedCount = 0;
+  let rejectedCount = 0;
   let firstErrorMessage: string | null = null;
 
   for (const file of files) {
+    if (!isValidPhotoFile(file)) {
+      rejectedCount += 1;
+      continue;
+    }
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -125,7 +148,7 @@ export async function uploadPhotoFiles(
     }
   }
 
-  return { succeededCount, failedCount, firstErrorMessage };
+  return { succeededCount, failedCount, rejectedCount, firstErrorMessage };
 }
 
 export function PhotoGalleryPanel({
@@ -181,12 +204,21 @@ export function PhotoGalleryPanel({
     setUploadError(null);
     try {
       const result = await uploadPhotoFiles(propertyId, files);
+      // rejected（クライアント検証で除外・未送信）と failed（送信したがサーバが拒否/通信エラー）は
+      // 原因が異なるため区別して表示する。
+      const messages: string[] = [];
+      if (result.rejectedCount > 0) {
+        messages.push(
+          `${result.rejectedCount}枚は画像でないかサイズ超過(${MAX_PHOTO_SIZE_MB}MB)のため除外しました`,
+        );
+      }
       if (result.failedCount > 0) {
-        setUploadError(
-          `${files.length}枚中${result.failedCount}枚アップロードできませんでした` +
+        messages.push(
+          `${result.failedCount}枚アップロードできませんでした` +
             (result.firstErrorMessage ? `（${result.firstErrorMessage}）` : ""),
         );
       }
+      if (messages.length > 0) setUploadError(messages.join(" / "));
       // 1枚でも成功していればギャラリーへ反映する。
       if (result.succeededCount > 0) await loadPhotos();
     } finally {

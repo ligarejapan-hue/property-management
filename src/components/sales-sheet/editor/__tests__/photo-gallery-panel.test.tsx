@@ -97,7 +97,12 @@ describe("uploadPhotoFiles — 既存 POST /api/properties/[id]/photos への mu
       fetchMock as unknown as typeof fetch,
     );
 
-    expect(result).toEqual({ succeededCount: 2, failedCount: 0, firstErrorMessage: null });
+    expect(result).toEqual({
+      succeededCount: 2,
+      failedCount: 0,
+      rejectedCount: 0,
+      firstErrorMessage: null,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/properties/prop-1/photos");
@@ -146,7 +151,12 @@ describe("uploadPhotoFiles — 既存 POST /api/properties/[id]/photos への mu
       fetchMock as unknown as typeof fetch,
     );
 
-    expect(result).toEqual({ succeededCount: 1, failedCount: 1, firstErrorMessage: null });
+    expect(result).toEqual({
+      succeededCount: 1,
+      failedCount: 1,
+      rejectedCount: 0,
+      firstErrorMessage: null,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -155,6 +165,143 @@ describe("uploadPhotoFiles — 既存 POST /api/properties/[id]/photos への mu
 
     const result = await uploadPhotoFiles("prop-1", [makeFile()], fetchMock as unknown as typeof fetch);
 
-    expect(result).toEqual({ succeededCount: 0, failedCount: 1, firstErrorMessage: null });
+    expect(result).toEqual({
+      succeededCount: 0,
+      failedCount: 1,
+      rejectedCount: 0,
+      firstErrorMessage: null,
+    });
+  });
+});
+
+describe("uploadPhotoFiles — 送信前クライアント検証（@codex #275 P2・photo-tab.tsx uploadFiles と同基準）", () => {
+  const makeFile = (name = "a.jpg", type = "image/jpeg", bytes: number[] = [1, 2, 3]) =>
+    new File([new Uint8Array(bytes)], name, { type });
+
+  it("非画像ファイル（'すべてのファイル'で選択された非image/*）は fetch を呼ばず rejectedCount に計上する", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "ph1" } }), { status: 201 }));
+    const textFile = new File(["x"], "a.txt", { type: "text/plain" });
+
+    const result = await uploadPhotoFiles("prop-1", [textFile], fetchMock as unknown as typeof fetch);
+
+    expect(result).toEqual({
+      succeededCount: 0,
+      failedCount: 0,
+      rejectedCount: 1,
+      firstErrorMessage: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("0バイトファイルは fetch を呼ばず rejectedCount に計上する", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "ph1" } }), { status: 201 }));
+    const emptyFile = new File([], "a.jpg", { type: "image/jpeg" });
+    expect(emptyFile.size).toBe(0);
+
+    const result = await uploadPhotoFiles("prop-1", [emptyFile], fetchMock as unknown as typeof fetch);
+
+    expect(result).toEqual({
+      succeededCount: 0,
+      failedCount: 0,
+      rejectedCount: 1,
+      firstErrorMessage: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("8MB超のファイルは fetch を呼ばず rejectedCount に計上する", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "ph1" } }), { status: 201 }));
+    const bigFile = makeFile("big.jpg");
+    Object.defineProperty(bigFile, "size", { value: 8 * 1024 * 1024 + 1 });
+
+    const result = await uploadPhotoFiles("prop-1", [bigFile], fetchMock as unknown as typeof fetch);
+
+    expect(result).toEqual({
+      succeededCount: 0,
+      failedCount: 0,
+      rejectedCount: 1,
+      firstErrorMessage: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ちょうど8MBは上限内として許容し POST される（境界値）", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "ph1" } }), { status: 201 }));
+    const exactFile = makeFile("exact.jpg");
+    Object.defineProperty(exactFile, "size", { value: 8 * 1024 * 1024 });
+
+    const result = await uploadPhotoFiles("prop-1", [exactFile], fetchMock as unknown as typeof fetch);
+
+    expect(result).toEqual({
+      succeededCount: 1,
+      failedCount: 0,
+      rejectedCount: 0,
+      firstErrorMessage: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("有効な画像は従来どおり POST される（回帰）", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "ph1" } }), { status: 201 }));
+
+    const result = await uploadPhotoFiles("prop-1", [makeFile("ok.jpg")], fetchMock as unknown as typeof fetch);
+
+    expect(result).toEqual({
+      succeededCount: 1,
+      failedCount: 0,
+      rejectedCount: 0,
+      firstErrorMessage: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("混在時：無効ファイルは POST せず rejectedCount へ、有効ファイルのみ POST される", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "ph1" } }), { status: 201 }));
+    const textFile = new File(["x"], "a.txt", { type: "text/plain" });
+    const emptyFile = new File([], "b.jpg", { type: "image/jpeg" });
+    const bigFile = makeFile("big.jpg");
+    Object.defineProperty(bigFile, "size", { value: 8 * 1024 * 1024 + 1 });
+    const okFile1 = makeFile("ok1.jpg");
+    const okFile2 = makeFile("ok2.jpg");
+
+    const result = await uploadPhotoFiles(
+      "prop-1",
+      [textFile, okFile1, emptyFile, bigFile, okFile2],
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(result).toEqual({
+      succeededCount: 2,
+      failedCount: 0,
+      rejectedCount: 3,
+      firstErrorMessage: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 呼ばれた2回とも有効ファイル(ok1.jpg / ok2.jpg)であること。
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit | undefined][];
+    const calledNames = calls
+      .map(([, init]) => (init?.body as FormData).get("file") as File)
+      .map((f) => f.name);
+    expect(calledNames).toEqual(["ok1.jpg", "ok2.jpg"]);
+  });
+
+  it("全ファイルが無効なら POST を一切行わない", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "ph1" } }), { status: 201 }));
+    const textFile = new File(["x"], "a.txt", { type: "text/plain" });
+    const emptyFile = new File([], "b.jpg", { type: "image/jpeg" });
+
+    const result = await uploadPhotoFiles(
+      "prop-1",
+      [textFile, emptyFile],
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(result).toEqual({
+      succeededCount: 0,
+      failedCount: 0,
+      rejectedCount: 2,
+      firstErrorMessage: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
