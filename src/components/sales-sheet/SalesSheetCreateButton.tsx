@@ -9,6 +9,7 @@ import {
   mapOccupancyStatusToMansionOccupancy,
   mapOccupancyStatusToLandOccupancy,
 } from "@/lib/sales-sheet/occupancy";
+import { computeTsuboUnitPrice } from "@/lib/sales-sheet/tsubo";
 
 export type { SalesSheetTemplateKind };
 
@@ -429,11 +430,15 @@ function FieldModelWidget({
   value,
   onChange,
   idPrefix,
+  placeholder,
 }: {
   field: SheetField;
   value: FieldModelValue | undefined;
   onChange: (v: FieldModelValue) => void;
   idPrefix: string;
+  /** number widget の `<input>` に付ける placeholder（例: 売土地の坪単価の自動計算プレビュー）。
+   *  他の widget では未使用（[Task1] 坪単価ライブプレースホルダ）。 */
+  placeholder?: string;
 }) {
   const id = `ss-${idPrefix}-${field.key}`;
 
@@ -502,6 +507,7 @@ function FieldModelWidget({
           inputMode="decimal"
           value={v}
           onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
           className="w-28 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
         />
         {field.unit && <span className="text-xs text-neutral-500 dark:text-neutral-400">{field.unit}</span>}
@@ -556,6 +562,21 @@ function AutoPreviewField({
       {field.unit && <span className="text-xs text-neutral-400">{field.unit}</span>}
     </div>
   );
+}
+
+/** 売土地の坪単価フィールド向けライブプレースホルダ（[Task1]）。現在の価格/土地面積
+ *  （フォーム入力中の生値）から computeTsuboUnitPrice した自動計算値があれば
+ *  "自動: {v}万円"、算出不可（面積0/空 等）なら undefined（プレースホルダ無し）を返す。
+ *  values 自体は変更しない＝上書き入力すればそちらが優先され、空欄のまま送信すれば
+ *  ビルダー側（buildLandValues）が同じ関数で同じ値を自動計算する。 */
+function tsuboUnitPricePlaceholder(
+  price: FieldModelValue | undefined,
+  landArea: FieldModelValue | undefined,
+): string | undefined {
+  const p = typeof price === "string" ? price : "";
+  const a = typeof landArea === "string" ? landArea : "";
+  const auto = computeTsuboUnitPrice(p, a);
+  return auto === "" ? undefined : `自動: ${auto}万円`;
 }
 
 /**
@@ -625,6 +646,12 @@ export function FieldModelForm({
             // mansion/land 共通のパターン）。
             const displayValue =
               f.key === "occupancy" && values[f.key] === undefined ? occupancySeed : values[f.key];
+            // 売土地の坪単価: 未入力時にビルダーが自動計算する値(computeTsuboUnitPrice)を
+            // ライブプレースホルダとして見せる。price/landArea の入力に追随する（[Task1]）。
+            const placeholder =
+              kind === "land" && f.key === "unitPrice"
+                ? tsuboUnitPricePlaceholder(values.price, values.landArea)
+                : undefined;
             return (
               <div key={f.key}>
                 {hints[f.key] && (
@@ -635,6 +662,7 @@ export function FieldModelForm({
                   field={f}
                   value={displayValue}
                   onChange={(v) => onChange(f.key, v)}
+                  placeholder={placeholder}
                 />
               </div>
             );

@@ -86,7 +86,7 @@ export const LAND_FIELDS: readonly SheetField[] = [
   { key: "propertyType", label: "物件種目", widget: "select", section: "価格", options: M.PROPERTY_TYPE_LAND },
   { key: "bestUse", label: "最適用途", widget: "select", section: "価格", options: M.BEST_USE_LAND },
   { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
-  { key: "unitPrice", label: "坪/㎡単価", widget: "number", section: "価格", unit: "万円" },
+  { key: "unitPrice", label: "坪単価", widget: "number", section: "価格", unit: "万円" },
   // 所在・交通
   { key: "address", label: "所在地", widget: "text", section: "所在", autoFrom: "address" },
   { key: "access", label: "交通", widget: "text", section: "所在" },
