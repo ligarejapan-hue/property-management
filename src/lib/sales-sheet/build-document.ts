@@ -15,6 +15,7 @@ import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS } from "./fi
 import { buildSheetRows, type SheetValues } from "./sheet-rows";
 import { computeSpecSheetLayout, DEFAULT_FOOTER_H, type Rect } from "./layout-engine";
 import { buildFooterBand, type FooterBandData } from "./footer-band";
+import { computeTsuboUnitPrice } from "./tsubo";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -538,7 +539,10 @@ function buildLandValues(input: SaleLandInput): SheetValues {
     propertyType: o.propertyType,
     bestUse: o.bestUse,
     price: o.price,
-    unitPrice: o.unitPrice,
+    // 坪単価: override（手動上書き）優先、空欄なら価格÷土地面積から自動計算する
+    // （tsubo.ts の computeTsuboUnitPrice。算出不可時は ""）。マンションの
+    // buildMansionValues.unitPrice（㎡単価・自動計算なし）とは異なる。
+    unitPrice: o.unitPrice && o.unitPrice.trim() !== "" ? o.unitPrice : computeTsuboUnitPrice(o.price, o.landArea),
     // 所在・交通
     address: p.address,
     access: o.access,

@@ -197,6 +197,34 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     expect(tableRow(doc, "セットバック")).toBe("");
   });
 
+  it("坪単価: 未指定なら価格と土地面積から自動計算し、行に「万円」付きで表示される([Task1])", () => {
+    const doc = buildSaleLandDocument({
+      ...base,
+      overrides: { price: "3000", landArea: "150" },
+    });
+    // 3000万 / (150㎡ / 3.305785=45.375坪) = 66.11.. → "66.1万円"（tsubo.test.ts と同じ計算）
+    expect(tableRow(doc, "坪単価")).toBe("66.1万円");
+  });
+
+  it("坪単価: 指定時はその値を優先する(自動計算値ではなく手動上書き値)([Task1])", () => {
+    const doc = buildSaleLandDocument({
+      ...base,
+      overrides: { price: "3000", landArea: "150", unitPrice: "80" },
+    });
+    expect(tableRow(doc, "坪単価")).toBe("80万円");
+  });
+
+  it("坪単価: 土地面積が空だと自動計算できず行は空文字([Task1])", () => {
+    const doc = buildSaleLandDocument({ ...base, overrides: { price: "3000" } });
+    expect(tableRow(doc, "坪単価")).toBe("");
+  });
+
+  it("坪単価の行ラベルは「坪単価」(旧「坪/㎡単価」から変更・マンションの「㎡単価」とは別・[Task1])", () => {
+    const doc = buildSaleLandDocument({ ...base, overrides: {} });
+    expect(tableLabels(doc)).toContain("坪単価");
+    expect(tableLabels(doc)).not.toContain("坪/㎡単価");
+  });
+
   it("表題は「売土地」固定、価格はoverride×万円", () => {
     const doc = buildSaleLandDocument({ ...base, overrides: { price: "3480" } });
     expect(findEl(doc, "heading")).toMatchObject({ content: "売土地" });

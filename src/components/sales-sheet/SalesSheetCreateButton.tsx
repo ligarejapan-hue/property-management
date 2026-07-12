@@ -9,6 +9,14 @@ import {
   mapOccupancyStatusToMansionOccupancy,
   mapOccupancyStatusToLandOccupancy,
 } from "@/lib/sales-sheet/occupancy";
+import { computeTsuboUnitPrice } from "@/lib/sales-sheet/tsubo";
+import {
+  OTHER_OPTION,
+  hasOtherOption,
+  selectOtherState,
+  multiOtherState,
+  setMultiFreeText,
+} from "@/lib/sales-sheet/other-input";
 
 export type { SalesSheetTemplateKind };
 
@@ -422,6 +430,178 @@ function buildFieldModelOverridePayload(
   return out;
 }
 
+/**
+ * 「その他」を持つ select 欄の描画（[Task2] 実装／@codex P2 final review M1 で堅牢化）。
+ * `FieldModelWidget` は widget 種別ごとに複数の早期 return を持つ関数のため、特定の
+ * 分岐内だけで hooks を呼ぶと rules-of-hooks（条件付き呼び出し）に抵触する。そのため
+ * その他対応部分だけをここへ切り出し、hooks を安全にトップレベルで呼べるようにする。
+ *
+ * 表示可否（自由入力欄を出すか）は `otherOpen`（ローカル state）で決め、値からの
+ * 毎レンダー再推論はしない。自由入力欄の value も `freeText`（ローカル state）の
+ * バッファを表示する。以前は `selectOtherState(value, options)` を毎レンダー呼んで
+ * isOther を直接使っていたため、選択肢と完全一致する自由入力（例:「RC造」の入力途中の
+ * 「RC」）を打った瞬間に isOther が false へ反転し、自由入力欄が消えて選択肢へ
+ * 畳まれてしまっていた（@codex P2）。otherOpen は `<select>` の実際の操作
+ * （その他⇔実選択肢の切替）でのみ変える＝自由入力欄への打鍵では変えないため再現しない。
+ *
+ * 初期値は現在値からの導出（selectOtherState、マウント時の1回のみ）。ダイアログは
+ * one-shot（作成時のみ・値は外部から書き換わらない）ためローカル state で desync しない。
+ * 保存する値の表現（options外文字列＝自由入力・空は「その他」）は不変
+ * （other-input.ts の純関数は初期化にのみ引き続き使用）。
+ */
+function SelectWithOther({
+  field,
+  value,
+  onChange,
+  id,
+}: {
+  field: SheetField;
+  value: string;
+  onChange: (v: FieldModelValue) => void;
+  id: string;
+}) {
+  const options = field.options ?? [];
+  const [otherOpen, setOtherOpen] = useState(() => selectOtherState(value, options).isOther);
+  const [freeText, setFreeText] = useState(() => selectOtherState(value, options).freeText);
+  const selectValue = otherOpen ? OTHER_OPTION : value;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-700 dark:text-gray-300">
+          {field.label}
+        </label>
+        <select
+          id={id}
+          aria-label={field.label}
+          value={selectValue}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === OTHER_OPTION) {
+              setOtherOpen(true);
+              setFreeText("");
+              onChange(OTHER_OPTION);
+            } else {
+              setOtherOpen(false);
+              setFreeText("");
+              onChange(v);
+            }
+          }}
+          className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+        >
+          <option value="">選択してください</option>
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+      </div>
+      {otherOpen && (
+        <div className="flex items-center gap-2">
+          <span className="w-28 shrink-0" aria-hidden="true" />
+          <input
+            aria-label={`${field.label}（その他）`}
+            value={freeText}
+            onChange={(e) => {
+              const t = e.target.value;
+              setFreeText(t);
+              onChange(t.trim() === "" ? OTHER_OPTION : t);
+            }}
+            placeholder="その他の内容を入力"
+            className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 「その他」を持つ multiselect 欄の描画（SelectWithOther と同じ理由・@codex P2 堅牢化）。
+ * `otherOpen`/`freeText` はローカル state＝「その他」チェックボックスの操作でのみ変わり、
+ * 自由入力欄への打鍵では変わらない（選択肢と完全一致する自由入力でチェックが外れて
+ * 欄が消える不具合を防ぐ、SelectWithOther 同様）。`optionSelections`（その他以外の実選択）は
+ * チェックボックス操作のたびに変わる普通の選択状態＝表示可否/自由入力バッファの再推論とは
+ * 別物のため、親から渡る最新の `selected` から毎レンダー再計算してよい
+ * （multiOtherState は純関数・other-input.test.ts でテスト済み）。
+ */
+function MultiSelectWithOther({
+  field,
+  options,
+  selected,
+  onChange,
+}: {
+  field: SheetField;
+  options: readonly string[];
+  selected: string[];
+  onChange: (v: FieldModelValue) => void;
+}) {
+  const [otherOpen, setOtherOpen] = useState(() => multiOtherState(selected, options).isOther);
+  const [freeText, setFreeText] = useState(() => multiOtherState(selected, options).freeText);
+  const optionSelections = multiOtherState(selected, options).optionSelections;
+  return (
+    <fieldset className="space-y-1">
+      <legend className="mb-1 text-sm text-gray-700 dark:text-gray-300">{field.label}</legend>
+      <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+        {options.map((opt) =>
+          opt === OTHER_OPTION ? (
+            // 「その他」チェックボックス: チェック状態は otherOpen（ローカル state）で決める
+            // （raw の selected.includes("その他") だけだと、自由入力テキストが入っている間は
+            // 配列にリテラル「その他」が無いため見た目上チェックが外れてしまう）。
+            <label key={opt} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                aria-label={opt}
+                checked={otherOpen}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setOtherOpen(true);
+                    setFreeText("");
+                    onChange([...optionSelections, OTHER_OPTION]);
+                  } else {
+                    setOtherOpen(false);
+                    setFreeText("");
+                    onChange(optionSelections);
+                  }
+                }}
+              />
+              {opt}
+            </label>
+          ) : (
+            <label key={opt} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                aria-label={opt}
+                checked={selected.includes(opt)}
+                onChange={(e) => {
+                  const next = e.target.checked
+                    ? [...selected, opt]
+                    : selected.filter((s) => s !== opt);
+                  onChange(next);
+                }}
+              />
+              {opt}
+            </label>
+          ),
+        )}
+      </div>
+      {otherOpen && (
+        <input
+          aria-label={`${field.label}（その他）`}
+          value={freeText}
+          onChange={(e) => {
+            const t = e.target.value;
+            setFreeText(t);
+            onChange(setMultiFreeText(selected, options, t));
+          }}
+          placeholder="その他の内容を入力"
+          className="w-full rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+        />
+      )}
+    </fieldset>
+  );
+}
+
 /** 1フィールド分の入力ウィジェット（select/multiselect/number/text）。mansion/land 共通
  * （[F2-A Task4] 汎用化・idPrefix で DOM id の名前空間を種別ごとに分ける）。 */
 function FieldModelWidget({
@@ -429,21 +609,34 @@ function FieldModelWidget({
   value,
   onChange,
   idPrefix,
+  placeholder,
 }: {
   field: SheetField;
   value: FieldModelValue | undefined;
   onChange: (v: FieldModelValue) => void;
   idPrefix: string;
+  /** number widget の `<input>` に付ける placeholder（例: 売土地の坪単価の自動計算プレビュー）。
+   *  他の widget では未使用（[Task1] 坪単価ライブプレースホルダ）。 */
+  placeholder?: string;
 }) {
   const id = `ss-${idPrefix}-${field.key}`;
 
   if (field.widget === "multiselect") {
     const selected = Array.isArray(value) ? value : [];
+    const options = field.options ?? [];
+    // [Task2] options に「その他」を含む欄のみ、その他対応の専用コンポーネントへ委譲する
+    // （明示モード＋ローカルバッファで保持し、値からの毎レンダー再推論はしない＝@codex P2）。
+    // 持たない欄は従来どおり（プレーンなチェックボックス群のみ・以下は不変）。
+    if (hasOtherOption(options)) {
+      return (
+        <MultiSelectWithOther field={field} options={options} selected={selected} onChange={onChange} />
+      );
+    }
     return (
       <fieldset className="space-y-1">
         <legend className="mb-1 text-sm text-gray-700 dark:text-gray-300">{field.label}</legend>
         <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-          {(field.options ?? []).map((opt) => (
+          {options.map((opt) => (
             <label key={opt} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
               <input
                 type="checkbox"
@@ -466,25 +659,64 @@ function FieldModelWidget({
 
   if (field.widget === "select") {
     const v = typeof value === "string" ? value : "";
+    const options = field.options ?? [];
+    // [Task2] options に「その他」を含む欄のみ、その他対応の専用コンポーネントへ委譲する
+    // （明示モード＋ローカルバッファで保持し、値からの毎レンダー再推論はしない＝@codex P2）。
+    // 持たない欄は従来どおり（プレーンな select のみ・以下は不変）。
+    if (hasOtherOption(options)) {
+      return <SelectWithOther field={field} value={v} onChange={onChange} id={id} />;
+    }
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-700 dark:text-gray-300">
+            {field.label}
+          </label>
+          <select
+            id={id}
+            aria-label={field.label}
+            value={v}
+            onChange={(e) => onChange(e.target.value)}
+            className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+          >
+            <option value="">選択してください</option>
+            {options.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    );
+  }
+
+  if (field.widget === "combo") {
+    // [Task3] 報酬など「プリセットから選ぶ／自由入力する」両方を許す欄。datalist は
+    // ブラウザネイティブのコンボボックス（プリセットを提示しつつ自由入力可）＝
+    // options は候補の一つに過ぎず、value は常に自由文字列（サーバ zod も
+    // z.string() のため無改修で通る＝ other-input.ts の「その他」機構とは別物）。
+    const v = typeof value === "string" ? value : "";
+    const options = field.options ?? [];
+    const listId = `${id}-list`;
     return (
       <div className="flex items-center gap-2">
         <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-700 dark:text-gray-300">
           {field.label}
         </label>
-        <select
+        <input
           id={id}
           aria-label={field.label}
+          list={listId}
           value={v}
           onChange={(e) => onChange(e.target.value)}
           className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
-        >
-          <option value="">選択してください</option>
-          {(field.options ?? []).map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
+        />
+        <datalist id={listId}>
+          {options.map((opt) => (
+            <option key={opt} value={opt} />
           ))}
-        </select>
+        </datalist>
       </div>
     );
   }
@@ -502,6 +734,7 @@ function FieldModelWidget({
           inputMode="decimal"
           value={v}
           onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
           className="w-28 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
         />
         {field.unit && <span className="text-xs text-neutral-500 dark:text-neutral-400">{field.unit}</span>}
@@ -556,6 +789,21 @@ function AutoPreviewField({
       {field.unit && <span className="text-xs text-neutral-400">{field.unit}</span>}
     </div>
   );
+}
+
+/** 売土地の坪単価フィールド向けライブプレースホルダ（[Task1]）。現在の価格/土地面積
+ *  （フォーム入力中の生値）から computeTsuboUnitPrice した自動計算値があれば
+ *  "自動: {v}万円"、算出不可（面積0/空 等）なら undefined（プレースホルダ無し）を返す。
+ *  values 自体は変更しない＝上書き入力すればそちらが優先され、空欄のまま送信すれば
+ *  ビルダー側（buildLandValues）が同じ関数で同じ値を自動計算する。 */
+function tsuboUnitPricePlaceholder(
+  price: FieldModelValue | undefined,
+  landArea: FieldModelValue | undefined,
+): string | undefined {
+  const p = typeof price === "string" ? price : "";
+  const a = typeof landArea === "string" ? landArea : "";
+  const auto = computeTsuboUnitPrice(p, a);
+  return auto === "" ? undefined : `自動: ${auto}万円`;
 }
 
 /**
@@ -625,6 +873,12 @@ export function FieldModelForm({
             // mansion/land 共通のパターン）。
             const displayValue =
               f.key === "occupancy" && values[f.key] === undefined ? occupancySeed : values[f.key];
+            // 売土地の坪単価: 未入力時にビルダーが自動計算する値(computeTsuboUnitPrice)を
+            // ライブプレースホルダとして見せる。price/landArea の入力に追随する（[Task1]）。
+            const placeholder =
+              kind === "land" && f.key === "unitPrice"
+                ? tsuboUnitPricePlaceholder(values.price, values.landArea)
+                : undefined;
             return (
               <div key={f.key}>
                 {hints[f.key] && (
@@ -635,6 +889,7 @@ export function FieldModelForm({
                   field={f}
                   value={displayValue}
                   onChange={(v) => onChange(f.key, v)}
+                  placeholder={placeholder}
                 />
               </div>
             );
