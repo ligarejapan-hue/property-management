@@ -6,7 +6,7 @@
  */
 import * as M from "./option-master";
 
-export type FieldWidget = "select" | "multiselect" | "toggle" | "text" | "number";
+export type FieldWidget = "select" | "multiselect" | "toggle" | "text" | "number" | "combo";
 
 export interface SheetField {
   key: string;
@@ -70,7 +70,7 @@ export const MANSION_FIELDS: readonly SheetField[] = [
   // 会社（フッター・手入力のみ・自動反映元なし。ビルダーはこのセクションを
   // スペック表から除外し、会社フッター帯の組み立てにのみ使う）
   { key: "transactionType", label: "取引態様", widget: "select", section: "会社", options: M.TRANSACTION_TYPE },
-  { key: "compensation", label: "報酬", widget: "select", section: "会社", options: M.COMPENSATION },
+  { key: "compensation", label: "報酬", widget: "combo", section: "会社", options: M.COMPENSATION },
   { key: "adType", label: "広告", widget: "select", section: "会社", options: M.AD_TYPE },
   { key: "staff", label: "担当者", widget: "text", section: "会社" },
   { key: "agent", label: "取引士", widget: "text", section: "会社" },
@@ -123,7 +123,7 @@ export const LAND_FIELDS: readonly SheetField[] = [
   // 会社（フッター・手入力のみ・自動反映元なし。MANSION_FIELDS と同一のキー・ラベル・
   // 選択肢のため、ビルダー側の会社帯組み立て(FooterBandData)を共有できる）
   { key: "transactionType", label: "取引態様", widget: "select", section: "会社", options: M.TRANSACTION_TYPE },
-  { key: "compensation", label: "報酬", widget: "select", section: "会社", options: M.COMPENSATION },
+  { key: "compensation", label: "報酬", widget: "combo", section: "会社", options: M.COMPENSATION },
   { key: "adType", label: "広告", widget: "select", section: "会社", options: M.AD_TYPE },
   { key: "staff", label: "担当者", widget: "text", section: "会社" },
   { key: "agent", label: "取引士", widget: "text", section: "会社" },
@@ -193,7 +193,7 @@ export const HOUSE_FIELDS: readonly SheetField[] = [
   // 会社（フッター・手入力のみ・自動反映元なし。MANSION_FIELDS/LAND_FIELDS と同一の
   // キー・ラベル・選択肢のため、FooterBandData を共有できる）
   { key: "transactionType", label: "取引態様", widget: "select", section: "会社", options: M.TRANSACTION_TYPE },
-  { key: "compensation", label: "報酬", widget: "select", section: "会社", options: M.COMPENSATION },
+  { key: "compensation", label: "報酬", widget: "combo", section: "会社", options: M.COMPENSATION },
   { key: "adType", label: "広告", widget: "select", section: "会社", options: M.AD_TYPE },
   { key: "staff", label: "担当者", widget: "text", section: "会社" },
   { key: "agent", label: "取引士", widget: "text", section: "会社" },
@@ -262,7 +262,7 @@ export const BUILDING_FIELDS: readonly SheetField[] = [
   { key: "remarks", label: "備考", widget: "text", section: "設備" },
   // 会社（フッター）
   { key: "transactionType", label: "取引態様", widget: "select", section: "会社", options: M.TRANSACTION_TYPE },
-  { key: "compensation", label: "報酬", widget: "select", section: "会社", options: M.COMPENSATION },
+  { key: "compensation", label: "報酬", widget: "combo", section: "会社", options: M.COMPENSATION },
   { key: "adType", label: "広告", widget: "select", section: "会社", options: M.AD_TYPE },
   { key: "staff", label: "担当者", widget: "text", section: "会社" },
   { key: "agent", label: "取引士", widget: "text", section: "会社" },

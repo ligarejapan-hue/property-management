@@ -20,6 +20,10 @@ describe("option-master", () => {
     expect(M.AREA_ZONE).toContain("防火");
   });
 
+  it("報酬(COMPENSATION)は税込/税別×定額加算の新選択肢に置換済み(コンボボックス・自由入力可・[Task3])", () => {
+    expect(M.COMPENSATION).toEqual(["税込3%", "税別3%", "税込3%+6万円", "税別3%+6万円"]);
+  });
+
   it("F2売土地分の選択肢を持つ", () => {
     expect(M.PROPERTY_TYPE_LAND).toEqual(["売地", "借地権", "底地権"]);
     expect(M.BEST_USE_LAND).toEqual([

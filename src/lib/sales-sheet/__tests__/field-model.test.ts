@@ -48,14 +48,14 @@ describe("MANSION_FIELDS", () => {
       expect(byKey(k)?.widget, k).toBe("multiselect");
     }
   });
-  it("会社セクション: 取引態様・報酬・広告は select・選択肢マスタ準拠", () => {
+  it("会社セクション: 取引態様・広告は select、報酬は combo(コンボボックス・選択肢マスタ準拠＋自由入力可・[Task3])", () => {
     const tt = byKey("transactionType");
     expect(tt?.widget).toBe("select");
     expect(tt?.options).toEqual(TRANSACTION_TYPE);
     expect(tt?.section).toBe("会社");
 
     const comp = byKey("compensation");
-    expect(comp?.widget).toBe("select");
+    expect(comp?.widget).toBe("combo");
     expect(comp?.options).toEqual(COMPENSATION);
     expect(comp?.section).toBe("会社");
 
@@ -118,14 +118,14 @@ describe("LAND_FIELDS（[F2-A Task3]）", () => {
       expect(byLandKey(k)?.widget, k).toBe("multiselect");
     }
   });
-  it("会社セクション: 取引態様・報酬・広告は select・選択肢マスタ準拠(マンションと同じ語彙)", () => {
+  it("会社セクション: 取引態様・広告は select、報酬は combo・選択肢マスタ準拠(マンションと同じ語彙・[Task3])", () => {
     const tt = byLandKey("transactionType");
     expect(tt?.widget).toBe("select");
     expect(tt?.options).toEqual(TRANSACTION_TYPE);
     expect(tt?.section).toBe("会社");
 
     const comp = byLandKey("compensation");
-    expect(comp?.widget).toBe("select");
+    expect(comp?.widget).toBe("combo");
     expect(comp?.options).toEqual(COMPENSATION);
     expect(comp?.section).toBe("会社");
 
@@ -209,14 +209,14 @@ describe("HOUSE_FIELDS（[F2-B Task2]）", () => {
     expect(byHouseKey("useDistrict")?.autoFrom).toBe("zoningDistrict");
     expect(byHouseKey("occupancy")?.autoFrom).toBe("occupancyStatus");
   });
-  it("会社セクション: 取引態様・報酬・広告は select・選択肢マスタ準拠(他種別と同じ語彙)", () => {
+  it("会社セクション: 取引態様・広告は select、報酬は combo・選択肢マスタ準拠(他種別と同じ語彙・[Task3])", () => {
     const tt = byHouseKey("transactionType");
     expect(tt?.widget).toBe("select");
     expect(tt?.options).toEqual(TRANSACTION_TYPE);
     expect(tt?.section).toBe("会社");
 
     const comp = byHouseKey("compensation");
-    expect(comp?.widget).toBe("select");
+    expect(comp?.widget).toBe("combo");
     expect(comp?.options).toEqual(COMPENSATION);
     expect(comp?.section).toBe("会社");
 
@@ -291,9 +291,13 @@ describe("BUILDING_FIELDS（[F2-C Task2]）", () => {
     expect(byBuildingKey("occupancy")?.autoFrom).toBe("occupancyStatus");
     expect(byBuildingKey("layout")).toBeUndefined();
   });
-  it("会社セクション(取引態様/報酬/広告=select, 担当者/取引士/特記=text)を持つ", () => {
+  it("会社セクション(取引態様/広告=select、報酬=combo、担当者/取引士/特記=text)を持つ([Task3])", () => {
     expect(byBuildingKey("transactionType")?.options).toEqual(TRANSACTION_TYPE);
     expect(byBuildingKey("transactionType")?.section).toBe("会社");
+    const comp = byBuildingKey("compensation");
+    expect(comp?.widget).toBe("combo");
+    expect(comp?.options).toEqual(COMPENSATION);
+    expect(comp?.section).toBe("会社");
     for (const k of ["staff", "agent", "specialNotes"]) {
       expect(byBuildingKey(k)?.widget, k).toBe("text");
       expect(byBuildingKey(k)?.section, k).toBe("会社");

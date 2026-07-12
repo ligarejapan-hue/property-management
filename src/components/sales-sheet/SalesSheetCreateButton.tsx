@@ -554,6 +554,36 @@ function FieldModelWidget({
     );
   }
 
+  if (field.widget === "combo") {
+    // [Task3] 報酬など「プリセットから選ぶ／自由入力する」両方を許す欄。datalist は
+    // ブラウザネイティブのコンボボックス（プリセットを提示しつつ自由入力可）＝
+    // options は候補の一つに過ぎず、value は常に自由文字列（サーバ zod も
+    // z.string() のため無改修で通る＝ other-input.ts の「その他」機構とは別物）。
+    const v = typeof value === "string" ? value : "";
+    const options = field.options ?? [];
+    const listId = `${id}-list`;
+    return (
+      <div className="flex items-center gap-2">
+        <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-700 dark:text-gray-300">
+          {field.label}
+        </label>
+        <input
+          id={id}
+          aria-label={field.label}
+          list={listId}
+          value={v}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+        />
+        <datalist id={listId}>
+          {options.map((opt) => (
+            <option key={opt} value={opt} />
+          ))}
+        </datalist>
+      </div>
+    );
+  }
+
   if (field.widget === "number") {
     const v = typeof value === "string" ? value : "";
     return (
