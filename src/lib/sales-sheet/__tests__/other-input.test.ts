@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  OTHER_OPTION, hasOtherOption, selectOtherState, multiOtherState, setMultiFreeText,
+  hasOtherOption, selectOtherState, multiOtherState, setMultiFreeText,
 } from "../other-input";
 
 const OPTS = ["宅地", "田", "その他"] as const;
