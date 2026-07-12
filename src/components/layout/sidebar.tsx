@@ -26,6 +26,7 @@ import {
   FileSearch,
   BookOpen,
   Newspaper,
+  Mail,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 
@@ -124,6 +125,11 @@ const adminNavItems: NavItem[] = [
     label: "謄本取得の資格情報",
     href: "/admin/registry-settings",
     icon: <FileText className="h-5 w-5" />,
+  },
+  {
+    label: "売却DM設定",
+    href: "/admin/sale-dm-settings",
+    icon: <Mail className="h-5 w-5" />,
   },
 ];
 
