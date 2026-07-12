@@ -9,8 +9,9 @@
  * 実データの認可（この物件に属するか）は保存時 assertDocumentImagesAuthorized が担保する。
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import { isSafeImageSrc } from "@/lib/sales-sheet/css-safety";
+import FilePickerButton from "@/components/import/file-picker-button";
 
 export interface GalleryPhoto {
   id: string;
@@ -73,6 +74,60 @@ export function PhotoGrid({
   );
 }
 
+/** POST 失敗レスポンスから { error: { message } } を best-effort で拾う（拾えなければ null）。 */
+async function extractErrorMessage(res: Response): Promise<string | null> {
+  try {
+    const body = (await res.json()) as { error?: { message?: string } };
+    return body?.error?.message ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export interface UploadPhotosResult {
+  succeededCount: number;
+  failedCount: number;
+  /** 失敗時、最初の失敗のエラーメッセージ（拾えれば）。UI の定型文に添える用途。 */
+  firstErrorMessage: string | null;
+}
+
+/**
+ * 選択ファイルを1枚ずつ既存 POST /api/properties/{id}/photos（multipart）へ送る（純関数）。
+ * 呼び出し側は完了後に loadPhotos() で再取得すること（本関数自体は state を持たない）。
+ * fetchImpl を注入可能にし、jsdom 無しの env=node でもユニットテストできるようにする。
+ */
+export async function uploadPhotoFiles(
+  propertyId: string,
+  files: File[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<UploadPhotosResult> {
+  let succeededCount = 0;
+  let failedCount = 0;
+  let firstErrorMessage: string | null = null;
+
+  for (const file of files) {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      // Content-Type はブラウザに multipart boundary を付与させるため手動指定しない。
+      const res = await fetchImpl(`/api/properties/${propertyId}/photos`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        failedCount += 1;
+        if (!firstErrorMessage) firstErrorMessage = await extractErrorMessage(res);
+        continue;
+      }
+      succeededCount += 1;
+    } catch {
+      failedCount += 1;
+    }
+  }
+
+  return { succeededCount, failedCount, firstErrorMessage };
+}
+
 export function PhotoGalleryPanel({
   propertyId,
   onClose,
@@ -84,23 +139,61 @@ export function PhotoGalleryPanel({
 }) {
   const [photos, setPhotos] = useState<GalleryPhoto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  // 初回描画時と、アップロード完了後の再取得の両方から呼ぶ。cancelled ガードは初回 useEffect の
+  // アンマウント/propertyId 切替時にのみ効かせる（アップロード後の呼び出しはガード不要=常時反映）。
+  // useCallback で propertyId のみを依存にした安定した参照にし、下の useEffect の deps に含める
+  // （photo-tab.tsx の fetchPhotosData と同じパターン）。
+  const loadPhotos = useCallback(
+    async (signal?: { cancelled: boolean }) => {
       try {
         const res = await fetch(`/api/properties/${propertyId}/photos`);
         if (!res.ok) throw new Error("failed");
         const body = (await res.json()) as { data: GalleryPhoto[] };
-        if (!cancelled) setPhotos(body.data);
+        if (!signal?.cancelled) {
+          setPhotos(body.data);
+          setError(null);
+        }
       } catch {
-        if (!cancelled) setError("写真の読み込みに失敗しました");
+        if (!signal?.cancelled) setError("写真の読み込みに失敗しました");
       }
-    })();
+    },
+    [propertyId],
+  );
+
+  useEffect(() => {
+    const signal = { cancelled: false };
+    loadPhotos(signal);
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
     };
-  }, [propertyId]);
+  }, [loadPhotos]);
+
+  async function handleUploadChange(e: ChangeEvent<HTMLInputElement>) {
+    const fileList = e.target.files;
+    const inputEl = e.target;
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const result = await uploadPhotoFiles(propertyId, files);
+      if (result.failedCount > 0) {
+        setUploadError(
+          `${files.length}枚中${result.failedCount}枚アップロードできませんでした` +
+            (result.firstErrorMessage ? `（${result.firstErrorMessage}）` : ""),
+        );
+      }
+      // 1枚でも成功していればギャラリーへ反映する。
+      if (result.succeededCount > 0) await loadPhotos();
+    } finally {
+      setUploading(false);
+      inputEl.value = ""; // 同じファイルを選び直しても onChange が発火するようにする
+    }
+  }
 
   return (
     <div
@@ -122,6 +215,24 @@ export function PhotoGalleryPanel({
           >
             ✕
           </button>
+        </div>
+
+        <div className="mb-4 space-y-2 border-b border-gray-200 pb-4 dark:border-gray-700">
+          <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
+            ローカルからアップロード
+          </h3>
+          <FilePickerButton
+            accept="image/*"
+            multiple
+            label="写真をアップロード"
+            hint="JPEG/PNG/WebP・1枚8MBまで・複数可"
+            disabled={uploading}
+            onChange={handleUploadChange}
+          />
+          {uploading && (
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">アップロード中…</p>
+          )}
+          {uploadError && <p className="text-sm text-red-600 dark:text-red-400">{uploadError}</p>}
         </div>
 
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}

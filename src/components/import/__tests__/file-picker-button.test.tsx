@@ -43,4 +43,19 @@ describe("FilePickerButton — SSR構造", () => {
     );
     expect(html).toContain("受付帳を選択");
   });
+
+  it("multiple 未指定時は input に multiple 属性が付かない（登記DM取込の既存呼び出し=単一選択の後方互換）", () => {
+    const html = renderToStaticMarkup(
+      <FilePickerButton accept=".xlsx,.csv" onChange={() => {}} />,
+    );
+    expect(html).not.toContain("multiple");
+  });
+
+  it("multiple 指定時は input に multiple 属性が付く（複数ファイル選択を許可）", () => {
+    const html = renderToStaticMarkup(
+      <FilePickerButton accept="image/*" onChange={() => {}} multiple />,
+    );
+    expect(html).toContain('type="file"');
+    expect(html).toContain("multiple");
+  });
 });

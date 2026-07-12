@@ -16,6 +16,7 @@ export default function FilePickerButton({
   label = "ファイルを選択",
   hint,
   disabled,
+  multiple,
 }: {
   accept: string;
   onChange: (e: ChangeEvent<HTMLInputElement>) => void;
@@ -23,6 +24,8 @@ export default function FilePickerButton({
   label?: string;
   hint?: string;
   disabled?: boolean;
+  /** 複数ファイル選択を許可するか(既定 undefined=単一選択・後方互換)。 */
+  multiple?: boolean;
 }) {
   return (
     <div data-file-picker className="space-y-1">
@@ -43,6 +46,7 @@ export default function FilePickerButton({
             accept={accept}
             disabled={disabled}
             onChange={onChange}
+            multiple={multiple}
             className="sr-only"
           />
         </label>
