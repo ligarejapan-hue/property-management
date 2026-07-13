@@ -18,6 +18,11 @@ describe("properties page: 売却DM対象選択の配線", () => {
     expect(src).toContain("disabled={creatingDm || loading || selectedIds.size === 0}");
   });
 
+  it("表示条件変更(setPage)で選択を同期的にクリアする(競合の芽を断つ・Codex R12)", () => {
+    // setPage を包み、ページ/フィルタ/検索/並べ替えの変更時に selectedIds をその場でクリアする
+    expect(src).toContain("setPageState(updater)");
+  });
+
   it("確認ダイアログに(表示中の)選択件数を出す", () => {
     expect(src).toContain("選択した ${ids.length} 件");
   });

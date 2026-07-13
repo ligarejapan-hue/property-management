@@ -137,7 +137,7 @@ function PropertiesPageInner() {
   const [sendCountMaxFilter, setSendCountMaxFilter] = useState(() => sp.get("dmSentMax") ?? "");
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
-  const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
+  const [page, setPageState] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
 
   // モバイル用フィルタ折りたたみ
   const [showFilters, setShowFilters] = useState(false);
@@ -262,6 +262,15 @@ function PropertiesPageInner() {
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // 表示条件(検索/フィルタ/並べ替え/ページ)を変えたら、選択(チェック)を同期的にクリアする。
+  // すべての表示条件変更は setPage(1) か setPage(p±1) を通るため setPage を包んで一箇所で断つ=
+  // 前ページ/前フィルタの(今は見えていない)選択のまま有料DM作成が走る競合を、再フェッチ完了を待たず
+  // その場で防ぐ(Codex R7/R11/R12)。バルク操作系(fetchProperties 直呼び)は setPage を通らず影響を受けない。
+  const setPage = useCallback((updater: number | ((p: number) => number)) => {
+    setSelectedIds(new Set());
+    setPageState(updater);
+  }, []);
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -575,7 +584,7 @@ function PropertiesPageInner() {
         setSearchText(value);
         setPage(1);
       }, 300),
-    [],
+    [setPage],
   );
   const commitMgmtId = useMemo(
     () =>
@@ -583,7 +592,7 @@ function PropertiesPageInner() {
         setMgmtIdText(value);
         setPage(1);
       }, 300),
-    [],
+    [setPage],
   );
   // アンマウント時に保留中の確定コミットを破棄する。
   useEffect(() => {
