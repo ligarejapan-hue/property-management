@@ -305,10 +305,13 @@ function PropertiesPageInner() {
   const saleDmIdemKeyRef = useRef<string | null>(null);
   const handleCreateSaleDm = async () => {
     if (creatingDm) return;
+    // 送信対象は「今読み込んでいる物件」に選択(チェック)を intersect して確定する。フィルタ/ページ変更の
+    // 読み込み中に古いページのIDが混ざって送られる競合(Codex R7/R11)を、送信の瞬間にも断つ。
+    const ids = properties.filter((p) => selectedIds.has(p.id)).map((p) => p.id);
     // 課金確認: 選択した(チェックした)物件の宛先ごとに AI が手紙を生成し、AI利用料金が発生する(オーナー
     // 情報を AI提供元へ送信)。件数を明示して確認を取り、サーバーへ confirmed:true を送る(サーバー側でも必須)。
-    if (selectedIds.size === 0) return;
-    if (!window.confirm(`選択した ${selectedIds.size} 件の物件にAIで手紙を生成します。\n共有者が複数いる物件は宛先ごとに複数通になることがあります。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？`)) return;
+    if (ids.length === 0) return;
+    if (!window.confirm(`選択した ${ids.length} 件の物件にAIで手紙を生成します。\n共有者が複数いる物件は宛先ごとに複数通になることがあります。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？`)) return;
     // 作成試行ごとに安定したキーを用意(secure context 外では randomUUID 不在ゆえ簡易フォールバック)。
     if (!saleDmIdemKeyRef.current) {
       saleDmIdemKeyRef.current =
@@ -328,7 +331,7 @@ function PropertiesPageInner() {
           appeal: "price",
           strength: "low",
         },
-        propertyIds: Array.from(selectedIds),
+        propertyIds: ids,
         confirmed: true,
         idempotencyKey: saleDmIdemKeyRef.current,
       });
@@ -336,7 +339,7 @@ function PropertiesPageInner() {
       // 一部失敗(空本文=failed)や、選択したが対象外(住所なし等)で作成されなかった物件を遷移前に明示する。
       // 対象外は「物件数」で数える(選択物件数 − 生成対象になった物件数 matchedProperties)。requested(手紙数)は
       // 共有者ぶんで物件数より多くなり得るため、除外判定には使わない。
-      const excluded = Math.max(0, selectedIds.size - (res.matchedProperties ?? selectedIds.size));
+      const excluded = Math.max(0, ids.length - (res.matchedProperties ?? ids.length));
       const partialNotice = buildSaleDmPartialNotice({
         generated: res.generated, failed: res.failed, truncated: res.truncated, excluded,
       });
@@ -853,7 +856,7 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleCreateSaleDm}
-            disabled={creatingDm || selectedIds.size === 0}
+            disabled={creatingDm || loading || selectedIds.size === 0}
             className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             title="チェックした物件から売却DM下書きを作成(住所が無い物件は自動で除外)"
           >

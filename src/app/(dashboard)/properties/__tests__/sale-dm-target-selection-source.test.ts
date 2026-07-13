@@ -9,16 +9,17 @@ const src = readFileSync(
 );
 
 describe("properties page: 売却DM対象選択の配線", () => {
-  it("作成はチェックした物件(selectedIds)から propertyIds で作る", () => {
-    expect(src).toContain("propertyIds: Array.from(selectedIds)");
+  it("作成は選択(selectedIds)を『今読み込んでいる物件』に intersect して propertyIds で送る(Codex R11)", () => {
+    expect(src).toContain("properties.filter((p) => selectedIds.has(p.id))");
+    expect(src).toContain("propertyIds: ids");
   });
 
-  it("作成ボタンは選択0件のとき無効", () => {
-    expect(src).toContain("disabled={creatingDm || selectedIds.size === 0}");
+  it("作成ボタンは選択0件/読み込み中は無効(競合クリック防止・Codex R11)", () => {
+    expect(src).toContain("disabled={creatingDm || loading || selectedIds.size === 0}");
   });
 
-  it("確認ダイアログに選択件数を出す", () => {
-    expect(src).toContain("選択した ${selectedIds.size} 件");
+  it("確認ダイアログに(表示中の)選択件数を出す", () => {
+    expect(src).toContain("選択した ${ids.length} 件");
   });
 
   it("送信回数の並べ替え(少ない順/多い順)がある", () => {

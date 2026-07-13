@@ -2,7 +2,7 @@
 
 - 日付: 2026-07-13
 - スコープ: 売却促進DMの「対象の選び方」を3点強化。**データ列の追加なし**（送信回数は既存DM履歴を集計）。性能のため `PropertyDmLog` に `propertyId` 索引を1本だけ追加（@codex R3・ユーザー承認・追加のみ）。
-- @codex 対応で当初設計から変わった主点: (a) 生成は**物件単位で50通に切詰**（配列上限=50物件・物件を分断せず[R8]共有者多数の暴走もさせない[R9-P1]・`matchedProperties` は実宛先ベース[R9-P2]／R1/R4/R8/R9）(b) 選択経路は送付可(send)のみ対象＝hold/no_send 除外（R2/R6）(c) 送信回数は並べ替え＋「未送信」抽出に簡素化（N回以下の groupBy は大規模時に重く廃止・R2/R3/R10-P2）＋`propertyId` 索引(d) 選択は表示中の物件に intersect（stale 送信防止・R7）。
+- @codex 対応で当初設計から変わった主点: (a) 生成は**物件単位で50通に切詰**（配列上限=50物件・物件を分断せず[R8]共有者多数の暴走もさせない[R9-P1]・`matchedProperties` は実宛先ベース[R9-P2]／R1/R4/R8/R9）(b) 選択経路は送付可(send)のみ対象＝hold/no_send 除外（R2/R6）(c) 送信回数は並べ替え＋「未送信」抽出に簡素化（N回以下の groupBy は大規模時に重く廃止・R2/R3/R10-P2）＋`propertyId` 索引(d) 選択は表示中の物件に intersect し、送信の瞬間も可視物件に絞る＋読込中は作成無効（stale/競合 送信防止・R7/R11）。
 - 前提: 既存の売却DM機能（作成→A/B型→確定→印刷）はそのまま。UI簡素化（かんたん作成ウィザード）は今回スコープ外。
 
 ## 機能1: チェックした物件から作成
@@ -14,7 +14,7 @@
   - `where` = field_staff 可視スコープ（`propertyVisibilityScopeWhere`）＋ `id: { in: propertyIds }` ＋ `isArchived: false` ＋ 既存と同じ「所有者に住所あり」。
   - DM は **送付可(send)の物件にのみ生成**（hold/no_send は除外・`filters` 経路と同じ不変条件＝アプリのDMモデル）。一覧は全ステータス表示ゆえ、未判断/送付不可をうっかり選んでも送らない（@codex R2/R6）。`propertyIds` 未指定時は従来どおり `filters` パス（`dmStatus=send` 強制）＝後方互換。
   - 宛先を作れない物件（住所なし／権限外／アーカイブ済）は結果的に対象から外れる。`requested`（選択数）と `generated`（実生成数）の差は既存の監査 detail に載る。
-- `page.tsx`: `handleCreateSaleDm` は `filters` の代わりに `propertyIds: Array.from(selectedIds)` を送る。ボタンは `selectedIds.size === 0` で無効。ラベルに件数（例:「売却DMを作成（12件）」）。
+- `page.tsx`: `handleCreateSaleDm` は `filters` の代わりに、選択(`selectedIds`)を**今読み込んでいる物件に intersect** した `propertyIds`（`properties.filter(p => selectedIds.has(p.id))`）を送る＝表示外の stale 物件を送らない（@codex R7/R11）。ボタンは選択0件/**読み込み中**は無効（競合クリック防止）。ラベルに件数（例:「売却DMを作成（12件）」）。物件取得のたびに `selectedIds` も表示中の物件へ intersect（`loadedIds.has`）。
 
 ## 機能2: 件数確認 + 1回の生成は50通まで（物件単位で切詰）
 
