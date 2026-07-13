@@ -24,6 +24,15 @@ describe("A3: 認証レイアウトのフォールバック(dashboard-layout)", 
   });
 });
 
+describe("A3(補強): ログイン成功後は callbackUrl(同一サイト内)へ戻す(@codex R3)", () => {
+  const src = read("src/app/(auth)/login/page.tsx");
+
+  it("callbackUrl を読み、オープンリダイレクトを防いで元の画面へ戻す", () => {
+    expect(src).toContain('get("callbackUrl")');
+    expect(src).toContain('!cb.startsWith("//")'); // プロトコル相対 URL を弾く
+  });
+});
+
 describe("A4: 販売図面エディタのセッション切れ処理(SalesSheetEditor)", () => {
   const src = read("src/components/sales-sheet/editor/SalesSheetEditor.tsx");
 

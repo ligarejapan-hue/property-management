@@ -42,7 +42,11 @@ export default function LoginPage() {
       if (result?.error) {
         setError("メールアドレスまたはパスワードが正しくありません");
       } else {
-        router.push("/properties");
+        // ログイン必須画面からの再ログイン誘導(A3)で付く callbackUrl を尊重し、元の画面へ戻す。
+        // オープンリダイレクト防止: 同一サイト内の絶対パス("/..." かつ "//"(プロトコル相対)始まりでない)のみ許可(@codex R3)。
+        const cb = new URLSearchParams(window.location.search).get("callbackUrl");
+        const dest = cb && cb.startsWith("/") && !cb.startsWith("//") ? cb : "/properties";
+        router.push(dest);
       }
     } catch {
       setError("ログイン中にエラーが発生しました");
