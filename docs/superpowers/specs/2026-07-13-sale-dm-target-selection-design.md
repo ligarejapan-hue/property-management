@@ -2,7 +2,7 @@
 
 - 日付: 2026-07-13
 - スコープ: 売却促進DMの「対象の選び方」を3点強化。**データ列の追加なし**（送信回数は既存DM履歴を集計）。性能のため `PropertyDmLog` に `propertyId` 索引を1本だけ追加（@codex R3・ユーザー承認・追加のみ）。
-- @codex 対応で当初設計から変わった主点: (a) 50件上限は撤廃せず**維持**（同期生成の安全上・R1/R4）(b) 選択経路は no_send を除外（R2）(c) 送信回数集計は全体で数え notIn 除外＋索引（R2/R3）。
+- @codex 対応で当初設計から変わった主点: (a) 50件上限は撤廃せず**維持**（同期生成の安全上・R1/R4）(b) 選択経路は送付可(send)のみ対象＝hold/no_send 除外（R2/R6）(c) 送信回数集計は全体で数え notIn 除外＋索引（R2/R3）。
 - 前提: 既存の売却DM機能（作成→A/B型→確定→印刷）はそのまま。UI簡素化（かんたん作成ウィザード）は今回スコープ外。
 
 ## 機能1: チェックした物件から作成
@@ -12,7 +12,7 @@
 - `validators-sale-dm.ts`: `saleDmCampaignBodySchema` に `propertyIds: z.array(z.string().uuid()).min(1).max(2000).optional()` を追加（`max(2000)` は絶対URL/巨大ペイロードと同様の安全上限。実用の上限ではない）。
 - `campaigns/route.ts`: `body.propertyIds` があればそれを対象にする。
   - `where` = field_staff 可視スコープ（`propertyVisibilityScopeWhere`）＋ `id: { in: propertyIds }` ＋ `isArchived: false` ＋ 既存と同じ「所有者に住所あり」。
-  - `dmStatus` は send/hold(未判断)は対象にするが **no_send(送付不可＝オプトアウト)は除外**（誤って全選択で送らない・@codex R2）。`propertyIds` 未指定時は従来どおり `filters` パス（`dmStatus=send` 強制）を維持＝後方互換。
+  - DM は **送付可(send)の物件にのみ生成**（hold/no_send は除外・`filters` 経路と同じ不変条件＝アプリのDMモデル）。一覧は全ステータス表示ゆえ、未判断/送付不可をうっかり選んでも送らない（@codex R2/R6）。`propertyIds` 未指定時は従来どおり `filters` パス（`dmStatus=send` 強制）＝後方互換。
   - 宛先を作れない物件（住所なし／権限外／アーカイブ済）は結果的に対象から外れる。`requested`（選択数）と `generated`（実生成数）の差は既存の監査 detail に載る。
 - `page.tsx`: `handleCreateSaleDm` は `filters` の代わりに `propertyIds: Array.from(selectedIds)` を送る。ボタンは `selectedIds.size === 0` で無効。ラベルに件数（例:「売却DMを作成（12件）」）。
 

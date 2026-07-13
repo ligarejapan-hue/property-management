@@ -115,7 +115,7 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(json.campaignId).toBe("c1");
     const whereArg = findMany.mock.calls[0][0].where;
     expect(whereArg.id).toEqual({ in: ids });
-    expect(whereArg.dmStatus).toEqual({ not: "no_send" }); // send/hold は許すが no_send(送付不可)は除外
+    expect(whereArg.dmStatus).toBe("send"); // DMは送付可(send)の物件にのみ生成(未判断/送付不可は除外)
     expect(json.requested).toBe(1); // findMany(住所あり)が1件返る → 対象=1
     expect(json.matchedProperties).toBe(1);
   });
