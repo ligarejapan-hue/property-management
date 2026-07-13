@@ -143,4 +143,23 @@ describe("EditorToolbar — 描画", () => {
     expect(html).toContain("data-toolbar-transaction-info");
     expect(html).toContain("取引情報");
   });
+
+  it("会社帯が無い図面では「取引情報」ボタンを無効化しツールチップを出す", () => {
+    const html = renderToStaticMarkup(
+      <EditorToolbar
+        dirty={false}
+        onSave={noop}
+        onExport={noop}
+        onDelete={noop}
+        onAddPhoto={() => {}}
+        onAutoArrange={() => {}}
+        onAutoBalance={() => {}}
+        onAddBadge={() => {}}
+        onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
+        canEditTransactionInfo={false}
+      />,
+    );
+    expect(html).toContain("この図面には会社帯がありません");
+  });
 });

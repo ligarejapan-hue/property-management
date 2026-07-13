@@ -289,6 +289,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onAddBadge={handleAddBadge}
         onAddQr={handleAddQr}
         onOpenTransactionInfo={() => setTxInfoOpen(true)}
+        canEditTransactionInfo={editorState.document.elements.some((e) => e.id === "footer-band")}
       />
 
       {/* ── 写真ギャラリー（写真管理・計画④） ─────────────────────────── */}
