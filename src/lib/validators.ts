@@ -123,8 +123,12 @@ const optionalRealEstateNumber = z
   .string()
   .optional()
   .nullable()
-  // 全角→半角・区切り除去した後の数字が1〜13桁か(import と同じ normalizeRealEstateNumber)。かな等の混入は空になり弾く(@codex R1)。
-  .refine((v) => v == null || v === "" || /^\d{1,13}$/.test(normalizeRealEstateNumber(v)), "不動産番号は数字(最大13桁)で入力してください");
+  // 数字(半/全角)+空白+区切りダッシュのみ許可し、正規化後が1〜13桁か。normalizeRealEstateNumber は非数字を削るため、
+  // かな/英字/記号の混入("abc123"等)を許すと生値のまま保存され、数字番号として誤保存/誤突合される(@codex R1/R2)。
+  .refine(
+    (v) => v == null || v === "" || (/^[0-9０-９\s　\-‐-―ー－−]+$/.test(v) && /^\d{1,13}$/.test(normalizeRealEstateNumber(v))),
+    "不動産番号は数字(最大13桁)で入力してください",
+  );
 const optionalLatitude = z.number().min(-90, "緯度は -90〜90 の範囲で入力してください").max(90, "緯度は -90〜90 の範囲で入力してください").optional().nullable();
 const optionalLongitude = z.number().min(-180, "経度は -180〜180 の範囲で入力してください").max(180, "経度は -180〜180 の範囲で入力してください").optional().nullable();
 

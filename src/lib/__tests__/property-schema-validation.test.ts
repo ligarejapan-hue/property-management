@@ -24,9 +24,11 @@ describe("createPropertySchema: 物件の入力バリデーション(A2)", () =>
     expect(() => createPropertySchema.parse({ ...base, postalCode: "123" })).toThrow();
   });
 
-  it("数字以外の不動産番号を弾く", () => {
+  it("数字以外・数字混在の不動産番号を弾く(@codex R1/R2)", () => {
     expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "あいうえお!!" })).toThrow();
     expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "12345678901234" })).toThrow(); // 14桁は超過
+    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "abc123" })).toThrow(); // 英字混在(正規化で数字だけ残る誤検知を防ぐ)
+    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "12あ34" })).toThrow(); // かな混在
   });
 
   it("範囲外の緯度・経度を弾く", () => {
