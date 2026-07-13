@@ -161,17 +161,19 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(json.generated).toBe(50);
   });
 
-  it("propertyIds 経路は50件を超えても切り詰めず全件生成する(50件上限は撤廃)", async () => {
+  it("propertyIds 経路も1回の生成は50件まで(超過は truncated・take せず対象物件数は正確)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const ids55 = Array.from({ length: 55 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
     const many = Array.from({ length: 55 }, (_, i) => ({ ...property, id: `p${i}` }));
-    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue(many as never);
+    const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
+    findMany.mockResolvedValue(many as never);
     const res = await POST(req({ ...validBody, propertyIds: ids55 }) as never);
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.truncated).toBe(false);
-    expect(json.generated).toBe(55);
-    expect(json.requested).toBe(55);
+    expect(json.truncated).toBe(true); // 50件超は先頭50件のみ生成
+    expect(json.generated).toBe(50);
+    expect(json.matchedProperties).toBe(55); // take しない=対象物件は全件把握(対象外件数を正確に)
+    expect(findMany.mock.calls[0][0].take).toBeUndefined(); // 明示選択は take しない
   });
 
   it("provider=openai のとき下書きに保存する model は gpt-4o(生成モデルと一致・claude既定にしない・Codex)", async () => {

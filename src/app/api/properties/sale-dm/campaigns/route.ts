@@ -83,12 +83,13 @@ export async function POST(request: NextRequest) {
     }
     // 対象の決め方: (A) チェックで選んだ propertyIds があればそれを対象にする(明示選択優先)。無ければ
     // (B) 従来どおり絞り込み条件(filters)から送付可(send)物件を対象にする(後方互換)。手紙を作れるのは
-    // 所有者に住所がある物件のみ(共通の mailableOwner)。50件上限は撤廃済み(take しない=選んだ分を全部生成)。
+    // 所有者に住所がある物件のみ(共通の mailableOwner)。
     const mailableOwner = { propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } } };
-    // propertyIds(明示選択)経路のみ上限なし(配列上限2000が実質ガード)。従来の filters 経路を無制限にすると
-    // filters:{} の1リクエストで数千通の有料AI生成/オーナーPII送信になり得るため、MAX_GENERATE_ITEMS で
-    // サーバー側から切り詰める(=無制限にするには propertyIds を必須にする・Codex P1)。
-    const uncapped = !!(body.propertyIds && body.propertyIds.length > 0);
+    // 1回の生成は MAX_GENERATE_ITEMS(=50)件まで(同期生成ゆえ、大量一括はタイムアウト/冪等の失効による二重課金の
+    // リスク・Codex R4)。両経路とも生成は下の generateLetters max で50に切り詰め、超過分は truncated で通知する。
+    // 明示選択(propertyIds)経路だけは take せず全件取得し、「対象外(住所なし等)」件数を正確に数える
+    // (filters 経路は該当が数千件になり得るので取得も take:MAX+1 で絞る)。
+    const explicitSelection = !!(body.propertyIds && body.propertyIds.length > 0);
     // whereClause は buildPropertyListWhere の where と同型(既存実装に合わせ緩い型)。mgmt短絡時は null。
     let whereClause: Awaited<ReturnType<typeof buildPropertyListWhere>>["where"] | null;
     let orderBy: ReturnType<typeof buildPropertyListOrderBy> = { updatedAt: "desc" };
@@ -128,8 +129,9 @@ export async function POST(request: NextRequest) {
         },
       },
       orderBy,
-      // filters 経路は上限で切り詰める(+1 で truncated 検出)。propertyIds 経路は take しない(配列上限2000が実質ガード)。
-      take: uncapped ? undefined : MAX_GENERATE_ITEMS + 1,
+      // 明示選択(propertyIds)は take せず全件取得(対象外件数を正確に数えるため・生成は下で max=50 に切詰)。
+      // filters 経路は該当多数になり得るので take:MAX+1(+1 は truncated 検出用)。
+      take: explicitSelection ? undefined : MAX_GENERATE_ITEMS + 1,
     });
 
     const { recipients, meta } = buildRecipientsFromProperties(
@@ -176,7 +178,7 @@ export async function POST(request: NextRequest) {
     let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
     let truncated: boolean;
     try {
-      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg), max: uncapped ? undefined : MAX_GENERATE_ITEMS });
+      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg), max: MAX_GENERATE_ITEMS });
       drafts = result.drafts;
       truncated = result.truncated;
 
