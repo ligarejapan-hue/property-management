@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
+  Link2,
   Building2,
   Building,
   Users,
@@ -146,6 +147,13 @@ const dataQualityNavItems: NavItem[] = [
     icon: <UserCog className="h-5 w-5" />,
   },
   {
+    // 法人番号の作業場所(所有者補正候補内のタブ)への直行ショートカット。
+    // href にクエリを含むため isActive(パス名比較)では光らない=補正候補側が光る(意図どおり)。
+    label: "法人番号紐づけ",
+    href: "/admin/owners/correction?tab=corporate_restore",
+    icon: <Link2 className="h-5 w-5" />,
+  },
+  {
     label: "表示名監査",
     href: "/admin/display-name-audit",
     icon: <ScanSearch className="h-5 w-5" />,
@@ -161,7 +169,7 @@ const dataQualityNavItems: NavItem[] = [
     icon: <ScanText className="h-5 w-5" />,
   },
   {
-    label: "品質監査",
+    label: "氏名・連絡先チェック",
     href: "/admin/owners/quality-audit",
     icon: <ClipboardCheck className="h-5 w-5" />,
   },

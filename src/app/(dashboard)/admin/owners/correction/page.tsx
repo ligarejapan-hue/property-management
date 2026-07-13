@@ -195,6 +195,24 @@ function OwnerCorrectionPageInner() {
   );
   const [duplicateSubFilter, setDuplicateSubFilterState] =
     useState<DuplicateSubFilter>(initialDupSub);
+
+  // サイドバー「法人番号紐づけ」など、このページを表示したまま「クエリだけ変わる」遷移でも
+  // タブを追従させる(App Router の soft navigation では再マウントされず initialTab が
+  // 効かないため)。effect内setStateはlint(react-hooks/set-state-in-effect)が禁止する
+  // ので、React公式の「レンダー中の状態調整」パターンで URL 変更を検知して同期する。
+  // 自前の setFilterType 由来の URL 変更は同値になるため無限ループしない。
+  const urlTab = parseFilterTypeFromQuery(searchParams?.get("tab") ?? null);
+  const [syncedUrlTab, setSyncedUrlTab] = useState<FilterType>(urlTab);
+  if (urlTab !== syncedUrlTab) {
+    setSyncedUrlTab(urlTab);
+    setFilterTypeState(urlTab);
+    // dup は duplicate タブ専用(setFilterType 内の同期方針と同じ)。
+    setDuplicateSubFilterState(
+      urlTab === "duplicate"
+        ? parseDuplicateSubFilterFromQuery(searchParams?.get("dup") ?? null)
+        : "all",
+    );
+  }
   const [data, setData] = useState<OwnerCorrectionCandidatesResponse | null>(
     null,
   );

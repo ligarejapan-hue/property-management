@@ -417,10 +417,10 @@ export default function QualityAuditPage() {
           管理
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900 dark:text-gray-100">所有者品質監査</span>
+        <span className="text-gray-900 dark:text-gray-100">氏名・連絡先チェック</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">所有者品質監査</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">氏名・連絡先チェック</h1>
       <p className="text-sm text-gray-500 mb-6 dark:text-gray-400">
         所有者の氏名・氏名カナ（DQ-01）と郵便番号・電話（DQ-02）について、品質に問題がある値を
         一覧します。サーバ側でマスクされた値のみ表示します。各行はプレビュー→適用で補正できます
