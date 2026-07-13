@@ -10,7 +10,10 @@
  *  - 氏名: "株式会社〇〇会社法人等番号０１２４－０１－０"(会社名+尻切れ断片)
  */
 import { describe, it, expect } from "vitest";
-import { detectSplitCorporateOwner } from "../corporate-number-restore";
+import {
+  detectSplitCorporateOwner,
+  repairSplitCorporateImportRow,
+} from "../corporate-number-restore";
 
 describe("detectSplitCorporateOwner: 住所+氏名 分断型(address_name_split)", () => {
   it("実データ形状(全角7桁+全角5桁)を12桁に復元し13桁を算出する", () => {
@@ -159,5 +162,111 @@ describe("優先順位: 分断型が成立するときは分断型を返す", ()
       address: "東京都会社法人等番号0110-01-0",
     });
     expect(r!.type).toBe("address_name_split");
+  });
+});
+
+describe("detectSplitCorporateOwner: 番号あり氏名欠落型(number_set_name_lost)", () => {
+  it("氏名が数字のみ+corporateNumber設定済(CD正)なら検出する", () => {
+    const r = detectSplitCorporateOwner({
+      name: "５９４４２",
+      address: "東京都渋谷区渋谷二丁目１７番１号", // 断片は除去済み(取込ガード後)
+      corporateNumber: "4011001059442", // 011001059442 の正CD=4
+    });
+    expect(r).not.toBeNull();
+    expect(r!.type).toBe("number_set_name_lost");
+    expect(r!.corporateNumber13).toBe("4011001059442");
+    expect(r!.companyRegistryNumber12).toBe("011001059442");
+    expect(r!.cleanedName).toBeNull();
+    expect(r!.cleanedAddress).toBeNull();
+  });
+
+  it("住所末尾に断片が残っている場合は分断型を優先する", () => {
+    const r = detectSplitCorporateOwner({
+      name: "５９４４２",
+      address: "東京都渋谷区…会社法人等番号０１１０－０１－０",
+      corporateNumber: "4011001059442",
+    });
+    expect(r!.type).toBe("address_name_split");
+  });
+
+  it("corporateNumberのチェックデジットが不正なら検出しない", () => {
+    const r = detectSplitCorporateOwner({
+      name: "５９４４２",
+      address: "東京都渋谷区1-1",
+      corporateNumber: "9011001059442", // CD不一致
+    });
+    expect(r).toBeNull();
+  });
+
+  it("氏名が数字でなければ検出しない(正常な法人)", () => {
+    const r = detectSplitCorporateOwner({
+      name: "株式会社テスト商事",
+      address: "東京都渋谷区1-1",
+      corporateNumber: "4011001059442",
+    });
+    expect(r).toBeNull();
+  });
+
+  it("corporateNumber未指定(既存呼び出し)では検出しない(後方互換)", () => {
+    const r = detectSplitCorporateOwner({
+      name: "５９４４２",
+      address: "東京都渋谷区1-1",
+    });
+    expect(r).toBeNull();
+  });
+});
+
+describe("repairSplitCorporateImportRow: 取込ガード(純関数)", () => {
+  it("分断型: 番号を復元し住所から断片を除去する(氏名は数字のまま=復元タブで照会)", () => {
+    const r = repairSplitCorporateImportRow({
+      name: "５９４４２",
+      address:
+        "東京都渋谷区渋谷二丁目１７番１号渋谷アクシュ２１Ｆ会社法人等番号０１１０－０１－０",
+    });
+    expect(r.repairedType).toBe("address_name_split");
+    expect(r.companyRegistryNumber12).toBe("011001059442");
+    expect(r.corporateNumber13).toMatch(/^\d{13}$/);
+    expect(r.address).toBe(
+      "東京都渋谷区渋谷二丁目１７番１号渋谷アクシュ２１Ｆ",
+    );
+    expect(r.name).toBe("５９４４２"); // 会社名は取込時点では不明(照会しない)
+  });
+
+  it("断片型: 氏名から断片を除去して会社名を救出する", () => {
+    const r = repairSplitCorporateImportRow({
+      name: "株式会社テスト商事会社法人等番号０１２４－０１－０",
+      address: "東京都中央区銀座1-1-1",
+    });
+    expect(r.repairedType).toBe("name_fragment");
+    expect(r.name).toBe("株式会社テスト商事");
+    expect(r.address).toBe("東京都中央区銀座1-1-1");
+    expect(r.corporateNumber13).toBeNull();
+  });
+
+  it("断片型で会社名が空(ラベルのみ氏名)なら修復しない(原文のまま取込)", () => {
+    const r = repairSplitCorporateImportRow({
+      name: "会社法人等番号２９００－０１－０",
+      address: "北海道札幌市1-1",
+    });
+    expect(r.repairedType).toBeNull();
+    expect(r.name).toBe("会社法人等番号２９００－０１－０");
+  });
+
+  it("正常な行はそのまま通す", () => {
+    const r = repairSplitCorporateImportRow({
+      name: "田中一郎",
+      address: "東京都千代田区1-1",
+    });
+    expect(r.repairedType).toBeNull();
+    expect(r.name).toBe("田中一郎");
+    expect(r.address).toBe("東京都千代田区1-1");
+    expect(r.corporateNumber13).toBeNull();
+    expect(r.companyRegistryNumber12).toBeNull();
+  });
+
+  it("address null でも安全", () => {
+    const r = repairSplitCorporateImportRow({ name: "５９４４２", address: null });
+    expect(r.repairedType).toBeNull();
+    expect(r.address).toBeNull();
   });
 });

@@ -103,6 +103,14 @@ const NORMAL_OWNER = {
   address: "東京都千代田区1-1",
   version: 1,
 };
+// 取込ガード適用後: 番号は復元済みだが会社名が数字のまま(第3型)
+const NAME_LOST_OWNER = {
+  id: "55555555-5555-4555-8555-555555555555",
+  name: "５９４４２",
+  address: "東京都渋谷区渋谷二丁目１７番１号",
+  corporateNumber: "4011001059442",
+  version: 4,
+};
 
 function req() {
   return new Request("http://t/api/x") as never;
@@ -118,6 +126,7 @@ beforeEach(() => {
     FRAGMENT_OWNER,
     FRAGMENT_NO_NAME_OWNER,
     NORMAL_OWNER,
+    NAME_LOST_OWNER,
   ]);
 });
 
@@ -149,13 +158,14 @@ describe("認可", () => {
 });
 
 describe("検出と応答", () => {
-  it("分断型・断片型を検出し、通常の所有者は含めない", async () => {
+  it("分断型・断片型・番号あり氏名欠落型を検出し、通常の所有者は含めない", async () => {
     const res = await GET(req());
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.rows).toHaveLength(3);
+    expect(body.rows).toHaveLength(4);
     const types = body.rows.map((r: { type: string }) => r.type);
     expect(types).toContain("address_name_split");
+    expect(types).toContain("number_set_name_lost");
     expect(types.filter((t: string) => t === "name_fragment")).toHaveLength(2);
     expect(
       body.rows.find(
@@ -196,7 +206,24 @@ describe("検出と応答", () => {
   it("summary に種別件数を返す", async () => {
     const res = await GET(req());
     const body = await res.json();
-    expect(body.summary).toEqual({ split: 1, fragment: 2, total: 3 });
+    expect(body.summary).toEqual({
+      split: 1,
+      fragment: 2,
+      nameLost: 1,
+      total: 4,
+    });
+  });
+
+  it("番号あり氏名欠落型は既存13桁を返し eligible=true", async () => {
+    const res = await GET(req());
+    const body = await res.json();
+    const row = body.rows.find(
+      (r: { ownerId: string }) => r.ownerId === NAME_LOST_OWNER.id,
+    );
+    expect(row.type).toBe("number_set_name_lost");
+    expect(row.corporate13Masked).toBe("4011001059442"); // full権限=生値
+    expect(row.registry12Masked).toBe("011001059442");
+    expect(row.eligible).toBe(true);
   });
 
   it("corporateNumber=masked のとき復元番号はマスクされる(先頭4桁+***)", async () => {

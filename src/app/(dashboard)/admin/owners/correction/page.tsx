@@ -2040,7 +2040,7 @@ function CorporateRestorePanel() {
                             {row.registry12Masked ?? "—"}
                           </td>
                           <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
-                            {row.type === "address_name_split"
+                            {row.type !== "name_fragment"
                               ? "国税庁に照会して会社名と住所を復元"
                               : row.eligible && row.cleanedNameMasked
                                 ? "氏名を「" + row.cleanedNameMasked + "」に修正"

@@ -780,3 +780,22 @@ describe("sanitizeAuditDetail: 法人番号復元(corporate-restore)の action �
     expect(out.addressMode).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: 取込ガード(corporateRepair)のサマリ", () => {
+  it.each(["reception_owner_csv_import", "owner_csv_import"])(
+    "%s: corporateRepair {split, fragment} を保持する",
+    (action) => {
+      const out = sanitizeAuditDetail(action, {
+        corporateRepair: { split: 3, fragment: 1 },
+      }) as Record<string, unknown>;
+      expect(out.corporateRepair).toEqual({ split: 3, fragment: 1 });
+    },
+  );
+
+  it("他 action では corporateRepair は保持されない", () => {
+    const out = sanitizeAuditDetail("owner_create", {
+      corporateRepair: { split: 1, fragment: 0 },
+    }) as Record<string, unknown>;
+    expect(out.corporateRepair).toBe(REDACTED);
+  });
+});

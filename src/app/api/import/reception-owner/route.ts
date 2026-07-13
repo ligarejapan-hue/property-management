@@ -37,6 +37,12 @@ import {
   appendImportMessage,
   type CorporateImportDecision,
 } from "@/lib/owner-corporate-import";
+import {
+  repairSplitCorporateImportRow,
+  emptyCorporateRepairSummary,
+  tallyCorporateRepair,
+  type CorporateRepairSummary,
+} from "@/lib/corporate-number-restore";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の本実行。
 // - 一意特定できた行だけ反映。それ以外は needs_review で記録。
@@ -199,6 +205,8 @@ export async function POST(request: NextRequest) {
     let ownerLinkedCount = 0;
     // Phase D: 法人番号自動検出のサマリ（AuditLog detail に非PIIで残す）
     const corporateSummary = emptyCorporateImportSummary();
+    // 取込ガード: 割れた会社法人等番号の修復件数(非PII・audit detail 用)
+    const corporateRepairSummary = emptyCorporateRepairSummary();
 
     for (const c of combined) {
       const reason = getReviewReason(c);
@@ -332,6 +340,7 @@ export async function POST(request: NextRequest) {
                 rowCorporateMessage = appendImportMessage(rowCorporateMessage, msg);
               }
             },
+            corporateRepairSummary,
           );
           if (!ownerId) {
             // name が無ければスキップ（owner 側要件）
@@ -418,6 +427,8 @@ export async function POST(request: NextRequest) {
         ownerLinkedCount,
         // Phase D: 法人番号自動検出のサマリ。生値・会社名・住所・候補リストは含めない。
         corporateNumber: corporateSummary,
+        // 取込ガード: 割れた会社法人等番号の修復件数(split/fragment・非PII)。
+        corporateRepair: corporateRepairSummary,
       },
     });
 
@@ -448,10 +459,23 @@ async function upsertOwnerAndLink(
   onOwnerCreated: () => void,
   onPropertyLinked: () => void,
   onCorporateDecision?: (decision: CorporateImportDecision) => void, // Phase D
+  repairSummary?: CorporateRepairSummary, // 取込ガード: 修復件数の集計(非PII)
 ): Promise<string | null> {
-  const name = nullIfBlank(o.name);
-  if (!name) return null; // 氏名がない行は所有者レコードを作れないのでスキップ
-  const address = nullIfBlank(o.address);
+  const rawName = nullIfBlank(o.name);
+  if (!rawName) return null; // 氏名がない行は所有者レコードを作れないのでスキップ
+
+  // 取込ガード: exe由来Excelで割れた会社法人等番号を、既存判定・作成より前に修復する。
+  // 分断型=住所からラベル+断片を除去し12/13桁を復元(氏名の数字は国税庁照会で後から
+  // 会社名に復元できるよう「法人番号復元」タブが拾う)。断片型=氏名から断片を除去。
+  const repair = repairSplitCorporateImportRow({
+    name: rawName,
+    address: nullIfBlank(o.address),
+  });
+  if (repair.repairedType && repairSummary) {
+    tallyCorporateRepair(repairSummary, repair.repairedType);
+  }
+  const name = repair.name;
+  const address = repair.address;
   const zip = nullIfBlank(o.zip);
 
   // 既存 Owner 検索: name + address → name のみ。
@@ -565,6 +589,18 @@ async function upsertOwnerAndLink(
         if (cnUpdate.count === 0) {
           effectiveDecision = { action: "noop", corporateNumber: null };
         }
+      } else if (repair.corporateNumber13) {
+        // 取込ガード: 分断型で復元した12/13桁を、既存 owner が未設定の場合のみ埋める
+        // (cnDecision と同じ corporateNumber:null レースガード。既存値は上書きしない)。
+        await prisma.owner.updateMany({
+          where: { id: candidateOwnerId!, corporateNumber: null },
+          data: {
+            corporateNumber: repair.corporateNumber13,
+            ...(repair.companyRegistryNumber12
+              ? { companyRegistryNumber: repair.companyRegistryNumber12 }
+              : {}),
+          },
+        });
       }
       if (onCorporateDecision) onCorporateDecision(effectiveDecision);
       return candidateOwnerId;
@@ -585,8 +621,15 @@ async function upsertOwnerAndLink(
       name,
       ...(address ? { address } : {}),
       ...(zip ? { zip } : {}),
+      // 13桁の採用優先度: テキスト検出(cnDecision) > 取込ガードの復元値。
+      // (両方が同時に成立するデータ形状は実務上ないが、既存挙動を優先する)
       ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
         ? { corporateNumber: cnDecisionForCreate.corporateNumber }
+        : repair.corporateNumber13
+          ? { corporateNumber: repair.corporateNumber13 }
+          : {}),
+      ...(repair.companyRegistryNumber12
+        ? { companyRegistryNumber: repair.companyRegistryNumber12 }
         : {}),
     },
     select: { id: true },

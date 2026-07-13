@@ -312,6 +312,55 @@ describe("分断型の反映", () => {
   });
 });
 
+describe("番号あり氏名欠落型の反映(取込ガード適用後のレコード)", () => {
+  const NAME_LOST_ID = "55555555-5555-4555-8555-555555555555";
+  const NAME_LOST_OWNER = {
+    id: NAME_LOST_ID,
+    name: "５９４４２",
+    address: "東京都渋谷区渋谷二丁目１７番１号",
+    zip: null,
+    corporateNumber: "4011001059442",
+    companyRegistryNumber: null,
+    version: 4,
+    isArchived: false,
+  };
+
+  beforeEach(() => {
+    p.owner.findUnique.mockResolvedValue(NAME_LOST_OWNER);
+  });
+
+  it("既存13桁で国税庁照会し、会社名を復元する(番号は不変・12桁は補完)", async () => {
+    const res = await POST(req([{ ownerId: NAME_LOST_ID, version: 4 }], "nta"));
+    const body = await res.json();
+    expect(body.results[0].status).toBe("applied");
+    expect(lookupMock).toHaveBeenCalledWith("4011001059442");
+    const call = p.owner.updateMany.mock.calls[0][0];
+    expect(call.where).toEqual({
+      id: NAME_LOST_ID,
+      version: 4,
+      corporateNumber: "4011001059442",
+    });
+    expect(call.data.name).toBe("株式会社リガーレ商事");
+    expect(call.data.companyRegistryNumber).toBe("011001059442");
+    // ChangeLog: 変わらない corporateNumber は old/new に載せない
+    const arg = recordChangesMock.mock.calls[0][0];
+    expect(arg.newValues).not.toHaveProperty("corporateNumber");
+    expect(arg.newValues.companyRegistryNumber).toBe("011001059442");
+    expect(arg.newValues.name).toBe("株式会社リガーレ商事");
+  });
+
+  it("addressMode=cleaned では住所を触らない(元々断片なし)", async () => {
+    const res = await POST(
+      req([{ ownerId: NAME_LOST_ID, version: 4 }], "cleaned"),
+    );
+    const body = await res.json();
+    expect(body.results[0].status).toBe("applied");
+    const call = p.owner.updateMany.mock.calls[0][0];
+    expect(call.data).not.toHaveProperty("address");
+    expect(call.data).not.toHaveProperty("zip");
+  });
+});
+
 describe("断片型の反映(lookupなし)", () => {
   beforeEach(() => {
     p.owner.findUnique.mockResolvedValue(FRAG_OWNER);
