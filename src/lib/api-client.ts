@@ -440,6 +440,52 @@ export async function updateSaleDmSettings(body: {
   });
 }
 
+// ---------- 会社情報(会社帯・管理者設定) ----------
+
+export interface CompanyProfileSettings {
+  nameJa: string;
+  license: string;
+  tel: string;
+  fax: string;
+  email: string;
+  hp: string;
+  address: string;
+  updatedAt: string | null;
+}
+
+export const EMPTY_COMPANY_PROFILE_SETTINGS: CompanyProfileSettings = {
+  nameJa: "", license: "", tel: "", fax: "", email: "", hp: "", address: "", updatedAt: null,
+};
+
+export async function fetchCompanySettings(): Promise<{ data: CompanyProfileSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_COMPANY_PROFILE_SETTINGS } };
+  }
+  return apiFetch<{ data: CompanyProfileSettings }>("/api/admin/company-settings");
+}
+
+// 部分更新。空文字=クリア(→既定 COMPANY_INFO へフォールバック)・未指定=現状維持。
+export async function updateCompanySettings(body: {
+  nameJa?: string;
+  license?: string;
+  tel?: string;
+  fax?: string;
+  email?: string;
+  hp?: string;
+  address?: string;
+}): Promise<{ data: CompanyProfileSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_COMPANY_PROFILE_SETTINGS } };
+  }
+  return apiFetch<{ data: CompanyProfileSettings }>("/api/admin/company-settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------- 謄本取得の資格情報(登記情報提供サービス・管理者設定) ----------
 
 export interface RegistrySettings {
