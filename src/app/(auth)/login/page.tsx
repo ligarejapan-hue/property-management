@@ -15,6 +15,23 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
+/**
+ * callbackUrl(A3の再ログイン導線)を同一オリジンの内部パスに限定する(オープンリダイレクト防止・@codex R3/R4)。
+ * "/\evil.com"(バックスラッシュ→ブラウザが // に正規化)や "//"(プロトコル相対)、外部URLは、
+ * origin 付きで URL を構築し同一オリジン判定することで確実に弾く。
+ */
+function safeInternalDest(raw: string | null): string {
+  const fallback = "/properties";
+  if (!raw) return fallback;
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (url.origin === window.location.origin) return url.pathname + url.search + url.hash;
+  } catch {
+    // 無効な URL は無視してフォールバック
+  }
+  return fallback;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -42,11 +59,9 @@ export default function LoginPage() {
       if (result?.error) {
         setError("メールアドレスまたはパスワードが正しくありません");
       } else {
-        // ログイン必須画面からの再ログイン誘導(A3)で付く callbackUrl を尊重し、元の画面へ戻す。
-        // オープンリダイレクト防止: 同一サイト内の絶対パス("/..." かつ "//"(プロトコル相対)始まりでない)のみ許可(@codex R3)。
+        // ログイン必須画面からの再ログイン誘導(A3)で付く callbackUrl を尊重し、元の画面へ戻す(@codex R3/R4)。
         const cb = new URLSearchParams(window.location.search).get("callbackUrl");
-        const dest = cb && cb.startsWith("/") && !cb.startsWith("//") ? cb : "/properties";
-        router.push(dest);
+        router.push(safeInternalDest(cb));
       }
     } catch {
       setError("ログイン中にエラーが発生しました");

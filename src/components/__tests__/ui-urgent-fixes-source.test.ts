@@ -27,9 +27,9 @@ describe("A3: 認証レイアウトのフォールバック(dashboard-layout)", 
 describe("A3(補強): ログイン成功後は callbackUrl(同一サイト内)へ戻す(@codex R3)", () => {
   const src = read("src/app/(auth)/login/page.tsx");
 
-  it("callbackUrl を読み、オープンリダイレクトを防いで元の画面へ戻す", () => {
+  it("callbackUrl を同一オリジンに限定してオープンリダイレクトを防ぐ(@codex R3/R4)", () => {
     expect(src).toContain('get("callbackUrl")');
-    expect(src).toContain('!cb.startsWith("//")'); // プロトコル相対 URL を弾く
+    expect(src).toContain("url.origin === window.location.origin"); // バックスラッシュ/プロトコル相対も確実に弾く
   });
 });
 
