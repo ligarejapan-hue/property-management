@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 import {
   fetchCompanySettings,
@@ -26,14 +26,27 @@ export default function CompanySettingsPage() {
   const [hp, setHp] = useState("");
   const [address, setAddress] = useState("");
 
+  // 読み込み時(既定フォールバック済み)の値。保存時にここから変わった項目だけを送る基準。
+  const loaded = useRef({ nameJa: "", license: "", tel: "", fax: "", email: "", hp: "", address: "" });
+
   const applySettings = (d: CompanyProfileSettings) => {
-    setNameJa(d.nameJa ?? "");
-    setLicense(d.license ?? "");
-    setTel(d.tel ?? "");
-    setFax(d.fax ?? "");
-    setEmail(d.email ?? "");
-    setHp(d.hp ?? "");
-    setAddress(d.address ?? "");
+    const v = {
+      nameJa: d.nameJa ?? "",
+      license: d.license ?? "",
+      tel: d.tel ?? "",
+      fax: d.fax ?? "",
+      email: d.email ?? "",
+      hp: d.hp ?? "",
+      address: d.address ?? "",
+    };
+    setNameJa(v.nameJa);
+    setLicense(v.license);
+    setTel(v.tel);
+    setFax(v.fax);
+    setEmail(v.email);
+    setHp(v.hp);
+    setAddress(v.address);
+    loaded.current = v;
   };
 
   useEffect(() => {
@@ -54,7 +67,16 @@ export default function CompanySettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const res = await updateCompanySettings({ nameJa, license, tel, fax, email, hp, address });
+      // 変更した項目だけ送る(PUT は部分更新: 未指定=触らない)。未変更の項目を送らないことで、
+      // 空(null)で既定 COMPANY_INFO を継承している列を、無関係な保存で既定文字列に焼き固めて
+      // しまい以後の既定変更を継承できなくなるのを防ぐ(@codex #278 P2)。
+      const current = { nameJa, license, tel, fax, email, hp, address };
+      const base = loaded.current;
+      const payload: Partial<typeof current> = {};
+      (Object.keys(current) as (keyof typeof current)[]).forEach((k) => {
+        if (current[k] !== base[k]) payload[k] = current[k];
+      });
+      const res = await updateCompanySettings(payload);
       applySettings(res.data);
       setMessage({ kind: "ok", text: "会社情報を保存しました" });
     } catch (e) {
