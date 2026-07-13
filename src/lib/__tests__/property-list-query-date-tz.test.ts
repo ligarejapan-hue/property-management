@@ -33,4 +33,10 @@ describe("buildPropertyListWhere: 更新日フィルタは JST 境界(A1)", () =
     const { where } = await buildPropertyListWhere(q, session);
     expect(where.updatedAt).toBeUndefined();
   });
+
+  it("暦として不正な日(2026-02-31=形式は妥当だが存在しない)は無視する(@codex R1)", async () => {
+    const q = propertyListQuerySchema.parse({ updatedFrom: "2026-02-31" });
+    const { where } = await buildPropertyListWhere(q, session);
+    expect(where.updatedAt).toBeUndefined();
+  });
 });

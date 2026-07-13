@@ -34,11 +34,15 @@ export interface BuildPropertyListWhereResult {
   mgmtIdTrimmed: string;
 }
 
-/** "YYYY-MM-DD" を JST(+09:00)の指定時刻の Date にする。日付でない/不正な日付は null(=フィルタ無効)。 */
+/** "YYYY-MM-DD" を JST(+09:00)の指定時刻の Date にする。日付でない/暦として不正な日付は null(=フィルタ無効)。 */
 function jstDayBoundary(day: string | undefined, time: string): Date | null {
   if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   const dt = new Date(`${day}T${time}+09:00`);
-  return Number.isNaN(dt.getTime()) ? null : dt;
+  if (Number.isNaN(dt.getTime())) return null;
+  // JS は 2026-02-31 を 3 月へ繰り上げてしまう。JST の年月日が入力と一致するか往復検証し、不正な暦日は無視する(@codex R1)。
+  const jst = new Date(dt.getTime() + 9 * 60 * 60 * 1000); // +09:00 平行移動して UTC ゲッターで JST 暦日を読む
+  const roundTrip = `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, "0")}-${String(jst.getUTCDate()).padStart(2, "0")}`;
+  return roundTrip === day ? dt : null;
 }
 
 /**

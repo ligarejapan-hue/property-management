@@ -4,6 +4,8 @@ import {
   normalizeCorporateNumber,
   normalizeCompanyRegistryNumber,
 } from "@/lib/corporate-number";
+import { isValidPostalCode } from "@/lib/address-lookup/normalize";
+import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import {
   FIELD_SURVEY_MEMO_MAX_LEN,
   FIELD_SURVEY_PIN_TYPES,
@@ -115,12 +117,14 @@ const optionalPostalCode = z
   .string()
   .optional()
   .nullable()
-  .refine((v) => v == null || v === "" || /^\d{3}-?\d{4}$/.test(v), "郵便番号は7桁の数字で入力してください(例: 1000001 / 100-0001)");
+  // 全角数字/空白/各種ダッシュも許容(import・住所補完と同じ isValidPostalCode で判定)。生値でなく正規化後を検査(@codex R1)。
+  .refine((v) => v == null || v === "" || isValidPostalCode(v), "郵便番号は7桁の数字で入力してください(例: 1000001 / 100-0001)");
 const optionalRealEstateNumber = z
   .string()
   .optional()
   .nullable()
-  .refine((v) => v == null || v === "" || /^\d{1,13}$/.test(v), "不動産番号は数字(最大13桁)で入力してください");
+  // 全角→半角・区切り除去した後の数字が1〜13桁か(import と同じ normalizeRealEstateNumber)。かな等の混入は空になり弾く(@codex R1)。
+  .refine((v) => v == null || v === "" || /^\d{1,13}$/.test(normalizeRealEstateNumber(v)), "不動産番号は数字(最大13桁)で入力してください");
 const optionalLatitude = z.number().min(-90, "緯度は -90〜90 の範囲で入力してください").max(90, "緯度は -90〜90 の範囲で入力してください").optional().nullable();
 const optionalLongitude = z.number().min(-180, "経度は -180〜180 の範囲で入力してください").max(180, "経度は -180〜180 の範囲で入力してください").optional().nullable();
 

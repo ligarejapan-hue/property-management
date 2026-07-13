@@ -13,6 +13,12 @@ describe("createPropertySchema: 物件の入力バリデーション(A2)", () =>
     expect(() => createPropertySchema.parse({ ...base, postalCode: null, gpsLat: null })).not.toThrow();
   });
 
+  it("全角・スペース入りの郵便番号/不動産番号は正規化して通す(import・住所補完と一貫・@codex R1)", () => {
+    expect(() => createPropertySchema.parse({ ...base, postalCode: "１００−０００１" })).not.toThrow();
+    expect(() => createPropertySchema.parse({ ...base, postalCode: "100 0001" })).not.toThrow();
+    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "１２３" })).not.toThrow();
+  });
+
   it("不正な郵便番号を弾く", () => {
     expect(() => createPropertySchema.parse({ ...base, postalCode: "abc-de!" })).toThrow();
     expect(() => createPropertySchema.parse({ ...base, postalCode: "123" })).toThrow();
