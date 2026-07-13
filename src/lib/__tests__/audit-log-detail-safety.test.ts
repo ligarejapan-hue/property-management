@@ -733,4 +733,17 @@ describe("sanitizeAuditDetail: 設定更新監査の target/changed を保持(@c
     expect(out.changed).toEqual(["loginId", "password"]);
     expect(out.password).toBe(REDACTED);
   });
+
+  it("company_profile_update は target(singleton)/fields を保持・値混入は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("company_profile_update", {
+      target: "singleton",
+      fields: ["nameJa", "tel", "address"],
+      nameJa: "株式会社リガーレジャパン",
+      tel: "03-0000-0000",
+    }) as Record<string, unknown>;
+    expect(out.target).toBe("singleton");
+    expect(out.fields).toEqual(["nameJa", "tel", "address"]);
+    expect(out.nameJa).toBe(REDACTED);
+    expect(out.tel).toBe(REDACTED);
+  });
 });

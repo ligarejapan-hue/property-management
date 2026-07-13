@@ -174,6 +174,10 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 謄本取得の資格情報 設定更新(管理画面)。target=対象識別子("singleton")・changed=変更した
   // フィールド名の配列(値ではない)。資格情報(ID/PW)の値は detail に載せず、混入しても denylist で [REDACTED]。
   registry_settings_update: new Set(["target", "changed"]),
+  // 会社情報 設定更新(管理画面)。target=対象識別子("singleton")・fields=変更したフィールド名の配列
+  // (値ではない・ALWAYS_SAFE)・updatedAt=ISO日時。会社情報の値そのものは detail に載せず、
+  // 混入しても denylist(/name/i,/addr/i,tel,fax,mail 等)で [REDACTED]。
+  company_profile_update: new Set(["target", "updatedAt"]),
   // 表示名監査（read-only レポート）の閲覧/CSV 出力監査。detail は操作事実の
   // 非PIIメタデータのみ（entity/format=enum・viewedAt=ISO日時・各種件数/真偽）。
   // owner-prefixed な件数/真偽（ownerGroupCount/ownerTruncated/ownerNameVisible）は
