@@ -7,11 +7,16 @@ import {
   fetchOwnerCorrectionCandidates,
   fetchCorporateCandidates,
   bulkApplyCorporateNumbers,
+  fetchCorporateRestoreCandidates,
+  applyCorporateRestore,
   type OwnerCorrectionCandidate,
   type OwnerCorrectionCandidatesResponse,
   type CorporateCandidateFilterType,
   type CorporateCandidateRowDTO,
   type CorporateCandidatesResponse,
+  type CorporateRestoreCandidatesResponse,
+  type CorporateRestoreAddressMode,
+  type CorporateRestoreApplyStatus,
 } from "@/lib/api-client";
 import {
   MAX_CORPORATE_BULK,
@@ -23,6 +28,17 @@ import {
   BULK_STATUS_LABEL,
   type BulkResultSummary,
 } from "@/lib/corporate-bulk-ui";
+import {
+  MAX_CORPORATE_RESTORE,
+  isRestoreEligible,
+  eligibleRestoreIds,
+  canSubmitRestore,
+  buildRestorePayload,
+  summarizeRestoreResults,
+  RESTORE_STATUS_LABEL,
+  RESTORE_TYPE_LABEL,
+  type RestoreResultSummary,
+} from "@/lib/corporate-restore-ui";
 import { AddressFillButton } from "@/components/owners/AddressFillButton";
 import { OwnerArchiveButton } from "@/components/owners/OwnerArchiveButton";
 import { OwnerMergePreviewButton } from "@/components/owners/OwnerMergePreviewButton";
@@ -46,10 +62,15 @@ type FilterType =
   | "address_null"
   | "duplicate"
   | "corporate_number"
+  | "corporate_restore"
   | "registry_address";
 
 // DQ-03: 自前 API で self-fetch するタブ（上位の data 駆動 fetch/描画から除外する）。
-const SELF_FETCH_TABS: FilterType[] = ["corporate_number", "registry_address"];
+const SELF_FETCH_TABS: FilterType[] = [
+  "corporate_number",
+  "corporate_restore",
+  "registry_address",
+];
 
 // Phase 2-A: duplicate タブ内のサブフィルタ。matchedBy で絞り込む。
 // "all" は経路を問わず duplicate 全件、各 matchedBy はそれぞれの経路のみ。
@@ -139,6 +160,7 @@ function parseFilterTypeFromQuery(value: string | null): FilterType {
     case "address_null":
     case "duplicate":
     case "corporate_number":
+    case "corporate_restore":
     case "registry_address":
     case "all":
       return value;
@@ -285,6 +307,8 @@ function OwnerCorrectionPageInner() {
     },
     // Phase E: 法人番号タブ。件数は子コンポーネント側 fetch のため上位では表示しない。
     { key: "corporate_number", label: "法人番号" },
+    // 割れた会社法人等番号の復元タブ。件数は子コンポーネント側 fetch。
+    { key: "corporate_restore", label: "法人番号復元" },
     // DQ-03: 住所の登記文字列タブ。件数は子コンポーネント側 fetch。
     { key: "registry_address", label: "住所の登記文字列" },
   ];
@@ -332,6 +356,7 @@ function OwnerCorrectionPageInner() {
       )}
 
       {filterType === "corporate_number" && <CorporateNumberCandidatesPanel />}
+      {filterType === "corporate_restore" && <CorporateRestorePanel />}
       {filterType === "registry_address" && <RegistryAddressCandidatesPanel />}
 
       {!SELF_FETCH_TABS.includes(filterType) && data && !loading && (
@@ -1707,6 +1732,349 @@ function RegistryAddressCandidatesPanel() {
               次へ
             </button>
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 法人番号復元タブ: 取込で割れた会社法人等番号(12桁)の一括復元。
+//
+// 外部ツール由来の所有者Excelでは、登記PDFの折返しにより会社法人等番号が
+//   - 住所末尾に前半断片 + 氏名に後半数字のみ(分断型: 12桁を復元→国税庁照会で
+//     会社名・住所ごと復活できる)
+//   - 氏名が「会社名+ラベル+尻切れ断片」(断片型: 会社名の救出のみ)
+// の形で壊れて取り込まれることがある。検出・復元・照会はすべて server 側で
+// 再実行され、client からは {ownerId, version} と住所モードだけを送る。
+// ─────────────────────────────────────────────────────────────────────────────
+function CorporateRestorePanel() {
+  const [data, setData] =
+    useState<CorporateRestoreCandidatesResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 選択は ownerId(uuid=非PII) のみ保持。住所モードは全選択行に共通で適用する。
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [addressMode, setAddressMode] =
+    useState<CorporateRestoreAddressMode>("nta");
+  const [phase, setPhase] = useState<"idle" | "confirm">("idle");
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<RestoreResultSummary | null>(null);
+  const [rowStatuses, setRowStatuses] = useState<
+    Record<string, CorporateRestoreApplyStatus>
+  >({});
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  // stale response ガード(既存パネルと同型)。
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const load = useCallback(async () => {
+    const myReqId = ++requestIdRef.current;
+    setLoading(true);
+    setError(null);
+    setData(null);
+    setSelectedIds(new Set());
+    setPhase("idle");
+    setApplyError(null);
+    try {
+      const res = await fetchCorporateRestoreCandidates();
+      if (!mountedRef.current || myReqId !== requestIdRef.current) return;
+      setData(res);
+    } catch (e) {
+      if (!mountedRef.current || myReqId !== requestIdRef.current) return;
+      setError(e instanceof Error ? e.message : "エラーが発生しました");
+      setData(null);
+    } finally {
+      if (mountedRef.current && myReqId === requestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const rows = data?.rows ?? [];
+  const eligibleIds = eligibleRestoreIds(rows);
+  const pageSelectableIds = eligibleIds.slice(0, MAX_CORPORATE_RESTORE);
+  const allSelected =
+    pageSelectableIds.length > 0 &&
+    pageSelectableIds.every((id) => selectedIds.has(id));
+  const selectedCount = rows.filter(
+    (r) => isRestoreEligible(r) && selectedIds.has(r.ownerId),
+  ).length;
+  const atCap = selectedCount >= MAX_CORPORATE_RESTORE;
+  const payload = buildRestorePayload(rows, selectedIds);
+
+  const toggleRow = (ownerId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(ownerId)) next.delete(ownerId);
+      else if (!atCap) next.add(ownerId);
+      return next;
+    });
+    setPhase("idle");
+    setResult(null);
+  };
+
+  const toggleAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of pageSelectableIds) next.delete(id);
+      } else {
+        for (const id of pageSelectableIds) next.add(id);
+      }
+      return next;
+    });
+    setPhase("idle");
+    setResult(null);
+  };
+
+  const onConfirm = async () => {
+    if (!canSubmitRestore(payload.length)) return;
+    setSubmitting(true);
+    setApplyError(null);
+    try {
+      const res = await applyCorporateRestore(payload, addressMode);
+      const summary = summarizeRestoreResults(res.results);
+      const statuses: Record<string, CorporateRestoreApplyStatus> = {};
+      for (const r of res.results) statuses[r.ownerId] = r.status;
+      await load(); // 反映済みの行は一覧から消える(検出されなくなる)
+      if (!mountedRef.current) return;
+      setResult(summary);
+      setRowStatuses(statuses);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setApplyError(
+        e instanceof Error ? e.message : "一括復元に失敗しました",
+      );
+      setPhase("idle");
+    } finally {
+      if (mountedRef.current) setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
+        取込の際に<strong>会社法人等番号が途中で割れてしまった法人所有者</strong>
+        を検出します。割れた番号を繋ぎ直し、国税庁に照会して
+        <strong>正しい会社名(と住所)を復元</strong>できます。
+        チェックした行をまとめて復元できます(確認のうえ実行・最大{" "}
+        {MAX_CORPORATE_RESTORE} 件)。廃止法人・国税庁に該当がない行は反映せずスキップします。
+      </p>
+
+      {loading && (
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
+          読み込み中...
+        </p>
+      )}
+      {error && !loading && (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
+      {!loading && !error && data && (
+        <>
+          {result && (
+            <div className="rounded-md border border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/10 px-3 py-2 text-xs text-green-800 dark:text-green-300">
+              <span className="font-semibold">
+                {result.applied} 件を復元しました
+              </span>
+              {result.skipped > 0 && (
+                <span className="ml-2">
+                  (スキップ {result.skipped} 件:{" "}
+                  {result.byStatus
+                    .filter((s) => s.status !== "applied")
+                    .map((s) => RESTORE_STATUS_LABEL[s.status] + " " + s.count + "件")
+                    .join(" / ")}
+                  )
+                </span>
+              )}
+            </div>
+          )}
+          {applyError && (
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {applyError}
+            </p>
+          )}
+
+          {rows.length === 0 ? (
+            <p className="rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+              割れた会社法人等番号は見つかりませんでした。データはきれいな状態です。
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-200">
+                  <input
+                    type="checkbox"
+                    checked={addressMode === "nta"}
+                    disabled={submitting}
+                    onChange={(e) =>
+                      setAddressMode(e.target.checked ? "nta" : "cleaned")
+                    }
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-700"
+                  />
+                  住所と郵便番号も国税庁の最新本店所在地に更新する(推奨)
+                </label>
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                  外すと住所は「番号の断片を取り除くだけ」になります
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-600 dark:text-gray-300">
+                  選択中 {selectedCount} / {MAX_CORPORATE_RESTORE} 件
+                </span>
+                {phase === "idle" ? (
+                  <button
+                    type="button"
+                    disabled={!canSubmitRestore(payload.length) || submitting}
+                    onClick={() => setPhase("confirm")}
+                    className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
+                  >
+                    選択した所有者を復元
+                  </button>
+                ) : (
+                  <>
+                    <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                      {payload.length} 件を復元します。よろしいですか？
+                    </span>
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={onConfirm}
+                      className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {submitting ? "復元中..." : "実行"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => setPhase("idle")}
+                      className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                    >
+                      やめる
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 text-left text-xs text-gray-500 dark:text-gray-400">
+                      <th className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          disabled={submitting || pageSelectableIds.length === 0}
+                          onChange={toggleAll}
+                          aria-label="復元可能な行を全選択"
+                          className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-700"
+                        />
+                      </th>
+                      <th className="px-3 py-2">壊れ方</th>
+                      <th className="px-3 py-2">現在の氏名</th>
+                      <th className="px-3 py-2">現在の住所</th>
+                      <th className="px-3 py-2">復元される番号(12桁)</th>
+                      <th className="px-3 py-2">復元の内容</th>
+                      <th className="px-3 py-2">結果</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => {
+                      const status = rowStatuses[row.ownerId];
+                      return (
+                        <tr
+                          key={row.ownerId}
+                          className="border-b border-gray-100 dark:border-gray-800 last:border-b-0"
+                        >
+                          <td className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(row.ownerId)}
+                              disabled={
+                                submitting ||
+                                !isRestoreEligible(row) ||
+                                (!selectedIds.has(row.ownerId) && atCap)
+                              }
+                              onChange={() => toggleRow(row.ownerId)}
+                              aria-label="この所有者を復元対象にする"
+                              className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-700 disabled:opacity-40"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className="inline-block rounded-full bg-purple-100 dark:bg-purple-500/20 px-2 py-0.5 text-[11px] text-purple-700 dark:text-purple-300 whitespace-nowrap">
+                              {RESTORE_TYPE_LABEL[row.type]}
+                            </span>
+                          </td>
+                          <td
+                            className="px-3 py-2 text-gray-900 dark:text-gray-100"
+                            data-pii-protected
+                            data-pii-surface="owner"
+                          >
+                            {row.ownerNameMasked ?? "—"}
+                          </td>
+                          <td
+                            className="max-w-xs truncate px-3 py-2 text-gray-600 dark:text-gray-300"
+                            data-pii-protected
+                            data-pii-surface="owner"
+                          >
+                            {row.ownerAddressMasked ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-xs text-gray-900 dark:text-gray-100">
+                            {row.registry12Masked ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
+                            {row.type === "address_name_split"
+                              ? "国税庁に照会して会社名と住所を復元"
+                              : row.eligible && row.cleanedNameMasked
+                                ? "氏名を「" + row.cleanedNameMasked + "」に修正"
+                                : "自動復元できません(詳細から手動対応)"}
+                          </td>
+                          <td className="px-3 py-2 text-xs">
+                            {status && status !== "applied" && (
+                              <span className="text-amber-700 dark:text-amber-400">
+                                {RESTORE_STATUS_LABEL[status]}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <Link
+                              href={row.detailUrl}
+                              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline whitespace-nowrap"
+                            >
+                              詳細
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {data.truncated && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  件数が多いため一部のみ表示しています。復元後に再読み込みすると続きが表示されます。
+                </p>
+              )}
+            </>
+          )}
         </>
       )}
     </div>

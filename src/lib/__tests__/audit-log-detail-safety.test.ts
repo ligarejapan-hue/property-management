@@ -734,3 +734,49 @@ describe("sanitizeAuditDetail: 設定更新監査の target/changed を保持(@c
     expect(out.password).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: 法人番号復元(corporate-restore)の action 固有キー", () => {
+  it("apply: addressMode(enum) は /addr/i denylist に当たるが force-safe で保持される", () => {
+    const out = sanitizeAuditDetail("owner_correction_corporate_restore_apply", {
+      requested: 3,
+      applied: 2,
+      skipped: 1,
+      addressMode: "nta",
+    });
+    expect(out).toEqual({
+      requested: 3,
+      applied: 2,
+      skipped: 1,
+      addressMode: "nta",
+    });
+  });
+
+  it("apply: 生値が混入しても REDACTED になる", () => {
+    const out = sanitizeAuditDetail("owner_correction_corporate_restore_apply", {
+      requested: 1,
+      ownerName: "株式会社テスト",
+      corporateNumber: "1234567890123",
+    }) as Record<string, unknown>;
+    expect(out.requested).toBe(1);
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.corporateNumber).toBe(REDACTED);
+  });
+
+  it("list: summary の子キー(split/fragment/total)と truncated を保持する", () => {
+    const out = sanitizeAuditDetail("owner_correction_corporate_restore_list", {
+      summary: { split: 28, fragment: 11, total: 39 },
+      truncated: false,
+    });
+    expect(out).toEqual({
+      summary: { split: 28, fragment: 11, total: 39 },
+      truncated: false,
+    });
+  });
+
+  it("他 action では addressMode は保持されない(force-safe は action 固有)", () => {
+    const out = sanitizeAuditDetail("owner_create", {
+      addressMode: "nta",
+    }) as Record<string, unknown>;
+    expect(out.addressMode).toBe(REDACTED);
+  });
+});

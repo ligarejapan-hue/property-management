@@ -3004,6 +3004,97 @@ export async function bulkApplyCorporateNumbers(
   );
 }
 
+// ---------- 割れた会社法人等番号の復元(候補一覧 / 一括復元) ----------
+// server route: GET  /api/admin/owners/correction/corporate-restore-candidates
+//               POST /api/admin/owners/correction/corporate-restore-apply
+// client は {ownerId, version} と addressMode のみ送る。検出・復元・国税庁 lookup は
+// server が再実行する(client は信頼境界外)。マスキングは server 側で適用済み。
+
+export type SplitCorporateTypeDTO = "address_name_split" | "name_fragment";
+
+export interface CorporateRestoreRowDTO {
+  ownerId: string;
+  type: SplitCorporateTypeDTO;
+  ownerNameMasked: string | null;
+  ownerAddressMasked: string | null;
+  registry12Masked: string | null;
+  corporate13Masked: string | null;
+  cleanedNameMasked: string | null;
+  eligible: boolean;
+  version: number;
+  detailUrl: string;
+}
+
+export interface CorporateRestoreCandidatesResponse {
+  rows: CorporateRestoreRowDTO[];
+  summary: { split: number; fragment: number; total: number };
+  truncated: boolean;
+}
+
+export async function fetchCorporateRestoreCandidates(): Promise<CorporateRestoreCandidatesResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      rows: [],
+      summary: { split: 0, fragment: 0, total: 0 },
+      truncated: false,
+    };
+  }
+  return apiFetch<CorporateRestoreCandidatesResponse>(
+    "/api/admin/owners/correction/corporate-restore-candidates",
+  );
+}
+
+export type CorporateRestoreApplyStatus =
+  | "applied"
+  | "not_found"
+  | "version_conflict"
+  | "no_detection"
+  | "not_eligible"
+  | "lookup_no_result"
+  | "closed"
+  | "lookup_error"
+  | "not_processed";
+
+/** 住所の反映モード: nta=国税庁の最新本店所在地(+郵便番号) / cleaned=断片除去のみ */
+export type CorporateRestoreAddressMode = "nta" | "cleaned";
+
+export interface CorporateRestoreApplyResultRow {
+  ownerId: string;
+  status: CorporateRestoreApplyStatus;
+}
+
+export interface CorporateRestoreApplyResponse {
+  results: CorporateRestoreApplyResultRow[];
+  requested: number;
+  applied: number;
+}
+
+export async function applyCorporateRestore(
+  owners: BulkCorporateApplyItem[],
+  addressMode: CorporateRestoreAddressMode,
+): Promise<CorporateRestoreApplyResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      results: owners.map((o) => ({
+        ownerId: o.ownerId,
+        status: "applied" as const,
+      })),
+      requested: owners.length,
+      applied: owners.length,
+    };
+  }
+  return apiFetch<CorporateRestoreApplyResponse>(
+    "/api/admin/owners/correction/corporate-restore-apply",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owners, addressMode }),
+    },
+  );
+}
+
 // ---------- Address lookup (郵便番号 / 住所補完) ----------
 // APIキーは server-side route (/api/address/lookup/*) と server lib 内でのみ使う。
 // client はここから route を叩くだけで APIキー(secret env) には一切触れない

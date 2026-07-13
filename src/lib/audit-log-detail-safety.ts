@@ -268,6 +268,23 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "applied",
     "skipped",
   ]),
+  // 割れた会社法人等番号の復元候補一覧(dry-run)・一括復元。件数と addressMode(enum)のみ。
+  // summary は ALWAYS_SAFE コンテナだが子キー(split/fragment/total)を再帰許可するため登録する。
+  // owner.id 配列・復元番号・会社名・住所の生値は route 側で記録せず、混入しても [REDACTED]。
+  owner_correction_corporate_restore_list: new Set([
+    "summary",
+    "split",
+    "fragment",
+    "total",
+    "truncated",
+  ]),
+  // addressMode(enum) は /addr/i denylist に当たるため ACTION_FORCE_SAFE_KEYS 側で保持する
+  // (attachment_search の hasFileName と同型)。
+  owner_correction_corporate_restore_apply: new Set([
+    "requested",
+    "applied",
+    "skipped",
+  ]),
   // 法人番号 lookup/apply の監査メタデータ(全て非PII enum/boolean)。
   //   found/isClosed = boolean、source = provider 名 enum、httpStatus/result は base 許可。
   //   inputKind = company_corporate_number_12 / corporate_number_13 / invalid の enum。
@@ -313,6 +330,9 @@ const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // attachment_search: hasFileName は /name/i denylist に当たるが「ファイル名フィルタを
   // 使ったか」の boolean ゆえ PII 流入余地なし。force-safe で保持する。
   attachment_search: new Set(["hasFileName"]),
+  // corporate-restore-apply: addressMode は /addr/i denylist に当たるが
+  // "nta" | "cleaned" の enum(住所の反映モード)で PII 流入余地なし。force-safe で保持する。
+  owner_correction_corporate_restore_apply: new Set(["addressMode"]),
 };
 
 /**
