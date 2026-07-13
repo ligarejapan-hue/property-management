@@ -18,6 +18,7 @@ import {
   buildSaleBuildingDocument,
   toCanonicalUploadsSrc,
 } from "@/lib/sales-sheet/build-document";
+import { loadCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { isImageKeyAuthorizedForProperty } from "@/lib/sales-sheet/authorize-document-images";
@@ -350,6 +351,7 @@ export async function POST(
     // （[F2-A Task4]・旧は土地のみ1枚 baseSheet 時代の名残）。
     const photos = await seedPhotos(3);
 
+    const company = await loadCompanyProfile();
     let document: SalesSheetDocument;
     let templateId: string;
 
@@ -368,6 +370,7 @@ export async function POST(
         },
         photos,
         overrides: o,
+        company,
       });
       templateId = "sale-land";
     } else if (kind === "mansion") {
@@ -398,6 +401,7 @@ export async function POST(
           : null,
         photos,
         overrides: o,
+        company,
       });
       templateId = "sale-mansion";
     } else if (kind === "house") {
@@ -415,6 +419,7 @@ export async function POST(
         },
         photos,
         overrides: o,
+        company,
       });
       templateId = "sale-house";
     } else {
@@ -432,6 +437,7 @@ export async function POST(
         kind: property.propertyType === "apartment_block" ? "apartment" : "mansion",
         photos,
         overrides: o,
+        company,
       });
       templateId = "sale-building";
     }

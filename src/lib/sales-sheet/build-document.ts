@@ -16,6 +16,7 @@ import { buildSheetRows, type SheetValues } from "./sheet-rows";
 import { computeSpecSheetLayout, DEFAULT_FOOTER_H, type Rect } from "./layout-engine";
 import { buildFooterBand, type FooterBandData } from "./footer-band";
 import { computeTsuboUnitPrice } from "./tsubo";
+import type { CompanyProfile } from "./company-profile-store";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -248,6 +249,7 @@ export interface SaleMansionInput {
   photos?: { fileUrl: string }[];
   /** 間取り図（任意）。指定時のみ中央にプレースホルダ画像を配置する。 */
   floorPlanImage?: { fileUrl: string } | null;
+  company?: CompanyProfile;
   overrides?: SaleMansionOverrides;
 }
 
@@ -337,6 +339,8 @@ export interface SpecSheetParts {
   /** 会社帯（取引態様/広告/報酬/担当/取引士/特記事項）。buildFooterBand(L.footer, …) へ渡す
    *  （[Task3] 旧 footerDetails:string を構造化・会社定数自体は COMPANY_INFO 固定）。 */
   footer?: FooterBandData;
+  /** 会社帯の会社情報（未指定時は COMPANY_INFO 既定）。 */
+  company?: CompanyProfile;
   /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を置く。 */
   floorPlanImage?: { fileUrl: string } | null;
 }
@@ -386,7 +390,7 @@ export function buildSpecSheetDocument(parts: SpecSheetParts): SalesSheetDocumen
       content: salesPointsText, style: { fontSizePt: 9, bold: true, color: NAVY } },
     // 会社帯（下部・全幅）: 会社ブロック(COMPANY_INFO固定)＋取引条件/担当テーブル（[Task3]
     // 旧2text要素(company/company-details)から置換・~15要素は帯矩形 L.footer 内に収まる）。
-    ...buildFooterBand(L.footer, parts.footer ?? {}),
+    ...buildFooterBand(L.footer, parts.footer ?? {}, parts.company),
     ...photoElements(photos, L.photoSlots),
   ];
 
@@ -428,6 +432,7 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
       specialNotes: o.specialNotes,
     },
     floorPlanImage: input.floorPlanImage,
+    company: input.company,
   });
 }
 
@@ -512,6 +517,7 @@ export interface SaleLandInput {
   photo?: { fileUrl: string } | null;
   /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を配置する。 */
   floorPlanImage?: { fileUrl: string } | null;
+  company?: CompanyProfile;
   overrides?: SaleLandOverrides;
 }
 
@@ -604,6 +610,7 @@ export function buildSaleLandDocument(input: SaleLandInput): SalesSheetDocument 
       specialNotes: o.specialNotes,
     },
     floorPlanImage: input.floorPlanImage,
+    company: input.company,
   });
 }
 
@@ -706,6 +713,7 @@ export interface SaleHouseInput {
   photos?: { fileUrl: string }[];
   /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を配置する。 */
   floorPlanImage?: { fileUrl: string } | null;
+  company?: CompanyProfile;
   overrides?: SaleHouseOverrides;
 }
 
@@ -810,6 +818,7 @@ export function buildSaleHouseDocument(input: SaleHouseInput): SalesSheetDocumen
       specialNotes: o.specialNotes,
     },
     floorPlanImage: input.floorPlanImage,
+    company: input.company,
   });
 }
 
@@ -902,6 +911,7 @@ export interface SaleBuildingInput {
   photos?: { fileUrl: string }[];
   /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を配置する。 */
   floorPlanImage?: { fileUrl: string } | null;
+  company?: CompanyProfile;
   overrides?: SaleBuildingOverrides;
 }
 
@@ -1008,5 +1018,6 @@ export function buildSaleBuildingDocument(input: SaleBuildingInput): SalesSheetD
       specialNotes: o.specialNotes,
     },
     floorPlanImage: input.floorPlanImage,
+    company: input.company,
   });
 }
