@@ -102,6 +102,7 @@ export async function GET(request: NextRequest) {
         id: true,
         name: true,
         address: true,
+        corporateNumber: true,
         version: true,
       },
       orderBy: { id: "asc" },
@@ -113,6 +114,7 @@ export async function GET(request: NextRequest) {
     const rows: CorporateRestoreRow[] = [];
     let split = 0;
     let fragment = 0;
+    let nameLost = 0;
     let truncatedRows = false;
 
     for (const owner of scanned) {
@@ -121,6 +123,10 @@ export async function GET(request: NextRequest) {
       const detection = detectSplitCorporateOwner({
         name: isRawVisible(displayConfig.name) ? owner.name : null,
         address: isRawVisible(displayConfig.address) ? owner.address : null,
+        // 第3型(番号あり氏名欠落)の判定に使う。応答には display-level マスクを通す。
+        // 型(検出有無)から番号保有が推測されるのは既存 corporate-number-candidates の
+        // 分類トレードオフと同型(owner_corporate_number=hidden は上で 403 済)。
+        corporateNumber: owner.corporateNumber,
       });
       if (!detection) continue;
 
@@ -130,12 +136,13 @@ export async function GET(request: NextRequest) {
       }
 
       if (detection.type === "address_name_split") split++;
+      else if (detection.type === "number_set_name_lost") nameLost++;
       else fragment++;
 
       const eligible =
-        detection.type === "address_name_split"
-          ? detection.corporateNumber13 != null
-          : detection.cleanedName != null;
+        detection.type === "name_fragment"
+          ? detection.cleanedName != null
+          : detection.corporateNumber13 != null;
 
       rows.push({
         ownerId: owner.id,
@@ -157,7 +164,12 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const summary = { split, fragment, total: split + fragment };
+    const summary = {
+      split,
+      fragment,
+      nameLost,
+      total: split + fragment + nameLost,
+    };
 
     // 非PII audit(件数のみ)。owner.id 配列・法人番号・会社名・住所は載せない。
     await writeAuditLog({

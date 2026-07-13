@@ -275,6 +275,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "summary",
     "split",
     "fragment",
+    "nameLost",
     "total",
     "truncated",
   ]),
@@ -285,6 +286,10 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "applied",
     "skipped",
   ]),
+  // 取込ガード(割れた会社法人等番号の修復)の件数サマリ。corporateRepair は
+  // {split, fragment} の件数のみ(生値・氏名・住所は含めない)。container+子キーを許可。
+  reception_owner_csv_import: new Set(["corporateRepair", "split", "fragment"]),
+  owner_csv_import: new Set(["corporateRepair", "split", "fragment"]),
   // 法人番号 lookup/apply の監査メタデータ(全て非PII enum/boolean)。
   //   found/isClosed = boolean、source = provider 名 enum、httpStatus/result は base 許可。
   //   inputKind = company_corporate_number_12 / corporate_number_13 / invalid の enum。

@@ -19,6 +19,7 @@ export const MAX_CORPORATE_RESTORE = 50;
 export const RESTORE_TYPE_LABEL: Record<SplitCorporateTypeDTO, string> = {
   address_name_split: "番号が住所と氏名に分断",
   name_fragment: "氏名に番号の断片",
+  number_set_name_lost: "番号はあるが会社名が数字のまま",
 };
 
 /** 一括復元の対象になり得る行か。 */

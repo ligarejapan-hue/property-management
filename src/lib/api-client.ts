@@ -3010,7 +3010,10 @@ export async function bulkApplyCorporateNumbers(
 // client は {ownerId, version} と addressMode のみ送る。検出・復元・国税庁 lookup は
 // server が再実行する(client は信頼境界外)。マスキングは server 側で適用済み。
 
-export type SplitCorporateTypeDTO = "address_name_split" | "name_fragment";
+export type SplitCorporateTypeDTO =
+  | "address_name_split"
+  | "name_fragment"
+  | "number_set_name_lost";
 
 export interface CorporateRestoreRowDTO {
   ownerId: string;
@@ -3027,7 +3030,12 @@ export interface CorporateRestoreRowDTO {
 
 export interface CorporateRestoreCandidatesResponse {
   rows: CorporateRestoreRowDTO[];
-  summary: { split: number; fragment: number; total: number };
+  summary: {
+    split: number;
+    fragment: number;
+    nameLost: number;
+    total: number;
+  };
   truncated: boolean;
 }
 
@@ -3036,7 +3044,7 @@ export async function fetchCorporateRestoreCandidates(): Promise<CorporateRestor
     await mockDelay();
     return {
       rows: [],
-      summary: { split: 0, fragment: 0, total: 0 },
+      summary: { split: 0, fragment: 0, nameLost: 0, total: 0 },
       truncated: false,
     };
   }

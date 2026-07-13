@@ -24,6 +24,11 @@ import {
   corporateImportMessage,
   appendImportMessage,
 } from "@/lib/owner-corporate-import";
+import {
+  repairSplitCorporateImportRow,
+  emptyCorporateRepairSummary,
+  tallyCorporateRepair,
+} from "@/lib/corporate-number-restore";
 
 // Japanese field name → Owner model property mapping
 const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
@@ -132,6 +137,8 @@ export async function POST(request: NextRequest) {
     const createdOwnerIds: string[] = [];
     // Phase D: 法人番号自動検出のサマリ（AuditLog detail に非PIIで残す）
     const corporateSummary = emptyCorporateImportSummary();
+    // 取込ガード: 割れた会社法人等番号の修復件数(非PII・audit detail 用)
+    const corporateRepairSummary = emptyCorporateRepairSummary();
 
     // 行ごとに「紐づけ判定に必要な元データを持っていたか」を覚えておく。
     // 行書き込みは linking 後に1回行うので、そこで status / errorMessage を最終決定する。
@@ -178,6 +185,23 @@ export async function POST(request: NextRequest) {
           });
           errorCount++;
           continue;
+        }
+
+        // 取込ガード: exe由来Excelで割れた会社法人等番号を、重複判定より前に修復する。
+        // 分断型=住所からラベル+断片を除去し12/13桁を復元(会社名は「法人番号復元」タブの
+        // 国税庁照会で後から復元できる)。断片型=氏名から断片を除去して会社名を救出。
+        const repair = repairSplitCorporateImportRow({
+          name: mapped.name.trim(),
+          address: mapped.address?.trim() ? mapped.address.trim() : null,
+        });
+        if (repair.repairedType) {
+          tallyCorporateRepair(corporateRepairSummary, repair.repairedType);
+          mapped.name = repair.name;
+          if (repair.address == null) {
+            delete mapped.address;
+          } else {
+            mapped.address = repair.address;
+          }
         }
 
         // Duplicate check（優先順位）
@@ -243,6 +267,12 @@ export async function POST(request: NextRequest) {
         tallyCorporateDecision(corporateSummary, cnDecision);
         if (cnDecision.action === "save" && cnDecision.corporateNumber) {
           createData.corporateNumber = cnDecision.corporateNumber;
+        } else if (repair.corporateNumber13) {
+          // 取込ガード: 分断型で復元した13桁(テキスト検出が優先・両立はしない)。
+          createData.corporateNumber = repair.corporateNumber13;
+        }
+        if (repair.companyRegistryNumber12) {
+          createData.companyRegistryNumber = repair.companyRegistryNumber12;
         }
         const cnMessage = corporateImportMessage(cnDecision);
 
@@ -546,6 +576,8 @@ export async function POST(request: NextRequest) {
         rescuedAddressLinkAmbiguousCount,
         // Phase D: 法人番号自動検出のサマリ。生値・会社名・住所・候補リストは含めない。
         corporateNumber: corporateSummary,
+        // 取込ガード: 割れた会社法人等番号の修復件数(split/fragment・非PII)。
+        corporateRepair: corporateRepairSummary,
       },
     });
 

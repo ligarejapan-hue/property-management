@@ -116,6 +116,7 @@ async function applyOne(
   const detection = detectSplitCorporateOwner({
     name: isRawVisible(displayConfig.name) ? owner.name : null,
     address: isRawVisible(displayConfig.address) ? owner.address : null,
+    corporateNumber: owner.corporateNumber,
   });
   if (!detection) return "no_detection";
 
@@ -144,7 +145,7 @@ async function applyOne(
     return "applied";
   }
 
-  // 分断型: 復元13桁が算出できないものは skip(candidates 側で eligible=false)。
+  // 分断型/番号あり氏名欠落型: 13桁が無いものは skip(candidates 側で eligible=false)。
   if (!detection.corporateNumber13 || !detection.companyRegistryNumber12) {
     return "not_eligible";
   }
@@ -199,22 +200,27 @@ async function applyOne(
   });
   if (updated.count === 0) return "version_conflict";
 
-  // ChangeLog: 実際に変更したフィールドの old/new のみ記録する。
-  const oldValues: Record<string, unknown> = {
-    name: owner.name,
-    corporateNumber: owner.corporateNumber,
-    companyRegistryNumber: owner.companyRegistryNumber,
-  };
-  const newValues: Record<string, unknown> = {
-    name: record.name,
-    corporateNumber: detection.corporateNumber13,
-    companyRegistryNumber: detection.companyRegistryNumber12,
-  };
-  if (newAddress != null) {
+  // ChangeLog: 実際に変更したフィールドの old/new のみ記録する
+  // (第3型では番号が既存値と同一のため、変わらないフィールドはノイズとして載せない)。
+  const oldValues: Record<string, unknown> = {};
+  const newValues: Record<string, unknown> = {};
+  if (owner.name !== record.name) {
+    oldValues.name = owner.name;
+    newValues.name = record.name;
+  }
+  if (owner.corporateNumber !== detection.corporateNumber13) {
+    oldValues.corporateNumber = owner.corporateNumber;
+    newValues.corporateNumber = detection.corporateNumber13;
+  }
+  if (owner.companyRegistryNumber !== detection.companyRegistryNumber12) {
+    oldValues.companyRegistryNumber = owner.companyRegistryNumber;
+    newValues.companyRegistryNumber = detection.companyRegistryNumber12;
+  }
+  if (newAddress != null && newAddress !== owner.address) {
     oldValues.address = owner.address;
     newValues.address = newAddress;
   }
-  if (data.zip !== undefined) {
+  if (data.zip !== undefined && data.zip !== owner.zip) {
     oldValues.zip = owner.zip;
     newValues.zip = data.zip;
   }

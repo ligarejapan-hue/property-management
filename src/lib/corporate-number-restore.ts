@@ -18,9 +18,13 @@
 import {
   normalizeCorporateIdentifier,
   calculateCorporateNumberFromCompanyNumber,
+  isValidCorporateNumber13,
 } from "./corporate-number";
 
-export type SplitCorporateType = "address_name_split" | "name_fragment";
+export type SplitCorporateType =
+  | "address_name_split"
+  | "name_fragment"
+  | "number_set_name_lost";
 
 export interface SplitCorporateDetection {
   type: SplitCorporateType;
@@ -63,6 +67,11 @@ function tidyTail(s: string): string {
 export interface OwnerLikeForRestore {
   name: string | null | undefined;
   address: string | null | undefined;
+  /**
+   * 既存の法人番号(13桁)。取込ガードで番号だけ復元済み・会社名が数字のまま残る
+   * レコード(number_set_name_lost)の検出に使う。未指定なら第3型は検出しない。
+   */
+  corporateNumber?: string | null;
 }
 
 /**
@@ -70,7 +79,9 @@ export interface OwnerLikeForRestore {
  * - パターン1(住所末尾断片+数字のみ氏名)が成立し、断片+氏名の数字が
  *   ちょうど12桁になる場合のみ復元する(11桁以下/13桁以上は別物として不採用)。
  * - 断片単独で12桁ちょうどの場合は既存のラベル付き12桁検出に委譲(ここでは null)。
- * - パターン1不成立時のみパターン2を判定する。
+ * - パターン3(番号あり氏名欠落): 氏名が数字のみ かつ 有効な13桁法人番号を保持
+ *   (取込ガード適用後のレコード)。会社名の復元は国税庁 lookup で行う。
+ * - パターン1不成立時のみパターン3→パターン2の順に判定する。
  */
 export function detectSplitCorporateOwner(
   owner: OwnerLikeForRestore,
@@ -106,6 +117,25 @@ export function detectSplitCorporateOwner(
     }
   }
 
+  // --- パターン3: 番号あり氏名欠落(取込ガード適用後) ---
+  // 氏名が数字のみ かつ 有効な13桁法人番号を既に保持しているレコード。
+  // 会社名は国税庁 lookup で復元する(番号は既存値をそのまま使う)。
+  const existing13 = owner.corporateNumber ?? null;
+  if (
+    trimmedName !== "" &&
+    NAME_DIGITS_ONLY_RE.test(trimmedName) &&
+    existing13 != null &&
+    isValidCorporateNumber13(existing13)
+  ) {
+    return {
+      type: "number_set_name_lost",
+      companyRegistryNumber12: existing13.slice(1),
+      corporateNumber13: existing13,
+      cleanedName: null,
+      cleanedAddress: null,
+    };
+  }
+
   // --- パターン2: 氏名内の尻切れ断片 → 会社名の救出のみ ---
   const nameMatch = name.match(NAME_FRAGMENT_RE);
   if (nameMatch) {
@@ -124,4 +154,86 @@ export function detectSplitCorporateOwner(
   }
 
   return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 取込ガード: 所有者Excel/CSVの1行を取込前に修復する(純関数・lookupしない)。
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RepairedImportOwnerRow {
+  /** 修復後の氏名。分断型では数字のまま(会社名は復元タブの国税庁照会で復元する) */
+  name: string;
+  /** 修復後の住所(分断型はラベル+断片を除去)。 */
+  address: string | null;
+  /** 分断型で復元できた13桁法人番号。 */
+  corporateNumber13: string | null;
+  /** 分断型で復元できた12桁会社法人等番号。 */
+  companyRegistryNumber12: string | null;
+  /** 修復した型。修復なし(正常行・修復不能)は null。 */
+  repairedType: SplitCorporateType | null;
+}
+
+/**
+ * 取込1行の修復。
+ * - 分断型: 12桁を復元して番号カラム用に返し、住所から断片を除去する。
+ *   氏名(数字)はそのまま=取込後に「法人番号復元」タブが number_set_name_lost として
+ *   検出し、国税庁照会で会社名を復元できる。
+ * - 断片型: 氏名から「ラベル+尻切れ断片」を除去して会社名を救出する。
+ *   会社名が救出できない(氏名がラベルのみ)は修復せず原文のまま。
+ * - 正常行はそのまま通す(repairedType=null)。
+ */
+export function repairSplitCorporateImportRow(input: {
+  name: string;
+  address: string | null;
+}): RepairedImportOwnerRow {
+  const detection = detectSplitCorporateOwner({
+    name: input.name,
+    address: input.address,
+  });
+
+  if (detection?.type === "address_name_split" && detection.corporateNumber13) {
+    return {
+      name: input.name,
+      address: detection.cleanedAddress,
+      corporateNumber13: detection.corporateNumber13,
+      companyRegistryNumber12: detection.companyRegistryNumber12,
+      repairedType: "address_name_split",
+    };
+  }
+
+  if (detection?.type === "name_fragment" && detection.cleanedName) {
+    return {
+      name: detection.cleanedName,
+      address: input.address,
+      corporateNumber13: null,
+      companyRegistryNumber12: null,
+      repairedType: "name_fragment",
+    };
+  }
+
+  return {
+    name: input.name,
+    address: input.address,
+    corporateNumber13: null,
+    companyRegistryNumber12: null,
+    repairedType: null,
+  };
+}
+
+/** 取込ガードの修復件数サマリ(AuditLog detail 用・非PII)。 */
+export interface CorporateRepairSummary {
+  split: number;
+  fragment: number;
+}
+
+export function emptyCorporateRepairSummary(): CorporateRepairSummary {
+  return { split: 0, fragment: 0 };
+}
+
+export function tallyCorporateRepair(
+  summary: CorporateRepairSummary,
+  type: SplitCorporateType,
+): void {
+  if (type === "address_name_split") summary.split++;
+  else if (type === "name_fragment") summary.fragment++;
 }
