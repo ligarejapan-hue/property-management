@@ -6,12 +6,12 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { propertyListQuerySchema } from "@/lib/validators";
-import { buildPropertyListWhere, buildPropertyListOrderBy } from "@/lib/property-list-query";
+import { buildPropertyListWhere, buildPropertyListOrderBy, propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
-import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, resolveLetterModel, resolveProvider } from "@/lib/sale-dm-letter";
+import { generateLetters, isSaleDmConfigured, resolveLetterModel, resolveProvider } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
@@ -81,23 +81,39 @@ export async function POST(request: NextRequest) {
         await prisma.dmCampaign.delete({ where: { id: existing.id } }).catch(() => {});
       }
     }
-    const query = propertyListQuerySchema.parse(body.filters ?? {});
-    // DM は送付可(dmStatus=send)の物件にのみ生成する。ユーザーの絞り込みが明示的に send 以外(hold/no_send)を
-    // 指している場合、send へ黙って上書きすると、確認ダイアログの「現在の絞り込み対象」と実際の生成対象がずれ、
-    // 意図しない物件へオーナーPII送信+課金が起きる。上書きせず 400 で弾き、確認した対象と一致させる。
-    if (query.dmStatus !== undefined && query.dmStatus !== "send") {
-      throw new ApiError(400, "送付可(dmStatus=send)以外の絞り込みではDMを作成できません", "INVALID_DM_STATUS_FILTER");
+    // 対象の決め方: (A) チェックで選んだ propertyIds があればそれを対象にする(明示選択優先)。無ければ
+    // (B) 従来どおり絞り込み条件(filters)から送付可(send)物件を対象にする(後方互換)。手紙を作れるのは
+    // 所有者に住所がある物件のみ(共通の mailableOwner)。50件上限は撤廃済み(take しない=選んだ分を全部生成)。
+    const mailableOwner = { propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } } };
+    // whereClause は buildPropertyListWhere の where と同型(既存実装に合わせ緩い型)。mgmt短絡時は null。
+    let whereClause: Awaited<ReturnType<typeof buildPropertyListWhere>>["where"] | null;
+    let orderBy: ReturnType<typeof buildPropertyListOrderBy> = { updatedAt: "desc" };
+    if (body.propertyIds && body.propertyIds.length > 0) {
+      // チェックで選んだ物件が対象。field_staff の可視スコープは適用するが、dmStatus は強制しない
+      // (ユーザーが明示的に選んだものを対象にする)。住所なし/権限外/アーカイブ済は結果的に除外される。
+      whereClause = { id: { in: body.propertyIds }, isArchived: false, ...mailableOwner };
+      const scope = propertyVisibilityScopeWhere(session);
+      if (scope) whereClause.AND = [scope];
+    } else {
+      const query = propertyListQuerySchema.parse(body.filters ?? {});
+      // 絞り込みが明示的に send 以外(hold/no_send)を指すなら黙って send へ上書きせず 400
+      // (確認ダイアログの対象と実際の生成対象のズレを防ぐ)。
+      if (query.dmStatus !== undefined && query.dmStatus !== "send") {
+        throw new ApiError(400, "送付可(dmStatus=send)以外の絞り込みではDMを作成できません", "INVALID_DM_STATUS_FILTER");
+      }
+      const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
+      orderBy = buildPropertyListOrderBy(query);
+      if (mgmtShortCircuitEmpty) {
+        whereClause = null;
+      } else {
+        where.dmStatus = "send";
+        where.isArchived = false;
+        whereClause = { ...where, AND: [...(where.AND ?? []), mailableOwner] };
+      }
     }
-    const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
-    where.dmStatus = "send";
-    where.isArchived = false;
-    const orderBy = buildPropertyListOrderBy(query);
 
-    const properties = mgmtShortCircuitEmpty ? [] : await prisma.property.findMany({
-      where: {
-        ...where,
-        AND: [...(where.AND ?? []), { propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } } }],
-      },
+    const properties = whereClause === null ? [] : await prisma.property.findMany({
+      where: whereClause,
       select: {
         id: true, address: true, propertyType: true, roomNo: true,
         propertyOwners: {
@@ -107,7 +123,6 @@ export async function POST(request: NextRequest) {
         },
       },
       orderBy,
-      take: MAX_GENERATE_ITEMS + 1,
     });
 
     const { recipients, meta } = buildRecipientsFromProperties(
@@ -205,7 +220,9 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(
-      { campaignId: claimed.id, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
+      // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
+      // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties: properties.length, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

@@ -80,7 +80,8 @@ export async function generateLetters(
   items: { recipient: LetterRecipient; options: LetterOptions }[],
   opts?: { provider?: LetterProvider; concurrency?: number; max?: number },
 ): Promise<{ drafts: GeneratedDraft[]; truncated: boolean }> {
-  const max = opts?.max ?? MAX_GENERATE_ITEMS;
+  // 既定は無制限(50件上限は撤廃)。呼び出し側が明示的に max を渡したときだけ切り詰める。
+  const max = opts?.max ?? Number.POSITIVE_INFINITY;
   const truncated = items.length > max;
   const sliced = truncated ? items.slice(0, max) : items;
   const provider = opts?.provider ?? resolveProvider();

@@ -104,6 +104,63 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
+  it("propertyIds を渡すと選択物件を対象にし dmStatus=send を強制しない・requested を返す", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
+    findMany.mockResolvedValue([property as never]);
+    const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
+    const res = await POST(req({ ...validBody, propertyIds: ids }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.campaignId).toBe("c1");
+    const whereArg = findMany.mock.calls[0][0].where;
+    expect(whereArg.id).toEqual({ in: ids });
+    expect(whereArg.dmStatus).toBeUndefined(); // 明示選択なので send を強制しない
+    expect(json.requested).toBe(1); // findMany(住所あり)が1件返る → 対象=1
+    expect(json.matchedProperties).toBe(1);
+  });
+
+  it("field_staff は propertyIds でも担当範囲(createdBy/assignedTo)に AND される", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
+    findMany.mockResolvedValue([]);
+    const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111"] }) as never);
+    expect(res.status).toBe(200);
+    const whereArg = findMany.mock.calls[0][0].where;
+    expect(whereArg.AND).toEqual([{ OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] }]);
+    expect(whereArg.id).toEqual({ in: ["11111111-1111-4111-8111-111111111111"] });
+  });
+
+  it("共有者が別住所の物件は手紙数(requested) > 物件数(matchedProperties)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const twoAddr = {
+      id: "p1", address: "東京都〇〇区△△1-2-3", propertyType: "land", roomNo: null,
+      propertyOwners: [
+        { isPrimary: true, relationship: null, owner: { name: "田中 一郎", nameKana: null, zip: "1000001", address: "東京都〇〇区△△1-2-3", corporateNumber: null } },
+        { isPrimary: false, relationship: null, owner: { name: "田中 二郎", nameKana: null, zip: "5300001", address: "大阪府大阪市北区1-1", corporateNumber: null } },
+      ],
+    };
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([twoAddr as never]);
+    const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111"] }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.matchedProperties).toBe(1); // 物件は1件
+    expect(json.requested).toBe(2); // 手紙は2通(別住所の共有者)
+  });
+
+  it("対象が50件を超えても切り詰めず全件生成する(50件上限は撤廃・truncated=false)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const many = Array.from({ length: 55 }, (_, i) => ({ ...property, id: `p${i}` }));
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue(many as never);
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.truncated).toBe(false);
+    expect(json.generated).toBe(55);
+    expect(json.requested).toBe(55);
+  });
+
   it("provider=openai のとき下書きに保存する model は gpt-4o(生成モデルと一致・claude既定にしない・Codex)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     process.env.SALE_DM_LETTER_PROVIDER = "openai"; // 永続モデルは provider 既定に追従すべき

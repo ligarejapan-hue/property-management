@@ -170,6 +170,8 @@ export interface CreateSaleDmCampaignBody {
     extraInstruction?: string;
   };
   filters?: Record<string, string>;
+  // チェックで選んだ物件から作成する(指定時は filters より優先=対象=選択物件)。
+  propertyIds?: string[];
   confirmed: boolean; // 課金確認(AI生成は有料+オーナーPII外部送信)。UI は確認後 true を送る。
   // 二重作成(再送信/別タブ/連打)防止の冪等性キー。作成試行ごとに安定生成し、成功で更新する。
   idempotencyKey?: string;
@@ -178,9 +180,9 @@ export interface CreateSaleDmCampaignBody {
 export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
   if (USE_MOCK) {
     await mockDelay();
-    return { campaignId: "mock-campaign", generated: 0, failed: 0, truncated: false };
+    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, failed: 0, truncated: false };
   }
-  return apiFetch<{ campaignId: string; generated?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
+  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
     "/api/properties/sale-dm/campaigns",
     {
       method: "POST",

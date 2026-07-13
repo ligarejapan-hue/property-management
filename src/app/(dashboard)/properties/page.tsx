@@ -57,6 +57,7 @@ interface ApiProperty {
   updatedAt: string;
   assignedTo: string | null;
   assignee: { id: string; name: string } | null;
+  dmSentCount?: number;
   ownerNames?: string[];
 }
 
@@ -132,6 +133,8 @@ function PropertiesPageInner() {
   const [updatedToFilter, setUpdatedToFilter] = useState(() => sp.get("updatedTo") ?? "");
   const [warningOnly, setWarningOnly] = useState(() => sp.get("hasWarning") === "true");
   const [undeliverableOnly, setUndeliverableOnly] = useState(() => sp.get("undeliverable") === "1");
+  // DM送信回数「N回以下」で絞り込む(空=絞らない)。
+  const [sendCountMaxFilter, setSendCountMaxFilter] = useState(() => sp.get("dmSentMax") ?? "");
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
   const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
@@ -287,11 +290,12 @@ function PropertiesPageInner() {
     if (updatedToFilter) params.updatedTo = updatedToFilter;
     if (warningOnly) params.hasWarning = "true";
     if (undeliverableOnly) params.undeliverable = "1";
+    if (sendCountMaxFilter) params.dmSentMax = sendCountMaxFilter;
     const [sortBy, sortOrder] = sort.split(":");
     if (sortBy) params.sortBy = sortBy;
     if (sortOrder) params.sortOrder = sortOrder;
     return params;
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sort]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sendCountMaxFilter, sort]);
 
   // 売却促進DM: 現在の検索条件で「送付可」物件から下書きを作成し、作業画面へ遷移する。
   // 差出人は env 既定を route が補完(初版・調整は作業画面)。集計・型は variant 基準。
@@ -301,9 +305,10 @@ function PropertiesPageInner() {
   const saleDmIdemKeyRef = useRef<string | null>(null);
   const handleCreateSaleDm = async () => {
     if (creatingDm) return;
-    // 課金確認: 現在の絞り込み対象の宛先ごとに AI が手紙を生成し、AI利用料金が発生する(オーナー情報を
-    // AI提供元へ送信)。実行前に明示確認を取り、サーバーへ confirmed:true を送る(サーバー側でも必須)。
-    if (!window.confirm("現在の絞り込み対象に、AIで宛先ごとの手紙を生成します。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？")) return;
+    // 課金確認: 選択した(チェックした)物件の宛先ごとに AI が手紙を生成し、AI利用料金が発生する(オーナー
+    // 情報を AI提供元へ送信)。件数を明示して確認を取り、サーバーへ confirmed:true を送る(サーバー側でも必須)。
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`選択した ${selectedIds.size} 件の物件にAIで手紙を生成します。\n共有者が複数いる物件は宛先ごとに複数通になることがあります。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？`)) return;
     // 作成試行ごとに安定したキーを用意(secure context 外では randomUUID 不在ゆえ簡易フォールバック)。
     if (!saleDmIdemKeyRef.current) {
       saleDmIdemKeyRef.current =
@@ -323,14 +328,18 @@ function PropertiesPageInner() {
           appeal: "price",
           strength: "low",
         },
-        filters: buildFilterParams(),
+        propertyIds: Array.from(selectedIds),
         confirmed: true,
         idempotencyKey: saleDmIdemKeyRef.current,
       });
       saleDmIdemKeyRef.current = null; // 成功 → 次の作成は新しいキー
-      // 部分生成(上限超で先頭のみ=truncated / 一部失敗で空本文=failed)は遷移前に明示する。
-      // 確認文は「現在の絞り込み対象を生成」と言うため、サブセットのみ生成/空letter を見落とさせない。
-      const partialNotice = buildSaleDmPartialNotice(res);
+      // 一部失敗(空本文=failed)や、選択したが対象外(住所なし等)で作成されなかった物件を遷移前に明示する。
+      // 対象外は「物件数」で数える(選択物件数 − 生成対象になった物件数 matchedProperties)。requested(手紙数)は
+      // 共有者ぶんで物件数より多くなり得るため、除外判定には使わない。
+      const excluded = Math.max(0, selectedIds.size - (res.matchedProperties ?? selectedIds.size));
+      const partialNotice = buildSaleDmPartialNotice({
+        generated: res.generated, failed: res.failed, truncated: res.truncated, excluded,
+      });
       if (partialNotice) window.alert(partialNotice);
       router.push(`/properties/sale-dm/${res.campaignId}`);
     } catch (err) {
@@ -454,11 +463,12 @@ function PropertiesPageInner() {
     if (updatedToFilter) params.set("updatedTo", updatedToFilter);
     if (warningOnly) params.set("hasWarning", "true");
     if (undeliverableOnly) params.set("undeliverable", "1");
+    if (sendCountMaxFilter) params.set("dmSentMax", sendCountMaxFilter);
     if (sort !== "updatedAt:desc") params.set("sort", sort);
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sort, page, pathname, router]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sendCountMaxFilter, sort, page, pathname, router]);
 
   // 警告バッジは「現在ページに表示中の物件」だけに scope して取得する（17-C F2）。
   // properties が変わるたび（page/filter/sort 変更・mutation 後の再取得）に追従するため、
@@ -604,6 +614,7 @@ function PropertiesPageInner() {
     setUpdatedToFilter("");
     setWarningOnly(false);
     setUndeliverableOnly(false);
+    setSendCountMaxFilter("");
     setSort("updatedAt:desc");
     setPage(1);
   };
@@ -612,12 +623,12 @@ function PropertiesPageInner() {
   const hasActiveFilter =
     !!searchInput || !!searchText || !!searchDraft || !!mgmtIdText || !!mgmtIdDraft || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
-    warningOnly || undeliverableOnly || sort !== "updatedAt:desc";
+    warningOnly || undeliverableOnly || !!sendCountMaxFilter || sort !== "updatedAt:desc";
 
   // アクティブなフィルタ条件数（モバイルトグルバッジ用）
   const activeFilterCount = [
     searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
-    introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter,
+    introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, sendCountMaxFilter,
   ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== "updatedAt:desc" ? 1 : 0);
 
   const toggleSelect = (id: string) => {
@@ -835,12 +846,12 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleCreateSaleDm}
-            disabled={creatingDm}
+            disabled={creatingDm || selectedIds.size === 0}
             className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            title="現在の検索条件で送付可の物件から売却DM下書きを作成"
+            title="チェックした物件から売却DM下書きを作成(住所が無い物件は自動で除外)"
           >
             {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            売却DMを作成
+            売却DMを作成{selectedIds.size > 0 ? `（${selectedIds.size}件）` : ""}
           </button>
         )}
         <button
@@ -904,6 +915,19 @@ function PropertiesPageInner() {
           <option value="send">送付可</option>
           <option value="no_send">送付不可</option>
           <option value="hold">未判断</option>
+        </select>
+
+        <select
+          value={sendCountMaxFilter}
+          onChange={handleFilterChange(setSendCountMaxFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          title="DM送信回数で絞り込む"
+        >
+          <option value="">送信回数: すべて</option>
+          <option value="0">未送信（0回）</option>
+          <option value="1">1回以下</option>
+          <option value="2">2回以下</option>
+          <option value="3">3回以下</option>
         </select>
 
         <div className="relative min-w-[220px]">
@@ -1072,6 +1096,8 @@ function PropertiesPageInner() {
           <option value="updatedAt:asc">更新日 古い順</option>
           <option value="caseStatus:asc">案件ステータス順</option>
           <option value="address:asc">住所昇順</option>
+          <option value="dmSendCount:asc">DM送信回数 少ない順</option>
+          <option value="dmSendCount:desc">DM送信回数 多い順</option>
         </select>
 
         <select
@@ -1360,6 +1386,11 @@ function PropertiesPageInner() {
                       {DM_STATUS_LABELS[property.dmStatus] ??
                         property.dmStatus}
                     </StatusBadge>
+                    {(property.dmSentCount ?? 0) > 0 && (
+                      <span className="ml-1 inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300" title="DM送信回数">
+                        送信{property.dmSentCount}回
+                      </span>
+                    )}
                     {/* 返送(宛先不明)連動で立った dmUndeliverableAt の可視化 + 手動解除(write 権限時) */}
                     {property.dmUndeliverableAt && (
                       <span className="ml-1 inline-flex items-center gap-1">
@@ -1536,6 +1567,11 @@ function PropertiesPageInner() {
                   >
                     {DM_STATUS_LABELS[property.dmStatus] ?? property.dmStatus}
                   </StatusBadge>
+                  {(property.dmSentCount ?? 0) > 0 && (
+                    <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300" title="DM送信回数">
+                      送信{property.dmSentCount}回
+                    </span>
+                  )}
                   {/* 宛先不明バッジ + 手動解除(モバイルカードでも表示・write 権限時にボタン) */}
                   {property.dmUndeliverableAt && (
                     <span className="inline-flex items-center gap-1">

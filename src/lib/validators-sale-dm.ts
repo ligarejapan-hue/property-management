@@ -27,7 +27,10 @@ export type SaleDmOptionsOverride = z.infer<typeof saleDmOptionsOverrideSchema>;
 export const saleDmCampaignBodySchema = z.object({
   name: z.string().min(1).max(100), // 他の自由記述(sender/label等)同様に上限。巨大DB書込/印刷title肥大を防ぐ。
   options: saleDmOptionsSchema,
-  filters: z.record(z.string(), z.string()).optional(), // 物件一覧と同じ検索条件
+  filters: z.record(z.string(), z.string()).optional(), // 物件一覧と同じ検索条件(propertyIds 未指定時のフォールバック)
+  // チェックで選んだ物件IDから作成する(指定時は filters より優先=対象=選択物件)。max は巨大ペイロード
+  // 防止の安全上限であって実用の生成上限ではない(50件上限は撤廃済み)。
+  propertyIds: z.array(z.string().uuid()).min(1).max(2000).optional(),
   // 課金確認(最大50通の有料AI呼び出し+オーナーPII外部送信)。route が === true を要求する。
   confirmed: z.boolean().optional(),
   // 二重作成(再送信/別タブ/連打)防止の冪等性キー。client が作成試行ごとに安定生成し、成功で更新する。

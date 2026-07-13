@@ -51,6 +51,7 @@ export async function buildPropertyListWhere(
     registryStatus,
     dmStatus,
     undeliverable,
+    dmSentMax,
     caseStatus,
     introductionRoute,
     assignedTo,
@@ -146,6 +147,25 @@ export async function buildPropertyListWhere(
     ];
   }
 
+  // DM送信回数(PropertyDmLog 件数)で「N回以下」に絞る。列を持たないためリレーション件数で判定する。
+  // 0回=未送信は none で効率的に。1回以上は groupBy で「N回超」の propertyId を求め id notIn で除外する
+  // (送信0回の物件も残すため in ではなく notIn 方式)。field_staff スコープは上の AND で別途効くので可視範囲は保たれる。
+  if (dmSentMax !== undefined) {
+    if (dmSentMax === 0) {
+      where.AND = [...(where.AND ?? []), { dmLogs: { none: {} } }];
+    } else {
+      const over = await client.propertyDmLog.groupBy({
+        by: ["propertyId"],
+        _count: { propertyId: true },
+        having: { propertyId: { _count: { gt: dmSentMax } } },
+      });
+      const overIds = over.map((o) => o.propertyId);
+      if (overIds.length > 0) {
+        where.AND = [...(where.AND ?? []), { id: { notIn: overIds } }];
+      }
+    }
+  }
+
   return { where, mgmtShortCircuitEmpty, mgmtHitCount, mgmtIdTrimmed };
 }
 
@@ -167,6 +187,10 @@ export function propertyVisibilityScopeWhere(
 
 /** sortBy / sortOrder から Prisma orderBy を組み立てる。 */
 export function buildPropertyListOrderBy(query: PropertyListQuery) {
+  // DM送信回数はリレーション件数(PropertyDmLog)で並べ替える(対応する列は無い)。
+  if (query.sortBy === "dmSendCount") {
+    return { dmLogs: { _count: query.sortOrder } };
+  }
   return { [query.sortBy]: query.sortOrder };
 }
 

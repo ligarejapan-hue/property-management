@@ -1,0 +1,38 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+// jsdom 無し(env=node)のため、page.tsx のソース文字列でUI配線の回帰を守る。
+const src = readFileSync(
+  path.resolve(process.cwd(), "src/app/(dashboard)/properties/page.tsx"),
+  "utf-8",
+);
+
+describe("properties page: 売却DM対象選択の配線", () => {
+  it("作成はチェックした物件(selectedIds)から propertyIds で作る", () => {
+    expect(src).toContain("propertyIds: Array.from(selectedIds)");
+  });
+
+  it("作成ボタンは選択0件のとき無効", () => {
+    expect(src).toContain("disabled={creatingDm || selectedIds.size === 0}");
+  });
+
+  it("確認ダイアログに選択件数を出す", () => {
+    expect(src).toContain("選択した ${selectedIds.size} 件");
+  });
+
+  it("送信回数の並べ替え(少ない順/多い順)がある", () => {
+    expect(src).toContain('value="dmSendCount:asc"');
+    expect(src).toContain('value="dmSendCount:desc"');
+  });
+
+  it("送信回数 N回以下 の抽出フィルタがある", () => {
+    expect(src).toContain("sendCountMaxFilter");
+    expect(src).toContain("params.dmSentMax");
+    expect(src).toContain('<option value="0">未送信');
+  });
+
+  it("一覧行に送信回数(dmSentCount)を表示する", () => {
+    expect(src).toContain("dmSentCount");
+  });
+});
