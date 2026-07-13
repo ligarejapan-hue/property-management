@@ -149,11 +149,24 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(json.requested).toBe(2); // 手紙は2通(別住所の共有者)
   });
 
-  it("対象が50件を超えても切り詰めず全件生成する(50件上限は撤廃・truncated=false)", async () => {
+  it("filters 経路(propertyIds 無し)は従来どおり上限で切り詰める(無制限は propertyIds のみ・Codex P1)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const many = Array.from({ length: 55 }, (_, i) => ({ ...property, id: `p${i}` }));
     (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue(many as never);
     const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // filters:{} での無制限な有料AI生成/PII送信を防ぐため上限(MAX_GENERATE_ITEMS)で切り詰める。
+    expect(json.truncated).toBe(true);
+    expect(json.generated).toBe(50);
+  });
+
+  it("propertyIds 経路は50件を超えても切り詰めず全件生成する(50件上限は撤廃)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const ids55 = Array.from({ length: 55 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+    const many = Array.from({ length: 55 }, (_, i) => ({ ...property, id: `p${i}` }));
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue(many as never);
+    const res = await POST(req({ ...validBody, propertyIds: ids55 }) as never);
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.truncated).toBe(false);

@@ -18,7 +18,7 @@
 ## 機能2: 50件上限の撤廃＋件数確認
 
 - `sale-dm-letter/index.ts`: `generateLetters` の既定 `max` を無制限（`Number.POSITIVE_INFINITY`）に。`truncated` は常に false（フィールドは後方互換で残す）。`MAX_GENERATE_ITEMS` export は残すが既定の切り詰めには使わない。
-- `campaigns/route.ts`: `findMany` の `take: MAX_GENERATE_ITEMS + 1` を撤廃（`propertyIds` の配列上限=2000 が実質のガード）。
+- `campaigns/route.ts`: **`propertyIds`（明示選択）経路のみ**上限なしにする（配列上限=2000 が実質のガード）。**従来の `filters` 経路（`propertyIds` 無し）は上限を維持**（`take: MAX_GENERATE_ITEMS + 1` と `generateLetters({ max: MAX_GENERATE_ITEMS })`）＝`filters:{}` の1リクエストで数千通の課金/PII送信になるのを防ぐ（無制限にするには `propertyIds` を必須にする）。
 - `page.tsx`: 作成前 `window.confirm` に**件数**を明示：「選択した ◯件 にAIで手紙を生成します（◯通）。AI料金が発生し、オーナー情報がAI提供元へ送信されます。続けますか？」。上限撤廃後、この件数確認が唯一の歯止め。
 
 ## 機能3: DM送信回数で並べ替え＋抽出
