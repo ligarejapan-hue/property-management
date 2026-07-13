@@ -62,6 +62,7 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { POST } from "../../app/api/properties/sale-dm/campaigns/route";
 import { isSenderConfigured } from "../sale-dm-letter/sender";
+import { saleDmCampaignBodySchema } from "../validators-sale-dm";
 
 // getUserPermissions は { resource, action, granted } の配列を返す(dm-export route test と同形)。
 const grant = (...keys: string[]) => (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -161,18 +162,19 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(json.generated).toBe(50);
   });
 
-  it("propertyIds 経路も1回の生成は50件まで(超過は truncated・take せず対象物件数は正確)", async () => {
+  it("propertyIds 経路は選んだ物件の宛先を全て生成(≤50物件・truncated 無・take 無・Codex R8)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
-    const ids55 = Array.from({ length: 55 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
-    const many = Array.from({ length: 55 }, (_, i) => ({ ...property, id: `p${i}` }));
+    // 選択は配列上限=50物件で件数が閉じるため letter cap を掛けず、共有者ぶんも含め全宛先を生成する(物件を途中で分断しない)。
+    const ids = Array.from({ length: 40 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+    const many = Array.from({ length: 40 }, (_, i) => ({ ...property, id: `p${i}` }));
     const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
     findMany.mockResolvedValue(many as never);
-    const res = await POST(req({ ...validBody, propertyIds: ids55 }) as never);
+    const res = await POST(req({ ...validBody, propertyIds: ids }) as never);
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.truncated).toBe(true); // 50件超は先頭50件のみ生成
-    expect(json.generated).toBe(50);
-    expect(json.matchedProperties).toBe(55); // take しない=対象物件は全件把握(対象外件数を正確に)
+    expect(json.truncated).toBe(false); // 切り詰めない(選択=全生成)
+    expect(json.generated).toBe(40);
+    expect(json.matchedProperties).toBe(40); // take しない=対象物件は全件把握(対象外件数を正確に)
     expect(findMany.mock.calls[0][0].take).toBeUndefined(); // 明示選択は take しない
   });
 
@@ -329,6 +331,17 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(pmc.dmCampaign.create).toHaveBeenCalled(); // クレーム実行
     const claimArg = pmc.dmCampaign.create.mock.calls[0][0];
     expect(claimArg.data.idempotencyKey).toBe("key-3"); // キーを保存(生成前にクレーム)
+  });
+});
+
+describe("saleDmCampaignBodySchema: propertyIds は1回50物件まで", () => {
+  const base = { name: "x", confirmed: true, options: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low" } };
+  const uuid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+  it("50件は許可(=生成上限 MAX_GENERATE_ITEMS と一致)", () => {
+    expect(() => saleDmCampaignBodySchema.parse({ ...base, propertyIds: Array.from({ length: 50 }, (_, i) => uuid(i)) })).not.toThrow();
+  });
+  it("51件は弾く(一度に選べる物件は50件まで=切り詰め/分断を起こさない・Codex R8)", () => {
+    expect(() => saleDmCampaignBodySchema.parse({ ...base, propertyIds: Array.from({ length: 51 }, (_, i) => uuid(i)) })).toThrow();
   });
 });
 

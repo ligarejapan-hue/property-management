@@ -85,10 +85,10 @@ export async function POST(request: NextRequest) {
     // (B) 従来どおり絞り込み条件(filters)から送付可(send)物件を対象にする(後方互換)。手紙を作れるのは
     // 所有者に住所がある物件のみ(共通の mailableOwner)。
     const mailableOwner = { propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } } };
-    // 1回の生成は MAX_GENERATE_ITEMS(=50)件まで(同期生成ゆえ、大量一括はタイムアウト/冪等の失効による二重課金の
-    // リスク・Codex R4)。両経路とも生成は下の generateLetters max で50に切り詰め、超過分は truncated で通知する。
-    // 明示選択(propertyIds)経路だけは take せず全件取得し、「対象外(住所なし等)」件数を正確に数える
-    // (filters 経路は該当が数千件になり得るので取得も take:MAX+1 で絞る)。
+    // 1回の生成は最大 MAX_GENERATE_ITEMS(=50)物件(同期生成ゆえ大量一括はタイムアウト/冪等失効の二重課金リスク・Codex R4)。
+    // 明示選択(propertyIds)は配列上限=50物件で件数が閉じるため、その宛先(共有者ぶん含む)は letter cap 無しで全て生成し
+    // truncated を出さない=物件を途中で分断しない(Codex R8)。take もせず全件取得して「対象外(住所なし/送付可でない等)」を正確に数える。
+    // filters 経路は該当が数千件になり得るので take:MAX+1 で取得を絞り、生成も max=MAX で50通に切詰(truncated 通知)。
     const explicitSelection = !!(body.propertyIds && body.propertyIds.length > 0);
     // whereClause は buildPropertyListWhere の where と同型(既存実装に合わせ緩い型)。mgmt短絡時は null。
     let whereClause: Awaited<ReturnType<typeof buildPropertyListWhere>>["where"] | null;
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
     let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
     let truncated: boolean;
     try {
-      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg), max: MAX_GENERATE_ITEMS });
+      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg), max: explicitSelection ? undefined : MAX_GENERATE_ITEMS });
       drafts = result.drafts;
       truncated = result.truncated;
 
