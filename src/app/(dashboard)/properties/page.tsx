@@ -386,6 +386,13 @@ function PropertiesPageInner() {
     try {
       const json = await apiFetchProperties(params);
       setProperties(json.data);
+      // 選択(チェック)は「今表示している物件」だけに保つ。フィルタ/ページ/検索の変更で見えなくなった物件が
+      // selectedIds に残ると、売却DM作成時に意図しない物件へ有料AI生成+オーナーPII送信になり得る(Codex R7)。
+      const loadedIds = new Set((json.data as ApiProperty[]).map((p) => p.id));
+      setSelectedIds((prev) => {
+        const next = new Set([...prev].filter((id) => loadedIds.has(id)));
+        return next.size === prev.size ? prev : next; // 変化が無ければ同一参照で無駄な再描画を避ける
+      });
       setPagination(json.pagination as Pagination);
     } catch (err) {
       setError(err instanceof Error ? err.message : "データ取得に失敗しました");

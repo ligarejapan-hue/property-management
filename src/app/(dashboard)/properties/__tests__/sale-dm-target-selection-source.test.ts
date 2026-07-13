@@ -35,4 +35,8 @@ describe("properties page: 売却DM対象選択の配線", () => {
   it("一覧行に送信回数(dmSentCount)を表示する", () => {
     expect(src).toContain("dmSentCount");
   });
+
+  it("読み込んだ物件で選択(selectedIds)を絞り込み、見えない stale 選択を送らない(Codex R7)", () => {
+    expect(src).toContain("loadedIds.has(id)");
+  });
 });
