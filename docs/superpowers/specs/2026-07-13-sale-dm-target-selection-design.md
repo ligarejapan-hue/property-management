@@ -21,7 +21,7 @@
 当初は「50件上限の撤廃」を検討したが、同期生成のため大量一括はタイムアウト/冪等失効による二重課金リスクがある（@codex R1/R4）。**1回の生成は最大50通**。ただし手紙数で機械的に切ると共有者の多い物件が途中で分断され（宛先が欠けたまま保存→再バッチで二重生成・@codex R8）、逆に無制限にすると1物件の共有者多数で数百通に膨らむ（@codex R9-P1）。両方を避けるため **`capRecipientsByProperty` で「物件単位」に50通で切詰**する（物件を丸ごと含める/繰り越す。`recipients`/`meta` は物件ごとに連続している前提。1物件が単独で50通超でもその物件は生成せず繰り越す＝上限を絶対に超えない[@codex R10-P1]。後続の残り予算に収まる物件は引き続き詰める）:
 
 - 生成上限は両経路共通 `capRecipientsByProperty(recipients, meta, MAX_GENERATE_ITEMS)`。切詰時は `truncated=true`。
-- **選択（`propertyIds`）経路**: 配列上限=50物件（@codex R8）。`take` せず全件取得。
+- **選択（`propertyIds`）経路**: 配列上限=50物件（@codex R8）。`take` せず全件取得。切り詰めは **UIの選択順（`propertyIds` の並び）** で行う（`findMany` の `orderBy` に依存せず、ユーザーが見ていた並びの末尾から繰り越す・@codex R13）。
 - **`filters`（後方互換）経路**: 該当が数千件になり得るので `take: MAX_GENERATE_ITEMS + 1` で取得を絞る。
 - `matchedProperties` は **実際に宛先を作れた物件数**（`meta` の distinct `propertyId`）で数える。DBの `address:{not:""}` は空白のみの住所を通すが grouping は trim で skip するため、`properties.length` だと過大計上で「対象外」通知が出ず空キャンペーンへ誘導してしまう（@codex R9-P2）。
 - `page.tsx`: 作成前 `window.confirm` に選択件数を明示（AI料金・オーナー情報の外部送信の同意）。共有者が別住所の物件は手紙数>物件数になるため「◯件の物件（共有者ぶんで複数通になる場合あり）」と表現し、除外通知は物件数（`matchedProperties`）で数える。真の大量一括はバックグラウンド生成（別機能）が前提。

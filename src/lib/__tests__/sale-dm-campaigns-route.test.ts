@@ -186,6 +186,28 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(json.matchedProperties).toBe(2); // 対象物件は2件(両方 住所あり)。切詰は truncated で示す
   });
 
+  it("propertyIds は「選択リストの並び」で切り詰める(findMany の並びに依存しない・Codex R13)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const idA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const idB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const owners = (tag: string, n: number) => Array.from({ length: n }, (_, i) => ({
+      isPrimary: i === 0, relationship: null,
+      owner: { name: `${tag}-o${i}`, nameKana: null, zip: "1000001", address: `東京都〇〇区${tag}-${i}`, corporateNumber: null },
+    }));
+    const pA = { id: idA, address: "A", propertyType: "land", roomNo: null, propertyOwners: owners("A", 30) };
+    const pB = { id: idB, address: "B", propertyType: "land", roomNo: null, propertyOwners: owners("B", 30) };
+    // findMany は updatedAt 等で [pB, pA] の順に返す(ユーザーの選択順 [A,B] とは逆)。
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([pB as never, pA as never]);
+    const res = await POST(req({ ...validBody, propertyIds: [idA, idB] }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.generated).toBe(30); // 30+30>50 → 物件単位で30通に切詰
+    expect(json.truncated).toBe(true);
+    // 切り詰めは選択順(先頭=A)を優先。生成された draft の propertyId は全て idA(B は繰り越し)。
+    const draftPropertyIds = new Set(draftCreate.mock.calls.map((c) => c[0].data.propertyId));
+    expect(draftPropertyIds).toEqual(new Set([idA]));
+  });
+
   it("filters 経路(propertyIds 無し)は従来どおり上限で切り詰める(無制限は propertyIds のみ・Codex P1)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const many = Array.from({ length: 55 }, (_, i) => ({ ...property, id: `p${i}` }));

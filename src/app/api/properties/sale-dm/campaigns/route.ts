@@ -135,8 +135,19 @@ export async function POST(request: NextRequest) {
       take: explicitSelection ? undefined : MAX_GENERATE_ITEMS + 1,
     });
 
+    // 明示選択は UI が「表示していた順」で propertyIds を送る。findMany は orderBy(既定=updatedAt desc)で返すため、
+    // 上限超で物件単位に切り詰める際、ユーザーが見ていた並びの末尾でなく別の物件が落ちてしまう。propertyIds の順へ
+    // 並べ替え、切り詰め対象を「選択リストの並び」に一致させる(Codex R13)。filters 経路は orderBy のままでよい。
+    let orderedProperties = properties;
+    if (explicitSelection && body.propertyIds) {
+      const rank = new Map(body.propertyIds.map((id, i) => [id, i] as const));
+      orderedProperties = [...properties].sort(
+        (a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
+
     const { recipients, meta } = buildRecipientsFromProperties(
-      properties as never,
+      orderedProperties as never,
       ownerDisplayConfig,
     );
 
