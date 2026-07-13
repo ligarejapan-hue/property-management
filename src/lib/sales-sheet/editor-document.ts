@@ -24,7 +24,13 @@ import {
   PHOTO_GAP_MM,
   packPhotoCells,
 } from "./layout-engine";
-import { buildFooterBand } from "./footer-band";
+import {
+  buildFooterBand,
+  buildFooterTransactionElements,
+  readFooterData,
+  footerDataEqual,
+  type FooterBandData,
+} from "./footer-band";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
@@ -578,6 +584,44 @@ export function removeTableRow(
 
   const newEl: TableElement = { ...el, rows: el.rows.filter((_, i) => i !== index) };
   return replaceElement(state, idx, newEl);
+}
+
+// ---------------------------------------------------------------------------
+// 会社帯の取引情報（物件別6項目）の一括編集
+// ---------------------------------------------------------------------------
+
+/**
+ * 会社帯の物件別6項目(取引態様/広告/報酬/担当者/取引士/特記事項)をまとめて更新する。
+ * - 帯外枠 footer-band の矩形を帯領域として、取引条件/担当テーブル(+担当区切り線)だけを
+ *   buildFooterTransactionElements で再生成し、既存の取引系要素と差し替える。
+ * - 会社ブロック・写真・他要素・footer-divider-terms は不変。
+ * - footer-band が無い document(壊れた図面)では no-op(同一参照)。
+ * - 現状の6値(readFooterData)と等価(footerDataEqual)なら no-op(同一参照)＝手動配置も保持。
+ * - 要素順は footer-divider-terms の直後へ挿入して保つ。変更時 dirty=true。
+ */
+export function editFooterData(state: EditorState, data: FooterBandData): EditorState {
+  const { document } = state;
+  const band = document.elements.find((e) => e.id === "footer-band");
+  if (!band) return state;
+  if (footerDataEqual(readFooterData(document.elements), data)) return state;
+
+  const footer = { x: band.x, y: band.y, w: band.w, h: band.h };
+  const regenerated = buildFooterTransactionElements(footer, data);
+  const TX_IDS = new Set(["footer-terms-table", "footer-divider-staff", "footer-staff-table"]);
+
+  const elements: SalesSheetElement[] = [];
+  let inserted = false;
+  for (const el of document.elements) {
+    if (TX_IDS.has(el.id)) continue;
+    elements.push(el);
+    if (el.id === "footer-divider-terms") {
+      elements.push(...regenerated);
+      inserted = true;
+    }
+  }
+  if (!inserted) elements.push(...regenerated);
+
+  return { ...state, dirty: true, document: { ...document, elements } };
 }
 
 // ---------------------------------------------------------------------------
