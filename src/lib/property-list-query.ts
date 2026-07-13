@@ -154,12 +154,13 @@ export async function buildPropertyListWhere(
     if (dmSentMax === 0) {
       where.AND = [...(where.AND ?? []), { dmLogs: { none: {} } }];
     } else {
+      // where で絞らず全体で「N回超」を求める: 呼び出し側(dm-export 等)は buildPropertyListWhere の後に
+      // where を書き換える(dmStatus=send 強制など)ため、この時点の where でスコープすると最終クエリとズレて
+      // 誤った抽出になる(Codex R3)。全体で over を求め notIn で除外すれば、最終 where が何であれ「N回以下だけ」が
+      // 正しく残る(notIn は ID 除外のみ＝担当外物件の存在も漏らさない)。
       const over = await client.propertyDmLog.groupBy({
         by: ["propertyId"],
         _count: { propertyId: true },
-        // 現在のクエリ(可視スコープ＋絞り込み)に合致する物件のログだけを数える。全 property_dm_logs 走査を避ける
-        // (この時点の where は dmSentMax の notIn 追加より前＝循環しない・Codex P2)。
-        where: { property: where },
         having: { propertyId: { _count: { gt: dmSentMax } } },
       });
       const overIds = over.map((o) => o.propertyId);
