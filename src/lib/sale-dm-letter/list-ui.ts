@@ -33,7 +33,7 @@ export function buildSaleDmPartialNotice(res: {
   const lines: string[] = [];
   if ((res.excluded ?? 0) > 0) {
     lines.push(
-      `${res.excluded} 件は住所が無い等のため対象外で、DMは作成されませんでした。`,
+      `${res.excluded} 件は送付不可・住所が無い等のため対象外で、DMは作成されませんでした。`,
     );
   }
   if (res.truncated) {

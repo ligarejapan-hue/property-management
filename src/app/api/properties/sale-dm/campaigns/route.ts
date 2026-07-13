@@ -93,9 +93,10 @@ export async function POST(request: NextRequest) {
     let whereClause: Awaited<ReturnType<typeof buildPropertyListWhere>>["where"] | null;
     let orderBy: ReturnType<typeof buildPropertyListOrderBy> = { updatedAt: "desc" };
     if (body.propertyIds && body.propertyIds.length > 0) {
-      // チェックで選んだ物件が対象。field_staff の可視スコープは適用するが、dmStatus は強制しない
-      // (ユーザーが明示的に選んだものを対象にする)。住所なし/権限外/アーカイブ済は結果的に除外される。
-      whereClause = { id: { in: body.propertyIds }, isArchived: false, ...mailableOwner };
+      // チェックで選んだ物件が対象。field_staff の可視スコープは適用する。dmStatus は send/hold(未判断)は許すが、
+      // no_send(送付不可=送らない設定)は明示オプトアウトなので除外する(誤って全選択で送らない・Codex P1)。
+      // 住所なし/権限外/アーカイブ済/送付不可 は結果的に対象外になり、件数を UI で通知する。
+      whereClause = { id: { in: body.propertyIds }, isArchived: false, dmStatus: { not: "no_send" }, ...mailableOwner };
       const scope = propertyVisibilityScopeWhere(session);
       if (scope) whereClause.AND = [scope];
     } else {

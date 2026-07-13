@@ -35,6 +35,10 @@ describe("property-list-query: DM送信回数の並べ替え/抽出", () => {
     const client = { propertyDmLog: { groupBy } } as never;
     const { where } = await buildPropertyListWhere(q, session, client);
     expect(groupBy).toHaveBeenCalledTimes(1);
+    // 現在のクエリの物件だけを数える(全ログ走査を避ける・Codex P2)。
+    expect(groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { property: expect.anything() } }),
+    );
     expect(where.AND).toEqual(
       expect.arrayContaining([{ id: { notIn: ["p-over-1", "p-over-2"] } }]),
     );

@@ -157,6 +157,9 @@ export async function buildPropertyListWhere(
       const over = await client.propertyDmLog.groupBy({
         by: ["propertyId"],
         _count: { propertyId: true },
+        // 現在のクエリ(可視スコープ＋絞り込み)に合致する物件のログだけを数える。全 property_dm_logs 走査を避ける
+        // (この時点の where は dmSentMax の notIn 追加より前＝循環しない・Codex P2)。
+        where: { property: where },
         having: { propertyId: { _count: { gt: dmSentMax } } },
       });
       const overIds = over.map((o) => o.propertyId);
