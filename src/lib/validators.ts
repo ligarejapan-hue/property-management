@@ -109,19 +109,34 @@ export const propertyListQuerySchema = z.object({
 
 // ---------- Create property ----------
 
+// 入力バリデーション(A2 UI総点検): 明らかな不正値の保存を防ぐ。空/未指定は許可(任意項目)。
+// 既存データの編集を壊さないよう、値がある時だけ形式を検査する(郵便番号=7桁/不動産番号=数字/緯度経度=範囲)。
+const optionalPostalCode = z
+  .string()
+  .optional()
+  .nullable()
+  .refine((v) => v == null || v === "" || /^\d{3}-?\d{4}$/.test(v), "郵便番号は7桁の数字で入力してください(例: 1000001 / 100-0001)");
+const optionalRealEstateNumber = z
+  .string()
+  .optional()
+  .nullable()
+  .refine((v) => v == null || v === "" || /^\d{1,13}$/.test(v), "不動産番号は数字(最大13桁)で入力してください");
+const optionalLatitude = z.number().min(-90, "緯度は -90〜90 の範囲で入力してください").max(90, "緯度は -90〜90 の範囲で入力してください").optional().nullable();
+const optionalLongitude = z.number().min(-180, "経度は -180〜180 の範囲で入力してください").max(180, "経度は -180〜180 の範囲で入力してください").optional().nullable();
+
 export const createPropertySchema = z.object({
   propertyType: z.enum(PROPERTY_TYPE_VALUES),
   address: z.string().min(1, "住所は必須です"),
-  postalCode: z.string().optional().nullable(),
+  postalCode: optionalPostalCode,
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
-  realEstateNumber: z.string().optional().nullable(),
+  realEstateNumber: optionalRealEstateNumber,
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).default("unconfirmed"),
   dmStatus: z.enum(["send", "hold", "no_send"]).default("hold"),
   caseStatus: z.enum(CASE_STATUS_VALUES).default("new_case"),
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
-  gpsLat: z.number().optional().nullable(),
-  gpsLng: z.number().optional().nullable(),
+  gpsLat: optionalLatitude,
+  gpsLng: optionalLongitude,
   note: z.string().optional().nullable(),
   assignedTo: z.string().uuid().optional().nullable(),
 });
@@ -131,10 +146,10 @@ export const createPropertySchema = z.object({
 export const convertPinToPropertySchema = z.object({
   propertyType: z.enum(PROPERTY_TYPE_VALUES),
   address: z.string().min(1, "住所は必須です"),
-  postalCode: z.string().optional().nullable(),
+  postalCode: optionalPostalCode,
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
-  realEstateNumber: z.string().optional().nullable(),
+  realEstateNumber: optionalRealEstateNumber,
 });
 export type ConvertPinToPropertyInput = z.infer<typeof convertPinToPropertySchema>;
 
@@ -143,16 +158,16 @@ export type ConvertPinToPropertyInput = z.infer<typeof convertPinToPropertySchem
 export const updatePropertySchema = z.object({
   propertyType: z.enum(PROPERTY_TYPE_VALUES).optional(),
   address: z.string().min(1).optional(),
-  postalCode: z.string().optional().nullable(),
+  postalCode: optionalPostalCode,
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
-  realEstateNumber: z.string().optional().nullable(),
+  realEstateNumber: optionalRealEstateNumber,
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
-  gpsLat: z.number().optional().nullable(),
-  gpsLng: z.number().optional().nullable(),
+  gpsLat: optionalLatitude,
+  gpsLng: optionalLongitude,
   zoningDistrict: z.string().optional().nullable(),
   buildingCoverageRatio: z.number().optional().nullable(),
   floorAreaRatio: z.number().optional().nullable(),

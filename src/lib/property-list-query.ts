@@ -34,6 +34,13 @@ export interface BuildPropertyListWhereResult {
   mgmtIdTrimmed: string;
 }
 
+/** "YYYY-MM-DD" を JST(+09:00)の指定時刻の Date にする。日付でない/不正な日付は null(=フィルタ無効)。 */
+function jstDayBoundary(day: string | undefined, time: string): Date | null {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const dt = new Date(`${day}T${time}+09:00`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 /**
  * 一覧クエリから Prisma where 条件を組み立てる。
  * mgmtId 検索のために非同期（helper を呼ぶ）。
@@ -91,9 +98,15 @@ export async function buildPropertyListWhere(
   }
 
   if (updatedFrom || updatedTo) {
-    where.updatedAt = {};
-    if (updatedFrom) where.updatedAt.gte = new Date(updatedFrom);
-    if (updatedTo) where.updatedAt.lte = new Date(updatedTo);
+    // 日付フィルタは JST の一日境界で解釈する。new Date("YYYY-MM-DD") は UTC 00:00 になり、JST 表示と9時間ズレて
+    // 「今日更新分」が 0 件になっていた(A1 UI総点検)。JST(+09:00)の日の始まり/終わりに固定する(不正な日付は無視)。
+    const gte = jstDayBoundary(updatedFrom, "00:00:00.000");
+    const lte = jstDayBoundary(updatedTo, "23:59:59.999");
+    if (gte || lte) {
+      where.updatedAt = {};
+      if (gte) where.updatedAt.gte = gte;
+      if (lte) where.updatedAt.lte = lte;
+    }
   }
 
   // 管理ID（取込元 fileName / rowNumber / __sourceRef）検索。

@@ -150,10 +150,16 @@ export default function PropertyEditForm({
     setError(null);
 
     try {
-      // Build update payload
+      // Build update payload — 変更した項目だけ送る(PATCH)。既存の(CSV取込等で入った)不正値が残る項目を、
+      // 無関係な項目の編集のたびに再送すると入力バリデーション(A2)で 422 になり「その物件が一切編集できない」
+      // 状態に陥る。初期値(property)と一致する項目は送らないことでこれを防ぎ、未編集項目の上書き(競合)も避ける。
       const payload: Record<string, unknown> = { version: property.version };
+      const propRecord = property as unknown as Record<string, unknown>;
       for (const f of FORM_FIELDS) {
-        const raw = values[f.key];
+        const raw = values[f.key] ?? "";
+        const initialRaw = propRecord[f.key];
+        const initialStr = initialRaw != null ? String(initialRaw) : "";
+        if (raw === initialStr) continue; // 未変更 → 送らない
         if (f.type === "number") {
           payload[f.key] = raw ? Number(raw) : null;
         } else {
