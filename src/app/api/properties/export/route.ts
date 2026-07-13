@@ -263,6 +263,7 @@ export async function GET(request: NextRequest) {
       "updatedTo",
       "includeArchived",
       "hasWarning",
+      "dmSentMax",
       "sortBy",
       "sortOrder",
     ] as const;
