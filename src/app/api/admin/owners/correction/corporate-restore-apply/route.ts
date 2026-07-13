@@ -77,6 +77,18 @@ type ItemStatus =
 
 type OwnerDisplayConfig = Awaited<ReturnType<typeof getOwnerDisplayConfig>>;
 
+/**
+ * lookup の postCode (7桁ハイフンなし) を Owner.zip の既存形式 (XXX-XXXX) に整形する。
+ * per-owner corporate-apply と同一実装(未整形のまま保存すると品質監査が
+ * zip_unformatted として再検出してしまう)。7桁以外は null。
+ */
+function formatPostCodeToZip(postCode: string | null): string | null {
+  if (!postCode) return null;
+  const digits = postCode.replace(/\D/g, "");
+  if (digits.length !== 7) return null;
+  return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+}
+
 async function applyOne(
   ownerId: string,
   version: number,
@@ -171,7 +183,11 @@ async function applyOne(
     version: { increment: 1 },
   };
   if (newAddress != null) data.address = newAddress;
-  if (addressMode === "nta" && record.postCode) data.zip = record.postCode;
+  if (addressMode === "nta") {
+    // Codex P2: 既存 corporate-apply と同じ XXX-XXXX 形式に整形してから保存する。
+    const formattedZip = formatPostCodeToZip(record.postCode);
+    if (formattedZip) data.zip = formattedZip;
+  }
 
   // 楽観ロック: version に加えて読み取り時点の corporateNumber をスナップショット条件に
   // する。国税庁 lookup(最大 ~8s)の待機中に「version を bump せず corporateNumber を

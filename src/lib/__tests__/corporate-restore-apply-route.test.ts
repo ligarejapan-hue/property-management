@@ -233,7 +233,7 @@ describe("分断型の反映", () => {
     });
     expect(call.data.name).toBe("株式会社リガーレ商事");
     expect(call.data.address).toBe("東京都渋谷区代々木一丁目1番1号");
-    expect(call.data.zip).toBe("1510053");
+    expect(call.data.zip).toBe("151-0053"); // XXX-XXXX 形式に整形して保存
     expect(call.data.companyRegistryNumber).toBe("011001059442");
     expect(call.data.corporateNumber).toMatch(/^\d011001059442$/);
     expect(call.data.version).toEqual({ increment: 1 });
