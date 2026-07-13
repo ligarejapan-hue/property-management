@@ -13,7 +13,37 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
+
+  // セッション取得が終わるまで/失敗して未認証になった時に、役割を "VIEWER" と誤決定しない。
+  // 誤決定すると管理者が一瞬「閲覧者」に降格して管理メニューが消え、無限スピナーのようにも見える(A3 UI総点検)。
+  if (!USE_MOCK && status === "loading") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="flex flex-col items-center gap-3 text-gray-500 dark:text-gray-400">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-500 dark:border-gray-700 dark:border-t-indigo-400" />
+          <p className="text-sm">読み込み中…</p>
+        </div>
+      </div>
+    );
+  }
+  if (!USE_MOCK && status === "unauthenticated") {
+    // ログイン必須画面での未認証=セッション切れ or 取得失敗。黙って閲覧者に降格せず、再ログインへ明確に誘導する。
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 p-6 dark:bg-gray-950">
+        <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <p className="mb-1 text-base font-semibold text-gray-900 dark:text-gray-100">セッションが切れました</p>
+          <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">通信状況で一時的に起きることもあります。ログインし直してください。</p>
+          <a
+            href={`/login?callbackUrl=${encodeURIComponent(pathname ?? "/")}`}
+            className="inline-block rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+          >
+            ログイン画面へ
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   const userName = USE_MOCK ? "モック管理者" : (session?.user?.name ?? "ユーザー");
   const userRole = USE_MOCK ? "admin" : ((session?.user as { role?: string } | undefined)?.role ?? "VIEWER");

@@ -25,7 +25,6 @@ import {
   packPhotoCells,
 } from "./layout-engine";
 import {
-  buildFooterBand,
   buildFooterTransactionElements,
   readFooterData,
   footerDataEqual,
@@ -762,20 +761,9 @@ export function autoBalanceLayout(state: EditorState): EditorState {
     company: L.company,
     "company-details": L.companyDetails,
   };
-  // 会社帯(footer-*)も再バランス対象に含める：手で動かした帯要素を正規位置へ戻す
-  // （@codex）。帯要素の座標は data 非依存ゆえ、全項目を埋めた probe で全 footer-* の
-  // 正規座標を得て合流する（content は使わず座標のみ利用）。doc に無い id は下の
-  // ループが idx===-1 で skip する。
-  for (const el of buildFooterBand(L.footer, {
-    transactionType: "-",
-    adType: "-",
-    compensation: "-",
-    staff: "-",
-    agent: "-",
-    specialNotes: "-",
-  })) {
-    templateRects[el.id] = { x: el.x, y: el.y, w: el.w, h: el.h };
-  }
+  // 会社帯(footer-*)は自動調整の対象に含めない：ユーザーが編集画面で手動配置した
+  // 会社帯レイアウトを「レイアウト自動調整」で消さずに保持するため（プロダクト判断）。
+  // 会社帯は作成時の位置から出発し、以後の配置はユーザーの手動編集を優先する。
 
   let changed = false;
   const next = document.elements.slice() as SalesSheetElement[];

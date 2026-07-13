@@ -10,11 +10,29 @@ describe("buildFooterBand", () => {
   it("会社ブロックの各文言を出す", () => {
     const els = buildFooterBand(FOOTER, { transactionType: "仲介" });
     expect(byId(els, "footer-name-ja").content).toBe(COMPANY_INFO.nameJa);
-    expect(byId(els, "footer-name-en").content).toBe(COMPANY_INFO.nameEn);
     expect(byId(els, "footer-license").content).toContain("東京都知事免許(1)第108344号");
     expect(byId(els, "footer-email").content).toContain(COMPANY_INFO.email);
     expect(byId(els, "footer-hp").content).toContain(COMPANY_INFO.hp);
     expect(byId(els, "footer-address").content).toContain(COMPANY_INFO.address);
+  });
+  it("company を渡すとその会社名/連絡先が入る", () => {
+    const els = buildFooterBand(FOOTER, { transactionType: "仲介" }, {
+      nameJa: "株式会社テスト", license: "免許X", tel: "01-1", fax: "02-2",
+      email: "a@b.jp", hp: "https://x.jp/", address: "000-0000 テスト町1",
+    });
+    const nameJa = els.find((e) => e.id === "footer-name-ja");
+    expect(nameJa && "content" in nameJa && nameJa.content).toBe("株式会社テスト");
+  });
+  it("英字社名・保証協会・所属協会の要素は出力されない", () => {
+    const els = buildFooterBand(FOOTER, {});
+    expect(els.find((e) => e.id === "footer-name-en")).toBeUndefined();
+    expect(els.find((e) => e.id === "footer-guarantee")).toBeUndefined();
+    expect(els.find((e) => e.id === "footer-member")).toBeUndefined();
+  });
+  it("company 未指定でも既定(COMPANY_INFO)で会社名が入る（後方互換）", () => {
+    const els = buildFooterBand(FOOTER, {});
+    const nameJa = els.find((e) => e.id === "footer-name-ja");
+    expect(nameJa && "content" in nameJa && nameJa.content).toBeTruthy();
   });
   it("取引条件テーブルに取引態様/広告/報酬を流し込む", () => {
     const els = buildFooterBand(FOOTER, { transactionType: "仲介", adType: "不可", compensation: "相談" });

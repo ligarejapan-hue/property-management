@@ -89,6 +89,17 @@ const MM_TO_PX = 96 / 25.4;
  * Task H: EditorToolbar with save (PUT + optimistic lock), export (POST blob),
  *   delete (DELETE + navigate). Dirty indicator.
  */
+/**
+ * セッション切れ検出(A4 UI総点検): 未認証時に API が /login へリダイレクト(res.redirected)または 401 を返した
+ * のを見ずに res.json()/blob() すると、HTML を掴んで「Unexpected token '<' ... is not valid JSON」等の生エラーに
+ * なり、再ログイン導線も無かった。分かりやすい再ログイン案内に変換する。
+ */
+function assertAuthedResponse(res: Response): void {
+  if (res.status === 401 || res.redirected) {
+    throw new Error("セッションが切れました。別タブでログインし直してから、もう一度お試しください");
+  }
+}
+
 export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   const router = useRouter();
   const [editorState, setEditorState] = useState<EditorState>({
@@ -210,8 +221,13 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       },
     );
     if (res.status === 409) throw new Error("他で更新されました。再読込してください");
+    assertAuthedResponse(res);
     if (!res.ok) throw new Error("保存に失敗しました");
-    const data = (await res.json()) as { updatedAt: string };
+    // セッション切れで HTML が返っても JSON.parse で落ちない(生エラーを出さず再ログイン案内にする)。
+    const data = (await res.json().catch(() => null)) as { updatedAt: string } | null;
+    if (!data || typeof data.updatedAt !== "string") {
+      throw new Error("セッションが切れた可能性があります。別タブでログインし直してから保存してください");
+    }
     setSavedAt(data.updatedAt);
     savedAtRef.current = data.updatedAt; // keep the export version check current
     return await new Promise<boolean>((resolve) => {
@@ -238,6 +254,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         );
         if (res.status === 409) throw new Error("他で更新されました。再読込してください");
         if (res.status === 503) throw new Error("PDF生成エンジン未準備");
+        assertAuthedResponse(res);
         if (!res.ok) throw new Error("出力に失敗しました");
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
@@ -256,6 +273,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       `/api/properties/${initial.propertyId}/sales-sheets/${initial.sheetId}`,
       { method: "DELETE" },
     );
+    assertAuthedResponse(res);
     if (!res.ok) throw new Error("削除に失敗しました");
     router.push(`/properties/${initial.propertyId}`);
   }

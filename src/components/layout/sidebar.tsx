@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
+  Link2,
   Building2,
   Building,
   Users,
@@ -131,6 +132,11 @@ const adminNavItems: NavItem[] = [
     href: "/admin/sale-dm-settings",
     icon: <Mail className="h-5 w-5" />,
   },
+  {
+    label: "会社情報",
+    href: "/admin/company-settings",
+    icon: <Building2 className="h-5 w-5" />,
+  },
 ];
 
 /** データ品質チェック: 所有者データの一括点検/補正ツール群。 */
@@ -139,6 +145,13 @@ const dataQualityNavItems: NavItem[] = [
     label: "所有者補正候補",
     href: "/admin/owners/correction",
     icon: <UserCog className="h-5 w-5" />,
+  },
+  {
+    // 法人番号の作業場所(所有者補正候補内のタブ)への直行ショートカット。
+    // href にクエリを含むため isActive(パス名比較)では光らない=補正候補側が光る(意図どおり)。
+    label: "法人番号紐づけ",
+    href: "/admin/owners/correction?tab=corporate_restore",
+    icon: <Link2 className="h-5 w-5" />,
   },
   {
     label: "表示名監査",
@@ -156,7 +169,7 @@ const dataQualityNavItems: NavItem[] = [
     icon: <ScanText className="h-5 w-5" />,
   },
   {
-    label: "品質監査",
+    label: "氏名・連絡先チェック",
     href: "/admin/owners/quality-audit",
     icon: <ClipboardCheck className="h-5 w-5" />,
   },
