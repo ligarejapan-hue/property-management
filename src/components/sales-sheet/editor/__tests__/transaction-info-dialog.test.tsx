@@ -32,4 +32,18 @@ describe("TransactionInfoDialog", () => {
     expect(html).toContain("専属専任");
     expect(html).toContain("税込3%+6万円");
   });
+
+  it("選択肢に無い既存の取引態様/広告も欄に表示して失わない", () => {
+    const html = renderToStaticMarkup(
+      <TransactionInfoDialog
+        open
+        initial={{ ...initial, transactionType: "専任媒介", adType: "特殊広告" }}
+        onApply={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    // 選択肢外の現在値は一時 option として描画され、空欄化して上書き喪失しない
+    expect(html).toContain("専任媒介");
+    expect(html).toContain("特殊広告");
+  });
 });

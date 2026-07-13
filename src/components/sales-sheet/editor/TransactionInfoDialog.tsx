@@ -5,6 +5,25 @@ import type { FooterBandData } from "@/lib/sales-sheet/footer-band";
 import { TRANSACTION_TYPE, AD_TYPE, COMPENSATION } from "@/lib/sales-sheet/option-master";
 
 /**
+ * select の選択肢を組む。「選択してください」＋プリセット選択肢に加え、現在値が
+ * プリセットに無い(旧データ/作成APIが受ける任意文字列)場合はその値の一時 option を
+ * 先頭に足す。これが無いと選択肢外の既存値は select が空欄表示になり、ユーザーが
+ * 「未設定」と誤認して上書き＝値を黙って失うため。
+ */
+function SelectOptions({ value, options }: { value: string; options: readonly string[] }) {
+  const inList = (options as readonly string[]).includes(value);
+  return (
+    <>
+      <option value="">選択してください</option>
+      {value !== "" && !inList && <option value={value}>{value}</option>}
+      {options.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+    </>
+  );
+}
+
+/**
  * 会社帯の物件別6項目(取引態様/広告/報酬/担当者/取引士/特記事項)を
  * まとめて編集するモーダル。開いた時点の initial を初期値とし、「適用」で
  * onApply(現在値) を1回だけ呼ぶ(帯の取引部分の再生成は親の editFooterData 側)。
@@ -48,10 +67,7 @@ export function TransactionInfoDialog({
               onChange={(e) => set({ transactionType: e.target.value })}
               className={fieldCls}
             >
-              <option value="">選択してください</option>
-              {TRANSACTION_TYPE.map((o) => (
-                <option key={o} value={o}>{o}</option>
-              ))}
+              <SelectOptions value={values.transactionType ?? ""} options={TRANSACTION_TYPE} />
             </select>
           </div>
 
@@ -64,10 +80,7 @@ export function TransactionInfoDialog({
               onChange={(e) => set({ adType: e.target.value })}
               className={fieldCls}
             >
-              <option value="">選択してください</option>
-              {AD_TYPE.map((o) => (
-                <option key={o} value={o}>{o}</option>
-              ))}
+              <SelectOptions value={values.adType ?? ""} options={AD_TYPE} />
             </select>
           </div>
 
