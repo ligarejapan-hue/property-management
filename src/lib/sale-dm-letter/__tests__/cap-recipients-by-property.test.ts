@@ -45,12 +45,19 @@ describe("capRecipientsByProperty", () => {
     expect(r.truncated).toBe(true);
   });
 
-  it("先頭の1物件だけで上限超なら、その物件は分断せず丸ごと出す(共有者数で有界)", () => {
-    // p1=60 (>50) → p1 を丸ごと(60通)。単一物件は途中で切らない。後続 p2 は落とす。
+  it("1物件が単独で上限超なら、その物件は生成せず繰り越し、後続の収まる物件を詰める(Codex R10-P1)", () => {
+    // p1=60 (>50) は繰り越し=上限を超える課金/PII送信をしない。p2=5 は残り予算に収まるので生成。
     const { recipients, meta } = concat(block("p1", 60), block("p2", 5));
     const r = capRecipientsByProperty(recipients, meta, 50);
-    expect(pids(r)).toEqual(new Set(["p1"]));
-    expect(r.recipients).toHaveLength(60);
+    expect(pids(r)).toEqual(new Set(["p2"]));
+    expect(r.recipients).toHaveLength(5);
+    expect(r.truncated).toBe(true);
+  });
+
+  it("単独で上限超の物件だけの選択は 0 件生成=上限を絶対に超えない(Codex R10-P1)", () => {
+    const { recipients, meta } = block("p1", 80); // 80通 > 50、他に物件なし
+    const r = capRecipientsByProperty(recipients, meta, 50);
+    expect(r.recipients).toHaveLength(0);
     expect(r.truncated).toBe(true);
   });
 

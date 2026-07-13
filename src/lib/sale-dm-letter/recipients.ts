@@ -72,30 +72,33 @@ export function buildRecipientsFromProperties(
   return { recipients, meta };
 }
 
-// 生成(課金)を最大 max 通に抑える。ただし物件を途中で分断しない=物件単位で丸ごと含める/落とす。
-// 共有者が別住所に多数いる1物件が数百通に膨らむ同期生成の暴走(Codex R9-P1)を防ぎつつ、ある物件だけ宛先が
-// 欠けたまま保存され再バッチで二重生成される事故(Codex R8)も防ぐ。recipients と meta は buildRecipientsFromProperties
-// が物件ごとに連続して積むため、物件境界での slice が成立する前提。max 通に収まらない先頭1物件だけは分断を避けて
-// 丸ごと生成する(選択した1物件は必ず出す。共有者数で有界)。
+// 生成(課金)を最大 max 通に抑える。物件を途中で分断せず、物件単位で「丸ごと入れる/今回は繰り越す」。
+// 共有者が別住所に多数いる1物件が数百通に膨らむ同期生成の暴走(Codex R9-P1/R10-P1)を防ぎ、かつ、ある物件だけ
+// 宛先が欠けたまま保存され再バッチで二重生成される事故(Codex R8)も防ぐ。1物件が単独で上限を超える場合もその物件は
+// 生成せず繰り越す(=上限を超える有料生成/PII外部送信をしない)。後続の(残り予算に収まる)物件は引き続き詰める。
+// recipients と meta は buildRecipientsFromProperties が物件ごとに連続して積む前提。
 export function capRecipientsByProperty(
   recipients: LetterRecipient[],
   meta: RecipientMeta[],
   max: number,
 ): { recipients: LetterRecipient[]; meta: RecipientMeta[]; truncated: boolean } {
   if (recipients.length <= max) return { recipients, meta, truncated: false };
-  let cut = 0;
+  const outRecipients: LetterRecipient[] = [];
+  const outMeta: RecipientMeta[] = [];
+  let used = 0;
+  let truncated = false;
   let i = 0;
   while (i < meta.length) {
     const pid = meta[i].propertyId;
     let j = i;
     while (j < meta.length && meta[j].propertyId === pid) j++; // 物件 pid のブロック [i, j)
-    if (j <= max) {
-      cut = j; // 丸ごと含めても max 以内=採用して次の物件へ
-      i = j;
+    if (used + (j - i) <= max) {
+      for (let k = i; k < j; k++) { outRecipients.push(recipients[k]); outMeta.push(meta[k]); } // 丸ごと収まる=採用
+      used += j - i;
     } else {
-      if (cut === 0) cut = j; // 先頭物件だけで超過=その1物件は分断せず丸ごと出す
-      break; // これ以上足すと超過=直前の物件境界で打ち切り
+      truncated = true; // 残り予算に収まらない物件は今回は生成しない(繰り越し)。分断も上限超過もしない
     }
+    i = j;
   }
-  return { recipients: recipients.slice(0, cut), meta: meta.slice(0, cut), truncated: cut < recipients.length };
+  return { recipients: outRecipients, meta: outMeta, truncated };
 }

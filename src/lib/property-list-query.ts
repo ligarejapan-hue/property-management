@@ -147,27 +147,11 @@ export async function buildPropertyListWhere(
     ];
   }
 
-  // DM送信回数(PropertyDmLog 件数)で「N回以下」に絞る。列を持たないためリレーション件数で判定する。
-  // 0回=未送信は none で効率的に。1回以上は groupBy で「N回超」の propertyId を求め id notIn で除外する
-  // (送信0回の物件も残すため in ではなく notIn 方式)。field_staff スコープは上の AND で別途効くので可視範囲は保たれる。
-  if (dmSentMax !== undefined) {
-    if (dmSentMax === 0) {
-      where.AND = [...(where.AND ?? []), { dmLogs: { none: {} } }];
-    } else {
-      // where で絞らず全体で「N回超」を求める: 呼び出し側(dm-export 等)は buildPropertyListWhere の後に
-      // where を書き換える(dmStatus=send 強制など)ため、この時点の where でスコープすると最終クエリとズレて
-      // 誤った抽出になる(Codex R3)。全体で over を求め notIn で除外すれば、最終 where が何であれ「N回以下だけ」が
-      // 正しく残る(notIn は ID 除外のみ＝担当外物件の存在も漏らさない)。
-      const over = await client.propertyDmLog.groupBy({
-        by: ["propertyId"],
-        _count: { propertyId: true },
-        having: { propertyId: { _count: { gt: dmSentMax } } },
-      });
-      const overIds = over.map((o) => o.propertyId);
-      if (overIds.length > 0) {
-        where.AND = [...(where.AND ?? []), { id: { notIn: overIds } }];
-      }
-    }
+  // DM送信回数フィルタは「未送信(0回)」のみ。dmLogs none でネイティブに絞れる(大規模でも高速・ID materialize 無し)。
+  // 「N回以下(1/2/3)」は列を持たず groupBy+id notIn になり、DM が多い本番では巨大な ID リストを生んでタイムアウト
+  // し得たため廃止した(送信回数の並べ替え sortBy=dmSendCount で代替・@codex R10-P2 + ユーザー判断)。
+  if (dmSentMax === 0) {
+    where.AND = [...(where.AND ?? []), { dmLogs: { none: {} } }];
   }
 
   return { where, mgmtShortCircuitEmpty, mgmtHitCount, mgmtIdTrimmed };

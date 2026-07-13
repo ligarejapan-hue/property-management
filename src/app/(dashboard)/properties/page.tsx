@@ -932,9 +932,6 @@ function PropertiesPageInner() {
         >
           <option value="">送信回数: すべて</option>
           <option value="0">未送信（0回）</option>
-          <option value="1">1回以下</option>
-          <option value="2">2回以下</option>
-          <option value="3">3回以下</option>
         </select>
 
         <div className="relative min-w-[220px]">

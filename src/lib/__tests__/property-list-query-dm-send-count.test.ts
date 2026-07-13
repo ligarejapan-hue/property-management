@@ -27,27 +27,10 @@ describe("property-list-query: DM送信回数の並べ替え/抽出", () => {
     expect(groupBy).not.toHaveBeenCalled();
   });
 
-  it("dmSentMax=2 → N回超の物件を groupBy で除外(id notIn)", async () => {
-    const q = propertyListQuerySchema.parse({ dmSentMax: "2" });
-    const groupBy = vi
-      .fn()
-      .mockResolvedValue([{ propertyId: "p-over-1" }, { propertyId: "p-over-2" }]);
-    const client = { propertyDmLog: { groupBy } } as never;
-    const { where } = await buildPropertyListWhere(q, session, client);
-    expect(groupBy).toHaveBeenCalledTimes(1);
-    expect(where.AND).toEqual(
-      expect.arrayContaining([{ id: { notIn: ["p-over-1", "p-over-2"] } }]),
-    );
-  });
-
-  it("dmSentMax=2 で N回超が0件 → 余計な id 条件を足さない", async () => {
-    const q = propertyListQuerySchema.parse({ dmSentMax: "2" });
-    const client = { propertyDmLog: { groupBy: vi.fn().mockResolvedValue([]) } } as never;
-    const { where } = await buildPropertyListWhere(q, session, client);
-    const hasIdNotIn = (where.AND ?? []).some(
-      (c: { id?: { notIn?: unknown } }) => c.id && "notIn" in (c.id ?? {}),
-    );
-    expect(hasIdNotIn).toBe(false);
+  it("dmSentMax は 0(未送信)のみ許可。N回以下(1/2/3)は廃止=スキーマが弾く(@codex R10-P2)", () => {
+    expect(propertyListQuerySchema.parse({ dmSentMax: "0" }).dmSentMax).toBe(0);
+    expect(() => propertyListQuerySchema.parse({ dmSentMax: "1" })).toThrow();
+    expect(() => propertyListQuerySchema.parse({ dmSentMax: "3" })).toThrow();
   });
 
   it("dmSentMax 未指定 → DM送信回数の絞りを足さない", async () => {
