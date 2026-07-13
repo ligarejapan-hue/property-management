@@ -1111,3 +1111,20 @@ model RegistryFetchConfig {
 
   @@map("registry_fetch_config")
 }
+
+// 会社情報（会社帯）の設定保管。管理画面から編集。1行のみ(id="singleton")。全項目 非秘匿・平文。
+// 未設定(null/空)は company-info.ts の COMPANY_INFO をフォールバック(resolveCompanyProfile)。
+model CompanyProfile {
+  id          String   @id @default("singleton")
+  nameJa      String?  @map("name_ja")
+  license     String?
+  tel         String?
+  fax         String?
+  email       String?
+  hp          String?
+  address     String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id") @db.Uuid
+
+  @@map("company_profile")
+}

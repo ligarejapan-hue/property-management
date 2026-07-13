@@ -361,4 +361,21 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(doc.page.orientation).toBe("landscape");
     expect(salesSheetDocumentSchema.safeParse(doc).success).toBe(true);
   });
+
+  it("input.company が会社帯へ流れる（既定 COMPANY_INFO を上書き）", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      company: {
+        nameJa: "株式会社ABC",
+        license: "免許L",
+        tel: "01-0000-0000",
+        fax: "02-0000-0000",
+        email: "e@x.jp",
+        hp: "https://x.jp/",
+        address: "000-0000 テスト町1",
+      },
+      overrides: {},
+    });
+    expect(findEl(doc, "footer-name-ja")).toMatchObject({ content: "株式会社ABC" });
+  });
 });

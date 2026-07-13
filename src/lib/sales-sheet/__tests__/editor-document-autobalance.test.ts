@@ -9,7 +9,6 @@
 import { describe, it, expect } from "vitest";
 import { type EditorState, autoBalanceLayout, autoArrangePhotos } from "../editor-document";
 import { buildSaleHouseDocument } from "../build-document";
-import { buildFooterBand } from "../footer-band";
 import {
   computeSpecSheetLayout,
   DEFAULT_FOOTER_H,
@@ -205,7 +204,7 @@ describe("autoBalanceLayout", () => {
     expect(after.selectedId).toBe("overview");
   });
 
-  it("手で動かした会社帯要素(footer-*)を再バランスで正規位置へ戻す（@codex）", () => {
+  it("手で動かした会社帯要素(footer-*)は再バランスで動かさない（手動配置を保持）", () => {
     const built = buildSaleHouseDocument({
       ...baseHouseInput,
       overrides: { price: "5280", transactionType: "専任媒介", staff: "村山廉太郎" },
@@ -214,24 +213,10 @@ describe("autoBalanceLayout", () => {
     const shifted = moveEl(built, "footer-name-ja", 200, 60);
     expect(findEl(shifted, "footer-name-ja")).toMatchObject({ x: 200, y: 60 });
     const out = autoBalanceLayout(makeState(shifted));
-    // computeSpecSheetLayout の footer から buildFooterBand が置く正規座標へ戻る
-    const L = computeSpecSheetLayout({
-      photoCount: images(built).length,
-      specRowCount: (findEl(built, "overview") as TableElement).rows.length,
-      hasFloorPlan: built.elements.some((e) => e.id === "floor-plan"),
-      footerHeight: DEFAULT_FOOTER_H,
-    });
-    const expected = buildFooterBand(L.footer, {
-      transactionType: "-",
-      adType: "-",
-      compensation: "-",
-      staff: "-",
-      agent: "-",
-      specialNotes: "-",
-    }).find((e) => e.id === "footer-name-ja")!;
+    // 会社帯は自動調整の対象外＝手動配置(200,60)のまま保持される（正規位置へ戻さない）
     const after = findEl(out.document, "footer-name-ja")!;
-    expect(after.x).toBeCloseTo(expected.x, 6);
-    expect(after.y).toBeCloseTo(expected.y, 6);
+    expect(after.x).toBe(200);
+    expect(after.y).toBe(60);
   });
 });
 

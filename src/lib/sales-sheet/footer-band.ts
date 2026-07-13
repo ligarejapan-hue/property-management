@@ -1,6 +1,7 @@
 import type { Rect } from "./layout-engine";
 import type { SalesSheetElement } from "./document-schema";
 import { COMPANY_INFO } from "./company-info";
+import type { CompanyProfile } from "./company-profile-store";
 
 /**
  * footer-band.ts
@@ -8,9 +9,10 @@ import { COMPANY_INFO } from "./company-info";
  * 御社ひな型どおりの下部会社帯（会社ブロック／取引条件テーブル／担当テーブルの横並び
  * 固定高帯）を組む純関数。`computeSpecSheetLayout` が返す `footer` 矩形（帯の領域）と、
  * 図面ごとの取引条件・担当者情報（`FooterBandData`）から text/table/shape 要素群を
- * 組み立てる。会社情報の値そのものは `company-info.ts` の `COMPANY_INFO` に集約されて
- * おり、このモジュールはレイアウト（座標算出）のみを担う。エンジンへの結線
- * （`layout-engine.ts`/`build-document.ts` の改修）は別タスク。
+ * 組み立てる。会社情報の値は第3引数 `company`（`CompanyProfile`）で受け取り、未指定時は
+ * `company-info.ts` の `COMPANY_INFO` を既定値とする。このモジュールはレイアウト
+ * （座標算出）のみを担う。DBからの解決（`company-profile-store.ts`）・エンジンへの結線
+ * （`build-document.ts` の改修）は別タスク。
  *
  * 前提: `footer` は実運用サイズ（≈幅277×高24mm＝`COMPANY_W_MM`×`DEFAULT_FOOTER_H`）を想定。
  * それより極端に小さい矩形では各スロットが縮退しうるが、出力要素の w/h は常に正（schema
@@ -52,26 +54,14 @@ const DIVIDER_W_MM = 0.3;
 /** 帯外周の枠線太さ(mm)。 */
 const FRAME_STROKE_W_MM = 0.3;
 
-/** 社名JPブロックの幅(mm)。社名は11文字×13pt≈50mm＝clip回避のため余裕を持たせる
- *  （render-html は overflow:hidden で box をはみ出す文字を切る）。 */
-const NAME_JA_W_MM = 58;
-/** 社名EN は社名JP（COMPANY_INFO.nameJa・定数長）の右に固定オフセット(mm)＝決定的。 */
-const NAME_EN_OFFSET_MM = 60;
-const NAME_EN_W_MM = 32;
-/** TEL/FAX（社名の右）の x オフセット・幅(mm)。社名ブロックの右端に置く。 */
-const CONTACT_X_OFFSET_MM = 96;
-const CONTACT_W_MM = 46;
-/** 社名行の高さ(mm)。TEL/FAX 2行はこの行の中で均等割りする。 */
-const NAME_ROW_H_MM = 6;
-/** 社名行と情報グリッドの間の余白(mm)。 */
-const GRID_TOP_GAP_MM = 1;
-/** 情報グリッド左列の幅(mm)。右列は残り幅（取引条件テーブルの手前まで）を使う。 */
+/** 会社ブロックは 3行×2列で組む。左列の幅(mm)。右列は残り幅（取引条件テーブルの手前まで）を使う。
+ *  render-html は overflow:hidden で box をはみ出す文字を切るため、各値が収まる幅にする。 */
 const GRID_LEFT_COL_W_MM = 76;
+/** 左右列の間の余白(mm)。 */
 const GRID_COL_GAP_MM = 4;
 
 const FONT_PT = {
   nameJa: 13,
-  nameEn: 11,
   contact: 8,
   grid: 6.5,
   table: 7,
@@ -135,7 +125,11 @@ function pickRows(pairs: [string, string | undefined][]): { label: string; value
   return pairs.filter((pair): pair is [string, string] => !!pair[1]).map(([label, value]) => ({ label, value }));
 }
 
-export function buildFooterBand(footer: Rect, data: FooterBandData): SalesSheetElement[] {
+export function buildFooterBand(
+  footer: Rect,
+  data: FooterBandData,
+  company: CompanyProfile = COMPANY_INFO,
+): SalesSheetElement[] {
   const companyW = Math.round(footer.w * COMPANY_W_RATIO);
   const termsW = Math.round(footer.w * TERMS_W_RATIO);
   const staffW = footer.w - companyW - termsW;
@@ -160,87 +154,44 @@ export function buildFooterBand(footer: Rect, data: FooterBandData): SalesSheetE
     strokeWidthMm: FRAME_STROKE_W_MM,
   });
 
-  // --- 会社ブロック（左） ---
+  // --- 会社ブロック（左・3行×2列でぎっしり詰める） ---
+  // 左列=社名(大)/免許/所在地、右列=TEL・FAX(1行)/Email/HP。旧2行の間延びと社名行の空白を解消。
   const companyContentX = companyX0 + PAD_MM;
   const companyContentTop = footer.y + PAD_MM;
   const companyContentBottom = footer.y + footer.h - PAD_MM;
+  const rowH = Math.max(0, (companyContentBottom - companyContentTop) / 3);
+  const leftColW = GRID_LEFT_COL_W_MM;
+  const rightColX = companyContentX + leftColW + GRID_COL_GAP_MM;
+  const rightColW = Math.max(0, termsX0 - GAP_MM - rightColX);
 
-  elements.push(
-    mkText(
-      "footer-name-ja",
-      clampRect({ x: companyContentX, y: companyContentTop, w: NAME_JA_W_MM, h: NAME_ROW_H_MM }, footer),
-      COMPANY_INFO.nameJa,
-      FONT_PT.nameJa,
-      { bold: true },
-    ),
-  );
-  elements.push(
-    mkText(
-      "footer-name-en",
-      // 社名ENは社名JPの右に固定オフセット（COMPANY_INFO.nameJaは定数長ゆえ決定的）。
-      clampRect(
-        { x: companyContentX + NAME_EN_OFFSET_MM, y: companyContentTop, w: NAME_EN_W_MM, h: NAME_ROW_H_MM },
-        footer,
-      ),
-      COMPANY_INFO.nameEn,
-      FONT_PT.nameEn,
-      { bold: true },
-    ),
-  );
-
-  const contactX = companyContentX + CONTACT_X_OFFSET_MM;
-  const contactLineH = NAME_ROW_H_MM / 2;
-  elements.push(
-    mkText(
-      "footer-tel",
-      clampRect({ x: contactX, y: companyContentTop, w: CONTACT_W_MM, h: contactLineH }, footer),
-      `TEL ${COMPANY_INFO.tel}`,
-      FONT_PT.contact,
-    ),
-  );
-  elements.push(
-    mkText(
-      "footer-fax",
-      clampRect({ x: contactX, y: companyContentTop + contactLineH, w: CONTACT_W_MM, h: contactLineH }, footer),
-      `FAX ${COMPANY_INFO.fax}`,
-      FONT_PT.contact,
-    ),
-  );
-
-  // 情報グリッド（社名行の下・2列×3行）。左列=免許/協会系（既にラベル込みの値）、
-  // 右列=Email/HP/所在地（値そのものにラベルが無いためここで付与）。
-  const gridY0 = companyContentTop + NAME_ROW_H_MM + GRID_TOP_GAP_MM;
-  const gridRowH = Math.max(0, (companyContentBottom - gridY0) / 3);
-  const gridRightX = companyContentX + GRID_LEFT_COL_W_MM + GRID_COL_GAP_MM;
-  const gridRightW = Math.max(0, termsX0 - GAP_MM - gridRightX);
-
-  const gridLeft: [string, string][] = [
-    ["footer-license", COMPANY_INFO.license],
-    ["footer-guarantee", COMPANY_INFO.guaranteeAssoc],
-    ["footer-member", COMPANY_INFO.memberAssoc],
+  const companyLeft: [string, string, number][] = [
+    ["footer-name-ja", company.nameJa, FONT_PT.nameJa],
+    ["footer-license", company.license, FONT_PT.grid],
+    ["footer-address", `所在地 ${company.address}`, FONT_PT.grid],
   ];
-  const gridRight: [string, string][] = [
-    ["footer-email", `Email ${COMPANY_INFO.email}`],
-    ["footer-hp", `H　P ${COMPANY_INFO.hp}`],
-    ["footer-address", `所在地 ${COMPANY_INFO.address}`],
+  const companyRight: [string, string, number][] = [
+    ["footer-contact", `TEL ${company.tel}　FAX ${company.fax}`, FONT_PT.contact],
+    ["footer-email", `Email ${company.email}`, FONT_PT.grid],
+    ["footer-hp", `H　P ${company.hp}`, FONT_PT.grid],
   ];
-  gridLeft.forEach(([id, content], i) => {
+  companyLeft.forEach(([id, content, fontPt], i) => {
     elements.push(
       mkText(
         id,
-        clampRect({ x: companyContentX, y: gridY0 + i * gridRowH, w: GRID_LEFT_COL_W_MM, h: gridRowH }, footer),
+        clampRect({ x: companyContentX, y: companyContentTop + i * rowH, w: leftColW, h: rowH }, footer),
         content,
-        FONT_PT.grid,
+        fontPt,
+        { bold: id === "footer-name-ja" },
       ),
     );
   });
-  gridRight.forEach(([id, content], i) => {
+  companyRight.forEach(([id, content, fontPt], i) => {
     elements.push(
       mkText(
         id,
-        clampRect({ x: gridRightX, y: gridY0 + i * gridRowH, w: gridRightW, h: gridRowH }, footer),
+        clampRect({ x: rightColX, y: companyContentTop + i * rowH, w: rightColW, h: rowH }, footer),
         content,
-        FONT_PT.grid,
+        fontPt,
       ),
     );
   });

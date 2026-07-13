@@ -131,6 +131,11 @@ const adminNavItems: NavItem[] = [
     href: "/admin/sale-dm-settings",
     icon: <Mail className="h-5 w-5" />,
   },
+  {
+    label: "会社情報",
+    href: "/admin/company-settings",
+    icon: <Building2 className="h-5 w-5" />,
+  },
 ];
 
 /** データ品質チェック: 所有者データの一括点検/補正ツール群。 */
