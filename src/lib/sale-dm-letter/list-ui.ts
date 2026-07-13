@@ -27,8 +27,15 @@ export function buildSaleDmPartialNotice(res: {
   generated?: number;
   failed?: number;
   truncated?: boolean;
+  // 選択したが対象外(所有者の住所が無い/権限外等)で作成されなかった件数。
+  excluded?: number;
 }): string | null {
   const lines: string[] = [];
+  if ((res.excluded ?? 0) > 0) {
+    lines.push(
+      `${res.excluded} 件は送付可でない(未判断/送付不可)・住所が無い等のため対象外で、DMは作成されませんでした。`,
+    );
+  }
   if (res.truncated) {
     lines.push(
       `対象が一度に生成できる上限を超えたため、先頭の ${res.generated ?? 0} 件のみ生成しました(残りは未生成です)。`,

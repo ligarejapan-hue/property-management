@@ -62,6 +62,7 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { POST } from "../../app/api/properties/sale-dm/campaigns/route";
 import { isSenderConfigured } from "../sale-dm-letter/sender";
+import { saleDmCampaignBodySchema } from "../validators-sale-dm";
 
 // getUserPermissions は { resource, action, granted } の配列を返す(dm-export route test と同形)。
 const grant = (...keys: string[]) => (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -102,6 +103,137 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const json = await res.json();
     expect(json.campaignId).toBe("c1");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("propertyIds を渡すと選択物件を対象にし dmStatus=send を強制しない・requested を返す", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
+    findMany.mockResolvedValue([property as never]);
+    const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
+    const res = await POST(req({ ...validBody, propertyIds: ids }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.campaignId).toBe("c1");
+    const whereArg = findMany.mock.calls[0][0].where;
+    expect(whereArg.id).toEqual({ in: ids });
+    expect(whereArg.dmStatus).toBe("send"); // DMは送付可(send)の物件にのみ生成(未判断/送付不可は除外)
+    expect(json.requested).toBe(1); // findMany(住所あり)が1件返る → 対象=1
+    expect(json.matchedProperties).toBe(1);
+  });
+
+  it("field_staff は propertyIds でも担当範囲(createdBy/assignedTo)に AND される", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
+    findMany.mockResolvedValue([]);
+    const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111"] }) as never);
+    expect(res.status).toBe(200);
+    const whereArg = findMany.mock.calls[0][0].where;
+    expect(whereArg.AND).toEqual([{ OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] }]);
+    expect(whereArg.id).toEqual({ in: ["11111111-1111-4111-8111-111111111111"] });
+  });
+
+  it("共有者が別住所の物件は手紙数(requested) > 物件数(matchedProperties)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const twoAddr = {
+      id: "p1", address: "東京都〇〇区△△1-2-3", propertyType: "land", roomNo: null,
+      propertyOwners: [
+        { isPrimary: true, relationship: null, owner: { name: "田中 一郎", nameKana: null, zip: "1000001", address: "東京都〇〇区△△1-2-3", corporateNumber: null } },
+        { isPrimary: false, relationship: null, owner: { name: "田中 二郎", nameKana: null, zip: "5300001", address: "大阪府大阪市北区1-1", corporateNumber: null } },
+      ],
+    };
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([twoAddr as never]);
+    const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111"] }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.matchedProperties).toBe(1); // 物件は1件
+    expect(json.requested).toBe(2); // 手紙は2通(別住所の共有者)
+  });
+
+  it("住所が空白のみの物件は対象外として matchedProperties に数えない(空キャンペーン誤誘導を防ぐ・Codex R9-P2)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    // DBの address:{not:""} は空白のみを通すが、生成側の grouping は trim して skip する=宛先0。
+    const blankAddr = {
+      id: "p-blank", address: "東京都〇〇区△△1-2-3", propertyType: "land", roomNo: null,
+      propertyOwners: [
+        { isPrimary: true, relationship: null, owner: { name: "空白 太郎", nameKana: null, zip: "1000001", address: "   ", corporateNumber: null } },
+      ],
+    };
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([property as never, blankAddr as never]);
+    const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"] }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.matchedProperties).toBe(1); // 宛先を作れた物件のみ(properties.length=2 ではない)
+    expect(json.requested).toBe(1); // 空白住所は宛先を作れない
+  });
+
+  it("propertyIds でも共有者多数で50通を超える分は物件単位で切り詰める(1物件を分断しない・Codex R9-P1)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    // 各物件に「別住所の共有者」を n 人 = n 通に fan-out させる。max: undefined の無制限だと 60通課金になるところ。
+    const owners = (pid: string, n: number) => Array.from({ length: n }, (_, i) => ({
+      isPrimary: i === 0, relationship: null,
+      owner: { name: `${pid}-owner${i}`, nameKana: null, zip: "1000001", address: `東京都〇〇区${pid}-${i}`, corporateNumber: null },
+    }));
+    const p1 = { id: "p1", address: "A", propertyType: "land", roomNo: null, propertyOwners: owners("p1", 30) };
+    const p2 = { id: "p2", address: "B", propertyType: "land", roomNo: null, propertyOwners: owners("p2", 30) };
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([p1 as never, p2 as never]);
+    const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"] }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.requested).toBe(60); // 全宛先(30+30)
+    expect(json.generated).toBe(30); // p1(30)のみ。p2 を足すと 60>50 なので物件境界で打ち切り(分断しない)
+    expect(json.truncated).toBe(true);
+    expect(json.matchedProperties).toBe(2); // 対象物件は2件(両方 住所あり)。切詰は truncated で示す
+  });
+
+  it("propertyIds は「選択リストの並び」で切り詰める(findMany の並びに依存しない・Codex R13)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const idA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const idB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const owners = (tag: string, n: number) => Array.from({ length: n }, (_, i) => ({
+      isPrimary: i === 0, relationship: null,
+      owner: { name: `${tag}-o${i}`, nameKana: null, zip: "1000001", address: `東京都〇〇区${tag}-${i}`, corporateNumber: null },
+    }));
+    const pA = { id: idA, address: "A", propertyType: "land", roomNo: null, propertyOwners: owners("A", 30) };
+    const pB = { id: idB, address: "B", propertyType: "land", roomNo: null, propertyOwners: owners("B", 30) };
+    // findMany は updatedAt 等で [pB, pA] の順に返す(ユーザーの選択順 [A,B] とは逆)。
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([pB as never, pA as never]);
+    const res = await POST(req({ ...validBody, propertyIds: [idA, idB] }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.generated).toBe(30); // 30+30>50 → 物件単位で30通に切詰
+    expect(json.truncated).toBe(true);
+    // 切り詰めは選択順(先頭=A)を優先。生成された draft の propertyId は全て idA(B は繰り越し)。
+    const draftPropertyIds = new Set(draftCreate.mock.calls.map((c) => c[0].data.propertyId));
+    expect(draftPropertyIds).toEqual(new Set([idA]));
+  });
+
+  it("filters 経路(propertyIds 無し)は従来どおり上限で切り詰める(無制限は propertyIds のみ・Codex P1)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const many = Array.from({ length: 55 }, (_, i) => ({ ...property, id: `p${i}` }));
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue(many as never);
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // filters:{} での無制限な有料AI生成/PII送信を防ぐため上限(MAX_GENERATE_ITEMS)で切り詰める。
+    expect(json.truncated).toBe(true);
+    expect(json.generated).toBe(50);
+  });
+
+  it("propertyIds 経路は選んだ物件の宛先を全て生成(≤50物件・truncated 無・take 無・Codex R8)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    // 選択は配列上限=50物件で件数が閉じるため letter cap を掛けず、共有者ぶんも含め全宛先を生成する(物件を途中で分断しない)。
+    const ids = Array.from({ length: 40 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+    const many = Array.from({ length: 40 }, (_, i) => ({ ...property, id: `p${i}` }));
+    const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
+    findMany.mockResolvedValue(many as never);
+    const res = await POST(req({ ...validBody, propertyIds: ids }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.truncated).toBe(false); // 切り詰めない(選択=全生成)
+    expect(json.generated).toBe(40);
+    expect(json.matchedProperties).toBe(40); // take しない=対象物件は全件把握(対象外件数を正確に)
+    expect(findMany.mock.calls[0][0].take).toBeUndefined(); // 明示選択は take しない
   });
 
   it("provider=openai のとき下書きに保存する model は gpt-4o(生成モデルと一致・claude既定にしない・Codex)", async () => {
@@ -257,6 +389,17 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(pmc.dmCampaign.create).toHaveBeenCalled(); // クレーム実行
     const claimArg = pmc.dmCampaign.create.mock.calls[0][0];
     expect(claimArg.data.idempotencyKey).toBe("key-3"); // キーを保存(生成前にクレーム)
+  });
+});
+
+describe("saleDmCampaignBodySchema: propertyIds は1回50物件まで", () => {
+  const base = { name: "x", confirmed: true, options: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low" } };
+  const uuid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+  it("50件は許可(=生成上限 MAX_GENERATE_ITEMS と一致)", () => {
+    expect(() => saleDmCampaignBodySchema.parse({ ...base, propertyIds: Array.from({ length: 50 }, (_, i) => uuid(i)) })).not.toThrow();
+  });
+  it("51件は弾く(一度に選べる物件は50件まで=切り詰め/分断を起こさない・Codex R8)", () => {
+    expect(() => saleDmCampaignBodySchema.parse({ ...base, propertyIds: Array.from({ length: 51 }, (_, i) => uuid(i)) })).toThrow();
   });
 });
 

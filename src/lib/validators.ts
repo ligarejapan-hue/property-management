@@ -81,6 +81,13 @@ export const propertyListQuerySchema = z.object({
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   // 宛先不明(返送連動)で絞り込む。"1" のときだけ有効(他の一覧フィルタと同じ文字列クエリ規約)。
   undeliverable: z.enum(["1"]).optional(),
+  // DM送信回数フィルタ。現状は「未送信(0回)」のみ有効(空文字/未指定は絞らない)。
+  // 「N回以下(1/2/3)」は列を持たず大規模データで groupBy+巨大 notIn になり重いため廃止し、
+  // 送信回数の並べ替え(sortBy=dmSendCount)で代替する(@codex R10-P2 + ユーザー判断)。
+  dmSentMax: z.preprocess(
+    (v) => (v === "" || v === undefined ? undefined : v),
+    z.coerce.number().int().min(0).max(0).optional(),
+  ),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional(),
   assignedTo: z.string().uuid().optional(),
@@ -96,7 +103,7 @@ export const propertyListQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => (v === undefined ? undefined : v === "true")),
-  sortBy: z.enum(["updatedAt", "createdAt", "address", "caseStatus"]).default("updatedAt"),
+  sortBy: z.enum(["updatedAt", "createdAt", "address", "caseStatus", "dmSendCount"]).default("updatedAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
 });
 

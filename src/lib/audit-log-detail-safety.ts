@@ -105,6 +105,7 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "propertyType",
   "registryStatus",
   "dmStatus",
+  "dmSentMax", // DM送信回数フィルタ(未送信=0 のみ・非PIIの整数)。export 監査 detail.filters に載るので表示許可。
   "caseStatus",
   "introductionRoute",
   "assignedTo",

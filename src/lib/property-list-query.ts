@@ -51,6 +51,7 @@ export async function buildPropertyListWhere(
     registryStatus,
     dmStatus,
     undeliverable,
+    dmSentMax,
     caseStatus,
     introductionRoute,
     assignedTo,
@@ -146,6 +147,13 @@ export async function buildPropertyListWhere(
     ];
   }
 
+  // DM送信回数フィルタは「未送信(0回)」のみ。dmLogs none でネイティブに絞れる(大規模でも高速・ID materialize 無し)。
+  // 「N回以下(1/2/3)」は列を持たず groupBy+id notIn になり、DM が多い本番では巨大な ID リストを生んでタイムアウト
+  // し得たため廃止した(送信回数の並べ替え sortBy=dmSendCount で代替・@codex R10-P2 + ユーザー判断)。
+  if (dmSentMax === 0) {
+    where.AND = [...(where.AND ?? []), { dmLogs: { none: {} } }];
+  }
+
   return { where, mgmtShortCircuitEmpty, mgmtHitCount, mgmtIdTrimmed };
 }
 
@@ -167,6 +175,10 @@ export function propertyVisibilityScopeWhere(
 
 /** sortBy / sortOrder から Prisma orderBy を組み立てる。 */
 export function buildPropertyListOrderBy(query: PropertyListQuery) {
+  // DM送信回数はリレーション件数(PropertyDmLog)で並べ替える(対応する列は無い)。
+  if (query.sortBy === "dmSendCount") {
+    return { dmLogs: { _count: query.sortOrder } };
+  }
   return { [query.sortBy]: query.sortOrder };
 }
 

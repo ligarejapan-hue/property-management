@@ -6,10 +6,10 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { propertyListQuerySchema } from "@/lib/validators";
-import { buildPropertyListWhere, buildPropertyListOrderBy } from "@/lib/property-list-query";
+import { buildPropertyListWhere, buildPropertyListOrderBy, propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
-import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
+import { buildRecipientsFromProperties, capRecipientsByProperty } from "@/lib/sale-dm-letter/recipients";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, resolveLetterModel, resolveProvider } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
@@ -81,23 +81,46 @@ export async function POST(request: NextRequest) {
         await prisma.dmCampaign.delete({ where: { id: existing.id } }).catch(() => {});
       }
     }
-    const query = propertyListQuerySchema.parse(body.filters ?? {});
-    // DM は送付可(dmStatus=send)の物件にのみ生成する。ユーザーの絞り込みが明示的に send 以外(hold/no_send)を
-    // 指している場合、send へ黙って上書きすると、確認ダイアログの「現在の絞り込み対象」と実際の生成対象がずれ、
-    // 意図しない物件へオーナーPII送信+課金が起きる。上書きせず 400 で弾き、確認した対象と一致させる。
-    if (query.dmStatus !== undefined && query.dmStatus !== "send") {
-      throw new ApiError(400, "送付可(dmStatus=send)以外の絞り込みではDMを作成できません", "INVALID_DM_STATUS_FILTER");
+    // 対象の決め方: (A) チェックで選んだ propertyIds があればそれを対象にする(明示選択優先)。無ければ
+    // (B) 従来どおり絞り込み条件(filters)から送付可(send)物件を対象にする(後方互換)。手紙を作れるのは
+    // 所有者に住所がある物件のみ(共通の mailableOwner)。
+    const mailableOwner = { propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } } };
+    // 生成(課金)は物件単位で最大 MAX_GENERATE_ITEMS(=50)通に抑える(下の capRecipientsByProperty)。物件を途中で
+    // 分断しないので、共有者多数の1物件が数百通に膨らむ同期生成の暴走(Codex R9-P1)も、宛先が欠けたまま保存され
+    // 再バッチで二重生成される事故(Codex R8)も防ぐ。上限は両経路で共通。
+    // 明示選択(propertyIds)は take せず全件取得して「対象外(住所なし/送付可でない等)」件数を正確に数える。
+    // filters 経路は該当が数千件になり得るので take:MAX+1 で取得を絞る。
+    const explicitSelection = !!(body.propertyIds && body.propertyIds.length > 0);
+    // whereClause は buildPropertyListWhere の where と同型(既存実装に合わせ緩い型)。mgmt短絡時は null。
+    let whereClause: Awaited<ReturnType<typeof buildPropertyListWhere>>["where"] | null;
+    let orderBy: ReturnType<typeof buildPropertyListOrderBy> = { updatedAt: "desc" };
+    if (body.propertyIds && body.propertyIds.length > 0) {
+      // チェックで選んだ物件が対象。field_staff の可視スコープは適用する。DM は「送付可(send)」の物件にのみ生成する
+      // (filters 経路と同じ不変条件＝アプリのDMモデル)。一覧は全ステータス表示ゆえ、未判断(hold)/送付不可(no_send)を
+      // うっかり選んでも、有料AI生成+オーナーPII送信はしない(Codex R2/R6)。対象外は結果的に外れ、件数を UI で通知する。
+      whereClause = { id: { in: body.propertyIds }, isArchived: false, dmStatus: "send", ...mailableOwner };
+      const scope = propertyVisibilityScopeWhere(session);
+      if (scope) whereClause.AND = [scope];
+    } else {
+      const query = propertyListQuerySchema.parse(body.filters ?? {});
+      // 絞り込みが明示的に send 以外(hold/no_send)を指すなら黙って send へ上書きせず 400
+      // (確認ダイアログの対象と実際の生成対象のズレを防ぐ)。
+      if (query.dmStatus !== undefined && query.dmStatus !== "send") {
+        throw new ApiError(400, "送付可(dmStatus=send)以外の絞り込みではDMを作成できません", "INVALID_DM_STATUS_FILTER");
+      }
+      const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
+      orderBy = buildPropertyListOrderBy(query);
+      if (mgmtShortCircuitEmpty) {
+        whereClause = null;
+      } else {
+        where.dmStatus = "send";
+        where.isArchived = false;
+        whereClause = { ...where, AND: [...(where.AND ?? []), mailableOwner] };
+      }
     }
-    const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
-    where.dmStatus = "send";
-    where.isArchived = false;
-    const orderBy = buildPropertyListOrderBy(query);
 
-    const properties = mgmtShortCircuitEmpty ? [] : await prisma.property.findMany({
-      where: {
-        ...where,
-        AND: [...(where.AND ?? []), { propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } } }],
-      },
+    const properties = whereClause === null ? [] : await prisma.property.findMany({
+      where: whereClause,
       select: {
         id: true, address: true, propertyType: true, roomNo: true,
         propertyOwners: {
@@ -107,13 +130,33 @@ export async function POST(request: NextRequest) {
         },
       },
       orderBy,
-      take: MAX_GENERATE_ITEMS + 1,
+      // 明示選択(propertyIds)は take せず全件取得(対象外件数を正確に数えるため・生成は下で max=50 に切詰)。
+      // filters 経路は該当多数になり得るので take:MAX+1(+1 は truncated 検出用)。
+      take: explicitSelection ? undefined : MAX_GENERATE_ITEMS + 1,
     });
 
+    // 明示選択は UI が「表示していた順」で propertyIds を送る。findMany は orderBy(既定=updatedAt desc)で返すため、
+    // 上限超で物件単位に切り詰める際、ユーザーが見ていた並びの末尾でなく別の物件が落ちてしまう。propertyIds の順へ
+    // 並べ替え、切り詰め対象を「選択リストの並び」に一致させる(Codex R13)。filters 経路は orderBy のままでよい。
+    let orderedProperties = properties;
+    if (explicitSelection && body.propertyIds) {
+      const rank = new Map(body.propertyIds.map((id, i) => [id, i] as const));
+      orderedProperties = [...properties].sort(
+        (a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
+
     const { recipients, meta } = buildRecipientsFromProperties(
-      properties as never,
+      orderedProperties as never,
       ownerDisplayConfig,
     );
+
+    // 対象になった物件数 = 実際に宛先を1件以上作れた物件の数。DBの address:{not:""} は空白のみの住所を通すが、
+    // groupPropertyOwnersByAddress は trim して空をスキップするため、そういう物件は recipient 0=対象外として数える
+    // (properties.length だと過大計上=UIの「対象外」通知が出ず空キャンペーンに飛ぶ・Codex R9-P2)。
+    const matchedProperties = new Set(meta.map((m) => m.propertyId)).size;
+    // 物件単位で最大 MAX_GENERATE_ITEMS 通に抑える(物件を分断しない・R8/R9-P1)。切詰めは truncated で通知。
+    const capped = capRecipientsByProperty(recipients, meta, MAX_GENERATE_ITEMS);
 
     // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)のみ。印刷・再生成も resolveSender(env)を使うため、
     // 生成も env 差出人で揃える(body 指定は非永続ゆえ使わない=印刷とのズレを防ぐ・Codex R33)。
@@ -154,9 +197,9 @@ export async function POST(request: NextRequest) {
     let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
     let truncated: boolean;
     try {
-      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg) });
+      const result = await generateLetters(capped.recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg) });
       drafts = result.drafts;
-      truncated = result.truncated;
+      truncated = capped.truncated; // 切詰めは物件単位 cap で判定(generateLetters には既に cap 済みの list を渡す)
 
       // 既定型 A(1つ)+ 宛先下書きを、クレーム済み campaign 配下に保存(生成成功分のみ body 入り。失敗分は空+メモ)。
       // 複数型(B/C)の追加と再割当は variants / assign route で行う。生成 route は「初期1型」を保証するのみ。
@@ -170,7 +213,7 @@ export async function POST(request: NextRequest) {
             strength: body.options.strength, extraInstruction: body.options.extraInstruction ?? null,
           },
         });
-        const sliced = meta.slice(0, drafts.length);
+        const sliced = capped.meta.slice(0, drafts.length);
         for (let i = 0; i < sliced.length; i++) {
           const d = drafts[i];
           await tx.dmRecipientDraft.create({
@@ -205,7 +248,9 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(
-      { campaignId: claimed.id, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
+      // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
+      // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

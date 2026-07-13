@@ -636,6 +636,8 @@ model PropertyDmLog {
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   sender   User     @relation(fields: [sentBy], references: [id])
 
+  // 送信回数の集計(_count / groupBy / リレーション件数ソート)を効率化する(Codex R3)。
+  @@index([propertyId])
   @@map("property_dm_logs")
 }
 

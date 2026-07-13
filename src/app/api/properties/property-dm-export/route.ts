@@ -56,6 +56,7 @@ const AUDIT_FILTER_KEYS = [
   "updatedTo",
   "includeArchived",
   "hasWarning",
+  "dmSentMax",
   "sortBy",
   "sortOrder",
 ] as const;

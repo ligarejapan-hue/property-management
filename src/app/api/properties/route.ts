@@ -81,6 +81,8 @@ export async function GET(request: NextRequest) {
               select: { owner: { select: { name: true } } },
               orderBy: { createdAt: "asc" },
             },
+            // DM送信回数(PropertyDmLog 件数)。一覧の「送信◯回」表示・送信回数の並べ替え/抽出に使う。
+            _count: { select: { dmLogs: true } },
           },
           orderBy,
           skip: (page - 1) * limit,
@@ -99,9 +101,11 @@ export async function GET(request: NextRequest) {
     // （rawData JSONB select 込み）が毎回走るのは無駄なため除去（17-C F1）。
     // 必要な経路は各自取得する: 詳細 GET / CSV export / dm-export / suggest。
     const data = properties.map((p) => {
-      const { propertyOwners, ...property } = p;
+      const { propertyOwners, _count, ...property } = p;
       return {
         ...property,
+        // _count は select 指定で実クエリでは常に付くが、テストの findMany モックには無いことがあるため null 安全に。
+        dmSentCount: _count?.dmLogs ?? 0,
         ownerNames: hasOwnerRead && ownerDisplayConfig
           ? propertyOwners
               .map(({ owner }) => maskValue(owner.name, ownerDisplayConfig.name))

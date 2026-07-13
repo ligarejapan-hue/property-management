@@ -45,10 +45,16 @@ describe("generateLetters", () => {
     expect(drafts.every((d) => d.body && d.error === null)).toBe(true);
   });
 
-  it("MAX 超過は先頭 N 件 + truncated=true", async () => {
+  it("既定では切り詰めず全件生成する(50件上限は撤廃)", async () => {
     const { drafts, truncated } = await generateLetters(items(MAX_GENERATE_ITEMS + 5), { provider: new MockLetterProvider() });
+    expect(truncated).toBe(false);
+    expect(drafts).toHaveLength(MAX_GENERATE_ITEMS + 5);
+  });
+
+  it("明示的に max を渡した場合のみ切り詰める(呼び出し側の任意ガード)", async () => {
+    const { drafts, truncated } = await generateLetters(items(10), { provider: new MockLetterProvider(), max: 4 });
     expect(truncated).toBe(true);
-    expect(drafts).toHaveLength(MAX_GENERATE_ITEMS);
+    expect(drafts).toHaveLength(4);
   });
 
   it("一部失敗しても全体は止めず該当のみ error", async () => {
