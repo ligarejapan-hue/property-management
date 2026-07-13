@@ -9,7 +9,7 @@ import { propertyListQuerySchema } from "@/lib/validators";
 import { buildPropertyListWhere, buildPropertyListOrderBy, propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
-import { buildRecipientsFromProperties } from "@/lib/sale-dm-letter/recipients";
+import { buildRecipientsFromProperties, capRecipientsByProperty } from "@/lib/sale-dm-letter/recipients";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
 import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, resolveLetterModel, resolveProvider } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
@@ -85,10 +85,11 @@ export async function POST(request: NextRequest) {
     // (B) 従来どおり絞り込み条件(filters)から送付可(send)物件を対象にする(後方互換)。手紙を作れるのは
     // 所有者に住所がある物件のみ(共通の mailableOwner)。
     const mailableOwner = { propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } } };
-    // 1回の生成は最大 MAX_GENERATE_ITEMS(=50)物件(同期生成ゆえ大量一括はタイムアウト/冪等失効の二重課金リスク・Codex R4)。
-    // 明示選択(propertyIds)は配列上限=50物件で件数が閉じるため、その宛先(共有者ぶん含む)は letter cap 無しで全て生成し
-    // truncated を出さない=物件を途中で分断しない(Codex R8)。take もせず全件取得して「対象外(住所なし/送付可でない等)」を正確に数える。
-    // filters 経路は該当が数千件になり得るので take:MAX+1 で取得を絞り、生成も max=MAX で50通に切詰(truncated 通知)。
+    // 生成(課金)は物件単位で最大 MAX_GENERATE_ITEMS(=50)通に抑える(下の capRecipientsByProperty)。物件を途中で
+    // 分断しないので、共有者多数の1物件が数百通に膨らむ同期生成の暴走(Codex R9-P1)も、宛先が欠けたまま保存され
+    // 再バッチで二重生成される事故(Codex R8)も防ぐ。上限は両経路で共通。
+    // 明示選択(propertyIds)は take せず全件取得して「対象外(住所なし/送付可でない等)」件数を正確に数える。
+    // filters 経路は該当が数千件になり得るので take:MAX+1 で取得を絞る。
     const explicitSelection = !!(body.propertyIds && body.propertyIds.length > 0);
     // whereClause は buildPropertyListWhere の where と同型(既存実装に合わせ緩い型)。mgmt短絡時は null。
     let whereClause: Awaited<ReturnType<typeof buildPropertyListWhere>>["where"] | null;
@@ -139,6 +140,13 @@ export async function POST(request: NextRequest) {
       ownerDisplayConfig,
     );
 
+    // 対象になった物件数 = 実際に宛先を1件以上作れた物件の数。DBの address:{not:""} は空白のみの住所を通すが、
+    // groupPropertyOwnersByAddress は trim して空をスキップするため、そういう物件は recipient 0=対象外として数える
+    // (properties.length だと過大計上=UIの「対象外」通知が出ず空キャンペーンに飛ぶ・Codex R9-P2)。
+    const matchedProperties = new Set(meta.map((m) => m.propertyId)).size;
+    // 物件単位で最大 MAX_GENERATE_ITEMS 通に抑える(物件を分断しない・R8/R9-P1)。切詰めは truncated で通知。
+    const capped = capRecipientsByProperty(recipients, meta, MAX_GENERATE_ITEMS);
+
     // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)のみ。印刷・再生成も resolveSender(env)を使うため、
     // 生成も env 差出人で揃える(body 指定は非永続ゆえ使わない=印刷とのズレを防ぐ・Codex R33)。
     const sender = resolveSender(saleDmCfg);
@@ -178,9 +186,9 @@ export async function POST(request: NextRequest) {
     let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
     let truncated: boolean;
     try {
-      const result = await generateLetters(recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg), max: explicitSelection ? undefined : MAX_GENERATE_ITEMS });
+      const result = await generateLetters(capped.recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg) });
       drafts = result.drafts;
-      truncated = result.truncated;
+      truncated = capped.truncated; // 切詰めは物件単位 cap で判定(generateLetters には既に cap 済みの list を渡す)
 
       // 既定型 A(1つ)+ 宛先下書きを、クレーム済み campaign 配下に保存(生成成功分のみ body 入り。失敗分は空+メモ)。
       // 複数型(B/C)の追加と再割当は variants / assign route で行う。生成 route は「初期1型」を保証するのみ。
@@ -194,7 +202,7 @@ export async function POST(request: NextRequest) {
             strength: body.options.strength, extraInstruction: body.options.extraInstruction ?? null,
           },
         });
-        const sliced = meta.slice(0, drafts.length);
+        const sliced = capped.meta.slice(0, drafts.length);
         for (let i = 0; i < sliced.length; i++) {
           const d = drafts[i];
           await tx.dmRecipientDraft.create({
@@ -231,7 +239,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
       // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
-      { campaignId: claimed.id, requested: recipients.length, matchedProperties: properties.length, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
