@@ -19,9 +19,10 @@ const PROPERTY_DETAIL_SRC = fs.readFileSync(
 );
 
 describe("sidebar.tsx — admin nav エントリ追加（既存 text-hygiene 様式）", () => {
-  it("品質監査 → /admin/owners/quality-audit の nav item がある", () => {
+  it("氏名・連絡先チェック(旧: 品質監査) → /admin/owners/quality-audit の nav item がある", () => {
+    // 2026-07-14 ユーザー要望で「品質監査」から改名(URL不変)。
     expect(SIDEBAR_SRC).toMatch(/href:\s*"\/admin\/owners\/quality-audit"/);
-    expect(SIDEBAR_SRC).toMatch(/品質監査/);
+    expect(SIDEBAR_SRC).toMatch(/氏名・連絡先チェック/);
   });
 
   it("添付検索 → /admin/attachments の nav item がある", () => {
