@@ -21,7 +21,7 @@ type LoginFormData = z.infer<typeof loginSchema>;
  * origin 付きで URL を構築し同一オリジン判定することで確実に弾く。
  */
 function safeInternalDest(raw: string | null): string {
-  const fallback = "/properties";
+  const fallback = "/home";
   if (!raw) return fallback;
   try {
     const url = new URL(raw, window.location.origin);
