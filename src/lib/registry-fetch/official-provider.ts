@@ -230,10 +230,11 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
    * 所在検索（PR-2b seam）。fetchRegistryPdf と同じ安全構造（throttle → browserFactory →
    * 起動 timeout → login → 検索 → 必ず close）を踏襲する。
    *
-   * 重要: 実 Playwright 所在検索（page.searchByLocation の実体・セレクタ）は本 PR では未実装。
-   * 実 adapter は searchByLocation を持たないため provider_error に分類する。本番は provider 未設定
-   * （getRegistryFetchProvider()==null → route 501）ゆえ、この経路はテスト（fake page 注入）でのみ
-   * 到達し、本番外部接続は発生しない。候補（秘匿情報）は呼び出し側が log/Audit/error response に出さない。
+   * 実 Playwright 所在検索（page.searchByLocation の実体・セレクタ）は実装済み(2026-07-14 実画面HTMLで
+   * 校正)。ただし **本番は既定で休眠**: provider は REGISTRY_FETCH_LOCATION_SEARCH_CALIBRATED="true"
+   * （+ SELECTORS_CALIBRATED）が無い限り解決されず（getRegistryFetchProvider()==null → route 501）、
+   * 実サイトへ一切アクセスしない。動的部分の最終確定は live 校正(約款確認後)で行う。
+   * 候補（秘匿情報）は呼び出し側が log/Audit/error response に出さない。
    */
   async searchCandidates(
     request: RegistrySearchRequest,
@@ -257,8 +258,9 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     }
 
     try {
-      // 実 adapter は searchByLocation 未実装（seam）。login（実外部接続）の前に fail-fast し、
-      // 無駄な実ログインを避ける → provider_error（本番は provider 未設定=501 ゆえ非到達）。
+      // searchByLocation は optional(seam)。未提供の adapter では login(実外部接続)の前に
+      // fail-fast し無駄な実ログインを避ける → provider_error。実 adapter は実装済みだが、
+      // 本番は provider 未解決(休眠フラグ)=501 ゆえ、この経路は fake page 注入テストで到達する。
       const searchByLocation = page.searchByLocation;
       if (!searchByLocation) {
         throw new RegistryFetchError("provider_error");
