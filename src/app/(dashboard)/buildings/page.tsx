@@ -96,7 +96,22 @@ export default function BuildingsPage() {
       ) : buildings.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white py-16 text-center dark:border-gray-800 dark:bg-gray-900">
           <Building className="mx-auto mb-3 h-10 w-10 text-gray-300 dark:text-gray-600" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">マンション棟がありません</p>
+          {keyword ? (
+            // 検索の0件。棟は存在するので「登録CTA」は出さない(誤って重複登録を促さない・@codex)。
+            <p className="text-sm text-gray-500 dark:text-gray-400">「{keyword}」に一致するマンション棟が見つかりません</p>
+          ) : (
+            // 本当に0件(未登録)のときだけ登録CTAで次の操作へ導く(B-12 UI総点検)。
+            <>
+              <p className="text-sm text-gray-500 dark:text-gray-400">マンション棟がまだ登録されていません</p>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                <Plus className="h-4 w-4" />
+                最初のマンション棟を登録
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-2">

@@ -102,6 +102,9 @@ export default function ActionBar(props: ActionBarProps) {
 
   return (
     <div className="mb-4">
+      {/* B-10 UI総点検: 色付きボタンがステータスバッジと紛らわしく「操作」と気づきにくかった。見出しで操作群と
+          明示する(表示される操作は物件の状態で変わる=「行える操作」と表現)。 */}
+      <p className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">この物件で行える操作</p>
       <div className="flex flex-wrap gap-2">
         {availableActions.map((action) => {
           const Icon = action.icon;
