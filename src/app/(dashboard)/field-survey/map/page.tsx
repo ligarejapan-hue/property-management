@@ -16,11 +16,13 @@ export default async function FieldSurveyMapPage() {
   // 401 / 想定外の失敗はすべて「閲覧不可」扱いに倒し、Maps loader を起動しない。
   // env 値・APIキー・session 詳細は出力しない。
   let canRead = false;
+  let canWrite = false;
   let currentUserId: string | null = null;
   try {
     const session = await getApiSession();
     const permissions = await getUserPermissions(session.id);
     canRead = hasPermission(permissions, "field_survey", "read");
+    canWrite = hasPermission(permissions, "field_survey", "write");
     if (canRead) currentUserId = session.id;
   } catch {
     canRead = false;
@@ -34,7 +36,7 @@ export default async function FieldSurveyMapPage() {
             現地調査マップ
           </h1>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            既存物件と調査ピンを地図上で確認します。巡回の開始・終了と、巡回中の位置情報の記録ができます。
+            既存物件と調査ピンを地図上で確認します。{canWrite && "巡回の開始・終了と、巡回中の位置情報の記録もできます。"}
           </p>
         </div>
       </header>

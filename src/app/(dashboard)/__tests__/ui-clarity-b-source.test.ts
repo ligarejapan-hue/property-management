@@ -17,6 +17,11 @@ describe("B-5: 現地調査マップの説明文から開発用語を排除(UI�
   it("現状を平易な言葉で説明する", () => {
     expect(src).toContain("巡回の開始・終了");
   });
+
+  it("巡回操作の案内は write 権限がある時だけ出す(read-only に不可能な操作を勧めない・@codex)", () => {
+    expect(src).toContain('hasPermission(permissions, "field_survey", "write")');
+    expect(src).toContain('{canWrite && "巡回の開始・終了');
+  });
 });
 
 describe("B-9: 更新日フィルタの範囲逆転(開始>終了)を警告する(UI総点検)", () => {
