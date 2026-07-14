@@ -34,9 +34,7 @@ export default async function FieldSurveyMapPage() {
             現地調査マップ
           </h1>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            既存物件と調査ピンを地図上で確認します。
-            巡回開始 / 終了は本フェーズ (Phase 1-F-1) で UI のみ追加されます。
-            位置情報の記録は次フェーズで追加予定。
+            既存物件と調査ピンを地図上で確認します。巡回の開始・終了と、巡回中の位置情報の記録ができます。
           </p>
         </div>
       </header>
