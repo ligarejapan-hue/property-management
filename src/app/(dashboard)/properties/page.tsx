@@ -644,6 +644,9 @@ function PropertiesPageInner() {
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || undeliverableOnly || !!sendCountMaxFilter || sort !== "updatedAt:desc";
 
+  // 更新日の開始>終了(逆転)は結果が必ず0件になるので警告する(UI総点検 B-9)。YYYY-MM-DD は文字列比較で日付順になる。
+  const dateRangeInvalid = !!updatedFromFilter && !!updatedToFilter && updatedFromFilter > updatedToFilter;
+
   // アクティブなフィルタ条件数（モバイルトグルバッジ用）
   const activeFilterCount = [
     searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
@@ -1147,6 +1150,9 @@ function PropertiesPageInner() {
             className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             title="更新日（終了）"
           />
+          {dateRangeInvalid && (
+            <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">開始日が終了日より後です</span>
+          )}
         </label>
 
         <button
