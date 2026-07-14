@@ -16,10 +16,14 @@ describe("B-10: 物件詳細の操作群に見出しを付ける(UI総点検)", 
 describe("B-12: マンション棟一覧の空状態に登録CTAを置く(UI総点検)", () => {
   const src = read("src/app/(dashboard)/buildings/page.tsx");
 
-  it("空状態に「最初のマンション棟を登録」CTAがあり、登録モーダルを開く", () => {
+  it("本当の空(検索なし)のときだけ登録CTAで登録モーダルへ導く", () => {
     expect(src).toContain("最初のマンション棟を登録");
-    // 空状態(buildings.length === 0)の分岐内に登録モーダルを開くハンドラがある
-    const emptyBlock = src.slice(src.indexOf("buildings.length === 0"), src.indexOf("buildings.length === 0") + 500);
-    expect(emptyBlock).toContain("setShowCreate(true)");
+    expect(src).toContain("マンション棟がまだ登録されていません");
+    expect(src).toContain("setShowCreate(true)");
+  });
+
+  it("検索0件と本当の空を区別する(検索0件では登録CTAを出さない・@codex)", () => {
+    expect(src).toContain("に一致するマンション棟が見つかりません"); // 検索0件の文言
+    expect(src).toContain("{keyword ? ("); // keyword で出し分け
   });
 });
