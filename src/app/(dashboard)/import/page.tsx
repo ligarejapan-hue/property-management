@@ -1831,7 +1831,8 @@ export default function ImportPage() {
           <button
             onClick={handleRpImport}
             disabled={!rpPreview || rpPreview.summary.toCreateCount === 0 || rpLoading}
-            className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            // C-2 UI総点検: 0件(取り込む対象なし)でも緑のままで「押せそう」に見えた。無効時はグレーにして非活性を明示。
+            className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:hover:bg-gray-200 dark:disabled:bg-gray-700 dark:disabled:text-gray-500 dark:disabled:hover:bg-gray-700"
           >
             {rpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
             取り込む（{rpPreview?.summary.toCreateCount ?? 0}件作成）
