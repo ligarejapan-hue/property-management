@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const src = readFileSync(
-  path.resolve(process.cwd(), "src/components/layout/sidebar.tsx"),
+  path.resolve(process.cwd(), "src/components/layout/sidebar-model.tsx"),
   "utf-8",
 );
 

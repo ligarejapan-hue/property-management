@@ -10,7 +10,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 const SIDEBAR_SRC = fs.readFileSync(
-  path.resolve(process.cwd(), "src/components/layout/sidebar.tsx"),
+  path.resolve(process.cwd(), "src/components/layout/sidebar-model.tsx"),
   "utf8",
 );
 const PROPERTY_DETAIL_SRC = fs.readFileSync(
