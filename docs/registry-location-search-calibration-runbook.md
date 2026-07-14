@@ -12,20 +12,28 @@
 
 ## 1. セレクタ校正(`src/lib/registry-fetch/auto-fetch.ts` の `REGISTRY_SELECTORS`)
 
-実サイトの所在検索画面を開き、下記 `TODO(calibrate)` の CSS セレクタを **実要素に差し替える**:
+> **2026-07-14 更新**: 御社が保存した実画面HTML(ログイン/不動産請求/不動産一覧)から
+> 主要セレクタを**確定済み**([確定])。残るは実サイト実行でのみ確定する動的部分([要live])のみ。
+> 詳細な設計資料 = `deliverables/registry-calibration/selector-map-20260714.md`。
 
-- `locationSearchAddress` … 所在(住所)入力欄
-- `locationSearchLot` … 地番入力欄
-- `locationSearchBuilding` … 家屋番号入力欄
-- `locationSearchSubmit` … 検索実行ボタン
-- `locationSearchResult` … 検索結果コンテナ(候補0件でも表示される要素)
-- `locationSearchRow` … 各候補行
+**[確定](差し替え不要・実要素で確認済み)**: login=`#userId`/`#password`/`button.CForwardLong`・
+ログイン後の目印=`form[name=logoutForm]`・所在検索の 請求方法ラジオ `#fuSeikyuMethodSHOZAI`・
+種別 `#fuShozaiTypeTOCHI`/`#fuShozaiTypeTATEMONO`・都道府県 `#fuTodofukenShozai`・
+直接入力 `#fuShozaiChokusetuNyuryoku`・所在 `#fuChibanKuiki`・地番家屋 `#fuChibanKaoku`・
+結果テーブル `#fudosanIchiranTbl`。
 
-さらに `searchByLocation` 内の `$$eval` 抽出関数の行内セレクタ(`[data-ref]` / `.address` /
-`.lot` / `.building` / `.ren`)を、実サイトの1行の中の各セル要素へ差し替える。
+**[要live](実サイトで動かして確定)**:
+- `locationSearchSubmit`(次へ/請求リストへ進むボタン)… 候補の暫定値は `#myPageTable_next`。実操作で確定。
+- `locationSearchRow` の**行内セル**(`$$eval` の `.address`/`.lot`/`.building`/`.ren`)…
+  一覧テーブルの実際の列(td)構造に合わせる。
+- 都道府県 `selectOption` に渡す**実 option 値/ラベルの一致**(`splitAddressForLocationSearch` が
+  返す "東京都" 等がそのまま option value か、ラベル一致指定が要るか)。
+- 直接入力モードで**市区町村ダイアログを完全に回避できるか**(できなければダイアログ操作を追加)。
+- 番号取得側の `searchInput`(不動産番号入力欄)/`searchSubmit`/`downloadButton`
+  (請求方法=不動産番号 `#fuSeikyuMethodFUDOSAN_NO` は[確定])。
 
-自動取得(不動産番号)側の login / search / download セレクタが未校正なら、併せて校正する
-(所在検索は login を共有する)。
+差し替えたら `splitAddressForLocationSearch`/`extractLocationCandidateRows` の
+既存テスト(`playwright-adapter.test.ts`)が緑のままか確認する。
 
 ## 2. 有効化フラグ(`app.env` / 環境変数)
 

@@ -137,6 +137,10 @@ interface RegistryPageLike {
   goto(url: string, options?: unknown): Promise<unknown>;
   fill(selector: string, value: string): Promise<void>;
   click(selector: string): Promise<void>;
+  // 所在検索は多段UI(都道府県プルダウン・直接入力チェック)を伴う。実 Playwright Page の
+  // selectOption/check に委譲する(fake page はテストで mock)。
+  selectOption(selector: string, value: string): Promise<unknown>;
+  check(selector: string): Promise<void>;
   waitForSelector(selector: string, options?: unknown): Promise<unknown>;
   waitForEvent(event: string, options?: unknown): Promise<RegistryDownloadLike>;
   // 所在検索の結果行を DOM から抽出する（実 Playwright は $$eval で各行のセルを読む）。
@@ -171,35 +175,42 @@ interface RegistryChromiumLike {
  * 非PII・非secret（公開された公式サービスの URL）。実サイトの最終パス/サブドメインは
  * live キャリブレーション時に REGISTRY_FETCH_BASE_URL で上書きできる（既定は安全側の表玄関）。
  */
-export const DEFAULT_REGISTRY_BASE_URL = "https://www1.touki.or.jp";
+export const DEFAULT_REGISTRY_BASE_URL = "https://www.touki.or.jp";
 
 /**
  * ログインページの既定パス（base URL に前置する相対パス）。
  *
- * CodexP2: 実サービスの正確な login エンドポイントは実ログイン環境でのみ確証できるため、
- * 既定値（"/login"）を **誤った固定値として確定しない**。live キャリブレーション時は
- * REGISTRY_FETCH_LOGIN_PATH（env）でこのパスを上書きできるようにし、確証後にこの定数へ
- * 反映する運用とする（TODO(calibrate): 実サイトの login パス/URL を確認して確定）。
+ * 実画面HTML(2026-07-14 御社保存・login.html の form action)で確定した実パス。
+ * REGISTRY_FETCH_LOGIN_PATH（env）で上書き可能(サイト改修時の即応用)。
  * 非PII・非secret（公開された公式サービスのパス）。
  */
-export const DEFAULT_REGISTRY_LOGIN_PATH = "/login";
+export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/common/login";
 
+// 実画面HTML(2026-07-14 御社保存)から確定したセレクタ。設計資料 =
+// deliverables/registry-calibration/selector-map-20260714.md。
+// [確定] = 保存HTMLで実要素を確認済み / [要live] = 動的生成・実サイト実行でのみ確定。
 const REGISTRY_SELECTORS = {
-  loginId: "#login-id", // TODO(calibrate): 実サイトの入力欄に合わせる
-  password: "#login-password", // TODO(calibrate)
-  loginSubmit: "button[type=submit]", // TODO(calibrate)
-  loggedIn: "#mypage", // TODO(calibrate): ログイン成功を示す固有要素
-  searchInput: "#real-estate-number", // TODO(calibrate)
-  searchSubmit: "#search-submit", // TODO(calibrate)
-  searchResult: "#registry-result", // TODO(calibrate): 謄本ヒットを示す要素
-  downloadButton: "#download-pdf", // TODO(calibrate)
-  // 所在検索（PR-3・所在/地番/家屋番号→候補。TODO(calibrate): 実サイトの所在検索画面に合わせる）
-  locationSearchAddress: "#loc-address", // TODO(calibrate): 所在(住所)入力
-  locationSearchLot: "#loc-lot", // TODO(calibrate): 地番入力
-  locationSearchBuilding: "#loc-building", // TODO(calibrate): 家屋番号入力
-  locationSearchSubmit: "#loc-search-submit", // TODO(calibrate): 検索実行
-  locationSearchResult: "#loc-results", // TODO(calibrate): 結果コンテナ(0件でも表示)
-  locationSearchRow: "#loc-results .candidate-row", // TODO(calibrate): 各候補行
+  loginId: "#userId", // [確定] 利用者識別番号(maxlength 8)
+  password: "#password", // [確定] パスワード(maxlength 14)
+  loginSubmit: "button.CForwardLong", // [確定] ログイン実行(onclick=requireCheck)
+  loggedIn: 'form[name="logoutForm"]', // [確定] ログイン後の全ページに存在(login画面には無い)
+  // 番号取得(不動産番号での請求)。請求画面で請求方法=不動産番号を選ぶ同一フロー。
+  searchMethodNumberRadio: "#fuSeikyuMethodFUDOSAN_NO", // [確定] 請求方法=不動産番号 ラジオ
+  searchInput: "#fuFudosanNo", // [要live] 不動産番号入力欄(番号請求時の実操作画面で確定)
+  searchSubmit: "#myPageSeikyu", // [要live] 請求実行/次へ
+  searchResult: "#fudosanIchiranTbl", // [確定] 請求リスト(一覧)テーブル=ヒットの目印
+  downloadButton: "#download-pdf", // [要live] PDFダウンロード
+  // 所在検索: 実サイトは多段UI。直接入力モードでダイアログを避ける(堅牢)。
+  searchMethodLocationRadio: "#fuSeikyuMethodSHOZAI", // [確定] 請求方法=所在 ラジオ
+  locationTypeLandRadio: "#fuShozaiTypeTOCHI", // [確定] 種別=土地
+  locationTypeBuildingRadio: "#fuShozaiTypeTATEMONO", // [確定] 種別=建物
+  locationPrefectureSelect: "#fuTodofukenShozai", // [確定] 都道府県 プルダウン
+  locationDirectInputCheck: "#fuShozaiChokusetuNyuryoku", // [確定] 所在の直接入力モード
+  locationSearchAddress: "#fuChibanKuiki", // [確定] 所在(地番区域=市区町村以下)入力
+  locationSearchLotBuilding: "#fuChibanKaoku", // [確定] 地番・家屋番号入力
+  locationSearchSubmit: "#myPageTable_next", // [要live] 次へ(候補一覧/請求リストへ)
+  locationSearchResult: "#fudosanIchiranTbl", // [確定] 結果コンテナ(0件でも表示)
+  locationSearchRow: "#fudosanIchiranTbl tbody tr", // [確定] 各候補行
 } as const;
 
 /**
@@ -234,6 +245,24 @@ function isTimeoutError(err: unknown): boolean {
  *   ユニークな非PII参照。@codex 指摘対応)。行要素自身 → 子要素 [data-ref] の順に属性を読む。
  * - address/lotNumber/buildingNumber/realEstateNumber は各セルの textContent(秘匿情報)。
  */
+/**
+ * 所在検索の住所を「都道府県」と「それ以降(市区町村＋町名)」に分解する純関数。
+ * 実サイトは都道府県=プルダウン / 所在=直接入力欄 の別入力のため、住所文字列を割る。
+ * - 都道府県は **明示列挙** で先頭一致させる(既存 pdf-registry-parser.ts と同方針)。
+ *   lazy な `.{1,4}?[都道府県]` は「京都府」の2文字目「都」で早期マッチして誤分解する
+ *   (@codex P1) ため使わない。県は「.{2,3}県」で受ける。
+ * - どれにも一致しない/先頭が空 → prefecture=null(呼び出し側は全体を所在欄へ)。
+ * ※ selectOption に渡す実際の option 値/ラベルの一致は実サイトでのみ確定(=[要live])。
+ */
+export function splitAddressForLocationSearch(address: string): {
+  prefecture: string | null;
+  rest: string;
+} {
+  const m = address.match(/^\s*(東京都|北海道|(?:京都|大阪)府|.{2,3}県)(.*)$/u);
+  if (!m) return { prefecture: null, rest: address.trim() };
+  return { prefecture: m[1], rest: m[2].trim() };
+}
+
 export function extractLocationCandidateRows(
   els: Element[],
 ): Array<Record<string, string | null>> {
@@ -301,6 +330,9 @@ function createPlaywrightRegistryPage(
       //     導入し、その経路でのみ found:false（→ not_found）を返す（TODO(calibrate)）。
       // いずれも生メッセージ（selector/入力が混入しうる）は例外に載せない。
       try {
+        // 実サイトは請求画面で「請求方法=不動産番号」を選んでから番号を入力する。
+        // ラジオ [確定]。番号入力欄/請求ボタンは番号モードの実操作画面で確定(=[要live])。
+        await page.click(REGISTRY_SELECTORS.searchMethodNumberRadio);
         await page.fill(REGISTRY_SELECTORS.searchInput, realEstateNumber);
         await page.click(REGISTRY_SELECTORS.searchSubmit);
       } catch {
@@ -319,16 +351,40 @@ function createPlaywrightRegistryPage(
       }
     },
     async searchByLocation(input) {
-      // 入力(fill)・検索(click)のセットアップ由来失敗は provider_error(校正ズレ/未準備)。
+      // 実サイトの所在検索は多段UI。ダイアログを避け「直接入力モード」で操作する:
+      //   ①請求方法=所在 ②種別(家屋番号あり=建物 / なし=土地)
+      //   ③都道府県=プルダウン + ④所在の直接入力チェック → 市区町村以下を入力
+      //   ⑤地番・家屋番号(1欄) ⑥次へ → 一覧を読む
+      // 入力(fill/click/select/check)のセットアップ由来失敗は provider_error(校正ズレ/未準備)。
       try {
-        await page.fill(REGISTRY_SELECTORS.locationSearchAddress, input.address);
-        if (input.lotNumber) {
-          await page.fill(REGISTRY_SELECTORS.locationSearchLot, input.lotNumber);
+        await page.click(REGISTRY_SELECTORS.searchMethodLocationRadio);
+        // 家屋番号があれば建物、無ければ土地(登記の種別区分。@codex P2 対応)。
+        await page.click(
+          input.buildingNumber && input.buildingNumber.length > 0
+            ? REGISTRY_SELECTORS.locationTypeBuildingRadio
+            : REGISTRY_SELECTORS.locationTypeLandRadio,
+        );
+        const { prefecture, rest } = splitAddressForLocationSearch(input.address);
+        if (prefecture) {
+          // selectOption は value 一致優先。実 option 値/ラベルの一致は [要live]。
+          await page.selectOption(
+            REGISTRY_SELECTORS.locationPrefectureSelect,
+            prefecture,
+          );
         }
-        if (input.buildingNumber) {
+        await page.check(REGISTRY_SELECTORS.locationDirectInputCheck);
+        await page.fill(
+          REGISTRY_SELECTORS.locationSearchAddress,
+          rest.length > 0 ? rest : input.address,
+        );
+        // 実サイトは地番・家屋番号を 1 欄(#fuChibanKaoku)にまとめて入れる。
+        const lotBuilding = [input.lotNumber, input.buildingNumber]
+          .filter((v): v is string => !!v && v.length > 0)
+          .join(" ");
+        if (lotBuilding.length > 0) {
           await page.fill(
-            REGISTRY_SELECTORS.locationSearchBuilding,
-            input.buildingNumber,
+            REGISTRY_SELECTORS.locationSearchLotBuilding,
+            lotBuilding,
           );
         }
         await page.click(REGISTRY_SELECTORS.locationSearchSubmit);

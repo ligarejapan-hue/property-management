@@ -30,6 +30,7 @@ import {
   DEFAULT_REGISTRY_BASE_URL,
   DEFAULT_REGISTRY_LOGIN_PATH,
   extractLocationCandidateRows,
+  splitAddressForLocationSearch,
 } from "../auto-fetch";
 import { RegistryFetchError } from "../errors";
 
@@ -48,6 +49,12 @@ function makeFakeChromium() {
       async () => undefined,
     ),
     click: vi.fn<(selector: string) => Promise<undefined>>(
+      async () => undefined,
+    ),
+    selectOption: vi.fn<(selector: string, value: string) => Promise<string[]>>(
+      async () => [],
+    ),
+    check: vi.fn<(selector: string) => Promise<undefined>>(
       async () => undefined,
     ),
     waitForSelector: vi.fn(async () => ({})),
@@ -215,7 +222,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.browser.close).toHaveBeenCalledTimes(1);
   });
 
-  it("C9: searchByLocation は 所在/地番/家屋番号 を fill→検索 click→結果行を候補へ変換", async () => {
+  it("C9: searchByLocation は 実サイトの多段UI(所在ラジオ/種別/都道府県select/直接入力/地番家屋)へ委譲→結果行を候補へ変換", async () => {
     const f = makeFakeChromium();
     f.page.$$eval = vi.fn(async () => [
       { candidateRef: "c1", address: "東京都千代田区丸の内1-1", lotNumber: "1番1", buildingNumber: null, realEstateNumber: "1234567890123" },
@@ -228,12 +235,45 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       lotNumber: "1番",
       buildingNumber: null,
     });
-    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "東京都千代田区丸の内1");
+    // 都道府県はプルダウン(selectOption)へ、市区町村以下は直接入力(fill)へ分解して渡す。
+    expect(f.page.selectOption).toHaveBeenCalledWith(expect.any(String), "東京都");
+    expect(f.page.check).toHaveBeenCalled(); // 直接入力モード
+    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "千代田区丸の内1");
+    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "1番"); // 地番・家屋番号(1欄)
     expect(f.page.click).toHaveBeenCalled();
     expect(candidates).toHaveLength(2);
     expect(candidates[0].realEstateNumber).toBe("1234567890123");
     // candidateRef 空は row-index フォールバックで必ず非空。
     expect(candidates[1].candidateRef).not.toBe("");
+  });
+
+  it("C9e: 地番・家屋番号は 1 欄に空白区切りで連結し、家屋番号ありは建物種別を選ぶ", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "北海道札幌市中央区北1条",
+      lotNumber: "5番",
+      buildingNumber: "12",
+    });
+    expect(f.page.selectOption).toHaveBeenCalledWith(expect.any(String), "北海道");
+    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "5番 12");
+    // 家屋番号ありは種別=建物(#fuShozaiTypeTATEMONO)を選ぶ(@codex P2)。
+    expect(f.page.click).toHaveBeenCalledWith("#fuShozaiTypeTATEMONO");
+    expect(f.page.click).not.toHaveBeenCalledWith("#fuShozaiTypeTOCHI");
+  });
+
+  it("C9f: 家屋番号なし(地番のみ)は種別=土地を選ぶ", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "東京都千代田区丸の内1",
+      lotNumber: "1番",
+      buildingNumber: null,
+    });
+    expect(f.page.click).toHaveBeenCalledWith("#fuShozaiTypeTOCHI");
+    expect(f.page.click).not.toHaveBeenCalledWith("#fuShozaiTypeTATEMONO");
   });
 
   it("C10: searchByLocation の結果待ちタイムアウトは timeout(not_found にしない)", async () => {
@@ -470,6 +510,51 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     });
     // close 失敗にかかわらず、元の起動エラーが伝播する。
     await expect(factory!()).rejects.toBe(boom);
+  });
+
+  it("SP: splitAddressForLocationSearch は都道府県と市区町村以下に分解する", () => {
+    expect(splitAddressForLocationSearch("東京都千代田区丸の内1-1-1")).toEqual({
+      prefecture: "東京都",
+      rest: "千代田区丸の内1-1-1",
+    });
+    expect(splitAddressForLocationSearch("北海道札幌市中央区北1条")).toEqual({
+      prefecture: "北海道",
+      rest: "札幌市中央区北1条",
+    });
+    expect(splitAddressForLocationSearch("大阪府大阪市北区")).toEqual({
+      prefecture: "大阪府",
+      rest: "大阪市北区",
+    });
+    expect(splitAddressForLocationSearch("神奈川県横浜市西区")).toEqual({
+      prefecture: "神奈川県",
+      rest: "横浜市西区",
+    });
+    // @codex P1: 「京都府」は2文字目が「都」= 早期マッチ罠。明示列挙で正しく分解する。
+    expect(splitAddressForLocationSearch("京都府京都市中京区河原町通")).toEqual({
+      prefecture: "京都府",
+      rest: "京都市中京区河原町通",
+    });
+    // 4文字県(和歌山県/鹿児島県)も .{2,3}県 で受ける。
+    expect(splitAddressForLocationSearch("和歌山県和歌山市")).toEqual({
+      prefecture: "和歌山県",
+      rest: "和歌山市",
+    });
+  });
+
+  it("SP2: 都道府県が判別できない/空は prefecture=null(全体を所在へ)", () => {
+    expect(splitAddressForLocationSearch("丸の内1-1")).toEqual({
+      prefecture: null,
+      rest: "丸の内1-1",
+    });
+    expect(splitAddressForLocationSearch("x")).toEqual({
+      prefecture: null,
+      rest: "x",
+    });
+    // 先頭空白は trim される。
+    expect(splitAddressForLocationSearch("  東京都港区  ")).toEqual({
+      prefecture: "東京都",
+      rest: "港区",
+    });
   });
 
   it("C13: launch 自体が reject したら close を呼ばずに throw する（起動済みリソースなし）", async () => {
