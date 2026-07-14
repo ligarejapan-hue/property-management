@@ -125,20 +125,123 @@ function pickRows(pairs: [string, string | undefined][]): { label: string; value
   return pairs.filter((pair): pair is [string, string] => !!pair[1]).map(([label, value]) => ({ label, value }));
 }
 
+/** 帯テーブルの行ラベル。生成(buildFooterTransactionElements)と復元(readFooterData)で共有。 */
+const TERMS_LABELS = { transactionType: "取引態様", adType: "広告", compensation: "報酬" } as const;
+const STAFF_LABELS = { staff: "担当", agent: "取引士", specialNotes: "特記事項" } as const;
+
+/** 会社帯の横3分割(会社/取引条件/担当)の列幾何。buildFooterBand と
+ *  buildFooterTransactionElements が同じ座標計算を共有する(見た目のズレ防止)。 */
+export function footerColumnGeometry(footer: Rect): {
+  companyW: number;
+  termsW: number;
+  staffW: number;
+  companyX0: number;
+  termsX0: number;
+  staffX0: number;
+} {
+  const companyW = Math.round(footer.w * COMPANY_W_RATIO);
+  const termsW = Math.round(footer.w * TERMS_W_RATIO);
+  const staffW = footer.w - companyW - termsW;
+  return {
+    companyW,
+    termsW,
+    staffW,
+    companyX0: footer.x,
+    termsX0: footer.x + companyW,
+    staffX0: footer.x + companyW + termsW,
+  };
+}
+
+/** 帯の取引条件テーブル/担当テーブル(+担当区切り線)を組む。物件別の
+ *  FooterBandData だけに依存する部分(作成時=buildFooterBand・編集時=editFooterData 共有)。
+ *  会社ブロック・帯外枠・「会社|取引」区切り線は含まない(それらは常在・データ非依存)。 */
+export function buildFooterTransactionElements(footer: Rect, data: FooterBandData): SalesSheetElement[] {
+  const { termsW, staffW, termsX0, staffX0 } = footerColumnGeometry(footer);
+  const hasStaff = !!(data.staff || data.agent || data.specialNotes);
+  const elements: SalesSheetElement[] = [];
+
+  const termsRows = pickRows([
+    [TERMS_LABELS.transactionType, data.transactionType],
+    [TERMS_LABELS.adType, data.adType],
+    [TERMS_LABELS.compensation, data.compensation],
+  ]);
+  elements.push({
+    id: "footer-terms-table",
+    type: "table",
+    ...clampRect(
+      { x: termsX0 + GAP_MM, y: footer.y + PAD_MM, w: termsW - GAP_MM * 2, h: footer.h - PAD_MM * 2 },
+      footer,
+    ),
+    z: 2,
+    rows: termsRows.length > 0 ? termsRows : [{ label: "", value: "" }],
+    style: { fontSizePt: FONT_PT.table, labelColor: NAVY, borderColor: TABLE_BORDER_COLOR },
+  });
+
+  if (hasStaff) {
+    elements.push(
+      mkDivider(
+        "footer-divider-staff",
+        clampRect({ x: staffX0, y: footer.y + PAD_MM, w: DIVIDER_W_MM, h: footer.h - PAD_MM * 2 }, footer),
+      ),
+    );
+    const staffRows = pickRows([
+      [STAFF_LABELS.staff, data.staff],
+      [STAFF_LABELS.agent, data.agent],
+      [STAFF_LABELS.specialNotes, data.specialNotes],
+    ]);
+    elements.push({
+      id: "footer-staff-table",
+      type: "table",
+      ...clampRect(
+        { x: staffX0 + GAP_MM, y: footer.y + PAD_MM, w: staffW - GAP_MM * 2, h: footer.h - PAD_MM * 2 },
+        footer,
+      ),
+      z: 2,
+      rows: staffRows,
+      style: { fontSizePt: FONT_PT.table, labelColor: NAVY, borderColor: TABLE_BORDER_COLOR },
+    });
+  }
+
+  return elements;
+}
+
+/** document の帯テーブルから現在の6値を復元する(欠け・省略は "")。 */
+export function readFooterData(elements: SalesSheetElement[]): FooterBandData {
+  const terms = elements.find((e) => e.id === "footer-terms-table" && e.type === "table");
+  const staff = elements.find((e) => e.id === "footer-staff-table" && e.type === "table");
+  const read = (el: SalesSheetElement | undefined, label: string): string => {
+    if (!el || el.type !== "table") return "";
+    return el.rows.find((r) => r.label === label)?.value ?? "";
+  };
+  return {
+    transactionType: read(terms, TERMS_LABELS.transactionType),
+    adType: read(terms, TERMS_LABELS.adType),
+    compensation: read(terms, TERMS_LABELS.compensation),
+    staff: read(staff, STAFF_LABELS.staff),
+    agent: read(staff, STAFF_LABELS.agent),
+    specialNotes: read(staff, STAFF_LABELS.specialNotes),
+  };
+}
+
+/** 6項目の等価判定(undefined と "" を同一視)。editFooterData の no-op 判定に使う。 */
+export function footerDataEqual(a: FooterBandData, b: FooterBandData): boolean {
+  const keys: (keyof FooterBandData)[] = [
+    "transactionType",
+    "adType",
+    "compensation",
+    "staff",
+    "agent",
+    "specialNotes",
+  ];
+  return keys.every((k) => (a[k] ?? "") === (b[k] ?? ""));
+}
+
 export function buildFooterBand(
   footer: Rect,
   data: FooterBandData,
   company: CompanyProfile = COMPANY_INFO,
 ): SalesSheetElement[] {
-  const companyW = Math.round(footer.w * COMPANY_W_RATIO);
-  const termsW = Math.round(footer.w * TERMS_W_RATIO);
-  const staffW = footer.w - companyW - termsW;
-
-  const companyX0 = footer.x;
-  const termsX0 = footer.x + companyW;
-  const staffX0 = footer.x + companyW + termsW;
-
-  const hasStaff = !!(data.staff || data.agent || data.specialNotes);
+  const { companyX0, termsX0 } = footerColumnGeometry(footer);
 
   const elements: SalesSheetElement[] = [];
 
@@ -204,50 +307,7 @@ export function buildFooterBand(
     ),
   );
 
-  // --- 取引条件テーブル（中央）。常に表示（値が無ければ空行1つで枠のみ出す）。 ---
-  const termsRows = pickRows([
-    ["取引態様", data.transactionType],
-    ["広告", data.adType],
-    ["報酬", data.compensation],
-  ]);
-  elements.push({
-    id: "footer-terms-table",
-    type: "table",
-    ...clampRect(
-      { x: termsX0 + GAP_MM, y: footer.y + PAD_MM, w: termsW - GAP_MM * 2, h: footer.h - PAD_MM * 2 },
-      footer,
-    ),
-    z: 2,
-    rows: termsRows.length > 0 ? termsRows : [{ label: "", value: "" }],
-    style: { fontSizePt: FONT_PT.table, labelColor: NAVY, borderColor: TABLE_BORDER_COLOR },
-  });
-
-  // --- 担当テーブル（右）。担当/取引士/特記事項が全空なら省略（コンパクト版・右区切り線も省略）。 ---
-  if (hasStaff) {
-    elements.push(
-      mkDivider(
-        "footer-divider-staff",
-        clampRect({ x: staffX0, y: footer.y + PAD_MM, w: DIVIDER_W_MM, h: footer.h - PAD_MM * 2 }, footer),
-      ),
-    );
-
-    const staffRows = pickRows([
-      ["担当", data.staff],
-      ["取引士", data.agent],
-      ["特記事項", data.specialNotes],
-    ]);
-    elements.push({
-      id: "footer-staff-table",
-      type: "table",
-      ...clampRect(
-        { x: staffX0 + GAP_MM, y: footer.y + PAD_MM, w: staffW - GAP_MM * 2, h: footer.h - PAD_MM * 2 },
-        footer,
-      ),
-      z: 2,
-      rows: staffRows,
-      style: { fontSizePt: FONT_PT.table, labelColor: NAVY, borderColor: TABLE_BORDER_COLOR },
-    });
-  }
+  elements.push(...buildFooterTransactionElements(footer, data));
 
   return elements;
 }

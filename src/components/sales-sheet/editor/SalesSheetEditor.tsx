@@ -23,6 +23,7 @@ import {
   addQrElement,
   autoArrangePhotos,
   autoBalanceLayout,
+  editFooterData,
   deleteElement,
   markSavedIfCurrent,
   exportWithSaveGuard,
@@ -32,6 +33,8 @@ import { ElementPanel } from "./ElementPanel";
 import type { ElementPanelChange } from "./ElementPanel";
 import { EditorToolbar } from "./EditorToolbar";
 import { PhotoGalleryPanel } from "./PhotoGalleryPanel";
+import { TransactionInfoDialog } from "./TransactionInfoDialog";
+import { readFooterData } from "@/lib/sales-sheet/footer-band";
 import { safeRandomId } from "@/lib/random-id";
 
 // ---------------------------------------------------------------------------
@@ -109,6 +112,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   // sends the LATEST persisted version, not the stale render-time closure.
   const savedAtRef = useRef(initial.updatedAt);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [txInfoOpen, setTxInfoOpen] = useState(false);
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
@@ -302,6 +306,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onAutoBalance={handleAutoBalance}
         onAddBadge={handleAddBadge}
         onAddQr={handleAddQr}
+        onOpenTransactionInfo={() => setTxInfoOpen(true)}
+        canEditTransactionInfo={editorState.document.elements.some((e) => e.id === "footer-band")}
       />
 
       {/* ── 写真ギャラリー（写真管理・計画④） ─────────────────────────── */}
@@ -310,6 +316,19 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           propertyId={initial.propertyId}
           onClose={() => setGalleryOpen(false)}
           onAddPhoto={handleAddImage}
+        />
+      )}
+
+      {/* ── 取引情報（会社帯の物件別6項目）編集モーダル ─────────────────── */}
+      {txInfoOpen && (
+        <TransactionInfoDialog
+          open
+          initial={readFooterData(editorState.document.elements)}
+          onClose={() => setTxInfoOpen(false)}
+          onApply={(data) => {
+            setEditorState((prev) => editFooterData(prev, data));
+            setTxInfoOpen(false);
+          }}
         />
       )}
 

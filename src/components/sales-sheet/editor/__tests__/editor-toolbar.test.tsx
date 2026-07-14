@@ -7,21 +7,21 @@ const noop = async () => {};
 describe("EditorToolbar — 描画", () => {
   it("data-editor-toolbar を持つルート要素を描画する", () => {
     const html = renderToStaticMarkup(
-      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} />,
+      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} onOpenTransactionInfo={() => {}} />,
     );
     expect(html).toContain("data-editor-toolbar");
   });
 
   it("dirty=false のとき dirty indicator は非表示", () => {
     const html = renderToStaticMarkup(
-      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} />,
+      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} onOpenTransactionInfo={() => {}} />,
     );
     expect(html).not.toContain("未保存の変更があります");
   });
 
   it("dirty=true のとき data-dirty-indicator を表示する", () => {
     const html = renderToStaticMarkup(
-      <EditorToolbar dirty={true} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} />,
+      <EditorToolbar dirty={true} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} onOpenTransactionInfo={() => {}} />,
     );
     expect(html).toContain("data-dirty-indicator");
     expect(html).toContain("未保存の変更があります");
@@ -29,7 +29,7 @@ describe("EditorToolbar — 描画", () => {
 
   it("保存・PDF出力・PNG出力・削除ボタンを持つ", () => {
     const html = renderToStaticMarkup(
-      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} />,
+      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} onOpenTransactionInfo={() => {}} />,
     );
     expect(html).toContain("data-toolbar-save");
     expect(html).toContain("data-toolbar-add-photo");
@@ -53,6 +53,7 @@ describe("EditorToolbar — 描画", () => {
         onAutoBalance={() => {}}
         onAddBadge={() => {}}
         onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
       />,
     );
     expect(html).toContain("data-toolbar-add-qr");
@@ -71,6 +72,7 @@ describe("EditorToolbar — 描画", () => {
         onAutoBalance={() => {}}
         onAddBadge={() => {}}
         onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
       />,
     );
     expect(html).toContain("data-toolbar-add-badge");
@@ -89,6 +91,7 @@ describe("EditorToolbar — 描画", () => {
         onAutoBalance={() => {}}
         onAddBadge={() => {}}
         onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
       />,
     );
     expect(html).toContain("data-toolbar-auto-arrange");
@@ -107,6 +110,7 @@ describe("EditorToolbar — 描画", () => {
         onAutoBalance={() => {}}
         onAddBadge={() => {}}
         onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
       />,
     );
     expect(html).toContain("data-toolbar-auto-balance");
@@ -115,9 +119,47 @@ describe("EditorToolbar — 描画", () => {
 
   it("dirty=false のとき保存ボタンが disabled でない", () => {
     const html = renderToStaticMarkup(
-      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} />,
+      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} onOpenTransactionInfo={() => {}} />,
     );
     // All buttons enabled (no disabled attr in static output when not busy)
     expect(html).not.toContain("保存中");
+  });
+
+  it("「取引情報」ボタンを描画する", () => {
+    const html = renderToStaticMarkup(
+      <EditorToolbar
+        dirty={false}
+        onSave={noop}
+        onExport={noop}
+        onDelete={noop}
+        onAddPhoto={() => {}}
+        onAutoArrange={() => {}}
+        onAutoBalance={() => {}}
+        onAddBadge={() => {}}
+        onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
+      />,
+    );
+    expect(html).toContain("data-toolbar-transaction-info");
+    expect(html).toContain("取引情報");
+  });
+
+  it("会社帯が無い図面では「取引情報」ボタンを無効化しツールチップを出す", () => {
+    const html = renderToStaticMarkup(
+      <EditorToolbar
+        dirty={false}
+        onSave={noop}
+        onExport={noop}
+        onDelete={noop}
+        onAddPhoto={() => {}}
+        onAutoArrange={() => {}}
+        onAutoBalance={() => {}}
+        onAddBadge={() => {}}
+        onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
+        canEditTransactionInfo={false}
+      />,
+    );
+    expect(html).toContain("この図面には会社帯がありません");
   });
 });

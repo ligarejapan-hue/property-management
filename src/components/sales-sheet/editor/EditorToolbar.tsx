@@ -16,9 +16,15 @@ export interface EditorToolbarProps {
   onAddBadge: () => void;
   /** QR コード要素を追加（計画⑧）。 */
   onAddQr: () => void;
+  /** 会社帯の物件別6項目(取引情報)の編集モーダルを開く。 */
+  onOpenTransactionInfo: () => void;
+  /** 会社帯(footer-band)を持つ図面か。古い様式で作成され帯が無い図面では
+   *  「取引情報」を編集しても反映先が無いため、ボタンを無効化して黙って捨てるのを防ぐ。
+   *  未指定は true(帯ありとして扱う)。 */
+  canEditTransactionInfo?: boolean;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onOpenTransactionInfo, canEditTransactionInfo = true }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -129,6 +135,16 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         QRを追加
+      </button>
+      <button
+        type="button"
+        data-toolbar-transaction-info
+        onClick={onOpenTransactionInfo}
+        disabled={busy || !canEditTransactionInfo}
+        title={!canEditTransactionInfo ? "この図面には会社帯がありません（古い様式で作成された図面）" : undefined}
+        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
+      >
+        取引情報
       </button>
       <button
         type="button"
