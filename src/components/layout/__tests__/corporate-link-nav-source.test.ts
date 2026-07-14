@@ -12,7 +12,7 @@ import { resolve } from "path";
 import { describe, it, expect } from "vitest";
 
 const sidebarSrc = readFileSync(
-  resolve(__dirname, "../sidebar.tsx"),
+  resolve(__dirname, "../sidebar-model.tsx"),
   "utf-8",
 );
 const qualityAuditPageSrc = readFileSync(

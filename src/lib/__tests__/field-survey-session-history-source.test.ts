@@ -23,7 +23,7 @@ const LIST_SRC = readSrc(
   "src/components/field-survey/session-history-client.tsx",
 );
 const PAGE_SRC = readSrc("src/app/(dashboard)/field-survey/sessions/page.tsx");
-const SIDEBAR_SRC = readSrc("src/components/layout/sidebar.tsx");
+const SIDEBAR_SRC = readSrc("src/components/layout/sidebar-model.tsx");
 const DETAIL_SRC = readSrc("src/components/field-survey/pin-detail-panel.tsx");
 
 // =======================================================================

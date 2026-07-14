@@ -2,205 +2,31 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import {
-  Link2,
-  Building2,
-  Building,
-  Users,
-  Shield,
-  FileText,
-  HelpCircle,
-  ClipboardList,
-  History,
-  Menu,
-  X,
-  ChevronDown,
-  ChevronRight,
-  Upload,
-  KeyRound,
-  UserCog,
-  MapPinned,
-  Map as MapIcon,
-  ScanSearch,
-  ScanText,
-  ClipboardCheck,
-  FileSearch,
-  BookOpen,
-  Newspaper,
-  Mail,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Menu, X, FileText } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { visibleSidebar, type NavGroup, type NavLeaf } from "./sidebar-model";
 
 interface SidebarProps {
   userRole: string;
   currentPath: string;
 }
 
-interface NavItem {
-  label: string;
-  href: string;
-  icon: React.ReactNode;
-}
-
-const mainNavItems: NavItem[] = [
-  {
-    label: "物件一覧",
-    href: "/properties",
-    icon: <Building2 className="h-5 w-5" />,
-  },
-  {
-    label: "マンション棟",
-    href: "/buildings",
-    icon: <Building className="h-5 w-5" />,
-  },
-  {
-    label: "販売図面を作成",
-    href: "/sales-sheets/new",
-    icon: <Newspaper className="h-5 w-5" />,
-  },
-  {
-    label: "現地調査マップ",
-    href: "/field-survey/map",
-    icon: <MapIcon className="h-5 w-5" />,
-  },
-  {
-    label: "巡回履歴",
-    href: "/field-survey/sessions",
-    icon: <History className="h-5 w-5" />,
-  },
-  {
-    label: "物件化の完成待ち",
-    href: "/field-survey/candidates",
-    icon: <ClipboardCheck className="h-5 w-5" />,
-  },
-  {
-    label: "受付帳CSV取込",
-    href: "/import",
-    icon: <Upload className="h-5 w-5" />,
-  },
-  {
-    label: "謄本PDF取込",
-    href: "/import/registry-pdf",
-    icon: <FileText className="h-5 w-5" />,
-  },
-  {
-    label: "ヘルプ",
-    href: "/help",
-    icon: <HelpCircle className="h-5 w-5" />,
-  },
-];
-
-/** 管理者メニュー: アカウント/権限/ログ/添付の運用系(案2で2グループに整理)。 */
-const adminNavItems: NavItem[] = [
-  {
-    label: "ユーザー管理",
-    href: "/admin/users",
-    icon: <Users className="h-5 w-5" />,
-  },
-  {
-    label: "権限テンプレート",
-    href: "/admin/templates",
-    icon: <Shield className="h-5 w-5" />,
-  },
-  {
-    label: "監査ログ",
-    href: "/admin/audit-logs",
-    icon: <ClipboardList className="h-5 w-5" />,
-  },
-  {
-    label: "権限変更履歴",
-    href: "/admin/permission-logs",
-    icon: <History className="h-5 w-5" />,
-  },
-  {
-    label: "パスワード変更",
-    href: "/admin/change-password",
-    icon: <KeyRound className="h-5 w-5" />,
-  },
-  {
-    label: "添付検索",
-    href: "/admin/attachments",
-    icon: <FileSearch className="h-5 w-5" />,
-  },
-  {
-    label: "謄本取得の資格情報",
-    href: "/admin/registry-settings",
-    icon: <FileText className="h-5 w-5" />,
-  },
-  {
-    label: "売却DM設定",
-    href: "/admin/sale-dm-settings",
-    icon: <Mail className="h-5 w-5" />,
-  },
-  {
-    label: "会社情報",
-    href: "/admin/company-settings",
-    icon: <Building2 className="h-5 w-5" />,
-  },
-];
-
-/** データ品質チェック: 所有者データの一括点検/補正ツール群。 */
-const dataQualityNavItems: NavItem[] = [
-  {
-    label: "所有者補正候補",
-    href: "/admin/owners/correction",
-    icon: <UserCog className="h-5 w-5" />,
-  },
-  {
-    // 法人番号の作業場所(所有者補正候補内のタブ)への直行ショートカット。
-    // href にクエリを含むため isActive(パス名比較)では光らない=補正候補側が光る(意図どおり)。
-    label: "法人番号紐づけ",
-    href: "/admin/owners/correction?tab=corporate_restore",
-    icon: <Link2 className="h-5 w-5" />,
-  },
-  {
-    label: "表示名監査",
-    href: "/admin/display-name-audit",
-    icon: <ScanSearch className="h-5 w-5" />,
-  },
-  {
-    label: "郵便番号×住所チェック",
-    href: "/admin/postal-code-audit",
-    icon: <MapPinned className="h-5 w-5" />,
-  },
-  {
-    label: "テキスト衛生監査",
-    href: "/admin/owners/text-hygiene",
-    icon: <ScanText className="h-5 w-5" />,
-  },
-  {
-    label: "氏名・連絡先チェック",
-    href: "/admin/owners/quality-audit",
-    icon: <ClipboardCheck className="h-5 w-5" />,
-  },
-];
-
 export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const groups = visibleSidebar(userRole);
 
   const isActive = (href: string) => {
-    if (href === "/properties") {
-      return currentPath === href || currentPath.startsWith("/properties/");
-    }
+    if (href === "/properties") return currentPath === href || currentPath.startsWith("/properties/");
     // Exact match for /import to avoid highlighting when on /import/owners etc.
-    if (href === "/import") {
-      return currentPath === "/import";
-    }
+    if (href === "/import") return currentPath === "/import";
     return currentPath === href || currentPath.startsWith(href + "/");
   };
 
-  // 管理者系グループは既定で閉じる(18項目が常時展開されるとモバイルで
-  // ドロワーが縦に収まらない)。開閉は「現在地(currentPath)＋ユーザーの手動操作」
-  // から毎レンダー導出する: 手動トグル(null=未操作)が無ければ、現在地がグループ内
-  // なら自動で開く。dashboard layout は永続で Sidebar が再マウントされないため、
-  // useState 初期化だけだと client-side 遷移で別グループへ入っても開かず現在地が
-  // サイドバーから消える。導出式にすることで遷移のたび追従する(effect 不要=
-  // react-hooks/set-state-in-effect も踏まない)。
-  const [adminToggle, setAdminToggle] = useState<boolean | null>(null);
-  const [qualityToggle, setQualityToggle] = useState<boolean | null>(null);
-  const adminOpen = adminToggle ?? adminNavItems.some((i) => isActive(i.href));
-  const qualityOpen =
-    qualityToggle ?? dataQualityNavItems.some((i) => isActive(i.href));
+  // 折りたたみグループの開閉: 手動トグル(未操作=未設定)が無ければ、現在地がグループ内なら
+  // 自動で開く。dashboard layout は永続で Sidebar が再マウントされないため、遷移のたび
+  // 導出することで現在地に追従する(effect 不要=react-hooks/set-state-in-effect も踏まない)。
+  const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
+  const isOpen = (g: NavGroup) => openMap[g.key] ?? g.items.some((i) => isActive(i.href));
 
   const linkClasses = (href: string) =>
     `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
@@ -209,106 +35,64 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
     }`;
 
-  const isAdmin = userRole === "admin" || userRole === "ADMIN";
-
-  /** 折りたたみ可能なメニューグループ(見出しボタン+開時のみ項目を描画)。 */
-  const navGroup = (
-    label: string,
-    items: NavItem[],
-    open: boolean,
-    toggle: () => void,
-  ) => (
-    <>
-      <div className="mt-4 mb-1">
-        <button
-          onClick={toggle}
-          aria-expanded={open}
-          className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-        >
-          {open ? (
-            <ChevronDown className="h-3 w-3" />
-          ) : (
-            <ChevronRight className="h-3 w-3" />
-          )}
-          {label}
-        </button>
-      </div>
-      {open &&
-        items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={linkClasses(item.href)}
-            onClick={() => setMobileOpen(false)}
-          >
-            {item.icon}
-            {item.label}
-          </Link>
-        ))}
-    </>
-  );
-
-  const navContent = (
-    <nav className="flex flex-col gap-1 p-4">
-      <div className="mb-2">
-        <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-          メニュー
-        </p>
-      </div>
-      {mainNavItems.map((item) => (
-        <Link
-          key={item.href}
-          href={item.href}
-          className={linkClasses(item.href)}
-          onClick={() => setMobileOpen(false)}
-        >
-          {item.icon}
-          {item.label}
-        </Link>
-      ))}
-
-      {isAdmin && (
-        <>
-          {navGroup("管理", adminNavItems, adminOpen, () => setAdminToggle(!adminOpen))}
-          {navGroup("データ品質チェック", dataQualityNavItems, qualityOpen, () =>
-            setQualityToggle(!qualityOpen),
-          )}
-        </>
-      )}
-
-      {/* 資料（使い方ガイド・取り扱いマニュアル）— メニュー最下部・全ユーザーに表示。
-          public/docs の静的HTML（個人情報を含まない一般資料）。未ログインは proxy が
-          /login へ誘導するが、静的ファイルのため厳密なセッション検証は行わない
-          （＝機密情報は載せない前提のドキュメントのみを置く）。将来 機密を含む資料が
-          必要になったら auth() で検証する route 経由に切り替えること。
-          別タブで開き、作業中の画面を失わないようにする。 */}
-      <div className="mt-4 mb-1">
-        <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-          資料
-        </p>
-      </div>
+  const renderLeaf = (item: NavLeaf) =>
+    item.external ? (
       <a
-        href="/docs/guide.html"
+        key={item.href}
+        href={item.href}
         target="_blank"
         rel="noopener noreferrer"
-        className={linkClasses("/docs/guide.html")}
+        className={linkClasses(item.href)}
         onClick={() => setMobileOpen(false)}
       >
-        <BookOpen className="h-5 w-5" />
-        使い方ガイド
+        {item.icon}
+        {item.label}
       </a>
-      <a
-        href="/docs/manual.html"
-        target="_blank"
-        rel="noopener noreferrer"
-        className={linkClasses("/docs/manual.html")}
+    ) : (
+      <Link
+        key={item.href}
+        href={item.href}
+        className={linkClasses(item.href)}
         onClick={() => setMobileOpen(false)}
       >
-        <FileText className="h-5 w-5" />
-        取り扱いマニュアル
-      </a>
-    </nav>
-  );
+        {item.icon}
+        {item.label}
+      </Link>
+    );
+
+  const renderGroup = (g: NavGroup) => {
+    if (!g.label) return <div key={g.key}>{g.items.map(renderLeaf)}</div>;
+    if (g.collapsible) {
+      const open = isOpen(g);
+      return (
+        <div key={g.key}>
+          <div className="mt-4 mb-1">
+            <button
+              onClick={() => setOpenMap((m) => ({ ...m, [g.key]: !open }))}
+              aria-expanded={open}
+              className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            >
+              {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {g.label}
+            </button>
+          </div>
+          {open && g.items.map(renderLeaf)}
+        </div>
+      );
+    }
+    return (
+      <div key={g.key}>
+        <div className="mt-4 mb-1">
+          <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+            {g.label}
+          </p>
+        </div>
+        {g.items.map(renderLeaf)}
+      </div>
+    );
+  };
+
+  const navContent = <nav className="flex flex-col gap-1 p-4">{groups.map(renderGroup)}</nav>;
 
   return (
     <>
@@ -327,10 +111,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
 
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/30 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
+        <div className="fixed inset-0 z-30 bg-black/30 lg:hidden" onClick={() => setMobileOpen(false)} />
       )}
 
       {/* Sidebar */}
@@ -345,9 +126,8 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
           <span className="text-sm font-bold text-gray-800 dark:text-gray-100">物件管理</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{navContent}</div>
-        {/* モバイルではヘッダーからテーマ切替をここへ移動(ヘッダーの詰まり解消)。
-            pb の env(safe-area-inset-bottom): iPhone のホームインジケータ/下部バーに
-            最下部の操作が隠れないための追加余白(非対応環境では 0 で無害)。 */}
+        {/* モバイルではヘッダーからテーマ切替をここへ移動。pb の env(safe-area-inset-bottom)で
+            iPhone のホームインジケータに最下部操作が隠れないよう余白を確保(非対応環境では 0)。 */}
         <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] lg:hidden">
           <div className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">表示テーマ</div>
           <ThemeToggle />

@@ -28,7 +28,7 @@ const MAP_SRC = fs.readFileSync(
   "utf8",
 );
 const SIDEBAR_SRC = fs.readFileSync(
-  path.resolve(process.cwd(), "src/components/layout/sidebar.tsx"),
+  path.resolve(process.cwd(), "src/components/layout/sidebar-model.tsx"),
   "utf8",
 );
 const ENV_EXAMPLE_SRC = fs.readFileSync(

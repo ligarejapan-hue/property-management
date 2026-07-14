@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 const SIDEBAR = fs.readFileSync(
-  path.resolve(process.cwd(), "src/components/layout/sidebar.tsx"),
+  path.resolve(process.cwd(), "src/components/layout/sidebar-model.tsx"),
   "utf8",
 );
 

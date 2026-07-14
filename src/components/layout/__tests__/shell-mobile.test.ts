@@ -14,6 +14,7 @@ const read = (...p: string[]) => readFileSync(join(dir, ...p), "utf8");
 
 const header = read("..", "header.tsx");
 const sidebar = read("..", "sidebar.tsx");
+const sidebarModel = read("..", "sidebar-model.tsx");
 const dashboardLayout = read("..", "dashboard-layout.tsx");
 const fieldSurveyMap = read("..", "..", "field-survey", "field-survey-map.tsx");
 const propertyDetail = read(
@@ -57,18 +58,16 @@ describe("sidebar(ドロワー) — ×ボタン被り解消 + モバイル用テ
   });
 });
 
-describe("sidebar — 管理者メニューの整理(2グループ・既定閉)", () => {
-  it("「管理」と「データ品質チェック」の2グループに分割", () => {
-    expect(sidebar).toContain('navGroup("管理"');
-    expect(sidebar).toContain('navGroup("データ品質チェック"');
-    expect(sidebar).toContain("dataQualityNavItems");
+describe("sidebar — 管理系は折りたたみグループ(既定閉)", () => {
+  it("データ品質・システム管理は collapsible グループ(nav-model)", () => {
+    expect(sidebarModel).toContain('label: "データ品質"');
+    expect(sidebarModel).toContain('label: "システム管理"');
+    expect(sidebarModel).toContain("collapsible: true");
   });
   it("開閉は現在地＋手動トグルから毎レンダー導出(client-side遷移に追従)", () => {
     // useState初期化のみだと永続layoutで再マウントされず遷移に追従しない(@codex P3)。
-    // トグル(null=未操作)が無ければ現在地(isActive)から開くよう導出する。
-    expect(sidebar).toMatch(/adminToggle \?\? adminNavItems\.some/);
-    expect(sidebar).toMatch(/qualityToggle \?\? dataQualityNavItems\.some/);
-    expect(sidebar).not.toMatch(/useState\(\(\) =>\s*adminNavItems\.some/);
+    // 手動トグル(openMap)が無ければ現在地(isActive)から開くよう導出する。
+    expect(sidebar).toMatch(/openMap\[g\.key\] \?\? g\.items\.some/);
   });
   it("グループ見出しは aria-expanded を持つ", () => {
     expect(sidebar).toMatch(/aria-expanded=\{open\}/);
@@ -78,20 +77,23 @@ describe("sidebar — 管理者メニューの整理(2グループ・既定閉)"
   });
 });
 
-describe("sidebar — メニュー最下部の資料リンク(ガイド/マニュアル)", () => {
-  it("使い方ガイドと取り扱いマニュアルへのリンクがある", () => {
-    expect(sidebar).toContain('href="/docs/guide.html"');
-    expect(sidebar).toContain('href="/docs/manual.html"');
-    expect(sidebar).toContain("使い方ガイド");
-    expect(sidebar).toContain("取り扱いマニュアル");
+describe("sidebar — 最下部の資料リンク(ガイド/マニュアル)", () => {
+  it("使い方ガイドと取り扱いマニュアルへのリンクがある(nav-model)", () => {
+    expect(sidebarModel).toContain('href: "/docs/guide.html"');
+    expect(sidebarModel).toContain('href: "/docs/manual.html"');
+    expect(sidebarModel).toContain("使い方ガイド");
+    expect(sidebarModel).toContain("取り扱いマニュアル");
   });
-  it("両リンクとも別タブで開く(target=_blank + rel=noopener)", () => {
-    expect(sidebar).toMatch(/href="\/docs\/guide\.html"[\s\S]{0,120}target="_blank"[\s\S]{0,60}rel="noopener/);
-    expect(sidebar).toMatch(/href="\/docs\/manual\.html"[\s\S]{0,120}target="_blank"[\s\S]{0,60}rel="noopener/);
+  it("外部資料(external)は別タブで開く(target=_blank + rel=noopener)", () => {
+    // nav-model 側で external: true、描画側(sidebar renderLeaf)が target=_blank + rel=noopener。
+    expect(sidebarModel).toMatch(/href: "\/docs\/guide\.html"[\s\S]{0,80}external: true/);
+    expect(sidebarModel).toMatch(/href: "\/docs\/manual\.html"[\s\S]{0,80}external: true/);
+    expect(sidebar).toContain('target="_blank"');
+    expect(sidebar).toContain('rel="noopener noreferrer"');
   });
-  it("資料リンクは管理者グループより後(メニュー最下部)に置かれる", () => {
-    const admin = sidebar.indexOf('navGroup("データ品質チェック"');
-    const docs = sidebar.indexOf('href="/docs/guide.html"');
+  it("資料グループは管理系グループより後(最下部)に置かれる", () => {
+    const admin = sidebarModel.indexOf('key: "admin"');
+    const docs = sidebarModel.indexOf('key: "doc"');
     expect(admin).toBeGreaterThan(-1);
     expect(docs).toBeGreaterThan(admin);
   });
