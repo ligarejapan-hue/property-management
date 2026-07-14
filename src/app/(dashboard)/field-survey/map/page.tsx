@@ -36,7 +36,7 @@ export default async function FieldSurveyMapPage() {
             現地調査マップ
           </h1>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            既存物件と調査ピンを地図上で確認します。{canWrite && "巡回の開始・終了と、巡回中の位置情報の記録もできます。"}
+            既存物件と調査ピンを地図上で確認します。{canRead && canWrite && "巡回の開始・終了と、巡回中の位置情報の記録もできます。"}
           </p>
         </div>
       </header>
