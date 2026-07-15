@@ -237,7 +237,7 @@ function VariantForm({
     setForm({ ...form, options: { ...form.options, [k]: value } });
 
   return (
-    <div className="space-y-2 rounded-md border border-indigo-200 bg-indigo-50/40 p-2 dark:border-indigo-800 dark:bg-indigo-950/30">
+    <div className="space-y-2 rounded-md border border-indigo-200 bg-indigo-50/40 p-2">
       <input
         type="text"
         value={form.label}
