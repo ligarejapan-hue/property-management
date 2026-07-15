@@ -72,9 +72,22 @@ export function IdleSessionGuard() {
         void fetch("/api/auth/session", {
           cache: "no-store",
           credentials: "same-origin",
-        }).catch(() => {
-          /* ネットワーク一時失敗は無視(次の機会に再試行) */
-        });
+        })
+          .then(async (res) => {
+            // 5xx 等の一時エラーではログアウトしない(R4: 一時失敗で UI を落とさない)。
+            if (!res.ok) return;
+            const data = await res.json().catch(() => undefined);
+            const hasSession = !!(data && typeof data === "object" && data.user);
+            // 200 かつ セッション本体が空 = サーバがセッション無効と確定回答した状態
+            // (管理者による無効化/削除・失効)。この確定時だけクライアントも即ログアウトして
+            // 画面を揃える(@codex #290 R9)。JSON 解析失敗(data=undefined)は無視。
+            if (data !== undefined && !hasSession) {
+              void signOut({ callbackUrl: "/login" });
+            }
+          })
+          .catch(() => {
+            /* ネットワーク一時失敗は無視(次の機会に再試行) */
+          });
       }
     };
 

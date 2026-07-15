@@ -92,6 +92,19 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
     expect(guardSrc).toMatch(/capture:\s*true/);
   });
 
+  it("キープアライブでセッション消失を確定検知したら即ログアウト(@codex R9)", () => {
+    // maybeRefreshSession の fetch は、res.ok かつ本体が空なら signOut する。
+    const fnBody = guardSrc.match(/const maybeRefreshSession[\s\S]*?\n {4}\};/);
+    expect(fnBody).not.toBeNull();
+    const body = fnBody![0];
+    // 一時エラー(!res.ok)は素通り(R4 維持)。
+    expect(body).toMatch(/!res\.ok[\s\S]{0,20}return/);
+    // セッション本体の有無を判定。
+    expect(body).toMatch(/hasSession/);
+    // 確定的にセッション無し(data あり & hasSession でない)なら signOut。
+    expect(body).toMatch(/!hasSession[\s\S]{0,60}signOut/);
+  });
+
   it("タブ間で最終操作を共有し、放置タブの誤ログアウトを防ぐ(@codex R2)", () => {
     // 共有ヘルパは session-activity に集約(localStorage + キー)。
     const activitySrc = readFileSync(
