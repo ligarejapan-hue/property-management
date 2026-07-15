@@ -14,6 +14,14 @@ const LOCK_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 //   よって IDLE + REFRESH のバッファを持たせ、無操作ログアウト境界より前に cookie が失効して
 //   誤ログアウトするのを防ぐ(@codex #290 R6)。
 // - updateAge: セッションendpointアクセス時にこの間隔で JWT を回転し cookie を延長(スライド)。
+//
+// トレードオフ(@codex #290 R8 P2②): 延長は最大 REFRESH_INTERVAL 間隔なので、cookie の寿命は
+// 「最後の操作 + IDLE_TIMEOUT」〜「+ IDLE_TIMEOUT + REFRESH_INTERVAL」の幅を持つ。そのため
+// サーバ入口(auth()/getApiSession)は、意図した無操作境界の最大 REFRESH_INTERVAL(5分)ぶん
+// 後までcookieを受理し得る。ここを厳密に締めると、逆に有効ユーザーを最大5分早くログアウトさせて
+// しまう(バッファを入れた理由=R6)。実ブラウザではクライアントガードが1時間で確実に signOut し、
+// JS 無効/直接アクセスでも maxAge(65分)で必ず失効するため、この5分の許容は意図的に受容する。
+// 厳密なサーバ強制が要る場合はトークンに最終操作時刻を載せる別設計が必要(現状は過剰)。
 const IDLE_TIMEOUT_SEC = 60 * 60; // 無操作1時間でログアウト
 const REFRESH_INTERVAL_SEC = 5 * 60; // 操作中は最大5分ごとに延長
 const SESSION_MAX_AGE_SEC = IDLE_TIMEOUT_SEC + REFRESH_INTERVAL_SEC; // 65分(バッファ込み)
@@ -108,12 +116,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // セッションを保ち続けるのを防ぐ(@codex #290 R7 P1)。
       // next-auth v5 では jwt が null を返すと cookie がクリアされ、セッションが失効する。
       if (token.id) {
-        const dbUser = await prisma.user.findUnique({
-          where: { id: token.id as string },
-          select: { isActive: true, role: true },
-        });
+        let dbUser: { isActive: boolean; role: string } | null;
+        try {
+          dbUser = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { isActive: true, role: true },
+          });
+        } catch {
+          // DB 一時障害で有効ユーザーを失効させない(fail-open)。next-auth v5 は jwt が
+          // 例外を投げると JWTSessionError で cookie をクリアするため、ここで握って token を
+          // 返す。無効化判定は次回の回転で再試行される(@codex #290 R8)。
+          return token;
+        }
+        // クエリ成功時のみ確定的に判定する(null=削除済み・isActive=false=無効化)。
         if (!dbUser || !dbUser.isActive) {
-          return null; // 無効化/削除 → セッション失効
+          return null; // 無効化/削除 → セッション失効(cookie クリア)
         }
         token.role = dbUser.role; // ロール変更(降格/昇格)を即反映
       }

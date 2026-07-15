@@ -52,6 +52,13 @@ describe("セッション設定: 無操作1時間でログアウト(スライド
     // ロール変更(降格/昇格)を反映。
     expect(jwtBlock).toMatch(/token\.role\s*=\s*dbUser\.role/);
   });
+
+  it("DB一時障害ではセッションを落とさない(fail-open・@codex R8 P2)", () => {
+    const jwtBlock = src.slice(src.indexOf("async jwt"), src.indexOf("async session"));
+    // findUnique を try/catch で囲み、catch では token を返す(失効させない)。
+    expect(jwtBlock).toMatch(/try\s*\{[\s\S]*?findUnique/);
+    expect(jwtBlock).toMatch(/catch[\s\S]*?return token/);
+  });
 });
 
 describe("アイドルガード: 実際に効く延長/失効の配線(@codex #290 P2)", () => {
