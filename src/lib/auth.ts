@@ -5,7 +5,12 @@ import prisma from "@/lib/prisma";
 
 const MAX_LOGIN_FAILURES = 5;
 const LOCK_DURATION_MS = 30 * 60 * 1000; // 30 minutes
-const SESSION_MAX_AGE_SEC = 30 * 60; // 30 minutes
+// セッションは「無操作1時間でログアウト」のスライド式。
+// - maxAge: セッションの有効期限。最後にセッションが延長された時点から1時間。
+// - updateAge: 操作(セッションアクセス)があると、最大この間隔ごとに maxAge を now 起点へ
+//   延ばす(=使っている間は切れない)。無操作が続くと最後の延長からおよそ1時間で失効する。
+const SESSION_MAX_AGE_SEC = 60 * 60; // 1 hour(無操作でこの時間が経つとログアウト)
+const SESSION_UPDATE_AGE_SEC = 5 * 60; // 操作があれば最大5分ごとにセッションを延長(スライド式)
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
@@ -77,6 +82,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: {
     strategy: "jwt",
     maxAge: SESSION_MAX_AGE_SEC,
+    // スライド式(無操作1時間でログアウト)。操作があると updateAge 間隔で有効期限を延長する。
+    updateAge: SESSION_UPDATE_AGE_SEC,
   },
   pages: {
     signIn: "/login",
