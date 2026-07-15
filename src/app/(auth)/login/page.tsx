@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, FileText } from "lucide-react";
+import { writeSharedLastActivity } from "@/lib/session-activity";
 
 const loginSchema = z.object({
   email: z.email("有効なメールアドレスを入力してください"),
@@ -60,6 +61,9 @@ export default function LoginPage() {
       if (result?.error) {
         setError("メールアドレスまたはパスワードが正しくありません");
       } else {
+        // 認証成功時に「今」を最終操作として seed する。これがないと、前セッションの古い値が
+        // 残っている場合にダッシュボード初回マウントで即ログアウトしてしまう(@codex #290 R7 P2)。
+        writeSharedLastActivity(Date.now());
         // ログイン必須画面からの再ログイン誘導(A3)で付く callbackUrl を尊重し、元の画面へ戻す(@codex R3/R4)。
         const cb = new URLSearchParams(window.location.search).get("callbackUrl");
         router.push(safeInternalDest(cb));
