@@ -34,3 +34,37 @@ describe("セッション設定: 無操作1時間でログアウト(スライド
     expect(src).not.toMatch(/SESSION_MAX_AGE_SEC\s*=\s*30\s*\*\s*60\b/);
   });
 });
+
+describe("アイドルガード: 実際に効く延長/失効の配線(@codex #290 P2)", () => {
+  const guardSrc = readFileSync(
+    resolve(__dirname, "../../components/auth/idle-session-guard.tsx"),
+    "utf-8",
+  );
+  const layoutSrc = readFileSync(
+    resolve(__dirname, "../../app/(dashboard)/layout.tsx"),
+    "utf-8",
+  );
+
+  it("無操作1時間で signOut、操作中は getSession で延長する", () => {
+    expect(guardSrc).toMatch(/IDLE_TIMEOUT_MS\s*=\s*60\s*\*\s*60\s*\*\s*1000/);
+    expect(guardSrc).toMatch(/REFRESH_INTERVAL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
+    // 無操作上限超過で signOut。
+    expect(guardSrc).toMatch(/idleFor\s*>=\s*IDLE_TIMEOUT_MS[\s\S]{0,80}signOut/);
+    // 直近操作あり時にセッション延長(getSession)。
+    expect(guardSrc).toContain("getSession()");
+    // 操作検知イベントを購読している。
+    for (const ev of ["mousemove", "keydown", "scroll", "touchstart"]) {
+      expect(guardSrc).toContain(`"${ev}"`);
+    }
+  });
+
+  it("dashboard layout に IdleSessionGuard が配線されている", () => {
+    expect(layoutSrc).toContain("IdleSessionGuard");
+    expect(layoutSrc).toMatch(/<IdleSessionGuard\s*\/>/);
+    // SessionProvider 配下(getSession が Provider 前提)であること。
+    const provIdx = layoutSrc.indexOf("<SessionProvider>");
+    const guardIdx = layoutSrc.indexOf("<IdleSessionGuard");
+    expect(provIdx).toBeGreaterThanOrEqual(0);
+    expect(guardIdx).toBeGreaterThan(provIdx);
+  });
+});
