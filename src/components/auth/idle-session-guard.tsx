@@ -84,6 +84,18 @@ export function IdleSessionGuard() {
 
     const markActivity = () => {
       const now = Date.now();
+      // @codex #290 R5(P1): スリープ/長時間の背景化で interval が境界(1時間)で発火しなかった
+      // 場合、復帰後の最初の操作が古い最終操作時刻を上書きすると無操作の痕跡が消え、ログアウトが
+      // 効かなくなる。過去の最終操作を「上書きする前に」超過判定し、超えていれば signOut する。
+      // 他タブが起きていた場合は共有値が新しいので誤ログアウトしない(Math.max)。
+      const prevLastActivity = Math.max(
+        lastActivityRef.current,
+        readSharedLastActivity(),
+      );
+      if (now - prevLastActivity >= IDLE_TIMEOUT_MS) {
+        void signOut({ callbackUrl: "/login" });
+        return;
+      }
       lastActivityRef.current = now;
       // 全タブへ共有(書込は throttle。頻発する mousemove で localStorage を叩き続けない)。
       if (now - lastStorageWriteRef.current >= STORAGE_WRITE_THROTTLE_MS) {

@@ -86,6 +86,18 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
     );
   });
 
+  it("スリープ復帰時は最終操作を上書きする前に超過判定して signOut(@codex R5 P1)", () => {
+    // markActivity の中で、lastActivityRef を更新する前に IDLE_TIMEOUT 超過を判定して signOut。
+    const markBody = guardSrc.match(/const markActivity[\s\S]*?\n {4}\};/);
+    expect(markBody).not.toBeNull();
+    const body = markBody![0];
+    const guardIdx = body.indexOf("IDLE_TIMEOUT_MS");
+    const assignIdx = body.indexOf("lastActivityRef.current = now");
+    expect(guardIdx).toBeGreaterThanOrEqual(0);
+    expect(assignIdx).toBeGreaterThan(guardIdx); // 判定が上書きより前
+    expect(body).toMatch(/prevLastActivity[\s\S]{0,40}signOut/);
+  });
+
   it("dashboard layout に IdleSessionGuard が配線されている", () => {
     expect(layoutSrc).toContain("IdleSessionGuard");
     expect(layoutSrc).toMatch(/<IdleSessionGuard\s*\/>/);
