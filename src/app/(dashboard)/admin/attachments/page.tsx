@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
+import { formatJaDateTime } from "@/lib/format-datetime";
 
 /**
  * 添付横断検索（管理者限定）。
@@ -288,7 +289,7 @@ export default function AttachmentSearchPage() {
               {results.map((hit) => (
                 <tr key={hit.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">
-                    {new Date(hit.createdAt).toLocaleString("ja-JP")}
+                    {formatJaDateTime(hit.createdAt)}
                   </td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 max-w-md truncate">
                     {hit.fileName}

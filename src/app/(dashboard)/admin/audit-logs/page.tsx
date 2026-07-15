@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
 import { debounce } from "@/lib/debounce";
+import { formatJaDateTime } from "@/lib/format-datetime";
 
 interface AuditLog {
   id: string;
@@ -296,7 +297,7 @@ export default function AuditLogsPage() {
                       }
                     >
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">
-                        {new Date(log.createdAt).toLocaleString("ja-JP")}
+                        {formatJaDateTime(log.createdAt)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                         {log.user?.name ?? "不明"}

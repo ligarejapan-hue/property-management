@@ -52,7 +52,7 @@ export default function SaleDmRecipientList({
           return (
             <li
               key={r.id}
-              className={`cursor-pointer rounded-md p-2 ${r.id === selectedId ? "bg-indigo-50" : "hover:bg-gray-50"}`}
+              className={`cursor-pointer rounded-md p-2 ${r.id === selectedId ? "bg-indigo-50 dark:bg-indigo-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800"}`}
               onClick={() => onSelect(r.id)}
             >
               <div className="flex items-center justify-between gap-2">

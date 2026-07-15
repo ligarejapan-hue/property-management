@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { formatJaDateTime } from "@/lib/format-datetime";
 
 interface PermissionLog {
   id: string;
@@ -91,7 +92,7 @@ export default function PermissionLogsPage() {
               {logs.map((log) => (
                 <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">
-                    {new Date(log.createdAt).toLocaleString("ja-JP")}
+                    {formatJaDateTime(log.createdAt)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                     {log.changer?.name ?? "不明"}

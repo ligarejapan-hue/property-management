@@ -301,7 +301,7 @@ export function OwnerLinkModal({
                 </p>
               )}
             {selected && (
-              <div className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">
+              <div className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
                 選択中: {selected.name}
               </div>
             )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { formatJaDateTime } from "@/lib/format-datetime";
 import {
   Upload,
   FileText,
@@ -449,7 +450,7 @@ function ReviewActionHint({
                   href={`/properties/${pid}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-blue-700 hover:bg-blue-100"
+                  className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
                 >
                   候補{i + 1} <ArrowRight className="h-3 w-3" />
                 </Link>
@@ -1233,7 +1234,7 @@ export default function ImportPage() {
                 }
                 if (det.error) {
                   return (
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                       <AlertTriangle className="h-3.5 w-3.5" />
                       {det.error}
                     </div>
@@ -1394,23 +1395,23 @@ export default function ImportPage() {
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">総行数</div>
             </div>
-            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center">
-              <div className="text-2xl font-bold text-green-700">
+            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center dark:border-green-800 dark:bg-green-950/40">
+              <div className="text-2xl font-bold text-green-700 dark:text-green-300">
                 {validationSummary.valid}
               </div>
-              <div className="text-xs text-green-600">有効</div>
+              <div className="text-xs text-green-600 dark:text-green-400">有効</div>
             </div>
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center">
-              <div className="text-2xl font-bold text-amber-700">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center dark:border-amber-800 dark:bg-amber-950/40">
+              <div className="text-2xl font-bold text-amber-700 dark:text-amber-300">
                 {validationSummary.warnings}
               </div>
-              <div className="text-xs text-amber-600">警告</div>
+              <div className="text-xs text-amber-600 dark:text-amber-400">警告</div>
             </div>
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-center">
-              <div className="text-2xl font-bold text-red-700">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-center dark:border-red-800 dark:bg-red-950/40">
+              <div className="text-2xl font-bold text-red-700 dark:text-red-300">
                 {validationSummary.errors}
               </div>
-              <div className="text-xs text-red-600">エラー</div>
+              <div className="text-xs text-red-600 dark:text-red-400">エラー</div>
             </div>
           </div>
 
@@ -1511,21 +1512,21 @@ export default function ImportPage() {
                   <div className="text-lg font-bold text-gray-800 dark:text-gray-100">{duplicatePreview.totalRows}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">総行数(サーバー)</div>
                 </div>
-                <div className="rounded-lg border border-green-200 bg-green-50 p-2 text-center">
-                  <div className="text-lg font-bold text-green-700">{duplicatePreview.validRows}</div>
-                  <div className="text-xs text-green-600">新規登録予定</div>
+                <div className="rounded-lg border border-green-200 bg-green-50 p-2 text-center dark:border-green-800 dark:bg-green-950/40">
+                  <div className="text-lg font-bold text-green-700 dark:text-green-300">{duplicatePreview.validRows}</div>
+                  <div className="text-xs text-green-600 dark:text-green-400">新規登録予定</div>
                 </div>
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-center">
-                  <div className="text-lg font-bold text-blue-700">{duplicatePreview.updateCount ?? 0}</div>
-                  <div className="text-xs text-blue-600">更新候補</div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-center dark:border-blue-800 dark:bg-blue-950/40">
+                  <div className="text-lg font-bold text-blue-700 dark:text-blue-300">{duplicatePreview.updateCount ?? 0}</div>
+                  <div className="text-xs text-blue-600 dark:text-blue-400">更新候補</div>
                 </div>
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-center">
-                  <div className="text-lg font-bold text-amber-700">{duplicatePreview.duplicateCount}</div>
-                  <div className="text-xs text-amber-600">重複スキップ</div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-center dark:border-amber-800 dark:bg-amber-950/40">
+                  <div className="text-lg font-bold text-amber-700 dark:text-amber-300">{duplicatePreview.duplicateCount}</div>
+                  <div className="text-xs text-amber-600 dark:text-amber-400">重複スキップ</div>
                 </div>
-                <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-center">
-                  <div className="text-lg font-bold text-red-700">{duplicatePreview.errorRows}</div>
-                  <div className="text-xs text-red-600">エラー行</div>
+                <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-center dark:border-red-800 dark:bg-red-950/40">
+                  <div className="text-lg font-bold text-red-700 dark:text-red-300">{duplicatePreview.errorRows}</div>
+                  <div className="text-xs text-red-600 dark:text-red-400">エラー行</div>
                 </div>
               </div>
 
@@ -2286,7 +2287,7 @@ export default function ImportPage() {
                       {job.executor.name}
                     </td>
                     <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400">
-                      {new Date(job.createdAt).toLocaleString("ja-JP")}
+                      {formatJaDateTime(job.createdAt)}
                     </td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-amber-800 dark:text-amber-300">
                       {job.elapsedMinutes}分
@@ -2594,7 +2595,7 @@ export default function ImportPage() {
                         {job.executor.name}
                       </td>
                       <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                        {new Date(job.createdAt).toLocaleString("ja-JP")}
+                        {formatJaDateTime(job.createdAt)}
                       </td>
                     </tr>
                   );

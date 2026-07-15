@@ -371,7 +371,7 @@ export function OwnerMislinkModal({
               </ul>
             )}
             {selectedTarget && (
-              <div className="mt-2 rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">
+              <div className="mt-2 rounded bg-blue-50 px-2 py-1 text-xs text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
                 選択: {selectedTarget.name} (
                 <span className="font-mono">
                   {selectedTarget.id.slice(0, 8)}…
@@ -397,7 +397,7 @@ export function OwnerMislinkModal({
         </div>
 
         {previewState === "preview_error" && previewErrorMsg && (
-          <div className="mb-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+          <div className="mb-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
             <p className="font-medium">プレビューの取得に失敗しました</p>
             <p className="mt-0.5 break-words">{previewErrorMsg}</p>
             <p className="mt-1 text-[11px] text-red-500">
@@ -410,13 +410,13 @@ export function OwnerMislinkModal({
           <div
             className={`mb-3 rounded-md border p-2 text-xs ${
               previewResult.eligible
-                ? "border-green-200 bg-green-50"
-                : "border-red-200 bg-red-50"
+                ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/40"
+                : "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/40"
             }`}
           >
             <p
               className={`mb-1 font-medium ${
-                previewResult.eligible ? "text-green-800" : "text-red-800"
+                previewResult.eligible ? "text-green-800 dark:text-green-300" : "text-red-800 dark:text-red-300"
               }`}
             >
               {previewResult.eligible ? "✓ 修正可能" : "✗ 修正不可"}
@@ -429,7 +429,7 @@ export function OwnerMislinkModal({
             </p>
 
             {previewResult.blockReasons.length > 0 && (
-              <ul className="mb-2 list-disc pl-4 text-red-700">
+              <ul className="mb-2 list-disc pl-4 text-red-700 dark:text-red-300">
                 {previewResult.blockReasons.map((r) => (
                   <li key={r}>{reasonLabel(r)}</li>
                 ))}
@@ -438,7 +438,7 @@ export function OwnerMislinkModal({
 
             {/* OwnerMemo 警告 */}
             {previewResult.summary.ownerMemoCountOnThisProperty > 0 && (
-              <div className="mb-2 rounded border border-amber-200 bg-amber-50 p-1.5 text-amber-800">
+              <div className="mb-2 rounded border border-amber-200 bg-amber-50 p-1.5 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                 ⚠ この物件に関連するメモが{" "}
                 {previewResult.summary.ownerMemoCountOnThisProperty}{" "}
                 件あります。修正後もメモは元の所有者に残ります。
@@ -482,7 +482,7 @@ export function OwnerMislinkModal({
         {previewResult &&
           previewResult.eligible &&
           executeState !== "executed" && (
-            <div className="rounded-md border border-red-300 bg-red-50 p-2">
+            <div className="rounded-md border border-red-300 bg-red-50 p-2 dark:border-red-700 dark:bg-red-950/40">
               <p className="mb-1 text-xs font-semibold text-red-800">
                 ⚠ この操作は元に戻せません
               </p>
@@ -584,7 +584,7 @@ export function OwnerMislinkModal({
 
         {/* 成功表示 */}
         {executeState === "executed" && executeResult && (
-          <div className="rounded-md border border-green-300 bg-green-50 p-2 text-xs text-green-800">
+          <div className="rounded-md border border-green-300 bg-green-50 p-2 text-xs text-green-800 dark:border-green-700 dark:bg-green-950/40 dark:text-green-300">
             <p className="mb-1 font-semibold">✓ 修正が完了しました</p>
             <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5">
               <dt>操作</dt>

@@ -338,7 +338,7 @@ function OwnerCorrectionPageInner() {
           所有者補正候補 (dry-run)
         </h1>
       </div>
-      <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+      <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-950/40 dark:border-amber-800">
         「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（soft-delete）、「重複候補」タブの同一キーグループには統合プレビュー（dryRun のみ）を個別実行できます。統合実行・再リンクは未実装です。
       </p>
 
@@ -368,7 +368,7 @@ function OwnerCorrectionPageInner() {
         <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && !SELF_FETCH_TABS.includes(filterType) && (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
         </p>
       )}
@@ -400,7 +400,7 @@ function OwnerCorrectionPageInner() {
             data.summary.corporateNumberDuplicateAvailable === false && (
               <p
                 data-testid="corporate-number-duplicate-permission-denied"
-                className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
               >
                 法人番号重複候補を表示する権限がありません（必要な権限: owner_corporate_number=full）。
               </p>
@@ -890,7 +890,7 @@ function DuplicateGroupCard({
         // Codex P2-round-2: corporate_number / external_link_key 経路は
         // merge-preview API 未対応。merge ボタンを出さず「要確認」注記のみ。
         <p
-          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
           data-testid="duplicate-group-merge-unsupported-notice"
         >
           {matchedBy === "corporate_number"
@@ -1202,7 +1202,7 @@ function CorporateNumberCandidatesPanel() {
         <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
         </p>
       )}
@@ -1303,7 +1303,7 @@ function CorporateNumberCandidatesPanel() {
               既定フィルタから除外）hasEligible=false になり、toolbar ごと結果サマリが
               消えてオペレーターが反映/スキップ件数を確認できない問題を防ぐ。 */}
           {bulkError && (
-            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
               {bulkError}
             </p>
           )}
@@ -1606,7 +1606,7 @@ function RegistryAddressCandidatesPanel() {
         <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
       {error && (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
         </p>
       )}
@@ -1898,7 +1898,7 @@ function CorporateRestorePanel() {
         </p>
       )}
       {error && !loading && (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
         </p>
       )}
@@ -1923,7 +1923,7 @@ function CorporateRestorePanel() {
             </div>
           )}
           {applyError && (
-            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
               {applyError}
             </p>
           )}

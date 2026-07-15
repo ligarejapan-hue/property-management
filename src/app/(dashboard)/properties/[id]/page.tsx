@@ -439,8 +439,8 @@ export default function PropertyDetailPage({
 
   if (error || !property) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-        <p className="text-sm text-red-700">
+      <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center dark:border-red-800 dark:bg-red-950/40">
+        <p className="text-sm text-red-700 dark:text-red-300">
           {error ?? "物件が見つかりません"}
         </p>
         <Link
@@ -552,9 +552,9 @@ export default function PropertyDetailPage({
 
       {/* Warning badge */}
       {!property.investigationConfirmedAt && (
-        <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2">
-          <AlertTriangle className="h-4 w-4 text-amber-600" />
-          <span className="text-sm text-amber-800">
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 dark:border-amber-800 dark:bg-amber-950/40">
+          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <span className="text-sm text-amber-800 dark:text-amber-300">
             調査情報が未確認です。最新の情報を取得してください。
           </span>
         </div>
@@ -693,7 +693,7 @@ function BasicTab({
           <dd>
             <Link
               href={`/buildings/${property.building.id}`}
-              className="inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
             >
               <Building2 className="h-4 w-4" />
               {property.building.name}
@@ -834,7 +834,7 @@ function OwnerTab({
             onClick={() => setLinkModalOpen(true)}
             aria-label="所有者を追加（既存の所有者を紐付け / 新規作成して紐付け）"
             title="この物件に所有者を追加（既存紐付け / 新規作成）"
-            className="flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+            className="flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
           >
             <UserPlus className="h-3.5 w-3.5" />
             所有者を追加
@@ -1051,7 +1051,7 @@ function OwnerCard({
             onClick={() => setMislinkOpen(true)}
             title="この物件と所有者の紐づきを修正"
             aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}の紐づきを修正`}
-            className={`${editAllowed ? "" : "ml-auto"} flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100`}
+            className={`${editAllowed ? "" : "ml-auto"} flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/40`}
           >
             誤紐づき修正
           </button>
@@ -1076,7 +1076,7 @@ function OwnerCard({
         /* ── 編集フォーム（full 権限のある項目のみ input を表示） ── */
         <div className="space-y-4">
           {/* 複数物件紐づき警告 */}
-          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
             <span>
               所有者情報の変更は、この所有者が紐付けられているすべての物件に反映されます。
@@ -1667,7 +1667,7 @@ function CorporateNumberSuspectBanner({ owner }: { owner: ApiOwner }) {
   if (detection.candidates.length === 0) return null;
   return (
     <div className="md:col-span-2">
-      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <div>
           氏名・現住所・備考欄に法人番号らしき文字列が含まれています。
@@ -1712,7 +1712,7 @@ function CorporateNumberCandidateBanner({
   const candidates = detection.candidates.slice(0, 3);
   if (candidates.length === 0) return null;
   return (
-    <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800">
+    <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
       <div className="mb-1 flex items-start gap-1.5">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
@@ -1751,7 +1751,7 @@ function CompanyRegistrySuspectBanner({ owner }: { owner: ApiOwner }) {
   if (detection.candidates.length === 0) return null;
   return (
     <div className="md:col-span-2">
-      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <div>
           氏名・現住所・備考欄に会社法人等番号（12桁）らしき文字列が含まれています。
@@ -1796,7 +1796,7 @@ function CompanyRegistryNumberCandidateBanner({
   const candidates = detection.candidates.slice(0, 3);
   if (candidates.length === 0) return null;
   return (
-    <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800">
+    <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
       <div className="mb-1 flex items-start gap-1.5">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>

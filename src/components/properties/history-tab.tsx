@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, History, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { fetchChangeLogs as apiFetchChangeLogs } from "@/lib/api-client";
+import { formatJaDateTime } from "@/lib/format-datetime";
 
 interface ChangeLogData {
   id: string;
@@ -241,7 +242,7 @@ export default function HistoryTab({
                 {logs.map((log) => (
                   <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="whitespace-nowrap px-3 py-2 text-gray-500 text-xs dark:text-gray-400">
-                      {new Date(log.changedAt).toLocaleString("ja-JP")}
+                      {formatJaDateTime(log.changedAt)}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
                       {log.changer.name}

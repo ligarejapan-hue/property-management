@@ -131,3 +131,27 @@ export function visibleSidebar(userRole: string): NavGroup[] {
     .map((g) => ({ ...g, items: g.items.filter((i) => canSee(userRole, i.minRole)) }))
     .filter((g) => g.items.length > 0);
 }
+
+/**
+ * /properties の URL 名前空間を間借りしているだけで「物件一覧」とは別機能のページ。
+ * これらでは物件一覧を現在地ハイライトしない(C-5 UI総点検: 品質チェックで物件一覧が光る現在地ズレ)。
+ */
+const PROPERTIES_NON_LIST = ["/properties/quality-check", "/properties/sale-dm"];
+
+/**
+ * サイドバー項目の現在地ハイライト判定(純関数=テスト可能)。
+ * - `/properties` は一覧および物件詳細(`/properties/<id>`)で点灯するが、上記の別機能ページ
+ *   (品質チェック・売却DM)では点灯させない。
+ * - `/import` は完全一致のみ(`/import/registry-pdf` 等では点灯しない)。
+ * - それ以外は完全一致、またはその配下(`href + "/"`)で点灯。
+ */
+export function isNavItemActive(href: string, currentPath: string): boolean {
+  if (href === "/properties") {
+    if (PROPERTIES_NON_LIST.some((p) => currentPath === p || currentPath.startsWith(p + "/"))) {
+      return false;
+    }
+    return currentPath === href || currentPath.startsWith("/properties/");
+  }
+  if (href === "/import") return currentPath === "/import";
+  return currentPath === href || currentPath.startsWith(href + "/");
+}
