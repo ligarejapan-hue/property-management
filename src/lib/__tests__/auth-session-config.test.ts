@@ -12,12 +12,20 @@ import { describe, it, expect } from "vitest";
 const src = readFileSync(resolve(__dirname, "../auth.ts"), "utf-8");
 
 describe("セッション設定: 無操作1時間でログアウト(スライド式)", () => {
-  it("maxAge は 1 時間(60*60秒)", () => {
-    expect(src).toMatch(/SESSION_MAX_AGE_SEC\s*=\s*60\s*\*\s*60\b/);
+  it("無操作ログアウトは1時間、延長間隔は5分", () => {
+    expect(src).toMatch(/IDLE_TIMEOUT_SEC\s*=\s*60\s*\*\s*60\b/);
+    expect(src).toMatch(/REFRESH_INTERVAL_SEC\s*=\s*5\s*\*\s*60\b/);
+  });
+
+  it("maxAge は IDLE+REFRESH のバッファ込み(境界での cookie 失効を防ぐ・@codex R6)", () => {
+    // cookie は最後の操作+IDLE まで生存させるため、延長間隔ぶんのバッファを足す。
+    expect(src).toMatch(
+      /SESSION_MAX_AGE_SEC\s*=\s*IDLE_TIMEOUT_SEC\s*\+\s*REFRESH_INTERVAL_SEC/,
+    );
   });
 
   it("updateAge(スライド延長)が設定されている", () => {
-    expect(src).toMatch(/SESSION_UPDATE_AGE_SEC\s*=\s*5\s*\*\s*60\b/);
+    expect(src).toMatch(/SESSION_UPDATE_AGE_SEC\s*=\s*REFRESH_INTERVAL_SEC/);
     expect(src).toMatch(/updateAge:\s*SESSION_UPDATE_AGE_SEC/);
   });
 
@@ -30,7 +38,7 @@ describe("セッション設定: 無操作1時間でログアウト(スライド
   });
 
   it("旧30分固定(30 * 60 の maxAge・updateAgeなし)ではない", () => {
-    // maxAge が 30*60 に戻っていないこと(ログイン失敗ロックの 30 分は別定数なので許容)。
+    // maxAge が 30*60 の即値に戻っていないこと(ログイン失敗ロックの 30 分は別定数なので許容)。
     expect(src).not.toMatch(/SESSION_MAX_AGE_SEC\s*=\s*30\s*\*\s*60\b/);
   });
 });

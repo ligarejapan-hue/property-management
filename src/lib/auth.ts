@@ -5,12 +5,19 @@ import prisma from "@/lib/prisma";
 
 const MAX_LOGIN_FAILURES = 5;
 const LOCK_DURATION_MS = 30 * 60 * 1000; // 30 minutes
-// セッションは「無操作1時間でログアウト」のスライド式。
-// - maxAge: セッションの有効期限。最後にセッションが延長された時点から1時間。
-// - updateAge: 操作(セッションアクセス)があると、最大この間隔ごとに maxAge を now 起点へ
-//   延ばす(=使っている間は切れない)。無操作が続くと最後の延長からおよそ1時間で失効する。
-const SESSION_MAX_AGE_SEC = 60 * 60; // 1 hour(無操作でこの時間が経つとログアウト)
-const SESSION_UPDATE_AGE_SEC = 5 * 60; // 操作があれば最大5分ごとにセッションを延長(スライド式)
+// セッションは「無操作1時間でログアウト」のスライド式。実際の無操作判定と延長は
+// クライアントの IdleSessionGuard が行い、以下はその前提となる cookie 側の寿命設定。
+// - IDLE_TIMEOUT: クライアントの無操作ログアウト時間(idle-session-guard の IDLE_TIMEOUT_MS と一致)。
+// - REFRESH_INTERVAL: クライアントの延長間隔(同 REFRESH_INTERVAL_MS と一致)。
+// - maxAge: cookie は「最後の操作 + IDLE_TIMEOUT」まで生存させる必要がある。延長は最大
+//   REFRESH_INTERVAL 間隔なので、最後の延長は最後の操作の最大 REFRESH_INTERVAL 前になり得る。
+//   よって IDLE + REFRESH のバッファを持たせ、無操作ログアウト境界より前に cookie が失効して
+//   誤ログアウトするのを防ぐ(@codex #290 R6)。
+// - updateAge: セッションendpointアクセス時にこの間隔で JWT を回転し cookie を延長(スライド)。
+const IDLE_TIMEOUT_SEC = 60 * 60; // 無操作1時間でログアウト
+const REFRESH_INTERVAL_SEC = 5 * 60; // 操作中は最大5分ごとに延長
+const SESSION_MAX_AGE_SEC = IDLE_TIMEOUT_SEC + REFRESH_INTERVAL_SEC; // 65分(バッファ込み)
+const SESSION_UPDATE_AGE_SEC = REFRESH_INTERVAL_SEC; // 5分
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
