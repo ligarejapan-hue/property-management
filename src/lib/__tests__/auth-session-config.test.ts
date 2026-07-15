@@ -50,8 +50,12 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
     expect(guardSrc).toMatch(/REFRESH_INTERVAL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
     // 無操作上限超過で signOut。
     expect(guardSrc).toMatch(/idleFor\s*>=\s*IDLE_TIMEOUT_MS[\s\S]{0,80}signOut/);
-    // 直近操作あり時にセッション延長(getSession)。
-    expect(guardSrc).toContain("getSession()");
+    // 直近操作あり時にセッション延長(素のfetchでendpointを叩く=ブロードキャストしない)。
+    expect(guardSrc).toContain('fetch("/api/auth/session"');
+    // getSession(broadcastする)は import しない=一時失敗でUIをログアウト化しない(@codex R4)。
+    expect(guardSrc).toMatch(
+      /import\s*\{\s*signOut\s*\}\s*from\s*"next-auth\/react"/,
+    );
     // 操作検知イベントを購読している(内側スクロール対策で wheel/scroll も)。
     for (const ev of ["mousemove", "keydown", "scroll", "wheel", "touchstart"]) {
       expect(guardSrc).toContain(`"${ev}"`);
@@ -74,6 +78,12 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
     const markBody = guardSrc.match(/const markActivity[\s\S]*?\n {4}\};/);
     expect(markBody).not.toBeNull();
     expect(markBody![0]).toContain("maybeRefreshSession");
+  });
+
+  it("モック時(NEXT_PUBLIC_USE_MOCK)はガードを無効化する(@codex R4 P3)", () => {
+    expect(guardSrc).toMatch(
+      /NEXT_PUBLIC_USE_MOCK[\s\S]{0,40}===\s*"true"[\s\S]{0,20}return/,
+    );
   });
 
   it("dashboard layout に IdleSessionGuard が配線されている", () => {

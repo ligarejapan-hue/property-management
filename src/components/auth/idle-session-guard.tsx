@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { getSession, signOut } from "next-auth/react";
+import { signOut } from "next-auth/react";
 
 /**
  * 無操作アイドルタイムアウト(クライアント側)。
@@ -56,6 +56,11 @@ export function IdleSessionGuard() {
   const lastStorageWriteRef = useRef<number>(0);
 
   useEffect(() => {
+    // モック(NEXT_PUBLIC_USE_MOCK=true)は auth 自体をバイパスする(proxy.ts も同様)。
+    // このガードだけが 1 時間で signOut すると dev/mock セッションを誤って落とすため何もしない
+    // (@codex #290 R4 P3)。
+    if (process.env.NEXT_PUBLIC_USE_MOCK === "true") return;
+
     const startNow = Date.now();
     lastActivityRef.current = startNow;
     lastRefreshRef.current = startNow;
@@ -64,8 +69,14 @@ export function IdleSessionGuard() {
     const maybeRefreshSession = (now: number) => {
       if (now - lastRefreshRef.current >= REFRESH_INTERVAL_MS) {
         lastRefreshRef.current = now;
-        // セッションendpointを叩くと updateAge に従い JWT が回転し cookie が延長される。
-        void getSession().catch(() => {
+        // セッションendpointを直接叩くと updateAge に従い JWT が回転し cookie が延長される。
+        // getSession(next-auth/react)は既定で結果をブロードキャストし、一時失敗(null)が
+        // SessionProvider 経由で UI をログアウト状態に切り替えかねないため、素の fetch にする
+        // (@codex #290 R4)。回転済み cookie は Set-Cookie で反映される。
+        void fetch("/api/auth/session", {
+          cache: "no-store",
+          credentials: "same-origin",
+        }).catch(() => {
           /* ネットワーク一時失敗は無視(次の機会に再試行) */
         });
       }
