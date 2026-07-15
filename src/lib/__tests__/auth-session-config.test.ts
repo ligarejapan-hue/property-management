@@ -52,10 +52,21 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
     expect(guardSrc).toMatch(/idleFor\s*>=\s*IDLE_TIMEOUT_MS[\s\S]{0,80}signOut/);
     // 直近操作あり時にセッション延長(getSession)。
     expect(guardSrc).toContain("getSession()");
-    // 操作検知イベントを購読している。
-    for (const ev of ["mousemove", "keydown", "scroll", "touchstart"]) {
+    // 操作検知イベントを購読している(内側スクロール対策で wheel/scroll も)。
+    for (const ev of ["mousemove", "keydown", "scroll", "wheel", "touchstart"]) {
       expect(guardSrc).toContain(`"${ev}"`);
     }
+  });
+
+  it("内側スクロールを拾うため capture フェーズで購読する(@codex R2)", () => {
+    expect(guardSrc).toMatch(/capture:\s*true/);
+  });
+
+  it("タブ間で最終操作を共有し、放置タブの誤ログアウトを防ぐ(@codex R2)", () => {
+    // localStorage で全タブの最終操作を共有し、最大値で idle 判定する。
+    expect(guardSrc).toContain("localStorage");
+    expect(guardSrc).toMatch(/Math\.max\(\s*lastActivityRef\.current/);
+    expect(guardSrc).toContain("pm:session:last-activity");
   });
 
   it("dashboard layout に IdleSessionGuard が配線されている", () => {

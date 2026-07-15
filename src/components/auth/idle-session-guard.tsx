@@ -27,11 +27,33 @@ import { getSession, signOut } from "next-auth/react";
 export const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 無操作 1 時間でログアウト
 export const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 操作中は最大5分ごとにセッションを延長
 const CHECK_INTERVAL_MS = 60 * 1000; // 1分ごとに判定
+const STORAGE_WRITE_THROTTLE_MS = 10 * 1000; // localStorage への書込は最大10秒に1回
+// タブ間で最終操作時刻を共有するキー(@codex #290 R2: 複数タブで放置タブが誤ログアウトするのを防ぐ)。
+const LAST_ACTIVITY_KEY = "pm:session:last-activity";
+
+function readSharedLastActivity(): number {
+  try {
+    const v = window.localStorage.getItem(LAST_ACTIVITY_KEY);
+    const n = v ? Number(v) : 0;
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0; // localStorage 不可時は自タブのみで判定
+  }
+}
+
+function writeSharedLastActivity(now: number): void {
+  try {
+    window.localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+  } catch {
+    /* private mode 等で不可なら自タブのみで判定 */
+  }
+}
 
 export function IdleSessionGuard() {
   // render 中に Date.now() を呼ばない(react-hooks/purity)。0 で初期化し effect 内で現在時刻を入れる。
   const lastActivityRef = useRef<number>(0);
   const lastRefreshRef = useRef<number>(0);
+  const lastStorageWriteRef = useRef<number>(0);
 
   useEffect(() => {
     const startNow = Date.now();
@@ -39,24 +61,41 @@ export function IdleSessionGuard() {
     lastRefreshRef.current = startNow;
 
     const markActivity = () => {
-      lastActivityRef.current = Date.now();
+      const now = Date.now();
+      lastActivityRef.current = now;
+      // 全タブへ共有(書込は throttle。頻発する mousemove で localStorage を叩き続けない)。
+      if (now - lastStorageWriteRef.current >= STORAGE_WRITE_THROTTLE_MS) {
+        lastStorageWriteRef.current = now;
+        writeSharedLastActivity(now);
+      }
     };
+    writeSharedLastActivity(startNow);
+
+    // scroll は bubbling しない=本文の内側スクロールコンテナ(overflow-y-auto)を拾うため
+    // capture フェーズで購読する。wheel も内側スクロール操作として活動に数える
+    // (@codex #290 R2)。
     const events: Array<keyof WindowEventMap> = [
       "mousemove",
       "mousedown",
       "keydown",
       "scroll",
+      "wheel",
       "touchstart",
     ];
     for (const ev of events) {
-      window.addEventListener(ev, markActivity, { passive: true });
+      window.addEventListener(ev, markActivity, { passive: true, capture: true });
     }
 
     const timer = window.setInterval(() => {
       const now = Date.now();
-      const idleFor = now - lastActivityRef.current;
+      // 自タブと他タブ(localStorage)の最終操作のうち新しい方を採用=どのタブの操作も活動に数える。
+      const lastActivity = Math.max(
+        lastActivityRef.current,
+        readSharedLastActivity(),
+      );
+      const idleFor = now - lastActivity;
 
-      // 無操作が上限を超えたらログアウト。
+      // 全タブで無操作が上限を超えたらログアウト。
       if (idleFor >= IDLE_TIMEOUT_MS) {
         void signOut({ callbackUrl: "/login" });
         return;
@@ -78,7 +117,7 @@ export function IdleSessionGuard() {
 
     return () => {
       for (const ev of events) {
-        window.removeEventListener(ev, markActivity);
+        window.removeEventListener(ev, markActivity, { capture: true });
       }
       window.clearInterval(timer);
     };
