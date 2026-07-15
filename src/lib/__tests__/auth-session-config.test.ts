@@ -41,6 +41,17 @@ describe("セッション設定: 無操作1時間でログアウト(スライド
     // maxAge が 30*60 の即値に戻っていないこと(ログイン失敗ロックの 30 分は別定数なので許容)。
     expect(src).not.toMatch(/SESSION_MAX_AGE_SEC\s*=\s*30\s*\*\s*60\b/);
   });
+
+  it("JWT回転時にDBでユーザーを再検証し無効化ユーザーを失効させる(@codex R7 P1)", () => {
+    // jwt callback(user 無し=既存トークンの検証/回転)で DB 再検証する。
+    const jwtBlock = src.slice(src.indexOf("async jwt"), src.indexOf("async session"));
+    expect(jwtBlock.length).toBeGreaterThan(0);
+    expect(jwtBlock).toContain("prisma.user.findUnique");
+    // 無効化/削除で null を返す(next-auth v5: cookie クリア=失効)。
+    expect(jwtBlock).toMatch(/!dbUser\s*\|\|\s*!dbUser\.isActive[\s\S]{0,40}return null/);
+    // ロール変更(降格/昇格)を反映。
+    expect(jwtBlock).toMatch(/token\.role\s*=\s*dbUser\.role/);
+  });
 });
 
 describe("アイドルガード: 実際に効く延長/失効の配線(@codex #290 P2)", () => {
@@ -75,10 +86,36 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
   });
 
   it("タブ間で最終操作を共有し、放置タブの誤ログアウトを防ぐ(@codex R2)", () => {
-    // localStorage で全タブの最終操作を共有し、最大値で idle 判定する。
-    expect(guardSrc).toContain("localStorage");
+    // 共有ヘルパは session-activity に集約(localStorage + キー)。
+    const activitySrc = readFileSync(
+      resolve(__dirname, "../session-activity.ts"),
+      "utf-8",
+    );
+    expect(activitySrc).toContain("localStorage");
+    expect(activitySrc).toContain("pm:session:last-activity");
+    // guard は共有値を読み、自タブと最大値で idle 判定する。
+    expect(guardSrc).toContain("readSharedLastActivity");
     expect(guardSrc).toMatch(/Math\.max\(\s*lastActivityRef\.current/);
-    expect(guardSrc).toContain("pm:session:last-activity");
+  });
+
+  it("マウント時に共有の最終操作が無操作上限超過なら signOut(リロード免脱防止・@codex R7 P2)", () => {
+    // startNow で無条件上書きせず、stored 起点(effectiveLast)で超過判定して signOut。
+    expect(guardSrc).toContain("effectiveLast");
+    expect(guardSrc).toMatch(
+      /startNow\s*-\s*effectiveLast\s*>=\s*IDLE_TIMEOUT_MS[\s\S]{0,90}signOut/,
+    );
+    // 既存の直近値を startNow で潰さない(seed は空のときだけ)。
+    expect(guardSrc).toMatch(/storedLast\s*<=\s*0[\s\S]{0,40}writeSharedLastActivity\(startNow\)/);
+  });
+
+  it("ログイン成功時に最終操作を seed する(新規ログイン直後の誤ログアウト防止・@codex R7 P2)", () => {
+    const loginSrc = readFileSync(
+      resolve(__dirname, "../../app/(auth)/login/page.tsx"),
+      "utf-8",
+    );
+    expect(loginSrc).toContain("writeSharedLastActivity");
+    // 認証成功ブランチ(error でない)で seed していること。
+    expect(loginSrc).toMatch(/else\s*\{[\s\S]{0,200}writeSharedLastActivity\(Date\.now\(\)\)/);
   });
 
   it("操作再開の瞬間に即延長する(境界の誤ログアウト防止・@codex R3)", () => {

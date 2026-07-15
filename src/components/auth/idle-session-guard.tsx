@@ -2,6 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { signOut } from "next-auth/react";
+import {
+  readSharedLastActivity,
+  writeSharedLastActivity,
+} from "@/lib/session-activity";
 
 /**
  * 無操作アイドルタイムアウト(クライアント側)。
@@ -28,26 +32,7 @@ export const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 無操作 1 時間でログア
 export const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 操作中は最大5分ごとにセッションを延長
 const CHECK_INTERVAL_MS = 60 * 1000; // 1分ごとに判定
 const STORAGE_WRITE_THROTTLE_MS = 10 * 1000; // localStorage への書込は最大10秒に1回
-// タブ間で最終操作時刻を共有するキー(@codex #290 R2: 複数タブで放置タブが誤ログアウトするのを防ぐ)。
-const LAST_ACTIVITY_KEY = "pm:session:last-activity";
-
-function readSharedLastActivity(): number {
-  try {
-    const v = window.localStorage.getItem(LAST_ACTIVITY_KEY);
-    const n = v ? Number(v) : 0;
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0; // localStorage 不可時は自タブのみで判定
-  }
-}
-
-function writeSharedLastActivity(now: number): void {
-  try {
-    window.localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
-  } catch {
-    /* private mode 等で不可なら自タブのみで判定 */
-  }
-}
+// タブ間で最終操作時刻を共有する仕組みは @/lib/session-activity に集約(@codex #290 R2/R7)。
 
 export function IdleSessionGuard() {
   // render 中に Date.now() を呼ばない(react-hooks/purity)。0 で初期化し effect 内で現在時刻を入れる。
@@ -62,7 +47,18 @@ export function IdleSessionGuard() {
     if (process.env.NEXT_PUBLIC_USE_MOCK === "true") return;
 
     const startNow = Date.now();
-    lastActivityRef.current = startNow;
+    // @codex #290 R7(P2): マウント/リロード時は保存済みの最終操作(全タブ共有)を起点にする。
+    // startNow で無条件に上書きすると、60〜65分アイドル(cookie バッファでまだ失効前)後の
+    // リロードで無操作の痕跡が消え、ログアウトを免れる。ログイン直後は login ページが直近値を
+    // seed するため stored は新しく、ここで誤ログアウトしない。
+    const storedLast = readSharedLastActivity();
+    const effectiveLast = storedLast > 0 ? storedLast : startNow;
+    if (startNow - effectiveLast >= IDLE_TIMEOUT_MS) {
+      // 既に無操作上限を超えている(バッファ窓でのリロード等)→ そのままログアウト。
+      void signOut({ callbackUrl: "/login" });
+      return;
+    }
+    lastActivityRef.current = effectiveLast;
     lastRefreshRef.current = startNow;
 
     // 前回更新から REFRESH_INTERVAL 以上経っていればセッションを延長(スライド)。throttle 済。
@@ -107,7 +103,8 @@ export function IdleSessionGuard() {
       // 操作検知の時点で(前回更新が古ければ)延長を発火する。
       maybeRefreshSession(now);
     };
-    writeSharedLastActivity(startNow);
+    // 空(新規)のときだけ seed。既存の直近値は保持する(上の effectiveLast 判定を壊さない)。
+    if (storedLast <= 0) writeSharedLastActivity(startNow);
 
     // scroll は bubbling しない=本文の内側スクロールコンテナ(overflow-y-auto)を拾うため
     // capture フェーズで購読する。wheel も内側スクロール操作として活動に数える

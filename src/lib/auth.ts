@@ -98,8 +98,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
+        // 初回ログイン: authorize() で有効性は確認済み。
         token.id = user.id;
         token.role = (user as unknown as { role: string }).role;
+        return token;
+      }
+      // 既存トークンの検証/回転(スライド延長・キープアライブ含む)時は、DB でユーザーの
+      // 有効性とロールを再確認する。管理者が無効化/削除/降格したユーザーが、延長で
+      // セッションを保ち続けるのを防ぐ(@codex #290 R7 P1)。
+      // next-auth v5 では jwt が null を返すと cookie がクリアされ、セッションが失効する。
+      if (token.id) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          select: { isActive: true, role: true },
+        });
+        if (!dbUser || !dbUser.isActive) {
+          return null; // 無効化/削除 → セッション失効
+        }
+        token.role = dbUser.role; // ロール変更(降格/昇格)を即反映
       }
       return token;
     },
