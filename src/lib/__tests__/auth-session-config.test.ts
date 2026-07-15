@@ -69,6 +69,13 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
     expect(guardSrc).toContain("pm:session:last-activity");
   });
 
+  it("操作再開の瞬間に即延長する(境界の誤ログアウト防止・@codex R3)", () => {
+    // markActivity から延長を発火(tick 待ちにしない)。
+    const markBody = guardSrc.match(/const markActivity[\s\S]*?\n {4}\};/);
+    expect(markBody).not.toBeNull();
+    expect(markBody![0]).toContain("maybeRefreshSession");
+  });
+
   it("dashboard layout に IdleSessionGuard が配線されている", () => {
     expect(layoutSrc).toContain("IdleSessionGuard");
     expect(layoutSrc).toMatch(/<IdleSessionGuard\s*\/>/);

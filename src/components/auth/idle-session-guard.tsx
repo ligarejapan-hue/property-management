@@ -60,6 +60,17 @@ export function IdleSessionGuard() {
     lastActivityRef.current = startNow;
     lastRefreshRef.current = startNow;
 
+    // 前回更新から REFRESH_INTERVAL 以上経っていればセッションを延長(スライド)。throttle 済。
+    const maybeRefreshSession = (now: number) => {
+      if (now - lastRefreshRef.current >= REFRESH_INTERVAL_MS) {
+        lastRefreshRef.current = now;
+        // セッションendpointを叩くと updateAge に従い JWT が回転し cookie が延長される。
+        void getSession().catch(() => {
+          /* ネットワーク一時失敗は無視(次の機会に再試行) */
+        });
+      }
+    };
+
     const markActivity = () => {
       const now = Date.now();
       lastActivityRef.current = now;
@@ -68,6 +79,10 @@ export function IdleSessionGuard() {
         lastStorageWriteRef.current = now;
         writeSharedLastActivity(now);
       }
+      // @codex #290 R3: 復帰(操作再開)の瞬間に即延長する。次の tick(最大1分後・背景タブでは
+      // タイマー間引きでさらに遅延)まで待つと、境界で cookie が失効して誤ログアウトし得るため、
+      // 操作検知の時点で(前回更新が古ければ)延長を発火する。
+      maybeRefreshSession(now);
     };
     writeSharedLastActivity(startNow);
 
@@ -101,17 +116,10 @@ export function IdleSessionGuard() {
         return;
       }
 
-      // 直近に操作があり、前回更新から一定時間が経っていればセッションを延長(スライド)。
+      // backup: 直近に操作があれば延長(通常は markActivity 側で即延長済み)。
       // idle 中(REFRESH_INTERVAL 以上無操作)は延長しない=放置で自然に失効させる。
-      if (
-        idleFor < REFRESH_INTERVAL_MS &&
-        now - lastRefreshRef.current >= REFRESH_INTERVAL_MS
-      ) {
-        lastRefreshRef.current = now;
-        // セッションendpointを叩くと updateAge に従い JWT が回転し cookie が延長される。
-        void getSession().catch(() => {
-          /* ネットワーク一時失敗は無視(次の tick で再試行) */
-        });
+      if (idleFor < REFRESH_INTERVAL_MS) {
+        maybeRefreshSession(now);
       }
     }, CHECK_INTERVAL_MS);
 
