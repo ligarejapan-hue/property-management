@@ -142,6 +142,10 @@ interface RegistryPageLike {
   selectOption(selector: string, value: string): Promise<unknown>;
   check(selector: string): Promise<void>;
   waitForSelector(selector: string, options?: unknown): Promise<unknown>;
+  // ブラウザ内で関数を評価する（実 Playwright Page.evaluate）。ログインボタンのような
+  // type="button"+onclick(JS submit)を、被り/actionability に左右されず DOM click で発火するために使う。
+  // 戻り値は使わないため unknown（実 Playwright Page.evaluate はより広い型だが構造的に代入可能）。
+  evaluate(pageFunction: (arg: string) => unknown, arg: string): Promise<unknown>;
   waitForEvent(event: string, options?: unknown): Promise<RegistryDownloadLike>;
   // 所在検索の結果行を DOM から抽出する（実 Playwright は $$eval で各行のセルを読む）。
   $$eval(
@@ -238,6 +242,23 @@ function isTimeoutError(err: unknown): boolean {
 }
 
 /**
+ * ログイン失敗の分類サマリを作る（運用診断ログ用）。エラー名 + メッセージ先頭行のみ。
+ * secret（loginId/password の実値）は Playwright エラーに載らない想定だが、防御的に除去する。
+ * PII は含めない（このエラー経路のメッセージはセレクタ名/URL/TimeoutError 程度で、所有者名等は含まない）。
+ */
+export function summarizeRegistryLoginError(
+  err: unknown,
+  secrets: string[] = [],
+): string {
+  const name = err instanceof Error ? err.name : "unknown";
+  let msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
+  for (const s of secrets) {
+    if (s) msg = msg.split(s).join("***");
+  }
+  return `${name}: ${msg}`.slice(0, 300);
+}
+
+/**
  * 所在検索の結果行(DOM)から候補の生フィールドを抽出する。page.$$eval に渡してブラウザ内で
  * 実行するため **self-contained/serializable**(モジュールスコープ非参照)にする。TODO(calibrate):
  * 実サイトの1行の要素構造に合わせる。
@@ -308,11 +329,28 @@ function createPlaywrightRegistryPage(
         await page.goto(`${base}${loginPath}`);
         await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
         await page.fill(REGISTRY_SELECTORS.password, input.password);
-        await page.click(REGISTRY_SELECTORS.loginSubmit);
+        // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
+        // requireCheck() が JS で form.submit() する特殊構造。page.click() は隣接する float
+        // ヒント要素の被りや actionability チェックで空振りし、送信に至らないことがある
+        // （実画面HTMLでのオフライン再現で確認）。DOM の click() を評価で直接発火し、被り/
+        // 可視状態に左右されず onclick(=送信) を確実にトリガーする。
+        await page.waitForSelector(REGISTRY_SELECTORS.loginSubmit);
+        await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          if (el && typeof (el as { click?: unknown }).click === "function") {
+            (el as unknown as { click: () => void }).click();
+          }
+        }, REGISTRY_SELECTORS.loginSubmit);
         // ログイン成功を固有要素で確認（URL だけで判定しない）。
         await page.waitForSelector(REGISTRY_SELECTORS.loggedIn);
-      } catch {
+      } catch (err) {
         // ログイン確認に至らない = 認証失敗扱い（生メッセージ非載・secret 非露出）。
+        // どの段階/種別で失敗したか（TimeoutError とセレクタ名など）は運用診断のため分類ログに残す。
+        // secret（loginId/password）はメッセージから除去してからログする。
+        console.warn(
+          "[registry-login] authentication flow failed:",
+          summarizeRegistryLoginError(err, [input.loginId, input.password]),
+        );
         throw new RegistryFetchError("auth_failed");
       }
     },
