@@ -86,14 +86,14 @@ const SPLIT_X_PHOTO_COUNT_DIVISOR = 3;
 /** splitX と photoArea 右端の間の余白(mm)。 */
 const COLUMN_GAP_MM = 6;
 
-/** overview（概要表）の右端 x 座標。 */
-const OVERVIEW_RIGHT_MM = 287;
+/** overview（概要表）の右端 x 座標。エディタの overview 定位置スナップも使う。 */
+export const OVERVIEW_RIGHT_MM = 287;
 /** ページ幅(mm)。A4横。overview 右端 OVERVIEW_RIGHT_MM との差が左右マージン。 */
 const PAGE_W_MM = 297;
 /** 概要表（物件種別）の最大幅(mm)＝ページ幅の 1/3（要件⑤: 枠は右端から最大 1/3）。 */
 const OVERVIEW_MAX_WIDTH_MM = PAGE_W_MM / 3;
-/** overview 左端の下限(mm)。これ以上左へは来ない＝概要表は常に右 1/3 以内・写真域は左側の残り。 */
-const OVERVIEW_MIN_X_MM = OVERVIEW_RIGHT_MM - OVERVIEW_MAX_WIDTH_MM;
+/** overview 左端の定位置(mm)。概要表は常にここ＝右 1/3・写真域は左側(エディタからも参照)。 */
+export const OVERVIEW_MIN_X_MM = OVERVIEW_RIGHT_MM - OVERVIEW_MAX_WIDTH_MM;
 /** overview.x は splitX からこの分だけ右にオフセット。 */
 const OVERVIEW_X_OFFSET_MM = 5;
 /**

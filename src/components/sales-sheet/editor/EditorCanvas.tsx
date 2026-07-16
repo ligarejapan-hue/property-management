@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import type { OnDrag, OnDragEnd, OnResize, OnResizeEnd, MoveableProps } from "react-moveable";
 import type { SalesSheetDocument, SalesSheetElement } from "@/lib/sales-sheet/document-schema";
 import { SalesSheetRenderer } from "../SalesSheetRenderer";
-import { pxToMm, mmToViewportPx } from "./geometry";
+import { pxToMm } from "./geometry";
 
 // ---------------------------------------------------------------------------
 // Dynamic import — Moveable is browser-only (uses DOM APIs at module init).
@@ -25,14 +25,9 @@ export interface EditorCanvasProps {
   onSelect: (id: string | null) => void;
   /** Called when the selected element is dragged to a new position (in mm). */
   onMove?: (id: string, pos: { x: number; y: number }) => void;
-  /** Called when the selected element is resized (in mm). */
-  onResize?: (id: string, size: { w: number; h: number }) => void;
-  /**
-   * Canvas display zoom (CSS `transform: scale(zoom)` applied by the parent).
-   * Required to convert Moveable viewport-px events back to mm.
-   * Defaults to 1 (no zoom) when omitted.
-   */
-  zoom?: number;
+  /** Called when the selected element is resized (in mm). x/y は top/left ハンドルで
+   *  原点が動いた時のみ入る(サイズと位置を1回の確定=1履歴として親がまとめて適用)。 */
+  onResize?: (id: string, size: { w: number; h: number; x?: number; y?: number }) => void;
   /**
    * Physical mm→px ratio (96 / 25.4 ≈ 3.7795 at 96 dpi).
    * Defaults to the 96 dpi value when omitted.
@@ -50,13 +45,15 @@ const HIT_BOX_Z_BASE = 1000;
 /** Default mm-to-px ratio at 96 dpi. */
 const DEFAULT_MM_TO_PX = 96 / 25.4;
 
-function hitBoxStyle(el: SalesSheetElement, isSelected: boolean): CSSProperties {
+function hitBoxStyle(el: SalesSheetElement, isSelected: boolean, mmToPx: number): CSSProperties {
+  // ⚠ px 単位で指定する(mm 文字列だと Moveable のリサイズ量計算が壊れ、ハンドルを掴んだ
+  // 瞬間に要素が最小サイズへ潰れる実機バグの一因だった・2026-07-16 Playwright 実測)。
   return {
     position: "absolute",
-    left: `${el.x}mm`,
-    top: `${el.y}mm`,
-    width: `${el.w}mm`,
-    height: `${el.h}mm`,
+    left: `${el.x * mmToPx}px`,
+    top: `${el.y * mmToPx}px`,
+    width: `${el.w * mmToPx}px`,
+    height: `${el.h * mmToPx}px`,
     zIndex: HIT_BOX_Z_BASE + el.z,
     cursor: "pointer",
     boxSizing: "border-box",
@@ -82,10 +79,10 @@ function hitBoxStyle(el: SalesSheetElement, isSelected: boolean): CSSProperties 
  *   hit-box, enabling drag and resize.
  * - The Moveable target is captured directly from the click event (stored as
  *   state), avoiding any ref reads during render.
- * - `onDragEnd` / `onResizeEnd`: converts Moveable viewport-px values back to
- *   mm via the `geometry.ts` helpers and dispatches to the parent via
+ * - `onDragEnd` / `onResizeEnd`: converts Moveable CSS-px values back to mm
+ *   (÷mmToPx のみ・zoom では割らない) and dispatches to the parent via
  *   `onMove` / `onResize` callbacks, which dispatch Task D reducers.
- * - `bounds` constrains drag/resize to the paper boundary.
+ * - 用紙内制約は Moveable bounds でなく確定時の reducer クランプで担保。
  */
 export function EditorCanvas({
   document,
@@ -93,7 +90,6 @@ export function EditorCanvas({
   onSelect,
   onMove,
   onResize,
-  zoom = 1,
   mmToPx = DEFAULT_MM_TO_PX,
 }: EditorCanvasProps) {
   const { page, elements } = document;
@@ -111,13 +107,12 @@ export function EditorCanvas({
   // requires a live selectedId, so a stale node is never handed to Moveable.
   const [moveableTarget, setMoveableTarget] = useState<HTMLDivElement | null>(null);
 
-  // ── Moveable bounds (paper boundary in viewport px) ──────────────────────
-  const paperBounds = {
-    left: 0,
-    top: 0,
-    right: mmToViewportPx(page.width, mmToPx, zoom),
-    bottom: mmToViewportPx(page.height, mmToPx, zoom),
-  };
+  // ── ⚠ Moveable の bounds は使わない ────────────────────────────────────────
+  // bounds は client(画面)座標で解釈され、画面中央に置かれた用紙では「リサイズハンドルを
+  // 掴んだ瞬間に範囲外と判定→要素が最小サイズへ潰れる」実機バグを起こした(2026-07-16
+  // ユーザー報告・position:"css" 指定でも実ブラウザで再現=Playwright で実測)。
+  // 用紙内への制約はドラッグ中の視覚制限でなく、確定時に reducer(moveElement/resizeElement)
+  // が mm 値でクランプして担保する(ドラッグ中に一瞬はみ出ても離した時点で用紙内へ収まる)。
 
   // ── Moveable event handlers ───────────────────────────────────────────────
 
@@ -135,8 +130,10 @@ export function EditorCanvas({
   function handleDragEnd({ target, isDrag, lastEvent }: OnDragEnd) {
     const el = target as HTMLElement;
     if (isDrag && selectedId && onMove && lastEvent) {
-      const x = pxToMm(lastEvent.left, mmToPx, zoom);
-      const y = pxToMm(lastEvent.top, mmToPx, zoom);
+      // Moveable のイベント値は CSS px(scale 前の空間)。zoom で割ると 10mm が 13.3mm に
+      // 化ける(実測で確認)ため、mmToPx のみで割る。
+      const x = pxToMm(lastEvent.left, mmToPx, 1);
+      const y = pxToMm(lastEvent.top, mmToPx, 1);
       onMove(selectedId, { x, y });
     }
     // Reset inline styles; React re-render will apply mm values.
@@ -155,36 +152,26 @@ export function EditorCanvas({
   }
 
   /**
-   * Resize committed: convert viewport-px → mm, dispatch to reducers.
-   * Dispatches resize (size) always; dispatches move only when the element
-   * origin actually shifted (top/left-handle resize). A bottom/right-handle
-   * resize leaves the origin unchanged, so skipping the move dispatch avoids
-   * a redundant setEditorState and a spurious dirty-mark.
+   * Resize committed: convert viewport-px → mm, dispatch ONCE via onResize.
+   * 原点が動いた(top/left ハンドル)場合は x/y も同じコールに含める=1回の確定が
+   * 1回の state 更新(=「元に戻す」1回で戻る)になる。bottom/right ハンドルでは
+   * x/y を含めず、位置の冗長な更新を避ける。
    */
   function handleResizeEnd({ target, isDrag, lastEvent }: OnResizeEnd) {
     const el = target as HTMLElement;
-    if (isDrag && selectedId && lastEvent) {
-      const w = pxToMm(lastEvent.width, mmToPx, zoom);
-      const h = pxToMm(lastEvent.height, mmToPx, zoom);
-      if (onResize) {
-        onResize(selectedId, { w, h });
-      }
-      // Only dispatch a move when the origin actually shifted (top/left-handle
-      // resize). Compare converted mm values against the stored position using a
-      // small epsilon to tolerate float conversion noise.
-      if (onMove) {
-        const x = pxToMm(lastEvent.drag.left, mmToPx, zoom);
-        const y = pxToMm(lastEvent.drag.top, mmToPx, zoom);
-        const currentEl = elements.find((e) => e.id === selectedId);
-        const ORIGIN_EPSILON = 0.01; // mm
-        if (
-          !currentEl ||
-          Math.abs(x - currentEl.x) > ORIGIN_EPSILON ||
-          Math.abs(y - currentEl.y) > ORIGIN_EPSILON
-        ) {
-          onMove(selectedId, { x, y });
-        }
-      }
+    if (isDrag && selectedId && lastEvent && onResize) {
+      // CSS px → mm(zoom で割らない・onDragEnd と同じ理由)。
+      const w = pxToMm(lastEvent.width, mmToPx, 1);
+      const h = pxToMm(lastEvent.height, mmToPx, 1);
+      const x = pxToMm(lastEvent.drag.left, mmToPx, 1);
+      const y = pxToMm(lastEvent.drag.top, mmToPx, 1);
+      const currentEl = elements.find((e) => e.id === selectedId);
+      const ORIGIN_EPSILON = 0.01; // mm
+      const originShifted =
+        !currentEl ||
+        Math.abs(x - currentEl.x) > ORIGIN_EPSILON ||
+        Math.abs(y - currentEl.y) > ORIGIN_EPSILON;
+      onResize(selectedId, originShifted ? { w, h, x, y } : { w, h });
     }
     // Reset inline styles.
     el.style.left = "";
@@ -226,7 +213,7 @@ export function EditorCanvas({
               // (React bails out on same-node sets, so no render cascade).
               if (isSelected && node !== null) setMoveableTarget(node);
             }}
-            style={hitBoxStyle(el, isSelected)}
+            style={hitBoxStyle(el, isSelected, mmToPx)}
             onClick={(e) => {
               e.stopPropagation();
               // Selection is the single source of truth — the effect above
@@ -255,7 +242,6 @@ export function EditorCanvas({
           resizable={true}
           throttleDrag={0}
           throttleResize={0}
-          bounds={paperBounds}
           onDrag={handleDrag}
           onDragEnd={handleDragEnd}
           onResize={handleResize}
