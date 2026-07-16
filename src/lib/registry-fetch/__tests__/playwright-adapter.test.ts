@@ -236,6 +236,32 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(out.length).toBeLessThanOrEqual(300);
   });
 
+  it("C3d: login 失敗ログは baseUrl / login URL を除去する（env の内部エンドポイント非露出・@codex）", async () => {
+    const f = makeFakeChromium();
+    const secretBase = "https://internal.reg.example";
+    // goto が遷移先 URL 込みのメッセージで reject（Playwright の典型）
+    f.page.goto.mockRejectedValue(
+      new Error(
+        `page.goto: net::ERR_CONNECTION_REFUSED at ${secretBase}/TeikyoUketsuke/common/login`,
+      ),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      await expect(
+        page.login({ loginId: "id", password: "pw", baseUrl: secretBase }),
+      ).rejects.toThrow();
+      const logged = warnSpy.mock.calls.map((c) => c.join(" ")).join(" ");
+      expect(logged).not.toContain(secretBase); // 内部 base URL は漏らさない
+      expect(logged).toContain("***"); // 除去が実施されている
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("C4: searchByRealEstateNumber が番号 fill・検索 click へ委譲し found を返す", async () => {
     const f = makeFakeChromium();
     const factory = resolveDefaultRegistryBrowserFactory({

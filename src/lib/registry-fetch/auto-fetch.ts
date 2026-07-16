@@ -322,11 +322,12 @@ function createPlaywrightRegistryPage(
   const { loginPath } = config;
   return {
     async login(input) {
+      // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
+      // loginPath は env（REGISTRY_FETCH_LOGIN_PATH）で上書き可能（live キャリブレーション）。
+      const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
+      const loginUrl = `${base}${loginPath}`;
       try {
-        // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
-        // loginPath は env（REGISTRY_FETCH_LOGIN_PATH）で上書き可能（live キャリブレーション）。
-        const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
-        await page.goto(`${base}${loginPath}`);
+        await page.goto(loginUrl);
         await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
         await page.fill(REGISTRY_SELECTORS.password, input.password);
         // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
@@ -346,10 +347,17 @@ function createPlaywrightRegistryPage(
       } catch (err) {
         // ログイン確認に至らない = 認証失敗扱い（生メッセージ非載・secret 非露出）。
         // どの段階/種別で失敗したか（TimeoutError とセレクタ名など）は運用診断のため分類ログに残す。
-        // secret（loginId/password）はメッセージから除去してからログする。
+        // secret（loginId/password）に加え、baseUrl/loginUrl（env でカスタム/内部エンドポイントに
+        // なり得る＝プロジェクト規約で失敗ログに出さない）も除去する（@codex）。goto 失敗時の
+        // Playwright メッセージには遷移先 URL が載るため。
         console.warn(
           "[registry-login] authentication flow failed:",
-          summarizeRegistryLoginError(err, [input.loginId, input.password]),
+          summarizeRegistryLoginError(err, [
+            input.loginId,
+            input.password,
+            loginUrl,
+            base,
+          ]),
         );
         throw new RegistryFetchError("auth_failed");
       }
