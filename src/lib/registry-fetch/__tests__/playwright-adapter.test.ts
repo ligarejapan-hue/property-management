@@ -31,6 +31,7 @@ import {
   DEFAULT_REGISTRY_LOGIN_PATH,
   extractLocationCandidateRows,
   splitAddressForLocationSearch,
+  summarizeRegistryLoginError,
 } from "../auto-fetch";
 import { RegistryFetchError } from "../errors";
 
@@ -62,6 +63,9 @@ function makeFakeChromium() {
       createReadStream: async () => Readable.from([Buffer.from("%PDF-1.4 dl")]),
     })),
     $$eval: vi.fn(async () => [] as unknown[]),
+    evaluate: vi.fn<
+      (fn: (arg: string) => unknown, arg: string) => Promise<undefined>
+    >(async () => undefined),
   };
   const context = {
     newPage: vi.fn(async () => page),
@@ -164,7 +168,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(typeof page.close).toBe("function");
   });
 
-  it("C3: login が goto(baseUrl) と ID/PW の fill・submit click へ委譲する", async () => {
+  it("C3: login が goto(baseUrl) と ID/PW の fill・submit(DOM click) へ委譲する", async () => {
     const f = makeFakeChromium();
     const factory = resolveDefaultRegistryBrowserFactory({
       chromiumLoader: f.loader,
@@ -178,7 +182,84 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.page.goto).toHaveBeenCalled();
     expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "the-id");
     expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "the-pw");
-    expect(f.page.click).toHaveBeenCalled();
+    // ログインボタンは type="button"+onclick(requireCheck→form.submit)の特殊構造。
+    // page.click は周辺要素の被り/actionability で空振りするため、DOM click を evaluate で発火する。
+    expect(f.page.evaluate).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.any(String),
+    );
+  });
+
+  it("C3b: submit の evaluate 関数は対象セレクタ要素の DOM click() を呼ぶ（覆い/actionability に非依存）", async () => {
+    const f = makeFakeChromium();
+    let evaluatedFn: ((arg: string) => unknown) | undefined;
+    let evaluatedArg: string | undefined;
+    f.page.evaluate.mockImplementation(
+      async (fn: (arg: string) => unknown, arg: string) => {
+        evaluatedFn = fn;
+        evaluatedArg = arg;
+        return undefined;
+      },
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "x", password: "y", baseUrl: "https://reg.test" });
+
+    expect(typeof evaluatedFn).toBe("function");
+    expect(typeof evaluatedArg).toBe("string");
+
+    // 渡された pageFunction を fake DOM で実行し、対象セレクタ要素の click() が呼ばれることを検証。
+    let clicked = false;
+    const fakeDoc = {
+      querySelector: (s: string) =>
+        s === evaluatedArg ? { click: () => (clicked = true) } : null,
+    };
+    const orig = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = fakeDoc;
+    try {
+      evaluatedFn!(evaluatedArg!);
+    } finally {
+      (globalThis as { document?: unknown }).document = orig;
+    }
+    expect(clicked).toBe(true);
+  });
+
+  it("C3c: summarizeRegistryLoginError は name+message を返し、secret を除去する", () => {
+    const e = new Error("page.fill: timeout for secret-pw-9999 at #password");
+    e.name = "TimeoutError";
+    const out = summarizeRegistryLoginError(e, ["the-login-id", "secret-pw-9999"]);
+    expect(out).toContain("TimeoutError");
+    expect(out).not.toContain("secret-pw-9999"); // secret は除去
+    expect(out).toContain("***");
+    expect(out.length).toBeLessThanOrEqual(300);
+  });
+
+  it("C3d: login 失敗ログは baseUrl / login URL を除去する（env の内部エンドポイント非露出・@codex）", async () => {
+    const f = makeFakeChromium();
+    const secretBase = "https://internal.reg.example";
+    // goto が遷移先 URL 込みのメッセージで reject（Playwright の典型）
+    f.page.goto.mockRejectedValue(
+      new Error(
+        `page.goto: net::ERR_CONNECTION_REFUSED at ${secretBase}/TeikyoUketsuke/common/login`,
+      ),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      await expect(
+        page.login({ loginId: "id", password: "pw", baseUrl: secretBase }),
+      ).rejects.toThrow();
+      const logged = warnSpy.mock.calls.map((c) => c.join(" ")).join(" ");
+      expect(logged).not.toContain(secretBase); // 内部 base URL は漏らさない
+      expect(logged).toContain("***"); // 除去が実施されている
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("C4: searchByRealEstateNumber が番号 fill・検索 click へ委譲し found を返す", async () => {
