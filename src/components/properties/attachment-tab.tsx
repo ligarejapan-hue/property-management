@@ -236,7 +236,7 @@ export default function AttachmentTab({
         </div>
 
         {uploadErrorGeneral && (
-          <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             {uploadErrorGeneral}
           </div>
@@ -303,7 +303,7 @@ export default function AttachmentTab({
         </div>
 
         {uploadErrorRegistry && (
-          <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             {uploadErrorRegistry}
           </div>
@@ -329,7 +329,7 @@ export default function AttachmentTab({
       </section>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
         </div>
       )}

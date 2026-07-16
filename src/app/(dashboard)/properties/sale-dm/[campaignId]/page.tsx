@@ -120,7 +120,7 @@ export default function SaleDmWorkspacePage() {
   // workspace を消さず、下の非破壊バナー(role=alert)で表示する。
   if (!campaign) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
         {error ?? "キャンペーンが見つかりません"}
         <button onClick={load} className="ml-2 underline hover:no-underline">再試行</button>
       </div>
@@ -137,7 +137,7 @@ export default function SaleDmWorkspacePage() {
       {/* 再取得/操作の一時エラーは workspace を消さず非破壊的に表示(初回ロード失敗は上の全画面分岐)。
           パネルが据え置かれるので、操作中パネル自身のエラーはパネル内に出る。ここはページ全体(load/送付フロー)用。 */}
       {error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
         </div>
       )}

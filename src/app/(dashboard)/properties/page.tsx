@@ -1044,7 +1044,7 @@ function PropertiesPageInner() {
           )}
         </div>
 
-        <label className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <label className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
           <input
             type="checkbox"
             checked={warningOnly}
@@ -1169,11 +1169,11 @@ function PropertiesPageInner() {
 
       {/* Error */}
       {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
           <button
             onClick={fetchProperties}
-            className="ml-2 text-red-800 underline hover:no-underline"
+            className="ml-2 text-red-800 underline hover:no-underline dark:text-red-300"
           >
             再試行
           </button>
@@ -1182,8 +1182,8 @@ function PropertiesPageInner() {
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
-          <span className="text-sm font-medium text-blue-800">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950/40">
+          <span className="text-sm font-medium text-blue-800 dark:text-blue-300">
             {selectedIds.size} 件選択中
           </span>
           <select
@@ -1244,8 +1244,8 @@ function PropertiesPageInner() {
         <div
           className={`mb-4 rounded-lg border p-3 text-sm ${
             bulkDeleteResult.failureCount === 0
-              ? "border-green-200 bg-green-50 text-green-800"
-              : "border-amber-200 bg-amber-50 text-amber-800"
+              ? "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300"
+              : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
           }`}
         >
           <div className="flex items-center justify-between">

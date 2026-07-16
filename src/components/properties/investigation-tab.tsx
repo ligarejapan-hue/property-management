@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { formatJaDateTime } from "@/lib/format-datetime";
 import {
   Loader2,
   RefreshCw,
@@ -333,12 +334,12 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
 
         {investigation?.fetchedAt && (
           <span className="text-xs text-gray-500 dark:text-gray-400">
-            取得: {new Date(investigation.fetchedAt).toLocaleString("ja-JP")}
+            取得: {formatJaDateTime(investigation.fetchedAt)}
           </span>
         )}
         {investigation?.confirmedAt && (
           <span className="text-xs text-gray-500 dark:text-gray-400">
-            確認: {new Date(investigation.confirmedAt).toLocaleString("ja-JP")}
+            確認: {formatJaDateTime(investigation.confirmedAt)}
             {investigation.confirmedBy && ` (${investigation.confirmedBy.name})`}
           </span>
         )}
@@ -649,7 +650,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
                     )}
                     <p className="text-gray-400 dark:text-gray-500">
                       {log.creator.name} •{" "}
-                      {new Date(log.createdAt).toLocaleString("ja-JP")}
+                      {formatJaDateTime(log.createdAt)}
                     </p>
                   </div>
                 </div>

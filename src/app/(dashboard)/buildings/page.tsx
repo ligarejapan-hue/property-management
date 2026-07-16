@@ -208,7 +208,7 @@ function CreateBuildingModal({
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
         <h3 className="mb-4 text-lg font-bold text-gray-800 dark:text-gray-100">新規マンション棟</h3>
         {error && (
-          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
             {error}
           </div>
         )}

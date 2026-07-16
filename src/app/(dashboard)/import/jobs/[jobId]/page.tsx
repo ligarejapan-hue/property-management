@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
+import { formatJaDateTime } from "@/lib/format-datetime";
 import {
   useParams,
   useRouter,
@@ -775,7 +776,7 @@ export default function ImportJobDetailPage() {
             <span className="text-gray-500 dark:text-gray-400">実行日時</span>
             <div className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">
               {job.createdAt
-                ? new Date(job.createdAt).toLocaleString("ja-JP")
+                ? formatJaDateTime(job.createdAt)
                 : "-"}
             </div>
           </div>

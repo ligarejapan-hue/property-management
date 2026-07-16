@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { formatJaDateTime } from "@/lib/format-datetime";
 import {
   Search,
   Plus,
@@ -237,7 +238,7 @@ export default function UsersPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                       {u.lastLoginAt
-                        ? new Date(u.lastLoginAt).toLocaleString("ja-JP")
+                        ? formatJaDateTime(u.lastLoginAt)
                         : "-"}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-sm">

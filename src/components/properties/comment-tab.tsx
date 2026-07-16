@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Send, Loader2, MessageCircle, CornerDownRight } from "lucide-react";
 import { fetchComments as apiFetchComments, postComment } from "@/lib/api-client";
+import { formatJaDateTime } from "@/lib/format-datetime";
 
 interface Author {
   id: string;
@@ -179,7 +180,7 @@ function CommentItem({
           {comment.author.name}
         </span>
         <span className="text-xs text-gray-400 dark:text-gray-500">
-          {new Date(comment.createdAt).toLocaleString("ja-JP")}
+          {formatJaDateTime(comment.createdAt)}
         </span>
       </div>
       <p className="text-sm text-gray-700 whitespace-pre-wrap dark:text-gray-200">
@@ -203,7 +204,7 @@ function CommentItem({
                   {reply.author.name}
                 </span>
                 <span className="text-xs text-gray-400 dark:text-gray-500">
-                  {new Date(reply.createdAt).toLocaleString("ja-JP")}
+                  {formatJaDateTime(reply.createdAt)}
                 </span>
               </div>
               <p className="text-sm text-gray-600 whitespace-pre-wrap dark:text-gray-300">

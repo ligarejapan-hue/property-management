@@ -311,7 +311,7 @@ export function AddressLookupControls({
         !postalResultStale &&
         !pendingStale &&
         needsOverwriteConfirm(address) && (
-        <div className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
+        <div className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
           <p>
             現在の郵便番号・住所を「{formatCandidateLabel(pendingCandidate)}
             」で上書きしますか?

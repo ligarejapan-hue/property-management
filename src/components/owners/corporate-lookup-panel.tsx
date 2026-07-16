@@ -334,7 +334,7 @@ export default function CorporateLookupPanel({
 
       {/* conflict: 国税庁結果と既存所有者情報が明らかに別物のときの事前警告。 */}
       {showResult && result && result.found && meta?.conflict === "conflict" && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div>
             国税庁の法人情報が既存の所有者情報と大きく異なります。別法人の可能性がないか確認のうえ反映してください。

@@ -88,7 +88,7 @@ export default function RegistrySettingsPage() {
       {!s?.encryptionConfigured && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300" role="alert">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>暗号化キー(サーバーの内部設定 REGISTRY_SETTINGS_ENC_KEY)が未設定のため、資格情報は保存できません。サーバー管理者に設定を依頼してください(ベースURLは保存できます)。</span>
+          <span>暗号化キー(サーバーの内部設定 REGISTRY_SETTINGS_ENC_KEY)が未設定のため、資格情報は保存できません。サーバー管理者に設定を依頼してください。</span>
         </div>
       )}
 
@@ -121,7 +121,10 @@ export default function RegistrySettingsPage() {
         />
       </div>
 
-      <button type="button" onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+      {/* 暗号化キー未設定時は新しい資格情報を入力できない(入力欄が無効)。ただし保存済みの値の
+          「クリア」は暗号化不要でサーバーも許可するため、クリア指定があるときは保存を有効に保つ。
+          未設定かつクリアも無い=保存できるものが無いときだけ、誤操作防止で無効化(C-3 UI総点検)。 */}
+      <button type="button" onClick={save} disabled={saving || (!s?.encryptionConfigured && !clearLoginId && !clearPassword)} className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
         保存
       </button>

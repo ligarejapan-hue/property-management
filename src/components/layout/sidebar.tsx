@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Menu, X, FileText } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { visibleSidebar, type NavGroup, type NavLeaf } from "./sidebar-model";
+import { visibleSidebar, isNavItemActive, type NavGroup, type NavLeaf } from "./sidebar-model";
 
 interface SidebarProps {
   userRole: string;
@@ -15,12 +15,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const groups = visibleSidebar(userRole);
 
-  const isActive = (href: string) => {
-    if (href === "/properties") return currentPath === href || currentPath.startsWith("/properties/");
-    // Exact match for /import to avoid highlighting when on /import/owners etc.
-    if (href === "/import") return currentPath === "/import";
-    return currentPath === href || currentPath.startsWith(href + "/");
-  };
+  const isActive = (href: string) => isNavItemActive(href, currentPath);
 
   // 折りたたみグループの開閉: 手動トグル(未操作=未設定)が無ければ、現在地がグループ内なら
   // 自動で開く。dashboard layout は永続で Sidebar が再マウントされないため、遷移のたび
