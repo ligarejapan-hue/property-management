@@ -254,6 +254,30 @@ describe("autoArrangePhotos", () => {
     }
   });
 
+  it("写真追加時(appendedId)は追加写真が先頭スロットを奪わず、既存の代表写真を保つ（@codex P2）", () => {
+    // 1枚を整列＝写真域全面（中央）に。
+    const one = autoArrangePhotos(makeState([imageEl(1)]));
+    // 2枚目をページ中央へ追加（addImageElement 相当の中央仮置き）。
+    const added: EditorState = {
+      ...one,
+      dirty: false,
+      document: {
+        ...one.document,
+        elements: [
+          ...one.document.elements,
+          { id: "img-2", type: "image", x: 297 / 2 - 45, y: 210 / 2 - 30, w: 90, h: 60, z: 2, src: SRC, fit: "cover" },
+        ],
+      },
+    };
+    const re = autoArrangePhotos(added, { appendedId: "img-2" });
+    const imgs = images(re);
+    const a = imgs.find((i) => i.id === "img-1")!;
+    const b = imgs.find((i) => i.id === "img-2")!;
+    // 既存(代表 img-1)が上スロット、追加(img-2)が下スロット。
+    expect(a.y).toBeCloseTo(ZONE.y, 3);
+    expect(b.y).toBeGreaterThan(a.y);
+  });
+
   it("移動距離を最小に: 既に各スロット付近にある写真は入れ替わらない（要件③）", () => {
     // 2枚を一度整列 → 位置を少しだけずらして再整列 → 各写真は元のスロットへ戻る（交差しない）。
     const arranged = autoArrangePhotos(makeState([imageEl(1), imageEl(2)]));

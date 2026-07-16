@@ -83,6 +83,22 @@ describe("assignMinMovement", () => {
     expect(a).toEqual([0, 1, 2]);
   });
 
+  it("未確定(追加直後)の写真は距離競争から外れ、既存写真がスロットを保つ", () => {
+    // 実シナリオ: 既存写真0はゾーン中央(2スロットに等距離)、追加写真1は中央寄りで slot0 に近い。
+    const photos: Point[] = [
+      { x: 98.5, y: 109.5 }, // 既存(代表): slot0/slot1 に等距離
+      { x: 148.5, y: 105 }, // 追加直後(ページ中央)
+    ];
+    const slots: Point[] = [
+      { x: 98.5, y: 76.75 }, // slot0(上)
+      { x: 98.5, y: 142.25 }, // slot1(下)
+    ];
+    // 距離だけの最小化(自由指定なし)では追加写真が上スロットを奪う。
+    expect(assignMinMovement(photos, slots)).toEqual([1, 0]);
+    // 追加写真(index 1)を距離競争から外すと、既存(代表)が上スロットを保ち追加は下へ。
+    expect(assignMinMovement(photos, slots, new Set([1]))).toEqual([0, 1]);
+  });
+
   it("4件でも順列かつ最適（グリッド想定）", () => {
     const photos: Point[] = [
       { x: 105, y: 105 },

@@ -669,8 +669,15 @@ const PHOTO_ZONE_BOTTOM_MARGIN_MM =
  * - 幾何(x/y/w/h)と fit のみ更新。src/焦点/角丸/alt/z は保存。
  * - 決定的: 同じ document からは常に同じ配置。既に整列済みなら no-op（同一参照）。
  * - 画像が無ければ no-op。変更があれば dirty=true。
+ *
+ * opts.appendedId: 直前に追加された写真の id（写真追加時の自動整列で指定）。その写真は
+ * ページ中央への仮置き位置を持つため移動最小の距離競争から外し、既存写真の並び（代表写真が
+ * 先頭）を保ったまま余ったスロットへ収める（@codex #292 P2・追加写真が先頭を奪う問題の回避）。
  */
-export function autoArrangePhotos(state: EditorState): EditorState {
+export function autoArrangePhotos(
+  state: EditorState,
+  opts?: { appendedId?: string },
+): EditorState {
   const { document } = state;
   const { page } = document;
   // 対象はギャラリー写真のみ。間取り図など既知のテンプレ枠（floor-plan は type=image）は
@@ -703,8 +710,14 @@ export function autoArrangePhotos(state: EditorState): EditorState {
     const el = document.elements[idx];
     return { x: el.x + el.w / 2, y: el.y + el.h / 2 };
   });
+  // 追加直後の写真（appendedId）は中央への仮置き位置を持つ＝距離競争から外す。
+  let unpositioned: Set<number> | undefined;
+  if (opts?.appendedId) {
+    const k = targets.findIndex((idx) => document.elements[idx].id === opts.appendedId);
+    if (k >= 0) unpositioned = new Set([k]);
+  }
   // assignment[k] = 写真 targets[k] を割り当てるスロット index。
-  const assignment = assignMinMovement(photoCenters, slotCenters);
+  const assignment = assignMinMovement(photoCenters, slotCenters, unpositioned);
 
   let changed = false;
   const elements = document.elements.slice() as SalesSheetElement[];

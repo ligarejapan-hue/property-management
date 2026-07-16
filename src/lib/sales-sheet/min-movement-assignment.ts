@@ -79,9 +79,17 @@ function hungarian(cost: number[][]): number[] {
  * 各写真中心を、総移動距離（ユークリッド）が最小になるようスロット中心へ割り当てる。
  * @param photoCenters 各写真の現在中心（長さ n）
  * @param slotCenters  整列先スロットの中心（長さ n・photoCenters と同数）
+ * @param unpositionedRows 現在位置が未確定な写真の index 集合（省略可）。ここに含む写真は
+ *   距離項を無視（＝どのスロットへも等コスト）し、既存の位置が確定した写真の割当を乱さない。
+ *   追加直後にページ中央へ仮置きされた写真が、既存の代表写真からスロットを奪うのを防ぐ用途。
+ *   未確定写真は余ったスロットを埋め、複数あるときは入力順（末尾側）へ tie-break で寄る。
  * @returns assignment[photoIndex] = 割り当てられた slotIndex（順列）
  */
-export function assignMinMovement(photoCenters: Point[], slotCenters: Point[]): number[] {
+export function assignMinMovement(
+  photoCenters: Point[],
+  slotCenters: Point[],
+  unpositionedRows?: ReadonlySet<number>,
+): number[] {
   const n = photoCenters.length;
   if (n === 0) return [];
   if (slotCenters.length !== n) {
@@ -95,9 +103,15 @@ export function assignMinMovement(photoCenters: Point[], slotCenters: Point[]): 
   // （写真 k → スロット k）を優先＝新規追加で全写真が同一点に積み重なった degenerate な
   // 場合でも「先頭写真＝代表写真が先頭スロット」に決定的に収まる。EPS は mm スケールの
   // 実距離差より十分小さく（|i−j|≤n の摂動が最大でも EPS·n）、真の最小移動解を変えない。
+  // unpositionedRows の写真は距離項をゼロにする＝既存写真の最小移動割当を優先させ、
+  // その写真自身は残ったスロット（tie-break で末尾寄り）に収める。
   const EPS = 1e-6;
-  const cost: number[][] = photoCenters.map((p, i) =>
-    slotCenters.map((s, j) => Math.hypot(p.x - s.x, p.y - s.y) + EPS * Math.abs(i - j)),
-  );
+  const cost: number[][] = photoCenters.map((p, i) => {
+    const free = unpositionedRows?.has(i) ?? false;
+    return slotCenters.map((s, j) => {
+      const distance = free ? 0 : Math.hypot(p.x - s.x, p.y - s.y);
+      return distance + EPS * Math.abs(i - j);
+    });
+  });
   return hungarian(cost);
 }
