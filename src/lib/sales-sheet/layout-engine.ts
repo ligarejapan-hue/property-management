@@ -96,6 +96,13 @@ const OVERVIEW_MAX_WIDTH_MM = PAGE_W_MM / 3;
 const OVERVIEW_MIN_X_MM = OVERVIEW_RIGHT_MM - OVERVIEW_MAX_WIDTH_MM;
 /** overview.x は splitX からこの分だけ右にオフセット。 */
 const OVERVIEW_X_OFFSET_MM = 5;
+/**
+ * photoArea 右端と overview 左端の間の水平余白(mm)。photoArea 右端 = overview.x − この値。
+ * （effectiveSplitX = overview.x − OVERVIEW_X_OFFSET_MM、photoArea 右端 = effectiveSplitX −
+ *  COLUMN_GAP_MM ゆえ両者の和。）autoArrangePhotos が同じ境界を使えるよう公開＝作成/再バランスと
+ *  写真右端を一致させ、ボタン間で写真が行き来しないようにする（@codex #292 P3）。
+ */
+export const PHOTO_AREA_TO_OVERVIEW_GAP_MM = OVERVIEW_X_OFFSET_MM + COLUMN_GAP_MM;
 /** overview フォント自動計算: clamp(h / rows / DIVISOR, MIN, MAX)。 */
 const OVERVIEW_FONT_MIN_PT = 5;
 const OVERVIEW_FONT_MAX_PT = 9;

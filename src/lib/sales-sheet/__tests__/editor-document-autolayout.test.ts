@@ -9,6 +9,7 @@ import {
   autoArrangePhotos,
   MIN_ELEMENT_SIZE_MM,
 } from "../editor-document";
+import { computeSpecSheetLayout } from "../layout-engine";
 import {
   parseSalesSheetDocument,
   salesSheetDocumentSchema,
@@ -79,10 +80,11 @@ function expectNoOverlaps(imgs: ImageElement[]): void {
   }
 }
 
-/** 写真ゾーン(A4横・overview 要素なしの素の版面): 左カラム x10-192 / y46-173。
- *  右端＝ページ幅297の2/3(=198)− 概要表との余白(6) = 192（要件①⑤・写真は左2/3）。
+/** 写真ゾーン(A4横・overview 要素なしの素の版面): 左カラム x10-187 / y46-173。
+ *  右端＝ページ幅297の2/3(=198)− 概要表との水平余白(11=OVERVIEW_X_OFFSET5+COLUMN_GAP6) = 187
+ *  （作成/再バランス経路と同じ境界・要件①⑤・写真は左2/3）。
  *  下端＝エンジンの photoPackBottom = mainBottom(184) − salesPoints(7) − gap(4) = 173。 */
-const ZONE = { x: 10, y: 46, right: 192, bottom: 173 };
+const ZONE = { x: 10, y: 46, right: 187, bottom: 173 };
 /** id="overview" の概要表要素（物件種別の枠）。写真はこの左端を越えない。 */
 const overviewEl = (x: number) => ({
   id: "overview", type: "table", x, y: 26, w: 287 - x, h: 158, z: 1,
@@ -219,6 +221,21 @@ describe("autoArrangePhotos", () => {
       expectInZone(img, ZONE);
     }
     expectNoOverlaps(galleryImgs);
+  });
+
+  it("作成/再バランス経路と同じ配置なら no-op（ボタン間で写真が行き来しない・@codex P3）", () => {
+    // computeSpecSheetLayout（作成/レイアウト自動調整が使う）の photoSlots に写真を置き、
+    // overview を同じ x に置いた図面では、autoArrangePhotos は幾何を動かさない（同一参照）。
+    const L = computeSpecSheetLayout({ photoCount: 3, specRowCount: 20, hasFloorPlan: false, footerHeight: 24 });
+    const photos = L.photoSlots.map((s, i) => ({
+      id: `photo-${i + 1}`, type: "image", x: s.x, y: s.y, w: s.w, h: s.h, z: 1, src: SRC, fit: "contain",
+    }));
+    const overview = {
+      id: "overview", type: "table", x: L.overview.x, y: L.overview.y, w: L.overview.w, h: L.overview.h, z: 1,
+      rows: [{ label: "物件種別", value: "売地" }], style: {},
+    };
+    const s = makeState([overview, ...photos]);
+    expect(autoArrangePhotos(s)).toBe(s);
   });
 
   it("間取り図があるときは写真ゾーンを下へ寄せ、写真が間取り図に重ならない", () => {

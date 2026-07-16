@@ -22,6 +22,7 @@ import {
   MAIN_BOTTOM_MARGIN_MM,
   SALES_POINTS_H_MM,
   PHOTO_GAP_MM,
+  PHOTO_AREA_TO_OVERVIEW_GAP_MM,
   packPhotoCells,
 } from "./layout-engine";
 import {
@@ -649,8 +650,6 @@ const TEMPLATE_ELEMENT_IDS = new Set([
 /** 写真ゾーン: テンプレの左カラム（タイトル/価格帯の下・概要表の左・会社帯の上）。 */
 const PHOTO_ZONE_X_MM = 10;
 const PHOTO_ZONE_Y_MM = 46;
-/** 写真ゾーン右端と概要表（物件種別）左端の間の余白(mm)。写真が概要表に接しないための隙間。 */
-const PHOTO_OVERVIEW_GAP_MM = 6;
 /** overview 要素が無い素の版面での写真ゾーン右境界＝ページ幅の 2/3（要件⑤の思想）。 */
 const PHOTO_ZONE_FALLBACK_RATIO = 2 / 3;
 // 写真ゾーン下端を、エンジンが写真敷詰めを止める位置（photoPackBottom = mainBottom −
@@ -692,7 +691,9 @@ export function autoArrangePhotos(state: EditorState): EditorState {
   const zoneY = floorPlanEl
     ? Math.max(PHOTO_ZONE_Y_MM, floorPlanEl.y + floorPlanEl.h + PHOTO_GAP_MM)
     : PHOTO_ZONE_Y_MM;
-  const zoneW = Math.max(0, boundaryX - PHOTO_OVERVIEW_GAP_MM - zoneX);
+  // 概要表との水平余白は作成/再バランス経路（computeSpecSheetLayout）と同一値を使い、
+  // 生成済み図面で「写真を自動整列」と「レイアウト自動調整」の間で写真が行き来しないようにする。
+  const zoneW = Math.max(0, boundaryX - PHOTO_AREA_TO_OVERVIEW_GAP_MM - zoneX);
   const zoneH = Math.max(0, page.height - zoneY - PHOTO_ZONE_BOTTOM_MARGIN_MM);
   const cells = packPhotoCells(targets.length, zoneW, zoneH);
 
