@@ -158,7 +158,8 @@ function photoElements(
     h: slots[i].h,
     z: 1,
     src: ph.fileUrl,
-    fit: "cover" as const,
+    // 縦横比を変えない（要件②）＝作成時の種写真も切り取らず全体表示。自動整列の contain と一致。
+    fit: "contain" as const,
     radiusMm: 2,
     alt: "物件写真",
   }));
