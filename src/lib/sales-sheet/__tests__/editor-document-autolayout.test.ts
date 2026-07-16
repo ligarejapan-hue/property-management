@@ -155,6 +155,21 @@ describe("autoArrangePhotos(段組み詰め)", () => {
     expect(b.y).toBeLessThan(a.y); // 上にあった img-2 が上のまま
   });
 
+  it("同じ行で高さが違う写真(手動リサイズ後)でも左→右の順を保つ(@codex R4)", () => {
+    // 上端は同じ・高さ違い: 左=背が高い(60)・右=低い(20)。y中心なら右が先になる崩れ方をする。
+    const s = autoArrangePhotos(
+      makeState([
+        imageEl(1, { x: 80, y: 50, w: 60, h: 20 }), // 右・低い
+        imageEl(2, { x: 10, y: 50, w: 60, h: 60 }), // 左・高い
+      ]),
+    );
+    const right = images(s).find((i) => i.id === "img-1")!;
+    const left = images(s).find((i) => i.id === "img-2")!;
+    // 同一行なら left.x < right.x、行が分かれるなら left が上=いずれも左が先。
+    const leftFirst = left.y < right.y - 0.01 || (Math.abs(left.y - right.y) <= 0.01 && left.x < right.x);
+    expect(leftFirst).toBe(true);
+  });
+
   it("appendedId は末尾(読み順で最後)に入る", () => {
     // 2枚整列済み → 3枚目をゾーン左上寄りへ仮置き → appendedId 指定で整列。
     const two = autoArrangePhotos(makeState([imageEl(1), imageEl(2)]));

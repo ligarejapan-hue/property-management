@@ -54,15 +54,18 @@ export function packJustifiedRows(
     if (!best || waste < best.waste - 1e-9) best = { rects, waste, k };
   }
   if (best) return best.rects;
-  // 全分割が不可(W/H が極小)。非正寸法を返さないことを最優先に、1行で
-  // 高さを微小正値にクランプして返す(呼び出し側はゾーン極小時に呼ばない想定のガード)。
-  const h = Math.max(MIN_DIM_MM, (W - (n - 1) * gap) / a.reduce((s2, v) => s2 + v, 0));
-  let x = 0;
-  return a.map((v) => {
-    const r = { x, y: 0, w: Math.max(MIN_DIM_MM, v * h), h };
-    x += r.w + gap;
-    return r;
-  });
+  // 全分割が不可(極端な枚数/極小ゾーン)。非正寸法を返さず、ゾーン内にも収まるよう
+  // 縦横比を諦めた均等グリッドで敷く(degenerate ケースの安全網・@codex #294 R4 P3)。
+  const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
+  const rowsN = Math.ceil(n / cols);
+  const cw = Math.max(MIN_DIM_MM, (W - (cols - 1) * gap) / cols);
+  const ch = Math.max(MIN_DIM_MM, (H - (rowsN - 1) * gap) / rowsN);
+  return a.map((_, i) => ({
+    x: (i % cols) * (cw + gap),
+    y: Math.floor(i / cols) * (ch + gap),
+    w: cw,
+    h: ch,
+  }));
 }
 
 /**

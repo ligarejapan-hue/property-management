@@ -759,14 +759,28 @@ export function autoArrangePhotos(
   // 検証で保存不能になる・提出前レビュー指摘)。
   if (zoneW < MIN_ELEMENT_SIZE_MM || zoneH < MIN_ELEMENT_SIZE_MM) return state;
 
-  // 並び順=見た目の順(y中心を1mm丸めで行グループ→x中心→元index)。appendedId は末尾。
-  const ordered = targets
+  // 並び順=見た目の順。y中心の丸めでは「同じ行だが高さが違う」写真(手動リサイズ後)で
+  // 行判定が崩れるため、上端順に走査して行をクラスタリングする(@codex #294 R4):
+  // 次の写真の上端が現在行の最小下端より上なら同じ行、行内は x→元index で左→右。
+  const byTop = targets
     .map((idx) => {
       const el = document.elements[idx];
-      return { idx, yKey: Math.round(el.y + el.h / 2), xKey: el.x + el.w / 2 };
+      return { idx, y: el.y, bottom: el.y + el.h, x: el.x };
     })
-    .sort((p, q) => p.yKey - q.yKey || p.xKey - q.xKey || p.idx - q.idx)
-    .map((o) => o.idx);
+    .sort((p, q) => p.y - q.y || p.x - q.x || p.idx - q.idx);
+  const rows: { minBottom: number; items: typeof byTop }[] = [];
+  for (const it of byTop) {
+    const row = rows[rows.length - 1];
+    if (row && it.y < row.minBottom - 0.01) {
+      row.items.push(it);
+      row.minBottom = Math.min(row.minBottom, it.bottom);
+    } else {
+      rows.push({ minBottom: it.bottom, items: [it] });
+    }
+  }
+  const ordered = rows.flatMap((r) =>
+    r.items.sort((p, q) => p.x - q.x || p.idx - q.idx).map((o) => o.idx),
+  );
   if (opts?.appendedId) {
     const k = ordered.findIndex((idx) => document.elements[idx].id === opts.appendedId);
     if (k >= 0) ordered.push(...ordered.splice(k, 1));
