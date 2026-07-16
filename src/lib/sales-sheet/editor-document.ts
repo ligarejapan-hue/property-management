@@ -685,10 +685,15 @@ export function autoArrangePhotos(state: EditorState): EditorState {
   // 写真ゾーン右端 = 概要表(物件種別)の左端 − 余白（要件①）。無ければページ幅の 2/3（要件⑤思想）。
   const overviewEl = document.elements.find((e) => e.id === "overview");
   const boundaryX = overviewEl ? overviewEl.x : page.width * PHOTO_ZONE_FALLBACK_RATIO;
+  // 間取り図(floor-plan)がある場合は写真ゾーン上端をその下へ寄せ、写真が間取り図に被らない
+  // ようにする（computeSpecSheetLayout が floorPlan の下から写真を敷くのと同じ予約）。
+  const floorPlanEl = document.elements.find((e) => e.id === "floor-plan" && e.type === "image");
   const zoneX = PHOTO_ZONE_X_MM;
-  const zoneY = PHOTO_ZONE_Y_MM;
+  const zoneY = floorPlanEl
+    ? Math.max(PHOTO_ZONE_Y_MM, floorPlanEl.y + floorPlanEl.h + PHOTO_GAP_MM)
+    : PHOTO_ZONE_Y_MM;
   const zoneW = Math.max(0, boundaryX - PHOTO_OVERVIEW_GAP_MM - zoneX);
-  const zoneH = page.height - PHOTO_ZONE_Y_MM - PHOTO_ZONE_BOTTOM_MARGIN_MM;
+  const zoneH = Math.max(0, page.height - zoneY - PHOTO_ZONE_BOTTOM_MARGIN_MM);
   const cells = packPhotoCells(targets.length, zoneW, zoneH);
 
   // セル中心と各写真の現在中心から、総移動距離が最小になる割当を求める（要件③）。

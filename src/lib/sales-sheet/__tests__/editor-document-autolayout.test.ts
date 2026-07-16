@@ -221,6 +221,22 @@ describe("autoArrangePhotos", () => {
     expectNoOverlaps(galleryImgs);
   });
 
+  it("間取り図があるときは写真ゾーンを下へ寄せ、写真が間取り図に重ならない", () => {
+    // floor-plan は左カラム上部（y=46）に固定。写真はその下に敷く（computeSpecSheetLayout と同じ）。
+    const fpRect = { id: "floor-plan", type: "image", x: 10, y: 46, w: 32, h: 18, z: 1, src: SRC, fit: "contain" } as const;
+    const s = autoArrangePhotos(makeState([fpRect, imageEl(1), imageEl(2), imageEl(3)]));
+    const galleryImgs = s.document.elements.filter(
+      (e): e is ImageElement => e.type === "image" && e.id !== "floor-plan",
+    );
+    expect(galleryImgs).toHaveLength(3);
+    const floorPlan = s.document.elements.find((e) => e.id === "floor-plan") as ImageElement;
+    for (const img of galleryImgs) {
+      expect(overlaps(img, floorPlan), "写真が間取り図に重なっている").toBe(false);
+      // 間取り図の下端より下から始まる（縦位置を予約）。
+      expect(img.y).toBeGreaterThanOrEqual(floorPlan.y + floorPlan.h - 0.001);
+    }
+  });
+
   it("移動距離を最小に: 既に各スロット付近にある写真は入れ替わらない（要件③）", () => {
     // 2枚を一度整列 → 位置を少しだけずらして再整列 → 各写真は元のスロットへ戻る（交差しない）。
     const arranged = autoArrangePhotos(makeState([imageEl(1), imageEl(2)]));
