@@ -628,6 +628,24 @@ export function editFooterData(state: EditorState, data: FooterBandData): Editor
 // 自動レイアウト（計画⑥）
 // ---------------------------------------------------------------------------
 
+/**
+ * buildSpecSheetDocument が組む既知のテンプレ要素 id。これらの id を持つ要素は
+ * 「テンプレ枠」として扱う（type==="image" 判定より優先）。floor-plan は type="image"
+ * だが、この集合に含めることで写真ゾーン（写真スロット）ではなく専用の間取り図枠で
+ * 扱い、autoArrangePhotos の整列対象・autoBalanceLayout の写真カウントに混入させない。
+ */
+const TEMPLATE_ELEMENT_IDS = new Set([
+  "catch-band",
+  "catch-copy",
+  "heading",
+  "price",
+  "overview",
+  "sales-points",
+  "company",
+  "company-details",
+  "floor-plan",
+]);
+
 /** 写真ゾーン: テンプレの左カラム（タイトル/価格帯の下・概要表の左・会社帯の上）。 */
 const PHOTO_ZONE_X_MM = 10;
 const PHOTO_ZONE_Y_MM = 46;
@@ -656,9 +674,11 @@ const PHOTO_ZONE_BOTTOM_MARGIN_MM =
 export function autoArrangePhotos(state: EditorState): EditorState {
   const { document } = state;
   const { page } = document;
+  // 対象はギャラリー写真のみ。間取り図など既知のテンプレ枠（floor-plan は type=image）は
+  // 専用枠に留めるため整列対象から除外する（autoBalanceLayout と同じ扱い）。
   const targets: number[] = [];
   document.elements.forEach((e, i) => {
-    if (e.type === "image") targets.push(i);
+    if (e.type === "image" && !TEMPLATE_ELEMENT_IDS.has(e.id)) targets.push(i);
   });
   if (targets.length === 0) return state;
 
@@ -701,23 +721,6 @@ export function autoArrangePhotos(state: EditorState): EditorState {
 // computeSpecSheetLayout の算出値へ再配置するワンボタン操作）。
 // ---------------------------------------------------------------------------
 
-/**
- * buildSpecSheetDocument が組む既知のテンプレ要素 id。これらの id を持つ要素だけを
- * 「テンプレ枠」として動かす（type==="image" 判定より優先）。floor-plan は type="image"
- * だが、この集合に含めることで写真ゾーン（L.photoSlots）ではなく専用の L.floorPlan で
- * 扱われるようにする（写真カウントに混入させない）。
- */
-const TEMPLATE_ELEMENT_IDS = new Set([
-  "catch-band",
-  "catch-copy",
-  "heading",
-  "price",
-  "overview",
-  "sales-points",
-  "company",
-  "company-details",
-  "floor-plan",
-]);
 
 /** x/y/w/h がすべて等しいか（幾何の変更検知用）。 */
 function geomEquals(

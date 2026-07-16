@@ -199,6 +199,28 @@ describe("autoArrangePhotos", () => {
     expect(s.document.elements[0]).toBe(before.document.elements[0]);
   });
 
+  it("間取り図（floor-plan）は写真として扱わない＝整列対象外・参照ごと不動", () => {
+    // floor-plan は type=image だがテンプレ枠。写真グリッドへ巻き込んではいけない
+    // （要件④の追加時自動整列でも動かさない・autoBalanceLayout と同じ除外）。
+    const floorPlan = {
+      id: "floor-plan", type: "image", x: 10, y: 46, w: 32, h: 18, z: 1, src: SRC, fit: "contain",
+    };
+    const before = makeState([floorPlan, imageEl(1), imageEl(2)]);
+    const after = autoArrangePhotos(before);
+    // floor-plan は不動（参照保存）。
+    expect(after.document.elements[0]).toBe(before.document.elements[0]);
+    // 整列されるのはギャラリー写真2枚のみ。
+    const galleryImgs = after.document.elements.filter(
+      (e): e is ImageElement => e.type === "image" && e.id !== "floor-plan",
+    );
+    expect(galleryImgs).toHaveLength(2);
+    for (const img of galleryImgs) {
+      expect(img.fit).toBe("contain");
+      expectInZone(img, ZONE);
+    }
+    expectNoOverlaps(galleryImgs);
+  });
+
   it("移動距離を最小に: 既に各スロット付近にある写真は入れ替わらない（要件③）", () => {
     // 2枚を一度整列 → 位置を少しだけずらして再整列 → 各写真は元のスロットへ戻る（交差しない）。
     const arranged = autoArrangePhotos(makeState([imageEl(1), imageEl(2)]));
