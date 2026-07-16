@@ -1173,7 +1173,7 @@ function PropertiesPageInner() {
           {error}
           <button
             onClick={fetchProperties}
-            className="ml-2 text-red-800 underline hover:no-underline"
+            className="ml-2 text-red-800 underline hover:no-underline dark:text-red-300"
           >
             再試行
           </button>
