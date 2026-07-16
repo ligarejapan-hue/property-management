@@ -79,9 +79,15 @@ function expectNoOverlaps(imgs: ImageElement[]): void {
   }
 }
 
-/** 写真ゾーン(A4横): テンプレの左カラム x10-140 / y46-173（概要表・salesPoints帯・会社帯を
- *  避ける既定。下端＝エンジンの photoPackBottom = mainBottom(184) − salesPoints(7) − gap(4) = 173）。 */
-const ZONE = { x: 10, y: 46, right: 140, bottom: 173 };
+/** 写真ゾーン(A4横・overview 要素なしの素の版面): 左カラム x10-192 / y46-173。
+ *  右端＝ページ幅297の2/3(=198)− 概要表との余白(6) = 192（要件①⑤・写真は左2/3）。
+ *  下端＝エンジンの photoPackBottom = mainBottom(184) − salesPoints(7) − gap(4) = 173。 */
+const ZONE = { x: 10, y: 46, right: 192, bottom: 173 };
+/** id="overview" の概要表要素（物件種別の枠）。写真はこの左端を越えない。 */
+const overviewEl = (x: number) => ({
+  id: "overview", type: "table", x, y: 26, w: 287 - x, h: 158, z: 1,
+  rows: [{ label: "物件種別", value: "売地" }], style: {},
+});
 
 describe("autoArrangePhotos", () => {
   it("画像が無ければ no-op（同一参照）", () => {
@@ -137,7 +143,7 @@ describe("autoArrangePhotos", () => {
     expect(after.document.elements[2]).toBe(before.document.elements[2]);
   });
 
-  it("幾何以外（id/src/fit/焦点/角丸/alt/z）と配列内の位置は保存する", () => {
+  it("幾何と fit 以外（id/src/焦点/角丸/alt/z）と配列内の位置は保存する", () => {
     const before = makeState([
       imageEl(1, { fit: "contain", focalX: 20, focalY: 80, radiusMm: 2, alt: "外観", z: 7 }),
       textEl(),
@@ -147,7 +153,6 @@ describe("autoArrangePhotos", () => {
     const el0 = after.document.elements[0] as ImageElement;
     expect(el0.id).toBe("img-1");
     expect(el0.src).toBe(SRC);
-    expect(el0.fit).toBe("contain");
     expect(el0.focalX).toBe(20);
     expect(el0.focalY).toBe(80);
     expect(el0.radiusMm).toBe(2);
@@ -155,6 +160,68 @@ describe("autoArrangePhotos", () => {
     expect(el0.z).toBe(7);
     expect(after.document.elements[1].type).toBe("text");
     expect(after.document.elements[2].id).toBe("img-2");
+  });
+
+  it("縦横比を変えない: 各写真は fit:\"contain\"（cover 入力も contain に正規化・要件②）", () => {
+    const s = autoArrangePhotos(makeState([imageEl(1), imageEl(2, { fit: "cover" }), imageEl(3)]));
+    for (const img of images(s)) {
+      expect(img.fit).toBe("contain");
+    }
+  });
+
+  it("cover のみを contain 化する場合も変更検知して dirty 化（幾何が既に整列済みでも）", () => {
+    // 1枚を先に整列（contain 化）→ もう一度 cover に戻して再整列すると fit 差だけで dirty。
+    const arranged = autoArrangePhotos(makeState([imageEl(1)]));
+    const coverAgain = {
+      ...arranged,
+      document: {
+        ...arranged.document,
+        elements: arranged.document.elements.map((e) =>
+          e.type === "image" ? { ...e, fit: "cover" as const } : e,
+        ),
+      },
+      dirty: false,
+    };
+    const re = autoArrangePhotos(coverAgain);
+    expect(re).not.toBe(coverAgain);
+    expect((re.document.elements[0] as ImageElement).fit).toBe("contain");
+    expect(re.dirty).toBe(true);
+  });
+
+  it("概要表（物件種別・id=overview）に被らない: 写真は overview 左端を越えない（要件①）", () => {
+    // 要件⑤で新規図面の overview は右1/3（左端≈188）。写真はその左のみを使う。
+    const before = makeState([overviewEl(188), imageEl(1), imageEl(2), imageEl(3), imageEl(4)]);
+    const s = autoArrangePhotos(before);
+    for (const img of images(s)) {
+      expect(img.x + img.w).toBeLessThanOrEqual(188 + 0.001);
+    }
+    // overview 要素自体は不動（参照保存）。
+    expect(s.document.elements[0]).toBe(before.document.elements[0]);
+  });
+
+  it("移動距離を最小に: 既に各スロット付近にある写真は入れ替わらない（要件③）", () => {
+    // 2枚を一度整列 → 位置を少しだけずらして再整列 → 各写真は元のスロットへ戻る（交差しない）。
+    const arranged = autoArrangePhotos(makeState([imageEl(1), imageEl(2)]));
+    const [a0, b0] = images(arranged);
+    const nudged = {
+      ...arranged,
+      dirty: false,
+      document: {
+        ...arranged.document,
+        elements: arranged.document.elements.map((e) => {
+          if (e.id === "img-1") return { ...e, x: a0.x + 3, y: a0.y + 2 };
+          if (e.id === "img-2") return { ...e, x: b0.x - 3, y: b0.y - 2 };
+          return e;
+        }),
+      },
+    };
+    const re = autoArrangePhotos(nudged);
+    const [a1, b1] = images(re);
+    // img-1 は元スロット a0、img-2 は元スロット b0 に収束（順序保持）。
+    expect(a1.x).toBeCloseTo(a0.x, 3);
+    expect(a1.y).toBeCloseTo(a0.y, 3);
+    expect(b1.x).toBeCloseTo(b0.x, 3);
+    expect(b1.y).toBeCloseTo(b0.y, 3);
   });
 
   it("先頭の画像（代表写真）が最上段・左端に来る", () => {

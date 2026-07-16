@@ -169,10 +169,13 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     });
   }
 
-  /** ギャラリーで選んだ写真を新しい image 要素として追加する。 */
+  /** ギャラリーで選んだ写真を新しい image 要素として追加し、その場で自動整列する（要件④）。 */
   function handleAddImage(src: string, alt?: string): void {
     // crypto.randomUUID は secure context 外(HTTP)で未定義ゆえフォールバック付き ID を使う。
-    setEditorState((prev) => addImageElement(prev, { id: safeRandomId(), src, alt }));
+    // 追加→自動整列を1回の state 更新で行い、中央への一時配置がちらつかないようにする。
+    setEditorState((prev) =>
+      autoArrangePhotos(addImageElement(prev, { id: safeRandomId(), src, alt })),
+    );
   }
 
   /** 写真（image 要素）を写真ゾーンへワンボタン整列する（計画⑥・手動上書き可）。 */

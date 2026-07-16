@@ -30,6 +30,7 @@ import {
   footerDataEqual,
   type FooterBandData,
 } from "./footer-band";
+import { assignMinMovement } from "./min-movement-assignment";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
@@ -630,7 +631,10 @@ export function editFooterData(state: EditorState, data: FooterBandData): Editor
 /** 写真ゾーン: テンプレの左カラム（タイトル/価格帯の下・概要表の左・会社帯の上）。 */
 const PHOTO_ZONE_X_MM = 10;
 const PHOTO_ZONE_Y_MM = 46;
-const PHOTO_ZONE_MAX_W_MM = 130;
+/** 写真ゾーン右端と概要表（物件種別）左端の間の余白(mm)。写真が概要表に接しないための隙間。 */
+const PHOTO_OVERVIEW_GAP_MM = 6;
+/** overview 要素が無い素の版面での写真ゾーン右境界＝ページ幅の 2/3（要件⑤の思想）。 */
+const PHOTO_ZONE_FALLBACK_RATIO = 2 / 3;
 // 写真ゾーン下端を、エンジンが写真敷詰めを止める位置（photoPackBottom = mainBottom −
 // salesPoints帯 − gap）に合わせる（@codex R1/R2）。会社帯だけでなく salesPoints 帯も避け、
 // 作成/再バランス経路と同じ予約にする。page 下端からの余白＝帯高 + main下余白 + salesPoints高 + gap。
@@ -638,10 +642,14 @@ const PHOTO_ZONE_BOTTOM_MARGIN_MM =
   DEFAULT_FOOTER_H + MAIN_BOTTOM_MARGIN_MM + SALES_POINTS_H_MM + PHOTO_GAP_MM;
 
 /**
- * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト）。
+ * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト／写真追加時にも自動実行）。
  * - 対象は image のみ。他要素（テキスト/表/バッジ等）は参照ごと不動。
- * - 配列順（＝追加順・テンプレは代表写真が先頭）にセルへ流し込む。先頭が左上。
- * - 幾何(x/y/w/h)のみ更新。src/fit/焦点/z などは保存。
+ * - 写真ゾーン右端は概要表（物件種別・id="overview"）の左端の手前まで＝概要表に被らない（要件①）。
+ *   overview 要素が無い素の版面ではページ幅の 2/3 まで（要件⑤の思想）。
+ * - 各写真は「押した時点の位置に最も近いスロット」へ割り当て、総移動距離を最小化（要件③）。
+ *   追加順の詰め直しをやめ、ユーザーが作った並びを保つ。
+ * - 各写真は切り取り・引き伸ばしせず全体表示＝fit:"contain"（要件②・縦横比を変えない）。
+ * - 幾何(x/y/w/h)と fit のみ更新。src/焦点/角丸/alt/z は保存。
  * - 決定的: 同じ document からは常に同じ配置。既に整列済みなら no-op（同一参照）。
  * - 画像が無ければ no-op。変更があれば dirty=true。
  */
@@ -654,22 +662,34 @@ export function autoArrangePhotos(state: EditorState): EditorState {
   });
   if (targets.length === 0) return state;
 
+  // 写真ゾーン右端 = 概要表(物件種別)の左端 − 余白（要件①）。無ければページ幅の 2/3（要件⑤思想）。
+  const overviewEl = document.elements.find((e) => e.id === "overview");
+  const boundaryX = overviewEl ? overviewEl.x : page.width * PHOTO_ZONE_FALLBACK_RATIO;
   const zoneX = PHOTO_ZONE_X_MM;
   const zoneY = PHOTO_ZONE_Y_MM;
-  const zoneW = Math.min(PHOTO_ZONE_MAX_W_MM, page.width - 2 * PHOTO_ZONE_X_MM);
+  const zoneW = Math.max(0, boundaryX - PHOTO_OVERVIEW_GAP_MM - zoneX);
   const zoneH = page.height - PHOTO_ZONE_Y_MM - PHOTO_ZONE_BOTTOM_MARGIN_MM;
   const cells = packPhotoCells(targets.length, zoneW, zoneH);
+
+  // セル中心と各写真の現在中心から、総移動距離が最小になる割当を求める（要件③）。
+  const slotCenters = cells.map((c) => ({ x: zoneX + c.x + c.w / 2, y: zoneY + c.y + c.h / 2 }));
+  const photoCenters = targets.map((idx) => {
+    const el = document.elements[idx];
+    return { x: el.x + el.w / 2, y: el.y + el.h / 2 };
+  });
+  // assignment[k] = 写真 targets[k] を割り当てるスロット index。
+  const assignment = assignMinMovement(photoCenters, slotCenters);
 
   let changed = false;
   const elements = document.elements.slice() as SalesSheetElement[];
   targets.forEach((idx, k) => {
-    const el = elements[idx];
-    const cell = cells[k];
+    const el = elements[idx] as ImageElement;
+    const cell = cells[assignment[k]];
     const x = zoneX + cell.x;
     const y = zoneY + cell.y;
-    if (el.x !== x || el.y !== y || el.w !== cell.w || el.h !== cell.h) {
+    if (el.x !== x || el.y !== y || el.w !== cell.w || el.h !== cell.h || el.fit !== "contain") {
       changed = true;
-      elements[idx] = applyGeom(el, { x, y, w: cell.w, h: cell.h });
+      elements[idx] = { ...el, x, y, w: cell.w, h: cell.h, fit: "contain" };
     }
   });
   if (!changed) return state;
