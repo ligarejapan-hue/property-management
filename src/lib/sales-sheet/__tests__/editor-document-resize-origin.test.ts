@@ -45,6 +45,23 @@ describe("resizeElementWithOrigin(サイズ+原点の一括クランプ)", () =>
     expect(s2.document.elements[0].h).toBe(5);
   });
 
+  it("左ハンドルで最小サイズを超えて縮めても右端(固定端)がズレない(@codex R2)", () => {
+    // x=100,w=40(右端140)。左ハンドルを右端近くまで: 報告 x=139,w=1 → w=5・右端140維持=x=135。
+    const s = resizeElementWithOrigin(state(el(100, 10, 40, 20)), "t", { x: 139, y: 10, w: 1, h: 20 });
+    const e = s.document.elements[0];
+    expect(e.w).toBe(5);
+    expect(e.x).toBe(135);
+    expect(e.x + e.w).toBe(140);
+  });
+
+  it("左ハンドルで用紙左端を越えて広げても右端(固定端)を保ち x=0 で止まる", () => {
+    // x=100,w=40(右端140)。左へ大きく: 報告 x=-10,w=150 → 右端140維持・x=0,w=140。
+    const s = resizeElementWithOrigin(state(el(100, 10, 40, 20)), "t", { x: -10, y: 10, w: 150, h: 20 });
+    const e = s.document.elements[0];
+    expect(e.x).toBe(0);
+    expect(e.w).toBe(140);
+  });
+
   it("未知idは no-op(同一参照)", () => {
     const s0 = state(el(10, 10, 40, 20));
     expect(resizeElementWithOrigin(s0, "nope", { x: 1, y: 1, w: 10, h: 10 })).toBe(s0);

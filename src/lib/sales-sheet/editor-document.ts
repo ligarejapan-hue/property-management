@@ -183,10 +183,34 @@ export function resizeElement(
 }
 
 /**
+ * 1軸分のリサイズクランプ。どちらの端が「固定端」かを報告値から判定する:
+ * - 原点(pos)が現値と同じ=右/下ハンドル → 原点固定でサイズのみクランプ。
+ * - 原点が動いた=左/上ハンドル → 反対端(pos+size)が固定端。最小サイズ/用紙境界で
+ *   クランプしても固定端を保ち、原点側だけを動かす(固定端がズレると要素が滑る・
+ *   @codex #294 P2)。
+ */
+function clampResizeAxis(
+  cur: number,
+  pos: number,
+  size: number,
+  pageLen: number,
+): { pos: number; size: number } {
+  const EPS = 0.01;
+  if (Math.abs(pos - cur) <= EPS) {
+    // 右/下ハンドル: 原点固定。
+    return { pos: cur, size: Math.max(MIN_ELEMENT_SIZE_MM, Math.min(size, pageLen - cur)) };
+  }
+  // 左/上ハンドル: 反対端固定(用紙内・最小サイズ分は確保)。
+  const fixedEnd = clamp(pos + size, MIN_ELEMENT_SIZE_MM, pageLen);
+  const clamped = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(size, fixedEnd));
+  return { pos: fixedEnd - clamped, size: clamped };
+}
+
+/**
  * リサイズ確定でサイズと原点が同時に変わる(top/leftハンドル)場合の一括適用。
  * moveElement→resizeElement の順次適用では、互いのクランプが「相手の旧値」を使い
- * 右端/下端付近の要素で位置やサイズが歪む(@codex #294 P2)。ここでは
- * w→x の順に新値同士で整合的にクランプする(h→y も同様)。
+ * 右端/下端付近の要素で位置やサイズが歪む(@codex #294 P2)。軸ごとに固定端を
+ * 判定して整合的にクランプする(clampResizeAxis)。
  */
 export function resizeElementWithOrigin(
   state: EditorState,
@@ -198,11 +222,9 @@ export function resizeElementWithOrigin(
   const idx = findIdx(document, id);
   if (idx === -1) return state;
   const el = document.elements[idx];
-  const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(geom.w, page.width));
-  const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(geom.h, page.height));
-  const x = clamp(geom.x, 0, Math.max(0, page.width - w));
-  const y = clamp(geom.y, 0, Math.max(0, page.height - h));
-  return replaceElement(state, idx, applyGeom(el, { x, y, w, h }));
+  const ax = clampResizeAxis(el.x, geom.x, geom.w, page.width);
+  const ay = clampResizeAxis(el.y, geom.y, geom.h, page.height);
+  return replaceElement(state, idx, applyGeom(el, { x: ax.pos, y: ay.pos, w: ax.size, h: ay.size }));
 }
 
 /**
