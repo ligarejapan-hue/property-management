@@ -183,6 +183,29 @@ export function resizeElement(
 }
 
 /**
+ * リサイズ確定でサイズと原点が同時に変わる(top/leftハンドル)場合の一括適用。
+ * moveElement→resizeElement の順次適用では、互いのクランプが「相手の旧値」を使い
+ * 右端/下端付近の要素で位置やサイズが歪む(@codex #294 P2)。ここでは
+ * w→x の順に新値同士で整合的にクランプする(h→y も同様)。
+ */
+export function resizeElementWithOrigin(
+  state: EditorState,
+  id: string,
+  geom: { x: number; y: number; w: number; h: number },
+): EditorState {
+  const { document } = state;
+  const { page } = document;
+  const idx = findIdx(document, id);
+  if (idx === -1) return state;
+  const el = document.elements[idx];
+  const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(geom.w, page.width));
+  const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(geom.h, page.height));
+  const x = clamp(geom.x, 0, Math.max(0, page.width - w));
+  const y = clamp(geom.y, 0, Math.max(0, page.height - h));
+  return replaceElement(state, idx, applyGeom(el, { x, y, w, h }));
+}
+
+/**
  * Raise element z above the current maximum.
  * Sets dirty=true. No-op if id is not found.
  */

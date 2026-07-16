@@ -9,6 +9,7 @@ import {
   selectElement,
   moveElement,
   resizeElement,
+  resizeElementWithOrigin,
   bringToFront,
   sendToBack,
   editText,
@@ -198,13 +199,12 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   /** リサイズ確定 — サイズと(top/leftハンドルで動いた)原点を1回の更新で適用=
    *  「元に戻す」1回でリサイズ全体が戻る(位置とサイズが別履歴に割れない)。 */
   function handleResize(id: string, size: { w: number; h: number; x?: number; y?: number }): void {
-    setEditorState((prev) => {
-      const moved =
-        size.x !== undefined && size.y !== undefined
-          ? moveElement(prev, id, { x: size.x, y: size.y })
-          : prev;
-      return resizeElement(moved, id, size);
-    });
+    setEditorState((prev) =>
+      size.x !== undefined && size.y !== undefined
+        ? // サイズと原点の同時変更は一括クランプ(順次適用だと旧値でクランプされ歪む)。
+          resizeElementWithOrigin(prev, id, { x: size.x, y: size.y, w: size.w, h: size.h })
+        : resizeElement(prev, id, size),
+    );
   }
 
   /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */

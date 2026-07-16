@@ -14,6 +14,9 @@
 
 /** 全分割が成立しない極小ゾーンで返す寸法の下限(mm)。非正寸法を絶対に返さない。 */
 const MIN_DIM_MM = 0.5;
+/** 行数探索の上限。行が増えるほど1行が薄くなり実用外になるため打ち切る
+ *  (k×linearPartition(O(k·n²))の全探索は写真数の4乗に伸びる・@codex #294 P2)。 */
+const MAX_ROWS = 8;
 
 export interface PackedRect {
   x: number;
@@ -39,7 +42,8 @@ export function packJustifiedRows(
 
   let best: { rects: PackedRect[]; waste: number; k: number } | null = null;
 
-  for (let k = 1; k <= n; k++) {
+  const kMax = Math.min(n, MAX_ROWS);
+  for (let k = 1; k <= kMax; k++) {
     const breaks = linearPartition(a, k);
     const rects = layoutRows(a, breaks, W, H, gap);
     // 非正寸法を含む分割は候補から除外(H が行間gapより小さい等で scale が負になる分割。
