@@ -22,9 +22,15 @@ export interface EditorToolbarProps {
    *  「取引情報」を編集しても反映先が無いため、ボタンを無効化して黙って捨てるのを防ぐ。
    *  未指定は true(帯ありとして扱う)。 */
   canEditTransactionInfo?: boolean;
+  /** 元に戻す(Ctrl+Z)。canUndo=false のとき非活性。未指定はボタン非表示(後方互換)。 */
+  onUndo?: () => void;
+  canUndo?: boolean;
+  /** やり直す(Ctrl+Y)。canRedo=false のとき非活性。未指定はボタン非表示(後方互換)。 */
+  onRedo?: () => void;
+  canRedo?: boolean;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onOpenTransactionInfo, canEditTransactionInfo = true }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -81,6 +87,30 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         >
           未保存の変更があります
         </span>
+      )}
+      {onUndo && (
+        <button
+          type="button"
+          data-toolbar-undo
+          onClick={onUndo}
+          disabled={busy || !canUndo}
+          title="元に戻す (Ctrl+Z)"
+          className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
+        >
+          ← 元に戻す
+        </button>
+      )}
+      {onRedo && (
+        <button
+          type="button"
+          data-toolbar-redo
+          onClick={onRedo}
+          disabled={busy || !canRedo}
+          title="やり直す (Ctrl+Y)"
+          className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
+        >
+          やり直す →
+        </button>
       )}
       <button
         type="button"

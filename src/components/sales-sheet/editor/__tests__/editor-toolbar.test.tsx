@@ -117,6 +117,56 @@ describe("EditorToolbar — 描画", () => {
     expect(html).toContain("レイアウト自動調整");
   });
 
+  it("onUndo/onRedo 指定時、元に戻す/やり直すボタンを持ち canUndo/canRedo で非活性化", () => {
+    const html = renderToStaticMarkup(
+      <EditorToolbar
+        dirty={false}
+        onSave={noop}
+        onExport={noop}
+        onDelete={noop}
+        onAddPhoto={() => {}}
+        onAutoArrange={() => {}}
+        onAutoBalance={() => {}}
+        onAddBadge={() => {}}
+        onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
+        onUndo={() => {}}
+        canUndo={false}
+        onRedo={() => {}}
+        canRedo={true}
+      />,
+    );
+    expect(html).toContain("data-toolbar-undo");
+    expect(html).toContain("元に戻す");
+    expect(html).toContain("data-toolbar-redo");
+    expect(html).toContain("やり直す");
+    // canUndo=false → undo は disabled 属性あり、canRedo=true → redo は無し
+    // (クラス名の "disabled:opacity-50" に誤マッチしないよう属性形 'disabled=""' で判定)
+    const undoBtn = html.slice(html.indexOf("data-toolbar-undo"), html.indexOf("data-toolbar-redo"));
+    expect(undoBtn).toContain('disabled=""');
+    const redoBtn = html.slice(html.indexOf("data-toolbar-redo"), html.indexOf("data-toolbar-save"));
+    expect(redoBtn).not.toContain('disabled=""');
+  });
+
+  it("onUndo/onRedo 未指定なら undo/redo ボタンは出ない(後方互換)", () => {
+    const html = renderToStaticMarkup(
+      <EditorToolbar
+        dirty={false}
+        onSave={noop}
+        onExport={noop}
+        onDelete={noop}
+        onAddPhoto={() => {}}
+        onAutoArrange={() => {}}
+        onAutoBalance={() => {}}
+        onAddBadge={() => {}}
+        onAddQr={() => {}}
+        onOpenTransactionInfo={() => {}}
+      />,
+    );
+    expect(html).not.toContain("data-toolbar-undo");
+    expect(html).not.toContain("data-toolbar-redo");
+  });
+
   it("dirty=false のとき保存ボタンが disabled でない", () => {
     const html = renderToStaticMarkup(
       <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} onOpenTransactionInfo={() => {}} />,

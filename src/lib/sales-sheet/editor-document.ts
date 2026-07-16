@@ -23,15 +23,16 @@ import {
   SALES_POINTS_H_MM,
   PHOTO_GAP_MM,
   PHOTO_AREA_TO_OVERVIEW_GAP_MM,
-  packPhotoCells,
+  OVERVIEW_MIN_X_MM,
+  OVERVIEW_RIGHT_MM,
 } from "./layout-engine";
+import { packJustifiedRows } from "./justified-pack";
 import {
   buildFooterTransactionElements,
   readFooterData,
   footerDataEqual,
   type FooterBandData,
 } from "./footer-band";
-import { assignMinMovement } from "./min-movement-assignment";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
@@ -160,7 +161,9 @@ export function moveElement(
 }
 
 /**
- * Resize element to (w, h), each clamped to MIN_ELEMENT_SIZE_MM.
+ * Resize element to (w, h), each clamped to [MIN_ELEMENT_SIZE_MM .. 用紙内]。
+ * 上限クランプ(現原点から用紙右端/下端まで)は、キャンバス側の bounds を廃止した代わりに
+ * 「保存境界(assertSavableDocument の A4 内検証)を resize で破れない」ことを担保する。
  * Sets dirty=true. No-op if id is not found.
  */
 export function resizeElement(
@@ -169,11 +172,13 @@ export function resizeElement(
   size: { w: number; h: number },
 ): EditorState {
   const { document } = state;
+  const { page } = document;
   const idx = findIdx(document, id);
   if (idx === -1) return state;
   const el = document.elements[idx];
-  const w = Math.max(MIN_ELEMENT_SIZE_MM, size.w);
-  const h = Math.max(MIN_ELEMENT_SIZE_MM, size.h);
+  // MIN が上限より優先(用紙右端ぎりぎりの要素でも最小サイズは維持=負/ゼロ寸法を返さない)。
+  const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(size.w, page.width - el.x));
+  const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(size.h, page.height - el.y));
   return replaceElement(state, idx, applyGeom(el, { w, h }));
 }
 
@@ -659,24 +664,22 @@ const PHOTO_ZONE_BOTTOM_MARGIN_MM =
   DEFAULT_FOOTER_H + MAIN_BOTTOM_MARGIN_MM + SALES_POINTS_H_MM + PHOTO_GAP_MM;
 
 /**
- * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト／写真追加時にも自動実行）。
- * - 対象は image のみ。他要素（テキスト/表/バッジ等）は参照ごと不動。
- * - 写真ゾーン右端は概要表（物件種別・id="overview"）の左端の手前まで＝概要表に被らない（要件①）。
- *   overview 要素が無い素の版面ではページ幅の 2/3 まで（要件⑤の思想）。
- * - 各写真は「押した時点の位置に最も近いスロット」へ割り当て、総移動距離を最小化（要件③）。
- *   追加順の詰め直しをやめ、ユーザーが作った並びを保つ。
- * - 各写真は切り取り・引き伸ばしせず全体表示＝fit:"contain"（要件②・縦横比を変えない）。
- * - 幾何(x/y/w/h)と fit のみ更新。src/焦点/角丸/alt/z は保存。
- * - 決定的: 同じ document からは常に同じ配置。既に整列済みなら no-op（同一参照）。
- * - 画像が無ければ no-op。変更があれば dirty=true。
- *
- * opts.appendedId: 直前に追加された写真の id（写真追加時の自動整列で指定）。その写真は
- * ページ中央への仮置き位置を持つため移動最小の距離競争から外し、既存写真の並び（代表写真が
- * 先頭）を保ったまま余ったスロットへ収める（@codex #292 P2・追加写真が先頭を奪う問題の回避）。
+ * すべてのギャラリー写真を写真ゾーンへ「段組み詰め」で整列し直す
+ * （ワンボタン自動レイアウト／写真追加時にも自動実行）。
+ * - 対象はギャラリー写真のみ。テンプレ枠(TEMPLATE_ELEMENT_IDS・floor-plan含む)は不動。
+ * - 写真ゾーンは**常に左2/3固定**: 右端 = OVERVIEW_MIN_X_MM(188) − 水平余白(11) = 177。
+ *   overview 要素が無い自由版面のみページ幅の2/3を右境界にする。
+ * - **overview(物件種目の枠)は定位置へスナップ**: 左端が定位置(188)からずれていれば
+ *   x=188 / 右端=287 に寄せる(y/h維持)＝古い図面でも「最初からその位置」でレイアウト。
+ * - 並び順=呼び出し時点の**見た目の順**(上の行から左→右)。opts.appendedId は末尾。
+ * - 枠は各写真の実寸縦横比(opts.aspects[id]・無ければ現枠のw/h比)で作り、行ごとに高さを
+ *   合わせて幅を使い切る(packJustifiedRows)。枠=写真の形なので枠内余白ゼロ・切り取りなし。
+ * - fit:"contain"(枠比=写真比のため見た目は全面表示)。src/焦点/角丸/alt/z は保存。
+ * - 純・決定的。変更ゼロなら同一参照(no-op)。変更があれば dirty=true。
  */
 export function autoArrangePhotos(
   state: EditorState,
-  opts?: { appendedId?: string },
+  opts?: { appendedId?: string; aspects?: Record<string, number> },
 ): EditorState {
   const { document } = state;
   const { page } = document;
@@ -688,9 +691,15 @@ export function autoArrangePhotos(
   });
   if (targets.length === 0) return state;
 
-  // 写真ゾーン右端 = 概要表(物件種別)の左端 − 余白（要件①）。無ければページ幅の 2/3（要件⑤思想）。
-  const overviewEl = document.elements.find((e) => e.id === "overview");
-  const boundaryX = overviewEl ? overviewEl.x : page.width * PHOTO_ZONE_FALLBACK_RATIO;
+  // overview(物件種目の枠)は定位置(右1/3)へスナップ。写真ゾーンは常に左側固定。
+  const overviewIdx = document.elements.findIndex((e) => e.id === "overview");
+  const overviewEl = overviewIdx >= 0 ? document.elements[overviewIdx] : null;
+  const boundaryX = overviewEl ? OVERVIEW_MIN_X_MM : page.width * PHOTO_ZONE_FALLBACK_RATIO;
+  const overviewNeedsSnap =
+    overviewEl !== null &&
+    (overviewEl.x !== OVERVIEW_MIN_X_MM ||
+      overviewEl.w !== OVERVIEW_RIGHT_MM - OVERVIEW_MIN_X_MM);
+
   // 間取り図(floor-plan)がある場合は写真ゾーン上端をその下へ寄せ、写真が間取り図に被らない
   // ようにする（computeSpecSheetLayout が floorPlan の下から写真を敷くのと同じ予約）。
   const floorPlanEl = document.elements.find((e) => e.id === "floor-plan" && e.type === "image");
@@ -698,41 +707,66 @@ export function autoArrangePhotos(
   const zoneY = floorPlanEl
     ? Math.max(PHOTO_ZONE_Y_MM, floorPlanEl.y + floorPlanEl.h + PHOTO_GAP_MM)
     : PHOTO_ZONE_Y_MM;
-  // 概要表との水平余白は作成/再バランス経路（computeSpecSheetLayout）と同一値を使い、
-  // 生成済み図面で「写真を自動整列」と「レイアウト自動調整」の間で写真が行き来しないようにする。
   const zoneW = Math.max(0, boundaryX - PHOTO_AREA_TO_OVERVIEW_GAP_MM - zoneX);
   const zoneH = Math.max(0, page.height - zoneY - PHOTO_ZONE_BOTTOM_MARGIN_MM);
-  const cells = packPhotoCells(targets.length, zoneW, zoneH);
+  // ゾーンが最小要素サイズ未満に潰れている(例: 間取り図を縦に大きくリサイズ)場合は
+  // 整列しない=非正/極小寸法を document に書き込まない(書き込むと schema の positive
+  // 検証で保存不能になる・提出前レビュー指摘)。
+  if (zoneW < MIN_ELEMENT_SIZE_MM || zoneH < MIN_ELEMENT_SIZE_MM) return state;
 
-  // セル中心と各写真の現在中心から、総移動距離が最小になる割当を求める（要件③）。
-  const slotCenters = cells.map((c) => ({ x: zoneX + c.x + c.w / 2, y: zoneY + c.y + c.h / 2 }));
-  const photoCenters = targets.map((idx) => {
-    const el = document.elements[idx];
-    return { x: el.x + el.w / 2, y: el.y + el.h / 2 };
-  });
-  // 追加直後の写真（appendedId）は中央への仮置き位置を持つ＝距離競争から外す。
-  let unpositioned: Set<number> | undefined;
+  // 並び順=見た目の順(y中心を1mm丸めで行グループ→x中心→元index)。appendedId は末尾。
+  const ordered = targets
+    .map((idx) => {
+      const el = document.elements[idx];
+      return { idx, yKey: Math.round(el.y + el.h / 2), xKey: el.x + el.w / 2 };
+    })
+    .sort((p, q) => p.yKey - q.yKey || p.xKey - q.xKey || p.idx - q.idx)
+    .map((o) => o.idx);
   if (opts?.appendedId) {
-    const k = targets.findIndex((idx) => document.elements[idx].id === opts.appendedId);
-    if (k >= 0) unpositioned = new Set([k]);
+    const k = ordered.findIndex((idx) => document.elements[idx].id === opts.appendedId);
+    if (k >= 0) ordered.push(...ordered.splice(k, 1));
   }
-  // assignment[k] = 写真 targets[k] を割り当てるスロット index。
-  const assignment = assignMinMovement(photoCenters, slotCenters, unpositioned);
+
+  // 各写真の縦横比: 実測値(opts.aspects)優先・無ければ現枠の w/h(非正は justified 側が矯正)。
+  const aspects = ordered.map((idx) => {
+    const el = document.elements[idx];
+    return opts?.aspects?.[el.id] ?? (el.h > 0 ? el.w / el.h : 0);
+  });
+  const rects = packJustifiedRows(aspects, zoneW, zoneH, PHOTO_GAP_MM);
 
   let changed = false;
   const elements = document.elements.slice() as SalesSheetElement[];
-  targets.forEach((idx, k) => {
+  ordered.forEach((idx, k) => {
     const el = elements[idx] as ImageElement;
-    const cell = cells[assignment[k]];
-    const x = zoneX + cell.x;
-    const y = zoneY + cell.y;
-    if (el.x !== x || el.y !== y || el.w !== cell.w || el.h !== cell.h || el.fit !== "contain") {
+    const r = rects[k];
+    const x = zoneX + r.x;
+    const y = zoneY + r.y;
+    // 幾何は 1/1000mm 単位で比較(浮動小数の等値比較で毎回 dirty 化しない・冪等)。
+    if (
+      !nearlyEqual(el.x, x) ||
+      !nearlyEqual(el.y, y) ||
+      !nearlyEqual(el.w, r.w) ||
+      !nearlyEqual(el.h, r.h) ||
+      el.fit !== "contain"
+    ) {
       changed = true;
-      elements[idx] = { ...el, x, y, w: cell.w, h: cell.h, fit: "contain" };
+      elements[idx] = { ...el, x, y, w: r.w, h: r.h, fit: "contain" };
     }
   });
+  if (overviewNeedsSnap && overviewEl) {
+    changed = true;
+    elements[overviewIdx] = applyGeom(overviewEl, {
+      x: OVERVIEW_MIN_X_MM,
+      w: OVERVIEW_RIGHT_MM - OVERVIEW_MIN_X_MM,
+    });
+  }
   if (!changed) return state;
   return { ...state, dirty: true, document: { ...document, elements } };
+}
+
+/** 幾何座標の等値判定(1/1000mm 許容・整列の冪等性用)。 */
+function nearlyEqual(a: number, b: number): boolean {
+  return Math.abs(a - b) < 0.001;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
+import type { ImageElement, SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import type { EditorState, EditThemePatch } from "@/lib/sales-sheet/editor-document";
+import { editorHistoryReducer, initHistoryState } from "@/lib/sales-sheet/editor-history";
 import {
   selectElement,
   moveElement,
@@ -102,17 +103,86 @@ function assertAuthedResponse(res: Response): void {
 
 export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   const router = useRouter();
-  const [editorState, setEditorState] = useState<EditorState>({
-    document: initial.document,
-    selectedId: null,
-    dirty: false,
-  });
+  // EditorState + 元に戻す/やり直す履歴を単一の純 reducer(editorHistoryReducer)で管理。
+  const [historyState, dispatch] = useReducer(
+    editorHistoryReducer,
+    { document: initial.document, selectedId: null, dirty: false },
+    initHistoryState,
+  );
+  const editorState = historyState.editor;
+  /** 既存ハンドラの互換シム: setEditorState(prev=>X) 相当を履歴 reducer 経由で行う。 */
+  function setEditorState(fn: (prev: EditorState) => EditorState): void {
+    dispatch({ type: "edit", fn });
+  }
   const [savedAt, setSavedAt] = useState(initial.updatedAt);
   // Mirror savedAt in a ref so export (which may run right after an auto-save)
   // sends the LATEST persisted version, not the stale render-time closure.
   const savedAtRef = useRef(initial.updatedAt);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [txInfoOpen, setTxInfoOpen] = useState(false);
+
+  // ── 元に戻す/やり直す ─────────────────────────────────────────────────────
+  const canUndo = historyState.past.length > 0;
+  const canRedo = historyState.future.length > 0;
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      // 入力欄へのフォーカス中はブラウザ既定の undo(テキスト取り消し)を妨げない。
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)
+      ) {
+        return;
+      }
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        dispatch({ type: "undo" });
+      } else if (key === "y" || (key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        dispatch({ type: "redo" });
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // ── 写真の実寸縦横比の計測(src→比のキャッシュ) ─────────────────────────────
+  // 段組み詰めは写真の実寸比で枠を作る。ブラウザで naturalWidth/Height を読み(同一
+  // オリジン /uploads・エディタで既に表示済みならキャッシュヒット)、id→比で渡す。
+  const aspectCacheRef = useRef(new Map<string, number>());
+
+  function measureAspect(src: string): Promise<number | null> {
+    const cached = aspectCacheRef.current.get(src);
+    if (cached !== undefined) return Promise.resolve(cached);
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const a = img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null;
+        if (a !== null) aspectCacheRef.current.set(src, a);
+        resolve(a);
+      };
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+
+  /** ギャラリー写真(floor-plan 除く image)の実寸比を id→比 で測る(失敗した写真は省く)。 */
+  async function measureGalleryAspects(doc: SalesSheetDocument): Promise<Record<string, number>> {
+    const targets = doc.elements.filter(
+      (e): e is ImageElement => e.type === "image" && e.id !== "floor-plan",
+    );
+    const out: Record<string, number> = {};
+    await Promise.all(
+      targets.map(async (el) => {
+        const a = await measureAspect(el.src);
+        if (a !== null) out[el.id] = a;
+      }),
+    );
+    return out;
+  }
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
@@ -125,9 +195,16 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) => moveElement(prev, id, pos));
   }
 
-  /** Dispatches resizeElement reducer — called by EditorCanvas onResizeEnd. */
-  function handleResize(id: string, size: { w: number; h: number }): void {
-    setEditorState((prev) => resizeElement(prev, id, size));
+  /** リサイズ確定 — サイズと(top/leftハンドルで動いた)原点を1回の更新で適用=
+   *  「元に戻す」1回でリサイズ全体が戻る(位置とサイズが別履歴に割れない)。 */
+  function handleResize(id: string, size: { w: number; h: number; x?: number; y?: number }): void {
+    setEditorState((prev) => {
+      const moved =
+        size.x !== undefined && size.y !== undefined
+          ? moveElement(prev, id, { x: size.x, y: size.y })
+          : prev;
+      return resizeElement(moved, id, size);
+    });
   }
 
   /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */
@@ -169,20 +246,23 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     });
   }
 
-  /** ギャラリーで選んだ写真を新しい image 要素として追加し、その場で自動整列する（要件④）。 */
-  function handleAddImage(src: string, alt?: string): void {
+  /** ギャラリーで選んだ写真を新しい image 要素として追加し、その場で段組み詰めする（要件④）。 */
+  async function handleAddImage(src: string, alt?: string): Promise<void> {
     // crypto.randomUUID は secure context 外(HTTP)で未定義ゆえフォールバック付き ID を使う。
     const id = safeRandomId();
-    // 追加→自動整列を1回の state 更新で行い、中央への一時配置がちらつかないようにする。
-    // appendedId で新規写真を移動最小の競争から外し、既存写真の並び（代表写真が先頭）を保つ。
+    // 実寸比を先に測ってから、追加→整列を1回の state 更新で行う(中間配置のちらつきなし)。
+    const aspects = await measureGalleryAspects(editorState.document);
+    const newAspect = await measureAspect(src);
+    if (newAspect !== null) aspects[id] = newAspect;
     setEditorState((prev) =>
-      autoArrangePhotos(addImageElement(prev, { id, src, alt }), { appendedId: id }),
+      autoArrangePhotos(addImageElement(prev, { id, src, alt }), { appendedId: id, aspects }),
     );
   }
 
-  /** 写真（image 要素）を写真ゾーンへワンボタン整列する（計画⑥・手動上書き可）。 */
-  function handleAutoArrange(): void {
-    setEditorState((prev) => autoArrangePhotos(prev));
+  /** 写真を写真ゾーンへワンボタン段組み詰めする（手動上書き可・元に戻すで復元可）。 */
+  async function handleAutoArrange(): Promise<void> {
+    const aspects = await measureGalleryAspects(editorState.document);
+    setEditorState((prev) => autoArrangePhotos(prev, { aspects }));
   }
 
   /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。 */
@@ -301,6 +381,10 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       {/* ── Toolbar — Task H ─────────────────────────────────────────── */}
       <EditorToolbar
         dirty={editorState.dirty}
+        onUndo={() => dispatch({ type: "undo" })}
+        canUndo={canUndo}
+        onRedo={() => dispatch({ type: "redo" })}
+        canRedo={canRedo}
         onSave={async () => {
           await handleSave();
         }}
@@ -373,7 +457,6 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
                   onSelect={handleSelect}
                   onMove={handleMove}
                   onResize={handleResize}
-                  zoom={DEFAULT_ZOOM}
                   mmToPx={MM_TO_PX}
                 />
               </div>
