@@ -251,18 +251,26 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     // crypto.randomUUID は secure context 外(HTTP)で未定義ゆえフォールバック付き ID を使う。
     const id = safeRandomId();
     // 実寸比を先に測ってから、追加→整列を1回の state 更新で行う(中間配置のちらつきなし)。
-    const aspects = await measureGalleryAspects(editorState.document);
+    const docAtCall = editorState.document;
+    const aspects = await measureGalleryAspects(docAtCall);
     const newAspect = await measureAspect(src);
     if (newAspect !== null) aspects[id] = newAspect;
-    setEditorState((prev) =>
-      autoArrangePhotos(addImageElement(prev, { id, src, alt }), { appendedId: id, aspects }),
-    );
+    setEditorState((prev) => {
+      const added = addImageElement(prev, { id, src, alt });
+      // 計測待ちの間にユーザーが編集していたら、遅延した整列で上書きしない(追加のみ・
+      // @codex #294 R3)。整列はボタンでいつでもやり直せる。
+      if (prev.document !== docAtCall) return added;
+      return autoArrangePhotos(added, { appendedId: id, aspects });
+    });
   }
 
   /** 写真を写真ゾーンへワンボタン段組み詰めする（手動上書き可・元に戻すで復元可）。 */
   async function handleAutoArrange(): Promise<void> {
-    const aspects = await measureGalleryAspects(editorState.document);
-    setEditorState((prev) => autoArrangePhotos(prev, { aspects }));
+    const docAtCall = editorState.document;
+    const aspects = await measureGalleryAspects(docAtCall);
+    // 計測待ちの間に編集が入っていたら適用しない(古い前提の整列で上書きしない・
+    // @codex #294 R3)。必要ならユーザーがもう一度押す。
+    setEditorState((prev) => (prev.document === docAtCall ? autoArrangePhotos(prev, { aspects }) : prev));
   }
 
   /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。 */
