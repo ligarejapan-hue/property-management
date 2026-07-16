@@ -88,8 +88,21 @@ const COLUMN_GAP_MM = 6;
 
 /** overview（概要表）の右端 x 座標。 */
 const OVERVIEW_RIGHT_MM = 287;
+/** ページ幅(mm)。A4横。overview 右端 OVERVIEW_RIGHT_MM との差が左右マージン。 */
+const PAGE_W_MM = 297;
+/** 概要表（物件種別）の最大幅(mm)＝ページ幅の 1/3（要件⑤: 枠は右端から最大 1/3）。 */
+const OVERVIEW_MAX_WIDTH_MM = PAGE_W_MM / 3;
+/** overview 左端の下限(mm)。これ以上左へは来ない＝概要表は常に右 1/3 以内・写真域は左側の残り。 */
+const OVERVIEW_MIN_X_MM = OVERVIEW_RIGHT_MM - OVERVIEW_MAX_WIDTH_MM;
 /** overview.x は splitX からこの分だけ右にオフセット。 */
 const OVERVIEW_X_OFFSET_MM = 5;
+/**
+ * photoArea 右端と overview 左端の間の水平余白(mm)。photoArea 右端 = overview.x − この値。
+ * （effectiveSplitX = overview.x − OVERVIEW_X_OFFSET_MM、photoArea 右端 = effectiveSplitX −
+ *  COLUMN_GAP_MM ゆえ両者の和。）autoArrangePhotos が同じ境界を使えるよう公開＝作成/再バランスと
+ *  写真右端を一致させ、ボタン間で写真が行き来しないようにする（@codex #292 P3）。
+ */
+export const PHOTO_AREA_TO_OVERVIEW_GAP_MM = OVERVIEW_X_OFFSET_MM + COLUMN_GAP_MM;
 /** overview フォント自動計算: clamp(h / rows / DIVISOR, MIN, MAX)。 */
 const OVERVIEW_FONT_MIN_PT = 5;
 const OVERVIEW_FONT_MAX_PT = 9;
@@ -240,7 +253,12 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
   const splitRatio = clamp(photoCount / SPLIT_X_PHOTO_COUNT_DIVISOR, 0, 1);
   const splitX = lerp(SPLIT_X_MIN_MM, SPLIT_X_MAX_MM, splitRatio);
 
-  const overviewX = splitX + OVERVIEW_X_OFFSET_MM;
+  // 概要表（物件種別）の幅はページ幅の 1/3 を上限とする（要件⑤）。overview 左端を
+  // OVERVIEW_MIN_X_MM 以上へクランプ＝概要表は右 1/3 以内、写真域は左側の残り（最大 ~2/3）。
+  const overviewX = Math.max(splitX + OVERVIEW_X_OFFSET_MM, OVERVIEW_MIN_X_MM);
+  // 左カラム（写真域/見出し/価格/セールスポイント）は overview の実位置から一貫して導出し、
+  // 写真域と概要表の間に無駄な隙間を作らない。
+  const effectiveSplitX = overviewX - OVERVIEW_X_OFFSET_MM;
   const overviewW = OVERVIEW_RIGHT_MM - overviewX;
   // footerHeight が将来さらに変わっても負の高さを返さないようガード（@review Fix3・現状の
   // DEFAULT_FOOTER_H=24 では mainBottom > MAIN_TOP_MM が常に成り立つ）。
@@ -261,7 +279,7 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     fontSizePt: overviewFontSizePt,
   };
 
-  const photoAreaW = Math.max(0, splitX - PHOTO_AREA_X_MM - COLUMN_GAP_MM);
+  const photoAreaW = Math.max(0, effectiveSplitX - PHOTO_AREA_X_MM - COLUMN_GAP_MM);
   // footerHeight が将来可変化しても負の高さを返さないようガード（@review Fix3）。
   const photoAreaH = Math.max(0, mainBottom - PHOTO_AREA_Y_MM);
   const photoArea: Rect = { x: PHOTO_AREA_X_MM, y: PHOTO_AREA_Y_MM, w: photoAreaW, h: photoAreaH };
@@ -288,7 +306,7 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     h: cell.h,
   }));
 
-  const leftColumnW = splitX - LEFT_COLUMN_WIDTH_MARGIN_MM;
+  const leftColumnW = effectiveSplitX - LEFT_COLUMN_WIDTH_MARGIN_MM;
   const heading: Rect = { x: HEADING_X_MM, y: HEADING_Y_MM, w: leftColumnW, h: HEADING_H_MM };
   const price: Rect = { x: PRICE_X_MM, y: PRICE_Y_MM, w: leftColumnW, h: PRICE_H_MM };
 

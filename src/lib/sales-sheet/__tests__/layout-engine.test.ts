@@ -21,11 +21,16 @@ describe("computeSpecSheetLayout", () => {
     expect(L.footer).toEqual({ x: L.company.x, y: L.company.y, w: L.company.w, h: base.footerHeight });
     expect(overlaps(L.footer, L.salesPoints), "salesPoints と重なっている").toBe(false);
   });
-  it("写真が少ないほど概要表が広い（写真0枚は表がほぼ全幅）", () => {
-    const few = computeSpecSheetLayout({ ...base, photoCount: 0 });
-    const many = computeSpecSheetLayout({ ...base, photoCount: 3 });
-    expect(few.overview.w).toBeGreaterThan(many.overview.w);
-    expect(few.photoSlots).toHaveLength(0);
+  it("概要表（物件種別）の幅は写真枚数によらず右端から最大 1/3（要件⑤）", () => {
+    // A4横 297mm の 1/3 = 99mm を上限に、概要表は右 1/3 以内・写真域が左側の残りを使う。
+    const maxOverviewW = A4W / 3 + 0.01;
+    for (const photoCount of [0, 1, 2, 3]) {
+      const L = computeSpecSheetLayout({ ...base, photoCount });
+      expect(L.overview.w, `photoCount=${photoCount}`).toBeLessThanOrEqual(maxOverviewW);
+      // 写真域は左 2/3 側（概要表の左端より左）。
+      expect(L.overview.x).toBeGreaterThanOrEqual(L.photoArea.x + L.photoArea.w);
+    }
+    expect(computeSpecSheetLayout({ ...base, photoCount: 0 }).photoSlots).toHaveLength(0);
   });
   it("行数が多いほど概要表フォントが小さい（5..9 pt）", () => {
     const dense = computeSpecSheetLayout({ ...base, specRowCount: 45 });

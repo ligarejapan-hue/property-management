@@ -205,6 +205,18 @@ describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レ
     expect(imageCount(buildSpecSheetDocument(baseParts))).toBe(0);
   });
 
+  it("作成時の種写真も切り取らず全体表示（fit:\"contain\"・要件②）", () => {
+    const doc = buildSpecSheetDocument({
+      ...baseParts,
+      photos: [{ fileUrl: "/uploads/1.jpg" }, { fileUrl: "/uploads/2.jpg" }],
+    });
+    const photoImgs = doc.elements.filter((e) => e.type === "image" && e.id.startsWith("photo-"));
+    expect(photoImgs).toHaveLength(2);
+    for (const img of photoImgs) {
+      expect((img as { fit: string }).fit).toBe("contain");
+    }
+  });
+
   it("A4横で schema 検証を通る（保存可能な document）", () => {
     const doc = buildSpecSheetDocument({
       ...baseParts,

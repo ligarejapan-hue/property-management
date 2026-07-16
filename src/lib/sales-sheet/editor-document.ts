@@ -22,6 +22,7 @@ import {
   MAIN_BOTTOM_MARGIN_MM,
   SALES_POINTS_H_MM,
   PHOTO_GAP_MM,
+  PHOTO_AREA_TO_OVERVIEW_GAP_MM,
   packPhotoCells,
 } from "./layout-engine";
 import {
@@ -30,6 +31,7 @@ import {
   footerDataEqual,
   type FooterBandData,
 } from "./footer-band";
+import { assignMinMovement } from "./min-movement-assignment";
 import type {
   SalesSheetDocument,
   SalesSheetElement,
@@ -627,65 +629,11 @@ export function editFooterData(state: EditorState, data: FooterBandData): Editor
 // 自動レイアウト（計画⑥）
 // ---------------------------------------------------------------------------
 
-/** 写真ゾーン: テンプレの左カラム（タイトル/価格帯の下・概要表の左・会社帯の上）。 */
-const PHOTO_ZONE_X_MM = 10;
-const PHOTO_ZONE_Y_MM = 46;
-const PHOTO_ZONE_MAX_W_MM = 130;
-// 写真ゾーン下端を、エンジンが写真敷詰めを止める位置（photoPackBottom = mainBottom −
-// salesPoints帯 − gap）に合わせる（@codex R1/R2）。会社帯だけでなく salesPoints 帯も避け、
-// 作成/再バランス経路と同じ予約にする。page 下端からの余白＝帯高 + main下余白 + salesPoints高 + gap。
-const PHOTO_ZONE_BOTTOM_MARGIN_MM =
-  DEFAULT_FOOTER_H + MAIN_BOTTOM_MARGIN_MM + SALES_POINTS_H_MM + PHOTO_GAP_MM;
-
 /**
- * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト）。
- * - 対象は image のみ。他要素（テキスト/表/バッジ等）は参照ごと不動。
- * - 配列順（＝追加順・テンプレは代表写真が先頭）にセルへ流し込む。先頭が左上。
- * - 幾何(x/y/w/h)のみ更新。src/fit/焦点/z などは保存。
- * - 決定的: 同じ document からは常に同じ配置。既に整列済みなら no-op（同一参照）。
- * - 画像が無ければ no-op。変更があれば dirty=true。
- */
-export function autoArrangePhotos(state: EditorState): EditorState {
-  const { document } = state;
-  const { page } = document;
-  const targets: number[] = [];
-  document.elements.forEach((e, i) => {
-    if (e.type === "image") targets.push(i);
-  });
-  if (targets.length === 0) return state;
-
-  const zoneX = PHOTO_ZONE_X_MM;
-  const zoneY = PHOTO_ZONE_Y_MM;
-  const zoneW = Math.min(PHOTO_ZONE_MAX_W_MM, page.width - 2 * PHOTO_ZONE_X_MM);
-  const zoneH = page.height - PHOTO_ZONE_Y_MM - PHOTO_ZONE_BOTTOM_MARGIN_MM;
-  const cells = packPhotoCells(targets.length, zoneW, zoneH);
-
-  let changed = false;
-  const elements = document.elements.slice() as SalesSheetElement[];
-  targets.forEach((idx, k) => {
-    const el = elements[idx];
-    const cell = cells[k];
-    const x = zoneX + cell.x;
-    const y = zoneY + cell.y;
-    if (el.x !== x || el.y !== y || el.w !== cell.w || el.h !== cell.h) {
-      changed = true;
-      elements[idx] = applyGeom(el, { x, y, w: cell.w, h: cell.h });
-    }
-  });
-  if (!changed) return state;
-  return { ...state, dirty: true, document: { ...document, elements } };
-}
-
-// ---------------------------------------------------------------------------
-// レイアウト自動再バランス（写真枚数/概要表行数/間取り有無に応じて、テンプレ枠と写真を
-// computeSpecSheetLayout の算出値へ再配置するワンボタン操作）。
-// ---------------------------------------------------------------------------
-
-/**
- * buildSpecSheetDocument が組む既知のテンプレ要素 id。これらの id を持つ要素だけを
- * 「テンプレ枠」として動かす（type==="image" 判定より優先）。floor-plan は type="image"
- * だが、この集合に含めることで写真ゾーン（L.photoSlots）ではなく専用の L.floorPlan で
- * 扱われるようにする（写真カウントに混入させない）。
+ * buildSpecSheetDocument が組む既知のテンプレ要素 id。これらの id を持つ要素は
+ * 「テンプレ枠」として扱う（type==="image" 判定より優先）。floor-plan は type="image"
+ * だが、この集合に含めることで写真ゾーン（写真スロット）ではなく専用の間取り図枠で
+ * 扱い、autoArrangePhotos の整列対象・autoBalanceLayout の写真カウントに混入させない。
  */
 const TEMPLATE_ELEMENT_IDS = new Set([
   "catch-band",
@@ -698,6 +646,100 @@ const TEMPLATE_ELEMENT_IDS = new Set([
   "company-details",
   "floor-plan",
 ]);
+
+/** 写真ゾーン: テンプレの左カラム（タイトル/価格帯の下・概要表の左・会社帯の上）。 */
+const PHOTO_ZONE_X_MM = 10;
+const PHOTO_ZONE_Y_MM = 46;
+/** overview 要素が無い素の版面での写真ゾーン右境界＝ページ幅の 2/3（要件⑤の思想）。 */
+const PHOTO_ZONE_FALLBACK_RATIO = 2 / 3;
+// 写真ゾーン下端を、エンジンが写真敷詰めを止める位置（photoPackBottom = mainBottom −
+// salesPoints帯 − gap）に合わせる（@codex R1/R2）。会社帯だけでなく salesPoints 帯も避け、
+// 作成/再バランス経路と同じ予約にする。page 下端からの余白＝帯高 + main下余白 + salesPoints高 + gap。
+const PHOTO_ZONE_BOTTOM_MARGIN_MM =
+  DEFAULT_FOOTER_H + MAIN_BOTTOM_MARGIN_MM + SALES_POINTS_H_MM + PHOTO_GAP_MM;
+
+/**
+ * すべての image 要素を写真ゾーンへ整列し直す（ワンボタン自動レイアウト／写真追加時にも自動実行）。
+ * - 対象は image のみ。他要素（テキスト/表/バッジ等）は参照ごと不動。
+ * - 写真ゾーン右端は概要表（物件種別・id="overview"）の左端の手前まで＝概要表に被らない（要件①）。
+ *   overview 要素が無い素の版面ではページ幅の 2/3 まで（要件⑤の思想）。
+ * - 各写真は「押した時点の位置に最も近いスロット」へ割り当て、総移動距離を最小化（要件③）。
+ *   追加順の詰め直しをやめ、ユーザーが作った並びを保つ。
+ * - 各写真は切り取り・引き伸ばしせず全体表示＝fit:"contain"（要件②・縦横比を変えない）。
+ * - 幾何(x/y/w/h)と fit のみ更新。src/焦点/角丸/alt/z は保存。
+ * - 決定的: 同じ document からは常に同じ配置。既に整列済みなら no-op（同一参照）。
+ * - 画像が無ければ no-op。変更があれば dirty=true。
+ *
+ * opts.appendedId: 直前に追加された写真の id（写真追加時の自動整列で指定）。その写真は
+ * ページ中央への仮置き位置を持つため移動最小の距離競争から外し、既存写真の並び（代表写真が
+ * 先頭）を保ったまま余ったスロットへ収める（@codex #292 P2・追加写真が先頭を奪う問題の回避）。
+ */
+export function autoArrangePhotos(
+  state: EditorState,
+  opts?: { appendedId?: string },
+): EditorState {
+  const { document } = state;
+  const { page } = document;
+  // 対象はギャラリー写真のみ。間取り図など既知のテンプレ枠（floor-plan は type=image）は
+  // 専用枠に留めるため整列対象から除外する（autoBalanceLayout と同じ扱い）。
+  const targets: number[] = [];
+  document.elements.forEach((e, i) => {
+    if (e.type === "image" && !TEMPLATE_ELEMENT_IDS.has(e.id)) targets.push(i);
+  });
+  if (targets.length === 0) return state;
+
+  // 写真ゾーン右端 = 概要表(物件種別)の左端 − 余白（要件①）。無ければページ幅の 2/3（要件⑤思想）。
+  const overviewEl = document.elements.find((e) => e.id === "overview");
+  const boundaryX = overviewEl ? overviewEl.x : page.width * PHOTO_ZONE_FALLBACK_RATIO;
+  // 間取り図(floor-plan)がある場合は写真ゾーン上端をその下へ寄せ、写真が間取り図に被らない
+  // ようにする（computeSpecSheetLayout が floorPlan の下から写真を敷くのと同じ予約）。
+  const floorPlanEl = document.elements.find((e) => e.id === "floor-plan" && e.type === "image");
+  const zoneX = PHOTO_ZONE_X_MM;
+  const zoneY = floorPlanEl
+    ? Math.max(PHOTO_ZONE_Y_MM, floorPlanEl.y + floorPlanEl.h + PHOTO_GAP_MM)
+    : PHOTO_ZONE_Y_MM;
+  // 概要表との水平余白は作成/再バランス経路（computeSpecSheetLayout）と同一値を使い、
+  // 生成済み図面で「写真を自動整列」と「レイアウト自動調整」の間で写真が行き来しないようにする。
+  const zoneW = Math.max(0, boundaryX - PHOTO_AREA_TO_OVERVIEW_GAP_MM - zoneX);
+  const zoneH = Math.max(0, page.height - zoneY - PHOTO_ZONE_BOTTOM_MARGIN_MM);
+  const cells = packPhotoCells(targets.length, zoneW, zoneH);
+
+  // セル中心と各写真の現在中心から、総移動距離が最小になる割当を求める（要件③）。
+  const slotCenters = cells.map((c) => ({ x: zoneX + c.x + c.w / 2, y: zoneY + c.y + c.h / 2 }));
+  const photoCenters = targets.map((idx) => {
+    const el = document.elements[idx];
+    return { x: el.x + el.w / 2, y: el.y + el.h / 2 };
+  });
+  // 追加直後の写真（appendedId）は中央への仮置き位置を持つ＝距離競争から外す。
+  let unpositioned: Set<number> | undefined;
+  if (opts?.appendedId) {
+    const k = targets.findIndex((idx) => document.elements[idx].id === opts.appendedId);
+    if (k >= 0) unpositioned = new Set([k]);
+  }
+  // assignment[k] = 写真 targets[k] を割り当てるスロット index。
+  const assignment = assignMinMovement(photoCenters, slotCenters, unpositioned);
+
+  let changed = false;
+  const elements = document.elements.slice() as SalesSheetElement[];
+  targets.forEach((idx, k) => {
+    const el = elements[idx] as ImageElement;
+    const cell = cells[assignment[k]];
+    const x = zoneX + cell.x;
+    const y = zoneY + cell.y;
+    if (el.x !== x || el.y !== y || el.w !== cell.w || el.h !== cell.h || el.fit !== "contain") {
+      changed = true;
+      elements[idx] = { ...el, x, y, w: cell.w, h: cell.h, fit: "contain" };
+    }
+  });
+  if (!changed) return state;
+  return { ...state, dirty: true, document: { ...document, elements } };
+}
+
+// ---------------------------------------------------------------------------
+// レイアウト自動再バランス（写真枚数/概要表行数/間取り有無に応じて、テンプレ枠と写真を
+// computeSpecSheetLayout の算出値へ再配置するワンボタン操作）。
+// ---------------------------------------------------------------------------
+
 
 /** x/y/w/h がすべて等しいか（幾何の変更検知用）。 */
 function geomEquals(
