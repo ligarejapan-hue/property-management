@@ -23,8 +23,6 @@ import {
   SALES_POINTS_H_MM,
   PHOTO_GAP_MM,
   PHOTO_AREA_TO_OVERVIEW_GAP_MM,
-  OVERVIEW_MIN_X_MM,
-  OVERVIEW_RIGHT_MM,
 } from "./layout-engine";
 import { packJustifiedRows } from "./justified-pack";
 import {
@@ -737,13 +735,16 @@ export function autoArrangePhotos(
   if (targets.length === 0) return state;
 
   // overview(物件種目の枠)は定位置(右1/3)へスナップ。写真ゾーンは常に左側固定。
+  // 定位置はページ幅から相対計算する(A4横なら x=188/右端287 で従来定数と一致)。
+  // 固定定数だと A4縦(幅210)で右端287を書き込み用紙外→保存不能になる(@codex #294 R5)。
+  const ovRight = page.width - PHOTO_ZONE_X_MM;
+  const ovMinX = ovRight - page.width / 3;
   const overviewIdx = document.elements.findIndex((e) => e.id === "overview");
   const overviewEl = overviewIdx >= 0 ? document.elements[overviewIdx] : null;
-  const boundaryX = overviewEl ? OVERVIEW_MIN_X_MM : page.width * PHOTO_ZONE_FALLBACK_RATIO;
+  const boundaryX = overviewEl ? ovMinX : page.width * PHOTO_ZONE_FALLBACK_RATIO;
   const overviewNeedsSnap =
     overviewEl !== null &&
-    (overviewEl.x !== OVERVIEW_MIN_X_MM ||
-      overviewEl.w !== OVERVIEW_RIGHT_MM - OVERVIEW_MIN_X_MM);
+    (!nearlyEqual(overviewEl.x, ovMinX) || !nearlyEqual(overviewEl.w, ovRight - ovMinX));
 
   // 間取り図(floor-plan)がある場合は写真ゾーン上端をその下へ寄せ、写真が間取り図に被らない
   // ようにする（computeSpecSheetLayout が floorPlan の下から写真を敷くのと同じ予約）。
@@ -814,10 +815,7 @@ export function autoArrangePhotos(
   });
   if (overviewNeedsSnap && overviewEl) {
     changed = true;
-    elements[overviewIdx] = applyGeom(overviewEl, {
-      x: OVERVIEW_MIN_X_MM,
-      w: OVERVIEW_RIGHT_MM - OVERVIEW_MIN_X_MM,
-    });
+    elements[overviewIdx] = applyGeom(overviewEl, { x: ovMinX, w: ovRight - ovMinX });
   }
   if (!changed) return state;
   return { ...state, dirty: true, document: { ...document, elements } };

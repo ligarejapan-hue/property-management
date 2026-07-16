@@ -142,6 +142,21 @@ describe("autoArrangePhotos(段組み詰め)", () => {
     }
   });
 
+  it("A4縦でも overview スナップは用紙内(ページ幅から相対計算・@codex R5)", () => {
+    const portrait = { width: 210, height: 297, orientation: "portrait" } as const;
+    const ov = { id: "overview", type: "table", x: 120, y: 26, w: 80, h: 150, z: 1,
+      rows: [{ label: "物件種別", value: "売地" }], style: {} };
+    const s = autoArrangePhotos(makeState([ov, imageEl(1)], portrait));
+    const after = s.document.elements.find((e) => e.id === "overview")!;
+    // 定位置 = 右端(210-10=200)から幅の1/3(70): x=130・右端200 ≤ 210。
+    expect(after.x).toBeCloseTo(130, 3);
+    expect(after.x + after.w).toBeLessThanOrEqual(210);
+    for (const img of images(s)) {
+      expect(img.x + img.w).toBeLessThanOrEqual(210);
+    }
+    expect(salesSheetDocumentSchema.safeParse(s.document).success).toBe(true);
+  });
+
   it("並び順=見た目の順(上の行から左→右)を保つ", () => {
     // img-1 を下段・img-2 を上段に置いた状態から整列 → img-2 が先(上)になる。
     const s = autoArrangePhotos(
