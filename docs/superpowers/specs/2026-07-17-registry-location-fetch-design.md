@@ -38,12 +38,14 @@
    - 地番種別: `#cbnDlgChibanType0`（数字/ハイフンのみ）/`#cbnDlgChibanType1`。
    - 地番範囲: `#cbnDlgSearchChibanStart`（〜`#cbnDlgSearchChibanEnd`）。
    - 検索: `#cbnDlgChibanSearch`（GFuChibanDialog.btnChibanSearch）。
-   - 結果テーブル: `#cbnDlgChibanCheckTbl`（チェックボックス付き候補行）。
+   - 結果テーブル: `#cbnDlgChibanCheckTbl`。**検索は非同期ロード**＝クリック直後は「データ取得中・・・」表示。行が現れるまで待つ（"データ取得中" を含まなくなり checkbox 行が入るまでポーリング）。
+   - **候補行構造（probe 確定・2026-07-17）**: 各 `<tr>` に `td.col_w1 > input[type=checkbox]#cbnDlgChibanChk_{N}`（onclick=GFuChibanDialog.chkChibanChk）＋ `td.col_w2#cbnDlgChibanDt_{N}` に地番テキスト（例「１－１」「１－２」…全角）。1所在の地番範囲検索で数十件返る（例 千代田区丸の内一丁目・範囲1 → 「１－１」〜59件）。
    - ページ: `#cbnDlgBtnPageNext`/`#cbnDlgBtnPageBefore`。確定: `#cbnDlgBtnOk`。取消: `#cbnDlgBtnCancel`。
    - 選択反映: `#cbnDlgCheckedChibanString`/`#cbnDlgCheckedChibanDsp`/`#cbnDlgCheckedChibanSeqNo`。
 10. 【②のみ】確定でメイン画面へ地番が反映 → 請求事項の種類（`#fuAll` 全部事項 / 所有者事項ラジオ等・既定=所有者事項）→ 確定（`fuBtnForward()`・id無 text「確定」）で請求リスト（`#fudosanIchiranTbl`）へ → 請求（`#myPageSeikyu`・**課金**）→ 表示・保存（PDFダウンロード）。
 
-> ⚠ **[要live確認・実装時1回]**: 段階①の実装冒頭で、`#cbnDlgChibanCheckTbl` の**候補行の正確なセル構造**（所在/地番/参照値の列・チェックボックスの name/value）を、無料検索1回で確定する（probe10 ではダイアログの地番入力を満たさず結果行を取得できていない）。段階②の請求ボタン確定後の**ダウンロード発火**（`waitForEvent("download")` かボタン `表示・保存`）は実課金でのみ最終確認。
+> ✅ **候補行構造は確定済み（2026-07-17 probe）**: 上記のとおり `#cbnDlgChibanChk_{N}`＋`#cbnDlgChibanDt_{N}`・非同期ロード待ち。段階①はこの構造で実装できる。
+> ⚠ **[要live・段階②のみ・実課金]**: 請求ボタン（`#myPageSeikyu`）確定後の**ダウンロード発火**（`waitForEvent("download")` かボタン `表示・保存`）は実課金でのみ最終確認。段階②の通しテストで御社承認のもと1回確認する。
 
 ## 設計（部品と責務）
 
