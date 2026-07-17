@@ -563,19 +563,24 @@ function reserveMapQrBelowFloorPlan(
   const fp = elements[fpIdx];
   const qr = elements[qrIdx];
   const contentBottom = page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM;
-  // 図の下に QR(gap+高さ)を収めるための図の最大下端。図が下端いっぱいなら縮める。
+  // 図(最小高)+ gap + QR が contentBottom 内に収まる図の最大 y。図を会社帯へ近づけ過ぎると
+  // 下に QR の空きが作れず QR が図の上へ回り込むため、その場合は図を上へ寄せる(@codex #300)。
+  const maxFloorY = Math.max(0, contentBottom - MIN_ELEMENT_SIZE_MM - MAP_QR_GAP_MM - qr.h);
+  const fpY = Math.min(fp.y, maxFloorY);
+  // 図の下に QR(gap+高さ)を収めるための図の最大下端。下端いっぱいなら縮める。
   const maxFloorBottom = contentBottom - MAP_QR_GAP_MM - qr.h;
   const newFpH =
-    fp.y + fp.h > maxFloorBottom
-      ? Math.max(MIN_ELEMENT_SIZE_MM, maxFloorBottom - fp.y)
+    fpY + fp.h > maxFloorBottom
+      ? Math.max(MIN_ELEMENT_SIZE_MM, maxFloorBottom - fpY)
       : fp.h;
   const qrX = clamp(fp.x + (fp.w - qr.w) / 2, 0, Math.max(0, page.width - qr.w));
-  // 会社帯の上(contentBottom − h)を上限にクランプ(図を下へ動かした等で空きが足りなくても
-  // 会社帯を覆わない・@codex #300)。
-  const qrY = clamp(fp.y + newFpH + MAP_QR_GAP_MM, 0, Math.max(0, contentBottom - qr.h));
-  if (nearlyEqual(newFpH, fp.h) && nearlyEqual(qrX, qr.x) && nearlyEqual(qrY, qr.y)) return elements;
+  // 会社帯の上(contentBottom − h)を上限にクランプ。図の y を上へ寄せた分、QR は必ず図の真下。
+  const qrY = clamp(fpY + newFpH + MAP_QR_GAP_MM, 0, Math.max(0, contentBottom - qr.h));
+  const fpChanged = !nearlyEqual(fpY, fp.y) || !nearlyEqual(newFpH, fp.h);
+  const qrChanged = !nearlyEqual(qrX, qr.x) || !nearlyEqual(qrY, qr.y);
+  if (!fpChanged && !qrChanged) return elements;
   const next = elements.slice();
-  if (!nearlyEqual(newFpH, fp.h)) next[fpIdx] = applyGeom(fp, { h: newFpH });
+  if (fpChanged) next[fpIdx] = applyGeom(fp, { y: fpY, h: newFpH });
   next[qrIdx] = applyGeom(qr, { x: qrX, y: qrY });
   return next;
 }

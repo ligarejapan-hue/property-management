@@ -130,10 +130,12 @@ describe("addMapQrElement", () => {
     expect(q!.dataUrl.startsWith("data:image/")).toBe(true);
   });
 
-  it("間取図を下方へ動かしても QR は会社帯を覆わない(contentBottom クランプ・@codex #300)", () => {
+  it("間取図が低すぎると図を上へ寄せ、QR は図の真下・会社帯の上に置く(@codex #300)", () => {
     const s = addMapQrElement(makeState([floorPlan({ y: 150, h: 20 })]), { address: ADDR });
     const q = qrOf(s)!;
-    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5);
+    const fp = fpOf(s);
+    expect(q.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.5); // QR は図の真下(図の上へ回り込まない)
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯も覆わない
   });
 
   it("z は最前面・schema 検証を通る", () => {
