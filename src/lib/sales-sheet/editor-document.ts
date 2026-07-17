@@ -595,15 +595,25 @@ function positionMapQr(
     fpY + fp.h > maxFloorBottom
       ? Math.max(MIN_ELEMENT_SIZE_MM, maxFloorBottom - fpY)
       : fp.h;
-  const qrX = clamp(fp.x + (fp.w - qr.w) / 2, 0, Math.max(0, page.width - qr.w));
+  // 図が QR より細い(commitFloorPlanGeometry は図を MIN_ELEMENT_SIZE_MM まで許容)場合、
+  // QR を図の列幅に収める(縮小時は正方形を保ちスキャン性を維持・@codex #300)。写真域/概要表へ
+  // はみ出さないよう横幅も制約する。
+  const fits = qr.w <= fp.w;
+  const qrW = fits ? qr.w : fp.w;
+  const qrH = fits ? qr.h : fp.w;
+  const qrX = clamp(fp.x + (fp.w - qrW) / 2, 0, Math.max(0, page.width - qrW));
   // 会社帯の上(contentBottom − h)を上限にクランプ。図の y を上へ寄せた分、QR は必ず図の真下。
-  const qrY = clamp(fpY + newFpH + MAP_QR_GAP_MM, 0, Math.max(0, contentBottom - qr.h));
+  const qrY = clamp(fpY + newFpH + MAP_QR_GAP_MM, 0, Math.max(0, contentBottom - qrH));
   const fpChanged = !nearlyEqual(fpY, fp.y) || !nearlyEqual(newFpH, fp.h);
-  const qrChanged = !nearlyEqual(qrX, qr.x) || !nearlyEqual(qrY, qr.y);
+  const qrChanged =
+    !nearlyEqual(qrX, qr.x) ||
+    !nearlyEqual(qrY, qr.y) ||
+    !nearlyEqual(qrW, qr.w) ||
+    !nearlyEqual(qrH, qr.h);
   if (!fpChanged && !qrChanged) return elements;
   const next = elements.slice();
   if (fpChanged) next[fpIdx] = applyGeom(fp, { y: fpY, h: newFpH });
-  next[qrIdx] = applyGeom(qr, { x: qrX, y: qrY });
+  next[qrIdx] = applyGeom(qr, { x: qrX, y: qrY, w: qrW, h: qrH });
   return next;
 }
 

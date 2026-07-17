@@ -211,6 +211,17 @@ describe("addMapQrElement", () => {
     expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯も覆わない
   });
 
+  it("図が QR より細いと QR を図の列幅に収める(はみ出さない・@codex #300)", () => {
+    // 図幅10mm(QR既定30mmより細い)。QR は図の列内に収まる(写真域/概要表へはみ出さない)。
+    const s = addMapQrElement(makeState([floorPlan({ x: 99, w: 10, h: 100 })]), { address: ADDR });
+    const q = qrOf(s)!;
+    const fp = fpOf(s);
+    expect(q.w).toBeLessThanOrEqual(fp.w + 0.01); // 図幅を超えない
+    expect(q.h).toBeCloseTo(q.w, 3); // 正方形を保つ
+    expect(q.x).toBeGreaterThanOrEqual(fp.x - 0.01); // 図の左端以降
+    expect(q.x + q.w).toBeLessThanOrEqual(fp.x + fp.w + 0.01); // 図の右端以内
+  });
+
   it("z は最前面・schema 検証を通る", () => {
     const s = addMapQrElement(makeState([floorPlan()]), { address: ADDR });
     const q = qrOf(s)!;
