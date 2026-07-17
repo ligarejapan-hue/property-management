@@ -24,7 +24,7 @@ import {
   PHOTO_GAP_MM,
   PHOTO_AREA_TO_OVERVIEW_GAP_MM,
 } from "./layout-engine";
-import { packJustifiedRows } from "./justified-pack";
+import { packMosaic } from "./mosaic-pack";
 import {
   buildFooterTransactionElements,
   readFooterData,
@@ -137,6 +137,31 @@ const DEFAULT_QR_SIZE_MM = 30;
  */
 export function selectElement(state: EditorState, id: string | null): EditorState {
   return { ...state, selectedId: id };
+}
+
+/**
+ * 用紙外にはみ出した要素を用紙内へ引き戻す修復。
+ * - 保存境界(assertSavableDocument)は ±10000mm 許容のため、ページ外(下端の外・右外・
+ *   負座標)の要素が保存され得る。そうした要素はキャンバス上で見えず選択もできないため、
+ *   図面を開いた時にこれを用紙内へ戻して編集・削除できるようにする。
+ * - 各要素の原点を [0 .. page.width − w] × [0 .. page.height − h] にクランプ(サイズは不変)。
+ *   用紙より大きい要素は左上(0,0)へ寄せる(下限が0未満にならないよう Math.max(0, …))。
+ * - 純・冪等。用紙内に収まっている図面は同一参照で返す(no-op・dirty 化しない)。変更時のみ
+ *   dirty=true。selectedId は保持。
+ */
+export function clampElementsToPage(state: EditorState): EditorState {
+  const { document } = state;
+  const { page } = document;
+  let changed = false;
+  const elements = document.elements.map((el) => {
+    const x = clamp(el.x, 0, Math.max(0, page.width - el.w));
+    const y = clamp(el.y, 0, Math.max(0, page.height - el.h));
+    if (nearlyEqual(x, el.x) && nearlyEqual(y, el.y)) return el;
+    changed = true;
+    return applyGeom(el, { x, y });
+  });
+  if (!changed) return state;
+  return { ...state, dirty: true, document: { ...document, elements } };
 }
 
 /**
@@ -707,7 +732,7 @@ const PHOTO_ZONE_BOTTOM_MARGIN_MM =
   DEFAULT_FOOTER_H + MAIN_BOTTOM_MARGIN_MM + SALES_POINTS_H_MM + PHOTO_GAP_MM;
 
 /**
- * すべてのギャラリー写真を写真ゾーンへ「段組み詰め」で整列し直す
+ * すべてのギャラリー写真を写真ゾーンへ「モザイク配置」で整列し直す
  * （ワンボタン自動レイアウト／写真追加時にも自動実行）。
  * - 対象はギャラリー写真のみ。テンプレ枠(TEMPLATE_ELEMENT_IDS・floor-plan含む)は不動。
  * - 写真ゾーンは**常に左2/3固定**: 右端 = OVERVIEW_MIN_X_MM(188) − 水平余白(11) = 177。
@@ -715,8 +740,9 @@ const PHOTO_ZONE_BOTTOM_MARGIN_MM =
  * - **overview(物件種目の枠)は定位置へスナップ**: 左端が定位置(188)からずれていれば
  *   x=188 / 右端=287 に寄せる(y/h維持)＝古い図面でも「最初からその位置」でレイアウト。
  * - 並び順=呼び出し時点の**見た目の順**(上の行から左→右)。opts.appendedId は末尾。
- * - 枠は各写真の実寸縦横比(opts.aspects[id]・無ければ現枠のw/h比)で作り、行ごとに高さを
- *   合わせて幅を使い切る(packJustifiedRows)。枠=写真の形なので枠内余白ゼロ・切り取りなし。
+ * - 枠は各写真の実寸縦横比(opts.aspects[id]・無ければ現枠のw/h比)を保ったまま、
+ *   スライシング木の全列挙で最も無駄の少ない配置を選ぶ(packMosaic・写真ごとに大小差が付く)。
+ *   縦長2枚+横長1枚のような組合せでも「細い1列」に潰れず左2/3を使い切る。切り取りなし。
  * - fit:"contain"(枠比=写真比のため見た目は全面表示)。src/焦点/角丸/alt/z は保存。
  * - 純・決定的。変更ゼロなら同一参照(no-op)。変更があれば dirty=true。
  */
@@ -760,28 +786,12 @@ export function autoArrangePhotos(
   // 検証で保存不能になる・提出前レビュー指摘)。
   if (zoneW < MIN_ELEMENT_SIZE_MM || zoneH < MIN_ELEMENT_SIZE_MM) return state;
 
-  // 並び順=見た目の順。y中心の丸めでは「同じ行だが高さが違う」写真(手動リサイズ後)で
-  // 行判定が崩れるため、上端順に走査して行をクラスタリングする(@codex #294 R4):
-  // 次の写真の上端が現在行の最小下端より上なら同じ行、行内は x→元index で左→右。
-  const byTop = targets
-    .map((idx) => {
-      const el = document.elements[idx];
-      return { idx, y: el.y, bottom: el.y + el.h, x: el.x };
-    })
-    .sort((p, q) => p.y - q.y || p.x - q.x || p.idx - q.idx);
-  const rows: { minBottom: number; items: typeof byTop }[] = [];
-  for (const it of byTop) {
-    const row = rows[rows.length - 1];
-    if (row && it.y < row.minBottom - 0.01) {
-      row.items.push(it);
-      row.minBottom = Math.min(row.minBottom, it.bottom);
-    } else {
-      rows.push({ minBottom: it.bottom, items: [it] });
-    }
-  }
-  const ordered = rows.flatMap((r) =>
-    r.items.sort((p, q) => p.x - q.x || p.idx - q.idx).map((o) => o.idx),
-  );
+  // 並び順=ドキュメント配列順(=写真の追加順・代表写真が先頭)。
+  // モザイク配置(packMosaic)は行構造でない(右に縦長1列など)ため、位置から読み順を
+  // 再導出すると再適用で順序が入れ替わり冪等性が壊れる。配列順は整列間で不変(整列は
+  // elements[idx] を in-place 置換し配列順を変えない)なので、これを読み順にすることで
+  // 「整列済みへの再適用=no-op」を構造的に保証する。写真は append 追加なので配列順=追加順。
+  const ordered = targets.slice();
   if (opts?.appendedId) {
     const k = ordered.findIndex((idx) => document.elements[idx].id === opts.appendedId);
     if (k >= 0) ordered.push(...ordered.splice(k, 1));
@@ -792,7 +802,7 @@ export function autoArrangePhotos(
     const el = document.elements[idx];
     return opts?.aspects?.[el.id] ?? (el.h > 0 ? el.w / el.h : 0);
   });
-  const rects = packJustifiedRows(aspects, zoneW, zoneH, PHOTO_GAP_MM);
+  const rects = packMosaic(aspects, zoneW, zoneH, PHOTO_GAP_MM);
 
   let changed = false;
   const elements = document.elements.slice() as SalesSheetElement[];
