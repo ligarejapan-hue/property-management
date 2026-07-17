@@ -37,7 +37,7 @@
 新規/レイアウト自動調整で使う **既定の** 3列 rect を返すよう変更(純関数・決定的)。
 
 - `hasFloorPlan` のとき `floorPlan` を **中央列** として返す(現状の「写真域の上」から変更):
-  - `x = FLOOR_PLAN_DEFAULT_X`(中央列の既定左端)、右端 = `overview.x − COLUMN_GAP_MM`、`y = MAIN_TOP_MM`、`h = photoBandBottom − MAIN_TOP_MM`(セールスポイント上まで=写真帯と同じ縦範囲)。
+  - `x = FLOOR_PLAN_DEFAULT_X`(中央列の既定左端)、右端 = `overview.x − COLUMN_GAP_MM`、`y = PHOTO_AREA_Y_MM`(=写真帯の上端。タイトル/価格の下。heading/price は x=10..177 を占めるため中央列を MAIN_TOP=26 から始めると重なる/実機スクショでも図はタイトル・価格の下から始まる)、`h = photoPackBottom − PHOTO_AREA_Y_MM`(セールスポイント上まで=写真帯と同じ縦範囲)。
   - 既定幅は概ね「左2/3の残り半分」= バランス既定(モックの三等分寄り)。定数 `FLOOR_PLAN_DEFAULT_X` で表現。
 - `photoArea`(写真域): 右端 = `hasFloorPlan ? floorPlan.x − COLUMN_GAP_MM : effectiveSplitX`。左端・上端・下端は現状の写真帯計算を流用。写真は上端から敷く(図の下ではなく **図の左**)。
 - `photoSlots`: `packPhotoCells` を新しい写真域(左列)で計算(build-document 用の既定並び。実編集ではモザイクで上書きされる)。

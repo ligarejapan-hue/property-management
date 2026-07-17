@@ -272,6 +272,11 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         void commitFloorPlan({ mode: "resize", w: change.w, h: change.h });
         return;
       }
+      if (change.type === "delete") {
+        // 中央列を削除したら写真を左2/3へ詰め直す(削除だけだと写真が狭いまま中央が空白・@codex #298)。
+        void handleDeleteFloorPlan();
+        return;
+      }
     }
     setEditorState((prev) => {
       const id = prev.selectedId;
@@ -383,6 +388,17 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) =>
       prev.document === doc && prev.selectedId === "floor-plan"
         ? unsetFloorPlan(prev, newId, aspects)
+        : prev,
+    );
+  }
+
+  /** 中央列(間取り図)を削除し、写真を左2/3(2列)へ詰め直す(@codex #298)。 */
+  async function handleDeleteFloorPlan(): Promise<void> {
+    const doc = editorState.document;
+    const aspects = await measureGalleryAspects(doc);
+    setEditorState((prev) =>
+      prev.document === doc && prev.selectedId === "floor-plan"
+        ? autoArrangePhotos(deleteElement(prev, "floor-plan"), { aspects })
         : prev,
     );
   }

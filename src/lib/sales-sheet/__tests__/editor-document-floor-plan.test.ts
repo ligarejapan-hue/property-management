@@ -9,6 +9,8 @@ import {
   setAsFloorPlan,
   unsetFloorPlan,
   commitFloorPlanGeometry,
+  autoArrangePhotos,
+  deleteElement,
 } from "../editor-document";
 import {
   parseSalesSheetDocument,
@@ -153,6 +155,17 @@ describe("commitFloorPlanGeometry（中央列の幾何確定＋写真リフロ�
       (e): e is ImageElement => e.type === "image" && e.id !== "floor-plan",
     );
     for (const p of photos) expect(p.x + p.w).toBeLessThanOrEqual(fp.x + 0.5); // 重ならない
+  });
+
+  it("間取り図を削除→自動整列で写真が左2/3へ広がる(2列復帰・@codex #298)", () => {
+    const withFp = setAsFloorPlan(makeState([img(1), img(2), img(3), overviewEl()]), "img-1", "d");
+    const rightWithFp = photosRightMost(withFp); // 図がある=写真は左列(狭い)
+    const deleted = autoArrangePhotos(deleteElement(withFp, "floor-plan"));
+    const photos = deleted.document.elements.filter(
+      (e): e is ImageElement => e.type === "image" && e.id !== "floor-plan",
+    );
+    expect(deleted.document.elements.some((e) => e.id === "floor-plan")).toBe(false);
+    expect(Math.max(...photos.map((p) => p.x + p.w))).toBeGreaterThan(rightWithFp); // 右へ広がる
   });
 
   it("結果は schema 検証を通る・floor-plan が無ければ no-op", () => {
