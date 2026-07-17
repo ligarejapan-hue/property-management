@@ -144,6 +144,17 @@ describe("commitFloorPlanGeometry（中央列の幾何確定＋写真リフロ�
     expect(fp.x + fp.w).toBeLessThanOrEqual(182 + 0.5);
   });
 
+  it("move: 図を左端いっぱいへ動かしても写真ゾーンが潰れず写真と重ならない(@codex #298 P1)", () => {
+    const s = commitFloorPlanGeometry(withFp(), { mode: "move", x: 0, y: 46 }); // 左端へ
+    const fp = byId(s, "floor-plan") as ImageElement;
+    // 左端は minX(=10+5+6=21)より左へ行かない=写真ゾーンが最小サイズ分残る。
+    expect(fp.x).toBeGreaterThanOrEqual(21 - 0.5);
+    const photos = s.document.elements.filter(
+      (e): e is ImageElement => e.type === "image" && e.id !== "floor-plan",
+    );
+    for (const p of photos) expect(p.x + p.w).toBeLessThanOrEqual(fp.x + 0.5); // 重ならない
+  });
+
   it("結果は schema 検証を通る・floor-plan が無ければ no-op", () => {
     const s = commitFloorPlanGeometry(withFp(), { mode: "resize", w: 60, h: 110 });
     expect(salesSheetDocumentSchema.safeParse(s.document).success).toBe(true);

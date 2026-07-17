@@ -991,7 +991,9 @@ export function commitFloorPlanGeometry(
   const x =
     geom.mode === "resize"
       ? Math.max(0, anchorRight - w) // 右端アンカー
-      : clamp(geom.x ?? fp.x, PHOTO_ZONE_X_MM, Math.max(PHOTO_ZONE_X_MM, anchorRight - w));
+      : // move も左端の下限は minX(写真域が最小サイズ分残る位置)。PHOTO_ZONE_X_MM まで許すと
+        // 写真ゾーンが潰れ autoArrangePhotos が写真を動かせず図が写真に重なる(@codex #298 P1)。
+        clamp(geom.x ?? fp.x, minX, Math.max(minX, anchorRight - w));
 
   const fpChanged =
     !nearlyEqual(x, fp.x) || !nearlyEqual(y, fp.y) || !nearlyEqual(w, fp.w) || !nearlyEqual(h, fp.h);

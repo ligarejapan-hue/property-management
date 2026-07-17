@@ -237,14 +237,17 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     w?: number;
     h?: number;
   }): Promise<void> {
-    // 最新操作トークン: 未キャッシュ画像で連続ジェスチャすると docAtCall 比較では先着が
-    // document を変え最新が破棄され図が巻き戻る(@codex #298)。トークンで最新ジェスチャを
-    // 勝たせる。commitFloorPlanGeometry は floor-plan と写真のみ触るので最新 state へ適用して
-    // 他要素の編集は保持される。
+    // 最新操作トークン＋docAtCall ガードの併用(@codex #298):
+    // - トークン: 未キャッシュ画像で連続ジェスチャしたとき、古い方を破棄し最新を勝たせる
+    //   (先着が document を変える前に古いジェスチャを弾く→最新の docAtCall が有効なまま)。
+    // - docAtCall: 測定待ちに undo/redo や他要素編集が入ったら適用しない(履歴/編集を壊さない)。
     const op = ++floorPlanOpRef.current;
-    const aspects = await measureGalleryAspects(editorState.document);
-    if (op !== floorPlanOpRef.current) return; // 新しいジェスチャに追い越された
-    setEditorState((prev) => commitFloorPlanGeometry(prev, geom, aspects));
+    const docAtCall = editorState.document;
+    const aspects = await measureGalleryAspects(docAtCall);
+    if (op !== floorPlanOpRef.current) return; // 新しいジェスチャに追い越された(古い方)
+    setEditorState((prev) =>
+      prev.document === docAtCall ? commitFloorPlanGeometry(prev, geom, aspects) : prev,
+    );
   }
 
   /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */
