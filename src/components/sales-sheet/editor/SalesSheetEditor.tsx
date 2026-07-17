@@ -253,6 +253,18 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       void handleUnsetFloorPlan();
       return;
     }
+    // 中央列(間取り図)の X/Y/幅/高さをパネルで編集した場合も、キャンバスのドラッグと同じ
+    // アンカー＋写真リフロー経路へ通す(汎用 move/resize だと概要表に食い込む/写真が非連動・@codex #298)。
+    if (editorState.selectedId === "floor-plan") {
+      if (change.type === "move") {
+        void commitFloorPlan({ mode: "move", x: change.x, y: change.y });
+        return;
+      }
+      if (change.type === "resize") {
+        void commitFloorPlan({ mode: "resize", w: change.w, h: change.h });
+        return;
+      }
+    }
     setEditorState((prev) => {
       const id = prev.selectedId;
       if (!id) return prev;
@@ -336,7 +348,12 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       if (a !== null) aspects[demotedId] = a;
     }
     // 計測待ちの間に選択/編集/undo が入っていたら適用しない(古い前提で上書きしない・@codex #298)。
-    setEditorState((prev) => (prev.document === doc ? setAsFloorPlan(prev, id, demotedId, aspects) : prev));
+    // 選択変更は document 参照を変えないため、selectedId===id も併せて確認する。
+    setEditorState((prev) =>
+      prev.document === doc && prev.selectedId === id
+        ? setAsFloorPlan(prev, id, demotedId, aspects)
+        : prev,
+    );
   }
 
   /** 中央列の間取り図/敷地図を通常の写真へ戻す（実寸比を測って写真を再整列）。 */
