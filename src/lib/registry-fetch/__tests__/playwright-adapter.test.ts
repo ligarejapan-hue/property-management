@@ -29,6 +29,7 @@ import {
   resolveDefaultRegistryBrowserFactory,
   DEFAULT_REGISTRY_BASE_URL,
   DEFAULT_REGISTRY_LOGIN_PATH,
+  REGISTRY_FORCE_LOGIN_MARKER,
   extractLocationCandidateRows,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
@@ -58,7 +59,13 @@ function makeFakeChromium() {
     check: vi.fn<(selector: string) => Promise<undefined>>(
       async () => undefined,
     ),
-    waitForSelector: vi.fn(async () => ({})),
+    // 既定: 二重ログイン確認マーカーは「出ない」(=通常メニュー着地)を模す。login の
+    // 突破ロジックはこのマーカー待ちが timeout したらスキップするので、既存 login テストは
+    // 影響を受けない。二重ログインを試すテストだけこの mock を差し替える。
+    waitForSelector: vi.fn(async (selector: string) => {
+      if (selector === REGISTRY_FORCE_LOGIN_MARKER) throw makeTimeoutError();
+      return {};
+    }),
     waitForEvent: vi.fn(async () => ({
       createReadStream: async () => Readable.from([Buffer.from("%PDF-1.4 dl")]),
     })),
@@ -280,6 +287,120 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it("C3f: 「ご利用中の方へ」(二重ログイン)が出たら強制ログインで突破してから loggedIn を待つ", async () => {
+    // 2026-07-17 本番実測: 前回セッション残存で login 送信後に確認画面が挟まる。マーカーが
+    // 出る=この画面。強制ログインボタンを DOM click で押し、その後 loggedIn を待つ。
+    const f = makeFakeChromium();
+    const order: string[] = [];
+    // マーカー(確認画面)は「出る」ように差し替え。loggedIn は成功。
+    f.page.waitForSelector = vi.fn(async (selector: string) => {
+      order.push(`wait:${selector}`);
+      return {};
+    });
+    const evaluatedArgs: string[] = [];
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) => {
+      evaluatedArgs.push(arg);
+      order.push(`click:${arg}`);
+      return undefined;
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" });
+    // ログインボタン→強制ログインボタンの2回 DOM click(いずれも button.CForwardLong)。
+    expect(evaluatedArgs).toEqual(["button.CForwardLong", "button.CForwardLong"]);
+    // 確認画面マーカーを待って強制ログインを押し、その「後」に loggedIn を待つ順序。
+    const forceIdx = order.indexOf(`wait:${REGISTRY_FORCE_LOGIN_MARKER}`);
+    const loggedInIdx = order.indexOf('wait:form[name="logoutForm"]');
+    expect(forceIdx).toBeGreaterThanOrEqual(0);
+    expect(loggedInIdx).toBeGreaterThan(forceIdx);
+    // マーカー検出は hidden input のため state:"attached" 必須(=リグレッションで落ちたら
+    // 確認画面を検出できず突破不能になる。この非自明な要件を値で固定する)。
+    expect(f.page.waitForSelector).toHaveBeenCalledWith(
+      REGISTRY_FORCE_LOGIN_MARKER,
+      expect.objectContaining({ state: "attached" }),
+    );
+    // 突破後は確認画面固有マーカーの消失(detached)を積極確認する(空振り検出)。
+    expect(f.page.waitForSelector).toHaveBeenCalledWith(
+      REGISTRY_FORCE_LOGIN_MARKER,
+      expect.objectContaining({ state: "detached" }),
+    );
+    // 確認画面判定の前に「確認画面 or 通常メニュー」着地をグループセレクタで待つ
+    // (5秒固定でなくログイン全体 timeout 内で終端画面を確定=応答遅延の吸収・@codex)。
+    const groupWaited = (
+      f.page.waitForSelector as unknown as {
+        mock: { calls: Array<[string, { state?: string }?]> };
+      }
+    ).mock.calls.some(
+      ([sel, opt]) =>
+        typeof sel === "string" &&
+        sel.includes(REGISTRY_FORCE_LOGIN_MARKER) &&
+        sel.includes("menuClick('FUDOSAN')") &&
+        opt?.state === "attached",
+    );
+    expect(groupWaited).toBe(true);
+    // 強制ログインボタン(button.CForwardLong)は click 前に waitForSelector で待つ
+    // (確認画面パース途中の空振り race を防ぐ)。login と force で計2回待つ(=force 側の
+    // ボタン待ちが消えると1回に落ちて検知できる・@codex 指摘)。
+    const buttonWaits = (
+      f.page.waitForSelector as unknown as {
+        mock: { calls: Array<[string, unknown?]> };
+      }
+    ).mock.calls.filter(([sel]) => sel === "button.CForwardLong").length;
+    expect(buttonWaits).toBe(2);
+  });
+
+  it("C3h: 強制ログインを押しても確認画面から抜けない(マーカー残存)なら失敗させる", async () => {
+    // 押下が空振り(セレクタ変更/ボタン無効化)でマーカーが消えない場合、detached 待ちが
+    // timeout → auth_failed。loggedIn が確認画面にも在るせいで誤って成功扱いになる退行を防ぐ。
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(
+      async (selector: string, options?: { state?: string }) => {
+        if (selector === REGISTRY_FORCE_LOGIN_MARKER) {
+          // attached(検出)は成功、detached(消失)は永遠に来ない=timeout。
+          if (options?.state === "detached") throw makeTimeoutError();
+          return {};
+        }
+        return {};
+      },
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      await expect(
+        page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+      ).rejects.toThrow(RegistryFetchError);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("C3g: 二重ログインでない(マーカー timeout)なら強制ログインを押さず loggedIn へ進む", async () => {
+    // 既定 fake は forceLoginMarker で timeout する(=通常メニュー)。突破 click は起きず、
+    // login は解決する(throw しない)。
+    const f = makeFakeChromium();
+    const evaluatedArgs: string[] = [];
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) => {
+      evaluatedArgs.push(arg);
+      return undefined;
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+    ).resolves.toBeUndefined();
+    // DOM click はログインボタンの1回のみ(強制ログインは押さない)。
+    expect(evaluatedArgs).toEqual(["button.CForwardLong"]);
+    // loggedIn は待つ。
+    expect(f.page.waitForSelector).toHaveBeenCalledWith('form[name="logoutForm"]');
   });
 
   it("C4: searchByRealEstateNumber が番号 fill・検索 click へ委譲し found を返す", async () => {

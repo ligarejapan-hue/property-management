@@ -194,6 +194,25 @@ export const DEFAULT_REGISTRY_BASE_URL = "https://www.touki.or.jp";
  */
 export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
 
+/**
+ * 二重ログイン確認画面「ご利用中の方へ」(force-login-confirm)の判定マーカー。
+ *
+ * 登記情報提供サービスは1IDにつき同時1セッションのため、前回セッションが残っていると
+ * ログイン送信後にこの画面が挟まる(2026-07-17 本番VPS実測で確認)。この画面固有の
+ * hidden input(from=elogin)で判定する。loggedIn(logoutForm)はこの画面にも存在するため
+ * 単独では通常メニューと区別できず、この画面を「ログイン成功」と誤認して後続の検索操作で
+ * 失敗していた(=本番の実失敗)。テストが値を参照するため export する。非PII・非secret。
+ */
+export const REGISTRY_FORCE_LOGIN_MARKER = 'input[name="from"][value="elogin"]';
+
+/**
+ * 「ご利用中の方へ」画面か否かの判定待ち時間(ms)。この待機の前に「確認画面 or 通常メニュー」
+ * の着地をログイン全体タイムアウト内で確定させる(応答遅延の吸収)ため、ここは既に着地済みの
+ * DOM に対する短時間判定でよい。マーカーが在れば即 resolve、通常メニュー着地なら在らずに短く
+ * timeout する。ログイン全体の主タイムアウト(REGISTRY_FETCH_TIMEOUT_MS)より十分短くする。
+ */
+const FORCE_LOGIN_CONFIRM_DETECT_MS = 1500;
+
 // 実画面HTML(2026-07-14 御社保存)から確定したセレクタ。設計資料 =
 // deliverables/registry-calibration/selector-map-20260714.md。
 // [確定] = 保存HTMLで実要素を確認済み / [要live] = 動的生成・実サイト実行でのみ確定。
@@ -202,6 +221,12 @@ const REGISTRY_SELECTORS = {
   password: "#password", // [確定] パスワード(maxlength 14)
   loginSubmit: "button.CForwardLong", // [確定] ログイン実行(onclick=requireCheck)
   loggedIn: 'form[name="logoutForm"]', // [確定] ログイン後の全ページに存在(login画面には無い)
+  // 二重ログイン確認画面「ご利用中の方へ」(2026-07-17 本番実測)。
+  forceLoginMarker: REGISTRY_FORCE_LOGIN_MARKER, // [確定] この画面固有の hidden input
+  forceLoginSubmit: "button.CForwardLong", // [確定] 「強制ログイン」ボタン(onclick=submit)
+  // 通常メニュー(請求情報受付メニュー)固有の目印。確認画面には無いため、ログイン送信後に
+  // 「確認画面 / 通常メニュー」のどちらへ着地したかの判別に使う(2026-07-17 本番実測)。
+  loggedInMenuLink: "a[href*=\"menuClick('FUDOSAN')\"]", // [確定] 「不動産請求」リンク
   // 番号取得(不動産番号での請求)。請求画面で請求方法=不動産番号を選ぶ同一フロー。
   searchMethodNumberRadio: "#fuSeikyuMethodFUDOSAN_NO", // [確定] 請求方法=不動産番号 ラジオ
   searchInput: "#fuFudosanNo", // [要live] 不動産番号入力欄(番号請求時の実操作画面で確定)
@@ -352,6 +377,56 @@ function createPlaywrightRegistryPage(
             (el as unknown as { click: () => void }).click();
           }
         }, REGISTRY_SELECTORS.loginSubmit);
+        // ログイン送信後の着地を待つ。「確認画面固有マーカー」か「通常メニュー固有リンク」の
+        // どちらかが DOM に現れるまで、ログイン全体のタイムアウト内で待つ(グループセレクタ)。
+        // 固定の短い猶予だと応答が遅いとき確認画面の到着前に打ち切ってしまい、その後に現れる
+        // 確認画面を「二重ログインでない」と誤判定してしまう(@codex 指摘)。どちらかの終端画面を
+        // 確定させてから、確認画面か否かを判定する。
+        await page.waitForSelector(
+          `${REGISTRY_SELECTORS.forceLoginMarker}, ${REGISTRY_SELECTORS.loggedInMenuLink}`,
+          { state: "attached" },
+        );
+        // 「ご利用中の方へ」(二重ログイン確認)が挟まれば「強制ログイン」で突破する。
+        // 登記情報提供サービスは1IDにつき同時1セッションのため、前回セッションが残っていると
+        // この確認画面が出る(本アプリは自動取得後にログアウトせず close するため残りやすい)。
+        // 着地は上で確定済みなので、ここはマーカー有無の短時間判定でよい(在れば強制ログイン、
+        // 無ければ通常メニュー着地=想定内としてスキップ)。
+        // 確認画面か否かの「判定」だけを内側 try に閉じる(未出現=通常メニュー着地=正常スキップ)。
+        // 突破処理(ボタン待ち→click→消失確認)は外側 try 内に置き、その timeout は auth_failed に
+        // 正しく落とす(「確認画面ありなのに突破できない」を正常スキップと混同しない)。
+        let sawForceLoginConfirm = false;
+        try {
+          // マーカーは hidden input のため state:"attached"(DOM 存在で判定)にする。
+          // 既定の "visible" 待ちでは hidden 要素が可視にならず永遠に timeout する
+          // (2026-07-17 本番実測で確認: これを付けないと確認画面でも突破できない)。
+          await page.waitForSelector(REGISTRY_SELECTORS.forceLoginMarker, {
+            state: "attached",
+            timeout: FORCE_LOGIN_CONFIRM_DETECT_MS,
+          });
+          sawForceLoginConfirm = true;
+        } catch (err) {
+          // マーカー未出現(timeout)=二重ログインでない=正常。それ以外は本当の失敗として送出。
+          if (!isTimeoutError(err)) throw err;
+        }
+        if (sawForceLoginConfirm) {
+          // 「強制ログイン」ボタンの出現を待ってから押す。確認画面のパース途中では marker(hidden)
+          // だけが先に attached になり、ボタン未描画のまま evaluate すると querySelector が null で
+          // 空振り(無操作)になる。初回ログインの loginSubmit 待ちと同じ race 回避(@codex 指摘)。
+          await page.waitForSelector(REGISTRY_SELECTORS.forceLoginSubmit);
+          await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (el && typeof (el as { click?: unknown }).click === "function") {
+              (el as unknown as { click: () => void }).click();
+            }
+          }, REGISTRY_SELECTORS.forceLoginSubmit);
+          // 強制ログインを押した「はず」だけでは不十分。loggedIn(logoutForm)は確認画面にも
+          // 存在するため、押下が空振り(セレクタ変更/ボタン無効化等)でも直後の loggedIn 待ちが
+          // 即満たされ「成功」と誤認しうる(=本番の実障害と同型)。確認画面固有マーカーの
+          // 消失(detached)を待ち、確実に画面を抜けたことを積極確認する(@codex 指摘)。
+          await page.waitForSelector(REGISTRY_SELECTORS.forceLoginMarker, {
+            state: "detached",
+          });
+        }
         // ログイン成功を固有要素で確認（URL だけで判定しない）。
         await page.waitForSelector(REGISTRY_SELECTORS.loggedIn);
       } catch (err) {
