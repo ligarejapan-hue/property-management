@@ -23,6 +23,7 @@ import {
   addImageElement,
   addBadgeElement,
   addQrElement,
+  addMapQrElement,
   autoArrangePhotos,
   autoBalanceLayout,
   setAsFloorPlan,
@@ -54,6 +55,8 @@ export interface SalesSheetEditorInitial {
   sheetId: string;
   /** 紐付く物件 ID */
   propertyId: string;
+  /** 物件の住所（地図QR のリンク生成に使う。未登録なら空/undefined でボタン無効）。 */
+  propertyAddress?: string;
   /** 最終保存日時（ISO 文字列） */
   updatedAt: string;
 }
@@ -435,6 +438,15 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) => addQrElement(prev, { id: safeRandomId(), content: "https://" }));
   }
 
+  /** 物件の場所を Google マップ検索する QR を、間取図の下(無ければ右下)へ差し込む。 */
+  const canAddMapQr = !!initial.propertyAddress && initial.propertyAddress.trim() !== "";
+  function handleAddMapQr(): void {
+    if (!canAddMapQr) return;
+    setEditorState((prev) =>
+      addMapQrElement(prev, { id: safeRandomId(), address: initial.propertyAddress ?? "" }),
+    );
+  }
+
   /** 文書テーマ（フォント/基調色）を変更する（計画⑧）。 */
   function handleThemeChange(patch: EditThemePatch): void {
     setEditorState((prev) => editTheme(prev, patch));
@@ -549,6 +561,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onAutoBalance={handleAutoBalance}
         onAddBadge={handleAddBadge}
         onAddQr={handleAddQr}
+        onAddMapQr={handleAddMapQr}
+        canAddMapQr={canAddMapQr}
         onOpenTransactionInfo={() => setTxInfoOpen(true)}
         canEditTransactionInfo={editorState.document.elements.some((e) => e.id === "footer-band")}
       />

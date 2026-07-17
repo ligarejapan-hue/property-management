@@ -16,6 +16,7 @@
 
 import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
 import { generateQrDataUrl } from "./qr-code";
+import { buildMapsSearchUrl } from "./maps-url";
 import {
   computeSpecSheetLayout,
   DEFAULT_FOOTER_H,
@@ -537,6 +538,60 @@ export function addQrElement(
     dirty: true,
     selectedId: params.id,
     document: { ...document, elements: [...document.elements, el] },
+  };
+}
+
+/**
+ * 物件の住所から Google マップ検索の QR を作り、間取図(中央列)の下に差し込む。
+ * - 住所が空 / URL 生成不能 / QR 生成不能なら no-op(同一参照)。
+ * - floor-plan(id="floor-plan"・image)があればその真下・図の幅内で中央寄せ、無ければ図面の
+ *   右下の既定位置。いずれも用紙内にクランプ(負値/はみ出しなし)。z=最前面・自動選択・dirty。
+ * - QR の中身(content)= Maps URL。後からパネルで移動/リサイズ/内容編集も可(通常の qr 要素)。
+ */
+export function addMapQrElement(
+  state: EditorState,
+  params: { id: string; address: string },
+): EditorState {
+  const url = buildMapsSearchUrl(params.address);
+  if (url === null) return state;
+  const dataUrl = generateQrDataUrl(url);
+  if (dataUrl === null) return state;
+  const { document } = state;
+  const { page } = document;
+  const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_QR_SIZE_MM, page.width - 10));
+  const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_QR_SIZE_MM, page.height - 10));
+  const z = document.elements.length
+    ? Math.max(...document.elements.map((e) => e.z)) + 1
+    : 1;
+  const floorPlanEl = document.elements.find((e) => e.id === "floor-plan" && e.type === "image");
+  const gap = 4;
+  let x: number;
+  let y: number;
+  if (floorPlanEl) {
+    x = floorPlanEl.x + (floorPlanEl.w - w) / 2; // 図の幅内で中央寄せ
+    y = floorPlanEl.y + floorPlanEl.h + gap; // 図の真下
+  } else {
+    x = page.width - w - 10; // 図が無ければ右下既定
+    y = page.height - h - 10;
+  }
+  x = clamp(x, 0, Math.max(0, page.width - w));
+  y = clamp(y, 0, Math.max(0, page.height - h));
+  const mapQrEl: QrElement = {
+    id: params.id,
+    type: "qr",
+    x,
+    y,
+    w,
+    h,
+    z,
+    dataUrl,
+    content: url,
+  };
+  return {
+    ...state,
+    dirty: true,
+    selectedId: params.id,
+    document: { ...document, elements: [...document.elements, mapQrEl] },
   };
 }
 
