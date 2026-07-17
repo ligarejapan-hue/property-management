@@ -378,8 +378,13 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       const a = await measureAspect(fp.src);
       if (a !== null) aspects[newId] = a;
     }
-    // 計測待ちの間に編集/undo が入っていたら適用しない(@codex #298)。
-    setEditorState((prev) => (prev.document === doc ? unsetFloorPlan(prev, newId, aspects) : prev));
+    // 計測待ちの間に編集/undo/選択変更が入っていたら適用しない(選択変更は document を変えない
+    // ため selectedId==="floor-plan" のままかも確認・handleSetFloorPlan と対称・@codex #298)。
+    setEditorState((prev) =>
+      prev.document === doc && prev.selectedId === "floor-plan"
+        ? unsetFloorPlan(prev, newId, aspects)
+        : prev,
+    );
   }
 
   /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。
