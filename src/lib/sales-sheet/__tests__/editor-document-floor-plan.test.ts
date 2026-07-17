@@ -8,6 +8,7 @@ import {
   type EditorState,
   setAsFloorPlan,
   unsetFloorPlan,
+  commitFloorPlanGeometry,
 } from "../editor-document";
 import {
   parseSalesSheetDocument,
@@ -96,5 +97,44 @@ describe("unsetFloorPlan", () => {
   it("間取り図が無ければ no-op(同一参照)", () => {
     const s = makeState([img(1), overviewEl()]);
     expect(unsetFloorPlan(s, "x")).toBe(s);
+  });
+});
+
+describe("commitFloorPlanGeometry（中央列の幾何確定＋写真リフローを1更新で）", () => {
+  const withFp = () =>
+    setAsFloorPlan(makeState([img(1), img(2), img(3), overviewEl()]), "img-1", "d");
+  const photosRightMost = (s: EditorState) =>
+    Math.max(
+      ...s.document.elements
+        .filter((e): e is ImageElement => e.type === "image" && e.id !== "floor-plan")
+        .map((e) => e.x + e.w),
+    );
+
+  it("resize: どの幅でも図の右端は概要表の左(182)へアンカーされる(@codex #298)", () => {
+    for (const w of [40, 60, 90]) {
+      const s = commitFloorPlanGeometry(withFp(), { mode: "resize", w, h: 100 });
+      const fp = byId(s, "floor-plan") as ImageElement;
+      expect(fp.x + fp.w).toBeCloseTo(182, 1); // 右端固定=右ハンドルでも概要表へ食い込まない
+    }
+  });
+
+  it("resize で図を広げると左端が動き、写真が反比例で左へ狭まる", () => {
+    const base = withFp();
+    const narrow = commitFloorPlanGeometry(base, { mode: "resize", w: 40, h: 100 }); // 図が狭い
+    const wide = commitFloorPlanGeometry(base, { mode: "resize", w: 90, h: 100 }); // 図が広い
+    expect(photosRightMost(wide)).toBeLessThan(photosRightMost(narrow));
+  });
+
+  it("move: 図の右端は概要表を越えない(食い込み防止)", () => {
+    const s = commitFloorPlanGeometry(withFp(), { mode: "move", x: 250, y: 46 });
+    const fp = byId(s, "floor-plan") as ImageElement;
+    expect(fp.x + fp.w).toBeLessThanOrEqual(182 + 0.5);
+  });
+
+  it("結果は schema 検証を通る・floor-plan が無ければ no-op", () => {
+    const s = commitFloorPlanGeometry(withFp(), { mode: "resize", w: 60, h: 110 });
+    expect(salesSheetDocumentSchema.safeParse(s.document).success).toBe(true);
+    const none = makeState([img(1), overviewEl()]);
+    expect(commitFloorPlanGeometry(none, { mode: "resize", w: 50, h: 100 })).toBe(none);
   });
 });

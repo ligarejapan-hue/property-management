@@ -933,6 +933,56 @@ export function unsetFloorPlan(
   return autoArrangePhotos(next, aspects ? { aspects } : undefined);
 }
 
+/**
+ * 中央列(間取り図/敷地図=floor-plan)の move/resize を確定し、右端を概要表の左へアンカー
+ * したうえで写真を再整列する。**幾何確定と写真リフローを1回の更新で行う**(=undo 1回で
+ * リサイズ全体が戻る・@codex #298)。
+ * - mode="resize": 右端を anchorRight に固定＝どの向きのハンドルで広げても左端が動く→写真が
+ *   反比例で狭まる。概要表への食い込みも起きない(@codex #298 の右ハンドル問題を解消)。
+ * - mode="move": 右端が概要表を越えない範囲で自由移動(左へ動かすと写真が狭まる)。縦は自由。
+ * - floor-plan が無ければ no-op。写真ゾーンが最小要素サイズ未満に潰れない幅にクランプ。
+ */
+export function commitFloorPlanGeometry(
+  state: EditorState,
+  geom: { mode: "resize" | "move"; x?: number; y?: number; w?: number; h?: number },
+  aspects?: Record<string, number>,
+): EditorState {
+  const { document } = state;
+  const { page } = document;
+  const idx = document.elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
+  if (idx === -1) return state;
+  const fp = document.elements[idx];
+
+  const overviewEl = document.elements.find((e) => e.id === "overview");
+  const ovRight = page.width - PHOTO_ZONE_X_MM;
+  const ovMinX = ovRight - page.width / 3;
+  const boundaryX = overviewEl ? ovMinX : page.width * PHOTO_ZONE_FALLBACK_RATIO;
+  const anchorRight = boundaryX - COLUMN_GAP_MM; // 図の右端(概要表の左に近接)
+  // 図の左端の下限＝写真域が最小要素サイズ分は残る位置。
+  const minX = PHOTO_ZONE_X_MM + MIN_ELEMENT_SIZE_MM + COLUMN_GAP_MM;
+  const maxW = Math.max(MIN_ELEMENT_SIZE_MM, anchorRight - minX);
+
+  const w = clamp(geom.w ?? fp.w, MIN_ELEMENT_SIZE_MM, maxW);
+  const y = clamp(geom.y ?? fp.y, 0, Math.max(0, page.height - MIN_ELEMENT_SIZE_MM));
+  const h = clamp(geom.h ?? fp.h, MIN_ELEMENT_SIZE_MM, Math.max(MIN_ELEMENT_SIZE_MM, page.height - y));
+  const x =
+    geom.mode === "resize"
+      ? Math.max(0, anchorRight - w) // 右端アンカー
+      : clamp(geom.x ?? fp.x, PHOTO_ZONE_X_MM, Math.max(PHOTO_ZONE_X_MM, anchorRight - w));
+
+  let elements = document.elements;
+  if (!nearlyEqual(x, fp.x) || !nearlyEqual(y, fp.y) || !nearlyEqual(w, fp.w) || !nearlyEqual(h, fp.h)) {
+    elements = document.elements.slice();
+    elements[idx] = applyGeom(fp, { x, y, w, h });
+  }
+  const moved: EditorState =
+    elements === document.elements
+      ? state
+      : { ...state, dirty: true, document: { ...document, elements } };
+  // 同一更新で写真を図の左へ詰め直す(no-op なら moved のまま)。
+  return autoArrangePhotos(moved, aspects ? { aspects } : undefined);
+}
+
 // ---------------------------------------------------------------------------
 // レイアウト自動再バランス（写真枚数/概要表行数/間取り有無に応じて、テンプレ枠と写真を
 // computeSpecSheetLayout の算出値へ再配置するワンボタン操作）。

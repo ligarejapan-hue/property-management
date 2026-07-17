@@ -27,6 +27,7 @@ import {
   autoBalanceLayout,
   setAsFloorPlan,
   unsetFloorPlan,
+  commitFloorPlanGeometry,
   clampElementsToPage,
   editFooterData,
   deleteElement,
@@ -200,29 +201,45 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
 
   /** Dispatches moveElement reducer — called by EditorCanvas onDragEnd. */
   function handleMove(id: string, pos: { x: number; y: number }): void {
+    // 中央列(間取り図)は幾何確定+写真リフローを1更新で行う専用経路へ(undo1回・反比例)。
+    if (id === "floor-plan") {
+      void commitFloorPlan({ mode: "move", x: pos.x, y: pos.y });
+      return;
+    }
     setEditorState((prev) => moveElement(prev, id, pos));
-    // 中央列(間取り図/敷地図)を動かしたら、写真を残りスペースへ詰め直す(指を離した瞬間)。
-    if (id === "floor-plan") void reflowPhotosForFloorPlan();
   }
 
   /** リサイズ確定 — サイズと(top/leftハンドルで動いた)原点を1回の更新で適用=
    *  「元に戻す」1回でリサイズ全体が戻る(位置とサイズが別履歴に割れない)。 */
   function handleResize(id: string, size: { w: number; h: number; x?: number; y?: number }): void {
+    if (id === "floor-plan") {
+      // どの向きのハンドルでも右端を概要表の左へアンカーし、左端が動く=写真が反比例で狭まる。
+      void commitFloorPlan({ mode: "resize", w: size.w, h: size.h, y: size.y });
+      return;
+    }
     setEditorState((prev) =>
       size.x !== undefined && size.y !== undefined
         ? // サイズと原点の同時変更は一括クランプ(順次適用だと旧値でクランプされ歪む)。
           resizeElementWithOrigin(prev, id, { x: size.x, y: size.y, w: size.w, h: size.h })
         : resizeElement(prev, id, size),
     );
-    // 中央列(間取り図/敷地図)の幅を変えたら、写真を反比例で詰め直す(指を離した瞬間)。
-    if (id === "floor-plan") void reflowPhotosForFloorPlan();
   }
 
-  /** 中央列(間取り図)の移動/リサイズ確定後に、写真を残りスペースへモザイクで詰め直す。
-   *  実寸比は src 由来(位置非依存)なので、確定前 document から測って最新 state へ適用する。 */
-  async function reflowPhotosForFloorPlan(): Promise<void> {
-    const aspects = await measureGalleryAspects(editorState.document);
-    setEditorState((prev) => autoArrangePhotos(prev, { aspects }));
+  /** 中央列(間取り図)の move/resize を確定し、右端アンカー＋写真リフローを1更新で行う。
+   *  実寸比は src 由来(位置非依存)なので確定前 document から測る。測定中に document が
+   *  変わっていたら適用しない(遅延した整列で intervening な編集を上書きしない・@codex #298)。 */
+  async function commitFloorPlan(geom: {
+    mode: "resize" | "move";
+    x?: number;
+    y?: number;
+    w?: number;
+    h?: number;
+  }): Promise<void> {
+    const docAtCall = editorState.document;
+    const aspects = await measureGalleryAspects(docAtCall);
+    setEditorState((prev) =>
+      prev.document === docAtCall ? commitFloorPlanGeometry(prev, geom, aspects) : prev,
+    );
   }
 
   /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */
