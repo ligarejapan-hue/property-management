@@ -40,6 +40,31 @@ function noOverlap(rects: PackedRect[]): boolean {
 
 const usedArea = (rects: PackedRect[]) => rects.reduce((s, r) => s + r.w * r.h, 0);
 
+/** 枠列が視覚のラスタ順(上→下・左→右)＝入力 index 順に並んでいるか。 */
+function isRasterOrdered(rects: PackedRect[]): boolean {
+  const items = rects.map((r, i) => ({ i, y: r.y, bottom: r.y + r.h, x: r.x }));
+  items.sort((p, q) => p.y - q.y || p.x - q.x || p.i - q.i);
+  const rows: { minBottom: number; items: typeof items }[] = [];
+  for (const it of items) {
+    const row = rows[rows.length - 1];
+    if (row && it.y < row.minBottom - 0.01) {
+      row.items.push(it);
+      row.minBottom = Math.min(row.minBottom, it.bottom);
+    } else {
+      rows.push({ minBottom: it.bottom, items: [it] });
+    }
+  }
+  let expect = 0;
+  for (const row of rows) {
+    row.items.sort((p, q) => p.x - q.x || p.i - q.i);
+    for (const it of row.items) {
+      if (it.i !== expect) return false;
+      expect++;
+    }
+  }
+  return true;
+}
+
 describe("packMosaic", () => {
   it("空配列は空を返す", () => {
     expect(packMosaic([], 100, 100, 4)).toEqual([]);
@@ -119,6 +144,31 @@ describe("packMosaic", () => {
     expect(rects.every((r) => r.w > 0 && r.h > 0 && Number.isFinite(r.w) && Number.isFinite(r.h))).toBe(
       true,
     );
+  });
+
+  it("視覚のラスタ順(上→下・左→右)＝入力順を保つ(@codex #296: 追加写真が上へ飛ばない)", () => {
+    // @codex 指摘の例: 極端な縦横比でも、末尾(index 2)が視覚的に先頭へ来ないこと。
+    const cases: number[][] = [
+      [0.3, 0.3, 1.5],
+      [0.66, 0.66, 1.5],
+      [1.5, 0.66, 1.2, 0.8],
+      [0.7, 0.7, 0.7, 1.5, 1.5],
+      [1.5, 0.66, 1.2, 0.75, 1.0, 1.6, 0.9], // n=7(上限)
+    ];
+    for (const aspects of cases) {
+      const rects = packMosaic(aspects, 177, 150, 4);
+      expect(isRasterOrdered(rects)).toBe(true);
+    }
+  });
+
+  it("n=7(上限)でもモザイクが働きラスタ順・ゾーン内・非重複", () => {
+    const aspects = [1.5, 0.66, 1.2, 0.75, 1.0, 1.6, 0.9];
+    const rects = packMosaic(aspects, 177, 150, 4);
+    expect(rects).toHaveLength(7);
+    expect(keepsAspect(rects, aspects)).toBe(true);
+    expect(withinZone(rects, 177, 150)).toBe(true);
+    expect(noOverlap(rects)).toBe(true);
+    expect(isRasterOrdered(rects)).toBe(true);
   });
 
   it("決定的: 同じ入力は同じ出力", () => {
