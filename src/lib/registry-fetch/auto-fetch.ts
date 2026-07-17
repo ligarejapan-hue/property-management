@@ -241,9 +241,15 @@ const REGISTRY_SELECTORS = {
   locationDirectInputCheck: "#fuShozaiChokusetuNyuryoku", // [確定] 所在の直接入力モード
   locationSearchAddress: "#fuChibanKuiki", // [確定] 所在(地番区域=市区町村以下)入力
   locationSearchLotBuilding: "#fuChibanKaoku", // [確定] 地番・家屋番号入力
-  locationSearchSubmit: "#myPageTable_next", // [要live] 次へ(候補一覧/請求リストへ)
-  locationSearchResult: "#fudosanIchiranTbl", // [確定] 結果コンテナ(0件でも表示)
-  locationSearchRow: "#fudosanIchiranTbl tbody tr", // [確定] 各候補行
+  // 所在検索フロー(2026-07-17 本番probe確定)。所在→不動産請求→地番検索ダイアログ方式。
+  fudosanRequestLink: "a[href*=\"menuClick('FUDOSAN')\"]", // [確定] 不動産請求リンク(=loggedInMenuLinkと同値)
+  dialogChibanKaokuListButton: "#fuChibanKaokuIchiran", // [確定] 地番・家屋番号一覧(ダイアログを開く)
+  dialogChibanTypeNumeric: "#cbnDlgChibanType0", // [確定] 地番種別=数字/ハイフンのみ
+  dialogChibanRangeStart: "#cbnDlgSearchChibanStart", // [確定] 地番範囲(開始)
+  dialogSearch: "#cbnDlgChibanSearch", // [確定] ダイアログ内検索(結果は非同期ロード)
+  dialogResultTable: "#cbnDlgChibanCheckTbl", // [確定] 候補テーブル(非同期ロード)
+  dialogResultCheckbox: "#cbnDlgChibanCheckTbl input[type=checkbox]", // [確定] 候補行チェックボックス
+  dialogCancel: "#cbnDlgBtnCancel", // [確定] ダイアログ取消(課金しない閉じ方)
 } as const;
 
 /**
@@ -294,14 +300,6 @@ export function summarizeRegistryLoginError(
 }
 
 /**
- * 所在検索の結果行(DOM)から候補の生フィールドを抽出する。page.$$eval に渡してブラウザ内で
- * 実行するため **self-contained/serializable**(モジュールスコープ非参照)にする。TODO(calibrate):
- * 実サイトの1行の要素構造に合わせる。
- * - candidateRef は **data-ref 属性値**(textContent ではない=同一ラベル行での重複を避ける
- *   ユニークな非PII参照。@codex 指摘対応)。行要素自身 → 子要素 [data-ref] の順に属性を読む。
- * - address/lotNumber/buildingNumber/realEstateNumber は各セルの textContent(秘匿情報)。
- */
-/**
  * 所在検索の住所を「都道府県」と「それ以降(市区町村＋町名)」に分解する純関数。
  * 実サイトは都道府県=プルダウン / 所在=直接入力欄 の別入力のため、住所文字列を割る。
  * - 都道府県は **明示列挙** で先頭一致させる(既存 pdf-registry-parser.ts と同方針)。
@@ -319,25 +317,41 @@ export function splitAddressForLocationSearch(address: string): {
   return { prefecture: m[1], rest: m[2].trim() };
 }
 
-export function extractLocationCandidateRows(
+/**
+ * 所在検索の失敗診断サマリ(PII安全)。所在/地番は秘匿情報のため、自由記述メッセージ(Playwright
+ * の生 message には検索語が混入し得る)は **一切出さず**、エラー名＋Playwright call log の
+ * "waiting for <selector>" 行(あれば)のみ返す。セレクタは自前定数=非PII。secret も載らない。
+ * summarizeRegistryLoginError と違い message 先頭行を出さない点が肝(所在の部分文字列漏れ防止)。
+ */
+export function summarizeRegistrySearchError(err: unknown): string {
+  const name = err instanceof Error ? err.name : "unknown";
+  const raw = err instanceof Error ? err.message : "";
+  const waiting = raw.split("\n").find((l) => l.includes("waiting for"));
+  return waiting ? `${name}: ${waiting.trim()}` : name;
+}
+
+/**
+ * 地番検索ダイアログ(#cbnDlgChibanCheckTbl)の各行(tr)を候補へ変換する。$$eval に渡すため
+ * self-contained/serializable(モジュールスコープ非参照)。checkbox を持つ行のみ候補とし、
+ * candidateRef=checkbox の id(例 cbnDlgChibanChk_1)、lotNumber=地番セル(#cbnDlgChibanDt_*)の
+ * textContent(例「１－１」)。checkbox 無し行(ヘッダ等)は除外する。地番/所在は秘匿情報。
+ * (2026-07-17 本番probe で行構造確定: td.col_w1>input[checkbox]#cbnDlgChibanChk_{N} +
+ *  td.col_w2#cbnDlgChibanDt_{N})
+ */
+export function extractChibanCandidateRows(
   els: Element[],
-): Array<Record<string, string | null>> {
-  return els.map((el) => {
-    const txt = (sel: string) =>
-      (el.querySelector(sel)?.textContent ?? "").trim() || null;
-    const candidateRef = (
-      el.getAttribute("data-ref") ??
-      el.querySelector("[data-ref]")?.getAttribute("data-ref") ??
-      ""
-    ).trim();
-    return {
-      candidateRef,
-      address: txt(".address"), // TODO(calibrate)
-      lotNumber: txt(".lot"), // TODO(calibrate)
-      buildingNumber: txt(".building"), // TODO(calibrate)
-      realEstateNumber: txt(".ren"), // TODO(calibrate)
-    };
-  });
+): Array<{ candidateRef: string; lotNumber: string | null }> {
+  const out: Array<{ candidateRef: string; lotNumber: string | null }> = [];
+  for (const tr of els) {
+    const chk = tr.querySelector('input[type="checkbox"]');
+    if (!chk) continue;
+    const ref = (chk.getAttribute("id") ?? "").trim();
+    if (!ref) continue;
+    const lotCell = tr.querySelector('td[id^="cbnDlgChibanDt_"]');
+    const lotNumber = (lotCell?.textContent ?? "").trim() || null;
+    out.push({ candidateRef: ref, lotNumber });
+  }
+  return out;
 }
 
 /**
@@ -482,14 +496,35 @@ function createPlaywrightRegistryPage(
       }
     },
     async searchByLocation(input) {
-      // 実サイトの所在検索は多段UI。ダイアログを避け「直接入力モード」で操作する:
-      //   ①請求方法=所在 ②種別(家屋番号あり=建物 / なし=土地)
-      //   ③都道府県=プルダウン + ④所在の直接入力チェック → 市区町村以下を入力
-      //   ⑤地番・家屋番号(1欄) ⑥次へ → 一覧を読む
-      // 入力(fill/click/select/check)のセットアップ由来失敗は provider_error(校正ズレ/未準備)。
+      // 実サイトの所在検索(2026-07-17 本番probe で全確定)。ログイン後の「請求情報受付メニュー」
+      // には所在検索が無く、「不動産請求」画面へ遷移した先にある。さらに検索実行は「次へ」一発では
+      // なく「地番・家屋番号一覧」ボタン→地番検索ダイアログ(非同期ロード)方式。段階①は候補一覧
+      // (地番)を返すまでで **課金しない**: 確定(#cbnDlgBtnOk)・請求(#myPageSeikyu)は押さず、
+      // キャンセルで閉じる。
+      //   ①「不動産請求」リンクを DOM click で遷移(javascript:menuClick は a.click で発火)
+      //   ②請求方法=所在 ③種別(家屋番号あり=建物/なし=土地) ④都道府県 select
+      //   ⑤直接入力チェック → 所在(市区町村以下) ⑥地番 ⑦地番一覧ボタン→ダイアログ
+      //   ⑧ダイアログ地番種別+範囲 → 検索(非同期) ⑨checkbox 行が現れるまで待つ → 抽出
+      //   ⑩キャンセルで閉じる(課金しない)
+      // セットアップ由来失敗は provider_error、結果待ち timeout は timeout に分類。診断ログは
+      // secret/PII(所在/地番)を除去して残す。
+      const lot = (input.lotNumber ?? "").trim();
+      // DOM click(login と同じ evaluate 経由・javascript: href/被りに左右されず onclick を発火)。
+      const domClick = (sel: string) =>
+        page.evaluate((s) => {
+          const el = document.querySelector(s);
+          if (el && typeof (el as { click?: unknown }).click === "function") {
+            (el as unknown as { click: () => void }).click();
+          }
+        }, sel);
       try {
+        await page.waitForSelector(REGISTRY_SELECTORS.fudosanRequestLink, {
+          state: "attached",
+        });
+        await domClick(REGISTRY_SELECTORS.fudosanRequestLink);
+        await page.waitForSelector(REGISTRY_SELECTORS.searchMethodLocationRadio);
         await page.click(REGISTRY_SELECTORS.searchMethodLocationRadio);
-        // 家屋番号があれば建物、無ければ土地(登記の種別区分。@codex P2 対応)。
+        // 家屋番号があれば建物、無ければ土地(登記の種別区分)。
         await page.click(
           input.buildingNumber && input.buildingNumber.length > 0
             ? REGISTRY_SELECTORS.locationTypeBuildingRadio
@@ -497,7 +532,6 @@ function createPlaywrightRegistryPage(
         );
         const { prefecture, rest } = splitAddressForLocationSearch(input.address);
         if (prefecture) {
-          // selectOption は value 一致優先。実 option 値/ラベルの一致は [要live]。
           await page.selectOption(
             REGISTRY_SELECTORS.locationPrefectureSelect,
             prefecture,
@@ -508,40 +542,48 @@ function createPlaywrightRegistryPage(
           REGISTRY_SELECTORS.locationSearchAddress,
           rest.length > 0 ? rest : input.address,
         );
-        // 実サイトは地番・家屋番号を 1 欄(#fuChibanKaoku)にまとめて入れる。
-        const lotBuilding = [input.lotNumber, input.buildingNumber]
-          .filter((v): v is string => !!v && v.length > 0)
-          .join(" ");
-        if (lotBuilding.length > 0) {
-          await page.fill(
-            REGISTRY_SELECTORS.locationSearchLotBuilding,
-            lotBuilding,
-          );
+        if (lot.length > 0) {
+          await page.fill(REGISTRY_SELECTORS.locationSearchLotBuilding, lot);
         }
-        await page.click(REGISTRY_SELECTORS.locationSearchSubmit);
-      } catch {
+        // 地番検索ダイアログを開く → 地番種別(数字/ハイフン) + 範囲 → 検索(非同期)。
+        await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
+        await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
+        if (lot.length > 0) {
+          await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, lot);
+        }
+        await page.click(REGISTRY_SELECTORS.dialogSearch);
+      } catch (err) {
+        console.warn(
+          "[registry-search] location search setup failed:",
+          summarizeRegistrySearchError(err),
+        );
         throw new RegistryFetchError("provider_error");
       }
       try {
-        // 結果コンテナを待つ(0件でも表示される想定)。行は 0..n → 候補配列。
-        // 結果待ちの TimeoutError は連携不備(リトライ可)= timeout。「候補ゼロ」とは区別する。
-        await page.waitForSelector(REGISTRY_SELECTORS.locationSearchResult);
-        // ブラウザ内で各行のセルを読む(extractLocationCandidateRows は self-contained/serializable)。
-        const rows = await page.$$eval(
-          REGISTRY_SELECTORS.locationSearchRow,
-          extractLocationCandidateRows,
-        );
-        // candidateRef が空なら行 index でフォールバック(非PII参照・取得時に server 側で再解決)。
-        return (rows as Array<Record<string, string | null>>).map((r, i) => ({
-          candidateRef:
-            r.candidateRef && r.candidateRef.length > 0 ? r.candidateRef : `row-${i}`,
-          address: r.address ?? null,
-          lotNumber: r.lotNumber ?? null,
-          buildingNumber: r.buildingNumber ?? null,
-          realEstateNumber: r.realEstateNumber ?? null,
+        // 非同期ロード完了を待つ(クリック直後は「データ取得中・・・」表示 → checkbox 行が現れる)。
+        await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
+          state: "attached",
+        });
+        // ブラウザ内で候補行を読む(extractChibanCandidateRows は self-contained/serializable)。
+        const rows = (await page.$$eval(
+          `${REGISTRY_SELECTORS.dialogResultTable} tr`,
+          extractChibanCandidateRows,
+        )) as Array<{ candidateRef: string; lotNumber: string | null }>;
+        // 課金しない: ダイアログはキャンセルで閉じる(確定/請求は押さない)。
+        await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+        return rows.map((r) => ({
+          candidateRef: r.candidateRef,
+          address: input.address,
+          lotNumber: r.lotNumber,
+          buildingNumber: input.buildingNumber ?? null,
+          realEstateNumber: null,
         }));
       } catch (err) {
         if (err instanceof RegistryFetchError) throw err;
+        console.warn(
+          "[registry-search] location result read failed:",
+          summarizeRegistrySearchError(err),
+        );
         if (isTimeoutError(err)) throw new RegistryFetchError("timeout");
         throw new RegistryFetchError("provider_error");
       }
