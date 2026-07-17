@@ -864,6 +864,26 @@ function defaultFloorPlanRect(page: { width: number; height: number }): {
 }
 
 /**
+ * overview(概要表)を定位置(右1/3)へスナップする(破壊的に elements を書き換え)。
+ * autoArrangePhotos も同じスナップを行うが、写真0枚だと同関数が対象0で早期 return し
+ * スナップ前に抜けるため、floor-plan 操作側でも概要表の定位置を保証する(@codex #298)。
+ * 変更があれば true。elements は呼び出し側で slice 済みの前提。
+ */
+function snapOverviewInPlace(
+  elements: SalesSheetElement[],
+  page: { width: number; height: number },
+): boolean {
+  const idx = elements.findIndex((e) => e.id === "overview");
+  if (idx === -1) return false;
+  const ov = elements[idx];
+  const ovRight = page.width - PHOTO_ZONE_X_MM;
+  const ovMinX = ovRight - page.width / 3;
+  if (nearlyEqual(ov.x, ovMinX) && nearlyEqual(ov.w, ovRight - ovMinX)) return false;
+  elements[idx] = applyGeom(ov, { x: ovMinX, w: ovRight - ovMinX });
+  return true;
+}
+
+/**
  * 選択中の写真を中央列の「間取り図/敷地図」(id="floor-plan")にする。
  * - 対象は image かつ id!=="floor-plan"。それ以外は no-op(同一参照)。
  * - 既存の floor-plan があれば demotedId へ改名して写真へ降格(中央は常に1枚)。
@@ -899,6 +919,9 @@ export function setAsFloorPlan(
     w: rect.w,
     h: rect.h,
   };
+  // 写真が0枚(この1枚を図にした)だと autoArrangePhotos が overview スナップ前に return する
+  // ため、ここで概要表を定位置へ寄せて中央列との重なりを防ぐ(@codex #298)。
+  snapOverviewInPlace(elements, document.page);
   const next: EditorState = {
     ...state,
     dirty: true,
@@ -970,10 +993,19 @@ export function commitFloorPlanGeometry(
       ? Math.max(0, anchorRight - w) // 右端アンカー
       : clamp(geom.x ?? fp.x, PHOTO_ZONE_X_MM, Math.max(PHOTO_ZONE_X_MM, anchorRight - w));
 
+  const fpChanged =
+    !nearlyEqual(x, fp.x) || !nearlyEqual(y, fp.y) || !nearlyEqual(w, fp.w) || !nearlyEqual(h, fp.h);
   let elements = document.elements;
-  if (!nearlyEqual(x, fp.x) || !nearlyEqual(y, fp.y) || !nearlyEqual(w, fp.w) || !nearlyEqual(h, fp.h)) {
+  if (fpChanged) {
     elements = document.elements.slice();
     elements[idx] = applyGeom(fp, { x, y, w, h });
+  }
+  // 概要表を定位置へ(写真0枚だと autoArrangePhotos がスナップ前に return するため・@codex #298)。
+  if (elements === document.elements) {
+    const copy = document.elements.slice();
+    if (snapOverviewInPlace(copy, page)) elements = copy;
+  } else {
+    snapOverviewInPlace(elements, page);
   }
   const moved: EditorState =
     elements === document.elements

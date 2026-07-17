@@ -162,6 +162,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   // 段組み詰めは写真の実寸比で枠を作る。ブラウザで naturalWidth/Height を読み(同一
   // オリジン /uploads・エディタで既に表示済みならキャッシュヒット)、id→比で渡す。
   const aspectCacheRef = useRef(new Map<string, number>());
+  // 中央列(間取り図)の move/resize の最新操作トークン(連続ジェスチャで最新を勝たせる)。
+  const floorPlanOpRef = useRef(0);
 
   function measureAspect(src: string): Promise<number | null> {
     const cached = aspectCacheRef.current.get(src);
@@ -235,11 +237,14 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     w?: number;
     h?: number;
   }): Promise<void> {
-    const docAtCall = editorState.document;
-    const aspects = await measureGalleryAspects(docAtCall);
-    setEditorState((prev) =>
-      prev.document === docAtCall ? commitFloorPlanGeometry(prev, geom, aspects) : prev,
-    );
+    // 最新操作トークン: 未キャッシュ画像で連続ジェスチャすると docAtCall 比較では先着が
+    // document を変え最新が破棄され図が巻き戻る(@codex #298)。トークンで最新ジェスチャを
+    // 勝たせる。commitFloorPlanGeometry は floor-plan と写真のみ触るので最新 state へ適用して
+    // 他要素の編集は保持される。
+    const op = ++floorPlanOpRef.current;
+    const aspects = await measureGalleryAspects(editorState.document);
+    if (op !== floorPlanOpRef.current) return; // 新しいジェスチャに追い越された
+    setEditorState((prev) => commitFloorPlanGeometry(prev, geom, aspects));
   }
 
   /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */

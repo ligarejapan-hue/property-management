@@ -70,6 +70,19 @@ describe("setAsFloorPlan", () => {
     expect(byId(s2, "old-fp")).toBeTruthy(); // 旧図は降格して写真として存在
   });
 
+  it("写真1枚を間取り図にしても概要表が定位置(右1/3)へスナップし重ならない(@codex #298)", () => {
+    // overview を左寄り(x=120)に手動配置＋写真1枚。その1枚を間取り図に→写真0枚でも概要表を寄せる。
+    const movedOverview = {
+      id: "overview", type: "table", x: 120, y: 26, w: 100, h: 158, z: 1,
+      rows: [{ label: "物件種別", value: "売地" }], style: {},
+    };
+    const s = setAsFloorPlan(makeState([img(1), movedOverview]), "img-1", "d");
+    const ov = byId(s, "overview") as ImageElement; // table だが x/w だけ見る
+    const fp = byId(s, "floor-plan") as ImageElement;
+    expect(ov.x).toBeCloseTo(188, 0); // 定位置(右1/3=297−10−99)へスナップ
+    expect(fp.x + fp.w).toBeLessThanOrEqual(ov.x + 0.5); // 図が概要表に食い込まない
+  });
+
   it("image でない要素・存在しない id は no-op(同一参照)", () => {
     const s = makeState([overviewEl(), img(1)]);
     expect(setAsFloorPlan(s, "overview", "d")).toBe(s);
