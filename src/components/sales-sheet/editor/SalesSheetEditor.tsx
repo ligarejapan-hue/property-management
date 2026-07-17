@@ -317,8 +317,10 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         case "sendToBack":
           return sendToBack(prev, id);
         case "delete":
-          // 地図QR削除時は、QRのために縮めた間取図を全高へ戻す(@codex #300)。
-          return id === MAP_QR_ID ? deleteMapQr(prev) : deleteElement(prev, id);
+          // 地図QR削除時は、縮めた間取図を全高へ戻し写真を再整列する(@codex #300)。
+          return id === MAP_QR_ID
+            ? deleteMapQr(prev, cachedGalleryAspects(prev.document))
+            : deleteElement(prev, id);
         case "editText":
           // 文字サイズ変更での自動再バランスは撤去（@codex P2 / review 3件が指摘）: レイアウトを
           // 駆動する概要表フォントは editText 対象外ゆえ、見出し等の text フォント変更では枠が

@@ -142,6 +142,43 @@ describe("addMapQrElement", () => {
     for (const im of imgs) expect(overlap(im, q)).toBe(false); // 写真は QR と重ならない
   });
 
+  it("QRをリサイズしてから削除しても間取図が全高へ戻る(固定予約・@codex #300)", () => {
+    const s1 = addMapQrElement(makeState([floorPlan({ y: 46, h: 127 })]), { address: ADDR });
+    const shrunk = fpOf(s1).h;
+    // 地図QR を 20mm にリサイズ(可変)しても、予約量は固定なので削除で全高へ戻る。
+    const s2: EditorState = {
+      ...s1,
+      document: {
+        ...s1.document,
+        elements: s1.document.elements.map((e) => (e.id === MAP_QR_ID ? { ...e, h: 20 } : e)),
+      },
+    };
+    const s3 = deleteMapQr(s2);
+    expect(fpOf(s3).h).toBeGreaterThan(shrunk);
+  });
+
+  it("図なし: 地図QRを削除すると写真が下へ広がる(予約解放・@codex #300)", () => {
+    const overview = { id: "overview", type: "table", x: 188, y: 26, w: 99, h: 158, z: 1, rows: [{ label: "a", value: "b" }], style: {} };
+    const photos = [1, 2, 3].map((n) => ({
+      id: `img-${n}`, type: "image", x: 20, y: 60, w: 60, h: 40, z: n, src: SRC, fit: "cover",
+    }));
+    const s1 = addMapQrElement(makeState([...photos, overview]), { address: ADDR });
+    const bottom = (s: EditorState) =>
+      Math.max(...s.document.elements.filter((e) => e.type === "image").map((e) => e.y + e.h));
+    const s2 = deleteMapQr(s1);
+    expect(bottom(s2)).toBeGreaterThan(bottom(s1)); // 予約帯が解けて写真が下へ広がる
+  });
+
+  it("概要表を手動でずらしていても、追加時にスナップされ地図QRが重ならない(@codex #300)", () => {
+    const overview = { id: "overview", type: "table", x: 250, y: 26, w: 37, h: 158, z: 1, rows: [{ label: "a", value: "b" }], style: {} };
+    const photo = { id: "img-1", type: "image", x: 20, y: 60, w: 60, h: 40, z: 2, src: SRC, fit: "cover" };
+    const s = addMapQrElement(makeState([overview, photo]), { address: ADDR });
+    const ov = s.document.elements.find((e) => e.id === "overview")!;
+    const q = qrOf(s)!;
+    expect(ov.x).toBeCloseTo(188, 0); // 概要表が定位置へスナップ
+    expect(q.x + q.w).toBeLessThanOrEqual(ov.x + 0.5); // QR はスナップ後の概要表の左
+  });
+
   it("用紙内にクランプ(負値・はみ出しなし)", () => {
     const s = addMapQrElement(makeState([floorPlan({ y: 46, h: 150 })]), { address: ADDR });
     const q = qrOf(s)!;
