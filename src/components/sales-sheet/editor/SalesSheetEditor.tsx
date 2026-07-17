@@ -25,6 +25,7 @@ import {
   addQrElement,
   autoArrangePhotos,
   autoBalanceLayout,
+  clampElementsToPage,
   editFooterData,
   deleteElement,
   markSavedIfCurrent,
@@ -107,7 +108,11 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   // EditorState + 元に戻す/やり直す履歴を単一の純 reducer(editorHistoryReducer)で管理。
   const [historyState, dispatch] = useReducer(
     editorHistoryReducer,
-    { document: initial.document, selectedId: null, dirty: false },
+    // 開いた時点で用紙外にはみ出した要素(過去データ/編集事故で用紙下端の外などに残った
+    // 見えない要素)を用紙内へ引き戻して選択・編集できるようにする。用紙内に収まっている
+    // 図面は同一参照=変更なし(dirty のまま false)。はみ出しがあった時のみ dirty=true で
+    // 保存を促す。
+    clampElementsToPage({ document: initial.document, selectedId: null, dirty: false }),
     initHistoryState,
   );
   const editorState = historyState.editor;
