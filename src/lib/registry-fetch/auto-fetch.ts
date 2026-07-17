@@ -147,6 +147,13 @@ interface RegistryPageLike {
   // 戻り値は使わないため unknown（実 Playwright Page.evaluate はより広い型だが構造的に代入可能）。
   evaluate(pageFunction: (arg: string) => unknown, arg: string): Promise<unknown>;
   waitForEvent(event: string, options?: unknown): Promise<RegistryDownloadLike>;
+  // ブラウザ内の述語が真になるまで待つ（実 Playwright Page.waitForFunction）。候補一覧の
+  // 次ページ遷移で「ページが実際に切り替わった（=1行目の候補refが変わった）」ことを待つのに使う。
+  waitForFunction(
+    pageFunction: (arg: unknown) => unknown,
+    arg?: unknown,
+    options?: unknown,
+  ): Promise<unknown>;
   // 所在検索の結果行を DOM から抽出する（実 Playwright は $$eval で各行のセルを読む）。
   $$eval(
     selector: string,
@@ -661,16 +668,34 @@ function createPlaywrightRegistryPage(
           }
           if (added === 0) break; // 進捗なし(想定外DOM/同一ページ)→安全停止
           // 次ページボタンは通常ボタン(login のような被り/js href ではない)ので page.click で押す。
+          const prevFirstRef = rows[0]?.candidateRef ?? "";
           await page.click(REGISTRY_SELECTORS.dialogPageNext);
           try {
-            // 次ページの非同期ロードを待つ。読めなければここまでで確定(取りこぼしは避けられないが退行はしない)。
-            await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
-              state: "attached",
-              timeout: DIALOG_RESULT_TIMEOUT_MS,
-            });
+            // @codex P1: 単に checkbox の attached を待つと、旧ページの checkbox が残っている間に
+            // 即 resolve し、旧行を再読込→全て seen 済み→added===0 で1ページ目しか返らない。
+            // 「ページが実際に切り替わった(1行目の候補refが前ページと変わり、ロード完了)」まで待つ。
+            await page.waitForFunction(
+              (arg) => {
+                const { tableSel, prevRef } = arg as {
+                  tableSel: string;
+                  prevRef: string;
+                };
+                const t = document.querySelector(tableSel);
+                if (!t) return false;
+                if (/データ取得中/.test(t.textContent ?? "")) return false;
+                const first = t.querySelector('input[type="checkbox"]');
+                const id = (first?.getAttribute("id") ?? "").trim();
+                return id !== "" && id !== prevRef;
+              },
+              {
+                tableSel: REGISTRY_SELECTORS.dialogResultTable,
+                prevRef: prevFirstRef,
+              },
+              { timeout: DIALOG_RESULT_TIMEOUT_MS },
+            );
           } catch (pageErr) {
             if (!isTimeoutError(pageErr)) throw pageErr;
-            break;
+            break; // 次ページに切り替わらない(読めない)→ここまでで確定(退行はしない)
           }
         }
         if (capped) {

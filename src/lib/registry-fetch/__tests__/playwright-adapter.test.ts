@@ -67,6 +67,7 @@ function makeFakeChromium() {
       if (selector === REGISTRY_FORCE_LOGIN_MARKER) throw makeTimeoutError();
       return {};
     }),
+    waitForFunction: vi.fn(async () => ({})),
     waitForEvent: vi.fn(async () => ({
       createReadStream: async () => Readable.from([Buffer.from("%PDF-1.4 dl")]),
     })),
@@ -575,6 +576,31 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.page.$$eval).toHaveBeenCalledTimes(2);
     // 次ページボタンを1回押す(通常ボタン=page.click)。
     expect(f.page.click).toHaveBeenCalledWith("#cbnDlgBtnPageNext");
+    // @codex P1: 単純な checkbox attached 待ちでなく「ページが実際に切り替わる」まで待つ
+    // (waitForFunction)。旧ページ残存 checkbox で即 resolve して1ページ目のみ返す退行を防ぐ。
+    expect(f.page.waitForFunction).toHaveBeenCalledTimes(1);
+  });
+
+  it("C9q: ページ切替待ち(waitForFunction)が timeout したら以降を諦め既取得分を返す(退行なし・@codex P1)", async () => {
+    const f = makeFakeChromium();
+    f.page.$$eval = vi
+      .fn()
+      .mockResolvedValueOnce([{ candidateRef: "chk_1", lotNumber: "１－１" }]);
+    // 次ページは常に有効を返すが、ページ切替待ちが timeout → 1ページ目で確定。
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "#cbnDlgBtnPageNext" ? true : undefined,
+    );
+    f.page.waitForFunction = vi.fn(async () => {
+      throw makeTimeoutError();
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    const candidates = await page.searchByLocation!({
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "1",
+      buildingNumber: null,
+    });
+    expect(candidates.map((c) => c.candidateRef)).toEqual(["chk_1"]);
   });
 
   it("C9g: 検索が0件(checkbox 無し)でロード完了なら空配列を返す(timeout にしない・@codex P2)", async () => {
