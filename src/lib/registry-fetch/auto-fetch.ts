@@ -184,11 +184,15 @@ export const DEFAULT_REGISTRY_BASE_URL = "https://www.touki.or.jp";
 /**
  * ログインページの既定パス（base URL に前置する相対パス）。
  *
- * 実画面HTML(2026-07-14 御社保存・login.html の form action)で確定した実パス。
+ * コンテキストルート /TeikyoUketsuke/ = ログイン画面の入口（2026-07-17 本番VPSの headless
+ * chromium で実測・ログイン成功まで実証）。旧値 /TeikyoUketsuke/common/login（保存HTMLの
+ * form action パス）は **直接アクセスするとセッション未確立で「ページ期限切れ」画面**
+ * （フォーム無し・HTTP 200）が返り、#userId の fill timeout → auth_failed になる。
+ * form の送信先パスと「ブラウザで開く入口」は別物。
  * REGISTRY_FETCH_LOGIN_PATH（env）で上書き可能(サイト改修時の即応用)。
  * 非PII・非secret（公開された公式サービスのパス）。
  */
-export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/common/login";
+export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
 
 // 実画面HTML(2026-07-14 御社保存)から確定したセレクタ。設計資料 =
 // deliverables/registry-calibration/selector-map-20260714.md。
@@ -242,7 +246,10 @@ function isTimeoutError(err: unknown): boolean {
 }
 
 /**
- * ログイン失敗の分類サマリを作る（運用診断ログ用）。エラー名 + メッセージ先頭行のみ。
+ * ログイン失敗の分類サマリを作る（運用診断ログ用）。エラー名 + メッセージ先頭行 +
+ * Playwright call log の最初の "waiting for ..." 行（あれば）。先頭行だけでは
+ * 「page.fill: Timeout 30000ms exceeded.」のように **どのセレクタで** 詰まったかが journal から
+ * 読めず、実障害（2026-07-17 ページ期限切れ）で切り分けに再調査を要した。
  * secret（loginId/password の実値）は Playwright エラーに載らない想定だが、防御的に除去する。
  * PII は含めない（このエラー経路のメッセージはセレクタ名/URL/TimeoutError 程度で、所有者名等は含まない）。
  */
@@ -250,8 +257,11 @@ export function summarizeRegistryLoginError(
   err: unknown,
   secrets: string[] = [],
 ): string {
+  const raw = err instanceof Error ? err.message : String(err);
   const name = err instanceof Error ? err.name : "unknown";
-  let msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
+  const lines = raw.split("\n");
+  const waiting = lines.find((l) => l.includes("waiting for"));
+  let msg = waiting ? `${lines[0]} (${waiting.trim()})` : lines[0];
   for (const s of secrets) {
     if (s) msg = msg.split(s).join("***");
   }
@@ -549,7 +559,7 @@ export function resolveDefaultRegistryBrowserFactory(
   const timeoutRaw = process.env.REGISTRY_FETCH_TIMEOUT_MS;
   const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
   // CodexP2: login パスは env（REGISTRY_FETCH_LOGIN_PATH）で上書き可能（誤った固定値で確定しない）。
-  //   未設定なら DEFAULT_REGISTRY_LOGIN_PATH（"/login"・TODO(calibrate)）。非PII・非secret。
+  //   未設定なら DEFAULT_REGISTRY_LOGIN_PATH（"/TeikyoUketsuke/"・実測確定）。非PII・非secret。
   const loginPath =
     process.env.REGISTRY_FETCH_LOGIN_PATH || DEFAULT_REGISTRY_LOGIN_PATH;
 

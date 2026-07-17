@@ -236,6 +236,26 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(out.length).toBeLessThanOrEqual(300);
   });
 
+  // 2026-07-17 運用診断の穴: 先頭行のみだと「page.fill: Timeout 30000ms exceeded.」で
+  // **どのセレクタで**待ちタイムアウトしたかが journal から読めなかった(実障害で再調査が必要に
+  // なった)。Playwright の call log にある最初の "waiting for ..." 行を要約へ含める。
+  it("C3e: summarizeRegistryLoginError は call log の waiting for 行(失敗セレクタ)を含める", () => {
+    const e = new Error(
+      [
+        "page.fill: Timeout 30000ms exceeded.",
+        "Call log:",
+        "  - waiting for locator('#userId')",
+        "    - navigated to secret-url",
+      ].join("\n"),
+    );
+    e.name = "TimeoutError";
+    const out = summarizeRegistryLoginError(e, ["secret-url"]);
+    expect(out).toContain("TimeoutError");
+    expect(out).toContain("#userId"); // 失敗セレクタが読める
+    expect(out).not.toContain("secret-url"); // secret 除去は全行に効く
+    expect(out.length).toBeLessThanOrEqual(300);
+  });
+
   it("C3d: login 失敗ログは baseUrl / login URL を除去する（env の内部エンドポイント非露出・@codex）", async () => {
     const f = makeFakeChromium();
     const secretBase = "https://internal.reg.example";
@@ -429,11 +449,18 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
   });
 
   // CodexP2-2: search のセットアップ(fill/click)由来 timeout は not_found ではなく provider_error。
-  // CodexP2: login のパスは env（REGISTRY_FETCH_LOGIN_PATH）で上書きできる。
-  // 既定の "/login" は実サービスのログインパスと一致が未確証ゆえ、live キャリブレーション時に
-  // 固定値を確定する前に env で校正できるようにする（誤った固定値で確定しない）。
+  // CodexP2: login のパスは env（REGISTRY_FETCH_LOGIN_PATH）で上書きできる
+  // （サイト改修時に固定値を変えずに即応できるようにする）。
   it("C14: DEFAULT_REGISTRY_LOGIN_PATH は '/' 始まりの相対パス（base に前置する想定）", () => {
     expect(DEFAULT_REGISTRY_LOGIN_PATH.startsWith("/")).toBe(true);
+  });
+
+  // 2026-07-17 本番VPSでの実測: form action のパス /TeikyoUketsuke/common/login へ **直接** goto
+  // するとセッション未確立で「ページ期限切れ」画面(フォーム無し)が返り、#userId の fill が
+  // timeout → auth_failed になる。コンテキストルート /TeikyoUketsuke/ ならログインフォームが
+  // 直接表示される(ログイン成功まで実証済み)。期限切れパスへの回帰を値で固定する。
+  it("C14b: DEFAULT_REGISTRY_LOGIN_PATH は入口 /TeikyoUketsuke/（直接アクセス可）であり、ページ期限切れになる /common/login ではない", () => {
+    expect(DEFAULT_REGISTRY_LOGIN_PATH).toBe("/TeikyoUketsuke/");
   });
 
   it("C15: login で baseUrl 省略時は default base + default login path の絶対 URL へ goto する", async () => {
@@ -461,7 +488,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(gotoUrl).not.toContain("/login");
   });
 
-  it("C17: REGISTRY_FETCH_LOGIN_PATH 未設定なら既定 login path（/login）を使う", async () => {
+  it("C17: REGISTRY_FETCH_LOGIN_PATH 未設定なら既定 login path（DEFAULT_REGISTRY_LOGIN_PATH）を使う", async () => {
     const f = makeFakeChromium();
     const factory = resolveDefaultRegistryBrowserFactory({
       chromiumLoader: f.loader,
