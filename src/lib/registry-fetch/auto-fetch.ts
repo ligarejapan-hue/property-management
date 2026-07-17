@@ -391,6 +391,9 @@ function createPlaywrightRegistryPage(
         // この確認画面が出る(本アプリは自動取得後にログアウトせず close するため残りやすい)。
         // 着地は上で確定済みなので、ここはマーカー有無の短時間判定でよい(在れば強制ログイン、
         // 無ければ通常メニュー着地=想定内としてスキップ)。
+        // 確認画面か否かの「判定」だけを内側 try に閉じる(未出現=通常メニュー着地=正常スキップ)。
+        // 突破処理(ボタン待ち→click→消失確認)は外側 try 内に置き、その timeout は auth_failed に
+        // 正しく落とす(「確認画面ありなのに突破できない」を正常スキップと混同しない)。
         let sawForceLoginConfirm = false;
         try {
           // マーカーは hidden input のため state:"attached"(DOM 存在で判定)にする。
@@ -401,17 +404,21 @@ function createPlaywrightRegistryPage(
             timeout: FORCE_LOGIN_CONFIRM_DETECT_MS,
           });
           sawForceLoginConfirm = true;
+        } catch (err) {
+          // マーカー未出現(timeout)=二重ログインでない=正常。それ以外は本当の失敗として送出。
+          if (!isTimeoutError(err)) throw err;
+        }
+        if (sawForceLoginConfirm) {
+          // 「強制ログイン」ボタンの出現を待ってから押す。確認画面のパース途中では marker(hidden)
+          // だけが先に attached になり、ボタン未描画のまま evaluate すると querySelector が null で
+          // 空振り(無操作)になる。初回ログインの loginSubmit 待ちと同じ race 回避(@codex 指摘)。
+          await page.waitForSelector(REGISTRY_SELECTORS.forceLoginSubmit);
           await page.evaluate((sel) => {
             const el = document.querySelector(sel);
             if (el && typeof (el as { click?: unknown }).click === "function") {
               (el as unknown as { click: () => void }).click();
             }
           }, REGISTRY_SELECTORS.forceLoginSubmit);
-        } catch (err) {
-          // マーカー未出現(timeout)=二重ログインでない=正常。それ以外は本当の失敗として送出。
-          if (!isTimeoutError(err)) throw err;
-        }
-        if (sawForceLoginConfirm) {
           // 強制ログインを押した「はず」だけでは不十分。loggedIn(logoutForm)は確認画面にも
           // 存在するため、押下が空振り(セレクタ変更/ボタン無効化等)でも直後の loggedIn 待ちが
           // 即満たされ「成功」と誤認しうる(=本番の実障害と同型)。確認画面固有マーカーの

@@ -342,6 +342,15 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
         opt?.state === "attached",
     );
     expect(groupWaited).toBe(true);
+    // 強制ログインボタン(button.CForwardLong)は click 前に waitForSelector で待つ
+    // (確認画面パース途中の空振り race を防ぐ)。login と force で計2回待つ(=force 側の
+    // ボタン待ちが消えると1回に落ちて検知できる・@codex 指摘)。
+    const buttonWaits = (
+      f.page.waitForSelector as unknown as {
+        mock: { calls: Array<[string, unknown?]> };
+      }
+    ).mock.calls.filter(([sel]) => sel === "button.CForwardLong").length;
+    expect(buttonWaits).toBe(2);
   });
 
   it("C3h: 強制ログインを押しても確認画面から抜けない(マーカー残存)なら失敗させる", async () => {
