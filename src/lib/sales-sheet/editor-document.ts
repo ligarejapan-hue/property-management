@@ -566,7 +566,13 @@ function positionMapQr(
   const fpIdx = elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
   if (fpIdx === -1) {
     // 図なし → 右下(会社帯の上)フォールバック。
-    const qrX = clamp(page.width - qr.w - 10, 0, Math.max(0, page.width - qr.w));
+    // 概要表(右1/3)を避けるため、その左端の手前・会社帯の上に置く(右端ぴったりだと
+    // 概要表のセルを覆う・@codex #300 P1)。概要表の実位置(無ければ定位置)を基準にする。
+    const overviewEl = elements.find((e) => e.id === "overview");
+    const ovLeft = overviewEl
+      ? overviewEl.x
+      : page.width - PHOTO_ZONE_X_MM - page.width / 3;
+    const qrX = clamp(ovLeft - COLUMN_GAP_MM - qr.w, 0, Math.max(0, page.width - qr.w));
     const qrY = clamp(contentBottom - qr.h, 0, Math.max(0, page.height - qr.h));
     if (nearlyEqual(qrX, qr.x) && nearlyEqual(qrY, qr.y)) return elements;
     const next = elements.slice();
@@ -660,6 +666,26 @@ export function addMapQrElement(
     selectedId: MAP_QR_ID,
     document: { ...document, elements },
   };
+}
+
+/**
+ * 地図QR(map-qr)を削除し、QR のために縮めた間取図を全高(会社帯の上端=contentBottom まで)へ
+ * 戻す(@codex #300: 予約解放)。map-qr が無ければ no-op。floor-plan が無ければ削除のみ。
+ */
+export function deleteMapQr(state: EditorState): EditorState {
+  if (!state.document.elements.some((e) => e.id === MAP_QR_ID)) return state;
+  const removed = deleteElement(state, MAP_QR_ID);
+  const { document } = removed;
+  const { page } = document;
+  const fpIdx = document.elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
+  if (fpIdx === -1) return removed;
+  const fp = document.elements[fpIdx];
+  const contentBottom = page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM;
+  const fullH = Math.max(MIN_ELEMENT_SIZE_MM, contentBottom - fp.y);
+  if (nearlyEqual(fp.h, fullH)) return removed;
+  const elements = document.elements.slice();
+  elements[fpIdx] = applyGeom(fp, { h: fullH });
+  return { ...removed, dirty: true, document: { ...document, elements } };
 }
 
 /**

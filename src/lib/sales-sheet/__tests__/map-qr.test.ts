@@ -11,6 +11,7 @@ import {
   autoBalanceLayout,
   setAsFloorPlan,
   unsetFloorPlan,
+  deleteMapQr,
   MAP_QR_ID,
 } from "../editor-document";
 import {
@@ -100,11 +101,22 @@ describe("addMapQrElement", () => {
     expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // QR は会社帯の上
   });
 
-  it("間取図が無ければ右下(ただし会社帯の上)", () => {
-    const s = addMapQrElement(makeState([]), { address: ADDR });
+  it("間取図が無ければ概要表の左・会社帯の上(概要表を覆わない・@codex #300 P1)", () => {
+    const overview = { id: "overview", type: "table", x: 188, y: 26, w: 99, h: 158, z: 1, rows: [{ label: "a", value: "b" }], style: {} };
+    const s = addMapQrElement(makeState([overview]), { address: ADDR });
     const q = qrOf(s)!;
-    expect(q.x + q.w).toBeGreaterThan(297 * 0.6); // 右側
-    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯を覆わない
+    expect(q.x + q.w).toBeLessThanOrEqual(188 + 0.5); // 概要表(x=188)の左に収まる
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯も覆わない
+  });
+
+  it("地図QRを削除すると縮めた間取図が全高へ戻る(@codex #300)", () => {
+    const s0 = makeState([floorPlan({ y: 46, h: 127 })]); // 全高相当
+    const s1 = addMapQrElement(s0, { address: ADDR }); // 図が縮む
+    expect(fpOf(s1).h).toBeLessThan(127);
+    const s2 = deleteMapQr(s1);
+    expect(s2.document.elements.some((e) => e.id === MAP_QR_ID)).toBe(false);
+    expect(fpOf(s2).h).toBeGreaterThan(fpOf(s1).h); // 全高へ戻る(空白解消)
+    expect(fpOf(s2).y + fpOf(s2).h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5);
   });
 
   it("用紙内にクランプ(負値・はみ出しなし)", () => {
