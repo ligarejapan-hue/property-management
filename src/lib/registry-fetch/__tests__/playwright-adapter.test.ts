@@ -548,6 +548,35 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.page.fill).not.toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "1番1");
   });
 
+  it("C9p: 複数ページの候補を次ページボタンで全て集める(@codex P1)", async () => {
+    const f = makeFakeChromium();
+    // $$eval: 1回目=1ページ目、2回目=2ページ目。
+    f.page.$$eval = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { candidateRef: "chk_1", lotNumber: "１－１" },
+        { candidateRef: "chk_2", lotNumber: "１－２" },
+      ])
+      .mockResolvedValueOnce([{ candidateRef: "chk_3", lotNumber: "１－３" }]);
+    // 次ページ有無(evaluate(#cbnDlgBtnPageNext)): 1ページ目後 true、2ページ目後 false。
+    let nextChecks = 0;
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "#cbnDlgBtnPageNext" ? nextChecks++ === 0 : undefined,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    const candidates = await page.searchByLocation!({
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "1",
+      buildingNumber: null,
+    });
+    // 2ページ分を重複排除して全件返す。
+    expect(candidates.map((c) => c.candidateRef)).toEqual(["chk_1", "chk_2", "chk_3"]);
+    expect(f.page.$$eval).toHaveBeenCalledTimes(2);
+    // 次ページボタンを1回押す(通常ボタン=page.click)。
+    expect(f.page.click).toHaveBeenCalledWith("#cbnDlgBtnPageNext");
+  });
+
   it("C9g: 検索が0件(checkbox 無し)でロード完了なら空配列を返す(timeout にしない・@codex P2)", async () => {
     const f = makeFakeChromium();
     f.page.waitForSelector = vi.fn(async (s: string) => {

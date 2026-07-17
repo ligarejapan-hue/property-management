@@ -220,6 +220,9 @@ const FORCE_LOGIN_CONFIRM_DETECT_MS = 1500;
  */
 const DIALOG_RESULT_TIMEOUT_MS = 15000;
 
+/** 地番検索ダイアログの結果ページを読み進める上限(暴走防止)。超えたら打ち切りログを残す。 */
+const MAX_DIALOG_PAGES = 20;
+
 // 実画面HTML(2026-07-14 御社保存)から確定したセレクタ。設計資料 =
 // deliverables/registry-calibration/selector-map-20260714.md。
 // [確定] = 保存HTMLで実要素を確認済み / [要live] = 動的生成・実サイト実行でのみ確定。
@@ -256,6 +259,7 @@ const REGISTRY_SELECTORS = {
   dialogSearch: "#cbnDlgChibanSearch", // [確定] ダイアログ内検索(結果は非同期ロード)
   dialogResultTable: "#cbnDlgChibanCheckTbl", // [確定] 候補テーブル(非同期ロード)
   dialogResultCheckbox: "#cbnDlgChibanCheckTbl input[type=checkbox]", // [確定] 候補行チェックボックス
+  dialogPageNext: "#cbnDlgBtnPageNext", // [確定] 候補一覧の次ページ(複数ページ時)
   dialogCancel: "#cbnDlgBtnCancel", // [確定] ダイアログ取消(課金しない閉じ方)
 } as const;
 
@@ -619,15 +623,67 @@ function createPlaywrightRegistryPage(
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           return [];
         }
-        // ブラウザ内で候補行を読む(extractChibanCandidateRows は self-contained/serializable)。
-        const rows = (await page.$$eval(
-          `${REGISTRY_SELECTORS.dialogResultTable} tr`,
-          extractChibanCandidateRows,
-        )) as Array<{ candidateRef: string; lotNumber: string | null }>;
+        // 結果は複数ページに渡り得る(#cbnDlgBtnPageNext)。1ページ目だけ読んで閉じると後続ページの
+        // 候補を取りこぼす(@codex P1)。次ページボタンが有効な限り読み進める(candidateRef で重複排除・
+        // 上限 MAX_DIALOG_PAGES で打ち切りログ)。⚠複数ページ時のDOM挙動は[要live]未観測のため防御的:
+        // 次ボタンが無い/無効/新規候補ゼロ/次ページ読込 timeout のいずれでも安全に停止する(最悪でも
+        // 1ページ目=従来挙動=退行なし)。
+        const collected: Array<{ candidateRef: string; lotNumber: string | null }> = [];
+        const seen = new Set<string>();
+        let capped = false;
+        for (let pageNo = 0; ; pageNo++) {
+          const rows = (await page.$$eval(
+            `${REGISTRY_SELECTORS.dialogResultTable} tr`,
+            extractChibanCandidateRows,
+          )) as Array<{ candidateRef: string; lotNumber: string | null }>;
+          let added = 0;
+          for (const r of rows) {
+            if (r.candidateRef && !seen.has(r.candidateRef)) {
+              seen.add(r.candidateRef);
+              collected.push(r);
+              added++;
+            }
+          }
+          // 次ページボタンが存在し有効(非 disabled・非表示でない)か。
+          const hasNext = await page.evaluate((sel) => {
+            const b = document.querySelector(sel) as {
+              disabled?: boolean;
+            } | null;
+            if (!b) return false;
+            if (b.disabled) return false;
+            const style = getComputedStyle(b as unknown as Element);
+            return style.display !== "none" && style.visibility !== "hidden";
+          }, REGISTRY_SELECTORS.dialogPageNext);
+          if (!hasNext) break;
+          if (pageNo + 1 >= MAX_DIALOG_PAGES) {
+            capped = true;
+            break;
+          }
+          if (added === 0) break; // 進捗なし(想定外DOM/同一ページ)→安全停止
+          // 次ページボタンは通常ボタン(login のような被り/js href ではない)ので page.click で押す。
+          await page.click(REGISTRY_SELECTORS.dialogPageNext);
+          try {
+            // 次ページの非同期ロードを待つ。読めなければここまでで確定(取りこぼしは避けられないが退行はしない)。
+            await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
+              state: "attached",
+              timeout: DIALOG_RESULT_TIMEOUT_MS,
+            });
+          } catch (pageErr) {
+            if (!isTimeoutError(pageErr)) throw pageErr;
+            break;
+          }
+        }
+        if (capped) {
+          // 上限で打ち切った=候補を全ては返せていない(無言の truncation を避け運用に残す)。
+          console.warn(
+            "[registry-search] candidate pages capped at",
+            MAX_DIALOG_PAGES,
+          );
+        }
         // 課金しない: ダイアログはキャンセルで閉じる(確定/請求は押さない)。
         await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
         // 行の番号値(#cbnDlgChibanDt_*)は種別に応じて地番 or 家屋番号。種別に合う欄へ入れる(@codex P1)。
-        return rows.map((r) => ({
+        return collected.map((r) => ({
           candidateRef: r.candidateRef,
           address: input.address,
           lotNumber: isBuilding ? null : r.lotNumber,
