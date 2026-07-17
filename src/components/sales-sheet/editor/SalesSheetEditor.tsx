@@ -25,6 +25,8 @@ import {
   addQrElement,
   autoArrangePhotos,
   autoBalanceLayout,
+  setAsFloorPlan,
+  unsetFloorPlan,
   clampElementsToPage,
   editFooterData,
   deleteElement,
@@ -199,6 +201,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   /** Dispatches moveElement reducer — called by EditorCanvas onDragEnd. */
   function handleMove(id: string, pos: { x: number; y: number }): void {
     setEditorState((prev) => moveElement(prev, id, pos));
+    // 中央列(間取り図/敷地図)を動かしたら、写真を残りスペースへ詰め直す(指を離した瞬間)。
+    if (id === "floor-plan") void reflowPhotosForFloorPlan();
   }
 
   /** リサイズ確定 — サイズと(top/leftハンドルで動いた)原点を1回の更新で適用=
@@ -210,10 +214,28 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           resizeElementWithOrigin(prev, id, { x: size.x, y: size.y, w: size.w, h: size.h })
         : resizeElement(prev, id, size),
     );
+    // 中央列(間取り図/敷地図)の幅を変えたら、写真を反比例で詰め直す(指を離した瞬間)。
+    if (id === "floor-plan") void reflowPhotosForFloorPlan();
+  }
+
+  /** 中央列(間取り図)の移動/リサイズ確定後に、写真を残りスペースへモザイクで詰め直す。
+   *  実寸比は src 由来(位置非依存)なので、確定前 document から測って最新 state へ適用する。 */
+  async function reflowPhotosForFloorPlan(): Promise<void> {
+    const aspects = await measureGalleryAspects(editorState.document);
+    setEditorState((prev) => autoArrangePhotos(prev, { aspects }));
   }
 
   /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */
   function handleElementPanelChange(change: ElementPanelChange): void {
+    // 間取り図の指定/解除は実寸比を測ってから整列する async 経路へ委譲する。
+    if (change.type === "setFloorPlan") {
+      void handleSetFloorPlan();
+      return;
+    }
+    if (change.type === "unsetFloorPlan") {
+      void handleUnsetFloorPlan();
+      return;
+    }
     setEditorState((prev) => {
       const id = prev.selectedId;
       if (!id) return prev;
@@ -237,6 +259,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           return editText(prev, id, change.patch);
         case "editImage":
           return editImage(prev, id, change.patch);
+
         case "editBadge":
           return editBadge(prev, id, change.patch);
         case "editQr":
@@ -278,9 +301,49 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) => (prev.document === docAtCall ? autoArrangePhotos(prev, { aspects }) : prev));
   }
 
-  /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。 */
-  function handleAutoBalance(): void {
-    setEditorState((prev) => autoBalanceLayout(prev));
+  /** 選択中の写真を中央列の間取り図/敷地図にする（実寸比を測って写真を図の左へ整列）。 */
+  async function handleSetFloorPlan(): Promise<void> {
+    const id = editorState.selectedId;
+    if (!id) return;
+    const doc = editorState.document;
+    const aspects = await measureGalleryAspects(doc);
+    const demotedId = safeRandomId();
+    // 既存の間取り図がある場合は写真へ降格する＝そのまま写真ゾーンのモザイクに再合流する。
+    // measureGalleryAspects は floor-plan を除外するため、降格後の実寸比を別途測って
+    // demotedId で登録する（未登録だと旧・中央列枠の縦横比にフォールバックし余白/歪みが出る）。
+    const existingFp = doc.elements.find(
+      (e): e is ImageElement => e.id === "floor-plan" && e.type === "image",
+    );
+    if (existingFp) {
+      const a = await measureAspect(existingFp.src);
+      if (a !== null) aspects[demotedId] = a;
+    }
+    setEditorState((prev) => setAsFloorPlan(prev, id, demotedId, aspects));
+  }
+
+  /** 中央列の間取り図/敷地図を通常の写真へ戻す（実寸比を測って写真を再整列）。 */
+  async function handleUnsetFloorPlan(): Promise<void> {
+    const doc = editorState.document;
+    const aspects = await measureGalleryAspects(doc);
+    const newId = safeRandomId();
+    // 解除で写真へ戻る間取り図は measureGalleryAspects の対象外ゆえ、実寸比を測って newId で
+    // 登録する（未登録だと中央列枠の縦横比でモザイク化され余白/歪みが出る）。
+    const fp = doc.elements.find(
+      (e): e is ImageElement => e.id === "floor-plan" && e.type === "image",
+    );
+    if (fp) {
+      const a = await measureAspect(fp.src);
+      if (a !== null) aspects[newId] = a;
+    }
+    setEditorState((prev) => unsetFloorPlan(prev, newId, aspects));
+  }
+
+  /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。
+   *  中央列(間取り図)・概要表・見出し等を整え直したうえで、写真は残りスペースへモザイクで
+   *  詰め直す（「写真を自動整列」と結果を揃える＝レイアウト自動調整でも写真がきれいに並ぶ）。 */
+  async function handleAutoBalance(): Promise<void> {
+    const aspects = await measureGalleryAspects(editorState.document);
+    setEditorState((prev) => autoArrangePhotos(autoBalanceLayout(prev), { aspects }));
   }
 
   /** オリジナルバッジを追加する（バッジデザイナー・計画⑦）。 */

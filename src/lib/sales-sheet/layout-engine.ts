@@ -84,7 +84,7 @@ const SPLIT_X_MAX_MM = 145;
 /** splitX 補間の t を作るための photoCount 正規化の分母（0..3枚 → 0..1）。 */
 const SPLIT_X_PHOTO_COUNT_DIVISOR = 3;
 /** splitX と photoArea 右端の間の余白(mm)。 */
-const COLUMN_GAP_MM = 6;
+export const COLUMN_GAP_MM = 6;
 
 /** overview（概要表）の右端 x 座標。エディタの overview 定位置スナップも使う。 */
 export const OVERVIEW_RIGHT_MM = 287;
@@ -137,15 +137,12 @@ const COMPANY_DETAILS_H_MM = 7;
 const COMPANY_DETAILS_Y_OFFSET_MM = 6;
 
 /**
- * floorPlan（間取り図・hasFloorPlan 時のみ）。写真域(左カラム)の上端に置き、写真は
- * その下に敷き詰める（@review Fix1）。splitX が写真枚数で可変になったため、固定座標
- * だと overview(x=splitX+5起点) や heading/price(右端=splitX-16起点) と重なり得る —
- * 写真域の原点に置けば、写真域自体が既に他領域と重ならない設計（splitX 左側）ため安全。
+ * floorPlan（間取り図・敷地図・hasFloorPlan 時のみ）は 3列構成の「中央列」に置く。
+ * 既定の左端は FLOOR_PLAN_MIDDLE_X_MM（概ね版面を三等分＝写真[左]／図[中央]／概要表[右1/3]）。
+ * 右端は概要表の左に近接、写真域(左カラム)の右端は中央列の左端 − COLUMN_GAP。実編集では
+ * ユーザーが中央列の幅をドラッグで調整し、写真は残りスペースへモザイクで詰め直される。
  */
-const FLOOR_PLAN_W_MM = 32;
-const FLOOR_PLAN_H_MM = 18;
-/** floorPlan と、その下の写真敷詰め領域の間の余白(mm)。 */
-const FLOOR_PLAN_GAP_MM = 4;
+const FLOOR_PLAN_MIDDLE_X_MM = 99;
 
 // ---------------------------------------------------------------------------
 // Local math helpers (pure)
@@ -279,25 +276,34 @@ export function computeSpecSheetLayout(input: SpecSheetLayoutInput): SpecSheetLa
     fontSizePt: overviewFontSizePt,
   };
 
-  const photoAreaW = Math.max(0, effectiveSplitX - PHOTO_AREA_X_MM - COLUMN_GAP_MM);
+  // 写真敷詰めの下端は salesPoints 帯の上まで（@review Fix A・写真スロット下端が mainBottom
+  // と一致し得て salesPoints(y=mainBottom−SALES_POINTS_H_MM..mainBottom) と重なっていた）。
+  const photoPackBottom = mainBottom - SALES_POINTS_H_MM - PHOTO_GAP_MM;
+
+  // 3列構成: 間取り図/敷地図があるときは「中央列」に置く（右端=概要表の左に近接・上端=写真域
+  // 上端・下端=salesPoints の上=写真帯と同じ縦範囲）。写真はその左に敷く＝図を広げると写真域が
+  // 反比例で狭くなる。図が無ければ従来どおり写真が左2/3（中央列なし）。
+  const floorPlanRight = OVERVIEW_MIN_X_MM - COLUMN_GAP_MM;
+  const floorPlan: Rect | null = hasFloorPlan
+    ? {
+        x: FLOOR_PLAN_MIDDLE_X_MM,
+        y: PHOTO_AREA_Y_MM,
+        w: Math.max(0, floorPlanRight - FLOOR_PLAN_MIDDLE_X_MM),
+        h: Math.max(0, photoPackBottom - PHOTO_AREA_Y_MM),
+      }
+    : null;
+
+  // 写真域(左カラム)の右端 = 中央列の左端 − gap（図あり）／ effectiveSplitX − gap（図なし=左2/3）。
+  const photoAreaRight = hasFloorPlan
+    ? FLOOR_PLAN_MIDDLE_X_MM - COLUMN_GAP_MM
+    : effectiveSplitX - COLUMN_GAP_MM;
+  const photoAreaW = Math.max(0, photoAreaRight - PHOTO_AREA_X_MM);
   // footerHeight が将来可変化しても負の高さを返さないようガード（@review Fix3）。
   const photoAreaH = Math.max(0, mainBottom - PHOTO_AREA_Y_MM);
   const photoArea: Rect = { x: PHOTO_AREA_X_MM, y: PHOTO_AREA_Y_MM, w: photoAreaW, h: photoAreaH };
 
-  // 間取り図は写真域(左カラム)の上端に置き、写真はその下に敷く（@review Fix1・重なり回避）。
-  const floorPlan: Rect | null = hasFloorPlan
-    ? {
-        x: PHOTO_AREA_X_MM,
-        y: PHOTO_AREA_Y_MM,
-        w: Math.min(FLOOR_PLAN_W_MM, photoArea.w),
-        h: FLOOR_PLAN_H_MM,
-      }
-    : null;
-
-  const photoPackY = hasFloorPlan ? PHOTO_AREA_Y_MM + FLOOR_PLAN_H_MM + FLOOR_PLAN_GAP_MM : PHOTO_AREA_Y_MM;
-  // 写真敷詰めの下端は salesPoints 帯の上まで（@review Fix A・写真スロット下端が mainBottom
-  // と一致し得て salesPoints(y=mainBottom−SALES_POINTS_H_MM..mainBottom) と重なっていた）。
-  const photoPackBottom = mainBottom - SALES_POINTS_H_MM - PHOTO_GAP_MM;
+  // 図は横（中央列）に置くので写真は上端から敷く（図の下へ寄せない）。
+  const photoPackY = PHOTO_AREA_Y_MM;
   const photoPackH = Math.max(0, photoPackBottom - photoPackY);
   const photoSlots: Rect[] = packPhotoCells(photoCount, photoArea.w, photoPackH).map((cell) => ({
     x: photoArea.x + cell.x,

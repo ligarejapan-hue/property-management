@@ -8,6 +8,33 @@ const within = (r: {x:number;y:number;w:number;h:number}) =>
 const overlaps = (a: Rect, b: Rect) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
+describe("computeSpecSheetLayout — 3列構成（写真/間取り図/概要表）", () => {
+  it("hasFloorPlan:true で間取り図は中央列（写真域の右・概要表の左）", () => {
+    const L = computeSpecSheetLayout({ ...base, hasFloorPlan: true });
+    const fp = L.floorPlan as Rect;
+    // 中央列: 写真域の右端より右、概要表の左端より左（3つの列が左→中→右）。
+    expect(fp.x).toBeGreaterThanOrEqual(L.photoArea.x + L.photoArea.w); // 写真域の右
+    expect(fp.x + fp.w).toBeLessThanOrEqual(L.overview.x + 0.01); // 概要表の左
+    // 縦は写真帯と同じ範囲（上端=写真域上端）＝図の下に写真を敷かない。
+    expect(fp.y).toBeCloseTo(L.photoArea.y, 5);
+    expect(fp.h).toBeGreaterThan(50); // 従来の小さな間取り枠(18mm)でなく列いっぱいの高さ
+    expect(within(fp)).toBe(true);
+  });
+
+  it("間取り図があると写真域が左へ狭まる（反比例の土台）", () => {
+    const no = computeSpecSheetLayout({ ...base, hasFloorPlan: false });
+    const yes = computeSpecSheetLayout({ ...base, hasFloorPlan: true });
+    expect(yes.photoArea.w).toBeLessThan(no.photoArea.w); // 図がある方が写真域は狭い
+    expect(yes.photoArea.x).toBeCloseTo(no.photoArea.x, 5); // 左端は不変
+  });
+
+  it("写真スロットは中央列(間取り図)と重ならない", () => {
+    const L = computeSpecSheetLayout({ ...base, hasFloorPlan: true, photoCount: 3 });
+    const fp = L.floorPlan as Rect;
+    for (const s of L.photoSlots) expect(overlaps(fp, s)).toBe(false);
+  });
+});
+
 describe("computeSpecSheetLayout", () => {
   it("全要素がA4内、overviewと写真域が重ならない", () => {
     const L = computeSpecSheetLayout(base);
