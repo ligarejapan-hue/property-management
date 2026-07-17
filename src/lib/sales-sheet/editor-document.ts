@@ -547,22 +547,33 @@ export const MAP_QR_ID = "map-qr";
 const MAP_QR_GAP_MM = 4;
 
 /**
- * 地図QR(id="map-qr")が間取図(floor-plan)の真下・会社帯の上に収まるよう、図を縮めて
- * QR の分を空け、QR を図の下・幅内中央へ配置する(reserve space)。
- * - map-qr か floor-plan が片方でも無ければ elements をそのまま返す(同一参照)。
- * - QR は会社帯/セールスポイントの上端(contentBottom)より下へは出さない(@codex #300)。
- * - 追加時と「レイアウト自動調整」の両方から呼び、予約を一貫させる。
+ * 地図QR(id="map-qr")の位置を版面に合わせて整える(@codex #300):
+ * - floor-plan があれば、その真下・会社帯の上に収まるよう図を縮め/上へ寄せ、QR を図の下・
+ *   幅内中央へ。QR は会社帯/セールスポイントの上端(contentBottom)より下へは出さない。
+ * - floor-plan が無ければ、図面の右下(会社帯の上)へ戻す(図を削除/解除したら写真が中央へ
+ *   広がるため、QR をその場に残さずフォールバック位置へ)。
+ * - map-qr が無ければ同一参照。追加/図の指定・解除・削除・リサイズ・レイアウト自動調整の
+ *   各経路の末尾で呼び、位置を一貫させる。
  */
-function reserveMapQrBelowFloorPlan(
+function positionMapQr(
   elements: SalesSheetElement[],
   page: { width: number; height: number },
 ): SalesSheetElement[] {
-  const fpIdx = elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
   const qrIdx = elements.findIndex((e) => e.id === MAP_QR_ID && e.type === "qr");
-  if (fpIdx === -1 || qrIdx === -1) return elements;
-  const fp = elements[fpIdx];
+  if (qrIdx === -1) return elements;
   const qr = elements[qrIdx];
   const contentBottom = page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM;
+  const fpIdx = elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
+  if (fpIdx === -1) {
+    // 図なし → 右下(会社帯の上)フォールバック。
+    const qrX = clamp(page.width - qr.w - 10, 0, Math.max(0, page.width - qr.w));
+    const qrY = clamp(contentBottom - qr.h, 0, Math.max(0, page.height - qr.h));
+    if (nearlyEqual(qrX, qr.x) && nearlyEqual(qrY, qr.y)) return elements;
+    const next = elements.slice();
+    next[qrIdx] = applyGeom(qr, { x: qrX, y: qrY });
+    return next;
+  }
+  const fp = elements[fpIdx];
   // 図(最小高)+ gap + QR が contentBottom 内に収まる図の最大 y。図を会社帯へ近づけ過ぎると
   // 下に QR の空きが作れず QR が図の上へ回り込むため、その場合は図を上へ寄せる(@codex #300)。
   const maxFloorY = Math.max(0, contentBottom - MIN_ELEMENT_SIZE_MM - MAP_QR_GAP_MM - qr.h);
@@ -585,10 +596,10 @@ function reserveMapQrBelowFloorPlan(
   return next;
 }
 
-/** state に地図QR予約(reserveMapQrBelowFloorPlan)を適用。変更なしは同一参照。
- *  間取図の配置/差替え/リサイズの各経路の末尾で呼び、地図QRが図に覆われないよう保つ。 */
-function reserveMapQrInState(state: EditorState): EditorState {
-  const reserved = reserveMapQrBelowFloorPlan(state.document.elements, state.document.page);
+/** state に地図QRの位置調整(positionMapQr)を適用。変更なしは同一参照。
+ *  間取図の配置/差替え/リサイズ/解除/削除の各経路の末尾で呼び、地図QRの位置を保つ。 */
+export function positionMapQrInState(state: EditorState): EditorState {
+  const reserved = positionMapQr(state.document.elements, state.document.page);
   if (reserved === state.document.elements) return state;
   return { ...state, dirty: true, document: { ...state.document, elements: reserved } };
 }
@@ -597,7 +608,7 @@ function reserveMapQrInState(state: EditorState): EditorState {
  * 物件の住所から Google マップ検索の QR を作り、間取図(中央列)の下に差し込む。
  * - 住所が空 / URL 生成不能 / QR 生成不能なら no-op(同一参照)。
  * - 地図QR は id="map-qr" の1枚(既存があれば置き換え)。floor-plan があればその真下・図の幅内で
- *   中央寄せ(図を縮めて会社帯を覆わない・reserveMapQrBelowFloorPlan)、無ければ図面の右下
+ *   中央寄せ(図を縮めて会社帯を覆わない・positionMapQr)、無ければ図面の右下
  *   (会社帯の上)。用紙内クランプ・z=最前面・自動選択・dirty。
  * - QR の中身(content)= Maps URL。後からパネルで移動/リサイズ/内容編集も可(通常の qr 要素)。
  */
@@ -642,7 +653,7 @@ export function addMapQrElement(
     dataUrl,
     content: url,
   };
-  const elements = reserveMapQrBelowFloorPlan([...base, mapQrEl], page);
+  const elements = positionMapQr([...base, mapQrEl], page);
   return {
     ...state,
     dirty: true,
@@ -1040,7 +1051,7 @@ export function setAsFloorPlan(
     document: { ...document, elements },
   };
   // 写真を図の左へモザイクで詰め直し、地図QRがあれば新しい図の真下へ再確保する(@codex #300)。
-  return reserveMapQrInState(autoArrangePhotos(next, aspects ? { aspects } : undefined));
+  return positionMapQrInState(autoArrangePhotos(next, aspects ? { aspects } : undefined));
 }
 
 /**
@@ -1064,7 +1075,8 @@ export function unsetFloorPlan(
     selectedId: newId,
     document: { ...document, elements },
   };
-  return autoArrangePhotos(next, aspects ? { aspects } : undefined);
+  // 図を解除したら写真が中央へ広がるため、地図QRを右下フォールバックへ戻す(@codex #300)。
+  return positionMapQrInState(autoArrangePhotos(next, aspects ? { aspects } : undefined));
 }
 
 /**
@@ -1125,7 +1137,7 @@ export function commitFloorPlanGeometry(
       ? state
       : { ...state, dirty: true, document: { ...document, elements } };
   // 写真を図の左へ詰め直し、地図QRがあれば図の真下へ再確保する(リサイズ/移動に追従・@codex #300)。
-  return reserveMapQrInState(autoArrangePhotos(moved, aspects ? { aspects } : undefined));
+  return positionMapQrInState(autoArrangePhotos(moved, aspects ? { aspects } : undefined));
 }
 
 // ---------------------------------------------------------------------------
@@ -1258,7 +1270,7 @@ export function autoBalanceLayout(state: EditorState): EditorState {
 
   // 地図QR(id="map-qr")がある場合、全高に戻した間取図が QR を覆わないよう、図を縮めて
   // QR を真下へ再確保する(@codex #300: 追加時の予約を自動調整でも保つ)。
-  const reserved = reserveMapQrBelowFloorPlan(next, document.page);
+  const reserved = positionMapQr(next, document.page);
   if (reserved !== next) changed = true;
 
   if (!changed) return state;

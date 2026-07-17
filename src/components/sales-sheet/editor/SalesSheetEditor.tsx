@@ -24,6 +24,7 @@ import {
   addBadgeElement,
   addQrElement,
   addMapQrElement,
+  positionMapQrInState,
   autoArrangePhotos,
   autoBalanceLayout,
   setAsFloorPlan,
@@ -404,13 +405,16 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     });
   }
 
-  /** 中央列(間取り図)を削除し、写真を左2/3(2列)へ詰め直す(**同期**・@codex #298)。 */
+  /** 中央列(間取り図)を削除し、写真を左2/3(2列)へ詰め直す(**同期**・@codex #298)。
+   *  地図QRがあれば右下フォールバックへ戻す(図が消えて写真が中央へ広がるため・@codex #300)。 */
   function handleDeleteFloorPlan(): void {
     setEditorState((prev) =>
       prev.selectedId === "floor-plan"
-        ? autoArrangePhotos(deleteElement(prev, "floor-plan"), {
-            aspects: cachedGalleryAspects(prev.document),
-          })
+        ? positionMapQrInState(
+            autoArrangePhotos(deleteElement(prev, "floor-plan"), {
+              aspects: cachedGalleryAspects(prev.document),
+            }),
+          )
         : prev,
     );
   }

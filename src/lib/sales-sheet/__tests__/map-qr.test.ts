@@ -10,6 +10,7 @@ import {
   addMapQrElement,
   autoBalanceLayout,
   setAsFloorPlan,
+  unsetFloorPlan,
   MAP_QR_ID,
 } from "../editor-document";
 import {
@@ -177,5 +178,16 @@ describe("addMapQrElement × autoBalanceLayout（予約の保持・@codex #300�
     const q = s2.document.elements.find((e): e is QrElement => e.id === MAP_QR_ID)!;
     expect(q.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.5); // 新しい図の真下へ移動
     expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5);
+  });
+
+  it("間取図を解除すると地図QRは右下フォールバックへ戻る(unsetFloorPlan・@codex #300)", () => {
+    const withFp = { id: "floor-plan", type: "image", x: 99, y: 46, w: 83, h: 110, z: 1, src: SRC, fit: "contain" };
+    const s0 = makeState([withFp, img(2), overviewEl()]);
+    const s1 = addMapQrElement(s0, { address: ADDR }); // 図の真下
+    const s2 = unsetFloorPlan(s1, "back-to-photo"); // 図を解除
+    expect(s2.document.elements.some((e) => e.id === "floor-plan")).toBe(false);
+    const q = s2.document.elements.find((e): e is QrElement => e.id === MAP_QR_ID)!;
+    expect(q.x + q.w).toBeGreaterThan(297 * 0.6); // 右下フォールバック
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯の上
   });
 });
