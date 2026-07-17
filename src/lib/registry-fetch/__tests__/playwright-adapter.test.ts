@@ -527,6 +527,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
   it("C9n: normalizeChibanForDialog は登記表記を数字/ハイフン形式へ正規化する(@codex P1)", () => {
     expect(normalizeChibanForDialog("1番1")).toBe("1-1");
     expect(normalizeChibanForDialog("1937番31")).toBe("1937-31");
+    expect(normalizeChibanForDialog("1番2の3")).toBe("1-2-3"); // 「の」区切り保持(@codex P2)
     expect(normalizeChibanForDialog("5番")).toBe("5");
     expect(normalizeChibanForDialog("１－１")).toBe("1-1"); // 全角数字＋全角ハイフン
     expect(normalizeChibanForDialog("1-2-3")).toBe("1-2-3");

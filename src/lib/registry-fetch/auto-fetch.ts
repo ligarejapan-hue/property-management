@@ -343,13 +343,16 @@ export function summarizeRegistrySearchError(err: unknown): string {
  * (pdf-registry-parser 由来の「1番1」「1937番31」や全角「１－１」)をそのまま数字専用欄へ
  * 渡すと弾かれ候補ゼロになるため、全角数字→半角・「番(地)」→ハイフン・各種ダッシュ→半角
  * ハイフンに変換し、数字/ハイフン以外を除去する。純関数(テスト可能)。
- * 例: 「1番1」→「1-1」/「1937番31」→「1937-31」/「5番」→「5」/「１－１」→「1-1」。
+ * 区切り「番(地)」「の(ノ)」はハイフンへ変換する(@codex P2)。「の」は registry-address-cleanup が
+ * 地番/家屋番号の区切りとして認識する形式(例「1番2の3」)で、除去して隣接数字を連結すると別物件に
+ * なるため、除去前にハイフン化する。
+ * 例: 「1番1」→「1-1」/「1937番31」→「1937-31」/「1番2の3」→「1-2-3」/「５番」→「5」/「１－１」→「1-1」。
  */
 export function normalizeChibanForDialog(raw: string): string {
   return raw
     .trim()
     .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
-    .replace(/番地|番/g, "-")
+    .replace(/番地|番|の|ノ/g, "-")
     .replace(/[‐‑‒–—―−ー－]/g, "-")
     .replace(/[^0-9-]/g, "")
     .replace(/-+/g, "-")
