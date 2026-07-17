@@ -211,10 +211,14 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     return out;
   }
 
-  // マウント時にギャラリー写真の実寸比を先読みしてキャッシュを暖める(floor-plan の同期操作が
-  // 実寸比でモザイクできるように)。fire-and-forget・state 更新なし。
+  // マウント時に **全 image**(floor-plan 含む)の実寸比を先読みしてキャッシュを暖める。
+  // floor-plan も含めるのが要点(@codex #298): 既存図面が最初から floor-plan を持つ場合、
+  // それを写真へ戻す/差し替える際に実寸比が要る。measureGalleryAspects は floor-plan を
+  // 除外するため、ここは src 単位の measureAspect で全画像を暖める。fire-and-forget。
   useEffect(() => {
-    void measureGalleryAspects(initial.document);
+    for (const el of initial.document.elements) {
+      if (el.type === "image") void measureAspect(el.src);
+    }
     // 初回のみ暖める(以後は写真追加/自動整列/測定で更新)。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
