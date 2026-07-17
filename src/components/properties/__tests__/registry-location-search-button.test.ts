@@ -37,6 +37,13 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
   it("cond②: 候補（所在等）を console/log に出さない", () => {
     expect(src).not.toContain("console.");
   });
+  it("段階①: 候補一覧は表示するが取得ボタンは準備中(disabled)でゲートする", () => {
+    // 候補の取得ボタンは disabled + 「準備中」ラベル。誤って有料取得を起動させない。
+    expect(src).toContain("取得（準備中）");
+    expect(src).toContain("現在準備中です");
+    // 候補行の取得ボタンに disabled が付く(段階②で有効化)。
+    expect(src).toContain('title="謄本取得は準備中です"');
+  });
 });
 
 describe("registry-location-search-button.tsx: dark 配色（暗面可読化）", () => {

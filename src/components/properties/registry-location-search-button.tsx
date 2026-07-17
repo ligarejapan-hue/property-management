@@ -86,6 +86,8 @@ export default function RegistryLocationSearchButton({
     }
   };
 
+  // 段階①では取得ボタンを「準備中」で disabled にしており、この経路は起動されない。
+  // 取得(有料の請求→PDF)は段階②で実サイトの地番ベース請求フローとして実装し、ここを差し替える。
   const runObtain = async () => {
     if (!selected) return;
     setState("obtaining");
@@ -180,7 +182,11 @@ export default function RegistryLocationSearchButton({
           ) : (
             <>
               <p className="font-medium text-gray-700 dark:text-gray-200">
-                候補（{candidates.length}件）から取得するものを選んでください
+                候補（{candidates.length}件）が見つかりました
+              </p>
+              {/* 段階①: 候補一覧の表示まで。実取得(有料の請求→PDF)は段階②で対応=ボタンは準備中。 */}
+              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                候補からの謄本取得は現在準備中です（近日対応）。
               </p>
               <ul className="flex flex-col gap-1">
                 {candidates.map((c) => (
@@ -198,13 +204,11 @@ export default function RegistryLocationSearchButton({
                     </span>
                     <button
                       type="button"
-                      onClick={() => {
-                        setSelected(c);
-                        setState("confirmObtain");
-                      }}
-                      className="shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
+                      disabled
+                      title="謄本取得は準備中です"
+                      className="shrink-0 rounded bg-gray-300 dark:bg-gray-700 px-2 py-1 font-medium text-gray-500 dark:text-gray-400 cursor-not-allowed"
                     >
-                      この候補で取得
+                      取得（準備中）
                     </button>
                   </li>
                 ))}
