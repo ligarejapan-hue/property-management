@@ -684,24 +684,26 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     }
   });
 
-  it("C11: extractChibanCandidateRows は checkbox 行を candidateRef+lotNumber へ変換し非候補行を除外", () => {
-    const trWith = (chkId: string | null, lot: string): Element =>
+  it("C11: extractChibanCandidateRows は checkbox 行を candidateRef=地番へ変換し非候補行を除外", () => {
+    // hasCheckbox=false(ヘッダ等)や地番テキスト無しは除外。candidateRef は checkbox id ではなく
+    // **地番テキスト**(ページ跨ぎに安定・一意)。
+    const trWith = (hasCheckbox: boolean, lot: string): Element =>
       ({
         querySelector: (sel: string) => {
-          if (sel.includes("checkbox"))
-            return chkId ? { getAttribute: (a: string) => (a === "id" ? chkId : null) } : null;
-          if (sel.includes("cbnDlgChibanDt")) return { textContent: lot };
+          if (sel.includes("checkbox")) return hasCheckbox ? {} : null;
+          if (sel.includes("cbnDlgChibanDt")) return lot ? { textContent: lot } : null;
           return null;
         },
       }) as unknown as Element;
     const out = extractChibanCandidateRows([
-      trWith("cbnDlgChibanChk_1", "１－１"),
-      trWith("cbnDlgChibanChk_2", "１－２"),
-      trWith(null, "ヘッダ"),
+      trWith(true, "１－１"),
+      trWith(true, "１－２"),
+      trWith(false, "ヘッダ"), // checkbox 無し→除外
+      trWith(true, ""), // 地番無し→除外
     ]);
     expect(out).toEqual([
-      { candidateRef: "cbnDlgChibanChk_1", lotNumber: "１－１" },
-      { candidateRef: "cbnDlgChibanChk_2", lotNumber: "１－２" },
+      { candidateRef: "１－１", lotNumber: "１－１" },
+      { candidateRef: "１－２", lotNumber: "１－２" },
     ]);
   });
 
