@@ -61,26 +61,39 @@ describe("addMapQrElement", () => {
     expect(s.dirty).toBe(true);
   });
 
-  it("間取図があるとその真下・図の幅内に配置", () => {
-    const fp = floorPlan();
-    const s = addMapQrElement(makeState([fp]), { id: "q1", address: ADDR });
+  // 会社帯/セールスポイントの上端(=写真帯の下端): 210 − (footer24+margin2+salesPoints7+gap4=37) = 173。
+  const CONTENT_BOTTOM = 173;
+  const fpOf = (s: EditorState) =>
+    s.document.elements.find((e) => e.id === "floor-plan")!;
+
+  it("間取図があると(縮めて)その真下・図の幅内に配置し、会社帯を覆わない(@codex #300)", () => {
+    const s = addMapQrElement(makeState([floorPlan()]), { id: "q1", address: ADDR });
     const q = qrOf(s)!;
-    expect(q.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.01); // 図の下
-    // 中央寄せ: QR中心が図の中心付近、かつ図の水平範囲に概ね収まる
+    const fp = fpOf(s); // 結果側(必要なら縮められている)
+    expect(q.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.01); // 図の真下
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯を覆わない
     const qCenter = q.x + q.w / 2;
     const fpCenter = fp.x + fp.w / 2;
-    expect(Math.abs(qCenter - fpCenter)).toBeLessThan(1);
+    expect(Math.abs(qCenter - fpCenter)).toBeLessThan(1); // 図の幅内で中央寄せ
   });
 
-  it("間取図が無ければ右下の既定位置", () => {
+  it("通常生成(図が下端いっぱい)では図を縮めて QR の分を空ける", () => {
+    const before = floorPlan({ y: 46, h: 127 }); // 下端=173(通常生成)
+    const s = addMapQrElement(makeState([before]), { id: "q1", address: ADDR });
+    const fp = fpOf(s);
+    expect(fp.h).toBeLessThan(127); // 図が縮む
+    const q = qrOf(s)!;
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // QR は会社帯の上
+  });
+
+  it("間取図が無ければ右下(ただし会社帯の上)", () => {
     const s = addMapQrElement(makeState([]), { id: "q1", address: ADDR });
     const q = qrOf(s)!;
     expect(q.x + q.w).toBeGreaterThan(297 * 0.6); // 右側
-    expect(q.y + q.h).toBeGreaterThan(210 * 0.6); // 下側
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯を覆わない
   });
 
   it("用紙内にクランプ(負値・はみ出しなし)", () => {
-    // 間取図が下端いっぱいでも QR が用紙外へ出ない。
     const s = addMapQrElement(makeState([floorPlan({ y: 46, h: 150 })]), { id: "q1", address: ADDR });
     const q = qrOf(s)!;
     expect(q.x).toBeGreaterThanOrEqual(0);

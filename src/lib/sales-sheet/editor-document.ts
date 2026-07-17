@@ -560,22 +560,36 @@ export function addMapQrElement(
   const { page } = document;
   const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_QR_SIZE_MM, page.width - 10));
   const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_QR_SIZE_MM, page.height - 10));
-  const z = document.elements.length
-    ? Math.max(...document.elements.map((e) => e.z)) + 1
-    : 1;
-  const floorPlanEl = document.elements.find((e) => e.id === "floor-plan" && e.type === "image");
   const gap = 4;
+  // 会社帯/セールスポイントの上端(=写真帯・中央列の下端)。QR はここより下へ出さない=
+  // 最前面の QR が会社帯(取引情報含む)を覆わないようにする(@codex #300 P1)。
+  const contentBottom = page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM;
+
+  const floorPlanEl = document.elements.find((e) => e.id === "floor-plan" && e.type === "image");
+  let elements = document.elements;
   let x: number;
   let y: number;
   if (floorPlanEl) {
-    x = floorPlanEl.x + (floorPlanEl.w - w) / 2; // 図の幅内で中央寄せ
-    y = floorPlanEl.y + floorPlanEl.h + gap; // 図の真下
+    // 図の真下に置く。図が下端いっぱい(通常生成)だと QR が会社帯へ食い込むため、QR の分
+    // (gap+h)だけ図を縮めて真下に空きを作る(reserve space・@codex #300 P1)。
+    const maxFloorBottom = contentBottom - gap - h;
+    let fp = floorPlanEl;
+    if (floorPlanEl.y + floorPlanEl.h > maxFloorBottom) {
+      const newH = Math.max(MIN_ELEMENT_SIZE_MM, maxFloorBottom - floorPlanEl.y);
+      elements = document.elements.map((e) =>
+        e.id === "floor-plan" && e.type === "image" ? applyGeom(e, { h: newH }) : e,
+      );
+      fp = { ...floorPlanEl, h: newH };
+    }
+    x = fp.x + (fp.w - w) / 2; // 図の幅内で中央寄せ
+    y = fp.y + fp.h + gap; // 図の真下
   } else {
-    x = page.width - w - 10; // 図が無ければ右下既定
-    y = page.height - h - 10;
+    x = page.width - w - 10; // 図が無ければ右下
+    y = contentBottom - h; // ただし会社帯の上に収める
   }
   x = clamp(x, 0, Math.max(0, page.width - w));
   y = clamp(y, 0, Math.max(0, page.height - h));
+  const z = elements.length ? Math.max(...elements.map((e) => e.z)) + 1 : 1;
   const mapQrEl: QrElement = {
     id: params.id,
     type: "qr",
@@ -591,7 +605,7 @@ export function addMapQrElement(
     ...state,
     dirty: true,
     selectedId: params.id,
-    document: { ...document, elements: [...document.elements, mapQrEl] },
+    document: { ...document, elements: [...elements, mapQrEl] },
   };
 }
 
