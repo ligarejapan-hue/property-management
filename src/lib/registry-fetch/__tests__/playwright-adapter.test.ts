@@ -71,7 +71,7 @@ function makeFakeChromium() {
     })),
     $$eval: vi.fn(async () => [] as unknown[]),
     evaluate: vi.fn<
-      (fn: (arg: string) => unknown, arg: string) => Promise<undefined>
+      (fn: (arg: string) => unknown, arg: string) => Promise<unknown>
     >(async () => undefined),
   };
   const context = {
@@ -503,7 +503,10 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     const f = makeFakeChromium();
     const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
     const page = await factory!();
-    await page.searchByLocation!({
+    f.page.$$eval = vi.fn(async () => [
+      { candidateRef: "cbnDlgChibanChk_1", lotNumber: "１２３番" },
+    ]);
+    const candidates = await page.searchByLocation!({
       address: "北海道札幌市中央区北1条",
       lotNumber: "5番",
       buildingNumber: "12",
@@ -512,6 +515,54 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     // 家屋番号ありは種別=建物(#fuShozaiTypeTATEMONO)を選ぶ。
     expect(f.page.click).toHaveBeenCalledWith("#fuShozaiTypeTATEMONO");
     expect(f.page.click).not.toHaveBeenCalledWith("#fuShozaiTypeTOCHI");
+    // @codex P1: 建物は家屋番号("12")で検索する(地番"5番"ではない)。
+    expect(f.page.fill).toHaveBeenCalledWith("#fuChibanKaoku", "12");
+    expect(f.page.fill).toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "12");
+    expect(f.page.fill).not.toHaveBeenCalledWith("#fuChibanKaoku", "5番");
+    // @codex P1: 返す候補は行の番号値を家屋番号欄へ(地番欄は null)。
+    expect(candidates[0]).toMatchObject({ buildingNumber: "１２３番", lotNumber: null });
+  });
+
+  it("C9g: 検索が0件(checkbox 無し)でロード完了なら空配列を返す(timeout にしない・@codex P2)", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async (s: string) => {
+      if (s.includes("input[type=checkbox]")) throw makeTimeoutError();
+      return {};
+    });
+    // ロード完了(「データ取得中」が消えた)を模す → 0件として [] を返す。
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "#cbnDlgChibanCheckTbl" ? true : undefined,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    const candidates = await page.searchByLocation!({
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "999",
+      buildingNumber: null,
+    });
+    expect(candidates).toEqual([]);
+  });
+
+  it("C9h: checkbox 無し且つロード未完(データ取得中のまま)は timeout(0件と区別・@codex P2)", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async (s: string) => {
+      if (s.includes("input[type=checkbox]")) throw makeTimeoutError();
+      return {};
+    });
+    // まだロード中(「データ取得中」)を模す → timeout。
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "#cbnDlgChibanCheckTbl" ? false : undefined,
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+      const page = await factory!();
+      await expect(
+        page.searchByLocation!({ address: "東京都千代田区丸の内一丁目", lotNumber: "1", buildingNumber: null }),
+      ).rejects.toMatchObject({ code: "timeout" });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("C9f: 家屋番号なし(地番のみ)は種別=土地を選ぶ", async () => {

@@ -213,6 +213,13 @@ export const REGISTRY_FORCE_LOGIN_MARKER = 'input[name="from"][value="elogin"]';
  */
 const FORCE_LOGIN_CONFIRM_DETECT_MS = 1500;
 
+/**
+ * 地番検索ダイアログの候補ロード待ち時間(ms)。クリック直後は「データ取得中・・・」表示で、
+ * 候補は非同期で後から入る。この時間内に候補 checkbox 行が現れれば抽出。現れないまま「データ
+ * 取得中」が消えていれば **0件**(→ 空配列)、まだ「データ取得中」なら連携遅延(→ timeout)。
+ */
+const DIALOG_RESULT_TIMEOUT_MS = 15000;
+
 // 実画面HTML(2026-07-14 御社保存)から確定したセレクタ。設計資料 =
 // deliverables/registry-calibration/selector-map-20260714.md。
 // [確定] = 保存HTMLで実要素を確認済み / [要live] = 動的生成・実サイト実行でのみ確定。
@@ -508,7 +515,10 @@ function createPlaywrightRegistryPage(
       //   ⑩キャンセルで閉じる(課金しない)
       // セットアップ由来失敗は provider_error、結果待ち timeout は timeout に分類。診断ログは
       // secret/PII(所在/地番)を除去して残す。
-      const lot = (input.lotNumber ?? "").trim();
+      // 種別(土地/建物)を家屋番号の有無で判定し、検索キーも種別に合わせる(@codex P1)。
+      // 建物なら家屋番号、土地なら地番で検索する(建物なのに地番で検索すると別物になる)。
+      const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
+      const searchKey = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
       // DOM click(login と同じ evaluate 経由・javascript: href/被りに左右されず onclick を発火)。
       const domClick = (sel: string) =>
         page.evaluate((s) => {
@@ -526,7 +536,7 @@ function createPlaywrightRegistryPage(
         await page.click(REGISTRY_SELECTORS.searchMethodLocationRadio);
         // 家屋番号があれば建物、無ければ土地(登記の種別区分)。
         await page.click(
-          input.buildingNumber && input.buildingNumber.length > 0
+          isBuilding
             ? REGISTRY_SELECTORS.locationTypeBuildingRadio
             : REGISTRY_SELECTORS.locationTypeLandRadio,
         );
@@ -542,14 +552,15 @@ function createPlaywrightRegistryPage(
           REGISTRY_SELECTORS.locationSearchAddress,
           rest.length > 0 ? rest : input.address,
         );
-        if (lot.length > 0) {
-          await page.fill(REGISTRY_SELECTORS.locationSearchLotBuilding, lot);
+        // 検索キーは種別に合わせた番号(建物=家屋番号 / 土地=地番)。
+        if (searchKey.length > 0) {
+          await page.fill(REGISTRY_SELECTORS.locationSearchLotBuilding, searchKey);
         }
         // 地番検索ダイアログを開く → 地番種別(数字/ハイフン) + 範囲 → 検索(非同期)。
         await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
         await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
-        if (lot.length > 0) {
-          await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, lot);
+        if (searchKey.length > 0) {
+          await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, searchKey);
         }
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
@@ -560,10 +571,30 @@ function createPlaywrightRegistryPage(
         throw new RegistryFetchError("provider_error");
       }
       try {
-        // 非同期ロード完了を待つ(クリック直後は「データ取得中・・・」表示 → checkbox 行が現れる)。
-        await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
-          state: "attached",
-        });
+        // 非同期ロード(クリック直後は「データ取得中・・・」)。候補 checkbox 行を待つ。
+        try {
+          await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
+            state: "attached",
+            timeout: DIALOG_RESULT_TIMEOUT_MS,
+          });
+        } catch (waitErr) {
+          if (!isTimeoutError(waitErr)) throw waitErr;
+          // checkbox が出ない = 「0件」か「まだロード中」。@codex P2: ロード完了(「データ取得中」が
+          // 消えた)なら真の 0件 → 空配列。まだロード中なら連携遅延 → timeout(候補ゼロと区別)。
+          const loaded = await page.evaluate((sel) => {
+            const t = document.querySelector(sel);
+            return !!t && !/データ取得中/.test(t.textContent ?? "");
+          }, REGISTRY_SELECTORS.dialogResultTable);
+          if (!loaded) {
+            console.warn(
+              "[registry-search] result load timed out:",
+              summarizeRegistrySearchError(waitErr),
+            );
+            throw new RegistryFetchError("timeout");
+          }
+          await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+          return [];
+        }
         // ブラウザ内で候補行を読む(extractChibanCandidateRows は self-contained/serializable)。
         const rows = (await page.$$eval(
           `${REGISTRY_SELECTORS.dialogResultTable} tr`,
@@ -571,11 +602,12 @@ function createPlaywrightRegistryPage(
         )) as Array<{ candidateRef: string; lotNumber: string | null }>;
         // 課金しない: ダイアログはキャンセルで閉じる(確定/請求は押さない)。
         await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+        // 行の番号値(#cbnDlgChibanDt_*)は種別に応じて地番 or 家屋番号。種別に合う欄へ入れる(@codex P1)。
         return rows.map((r) => ({
           candidateRef: r.candidateRef,
           address: input.address,
-          lotNumber: r.lotNumber,
-          buildingNumber: input.buildingNumber ?? null,
+          lotNumber: isBuilding ? null : r.lotNumber,
+          buildingNumber: isBuilding ? r.lotNumber : null,
           realEstateNumber: null,
         }));
       } catch (err) {
