@@ -338,6 +338,25 @@ export function summarizeRegistrySearchError(err: unknown): string {
 }
 
 /**
+ * 地番/家屋番号を、地番検索ダイアログの「数字・ハイフンのみ」欄(#cbnDlgChibanType0 +
+ * #cbnDlgSearchChibanStart)が受理する形へ正規化する(@codex P1)。リポジトリの通常表記
+ * (pdf-registry-parser 由来の「1番1」「1937番31」や全角「１－１」)をそのまま数字専用欄へ
+ * 渡すと弾かれ候補ゼロになるため、全角数字→半角・「番(地)」→ハイフン・各種ダッシュ→半角
+ * ハイフンに変換し、数字/ハイフン以外を除去する。純関数(テスト可能)。
+ * 例: 「1番1」→「1-1」/「1937番31」→「1937-31」/「5番」→「5」/「１－１」→「1-1」。
+ */
+export function normalizeChibanForDialog(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
+    .replace(/番地|番/g, "-")
+    .replace(/[‐‑‒–—―−ー－]/g, "-")
+    .replace(/[^0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
  * 地番検索ダイアログ(#cbnDlgChibanCheckTbl)の各行(tr)を候補へ変換する。$$eval に渡すため
  * self-contained/serializable(モジュールスコープ非参照)。checkbox を持つ行のみ候補とし、
  * candidateRef=checkbox の id(例 cbnDlgChibanChk_1)、lotNumber=地番セル(#cbnDlgChibanDt_*)の
@@ -518,7 +537,9 @@ function createPlaywrightRegistryPage(
       // 種別(土地/建物)を家屋番号の有無で判定し、検索キーも種別に合わせる(@codex P1)。
       // 建物なら家屋番号、土地なら地番で検索する(建物なのに地番で検索すると別物になる)。
       const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
-      const searchKey = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
+      const rawKey = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
+      // ダイアログの数字/ハイフン専用欄に合わせて正規化(「1番1」→「1-1」等・@codex P1)。
+      const searchKey = normalizeChibanForDialog(rawKey);
       // DOM click(login と同じ evaluate 経由・javascript: href/被りに左右されず onclick を発火)。
       const domClick = (sel: string) =>
         page.evaluate((s) => {

@@ -31,6 +31,7 @@ import {
   DEFAULT_REGISTRY_LOGIN_PATH,
   REGISTRY_FORCE_LOGIN_MARKER,
   extractChibanCandidateRows,
+  normalizeChibanForDialog,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
 } from "../auto-fetch";
@@ -521,6 +522,29 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.page.fill).not.toHaveBeenCalledWith("#fuChibanKaoku", "5番");
     // @codex P1: 返す候補は行の番号値を家屋番号欄へ(地番欄は null)。
     expect(candidates[0]).toMatchObject({ buildingNumber: "１２３番", lotNumber: null });
+  });
+
+  it("C9n: normalizeChibanForDialog は登記表記を数字/ハイフン形式へ正規化する(@codex P1)", () => {
+    expect(normalizeChibanForDialog("1番1")).toBe("1-1");
+    expect(normalizeChibanForDialog("1937番31")).toBe("1937-31");
+    expect(normalizeChibanForDialog("5番")).toBe("5");
+    expect(normalizeChibanForDialog("１－１")).toBe("1-1"); // 全角数字＋全角ハイフン
+    expect(normalizeChibanForDialog("1-2-3")).toBe("1-2-3");
+    expect(normalizeChibanForDialog("あ番")).toBe(""); // 数字なし→空
+  });
+
+  it("C9m: 「1番1」表記の地番はダイアログの数字欄へ「1-1」で入れる(@codex P1)", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "1番1",
+      buildingNumber: null,
+    });
+    // 数字専用のダイアログ範囲欄には正規化後の「1-1」を入れる(生の「1番1」ではない)。
+    expect(f.page.fill).toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "1-1");
+    expect(f.page.fill).not.toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "1番1");
   });
 
   it("C9g: 検索が0件(checkbox 無し)でロード完了なら空配列を返す(timeout にしない・@codex P2)", async () => {
