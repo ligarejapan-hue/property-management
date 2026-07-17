@@ -328,6 +328,20 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       REGISTRY_FORCE_LOGIN_MARKER,
       expect.objectContaining({ state: "detached" }),
     );
+    // 確認画面判定の前に「確認画面 or 通常メニュー」着地をグループセレクタで待つ
+    // (5秒固定でなくログイン全体 timeout 内で終端画面を確定=応答遅延の吸収・@codex)。
+    const groupWaited = (
+      f.page.waitForSelector as unknown as {
+        mock: { calls: Array<[string, { state?: string }?]> };
+      }
+    ).mock.calls.some(
+      ([sel, opt]) =>
+        typeof sel === "string" &&
+        sel.includes(REGISTRY_FORCE_LOGIN_MARKER) &&
+        sel.includes("menuClick('FUDOSAN')") &&
+        opt?.state === "attached",
+    );
+    expect(groupWaited).toBe(true);
   });
 
   it("C3h: 強制ログインを押しても確認画面から抜けない(マーカー残存)なら失敗させる", async () => {

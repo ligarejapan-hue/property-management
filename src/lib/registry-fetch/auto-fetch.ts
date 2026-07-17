@@ -206,11 +206,12 @@ export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
 export const REGISTRY_FORCE_LOGIN_MARKER = 'input[name="from"][value="elogin"]';
 
 /**
- * 「ご利用中の方へ」画面の検出待ち時間(ms)。通常メニューに直接着地した場合はこの画面が
- * 出ないため、この時間だけ待って timeout したら「二重ログインではない」と判断して先へ進む。
- * ログイン全体の主タイムアウト(REGISTRY_FETCH_TIMEOUT_MS)より十分短くする。
+ * 「ご利用中の方へ」画面か否かの判定待ち時間(ms)。この待機の前に「確認画面 or 通常メニュー」
+ * の着地をログイン全体タイムアウト内で確定させる(応答遅延の吸収)ため、ここは既に着地済みの
+ * DOM に対する短時間判定でよい。マーカーが在れば即 resolve、通常メニュー着地なら在らずに短く
+ * timeout する。ログイン全体の主タイムアウト(REGISTRY_FETCH_TIMEOUT_MS)より十分短くする。
  */
-const FORCE_LOGIN_CONFIRM_DETECT_MS = 5000;
+const FORCE_LOGIN_CONFIRM_DETECT_MS = 1500;
 
 // 実画面HTML(2026-07-14 御社保存)から確定したセレクタ。設計資料 =
 // deliverables/registry-calibration/selector-map-20260714.md。
@@ -223,6 +224,9 @@ const REGISTRY_SELECTORS = {
   // 二重ログイン確認画面「ご利用中の方へ」(2026-07-17 本番実測)。
   forceLoginMarker: REGISTRY_FORCE_LOGIN_MARKER, // [確定] この画面固有の hidden input
   forceLoginSubmit: "button.CForwardLong", // [確定] 「強制ログイン」ボタン(onclick=submit)
+  // 通常メニュー(請求情報受付メニュー)固有の目印。確認画面には無いため、ログイン送信後に
+  // 「確認画面 / 通常メニュー」のどちらへ着地したかの判別に使う(2026-07-17 本番実測)。
+  loggedInMenuLink: "a[href*=\"menuClick('FUDOSAN')\"]", // [確定] 「不動産請求」リンク
   // 番号取得(不動産番号での請求)。請求画面で請求方法=不動産番号を選ぶ同一フロー。
   searchMethodNumberRadio: "#fuSeikyuMethodFUDOSAN_NO", // [確定] 請求方法=不動産番号 ラジオ
   searchInput: "#fuFudosanNo", // [要live] 不動産番号入力欄(番号請求時の実操作画面で確定)
@@ -373,11 +377,20 @@ function createPlaywrightRegistryPage(
             (el as unknown as { click: () => void }).click();
           }
         }, REGISTRY_SELECTORS.loginSubmit);
+        // ログイン送信後の着地を待つ。「確認画面固有マーカー」か「通常メニュー固有リンク」の
+        // どちらかが DOM に現れるまで、ログイン全体のタイムアウト内で待つ(グループセレクタ)。
+        // 固定の短い猶予だと応答が遅いとき確認画面の到着前に打ち切ってしまい、その後に現れる
+        // 確認画面を「二重ログインでない」と誤判定してしまう(@codex 指摘)。どちらかの終端画面を
+        // 確定させてから、確認画面か否かを判定する。
+        await page.waitForSelector(
+          `${REGISTRY_SELECTORS.forceLoginMarker}, ${REGISTRY_SELECTORS.loggedInMenuLink}`,
+          { state: "attached" },
+        );
         // 「ご利用中の方へ」(二重ログイン確認)が挟まれば「強制ログイン」で突破する。
         // 登記情報提供サービスは1IDにつき同時1セッションのため、前回セッションが残っていると
         // この確認画面が出る(本アプリは自動取得後にログアウトせず close するため残りやすい)。
-        // マーカー(この画面固有の hidden input)が短時間で出れば強制ログイン、出なければ
-        // (通常メニューに直接着地) timeout=想定内としてスキップする。
+        // 着地は上で確定済みなので、ここはマーカー有無の短時間判定でよい(在れば強制ログイン、
+        // 無ければ通常メニュー着地=想定内としてスキップ)。
         let sawForceLoginConfirm = false;
         try {
           // マーカーは hidden input のため state:"attached"(DOM 存在で判定)にする。
