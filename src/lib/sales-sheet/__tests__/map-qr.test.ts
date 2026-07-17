@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { buildMapsSearchUrl } from "../maps-url";
-import { type EditorState, addMapQrElement } from "../editor-document";
+import { type EditorState, addMapQrElement, autoBalanceLayout, MAP_QR_ID } from "../editor-document";
 import {
   parseSalesSheetDocument,
   salesSheetDocumentSchema,
@@ -52,13 +52,20 @@ describe("addMapQrElement", () => {
   const ADDR = "東京都世田谷区上馬4-36-15";
 
   it("QR要素を追加し content が地図URL・自動選択・dirty", () => {
-    const s = addMapQrElement(makeState([]), { id: "q1", address: ADDR });
+    const s = addMapQrElement(makeState([]), { address: ADDR });
     const q = qrOf(s)!;
     expect(q).toBeTruthy();
     expect(q.content).toBe(buildMapsSearchUrl(ADDR));
     expect(q.dataUrl.startsWith("data:image/")).toBe(true);
-    expect(s.selectedId).toBe("q1");
+    expect(q.id).toBe(MAP_QR_ID); // 地図QRは単一(id固定)
+    expect(s.selectedId).toBe(MAP_QR_ID);
     expect(s.dirty).toBe(true);
+  });
+
+  it("地図QRは1枚(再追加で置き換え)", () => {
+    const once = addMapQrElement(makeState([floorPlan()]), { address: ADDR });
+    const twice = addMapQrElement(once, { address: ADDR });
+    expect(twice.document.elements.filter((e) => e.id === MAP_QR_ID)).toHaveLength(1);
   });
 
   // 会社帯/セールスポイントの上端(=写真帯の下端): 210 − (footer24+margin2+salesPoints7+gap4=37) = 173。
@@ -67,7 +74,7 @@ describe("addMapQrElement", () => {
     s.document.elements.find((e) => e.id === "floor-plan")!;
 
   it("間取図があると(縮めて)その真下・図の幅内に配置し、会社帯を覆わない(@codex #300)", () => {
-    const s = addMapQrElement(makeState([floorPlan()]), { id: "q1", address: ADDR });
+    const s = addMapQrElement(makeState([floorPlan()]), { address: ADDR });
     const q = qrOf(s)!;
     const fp = fpOf(s); // 結果側(必要なら縮められている)
     expect(q.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.01); // 図の真下
@@ -79,7 +86,7 @@ describe("addMapQrElement", () => {
 
   it("通常生成(図が下端いっぱい)では図を縮めて QR の分を空ける", () => {
     const before = floorPlan({ y: 46, h: 127 }); // 下端=173(通常生成)
-    const s = addMapQrElement(makeState([before]), { id: "q1", address: ADDR });
+    const s = addMapQrElement(makeState([before]), { address: ADDR });
     const fp = fpOf(s);
     expect(fp.h).toBeLessThan(127); // 図が縮む
     const q = qrOf(s)!;
@@ -87,14 +94,14 @@ describe("addMapQrElement", () => {
   });
 
   it("間取図が無ければ右下(ただし会社帯の上)", () => {
-    const s = addMapQrElement(makeState([]), { id: "q1", address: ADDR });
+    const s = addMapQrElement(makeState([]), { address: ADDR });
     const q = qrOf(s)!;
     expect(q.x + q.w).toBeGreaterThan(297 * 0.6); // 右側
     expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯を覆わない
   });
 
   it("用紙内にクランプ(負値・はみ出しなし)", () => {
-    const s = addMapQrElement(makeState([floorPlan({ y: 46, h: 150 })]), { id: "q1", address: ADDR });
+    const s = addMapQrElement(makeState([floorPlan({ y: 46, h: 150 })]), { address: ADDR });
     const q = qrOf(s)!;
     expect(q.x).toBeGreaterThanOrEqual(0);
     expect(q.y).toBeGreaterThanOrEqual(0);
@@ -104,14 +111,44 @@ describe("addMapQrElement", () => {
 
   it("住所が空なら no-op(同一参照)", () => {
     const s = makeState([]);
-    expect(addMapQrElement(s, { id: "q1", address: "" })).toBe(s);
-    expect(addMapQrElement(s, { id: "q1", address: "  " })).toBe(s);
+    expect(addMapQrElement(s, { address: "" })).toBe(s);
+    expect(addMapQrElement(s, { address: "  " })).toBe(s);
+  });
+
+  it("間取図を下方へ動かしても QR は会社帯を覆わない(contentBottom クランプ・@codex #300)", () => {
+    const s = addMapQrElement(makeState([floorPlan({ y: 150, h: 20 })]), { address: ADDR });
+    const q = qrOf(s)!;
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5);
   });
 
   it("z は最前面・schema 検証を通る", () => {
-    const s = addMapQrElement(makeState([floorPlan()]), { id: "q1", address: ADDR });
+    const s = addMapQrElement(makeState([floorPlan()]), { address: ADDR });
     const q = qrOf(s)!;
     expect(q.z).toBeGreaterThanOrEqual(2);
     expect(salesSheetDocumentSchema.safeParse(s.document).success).toBe(true);
+  });
+});
+
+describe("addMapQrElement × autoBalanceLayout（予約の保持・@codex #300）", () => {
+  const ADDR = "東京都世田谷区上馬4-36-15";
+  const CONTENT_BOTTOM = 173;
+  const overviewEl = () => ({
+    id: "overview", type: "table", x: 188, y: 26, w: 99, h: 158, z: 1,
+    rows: [{ label: "物件種別", value: "売地" }], style: {},
+  });
+  const img = (n: number) => ({
+    id: `img-${n}`, type: "image", x: 103, y: 75, w: 90, h: 60, z: n, src: SRC, fit: "cover",
+  });
+
+  it("レイアウト自動調整でも間取図が地図QRを覆わない(図を縮めて真下を保つ)", () => {
+    // 間取図(1枚) + 写真 + 概要表 + 地図QR。自動調整で図が全高に戻っても QR を覆わない。
+    const withFp = { id: "floor-plan", type: "image", x: 99, y: 46, w: 83, h: 110, z: 1, src: SRC, fit: "contain" };
+    const s0 = makeState([withFp, img(2), img(3), overviewEl()]);
+    const s1 = addMapQrElement(s0, { address: ADDR });
+    const s2 = autoBalanceLayout(s1);
+    const fp = s2.document.elements.find((e) => e.id === "floor-plan")!;
+    const q = s2.document.elements.find((e): e is QrElement => e.id === MAP_QR_ID)!;
+    expect(q.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.5); // 図の真下(覆っていない)
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯も覆わない
   });
 });

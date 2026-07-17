@@ -442,9 +442,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   const canAddMapQr = !!initial.propertyAddress && initial.propertyAddress.trim() !== "";
   function handleAddMapQr(): void {
     if (!canAddMapQr) return;
-    setEditorState((prev) =>
-      addMapQrElement(prev, { id: safeRandomId(), address: initial.propertyAddress ?? "" }),
-    );
+    setEditorState((prev) => addMapQrElement(prev, { address: initial.propertyAddress ?? "" }));
   }
 
   /** 文書テーマ（フォント/基調色）を変更する（計画⑧）。 */
