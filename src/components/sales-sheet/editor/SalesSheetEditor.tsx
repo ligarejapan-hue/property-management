@@ -335,7 +335,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       const a = await measureAspect(existingFp.src);
       if (a !== null) aspects[demotedId] = a;
     }
-    setEditorState((prev) => setAsFloorPlan(prev, id, demotedId, aspects));
+    // 計測待ちの間に選択/編集/undo が入っていたら適用しない(古い前提で上書きしない・@codex #298)。
+    setEditorState((prev) => (prev.document === doc ? setAsFloorPlan(prev, id, demotedId, aspects) : prev));
   }
 
   /** 中央列の間取り図/敷地図を通常の写真へ戻す（実寸比を測って写真を再整列）。 */
@@ -352,15 +353,20 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       const a = await measureAspect(fp.src);
       if (a !== null) aspects[newId] = a;
     }
-    setEditorState((prev) => unsetFloorPlan(prev, newId, aspects));
+    // 計測待ちの間に編集/undo が入っていたら適用しない(@codex #298)。
+    setEditorState((prev) => (prev.document === doc ? unsetFloorPlan(prev, newId, aspects) : prev));
   }
 
   /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。
    *  中央列(間取り図)・概要表・見出し等を整え直したうえで、写真は残りスペースへモザイクで
    *  詰め直す（「写真を自動整列」と結果を揃える＝レイアウト自動調整でも写真がきれいに並ぶ）。 */
   async function handleAutoBalance(): Promise<void> {
-    const aspects = await measureGalleryAspects(editorState.document);
-    setEditorState((prev) => autoArrangePhotos(autoBalanceLayout(prev), { aspects }));
+    const docAtCall = editorState.document;
+    const aspects = await measureGalleryAspects(docAtCall);
+    // 計測待ちの間に編集/undo が入っていたら適用しない(古い前提で再バランスしない・@codex #298)。
+    setEditorState((prev) =>
+      prev.document === docAtCall ? autoArrangePhotos(autoBalanceLayout(prev), { aspects }) : prev,
+    );
   }
 
   /** オリジナルバッジを追加する（バッジデザイナー・計画⑦）。 */
