@@ -580,6 +580,14 @@ function reserveMapQrBelowFloorPlan(
   return next;
 }
 
+/** state に地図QR予約(reserveMapQrBelowFloorPlan)を適用。変更なしは同一参照。
+ *  間取図の配置/差替え/リサイズの各経路の末尾で呼び、地図QRが図に覆われないよう保つ。 */
+function reserveMapQrInState(state: EditorState): EditorState {
+  const reserved = reserveMapQrBelowFloorPlan(state.document.elements, state.document.page);
+  if (reserved === state.document.elements) return state;
+  return { ...state, dirty: true, document: { ...state.document, elements: reserved } };
+}
+
 /**
  * 物件の住所から Google マップ検索の QR を作り、間取図(中央列)の下に差し込む。
  * - 住所が空 / URL 生成不能 / QR 生成不能なら no-op(同一参照)。
@@ -1026,8 +1034,8 @@ export function setAsFloorPlan(
     selectedId: "floor-plan",
     document: { ...document, elements },
   };
-  // 写真を図の左へモザイクで詰め直す(no-op なら next のまま)。
-  return autoArrangePhotos(next, aspects ? { aspects } : undefined);
+  // 写真を図の左へモザイクで詰め直し、地図QRがあれば新しい図の真下へ再確保する(@codex #300)。
+  return reserveMapQrInState(autoArrangePhotos(next, aspects ? { aspects } : undefined));
 }
 
 /**
@@ -1111,8 +1119,8 @@ export function commitFloorPlanGeometry(
     elements === document.elements
       ? state
       : { ...state, dirty: true, document: { ...document, elements } };
-  // 同一更新で写真を図の左へ詰め直す(no-op なら moved のまま)。
-  return autoArrangePhotos(moved, aspects ? { aspects } : undefined);
+  // 写真を図の左へ詰め直し、地図QRがあれば図の真下へ再確保する(リサイズ/移動に追従・@codex #300)。
+  return reserveMapQrInState(autoArrangePhotos(moved, aspects ? { aspects } : undefined));
 }
 
 // ---------------------------------------------------------------------------

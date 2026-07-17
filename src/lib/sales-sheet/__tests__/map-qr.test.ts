@@ -5,7 +5,13 @@
  */
 import { describe, it, expect } from "vitest";
 import { buildMapsSearchUrl } from "../maps-url";
-import { type EditorState, addMapQrElement, autoBalanceLayout, MAP_QR_ID } from "../editor-document";
+import {
+  type EditorState,
+  addMapQrElement,
+  autoBalanceLayout,
+  setAsFloorPlan,
+  MAP_QR_ID,
+} from "../editor-document";
 import {
   parseSalesSheetDocument,
   salesSheetDocumentSchema,
@@ -115,6 +121,15 @@ describe("addMapQrElement", () => {
     expect(addMapQrElement(s, { address: "  " })).toBe(s);
   });
 
+  it("長い住所(建物名込み)でも QR を生成できる(@codex #300: 適応セルサイズ)", () => {
+    // マンション名込みの長い住所。従来は QR data URL 上限超過で無反応だった。
+    const longAddr = "北海道札幌市中央区北一条西二十三丁目四番五号サンハイツ札幌マンション303号室";
+    const s = addMapQrElement(makeState([]), { address: longAddr });
+    const q = qrOf(s);
+    expect(q).toBeTruthy(); // no-op でなく QR が入る
+    expect(q!.dataUrl.startsWith("data:image/")).toBe(true);
+  });
+
   it("間取図を下方へ動かしても QR は会社帯を覆わない(contentBottom クランプ・@codex #300)", () => {
     const s = addMapQrElement(makeState([floorPlan({ y: 150, h: 20 })]), { address: ADDR });
     const q = qrOf(s)!;
@@ -150,5 +165,15 @@ describe("addMapQrElement × autoBalanceLayout（予約の保持・@codex #300�
     const q = s2.document.elements.find((e): e is QrElement => e.id === MAP_QR_ID)!;
     expect(q.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.5); // 図の真下(覆っていない)
     expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5); // 会社帯も覆わない
+  });
+
+  it("図なしで追加した地図QRは、後で間取図を指定すると図の真下へ再確保(setAsFloorPlan)", () => {
+    const s0 = makeState([img(2), img(3), overviewEl()]); // 図なし
+    const s1 = addMapQrElement(s0, { address: ADDR }); // 右下に地図QR
+    const s2 = setAsFloorPlan(s1, "img-2", "demoted-x"); // 写真を間取図に
+    const fp = s2.document.elements.find((e) => e.id === "floor-plan")!;
+    const q = s2.document.elements.find((e): e is QrElement => e.id === MAP_QR_ID)!;
+    expect(q.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.5); // 新しい図の真下へ移動
+    expect(q.y + q.h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5);
   });
 });
