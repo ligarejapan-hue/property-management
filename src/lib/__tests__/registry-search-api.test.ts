@@ -163,17 +163,34 @@ beforeEach(() => {
 });
 
 describe("PR-2b-2: runRegistrySearch（provider 注入）", () => {
-  it("取得できない候補（realEstateNumber 無し）は応答に含めない（@codex P2）", async () => {
+  it("段階①: candidateRef を持つ候補は不動産番号が無くても表示する(実サイトの所在検索は地番候補=番号なし)", async () => {
+    // 実サイトの所在検索は不動産番号を返さず候補は地番(candidateRef)。旧実装は番号無し候補を
+    // 捨てていたが、それでは実候補が全て消える。candidateRef があれば表示用に通す。取得(段階②)は
+    // 別経路で、地番候補は取得 API で 409(課金なし)になる=表示を広げても誤課金は起きない。
     const provider = new MockRegistryFetchProvider({
       candidates: [
         { candidateRef: "with-ren", address: "所在A", realEstateNumber: "REN-A" },
-        { candidateRef: "no-ren", address: "所在B", realEstateNumber: null },
+        { candidateRef: "chiban-only", address: "所在B", lotNumber: "１－２", realEstateNumber: null },
       ],
     });
     const body = await runSearch({ provider });
     expect(body.searchable).toBe(true);
     const candidates = body.candidates as Array<{ candidateRef: string }>;
-    expect(candidates.map((c) => c.candidateRef)).toEqual(["with-ren"]);
+    expect(candidates.map((c) => c.candidateRef)).toEqual(["with-ren", "chiban-only"]);
+    // 不動産番号は応答に出さない（cond③）。
+    expect(candidates[0]).not.toHaveProperty("realEstateNumber");
+  });
+
+  it("candidateRef 空の候補は表示しない(参照キーが無く扱えない)", async () => {
+    const provider = new MockRegistryFetchProvider({
+      candidates: [
+        { candidateRef: "ok", address: "所在A", realEstateNumber: null },
+        { candidateRef: "", address: "所在B", realEstateNumber: null },
+      ],
+    });
+    const body = await runSearch({ provider });
+    const candidates = body.candidates as Array<{ candidateRef: string }>;
+    expect(candidates.map((c) => c.candidateRef)).toEqual(["ok"]);
   });
 
   it("正常系: searchable な物件で候補を返し、realEstateNumber は応答に含めない", async () => {

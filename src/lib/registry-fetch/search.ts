@@ -139,25 +139,31 @@ export async function runRegistrySearch(
   try {
     const candidates = await provider.searchCandidates(built.request);
 
-    // 取得できる候補のみを扱う（@codex P2）。不動産番号の無い候補は取得時に必ず 409 になるため、
-    // UI に出さない・キャッシュもしない（選んで確認後に必ず失敗する導線を作らない）。
-    const obtainable = candidates.filter((c) => !!c.realEstateNumber?.trim());
+    // 段階①(所在検索フル対応): 候補一覧の表示まで。実サイトの所在検索は不動産番号を返さず、候補は
+    // **地番(candidateRef)**（不動産番号は有料の請求まで進まないと得られない=サイト仕様）。旧実装は
+    // 不動産番号の無い候補を捨てていたが、それでは実サイトの候補が全て消える（実質「候補なし」）。
+    // ここでは candidateRef を持つ候補を表示用に通す。取得(段階②)は candidateRef=地番を選んで
+    // 請求する別経路で実装し、UI 側は段階①では取得を「準備中」にゲートする。
+    // 安全: 取得 API は resolveCachedCandidate が地番候補(不動産番号未キャッシュ)に null を返し
+    // 409(課金なし)になるため、表示を広げても誤課金は起きない。
+    const displayable = candidates.filter((c) => !!c.candidateRef?.trim());
 
     // 取得側（resolveRegistryCandidate）が provider を再検索せず候補→不動産番号を解決できるよう、
     // 認可済み検索の結果を server 内メモリに覚える（@codex P1: throttle 二重消費の回避）。
-    // realEstateNumber は log/応答に出さず、取得キーとして server 内でのみ保持する（cond②/③）。
+    // realEstateNumber を持つ候補（番号検索/mock 経路）のみキャッシュされる。地番のみの候補は
+    // キャッシュされず（rememberSearchCandidates 側で ren 必須）、取得は 409（段階②で対応）。
     // 物件指紋も一緒に覚え、取得時に物件が編集されていたら古い候補を無効化する（@codex P1）。
     rememberSearchCandidates(
       session.id,
       propertyId,
       fingerprintProperty(property),
-      obtainable,
+      displayable,
     );
 
     // cond③: 応答から realEstateNumber を除外する（候補参照は取得時に server 再解決）。
     // 表示用フィールド（所在/地番/家屋番号）は認可ユーザー向け本文として返すが、
     // log / AuditLog には出さない。
-    const shaped = obtainable.map((c) => ({
+    const shaped = displayable.map((c) => ({
       candidateRef: c.candidateRef,
       address: c.address ?? null,
       lotNumber: c.lotNumber ?? null,
@@ -167,7 +173,7 @@ export async function runRegistrySearch(
     // 成功 AuditLog（非PII: 件数・状態のみ。所在/地番/不動産番号は載せない）。件数は返却分。
     await writeRegistrySearchAudit(session.id, propertyId, {
       status: "success",
-      candidateCount: obtainable.length,
+      candidateCount: displayable.length,
     });
 
     return { searchable: true, candidates: shaped };

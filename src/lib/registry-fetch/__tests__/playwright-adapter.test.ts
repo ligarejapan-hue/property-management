@@ -30,7 +30,8 @@ import {
   DEFAULT_REGISTRY_BASE_URL,
   DEFAULT_REGISTRY_LOGIN_PATH,
   REGISTRY_FORCE_LOGIN_MARKER,
-  extractLocationCandidateRows,
+  extractChibanCandidateRows,
+  normalizeChibanForDialog,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
 } from "../auto-fetch";
@@ -71,7 +72,7 @@ function makeFakeChromium() {
     })),
     $$eval: vi.fn(async () => [] as unknown[]),
     evaluate: vi.fn<
-      (fn: (arg: string) => unknown, arg: string) => Promise<undefined>
+      (fn: (arg: string) => unknown, arg: string) => Promise<unknown>
     >(async () => undefined),
   };
   const context = {
@@ -444,45 +445,178 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.browser.close).toHaveBeenCalledTimes(1);
   });
 
-  it("C9: searchByLocation は 実サイトの多段UI(所在ラジオ/種別/都道府県select/直接入力/地番家屋)へ委譲→結果行を候補へ変換", async () => {
+  it("C9: searchByLocation は 不動産請求遷移→所在/種別/都道府県/直接入力/地番→地番ダイアログ検索→候補抽出→キャンセル", async () => {
     const f = makeFakeChromium();
+    const calls: string[] = [];
+    f.page.click = vi.fn(async (s: string) => {
+      calls.push("click:" + s);
+    });
+    f.page.fill = vi.fn(async (s: string) => {
+      calls.push("fill:" + s);
+    });
+    f.page.selectOption = vi.fn(async (s: string) => {
+      calls.push("select:" + s);
+      return [];
+    });
+    f.page.check = vi.fn(async (s: string) => {
+      calls.push("check:" + s);
+    });
+    f.page.waitForSelector = vi.fn(async (s: string) => {
+      calls.push("wait:" + s);
+      return {};
+    });
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) => {
+      calls.push("eval:" + arg);
+      return undefined;
+    });
     f.page.$$eval = vi.fn(async () => [
-      { candidateRef: "c1", address: "東京都千代田区丸の内1-1", lotNumber: "1番1", buildingNumber: null, realEstateNumber: "1234567890123" },
-      { candidateRef: "", address: "東京都千代田区丸の内1-2", lotNumber: "1番2", buildingNumber: null, realEstateNumber: null },
+      { candidateRef: "cbnDlgChibanChk_1", lotNumber: "１－１" },
+      { candidateRef: "cbnDlgChibanChk_2", lotNumber: "１－２" },
     ]);
     const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
     const page = await factory!();
     const candidates = await page.searchByLocation!({
-      address: "東京都千代田区丸の内1",
-      lotNumber: "1番",
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "1",
       buildingNumber: null,
     });
-    // 都道府県はプルダウン(selectOption)へ、市区町村以下は直接入力(fill)へ分解して渡す。
-    expect(f.page.selectOption).toHaveBeenCalledWith(expect.any(String), "東京都");
-    expect(f.page.check).toHaveBeenCalled(); // 直接入力モード
-    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "千代田区丸の内1");
-    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "1番"); // 地番・家屋番号(1欄)
-    expect(f.page.click).toHaveBeenCalled();
-    expect(candidates).toHaveLength(2);
-    expect(candidates[0].realEstateNumber).toBe("1234567890123");
-    // candidateRef 空は row-index フォールバックで必ず非空。
-    expect(candidates[1].candidateRef).not.toBe("");
+    // 不動産請求への遷移(DOM click)を経由。
+    expect(calls).toContain("eval:a[href*=\"menuClick('FUDOSAN')\"]");
+    expect(calls).toContain("click:#fuSeikyuMethodSHOZAI");
+    expect(calls).toContain("select:#fuTodofukenShozai");
+    expect(calls).toContain("check:#fuShozaiChokusetuNyuryoku");
+    expect(calls).toContain("click:#fuChibanKaokuIchiran"); // 地番一覧ダイアログを開く
+    expect(calls).toContain("click:#cbnDlgChibanSearch"); // ダイアログ検索
+    // 非同期候補ロードを待つ。
+    expect(calls).toContain("wait:#cbnDlgChibanCheckTbl input[type=checkbox]");
+    // 課金しない: 確定は押さずキャンセルで閉じる。
+    expect(calls).toContain("eval:#cbnDlgBtnCancel");
+    expect(calls).not.toContain("click:#cbnDlgBtnOk");
+    expect(calls).not.toContain("click:#myPageSeikyu");
+    // 候補整形(地番=行の値、所在=入力、不動産番号は所在検索段では得られず null)。
+    expect(candidates).toEqual([
+      { candidateRef: "cbnDlgChibanChk_1", address: "東京都千代田区丸の内一丁目", lotNumber: "１－１", buildingNumber: null, realEstateNumber: null },
+      { candidateRef: "cbnDlgChibanChk_2", address: "東京都千代田区丸の内一丁目", lotNumber: "１－２", buildingNumber: null, realEstateNumber: null },
+    ]);
   });
 
-  it("C9e: 地番・家屋番号は 1 欄に空白区切りで連結し、家屋番号ありは建物種別を選ぶ", async () => {
+  it("C9e: 家屋番号ありは種別=建物を選ぶ", async () => {
     const f = makeFakeChromium();
     const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
     const page = await factory!();
-    await page.searchByLocation!({
+    f.page.$$eval = vi.fn(async () => [
+      { candidateRef: "cbnDlgChibanChk_1", lotNumber: "１２３番" },
+    ]);
+    const candidates = await page.searchByLocation!({
       address: "北海道札幌市中央区北1条",
       lotNumber: "5番",
       buildingNumber: "12",
     });
     expect(f.page.selectOption).toHaveBeenCalledWith(expect.any(String), "北海道");
-    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "5番 12");
-    // 家屋番号ありは種別=建物(#fuShozaiTypeTATEMONO)を選ぶ(@codex P2)。
+    // 家屋番号ありは種別=建物(#fuShozaiTypeTATEMONO)を選ぶ。
     expect(f.page.click).toHaveBeenCalledWith("#fuShozaiTypeTATEMONO");
     expect(f.page.click).not.toHaveBeenCalledWith("#fuShozaiTypeTOCHI");
+    // @codex P1: 建物は家屋番号("12")で検索する(地番"5番"ではない)。
+    expect(f.page.fill).toHaveBeenCalledWith("#fuChibanKaoku", "12");
+    expect(f.page.fill).toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "12");
+    expect(f.page.fill).not.toHaveBeenCalledWith("#fuChibanKaoku", "5番");
+    // @codex P1: 返す候補は行の番号値を家屋番号欄へ(地番欄は null)。
+    expect(candidates[0]).toMatchObject({ buildingNumber: "１２３番", lotNumber: null });
+  });
+
+  it("C9n: normalizeChibanForDialog は登記表記を数字/ハイフン形式へ正規化する(@codex P1)", () => {
+    expect(normalizeChibanForDialog("1番1")).toBe("1-1");
+    expect(normalizeChibanForDialog("1937番31")).toBe("1937-31");
+    expect(normalizeChibanForDialog("1番2の3")).toBe("1-2-3"); // 「の」区切り保持(@codex P2)
+    expect(normalizeChibanForDialog("5番")).toBe("5");
+    expect(normalizeChibanForDialog("１－１")).toBe("1-1"); // 全角数字＋全角ハイフン
+    expect(normalizeChibanForDialog("1-2-3")).toBe("1-2-3");
+    expect(normalizeChibanForDialog("あ番")).toBe(""); // 数字なし→空
+  });
+
+  it("C9m: 「1番1」表記の地番はダイアログの数字欄へ「1-1」で入れる(@codex P1)", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "1番1",
+      buildingNumber: null,
+    });
+    // 数字専用のダイアログ範囲欄には正規化後の「1-1」を入れる(生の「1番1」ではない)。
+    expect(f.page.fill).toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "1-1");
+    expect(f.page.fill).not.toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "1番1");
+  });
+
+  it("C9p: 複数ページの候補を次ページボタンで全て集める(@codex P1)", async () => {
+    const f = makeFakeChromium();
+    // $$eval: 1回目=1ページ目、2回目=2ページ目。
+    f.page.$$eval = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { candidateRef: "chk_1", lotNumber: "１－１" },
+        { candidateRef: "chk_2", lotNumber: "１－２" },
+      ])
+      .mockResolvedValueOnce([{ candidateRef: "chk_3", lotNumber: "１－３" }]);
+    // 次ページ有無(evaluate(#cbnDlgBtnPageNext)): 1ページ目後 true、2ページ目後 false。
+    let nextChecks = 0;
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "#cbnDlgBtnPageNext" ? nextChecks++ === 0 : undefined,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    const candidates = await page.searchByLocation!({
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "1",
+      buildingNumber: null,
+    });
+    // 2ページ分を重複排除して全件返す。
+    expect(candidates.map((c) => c.candidateRef)).toEqual(["chk_1", "chk_2", "chk_3"]);
+    expect(f.page.$$eval).toHaveBeenCalledTimes(2);
+    // 次ページボタンを1回押す(通常ボタン=page.click)。
+    expect(f.page.click).toHaveBeenCalledWith("#cbnDlgBtnPageNext");
+  });
+
+  it("C9g: 検索が0件(checkbox 無し)でロード完了なら空配列を返す(timeout にしない・@codex P2)", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async (s: string) => {
+      if (s.includes("input[type=checkbox]")) throw makeTimeoutError();
+      return {};
+    });
+    // ロード完了(「データ取得中」が消えた)を模す → 0件として [] を返す。
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "#cbnDlgChibanCheckTbl" ? true : undefined,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    const candidates = await page.searchByLocation!({
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "999",
+      buildingNumber: null,
+    });
+    expect(candidates).toEqual([]);
+  });
+
+  it("C9h: checkbox 無し且つロード未完(データ取得中のまま)は timeout(0件と区別・@codex P2)", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async (s: string) => {
+      if (s.includes("input[type=checkbox]")) throw makeTimeoutError();
+      return {};
+    });
+    // まだロード中(「データ取得中」)を模す → timeout。
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "#cbnDlgChibanCheckTbl" ? false : undefined,
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+      const page = await factory!();
+      await expect(
+        page.searchByLocation!({ address: "東京都千代田区丸の内一丁目", lotNumber: "1", buildingNumber: null }),
+      ).rejects.toMatchObject({ code: "timeout" });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("C9f: 家屋番号なし(地番のみ)は種別=土地を選ぶ", async () => {
@@ -498,39 +632,51 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.page.click).not.toHaveBeenCalledWith("#fuShozaiTypeTATEMONO");
   });
 
-  it("C10: searchByLocation の結果待ちタイムアウトは timeout(not_found にしない)", async () => {
+  it("C10: 候補ロード待ち(#cbnDlgChibanCheckTbl checkbox)の timeout は timeout に分類し PII を出さない", async () => {
     const f = makeFakeChromium();
-    f.page.waitForSelector = vi.fn(async () => {
-      throw makeTimeoutError();
+    // セットアップの waitForSelector は成功、結果 checkbox 待ちだけ timeout。
+    f.page.waitForSelector = vi.fn(async (s: string) => {
+      if (s.includes("input[type=checkbox]")) {
+        const e = new Error("Timeout 30000ms exceeded for 東京都千代田区丸の内");
+        (e as { name?: string }).name = "TimeoutError";
+        throw e;
+      }
+      return {};
     });
-    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
-    const page = await factory!();
-    await expect(page.searchByLocation!({ address: "x" })).rejects.toMatchObject({
-      code: "timeout",
-    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+      const page = await factory!();
+      await expect(
+        page.searchByLocation!({ address: "東京都千代田区丸の内一丁目", lotNumber: "1", buildingNumber: null }),
+      ).rejects.toMatchObject({ code: "timeout" });
+      const logged = warn.mock.calls.map((c) => c.join(" ")).join(" ");
+      expect(logged).toContain("[registry-search]");
+      expect(logged).not.toContain("丸の内"); // 所在(PII)を出さない
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it("C11: extractLocationCandidateRows は candidateRef を data-ref 属性から読む(textContent でない)", () => {
-    const makeEl = (dataRef: string | null, cells: Record<string, string>): Element =>
+  it("C11: extractChibanCandidateRows は checkbox 行を candidateRef+lotNumber へ変換し非候補行を除外", () => {
+    const trWith = (chkId: string | null, lot: string): Element =>
       ({
-        getAttribute: (name: string) => (name === "data-ref" ? dataRef : null),
-        querySelector: (sel: string) =>
-          sel === "[data-ref]"
-            ? null
-            : cells[sel] !== undefined
-              ? ({ textContent: cells[sel] } as unknown as Element)
-              : null,
+        querySelector: (sel: string) => {
+          if (sel.includes("checkbox"))
+            return chkId ? { getAttribute: (a: string) => (a === "id" ? chkId : null) } : null;
+          if (sel.includes("cbnDlgChibanDt")) return { textContent: lot };
+          return null;
+        },
       }) as unknown as Element;
-    const rows = extractLocationCandidateRows([
-      makeEl("ref-abc", { ".address": "東京都千代田区丸の内1-1", ".ren": "1234567890123" }),
-      makeEl(null, { ".address": "東京都千代田区丸の内1-2" }),
+    const out = extractChibanCandidateRows([
+      trWith("cbnDlgChibanChk_1", "１－１"),
+      trWith("cbnDlgChibanChk_2", "１－２"),
+      trWith(null, "ヘッダ"),
     ]);
-    // candidateRef はラベルの textContent ではなく data-ref 属性値。
-    expect(rows[0].candidateRef).toBe("ref-abc");
-    expect(rows[0].address).toBe("東京都千代田区丸の内1-1");
-    expect(rows[0].realEstateNumber).toBe("1234567890123");
-    // data-ref 無しは空(呼び出し側で row-index フォールバック)。
-    expect(rows[1].candidateRef).toBe("");
+    expect(out).toEqual([
+      { candidateRef: "cbnDlgChibanChk_1", lotNumber: "１－１" },
+      { candidateRef: "cbnDlgChibanChk_2", lotNumber: "１－２" },
+    ]);
   });
 
   // CodexP2-1: baseUrl 省略時は documented default を使い、相対 URL へ遷移しない。
