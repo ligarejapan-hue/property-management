@@ -147,6 +147,13 @@ interface RegistryPageLike {
   // 戻り値は使わないため unknown（実 Playwright Page.evaluate はより広い型だが構造的に代入可能）。
   evaluate(pageFunction: (arg: string) => unknown, arg: string): Promise<unknown>;
   waitForEvent(event: string, options?: unknown): Promise<RegistryDownloadLike>;
+  // ブラウザ内の述語が真になるまで待つ（実 Playwright Page.waitForFunction）。候補一覧の
+  // 次ページ遷移で「ページが実際に切り替わった（=1行目の候補refが変わった）」ことを待つのに使う。
+  waitForFunction(
+    pageFunction: (arg: unknown) => unknown,
+    arg?: unknown,
+    options?: unknown,
+  ): Promise<unknown>;
   // 所在検索の結果行を DOM から抽出する（実 Playwright は $$eval で各行のセルを読む）。
   $$eval(
     selector: string,
@@ -365,11 +372,12 @@ export function normalizeChibanForDialog(raw: string): string {
 
 /**
  * 地番検索ダイアログ(#cbnDlgChibanCheckTbl)の各行(tr)を候補へ変換する。$$eval に渡すため
- * self-contained/serializable(モジュールスコープ非参照)。checkbox を持つ行のみ候補とし、
- * candidateRef=checkbox の id(例 cbnDlgChibanChk_1)、lotNumber=地番セル(#cbnDlgChibanDt_*)の
- * textContent(例「１－１」)。checkbox 無し行(ヘッダ等)は除外する。地番/所在は秘匿情報。
- * (2026-07-17 本番probe で行構造確定: td.col_w1>input[checkbox]#cbnDlgChibanChk_{N} +
- *  td.col_w2#cbnDlgChibanDt_{N})
+ * self-contained/serializable(モジュールスコープ非参照)。checkbox を持つ行のみ候補とする。
+ * **candidateRef=地番テキスト(#cbnDlgChibanDt_* の textContent、例「１－１」)**。checkbox の id
+ * (cbnDlgChibanChk_{N})は **行位置由来でページ跨ぎに再利用され得る**ため candidateRef に使わない
+ * (@codex: ページ2の先頭 id がページ1と同じだと切替検出/重複排除が壊れる)。地番は1検索内で一意・
+ * ページ跨ぎで安定。地番の無い行/checkbox 無し行(ヘッダ等)は候補にできないので除外。地番/所在は秘匿情報。
+ * (2026-07-17 本番probe で行構造確定: td.col_w1>input[checkbox] + td.col_w2#cbnDlgChibanDt_{N})
  */
 export function extractChibanCandidateRows(
   els: Element[],
@@ -378,11 +386,10 @@ export function extractChibanCandidateRows(
   for (const tr of els) {
     const chk = tr.querySelector('input[type="checkbox"]');
     if (!chk) continue;
-    const ref = (chk.getAttribute("id") ?? "").trim();
-    if (!ref) continue;
     const lotCell = tr.querySelector('td[id^="cbnDlgChibanDt_"]');
-    const lotNumber = (lotCell?.textContent ?? "").trim() || null;
-    out.push({ candidateRef: ref, lotNumber });
+    const lotNumber = (lotCell?.textContent ?? "").trim();
+    if (!lotNumber) continue; // 地番=行の安定一意キー。無ければ候補にできない。
+    out.push({ candidateRef: lotNumber, lotNumber });
   }
   return out;
 }
@@ -661,16 +668,35 @@ function createPlaywrightRegistryPage(
           }
           if (added === 0) break; // 進捗なし(想定外DOM/同一ページ)→安全停止
           // 次ページボタンは通常ボタン(login のような被り/js href ではない)ので page.click で押す。
+          const prevFirstRef = rows[0]?.candidateRef ?? "";
           await page.click(REGISTRY_SELECTORS.dialogPageNext);
           try {
-            // 次ページの非同期ロードを待つ。読めなければここまでで確定(取りこぼしは避けられないが退行はしない)。
-            await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
-              state: "attached",
-              timeout: DIALOG_RESULT_TIMEOUT_MS,
-            });
+            // @codex P1: 単に checkbox の attached を待つと、旧ページの checkbox が残っている間に
+            // 即 resolve し、旧行を再読込→全て seen 済み→added===0 で1ページ目しか返らない。
+            // 「ページが実際に切り替わった(1行目の**地番**が前ページと変わり、ロード完了)」まで待つ。
+            // 判定は checkbox の id(位置由来・ページ跨ぎ再利用の恐れ)ではなく **地番テキスト**で行う。
+            await page.waitForFunction(
+              (arg) => {
+                const { tableSel, prevRef } = arg as {
+                  tableSel: string;
+                  prevRef: string;
+                };
+                const t = document.querySelector(tableSel);
+                if (!t) return false;
+                if (/データ取得中/.test(t.textContent ?? "")) return false;
+                const firstCell = t.querySelector('td[id^="cbnDlgChibanDt_"]');
+                const val = (firstCell?.textContent ?? "").trim();
+                return val !== "" && val !== prevRef;
+              },
+              {
+                tableSel: REGISTRY_SELECTORS.dialogResultTable,
+                prevRef: prevFirstRef,
+              },
+              { timeout: DIALOG_RESULT_TIMEOUT_MS },
+            );
           } catch (pageErr) {
             if (!isTimeoutError(pageErr)) throw pageErr;
-            break;
+            break; // 次ページに切り替わらない(読めない)→ここまでで確定(退行はしない)
           }
         }
         if (capped) {
