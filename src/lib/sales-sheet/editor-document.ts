@@ -23,6 +23,7 @@ import {
   SALES_POINTS_H_MM,
   PHOTO_GAP_MM,
   PHOTO_AREA_TO_OVERVIEW_GAP_MM,
+  COLUMN_GAP_MM,
 } from "./layout-engine";
 import { packMosaic } from "./mosaic-pack";
 import {
@@ -772,14 +773,18 @@ export function autoArrangePhotos(
     overviewEl !== null &&
     (!nearlyEqual(overviewEl.x, ovMinX) || !nearlyEqual(overviewEl.w, ovRight - ovMinX));
 
-  // 間取り図(floor-plan)がある場合は写真ゾーン上端をその下へ寄せ、写真が間取り図に被らない
-  // ようにする（computeSpecSheetLayout が floorPlan の下から写真を敷くのと同じ予約）。
+  // 間取り図/敷地図(floor-plan)は 3列構成の「中央列」。写真ゾーンはその左に置く＝
+  // 写真ゾーン右端 = 図の左端 − COLUMN_GAP（図があるとき）。図を広げる(左端を左へ動かす)と
+  // 写真ゾーンが反比例で狭くなる。図が無ければ従来どおり overview 左（or 2/3）まで。
+  // 図は横に並ぶので写真は上端から敷く（図の下へ寄せない）。
   const floorPlanEl = document.elements.find((e) => e.id === "floor-plan" && e.type === "image");
   const zoneX = PHOTO_ZONE_X_MM;
-  const zoneY = floorPlanEl
-    ? Math.max(PHOTO_ZONE_Y_MM, floorPlanEl.y + floorPlanEl.h + PHOTO_GAP_MM)
-    : PHOTO_ZONE_Y_MM;
-  const zoneW = Math.max(0, boundaryX - PHOTO_AREA_TO_OVERVIEW_GAP_MM - zoneX);
+  const zoneY = PHOTO_ZONE_Y_MM;
+  const overviewBoundaryRight = boundaryX - PHOTO_AREA_TO_OVERVIEW_GAP_MM;
+  const zoneRight = floorPlanEl
+    ? Math.min(overviewBoundaryRight, floorPlanEl.x - COLUMN_GAP_MM)
+    : overviewBoundaryRight;
+  const zoneW = Math.max(0, zoneRight - zoneX);
   const zoneH = Math.max(0, page.height - zoneY - PHOTO_ZONE_BOTTOM_MARGIN_MM);
   // ゾーンが最小要素サイズ未満に潰れている(例: 間取り図を縦に大きくリサイズ)場合は
   // 整列しない=非正/極小寸法を document に書き込まない(書き込むと schema の positive
@@ -834,6 +839,182 @@ export function autoArrangePhotos(
 /** 幾何座標の等値判定(1/1000mm 許容・整列の冪等性用)。 */
 function nearlyEqual(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.001;
+}
+
+/**
+ * 中央列(間取り図/敷地図)の既定 rect をページ寸法から算出する。
+ * 版面を概ね三等分し、中央列の右端は概要表の左に近接、左端は写真域と半々。
+ * 実編集ではユーザーが幅をドラッグで調整し、写真は残りスペースへ詰め直される。
+ */
+function defaultFloorPlanRect(page: { width: number; height: number }): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} {
+  const ovRight = page.width - PHOTO_ZONE_X_MM;
+  const ovMinX = ovRight - page.width / 3;
+  const floorPlanRight = ovMinX - COLUMN_GAP_MM;
+  const leftRegionW = floorPlanRight - PHOTO_ZONE_X_MM; // 写真域+中央列の合計幅
+  const w = Math.max(MIN_ELEMENT_SIZE_MM, (leftRegionW - COLUMN_GAP_MM) / 2);
+  const x = floorPlanRight - w;
+  const y = PHOTO_ZONE_Y_MM;
+  const h = Math.max(MIN_ELEMENT_SIZE_MM, page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM - PHOTO_ZONE_Y_MM);
+  return { x, y, w, h };
+}
+
+/**
+ * overview(概要表)を定位置(右1/3)へスナップする(破壊的に elements を書き換え)。
+ * autoArrangePhotos も同じスナップを行うが、写真0枚だと同関数が対象0で早期 return し
+ * スナップ前に抜けるため、floor-plan 操作側でも概要表の定位置を保証する(@codex #298)。
+ * 変更があれば true。elements は呼び出し側で slice 済みの前提。
+ */
+function snapOverviewInPlace(
+  elements: SalesSheetElement[],
+  page: { width: number; height: number },
+): boolean {
+  const idx = elements.findIndex((e) => e.id === "overview");
+  if (idx === -1) return false;
+  const ov = elements[idx];
+  const ovRight = page.width - PHOTO_ZONE_X_MM;
+  const ovMinX = ovRight - page.width / 3;
+  if (nearlyEqual(ov.x, ovMinX) && nearlyEqual(ov.w, ovRight - ovMinX)) return false;
+  elements[idx] = applyGeom(ov, { x: ovMinX, w: ovRight - ovMinX });
+  return true;
+}
+
+/**
+ * 選択中の写真を中央列の「間取り図/敷地図」(id="floor-plan")にする。
+ * - 対象は image かつ id!=="floor-plan"。それ以外は no-op(同一参照)。
+ * - 既存の floor-plan があれば demotedId へ改名して写真へ降格(中央は常に1枚)。
+ * - 対象を id="floor-plan"・fit:"contain"・中央列の既定 rect へ。
+ * - 続けて autoArrangePhotos で写真を図の左へ詰め直す。selectedId は "floor-plan" に。
+ * - id はサーバでなく呼び出し側が safeRandomId で用意する(reducer は純・決定的)。
+ */
+export function setAsFloorPlan(
+  state: EditorState,
+  id: string,
+  demotedId: string,
+  aspects?: Record<string, number>,
+): EditorState {
+  const { document } = state;
+  const idx = document.elements.findIndex((e) => e.id === id);
+  if (idx === -1) return state;
+  const target = document.elements[idx];
+  if (target.type !== "image" || target.id === "floor-plan") return state;
+
+  const elements = document.elements.slice() as SalesSheetElement[];
+  const existingIdx = elements.findIndex((e) => e.id === "floor-plan");
+  if (existingIdx !== -1) {
+    // 既存の間取り図を写真へ降格(id を付け替え・幾何/内容は保持=整列で再配置される)。
+    elements[existingIdx] = { ...elements[existingIdx], id: demotedId } as SalesSheetElement;
+  }
+  const rect = defaultFloorPlanRect(document.page);
+  elements[idx] = {
+    ...(target as ImageElement),
+    id: "floor-plan",
+    fit: "contain",
+    x: rect.x,
+    y: rect.y,
+    w: rect.w,
+    h: rect.h,
+  };
+  // 写真が0枚(この1枚を図にした)だと autoArrangePhotos が overview スナップ前に return する
+  // ため、ここで概要表を定位置へ寄せて中央列との重なりを防ぐ(@codex #298)。
+  snapOverviewInPlace(elements, document.page);
+  const next: EditorState = {
+    ...state,
+    dirty: true,
+    selectedId: "floor-plan",
+    document: { ...document, elements },
+  };
+  // 写真を図の左へモザイクで詰め直す(no-op なら next のまま)。
+  return autoArrangePhotos(next, aspects ? { aspects } : undefined);
+}
+
+/**
+ * 中央列の「間取り図/敷地図」(id="floor-plan")を通常の写真へ戻す(解除)。
+ * - floor-plan が無ければ no-op。id を newId へ改名して写真化 → autoArrangePhotos で整列。
+ * - selectedId は newId に。id は呼び出し側が safeRandomId で用意。
+ */
+export function unsetFloorPlan(
+  state: EditorState,
+  newId: string,
+  aspects?: Record<string, number>,
+): EditorState {
+  const { document } = state;
+  const idx = document.elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
+  if (idx === -1) return state;
+  const elements = document.elements.slice() as SalesSheetElement[];
+  elements[idx] = { ...elements[idx], id: newId } as SalesSheetElement;
+  const next: EditorState = {
+    ...state,
+    dirty: true,
+    selectedId: newId,
+    document: { ...document, elements },
+  };
+  return autoArrangePhotos(next, aspects ? { aspects } : undefined);
+}
+
+/**
+ * 中央列(間取り図/敷地図=floor-plan)の move/resize を確定し、右端を概要表の左へアンカー
+ * したうえで写真を再整列する。**幾何確定と写真リフローを1回の更新で行う**(=undo 1回で
+ * リサイズ全体が戻る・@codex #298)。
+ * - mode="resize": 右端を anchorRight に固定＝どの向きのハンドルで広げても左端が動く→写真が
+ *   反比例で狭まる。概要表への食い込みも起きない(@codex #298 の右ハンドル問題を解消)。
+ * - mode="move": 右端が概要表を越えない範囲で自由移動(左へ動かすと写真が狭まる)。縦は自由。
+ * - floor-plan が無ければ no-op。写真ゾーンが最小要素サイズ未満に潰れない幅にクランプ。
+ */
+export function commitFloorPlanGeometry(
+  state: EditorState,
+  geom: { mode: "resize" | "move"; x?: number; y?: number; w?: number; h?: number },
+  aspects?: Record<string, number>,
+): EditorState {
+  const { document } = state;
+  const { page } = document;
+  const idx = document.elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
+  if (idx === -1) return state;
+  const fp = document.elements[idx];
+
+  const overviewEl = document.elements.find((e) => e.id === "overview");
+  const ovRight = page.width - PHOTO_ZONE_X_MM;
+  const ovMinX = ovRight - page.width / 3;
+  const boundaryX = overviewEl ? ovMinX : page.width * PHOTO_ZONE_FALLBACK_RATIO;
+  const anchorRight = boundaryX - COLUMN_GAP_MM; // 図の右端(概要表の左に近接)
+  // 図の左端の下限＝写真域が最小要素サイズ分は残る位置。
+  const minX = PHOTO_ZONE_X_MM + MIN_ELEMENT_SIZE_MM + COLUMN_GAP_MM;
+  const maxW = Math.max(MIN_ELEMENT_SIZE_MM, anchorRight - minX);
+
+  const w = clamp(geom.w ?? fp.w, MIN_ELEMENT_SIZE_MM, maxW);
+  const y = clamp(geom.y ?? fp.y, 0, Math.max(0, page.height - MIN_ELEMENT_SIZE_MM));
+  const h = clamp(geom.h ?? fp.h, MIN_ELEMENT_SIZE_MM, Math.max(MIN_ELEMENT_SIZE_MM, page.height - y));
+  const x =
+    geom.mode === "resize"
+      ? Math.max(0, anchorRight - w) // 右端アンカー
+      : // move も左端の下限は minX(写真域が最小サイズ分残る位置)。PHOTO_ZONE_X_MM まで許すと
+        // 写真ゾーンが潰れ autoArrangePhotos が写真を動かせず図が写真に重なる(@codex #298 P1)。
+        clamp(geom.x ?? fp.x, minX, Math.max(minX, anchorRight - w));
+
+  const fpChanged =
+    !nearlyEqual(x, fp.x) || !nearlyEqual(y, fp.y) || !nearlyEqual(w, fp.w) || !nearlyEqual(h, fp.h);
+  let elements = document.elements;
+  if (fpChanged) {
+    elements = document.elements.slice();
+    elements[idx] = applyGeom(fp, { x, y, w, h });
+  }
+  // 概要表を定位置へ(写真0枚だと autoArrangePhotos がスナップ前に return するため・@codex #298)。
+  if (elements === document.elements) {
+    const copy = document.elements.slice();
+    if (snapOverviewInPlace(copy, page)) elements = copy;
+  } else {
+    snapOverviewInPlace(elements, page);
+  }
+  const moved: EditorState =
+    elements === document.elements
+      ? state
+      : { ...state, dirty: true, document: { ...document, elements } };
+  // 同一更新で写真を図の左へ詰め直す(no-op なら moved のまま)。
+  return autoArrangePhotos(moved, aspects ? { aspects } : undefined);
 }
 
 // ---------------------------------------------------------------------------

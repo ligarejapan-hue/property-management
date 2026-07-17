@@ -206,27 +206,40 @@ describe("autoArrangePhotos(段組み詰め)", () => {
     }
   });
 
-  it("間取り図(floor-plan)は不動・写真はその下から敷く", () => {
+  it("間取り図(floor-plan)は中央列・不動、写真はその左に敷く(3列)", () => {
+    // 3列構成: 図は中央列。写真は図の左に詰まる（図の下ではない）。
     const floorPlan = {
-      id: "floor-plan", type: "image", x: 10, y: 46, w: 32, h: 18, z: 1, src: SRC, fit: "contain",
+      id: "floor-plan", type: "image", x: 99, y: 46, w: 83, h: 110, z: 1, src: SRC, fit: "contain",
     };
     const before = makeState([floorPlan, imageEl(1), imageEl(2)]);
     const after = autoArrangePhotos(before);
-    expect(after.document.elements[0]).toBe(before.document.elements[0]);
+    expect(after.document.elements[0]).toBe(before.document.elements[0]); // 図は不動
     const fp = after.document.elements[0];
     for (const img of images(after)) {
       expect(overlaps(img, fp)).toBe(false);
-      expect(img.y).toBeGreaterThanOrEqual(fp.y + fp.h - 0.01);
+      expect(img.x + img.w).toBeLessThanOrEqual(fp.x + 0.01); // 図の左に収まる
     }
   });
 
-  it("間取り図が巨大で写真ゾーンが潰れている場合は no-op(負寸法を書き込まない)", () => {
-    // floor-plan を縦に大きくリサイズ → 写真ゾーン高さが最小要素サイズ未満 → 整列しない。
-    const hugeFloorPlan = {
-      id: "floor-plan", type: "image", x: 10, y: 46, w: 60, h: 125, z: 1, src: SRC, fit: "contain",
+  it("間取り図が広すぎて写真ゾーン(左)が潰れている場合は no-op(負寸法を書き込まない)", () => {
+    // floor-plan を横に大きく広げる → 写真ゾーン幅(図の左)が最小要素サイズ未満 → 整列しない。
+    const wideFloorPlan = {
+      id: "floor-plan", type: "image", x: 13, y: 46, w: 169, h: 110, z: 1, src: SRC, fit: "contain",
     };
-    const s2 = makeState([hugeFloorPlan, imageEl(1), imageEl(2)]);
+    const s2 = makeState([wideFloorPlan, imageEl(1), imageEl(2)]);
     expect(autoArrangePhotos(s2)).toBe(s2);
+  });
+
+  it("間取り図の左端を左へ動かすと写真ゾーンが反比例で狭くなる", () => {
+    const mk = (fpx: number) =>
+      makeState([
+        { id: "floor-plan", type: "image", x: fpx, y: 46, w: 182 - fpx, h: 110, z: 1, src: SRC, fit: "contain" },
+        imageEl(1), imageEl(2),
+      ]);
+    const wide = images(autoArrangePhotos(mk(120))); // 図が狭い→写真ゾーン広い
+    const narrow = images(autoArrangePhotos(mk(80))); // 図が広い→写真ゾーン狭い
+    const rightMost = (imgs: ReturnType<typeof images>) => Math.max(...imgs.map((i) => i.x + i.w));
+    expect(rightMost(narrow)).toBeLessThan(rightMost(wide)); // 図を広げると写真は左へ狭まる
   });
 
   it("非画像要素(テキスト)は参照ごと不動・幾何/fit以外(id/src/焦点/alt/z)は保存", () => {

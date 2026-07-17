@@ -45,6 +45,8 @@ export type ElementPanelChange =
   | { type: "delete" }
   | { type: "editText"; patch: EditTextPatch }
   | { type: "editImage"; patch: EditImagePatch }
+  | { type: "setFloorPlan" }
+  | { type: "unsetFloorPlan" }
   | { type: "editBadge"; patch: EditBadgePatch }
   | { type: "editQr"; patch: EditQrPatch }
   | { type: "editTableRow"; index: number; patch: EditTableRowPatch }
@@ -462,6 +464,26 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
         <section className="p-3" data-image-editor>
           <p className={sectionHeadCls}>写真</p>
           <div className="flex flex-col gap-2">
+            {/* 間取り図/敷地図の指定・解除（中央列）。この画像を中央の間取り図にする／写真に戻す。 */}
+            {imageEl.id === "floor-plan" ? (
+              <button
+                type="button"
+                data-action="unset-floor-plan"
+                onClick={() => onChange({ type: "unsetFloorPlan" })}
+                className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+              >
+                写真に戻す（中央の間取り図を解除）
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-action="set-floor-plan"
+                onClick={() => onChange({ type: "setFloorPlan" })}
+                className="w-full rounded border border-blue-500 bg-blue-50 px-2 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-100 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300"
+              >
+                間取り図にする（中央列へ）
+              </button>
+            )}
             {/* Fit */}
             <label className="flex flex-col gap-0.5">
               <span className={labelSpanCls}>表示方法</span>
