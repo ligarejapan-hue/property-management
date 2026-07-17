@@ -620,7 +620,7 @@ export function positionMapQrInState(state: EditorState): EditorState {
  */
 export function addMapQrElement(
   state: EditorState,
-  params: { address: string },
+  params: { address: string; aspects?: Record<string, number> },
 ): EditorState {
   const url = buildMapsSearchUrl(params.address);
   if (url === null) return state;
@@ -660,20 +660,27 @@ export function addMapQrElement(
     content: url,
   };
   const elements = positionMapQr([...base, mapQrEl], page);
-  return {
+  const withQr: EditorState = {
     ...state,
     dirty: true,
     selectedId: MAP_QR_ID,
     document: { ...document, elements },
   };
+  // 図が無い場合は写真ゾーン下端を QR 分予約するため、写真を再整列して QR 帯から外す
+  // (既存写真が QR に重ならないように・@codex #300 P1)。図があるときは写真ゾーンは
+  // 図の左で不変ゆえ整列不要だが、autoArrangePhotos は変化ゼロなら同一参照。
+  return autoArrangePhotos(withQr, params.aspects ? { aspects: params.aspects } : undefined);
 }
 
 /**
- * 地図QR(map-qr)を削除し、QR のために縮めた間取図を全高(会社帯の上端=contentBottom まで)へ
- * 戻す(@codex #300: 予約解放)。map-qr が無ければ no-op。floor-plan が無ければ削除のみ。
+ * 地図QR(map-qr)を削除し、QR の予約のために縮めた間取図の高さを解放する(@codex #300)。
+ * - map-qr が無ければ no-op。floor-plan が無ければ削除のみ。
+ * - **予約境界にちょうど収まっている図だけ**を全高(会社帯の上端=contentBottom まで)へ戻す。
+ *   手動で別の高さにした図(予約境界と一致しない)は尊重してそのまま(@codex #300: 高さ保持)。
  */
 export function deleteMapQr(state: EditorState): EditorState {
-  if (!state.document.elements.some((e) => e.id === MAP_QR_ID)) return state;
+  const qr = state.document.elements.find((e) => e.id === MAP_QR_ID && e.type === "qr");
+  if (!qr) return state;
   const removed = deleteElement(state, MAP_QR_ID);
   const { document } = removed;
   const { page } = document;
@@ -681,6 +688,9 @@ export function deleteMapQr(state: EditorState): EditorState {
   if (fpIdx === -1) return removed;
   const fp = document.elements[fpIdx];
   const contentBottom = page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM;
+  // 予約時の図の下端(maxFloorBottom)にちょうど一致する図のみ解放。削除前の QR 高さで判定する。
+  const reservedBottom = contentBottom - MAP_QR_GAP_MM - qr.h;
+  if (!nearlyEqual(fp.y + fp.h, reservedBottom)) return removed; // 手動高さは尊重
   const fullH = Math.max(MIN_ELEMENT_SIZE_MM, contentBottom - fp.y);
   if (nearlyEqual(fp.h, fullH)) return removed;
   const elements = document.elements.slice();
@@ -933,7 +943,12 @@ export function autoArrangePhotos(
     ? Math.min(overviewBoundaryRight, floorPlanEl.x - COLUMN_GAP_MM)
     : overviewBoundaryRight;
   const zoneW = Math.max(0, zoneRight - zoneX);
-  const zoneH = Math.max(0, page.height - zoneY - PHOTO_ZONE_BOTTOM_MARGIN_MM);
+  // 図が無く地図QRがある場合は、写真ゾーン下端を QR(高さ+gap)分だけ上げて予約する
+  // (QR は positionMapQr がその下帯・概要表の左へ置く=写真と重ならない・@codex #300 P1)。
+  // 図がある場合は floor-plan 側の予約で処理するのでここでは不要。
+  const mapQrEl = document.elements.find((e) => e.id === MAP_QR_ID && e.type === "qr");
+  const mapQrBand = !floorPlanEl && mapQrEl ? mapQrEl.h + COLUMN_GAP_MM : 0;
+  const zoneH = Math.max(0, page.height - zoneY - PHOTO_ZONE_BOTTOM_MARGIN_MM - mapQrBand);
   // ゾーンが最小要素サイズ未満に潰れている(例: 間取り図を縦に大きくリサイズ)場合は
   // 整列しない=非正/極小寸法を document に書き込まない(書き込むと schema の positive
   // 検証で保存不能になる・提出前レビュー指摘)。

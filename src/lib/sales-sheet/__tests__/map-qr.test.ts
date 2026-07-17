@@ -119,6 +119,29 @@ describe("addMapQrElement", () => {
     expect(fpOf(s2).y + fpOf(s2).h).toBeLessThanOrEqual(CONTENT_BOTTOM + 0.5);
   });
 
+  it("手動で低くした間取図は、地図QR削除で高さを保持する(@codex #300)", () => {
+    // h=50(下端96 < 予約境界139)は positionMapQr で縮まない→削除でも全高に伸ばさない。
+    const s1 = addMapQrElement(makeState([floorPlan({ y: 46, h: 50 })]), { address: ADDR });
+    expect(fpOf(s1).h).toBeCloseTo(50, 1); // 縮まない
+    const s2 = deleteMapQr(s1);
+    expect(fpOf(s2).h).toBeCloseTo(50, 1); // 削除しても手動高さを保持
+  });
+
+  it("図なし+写真: 地図QR追加で写真が再整列し QR と重ならない(@codex #300 P1)", () => {
+    const overview = { id: "overview", type: "table", x: 188, y: 26, w: 99, h: 158, z: 1, rows: [{ label: "a", value: "b" }], style: {} };
+    const photos = [1, 2, 3].map((n) => ({
+      id: `img-${n}`, type: "image", x: 20, y: 60, w: 60, h: 40, z: n, src: SRC, fit: "cover",
+    }));
+    const s = addMapQrElement(makeState([...photos, overview]), { address: ADDR });
+    const q = qrOf(s)!;
+    type R = { x: number; y: number; w: number; h: number };
+    const imgs = s.document.elements.filter((e) => e.type === "image") as unknown as R[];
+    const overlap = (a: R, b: R) =>
+      a.x + 0.01 < b.x + b.w && b.x + 0.01 < a.x + a.w && a.y + 0.01 < b.y + b.h && b.y + 0.01 < a.y + a.h;
+    expect(imgs.length).toBeGreaterThan(0);
+    for (const im of imgs) expect(overlap(im, q)).toBe(false); // 写真は QR と重ならない
+  });
+
   it("用紙内にクランプ(負値・はみ出しなし)", () => {
     const s = addMapQrElement(makeState([floorPlan({ y: 46, h: 150 })]), { address: ADDR });
     const q = qrOf(s)!;
