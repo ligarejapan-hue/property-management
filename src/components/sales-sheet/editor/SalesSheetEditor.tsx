@@ -162,8 +162,6 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   // 段組み詰めは写真の実寸比で枠を作る。ブラウザで naturalWidth/Height を読み(同一
   // オリジン /uploads・エディタで既に表示済みならキャッシュヒット)、id→比で渡す。
   const aspectCacheRef = useRef(new Map<string, number>());
-  // 中央列(間取り図)の move/resize の最新操作トークン(連続ジェスチャで最新を勝たせる)。
-  const floorPlanOpRef = useRef(0);
 
   function measureAspect(src: string): Promise<number | null> {
     const cached = aspectCacheRef.current.get(src);
@@ -195,6 +193,32 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     return out;
   }
 
+  /**
+   * キャッシュ済みの実寸比のみを id→比 で **同期的に** 集める(未キャッシュは省く=
+   * autoArrangePhotos が現枠 w/h にフォールバック)。中央列(間取り図)の move/resize/指定/解除/
+   * 削除はこれを使い **同期** で確定する。これにより (a) 非同期待ちの間に react-moveable が
+   * ドラッグ時スタイルをリセットしてヒットボックスが崩れる問題 (b) 複数の floor-plan 操作が
+   * 画像ロード順で入れ替わる競合 を原理的に無くす(@codex #298)。キャッシュはマウント時と
+   * 写真追加/自動整列で暖める。
+   */
+  function cachedGalleryAspects(doc: SalesSheetDocument): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const el of doc.elements) {
+      if (el.type !== "image" || el.id === "floor-plan") continue;
+      const a = aspectCacheRef.current.get(el.src);
+      if (a !== undefined) out[el.id] = a;
+    }
+    return out;
+  }
+
+  // マウント時にギャラリー写真の実寸比を先読みしてキャッシュを暖める(floor-plan の同期操作が
+  // 実寸比でモザイクできるように)。fire-and-forget・state 更新なし。
+  useEffect(() => {
+    void measureGalleryAspects(initial.document);
+    // 初回のみ暖める(以後は写真追加/自動整列/測定で更新)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Handlers ────────────────────────────────────────────────────────────
 
   function handleSelect(id: string | null): void {
@@ -205,7 +229,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   function handleMove(id: string, pos: { x: number; y: number }): void {
     // 中央列(間取り図)は幾何確定+写真リフローを1更新で行う専用経路へ(undo1回・反比例)。
     if (id === "floor-plan") {
-      void commitFloorPlan({ mode: "move", x: pos.x, y: pos.y });
+      commitFloorPlan({ mode: "move", x: pos.x, y: pos.y });
       return;
     }
     setEditorState((prev) => moveElement(prev, id, pos));
@@ -216,7 +240,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   function handleResize(id: string, size: { w: number; h: number; x?: number; y?: number }): void {
     if (id === "floor-plan") {
       // どの向きのハンドルでも右端を概要表の左へアンカーし、左端が動く=写真が反比例で狭まる。
-      void commitFloorPlan({ mode: "resize", w: size.w, h: size.h, y: size.y });
+      commitFloorPlan({ mode: "resize", w: size.w, h: size.h, y: size.y });
       return;
     }
     setEditorState((prev) =>
@@ -230,51 +254,43 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   /** 中央列(間取り図)の move/resize を確定し、右端アンカー＋写真リフローを1更新で行う。
    *  実寸比は src 由来(位置非依存)なので確定前 document から測る。測定中に document が
    *  変わっていたら適用しない(遅延した整列で intervening な編集を上書きしない・@codex #298)。 */
-  async function commitFloorPlan(geom: {
+  /** 中央列(間取り図)の move/resize を **同期** で確定(右端アンカー＋写真リフローを1更新)。
+   *  実寸比はキャッシュから同期取得するため、非同期待ちに伴うヒットボックス崩れ/操作競合が無い。 */
+  function commitFloorPlan(geom: {
     mode: "resize" | "move";
     x?: number;
     y?: number;
     w?: number;
     h?: number;
-  }): Promise<void> {
-    // 最新操作トークン＋docAtCall ガードの併用(@codex #298):
-    // - トークン: 未キャッシュ画像で連続ジェスチャしたとき、古い方を破棄し最新を勝たせる
-    //   (先着が document を変える前に古いジェスチャを弾く→最新の docAtCall が有効なまま)。
-    // - docAtCall: 測定待ちに undo/redo や他要素編集が入ったら適用しない(履歴/編集を壊さない)。
-    const op = ++floorPlanOpRef.current;
-    const docAtCall = editorState.document;
-    const aspects = await measureGalleryAspects(docAtCall);
-    if (op !== floorPlanOpRef.current) return; // 新しいジェスチャに追い越された(古い方)
-    setEditorState((prev) =>
-      prev.document === docAtCall ? commitFloorPlanGeometry(prev, geom, aspects) : prev,
-    );
+  }): void {
+    setEditorState((prev) => commitFloorPlanGeometry(prev, geom, cachedGalleryAspects(prev.document)));
   }
 
   /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */
   function handleElementPanelChange(change: ElementPanelChange): void {
     // 間取り図の指定/解除は実寸比を測ってから整列する async 経路へ委譲する。
     if (change.type === "setFloorPlan") {
-      void handleSetFloorPlan();
+      handleSetFloorPlan();
       return;
     }
     if (change.type === "unsetFloorPlan") {
-      void handleUnsetFloorPlan();
+      handleUnsetFloorPlan();
       return;
     }
     // 中央列(間取り図)の X/Y/幅/高さをパネルで編集した場合も、キャンバスのドラッグと同じ
     // アンカー＋写真リフロー経路へ通す(汎用 move/resize だと概要表に食い込む/写真が非連動・@codex #298)。
     if (editorState.selectedId === "floor-plan") {
       if (change.type === "move") {
-        void commitFloorPlan({ mode: "move", x: change.x, y: change.y });
+        commitFloorPlan({ mode: "move", x: change.x, y: change.y });
         return;
       }
       if (change.type === "resize") {
-        void commitFloorPlan({ mode: "resize", w: change.w, h: change.h });
+        commitFloorPlan({ mode: "resize", w: change.w, h: change.h });
         return;
       }
       if (change.type === "delete") {
         // 中央列を削除したら写真を左2/3へ詰め直す(削除だけだと写真が狭いまま中央が空白・@codex #298)。
-        void handleDeleteFloorPlan();
+        handleDeleteFloorPlan();
         return;
       }
     }
@@ -343,62 +359,51 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) => (prev.document === docAtCall ? autoArrangePhotos(prev, { aspects }) : prev));
   }
 
-  /** 選択中の写真を中央列の間取り図/敷地図にする（実寸比を測って写真を図の左へ整列）。 */
-  async function handleSetFloorPlan(): Promise<void> {
+  /** 選択中の写真を中央列の間取り図/敷地図にする（**同期**・キャッシュ実寸比で写真を図の左へ）。 */
+  function handleSetFloorPlan(): void {
     const id = editorState.selectedId;
     if (!id) return;
-    const doc = editorState.document;
-    const aspects = await measureGalleryAspects(doc);
     const demotedId = safeRandomId();
-    // 既存の間取り図がある場合は写真へ降格する＝そのまま写真ゾーンのモザイクに再合流する。
-    // measureGalleryAspects は floor-plan を除外するため、降格後の実寸比を別途測って
-    // demotedId で登録する（未登録だと旧・中央列枠の縦横比にフォールバックし余白/歪みが出る）。
-    const existingFp = doc.elements.find(
-      (e): e is ImageElement => e.id === "floor-plan" && e.type === "image",
-    );
-    if (existingFp) {
-      const a = await measureAspect(existingFp.src);
-      if (a !== null) aspects[demotedId] = a;
-    }
-    // 計測待ちの間に選択/編集/undo が入っていたら適用しない(古い前提で上書きしない・@codex #298)。
-    // 選択変更は document 参照を変えないため、selectedId===id も併せて確認する。
-    setEditorState((prev) =>
-      prev.document === doc && prev.selectedId === id
-        ? setAsFloorPlan(prev, id, demotedId, aspects)
-        : prev,
-    );
+    setEditorState((prev) => {
+      if (prev.selectedId !== id) return prev;
+      const aspects = cachedGalleryAspects(prev.document);
+      // 既存の間取り図を写真へ降格する場合、その実寸比を demotedId で登録(未登録だと旧・中央列
+      // 枠の縦横比にフォールバックし余白/歪みが出る)。キャッシュ済みなので同期で取れる。
+      const existingFp = prev.document.elements.find(
+        (e): e is ImageElement => e.id === "floor-plan" && e.type === "image",
+      );
+      if (existingFp) {
+        const a = aspectCacheRef.current.get(existingFp.src);
+        if (a !== undefined) aspects[demotedId] = a;
+      }
+      return setAsFloorPlan(prev, id, demotedId, aspects);
+    });
   }
 
-  /** 中央列の間取り図/敷地図を通常の写真へ戻す（実寸比を測って写真を再整列）。 */
-  async function handleUnsetFloorPlan(): Promise<void> {
-    const doc = editorState.document;
-    const aspects = await measureGalleryAspects(doc);
+  /** 中央列の間取り図/敷地図を通常の写真へ戻す（**同期**）。 */
+  function handleUnsetFloorPlan(): void {
     const newId = safeRandomId();
-    // 解除で写真へ戻る間取り図は measureGalleryAspects の対象外ゆえ、実寸比を測って newId で
-    // 登録する（未登録だと中央列枠の縦横比でモザイク化され余白/歪みが出る）。
-    const fp = doc.elements.find(
-      (e): e is ImageElement => e.id === "floor-plan" && e.type === "image",
-    );
-    if (fp) {
-      const a = await measureAspect(fp.src);
-      if (a !== null) aspects[newId] = a;
-    }
-    // 計測待ちの間に編集/undo/選択変更が入っていたら適用しない(選択変更は document を変えない
-    // ため selectedId==="floor-plan" のままかも確認・handleSetFloorPlan と対称・@codex #298)。
-    setEditorState((prev) =>
-      prev.document === doc && prev.selectedId === "floor-plan"
-        ? unsetFloorPlan(prev, newId, aspects)
-        : prev,
-    );
+    setEditorState((prev) => {
+      if (prev.selectedId !== "floor-plan") return prev;
+      const aspects = cachedGalleryAspects(prev.document);
+      const fp = prev.document.elements.find(
+        (e): e is ImageElement => e.id === "floor-plan" && e.type === "image",
+      );
+      if (fp) {
+        const a = aspectCacheRef.current.get(fp.src);
+        if (a !== undefined) aspects[newId] = a;
+      }
+      return unsetFloorPlan(prev, newId, aspects);
+    });
   }
 
-  /** 中央列(間取り図)を削除し、写真を左2/3(2列)へ詰め直す(@codex #298)。 */
-  async function handleDeleteFloorPlan(): Promise<void> {
-    const doc = editorState.document;
-    const aspects = await measureGalleryAspects(doc);
+  /** 中央列(間取り図)を削除し、写真を左2/3(2列)へ詰め直す(**同期**・@codex #298)。 */
+  function handleDeleteFloorPlan(): void {
     setEditorState((prev) =>
-      prev.document === doc && prev.selectedId === "floor-plan"
-        ? autoArrangePhotos(deleteElement(prev, "floor-plan"), { aspects })
+      prev.selectedId === "floor-plan"
+        ? autoArrangePhotos(deleteElement(prev, "floor-plan"), {
+            aspects: cachedGalleryAspects(prev.document),
+          })
         : prev,
     );
   }
