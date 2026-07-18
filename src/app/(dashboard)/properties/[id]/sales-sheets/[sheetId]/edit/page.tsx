@@ -28,7 +28,8 @@ export default async function SalesSheetEditPage({
 
   const property = await prisma.property.findUnique({
     where: { id },
-    select: { id: true, createdBy: true, assignedTo: true },
+    // address は地図QR(物件の場所を Google マップ検索する QR)のリンク生成に使う。
+    select: { id: true, createdBy: true, assignedTo: true, address: true },
   });
   if (!property || !canAccessPropertyRecord(session, property)) {
     redirect(`/properties/${id}`);
@@ -46,6 +47,7 @@ export default async function SalesSheetEditPage({
           document,
           sheetId: design.id,
           propertyId: id,
+          propertyAddress: property.address,
           updatedAt: design.updatedAt.toISOString(),
         }}
       />

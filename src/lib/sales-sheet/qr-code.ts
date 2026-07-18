@@ -12,9 +12,12 @@ import qrcode from "qrcode-generator";
 /** 保存境界 design-service.ts の MAX_INLINE_IMAGE_SRC_LEN と同値（独立定義）。 */
 const MAX_QR_DATA_URL_LEN = 8192;
 
-/** QR 1 セルの描画ピクセルと余白。30mm 枠への拡大とデータ量のバランス。 */
-const CELL_SIZE_PX = 4;
-const MARGIN_PX = 16;
+/** QR 1 セルの描画ピクセル(既定→段階的に縮小)。長い URL(住所エンコード等)でも保存上限
+ *  (MAX_QR_DATA_URL_LEN)に収まるよう、大きい順に試して最初に収まったものを使う。表示は
+ *  要素サイズ(mm)へ拡大されるため、実用上のスキャン性は保たれる。 */
+const CELL_SIZE_CANDIDATES_PX = [4, 3, 2, 1];
+/** 余白(クワイエットゾーン)はセルの 4 倍(=4 モジュール相当)でセルに比例させる。 */
+const MARGIN_CELLS = 4;
 
 /** printable ASCII のみ許可。qrcode-generator の既定 Byte モードは非 ASCII を
  *  文字化けさせる（UTF-8 変換を持たない）ため、URL 等の半角に限定する。 */
@@ -35,11 +38,15 @@ export function generateQrDataUrl(content: string): string | null {
     const qr = qrcode(0, "M");
     qr.addData(text);
     qr.make();
-    const dataUrl = qr.createDataURL(CELL_SIZE_PX, MARGIN_PX);
-    if (!dataUrl.startsWith("data:image/") || dataUrl.length > MAX_QR_DATA_URL_LEN) {
-      return null;
+    // セルサイズを大きい順に試し、保存上限内に収まる最初のものを採用(長い URL でも
+    // 生成できるように)。すべて超過なら null(呼び出し側は no-op)。
+    for (const cell of CELL_SIZE_CANDIDATES_PX) {
+      const dataUrl = qr.createDataURL(cell, cell * MARGIN_CELLS);
+      if (dataUrl.startsWith("data:image/") && dataUrl.length <= MAX_QR_DATA_URL_LEN) {
+        return dataUrl;
+      }
     }
-    return dataUrl;
+    return null;
   } catch {
     return null;
   }

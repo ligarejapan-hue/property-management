@@ -60,6 +60,25 @@ describe("EditorToolbar — 描画", () => {
     expect(html).toContain("QRを追加");
   });
 
+  it("地図QR追加ボタン: 住所ありで活性・住所無しで無効", () => {
+    const withAddr = renderToStaticMarkup(
+      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} onAddMapQr={() => {}} canAddMapQr={true} onOpenTransactionInfo={() => {}} />,
+    );
+    expect(withAddr).toContain("data-toolbar-add-map-qr");
+    expect(withAddr).toContain("地図QRを追加");
+    // React SSR は disabled=true のとき属性 `disabled=""` を出力(className の disabled: とは別)。
+    const tag = (html: string) => {
+      const s = html.slice(html.indexOf("data-toolbar-add-map-qr"));
+      return s.slice(0, s.indexOf(">"));
+    };
+    expect(tag(withAddr).includes('disabled=""')).toBe(false); // 住所あり=活性
+
+    const noAddr = renderToStaticMarkup(
+      <EditorToolbar dirty={false} onSave={noop} onExport={noop} onDelete={noop} onAddPhoto={() => {}} onAutoArrange={() => {}} onAutoBalance={() => {}} onAddBadge={() => {}} onAddQr={() => {}} onAddMapQr={() => {}} canAddMapQr={false} onOpenTransactionInfo={() => {}} />,
+    );
+    expect(tag(noAddr).includes('disabled=""')).toBe(true); // 住所無し=無効
+  });
+
   it("バッジ追加ボタンを持つ（計画⑦）", () => {
     const html = renderToStaticMarkup(
       <EditorToolbar

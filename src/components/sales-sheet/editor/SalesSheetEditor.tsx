@@ -23,6 +23,10 @@ import {
   addImageElement,
   addBadgeElement,
   addQrElement,
+  addMapQrElement,
+  deleteMapQr,
+  MAP_QR_ID,
+  positionMapQrInState,
   autoArrangePhotos,
   autoBalanceLayout,
   setAsFloorPlan,
@@ -54,6 +58,8 @@ export interface SalesSheetEditorInitial {
   sheetId: string;
   /** 紐付く物件 ID */
   propertyId: string;
+  /** 物件の住所（地図QR のリンク生成に使う。未登録なら空/undefined でボタン無効）。 */
+  propertyAddress?: string;
   /** 最終保存日時（ISO 文字列） */
   updatedAt: string;
 }
@@ -311,7 +317,10 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         case "sendToBack":
           return sendToBack(prev, id);
         case "delete":
-          return deleteElement(prev, id);
+          // 地図QR削除時は、縮めた間取図を全高へ戻し写真を再整列する(@codex #300)。
+          return id === MAP_QR_ID
+            ? deleteMapQr(prev, cachedGalleryAspects(prev.document))
+            : deleteElement(prev, id);
         case "editText":
           // 文字サイズ変更での自動再バランスは撤去（@codex P2 / review 3件が指摘）: レイアウトを
           // 駆動する概要表フォントは editText 対象外ゆえ、見出し等の text フォント変更では枠が
@@ -401,13 +410,16 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     });
   }
 
-  /** 中央列(間取り図)を削除し、写真を左2/3(2列)へ詰め直す(**同期**・@codex #298)。 */
+  /** 中央列(間取り図)を削除し、写真を左2/3(2列)へ詰め直す(**同期**・@codex #298)。
+   *  地図QRがあれば右下フォールバックへ戻す(図が消えて写真が中央へ広がるため・@codex #300)。 */
   function handleDeleteFloorPlan(): void {
     setEditorState((prev) =>
       prev.selectedId === "floor-plan"
-        ? autoArrangePhotos(deleteElement(prev, "floor-plan"), {
-            aspects: cachedGalleryAspects(prev.document),
-          })
+        ? positionMapQrInState(
+            autoArrangePhotos(deleteElement(prev, "floor-plan"), {
+              aspects: cachedGalleryAspects(prev.document),
+            }),
+          )
         : prev,
     );
   }
@@ -433,6 +445,18 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   /** QR コードを追加する（計画⑧）。中身はプレースホルダー＝右パネルで書き換える。 */
   function handleAddQr(): void {
     setEditorState((prev) => addQrElement(prev, { id: safeRandomId(), content: "https://" }));
+  }
+
+  /** 物件の場所を Google マップ検索する QR を、間取図の下(無ければ右下)へ差し込む。 */
+  const canAddMapQr = !!initial.propertyAddress && initial.propertyAddress.trim() !== "";
+  function handleAddMapQr(): void {
+    if (!canAddMapQr) return;
+    setEditorState((prev) =>
+      addMapQrElement(prev, {
+        address: initial.propertyAddress ?? "",
+        aspects: cachedGalleryAspects(prev.document),
+      }),
+    );
   }
 
   /** 文書テーマ（フォント/基調色）を変更する（計画⑧）。 */
@@ -549,6 +573,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onAutoBalance={handleAutoBalance}
         onAddBadge={handleAddBadge}
         onAddQr={handleAddQr}
+        onAddMapQr={handleAddMapQr}
+        canAddMapQr={canAddMapQr}
         onOpenTransactionInfo={() => setTxInfoOpen(true)}
         canEditTransactionInfo={editorState.document.elements.some((e) => e.id === "footer-band")}
       />

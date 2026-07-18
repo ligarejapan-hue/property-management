@@ -16,6 +16,10 @@ export interface EditorToolbarProps {
   onAddBadge: () => void;
   /** QR コード要素を追加（計画⑧）。 */
   onAddQr: () => void;
+  /** 物件の場所を Google マップ検索する QR を間取図の下(無ければ右下)へ追加。 */
+  onAddMapQr?: () => void;
+  /** 物件の住所が登録されているか。false のとき地図QRボタンを無効化。 */
+  canAddMapQr?: boolean;
   /** 会社帯の物件別6項目(取引情報)の編集モーダルを開く。 */
   onOpenTransactionInfo: () => void;
   /** 会社帯(footer-band)を持つ図面か。古い様式で作成され帯が無い図面では
@@ -30,7 +34,7 @@ export interface EditorToolbarProps {
   canRedo?: boolean;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -165,6 +169,16 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         QRを追加
+      </button>
+      <button
+        type="button"
+        data-toolbar-add-map-qr
+        onClick={onAddMapQr}
+        disabled={busy || !canAddMapQr}
+        title={!canAddMapQr ? "物件の住所が未登録です" : "物件の場所（Googleマップ）のQRを間取図の下に追加"}
+        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
+      >
+        地図QRを追加
       </button>
       <button
         type="button"
