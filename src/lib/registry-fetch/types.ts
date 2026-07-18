@@ -52,7 +52,10 @@ export type RegistryFetchErrorCode =
   | "rate_limited"
   | "auth_failed"
   | "not_found"
-  | "provider_error";
+  | "provider_error"
+  // 登記情報提供サービスの利用時間外(jikangai.html へ誘導される)。auth_failed と区別し、
+  // 利用者に「時間外」と明示する(誤って資格情報を疑わせない)。
+  | "service_hours";
 
 /**
  * 所在検索の入力（PR-2b）。所在/地番/家屋番号で謄本候補を検索する。
