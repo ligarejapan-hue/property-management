@@ -216,6 +216,27 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.page.fill).not.toHaveBeenCalled();
   });
 
+  it("C3t: 送信後に時間外へ切替(締切レース)でも、着地待ち失敗時に URL 再確認で service_hours にする", async () => {
+    const f = makeFakeChromium();
+    // jikangai 判定(arg=""): 1回目(初回goto直後)=false、2回目(catch再確認)=true。
+    let jikangaiChecks = 0;
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "" ? ++jikangaiChecks >= 2 : undefined,
+    );
+    // 送信後の着地待ち(グループセレクタ=menuClick を含む)で timeout させる。他は成功。
+    f.page.waitForSelector = vi.fn(async (sel: string) => {
+      if (sel.includes("menuClick")) throw makeTimeoutError();
+      return {};
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+    ).rejects.toMatchObject({ code: "service_hours" });
+  });
+
   it("C3b: submit の evaluate 関数は対象セレクタ要素の DOM click() を呼ぶ（覆い/actionability に非依存）", async () => {
     const f = makeFakeChromium();
     let evaluatedFn: ((arg: string) => unknown) | undefined;

@@ -496,6 +496,18 @@ function createPlaywrightRegistryPage(
       } catch (err) {
         // 既に分類済み(service_hours 等)はそのまま保持し、auth_failed で上書きしない。
         if (err instanceof RegistryFetchError) throw err;
+        // 締切レース(@codex): 送信後に時間外へ切り替わる/送信の応答で jikangai へ誘導される場合、
+        // 着地待ちが timeout する。ここで URL を再確認し、時間外なら service_hours に分類する
+        // (auth_failed で資格情報を疑わせない)。評価失敗(ページ閉鎖等)は false 扱い。
+        const outsideHoursNow = await page
+          .evaluate(
+            () =>
+              typeof location !== "undefined" &&
+              /jikangai/i.test(location.href),
+            "",
+          )
+          .catch(() => false);
+        if (outsideHoursNow) throw new RegistryFetchError("service_hours");
         // ログイン確認に至らない = 認証失敗扱い（生メッセージ非載・secret 非露出）。
         // どの段階/種別で失敗したか（TimeoutError とセレクタ名など）は運用診断のため分類ログに残す。
         // secret（loginId/password）に加え、baseUrl/loginUrl（env でカスタム/内部エンドポイントに
