@@ -76,6 +76,7 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   // 502 だとクライアント/呼び出し側が「一時的な upstream 障害 → リトライ」と誤認しうるため。
   not_found: 404,
   provider_error: 502,
+  service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
 };
 
 /**
@@ -417,6 +418,15 @@ function createPlaywrightRegistryPage(
       const loginUrl = `${base}${loginPath}`;
       try {
         await page.goto(loginUrl);
+        // 利用時間外だとログイン画面ではなく jikangai.html(時間外案内)へ誘導される。この場合
+        // #userId は現れず fill が 30秒 timeout → auth_failed に見えてしまう。時間外を先に検出し、
+        // 「認証失敗」でなく「利用時間外」として明示する(資格情報を疑わせない・2026-07-18 本番確認)。
+        const outsideHours = await page.evaluate(
+          () =>
+            typeof location !== "undefined" && /jikangai/i.test(location.href),
+          "",
+        );
+        if (outsideHours) throw new RegistryFetchError("service_hours");
         await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
         await page.fill(REGISTRY_SELECTORS.password, input.password);
         // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
@@ -484,6 +494,8 @@ function createPlaywrightRegistryPage(
         // ログイン成功を固有要素で確認（URL だけで判定しない）。
         await page.waitForSelector(REGISTRY_SELECTORS.loggedIn);
       } catch (err) {
+        // 既に分類済み(service_hours 等)はそのまま保持し、auth_failed で上書きしない。
+        if (err instanceof RegistryFetchError) throw err;
         // ログイン確認に至らない = 認証失敗扱い（生メッセージ非載・secret 非露出）。
         // どの段階/種別で失敗したか（TimeoutError とセレクタ名など）は運用診断のため分類ログに残す。
         // secret（loginId/password）に加え、baseUrl/loginUrl（env でカスタム/内部エンドポイントに

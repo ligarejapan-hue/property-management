@@ -199,6 +199,23 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     );
   });
 
+  it("C3s: 利用時間外(jikangai へ誘導)なら service_hours で停止し auth_failed にしない", async () => {
+    const f = makeFakeChromium();
+    // login の最初の evaluate(jikangai 判定・arg="")を「時間外」に。他の evaluate は undefined。
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      arg === "" ? true : undefined,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+    ).rejects.toMatchObject({ code: "service_hours" });
+    // 時間外検出は fill の前=ID/PW を入力しに行かない(資格情報を疑わせない)。
+    expect(f.page.fill).not.toHaveBeenCalled();
+  });
+
   it("C3b: submit の evaluate 関数は対象セレクタ要素の DOM click() を呼ぶ（覆い/actionability に非依存）", async () => {
     const f = makeFakeChromium();
     let evaluatedFn: ((arg: string) => unknown) | undefined;
@@ -313,7 +330,11 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     const page = await factory!();
     await page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" });
     // ログインボタン→強制ログインボタンの2回 DOM click(いずれも button.CForwardLong)。
-    expect(evaluatedArgs).toEqual(["button.CForwardLong", "button.CForwardLong"]);
+    // 先頭の jikangai 判定 evaluate(arg="")は除外する。
+    expect(evaluatedArgs.filter((a) => a !== "")).toEqual([
+      "button.CForwardLong",
+      "button.CForwardLong",
+    ]);
     // 確認画面マーカーを待って強制ログインを押し、その「後」に loggedIn を待つ順序。
     const forceIdx = order.indexOf(`wait:${REGISTRY_FORCE_LOGIN_MARKER}`);
     const loggedInIdx = order.indexOf('wait:form[name="logoutForm"]');
@@ -399,8 +420,8 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await expect(
       page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
     ).resolves.toBeUndefined();
-    // DOM click はログインボタンの1回のみ(強制ログインは押さない)。
-    expect(evaluatedArgs).toEqual(["button.CForwardLong"]);
+    // DOM click はログインボタンの1回のみ(強制ログインは押さない)。jikangai 判定(arg="")は除外。
+    expect(evaluatedArgs.filter((a) => a !== "")).toEqual(["button.CForwardLong"]);
     // loggedIn は待つ。
     expect(f.page.waitForSelector).toHaveBeenCalledWith('form[name="logoutForm"]');
   });

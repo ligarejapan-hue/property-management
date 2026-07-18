@@ -20,6 +20,8 @@ export const REGISTRY_FETCH_ERROR_MESSAGES: Readonly<
   auth_failed: "謄本取得サービスの認証に失敗しました。",
   not_found: "対象の謄本が見つかりませんでした。",
   provider_error: "謄本取得サービスでエラーが発生しました。",
+  service_hours:
+    "登記情報提供サービスは現在ご利用時間外です。サービスの利用時間内に再度お試しください。",
 };
 
 /**
