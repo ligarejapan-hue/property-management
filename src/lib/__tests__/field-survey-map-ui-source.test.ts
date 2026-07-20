@@ -419,6 +419,20 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(PAGE_SRC).not.toMatch(/h-\[calc\(100vh-3\.5rem\)\]/);
   });
 
+  it("表示切替パネルは地図エリアの実高に固定+内部スクロールでスマホでも下部が切れない", () => {
+    // 地図エリア(flex-1 overflow-hidden)にパネルが絶対配置され、内容が地図高より
+    // 高くなると下部が overflow-hidden で切れる(スマホで発生)。viewport 固定値の
+    // 上限だとバナー/ヘッダ折返し等の可変高で狂うため、コンテナを地図エリアの実高
+    // (top-3〜bottom-3)に固定し、その中でパネルをスクロールさせる。
+    expect(MAP_SRC).toMatch(/pointer-events-none absolute bottom-3 right-3 top-3/);
+    expect(MAP_SRC).toMatch(/overflow-y-auto/);
+    expect(MAP_SRC).toMatch(/overscroll-contain/);
+    // 空き領域は地図操作を透過し、パネル/ボタンのみ操作可能にする。
+    expect(MAP_SRC).toMatch(/pointer-events-auto/);
+    // viewport 固定値のマジックナンバーには戻さない。
+    expect(MAP_SRC).not.toMatch(/max-h-\[calc\(100dvh/);
+  });
+
   it("map component / page から料金関連内部設定値を console / error に流さない", () => {
     // billing / budget / quota の内部値を出力に混ぜないこと
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*billing/i);
