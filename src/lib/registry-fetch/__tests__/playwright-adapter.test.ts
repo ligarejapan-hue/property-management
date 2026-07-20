@@ -31,11 +31,15 @@ import {
   DEFAULT_REGISTRY_LOGIN_PATH,
   REGISTRY_FORCE_LOGIN_MARKER,
   extractChibanCandidateRows,
+  isRegistryUnavailablePage,
   normalizeChibanForDialog,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
 } from "../auto-fetch";
-import { RegistryFetchError } from "../errors";
+import {
+  RegistryFetchError,
+  REGISTRY_FETCH_ERROR_MESSAGES,
+} from "../errors";
 
 /** name=="TimeoutError" の擬似エラー（Playwright TimeoutError 相当）。 */
 function makeTimeoutError(): Error {
@@ -108,6 +112,47 @@ afterEach(() => {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
+});
+
+describe("isRegistryUnavailablePage（時間外/停止ページのブラウザ内判定）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("jikangai(時間外案内)へ誘導された URL は true", () => {
+    vi.stubGlobal("location", {
+      href: "https://reg.test/TeikyoUketsuke/jikangai.html",
+    });
+    vi.stubGlobal("document", { title: "ご利用時間のお知らせ" });
+    expect(isRegistryUnavailablePage()).toBe(true);
+  });
+
+  it("夜間時間外の 404 ページ(URL 不変・title が404)は true", () => {
+    vi.stubGlobal("location", {
+      href: "https://reg.test/TeikyoUketsuke/common/login",
+    });
+    vi.stubGlobal("document", { title: "404｜ページが見つかりません" });
+    expect(isRegistryUnavailablePage()).toBe(true);
+  });
+
+  it("通常のログイン画面は false", () => {
+    vi.stubGlobal("location", {
+      href: "https://reg.test/TeikyoUketsuke/common/login",
+    });
+    vi.stubGlobal("document", { title: "登記情報提供サービス ログイン" });
+    expect(isRegistryUnavailablePage()).toBe(false);
+  });
+
+  it("グローバル未定義(非ブラウザ)では false(誤検出しない)", () => {
+    expect(isRegistryUnavailablePage()).toBe(false);
+  });
+
+  it("service_hours の利用者向け文言に利用時間を明記する", () => {
+    const msg = REGISTRY_FETCH_ERROR_MESSAGES.service_hours;
+    expect(msg).toContain("ご利用時間外");
+    expect(msg).toContain("平日 8:30〜23:00");
+    expect(msg).toContain("土日祝日 8:30〜18:00");
+  });
 });
 
 describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）", () => {
@@ -235,6 +280,36 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await expect(
       page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
     ).rejects.toMatchObject({ code: "service_hours" });
+  });
+
+  it("C3u: 夜間の時間外(サイト全体が404ページ・URLは不変)でも service_hours に分類し auth_failed にしない", async () => {
+    const f = makeFakeChromium();
+    // 実ブラウザ相当: 渡された判定関数を実際に実行する。グローバルは夜間時間外の実挙動
+    // (URL はログインURLのまま・title が 404)を模す(2026-07-20 本番probe で採取)。
+    vi.stubGlobal("location", {
+      href: "https://reg.test/TeikyoUketsuke/common/login",
+    });
+    vi.stubGlobal("document", { title: "404｜ページが見つかりません" });
+    try {
+      f.page.evaluate = vi.fn(
+        async (fn: (arg: string) => unknown, arg: string) => fn(arg),
+      );
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      await expect(
+        page.login({
+          loginId: "id",
+          password: "pw",
+          baseUrl: "https://reg.test",
+        }),
+      ).rejects.toMatchObject({ code: "service_hours" });
+      // 404 検出は fill の前=ID/PW を入力しに行かない(資格情報を疑わせない)。
+      expect(f.page.fill).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("C3b: submit の evaluate 関数は対象セレクタ要素の DOM click() を呼ぶ（覆い/actionability に非依存）", async () => {
