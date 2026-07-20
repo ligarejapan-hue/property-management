@@ -223,6 +223,16 @@ export const REGISTRY_FORCE_LOGIN_MARKER = 'input[name="from"][value="elogin"]';
 const FORCE_LOGIN_CONFIRM_DETECT_MS = 1500;
 
 /**
+ * ログインフォーム(#userId)の出現待ち時間(ms)。閉局時はアプリ入口URL(www側)が
+ * 「ご利用中の皆様へ」案内ページ(HTTP200・フォーム無し)を返すことがあり、この待機が
+ * 「フォーム不在=閉局/接続不可」の検出を兼ねる。**主タイムアウト(REGISTRY_FETCH_TIMEOUT_MS・
+ * 推奨30000)より十分短くする**こと: 同値だと provider 全体タイマー(goto の前から進行)が
+ * 先に切れて分類に到達せず、generic timeout に化ける(@codex P1)。goto 数秒+本待機でも
+ * 全体予算内に収まる値にする。
+ */
+const LOGIN_FORM_DETECT_MS = 15000;
+
+/**
  * 地番検索ダイアログの候補ロード待ち時間(ms)。クリック直後は「データ取得中・・・」表示で、
  * 候補は非同期で後から入る。この時間内に候補 checkbox 行が現れれば抽出。現れないまま「データ
  * 取得中」が消えていれば **0件**(→ 空配列)、まだ「データ取得中」なら連携遅延(→ timeout)。
@@ -472,14 +482,19 @@ function createPlaywrightRegistryPage(
         if (unavailable === "closed") throw new RegistryFetchError("service_hours");
         if (unavailable === "missing")
           throw new RegistryFetchError(classifyRegistryMissingPage(new Date()));
-        // ログインフォームの出現待ちを兼ねる最初の fill。閉局時、アプリ入口URL(www側)は
+        // ログインフォームの出現を専用の短い timeout で待つ。閉局時、アプリ入口URL(www側)は
         // jikangai でも 404 でもない「ご利用中の皆様へ」案内ページ(HTTP200)を返すことがあり
         // (2026-07-21 02:30 本番probeで採取・実機の 23:34/02:13 の auth_failed 誤表示の真因)、
         // 上のページ指紋検出をすり抜ける。指紋は変わりうるため、ページの見た目でなく
         // 「フォームが現れなかった」こと自体を合図に時計分類へ落とす(確実閉局帯=service_hours/
         // 判別不能帯=service_unavailable)。auth_failed(資格情報疑い)にはしない。
+        // ⚠fill の既定 timeout に頼らない: REGISTRY_FETCH_TIMEOUT_MS 設定時は provider 全体
+        // タイマーと同値になり、全体タイマー(goto の前から進行)が先に切れてこの分類に到達
+        // できない(@codex P1)。LOGIN_FORM_DETECT_MS は主タイムアウトより十分短い専用値。
         try {
-          await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
+          await page.waitForSelector(REGISTRY_SELECTORS.loginId, {
+            timeout: LOGIN_FORM_DETECT_MS,
+          });
         } catch (err) {
           if (isTimeoutError(err)) {
             const code = classifyRegistryMissingPage(new Date());
@@ -492,6 +507,7 @@ function createPlaywrightRegistryPage(
           }
           throw err;
         }
+        await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
         await page.fill(REGISTRY_SELECTORS.password, input.password);
         // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
         // requireCheck() が JS で form.submit() する特殊構造。page.click() は隣接する float

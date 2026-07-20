@@ -380,13 +380,17 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     }
   });
 
-  it("C3v: ログインフォーム不在(fill timeout)は時間外系に分類し auth_failed にしない(閉局時の案内ページ対策)", async () => {
+  it("C3v: ログインフォーム不在(出現待ちtimeout)は時間外系に分類し auth_failed にしない(閉局時の案内ページ対策)", async () => {
     const f = makeFakeChromium();
     // 閉局時にアプリの入口URL(www側)が返す「ご利用中の皆様へ」案内ページ(HTTP200・
     // jikangai でも 404 でもない・#userId 無し・2026-07-21 02:30 本番probeで採取)を模す:
-    // 利用不可判定は ""(すり抜け)・#userId の fill が timeout する。
-    f.page.fill = vi.fn(async () => {
-      throw makeTimeoutError();
+    // 利用不可判定は ""(すり抜け)・#userId の出現待ち(専用短timeout)が timeout する。
+    // ⚠fill の既定 timeout でなく専用 waitForSelector で検出する(@codex P1: 主タイムアウト
+    // REGISTRY_FETCH_TIMEOUT_MS と同値の fill 待ちでは provider 全体タイマーが先に切れる)。
+    f.page.waitForSelector = vi.fn(async (sel: string) => {
+      if (sel.includes("userId")) throw makeTimeoutError();
+      if (sel === REGISTRY_FORCE_LOGIN_MARKER) throw makeTimeoutError();
+      return {};
     });
     const factory = resolveDefaultRegistryBrowserFactory({
       chromiumLoader: f.loader,
@@ -403,6 +407,8 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(["service_hours", "service_unavailable"]).toContain(
       (err as RegistryFetchError).code,
     );
+    // フォーム不在なら資格情報を入力しに行かない(fill 未呼び出し)。
+    expect(f.page.fill).not.toHaveBeenCalled();
   });
 
   it("C3w: フォームの fill が非timeoutで失敗した場合は従来どおり auth_failed", async () => {
