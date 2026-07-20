@@ -223,6 +223,35 @@ export const REGISTRY_FORCE_LOGIN_MARKER = 'input[name="from"][value="elogin"]';
 const FORCE_LOGIN_CONFIRM_DETECT_MS = 1500;
 
 /**
+ * ログインフォーム(#userId)の出現待ち時間(ms)の既定上限。閉局時はアプリ入口URL(www側)が
+ * 「ご利用中の皆様へ」案内ページ(HTTP200・フォーム無し)を返すことがあり、この待機が
+ * 「フォーム不在=閉局/接続不可」の検出を兼ねる。**主タイムアウト(REGISTRY_FETCH_TIMEOUT_MS・
+ * 推奨30000)より十分短くする**こと: 同値だと provider 全体タイマー(goto の前から進行)が
+ * 先に切れて分類に到達せず、generic timeout に化ける(@codex P1)。実際の待ち時間は
+ * resolveLoginFormDetectMs で全体予算から導出する(@codex P2: 予算が小さい設定でも
+ * 分類が先に走る余地を残す)。
+ */
+const LOGIN_FORM_DETECT_MS = 15000;
+
+/**
+ * フォーム出現待ち時間を provider 全体予算(REGISTRY_FETCH_TIMEOUT_MS)から導出する純関数。
+ * - 予算未設定/不正: 既定の LOGIN_FORM_DETECT_MS(fill 側は Playwright 既定30sのため常に手前で発火)
+ * - 予算あり: 予算の半分(上限 LOGIN_FORM_DETECT_MS)= launch/goto に残り半分を確保する
+ *   ヒューリスティック。下限1秒(それ未満の予算は設定ミスの域で、どの待ちも成立しない)。
+ * goto が予算の大半を食う極端な遅延では依然 provider タイマーが先に切れ generic timeout に
+ * なるが、その場合は「サイトが応答しない=タイムアウト」自体が妥当な表示であり誤案内ではない。
+ */
+export function resolveLoginFormDetectMs(timeoutMs?: number): number {
+  if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return LOGIN_FORM_DETECT_MS;
+  }
+  return Math.max(
+    1000,
+    Math.min(LOGIN_FORM_DETECT_MS, Math.floor(timeoutMs / 2)),
+  );
+}
+
+/**
  * 地番検索ダイアログの候補ロード待ち時間(ms)。クリック直後は「データ取得中・・・」表示で、
  * 候補は非同期で後から入る。この時間内に候補 checkbox 行が現れれば抽出。現れないまま「データ
  * 取得中」が消えていれば **0件**(→ 空配列)、まだ「データ取得中」なら連携遅延(→ timeout)。
@@ -453,10 +482,13 @@ function createPlaywrightRegistryPage(
     context: RegistryContextLike;
     page: RegistryPageLike;
   },
-  config: { loginPath: string } = { loginPath: DEFAULT_REGISTRY_LOGIN_PATH },
+  config: { loginPath: string; formDetectTimeoutMs?: number } = {
+    loginPath: DEFAULT_REGISTRY_LOGIN_PATH,
+  },
 ): RegistryBrowserPage {
   const { browser, context, page } = handles;
   const { loginPath } = config;
+  const formDetectTimeoutMs = config.formDetectTimeoutMs ?? LOGIN_FORM_DETECT_MS;
   return {
     async login(input) {
       // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
@@ -472,6 +504,31 @@ function createPlaywrightRegistryPage(
         if (unavailable === "closed") throw new RegistryFetchError("service_hours");
         if (unavailable === "missing")
           throw new RegistryFetchError(classifyRegistryMissingPage(new Date()));
+        // ログインフォームの出現を専用の短い timeout で待つ。閉局時、アプリ入口URL(www側)は
+        // jikangai でも 404 でもない「ご利用中の皆様へ」案内ページ(HTTP200)を返すことがあり
+        // (2026-07-21 02:30 本番probeで採取・実機の 23:34/02:13 の auth_failed 誤表示の真因)、
+        // 上のページ指紋検出をすり抜ける。指紋は変わりうるため、ページの見た目でなく
+        // 「フォームが現れなかった」こと自体を合図に時計分類へ落とす(確実閉局帯=service_hours/
+        // 判別不能帯=service_unavailable)。auth_failed(資格情報疑い)にはしない。
+        // ⚠fill の既定 timeout に頼らない: REGISTRY_FETCH_TIMEOUT_MS 設定時は provider 全体
+        // タイマーと同値になり、全体タイマー(goto の前から進行)が先に切れてこの分類に到達
+        // できない(@codex P1)。待ち時間は全体予算から導出(resolveLoginFormDetectMs・@codex P2)。
+        try {
+          await page.waitForSelector(REGISTRY_SELECTORS.loginId, {
+            timeout: formDetectTimeoutMs,
+          });
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            const code = classifyRegistryMissingPage(new Date());
+            // 運用診断: 開局帯でこれが出続ける場合はセレクタ/導線ドリフトの合図(非PII)。
+            console.warn(
+              "[registry-login] login form did not appear; classified as",
+              code,
+            );
+            throw new RegistryFetchError(code);
+          }
+          throw err;
+        }
         await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
         await page.fill(REGISTRY_SELECTORS.password, input.password);
         // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
@@ -911,7 +968,15 @@ export function resolveDefaultRegistryBrowserFactory(
     if (timeoutMs && Number.isFinite(timeoutMs) && page.setDefaultTimeout) {
       page.setDefaultTimeout(timeoutMs);
     }
-    return createPlaywrightRegistryPage({ browser, context, page }, { loginPath });
+    return createPlaywrightRegistryPage(
+      { browser, context, page },
+      {
+        loginPath,
+        formDetectTimeoutMs: resolveLoginFormDetectMs(
+          Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+        ),
+      },
+    );
   };
 }
 
