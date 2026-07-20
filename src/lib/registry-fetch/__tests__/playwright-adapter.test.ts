@@ -380,6 +380,45 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     }
   });
 
+  it("C3v: ログインフォーム不在(fill timeout)は時間外系に分類し auth_failed にしない(閉局時の案内ページ対策)", async () => {
+    const f = makeFakeChromium();
+    // 閉局時にアプリの入口URL(www側)が返す「ご利用中の皆様へ」案内ページ(HTTP200・
+    // jikangai でも 404 でもない・#userId 無し・2026-07-21 02:30 本番probeで採取)を模す:
+    // 利用不可判定は ""(すり抜け)・#userId の fill が timeout する。
+    f.page.fill = vi.fn(async () => {
+      throw makeTimeoutError();
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    // 分類は実時計依存(確実閉局帯=service_hours/それ以外=service_unavailable)。
+    // どちらでも auth_failed でない=資格情報を疑わせないことが契約(時計分岐は
+    // classifyRegistryMissingPage 単体で固定検証済み)。
+    const err = await page
+      .login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RegistryFetchError);
+    expect(["service_hours", "service_unavailable"]).toContain(
+      (err as RegistryFetchError).code,
+    );
+  });
+
+  it("C3w: フォームの fill が非timeoutで失敗した場合は従来どおり auth_failed", async () => {
+    const f = makeFakeChromium();
+    f.page.fill = vi.fn(async () => {
+      throw new Error("element detached");
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+    ).rejects.toMatchObject({ code: "auth_failed" });
+  });
+
   it("C3b: submit の evaluate 関数は対象セレクタ要素の DOM click() を呼ぶ（覆い/actionability に非依存）", async () => {
     const f = makeFakeChromium();
     let evaluatedFn: ((arg: string) => unknown) | undefined;

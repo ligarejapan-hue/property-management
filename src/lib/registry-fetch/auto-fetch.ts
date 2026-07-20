@@ -472,7 +472,26 @@ function createPlaywrightRegistryPage(
         if (unavailable === "closed") throw new RegistryFetchError("service_hours");
         if (unavailable === "missing")
           throw new RegistryFetchError(classifyRegistryMissingPage(new Date()));
-        await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
+        // ログインフォームの出現待ちを兼ねる最初の fill。閉局時、アプリ入口URL(www側)は
+        // jikangai でも 404 でもない「ご利用中の皆様へ」案内ページ(HTTP200)を返すことがあり
+        // (2026-07-21 02:30 本番probeで採取・実機の 23:34/02:13 の auth_failed 誤表示の真因)、
+        // 上のページ指紋検出をすり抜ける。指紋は変わりうるため、ページの見た目でなく
+        // 「フォームが現れなかった」こと自体を合図に時計分類へ落とす(確実閉局帯=service_hours/
+        // 判別不能帯=service_unavailable)。auth_failed(資格情報疑い)にはしない。
+        try {
+          await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            const code = classifyRegistryMissingPage(new Date());
+            // 運用診断: 開局帯でこれが出続ける場合はセレクタ/導線ドリフトの合図(非PII)。
+            console.warn(
+              "[registry-login] login form did not appear; classified as",
+              code,
+            );
+            throw new RegistryFetchError(code);
+          }
+          throw err;
+        }
         await page.fill(REGISTRY_SELECTORS.password, input.password);
         // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
         // requireCheck() が JS で form.submit() する特殊構造。page.click() は隣接する float
