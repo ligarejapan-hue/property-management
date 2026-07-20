@@ -394,10 +394,12 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
   });
 
   it("共有フック useMapGestureHandling がタッチ端末検出で cooperative / greedy を返す", () => {
-    // 地図が画面を占有して周囲 UI に触れなくなる問題の対策。タッチ端末検出は
-    // useSyncExternalStore + matchMedia("(pointer: coarse)")。
+    // 地図が画面を占有して周囲 UI に触れなくなる問題の対策。タッチ入力検出は
+    // useSyncExternalStore + matchMedia("(any-pointer: coarse)")。
+    // ハイブリッド機(タッチPC+マウス)でも再発しないよう any-pointer を使う。
     expect(GESTURE_HOOK_SRC).toMatch(/useSyncExternalStore/);
-    expect(GESTURE_HOOK_SRC).toMatch(/\(pointer:\s*coarse\)/);
+    expect(GESTURE_HOOK_SRC).toMatch(/\(any-pointer:\s*coarse\)/);
+    expect(GESTURE_HOOK_SRC).not.toMatch(/matchMedia\(["']\(pointer:\s*coarse\)["']\)/);
     expect(GESTURE_HOOK_SRC).toMatch(
       /isCoarsePointer\s*\?\s*["']cooperative["']\s*:\s*["']greedy["']/,
     );
