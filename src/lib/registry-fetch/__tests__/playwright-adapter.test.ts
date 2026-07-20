@@ -33,6 +33,7 @@ import {
   extractChibanCandidateRows,
   detectRegistryUnavailablePage,
   classifyRegistryMissingPage,
+  resolveLoginFormDetectMs,
   normalizeChibanForDialog,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
@@ -216,6 +217,26 @@ describe("classifyRegistryMissingPage（404 検出時の時計による分類・
     expect(classifyRegistryMissingPage(jst(2026, 7, 25, 10, 0))).toBe(
       "service_unavailable",
     );
+  });
+});
+
+describe("resolveLoginFormDetectMs（フォーム出現待ちの予算導出・@codex P2）", () => {
+  it("予算未設定/不正は既定 15000", () => {
+    expect(resolveLoginFormDetectMs(undefined)).toBe(15000);
+    expect(resolveLoginFormDetectMs(Number.NaN)).toBe(15000);
+    expect(resolveLoginFormDetectMs(0)).toBe(15000);
+    expect(resolveLoginFormDetectMs(-5)).toBe(15000);
+  });
+
+  it("予算ありは半分(上限15000)=launch/goto に残り半分を確保", () => {
+    expect(resolveLoginFormDetectMs(30000)).toBe(15000);
+    expect(resolveLoginFormDetectMs(60000)).toBe(15000);
+    expect(resolveLoginFormDetectMs(10000)).toBe(5000);
+  });
+
+  it("極小予算は下限1000にクランプ(設定ミス域でも負値/0にしない)", () => {
+    expect(resolveLoginFormDetectMs(1500)).toBe(1000);
+    expect(resolveLoginFormDetectMs(100)).toBe(1000);
   });
 });
 
@@ -409,6 +430,25 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     );
     // フォーム不在なら資格情報を入力しに行かない(fill 未呼び出し)。
     expect(f.page.fill).not.toHaveBeenCalled();
+  });
+
+  it("C3x: REGISTRY_FETCH_TIMEOUT_MS 設定時、フォーム出現待ちは予算由来の専用timeoutで呼ばれる(@codex P1/P2)", async () => {
+    process.env.REGISTRY_FETCH_TIMEOUT_MS = "8000";
+    const f = makeFakeChromium();
+    const calls: Array<{ sel: string; opts: unknown }> = [];
+    f.page.waitForSelector = vi.fn(async (sel: string, opts?: unknown) => {
+      calls.push({ sel, opts });
+      if (sel === REGISTRY_FORCE_LOGIN_MARKER) throw makeTimeoutError();
+      return {};
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" });
+    // フォーム出現待ちは全体予算8000の半分=4000で呼ばれる(全体タイマーより先に判定が走る)。
+    const formWait = calls.find((c) => c.sel.includes("userId"));
+    expect(formWait?.opts).toMatchObject({ timeout: 4000 });
   });
 
   it("C3w: フォームの fill が非timeoutで失敗した場合は従来どおり auth_failed", async () => {

@@ -223,14 +223,33 @@ export const REGISTRY_FORCE_LOGIN_MARKER = 'input[name="from"][value="elogin"]';
 const FORCE_LOGIN_CONFIRM_DETECT_MS = 1500;
 
 /**
- * ログインフォーム(#userId)の出現待ち時間(ms)。閉局時はアプリ入口URL(www側)が
+ * ログインフォーム(#userId)の出現待ち時間(ms)の既定上限。閉局時はアプリ入口URL(www側)が
  * 「ご利用中の皆様へ」案内ページ(HTTP200・フォーム無し)を返すことがあり、この待機が
  * 「フォーム不在=閉局/接続不可」の検出を兼ねる。**主タイムアウト(REGISTRY_FETCH_TIMEOUT_MS・
  * 推奨30000)より十分短くする**こと: 同値だと provider 全体タイマー(goto の前から進行)が
- * 先に切れて分類に到達せず、generic timeout に化ける(@codex P1)。goto 数秒+本待機でも
- * 全体予算内に収まる値にする。
+ * 先に切れて分類に到達せず、generic timeout に化ける(@codex P1)。実際の待ち時間は
+ * resolveLoginFormDetectMs で全体予算から導出する(@codex P2: 予算が小さい設定でも
+ * 分類が先に走る余地を残す)。
  */
 const LOGIN_FORM_DETECT_MS = 15000;
+
+/**
+ * フォーム出現待ち時間を provider 全体予算(REGISTRY_FETCH_TIMEOUT_MS)から導出する純関数。
+ * - 予算未設定/不正: 既定の LOGIN_FORM_DETECT_MS(fill 側は Playwright 既定30sのため常に手前で発火)
+ * - 予算あり: 予算の半分(上限 LOGIN_FORM_DETECT_MS)= launch/goto に残り半分を確保する
+ *   ヒューリスティック。下限1秒(それ未満の予算は設定ミスの域で、どの待ちも成立しない)。
+ * goto が予算の大半を食う極端な遅延では依然 provider タイマーが先に切れ generic timeout に
+ * なるが、その場合は「サイトが応答しない=タイムアウト」自体が妥当な表示であり誤案内ではない。
+ */
+export function resolveLoginFormDetectMs(timeoutMs?: number): number {
+  if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return LOGIN_FORM_DETECT_MS;
+  }
+  return Math.max(
+    1000,
+    Math.min(LOGIN_FORM_DETECT_MS, Math.floor(timeoutMs / 2)),
+  );
+}
 
 /**
  * 地番検索ダイアログの候補ロード待ち時間(ms)。クリック直後は「データ取得中・・・」表示で、
@@ -463,10 +482,13 @@ function createPlaywrightRegistryPage(
     context: RegistryContextLike;
     page: RegistryPageLike;
   },
-  config: { loginPath: string } = { loginPath: DEFAULT_REGISTRY_LOGIN_PATH },
+  config: { loginPath: string; formDetectTimeoutMs?: number } = {
+    loginPath: DEFAULT_REGISTRY_LOGIN_PATH,
+  },
 ): RegistryBrowserPage {
   const { browser, context, page } = handles;
   const { loginPath } = config;
+  const formDetectTimeoutMs = config.formDetectTimeoutMs ?? LOGIN_FORM_DETECT_MS;
   return {
     async login(input) {
       // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
@@ -490,10 +512,10 @@ function createPlaywrightRegistryPage(
         // 判別不能帯=service_unavailable)。auth_failed(資格情報疑い)にはしない。
         // ⚠fill の既定 timeout に頼らない: REGISTRY_FETCH_TIMEOUT_MS 設定時は provider 全体
         // タイマーと同値になり、全体タイマー(goto の前から進行)が先に切れてこの分類に到達
-        // できない(@codex P1)。LOGIN_FORM_DETECT_MS は主タイムアウトより十分短い専用値。
+        // できない(@codex P1)。待ち時間は全体予算から導出(resolveLoginFormDetectMs・@codex P2)。
         try {
           await page.waitForSelector(REGISTRY_SELECTORS.loginId, {
-            timeout: LOGIN_FORM_DETECT_MS,
+            timeout: formDetectTimeoutMs,
           });
         } catch (err) {
           if (isTimeoutError(err)) {
@@ -946,7 +968,15 @@ export function resolveDefaultRegistryBrowserFactory(
     if (timeoutMs && Number.isFinite(timeoutMs) && page.setDefaultTimeout) {
       page.setDefaultTimeout(timeoutMs);
     }
-    return createPlaywrightRegistryPage({ browser, context, page }, { loginPath });
+    return createPlaywrightRegistryPage(
+      { browser, context, page },
+      {
+        loginPath,
+        formDetectTimeoutMs: resolveLoginFormDetectMs(
+          Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+        ),
+      },
+    );
   };
 }
 
