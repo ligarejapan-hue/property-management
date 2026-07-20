@@ -23,6 +23,7 @@ import {
   useMap,
 } from "@vis.gl/react-google-maps";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMapGestureHandling } from "@/components/field-survey/use-map-gesture-handling";
 import {
   Bbox,
   buildMapPropertiesQuery,
@@ -101,6 +102,9 @@ export default function FieldSurveyMap({
   mapId,
   currentUserId,
 }: FieldSurveyMapProps) {
+  // タッチ端末では地図ジェスチャを cooperative(1本指=ページスクロール / 2本指=地図移動)に
+  // して、地図が画面を占有し周囲の UI に触れなくなる問題を避ける。PC は greedy 継続。共有フック。
+  const mapGestureHandling = useMapGestureHandling();
   const [layers, setLayers] = useState<Record<Layer, boolean>>({
     properties: true,
     pins: true,
@@ -482,7 +486,7 @@ export default function FieldSurveyMap({
           defaultCenter={DEFAULT_CENTER}
           defaultZoom={DEFAULT_ZOOM}
           mapId={mapId}
-          gestureHandling="greedy"
+          gestureHandling={mapGestureHandling}
           disableDefaultUI={false}
           style={{ width: "100%", height: "100%" }}
         >

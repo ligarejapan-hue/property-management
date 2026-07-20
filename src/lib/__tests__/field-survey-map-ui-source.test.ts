@@ -27,6 +27,20 @@ const MAP_SRC = fs.readFileSync(
   ),
   "utf8",
 );
+const HISTORY_MAP_SRC = fs.readFileSync(
+  path.resolve(
+    process.cwd(),
+    "src/components/field-survey/field-survey-history-map.tsx",
+  ),
+  "utf8",
+);
+const GESTURE_HOOK_SRC = fs.readFileSync(
+  path.resolve(
+    process.cwd(),
+    "src/components/field-survey/use-map-gesture-handling.ts",
+  ),
+  "utf8",
+);
 const SIDEBAR_SRC = fs.readFileSync(
   path.resolve(process.cwd(), "src/components/layout/sidebar-model.tsx"),
   "utf8",
@@ -377,6 +391,32 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(filterRegion).not.toBeNull();
     expect(filterRegion?.[0]).not.toMatch(/typeof\s+\w+\.gpsLat\s*===\s*"number"/);
     expect(filterRegion?.[0]).not.toMatch(/typeof\s+\w+\.lat\s*===\s*"number"/);
+  });
+
+  it("共有フック useMapGestureHandling がタッチ端末検出で cooperative / greedy を返す", () => {
+    // 地図が画面を占有して周囲 UI に触れなくなる問題の対策。タッチ入力検出は
+    // useSyncExternalStore + matchMedia("(any-pointer: coarse)")。
+    // ハイブリッド機(タッチPC+マウス)でも再発しないよう any-pointer を使う。
+    expect(GESTURE_HOOK_SRC).toMatch(/useSyncExternalStore/);
+    expect(GESTURE_HOOK_SRC).toMatch(/\(any-pointer:\s*coarse\)/);
+    expect(GESTURE_HOOK_SRC).not.toMatch(/matchMedia\(["']\(pointer:\s*coarse\)["']\)/);
+    expect(GESTURE_HOOK_SRC).toMatch(
+      /isCoarsePointer\s*\?\s*["']cooperative["']\s*:\s*["']greedy["']/,
+    );
+    expect(GESTURE_HOOK_SRC).toMatch(/export function useMapGestureHandling/);
+  });
+
+  it("現地調査マップ本体と履歴マップの両方が共有フックで gestureHandling を切替える(greedy 固定にしない)", () => {
+    for (const src of [MAP_SRC, HISTORY_MAP_SRC]) {
+      expect(src).toMatch(/useMapGestureHandling\(\)/);
+      expect(src).toMatch(/gestureHandling=\{mapGestureHandling\}/);
+      expect(src).not.toMatch(/gestureHandling="greedy"/);
+    }
+  });
+
+  it("地図ページの高さは dvh(実表示高)で スマホの 100vh はみ出しを避ける", () => {
+    expect(PAGE_SRC).toMatch(/h-\[calc\(100dvh-3\.5rem\)\]/);
+    expect(PAGE_SRC).not.toMatch(/h-\[calc\(100vh-3\.5rem\)\]/);
   });
 
   it("map component / page から料金関連内部設定値を console / error に流さない", () => {
