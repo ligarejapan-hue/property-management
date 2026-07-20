@@ -28,8 +28,10 @@ export default async function FieldSurveyMapPage() {
     canRead = false;
   }
 
+  // スマホは 100vh がアドレスバー分だけ実表示より大きく地図がはみ出すため、地図ページの高さは
+  // 実表示高の dvh(dynamic viewport height)にする(iOS 15.4+ / 各モダンブラウザ対応)。
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
+    <div className="flex h-[calc(100dvh-3.5rem)] flex-col">
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
         <div>
           <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-100">

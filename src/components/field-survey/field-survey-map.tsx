@@ -22,7 +22,14 @@ import {
   InfoWindow,
   useMap,
 } from "@vis.gl/react-google-maps";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   Bbox,
   buildMapPropertiesQuery,
@@ -57,6 +64,29 @@ const DEFAULT_ZOOM = 14;
 const FETCH_DEBOUNCE_MS = 500;
 const PROPERTY_LIMIT = 200;
 const PIN_LIMIT = 100;
+
+// タッチ端末(スマホ/タブレット = pointer:coarse)を検出する。地図の gestureHandling を
+// 端末で切り替えるため。coarse では "cooperative"(1本指=ページスクロール / 2本指=地図移動)に
+// し、地図が画面を占有して周囲の UI に触れなくなる問題を避ける。PC(pointer:fine)は従来どおり
+// "greedy"(1本指で地図移動)。useSyncExternalStore で SSR/lint 安全に購読する。
+function subscribeCoarsePointer(onChange: () => void): () => void {
+  if (typeof window === "undefined" || !window.matchMedia) return () => {};
+  const mq = window.matchMedia("(pointer: coarse)");
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+function getCoarsePointerSnapshot(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    !!window.matchMedia &&
+    window.matchMedia("(pointer: coarse)").matches
+  );
+}
+// SSR スナップショット: サーバでは判定不能なので false(PC 既定=greedy)。ハイドレート後に
+// クライアントで再評価され、タッチ端末なら cooperative へ切り替わる。
+function getCoarsePointerServerSnapshot(): boolean {
+  return false;
+}
 
 interface FieldSurveyMapProps {
   apiKey: string;
@@ -101,6 +131,14 @@ export default function FieldSurveyMap({
   mapId,
   currentUserId,
 }: FieldSurveyMapProps) {
+  // タッチ端末では地図ジェスチャを cooperative にして、地図が画面を占有し周囲の UI に
+  // 触れなくなる問題を避ける(1本指=ページスクロール / 2本指=地図移動)。PC は greedy 継続。
+  const isCoarsePointer = useSyncExternalStore(
+    subscribeCoarsePointer,
+    getCoarsePointerSnapshot,
+    getCoarsePointerServerSnapshot,
+  );
+  const mapGestureHandling = isCoarsePointer ? "cooperative" : "greedy";
   const [layers, setLayers] = useState<Record<Layer, boolean>>({
     properties: true,
     pins: true,
@@ -482,7 +520,7 @@ export default function FieldSurveyMap({
           defaultCenter={DEFAULT_CENTER}
           defaultZoom={DEFAULT_ZOOM}
           mapId={mapId}
-          gestureHandling="greedy"
+          gestureHandling={mapGestureHandling}
           disableDefaultUI={false}
           style={{ width: "100%", height: "100%" }}
         >

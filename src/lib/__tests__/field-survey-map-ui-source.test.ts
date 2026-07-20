@@ -379,6 +379,24 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(filterRegion?.[0]).not.toMatch(/typeof\s+\w+\.lat\s*===\s*"number"/);
   });
 
+  it("スマホ(pointer:coarse)は地図 gestureHandling を cooperative・PC は greedy に切替える", () => {
+    // 地図が画面を占有して周囲 UI に触れなくなる問題の対策。タッチ端末検出は
+    // useSyncExternalStore + matchMedia("(pointer: coarse)")。gestureHandling は固定文字列でなく
+    // 端末で切替える変数を渡す(greedy 固定へ退行しないこと)。
+    expect(MAP_SRC).toMatch(/useSyncExternalStore/);
+    expect(MAP_SRC).toMatch(/\(pointer:\s*coarse\)/);
+    expect(MAP_SRC).toMatch(
+      /isCoarsePointer\s*\?\s*["']cooperative["']\s*:\s*["']greedy["']/,
+    );
+    expect(MAP_SRC).toMatch(/gestureHandling=\{mapGestureHandling\}/);
+    expect(MAP_SRC).not.toMatch(/gestureHandling="greedy"/);
+  });
+
+  it("地図ページの高さは dvh(実表示高)で スマホの 100vh はみ出しを避ける", () => {
+    expect(PAGE_SRC).toMatch(/h-\[calc\(100dvh-3\.5rem\)\]/);
+    expect(PAGE_SRC).not.toMatch(/h-\[calc\(100vh-3\.5rem\)\]/);
+  });
+
   it("map component / page から料金関連内部設定値を console / error に流さない", () => {
     // billing / budget / quota の内部値を出力に混ぜないこと
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*billing/i);
