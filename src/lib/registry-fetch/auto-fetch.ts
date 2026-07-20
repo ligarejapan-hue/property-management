@@ -77,6 +77,7 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   not_found: 404,
   provider_error: 502,
   service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
+  service_unavailable: 503, // 接続不可(時間外の可能性)=同じく一時的利用不可。
 };
 
 /**
@@ -396,6 +397,52 @@ export function extractChibanCandidateRows(
 }
 
 /**
+ * ブラウザ内評価: 現在のページが「登記情報提供サービスを利用できない状態」かを判定し、
+ * 理由を返す。時間外の実挙動は時間帯で異なることを本番で確認済み:
+ *  - "closed": jikangai.html(時間外案内)へ誘導された(URL が変わる・2026-07-18 本番確認)
+ *    = サイト自身が時間外と言っている → 確定で service_hours。
+ *  - "missing": サイト全体が「404｜ページが見つかりません」を返し URL は不変
+ *    (夜間の時間外の実挙動・2026-07-20 本番probe で採取)。ただし設定ミス
+ *    (REGISTRY_FETCH_LOGIN_PATH の陳腐化)やサイト側停止でも同じ見え方になるため、
+ *    時間外かの断定は Node 側の classifyRegistryMissingPage に委ねる(@codex P2)。
+ *  - "": 利用可能なページ(ログイン画面等)。
+ * Playwright がこの関数をシリアライズしてブラウザ内で実行するため、外部参照を持たない
+ * 自己完結関数にする(モジュール内の定数・関数を参照しない)。
+ */
+export function detectRegistryUnavailablePage(): "closed" | "missing" | "" {
+  const href = typeof location !== "undefined" ? location.href : "";
+  const title = typeof document !== "undefined" ? document.title : "";
+  if (/jikangai/i.test(href)) return "closed";
+  if (/^404|ページが見つかりません/.test(title)) return "missing";
+  return "";
+}
+
+/**
+ * 404("missing")検出時の分類(Node 側・純関数)。登記情報提供サービスの利用時間
+ * (平日 8:30〜23:00・土日祝日 8:30〜18:00)に照らし、**どのカレンダーでも確実に
+ * 時間外**の時刻のみ service_hours と断定する:
+ *  - 全日共通の閉局帯(23:00〜翌8:30)
+ *  - 土日の 18:00 以降
+ * 祝日(曜日は平日だが 18時閉局)はコード上判別できないため、平日 18〜23時や日中の
+ * 404 は service_unavailable(時間外の「可能性」として案内・断定しない)に落とす。
+ * これにより設定ミス/サイト側停止による営業時間内の 404 を「現在ご利用時間外です」と
+ * 誤案内しない(@codex P2)。JST はサーバ TZ に依存せず UTC+9 演算で求める。
+ */
+export function classifyRegistryMissingPage(
+  now: Date,
+): "service_hours" | "service_unavailable" {
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const day = jst.getUTCDay(); // 0=日, 6=土(JST基準)
+  const mins = jst.getUTCHours() * 60 + jst.getUTCMinutes();
+  const OPEN = 8 * 60 + 30;
+  const CLOSE_ALL = 23 * 60;
+  const CLOSE_WEEKEND = 18 * 60;
+  if (mins < OPEN || mins >= CLOSE_ALL) return "service_hours";
+  if ((day === 0 || day === 6) && mins >= CLOSE_WEEKEND) return "service_hours";
+  return "service_unavailable";
+}
+
+/**
  * 生 Playwright Page を RegistryBrowserPage（高水準セッション抽象）へ適合させる adapter。
  * 失敗は **RegistryFetchError（分類コードのみ）** に正規化し、生メッセージ（URL/入力/selector が
  * 混入しうる）を例外に載せない。中間成果物（Cookie/DL）は close() で破棄する。
@@ -418,15 +465,13 @@ function createPlaywrightRegistryPage(
       const loginUrl = `${base}${loginPath}`;
       try {
         await page.goto(loginUrl);
-        // 利用時間外だとログイン画面ではなく jikangai.html(時間外案内)へ誘導される。この場合
-        // #userId は現れず fill が 30秒 timeout → auth_failed に見えてしまう。時間外を先に検出し、
-        // 「認証失敗」でなく「利用時間外」として明示する(資格情報を疑わせない・2026-07-18 本番確認)。
-        const outsideHours = await page.evaluate(
-          () =>
-            typeof location !== "undefined" && /jikangai/i.test(location.href),
-          "",
-        );
-        if (outsideHours) throw new RegistryFetchError("service_hours");
+        // 利用時間外だとログイン画面が出ない(jikangai 誘導 or サイト全体404)。この場合
+        // #userId は現れず fill が 30秒 timeout → auth_failed に見えてしまう。利用不可を先に検出し、
+        // 「認証失敗」でなく「利用時間外(または接続不可)」として明示する(資格情報を疑わせない)。
+        const unavailable = await page.evaluate(detectRegistryUnavailablePage, "");
+        if (unavailable === "closed") throw new RegistryFetchError("service_hours");
+        if (unavailable === "missing")
+          throw new RegistryFetchError(classifyRegistryMissingPage(new Date()));
         await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
         await page.fill(REGISTRY_SELECTORS.password, input.password);
         // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
@@ -496,18 +541,16 @@ function createPlaywrightRegistryPage(
       } catch (err) {
         // 既に分類済み(service_hours 等)はそのまま保持し、auth_failed で上書きしない。
         if (err instanceof RegistryFetchError) throw err;
-        // 締切レース(@codex): 送信後に時間外へ切り替わる/送信の応答で jikangai へ誘導される場合、
-        // 着地待ちが timeout する。ここで URL を再確認し、時間外なら service_hours に分類する
-        // (auth_failed で資格情報を疑わせない)。評価失敗(ページ閉鎖等)は false 扱い。
-        const outsideHoursNow = await page
-          .evaluate(
-            () =>
-              typeof location !== "undefined" &&
-              /jikangai/i.test(location.href),
-            "",
-          )
-          .catch(() => false);
-        if (outsideHoursNow) throw new RegistryFetchError("service_hours");
+        // 締切レース(@codex): 送信後に時間外へ切り替わる(jikangai 誘導/404 化)場合、
+        // 着地待ちが timeout する。ここでページを再確認し、利用不可なら時間外系に分類する
+        // (auth_failed で資格情報を疑わせない)。評価失敗(ページ閉鎖等)は "" 扱い。
+        const unavailableNow = await page
+          .evaluate(detectRegistryUnavailablePage, "")
+          .catch(() => "");
+        if (unavailableNow === "closed")
+          throw new RegistryFetchError("service_hours");
+        if (unavailableNow === "missing")
+          throw new RegistryFetchError(classifyRegistryMissingPage(new Date()));
         // ログイン確認に至らない = 認証失敗扱い（生メッセージ非載・secret 非露出）。
         // どの段階/種別で失敗したか（TimeoutError とセレクタ名など）は運用診断のため分類ログに残す。
         // secret（loginId/password）に加え、baseUrl/loginUrl（env でカスタム/内部エンドポイントに

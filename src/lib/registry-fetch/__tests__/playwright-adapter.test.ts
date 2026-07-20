@@ -31,11 +31,16 @@ import {
   DEFAULT_REGISTRY_LOGIN_PATH,
   REGISTRY_FORCE_LOGIN_MARKER,
   extractChibanCandidateRows,
+  detectRegistryUnavailablePage,
+  classifyRegistryMissingPage,
   normalizeChibanForDialog,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
 } from "../auto-fetch";
-import { RegistryFetchError } from "../errors";
+import {
+  RegistryFetchError,
+  REGISTRY_FETCH_ERROR_MESSAGES,
+} from "../errors";
 
 /** name=="TimeoutError" の擬似エラー（Playwright TimeoutError 相当）。 */
 function makeTimeoutError(): Error {
@@ -108,6 +113,110 @@ afterEach(() => {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
+});
+
+describe("detectRegistryUnavailablePage（時間外/停止ページのブラウザ内判定）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("jikangai(時間外案内)へ誘導された URL は 'closed'(確定時間外)", () => {
+    vi.stubGlobal("location", {
+      href: "https://reg.test/TeikyoUketsuke/jikangai.html",
+    });
+    vi.stubGlobal("document", { title: "ご利用時間のお知らせ" });
+    expect(detectRegistryUnavailablePage()).toBe("closed");
+  });
+
+  it("夜間時間外の 404 ページ(URL 不変・title が404)は 'missing'", () => {
+    vi.stubGlobal("location", {
+      href: "https://reg.test/TeikyoUketsuke/common/login",
+    });
+    vi.stubGlobal("document", { title: "404｜ページが見つかりません" });
+    expect(detectRegistryUnavailablePage()).toBe("missing");
+  });
+
+  it("通常のログイン画面は ''(利用可能)", () => {
+    vi.stubGlobal("location", {
+      href: "https://reg.test/TeikyoUketsuke/common/login",
+    });
+    vi.stubGlobal("document", { title: "登記情報提供サービス ログイン" });
+    expect(detectRegistryUnavailablePage()).toBe("");
+  });
+
+  it("グローバル未定義(非ブラウザ)では ''(誤検出しない)", () => {
+    expect(detectRegistryUnavailablePage()).toBe("");
+  });
+
+  it("service_hours の利用者向け文言に利用時間を明記する", () => {
+    const msg = REGISTRY_FETCH_ERROR_MESSAGES.service_hours;
+    expect(msg).toContain("ご利用時間外");
+    expect(msg).toContain("平日 8:30〜23:00");
+    expect(msg).toContain("土日祝日 8:30〜18:00");
+  });
+
+  it("service_unavailable の文言は時間外と断定せず、利用時間を案内する", () => {
+    const msg = REGISTRY_FETCH_ERROR_MESSAGES.service_unavailable;
+    expect(msg).toContain("接続できません");
+    expect(msg).toContain("可能性");
+    expect(msg).toContain("平日 8:30〜23:00");
+    expect(msg).toContain("土日祝日 8:30〜18:00");
+  });
+});
+
+describe("classifyRegistryMissingPage（404 検出時の時計による分類・JST）", () => {
+  // JST = UTC+9。Date.UTC で「JST の狙い時刻 − 9時間」を組み立てる。
+  const jst = (y: number, mo: number, d: number, h: number, mi: number) =>
+    new Date(Date.UTC(y, mo - 1, d, h - 9, mi));
+
+  it("平日深夜(23:00 以降)は全日閉局 → service_hours と断定", () => {
+    expect(classifyRegistryMissingPage(jst(2026, 7, 22, 23, 30))).toBe(
+      "service_hours",
+    ); // 水曜 23:30
+    expect(classifyRegistryMissingPage(jst(2026, 7, 22, 23, 0))).toBe(
+      "service_hours",
+    ); // 境界: 23:00 ちょうどは閉局
+  });
+
+  it("早朝(8:30 前)は全日閉局 → service_hours と断定", () => {
+    expect(classifyRegistryMissingPage(jst(2026, 7, 21, 7, 0))).toBe(
+      "service_hours",
+    ); // 火曜 7:00
+    expect(classifyRegistryMissingPage(jst(2026, 7, 21, 8, 29))).toBe(
+      "service_hours",
+    ); // 境界: 8:29 は閉局
+  });
+
+  it("土日の 18:00 以降は閉局 → service_hours と断定", () => {
+    expect(classifyRegistryMissingPage(jst(2026, 7, 25, 19, 0))).toBe(
+      "service_hours",
+    ); // 土曜 19:00
+    expect(classifyRegistryMissingPage(jst(2026, 7, 26, 18, 0))).toBe(
+      "service_hours",
+    ); // 日曜 18:00 ちょうど
+  });
+
+  it("平日日中は営業中の可能性 → service_unavailable(断定しない)", () => {
+    expect(classifyRegistryMissingPage(jst(2026, 7, 22, 10, 0))).toBe(
+      "service_unavailable",
+    ); // 水曜 10:00(設定ミス/サイト停止の可能性)
+    expect(classifyRegistryMissingPage(jst(2026, 7, 21, 8, 30))).toBe(
+      "service_unavailable",
+    ); // 境界: 8:30 ちょうどは開局
+  });
+
+  it("祝日夜(曜日は平日・18〜23時)は判別不能 → service_unavailable(可能性として案内)", () => {
+    // 2026-07-20(海の日・月曜) 21:41 JST = 実際に本番で観測したケース
+    expect(classifyRegistryMissingPage(jst(2026, 7, 20, 21, 41))).toBe(
+      "service_unavailable",
+    );
+  });
+
+  it("土曜日中は営業中の可能性 → service_unavailable", () => {
+    expect(classifyRegistryMissingPage(jst(2026, 7, 25, 10, 0))).toBe(
+      "service_unavailable",
+    );
+  });
 });
 
 describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）", () => {
@@ -201,9 +310,9 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
 
   it("C3s: 利用時間外(jikangai へ誘導)なら service_hours で停止し auth_failed にしない", async () => {
     const f = makeFakeChromium();
-    // login の最初の evaluate(jikangai 判定・arg="")を「時間外」に。他の evaluate は undefined。
+    // login の最初の evaluate(利用不可判定・arg="")を「時間外案内(closed)」に。他は undefined。
     f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
-      arg === "" ? true : undefined,
+      arg === "" ? "closed" : undefined,
     );
     const factory = resolveDefaultRegistryBrowserFactory({
       chromiumLoader: f.loader,
@@ -218,10 +327,10 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
 
   it("C3t: 送信後に時間外へ切替(締切レース)でも、着地待ち失敗時に URL 再確認で service_hours にする", async () => {
     const f = makeFakeChromium();
-    // jikangai 判定(arg=""): 1回目(初回goto直後)=false、2回目(catch再確認)=true。
+    // 利用不可判定(arg=""): 1回目(初回goto直後)=""(利用可)、2回目(catch再確認)="closed"。
     let jikangaiChecks = 0;
     f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
-      arg === "" ? ++jikangaiChecks >= 2 : undefined,
+      arg === "" ? (++jikangaiChecks >= 2 ? "closed" : "") : undefined,
     );
     // 送信後の着地待ち(グループセレクタ=menuClick を含む)で timeout させる。他は成功。
     f.page.waitForSelector = vi.fn(async (sel: string) => {
@@ -235,6 +344,40 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await expect(
       page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
     ).rejects.toMatchObject({ code: "service_hours" });
+  });
+
+  it("C3u: 夜間の時間外(サイト全体が404ページ・URLは不変)でも時間外系に分類し auth_failed にしない", async () => {
+    const f = makeFakeChromium();
+    // 実ブラウザ相当: 渡された判定関数を実際に実行する。グローバルは夜間時間外の実挙動
+    // (URL はログインURLのまま・title が 404)を模す(2026-07-20 本番probe で採取)。
+    vi.stubGlobal("location", {
+      href: "https://reg.test/TeikyoUketsuke/common/login",
+    });
+    vi.stubGlobal("document", { title: "404｜ページが見つかりません" });
+    try {
+      f.page.evaluate = vi.fn(
+        async (fn: (arg: string) => unknown, arg: string) => fn(arg),
+      );
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      // 分類はテスト実行時刻の実時計に依存する(確実な閉局帯=service_hours/それ以外=
+      // service_unavailable)。どちらであっても auth_failed でない=資格情報を疑わせない
+      // ことが本テストの契約。時計の分岐自体は classifyRegistryMissingPage 単体で固定検証。
+      const err = await page
+        .login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" })
+        .then(() => null)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RegistryFetchError);
+      expect(["service_hours", "service_unavailable"]).toContain(
+        (err as RegistryFetchError).code,
+      );
+      // 404 検出は fill の前=ID/PW を入力しに行かない(資格情報を疑わせない)。
+      expect(f.page.fill).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("C3b: submit の evaluate 関数は対象セレクタ要素の DOM click() を呼ぶ（覆い/actionability に非依存）", async () => {

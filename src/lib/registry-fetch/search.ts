@@ -50,6 +50,7 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   not_found: 404,
   provider_error: 502,
   service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
+  service_unavailable: 503, // 接続不可(時間外の可能性)=同じく一時的利用不可。
 };
 
 /**
