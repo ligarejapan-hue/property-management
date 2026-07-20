@@ -27,6 +27,20 @@ const MAP_SRC = fs.readFileSync(
   ),
   "utf8",
 );
+const HISTORY_MAP_SRC = fs.readFileSync(
+  path.resolve(
+    process.cwd(),
+    "src/components/field-survey/field-survey-history-map.tsx",
+  ),
+  "utf8",
+);
+const GESTURE_HOOK_SRC = fs.readFileSync(
+  path.resolve(
+    process.cwd(),
+    "src/components/field-survey/use-map-gesture-handling.ts",
+  ),
+  "utf8",
+);
 const SIDEBAR_SRC = fs.readFileSync(
   path.resolve(process.cwd(), "src/components/layout/sidebar-model.tsx"),
   "utf8",
@@ -379,17 +393,23 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(filterRegion?.[0]).not.toMatch(/typeof\s+\w+\.lat\s*===\s*"number"/);
   });
 
-  it("スマホ(pointer:coarse)は地図 gestureHandling を cooperative・PC は greedy に切替える", () => {
+  it("共有フック useMapGestureHandling がタッチ端末検出で cooperative / greedy を返す", () => {
     // 地図が画面を占有して周囲 UI に触れなくなる問題の対策。タッチ端末検出は
-    // useSyncExternalStore + matchMedia("(pointer: coarse)")。gestureHandling は固定文字列でなく
-    // 端末で切替える変数を渡す(greedy 固定へ退行しないこと)。
-    expect(MAP_SRC).toMatch(/useSyncExternalStore/);
-    expect(MAP_SRC).toMatch(/\(pointer:\s*coarse\)/);
-    expect(MAP_SRC).toMatch(
+    // useSyncExternalStore + matchMedia("(pointer: coarse)")。
+    expect(GESTURE_HOOK_SRC).toMatch(/useSyncExternalStore/);
+    expect(GESTURE_HOOK_SRC).toMatch(/\(pointer:\s*coarse\)/);
+    expect(GESTURE_HOOK_SRC).toMatch(
       /isCoarsePointer\s*\?\s*["']cooperative["']\s*:\s*["']greedy["']/,
     );
-    expect(MAP_SRC).toMatch(/gestureHandling=\{mapGestureHandling\}/);
-    expect(MAP_SRC).not.toMatch(/gestureHandling="greedy"/);
+    expect(GESTURE_HOOK_SRC).toMatch(/export function useMapGestureHandling/);
+  });
+
+  it("現地調査マップ本体と履歴マップの両方が共有フックで gestureHandling を切替える(greedy 固定にしない)", () => {
+    for (const src of [MAP_SRC, HISTORY_MAP_SRC]) {
+      expect(src).toMatch(/useMapGestureHandling\(\)/);
+      expect(src).toMatch(/gestureHandling=\{mapGestureHandling\}/);
+      expect(src).not.toMatch(/gestureHandling="greedy"/);
+    }
   });
 
   it("地図ページの高さは dvh(実表示高)で スマホの 100vh はみ出しを避ける", () => {

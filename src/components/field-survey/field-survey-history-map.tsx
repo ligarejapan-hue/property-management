@@ -24,6 +24,7 @@ import {
 } from "@vis.gl/react-google-maps";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useMapGestureHandling } from "@/components/field-survey/use-map-gesture-handling";
 import RoutePolyline, {
   type RoutePolylinePoint,
 } from "@/components/field-survey/route-polyline";
@@ -93,6 +94,9 @@ export default function FieldSurveyHistoryMap({
   currentUserId: string;
   sessionId: string;
 }) {
+  // タッチ端末では地図ジェスチャを cooperative(1本指=ページスクロール / 2本指=地図移動)に
+  // して、地図が画面を占有し周囲の UI に触れなくなる問題を避ける。PC は greedy 継続。共有フック。
+  const mapGestureHandling = useMapGestureHandling();
   const [meta, setMeta] = useState<SessionMeta | null>(null);
   const [routePoints, setRoutePoints] = useState<RoutePolylinePoint[]>([]);
   const [pins, setPins] = useState<HistoryPinRow[]>([]);
@@ -366,7 +370,7 @@ export default function FieldSurveyHistoryMap({
             defaultCenter={center}
             defaultZoom={DEFAULT_ZOOM}
             mapId={mapId}
-            gestureHandling="greedy"
+            gestureHandling={mapGestureHandling}
             disableDefaultUI={false}
             style={{ width: "100%", height: "100%" }}
           >
