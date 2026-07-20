@@ -628,8 +628,12 @@ function ControlPanel({
       >
         表示切替{hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
       </button>
+      {/* パネルは地図エリア(flex-1 overflow-hidden)に絶対配置されるため、内容が
+          地図高より高いと下部が切れる(スマホで発生)。max-h(実表示高 dvh から
+          上部 chrome ぶんを引く)+ overflow-y-auto でパネル内スクロールにし、
+          overscroll-contain で端でのスクロール連鎖(地図/ページ)を止める。 */}
       <div
-        className={`${panelOpen ? "mt-2 block" : "hidden"} w-56 rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900 md:mt-0 md:block`}
+        className={`${panelOpen ? "mt-2 block" : "hidden"} max-h-[calc(100dvh-13rem)] w-56 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900 md:mt-0 md:block`}
       >
       <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">表示切替</div>
       <label className="mb-1 flex cursor-pointer items-center gap-2">
