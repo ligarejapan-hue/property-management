@@ -1435,3 +1435,46 @@ function replaceElement(
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
 }
+
+// ---------------------------------------------------------------------------
+// B-8 (UI総点検): 文字・表どうしの重なり検知 (read-only)
+// ---------------------------------------------------------------------------
+
+export interface TextTableOverlapPair {
+  aId: string;
+  bId: string;
+}
+
+/** 実質的な重なりとみなす最小の食い込み (mm)。隣接・微小接触は除外する。 */
+const OVERLAP_TOLERANCE_MM = 0.5;
+
+/**
+ * 文字 (text) と表 (table) どうしの矩形重なりを列挙する (document は不変)。
+ *
+ * 自動整列/自動調整は自由配置の文字・表を動かさない仕様 (手動配置の尊重) の
+ * ため、重なったままだと PDF/PNG 出力にもそのまま残る。編集画面で注意を出す
+ * ための検知専用ヘルパ。写真の上の文字や帯 (shape) の上の見出しは意図的な
+ * 重なりの定番なので対象外 (text/table 以外は見ない)。
+ */
+export function findTextTableOverlaps(
+  document: SalesSheetDocument,
+): TextTableOverlapPair[] {
+  const boxes = document.elements.filter(
+    (e) => e.type === "text" || e.type === "table",
+  );
+  const pairs: TextTableOverlapPair[] = [];
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i];
+      const b = boxes[j];
+      const overlapW =
+        Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+      const overlapH =
+        Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+      if (overlapW > OVERLAP_TOLERANCE_MM && overlapH > OVERLAP_TOLERANCE_MM) {
+        pairs.push({ aId: a.id, bId: b.id });
+      }
+    }
+  }
+  return pairs;
+}

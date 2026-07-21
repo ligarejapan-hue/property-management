@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ImageElement, SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import type { EditorState, EditThemePatch } from "@/lib/sales-sheet/editor-document";
@@ -37,6 +37,7 @@ import {
   deleteElement,
   markSavedIfCurrent,
   exportWithSaveGuard,
+  findTextTableOverlaps,
 } from "@/lib/sales-sheet/editor-document";
 import { EditorCanvas } from "./EditorCanvas";
 import { ElementPanel } from "./ElementPanel";
@@ -554,6 +555,17 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       ? (editorState.document.elements.find((e) => e.id === editorState.selectedId) ?? null)
       : null;
 
+  // B-8: 文字・表どうしの重なりは自動整列/自動調整では解消されない(手動配置の
+  // 尊重)ため、常時検知して出力前に気付けるよう控えめに注意を出す。
+  const textTableOverlapCount = useMemo(
+    () => findTextTableOverlaps(editorState.document).length,
+    [editorState.document],
+  );
+  const layoutWarning =
+    textTableOverlapCount > 0
+      ? `文字・表が重なっています(${textTableOverlapCount}箇所)。出力にもそのまま写るため、ドラッグで位置を調整してください`
+      : null;
+
   return (
     <div className="flex flex-col h-full bg-neutral-200 dark:bg-zinc-900">
       {/* ── Toolbar — Task H ─────────────────────────────────────────── */}
@@ -577,6 +589,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         canAddMapQr={canAddMapQr}
         onOpenTransactionInfo={() => setTxInfoOpen(true)}
         canEditTransactionInfo={editorState.document.elements.some((e) => e.id === "footer-band")}
+        layoutWarning={layoutWarning}
       />
 
       {/* ── 写真ギャラリー（写真管理・計画④） ─────────────────────────── */}

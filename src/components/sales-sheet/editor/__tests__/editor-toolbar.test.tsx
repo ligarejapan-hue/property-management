@@ -232,3 +232,42 @@ describe("EditorToolbar — 描画", () => {
     expect(html).toContain("この図面には会社帯がありません");
   });
 });
+
+// ---------------------------------------------------------------------------
+// B-8 (UI総点検): 自動調整の効果範囲注記 + 文字・表の重なり注意表示
+// ---------------------------------------------------------------------------
+
+describe("EditorToolbar — B-8 効果範囲注記と重なり注意", () => {
+  const noop2 = async () => {};
+  const base = {
+    dirty: false,
+    onSave: noop2,
+    onExport: noop2,
+    onDelete: noop2,
+    onAddPhoto: () => {},
+    onAutoArrange: () => {},
+    onAutoBalance: () => {},
+    onAddBadge: () => {},
+    onAddQr: () => {},
+    onOpenTransactionInfo: () => {},
+  };
+
+  it("自動整列・自動調整ボタンに効果範囲の title 注記がある", () => {
+    const html = renderToStaticMarkup(<EditorToolbar {...base} />);
+    expect(html).toContain("手で配置した文字・表・バッジは動きません");
+    expect(html).toContain("手で配置した文字・バッジは動きません");
+  });
+
+  it("layoutWarning 指定時は data-toolbar-layout-warning を表示する", () => {
+    const html = renderToStaticMarkup(
+      <EditorToolbar {...base} layoutWarning="文字・表が重なっています(2箇所)。出力にもそのまま写るため、ドラッグで位置を調整してください" />,
+    );
+    expect(html).toContain("data-toolbar-layout-warning");
+    expect(html).toContain("文字・表が重なっています(2箇所)");
+  });
+
+  it("layoutWarning 未指定なら注意表示は出ない(後方互換)", () => {
+    const html = renderToStaticMarkup(<EditorToolbar {...base} />);
+    expect(html).not.toContain("data-toolbar-layout-warning");
+  });
+});

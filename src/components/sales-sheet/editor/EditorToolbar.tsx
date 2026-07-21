@@ -32,9 +32,12 @@ export interface EditorToolbarProps {
   /** やり直す(Ctrl+Y)。canRedo=false のとき非活性。未指定はボタン非表示(後方互換)。 */
   onRedo?: () => void;
   canRedo?: boolean;
+  /** B-8: 文字・表どうしの重なり検知の注意文言(重なりなし/未指定は非表示)。
+   *  自動整列・自動調整は文字を動かさない仕様のため、出力前に気付けるように出す。 */
+  layoutWarning?: string | null;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false, layoutWarning = null }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -139,6 +142,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-auto-arrange
         onClick={onAutoArrange}
         disabled={busy}
+        title="写真の並びと概要表・地図QRの位置を整えます。手で配置した文字・表・バッジは動きません"
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         写真を自動整列
@@ -148,6 +152,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-auto-balance
         onClick={onAutoBalance}
         disabled={busy}
+        title="見出し・価格・概要表・間取図・写真を標準の配置に戻します。手で配置した文字・バッジは動きません"
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         レイアウト自動調整
@@ -209,6 +214,14 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         PNG出力
       </button>
       <div className="flex-1" />
+      {layoutWarning && !error && (
+        <span
+          data-toolbar-layout-warning
+          className="text-sm text-amber-700 dark:text-amber-400"
+        >
+          {layoutWarning}
+        </span>
+      )}
       {error && (
         <span
           data-toolbar-error
