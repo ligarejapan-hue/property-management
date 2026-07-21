@@ -327,39 +327,14 @@ describe("POST /api/field-survey/sessions", () => {
     expect(prisma.$transaction as Mock).toHaveBeenCalledTimes(1);
   });
 
-  it("B-7(@codex R1): 読取後に track point flush が入ったら再読取して最新スナップショットで自動終了", async () => {
+  it("B-7(@codex R3): 開始24h超でも最終活動が新しければ放置扱いせず 409 (自動終了しない)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
-    const staleStartedAt = new Date(Date.now() - 30 * 60 * 60 * 1000);
-    const oldActivityAt = new Date(Date.now() - 29 * 60 * 60 * 1000);
-    const newActivityAt = new Date(Date.now() - 60 * 1000); // 直前に flush が入った
-    (prisma.fieldSurveySession.findFirst as Mock)
-      .mockResolvedValueOnce({
-        id: "s-stale",
-        startedAt: staleStartedAt,
-        updatedAt: oldActivityAt,
-        pointCount: 7,
-      })
-      // 再読取: まだ active だが updatedAt / pointCount が進んでいる
-      .mockResolvedValueOnce({
-        id: "s-stale",
-        startedAt: staleStartedAt,
-        updatedAt: newActivityAt,
-        pointCount: 9,
-      });
-    (prisma.fieldSurveySession.updateMany as Mock)
-      .mockResolvedValueOnce({ count: 0 }) // 古い updatedAt 条件は外れる
-      .mockResolvedValueOnce({ count: 1 }); // 最新スナップショットで成功
-    (prisma.fieldSurveySession.create as Mock).mockResolvedValue({
-      id: "s-new",
-      staffUserId: fieldUser.id,
-      startedAt: new Date(),
-      endedAt: null,
-      status: "active",
-      memo: null,
-      pointCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue({
+      id: "s-long",
+      startedAt: new Date(Date.now() - 30 * 60 * 60 * 1000), // 30h 前開始
+      updatedAt: new Date(Date.now() - 60 * 60 * 1000), // 1h 前まで活動
+      pointCount: 100,
     });
     const res = await POST(
       makeReq("http://x/api/field-survey/sessions", {
@@ -367,22 +342,40 @@ describe("POST /api/field-survey/sessions", () => {
         body: "{}",
       }),
     );
-    expect(res.status).toBe(201);
-    // 2 回目の updateMany は最新の updatedAt を条件・endedAt に使う
-    const second = (prisma.fieldSurveySession.updateMany as Mock).mock
-      .calls[1][0];
-    expect(second.where).toEqual({
-      id: "s-stale",
-      status: "active",
-      updatedAt: newActivityAt,
+    expect(res.status).toBe(409);
+    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveySession.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("B-7(@codex R1/R3): 読取後に track point flush が入って条件が外れたら、活動中とみなし 409 (再終了しない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findFirst as Mock)
+      .mockResolvedValueOnce({
+        id: "s-stale",
+        startedAt: new Date(Date.now() - 30 * 60 * 60 * 1000),
+        updatedAt: new Date(Date.now() - 29 * 60 * 60 * 1000),
+        pointCount: 7,
+      })
+      // 再読取: まだ active (= flush 直後で updatedAt が進んだ)
+      .mockResolvedValueOnce({ id: "s-stale" });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 0, // 古い updatedAt 条件が外れた
     });
-    expect(second.data.endedAt).toEqual(newActivityAt);
-    // 監査は最新 pointCount のスナップショットで 1 回だけ
-    const autoEndCalls = writeAuditLog.mock.calls.filter(
-      (c) => c[0].action === "field_survey_session_auto_end",
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "{}",
+      }),
     );
-    expect(autoEndCalls).toHaveLength(1);
-    expect(autoEndCalls[0][0].detail.pointCount).toBe(9);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("ACTIVE_SESSION_EXISTS");
+    // updateMany は 1 回だけ (最新スナップショットへの再終了はしない)
+    expect(prisma.fieldSurveySession.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.fieldSurveySession.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("race: 事前チェック通過後 create で P2002 が出ても 409 ACTIVE_SESSION_EXISTS", async () => {
@@ -753,6 +746,93 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const s = JSON.stringify(call.detail);
     expect(s).not.toMatch(/lat/i);
     expect(s).not.toMatch(/lng/i);
+  });
+
+  it("B-7(@codex R3): 放置 session (最終活動12h超) の終了は endedAt=最終活動時刻・durationSec も過大にしない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date(Date.now() - 73 * 60 * 60 * 1000); // 73h 前開始
+    const lastActivityAt = new Date(Date.now() - 72 * 60 * 60 * 1000); // 72h 前まで活動
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        updatedAt: lastActivityAt,
+        status: "active",
+        pointCount: 5,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: lastActivityAt,
+        status: "ended",
+        memo: null,
+        pointCount: 5,
+        createdAt: startedAt,
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({ status: "ended" }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(200);
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(umArgs.data.endedAt).toEqual(lastActivityAt);
+    // durationSec は startedAt→最終活動時刻 (約1時間) で、73時間にはならない
+    const call = writeAuditLog.mock.calls[0][0];
+    expect(call.detail.durationSec).toBe(60 * 60);
+  });
+
+  it("B-7(@codex R3): 直前まで活動していた session の通常終了は従来どおり endedAt=now", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date(Date.now() - 60 * 60 * 1000);
+    const justNow = new Date(Date.now() - 30 * 1000);
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        updatedAt: justNow,
+        status: "active",
+        pointCount: 5,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: new Date(),
+        status: "ended",
+        memo: null,
+        pointCount: 5,
+        createdAt: startedAt,
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({ status: "ended" }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(200);
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    // endedAt は updatedAt (30秒前) ではなく now 相当 (直近3秒以内)
+    const endedAt = umArgs.data.endedAt as Date;
+    expect(Date.now() - endedAt.getTime()).toBeLessThan(3000);
   });
 
   it("active でない session への終了要求は 409 (updateMany が 0 行)", async () => {

@@ -53,15 +53,15 @@ export async function POST(request: NextRequest) {
       select: { id: true, startedAt: true, updatedAt: true, pointCount: true },
     });
     if (existingActive) {
-      // B-7 (UI総点検): 終了し忘れで放置された active session (24h 超) は
+      // B-7 (UI総点検): 終了し忘れで放置された active session は
       // ここで自動終了してから新規開始を通す (終了し忘れによる 409 詰み解消)。
-      // - endedAt は now でなく最終活動時刻 (updatedAt ≒ 最後の位置記録/メモ更新)
-      //   を使い、巡回時間を実際より長く記録しない。
-      // - 0 行更新 = 並行で既に終了済み。そのまま新規作成に進む (真の並行 active
-      //   は partial unique index → P2002 → 409 で従来どおり防がれる)。
+      // - 放置判定は startedAt でなく最終活動時刻 (updatedAt ≒ 最後の位置記録/
+      //   メモ更新) で行う (@codex R3: 開始から 24h 超でも現に記録が続いている
+      //   session を別端末からの開始で誤終了しない)。
+      // - endedAt も updatedAt を使い、巡回時間を実際より長く記録しない。
       if (
         !isSessionStale(
-          existingActive.startedAt,
+          existingActive.updatedAt,
           new Date(),
           STALE_AUTO_END_THRESHOLD_MS,
         )
@@ -76,44 +76,46 @@ export async function POST(request: NextRequest) {
 
     // 自動終了 (放置 session がある場合) と新規作成は 1 トランザクションで行う。
     // - @codex R1 P2: updatedAt を conditional write の条件に含め、読取後の
-    //   track point flush と競合したら再読取して 1 回だけやり直す (endedAt /
-    //   監査 detail は条件一致したスナップショットなので常に整合)。
+    //   track point flush と競合したら書かない (endedAt / 監査 detail は条件
+    //   一致したスナップショットなので常に整合)。
     // - @codex R2 P2: create が失敗 (非 P2002 含む) したら自動終了ごと rollback
     //   し、「既存 session だけ終了して新規が無い」中途半端な状態を残さない。
     //   監査ログはトランザクション成功後にのみ書く。
-    // - startedAt は不変のため、再読取後も stale 判定は変わらない。
+    // - @codex R3 P2: 条件が外れて再読取した session がまだ active なら、それは
+    //   「直前に活動があった」= 放置ではないので自動終了せず 409 に倒す
+    //   (@updatedAt は更新の度に現在時刻になるため、再判定は常に非 stale)。
     let created;
     let autoEndedSnapshot: typeof existingActive = null;
     try {
       const result = await prisma.$transaction(async (tx) => {
         let endedSnapshot: typeof existingActive = null;
         if (existingActive) {
-          let snapshot = existingActive;
-          for (let attempt = 0; attempt < 2; attempt++) {
-            const autoEnded = await tx.fieldSurveySession.updateMany({
-              where: {
-                id: snapshot.id,
-                status: "active",
-                updatedAt: snapshot.updatedAt,
-              },
-              data: { status: "ended", endedAt: snapshot.updatedAt },
-            });
-            if (autoEnded.count > 0) {
-              endedSnapshot = snapshot;
-              break;
-            }
+          const autoEnded = await tx.fieldSurveySession.updateMany({
+            where: {
+              id: existingActive.id,
+              status: "active",
+              updatedAt: existingActive.updatedAt,
+            },
+            data: { status: "ended", endedAt: existingActive.updatedAt },
+          });
+          if (autoEnded.count > 0) {
+            endedSnapshot = existingActive;
+          } else {
             // 0 行更新 = 並行で終了済み or 直前に活動があった。再読取して判別。
             const fresh = await tx.fieldSurveySession.findFirst({
-              where: { id: snapshot.id, status: "active" },
-              select: {
-                id: true,
-                startedAt: true,
-                updatedAt: true,
-                pointCount: true,
-              },
+              where: { id: existingActive.id, status: "active" },
+              select: { id: true },
             });
-            if (!fresh) break; // 終了済み → そのまま新規作成へ
-            snapshot = fresh;
+            if (fresh) {
+              // まだ active = updatedAt が進んだ直後 (活動中)。放置ではないので
+              // 自動終了せず、従来どおり 409 (rollback で無傷)。
+              throw new ApiError(
+                409,
+                "active な巡回 session が既に存在します。先に終了してください",
+                "ACTIVE_SESSION_EXISTS",
+              );
+            }
+            // 終了済み → そのまま新規作成へ
           }
         }
         const createdRow = await tx.fieldSurveySession.create({

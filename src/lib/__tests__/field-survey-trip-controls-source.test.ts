@@ -203,6 +203,10 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
     expect(TRIP_SRC).toMatch(/stalePromptedRef/);
   });
 
+  it("放置判定は最終活動時刻ベース (@codex R3・記録中の session に出さない)", () => {
+    expect(TRIP_SRC).toMatch(/own\.updatedAt \?\? own\.startedAt/);
+  });
+
   it("終了は既存の endSession (PATCH status: ended) を流用する", () => {
     // 専用の別 API を増やしていないこと (PATCH は 1 箇所のまま)
     const patches = TRIP_SRC.match(/method:\s*"PATCH"/g) ?? [];

@@ -11,6 +11,10 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { patchFieldSurveySessionSchema } from "@/lib/validators";
+import {
+  isSessionStale,
+  STALE_CONFIRM_THRESHOLD_MS,
+} from "@/lib/field-survey-trip-util";
 
 // ---------- PATCH /api/field-survey/sessions/[id] ----------
 // 巡回終了 / cancel / memo 更新の最小対応。
@@ -134,6 +138,7 @@ export async function PATCH(
         id: true,
         staffUserId: true,
         startedAt: true,
+        updatedAt: true,
         status: true,
         pointCount: true,
       },
@@ -152,6 +157,15 @@ export async function PATCH(
     }
 
     const now = new Date();
+    // B-7 (@codex R3): 放置していた session (最終活動から 12h 超) を後から終了
+    // する場合は、endedAt に now でなく最終活動時刻 (updatedAt) を使い、
+    // 「数日巡回していた」ような過大な巡回時間を記録しない (自動終了と同じ規則)。
+    // 通常の終了 (直前まで活動) は従来どおり now。
+    const effectiveEndedAt =
+      patch.status === "ended" &&
+      isSessionStale(existing.updatedAt, now, STALE_CONFIRM_THRESHOLD_MS)
+        ? existing.updatedAt
+        : now;
 
     if (patch.status === "ended" || patch.status === "cancelled") {
       // status 変更は atomic な conditional update で実施。
@@ -160,7 +174,7 @@ export async function PATCH(
         where: { id, status: "active" },
         data: {
           status: patch.status,
-          endedAt: now,
+          endedAt: effectiveEndedAt,
           ...(patch.memo !== undefined && { memo: patch.memo }),
         },
       });
@@ -192,7 +206,7 @@ export async function PATCH(
       const durationSec = Math.max(
         0,
         Math.floor(
-          (now.getTime() - existing.startedAt.getTime()) / 1000,
+          (effectiveEndedAt.getTime() - existing.startedAt.getTime()) / 1000,
         ),
       );
       await writeAuditLog({

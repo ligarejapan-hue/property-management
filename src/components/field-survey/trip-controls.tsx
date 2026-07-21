@@ -123,12 +123,17 @@ export default function TripControls({
       // pickOwnActiveSession は server filter 漏れに対する防御として残す。
       const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
       setSession(own);
-      // B-7: 終了し忘れの放置 session (12h 超) を復元したときは、
+      // B-7: 終了し忘れの放置 session (最終活動から 12h 超) を復元したときは、
       // 巡回中表示へ戻す前に終了するかどうかを確認する (同一 session 1 回のみ)。
+      // 放置判定は最終活動時刻ベース (@codex R3・記録が続いている session に出さない)。
       if (
         own &&
         stalePromptedRef.current !== own.id &&
-        isSessionStale(own.startedAt, new Date(), STALE_CONFIRM_THRESHOLD_MS)
+        isSessionStale(
+          own.updatedAt ?? own.startedAt,
+          new Date(),
+          STALE_CONFIRM_THRESHOLD_MS,
+        )
       ) {
         stalePromptedRef.current = own.id;
         setPhase("confirmStaleEnd");

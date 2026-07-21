@@ -105,6 +105,8 @@ export interface ActiveSessionLike {
   status: string;
   memo: string | null;
   pointCount: number;
+  /** 最終活動時刻 (放置判定に使用)。古い API 応答に無い場合は startedAt で代用。 */
+  updatedAt?: string | Date;
 }
 
 /**
