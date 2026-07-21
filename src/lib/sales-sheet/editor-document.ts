@@ -1451,19 +1451,41 @@ const OVERLAP_TOLERANCE_MM = 0.5;
 /** pt → mm 換算 (1pt = 25.4/72 mm)。 */
 const PT_TO_MM = 25.4 / 72;
 
+/** 折返し見積り用の実効文字数 (全角=1・半角=0.5)。 */
+function effectiveCharCount(s: string): number {
+  let n = 0;
+  for (const ch of s) n += ch.charCodeAt(0) > 0xff ? 1 : 0.5;
+  return n;
+}
+
 /**
  * 表の描画上の高さの概算 (mm)。
  *
  * レンダラ (SalesSheetRenderer / render-html) は <table> を直接絶対配置する
- * ため、CSS の height は最小値扱いで、行が増えると保存 h を超えて描画される
- * (overflow:hidden は table 要素の行を切り取らない・@codex #310)。
- * 行高 ≒ フォント高×行送り + 上下 padding(0.5mm×2) + 罫線 で控えめに見積る
- * (値の折返しによる増分までは見ない)。
+ * ため、CSS の height は最小値扱いで、行数の増加やセル内の折返しで保存 h を
+ * 超えて描画される (overflow:hidden は table 要素の行を切り取らない・@codex #310)。
+ * 行ごとに「セル幅(label 32% / value 68%)に収まらない分の折返し行数」を
+ * 全角=フォント幅 1 文字分として概算する (厳密なテキスト実測はしない)。
  */
 function estimatedTableHeightMm(el: TableElement): number {
   const fontMm = (el.style.fontSizePt ?? 9) * PT_TO_MM;
-  const rowMm = fontMm * 1.3 + 1.4;
-  return el.rows.length * rowMm;
+  const lineMm = fontMm * 1.3;
+  // 左右 padding 1mm×2 相当を引いたセル幅。極端に狭い表でも 1 文字分は確保。
+  const labelW = Math.max(el.w * 0.32 - 2, fontMm);
+  const valueW = Math.max(el.w * 0.68 - 2, fontMm);
+  let total = 0;
+  for (const r of el.rows) {
+    const labelLines = Math.max(
+      1,
+      Math.ceil((effectiveCharCount(r.label) * fontMm) / labelW),
+    );
+    const valueLines = Math.max(
+      1,
+      Math.ceil((effectiveCharCount(r.value) * fontMm) / valueW),
+    );
+    total += Math.max(labelLines, valueLines) * lineMm + 1.4;
+  }
+  return total;
 }
 
 /**
@@ -1473,14 +1495,20 @@ function estimatedTableHeightMm(el: TableElement): number {
  * ため、重なったままだと PDF/PNG 出力にもそのまま残る。編集画面で注意を出す
  * ための検知専用ヘルパ。写真の上の文字や帯 (shape) の上の見出しは意図的な
  * 重なりの定番なので対象外 (text/table 以外は見ない)。
- * 表は保存 h と「行数から見積もった描画上の高さ」の大きい方で判定する
- * (行を増やして保存 h からはみ出した表との重なりも検知する・@codex #310)。
+ * - 空文字の text (テンプレが保持する未入力の price 等) は見えないため対象外
+ *   (@codex #310: 見えない箱との交差で警告しない)
+ * - 表は保存 h と「行数・折返しから見積もった描画上の高さ」の大きい方で判定
+ *   (はみ出して描画される表との重なりも検知する・@codex #310)
  */
 export function findTextTableOverlaps(
   document: SalesSheetDocument,
 ): TextTableOverlapPair[] {
   const boxes = document.elements
-    .filter((e) => e.type === "text" || e.type === "table")
+    .filter(
+      (e) =>
+        (e.type === "text" && e.content.trim() !== "") ||
+        (e.type === "table" && e.rows.length > 0),
+    )
     .map((e) => ({
       id: e.id,
       x: e.x,

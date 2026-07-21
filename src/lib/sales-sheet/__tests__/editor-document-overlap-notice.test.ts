@@ -96,6 +96,32 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(0);
   });
 
+  it("空文字の text (テンプレが保持する未入力枠) は対象外 (@codex #310 R2)", () => {
+    const emptyText = { id: "price", type: "text", x: 100, y: 40, w: 40, h: 10, z: 5, content: "", style: {} };
+    const doc = makeDoc([emptyText, table("overview", 100, 30)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 空白のみも対象外
+    const blankText = { ...emptyText, id: "sales-points", content: "  " };
+    const doc2 = makeDoc([blankText, table("overview", 100, 30)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
+  it("セル内の折返しで伸びた表との重なりも検知する (@codex #310 R2)", () => {
+    // 幅 40mm の表に長い値 (全角40文字) → value セル(約25mm)で複数行に折返し、
+    // 1 行の保存 h=8mm を大きく超えて描画される
+    const wrapTable = {
+      id: "overview", type: "table", x: 100, y: 10, w: 40, h: 8, z: 1,
+      rows: [{ label: "備考", value: "あ".repeat(40) }],
+      style: {},
+    };
+    const doc = makeDoc([wrapTable, text("below", 105, 22)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+    // 同じ表でも値が短ければ保存 h 相当のまま = 検知しない
+    const shortTable = { ...wrapTable, rows: [{ label: "備考", value: "短い" }] };
+    const doc2 = makeDoc([shortTable, text("below", 105, 22)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
