@@ -146,6 +146,20 @@ describe("B-5: 監査ログの操作種別を日本語化", () => {
     expect(src).toMatch(/company_profile_update:/);
   });
 
+  it("動的生成 action (三項演算子/ヘルパ経由) も収載する(@codex R3)", () => {
+    expect(src).toMatch(/registry_pdf_download:/);
+    expect(src).toMatch(/registry_pdf_preview:/);
+    expect(src).toMatch(/postal_code_audit_list:/);
+    expect(src).toMatch(/postal_code_audit_csv_export:/);
+    expect(src).toMatch(/pii_copy_attempt:/);
+    expect(src).toMatch(/pii_cut_attempt:/);
+    expect(src).toMatch(/pii_contextmenu_attempt:/);
+    expect(src).toMatch(/pii_print_attempt:/);
+    expect(src).toMatch(/user_deactivate:/);
+    expect(src).toMatch(/user_reactivate:/);
+    expect(src).toMatch(/complete:\s*"完了"/);
+  });
+
   it("対象テーブル名も日本語ラベルを収載する(@codex R1)", () => {
     expect(src).toMatch(/field_survey_sessions:\s*"巡回記録"/);
     expect(src).toMatch(/dm_campaigns:\s*"売却DMキャンペーン"/);

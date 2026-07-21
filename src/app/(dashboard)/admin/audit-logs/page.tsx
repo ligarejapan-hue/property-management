@@ -59,6 +59,7 @@ const ACTION_LABELS: Record<string, string> = {
   update: "更新",
   delete: "削除",
   restore: "復元",
+  complete: "完了",
   bulk_update: "一括更新",
   // --- 物件のワンクリック操作(action:* 形式で記録される) ---
   "action:confirm_investigation": "調査情報を確認",
@@ -136,6 +137,8 @@ const ACTION_LABELS: Record<string, string> = {
   registry_pdf_bulk_upload: "謄本PDF一括取込",
   registry_pdf_bulk_resume: "謄本PDF一括取込の再開",
   registry_pdf_manual_attach: "謄本PDF手動添付",
+  registry_pdf_download: "謄本PDFダウンロード",
+  registry_pdf_preview: "謄本PDFプレビュー",
   pdf_import: "PDF取込",
   // --- 売却促進DM ---
   sale_dm_settings_update: "売却DM設定更新",
@@ -160,7 +163,16 @@ const ACTION_LABELS: Record<string, string> = {
   sales_sheet_design_delete: "販売図面削除",
   company_profile_update: "会社情報更新",
   user_delete: "ユーザー削除",
+  user_deactivate: "ユーザー無効化",
+  user_reactivate: "ユーザー再有効化",
   password_change_self: "パスワード変更(本人)",
+  // --- 動的生成 action (三項演算子/ヘルパ経由・@codex R3 で網羅) ---
+  postal_code_audit_list: "郵便番号監査一覧",
+  postal_code_audit_csv_export: "郵便番号監査CSVエクスポート",
+  pii_copy_attempt: "保護画面でのコピー操作",
+  pii_cut_attempt: "保護画面での切り取り操作",
+  pii_contextmenu_attempt: "保護画面での右クリック",
+  pii_print_attempt: "保護画面での印刷操作",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {
