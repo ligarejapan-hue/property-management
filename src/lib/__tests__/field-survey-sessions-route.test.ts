@@ -79,8 +79,8 @@ vi.mock("@/lib/api-helpers", () => {
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const client = {
     fieldSurveySession: {
       findFirst: vi.fn(),
       findUnique: vi.fn(),
@@ -94,8 +94,14 @@ vi.mock("@/lib/prisma", () => ({
       groupBy: vi.fn().mockResolvedValue([]),
       count: vi.fn().mockResolvedValue(0),
     },
-  },
-}));
+    // interactive transaction: callback へ同一 client を渡す (rollback 自体は
+    // DB の責務なのでモックでは検証せず、監査ログ等の観測点で検証する)
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn(client),
+    ),
+  };
+  return { default: client };
+});
 
 import prisma from "@/lib/prisma";
 import {
@@ -289,6 +295,36 @@ describe("POST /api/field-survey/sessions", () => {
     expect(writeAuditLog.mock.calls[0][0].action).toBe(
       "field_survey_session_start",
     );
+  });
+
+  it("B-7(@codex R2): 自動終了後の create 失敗 (非P2002) は 500 で、監査ログを一切書かない (rollback 前提)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue({
+      id: "s-stale",
+      startedAt: new Date(Date.now() - 30 * 60 * 60 * 1000),
+      updatedAt: new Date(Date.now() - 29 * 60 * 60 * 1000),
+      pointCount: 3,
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
+    const dbDown = Object.assign(new Error("connection lost"), {
+      code: "P1001",
+    });
+    (prisma.fieldSurveySession.create as Mock).mockRejectedValueOnce(dbDown);
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(res.status).toBe(500);
+    // 自動終了はトランザクション rollback で取り消される前提のため、
+    // auto_end / session_start いずれの監査ログも書かない
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    // 自動終了と create は同一トランザクション内で実行される
+    expect(prisma.$transaction as Mock).toHaveBeenCalledTimes(1);
   });
 
   it("B-7(@codex R1): 読取後に track point flush が入ったら再読取して最新スナップショットで自動終了", async () => {
