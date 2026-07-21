@@ -152,6 +152,7 @@ const ACTION_LABELS: Record<string, string> = {
   sale_dm_draft_mark_sent: "売却DM送付済みに設定",
   sale_dm_draft_outcome_update: "売却DM反応の記録",
   sale_dm_undeliverable_clear: "売却DM宛先不明の解除",
+  sale_dm_tracking_hit: "売却DMリンク開封",
   // --- 販売図面・その他 ---
   sales_sheet_design_create: "販売図面作成",
   sales_sheet_design_update: "販売図面更新",
@@ -171,6 +172,30 @@ const TARGET_TABLE_LABELS: Record<string, string> = {
   user_permissions: "権限",
   property_photos: "写真",
   property_investigation_logs: "調査ログ",
+  // B-5(@codex): action 側の日本語化に合わせ、実際に記録される対象テーブル名も
+  // 日本語で収載する(未知の値は従来どおり生表示フォールバック)。
+  attachments: "添付ファイル",
+  building_photos: "棟写真",
+  comments: "コメント",
+  company_profile: "会社情報",
+  dm_campaigns: "売却DMキャンペーン",
+  dm_recipient_drafts: "売却DM下書き",
+  dm_variants: "売却DM文面",
+  field_survey_pin_photos: "調査ピン写真",
+  field_survey_pins: "調査ピン",
+  field_survey_sessions: "巡回記録",
+  field_survey_track_points: "移動軌跡",
+  import_job_rows: "取込行",
+  next_actions: "次のアクション",
+  owner_memos: "オーナーメモ",
+  property_dm_logs: "DM履歴",
+  property_investigations: "調査情報",
+  property_match_candidates: "物件候補",
+  property_owners: "所有者紐づけ",
+  registry_fetch_config: "謄本取得設定",
+  sale_dm_config: "売却DM設定",
+  sales_sheet_designs: "販売図面",
+  screen_protection: "画面保護",
 };
 
 export default function AuditLogsPage() {

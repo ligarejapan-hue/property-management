@@ -140,9 +140,18 @@ describe("B-5: 監査ログの操作種別を日本語化", () => {
     expect(src).toMatch(/owner_correction_mislink:\s*"誤紐づけ解除"/);
     expect(src).toMatch(/registry_auto_fetch:\s*"謄本自動取得"/);
     expect(src).toMatch(/sale_dm_campaign_create:/);
+    expect(src).toMatch(/sale_dm_tracking_hit:/);
     expect(src).toMatch(/sales_sheet_design_create:/);
     expect(src).toMatch(/attachment_search:/);
     expect(src).toMatch(/company_profile_update:/);
+  });
+
+  it("対象テーブル名も日本語ラベルを収載する(@codex R1)", () => {
+    expect(src).toMatch(/field_survey_sessions:\s*"巡回記録"/);
+    expect(src).toMatch(/dm_campaigns:\s*"売却DMキャンペーン"/);
+    expect(src).toMatch(/registry_fetch_config:\s*"謄本取得設定"/);
+    expect(src).toMatch(/sales_sheet_designs:\s*"販売図面"/);
+    expect(src).toMatch(/company_profile:\s*"会社情報"/);
   });
 
   it("未知コードの生表示フォールバックは残す(古いログ対策)", () => {
