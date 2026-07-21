@@ -1468,7 +1468,9 @@ function effectiveCharCount(s: string): number {
  * 全角=フォント幅 1 文字分として概算する (厳密なテキスト実測はしない)。
  */
 function estimatedTableHeightMm(el: TableElement): number {
-  const fontMm = (el.style.fontSizePt ?? 9) * PT_TO_MM;
+  // fontSizePt 未指定時、両レンダラは font-size を出力せずブラウザ既定の
+  // 16px = 12pt を継承する (@codex #310 R3: 9pt と仮定すると過小見積りになる)。
+  const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
   const lineMm = fontMm * 1.3;
   // 左右 padding 1mm×2 相当を引いたセル幅。極端に狭い表でも 1 文字分は確保。
   const labelW = Math.max(el.w * 0.32 - 2, fontMm);
