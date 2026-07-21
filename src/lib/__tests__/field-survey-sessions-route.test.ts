@@ -222,10 +222,15 @@ describe("POST /api/field-survey/sessions", () => {
       }),
     );
     expect(res.status).toBe(201);
-    // 自動終了は atomic conditional update (status=active 条件付き)
+    // 自動終了は atomic conditional update (status=active + updatedAt 一致条件。
+    // @codex R1: 読取後の track point flush と競合したら書かない)
     const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
       .calls[0][0];
-    expect(umArgs.where).toEqual({ id: "s-stale", status: "active" });
+    expect(umArgs.where).toEqual({
+      id: "s-stale",
+      status: "active",
+      updatedAt: lastActivityAt,
+    });
     expect(umArgs.data.status).toBe("ended");
     // endedAt は now でなく最終活動時刻 (updatedAt) = 巡回時間の過大記録を避ける
     expect(umArgs.data.endedAt).toEqual(lastActivityAt);
@@ -249,12 +254,15 @@ describe("POST /api/field-survey/sessions", () => {
   it("B-7: 自動終了が 0 行 (並行で終了済み) でも新規作成に進み、自動終了の監査ログは書かない", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
-    (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue({
-      id: "s-stale",
-      startedAt: new Date(Date.now() - 30 * 60 * 60 * 1000),
-      updatedAt: new Date(Date.now() - 29 * 60 * 60 * 1000),
-      pointCount: 0,
-    });
+    (prisma.fieldSurveySession.findFirst as Mock)
+      .mockResolvedValueOnce({
+        id: "s-stale",
+        startedAt: new Date(Date.now() - 30 * 60 * 60 * 1000),
+        updatedAt: new Date(Date.now() - 29 * 60 * 60 * 1000),
+        pointCount: 0,
+      })
+      // 再読取: 並行で終了済み (active では見つからない)
+      .mockResolvedValueOnce(null);
     (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
       count: 0,
     });
@@ -281,6 +289,64 @@ describe("POST /api/field-survey/sessions", () => {
     expect(writeAuditLog.mock.calls[0][0].action).toBe(
       "field_survey_session_start",
     );
+  });
+
+  it("B-7(@codex R1): 読取後に track point flush が入ったら再読取して最新スナップショットで自動終了", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const staleStartedAt = new Date(Date.now() - 30 * 60 * 60 * 1000);
+    const oldActivityAt = new Date(Date.now() - 29 * 60 * 60 * 1000);
+    const newActivityAt = new Date(Date.now() - 60 * 1000); // 直前に flush が入った
+    (prisma.fieldSurveySession.findFirst as Mock)
+      .mockResolvedValueOnce({
+        id: "s-stale",
+        startedAt: staleStartedAt,
+        updatedAt: oldActivityAt,
+        pointCount: 7,
+      })
+      // 再読取: まだ active だが updatedAt / pointCount が進んでいる
+      .mockResolvedValueOnce({
+        id: "s-stale",
+        startedAt: staleStartedAt,
+        updatedAt: newActivityAt,
+        pointCount: 9,
+      });
+    (prisma.fieldSurveySession.updateMany as Mock)
+      .mockResolvedValueOnce({ count: 0 }) // 古い updatedAt 条件は外れる
+      .mockResolvedValueOnce({ count: 1 }); // 最新スナップショットで成功
+    (prisma.fieldSurveySession.create as Mock).mockResolvedValue({
+      id: "s-new",
+      staffUserId: fieldUser.id,
+      startedAt: new Date(),
+      endedAt: null,
+      status: "active",
+      memo: null,
+      pointCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(res.status).toBe(201);
+    // 2 回目の updateMany は最新の updatedAt を条件・endedAt に使う
+    const second = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[1][0];
+    expect(second.where).toEqual({
+      id: "s-stale",
+      status: "active",
+      updatedAt: newActivityAt,
+    });
+    expect(second.data.endedAt).toEqual(newActivityAt);
+    // 監査は最新 pointCount のスナップショットで 1 回だけ
+    const autoEndCalls = writeAuditLog.mock.calls.filter(
+      (c) => c[0].action === "field_survey_session_auto_end",
+    );
+    expect(autoEndCalls).toHaveLength(1);
+    expect(autoEndCalls[0][0].detail.pointCount).toBe(9);
   });
 
   it("race: 事前チェック通過後 create で P2002 が出ても 409 ACTIVE_SESSION_EXISTS", async () => {

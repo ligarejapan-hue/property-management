@@ -72,22 +72,48 @@ export async function POST(request: NextRequest) {
           "ACTIVE_SESSION_EXISTS",
         );
       }
-      const autoEnded = await prisma.fieldSurveySession.updateMany({
-        where: { id: existingActive.id, status: "active" },
-        data: { status: "ended", endedAt: existingActive.updatedAt },
-      });
-      if (autoEnded.count > 0) {
-        await writeAuditLog({
-          userId: session.id,
-          action: "field_survey_session_auto_end",
-          targetTable: "field_survey_sessions",
-          targetId: existingActive.id,
-          detail: {
-            sessionId: existingActive.id,
-            reason: "stale_on_new_start",
-            pointCount: existingActive.pointCount,
+      // @codex R1 P2: findFirst と updateMany の間に track point flush が入ると
+      // 古い updatedAt を endedAt に採用し、監査の pointCount も古くなる。
+      // updatedAt を conditional write の条件に含め、外れたら再読取して 1 回だけ
+      // やり直す (endedAt / 監査 detail は条件一致したスナップショットなので常に
+      // 整合する)。再試行も外れたら create に進み、既存の P2002→409 に任せる。
+      // startedAt は不変のため、再読取後も stale 判定は変わらない。
+      let snapshot = existingActive;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const autoEnded = await prisma.fieldSurveySession.updateMany({
+          where: {
+            id: snapshot.id,
+            status: "active",
+            updatedAt: snapshot.updatedAt,
+          },
+          data: { status: "ended", endedAt: snapshot.updatedAt },
+        });
+        if (autoEnded.count > 0) {
+          await writeAuditLog({
+            userId: session.id,
+            action: "field_survey_session_auto_end",
+            targetTable: "field_survey_sessions",
+            targetId: snapshot.id,
+            detail: {
+              sessionId: snapshot.id,
+              reason: "stale_on_new_start",
+              pointCount: snapshot.pointCount,
+            },
+          });
+          break;
+        }
+        // 0 行更新 = 並行で終了済み or 直前に活動があった。再読取して判別する。
+        const fresh = await prisma.fieldSurveySession.findFirst({
+          where: { id: snapshot.id, status: "active" },
+          select: {
+            id: true,
+            startedAt: true,
+            updatedAt: true,
+            pointCount: true,
           },
         });
+        if (!fresh) break; // 終了済み → そのまま新規作成へ
+        snapshot = fresh;
       }
     }
 
