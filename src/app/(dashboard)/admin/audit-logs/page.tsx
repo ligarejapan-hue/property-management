@@ -97,7 +97,8 @@ const ACTION_LABELS: Record<string, string> = {
   owner_correction_mislink: "誤紐づけ解除",
   owner_correction_name_fix: "氏名補正",
   owner_correction_contact_fix: "連絡先補正",
-  owner_correction_text_fix: "住所文字列補正",
+  // text-fix は氏名/カナ/住所の3フィールド共通 action のため中立な名称にする(@codex R2)
+  owner_correction_text_fix: "文字列補正",
   owner_correction_corporate_candidates_list: "法人番号候補一覧",
   owner_correction_corporate_candidate_view: "法人番号候補の閲覧",
   owner_correction_corporate_bulk_apply: "法人番号一括反映",
