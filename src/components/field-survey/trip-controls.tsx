@@ -218,8 +218,9 @@ export default function TripControls({
     }
   }, [fetchActiveSession]);
 
-  // B-7 (@codex R6): 放置確認で「巡回を続ける」を選んだことも巡回の活動として
-  // 記録する (memo を現値のまま送る memo-only PATCH で updatedAt を進める)。
+  // B-7 (@codex R6/R7): 放置確認で「巡回を続ける」を選んだことも巡回の活動
+  // として記録する (活動記録専用の touch PATCH で updatedAt だけを進める。
+  // memo 送信で代用すると一覧 API が memo を返さないため既存 memo を消す)。
   // これが無いと、続行後に点・ピン無しで終了したとき server 側で stale 扱いの
   // まま endedAt が続行前の時刻へ巻き戻る。失敗しても続行自体は妨げない。
   const touchSession = useCallback(async (target: ActiveSessionLike) => {
@@ -230,7 +231,7 @@ export default function TripControls({
           method: "PATCH",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ memo: target.memo ?? null }),
+          body: JSON.stringify({ touch: true }),
         },
       );
     } catch {

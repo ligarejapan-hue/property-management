@@ -255,10 +255,17 @@ export const patchFieldSurveySessionSchema = z
   .object({
     status: z.enum(["ended", "cancelled"]).optional(),
     memo: z.string().max(FIELD_SURVEY_MEMO_MAX_LEN).optional().nullable(),
+    // B-7: 「巡回を続ける」等の活動記録専用 (updatedAt を進めるだけ・他は不変)。
+    // memo 送信で代用すると、一覧 API が memo を返さない設計のため null 上書きで
+    // 既存 memo を消してしまう (@codex #308 R7)。
+    touch: z.literal(true).optional(),
   })
-  .refine((v) => v.status !== undefined || v.memo !== undefined, {
-    message: "status または memo のいずれかを指定してください",
-  });
+  .refine(
+    (v) => v.status !== undefined || v.memo !== undefined || v.touch === true,
+    {
+      message: "status / memo / touch のいずれかを指定してください",
+    },
+  );
 
 export const fieldSurveySessionListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),

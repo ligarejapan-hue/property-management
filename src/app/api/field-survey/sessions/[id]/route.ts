@@ -198,6 +198,13 @@ export async function PATCH(
         where: { id },
         data: { memo: patch.memo },
       });
+    } else if (patch.touch) {
+      // B-7 (@codex R7): 活動記録専用の touch。updatedAt だけを進め、memo 等は
+      // 一切変更しない (active でなくなっていれば no-op・エラーにもしない)。
+      await prisma.fieldSurveySession.updateMany({
+        where: { id, status: "active" },
+        data: { updatedAt: new Date() },
+      });
     }
 
     const updated = await prisma.fieldSurveySession.findUnique({

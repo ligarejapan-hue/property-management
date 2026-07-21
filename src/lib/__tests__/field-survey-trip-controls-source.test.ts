@@ -206,13 +206,15 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
     expect(TRIP_SRC).toMatch(/own\.updatedAt \?\? own\.startedAt/);
   });
 
-  it("終了は既存 PATCH を流用・続行は memo-only PATCH で活動を記録 (@codex R6)", () => {
+  it("終了は既存 PATCH を流用・続行は touch PATCH で活動のみ記録 (@codex R6/R7)", () => {
     // 専用の別 API は増やさない (end 用 + 続行 touch 用の PATCH 2 箇所のみ)
     const patches = TRIP_SRC.match(/method:\s*"PATCH"/g) ?? [];
     expect(patches.length).toBe(2);
-    // 続行 touch は memo を現値のまま送る (状態は変えない)
+    // 続行 touch は活動記録専用 ({ touch: true })。memo 送信での代用は
+    // 一覧 API が memo を返さないため既存 memo を消す (禁止)
     expect(TRIP_SRC).toMatch(/touchSession/);
-    expect(TRIP_SRC).toMatch(/memo:\s*target\.memo \?\? null/);
+    expect(TRIP_SRC).toMatch(/JSON\.stringify\(\{ touch: true \}\)/);
+    expect(TRIP_SRC).not.toMatch(/memo:\s*target\.memo/);
   });
 });
 

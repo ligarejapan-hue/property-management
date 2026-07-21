@@ -993,6 +993,47 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
+  it("B-7(@codex R7): touch-only PATCH は updatedAt だけ進める (memo 不変・監査なし)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date(Date.now() - 13 * 60 * 60 * 1000);
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        updatedAt: startedAt,
+        status: "active",
+        pointCount: 0,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: null,
+        status: "active",
+        memo: "既存メモ",
+        pointCount: 0,
+        createdAt: startedAt,
+        updatedAt: new Date(),
+      });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({ touch: true }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(200);
+    // updatedAt のみ更新 (active 条件付き)・memo 更新経路は通らない
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(umArgs.where).toEqual({ id: "s-1", status: "active" });
+    expect(umArgs.data).toEqual({ updatedAt: expect.any(Date) });
+    expect(prisma.fieldSurveySession.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
   it("status / memo どちらも空は 422", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
