@@ -1448,6 +1448,24 @@ export interface TextTableOverlapPair {
 /** 実質的な重なりとみなす最小の食い込み (mm)。隣接・微小接触は除外する。 */
 const OVERLAP_TOLERANCE_MM = 0.5;
 
+/** pt → mm 換算 (1pt = 25.4/72 mm)。 */
+const PT_TO_MM = 25.4 / 72;
+
+/**
+ * 表の描画上の高さの概算 (mm)。
+ *
+ * レンダラ (SalesSheetRenderer / render-html) は <table> を直接絶対配置する
+ * ため、CSS の height は最小値扱いで、行が増えると保存 h を超えて描画される
+ * (overflow:hidden は table 要素の行を切り取らない・@codex #310)。
+ * 行高 ≒ フォント高×行送り + 上下 padding(0.5mm×2) + 罫線 で控えめに見積る
+ * (値の折返しによる増分までは見ない)。
+ */
+function estimatedTableHeightMm(el: TableElement): number {
+  const fontMm = (el.style.fontSizePt ?? 9) * PT_TO_MM;
+  const rowMm = fontMm * 1.3 + 1.4;
+  return el.rows.length * rowMm;
+}
+
 /**
  * 文字 (text) と表 (table) どうしの矩形重なりを列挙する (document は不変)。
  *
@@ -1455,13 +1473,21 @@ const OVERLAP_TOLERANCE_MM = 0.5;
  * ため、重なったままだと PDF/PNG 出力にもそのまま残る。編集画面で注意を出す
  * ための検知専用ヘルパ。写真の上の文字や帯 (shape) の上の見出しは意図的な
  * 重なりの定番なので対象外 (text/table 以外は見ない)。
+ * 表は保存 h と「行数から見積もった描画上の高さ」の大きい方で判定する
+ * (行を増やして保存 h からはみ出した表との重なりも検知する・@codex #310)。
  */
 export function findTextTableOverlaps(
   document: SalesSheetDocument,
 ): TextTableOverlapPair[] {
-  const boxes = document.elements.filter(
-    (e) => e.type === "text" || e.type === "table",
-  );
+  const boxes = document.elements
+    .filter((e) => e.type === "text" || e.type === "table")
+    .map((e) => ({
+      id: e.id,
+      x: e.x,
+      y: e.y,
+      w: e.w,
+      h: e.type === "table" ? Math.max(e.h, estimatedTableHeightMm(e)) : e.h,
+    }));
   const pairs: TextTableOverlapPair[] = [];
   for (let i = 0; i < boxes.length; i++) {
     for (let j = i + 1; j < boxes.length; j++) {

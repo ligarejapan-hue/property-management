@@ -254,7 +254,8 @@ describe("EditorToolbar — B-8 効果範囲注記と重なり注意", () => {
 
   it("自動整列・自動調整ボタンに効果範囲の title 注記がある", () => {
     const html = renderToStaticMarkup(<EditorToolbar {...base} />);
-    expect(html).toContain("手で配置した文字・表・バッジは動きません");
+    // 自動整列: 地図QRは動かさない(@codex #310)ため QR も「動かない」側に明記
+    expect(html).toContain("手で配置した文字・表・バッジ・QRは動きません");
     expect(html).toContain("手で配置した文字・バッジは動きません");
   });
 
