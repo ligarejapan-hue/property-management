@@ -217,7 +217,8 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
       {layoutWarning && !error && (
         <span
           data-toolbar-layout-warning
-          className="text-sm text-amber-700 dark:text-amber-400"
+          title={layoutWarning}
+          className="inline-block max-w-[22rem] truncate align-middle text-sm text-amber-700 dark:text-amber-400"
         >
           {layoutWarning}
         </span>
