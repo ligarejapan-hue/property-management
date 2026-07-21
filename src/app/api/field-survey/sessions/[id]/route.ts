@@ -161,17 +161,24 @@ export async function PATCH(
     // する場合は、endedAt に now でなく最終活動時刻 (updatedAt) を使い、
     // 「数日巡回していた」ような過大な巡回時間を記録しない (自動終了と同じ規則)。
     // 通常の終了 (直前まで活動) は従来どおり now。
-    const effectiveEndedAt =
+    const isStaleEnd =
       patch.status === "ended" &&
-      isSessionStale(existing.updatedAt, now, STALE_CONFIRM_THRESHOLD_MS)
-        ? existing.updatedAt
-        : now;
+      isSessionStale(existing.updatedAt, now, STALE_CONFIRM_THRESHOLD_MS);
+    const effectiveEndedAt = isStaleEnd ? existing.updatedAt : now;
 
     if (patch.status === "ended" || patch.status === "cancelled") {
       // status 変更は atomic な conditional update で実施。
       // 0 行更新は「既に終了/キャンセル済」を意味し 409 にマップ。
+      // stale 終了時は読取時の updatedAt も条件に含める (@codex R4: 読取後に
+      // track point flush が入った場合は 0 行 → 409 INVALID_STATE となり、UI の
+      // 既存 conflict 処理 (再取得) に乗る。再試行時は stale でなくなるため
+      // 通常終了 endedAt=now になる)。
       const result = await prisma.fieldSurveySession.updateMany({
-        where: { id, status: "active" },
+        where: {
+          id,
+          status: "active",
+          ...(isStaleEnd && { updatedAt: existing.updatedAt }),
+        },
         data: {
           status: patch.status,
           endedAt: effectiveEndedAt,

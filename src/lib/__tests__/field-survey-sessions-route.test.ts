@@ -787,9 +787,42 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
       .calls[0][0];
     expect(umArgs.data.endedAt).toEqual(lastActivityAt);
+    // stale 終了は読取時 updatedAt を条件に含める (読取後 flush との race 防止)
+    expect(umArgs.where).toEqual({
+      id: "s-1",
+      status: "active",
+      updatedAt: lastActivityAt,
+    });
     // durationSec は startedAt→最終活動時刻 (約1時間) で、73時間にはならない
     const call = writeAuditLog.mock.calls[0][0];
     expect(call.detail.durationSec).toBe(60 * 60);
+  });
+
+  it("B-7(@codex R4): stale 終了中に flush が入って条件が外れたら 409 INVALID_STATE (監査なし)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      id: "s-1",
+      staffUserId: fieldUser.id,
+      startedAt: new Date(Date.now() - 73 * 60 * 60 * 1000),
+      updatedAt: new Date(Date.now() - 72 * 60 * 60 * 1000),
+      status: "active",
+      pointCount: 5,
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 0, // 読取後に updatedAt が進んで条件が外れた
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({ status: "ended" }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_STATE");
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("B-7(@codex R3): 直前まで活動していた session の通常終了は従来どおり endedAt=now", async () => {
