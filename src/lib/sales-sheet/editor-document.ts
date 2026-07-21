@@ -1491,6 +1491,41 @@ function estimatedTableHeightMm(el: TableElement): number {
 }
 
 /**
+ * text 要素の「実際に文字が描画される範囲」の概算 (mm)。
+ *
+ * 手動リサイズで箱だけ大きい text は、透明な余白部分に表が重なっても出力上は
+ * 何も重ならない (@codex #310 R5: 箱全体で判定すると消せない誤警告になる)。
+ * 折返し(箱幅・全角=フォント幅1文字)と行数から文字域を見積り、textAlign に
+ * 応じて箱内の位置を決める (縦方向は上詰め描画)。
+ */
+function textRenderedRectMm(el: TextElement): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} {
+  const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
+  const lineMm = fontMm * (el.style.lineHeight ?? 1.2);
+  const charsPerLine = Math.max(1, Math.floor(el.w / fontMm));
+  let lines = 0;
+  let maxLineChars = 0;
+  for (const para of el.content.split("\n")) {
+    const eff = effectiveCharCount(para);
+    lines += Math.max(1, Math.ceil(eff / charsPerLine));
+    maxLineChars = Math.max(maxLineChars, Math.min(eff, charsPerLine));
+  }
+  const w = Math.min(el.w, Math.max(maxLineChars * fontMm, fontMm));
+  const h = Math.min(el.h, lines * lineMm);
+  const x =
+    el.style.align === "right"
+      ? el.x + (el.w - w)
+      : el.style.align === "center"
+        ? el.x + (el.w - w) / 2
+        : el.x;
+  return { x, y: el.y, w, h };
+}
+
+/**
  * 文字 (text) と表 (table) どうしの矩形重なりを列挙する (document は不変)。
  *
  * 自動整列/自動調整は自由配置の文字・表を動かさない仕様 (手動配置の尊重) の
@@ -1499,6 +1534,8 @@ function estimatedTableHeightMm(el: TableElement): number {
  * 重なりの定番なので対象外 (text/table 以外は見ない)。
  * - 空文字の text (テンプレが保持する未入力の price 等) は見えないため対象外
  *   (@codex #310: 見えない箱との交差で警告しない)
+ * - text は箱全体でなく「文字が描画される範囲」の概算で判定 (箱だけ大きい
+ *   text の透明余白では警告しない・@codex #310 R5)
  * - 表は保存 h と「行数・折返しから見積もった描画上の高さ」の大きい方で判定
  *   (はみ出して描画される表との重なりも検知する・@codex #310)
  */
@@ -1507,17 +1544,21 @@ export function findTextTableOverlaps(
 ): TextTableOverlapPair[] {
   const boxes = document.elements
     .filter(
-      (e) =>
+      (e): e is TextElement | TableElement =>
         (e.type === "text" && e.content.trim() !== "") ||
         (e.type === "table" && e.rows.length > 0),
     )
-    .map((e) => ({
-      id: e.id,
-      x: e.x,
-      y: e.y,
-      w: e.w,
-      h: e.type === "table" ? Math.max(e.h, estimatedTableHeightMm(e)) : e.h,
-    }));
+    .map((e) =>
+      e.type === "text"
+        ? { id: e.id, ...textRenderedRectMm(e) }
+        : {
+            id: e.id,
+            x: e.x,
+            y: e.y,
+            w: e.w,
+            h: Math.max(e.h, estimatedTableHeightMm(e)),
+          },
+    );
   const pairs: TextTableOverlapPair[] = [];
   for (let i = 0; i < boxes.length; i++) {
     for (let j = i + 1; j < boxes.length; j++) {

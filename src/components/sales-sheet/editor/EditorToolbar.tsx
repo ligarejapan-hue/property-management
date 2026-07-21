@@ -213,16 +213,19 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
       >
         PNG出力
       </button>
-      <div className="flex-1" />
-      {layoutWarning && !error && (
-        <span
-          data-toolbar-layout-warning
-          title={layoutWarning}
-          className="inline-block max-w-[22rem] truncate align-middle text-sm text-amber-700 dark:text-amber-400"
-        >
-          {layoutWarning}
-        </span>
-      )}
+      {/* スペーサー兼・重なり警告の置き場。min-w-0 + max-w-full の truncate で
+          余り幅にだけ収まり、狭い画面でもボタン群を圧迫しない (@codex #310 R5)。 */}
+      <div className="flex-1 min-w-0 text-right">
+        {layoutWarning && !error && (
+          <span
+            data-toolbar-layout-warning
+            title={layoutWarning}
+            className="inline-block max-w-full truncate align-middle text-sm text-amber-700 dark:text-amber-400"
+          >
+            {layoutWarning}
+          </span>
+        )}
+      </div>
       {error && (
         <span
           data-toolbar-error

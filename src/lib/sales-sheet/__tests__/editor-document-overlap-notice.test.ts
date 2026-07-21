@@ -38,14 +38,15 @@ const image = (id: string, x: number, y: number, w = 90, h = 60) => ({
 
 describe("findTextTableOverlaps", () => {
   it("重なる text×table を 1 組として検出する (B-8 の価格 vs 概要表)", () => {
-    const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
+    // text("price") の文字域は左上から約 17×5mm (4文字・既定12pt)
+    const doc = makeDoc([text("price", 100, 40), table("overview", 110, 30)]);
     const pairs = findTextTableOverlaps(doc);
     expect(pairs).toHaveLength(1);
     expect([pairs[0].aId, pairs[0].bId].sort()).toEqual(["overview", "price"]);
   });
 
   it("重なる text×text も検出する", () => {
-    const doc = makeDoc([text("t1", 10, 10), text("t2", 30, 12)]);
+    const doc = makeDoc([text("t1", 10, 10), text("t2", 20, 12)]);
     expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
@@ -55,12 +56,12 @@ describe("findTextTableOverlaps", () => {
   });
 
   it("辺が接しているだけ (隣接) は重なり扱いしない", () => {
-    const doc = makeDoc([text("t1", 10, 10, 40, 10), text("t2", 50, 10, 40, 10)]);
+    const doc = makeDoc([table("a", 10, 10, 40, 60), table("b", 50, 10, 40, 60)]);
     expect(findTextTableOverlaps(doc)).toHaveLength(0);
   });
 
   it("ごくわずかな食い込み (0.5mm 以下) は許容して検出しない", () => {
-    const doc = makeDoc([text("t1", 10, 10, 40, 10), text("t2", 49.7, 10, 40, 10)]);
+    const doc = makeDoc([table("a", 10, 10, 40, 60), table("b", 49.7, 10, 40, 60)]);
     expect(findTextTableOverlaps(doc)).toHaveLength(0);
   });
 
@@ -72,10 +73,22 @@ describe("findTextTableOverlaps", () => {
   it("3 要素が相互に重なると組数で数える (t1×t2, t1×表, t2×表 = 3)", () => {
     const doc = makeDoc([
       text("t1", 100, 40, 60, 30),
-      text("t2", 110, 50, 60, 30),
+      text("t2", 105, 42, 60, 30),
       table("overview", 90, 30, 100, 60),
     ]);
     expect(findTextTableOverlaps(doc)).toHaveLength(3);
+  });
+
+  it("箱だけ大きい text の透明余白では警告しない (@codex #310 R5)", () => {
+    // 幅 120mm の箱に「価格」2文字 (左寄せ・文字域は左端の約8.5mm) — 箱の右側の
+    // 余白にだけ重なる表は出力上何も重ならないため検出しない
+    const wideBox = { id: "price", type: "text", x: 100, y: 40, w: 120, h: 40, z: 5, content: "価格", style: {} };
+    const doc = makeDoc([wideBox, table("overview", 150, 30, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 右寄せなら文字域は箱の右端 → 同じ表と重なる
+    const rightAligned = { ...wideBox, style: { align: "right" } };
+    const doc2 = makeDoc([rightAligned, table("overview", 150, 30, 80, 60)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(1);
   });
 
   it("行数が多く保存 h からはみ出して描画される表との重なりも検知する (@codex #310)", () => {
