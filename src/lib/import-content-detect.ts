@@ -157,13 +157,6 @@ export interface ResolvedFileType {
   error: string | null;
   /** ok=true でも表示したい注意文言 */
   warning: string | null;
-  /**
-   * 受付帳のヘッダ行なしファイルで、parseSheet がヘッダ扱いした 1 行目が
-   * 実はデータ行であるとき true (expected=reception のときのみ true になり得る)。
-   * 呼び出し側はヘッダ行をデータ行として先頭に戻してからパースすること
-   * (@codex #309: 戻さないと 1 件目が黙って欠落する)。
-   */
-  headerRowIsData: boolean;
 }
 
 const TYPE_LABEL: Record<ExpectedImportFileType, string> = {
@@ -194,6 +187,20 @@ export function resolveImportFileType(
   const byName = detectImportFileType(fileName);
 
   if (content.type === expected) {
+    // ヘッダ行なしの受付帳は受け付けない (@codex #309: parseSheet が 1 行目を
+    // ヘッダ扱いした時点で、空欄などの重複キーにより後続行の列が復元不能に
+    // 壊れている。黙って欠落/列ずれさせるより、明確に案内して直してもらう)。
+    if (expected === "reception" && content.receptionHeaderRowIsData) {
+      return {
+        type: expected,
+        ok: false,
+        source: "content",
+        label: null,
+        error:
+          "1行目からデータが始まっており、見出し行がありません。1行目に見出し行を付けてから取り込んでください(見出し行が無いままだと1件目の欠落や列ずれが起きます)",
+        warning: null,
+      };
+    }
     return {
       type: expected,
       ok: true,
@@ -204,8 +211,6 @@ export function resolveImportFileType(
         byName.type === other
           ? `ファイル名には「${otherLabel}」とありますが、内容は${expLabel}の形式です。ファイルの取り違えでないかご確認ください。`
           : null,
-      headerRowIsData:
-        expected === "reception" && content.receptionHeaderRowIsData,
     };
   }
 
@@ -217,7 +222,6 @@ export function resolveImportFileType(
       label: null,
       error: `内容(列構成)が${otherLabel}の形式です。${expLabel}の枠とファイルを取り違えていないか確認してください`,
       warning: null,
-      headerRowIsData: false,
     };
   }
 
@@ -233,7 +237,6 @@ export function resolveImportFileType(
         content.type === "ambiguous"
           ? "内容に受付帳と所有者の両方の特徴があり、形式を絞り込めませんでした。プレビューの内容をご確認ください。"
           : null,
-      headerRowIsData: false,
     };
   }
 
@@ -245,7 +248,6 @@ export function resolveImportFileType(
       label: null,
       error: `ファイル名が「${otherLabel}」のファイルで、内容からも${expLabel}の形式を確認できませんでした。ファイルを取り違えていないか確認してください`,
       warning: null,
-      headerRowIsData: false,
     };
   }
 
@@ -258,6 +260,5 @@ export function resolveImportFileType(
     error: null,
     warning:
       "ファイル種別を自動判定できませんでした。プレビューの内容を必ず確認してから取り込んでください。",
-    headerRowIsData: false,
   };
 }

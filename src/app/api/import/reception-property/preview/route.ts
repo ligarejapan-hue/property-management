@@ -101,13 +101,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ヘッダ行なしの受付帳では、parseSheet がヘッダ扱いした 1 行目をデータへ
-    // 戻してからパースする (@codex #309: 戻さないと 1 件目が黙って欠落する)。
-    const receptionRowsPositional = receptionResolved.headerRowIsData
-      ? [receptionParsed.headers.map((h) => h ?? ""), ...receptionPositional]
-      : receptionPositional;
     const allRows = applyReceptionFilters(
-      parseReceptionRows(receptionRowsPositional),
+      parseReceptionRows(receptionPositional),
       filterOptions,
     );
 

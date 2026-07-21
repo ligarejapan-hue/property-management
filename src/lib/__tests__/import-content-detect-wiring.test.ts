@@ -45,12 +45,6 @@ describe("B-11: 取込 route のファイル種別ゲートが内容ベース", 
         expect(resolveIdx).toBeGreaterThan(parseIdx);
       });
 
-      it("ヘッダ行なし受付帳では 1 行目をデータへ戻す (@codex #309: 1件目の欠落防止)", () => {
-        expect(src).toMatch(/headerRowIsData/);
-        expect(src).toMatch(
-          /\[receptionParsed\.headers\.map\(\(h\) => h \?\? ""\), \.\.\.receptionPositional\]/,
-        );
-      });
     });
   }
 });

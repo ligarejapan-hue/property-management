@@ -247,23 +247,25 @@ describe("resolveImportFileType", () => {
     expect(r.warning).not.toBeNull();
   });
 
-  it("ヘッダ行なし受付帳の resolve は headerRowIsData=true (route は 1 行目を戻す)", () => {
+  it("ヘッダ行なし受付帳は明確なエラーで拒否 (@codex #309: 黙った欠落/列ずれを防ぐ)", () => {
+    // parseSheet が 1 行目をヘッダ扱いした時点で空欄キーの衝突により後続行の
+    // 列が復元不能に壊れるため、受理せず見出し行の追加を案内する。
     const r = resolveImportFileType(
       "reception",
-      "data.csv",
+      "受付帳.csv", // ファイル名が正しくても中身がヘッダ行なしなら拒否
       HEADERLESS_RECEPTION_HEADERS,
       HEADERLESS_RECEPTION_ROWS,
     );
-    expect(r.ok).toBe(true);
-    expect(r.headerRowIsData).toBe(true);
-    // ヘッダ行あり受付帳では false
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("見出し行");
+    // ヘッダ行あり受付帳は従来どおり受理
     const r2 = resolveImportFileType(
       "reception",
       "受付帳.csv",
       RECEPTION_HEADERS,
       RECEPTION_ROWS,
     );
-    expect(r2.headerRowIsData).toBe(false);
+    expect(r2.ok).toBe(true);
   });
 
   it("表示用 label は平易な日本語 (内部コードなし)", () => {
