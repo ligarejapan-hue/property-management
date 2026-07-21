@@ -80,8 +80,8 @@ vi.mock("@/lib/api-helpers", () => {
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const client: Record<string, unknown> = {
     fieldSurveyPin: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -103,8 +103,13 @@ vi.mock("@/lib/prisma", () => ({
     property: {
       findUnique: vi.fn(),
     },
-  },
-}));
+  };
+  // interactive transaction: callback へ同一 client を渡す (rollback は DB の責務)
+  client.$transaction = vi.fn(
+    async (fn: (tx: unknown) => Promise<unknown>) => fn(client),
+  );
+  return { default: client };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";

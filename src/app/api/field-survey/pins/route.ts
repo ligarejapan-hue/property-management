@@ -95,31 +95,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const created = await prisma.fieldSurveyPin.create({
-      data: {
-        sessionId: input.sessionId ?? null,
-        staffUserId: session.id,
-        propertyId: input.propertyId ?? null,
-        lat: input.lat,
-        lng: input.lng,
-        accuracy: input.accuracy ?? null,
-        pinType: input.pinType,
-        status: "open",
-        memo: input.memo ?? null,
-      },
-      select: SELECT_PIN,
-    });
-
     // B-7 (@codex #308): ピン作成も巡回の「活動」として session の最終活動時刻
     // (updatedAt) に反映する。位置記録を使わずピンだけ打つ運用でも、放置判定
-    // (12h 確認 / 24h 自動終了) が誤発火しないようにする。active 条件付きなので
-    // 並行終了後は no-op (失敗しても pin 作成自体は成立させる)。
-    if (input.sessionId) {
-      await prisma.fieldSurveySession.updateMany({
-        where: { id: input.sessionId, status: "active" },
-        data: { updatedAt: new Date() },
+    // (12h 確認 / 24h 自動終了) が誤発火しないようにする。
+    // ピン作成と touch は 1 トランザクション (@codex R6: touch だけ失敗して 500 →
+    // リトライで pin が二重作成される事故を防ぐ)。touch は active 条件付きなので
+    // 並行終了後は no-op。
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.fieldSurveyPin.create({
+        data: {
+          sessionId: input.sessionId ?? null,
+          staffUserId: session.id,
+          propertyId: input.propertyId ?? null,
+          lat: input.lat,
+          lng: input.lng,
+          accuracy: input.accuracy ?? null,
+          pinType: input.pinType,
+          status: "open",
+          memo: input.memo ?? null,
+        },
+        select: SELECT_PIN,
       });
-    }
+      if (input.sessionId) {
+        await tx.fieldSurveySession.updateMany({
+          where: { id: input.sessionId, status: "active" },
+          data: { updatedAt: new Date() },
+        });
+      }
+      return row;
+    });
 
     await writeAuditLog({
       userId: session.id,

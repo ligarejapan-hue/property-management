@@ -119,19 +119,18 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
 
   // --- Codex P2: mutation の AbortController + mounted guard ----------------
 
-  it("POST sessions / PATCH sessions に signal が渡される", () => {
+  it("POST sessions / 終了 PATCH に signal が渡される", () => {
     // POST 経路: method: "POST" を含む fetch 呼び出し block 内に signal がある
     const postRegion = TRIP_SRC.match(
       /method:\s*"POST"[\s\S]*?\)\s*;/,
     );
     expect(postRegion).not.toBeNull();
     expect(postRegion?.[0]).toMatch(/signal:\s*\w+\.signal/);
-    // PATCH 経路: 同様
-    const patchRegion = TRIP_SRC.match(
-      /method:\s*"PATCH"[\s\S]*?\)\s*;/,
+    // 終了 PATCH 経路 (status: "ended" を送る fetch) にも signal がある。
+    // ※続行 touch の memo-only PATCH は fire-and-forget のため対象外 (B-7 @codex R6)
+    expect(TRIP_SRC).toMatch(
+      /status:\s*"ended"\s*\}\),\s*signal:\s*\w+\.signal/,
     );
-    expect(patchRegion).not.toBeNull();
-    expect(patchRegion?.[0]).toMatch(/signal:\s*\w+\.signal/);
   });
 
   it("active fetch と mutation で AbortController を分離している", () => {
@@ -207,10 +206,13 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
     expect(TRIP_SRC).toMatch(/own\.updatedAt \?\? own\.startedAt/);
   });
 
-  it("終了は既存の endSession (PATCH status: ended) を流用する", () => {
-    // 専用の別 API を増やしていないこと (PATCH は 1 箇所のまま)
+  it("終了は既存 PATCH を流用・続行は memo-only PATCH で活動を記録 (@codex R6)", () => {
+    // 専用の別 API は増やさない (end 用 + 続行 touch 用の PATCH 2 箇所のみ)
     const patches = TRIP_SRC.match(/method:\s*"PATCH"/g) ?? [];
-    expect(patches.length).toBe(1);
+    expect(patches.length).toBe(2);
+    // 続行 touch は memo を現値のまま送る (状態は変えない)
+    expect(TRIP_SRC).toMatch(/touchSession/);
+    expect(TRIP_SRC).toMatch(/memo:\s*target\.memo \?\? null/);
   });
 });
 

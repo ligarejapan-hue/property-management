@@ -218,6 +218,26 @@ export default function TripControls({
     }
   }, [fetchActiveSession]);
 
+  // B-7 (@codex R6): 放置確認で「巡回を続ける」を選んだことも巡回の活動として
+  // 記録する (memo を現値のまま送る memo-only PATCH で updatedAt を進める)。
+  // これが無いと、続行後に点・ピン無しで終了したとき server 側で stale 扱いの
+  // まま endedAt が続行前の時刻へ巻き戻る。失敗しても続行自体は妨げない。
+  const touchSession = useCallback(async (target: ActiveSessionLike) => {
+    try {
+      await fetch(
+        `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
+        {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ memo: target.memo ?? null }),
+        },
+      );
+    } catch {
+      // best effort (オフライン等)。続行操作はローカルで成立させる。
+    }
+  }, []);
+
   const endSession = useCallback(
     async (target: ActiveSessionLike) => {
       setPhase("ending");
@@ -341,7 +361,10 @@ export default function TripControls({
         <ConfirmStaleEndModal
           session={session}
           now={now}
-          onContinue={() => setPhase("active")}
+          onContinue={() => {
+            setPhase("active");
+            void touchSession(session);
+          }}
           onAgree={() => void endSession(session)}
         />
       )}
