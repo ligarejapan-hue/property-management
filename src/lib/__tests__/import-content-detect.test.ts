@@ -88,12 +88,20 @@ describe("detectImportFileTypeFromContent", () => {
     expect(r.reasons.length).toBeGreaterThan(0);
   });
 
-  it("ヘッダ行なし受付帳も F列位置の区分値で reception", () => {
+  it("ヘッダ行なし受付帳も F列位置の区分値で reception (1行目=データのフラグ付き)", () => {
     const r = detectImportFileTypeFromContent(
       HEADERLESS_RECEPTION_HEADERS,
       HEADERLESS_RECEPTION_ROWS,
     );
     expect(r.type).toBe("reception");
+    // ヘッダ扱いされた 1 行目をデータへ戻す必要があることを呼び出し側へ伝える
+    expect(r.receptionHeaderRowIsData).toBe(true);
+  });
+
+  it("ヘッダ行あり受付帳では 1 行目=データのフラグは立たない", () => {
+    const r = detectImportFileTypeFromContent(RECEPTION_HEADERS, RECEPTION_ROWS);
+    expect(r.type).toBe("reception");
+    expect(r.receptionHeaderRowIsData).toBe(false);
   });
 
   it("所有者系ヘッダ (所有者氏名/物件住所 等) で owner", () => {
@@ -237,6 +245,25 @@ describe("resolveImportFileType", () => {
     );
     expect(r.ok).toBe(true);
     expect(r.warning).not.toBeNull();
+  });
+
+  it("ヘッダ行なし受付帳の resolve は headerRowIsData=true (route は 1 行目を戻す)", () => {
+    const r = resolveImportFileType(
+      "reception",
+      "data.csv",
+      HEADERLESS_RECEPTION_HEADERS,
+      HEADERLESS_RECEPTION_ROWS,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.headerRowIsData).toBe(true);
+    // ヘッダ行あり受付帳では false
+    const r2 = resolveImportFileType(
+      "reception",
+      "受付帳.csv",
+      RECEPTION_HEADERS,
+      RECEPTION_ROWS,
+    );
+    expect(r2.headerRowIsData).toBe(false);
   });
 
   it("表示用 label は平易な日本語 (内部コードなし)", () => {

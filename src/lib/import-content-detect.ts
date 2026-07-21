@@ -25,6 +25,12 @@ export interface ContentTypeDetection {
   type: ImportFileType;
   /** 判定根拠 (平易な日本語・UI 表示用) */
   reasons: string[];
+  /**
+   * 受付帳のヘッダ行なしファイルで、parseSheet がヘッダ扱いした 1 行目が
+   * 実はデータ行であるとき true。呼び出し側はこの行をデータへ戻す必要がある
+   * (@codex #309: 戻さないと 1 件目が黙って欠落する)。
+   */
+  receptionHeaderRowIsData: boolean;
 }
 
 const RECEPTION_H_HEADERS = new Set(["都道府県", "都道府県名"]);
@@ -71,6 +77,7 @@ export function detectImportFileTypeFromContent(
 ): ContentTypeDetection {
   const trimmed = headers.map((h) => (h ?? "").trim());
   const reasons: string[] = [];
+  let receptionHeaderRowIsData = false;
 
   // --- 受付帳シグナル ---
   let reception = false;
@@ -101,6 +108,7 @@ export function detectImportFileTypeFromContent(
       );
       if (corroborated) {
         reception = true;
+        receptionHeaderRowIsData = true;
         reasons.push(
           "1行目から受付帳形式のデータ(区分と新既/DL印)が始まっています",
         );
@@ -120,10 +128,14 @@ export function detectImportFileTypeFromContent(
     reasons.push("氏名・住所など所有者向け見出しの組合せがあります");
   }
 
-  if (reception && owner) return { type: "ambiguous", reasons };
-  if (reception) return { type: "reception", reasons };
-  if (owner) return { type: "owner", reasons };
-  return { type: "unknown", reasons };
+  if (reception && owner) {
+    return { type: "ambiguous", reasons, receptionHeaderRowIsData: false };
+  }
+  if (reception) {
+    return { type: "reception", reasons, receptionHeaderRowIsData };
+  }
+  if (owner) return { type: "owner", reasons, receptionHeaderRowIsData: false };
+  return { type: "unknown", reasons, receptionHeaderRowIsData: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +157,13 @@ export interface ResolvedFileType {
   error: string | null;
   /** ok=true でも表示したい注意文言 */
   warning: string | null;
+  /**
+   * 受付帳のヘッダ行なしファイルで、parseSheet がヘッダ扱いした 1 行目が
+   * 実はデータ行であるとき true (expected=reception のときのみ true になり得る)。
+   * 呼び出し側はヘッダ行をデータ行として先頭に戻してからパースすること
+   * (@codex #309: 戻さないと 1 件目が黙って欠落する)。
+   */
+  headerRowIsData: boolean;
 }
 
 const TYPE_LABEL: Record<ExpectedImportFileType, string> = {
@@ -185,6 +204,8 @@ export function resolveImportFileType(
         byName.type === other
           ? `ファイル名には「${otherLabel}」とありますが、内容は${expLabel}の形式です。ファイルの取り違えでないかご確認ください。`
           : null,
+      headerRowIsData:
+        expected === "reception" && content.receptionHeaderRowIsData,
     };
   }
 
@@ -196,6 +217,7 @@ export function resolveImportFileType(
       label: null,
       error: `内容(列構成)が${otherLabel}の形式です。${expLabel}の枠とファイルを取り違えていないか確認してください`,
       warning: null,
+      headerRowIsData: false,
     };
   }
 
@@ -211,6 +233,7 @@ export function resolveImportFileType(
         content.type === "ambiguous"
           ? "内容に受付帳と所有者の両方の特徴があり、形式を絞り込めませんでした。プレビューの内容をご確認ください。"
           : null,
+      headerRowIsData: false,
     };
   }
 
@@ -222,6 +245,7 @@ export function resolveImportFileType(
       label: null,
       error: `ファイル名が「${otherLabel}」のファイルで、内容からも${expLabel}の形式を確認できませんでした。ファイルを取り違えていないか確認してください`,
       warning: null,
+      headerRowIsData: false,
     };
   }
 
@@ -234,5 +258,6 @@ export function resolveImportFileType(
     error: null,
     warning:
       "ファイル種別を自動判定できませんでした。プレビューの内容を必ず確認してから取り込んでください。",
+    headerRowIsData: false,
   };
 }
