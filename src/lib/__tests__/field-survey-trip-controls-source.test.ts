@@ -180,6 +180,36 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
   });
 });
 
+// --- B-7 (UI総点検): 終了し忘れ巡回の「次回表示時の終了確認」 ---------------
+
+describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
+  it("放置判定 helper (isSessionStale / 閾値 / 表示用 formatter) を import する", () => {
+    expect(TRIP_SRC).toMatch(/isSessionStale/);
+    expect(TRIP_SRC).toMatch(/STALE_CONFIRM_THRESHOLD_MS/);
+    expect(TRIP_SRC).toMatch(/formatStaleDuration/);
+  });
+
+  it("phase に confirmStaleEnd があり、専用モーダルを描画する", () => {
+    expect(TRIP_SRC).toMatch(/"confirmStaleEnd"/);
+    expect(TRIP_SRC).toMatch(/trip-confirm-stale-end-modal/);
+  });
+
+  it("モーダルは「終了する」と「巡回を続ける」の二択", () => {
+    expect(TRIP_SRC).toMatch(/巡回を続ける/);
+    expect(TRIP_SRC).toMatch(/終了されないまま残っています/);
+  });
+
+  it("同じ session への確認は 1 回だけ (再取得のたびに聞き直さない)", () => {
+    expect(TRIP_SRC).toMatch(/stalePromptedRef/);
+  });
+
+  it("終了は既存の endSession (PATCH status: ended) を流用する", () => {
+    // 専用の別 API を増やしていないこと (PATCH は 1 箇所のまま)
+    const patches = TRIP_SRC.match(/method:\s*"PATCH"/g) ?? [];
+    expect(patches.length).toBe(1);
+  });
+});
+
 describe("field-survey-map.tsx — TripControls 統合", () => {
   it("TripControls を import して ControlPanel から呼ぶ", () => {
     expect(MAP_SRC).toMatch(/import\s+TripControls/);

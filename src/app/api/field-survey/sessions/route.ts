@@ -14,6 +14,10 @@ import {
   createFieldSurveySessionSchema,
   fieldSurveySessionListQuerySchema,
 } from "@/lib/validators";
+import {
+  isSessionStale,
+  STALE_AUTO_END_THRESHOLD_MS,
+} from "@/lib/field-survey-trip-util";
 
 // Prisma の unique constraint 違反 (P2002) を class import なしで判定する。
 // `@/generated/prisma` から Prisma.PrismaClientKnownRequestError を import すると
@@ -46,14 +50,45 @@ export async function POST(request: NextRequest) {
     // 担保し、P2002 を ACTIVE_SESSION_EXISTS にマップする (下記 catch)。
     const existingActive = await prisma.fieldSurveySession.findFirst({
       where: { staffUserId: session.id, status: "active" },
-      select: { id: true },
+      select: { id: true, startedAt: true, updatedAt: true, pointCount: true },
     });
     if (existingActive) {
-      throw new ApiError(
-        409,
-        "active な巡回 session が既に存在します。先に終了してください",
-        "ACTIVE_SESSION_EXISTS",
-      );
+      // B-7 (UI総点検): 終了し忘れで放置された active session (24h 超) は
+      // ここで自動終了してから新規開始を通す (終了し忘れによる 409 詰み解消)。
+      // - endedAt は now でなく最終活動時刻 (updatedAt ≒ 最後の位置記録/メモ更新)
+      //   を使い、巡回時間を実際より長く記録しない。
+      // - 0 行更新 = 並行で既に終了済み。そのまま新規作成に進む (真の並行 active
+      //   は partial unique index → P2002 → 409 で従来どおり防がれる)。
+      if (
+        !isSessionStale(
+          existingActive.startedAt,
+          new Date(),
+          STALE_AUTO_END_THRESHOLD_MS,
+        )
+      ) {
+        throw new ApiError(
+          409,
+          "active な巡回 session が既に存在します。先に終了してください",
+          "ACTIVE_SESSION_EXISTS",
+        );
+      }
+      const autoEnded = await prisma.fieldSurveySession.updateMany({
+        where: { id: existingActive.id, status: "active" },
+        data: { status: "ended", endedAt: existingActive.updatedAt },
+      });
+      if (autoEnded.count > 0) {
+        await writeAuditLog({
+          userId: session.id,
+          action: "field_survey_session_auto_end",
+          targetTable: "field_survey_sessions",
+          targetId: existingActive.id,
+          detail: {
+            sessionId: existingActive.id,
+            reason: "stale_on_new_start",
+            pointCount: existingActive.pointCount,
+          },
+        });
+      }
     }
 
     let created;

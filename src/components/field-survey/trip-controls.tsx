@@ -26,7 +26,10 @@ import {
   classifyTripApiResponse,
   extractApiErrorCode,
   formatElapsed,
+  formatStaleDuration,
+  isSessionStale,
   pickOwnActiveSession,
+  STALE_CONFIRM_THRESHOLD_MS,
   tripOutcomeMessage,
   type ActiveSessionLike,
 } from "@/lib/field-survey-trip-util";
@@ -58,6 +61,7 @@ type Phase =
   | "starting" // POST sessions 中
   | "active" // 巡回中
   | "confirmEnd" // 終了確認 modal 表示中
+  | "confirmStaleEnd" // B-7: 放置 session の終了確認 modal 表示中
   | "ending"; // PATCH sessions 中
 
 export default function TripControls({
@@ -76,6 +80,9 @@ export default function TripControls({
   // Codex P2 (unmount safety): unmount 後の setState を抑止する。
   // useEffect cleanup で false に倒し、各 handler の state 更新前に確認する。
   const mountedRef = useRef(true);
+  // B-7: 放置 session の終了確認は同一 session につき 1 回だけ出す
+  // (conflict 後の再取得などで繰り返し聞き直さない)。
+  const stalePromptedRef = useRef<string | null>(null);
 
   const isAbortError = (err: unknown): boolean =>
     typeof err === "object" &&
@@ -116,7 +123,18 @@ export default function TripControls({
       // pickOwnActiveSession は server filter 漏れに対する防御として残す。
       const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
       setSession(own);
-      setPhase(own ? "active" : "idle");
+      // B-7: 終了し忘れの放置 session (12h 超) を復元したときは、
+      // 巡回中表示へ戻す前に終了するかどうかを確認する (同一 session 1 回のみ)。
+      if (
+        own &&
+        stalePromptedRef.current !== own.id &&
+        isSessionStale(own.startedAt, new Date(), STALE_CONFIRM_THRESHOLD_MS)
+      ) {
+        stalePromptedRef.current = own.id;
+        setPhase("confirmStaleEnd");
+      } else {
+        setPhase(own ? "active" : "idle");
+      }
       setError(null);
     } catch (err) {
       if (isAbortError(err) || !mountedRef.current) return;
@@ -313,6 +331,15 @@ export default function TripControls({
           onAgree={() => void endSession(session)}
         />
       )}
+
+      {phase === "confirmStaleEnd" && session && (
+        <ConfirmStaleEndModal
+          session={session}
+          now={now}
+          onContinue={() => setPhase("active")}
+          onAgree={() => void endSession(session)}
+        />
+      )}
     </Panel>
   );
 }
@@ -440,6 +467,38 @@ function ConfirmEndModal({
   );
 }
 
+// B-7: 終了し忘れの放置 session を復元したときの終了確認。
+// 「巡回を続ける」で従来どおりの巡回中表示に戻る (終了は既存 endSession を流用)。
+function ConfirmStaleEndModal({
+  session,
+  now,
+  onContinue,
+  onAgree,
+}: {
+  session: ActiveSessionLike;
+  now: Date;
+  onContinue: () => void;
+  onAgree: () => void;
+}) {
+  return (
+    <ModalShell
+      title="前回の巡回が終了されていません"
+      testId="trip-confirm-stale-end-modal"
+    >
+      <p className="mb-3 text-[12px] text-gray-700 dark:text-gray-200">
+        {formatStaleDuration(session.startedAt, now)}
+        前に開始した巡回が、終了されないまま残っています。 巡回を終了しますか?
+      </p>
+      <ModalActions
+        onCancel={onContinue}
+        cancelLabel="巡回を続ける"
+        onAgree={onAgree}
+        agreeLabel="終了する"
+      />
+    </ModalShell>
+  );
+}
+
 function ModalShell({
   title,
   testId,
@@ -468,10 +527,12 @@ function ModalActions({
   onCancel,
   onAgree,
   agreeLabel,
+  cancelLabel = "キャンセル",
 }: {
   onCancel: () => void;
   onAgree: () => void;
   agreeLabel: string;
+  cancelLabel?: string;
 }) {
   return (
     <div className="flex justify-end gap-2">
@@ -480,7 +541,7 @@ function ModalActions({
         onClick={onCancel}
         className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
       >
-        キャンセル
+        {cancelLabel}
       </button>
       <button
         type="button"

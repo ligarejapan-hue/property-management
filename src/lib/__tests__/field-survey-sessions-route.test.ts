@@ -167,11 +167,14 @@ describe("POST /api/field-survey/sessions", () => {
     expect(res.status).toBe(403);
   });
 
-  it("active session 重複 (事前チェックでヒット) は 409", async () => {
+  it("active session 重複 (事前チェックでヒット・24h 未満) は 409", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue({
       id: "s-active",
+      startedAt: new Date(Date.now() - 60 * 60 * 1000), // 1h 前 = 放置ではない
+      updatedAt: new Date(),
+      pointCount: 5,
     });
     const res = await POST(
       makeReq("http://x/api/field-survey/sessions", {
@@ -181,6 +184,103 @@ describe("POST /api/field-survey/sessions", () => {
     );
     expect(res.status).toBe(409);
     expect(prisma.fieldSurveySession.create).not.toHaveBeenCalled();
+    // 放置ではない active を勝手に終了しない
+    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
+  });
+
+  // ---------- B-7 (UI総点検): 放置 active session の lazy 自動終了 ----------
+
+  it("B-7: 放置 active (24h 超) は自動終了してから新規作成 201 (endedAt=最終活動時刻)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const staleStartedAt = new Date(Date.now() - 30 * 60 * 60 * 1000); // 30h 前
+    const lastActivityAt = new Date(Date.now() - 29 * 60 * 60 * 1000); // 29h 前
+    (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue({
+      id: "s-stale",
+      startedAt: staleStartedAt,
+      updatedAt: lastActivityAt,
+      pointCount: 7,
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
+    (prisma.fieldSurveySession.create as Mock).mockResolvedValue({
+      id: "s-new",
+      staffUserId: fieldUser.id,
+      startedAt: new Date(),
+      endedAt: null,
+      status: "active",
+      memo: null,
+      pointCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(res.status).toBe(201);
+    // 自動終了は atomic conditional update (status=active 条件付き)
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(umArgs.where).toEqual({ id: "s-stale", status: "active" });
+    expect(umArgs.data.status).toBe("ended");
+    // endedAt は now でなく最終活動時刻 (updatedAt) = 巡回時間の過大記録を避ける
+    expect(umArgs.data.endedAt).toEqual(lastActivityAt);
+    // 監査ログ: 自動終了 + 通常の開始 の 2 件 (PII / 座標なし)
+    expect(writeAuditLog).toHaveBeenCalledTimes(2);
+    const autoEndCall = writeAuditLog.mock.calls[0][0];
+    expect(autoEndCall.action).toBe("field_survey_session_auto_end");
+    expect(autoEndCall.targetId).toBe("s-stale");
+    expect(autoEndCall.detail).toEqual({
+      sessionId: "s-stale",
+      reason: "stale_on_new_start",
+      pointCount: 7,
+    });
+    const serialized = JSON.stringify(autoEndCall.detail);
+    expect(serialized).not.toMatch(/lat/i);
+    expect(serialized).not.toMatch(/lng/i);
+    const startCall = writeAuditLog.mock.calls[1][0];
+    expect(startCall.action).toBe("field_survey_session_start");
+  });
+
+  it("B-7: 自動終了が 0 行 (並行で終了済み) でも新規作成に進み、自動終了の監査ログは書かない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findFirst as Mock).mockResolvedValue({
+      id: "s-stale",
+      startedAt: new Date(Date.now() - 30 * 60 * 60 * 1000),
+      updatedAt: new Date(Date.now() - 29 * 60 * 60 * 1000),
+      pointCount: 0,
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 0,
+    });
+    (prisma.fieldSurveySession.create as Mock).mockResolvedValue({
+      id: "s-new",
+      staffUserId: fieldUser.id,
+      startedAt: new Date(),
+      endedAt: null,
+      status: "active",
+      memo: null,
+      pointCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/sessions", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(res.status).toBe(201);
+    // 自動終了の監査ログは書かず、session_start の 1 件のみ
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    expect(writeAuditLog.mock.calls[0][0].action).toBe(
+      "field_survey_session_start",
+    );
   });
 
   it("race: 事前チェック通過後 create で P2002 が出ても 409 ACTIVE_SESSION_EXISTS", async () => {

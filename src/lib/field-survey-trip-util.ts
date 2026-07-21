@@ -132,3 +132,49 @@ export function pickOwnActiveSession<T extends ActiveSessionLike>(
   });
   return owned[0];
 }
+
+// ---------------------------------------------------------------------------
+// B-7 (UI総点検): 巡回セッションの終了し忘れ対策
+// ---------------------------------------------------------------------------
+
+/**
+ * 画面表示時に「巡回を終了しますか?」の確認を出す放置閾値 (12 時間)。
+ * 実巡回がこの長さを超えることは想定していない。
+ */
+export const STALE_CONFIRM_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * 新規巡回開始時に、残っている古い active session を自動終了する放置閾値
+ * (24 時間)。表示時確認 (12h) より保守的に長く取り、実巡回中の誤終了を避ける。
+ */
+export const STALE_AUTO_END_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 巡回 session が「放置されている」と見なせるか (startedAt から thresholdMs 以上経過)。
+ * startedAt が不正な日付の場合は false (安全側 = 勝手に終了扱いしない)。
+ */
+export function isSessionStale(
+  startedAt: string | Date,
+  now: Date,
+  thresholdMs: number,
+): boolean {
+  const t = new Date(startedAt).getTime();
+  if (!Number.isFinite(t)) return false;
+  return now.getTime() - t >= thresholdMs;
+}
+
+/**
+ * 放置時間の概算表示 (「約13時間」/ 48 時間以上は「約2日」)。
+ * 不正・負値は「しばらく」に fallback (通常発生しない)。
+ */
+export function formatStaleDuration(
+  startedAt: string | Date,
+  now: Date,
+): string {
+  const t = new Date(startedAt).getTime();
+  const ms = now.getTime() - t;
+  if (!Number.isFinite(ms) || ms < 0) return "しばらく";
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 48) return `約${hours}時間`;
+  return `約${Math.floor(hours / 24)}日`;
+}
