@@ -30,6 +30,9 @@ export interface ContentTypeDetection {
 const RECEPTION_H_HEADERS = new Set(["都道府県", "都道府県名"]);
 const RECEPTION_I_HEADERS = new Set(["区", "市区町村"]);
 const RECEPTION_F_VALUES = new Set(["土地", "建物", "区分", "区建", "共担"]);
+// 値フォールバックの裏取りに使う受付帳固有の値 (E列位置=新既 / B列位置=DL印)。
+const RECEPTION_SHINKI_VALUES = new Set(["新", "既", "新規", "既存"]);
+const RECEPTION_DL_MARKS = new Set(["〇", "○"]);
 
 /** 所有者固有のヘッダ名 (これがあれば所有者ファイルとみなせる)。 */
 const OWNER_STRONG_HEADERS = new Set([
@@ -79,17 +82,29 @@ export function detectImportFileTypeFromContent(
     reasons.push("見出し行が受付帳の形式(8列目=都道府県・9列目=区)です");
   }
   if (!reception) {
-    // ヘッダ行の無い受付帳 (1行目からデータ) では、parseSheet がデータ行を
-    // ヘッダ扱いするため、ヘッダ配列自体も F列位置の値として検査する。
-    const fValues: string[] = [trimmed[5] ?? ""];
-    for (const row of rows.slice(0, CONTENT_SCAN_ROW_LIMIT)) {
-      fValues.push((row[5] ?? "").trim());
-    }
-    if (fValues.some((v) => RECEPTION_F_VALUES.has(v))) {
-      reception = true;
-      reasons.push(
-        "区分列(6列目)に 土地/建物/区分 など受付帳の値があります",
+    // ヘッダ行の無い受付帳 (1行目からデータ) の救済。物件CSV等の「ヘッダ行が
+    // ある別スキーマ」のデータ行 (種別列に 土地/区分 等が入る) を誤検知しない
+    // (@codex #309 P1) ため、次の両方を要求する:
+    //  (1) 1行目(parseSheet がヘッダ扱いした行)自体が F 列位置に区分値を持つ
+    //      = ヘッダ行が無いファイルである (「種別」等の見出し語なら不成立)
+    //  (2) 同じファイル内に 新既(E列位置) か DL印(B列位置) の受付帳固有値がある
+    const headerRowIsData = RECEPTION_F_VALUES.has(trimmed[5] ?? "");
+    if (headerRowIsData) {
+      const scanRows: readonly (readonly string[])[] = [
+        trimmed,
+        ...rows.slice(0, CONTENT_SCAN_ROW_LIMIT),
+      ];
+      const corroborated = scanRows.some(
+        (row) =>
+          RECEPTION_SHINKI_VALUES.has((row[4] ?? "").trim()) ||
+          RECEPTION_DL_MARKS.has((row[1] ?? "").trim()),
       );
+      if (corroborated) {
+        reception = true;
+        reasons.push(
+          "1行目から受付帳形式のデータ(区分と新既/DL印)が始まっています",
+        );
+      }
     }
   }
 

@@ -117,6 +117,34 @@ describe("detectImportFileTypeFromContent", () => {
     expect(r.type).toBe("unknown");
   });
 
+  it("標準物件CSV (種別列に 土地/区分) を reception と誤認しない (@codex #309 P1)", () => {
+    // 物件CSVウィザードの標準テンプレは 6 列目が「種別」で、値に 土地/区分 が入る。
+    // ヘッダ行がある別スキーマのデータ行を F 列値だけで受付帳と判定してはいけない。
+    const headers = [
+      "住所(必須)",
+      "郵便番号",
+      "地番",
+      "家屋番号",
+      "不動産番号",
+      "種別",
+      "登記状況",
+      "DM判断",
+    ];
+    const rows = [
+      ["東京都北区1-2", "1140000", "3-4", "", "0123456789012", "土地", "未取得", "未判断"],
+      ["東京都南区5-6", "1080000", "7-8", "", "", "区分", "取得済", "送付可"],
+    ];
+    const r = detectImportFileTypeFromContent(headers, rows);
+    expect(r.type).toBe("unknown");
+  });
+
+  it("ヘッダ行なしでも新既/DL印の裏取りが無ければ reception と断定しない (安全側)", () => {
+    const headers = ["1", "", "2026/07/01", "123", "", "土地", "", "東京都", "北区", "1-2", "3-4", ""];
+    const rows = [["2", "", "2026/07/02", "124", "", "建物", "", "東京都", "南区", "5-6", "7-8", ""]];
+    const r = detectImportFileTypeFromContent(headers, rows);
+    expect(r.type).toBe("unknown");
+  });
+
   it("指紋のない一般CSVは unknown", () => {
     const r = detectImportFileTypeFromContent(GENERIC_HEADERS, GENERIC_ROWS);
     expect(r.type).toBe("unknown");
