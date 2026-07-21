@@ -916,15 +916,8 @@ export default function ImportPage() {
       else setOwnerFile(null);
       return;
     }
-    const detect = detectImportFileType(file.name);
-    if (which === "reception" && detect.type !== "reception") {
-      setRoError(`受付帳として認識できません: ${detect.error ?? "ファイル名に『受付帳』を含めてください"}`);
-      return;
-    }
-    if (which === "owner" && detect.type !== "owner") {
-      setRoError(`所有者として認識できません: ${detect.error ?? "ファイル名に『所有者』を含めてください"}`);
-      return;
-    }
+    // B-11: ファイル名では拒否しない。種別はプレビュー時にサーバーが
+    // 内容(列構成)から判定し、取り違えのみエラーにする。
     try {
       const buf = await readFileForImport(file);
       const entry = {
@@ -1004,11 +997,7 @@ export default function ImportPage() {
     setRpPreview(null);
     setRpResult(null);
     if (!file) { setRpFile(null); return; }
-    const detect = detectImportFileType(file.name);
-    if (detect.type !== "reception") {
-      setRpError(`受付帳として認識できません: ${detect.error ?? "ファイル名に『受付帳』を含めてください"}`);
-      return;
-    }
+    // B-11: ファイル名では拒否しない (種別はプレビュー時に内容から判定)。
     try {
       const buf = await readFileForImport(file);
       setRpFile({ name: file.name, csvText: buf.csvText, xlsxBase64: buf.xlsxBase64 });
@@ -1802,7 +1791,7 @@ export default function ImportPage() {
             <Upload className="mx-auto mb-2 h-7 w-7 text-gray-400 dark:text-gray-500" />
             <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
             <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
-            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（ファイル名に「受付帳」を含める）</p>
+            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（受付帳のファイル — 種別は中身の列構成から自動判定します）</p>
             <input
               ref={rpFileInputRef}
               type="file"
@@ -1862,6 +1851,17 @@ export default function ImportPage() {
         {rpPreview && !rpResult && (
           <div className="rounded-md border border-gray-200 dark:border-gray-800 p-4">
             <p className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">プレビュー結果</p>
+            {/* B-11: サーバー側のファイル種別判定の結果と注意を表示 */}
+            {rpPreview.receptionFileType.label && (
+              <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+                {rpPreview.receptionFileType.label}
+              </p>
+            )}
+            {rpPreview.receptionFileType.warning && (
+              <p className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+                {rpPreview.receptionFileType.warning}
+              </p>
+            )}
             <div className="mb-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
               <div className="rounded bg-green-50 dark:bg-green-500/10 p-2 text-center">
                 <div className="text-xl font-bold text-green-700 dark:text-green-300">{rpPreview.summary.toCreateCount}</div>
@@ -2013,7 +2013,7 @@ export default function ImportPage() {
               <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400 dark:text-gray-500" />
               <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
               <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
-              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（受付帳 — ファイル名に「受付帳」を含める）</p>
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（受付帳 — 種別は中身の列構成から自動判定します）</p>
               <input
                 ref={roReceptionInputRef}
                 type="file"
@@ -2048,7 +2048,7 @@ export default function ImportPage() {
               <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400 dark:text-gray-500" />
               <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
               <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
-              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（所有者 — ファイル名に「所有者」を含める）</p>
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（所有者 — 種別は中身の列構成から自動判定します）</p>
               <input
                 ref={roOwnerInputRef}
                 type="file"
@@ -2103,6 +2103,23 @@ export default function ImportPage() {
         {roPreview && (
           <div className="mb-4 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-4">
             <div className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">突合結果サマリ</div>
+            {/* B-11: サーバー側のファイル種別判定の結果と注意を表示 */}
+            {(roPreview.receptionFileType.label || roPreview.ownerFileType.label) && (
+              <div className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+                受付帳: {roPreview.receptionFileType.label ?? "—"} / 所有者:{" "}
+                {roPreview.ownerFileType.label ?? "—"}
+              </div>
+            )}
+            {(roPreview.receptionFileType.warning || roPreview.ownerFileType.warning) && (
+              <div className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+                {roPreview.receptionFileType.warning && (
+                  <div>{roPreview.receptionFileType.warning}</div>
+                )}
+                {roPreview.ownerFileType.warning && (
+                  <div>{roPreview.ownerFileType.warning}</div>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
               <RoStat label="受付帳件数" value={roPreview.summary.receptionCount} />
               <RoStat label="所有者件数" value={roPreview.summary.ownerCount} />

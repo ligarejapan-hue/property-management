@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
-import { detectImportFileType } from "@/lib/import-file-type";
+import { resolveImportFileType } from "@/lib/import-content-detect";
 import {
   parseReceptionRows,
   applyReceptionFilters,
@@ -67,15 +67,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const receptionDetect = detectImportFileType(receptionFileName);
-    if (receptionDetect.type !== "reception") {
-      throw new ApiError(
-        422,
-        `受付帳ファイルとして認識できません: ${receptionDetect.error ?? "ファイル名に『受付帳』を含めてください"}`,
-        "VALIDATION_ERROR",
-      );
-    }
-
     let receptionParsed: ReturnType<typeof parseSheet>;
     try {
       receptionParsed = parseSheet({
@@ -89,11 +80,29 @@ export async function POST(request: NextRequest) {
       }
       throw e;
     }
+    const receptionPositional = toPositionalRows(
+      receptionParsed.headers,
+      receptionParsed.rows,
+    );
+
+    // ファイル種別チェック (B-11: 内容(列構成)優先・ファイル名は補助。
+    // 本取込 route と同じ純関数・同じ入力で判定する)
+    const receptionResolved = resolveImportFileType(
+      "reception",
+      receptionFileName,
+      receptionParsed.headers,
+      receptionPositional,
+    );
+    if (!receptionResolved.ok) {
+      throw new ApiError(
+        422,
+        `受付帳ファイルとして認識できません: ${receptionResolved.error}`,
+        "VALIDATION_ERROR",
+      );
+    }
 
     const allRows = applyReceptionFilters(
-      parseReceptionRows(
-        toPositionalRows(receptionParsed.headers, receptionParsed.rows),
-      ),
+      parseReceptionRows(receptionPositional),
       filterOptions,
     );
 
@@ -175,9 +184,10 @@ export async function POST(request: NextRequest) {
       toCreateSamples,
       duplicateSamples,
       receptionFileType: {
-        type: receptionDetect.type,
-        label: receptionDetect.label ?? null,
-        error: receptionDetect.error ?? null,
+        type: receptionResolved.type,
+        label: receptionResolved.label,
+        error: null,
+        warning: receptionResolved.warning,
       },
     });
   } catch (error) {
