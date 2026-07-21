@@ -98,6 +98,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     fieldSurveySession: {
       findUnique: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     property: {
       findUnique: vi.fn(),
@@ -361,6 +362,43 @@ describe("POST /api/field-survey/pins", () => {
     const createArgs = (prisma.fieldSurveyPin.create as Mock).mock.calls[0][0];
     expect(createArgs.data.staffUserId).toBe(fieldUser.id);
     expect(createArgs.data.sessionId).toBe(SESSION_ID);
+    // B-7(@codex #308): ピン作成は巡回の活動として session の最終活動時刻を更新
+    // (active 条件付き = 並行終了後は no-op)
+    const touchArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(touchArgs.where).toEqual({ id: SESSION_ID, status: "active" });
+    expect(touchArgs.data.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("sessionId 無しの pin 作成では session を触らない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.create as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "candidate",
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
   });
 
   it("sessionId 指定: ended session は 409", async () => {

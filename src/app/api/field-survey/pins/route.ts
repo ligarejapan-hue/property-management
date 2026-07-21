@@ -110,6 +110,17 @@ export async function POST(request: NextRequest) {
       select: SELECT_PIN,
     });
 
+    // B-7 (@codex #308): ピン作成も巡回の「活動」として session の最終活動時刻
+    // (updatedAt) に反映する。位置記録を使わずピンだけ打つ運用でも、放置判定
+    // (12h 確認 / 24h 自動終了) が誤発火しないようにする。active 条件付きなので
+    // 並行終了後は no-op (失敗しても pin 作成自体は成立させる)。
+    if (input.sessionId) {
+      await prisma.fieldSurveySession.updateMany({
+        where: { id: input.sessionId, status: "active" },
+        data: { updatedAt: new Date() },
+      });
+    }
+
     await writeAuditLog({
       userId: session.id,
       action: "field_survey_pin_create",
