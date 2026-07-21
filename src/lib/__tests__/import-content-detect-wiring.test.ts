@@ -68,3 +68,13 @@ describe("B-11: 取込画面はファイル選択時にファイル名で拒否�
     expect(src).toMatch(/rpPreview\.receptionFileType\.warning/);
   });
 });
+
+describe("B-11(@codex R1): 登記DM取込ウィザードにも判定注意を表示する", () => {
+  const src = read("src/app/(dashboard)/import/registry-dm/page.tsx");
+
+  it("プレビューの warning を両フロー (rp/ro) で表示する", () => {
+    expect(src).toMatch(/rpPreview\?\.receptionFileType\.warning/);
+    expect(src).toMatch(/roPreview\?\.receptionFileType\.warning/);
+    expect(src).toMatch(/roPreview\?\.ownerFileType\.warning/);
+  });
+});
