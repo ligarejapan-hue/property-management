@@ -56,8 +56,9 @@ describe("corporate-lookup-panel.tsx", () => {
     expect(panelSrc).not.toMatch(/fetch\(.*PATCH/);
   });
 
-  it("env 未設定（configured=false）時のメッセージがある", () => {
-    expect(panelSrc).toMatch(/法人番号API未設定/);
+  it("env 未設定（configured=false）時のメッセージがある（開発用語なしの平易文言）", () => {
+    expect(panelSrc).toMatch(/法人番号の自動検索は現在利用できません/);
+    expect(panelSrc).not.toMatch(/env 設定/);
   });
 
   it("12桁/13桁の分類で検索可否を決める（invalid は disabled）", () => {

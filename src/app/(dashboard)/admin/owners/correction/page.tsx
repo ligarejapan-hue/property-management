@@ -335,11 +335,11 @@ function OwnerCorrectionPageInner() {
     <div className="p-6">
       <div className="mb-1">
         <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-          所有者補正候補 (dry-run)
+          所有者補正候補
         </h1>
       </div>
       <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-950/40 dark:border-amber-800">
-        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（soft-delete）、「重複候補」タブの同一キーグループには統合プレビュー（dryRun のみ）を個別実行できます。統合実行・再リンクは未実装です。
+        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（一覧・検索から除外されます）、「重複候補」タブの同一キーグループには統合のプレビューと実行（確認のうえ）を個別に行えます。
       </p>
 
       {/* Filter tabs */}
@@ -597,8 +597,7 @@ function OwnerCorrectionPageInner() {
               })()}
 
           <p className="mt-4 text-xs text-gray-400 dark:text-gray-500">
-            ※ 統合実行・再リンクの実行機能は Phase 2-B-β 以降で対応予定です。
-            （重複候補の dryRun preview のみ Phase 2-B-α で利用可能）
+            ※ 統合の実行は「氏名住所一致」グループでのみ行えます（プレビューで内容を確認してから実行します）。
           </p>
         </>
       )}
@@ -722,7 +721,7 @@ function DuplicateGroupSummary({
         重複グループ ({groupList.length} 件)
       </h2>
       <p className="mb-3 text-xs text-purple-700 dark:text-purple-300">
-        重複候補をグループごとに表示しています。<strong>氏名住所一致</strong>グループのみ master / source を選んで統合プレビュー（dryRun）を取得できます。<strong>法人番号一致 / リンクキー一致</strong>は表示のみで、統合プレビュー / 実行は別 phase で対応予定です。
+        重複候補をグループごとに表示しています。<strong>氏名住所一致</strong>グループのみ master / source を選んで統合プレビューを取得できます。<strong>法人番号一致 / リンクキー一致</strong>は表示のみで、統合はできません。
       </p>
       <div className="space-y-3">
         {groupList.map(([key, members], idx) => (
@@ -898,7 +897,7 @@ function DuplicateGroupCard({
             : matchedBy === "external_link_key"
               ? "リンクキー一致のため要確認。"
               : "要確認。"}
-          Phase 2-A では統合プレビュー / 実行は氏名住所一致グループのみ対応しています。法人番号 / リンクキー一致グループは候補表示のみで、merge は別 phase で対応予定です。
+          統合のプレビューと実行は「氏名住所一致」グループのみ対応しています。法人番号 / リンクキー一致グループは候補表示のみです。
         </p>
       )}
     </div>
@@ -1169,12 +1168,12 @@ function CorporateNumberCandidatesPanel() {
   return (
     <div className="space-y-3">
       <p className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
-        所有者の氏名・住所・メモから法人番号候補を検出して dry-run で表示します。
+        所有者の氏名・住所・メモから法人番号候補を検出してプレビュー表示します。
         <strong>未登録</strong>（既存の法人番号が空・候補が 1 件）の行はチェックして
         「一括反映」できます（確認のうえ実行・最大 {MAX_CORPORATE_BULK} 件）。検出番号で
         国税庁 lookup を行い、該当する法人のみ <strong>法人番号欄だけ</strong>を反映します
         （氏名・住所は変更しません。廃止法人・該当なし・競合・複数候補はスキップ）。
-        競合・複数候補など個別判断が必要な行は各 Owner 詳細画面で確認してください。
+        競合・複数候補など個別判断が必要な行は各所有者詳細画面で確認してください。
       </p>
 
       <div className="flex flex-wrap gap-1">
@@ -1419,7 +1418,7 @@ function CorporateNumberCandidatesPanel() {
                           href={c.detailUrl}
                           className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                         >
-                          Owner 詳細を開く
+                          所有者詳細を開く
                         </Link>
                       </td>
                     </tr>
@@ -1580,9 +1579,9 @@ function RegistryAddressCandidatesPanel() {
     <div className="space-y-3">
       <p className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
         所有者住所に混入した登記由来文字列（受付番号・和暦日付・登記原因・持分・証明書定型文）を
-        検出して dry-run で表示します。「除去可能」は各行の「適用」で住所から除去できます（住所の
+        検出してプレビュー表示します。「除去可能」は各行の「適用」で住所から除去できます（住所の
         書込権限が必要）。地番ラベル・不動産番号・床面積などは誤って番地を消さないため
-        <strong>監査専用（自動除去しない）</strong>です。Owner 詳細で手動確認してください。
+        <strong>監査専用（自動除去しない）</strong>です。所有者詳細で手動確認してください。
       </p>
 
       <div className="flex flex-wrap gap-1">
@@ -1703,7 +1702,7 @@ function RegistryAddressCandidatesPanel() {
                             href={c.detailUrl}
                             className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-center text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                           >
-                            Owner 詳細
+                            所有者詳細
                           </Link>
                           {rowMsg && rowMsg.id === c.ownerId && (
                             <span

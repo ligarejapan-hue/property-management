@@ -299,7 +299,7 @@ export default function CorporateLookupPanel({
         </button>
         {!configured && (
           <span className="text-xs text-gray-500 dark:text-gray-400">
-            法人番号API未設定（管理者に env 設定を依頼してください）
+            法人番号の自動検索は現在利用できません（システム管理者にお問い合わせください）
           </span>
         )}
         {disabledReason && (

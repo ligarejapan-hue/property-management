@@ -216,7 +216,7 @@ export default function AdminOwnerDetailPage() {
           補正候補に戻る
         </Link>
         <span className="text-gray-300 dark:text-gray-700">/</span>
-        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Owner 詳細</h1>
+        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">所有者詳細</h1>
         {owner && (
           <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">
             {owner.ownerId.slice(0, 8)}…
@@ -239,10 +239,10 @@ export default function AdminOwnerDetailPage() {
 
       {!loading && !error && owner && (
         <div className="space-y-6">
-          {/* Owner 概要カード */}
+          {/* 所有者概要カード */}
           <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <h2 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Owner 概要
+              所有者概要
             </h2>
             {/* 17-A: masked 値であっても所有者 PII 面として copy/cut/contextmenu 抑止＋監査の対象にする。 */}
             <dl
@@ -259,7 +259,7 @@ export default function AdminOwnerDetailPage() {
               <div className="md:col-span-2">
                 <Field label="現住所" value={owner.ownerAddressMasked} />
               </div>
-              <Field label="version" value={String(owner.version)} mono />
+              <Field label="バージョン" value={String(owner.version)} mono />
               <Field
                 label="紐づき物件数"
                 value={String(owner.propertyOwnerCount)}

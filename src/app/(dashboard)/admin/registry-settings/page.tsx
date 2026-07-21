@@ -10,7 +10,7 @@ import {
 
 // 謄本取得の資格情報(登記情報提供サービス・管理者のみ)。利用者識別番号/パスワードは
 // 「設定済/未設定」のみ表示し、値は決して表示しない。保存は暗号化(サーバーのマスターキー)前提。
-// 未設定だと資格情報の保存は 503。実際の自動取得はフェーズ3(利用約款の確認後)で有効化する。
+// 未設定だと資格情報の保存は 503(自動取得自体は env 直接指定の資格情報でも動作する)。
 export default function RegistrySettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -81,14 +81,14 @@ export default function RegistrySettingsPage() {
       <div>
         <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">謄本取得の資格情報</h1>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          登記情報提供サービスのログイン情報(利用者識別番号・パスワード)を設定します。値は暗号化して保存され、画面には表示されません(設定済/未設定のみ)。実際の自動取得はフェーズ3(利用約款の確認後)で有効化されます。
+          登記情報提供サービスのログイン情報(利用者識別番号・パスワード)を設定します。値は暗号化して保存され、画面には表示されません(設定済/未設定のみ)。実際の自動取得には、登記情報提供サービスの利用契約(有料)とサーバー側の設定が必要です。
         </p>
       </div>
 
       {!s?.encryptionConfigured && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300" role="alert">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>暗号化キー(サーバーの内部設定 REGISTRY_SETTINGS_ENC_KEY)が未設定のため、資格情報は保存できません。サーバー管理者に設定を依頼してください。</span>
+          <span>サーバー側の暗号化設定が完了していないため、資格情報は保存できません。システム管理者に設定を依頼してください。</span>
         </div>
       )}
 
