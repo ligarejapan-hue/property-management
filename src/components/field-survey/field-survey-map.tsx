@@ -41,6 +41,14 @@ import { useFieldSurveyLocationRecorder } from "@/components/field-survey/use-fi
 import type { ActiveSessionLike } from "@/lib/field-survey-trip-util";
 import PinAddModeToggle from "@/components/field-survey/pin-add-mode-toggle";
 import PinCreateModal from "@/components/field-survey/pin-create-modal";
+import CameraFirstButton from "@/components/field-survey/camera-first-button";
+import CameraFirstBanner from "@/components/field-survey/camera-first-banner";
+import {
+  cameraFirstButtonState,
+  cameraFirstCandidateFromPosition,
+  cameraFirstFallbackMessage,
+  type CameraFirstPhase,
+} from "@/lib/field-survey-camera-first";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
 import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
 import { useFieldSurveyPinPhotoMutations } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
@@ -115,10 +123,8 @@ export default function FieldSurveyMap({
   const [activeSession, setActiveSession] = useState<ActiveSessionLike | null>(
     null,
   );
-  const handleActiveSessionChange = useCallback(
-    (s: ActiveSessionLike | null) => setActiveSession(s),
-    [],
-  );
+  // handleActiveSessionChange はカメラファースト reset と束ねるため
+  // resetCameraFirst 定義後 (下方) で宣言する (JSX からのみ参照)。
   const recorder = useFieldSurveyLocationRecorder({
     sessionId: activeSession?.id ?? null,
   });
@@ -259,12 +265,51 @@ export default function FieldSurveyMap({
   }, [permissionsRefreshPending, permissionsLoading, permissionsError, mePermissions]);
 
   const [pinAddMode, setPinAddMode] = useState(false);
-  // 地図 click / 「現在地を使う」で確定した作成候補座標。
+  // 地図 click / 「現在地を使う」/ カメラファーストで確定した作成候補座標。
+  // cameraPhoto はカメラファースト経由の撮影済み写真 (modal を選択済みで開く)。
+  // cameraPhotoPreviewUrl は同写真の preview 用 objectURL (イベントハンドラ内で
+  // 生成し、revoke は modal 側の既存 cleanup が担う)。
   const [createCandidate, setCreateCandidate] = useState<
-    | { lat: number; lng: number; accuracy?: number }
+    | {
+        lat: number;
+        lng: number;
+        accuracy?: number;
+        cameraPhoto?: File;
+        cameraPhotoPreviewUrl?: string;
+      }
     | null
   >(null);
   const [detailPinId, setDetailPinId] = useState<string | null>(null);
+  // カメラファースト (撮って登録): 撮影→現在地取得→ピン作成 modal の進行状態。
+  const [cameraFirstPhase, setCameraFirstPhase] =
+    useState<CameraFirstPhase>("idle");
+  // 現在地が取れず地図タップ待ちへフォールバックした理由の案内文。
+  const [cameraFirstNotice, setCameraFirstNotice] = useState<string | null>(
+    null,
+  );
+  // 撮影済みで位置未確定の写真 (locating / awaiting-map-tap の間だけ保持)。
+  const cameraPhotoFileRef = useRef<File | null>(null);
+  // 今回の作成候補がカメラファースト由来か。finalize で詳細パネルを開かず
+  // トースト表示にして、次の撮影へすぐ移れるようにする。
+  const createdFromCameraRef = useRef(false);
+  // カメラファースト保存完了トースト (自動で消える)。
+  const [cameraSavedNotice, setCameraSavedNotice] = useState(false);
+  const cameraToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  // modal 表示中かを closure から読むための ref (locating 完了時の競合ガード)。
+  const createCandidateOpenRef = useRef(false);
+  useEffect(() => {
+    createCandidateOpenRef.current = !!createCandidate;
+  }, [createCandidate]);
+  // 最新のカメラ発行 token。共有 token (currentLocationRequestIdRef) が他経路
+  // (モーダル操作 / 現在地を使う / session 再取得) で bump された遅延 callback が、
+  // 自分がまだ最新のカメラ要求か判定して後始末するための照合用。
+  // これが無いと phase が "locating" のまま固着し FAB が復帰不能になる。
+  const cameraRequestIdRef = useRef(0);
+  // モバイルの表示切替パネル開閉 (ControlPanel から持ち上げ)。展開中は
+  // FAB / banner がパネル下部を覆ってタップを遮るため描画を止める。
+  const [panelOpen, setPanelOpen] = useState(false);
   // Phase 1-H: pin 作成済みだが写真アップロードだけ失敗した状態。modal を閉じず
   // 「写真だけ再試行 / 写真なしで完了」に誘導し、pin を作り直させない。
   const [photoUploadFailed, setPhotoUploadFailed] = useState(false);
@@ -381,19 +426,157 @@ export default function FieldSurveyMap({
     );
   }, []);
 
+  // カメラファースト状態の一括リセット。撮影待ちの写真は破棄し、進行中の
+  // 現在地取得 callback も token bump で無効化する。
+  const resetCameraFirst = useCallback(() => {
+    currentLocationRequestIdRef.current += 1;
+    cameraPhotoFileRef.current = null;
+    createdFromCameraRef.current = false;
+    setCameraFirstPhase("idle");
+    setCameraFirstNotice(null);
+  }, []);
+
+  // TripControls からの active session 通知。session の切替 (開始 / 終了 /
+  // 別 session 化) ではカメラファーストの撮影待ち状態を持ち越さない
+  // (effect でなくイベント駆動で reset し、cascading render を避ける)。
+  const prevActiveSessionIdRef = useRef<string | null>(null);
+  const handleActiveSessionChange = useCallback(
+    (s: ActiveSessionLike | null) => {
+      const nextId = s?.id ?? null;
+      if (prevActiveSessionIdRef.current !== nextId) {
+        prevActiveSessionIdRef.current = nextId;
+        resetCameraFirst();
+      }
+      setActiveSession(s);
+    },
+    [resetCameraFirst],
+  );
+
+  // 保存完了トーストの timer を unmount で必ず止める。
+  useEffect(() => {
+    return () => {
+      if (cameraToastTimerRef.current) clearTimeout(cameraToastTimerRef.current);
+    };
+  }, []);
+
+  // カメラファースト: 撮影直後に現在地を単発取得し、取れたら作成 modal を
+  // 写真選択済みで開く。取れない環境 (http / 権限拒否 / タイムアウト) は
+  // 「地図をタップして場所を指定」へフォールバックする。
+  // token / mount / session ガードは「現在地を使う」と同型。
+  const handleCameraPhotoCaptured = useCallback(
+    (file: File) => {
+      const requestSessionId = activeSessionIdRef.current;
+      if (!requestSessionId) return;
+      if (createCandidateOpenRef.current) return;
+      cameraPhotoFileRef.current = file;
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        setCameraFirstPhase("awaiting-map-tap");
+        setCameraFirstNotice(cameraFirstFallbackMessage(null));
+        return;
+      }
+      currentLocationRequestIdRef.current += 1;
+      const requestId = currentLocationRequestIdRef.current;
+      cameraRequestIdRef.current = requestId;
+      setCameraFirstPhase("locating");
+      setCameraFirstNotice(null);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!fsMapMountedRef.current) return;
+          if (
+            currentLocationRequestIdRef.current !== requestId ||
+            activeSessionIdRef.current !== requestSessionId
+          ) {
+            // 共有 token の bump / session 切替で無効化された遅延 callback。
+            // 自分がまだ最新のカメラ要求なら (新しい撮影が始まっていなければ)
+            // "locating" 固着と写真リークを防ぐため状態を後始末する。
+            if (cameraRequestIdRef.current === requestId) {
+              resetCameraFirst();
+            }
+            return;
+          }
+          if (createCandidateOpenRef.current) {
+            // 取得中に別経路 (ピン追加モードの地図タップ) で modal が開いた。
+            // カメラ側の写真は破棄して衝突させない。
+            resetCameraFirst();
+            return;
+          }
+          const cand = cameraFirstCandidateFromPosition(pos);
+          if (!cand) {
+            setCameraFirstPhase("awaiting-map-tap");
+            setCameraFirstNotice(cameraFirstFallbackMessage(null));
+            return;
+          }
+          const photo = cameraPhotoFileRef.current ?? undefined;
+          cameraPhotoFileRef.current = null;
+          createdFromCameraRef.current = true;
+          setCameraFirstPhase("idle");
+          setCameraFirstNotice(null);
+          setCreateCandidate({
+            ...cand,
+            cameraPhoto: photo,
+            cameraPhotoPreviewUrl: photo
+              ? URL.createObjectURL(photo)
+              : undefined,
+          });
+        },
+        (err) => {
+          if (!fsMapMountedRef.current) return;
+          if (
+            currentLocationRequestIdRef.current !== requestId ||
+            activeSessionIdRef.current !== requestSessionId
+          ) {
+            // 成功側と同じ後始末 (locating 固着防止)。
+            if (cameraRequestIdRef.current === requestId) {
+              resetCameraFirst();
+            }
+            return;
+          }
+          if (createCandidateOpenRef.current) {
+            // 成功側と同じ競合ガード: modal 表示中に awaiting-map-tap へ
+            // 遷移させず、カメラ側の写真を破棄する。
+            resetCameraFirst();
+            return;
+          }
+          const code = (err as { code?: number })?.code;
+          setCameraFirstPhase("awaiting-map-tap");
+          setCameraFirstNotice(
+            cameraFirstFallbackMessage(typeof code === "number" ? code : null),
+          );
+        },
+        { enableHighAccuracy: true, maximumAge: 5_000, timeout: 30_000 },
+      );
+    },
+    [resetCameraFirst],
+  );
+
   const pinMutations = useFieldSurveyPinMutations();
   const photoMutations = useFieldSurveyPinPhotoMutations();
 
   // pin 作成 (+写真) が完結した時の共通後処理。modal を閉じ、誤タップ防止に
   // pin 追加モードを OFF にし、作成した pin の detail panel を開く。
+  // カメラファースト由来の作成では detail panel を開かずトーストのみ出し、
+  // 次の撮影 (歩いて次の家へ) をパネル閉じ操作で遮らない。
   const finalizePinCreate = useCallback(
     (pinId: string) => {
       invalidateCurrentLocationRequest();
       setCreateCandidate(null);
-      setPinAddMode(false);
       setPhotoUploadFailed(false);
       createdPinIdRef.current = null;
       pendingPhotoFileRef.current = null;
+      if (createdFromCameraRef.current) {
+        createdFromCameraRef.current = false;
+        setCameraSavedNotice(true);
+        if (cameraToastTimerRef.current) {
+          clearTimeout(cameraToastTimerRef.current);
+        }
+        cameraToastTimerRef.current = setTimeout(() => {
+          if (fsMapMountedRef.current) setCameraSavedNotice(false);
+        }, 4000);
+        return;
+      }
+      // 地図タップ経路のみ: 誤タップ防止に pin 追加モードを OFF にする。
+      // カメラ経路ではユーザーが明示 ON にしたモードを黙って解除しない。
+      setPinAddMode(false);
       // Phase 1-H: 作成後は detail panel を開く。
       setDetailPinId(pinId);
     },
@@ -427,8 +610,7 @@ export default function FieldSurveyMap({
       const newPinId = r.data.id;
       createdPinIdRef.current = newPinId;
       if (!file) {
-        setCreateCandidate(null);
-        setPinAddMode(false);
+        // modal close / mode 解除 / detail panel は finalizePinCreate に集約。
         finalizePinCreate(newPinId);
         return;
       }
@@ -469,15 +651,51 @@ export default function FieldSurveyMap({
 
   const handleMapClick = useCallback(
     (latLng: { lat: number; lng: number }) => {
-      // mode OFF / active session 無し / 既に modal 表示中はスルー (誤操作防止)
-      if (!pinAddMode) return;
-      if (!activeSession) return;
+      // 既に modal 表示中はスルー (誤操作防止)
       if (createCandidate) return;
+      if (!activeSession) return;
+      // カメラファーストの位置指定待ちを最優先 (pin 追加モードと独立に動く)。
+      // タップ座標 + 撮影済み写真で作成 modal を開く。
+      if (cameraFirstPhase === "awaiting-map-tap") {
+        const photo = cameraPhotoFileRef.current ?? undefined;
+        cameraPhotoFileRef.current = null;
+        createdFromCameraRef.current = true;
+        setCameraFirstPhase("idle");
+        setCameraFirstNotice(null);
+        setCreateCandidate({
+          lat: latLng.lat,
+          lng: latLng.lng,
+          cameraPhoto: photo,
+          cameraPhotoPreviewUrl: photo ? URL.createObjectURL(photo) : undefined,
+        });
+        setCurrentLocationError(null);
+        return;
+      }
+      // mode OFF はスルー (誤操作防止)
+      if (!pinAddMode) return;
+      // 撮影の現在地取得中に通常経路で modal を開くなら、カメラ側は同期的に
+      // 破棄する (以後のモーダル操作による共有 token bump で "locating" に
+      // 固着させない。callback 側の後始末は防御の二重化)。
+      if (cameraFirstPhase === "locating") resetCameraFirst();
       setCreateCandidate({ lat: latLng.lat, lng: latLng.lng });
       setCurrentLocationError(null);
     },
-    [pinAddMode, activeSession, createCandidate],
+    [
+      pinAddMode,
+      activeSession,
+      createCandidate,
+      cameraFirstPhase,
+      resetCameraFirst,
+    ],
   );
+
+  // カメラファーストボタンの表示 / 無効判定 (純関数)。
+  const cameraButton = cameraFirstButtonState({
+    hasActiveSession: !!activeSession,
+    canWrite: canWritePin,
+    phase: cameraFirstPhase,
+    modalOpen: !!createCandidate,
+  });
 
   return (
     <APIProvider apiKey={apiKey}>
@@ -494,7 +712,7 @@ export default function FieldSurveyMap({
             layers={layers}
             onError={setError}
             refetchNonce={refetchNonce}
-            pinAddMode={pinAddMode}
+            captureMapClick={pinAddMode || cameraFirstPhase === "awaiting-map-tap"}
             onMapClick={handleMapClick}
             onOpenPinDetail={setDetailPinId}
           />
@@ -513,6 +731,8 @@ export default function FieldSurveyMap({
           onToggle={(key) =>
             setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
           }
+          panelOpen={panelOpen}
+          onTogglePanelOpen={() => setPanelOpen((v) => !v)}
           currentUserId={currentUserId}
           onActiveSessionChange={handleActiveSessionChange}
           onBeforeSessionEnd={handleBeforeSessionEnd}
@@ -524,10 +744,40 @@ export default function FieldSurveyMap({
           onPanToCurrent={handlePanToCurrent}
         />
 
+        {/* カメラファースト: 巡回中は「撮って登録」ボタンを地図下部に常設。
+            表示切替パネルを開かなくても撮影→ピン登録へ直行できる。
+            モバイルでパネル展開中 (panelOpen) はパネル下部を覆いタップを
+            遮るため FAB / banner を描画しない (md+ はトグル自体が無い)。 */}
+        {cameraButton.visible && !panelOpen && (
+          <CameraFirstButton
+            disabled={cameraButton.disabled}
+            locating={cameraFirstPhase === "locating"}
+            permissionDenied={canWritePin === false}
+            onPhotoCaptured={handleCameraPhotoCaptured}
+          />
+        )}
+        {activeSession && cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
+          <CameraFirstBanner
+            notice={cameraFirstNotice}
+            onCancel={resetCameraFirst}
+          />
+        )}
+        {cameraSavedNotice && (
+          <div
+            role="status"
+            data-testid="camera-first-saved-toast"
+            className="pointer-events-none absolute bottom-28 left-1/2 z-10 -translate-x-1/2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+          >
+            ピンを保存しました
+          </div>
+        )}
+
         {createCandidate && activeSession && (
           <PinCreateModal
             initialLat={createCandidate.lat}
             initialLng={createCandidate.lng}
+            initialPhotoFile={createCandidate.cameraPhoto ?? null}
+            initialPhotoPreviewUrl={createCandidate.cameraPhotoPreviewUrl ?? null}
             sessionId={activeSession.id}
             saving={pinMutations.createLoading}
             serverError={pinMutations.createError}
@@ -541,6 +791,8 @@ export default function FieldSurveyMap({
               setPhotoUploadFailed(false);
               createdPinIdRef.current = null;
               pendingPhotoFileRef.current = null;
+              // カメラファースト経由の candidate を破棄した場合も origin flag を戻す
+              createdFromCameraRef.current = false;
             }}
             onSubmit={(payload, file) => {
               void handlePinCreateSubmit(
@@ -593,6 +845,8 @@ export default function FieldSurveyMap({
 function ControlPanel({
   layers,
   onToggle,
+  panelOpen,
+  onTogglePanelOpen,
   currentUserId,
   onActiveSessionChange,
   onBeforeSessionEnd,
@@ -605,6 +859,14 @@ function ControlPanel({
 }: {
   layers: Record<Layer, boolean>;
   onToggle: (key: Layer) => void;
+  /**
+   * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
+   * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
+   * 開閉 state は親 (FieldSurveyMap) 管理: 展開中はカメラ FAB / banner の
+   * 描画を止めてパネル下部のタップを遮らないようにするため。
+   */
+  panelOpen: boolean;
+  onTogglePanelOpen: () => void;
   currentUserId: string;
   onActiveSessionChange: (s: ActiveSessionLike | null) => void;
   onBeforeSessionEnd: () => Promise<boolean>;
@@ -615,9 +877,6 @@ function ControlPanel({
   canWritePin: boolean | null;
   onPanToCurrent: () => void;
 }) {
-  // モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
-  // パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
-  const [panelOpen, setPanelOpen] = useState(false);
   // パネルは地図エリア(flex-1 overflow-hidden)に絶対配置されるため、内容が地図高より
   // 高いと下部が切れる(スマホで発生)。上限を viewport 固定値で見積もるとバナー
   // (InsecureContextBanner)やヘッダ折返し等の可変高で狂うため、コンテナ自身を地図
@@ -628,7 +887,7 @@ function ControlPanel({
     <div className="pointer-events-none absolute bottom-3 right-3 top-3 flex flex-col items-end md:w-56">
       <button
         type="button"
-        onClick={() => setPanelOpen((v) => !v)}
+        onClick={onTogglePanelOpen}
         aria-expanded={panelOpen}
         className="pointer-events-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 md:hidden"
       >
@@ -731,14 +990,15 @@ function MapDataLayer({
   layers,
   onError,
   refetchNonce,
-  pinAddMode,
+  captureMapClick,
   onMapClick,
   onOpenPinDetail,
 }: {
   layers: Record<Layer, boolean>;
   onError: (msg: string | null) => void;
   refetchNonce: number;
-  pinAddMode: boolean;
+  /** pin 追加モード中またはカメラファーストの地図タップ待ち中に map click を転送する。 */
+  captureMapClick: boolean;
   onMapClick: (latLng: { lat: number; lng: number }) => void;
   onOpenPinDetail: (pinId: string) => void;
 }) {
@@ -889,12 +1149,13 @@ function MapDataLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layers.properties, layers.pins, refetchNonce]);
 
-  // Phase 1-G: pin 追加モード中のみ map click を pin 作成候補に転送する。
-  // mode OFF のときは marker click (AdvancedMarker onClick) のみが動く。
+  // Phase 1-G: pin 追加モード中 (またはカメラファーストの地図タップ待ち中) のみ
+  // map click を pin 作成候補に転送する。
+  // OFF のときは marker click (AdvancedMarker onClick) のみが動く。
   // raw click 座標は console に出さない。
   useEffect(() => {
     if (!map) return;
-    if (!pinAddMode) return;
+    if (!captureMapClick) return;
     const listener = map.addListener(
       "click",
       (e: { latLng?: { lat: () => number; lng: () => number } }) => {
@@ -907,7 +1168,7 @@ function MapDataLayer({
       },
     );
     return () => listener.remove();
-  }, [map, pinAddMode, onMapClick]);
+  }, [map, captureMapClick, onMapClick]);
 
   return (
     <>

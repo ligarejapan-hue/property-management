@@ -302,13 +302,19 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     expect(MAP_SRC).toMatch(/"field_survey"[\s\S]*?"write"/);
   });
 
-  it("map.addListener('click', ...) は pinAddMode の時のみ effect が走る", () => {
+  it("map.addListener('click', ...) は captureMapClick の時のみ effect が走る", () => {
     expect(MAP_SRC).toMatch(/addListener\(\s*"click"/);
-    // useEffect 内で if (!pinAddMode) return;
+    // useEffect 内で if (!captureMapClick) return;
+    // (captureMapClick = pinAddMode || カメラファーストの地図タップ待ち。
+    //  カメラファースト導入で pinAddMode 単独ゲートから統合フラグへ変更)
     const clickEffect = MAP_SRC.match(
-      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?if\s*\(!pinAddMode\)\s*return;[\s\S]*?addListener\(\s*"click"[\s\S]*?\}\,\s*\[map,\s*pinAddMode,\s*onMapClick\]/,
+      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?if\s*\(!captureMapClick\)\s*return;[\s\S]*?addListener\(\s*"click"[\s\S]*?\}\,\s*\[map,\s*captureMapClick,\s*onMapClick\]/,
     );
     expect(clickEffect).not.toBeNull();
+    // 親からは pinAddMode とカメラファースト待ちの OR で渡す
+    expect(MAP_SRC).toMatch(
+      /captureMapClick=\{pinAddMode\s*\|\|\s*cameraFirstPhase\s*===\s*"awaiting-map-tap"\}/,
+    );
   });
 
   it("map click 座標を console / error UI に出さない", () => {
