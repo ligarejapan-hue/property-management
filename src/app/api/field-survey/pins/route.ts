@@ -99,8 +99,10 @@ export async function POST(request: NextRequest) {
     // (updatedAt) に反映する。位置記録を使わずピンだけ打つ運用でも、放置判定
     // (12h 確認 / 24h 自動終了) が誤発火しないようにする。
     // ピン作成と touch は 1 トランザクション (@codex R6: touch だけ失敗して 500 →
-    // リトライで pin が二重作成される事故を防ぐ)。touch は active 条件付きなので
-    // 並行終了後は no-op。
+    // リトライで pin が二重作成される事故を防ぐ)。
+    // touch の 0 行更新 = 事前チェック後に session が並行終了した合図なので、
+    // track-point route と同様に 409 INVALID_STATE で pin 作成ごと rollback する
+    // (@codex R8 P1: 終了済み session に紐づく pin を作らない)。
     const created = await prisma.$transaction(async (tx) => {
       const row = await tx.fieldSurveyPin.create({
         data: {
@@ -117,10 +119,17 @@ export async function POST(request: NextRequest) {
         select: SELECT_PIN,
       });
       if (input.sessionId) {
-        await tx.fieldSurveySession.updateMany({
+        const touched = await tx.fieldSurveySession.updateMany({
           where: { id: input.sessionId, status: "active" },
           data: { updatedAt: new Date() },
         });
+        if (touched.count === 0) {
+          throw new ApiError(
+            409,
+            "active 状態でない session には紐付けられません",
+            "INVALID_STATE",
+          );
+        }
       }
       return row;
     });
