@@ -380,6 +380,25 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(0);
   });
 
+  it("結合濁点・ZWJ絵文字は合成後の1グリフで数える (@codex #310 R28)", () => {
+    // 分解表記の「か+結合濁点」×10 は 10 グリフ (約42mm)。結合文字を 1em で
+    // 数えると約85mmになり x=145 の表に誤って届く
+    const decomposed = {
+      id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: ("か" + "゙").repeat(10), style: {},
+    };
+    const tbl = table("overview", 145, 40, 60, 20);
+    expect(findTextTableOverlaps(makeDoc([decomposed, tbl]))).toHaveLength(0);
+    // ZWJ 連結絵文字 (家族) ×3 は 3 グリフ (約12.7mm)。構成絵文字ごとに数えると
+    // 約38mmになり x=120 の表に誤って届く
+    const zwj = {
+      ...decomposed,
+      content: "\u{1F468}‍\u{1F469}‍\u{1F467}".repeat(3),
+    };
+    const tbl2 = table("overview", 120, 40, 60, 20);
+    expect(findTextTableOverlaps(makeDoc([zwj, tbl2]))).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

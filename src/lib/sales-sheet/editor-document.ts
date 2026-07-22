@@ -1666,6 +1666,16 @@ function measureParagraph(
   // 折返し可能点スキャナ (@codex #310 R25: 数百万文字の不可分連続でも
   // native 検索で読み飛ばし、1 文字ずつの走査で main thread を塞がない)
   const BREAK_SCAN = /[ \t\n\r\-/]|[^\x00-\xff]/g;
+  // 送り幅ゼロの結合文字 (結合分音記号・濁点/半濁点・異体字セレクタ・ZWJ/ZWSP)。
+  // レンダラは直前のグリフに合成して描くため幅に数えない (@codex #310 R28)。
+  const isZeroAdvance = (code: number): boolean =>
+    (code >= 0x0300 && code <= 0x036f) ||
+    code === 0x3099 ||
+    code === 0x309a ||
+    (code >= 0xfe00 && code <= 0xfe0f) ||
+    code === 0x200d ||
+    code === 0x200b;
+  let joinNext = false; // ZWJ 直後のグリフは前と合成され 1 グリフになる
   let prevWasCr = false;
   for (let i = 0; i < para.length; i++) {
     const ch = para[i];
@@ -1731,11 +1741,21 @@ function measureParagraph(
         emitSpace();
       }
     } else {
-      sawContent = true;
+      const code = ch.charCodeAt(0);
+      // ゼロ送りの結合文字は幅に数えない (@codex #310 R28)
+      if (isZeroAdvance(code)) {
+        if (code === 0x200d) joinNext = true;
+        continue;
+      }
       // サロゲートペア (絵文字等) は 1 グリフ = 全角 1 文字として数える
       // (@codex #310 R26: UTF-16 の 2 単位を 2 文字分にしない)
-      const code = ch.charCodeAt(0);
       if (code >= 0xd800 && code <= 0xdbff) i++;
+      if (joinNext) {
+        // ZWJ 連結 (家族絵文字等) は直前のグリフと合成され幅を増やさない
+        joinNext = false;
+        continue;
+      }
+      sawContent = true;
       emitBlock(1); // 全角 1 文字 (どこでも折返し可)
     }
   }
