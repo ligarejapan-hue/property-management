@@ -73,7 +73,11 @@
 
 ```
 client <input type="file" accept="image/*" capture="environment">
-  → File を無加工で FormData に append
+  → prepareFieldSurveyPhotoForUpload(file)          ← 利便レイヤ（UX のみ・保証ではない）
+      ・8MB 以内の JPEG/PNG/WebP は無変換で pass
+      ・HEIC/HEIF・8MB 超・不明形式は decode → canvas → JPEG 再エンコード
+        （decode 不能な端末はサーバへ送らず設定案内を表示）
+  → File（pass 時は原本 / convert 時は変換後 JPEG）を FormData に append
   → POST /api/field-survey/pins/[id]/photos
       validateFile(MIME allowlist + 8MB)            ← 判定のみ・変換なし
       Buffer.from(await file.arrayBuffer())         ← 生バイト
@@ -85,8 +89,12 @@ client <input type="file" accept="image/*" capture="environment">
 
 - MIME allowlist: `image/jpeg` / `image/png` / `image/webp` / `image/heic` / `image/heif`
   （`ALLOWED_PHOTO_MIMES`。**property / building の写真 route とも共有**される定数）
-- サイズ上限: 8 MB（`MAX_FILE_SIZE`）
-- クライアント側に canvas / 再エンコード等の画像処理は存在しない（File がそのまま送られる）
+- サイズ上限: 8 MB（`MAX_FILE_SIZE`）。サーバー側の判定・422 は従来どおり
+  （直接 API POST では HEIC / 8MB 超は今も 422 = server invariant 不変）
+- クライアント側の変換（`src/lib/field-survey-photo-prepare.ts`）は **HEIC / 大容量の
+  救済という利便性のためだけ**に存在する。canvas 再エンコードで EXIF が全て消える
+  副次効果はあるが、**プライバシー保証としては数えない**（直接 API POST で迂回可能）。
+  GPS/EXIF の保証は従来どおりサーバー側 strip（B0・fail-closed）のみが担う
 
 ---
 
@@ -94,7 +102,7 @@ client <input type="file" accept="image/*" capture="environment">
 
 | 候補 | 概要 | 判定 |
 |---|---|---|
-| A. client canvas 再エンコード | package 不要だが、Android で HEIC を decode できず無音失敗・orientation 反映がブラウザ依存・vitest(node) でテスト不能・直接 API POST で迂回可能（server invariant にならない） | 不採用 |
+| A. client canvas 再エンコード | package 不要だが、Android で HEIC を decode できず無音失敗・orientation 反映がブラウザ依存・vitest(node) でテスト不能・直接 API POST で迂回可能（server invariant にならない） | **strip 手段としては不採用**（※後日、HEIC/大容量の**利便レイヤ**として `field-survey-photo-prepare.ts` に採用。decode 不能は無音でなく明示案内・迂回されても B0 の server strip が保証を維持するため、この不採用判断とは両立する。§3 参照） |
 | B. server 画像ライブラリ（sharp 等） | 一貫性は高いが package + lock 変更が必要。prebuilt sharp は HEIC 非対応（libvips 系のシステム依存 = VPS ビルド複雑化）・再エンコードは lossy | 代替案（要 package 承認） |
 | B0. pure TS route-level strip | **依存追加なし・lossless（再エンコードなし）・server-side invariant・合成バイト fixture で vitest ロック可**。field-survey route 内（Buffer 生成〜 `storage.upload` の間）にのみ挿入 | **推奨** |
 | C. 配信時（/uploads）strip | 原本（GPS 付き）が at rest に残り続けるため目的未達。read 毎の CPU 負荷・キャッシュ矛盾もある | 不採用 |

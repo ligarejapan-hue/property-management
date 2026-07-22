@@ -133,6 +133,12 @@ exiftool -a -G1 <file>                                   # 全タグ概観
 マップされる（`pinApiErrorMessage`）。サーバ側の具体的文言は **DevTools の Network タブ**
 （response body の `error.message`）でのみ確認できる。NG 判定の前に必ず両方を見ること。
 
+> **端末内自動変換の導入後**: HEIC / 8MB 超 / decode 不能は原則 **送信前に端末内で
+> 解決または表示**される（POST 自体が出ない。§7 参照）。この場合の画面文言は
+> `field-survey-photo-prepare.ts` の案内文言（「互換性優先」誘導等）がそのまま
+> `role="status"`（詳細 panel）/ 失敗ブロック内の理由併記（作成 modal）に出る。
+> 下表の 422 行は **直接 API POST（7-5b）での回帰確認用**。
+
 | 事象 | HTTP | サーバ文言（DevTools） | 画面表示（ユーザーが見る文言） |
 |---|---|---|---|
 | HEIC / HEIF | 422 | この画像形式は現地調査写真では現在サポートされていません。JPEG / PNG / WebP を使用してください。 | 入力内容に誤りがあります。 |
@@ -185,18 +191,25 @@ exiftool -a -G1 <file>                                   # 全タグ概観
 
 ## 7. HEIC / malformed / 8MB（エラー系）
 
+> **前提（端末内自動変換の導入後)**: UI 導線のアップロードは送信前に
+> `prepareFieldSurveyPhotoForUpload` を通る。HEIC / 8MB 超は**端末内で JPEG へ
+> 変換・縮小されてから送信される**ため、UI からは 422 に到達しないのが正常。
+> **サーバー側 422（HEIC / 8MB 超 / malformed）の回帰確認は直接 API POST
+> （curl / DevTools fetch で FormData 送信）で行う** — server invariant は不変。
+
 | # | 入力・手順 | 期待結果 |
 |---|---|---|
-| 7-1 | HEIC: iPhone（高効率フォーマット）で撮影 → カメラ / ギャラリー導線でアップロード試行 | **(a) 422**（画面「入力内容に誤りがあります。」・DevTools でサポート外文言）**または (b) 成功**（= iOS が input 経由で HEIC→JPEG に自動変換して送信。レスポンスの `mimeType` が `image/jpeg`）。**どちらになったかを必ず記録**。(b) の場合は 6-1 と同じ strip 確認を行う |
-| 7-2 | HEIC: 「ファイル」アプリ / PC から `.heic` を直接ギャラリー導線で添付 | HEIC のまま届けば 422。変換される場合は 7-1(b) と同様に記録 |
-| 7-3 | malformed（ゼロ列 `.jpg`） | 422。画面「入力内容に誤りがあります。」・DevTools「画像ファイルを処理できませんでした。」。**写真は保存されない**（一覧に増えない） |
-| 7-4 | （任意）JPEG 実体の `.png` 偽装 | 422（PNG signature 不一致で malformed） |
-| 7-5 | 8MB + 1 byte | 422。DevTools「ファイルサイズが上限 (8MB) を超えています」（サイズ検査は strip より先に走るため、巨大ファイルでは strip 系文言は出ない） |
-| 7-6 | 7-1〜7-5 の後、写真一覧を再読込 | **失敗分の写真行が 1 件も増えていない**（422 時は storage / DB / 監査ログのいずれにも書き込まない設計） |
+| 7-1 | HEIC: iPhone（高効率フォーマット）で撮影 → カメラ / ギャラリー導線でアップロード試行 | **成功**。レスポンスの `mimeType` が `image/jpeg`（iOS の input 自動変換または端末内変換のどちらか）。6-1 と同じ strip 確認を行う |
+| 7-2 | HEIC: 「ファイル」アプリ / PC から `.heic` を直接ギャラリー導線で添付 | **(a) decode できる環境（iOS/macOS Safari 等) = 成功**（`mimeType` が `image/jpeg`・変換後は 8MB 以下） **(b) decode できない環境（Android Chrome / PC Chrome）= 送信されずに端末内エラー表示**（「この写真 (高効率/HEIC・HEIF形式) は…」+ iPhone/Android の設定案内。**Network タブに POST が出ない**こと）。どちらになったかを記録 |
+| 7-3 | malformed（ゼロ列 `.jpg`） | **端末内 decode 失敗で送信されない**（「この写真は読み込めませんでした。JPEG/PNG形式の写真をお使いください。」・Network タブに POST が出ない）。**写真は保存されない**（一覧に増えない） |
+| 7-4 | （任意）JPEG 実体の `.png` 偽装 | 8MB 以内なら MIME=image/png で pass-through 送信 → サーバー側 malformed 検査で 422（PNG signature 不一致）。画面「入力内容に誤りがあります。」 |
+| 7-5 | 8MB + 1 byte の実画像 JPEG | **成功**。端末内で縮小され、レスポンスの `fileSize` が 8MB 以下・`mimeType` が `image/jpeg`。（非画像バイトの巨大 `.jpg` は 7-3 と同じく端末内で弾かれ送信されない） |
+| 7-5b | （回帰・直接 API）HEIC / 8MB+1 / ゼロ列 `.jpg` を curl 等で直接 POST | 従来どおり **422**（HEIC=サポート外文言 / サイズ=「上限 (8MB) を超えています」/ malformed=「画像ファイルを処理できませんでした。」）。**server invariant が UI 変換に依存していないことの確認** |
+| 7-6 | 7-1〜7-5b の後、写真一覧を再読込 | **失敗分の写真行が 1 件も増えていない**（422 時は storage / DB / 監査ログのいずれにも書き込まない設計） |
 
-> iOS Safari の HEIC→JPEG 自動変換はOS / ブラウザのバージョンに依存する。
-> 「(b) 成功」になっても**サーバに HEIC が到達していない**だけであり、422 分岐の回帰ではない。
-> どうしても HEIC のままサーバへ届けたい場合は 7-2 の直接添付を優先する。
+> iOS Safari の HEIC→JPEG 自動変換（input 経由）は OS / ブラウザのバージョンに依存する。
+> どちらが変換したかはレスポンスでは区別できないが、いずれもサーバに HEIC が到達しない点は同じ。
+> HEIC のままサーバへ届けたい（422 回帰を見たい）場合は 7-5b の直接 API POST を使う。
 
 ---
 
