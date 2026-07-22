@@ -173,22 +173,18 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     );
     expect(finalize).not.toBeNull();
     const m = finalize?.[0] ?? "";
-    // createdFromCameraRef が true の分岐で toast を出して early return
+    // カメラ由来 (fromCamera) の分岐で toast を出して early return
+    // (連続ピンモード導入で「写真付き保存」全般と統合。詳細は
+    //  field-survey-pin-continuity-source.test.ts が固定)
     expect(m).toMatch(
-      /createdFromCameraRef\.current[\s\S]*?setCameraSavedNotice\(true\)[\s\S]*?return/,
+      /createdFromCameraRef\.current[\s\S]*?setPinSavedNotice\(true\)[\s\S]*?return/,
     );
-    // その分岐の後に従来どおり detail panel を開く
+    // 写真なし保存は従来どおり detail panel を開く
     expect(m).toMatch(/setDetailPinId\(pinId\)/);
-    // カメラ由来の保存ではユーザーが明示 ON にした pin 追加モードを解除しない
-    // (setPinAddMode(false) はカメラ分岐 early return の後 = 地図タップ経路のみ)
-    const cameraIdx = m.indexOf("createdFromCameraRef.current");
-    const modeOffIdx = m.indexOf("setPinAddMode(false)");
-    expect(cameraIdx).toBeGreaterThan(-1);
-    expect(modeOffIdx).toBeGreaterThan(cameraIdx);
   });
 
   it("保存完了トーストは 4 秒で自動で消える (unmount ガード付き)", () => {
-    expect(MAP_SRC).toMatch(/setTimeout\([\s\S]{0,200}setCameraSavedNotice\(false\)/);
+    expect(MAP_SRC).toMatch(/setTimeout\([\s\S]{0,200}setPinSavedNotice\(false\)/);
     expect(MAP_SRC).toMatch(/clearTimeout\(/);
   });
 

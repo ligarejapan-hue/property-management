@@ -322,8 +322,17 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*click/i);
   });
 
-  it("作成成功で pin 追加モードを OFF + refetchNonce bump (誤タップ防止)", () => {
-    expect(MAP_SRC).toMatch(/setPinAddMode\(false\)/);
+  it("作成成功でも pin 追加モードを維持 (連続ピンモード) + refetchNonce bump", () => {
+    // 旧仕様「保存のたびに自動 OFF (誤タップ防止)」は、連続してピンを立てる
+    // 巡回で毎回モードを入れ直す 2 タップの摩擦になっていたため撤回。
+    // 誤タップは作成 modal のキャンセルで防げる (保存なしでは何も起きない)。
+    // ※巡回の終了/切替での解除 (handleActiveSessionChange 内) は別途あるため、
+    //   不在チェックは finalizePinCreate ブロックにスコープ限定する。
+    const finalize = MAP_SRC.match(
+      /const finalizePinCreate\s*=\s*useCallback\([\s\S]*?\}\,\s*\[[\s\S]*?\],?\s*\);/,
+    );
+    expect(finalize).not.toBeNull();
+    expect(finalize?.[0] ?? "").not.toMatch(/setPinAddMode\(false\)/);
     expect(MAP_SRC).toMatch(/bumpRefetch\(\)/);
   });
 

@@ -51,6 +51,13 @@ interface PinDetailPanelProps {
   onUpdated?: (updated: PinDetail) => void;
   /** 論理削除の成功通知 → 親側で panel を閉じ marker 再 fetch する。 */
   onDeleted?: (pinId: string) => void;
+  /**
+   * 「作業中 (編集中の下書き / 削除確認 / 物件化 / 写真の送信・削除中)」の
+   * 変化通知。連続ピンモードでは詳細パネル表示中も地図タップが有効なため、
+   * 親 (FieldSurveyMap) はこれが true の間、新規ピン作成の地図タップを無視して
+   * パネルを黙って閉じない (下書き・送信中の写真の喪失防止。Codex P2)。
+   */
+  onBusyStateChange?: (busy: boolean) => void;
 }
 
 export default function PinDetailPanel({
@@ -62,6 +69,7 @@ export default function PinDetailPanel({
   onClose,
   onUpdated,
   onDeleted,
+  onBusyStateChange,
 }: PinDetailPanelProps) {
   const mutations = useFieldSurveyPinMutations();
   const [detail, setDetail] = useState<PinDetail | null>(null);
@@ -71,6 +79,27 @@ export default function PinDetailPanel({
   const [draftMemo, setDraftMemo] = useState<string>("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
+  // 写真セクション (子) の送信・削除中フラグ。作業中判定に合流させる。
+  const [photoSectionBusy, setPhotoSectionBusy] = useState(false);
+
+  // 作業中 = 下書きが失われ得る状態 (編集フォーム / 削除確認 / 物件化 modal)
+  // または進行中の通信 (保存 / 削除 / 写真送信・削除)。
+  const hasUnfinishedWork =
+    editing ||
+    confirmingDelete ||
+    showConvert ||
+    photoSectionBusy ||
+    mutations.updateLoading ||
+    mutations.deleteLoading;
+  useEffect(() => {
+    onBusyStateChange?.(hasUnfinishedWork);
+  }, [hasUnfinishedWork, onBusyStateChange]);
+  // unmount 時は必ず false へ戻す (親 ref に stale な true を残さない)。
+  useEffect(() => {
+    return () => {
+      onBusyStateChange?.(false);
+    };
+  }, [onBusyStateChange]);
 
   // Codex P2 (本 fix): props.pinId は handleSave 内で stale closure になりうる。
   // PATCH レスポンス到達時に「現在表示中の pinId」と一致するかを ref で再確認
@@ -289,6 +318,7 @@ export default function PinDetailPanel({
           <PinPhotoSection
             pinId={pinId}
             canEdit={canEditOwn && detail!.status !== "archived"}
+            onBusyChange={setPhotoSectionBusy}
           />
         )}
 
@@ -375,12 +405,26 @@ function deleteErrorMessage(raw: string | null): string | null {
 function PinPhotoSection({
   pinId,
   canEdit,
+  onBusyChange,
 }: {
   pinId: string;
   canEdit: boolean;
+  /** 写真の送信・削除中の変化通知 (親 panel の作業中判定に合流)。 */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const photoMutations = useFieldSurveyPinPhotoMutations();
   const [photos, setPhotos] = useState<PinPhoto[]>([]);
+  // 送信・削除の進行中を親へ通知する (unmount 時は必ず false へ戻す)。
+  const photoBusy =
+    photoMutations.uploadLoading || photoMutations.deleteLoading;
+  useEffect(() => {
+    onBusyChange?.(photoBusy);
+  }, [photoBusy, onBusyChange]);
+  useEffect(() => {
+    return () => {
+      onBusyChange?.(false);
+    };
+  }, [onBusyChange]);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [brokenIds, setBrokenIds] = useState<Set<string>>(new Set());
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
