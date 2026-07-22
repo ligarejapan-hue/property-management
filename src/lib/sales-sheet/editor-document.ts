@@ -1539,14 +1539,27 @@ function measureParagraph(
     }
     if (asciiRun > 0) units.push(asciiRun);
     asciiRun = 0;
-    units.push(ch === " " || ch === "\t" ? -1 : 1);
+    // -1 = 空白 / -2 = タブ (pre-wrap はタブを保持し次のタブストップまで送る)
+    units.push(ch === " " ? -1 : ch === "\t" ? -2 : 1);
   }
   if (asciiRun > 0) units.push(asciiRun);
+
+  // タブストップ幅: ブラウザ既定 tab-size:8 = 空白8個分 ≒ 8×0.6em
+  // (@codex #310 R14: タブを空白1個で数えると貼り付けた表形式文字列を過小見積り)
+  const TAB_STOP_EM = 8 * 0.6;
 
   // 行ごとの実効文字数を返す (@codex #310 R13: 行別の矩形判定に使う)
   const lineWidths: number[] = [];
   let cur = 0;
   for (const u of units) {
+    if (u === -2) {
+      // 次のタブストップへ送る (行幅は超えない)。タブ自体は折返し可能点。
+      cur = Math.min(
+        charsPerLine,
+        (Math.floor(cur / TAB_STOP_EM) + 1) * TAB_STOP_EM,
+      );
+      continue;
+    }
     const w = u === -1 ? 0.6 : u;
     if (u !== -1 && w > charsPerLine) {
       // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)

@@ -220,6 +220,19 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(1);
   });
 
+  it("タブは次のタブストップ(空白8個分)まで送って見積る (@codex #310 R14)", () => {
+    // 「あ\tあ」はタブ送りで約 24.6mm に達し x=110 の表と重なるが、
+    // 「ああ」(約8.5mm) なら届かない
+    const tabbed = {
+      id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: "あ\tあ", style: {},
+    };
+    const tbl = table("overview", 110, 30, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([tabbed, tbl]))).toHaveLength(1);
+    const plain = { ...tabbed, content: "ああ" };
+    expect(findTextTableOverlaps(makeDoc([plain, tbl]))).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
