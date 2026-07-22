@@ -253,6 +253,21 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(0);
   });
 
+  it("箱の高さを超える貼り付けは可視行だけで判定する (@codex #310 R16)", () => {
+    // 50 行貼り付けても箱 h=10mm に入るのは約 2 行。3 行目以降は clip される
+    // ため、その位置に置いた表とは重ならない
+    const bigPaste = {
+      id: "note", type: "text", x: 100, y: 10, w: 100, h: 10, z: 5,
+      content: Array.from({ length: 50 }, () => "あ".repeat(10)).join("\n"),
+      style: {},
+    };
+    const belowClip = table("overview", 100, 25, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([bigPaste, belowClip]))).toHaveLength(0);
+    // 箱の内側 (可視行) に掛かる表は検出する
+    const onVisible = table("overview", 100, 14, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([bigPaste, onVisible]))).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

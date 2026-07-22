@@ -1607,9 +1607,16 @@ function textRenderedLineRectsMm(el: TextElement, mono: boolean): RectMm[] {
   const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
   const lineMm = fontMm * (el.style.lineHeight ?? 1.2);
   const charsPerLine = Math.max(1, Math.floor(el.w / fontMm));
+  // 箱の高さを超える行は描画されない (overflow hidden) ため、計測も可視行数で
+  // 打ち切る (@codex #310 R16: 巨大な貼り付けで useMemo の同期計測が main thread
+  // を塞がないように)。段落は可視行を満たすのに十分な文字数 (最小字送り 0.35em
+  // ≒ 1em あたり約3文字) までで切り詰めてから測る。
+  const maxLines = Math.max(1, Math.ceil(el.h / lineMm));
+  const charCap = Math.ceil(maxLines * charsPerLine * 3);
   const lineChars: number[] = [];
   for (const para of el.content.split("\n")) {
-    lineChars.push(...measureParagraph(para, charsPerLine, mono));
+    if (lineChars.length >= maxLines) break;
+    lineChars.push(...measureParagraph(para.slice(0, charCap), charsPerLine, mono));
   }
   const rects: RectMm[] = [];
   for (let i = 0; i < lineChars.length; i++) {
