@@ -267,16 +267,20 @@ describe("EditorToolbar — B-8 効果範囲注記と重なり注意", () => {
     expect(html).toContain("文字・表が重なっています(2箇所)");
   });
 
-  it("警告はツールバーを折り返さない (幅制限+truncate・全文はtitleで参照・@codex R4)", () => {
+  it("警告はボタン行と競合しない独立行に全文表示 (@codex R4/R6)", () => {
     const long = "文字・表が重なっています(12箇所)。出力にもそのまま写るため、ドラッグで位置を調整してください";
     const html = renderToStaticMarkup(
       <EditorToolbar {...base} layoutWarning={long} />,
     );
-    const region = html.slice(html.indexOf("data-toolbar-layout-warning"));
-    const tag = region.slice(0, region.indexOf(">"));
-    expect(tag).toContain("truncate");
-    expect(tag).toContain("max-w-");
-    expect(tag).toContain('title="');
+    // ボタン行 (flex) の外 = 削除ボタンより後に独立要素として出る
+    const deleteIdx = html.indexOf("data-toolbar-delete");
+    const warnIdx = html.indexOf("data-toolbar-layout-warning");
+    expect(deleteIdx).toBeGreaterThan(-1);
+    expect(warnIdx).toBeGreaterThan(deleteIdx);
+    // 全文が truncate されずに含まれる (幅に依存して消えない)
+    expect(html).toContain(long);
+    const tag = html.slice(warnIdx, html.indexOf(">", warnIdx));
+    expect(tag).not.toContain("truncate");
   });
 
   it("layoutWarning 未指定なら注意表示は出ない(後方互換)", () => {

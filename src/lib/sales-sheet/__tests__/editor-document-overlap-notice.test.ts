@@ -135,6 +135,28 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(0);
   });
 
+  it("monospace テーマでは ASCII を全角幅で見積る (@codex #310 R6)", () => {
+    // ASCII 32文字・箱 w=120。プロポーショナル(0.6em)なら文字域は約81mmで
+    // x=200 の表に届かないが、monospace(1em)なら約135mm→箱幅いっぱいまで届く。
+    const asciiText = {
+      id: "code", type: "text", x: 100, y: 40, w: 120, h: 10, z: 5,
+      content: "A".repeat(32), style: {},
+    };
+    const tbl = table("overview", 200, 30, 60, 60);
+    const propDoc = parseSalesSheetDocument({
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "sans-serif", accentColor: "#1f4e79" },
+      elements: [asciiText, tbl],
+    });
+    expect(findTextTableOverlaps(propDoc)).toHaveLength(0);
+    const monoDoc = parseSalesSheetDocument({
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "monospace", accentColor: "#1f4e79" },
+      elements: [asciiText, tbl],
+    });
+    expect(findTextTableOverlaps(monoDoc)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

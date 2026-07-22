@@ -85,8 +85,9 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
   return (
     <div
       data-editor-toolbar
-      className="flex items-center gap-2 px-4 py-2 border-b border-neutral-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 shrink-0"
+      className="border-b border-neutral-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 shrink-0"
     >
+    <div className="flex items-center gap-2 px-4 py-2">
       {dirty && (
         <span
           data-dirty-indicator
@@ -213,19 +214,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
       >
         PNG出力
       </button>
-      {/* スペーサー兼・重なり警告の置き場。min-w-0 + max-w-full の truncate で
-          余り幅にだけ収まり、狭い画面でもボタン群を圧迫しない (@codex #310 R5)。 */}
-      <div className="flex-1 min-w-0 text-right">
-        {layoutWarning && !error && (
-          <span
-            data-toolbar-layout-warning
-            title={layoutWarning}
-            className="inline-block max-w-full truncate align-middle text-sm text-amber-700 dark:text-amber-400"
-          >
-            {layoutWarning}
-          </span>
-        )}
-      </div>
+      <div className="flex-1" />
       {error && (
         <span
           data-toolbar-error
@@ -243,6 +232,17 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
       >
         {deleting ? "削除中…" : "削除"}
       </button>
+    </div>
+    {/* B-8: 文字・表の重なり注意はボタン行と競合しない独立行に全文表示する
+        (@codex #310 R4/R6: flex 行内だと幅次第で折返し崩れ or 0 幅で消える)。 */}
+    {layoutWarning && !error && (
+      <p
+        data-toolbar-layout-warning
+        className="px-4 pb-1.5 text-sm text-amber-700 dark:text-amber-400"
+      >
+        {layoutWarning}
+      </p>
+    )}
     </div>
   );
 }
