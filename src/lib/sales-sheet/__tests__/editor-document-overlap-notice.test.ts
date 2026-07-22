@@ -220,9 +220,10 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(1);
   });
 
-  it("タブは次のタブストップ(空白8個分)まで送って見積る (@codex #310 R14)", () => {
-    // 「あ\tあ」はタブ送りで約 24.6mm に達し x=110 の表と重なるが、
-    // 「ああ」(約8.5mm) なら届かない
+  it("タブは次のタブストップ(空白8個分)まで送って見積る (@codex #310 R14/R27)", () => {
+    // プロポーショナルの空白は約0.3em → タブストップは約2.4em。
+    // 「あ\tあ」は約 14.4mm に達し x=110 の表と重なるが、「ああ」(約8.5mm)
+    // なら届かない
     const tabbed = {
       id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
       content: "あ\tあ", style: {},
@@ -231,6 +232,10 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(makeDoc([tabbed, tbl]))).toHaveLength(1);
     const plain = { ...tabbed, content: "ああ" };
     expect(findTextTableOverlaps(makeDoc([plain, tbl]))).toHaveLength(0);
+    // タブ送りは実描画より右へ伸ばさない: x=116 の表には届かない
+    // (旧 0.6em 空白基準のタブストップだと約 24.6mm で誤って重なっていた)
+    const tblFar = table("overview", 116, 30, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([tabbed, tblFar]))).toHaveLength(0);
   });
 
   it("表セルは連続空白が潰れ・空行は文字行を作らない (@codex #310 R15)", () => {

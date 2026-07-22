@@ -1610,9 +1610,13 @@ function measureParagraph(
     if (/[A-Z]/.test(ch)) return 0.7;
     return 0.6;
   };
-  // タブストップ幅: ブラウザ既定 tab-size:8 = 空白8個分 ≒ 8×0.6em
+  // 空白 (U+0020) の字送り: monospace は他と同じ 0.6em・プロポーショナルの
+  // 空白グリフは細く ≒0.3em (@codex #310 R27: 0.6em だとタブストップと行詰めが
+  // 実描画より右へ伸びて誤検知する)。
+  const SPACE_EM = mono ? 0.6 : 0.3;
+  // タブストップ幅: ブラウザ既定 tab-size:8 = 空白8個分
   // (@codex #310 R14: タブを空白1個で数えると貼り付けた表形式文字列を過小見積り)
-  const TAB_STOP_EM = 8 * 0.6;
+  const TAB_STOP_EM = 8 * SPACE_EM;
 
   // 単一パスの貪欲行詰め。maxLines 行が確定した時点で走査を打ち切る
   // (@codex #310 R16/R18: 巨大貼り付けの同期計測対策を文字数 slice でなく
@@ -1628,11 +1632,11 @@ function measureParagraph(
   let afterClip = false;
   const emitSpace = (): void => {
     afterClip = false;
-    if (cur + 0.6 > charsPerLine) {
+    if (cur + SPACE_EM > charsPerLine) {
       lineWidths.push(cur);
-      cur = 0.6;
+      cur = SPACE_EM;
     } else {
-      cur += 0.6;
+      cur += SPACE_EM;
     }
   };
   const emitBlock = (w: number): void => {
