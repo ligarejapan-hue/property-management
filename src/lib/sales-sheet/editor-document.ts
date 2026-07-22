@@ -1507,6 +1507,58 @@ function estimatedTableHeightMm(el: TableElement, asciiEm: number): number {
  * 折返し(箱幅・全角=フォント幅1文字)と行数から文字域を見積り、textAlign に
  * 応じて箱内の位置を決める (縦方向は上詰め描画)。
  */
+/**
+ * 段落 1 つの折返し行数と最大行幅 (実効文字数) の概算。
+ *
+ * レンダラの text は white-space: pre-wrap のみで overflow-wrap を持たないため、
+ * 連続する非空白 ASCII (識別子・URL 等) は塊内で折り返されず横方向に clip される
+ * (@codex #310 R7: 塊を charsPerLine で機械的に割ると縦に伸びない文字を伸びた
+ * 扱いにして誤検知する)。全角は 1 文字ごと・空白位置では折返し可として
+ * 貪欲に行詰めする。
+ */
+function measureParagraph(
+  para: string,
+  charsPerLine: number,
+  asciiEm: number,
+): { lines: number; maxLineChars: number } {
+  // 折返し単位列: 正 = その幅の折返し不可塊 / -1 = 空白 (区切り・幅 asciiEm)
+  const units: number[] = [];
+  let asciiRun = 0;
+  for (const ch of para) {
+    if (ch.charCodeAt(0) <= 0xff && ch !== " ") {
+      asciiRun += asciiEm;
+      continue;
+    }
+    if (asciiRun > 0) units.push(asciiRun);
+    asciiRun = 0;
+    units.push(ch === " " ? -1 : 1);
+  }
+  if (asciiRun > 0) units.push(asciiRun);
+
+  let lines = 1;
+  let cur = 0;
+  let maxLineChars = 0;
+  for (const u of units) {
+    const w = u === -1 ? asciiEm : u;
+    if (u !== -1 && w > charsPerLine) {
+      // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)
+      if (cur > 0) lines += 1;
+      maxLineChars = Math.max(maxLineChars, charsPerLine, cur);
+      cur = charsPerLine; // この行は埋まった扱い (次の単位で改行される)
+      continue;
+    }
+    if (cur + w > charsPerLine) {
+      lines += 1;
+      maxLineChars = Math.max(maxLineChars, cur);
+      cur = w;
+    } else {
+      cur += w;
+    }
+  }
+  maxLineChars = Math.max(maxLineChars, cur);
+  return { lines, maxLineChars };
+}
+
 function textRenderedRectMm(
   el: TextElement,
   asciiEm: number,
@@ -1522,9 +1574,9 @@ function textRenderedRectMm(
   let lines = 0;
   let maxLineChars = 0;
   for (const para of el.content.split("\n")) {
-    const eff = effectiveCharCount(para, asciiEm);
-    lines += Math.max(1, Math.ceil(eff / charsPerLine));
-    maxLineChars = Math.max(maxLineChars, Math.min(eff, charsPerLine));
+    const m = measureParagraph(para, charsPerLine, asciiEm);
+    lines += m.lines;
+    maxLineChars = Math.max(maxLineChars, m.maxLineChars);
   }
   const w = Math.min(el.w, Math.max(maxLineChars * fontMm, fontMm));
   const h = Math.min(el.h, lines * lineMm);

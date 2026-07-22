@@ -157,6 +157,21 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(monoDoc)).toHaveLength(1);
   });
 
+  it("折返し不可のASCII塊は縦に伸びない扱い (横clip・@codex #310 R7)", () => {
+    // 幅 40mm の箱に空白なしの長い識別子 → pre-wrap では折り返されず横に clip
+    // されるため、下に置いた表とは重ならない (機械的に割ると 4 行分に伸びて誤検知)
+    const token = {
+      id: "code", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "A".repeat(60), style: {},
+    };
+    const doc = makeDoc([token, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 空白区切りなら折り返して縦に伸びる → 同じ表と重なる
+    const wrapped = { ...token, content: "ABCDEFG ".repeat(8) };
+    const doc2 = makeDoc([wrapped, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

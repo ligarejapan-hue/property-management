@@ -143,7 +143,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-auto-arrange
         onClick={onAutoArrange}
         disabled={busy}
-        title="写真がある場合に、写真の並びと概要表の位置を整えます。手で配置した文字・表・バッジ・QRは動きません"
+        title="写真がある場合に、写真の並びと概要表の位置を整えます。文字・バッジ・QR・概要表以外の表は動きません"
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         写真を自動整列
