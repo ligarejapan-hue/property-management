@@ -30,6 +30,18 @@ interface PinCreateModalProps {
   /** 地図クリック / 現在地で確定した座標。表示専用。 */
   initialLat: number;
   initialLng: number;
+  /**
+   * カメラファースト (撮って登録) 経由で既に撮影済みの写真。
+   * 指定時は modal を写真選択済み状態で開く (通常の地図タップ経路は null)。
+   */
+  initialPhotoFile?: File | null;
+  /**
+   * initialPhotoFile の preview 用 objectURL。親がイベントハンドラ内で生成して
+   * 渡す (render 中の createObjectURL を避ける: SSR 安全 + StrictMode の
+   * initializer 二重実行でもリークしない)。revoke は modal 側の既存 cleanup
+   * (差し替え / unmount) が担う。
+   */
+  initialPhotoPreviewUrl?: string | null;
   /** 親が把握している active session id。null は modal を mount しない前提。 */
   sessionId: string | null;
   saving: boolean;
@@ -64,6 +76,8 @@ interface PinCreateModalProps {
 export default function PinCreateModal({
   initialLat,
   initialLng,
+  initialPhotoFile,
+  initialPhotoPreviewUrl,
   sessionId,
   saving,
   serverError,
@@ -79,8 +93,12 @@ export default function PinCreateModal({
 }: PinCreateModalProps) {
   const [pinType, setPinType] = useState<FieldSurveyPinType>("candidate");
   const [memo, setMemo] = useState<string>("");
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  // カメラファースト経由の写真は選択済み状態で開始する。preview の objectURL は
+  // 親がイベントハンドラ内で生成済み (render 中に createObjectURL を呼ばない)。
+  const [photoFile, setPhotoFile] = useState<File | null>(initialPhotoFile ?? null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(
+    initialPhotoPreviewUrl ?? null,
+  );
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
