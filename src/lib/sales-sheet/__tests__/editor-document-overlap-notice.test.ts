@@ -354,6 +354,16 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(0);
   });
 
+  it("巨大な不可分連続をスキップしても後続の可視テキストは正しく測る (@codex #310 R25)", () => {
+    // 10万文字の不可分 ASCII (clip 1行) の後の空白+全角は 2 行目に載る
+    const hugeRun = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "a".repeat(100000) + " " + "あああ", style: {},
+    };
+    const doc = makeDoc([hugeRun, table("overview", 100, 16, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

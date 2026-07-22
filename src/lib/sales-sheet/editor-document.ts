@@ -1658,8 +1658,13 @@ function measureParagraph(
       cur += w;
     }
   };
+  // 飽和した不可分塊 (既に clip 確定) の残りを一括スキップするための
+  // 折返し可能点スキャナ (@codex #310 R25: 数百万文字の不可分連続でも
+  // native 検索で読み飛ばし、1 文字ずつの走査で main thread を塞がない)
+  const BREAK_SCAN = /[ \t\n\r\-/]|[^\x00-\xff]/g;
   let prevWasCr = false;
-  for (const ch of para) {
+  for (let i = 0; i < para.length; i++) {
+    const ch = para[i];
     if (lineWidths.length >= maxLines) return lineWidths; // 可視行ぶん確定済み
     // CRLF/CR は 1 つの改行として扱う (@codex #310 R22: \r を印字グリフとして
     // 0.6em 加算しない。レンダラは \r\n を 1 つの改行として描く)
@@ -1694,6 +1699,12 @@ function measureParagraph(
         // URL・パスはスラッシュ位置で実際に折り返されて縦に伸びる)
         emitBlock(asciiRun);
         asciiRun = 0;
+      } else if (asciiRun > charsPerLine) {
+        // この塊は clip 確定 (@codex R25)。残りは次の折返し可能点まで
+        // 一括スキップ (幅は既に飽和しており結果に影響しない)
+        BREAK_SCAN.lastIndex = i + 1;
+        const m = BREAK_SCAN.exec(para);
+        i = (m ? m.index : para.length) - 1;
       }
       continue;
     }
