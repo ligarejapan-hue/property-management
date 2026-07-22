@@ -1478,8 +1478,10 @@ function estimatedTableHeightMm(
   // 左右 padding 1mm×2 相当を引いたセル幅。極端に狭い表でも 1 文字分は確保。
   const labelW = Math.max(el.w * 0.32 - 2, fontMm);
   const valueW = Math.max(el.w * 0.68 - 2, fontMm);
-  const labelChars = Math.max(1, Math.floor(labelW / fontMm));
-  const valueChars = Math.max(1, Math.floor(valueW / fontMm));
+  // 行容量 (em) は端数を保つ (@codex #310 R24: floor すると実際には収まる
+  // 混在幅の塊を clip 扱いにしてしまう)
+  const labelChars = Math.max(0.1, labelW / fontMm);
+  const valueChars = Math.max(0.1, valueW / fontMm);
   // 判定はページ内要素との交差にしか使わないため、高さ maxHeightMm (ページ高
   // 相当) 分を超えたら行数・走査とも打ち切ってよい (@codex #310 R17/R18:
   // 巨大セルの同期計測で main thread を塞がない・切り詰めは行数上限で行う)。
@@ -1741,7 +1743,8 @@ interface RectMm {
 function textRenderedLineRectsMm(el: TextElement, mono: boolean): RectMm[] {
   const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
   const lineMm = fontMm * (el.style.lineHeight ?? 1.2);
-  const charsPerLine = Math.max(1, Math.floor(el.w / fontMm));
+  // 行容量 (em) は端数を保つ (@codex #310 R24)
+  const charsPerLine = Math.max(0.1, el.w / fontMm);
   // 箱の高さを超える行は描画されない (overflow hidden) ため、計測も可視行数で
   // 打ち切る (@codex #310 R16/R18: 巨大な貼り付けで useMemo の同期計測が
   // main thread を塞がない。文字数 slice でなく行数上限で打ち切ることで、

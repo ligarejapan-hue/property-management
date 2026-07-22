@@ -343,6 +343,17 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(0);
   });
 
+  it("行容量は端数を保つ=収まる混在幅の塊をclip扱いしない (@codex #310 R24)", () => {
+    // 幅 10mm(12pt で約2.36em) の箱に「MMi」(0.9+0.9+0.35=2.15em ≒9.1mm)。
+    // floor(2em) だと clip=全幅扱いになり x=109.2 の表と誤って重なる
+    const mixed = {
+      id: "code", type: "text", x: 100, y: 40, w: 10, h: 10, z: 5,
+      content: "MMi", style: {},
+    };
+    const doc = makeDoc([mixed, table("overview", 109.2, 40, 60, 20)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
