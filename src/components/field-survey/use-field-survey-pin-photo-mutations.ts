@@ -114,6 +114,9 @@ export function useFieldSurveyPinPhotoMutations() {
       try {
         // 送信前に端末内で自動変換 (HEIC → JPEG / 8MB 超の縮小)。変換できない
         // 端末ではサーバー 422 の代わりに平易な案内 (「互換性優先」設定) を返す。
+        // decode 資源 (ImageBitmap / objectURL) は prepare 関数内部の
+        // try/finally で必ず解放されてから返るため、直後の unmount early
+        // return が資源を保持することはない。
         const prepared = await prepareFieldSurveyPhotoForUpload(file);
         if (!mountedRef.current) return { ok: false };
         if (!prepared.ok) {
