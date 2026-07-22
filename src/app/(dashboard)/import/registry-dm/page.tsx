@@ -228,6 +228,12 @@ export default function RegistryDmImportPage() {
               {rpPreview.summary.noAddressCount}件
             </p>
           )}
+          {/* B-11(@codex R1 P1): 種別を自動判定できなかったときの注意をこのウィザードでも表示 */}
+          {rpPreview?.receptionFileType.warning && (
+            <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+              {rpPreview.receptionFileType.warning}
+            </p>
+          )}
           {rpResult && (
             <p className="text-sm text-emerald-700 dark:text-emerald-400">
               取込完了: 作成 {rpResult.successCount}件 / 要確認{" "}
@@ -394,6 +400,17 @@ export default function RegistryDmImportPage() {
               {roPreview.summary.propertyNotFoundCount}件 / 所有者一致{" "}
               {roPreview.summary.ownerMatchedCount}件
             </p>
+          )}
+          {/* B-11(@codex R1 P1): 種別を自動判定できなかったときの注意をこのウィザードでも表示 */}
+          {(roPreview?.receptionFileType.warning || roPreview?.ownerFileType.warning) && (
+            <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+              {roPreview.receptionFileType.warning && (
+                <p>{roPreview.receptionFileType.warning}</p>
+              )}
+              {roPreview.ownerFileType.warning && (
+                <p>{roPreview.ownerFileType.warning}</p>
+              )}
+            </div>
           )}
           {roResult && (
             <p className="text-sm text-emerald-700 dark:text-emerald-400">

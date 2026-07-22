@@ -1358,8 +1358,16 @@ export interface ReceptionOwnerPreviewResponse {
     lotNumber: string | null;
     buildingNumber: string | null;
   }>;
-  receptionFileType: { type: string; label: string | null; error: string | null };
-  ownerFileType: { type: string; label: string | null; error: string | null };
+  receptionFileType: ImportFileTypeInfo;
+  ownerFileType: ImportFileTypeInfo;
+}
+
+/** B-11: サーバー側ファイル種別判定の表示用情報 (warning は注意喚起・任意)。 */
+export interface ImportFileTypeInfo {
+  type: string;
+  label: string | null;
+  error: string | null;
+  warning?: string | null;
 }
 
 export type ReceptionDlFilter = "marked" | "unmarked" | "all";
@@ -1487,7 +1495,7 @@ export interface ReceptionPropertyPreviewResponse {
     propertyAddress: string;
     existingPropertyId: string;
   }>;
-  receptionFileType: { type: string; label: string | null; error: string | null };
+  receptionFileType: ImportFileTypeInfo;
 }
 
 export interface ReceptionPropertyImportResponse {

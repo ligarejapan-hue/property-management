@@ -10,7 +10,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
-import { detectImportFileType } from "@/lib/import-file-type";
+import { resolveImportFileType } from "@/lib/import-content-detect";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import {
   parseReceptionRows,
@@ -113,23 +113,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const receptionDetect = detectImportFileType(receptionFileName);
-    const ownerDetect = detectImportFileType(ownerFileName);
-    if (receptionDetect.type !== "reception") {
-      throw new ApiError(
-        422,
-        `受付帳ファイルとして認識できません: ${receptionDetect.error ?? "ファイル名に『受付帳』を含めてください"}`,
-        "VALIDATION_ERROR",
-      );
-    }
-    if (ownerDetect.type !== "owner") {
-      throw new ApiError(
-        422,
-        `所有者ファイルとして認識できません: ${ownerDetect.error ?? "ファイル名に『所有者』を含めてください"}`,
-        "VALIDATION_ERROR",
-      );
-    }
-
     // パース（csv / xlsx 共通）
     let receptionParsed: ReturnType<typeof parseSheet>;
     let ownerParsed: ReturnType<typeof parseSheet>;
@@ -150,16 +133,49 @@ export async function POST(request: NextRequest) {
       }
       throw e;
     }
+    const receptionPositional = toPositionalRows(
+      receptionParsed.headers,
+      receptionParsed.rows,
+    );
+    const ownerPositional = toPositionalRows(
+      ownerParsed.headers,
+      ownerParsed.rows,
+    );
+
+    // ファイル種別チェック (B-11: preview route と同じ純関数・同じ入力で判定し、
+    // プレビュー通過 = 本取込も通過を保証する。取り違えのみ 422)
+    const receptionResolved = resolveImportFileType(
+      "reception",
+      receptionFileName,
+      receptionParsed.headers,
+      receptionPositional,
+    );
+    if (!receptionResolved.ok) {
+      throw new ApiError(
+        422,
+        `受付帳ファイルとして認識できません: ${receptionResolved.error}`,
+        "VALIDATION_ERROR",
+      );
+    }
+    const ownerResolved = resolveImportFileType(
+      "owner",
+      ownerFileName,
+      ownerParsed.headers,
+      ownerPositional,
+    );
+    if (!ownerResolved.ok) {
+      throw new ApiError(
+        422,
+        `所有者ファイルとして認識できません: ${ownerResolved.error}`,
+        "VALIDATION_ERROR",
+      );
+    }
+
     const receptionRows = applyReceptionFilters(
-      parseReceptionRows(
-        toPositionalRows(receptionParsed.headers, receptionParsed.rows),
-      ),
+      parseReceptionRows(receptionPositional),
       filterOptions,
     );
-    const ownerRows = parseOwnerRows(
-      ownerParsed.headers,
-      toPositionalRows(ownerParsed.headers, ownerParsed.rows),
-    );
+    const ownerRows = parseOwnerRows(ownerParsed.headers, ownerPositional);
 
     // 既存物件
     const existing = await prisma.property.findMany({
