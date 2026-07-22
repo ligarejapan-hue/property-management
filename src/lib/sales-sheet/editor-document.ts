@@ -1514,9 +1514,15 @@ function maxUnbreakableRunEm(
 ): number {
   const WIDE_ASCII = /[MWmw@#%&]/;
   const NARROW_ASCII = /[ijlI.,;:!'|]/;
+  // ページ内 (可視域) に描かれ得る文字数を大きく超える走査はしない
+  // (@codex #310 R33: 区切りの多い巨大セル値でも全走査で UI を塞がない。
+  //  これより後の塊はページ外の行にしか現れず判定に影響しない)
+  const SCAN_CHAR_CAP = 10000;
+  let scanned = 0;
   let run = 0;
   let max = 0;
   for (const ch of s) {
+    if (++scanned > SCAN_CHAR_CAP) break;
     if (ch.charCodeAt(0) <= 0xff) {
       if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
         max = Math.max(max, run);
