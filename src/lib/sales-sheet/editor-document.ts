@@ -1745,6 +1745,10 @@ function measureParagraph(
       if (collapseWs) {
         // セル (white-space: normal) は連続空白を 1 個に潰し、先頭空白は捨てる
         if (sawContent) pendingWs = true;
+      } else if (afterClip && cur === 0) {
+        // clip 行の直後の空白/タブは clip 行の行末に掛かる (pre-wrap は行末
+        // 空白を次行へ送らない) ため、新しい行を作らない (@codex #310 R32)。
+        // afterClip は維持し、続く改行も clip 行を終えるだけにする。
       } else if (ch === "\t") {
         // 次のタブストップへ送る (行幅は超えない)。タブ自体は折返し可能点。
         afterClip = false;

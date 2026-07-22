@@ -423,6 +423,17 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(makeDoc([padded, underGlyph]))).toHaveLength(1);
   });
 
+  it("clip行直後の空白は行末扱いで新行を作らない (@codex #310 R32)", () => {
+    // 「巨大トークン + 空白×3 + 改行 + あ×5」→ あ は 2 行目 (可視) に載る。
+    // 空白が新行を作ると あ が 3 行目扱いになり h=10 の外で見逃す
+    const clipWsNewline = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 10, z: 5,
+      content: "a".repeat(500) + "   \n" + "あ".repeat(5), style: {},
+    };
+    const doc = makeDoc([clipWsNewline, table("overview", 100, 16, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
