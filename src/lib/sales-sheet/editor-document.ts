@@ -1466,7 +1466,11 @@ function isMonospaceFamily(family: string | undefined): boolean {
  * 行ごとに「セル幅(label 32% / value 68%)に収まらない分の折返し行数」を
  * 全角=フォント幅 1 文字分として概算する (厳密なテキスト実測はしない)。
  */
-function estimatedTableHeightMm(el: TableElement, mono: boolean): number {
+function estimatedTableHeightMm(
+  el: TableElement,
+  mono: boolean,
+  maxHeightMm: number,
+): number {
   // fontSizePt 未指定時、両レンダラは font-size を出力せずブラウザ既定の
   // 16px = 12pt を継承する (@codex #310 R3: 9pt と仮定すると過小見積りになる)。
   const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
@@ -1476,11 +1480,17 @@ function estimatedTableHeightMm(el: TableElement, mono: boolean): number {
   const valueW = Math.max(el.w * 0.68 - 2, fontMm);
   const labelChars = Math.max(1, Math.floor(labelW / fontMm));
   const valueChars = Math.max(1, Math.floor(valueW / fontMm));
+  // 判定はページ内要素との交差にしか使わないため、高さ maxHeightMm (ページ高
+  // 相当) 分を超えたら打ち切ってよい。セル文字列も「その高さを満たすのに十分な
+  // 文字数」(最小字送り 0.35em ≒ 1em あたり約3文字) で切り詰めてから正規化する
+  // (@codex #310 R17: 巨大セルの同期計測で main thread を塞がない)。
+  const lineCap = Math.max(1, Math.ceil(maxHeightMm / lineMm));
+  const charCap = lineCap * Math.max(labelChars, valueChars) * 3;
   // セルは white-space: normal (@codex #310 R15): 連続空白・タブ・改行は
   // 1 つの空白に潰れ、空セルは文字行を作らない。正規化してから text と同じ
   // 貪欲行詰め (@codex R8: 空白なし ASCII 塊は折り返されない) で数える。
   const cellLines = (s: string, chars: number): number => {
-    const normalized = s.replace(/\s+/g, " ").trim();
+    const normalized = s.slice(0, charCap).replace(/\s+/g, " ").trim();
     return normalized === ""
       ? 0
       : measureParagraph(normalized, chars, mono).length;
@@ -1493,6 +1503,7 @@ function estimatedTableHeightMm(el: TableElement, mono: boolean): number {
     );
     // 空行でも罫線+上下 padding (≒1.4mm) は残る
     total += rowLines * lineMm + 1.4;
+    if (total >= maxHeightMm) return total; // これ以上は判定に影響しない
   }
   return total;
 }
@@ -1677,7 +1688,10 @@ export function findTextTableOverlaps(
                 x: e.x,
                 y: e.y,
                 w: e.w,
-                h: Math.max(e.h, estimatedTableHeightMm(e, themeMono)),
+                h: Math.max(
+                  e.h,
+                  estimatedTableHeightMm(e, themeMono, document.page.height),
+                ),
               },
             ],
           },
