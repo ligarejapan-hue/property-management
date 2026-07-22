@@ -446,6 +446,20 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
+  it("完全透明の文字色は描画されないため対象外 (@codex #310 R35)", () => {
+    const invisible = {
+      id: "price", type: "text", x: 100, y: 40, w: 40, h: 10, z: 5,
+      content: "価格", style: { color: "rgba(0,0,0,0)" },
+    };
+    const tbl = table("overview", 100, 40, 60, 20);
+    expect(findTextTableOverlaps(makeDoc([invisible, tbl]))).toHaveLength(0);
+    const transparent = { ...invisible, style: { color: "transparent" } };
+    expect(findTextTableOverlaps(makeDoc([transparent, tbl]))).toHaveLength(0);
+    // 可視色なら従来どおり検出
+    const visible = { ...invisible, style: { color: "#d0331a" } };
+    expect(findTextTableOverlaps(makeDoc([visible, tbl]))).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

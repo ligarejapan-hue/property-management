@@ -1807,6 +1807,25 @@ function measureParagraph(
   return lines;
 }
 
+/**
+ * 完全に透明な文字色か (transparent / rgba(...,0) / #RGB0 / #RRGGBB00)。
+ * 透明な text は描画されないため重なり判定の対象外にする (@codex #310 R35)。
+ */
+function isFullyTransparentColor(color: string | undefined): boolean {
+  if (!color) return false;
+  const c = color.trim().toLowerCase();
+  if (c === "transparent") return true;
+  const fn = c.match(/^(?:rgba|hsla)\(([^)]*)\)$/);
+  if (fn) {
+    const parts = fn[1].split(/[,/]/);
+    const alpha = parseFloat(parts[3] ?? "1");
+    return alpha === 0;
+  }
+  if (/^#[0-9a-f]{4}$/.test(c)) return c[4] === "0";
+  if (/^#[0-9a-f]{8}$/.test(c)) return c.slice(-2) === "00";
+  return false;
+}
+
 interface MeasuredLine {
   /** 行頭からグリフ開始までの空白送り (em)。clip 行は 0 */
   lead: number;
@@ -1890,7 +1909,11 @@ export function findTextTableOverlaps(
   const entries = document.elements
     .filter(
       (e): e is TextElement | TableElement =>
-        (e.type === "text" && e.content.trim() !== "") ||
+        (e.type === "text" &&
+          e.content.trim() !== "" &&
+          // 完全透明の文字色は描画されない (@codex #310 R35。表は罫線が
+          // 残るため対象のまま)
+          !isFullyTransparentColor(e.style.color)) ||
         (e.type === "table" && e.rows.length > 0),
     )
     .map((e) =>
