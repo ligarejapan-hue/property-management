@@ -268,6 +268,18 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(makeDoc([bigPaste, onVisible]))).toHaveLength(1);
   });
 
+  it("長大な不可分塊の後に続く可視テキストも取りこぼさない (@codex #310 R18)", () => {
+    // 巨大な URL(不可分・1 行 clip) の後の空白区切りテキストは 2 行目以降の
+    // 可視行に折り返される → その行帯に置いた表と重なる
+    const urlThenText = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "https://example.com/" + "a".repeat(500) + " " + "ABCDEFG ".repeat(6),
+      style: {},
+    };
+    const doc = makeDoc([urlThenText, table("overview", 100, 16, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

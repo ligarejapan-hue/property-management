@@ -1481,20 +1481,13 @@ function estimatedTableHeightMm(
   const labelChars = Math.max(1, Math.floor(labelW / fontMm));
   const valueChars = Math.max(1, Math.floor(valueW / fontMm));
   // 判定はページ内要素との交差にしか使わないため、高さ maxHeightMm (ページ高
-  // 相当) 分を超えたら打ち切ってよい。セル文字列も「その高さを満たすのに十分な
-  // 文字数」(最小字送り 0.35em ≒ 1em あたり約3文字) で切り詰めてから正規化する
-  // (@codex #310 R17: 巨大セルの同期計測で main thread を塞がない)。
+  // 相当) 分を超えたら行数・走査とも打ち切ってよい (@codex #310 R17/R18:
+  // 巨大セルの同期計測で main thread を塞がない・切り詰めは行数上限で行う)。
   const lineCap = Math.max(1, Math.ceil(maxHeightMm / lineMm));
-  const charCap = lineCap * Math.max(labelChars, valueChars) * 3;
   // セルは white-space: normal (@codex #310 R15): 連続空白・タブ・改行は
-  // 1 つの空白に潰れ、空セルは文字行を作らない。正規化してから text と同じ
-  // 貪欲行詰め (@codex R8: 空白なし ASCII 塊は折り返されない) で数える。
-  const cellLines = (s: string, chars: number): number => {
-    const normalized = s.slice(0, charCap).replace(/\s+/g, " ").trim();
-    return normalized === ""
-      ? 0
-      : measureParagraph(normalized, chars, mono).length;
-  };
+  // 1 つの空白に潰れ、空セルは文字行を作らない (collapseWs=true)。
+  const cellLines = (s: string, chars: number): number =>
+    measureParagraph(s, chars, mono, lineCap + 1, true).length;
   let total = 0;
   for (const r of el.rows) {
     const rowLines = Math.max(
@@ -1529,6 +1522,8 @@ function measureParagraph(
   para: string,
   charsPerLine: number,
   mono: boolean,
+  maxLines: number,
+  collapseWs: boolean,
 ): number[] {
   // ASCII の字送り: monospace は均一 ≒0.6em (Courier 等。1em はフォントサイズで
   // ありグリフ幅ではない・@codex #310 R11)。プロポーショナルは段階化する
@@ -1544,50 +1539,37 @@ function measureParagraph(
     if (/[A-Z]/.test(ch)) return 0.7;
     return 0.6;
   };
-  // 折返し単位列: 正 = その幅の折返し不可塊 / -1 = 空白 (区切り・幅 0.6em)
-  const units: number[] = [];
-  let asciiRun = 0;
-  for (const ch of para) {
-    if (ch.charCodeAt(0) <= 0xff && ch !== " " && ch !== "\t") {
-      asciiRun += charEm(ch);
-      if (ch === "-") {
-        // ハイフンの直後は CSS の折返し可能点 (@codex #310 R9:
-        // ABC-DEF-… のようなハイフン区切りは実際に折り返されて縦に伸びる)
-        units.push(asciiRun);
-        asciiRun = 0;
-      }
-      continue;
-    }
-    if (asciiRun > 0) units.push(asciiRun);
-    asciiRun = 0;
-    // -1 = 空白 / -2 = タブ (pre-wrap はタブを保持し次のタブストップまで送る)
-    units.push(ch === " " ? -1 : ch === "\t" ? -2 : 1);
-  }
-  if (asciiRun > 0) units.push(asciiRun);
-
   // タブストップ幅: ブラウザ既定 tab-size:8 = 空白8個分 ≒ 8×0.6em
   // (@codex #310 R14: タブを空白1個で数えると貼り付けた表形式文字列を過小見積り)
   const TAB_STOP_EM = 8 * 0.6;
 
-  // 行ごとの実効文字数を返す (@codex #310 R13: 行別の矩形判定に使う)
+  // 単一パスの貪欲行詰め。maxLines 行が確定した時点で走査を打ち切る
+  // (@codex #310 R16/R18: 巨大貼り付けの同期計測対策を文字数 slice でなく
+  // 行数上限で行う = 長大な不可分塊の後に続く可視テキストを取りこぼさない)。
   const lineWidths: number[] = [];
   let cur = 0;
-  for (const u of units) {
-    if (u === -2) {
-      // 次のタブストップへ送る (行幅は超えない)。タブ自体は折返し可能点。
-      cur = Math.min(
-        charsPerLine,
-        (Math.floor(cur / TAB_STOP_EM) + 1) * TAB_STOP_EM,
-      );
-      continue;
+  let asciiRun = 0;
+  let sawContent = false;
+  let pendingWs = false; // collapseWs 用 (連続空白を 1 個に潰す)
+  const emitSpace = (): void => {
+    if (cur + 0.6 > charsPerLine) {
+      lineWidths.push(cur);
+      cur = 0.6;
+    } else {
+      cur += 0.6;
     }
-    const w = u === -1 ? 0.6 : u;
-    if (u !== -1 && w > charsPerLine) {
+  };
+  const emitBlock = (w: number): void => {
+    if (pendingWs) {
+      pendingWs = false;
+      emitSpace();
+    }
+    if (w > charsPerLine) {
       // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)
       if (cur > 0) lineWidths.push(cur);
       lineWidths.push(charsPerLine);
       cur = 0;
-      continue;
+      return;
     }
     if (cur + w > charsPerLine) {
       lineWidths.push(cur);
@@ -1595,8 +1577,45 @@ function measureParagraph(
     } else {
       cur += w;
     }
+  };
+  for (const ch of para) {
+    if (lineWidths.length >= maxLines) return lineWidths; // 可視行ぶん確定済み
+    const isWs = ch === " " || ch === "\t" || (collapseWs && ch === "\n");
+    if (!isWs && ch.charCodeAt(0) <= 0xff) {
+      sawContent = true;
+      asciiRun += charEm(ch);
+      if (ch === "-") {
+        // ハイフンの直後は CSS の折返し可能点 (@codex #310 R9)
+        emitBlock(asciiRun);
+        asciiRun = 0;
+      }
+      continue;
+    }
+    if (asciiRun > 0) {
+      emitBlock(asciiRun);
+      asciiRun = 0;
+    }
+    if (isWs) {
+      if (collapseWs) {
+        // セル (white-space: normal) は連続空白を 1 個に潰し、先頭空白は捨てる
+        if (sawContent) pendingWs = true;
+      } else if (ch === "\t") {
+        // 次のタブストップへ送る (行幅は超えない)。タブ自体は折返し可能点。
+        cur = Math.min(
+          charsPerLine,
+          (Math.floor(cur / TAB_STOP_EM) + 1) * TAB_STOP_EM,
+        );
+      } else {
+        emitSpace();
+      }
+    } else {
+      sawContent = true;
+      emitBlock(1); // 全角 1 文字 (どこでも折返し可)
+    }
   }
-  lineWidths.push(cur);
+  if (asciiRun > 0) emitBlock(asciiRun);
+  if (collapseWs && !sawContent) return []; // 空セルは文字行を作らない (R15)
+  if (cur > 0 || lineWidths.length === 0) lineWidths.push(cur);
   return lineWidths;
 }
 
@@ -1619,15 +1638,22 @@ function textRenderedLineRectsMm(el: TextElement, mono: boolean): RectMm[] {
   const lineMm = fontMm * (el.style.lineHeight ?? 1.2);
   const charsPerLine = Math.max(1, Math.floor(el.w / fontMm));
   // 箱の高さを超える行は描画されない (overflow hidden) ため、計測も可視行数で
-  // 打ち切る (@codex #310 R16: 巨大な貼り付けで useMemo の同期計測が main thread
-  // を塞がないように)。段落は可視行を満たすのに十分な文字数 (最小字送り 0.35em
-  // ≒ 1em あたり約3文字) までで切り詰めてから測る。
+  // 打ち切る (@codex #310 R16/R18: 巨大な貼り付けで useMemo の同期計測が
+  // main thread を塞がない。文字数 slice でなく行数上限で打ち切ることで、
+  // 長大な不可分塊の後に続く可視テキストを取りこぼさない)。
   const maxLines = Math.max(1, Math.ceil(el.h / lineMm));
-  const charCap = Math.ceil(maxLines * charsPerLine * 3);
   const lineChars: number[] = [];
   for (const para of el.content.split("\n")) {
     if (lineChars.length >= maxLines) break;
-    lineChars.push(...measureParagraph(para.slice(0, charCap), charsPerLine, mono));
+    lineChars.push(
+      ...measureParagraph(
+        para,
+        charsPerLine,
+        mono,
+        maxLines - lineChars.length,
+        false,
+      ),
+    );
   }
   const rects: RectMm[] = [];
   for (let i = 0; i < lineChars.length; i++) {
