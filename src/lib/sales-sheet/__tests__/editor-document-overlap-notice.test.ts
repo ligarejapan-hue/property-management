@@ -1,0 +1,472 @@
+/**
+ * B-8 (UI総点検): 文字・表どうしの重なり検知 (findTextTableOverlaps)。
+ *
+ * 自動整列/自動調整は自由配置の文字・表を動かさない仕様(手動配置の尊重・
+ * editor-document-autobalance.test.ts で固定)のため、重なりが出力(PDF/PNG)に
+ * そのまま残り得る。read-only の検知ヘルパで編集画面に注意を出す。
+ *
+ * 対象は text×text / text×table / table×table のみ:
+ * - 写真の上の文字 (キャプション等) や帯 (shape) の上の見出しは意図的な重なりの
+ *   定番なので対象外
+ */
+import { describe, it, expect } from "vitest";
+import { findTextTableOverlaps } from "../editor-document";
+import {
+  parseSalesSheetDocument,
+  A4_LANDSCAPE,
+  type SalesSheetDocument,
+} from "../document-schema";
+
+function makeDoc(elements: unknown[]): SalesSheetDocument {
+  return parseSalesSheetDocument({
+    page: A4_LANDSCAPE,
+    theme: { fontFamily: "sans-serif", accentColor: "#1f4e79" },
+    elements,
+  });
+}
+
+const text = (id: string, x: number, y: number, w = 40, h = 10) => ({
+  id, type: "text", x, y, w, h, z: 5, content: "テキスト", style: {},
+});
+const table = (id: string, x: number, y: number, w = 80, h = 60) => ({
+  id, type: "table", x, y, w, h, z: 1,
+  rows: [{ label: "物件種別", value: "売地" }], style: {},
+});
+const image = (id: string, x: number, y: number, w = 90, h = 60) => ({
+  id, type: "image", x, y, w, h, z: 2, src: "/uploads/properties/a/1.jpg", fit: "cover",
+});
+
+describe("findTextTableOverlaps", () => {
+  it("重なる text×table を 1 組として検出する (B-8 の価格 vs 概要表)", () => {
+    // text("price") の文字域は左上から約 17×5mm (4文字・既定12pt)
+    const doc = makeDoc([text("price", 100, 40), table("overview", 110, 30)]);
+    const pairs = findTextTableOverlaps(doc);
+    expect(pairs).toHaveLength(1);
+    expect([pairs[0].aId, pairs[0].bId].sort()).toEqual(["overview", "price"]);
+  });
+
+  it("重なる text×text も検出する", () => {
+    const doc = makeDoc([text("t1", 10, 10), text("t2", 20, 12)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
+  it("離れていれば検出しない", () => {
+    const doc = makeDoc([text("t1", 10, 10), table("overview", 120, 100)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
+  it("辺が接しているだけ (隣接) は重なり扱いしない", () => {
+    const doc = makeDoc([table("a", 10, 10, 40, 60), table("b", 50, 10, 40, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
+  it("ごくわずかな食い込み (0.5mm 以下) は許容して検出しない", () => {
+    const doc = makeDoc([table("a", 10, 10, 40, 60), table("b", 49.7, 10, 40, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
+  it("写真の上の文字 (意図的な重なりの定番) は対象外", () => {
+    const doc = makeDoc([image("img-1", 10, 10), text("caption", 12, 12)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
+  it("3 要素が相互に重なると組数で数える (t1×t2, t1×表, t2×表 = 3)", () => {
+    const doc = makeDoc([
+      text("t1", 100, 40, 60, 30),
+      text("t2", 105, 42, 60, 30),
+      table("overview", 90, 30, 100, 60),
+    ]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(3);
+  });
+
+  it("箱だけ大きい text の透明余白では警告しない (@codex #310 R5)", () => {
+    // 幅 120mm の箱に「価格」2文字 (左寄せ・文字域は左端の約8.5mm) — 箱の右側の
+    // 余白にだけ重なる表は出力上何も重ならないため検出しない
+    const wideBox = { id: "price", type: "text", x: 100, y: 40, w: 120, h: 40, z: 5, content: "価格", style: {} };
+    const doc = makeDoc([wideBox, table("overview", 150, 30, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 右寄せなら文字域は箱の右端 → 同じ表と重なる
+    const rightAligned = { ...wideBox, style: { align: "right" } };
+    const doc2 = makeDoc([rightAligned, table("overview", 150, 30, 80, 60)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(1);
+  });
+
+  it("行数が多く保存 h からはみ出して描画される表との重なりも検知する (@codex #310)", () => {
+    // レンダラは <table> を直接描くため、行が増えると CSS height(最小値扱い)を
+    // 超えて描画される。保存 h=10mm でも 8 行なら実描画は約44mm に達し、
+    // その範囲の文字と重なる。
+    const bigTable = {
+      id: "overview", type: "table", x: 100, y: 10, w: 80, h: 10, z: 1,
+      rows: Array.from({ length: 8 }, (_, i) => ({ label: `項目${i}`, value: "値" })),
+      style: {},
+    };
+    // 保存 h(10mm) の外・見積り高さ(約44mm)の内に置いた文字
+    const doc = makeDoc([bigTable, text("below", 110, 30)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+    // 行数が少なく保存 h に収まる表では、保存 h の外の文字は検知しない
+    const smallTable = { ...bigTable, id: "overview", rows: [{ label: "a", value: "b" }] };
+    const doc2 = makeDoc([smallTable, text("below", 110, 30)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
+  it("空文字の text (テンプレが保持する未入力枠) は対象外 (@codex #310 R2)", () => {
+    const emptyText = { id: "price", type: "text", x: 100, y: 40, w: 40, h: 10, z: 5, content: "", style: {} };
+    const doc = makeDoc([emptyText, table("overview", 100, 30)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 空白のみも対象外
+    const blankText = { ...emptyText, id: "sales-points", content: "  " };
+    const doc2 = makeDoc([blankText, table("overview", 100, 30)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
+  it("セル内の折返しで伸びた表との重なりも検知する (@codex #310 R2)", () => {
+    // 幅 40mm の表に長い値 (全角40文字) → value セル(約25mm)で複数行に折返し、
+    // 1 行の保存 h=8mm を大きく超えて描画される
+    const wrapTable = {
+      id: "overview", type: "table", x: 100, y: 10, w: 40, h: 8, z: 1,
+      rows: [{ label: "備考", value: "あ".repeat(40) }],
+      style: {},
+    };
+    const doc = makeDoc([wrapTable, text("below", 105, 22)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+    // 同じ表でも値が短ければ保存 h 相当のまま = 検知しない
+    const shortTable = { ...wrapTable, rows: [{ label: "備考", value: "短い" }] };
+    const doc2 = makeDoc([shortTable, text("below", 105, 22)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
+  it("ASCII の字送り: 幅広グリフ(大文字)は0.9em・monospaceは1emでなく実測相当0.6em (@codex #310 R10/R11)", () => {
+    // 小文字32字 (0.6em) → 文字域 約81mm = x=200 の表に届かない
+    const lower = {
+      id: "code", type: "text", x: 100, y: 40, w: 120, h: 10, z: 5,
+      content: "a".repeat(32), style: {},
+    };
+    const tbl = table("overview", 200, 30, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([lower, tbl]))).toHaveLength(0);
+    // 幅広グリフ32字 (M/W 等はプロポーショナルで 0.9em) → 箱幅近くまで届き重なる
+    const wide = { ...lower, content: "M".repeat(32) };
+    expect(findTextTableOverlaps(makeDoc([wide, tbl]))).toHaveLength(1);
+    // monospace でも ASCII の字送りは ≒0.6em (1em はフォントサイズでありグリフ幅
+    // ではない・Courier 等の実測) → 小文字32字は届かない (1em 扱いだと誤検知)
+    const monoDoc = parseSalesSheetDocument({
+      page: A4_LANDSCAPE,
+      theme: { fontFamily: "monospace", accentColor: "#1f4e79" },
+      elements: [lower, tbl],
+    });
+    expect(findTextTableOverlaps(monoDoc)).toHaveLength(0);
+  });
+
+  it("折返し不可のASCII塊は縦に伸びない扱い (横clip・@codex #310 R7)", () => {
+    // 幅 40mm の箱に空白なしの長い識別子 → pre-wrap では折り返されず横に clip
+    // されるため、下に置いた表とは重ならない (機械的に割ると 4 行分に伸びて誤検知)
+    const token = {
+      id: "code", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "a".repeat(60), style: {},
+    };
+    const doc = makeDoc([token, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 空白区切りなら折り返して縦に伸びる → 同じ表と重なる
+    const wrapped = { ...token, content: "ABCDEFG ".repeat(8) };
+    const doc2 = makeDoc([wrapped, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(1);
+  });
+
+  it("表セルの折返し不可ASCII塊も縦に伸びない扱い (@codex #310 R8)", () => {
+    // 空白なしの長い URL は value セル内で折り返されず横にはみ出す → 表は
+    // 1 行分のまま。下に置いた文字とは重ならない
+    const urlTable = {
+      id: "overview", type: "table", x: 100, y: 10, w: 80, h: 10, z: 1,
+      rows: [{ label: "URL", value: "https://example.com/" + "a".repeat(40) }],
+      style: {},
+    };
+    const doc = makeDoc([urlTable, text("below", 110, 24)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 空白区切りの長い値なら折り返して縦に伸びる → 同じ文字と重なる
+    const wrappedTable = {
+      ...urlTable,
+      rows: [{ label: "備考", value: "word ".repeat(24).trim() }],
+    };
+    const doc2 = makeDoc([wrappedTable, text("below", 110, 24)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(1);
+  });
+
+  it("ハイフン区切りのASCIIは折返し可能点で縦に伸びる (@codex #310 R9)", () => {
+    // ハイフン直後は CSS の折返し可能点 → 複数行に伸びて下の表と重なる
+    const hyphenated = {
+      id: "code", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "ABCD-".repeat(12), style: {},
+    };
+    const doc = makeDoc([hyphenated, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+    // 同じ長さでもハイフン無しの塊なら 1 行で clip → 重ならない
+    const unbroken = { ...hyphenated, content: "ABCDE".repeat(12) };
+    const doc2 = makeDoc([unbroken, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
+  it("複数行テキストは行ごとの矩形で判定 (短い行の横の余白では警告しない・@codex #310 R13)", () => {
+    // 1行目は長く2行目は1文字。2行目の横 (1行目の下・右側) に置いた表は
+    // 描画上どの行とも交差しないため検出しない
+    const multi = {
+      id: "note", type: "text", x: 100, y: 10, w: 100, h: 20, z: 5,
+      content: "あ".repeat(20) + "\n" + "あ", style: {},
+    };
+    const beside2ndLine = table("overview", 150, 15.5, 60, 60);
+    const doc = makeDoc([multi, beside2ndLine]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 1行目の行帯に掛かる位置なら検出する
+    const on1stLine = table("overview", 150, 12, 60, 60);
+    const doc2 = makeDoc([multi, on1stLine]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(1);
+  });
+
+  it("タブは次のタブストップ(空白8個分)まで送って見積る (@codex #310 R14/R27)", () => {
+    // プロポーショナルの空白は約0.3em → タブストップは約2.4em。
+    // 「あ\tあ」は約 14.4mm に達し x=110 の表と重なるが、「ああ」(約8.5mm)
+    // なら届かない
+    const tabbed = {
+      id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: "あ\tあ", style: {},
+    };
+    const tbl = table("overview", 110, 30, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([tabbed, tbl]))).toHaveLength(1);
+    const plain = { ...tabbed, content: "ああ" };
+    expect(findTextTableOverlaps(makeDoc([plain, tbl]))).toHaveLength(0);
+    // タブ送りは実描画より右へ伸ばさない: x=116 の表には届かない
+    // (旧 0.6em 空白基準のタブストップだと約 24.6mm で誤って重なっていた)
+    const tblFar = table("overview", 116, 30, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([tabbed, tblFar]))).toHaveLength(0);
+  });
+
+  it("表セルは連続空白が潰れ・空行は文字行を作らない (@codex #310 R15)", () => {
+    // white-space: normal のセルでは連続空白は 1 個に潰れる → 「あ あ あ」は
+    // 1 行に収まり、保存 h の外の文字と重ならない
+    const spacedTable = {
+      id: "overview", type: "table", x: 100, y: 10, w: 40, h: 8, z: 1,
+      rows: [{ label: "備考", value: ("あ" + " ".repeat(30)).repeat(3) }],
+      style: {},
+    };
+    const doc = makeDoc([spacedTable, text("below", 105, 22)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 空セルだけの行は文字行を作らない (罫線+padding のみ) → 6 行でも伸びない
+    const emptyRowsTable = {
+      ...spacedTable,
+      h: 10,
+      rows: Array.from({ length: 6 }, () => ({ label: "", value: " " })),
+    };
+    const doc2 = makeDoc([emptyRowsTable, text("below", 105, 22)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
+  it("箱の高さを超える貼り付けは可視行だけで判定する (@codex #310 R16)", () => {
+    // 50 行貼り付けても箱 h=10mm に入るのは約 2 行。3 行目以降は clip される
+    // ため、その位置に置いた表とは重ならない
+    const bigPaste = {
+      id: "note", type: "text", x: 100, y: 10, w: 100, h: 10, z: 5,
+      content: Array.from({ length: 50 }, () => "あ".repeat(10)).join("\n"),
+      style: {},
+    };
+    const belowClip = table("overview", 100, 25, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([bigPaste, belowClip]))).toHaveLength(0);
+    // 箱の内側 (可視行) に掛かる表は検出する
+    const onVisible = table("overview", 100, 14, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([bigPaste, onVisible]))).toHaveLength(1);
+  });
+
+  it("長大な不可分塊の後に続く可視テキストも取りこぼさない (@codex #310 R18)", () => {
+    // 巨大な URL(不可分・1 行 clip) の後の空白区切りテキストは 2 行目以降の
+    // 可視行に折り返される → その行帯に置いた表と重なる
+    const urlThenText = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "https://example.com/" + "a".repeat(500) + " " + "ABCDEFG ".repeat(6),
+      style: {},
+    };
+    const doc = makeDoc([urlThenText, table("overview", 100, 16, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
+  it("URL・パスはスラッシュ位置で折り返されて縦に伸びる (@codex #310 R19)", () => {
+    // スラッシュ区切りのパス → 折返しで複数行に伸び、下の表と重なる
+    const path = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "aaaa/".repeat(12), style: {},
+    };
+    const doc = makeDoc([path, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
+  it("clip行直後の改行は幻の空行を作らない (@codex #310 R20)", () => {
+    // 巨大URL(clip 1行) + 改行 + 短い全角 → 全角は 2 行目 (renderer と一致)。
+    // 箱 h=10 では 2 行目まで可視のため、その行帯の表と重なる
+    // (幻の空行が挟まると全角が 3 行目扱いになり h=10 の外へ出て見逃す)
+    const urlNewline = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 10, z: 5,
+      content: "a".repeat(500) + "\n" + "あ".repeat(5), style: {},
+    };
+    const doc = makeDoc([urlNewline, table("overview", 100, 16, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
+  it("clip行は箱の右端まで描かれる=全幅で判定 (@codex #310 R21)", () => {
+    // 幅 10mm の箱 (2 文字分 ≒8.5mm) に不可分な長い ASCII → グリフは箱の
+    // 右端 (110mm) まで描かれて切れる。x=109 から始まる表とも重なる
+    const clipped = {
+      id: "code", type: "text", x: 100, y: 40, w: 10, h: 10, z: 5,
+      content: "a".repeat(50), style: {},
+    };
+    const doc = makeDoc([clipped, table("overview", 109, 40, 60, 20)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
+  it("CRLF は 1 つの改行として扱い \\r を幅に数えない (@codex #310 R22)", () => {
+    // 「あ\r\nあ」は 2 行×全角1文字 (LF と同じ)。\r を 0.6em 加算すると
+    // 1 行目が広がり x=105 の表に届いてしまう
+    const crlf = {
+      id: "note", type: "text", x: 100, y: 10, w: 100, h: 20, z: 5,
+      content: "あ\r\nあ", style: {},
+    };
+    const probe = table("overview", 105, 10, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([crlf, probe]))).toHaveLength(0);
+    // LF 版と同一判定
+    const lf = { ...crlf, content: "あ\nあ" };
+    expect(findTextTableOverlaps(makeDoc([lf, probe]))).toHaveLength(0);
+  });
+
+  it("セルの不可分な長い値は表の右へはみ出す=実効幅で判定 (@codex #310 R23)", () => {
+    // value セル(表の32%位置から)の不可分 ASCII 30 文字は表幅 40mm を大きく
+    // 超えて右へはみ出し、x=150 の文字と重なる
+    const overflowTable = {
+      id: "overview", type: "table", x: 100, y: 40, w: 40, h: 60, z: 1,
+      rows: [{ label: "URL", value: "a".repeat(30) }],
+      style: {},
+    };
+    const doc = makeDoc([overflowTable, text("beside", 150, 45)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+    // 値が短ければ保存幅のまま = 重ならない
+    const shortTable2 = { ...overflowTable, rows: [{ label: "URL", value: "ab" }] };
+    const doc2 = makeDoc([shortTable2, text("beside", 150, 45)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
+  it("行容量は端数を保つ=収まる混在幅の塊をclip扱いしない (@codex #310 R24)", () => {
+    // 幅 10mm(12pt で約2.36em) の箱に「MMi」(0.9+0.9+0.35=2.15em ≒9.1mm)。
+    // floor(2em) だと clip=全幅扱いになり x=109.2 の表と誤って重なる
+    const mixed = {
+      id: "code", type: "text", x: 100, y: 40, w: 10, h: 10, z: 5,
+      content: "MMi", style: {},
+    };
+    const doc = makeDoc([mixed, table("overview", 109.2, 40, 60, 20)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
+  it("巨大な不可分連続をスキップしても後続の可視テキストは正しく測る (@codex #310 R25)", () => {
+    // 10万文字の不可分 ASCII (clip 1行) の後の空白+全角は 2 行目に載る
+    const hugeRun = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "a".repeat(100000) + " " + "あああ", style: {},
+    };
+    const doc = makeDoc([hugeRun, table("overview", 100, 16, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
+  it("絵文字(サロゲートペア)は1グリフ=全角1文字として数える (@codex #310 R26)", () => {
+    // 😀×3 は約 12.7mm。2 文字分に数えると約 25.4mm になり x=115 の表に
+    // 誤って届いてしまう
+    const emoji = {
+      id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: "😀😀😀", style: {},
+    };
+    const doc = makeDoc([emoji, table("overview", 115, 40, 60, 20)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
+  it("結合濁点・ZWJ絵文字は合成後の1グリフで数える (@codex #310 R28)", () => {
+    // 分解表記の「か+結合濁点」×10 は 10 グリフ (約42mm)。結合文字を 1em で
+    // 数えると約85mmになり x=145 の表に誤って届く
+    const decomposed = {
+      id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: ("か" + "゙").repeat(10), style: {},
+    };
+    const tbl = table("overview", 145, 40, 60, 20);
+    expect(findTextTableOverlaps(makeDoc([decomposed, tbl]))).toHaveLength(0);
+    // ZWJ 連結絵文字 (家族) ×3 は 3 グリフ (約12.7mm)。構成絵文字ごとに数えると
+    // 約38mmになり x=120 の表に誤って届く
+    const zwj = {
+      ...decomposed,
+      content: "\u{1F468}‍\u{1F469}‍\u{1F467}".repeat(3),
+    };
+    const tbl2 = table("overview", 120, 40, 60, 20);
+    expect(findTextTableOverlaps(makeDoc([zwj, tbl2]))).toHaveLength(0);
+  });
+
+  it("肌色モディファイア付き絵文字は1グリフで数える (@codex #310 R29)", () => {
+    // 👍🏻×5 は 5 グリフ (約21mm)。モディファイアを別グリフに数えると約42mmで
+    // x=130 の表に誤って届く
+    const modified = {
+      id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: "\u{1F44D}\u{1F3FB}".repeat(5), style: {},
+    };
+    const doc = makeDoc([modified, table("overview", 130, 40, 60, 20)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
+  it("先頭空白の空白域では警告しない (@codex #310 R30)", () => {
+    // 先頭に空白10個(約12.7mm)+「価格」— 空白域(100..112.7)にだけ重なる表は
+    // 描画上何も重ならないため検出しない。グリフ域(112.7..121.2)なら検出する
+    const padded = {
+      id: "price", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: " ".repeat(10) + "価格", style: {},
+    };
+    const underBlank = table("overview", 100, 40, 11, 20);
+    expect(findTextTableOverlaps(makeDoc([padded, underBlank]))).toHaveLength(0);
+    const underGlyph = table("overview", 114, 40, 20, 20);
+    expect(findTextTableOverlaps(makeDoc([padded, underGlyph]))).toHaveLength(1);
+  });
+
+  it("clip行直後の空白は行末扱いで新行を作らない (@codex #310 R32)", () => {
+    // 「巨大トークン + 空白×3 + 改行 + あ×5」→ あ は 2 行目 (可視) に載る。
+    // 空白が新行を作ると あ が 3 行目扱いになり h=10 の外で見逃す
+    const clipWsNewline = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 10, z: 5,
+      content: "a".repeat(500) + "   \n" + "あ".repeat(5), style: {},
+    };
+    const doc = makeDoc([clipWsNewline, table("overview", 100, 16, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
+  it("大量の先頭空白の後の不可分値もセル先頭に描画される扱い (@codex #310 R34)", () => {
+    // セルは空白が潰れるため、先頭2万個の空白の後の30文字はセル先頭から
+    // 描画されて表の右へはみ出す → 右隣の文字と重なる
+    const paddedOverflow = {
+      id: "overview", type: "table", x: 100, y: 40, w: 40, h: 60, z: 1,
+      rows: [{ label: "URL", value: " ".repeat(20000) + "a".repeat(30) }],
+      style: {},
+    };
+    const doc = makeDoc([paddedOverflow, text("beside", 150, 45)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
+  it("完全透明の文字色は描画されないため対象外 (@codex #310 R35)", () => {
+    const invisible = {
+      id: "price", type: "text", x: 100, y: 40, w: 40, h: 10, z: 5,
+      content: "価格", style: { color: "rgba(0,0,0,0)" },
+    };
+    const tbl = table("overview", 100, 40, 60, 20);
+    expect(findTextTableOverlaps(makeDoc([invisible, tbl]))).toHaveLength(0);
+    const transparent = { ...invisible, style: { color: "transparent" } };
+    expect(findTextTableOverlaps(makeDoc([transparent, tbl]))).toHaveLength(0);
+    // CSS Color 4 のスラッシュ記法も透明として認識 (@codex R36)
+    const slashAlpha = { ...invisible, style: { color: "rgb(0 0 0 / 0)" } };
+    expect(findTextTableOverlaps(makeDoc([slashAlpha, tbl]))).toHaveLength(0);
+    // 可視色なら従来どおり検出
+    const visible = { ...invisible, style: { color: "#d0331a" } };
+    expect(findTextTableOverlaps(makeDoc([visible, tbl]))).toHaveLength(1);
+  });
+
+  it("要素を動かさない read-only ヘルパ (document は不変)", () => {
+    const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
+    const before = JSON.stringify(doc);
+    findTextTableOverlaps(doc);
+    expect(JSON.stringify(doc)).toBe(before);
+  });
+});

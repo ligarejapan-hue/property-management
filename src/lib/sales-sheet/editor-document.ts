@@ -1435,3 +1435,536 @@ function replaceElement(
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
 }
+
+// ---------------------------------------------------------------------------
+// B-8 (UI総点検): 文字・表どうしの重なり検知 (read-only)
+// ---------------------------------------------------------------------------
+
+export interface TextTableOverlapPair {
+  aId: string;
+  bId: string;
+}
+
+/** 実質的な重なりとみなす最小の食い込み (mm)。隣接・微小接触は除外する。 */
+const OVERLAP_TOLERANCE_MM = 0.5;
+
+/** pt → mm 換算 (1pt = 25.4/72 mm)。 */
+const PT_TO_MM = 25.4 / 72;
+
+/** monospace 系フォントか (ASCII の字送りが均一 ≒0.6em になる)。 */
+function isMonospaceFamily(family: string | undefined): boolean {
+  return !!family && /mono|courier|consolas|menlo/i.test(family);
+}
+
+
+/**
+ * 表の描画上の高さの概算 (mm)。
+ *
+ * レンダラ (SalesSheetRenderer / render-html) は <table> を直接絶対配置する
+ * ため、CSS の height は最小値扱いで、行数の増加やセル内の折返しで保存 h を
+ * 超えて描画される (overflow:hidden は table 要素の行を切り取らない・@codex #310)。
+ * 行ごとに「セル幅(label 32% / value 68%)に収まらない分の折返し行数」を
+ * 全角=フォント幅 1 文字分として概算する (厳密なテキスト実測はしない)。
+ */
+function estimatedTableHeightMm(
+  el: TableElement,
+  mono: boolean,
+  maxHeightMm: number,
+): number {
+  // fontSizePt 未指定時、両レンダラは font-size を出力せずブラウザ既定の
+  // 16px = 12pt を継承する (@codex #310 R3: 9pt と仮定すると過小見積りになる)。
+  const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
+  const lineMm = fontMm * 1.3;
+  // 左右 padding 1mm×2 相当を引いたセル幅。極端に狭い表でも 1 文字分は確保。
+  const labelW = Math.max(el.w * 0.32 - 2, fontMm);
+  const valueW = Math.max(el.w * 0.68 - 2, fontMm);
+  // 行容量 (em) は端数を保つ (@codex #310 R24: floor すると実際には収まる
+  // 混在幅の塊を clip 扱いにしてしまう)
+  const labelChars = Math.max(0.1, labelW / fontMm);
+  const valueChars = Math.max(0.1, valueW / fontMm);
+  // 判定はページ内要素との交差にしか使わないため、高さ maxHeightMm (ページ高
+  // 相当) 分を超えたら行数・走査とも打ち切ってよい (@codex #310 R17/R18:
+  // 巨大セルの同期計測で main thread を塞がない・切り詰めは行数上限で行う)。
+  const lineCap = Math.max(1, Math.ceil(maxHeightMm / lineMm));
+  // セルは white-space: normal (@codex #310 R15): 連続空白・タブ・改行は
+  // 1 つの空白に潰れ、空セルは文字行を作らない (collapseWs=true)。
+  const cellLines = (s: string, chars: number): number =>
+    measureParagraph(s, chars, mono, lineCap + 1, true).length;
+  let total = 0;
+  for (const r of el.rows) {
+    const rowLines = Math.max(
+      cellLines(r.label, labelChars),
+      cellLines(r.value, valueChars),
+    );
+    // 空行でも罫線+上下 padding (≒1.4mm) は残る
+    total += rowLines * lineMm + 1.4;
+    if (total >= maxHeightMm) return total; // これ以上は判定に影響しない
+  }
+  return total;
+}
+
+/**
+ * セル内で折返し不可な最長の塊 (em)。折返し可能点はテキストと同じ
+ * (空白/タブ/改行/ハイフン・スラッシュの直後)。capEm で走査を打ち切る。
+ */
+function maxUnbreakableRunEm(
+  s: string,
+  mono: boolean,
+  capEm: number,
+): number {
+  const WIDE_ASCII = /[MWmw@#%&]/;
+  const NARROW_ASCII = /[ijlI.,;:!'|]/;
+  // ページ内 (可視域) に描かれ得る「グリフ文字数」を大きく超える走査はしない
+  // (@codex #310 R33: 区切りの多い巨大セル値でも全走査で UI を塞がない)。
+  // 空白 run は予算に数えず native 検索で読み飛ばす (@codex #310 R34: セルは
+  // white-space: normal で空白が潰れるため、先頭に大量の空白があっても後続の
+  // 塊はセル先頭に描画される = 空白で予算を消費して見逃してはいけない)
+  const SCAN_CHAR_CAP = 10000;
+  const NON_WS = /[^ \t\n\r]/g;
+  let scanned = 0;
+  let run = 0;
+  let max = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch.charCodeAt(0) <= 0xff) {
+      if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
+        max = Math.max(max, run);
+        run = 0;
+        // 空白 run を一括スキップ (予算外)
+        NON_WS.lastIndex = i + 1;
+        const m = NON_WS.exec(s);
+        i = (m ? m.index : s.length) - 1;
+        continue;
+      }
+      if (++scanned > SCAN_CHAR_CAP) break;
+      run += mono
+        ? 0.6
+        : WIDE_ASCII.test(ch)
+          ? 0.9
+          : NARROW_ASCII.test(ch)
+            ? 0.35
+            : /[A-Z]/.test(ch)
+              ? 0.7
+              : 0.6;
+      if (ch === "-" || ch === "/") {
+        max = Math.max(max, run);
+        run = 0;
+      }
+      // 成長中の run 自体も上限で打ち切る (@codex #310 R31: 区切りの無い
+      // 巨大トークンでは max が更新されず走査が止まらない)
+      if (run >= capEm || max >= capEm) return capEm;
+      continue;
+    }
+    if (++scanned > SCAN_CHAR_CAP) break;
+    max = Math.max(max, run);
+    run = 0;
+  }
+  return Math.min(capEm, Math.max(max, run));
+}
+
+/**
+ * 表の描画上の実効幅 (mm)。
+ *
+ * table 要素の overflow: hidden は table box には効かず、セル内の折返し不可な
+ * 長い値 (URL・識別子) はセル・表の右へはみ出して描画される (@codex #310 R23)。
+ * label セル(左端+padding≒1.2mm)・value セル(表幅の32%+1.2mm)それぞれの
+ * 最長不可分塊の到達位置と保存幅の大きい方を返す。
+ */
+function estimatedTableWidthMm(
+  el: TableElement,
+  mono: boolean,
+  maxWidthMm: number,
+): number {
+  const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
+  const capEm = Math.ceil(maxWidthMm / fontMm);
+  let labelMaxEm = 0;
+  let valueMaxEm = 0;
+  for (const r of el.rows) {
+    labelMaxEm = Math.max(labelMaxEm, maxUnbreakableRunEm(r.label, mono, capEm));
+    valueMaxEm = Math.max(valueMaxEm, maxUnbreakableRunEm(r.value, mono, capEm));
+    if (labelMaxEm >= capEm && valueMaxEm >= capEm) break;
+  }
+  const labelReach = 1.2 + labelMaxEm * fontMm;
+  const valueReach = el.w * 0.32 + 1.2 + valueMaxEm * fontMm;
+  return Math.min(maxWidthMm, Math.max(el.w, labelReach, valueReach));
+}
+
+/**
+ * text 要素の「実際に文字が描画される範囲」の概算 (mm)。
+ *
+ * 手動リサイズで箱だけ大きい text は、透明な余白部分に表が重なっても出力上は
+ * 何も重ならない (@codex #310 R5: 箱全体で判定すると消せない誤警告になる)。
+ * 折返し(箱幅・全角=フォント幅1文字)と行数から文字域を見積り、textAlign に
+ * 応じて箱内の位置を決める (縦方向は上詰め描画)。
+ */
+/**
+ * 段落 1 つの折返し行数と最大行幅 (実効文字数) の概算。
+ *
+ * レンダラの text は white-space: pre-wrap のみで overflow-wrap を持たないため、
+ * 連続する非空白 ASCII (識別子・URL 等) は塊内で折り返されず横方向に clip される
+ * (@codex #310 R7: 塊を charsPerLine で機械的に割ると縦に伸びない文字を伸びた
+ * 扱いにして誤検知する)。全角は 1 文字ごと・空白位置では折返し可として
+ * 貪欲に行詰めする。
+ */
+function measureParagraph(
+  para: string,
+  charsPerLine: number,
+  mono: boolean,
+  maxLines: number,
+  collapseWs: boolean,
+): MeasuredLine[] {
+  // ASCII の字送り: monospace は均一 ≒0.6em (Courier 等。1em はフォントサイズで
+  // ありグリフ幅ではない・@codex #310 R11)。プロポーショナルは段階化する
+  // (@codex #310 R10/R13: 一律だと過小/過大の双方が出る):
+  //   幅広 (M/W/m/w/@/#/%/&) = 0.9em / 細身 (i/j/l/I/約物) = 0.35em /
+  //   その他大文字 = 0.7em / その他 = 0.6em
+  const WIDE_ASCII = /[MWmw@#%&]/;
+  const NARROW_ASCII = /[ijlI.,;:!'|]/;
+  const charEm = (ch: string): number => {
+    if (mono) return 0.6;
+    if (WIDE_ASCII.test(ch)) return 0.9;
+    if (NARROW_ASCII.test(ch)) return 0.35;
+    if (/[A-Z]/.test(ch)) return 0.7;
+    return 0.6;
+  };
+  // 空白 (U+0020) の字送り: monospace は他と同じ 0.6em・プロポーショナルの
+  // 空白グリフは細く ≒0.3em (@codex #310 R27: 0.6em だとタブストップと行詰めが
+  // 実描画より右へ伸びて誤検知する)。
+  const SPACE_EM = mono ? 0.6 : 0.3;
+  // タブストップ幅: ブラウザ既定 tab-size:8 = 空白8個分
+  // (@codex #310 R14: タブを空白1個で数えると貼り付けた表形式文字列を過小見積り)
+  const TAB_STOP_EM = 8 * SPACE_EM;
+
+  // 単一パスの貪欲行詰め。maxLines 行が確定した時点で走査を打ち切る
+  // (@codex #310 R16/R18: 巨大貼り付けの同期計測対策を文字数 slice でなく
+  // 行数上限で行う = 長大な不可分塊の後に続く可視テキストを取りこぼさない)。
+  // 行ごとに「先頭の空白送り (lead)」と「グリフ域 (glyph)」を分けて記録する
+  // (@codex #310 R30: 先頭/行末の空白域は描画されないため矩形に含めない)。
+  const lines: MeasuredLine[] = [];
+  let cur = 0; // 行の総送り (lead + glyph + trail)
+  let lead = 0; // 行頭からグリフ開始までの空白送り
+  let trail = 0; // 最後のグリフ以降の空白送り
+  let hasGlyph = false;
+  let asciiRun = 0;
+  let sawContent = false;
+  let pendingWs = false; // collapseWs 用 (連続空白を 1 個に潰す)
+  // 直前が clip 済み不可分塊の行末で、新しい行にまだ何も無い状態。
+  // この直後の改行は「clip 行を終えるだけ」で新しい空行を作らない
+  // (@codex #310 R20: 幻の空行で以降の行がズレるのを防ぐ)。
+  let afterClip = false;
+  const pushLine = (): void => {
+    lines.push({ lead, glyph: Math.max(0, cur - lead - trail) });
+    cur = 0;
+    lead = 0;
+    trail = 0;
+    hasGlyph = false;
+  };
+  const addWs = (adv: number): void => {
+    cur += adv;
+    if (hasGlyph) trail += adv;
+    else lead += adv;
+  };
+  const emitSpace = (): void => {
+    afterClip = false;
+    if (cur + SPACE_EM > charsPerLine) pushLine();
+    addWs(SPACE_EM);
+  };
+  const emitBlock = (w: number): void => {
+    if (pendingWs) {
+      pendingWs = false;
+      emitSpace();
+    }
+    if (w > charsPerLine) {
+      // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)。
+      // clip 行のグリフは箱の右端まで描かれて切れるため、幅は「全幅」として
+      // 記録する (@codex #310 R21: charsPerLine×字送りだと端数分だけ狭くなる)。
+      if (cur > 0) pushLine();
+      lines.push({ lead: 0, glyph: Number.POSITIVE_INFINITY });
+      cur = 0;
+      lead = 0;
+      trail = 0;
+      hasGlyph = false;
+      afterClip = true;
+      return;
+    }
+    afterClip = false;
+    if (cur + w > charsPerLine) pushLine();
+    hasGlyph = true;
+    trail = 0;
+    cur += w;
+  };
+  // 飽和した不可分塊 (既に clip 確定) の残りを一括スキップするための
+  // 折返し可能点スキャナ (@codex #310 R25: 数百万文字の不可分連続でも
+  // native 検索で読み飛ばし、1 文字ずつの走査で main thread を塞がない)
+  const BREAK_SCAN = /[ \t\n\r\-/]|[^\x00-\xff]/g;
+  // 送り幅ゼロの結合文字 (結合分音記号・濁点/半濁点・異体字セレクタ・ZWJ/ZWSP)。
+  // レンダラは直前のグリフに合成して描くため幅に数えない (@codex #310 R28)。
+  const isZeroAdvance = (code: number): boolean =>
+    (code >= 0x0300 && code <= 0x036f) ||
+    code === 0x3099 ||
+    code === 0x309a ||
+    (code >= 0xfe00 && code <= 0xfe0f) ||
+    code === 0x200d ||
+    code === 0x200b;
+  let joinNext = false; // ZWJ 直後のグリフは前と合成され 1 グリフになる
+  let prevWasCr = false;
+  for (let i = 0; i < para.length; i++) {
+    const ch = para[i];
+    if (lines.length >= maxLines) return lines; // 可視行ぶん確定済み
+    // CRLF/CR は 1 つの改行として扱う (@codex #310 R22: \r を印字グリフとして
+    // 0.6em 加算しない。レンダラは \r\n を 1 つの改行として描く)
+    if (ch === "\n" && prevWasCr) {
+      prevWasCr = false;
+      continue;
+    }
+    prevWasCr = ch === "\r";
+    const isBreak = ch === "\n" || ch === "\r";
+    if (!collapseWs && isBreak) {
+      // pre-wrap の改行 = 強制改行 (@codex #310 R19: split("\n") で全文を
+      // 走査/確保せず、単一パス内で段落境界を処理して行数上限で打ち切る)
+      if (asciiRun > 0) {
+        emitBlock(asciiRun);
+        asciiRun = 0;
+      }
+      if (afterClip && cur === 0) {
+        // clip 行の直後の改行は行を増やさない (@codex R20)
+        afterClip = false;
+        continue;
+      }
+      pushLine();
+      continue;
+    }
+    const isWs = ch === " " || ch === "\t" || (collapseWs && isBreak);
+    if (!isWs && ch.charCodeAt(0) <= 0xff) {
+      sawContent = true;
+      asciiRun += charEm(ch);
+      if (ch === "-" || ch === "/") {
+        // ハイフン/スラッシュの直後は CSS の折返し可能点 (@codex #310 R9/R19:
+        // URL・パスはスラッシュ位置で実際に折り返されて縦に伸びる)
+        emitBlock(asciiRun);
+        asciiRun = 0;
+      } else if (asciiRun > charsPerLine) {
+        // この塊は clip 確定 (@codex R25)。残りは次の折返し可能点まで
+        // 一括スキップ (幅は既に飽和しており結果に影響しない)
+        BREAK_SCAN.lastIndex = i + 1;
+        const m = BREAK_SCAN.exec(para);
+        i = (m ? m.index : para.length) - 1;
+      }
+      continue;
+    }
+    if (asciiRun > 0) {
+      emitBlock(asciiRun);
+      asciiRun = 0;
+    }
+    if (isWs) {
+      if (collapseWs) {
+        // セル (white-space: normal) は連続空白を 1 個に潰し、先頭空白は捨てる
+        if (sawContent) pendingWs = true;
+      } else if (afterClip && cur === 0) {
+        // clip 行の直後の空白/タブは clip 行の行末に掛かる (pre-wrap は行末
+        // 空白を次行へ送らない) ため、新しい行を作らない (@codex #310 R32)。
+        // afterClip は維持し、続く改行も clip 行を終えるだけにする。
+      } else if (ch === "\t") {
+        // 次のタブストップへ送る (行幅は超えない)。タブ自体は折返し可能点。
+        afterClip = false;
+        addWs(
+          Math.min(
+            charsPerLine,
+            (Math.floor(cur / TAB_STOP_EM) + 1) * TAB_STOP_EM,
+          ) - cur,
+        );
+      } else {
+        emitSpace();
+      }
+    } else {
+      const code = ch.charCodeAt(0);
+      // ゼロ送りの結合文字は幅に数えない (@codex #310 R28)
+      if (isZeroAdvance(code)) {
+        if (code === 0x200d) joinNext = true;
+        continue;
+      }
+      // サロゲートペア (絵文字等) は 1 グリフ = 全角 1 文字として数える
+      // (@codex #310 R26: UTF-16 の 2 単位を 2 文字分にしない)
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const cp = para.codePointAt(i) ?? 0;
+        i++;
+        // 肌色モディファイア (U+1F3FB..U+1F3FF) は直前の絵文字に合成される
+        // (@codex #310 R29: 別グリフとして数えると約2倍幅の誤検知)
+        if (cp >= 0x1f3fb && cp <= 0x1f3ff) continue;
+      }
+      if (joinNext) {
+        // ZWJ 連結 (家族絵文字等) は直前のグリフと合成され幅を増やさない
+        joinNext = false;
+        continue;
+      }
+      sawContent = true;
+      emitBlock(1); // 全角 1 文字 (どこでも折返し可)
+    }
+  }
+  if (asciiRun > 0) emitBlock(asciiRun);
+  if (collapseWs && !sawContent) return []; // 空セルは文字行を作らない (R15)
+  if (cur > 0 || lines.length === 0) pushLine();
+  return lines;
+}
+
+/**
+ * 完全に透明な文字色か (transparent / rgba(...,0) / #RGB0 / #RRGGBB00)。
+ * 透明な text は描画されないため重なり判定の対象外にする (@codex #310 R35)。
+ */
+function isFullyTransparentColor(color: string | undefined): boolean {
+  if (!color) return false;
+  const c = color.trim().toLowerCase();
+  if (c === "transparent") return true;
+  // rgb()/rgba()/hsl()/hsla(): カンマ区切り第4成分か、CSS Color 4 の
+  // スラッシュ記法 (rgb(0 0 0 / 0)) のどちらでも alpha を読む (@codex #310 R36)
+  const fn = c.match(/^(?:rgba?|hsla?)\(([^)]*)\)$/);
+  if (fn) {
+    const inner = fn[1];
+    let alphaStr: string | undefined;
+    if (inner.includes("/")) {
+      alphaStr = inner.split("/")[1];
+    } else {
+      const parts = inner.split(",");
+      alphaStr = parts.length >= 4 ? parts[3] : undefined;
+    }
+    if (alphaStr === undefined) return false; // alpha 未指定 = 不透明
+    return parseFloat(alphaStr) === 0;
+  }
+  if (/^#[0-9a-f]{4}$/.test(c)) return c[4] === "0";
+  if (/^#[0-9a-f]{8}$/.test(c)) return c.slice(-2) === "00";
+  return false;
+}
+
+interface MeasuredLine {
+  /** 行頭からグリフ開始までの空白送り (em)。clip 行は 0 */
+  lead: number;
+  /** グリフ域の送り (em)。clip 行は Infinity = 箱の全幅 */
+  glyph: number;
+}
+
+interface RectMm {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * text 要素の描画行ごとの矩形 (mm)。
+ *
+ * 複数行を 1 枚の外接矩形にすると、短い行の横の余白まで「文字がある」扱いに
+ * なり誤検知する (@codex #310 R13)。行ごとに幅と textAlign を反映した矩形を
+ * 返し、箱の高さを超える行は clip (overflow hidden) として捨てる。
+ */
+function textRenderedLineRectsMm(el: TextElement, mono: boolean): RectMm[] {
+  const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
+  const lineMm = fontMm * (el.style.lineHeight ?? 1.2);
+  // 行容量 (em) は端数を保つ (@codex #310 R24)
+  const charsPerLine = Math.max(0.1, el.w / fontMm);
+  // 箱の高さを超える行は描画されない (overflow hidden) ため、計測も可視行数で
+  // 打ち切る (@codex #310 R16/R18: 巨大な貼り付けで useMemo の同期計測が
+  // main thread を塞がない。文字数 slice でなく行数上限で打ち切ることで、
+  // 長大な不可分塊の後に続く可視テキストを取りこぼさない)。
+  const maxLines = Math.max(1, Math.ceil(el.h / lineMm));
+  // 改行は measureParagraph が単一パス内で強制改行として扱う (split("\n") で
+  // 全文を確保しない・@codex #310 R19)。
+  const lineChars = measureParagraph(el.content, charsPerLine, mono, maxLines, false);
+  const rects: RectMm[] = [];
+  for (let i = 0; i < lineChars.length; i++) {
+    const top = i * lineMm;
+    if (top >= el.h) break; // 箱の外は描画されない (overflow: hidden)
+    const line = lineChars[i];
+    if (line.glyph <= 0) continue; // 空白のみ/空行は描画されない
+    // 先頭空白 (lead) の空白域は矩形に含めない (@codex #310 R30)
+    const leadMm = Math.min(line.lead * fontMm, el.w);
+    const glyphMm = Number.isFinite(line.glyph)
+      ? line.glyph * fontMm
+      : el.w; // clip 行は箱の全幅
+    const totalMm = Math.min(el.w, leadMm + glyphMm);
+    const base =
+      el.style.align === "right"
+        ? el.x + (el.w - totalMm)
+        : el.style.align === "center"
+          ? el.x + (el.w - totalMm) / 2
+          : el.x;
+    const x = base + leadMm;
+    const w = Math.min(glyphMm, el.x + el.w - x);
+    if (w <= 0) continue;
+    rects.push({ x, y: el.y + top, w, h: Math.min(lineMm, el.h - top) });
+  }
+  return rects;
+}
+
+/**
+ * 文字 (text) と表 (table) どうしの矩形重なりを列挙する (document は不変)。
+ *
+ * 自動整列/自動調整は自由配置の文字・表を動かさない仕様 (手動配置の尊重) の
+ * ため、重なったままだと PDF/PNG 出力にもそのまま残る。編集画面で注意を出す
+ * ための検知専用ヘルパ。写真の上の文字や帯 (shape) の上の見出しは意図的な
+ * 重なりの定番なので対象外 (text/table 以外は見ない)。
+ * - 空文字の text (テンプレが保持する未入力の price 等) は見えないため対象外
+ *   (@codex #310: 見えない箱との交差で警告しない)
+ * - text は箱全体でなく「文字が描画される範囲」の概算で判定 (箱だけ大きい
+ *   text の透明余白では警告しない・@codex #310 R5)
+ * - 表は保存 h と「行数・折返しから見積もった描画上の高さ」の大きい方で判定
+ *   (はみ出して描画される表との重なりも検知する・@codex #310)
+ */
+export function findTextTableOverlaps(
+  document: SalesSheetDocument,
+): TextTableOverlapPair[] {
+  // ASCII の字送りモデルはフォントで変える (mono=均一0.6em / プロポーショナル=
+  // 段階化)。text は要素指定フォント優先・表はテーマ。
+  const themeMono = isMonospaceFamily(document.theme.fontFamily);
+  const entries = document.elements
+    .filter(
+      (e): e is TextElement | TableElement =>
+        (e.type === "text" &&
+          e.content.trim() !== "" &&
+          // 完全透明の文字色は描画されない (@codex #310 R35。表は罫線が
+          // 残るため対象のまま)
+          !isFullyTransparentColor(e.style.color)) ||
+        (e.type === "table" && e.rows.length > 0),
+    )
+    .map((e) =>
+      e.type === "text"
+        ? {
+            id: e.id,
+            rects: textRenderedLineRectsMm(
+              e,
+              isMonospaceFamily(e.style.fontFamily ?? document.theme.fontFamily),
+            ),
+          }
+        : {
+            id: e.id,
+            rects: [
+              {
+                x: e.x,
+                y: e.y,
+                // セルの折返し不可な長い値は表の右へはみ出して描画される
+                // (@codex #310 R23: overflow hidden は table box に効かない)
+                w: estimatedTableWidthMm(e, themeMono, document.page.width),
+                h: Math.max(
+                  e.h,
+                  estimatedTableHeightMm(e, themeMono, document.page.height),
+                ),
+              },
+            ],
+          },
+    );
+  const rectsOverlap = (a: RectMm, b: RectMm): boolean => {
+    const overlapW = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+    const overlapH = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    return overlapW > OVERLAP_TOLERANCE_MM && overlapH > OVERLAP_TOLERANCE_MM;
+  };
+  const pairs: TextTableOverlapPair[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const a = entries[i];
+      const b = entries[j];
+      if (a.rects.some((ra) => b.rects.some((rb) => rectsOverlap(ra, rb)))) {
+        pairs.push({ aId: a.id, bId: b.id });
+      }
+    }
+  }
+  return pairs;
+}

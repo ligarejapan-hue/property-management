@@ -32,9 +32,12 @@ export interface EditorToolbarProps {
   /** やり直す(Ctrl+Y)。canRedo=false のとき非活性。未指定はボタン非表示(後方互換)。 */
   onRedo?: () => void;
   canRedo?: boolean;
+  /** B-8: 文字・表どうしの重なり検知の注意文言(重なりなし/未指定は非表示)。
+   *  自動整列・自動調整は文字を動かさない仕様のため、出力前に気付けるように出す。 */
+  layoutWarning?: string | null;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false, layoutWarning = null }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -82,8 +85,9 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
   return (
     <div
       data-editor-toolbar
-      className="flex items-center gap-2 px-4 py-2 border-b border-neutral-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 shrink-0"
+      className="border-b border-neutral-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 shrink-0"
     >
+    <div className="flex items-center gap-2 px-4 py-2">
       {dirty && (
         <span
           data-dirty-indicator
@@ -139,6 +143,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-auto-arrange
         onClick={onAutoArrange}
         disabled={busy}
+        title="写真がある場合に、写真の並びと概要表の位置を整えます。文字・バッジ・QR・概要表以外の表は動きません"
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         写真を自動整列
@@ -148,6 +153,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-auto-balance
         onClick={onAutoBalance}
         disabled={busy}
+        title="見出し・価格・キャッチコピー・概要表・間取図・写真・地図QRなどの定型項目を標準の配置に戻します(手で動かしていても戻ります)。自分で追加した文字・バッジ・QR(地図QRを除く)は動きません"
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         レイアウト自動調整
@@ -226,6 +232,19 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
       >
         {deleting ? "削除中…" : "削除"}
       </button>
+    </div>
+    {/* B-8: 文字・表の重なり注意はボタン行と競合しない独立行に全文表示する
+        (@codex #310 R4/R6: flex 行内だと幅次第で折返し崩れ or 0 幅で消える)。
+        エラー表示とは独立に出す (@codex R12: 保存/出力失敗の error が残っている
+        間も、その後のレイアウト編集で必要な警告を消さない)。 */}
+    {layoutWarning && (
+      <p
+        data-toolbar-layout-warning
+        className="px-4 pb-1.5 text-sm text-amber-700 dark:text-amber-400"
+      >
+        {layoutWarning}
+      </p>
+    )}
     </div>
   );
 }
