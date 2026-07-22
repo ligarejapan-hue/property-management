@@ -80,8 +80,8 @@ vi.mock("@/lib/api-helpers", () => {
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const client: Record<string, unknown> = {
     fieldSurveyPin: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -98,12 +98,18 @@ vi.mock("@/lib/prisma", () => ({
     },
     fieldSurveySession: {
       findUnique: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     property: {
       findUnique: vi.fn(),
     },
-  },
-}));
+  };
+  // interactive transaction: callback へ同一 client を渡す (rollback は DB の責務)
+  client.$transaction = vi.fn(
+    async (fn: (tx: unknown) => Promise<unknown>) => fn(client),
+  );
+  return { default: client };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -361,6 +367,86 @@ describe("POST /api/field-survey/pins", () => {
     const createArgs = (prisma.fieldSurveyPin.create as Mock).mock.calls[0][0];
     expect(createArgs.data.staffUserId).toBe(fieldUser.id);
     expect(createArgs.data.sessionId).toBe(SESSION_ID);
+    // B-7(@codex #308): ピン作成は巡回の活動として session の最終活動時刻を更新
+    // (active 条件付き = 並行終了後は no-op)
+    const touchArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(touchArgs.where).toEqual({ id: SESSION_ID, status: "active" });
+    expect(touchArgs.data.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("B-7(@codex R8): 事前チェック後に session が並行終了していたら 409 で pin 作成ごと rollback", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      staffUserId: fieldUser.id,
+      status: "active",
+    });
+    (prisma.fieldSurveyPin.create as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: SESSION_ID,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    // touch が 0 行 = 事前チェック後に並行で auto-end された
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValueOnce({
+      count: 0,
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "candidate",
+          sessionId: SESSION_ID,
+        }),
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_STATE");
+    // rollback 前提のため成功系の監査ログは書かない
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("sessionId 無しの pin 作成では session を触らない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.create as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "candidate",
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
   });
 
   it("sessionId 指定: ended session は 409", async () => {

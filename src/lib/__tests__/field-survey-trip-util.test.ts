@@ -9,7 +9,11 @@ import {
   classifyTripApiResponse,
   extractApiErrorCode,
   formatElapsed,
+  formatStaleDuration,
+  isSessionStale,
   pickOwnActiveSession,
+  STALE_AUTO_END_THRESHOLD_MS,
+  STALE_CONFIRM_THRESHOLD_MS,
   tripOutcomeMessage,
 } from "@/lib/field-survey-trip-util";
 
@@ -193,5 +197,79 @@ describe("pickOwnActiveSession", () => {
     expect(pickOwnActiveSession([], u)).toBeNull();
     expect(pickOwnActiveSession(null, u)).toBeNull();
     expect(pickOwnActiveSession(undefined, u)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-7 (UI総点検): 巡回セッションの終了し忘れ対策
+// ---------------------------------------------------------------------------
+
+describe("isSessionStale", () => {
+  const now = new Date("2026-07-21T12:00:00.000Z");
+  const H = 60 * 60 * 1000;
+
+  it("閾値ちょうど・超過は stale", () => {
+    expect(
+      isSessionStale(new Date(now.getTime() - 12 * H), now, 12 * H),
+    ).toBe(true);
+    expect(
+      isSessionStale(new Date(now.getTime() - 13 * H), now, 12 * H),
+    ).toBe(true);
+  });
+
+  it("閾値未満は stale でない", () => {
+    expect(
+      isSessionStale(new Date(now.getTime() - 12 * H + 1000), now, 12 * H),
+    ).toBe(false);
+    expect(isSessionStale(now, now, 12 * H)).toBe(false);
+  });
+
+  it("ISO 文字列でも判定できる", () => {
+    expect(isSessionStale("2026-07-20T11:00:00.000Z", now, 24 * H)).toBe(true);
+    expect(isSessionStale("2026-07-21T11:00:00.000Z", now, 24 * H)).toBe(false);
+  });
+
+  it("不正な日付は false (安全側 = 勝手に stale 扱いしない)", () => {
+    expect(isSessionStale("not-a-date", now, 12 * H)).toBe(false);
+  });
+
+  it("閾値定数: 表示時確認 12h / 自動終了 24h", () => {
+    expect(STALE_CONFIRM_THRESHOLD_MS).toBe(12 * H);
+    expect(STALE_AUTO_END_THRESHOLD_MS).toBe(24 * H);
+    // 自動終了は表示時確認より保守的 (長い) であること
+    expect(STALE_AUTO_END_THRESHOLD_MS).toBeGreaterThan(
+      STALE_CONFIRM_THRESHOLD_MS,
+    );
+  });
+});
+
+describe("formatStaleDuration", () => {
+  const now = new Date("2026-07-21T12:00:00.000Z");
+  const H = 60 * 60 * 1000;
+
+  it("48 時間未満は時間単位", () => {
+    expect(formatStaleDuration(new Date(now.getTime() - 13 * H), now)).toBe(
+      "約13時間",
+    );
+    expect(formatStaleDuration(new Date(now.getTime() - 47 * H), now)).toBe(
+      "約47時間",
+    );
+  });
+
+  it("48 時間以上は日単位 (切り捨て)", () => {
+    expect(formatStaleDuration(new Date(now.getTime() - 48 * H), now)).toBe(
+      "約2日",
+    );
+    // 1095 時間放置の実例 → 約45日
+    expect(formatStaleDuration(new Date(now.getTime() - 1095 * H), now)).toBe(
+      "約45日",
+    );
+  });
+
+  it("不正・負値は汎用表現に fallback", () => {
+    expect(formatStaleDuration("not-a-date", now)).toBe("しばらく");
+    expect(
+      formatStaleDuration(new Date(now.getTime() + 1000), now),
+    ).toBe("しばらく");
   });
 });

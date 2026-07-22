@@ -119,19 +119,18 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
 
   // --- Codex P2: mutation の AbortController + mounted guard ----------------
 
-  it("POST sessions / PATCH sessions に signal が渡される", () => {
+  it("POST sessions / 終了 PATCH に signal が渡される", () => {
     // POST 経路: method: "POST" を含む fetch 呼び出し block 内に signal がある
     const postRegion = TRIP_SRC.match(
       /method:\s*"POST"[\s\S]*?\)\s*;/,
     );
     expect(postRegion).not.toBeNull();
     expect(postRegion?.[0]).toMatch(/signal:\s*\w+\.signal/);
-    // PATCH 経路: 同様
-    const patchRegion = TRIP_SRC.match(
-      /method:\s*"PATCH"[\s\S]*?\)\s*;/,
+    // 終了 PATCH 経路 (status: "ended" を送る fetch) にも signal がある。
+    // ※続行 touch の memo-only PATCH は fire-and-forget のため対象外 (B-7 @codex R6)
+    expect(TRIP_SRC).toMatch(
+      /status:\s*"ended"\s*\}\),\s*signal:\s*\w+\.signal/,
     );
-    expect(patchRegion).not.toBeNull();
-    expect(patchRegion?.[0]).toMatch(/signal:\s*\w+\.signal/);
   });
 
   it("active fetch と mutation で AbortController を分離している", () => {
@@ -177,6 +176,57 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
     expect(TRIP_SRC).not.toMatch(/28[,\s]?500/);
     expect(TRIP_SRC).not.toMatch(/\b\d{2,3}\s*円\b/);
     expect(TRIP_SRC).not.toMatch(/\bper\s*1[,\s]?000\b/i);
+  });
+});
+
+// --- B-7 (UI総点検): 終了し忘れ巡回の「次回表示時の終了確認」 ---------------
+
+describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
+  it("放置判定 helper (isSessionStale / 閾値 / 表示用 formatter) を import する", () => {
+    expect(TRIP_SRC).toMatch(/isSessionStale/);
+    expect(TRIP_SRC).toMatch(/STALE_CONFIRM_THRESHOLD_MS/);
+    expect(TRIP_SRC).toMatch(/formatStaleDuration/);
+  });
+
+  it("phase に confirmStaleEnd があり、専用モーダルを描画する", () => {
+    expect(TRIP_SRC).toMatch(/"confirmStaleEnd"/);
+    expect(TRIP_SRC).toMatch(/trip-confirm-stale-end-modal/);
+  });
+
+  it("モーダルは「終了する」と「巡回を続ける」の二択", () => {
+    expect(TRIP_SRC).toMatch(/巡回を続ける/);
+    expect(TRIP_SRC).toMatch(/終了されないまま残っています/);
+  });
+
+  it("同じ session への確認は 1 回だけ (再取得のたびに聞き直さない)", () => {
+    expect(TRIP_SRC).toMatch(/stalePromptedRef/);
+  });
+
+  it("放置判定は最終活動時刻ベース (@codex R3・記録中の session に出さない)", () => {
+    expect(TRIP_SRC).toMatch(/own\.updatedAt \?\? own\.startedAt/);
+  });
+
+  it("終了は既存 PATCH を流用・続行は touch PATCH で活動のみ記録 (@codex R6/R7)", () => {
+    // 専用の別 API は増やさない (end 用 + 続行 touch 用の PATCH 2 箇所のみ)
+    const patches = TRIP_SRC.match(/method:\s*"PATCH"/g) ?? [];
+    expect(patches.length).toBe(2);
+    // 続行 touch は活動記録専用 ({ touch: true })。memo 送信での代用は
+    // 一覧 API が memo を返さないため既存 memo を消す (禁止)
+    expect(TRIP_SRC).toMatch(/touchSession/);
+    expect(TRIP_SRC).toMatch(/JSON\.stringify\(\{ touch: true \}\)/);
+    expect(TRIP_SRC).not.toMatch(/memo:\s*target\.memo/);
+    // 並行終了済み (409) は再取得して UI を整合させる (@codex R9)
+    expect(TRIP_SRC).toMatch(
+      /409[\s\S]{0,300}?fetchActiveSession\(\)/,
+    );
+  });
+
+  it("続行済み session の終了は直前に再 touch する (@codex R10: touch 失敗時の巻き戻り防止)", () => {
+    expect(TRIP_SRC).toMatch(/resumedRef/);
+    // endSession 内で resumed の場合に touchSession を await してから終了 PATCH
+    expect(TRIP_SRC).toMatch(
+      /resumedRef\.current === target\.id[\s\S]{0,120}?await touchSession\(target\)/,
+    );
   });
 });
 

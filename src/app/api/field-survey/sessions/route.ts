@@ -14,6 +14,10 @@ import {
   createFieldSurveySessionSchema,
   fieldSurveySessionListQuerySchema,
 } from "@/lib/validators";
+import {
+  isSessionStale,
+  STALE_AUTO_END_THRESHOLD_MS,
+} from "@/lib/field-survey-trip-util";
 
 // Prisma の unique constraint 違反 (P2002) を class import なしで判定する。
 // `@/generated/prisma` から Prisma.PrismaClientKnownRequestError を import すると
@@ -46,40 +50,101 @@ export async function POST(request: NextRequest) {
     // 担保し、P2002 を ACTIVE_SESSION_EXISTS にマップする (下記 catch)。
     const existingActive = await prisma.fieldSurveySession.findFirst({
       where: { staffUserId: session.id, status: "active" },
-      select: { id: true },
+      select: { id: true, startedAt: true, updatedAt: true, pointCount: true },
     });
     if (existingActive) {
-      throw new ApiError(
-        409,
-        "active な巡回 session が既に存在します。先に終了してください",
-        "ACTIVE_SESSION_EXISTS",
-      );
+      // B-7 (UI総点検): 終了し忘れで放置された active session は
+      // ここで自動終了してから新規開始を通す (終了し忘れによる 409 詰み解消)。
+      // - 放置判定は startedAt でなく最終活動時刻 (updatedAt ≒ 最後の位置記録/
+      //   メモ更新) で行う (@codex R3: 開始から 24h 超でも現に記録が続いている
+      //   session を別端末からの開始で誤終了しない)。
+      // - endedAt も updatedAt を使い、巡回時間を実際より長く記録しない。
+      if (
+        !isSessionStale(
+          existingActive.updatedAt,
+          new Date(),
+          STALE_AUTO_END_THRESHOLD_MS,
+        )
+      ) {
+        throw new ApiError(
+          409,
+          "active な巡回 session が既に存在します。先に終了してください",
+          "ACTIVE_SESSION_EXISTS",
+        );
+      }
     }
 
+    // 自動終了 (放置 session がある場合) と新規作成は 1 トランザクションで行う。
+    // - @codex R1 P2: updatedAt を conditional write の条件に含め、読取後の
+    //   track point flush と競合したら書かない (endedAt / 監査 detail は条件
+    //   一致したスナップショットなので常に整合)。
+    // - @codex R2 P2: create が失敗 (非 P2002 含む) したら自動終了ごと rollback
+    //   し、「既存 session だけ終了して新規が無い」中途半端な状態を残さない。
+    //   監査ログはトランザクション成功後にのみ書く。
+    // - @codex R3 P2: 条件が外れて再読取した session がまだ active なら、それは
+    //   「直前に活動があった」= 放置ではないので自動終了せず 409 に倒す
+    //   (@updatedAt は更新の度に現在時刻になるため、再判定は常に非 stale)。
     let created;
+    let autoEndedSnapshot: typeof existingActive = null;
     try {
-      created = await prisma.fieldSurveySession.create({
-        data: {
-          staffUserId: session.id,
-          startedAt: new Date(),
-          status: "active",
-          memo: memo ?? null,
-        },
-        select: {
-          id: true,
-          staffUserId: true,
-          startedAt: true,
-          endedAt: true,
-          status: true,
-          memo: true,
-          pointCount: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+      const result = await prisma.$transaction(async (tx) => {
+        let endedSnapshot: typeof existingActive = null;
+        if (existingActive) {
+          const autoEnded = await tx.fieldSurveySession.updateMany({
+            where: {
+              id: existingActive.id,
+              status: "active",
+              updatedAt: existingActive.updatedAt,
+            },
+            data: { status: "ended", endedAt: existingActive.updatedAt },
+          });
+          if (autoEnded.count > 0) {
+            endedSnapshot = existingActive;
+          } else {
+            // 0 行更新 = 並行で終了済み or 直前に活動があった。再読取して判別。
+            const fresh = await tx.fieldSurveySession.findFirst({
+              where: { id: existingActive.id, status: "active" },
+              select: { id: true },
+            });
+            if (fresh) {
+              // まだ active = updatedAt が進んだ直後 (活動中)。放置ではないので
+              // 自動終了せず、従来どおり 409 (rollback で無傷)。
+              throw new ApiError(
+                409,
+                "active な巡回 session が既に存在します。先に終了してください",
+                "ACTIVE_SESSION_EXISTS",
+              );
+            }
+            // 終了済み → そのまま新規作成へ
+          }
+        }
+        const createdRow = await tx.fieldSurveySession.create({
+          data: {
+            staffUserId: session.id,
+            startedAt: new Date(),
+            status: "active",
+            memo: memo ?? null,
+          },
+          select: {
+            id: true,
+            staffUserId: true,
+            startedAt: true,
+            endedAt: true,
+            status: true,
+            memo: true,
+            pointCount: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        return { createdRow, endedSnapshot };
       });
+      created = result.createdRow;
+      autoEndedSnapshot = result.endedSnapshot;
     } catch (err) {
       // partial unique index 違反 (同一 staff の active 重複) を 409 に変換。
       // 並行 POST のうち、後発リクエストは findFirst 後にここへ到達しうる。
+      // rollback により自動終了も取り消される (安全側 = 既存 session は残る)。
       if (isPrismaUniqueViolation(err)) {
         throw new ApiError(
           409,
@@ -90,6 +155,19 @@ export async function POST(request: NextRequest) {
       throw err;
     }
 
+    if (autoEndedSnapshot) {
+      await writeAuditLog({
+        userId: session.id,
+        action: "field_survey_session_auto_end",
+        targetTable: "field_survey_sessions",
+        targetId: autoEndedSnapshot.id,
+        detail: {
+          sessionId: autoEndedSnapshot.id,
+          reason: "stale_on_new_start",
+          pointCount: autoEndedSnapshot.pointCount,
+        },
+      });
+    }
     await writeAuditLog({
       userId: session.id,
       action: "field_survey_session_start",

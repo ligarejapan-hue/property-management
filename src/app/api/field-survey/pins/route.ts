@@ -95,19 +95,43 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const created = await prisma.fieldSurveyPin.create({
-      data: {
-        sessionId: input.sessionId ?? null,
-        staffUserId: session.id,
-        propertyId: input.propertyId ?? null,
-        lat: input.lat,
-        lng: input.lng,
-        accuracy: input.accuracy ?? null,
-        pinType: input.pinType,
-        status: "open",
-        memo: input.memo ?? null,
-      },
-      select: SELECT_PIN,
+    // B-7 (@codex #308): ピン作成も巡回の「活動」として session の最終活動時刻
+    // (updatedAt) に反映する。位置記録を使わずピンだけ打つ運用でも、放置判定
+    // (12h 確認 / 24h 自動終了) が誤発火しないようにする。
+    // ピン作成と touch は 1 トランザクション (@codex R6: touch だけ失敗して 500 →
+    // リトライで pin が二重作成される事故を防ぐ)。
+    // touch の 0 行更新 = 事前チェック後に session が並行終了した合図なので、
+    // track-point route と同様に 409 INVALID_STATE で pin 作成ごと rollback する
+    // (@codex R8 P1: 終了済み session に紐づく pin を作らない)。
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.fieldSurveyPin.create({
+        data: {
+          sessionId: input.sessionId ?? null,
+          staffUserId: session.id,
+          propertyId: input.propertyId ?? null,
+          lat: input.lat,
+          lng: input.lng,
+          accuracy: input.accuracy ?? null,
+          pinType: input.pinType,
+          status: "open",
+          memo: input.memo ?? null,
+        },
+        select: SELECT_PIN,
+      });
+      if (input.sessionId) {
+        const touched = await tx.fieldSurveySession.updateMany({
+          where: { id: input.sessionId, status: "active" },
+          data: { updatedAt: new Date() },
+        });
+        if (touched.count === 0) {
+          throw new ApiError(
+            409,
+            "active 状態でない session には紐付けられません",
+            "INVALID_STATE",
+          );
+        }
+      }
+      return row;
     });
 
     await writeAuditLog({

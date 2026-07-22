@@ -26,7 +26,10 @@ import {
   classifyTripApiResponse,
   extractApiErrorCode,
   formatElapsed,
+  formatStaleDuration,
+  isSessionStale,
   pickOwnActiveSession,
+  STALE_CONFIRM_THRESHOLD_MS,
   tripOutcomeMessage,
   type ActiveSessionLike,
 } from "@/lib/field-survey-trip-util";
@@ -58,6 +61,7 @@ type Phase =
   | "starting" // POST sessions 中
   | "active" // 巡回中
   | "confirmEnd" // 終了確認 modal 表示中
+  | "confirmStaleEnd" // B-7: 放置 session の終了確認 modal 表示中
   | "ending"; // PATCH sessions 中
 
 export default function TripControls({
@@ -76,6 +80,13 @@ export default function TripControls({
   // Codex P2 (unmount safety): unmount 後の setState を抑止する。
   // useEffect cleanup で false に倒し、各 handler の state 更新前に確認する。
   const mountedRef = useRef(true);
+  // B-7: 放置 session の終了確認は同一 session につき 1 回だけ出す
+  // (conflict 後の再取得などで繰り返し聞き直さない)。
+  const stalePromptedRef = useRef<string | null>(null);
+  // B-7 (@codex R10): 「巡回を続ける」を選んだ session id。続行直後の touch が
+  // 失敗 (オフライン等) しても、終了直前に再 touch して「続行したのに endedAt が
+  // 続行前へ巻き戻る」ことを防ぐための印。
+  const resumedRef = useRef<string | null>(null);
 
   const isAbortError = (err: unknown): boolean =>
     typeof err === "object" &&
@@ -116,7 +127,23 @@ export default function TripControls({
       // pickOwnActiveSession は server filter 漏れに対する防御として残す。
       const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
       setSession(own);
-      setPhase(own ? "active" : "idle");
+      // B-7: 終了し忘れの放置 session (最終活動から 12h 超) を復元したときは、
+      // 巡回中表示へ戻す前に終了するかどうかを確認する (同一 session 1 回のみ)。
+      // 放置判定は最終活動時刻ベース (@codex R3・記録が続いている session に出さない)。
+      if (
+        own &&
+        stalePromptedRef.current !== own.id &&
+        isSessionStale(
+          own.updatedAt ?? own.startedAt,
+          new Date(),
+          STALE_CONFIRM_THRESHOLD_MS,
+        )
+      ) {
+        stalePromptedRef.current = own.id;
+        setPhase("confirmStaleEnd");
+      } else {
+        setPhase(own ? "active" : "idle");
+      }
       setError(null);
     } catch (err) {
       if (isAbortError(err) || !mountedRef.current) return;
@@ -195,6 +222,36 @@ export default function TripControls({
     }
   }, [fetchActiveSession]);
 
+  // B-7 (@codex R6/R7): 放置確認で「巡回を続ける」を選んだことも巡回の活動
+  // として記録する (活動記録専用の touch PATCH で updatedAt だけを進める。
+  // memo 送信で代用すると一覧 API が memo を返さないため既存 memo を消す)。
+  // これが無いと、続行後に点・ピン無しで終了したとき server 側で stale 扱いの
+  // まま endedAt が続行前の時刻へ巻き戻る。失敗しても続行自体は妨げない。
+  const touchSession = useCallback(
+    async (target: ActiveSessionLike) => {
+      try {
+        const res = await fetch(
+          `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
+          {
+            method: "PATCH",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ touch: true }),
+          },
+        );
+        if (!mountedRef.current) return;
+        if (res.status === 409) {
+          // 並行で終了済み (@codex R9)。終了済み session を巡回中として使い
+          // 続けないよう、状態を取り直して UI を整合させる。
+          await fetchActiveSession();
+        }
+      } catch {
+        // best effort (オフライン等)。続行操作はローカルで成立させる。
+      }
+    },
+    [fetchActiveSession],
+  );
+
   const endSession = useCallback(
     async (target: ActiveSessionLike) => {
       setPhase("ending");
@@ -218,6 +275,13 @@ export default function TripControls({
           setPhase("active");
           return;
         }
+      }
+      // B-7 (@codex R10): 続行済み session の終了は、直前に活動 touch を挟んで
+      // server の stale 判定を解除する (続行時の touch が失敗していても、ここで
+      // 記録されれば endedAt は now になり、続行後の巡回が消えない)。
+      if (resumedRef.current === target.id) {
+        await touchSession(target);
+        if (!mountedRef.current) return;
       }
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
@@ -243,6 +307,7 @@ export default function TripControls({
           extractApiErrorCode(body),
         );
         if (outcome.kind === "ok") {
+          if (resumedRef.current === target.id) resumedRef.current = null;
           setSession(null);
           setPhase("idle");
           return;
@@ -261,7 +326,7 @@ export default function TripControls({
         setPhase("active");
       }
     },
-    [fetchActiveSession, onBeforeSessionEnd],
+    [fetchActiveSession, onBeforeSessionEnd, touchSession],
   );
 
   if (phase === "loading") {
@@ -310,6 +375,19 @@ export default function TripControls({
       {phase === "confirmEnd" && session && (
         <ConfirmEndModal
           onCancel={() => setPhase("active")}
+          onAgree={() => void endSession(session)}
+        />
+      )}
+
+      {phase === "confirmStaleEnd" && session && (
+        <ConfirmStaleEndModal
+          session={session}
+          now={now}
+          onContinue={() => {
+            resumedRef.current = session.id;
+            setPhase("active");
+            void touchSession(session);
+          }}
           onAgree={() => void endSession(session)}
         />
       )}
@@ -440,6 +518,38 @@ function ConfirmEndModal({
   );
 }
 
+// B-7: 終了し忘れの放置 session を復元したときの終了確認。
+// 「巡回を続ける」で従来どおりの巡回中表示に戻る (終了は既存 endSession を流用)。
+function ConfirmStaleEndModal({
+  session,
+  now,
+  onContinue,
+  onAgree,
+}: {
+  session: ActiveSessionLike;
+  now: Date;
+  onContinue: () => void;
+  onAgree: () => void;
+}) {
+  return (
+    <ModalShell
+      title="前回の巡回が終了されていません"
+      testId="trip-confirm-stale-end-modal"
+    >
+      <p className="mb-3 text-[12px] text-gray-700 dark:text-gray-200">
+        {formatStaleDuration(session.startedAt, now)}
+        前に開始した巡回が、終了されないまま残っています。 巡回を終了しますか?
+      </p>
+      <ModalActions
+        onCancel={onContinue}
+        cancelLabel="巡回を続ける"
+        onAgree={onAgree}
+        agreeLabel="終了する"
+      />
+    </ModalShell>
+  );
+}
+
 function ModalShell({
   title,
   testId,
@@ -468,10 +578,12 @@ function ModalActions({
   onCancel,
   onAgree,
   agreeLabel,
+  cancelLabel = "キャンセル",
 }: {
   onCancel: () => void;
   onAgree: () => void;
   agreeLabel: string;
+  cancelLabel?: string;
 }) {
   return (
     <div className="flex justify-end gap-2">
@@ -480,7 +592,7 @@ function ModalActions({
         onClick={onCancel}
         className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
       >
-        キャンセル
+        {cancelLabel}
       </button>
       <button
         type="button"
