@@ -140,7 +140,7 @@ describe("findTextTableOverlaps", () => {
     // x=200 の表に届かないが、monospace(1em)なら約135mm→箱幅いっぱいまで届く。
     const asciiText = {
       id: "code", type: "text", x: 100, y: 40, w: 120, h: 10, z: 5,
-      content: "A".repeat(32), style: {},
+      content: "a".repeat(32), style: {},
     };
     const tbl = table("overview", 200, 30, 60, 60);
     const propDoc = parseSalesSheetDocument({
@@ -162,7 +162,7 @@ describe("findTextTableOverlaps", () => {
     // されるため、下に置いた表とは重ならない (機械的に割ると 4 行分に伸びて誤検知)
     const token = {
       id: "code", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
-      content: "A".repeat(60), style: {},
+      content: "a".repeat(60), style: {},
     };
     const doc = makeDoc([token, table("overview", 100, 18, 80, 60)]);
     expect(findTextTableOverlaps(doc)).toHaveLength(0);

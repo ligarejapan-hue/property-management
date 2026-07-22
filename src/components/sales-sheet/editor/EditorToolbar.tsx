@@ -153,7 +153,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-auto-balance
         onClick={onAutoBalance}
         disabled={busy}
-        title="見出し・価格・概要表・間取図・写真を標準の配置に戻します。手で配置した文字・バッジは動きません"
+        title="見出し・価格・キャッチコピー・概要表・間取図・写真などの定型項目を標準の配置に戻します(手で動かしていても戻ります)。自分で追加した文字・バッジ・QRは動きません"
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         レイアウト自動調整

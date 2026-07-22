@@ -1510,11 +1510,14 @@ function measureParagraph(
   asciiEm: number,
 ): { lines: number; maxLineChars: number } {
   // 折返し単位列: 正 = その幅の折返し不可塊 / -1 = 空白 (区切り・幅 asciiEm)
+  // プロポーショナル時は幅広グリフ (大文字・m/w/@ 等) を 0.9em で数える
+  // (@codex #310 R10: 一律 0.6em だと英大文字見出しの幅を過小見積りする)。
+  const WIDE_ASCII = /[A-Z@#%&mw_]/;
   const units: number[] = [];
   let asciiRun = 0;
   for (const ch of para) {
     if (ch.charCodeAt(0) <= 0xff && ch !== " " && ch !== "\t") {
-      asciiRun += asciiEm;
+      asciiRun += asciiEm >= 1 ? asciiEm : WIDE_ASCII.test(ch) ? 0.9 : asciiEm;
       if (ch === "-") {
         // ハイフンの直後は CSS の折返し可能点 (@codex #310 R9:
         // ABC-DEF-… のようなハイフン区切りは実際に折り返されて縦に伸びる)

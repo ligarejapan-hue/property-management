@@ -257,7 +257,10 @@ describe("EditorToolbar — B-8 効果範囲注記と重なり注意", () => {
     // 自動整列は概要表をスナップするため「表は動きません」とは書かない
     // (@codex R7: 概要表を整える説明と矛盾しない表現にする)
     expect(html).toContain("文字・バッジ・QR・概要表以外の表は動きません");
-    expect(html).toContain("手で配置した文字・バッジは動きません");
+    // 自動調整はテンプレ文字 (見出し/価格等) を手で動かしていても戻すため、
+    // 「動かないのは自分で追加した要素」と明確化 (@codex R10)
+    expect(html).toContain("手で動かしていても戻ります");
+    expect(html).toContain("自分で追加した文字・バッジ・QRは動きません");
   });
 
   it("layoutWarning 指定時は data-toolbar-layout-warning を表示する", () => {
