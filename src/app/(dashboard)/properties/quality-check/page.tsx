@@ -27,6 +27,17 @@ interface Summary {
   propertiesChecked: number;
 }
 
+// B-5(UI総点検): チェック内容のコード(NO_OWNER 等)は日本語ラベルで表示する。
+// 未知コードは従来どおり生表示にフォールバックする。
+const CODE_LABELS: Record<string, string> = {
+  NO_OWNER: "所有者未紐づけ",
+  REGISTRY_DM_MISMATCH: "登記とDMの不整合",
+  NO_LOT_NUMBER: "地番未入力",
+  NO_REAL_ESTATE_NUMBER: "不動産番号未入力",
+  INVESTIGATION_NOT_CONFIRMED: "調査未確認",
+  NO_ASSIGNEE: "担当者未設定",
+};
+
 const severityConfig = {
   error: {
     icon: AlertCircle,
@@ -212,8 +223,8 @@ export default function QualityCheckPage() {
                     >
                       {config.label}
                     </span>
-                    <span className="text-xs text-gray-500 font-mono dark:text-gray-400">
-                      {issue.code}
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {CODE_LABELS[issue.code] ?? issue.code}
                     </span>
                   </div>
                   <p className={`text-sm ${config.text}`}>{issue.message}</p>

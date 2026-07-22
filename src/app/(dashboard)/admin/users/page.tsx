@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import StatusBadge, { USER_ROLE_INTENT } from "@/components/ui/status-badge";
+import { ROLE_LABELS } from "@/lib/role-labels";
 
 interface UserItem {
   id: string;
@@ -30,12 +31,6 @@ interface UserItem {
   mustChangePassword: boolean;
   createdAt: string;
 }
-
-const ROLE_LABELS: Record<string, string> = {
-  admin: "管理者",
-  office_staff: "事務担当",
-  field_staff: "現地担当",
-};
 
 export default function UsersPage() {
   const [users, setUsers] = useState<UserItem[]>([]);

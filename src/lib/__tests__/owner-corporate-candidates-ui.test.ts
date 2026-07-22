@@ -49,9 +49,9 @@ describe("admin/owners/correction page Phase E 法人番号タブ", () => {
     );
   });
 
-  it("Owner 詳細リンクが <Link href={c.detailUrl}> で描画される", () => {
+  it("所有者詳細リンクが <Link href={c.detailUrl}> で描画される", () => {
     expect(pageSrc).toMatch(/<Link[\s\S]{0,80}href=\{c\.detailUrl\}/);
-    expect(pageSrc).toMatch(/Owner\s+詳細を開く/);
+    expect(pageSrc).toMatch(/所有者詳細を開く/);
   });
 
   it("missing 候補のみ checkbox + 「一括反映」ボタンを提供する", () => {

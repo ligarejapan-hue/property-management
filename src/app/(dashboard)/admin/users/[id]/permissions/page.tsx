@@ -3,6 +3,7 @@
 import { use, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Loader2, Save } from "lucide-react";
+import { ROLE_LABELS } from "@/lib/role-labels";
 
 const RESOURCES = [
   { key: "property", label: "物件", actions: ["read", "write", "delete"] },
@@ -39,6 +40,9 @@ const ACTION_LABELS: Record<string, string> = {
   bypass: "保護免除",
   preview: "プレビュー",
   download: "ダウンロード",
+  // 謄本自動取得 / 売却促進DM(B-5: 英語コードの生表示を避ける)
+  auto_fetch: "自動取得",
+  generate: "AI生成",
 };
 
 interface Override {
@@ -208,7 +212,7 @@ export default function UserPermissionsPage({
           <div>
             <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">ロール</dt>
             <dd className="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
-              {user?.role ?? "不明"}
+              {user ? (ROLE_LABELS[user.role] ?? user.role) : "不明"}
             </dd>
           </div>
         </dl>
