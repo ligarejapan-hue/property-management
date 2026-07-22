@@ -1815,11 +1815,20 @@ function isFullyTransparentColor(color: string | undefined): boolean {
   if (!color) return false;
   const c = color.trim().toLowerCase();
   if (c === "transparent") return true;
-  const fn = c.match(/^(?:rgba|hsla)\(([^)]*)\)$/);
+  // rgb()/rgba()/hsl()/hsla(): カンマ区切り第4成分か、CSS Color 4 の
+  // スラッシュ記法 (rgb(0 0 0 / 0)) のどちらでも alpha を読む (@codex #310 R36)
+  const fn = c.match(/^(?:rgba?|hsla?)\(([^)]*)\)$/);
   if (fn) {
-    const parts = fn[1].split(/[,/]/);
-    const alpha = parseFloat(parts[3] ?? "1");
-    return alpha === 0;
+    const inner = fn[1];
+    let alphaStr: string | undefined;
+    if (inner.includes("/")) {
+      alphaStr = inner.split("/")[1];
+    } else {
+      const parts = inner.split(",");
+      alphaStr = parts.length >= 4 ? parts[3] : undefined;
+    }
+    if (alphaStr === undefined) return false; // alpha 未指定 = 不透明
+    return parseFloat(alphaStr) === 0;
   }
   if (/^#[0-9a-f]{4}$/.test(c)) return c[4] === "0";
   if (/^#[0-9a-f]{8}$/.test(c)) return c.slice(-2) === "00";

@@ -455,6 +455,9 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(makeDoc([invisible, tbl]))).toHaveLength(0);
     const transparent = { ...invisible, style: { color: "transparent" } };
     expect(findTextTableOverlaps(makeDoc([transparent, tbl]))).toHaveLength(0);
+    // CSS Color 4 のスラッシュ記法も透明として認識 (@codex R36)
+    const slashAlpha = { ...invisible, style: { color: "rgb(0 0 0 / 0)" } };
+    expect(findTextTableOverlaps(makeDoc([slashAlpha, tbl]))).toHaveLength(0);
     // 可視色なら従来どおり検出
     const visible = { ...invisible, style: { color: "#d0331a" } };
     expect(findTextTableOverlaps(makeDoc([visible, tbl]))).toHaveLength(1);
