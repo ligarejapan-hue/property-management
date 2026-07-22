@@ -1728,6 +1728,10 @@ function measureParagraph(
       }
     } else {
       sawContent = true;
+      // サロゲートペア (絵文字等) は 1 グリフ = 全角 1 文字として数える
+      // (@codex #310 R26: UTF-16 の 2 単位を 2 文字分にしない)
+      const code = ch.charCodeAt(0);
+      if (code >= 0xd800 && code <= 0xdbff) i++;
       emitBlock(1); // 全角 1 文字 (どこでも折返し可)
     }
   }

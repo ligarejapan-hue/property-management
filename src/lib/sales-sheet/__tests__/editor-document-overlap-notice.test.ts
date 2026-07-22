@@ -364,6 +364,17 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
+  it("絵文字(サロゲートペア)は1グリフ=全角1文字として数える (@codex #310 R26)", () => {
+    // 😀×3 は約 12.7mm。2 文字分に数えると約 25.4mm になり x=115 の表に
+    // 誤って届いてしまう
+    const emoji = {
+      id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: "😀😀😀", style: {},
+    };
+    const doc = makeDoc([emoji, table("overview", 115, 40, 60, 20)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
