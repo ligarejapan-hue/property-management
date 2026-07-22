@@ -107,7 +107,10 @@ describe("dashboard-layout — 下部ツールバー被り解消", () => {
 
 describe("field-survey マップ — 表示切替パネルはモバイルで折りたたみ", () => {
   it("モバイル専用の開閉ボタンがある（md では非表示）", () => {
-    expect(fieldSurveyMap).toMatch(/表示切替\{hasActiveSession/);
+    // ラベルは排他表示 (ピン追加中 > 巡回中 > なし)。連続ピンモード導入時に
+    // 併記だと地図/航空写真ボタンへ重なるため短縮した (詳細は
+    // field-survey-pin-continuity-source.test.ts)。
+    expect(fieldSurveyMap).toMatch(/表示切替\{pinAddMode/);
     expect(fieldSurveyMap).toMatch(/aria-expanded=\{panelOpen\}/);
   });
   it("パネル本体は折りたたみ時 hidden・md 以上で常時表示", () => {

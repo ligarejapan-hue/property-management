@@ -292,8 +292,9 @@ export default function FieldSurveyMap({
   // 今回の作成候補がカメラファースト由来か。finalize で詳細パネルを開かず
   // トースト表示にして、次の撮影へすぐ移れるようにする。
   const createdFromCameraRef = useRef(false);
-  // カメラファースト保存完了トースト (自動で消える)。
-  const [cameraSavedNotice, setCameraSavedNotice] = useState(false);
+  // 保存完了トースト (自動で消える)。カメラファーストおよび写真付き保存で
+  // 詳細パネルの代わりに出す (連続作業を遮らないため)。
+  const [pinSavedNotice, setPinSavedNotice] = useState(false);
   const cameraToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -451,6 +452,11 @@ export default function FieldSurveyMap({
       if (prevActiveSessionIdRef.current !== nextId) {
         prevActiveSessionIdRef.current = nextId;
         resetCameraFirst();
+        // ピン追加モードも巡回の終了/切替で解除する。連続ピンモードで保存後も
+        // ON が続くため、ここで畳まないと巡回終了後に「・ピン追加中」表示が
+        // 残るのに OFF 導線 (パネル内トグル=巡回中のみ描画) が消えて復帰
+        // 不能になり、次の巡回開始時も暗黙 ON で復活してしまう。
+        setPinAddMode(false);
       }
       setActiveSession(s);
     },
@@ -557,32 +563,32 @@ export default function FieldSurveyMap({
   const pinMutations = useFieldSurveyPinMutations();
   const photoMutations = useFieldSurveyPinPhotoMutations();
 
-  // pin 作成 (+写真) が完結した時の共通後処理。modal を閉じ、誤タップ防止に
-  // pin 追加モードを OFF にし、作成した pin の detail panel を開く。
-  // カメラファースト由来の作成では detail panel を開かずトーストのみ出し、
-  // 次の撮影 (歩いて次の家へ) をパネル閉じ操作で遮らない。
+  // pin 作成 (+写真) が完結した時の共通後処理。modal を閉じる。
+  // 連続ピンモード: 地図タップ経路でも pin 追加モードは維持する (保存のたびに
+  // モードを入れ直す 2 タップを無くす。誤タップは modal のキャンセルで防げる)。
+  // 写真付き保存 (カメラファースト含む) は詳細パネルを開かずトーストのみ出し、
+  // 次のピンへの移動をパネル閉じ操作で遮らない。写真なし保存は従来どおり
+  // 詳細パネルを開く (写真の追加先を提示するため)。
   const finalizePinCreate = useCallback(
-    (pinId: string) => {
+    (pinId: string, hadPhoto: boolean) => {
       invalidateCurrentLocationRequest();
       setCreateCandidate(null);
       setPhotoUploadFailed(false);
       createdPinIdRef.current = null;
       pendingPhotoFileRef.current = null;
-      if (createdFromCameraRef.current) {
-        createdFromCameraRef.current = false;
-        setCameraSavedNotice(true);
+      const fromCamera = createdFromCameraRef.current;
+      createdFromCameraRef.current = false;
+      if (fromCamera || hadPhoto) {
+        setPinSavedNotice(true);
         if (cameraToastTimerRef.current) {
           clearTimeout(cameraToastTimerRef.current);
         }
         cameraToastTimerRef.current = setTimeout(() => {
-          if (fsMapMountedRef.current) setCameraSavedNotice(false);
+          if (fsMapMountedRef.current) setPinSavedNotice(false);
         }, 4000);
         return;
       }
-      // 地図タップ経路のみ: 誤タップ防止に pin 追加モードを OFF にする。
-      // カメラ経路ではユーザーが明示 ON にしたモードを黙って解除しない。
-      setPinAddMode(false);
-      // Phase 1-H: 作成後は detail panel を開く。
+      // Phase 1-H: 写真なしの作成後は detail panel を開く。
       setDetailPinId(pinId);
     },
     [invalidateCurrentLocationRequest],
@@ -615,15 +621,15 @@ export default function FieldSurveyMap({
       const newPinId = r.data.id;
       createdPinIdRef.current = newPinId;
       if (!file) {
-        // modal close / mode 解除 / detail panel は finalizePinCreate に集約。
-        finalizePinCreate(newPinId);
+        // modal close / トースト / detail panel は finalizePinCreate に集約。
+        finalizePinCreate(newPinId, false);
         return;
       }
       // 二段階目: 作成済み pin に写真を添付。失敗時は pin を残したまま再試行 UI へ。
       pendingPhotoFileRef.current = file;
       const up = await photoMutations.uploadPhoto(newPinId, file);
       if (up.ok) {
-        finalizePinCreate(newPinId);
+        finalizePinCreate(newPinId, true);
       } else {
         setPhotoUploadFailed(true);
       }
@@ -644,14 +650,14 @@ export default function FieldSurveyMap({
     if (!pinId || !file) return;
     const up = await photoMutations.uploadPhoto(pinId, file);
     if (up.ok) {
-      finalizePinCreate(pinId);
+      finalizePinCreate(pinId, true);
     }
   }, [photoMutations, finalizePinCreate]);
 
   const handleFinishWithoutPhoto = useCallback(() => {
     const pinId = createdPinIdRef.current;
     if (!pinId) return;
-    finalizePinCreate(pinId);
+    finalizePinCreate(pinId, false);
   }, [finalizePinCreate]);
 
   const handleMapClick = useCallback(
@@ -667,6 +673,9 @@ export default function FieldSurveyMap({
         createdFromCameraRef.current = true;
         setCameraFirstPhase("idle");
         setCameraFirstNotice(null);
+        // 開いたままの詳細パネルは閉じる (旧ピンのパネル残留と、スマホで
+        // bottom sheet が保存トーストを覆い隠すのを防ぐ)。
+        setDetailPinId(null);
         setCreateCandidate({
           lat: latLng.lat,
           lng: latLng.lng,
@@ -682,6 +691,9 @@ export default function FieldSurveyMap({
       // 破棄する (以後のモーダル操作による共有 token bump で "locating" に
       // 固着させない。callback 側の後始末は防御の二重化)。
       if (cameraFirstPhase === "locating") resetCameraFirst();
+      // 連続ピンモードでは詳細パネル表示中でも地図タップが有効なため、
+      // 新規作成の確定でパネルを閉じる (上と同旨)。
+      setDetailPinId(null);
       setCreateCandidate({ lat: latLng.lat, lng: latLng.lng });
       setCurrentLocationError(null);
     },
@@ -767,10 +779,10 @@ export default function FieldSurveyMap({
             onCancel={resetCameraFirst}
           />
         )}
-        {cameraSavedNotice && (
+        {pinSavedNotice && (
           <div
             role="status"
-            data-testid="camera-first-saved-toast"
+            data-testid="pin-saved-toast"
             className="pointer-events-none absolute bottom-28 left-1/2 z-10 -translate-x-1/2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
           >
             ピンを保存しました
@@ -896,7 +908,10 @@ function ControlPanel({
         aria-expanded={panelOpen}
         className="pointer-events-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 md:hidden"
       >
-        表示切替{hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
+        {/* ラベルは排他表示で短く保つ (ピン追加は巡回中にしか ON にならない)。
+            併記で長くなると左上の地図/航空写真ボタンに重なりタップを奪う
+            (過去に実機で発生した既知ホットスポット)。 */}
+        表示切替{pinAddMode ? "・ピン追加" : hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
       </button>
       <div
         className={`${panelOpen ? "mt-2 block" : "hidden"} pointer-events-auto min-h-0 w-56 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900 md:mt-0 md:block`}
