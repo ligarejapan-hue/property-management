@@ -788,6 +788,7 @@ export default function FieldSurveyMap({
             serverError={pinMutations.createError}
             photoUploading={photoMutations.uploadLoading}
             photoUploadFailed={photoUploadFailed}
+            photoUploadErrorDetail={photoMutations.uploadError}
             onCancel={() => {
               // Codex P2: pending geolocation callback を無効化してから modal を閉じる
               invalidateCurrentLocationRequest();
@@ -811,6 +812,10 @@ export default function FieldSurveyMap({
             }}
             onRetryPhoto={() => {
               void handleRetryPhoto();
+            }}
+            onReplaceRetryPhoto={(file) => {
+              // 失敗中に選び直された写真で再試行できるよう保持 file を差し替える
+              pendingPhotoFileRef.current = file;
             }}
             onFinishWithoutPhoto={handleFinishWithoutPhoto}
             onUseCurrentLocation={useCurrentLocationForCreate}

@@ -53,6 +53,11 @@ interface PinCreateModalProps {
    * true の間は「写真だけ再試行」「写真なしで完了」を出し、pin を作り直させない。
    */
   photoUploadFailed: boolean;
+  /**
+   * 写真失敗の具体的な理由 (端末内変換の案内など)。固定文言だけでは
+   * 「HEIC は互換性優先設定に」等の対処が伝わらないため併記する。
+   */
+  photoUploadErrorDetail?: string | null;
   onCancel: () => void;
   onSubmit: (
     input: {
@@ -66,6 +71,12 @@ interface PinCreateModalProps {
   ) => void;
   /** 写真アップロード失敗時の再試行 (親が捕捉済みの file を再送)。 */
   onRetryPhoto: () => void;
+  /**
+   * 失敗中に別の写真を選び直した通知。親は再試行用の保持 file を差し替える。
+   * (変換不能な HEIC 等は同じ file の再試行が必ず再失敗するため、
+   *  「別の写真を」という案内文言と操作を一致させる)
+   */
+  onReplaceRetryPhoto?: (file: File) => void;
   /** 写真なしで完了 (pin は保存済み)。 */
   onFinishWithoutPhoto: () => void;
   onUseCurrentLocation: () => void;
@@ -83,9 +94,11 @@ export default function PinCreateModal({
   serverError,
   photoUploading,
   photoUploadFailed,
+  photoUploadErrorDetail,
   onCancel,
   onSubmit,
   onRetryPhoto,
+  onReplaceRetryPhoto,
   onFinishWithoutPhoto,
   onUseCurrentLocation,
   currentLocationLoading,
@@ -124,6 +137,9 @@ export default function PinCreateModal({
       return URL.createObjectURL(file);
     });
     setPhotoFile(file);
+    // 写真失敗中の選び直しは、親が保持する再試行用 file も差し替える
+    // (「写真だけ再試行」が新しい写真を送るようにする)。
+    if (photoUploadFailed) onReplaceRetryPhoto?.(file);
   };
 
   const clearPhoto = () => {
@@ -246,10 +262,13 @@ export default function PinCreateModal({
             onChange={(e) => handleFilePicked(e.target.files?.[0] ?? null)}
           />
           <div className="flex gap-2">
+            {/* 失敗中 (photoUploadFailed) も選び直し可: 変換できない写真は
+                同じ file の再試行が必ず再失敗するため、「別の写真を」の案内と
+                操作を一致させる (選び直しは onReplaceRetryPhoto で親に反映)。 */}
             <button
               type="button"
               onClick={() => cameraInputRef.current?.click()}
-              disabled={busy || photoUploadFailed}
+              disabled={busy}
               data-testid="pin-create-photo-camera"
               className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -258,7 +277,7 @@ export default function PinCreateModal({
             <button
               type="button"
               onClick={() => galleryInputRef.current?.click()}
-              disabled={busy || photoUploadFailed}
+              disabled={busy}
               data-testid="pin-create-photo-add"
               className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -314,6 +333,11 @@ export default function PinCreateModal({
           >
             <p className="font-semibold text-emerald-700 dark:text-emerald-400">ピンは保存されました</p>
             <p className="mt-1">写真の保存に失敗しました</p>
+            {photoUploadErrorDetail && (
+              <p className="mt-1" data-testid="pin-create-photo-error-detail">
+                {photoUploadErrorDetail}
+              </p>
+            )}
             <div className="mt-2 flex justify-end gap-2">
               <button
                 type="button"

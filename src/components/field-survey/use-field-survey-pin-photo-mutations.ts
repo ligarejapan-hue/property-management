@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pinApiErrorMessage } from "@/lib/field-survey-pin-util";
+import { prepareFieldSurveyPhotoForUpload } from "@/lib/field-survey-photo-prepare";
 
 export interface PinPhoto {
   id: string;
@@ -111,8 +112,16 @@ export function useFieldSurveyPinPhotoMutations() {
       uploadAbortRef.current = ac;
       if (mountedRef.current) setUploadState({ loading: true, error: null });
       try {
+        // 送信前に端末内で自動変換 (HEIC → JPEG / 8MB 超の縮小)。変換できない
+        // 端末ではサーバー 422 の代わりに平易な案内 (「互換性優先」設定) を返す。
+        const prepared = await prepareFieldSurveyPhotoForUpload(file);
+        if (!mountedRef.current) return { ok: false };
+        if (!prepared.ok) {
+          setUploadState({ loading: false, error: prepared.error });
+          return { ok: false, error: prepared.error };
+        }
         const formData = new FormData();
-        formData.append("file", file);
+        formData.append("file", prepared.file);
         const res = await fetch(
           `/api/field-survey/pins/${encodeURIComponent(pinId)}/photos`,
           {
