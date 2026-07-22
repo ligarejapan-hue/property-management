@@ -410,6 +410,19 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(0);
   });
 
+  it("先頭空白の空白域では警告しない (@codex #310 R30)", () => {
+    // 先頭に空白10個(約12.7mm)+「価格」— 空白域(100..112.7)にだけ重なる表は
+    // 描画上何も重ならないため検出しない。グリフ域(112.7..121.2)なら検出する
+    const padded = {
+      id: "price", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: " ".repeat(10) + "価格", style: {},
+    };
+    const underBlank = table("overview", 100, 40, 11, 20);
+    expect(findTextTableOverlaps(makeDoc([padded, underBlank]))).toHaveLength(0);
+    const underGlyph = table("overview", 114, 40, 20, 20);
+    expect(findTextTableOverlaps(makeDoc([padded, underGlyph]))).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

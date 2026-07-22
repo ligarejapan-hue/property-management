@@ -1595,7 +1595,7 @@ function measureParagraph(
   mono: boolean,
   maxLines: number,
   collapseWs: boolean,
-): number[] {
+): MeasuredLine[] {
   // ASCII の字送り: monospace は均一 ≒0.6em (Courier 等。1em はフォントサイズで
   // ありグリフ幅ではない・@codex #310 R11)。プロポーショナルは段階化する
   // (@codex #310 R10/R13: 一律だと過小/過大の双方が出る):
@@ -1621,8 +1621,13 @@ function measureParagraph(
   // 単一パスの貪欲行詰め。maxLines 行が確定した時点で走査を打ち切る
   // (@codex #310 R16/R18: 巨大貼り付けの同期計測対策を文字数 slice でなく
   // 行数上限で行う = 長大な不可分塊の後に続く可視テキストを取りこぼさない)。
-  const lineWidths: number[] = [];
-  let cur = 0;
+  // 行ごとに「先頭の空白送り (lead)」と「グリフ域 (glyph)」を分けて記録する
+  // (@codex #310 R30: 先頭/行末の空白域は描画されないため矩形に含めない)。
+  const lines: MeasuredLine[] = [];
+  let cur = 0; // 行の総送り (lead + glyph + trail)
+  let lead = 0; // 行頭からグリフ開始までの空白送り
+  let trail = 0; // 最後のグリフ以降の空白送り
+  let hasGlyph = false;
   let asciiRun = 0;
   let sawContent = false;
   let pendingWs = false; // collapseWs 用 (連続空白を 1 個に潰す)
@@ -1630,14 +1635,22 @@ function measureParagraph(
   // この直後の改行は「clip 行を終えるだけ」で新しい空行を作らない
   // (@codex #310 R20: 幻の空行で以降の行がズレるのを防ぐ)。
   let afterClip = false;
+  const pushLine = (): void => {
+    lines.push({ lead, glyph: Math.max(0, cur - lead - trail) });
+    cur = 0;
+    lead = 0;
+    trail = 0;
+    hasGlyph = false;
+  };
+  const addWs = (adv: number): void => {
+    cur += adv;
+    if (hasGlyph) trail += adv;
+    else lead += adv;
+  };
   const emitSpace = (): void => {
     afterClip = false;
-    if (cur + SPACE_EM > charsPerLine) {
-      lineWidths.push(cur);
-      cur = SPACE_EM;
-    } else {
-      cur += SPACE_EM;
-    }
+    if (cur + SPACE_EM > charsPerLine) pushLine();
+    addWs(SPACE_EM);
   };
   const emitBlock = (w: number): void => {
     if (pendingWs) {
@@ -1648,19 +1661,20 @@ function measureParagraph(
       // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)。
       // clip 行のグリフは箱の右端まで描かれて切れるため、幅は「全幅」として
       // 記録する (@codex #310 R21: charsPerLine×字送りだと端数分だけ狭くなる)。
-      if (cur > 0) lineWidths.push(cur);
-      lineWidths.push(Number.POSITIVE_INFINITY);
+      if (cur > 0) pushLine();
+      lines.push({ lead: 0, glyph: Number.POSITIVE_INFINITY });
       cur = 0;
+      lead = 0;
+      trail = 0;
+      hasGlyph = false;
       afterClip = true;
       return;
     }
     afterClip = false;
-    if (cur + w > charsPerLine) {
-      lineWidths.push(cur);
-      cur = w;
-    } else {
-      cur += w;
-    }
+    if (cur + w > charsPerLine) pushLine();
+    hasGlyph = true;
+    trail = 0;
+    cur += w;
   };
   // 飽和した不可分塊 (既に clip 確定) の残りを一括スキップするための
   // 折返し可能点スキャナ (@codex #310 R25: 数百万文字の不可分連続でも
@@ -1679,7 +1693,7 @@ function measureParagraph(
   let prevWasCr = false;
   for (let i = 0; i < para.length; i++) {
     const ch = para[i];
-    if (lineWidths.length >= maxLines) return lineWidths; // 可視行ぶん確定済み
+    if (lines.length >= maxLines) return lines; // 可視行ぶん確定済み
     // CRLF/CR は 1 つの改行として扱う (@codex #310 R22: \r を印字グリフとして
     // 0.6em 加算しない。レンダラは \r\n を 1 つの改行として描く)
     if (ch === "\n" && prevWasCr) {
@@ -1700,8 +1714,7 @@ function measureParagraph(
         afterClip = false;
         continue;
       }
-      lineWidths.push(cur);
-      cur = 0;
+      pushLine();
       continue;
     }
     const isWs = ch === " " || ch === "\t" || (collapseWs && isBreak);
@@ -1733,9 +1746,11 @@ function measureParagraph(
       } else if (ch === "\t") {
         // 次のタブストップへ送る (行幅は超えない)。タブ自体は折返し可能点。
         afterClip = false;
-        cur = Math.min(
-          charsPerLine,
-          (Math.floor(cur / TAB_STOP_EM) + 1) * TAB_STOP_EM,
+        addWs(
+          Math.min(
+            charsPerLine,
+            (Math.floor(cur / TAB_STOP_EM) + 1) * TAB_STOP_EM,
+          ) - cur,
         );
       } else {
         emitSpace();
@@ -1767,8 +1782,15 @@ function measureParagraph(
   }
   if (asciiRun > 0) emitBlock(asciiRun);
   if (collapseWs && !sawContent) return []; // 空セルは文字行を作らない (R15)
-  if (cur > 0 || lineWidths.length === 0) lineWidths.push(cur);
-  return lineWidths;
+  if (cur > 0 || lines.length === 0) pushLine();
+  return lines;
+}
+
+interface MeasuredLine {
+  /** 行頭からグリフ開始までの空白送り (em)。clip 行は 0 */
+  lead: number;
+  /** グリフ域の送り (em)。clip 行は Infinity = 箱の全幅 */
+  glyph: number;
 }
 
 interface RectMm {
@@ -1802,14 +1824,23 @@ function textRenderedLineRectsMm(el: TextElement, mono: boolean): RectMm[] {
   for (let i = 0; i < lineChars.length; i++) {
     const top = i * lineMm;
     if (top >= el.h) break; // 箱の外は描画されない (overflow: hidden)
-    const w = Math.min(el.w, lineChars[i] * fontMm);
-    if (w <= 0) continue; // 空行は幅を持たない
-    const x =
+    const line = lineChars[i];
+    if (line.glyph <= 0) continue; // 空白のみ/空行は描画されない
+    // 先頭空白 (lead) の空白域は矩形に含めない (@codex #310 R30)
+    const leadMm = Math.min(line.lead * fontMm, el.w);
+    const glyphMm = Number.isFinite(line.glyph)
+      ? line.glyph * fontMm
+      : el.w; // clip 行は箱の全幅
+    const totalMm = Math.min(el.w, leadMm + glyphMm);
+    const base =
       el.style.align === "right"
-        ? el.x + (el.w - w)
+        ? el.x + (el.w - totalMm)
         : el.style.align === "center"
-          ? el.x + (el.w - w) / 2
+          ? el.x + (el.w - totalMm) / 2
           : el.x;
+    const x = base + leadMm;
+    const w = Math.min(glyphMm, el.x + el.w - x);
+    if (w <= 0) continue;
     rects.push({ x, y: el.y + top, w, h: Math.min(lineMm, el.h - top) });
   }
   return rects;
