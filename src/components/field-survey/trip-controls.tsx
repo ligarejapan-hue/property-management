@@ -223,21 +223,30 @@ export default function TripControls({
   // memo 送信で代用すると一覧 API が memo を返さないため既存 memo を消す)。
   // これが無いと、続行後に点・ピン無しで終了したとき server 側で stale 扱いの
   // まま endedAt が続行前の時刻へ巻き戻る。失敗しても続行自体は妨げない。
-  const touchSession = useCallback(async (target: ActiveSessionLike) => {
-    try {
-      await fetch(
-        `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
-        {
-          method: "PATCH",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ touch: true }),
-        },
-      );
-    } catch {
-      // best effort (オフライン等)。続行操作はローカルで成立させる。
-    }
-  }, []);
+  const touchSession = useCallback(
+    async (target: ActiveSessionLike) => {
+      try {
+        const res = await fetch(
+          `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
+          {
+            method: "PATCH",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ touch: true }),
+          },
+        );
+        if (!mountedRef.current) return;
+        if (res.status === 409) {
+          // 並行で終了済み (@codex R9)。終了済み session を巡回中として使い
+          // 続けないよう、状態を取り直して UI を整合させる。
+          await fetchActiveSession();
+        }
+      } catch {
+        // best effort (オフライン等)。続行操作はローカルで成立させる。
+      }
+    },
+    [fetchActiveSession],
+  );
 
   const endSession = useCallback(
     async (target: ActiveSessionLike) => {

@@ -215,6 +215,10 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
     expect(TRIP_SRC).toMatch(/touchSession/);
     expect(TRIP_SRC).toMatch(/JSON\.stringify\(\{ touch: true \}\)/);
     expect(TRIP_SRC).not.toMatch(/memo:\s*target\.memo/);
+    // 並行終了済み (409) は再取得して UI を整合させる (@codex R9)
+    expect(TRIP_SRC).toMatch(
+      /409[\s\S]{0,300}?fetchActiveSession\(\)/,
+    );
   });
 });
 

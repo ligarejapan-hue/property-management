@@ -200,11 +200,21 @@ export async function PATCH(
       });
     } else if (patch.touch) {
       // B-7 (@codex R7): 活動記録専用の touch。updatedAt だけを進め、memo 等は
-      // 一切変更しない (active でなくなっていれば no-op・エラーにもしない)。
-      await prisma.fieldSurveySession.updateMany({
+      // 一切変更しない。
+      const touched = await prisma.fieldSurveySession.updateMany({
         where: { id, status: "active" },
         data: { updatedAt: new Date() },
       });
+      if (touched.count === 0) {
+        // 並行で終了済み (@codex R9): 200 で握り潰すと client が終了済み
+        // session を巡回中として使い続けるため、既存の INVALID_STATE conflict
+        // に乗せて client 側の再取得へ誘導する。
+        throw new ApiError(
+          409,
+          "active 状態でない session です",
+          "INVALID_STATE",
+        );
+      }
     }
 
     const updated = await prisma.fieldSurveySession.findUnique({
