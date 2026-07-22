@@ -313,6 +313,20 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
+  it("CRLF は 1 つの改行として扱い \\r を幅に数えない (@codex #310 R22)", () => {
+    // 「あ\r\nあ」は 2 行×全角1文字 (LF と同じ)。\r を 0.6em 加算すると
+    // 1 行目が広がり x=105 の表に届いてしまう
+    const crlf = {
+      id: "note", type: "text", x: 100, y: 10, w: 100, h: 20, z: 5,
+      content: "あ\r\nあ", style: {},
+    };
+    const probe = table("overview", 105, 10, 60, 60);
+    expect(findTextTableOverlaps(makeDoc([crlf, probe]))).toHaveLength(0);
+    // LF 版と同一判定
+    const lf = { ...crlf, content: "あ\nあ" };
+    expect(findTextTableOverlaps(makeDoc([lf, probe]))).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

@@ -1587,9 +1587,18 @@ function measureParagraph(
       cur += w;
     }
   };
+  let prevWasCr = false;
   for (const ch of para) {
     if (lineWidths.length >= maxLines) return lineWidths; // 可視行ぶん確定済み
-    if (!collapseWs && ch === "\n") {
+    // CRLF/CR は 1 つの改行として扱う (@codex #310 R22: \r を印字グリフとして
+    // 0.6em 加算しない。レンダラは \r\n を 1 つの改行として描く)
+    if (ch === "\n" && prevWasCr) {
+      prevWasCr = false;
+      continue;
+    }
+    prevWasCr = ch === "\r";
+    const isBreak = ch === "\n" || ch === "\r";
+    if (!collapseWs && isBreak) {
       // pre-wrap の改行 = 強制改行 (@codex #310 R19: split("\n") で全文を
       // 走査/確保せず、単一パス内で段落境界を処理して行数上限で打ち切る)
       if (asciiRun > 0) {
@@ -1605,7 +1614,7 @@ function measureParagraph(
       cur = 0;
       continue;
     }
-    const isWs = ch === " " || ch === "\t" || (collapseWs && ch === "\n");
+    const isWs = ch === " " || ch === "\t" || (collapseWs && isBreak);
     if (!isWs && ch.charCodeAt(0) <= 0xff) {
       sawContent = true;
       asciiRun += charEm(ch);
