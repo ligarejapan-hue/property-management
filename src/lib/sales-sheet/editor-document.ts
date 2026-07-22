@@ -1551,7 +1551,12 @@ function measureParagraph(
   let asciiRun = 0;
   let sawContent = false;
   let pendingWs = false; // collapseWs 用 (連続空白を 1 個に潰す)
+  // 直前が clip 済み不可分塊の行末で、新しい行にまだ何も無い状態。
+  // この直後の改行は「clip 行を終えるだけ」で新しい空行を作らない
+  // (@codex #310 R20: 幻の空行で以降の行がズレるのを防ぐ)。
+  let afterClip = false;
   const emitSpace = (): void => {
+    afterClip = false;
     if (cur + 0.6 > charsPerLine) {
       lineWidths.push(cur);
       cur = 0.6;
@@ -1569,8 +1574,10 @@ function measureParagraph(
       if (cur > 0) lineWidths.push(cur);
       lineWidths.push(charsPerLine);
       cur = 0;
+      afterClip = true;
       return;
     }
+    afterClip = false;
     if (cur + w > charsPerLine) {
       lineWidths.push(cur);
       cur = w;
@@ -1586,6 +1593,11 @@ function measureParagraph(
       if (asciiRun > 0) {
         emitBlock(asciiRun);
         asciiRun = 0;
+      }
+      if (afterClip && cur === 0) {
+        // clip 行の直後の改行は行を増やさない (@codex R20)
+        afterClip = false;
+        continue;
       }
       lineWidths.push(cur);
       cur = 0;
@@ -1613,6 +1625,7 @@ function measureParagraph(
         if (sawContent) pendingWs = true;
       } else if (ch === "\t") {
         // 次のタブストップへ送る (行幅は超えない)。タブ自体は折返し可能点。
+        afterClip = false;
         cur = Math.min(
           charsPerLine,
           (Math.floor(cur / TAB_STOP_EM) + 1) * TAB_STOP_EM,

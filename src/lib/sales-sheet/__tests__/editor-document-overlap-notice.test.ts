@@ -290,6 +290,18 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
+  it("clip行直後の改行は幻の空行を作らない (@codex #310 R20)", () => {
+    // 巨大URL(clip 1行) + 改行 + 短い全角 → 全角は 2 行目 (renderer と一致)。
+    // 箱 h=10 では 2 行目まで可視のため、その行帯の表と重なる
+    // (幻の空行が挟まると全角が 3 行目扱いになり h=10 の外へ出て見逃す)
+    const urlNewline = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 10, z: 5,
+      content: "a".repeat(500) + "\n" + "あ".repeat(5), style: {},
+    };
+    const doc = makeDoc([urlNewline, table("overview", 100, 16, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
