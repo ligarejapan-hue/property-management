@@ -1476,13 +1476,23 @@ function estimatedTableHeightMm(el: TableElement, mono: boolean): number {
   const valueW = Math.max(el.w * 0.68 - 2, fontMm);
   const labelChars = Math.max(1, Math.floor(labelW / fontMm));
   const valueChars = Math.max(1, Math.floor(valueW / fontMm));
+  // セルは white-space: normal (@codex #310 R15): 連続空白・タブ・改行は
+  // 1 つの空白に潰れ、空セルは文字行を作らない。正規化してから text と同じ
+  // 貪欲行詰め (@codex R8: 空白なし ASCII 塊は折り返されない) で数える。
+  const cellLines = (s: string, chars: number): number => {
+    const normalized = s.replace(/\s+/g, " ").trim();
+    return normalized === ""
+      ? 0
+      : measureParagraph(normalized, chars, mono).length;
+  };
   let total = 0;
   for (const r of el.rows) {
-    // セルも折返し単位を考慮する (@codex #310 R8: 空白なしの ASCII 塊は
-    // 折り返されず横にはみ出す=縦に伸びない。text と同じ貪欲行詰めで数える)。
-    const labelLines = measureParagraph(r.label, labelChars, mono).length;
-    const valueLines = measureParagraph(r.value, valueChars, mono).length;
-    total += Math.max(labelLines, valueLines) * lineMm + 1.4;
+    const rowLines = Math.max(
+      cellLines(r.label, labelChars),
+      cellLines(r.value, valueChars),
+    );
+    // 空行でも罫線+上下 padding (≒1.4mm) は残る
+    total += rowLines * lineMm + 1.4;
   }
   return total;
 }

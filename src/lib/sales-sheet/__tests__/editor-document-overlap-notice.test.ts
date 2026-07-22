@@ -233,6 +233,26 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(makeDoc([plain, tbl]))).toHaveLength(0);
   });
 
+  it("表セルは連続空白が潰れ・空行は文字行を作らない (@codex #310 R15)", () => {
+    // white-space: normal のセルでは連続空白は 1 個に潰れる → 「あ あ あ」は
+    // 1 行に収まり、保存 h の外の文字と重ならない
+    const spacedTable = {
+      id: "overview", type: "table", x: 100, y: 10, w: 40, h: 8, z: 1,
+      rows: [{ label: "備考", value: ("あ" + " ".repeat(30)).repeat(3) }],
+      style: {},
+    };
+    const doc = makeDoc([spacedTable, text("below", 105, 22)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 空セルだけの行は文字行を作らない (罫線+padding のみ) → 6 行でも伸びない
+    const emptyRowsTable = {
+      ...spacedTable,
+      h: 10,
+      rows: Array.from({ length: 6 }, () => ({ label: "", value: " " })),
+    };
+    const doc2 = makeDoc([emptyRowsTable, text("below", 105, 22)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
