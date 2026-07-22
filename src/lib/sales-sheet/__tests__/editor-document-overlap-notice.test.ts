@@ -434,6 +434,18 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
+  it("大量の先頭空白の後の不可分値もセル先頭に描画される扱い (@codex #310 R34)", () => {
+    // セルは空白が潰れるため、先頭2万個の空白の後の30文字はセル先頭から
+    // 描画されて表の右へはみ出す → 右隣の文字と重なる
+    const paddedOverflow = {
+      id: "overview", type: "table", x: 100, y: 40, w: 40, h: 60, z: 1,
+      rows: [{ label: "URL", value: " ".repeat(20000) + "a".repeat(30) }],
+      style: {},
+    };
+    const doc = makeDoc([paddedOverflow, text("beside", 150, 45)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

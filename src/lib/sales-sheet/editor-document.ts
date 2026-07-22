@@ -1514,21 +1514,29 @@ function maxUnbreakableRunEm(
 ): number {
   const WIDE_ASCII = /[MWmw@#%&]/;
   const NARROW_ASCII = /[ijlI.,;:!'|]/;
-  // ページ内 (可視域) に描かれ得る文字数を大きく超える走査はしない
-  // (@codex #310 R33: 区切りの多い巨大セル値でも全走査で UI を塞がない。
-  //  これより後の塊はページ外の行にしか現れず判定に影響しない)
+  // ページ内 (可視域) に描かれ得る「グリフ文字数」を大きく超える走査はしない
+  // (@codex #310 R33: 区切りの多い巨大セル値でも全走査で UI を塞がない)。
+  // 空白 run は予算に数えず native 検索で読み飛ばす (@codex #310 R34: セルは
+  // white-space: normal で空白が潰れるため、先頭に大量の空白があっても後続の
+  // 塊はセル先頭に描画される = 空白で予算を消費して見逃してはいけない)
   const SCAN_CHAR_CAP = 10000;
+  const NON_WS = /[^ \t\n\r]/g;
   let scanned = 0;
   let run = 0;
   let max = 0;
-  for (const ch of s) {
-    if (++scanned > SCAN_CHAR_CAP) break;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
     if (ch.charCodeAt(0) <= 0xff) {
       if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
         max = Math.max(max, run);
         run = 0;
+        // 空白 run を一括スキップ (予算外)
+        NON_WS.lastIndex = i + 1;
+        const m = NON_WS.exec(s);
+        i = (m ? m.index : s.length) - 1;
         continue;
       }
+      if (++scanned > SCAN_CHAR_CAP) break;
       run += mono
         ? 0.6
         : WIDE_ASCII.test(ch)
@@ -1547,6 +1555,7 @@ function maxUnbreakableRunEm(
       if (run >= capEm || max >= capEm) return capEm;
       continue;
     }
+    if (++scanned > SCAN_CHAR_CAP) break;
     max = Math.max(max, run);
     run = 0;
   }
