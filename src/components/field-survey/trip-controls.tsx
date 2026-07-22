@@ -83,6 +83,10 @@ export default function TripControls({
   // B-7: 放置 session の終了確認は同一 session につき 1 回だけ出す
   // (conflict 後の再取得などで繰り返し聞き直さない)。
   const stalePromptedRef = useRef<string | null>(null);
+  // B-7 (@codex R10): 「巡回を続ける」を選んだ session id。続行直後の touch が
+  // 失敗 (オフライン等) しても、終了直前に再 touch して「続行したのに endedAt が
+  // 続行前へ巻き戻る」ことを防ぐための印。
+  const resumedRef = useRef<string | null>(null);
 
   const isAbortError = (err: unknown): boolean =>
     typeof err === "object" &&
@@ -272,6 +276,13 @@ export default function TripControls({
           return;
         }
       }
+      // B-7 (@codex R10): 続行済み session の終了は、直前に活動 touch を挟んで
+      // server の stale 判定を解除する (続行時の touch が失敗していても、ここで
+      // 記録されれば endedAt は now になり、続行後の巡回が消えない)。
+      if (resumedRef.current === target.id) {
+        await touchSession(target);
+        if (!mountedRef.current) return;
+      }
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
       mutationAbortRef.current = ac;
@@ -296,6 +307,7 @@ export default function TripControls({
           extractApiErrorCode(body),
         );
         if (outcome.kind === "ok") {
+          if (resumedRef.current === target.id) resumedRef.current = null;
           setSession(null);
           setPhase("idle");
           return;
@@ -314,7 +326,7 @@ export default function TripControls({
         setPhase("active");
       }
     },
-    [fetchActiveSession, onBeforeSessionEnd],
+    [fetchActiveSession, onBeforeSessionEnd, touchSession],
   );
 
   if (phase === "loading") {
@@ -372,6 +384,7 @@ export default function TripControls({
           session={session}
           now={now}
           onContinue={() => {
+            resumedRef.current = session.id;
             setPhase("active");
             void touchSession(session);
           }}

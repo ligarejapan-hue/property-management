@@ -220,6 +220,14 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
       /409[\s\S]{0,300}?fetchActiveSession\(\)/,
     );
   });
+
+  it("続行済み session の終了は直前に再 touch する (@codex R10: touch 失敗時の巻き戻り防止)", () => {
+    expect(TRIP_SRC).toMatch(/resumedRef/);
+    // endSession 内で resumed の場合に touchSession を await してから終了 PATCH
+    expect(TRIP_SRC).toMatch(
+      /resumedRef\.current === target\.id[\s\S]{0,120}?await touchSession\(target\)/,
+    );
+  });
 });
 
 describe("field-survey-map.tsx — TripControls 統合", () => {
