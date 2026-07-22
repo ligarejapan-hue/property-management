@@ -1749,7 +1749,13 @@ function measureParagraph(
       }
       // サロゲートペア (絵文字等) は 1 グリフ = 全角 1 文字として数える
       // (@codex #310 R26: UTF-16 の 2 単位を 2 文字分にしない)
-      if (code >= 0xd800 && code <= 0xdbff) i++;
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const cp = para.codePointAt(i) ?? 0;
+        i++;
+        // 肌色モディファイア (U+1F3FB..U+1F3FF) は直前の絵文字に合成される
+        // (@codex #310 R29: 別グリフとして数えると約2倍幅の誤検知)
+        if (cp >= 0x1f3fb && cp <= 0x1f3ff) continue;
+      }
       if (joinNext) {
         // ZWJ 連結 (家族絵文字等) は直前のグリフと合成され幅を増やさない
         joinNext = false;

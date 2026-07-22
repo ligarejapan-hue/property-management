@@ -399,6 +399,17 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(makeDoc([zwj, tbl2]))).toHaveLength(0);
   });
 
+  it("肌色モディファイア付き絵文字は1グリフで数える (@codex #310 R29)", () => {
+    // 👍🏻×5 は 5 グリフ (約21mm)。モディファイアを別グリフに数えると約42mmで
+    // x=130 の表に誤って届く
+    const modified = {
+      id: "note", type: "text", x: 100, y: 40, w: 100, h: 10, z: 5,
+      content: "\u{1F44D}\u{1F3FB}".repeat(5), style: {},
+    };
+    const doc = makeDoc([modified, table("overview", 130, 40, 60, 20)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
