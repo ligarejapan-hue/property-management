@@ -1480,8 +1480,8 @@ function estimatedTableHeightMm(el: TableElement, mono: boolean): number {
   for (const r of el.rows) {
     // セルも折返し単位を考慮する (@codex #310 R8: 空白なしの ASCII 塊は
     // 折り返されず横にはみ出す=縦に伸びない。text と同じ貪欲行詰めで数える)。
-    const labelLines = measureParagraph(r.label, labelChars, mono).lines;
-    const valueLines = measureParagraph(r.value, valueChars, mono).lines;
+    const labelLines = measureParagraph(r.label, labelChars, mono).length;
+    const valueLines = measureParagraph(r.value, valueChars, mono).length;
     total += Math.max(labelLines, valueLines) * lineMm + 1.4;
   }
   return total;
@@ -1508,17 +1508,27 @@ function measureParagraph(
   para: string,
   charsPerLine: number,
   mono: boolean,
-): { lines: number; maxLineChars: number } {
-  // 折返し単位列: 正 = その幅の折返し不可塊 / -1 = 空白 (区切り・幅 0.6em)
+): number[] {
   // ASCII の字送り: monospace は均一 ≒0.6em (Courier 等。1em はフォントサイズで
-  // ありグリフ幅ではない・@codex #310 R11)。プロポーショナルは基本 0.6em、
-  // 幅広グリフ (大文字・m/w/@ 等) のみ 0.9em (@codex #310 R10)。
-  const WIDE_ASCII = /[A-Z@#%&mw_]/;
+  // ありグリフ幅ではない・@codex #310 R11)。プロポーショナルは段階化する
+  // (@codex #310 R10/R13: 一律だと過小/過大の双方が出る):
+  //   幅広 (M/W/m/w/@/#/%/&) = 0.9em / 細身 (i/j/l/I/約物) = 0.35em /
+  //   その他大文字 = 0.7em / その他 = 0.6em
+  const WIDE_ASCII = /[MWmw@#%&]/;
+  const NARROW_ASCII = /[ijlI.,;:!'|]/;
+  const charEm = (ch: string): number => {
+    if (mono) return 0.6;
+    if (WIDE_ASCII.test(ch)) return 0.9;
+    if (NARROW_ASCII.test(ch)) return 0.35;
+    if (/[A-Z]/.test(ch)) return 0.7;
+    return 0.6;
+  };
+  // 折返し単位列: 正 = その幅の折返し不可塊 / -1 = 空白 (区切り・幅 0.6em)
   const units: number[] = [];
   let asciiRun = 0;
   for (const ch of para) {
     if (ch.charCodeAt(0) <= 0xff && ch !== " " && ch !== "\t") {
-      asciiRun += !mono && WIDE_ASCII.test(ch) ? 0.9 : 0.6;
+      asciiRun += charEm(ch);
       if (ch === "-") {
         // ハイフンの直後は CSS の折返し可能点 (@codex #310 R9:
         // ABC-DEF-… のようなハイフン区切りは実際に折り返されて縦に伸びる)
@@ -1533,58 +1543,66 @@ function measureParagraph(
   }
   if (asciiRun > 0) units.push(asciiRun);
 
-  let lines = 1;
+  // 行ごとの実効文字数を返す (@codex #310 R13: 行別の矩形判定に使う)
+  const lineWidths: number[] = [];
   let cur = 0;
-  let maxLineChars = 0;
   for (const u of units) {
     const w = u === -1 ? 0.6 : u;
     if (u !== -1 && w > charsPerLine) {
       // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)
-      if (cur > 0) lines += 1;
-      maxLineChars = Math.max(maxLineChars, charsPerLine, cur);
-      cur = charsPerLine; // この行は埋まった扱い (次の単位で改行される)
+      if (cur > 0) lineWidths.push(cur);
+      lineWidths.push(charsPerLine);
+      cur = 0;
       continue;
     }
     if (cur + w > charsPerLine) {
-      lines += 1;
-      maxLineChars = Math.max(maxLineChars, cur);
+      lineWidths.push(cur);
       cur = w;
     } else {
       cur += w;
     }
   }
-  maxLineChars = Math.max(maxLineChars, cur);
-  return { lines, maxLineChars };
+  lineWidths.push(cur);
+  return lineWidths;
 }
 
-function textRenderedRectMm(
-  el: TextElement,
-  mono: boolean,
-): {
+interface RectMm {
   x: number;
   y: number;
   w: number;
   h: number;
-} {
+}
+
+/**
+ * text 要素の描画行ごとの矩形 (mm)。
+ *
+ * 複数行を 1 枚の外接矩形にすると、短い行の横の余白まで「文字がある」扱いに
+ * なり誤検知する (@codex #310 R13)。行ごとに幅と textAlign を反映した矩形を
+ * 返し、箱の高さを超える行は clip (overflow hidden) として捨てる。
+ */
+function textRenderedLineRectsMm(el: TextElement, mono: boolean): RectMm[] {
   const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
   const lineMm = fontMm * (el.style.lineHeight ?? 1.2);
   const charsPerLine = Math.max(1, Math.floor(el.w / fontMm));
-  let lines = 0;
-  let maxLineChars = 0;
+  const lineChars: number[] = [];
   for (const para of el.content.split("\n")) {
-    const m = measureParagraph(para, charsPerLine, mono);
-    lines += m.lines;
-    maxLineChars = Math.max(maxLineChars, m.maxLineChars);
+    lineChars.push(...measureParagraph(para, charsPerLine, mono));
   }
-  const w = Math.min(el.w, Math.max(maxLineChars * fontMm, fontMm));
-  const h = Math.min(el.h, lines * lineMm);
-  const x =
-    el.style.align === "right"
-      ? el.x + (el.w - w)
-      : el.style.align === "center"
-        ? el.x + (el.w - w) / 2
-        : el.x;
-  return { x, y: el.y, w, h };
+  const rects: RectMm[] = [];
+  for (let i = 0; i < lineChars.length; i++) {
+    const top = i * lineMm;
+    if (top >= el.h) break; // 箱の外は描画されない (overflow: hidden)
+    const w = Math.min(el.w, lineChars[i] * fontMm);
+    if (w <= 0) continue; // 空行は幅を持たない
+    const x =
+      el.style.align === "right"
+        ? el.x + (el.w - w)
+        : el.style.align === "center"
+          ? el.x + (el.w - w) / 2
+          : el.x;
+    rects.push({ x, y: el.y + top, w, h: Math.min(lineMm, el.h - top) });
+  }
+  return rects;
 }
 
 /**
@@ -1605,9 +1623,9 @@ export function findTextTableOverlaps(
   document: SalesSheetDocument,
 ): TextTableOverlapPair[] {
   // ASCII の字送りモデルはフォントで変える (mono=均一0.6em / プロポーショナル=
-  // 0.6em+幅広グリフ0.9em)。text は要素指定フォント優先・表はテーマ。
+  // 段階化)。text は要素指定フォント優先・表はテーマ。
   const themeMono = isMonospaceFamily(document.theme.fontFamily);
-  const boxes = document.elements
+  const entries = document.elements
     .filter(
       (e): e is TextElement | TableElement =>
         (e.type === "text" && e.content.trim() !== "") ||
@@ -1617,29 +1635,34 @@ export function findTextTableOverlaps(
       e.type === "text"
         ? {
             id: e.id,
-            ...textRenderedRectMm(
+            rects: textRenderedLineRectsMm(
               e,
               isMonospaceFamily(e.style.fontFamily ?? document.theme.fontFamily),
             ),
           }
         : {
             id: e.id,
-            x: e.x,
-            y: e.y,
-            w: e.w,
-            h: Math.max(e.h, estimatedTableHeightMm(e, themeMono)),
+            rects: [
+              {
+                x: e.x,
+                y: e.y,
+                w: e.w,
+                h: Math.max(e.h, estimatedTableHeightMm(e, themeMono)),
+              },
+            ],
           },
     );
+  const rectsOverlap = (a: RectMm, b: RectMm): boolean => {
+    const overlapW = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+    const overlapH = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    return overlapW > OVERLAP_TOLERANCE_MM && overlapH > OVERLAP_TOLERANCE_MM;
+  };
   const pairs: TextTableOverlapPair[] = [];
-  for (let i = 0; i < boxes.length; i++) {
-    for (let j = i + 1; j < boxes.length; j++) {
-      const a = boxes[i];
-      const b = boxes[j];
-      const overlapW =
-        Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
-      const overlapH =
-        Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-      if (overlapW > OVERLAP_TOLERANCE_MM && overlapH > OVERLAP_TOLERANCE_MM) {
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const a = entries[i];
+      const b = entries[j];
+      if (a.rects.some((ra) => b.rects.some((rb) => rectsOverlap(ra, rb)))) {
         pairs.push({ aId: a.id, bId: b.id });
       }
     }

@@ -143,9 +143,9 @@ describe("findTextTableOverlaps", () => {
     };
     const tbl = table("overview", 200, 30, 60, 60);
     expect(findTextTableOverlaps(makeDoc([lower, tbl]))).toHaveLength(0);
-    // 大文字32字 (プロポーショナルは幅広 0.9em) → 箱幅近くまで届き重なる
-    const upper = { ...lower, content: "A".repeat(32) };
-    expect(findTextTableOverlaps(makeDoc([upper, tbl]))).toHaveLength(1);
+    // 幅広グリフ32字 (M/W 等はプロポーショナルで 0.9em) → 箱幅近くまで届き重なる
+    const wide = { ...lower, content: "M".repeat(32) };
+    expect(findTextTableOverlaps(makeDoc([wide, tbl]))).toHaveLength(1);
     // monospace でも ASCII の字送りは ≒0.6em (1em はフォントサイズでありグリフ幅
     // ではない・Courier 等の実測) → 小文字32字は届かない (1em 扱いだと誤検知)
     const monoDoc = parseSalesSheetDocument({
@@ -202,6 +202,22 @@ describe("findTextTableOverlaps", () => {
     const unbroken = { ...hyphenated, content: "ABCDE".repeat(12) };
     const doc2 = makeDoc([unbroken, table("overview", 100, 18, 80, 60)]);
     expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
+  it("複数行テキストは行ごとの矩形で判定 (短い行の横の余白では警告しない・@codex #310 R13)", () => {
+    // 1行目は長く2行目は1文字。2行目の横 (1行目の下・右側) に置いた表は
+    // 描画上どの行とも交差しないため検出しない
+    const multi = {
+      id: "note", type: "text", x: 100, y: 10, w: 100, h: 20, z: 5,
+      content: "あ".repeat(20) + "\n" + "あ", style: {},
+    };
+    const beside2ndLine = table("overview", 150, 15.5, 60, 60);
+    const doc = makeDoc([multi, beside2ndLine]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 1行目の行帯に掛かる位置なら検出する
+    const on1stLine = table("overview", 150, 12, 60, 60);
+    const doc2 = makeDoc([multi, on1stLine]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(1);
   });
 
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
