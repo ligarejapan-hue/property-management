@@ -172,6 +172,25 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(1);
   });
 
+  it("表セルの折返し不可ASCII塊も縦に伸びない扱い (@codex #310 R8)", () => {
+    // 空白なしの長い URL は value セル内で折り返されず横にはみ出す → 表は
+    // 1 行分のまま。下に置いた文字とは重ならない
+    const urlTable = {
+      id: "overview", type: "table", x: 100, y: 10, w: 80, h: 10, z: 1,
+      rows: [{ label: "URL", value: "https://example.com/" + "a".repeat(40) }],
+      style: {},
+    };
+    const doc = makeDoc([urlTable, text("below", 110, 24)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+    // 空白区切りの長い値なら折り返して縦に伸びる → 同じ文字と重なる
+    const wrappedTable = {
+      ...urlTable,
+      rows: [{ label: "備考", value: "word ".repeat(24).trim() }],
+    };
+    const doc2 = makeDoc([wrappedTable, text("below", 110, 24)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

@@ -1456,16 +1456,6 @@ function isMonospaceFamily(family: string | undefined): boolean {
   return !!family && /mono|courier|consolas|menlo/i.test(family);
 }
 
-/**
- * 折返し見積り用の実効文字数 (全角=1・半角=asciiEm)。
- * asciiEm はフォントに応じて 1 (monospace) / 0.6 (プロポーショナルの控えめ値)
- * を渡す (@codex #310 R6: 一律 0.5 だと ASCII 主体の文字列を過小見積りする)。
- */
-function effectiveCharCount(s: string, asciiEm: number): number {
-  let n = 0;
-  for (const ch of s) n += ch.charCodeAt(0) > 0xff ? 1 : asciiEm;
-  return n;
-}
 
 /**
  * 表の描画上の高さの概算 (mm)。
@@ -1484,16 +1474,14 @@ function estimatedTableHeightMm(el: TableElement, asciiEm: number): number {
   // 左右 padding 1mm×2 相当を引いたセル幅。極端に狭い表でも 1 文字分は確保。
   const labelW = Math.max(el.w * 0.32 - 2, fontMm);
   const valueW = Math.max(el.w * 0.68 - 2, fontMm);
+  const labelChars = Math.max(1, Math.floor(labelW / fontMm));
+  const valueChars = Math.max(1, Math.floor(valueW / fontMm));
   let total = 0;
   for (const r of el.rows) {
-    const labelLines = Math.max(
-      1,
-      Math.ceil((effectiveCharCount(r.label, asciiEm) * fontMm) / labelW),
-    );
-    const valueLines = Math.max(
-      1,
-      Math.ceil((effectiveCharCount(r.value, asciiEm) * fontMm) / valueW),
-    );
+    // セルも折返し単位を考慮する (@codex #310 R8: 空白なしの ASCII 塊は
+    // 折り返されず横にはみ出す=縦に伸びない。text と同じ貪欲行詰めで数える)。
+    const labelLines = measureParagraph(r.label, labelChars, asciiEm).lines;
+    const valueLines = measureParagraph(r.value, valueChars, asciiEm).lines;
     total += Math.max(labelLines, valueLines) * lineMm + 1.4;
   }
   return total;
