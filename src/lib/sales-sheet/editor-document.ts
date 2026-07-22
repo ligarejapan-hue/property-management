@@ -1536,7 +1536,9 @@ function maxUnbreakableRunEm(
         max = Math.max(max, run);
         run = 0;
       }
-      if (max >= capEm) return capEm; // これ以上は判定に影響しない
+      // 成長中の run 自体も上限で打ち切る (@codex #310 R31: 区切りの無い
+      // 巨大トークンでは max が更新されず走査が止まらない)
+      if (run >= capEm || max >= capEm) return capEm;
       continue;
     }
     max = Math.max(max, run);
