@@ -280,6 +280,16 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
+  it("URL・パスはスラッシュ位置で折り返されて縦に伸びる (@codex #310 R19)", () => {
+    // スラッシュ区切りのパス → 折返しで複数行に伸び、下の表と重なる
+    const path = {
+      id: "note", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "aaaa/".repeat(12), style: {},
+    };
+    const doc = makeDoc([path, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

@@ -1580,12 +1580,24 @@ function measureParagraph(
   };
   for (const ch of para) {
     if (lineWidths.length >= maxLines) return lineWidths; // 可視行ぶん確定済み
+    if (!collapseWs && ch === "\n") {
+      // pre-wrap の改行 = 強制改行 (@codex #310 R19: split("\n") で全文を
+      // 走査/確保せず、単一パス内で段落境界を処理して行数上限で打ち切る)
+      if (asciiRun > 0) {
+        emitBlock(asciiRun);
+        asciiRun = 0;
+      }
+      lineWidths.push(cur);
+      cur = 0;
+      continue;
+    }
     const isWs = ch === " " || ch === "\t" || (collapseWs && ch === "\n");
     if (!isWs && ch.charCodeAt(0) <= 0xff) {
       sawContent = true;
       asciiRun += charEm(ch);
-      if (ch === "-") {
-        // ハイフンの直後は CSS の折返し可能点 (@codex #310 R9)
+      if (ch === "-" || ch === "/") {
+        // ハイフン/スラッシュの直後は CSS の折返し可能点 (@codex #310 R9/R19:
+        // URL・パスはスラッシュ位置で実際に折り返されて縦に伸びる)
         emitBlock(asciiRun);
         asciiRun = 0;
       }
@@ -1642,19 +1654,9 @@ function textRenderedLineRectsMm(el: TextElement, mono: boolean): RectMm[] {
   // main thread を塞がない。文字数 slice でなく行数上限で打ち切ることで、
   // 長大な不可分塊の後に続く可視テキストを取りこぼさない)。
   const maxLines = Math.max(1, Math.ceil(el.h / lineMm));
-  const lineChars: number[] = [];
-  for (const para of el.content.split("\n")) {
-    if (lineChars.length >= maxLines) break;
-    lineChars.push(
-      ...measureParagraph(
-        para,
-        charsPerLine,
-        mono,
-        maxLines - lineChars.length,
-        false,
-      ),
-    );
-  }
+  // 改行は measureParagraph が単一パス内で強制改行として扱う (split("\n") で
+  // 全文を確保しない・@codex #310 R19)。
+  const lineChars = measureParagraph(el.content, charsPerLine, mono, maxLines, false);
   const rects: RectMm[] = [];
   for (let i = 0; i < lineChars.length; i++) {
     const top = i * lineMm;
