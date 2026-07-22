@@ -430,6 +430,11 @@ export default function FieldSurveyMap({
   // 現在地取得 callback も token bump で無効化する。
   const resetCameraFirst = useCallback(() => {
     currentLocationRequestIdRef.current += 1;
+    // 照合 ID も無効化する (Codex P2): reset 後に届いた旧カメラ callback の
+    // 後始末分岐を発火させない。残したままだと後始末の resetCameraFirst が
+    // 共有 token を再 bump し、モーダルの「現在地を使う」など reset 後に
+    // 始まった新しい取得まで握り潰してしまう (取得中表示で固まる)。
+    cameraRequestIdRef.current = 0;
     cameraPhotoFileRef.current = null;
     createdFromCameraRef.current = false;
     setCameraFirstPhase("idle");

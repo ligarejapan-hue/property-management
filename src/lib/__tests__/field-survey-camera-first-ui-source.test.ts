@@ -218,6 +218,10 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     expect(r).toMatch(/currentLocationRequestIdRef\.current\s*\+=\s*1/);
     expect(r).toMatch(/cameraPhotoFileRef\.current\s*=\s*null/);
     expect(r).toMatch(/setCameraFirstPhase\("idle"\)/);
+    // Codex P2: reset 後に届いた旧カメラ callback の後始末を発火させない
+    // (照合 ID を無効化しないと、後始末の再 bump が reset 後に始まった
+    //  「現在地を使う」等の新しい取得まで握り潰す)
+    expect(r).toMatch(/cameraRequestIdRef\.current\s*=\s*0/);
   });
 
   it("banner は active session かつ awaiting-map-tap のときのみ render", () => {
