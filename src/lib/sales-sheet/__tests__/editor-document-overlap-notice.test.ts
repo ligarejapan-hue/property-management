@@ -327,6 +327,22 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(makeDoc([lf, probe]))).toHaveLength(0);
   });
 
+  it("セルの不可分な長い値は表の右へはみ出す=実効幅で判定 (@codex #310 R23)", () => {
+    // value セル(表の32%位置から)の不可分 ASCII 30 文字は表幅 40mm を大きく
+    // 超えて右へはみ出し、x=150 の文字と重なる
+    const overflowTable = {
+      id: "overview", type: "table", x: 100, y: 40, w: 40, h: 60, z: 1,
+      rows: [{ label: "URL", value: "a".repeat(30) }],
+      style: {},
+    };
+    const doc = makeDoc([overflowTable, text("beside", 150, 45)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+    // 値が短ければ保存幅のまま = 重ならない
+    const shortTable2 = { ...overflowTable, rows: [{ label: "URL", value: "ab" }] };
+    const doc2 = makeDoc([shortTable2, text("beside", 150, 45)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

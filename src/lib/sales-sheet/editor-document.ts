@@ -1502,6 +1502,75 @@ function estimatedTableHeightMm(
 }
 
 /**
+ * セル内で折返し不可な最長の塊 (em)。折返し可能点はテキストと同じ
+ * (空白/タブ/改行/ハイフン・スラッシュの直後)。capEm で走査を打ち切る。
+ */
+function maxUnbreakableRunEm(
+  s: string,
+  mono: boolean,
+  capEm: number,
+): number {
+  const WIDE_ASCII = /[MWmw@#%&]/;
+  const NARROW_ASCII = /[ijlI.,;:!'|]/;
+  let run = 0;
+  let max = 0;
+  for (const ch of s) {
+    if (ch.charCodeAt(0) <= 0xff) {
+      if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
+        max = Math.max(max, run);
+        run = 0;
+        continue;
+      }
+      run += mono
+        ? 0.6
+        : WIDE_ASCII.test(ch)
+          ? 0.9
+          : NARROW_ASCII.test(ch)
+            ? 0.35
+            : /[A-Z]/.test(ch)
+              ? 0.7
+              : 0.6;
+      if (ch === "-" || ch === "/") {
+        max = Math.max(max, run);
+        run = 0;
+      }
+      if (max >= capEm) return capEm; // これ以上は判定に影響しない
+      continue;
+    }
+    max = Math.max(max, run);
+    run = 0;
+  }
+  return Math.min(capEm, Math.max(max, run));
+}
+
+/**
+ * 表の描画上の実効幅 (mm)。
+ *
+ * table 要素の overflow: hidden は table box には効かず、セル内の折返し不可な
+ * 長い値 (URL・識別子) はセル・表の右へはみ出して描画される (@codex #310 R23)。
+ * label セル(左端+padding≒1.2mm)・value セル(表幅の32%+1.2mm)それぞれの
+ * 最長不可分塊の到達位置と保存幅の大きい方を返す。
+ */
+function estimatedTableWidthMm(
+  el: TableElement,
+  mono: boolean,
+  maxWidthMm: number,
+): number {
+  const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
+  const capEm = Math.ceil(maxWidthMm / fontMm);
+  let labelMaxEm = 0;
+  let valueMaxEm = 0;
+  for (const r of el.rows) {
+    labelMaxEm = Math.max(labelMaxEm, maxUnbreakableRunEm(r.label, mono, capEm));
+    valueMaxEm = Math.max(valueMaxEm, maxUnbreakableRunEm(r.value, mono, capEm));
+    if (labelMaxEm >= capEm && valueMaxEm >= capEm) break;
+  }
+  const labelReach = 1.2 + labelMaxEm * fontMm;
+  const valueReach = el.w * 0.32 + 1.2 + valueMaxEm * fontMm;
+  return Math.min(maxWidthMm, Math.max(el.w, labelReach, valueReach));
+}
+
+/**
  * text 要素の「実際に文字が描画される範囲」の概算 (mm)。
  *
  * 手動リサイズで箱だけ大きい text は、透明な余白部分に表が重なっても出力上は
@@ -1739,7 +1808,9 @@ export function findTextTableOverlaps(
               {
                 x: e.x,
                 y: e.y,
-                w: e.w,
+                // セルの折返し不可な長い値は表の右へはみ出して描画される
+                // (@codex #310 R23: overflow hidden は table box に効かない)
+                w: estimatedTableWidthMm(e, themeMono, document.page.width),
                 h: Math.max(
                   e.h,
                   estimatedTableHeightMm(e, themeMono, document.page.height),
