@@ -1451,7 +1451,7 @@ const OVERLAP_TOLERANCE_MM = 0.5;
 /** pt → mm 換算 (1pt = 25.4/72 mm)。 */
 const PT_TO_MM = 25.4 / 72;
 
-/** monospace 系フォントか (ASCII もほぼ 1em 幅で描画される)。 */
+/** monospace 系フォントか (ASCII の字送りが均一 ≒0.6em になる)。 */
 function isMonospaceFamily(family: string | undefined): boolean {
   return !!family && /mono|courier|consolas|menlo/i.test(family);
 }
@@ -1466,7 +1466,7 @@ function isMonospaceFamily(family: string | undefined): boolean {
  * 行ごとに「セル幅(label 32% / value 68%)に収まらない分の折返し行数」を
  * 全角=フォント幅 1 文字分として概算する (厳密なテキスト実測はしない)。
  */
-function estimatedTableHeightMm(el: TableElement, asciiEm: number): number {
+function estimatedTableHeightMm(el: TableElement, mono: boolean): number {
   // fontSizePt 未指定時、両レンダラは font-size を出力せずブラウザ既定の
   // 16px = 12pt を継承する (@codex #310 R3: 9pt と仮定すると過小見積りになる)。
   const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
@@ -1480,8 +1480,8 @@ function estimatedTableHeightMm(el: TableElement, asciiEm: number): number {
   for (const r of el.rows) {
     // セルも折返し単位を考慮する (@codex #310 R8: 空白なしの ASCII 塊は
     // 折り返されず横にはみ出す=縦に伸びない。text と同じ貪欲行詰めで数える)。
-    const labelLines = measureParagraph(r.label, labelChars, asciiEm).lines;
-    const valueLines = measureParagraph(r.value, valueChars, asciiEm).lines;
+    const labelLines = measureParagraph(r.label, labelChars, mono).lines;
+    const valueLines = measureParagraph(r.value, valueChars, mono).lines;
     total += Math.max(labelLines, valueLines) * lineMm + 1.4;
   }
   return total;
@@ -1507,17 +1507,18 @@ function estimatedTableHeightMm(el: TableElement, asciiEm: number): number {
 function measureParagraph(
   para: string,
   charsPerLine: number,
-  asciiEm: number,
+  mono: boolean,
 ): { lines: number; maxLineChars: number } {
-  // 折返し単位列: 正 = その幅の折返し不可塊 / -1 = 空白 (区切り・幅 asciiEm)
-  // プロポーショナル時は幅広グリフ (大文字・m/w/@ 等) を 0.9em で数える
-  // (@codex #310 R10: 一律 0.6em だと英大文字見出しの幅を過小見積りする)。
+  // 折返し単位列: 正 = その幅の折返し不可塊 / -1 = 空白 (区切り・幅 0.6em)
+  // ASCII の字送り: monospace は均一 ≒0.6em (Courier 等。1em はフォントサイズで
+  // ありグリフ幅ではない・@codex #310 R11)。プロポーショナルは基本 0.6em、
+  // 幅広グリフ (大文字・m/w/@ 等) のみ 0.9em (@codex #310 R10)。
   const WIDE_ASCII = /[A-Z@#%&mw_]/;
   const units: number[] = [];
   let asciiRun = 0;
   for (const ch of para) {
     if (ch.charCodeAt(0) <= 0xff && ch !== " " && ch !== "\t") {
-      asciiRun += asciiEm >= 1 ? asciiEm : WIDE_ASCII.test(ch) ? 0.9 : asciiEm;
+      asciiRun += !mono && WIDE_ASCII.test(ch) ? 0.9 : 0.6;
       if (ch === "-") {
         // ハイフンの直後は CSS の折返し可能点 (@codex #310 R9:
         // ABC-DEF-… のようなハイフン区切りは実際に折り返されて縦に伸びる)
@@ -1536,7 +1537,7 @@ function measureParagraph(
   let cur = 0;
   let maxLineChars = 0;
   for (const u of units) {
-    const w = u === -1 ? asciiEm : u;
+    const w = u === -1 ? 0.6 : u;
     if (u !== -1 && w > charsPerLine) {
       // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)
       if (cur > 0) lines += 1;
@@ -1558,7 +1559,7 @@ function measureParagraph(
 
 function textRenderedRectMm(
   el: TextElement,
-  asciiEm: number,
+  mono: boolean,
 ): {
   x: number;
   y: number;
@@ -1571,7 +1572,7 @@ function textRenderedRectMm(
   let lines = 0;
   let maxLineChars = 0;
   for (const para of el.content.split("\n")) {
-    const m = measureParagraph(para, charsPerLine, asciiEm);
+    const m = measureParagraph(para, charsPerLine, mono);
     lines += m.lines;
     maxLineChars = Math.max(maxLineChars, m.maxLineChars);
   }
@@ -1603,9 +1604,9 @@ function textRenderedRectMm(
 export function findTextTableOverlaps(
   document: SalesSheetDocument,
 ): TextTableOverlapPair[] {
-  // ASCII の想定幅はフォントで変える (@codex #310 R6): monospace 系は 1em、
-  // プロポーショナルは控えめに 0.6em。text は要素指定フォント優先・表はテーマ。
-  const themeAsciiEm = isMonospaceFamily(document.theme.fontFamily) ? 1 : 0.6;
+  // ASCII の字送りモデルはフォントで変える (mono=均一0.6em / プロポーショナル=
+  // 0.6em+幅広グリフ0.9em)。text は要素指定フォント優先・表はテーマ。
+  const themeMono = isMonospaceFamily(document.theme.fontFamily);
   const boxes = document.elements
     .filter(
       (e): e is TextElement | TableElement =>
@@ -1618,9 +1619,7 @@ export function findTextTableOverlaps(
             id: e.id,
             ...textRenderedRectMm(
               e,
-              isMonospaceFamily(e.style.fontFamily ?? document.theme.fontFamily)
-                ? 1
-                : 0.6,
+              isMonospaceFamily(e.style.fontFamily ?? document.theme.fontFamily),
             ),
           }
         : {
@@ -1628,7 +1627,7 @@ export function findTextTableOverlaps(
             x: e.x,
             y: e.y,
             w: e.w,
-            h: Math.max(e.h, estimatedTableHeightMm(e, themeAsciiEm)),
+            h: Math.max(e.h, estimatedTableHeightMm(e, themeMono)),
           },
     );
   const pairs: TextTableOverlapPair[] = [];

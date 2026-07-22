@@ -135,26 +135,25 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(0);
   });
 
-  it("monospace テーマでは ASCII を全角幅で見積る (@codex #310 R6)", () => {
-    // ASCII 32文字・箱 w=120。プロポーショナル(0.6em)なら文字域は約81mmで
-    // x=200 の表に届かないが、monospace(1em)なら約135mm→箱幅いっぱいまで届く。
-    const asciiText = {
+  it("ASCII の字送り: 幅広グリフ(大文字)は0.9em・monospaceは1emでなく実測相当0.6em (@codex #310 R10/R11)", () => {
+    // 小文字32字 (0.6em) → 文字域 約81mm = x=200 の表に届かない
+    const lower = {
       id: "code", type: "text", x: 100, y: 40, w: 120, h: 10, z: 5,
       content: "a".repeat(32), style: {},
     };
     const tbl = table("overview", 200, 30, 60, 60);
-    const propDoc = parseSalesSheetDocument({
-      page: A4_LANDSCAPE,
-      theme: { fontFamily: "sans-serif", accentColor: "#1f4e79" },
-      elements: [asciiText, tbl],
-    });
-    expect(findTextTableOverlaps(propDoc)).toHaveLength(0);
+    expect(findTextTableOverlaps(makeDoc([lower, tbl]))).toHaveLength(0);
+    // 大文字32字 (プロポーショナルは幅広 0.9em) → 箱幅近くまで届き重なる
+    const upper = { ...lower, content: "A".repeat(32) };
+    expect(findTextTableOverlaps(makeDoc([upper, tbl]))).toHaveLength(1);
+    // monospace でも ASCII の字送りは ≒0.6em (1em はフォントサイズでありグリフ幅
+    // ではない・Courier 等の実測) → 小文字32字は届かない (1em 扱いだと誤検知)
     const monoDoc = parseSalesSheetDocument({
       page: A4_LANDSCAPE,
       theme: { fontFamily: "monospace", accentColor: "#1f4e79" },
-      elements: [asciiText, tbl],
+      elements: [lower, tbl],
     });
-    expect(findTextTableOverlaps(monoDoc)).toHaveLength(1);
+    expect(findTextTableOverlaps(monoDoc)).toHaveLength(0);
   });
 
   it("折返し不可のASCII塊は縦に伸びない扱い (横clip・@codex #310 R7)", () => {
