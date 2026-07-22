@@ -103,4 +103,46 @@ describe("field-survey-map.tsx — 連続ピンモード", () => {
     // カメラの地図タップ待ち経路 + 通常のピン追加モード経路の両方
     expect(closes.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("詳細パネルで作業中は地図タップを無視する (下書き・送信中写真の喪失防止)", () => {
+    // Codex P2: 編集下書き / 削除確認 / 物件化 / 写真送信中に地図タップで
+    // パネルを黙って unmount すると下書き喪失・upload 中断になる。
+    // パネルが busy を親へ通知し、親は busy の間タップを無視する。
+    const handler = MAP_SRC.match(
+      /const handleMapClick\s*=\s*useCallback\([\s\S]*?\],?\s*\);/,
+    );
+    expect(handler).not.toBeNull();
+    // busy ガードは candidate 確定 (setDetailPinId(null)) より前
+    const m = handler?.[0] ?? "";
+    const guardIdx = m.indexOf("detailPanelBusyRef.current");
+    const closeIdx = m.indexOf("setDetailPinId(null)");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(closeIdx).toBeGreaterThan(guardIdx);
+    // 親は callback で ref に受ける (cascading render なし)
+    expect(MAP_SRC).toMatch(
+      /onBusyStateChange=\{handleDetailPanelBusyChange\}/,
+    );
+
+    const PANEL_SRC = fs.readFileSync(
+      path.resolve(
+        process.cwd(),
+        "src/components/field-survey/pin-detail-panel.tsx",
+      ),
+      "utf8",
+    );
+    // パネル側: 編集/削除確認/物件化/写真送信を合流した busy を通知し、
+    // unmount では必ず false へ戻す
+    expect(PANEL_SRC).toMatch(/onBusyStateChange\?:\s*\(busy:\s*boolean\)/);
+    expect(PANEL_SRC).toMatch(
+      /hasUnfinishedWork\s*=[\s\S]{0,300}editing[\s\S]{0,300}confirmingDelete[\s\S]{0,300}showConvert[\s\S]{0,300}photoSectionBusy/,
+    );
+    expect(PANEL_SRC).toMatch(
+      /return\s*\(\)\s*=>\s*\{\s*onBusyStateChange\?\.\(false\);/,
+    );
+    // 写真セクション: 送信・削除中を親 panel に合流
+    expect(PANEL_SRC).toMatch(/onBusyChange=\{setPhotoSectionBusy\}/);
+    expect(PANEL_SRC).toMatch(
+      /photoBusy\s*=[\s\S]{0,120}uploadLoading\s*\|\|[\s\S]{0,60}deleteLoading/,
+    );
+  });
 });

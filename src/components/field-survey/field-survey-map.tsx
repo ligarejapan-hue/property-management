@@ -660,11 +660,21 @@ export default function FieldSurveyMap({
     finalizePinCreate(pinId, false);
   }, [finalizePinCreate]);
 
+  // 詳細パネルの「作業中」(編集下書き / 削除確認 / 物件化 / 写真送信中) を
+  // closure から読むための ref。true の間は地図タップでパネルを閉じない
+  // (下書き・送信中の写真を黙って破棄しない。Codex P2)。
+  const detailPanelBusyRef = useRef(false);
+  const handleDetailPanelBusyChange = useCallback((busy: boolean) => {
+    detailPanelBusyRef.current = busy;
+  }, []);
+
   const handleMapClick = useCallback(
     (latLng: { lat: number; lng: number }) => {
       // 既に modal 表示中はスルー (誤操作防止)
       if (createCandidate) return;
       if (!activeSession) return;
+      // 詳細パネルで作業中なら新規作成のタップを無視する (パネルは維持)。
+      if (detailPinId && detailPanelBusyRef.current) return;
       // カメラファーストの位置指定待ちを最優先 (pin 追加モードと独立に動く)。
       // タップ座標 + 撮影済み写真で作成 modal を開く。
       if (cameraFirstPhase === "awaiting-map-tap") {
@@ -703,6 +713,7 @@ export default function FieldSurveyMap({
       createCandidate,
       cameraFirstPhase,
       resetCameraFirst,
+      detailPinId,
     ],
   );
 
@@ -843,6 +854,7 @@ export default function FieldSurveyMap({
               setDetailPinId(null);
               bumpRefetch();
             }}
+            onBusyStateChange={handleDetailPanelBusyChange}
           />
         )}
 
