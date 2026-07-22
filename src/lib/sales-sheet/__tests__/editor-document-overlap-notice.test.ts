@@ -302,6 +302,17 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
+  it("clip行は箱の右端まで描かれる=全幅で判定 (@codex #310 R21)", () => {
+    // 幅 10mm の箱 (2 文字分 ≒8.5mm) に不可分な長い ASCII → グリフは箱の
+    // 右端 (110mm) まで描かれて切れる。x=109 から始まる表とも重なる
+    const clipped = {
+      id: "code", type: "text", x: 100, y: 40, w: 10, h: 10, z: 5,
+      content: "a".repeat(50), style: {},
+    };
+    const doc = makeDoc([clipped, table("overview", 109, 40, 60, 20)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);

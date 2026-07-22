@@ -1570,9 +1570,11 @@ function measureParagraph(
       emitSpace();
     }
     if (w > charsPerLine) {
-      // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)
+      // 行に収まらない折返し不可塊 = 単独 1 行で横 clip (縦には伸びない)。
+      // clip 行のグリフは箱の右端まで描かれて切れるため、幅は「全幅」として
+      // 記録する (@codex #310 R21: charsPerLine×字送りだと端数分だけ狭くなる)。
       if (cur > 0) lineWidths.push(cur);
-      lineWidths.push(charsPerLine);
+      lineWidths.push(Number.POSITIVE_INFINITY);
       cur = 0;
       afterClip = true;
       return;
