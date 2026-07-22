@@ -1513,13 +1513,19 @@ function measureParagraph(
   const units: number[] = [];
   let asciiRun = 0;
   for (const ch of para) {
-    if (ch.charCodeAt(0) <= 0xff && ch !== " ") {
+    if (ch.charCodeAt(0) <= 0xff && ch !== " " && ch !== "\t") {
       asciiRun += asciiEm;
+      if (ch === "-") {
+        // ハイフンの直後は CSS の折返し可能点 (@codex #310 R9:
+        // ABC-DEF-… のようなハイフン区切りは実際に折り返されて縦に伸びる)
+        units.push(asciiRun);
+        asciiRun = 0;
+      }
       continue;
     }
     if (asciiRun > 0) units.push(asciiRun);
     asciiRun = 0;
-    units.push(ch === " " ? -1 : 1);
+    units.push(ch === " " || ch === "\t" ? -1 : 1);
   }
   if (asciiRun > 0) units.push(asciiRun);
 

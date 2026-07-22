@@ -191,6 +191,20 @@ describe("findTextTableOverlaps", () => {
     expect(findTextTableOverlaps(doc2)).toHaveLength(1);
   });
 
+  it("ハイフン区切りのASCIIは折返し可能点で縦に伸びる (@codex #310 R9)", () => {
+    // ハイフン直後は CSS の折返し可能点 → 複数行に伸びて下の表と重なる
+    const hyphenated = {
+      id: "code", type: "text", x: 100, y: 10, w: 40, h: 20, z: 5,
+      content: "ABCD-".repeat(12), style: {},
+    };
+    const doc = makeDoc([hyphenated, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
+    // 同じ長さでもハイフン無しの塊なら 1 行で clip → 重ならない
+    const unbroken = { ...hyphenated, content: "ABCDE".repeat(12) };
+    const doc2 = makeDoc([unbroken, table("overview", 100, 18, 80, 60)]);
+    expect(findTextTableOverlaps(doc2)).toHaveLength(0);
+  });
+
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {
     const doc = makeDoc([text("price", 100, 40), table("overview", 120, 30)]);
     const before = JSON.stringify(doc);
