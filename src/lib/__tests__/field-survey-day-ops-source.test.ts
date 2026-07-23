@@ -155,8 +155,27 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     // buffer / count は消さない (終了 PATCH の成否確定後に破棄/保全)
     expect(m).not.toMatch(/bufferRef\.current = \[\]/);
     expect(m).not.toMatch(/setBufferedCount\(0\)/);
+    // @codex P2: 操作可能状態へ復帰する (破棄 PATCH 失敗で active 復帰時に
+    // "stopping" 固着で開始/停止ボタンが出ないのを防ぐ)。
+    expect(m).toMatch(/setStatus\("idle"\)/);
     // hook の戻り値に含まれる
     expect(RECORDER_SRC).toMatch(/\n\s+abortInFlightFlush,\r?\n/);
+  });
+
+  it("終了 PATCH 自体も timeout し、active に戻して再試行可能にする (@codex P2)", () => {
+    // session 終了 API が無応答でも phase="ending" 固着で UI が無効化されない
+    expect(TRIP_SRC).toMatch(/END_PATCH_TIMEOUT_MS/);
+    expect(TRIP_SRC).toMatch(/patchTimedOut = true/);
+    // timeout abort は unmount/supersede と区別して active に戻す
+    expect(TRIP_SRC).toMatch(
+      /if \(patchTimedOut\)[\s\S]{0,300}?setPhase\("active"\)/,
+    );
+    // 破棄経路では buffer 保全 + 脱出口を再提示
+    expect(TRIP_SRC).toMatch(
+      /if \(patchTimedOut\)[\s\S]{0,300}?opts\?\.discardUnsent\) setEndBlockedByBuffer\(true\)/,
+    );
+    // timer は finally で解除する
+    expect(TRIP_SRC).toMatch(/finally \{\s*clearTimeout\(patchTimer\)/);
   });
 
   it("stopBeforeSessionEnd は superseded 時に UI state を上書きしない (generation guard)", () => {

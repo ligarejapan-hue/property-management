@@ -720,6 +720,13 @@ export function useFieldSurveyLocationRecorder(
     inFlightFlushPromiseRef.current = null;
     if (!mountedRef.current) return;
     setIsFlushing(false);
+    // @codex P2: buffer は保持しつつ操作可能状態に戻す。通常終了の flush が
+    // timeout した時点で status は "stopping"、破棄でこの generation を進めると
+    // 元の stopBeforeSessionEnd は generation guard で setStatus("idle") を
+    // 行わず抜ける。この helper も idle に戻さないと、破棄 PATCH が失敗して
+    // session が active に戻った時、LocationRecorderControls が停止ボタンを無効の
+    // まま開始ボタンも出さず位置記録を再開できない。buffer は残す。
+    setStatus("idle");
   }, []);
 
   // 未送信の位置記録を破棄して即時停止する (圏外時の巡回終了の脱出口)。

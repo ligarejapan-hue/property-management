@@ -44,6 +44,14 @@ import {
  */
 const END_FLUSH_SETTLE_TIMEOUT_MS = 15000;
 
+/**
+ * 巡回終了 PATCH のタイムアウト (@codex P2)。session 終了 API 自体が無応答の
+ * 環境でも、押下後に phase が "ending" のまま固まって UI が無効化されないよう、
+ * 一定時間で abort して active へ戻し再試行可能にする。破棄経路では buffer を
+ * 保全したまま脱出口を再度提示する。
+ */
+const END_PATCH_TIMEOUT_MS = 15000;
+
 interface TripControlsProps {
   currentUserId: string;
   /**
@@ -398,6 +406,14 @@ export default function TripControls({
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
       mutationAbortRef.current = ac;
+      // @codex P2: 終了 API 自体が無応答の環境でも脱出口が機能するよう、PATCH
+      // にも timeout を設ける。timeout で abort した場合は active に戻して再試行
+      // 可能にする (unmount / supersede の abort とは patchTimedOut で区別する)。
+      let patchTimedOut = false;
+      const patchTimer = setTimeout(() => {
+        patchTimedOut = true;
+        ac.abort();
+      }, END_PATCH_TIMEOUT_MS);
       try {
         const res = await fetch(
           `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
@@ -436,11 +452,25 @@ export default function TripControls({
         // active state に復帰して再試行可能にする
         setPhase("active");
       } catch (err) {
-        if (isAbortError(err) || !mountedRef.current) return;
+        if (!mountedRef.current) return;
+        if (patchTimedOut) {
+          // 終了 API 無応答: active に戻して再試行可能にする。破棄経路では buffer
+          // は保全されているので脱出口 (「破棄して終了」) を再度提示する。
+          setError(
+            "巡回終了の通信が完了しません。電波の良い場所へ移動して、もう一度お試しください。",
+          );
+          if (opts?.discardUnsent) setEndBlockedByBuffer(true);
+          setPhase("active");
+          return;
+        }
+        // unmount / supersede による abort は state を触らない (従来挙動)
+        if (isAbortError(err)) return;
         setError(
           "巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。",
         );
         setPhase("active");
+      } finally {
+        clearTimeout(patchTimer);
       }
     },
     [
