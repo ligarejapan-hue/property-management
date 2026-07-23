@@ -218,6 +218,13 @@ describe("4. 完成待ち一覧の放置可視化", () => {
       ) ?? [];
     // 成功側・失敗側の両方でチェックする
     expect(generationChecks.length).toBeGreaterThanOrEqual(2);
+    // 取得前に一覧をクリア (失敗時に反対側のデータが残って
+    // トグル表示と食い違うのを防ぐ。Codex P2)
+    expect(loadFn?.[0] ?? "").toMatch(
+      /setRows\(null\);[\s\S]{0,40}setTruncated\(false\)/,
+    );
+    // 失敗時はスピナーを回し続けない (エラー表示のみ)
+    expect(QUEUE_SRC).toMatch(/error \? null : \(/);
     // 警告文は並び順に応じて「どちら側が隠れているか」を正しく伝える
     expect(QUEUE_SRC).toMatch(/「古い順」に切り替える/);
     expect(QUEUE_SRC).toMatch(/古い順で表示中/);

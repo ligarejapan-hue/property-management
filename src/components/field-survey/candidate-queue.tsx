@@ -86,6 +86,11 @@ export default function CandidateQueue() {
   const loadGenerationRef = useRef(0);
   const load = useCallback(async () => {
     const generation = ++loadGenerationRef.current;
+    // 取得前に一覧をクリアして「読み込み中」へ切り替える (Codex P2: 並び順
+    // 切替の取得が失敗すると、トグルは新しい選択のまま一覧に反対側の
+    // データが残って食い違う。クリアしておけば失敗時は空+エラー表示になる)。
+    setRows(null);
+    setTruncated(false);
     setError(null);
     try {
       const r = await listCandidatePins(order);
@@ -191,10 +196,13 @@ export default function CandidateQueue() {
       )}
 
       {rows === null ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          読み込み中…
-        </div>
+        // 取得失敗時は上のエラー表示のみ (スピナーを回し続けない)
+        error ? null : (
+          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            読み込み中…
+          </div>
+        )
       ) : rows.length === 0 ? (
         <p className="text-sm text-gray-500 dark:text-gray-400">完成待ちの候補はありません。</p>
       ) : (
