@@ -155,11 +155,34 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     // buffer / count は消さない (終了 PATCH の成否確定後に破棄/保全)
     expect(m).not.toMatch(/bufferRef\.current = \[\]/);
     expect(m).not.toMatch(/setBufferedCount\(0\)/);
-    // @codex P2: 操作可能状態へ復帰する (破棄 PATCH 失敗で active 復帰時に
-    // "stopping" 固着で開始/停止ボタンが出ないのを防ぐ)。
-    expect(m).toMatch(/setStatus\("idle"\)/);
+    // @codex P2 R6: ここでは status を idle にしない (PATCH 中に新 watch を
+    // 開始させないため "stopping" 固着のままにする)。
+    expect(m).not.toMatch(/setStatus\(/);
     // hook の戻り値に含まれる
     expect(RECORDER_SRC).toMatch(/\n\s+abortInFlightFlush,\r?\n/);
+  });
+
+  it("recorder 復帰は終了失敗時のみ (restoreIdleAfterFailedEnd・PATCH 中は非復帰)", () => {
+    // @codex P2 R6: PATCH 中は "stopping" 固着で新 watch 開始を防ぎ、破棄経路で
+    // 終了が成立しなかった (ended=false) 時だけ recorder を idle に戻す。
+    const fn = RECORDER_SRC.match(
+      /const restoreIdleAfterFailedEnd = useCallback\([\s\S]*?\}, \[\]\);/,
+    );
+    expect(fn).not.toBeNull();
+    expect(fn?.[0] ?? "").toMatch(/setStatus\("idle"\)/);
+    expect(RECORDER_SRC).toMatch(/\n\s+restoreIdleAfterFailedEnd,\r?\n/);
+    // endSession の finally で、破棄経路かつ未成立時のみ復帰を呼ぶ
+    expect(TRIP_SRC).toMatch(
+      /if \(opts\?\.discardUnsent && !ended && mountedRef\.current\)\s*\{\s*onEndFailedRestoreRecorder\?\.\(\)/,
+    );
+    // map が配線する
+    expect(MAP_SRC).toMatch(/recorder\.restoreIdleAfterFailedEnd\(\)/);
+  });
+
+  it("既存 active session 復元時は予約 quick-start をクリアする (@codex P2)", () => {
+    // 放置しておくと後の refresh (別クライアント終了→conflict 再取得) が
+    // 古い予約を消化して再調整/終了中に開始確認 modal を開いてしまう。
+    expect(TRIP_SRC).toMatch(/if \(own\) pendingStartRef\.current = false/);
   });
 
   it("終了 PATCH 自体も timeout し、active に戻して再試行可能にする (@codex P2)", () => {

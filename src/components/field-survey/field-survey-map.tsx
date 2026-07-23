@@ -838,6 +838,9 @@ export default function FieldSurveyMap({
           registerStartRequest={registerStartRequest}
           onDiscardUnsentLocations={() => recorder.discardBufferAndStop()}
           onAbortPendingFlush={() => recorder.abortInFlightFlush()}
+          onEndFailedRestoreRecorder={() =>
+            recorder.restoreIdleAfterFailedEnd()
+          }
           onActiveSessionChange={handleActiveSessionChange}
           onBeforeSessionEnd={handleBeforeSessionEnd}
           recorder={recorder}
@@ -1042,6 +1045,7 @@ function ControlPanel({
   registerStartRequest,
   onDiscardUnsentLocations,
   onAbortPendingFlush,
+  onEndFailedRestoreRecorder,
   onActiveSessionChange,
   onBeforeSessionEnd,
   recorder,
@@ -1069,6 +1073,8 @@ function ControlPanel({
   onDiscardUnsentLocations: () => void;
   /** 「破棄して終了」前に進行中 flush を中断する (buffer 保持・recorder)。 */
   onAbortPendingFlush: () => void;
+  /** 破棄経路の終了 PATCH 失敗時に recorder を操作可能へ戻す (recorder)。 */
+  onEndFailedRestoreRecorder: () => void;
   onActiveSessionChange: (s: ActiveSessionLike | null) => void;
   onBeforeSessionEnd: () => Promise<boolean>;
   recorder: ReturnType<typeof useFieldSurveyLocationRecorder>;
@@ -1133,6 +1139,7 @@ function ControlPanel({
         registerStartRequest={registerStartRequest}
         onDiscardUnsentLocations={onDiscardUnsentLocations}
         onAbortPendingFlush={onAbortPendingFlush}
+        onEndFailedRestoreRecorder={onEndFailedRestoreRecorder}
         unsentLocationCount={recorder.bufferedCount}
       />
 

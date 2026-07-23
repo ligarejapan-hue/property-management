@@ -128,6 +128,12 @@ export interface UseLocationRecorderResult {
    * buffer は残し、終了 PATCH 成功後に discardBufferAndStop で破棄する。
    */
   abortInFlightFlush: () => void;
+  /**
+   * 破棄経路で終了 PATCH が失敗した時、buffer を保持したまま recorder を操作可能
+   * (idle) に戻す。abortInFlightFlush で "stopping" 固着にした状態を、終了が成立
+   * しなかった場合にのみ復帰させる (PATCH 中に新 watch を開始させないため)。
+   */
+  restoreIdleAfterFailedEnd: () => void;
 }
 
 interface UseLocationRecorderOptions {
@@ -720,12 +726,19 @@ export function useFieldSurveyLocationRecorder(
     inFlightFlushPromiseRef.current = null;
     if (!mountedRef.current) return;
     setIsFlushing(false);
-    // @codex P2: buffer は保持しつつ操作可能状態に戻す。通常終了の flush が
-    // timeout した時点で status は "stopping"、破棄でこの generation を進めると
-    // 元の stopBeforeSessionEnd は generation guard で setStatus("idle") を
-    // 行わず抜ける。この helper も idle に戻さないと、破棄 PATCH が失敗して
-    // session が active に戻った時、LocationRecorderControls が停止ボタンを無効の
-    // まま開始ボタンも出さず位置記録を再開できない。buffer は残す。
+    // @codex P2 R6: ここでは status を idle に戻さない。破棄 PATCH は最大 15 秒
+    // かかり得るが、その間に idle にすると LocationRecorderControls が開始ボタンを
+    // 出し、ユーザーが新しい watch を始められてしまう。その後 PATCH が成功すると
+    // discardBufferAndStop が新規に集めた点まで消してしまう。PATCH が確定するまで
+    // 操作不能 (stopping) のままにし、終了に失敗した時だけ明示的に idle へ戻す
+    // (restoreIdleAfterFailedEnd)。buffer は保持する。
+  }, []);
+
+  // 破棄経路で終了 PATCH が失敗した時、buffer を保持したまま recorder を操作可能
+  // (idle) に戻す。abortInFlightFlush で "stopping" 固着にした recorder を、終了が
+  // 成立しなかった場合にのみ復帰させ、ユーザーが記録を再開/再試行できるようにする。
+  const restoreIdleAfterFailedEnd = useCallback((): void => {
+    if (!mountedRef.current) return;
     setStatus("idle");
   }, []);
 
@@ -811,6 +824,7 @@ export function useFieldSurveyLocationRecorder(
     stopBeforeSessionEnd,
     discardBufferAndStop,
     abortInFlightFlush,
+    restoreIdleAfterFailedEnd,
   };
 }
 

@@ -88,6 +88,12 @@ interface TripControlsProps {
    */
   onAbortPendingFlush?: () => void;
   /**
+   * 破棄経路で終了 PATCH が失敗した時に recorder を操作可能 (idle) へ戻す
+   * (buffer 保持・親の recorder が実装)。PATCH 中は "stopping" 固着のままにして
+   * 新 watch 開始を防ぎ、終了が成立しなかった時だけ復帰させる (@codex P2)。
+   */
+  onEndFailedRestoreRecorder?: () => void;
+  /**
    * 未送信 buffer の点数 (recorder.bufferedCount)。「破棄して終了」で失われる
    * 軌跡の規模を平易に示すために表示する (圏外が長いと数百点になり得る)。
    */
@@ -111,6 +117,7 @@ export default function TripControls({
   registerStartRequest,
   onDiscardUnsentLocations,
   onAbortPendingFlush,
+  onEndFailedRestoreRecorder,
   unsentLocationCount,
 }: TripControlsProps) {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -194,6 +201,11 @@ export default function TripControls({
       // pickOwnActiveSession は server filter 漏れに対する防御として残す。
       const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
       setSession(own);
+      // @codex P2: 既存 active session が復元された場合は、loading 中に予約された
+      // 「巡回を開始」を破棄する。放置しておくと、後で別クライアントが終了して
+      // active 無しに転じた refresh (conflict 後の再取得等) が古い予約を消化し、
+      // 再調整/終了中に予期せず開始確認 modal を開いてしまう。
+      if (own) pendingStartRef.current = false;
       // B-7: 終了し忘れの放置 session (最終活動から 12h 超) を復元したときは、
       // 巡回中表示へ戻す前に終了するかどうかを確認する (同一 session 1 回のみ)。
       // 放置判定は最終活動時刻ベース (@codex R3・記録が続いている session に出さない)。
@@ -410,6 +422,9 @@ export default function TripControls({
       // にも timeout を設ける。timeout で abort した場合は active に戻して再試行
       // 可能にする (unmount / supersede の abort とは patchTimedOut で区別する)。
       let patchTimedOut = false;
+      // 破棄経路で終了 PATCH が成立したか。未成立で抜ける時は recorder を操作可能
+      // に戻す (abortInFlightFlush で "stopping" 固着にしたのを finally で復帰)。
+      let ended = false;
       const patchTimer = setTimeout(() => {
         patchTimedOut = true;
         ac.abort();
@@ -437,6 +452,7 @@ export default function TripControls({
         if (outcome.kind === "ok") {
           // 終了が確定してから未送信 buffer を破棄する (offline で PATCH が
           // 失敗した場合は破棄されず、軌跡が保全される)。
+          ended = true;
           if (opts?.discardUnsent) onDiscardUnsentLocations?.();
           if (resumedRef.current === target.id) resumedRef.current = null;
           setSession(null);
@@ -471,6 +487,12 @@ export default function TripControls({
         setPhase("active");
       } finally {
         clearTimeout(patchTimer);
+        // @codex P2 R6: 破棄経路で終了が成立しなかった場合、"stopping" 固着に
+        // した recorder を操作可能 (idle) へ戻す (buffer 保持)。成立時 (ended) は
+        // discardBufferAndStop が idle+破棄まで済ませるので触らない。
+        if (opts?.discardUnsent && !ended && mountedRef.current) {
+          onEndFailedRestoreRecorder?.();
+        }
       }
     },
     [
@@ -478,6 +500,7 @@ export default function TripControls({
       onAbortPendingFlush,
       onBeforeSessionEnd,
       onDiscardUnsentLocations,
+      onEndFailedRestoreRecorder,
       touchSession,
     ],
   );
