@@ -74,6 +74,12 @@ interface TripControlsProps {
    */
   onDiscardUnsentLocations?: () => void;
   /**
+   * 進行中の flush を即座に中断する (buffer は保持・親の recorder が実装)。
+   * 「破棄して終了」で終了 PATCH を打つ前に呼び、timeout race に負けて裏で
+   * 走り続けている drain が破棄予定の点を送るのを防ぐ (@codex P2)。
+   */
+  onAbortPendingFlush?: () => void;
+  /**
    * 未送信 buffer の点数 (recorder.bufferedCount)。「破棄して終了」で失われる
    * 軌跡の規模を平易に示すために表示する (圏外が長いと数百点になり得る)。
    */
@@ -96,6 +102,7 @@ export default function TripControls({
   onBeforeSessionEnd,
   registerStartRequest,
   onDiscardUnsentLocations,
+  onAbortPendingFlush,
   unsentLocationCount,
 }: TripControlsProps) {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -320,6 +327,13 @@ export default function TripControls({
       setPhase("ending");
       setError(null);
       setEndBlockedByBuffer(false);
+      // @codex P2: 「破棄して終了」経路では、まず進行中の flush を即座に中断する
+      // (buffer は保持)。flush timeout race に負けて裏で走り続けている drain が
+      // 遅れて応答し、破棄すると決めた点を送信/buffer から除去するのを防ぐ。
+      // 実際の buffer 破棄は PATCH 成功後 (下記 onDiscardUnsentLocations)。
+      if (opts?.discardUnsent) {
+        onAbortPendingFlush?.();
+      }
       // Phase 1-F-2: session PATCH の前に位置記録 (watchPosition / flush
       // timer / 残 buffer chunk flush) を停止する。throw は握り潰す。
       // Codex P1: 戻り値が明示的に false の場合 = 未送信 buffer が残っている。
@@ -424,6 +438,7 @@ export default function TripControls({
     },
     [
       fetchActiveSession,
+      onAbortPendingFlush,
       onBeforeSessionEnd,
       onDiscardUnsentLocations,
       touchSession,

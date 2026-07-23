@@ -132,6 +132,42 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(TRIP_SRC).toMatch(/位置情報の送信が完了しません/);
   });
 
+  it("破棄前に進行中 flush を中断し、buffer は PATCH 成功まで保持する (@codex P2)", () => {
+    // discard 経路の冒頭 (PATCH より前) で onAbortPendingFlush を呼ぶ。
+    // timeout race に負けた drain の遅延応答が破棄予定の点を送るのを防ぐ。
+    expect(TRIP_SRC).toMatch(
+      /if \(opts\?\.discardUnsent\) \{\s*onAbortPendingFlush\?\.\(\)/,
+    );
+    // map は recorder.abortInFlightFlush を配線する
+    expect(MAP_SRC).toMatch(
+      /onAbortPendingFlush=\{\(\) => recorder\.abortInFlightFlush\(\)\}/,
+    );
+  });
+
+  it("abortInFlightFlush は generation bump + fetch abort だが buffer は残す", () => {
+    const fn = RECORDER_SRC.match(
+      /const abortInFlightFlush = useCallback\([\s\S]*?\}, \[\]\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/recorderGenerationRef\.current \+= 1/);
+    expect(m).toMatch(/flushAbortRef\.current\.abort\(\)/);
+    // buffer / count は消さない (終了 PATCH の成否確定後に破棄/保全)
+    expect(m).not.toMatch(/bufferRef\.current = \[\]/);
+    expect(m).not.toMatch(/setBufferedCount\(0\)/);
+    // hook の戻り値に含まれる
+    expect(RECORDER_SRC).toMatch(/\n\s+abortInFlightFlush,\r?\n/);
+  });
+
+  it("stopBeforeSessionEnd は superseded 時に UI state を上書きしない (generation guard)", () => {
+    expect(RECORDER_SRC).toMatch(
+      /const myGeneration = recorderGenerationRef\.current/,
+    );
+    expect(RECORDER_SRC).toMatch(
+      /recorderGenerationRef\.current !== myGeneration\) return drained/,
+    );
+  });
+
   it("終了失敗の文言は通信起因の対処 (電波の良い場所で) を含む", () => {
     expect(TRIP_SRC).toMatch(/電波の良い場所で、もう一度「巡回終了」を押すと再送信します/);
     expect(TRIP_SRC).toMatch(/巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。/);

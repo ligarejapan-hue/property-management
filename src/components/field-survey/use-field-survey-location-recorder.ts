@@ -121,6 +121,13 @@ export interface UseLocationRecorderResult {
    * 明示操作 (TripControls の「破棄して終了」) からのみ呼ぶ。
    */
   discardBufferAndStop: () => void;
+  /**
+   * 進行中の flush を即座に無効化・中断する (buffer は保持する)。
+   * 「破棄して終了」で終了 PATCH を打つ前に、flush timeout race に負けて裏で
+   * 走り続けている drain の遅延応答が、破棄予定の点を送信/除去するのを防ぐ。
+   * buffer は残し、終了 PATCH 成功後に discardBufferAndStop で破棄する。
+   */
+  abortInFlightFlush: () => void;
 }
 
 interface UseLocationRecorderOptions {
@@ -668,9 +675,15 @@ export function useFieldSurveyLocationRecorder(
       setStatus("stopping");
     }
     recorderGenerationRef.current += 1;
+    const myGeneration = recorderGenerationRef.current;
     stopWatchingInternal();
     const drained = await flushAllBufferedChunks();
     if (!mountedRef.current) return drained;
+    // @codex P2: 別経路 (abortInFlightFlush / discardBufferAndStop など) で
+    // generation が進んでいたら、この呼び出しは陳腐化しているので UI state を
+    // 触らない (timeout race に負けた drain が遅れて完了し、破棄経路の表示を
+    // 上書きするのを防ぐ)。
+    if (recorderGenerationRef.current !== myGeneration) return drained;
     if (!drained) {
       // 座標を含めない汎用文言。API status / 件数 / 内部詳細は出さない。
       setError(
@@ -691,10 +704,32 @@ export function useFieldSurveyLocationRecorder(
     stopWatchingInternal,
   ]);
 
+  // 進行中の flush を即座に無効化・中断する (buffer は保持する)。
+  // @codex P2: 「破棄して終了」で、flush の timeout race に負けて裏で走り続けて
+  // いる drain が遅れて応答し、破棄すると決めた点を送信/buffer から除去して
+  // しまうのを防ぐ。generation を進めて遅延応答の buffer 反映を無効化し、
+  // in-flight fetch を abort する。buffer / bufferedCount は保持し、終了 PATCH の
+  // 成否確定後に破棄 (成功) / 保全 (失敗) する。fetch は新規に呼ばない。
+  const abortInFlightFlush = useCallback((): void => {
+    recorderGenerationRef.current += 1;
+    if (flushAbortRef.current) {
+      flushAbortRef.current.abort();
+      flushAbortRef.current = null;
+    }
+    inFlightFlushRef.current = false;
+    inFlightFlushPromiseRef.current = null;
+    if (!mountedRef.current) return;
+    setIsFlushing(false);
+  }, []);
+
   // 未送信の位置記録を破棄して即時停止する (圏外時の巡回終了の脱出口)。
   // generation bump で in-flight flush の遅延応答も無効化する。fetch は呼ばない。
   const discardBufferAndStop = useCallback((): void => {
     recorderGenerationRef.current += 1;
+    if (flushAbortRef.current) {
+      flushAbortRef.current.abort();
+      flushAbortRef.current = null;
+    }
     stopWatchingInternal();
     bufferRef.current = [];
     inFlightFlushRef.current = false;
@@ -768,6 +803,7 @@ export function useFieldSurveyLocationRecorder(
     stop,
     stopBeforeSessionEnd,
     discardBufferAndStop,
+    abortInFlightFlush,
   };
 }
 
