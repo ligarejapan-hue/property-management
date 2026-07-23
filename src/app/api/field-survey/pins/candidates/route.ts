@@ -44,17 +44,22 @@ export async function GET() {
       },
       select: { id: true, staffUserId: true, createdAt: true, memo: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: MAX,
+      // 上限ちょうど (=MAX 件) と超過 (=MAX+1 件以上) を区別するため 1 件
+      // 余分に取得し、truncated フラグで「古い候補が表示されていない」を
+      // 正確に伝える (Codex P2: 件数一致だけでは誤警告になる)。
+      take: MAX + 1,
     });
 
-    const data = rows.map((r) => ({
+    const truncated = rows.length > MAX;
+    const limited = truncated ? rows.slice(0, MAX) : rows;
+    const data = limited.map((r) => ({
       id: r.id,
       staffUserId: r.staffUserId,
       createdAt: r.createdAt,
       hasMemo: typeof r.memo === "string" && r.memo.trim().length > 0,
     }));
 
-    return apiResponse({ data });
+    return apiResponse({ data, truncated });
   } catch (error) {
     return handleApiError(error);
   }

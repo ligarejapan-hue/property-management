@@ -144,6 +144,16 @@ describe("4. 完成待ち一覧の放置可視化", () => {
     );
   });
 
+  it("上限警告は truncated フラグ基準 (ちょうど上限件数では誤警告しない)", () => {
+    // Codex P2: 件数一致 (length >= LIMIT) では 200 件ちょうどと 201 件以上を
+    // 区別できない。route が 1 件余分に取得して truncated を返し、UI はそれを見る。
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/take:\s*MAX \+ 1/);
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/truncated\s*=\s*rows\.length > MAX/);
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/apiResponse\(\{ data, truncated \}\)/);
+    expect(QUEUE_SRC).toMatch(/truncated && \(/);
+    expect(QUEUE_SRC).not.toMatch(/rows\.length >= CANDIDATE_LIST_LIMIT/);
+  });
+
   it("警告・強調はダークモード配色を持つ", () => {
     const warning = QUEUE_SRC.match(
       /data-testid="candidate-limit-warning"[\s\S]{0,300}/,

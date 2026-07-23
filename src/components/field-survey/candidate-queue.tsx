@@ -34,6 +34,9 @@ export default function CandidateQueue() {
     );
 
   const [rows, setRows] = useState<CandidatePinRow[] | null>(null);
+  // 取得上限超過 (古い候補が data に含まれていない) の正確な通知は API の
+  // truncated フラグで受ける (件数一致だけではちょうど上限件数と区別できない)。
+  const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [convertPinId, setConvertPinId] = useState<string | null>(null);
   // 経過日数の基準時刻。render 中の new Date() 連発を避け、読込ごとに固定する。
@@ -44,6 +47,7 @@ export default function CandidateQueue() {
     try {
       const r = await listCandidatePins();
       setRows(r.data);
+      setTruncated(r.truncated === true);
       setAgeBase(new Date());
     } catch {
       setError("候補の取得に失敗しました。再読み込みしてください。");
@@ -81,7 +85,7 @@ export default function CandidateQueue() {
         </div>
       )}
 
-      {rows !== null && rows.length >= CANDIDATE_LIST_LIMIT && (
+      {rows !== null && truncated && (
         <div
           role="status"
           data-testid="candidate-limit-warning"
