@@ -80,14 +80,21 @@ export default function CandidateQueue() {
   // (Codex P2: 「古いものから処理して」と案内しつつ古い分が開けない矛盾の解消)。
   const [order, setOrder] = useState<"newest" | "oldest">("newest");
 
+  // 並び順切替の競合ガード: 先行リクエストの遅延応答が後から届いても、
+  // 現在の並び順のリクエストでなければ破棄する (Codex P2: 切替直後に
+  // 古い応答が rows/truncated を上書きし、表示と選択が食い違う)。
+  const loadGenerationRef = useRef(0);
   const load = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
     setError(null);
     try {
       const r = await listCandidatePins(order);
+      if (generation !== loadGenerationRef.current) return;
       setRows(r.data);
       setTruncated(r.truncated === true);
       setAgeBase(new Date());
     } catch {
+      if (generation !== loadGenerationRef.current) return;
       setError("候補の取得に失敗しました。再読み込みしてください。");
     }
   }, [order]);

@@ -44,18 +44,19 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
     }
     // 不動産番号は正規化して保存する (全角数字・区切り付きの生値のまま保存すると
     // CSV 取込の重複判定 [完全一致] をすり抜けて二重登録になり得る。Codex P2)。
-    // 数字にならない入力は正規化で黙って捨てず、その場でエラーにする
-    // (validator と同じ判定基準: 許容文字種 + 正規化後 1〜13 桁)。
+    // 新規入力は 13 桁ちょうどを要求する (Codex P2: 桁足らずでも値が入ると
+    // 所在検索が「番号あり」と誤認して無効化され、謄本自動取得には不正な
+    // 番号がそのまま渡る = この欄の目的である確実な取得経路を自ら塞ぐ)。
     const rawRen = realEstateNumber.trim();
     const normalizedRen = normalizeRealEstateNumber(rawRen);
     if (
       rawRen !== "" &&
       !(
         /^[0-9０-９\s　\-‐-―ー－−]+$/.test(rawRen) &&
-        /^\d{1,13}$/.test(normalizedRen)
+        /^\d{13}$/.test(normalizedRen)
       )
     ) {
-      setError("不動産番号は数字(最大13桁)で入力してください");
+      setError("不動産番号は13桁の数字で入力してください");
       return;
     }
     setSubmitting(true);

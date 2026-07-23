@@ -206,6 +206,18 @@ describe("4. 完成待ち一覧の放置可視化", () => {
     expect(QUEUE_SRC).toMatch(/\["newest", "新しい順"\]/);
     expect(QUEUE_SRC).toMatch(/\["oldest", "古い順"\]/);
     expect(QUEUE_SRC).toMatch(/listCandidatePins\(order\)/);
+    // 切替直後の遅延応答 (先行リクエスト) を破棄する世代ガード (Codex P2)
+    expect(QUEUE_SRC).toMatch(/loadGenerationRef/);
+    const loadFn = QUEUE_SRC.match(
+      /const load = useCallback\([\s\S]*?\}, \[order\]\);/,
+    );
+    expect(loadFn).not.toBeNull();
+    const generationChecks =
+      (loadFn?.[0] ?? "").match(
+        /generation !== loadGenerationRef\.current/g,
+      ) ?? [];
+    // 成功側・失敗側の両方でチェックする
+    expect(generationChecks.length).toBeGreaterThanOrEqual(2);
     // 警告文は並び順に応じて「どちら側が隠れているか」を正しく伝える
     expect(QUEUE_SRC).toMatch(/「古い順」に切り替える/);
     expect(QUEUE_SRC).toMatch(/古い順で表示中/);
@@ -238,9 +250,10 @@ describe("5. 物件化モーダルの不動産番号 (任意)", () => {
     expect(CONVERT_SRC).toMatch(
       /realEstateNumber:\s*rawRen === "" \? null : normalizedRen/,
     );
-    // 数字にならない入力は黙って捨てず、validator と同じ基準でその場エラー
-    expect(CONVERT_SRC).toMatch(/不動産番号は数字\(最大13桁\)で入力してください/);
-    expect(CONVERT_SRC).toMatch(/\\d\{1,13\}/);
+    // 数字にならない/桁足らずの入力は黙って捨てず・保存もせず、その場エラー
+    // (桁足らずでも値が入ると所在検索が誤無効化され、自動取得に不正番号が渡る)
+    expect(CONVERT_SRC).toMatch(/不動産番号は13桁の数字で入力してください/);
+    expect(CONVERT_SRC).toMatch(/\\d\{13\}/);
     // 任意項目 (必須ガードに含めない)
     expect(CONVERT_SRC).toMatch(/任意/);
   });
