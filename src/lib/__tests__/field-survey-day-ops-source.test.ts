@@ -168,6 +168,14 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     );
   });
 
+  it("破棄経路では best-effort touch も省く (touch ハングで脱出口が固まらない)", () => {
+    // @codex P2 R4: touchSession は signal/timeout 無し。discardUnsent 経路で
+    // await すると touch 無応答時に phase="ending" 固着で PATCH に到達できない。
+    expect(TRIP_SRC).toMatch(
+      /if \(resumedRef\.current === target\.id && !opts\?\.discardUnsent\)/,
+    );
+  });
+
   it("終了失敗の文言は通信起因の対処 (電波の良い場所で) を含む", () => {
     expect(TRIP_SRC).toMatch(/電波の良い場所で、もう一度「巡回終了」を押すと再送信します/);
     expect(TRIP_SRC).toMatch(/巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。/);

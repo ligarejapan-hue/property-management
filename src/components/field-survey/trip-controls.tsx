@@ -384,7 +384,14 @@ export default function TripControls({
       // B-7 (@codex R10): 続行済み session の終了は、直前に活動 touch を挟んで
       // server の stale 判定を解除する (続行時の touch が失敗していても、ここで
       // 記録されれば endedAt は now になり、続行後の巡回が消えない)。
-      if (resumedRef.current === target.id) {
+      //
+      // @codex P2 R4: ただし「破棄して終了」(discardUnsent) 経路では touch を
+      // 省略する。touchSession は signal / timeout を持たず、脱出口を使うのは
+      // 圏外/セッション API 障害の状況なので、ここで await すると touch が応答
+      // しない時に phase が "ending" に固まり、追加した脱出口でも終了 PATCH に
+      // 到達できなくなる。touch は best-effort であり、pin / 写真は既に保存済み
+      // (session の endedAt メタデータのみ影響) なので破棄経路では省いてよい。
+      if (resumedRef.current === target.id && !opts?.discardUnsent) {
         await touchSession(target);
         if (!mountedRef.current) return;
       }
