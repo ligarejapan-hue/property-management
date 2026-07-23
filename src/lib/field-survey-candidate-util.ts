@@ -18,6 +18,18 @@ function jstDayNumber(epochMs: number): number {
 }
 
 /**
+ * 次の JST 0:00 までのミリ秒。画面を開いたまま日付を跨いだ時に
+ * 「今日/昨日/N日前」の表示を更新するタイマーの遅延に使う。
+ * 最低 1 秒 (0 や負値での即時連発を防ぐ)。
+ */
+export function msUntilNextJstMidnight(now: Date): number {
+  const t = now.getTime();
+  if (!Number.isFinite(t)) return 86_400_000;
+  const nextMidnight = (jstDayNumber(t) + 1) * 86_400_000 - 9 * 3_600_000;
+  return Math.max(1_000, nextMidnight - t);
+}
+
+/**
  * 作成日時から経過日数の表示を作る。**JST の暦日**基準
  * (昨夜 23 時に立てた候補は今日の昼に見れば「昨日」)。
  * - 0日=「今日」/ 1日=「昨日」/ それ以上=「N日前」

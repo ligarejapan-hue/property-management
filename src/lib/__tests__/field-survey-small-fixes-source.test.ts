@@ -137,6 +137,20 @@ describe("4. 完成待ち一覧の放置可視化", () => {
     expect(QUEUE_SRC).toMatch(/age\.stale/);
   });
 
+  it("JST の日付境界で経過日数表示を自動更新する (開きっぱなしの夜跨ぎ対策)", () => {
+    // Codex P2: ageBase が読込時のまま固定だと、日付を跨いでも「今日/昨日」や
+    // 放置強調が更新されない。次の 0:00 JST への自己継続タイマーで更新する。
+    expect(QUEUE_SRC).toMatch(/msUntilNextJstMidnight\(new Date\(\)\)/);
+    const rollover = QUEUE_SRC.match(
+      /useEffect\(\(\)\s*=>\s*\{\s*if\s*\(!ageBase\)\s*return;[\s\S]*?\},\s*\[ageBase\]\);/,
+    );
+    expect(rollover).not.toBeNull();
+    const m = rollover?.[0] ?? "";
+    expect(m).toMatch(/setTimeout\([\s\S]{0,100}setAgeBase\(new Date\(\)\)/);
+    // unmount / 再スケジュール時にタイマーを必ず片付ける
+    expect(m).toMatch(/clearTimeout\(timer\)/);
+  });
+
   it("上限は route と共有の CANDIDATE_LIST_LIMIT (乖離しない)", () => {
     expect(QUEUE_SRC).toMatch(/CANDIDATE_LIST_LIMIT/);
     expect(CANDIDATES_ROUTE_SRC).toMatch(

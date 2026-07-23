@@ -9,6 +9,7 @@ import ConvertPinToPropertyModal from "@/components/field-survey/convert-pin-to-
 import { formatPinCreatedAt } from "@/lib/field-survey-pin-util";
 import {
   describeCandidateAge,
+  msUntilNextJstMidnight,
   CANDIDATE_LIST_LIMIT,
 } from "@/lib/field-survey-candidate-util";
 
@@ -58,6 +59,17 @@ export default function CandidateQueue() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: 一覧データ取得エフェクトの標準形（sales-sheets/new と同様）。取得開始時に error をリセットする同期 setState。
     void load();
   }, [load]);
+
+  // 画面を開いたまま JST の日付を跨いだ場合に「今日/昨日/N日前」と放置強調を
+  // 更新する (Codex P2: ageBase が読込時のまま固定だと翌日以降ずれ続ける)。
+  // ageBase 更新のたびに次の 0:00 へ再スケジュールされる自己継続タイマー。
+  useEffect(() => {
+    if (!ageBase) return;
+    const timer = setTimeout(() => {
+      setAgeBase(new Date());
+    }, msUntilNextJstMidnight(new Date()));
+    return () => clearTimeout(timer);
+  }, [ageBase]);
 
   return (
     <div className="p-4 sm:p-6">

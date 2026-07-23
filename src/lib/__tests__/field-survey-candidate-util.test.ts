@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   describeCandidateAge,
+  msUntilNextJstMidnight,
   CANDIDATE_STALE_DAYS,
   CANDIDATE_LIST_LIMIT,
 } from "@/lib/field-survey-candidate-util";
@@ -48,6 +49,30 @@ describe("describeCandidateAge", () => {
   it("不正な日時は空 label で例外を出さない", () => {
     const r = describeCandidateAge("not-a-date", NOW);
     expect(r).toEqual({ label: "", days: 0, stale: false });
+  });
+});
+
+describe("msUntilNextJstMidnight", () => {
+  it("昼 12:00 JST からは 12 時間", () => {
+    expect(msUntilNextJstMidnight(new Date("2026-07-23T12:00:00+09:00"))).toBe(
+      12 * 3_600_000,
+    );
+  });
+
+  it("JST 0:00 ちょうどからは丸 1 日", () => {
+    expect(msUntilNextJstMidnight(new Date("2026-07-23T00:00:00+09:00"))).toBe(
+      86_400_000,
+    );
+  });
+
+  it("23:59:59.5 JST からは最低 1 秒に clamp", () => {
+    expect(
+      msUntilNextJstMidnight(new Date("2026-07-23T23:59:59.500+09:00")),
+    ).toBe(1_000);
+  });
+
+  it("不正な Date は 1 日にフォールバック", () => {
+    expect(msUntilNextJstMidnight(new Date("invalid"))).toBe(86_400_000);
   });
 });
 
