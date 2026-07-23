@@ -34,6 +34,16 @@ import {
   type ActiveSessionLike,
 } from "@/lib/field-survey-trip-util";
 
+/**
+ * 巡回終了時の flush 待ちのタイムアウト (@codex P2)。track-points API が停止/
+ * ハングして応答しない場合、await onBeforeSessionEnd() が settle せず phase が
+ * "ending" のまま固まり「破棄して終了」の脱出口へ到達できない。一定時間で
+ * 打ち切って「終了ブロック」表示に倒し、脱出口を必ず出せるようにする。圏内の
+ * 大 buffer flush を誤って打ち切らないよう余裕を持たせる (点は chunk 単位で
+ * 送信済みが保全され、再度「巡回終了」を押せば残りから続行できる)。
+ */
+const END_FLUSH_SETTLE_TIMEOUT_MS = 15000;
+
 interface TripControlsProps {
   currentUserId: string;
   /**
@@ -324,17 +334,34 @@ export default function TripControls({
       // buffer を保全し、電波復帰後の通常終了で送信できるようにする)。
       if (onBeforeSessionEnd && !opts?.discardUnsent) {
         let beforeOk: boolean | void = undefined;
+        // @codex P2: flush が settle しない (endpoint 停止/ハング) 場合でも脱出口
+        // へ到達できるよう、一定時間で打ち切って「終了ブロック」に倒す。timeout が
+        // 勝った場合は timedOut=true にして文言を切り替える。
+        let timedOut = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          beforeOk = await onBeforeSessionEnd();
+          beforeOk = await Promise.race([
+            Promise.resolve(onBeforeSessionEnd()),
+            new Promise<false>((resolve) => {
+              timer = setTimeout(() => {
+                timedOut = true;
+                resolve(false);
+              }, END_FLUSH_SETTLE_TIMEOUT_MS);
+            }),
+          ]);
         } catch {
           // 終了前 stop の失敗で巡回終了を阻まない (従来挙動)
+        } finally {
+          if (timer) clearTimeout(timer);
         }
         if (!mountedRef.current) return;
         if (beforeOk === false) {
           setError(
-            "未送信の位置情報が残っていて送信できません。電波の良い場所で、もう一度「巡回終了」を押すと再送信します。",
+            timedOut
+              ? "位置情報の送信が完了しません。電波の良い場所へ移動して、もう一度「巡回終了」を押すか、下の「破棄して終了」で終了できます。"
+              : "未送信の位置情報が残っていて送信できません。電波の良い場所で、もう一度「巡回終了」を押すと再送信します。",
           );
-          // 圏外のまま終業する日の脱出口 (「破棄して終了」) を出す
+          // 圏外/応答なしのまま終業する日の脱出口 (「破棄して終了」) を出す
           setEndBlockedByBuffer(true);
           setPhase("active");
           return;

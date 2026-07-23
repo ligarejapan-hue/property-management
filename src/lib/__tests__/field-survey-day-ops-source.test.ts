@@ -121,6 +121,17 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     );
   });
 
+  it("flush が settle しない (ハング) 場合も timeout で脱出口へ到達できる", () => {
+    // @codex P2 R2: await onBeforeSessionEnd() が応答なしで固まると phase が
+    // "ending" のままになり「破棄して終了」に到達できない。timeout と race して
+    // 一定時間で「終了ブロック」に倒し、脱出口を必ず出す。
+    expect(TRIP_SRC).toMatch(/Promise\.race\(\[/);
+    expect(TRIP_SRC).toMatch(/END_FLUSH_SETTLE_TIMEOUT_MS/);
+    expect(TRIP_SRC).toMatch(/timedOut = true/);
+    // timeout 経路は通信起因の対処 + 破棄導線を案内する専用文言
+    expect(TRIP_SRC).toMatch(/位置情報の送信が完了しません/);
+  });
+
   it("終了失敗の文言は通信起因の対処 (電波の良い場所で) を含む", () => {
     expect(TRIP_SRC).toMatch(/電波の良い場所で、もう一度「巡回終了」を押すと再送信します/);
     expect(TRIP_SRC).toMatch(/巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。/);
