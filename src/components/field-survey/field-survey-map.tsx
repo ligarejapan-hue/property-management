@@ -337,6 +337,16 @@ export default function FieldSurveyMap({
   // モバイルの表示切替パネル開閉 (ControlPanel から持ち上げ)。展開中は
   // FAB / banner がパネル下部を覆ってタップを遮るため描画を止める。
   const [panelOpen, setPanelOpen] = useState(false);
+  // 地図上の「巡回を開始」ボタン → TripControls の開始確認 modal を開く
+  // ハンドラ (TripControls が effect で登録する)。パネルを開かずに開始できる
+  // 導線 (毎朝の 6 タップ → 2 タップ)。
+  const startTripRef = useRef<(() => void) | null>(null);
+  const registerStartRequest = useCallback((fn: (() => void) | null) => {
+    startTripRef.current = fn;
+  }, []);
+  // 「巡回を開始」ボタン経由の開始かどうか。開始成功時にパネルを自動で
+  // 畳んで撮影 FAB へ直行できるようにする (パネル手動操作でリセット)。
+  const quickStartRef = useRef(false);
   // Phase 1-H: pin 作成済みだが写真アップロードだけ失敗した状態。modal を閉じず
   // 「写真だけ再試行 / 写真なしで完了」に誘導し、pin を作り直させない。
   const [photoUploadFailed, setPhotoUploadFailed] = useState(false);
@@ -475,8 +485,14 @@ export default function FieldSurveyMap({
   const handleActiveSessionChange = useCallback(
     (s: ActiveSessionLike | null) => {
       const nextId = s?.id ?? null;
-      if (prevActiveSessionIdRef.current !== nextId) {
+      const prevId = prevActiveSessionIdRef.current;
+      if (prevId !== nextId) {
         prevActiveSessionIdRef.current = nextId;
+        // 「巡回を開始」ボタン経由の開始成功時はパネルを畳み、撮影 FAB へ直行
+        if (prevId === null && nextId !== null && quickStartRef.current) {
+          quickStartRef.current = false;
+          setPanelOpen(false);
+        }
         resetCameraFirst();
         // ピン追加モードも巡回の終了/切替で解除する。連続ピンモードで保存後も
         // ON が続くため、ここで畳まないと巡回終了後に「・ピン追加中」表示が
@@ -814,8 +830,13 @@ export default function FieldSurveyMap({
             setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
           }
           panelOpen={panelOpen}
-          onTogglePanelOpen={() => setPanelOpen((v) => !v)}
+          onTogglePanelOpen={() => {
+            quickStartRef.current = false;
+            setPanelOpen((v) => !v);
+          }}
           currentUserId={currentUserId}
+          registerStartRequest={registerStartRequest}
+          onDiscardUnsentLocations={() => recorder.discardBufferAndStop()}
           onActiveSessionChange={handleActiveSessionChange}
           onBeforeSessionEnd={handleBeforeSessionEnd}
           recorder={recorder}
@@ -844,6 +865,59 @@ export default function FieldSurveyMap({
             notice={cameraFirstNotice}
             onCancel={resetCameraFirst}
           />
+        )}
+
+        {/* 巡回していない時は「巡回を開始」を地図に直置きする (パネルを開いて
+            探す必要をなくす)。押すとパネルを開き開始確認 modal を直接出す。 */}
+        {!activeSession && !panelOpen && (
+          <div className="pointer-events-none absolute bottom-14 left-1/2 z-10 -translate-x-1/2">
+            <button
+              type="button"
+              data-testid="trip-quick-start"
+              onClick={() => {
+                quickStartRef.current = true;
+                setPanelOpen(true);
+                startTripRef.current?.();
+              }}
+              className="pointer-events-auto flex items-center gap-2 rounded-full border border-emerald-700 bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-lg hover:bg-emerald-700 dark:border-emerald-500"
+            >
+              <span aria-hidden="true">🚶</span>
+              巡回を開始
+            </button>
+          </div>
+        )}
+
+        {/* 位置記録の状態チップ (巡回中のみ)。撮影でタブが再読込されると記録が
+            静かに止まる・開始し忘れに気づけない問題への可視化。位置記録は任意
+            機能 (撮って登録だけの巡回では使わない) なので、「オフ」は警告色に
+            せず中立の灰色にする (常時オフの巡回で警告が鳴りっぱなしになるのを
+            防ぐ)。記録中は緑・準備中は青で明示。タップでパネルへ。 */}
+        {activeSession && (
+          <button
+            type="button"
+            data-testid="location-recording-chip"
+            onClick={() => setPanelOpen(true)}
+            className={
+              recorder.status === "recording"
+                ? "absolute left-3 top-14 z-10 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+                : recorder.status === "preparing"
+                  ? "absolute left-3 top-14 z-10 rounded-full border border-sky-300 bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-800 shadow dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-300"
+                  : "absolute left-3 top-14 z-10 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-gray-500 shadow dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400"
+            }
+          >
+            {recorder.status === "recording" ? (
+              <>
+                <span aria-hidden="true" className="animate-pulse">
+                  ●
+                </span>{" "}
+                位置記録中
+              </>
+            ) : recorder.status === "preparing" ? (
+              "位置記録の準備中…"
+            ) : (
+              "位置記録オフ"
+            )}
+          </button>
         )}
         {savedToastPinId && (
           <div
@@ -956,6 +1030,8 @@ function ControlPanel({
   panelOpen,
   onTogglePanelOpen,
   currentUserId,
+  registerStartRequest,
+  onDiscardUnsentLocations,
   onActiveSessionChange,
   onBeforeSessionEnd,
   recorder,
@@ -977,6 +1053,10 @@ function ControlPanel({
   panelOpen: boolean;
   onTogglePanelOpen: () => void;
   currentUserId: string;
+  /** 地図上「巡回を開始」→ TripControls の開始確認 modal を開くハンドラ登録。 */
+  registerStartRequest: (fn: (() => void) | null) => void;
+  /** 圏外時の「未送信の位置記録を破棄して終了」の破棄側 (recorder)。 */
+  onDiscardUnsentLocations: () => void;
   onActiveSessionChange: (s: ActiveSessionLike | null) => void;
   onBeforeSessionEnd: () => Promise<boolean>;
   recorder: ReturnType<typeof useFieldSurveyLocationRecorder>;
@@ -1038,6 +1118,9 @@ function ControlPanel({
         currentUserId={currentUserId}
         onActiveSessionChange={onActiveSessionChange}
         onBeforeSessionEnd={onBeforeSessionEnd}
+        registerStartRequest={registerStartRequest}
+        onDiscardUnsentLocations={onDiscardUnsentLocations}
+        unsentLocationCount={recorder.bufferedCount}
       />
 
       {/* Phase 1-F-2: 位置記録 UI。active session がある時のみ表示。

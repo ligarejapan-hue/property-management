@@ -254,7 +254,7 @@ describe("trip-controls.tsx — Phase 1-F-2 巡回終了の明示連動 (修正1
   it("onBeforeSessionEnd が false を返したら PATCH を打たず active に戻す", () => {
     // Codex P1: 未送信 buffer が残っている場合の data loss を抑止
     expect(TRIP_SRC).toMatch(
-      /beforeOk\s*===\s*false[\s\S]*?未送信の位置情報が残っている[\s\S]*?setPhase\("active"\)[\s\S]*?return/,
+      /beforeOk\s*===\s*false[\s\S]*?未送信の位置情報が残って[\s\S]*?setPhase\("active"\)[\s\S]*?return/,
     );
     // false 分岐から PATCH に到達しない構造 (return がある)
     const endBlock = TRIP_SRC.match(

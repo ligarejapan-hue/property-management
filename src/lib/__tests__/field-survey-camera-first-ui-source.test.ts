@@ -202,7 +202,8 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     );
     expect(handler).not.toBeNull();
     const m = handler?.[0] ?? "";
-    expect(m).toMatch(/prevActiveSessionIdRef\.current\s*!==\s*nextId/);
+    expect(m).toMatch(/const prevId\s*=\s*prevActiveSessionIdRef\.current/);
+    expect(m).toMatch(/prevId\s*!==\s*nextId/);
     expect(m).toMatch(/resetCameraFirst\(\)/);
     expect(m).toMatch(/setActiveSession\(s\)/);
     // reset は token bump + 写真破棄 + phase/notice 初期化を行う

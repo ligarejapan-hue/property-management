@@ -52,6 +52,22 @@ interface TripControlsProps {
    * void / true / undefined / 例外時は従来どおり PATCH に進む。
    */
   onBeforeSessionEnd?: () => Promise<boolean | void> | boolean | void;
+  /**
+   * 地図上の「巡回を開始」ボタン (パネル外) からの開始要求を受けるための
+   * ハンドラ登録。effect で登録/解除し、呼ばれたら idle 時のみ確認 modal を
+   * 開く (event 駆動。effect 内 setState を避ける)。
+   */
+  registerStartRequest?: (fn: (() => void) | null) => void;
+  /**
+   * 「未送信の位置記録を破棄して終了」の破棄側 (親の recorder が実装)。
+   * 圏外などで flush できず巡回終了がブロックされた時の脱出口。
+   */
+  onDiscardUnsentLocations?: () => void;
+  /**
+   * 未送信 buffer の点数 (recorder.bufferedCount)。「破棄して終了」で失われる
+   * 軌跡の規模を平易に示すために表示する (圏外が長いと数百点になり得る)。
+   */
+  unsentLocationCount?: number;
 }
 
 type Phase =
@@ -68,6 +84,9 @@ export default function TripControls({
   currentUserId,
   onActiveSessionChange,
   onBeforeSessionEnd,
+  registerStartRequest,
+  onDiscardUnsentLocations,
+  unsentLocationCount,
 }: TripControlsProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<ActiveSessionLike | null>(null);
@@ -87,6 +106,28 @@ export default function TripControls({
   // 失敗 (オフライン等) しても、終了直前に再 touch して「続行したのに endedAt が
   // 続行前へ巻き戻る」ことを防ぐための印。
   const resumedRef = useRef<string | null>(null);
+  // 圏外などで未送信 buffer が残り巡回終了がブロックされた状態。
+  // 「破棄して終了」の脱出口ボタンを出すために保持する。
+  const [endBlockedByBuffer, setEndBlockedByBuffer] = useState(false);
+
+  // 地図上の「巡回を開始」ボタン用: 開始確認 modal を開くハンドラを親に登録する。
+  // まだ session 取得中 (phase="loading") に押された場合は取得完了まで予約し、
+  // idle に確定した時点で確認 modal を開く (取得中の空打ちで無反応になるのを防ぐ)。
+  const pendingStartRef = useRef(false);
+  const requestStart = useCallback(() => {
+    setPhase((p) => {
+      if (p === "idle") return "confirmStart";
+      // loading 中は予約だけして、fetchActiveSession の解決時に開く。
+      if (p === "loading") pendingStartRef.current = true;
+      return p;
+    });
+  }, []);
+  useEffect(() => {
+    registerStartRequest?.(requestStart);
+    return () => {
+      registerStartRequest?.(null);
+    };
+  }, [registerStartRequest, requestStart]);
 
   const isAbortError = (err: unknown): boolean =>
     typeof err === "object" &&
@@ -119,6 +160,7 @@ export default function TripControls({
         extractApiErrorCode(body),
       );
       if (outcome.kind !== "ok") {
+        pendingStartRef.current = false;
         setError(tripOutcomeMessage(outcome));
         setSession(null);
         setPhase("idle");
@@ -141,12 +183,20 @@ export default function TripControls({
       ) {
         stalePromptedRef.current = own.id;
         setPhase("confirmStaleEnd");
+      } else if (own) {
+        setPhase("active");
+      } else if (pendingStartRef.current) {
+        // loading 中に地図の「巡回を開始」が押されていた → 取得完了 (active
+        // session 無し) で開始確認 modal を開く (空打ちを取りこぼさない)。
+        pendingStartRef.current = false;
+        setPhase("confirmStart");
       } else {
-        setPhase(own ? "active" : "idle");
+        setPhase("idle");
       }
       setError(null);
     } catch (err) {
       if (isAbortError(err) || !mountedRef.current) return;
+      pendingStartRef.current = false;
       setError("巡回情報の取得に失敗しました。");
       setSession(null);
       setPhase("idle");
@@ -253,9 +303,13 @@ export default function TripControls({
   );
 
   const endSession = useCallback(
-    async (target: ActiveSessionLike) => {
+    async (
+      target: ActiveSessionLike,
+      opts?: { discardUnsent?: boolean },
+    ) => {
       setPhase("ending");
       setError(null);
+      setEndBlockedByBuffer(false);
       // Phase 1-F-2: session PATCH の前に位置記録 (watchPosition / flush
       // timer / 残 buffer chunk flush) を停止する。throw は握り潰す。
       // Codex P1: 戻り値が明示的に false の場合 = 未送信 buffer が残っている。
@@ -268,10 +322,16 @@ export default function TripControls({
           // 終了前 stop の失敗で巡回終了を阻まない (従来挙動)
         }
         if (!mountedRef.current) return;
-        if (beforeOk === false) {
+        // discardUnsent 指定 (「破棄して終了」経由) のときは未送信 buffer を
+        // ブロック理由にしない。ただし破棄は PATCH 成功後に行う (下記)。
+        // 圏外で PATCH 自体も失敗する場合は buffer を残し、電波復帰後の
+        // 通常終了で軌跡を送信できるようにする (無駄な喪失を防ぐ)。
+        if (beforeOk === false && !opts?.discardUnsent) {
           setError(
-            "未送信の位置情報が残っているため、巡回終了前に再度送信してください。",
+            "未送信の位置情報が残っていて送信できません。電波の良い場所で、もう一度「巡回終了」を押すと再送信します。",
           );
+          // 圏外のまま終業する日の脱出口 (「破棄して終了」) を出す
+          setEndBlockedByBuffer(true);
           setPhase("active");
           return;
         }
@@ -307,6 +367,9 @@ export default function TripControls({
           extractApiErrorCode(body),
         );
         if (outcome.kind === "ok") {
+          // 終了が確定してから未送信 buffer を破棄する (offline で PATCH が
+          // 失敗した場合は破棄されず、軌跡が保全される)。
+          if (opts?.discardUnsent) onDiscardUnsentLocations?.();
           if (resumedRef.current === target.id) resumedRef.current = null;
           setSession(null);
           setPhase("idle");
@@ -322,11 +385,18 @@ export default function TripControls({
         setPhase("active");
       } catch (err) {
         if (isAbortError(err) || !mountedRef.current) return;
-        setError("巡回終了に失敗しました。");
+        setError(
+          "巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。",
+        );
         setPhase("active");
       }
     },
-    [fetchActiveSession, onBeforeSessionEnd, touchSession],
+    [
+      fetchActiveSession,
+      onBeforeSessionEnd,
+      onDiscardUnsentLocations,
+      touchSession,
+    ],
   );
 
   if (phase === "loading") {
@@ -363,6 +433,33 @@ export default function TripControls({
         >
           {error}
         </p>
+      )}
+
+      {endBlockedByBuffer && phase === "active" && session && (
+        <div className="mt-2">
+          {/* 圏外で終業する日の脱出口: 未送信の軌跡を諦めて終了する。破棄は
+              endSession 内で PATCH 成功後に行う (offline で終了自体が失敗する
+              場合は破棄されず軌跡を保全する)。 */}
+          <button
+            type="button"
+            data-testid="trip-discard-and-end"
+            onClick={() => {
+              setEndBlockedByBuffer(false);
+              void endSession(session, { discardUnsent: true });
+            }}
+            disabled={phase !== "active"}
+            className="w-full rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
+          >
+            未送信の位置記録を破棄して終了する
+          </button>
+          <p className="mt-1 text-[11px] font-medium leading-tight text-gray-600 dark:text-gray-300">
+            まだ送信できていない移動の記録
+            {typeof unsentLocationCount === "number" && unsentLocationCount > 0
+              ? ` (約${unsentLocationCount}点)`
+              : ""}
+            は失われます。ピンと写真は保存済みです。
+          </p>
+        </div>
       )}
 
       {phase === "confirmStart" && (

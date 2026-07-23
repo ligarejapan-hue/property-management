@@ -114,6 +114,13 @@ export interface UseLocationRecorderResult {
    *    呼ばないことで未送信データを保持し、次回再試行できる)
    */
   stopBeforeSessionEnd: () => Promise<boolean>;
+  /**
+   * 未送信の位置記録を破棄して即時停止する (圏外時の巡回終了の脱出口)。
+   * flush を試みず buffer / in-flight を捨てる。地下駐車場・山間部など
+   * 電波の無い場所で終業する日に「数点の軌跡を諦めて終了する」ための
+   * 明示操作 (TripControls の「破棄して終了」) からのみ呼ぶ。
+   */
+  discardBufferAndStop: () => void;
 }
 
 interface UseLocationRecorderOptions {
@@ -684,6 +691,24 @@ export function useFieldSurveyLocationRecorder(
     stopWatchingInternal,
   ]);
 
+  // 未送信の位置記録を破棄して即時停止する (圏外時の巡回終了の脱出口)。
+  // generation bump で in-flight flush の遅延応答も無効化する。fetch は呼ばない。
+  const discardBufferAndStop = useCallback((): void => {
+    recorderGenerationRef.current += 1;
+    stopWatchingInternal();
+    bufferRef.current = [];
+    inFlightFlushRef.current = false;
+    inFlightFlushPromiseRef.current = null;
+    if (!mountedRef.current) return;
+    setBufferedCount(0);
+    setPendingPoints([]);
+    setIsFlushing(false);
+    setStatus("idle");
+    setError(null);
+    setLatestPositionForDisplay(null);
+    setLastLocationErrorForDisplay(null);
+  }, [stopWatchingInternal]);
+
   // ---- session change / unmount cleanup ---------------------------------
 
   // Codex P2 fix 4: sessionId が変わったら null / non-null を問わず必ず reset
@@ -742,6 +767,7 @@ export function useFieldSurveyLocationRecorder(
     start,
     stop,
     stopBeforeSessionEnd,
+    discardBufferAndStop,
   };
 }
 
