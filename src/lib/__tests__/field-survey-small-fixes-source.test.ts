@@ -120,8 +120,25 @@ describe("3. 物件化成功後の遷移", () => {
   it("candidate-queue は propertyId を受け取り物件ページへ直行する", () => {
     expect(QUEUE_SRC).toMatch(/useRouter/);
     expect(QUEUE_SRC).toMatch(
-      /onConverted=\{\(propertyId\)\s*=>\s*\{[\s\S]{0,200}router\.push\(`\/properties\/\$\{propertyId\}`\)/,
+      /onConverted=\{\(propertyId\)\s*=>\s*\{[\s\S]{0,400}router\.push\(`\/properties\/\$\{propertyId\}`\)/,
     );
+  });
+
+  it("property:read が無い構成では 403 へ飛ばさず一覧に留まり成功を案内する (Codex P2)", () => {
+    // write のみ付与 (read 無し) は独立権限のため有効な構成。判定不能時も
+    // 安全側 (留まる) に倒す。
+    expect(QUEUE_SRC).toMatch(/canReadProperty/);
+    const onConverted = QUEUE_SRC.match(
+      /onConverted=\{\(propertyId\)\s*=>\s*\{[\s\S]*?\}\}/,
+    );
+    expect(onConverted).not.toBeNull();
+    const m = onConverted?.[0] ?? "";
+    expect(m).toMatch(/if\s*\(canReadProperty\)\s*\{[\s\S]*?router\.push/);
+    expect(m).toMatch(/setConvertedNotice\(true\)/);
+    expect(m).toMatch(/void load\(\)/);
+    // 成功案内はダーク配色付きで表示される
+    expect(QUEUE_SRC).toMatch(/data-testid="candidate-converted-notice"/);
+    expect(QUEUE_SRC).toMatch(/物件を作成しました/);
   });
 });
 

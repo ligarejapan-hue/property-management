@@ -33,8 +33,19 @@ export default function CandidateQueue() {
     (permissions ?? []).some(
       (p) => p.resource === "property" && p.action === "write" && p.granted === true,
     );
+  // 物件化成功後の遷移先判定。property:read が無い構成 (write のみ付与) では
+  // 物件詳細が 403 になるため遷移せず一覧に留まる (Codex P2)。判定不能時も
+  // 安全側 (留まる) に倒す。
+  const canReadProperty =
+    !permissionsLoading &&
+    !permissionsError &&
+    (permissions ?? []).some(
+      (p) => p.resource === "property" && p.action === "read" && p.granted === true,
+    );
 
   const [rows, setRows] = useState<CandidatePinRow[] | null>(null);
+  // 物件詳細へ遷移できない権限構成で物件化した時の成功表示 (一覧に留まる)。
+  const [convertedNotice, setConvertedNotice] = useState(false);
   // 取得上限超過 (古い候補が data に含まれていない) の正確な通知は API の
   // truncated フラグで受ける (件数一致だけではちょうど上限件数と区別できない)。
   const [truncated, setTruncated] = useState(false);
@@ -97,6 +108,16 @@ export default function CandidateQueue() {
         </div>
       )}
 
+      {convertedNotice && (
+        <div
+          role="status"
+          data-testid="candidate-converted-notice"
+          className="mb-3 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+        >
+          物件を作成しました。続きの入力 (謄本取得・DM判断) は物件の閲覧権限を持つ担当者にお願いしてください。
+        </div>
+      )}
+
       {rows !== null && truncated && (
         <div
           role="status"
@@ -144,7 +165,10 @@ export default function CandidateQueue() {
                 {canWriteProperty && (
                   <button
                     type="button"
-                    onClick={() => setConvertPinId(r.id)}
+                    onClick={() => {
+                      setConvertedNotice(false);
+                      setConvertPinId(r.id);
+                    }}
                     className="shrink-0 rounded border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
                   >
                     物件にする
@@ -161,9 +185,16 @@ export default function CandidateQueue() {
           pinId={convertPinId}
           onClose={() => setConvertPinId(null)}
           onConverted={(propertyId) => {
-            // 次アクション (謄本取得 / DM 判断) は物件詳細にあるため直行する。
             setConvertPinId(null);
-            router.push(`/properties/${propertyId}`);
+            if (canReadProperty) {
+              // 次アクション (謄本取得 / DM 判断) は物件詳細にあるため直行する。
+              router.push(`/properties/${propertyId}`);
+            } else {
+              // 閲覧権限が無い構成では物件詳細が 403 になるため一覧に留まり、
+              // 成功と引き継ぎ先を案内する。
+              setConvertedNotice(true);
+              void load();
+            }
           }}
         />
       )}
