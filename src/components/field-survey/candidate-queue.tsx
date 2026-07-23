@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { listCandidatePins, type CandidatePinRow } from "@/lib/api-client";
@@ -26,17 +26,40 @@ import {
  */
 export default function CandidateQueue() {
   const router = useRouter();
-  const { permissions, permissionsLoading, permissionsError } = useScreenProtection();
+  const {
+    permissions,
+    permissionsLoading,
+    permissionsError,
+    refetchPermissions,
+  } = useScreenProtection();
+
+  // 進入時 refresh (FieldSurveyMap と同方針・Codex P2): provider は dashboard
+  // layout の mount 時に 1 回取得するだけのため、滞在中の権限変更 (read 剥奪 /
+  // 付与) に追従できない。ページ進入あたり 1 回だけ再取得し、完了までは
+  // 権限判定を保留 (= ボタン非表示・遷移しない安全側) に倒す。
+  const permissionsRefreshRequestedRef = useRef(false);
+  const [permissionsRefreshPending, setPermissionsRefreshPending] =
+    useState(true);
+  useEffect(() => {
+    if (permissionsRefreshRequestedRef.current) return;
+    permissionsRefreshRequestedRef.current = true;
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [refetchPermissions]);
+
   const canWriteProperty =
+    !permissionsRefreshPending &&
     !permissionsLoading &&
     !permissionsError &&
     (permissions ?? []).some(
       (p) => p.resource === "property" && p.action === "write" && p.granted === true,
     );
   // 物件化成功後の遷移先判定。property:read が無い構成 (write のみ付与) では
-  // 物件詳細が 403 になるため遷移せず一覧に留まる (Codex P2)。判定不能時も
-  // 安全側 (留まる) に倒す。
+  // 物件詳細が 403 になるため遷移せず一覧に留まる (Codex P2)。判定不能・
+  // 再取得中も安全側 (留まる) に倒す。
   const canReadProperty =
+    !permissionsRefreshPending &&
     !permissionsLoading &&
     !permissionsError &&
     (permissions ?? []).some(
@@ -91,7 +114,8 @@ export default function CandidateQueue() {
             data-testid="candidate-count"
             className="ml-2 align-middle rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
           >
-            {rows.length}件
+            {rows.length}
+            {truncated ? "件以上" : "件"}
           </span>
         )}
       </h1>

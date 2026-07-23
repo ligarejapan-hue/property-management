@@ -175,6 +175,26 @@ describe("4. 完成待ち一覧の放置可視化", () => {
     );
   });
 
+  it("件数バッジは切り捨て時に「以上」を付ける (警告と矛盾しない)", () => {
+    expect(QUEUE_SRC).toMatch(/truncated \? "件以上" : "件"/);
+  });
+
+  it("進入時に権限を再取得し、完了まで判定を保留する (stale 権限で遷移しない)", () => {
+    // Codex P2: provider は layout mount 時のみ取得のため滞在中の権限変更に
+    // 追従できない。ページ進入あたり 1 回 refetch し、pending 中は
+    // canRead/canWriteProperty を false (安全側) に倒す。
+    expect(QUEUE_SRC).toMatch(/refetchPermissions\(\)\.finally/);
+    expect(QUEUE_SRC).toMatch(/permissionsRefreshRequestedRef/);
+    const readDef = QUEUE_SRC.match(
+      /const canReadProperty\s*=[\s\S]{0,200}?\.some/,
+    );
+    expect(readDef?.[0] ?? "").toMatch(/!permissionsRefreshPending/);
+    const writeDef = QUEUE_SRC.match(
+      /const canWriteProperty\s*=[\s\S]{0,200}?\.some/,
+    );
+    expect(writeDef?.[0] ?? "").toMatch(/!permissionsRefreshPending/);
+  });
+
   it("上限警告は truncated フラグ基準 (ちょうど上限件数では誤警告しない)", () => {
     // Codex P2: 件数一致 (length >= LIMIT) では 200 件ちょうどと 201 件以上を
     // 区別できない。route が 1 件余分に取得して truncated を返し、UI はそれを見る。
