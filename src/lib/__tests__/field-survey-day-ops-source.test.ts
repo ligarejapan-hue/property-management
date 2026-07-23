@@ -111,6 +111,16 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(MAP_SRC).toMatch(/unsentLocationCount=\{recorder\.bufferedCount\}/);
   });
 
+  it("破棄経路は flush hook を呼ばない (endpoint 停止で脱出口が再度固まらない)", () => {
+    // @codex P2: discardUnsent 指定時は onBeforeSessionEnd (track-point 再送を
+    // 試みる flush hook) を呼ばず PATCH へ進む。env=node の SSR テストでは
+    // 実 fetch 回数を検証できないため、hook 呼び出しが !discardUnsent で
+    // ガードされていることをソース構造で固定する。
+    expect(TRIP_SRC).toMatch(
+      /if \(onBeforeSessionEnd && !opts\?\.discardUnsent\)/,
+    );
+  });
+
   it("終了失敗の文言は通信起因の対処 (電波の良い場所で) を含む", () => {
     expect(TRIP_SRC).toMatch(/電波の良い場所で、もう一度「巡回終了」を押すと再送信します/);
     expect(TRIP_SRC).toMatch(/巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。/);
@@ -124,9 +134,9 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
 });
 
 describe("3. 位置記録の可視化 (状態チップ)", () => {
-  it("巡回中のみチップを表示し、記録中/準備中/オフで文言と配色を変える", () => {
+  it("巡回中のみチップを表示し、記録中/準備中/エラー/オフで文言と配色を変える", () => {
     const chip = MAP_SRC.match(
-      /data-testid="location-recording-chip"[\s\S]{0,2000}?<\/button>/,
+      /data-testid="location-recording-chip"[\s\S]{0,2400}?<\/button>/,
     );
     expect(chip).not.toBeNull();
     const m = chip?.[0] ?? "";
@@ -135,9 +145,13 @@ describe("3. 位置記録の可視化 (状態チップ)", () => {
     expect(m).toMatch(/位置記録オフ/);
     expect(m).toMatch(/recorder\.status === "recording"/);
     expect(m).toMatch(/recorder\.status === "preparing"/);
-    // 位置記録は任意機能。オフは警告色 (amber) でなく中立の灰色にして
-    // 常時オフの巡回で警告が鳴りっぱなしになるのを防ぐ。
-    expect(m).not.toMatch(/amber/);
+    // @codex P2: 権限拒否・取得不可などの error は「意図的オフ」と区別して
+    // 琥珀色で明示する (静かに止まったのを見逃さない)。
+    expect(m).toMatch(/recorder\.status === "error"/);
+    expect(m).toMatch(/位置記録エラー/);
+    expect(m).toMatch(/border-amber-400/);
+    // 一方、意図的な「オフ」は警告色でなく中立の灰色 (任意機能なので
+    // 常時オフの巡回で警告が鳴りっぱなしにならないようにする)。
     expect(m).toMatch(/border-gray-300/);
     // タップでパネルを開き、記録の開始/停止操作へ誘導
     expect(m).toMatch(/setPanelOpen\(true\)/);

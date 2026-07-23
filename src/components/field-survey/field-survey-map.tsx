@@ -889,9 +889,11 @@ export default function FieldSurveyMap({
 
         {/* 位置記録の状態チップ (巡回中のみ)。撮影でタブが再読込されると記録が
             静かに止まる・開始し忘れに気づけない問題への可視化。位置記録は任意
-            機能 (撮って登録だけの巡回では使わない) なので、「オフ」は警告色に
-            せず中立の灰色にする (常時オフの巡回で警告が鳴りっぱなしになるのを
-            防ぐ)。記録中は緑・準備中は青で明示。タップでパネルへ。 */}
+            機能 (撮って登録だけの巡回では使わない) なので、意図的な「オフ」は
+            警告色にせず中立の灰色にする (常時オフの巡回で警告が鳴りっぱなしに
+            なるのを防ぐ)。一方、権限拒否・取得不可などの「エラー」で予期せず
+            止まった場合 (@codex P2) は琥珀色で明示し、意図的オフと区別する。
+            記録中は緑・準備中は青。タップでパネルへ。 */}
         {activeSession && (
           <button
             type="button"
@@ -902,7 +904,9 @@ export default function FieldSurveyMap({
                 ? "absolute left-3 top-14 z-10 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
                 : recorder.status === "preparing"
                   ? "absolute left-3 top-14 z-10 rounded-full border border-sky-300 bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-800 shadow dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-300"
-                  : "absolute left-3 top-14 z-10 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-gray-500 shadow dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                  : recorder.status === "error"
+                    ? "absolute left-3 top-14 z-10 rounded-full border border-amber-400 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-900 shadow dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-300"
+                    : "absolute left-3 top-14 z-10 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-gray-500 shadow dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400"
             }
           >
             {recorder.status === "recording" ? (
@@ -914,6 +918,10 @@ export default function FieldSurveyMap({
               </>
             ) : recorder.status === "preparing" ? (
               "位置記録の準備中…"
+            ) : recorder.status === "error" ? (
+              <>
+                <span aria-hidden="true">⚠</span> 位置記録エラー
+              </>
             ) : (
               "位置記録オフ"
             )}

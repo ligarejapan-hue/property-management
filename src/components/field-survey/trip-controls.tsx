@@ -314,7 +314,15 @@ export default function TripControls({
       // timer / 残 buffer chunk flush) を停止する。throw は握り潰す。
       // Codex P1: 戻り値が明示的に false の場合 = 未送信 buffer が残っている。
       // session end PATCH を呼ばず active 状態へ戻し、ユーザーに再送信を促す。
-      if (onBeforeSessionEnd) {
+      //
+      // @codex P2: 「破棄して終了」(discardUnsent) のときは flush hook を呼ばない。
+      // hook は未送信 track-point の再送 (fetch) を試みるため、endpoint が停止/
+      // ハングしていると、点を破棄すると決めたユーザーの脱出口自体がまた固まる。
+      // discardUnsent 経路に来る時点で、直前の通常終了 (endBlockedByBuffer を
+      // 立てた側) が既に watchPosition を停止済みなので、ここで stop を省いても
+      // watch は残らない。破棄は PATCH 成功後に行う (下記・offline 失敗時は
+      // buffer を保全し、電波復帰後の通常終了で送信できるようにする)。
+      if (onBeforeSessionEnd && !opts?.discardUnsent) {
         let beforeOk: boolean | void = undefined;
         try {
           beforeOk = await onBeforeSessionEnd();
@@ -322,11 +330,7 @@ export default function TripControls({
           // 終了前 stop の失敗で巡回終了を阻まない (従来挙動)
         }
         if (!mountedRef.current) return;
-        // discardUnsent 指定 (「破棄して終了」経由) のときは未送信 buffer を
-        // ブロック理由にしない。ただし破棄は PATCH 成功後に行う (下記)。
-        // 圏外で PATCH 自体も失敗する場合は buffer を残し、電波復帰後の
-        // 通常終了で軌跡を送信できるようにする (無駄な喪失を防ぐ)。
-        if (beforeOk === false && !opts?.discardUnsent) {
+        if (beforeOk === false) {
           setError(
             "未送信の位置情報が残っていて送信できません。電波の良い場所で、もう一度「巡回終了」を押すと再送信します。",
           );
