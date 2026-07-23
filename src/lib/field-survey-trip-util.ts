@@ -54,9 +54,9 @@ export function tripOutcomeMessage(outcome: TripApiOutcome): string {
     case "forbidden":
       return "巡回操作の権限がありません。管理者に確認してください。";
     case "conflict_active":
-      return "active な巡回 session が既に存在します。状態を再取得します。";
+      return "すでに巡回中です。最新の状態を取得します。";
     case "conflict_state":
-      return "巡回 session の状態が変わりました。状態を再取得します。";
+      return "巡回の状態が変わりました。最新の状態を取得します。";
     case "validation":
       return "リクエストが不正です。";
     case "server_error":

@@ -76,7 +76,9 @@ describe("tripOutcomeMessage", () => {
     const fb = tripOutcomeMessage({ kind: "forbidden" });
     expect(fb).toContain("権限");
     const ca = tripOutcomeMessage({ kind: "conflict_active" });
-    expect(ca).toContain("再取得");
+    // 平易語化: 「session の再取得」でなく「すでに巡回中 / 最新の状態を取得」
+    expect(ca).toContain("巡回中");
+    expect(ca).toContain("取得");
     const cs = tripOutcomeMessage({ kind: "conflict_state" });
     expect(cs).toContain("状態");
     expect(tripOutcomeMessage({ kind: "server_error" })).toContain("サーバー");

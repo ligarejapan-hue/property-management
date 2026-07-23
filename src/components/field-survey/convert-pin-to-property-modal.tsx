@@ -24,6 +24,9 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   const [addressEdited, setAddressEdited] = useState(false);
   const [lotNumber, setLotNumber] = useState("");
   const [buildingNumber, setBuildingNumber] = useState("");
+  // 不動産番号が既に分かっている場合の近道 (13桁)。あれば通常の謄本自動取得が
+  // 所在検索より確実に使える。API/validator は元々受け付けており入力欄のみ追加。
+  const [realEstateNumber, setRealEstateNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +49,7 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
         address: address.trim(),
         lotNumber: lotNumber.trim() || null,
         buildingNumber: buildingNumber.trim() || null,
+        realEstateNumber: realEstateNumber.trim() || null,
       });
       onConverted(result.id);
     } catch (err) {
@@ -150,6 +154,25 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
               placeholder="例: 1番1の1"
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+              不動産番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意(13桁・分かる場合)</span>
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={realEstateNumber}
+              onChange={(e) => setRealEstateNumber(e.target.value)}
+              disabled={submitting}
+              placeholder="例: 0123456789012"
+              data-testid="convert-real-estate-number"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+            />
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              入力しておくと、謄本の自動取得をすぐに使えます。
+            </p>
           </div>
 
           <div className="flex items-center justify-end gap-3 border-t border-gray-100 dark:border-gray-800 pt-4">

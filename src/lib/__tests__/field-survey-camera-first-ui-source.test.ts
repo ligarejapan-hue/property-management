@@ -177,14 +177,14 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     // (連続ピンモード導入で「写真付き保存」全般と統合。詳細は
     //  field-survey-pin-continuity-source.test.ts が固定)
     expect(m).toMatch(
-      /createdFromCameraRef\.current[\s\S]*?setPinSavedNotice\(true\)[\s\S]*?return/,
+      /createdFromCameraRef\.current[\s\S]*?setSavedToastPinId\(pinId\)[\s\S]*?return/,
     );
     // 写真なし保存は従来どおり detail panel を開く
     expect(m).toMatch(/setDetailPinId\(pinId\)/);
   });
 
   it("保存完了トーストは 4 秒で自動で消える (unmount ガード付き)", () => {
-    expect(MAP_SRC).toMatch(/setTimeout\([\s\S]{0,200}setPinSavedNotice\(false\)/);
+    expect(MAP_SRC).toMatch(/setTimeout\([\s\S]{0,200}setSavedToastPinId\(null\)/);
     expect(MAP_SRC).toMatch(/clearTimeout\(/);
   });
 

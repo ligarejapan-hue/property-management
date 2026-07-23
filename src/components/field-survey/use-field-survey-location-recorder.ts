@@ -472,7 +472,7 @@ export function useFieldSurveyLocationRecorder(
 
   const start = useCallback(() => {
     if (!sessionIdRef.current) {
-      setError("巡回 session が無いため位置記録を開始できません。");
+      setError("巡回を開始してから位置記録を開始してください。");
       return;
     }
     if (status === "recording" || status === "preparing") return;
@@ -770,8 +770,8 @@ function isAbortError(err: unknown): boolean {
 function mapHttpErrorToMessage(status: number): string {
   if (status === 401) return "ログインが必要です。再ログインしてください。";
   if (status === 403) return "位置記録の権限がありません。";
-  if (status === 404) return "巡回 session が見つかりません。";
-  if (status === 409) return "巡回 session の状態が変わりました。";
+  if (status === 404) return "巡回の情報が見つかりません。ページを再読み込みしてください。";
+  if (status === 409) return "巡回の状態が変わりました。ページを再読み込みしてください。";
   if (status === 422) return "送信内容が不正です。";
   if (status >= 500 && status < 600)
     return "サーバーエラーが発生しました。時間をおいて再試行してください。";

@@ -15,9 +15,12 @@ import { hasPermission } from "@/lib/permissions";
 // - field_survey:read 必須。read_all / manage が無ければ own のみ
 //   (= 変換エンドポイントの可視スコープと一致するので、返る候補は必ず変換可能)。
 // - 座標(lat/lng/accuracy)・memo 本文は返さない(一覧は表示しない=非PII)。hasMemo のみ。
-// - ページングは未対応。上限 MAX 件(通常運用では十分。超過時は古い分が出ない)。
+// - ページングは未対応。上限 MAX 件(通常運用では十分。超過時は古い分が出ない。
+//   UI 側は件数が上限に達したら「古い候補が表示されていない」警告を出す)。
 
-const MAX = 200;
+import { CANDIDATE_LIST_LIMIT } from "@/lib/field-survey-candidate-util";
+
+const MAX = CANDIDATE_LIST_LIMIT;
 
 export async function GET() {
   try {

@@ -164,7 +164,7 @@ export default function FieldSurveyHistoryMap({
           metaRes.status === 403
             ? "この巡回を閲覧する権限がありません。"
             : metaRes.status === 404
-              ? "巡回 session が見つかりません。"
+              ? "巡回の記録が見つかりません。"
               : "巡回履歴の取得に失敗しました。",
         );
         return;

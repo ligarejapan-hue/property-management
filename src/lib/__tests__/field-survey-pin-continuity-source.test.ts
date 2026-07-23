@@ -37,7 +37,7 @@ describe("field-survey-map.tsx — 連続ピンモード", () => {
     expect(m).toMatch(/\(pinId:\s*string,\s*hadPhoto:\s*boolean\)/);
     // 写真付き (またはカメラ由来) はトーストを出して early return
     expect(m).toMatch(
-      /(fromCamera\s*\|\|\s*hadPhoto|hadPhoto\s*\|\|\s*fromCamera)[\s\S]*?setPinSavedNotice\(true\)[\s\S]*?return/,
+      /(fromCamera\s*\|\|\s*hadPhoto|hadPhoto\s*\|\|\s*fromCamera)[\s\S]*?setSavedToastPinId\(pinId\)[\s\S]*?return/,
     );
     // 写真なしは従来どおり詳細パネル
     expect(m).toMatch(/setDetailPinId\(pinId\)/);
@@ -63,8 +63,8 @@ describe("field-survey-map.tsx — 連続ピンモード", () => {
     expect(without).not.toBeNull();
   });
 
-  it("保存完了トーストは汎用名 pinSavedNotice (カメラ専用ではない)", () => {
-    expect(MAP_SRC).toMatch(/const \[pinSavedNotice, setPinSavedNotice\]/);
+  it("保存完了トーストは pin id を保持する汎用 state (カメラ専用ではない)", () => {
+    expect(MAP_SRC).toMatch(/const \[savedToastPinId, setSavedToastPinId\]/);
     expect(MAP_SRC).toMatch(/data-testid="pin-saved-toast"/);
     expect(MAP_SRC).not.toMatch(/cameraSavedNotice/);
   });
