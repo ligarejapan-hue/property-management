@@ -294,7 +294,9 @@ export default function FieldSurveyMap({
   const createdFromCameraRef = useRef(false);
   // 保存完了トースト (自動で消える)。カメラファーストおよび写真付き保存で
   // 詳細パネルの代わりに出す (連続作業を遮らないため)。
-  const [pinSavedNotice, setPinSavedNotice] = useState(false);
+  // 作成した pin の id を保持し、「取り消す」(誤作成の即時 undo) と
+  // 「写真を追加」(2枚目の最短経路 = 詳細パネルを開く) をトーストから提供する。
+  const [savedToastPinId, setSavedToastPinId] = useState<string | null>(null);
   const cameraToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -368,7 +370,7 @@ export default function FieldSurveyMap({
     const requestSessionId = activeSessionIdRef.current;
     if (!requestSessionId) {
       setCurrentLocationError(
-        "巡回 session が無いため現在地を取得できません。",
+        "巡回を開始してから現在地を取得してください。",
       );
       return;
     }
@@ -579,13 +581,14 @@ export default function FieldSurveyMap({
       const fromCamera = createdFromCameraRef.current;
       createdFromCameraRef.current = false;
       if (fromCamera || hadPhoto) {
-        setPinSavedNotice(true);
+        setSavedToastPinId(pinId);
         if (cameraToastTimerRef.current) {
           clearTimeout(cameraToastTimerRef.current);
         }
+        // ボタン (取り消す / 写真を追加) 付きのため従来の 4 秒から少し延長。
         cameraToastTimerRef.current = setTimeout(() => {
-          if (fsMapMountedRef.current) setPinSavedNotice(false);
-        }, 4000);
+          if (fsMapMountedRef.current) setSavedToastPinId(null);
+        }, 7000);
         return;
       }
       // Phase 1-H: 写真なしの作成後は detail panel を開く。
@@ -593,6 +596,32 @@ export default function FieldSurveyMap({
     },
     [invalidateCurrentLocationRequest],
   );
+
+  // トーストの「取り消す」: 直前に作成した pin を論理削除 (アーカイブ) する。
+  // 誤作成をマーカー探し + 4 タップの削除導線なしで即時に戻せるようにする。
+  const handleUndoCreatedPin = useCallback(async () => {
+    const pinId = savedToastPinId;
+    if (!pinId) return;
+    const r = await pinMutations.deletePin(pinId);
+    if (!fsMapMountedRef.current) return;
+    if (r.ok) {
+      // 削除中に別ピンの保存でトーストが切替済みなら、そちらは消さない
+      // (timer は共有 ref のため触らない。発火時の null 化は no-op で安全)。
+      setSavedToastPinId((cur) => (cur === pinId ? null : cur));
+      bumpRefetch();
+    } else {
+      setError("ピンの取り消しに失敗しました。ピンをタップして削除してください。");
+    }
+  }, [savedToastPinId, pinMutations, bumpRefetch]);
+
+  // トーストの「写真を追加」: 作成した pin の詳細パネルを開く (写真セクション
+  // から即撮影できる)。連続ピンモードで 2 枚目の最短経路が長くなった件の解消。
+  const handleAddPhotoToCreatedPin = useCallback(() => {
+    const pinId = savedToastPinId;
+    if (!pinId) return;
+    setSavedToastPinId((cur) => (cur === pinId ? null : cur));
+    setDetailPinId(pinId);
+  }, [savedToastPinId]);
 
   const handlePinCreateSubmit = useCallback(
     async (
@@ -790,13 +819,32 @@ export default function FieldSurveyMap({
             onCancel={resetCameraFirst}
           />
         )}
-        {pinSavedNotice && (
+        {savedToastPinId && (
           <div
             role="status"
             data-testid="pin-saved-toast"
-            className="pointer-events-none absolute bottom-28 left-1/2 z-10 -translate-x-1/2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+            className="pointer-events-auto absolute bottom-28 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
           >
-            ピンを保存しました
+            <span>ピンを保存しました</span>
+            <button
+              type="button"
+              onClick={handleAddPhotoToCreatedPin}
+              data-testid="pin-saved-add-photo"
+              className="rounded border border-emerald-400 bg-white px-2 py-0.5 text-[11px] text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/50 dark:bg-gray-900 dark:text-emerald-300 dark:hover:bg-gray-800"
+            >
+              写真を追加
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void handleUndoCreatedPin();
+              }}
+              disabled={pinMutations.deleteLoading}
+              data-testid="pin-saved-undo"
+              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              {pinMutations.deleteLoading ? "取り消し中…" : "取り消す"}
+            </button>
           </div>
         )}
 
@@ -1296,7 +1344,7 @@ function PinInfo({ row, onOpenDetail }: { row: PinRow; onOpenDetail: () => void 
         <dd>{formatPinType(row.pinType)}</dd>
         <dt>状態</dt>
         <dd>{formatPinStatus(row.status)}</dd>
-        <dt>session</dt>
+        <dt>巡回</dt>
         <dd>{row.sessionId ? "あり" : "—"}</dd>
         <dt>物件</dt>
         <dd>

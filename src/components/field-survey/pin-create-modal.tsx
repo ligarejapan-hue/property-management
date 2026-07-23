@@ -312,7 +312,7 @@ export default function PinCreateModal({
             role="status"
             className="mb-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
           >
-            巡回 session が無いため保存できません。巡回を開始してください。
+            巡回中でないため保存できません。巡回を開始してください。
           </p>
         )}
 

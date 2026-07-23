@@ -147,7 +147,7 @@ export default function TripControls({
       setError(null);
     } catch (err) {
       if (isAbortError(err) || !mountedRef.current) return;
-      setError("巡回 session の取得に失敗しました。");
+      setError("巡回情報の取得に失敗しました。");
       setSession(null);
       setPhase("idle");
     }

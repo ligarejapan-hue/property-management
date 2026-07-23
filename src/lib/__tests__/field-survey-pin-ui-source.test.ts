@@ -101,7 +101,9 @@ describe("pin-create-modal.tsx", () => {
   });
 
   it("sessionId が無い時の説明文を出す", () => {
-    expect(CREATE_SRC).toMatch(/巡回 session が無いため保存できません/);
+    expect(CREATE_SRC).toMatch(/巡回中でないため保存できません/);
+    // 技術用語「session」を利用者向け文言に出さない (平易語ルール)
+    expect(CREATE_SRC).not.toMatch(/巡回 session/);
   });
 
   it("watchPosition / wakeLock / IndexedDB / Storage を使わない", () => {
@@ -747,7 +749,7 @@ describe("Codex P2 — ignore stale geolocation callbacks", () => {
   });
 
   it("active session 無しで「現在地を使う」を押した場合は早期 return (汎用文言)", () => {
-    expect(MAP_SRC).toMatch(/巡回 session が無いため現在地を取得できません/);
+    expect(MAP_SRC).toMatch(/巡回を開始してから現在地を取得してください/);
   });
 
   it("pin 作成成功時にも pending callback を invalidate する", () => {

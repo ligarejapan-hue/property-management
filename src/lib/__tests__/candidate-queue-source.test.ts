@@ -19,8 +19,10 @@ describe("candidate-queue", () => {
     expect(queue).toContain("ConvertPinToPropertyModal");
     expect(queue).toContain("canWriteProperty");
   });
-  it("変換成功で一覧を再取得する", () => {
-    expect(queue).toMatch(/onConverted[\s\S]*load|refetch|fetchList/i);
+  it("変換成功で新しい物件ページへ直行する (一覧再読込でなく次アクションへ)", () => {
+    // 謄本取得 / DM 判断は物件詳細にあるため、検索し直しの手間を無くす
+    expect(queue).toMatch(/onConverted=\{\(propertyId\)/);
+    expect(queue).toMatch(/router\.push\(`\/properties\/\$\{propertyId\}`\)/);
   });
 });
 

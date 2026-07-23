@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X, Loader2, AlertTriangle } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { convertPinToProperty } from "@/lib/api-client";
+import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface Props {
@@ -24,6 +25,9 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   const [addressEdited, setAddressEdited] = useState(false);
   const [lotNumber, setLotNumber] = useState("");
   const [buildingNumber, setBuildingNumber] = useState("");
+  // 不動産番号が既に分かっている場合の近道 (13桁)。あれば通常の謄本自動取得が
+  // 所在検索より確実に使える。API/validator は元々受け付けており入力欄のみ追加。
+  const [realEstateNumber, setRealEstateNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +42,23 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
       setError("住所を入力してください");
       return;
     }
+    // 不動産番号は正規化して保存する (全角数字・区切り付きの生値のまま保存すると
+    // CSV 取込の重複判定 [完全一致] をすり抜けて二重登録になり得る。Codex P2)。
+    // 新規入力は 13 桁ちょうどを要求する (Codex P2: 桁足らずでも値が入ると
+    // 所在検索が「番号あり」と誤認して無効化され、謄本自動取得には不正な
+    // 番号がそのまま渡る = この欄の目的である確実な取得経路を自ら塞ぐ)。
+    const rawRen = realEstateNumber.trim();
+    const normalizedRen = normalizeRealEstateNumber(rawRen);
+    if (
+      rawRen !== "" &&
+      !(
+        /^[0-9０-９\s　\-‐-―ー－−]+$/.test(rawRen) &&
+        /^\d{13}$/.test(normalizedRen)
+      )
+    ) {
+      setError("不動産番号は13桁の数字で入力してください");
+      return;
+    }
     setSubmitting(true);
     try {
       const result = await convertPinToProperty(pinId, {
@@ -46,6 +67,7 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
         address: address.trim(),
         lotNumber: lotNumber.trim() || null,
         buildingNumber: buildingNumber.trim() || null,
+        realEstateNumber: rawRen === "" ? null : normalizedRen,
       });
       onConverted(result.id);
     } catch (err) {
@@ -150,6 +172,25 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
               placeholder="例: 1番1の1"
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+              不動産番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意(13桁・分かる場合)</span>
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={realEstateNumber}
+              onChange={(e) => setRealEstateNumber(e.target.value)}
+              disabled={submitting}
+              placeholder="例: 0123456789012"
+              data-testid="convert-real-estate-number"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+            />
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              入力しておくと、謄本の自動取得をすぐに使えます。
+            </p>
           </div>
 
           <div className="flex items-center justify-end gap-3 border-t border-gray-100 dark:border-gray-800 pt-4">
