@@ -2782,9 +2782,11 @@ export interface CandidatePinRow {
  * 物件化前の候補(candidate×open)を取得する。
  * 専用エンドポイントが座標・memo 本文を除外して返す(一覧は表示しない=非PII)。
  */
-export async function listCandidatePins(): Promise<{
+export async function listCandidatePins(
+  order: "newest" | "oldest" = "newest",
+): Promise<{
   data: CandidatePinRow[];
-  /** 取得上限を超える候補があり、古い分が data に含まれていない場合 true。 */
+  /** 取得上限を超える候補があり、反対側の並びが data に含まれていない場合 true。 */
   truncated?: boolean;
 }> {
   if (USE_MOCK) {
@@ -2792,7 +2794,7 @@ export async function listCandidatePins(): Promise<{
     return { data: [], truncated: false };
   }
   return apiFetch<{ data: CandidatePinRow[]; truncated?: boolean }>(
-    "/api/field-survey/pins/candidates",
+    `/api/field-survey/pins/candidates?order=${order}`,
   );
 }
 

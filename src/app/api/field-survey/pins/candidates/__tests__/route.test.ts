@@ -39,6 +39,11 @@ const READ_ALL = [
   { resource: "field_survey", action: "read_all", granted: true },
 ];
 
+const req = (order?: string) =>
+  new Request(
+    `http://localhost/api/field-survey/pins/candidates${order ? `?order=${order}` : ""}`,
+  );
+
 describe("GET /api/field-survey/pins/candidates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -49,12 +54,12 @@ describe("GET /api/field-survey/pins/candidates", () => {
 
   it("field_survey:read が無ければ 403", async () => {
     (getUserPermissions as Mock).mockResolvedValue([]);
-    const res = await GET();
+    const res = await GET(req());
     expect(res.status).toBe(403);
   });
 
   it("候補 × open × 未紐付けのみ・read_all は全スタッフ分を対象", async () => {
-    await GET();
+    await GET(req());
     const where = pm.fieldSurveyPin.findMany.mock.calls[0][0].where;
     expect(where.pinType).toBe("candidate");
     expect(where.status).toBe("open");
@@ -64,9 +69,21 @@ describe("GET /api/field-survey/pins/candidates", () => {
 
   it("read_all/manage が無ければ own のみ(staffUserId 強制)", async () => {
     (getUserPermissions as Mock).mockResolvedValue(READ);
-    await GET();
+    await GET(req());
     const where = pm.fieldSurveyPin.findMany.mock.calls[0][0].where;
     expect(where.staffUserId).toBe("user-1");
+  });
+
+  it("order=oldest で古い順 (createdAt asc)", async () => {
+    await GET(req("oldest"));
+    const orderBy = pm.fieldSurveyPin.findMany.mock.calls[0][0].orderBy;
+    expect(orderBy).toEqual([{ createdAt: "asc" }, { id: "asc" }]);
+  });
+
+  it("order 未指定・不正値は新しい順 (createdAt desc) に倒す (allowlist)", async () => {
+    await GET(req("bogus"));
+    const orderBy = pm.fieldSurveyPin.findMany.mock.calls[0][0].orderBy;
+    expect(orderBy).toEqual([{ createdAt: "desc" }, { id: "desc" }]);
   });
 
   it("座標・memo 本文を返さず hasMemo のみ(非PII)", async () => {
@@ -74,7 +91,7 @@ describe("GET /api/field-survey/pins/candidates", () => {
       { id: "p1", staffUserId: "u", createdAt: "2026-07-06T00:00:00Z", memo: "秘密メモ" },
       { id: "p2", staffUserId: "u", createdAt: "2026-07-06T00:00:00Z", memo: "  " },
     ]);
-    const res = await GET();
+    const res = await GET(req());
     const body = await res.json();
     expect(body.data[0]).toEqual({ id: "p1", staffUserId: "u", createdAt: "2026-07-06T00:00:00Z", hasMemo: true });
     expect(body.data[1].hasMemo).toBe(false);

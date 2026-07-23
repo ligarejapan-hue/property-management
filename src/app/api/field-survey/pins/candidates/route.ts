@@ -22,7 +22,7 @@ import { CANDIDATE_LIST_LIMIT } from "@/lib/field-survey-candidate-util";
 
 const MAX = CANDIDATE_LIST_LIMIT;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await getApiSession();
     const permissions = await getUserPermissions(session.id);
@@ -35,6 +35,13 @@ export async function GET() {
       hasPermission(permissions, "field_survey", "read_all") ||
       hasPermission(permissions, "field_survey", "manage");
 
+    // 並び順 (allowlist)。上限超過時に「古い候補へ到達できない」を防ぐため
+    // oldest (古い順) を選べるようにする (Codex P2)。既定は newest。
+    const order =
+      new URL(request.url).searchParams.get("order") === "oldest"
+        ? "asc"
+        : "desc";
+
     const rows = await prisma.fieldSurveyPin.findMany({
       where: {
         pinType: "candidate",
@@ -43,7 +50,7 @@ export async function GET() {
         ...(canSeeOthers ? {} : { staffUserId: session.id }),
       },
       select: { id: true, staffUserId: true, createdAt: true, memo: true },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: [{ createdAt: order }, { id: order }],
       // 上限ちょうど (=MAX 件) と超過 (=MAX+1 件以上) を区別するため 1 件
       // 余分に取得し、truncated フラグで「古い候補が表示されていない」を
       // 正確に伝える (Codex P2: 件数一致だけでは誤警告になる)。

@@ -76,18 +76,21 @@ export default function CandidateQueue() {
   const [convertPinId, setConvertPinId] = useState<string | null>(null);
   // 経過日数の基準時刻。render 中の new Date() 連発を避け、読込ごとに固定する。
   const [ageBase, setAgeBase] = useState<Date | null>(null);
+  // 並び順。上限超過時に古い候補へ到達できるよう「古い順」を選べる
+  // (Codex P2: 「古いものから処理して」と案内しつつ古い分が開けない矛盾の解消)。
+  const [order, setOrder] = useState<"newest" | "oldest">("newest");
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await listCandidatePins();
+      const r = await listCandidatePins(order);
       setRows(r.data);
       setTruncated(r.truncated === true);
       setAgeBase(new Date());
     } catch {
       setError("候補の取得に失敗しました。再読み込みしてください。");
     }
-  }, []);
+  }, [order]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: 一覧データ取得エフェクトの標準形（sales-sheets/new と同様）。取得開始時に error をリセットする同期 setState。
@@ -119,9 +122,34 @@ export default function CandidateQueue() {
           </span>
         )}
       </h1>
-      <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-        現地で撮影された「物件化候補」で、まだ物件になっていないものです。
-      </p>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          現地で撮影された「物件化候補」で、まだ物件になっていないものです。
+        </p>
+        <div className="flex items-center gap-1 text-xs" role="group" aria-label="並び順">
+          {(
+            [
+              ["newest", "新しい順"],
+              ["oldest", "古い順"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              data-testid={`candidate-order-${value}`}
+              onClick={() => setOrder(value)}
+              aria-pressed={order === value}
+              className={
+                order === value
+                  ? "rounded border border-emerald-400 bg-emerald-50 px-2 py-1 font-semibold text-emerald-700 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-300"
+                  : "rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {error && (
         <div
@@ -148,7 +176,10 @@ export default function CandidateQueue() {
           data-testid="candidate-limit-warning"
           className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
         >
-          候補が{CANDIDATE_LIST_LIMIT}件を超えているため、これより古い候補は表示されていません。古いものから物件化を進めて減らしてください。
+          候補が{CANDIDATE_LIST_LIMIT}件を超えているため、
+          {order === "newest"
+            ? "これより古い候補は表示されていません。「古い順」に切り替えると、放置されている古い候補から確認できます。"
+            : "これより新しい候補は表示されていません(古い順で表示中)。古いものから物件化を進めて減らしてください。"}
         </div>
       )}
 

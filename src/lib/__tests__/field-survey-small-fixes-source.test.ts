@@ -195,6 +195,22 @@ describe("4. 完成待ち一覧の放置可視化", () => {
     expect(writeDef?.[0] ?? "").toMatch(/!permissionsRefreshPending/);
   });
 
+  it("並び順切替で古い候補へ到達できる (上限超過時の案内と矛盾しない)", () => {
+    // Codex P2: 新しい順 200 件のみだと「古いものから処理して」と案内しつつ
+    // 古い候補が開けない。allowlist の order パラメータ (newest/oldest) を追加。
+    expect(CANDIDATES_ROUTE_SRC).toMatch(
+      /searchParams\.get\("order"\)\s*===\s*"oldest"/,
+    );
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/\{ createdAt: order \}/);
+    expect(QUEUE_SRC).toMatch(/candidate-order-\$\{value\}/);
+    expect(QUEUE_SRC).toMatch(/\["newest", "新しい順"\]/);
+    expect(QUEUE_SRC).toMatch(/\["oldest", "古い順"\]/);
+    expect(QUEUE_SRC).toMatch(/listCandidatePins\(order\)/);
+    // 警告文は並び順に応じて「どちら側が隠れているか」を正しく伝える
+    expect(QUEUE_SRC).toMatch(/「古い順」に切り替える/);
+    expect(QUEUE_SRC).toMatch(/古い順で表示中/);
+  });
+
   it("上限警告は truncated フラグ基準 (ちょうど上限件数では誤警告しない)", () => {
     // Codex P2: 件数一致 (length >= LIMIT) では 200 件ちょうどと 201 件以上を
     // 区別できない。route が 1 件余分に取得して truncated を返し、UI はそれを見る。
