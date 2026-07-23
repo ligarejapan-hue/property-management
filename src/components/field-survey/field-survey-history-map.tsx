@@ -20,6 +20,7 @@ import {
   Map,
   AdvancedMarker,
   InfoWindow,
+  Pin,
   useMap,
 } from "@vis.gl/react-google-maps";
 import Link from "next/link";
@@ -34,6 +35,7 @@ import {
   coerceLng,
 } from "@/lib/field-survey-map-util";
 import { formatPinStatus, formatPinType } from "@/lib/field-survey-pin-util";
+import { pinMarkerStyle } from "@/lib/field-survey-pin-marker";
 
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
 const DEFAULT_ZOOM = 15;
@@ -381,8 +383,20 @@ export default function FieldSurveyHistoryMap({
                 key={pin.id}
                 position={{ lat: pin.lat, lng: pin.lng }}
                 onClick={() => setSelectedPinId(pin.id)}
-                title={pin.pinType}
-              />
+                title={formatPinType(pin.pinType)}
+              >
+                {/* 本編の地図と同じ配色。read_all/manage で他人の巡回を閲覧
+                    している場合は他人のピン = 白縁 (縁色の意味を本編と揃える)。
+                    meta は pins より先に set され clear も同時のため、描画時は
+                    常に当該巡回の staffUserId を参照できる。 */}
+                <Pin
+                  {...pinMarkerStyle({
+                    pinType: pin.pinType,
+                    status: pin.status,
+                    isOwn: meta?.staffUserId === currentUserId,
+                  })}
+                />
+              </AdvancedMarker>
             ))}
             {selectedPinId &&
               (() => {
