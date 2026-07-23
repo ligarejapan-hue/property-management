@@ -214,11 +214,17 @@ describe("4. 完成待ち一覧の放置可視化", () => {
 });
 
 describe("5. 物件化モーダルの不動産番号 (任意)", () => {
-  it("入力欄があり、payload に realEstateNumber を渡す", () => {
+  it("入力欄があり、正規化した値を payload に渡す (生値保存で重複判定をすり抜けない)", () => {
     expect(CONVERT_SRC).toMatch(/data-testid="convert-real-estate-number"/);
+    // Codex P2: 全角数字・区切り付きの生値を保存すると CSV 取込の重複判定
+    // (完全一致) をすり抜ける → normalizeRealEstateNumber で正規化して送る
+    expect(CONVERT_SRC).toMatch(/normalizeRealEstateNumber\(rawRen\)/);
     expect(CONVERT_SRC).toMatch(
-      /realEstateNumber:\s*realEstateNumber\.trim\(\)\s*\|\|\s*null/,
+      /realEstateNumber:\s*rawRen === "" \? null : normalizedRen/,
     );
+    // 数字にならない入力は黙って捨てず、validator と同じ基準でその場エラー
+    expect(CONVERT_SRC).toMatch(/不動産番号は数字\(最大13桁\)で入力してください/);
+    expect(CONVERT_SRC).toMatch(/\\d\{1,13\}/);
     // 任意項目 (必須ガードに含めない)
     expect(CONVERT_SRC).toMatch(/任意/);
   });
