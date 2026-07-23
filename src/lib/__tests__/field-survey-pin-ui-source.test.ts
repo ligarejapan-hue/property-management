@@ -476,13 +476,17 @@ describe("F12 展開(19-A) — field-survey-map は provider 経由で権限を�
     expect(MAP_SRC).toMatch(
       /permissionsRefreshPending \|\|\s*\n?\s*permissionsLoading \|\|\s*\n?\s*permissionsError \|\|\s*\n?\s*mePermissions === null/,
     );
+    // ピン配色導入で canSeeOtherPins (凡例ヒント用・boolean) が増えたが、
+    // 権限系 3 値の tristate null への倒し込みは維持されている
     expect(MAP_SRC).toMatch(
-      /return \{ canWritePin: null, canManagePin: null, canWriteProperty: null \}/,
+      /return \{\s*canWritePin: null,\s*canManagePin: null,\s*canWriteProperty: null,\s*canSeeOtherPins: false,\s*\}/,
     );
   });
 
   it("導出は useMemo の純関数で context 値の派生（setter / state 持ち越しなし）", () => {
-    expect(MAP_SRC).toMatch(/const \{ canWritePin, canManagePin, canWriteProperty \} = useMemo/);
+    expect(MAP_SRC).toMatch(
+      /const \{ canWritePin, canManagePin, canWriteProperty, canSeeOtherPins \} =\s*\n?\s*useMemo/,
+    );
     expect(MAP_SRC).toMatch(
       /\[permissionsRefreshPending,\s*permissionsLoading,\s*permissionsError,\s*mePermissions\]/,
     );

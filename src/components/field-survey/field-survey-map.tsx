@@ -20,6 +20,7 @@ import {
   Map,
   AdvancedMarker,
   InfoWindow,
+  Pin,
   useMap,
 } from "@vis.gl/react-google-maps";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -57,6 +58,8 @@ import {
   formatPinType,
 } from "@/lib/field-survey-pin-util";
 import CurrentLocationMarker from "@/components/field-survey/current-location-marker";
+import PinMarkerLegend from "@/components/field-survey/pin-marker-legend";
+import { pinMarkerStyle } from "@/lib/field-survey-pin-marker";
 import CurrentLocationStatus from "@/components/field-survey/current-location-status";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
@@ -227,18 +230,25 @@ export default function FieldSurveyMap({
   // （pending）・provider 取得中（loading）・取得失敗（error）・未取得（null）は判定不能
   // null（= API 403 委譲）に倒す。ここで [] や false に倒すと PinAddModeToggle が
   // 「権限がありません」を誤表示するため、tristate の null を維持して stale 権限表示を防ぐ。
-  const { canWritePin, canManagePin, canWriteProperty } = useMemo<{
-    canWritePin: boolean | null;
-    canManagePin: boolean | null;
-    canWriteProperty: boolean | null;
-  }>(() => {
+  const { canWritePin, canManagePin, canWriteProperty, canSeeOtherPins } =
+    useMemo<{
+      canWritePin: boolean | null;
+      canManagePin: boolean | null;
+      canWriteProperty: boolean | null;
+      canSeeOtherPins: boolean;
+    }>(() => {
     if (
       permissionsRefreshPending ||
       permissionsLoading ||
       permissionsError ||
       mePermissions === null
     ) {
-      return { canWritePin: null, canManagePin: null, canWriteProperty: null };
+      return {
+        canWritePin: null,
+        canManagePin: null,
+        canWriteProperty: null,
+        canSeeOtherPins: false,
+      };
     }
     // granted===true のみ許可（明示 deny / 欠損 entry は false）。
     const canWrite = mePermissions.some(
@@ -261,7 +271,21 @@ export default function FieldSurveyMap({
         p.action === "write" &&
         p.granted === true,
     );
-    return { canWritePin: canWrite, canManagePin: canManage, canWriteProperty: canWriteProp };
+    // 凡例の「白いふちどり = 他の担当者」行の表示用: read_all/manage が無い
+    // スタッフには API が own のみを返し他人ピンは一度も出ないため、存在しない
+    // 見分け方を案内しない (判定不能時も非表示 = 表示専用ヒントなので安全側)。
+    const canSeeOthers = mePermissions.some(
+      (p) =>
+        p.resource === "field_survey" &&
+        (p.action === "read_all" || p.action === "manage") &&
+        p.granted === true,
+    );
+    return {
+      canWritePin: canWrite,
+      canManagePin: canManage,
+      canWriteProperty: canWriteProp,
+      canSeeOtherPins: canSeeOthers,
+    };
   }, [permissionsRefreshPending, permissionsLoading, permissionsError, mePermissions]);
 
   const [pinAddMode, setPinAddMode] = useState(false);
@@ -769,6 +793,7 @@ export default function FieldSurveyMap({
             layers={layers}
             onError={setError}
             refetchNonce={refetchNonce}
+            currentUserId={currentUserId}
             captureMapClick={pinAddMode || cameraFirstPhase === "awaiting-map-tap"}
             onMapClick={handleMapClick}
             onOpenPinDetail={setDetailPinId}
@@ -798,6 +823,7 @@ export default function FieldSurveyMap({
           pinAddMode={pinAddMode}
           onTogglePinAddMode={() => setPinAddMode((v) => !v)}
           canWritePin={canWritePin}
+          showOthersLegendHint={canSeeOtherPins}
           onPanToCurrent={handlePanToCurrent}
         />
 
@@ -937,6 +963,7 @@ function ControlPanel({
   pinAddMode,
   onTogglePinAddMode,
   canWritePin,
+  showOthersLegendHint,
   onPanToCurrent,
 }: {
   layers: Record<Layer, boolean>;
@@ -957,6 +984,8 @@ function ControlPanel({
   pinAddMode: boolean;
   onTogglePinAddMode: () => void;
   canWritePin: boolean | null;
+  /** 凡例に「白いふちどり = 他の担当者」を出すか (read_all/manage 保持者のみ)。 */
+  showOthersLegendHint: boolean;
   onPanToCurrent: () => void;
 }) {
   // パネルは地図エリア(flex-1 overflow-hidden)に絶対配置されるため、内容が地図高より
@@ -998,6 +1027,9 @@ function ControlPanel({
         />
         <span>調査ピン</span>
       </label>
+
+      {/* ピンの配色凡例 (調査ピン表示中のみ)。 */}
+      {layers.pins && <PinMarkerLegend showOthersHint={showOthersLegendHint} />}
 
       {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
           Phase 1-F-2: 終了前に位置記録 (watchPosition / flush timer / buffer)
@@ -1075,6 +1107,7 @@ function MapDataLayer({
   layers,
   onError,
   refetchNonce,
+  currentUserId,
   captureMapClick,
   onMapClick,
   onOpenPinDetail,
@@ -1082,6 +1115,8 @@ function MapDataLayer({
   layers: Record<Layer, boolean>;
   onError: (msg: string | null) => void;
   refetchNonce: number;
+  /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
+  currentUserId: string;
   /** pin 追加モード中またはカメラファーストの地図タップ待ち中に map click を転送する。 */
   captureMapClick: boolean;
   onMapClick: (latLng: { lat: number; lng: number }) => void;
@@ -1272,8 +1307,17 @@ function MapDataLayer({
             key={pin.id}
             position={{ lat: pin.lat, lng: pin.lng }}
             onClick={() => setSelected({ kind: "pin", row: pin })}
-            title={pin.pinType}
-          />
+            title={formatPinType(pin.pinType)}
+          >
+            {/* 種別=色+グリフ / 対応済み=灰✓ / 他人=白縁 (凡例と純関数を共有) */}
+            <Pin
+              {...pinMarkerStyle({
+                pinType: pin.pinType,
+                status: pin.status,
+                isOwn: pin.staffUserId === currentUserId,
+              })}
+            />
+          </AdvancedMarker>
         ))}
 
       {selected && selected.kind === "property" && (
