@@ -45,9 +45,9 @@ describe("field-survey: この場所を地図で見る (?focusPin)", () => {
     // 一度だけ (once-guard) + map instance が揃うまで待つ
     expect(m).toMatch(/if \(!focusPinId \|\| !mapInstance\) return/);
     expect(m).toMatch(/focusedPinRef\.current === focusPinId/);
-    // 座標は pin 詳細 API から取得 (URL には id のみ)
+    // 座標は「座標のみ射影」エンドポイントから取得 (memo 本文を client に乗せない)
     expect(m).toMatch(
-      /\/api\/field-survey\/pins\/\$\{encodeURIComponent\(focusPinId\)\}/,
+      /\/api\/field-survey\/pins\/\$\{encodeURIComponent\(focusPinId\)\}\/location/,
     );
     // panTo で場所へ寄せ、強調マーカー用に座標を state 化する
     expect(m).toMatch(/panTo\(\{ lat, lng \}\)/);

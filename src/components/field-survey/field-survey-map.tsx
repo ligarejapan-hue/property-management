@@ -331,8 +331,9 @@ export default function FieldSurveyMap({
     focusedPinRef.current = focusPinId;
     void (async () => {
       try {
+        // 座標のみ射影 (memo 本文を client メモリに乗せない・@codex P2)。
         const res = await fetch(
-          `/api/field-survey/pins/${encodeURIComponent(focusPinId)}`,
+          `/api/field-survey/pins/${encodeURIComponent(focusPinId)}/location`,
           { credentials: "same-origin" },
         );
         if (!res.ok) {
