@@ -308,14 +308,22 @@ export default function FieldSurveyMap({
     | null
   >(null);
   const [detailPinId, setDetailPinId] = useState<string | null>(null);
-  // 「この場所を地図で見る」(?focusPin): 指定ピンの場所へ地図を寄せる。map instance
-  // が揃った後に一度だけ、pin 詳細 API から座標を取得して panTo する。
+  // 「この場所を地図で見る」(?focusPin): 指定ピンの場所へ地図を寄せ、そのピンを
+  // 強調マーカーで必ず表示する。map instance が揃った後に一度だけ、pin 詳細 API
+  // から座標を取得して panTo + 強調マーカーを立てる。
+  // - MapDataLayer は bbox を PIN_LIMIT (新しい順) で取得するため、古い候補は
+  //   marker 一覧から漏れ得る (この完成待ちキューが処理する対象がまさに古い候補)。
+  //   panTo だけだと marker の無い中心に着地するので、取得済み座標で専用の強調
+  //   マーカーを立てて「指定した場所」を必ず示す (@codex P2)。
   // - 詳細パネルは自動で開かない: 座標取得のこの 1 回だけを field_survey_pin_view
   //   監査に載せる (パネルも同 API を fetch するため、開くと他人 pin で監査が
   //   二重計上される。@codex 指摘)。ピンの中身を見たい場合は marker タップで開く。
   // - 座標は URL でなく API から取得し、console / ログには出さない。
-  // - 取得失敗・権限外は静かにスキップし、once-guard を解除して再訪 (再 mount) で
-  //   再試行できるようにする。
+  // - 取得失敗・権限外は静かにスキップし、once-guard を解除して再訪で再試行できる。
+  const [focusPinPos, setFocusPinPos] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   const focusedPinRef = useRef<string | null>(null);
   useEffect(() => {
     if (!focusPinId || !mapInstance) return;
@@ -336,12 +344,15 @@ export default function FieldSurveyMap({
         } | null;
         const lat = Number(body?.data?.lat);
         const lng = Number(body?.data?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          focusedPinRef.current = null;
+          return;
+        }
+        setFocusPinPos({ lat, lng });
         const m = mapInstance as {
           panTo?: (p: { lat: number; lng: number }) => void;
         };
-        if (Number.isFinite(lat) && Number.isFinite(lng) && m?.panTo) {
-          m.panTo({ lat, lng });
-        }
+        if (m?.panTo) m.panTo({ lat, lng });
       } catch {
         // 座標 / API 内部情報を出さない。次回再訪で再試行できるよう guard 解除。
         focusedPinRef.current = null;
@@ -865,6 +876,23 @@ export default function FieldSurveyMap({
               lat={recorder.latestPositionForDisplay.lat}
               lng={recorder.latestPositionForDisplay.lng}
             />
+          )}
+          {/* 「この場所を地図で見る」で指定されたピンの強調マーカー。PIN_LIMIT で
+              marker 一覧から漏れる古い候補でも、指定した場所を必ず示す (@codex P2)。 */}
+          {focusPinPos && (
+            <AdvancedMarker
+              position={focusPinPos}
+              zIndex={1000}
+              title="指定した場所"
+            >
+              <Pin
+                background="#2563EB"
+                borderColor="#FFFFFF"
+                glyphColor="#FFFFFF"
+                glyph="★"
+                scale={1.4}
+              />
+            </AdvancedMarker>
           )}
         </Map>
 

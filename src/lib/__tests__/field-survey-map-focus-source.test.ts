@@ -49,8 +49,9 @@ describe("field-survey: この場所を地図で見る (?focusPin)", () => {
     expect(m).toMatch(
       /\/api\/field-survey\/pins\/\$\{encodeURIComponent\(focusPinId\)\}/,
     );
-    // panTo で場所へ寄せる
+    // panTo で場所へ寄せ、強調マーカー用に座標を state 化する
     expect(m).toMatch(/panTo\(\{ lat, lng \}\)/);
+    expect(m).toMatch(/setFocusPinPos\(\{ lat, lng \}\)/);
     // @codex: 詳細パネルは自動で開かない (開くと他人 pin で監査が二重計上)
     expect(m).not.toMatch(/setDetailPinId/);
     // 取得失敗は once-guard を解除して再訪で再試行できるようにする
@@ -59,5 +60,19 @@ describe("field-survey: この場所を地図で見る (?focusPin)", () => {
     expect(m).not.toMatch(/cancelled/);
     // 座標を console に出さない (継続ガード)
     expect(m).not.toMatch(/console\./);
+  });
+
+  it("@codex P2: 指定ピンを強調マーカーで必ず表示する (PIN_LIMIT で漏れる古い候補対策)", () => {
+    // MapDataLayer は bbox を新しい順 PIN_LIMIT で取得するため古い候補は marker
+    // 一覧から漏れ得る。panTo だけでなく取得座標で専用マーカーを立てる。
+    const marker = MAP.match(
+      /\{focusPinPos && \([\s\S]*?<\/AdvancedMarker>[\s\S]*?\)\}/,
+    );
+    expect(marker).not.toBeNull();
+    const m = marker?.[0] ?? "";
+    expect(m).toMatch(/position=\{focusPinPos\}/);
+    // 通常ピンと区別できる強調 (グリフ ★ + 前面 zIndex)
+    expect(m).toMatch(/glyph="★"/);
+    expect(m).toMatch(/zIndex=\{1000\}/);
   });
 });
