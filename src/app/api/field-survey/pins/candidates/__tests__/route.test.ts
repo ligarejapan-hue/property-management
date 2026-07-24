@@ -86,19 +86,69 @@ describe("GET /api/field-survey/pins/candidates", () => {
     expect(orderBy).toEqual([{ createdAt: "desc" }, { id: "desc" }]);
   });
 
-  it("座標・memo 本文を返さず hasMemo のみ(非PII)", async () => {
+  it("座標・memo 本文を返さず hasMemo + 写真サムネイルのみ(非PII)", async () => {
     pm.fieldSurveyPin.findMany.mockResolvedValue([
-      { id: "p1", staffUserId: "u", createdAt: "2026-07-06T00:00:00Z", memo: "秘密メモ" },
-      { id: "p2", staffUserId: "u", createdAt: "2026-07-06T00:00:00Z", memo: "  " },
+      {
+        id: "p1",
+        staffUserId: "u",
+        createdAt: "2026-07-06T00:00:00Z",
+        memo: "秘密メモ",
+        photos: [
+          { fileUrl: "/uploads/a.jpg", thumbnailUrl: "/uploads/a_thumb.jpg" },
+        ],
+        _count: { photos: 3 },
+      },
+      {
+        id: "p2",
+        staffUserId: "u",
+        createdAt: "2026-07-06T00:00:00Z",
+        memo: "  ",
+        photos: [],
+        _count: { photos: 0 },
+      },
+      {
+        // 本番実態 (local backend): thumbnailUrl は生成されず null。
+        // cover は原本 fileUrl に fallback する (normalizeFileUrl 適用)。
+        id: "p3",
+        staffUserId: "u",
+        createdAt: "2026-07-06T00:00:00Z",
+        memo: null,
+        photos: [{ fileUrl: "/uploads/x.jpg", thumbnailUrl: null }],
+        _count: { photos: 1 },
+      },
     ]);
     const res = await GET(req());
     const body = await res.json();
-    expect(body.data[0]).toEqual({ id: "p1", staffUserId: "u", createdAt: "2026-07-06T00:00:00Z", hasMemo: true });
+    // 写真あり → cover (thumbnailUrl 優先) + 枚数
+    expect(body.data[0]).toEqual({
+      id: "p1",
+      staffUserId: "u",
+      createdAt: "2026-07-06T00:00:00Z",
+      hasMemo: true,
+      coverPhotoUrl: "/uploads/a_thumb.jpg",
+      photoCount: 3,
+    });
+    // 写真なし → cover は null
     expect(body.data[1].hasMemo).toBe(false);
+    expect(body.data[1].coverPhotoUrl).toBeNull();
+    expect(body.data[1].photoCount).toBe(0);
+    // 本番実態: thumbnailUrl null → 原本 fileUrl に fallback (P3 対応)
+    expect(body.data[2].coverPhotoUrl).toBe("/uploads/x.jpg");
+    expect(body.data[2].photoCount).toBe(1);
+    expect(body.data[2].hasMemo).toBe(false);
+    // PII 境界維持: 座標・memo 本文は返さない
     expect(body.data[0]).not.toHaveProperty("lat");
+    expect(body.data[0]).not.toHaveProperty("lng");
+    expect(body.data[0]).not.toHaveProperty("accuracy");
     expect(body.data[0]).not.toHaveProperty("memo");
     const select = pm.fieldSurveyPin.findMany.mock.calls[0][0].select;
     expect(select.lat).toBeUndefined();
     expect(select.lng).toBeUndefined();
+    // cover は sortOrder 昇順の先頭 1 件だけ取得
+    expect(select.photos.take).toBe(1);
+    expect(select.photos.orderBy).toEqual([
+      { sortOrder: "asc" },
+      { createdAt: "asc" },
+    ]);
   });
 });

@@ -2776,6 +2776,10 @@ export interface CandidatePinRow {
   staffUserId: string;
   createdAt: string;
   hasMemo?: boolean;
+  /** 現地写真 cover サムネイル URL (場所特定用)。写真が無ければ null。 */
+  coverPhotoUrl?: string | null;
+  /** 現地写真の枚数。 */
+  photoCount?: number;
 }
 
 /**
