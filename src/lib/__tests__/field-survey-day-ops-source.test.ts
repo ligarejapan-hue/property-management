@@ -175,9 +175,9 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(fn).not.toBeNull();
     expect(fn?.[0] ?? "").toMatch(/setStatus\("idle"\)/);
     expect(RECORDER_SRC).toMatch(/\n\s+restoreIdleAfterFailedEnd,\r?\n/);
-    // active 分岐でのみ recorder 復帰 (かつ @codex R14: commit し得ない時のみ)
+    // active 分岐でのみ recorder 復帰 (かつ @codex R14/R15: commit し得ない時のみ)
     expect(TRIP_SRC).toMatch(
-      /reconciled\.kind === "active"[\s\S]{0,700}?if \(!mutationMayHaveCommitted\) onEndFailedRestoreRecorder\?\.\(\)/,
+      /reconciled\.kind === "active"[\s\S]{0,800}?if \(!outstandingEndMayCommitRef\.current\) onEndFailedRestoreRecorder\?\.\(\)/,
     );
     // unknown 分岐は session/buffer を消さず active に戻す (recorder は復帰しない)
     expect(TRIP_SRC).toMatch(
@@ -187,7 +187,7 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(MAP_SRC).toMatch(/recorder\.restoreIdleAfterFailedEnd\(\)/);
   });
 
-  it("commit し得る失敗 (timeout/network/5xx) は active reconcile でも復帰しない (@codex P1 R14)", () => {
+  it("commit し得る失敗 (timeout/network/5xx) は active reconcile でも復帰しない (@codex P1 R14/R15)", () => {
     // client abort は server 側の commit を止めない。単発 reconcile が active でも
     // 遅延 commit と記録再開がレースし新規点が 409 で失われるため、commit し得る
     // 間は recorder を stopping のまま残し、ユーザーの終了再試行で確定させる。
@@ -196,10 +196,21 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(TRIP_SRC).toMatch(/mutationMayHaveCommitted = res\.status >= 500/);
     // timeout / network も送信済みかも
     expect(TRIP_SRC).toMatch(/mutationMayHaveCommitted = true/);
-    // 復帰は commit し得ない時のみ
+    // @codex R15: 再試行を跨いで保持する session 単位 ref に累積する。
     expect(TRIP_SRC).toMatch(
-      /if \(!mutationMayHaveCommitted\) onEndFailedRestoreRecorder\?\.\(\)/,
+      /const outstandingEndMayCommitRef = useRef\(false\)/,
     );
+    expect(TRIP_SRC).toMatch(
+      /if \(mutationMayHaveCommitted\) outstandingEndMayCommitRef\.current = true/,
+    );
+    // 復帰判定は ref を見る (local ではない)
+    expect(TRIP_SRC).toMatch(
+      /if \(!outstandingEndMayCommitRef\.current\) onEndFailedRestoreRecorder\?\.\(\)/,
+    );
+    // 確実な終了 (200 OK / reconcile ended) と新規 session 開始で解除する
+    const clears =
+      TRIP_SRC.match(/outstandingEndMayCommitRef\.current = false/g) ?? [];
+    expect(clears.length).toBeGreaterThanOrEqual(3);
   });
 
   it("曖昧な終了の間は両経路とも recorder を stopping + watch 停止する (@codex P1 R11/R13)", () => {

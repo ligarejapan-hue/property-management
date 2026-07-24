@@ -173,6 +173,12 @@ export default function TripControls({
   // 失敗 (オフライン等) しても、終了直前に再 touch して「続行したのに endedAt が
   // 続行前へ巻き戻る」ことを防ぐための印。
   const resumedRef = useRef<string | null>(null);
+  // @codex P1 R15: 終了 PATCH が timeout/network/5xx で server 上に残り commit し
+  // 得る状態。再試行を跨いで保持する (local 変数だと retry で false 初期化され、
+  // 遅延 commit がまだ可能なのに recorder を復帰させてしまう)。session 単位で、
+  // 確実な終了 (200 OK / reconcile ended) か新規 session 開始まで true を保つ。
+  // true の間は active reconcile でも recorder を復帰させない。
+  const outstandingEndMayCommitRef = useRef(false);
   // 圏外などで未送信 buffer が残り巡回終了がブロックされた状態。
   // 「破棄して終了」の脱出口ボタンを出すために保持する。
   const [endBlockedByBuffer, setEndBlockedByBuffer] = useState(false);
@@ -335,6 +341,9 @@ export default function TripControls({
   const startSession = useCallback(async () => {
     setPhase("starting");
     setError(null);
+    // @codex P1 R15: 新規 session を開始する前に、前 session の「commit し得る
+    // 終了」flag を解除する (別 session に持ち越さない)。
+    outstandingEndMayCommitRef.current = false;
     // 並行起動の mutation を中断し、AbortController を新規発行。
     if (mutationAbortRef.current) mutationAbortRef.current.abort();
     const ac = new AbortController();
@@ -552,6 +561,8 @@ export default function TripControls({
           // 失敗した場合は破棄されず、軌跡が保全される)。
           if (opts?.discardUnsent) onDiscardUnsentLocations?.();
           if (resumedRef.current === target.id) resumedRef.current = null;
+          // 確実な終了 → outstanding 終了 flag を解除。
+          outstandingEndMayCommitRef.current = false;
           setSession(null);
           setPhase("idle");
           return;
@@ -572,6 +583,9 @@ export default function TripControls({
         mutationMayHaveCommitted = true;
       } finally {
         clearTimeout(patchTimer);
+        // @codex P1 R15: 「commit し得る終了」を session 単位 ref に累積する
+        // (再試行を跨いで保持)。確実な終了/新規 session まで解除しない。
+        if (mutationMayHaveCommitted) outstandingEndMayCommitRef.current = true;
       }
       if (!ambiguous || !mountedRef.current) return;
       // 曖昧な結果を真の状態へ整合する。reconcile GET 自体も timeout し、失敗時は
@@ -585,12 +599,14 @@ export default function TripControls({
         // まだ active。破棄経路では脱出口を再提示する。
         setError(failMessage());
         if (opts?.discardUnsent) setEndBlockedByBuffer(true);
-        // @codex P1 R14: outstanding PATCH が commit し得ない (server が明確に未
-        // commit) 時のみ recorder を操作可能へ戻す。commit し得る (timeout /
-        // network / 5xx) 場合は、この単発 reconcile が active でも stopping の
-        // まま残す (遅延 commit と記録再開のレースで新規点が失われるため)。ユー
-        // ザーは終了を再試行して確定させる。
-        if (!mutationMayHaveCommitted) onEndFailedRestoreRecorder?.();
+        // @codex P1 R14/R15: outstanding な終了 PATCH が commit し得ない時のみ
+        // recorder を操作可能へ戻す。commit し得る (timeout / network / 5xx) 場合は
+        // この単発 reconcile が active でも stopping のまま残す (遅延 commit と記録
+        // 再開のレースで新規点が失われる)。判定は session 単位 ref で行い、再試行を
+        // 跨いで保持する (前回の timeout の outstanding PATCH がまだ commit し得る
+        // のに、今回の 4xx で false 初期化して復帰してしまうのを防ぐ)。ユーザーは
+        // 終了を再試行して確定させる。
+        if (!outstandingEndMayCommitRef.current) onEndFailedRestoreRecorder?.();
       } else if (reconciled.kind === "unknown") {
         // 整合も判定不能。session / buffer は消さず active に戻して retry 可能に
         // する。recorder は stopping のまま = 状態不明の間は新 watch を開始させ
@@ -600,9 +616,12 @@ export default function TripControls({
         );
         setPhase("active");
         if (opts?.discardUnsent) setEndBlockedByBuffer(true);
+      } else {
+        // reconciled.kind === "ended" → 確実に終了 (別クライアント / 遅延 commit
+        // 含む)。outstanding flag を解除。fetchActiveSession が session null / idle
+        // 済み。recorder は sessionId 変化の reset effect が片付ける (= 終了成功)。
+        outstandingEndMayCommitRef.current = false;
       }
-      // reconciled.kind === "ended" → fetchActiveSession が session null / idle
-      // 済み。recorder は sessionId 変化の reset effect が片付ける (= 終了成功)。
     },
     [
       fetchActiveSession,
