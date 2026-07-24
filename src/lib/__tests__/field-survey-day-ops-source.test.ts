@@ -155,9 +155,11 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     // buffer / count は消さない (終了 PATCH の成否確定後に破棄/保全)
     expect(m).not.toMatch(/bufferRef\.current = \[\]/);
     expect(m).not.toMatch(/setBufferedCount\(0\)/);
-    // @codex P2 R6: ここでは status を idle にしない (PATCH 中に新 watch を
-    // 開始させないため "stopping" 固着のままにする)。
-    expect(m).not.toMatch(/setStatus\(/);
+    // @codex P2 R6/R7: idle にはしない (PATCH 中に新 watch を開始させない)。
+    // 直前 flush が通常失敗して idle になっていても、明示的に "stopping"
+    // (非 startable) へ倒す。
+    expect(m).toMatch(/setStatus\("stopping"\)/);
+    expect(m).not.toMatch(/setStatus\("idle"\)/);
     // hook の戻り値に含まれる
     expect(RECORDER_SRC).toMatch(/\n\s+abortInFlightFlush,\r?\n/);
   });

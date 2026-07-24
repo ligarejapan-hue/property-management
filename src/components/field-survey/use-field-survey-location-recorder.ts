@@ -726,12 +726,15 @@ export function useFieldSurveyLocationRecorder(
     inFlightFlushPromiseRef.current = null;
     if (!mountedRef.current) return;
     setIsFlushing(false);
-    // @codex P2 R6: ここでは status を idle に戻さない。破棄 PATCH は最大 15 秒
-    // かかり得るが、その間に idle にすると LocationRecorderControls が開始ボタンを
-    // 出し、ユーザーが新しい watch を始められてしまう。その後 PATCH が成功すると
-    // discardBufferAndStop が新規に集めた点まで消してしまう。PATCH が確定するまで
-    // 操作不能 (stopping) のままにし、終了に失敗した時だけ明示的に idle へ戻す
-    // (restoreIdleAfterFailedEnd)。buffer は保持する。
+    // @codex P2 R6/R7: 破棄 PATCH は最大 15 秒かかり得る。その間に status が idle
+    // だと LocationRecorderControls が開始ボタンを出し、ユーザーが新しい watch を
+    // 始められてしまう (その後 PATCH 成功で discardBufferAndStop が新規点まで消す)。
+    // 直前の flush が timeout でハングした場合は status="stopping" のままだが、
+    // 通常失敗 (fast reject) した場合は stopBeforeSessionEnd が完了して idle を
+    // セットしているため、ここで明示的に "stopping" (非 startable) に倒す。PATCH
+    // 確定後、成功なら discardBufferAndStop、失敗なら restoreIdleAfterFailedEnd で
+    // idle に戻す。buffer は保持する。
+    setStatus("stopping");
   }, []);
 
   // 破棄経路で終了 PATCH が失敗した時、buffer を保持したまま recorder を操作可能
