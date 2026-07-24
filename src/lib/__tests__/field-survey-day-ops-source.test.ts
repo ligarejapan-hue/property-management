@@ -164,24 +164,24 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(RECORDER_SRC).toMatch(/\n\s+abortInFlightFlush,\r?\n/);
   });
 
-  it("recorder 復帰は session が active な失敗時のみ (restoreRecorder・reconcile 判定)", () => {
-    // @codex P2 R6/P1 R9: PATCH 中は "stopping" 固着で新 watch 開始を防ぎ、
-    // session が確実に active な失敗 (明確な失敗 / まだ active な reconcile) の
-    // ときだけ recorder を idle に戻す。終了済み reconcile では復帰させない
-    // (sessionId 変化の reset effect が片付ける)。
+  it("recorder 復帰は reconcile が active を返した時のみ (unknown/ended は復帰しない)", () => {
+    // @codex P2 R6/P1 R9-R10: PATCH 中は "stopping" 固着で新 watch 開始を防ぎ、
+    // reconcile が active を返した (= session が確実に未終了) 時だけ recorder を
+    // idle に戻す。ended は reset effect が片付け、unknown は状態不明ゆえ復帰
+    // させない (新 watch を開始させない)。
     const fn = RECORDER_SRC.match(
       /const restoreIdleAfterFailedEnd = useCallback\([\s\S]*?\}, \[\]\);/,
     );
     expect(fn).not.toBeNull();
     expect(fn?.[0] ?? "").toMatch(/setStatus\("idle"\)/);
     expect(RECORDER_SRC).toMatch(/\n\s+restoreIdleAfterFailedEnd,\r?\n/);
-    // finally は restoreRecorder フラグを見る (曖昧な timeout/conflict は
-    // reconcile が active を返した時だけ true になる)
+    // active 分岐でのみ recorder 復帰 + 脱出口再提示
     expect(TRIP_SRC).toMatch(
-      /if \(restoreRecorder && mountedRef\.current\)\s*\{\s*onEndFailedRestoreRecorder\?\.\(\)/,
+      /reconciled\.kind === "active"[\s\S]{0,320}?onEndFailedRestoreRecorder\?\.\(\)/,
     );
+    // unknown 分岐は session/buffer を消さず active に戻す (recorder は復帰しない)
     expect(TRIP_SRC).toMatch(
-      /if \(opts\?\.discardUnsent && reconciled\) restoreRecorder = true/,
+      /reconciled\.kind === "unknown"[\s\S]{0,320}?setPhase\("active"\)/,
     );
     // map が配線する
     expect(MAP_SRC).toMatch(/recorder\.restoreIdleAfterFailedEnd\(\)/);
@@ -193,27 +193,38 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(TRIP_SRC).toMatch(/if \(own\) pendingStartRef\.current = false/);
   });
 
-  it("終了 PATCH に timeout を設け、曖昧な結果は reconcile する (@codex P1)", () => {
+  it("非 200 の終了結果はすべて曖昧として reconcile する (@codex P1)", () => {
     // session 終了 API が無応答でも phase="ending" 固着で UI が無効化されない。
-    // かつ timeout は「server が終了を commit したが応答が遅い」曖昧な結果ゆえ、
-    // active 決め打ちでなく fetchActiveSession で真の状態に整合する。
+    // timeout / 5xx / conflict / network はいずれも「server が終了を commit した
+    // か不明」= 曖昧。active 決め打ちでなく reconcile で真の状態に整合する。
     expect(TRIP_SRC).toMatch(/END_PATCH_TIMEOUT_MS/);
     expect(TRIP_SRC).toMatch(/patchTimedOut = true/);
-    // timeout 分岐は reconcile する (setPhase("active") で決め打ちしない)
+    expect(TRIP_SRC).toMatch(/ambiguous = true/);
+    // 非 ok / catch とも ambiguous にし、try/catch/finally の外で reconcile する
+    expect(TRIP_SRC).toMatch(/if \(!ambiguous \|\| !mountedRef\.current\) return/);
     expect(TRIP_SRC).toMatch(
-      /if \(patchTimedOut\)[\s\S]{0,400}?const reconciled = await fetchActiveSession\(\)/,
+      /await fetchActiveSession\(\{\s*timeoutMs: RECONCILE_TIMEOUT_MS,\s*preserveOnFailure: true,?\s*\}\)/,
     );
-    // まだ active な時だけ脱出口再提示 + recorder 復帰
-    expect(TRIP_SRC).toMatch(
-      /if \(reconciled && opts\?\.discardUnsent\)[\s\S]{0,140}?setEndBlockedByBuffer\(true\)/,
-    );
-    // timer は finally で解除する
+    // patch timer は finally で解除する
     expect(TRIP_SRC).toMatch(/finally \{\s*clearTimeout\(patchTimer\)/);
   });
 
-  it("fetchActiveSession は整合後の session を返す (reconcile 判定用・@codex P1)", () => {
-    expect(TRIP_SRC).toMatch(/Promise<\s*ActiveSessionLike \| null\s*>/);
-    expect(TRIP_SRC).toMatch(/return own;/);
+  it("reconcile GET 自体にも timeout があり、失敗は unknown で判定不能 (@codex P1)", () => {
+    // GET が blackhole でも終了脱出口が固まらない。失敗時は session を消さず
+    // unknown を返す (integrity: 終了整合中に buffer/points を失わない)。
+    expect(TRIP_SRC).toMatch(/RECONCILE_TIMEOUT_MS/);
+    expect(TRIP_SRC).toMatch(
+      /if \(opts\?\.timeoutMs\)[\s\S]{0,140}?setTimeout\(\(\) => ac\.abort\(\)/,
+    );
+    // 3 値の結果を返す
+    expect(TRIP_SRC).toMatch(/Promise<ReconcileResult>/);
+    expect(TRIP_SRC).toMatch(
+      /return own \? \{ kind: "active", session: own \} : \{ kind: "ended" \}/,
+    );
+    // preserveOnFailure 経路は session を消さず unknown
+    expect(TRIP_SRC).toMatch(
+      /if \(opts\?\.preserveOnFailure\)[\s\S]{0,160}?return \{ kind: "unknown" \}/,
+    );
   });
 
   it("flushAllBufferedChunks は drain 全体を generation でガードする (@codex P2)", () => {

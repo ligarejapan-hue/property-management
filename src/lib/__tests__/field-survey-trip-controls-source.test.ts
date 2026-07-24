@@ -162,8 +162,11 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
   });
 
   it("409 系の outcome を経由して active を再取得する設計", () => {
+    // 開始側の 409 (conflict_active) は個別 branch で再取得。
     expect(TRIP_SRC).toMatch(/conflict_active/);
-    expect(TRIP_SRC).toMatch(/conflict_state/);
+    // 終了側の 409 (conflict_state) を含む非 ok は @codex P1 R10 で「曖昧」に
+    // 統一し、reconcile (fetchActiveSession) で active を再取得する。
+    expect(TRIP_SRC).toMatch(/ambiguous = true/);
     expect(TRIP_SRC).toMatch(/fetchActiveSession/);
   });
 
