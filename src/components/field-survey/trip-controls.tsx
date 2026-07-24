@@ -166,7 +166,12 @@ export default function TripControls({
     err !== null &&
     (err as { name?: string }).name === "AbortError";
 
-  const fetchActiveSession = useCallback(async (): Promise<void> => {
+  // 戻り値: 整合後の自分の active session (無ければ null)。@codex P1: 終了 PATCH
+  // の timeout など曖昧な結果を、真の server 状態に整合させて呼び出し側が
+  // 「まだ active か」を判定できるようにするため session を返す。
+  const fetchActiveSession = useCallback(async (): Promise<
+    ActiveSessionLike | null
+  > => {
     if (activeFetchAbortRef.current) activeFetchAbortRef.current.abort();
     const ac = new AbortController();
     activeFetchAbortRef.current = ac;
@@ -182,11 +187,11 @@ export default function TripControls({
         signal: ac.signal,
         credentials: "same-origin",
       });
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return null;
       const body = (await res.json().catch(() => null)) as
         | { data?: ActiveSessionLike[] }
         | null;
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return null;
       const outcome = classifyTripApiResponse(
         res.status,
         extractApiErrorCode(body),
@@ -196,7 +201,7 @@ export default function TripControls({
         setError(tripOutcomeMessage(outcome));
         setSession(null);
         setPhase("idle");
-        return;
+        return null;
       }
       // pickOwnActiveSession は server filter 漏れに対する防御として残す。
       const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
@@ -231,12 +236,14 @@ export default function TripControls({
         setPhase("idle");
       }
       setError(null);
+      return own;
     } catch (err) {
-      if (isAbortError(err) || !mountedRef.current) return;
+      if (isAbortError(err) || !mountedRef.current) return null;
       pendingStartRef.current = false;
       setError("巡回情報の取得に失敗しました。");
       setSession(null);
       setPhase("idle");
+      return null;
     }
   }, [currentUserId]);
 
@@ -422,9 +429,12 @@ export default function TripControls({
       // にも timeout を設ける。timeout で abort した場合は active に戻して再試行
       // 可能にする (unmount / supersede の abort とは patchTimedOut で区別する)。
       let patchTimedOut = false;
-      // 破棄経路で終了 PATCH が成立したか。未成立で抜ける時は recorder を操作可能
-      // に戻す (abortInFlightFlush で "stopping" 固着にしたのを finally で復帰)。
-      let ended = false;
+      // 破棄経路の失敗時に recorder を操作可能 (idle) へ戻すか。abortInFlightFlush
+      // で "stopping" 固着にした recorder を、session が確実に active な (未終了)
+      // 失敗のときだけ復帰させる。@codex P1: 曖昧な timeout / conflict は
+      // fetchActiveSession で真の状態に整合してから判定する (終了済みなら復帰
+      // させない — sessionId 変化の reset effect が recorder を片付ける)。
+      let restoreRecorder = false;
       const patchTimer = setTimeout(() => {
         patchTimedOut = true;
         ac.abort();
@@ -452,7 +462,6 @@ export default function TripControls({
         if (outcome.kind === "ok") {
           // 終了が確定してから未送信 buffer を破棄する (offline で PATCH が
           // 失敗した場合は破棄されず、軌跡が保全される)。
-          ended = true;
           if (opts?.discardUnsent) onDiscardUnsentLocations?.();
           if (resumedRef.current === target.id) resumedRef.current = null;
           setSession(null);
@@ -460,37 +469,53 @@ export default function TripControls({
           return;
         }
         if (outcome.kind === "conflict_state") {
+          // 別クライアントによる状態変化。真の状態へ整合し、まだ active なら
+          // (破棄経路で) recorder を復帰させる。
           setError(tripOutcomeMessage(outcome));
-          await fetchActiveSession();
+          const reconciled = await fetchActiveSession();
+          if (opts?.discardUnsent && reconciled) restoreRecorder = true;
           return;
         }
+        // 明確な失敗 (server は終了を commit していない) = session は active の
+        // まま。active に復帰して再試行可能にする。
         setError(tripOutcomeMessage(outcome));
-        // active state に復帰して再試行可能にする
         setPhase("active");
+        if (opts?.discardUnsent) restoreRecorder = true;
       } catch (err) {
         if (!mountedRef.current) return;
         if (patchTimedOut) {
-          // 終了 API 無応答: active に戻して再試行可能にする。破棄経路では buffer
-          // は保全されているので脱出口 (「破棄して終了」) を再度提示する。
+          // @codex P1: timeout は「server が終了を commit したが応答が遅い」
+          // 可能性がある曖昧な結果。abort は適用済みの status:"ended" を巻き戻さ
+          // ないため、active に決め打ちせず fetchActiveSession で真の状態に整合
+          // する (終了済みなら idle、まだ active なら active)。まだ active な時
+          // だけ、破棄経路の脱出口再提示と recorder 復帰を行う。
           setError(
             "巡回終了の通信が完了しません。電波の良い場所へ移動して、もう一度お試しください。",
           );
-          if (opts?.discardUnsent) setEndBlockedByBuffer(true);
-          setPhase("active");
+          const reconciled = await fetchActiveSession();
+          if (!mountedRef.current) return;
+          if (reconciled && opts?.discardUnsent) {
+            setEndBlockedByBuffer(true);
+            restoreRecorder = true;
+          }
           return;
         }
         // unmount / supersede による abort は state を触らない (従来挙動)
         if (isAbortError(err)) return;
+        // network error 等 = server は終了を commit していない = session は
+        // active のまま。active に復帰して再試行可能にする。
         setError(
           "巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。",
         );
         setPhase("active");
+        if (opts?.discardUnsent) restoreRecorder = true;
       } finally {
         clearTimeout(patchTimer);
-        // @codex P2 R6: 破棄経路で終了が成立しなかった場合、"stopping" 固着に
-        // した recorder を操作可能 (idle) へ戻す (buffer 保持)。成立時 (ended) は
-        // discardBufferAndStop が idle+破棄まで済ませるので触らない。
-        if (opts?.discardUnsent && !ended && mountedRef.current) {
+        // @codex P2 R6 / P1 R9: session が確実に active な失敗のときだけ、
+        // "stopping" 固着にした recorder を操作可能 (idle) へ戻す (buffer 保持)。
+        // 成功時は discardBufferAndStop が、終了済み reconcile 時は sessionId
+        // 変化の reset effect が recorder を片付けるのでここでは触らない。
+        if (restoreRecorder && mountedRef.current) {
           onEndFailedRestoreRecorder?.();
         }
       }
