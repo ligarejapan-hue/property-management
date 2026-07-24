@@ -25,11 +25,21 @@ import {
   type FieldSurveyPinType,
 } from "@/lib/field-survey-pin-util";
 import { FIELD_SURVEY_MEMO_MAX_LEN } from "@/lib/field-survey-constants";
+import {
+  formatAccuracyMeters,
+  isLowAccuracyForDisplay,
+} from "@/lib/field-survey-current-location-util";
 
 interface PinCreateModalProps {
   /** 地図クリック / 現在地で確定した座標。表示専用。 */
   initialLat: number;
   initialLng: number;
+  /**
+   * GPS 由来の位置精度 (m)。現在地/カメラファーストで自動配置した時のみ入る
+   * (地図タップは undefined)。精度が悪い (>しきい値) と実際の家から離れた所に
+   * ピンが落ちるため、値と低精度警告を表示して取り直し/修正を促す。
+   */
+  initialAccuracy?: number | null;
   /**
    * カメラファースト (撮って登録) 経由で既に撮影済みの写真。
    * 指定時は modal を写真選択済み状態で開く (通常の地図タップ経路は null)。
@@ -87,6 +97,7 @@ interface PinCreateModalProps {
 export default function PinCreateModal({
   initialLat,
   initialLng,
+  initialAccuracy,
   initialPhotoFile,
   initialPhotoPreviewUrl,
   sessionId,
@@ -129,6 +140,9 @@ export default function PinCreateModal({
     !busy &&
     Number.isFinite(initialLat) &&
     Number.isFinite(initialLng);
+  // GPS 由来の精度表示 (地図タップは accuracy 無しで "—" → 非表示)。
+  const accuracyText = formatAccuracyMeters(initialAccuracy);
+  const lowAccuracy = isLowAccuracyForDisplay(initialAccuracy);
 
   const handleFilePicked = (file: File | null) => {
     if (!file) return;
@@ -177,7 +191,36 @@ export default function PinCreateModal({
           <dd data-testid="pin-create-lat">{formatCoord(initialLat)}</dd>
           <dt>経度</dt>
           <dd data-testid="pin-create-lng">{formatCoord(initialLng)}</dd>
+          {accuracyText !== "—" && (
+            <>
+              <dt>位置精度</dt>
+              <dd
+                data-testid="pin-create-accuracy"
+                className={
+                  lowAccuracy
+                    ? "font-semibold text-amber-700 dark:text-amber-400"
+                    : ""
+                }
+              >
+                {accuracyText}
+              </dd>
+            </>
+          )}
         </dl>
+
+        {/* 低精度 (GPS が悪い) 警告: 現在地/カメラファーストで自動配置した位置が
+            実際の家から離れている恐れを、保存前に気づかせて取り直し/修正を促す。 */}
+        {lowAccuracy && (
+          <p
+            role="status"
+            data-testid="pin-create-low-accuracy-warning"
+            className="mb-3 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] leading-tight text-amber-900 dark:text-amber-300"
+          >
+            <span aria-hidden="true">⚠</span> 位置の精度が低めです ({accuracyText}
+            )。実際の建物から離れているかもしれません。ずれていれば「現在地を使う」で
+            取り直すか、一度キャンセルして地図をタップし直して修正してください。
+          </p>
+        )}
 
         <div className="mb-3">
           <button
