@@ -878,12 +878,17 @@ export default function FieldSurveyMap({
             />
           )}
           {/* 「この場所を地図で見る」で指定されたピンの強調マーカー。PIN_LIMIT で
-              marker 一覧から漏れる古い候補でも、指定した場所を必ず示す (@codex P2)。 */}
-          {focusPinPos && (
+              marker 一覧から漏れる古い候補でも、指定した場所を必ず示す (@codex P2)。
+              タップで詳細を開く: 前面 (zIndex) のこのマーカーが背後の通常マーカーの
+              タップを奪うため onClick が無いと詳細を開けない。ユーザー操作時のみ
+              setDetailPinId を呼ぶ (自動オープンしないので監査は二重計上されない・
+              タップは 1 回の意図的な閲覧として正しく監査される。@codex P2)。 */}
+          {focusPinPos && focusPinId && (
             <AdvancedMarker
               position={focusPinPos}
               zIndex={1000}
-              title="指定した場所"
+              title="指定した場所 (タップで詳細)"
+              onClick={() => setDetailPinId(focusPinId)}
             >
               <Pin
                 background="#2563EB"

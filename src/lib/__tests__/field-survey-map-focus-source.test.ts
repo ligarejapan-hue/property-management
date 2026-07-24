@@ -66,7 +66,7 @@ describe("field-survey: この場所を地図で見る (?focusPin)", () => {
     // MapDataLayer は bbox を新しい順 PIN_LIMIT で取得するため古い候補は marker
     // 一覧から漏れ得る。panTo だけでなく取得座標で専用マーカーを立てる。
     const marker = MAP.match(
-      /\{focusPinPos && \([\s\S]*?<\/AdvancedMarker>[\s\S]*?\)\}/,
+      /\{focusPinPos && focusPinId && \([\s\S]*?<\/AdvancedMarker>[\s\S]*?\)\}/,
     );
     expect(marker).not.toBeNull();
     const m = marker?.[0] ?? "";
@@ -74,5 +74,9 @@ describe("field-survey: この場所を地図で見る (?focusPin)", () => {
     // 通常ピンと区別できる強調 (グリフ ★ + 前面 zIndex)
     expect(m).toMatch(/glyph="★"/);
     expect(m).toMatch(/zIndex=\{1000\}/);
+    // @codex P2: 前面マーカーが背後の通常マーカーのタップを奪うため、この
+    // マーカー自身の onClick (ユーザー操作) で詳細を開く。自動オープンではない
+    // ので監査は二重計上されない。
+    expect(m).toMatch(/onClick=\{\(\) => setDetailPinId\(focusPinId\)\}/);
   });
 });
