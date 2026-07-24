@@ -79,6 +79,33 @@ export default function CandidateQueue() {
   // 並び順。上限超過時に古い候補へ到達できるよう「古い順」を選べる
   // (Codex P2: 「古いものから処理して」と案内しつつ古い分が開けない矛盾の解消)。
   const [order, setOrder] = useState<"newest" | "oldest">("newest");
+  // 現地写真は「タップした時だけ」読み込む (モバイルの通信量に配慮)。本番は
+  // サムネイル生成が無く cover が原寸 (最大 8MB) のため、一覧の全行に常時
+  // <img> を置くとスクロールで原寸を大量に落としてしまう。表示中の行だけ
+  // <img> を DOM に入れる。
+  const [shownPhotoIds, setShownPhotoIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const togglePhoto = useCallback((id: string) => {
+    setShownPhotoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  // 写真の読込失敗を記録して「表示できません」に倒す (/uploads 配信失敗や欠損)。
+  const [brokenThumbIds, setBrokenThumbIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const markThumbBroken = useCallback((id: string) => {
+    setBrokenThumbIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
 
   // 並び順切替の競合ガード: 先行リクエストの遅延応答が後から届いても、
   // 現在の並び順のリクエストでなければ破棄する (Codex P2: 切替直後に
@@ -92,6 +119,8 @@ export default function CandidateQueue() {
     setRows(null);
     setTruncated(false);
     setError(null);
+    setShownPhotoIds(new Set());
+    setBrokenThumbIds(new Set());
     try {
       const r = await listCandidatePins(order);
       if (generation !== loadGenerationRef.current) return;
@@ -211,38 +240,84 @@ export default function CandidateQueue() {
             const age = ageBase
               ? describeCandidateAge(r.createdAt, ageBase)
               : { label: "", days: 0, stale: false };
+            const photoCount = r.photoCount ?? 0;
+            const photoShown = shownPhotoIds.has(r.id);
+            const photoBroken = brokenThumbIds.has(r.id);
             return (
-              <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-sm text-gray-800 dark:text-gray-200">
-                    <span>{formatPinCreatedAt(r.createdAt)}</span>
-                    {age.label && (
-                      <span
-                        data-testid="candidate-age"
-                        className={
-                          age.stale
-                            ? "rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
-                            : "text-[11px] text-gray-500 dark:text-gray-400"
-                        }
-                      >
-                        {age.label}
-                        {age.stale ? "・放置気味" : ""}
-                      </span>
+              <li key={r.id} className="px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-gray-800 dark:text-gray-200">
+                      <span>{formatPinCreatedAt(r.createdAt)}</span>
+                      {age.label && (
+                        <span
+                          data-testid="candidate-age"
+                          className={
+                            age.stale
+                              ? "rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
+                              : "text-[11px] text-gray-500 dark:text-gray-400"
+                          }
+                        >
+                          {age.label}
+                          {age.stale ? "・放置気味" : ""}
+                        </span>
+                      )}
+                      {/* 場所特定の手がかり: 現地写真。タップした時だけ読み込む
+                          (本番はサムネイル生成が無く原寸のため、常時読込を避ける)。 */}
+                      {photoCount > 0 && (
+                        <button
+                          type="button"
+                          data-testid="candidate-photo-toggle"
+                          onClick={() => togglePhoto(r.id)}
+                          aria-expanded={photoShown}
+                          className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                        >
+                          <span aria-hidden="true">📷</span>
+                          写真{photoCount}枚{photoShown ? "を隠す" : "を見る"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{r.hasMemo ? "メモあり" : "メモなし"}</div>
+                  </div>
+                  {canWriteProperty && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConvertedNotice(false);
+                        setConvertPinId(r.id);
+                      }}
+                      className="shrink-0 rounded border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
+                    >
+                      物件にする
+                    </button>
+                  )}
+                </div>
+                {/* タップ時のみ cover 写真を読み込む (ここで初めて <img> を DOM
+                    に入れる = 表示していない行は原寸を落とさない)。 */}
+                {photoShown && r.coverPhotoUrl && !photoBroken && (
+                  <div data-testid="candidate-photo-view" className="mt-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={r.coverPhotoUrl}
+                      alt="現地写真"
+                      loading="lazy"
+                      onError={() => markThumbBroken(r.id)}
+                      className="max-h-48 w-auto max-w-full rounded border border-gray-200 object-contain dark:border-gray-800"
+                    />
+                    {photoCount > 1 && (
+                      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        代表写真を表示中 (ほか{photoCount - 1}枚)。
+                      </p>
                     )}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{r.hasMemo ? "メモあり" : "メモなし"}</div>
-                </div>
-                {canWriteProperty && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setConvertedNotice(false);
-                      setConvertPinId(r.id);
-                    }}
-                    className="shrink-0 rounded border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
+                )}
+                {photoShown && photoBroken && (
+                  <p
+                    data-testid="candidate-photo-broken"
+                    className="mt-2 text-[11px] text-gray-500 dark:text-gray-400"
                   >
-                    物件にする
-                  </button>
+                    写真を表示できませんでした。
+                  </p>
                 )}
               </li>
             );
