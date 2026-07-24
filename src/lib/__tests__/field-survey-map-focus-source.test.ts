@@ -52,6 +52,10 @@ describe("field-survey: この場所を地図で見る (?focusPin)", () => {
     // panTo で場所へ寄せ、強調マーカー用に座標を state 化する
     expect(m).toMatch(/panTo\(\{ lat, lng \}\)/);
     expect(m).toMatch(/setFocusPinPos\(\{ lat, lng \}\)/);
+    // @codex P2: A→B のソフト遷移 race 対策。id 変更で前回位置をクリアし、
+    // await 明けに現 focusPinId と一致しない完了 (stale) は捨てる。
+    expect(m).toMatch(/setFocusPinPos\(null\)/);
+    expect(m).toMatch(/focusedPinRef\.current !== focusPinId/);
     // @codex: 詳細パネルは自動で開かない (開くと他人 pin で監査が二重計上)
     expect(m).not.toMatch(/setDetailPinId/);
     // 取得失敗は once-guard を解除して再訪で再試行できるようにする

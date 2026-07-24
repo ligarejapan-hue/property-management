@@ -328,14 +328,21 @@ export default function FieldSurveyMap({
   useEffect(() => {
     if (!focusPinId || !mapInstance) return;
     if (focusedPinRef.current === focusPinId) return;
+    // App Router のソフト遷移で ?focusPin が A→B に変わると (remount せず) 本 effect
+    // が再実行され、2 つの取得が重なり得る (@codex P2)。focusedPinRef が最新要求 id
+    // を保持するので、await 明けに現 focusPinId と一致しない完了は stale として捨てる。
     focusedPinRef.current = focusPinId;
     void (async () => {
+      // id 変更時は前回 (A) の強調位置を消す (B が失敗しても A の marker が残らない)。
+      setFocusPinPos(null);
       try {
         // 座標のみ射影 (memo 本文を client メモリに乗せない・@codex P2)。
         const res = await fetch(
           `/api/field-survey/pins/${encodeURIComponent(focusPinId)}/location`,
           { credentials: "same-origin" },
         );
+        // stale: await 中に focusPinId が変わっていたら (新しい focus が所有) 破棄。
+        if (focusedPinRef.current !== focusPinId) return;
         if (!res.ok) {
           focusedPinRef.current = null;
           return;
@@ -343,6 +350,7 @@ export default function FieldSurveyMap({
         const body = (await res.json().catch(() => null)) as {
           data?: { lat?: unknown; lng?: unknown };
         } | null;
+        if (focusedPinRef.current !== focusPinId) return;
         const lat = Number(body?.data?.lat);
         const lng = Number(body?.data?.lng);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -355,8 +363,8 @@ export default function FieldSurveyMap({
         };
         if (m?.panTo) m.panTo({ lat, lng });
       } catch {
-        // 座標 / API 内部情報を出さない。次回再訪で再試行できるよう guard 解除。
-        focusedPinRef.current = null;
+        // 座標 / API 内部情報を出さない。現要求のままなら guard 解除で再試行可。
+        if (focusedPinRef.current === focusPinId) focusedPinRef.current = null;
       }
     })();
   }, [focusPinId, mapInstance]);
