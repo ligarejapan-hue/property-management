@@ -187,6 +187,24 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(MAP_SRC).toMatch(/recorder\.restoreIdleAfterFailedEnd\(\)/);
   });
 
+  it("曖昧な終了の間は両経路とも recorder を stopping にする (@codex P1 R11)", () => {
+    // 通常終了は flush 成功で idle のため、PATCH commit + 応答喪失 + reconcile
+    // unknown で active に戻すと記録再開→409 で失われる。PATCH 前に
+    // blockRecorderForPendingEnd で stopping にし、active 確認まで解除しない。
+    const fn = RECORDER_SRC.match(
+      /const blockRecorderForPendingEnd = useCallback\([\s\S]*?\}, \[\]\);/,
+    );
+    expect(fn).not.toBeNull();
+    expect(fn?.[0] ?? "").toMatch(/setStatus\("stopping"\)/);
+    expect(RECORDER_SRC).toMatch(/\n\s+blockRecorderForPendingEnd,\r?\n/);
+    // PATCH の前に呼ぶ (両経路)
+    expect(TRIP_SRC).toMatch(
+      /onBlockRecorderForEnd\?\.\(\)[\s\S]{0,1400}?method: "PATCH"/,
+    );
+    // map が配線する
+    expect(MAP_SRC).toMatch(/recorder\.blockRecorderForPendingEnd\(\)/);
+  });
+
   it("既存 active session 復元時は予約 quick-start をクリアする (@codex P2)", () => {
     // 放置しておくと後の refresh (別クライアント終了→conflict 再取得) が
     // 古い予約を消化して再調整/終了中に開始確認 modal を開いてしまう。

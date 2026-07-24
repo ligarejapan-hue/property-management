@@ -841,6 +841,7 @@ export default function FieldSurveyMap({
           onEndFailedRestoreRecorder={() =>
             recorder.restoreIdleAfterFailedEnd()
           }
+          onBlockRecorderForEnd={() => recorder.blockRecorderForPendingEnd()}
           onActiveSessionChange={handleActiveSessionChange}
           onBeforeSessionEnd={handleBeforeSessionEnd}
           recorder={recorder}
@@ -1046,6 +1047,7 @@ function ControlPanel({
   onDiscardUnsentLocations,
   onAbortPendingFlush,
   onEndFailedRestoreRecorder,
+  onBlockRecorderForEnd,
   onActiveSessionChange,
   onBeforeSessionEnd,
   recorder,
@@ -1075,6 +1077,8 @@ function ControlPanel({
   onAbortPendingFlush: () => void;
   /** 破棄経路の終了 PATCH 失敗時に recorder を操作可能へ戻す (recorder)。 */
   onEndFailedRestoreRecorder: () => void;
+  /** 曖昧な終了の間 recorder を stopping にし新 watch を防ぐ (recorder)。 */
+  onBlockRecorderForEnd: () => void;
   onActiveSessionChange: (s: ActiveSessionLike | null) => void;
   onBeforeSessionEnd: () => Promise<boolean>;
   recorder: ReturnType<typeof useFieldSurveyLocationRecorder>;
@@ -1140,6 +1144,7 @@ function ControlPanel({
         onDiscardUnsentLocations={onDiscardUnsentLocations}
         onAbortPendingFlush={onAbortPendingFlush}
         onEndFailedRestoreRecorder={onEndFailedRestoreRecorder}
+        onBlockRecorderForEnd={onBlockRecorderForEnd}
         unsentLocationCount={recorder.bufferedCount}
       />
 

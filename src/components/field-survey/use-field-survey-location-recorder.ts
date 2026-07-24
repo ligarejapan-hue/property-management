@@ -134,6 +134,12 @@ export interface UseLocationRecorderResult {
    * しなかった場合にのみ復帰させる (PATCH 中に新 watch を開始させないため)。
    */
   restoreIdleAfterFailedEnd: () => void;
+  /**
+   * 終了処理が「曖昧」な間、recorder を "stopping" (非 startable) にして新 watch
+   * の開始を防ぐ。両経路 (通常終了 / 破棄) の ambiguous な終了で使い、reconcile
+   * が active を確認するまで解除しない。buffer は保持する。
+   */
+  blockRecorderForPendingEnd: () => void;
 }
 
 interface UseLocationRecorderOptions {
@@ -756,6 +762,17 @@ export function useFieldSurveyLocationRecorder(
     setStatus("idle");
   }, []);
 
+  // @codex P1: 終了処理が「曖昧」な間、recorder を "stopping" (非 startable) に
+  // する。通常終了では stopBeforeSessionEnd の flush 成功で status="idle" に
+  // なっているため、PATCH が commit 済みだが応答喪失 + reconcile も unknown の
+  // 場合、active に戻すと「位置記録開始」が再露出し、終了済み session に記録して
+  // 409 で失われる。終了確定まで新 watch を開始させないよう明示的に倒す。buffer
+  // は保持する。reconcile が active を確認したら restoreIdleAfterFailedEnd で戻す。
+  const blockRecorderForPendingEnd = useCallback((): void => {
+    if (!mountedRef.current) return;
+    setStatus("stopping");
+  }, []);
+
   // 未送信の位置記録を破棄して即時停止する (圏外時の巡回終了の脱出口)。
   // generation bump で in-flight flush の遅延応答も無効化する。fetch は呼ばない。
   const discardBufferAndStop = useCallback((): void => {
@@ -839,6 +856,7 @@ export function useFieldSurveyLocationRecorder(
     discardBufferAndStop,
     abortInFlightFlush,
     restoreIdleAfterFailedEnd,
+    blockRecorderForPendingEnd,
   };
 }
 

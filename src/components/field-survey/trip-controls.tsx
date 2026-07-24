@@ -113,6 +113,13 @@ interface TripControlsProps {
    */
   onEndFailedRestoreRecorder?: () => void;
   /**
+   * 終了処理が「曖昧」な間、recorder を "stopping" にして新 watch を開始させない
+   * (buffer 保持・親の recorder が実装)。通常終了では flush 成功で idle になって
+   * いるため、PATCH commit 済み + 応答喪失 + reconcile unknown のとき active に
+   * 戻すと記録を再開でき 409 で失われる。それを防ぐ (@codex P1)。
+   */
+  onBlockRecorderForEnd?: () => void;
+  /**
    * 未送信 buffer の点数 (recorder.bufferedCount)。「破棄して終了」で失われる
    * 軌跡の規模を平易に示すために表示する (圏外が長いと数百点になり得る)。
    */
@@ -137,6 +144,7 @@ export default function TripControls({
   onDiscardUnsentLocations,
   onAbortPendingFlush,
   onEndFailedRestoreRecorder,
+  onBlockRecorderForEnd,
   unsentLocationCount,
 }: TripControlsProps) {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -466,6 +474,13 @@ export default function TripControls({
         await touchSession(target);
         if (!mountedRef.current) return;
       }
+      // @codex P1: PATCH 開始から結果が確定 (成功 / active reconcile) するまで、
+      // recorder を "stopping" (非 startable) にして新 watch を開始させない。通常
+      // 終了では flush 成功で idle になっているため、これが無いと PATCH commit 済み
+      // + 応答喪失 + reconcile unknown のとき active に戻した瞬間に記録を再開でき、
+      // 終了済み session への記録が 409 で失われる。破棄経路は abortInFlightFlush
+      // で既に stopping だが冪等。buffer は保持する。
+      onBlockRecorderForEnd?.();
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
       mutationAbortRef.current = ac;
@@ -537,13 +552,11 @@ export default function TripControls({
       });
       if (!mountedRef.current) return;
       if (reconciled.kind === "active") {
-        // まだ active。破棄経路では脱出口を再提示し、"stopping" 固着にした
-        // recorder を操作可能 (idle) へ戻す (buffer 保持)。
+        // まだ active。ambiguous の間 "stopping" にした recorder を操作可能 (idle)
+        // へ戻す (両経路・buffer 保持)。破棄経路では脱出口も再提示する。
         setError(failMessage());
-        if (opts?.discardUnsent) {
-          setEndBlockedByBuffer(true);
-          onEndFailedRestoreRecorder?.();
-        }
+        onEndFailedRestoreRecorder?.();
+        if (opts?.discardUnsent) setEndBlockedByBuffer(true);
       } else if (reconciled.kind === "unknown") {
         // 整合も判定不能。session / buffer は消さず active に戻して retry 可能に
         // する。recorder は stopping のまま = 状態不明の間は新 watch を開始させ
@@ -561,6 +574,7 @@ export default function TripControls({
       fetchActiveSession,
       onAbortPendingFlush,
       onBeforeSessionEnd,
+      onBlockRecorderForEnd,
       onDiscardUnsentLocations,
       onEndFailedRestoreRecorder,
       touchSession,
