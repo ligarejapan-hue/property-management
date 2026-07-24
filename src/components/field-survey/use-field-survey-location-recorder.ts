@@ -766,12 +766,24 @@ export function useFieldSurveyLocationRecorder(
   // する。通常終了では stopBeforeSessionEnd の flush 成功で status="idle" に
   // なっているため、PATCH が commit 済みだが応答喪失 + reconcile も unknown の
   // 場合、active に戻すと「位置記録開始」が再露出し、終了済み session に記録して
-  // 409 で失われる。終了確定まで新 watch を開始させないよう明示的に倒す。buffer
-  // は保持する。reconcile が active を確認したら restoreIdleAfterFailedEnd で戻す。
+  // 409 で失われる。終了確定まで新 watch を開始させないよう明示的に倒す。
+  // @codex R13: watch 停止 + generation bump + in-flight abort も行い、直前に
+  // 紛れ込んで開始された watch を止め、不可視で走り続けないようにする (buffer は
+  // 保持し、終了確定時に破棄 / active reconcile 後に委ねる)。reconcile が active
+  // を確認したら restoreIdleAfterFailedEnd で idle に戻す。
   const blockRecorderForPendingEnd = useCallback((): void => {
+    recorderGenerationRef.current += 1;
+    stopWatchingInternal();
+    if (flushAbortRef.current) {
+      flushAbortRef.current.abort();
+      flushAbortRef.current = null;
+    }
+    inFlightFlushRef.current = false;
+    inFlightFlushPromiseRef.current = null;
     if (!mountedRef.current) return;
+    setIsFlushing(false);
     setStatus("stopping");
-  }, []);
+  }, [stopWatchingInternal]);
 
   // 未送信の位置記録を破棄して即時停止する (圏外時の巡回終了の脱出口)。
   // generation bump で in-flight flush の遅延応答も無効化する。fetch は呼ばない。

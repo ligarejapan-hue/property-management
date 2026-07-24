@@ -476,6 +476,15 @@ export default function TripControls({
           return;
         }
       }
+      // @codex P1 R11/R13: ここから終了結果が確定 (成功 / active reconcile) する
+      // まで recorder を "stopping" (非 startable) にして新 watch を開始させない。
+      // 通常終了では直前の flush 成功で idle に戻っているため、これを touch await
+      // (最大 8 秒) や PATCH の前に置かないと、その間に「位置記録開始」が露出して
+      // 新 watch を開始でき、終了成功でその点が失われたり active reconcile 後に
+      // watch が不可視で走り続けたりする。block は watch 停止 + in-flight 無効化も
+      // 行う (snuck-in watch を残さない)。破棄経路は abortInFlightFlush で既に
+      // stopping だが冪等。buffer は保持する。
+      onBlockRecorderForEnd?.();
       // B-7 (@codex R10): 続行済み session の終了は、直前に活動 touch を挟んで
       // server の stale 判定を解除する (続行時の touch が失敗していても、ここで
       // 記録されれば endedAt は now になり、続行後の巡回が消えない)。
@@ -490,13 +499,6 @@ export default function TripControls({
         await touchSession(target);
         if (!mountedRef.current) return;
       }
-      // @codex P1: PATCH 開始から結果が確定 (成功 / active reconcile) するまで、
-      // recorder を "stopping" (非 startable) にして新 watch を開始させない。通常
-      // 終了では flush 成功で idle になっているため、これが無いと PATCH commit 済み
-      // + 応答喪失 + reconcile unknown のとき active に戻した瞬間に記録を再開でき、
-      // 終了済み session への記録が 409 で失われる。破棄経路は abortInFlightFlush
-      // で既に stopping だが冪等。buffer は保持する。
-      onBlockRecorderForEnd?.();
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
       mutationAbortRef.current = ac;
