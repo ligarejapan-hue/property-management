@@ -238,23 +238,27 @@ describe("trip-controls.tsx — Phase 1-F-2 巡回終了の明示連動 (修正1
   });
 
   it("endSession 内で onBeforeSessionEnd を await してから PATCH を打つ", () => {
-    // endSession 関数の冒頭 (PATCH fetch より前) で onBeforeSessionEnd を await している
+    // endSession 関数の冒頭 (PATCH fetch より前) で onBeforeSessionEnd を await
+    // している。@codex P2 R2 以降は timeout と race するため Promise.race 経由。
     const endBlock = TRIP_SRC.match(
       /const endSession[\s\S]*?method:\s*"PATCH"/,
     );
     expect(endBlock).not.toBeNull();
-    expect(endBlock?.[0]).toMatch(/await\s+onBeforeSessionEnd\(\)/);
+    expect(endBlock?.[0]).toMatch(/await\s+Promise\.race\(\[/);
+    expect(endBlock?.[0]).toMatch(/Promise\.resolve\(onBeforeSessionEnd\(\)\)/);
   });
 
   it("onBeforeSessionEnd の throw は握り潰して PATCH を継続する", () => {
-    // try { ... = await onBeforeSessionEnd() } catch { ... } のパターン
-    expect(TRIP_SRC).toMatch(/await\s+onBeforeSessionEnd\(\)[\s\S]{0,80}\}\s*catch/);
+    // try { ... = await Promise.race([onBeforeSessionEnd(), timeout]) } catch {}
+    expect(TRIP_SRC).toMatch(
+      /Promise\.resolve\(onBeforeSessionEnd\(\)\)[\s\S]{0,240}\}\s*catch/,
+    );
   });
 
   it("onBeforeSessionEnd が false を返したら PATCH を打たず active に戻す", () => {
     // Codex P1: 未送信 buffer が残っている場合の data loss を抑止
     expect(TRIP_SRC).toMatch(
-      /beforeOk\s*===\s*false[\s\S]*?未送信の位置情報が残っている[\s\S]*?setPhase\("active"\)[\s\S]*?return/,
+      /beforeOk\s*===\s*false[\s\S]*?未送信の位置情報が残って[\s\S]*?setPhase\("active"\)[\s\S]*?return/,
     );
     // false 分岐から PATCH に到達しない構造 (return がある)
     const endBlock = TRIP_SRC.match(

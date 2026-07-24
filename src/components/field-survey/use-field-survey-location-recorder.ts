@@ -114,6 +114,32 @@ export interface UseLocationRecorderResult {
    *    呼ばないことで未送信データを保持し、次回再試行できる)
    */
   stopBeforeSessionEnd: () => Promise<boolean>;
+  /**
+   * 未送信の位置記録を破棄して即時停止する (圏外時の巡回終了の脱出口)。
+   * flush を試みず buffer / in-flight を捨てる。地下駐車場・山間部など
+   * 電波の無い場所で終業する日に「数点の軌跡を諦めて終了する」ための
+   * 明示操作 (TripControls の「破棄して終了」) からのみ呼ぶ。
+   */
+  discardBufferAndStop: () => void;
+  /**
+   * 進行中の flush を即座に無効化・中断する (buffer は保持する)。
+   * 「破棄して終了」で終了 PATCH を打つ前に、flush timeout race に負けて裏で
+   * 走り続けている drain の遅延応答が、破棄予定の点を送信/除去するのを防ぐ。
+   * buffer は残し、終了 PATCH 成功後に discardBufferAndStop で破棄する。
+   */
+  abortInFlightFlush: () => void;
+  /**
+   * 破棄経路で終了 PATCH が失敗した時、buffer を保持したまま recorder を操作可能
+   * (idle) に戻す。abortInFlightFlush で "stopping" 固着にした状態を、終了が成立
+   * しなかった場合にのみ復帰させる (PATCH 中に新 watch を開始させないため)。
+   */
+  restoreIdleAfterFailedEnd: () => void;
+  /**
+   * 終了処理が「曖昧」な間、recorder を "stopping" (非 startable) にして新 watch
+   * の開始を防ぐ。両経路 (通常終了 / 破棄) の ambiguous な終了で使い、reconcile
+   * が active を確認するまで解除しない。buffer は保持する。
+   */
+  blockRecorderForPendingEnd: () => void;
 }
 
 interface UseLocationRecorderOptions {
@@ -585,6 +611,12 @@ export function useFieldSurveyLocationRecorder(
    * - lat/lng / raw response を console / error に流さない
    */
   const flushAllBufferedChunks = useCallback(async (): Promise<boolean> => {
+    // @codex P2: drain 全体を generation でガードする。abort / discard /
+    // session 切替で generation が進んだら、await 明けや各再送の前で打ち切り、
+    // 新しい flushBuffer() を開始しない。これを怠ると、破棄 (abortInFlightFlush)
+    // 後に本ループが新規 flush を始め、その POST は更新後 generation を捕捉する
+    // ため flushBuffer 内の stale guard に掛からず、破棄予定の点を送ってしまう。
+    const myGeneration = recorderGenerationRef.current;
     // 既存 in-flight flush の完了を先に待つ
     const inflight = inFlightFlushPromiseRef.current;
     if (inflight) {
@@ -594,9 +626,12 @@ export function useFieldSurveyLocationRecorder(
         // raw error / response は出さない
       }
       if (!mountedRef.current) return false;
+      if (recorderGenerationRef.current !== myGeneration) return false;
     }
     // 進捗のあるうちは chunk を送り続ける
     while (bufferRef.current.length > 0) {
+      // 各再送の前に generation を確認 (途中の abort / discard で打ち切る)
+      if (recorderGenerationRef.current !== myGeneration) break;
       const before = bufferRef.current.length;
       let ok = false;
       try {
@@ -605,6 +640,8 @@ export function useFieldSurveyLocationRecorder(
         ok = false;
       }
       if (!mountedRef.current) return false;
+      // 送信の応答が返る間に generation が進んでいたら以降の再送はしない
+      if (recorderGenerationRef.current !== myGeneration) break;
       const after = bufferRef.current.length;
       if (!ok) break;
       if (after >= before) break;
@@ -661,9 +698,15 @@ export function useFieldSurveyLocationRecorder(
       setStatus("stopping");
     }
     recorderGenerationRef.current += 1;
+    const myGeneration = recorderGenerationRef.current;
     stopWatchingInternal();
     const drained = await flushAllBufferedChunks();
     if (!mountedRef.current) return drained;
+    // @codex P2: 別経路 (abortInFlightFlush / discardBufferAndStop など) で
+    // generation が進んでいたら、この呼び出しは陳腐化しているので UI state を
+    // 触らない (timeout race に負けた drain が遅れて完了し、破棄経路の表示を
+    // 上書きするのを防ぐ)。
+    if (recorderGenerationRef.current !== myGeneration) return drained;
     if (!drained) {
       // 座標を含めない汎用文言。API status / 件数 / 内部詳細は出さない。
       setError(
@@ -683,6 +726,86 @@ export function useFieldSurveyLocationRecorder(
     status,
     stopWatchingInternal,
   ]);
+
+  // 進行中の flush を即座に無効化・中断する (buffer は保持する)。
+  // @codex P2: 「破棄して終了」で、flush の timeout race に負けて裏で走り続けて
+  // いる drain が遅れて応答し、破棄すると決めた点を送信/buffer から除去して
+  // しまうのを防ぐ。generation を進めて遅延応答の buffer 反映を無効化し、
+  // in-flight fetch を abort する。buffer / bufferedCount は保持し、終了 PATCH の
+  // 成否確定後に破棄 (成功) / 保全 (失敗) する。fetch は新規に呼ばない。
+  const abortInFlightFlush = useCallback((): void => {
+    recorderGenerationRef.current += 1;
+    if (flushAbortRef.current) {
+      flushAbortRef.current.abort();
+      flushAbortRef.current = null;
+    }
+    inFlightFlushRef.current = false;
+    inFlightFlushPromiseRef.current = null;
+    if (!mountedRef.current) return;
+    setIsFlushing(false);
+    // @codex P2 R6/R7: 破棄 PATCH は最大 15 秒かかり得る。その間に status が idle
+    // だと LocationRecorderControls が開始ボタンを出し、ユーザーが新しい watch を
+    // 始められてしまう (その後 PATCH 成功で discardBufferAndStop が新規点まで消す)。
+    // 直前の flush が timeout でハングした場合は status="stopping" のままだが、
+    // 通常失敗 (fast reject) した場合は stopBeforeSessionEnd が完了して idle を
+    // セットしているため、ここで明示的に "stopping" (非 startable) に倒す。PATCH
+    // 確定後、成功なら discardBufferAndStop、失敗なら restoreIdleAfterFailedEnd で
+    // idle に戻す。buffer は保持する。
+    setStatus("stopping");
+  }, []);
+
+  // 破棄経路で終了 PATCH が失敗した時、buffer を保持したまま recorder を操作可能
+  // (idle) に戻す。abortInFlightFlush で "stopping" 固着にした recorder を、終了が
+  // 成立しなかった場合にのみ復帰させ、ユーザーが記録を再開/再試行できるようにする。
+  const restoreIdleAfterFailedEnd = useCallback((): void => {
+    if (!mountedRef.current) return;
+    setStatus("idle");
+  }, []);
+
+  // @codex P1: 終了処理が「曖昧」な間、recorder を "stopping" (非 startable) に
+  // する。通常終了では stopBeforeSessionEnd の flush 成功で status="idle" に
+  // なっているため、PATCH が commit 済みだが応答喪失 + reconcile も unknown の
+  // 場合、active に戻すと「位置記録開始」が再露出し、終了済み session に記録して
+  // 409 で失われる。終了確定まで新 watch を開始させないよう明示的に倒す。
+  // @codex R13: watch 停止 + generation bump + in-flight abort も行い、直前に
+  // 紛れ込んで開始された watch を止め、不可視で走り続けないようにする (buffer は
+  // 保持し、終了確定時に破棄 / active reconcile 後に委ねる)。reconcile が active
+  // を確認したら restoreIdleAfterFailedEnd で idle に戻す。
+  const blockRecorderForPendingEnd = useCallback((): void => {
+    recorderGenerationRef.current += 1;
+    stopWatchingInternal();
+    if (flushAbortRef.current) {
+      flushAbortRef.current.abort();
+      flushAbortRef.current = null;
+    }
+    inFlightFlushRef.current = false;
+    inFlightFlushPromiseRef.current = null;
+    if (!mountedRef.current) return;
+    setIsFlushing(false);
+    setStatus("stopping");
+  }, [stopWatchingInternal]);
+
+  // 未送信の位置記録を破棄して即時停止する (圏外時の巡回終了の脱出口)。
+  // generation bump で in-flight flush の遅延応答も無効化する。fetch は呼ばない。
+  const discardBufferAndStop = useCallback((): void => {
+    recorderGenerationRef.current += 1;
+    if (flushAbortRef.current) {
+      flushAbortRef.current.abort();
+      flushAbortRef.current = null;
+    }
+    stopWatchingInternal();
+    bufferRef.current = [];
+    inFlightFlushRef.current = false;
+    inFlightFlushPromiseRef.current = null;
+    if (!mountedRef.current) return;
+    setBufferedCount(0);
+    setPendingPoints([]);
+    setIsFlushing(false);
+    setStatus("idle");
+    setError(null);
+    setLatestPositionForDisplay(null);
+    setLastLocationErrorForDisplay(null);
+  }, [stopWatchingInternal]);
 
   // ---- session change / unmount cleanup ---------------------------------
 
@@ -742,6 +865,10 @@ export function useFieldSurveyLocationRecorder(
     start,
     stop,
     stopBeforeSessionEnd,
+    discardBufferAndStop,
+    abortInFlightFlush,
+    restoreIdleAfterFailedEnd,
+    blockRecorderForPendingEnd,
   };
 }
 
