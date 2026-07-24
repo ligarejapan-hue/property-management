@@ -60,6 +60,14 @@ const END_PATCH_TIMEOUT_MS = 15000;
 const RECONCILE_TIMEOUT_MS = 12000;
 
 /**
+ * 続行済み stale session の終了直前 best-effort touch のタイムアウト (@codex P1)。
+ * signal / timeout が無いと、touch PATCH が blackhole した時に通常終了が永久待機
+ * し、phase="ending" 固着で終了 PATCH / reconcile / 脱出口へ到達できなくなる。
+ * best-effort ゆえ一定時間で諦めて先へ進む。
+ */
+const TOUCH_TIMEOUT_MS = 8000;
+
+/**
  * active session 整合の結果 (@codex P1)。
  * - active:  自分の active session が確実に存在する
  * - ended:   確実に active session が無い (= 終了済み)
@@ -375,6 +383,11 @@ export default function TripControls({
   // まま endedAt が続行前の時刻へ巻き戻る。失敗しても続行自体は妨げない。
   const touchSession = useCallback(
     async (target: ActiveSessionLike) => {
+      // @codex P1: best-effort touch に timeout を付ける。blackhole すると通常
+      // 終了がここで永久待機し phase="ending" 固着で終了 PATCH / reconcile /
+      // 脱出口へ到達できない。timeout 後は touch を諦めて先へ進む。
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), TOUCH_TIMEOUT_MS);
       try {
         const res = await fetch(
           `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
@@ -383,16 +396,19 @@ export default function TripControls({
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ touch: true }),
+            signal: ac.signal,
           },
         );
         if (!mountedRef.current) return;
         if (res.status === 409) {
           // 並行で終了済み (@codex R9)。終了済み session を巡回中として使い
-          // 続けないよう、状態を取り直して UI を整合させる。
-          await fetchActiveSession();
+          // 続けないよう、状態を取り直して UI を整合させる (GET も timeout 付き)。
+          await fetchActiveSession({ timeoutMs: RECONCILE_TIMEOUT_MS });
         }
       } catch {
-        // best effort (オフライン等)。続行操作はローカルで成立させる。
+        // best effort (オフライン / timeout 等)。続行操作はローカルで成立させる。
+      } finally {
+        clearTimeout(timer);
       }
     },
     [fetchActiveSession],

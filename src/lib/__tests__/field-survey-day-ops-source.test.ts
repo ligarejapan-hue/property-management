@@ -277,6 +277,20 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     );
   });
 
+  it("通常終了の best-effort touch にも timeout/abort を付ける (@codex P1 R12)", () => {
+    // 続行済み stale session の通常終了で touch PATCH が blackhole しても、
+    // 永久待機せず先へ進む (phase="ending" 固着を防ぐ)。
+    const fn = TRIP_SRC.match(
+      /const touchSession = useCallback\([\s\S]*?\[fetchActiveSession\],\s*\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/TOUCH_TIMEOUT_MS/);
+    expect(m).toMatch(/setTimeout\(\(\) => ac\.abort\(\)/);
+    expect(m).toMatch(/signal: ac\.signal/);
+    expect(m).toMatch(/clearTimeout\(timer\)/);
+  });
+
   it("終了失敗の文言は通信起因の対処 (電波の良い場所で) を含む", () => {
     expect(TRIP_SRC).toMatch(/電波の良い場所で、もう一度「巡回終了」を押すと再送信します/);
     expect(TRIP_SRC).toMatch(/巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。/);
