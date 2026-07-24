@@ -520,6 +520,13 @@ export default function TripControls({
           ? "巡回終了の通信が完了しません。電波の良い場所へ移動して、もう一度お試しください。"
           : "巡回終了に失敗しました。電波の良い場所で、もう一度お試しください。";
       let ambiguous = false;
+      // @codex P1 R14: outstanding な終了 PATCH が (client abort 後も) server 側で
+      // commit し得るか。timeout / network (送信済みかも) / 5xx (更新後に throw
+      // かも) は true。この場合、単発 reconcile が active でも recorder を解除しな
+      // い (解除→記録再開中に遅延 PATCH が commit すると新規点が 409 で送れなく
+      // なる)。commit し得ない (server が明確に未 commit=4xx 応答) 時のみ復帰する。
+      // 完全な解消には server 側の冪等キー/operation-id 等の整合プロトコルが要る。
+      let mutationMayHaveCommitted = false;
       try {
         const res = await fetch(
           `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
@@ -549,15 +556,20 @@ export default function TripControls({
           setPhase("idle");
           return;
         }
-        // 非 ok (conflict / 5xx / その他) は曖昧 → 下で reconcile。
+        // 非 ok (conflict / 5xx / その他) は曖昧 → 下で reconcile。5xx は更新後に
+        // throw して commit 済みの可能性があるため mayHaveCommitted。4xx は server
+        // が明確に未 commit (拒否) なので false のまま。
         setError(tripOutcomeMessage(outcome));
         ambiguous = true;
+        mutationMayHaveCommitted = res.status >= 500;
       } catch (err) {
         if (!mountedRef.current) return;
         // unmount / supersede の abort (timeout ではない) は state を触らない。
         if (isAbortError(err) && !patchTimedOut) return;
+        // timeout / network は送信済みかもしれず commit し得る。
         setError(failMessage());
         ambiguous = true;
+        mutationMayHaveCommitted = true;
       } finally {
         clearTimeout(patchTimer);
       }
@@ -570,11 +582,15 @@ export default function TripControls({
       });
       if (!mountedRef.current) return;
       if (reconciled.kind === "active") {
-        // まだ active。ambiguous の間 "stopping" にした recorder を操作可能 (idle)
-        // へ戻す (両経路・buffer 保持)。破棄経路では脱出口も再提示する。
+        // まだ active。破棄経路では脱出口を再提示する。
         setError(failMessage());
-        onEndFailedRestoreRecorder?.();
         if (opts?.discardUnsent) setEndBlockedByBuffer(true);
+        // @codex P1 R14: outstanding PATCH が commit し得ない (server が明確に未
+        // commit) 時のみ recorder を操作可能へ戻す。commit し得る (timeout /
+        // network / 5xx) 場合は、この単発 reconcile が active でも stopping の
+        // まま残す (遅延 commit と記録再開のレースで新規点が失われるため)。ユー
+        // ザーは終了を再試行して確定させる。
+        if (!mutationMayHaveCommitted) onEndFailedRestoreRecorder?.();
       } else if (reconciled.kind === "unknown") {
         // 整合も判定不能。session / buffer は消さず active に戻して retry 可能に
         // する。recorder は stopping のまま = 状態不明の間は新 watch を開始させ
