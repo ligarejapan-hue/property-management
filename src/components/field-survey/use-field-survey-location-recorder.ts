@@ -605,6 +605,12 @@ export function useFieldSurveyLocationRecorder(
    * - lat/lng / raw response を console / error に流さない
    */
   const flushAllBufferedChunks = useCallback(async (): Promise<boolean> => {
+    // @codex P2: drain 全体を generation でガードする。abort / discard /
+    // session 切替で generation が進んだら、await 明けや各再送の前で打ち切り、
+    // 新しい flushBuffer() を開始しない。これを怠ると、破棄 (abortInFlightFlush)
+    // 後に本ループが新規 flush を始め、その POST は更新後 generation を捕捉する
+    // ため flushBuffer 内の stale guard に掛からず、破棄予定の点を送ってしまう。
+    const myGeneration = recorderGenerationRef.current;
     // 既存 in-flight flush の完了を先に待つ
     const inflight = inFlightFlushPromiseRef.current;
     if (inflight) {
@@ -614,9 +620,12 @@ export function useFieldSurveyLocationRecorder(
         // raw error / response は出さない
       }
       if (!mountedRef.current) return false;
+      if (recorderGenerationRef.current !== myGeneration) return false;
     }
     // 進捗のあるうちは chunk を送り続ける
     while (bufferRef.current.length > 0) {
+      // 各再送の前に generation を確認 (途中の abort / discard で打ち切る)
+      if (recorderGenerationRef.current !== myGeneration) break;
       const before = bufferRef.current.length;
       let ok = false;
       try {
@@ -625,6 +634,8 @@ export function useFieldSurveyLocationRecorder(
         ok = false;
       }
       if (!mountedRef.current) return false;
+      // 送信の応答が返る間に generation が進んでいたら以降の再送はしない
+      if (recorderGenerationRef.current !== myGeneration) break;
       const after = bufferRef.current.length;
       if (!ok) break;
       if (after >= before) break;

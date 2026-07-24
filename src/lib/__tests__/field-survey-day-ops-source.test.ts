@@ -203,6 +203,21 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(TRIP_SRC).toMatch(/finally \{\s*clearTimeout\(patchTimer\)/);
   });
 
+  it("flushAllBufferedChunks は drain 全体を generation でガードする (@codex P2)", () => {
+    // abort/discard 後に本ループが新規 flush を始めると、その POST は更新後の
+    // generation を捕捉して flushBuffer 内 stale guard に掛からず、破棄予定の
+    // 点を送ってしまう。await 明けと各再送の前後で generation を確認して打ち切る。
+    const fn = RECORDER_SRC.match(
+      /const flushAllBufferedChunks = useCallback\([\s\S]*?\}, \[flushBuffer\]\);/,
+    );
+    expect(fn).not.toBeNull();
+    const m = fn?.[0] ?? "";
+    expect(m).toMatch(/const myGeneration = recorderGenerationRef\.current/);
+    const guards =
+      m.match(/recorderGenerationRef\.current !== myGeneration/g) ?? [];
+    expect(guards.length).toBeGreaterThanOrEqual(3);
+  });
+
   it("stopBeforeSessionEnd は superseded 時に UI state を上書きしない (generation guard)", () => {
     expect(RECORDER_SRC).toMatch(
       /const myGeneration = recorderGenerationRef\.current/,
