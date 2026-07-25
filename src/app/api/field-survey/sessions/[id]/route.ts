@@ -168,16 +168,21 @@ export async function PATCH(
 
     if (patch.status === "ended" || patch.status === "cancelled") {
       // status 変更は atomic な conditional update で実施。
-      // 0 行更新は「既に終了/キャンセル済」を意味し 409 にマップ。
-      // stale 終了時は読取時の updatedAt も条件に含める (@codex R4: 読取後に
-      // track point flush が入った場合は 0 行 → 409 INVALID_STATE となり、UI の
-      // 既存 conflict 処理 (再取得) に乗る。再試行時は stale でなくなるため
-      // 通常終了 endedAt=now になる)。
+      // 0 行更新は「既に終了/キャンセル済」または「読取後に活動が入った」を
+      // 意味し 409 にマップ (client は既存 conflict 処理 = 再取得 → 再試行)。
+      //
+      // #317 活動フェンス: 読取時の updatedAt を常に条件へ含める (従来は stale
+      // 終了のみ = @codex R4)。track point flush / touch (位置記録開始のフェンス)
+      // は updatedAt を進めるため、client が abort した終了 PATCH がサーバー側で
+      // 遅延して commit する場合でも、「再読込・別タブで再開された記録より後に
+      // 終了が着地して以降の点を 409 で失わせる」ことができなくなる (どちらが
+      // 先かは DB の行ロックが直列化する)。updatedAt は timestamp(3)=ms 精度で
+      // Prisma も ms 精度で書き込むため、読取値の等値比較は round-trip で一致する。
       const result = await prisma.fieldSurveySession.updateMany({
         where: {
           id,
           status: "active",
-          ...(isStaleEnd && { updatedAt: existing.updatedAt }),
+          updatedAt: existing.updatedAt,
         },
         data: {
           status: patch.status,
@@ -188,7 +193,7 @@ export async function PATCH(
       if (result.count === 0) {
         throw new ApiError(
           409,
-          "active 状態でない session は終了/キャンセルできません",
+          "session の状態が変わったため終了/キャンセルできませんでした",
           "INVALID_STATE",
         );
       }

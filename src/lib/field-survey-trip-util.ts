@@ -165,6 +165,28 @@ export function isSessionStale(
   return now.getTime() - t >= thresholdMs;
 }
 
+// ---------------------------------------------------------------------------
+// #317: 巡回終了の確実化 (終了 commit の活動フェンス)
+// ---------------------------------------------------------------------------
+
+/**
+ * 「位置記録開始」フェンス (活動 touch PATCH) の応答分類。
+ *
+ * - 409 = 巡回は既に終了済み (遅延した終了 commit が先に着地した等)。
+ *   watch を開始すると以降の点が 409 で失われるため開始をブロックする。
+ * - 404 = session 消失。同様にブロック。
+ * - null (network / timeout / abort) やその他のエラーは fail-open で開始を許可
+ *   する。フェンスの目的は「終了済みへの記録開始」の防止であり、オフライン等の
+ *   一時障害で記録自体を妨げない (この後の既存ルート取得 GET が失敗すれば
+ *   従来どおり開始は中止される)。
+ */
+export function classifyStartFence(
+  status: number | null,
+): "proceed" | "blocked" {
+  if (status === 409 || status === 404) return "blocked";
+  return "proceed";
+}
+
 /**
  * 放置時間の概算表示 (「約13時間」/ 48 時間以上は「約2日」)。
  * 不正・負値は「しばらく」に fallback (通常発生しない)。

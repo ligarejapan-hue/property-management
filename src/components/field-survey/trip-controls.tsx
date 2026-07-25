@@ -104,6 +104,12 @@ interface TripControlsProps {
    */
   registerStartRequest?: (fn: (() => void) | null) => void;
   /**
+   * #317: 巡回状態の再取得要求を受けるためのハンドラ登録 (registerStartRequest
+   * と同型)。recorder の開始フェンス touch が 409/404 で「巡回は既に終了して
+   * いる」と検知した時に親経由で呼ばれ、巡回中表示を真の状態へ整合させる。
+   */
+  registerSessionRefresh?: (fn: (() => void) | null) => void;
+  /**
    * 「未送信の位置記録を破棄して終了」の破棄側 (親の recorder が実装)。
    * 圏外などで flush できず巡回終了がブロックされた時の脱出口。
    */
@@ -149,6 +155,7 @@ export default function TripControls({
   onActiveSessionChange,
   onBeforeSessionEnd,
   registerStartRequest,
+  registerSessionRefresh,
   onDiscardUnsentLocations,
   onAbortPendingFlush,
   onEndFailedRestoreRecorder,
@@ -323,6 +330,20 @@ export default function TripControls({
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
     };
   }, [fetchActiveSession]);
+
+  // #317: recorder の開始フェンスが「巡回は既に終了」を検知した時の再取得要求を
+  // 親に登録する (registerStartRequest と同型・event 駆動)。GET は timeout 付き。
+  // フェンスが 409 を返した時点で終了は確定しているため、失敗時に session を
+  // 消す既定挙動 (preserveOnFailure なし) で問題ない。
+  const requestRefresh = useCallback(() => {
+    void fetchActiveSession({ timeoutMs: RECONCILE_TIMEOUT_MS });
+  }, [fetchActiveSession]);
+  useEffect(() => {
+    registerSessionRefresh?.(requestRefresh);
+    return () => {
+      registerSessionRefresh?.(null);
+    };
+  }, [registerSessionRefresh, requestRefresh]);
 
   // 巡回中の経過時間表示用 (1 秒 tick)
   useEffect(() => {
