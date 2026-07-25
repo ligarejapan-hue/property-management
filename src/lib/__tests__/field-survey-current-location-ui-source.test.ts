@@ -424,12 +424,13 @@ describe("field-survey-map.tsx — Phase 1-F-3 統合", () => {
   });
 
   it("現在地マーカーで AdvancedMarker を使わない (pin click 干渉防止)", () => {
-    // Map 内に追加した CurrentLocationMarker 経路で AdvancedMarker を使わない
-    // (CurrentLocationMarker 自体は別ファイルで AdvancedMarker 不使用)。
-    // FieldSurveyMap の既存 AdvancedMarker (property / pin) はそのまま。
+    // 現在地は CurrentLocationMarker (別ファイル・AdvancedMarker 不使用) を使う。
+    expect(MAP_SRC).toMatch(/<CurrentLocationMarker/);
+    // FieldSurveyMap の AdvancedMarker は property / pin / focus 強調の 3 経路のみ。
+    // (現在地には AdvancedMarker を足さないこと。focus は @codex P2 で追加した
+    //  「この場所を地図で見る」の強調マーカー。)
     const occurrences = MAP_SRC.match(/<AdvancedMarker/g) ?? [];
-    // property / pin の 2 経路のみ (Phase 1-F-3 で追加しないこと)
-    expect(occurrences.length).toBeLessThanOrEqual(2);
+    expect(occurrences.length).toBeLessThanOrEqual(3);
   });
 
   it("map click 経路で lat / lng を console に出さない", () => {

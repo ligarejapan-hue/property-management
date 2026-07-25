@@ -79,6 +79,9 @@ interface FieldSurveyMapProps {
   // Phase 1-F-1: 巡回 session の own/active 復元用に server-side で確定した
   // ログインユーザー ID を受け取る (client 側で再 fetch しないため漏洩面を絞る)。
   currentUserId: string;
+  // 完成待ち一覧などからの「この場所を地図で見る」導線 (?focusPin=<uuid>)。
+  // 指定ピンへ地図を寄せて詳細を開く。座標は URL でなく pin 詳細 API から取得。
+  focusPinId?: string | null;
 }
 
 interface PropertyRow {
@@ -112,6 +115,7 @@ export default function FieldSurveyMap({
   apiKey,
   mapId,
   currentUserId,
+  focusPinId = null,
 }: FieldSurveyMapProps) {
   // タッチ端末では地図ジェスチャを cooperative(1本指=ページスクロール / 2本指=地図移動)に
   // して、地図が画面を占有し周囲の UI に触れなくなる問題を避ける。PC は greedy 継続。共有フック。
@@ -304,6 +308,66 @@ export default function FieldSurveyMap({
     | null
   >(null);
   const [detailPinId, setDetailPinId] = useState<string | null>(null);
+  // 「この場所を地図で見る」(?focusPin): 指定ピンの場所へ地図を寄せ、そのピンを
+  // 強調マーカーで必ず表示する。map instance が揃った後に一度だけ、pin 詳細 API
+  // から座標を取得して panTo + 強調マーカーを立てる。
+  // - MapDataLayer は bbox を PIN_LIMIT (新しい順) で取得するため、古い候補は
+  //   marker 一覧から漏れ得る (この完成待ちキューが処理する対象がまさに古い候補)。
+  //   panTo だけだと marker の無い中心に着地するので、取得済み座標で専用の強調
+  //   マーカーを立てて「指定した場所」を必ず示す (@codex P2)。
+  // - 詳細パネルは自動で開かない: 座標取得のこの 1 回だけを field_survey_pin_view
+  //   監査に載せる (パネルも同 API を fetch するため、開くと他人 pin で監査が
+  //   二重計上される。@codex 指摘)。ピンの中身を見たい場合は marker タップで開く。
+  // - 座標は URL でなく API から取得し、console / ログには出さない。
+  // - 取得失敗・権限外は静かにスキップし、once-guard を解除して再訪で再試行できる。
+  const [focusPinPos, setFocusPinPos] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const focusedPinRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusPinId || !mapInstance) return;
+    if (focusedPinRef.current === focusPinId) return;
+    // App Router のソフト遷移で ?focusPin が A→B に変わると (remount せず) 本 effect
+    // が再実行され、2 つの取得が重なり得る (@codex P2)。focusedPinRef が最新要求 id
+    // を保持するので、await 明けに現 focusPinId と一致しない完了は stale として捨てる。
+    focusedPinRef.current = focusPinId;
+    void (async () => {
+      // id 変更時は前回 (A) の強調位置を消す (B が失敗しても A の marker が残らない)。
+      setFocusPinPos(null);
+      try {
+        // 座標のみ射影 (memo 本文を client メモリに乗せない・@codex P2)。
+        const res = await fetch(
+          `/api/field-survey/pins/${encodeURIComponent(focusPinId)}/location`,
+          { credentials: "same-origin" },
+        );
+        // stale: await 中に focusPinId が変わっていたら (新しい focus が所有) 破棄。
+        if (focusedPinRef.current !== focusPinId) return;
+        if (!res.ok) {
+          focusedPinRef.current = null;
+          return;
+        }
+        const body = (await res.json().catch(() => null)) as {
+          data?: { lat?: unknown; lng?: unknown };
+        } | null;
+        if (focusedPinRef.current !== focusPinId) return;
+        const lat = Number(body?.data?.lat);
+        const lng = Number(body?.data?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          focusedPinRef.current = null;
+          return;
+        }
+        setFocusPinPos({ lat, lng });
+        const m = mapInstance as {
+          panTo?: (p: { lat: number; lng: number }) => void;
+        };
+        if (m?.panTo) m.panTo({ lat, lng });
+      } catch {
+        // 座標 / API 内部情報を出さない。現要求のままなら guard 解除で再試行可。
+        if (focusedPinRef.current === focusPinId) focusedPinRef.current = null;
+      }
+    })();
+  }, [focusPinId, mapInstance]);
   // カメラファースト (撮って登録): 撮影→現在地取得→ピン作成 modal の進行状態。
   const [cameraFirstPhase, setCameraFirstPhase] =
     useState<CameraFirstPhase>("idle");
@@ -821,6 +885,28 @@ export default function FieldSurveyMap({
               lat={recorder.latestPositionForDisplay.lat}
               lng={recorder.latestPositionForDisplay.lng}
             />
+          )}
+          {/* 「この場所を地図で見る」で指定されたピンの強調マーカー。PIN_LIMIT で
+              marker 一覧から漏れる古い候補でも、指定した場所を必ず示す (@codex P2)。
+              タップで詳細を開く: 前面 (zIndex) のこのマーカーが背後の通常マーカーの
+              タップを奪うため onClick が無いと詳細を開けない。ユーザー操作時のみ
+              setDetailPinId を呼ぶ (自動オープンしないので監査は二重計上されない・
+              タップは 1 回の意図的な閲覧として正しく監査される。@codex P2)。 */}
+          {focusPinPos && focusPinId && (
+            <AdvancedMarker
+              position={focusPinPos}
+              zIndex={1000}
+              title="指定した場所 (タップで詳細)"
+              onClick={() => setDetailPinId(focusPinId)}
+            >
+              <Pin
+                background="#2563EB"
+                borderColor="#FFFFFF"
+                glyphColor="#FFFFFF"
+                glyph="★"
+                scale={1.4}
+              />
+            </AdvancedMarker>
           )}
         </Map>
 

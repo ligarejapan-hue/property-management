@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { listCandidatePins, type CandidatePinRow } from "@/lib/api-client";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
@@ -276,6 +277,16 @@ export default function CandidateQueue() {
                           写真{photoCount}枚{photoShown ? "を隠す" : "を見る"}
                         </button>
                       )}
+                      {/* 場所特定の導線: 地図を指定ピンへ寄せて開く。座標は URL に
+                          載せず (id のみ)、地図側が pin 詳細 API から取得する。 */}
+                      <Link
+                        data-testid="candidate-map-link"
+                        href={`/field-survey/map?focusPin=${r.id}`}
+                        className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                      >
+                        <span aria-hidden="true">🗺</span>
+                        地図で見る
+                      </Link>
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">{r.hasMemo ? "メモあり" : "メモなし"}</div>
                   </div>

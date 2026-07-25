@@ -32,6 +32,10 @@ export default function FieldSurveyMapClient({
   const searchParams = useSearchParams();
   const rawSessionId = searchParams?.get("sessionId") ?? null;
   const historySessionId = isValidUuid(rawSessionId) ? rawSessionId : null;
+  // 完成待ち一覧などからの「この場所を地図で見る」導線。指定ピンへ寄せて
+  // 詳細を開く (座標は map が pin 詳細 API から取得。URL には id のみ)。
+  const rawFocusPin = searchParams?.get("focusPin") ?? null;
+  const focusPinId = isValidUuid(rawFocusPin) ? rawFocusPin : null;
 
   if (!hasKey) return <MissingKeyNotice />;
   // Codex P1: APIキーが入っていても billing 未確認なら Maps JS API loader を
@@ -57,6 +61,7 @@ export default function FieldSurveyMapClient({
       apiKey={apiKey as string}
       mapId={mapId as string}
       currentUserId={currentUserId}
+      focusPinId={focusPinId}
     />
   );
 }
