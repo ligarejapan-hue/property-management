@@ -231,10 +231,10 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(m).not.toMatch(/bufferRef\.current = \[\]/);
     expect(RECORDER_SRC).toMatch(/\n\s+blockRecorderForPendingEnd,\r?\n/);
     // @codex R13: block は touch await より前に呼ぶ (touch 最大 8 秒の間に idle
-    // で「位置記録開始」が露出するのを防ぐ)。#317 R3/R4 でフェンストークン発行
-    // の touch (staleDirect 以外の全終了) に一般化された。
+    // で「位置記録開始」が露出するのを防ぐ)。#317 R3〜R5 でフェンストークン
+    // 発行の GET→CAS touch 連鎖 (staleDirect 以外の全終了) に一般化された。
     expect(TRIP_SRC).toMatch(
-      /onBlockRecorderForEnd\?\.\(\)[\s\S]{0,1600}?await touchSession\(target\)/,
+      /onBlockRecorderForEnd\?\.\(\)[\s\S]{0,2800}?await touchSession\(target/,
     );
     // map が配線する
     expect(MAP_SRC).toMatch(/recorder\.blockRecorderForPendingEnd\(\)/);
@@ -304,14 +304,17 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     );
   });
 
-  it("破棄経路も bounded touch でトークンを取得する (#317 @codex R4)", () => {
+  it("破棄経路も GET→CAS touch でトークンを取得する (#317 @codex R4/R5)", () => {
     // かつての「破棄経路は touch 省略」は touch に timeout が無かった時代の
-    // 判断 (#316 P2 R4)。現在は TOUCH_TIMEOUT_MS で bounded のため、破棄経路も
-    // touch でフェンストークンを取得し、tokenless の終了は送らない。touch
-    // 不達時は終了を送らず脱出口を再提示する (完全圏外では終了 PATCH 自体も
-    // 届かないため、従来挙動から失うものは無い)。
+    // 判断 (#316 P2 R4)。現在は bounded な GET→CAS touch 連鎖でフェンストークン
+    // を取得し、tokenless の終了は送らない。不達時は終了を送らず脱出口を再提示
+    // する (完全圏外では終了 PATCH 自体も届かないため、従来挙動から失うものは
+    // 無い)。
     expect(TRIP_SRC).toMatch(
-      /\} else \{\s*const fence = await touchSession\(target\)/,
+      /\} else \{\s*const known = await fetchOwnActiveUpdatedAt\(target\.id\)/,
+    );
+    expect(TRIP_SRC).toMatch(
+      /await touchSession\(target, \{\s*expectedUpdatedAt: known\.updatedAt,?\s*\}\)/,
     );
     expect(TRIP_SRC).toMatch(/if \(fenceToken === null\)/);
     expect(TRIP_SRC).toMatch(

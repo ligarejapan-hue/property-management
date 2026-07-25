@@ -223,8 +223,20 @@ export async function PATCH(
     } else if (patch.touch) {
       // B-7 (@codex R7): 活動記録専用の touch。updatedAt だけを進め、memo 等は
       // 一切変更しない。
+      //
+      // #317 (@codex R5): expectedUpdatedAt 付き touch は CAS (compare-and-set)。
+      // 「client が既知の世代のままなら進める」を atomic に行い、終了フローの
+      // トークン鋳造に使う。遅延した touch は古い expected のまま = 後から
+      // 立った位置記録開始フェンスの後では不成立 (0 行 → 409) となり、
+      // 「遅延リクエストが新しい世代のトークンを鋳造して追い越す」余地を消す。
       const touched = await prisma.fieldSurveySession.updateMany({
-        where: { id, status: "active" },
+        where: {
+          id,
+          status: "active",
+          ...(patch.expectedUpdatedAt && {
+            updatedAt: new Date(patch.expectedUpdatedAt),
+          }),
+        },
         data: { updatedAt: new Date() },
       });
       if (touched.count === 0) {

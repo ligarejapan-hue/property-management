@@ -1195,6 +1195,85 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
+  it("#317(@codex R5): expectedUpdatedAt 付き touch は CAS (既知世代と一致時のみ成立)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date(Date.now() - 60 * 60 * 1000);
+    const known = new Date(Date.now() - 10 * 1000);
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        updatedAt: known,
+        status: "active",
+        pointCount: 3,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: null,
+        status: "active",
+        memo: null,
+        pointCount: 3,
+        createdAt: startedAt,
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({
+          touch: true,
+          expectedUpdatedAt: known.toISOString(),
+        }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(200);
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(umArgs.where).toEqual({
+      id: "s-1",
+      status: "active",
+      updatedAt: known,
+    });
+    expect(umArgs.data).toEqual({ updatedAt: expect.any(Date) });
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("#317(@codex R5): 世代が進んでいたら CAS touch は 409 (遅延 touch がトークンを鋳造できない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      id: "s-1",
+      staffUserId: fieldUser.id,
+      startedAt: new Date(),
+      updatedAt: new Date(), // 別タブのフェンス等が既に進めた
+      status: "active",
+      pointCount: 0,
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 0,
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({
+          touch: true,
+          expectedUpdatedAt: new Date(Date.now() - 60_000).toISOString(),
+        }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_STATE");
+  });
+
   it("B-7(@codex R9): 並行終了済みへの touch は 409 INVALID_STATE (200で握り潰さない)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);

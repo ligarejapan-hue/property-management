@@ -418,6 +418,15 @@ export default function TripControls({
   const touchSession = useCallback(
     async (
       target: ActiveSessionLike,
+      opts?: {
+        /**
+         * #317 (@codex R5): CAS (compare-and-set) 条件。指定時は「session の
+         * updatedAt がこの値のまま」の時だけ touch が成立する。遅延した touch
+         * が後から立ったフェンスを追い越して新しいトークンを鋳造するのを防ぐ
+         * (古い expected のままでは server 側で 0 行 → 409)。
+         */
+        expectedUpdatedAt?: string;
+      },
     ): Promise<{ conflict: boolean; pinnedUpdatedAt: string | null }> => {
       // @codex P1: best-effort touch に timeout を付ける。blackhole すると通常
       // 終了がここで永久待機し phase="ending" 固着で終了 PATCH / reconcile /
@@ -431,7 +440,12 @@ export default function TripControls({
             method: "PATCH",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ touch: true }),
+            body: JSON.stringify({
+              touch: true,
+              ...(opts?.expectedUpdatedAt && {
+                expectedUpdatedAt: opts.expectedUpdatedAt,
+              }),
+            }),
             signal: ac.signal,
           },
         );
@@ -463,6 +477,55 @@ export default function TripControls({
       }
     },
     [fetchActiveSession],
+  );
+
+  // #317 (@codex R5): 終了フローの「操作開始時点で既知の世代」を取る読み取り
+  // 専用 GET。fetchActiveSession と違い UI state を一切触らない (phase="ending"
+  // 中に session/phase を書き換えない)。drain 完了後に呼ぶため、自分の flush
+  // による updatedAt 前進もここで取り込める (client 側で世代を別途追跡する
+  // 配線が不要になる)。読み取りは何も鋳造しないため、遅延・陳腐化しても
+  // 後段の CAS touch が必ず検出する (古い値での CAS は 0 行 → 409)。
+  const fetchOwnActiveUpdatedAt = useCallback(
+    async (
+      targetId: string,
+    ): Promise<
+      | { kind: "active"; updatedAt: string | null }
+      | { kind: "ended" }
+      | { kind: "unknown" }
+    > => {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), RECONCILE_TIMEOUT_MS);
+      try {
+        const url =
+          `/api/field-survey/sessions?status=active` +
+          `&staffUserId=${encodeURIComponent(currentUserId)}&limit=1`;
+        const res = await fetch(url, {
+          signal: ac.signal,
+          credentials: "same-origin",
+        });
+        if (!res.ok) return { kind: "unknown" };
+        const body = (await res.json().catch(() => null)) as
+          | { data?: ActiveSessionLike[] }
+          | null;
+        const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
+        if (!own || own.id !== targetId) return { kind: "ended" };
+        const u = own.updatedAt;
+        return {
+          kind: "active",
+          updatedAt:
+            typeof u === "string"
+              ? u
+              : u instanceof Date
+                ? u.toISOString()
+                : null,
+        };
+      } catch {
+        return { kind: "unknown" };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    [currentUserId],
   );
 
   const endSession = useCallback(
@@ -552,19 +615,21 @@ export default function TripControls({
       // B-7 (@codex R10) の「続行済み session の stale 判定解除」もこの touch が
       // 兼ねる (endedAt が続行前へ巻き戻らない)。
       //
-      // フェンストークンの取得 (@codex R4: トークン無しの終了は server が拒否
-      // する。server 側で観測する時刻では「ハンドラ開始前」の遅延を区別できない
-      // ため、全経路で client がピン留めした世代値を運ぶ):
-      // - 通常終了・破棄終了: 直前の活動 touch (TOUCH_TIMEOUT_MS で bounded =
-      //   ハングしても脱出口は固まらない。かつての破棄経路の touch 省略は
-      //   timeout 導入前の判断) の応答 updatedAt をトークンにする。touch 不達
-      //   (完全圏外) の場合は終了を送らず再試行を案内する — その状況では終了
-      //   PATCH 自体も届かないため、従来挙動から失うものは無い。
+      // フェンストークンの取得 (@codex R3〜R5: 終了は「操作開始時点で既知の
+      // 世代」に連鎖する CAS でのみ commit できる。server 側で観測する時刻や、
+      // 遅延後に鋳造されたトークンでは、後から立った位置記録開始フェンスを
+      // 追い越せてしまう):
+      // - 通常終了・破棄終了: ①drain 後に読み取り専用 GET で現在の世代を取得
+      //   → ②その世代と一致する時だけ成立する CAS touch (bounded 8 秒) →
+      //   ③CAS が鋳造した世代で終了 PATCH。各リンクが前段の値を条件にする
+      //   ため、鎖のどこにフェンスが割り込んでも必ず不成立になる。遅延した
+      //   CAS touch 自体も古い expected のままなので何も書かない (ゾンビ化
+      //   しない)。GET/touch 不達 (完全圏外) は終了を送らず再試行を案内 —
+      //   その状況では終了 PATCH 自体も届かないため従来から失うものは無い。
       // - 放置 session の直接終了 (staleDirect): touch すると server の stale
       //   判定が解除され endedAt=now の過大記録に戻る (B-7 R3)。touch せず
-      //   復元 GET で得た client 既知の updatedAt をトークンにする (復元後に
-      //   活動していなければ現在値と一致して成立・並行活動があれば 409 →
-      //   既存 conflict 処理。ゾンビ排除と endedAt 規則を両立)。
+      //   復元 GET で得た client 既知の updatedAt をトークンにする (これ自体
+      //   が操作開始時点の世代 = R5 の要件を満たす)。
       let fenceToken: string | null = null;
       if (opts?.staleDirect) {
         if (target.updatedAt !== undefined) {
@@ -574,14 +639,33 @@ export default function TripControls({
               : new Date(target.updatedAt).toISOString();
         }
       } else {
-        const fence = await touchSession(target);
+        const known = await fetchOwnActiveUpdatedAt(target.id);
         if (!mountedRef.current) return;
-        if (fence.conflict) {
-          // 既に並行で終了済み (touchSession 内で reconcile 済み・session は
-          // null → idle)。終了の目的は達しているためここで完了とする。
+        if (known.kind === "ended") {
+          // 既に active でない (並行終了済み等)。全体 reconcile で UI を整合
+          // させ、この終了操作は完了扱いにする。
+          await fetchActiveSession({ timeoutMs: RECONCILE_TIMEOUT_MS });
           return;
         }
-        fenceToken = fence.pinnedUpdatedAt;
+        if (known.kind === "active" && known.updatedAt !== null) {
+          const fence = await touchSession(target, {
+            expectedUpdatedAt: known.updatedAt,
+          });
+          if (!mountedRef.current) return;
+          if (fence.conflict) {
+            // CAS 敗北 (別タブのフェンス等が世代を進めた) または並行終了。
+            // touchSession 内の reconcile が UI を整合済み。active のままなら
+            // ユーザーが最新状態を見て終了を再確認する (自動では終了しない)。
+            setError(
+              "巡回の状態が変わりました。最新の状態を確認して、もう一度お試しください。",
+            );
+            if (!outstandingEndMayCommitRef.current) {
+              onEndFailedRestoreRecorder?.();
+            }
+            return;
+          }
+          fenceToken = fence.pinnedUpdatedAt;
+        }
       }
       if (fenceToken === null) {
         // トークンを得られない間は終了を送らない (tokenless は server が拒否)。
@@ -717,6 +801,7 @@ export default function TripControls({
     },
     [
       fetchActiveSession,
+      fetchOwnActiveUpdatedAt,
       onAbortPendingFlush,
       onBeforeSessionEnd,
       onBlockRecorderForEnd,
