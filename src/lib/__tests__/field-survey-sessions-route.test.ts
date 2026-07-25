@@ -805,11 +805,14 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
       .calls[0][0];
     expect(umArgs.data.endedAt).toEqual(lastActivityAt);
-    // stale 終了も同じフェンストークン等値条件 (client 既知の最終活動時刻)
+    // stale 終了は世代条件に加えて読取時 updatedAt 等値も併用する (@codex R8:
+    // flush は世代を進めないため、読取後に割り込む flush は世代条件では検出
+    // できない。endedAt=過去時刻の終了より後の記録を残さない)
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
       activitySeq: 7,
+      updatedAt: lastActivityAt,
     });
     // durationSec は startedAt→最終活動時刻 (約1時間) で、73時間にはならない
     const call = writeAuditLog.mock.calls[0][0];
@@ -847,11 +850,36 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("#317(@codex R4): トークン無しの status 変更は 422 (DB 更新に到達しない)", async () => {
-    // server 側で観測する時刻 (読取値・到着時刻) では「ハンドラ開始前」の遅延
-    // を区別できないため、フェンストークンの無い終了/キャンセルは許可しない。
+  it("#317(@codex R8): トークン無し (旧タブ互換) は従来条件 (status のみ) で受ける", async () => {
+    // deploy を跨いだ旧タブは expectedActivitySeq を送れない。拒否すると
+    // reload まで終了不能になるため、従来 (改修前) と同一の保護水準で受ける。
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date(Date.now() - 60 * 60 * 1000);
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        updatedAt: new Date(Date.now() - 20 * 1000), // 非 stale
+        status: "active",
+        pointCount: 5,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: new Date(),
+        status: "ended",
+        memo: null,
+        pointCount: 5,
+        activitySeq: 3,
+        createdAt: startedAt,
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
@@ -859,9 +887,10 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
       }),
       { params: Promise.resolve({ id: "s-1" }) },
     );
-    expect(res.status).toBe(422);
-    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
-    expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(umArgs.where).toEqual({ id: "s-1", status: "active" });
   });
 
   it("#317(@codex R3): フェンストークン付き終了は client 発行値の等値条件で commit する", async () => {

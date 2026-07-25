@@ -60,24 +60,24 @@ describe("classifyStartFence — フェンス touch 応答の分類 (純関数)"
   });
 });
 
-describe("route — 終了 commit の活動フェンス (フェンストークン等値のみ)", () => {
-  it("終了/キャンセルの updateMany はフェンストークン等値を条件にし、tokenless は拒否", () => {
+describe("route — 終了 commit の活動フェンス (世代等値 + stale の updatedAt 併用)", () => {
+  it("終了/キャンセルの updateMany は世代等値 (+ stale は updatedAt 等値) を条件にする", () => {
     // 終了/キャンセル分岐の updateMany を掴む
     const block =
       ROUTE_SRC.match(
         /if \(patch\.status === "ended" \|\| patch\.status === "cancelled"\) \{[\s\S]*?INVALID_STATE/,
       )?.[0] ?? "";
     expect(block).not.toBe("");
-    // @codex R2〜R4: server 側で観測する値 (読取時 updatedAt / ハンドラ到着
-    // 時刻) はどこで捕捉しても「遅延後」になり得る。client が送信時にピン留め
-    // した世代値の等値のみを条件にし、トークン無しは 422 で拒否する
-    // (schema refine + 型ガード二重防御)。
-    expect(block).toMatch(/if \(patch\.expectedActivitySeq === undefined\)/);
-    expect(block).toMatch(/activitySeq:\s*patch\.expectedActivitySeq/);
+    // @codex R2〜R7: server 側で観測する値では遅延を区別できない。client が
+    // 意図時点にピン留めした世代の等値を条件にする。token 無し (deploy を
+    // 跨いだ旧タブ) は従来条件で受ける (R8: 拒否すると reload まで終了不能)。
+    expect(block).toMatch(
+      /\.\.\.\(patch\.expectedActivitySeq !== undefined && \{\s*activitySeq: patch\.expectedActivitySeq,?\s*\}\)/,
+    );
+    // @codex R8: stale 終了は flush (世代を進めない) の割り込みを検出するため
+    // 読取時 updatedAt 等値も併用する
+    expect(block).toMatch(/isStaleEnd && \{ updatedAt: existing\.updatedAt \}/);
     expect(block).not.toMatch(/updatedAt:\s*fenceToken/);
-    expect(block).not.toMatch(/requestArrivedAt/);
-    expect(block).not.toMatch(/updatedAt:\s*existing\.updatedAt/);
-    expect(block).not.toMatch(/isStaleEnd && \{ updatedAt/);
     // 到着時刻フォールバック自体を廃止 (R4)
     expect(ROUTE_SRC).not.toMatch(/requestArrivedAt/);
   });
@@ -115,7 +115,7 @@ describe("route — 終了 commit の活動フェンス (フェンストーク�
     expect(TRIP).toMatch(/staleDirect: true/);
   });
 
-  it("トークンはスキーマで整数検証 + status 変更には必須 (validators)", () => {
+  it("トークンはスキーマで整数検証 (旧タブ互換のため必須にはしない)・fence flag あり", () => {
     const VALIDATORS_SRC = readSrc("src/lib/validators.ts");
     const schema =
       VALIDATORS_SRC.match(
@@ -126,8 +126,9 @@ describe("route — 終了 commit の活動フェンス (フェンストーク�
     );
     // @codex R7: フェンス指定 flag (記録開始 touch のみ世代を進める)
     expect(schema).toMatch(/fence:\s*z\.literal\(true\)\.optional\(\)/);
-    // @codex R4: tokenless の status 変更を schema 段階で拒否
-    expect(schema).toMatch(
+    // @codex R8: token を schema 必須にしない (deploy を跨いだ旧タブが reload
+    // まで終了不能になるため)。本 client は常に同封する (trip-controls 参照)。
+    expect(schema).not.toMatch(
       /v\.status === undefined \|\| v\.expectedActivitySeq !== undefined/,
     );
   });

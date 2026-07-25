@@ -263,25 +263,22 @@ export const patchFieldSurveySessionSchema = z
     // fence: true の touch で行い、session の世代 (activitySeq) を必ず +1 する。
     // 通常の活動 touch (続行の記録・stale 解除) は世代を進めない。
     fence: z.literal(true).optional(),
-    // #317 (@codex R3〜R7): 終了/キャンセルのフェンストークン (世代カウンタ)。
+    // #317 (@codex R3〜R8): 終了/キャンセルのフェンストークン (世代カウンタ)。
     // client が「終了の意図時点」に読み取り GET で得た activitySeq をそのまま
     // echo する。server はこの等値を commit 条件に使い、意図より後にフェンス
     // (記録再開) が立った終了を (どの段階で遅延していても) 拒否できる。整数の
-    // 単調増加なので時計・ms 精度に依存しない。status 変更には必須 (トークン
-    // 無しの終了は server 側で観測する値では遅延を区別できないため許可しない)。
+    // 単調増加なので時計・ms 精度に依存しない。
+    //
+    // 本 client は必ず同封するが、schema 必須にはしない (@codex R8): deploy を
+    // 跨いで開いたままの旧タブは token を送れず、必須化すると reload まで終了
+    // 不能になり buffer を放棄させかねない。token 無しは「従来 (改修前) と
+    // 同一の保護水準」で受ける (route 側コメント参照・退行ではない)。
     expectedActivitySeq: z.number().int().min(0).optional(),
   })
   .refine(
     (v) => v.status !== undefined || v.memo !== undefined || v.touch === true,
     {
       message: "status / memo / touch のいずれかを指定してください",
-    },
-  )
-  .refine(
-    (v) => v.status === undefined || v.expectedActivitySeq !== undefined,
-    {
-      message:
-        "status 変更には expectedActivitySeq (フェンストークン) が必要です。ページを再読み込みしてください",
     },
   );
 

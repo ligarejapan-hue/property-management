@@ -173,30 +173,36 @@ export async function PATCH(
       // 意味し 409 にマップ (client は既存 conflict 処理 = 再取得 → 再試行)。
       //
       // #317 活動フェンス: 遅延した終了 commit が「再読込・別タブで再開された
-      // 記録 (フェンス touch 以降)」の後から着地して以降の点を 409 で失わせる
-      // ことを防ぐ。
+      // 記録 (位置記録開始フェンス以降)」の後から着地して以降の点を 409 で
+      // 失わせることを防ぐ。
       //
-      // commit 条件は expectedActivitySeq (世代カウンタ) の等値のみ。client は
-      // 終了直前の CAS touch 応答 (または復元 GET) から得た activitySeq を echo
-      // する。値は「送信時点」でピン留めされ、活動 (touch / flush) は必ず世代を
-      // +1 するため、リクエストがどの段階で遅延しても古い終了は古い世代のまま
-      // = 後から立った位置記録開始フェンスの後では必ず不成立。
-      // (@codex R2〜R6: 読取時 updatedAt・ハンドラ到着時刻・timestamp(3) の
-      //  updatedAt 等値はいずれも遅延/同一 ms 衝突で追い越され得る。整数の
-      //  単調増加カウンタのみが健全。トークン無しの終了はスキーマで拒否)。
-      if (patch.expectedActivitySeq === undefined) {
-        // schema refine 済みだが型ガードを兼ねた二重防御 (fail-closed)。
-        throw new ApiError(
-          422,
-          "status 変更には expectedActivitySeq が必要です",
-          "VALIDATION_ERROR",
-        );
-      }
+      // commit 条件は expectedActivitySeq (世代カウンタ) の等値。client は終了
+      // 意図の時点 (drain より前) に読み取り GET で得た activitySeq を echo
+      // する。値は意図時点でピン留めされ、記録開始フェンスは必ず世代を +1
+      // するため、リクエストがどの段階で遅延しても「意図より後に記録が再開
+      // された終了」は必ず不成立 (@codex R2〜R7: 読取時 updatedAt・ハンドラ
+      // 到着時刻・timestamp(3) の等値はいずれも遅延/同一 ms 衝突で追い越され
+      // 得る。整数の単調増加カウンタ + 意図時点ピンのみが健全)。
+      //
+      // token 無し (@codex R8): deploy を跨いで開いたままの旧タブとの互換のため
+      // 拒否せず、従来 (改修前) と同一の条件 = status:"active" (+ stale 終了の
+      // updatedAt 等値) で受ける。保護水準は現行本番と同じ = 退行ではない。
+      // 旧タブの露出はタブ寿命 + 放置 session の 24h 自動終了で有界。
+      //
+      // stale 終了の updatedAt 等値 (@codex R8): flush は世代を進めない (R7)
+      // ため、読取と commit の間に割り込む flush (半日圏外→復帰直後の一括
+      // 送信等) を世代条件では検出できない。endedAt=最終活動時刻 (過去) で
+      // 終了した後にその flush の点が「終了時刻より後の記録」として残らない
+      // よう、stale 終了に限り従来の読取時 updatedAt 等値も併用する
+      // (割り込まれたら 0 行 → 409 → 再試行では最新活動が見え stale でなくなる)。
       const result = await prisma.fieldSurveySession.updateMany({
         where: {
           id,
           status: "active",
-          activitySeq: patch.expectedActivitySeq,
+          ...(patch.expectedActivitySeq !== undefined && {
+            activitySeq: patch.expectedActivitySeq,
+          }),
+          ...(isStaleEnd && { updatedAt: existing.updatedAt }),
         },
         data: {
           status: patch.status,
