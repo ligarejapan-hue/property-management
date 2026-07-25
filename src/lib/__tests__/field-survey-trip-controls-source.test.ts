@@ -232,11 +232,11 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
     // endSession 内で (stale 直接終了を除き) 読み取り GET → その世代を条件に
     // した CAS touch → 鋳造された世代で終了 PATCH、と連鎖する。続行済み
     // session の stale 巻き戻り防止 (R10) はこの touch が兼ねる。
-    expect(TRIP_SRC).toMatch(/fetchOwnActiveUpdatedAt\(target\.id\)/);
+    expect(TRIP_SRC).toMatch(/fetchOwnActiveGeneration\(target\.id\)/);
     expect(TRIP_SRC).toMatch(
-      /await touchSession\(target, \{\s*expectedUpdatedAt: known\.updatedAt,?\s*\}\)/,
+      /await touchSession\(target, \{\s*expectedActivitySeq: known\.activitySeq,?\s*\}\)/,
     );
-    expect(TRIP_SRC).toMatch(/expectedUpdatedAt: fenceToken/);
+    expect(TRIP_SRC).toMatch(/expectedActivitySeq: fenceToken/);
   });
 });
 

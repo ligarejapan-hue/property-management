@@ -311,10 +311,10 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     // する (完全圏外では終了 PATCH 自体も届かないため、従来挙動から失うものは
     // 無い)。
     expect(TRIP_SRC).toMatch(
-      /\} else \{\s*const known = await fetchOwnActiveUpdatedAt\(target\.id\)/,
+      /\} else \{\s*const known = await fetchOwnActiveGeneration\(target\.id\)/,
     );
     expect(TRIP_SRC).toMatch(
-      /await touchSession\(target, \{\s*expectedUpdatedAt: known\.updatedAt,?\s*\}\)/,
+      /await touchSession\(target, \{\s*expectedActivitySeq: known\.activitySeq,?\s*\}\)/,
     );
     expect(TRIP_SRC).toMatch(/if \(fenceToken === null\)/);
     expect(TRIP_SRC).toMatch(

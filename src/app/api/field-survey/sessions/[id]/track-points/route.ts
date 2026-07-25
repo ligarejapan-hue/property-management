@@ -103,9 +103,15 @@ export async function POST(
       if (inserted.count > 0) {
         // 実 insert 件数のみ加算。session が終了済になっていたら 0 行更新 →
         // throw して transaction を rollback。
+        // #317: 活動世代 (activitySeq) も +1 する。終了フェンスは世代等値で
+        // commit するため、flush が世代を進めることで「遅延した終了が新しい
+        // 記録の後から着地する」ことを防ぐ。
         const upd = await tx.fieldSurveySession.updateMany({
           where: { id, status: "active" },
-          data: { pointCount: { increment: inserted.count } },
+          data: {
+            pointCount: { increment: inserted.count },
+            activitySeq: { increment: 1 },
+          },
         });
         if (upd.count === 0) {
           throw new ApiError(

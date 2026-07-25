@@ -107,6 +107,11 @@ export interface ActiveSessionLike {
   pointCount: number;
   /** 最終活動時刻 (放置判定に使用)。古い API 応答に無い場合は startedAt で代用。 */
   updatedAt?: string | Date;
+  /**
+   * #317: 終了フェンスの世代カウンタ。活動 (touch / flush) のたびに +1 され、
+   * 終了/キャンセルはこの世代との等値でのみ commit できる。
+   */
+  activitySeq?: number;
 }
 
 /**

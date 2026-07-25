@@ -866,6 +866,12 @@ model FieldSurveySession {
   status      FieldSurveySessionStatus @default(active)
   memo        String?
   pointCount  Int                     @default(0) @map("point_count")
+  // #317: 巡回終了フェンスの世代カウンタ。活動 (touch / track point flush) の
+  // たびに必ず +1 され、終了/キャンセルは client がピン留めした世代との等値
+  // でのみ commit できる。整数の単調増加なので時計・ms 精度に依存しない
+  // (updatedAt は同一 ms の並行書込で値が変わらないことがあり、フェンスには
+  // 使えない = @codex #322 R6)。
+  activitySeq Int                     @default(0) @map("activity_seq")
   createdAt   DateTime                @default(now()) @map("created_at")
   updatedAt   DateTime                @updatedAt @map("updated_at")
 

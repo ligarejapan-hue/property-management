@@ -420,14 +420,14 @@ export default function TripControls({
       target: ActiveSessionLike,
       opts?: {
         /**
-         * #317 (@codex R5): CAS (compare-and-set) 条件。指定時は「session の
-         * updatedAt がこの値のまま」の時だけ touch が成立する。遅延した touch
-         * が後から立ったフェンスを追い越して新しいトークンを鋳造するのを防ぐ
-         * (古い expected のままでは server 側で 0 行 → 409)。
+         * #317 (@codex R5/R6): CAS (compare-and-set) 条件。指定時は「session の
+         * 活動世代 (activitySeq) がこの値のまま」の時だけ touch が成立し +1 で
+         * 進める。遅延した touch が後から立ったフェンスを追い越して新しい
+         * トークンを鋳造するのを防ぐ (古い expected では server 側で 0 行 → 409)。
          */
-        expectedUpdatedAt?: string;
+        expectedActivitySeq?: number;
       },
-    ): Promise<{ conflict: boolean; pinnedUpdatedAt: string | null }> => {
+    ): Promise<{ conflict: boolean; pinnedActivitySeq: number | null }> => {
       // @codex P1: best-effort touch に timeout を付ける。blackhole すると通常
       // 終了がここで永久待機し phase="ending" 固着で終了 PATCH / reconcile /
       // 脱出口へ到達できない。timeout 後は touch を諦めて先へ進む。
@@ -442,36 +442,37 @@ export default function TripControls({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               touch: true,
-              ...(opts?.expectedUpdatedAt && {
-                expectedUpdatedAt: opts.expectedUpdatedAt,
+              ...(opts?.expectedActivitySeq !== undefined && {
+                expectedActivitySeq: opts.expectedActivitySeq,
               }),
             }),
             signal: ac.signal,
           },
         );
         if (!mountedRef.current) {
-          return { conflict: false, pinnedUpdatedAt: null };
+          return { conflict: false, pinnedActivitySeq: null };
         }
         if (res.status === 409) {
-          // 並行で終了済み (@codex R9)。終了済み session を巡回中として使い
-          // 続けないよう、状態を取り直して UI を整合させる (GET も timeout 付き)。
+          // 並行で終了済み / CAS 敗北 (@codex R9)。終了済み session を巡回中と
+          // して使い続けないよう、状態を取り直して UI を整合させる。
           await fetchActiveSession({ timeoutMs: RECONCILE_TIMEOUT_MS });
-          return { conflict: true, pinnedUpdatedAt: null };
+          return { conflict: true, pinnedActivitySeq: null };
         }
         if (res.ok) {
           const body = (await res.json().catch(() => null)) as
-            | { data?: { updatedAt?: string } }
+            | { data?: { activitySeq?: number } }
             | null;
-          const u = body?.data?.updatedAt;
+          const s = body?.data?.activitySeq;
           return {
             conflict: false,
-            pinnedUpdatedAt: typeof u === "string" ? u : null,
+            pinnedActivitySeq:
+              typeof s === "number" && Number.isInteger(s) ? s : null,
           };
         }
-        return { conflict: false, pinnedUpdatedAt: null };
+        return { conflict: false, pinnedActivitySeq: null };
       } catch {
         // best effort (オフライン / timeout 等)。続行操作はローカルで成立させる。
-        return { conflict: false, pinnedUpdatedAt: null };
+        return { conflict: false, pinnedActivitySeq: null };
       } finally {
         clearTimeout(timer);
       }
@@ -482,14 +483,14 @@ export default function TripControls({
   // #317 (@codex R5): 終了フローの「操作開始時点で既知の世代」を取る読み取り
   // 専用 GET。fetchActiveSession と違い UI state を一切触らない (phase="ending"
   // 中に session/phase を書き換えない)。drain 完了後に呼ぶため、自分の flush
-  // による updatedAt 前進もここで取り込める (client 側で世代を別途追跡する
-  // 配線が不要になる)。読み取りは何も鋳造しないため、遅延・陳腐化しても
-  // 後段の CAS touch が必ず検出する (古い値での CAS は 0 行 → 409)。
-  const fetchOwnActiveUpdatedAt = useCallback(
+  // による世代前進もここで取り込める (client 側で世代を別途追跡する配線が
+  // 不要になる)。読み取りは何も鋳造しないため、遅延・陳腐化しても後段の
+  // CAS touch が必ず検出する (古い世代での CAS は 0 行 → 409)。
+  const fetchOwnActiveGeneration = useCallback(
     async (
       targetId: string,
     ): Promise<
-      | { kind: "active"; updatedAt: string | null }
+      | { kind: "active"; activitySeq: number | null }
       | { kind: "ended" }
       | { kind: "unknown" }
     > => {
@@ -509,15 +510,11 @@ export default function TripControls({
           | null;
         const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
         if (!own || own.id !== targetId) return { kind: "ended" };
-        const u = own.updatedAt;
+        const s = own.activitySeq;
         return {
           kind: "active",
-          updatedAt:
-            typeof u === "string"
-              ? u
-              : u instanceof Date
-                ? u.toISOString()
-                : null,
+          activitySeq:
+            typeof s === "number" && Number.isInteger(s) ? s : null,
         };
       } catch {
         return { kind: "unknown" };
@@ -615,41 +612,49 @@ export default function TripControls({
       // B-7 (@codex R10) の「続行済み session の stale 判定解除」もこの touch が
       // 兼ねる (endedAt が続行前へ巻き戻らない)。
       //
-      // フェンストークンの取得 (@codex R3〜R5: 終了は「操作開始時点で既知の
-      // 世代」に連鎖する CAS でのみ commit できる。server 側で観測する時刻や、
-      // 遅延後に鋳造されたトークンでは、後から立った位置記録開始フェンスを
-      // 追い越せてしまう):
+      // フェンストークン (世代カウンタ activitySeq) の取得 (@codex R3〜R6:
+      // 終了は「操作開始時点で既知の世代」に連鎖する CAS でのみ commit できる。
+      // server 側で観測する時刻・遅延後に鋳造されたトークン・同一 ms で衝突し
+      // 得る updatedAt では、後から立った位置記録開始フェンスを追い越せる):
       // - 通常終了・破棄終了: ①drain 後に読み取り専用 GET で現在の世代を取得
-      //   → ②その世代と一致する時だけ成立する CAS touch (bounded 8 秒) →
-      //   ③CAS が鋳造した世代で終了 PATCH。各リンクが前段の値を条件にする
+      //   → ②その世代と一致する時だけ +1 で成立する CAS touch (bounded 8 秒)
+      //   → ③CAS が鋳造した世代で終了 PATCH。各リンクが前段の値を条件にする
       //   ため、鎖のどこにフェンスが割り込んでも必ず不成立になる。遅延した
       //   CAS touch 自体も古い expected のままなので何も書かない (ゾンビ化
       //   しない)。GET/touch 不達 (完全圏外) は終了を送らず再試行を案内 —
       //   その状況では終了 PATCH 自体も届かないため従来から失うものは無い。
       // - 放置 session の直接終了 (staleDirect): touch すると server の stale
       //   判定が解除され endedAt=now の過大記録に戻る (B-7 R3)。touch せず
-      //   復元 GET で得た client 既知の updatedAt をトークンにする (これ自体
+      //   復元 GET で得た client 既知の activitySeq をトークンにする (これ自体
       //   が操作開始時点の世代 = R5 の要件を満たす)。
-      let fenceToken: string | null = null;
+      let fenceToken: number | null = null;
       if (opts?.staleDirect) {
-        if (target.updatedAt !== undefined) {
-          fenceToken =
-            typeof target.updatedAt === "string"
-              ? target.updatedAt
-              : new Date(target.updatedAt).toISOString();
+        if (typeof target.activitySeq === "number") {
+          fenceToken = target.activitySeq;
         }
       } else {
-        const known = await fetchOwnActiveUpdatedAt(target.id);
+        const known = await fetchOwnActiveGeneration(target.id);
         if (!mountedRef.current) return;
         if (known.kind === "ended") {
           // 既に active でない (並行終了済み等)。全体 reconcile で UI を整合
-          // させ、この終了操作は完了扱いにする。
-          await fetchActiveSession({ timeoutMs: RECONCILE_TIMEOUT_MS });
+          // させ、この終了操作は完了扱いにする。reconcile 自体が timeout 等で
+          // 判定不能 (unknown・state 未変更) の場合は phase="ending" のまま
+          // 固まらないよう active に戻して再試行可能にする (@codex R6 P2)。
+          const rec = await fetchActiveSession({
+            timeoutMs: RECONCILE_TIMEOUT_MS,
+          });
+          if (!mountedRef.current) return;
+          if (rec.kind === "unknown") {
+            setError(
+              "巡回終了を確認できませんでした。電波の良い場所へ移動して、もう一度お試しください。",
+            );
+            setPhase("active");
+          }
           return;
         }
-        if (known.kind === "active" && known.updatedAt !== null) {
+        if (known.kind === "active" && known.activitySeq !== null) {
           const fence = await touchSession(target, {
-            expectedUpdatedAt: known.updatedAt,
+            expectedActivitySeq: known.activitySeq,
           });
           if (!mountedRef.current) return;
           if (fence.conflict) {
@@ -664,7 +669,7 @@ export default function TripControls({
             }
             return;
           }
-          fenceToken = fence.pinnedUpdatedAt;
+          fenceToken = fence.pinnedActivitySeq;
         }
       }
       if (fenceToken === null) {
@@ -716,9 +721,9 @@ export default function TripControls({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               status: "ended",
-              // #317: フェンストークン (touch 応答 / 復元 GET の updatedAt
+              // #317: フェンストークン (CAS touch 応答 / 復元 GET の activitySeq
               // echo)。終了は必ずこれを同封する (tokenless は server が拒否)。
-              expectedUpdatedAt: fenceToken,
+              expectedActivitySeq: fenceToken,
             }),
             signal: ac.signal,
           },
@@ -801,7 +806,7 @@ export default function TripControls({
     },
     [
       fetchActiveSession,
-      fetchOwnActiveUpdatedAt,
+      fetchOwnActiveGeneration,
       onAbortPendingFlush,
       onBeforeSessionEnd,
       onBlockRecorderForEnd,

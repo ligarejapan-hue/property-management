@@ -1,15 +1,16 @@
 /**
  * 巡回終了の確実化 (#317) — 終了 commit の活動フェンス化のソース検証。
  *
- * 設計 (issue #317 の目的「再読込・別タブ越えの記録喪失防止」を、DB 行ロックの
- * 直列化で構造的に閉じる。migration / ブラウザ保存なし):
- *  1. 終了/キャンセルの commit は常に「読取時点から updatedAt が変わっていない」
- *     ことを条件にする (従来は放置終了のみ)。位置記録 flush / touch は updatedAt
- *     を進めるため、client abort 後にサーバー側で遅延した終了 commit が、再開
- *     された記録の後から着地して以降の点を 409 で失わせることができなくなる。
- *  2. 「位置記録開始」は watch 開始前に活動 touch をフェンスとして打つ。
- *     touch が先に届けば遅延終了は条件不成立で失敗し session は active のまま。
- *     終了が先に commit していれば touch が 409 を返し開始を止める。
+ * 設計 (@codex R1〜R6 で確定した最終形。世代カウンタ activitySeq を追加する
+ * additive migration を含む):
+ *  1. 活動 (touch / track point flush) は session の activitySeq を必ず +1 する
+ *     (整数の単調増加 = 時計・ms 精度・遅延に依存しない)。
+ *  2. 終了/キャンセルは「client が送信時にピン留めした世代 (expectedActivitySeq)
+ *     と等値」の時のみ commit できる (tokenless は schema で拒否)。トークンは
+ *     drain 後の読み取り GET → その世代を条件にした CAS touch → 鋳造世代で終了
+ *     PATCH、の連鎖で得る。鎖のどこにフェンスが割り込んでも必ず不成立になる。
+ *  3. 「位置記録開始」は watch 開始前に活動 touch をフェンスとして打つ (2xx の
+ *     成立確認時のみ開始・409/404 は終了検知・その他は再試行ブロック)。
  *
  * vitest は env=node のため、hook の実挙動はソース静的検証 + route 挙動テスト
  * (field-survey-sessions-route.test.ts) で担保する。改行固定アンカーは使わない
@@ -69,40 +70,40 @@ describe("route — 終了 commit の活動フェンス (フェンストーク�
     // 時刻) はどこで捕捉しても「遅延後」になり得る。client が送信時にピン留め
     // した世代値の等値のみを条件にし、トークン無しは 422 で拒否する
     // (schema refine + 型ガード二重防御)。
-    expect(block).toMatch(/if \(!patch\.expectedUpdatedAt\)/);
-    expect(block).toMatch(
-      /const fenceToken = new Date\(patch\.expectedUpdatedAt\)/,
-    );
-    expect(block).toMatch(/updatedAt:\s*fenceToken/);
+    expect(block).toMatch(/if \(patch\.expectedActivitySeq === undefined\)/);
+    expect(block).toMatch(/activitySeq:\s*patch\.expectedActivitySeq/);
+    expect(block).not.toMatch(/updatedAt:\s*fenceToken/);
     expect(block).not.toMatch(/requestArrivedAt/);
     expect(block).not.toMatch(/updatedAt:\s*existing\.updatedAt/);
     expect(block).not.toMatch(/isStaleEnd && \{ updatedAt/);
     // 到着時刻フォールバック自体を廃止 (R4)
     expect(ROUTE_SRC).not.toMatch(/requestArrivedAt/);
+    // 世代カウンタは touch/flush で必ず +1 される
+    expect(ROUTE_SRC).toMatch(/activitySeq: { increment: 1 }/);
   });
 
-  it("stale 直接終了は touch せず client 既知の updatedAt をトークンにする", () => {
+  it("stale 直接終了は touch せず client 既知の activitySeq をトークンにする", () => {
     // touch すると stale 判定が解除され endedAt=now の過大記録に戻る (B-7 R3)。
-    // 復元 GET の updatedAt を echo すれば、touch 無しでゾンビ排除条件を満たせる。
+    // 復元 GET の activitySeq を echo すれば、touch 無しでゾンビ排除条件を満たせる。
     const TRIP = readSrc("src/components/field-survey/trip-controls.tsx");
     expect(TRIP).toMatch(
-      /if \(opts\?\.staleDirect\) \{\s*if \(target\.updatedAt !== undefined\)/,
+      /if \(opts\?\.staleDirect\) \{\s*if \(typeof target\.activitySeq === "number"\)/,
     );
     expect(TRIP).toMatch(/staleDirect: true/);
   });
 
-  it("トークンはスキーマで ISO datetime 検証 + status 変更には必須 (validators)", () => {
+  it("トークンはスキーマで整数検証 + status 変更には必須 (validators)", () => {
     const VALIDATORS_SRC = readSrc("src/lib/validators.ts");
     const schema =
       VALIDATORS_SRC.match(
         /patchFieldSurveySessionSchema[\s\S]*?fieldSurveySessionListQuerySchema/,
       )?.[0] ?? "";
     expect(schema).toMatch(
-      /expectedUpdatedAt:\s*z\.string\(\)\.datetime\(\)\.optional\(\)/,
+      /expectedActivitySeq:\s*z\.number\(\)\.int\(\)\.min\(0\)\.optional\(\)/,
     );
     // @codex R4: tokenless の status 変更を schema 段階で拒否
     expect(schema).toMatch(
-      /v\.status === undefined \|\| v\.expectedUpdatedAt !== undefined/,
+      /v\.status === undefined \|\| v\.expectedActivitySeq !== undefined/,
     );
   });
 });
@@ -146,6 +147,16 @@ describe("recorder — 位置記録開始のフェンス touch", () => {
       /recorderGenerationRef\.current !== startGeneration/g,
     );
     expect((guards ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("trip-controls — 終了フローの ending 固着防止 (@codex R6 P2)", () => {
+  it("既 ended 検知後の reconcile が unknown なら active へ戻して再試行可能にする", () => {
+    // fetchOwnActiveGeneration が ended を返した後の全体 reconcile が timeout
+    // (unknown・state 未変更) だと phase="ending" のまま固まる → active へ戻す。
+    expect(TRIP_SRC).toMatch(
+      /known\.kind === "ended"[\s\S]{0,900}?rec\.kind === "unknown"[\s\S]{0,300}?setPhase\("active"\)/,
+    );
   });
 });
 

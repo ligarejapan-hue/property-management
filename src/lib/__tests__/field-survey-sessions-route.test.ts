@@ -670,7 +670,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: new Date().toISOString(),
+          expectedActivitySeq: 1,
         }),
       }),
       { params },
@@ -694,7 +694,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: new Date().toISOString(),
+          expectedActivitySeq: 1,
         }),
       }),
       { params },
@@ -736,7 +736,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: startedAt.toISOString(),
+          expectedActivitySeq: 4,
         }),
       }),
       { params },
@@ -749,7 +749,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: startedAt,
+      activitySeq: 4,
     });
     expect(umArgs.data.status).toBe("ended");
     // AuditLog
@@ -796,7 +796,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: lastActivityAt.toISOString(),
+          expectedActivitySeq: 7,
         }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
@@ -809,7 +809,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: lastActivityAt,
+      activitySeq: 7,
     });
     // durationSec は startedAt→最終活動時刻 (約1時間) で、73時間にはならない
     const call = writeAuditLog.mock.calls[0][0];
@@ -836,7 +836,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: lastActivityAt.toISOString(),
+          expectedActivitySeq: 7,
         }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
@@ -897,7 +897,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: pinned.toISOString(),
+          expectedActivitySeq: 12,
         }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
@@ -910,7 +910,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: pinned,
+      activitySeq: 12,
     });
   });
 
@@ -933,7 +933,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: new Date(Date.now() - 60_000).toISOString(),
+          expectedActivitySeq: 3,
         }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
@@ -944,7 +944,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("#317: expectedUpdatedAt が不正な文字列なら 422 (DB 更新に到達しない)", async () => {
+  it("#317: expectedActivitySeq が不正な値 (負数) なら 422 (DB 更新に到達しない)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     const res = await PATCH(
@@ -952,7 +952,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: "not-a-datetime",
+          expectedActivitySeq: -1,
         }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
@@ -995,7 +995,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: justNow.toISOString(),
+          expectedActivitySeq: 2,
         }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
@@ -1026,7 +1026,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: new Date().toISOString(),
+          expectedActivitySeq: 1,
         }),
       }),
       { params },
@@ -1055,7 +1055,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "ended",
-          expectedUpdatedAt: new Date().toISOString(),
+          expectedActivitySeq: 1,
         }),
       }),
       { params },
@@ -1096,7 +1096,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           status: "cancelled",
-          expectedUpdatedAt: startedAt.toISOString(),
+          expectedActivitySeq: 4,
         }),
       }),
       { params },
@@ -1110,7 +1110,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: startedAt,
+      activitySeq: 4,
     });
   });
 
@@ -1190,12 +1190,12 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
       .calls[0][0];
     expect(umArgs.where).toEqual({ id: "s-1", status: "active" });
-    expect(umArgs.data).toEqual({ updatedAt: expect.any(Date) });
+    expect(umArgs.data).toEqual({ updatedAt: expect.any(Date), activitySeq: { increment: 1 } });
     expect(prisma.fieldSurveySession.update).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("#317(@codex R5): expectedUpdatedAt 付き touch は CAS (既知世代と一致時のみ成立)", async () => {
+  it("#317(@codex R5): expectedActivitySeq 付き touch は CAS (既知世代と一致時のみ成立)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     const startedAt = new Date(Date.now() - 60 * 60 * 1000);
@@ -1228,7 +1228,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           touch: true,
-          expectedUpdatedAt: known.toISOString(),
+          expectedActivitySeq: 5,
         }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
@@ -1239,9 +1239,9 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: known,
+      activitySeq: 5,
     });
-    expect(umArgs.data).toEqual({ updatedAt: expect.any(Date) });
+    expect(umArgs.data).toEqual({ updatedAt: expect.any(Date), activitySeq: { increment: 1 } });
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
@@ -1264,7 +1264,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         method: "PATCH",
         body: JSON.stringify({
           touch: true,
-          expectedUpdatedAt: new Date(Date.now() - 60_000).toISOString(),
+          expectedActivitySeq: 3,
         }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },

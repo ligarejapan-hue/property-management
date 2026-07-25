@@ -259,13 +259,14 @@ export const patchFieldSurveySessionSchema = z
     // memo 送信で代用すると、一覧 API が memo を返さない設計のため null 上書きで
     // 既存 memo を消してしまう (@codex #308 R7)。
     touch: z.literal(true).optional(),
-    // #317 (@codex R3/R4): 終了/キャンセルのフェンストークン。client が直前の
-    // 活動 touch 応答 (または復元 GET) から得た session.updatedAt (= session に
-    // 永続化済みの世代値) をそのまま echo する。server はこの等値を commit
-    // 条件に使い、より古いトークンを運ぶ遅延リクエストを (どの段階で遅延
-    // していても) 拒否できる。status 変更には必須 (トークン無しの終了は
-    // server 側で観測する時刻では遅延を区別できないため許可しない = R4)。
-    expectedUpdatedAt: z.string().datetime().optional(),
+    // #317 (@codex R3〜R6): 終了/キャンセルのフェンストークン (世代カウンタ)。
+    // client が直前の CAS touch 応答 (または復元 GET) から得た activitySeq を
+    // そのまま echo する。server はこの等値を commit 条件に使い、より古い世代
+    // を運ぶ遅延リクエストを (どの段階で遅延していても) 拒否できる。整数の
+    // 単調増加なので時計・ms 精度に依存しない。status 変更には必須 (トークン
+    // 無しの終了は server 側で観測する値では遅延を区別できないため許可しない)。
+    // touch に付けた場合は CAS 条件 (既知世代のままなら +1 して進める)。
+    expectedActivitySeq: z.number().int().min(0).optional(),
   })
   .refine(
     (v) => v.status !== undefined || v.memo !== undefined || v.touch === true,
@@ -273,10 +274,13 @@ export const patchFieldSurveySessionSchema = z
       message: "status / memo / touch のいずれかを指定してください",
     },
   )
-  .refine((v) => v.status === undefined || v.expectedUpdatedAt !== undefined, {
-    message:
-      "status 変更には expectedUpdatedAt (フェンストークン) が必要です。ページを再読み込みしてください",
-  });
+  .refine(
+    (v) => v.status === undefined || v.expectedActivitySeq !== undefined,
+    {
+      message:
+        "status 変更には expectedActivitySeq (フェンストークン) が必要です。ページを再読み込みしてください",
+    },
+  );
 
 export const fieldSurveySessionListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
