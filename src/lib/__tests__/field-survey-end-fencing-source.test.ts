@@ -57,33 +57,28 @@ describe("classifyStartFence — フェンス touch 応答の分類 (純関数)"
   });
 });
 
-describe("route — 終了 commit の活動フェンス (トークン等値 + 到着時刻フォールバック)", () => {
-  it("終了/キャンセルの updateMany はフェンストークン等値、無ければ到着時刻上限を条件に含む", () => {
+describe("route — 終了 commit の活動フェンス (フェンストークン等値のみ)", () => {
+  it("終了/キャンセルの updateMany はフェンストークン等値を条件にし、tokenless は拒否", () => {
     // 終了/キャンセル分岐の updateMany を掴む
     const block =
       ROUTE_SRC.match(
         /if \(patch\.status === "ended" \|\| patch\.status === "cancelled"\) \{[\s\S]*?INVALID_STATE/,
       )?.[0] ?? "";
     expect(block).not.toBe("");
-    // @codex R3: server 側で観測する時刻 (読取値・到着時刻) はどこで捕捉しても
-    // 「遅延後」になり得る。client が送信時にピン留めした値 (touch 応答の
-    // updatedAt echo) の等値を第一条件にし、トークン無しのみ到着時刻に落とす。
+    // @codex R2〜R4: server 側で観測する値 (読取時 updatedAt / ハンドラ到着
+    // 時刻) はどこで捕捉しても「遅延後」になり得る。client が送信時にピン留め
+    // した世代値の等値のみを条件にし、トークン無しは 422 で拒否する
+    // (schema refine + 型ガード二重防御)。
+    expect(block).toMatch(/if \(!patch\.expectedUpdatedAt\)/);
     expect(block).toMatch(
-      /const fenceToken = patch\.expectedUpdatedAt\s*\?\s*new Date\(patch\.expectedUpdatedAt\)\s*:\s*null/,
+      /const fenceToken = new Date\(patch\.expectedUpdatedAt\)/,
     );
-    expect(block).toMatch(
-      /updatedAt:\s*fenceToken\s*\?\?\s*\{\s*lte:\s*requestArrivedAt\s*\}/,
-    );
+    expect(block).toMatch(/updatedAt:\s*fenceToken/);
+    expect(block).not.toMatch(/requestArrivedAt/);
     expect(block).not.toMatch(/updatedAt:\s*existing\.updatedAt/);
     expect(block).not.toMatch(/isStaleEnd && \{ updatedAt/);
-  });
-
-  it("到着時刻は認証・パースより前 (ハンドラ先頭) で捕捉する", () => {
-    const patchBlock =
-      ROUTE_SRC.match(/export async function PATCH[\s\S]*?getApiSession/)?.[0] ??
-      "";
-    // requestArrivedAt の捕捉が getApiSession (認証) より前にある
-    expect(patchBlock).toMatch(/const requestArrivedAt = new Date\(\);/);
+    // 到着時刻フォールバック自体を廃止 (R4)
+    expect(ROUTE_SRC).not.toMatch(/requestArrivedAt/);
   });
 
   it("stale 直接終了は touch せず client 既知の updatedAt をトークンにする", () => {
@@ -91,19 +86,23 @@ describe("route — 終了 commit の活動フェンス (トークン等値 + �
     // 復元 GET の updatedAt を echo すれば、touch 無しでゾンビ排除条件を満たせる。
     const TRIP = readSrc("src/components/field-survey/trip-controls.tsx");
     expect(TRIP).toMatch(
-      /opts\?\.staleDirect && target\.updatedAt !== undefined/,
+      /if \(opts\?\.staleDirect\) \{\s*if \(target\.updatedAt !== undefined\)/,
     );
     expect(TRIP).toMatch(/staleDirect: true/);
   });
 
-  it("トークンはスキーマで ISO datetime に検証される (validators)", () => {
+  it("トークンはスキーマで ISO datetime 検証 + status 変更には必須 (validators)", () => {
     const VALIDATORS_SRC = readSrc("src/lib/validators.ts");
     const schema =
       VALIDATORS_SRC.match(
-        /patchFieldSurveySessionSchema[\s\S]*?\.refine/,
+        /patchFieldSurveySessionSchema[\s\S]*?fieldSurveySessionListQuerySchema/,
       )?.[0] ?? "";
     expect(schema).toMatch(
       /expectedUpdatedAt:\s*z\.string\(\)\.datetime\(\)\.optional\(\)/,
+    );
+    // @codex R4: tokenless の status 変更を schema 段階で拒否
+    expect(schema).toMatch(
+      /v\.status === undefined \|\| v\.expectedUpdatedAt !== undefined/,
     );
   });
 });

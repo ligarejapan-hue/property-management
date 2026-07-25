@@ -552,19 +552,28 @@ export default function TripControls({
       // B-7 (@codex R10) の「続行済み session の stale 判定解除」もこの touch が
       // 兼ねる (endedAt が続行前へ巻き戻らない)。
       //
-      // touch を省略する経路:
-      // - 「破棄して終了」(discardUnsent): 圏外/API 障害の脱出口。touch を
-      //   await すると応答しない時に phase="ending" が固まる (@codex P2 R4)。
-      //   記録中の flush が updatedAt を進めており client 既知の値も古いため、
-      //   トークン無し = server の到着時刻フォールバックで送る。
+      // フェンストークンの取得 (@codex R4: トークン無しの終了は server が拒否
+      // する。server 側で観測する時刻では「ハンドラ開始前」の遅延を区別できない
+      // ため、全経路で client がピン留めした世代値を運ぶ):
+      // - 通常終了・破棄終了: 直前の活動 touch (TOUCH_TIMEOUT_MS で bounded =
+      //   ハングしても脱出口は固まらない。かつての破棄経路の touch 省略は
+      //   timeout 導入前の判断) の応答 updatedAt をトークンにする。touch 不達
+      //   (完全圏外) の場合は終了を送らず再試行を案内する — その状況では終了
+      //   PATCH 自体も届かないため、従来挙動から失うものは無い。
       // - 放置 session の直接終了 (staleDirect): touch すると server の stale
-      //   判定が解除され、endedAt が最終活動時刻でなく now になってしまう
-      //   (B-7 R3 の「数日巡回していた」過大記録の防止を壊さない)。こちらは
-      //   touch はせず、復元 GET で得た client 既知の updatedAt をトークンに
-      //   する (復元後に活動していなければ現在値と一致して成立・並行活動が
-      //   あれば 409 → 既存 conflict 処理。ゾンビ排除と endedAt 規則を両立)。
+      //   判定が解除され endedAt=now の過大記録に戻る (B-7 R3)。touch せず
+      //   復元 GET で得た client 既知の updatedAt をトークンにする (復元後に
+      //   活動していなければ現在値と一致して成立・並行活動があれば 409 →
+      //   既存 conflict 処理。ゾンビ排除と endedAt 規則を両立)。
       let fenceToken: string | null = null;
-      if (!opts?.discardUnsent && !opts?.staleDirect) {
+      if (opts?.staleDirect) {
+        if (target.updatedAt !== undefined) {
+          fenceToken =
+            typeof target.updatedAt === "string"
+              ? target.updatedAt
+              : new Date(target.updatedAt).toISOString();
+        }
+      } else {
         const fence = await touchSession(target);
         if (!mountedRef.current) return;
         if (fence.conflict) {
@@ -573,11 +582,18 @@ export default function TripControls({
           return;
         }
         fenceToken = fence.pinnedUpdatedAt;
-      } else if (opts?.staleDirect && target.updatedAt !== undefined) {
-        fenceToken =
-          typeof target.updatedAt === "string"
-            ? target.updatedAt
-            : new Date(target.updatedAt).toISOString();
+      }
+      if (fenceToken === null) {
+        // トークンを得られない間は終了を送らない (tokenless は server が拒否)。
+        // 未送信のため outstanding な終了は増えておらず、以前の曖昧な終了が
+        // 残っていない限り recorder を操作可能へ戻して安全に再試行できる。
+        setError(
+          "巡回終了の通信ができませんでした。電波の良い場所で、もう一度お試しください。",
+        );
+        setPhase("active");
+        if (opts?.discardUnsent) setEndBlockedByBuffer(true);
+        if (!outstandingEndMayCommitRef.current) onEndFailedRestoreRecorder?.();
+        return;
       }
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
@@ -616,9 +632,9 @@ export default function TripControls({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               status: "ended",
-              // #317: フェンストークン (touch 応答の updatedAt echo)。無い場合
-              // は server が到着時刻条件にフォールバックする。
-              ...(fenceToken !== null && { expectedUpdatedAt: fenceToken }),
+              // #317: フェンストークン (touch 応答 / 復元 GET の updatedAt
+              // echo)。終了は必ずこれを同封する (tokenless は server が拒否)。
+              expectedUpdatedAt: fenceToken,
             }),
             signal: ac.signal,
           },

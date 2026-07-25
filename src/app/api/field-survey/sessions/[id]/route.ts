@@ -121,12 +121,6 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    // #317 (@codex R2): リクエスト到着時刻を認証・パースより前に捕捉する。
-    // 終了/キャンセルの commit 条件はこの到着時刻を基準にする (下記参照)。
-    // 読取時 updatedAt の等値条件では、認証や DB スケジューリングで「読取より
-    // 前」に遅延したリクエストが、フェンス touch 後の新しい updatedAt を読んで
-    // 条件を満たしてしまう。到着時刻はその遅延の影響を受けない。
-    const requestArrivedAt = new Date();
     const { id } = await params;
     const session = await getApiSession();
     const permissions = await getUserPermissions(session.id);
@@ -179,29 +173,33 @@ export async function PATCH(
       //
       // #317 活動フェンス: 遅延した終了 commit が「再読込・別タブで再開された
       // 記録 (フェンス touch 以降)」の後から着地して以降の点を 409 で失わせる
-      // ことを防ぐ。二層の条件で守る:
+      // ことを防ぐ。
       //
-      // 1) expectedUpdatedAt (フェンストークン) あり = 等値条件。client は終了
-      //    直前の活動 touch 応答から得た session.updatedAt を echo する。値は
-      //    「送信時点」でピン留めされるため、リクエストがプロキシ/TCP 再送/
-      //    認証などどの段階で遅延しても、古い終了は古いトークンのまま = 位置
-      //    記録開始フェンスの touch が updatedAt を進めた後では必ず不成立
-      //    (@codex R3: server 側で観測する時刻はどこで捕捉しても「遅延後」に
-      //    なり得るため、client 発行で session に永続化済みの世代値を使う)。
-      // 2) トークン無し (旧タブ / 圏外の破棄経路で touch 不能) = 到着時刻
-      //    フォールバック (updatedAt <= requestArrivedAt・ハンドラ先頭で捕捉)。
-      //    ハンドラ開始後の遅延 (認証/パース/読取) には守りが効く (@codex R2)。
+      // commit 条件は expectedUpdatedAt (フェンストークン) の等値のみ。client は
+      // 終了直前の活動 touch 応答 (または復元 GET) から得た session.updatedAt を
+      // echo する。値は「送信時点」でピン留めされるため、リクエストがプロキシ/
+      // TCP 再送/認証などどの段階で遅延しても、古い終了は古いトークンのまま =
+      // 位置記録開始フェンスの touch が updatedAt を進めた後では必ず不成立。
+      // (@codex R2〜R4: 読取時 updatedAt もハンドラ到着時刻も「遅延後」に観測
+      // され得るため、server 側で観測する値では代用できない。トークン無しの
+      // 終了はスキーマで拒否する = 到着時刻フォールバックは置かない)。
       //
       // updatedAt は timestamp(3)=ms 精度・Prisma @updatedAt も client 側 (同一
       // Node プロセス) 生成のため、ISO round-trip の等値比較は正確に一致する。
-      const fenceToken = patch.expectedUpdatedAt
-        ? new Date(patch.expectedUpdatedAt)
-        : null;
+      if (!patch.expectedUpdatedAt) {
+        // schema refine 済みだが型ガードを兼ねた二重防御 (fail-closed)。
+        throw new ApiError(
+          422,
+          "status 変更には expectedUpdatedAt が必要です",
+          "VALIDATION_ERROR",
+        );
+      }
+      const fenceToken = new Date(patch.expectedUpdatedAt);
       const result = await prisma.fieldSurveySession.updateMany({
         where: {
           id,
           status: "active",
-          updatedAt: fenceToken ?? { lte: requestArrivedAt },
+          updatedAt: fenceToken,
         },
         data: {
           status: patch.status,
