@@ -231,9 +231,10 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(m).not.toMatch(/bufferRef\.current = \[\]/);
     expect(RECORDER_SRC).toMatch(/\n\s+blockRecorderForPendingEnd,\r?\n/);
     // @codex R13: block は touch await より前に呼ぶ (touch 最大 8 秒の間に idle
-    // で「位置記録開始」が露出するのを防ぐ)。
+    // で「位置記録開始」が露出するのを防ぐ)。#317 R3 でフェンストークン発行の
+    // touch (非破棄・非 staleDirect) に一般化された。
     expect(TRIP_SRC).toMatch(
-      /onBlockRecorderForEnd\?\.\(\)[\s\S]{0,900}?if \(resumedRef\.current === target\.id/,
+      /onBlockRecorderForEnd\?\.\(\)[\s\S]{0,1400}?if \(!opts\?\.discardUnsent && !opts\?\.staleDirect\)/,
     );
     // map が配線する
     expect(MAP_SRC).toMatch(/recorder\.blockRecorderForPendingEnd\(\)/);
@@ -304,10 +305,11 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
   });
 
   it("破棄経路では best-effort touch も省く (touch ハングで脱出口が固まらない)", () => {
-    // @codex P2 R4: touchSession は signal/timeout 無し。discardUnsent 経路で
-    // await すると touch 無応答時に phase="ending" 固着で PATCH に到達できない。
+    // @codex P2 R4: discardUnsent 経路で touch を await すると無応答時に
+    // phase="ending" 固着で PATCH に到達できない。#317 R3 のフェンストークン
+    // touch も同じ理由で破棄経路 (と stale 直接終了) では省略する。
     expect(TRIP_SRC).toMatch(
-      /if \(resumedRef\.current === target\.id && !opts\?\.discardUnsent\)/,
+      /if \(!opts\?\.discardUnsent && !opts\?\.staleDirect\) \{\s*const fence = await touchSession\(target\)/,
     );
   });
 

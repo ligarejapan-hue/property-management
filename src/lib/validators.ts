@@ -259,6 +259,12 @@ export const patchFieldSurveySessionSchema = z
     // memo 送信で代用すると、一覧 API が memo を返さない設計のため null 上書きで
     // 既存 memo を消してしまう (@codex #308 R7)。
     touch: z.literal(true).optional(),
+    // #317 (@codex R3): 終了/キャンセルのフェンストークン。client が直前の
+    // 活動 touch 応答から得た session.updatedAt (= client 発行の世代値として
+    // session に永続化済み) をそのまま echo する。server はこの等値を commit
+    // 条件に使い、より古いトークンを運ぶ遅延リクエストを (どの段階で遅延
+    // していても) 拒否できる。省略時は到着時刻条件へフォールバック。
+    expectedUpdatedAt: z.string().datetime().optional(),
   })
   .refine(
     (v) => v.status !== undefined || v.memo !== undefined || v.touch === true,

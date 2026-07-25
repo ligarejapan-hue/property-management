@@ -127,9 +127,11 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
     expect(postRegion).not.toBeNull();
     expect(postRegion?.[0]).toMatch(/signal:\s*\w+\.signal/);
     // 終了 PATCH 経路 (status: "ended" を送る fetch) にも signal がある。
+    // #317 R3 で body にフェンストークン (expectedUpdatedAt) の条件付き spread が
+    // 加わったため、body 終端〜signal までを許容幅で掴む。
     // ※続行 touch の memo-only PATCH は fire-and-forget のため対象外 (B-7 @codex R6)
     expect(TRIP_SRC).toMatch(
-      /status:\s*"ended"\s*\}\),\s*signal:\s*\w+\.signal/,
+      /status:\s*"ended",[\s\S]{0,300}?\}\),\s*signal:\s*\w+\.signal/,
     );
   });
 
@@ -224,12 +226,15 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
     );
   });
 
-  it("続行済み session の終了は直前に再 touch する (@codex R10: touch 失敗時の巻き戻り防止)", () => {
+  it("終了直前の touch (@codex R10 の stale 解除 + #317 R3 フェンストークン発行)", () => {
     expect(TRIP_SRC).toMatch(/resumedRef/);
-    // endSession 内で resumed の場合に touchSession を await してから終了 PATCH
+    // endSession 内で (破棄・stale 直接終了を除き) touchSession を await して
+    // から終了 PATCH。続行済み session の stale 巻き戻り防止 (R10) はこの
+    // 一般化された touch が兼ねる。トークンは終了 PATCH に echo される。
     expect(TRIP_SRC).toMatch(
-      /resumedRef\.current === target\.id[\s\S]{0,120}?await touchSession\(target\)/,
+      /if \(!opts\?\.discardUnsent && !opts\?\.staleDirect\)[\s\S]{0,80}?await touchSession\(target\)/,
     );
+    expect(TRIP_SRC).toMatch(/expectedUpdatedAt: fenceToken/);
   });
 });
 

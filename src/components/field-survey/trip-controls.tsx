@@ -411,8 +411,14 @@ export default function TripControls({
   // memo 送信で代用すると一覧 API が memo を返さないため既存 memo を消す)。
   // これが無いと、続行後に点・ピン無しで終了したとき server 側で stale 扱いの
   // まま endedAt が続行前の時刻へ巻き戻る。失敗しても続行自体は妨げない。
+  //
+  // #317 (@codex R3): 終了直前の touch はフェンストークンの発行も兼ねる。
+  // 応答の session.updatedAt (= この touch が永続化した世代値) を返し、終了
+  // PATCH に echo する。conflict=true は並行終了済み (reconcile 実施済み)。
   const touchSession = useCallback(
-    async (target: ActiveSessionLike) => {
+    async (
+      target: ActiveSessionLike,
+    ): Promise<{ conflict: boolean; pinnedUpdatedAt: string | null }> => {
       // @codex P1: best-effort touch に timeout を付ける。blackhole すると通常
       // 終了がここで永久待機し phase="ending" 固着で終了 PATCH / reconcile /
       // 脱出口へ到達できない。timeout 後は touch を諦めて先へ進む。
@@ -429,14 +435,29 @@ export default function TripControls({
             signal: ac.signal,
           },
         );
-        if (!mountedRef.current) return;
+        if (!mountedRef.current) {
+          return { conflict: false, pinnedUpdatedAt: null };
+        }
         if (res.status === 409) {
           // 並行で終了済み (@codex R9)。終了済み session を巡回中として使い
           // 続けないよう、状態を取り直して UI を整合させる (GET も timeout 付き)。
           await fetchActiveSession({ timeoutMs: RECONCILE_TIMEOUT_MS });
+          return { conflict: true, pinnedUpdatedAt: null };
         }
+        if (res.ok) {
+          const body = (await res.json().catch(() => null)) as
+            | { data?: { updatedAt?: string } }
+            | null;
+          const u = body?.data?.updatedAt;
+          return {
+            conflict: false,
+            pinnedUpdatedAt: typeof u === "string" ? u : null,
+          };
+        }
+        return { conflict: false, pinnedUpdatedAt: null };
       } catch {
         // best effort (オフライン / timeout 等)。続行操作はローカルで成立させる。
+        return { conflict: false, pinnedUpdatedAt: null };
       } finally {
         clearTimeout(timer);
       }
@@ -447,7 +468,16 @@ export default function TripControls({
   const endSession = useCallback(
     async (
       target: ActiveSessionLike,
-      opts?: { discardUnsent?: boolean },
+      opts?: {
+        discardUnsent?: boolean;
+        /**
+         * B-7 の放置 session を確認 modal から直接終了する経路。フェンス
+         * トークン発行の touch を打つと server の stale 判定が解除され
+         * endedAt=now になってしまうため、touch を省略しトークン無しで送る
+         * (server は到着時刻条件へフォールバック)。
+         */
+        staleDirect?: boolean;
+      },
     ) => {
       setPhase("ending");
       setError(null);
@@ -515,19 +545,39 @@ export default function TripControls({
       // 行う (snuck-in watch を残さない)。破棄経路は abortInFlightFlush で既に
       // stopping だが冪等。buffer は保持する。
       onBlockRecorderForEnd?.();
-      // B-7 (@codex R10): 続行済み session の終了は、直前に活動 touch を挟んで
-      // server の stale 判定を解除する (続行時の touch が失敗していても、ここで
-      // 記録されれば endedAt は now になり、続行後の巡回が消えない)。
+      // #317 (@codex R3): 終了直前の活動 touch でフェンストークンを発行する。
+      // 応答の updatedAt を終了 PATCH に echo し、server は等値を commit 条件に
+      // 使う (トークンは送信時点でピン留めされるため、この終了リクエストが
+      // どの段階で遅延しても、後から打たれた位置記録開始フェンスに必ず負ける)。
+      // B-7 (@codex R10) の「続行済み session の stale 判定解除」もこの touch が
+      // 兼ねる (endedAt が続行前へ巻き戻らない)。
       //
-      // @codex P2 R4: ただし「破棄して終了」(discardUnsent) 経路では touch を
-      // 省略する。touchSession は signal / timeout を持たず、脱出口を使うのは
-      // 圏外/セッション API 障害の状況なので、ここで await すると touch が応答
-      // しない時に phase が "ending" に固まり、追加した脱出口でも終了 PATCH に
-      // 到達できなくなる。touch は best-effort であり、pin / 写真は既に保存済み
-      // (session の endedAt メタデータのみ影響) なので破棄経路では省いてよい。
-      if (resumedRef.current === target.id && !opts?.discardUnsent) {
-        await touchSession(target);
+      // touch を省略する経路:
+      // - 「破棄して終了」(discardUnsent): 圏外/API 障害の脱出口。touch を
+      //   await すると応答しない時に phase="ending" が固まる (@codex P2 R4)。
+      //   記録中の flush が updatedAt を進めており client 既知の値も古いため、
+      //   トークン無し = server の到着時刻フォールバックで送る。
+      // - 放置 session の直接終了 (staleDirect): touch すると server の stale
+      //   判定が解除され、endedAt が最終活動時刻でなく now になってしまう
+      //   (B-7 R3 の「数日巡回していた」過大記録の防止を壊さない)。こちらは
+      //   touch はせず、復元 GET で得た client 既知の updatedAt をトークンに
+      //   する (復元後に活動していなければ現在値と一致して成立・並行活動が
+      //   あれば 409 → 既存 conflict 処理。ゾンビ排除と endedAt 規則を両立)。
+      let fenceToken: string | null = null;
+      if (!opts?.discardUnsent && !opts?.staleDirect) {
+        const fence = await touchSession(target);
         if (!mountedRef.current) return;
+        if (fence.conflict) {
+          // 既に並行で終了済み (touchSession 内で reconcile 済み・session は
+          // null → idle)。終了の目的は達しているためここで完了とする。
+          return;
+        }
+        fenceToken = fence.pinnedUpdatedAt;
+      } else if (opts?.staleDirect && target.updatedAt !== undefined) {
+        fenceToken =
+          typeof target.updatedAt === "string"
+            ? target.updatedAt
+            : new Date(target.updatedAt).toISOString();
       }
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();
@@ -564,7 +614,12 @@ export default function TripControls({
             method: "PATCH",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "ended" }),
+            body: JSON.stringify({
+              status: "ended",
+              // #317: フェンストークン (touch 応答の updatedAt echo)。無い場合
+              // は server が到着時刻条件にフォールバックする。
+              ...(fenceToken !== null && { expectedUpdatedAt: fenceToken }),
+            }),
             signal: ac.signal,
           },
         );
@@ -741,7 +796,7 @@ export default function TripControls({
             setPhase("active");
             void touchSession(session);
           }}
-          onAgree={() => void endSession(session)}
+          onAgree={() => void endSession(session, { staleDirect: true })}
         />
       )}
     </Panel>

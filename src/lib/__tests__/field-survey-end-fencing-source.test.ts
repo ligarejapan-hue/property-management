@@ -57,17 +57,23 @@ describe("classifyStartFence — フェンス touch 応答の分類 (純関数)"
   });
 });
 
-describe("route — 終了 commit の活動フェンス (到着後に活動なし条件)", () => {
-  it("終了/キャンセルの updateMany は updatedAt <= リクエスト到着時刻を条件に含む", () => {
+describe("route — 終了 commit の活動フェンス (トークン等値 + 到着時刻フォールバック)", () => {
+  it("終了/キャンセルの updateMany はフェンストークン等値、無ければ到着時刻上限を条件に含む", () => {
     // 終了/キャンセル分岐の updateMany を掴む
     const block =
       ROUTE_SRC.match(
         /if \(patch\.status === "ended" \|\| patch\.status === "cancelled"\) \{[\s\S]*?INVALID_STATE/,
       )?.[0] ?? "";
     expect(block).not.toBe("");
-    // @codex R2: 読取時 updatedAt の等値条件は「読取前に遅延した」リクエストが
-    // フェンス touch 後の新しい値を読んで満たしてしまう。到着時刻上限を使う。
-    expect(block).toMatch(/updatedAt:\s*\{\s*lte:\s*requestArrivedAt\s*\}/);
+    // @codex R3: server 側で観測する時刻 (読取値・到着時刻) はどこで捕捉しても
+    // 「遅延後」になり得る。client が送信時にピン留めした値 (touch 応答の
+    // updatedAt echo) の等値を第一条件にし、トークン無しのみ到着時刻に落とす。
+    expect(block).toMatch(
+      /const fenceToken = patch\.expectedUpdatedAt\s*\?\s*new Date\(patch\.expectedUpdatedAt\)\s*:\s*null/,
+    );
+    expect(block).toMatch(
+      /updatedAt:\s*fenceToken\s*\?\?\s*\{\s*lte:\s*requestArrivedAt\s*\}/,
+    );
     expect(block).not.toMatch(/updatedAt:\s*existing\.updatedAt/);
     expect(block).not.toMatch(/isStaleEnd && \{ updatedAt/);
   });
@@ -78,6 +84,27 @@ describe("route — 終了 commit の活動フェンス (到着後に活動な�
       "";
     // requestArrivedAt の捕捉が getApiSession (認証) より前にある
     expect(patchBlock).toMatch(/const requestArrivedAt = new Date\(\);/);
+  });
+
+  it("stale 直接終了は touch せず client 既知の updatedAt をトークンにする", () => {
+    // touch すると stale 判定が解除され endedAt=now の過大記録に戻る (B-7 R3)。
+    // 復元 GET の updatedAt を echo すれば、touch 無しでゾンビ排除条件を満たせる。
+    const TRIP = readSrc("src/components/field-survey/trip-controls.tsx");
+    expect(TRIP).toMatch(
+      /opts\?\.staleDirect && target\.updatedAt !== undefined/,
+    );
+    expect(TRIP).toMatch(/staleDirect: true/);
+  });
+
+  it("トークンはスキーマで ISO datetime に検証される (validators)", () => {
+    const VALIDATORS_SRC = readSrc("src/lib/validators.ts");
+    const schema =
+      VALIDATORS_SRC.match(
+        /patchFieldSurveySessionSchema[\s\S]*?\.refine/,
+      )?.[0] ?? "";
+    expect(schema).toMatch(
+      /expectedUpdatedAt:\s*z\.string\(\)\.datetime\(\)\.optional\(\)/,
+    );
   });
 });
 
