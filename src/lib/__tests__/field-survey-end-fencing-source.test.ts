@@ -156,6 +156,13 @@ describe("recorder — 位置記録開始のフェンス touch", () => {
     expect(RECORDER_SRC).toMatch(/START_FENCE_TIMEOUT_MS/);
     // fence: true = 世代 (activitySeq) を +1 する記録開始フェンス (@codex R7)
     expect(RECORDER_SRC).toMatch(/touch:\s*true,\s*fence:\s*true/);
+    // @codex R9: 200 でも応答 body の session status を確認する (フェンス直後に
+    // 互換経路の終了が commit されたケースを検知)。active 以外は 409 相当・
+    // 解析不能は null (blocked-retry = fail-closed)。
+    expect(RECORDER_SRC).toMatch(/sessStatus === "active"/);
+    expect(RECORDER_SRC).toMatch(
+      /if \(typeof sessStatus === "string"\) return 409/,
+    );
     // 成立不明 (blocked-retry) でも開始せず、再試行を案内する
     expect(RECORDER_SRC).toMatch(/blocked-retry/);
     expect(RECORDER_SRC).toMatch(

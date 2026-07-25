@@ -550,7 +550,21 @@ export function useFieldSurveyLocationRecorder(
             signal: ac.signal,
           },
         );
-        return res.status;
+        if (!res.ok) return res.status;
+        // #317 (@codex R9): フェンス成立 (200) でも、その直後・応答再読の前に
+        // (旧タブ互換の tokenless 経路等で) 終了が commit されていると応答
+        // body の status は "ended" になる。HTTP status だけで proceed すると
+        // 終了済み session に記録を開始し以降の点が全て 409 で失われるため、
+        // body の session status も確認する。active 以外 = 終了検知 (409 相当)。
+        // 応答を解析できない場合は成立を確認できないものとして fail-closed
+        // (null = blocked-retry)。
+        const body = (await res.json().catch(() => null)) as
+          | { data?: { status?: string } }
+          | null;
+        const sessStatus = body?.data?.status;
+        if (sessStatus === "active") return res.status;
+        if (typeof sessStatus === "string") return 409;
+        return null;
       } catch {
         // network / timeout / abort → fail-open (呼び出し側が classifyStartFence
         // で proceed 扱いにする)。詳細は console に出さない。
