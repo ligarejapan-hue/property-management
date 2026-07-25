@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react";
 import { listCandidatePins, type CandidatePinRow } from "@/lib/api-client";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import ConvertPinToPropertyModal from "@/components/field-survey/convert-pin-to-property-modal";
+import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
 import { formatPinCreatedAt } from "@/lib/field-survey-pin-util";
 import {
   describeCandidateAge,
@@ -24,8 +25,16 @@ import {
  *   (CANDIDATE_LIST_LIMIT) に達したら「古い候補が表示されていない」警告を出す。
  * - 物件化成功後はそのまま新しい物件ページへ移動する (次アクション =
  *   謄本取得 / DM 判断は物件詳細にあるため、検索し直しの手間を無くす)。
+ * - 物件化しない候補は「候補から外す」で既存の論理削除 (status=archived) に
+ *   落とす。表示ゲートは DELETE の認可 (own=field_survey:write / 他人=manage)
+ *   と一致させ、押しても 403 になるボタンを出さない (fail-closed)。
+ *   currentUserId は server component が確定した値のみ使う (client 推測なし)。
  */
-export default function CandidateQueue() {
+export default function CandidateQueue({
+  currentUserId,
+}: {
+  currentUserId: string | null;
+}) {
   const router = useRouter();
   const {
     permissions,
@@ -66,8 +75,34 @@ export default function CandidateQueue() {
     (permissions ?? []).some(
       (p) => p.resource === "property" && p.action === "read" && p.granted === true,
     );
+  // 「候補から外す」の表示ゲート。DELETE /pins/[id] の認可 (own=write /
+  // 他人=manage) と同じ条件で行単位に出し分ける。再取得中・失敗時は
+  // 非表示の安全側 (fail-closed)。
+  const canWriteFieldSurvey =
+    !permissionsRefreshPending &&
+    !permissionsLoading &&
+    !permissionsError &&
+    (permissions ?? []).some(
+      (p) => p.resource === "field_survey" && p.action === "write" && p.granted === true,
+    );
+  const canManageFieldSurvey =
+    !permissionsRefreshPending &&
+    !permissionsLoading &&
+    !permissionsError &&
+    (permissions ?? []).some(
+      (p) => p.resource === "field_survey" && p.action === "manage" && p.granted === true,
+    );
 
   const [rows, setRows] = useState<CandidatePinRow[] | null>(null);
+  // 「候補から外す」= 既存の論理削除 (status=archived) の再利用。
+  const pinMutations = useFieldSurveyPinMutations();
+  // 確認ステップ中の行 id (誤タップ即削除を防ぐ 2 段階)。
+  const [rejectPinId, setRejectPinId] = useState<string | null>(null);
+  // closure から現在の確認対象を読むための鏡 ref。削除リクエストの await 明けに
+  // 対象が切り替わっていた古い completion で UI state を触らないための照合に使う
+  // (state 更新箇所で同時に更新する)。
+  const rejectPinIdRef = useRef<string | null>(null);
+  const [rejectError, setRejectError] = useState<string | null>(null);
   // 物件詳細へ遷移できない権限構成で物件化した時の成功表示 (一覧に留まる)。
   const [convertedNotice, setConvertedNotice] = useState(false);
   // 取得上限超過 (古い候補が data に含まれていない) の正確な通知は API の
@@ -138,6 +173,36 @@ export default function CandidateQueue() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: 一覧データ取得エフェクトの標準形（sales-sheets/new と同様）。取得開始時に error をリセットする同期 setState。
     void load();
   }, [load]);
+
+  // 「外す」確定。論理削除に成功したら一覧を取り直す (行が消えるのが成功の
+  // 見た目のフィードバック)。失敗は確認ボックス内に理由を出して留まる。
+  // 進行中はトリガー側を disabled にして行またぎ操作を止めるが、二重防御として
+  // await 明けに確認対象 (rejectPinIdRef) が変わっていたら古い completion で
+  // UI state を触らない。成功時の一覧再取得だけは server 状態が変わったので
+  // 常に行う (陳腐化した行を残して「物件にする」を 404 にしない)。
+  const handleRejectConfirm = useCallback(
+    async (pinId: string) => {
+      setRejectError(null);
+      const r = await pinMutations.deletePin(pinId);
+      const stillCurrent = rejectPinIdRef.current === pinId;
+      if (r.ok) {
+        if (stillCurrent) {
+          rejectPinIdRef.current = null;
+          setRejectPinId(null);
+        }
+        void load();
+        return;
+      }
+      if (stillCurrent) {
+        setRejectError(
+          r.error
+            ? `候補から外せませんでした。${r.error}`
+            : "候補から外せませんでした。時間をおいて再試行してください。",
+        );
+      }
+    },
+    [pinMutations, load],
+  );
 
   // 画面を開いたまま JST の日付を跨いだ場合に「今日/昨日/N日前」と放置強調を
   // 更新する (Codex P2: ageBase が読込時のまま固定だと翌日以降ずれ続ける)。
@@ -244,6 +309,12 @@ export default function CandidateQueue() {
             const photoCount = r.photoCount ?? 0;
             const photoShown = shownPhotoIds.has(r.id);
             const photoBroken = brokenThumbIds.has(r.id);
+            // DELETE の認可と一致: own は write、他人は manage のみ。
+            const canReject =
+              canManageFieldSurvey ||
+              (canWriteFieldSurvey &&
+                currentUserId !== null &&
+                r.staffUserId === currentUserId);
             return (
               <li key={r.id} className="px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
@@ -290,19 +361,84 @@ export default function CandidateQueue() {
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">{r.hasMemo ? "メモあり" : "メモなし"}</div>
                   </div>
-                  {canWriteProperty && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setConvertedNotice(false);
-                        setConvertPinId(r.id);
-                      }}
-                      className="shrink-0 rounded border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
-                    >
-                      物件にする
-                    </button>
-                  )}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {canReject && (
+                      <button
+                        type="button"
+                        data-testid="candidate-reject"
+                        onClick={() => {
+                          setRejectError(null);
+                          const next = rejectPinIdRef.current === r.id ? null : r.id;
+                          rejectPinIdRef.current = next;
+                          setRejectPinId(next);
+                        }}
+                        disabled={pinMutations.deleteLoading}
+                        className="rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 px-3 py-1.5 text-sm text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        候補から外す
+                      </button>
+                    )}
+                    {canWriteProperty && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConvertedNotice(false);
+                          setConvertPinId(r.id);
+                        }}
+                        className="rounded border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
+                      >
+                        物件にする
+                      </button>
+                    )}
+                  </div>
                 </div>
+                {/* 「候補から外す」の確認 (2 段階)。行内に出して対象を見失わない。 */}
+                {rejectPinId === r.id && (
+                  <div
+                    data-testid="candidate-reject-confirm-box"
+                    className="mt-2 rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 p-2 text-[12px] text-red-900 dark:text-red-300"
+                  >
+                    <p className="font-semibold">この候補を外しますか？</p>
+                    <p className="mt-1 text-[11px]">
+                      外すと一覧から消え、地図の通常表示にも出なくなります
+                      (物件にはなりません)。
+                    </p>
+                    {rejectError && (
+                      <p
+                        role="status"
+                        className="mt-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
+                      >
+                        {rejectError}
+                      </p>
+                    )}
+                    <div className="mt-2 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        data-testid="candidate-reject-cancel"
+                        onClick={() => {
+                          rejectPinIdRef.current = null;
+                          setRejectPinId(null);
+                          setRejectError(null);
+                        }}
+                        disabled={pinMutations.deleteLoading}
+                        className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
+                      >
+                        やめる
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="candidate-reject-confirm"
+                        onClick={() => {
+                          void handleRejectConfirm(r.id);
+                        }}
+                        disabled={pinMutations.deleteLoading}
+                        className="rounded border border-red-600 bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {pinMutations.deleteLoading ? "外しています…" : "外す"}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {/* タップ時のみ cover 写真を読み込む (ここで初めて <img> を DOM
                     に入れる = 表示していない行は原寸を落とさない)。 */}
                 {photoShown && r.coverPhotoUrl && !photoBroken && (
