@@ -162,8 +162,9 @@ interface UseLocationRecorderOptions {
 }
 
 /**
- * #317: 位置記録開始フェンス (活動 touch) のタイムアウト。blackhole した場合は
- * fail-open で開始へ進む (この後の既存ルート取得 GET が最終ゲート)。
+ * #317: 位置記録開始フェンス (活動 touch) のタイムアウト。blackhole しても
+ * 開始判断が固まらないよう一定時間で打ち切る (成立を確認できなければ開始は
+ * ブロックし再試行を促す = fail-closed)。
  */
 const START_FENCE_TIMEOUT_MS = 8000;
 
@@ -522,7 +523,10 @@ export function useFieldSurveyLocationRecorder(
    *    条件 (読取時 updatedAt 一致) の不成立で失敗する → session は active の
    *    まま = 再開した記録は失われない。
    *  - 終了が先に commit していれば touch は 409 → 開始をブロックする。
-   * 戻り値は HTTP status (network / timeout / abort は null = fail-open)。
+   *  - 成立を確認できない失敗 (timeout/network/5xx) も開始をブロックする
+   *    (@codex P1: fail-open だと touch だけ落ちて GET が通る劣化網で保護が
+   *    効かない。開始は元々 GET 必須 = オフラインでは不可なので失う動作は無い)。
+   * 戻り値は HTTP status (network / timeout / abort は null)。
    * 座標や応答本文は扱わない。
    */
   const touchFence = useCallback(
@@ -576,8 +580,11 @@ export function useFieldSurveyLocationRecorder(
     const startGeneration = recorderGenerationRef.current;
     void (async () => {
       // #317 フェンス: 既存ルート取得より先に活動 touch を打つ (上記 touchFence
-      // 参照)。blocked (409/404) = 巡回は既に終了/消失 → watch を開始せず、親へ
-      // 通知して巡回表示を整合させる。それ以外は fail-open で従来フローへ。
+      // 参照)。フェンス成立 (2xx) を確認できた時のみ watch 開始へ進む (@codex P1:
+      // touch だけ timeout/5xx して後続 GET が通る劣化網で fail-open すると、
+      // フェンス未成立のまま記録が始まり遅延終了 commit に負ける)。
+      // - blocked-ended (409/404) = 巡回は既に終了/消失 → 親へ通知して表示整合。
+      // - blocked-retry (timeout/network/5xx 等) = 成立不明 → 開始せず再試行案内。
       const fenceStatus = await touchFence(startSessionId);
       if (!mountedRef.current) return;
       if (
@@ -586,10 +593,18 @@ export function useFieldSurveyLocationRecorder(
       ) {
         return;
       }
-      if (classifyStartFence(fenceStatus) === "blocked") {
+      const fence = classifyStartFence(fenceStatus);
+      if (fence === "blocked-ended") {
         setError(mapHttpErrorToMessage(fenceStatus ?? 409));
         setStatus("idle");
         options.onSessionEnded?.();
+        return;
+      }
+      if (fence === "blocked-retry") {
+        setError(
+          "位置情報の記録を開始できませんでした。通信状態を確認して、もう一度お試しください。",
+        );
+        setStatus("idle");
         return;
       }
       const r = await fetchExistingTrackPoints();

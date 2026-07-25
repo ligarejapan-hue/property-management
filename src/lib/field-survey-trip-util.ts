@@ -172,19 +172,22 @@ export function isSessionStale(
 /**
  * 「位置記録開始」フェンス (活動 touch PATCH) の応答分類。
  *
+ * - 2xx = フェンス成立 (updatedAt が進んだことを確認) → 開始してよい。
  * - 409 = 巡回は既に終了済み (遅延した終了 commit が先に着地した等)。
- *   watch を開始すると以降の点が 409 で失われるため開始をブロックする。
- * - 404 = session 消失。同様にブロック。
- * - null (network / timeout / abort) やその他のエラーは fail-open で開始を許可
- *   する。フェンスの目的は「終了済みへの記録開始」の防止であり、オフライン等の
- *   一時障害で記録自体を妨げない (この後の既存ルート取得 GET が失敗すれば
- *   従来どおり開始は中止される)。
+ *   watch を開始すると以降の点が 409 で失われるため開始をブロックし、
+ *   巡回表示の再取得整合へ倒す。404 = session 消失。同様。
+ * - null (network / timeout / abort) やその他のエラーは「フェンス未成立」。
+ *   touch が届いたか不明なまま開始すると、まさに保護対象の劣化網 (touch だけ
+ *   落ちて後続 GET が通る) で遅延終了 commit が記録開始後に着地し得るため、
+ *   開始をブロックして再試行を促す (@codex P1)。オフライン開始は従来から
+ *   既存ルート取得 GET 必須で不可のため、この fail-closed で失う動作は無い。
  */
 export function classifyStartFence(
   status: number | null,
-): "proceed" | "blocked" {
-  if (status === 409 || status === 404) return "blocked";
-  return "proceed";
+): "proceed" | "blocked-ended" | "blocked-retry" {
+  if (status !== null && status >= 200 && status < 300) return "proceed";
+  if (status === 409 || status === 404) return "blocked-ended";
+  return "blocked-retry";
 }
 
 /**

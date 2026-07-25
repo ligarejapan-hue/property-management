@@ -34,22 +34,26 @@ const TRIP_SRC = readSrc("src/components/field-survey/trip-controls.tsx");
 const MAP_SRC = readSrc("src/components/field-survey/field-survey-map.tsx");
 
 describe("classifyStartFence — フェンス touch 応答の分類 (純関数)", () => {
-  it("409 (終了済み) / 404 (session 消失) は開始をブロックする", () => {
-    expect(classifyStartFence(409)).toBe("blocked");
-    expect(classifyStartFence(404)).toBe("blocked");
+  it("409 (終了済み) / 404 (session 消失) は終了検知としてブロックする", () => {
+    expect(classifyStartFence(409)).toBe("blocked-ended");
+    expect(classifyStartFence(404)).toBe("blocked-ended");
   });
 
-  it("200 は開始を許可する", () => {
+  it("2xx (フェンス成立を確認) のみ開始を許可する", () => {
     expect(classifyStartFence(200)).toBe("proceed");
+    expect(classifyStartFence(204)).toBe("proceed");
   });
 
-  it("network/timeout (null) やその他エラーは fail-open (オフライン記録を妨げない)", () => {
-    // 以降の既存ルート取得 GET が失敗すれば従来どおり開始しないため、
-    // フェンス単独では安全側に倒しすぎない。
-    expect(classifyStartFence(null)).toBe("proceed");
-    expect(classifyStartFence(500)).toBe("proceed");
-    expect(classifyStartFence(401)).toBe("proceed");
-    expect(classifyStartFence(403)).toBe("proceed");
+  it("成立を確認できない失敗 (null/5xx/401/403 等) は再試行ブロック (@codex P1)", () => {
+    // fail-open だと「touch だけ timeout/5xx して後続 GET が通る」劣化網で
+    // フェンス未成立のまま記録が始まり、遅延終了 commit に負けて以降の点を
+    // 失う。開始は元々既存ルート取得 GET 必須 (オフライン開始は従来から不可)
+    // なので、fail-closed にしても失う動作は無い。
+    expect(classifyStartFence(null)).toBe("blocked-retry");
+    expect(classifyStartFence(500)).toBe("blocked-retry");
+    expect(classifyStartFence(401)).toBe("blocked-retry");
+    expect(classifyStartFence(403)).toBe("blocked-retry");
+    expect(classifyStartFence(422)).toBe("blocked-retry");
   });
 });
 
@@ -85,9 +89,14 @@ describe("recorder — 位置記録開始のフェンス touch", () => {
     expect(startBlock).toMatch(/onSessionEnded/);
   });
 
-  it("フェンスは touch PATCH (touch: true) で timeout 付き・失敗は fail-open", () => {
+  it("フェンスは touch PATCH (touch: true) で timeout 付き・成立確認 (2xx) のみ開始", () => {
     expect(RECORDER_SRC).toMatch(/START_FENCE_TIMEOUT_MS/);
     expect(RECORDER_SRC).toMatch(/touch:\s*true/);
+    // 成立不明 (blocked-retry) でも開始せず、再試行を案内する
+    expect(RECORDER_SRC).toMatch(/blocked-retry/);
+    expect(RECORDER_SRC).toMatch(
+      /位置情報の記録を開始できませんでした。通信状態を確認して、もう一度お試しください。/,
+    );
   });
 
   it("フェンス await 明けにも session/世代ガードを通す (陳腐化 continuation 対策)", () => {
