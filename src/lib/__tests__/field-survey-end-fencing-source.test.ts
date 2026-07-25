@@ -57,17 +57,27 @@ describe("classifyStartFence — フェンス touch 応答の分類 (純関数)"
   });
 });
 
-describe("route — 終了 commit の活動フェンス (常時 updatedAt 条件)", () => {
-  it("終了/キャンセルの updateMany は isStaleEnd に関係なく updatedAt を条件に含む", () => {
+describe("route — 終了 commit の活動フェンス (到着後に活動なし条件)", () => {
+  it("終了/キャンセルの updateMany は updatedAt <= リクエスト到着時刻を条件に含む", () => {
     // 終了/キャンセル分岐の updateMany を掴む
     const block =
       ROUTE_SRC.match(
         /if \(patch\.status === "ended" \|\| patch\.status === "cancelled"\) \{[\s\S]*?INVALID_STATE/,
       )?.[0] ?? "";
     expect(block).not.toBe("");
-    // 無条件の updatedAt 条件 (isStaleEnd ゲートの conditional spread ではない)
-    expect(block).toMatch(/updatedAt:\s*existing\.updatedAt/);
+    // @codex R2: 読取時 updatedAt の等値条件は「読取前に遅延した」リクエストが
+    // フェンス touch 後の新しい値を読んで満たしてしまう。到着時刻上限を使う。
+    expect(block).toMatch(/updatedAt:\s*\{\s*lte:\s*requestArrivedAt\s*\}/);
+    expect(block).not.toMatch(/updatedAt:\s*existing\.updatedAt/);
     expect(block).not.toMatch(/isStaleEnd && \{ updatedAt/);
+  });
+
+  it("到着時刻は認証・パースより前 (ハンドラ先頭) で捕捉する", () => {
+    const patchBlock =
+      ROUTE_SRC.match(/export async function PATCH[\s\S]*?getApiSession/)?.[0] ??
+      "";
+    // requestArrivedAt の捕捉が getApiSession (認証) より前にある
+    expect(patchBlock).toMatch(/const requestArrivedAt = new Date\(\);/);
   });
 });
 

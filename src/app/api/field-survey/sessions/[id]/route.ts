@@ -121,6 +121,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    // #317 (@codex R2): リクエスト到着時刻を認証・パースより前に捕捉する。
+    // 終了/キャンセルの commit 条件はこの到着時刻を基準にする (下記参照)。
+    // 読取時 updatedAt の等値条件では、認証や DB スケジューリングで「読取より
+    // 前」に遅延したリクエストが、フェンス touch 後の新しい updatedAt を読んで
+    // 条件を満たしてしまう。到着時刻はその遅延の影響を受けない。
+    const requestArrivedAt = new Date();
     const { id } = await params;
     const session = await getApiSession();
     const permissions = await getUserPermissions(session.id);
@@ -171,18 +177,25 @@ export async function PATCH(
       // 0 行更新は「既に終了/キャンセル済」または「読取後に活動が入った」を
       // 意味し 409 にマップ (client は既存 conflict 処理 = 再取得 → 再試行)。
       //
-      // #317 活動フェンス: 読取時の updatedAt を常に条件へ含める (従来は stale
-      // 終了のみ = @codex R4)。track point flush / touch (位置記録開始のフェンス)
-      // は updatedAt を進めるため、client が abort した終了 PATCH がサーバー側で
-      // 遅延して commit する場合でも、「再読込・別タブで再開された記録より後に
-      // 終了が着地して以降の点を 409 で失わせる」ことができなくなる (どちらが
-      // 先かは DB の行ロックが直列化する)。updatedAt は timestamp(3)=ms 精度で
-      // Prisma も ms 精度で書き込むため、読取値の等値比較は round-trip で一致する。
+      // #317 活動フェンス: 「このリクエストの到着後に巡回へ活動が刻まれて
+      // いない」ことを commit 条件にする (updatedAt <= 到着時刻)。track point
+      // flush / touch (位置記録開始のフェンス) は updatedAt を進めるため、
+      // client が abort した終了 PATCH がサーバー側で遅延して commit する場合
+      // でも、「再読込・別タブで再開された記録 (フェンス touch 以降) より後に
+      // 終了が着地して以降の点を 409 で失わせる」ことができない。
+      //
+      // @codex R2: 読取時 updatedAt の等値条件だと、認証・パース・DB スケジュー
+      // リングで「読取より前」に遅延したリクエストがフェンス touch 後の新しい
+      // updatedAt を読んで条件を満たしてしまう。到着時刻 (ハンドラ先頭で捕捉)
+      // は読取遅延の影響を受けず、フェンス touch は終了リクエストの client
+      // timeout (15 秒) より後に打たれるため必ずこの条件を破る。updatedAt /
+      // 到着時刻はいずれも同一 Node プロセスの時計 (Prisma @updatedAt も client
+      // 側生成) なので時計ずれの問題はない。
       const result = await prisma.fieldSurveySession.updateMany({
         where: {
           id,
           status: "active",
-          updatedAt: existing.updatedAt,
+          updatedAt: { lte: requestArrivedAt },
         },
         data: {
           status: patch.status,

@@ -733,14 +733,15 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
       { params },
     );
     expect(res.status).toBe(200);
-    // updateMany は status="active" + 読取時 updatedAt 条件付きで呼ばれる
-    // (atomicity + #317 活動フェンス: 読取後に活動があれば commit しない)
+    // updateMany は status="active" + 活動フェンス条件 (updatedAt <= リクエスト
+    // 到着時刻) 付きで呼ばれる (#317 / @codex R2: 到着後に活動が刻まれていたら
+    // commit しない)
     const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
       .calls[0][0];
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: startedAt,
+      updatedAt: { lte: expect.any(Date) },
     });
     expect(umArgs.data.status).toBe("ended");
     // AuditLog
@@ -793,11 +794,11 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
       .calls[0][0];
     expect(umArgs.data.endedAt).toEqual(lastActivityAt);
-    // stale 終了は読取時 updatedAt を条件に含める (読取後 flush との race 防止)
+    // stale 終了も同じ活動フェンス条件 (到着後に活動があれば commit しない)
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: lastActivityAt,
+      updatedAt: { lte: expect.any(Date) },
     });
     // durationSec は startedAt→最終活動時刻 (約1時間) で、73時間にはならない
     const call = writeAuditLog.mock.calls[0][0];
@@ -831,7 +832,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("#317: 通常終了でも updateMany は読取時 updatedAt を条件に含む (活動フェンス)", async () => {
+  it("#317: 通常終了でも updateMany は「到着後に活動なし」(updatedAt <= 到着時刻) を条件に含む", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     const startedAt = new Date(Date.now() - 60 * 60 * 1000);
@@ -872,11 +873,15 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: lastActivityAt,
+      updatedAt: { lte: expect.any(Date) },
     });
+    // 到着時刻は「テスト開始以降・updateMany 呼び出し以前」の実時刻
+    const bound = (umArgs.where.updatedAt as { lte: Date }).lte;
+    expect(bound.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(Date.now() - bound.getTime()).toBeLessThan(10_000);
   });
 
-  it("#317: 読取後に活動 (flush/touch) が入った通常終了は 409 (遅延 commit が新しい活動を上書きしない)", async () => {
+  it("#317: 到着後に活動 (flush/touch) が入った終了は 409 (遅延 commit が新しい活動を上書きしない)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
@@ -1039,7 +1044,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
-      updatedAt: startedAt,
+      updatedAt: { lte: expect.any(Date) },
     });
   });
 
