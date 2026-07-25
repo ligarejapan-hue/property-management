@@ -1051,6 +1051,7 @@ export default function FieldSurveyMap({
           <PinCreateModal
             initialLat={createCandidate.lat}
             initialLng={createCandidate.lng}
+            initialAccuracy={createCandidate.accuracy ?? null}
             initialPhotoFile={createCandidate.cameraPhoto ?? null}
             initialPhotoPreviewUrl={createCandidate.cameraPhotoPreviewUrl ?? null}
             sessionId={activeSession.id}
