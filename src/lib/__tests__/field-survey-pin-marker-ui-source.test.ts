@@ -23,10 +23,11 @@ const LEGEND_SRC = readSrc(
 describe("field-survey-map — ピン配色の配線", () => {
   it("ピン marker は Pin (色+グリフ) を子に持ち、スタイルは純関数経由", () => {
     expect(MAP_SRC).toMatch(/\bPin,\n/);
-    // pins.map 起点にアンカーして marker ブロックのみを掴む
-    // (ControlPanel の {layers.pins && <PinMarkerLegend .../>} に誤マッチさせない)
+    // pins 起点にアンカーして marker ブロックのみを掴む
+    // (ControlPanel の {layers.pins && <PinMarkerLegend .../>} に誤マッチさせない)。
+    // 「対応済みのピンを隠す」フィルタ (hideClosedPins) を挟んだ形。
     const pinBlock = MAP_SRC.match(
-      /\{layers\.pins &&\n\s*pins\.map\(\(pin\) => \([\s\S]*?<\/AdvancedMarker>\n\s*\)\)\}/,
+      /\{layers\.pins &&\s*\(hideClosedPins\s*\?\s*pins\.filter\(\(p\) => p\.status !== "closed"\)\s*:\s*pins\s*\)\.map\(\(pin\) => \([\s\S]*?<\/AdvancedMarker>\s*\)\)\}/,
     );
     expect(pinBlock).not.toBeNull();
     const m = pinBlock?.[0] ?? "";

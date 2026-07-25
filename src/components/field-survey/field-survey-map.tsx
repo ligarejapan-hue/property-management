@@ -56,7 +56,15 @@ import { useFieldSurveyPinPhotoMutations } from "@/components/field-survey/use-f
 import {
   formatPinStatus,
   formatPinType,
+  isFieldSurveyPinType,
+  type FieldSurveyPinType,
 } from "@/lib/field-survey-pin-util";
+import {
+  PROPERTY_TYPE_LABELS,
+  REGISTRY_STATUS_LABELS,
+  DM_STATUS_LABELS,
+  CASE_STATUS_LABELS,
+} from "@/lib/property-types";
 import CurrentLocationMarker from "@/components/field-survey/current-location-marker";
 import PinMarkerLegend from "@/components/field-survey/pin-marker-legend";
 import { pinMarkerStyle } from "@/lib/field-survey-pin-marker";
@@ -124,6 +132,14 @@ export default function FieldSurveyMap({
     properties: true,
     pins: true,
   });
+  // 「対応済み (closed)」ピンを地図から一時的に隠す表示フィルタ。
+  // 未対応だけを見たい巡回中の視認性向上が目的で、データは消さない (表示のみ)。
+  // ブラウザ保存はしない方針のためページ滞在中のみ有効。
+  const [hideClosedPins, setHideClosedPins] = useState(false);
+  // 直前に保存したピンの種類。連続ピンで同じ種類を続けて立てることが多いため、
+  // 次の作成モーダルの初期値に引き継いで選び直しのタップを省く。
+  // 巡回の終了/切替で既定 (candidate) に戻す (handleActiveSessionChange)。
+  const [lastPinType, setLastPinType] = useState<FieldSurveyPinType>("candidate");
   const [error, setError] = useState<string | null>(null);
   // Phase 1-F-2: TripControls から active session (own のみ) の通知を受け、
   // location recorder hook を駆動する。session が無い間 hook は何もしない。
@@ -563,6 +579,9 @@ export default function FieldSurveyMap({
         // 残るのに OFF 導線 (パネル内トグル=巡回中のみ描画) が消えて復帰
         // 不能になり、次の巡回開始時も暗黙 ON で復活してしまう。
         setPinAddMode(false);
+        // 種類の引き継ぎも巡回単位でリセットする (別の巡回に前回の種類を
+        // 持ち越さない。既定 = candidate)。
+        setLastPinType("candidate");
       }
       setActiveSession(s);
     },
@@ -748,6 +767,12 @@ export default function FieldSurveyMap({
         sessionId: activeSession.id,
       });
       if (!r.ok || !r.data) return;
+      // 保存成功した種類を次のモーダル初期値へ引き継ぐ (連続ピンの入力時短)。
+      // allowlist 検証つき: 未知の値は記憶しない (モーダルの radio に無い値で
+      // 開くと何も選択されないため)。
+      if (isFieldSurveyPinType(input.pinType)) {
+        setLastPinType(input.pinType);
+      }
       // pin 作成成功。pending な「現在地を使う」callback を無効化し marker を再取得。
       invalidateCurrentLocationRequest();
       bumpRefetch();
@@ -871,6 +896,7 @@ export default function FieldSurveyMap({
         >
           <MapDataLayer
             layers={layers}
+            hideClosedPins={hideClosedPins}
             onError={setError}
             refetchNonce={refetchNonce}
             currentUserId={currentUserId}
@@ -915,6 +941,8 @@ export default function FieldSurveyMap({
           onToggle={(key) =>
             setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
           }
+          hideClosedPins={hideClosedPins}
+          onToggleHideClosedPins={() => setHideClosedPins((v) => !v)}
           panelOpen={panelOpen}
           onTogglePanelOpen={() => {
             quickStartRef.current = false;
@@ -1054,6 +1082,7 @@ export default function FieldSurveyMap({
             initialAccuracy={createCandidate.accuracy ?? null}
             initialPhotoFile={createCandidate.cameraPhoto ?? null}
             initialPhotoPreviewUrl={createCandidate.cameraPhotoPreviewUrl ?? null}
+            initialPinType={lastPinType}
             sessionId={activeSession.id}
             saving={pinMutations.createLoading}
             serverError={pinMutations.createError}
@@ -1127,6 +1156,8 @@ export default function FieldSurveyMap({
 function ControlPanel({
   layers,
   onToggle,
+  hideClosedPins,
+  onToggleHideClosedPins,
   panelOpen,
   onTogglePanelOpen,
   currentUserId,
@@ -1147,6 +1178,9 @@ function ControlPanel({
 }: {
   layers: Record<Layer, boolean>;
   onToggle: (key: Layer) => void;
+  /** 「対応済みのピンを隠す」表示フィルタ (親 state。データは消さない)。 */
+  hideClosedPins: boolean;
+  onToggleHideClosedPins: () => void;
   /**
    * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
    * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
@@ -1208,7 +1242,10 @@ function ControlPanel({
         />
         <span>既存物件</span>
       </label>
-      <label className="mb-3 flex cursor-pointer items-center gap-2">
+      {/* 入れ子トグル表示中は下の mb-3 が余白を担う (OFF 時は従来どおり)。 */}
+      <label
+        className={`${layers.pins ? "mb-1" : "mb-3"} flex cursor-pointer items-center gap-2`}
+      >
         <input
           type="checkbox"
           checked={layers.pins}
@@ -1216,6 +1253,19 @@ function ControlPanel({
         />
         <span>調査ピン</span>
       </label>
+      {/* 対応済み (closed=灰✓) を一時的に隠す表示フィルタ。未対応だけを
+          見たい時のノイズ削減。調査ピン表示中のみ意味があるため入れ子で出す。 */}
+      {layers.pins && (
+        <label className="mb-3 ml-6 flex cursor-pointer items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={hideClosedPins}
+            onChange={onToggleHideClosedPins}
+            data-testid="hide-closed-pins-toggle"
+          />
+          <span>対応済みのピンを隠す</span>
+        </label>
+      )}
 
       {/* ピンの配色凡例 (調査ピン表示中のみ)。 */}
       {layers.pins && <PinMarkerLegend showOthersHint={showOthersLegendHint} />}
@@ -1300,6 +1350,7 @@ function MapInstanceCapture({
 
 function MapDataLayer({
   layers,
+  hideClosedPins,
   onError,
   refetchNonce,
   currentUserId,
@@ -1308,6 +1359,11 @@ function MapDataLayer({
   onOpenPinDetail,
 }: {
   layers: Record<Layer, boolean>;
+  /**
+   * 「対応済みのピンを隠す」表示フィルタ。fetch 条件は変えず描画だけを
+   * 間引く (トグルのたびに再取得しない。closed は #315 の灰✓ marker)。
+   */
+  hideClosedPins: boolean;
   onError: (msg: string | null) => void;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
@@ -1497,7 +1553,10 @@ function MapDataLayer({
           />
         ))}
       {layers.pins &&
-        pins.map((pin) => (
+        (hideClosedPins
+          ? pins.filter((p) => p.status !== "closed")
+          : pins
+        ).map((pin) => (
           <AdvancedMarker
             key={pin.id}
             position={{ lat: pin.lat, lng: pin.lng }}
@@ -1523,7 +1582,12 @@ function MapDataLayer({
           <PropertyInfo row={selected.row} />
         </InfoWindow>
       )}
-      {selected && selected.kind === "pin" && (
+      {/* 開いたまま「対応済みを隠す」を ON にした closed ピンの吹き出しは
+          marker と一緒に非表示にする (marker が消えたのに吹き出しだけ残ると
+          位置の手がかりが無い浮遊 UI になる)。OFF に戻せば再表示される。 */}
+      {selected &&
+        selected.kind === "pin" &&
+        !(hideClosedPins && selected.row.status === "closed") && (
         <InfoWindow
           position={{ lat: selected.row.lat, lng: selected.row.lng }}
           onCloseClick={() => setSelected(null)}
@@ -1552,15 +1616,17 @@ function PropertyInfo({ row }: { row: PropertyRow }) {
   return (
     <div className="min-w-[200px] max-w-[280px] text-xs">
       <div className="mb-1 font-semibold text-gray-800">{row.address}</div>
+      {/* 値は他画面と同じ共有ラベル辞書で日本語表示する (生の enum 英字を
+          現場に見せない)。未知の値はフォールバックで素通し (既存データ保全)。 */}
       <dl className="grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700">
         <dt>種別</dt>
-        <dd>{row.propertyType}</dd>
+        <dd>{PROPERTY_TYPE_LABELS[row.propertyType] ?? row.propertyType}</dd>
         <dt>登記</dt>
-        <dd>{row.registryStatus}</dd>
+        <dd>{REGISTRY_STATUS_LABELS[row.registryStatus] ?? row.registryStatus}</dd>
         <dt>DM</dt>
-        <dd>{row.dmStatus}</dd>
+        <dd>{DM_STATUS_LABELS[row.dmStatus] ?? row.dmStatus}</dd>
         <dt>案件</dt>
-        <dd>{row.caseStatus}</dd>
+        <dd>{CASE_STATUS_LABELS[row.caseStatus] ?? row.caseStatus}</dd>
       </dl>
       <div className="mt-2">
         <a

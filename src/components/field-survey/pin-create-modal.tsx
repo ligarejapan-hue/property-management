@@ -52,6 +52,12 @@ interface PinCreateModalProps {
    * (差し替え / unmount) が担う。
    */
   initialPhotoPreviewUrl?: string | null;
+  /**
+   * 「種類」の初期選択。連続ピンで直前に保存した種類を親が引き継いで渡す
+   * (同じ種類を続けて立てる現場動作の選び直しタップを省く)。未指定は
+   * 従来どおり candidate。
+   */
+  initialPinType?: FieldSurveyPinType;
   /** 親が把握している active session id。null は modal を mount しない前提。 */
   sessionId: string | null;
   saving: boolean;
@@ -100,6 +106,7 @@ export default function PinCreateModal({
   initialAccuracy,
   initialPhotoFile,
   initialPhotoPreviewUrl,
+  initialPinType,
   sessionId,
   saving,
   serverError,
@@ -115,7 +122,11 @@ export default function PinCreateModal({
   currentLocationLoading,
   currentLocationError,
 }: PinCreateModalProps) {
-  const [pinType, setPinType] = useState<FieldSurveyPinType>("candidate");
+  // 初期値は親から引き継いだ直前の種類 (未指定は candidate)。modal は作成の
+  // たびに mount し直されるため、開いた時点の引き継ぎ値で確定する。
+  const [pinType, setPinType] = useState<FieldSurveyPinType>(
+    initialPinType ?? "candidate",
+  );
   const [memo, setMemo] = useState<string>("");
   // カメラファースト経由の写真は選択済み状態で開始する。preview の objectURL は
   // 親がイベントハンドラ内で生成済み (render 中に createObjectURL を呼ばない)。
