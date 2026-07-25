@@ -415,19 +415,11 @@ export default function TripControls({
   // #317 (@codex R3): 終了直前の touch はフェンストークンの発行も兼ねる。
   // 応答の session.updatedAt (= この touch が永続化した世代値) を返し、終了
   // PATCH に echo する。conflict=true は並行終了済み (reconcile 実施済み)。
+  // #317 (@codex R7): この touch は世代 (activitySeq) を進めない通常の活動記録
+  // (fence: true を送らない)。終了フロー内の R10 バックストップとして呼んでも
+  // 「終了意図の時点でピンした世代」を自分で壊さない。
   const touchSession = useCallback(
-    async (
-      target: ActiveSessionLike,
-      opts?: {
-        /**
-         * #317 (@codex R5/R6): CAS (compare-and-set) 条件。指定時は「session の
-         * 活動世代 (activitySeq) がこの値のまま」の時だけ touch が成立し +1 で
-         * 進める。遅延した touch が後から立ったフェンスを追い越して新しい
-         * トークンを鋳造するのを防ぐ (古い expected では server 側で 0 行 → 409)。
-         */
-        expectedActivitySeq?: number;
-      },
-    ): Promise<{ conflict: boolean; pinnedActivitySeq: number | null }> => {
+    async (target: ActiveSessionLike): Promise<void> => {
       // @codex P1: best-effort touch に timeout を付ける。blackhole すると通常
       // 終了がここで永久待機し phase="ending" 固着で終了 PATCH / reconcile /
       // 脱出口へ到達できない。timeout 後は touch を諦めて先へ進む。
@@ -440,39 +432,18 @@ export default function TripControls({
             method: "PATCH",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              touch: true,
-              ...(opts?.expectedActivitySeq !== undefined && {
-                expectedActivitySeq: opts.expectedActivitySeq,
-              }),
-            }),
+            body: JSON.stringify({ touch: true }),
             signal: ac.signal,
           },
         );
-        if (!mountedRef.current) {
-          return { conflict: false, pinnedActivitySeq: null };
-        }
+        if (!mountedRef.current) return;
         if (res.status === 409) {
-          // 並行で終了済み / CAS 敗北 (@codex R9)。終了済み session を巡回中と
-          // して使い続けないよう、状態を取り直して UI を整合させる。
+          // 並行で終了済み (@codex R9)。終了済み session を巡回中として使い
+          // 続けないよう、状態を取り直して UI を整合させる (GET も timeout 付き)。
           await fetchActiveSession({ timeoutMs: RECONCILE_TIMEOUT_MS });
-          return { conflict: true, pinnedActivitySeq: null };
         }
-        if (res.ok) {
-          const body = (await res.json().catch(() => null)) as
-            | { data?: { activitySeq?: number } }
-            | null;
-          const s = body?.data?.activitySeq;
-          return {
-            conflict: false,
-            pinnedActivitySeq:
-              typeof s === "number" && Number.isInteger(s) ? s : null,
-          };
-        }
-        return { conflict: false, pinnedActivitySeq: null };
       } catch {
         // best effort (オフライン / timeout 等)。続行操作はローカルで成立させる。
-        return { conflict: false, pinnedActivitySeq: null };
       } finally {
         clearTimeout(timer);
       }
@@ -542,6 +513,58 @@ export default function TripControls({
       setPhase("ending");
       setError(null);
       setEndBlockedByBuffer(false);
+      // #317 (@codex R3〜R7) フェンストークン (世代カウンタ activitySeq) のピン。
+      // 「終了の意図時点」= drain より前に読み取り GET でピンする (R7: drain は
+      // 最大 15 秒あり、その間に別 client が記録を再開 (フェンス = 世代 +1) して
+      // も、drain 後に読むとその新世代を吸収してしまう)。flush は世代を進めない
+      // ため、自分の drain でピンは壊れない。以後この終了は「ピンした世代の
+      // まま」の時のみ commit でき、意図より後のフェンスには (リクエストが
+      // どの段階で遅延していても) 必ず負ける。読み取りは何も書かないため、
+      // 遅延・陳腐化した GET は古いピンを返すだけ = 終了が 409 に倒れる安全側。
+      // - staleDirect (放置 session の直接終了): 復元 GET で得た client 既知の
+      //   世代をそのまま使う (touch しない = stale 判定と endedAt 規則を保全)。
+      // - GET 不達 (完全圏外): 終了を送らず再試行を案内 — その状況では終了
+      //   PATCH 自体も届かないため、従来挙動から失うものは無い。
+      let fenceToken: number | null = null;
+      if (opts?.staleDirect) {
+        if (typeof target.activitySeq === "number") {
+          fenceToken = target.activitySeq;
+        }
+      } else {
+        const known = await fetchOwnActiveGeneration(target.id);
+        if (!mountedRef.current) return;
+        if (known.kind === "ended") {
+          // 既に active でない (並行終了済み等)。全体 reconcile で UI を整合
+          // させ、この終了操作は完了扱いにする。reconcile 自体が timeout 等で
+          // 判定不能 (unknown・state 未変更) の場合は phase="ending" のまま
+          // 固まらないよう active に戻して再試行可能にする (@codex R6 P2)。
+          const rec = await fetchActiveSession({
+            timeoutMs: RECONCILE_TIMEOUT_MS,
+          });
+          if (!mountedRef.current) return;
+          if (rec.kind === "unknown") {
+            setError(
+              "巡回終了を確認できませんでした。電波の良い場所へ移動して、もう一度お試しください。",
+            );
+            setPhase("active");
+          }
+          return;
+        }
+        if (known.kind === "active") {
+          fenceToken = known.activitySeq;
+        }
+      }
+      if (fenceToken === null) {
+        // ピンを得られない間は終了を送らない (tokenless は server が拒否)。
+        // まだ drain / recorder 停止の前なので、active に戻すだけで安全に
+        // 再試行できる。
+        setError(
+          "巡回終了の通信ができませんでした。電波の良い場所で、もう一度お試しください。",
+        );
+        setPhase("active");
+        if (opts?.discardUnsent) setEndBlockedByBuffer(true);
+        return;
+      }
       // @codex P2: 「破棄して終了」経路では、まず進行中の flush を即座に中断する
       // (buffer は保持)。flush timeout race に負けて裏で走り続けている drain が
       // 遅れて応答し、破棄すると決めた点を送信/buffer から除去するのを防ぐ。
@@ -605,84 +628,14 @@ export default function TripControls({
       // 行う (snuck-in watch を残さない)。破棄経路は abortInFlightFlush で既に
       // stopping だが冪等。buffer は保持する。
       onBlockRecorderForEnd?.();
-      // #317 (@codex R3): 終了直前の活動 touch でフェンストークンを発行する。
-      // 応答の updatedAt を終了 PATCH に echo し、server は等値を commit 条件に
-      // 使う (トークンは送信時点でピン留めされるため、この終了リクエストが
-      // どの段階で遅延しても、後から打たれた位置記録開始フェンスに必ず負ける)。
-      // B-7 (@codex R10) の「続行済み session の stale 判定解除」もこの touch が
-      // 兼ねる (endedAt が続行前へ巻き戻らない)。
-      //
-      // フェンストークン (世代カウンタ activitySeq) の取得 (@codex R3〜R6:
-      // 終了は「操作開始時点で既知の世代」に連鎖する CAS でのみ commit できる。
-      // server 側で観測する時刻・遅延後に鋳造されたトークン・同一 ms で衝突し
-      // 得る updatedAt では、後から立った位置記録開始フェンスを追い越せる):
-      // - 通常終了・破棄終了: ①drain 後に読み取り専用 GET で現在の世代を取得
-      //   → ②その世代と一致する時だけ +1 で成立する CAS touch (bounded 8 秒)
-      //   → ③CAS が鋳造した世代で終了 PATCH。各リンクが前段の値を条件にする
-      //   ため、鎖のどこにフェンスが割り込んでも必ず不成立になる。遅延した
-      //   CAS touch 自体も古い expected のままなので何も書かない (ゾンビ化
-      //   しない)。GET/touch 不達 (完全圏外) は終了を送らず再試行を案内 —
-      //   その状況では終了 PATCH 自体も届かないため従来から失うものは無い。
-      // - 放置 session の直接終了 (staleDirect): touch すると server の stale
-      //   判定が解除され endedAt=now の過大記録に戻る (B-7 R3)。touch せず
-      //   復元 GET で得た client 既知の activitySeq をトークンにする (これ自体
-      //   が操作開始時点の世代 = R5 の要件を満たす)。
-      let fenceToken: number | null = null;
-      if (opts?.staleDirect) {
-        if (typeof target.activitySeq === "number") {
-          fenceToken = target.activitySeq;
-        }
-      } else {
-        const known = await fetchOwnActiveGeneration(target.id);
+      // B-7 (@codex R10/R12): 続行済み session の終了は、直前に活動 touch
+      // (fence 無し = 世代を進めない → 意図時点のピンを壊さない) を挟んで
+      // server の stale 判定を解除する (続行時の touch が offline で失敗して
+      // いても endedAt が続行前の時刻へ巻き戻らない)。破棄経路では touch が
+      // ハングした時の脱出口固着を避けるため従来どおり省略する (P2 R4)。
+      if (resumedRef.current === target.id && !opts?.discardUnsent) {
+        await touchSession(target);
         if (!mountedRef.current) return;
-        if (known.kind === "ended") {
-          // 既に active でない (並行終了済み等)。全体 reconcile で UI を整合
-          // させ、この終了操作は完了扱いにする。reconcile 自体が timeout 等で
-          // 判定不能 (unknown・state 未変更) の場合は phase="ending" のまま
-          // 固まらないよう active に戻して再試行可能にする (@codex R6 P2)。
-          const rec = await fetchActiveSession({
-            timeoutMs: RECONCILE_TIMEOUT_MS,
-          });
-          if (!mountedRef.current) return;
-          if (rec.kind === "unknown") {
-            setError(
-              "巡回終了を確認できませんでした。電波の良い場所へ移動して、もう一度お試しください。",
-            );
-            setPhase("active");
-          }
-          return;
-        }
-        if (known.kind === "active" && known.activitySeq !== null) {
-          const fence = await touchSession(target, {
-            expectedActivitySeq: known.activitySeq,
-          });
-          if (!mountedRef.current) return;
-          if (fence.conflict) {
-            // CAS 敗北 (別タブのフェンス等が世代を進めた) または並行終了。
-            // touchSession 内の reconcile が UI を整合済み。active のままなら
-            // ユーザーが最新状態を見て終了を再確認する (自動では終了しない)。
-            setError(
-              "巡回の状態が変わりました。最新の状態を確認して、もう一度お試しください。",
-            );
-            if (!outstandingEndMayCommitRef.current) {
-              onEndFailedRestoreRecorder?.();
-            }
-            return;
-          }
-          fenceToken = fence.pinnedActivitySeq;
-        }
-      }
-      if (fenceToken === null) {
-        // トークンを得られない間は終了を送らない (tokenless は server が拒否)。
-        // 未送信のため outstanding な終了は増えておらず、以前の曖昧な終了が
-        // 残っていない限り recorder を操作可能へ戻して安全に再試行できる。
-        setError(
-          "巡回終了の通信ができませんでした。電波の良い場所で、もう一度お試しください。",
-        );
-        setPhase("active");
-        if (opts?.discardUnsent) setEndBlockedByBuffer(true);
-        if (!outstandingEndMayCommitRef.current) onEndFailedRestoreRecorder?.();
-        return;
       }
       if (mutationAbortRef.current) mutationAbortRef.current.abort();
       const ac = new AbortController();

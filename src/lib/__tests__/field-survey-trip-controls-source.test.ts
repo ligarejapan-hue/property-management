@@ -215,11 +215,10 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
     // 専用の別 API は増やさない (end 用 + 続行 touch 用の PATCH 2 箇所のみ)
     const patches = TRIP_SRC.match(/method:\s*"PATCH"/g) ?? [];
     expect(patches.length).toBe(2);
-    // 続行 touch は活動記録専用 (touch: true。#317 R5 で CAS 用の
-    // expectedUpdatedAt を任意同封)。memo 送信での代用は一覧 API が memo を
-    // 返さないため既存 memo を消す (禁止)
+    // 続行 touch は活動記録専用 ({ touch: true }・fence 無し = 世代を進めない)。
+    // memo 送信での代用は一覧 API が memo を返さないため既存 memo を消す (禁止)
     expect(TRIP_SRC).toMatch(/touchSession/);
-    expect(TRIP_SRC).toMatch(/touch:\s*true,/);
+    expect(TRIP_SRC).toMatch(/JSON\.stringify\(\{ touch: true \}\)/);
     expect(TRIP_SRC).not.toMatch(/memo:\s*target\.memo/);
     // 並行終了済み (409) は再取得して UI を整合させる (@codex R9)
     expect(TRIP_SRC).toMatch(
@@ -227,14 +226,18 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
     );
   });
 
-  it("終了直前の GET→CAS touch (@codex R10 の stale 解除 + #317 R3〜R5 トークン発行)", () => {
+  it("終了 = 意図時点の世代ピン → drain → (resumed のみ) 活動 touch → PATCH (#317 R7)", () => {
     expect(TRIP_SRC).toMatch(/resumedRef/);
-    // endSession 内で (stale 直接終了を除き) 読み取り GET → その世代を条件に
-    // した CAS touch → 鋳造された世代で終了 PATCH、と連鎖する。続行済み
-    // session の stale 巻き戻り防止 (R10) はこの touch が兼ねる。
-    expect(TRIP_SRC).toMatch(/fetchOwnActiveGeneration\(target\.id\)/);
+    // ピン (読み取り GET) は drain より前 = 終了意図の時点で取る (@codex R7:
+    // drain 中に別 client が記録を再開しても、その世代を吸収しない)。
+    const pinIdx = TRIP_SRC.indexOf("fetchOwnActiveGeneration(target.id)");
+    const drainIdx = TRIP_SRC.indexOf("Promise.resolve(onBeforeSessionEnd())");
+    expect(pinIdx).toBeGreaterThan(-1);
+    expect(drainIdx).toBeGreaterThan(-1);
+    expect(pinIdx).toBeLessThan(drainIdx);
+    // resumed の stale 解除 touch は fence 無し = 意図時点のピンを壊さない (R10/R12)
     expect(TRIP_SRC).toMatch(
-      /await touchSession\(target, \{\s*expectedActivitySeq: known\.activitySeq,?\s*\}\)/,
+      /resumedRef\.current === target\.id && !opts\?\.discardUnsent[\s\S]{0,120}?await touchSession\(target\)/,
     );
     expect(TRIP_SRC).toMatch(/expectedActivitySeq: fenceToken/);
   });

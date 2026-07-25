@@ -221,22 +221,19 @@ export async function PATCH(
       // B-7 (@codex R7): 活動記録専用の touch。updatedAt だけを進め、memo 等は
       // 一切変更しない。
       //
-      // #317 (@codex R5/R6): touch は活動世代 (activitySeq) を必ず +1 する。
-      // expectedActivitySeq 付きは CAS (compare-and-set): 「client が既知の世代
-      // のままなら進める」を atomic に行い、終了フローのトークン鋳造に使う。
-      // 遅延した touch は古い expected のまま = 後から立った位置記録開始
-      // フェンスの後では不成立 (0 行 → 409) となり、「遅延リクエストが新しい
-      // 世代のトークンを鋳造して追い越す」余地を消す。increment は同一 ms の
-      // 並行書込でも必ず値が変わる (updatedAt 等値ではここが破れる = R6)。
+      // #317 (@codex R6/R7): fence: true の touch (位置記録の開始/再開) のみ
+      // 世代 (activitySeq) を +1 する。increment は同一 ms の並行書込でも必ず
+      // 値が変わる (updatedAt 等値ではここが破れる = R6)。フェンスは世代を
+      // 進めるだけで何も条件にしない — 遅延したフェンスが後から着地しても
+      // 「以後の古いトークンの終了を弾く」安全方向にしか働かない。
+      // 通常の活動 touch (続行の記録・stale 解除) は updatedAt のみ進め、
+      // 世代を変えない = 終了フロー自身の touch が意図時点のピンを壊さない。
       const touched = await prisma.fieldSurveySession.updateMany({
-        where: {
-          id,
-          status: "active",
-          ...(patch.expectedActivitySeq !== undefined && {
-            activitySeq: patch.expectedActivitySeq,
-          }),
+        where: { id, status: "active" },
+        data: {
+          updatedAt: new Date(),
+          ...(patch.fence && { activitySeq: { increment: 1 } }),
         },
-        data: { updatedAt: new Date(), activitySeq: { increment: 1 } },
       });
       if (touched.count === 0) {
         // 並行で終了済み (@codex R9): 200 で握り潰すと client が終了済み

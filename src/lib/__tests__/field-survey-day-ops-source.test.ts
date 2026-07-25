@@ -304,17 +304,14 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     );
   });
 
-  it("破棄経路も GET→CAS touch でトークンを取得する (#317 @codex R4/R5)", () => {
-    // かつての「破棄経路は touch 省略」は touch に timeout が無かった時代の
-    // 判断 (#316 P2 R4)。現在は bounded な GET→CAS touch 連鎖でフェンストークン
-    // を取得し、tokenless の終了は送らない。不達時は終了を送らず脱出口を再提示
+  it("終了は意図時点の世代ピン必須・破棄経路もピン GET を通る (#317 R4/R7)", () => {
+    // tokenless の終了は server が拒否するため、破棄経路も bounded なピン GET
+    // (fetchOwnActiveGeneration) を通る。不達時は終了を送らず脱出口を再提示
     // する (完全圏外では終了 PATCH 自体も届かないため、従来挙動から失うものは
-    // 無い)。
+    // 無い)。ピンは読み取りのみ = touch は挟まない (R7: CAS touch は遅延時に
+    // 新世代を鋳造して追い越し得るため廃止)。
     expect(TRIP_SRC).toMatch(
       /\} else \{\s*const known = await fetchOwnActiveGeneration\(target\.id\)/,
-    );
-    expect(TRIP_SRC).toMatch(
-      /await touchSession\(target, \{\s*expectedActivitySeq: known\.activitySeq,?\s*\}\)/,
     );
     expect(TRIP_SRC).toMatch(/if \(fenceToken === null\)/);
     expect(TRIP_SRC).toMatch(

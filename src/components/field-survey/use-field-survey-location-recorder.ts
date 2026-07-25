@@ -543,7 +543,10 @@ export function useFieldSurveyLocationRecorder(
             method: "PATCH",
             credentials: "same-origin",
             headers: POST_HEADERS,
-            body: JSON.stringify({ touch: true }),
+            // fence: true = 世代 (activitySeq) を +1 する記録開始フェンス。
+            // 以後、これより古い世代をピンした終了は server 側で必ず不成立
+            // になる (#317 @codex R7)。
+            body: JSON.stringify({ touch: true, fence: true }),
             signal: ac.signal,
           },
         );

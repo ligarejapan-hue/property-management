@@ -259,13 +259,16 @@ export const patchFieldSurveySessionSchema = z
     // memo 送信で代用すると、一覧 API が memo を返さない設計のため null 上書きで
     // 既存 memo を消してしまう (@codex #308 R7)。
     touch: z.literal(true).optional(),
-    // #317 (@codex R3〜R6): 終了/キャンセルのフェンストークン (世代カウンタ)。
-    // client が直前の CAS touch 応答 (または復元 GET) から得た activitySeq を
-    // そのまま echo する。server はこの等値を commit 条件に使い、より古い世代
-    // を運ぶ遅延リクエストを (どの段階で遅延していても) 拒否できる。整数の
+    // #317 (@codex R7): touch のフェンス指定。位置記録の開始 (再開) は
+    // fence: true の touch で行い、session の世代 (activitySeq) を必ず +1 する。
+    // 通常の活動 touch (続行の記録・stale 解除) は世代を進めない。
+    fence: z.literal(true).optional(),
+    // #317 (@codex R3〜R7): 終了/キャンセルのフェンストークン (世代カウンタ)。
+    // client が「終了の意図時点」に読み取り GET で得た activitySeq をそのまま
+    // echo する。server はこの等値を commit 条件に使い、意図より後にフェンス
+    // (記録再開) が立った終了を (どの段階で遅延していても) 拒否できる。整数の
     // 単調増加なので時計・ms 精度に依存しない。status 変更には必須 (トークン
     // 無しの終了は server 側で観測する値では遅延を区別できないため許可しない)。
-    // touch に付けた場合は CAS 条件 (既知世代のままなら +1 して進める)。
     expectedActivitySeq: z.number().int().min(0).optional(),
   })
   .refine(

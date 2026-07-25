@@ -1,16 +1,18 @@
 /**
  * 巡回終了の確実化 (#317) — 終了 commit の活動フェンス化のソース検証。
  *
- * 設計 (@codex R1〜R6 で確定した最終形。世代カウンタ activitySeq を追加する
+ * 設計 (@codex R1〜R7 で確定した最終形。世代カウンタ activitySeq を追加する
  * additive migration を含む):
- *  1. 活動 (touch / track point flush) は session の activitySeq を必ず +1 する
- *     (整数の単調増加 = 時計・ms 精度・遅延に依存しない)。
- *  2. 終了/キャンセルは「client が送信時にピン留めした世代 (expectedActivitySeq)
- *     と等値」の時のみ commit できる (tokenless は schema で拒否)。トークンは
- *     drain 後の読み取り GET → その世代を条件にした CAS touch → 鋳造世代で終了
- *     PATCH、の連鎖で得る。鎖のどこにフェンスが割り込んでも必ず不成立になる。
- *  3. 「位置記録開始」は watch 開始前に活動 touch をフェンスとして打つ (2xx の
- *     成立確認時のみ開始・409/404 は終了検知・その他は再試行ブロック)。
+ *  1. 「位置記録の開始」だけが世代 (activitySeq) を +1 する (fence: true の
+ *     touch)。flush は世代を進めない (終了フロー自身の drain がピンを壊さない)。
+ *     整数の単調増加 = 時計・ms 精度・遅延に依存しない。
+ *  2. 終了/キャンセルは「client が終了意図の時点 (drain より前) に読み取り GET
+ *     でピンした世代 (expectedActivitySeq) と等値」の時のみ commit できる
+ *     (tokenless は schema で拒否)。意図より後に記録が再開された終了は、
+ *     リクエストがどの段階で遅延していても必ず不成立になる。読み取りは何も
+ *     書かないため、遅延・陳腐化した GET は古いピン = 安全側にしか倒れない。
+ *  3. 「位置記録開始」は watch 開始前にフェンス touch を打つ (2xx の成立確認時
+ *     のみ開始・409/404 は終了検知・その他は再試行ブロック)。
  *
  * vitest は env=node のため、hook の実挙動はソース静的検証 + route 挙動テスト
  * (field-survey-sessions-route.test.ts) で担保する。改行固定アンカーは使わない
@@ -78,8 +80,29 @@ describe("route — 終了 commit の活動フェンス (フェンストーク�
     expect(block).not.toMatch(/isStaleEnd && \{ updatedAt/);
     // 到着時刻フォールバック自体を廃止 (R4)
     expect(ROUTE_SRC).not.toMatch(/requestArrivedAt/);
-    // 世代カウンタは touch/flush で必ず +1 される
-    expect(ROUTE_SRC).toMatch(/activitySeq: { increment: 1 }/);
+  });
+
+  it("世代を進めるのはフェンス touch のみ・flush は進めない (@codex R7)", () => {
+    // フェンス (記録開始) だけが世代を +1 する。条件は持たない = 遅延した
+    // フェンスも「古いピンの終了を弾く」安全方向にしか働かない。
+    expect(ROUTE_SRC).toMatch(
+      /patch\.fence && \{ activitySeq: \{ increment: 1 \} \}/,
+    );
+    // flush (track-points) は世代を進めない = 終了フロー自身の drain が
+    // 意図時点のピンを壊さない。
+    const TRACK_SRC = readSrc(
+      "src/app/api/field-survey/sessions/[id]/track-points/route.ts",
+    );
+    expect(TRACK_SRC).not.toMatch(/activitySeq:\s*\{\s*increment/);
+  });
+
+  it("世代ピンは終了意図の時点 (drain より前) に取る (@codex R7)", () => {
+    const TRIP = readSrc("src/components/field-survey/trip-controls.tsx");
+    const pinIdx = TRIP.indexOf("fetchOwnActiveGeneration(target.id)");
+    const drainIdx = TRIP.indexOf("Promise.resolve(onBeforeSessionEnd())");
+    expect(pinIdx).toBeGreaterThan(-1);
+    expect(drainIdx).toBeGreaterThan(-1);
+    expect(pinIdx).toBeLessThan(drainIdx);
   });
 
   it("stale 直接終了は touch せず client 既知の activitySeq をトークンにする", () => {
@@ -101,6 +124,8 @@ describe("route — 終了 commit の活動フェンス (フェンストーク�
     expect(schema).toMatch(
       /expectedActivitySeq:\s*z\.number\(\)\.int\(\)\.min\(0\)\.optional\(\)/,
     );
+    // @codex R7: フェンス指定 flag (記録開始 touch のみ世代を進める)
+    expect(schema).toMatch(/fence:\s*z\.literal\(true\)\.optional\(\)/);
     // @codex R4: tokenless の status 変更を schema 段階で拒否
     expect(schema).toMatch(
       /v\.status === undefined \|\| v\.expectedActivitySeq !== undefined/,
@@ -126,9 +151,10 @@ describe("recorder — 位置記録開始のフェンス touch", () => {
     expect(startBlock).toMatch(/onSessionEnded/);
   });
 
-  it("フェンスは touch PATCH (touch: true) で timeout 付き・成立確認 (2xx) のみ開始", () => {
+  it("フェンスは touch PATCH (touch: true, fence: true) で timeout 付き・成立確認 (2xx) のみ開始", () => {
     expect(RECORDER_SRC).toMatch(/START_FENCE_TIMEOUT_MS/);
-    expect(RECORDER_SRC).toMatch(/touch:\s*true/);
+    // fence: true = 世代 (activitySeq) を +1 する記録開始フェンス (@codex R7)
+    expect(RECORDER_SRC).toMatch(/touch:\s*true,\s*fence:\s*true/);
     // 成立不明 (blocked-retry) でも開始せず、再試行を案内する
     expect(RECORDER_SRC).toMatch(/blocked-retry/);
     expect(RECORDER_SRC).toMatch(
