@@ -31,6 +31,12 @@ interface LiveViewEntry {
   totalShotBytes: number;
   done: boolean;
   updatedAt: number;
+  /**
+   * TTL 到達で自動削除するタイマー (@codex P2: prune がアクセス起点だけだと、
+   * パネルが done で ポーリングを止めた後アクセスが来ず、所在の写るスクショが
+   * プロセス内に残り続ける)。書き込みのたびに張り直し、発火で必ず消す。
+   */
+  expireTimer?: ReturnType<typeof setTimeout>;
 }
 
 /** 最終更新からの生存時間 (完了後にパネルを眺め直す猶予込み)。 */
@@ -58,9 +64,31 @@ function prefix(userId: string, propertyId: string): string {
   return `${userId}/${propertyId}/`;
 }
 
+/** エントリ削除は必ずここを通す (残タイマーが同一 key の新エントリを誤削除しない)。 */
+function deleteEntry(k: string): void {
+  const entry = store.get(k);
+  if (entry?.expireTimer) clearTimeout(entry.expireTimer);
+  store.delete(k);
+}
+
+/**
+ * 書き込みのたびに TTL タイマーを張り直す。発火時点 = 最終書き込みから TTL
+ * 経過なので無条件に削除できる (アクセスが一切来なくても必ず消える)。
+ * unref でこのタイマーがプロセスの生存を延ばさないようにする (Node 専用 API
+ * のため optional call・テストの fake timers でも安全)。
+ */
+function scheduleExpiry(k: string, entry: LiveViewEntry): void {
+  if (entry.expireTimer) clearTimeout(entry.expireTimer);
+  const timer = setTimeout(() => {
+    store.delete(k);
+  }, LIVE_VIEW_TTL_MS);
+  (timer as { unref?: () => void }).unref?.();
+  entry.expireTimer = timer;
+}
+
 function pruneExpired(now: number): void {
   for (const [k, v] of store) {
-    if (now - v.updatedAt > LIVE_VIEW_TTL_MS) store.delete(k);
+    if (now - v.updatedAt > LIVE_VIEW_TTL_MS) deleteEntry(k);
   }
 }
 
@@ -73,16 +101,19 @@ export function beginLiveView(
   const now = Date.now();
   pruneExpired(now);
   const p = prefix(userId, propertyId);
-  for (const k of store.keys()) {
-    if (k.startsWith(p)) store.delete(k);
+  for (const k of Array.from(store.keys())) {
+    if (k.startsWith(p)) deleteEntry(k);
   }
-  store.set(key(userId, propertyId, liveRef), {
+  const k = key(userId, propertyId, liveRef);
+  const entry: LiveViewEntry = {
     steps: [],
     shots: new Map(),
     totalShotBytes: 0,
     done: false,
     updatedAt: now,
-  });
+  };
+  store.set(k, entry);
+  scheduleExpiry(k, entry);
 }
 
 /**
@@ -112,6 +143,7 @@ export function reportLiveStep(
   }
   entry.steps.push({ seq, label, at: now, hasShot: stored });
   entry.updatedAt = now;
+  scheduleExpiry(key(userId, propertyId, liveRef), entry);
 }
 
 /** 実行完了 (成功・失敗とも)。エントリは TTL まで閲覧可能なまま残る。 */
@@ -124,6 +156,7 @@ export function completeLiveView(
   if (!entry) return;
   entry.done = true;
   entry.updatedAt = Date.now();
+  scheduleExpiry(key(userId, propertyId, liveRef), entry);
 }
 
 /** 進行状況の取得 (実行者本人のみ = userId が key に一致する場合のみ)。 */
@@ -152,6 +185,7 @@ export function getLiveShot(
 }
 
 export function __clearLiveViewStoreForTests(): void {
+  for (const k of Array.from(store.keys())) deleteEntry(k);
   store.clear();
 }
 

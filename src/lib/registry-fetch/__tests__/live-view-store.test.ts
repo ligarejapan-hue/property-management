@@ -79,6 +79,32 @@ describe("live-view-store", () => {
     expect(getLiveShot(U, P, R, 0)).toBeNull();
   });
 
+  it("アクセスが一切来なくても TTL で自動削除される (scheduled expiry・@codex P2)", () => {
+    // パネルは done でポーリングを止めるため、以後の get は来ないのが通常経路。
+    // アクセス起点の prune に頼らず、タイマー発火でプロセス内から必ず消える。
+    beginLiveView(U, P, R);
+    reportLiveStep(U, P, R, "a", shot(100));
+    completeLiveView(U, P, R);
+    expect(__liveViewStoreSizeForTests()).toBe(1);
+    vi.advanceTimersByTime(LIVE_VIEW_TTL_MS + 1000);
+    // get を呼ばずにサイズだけ確認
+    expect(__liveViewStoreSizeForTests()).toBe(0);
+  });
+
+  it("旧エントリの残タイマーが同一 key の新エントリを誤削除しない", () => {
+    beginLiveView(U, P, R);
+    vi.advanceTimersByTime(LIVE_VIEW_TTL_MS - 1000);
+    // 同一 user×property×ref で新しい実行を開始 (旧タイマーは clear される)
+    beginLiveView(U, P, R);
+    reportLiveStep(U, P, R, "fresh", shot(10));
+    // 旧タイマーの発火予定時刻を跨いでも、新エントリは生きている
+    vi.advanceTimersByTime(2000);
+    expect(getLiveView(U, P, R)).not.toBeNull();
+    // 新エントリ自身の TTL では消える
+    vi.advanceTimersByTime(LIVE_VIEW_TTL_MS + 1000);
+    expect(__liveViewStoreSizeForTests()).toBe(0);
+  });
+
   it("同一 user×property の新規 begin は旧エントリを破棄する (滞留防止)", () => {
     beginLiveView(U, P, "ref-old0001");
     reportLiveStep(U, P, "ref-old0001", "a", shot(10));

@@ -23,6 +23,14 @@ import {
 
 const POLL_INTERVAL_MS = 1000;
 
+/**
+ * 表示の保持期間 (done 観測から)。server 側ストアの TTL (live-view-store.ts
+ * LIVE_VIEW_TTL_MS = 3 分) と同じ値。server の期限切れは「既に描画済みの
+ * <img>」を消せないため、client 側でも同じ窓で表示を畳む (@codex P2:
+ * 物件ページを開きっぱなしでも所在の写ったスクショが残り続けない)。
+ */
+const PANEL_RETENTION_MS = 3 * 60 * 1000;
+
 export default function RegistryLivePanel({
   propertyId,
   liveRef,
@@ -33,6 +41,9 @@ export default function RegistryLivePanel({
   const [steps, setSteps] = useState<RegistryLiveViewStep[]>([]);
   const [done, setDone] = useState(false);
   const [enlarged, setEnlarged] = useState(false);
+  // 表示期限切れ (done 観測から PANEL_RETENTION_MS 経過)。スクショの描画を
+  // 畳み、文言のみの終了表示に切り替える。
+  const [expired, setExpired] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlightRef = useRef(false);
 
@@ -71,8 +82,28 @@ export default function RegistryLivePanel({
     };
   }, [propertyId, liveRef]);
 
+  // done 観測から保持期間が過ぎたら表示を畳む (server 期限切れと同じ窓)。
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setExpired(true), PANEL_RETENTION_MS);
+    return () => clearTimeout(t);
+  }, [done]);
+
   const latestShotStep = [...steps].reverse().find((s) => s.hasShot) ?? null;
   const latestLabel = steps.length > 0 ? steps[steps.length - 1].label : null;
+
+  // 表示期限切れ: スクショ (img) を描画しない終了表示のみ。
+  if (expired) {
+    return (
+      <div
+        data-testid="registry-live-panel"
+        className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-[11px] text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400"
+      >
+        <span aria-hidden="true">📺</span> 実況の表示期限が切れました
+        (スクリーンショットは保存されていません)。
+      </div>
+    );
+  }
 
   return (
     <div

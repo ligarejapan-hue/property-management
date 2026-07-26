@@ -55,6 +55,19 @@ describe("RegistryLivePanel — ポーリング規約 (ソース静的検証)", 
     expect(PANEL_SRC).toMatch(/cursor-zoom-in/);
   });
 
+  it("done 観測から保持期間で表示を畳む (server 期限と同窓・@codex P2)", () => {
+    // server の期限切れは描画済み <img> を消せないため、client 側でも同じ
+    // 3 分窓で expired に倒し、スクショを描画しない終了表示へ切り替える。
+    expect(PANEL_SRC).toMatch(/PANEL_RETENTION_MS = 3 \* 60 \* 1000/);
+    expect(PANEL_SRC).toMatch(
+      /setTimeout\(\(\) => setExpired\(true\), PANEL_RETENTION_MS\)/,
+    );
+    // 期限タイマーも cleanup で解除
+    expect(PANEL_SRC).toMatch(/return \(\) => clearTimeout\(t\)/);
+    // expired 分岐は img を含まない早期 return
+    expect(PANEL_SRC).toMatch(/実況の表示期限が切れました/);
+  });
+
   it("画像は認可付き URL (registryLiveShotUrl) のみで参照する", () => {
     expect(PANEL_SRC).toMatch(/registryLiveShotUrl\(propertyId, liveRef/);
     expect(PANEL_SRC).not.toMatch(/data:image/);
