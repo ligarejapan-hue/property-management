@@ -29,8 +29,12 @@ function makeReporter(): RegistryLiveReporter & {
   const events: Array<{ label: string; hasShot: boolean }> = [];
   return {
     events,
-    step(label, shot) {
-      events.push({ label, hasShot: !!shot });
+    step(label) {
+      events.push({ label, hasShot: false });
+      return events.length - 1;
+    },
+    attachShot(seq) {
+      if (events[seq]) events[seq].hasShot = true;
     },
   };
 }
@@ -50,8 +54,11 @@ describe("provider — 実況ステップの通知と live の引き渡し", () 
       async close() {},
       async searchByLocation(input) {
         receivedLive = input.live;
-        // adapter 相当のステップ通知 (スクショ付き) を模擬
-        input.live?.step("所在と地番・家屋番号を入力しました", new Uint8Array(4));
+        // adapter 相当のステップ通知 + fire-and-forget 撮影の後付けを模擬
+        const seq = input.live?.step("所在と地番・家屋番号を入力しました");
+        if (typeof seq === "number" && seq >= 0) {
+          input.live?.attachShot(seq, new Uint8Array(4));
+        }
         return [{ candidateRef: "c1" }] as RegistryCandidate[];
       },
     };
@@ -109,23 +116,26 @@ describe("adapter — searchByLocation の実況 (ソース静的検証)", () =>
   const searchByLocationBlock =
     SRC.match(/async searchByLocation\(input\) \{[\s\S]*?\n    \},/)?.[0] ?? "";
 
-  it("reportLive helper は screenshot を optional chain + 二重予算で撮り、失敗を握り潰す", () => {
-    expect(searchByLocationBlock).toMatch(/const reportLive = async/);
-    // 1 枚あたり timeout は累計予算との min (検索本体のタイムアウト予算を
-    // 多ページ読取りで圧迫しない・内部レビュー P2)
+  it("reportLive は step を即時通知し、撮影は fire-and-forget で後付けする (@codex R6)", () => {
+    // 撮影の await を検索本体のチェーンに乗せない (本体の timeout 予算を
+    // 消費しない)。step は同期通知・撮影は void (async)() で分離。
+    expect(searchByLocationBlock).toMatch(/const reportLive = \(label: string\): void =>/);
+    expect(searchByLocationBlock).toMatch(/void \(async \(\) => \{/);
+    expect(searchByLocationBlock).not.toMatch(/await reportLive\(/);
+    // 1 枚あたり timeout は累計予算との min + 同時 1 枚 + 累計予算で有界
     expect(searchByLocationBlock).toMatch(
       /timeout: Math\.min\(LIVE_SCREENSHOT_TIMEOUT_MS, liveShotBudgetMs\)/,
     );
-    // 累計予算を消費し、使い切ったら撮影しない (文字進行のみ)
     expect(searchByLocationBlock).toMatch(
       /let liveShotBudgetMs = LIVE_SCREENSHOT_TOTAL_BUDGET_MS/,
     );
-    expect(searchByLocationBlock).toMatch(/if \(liveShotBudgetMs > 0\)/);
+    expect(searchByLocationBlock).toMatch(/liveShotInFlight/);
     expect(searchByLocationBlock).toMatch(
       /liveShotBudgetMs -= Date\.now\(\) - startedAt/,
     );
-    // reporter 呼び出しも try/catch (実況が検索を壊さない二重防御)
-    expect(searchByLocationBlock).toMatch(/live\.step\(label, shot\)/);
+    // step 通知は try/catch + 後付けは attachShot (実況が検索を壊さない)
+    expect(searchByLocationBlock).toMatch(/seq = live\.step\(label\)/);
+    expect(searchByLocationBlock).toMatch(/live\.attachShot\(/);
   });
 
   it("主要ステップで reportLive を呼ぶ (メニュー移動/入力/検索実行/ページ読取/完了)", () => {

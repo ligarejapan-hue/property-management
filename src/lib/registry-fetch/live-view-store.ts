@@ -140,8 +140,9 @@ export function beginLiveView(
 }
 
 /**
- * ステップ進行を記録する。begin していない ref は無視 (誤配線でも検索本体を
- * 妨げない)。shot は cap 内のときのみ保存し、超過時は文字進行だけ残す。
+ * ステップ進行を記録し、step の seq を返す (begin していない ref は -1 =
+ * 誤配線でも検索本体を妨げない)。shot は同時指定 (直接添付) も後付け
+ * (attachLiveShot) もでき、cap 内のときのみ保存する。
  */
 export function reportLiveStep(
   userId: string,
@@ -149,9 +150,9 @@ export function reportLiveStep(
   liveRef: string,
   label: string,
   shot: Uint8Array | null,
-): void {
+): number {
   const entry = store.get(key(userId, propertyId, liveRef));
-  if (!entry) return;
+  if (!entry) return -1;
   const now = Date.now();
   const seq = entry.steps.length;
   let stored = false;
@@ -167,6 +168,38 @@ export function reportLiveStep(
   entry.steps.push({ seq, label, at: now, hasShot: stored });
   entry.updatedAt = now;
   scheduleExpiry(key(userId, propertyId, liveRef), entry);
+  return seq;
+}
+
+/**
+ * 既存 step へスクショを後付けする (@codex R6: 撮影は検索本体の await
+ * チェーンに乗せず fire-and-forget するため、step の記録と shot の到着が
+ * 分離する)。エントリ/step が消えていれば黙って捨てる。cap は直接添付と同一。
+ */
+export function attachLiveShot(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+  seq: number,
+  shot: Uint8Array,
+): void {
+  const k = key(userId, propertyId, liveRef);
+  const entry = store.get(k);
+  if (!entry) return;
+  if (entry.shots.has(seq)) return;
+  const stepIdx = entry.steps.findIndex((s) => s.seq === seq);
+  if (stepIdx < 0) return;
+  if (
+    entry.shots.size >= LIVE_VIEW_MAX_SHOTS ||
+    entry.totalShotBytes + shot.byteLength > LIVE_VIEW_MAX_TOTAL_SHOT_BYTES
+  ) {
+    return;
+  }
+  entry.shots.set(seq, shot);
+  entry.totalShotBytes += shot.byteLength;
+  entry.steps[stepIdx] = { ...entry.steps[stepIdx], hasShot: true };
+  entry.updatedAt = Date.now();
+  scheduleExpiry(k, entry);
 }
 
 /** 実行完了 (成功・失敗とも)。エントリは TTL まで閲覧可能なまま残る。 */

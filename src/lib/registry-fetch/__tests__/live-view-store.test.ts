@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import {
   beginLiveView,
   reportLiveStep,
+  attachLiveShot,
   completeLiveView,
   getLiveView,
   getLiveShot,
@@ -146,5 +147,35 @@ describe("live-view-store", () => {
     const v = getLiveView(U, P, R)!;
     expect(v.steps[0].hasShot).toBe(true);
     expect(v.steps[1].hasShot).toBe(false);
+  });
+
+  it("attachLiveShot: fire-and-forget 撮影の後付けが hasShot を立てる (@codex R6)", () => {
+    beginLiveView(U, P, R);
+    const seq = reportLiveStep(U, P, R, "所在の入力", null);
+    expect(seq).toBe(0);
+    expect(getLiveView(U, P, R)!.steps[0].hasShot).toBe(false);
+    attachLiveShot(U, P, R, seq, shot(64));
+    expect(getLiveView(U, P, R)!.steps[0].hasShot).toBe(true);
+    expect(getLiveShot(U, P, R, seq)).not.toBeNull();
+  });
+
+  it("attachLiveShot: 存在しない entry/seq・cap 超過は黙って捨てる", () => {
+    // entry 無し
+    attachLiveShot(U, P, R, 0, shot(8));
+    expect(getLiveView(U, P, R)).toBeNull();
+    // seq 無し
+    beginLiveView(U, P, R);
+    attachLiveShot(U, P, R, 99, shot(8));
+    expect(getLiveView(U, P, R)!.steps.length).toBe(0);
+    // 総バイト cap
+    const s0 = reportLiveStep(U, P, R, "a", shot(LIVE_VIEW_MAX_TOTAL_SHOT_BYTES - 10));
+    const s1 = reportLiveStep(U, P, R, "b", null);
+    attachLiveShot(U, P, R, s1, shot(1024));
+    expect(getLiveView(U, P, R)!.steps[s1].hasShot).toBe(false);
+    expect(getLiveView(U, P, R)!.steps[s0].hasShot).toBe(true);
+  });
+
+  it("begin していない ref への reportLiveStep は -1 を返す", () => {
+    expect(reportLiveStep(U, P, "ref-none0001", "x", null)).toBe(-1);
   });
 });

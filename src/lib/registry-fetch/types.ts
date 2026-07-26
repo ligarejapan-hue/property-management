@@ -91,10 +91,17 @@ export interface RegistrySearchRequest {
 
 /**
  * 実況パネルへのステップ通知 (server 内のみで受け渡す callback。serialize しない)。
+ *
+ * 撮影は検索本体の await チェーンに乗せない (@codex R6: 実況を有効にした
+ * だけで本体の timeout 予算を消費してはならない)。step は即時に文字だけを
+ * 通知して seq を返し、スクショは fire-and-forget で撮って attachShot で
+ * 後付けする。いずれも非 throw 契約 (best-effort)。
  */
 export interface RegistryLiveReporter {
-  /** label=固定文言 (秘匿情報なし)・shot=viewport JPEG (無ければ文字のみ)。 */
-  step(label: string, shot?: Uint8Array | null): void;
+  /** ステップを即時通知する (label=固定文言・秘匿情報なし)。step の seq を返す (失敗は -1)。 */
+  step(label: string): number;
+  /** step() が返した seq へ viewport JPEG を後付けする (cap 超過・期限切れは黙って捨てる)。 */
+  attachShot(seq: number, shot: Uint8Array): void;
 }
 
 /**

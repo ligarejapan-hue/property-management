@@ -14,6 +14,7 @@ import { runRegistrySearch } from "@/lib/registry-fetch/search";
 import {
   beginLiveView,
   reportLiveStep,
+  attachLiveShot,
   completeLiveView,
   isValidLiveRef,
 } from "@/lib/registry-fetch/live-view-store";
@@ -92,8 +93,11 @@ export async function POST(
     }
     const live = liveRef
       ? {
-          step(label: string, shot?: Uint8Array | null) {
-            reportLiveStep(session.id, id, liveRef, label, shot ?? null);
+          step(label: string): number {
+            return reportLiveStep(session.id, id, liveRef, label, null);
+          },
+          attachShot(seq: number, shot: Uint8Array): void {
+            attachLiveShot(session.id, id, liveRef, seq, shot);
           },
         }
       : undefined;

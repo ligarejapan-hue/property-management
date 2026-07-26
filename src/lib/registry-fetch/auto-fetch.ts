@@ -703,39 +703,55 @@ function createPlaywrightRegistryPage(
       const rawKey = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
       // ダイアログの数字/ハイフン専用欄に合わせて正規化(「1番1」→「1-1」等・@codex P1)。
       const searchKey = normalizeChibanForDialog(rawKey);
-      // 実況パネル: ステップ毎に viewport スクショ (JPEG) を添えて通知する。
-      // best-effort: スクショ失敗・reporter 例外のいずれでも検索本体を妨げない。
+      // 実況パネル: ステップは即時に文字で通知し、viewport スクショ (JPEG) は
+      // fire-and-forget で撮って後からその step に添付する (@codex R6: 撮影の
+      // await を検索本体のチェーンに乗せると、実況を有効にしただけで本体の
+      // timeout 予算 (REGISTRY_FETCH_TIMEOUT_MS) を消費してしまう。本方式では
+      // 本体への追加待ち時間はゼロ)。
+      // best-effort: 撮影失敗・reporter 例外のいずれでも検索本体を妨げない。
       // ⚠スクショには所在・地番が写る = live-view-store が実行者本人限定・
       // メモリ内 TTL のみで保持 (ログ・監査・ディスクには一切出さない)。
       // ログイン画面は provider 側で撮影を省略済み (この関数はログイン後のみ)。
-      // 撮影は 1 枚 LIVE_SCREENSHOT_TIMEOUT_MS + 検索全体で累計
-      // LIVE_SCREENSHOT_TOTAL_BUDGET_MS の二重予算で有界にし、多ページ読取り
-      // でも検索本体のタイムアウト予算を圧迫しない (超過後は文字進行のみ)。
+      // 撮影は同時 1 枚 + 1 枚 LIVE_SCREENSHOT_TIMEOUT_MS + 累計
+      // LIVE_SCREENSHOT_TOTAL_BUDGET_MS で有界 (超過後は文字進行のみ)。
       let liveShotBudgetMs = LIVE_SCREENSHOT_TOTAL_BUDGET_MS;
-      const reportLive = async (label: string) => {
+      let liveShotInFlight = false;
+      const reportLive = (label: string): void => {
         const live = input.live;
         if (!live) return;
-        let shot: Uint8Array | null = null;
-        if (liveShotBudgetMs > 0) {
-          const startedAt = Date.now();
+        let seq = -1;
+        try {
+          seq = live.step(label);
+        } catch {
+          // reporter は非 throw 契約だが、実況が検索を壊さない二重防御。
+          return;
+        }
+        if (seq < 0) return;
+        if (liveShotBudgetMs <= 0 || liveShotInFlight) return;
+        liveShotInFlight = true;
+        const startedAt = Date.now();
+        // 検索本体の await チェーンには乗せない (void)。page.close 後の解決も
+        // catch で握り潰される。
+        void (async () => {
           try {
             const raw = await page.screenshot?.({
               type: "jpeg",
               quality: 55,
               timeout: Math.min(LIVE_SCREENSHOT_TIMEOUT_MS, liveShotBudgetMs),
             });
-            if (raw)
-              shot = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+            if (raw) {
+              live.attachShot(
+                seq,
+                raw instanceof Uint8Array ? raw : new Uint8Array(raw),
+              );
+            }
           } catch {
             // 撮影失敗は文字進行のみで続行 (詳細は log にも出さない)。
+          } finally {
+            liveShotBudgetMs -= Date.now() - startedAt;
+            liveShotInFlight = false;
           }
-          liveShotBudgetMs -= Date.now() - startedAt;
-        }
-        try {
-          live.step(label, shot);
-        } catch {
-          // reporter は非 throw 契約だが、実況が検索を壊さない二重防御。
-        }
+        })();
       };
       // DOM click(login と同じ evaluate 経由・javascript: href/被りに左右されず onclick を発火)。
       const domClick = (sel: string) =>
@@ -749,10 +765,10 @@ function createPlaywrightRegistryPage(
         await page.waitForSelector(REGISTRY_SELECTORS.fudosanRequestLink, {
           state: "attached",
         });
-        await reportLive("ログインしました。不動産請求メニューへ移動します");
+        reportLive("ログインしました。不動産請求メニューへ移動します");
         await domClick(REGISTRY_SELECTORS.fudosanRequestLink);
         await page.waitForSelector(REGISTRY_SELECTORS.searchMethodLocationRadio);
-        await reportLive("請求方法「所在指定」を選択しています");
+        reportLive("請求方法「所在指定」を選択しています");
         await page.click(REGISTRY_SELECTORS.searchMethodLocationRadio);
         // 家屋番号があれば建物、無ければ土地(登記の種別区分)。
         await page.click(
@@ -776,14 +792,14 @@ function createPlaywrightRegistryPage(
         if (searchKey.length > 0) {
           await page.fill(REGISTRY_SELECTORS.locationSearchLotBuilding, searchKey);
         }
-        await reportLive("所在と地番・家屋番号を入力しました");
+        reportLive("所在と地番・家屋番号を入力しました");
         // 地番検索ダイアログを開く → 地番種別(数字/ハイフン) + 範囲 → 検索(非同期)。
         await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
         await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
         if (searchKey.length > 0) {
           await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, searchKey);
         }
-        await reportLive("地番検索を実行しています…");
+        reportLive("地番検索を実行しています…");
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
         console.warn(
@@ -814,7 +830,7 @@ function createPlaywrightRegistryPage(
             );
             throw new RegistryFetchError("timeout");
           }
-          await reportLive("候補は見つかりませんでした (0 件)");
+          reportLive("候補は見つかりませんでした (0 件)");
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           return [];
         }
@@ -827,7 +843,7 @@ function createPlaywrightRegistryPage(
         const seen = new Set<string>();
         let capped = false;
         for (let pageNo = 0; ; pageNo++) {
-          await reportLive(`候補一覧を読み取っています (${pageNo + 1} ページ目)`);
+          reportLive(`候補一覧を読み取っています (${pageNo + 1} ページ目)`);
           const rows = (await page.$$eval(
             `${REGISTRY_SELECTORS.dialogResultTable} tr`,
             extractChibanCandidateRows,
@@ -895,7 +911,7 @@ function createPlaywrightRegistryPage(
             MAX_DIALOG_PAGES,
           );
         }
-        await reportLive(
+        reportLive(
           `候補の読み取りが完了しました (${collected.length} 件)。請求はせずに閉じます (課金なし)`,
         );
         // 課金しない: ダイアログはキャンセルで閉じる(確定/請求は押さない)。
