@@ -27,6 +27,7 @@ describe("RegistryLivePanel — SSR (初期状態)", () => {
       createElement(RegistryLivePanel, {
         propertyId: "p1",
         liveRef: "ref-12345678",
+        searchSettled: false,
       }),
     );
     expect(html).toContain('data-testid="registry-live-panel"');
@@ -36,18 +37,35 @@ describe("RegistryLivePanel — SSR (初期状態)", () => {
 });
 
 describe("RegistryLivePanel — ポーリング規約 (ソース静的検証)", () => {
-  it("1 秒間隔で setInterval し、unmount と done で必ず clearInterval する", () => {
+  it("1 秒間隔で setInterval し、done/決着/失敗上限/unmount で必ず停止する", () => {
     expect(PANEL_SRC).toMatch(/POLL_INTERVAL_MS = 1000/);
     expect(PANEL_SRC).toMatch(/setInterval/);
-    // done 到達時と cleanup の両方で解除 (interval リーク防止)
-    const clears = PANEL_SRC.match(/clearInterval\(timerRef\.current\)/g) ?? [];
-    expect(clears.length).toBeGreaterThanOrEqual(2);
+    // 停止は stopPolling に集約 (clearInterval + null 化) し、done 到達・
+    // POST 決着・連続失敗上限・cleanup の各所から呼ぶ (interval リーク防止)
+    expect(PANEL_SRC).toMatch(
+      /const stopPolling = \(\) => \{\s*if \(timerRef\.current !== null\) \{\s*clearInterval\(timerRef\.current\)/,
+    );
+    const stops = PANEL_SRC.match(/stopPolling\(\)/g) ?? [];
+    expect(stops.length).toBeGreaterThanOrEqual(4);
     // 応答遅延時に重ね撃ちしない
     expect(PANEL_SRC).toMatch(/inFlightRef/);
   });
 
-  it("失敗 (404/network) は静かに次の tick を待つ (エラーを console に出さない)", () => {
+  it("失敗 (404/network) は静かに数える (エラーを console に出さない)", () => {
     expect(PANEL_SRC).not.toMatch(/console\./);
+  });
+
+  it("実況が存在しない場合の無限ポーリングを断つ (@codex P2)", () => {
+    // ①POST 決着 (searchSettled) で最終 1 回取得 → 停止
+    expect(PANEL_SRC).toMatch(/searchSettled: boolean/);
+    expect(PANEL_SRC).toMatch(/if \(!searchSettled\) return/);
+    // ②連続失敗の上限 (二重防御)
+    expect(PANEL_SRC).toMatch(/MAX_CONSECUTIVE_POLL_FAILURES = 8/);
+    expect(PANEL_SRC).toMatch(
+      /failStreakRef\.current >= MAX_CONSECUTIVE_POLL_FAILURES/,
+    );
+    // 親は POST 決着 (state !== "searching") を伝える
+    expect(BUTTON_SRC).toMatch(/searchSettled=\{state !== "searching"\}/);
   });
 
   it("拡大表示 (クリックで画面全体を見る) がある", () => {

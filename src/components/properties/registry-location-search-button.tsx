@@ -191,7 +191,11 @@ export default function RegistryLocationSearchButton({
         (state === "searching" ||
           state === "results" ||
           state === "error") && (
-          <RegistryLivePanel propertyId={propertyId} liveRef={liveRef} />
+          <RegistryLivePanel
+            propertyId={propertyId}
+            liveRef={liveRef}
+            searchSettled={state !== "searching"}
+          />
         )}
 
       {state === "results" && (

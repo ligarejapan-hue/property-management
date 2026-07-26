@@ -31,12 +31,28 @@ const POLL_INTERVAL_MS = 1000;
  */
 const PANEL_RETENTION_MS = 3 * 60 * 1000;
 
+/**
+ * 連続ポーリング失敗の上限。検索 POST が beginLiveView 前に失敗した等で実況が
+ * 存在しない (毎回 401/403/404) 場合に、開きっぱなしの物件ページが毎秒叩き
+ * 続けないための安全弁 (@codex P2)。通常は searchSettled の最終取得で先に
+ * 停止するため、これは二重防御。
+ */
+const MAX_CONSECUTIVE_POLL_FAILURES = 8;
+
 export default function RegistryLivePanel({
   propertyId,
   liveRef,
+  searchSettled,
 }: {
   propertyId: string;
   liveRef: string;
+  /**
+   * 検索 POST が決着した (searching を抜けた) か。true になった時点で store は
+   * (begin されていれば) route の finally により必ず done 済みなので、最後に
+   * 1 回だけ取得してポーリングを止める。begin 前に POST が失敗した場合 (毎回
+   * 404) の無限ポーリングをここで確実に断つ (@codex P2)。
+   */
+  searchSettled: boolean;
 }) {
   const [steps, setSteps] = useState<RegistryLiveViewStep[]>([]);
   const [done, setDone] = useState(false);
@@ -46,41 +62,69 @@ export default function RegistryLivePanel({
   const [expired, setExpired] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlightRef = useRef(false);
+  const failStreakRef = useRef(0);
+
+  const stopPolling = () => {
+    if (timerRef.current !== null) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  // 1 回分の取得。成功で失敗カウンタをリセットし、done で停止する。
+  // 失敗は静かに数えるだけ (表示のエラーは親の責務)・上限で停止 (無限
+  // ポーリング防止の二重防御)。
+  const pollOnce = async (isCancelled: () => boolean) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      const res = await fetchRegistryLiveView(propertyId, liveRef);
+      if (isCancelled()) return;
+      failStreakRef.current = 0;
+      setSteps(res.data.steps);
+      setDone(res.data.done);
+      if (res.data.done) stopPolling();
+    } catch {
+      failStreakRef.current += 1;
+      if (failStreakRef.current >= MAX_CONSECUTIVE_POLL_FAILURES) {
+        stopPolling();
+      }
+    } finally {
+      inFlightRef.current = false;
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
-    const poll = async () => {
-      // 応答遅延時に重ねて撃たない (次の tick に譲る)。
-      if (inFlightRef.current) return;
-      inFlightRef.current = true;
-      try {
-        const res = await fetchRegistryLiveView(propertyId, liveRef);
-        if (cancelled) return;
-        setSteps(res.data.steps);
-        setDone(res.data.done);
-        if (res.data.done && timerRef.current !== null) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-      } catch {
-        // 404 (未開始/期限切れ) やネットワーク失敗は静かに次の tick を待つ。
-        // 検索本体の成否・エラー表示は親コンポーネントの責務。
-      } finally {
-        inFlightRef.current = false;
-      }
-    };
-    void poll();
+    const isCancelled = () => cancelled;
+    void pollOnce(isCancelled);
     timerRef.current = setInterval(() => {
-      void poll();
+      void pollOnce(isCancelled);
     }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
-      if (timerRef.current !== null) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      stopPolling();
     };
+    // pollOnce は propertyId/liveRef のみに依存 (render 毎再生成だが effect は
+    // key 変更時のみ再実行でよい)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyId, liveRef]);
+
+  // 検索 POST 決着後: store は (begin されていれば) 必ず done 済み。最後に
+  // 1 回だけ取得して interval を止める (begin 前失敗 = 実況が存在せず毎回
+  // 404 のケースで、開きっぱなしのページが毎秒叩き続けない・@codex P2)。
+  useEffect(() => {
+    if (!searchSettled) return;
+    let cancelled = false;
+    void (async () => {
+      await pollOnce(() => cancelled);
+      if (!cancelled) stopPolling();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchSettled]);
 
   // done 観測から保持期間が過ぎたら表示を畳む (server 期限切れと同じ窓)。
   useEffect(() => {
