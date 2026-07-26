@@ -104,6 +104,12 @@ interface TripControlsProps {
    */
   registerStartRequest?: (fn: (() => void) | null) => void;
   /**
+   * #317: 巡回状態の再取得要求を受けるためのハンドラ登録 (registerStartRequest
+   * と同型)。recorder の開始フェンス touch が 409/404 で「巡回は既に終了して
+   * いる」と検知した時に親経由で呼ばれ、巡回中表示を真の状態へ整合させる。
+   */
+  registerSessionRefresh?: (fn: (() => void) | null) => void;
+  /**
    * 「未送信の位置記録を破棄して終了」の破棄側 (親の recorder が実装)。
    * 圏外などで flush できず巡回終了がブロックされた時の脱出口。
    */
@@ -149,6 +155,7 @@ export default function TripControls({
   onActiveSessionChange,
   onBeforeSessionEnd,
   registerStartRequest,
+  registerSessionRefresh,
   onDiscardUnsentLocations,
   onAbortPendingFlush,
   onEndFailedRestoreRecorder,
@@ -324,6 +331,20 @@ export default function TripControls({
     };
   }, [fetchActiveSession]);
 
+  // #317: recorder の開始フェンスが「巡回は既に終了」を検知した時の再取得要求を
+  // 親に登録する (registerStartRequest と同型・event 駆動)。GET は timeout 付き。
+  // フェンスが 409 を返した時点で終了は確定しているため、失敗時に session を
+  // 消す既定挙動 (preserveOnFailure なし) で問題ない。
+  const requestRefresh = useCallback(() => {
+    void fetchActiveSession({ timeoutMs: RECONCILE_TIMEOUT_MS });
+  }, [fetchActiveSession]);
+  useEffect(() => {
+    registerSessionRefresh?.(requestRefresh);
+    return () => {
+      registerSessionRefresh?.(null);
+    };
+  }, [registerSessionRefresh, requestRefresh]);
+
   // 巡回中の経過時間表示用 (1 秒 tick)
   useEffect(() => {
     if (phase !== "active") return;
@@ -390,8 +411,15 @@ export default function TripControls({
   // memo 送信で代用すると一覧 API が memo を返さないため既存 memo を消す)。
   // これが無いと、続行後に点・ピン無しで終了したとき server 側で stale 扱いの
   // まま endedAt が続行前の時刻へ巻き戻る。失敗しても続行自体は妨げない。
+  //
+  // #317 (@codex R3): 終了直前の touch はフェンストークンの発行も兼ねる。
+  // 応答の session.updatedAt (= この touch が永続化した世代値) を返し、終了
+  // PATCH に echo する。conflict=true は並行終了済み (reconcile 実施済み)。
+  // #317 (@codex R7): この touch は世代 (activitySeq) を進めない通常の活動記録
+  // (fence: true を送らない)。終了フロー内の R10 バックストップとして呼んでも
+  // 「終了意図の時点でピンした世代」を自分で壊さない。
   const touchSession = useCallback(
-    async (target: ActiveSessionLike) => {
+    async (target: ActiveSessionLike): Promise<void> => {
       // @codex P1: best-effort touch に timeout を付ける。blackhole すると通常
       // 終了がここで永久待機し phase="ending" 固着で終了 PATCH / reconcile /
       // 脱出口へ到達できない。timeout 後は touch を諦めて先へ進む。
@@ -423,14 +451,120 @@ export default function TripControls({
     [fetchActiveSession],
   );
 
+  // #317 (@codex R5): 終了フローの「操作開始時点で既知の世代」を取る読み取り
+  // 専用 GET。fetchActiveSession と違い UI state を一切触らない (phase="ending"
+  // 中に session/phase を書き換えない)。drain 完了後に呼ぶため、自分の flush
+  // による世代前進もここで取り込める (client 側で世代を別途追跡する配線が
+  // 不要になる)。読み取りは何も鋳造しないため、遅延・陳腐化しても後段の
+  // CAS touch が必ず検出する (古い世代での CAS は 0 行 → 409)。
+  const fetchOwnActiveGeneration = useCallback(
+    async (
+      targetId: string,
+    ): Promise<
+      | { kind: "active"; activitySeq: number | null }
+      | { kind: "ended" }
+      | { kind: "unknown" }
+    > => {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), RECONCILE_TIMEOUT_MS);
+      try {
+        const url =
+          `/api/field-survey/sessions?status=active` +
+          `&staffUserId=${encodeURIComponent(currentUserId)}&limit=1`;
+        const res = await fetch(url, {
+          signal: ac.signal,
+          credentials: "same-origin",
+        });
+        if (!res.ok) return { kind: "unknown" };
+        const body = (await res.json().catch(() => null)) as
+          | { data?: ActiveSessionLike[] }
+          | null;
+        const own = pickOwnActiveSession(body?.data ?? [], currentUserId);
+        if (!own || own.id !== targetId) return { kind: "ended" };
+        const s = own.activitySeq;
+        return {
+          kind: "active",
+          activitySeq:
+            typeof s === "number" && Number.isInteger(s) ? s : null,
+        };
+      } catch {
+        return { kind: "unknown" };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    [currentUserId],
+  );
+
   const endSession = useCallback(
     async (
       target: ActiveSessionLike,
-      opts?: { discardUnsent?: boolean },
+      opts?: {
+        discardUnsent?: boolean;
+        /**
+         * B-7 の放置 session を確認 modal から直接終了する経路。フェンス
+         * トークン発行の touch を打つと server の stale 判定が解除され
+         * endedAt=now になってしまうため、touch を省略しトークン無しで送る
+         * (server は到着時刻条件へフォールバック)。
+         */
+        staleDirect?: boolean;
+      },
     ) => {
       setPhase("ending");
       setError(null);
       setEndBlockedByBuffer(false);
+      // #317 (@codex R3〜R7) フェンストークン (世代カウンタ activitySeq) のピン。
+      // 「終了の意図時点」= drain より前に読み取り GET でピンする (R7: drain は
+      // 最大 15 秒あり、その間に別 client が記録を再開 (フェンス = 世代 +1) して
+      // も、drain 後に読むとその新世代を吸収してしまう)。flush は世代を進めない
+      // ため、自分の drain でピンは壊れない。以後この終了は「ピンした世代の
+      // まま」の時のみ commit でき、意図より後のフェンスには (リクエストが
+      // どの段階で遅延していても) 必ず負ける。読み取りは何も書かないため、
+      // 遅延・陳腐化した GET は古いピンを返すだけ = 終了が 409 に倒れる安全側。
+      // - staleDirect (放置 session の直接終了): 復元 GET で得た client 既知の
+      //   世代をそのまま使う (touch しない = stale 判定と endedAt 規則を保全)。
+      // - GET 不達 (完全圏外): 終了を送らず再試行を案内 — その状況では終了
+      //   PATCH 自体も届かないため、従来挙動から失うものは無い。
+      let fenceToken: number | null = null;
+      if (opts?.staleDirect) {
+        if (typeof target.activitySeq === "number") {
+          fenceToken = target.activitySeq;
+        }
+      } else {
+        const known = await fetchOwnActiveGeneration(target.id);
+        if (!mountedRef.current) return;
+        if (known.kind === "ended") {
+          // 既に active でない (並行終了済み等)。全体 reconcile で UI を整合
+          // させ、この終了操作は完了扱いにする。reconcile 自体が timeout 等で
+          // 判定不能 (unknown・state 未変更) の場合は phase="ending" のまま
+          // 固まらないよう active に戻して再試行可能にする (@codex R6 P2)。
+          const rec = await fetchActiveSession({
+            timeoutMs: RECONCILE_TIMEOUT_MS,
+          });
+          if (!mountedRef.current) return;
+          if (rec.kind === "unknown") {
+            setError(
+              "巡回終了を確認できませんでした。電波の良い場所へ移動して、もう一度お試しください。",
+            );
+            setPhase("active");
+          }
+          return;
+        }
+        if (known.kind === "active") {
+          fenceToken = known.activitySeq;
+        }
+      }
+      if (fenceToken === null) {
+        // ピンを得られない間は終了を送らない (tokenless は server が拒否)。
+        // まだ drain / recorder 停止の前なので、active に戻すだけで安全に
+        // 再試行できる。
+        setError(
+          "巡回終了の通信ができませんでした。電波の良い場所で、もう一度お試しください。",
+        );
+        setPhase("active");
+        if (opts?.discardUnsent) setEndBlockedByBuffer(true);
+        return;
+      }
       // @codex P2: 「破棄して終了」経路では、まず進行中の flush を即座に中断する
       // (buffer は保持)。flush timeout race に負けて裏で走り続けている drain が
       // 遅れて応答し、破棄すると決めた点を送信/buffer から除去するのを防ぐ。
@@ -494,16 +628,11 @@ export default function TripControls({
       // 行う (snuck-in watch を残さない)。破棄経路は abortInFlightFlush で既に
       // stopping だが冪等。buffer は保持する。
       onBlockRecorderForEnd?.();
-      // B-7 (@codex R10): 続行済み session の終了は、直前に活動 touch を挟んで
-      // server の stale 判定を解除する (続行時の touch が失敗していても、ここで
-      // 記録されれば endedAt は now になり、続行後の巡回が消えない)。
-      //
-      // @codex P2 R4: ただし「破棄して終了」(discardUnsent) 経路では touch を
-      // 省略する。touchSession は signal / timeout を持たず、脱出口を使うのは
-      // 圏外/セッション API 障害の状況なので、ここで await すると touch が応答
-      // しない時に phase が "ending" に固まり、追加した脱出口でも終了 PATCH に
-      // 到達できなくなる。touch は best-effort であり、pin / 写真は既に保存済み
-      // (session の endedAt メタデータのみ影響) なので破棄経路では省いてよい。
+      // B-7 (@codex R10/R12): 続行済み session の終了は、直前に活動 touch
+      // (fence 無し = 世代を進めない → 意図時点のピンを壊さない) を挟んで
+      // server の stale 判定を解除する (続行時の touch が offline で失敗して
+      // いても endedAt が続行前の時刻へ巻き戻らない)。破棄経路では touch が
+      // ハングした時の脱出口固着を避けるため従来どおり省略する (P2 R4)。
       if (resumedRef.current === target.id && !opts?.discardUnsent) {
         await touchSession(target);
         if (!mountedRef.current) return;
@@ -543,7 +672,12 @@ export default function TripControls({
             method: "PATCH",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "ended" }),
+            body: JSON.stringify({
+              status: "ended",
+              // #317: フェンストークン (CAS touch 応答 / 復元 GET の activitySeq
+              // echo)。終了は必ずこれを同封する (tokenless は server が拒否)。
+              expectedActivitySeq: fenceToken,
+            }),
             signal: ac.signal,
           },
         );
@@ -625,6 +759,7 @@ export default function TripControls({
     },
     [
       fetchActiveSession,
+      fetchOwnActiveGeneration,
       onAbortPendingFlush,
       onBeforeSessionEnd,
       onBlockRecorderForEnd,
@@ -720,7 +855,7 @@ export default function TripControls({
             setPhase("active");
             void touchSession(session);
           }}
-          onAgree={() => void endSession(session)}
+          onAgree={() => void endSession(session, { staleDirect: true })}
         />
       )}
     </Panel>

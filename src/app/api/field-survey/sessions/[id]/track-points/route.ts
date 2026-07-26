@@ -103,6 +103,10 @@ export async function POST(
       if (inserted.count > 0) {
         // 実 insert 件数のみ加算。session が終了済になっていたら 0 行更新 →
         // throw して transaction を rollback。
+        // #317 (@codex R7): flush は世代 (activitySeq) を進めない。世代は
+        // 「記録の開始 (フェンス)」だけが進める。これにより終了フローが
+        // 意図時点でピンした世代が自分の drain (最終 flush) で壊れず、かつ
+        // 他 client の記録再開 (フェンス) では必ず壊れる、が両立する。
         const upd = await tx.fieldSurveySession.updateMany({
           where: { id, status: "active" },
           data: { pointCount: { increment: inserted.count } },

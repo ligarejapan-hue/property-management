@@ -231,9 +231,10 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     expect(m).not.toMatch(/bufferRef\.current = \[\]/);
     expect(RECORDER_SRC).toMatch(/\n\s+blockRecorderForPendingEnd,\r?\n/);
     // @codex R13: block は touch await より前に呼ぶ (touch 最大 8 秒の間に idle
-    // で「位置記録開始」が露出するのを防ぐ)。
+    // で「位置記録開始」が露出するのを防ぐ)。#317 R3〜R5 でフェンストークン
+    // 発行の GET→CAS touch 連鎖 (staleDirect 以外の全終了) に一般化された。
     expect(TRIP_SRC).toMatch(
-      /onBlockRecorderForEnd\?\.\(\)[\s\S]{0,900}?if \(resumedRef\.current === target\.id/,
+      /onBlockRecorderForEnd\?\.\(\)[\s\S]{0,2800}?await touchSession\(target/,
     );
     // map が配線する
     expect(MAP_SRC).toMatch(/recorder\.blockRecorderForPendingEnd\(\)/);
@@ -303,11 +304,18 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
     );
   });
 
-  it("破棄経路では best-effort touch も省く (touch ハングで脱出口が固まらない)", () => {
-    // @codex P2 R4: touchSession は signal/timeout 無し。discardUnsent 経路で
-    // await すると touch 無応答時に phase="ending" 固着で PATCH に到達できない。
+  it("終了は意図時点の世代ピン必須・破棄経路もピン GET を通る (#317 R4/R7)", () => {
+    // tokenless の終了は server が拒否するため、破棄経路も bounded なピン GET
+    // (fetchOwnActiveGeneration) を通る。不達時は終了を送らず脱出口を再提示
+    // する (完全圏外では終了 PATCH 自体も届かないため、従来挙動から失うものは
+    // 無い)。ピンは読み取りのみ = touch は挟まない (R7: CAS touch は遅延時に
+    // 新世代を鋳造して追い越し得るため廃止)。
     expect(TRIP_SRC).toMatch(
-      /if \(resumedRef\.current === target\.id && !opts\?\.discardUnsent\)/,
+      /\} else \{\s*const known = await fetchOwnActiveGeneration\(target\.id\)/,
+    );
+    expect(TRIP_SRC).toMatch(/if \(fenceToken === null\)/);
+    expect(TRIP_SRC).toMatch(
+      /if \(opts\?\.discardUnsent\) setEndBlockedByBuffer\(true\)/,
     );
   });
 

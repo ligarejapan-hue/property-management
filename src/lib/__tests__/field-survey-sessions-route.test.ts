@@ -668,7 +668,10 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
-        body: JSON.stringify({ status: "ended" }),
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 1,
+        }),
       }),
       { params },
     );
@@ -689,7 +692,10 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
-        body: JSON.stringify({ status: "ended" }),
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 1,
+        }),
       }),
       { params },
     );
@@ -707,6 +713,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         id: "s-1",
         staffUserId: "other-user",
         startedAt,
+        updatedAt: startedAt,
         status: "active",
         pointCount: 42,
       })
@@ -727,15 +734,23 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
-        body: JSON.stringify({ status: "ended" }),
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 4,
+        }),
       }),
       { params },
     );
     expect(res.status).toBe(200);
-    // updateMany は status="active" 条件付きで呼ばれる (atomicity)
+    // updateMany は status="active" + フェンストークン等値条件付きで呼ばれる
+    // (#317 / @codex R3: client がピン留めした世代値のみが遅延を区別できる)
     const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
       .calls[0][0];
-    expect(umArgs.where).toEqual({ id: "s-1", status: "active" });
+    expect(umArgs.where).toEqual({
+      id: "s-1",
+      status: "active",
+      activitySeq: 4,
+    });
     expect(umArgs.data.status).toBe("ended");
     // AuditLog
     const call = writeAuditLog.mock.calls[0][0];
@@ -779,7 +794,10 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
-        body: JSON.stringify({ status: "ended" }),
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 7,
+        }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
     );
@@ -787,10 +805,13 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
       .calls[0][0];
     expect(umArgs.data.endedAt).toEqual(lastActivityAt);
-    // stale 終了は読取時 updatedAt を条件に含める (読取後 flush との race 防止)
+    // stale 終了は世代条件に加えて読取時 updatedAt 等値も併用する (@codex R8:
+    // flush は世代を進めないため、読取後に割り込む flush は世代条件では検出
+    // できない。endedAt=過去時刻の終了より後の記録を残さない)
     expect(umArgs.where).toEqual({
       id: "s-1",
       status: "active",
+      activitySeq: 7,
       updatedAt: lastActivityAt,
     });
     // durationSec は startedAt→最終活動時刻 (約1時間) で、73時間にはならない
@@ -801,16 +822,63 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
   it("B-7(@codex R4): stale 終了中に flush が入って条件が外れたら 409 INVALID_STATE (監査なし)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const lastActivityAt = new Date(Date.now() - 72 * 60 * 60 * 1000);
     (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
       id: "s-1",
       staffUserId: fieldUser.id,
       startedAt: new Date(Date.now() - 73 * 60 * 60 * 1000),
-      updatedAt: new Date(Date.now() - 72 * 60 * 60 * 1000),
+      updatedAt: lastActivityAt,
       status: "active",
       pointCount: 5,
     });
     (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
-      count: 0, // 読取後に updatedAt が進んで条件が外れた
+      count: 0, // トークン発行後に flush が updatedAt を進めて等値が外れた
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 7,
+        }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_STATE");
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("#317(@codex R8): トークン無し (旧タブ互換) は従来条件 (status のみ) で受ける", async () => {
+    // deploy を跨いだ旧タブは expectedActivitySeq を送れない。拒否すると
+    // reload まで終了不能になるため、従来 (改修前) と同一の保護水準で受ける。
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date(Date.now() - 60 * 60 * 1000);
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        updatedAt: new Date(Date.now() - 20 * 1000), // 非 stale
+        status: "active",
+        pointCount: 5,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: new Date(),
+        status: "ended",
+        memo: null,
+        pointCount: 5,
+        activitySeq: 3,
+        createdAt: startedAt,
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
     });
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
@@ -819,9 +887,107 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
       }),
       { params: Promise.resolve({ id: "s-1" }) },
     );
+    expect(res.status).toBe(200);
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(umArgs.where).toEqual({ id: "s-1", status: "active" });
+  });
+
+  it("#317(@codex R3): フェンストークン付き終了は client 発行値の等値条件で commit する", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date(Date.now() - 60 * 60 * 1000);
+    const pinned = new Date(Date.now() - 5 * 1000);
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        updatedAt: pinned,
+        status: "active",
+        pointCount: 5,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: new Date(),
+        status: "ended",
+        memo: null,
+        pointCount: 5,
+        createdAt: startedAt,
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 12,
+        }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(200);
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    // トークンは「送信時にピン留め」された値の等値。到着時刻ではない
+    // (到着時刻はハンドラ開始前の遅延を捕捉できない = @codex R3)。
+    expect(umArgs.where).toEqual({
+      id: "s-1",
+      status: "active",
+      activitySeq: 12,
+    });
+  });
+
+  it("#317(@codex R3): 古いトークンの遅延終了は 409 (フェンス touch 後は等値不成立)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      id: "s-1",
+      staffUserId: fieldUser.id,
+      startedAt: new Date(Date.now() - 60 * 60 * 1000),
+      updatedAt: new Date(), // フェンス touch が進めた現在値
+      status: "active",
+      pointCount: 5,
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 0, // 古いトークン ≠ 現在の updatedAt
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 3,
+        }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error.code).toBe("INVALID_STATE");
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("#317: expectedActivitySeq が不正な値 (負数) なら 422 (DB 更新に到達しない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: -1,
+        }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(422);
+    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
@@ -856,7 +1022,10 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
-        body: JSON.stringify({ status: "ended" }),
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 2,
+        }),
       }),
       { params: Promise.resolve({ id: "s-1" }) },
     );
@@ -884,7 +1053,10 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
-        body: JSON.stringify({ status: "ended" }),
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 1,
+        }),
       }),
       { params },
     );
@@ -910,7 +1082,10 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     const res = await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
-        body: JSON.stringify({ status: "ended" }),
+        body: JSON.stringify({
+          status: "ended",
+          expectedActivitySeq: 1,
+        }),
       }),
       { params },
     );
@@ -927,6 +1102,7 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
         id: "s-1",
         staffUserId: fieldUser.id,
         startedAt,
+        updatedAt: startedAt,
         status: "active",
         pointCount: 0,
       })
@@ -947,13 +1123,24 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     await PATCH(
       makeReq("http://x/api/field-survey/sessions/s-1", {
         method: "PATCH",
-        body: JSON.stringify({ status: "cancelled" }),
+        body: JSON.stringify({
+          status: "cancelled",
+          expectedActivitySeq: 4,
+        }),
       }),
       { params },
     );
     const call = writeAuditLog.mock.calls[0][0];
     expect(call.action).toBe("field_survey_session_cancel");
     expect(call.detail).toEqual({ sessionId: "s-1" });
+    // #317: cancel も終了と同じフェンストークン等値条件で commit する
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(umArgs.where).toEqual({
+      id: "s-1",
+      status: "active",
+      activitySeq: 4,
+    });
   });
 
   it("memo のみ更新は updateMany ではなく update を使う / AuditLog を書かない", async () => {
@@ -1034,6 +1221,53 @@ describe("PATCH /api/field-survey/sessions/[id]", () => {
     expect(umArgs.where).toEqual({ id: "s-1", status: "active" });
     expect(umArgs.data).toEqual({ updatedAt: expect.any(Date) });
     expect(prisma.fieldSurveySession.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("#317(@codex R7): fence: true の touch は世代 (activitySeq) を +1 する", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const startedAt = new Date(Date.now() - 60 * 60 * 1000);
+    (prisma.fieldSurveySession.findUnique as Mock)
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        updatedAt: new Date(),
+        status: "active",
+        pointCount: 3,
+      })
+      .mockResolvedValueOnce({
+        id: "s-1",
+        staffUserId: fieldUser.id,
+        startedAt,
+        endedAt: null,
+        status: "active",
+        memo: null,
+        pointCount: 3,
+        activitySeq: 6,
+        createdAt: startedAt,
+        updatedAt: new Date(),
+      });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
+    const res = await PATCH(
+      makeReq("http://x/api/field-survey/sessions/s-1", {
+        method: "PATCH",
+        body: JSON.stringify({ touch: true, fence: true }),
+      }),
+      { params: Promise.resolve({ id: "s-1" }) },
+    );
+    expect(res.status).toBe(200);
+    const umArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    // フェンスは条件を持たない (世代を進めるだけ = 安全方向にしか働かない)
+    expect(umArgs.where).toEqual({ id: "s-1", status: "active" });
+    expect(umArgs.data).toEqual({
+      updatedAt: expect.any(Date),
+      activitySeq: { increment: 1 },
+    });
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 

@@ -133,6 +133,7 @@ export async function POST(request: NextRequest) {
             status: true,
             memo: true,
             pointCount: true,
+            activitySeq: true,
             createdAt: true,
             updatedAt: true,
           },
@@ -249,6 +250,7 @@ export async function GET(request: NextRequest) {
           endedAt: true,
           status: true,
           pointCount: true,
+          activitySeq: true,
           createdAt: true,
           updatedAt: true,
           staff: { select: { name: true } },
@@ -278,6 +280,9 @@ export async function GET(request: NextRequest) {
       endedAt: s.endedAt,
       status: s.status,
       pointCount: s.pointCount,
+      // #317: 終了フェンスの世代カウンタ (復元 client が stale 直接終了の
+      // トークンに使う)。非 PII。
+      activitySeq: s.activitySeq,
       pinCount: pinCountMap.get(s.id) ?? 0,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,

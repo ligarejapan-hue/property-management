@@ -32,6 +32,7 @@ const SELECT_SESSION = {
   status: true,
   memo: true,
   pointCount: true,
+  activitySeq: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -168,15 +169,39 @@ export async function PATCH(
 
     if (patch.status === "ended" || patch.status === "cancelled") {
       // status 変更は atomic な conditional update で実施。
-      // 0 行更新は「既に終了/キャンセル済」を意味し 409 にマップ。
-      // stale 終了時は読取時の updatedAt も条件に含める (@codex R4: 読取後に
-      // track point flush が入った場合は 0 行 → 409 INVALID_STATE となり、UI の
-      // 既存 conflict 処理 (再取得) に乗る。再試行時は stale でなくなるため
-      // 通常終了 endedAt=now になる)。
+      // 0 行更新は「既に終了/キャンセル済」または「読取後に活動が入った」を
+      // 意味し 409 にマップ (client は既存 conflict 処理 = 再取得 → 再試行)。
+      //
+      // #317 活動フェンス: 遅延した終了 commit が「再読込・別タブで再開された
+      // 記録 (位置記録開始フェンス以降)」の後から着地して以降の点を 409 で
+      // 失わせることを防ぐ。
+      //
+      // commit 条件は expectedActivitySeq (世代カウンタ) の等値。client は終了
+      // 意図の時点 (drain より前) に読み取り GET で得た activitySeq を echo
+      // する。値は意図時点でピン留めされ、記録開始フェンスは必ず世代を +1
+      // するため、リクエストがどの段階で遅延しても「意図より後に記録が再開
+      // された終了」は必ず不成立 (@codex R2〜R7: 読取時 updatedAt・ハンドラ
+      // 到着時刻・timestamp(3) の等値はいずれも遅延/同一 ms 衝突で追い越され
+      // 得る。整数の単調増加カウンタ + 意図時点ピンのみが健全)。
+      //
+      // token 無し (@codex R8): deploy を跨いで開いたままの旧タブとの互換のため
+      // 拒否せず、従来 (改修前) と同一の条件 = status:"active" (+ stale 終了の
+      // updatedAt 等値) で受ける。保護水準は現行本番と同じ = 退行ではない。
+      // 旧タブの露出はタブ寿命 + 放置 session の 24h 自動終了で有界。
+      //
+      // stale 終了の updatedAt 等値 (@codex R8): flush は世代を進めない (R7)
+      // ため、読取と commit の間に割り込む flush (半日圏外→復帰直後の一括
+      // 送信等) を世代条件では検出できない。endedAt=最終活動時刻 (過去) で
+      // 終了した後にその flush の点が「終了時刻より後の記録」として残らない
+      // よう、stale 終了に限り従来の読取時 updatedAt 等値も併用する
+      // (割り込まれたら 0 行 → 409 → 再試行では最新活動が見え stale でなくなる)。
       const result = await prisma.fieldSurveySession.updateMany({
         where: {
           id,
           status: "active",
+          ...(patch.expectedActivitySeq !== undefined && {
+            activitySeq: patch.expectedActivitySeq,
+          }),
           ...(isStaleEnd && { updatedAt: existing.updatedAt }),
         },
         data: {
@@ -188,7 +213,7 @@ export async function PATCH(
       if (result.count === 0) {
         throw new ApiError(
           409,
-          "active 状態でない session は終了/キャンセルできません",
+          "session の状態が変わったため終了/キャンセルできませんでした",
           "INVALID_STATE",
         );
       }
@@ -201,9 +226,20 @@ export async function PATCH(
     } else if (patch.touch) {
       // B-7 (@codex R7): 活動記録専用の touch。updatedAt だけを進め、memo 等は
       // 一切変更しない。
+      //
+      // #317 (@codex R6/R7): fence: true の touch (位置記録の開始/再開) のみ
+      // 世代 (activitySeq) を +1 する。increment は同一 ms の並行書込でも必ず
+      // 値が変わる (updatedAt 等値ではここが破れる = R6)。フェンスは世代を
+      // 進めるだけで何も条件にしない — 遅延したフェンスが後から着地しても
+      // 「以後の古いトークンの終了を弾く」安全方向にしか働かない。
+      // 通常の活動 touch (続行の記録・stale 解除) は updatedAt のみ進め、
+      // 世代を変えない = 終了フロー自身の touch が意図時点のピンを壊さない。
       const touched = await prisma.fieldSurveySession.updateMany({
         where: { id, status: "active" },
-        data: { updatedAt: new Date() },
+        data: {
+          updatedAt: new Date(),
+          ...(patch.fence && { activitySeq: { increment: 1 } }),
+        },
       });
       if (touched.count === 0) {
         // 並行で終了済み (@codex R9): 200 で握り潰すと client が終了済み

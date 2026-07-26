@@ -32,6 +32,7 @@ import {
   shouldFlushNow,
   type TrackPointInput,
 } from "@/lib/field-survey-geolocation-util";
+import { classifyStartFence } from "@/lib/field-survey-trip-util";
 
 export type RecorderStatus =
   | "idle" // 未記録 (active session があっても自動 start しない)
@@ -152,7 +153,20 @@ interface UseLocationRecorderOptions {
    * 返り値の Response 互換 ({ ok, status, json })。
    */
   fetcher?: typeof fetch;
+  /**
+   * #317: 位置記録開始のフェンス touch が 409/404 を返し「巡回は既に終了して
+   * いる」と判明した時の通知。親は巡回状態の再取得で UI (巡回中表示) を整合
+   * させる。座標や API 応答は渡さない。
+   */
+  onSessionEnded?: () => void;
 }
+
+/**
+ * #317: 位置記録開始フェンス (活動 touch) のタイムアウト。blackhole しても
+ * 開始判断が固まらないよう一定時間で打ち切る (成立を確認できなければ開始は
+ * ブロックし再試行を促す = fail-closed)。
+ */
+const START_FENCE_TIMEOUT_MS = 8000;
 
 interface ApiTrackPointRow {
   sequence: number;
@@ -200,6 +214,12 @@ export function useFieldSurveyLocationRecorder(
   const lastFlushAtMsRef = useRef<number | null>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const flushAbortRef = useRef<AbortController | null>(null);
+  // #317: 進行中の開始フェンス touch。stop / block / discard / unmount で他の
+  // in-flight fetch と同様に中断する (放置すると最大 8 秒待つだけで害は無いが、
+  // 陳腐化したリクエストを持ち越さない既存方針に合わせる)。abort しても server
+  // 側の touch 自体は止まらない点は終了 PATCH と同じで、結果は start 側の
+  // generation ガードが破棄する。
+  const fenceAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const sessionIdRef = useRef<string | null>(sessionId);
   // Codex P1 (fix 2 / fix 4) + P2 (fix 4): start() の async continuation や
@@ -496,6 +516,66 @@ export function useFieldSurveyLocationRecorder(
 
   // ---- start / stop ------------------------------------------------------
 
+  /**
+   * #317: 位置記録開始のフェンス。watch 開始前に活動 touch (PATCH touch:true)
+   * を打ち、進行中/遅延中の巡回終了 commit と DB の行ロックで直列化する。
+   *  - touch が先に届けば updatedAt が進み、遅延した終了 commit は活動フェンス
+   *    条件 (読取時 updatedAt 一致) の不成立で失敗する → session は active の
+   *    まま = 再開した記録は失われない。
+   *  - 終了が先に commit していれば touch は 409 → 開始をブロックする。
+   *  - 成立を確認できない失敗 (timeout/network/5xx) も開始をブロックする
+   *    (@codex P1: fail-open だと touch だけ落ちて GET が通る劣化網で保護が
+   *    効かない。開始は元々 GET 必須 = オフラインでは不可なので失う動作は無い)。
+   * 戻り値は HTTP status (network / timeout / abort は null)。
+   * 座標や応答本文は扱わない。
+   */
+  const touchFence = useCallback(
+    async (sid: string): Promise<number | null> => {
+      if (fenceAbortRef.current) fenceAbortRef.current.abort();
+      const ac = new AbortController();
+      fenceAbortRef.current = ac;
+      const timer = setTimeout(() => ac.abort(), START_FENCE_TIMEOUT_MS);
+      try {
+        const f = options.fetcher ?? fetch;
+        const res = await f(
+          `/api/field-survey/sessions/${encodeURIComponent(sid)}`,
+          {
+            method: "PATCH",
+            credentials: "same-origin",
+            headers: POST_HEADERS,
+            // fence: true = 世代 (activitySeq) を +1 する記録開始フェンス。
+            // 以後、これより古い世代をピンした終了は server 側で必ず不成立
+            // になる (#317 @codex R7)。
+            body: JSON.stringify({ touch: true, fence: true }),
+            signal: ac.signal,
+          },
+        );
+        if (!res.ok) return res.status;
+        // #317 (@codex R9): フェンス成立 (200) でも、その直後・応答再読の前に
+        // (旧タブ互換の tokenless 経路等で) 終了が commit されていると応答
+        // body の status は "ended" になる。HTTP status だけで proceed すると
+        // 終了済み session に記録を開始し以降の点が全て 409 で失われるため、
+        // body の session status も確認する。active 以外 = 終了検知 (409 相当)。
+        // 応答を解析できない場合は成立を確認できないものとして fail-closed
+        // (null = blocked-retry)。
+        const body = (await res.json().catch(() => null)) as
+          | { data?: { status?: string } }
+          | null;
+        const sessStatus = body?.data?.status;
+        if (sessStatus === "active") return res.status;
+        if (typeof sessStatus === "string") return 409;
+        return null;
+      } catch {
+        // network / timeout / abort → fail-open (呼び出し側が classifyStartFence
+        // で proceed 扱いにする)。詳細は console に出さない。
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    [options],
+  );
+
   const start = useCallback(() => {
     if (!sessionIdRef.current) {
       setError("巡回を開始してから位置記録を開始してください。");
@@ -516,6 +596,34 @@ export function useFieldSurveyLocationRecorder(
     const startSessionId = sessionIdRef.current;
     const startGeneration = recorderGenerationRef.current;
     void (async () => {
+      // #317 フェンス: 既存ルート取得より先に活動 touch を打つ (上記 touchFence
+      // 参照)。フェンス成立 (2xx) を確認できた時のみ watch 開始へ進む (@codex P1:
+      // touch だけ timeout/5xx して後続 GET が通る劣化網で fail-open すると、
+      // フェンス未成立のまま記録が始まり遅延終了 commit に負ける)。
+      // - blocked-ended (409/404) = 巡回は既に終了/消失 → 親へ通知して表示整合。
+      // - blocked-retry (timeout/network/5xx 等) = 成立不明 → 開始せず再試行案内。
+      const fenceStatus = await touchFence(startSessionId);
+      if (!mountedRef.current) return;
+      if (
+        sessionIdRef.current !== startSessionId ||
+        recorderGenerationRef.current !== startGeneration
+      ) {
+        return;
+      }
+      const fence = classifyStartFence(fenceStatus);
+      if (fence === "blocked-ended") {
+        setError(mapHttpErrorToMessage(fenceStatus ?? 409));
+        setStatus("idle");
+        options.onSessionEnded?.();
+        return;
+      }
+      if (fence === "blocked-retry") {
+        setError(
+          "位置情報の記録を開始できませんでした。通信状態を確認して、もう一度お試しください。",
+        );
+        setStatus("idle");
+        return;
+      }
       const r = await fetchExistingTrackPoints();
       if (!mountedRef.current) return;
       // session / 世代の不変条件を再確認
@@ -597,8 +705,9 @@ export function useFieldSurveyLocationRecorder(
     flushBuffer,
     handlePosition,
     handlePositionError,
-    options.geolocation,
+    options,
     status,
+    touchFence,
   ]);
 
   /**
@@ -778,6 +887,12 @@ export function useFieldSurveyLocationRecorder(
       flushAbortRef.current.abort();
       flushAbortRef.current = null;
     }
+    // #317: 進行中の開始フェンス touch も中断する (紛れ込んだ開始操作の残骸を
+    // 持ち越さない。結果の破棄自体は start 側の generation ガードが行う)。
+    if (fenceAbortRef.current) {
+      fenceAbortRef.current.abort();
+      fenceAbortRef.current = null;
+    }
     inFlightFlushRef.current = false;
     inFlightFlushPromiseRef.current = null;
     if (!mountedRef.current) return;
@@ -792,6 +907,10 @@ export function useFieldSurveyLocationRecorder(
     if (flushAbortRef.current) {
       flushAbortRef.current.abort();
       flushAbortRef.current = null;
+    }
+    if (fenceAbortRef.current) {
+      fenceAbortRef.current.abort();
+      fenceAbortRef.current = null;
     }
     stopWatchingInternal();
     bufferRef.current = [];
@@ -843,6 +962,7 @@ export function useFieldSurveyLocationRecorder(
       stopWatchingInternal();
       if (fetchAbortRef.current) fetchAbortRef.current.abort();
       if (flushAbortRef.current) flushAbortRef.current.abort();
+      if (fenceAbortRef.current) fenceAbortRef.current.abort();
     };
   }, [stopWatchingInternal]);
 

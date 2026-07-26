@@ -866,6 +866,14 @@ model FieldSurveySession {
   status      FieldSurveySessionStatus @default(active)
   memo        String?
   pointCount  Int                     @default(0) @map("point_count")
+  // #317: 巡回終了フェンスの世代カウンタ。位置記録の開始 (フェンス touch =
+  // fence: true) のたびに必ず +1 され、終了/キャンセルは client が終了意図の
+  // 時点でピン留めした世代との等値でのみ commit できる (= 意図より後に記録が
+  // 再開された終了は、どの段階で遅延していても不成立)。整数の単調増加なので
+  // 時計・ms 精度に依存しない (updatedAt は同一 ms の並行書込で値が変わらない
+  // ことがあり、フェンスには使えない = @codex #322 R6)。flush は世代を進めない
+  // (終了フロー自身の drain が意図時点のピンを壊さないため = R7)。
+  activitySeq Int                     @default(0) @map("activity_seq")
   createdAt   DateTime                @default(now()) @map("created_at")
   updatedAt   DateTime                @updatedAt @map("updated_at")
 

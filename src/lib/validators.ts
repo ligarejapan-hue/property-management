@@ -259,6 +259,21 @@ export const patchFieldSurveySessionSchema = z
     // memo 送信で代用すると、一覧 API が memo を返さない設計のため null 上書きで
     // 既存 memo を消してしまう (@codex #308 R7)。
     touch: z.literal(true).optional(),
+    // #317 (@codex R7): touch のフェンス指定。位置記録の開始 (再開) は
+    // fence: true の touch で行い、session の世代 (activitySeq) を必ず +1 する。
+    // 通常の活動 touch (続行の記録・stale 解除) は世代を進めない。
+    fence: z.literal(true).optional(),
+    // #317 (@codex R3〜R8): 終了/キャンセルのフェンストークン (世代カウンタ)。
+    // client が「終了の意図時点」に読み取り GET で得た activitySeq をそのまま
+    // echo する。server はこの等値を commit 条件に使い、意図より後にフェンス
+    // (記録再開) が立った終了を (どの段階で遅延していても) 拒否できる。整数の
+    // 単調増加なので時計・ms 精度に依存しない。
+    //
+    // 本 client は必ず同封するが、schema 必須にはしない (@codex R8): deploy を
+    // 跨いで開いたままの旧タブは token を送れず、必須化すると reload まで終了
+    // 不能になり buffer を放棄させかねない。token 無しは「従来 (改修前) と
+    // 同一の保護水準」で受ける (route 側コメント参照・退行ではない)。
+    expectedActivitySeq: z.number().int().min(0).optional(),
   })
   .refine(
     (v) => v.status !== undefined || v.memo !== undefined || v.touch === true,

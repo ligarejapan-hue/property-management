@@ -148,8 +148,20 @@ export default function FieldSurveyMap({
   );
   // handleActiveSessionChange はカメラファースト reset と束ねるため
   // resetCameraFirst 定義後 (下方) で宣言する (JSX からのみ参照)。
+  //
+  // #317: recorder の開始フェンスが「巡回は既に終了」を検知した時、TripControls
+  // が登録した再取得ハンドラを呼んで巡回中表示を真の状態へ整合させる
+  // (registerStartRequest と同型の event 駆動登録)。
+  const sessionRefreshRef = useRef<(() => void) | null>(null);
+  const registerSessionRefresh = useCallback((fn: (() => void) | null) => {
+    sessionRefreshRef.current = fn;
+  }, []);
+  const handleRecorderSessionEnded = useCallback(() => {
+    sessionRefreshRef.current?.();
+  }, []);
   const recorder = useFieldSurveyLocationRecorder({
     sessionId: activeSession?.id ?? null,
+    onSessionEnded: handleRecorderSessionEnded,
   });
   // 巡回終了ボタン押下 → recorder を確実に停止してから session PATCH を打つ。
   // recorder.stopBeforeSessionEnd は idle 中なら no-op で安全。
@@ -950,6 +962,7 @@ export default function FieldSurveyMap({
           }}
           currentUserId={currentUserId}
           registerStartRequest={registerStartRequest}
+          registerSessionRefresh={registerSessionRefresh}
           onDiscardUnsentLocations={() => recorder.discardBufferAndStop()}
           onAbortPendingFlush={() => recorder.abortInFlightFlush()}
           onEndFailedRestoreRecorder={() =>
@@ -1162,6 +1175,7 @@ function ControlPanel({
   onTogglePanelOpen,
   currentUserId,
   registerStartRequest,
+  registerSessionRefresh,
   onDiscardUnsentLocations,
   onAbortPendingFlush,
   onEndFailedRestoreRecorder,
@@ -1192,6 +1206,8 @@ function ControlPanel({
   currentUserId: string;
   /** 地図上「巡回を開始」→ TripControls の開始確認 modal を開くハンドラ登録。 */
   registerStartRequest: (fn: (() => void) | null) => void;
+  /** #317: 開始フェンスの終了検知 → 巡回状態の再取得ハンドラ登録 (TripControls)。 */
+  registerSessionRefresh: (fn: (() => void) | null) => void;
   /** 圏外時の「未送信の位置記録を破棄して終了」の破棄側 (recorder)。 */
   onDiscardUnsentLocations: () => void;
   /** 「破棄して終了」前に進行中 flush を中断する (buffer 保持・recorder)。 */
@@ -1278,6 +1294,7 @@ function ControlPanel({
         onActiveSessionChange={onActiveSessionChange}
         onBeforeSessionEnd={onBeforeSessionEnd}
         registerStartRequest={registerStartRequest}
+        registerSessionRefresh={registerSessionRefresh}
         onDiscardUnsentLocations={onDiscardUnsentLocations}
         onAbortPendingFlush={onAbortPendingFlush}
         onEndFailedRestoreRecorder={onEndFailedRestoreRecorder}
