@@ -18,6 +18,7 @@ import {
   LIVE_VIEW_TTL_MS,
   LIVE_VIEW_MAX_SHOTS,
   LIVE_VIEW_MAX_TOTAL_SHOT_BYTES,
+  LIVE_VIEW_MAX_PER_PROPERTY,
   __clearLiveViewStoreForTests,
   __liveViewStoreSizeForTests,
 } from "@/lib/registry-fetch/live-view-store";
@@ -105,13 +106,26 @@ describe("live-view-store", () => {
     expect(__liveViewStoreSizeForTests()).toBe(0);
   });
 
-  it("同一 user×property の新規 begin は旧エントリを破棄する (滞留防止)", () => {
-    beginLiveView(U, P, "ref-old0001");
-    reportLiveStep(U, P, "ref-old0001", "a", shot(10));
-    beginLiveView(U, P, "ref-new0001");
-    expect(getLiveView(U, P, "ref-old0001")).toBeNull();
-    expect(getLiveView(U, P, "ref-new0001")).not.toBeNull();
-    expect(__liveViewStoreSizeForTests()).toBe(1);
+  it("並行実況 (別 liveRef) は保持する (@codex P2: 別タブ/二重送信を壊さない)", () => {
+    beginLiveView(U, P, "ref-tab00001");
+    reportLiveStep(U, P, "ref-tab00001", "a", shot(10));
+    beginLiveView(U, P, "ref-tab00002");
+    // 先発の実況は生きたまま (後発の begin で全消ししない)
+    expect(getLiveView(U, P, "ref-tab00001")).not.toBeNull();
+    expect(getLiveView(U, P, "ref-tab00002")).not.toBeNull();
+    expect(__liveViewStoreSizeForTests()).toBe(LIVE_VIEW_MAX_PER_PROPERTY);
+  });
+
+  it("同一 user×property の並行数は上限で抑える (超過は最古から削除)", () => {
+    beginLiveView(U, P, "ref-tab00001");
+    vi.advanceTimersByTime(10);
+    beginLiveView(U, P, "ref-tab00002");
+    vi.advanceTimersByTime(10);
+    beginLiveView(U, P, "ref-tab00003");
+    // 最古 (00001) だけが落ち、新しい 2 件が残る
+    expect(getLiveView(U, P, "ref-tab00001")).toBeNull();
+    expect(getLiveView(U, P, "ref-tab00002")).not.toBeNull();
+    expect(getLiveView(U, P, "ref-tab00003")).not.toBeNull();
   });
 
   it("shot 枚数 cap 超過は画像を保存しない (steps は残る)", () => {

@@ -12,8 +12,9 @@
  *    よい情報のため許容)。
  *  - スクショには所在・地番等が写るため、取得は実行者本人 (userId 一致) のみ
  *    = key に userId を含め、配信 route 側も session.id で引く。
- *  - 追加時に期限切れ prune + 同一 user×property の旧エントリ破棄。TTL は
- *    最終更新から LIVE_VIEW_TTL_MS (完了後に眺め直す猶予を含む)。
+ *  - TTL (最終更新から LIVE_VIEW_TTL_MS・完了後に眺め直す猶予込み) は
+ *    scheduled expiry で実削除する (アクセスが来なくても必ず消える)。並行
+ *    実況 (別タブ/二重送信) は保持し、同一 user×property の件数だけ上限で抑える。
  *  - shot は枚数 / 総バイト数 cap を超えたら保存しない (steps の文字進行は
  *    残す = パネルは文字だけでも成立する)。
  */
@@ -41,6 +42,12 @@ interface LiveViewEntry {
 
 /** 最終更新からの生存時間 (完了後にパネルを眺め直す猶予込み)。 */
 export const LIVE_VIEW_TTL_MS = 3 * 60 * 1000;
+/**
+ * 同一 user×property の同時実況の上限 (@codex P2: 別タブ/二重送信の並行検索を
+ * begin 時の全消しで壊さない。TTL の実削除が滞留を防ぐため、ここは並行数の
+ * 抑えのみ・超過時は最古から削除)。
+ */
+export const LIVE_VIEW_MAX_PER_PROPERTY = 2;
 /** 1 実行あたりのスクショ枚数上限 (候補ページ送り最大 20 + 前段ステップ)。 */
 export const LIVE_VIEW_MAX_SHOTS = 30;
 /** 1 実行あたりのスクショ総バイト上限 (viewport JPEG 想定・メモリ保護)。 */
@@ -92,7 +99,11 @@ function pruneExpired(now: number): void {
   }
 }
 
-/** 実行開始。同一 user×property の旧実況は破棄する (滞留防止)。 */
+/**
+ * 実行開始。並行実況 (別タブ/二重送信 = 別 liveRef) は壊さず保持し、同一
+ * user×property のエントリ数だけ上限で抑える (超過は最古から削除)。滞留の
+ * 防止自体は scheduled expiry (TTL の実削除) が担う。
+ */
 export function beginLiveView(
   userId: string,
   propertyId: string,
@@ -100,11 +111,10 @@ export function beginLiveView(
 ): void {
   const now = Date.now();
   pruneExpired(now);
-  const p = prefix(userId, propertyId);
-  for (const k of Array.from(store.keys())) {
-    if (k.startsWith(p)) deleteEntry(k);
-  }
   const k = key(userId, propertyId, liveRef);
+  // 同一 key の再開始は旧エントリ (とその expire タイマー) を先に片付ける
+  // (残タイマーが新エントリを誤削除しない)。
+  deleteEntry(k);
   const entry: LiveViewEntry = {
     steps: [],
     shots: new Map(),
@@ -114,6 +124,19 @@ export function beginLiveView(
   };
   store.set(k, entry);
   scheduleExpiry(k, entry);
+  // 並行数の上限 (最古から削除)。
+  const p = prefix(userId, propertyId);
+  const siblings: Array<[string, LiveViewEntry]> = [];
+  for (const [sk, sv] of store) {
+    if (sk.startsWith(p)) siblings.push([sk, sv]);
+  }
+  if (siblings.length > LIVE_VIEW_MAX_PER_PROPERTY) {
+    siblings.sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+    const excess = siblings.length - LIVE_VIEW_MAX_PER_PROPERTY;
+    for (let i = 0; i < excess; i++) {
+      deleteEntry(siblings[i][0]);
+    }
+  }
 }
 
 /**
