@@ -161,6 +161,14 @@ interface RegistryPageLike {
     selector: string,
     pageFunction: (elements: Element[]) => unknown[],
   ): Promise<unknown[]>;
+  // 実況パネル用の viewport スクショ（実 Playwright Page.screenshot）。optional:
+  // fake page が未実装でも動作は変わらない（実況は best-effort・文字進行のみになる）。
+  // fullPage は使わない（viewport = ユーザー要望「画面全体をそのまま」の表示範囲）。
+  screenshot?(options?: {
+    type?: "jpeg" | "png";
+    quality?: number;
+    timeout?: number;
+  }): Promise<Buffer | Uint8Array>;
 }
 interface RegistryContextLike {
   newPage(): Promise<RegistryPageLike>;
@@ -260,6 +268,21 @@ const DIALOG_RESULT_TIMEOUT_MS = 15000;
 
 /** 地番検索ダイアログの結果ページを読み進める上限(暴走防止)。超えたら打ち切りログを残す。 */
 const MAX_DIALOG_PAGES = 20;
+
+/**
+ * 実況パネル用スクショの撮影タイムアウト (1 枚あたり)。best-effort であり、
+ * 撮影がハングしても検索本体を遅らせない (失敗時は文字進行のみになる)。
+ */
+const LIVE_SCREENSHOT_TIMEOUT_MS = 1500;
+
+/**
+ * 実況パネル用スクショの 1 検索あたりの撮影時間予算 (累計)。候補が多ページの
+ * 場合でも、実況の撮影が検索全体のタイムアウト予算 (REGISTRY_FETCH_TIMEOUT_MS)
+ * を無制限に圧迫しないよう有界にする (resolveLoginFormDetectMs が残り予算から
+ * 待機時間を導出するのと同じ「実況/診断は本体の予算を食い潰さない」方針)。
+ * 予算を使い切った後のステップは文字進行のみ届く (パネルは文字だけでも成立)。
+ */
+const LIVE_SCREENSHOT_TOTAL_BUDGET_MS = 10_000;
 
 // 実画面HTML(2026-07-14 御社保存)から確定したセレクタ。設計資料 =
 // deliverables/registry-calibration/selector-map-20260714.md。
@@ -475,6 +498,8 @@ export function classifyRegistryMissingPage(
  * 生 Playwright Page を RegistryBrowserPage（高水準セッション抽象）へ適合させる adapter。
  * 失敗は **RegistryFetchError（分類コードのみ）** に正規化し、生メッセージ（URL/入力/selector が
  * 混入しうる）を例外に載せない。中間成果物（Cookie/DL）は close() で破棄する。
+ * 実況パネル用のステップスクショのみ例外: live reporter 経由で実行者本人限定の
+ * メモリ内 TTL ストア (live-view-store.ts) に短時間保持される (DB/ディスク永続なし)。
  */
 function createPlaywrightRegistryPage(
   handles: {
@@ -678,6 +703,40 @@ function createPlaywrightRegistryPage(
       const rawKey = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
       // ダイアログの数字/ハイフン専用欄に合わせて正規化(「1番1」→「1-1」等・@codex P1)。
       const searchKey = normalizeChibanForDialog(rawKey);
+      // 実況パネル: ステップ毎に viewport スクショ (JPEG) を添えて通知する。
+      // best-effort: スクショ失敗・reporter 例外のいずれでも検索本体を妨げない。
+      // ⚠スクショには所在・地番が写る = live-view-store が実行者本人限定・
+      // メモリ内 TTL のみで保持 (ログ・監査・ディスクには一切出さない)。
+      // ログイン画面は provider 側で撮影を省略済み (この関数はログイン後のみ)。
+      // 撮影は 1 枚 LIVE_SCREENSHOT_TIMEOUT_MS + 検索全体で累計
+      // LIVE_SCREENSHOT_TOTAL_BUDGET_MS の二重予算で有界にし、多ページ読取り
+      // でも検索本体のタイムアウト予算を圧迫しない (超過後は文字進行のみ)。
+      let liveShotBudgetMs = LIVE_SCREENSHOT_TOTAL_BUDGET_MS;
+      const reportLive = async (label: string) => {
+        const live = input.live;
+        if (!live) return;
+        let shot: Uint8Array | null = null;
+        if (liveShotBudgetMs > 0) {
+          const startedAt = Date.now();
+          try {
+            const raw = await page.screenshot?.({
+              type: "jpeg",
+              quality: 55,
+              timeout: Math.min(LIVE_SCREENSHOT_TIMEOUT_MS, liveShotBudgetMs),
+            });
+            if (raw)
+              shot = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+          } catch {
+            // 撮影失敗は文字進行のみで続行 (詳細は log にも出さない)。
+          }
+          liveShotBudgetMs -= Date.now() - startedAt;
+        }
+        try {
+          live.step(label, shot);
+        } catch {
+          // reporter は非 throw 契約だが、実況が検索を壊さない二重防御。
+        }
+      };
       // DOM click(login と同じ evaluate 経由・javascript: href/被りに左右されず onclick を発火)。
       const domClick = (sel: string) =>
         page.evaluate((s) => {
@@ -690,8 +749,10 @@ function createPlaywrightRegistryPage(
         await page.waitForSelector(REGISTRY_SELECTORS.fudosanRequestLink, {
           state: "attached",
         });
+        await reportLive("ログインしました。不動産請求メニューへ移動します");
         await domClick(REGISTRY_SELECTORS.fudosanRequestLink);
         await page.waitForSelector(REGISTRY_SELECTORS.searchMethodLocationRadio);
+        await reportLive("請求方法「所在指定」を選択しています");
         await page.click(REGISTRY_SELECTORS.searchMethodLocationRadio);
         // 家屋番号があれば建物、無ければ土地(登記の種別区分)。
         await page.click(
@@ -715,12 +776,14 @@ function createPlaywrightRegistryPage(
         if (searchKey.length > 0) {
           await page.fill(REGISTRY_SELECTORS.locationSearchLotBuilding, searchKey);
         }
+        await reportLive("所在と地番・家屋番号を入力しました");
         // 地番検索ダイアログを開く → 地番種別(数字/ハイフン) + 範囲 → 検索(非同期)。
         await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
         await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
         if (searchKey.length > 0) {
           await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, searchKey);
         }
+        await reportLive("地番検索を実行しています…");
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
         console.warn(
@@ -751,6 +814,7 @@ function createPlaywrightRegistryPage(
             );
             throw new RegistryFetchError("timeout");
           }
+          await reportLive("候補は見つかりませんでした (0 件)");
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           return [];
         }
@@ -763,6 +827,7 @@ function createPlaywrightRegistryPage(
         const seen = new Set<string>();
         let capped = false;
         for (let pageNo = 0; ; pageNo++) {
+          await reportLive(`候補一覧を読み取っています (${pageNo + 1} ページ目)`);
           const rows = (await page.$$eval(
             `${REGISTRY_SELECTORS.dialogResultTable} tr`,
             extractChibanCandidateRows,
@@ -830,6 +895,9 @@ function createPlaywrightRegistryPage(
             MAX_DIALOG_PAGES,
           );
         }
+        await reportLive(
+          `候補の読み取りが完了しました (${collected.length} 件)。請求はせずに閉じます (課金なし)`,
+        );
         // 課金しない: ダイアログはキャンセルで閉じる(確定/請求は押さない)。
         await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
         // 行の番号値(#cbnDlgChibanDt_*)は種別に応じて地番 or 家屋番号。種別に合う欄へ入れる(@codex P1)。

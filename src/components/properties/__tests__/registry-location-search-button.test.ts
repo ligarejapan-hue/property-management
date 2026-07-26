@@ -16,8 +16,8 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
     expect(src).toContain("providerDisabled");
     expect(src).toContain("未設定のため現在利用できません");
   });
-  it("検索は api-client searchRegistryCandidates を使う", () => {
-    expect(src).toContain("searchRegistryCandidates(propertyId)");
+  it("検索は api-client searchRegistryCandidates を使う (実況パネル用 liveRef 同封)", () => {
+    expect(src).toContain("searchRegistryCandidates(propertyId, ref)");
   });
   it("取得は candidateRef を渡して obtainRegistryByCandidate を使う（cond③ server 再解決）", () => {
     expect(src).toContain("obtainRegistryByCandidate(propertyId, selected.candidateRef)");

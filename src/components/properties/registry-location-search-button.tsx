@@ -7,6 +7,8 @@ import {
   obtainRegistryByCandidate,
   type RegistrySearchCandidate,
 } from "@/lib/api-client";
+import RegistryLivePanel from "@/components/properties/registry-live-panel";
+import { safeRandomId } from "@/lib/random-id";
 
 interface RegistryLocationSearchButtonProps {
   propertyId: string;
@@ -46,6 +48,9 @@ export default function RegistryLocationSearchButton({
   const [notSearchableReason, setNotSearchableReason] = useState<string | null>(null);
   const [selected, setSelected] = useState<RegistrySearchCandidate | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // 実況パネル用の参照 (client 発行・非PII)。検索のたびに発行し直す。
+  // HTTP 本番でも動く safeRandomId を使う (crypto.randomUUID 禁止)。
+  const [liveRef, setLiveRef] = useState<string | null>(null);
 
   // 非 admin には導線自体を出さない（サーバ側でも 403 で二重防御）。
   if (!canAutoFetch) return null;
@@ -70,8 +75,12 @@ export default function RegistryLocationSearchButton({
   const runSearch = async () => {
     setState("searching");
     setErrorMsg(null);
+    // 実況パネルの参照を発行して検索 POST に同封する。実行中の自動操作を
+    // 本人がスクショ紙芝居で追える (サーバー側はメモリ内 TTL・完了後破棄)。
+    const ref = safeRandomId();
+    setLiveRef(ref);
     try {
-      const res = await searchRegistryCandidates(propertyId);
+      const res = await searchRegistryCandidates(propertyId, ref);
       if (res.searchable) {
         setCandidates(res.candidates);
         setNotSearchableReason(res.candidates.length === 0 ? "no_candidates" : null);
@@ -169,6 +178,11 @@ export default function RegistryLocationSearchButton({
           <Loader2 className="h-3 w-3 animate-spin" />
           {state === "searching" ? "検索中..." : "取得中..."}
         </span>
+      )}
+
+      {/* 実況パネル: 検索実行中の自動操作をスクショ紙芝居で中継する。 */}
+      {state === "searching" && liveRef && (
+        <RegistryLivePanel propertyId={propertyId} liveRef={liveRef} />
       )}
 
       {state === "results" && (

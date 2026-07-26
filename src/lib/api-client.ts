@@ -1758,18 +1758,57 @@ export type RegistrySearchResult =
       reason: "has_real_estate_number" | "insufficient_location";
     };
 
-/** 所在検索: 番号無し物件を所在/地番/家屋番号で謄本候補検索する（confirmed 必須）。 */
+/**
+ * 所在検索: 番号無し物件を所在/地番/家屋番号で謄本候補検索する（confirmed 必須）。
+ * liveRef (任意) を渡すと、検索実行中の自動操作を実況パネル API
+ * (fetchRegistryLiveView / registryLiveShotUrl) で追える。
+ */
 export async function searchRegistryCandidates(
   propertyId: string,
+  liveRef?: string,
 ): Promise<RegistrySearchResult> {
   return apiFetch<RegistrySearchResult>(
     `/api/properties/${propertyId}/registry/search`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ confirmed: true }),
+      body: JSON.stringify({
+        confirmed: true,
+        ...(liveRef ? { liveRef } : {}),
+      }),
     },
   );
+}
+
+/** 実況パネルのステップ進行 (固定文言 + スクショ有無 + 完了フラグ)。 */
+export interface RegistryLiveViewStep {
+  seq: number;
+  label: string;
+  at: number;
+  hasShot: boolean;
+}
+
+/** 実況パネルの進行状況を取得する (実行者本人のみ・404 は未開始/期限切れ)。 */
+export async function fetchRegistryLiveView(
+  propertyId: string,
+  liveRef: string,
+): Promise<{ data: { steps: RegistryLiveViewStep[]; done: boolean } }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { steps: [], done: false } };
+  }
+  return apiFetch(
+    `/api/properties/${propertyId}/registry/search/live/${encodeURIComponent(liveRef)}`,
+  );
+}
+
+/** 実況パネルのステップスクショ URL (img src 用・認可付き・no-store)。 */
+export function registryLiveShotUrl(
+  propertyId: string,
+  liveRef: string,
+  seq: number,
+): string {
+  return `/api/properties/${propertyId}/registry/search/live/${encodeURIComponent(liveRef)}/shot/${seq}`;
 }
 
 /** 候補を選んで謄本取得（cond③: candidateRef は取得時に server 側で再解決）。confirmed 必須。 */

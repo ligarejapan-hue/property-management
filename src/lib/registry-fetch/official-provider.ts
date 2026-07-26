@@ -18,6 +18,8 @@
  *   PR-2 は **不動産番号がある物件に限定**（realEstateNumber 空 → not_found）。所在系
  *   （地番/家屋番号/所在＝PII 性）での検索は PR-2b（契約拡張・別 PII 評価）に分離する。
  *   スクショ/HTML/Cookie/セッション等の中間成果物は adapter 側で永続しない・即破棄。
+ *   例外は実況パネル (live-view-store.ts) 用のステップスクショのみ: 実行者本人限定の
+ *   メモリ内 TTL ストアへ短時間保持する (DB/ディスク/localStorage への永続は引き続き禁止)。
  *
  * ★ Playwright バンドル混入防止の契約（C-1）:
  *   本ファイルは playwright を **静的 import / require しない**（source-assertion テストで固定）。
@@ -30,6 +32,7 @@ import type {
   RegistryFetchResult,
   RegistrySearchRequest,
   RegistryCandidate,
+  RegistryLiveReporter,
 } from "./types";
 import { RegistryFetchError } from "./errors";
 import type { RegistryFetchThrottle } from "./throttle";
@@ -68,6 +71,8 @@ export interface RegistryBrowserPage {
     address: string;
     lotNumber?: string | null;
     buildingNumber?: string | null;
+    /** 実況パネル通知先 (任意・best-effort)。adapter がステップ+スクショを報告。 */
+    live?: RegistryLiveReporter;
   }): Promise<RegistryCandidate[]>;
   /** 検索ヒット後、謄本PDFを取得して Buffer で返す。 */
   downloadRegistryPdf(): Promise<Buffer>;
@@ -250,6 +255,10 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       throw new RegistryFetchError("provider_error");
     }
 
+    // 実況パネル (#317 とは別機能): ステップ進行の通知。label は固定文言のみ
+    // (所在・地番・資格情報を入れない)。reporter は非 throw 契約だが、実況が
+    // 検索本体を壊さないよう optional chain のみで触る。
+    request.live?.step("自動操作ブラウザを起動しています…");
     let page: RegistryBrowserPage;
     try {
       page = await this.withStartupTimeout(() => this.browserFactory!());
@@ -266,6 +275,11 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         throw new RegistryFetchError("provider_error");
       }
       return await this.withTimeout(async () => {
+        // ログイン場面は撮影しない (ID/PW が画面に写り得るため文言のみ =
+        // ユーザー合意済みの「ぼかし or 省略」の省略側)。
+        request.live?.step(
+          "登記情報提供サービスへログインしています…(この画面の表示は省略されます)",
+        );
         await page.login({
           loginId: this.loginId,
           password: this.password,
@@ -275,6 +289,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           address: request.address,
           lotNumber: request.lotNumber,
           buildingNumber: request.buildingNumber,
+          live: request.live,
         });
       });
     } catch (err) {
