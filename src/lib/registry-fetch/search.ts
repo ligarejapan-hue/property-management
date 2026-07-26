@@ -25,6 +25,7 @@ import {
   type RegistryFetchProvider,
   type RegistryFetchErrorCode,
 } from "@/lib/registry-fetch";
+import type { RegistryLiveReporter } from "@/lib/registry-fetch/types";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
 import {
   rememberSearchCandidates,
@@ -39,6 +40,11 @@ export interface RunRegistrySearchArgs {
   propertyId: string;
   /** 課金を伴う可能性があるため明示確認フラグ。true 以外は実行しない（cond①）。 */
   confirmed: boolean;
+  /**
+   * 実況パネルのステップ通知先 (任意)。route が実行者本人限定のメモリ内
+   * ストアへ橋渡しする。認可・確認フラグを通過した後にのみ provider へ渡す。
+   */
+  live?: RegistryLiveReporter;
 }
 
 // provider 失敗（RegistryFetchError）の分類コード → 安全な HTTP ステータス。
@@ -139,7 +145,10 @@ export async function runRegistrySearch(
   }
 
   try {
-    const candidates = await provider.searchCandidates(built.request);
+    // 実況パネル通知先の接続 (認可・確認・searchable 判定を全て通過した後)。
+    const candidates = await provider.searchCandidates(
+      args.live ? { ...built.request, live: args.live } : built.request,
+    );
 
     // 段階①(所在検索フル対応): 候補一覧の表示まで。実サイトの所在検索は不動産番号を返さず、候補は
     // **地番(candidateRef)**（不動産番号は有料の請求まで進まないと得られない=サイト仕様）。旧実装は

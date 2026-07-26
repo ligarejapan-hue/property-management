@@ -90,7 +90,7 @@
 ## 認可・PII
 
 - 権限: 既存 `registry:auto_fetch` ＋ `property:read/write`（新 permission は作らない）。取得（添付）は `property:write` 相当。
-- PII: 候補（所在/地番）・謄本内容・資格情報を**ログ/監査 detail/エラー応答に出さない**（既存方針）。監査は非PII の件数/結果コードのみ。中間成果物（Cookie/DL/スクショ）は adapter で永続せず即破棄。
+- PII: 候補（所在/地番）・謄本内容・資格情報を**ログ/監査 detail/エラー応答に出さない**（既存方針）。監査は非PII の件数/結果コードのみ。中間成果物（Cookie/DL/スクショ）は adapter で永続せず即破棄。例外は実況パネル（live-view-store.ts）用のステップスクショのみ: 実行者本人限定のメモリ内 TTL 保持（DB/ディスク永続は引き続き禁止・ログイン画面は撮影省略）。
 
 ## テスト方針
 

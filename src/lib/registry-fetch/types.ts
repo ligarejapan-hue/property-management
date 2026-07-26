@@ -78,6 +78,30 @@ export interface RegistrySearchRequest {
   buildingNumber?: string | null;
   /** トレース用の非PII参照ラベル（例: 物件UUID）。PII・所在地は入れない。 */
   ref?: string | null;
+  /**
+   * 実況パネル (謄本自動操作のライブ中継) のステップ通知先 (任意)。
+   * route が実行者本人限定のメモリ内 TTL ストア (live-view-store.ts) へ橋渡し
+   * する。provider / adapter は label に秘匿情報 (所在・地番・資格情報) を
+   * 入れない固定文言のみ渡す。shot (viewport スクショ) には所在等が写るため、
+   * 閲覧はストア側で実行者本人に限定される。通知は best-effort であり、
+   * 実装は例外を投げてはならない (検索本体を妨げない)。
+   */
+  live?: RegistryLiveReporter;
+}
+
+/**
+ * 実況パネルへのステップ通知 (server 内のみで受け渡す callback。serialize しない)。
+ *
+ * 撮影は検索本体の await チェーンに乗せない (@codex R6: 実況を有効にした
+ * だけで本体の timeout 予算を消費してはならない)。step は即時に文字だけを
+ * 通知して seq を返し、スクショは fire-and-forget で撮って attachShot で
+ * 後付けする。いずれも非 throw 契約 (best-effort)。
+ */
+export interface RegistryLiveReporter {
+  /** ステップを即時通知する (label=固定文言・秘匿情報なし)。step の seq を返す (失敗は -1)。 */
+  step(label: string): number;
+  /** step() が返した seq へ viewport JPEG を後付けする (cap 超過・期限切れは黙って捨てる)。 */
+  attachShot(seq: number, shot: Uint8Array): void;
 }
 
 /**

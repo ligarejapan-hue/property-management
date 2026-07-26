@@ -11,6 +11,13 @@ import { hasPermission } from "@/lib/permissions";
 import { getRegistryFetchProvider } from "@/lib/registry-fetch/auto-fetch";
 import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 import { runRegistrySearch } from "@/lib/registry-fetch/search";
+import {
+  beginLiveView,
+  reportLiveStep,
+  attachLiveShot,
+  completeLiveView,
+  isValidLiveRef,
+} from "@/lib/registry-fetch/live-view-store";
 
 // ---------- POST /api/properties/[id]/registry/search ----------
 // 謄本 所在検索（PR-2b-2・add-only・検索ルートのみ）。番号無し物件を所在/地番/家屋番号で
@@ -72,16 +79,45 @@ export async function POST(
       );
     }
 
-    const result = await runRegistrySearch(
-      {
-        session: { id: session.id, role: session.role },
-        propertyId: id,
-        confirmed,
-      },
-      provider,
-    );
+    // 実況パネル (任意): client 発行の liveRef があれば、検索実行中のステップ
+    // 進行 + スクショを実行者本人限定のメモリ内ストアへ中継する。liveRef が
+    // 不正形式なら黙って無効化 (実況なしで検索は続行 = 従来挙動)。
+    const liveRefRaw = (body as { liveRef?: unknown } | null)?.liveRef;
+    const liveRef =
+      typeof liveRefRaw === "string" && isValidLiveRef(liveRefRaw)
+        ? liveRefRaw
+        : null;
+    if (liveRef) {
+      beginLiveView(session.id, id, liveRef);
+      reportLiveStep(session.id, id, liveRef, "自動検索を受け付けました", null);
+    }
+    const live = liveRef
+      ? {
+          step(label: string): number {
+            return reportLiveStep(session.id, id, liveRef, label, null);
+          },
+          attachShot(seq: number, shot: Uint8Array): void {
+            attachLiveShot(session.id, id, liveRef, seq, shot);
+          },
+        }
+      : undefined;
 
-    return apiResponse(result, 200);
+    try {
+      const result = await runRegistrySearch(
+        {
+          session: { id: session.id, role: session.role },
+          propertyId: id,
+          confirmed,
+          live,
+        },
+        provider,
+      );
+      return apiResponse(result, 200);
+    } finally {
+      // 成否に関わらず実況を完了へ (パネルの「実行中」を残さない)。TTL 経過で
+      // ストアから消える。
+      if (liveRef) completeLiveView(session.id, id, liveRef);
+    }
   } catch (error) {
     return handleApiError(error);
   }
