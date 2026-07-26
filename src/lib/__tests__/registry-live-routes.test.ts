@@ -47,6 +47,16 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 
+vi.mock("@/lib/prisma", () => {
+  const client = {
+    property: {
+      findUnique: vi.fn(),
+    },
+  };
+  return { default: client };
+});
+
+import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { GET as GET_LIVE } from "@/app/api/properties/[id]/registry/search/live/[ref]/route";
 import { GET as GET_SHOT } from "@/app/api/properties/[id]/registry/search/live/[ref]/shot/[seq]/route";
@@ -74,6 +84,12 @@ beforeEach(() => {
   __clearLiveViewStoreForTests();
   (getApiSession as Mock).mockResolvedValue(user);
   (getUserPermissions as Mock).mockResolvedValue(fullPerms);
+  // 物件スコープ再チェック用 (admin は record-level 制限なし)。
+  (prisma.property.findUnique as Mock).mockResolvedValue({
+    id: PROP,
+    createdBy: "someone",
+    assignedTo: null,
+  });
 });
 
 describe("GET live/[ref]", () => {
@@ -136,6 +152,29 @@ describe("GET live/[ref]", () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it("物件スコープ外の field_staff は 403 (TTL 内の担当剥奪を即時反映・@codex P2)", async () => {
+    (getApiSession as Mock).mockResolvedValue({
+      ...user,
+      id: "u-field",
+      role: "field_staff",
+    });
+    beginLiveView("u-field", PROP, REF);
+    // createdBy/assignedTo とも本人でない = 担当を外された状態
+    const res = await GET_LIVE(req("http://x"), {
+      params: Promise.resolve({ id: PROP, ref: REF }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("物件が消えていたら 404", async () => {
+    (prisma.property.findUnique as Mock).mockResolvedValue(null);
+    beginLiveView(user.id, PROP, REF);
+    const res = await GET_LIVE(req("http://x"), {
+      params: Promise.resolve({ id: PROP, ref: REF }),
+    });
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("GET live/[ref]/shot/[seq]", () => {
@@ -177,6 +216,20 @@ describe("GET live/[ref]/shot/[seq]", () => {
     (getUserPermissions as Mock).mockResolvedValue([
       { resource: "property", action: "read", granted: true },
     ]);
+    const res = await GET_SHOT(req("http://x"), {
+      params: Promise.resolve({ id: PROP, ref: REF, seq: "0" }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("物件スコープ外の field_staff は 403 (スクショに所在が写るため・@codex P2)", async () => {
+    (getApiSession as Mock).mockResolvedValue({
+      ...user,
+      id: "u-field",
+      role: "field_staff",
+    });
+    beginLiveView("u-field", PROP, REF);
+    reportLiveStep("u-field", PROP, REF, "s", new Uint8Array([1]));
     const res = await GET_SHOT(req("http://x"), {
       params: Promise.resolve({ id: PROP, ref: REF, seq: "0" }),
     });

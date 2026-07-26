@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
@@ -7,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import {
   getLiveView,
   isValidLiveRef,
@@ -35,6 +37,24 @@ export async function GET(
     }
     if (!hasPermission(permissions, "property", "read")) {
       throw new ApiError(403, "物件閲覧の権限がありません", "FORBIDDEN");
+    }
+    // 物件スコープの再適用 (@codex P2・shot route と同一)。TTL 内の権限剥奪を
+    // 即時反映する (検索経路 runRegistrySearch と同じ record-level 判定)。
+    const property = await prisma.property.findUnique({
+      where: { id },
+      select: { id: true, createdBy: true, assignedTo: true },
+    });
+    if (!property) {
+      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+    if (
+      !canAccessPropertyRecord({ id: session.id, role: session.role }, property)
+    ) {
+      throw new ApiError(
+        403,
+        "この物件にアクセスする権限がありません",
+        "FORBIDDEN",
+      );
     }
     if (!isValidLiveRef(ref)) {
       throw new ApiError(404, "実況が見つかりません", "NOT_FOUND");

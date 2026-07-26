@@ -70,10 +70,15 @@ describe("registry-location-search-button — 実況パネル統合 (ソース�
     expect(BUTTON_SRC).toMatch(/searchRegistryCandidates\(propertyId, ref\)/);
   });
 
-  it("パネルは searching 中のみ描画する", () => {
+  it("パネルは検索完了後 (results/error) も維持し、閉じるで消える (@codex P2)", () => {
+    // searching 限定だと POST 完了と同時に unmount され「(完了)」表示も
+    // 3 分の見返しもできない。reset (閉じる) が liveRef を null にして閉じる。
     expect(BUTTON_SRC).toMatch(
-      /state === "searching" && liveRef && \(\s*<RegistryLivePanel/,
+      /liveRef &&\s*\(state === "searching" \|\|\s*state === "results" \|\|\s*state === "error"\) && \(\s*<RegistryLivePanel/,
     );
+    const resetBlock =
+      BUTTON_SRC.match(/const reset = \(\) => \{[\s\S]*?\};/)?.[0] ?? "";
+    expect(resetBlock).toMatch(/setLiveRef\(null\)/);
   });
 });
 

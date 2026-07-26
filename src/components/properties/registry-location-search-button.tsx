@@ -63,6 +63,8 @@ export default function RegistryLocationSearchButton({
     setNotSearchableReason(null);
     setSelected(null);
     setErrorMsg(null);
+    // 実況パネルも閉じる (server 側のスクショは TTL で自動消滅)。
+    setLiveRef(null);
   };
 
   const reasonText = (reason: string): string =>
@@ -180,10 +182,17 @@ export default function RegistryLocationSearchButton({
         </span>
       )}
 
-      {/* 実況パネル: 検索実行中の自動操作をスクショ紙芝居で中継する。 */}
-      {state === "searching" && liveRef && (
-        <RegistryLivePanel propertyId={propertyId} liveRef={liveRef} />
-      )}
+      {/* 実況パネル: 検索実行中の自動操作をスクショ紙芝居で中継する。
+          検索完了 (results/error) 後も維持し、最後の画面を見返せるようにする
+          (@codex P2: searching 限定だと POST 完了と同時に unmount され「(完了)」
+          表示も 3 分の見返しも実際には見えない)。「閉じる」(reset) で消える。
+          server 側のスクショは TTL で自動消滅する。 */}
+      {liveRef &&
+        (state === "searching" ||
+          state === "results" ||
+          state === "error") && (
+          <RegistryLivePanel propertyId={propertyId} liveRef={liveRef} />
+        )}
 
       {state === "results" && (
         <div className="flex flex-col gap-1.5 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 text-xs">

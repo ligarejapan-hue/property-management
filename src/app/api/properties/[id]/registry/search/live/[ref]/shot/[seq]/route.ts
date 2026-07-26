@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
@@ -6,6 +7,7 @@ import {
   handleApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import {
   getLiveShot,
   isValidLiveRef,
@@ -35,6 +37,26 @@ export async function GET(
     }
     if (!hasPermission(permissions, "property", "read")) {
       throw new ApiError(403, "物件閲覧の権限がありません", "FORBIDDEN");
+    }
+    // 物件スコープの再適用 (@codex P2): スクショには物件の所在・地番が写る。
+    // 検索実行後〜TTL の間に field_staff の担当が外れた場合でも、配信のたびに
+    // 検索経路 (runRegistrySearch) と同じ record-level 判定を通し、権限剥奪を
+    // 即時反映する (実行者本人チェックだけでは在職時の実行が残ってしまう)。
+    const property = await prisma.property.findUnique({
+      where: { id },
+      select: { id: true, createdBy: true, assignedTo: true },
+    });
+    if (!property) {
+      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+    if (
+      !canAccessPropertyRecord({ id: session.id, role: session.role }, property)
+    ) {
+      throw new ApiError(
+        403,
+        "この物件にアクセスする権限がありません",
+        "FORBIDDEN",
+      );
     }
     const seqNum = Number(seq);
     if (
