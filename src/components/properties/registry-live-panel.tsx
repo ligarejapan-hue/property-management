@@ -62,6 +62,11 @@ export default function RegistryLivePanel({
   const [expired, setExpired] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlightRef = useRef(false);
+  // 進行中の取得を Promise でも追跡する (@codex P1: 決着時の最終取得が
+  // in-flight ガードで素通りすると、直前の取得が done:false を掴んでいた
+  // 場合にパネルが永久に「実行中」のまま止まる。決着側は進行中の完了を
+  // 待ってから必ず実取得する)。
+  const inFlightPromiseRef = useRef<Promise<void> | null>(null);
   const failStreakRef = useRef(0);
 
   const stopPolling = () => {
@@ -73,25 +78,39 @@ export default function RegistryLivePanel({
 
   // 1 回分の取得。成功で失敗カウンタをリセットし、done で停止する。
   // 失敗は静かに数えるだけ (表示のエラーは親の責務)・上限で停止 (無限
-  // ポーリング防止の二重防御)。
-  const pollOnce = async (isCancelled: () => boolean) => {
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
-    try {
-      const res = await fetchRegistryLiveView(propertyId, liveRef);
-      if (isCancelled()) return;
-      failStreakRef.current = 0;
-      setSteps(res.data.steps);
-      setDone(res.data.done);
-      if (res.data.done) stopPolling();
-    } catch {
-      failStreakRef.current += 1;
-      if (failStreakRef.current >= MAX_CONSECUTIVE_POLL_FAILURES) {
-        stopPolling();
-      }
-    } finally {
-      inFlightRef.current = false;
+  // ポーリング防止の二重防御)。既に取得中なら、その取得の Promise を返す
+  // (重ね撃ちせず、呼び出し側が完了を待てる)。
+  const pollOnce = (isCancelled: () => boolean): Promise<void> => {
+    if (inFlightRef.current) {
+      return inFlightPromiseRef.current ?? Promise.resolve();
     }
+    inFlightRef.current = true;
+    const work = (async () => {
+      try {
+        const res = await fetchRegistryLiveView(propertyId, liveRef);
+        if (isCancelled()) return;
+        failStreakRef.current = 0;
+        setSteps(res.data.steps);
+        setDone(res.data.done);
+        if (res.data.done) stopPolling();
+      } catch {
+        failStreakRef.current += 1;
+        if (failStreakRef.current >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          stopPolling();
+        }
+      } finally {
+        inFlightRef.current = false;
+      }
+    })();
+    inFlightPromiseRef.current = work;
+    // 自己参照 TDZ (TS2454) を避けるため、後段の .finally() で片付ける
+    // (recorder の inFlightFlushPromiseRef と同じ型)。
+    void work.finally(() => {
+      if (inFlightPromiseRef.current === work) {
+        inFlightPromiseRef.current = null;
+      }
+    });
+    return work;
   };
 
   useEffect(() => {
@@ -110,15 +129,23 @@ export default function RegistryLivePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyId, liveRef]);
 
-  // 検索 POST 決着後: store は (begin されていれば) 必ず done 済み。最後に
-  // 1 回だけ取得して interval を止める (begin 前失敗 = 実況が存在せず毎回
-  // 404 のケースで、開きっぱなしのページが毎秒叩き続けない・@codex P2)。
+  // 検索 POST 決着後: store は (begin されていれば) 必ず done 済み。定期
+  // tick を先に止め、進行中の取得があれば完了を待ってから **必ず実取得を
+  // 1 回** 行う (@codex P1: in-flight ガードで素通りすると done:false のまま
+  // 固まる)。begin 前失敗 = 実況が存在せず毎回 404 のケースでも、この 1 回で
+  // 打ち止めになる (開きっぱなしのページが毎秒叩き続けない・@codex P2)。
   useEffect(() => {
     if (!searchSettled) return;
     let cancelled = false;
     void (async () => {
+      stopPolling();
+      try {
+        await inFlightPromiseRef.current;
+      } catch {
+        // 進行中取得の失敗は最終取得で上書きされる
+      }
+      if (cancelled) return;
       await pollOnce(() => cancelled);
-      if (!cancelled) stopPolling();
     })();
     return () => {
       cancelled = true;
@@ -126,12 +153,13 @@ export default function RegistryLivePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchSettled]);
 
-  // done 観測から保持期間が過ぎたら表示を畳む (server 期限切れと同じ窓)。
+  // done 観測 (または POST 決着) から保持期間が過ぎたら表示を畳む (server
+  // 期限切れと同じ窓。最終取得が失敗して done が立たなくても必ず畳まれる)。
   useEffect(() => {
-    if (!done) return;
+    if (!done && !searchSettled) return;
     const t = setTimeout(() => setExpired(true), PANEL_RETENTION_MS);
     return () => clearTimeout(t);
-  }, [done]);
+  }, [done, searchSettled]);
 
   const latestShotStep = [...steps].reverse().find((s) => s.hasShot) ?? null;
   const latestLabel = steps.length > 0 ? steps[steps.length - 1].label : null;
@@ -154,13 +182,15 @@ export default function RegistryLivePanel({
       data-testid="registry-live-panel"
       className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900"
     >
+      {/* 「実行中」の表示判定は store の done に加えて POST 決着 (searchSettled)
+          も見る: 最終取得が失敗しても、決着済みなら実行中パルスを出し続けない。 */}
       <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-700 dark:text-gray-200">
         <span aria-hidden="true">📺</span>
         自動操作の実況
-        {!done && (
+        {!done && !searchSettled && (
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
         )}
-        {done && (
+        {(done || searchSettled) && (
           <span className="text-[10px] font-normal text-gray-500 dark:text-gray-400">
             (完了)
           </span>

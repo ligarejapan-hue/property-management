@@ -68,6 +68,29 @@ describe("RegistryLivePanel — ポーリング規約 (ソース静的検証)", 
     expect(BUTTON_SRC).toMatch(/searchSettled=\{state !== "searching"\}/);
   });
 
+  it("決着時の最終取得は in-flight を待ってから必ず実取得する (@codex P1)", () => {
+    // in-flight ガードで素通りすると done:false のまま固まる。決着 effect は
+    // ①定期 tick 停止 → ②進行中取得の完了 await → ③実取得、の順。
+    const settleEffect =
+      PANEL_SRC.match(
+        /if \(!searchSettled\) return;[\s\S]*?\}, \[searchSettled\]\)/,
+      )?.[0] ?? "";
+    expect(settleEffect).toMatch(/stopPolling\(\);/);
+    expect(settleEffect).toMatch(/await inFlightPromiseRef\.current/);
+    expect(settleEffect).toMatch(/await pollOnce\(/);
+    // stopPolling が await より前 (新規 tick が挟まらない)
+    expect(settleEffect.indexOf("stopPolling()")).toBeLessThan(
+      settleEffect.indexOf("await inFlightPromiseRef.current"),
+    );
+    // pollOnce は in-flight 中なら同じ Promise を返す (重ね撃ちせず待てる)
+    expect(PANEL_SRC).toMatch(
+      /return inFlightPromiseRef\.current \?\? Promise\.resolve\(\)/,
+    );
+    // 表示も決着を反映: 最終取得が失敗しても「実行中」パルスを出し続けない
+    expect(PANEL_SRC).toMatch(/!done && !searchSettled/);
+    expect(PANEL_SRC).toMatch(/\(done \|\| searchSettled\)/);
+  });
+
   it("拡大表示 (クリックで画面全体を見る) がある", () => {
     expect(PANEL_SRC).toMatch(/registry-live-shot-enlarged/);
     expect(PANEL_SRC).toMatch(/cursor-zoom-in/);
