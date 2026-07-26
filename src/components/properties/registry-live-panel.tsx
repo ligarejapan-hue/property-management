@@ -39,6 +39,13 @@ const PANEL_RETENTION_MS = 3 * 60 * 1000;
  */
 const MAX_CONSECUTIVE_POLL_FAILURES = 8;
 
+/**
+ * done 観測後の猶予ポーリング回数 (@codex P2: スクショは fire-and-forget で
+ * 撮影されるため、最終ステップの画像が done の後から届く。1 枚あたりの撮影
+ * timeout は 1.5 秒なので、1 秒間隔 ×3 回で確実に拾える)。有界。
+ */
+const GRACE_POLLS_AFTER_DONE = 3;
+
 export default function RegistryLivePanel({
   propertyId,
   liveRef,
@@ -68,6 +75,8 @@ export default function RegistryLivePanel({
   // 待ってから必ず実取得する)。
   const inFlightPromiseRef = useRef<Promise<void> | null>(null);
   const failStreakRef = useRef(0);
+  // done 観測後の残り猶予ポーリング数 (null = まだ done を見ていない)。
+  const graceRemainingRef = useRef<number | null>(null);
 
   const stopPolling = () => {
     if (timerRef.current !== null) {
@@ -92,7 +101,19 @@ export default function RegistryLivePanel({
         failStreakRef.current = 0;
         setSteps(res.data.steps);
         setDone(res.data.done);
-        if (res.data.done) stopPolling();
+        if (res.data.done) {
+          // done 直後に停止すると fire-and-forget 撮影の遅着スクショ (最終
+          // ステップ分) を取り逃す (@codex P2)。猶予分だけ追加で拾ってから
+          // 停止する。
+          if (graceRemainingRef.current === null) {
+            graceRemainingRef.current = GRACE_POLLS_AFTER_DONE;
+          } else {
+            graceRemainingRef.current -= 1;
+          }
+          if (graceRemainingRef.current <= 0) stopPolling();
+        } else {
+          graceRemainingRef.current = null;
+        }
       } catch {
         failStreakRef.current += 1;
         if (failStreakRef.current >= MAX_CONSECUTIVE_POLL_FAILURES) {
@@ -146,6 +167,13 @@ export default function RegistryLivePanel({
       }
       if (cancelled) return;
       await pollOnce(() => cancelled);
+      // fire-and-forget 撮影の遅着スクショを拾う猶予 (interval は停止済み
+      // なので、こちらの経路では明示的に有界回数だけ追い取得する・@codex P2)。
+      for (let i = 0; i < GRACE_POLLS_AFTER_DONE && !cancelled; i++) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        if (cancelled) return;
+        await pollOnce(() => cancelled);
+      }
     })();
     return () => {
       cancelled = true;

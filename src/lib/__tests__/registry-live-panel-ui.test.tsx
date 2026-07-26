@@ -86,6 +86,12 @@ describe("RegistryLivePanel — ポーリング規約 (ソース静的検証)", 
     expect(PANEL_SRC).toMatch(
       /return inFlightPromiseRef\.current \?\? Promise\.resolve\(\)/,
     );
+    // 遅着スクショの猶予: done 後も有界回数だけ拾ってから停止 (@codex P2)
+    expect(PANEL_SRC).toMatch(/GRACE_POLLS_AFTER_DONE = 3/);
+    expect(PANEL_SRC).toMatch(/graceRemainingRef/);
+    expect(settleEffect).toMatch(
+      /for \(let i = 0; i < GRACE_POLLS_AFTER_DONE && !cancelled; i\+\+\)/,
+    );
     // 表示も決着を反映: 最終取得が失敗しても「実行中」パルスを出し続けない
     expect(PANEL_SRC).toMatch(/!done && !searchSettled/);
     expect(PANEL_SRC).toMatch(/\(done \|\| searchSettled\)/);
