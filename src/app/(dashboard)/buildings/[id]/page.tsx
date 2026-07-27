@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, useCallback, useRef, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -102,10 +102,45 @@ export default function BuildingDetailPage({
   // 押しても必ず 403 になるボタンを出さないよう UI も同条件にする。
   // 権限は dashboard 全体を覆う ScreenProtectionProvider の配布値から導出し、
   // 取得中・取得失敗（null）は false = 非表示に倒す（fail-safe・緩めない）。
-  const { permissions: mePermissions, permissionsLoading } =
-    useScreenProtection();
+  const {
+    permissions: mePermissions,
+    permissionsLoading,
+    refetchPermissions,
+  } = useScreenProtection();
+
+  // 権限鮮度: ScreenProtectionProvider は dashboard layout に居座り client
+  // navigation で再 mount されないため、provider の mount 時 1 回 fetch だけでは
+  // 滞在中の権限付与・剥奪に追従できない（付与済みなのにボタンが出ない／剥奪後も
+  // 出たままで 403 になる）。物件一覧・物件詳細と同じく、このページ進入あたり
+  // 最大 1 回だけ再確認する（@codex 指摘）。
+  const permissionsRefreshRequestedRef = useRef(false);
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  // 再確認が終わるまでは stale 権限でボタンを出さない（一瞬表示の回帰防止）。
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
+  useEffect(() => {
+    if (permissionsRefreshRequestedRef.current) return;
+    // provider の取得が進行中なら完了を待つ（同時 2 本にしない）。
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && mePermissions !== null) {
+      // mount 時に進行中だった取得が成功 → このページが見ている値は最新。
+      permissionsRefreshRequestedRef.current = true;
+      return;
+    }
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, mePermissions, refetchPermissions]);
+
   const canDeleteBuilding =
     !permissionsLoading &&
+    !permissionsRefreshPending &&
     (mePermissions ?? []).some(
       (p) => p.resource === "property" && p.action === "delete" && p.granted,
     );
