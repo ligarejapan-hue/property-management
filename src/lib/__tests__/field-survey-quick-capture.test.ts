@@ -155,6 +155,22 @@ describe("巡回外は種類を候補に固定する (@codex R1: 初期値だけ
     expect(CREATE_MODAL_SRC).toMatch(/物件化の完成待ち」に必ず出すため/);
   });
 
+  it("更新側も不変条件を守る: 巡回外で候補以外になる更新を拒否 (@codex #328 R1 P1)", () => {
+    const patchSrc = read("src/app/api/field-survey/pins/[id]/route.ts");
+    // 更新後の姿 (sessionId / pinType) で判定する。作成時だけ守っても
+    // ①巡回外ピンの種類変更 ②候補以外ピンの巡回解除 で同じ状態が作れる。
+    expect(patchSrc).toMatch(
+      /const nextSessionId =[\s\S]{0,120}?patch\.sessionId !== undefined \? patch\.sessionId : existing\.sessionId;/,
+    );
+    expect(patchSrc).toMatch(
+      /const nextPinType = patch\.pinType \?\? existing\.pinType;/,
+    );
+    expect(patchSrc).toMatch(
+      /nextSessionId === null && nextPinType !== "candidate"/,
+    );
+    expect(patchSrc).toMatch(/QUICK_CAPTURE_PIN_TYPE/);
+  });
+
   it("サーバも巡回外の候補以外を拒否する (API 直叩きでも孤児ピンを作れない)", () => {
     expect(PINS_ROUTE_SRC).toMatch(
       /!input\.sessionId && input\.pinType !== "candidate"/,

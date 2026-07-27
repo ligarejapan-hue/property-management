@@ -152,6 +152,23 @@ export async function PATCH(
       );
     }
 
+    // 「巡回に紐づかない pin は必ず物件化候補」の不変条件を更新側でも守る。
+    // 巡回外 pin は巡回履歴に出ないため、候補以外にすると完成待ち一覧
+    // (candidate / open / 未物件化のみ) からも外れ、どの一覧にも出なくなる。
+    // 作成時 (POST) だけ守っても、①巡回外 pin の種類変更 ②候補以外 pin の
+    // 巡回紐づけ解除 の 2 経路で同じ状態を作れるため、更新後の姿で判定する。
+    // 完成待ち一覧から外したいだけなら「候補から外す」(status=archived) を使う。
+    const nextSessionId =
+      patch.sessionId !== undefined ? patch.sessionId : existing.sessionId;
+    const nextPinType = patch.pinType ?? existing.pinType;
+    if (nextSessionId === null && nextPinType !== "candidate") {
+      throw new ApiError(
+        422,
+        "巡回に紐づかないピンは「物件化候補」のみです。種類を変えるには巡回に紐づけてください。",
+        "QUICK_CAPTURE_PIN_TYPE",
+      );
+    }
+
     // sessionId 変更時の認可。
     // pin owner と session owner の一致を必須にする (Codex P1-2)。
     // manage で他人 pin を更新するケースでも、pin 所有者と一致する session
