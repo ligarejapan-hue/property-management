@@ -152,6 +152,35 @@ export async function PATCH(
       );
     }
 
+    // 「巡回に紐づかない pin は必ず物件化候補」の不変条件を更新側でも守る。
+    // 巡回外 pin は巡回履歴に出ないため、候補以外にすると完成待ち一覧
+    // (candidate / open / 未物件化のみ) からも外れ、どの一覧にも出なくなる。
+    // 作成時 (POST) だけ守っても、①巡回外 pin の種類変更 ②候補以外 pin の
+    // 巡回紐づけ解除 の 2 経路で同じ状態を作れるため、更新後の姿で判定する。
+    // 完成待ち一覧から外したいだけなら「候補から外す」(status=archived) を使う。
+    const nextSessionId =
+      patch.sessionId !== undefined ? patch.sessionId : existing.sessionId;
+    const nextPinType = patch.pinType ?? existing.pinType;
+    // 判定するのは「この更新が違反を作る/維持する場合」だけにする。
+    // 本機能の前(または API 直叩き・session 削除の SetNull)で既に
+    // 「巡回なし × 候補以外」の行が存在し得る環境では、メモや状態だけを直す
+    // 無関係な PATCH まで 422 で塞ぐと編集不能になる (@codex #328 R4)。
+    // pinType / sessionId を触らない更新は既存状態のまま通し、種類を candidate に
+    // 直す更新 (違反の解消) も通す。
+    const touchesInvariantFields =
+      patch.pinType !== undefined || patch.sessionId !== undefined;
+    if (
+      nextSessionId === null &&
+      nextPinType !== "candidate" &&
+      touchesInvariantFields
+    ) {
+      throw new ApiError(
+        422,
+        "巡回に紐づかないピンは「物件化候補」のみです。種類を変えるには巡回に紐づけてください。",
+        "QUICK_CAPTURE_PIN_TYPE",
+      );
+    }
+
     // sessionId 変更時の認可。
     // pin owner と session owner の一致を必須にする (Codex P1-2)。
     // manage で他人 pin を更新するケースでも、pin 所有者と一致する session
@@ -186,17 +215,47 @@ export async function PATCH(
       await assertPropertyAccessible(patch.propertyId, session, permissions);
     }
 
-    const updated = await prisma.fieldSurveyPin.update({
-      where: { id },
-      data: {
-        ...(patch.pinType !== undefined && { pinType: patch.pinType }),
-        ...(patch.status !== undefined && { status: patch.status }),
-        ...(patch.memo !== undefined && { memo: patch.memo }),
-        ...(patch.propertyId !== undefined && { propertyId: patch.propertyId }),
-        ...(patch.sessionId !== undefined && { sessionId: patch.sessionId }),
-      },
-      select: SELECT_PIN,
+    // 「巡回外は候補のみ」の判定は上で読んだ行に基づく = check-then-write。
+    // 同一 pin に対する 2 本の PATCH ({pinType:"blocked"} と {sessionId:null}) が
+    // 並行すると、双方が同じ旧行を読んで個別に判定を通り、それぞれ別フィールドだけ
+    // 更新するため最終行が「巡回なし × 候補以外」= 防ごうとした孤児状態になる
+    // (@codex #328 R2 P1)。判定の根拠列 (sessionId / pinType) を条件に含めた
+    // updateMany で CAS し、0 件なら 409 にして再試行させる。
+    // CAS と読み直しは同一 transaction 内で行う。updateMany が行ロックを取るため、
+    // 続く findUniqueOrThrow は「自分の更新後の姿」を読み、並行 PATCH は
+    // commit まで待たされる。分離すると、CAS 述語に含まれない列だけを変える
+    // 2 本 (例: status closed と archived) が双方成功し、読み直しで相手の結果を
+    // 拾って応答と AuditLog の statusAfter が食い違う (@codex #328 R3 P2)。
+    const updated = await prisma.$transaction(async (tx) => {
+      const casResult = await tx.fieldSurveyPin.updateMany({
+        where: {
+          id,
+          sessionId: existing.sessionId,
+          pinType: existing.pinType,
+        },
+        data: {
+          ...(patch.pinType !== undefined && { pinType: patch.pinType }),
+          ...(patch.status !== undefined && { status: patch.status }),
+          ...(patch.memo !== undefined && { memo: patch.memo }),
+          ...(patch.propertyId !== undefined && {
+            propertyId: patch.propertyId,
+          }),
+          ...(patch.sessionId !== undefined && { sessionId: patch.sessionId }),
+        },
+      });
+      if (casResult.count === 0) return null;
+      return tx.fieldSurveyPin.findUniqueOrThrow({
+        where: { id },
+        select: SELECT_PIN,
+      });
     });
+    if (updated === null) {
+      throw new ApiError(
+        409,
+        "ほかの操作と競合しました。画面を更新してからやり直してください。",
+        "CONCURRENT_UPDATE",
+      );
+    }
 
     const changedFields: string[] = [];
     if (patch.pinType !== undefined && patch.pinType !== existing.pinType) {

@@ -84,6 +84,7 @@ vi.mock("@/lib/prisma", () => {
   const client: Record<string, unknown> = {
     fieldSurveyPin: {
       findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       findMany: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
@@ -155,6 +156,10 @@ const adminPerms = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // PATCH は CAS (updateMany + 件数チェック) で更新するため既定を「1 件成功」に
+  // 倒す。競合 (0 件 → 409 CONCURRENT_UPDATE) を検証するテストだけ個別に上書きする。
+  // clearAllMocks が mockResolvedValue も消すのでここで張り直す。
+  (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValue({ count: 1 });
 });
 
 function makeReq(url: string, init?: RequestInit) {
@@ -475,6 +480,61 @@ describe("POST /api/field-survey/pins", () => {
     expect(body.error?.code).toBe("QUICK_CAPTURE_FORBIDDEN");
     expect(prisma.fieldSurveyPin.create).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("巡回外で候補以外の種類は 422 (孤児ピン防止・DB に触れない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "followup",
+        }),
+      }),
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error?: { code?: string } };
+    expect(body.error?.code).toBe("QUICK_CAPTURE_PIN_TYPE");
+    expect(prisma.fieldSurveyPin.create).not.toHaveBeenCalled();
+  });
+
+  it("巡回中なら候補以外の種類も従来どおり作成できる", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      staffUserId: fieldUser.id,
+      status: "active",
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({ count: 1 });
+    (prisma.fieldSurveyPin.create as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: SESSION_ID,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "followup",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "followup",
+          sessionId: SESSION_ID,
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
   });
 
   it("quick_capture が無くても sessionId 付き (巡回中) の作成は従来どおり通る", async () => {
@@ -1235,7 +1295,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       { params },
     );
     expect(res.status).toBe(400);
-    expect(prisma.fieldSurveyPin.update).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
   });
 
   it("未存在は 404", async () => {
@@ -1263,7 +1323,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       { params },
     );
     expect(res.status).toBe(422);
-    expect(prisma.fieldSurveyPin.update).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
   });
 
   it("空 body は 422", async () => {
@@ -1298,7 +1358,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       { params },
     );
     expect(res.status).toBe(403);
-    expect(prisma.fieldSurveyPin.update).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
   });
 
   it("office_staff (read_all のみ・write なし) は own でも 403", async () => {
@@ -1325,7 +1385,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       pinType: "candidate",
       status: "open",
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
       staffUserId: fieldUser.id,
@@ -1370,7 +1430,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       pinType: "candidate",
       status: "open",
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
       staffUserId: "other-user",
@@ -1405,7 +1465,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       pinType: "candidate",
       status: "open",
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
       staffUserId: fieldUser.id,
@@ -1427,7 +1487,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       { params },
     );
     expect(res.status).toBe(200);
-    const updateArgs = (prisma.fieldSurveyPin.update as Mock).mock.calls[0][0];
+    const updateArgs = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls[0][0];
     expect(updateArgs.data.propertyId).toBeNull();
     const call = writeAuditLog.mock.calls[0][0];
     expect(call.detail.changedFields).toContain("propertyId");
@@ -1457,7 +1517,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       { params },
     );
     expect(res.status).toBe(403);
-    expect(prisma.fieldSurveyPin.update).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
   });
 
   it("sessionId 紐付け: manage でも pin 所有者と session 所有者が異なれば 409 SESSION_OWNER_MISMATCH (P1-2)", async () => {
@@ -1486,7 +1546,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error.code).toBe("SESSION_OWNER_MISMATCH");
-    expect(prisma.fieldSurveyPin.update).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
@@ -1506,7 +1566,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       staffUserId: "other-user", // pin 所有者と一致
       status: "active",
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: SESSION_ID,
       staffUserId: "other-user",
@@ -1532,6 +1592,227 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     expect(call.detail.changedFields).toContain("sessionId");
   });
 
+  it("既存の巡回なし×候補以外ピンでも、メモだけの更新は通す (旧データを編集不能にしない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "followup",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "followup",
+      status: "open",
+      memo: "m",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ memo: "m" }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("既存の巡回なし×候補以外ピンを候補へ直す更新は通す (違反の解消)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "blocked",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinType: "candidate" }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("CAS: 判定の根拠列 (sessionId/pinType) を where に含めて更新する", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: SESSION_ID,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: SESSION_ID,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "candidate",
+      status: "archived",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "archived" }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(200);
+    const where = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls[0][0].where;
+    expect(where.id).toBe(PIN_ID);
+    expect(where.sessionId).toBe(SESSION_ID);
+    expect(where.pinType).toBe("candidate");
+  });
+
+  it("CAS: 並行更新で 0 件なら 409 CONCURRENT_UPDATE (孤児状態を作らない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: SESSION_ID,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValue({ count: 0 });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinType: "blocked" }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(409);
+    const b = (await res.json()) as { error?: { code?: string } };
+    expect(b.error?.code).toBe("CONCURRENT_UPDATE");
+  });
+
+  it("巡回外ピンの種類を候補以外へ変更する PATCH は 422 (孤児ピン防止)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinType: "followup" }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(422);
+    const b = (await res.json()) as { error?: { code?: string } };
+    expect(b.error?.code).toBe("QUICK_CAPTURE_PIN_TYPE");
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("候補以外ピンの巡回紐づけ解除も 422 (同じ状態を別経路で作らせない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: SESSION_ID,
+      propertyId: null,
+      pinType: "blocked",
+      status: "open",
+      memo: null,
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ sessionId: null }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(422);
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("巡回中ピンの種類変更は従来どおり通る (挙動不変)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: SESSION_ID,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: SESSION_ID,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "followup",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinType: "followup" }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("quick_capture が無いと sessionId=null の解除は 403 (POST ゲートの迂回防止)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
@@ -1554,7 +1835,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error?: { code?: string } };
     expect(body.error?.code).toBe("QUICK_CAPTURE_FORBIDDEN");
-    expect(prisma.fieldSurveyPin.update).not.toHaveBeenCalled();
+    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
   });
 
   it("sessionId=null で解除可 / SESSION_OWNER_MISMATCH チェックを経由しない", async () => {
@@ -1570,7 +1851,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       status: "open",
       memo: null,
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
       staffUserId: fieldUser.id,
@@ -1610,7 +1891,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       status: "open",
       memo: "same-value",
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
       staffUserId: fieldUser.id,
@@ -1647,7 +1928,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       status: "open",
       memo: null,
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
       staffUserId: fieldUser.id,
@@ -1684,7 +1965,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       status: "open",
       memo: "old",
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
       staffUserId: fieldUser.id,
@@ -1726,7 +2007,7 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       pinType: "candidate",
       status: "open",
     });
-    (prisma.fieldSurveyPin.update as Mock).mockResolvedValue({
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
       staffUserId: fieldUser.id,

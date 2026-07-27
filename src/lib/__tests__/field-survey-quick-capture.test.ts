@@ -134,6 +134,92 @@ describe("サーバ側 fail-closed ゲート (POST /api/field-survey/pins)", () 
   });
 });
 
+const CREATE_MODAL_SRC = read("src/components/field-survey/pin-create-modal.tsx");
+
+describe("巡回外は種類を候補に固定する (@codex R1: 初期値だけでは固定にならない)", () => {
+  it("modal は sessionId 無しのとき種類のラジオを出さず候補固定を表示する", () => {
+    expect(CREATE_MODAL_SRC).toMatch(/const lockPinType = sessionId === null;/);
+    // 固定時は初期引き継ぎ (lastPinType) より候補を優先する
+    expect(CREATE_MODAL_SRC).toMatch(
+      /lockPinType \? "candidate" : \(initialPinType \?\? "candidate"\)/,
+    );
+    // ラジオ群は固定時に描画しない (選べてしまうと孤児ピンが作れる)
+    expect(CREATE_MODAL_SRC).toMatch(
+      /\{lockPinType \? \([\s\S]{0,600}?data-testid="pin-create-type-locked"/,
+    );
+    // 固定時はラジオ (pin-create-type-<種類>) を出さない構造であること
+    expect(CREATE_MODAL_SRC).toMatch(
+      /\) : \([\s\S]{0,400}?FIELD_SURVEY_PIN_TYPES\.map/,
+    );
+    // 理由も見せる (現場で「なぜ選べない」を迷わせない)
+    expect(CREATE_MODAL_SRC).toMatch(/物件化の完成待ち」に必ず出すため/);
+  });
+
+  it("更新側も不変条件を守る: 巡回外で候補以外になる更新を拒否 (@codex #328 R1 P1)", () => {
+    const patchSrc = read("src/app/api/field-survey/pins/[id]/route.ts");
+    // 更新後の姿 (sessionId / pinType) で判定する。作成時だけ守っても
+    // ①巡回外ピンの種類変更 ②候補以外ピンの巡回解除 で同じ状態が作れる。
+    expect(patchSrc).toMatch(
+      /const nextSessionId =[\s\S]{0,120}?patch\.sessionId !== undefined \? patch\.sessionId : existing\.sessionId;/,
+    );
+    expect(patchSrc).toMatch(
+      /const nextPinType = patch\.pinType \?\? existing\.pinType;/,
+    );
+    expect(patchSrc).toMatch(
+      /nextSessionId === null &&\s*\n?\s*nextPinType !== "candidate"/,
+    );
+    expect(patchSrc).toMatch(/QUICK_CAPTURE_PIN_TYPE/);
+    // check-then-write の競合で孤児状態を作られないよう、判定の根拠列を
+    // where に含めた CAS (updateMany + 件数 0 で 409) で更新する。
+    expect(patchSrc).toMatch(
+      /updateMany\(\{[\s\S]{0,240}?sessionId: existing\.sessionId,[\s\S]{0,80}?pinType: existing\.pinType,/,
+    );
+    expect(patchSrc).toMatch(/casResult\.count === 0/);
+    expect(patchSrc).toMatch(/CONCURRENT_UPDATE/);
+    // 旧データ (巡回なし×候補以外) を編集不能にしないため、pinType/sessionId を
+    // 触らない更新は通す (@codex #328 R4)。
+    expect(patchSrc).toMatch(
+      /const touchesInvariantFields =[\s\S]{0,120}?patch\.pinType !== undefined \|\| patch\.sessionId !== undefined;/,
+    );
+    expect(patchSrc).toMatch(/touchesInvariantFields\s*\n?\s*\) \{/);
+  });
+
+  it("サーバも巡回外の候補以外を拒否する (API 直叩きでも孤児ピンを作れない)", () => {
+    expect(PINS_ROUTE_SRC).toMatch(
+      /!input\.sessionId && input\.pinType !== "candidate"/,
+    );
+    expect(PINS_ROUTE_SRC).toMatch(/QUICK_CAPTURE_PIN_TYPE/);
+  });
+});
+
+describe("編集フォームも巡回外は候補固定 (@codex #328 R3 P2)", () => {
+  const DETAIL_SRC = read("src/components/field-survey/pin-detail-panel.tsx");
+
+  it("detail.sessionId が null なら種類のラジオを出さない (押して422にしない)", () => {
+    expect(DETAIL_SRC).toMatch(
+      /const lockPinType = detail\.sessionId === null;/,
+    );
+    expect(DETAIL_SRC).toMatch(/data-testid="pin-edit-type-locked"/);
+    expect(DETAIL_SRC).toMatch(/種類は変更できません/);
+  });
+
+  it("保存時の送信値も巡回外なら候補に倒す (下書きが stale でも 422 にしない)", () => {
+    expect(DETAIL_SRC).toMatch(
+      /detail\.sessionId === null \? "candidate" : draftPinType/,
+    );
+    expect(DETAIL_SRC).toMatch(/pinType: effectiveDraftPinType/);
+  });
+
+  it("CAS と読み直しは同一 transaction 内で行う (応答と監査ログの取り違え防止)", () => {
+    const patchSrc = read("src/app/api/field-survey/pins/[id]/route.ts");
+    expect(patchSrc).toMatch(
+      /prisma\.\$transaction\(async \(tx\) => \{[\s\S]{0,400}?tx\.fieldSurveyPin\.updateMany/,
+    );
+    expect(patchSrc).toMatch(/tx\.fieldSurveyPin\.findUniqueOrThrow/);
+    expect(patchSrc).toMatch(/if \(updated === null\) \{/);
+  });
+});
+
 describe("クライアント配線 (field-survey-map)", () => {
   it("provider 配布の権限から canQuickCapture を導出する", () => {
     expect(MAP_SRC).toMatch(
