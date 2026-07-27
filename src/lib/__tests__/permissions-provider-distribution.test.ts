@@ -47,6 +47,7 @@ const providerSrc = read(
   "src/components/screen-protection/screen-protection-provider.tsx",
 );
 const pageSrc = read("src/app/(dashboard)/properties/page.tsx");
+const buildingDetailSrc = read("src/app/(dashboard)/buildings/[id]/page.tsx");
 const guardSrc = read(
   "src/components/screen-protection/screen-protection-guard.tsx",
 );
@@ -206,7 +207,37 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
     expect(pageSrc).toMatch(
       /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*refetchPermissions,\s*capabilities,\s*\} = useScreenProtection\(\)/,
     );
-    expect(pageSrc).toMatch(/const \{ canExportCsv, canExportDm, canCreateDm(, canWriteProperty)? \} = useMemo\(/);
+    // 導出キーは今後も増えるため、必須キーの並びだけを緩く固定する
+    // (複数行の分割代入・後続キー追加に耐える)。
+    expect(pageSrc).toMatch(
+      /const\s*\{[\s\S]*?canExportCsv,\s*canExportDm,\s*canCreateDm[\s\S]*?\}\s*=\s*useMemo\(/,
+    );
+  });
+
+  it("棟詳細も進入時に権限を1回だけ再確認してから削除ボタンを導出する（@codex 指摘）", () => {
+    // provider は dashboard layout に居座るため、mount 時スナップショットのままだと
+    // 滞在中の付与/剥奪に追従できない（付与済みでもボタンが出ない／剥奪後も出て 403）。
+    // 物件一覧・物件詳細と同じ entry-refresh + pending 中は非表示（fail-safe）に揃える。
+    expect(buildingDetailSrc).toMatch(
+      /if \(permissionsRefreshRequestedRef\.current\) return;/,
+    );
+    expect(buildingDetailSrc).toMatch(/refetchPermissions\(\)\.finally\(/);
+    expect(buildingDetailSrc).toMatch(
+      /const canDeleteBuilding =\s*!permissionsLoading &&\s*!permissionsRefreshPending &&/,
+    );
+    // 棟ページ独自の /api/me/permissions fetch は持たない（provider 経由のみ）。
+    expect(buildingDetailSrc).not.toMatch(
+      /fetch\(\s*["']\/api\/me\/permissions["']/,
+    );
+  });
+
+  it("削除ボタンの表示は property:delete から導出する（サーバ DELETE と同条件）", () => {
+    // DELETE /api/properties/[id] は property:delete を要求する。UI が write 相当で
+    // ボタンを出すと必ず 403 になるため、専用の導出値でゲートする。
+    expect(pageSrc).toMatch(
+      /canDeleteProperty:\s*hasDelete\("property"\)/,
+    );
+    expect(pageSrc).toMatch(/\{canDeleteProperty && \(/);
   });
 
   it("権限鮮度: properties 進入（mount）あたり最大 1 回だけ refetchPermissions を呼ぶ（Codex 対応2）", () => {

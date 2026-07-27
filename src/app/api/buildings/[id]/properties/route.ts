@@ -4,12 +4,14 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, maskValue } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 const createUnitSchema = z.object({
   address: z.string().min(1, "住所は必須です"),
@@ -52,6 +54,14 @@ export async function GET(
       throw new ApiError(404, "棟が見つかりません", "NOT_FOUND");
     }
 
+    // オーナー名は物件一覧 API (/api/properties) と同じゲートを通す:
+    // owner:read が無ければ返さない / あれば表示レベルでマスクする。
+    // ここを素通しすると、棟経由だけが氏名マスクの抜け道になる。
+    const hasOwnerRead = hasPermission(perms, "owner", "read");
+    const ownerDisplayConfig = hasOwnerRead
+      ? await getOwnerDisplayConfig(session.id, perms)
+      : null;
+
     const properties = await prisma.property.findMany({
       where: { buildingId: id },
       include: {
@@ -65,7 +75,37 @@ export async function GET(
       orderBy: [{ floorNo: "asc" }, { roomNo: "asc" }],
     });
 
-    return apiResponse({ data: properties });
+    // field_staff は担当（作成者 or 担当者）の部屋のみ。個別物件 API と同じ
+    // record スコープを適用する（src/lib/property-access.ts の規約）。
+    const visible = properties.filter((p) =>
+      canAccessPropertyRecord(session, {
+        createdBy: p.createdBy,
+        assignedTo: p.assignedTo,
+      }),
+    );
+
+    const data = visible.map((p) => {
+      const { propertyOwners, ...rest } = p;
+      return {
+        ...rest,
+        propertyOwners:
+          hasOwnerRead && ownerDisplayConfig
+            ? propertyOwners
+                .map((po) => ({
+                  ...po,
+                  owner: {
+                    ...po.owner,
+                    name: maskValue(po.owner.name, ownerDisplayConfig.name),
+                  },
+                }))
+                // hidden は maskValue が null を返す。名前なしの行を描画しても
+                // 意味がないので落とす（UI は owner.name を直接表示する）。
+                .filter((po) => po.owner.name !== null)
+            : [],
+      };
+    });
+
+    return apiResponse({ data });
   } catch (error) {
     return handleApiError(error);
   }

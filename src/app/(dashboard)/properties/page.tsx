@@ -214,7 +214,13 @@ function PropertiesPageInner() {
   // 両方を必須にしているため、UI 側も同条件で判定し、権限がなければボタンを非表示にする。
   // DM差込CSV の出力可否。dm-export API は csv_export:read / csv_export_personal:read に
   // 加えて owner:read（所有者個人情報を含むため）を必須にする。UI も同条件で判定する。
-  const { canExportCsv, canExportDm, canCreateDm, canWriteProperty } = useMemo(() => {
+  const {
+    canExportCsv,
+    canExportDm,
+    canCreateDm,
+    canWriteProperty,
+    canDeleteProperty,
+  } = useMemo(() => {
     // F12-2 Codex 対応(3): 進入時 refresh 中（pending）・provider 取得中（loading）は
     // stale な granted permissions を使わず空配列に倒す＝ボタン非表示（fail-safe 側）。
     // refresh 完了後の最新 permissions からのみ true になり得る。
@@ -230,6 +236,10 @@ function PropertiesPageInner() {
       effectivePermissions.some(
         (p) => p.resource === resource && p.action === "write" && p.granted,
       );
+    const hasDelete = (resource: string) =>
+      effectivePermissions.some(
+        (p) => p.resource === resource && p.action === "delete" && p.granted,
+      );
     const canCsv = has("csv_export") && has("csv_export_personal");
     return {
       canExportCsv: canCsv,
@@ -238,6 +248,9 @@ function PropertiesPageInner() {
       canCreateDm: canCreateSaleDm(effectivePermissions),
       // 宛先不明の手動解除は物件を書き換えるため property:write 必須(server も 403 で要求)。
       canWriteProperty: hasWrite("property"),
+      // 物件削除は DELETE /api/properties/[id] が property:delete を要求する。
+      // 押しても必ず 403 になるボタンを出さないよう UI も同条件に揃える。
+      canDeleteProperty: hasDelete("property"),
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions]);
 
@@ -1216,6 +1229,7 @@ function PropertiesPageInner() {
             <option value="no_send">送付不可</option>
             <option value="hold">未判断</option>
           </select>
+          {canDeleteProperty && (
           <button
             type="button"
             disabled={bulkDeleting || bulkUpdating}
@@ -1229,6 +1243,7 @@ function PropertiesPageInner() {
             )}
             選択した物件を削除
           </button>
+          )}
           <button
             onClick={() => setSelectedIds(new Set())}
             disabled={bulkDeleting}
@@ -1446,19 +1461,21 @@ function PropertiesPageInner() {
                     {new Date(property.updatedAt).toLocaleDateString("ja-JP")}
                   </td>
                   <td className="whitespace-nowrap px-2 py-3" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      title="この物件を削除"
-                      disabled={deletingId === property.id}
-                      onClick={() => handleDelete(property.id, property.address)}
-                      className="inline-flex items-center justify-center rounded-md p-1.5 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {deletingId === property.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </button>
+                    {canDeleteProperty && (
+                      <button
+                        type="button"
+                        title="この物件を削除"
+                        disabled={deletingId === property.id}
+                        onClick={() => handleDelete(property.id, property.address)}
+                        className="inline-flex items-center justify-center rounded-md p-1.5 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {deletingId === property.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    )}
                   </td>
                 </tr>
                 );
