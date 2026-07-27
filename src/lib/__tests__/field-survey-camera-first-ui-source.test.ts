@@ -130,14 +130,19 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     );
     expect(handler).not.toBeNull();
     const m = handler?.[0] ?? "";
-    // 成功・失敗の両 callback に cameraRequestIdRef 照合付きの後始末がある
-    const cleanups = m.match(/cameraRequestIdRef\.current\s*===\s*requestId/g) ?? [];
-    expect(cleanups.length).toBeGreaterThanOrEqual(2);
-    // modal 競合ガードは 捕捉時 + 成功 + 失敗 の 3 箇所 (error 側も非対称にしない)
+    // 現在地取得の並行化 (撮影ボタン押下で prefetch 開始) に伴い、成功/失敗の
+    // 2 つの callback は単一の apply(result) に統合された。後始末・modal 競合
+    // ガードは「両方に書く」から「1 箇所で両方を賄う」へ変わっただけで、守って
+    // いる不変条件 (locating 固着させない / 写真をリークさせない / modal 競合時は
+    // 破棄) は同じ。むしろ error 側だけ書き忘れる余地が構造的に消えている。
+    expect(m).toMatch(/cameraRequestIdRef\.current\s*===\s*requestId/);
+    // 失敗も同じ経路を通る
+    expect(m).toMatch(/if \(!result\.ok\)/);
+    // modal 競合ガードは 捕捉時 + apply 内 の 2 箇所
     const modalGuards = m.match(/createCandidateOpenRef\.current/g) ?? [];
-    expect(modalGuards.length).toBeGreaterThanOrEqual(3);
-    // token 発行時に最新カメラ要求として記録する
-    expect(m).toMatch(/cameraRequestIdRef\.current\s*=\s*requestId/);
+    expect(modalGuards.length).toBeGreaterThanOrEqual(2);
+    // 最新カメラ要求としての記録は prefetch 開始時に行う (撮影開始が起点)
+    expect(MAP_SRC).toMatch(/cameraRequestIdRef\.current\s*=\s*requestId/);
   });
 
   it("地図タップ待ち (awaiting-map-tap) はピン追加モードより先に処理される", () => {

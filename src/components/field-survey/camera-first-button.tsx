@@ -25,6 +25,12 @@ interface CameraFirstButtonProps {
    * bottom-14 left-1/2 を占めて重なるのを防ぐ)。
    */
   inline?: boolean;
+  /**
+   * 撮影を始める瞬間 (カメラ起動の直前) に一度だけ呼ばれる。
+   * 親はここで現在地の取得を先に走らせ、撮影と並行させる
+   * (撮影後に取得を始めると、その分だけ保存画面が開くのを待たせる)。
+   */
+  onCaptureStart?: () => void;
   onPhotoCaptured: (file: File) => void;
 }
 
@@ -33,6 +39,7 @@ export default function CameraFirstButton({
   locating,
   permissionDenied,
   inline = false,
+  onCaptureStart,
   onPhotoCaptured,
 }: CameraFirstButtonProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -63,7 +70,13 @@ export default function CameraFirstButton({
       />
       <button
         type="button"
-        onClick={() => inputRef.current?.click()}
+        onClick={() => {
+          // 現在地の取得を先に開始し、カメラ起動と並行させる。
+          // 同じユーザー操作 (click) 内で呼ぶので、権限プロンプトが必要な
+          // 初回でもジェスチャ由来として扱われる。
+          onCaptureStart?.();
+          inputRef.current?.click();
+        }}
         disabled={disabled}
         data-testid="camera-first-button"
         aria-label="写真を撮ってピンを登録"
