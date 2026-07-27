@@ -221,9 +221,14 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     expect(r).toMatch(/cameraRequestIdRef\.current\s*=\s*0/);
   });
 
-  it("banner は active session かつ awaiting-map-tap のときのみ render", () => {
+  it("banner は awaiting-map-tap のときのみ render (巡回外の撮影でも出す)", () => {
+    // 巡回なし撮影 (quick_capture) では activeSession が無い状態で GPS 失敗
+    // フォールバックに入る。巡回を条件にすると場所指定の案内が出ず操作が詰む。
     expect(MAP_SRC).toMatch(
-      /activeSession\s*&&\s*cameraFirstPhase\s*===\s*"awaiting-map-tap"\s*&&[\s\S]{0,120}<CameraFirstBanner/,
+      /cameraFirstPhase\s*===\s*"awaiting-map-tap"\s*&&\s*!panelOpen\s*&&[\s\S]{0,120}<CameraFirstBanner/,
+    );
+    expect(MAP_SRC).not.toMatch(
+      /\{activeSession\s*&&\s*cameraFirstPhase\s*===\s*"awaiting-map-tap"/,
     );
   });
 });

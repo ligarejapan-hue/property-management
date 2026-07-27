@@ -19,6 +19,12 @@ interface CameraFirstButtonProps {
   locating: boolean;
   /** field_survey:write 未付与が確定している (title で理由を示す)。 */
   permissionDenied: boolean;
+  /**
+   * 巡回外 (巡回なし撮影) で「巡回を開始」ボタンと横並びに置く場合 true。
+   * 自前の absolute 配置をやめ、親の行レイアウトに従う (両方が
+   * bottom-14 left-1/2 を占めて重なるのを防ぐ)。
+   */
+  inline?: boolean;
   onPhotoCaptured: (file: File) => void;
 }
 
@@ -26,6 +32,7 @@ export default function CameraFirstButton({
   disabled,
   locating,
   permissionDenied,
+  inline = false,
   onPhotoCaptured,
 }: CameraFirstButtonProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -38,7 +45,13 @@ export default function CameraFirstButton({
   };
 
   return (
-    <div className="pointer-events-none absolute bottom-14 left-1/2 z-10 -translate-x-1/2">
+    <div
+      className={
+        inline
+          ? "pointer-events-none"
+          : "pointer-events-none absolute bottom-14 left-1/2 z-10 -translate-x-1/2"
+      }
+    >
       <input
         ref={inputRef}
         type="file"

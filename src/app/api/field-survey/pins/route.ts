@@ -57,6 +57,22 @@ export async function POST(request: NextRequest) {
     const body = await parseJsonBody(request);
     const input = createFieldSurveyPinSchema.parse(body);
 
+    // 巡回 session に紐づかない pin (巡回なし撮影) は専用権限を要求する。
+    // 巡回外の pin は移動軌跡 (track_points) が残らず巡回履歴にも出ないため、
+    // write 保有者全員には開放せず fail-closed で絞る (既定で誰も持たない =
+    // 付与するまで従来どおり「巡回中のみ作成可」の挙動)。
+    // sessionId あり (通常の巡回中作成) はこの判定を通らない = 挙動不変。
+    if (
+      !input.sessionId &&
+      !hasPermission(permissions, "field_survey", "quick_capture")
+    ) {
+      throw new ApiError(
+        403,
+        "巡回なしで登録する権限がありません。巡回を開始してください。",
+        "QUICK_CAPTURE_FORBIDDEN",
+      );
+    }
+
     // sessionId 検証
     // POST 時は pin.staffUserId = session.id 固定のため、pin owner と session owner
     // を一致させるには session.staffUserId === session.id を必須にする。

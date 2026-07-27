@@ -90,6 +90,8 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       { resource: "field_survey", action: "write", granted: true },
       { resource: "field_survey", action: "read_all", granted: true },
       { resource: "field_survey", action: "manage", granted: true },
+      // 巡回なし撮影（field_survey:quick_capture）。mock は admin 相当のため付与。
+      { resource: "field_survey", action: "quick_capture", granted: true },
       // PR2: 謄本自動取得（registry:auto_fetch）。mock は admin 相当の全権限のため付与。
       { resource: "registry", action: "auto_fetch", granted: true },
       // 売却促進DM の AI 生成（sale_dm:generate）。mock は admin 相当の全権限のため付与

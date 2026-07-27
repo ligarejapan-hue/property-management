@@ -228,6 +228,11 @@ async function main() {
     { templateId: adminTemplate.id, resource: "field_survey", action: "write", granted: true },
     { templateId: adminTemplate.id, resource: "field_survey", action: "read_all", granted: true },
     { templateId: adminTemplate.id, resource: "field_survey", action: "manage", granted: true },
+    // 巡回を開始せずにその場で撮影→ピン登録できる権限（field_survey:quick_capture）。
+    // 巡回外の撮影は移動軌跡 (track_points) が残らないため、誰でも使える状態にはせず
+    // admin のみに既定付与し、必要な担当者へは管理画面のユーザー個別権限で配る。
+    // read + write とセットで配ること（地図ページ・写真閲覧が read を要求するため）。
+    { templateId: adminTemplate.id, resource: "field_survey", action: "quick_capture", granted: true },
     // PR2: 謄本自動取得（registry:auto_fetch）の権限土台。外部サービスへの課金を伴う
     // 高リスク操作のため、安全側で admin のみに付与する（office_staff / field_staff には
     // 付与しない）。実際の自動取得 API / UI / provider は後続 PR（外部規約・課金確認後）。

@@ -137,11 +137,26 @@ export async function PATCH(
       );
     }
 
+    // 巡回紐づけの「解除」は巡回外ピンを作るのと同じ結果になる (巡回履歴から
+    // 外れ、移動軌跡と対応しなくなる)。POST の quick_capture ゲートが
+    // 「巡回中に作ってから解除する」で迂回されないよう、同じ権限を要求する。
+    if (
+      patch.sessionId === null &&
+      existing.sessionId !== null &&
+      !hasPermission(permissions, "field_survey", "quick_capture")
+    ) {
+      throw new ApiError(
+        403,
+        "巡回の紐づけを外す権限がありません",
+        "QUICK_CAPTURE_FORBIDDEN",
+      );
+    }
+
     // sessionId 変更時の認可。
     // pin owner と session owner の一致を必須にする (Codex P1-2)。
     // manage で他人 pin を更新するケースでも、pin 所有者と一致する session
     // にのみ紐付け可能。pin と session の所有者が食い違うデータを作らない。
-    // 解除 (patch.sessionId === null) は許可。
+    // 解除 (patch.sessionId === null) は上のゲートを通過したものだけ許可。
     if (patch.sessionId !== undefined && patch.sessionId !== null) {
       const sess = await prisma.fieldSurveySession.findUnique({
         where: { id: patch.sessionId },

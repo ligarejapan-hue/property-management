@@ -106,8 +106,10 @@ describe("2. 技術用語「session」の一掃 (利用者向け文言)", () => 
   });
 
   it("置換後の平易文言が存在する", () => {
+    // 巡回なし撮影の導入で、sessionId 無しは「保存できない」ではなく
+    // 「巡回外の撮影として保存する」正常系になった (平易語のまま置換)。
     expect(readSrc("src/components/field-survey/pin-create-modal.tsx")).toMatch(
-      /巡回中でないため保存できません/,
+      /巡回外の撮影として保存します/,
     );
     expect(MAP_SRC).toMatch(/巡回を開始してから現在地を取得してください/);
     expect(readSrc("src/lib/field-survey-trip-util.ts")).toMatch(

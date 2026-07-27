@@ -66,19 +66,27 @@ export function cameraFirstFallbackMessage(errorCode: number | null): string {
 
 /**
  * カメラボタンの表示 / 無効判定。
- * - 巡回 session 中のみ表示 (ピン作成の前提と同じ)
+ * - 巡回 session 中、または「巡回なしで撮影」権限 (field_survey:quick_capture)
+ *   保有時に表示する。後者は巡回を開始せずその場で撮って登録するための権限で、
+ *   既定では誰も持たない (server 側も同じ権限で fail-closed に判定する)。
  * - 作成 modal 表示中・地図タップ待ち中は非表示 (二重起動防止 / banner に譲る)
  * - canWrite は tristate: false 確定のみ無効化、null (判定不能) は API 403 委譲で有効
+ * - canCaptureWithoutTrip は「true 確定のときだけ」表示に効かせる。null(判定不能)で
+ *   出すと、権限が無い人に押させて 403 にするだけなので安全側に倒す。
  * - 現在地取得中 (locating) は押下不可
  */
 export function cameraFirstButtonState(input: {
   hasActiveSession: boolean;
+  /** 巡回外でも撮影できるか (field_survey:quick_capture)。null = 判定不能。 */
+  canCaptureWithoutTrip?: boolean | null;
   canWrite: boolean | null;
   phase: CameraFirstPhase;
   modalOpen: boolean;
 }): { visible: boolean; disabled: boolean } {
   const visible =
-    input.hasActiveSession && !input.modalOpen && input.phase !== "awaiting-map-tap";
+    (input.hasActiveSession || input.canCaptureWithoutTrip === true) &&
+    !input.modalOpen &&
+    input.phase !== "awaiting-map-tap";
   const disabled = input.canWrite === false || input.phase === "locating";
   return { visible, disabled };
 }

@@ -146,11 +146,11 @@ export default function PinCreateModal({
   }, [photoPreviewUrl]);
 
   const busy = saving || photoUploading;
+  // sessionId=null は「巡回なしで撮影」(field_survey:quick_capture) の正常系。
+  // 巡回の有無を保存可否の条件にしない (権限判定はサーバーの POST /pins が行い、
+  // 権限が無ければ 403 QUICK_CAPTURE_FORBIDDEN が serverError に出る)。
   const canSubmit =
-    !!sessionId &&
-    !busy &&
-    Number.isFinite(initialLat) &&
-    Number.isFinite(initialLng);
+    !busy && Number.isFinite(initialLat) && Number.isFinite(initialLng);
   // GPS 由来の精度表示 (地図タップは accuracy 無しで "—" → 非表示)。
   const accuracyText = formatAccuracyMeters(initialAccuracy);
   const lowAccuracy = isLowAccuracyForDisplay(initialAccuracy);
@@ -364,9 +364,10 @@ export default function PinCreateModal({
         {!sessionId && (
           <p
             role="status"
-            className="mb-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
+            data-testid="pin-create-no-trip-note"
+            className="mb-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-300"
           >
-            巡回中でないため保存できません。巡回を開始してください。
+            巡回外の撮影として保存します（移動ルートは記録されません）。
           </p>
         )}
 

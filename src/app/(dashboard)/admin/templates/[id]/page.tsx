@@ -20,6 +20,13 @@ const RESOURCES = [
   { key: "import", label: "インポート", actions: ["write"] },
   { key: "user_management", label: "ユーザー管理", actions: ["read", "write", "delete"] },
   { key: "audit_log", label: "監査ログ", actions: ["read"] },
+  // 現地調査。quick_capture(巡回なしで撮影) は移動軌跡が残らないため既定 admin のみ。
+  // ⚠ users 個別権限画面の RESOURCES と必ず同内容にすること(片方だけだと付与できず 403)。
+  {
+    key: "field_survey",
+    label: "現地調査",
+    actions: ["read", "write", "read_all", "manage", "quick_capture"],
+  },
   // PR2: 謄本自動取得（admin のみ既定付与。実 API/UIボタンは後続 PR）。
   { key: "registry", label: "謄本自動取得", actions: ["auto_fetch"] },
   // 売却促進DM の AI 生成（課金を伴う高リスク操作。謄本自動取得と同様に専用権限で限定。
@@ -41,6 +48,13 @@ const ACTION_LABELS: Record<string, string> = {
   bypass: "保護免除",
   preview: "プレビュー",
   download: "ダウンロード",
+  // 謄本自動取得 / 売却促進DM(未登録だと英語コードが生表示される)
+  auto_fetch: "自動取得",
+  generate: "AI生成",
+  // 現地調査
+  read_all: "全員分の閲覧",
+  manage: "他の人の分も編集",
+  quick_capture: "巡回なしで撮影",
 };
 
 interface TemplatePermission {

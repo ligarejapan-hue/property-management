@@ -134,6 +134,12 @@ const fieldPerms = [
   { resource: "field_survey", action: "write", granted: true },
   { resource: "property", action: "read", granted: true },
 ];
+// 巡回なし撮影 (sessionId を送らない pin 作成) を許可された担当者。
+// 既定テンプレートには付かない権限なので、fieldPerms とは別に用意する。
+const quickCapturePerms = [
+  ...fieldPerms,
+  { resource: "field_survey", action: "quick_capture", granted: true },
+];
 const officePerms = [
   { resource: "field_survey", action: "read", granted: true },
   { resource: "field_survey", action: "read_all", granted: true },
@@ -239,7 +245,7 @@ describe("POST /api/field-survey/pins", () => {
 
   it("正常時: own pin を作成 + 201 + AuditLog (座標非含有)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
-    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
     (prisma.fieldSurveyPin.create as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
@@ -420,7 +426,7 @@ describe("POST /api/field-survey/pins", () => {
 
   it("sessionId 無しの pin 作成では session を触らない", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
-    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
     (prisma.fieldSurveyPin.create as Mock).mockResolvedValue({
       id: PIN_ID,
       sessionId: null,
@@ -447,6 +453,66 @@ describe("POST /api/field-survey/pins", () => {
     );
     expect(res.status).toBe(201);
     expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
+  });
+
+  // 巡回なし撮影 (field_survey:quick_capture) の fail-closed ゲート。
+  // 巡回外の pin は移動軌跡が残らず巡回履歴にも出ないため、write だけでは作れない。
+  it("quick_capture が無いと sessionId 無しの作成は 403 (DB に触れない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "candidate",
+        }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: { code?: string } };
+    expect(body.error?.code).toBe("QUICK_CAPTURE_FORBIDDEN");
+    expect(prisma.fieldSurveyPin.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("quick_capture が無くても sessionId 付き (巡回中) の作成は従来どおり通る", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      staffUserId: fieldUser.id,
+      status: "active",
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({
+      count: 1,
+    });
+    (prisma.fieldSurveyPin.create as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: SESSION_ID,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "candidate",
+          sessionId: SESSION_ID,
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
   });
 
   it("sessionId 指定: ended session は 409", async () => {
@@ -491,7 +557,7 @@ describe("POST /api/field-survey/pins", () => {
 
   it("propertyId 指定: 未存在は 404", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
-    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
     (prisma.property.findUnique as Mock).mockResolvedValue(null);
     const res = await POST(
       makeReq("http://x/api/field-survey/pins", {
@@ -532,7 +598,7 @@ describe("POST /api/field-survey/pins", () => {
 
   it("propertyId 指定: own property に紐付け可", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
-    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
     (prisma.property.findUnique as Mock).mockResolvedValue({
       id: PROPERTY_ID,
       createdBy: fieldUser.id,
@@ -1466,9 +1532,35 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     expect(call.detail.changedFields).toContain("sessionId");
   });
 
-  it("sessionId=null で解除可 / SESSION_OWNER_MISMATCH チェックを経由しない", async () => {
+  it("quick_capture が無いと sessionId=null の解除は 403 (POST ゲートの迂回防止)", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: SESSION_ID,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ sessionId: null }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: { code?: string } };
+    expect(body.error?.code).toBe("QUICK_CAPTURE_FORBIDDEN");
+    expect(prisma.fieldSurveyPin.update).not.toHaveBeenCalled();
+  });
+
+  it("sessionId=null で解除可 / SESSION_OWNER_MISMATCH チェックを経由しない", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    // 巡回紐づけの解除は巡回外ピンを作るのと同じ結果になるため quick_capture が必要。
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
     (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
       id: PIN_ID,
       staffUserId: fieldUser.id,
