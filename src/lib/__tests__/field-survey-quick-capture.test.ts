@@ -134,6 +134,35 @@ describe("サーバ側 fail-closed ゲート (POST /api/field-survey/pins)", () 
   });
 });
 
+const CREATE_MODAL_SRC = read("src/components/field-survey/pin-create-modal.tsx");
+
+describe("巡回外は種類を候補に固定する (@codex R1: 初期値だけでは固定にならない)", () => {
+  it("modal は sessionId 無しのとき種類のラジオを出さず候補固定を表示する", () => {
+    expect(CREATE_MODAL_SRC).toMatch(/const lockPinType = sessionId === null;/);
+    // 固定時は初期引き継ぎ (lastPinType) より候補を優先する
+    expect(CREATE_MODAL_SRC).toMatch(
+      /lockPinType \? "candidate" : \(initialPinType \?\? "candidate"\)/,
+    );
+    // ラジオ群は固定時に描画しない (選べてしまうと孤児ピンが作れる)
+    expect(CREATE_MODAL_SRC).toMatch(
+      /\{lockPinType \? \([\s\S]{0,600}?data-testid="pin-create-type-locked"/,
+    );
+    // 固定時はラジオ (pin-create-type-<種類>) を出さない構造であること
+    expect(CREATE_MODAL_SRC).toMatch(
+      /\) : \([\s\S]{0,400}?FIELD_SURVEY_PIN_TYPES\.map/,
+    );
+    // 理由も見せる (現場で「なぜ選べない」を迷わせない)
+    expect(CREATE_MODAL_SRC).toMatch(/物件化の完成待ち」に必ず出すため/);
+  });
+
+  it("サーバも巡回外の候補以外を拒否する (API 直叩きでも孤児ピンを作れない)", () => {
+    expect(PINS_ROUTE_SRC).toMatch(
+      /!input\.sessionId && input\.pinType !== "candidate"/,
+    );
+    expect(PINS_ROUTE_SRC).toMatch(/QUICK_CAPTURE_PIN_TYPE/);
+  });
+});
+
 describe("クライアント配線 (field-survey-map)", () => {
   it("provider 配布の権限から canQuickCapture を導出する", () => {
     expect(MAP_SRC).toMatch(

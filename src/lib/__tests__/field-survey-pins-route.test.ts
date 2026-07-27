@@ -477,6 +477,61 @@ describe("POST /api/field-survey/pins", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it("巡回外で候補以外の種類は 422 (孤児ピン防止・DB に触れない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(quickCapturePerms);
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "followup",
+        }),
+      }),
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error?: { code?: string } };
+    expect(body.error?.code).toBe("QUICK_CAPTURE_PIN_TYPE");
+    expect(prisma.fieldSurveyPin.create).not.toHaveBeenCalled();
+  });
+
+  it("巡回中なら候補以外の種類も従来どおり作成できる", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      staffUserId: fieldUser.id,
+      status: "active",
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({ count: 1 });
+    (prisma.fieldSurveyPin.create as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: SESSION_ID,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "followup",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await POST(
+      makeReq("http://x/api/field-survey/pins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: baseLat,
+          lng: baseLng,
+          pinType: "followup",
+          sessionId: SESSION_ID,
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
+  });
+
   it("quick_capture が無くても sessionId 付き (巡回中) の作成は従来どおり通る", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);

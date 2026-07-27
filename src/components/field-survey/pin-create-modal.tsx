@@ -58,7 +58,10 @@ interface PinCreateModalProps {
    * 従来どおり candidate。
    */
   initialPinType?: FieldSurveyPinType;
-  /** 親が把握している active session id。null は modal を mount しない前提。 */
+  /**
+   * 親が把握している active session id。
+   * null = 巡回なし撮影 (field_survey:quick_capture) の正常系。
+   */
   sessionId: string | null;
   saving: boolean;
   serverError: string | null;
@@ -122,10 +125,15 @@ export default function PinCreateModal({
   currentLocationLoading,
   currentLocationError,
 }: PinCreateModalProps) {
+  // 巡回なし撮影 (sessionId 無し) は種類を「物件化候補」に固定する。
+  // 巡回外の pin は巡回履歴に出ないため、候補以外にすると完成待ち一覧
+  // (candidate / open / 未物件化のみ) にも出ず、地図でしか辿れない孤児ピンになる。
+  // 現場の判断も1つ減る (ユーザー決定: 巡回外は候補に固定)。
+  const lockPinType = sessionId === null;
   // 初期値は親から引き継いだ直前の種類 (未指定は candidate)。modal は作成の
   // たびに mount し直されるため、開いた時点の引き継ぎ値で確定する。
   const [pinType, setPinType] = useState<FieldSurveyPinType>(
-    initialPinType ?? "candidate",
+    lockPinType ? "candidate" : (initialPinType ?? "candidate"),
   );
   const [memo, setMemo] = useState<string>("");
   // カメラファースト経由の写真は選択済み状態で開始する。preview の objectURL は
@@ -253,26 +261,41 @@ export default function PinCreateModal({
           )}
         </div>
 
-        <fieldset className="mb-3" disabled={busy}>
-          <legend className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-            種類
-          </legend>
-          <div className="grid grid-cols-2 gap-1">
-            {FIELD_SURVEY_PIN_TYPES.map((t) => (
-              <label key={t} className="flex items-center gap-1 text-[11px]">
-                <input
-                  type="radio"
-                  name="pin-create-type"
-                  value={t}
-                  checked={pinType === t}
-                  onChange={() => setPinType(t)}
-                  data-testid={`pin-create-type-${t}`}
-                />
-                <span className="dark:text-gray-200">{formatPinType(t)}</span>
-              </label>
-            ))}
+        {lockPinType ? (
+          // 巡回外は候補固定。選べない理由まで書くと現場で迷わない。
+          <div className="mb-3" data-testid="pin-create-type-locked">
+            <p className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+              種類
+            </p>
+            <p className="text-[11px] text-gray-700 dark:text-gray-200">
+              {formatPinType("candidate")}
+              <span className="ml-1 text-gray-500 dark:text-gray-400">
+                （巡回外の撮影は「物件化の完成待ち」に必ず出すため、この種類で保存します）
+              </span>
+            </p>
           </div>
-        </fieldset>
+        ) : (
+          <fieldset className="mb-3" disabled={busy}>
+            <legend className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+              種類
+            </legend>
+            <div className="grid grid-cols-2 gap-1">
+              {FIELD_SURVEY_PIN_TYPES.map((t) => (
+                <label key={t} className="flex items-center gap-1 text-[11px]">
+                  <input
+                    type="radio"
+                    name="pin-create-type"
+                    value={t}
+                    checked={pinType === t}
+                    onChange={() => setPinType(t)}
+                    data-testid={`pin-create-type-${t}`}
+                  />
+                  <span className="dark:text-gray-200">{formatPinType(t)}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
 
         <label className="mb-3 block">
           <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">

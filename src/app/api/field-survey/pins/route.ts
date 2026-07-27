@@ -73,6 +73,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 巡回外の pin は「物件化の完成待ち」一覧 (candidate / open / 未物件化のみ)
+    // が唯一の受け皿になる (巡回履歴には出ない)。候補以外を許すと、どの一覧にも
+    // 出ず地図の bbox 検索でしか辿れない孤児 pin になるため候補に限定する。
+    // client も巡回外では種類選択を出さない (二重の担保)。
+    if (!input.sessionId && input.pinType !== "candidate") {
+      throw new ApiError(
+        422,
+        "巡回なしの登録は「物件化候補」のみです。ほかの種類は巡回中に登録してください。",
+        "QUICK_CAPTURE_PIN_TYPE",
+      );
+    }
+
     // sessionId 検証
     // POST 時は pin.staffUserId = session.id 固定のため、pin owner と session owner
     // を一致させるには session.staffUserId === session.id を必須にする。

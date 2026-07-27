@@ -63,8 +63,10 @@ describe("1. 既存物件 InfoWindow の日本語ラベル表示", () => {
 describe("2. ピン作成モーダルの種類引き継ぎ", () => {
   it("モーダルは initialPinType prop を受け、無指定は candidate に倒す", () => {
     expect(MODAL_SRC).toMatch(/initialPinType\?\s*:\s*FieldSurveyPinType/);
+    // 巡回外 (sessionId 無し) は候補に固定するため lockPinType を挟むが、
+    // 巡回中は従来どおり initialPinType ?? "candidate" に倒す。
     expect(MODAL_SRC).toMatch(
-      /useState<FieldSurveyPinType>\(\s*initialPinType\s*\?\?\s*"candidate"\s*,?\s*\)/,
+      /useState<FieldSurveyPinType>\(\s*\n?\s*lockPinType \? "candidate" : \(initialPinType \?\? "candidate"\)/,
     );
   });
 
