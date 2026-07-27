@@ -507,9 +507,13 @@ export default function FieldSurveyMap({
       );
       return;
     }
-    // active session が無ければ「現在地」自体不要 (modal も mount されない前提)
+    // 巡回なし撮影 (quick_capture) では作成 modal が巡回外でも開くため、
+    // requestSessionId=null を正常系として通す (@codex R1)。位置情報が一時的に
+    // 失敗した後や、その場で許可を出し直した後に再取得できないと詰むため。
+    // 巡回外でも modal が開いていない状態での要求は従来どおり拒否する
+    // (パネルからの「現在地を使う」は巡回中のみ描画される)。
     const requestSessionId = activeSessionIdRef.current;
-    if (!requestSessionId) {
+    if (!requestSessionId && !createCandidateOpenRef.current) {
       setCurrentLocationError(
         "巡回を開始してから現在地を取得してください。",
       );
@@ -526,7 +530,13 @@ export default function FieldSurveyMap({
         // late callback ガード: unmount / token 不一致 / session 終了 or 切替
         if (!fsMapMountedRef.current) return;
         if (currentLocationRequestIdRef.current !== requestId) return;
-        if (activeSessionIdRef.current !== requestSessionId) return;
+        // 巡回中に始めた取得は session 切替で無効化する (従来どおり)。巡回外
+        // (requestSessionId=null) の取得は途中で巡回が始まっても捨てない。
+        if (
+          requestSessionId !== null &&
+          activeSessionIdRef.current !== requestSessionId
+        )
+          return;
         setCurrentLocationLoading(false);
         // raw position を console / error に出さない
         const lat = pos?.coords?.latitude;
@@ -551,7 +561,13 @@ export default function FieldSurveyMap({
       (err) => {
         if (!fsMapMountedRef.current) return;
         if (currentLocationRequestIdRef.current !== requestId) return;
-        if (activeSessionIdRef.current !== requestSessionId) return;
+        // 巡回中に始めた取得は session 切替で無効化する (従来どおり)。巡回外
+        // (requestSessionId=null) の取得は途中で巡回が始まっても捨てない。
+        if (
+          requestSessionId !== null &&
+          activeSessionIdRef.current !== requestSessionId
+        )
+          return;
         setCurrentLocationLoading(false);
         const code = (err as { code?: number })?.code;
         if (code === 1) {
@@ -600,7 +616,13 @@ export default function FieldSurveyMap({
           quickStartRef.current = false;
           setPanelOpen(false);
         }
-        resetCameraFirst();
+        // 巡回なし撮影の進行中 (現在地取得中 / 地図タップ待ち) に巡回が開始された
+        // 場合は撮影を破棄しない (撮った写真を黙って失わない。@codex R1)。保存時に
+        // activeSession?.id を見るので、そのまま新しい巡回へ紐づく。
+        // それ以外の遷移 (巡回の終了 / 別巡回への切替) は従来どおり破棄する。
+        if (prevId !== null || nextId === null) {
+          resetCameraFirst();
+        }
         // ピン追加モードも巡回の終了/切替で解除する。連続ピンモードで保存後も
         // ON が続くため、ここで畳まないと巡回終了後に「・ピン追加中」表示が
         // 残るのに OFF 導線 (パネル内トグル=巡回中のみ描画) が消えて復帰

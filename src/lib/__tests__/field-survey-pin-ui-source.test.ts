@@ -717,8 +717,10 @@ describe("Codex P2 — ignore stale geolocation callbacks", () => {
     expect(sb).toMatch(
       /if\s*\(currentLocationRequestIdRef\.current\s*!==\s*requestId\)\s*return/,
     );
+    // 巡回なし撮影 (quick_capture) の再取得を捨てないため、session ガードは
+    // 「巡回中に始めた取得」に限定する (requestSessionId !== null)。
     expect(sb).toMatch(
-      /if\s*\(activeSessionIdRef\.current\s*!==\s*requestSessionId\)\s*return/,
+      /requestSessionId !== null &&\s*\n?\s*activeSessionIdRef\.current !== requestSessionId/,
     );
     // error callback
     const errBlock = m.match(/\(err\)\s*=>\s*\{[\s\S]*?\}\,\s*\{[\s\S]*?enableHighAccuracy/);
@@ -729,7 +731,7 @@ describe("Codex P2 — ignore stale geolocation callbacks", () => {
       /if\s*\(currentLocationRequestIdRef\.current\s*!==\s*requestId\)\s*return/,
     );
     expect(eb).toMatch(
-      /if\s*\(activeSessionIdRef\.current\s*!==\s*requestSessionId\)\s*return/,
+      /requestSessionId !== null &&\s*\n?\s*activeSessionIdRef\.current !== requestSessionId/,
     );
   });
 

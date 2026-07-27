@@ -160,6 +160,26 @@ describe("クライアント配線 (field-survey-map)", () => {
   it("地図の吹き出しは巡回なしを「巡回外の撮影」と表示する", () => {
     expect(MAP_SRC).toMatch(/row\.sessionId \? "あり" : "巡回外の撮影"/);
   });
+
+  it("撮影中に巡回が開始されても撮影を破棄しない (@codex R1)", () => {
+    // 巡回外→巡回中の遷移だけは resetCameraFirst を呼ばない。呼ぶと
+    // 隣の「巡回を開始」を押した瞬間に撮った写真が消える。
+    expect(MAP_SRC).toMatch(
+      /if \(prevId !== null \|\| nextId === null\) \{\s*\n?\s*resetCameraFirst\(\);/,
+    );
+  });
+
+  it("巡回外の作成 modal でも「現在地を使う」の再取得を許す (@codex R1)", () => {
+    // 位置情報が一時的に失敗した後・その場で許可を出し直した後に再取得できないと
+    // 巡回外フローが詰む。modal が開いている間は null session でも通す。
+    expect(MAP_SRC).toMatch(
+      /if \(!requestSessionId && !createCandidateOpenRef\.current\) \{/,
+    );
+    // 遅延 callback の session ガードも巡回中に限定する (巡回外の取得を捨てない)。
+    expect(MAP_SRC).toMatch(
+      /requestSessionId !== null &&\s*\n?\s*activeSessionIdRef\.current !== requestSessionId/,
+    );
+  });
 });
 
 describe("権限の配線 (既定は誰も持たない fail-closed)", () => {
