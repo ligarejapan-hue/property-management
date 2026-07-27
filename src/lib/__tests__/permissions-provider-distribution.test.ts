@@ -206,7 +206,20 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
     expect(pageSrc).toMatch(
       /const \{\s*permissions: mePermissions,\s*permissionsLoading,\s*refetchPermissions,\s*capabilities,\s*\} = useScreenProtection\(\)/,
     );
-    expect(pageSrc).toMatch(/const \{ canExportCsv, canExportDm, canCreateDm(, canWriteProperty)? \} = useMemo\(/);
+    // 導出キーは今後も増えるため、必須キーの並びだけを緩く固定する
+    // (複数行の分割代入・後続キー追加に耐える)。
+    expect(pageSrc).toMatch(
+      /const\s*\{[\s\S]*?canExportCsv,\s*canExportDm,\s*canCreateDm[\s\S]*?\}\s*=\s*useMemo\(/,
+    );
+  });
+
+  it("削除ボタンの表示は property:delete から導出する（サーバ DELETE と同条件）", () => {
+    // DELETE /api/properties/[id] は property:delete を要求する。UI が write 相当で
+    // ボタンを出すと必ず 403 になるため、専用の導出値でゲートする。
+    expect(pageSrc).toMatch(
+      /canDeleteProperty:\s*hasDelete\("property"\)/,
+    );
+    expect(pageSrc).toMatch(/\{canDeleteProperty && \(/);
   });
 
   it("権限鮮度: properties 進入（mount）あたり最大 1 回だけ refetchPermissions を呼ぶ（Codex 対応2）", () => {

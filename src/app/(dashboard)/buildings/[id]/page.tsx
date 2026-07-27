@@ -26,6 +26,7 @@ import {
 import BuildingPhotoTab from "@/components/buildings/building-photo-tab";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { CASE_STATUS_LABELS as CASE_LABELS, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 // ---------- Types ----------
 
@@ -96,6 +97,18 @@ export default function BuildingDetailPage({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showAddUnit, setShowAddUnit] = useState(false);
+
+  // 棟の削除は DELETE /api/buildings/[id] が property:delete を要求する。
+  // 押しても必ず 403 になるボタンを出さないよう UI も同条件にする。
+  // 権限は dashboard 全体を覆う ScreenProtectionProvider の配布値から導出し、
+  // 取得中・取得失敗（null）は false = 非表示に倒す（fail-safe・緩めない）。
+  const { permissions: mePermissions, permissionsLoading } =
+    useScreenProtection();
+  const canDeleteBuilding =
+    !permissionsLoading &&
+    (mePermissions ?? []).some(
+      (p) => p.resource === "property" && p.action === "delete" && p.granted,
+    );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -227,23 +240,25 @@ export default function BuildingDetailPage({
                 <Edit className="h-4 w-4" />
                 編集
               </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting || building._count.properties > 0}
-                title={
-                  building._count.properties > 0
-                    ? "紐づく部屋があるため削除できません"
-                    : undefined
-                }
-                className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {deleting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-                削除
-              </button>
+              {canDeleteBuilding && (
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting || building._count.properties > 0}
+                  title={
+                    building._count.properties > 0
+                      ? "紐づく部屋があるため削除できません"
+                      : undefined
+                  }
+                  className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {deleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                  削除
+                </button>
+              )}
             </>
           )}
         </div>

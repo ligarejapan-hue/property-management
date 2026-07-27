@@ -12,6 +12,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { createOwnerSchema } from "@/lib/validators";
 import { hasPermission, maskValue, hasExplicitWritePerm } from "@/lib/permissions";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 // ---------- GET /api/owners ----------
 
@@ -53,7 +54,15 @@ export async function GET(request: NextRequest) {
           propertyOwners: {
             include: {
               property: {
-                select: { id: true, address: true, propertyType: true },
+                // createdBy/assignedTo は field_staff の担当スコープ判定に使う
+                // (レスポンスには載せない)。
+                select: {
+                  id: true,
+                  address: true,
+                  propertyType: true,
+                  createdBy: true,
+                  assignedTo: true,
+                },
               },
             },
           },
@@ -78,12 +87,16 @@ export async function GET(request: NextRequest) {
       createdAt: owner.createdAt,
       updatedAt: owner.updatedAt,
       version: owner.version,
-      properties: owner.propertyOwners.map((po) => ({
-        id: po.property.id,
-        address: po.property.address,
-        propertyType: po.property.propertyType,
-        relationship: po.relationship,
-      })),
+      // 物件一覧/詳細と同じ record スコープ。所有者経由で担当外物件の
+      // 住所 (PII) が出ないようにする (src/lib/property-access.ts の規約)。
+      properties: owner.propertyOwners
+        .filter((po) => canAccessPropertyRecord(session, po.property))
+        .map((po) => ({
+          id: po.property.id,
+          address: po.property.address,
+          propertyType: po.property.propertyType,
+          relationship: po.relationship,
+        })),
     }));
 
     await writeAuditLog({

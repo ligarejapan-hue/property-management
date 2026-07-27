@@ -330,7 +330,9 @@ export async function DELETE(
     const session = await getApiSession();
     const permissions = await getUserPermissions(session.id);
 
-    if (!hasPermission(permissions, "property", "write")) {
+    // 物理削除 + cascade は取り消せないため write ではなく delete を要求する。
+    // 権限テンプレートの「削除」トグル (admin/users/[id]/permissions) を実効化する。
+    if (!hasPermission(permissions, "property", "delete")) {
       throw new ApiError(403, "物件削除の権限がありません", "FORBIDDEN");
     }
 

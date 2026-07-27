@@ -178,7 +178,9 @@ export async function DELETE(
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
 
-    if (!hasPermission(perms, "property", "write")) {
+    // 物件 DELETE と同じく delete アクションを要求する
+    // (棟削除も物理削除 = BuildingPhoto が cascade で消える)。
+    if (!hasPermission(perms, "property", "delete")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 

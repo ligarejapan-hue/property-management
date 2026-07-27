@@ -356,6 +356,7 @@ export default function PropertyDetailPage({
   // 判定ロジック（granted / full|edit / 複合 owner:write && owner_note）は従来どおり（緩めない）。
   const {
     canWriteProperty,
+    canDeleteProperty,
     canWriteOwner,
     canReadOwner,
     canCreateOwnerMemo,
@@ -385,6 +386,10 @@ export default function PropertyDetailPage({
     );
     const canWriteProperty = effectivePermissions.some(
       (p) => p.resource === "property" && p.action === "write" && p.granted,
+    );
+    // 削除は DELETE /api/properties/[id] が property:delete を要求する（write では通らない）。
+    const canDeleteProperty = effectivePermissions.some(
+      (p) => p.resource === "property" && p.action === "delete" && p.granted,
     );
     const canWriteOwner = effectivePermissions.some(
       (p) => p.resource === "owner" && p.action === "write" && p.granted,
@@ -417,6 +422,7 @@ export default function PropertyDetailPage({
       canWriteOwner && (hasFullPerm("owner_note") || hasEditPerm("owner_note"));
     return {
       canWriteProperty,
+      canDeleteProperty,
       canWriteOwner,
       canReadOwner,
       canCreateOwnerMemo,
@@ -504,20 +510,22 @@ export default function PropertyDetailPage({
             <Edit className="h-4 w-4" />
             物件を編集
           </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            aria-label="物件を削除"
-            title="この物件を削除"
-            className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
-          >
-            {deleting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-            物件を削除
-          </button>
+          {canDeleteProperty && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              aria-label="物件を削除"
+              title="この物件を削除"
+              className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              {deleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              物件を削除
+            </button>
+          )}
         </div>
       </div>
 

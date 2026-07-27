@@ -13,6 +13,63 @@ import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { updateOwnerSchema } from "@/lib/validators";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { applyDisplayToOwner } from "@/lib/display-level";
+import { canAccessPropertyRecord } from "@/lib/property-access";
+
+/**
+ * 所有者に紐づく物件を、物件一覧/詳細と同じ record スコープに絞る。
+ *
+ * GET と PATCH の両方の応答で使う。片方だけに適用すると、更新レスポンス経由で
+ * 担当外物件の住所 (PII) が漏れる（src/lib/property-access.ts の規約）。
+ * 判定に使う createdBy/assignedTo は応答に載せない。
+ */
+function scopeOwnerProperties<
+  T extends {
+    propertyOwners: Array<{
+      property: {
+        id: string;
+        address: string;
+        propertyType: string;
+        caseStatus: string;
+        createdBy: string;
+        assignedTo: string | null;
+      };
+    }>;
+  },
+>(session: { id: string; role: string }, owner: T) {
+  return {
+    ...owner,
+    propertyOwners: owner.propertyOwners
+      .filter((po) => canAccessPropertyRecord(session, po.property))
+      .map((po) => ({
+        ...po,
+        property: {
+          id: po.property.id,
+          address: po.property.address,
+          propertyType: po.property.propertyType,
+          caseStatus: po.property.caseStatus,
+        },
+      })),
+  };
+}
+
+/** GET/PATCH で共有する propertyOwners の include（スコープ判定列を含む）。 */
+const OWNER_PROPERTIES_INCLUDE = {
+  propertyOwners: {
+    include: {
+      property: {
+        // createdBy/assignedTo は担当スコープ判定用（応答には載せない）。
+        select: {
+          id: true,
+          address: true,
+          propertyType: true,
+          caseStatus: true,
+          createdBy: true,
+          assignedTo: true,
+        },
+      },
+    },
+  },
+} as const;
 
 // ---------------------------------------------------------------------------
 // GET /api/owners/:id
@@ -33,28 +90,17 @@ export async function GET(
 
     const owner = await prisma.owner.findUnique({
       where: { id },
-      include: {
-        propertyOwners: {
-          include: {
-            property: {
-              select: {
-                id: true,
-                address: true,
-                propertyType: true,
-                caseStatus: true,
-              },
-            },
-          },
-        },
-      },
+      include: OWNER_PROPERTIES_INCLUDE,
     });
 
     if (!owner) {
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
 
+    const scopedOwner = scopeOwnerProperties(session, owner);
+
     const displayConfig = await getOwnerDisplayConfig(session.id, perms);
-    const filtered = applyDisplayToOwner(owner, displayConfig);
+    const filtered = applyDisplayToOwner(scopedOwner, displayConfig);
 
     await writeAuditLog({
       userId: session.id,
@@ -150,20 +196,7 @@ export async function PATCH(
     // Fetch updated owner
     const updatedOwner = await prisma.owner.findUniqueOrThrow({
       where: { id },
-      include: {
-        propertyOwners: {
-          include: {
-            property: {
-              select: {
-                id: true,
-                address: true,
-                propertyType: true,
-                caseStatus: true,
-              },
-            },
-          },
-        },
-      },
+      include: OWNER_PROPERTIES_INCLUDE,
     });
 
     // Response owner:read gate:
@@ -176,7 +209,12 @@ export async function PATCH(
 
     // displayConfig は表示用。owner_email fallback を含む（書込判定には使っていない）。
     const displayConfig = await getOwnerDisplayConfig(session.id, perms);
-    const filtered = applyDisplayToOwner(updatedOwner, displayConfig);
+    // GET と同じ record スコープを更新レスポンスにも適用する
+    // （片方だけだと PATCH 経由で担当外物件の住所が漏れる）。
+    const filtered = applyDisplayToOwner(
+      scopeOwnerProperties(session, updatedOwner),
+      displayConfig,
+    );
 
     return apiResponse(filtered);
   } catch (error) {
