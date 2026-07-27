@@ -1592,6 +1592,78 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     expect(call.detail.changedFields).toContain("sessionId");
   });
 
+  it("既存の巡回なし×候補以外ピンでも、メモだけの更新は通す (旧データを編集不能にしない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "followup",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "followup",
+      status: "open",
+      memo: "m",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ memo: "m" }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("既存の巡回なし×候補以外ピンを候補へ直す更新は通す (違反の解消)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "blocked",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: baseLat,
+      lng: baseLng,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinType: "candidate" }),
+      }),
+      { params: Promise.resolve({ id: PIN_ID }) },
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("CAS: 判定の根拠列 (sessionId/pinType) を where に含めて更新する", async () => {
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);

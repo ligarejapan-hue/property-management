@@ -161,7 +161,19 @@ export async function PATCH(
     const nextSessionId =
       patch.sessionId !== undefined ? patch.sessionId : existing.sessionId;
     const nextPinType = patch.pinType ?? existing.pinType;
-    if (nextSessionId === null && nextPinType !== "candidate") {
+    // 判定するのは「この更新が違反を作る/維持する場合」だけにする。
+    // 本機能の前(または API 直叩き・session 削除の SetNull)で既に
+    // 「巡回なし × 候補以外」の行が存在し得る環境では、メモや状態だけを直す
+    // 無関係な PATCH まで 422 で塞ぐと編集不能になる (@codex #328 R4)。
+    // pinType / sessionId を触らない更新は既存状態のまま通し、種類を candidate に
+    // 直す更新 (違反の解消) も通す。
+    const touchesInvariantFields =
+      patch.pinType !== undefined || patch.sessionId !== undefined;
+    if (
+      nextSessionId === null &&
+      nextPinType !== "candidate" &&
+      touchesInvariantFields
+    ) {
       throw new ApiError(
         422,
         "巡回に紐づかないピンは「物件化候補」のみです。種類を変えるには巡回に紐づけてください。",

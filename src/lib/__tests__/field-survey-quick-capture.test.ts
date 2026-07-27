@@ -166,7 +166,7 @@ describe("巡回外は種類を候補に固定する (@codex R1: 初期値だけ
       /const nextPinType = patch\.pinType \?\? existing\.pinType;/,
     );
     expect(patchSrc).toMatch(
-      /nextSessionId === null && nextPinType !== "candidate"/,
+      /nextSessionId === null &&\s*\n?\s*nextPinType !== "candidate"/,
     );
     expect(patchSrc).toMatch(/QUICK_CAPTURE_PIN_TYPE/);
     // check-then-write の競合で孤児状態を作られないよう、判定の根拠列を
@@ -176,6 +176,12 @@ describe("巡回外は種類を候補に固定する (@codex R1: 初期値だけ
     );
     expect(patchSrc).toMatch(/casResult\.count === 0/);
     expect(patchSrc).toMatch(/CONCURRENT_UPDATE/);
+    // 旧データ (巡回なし×候補以外) を編集不能にしないため、pinType/sessionId を
+    // 触らない更新は通す (@codex #328 R4)。
+    expect(patchSrc).toMatch(
+      /const touchesInvariantFields =[\s\S]{0,120}?patch\.pinType !== undefined \|\| patch\.sessionId !== undefined;/,
+    );
+    expect(patchSrc).toMatch(/touchesInvariantFields\s*\n?\s*\) \{/);
   });
 
   it("サーバも巡回外の候補以外を拒否する (API 直叩きでも孤児ピンを作れない)", () => {
