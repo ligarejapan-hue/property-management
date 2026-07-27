@@ -789,35 +789,59 @@ export default function FieldSurveyMap({
       // (ネイティブカメラがページを一時停止すると、解決済みでも .then が
       //  走らないまま change が先に届く。@codex #329 R2)。待機側で検証を
       // 省くとこの経路だけ古い座標が通ってしまう。
-      // 取り直しは1回まで。2回目も古ければ手動指定へ回す (無限ループ防止)。
+      // 取り直しは1回まで (無限ループ防止)。撮った写真は捨てない。
       const consume = (
-        entry: { requestId: number; promise: Promise<CameraPrefetchResult>; settled: boolean; result?: CameraPrefetchResult },
+        entry: {
+          requestId: number;
+          promise: Promise<CameraPrefetchResult>;
+          settled: boolean;
+          result?: CameraPrefetchResult;
+        },
         attempt: number,
       ) => {
+        // 取り直す (1回まで)。上限に達したら手動指定へ倒す。いずれの経路でも
+        // 撮影済みの写真は保持したまま = 撮り直しを要求しない。
+        const retryOrFallback = (code: number | null, notice?: string) => {
+          if (attempt >= 1) {
+            fallbackToMapTap(code, notice);
+            return;
+          }
+          startCameraLocationPrefetch();
+          const renewed = cameraLocationPrefetchRef.current;
+          if (!renewed) {
+            fallbackToMapTap(code, notice);
+            return;
+          }
+          consume(renewed, attempt + 1);
+        };
         const finish = (r: CameraPrefetchResult) => {
-          // 取り直し/別経路で token が進んでいたら apply のガードに委ねる
-          // (ここで再取得を重ねない)。
           if (currentLocationRequestIdRef.current !== entry.requestId) {
-            apply(entry.requestId, r);
+            // より新しい撮影が始まった / 別経路で作成 modal が開いた場合は
+            // 従来どおり破棄する (apply のガードに委ねる)。
+            if (
+              createCandidateOpenRef.current ||
+              cameraRequestIdRef.current !== entry.requestId
+            ) {
+              apply(entry.requestId, r);
+              return;
+            }
+            // 自分がまだ最新の撮影なのに token だけ進んでいる = 巡回の復元
+            // (null→active) などで共有 token が bump されたケース
+            // (@codex #329 R3)。撮った写真を捨てず、取り直して続行する。
+            retryOrFallback(null, "撮った場所の現在地を取得できませんでした。地図をタップして、撮った場所を指定してください。");
             return;
           }
           if (r.ok && !isCameraPrefetchFresh(r.pos)) {
-            if (attempt >= 1) {
-              // 2回続けて古い = ページ停止などで撮影時刻に追いつけない。
-              // 誤った座標でピンを立てるより手動指定に倒す。
-              fallbackToMapTap(
-                null,
-                "撮った場所の現在地を取得できませんでした。地図をタップして、撮った場所を指定してください。",
-              );
-              return;
-            }
-            startCameraLocationPrefetch();
-            const renewed = cameraLocationPrefetchRef.current;
-            if (!renewed) {
-              fallbackToMapTap(null);
-              return;
-            }
-            consume(renewed, attempt + 1);
+            // カメラを開けたまま移動した = 撮影地点とずれる。取り直す。
+            retryOrFallback(null, "撮った場所の現在地を取得できませんでした。地図をタップして、撮った場所を指定してください。");
+            return;
+          }
+          if (!r.ok && r.code !== 1) {
+            // 一時的な失敗 (timeout / 位置不明 / 不詳) は撮影後に取り直せば
+            // 成功し得る。カメラ滞在が prefetch の制限時間を超えた場合に
+            // 即あきらめないため (@codex #329 R3)。
+            // 権限拒否 (code 1) は取り直しても無駄なので即フォールバック。
+            retryOrFallback(r.code);
             return;
           }
           apply(entry.requestId, r);
@@ -831,7 +855,6 @@ export default function FieldSurveyMap({
         setCameraFirstNotice(null);
         void entry.promise.then(finish);
       };
-
       const prefetch = cameraLocationPrefetchRef.current;
       if (!prefetch) {
         // geolocation 非対応、または撮影開始の通知が来ていない (想定外) 場合は

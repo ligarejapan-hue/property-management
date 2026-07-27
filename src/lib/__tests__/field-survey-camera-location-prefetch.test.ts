@@ -121,20 +121,36 @@ describe("撮影後: 新しければ待たせない / 古ければ取り直す /
     expect(HANDLER).toMatch(/consume\(renewed, attempt \+ 1\);/);
   });
 
-  it("取り直しは1回まで。2回目も古ければ手動指定へ倒す (無限ループ防止)", () => {
+  it("取り直しは1回まで。上限に達したら手動指定へ倒す (無限ループ防止)", () => {
+    expect(HANDLER).toMatch(/const retryOrFallback = \(/);
     expect(HANDLER).toMatch(/if \(attempt >= 1\) \{/);
     expect(HANDLER).toMatch(/撮った場所の現在地を取得できませんでした/);
-    // 誤った座標でピンを立てない = apply へ進まない
+    // 上限判定は再取得より前にある
     const limitIdx = HANDLER.indexOf("if (attempt >= 1) {");
     const renewIdx = HANDLER.indexOf("startCameraLocationPrefetch();");
     expect(limitIdx).toBeGreaterThan(-1);
     expect(limitIdx).toBeLessThan(renewIdx);
   });
 
-  it("token が進んでいたら再取得を重ねず apply のガードに委ねる", () => {
+  it("一時的な取得失敗は撮り直さず取り直す。権限拒否だけ即フォールバック (@codex R3)", () => {
+    // カメラ滞在が prefetch の制限時間を超えた場合に即あきらめない。
+    expect(HANDLER).toMatch(/if \(!r\.ok && r\.code !== 1\) \{/);
+    expect(HANDLER).toMatch(/retryOrFallback\(r\.code\);/);
+  });
+
+  it("巡回復元で token だけ進んだ場合は写真を捨てず取り直す (@codex R3)", () => {
+    // より新しい撮影 / 別経路の modal は従来どおり破棄 (apply のガードへ)。
     expect(HANDLER).toMatch(
-      /if \(currentLocationRequestIdRef\.current !== entry\.requestId\) \{\s*\n?\s*apply\(entry\.requestId, r\);\s*\n?\s*return;/,
+      /createCandidateOpenRef\.current \|\|\s*\n?\s*cameraRequestIdRef\.current !== entry\.requestId/,
     );
+    // 自分がまだ最新の撮影なら retryOrFallback で続行する (resetCameraFirst で
+    // 写真を黙って捨てない)。
+    const mismatchIdx = HANDLER.indexOf(
+      "currentLocationRequestIdRef.current !== entry.requestId",
+    );
+    const retryIdx = HANDLER.indexOf("retryOrFallback(null,", mismatchIdx);
+    expect(mismatchIdx).toBeGreaterThan(-1);
+    expect(retryIdx).toBeGreaterThan(mismatchIdx);
   });
 
   it("未解決なら locating 表示にして結果を待つ", () => {
