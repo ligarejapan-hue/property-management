@@ -77,8 +77,12 @@ describe("2. ピン作成モーダルの種類引き継ぎ", () => {
     expect(submit).toMatch(/setLastPinType\(input\.pinType\)/);
   });
 
-  it("親はモーダルへ記憶した種類を渡す", () => {
-    expect(MAP_SRC).toMatch(/initialPinType=\{lastPinType\}/);
+  it("親はモーダルへ記憶した種類を渡す (巡回中のみ。巡回外は候補に固定)", () => {
+    // 巡回なし撮影は完成待ち一覧 (candidate/open/未物件化) に必ず出す必要があるため
+    // 種類引継ぎを効かせない。巡回中の引継ぎは従来どおり。
+    expect(MAP_SRC).toMatch(
+      /initialPinType=\{activeSession \? lastPinType : "candidate"\}/,
+    );
   });
 
   it("巡回の切替/終了で記憶を既定 (candidate) に戻す", () => {

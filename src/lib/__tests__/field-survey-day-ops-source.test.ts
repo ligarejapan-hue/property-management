@@ -26,15 +26,17 @@ const RECORDER_CODE = stripComments(RECORDER_SRC);
 
 describe("1. 巡回開始の短縮 (地図直置きボタン)", () => {
   it("巡回していない時のみ「巡回を開始」を地図に出す (パネル展開中は出さない)", () => {
+    // 巡回なし撮影 (quick_capture) 導入で、この枠には「撮って登録」が
+    // 横並びで入り得るため trip-quick-start までの許容幅を広げてある。
     expect(MAP_SRC).toMatch(
-      /\{!activeSession && !panelOpen && \([\s\S]{0,400}trip-quick-start/,
+      /\{!activeSession && !panelOpen && \([\s\S]{0,1200}trip-quick-start/,
     );
     expect(MAP_SRC).toMatch(/巡回を開始/);
   });
 
   it("押下でパネルを開き、TripControls の開始確認 modal を直接出す", () => {
     const btn = MAP_SRC.match(
-      /\{!activeSession && !panelOpen &&[\s\S]{0,900}?<\/button>/,
+      /\{!activeSession && !panelOpen &&[\s\S]{0,2600}?<\/button>/,
     );
     expect(btn).not.toBeNull();
     const m = btn?.[0] ?? "";

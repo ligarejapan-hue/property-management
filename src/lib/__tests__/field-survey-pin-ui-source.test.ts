@@ -96,12 +96,18 @@ describe("pin-create-modal.tsx", () => {
     expect(CREATE_SRC).toMatch(/data-testid="pin-create-memo"/);
   });
 
-  it("sessionId が無いと submit を disable する (canSubmit に sessionId 条件)", () => {
-    expect(CREATE_SRC).toMatch(/canSubmit\s*=[\s\S]*?!!sessionId/);
+  it("巡回の有無は submit の条件にしない (巡回なし撮影の正常系)", () => {
+    // sessionId=null は field_survey:quick_capture での正常系。保存可否は
+    // 座標と busy だけで決め、権限判定はサーバー (POST /pins) に委ねる。
+    expect(CREATE_SRC).toMatch(/canSubmit\s*=\s*\n?\s*!busy\s*&&/);
+    expect(CREATE_SRC).not.toMatch(/canSubmit\s*=[\s\S]{0,80}?!!sessionId/);
   });
 
-  it("sessionId が無い時の説明文を出す", () => {
-    expect(CREATE_SRC).toMatch(/巡回中でないため保存できません/);
+  it("巡回外で保存するときは軌跡が残らないことを説明する", () => {
+    expect(CREATE_SRC).toMatch(/巡回外の撮影として保存します/);
+    expect(CREATE_SRC).toMatch(/移動ルートは記録されません/);
+    // 「保存できません」と誤解させる旧文言を残さない
+    expect(CREATE_SRC).not.toMatch(/巡回中でないため保存できません/);
     // 技術用語「session」を利用者向け文言に出さない (平易語ルール)
     expect(CREATE_SRC).not.toMatch(/巡回 session/);
   });
@@ -288,8 +294,15 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     expect(MAP_SRC).toMatch(/hasActiveSession\s*&&\s*\(?\s*<PinAddModeToggle/);
   });
 
-  it("createCandidate + activeSession の両方が揃った時のみ create modal を mount", () => {
-    expect(MAP_SRC).toMatch(/createCandidate\s*&&\s*activeSession\s*&&\s*\(?\s*<PinCreateModal/);
+  it("createCandidate があるときに create modal を mount し、巡回の有無で sessionId を出し分ける", () => {
+    // 巡回なし撮影 (quick_capture) では activeSession が無い状態で開くのが正常系。
+    expect(MAP_SRC).toMatch(/createCandidate\s*&&\s*\(?\s*<PinCreateModal/);
+    // 巡回中は必ず session に紐づけ、巡回外は null を渡す。
+    expect(MAP_SRC).toMatch(/sessionId=\{activeSession\?\.id \?\? null\}/);
+    // 巡回外は種類を候補に固定する (完成待ち一覧に出ない孤児ピンを作らない)。
+    expect(MAP_SRC).toMatch(
+      /initialPinType=\{activeSession \? lastPinType : "candidate"\}/,
+    );
   });
 
   it("detailPinId がある時のみ PinDetailPanel を mount", () => {
@@ -476,16 +489,18 @@ describe("F12 展開(19-A) — field-survey-map は provider 経由で権限を�
     expect(MAP_SRC).toMatch(
       /permissionsRefreshPending \|\|\s*\n?\s*permissionsLoading \|\|\s*\n?\s*permissionsError \|\|\s*\n?\s*mePermissions === null/,
     );
-    // ピン配色導入で canSeeOtherPins (凡例ヒント用・boolean) が増えたが、
-    // 権限系 3 値の tristate null への倒し込みは維持されている
+    // 導出値は増えるが、権限系の tristate null への倒し込みは維持されている
+    // (canSeeOtherPins は凡例ヒント用の boolean なので false 固定)。
     expect(MAP_SRC).toMatch(
-      /return \{\s*canWritePin: null,\s*canManagePin: null,\s*canWriteProperty: null,\s*canSeeOtherPins: false,\s*\}/,
+      /return \{\s*canWritePin: null,\s*canManagePin: null,\s*canWriteProperty: null,\s*canSeeOtherPins: false,\s*canQuickCapture: null,\s*\}/,
     );
   });
 
   it("導出は useMemo の純関数で context 値の派生（setter / state 持ち越しなし）", () => {
+    // 導出キーは増えるため、必須キーの並びだけを緩く固定する
+    // (複数行の分割代入・後続キー追加に耐える)。
     expect(MAP_SRC).toMatch(
-      /const \{ canWritePin, canManagePin, canWriteProperty, canSeeOtherPins \} =\s*\n?\s*useMemo/,
+      /const \{[\s\S]*?canWritePin,\s*canManagePin,\s*canWriteProperty,\s*canSeeOtherPins[\s\S]*?\} =\s*\n?\s*useMemo/,
     );
     expect(MAP_SRC).toMatch(
       /\[permissionsRefreshPending,\s*permissionsLoading,\s*permissionsError,\s*mePermissions\]/,

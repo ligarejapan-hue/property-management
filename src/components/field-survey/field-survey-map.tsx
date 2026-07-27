@@ -262,13 +262,19 @@ export default function FieldSurveyMap({
   // （pending）・provider 取得中（loading）・取得失敗（error）・未取得（null）は判定不能
   // null（= API 403 委譲）に倒す。ここで [] や false に倒すと PinAddModeToggle が
   // 「権限がありません」を誤表示するため、tristate の null を維持して stale 権限表示を防ぐ。
-  const { canWritePin, canManagePin, canWriteProperty, canSeeOtherPins } =
-    useMemo<{
-      canWritePin: boolean | null;
-      canManagePin: boolean | null;
-      canWriteProperty: boolean | null;
-      canSeeOtherPins: boolean;
-    }>(() => {
+  const {
+    canWritePin,
+    canManagePin,
+    canWriteProperty,
+    canSeeOtherPins,
+    canQuickCapture,
+  } = useMemo<{
+    canWritePin: boolean | null;
+    canManagePin: boolean | null;
+    canWriteProperty: boolean | null;
+    canSeeOtherPins: boolean;
+    canQuickCapture: boolean | null;
+  }>(() => {
     if (
       permissionsRefreshPending ||
       permissionsLoading ||
@@ -280,6 +286,7 @@ export default function FieldSurveyMap({
         canManagePin: null,
         canWriteProperty: null,
         canSeeOtherPins: false,
+        canQuickCapture: null,
       };
     }
     // granted===true のみ許可（明示 deny / 欠損 entry は false）。
@@ -312,11 +319,19 @@ export default function FieldSurveyMap({
         (p.action === "read_all" || p.action === "manage") &&
         p.granted === true,
     );
+    // 巡回を開始せずに撮って登録できるか (server 側の POST /pins も同権限で判定)。
+    const canQuick = mePermissions.some(
+      (p) =>
+        p.resource === "field_survey" &&
+        p.action === "quick_capture" &&
+        p.granted === true,
+    );
     return {
       canWritePin: canWrite,
       canManagePin: canManage,
       canWriteProperty: canWriteProp,
       canSeeOtherPins: canSeeOthers,
+      canQuickCapture: canQuick,
     };
   }, [permissionsRefreshPending, permissionsLoading, permissionsError, mePermissions]);
 
@@ -613,8 +628,10 @@ export default function FieldSurveyMap({
   // token / mount / session ガードは「現在地を使う」と同型。
   const handleCameraPhotoCaptured = useCallback(
     (file: File) => {
+      // 巡回なし撮影では requestSessionId = null が正常系。撮影ボタン自体が
+      // 「巡回中 or quick_capture 権限」でしか描画されないため、ここで巡回を
+      // 要求しない (要求すると巡回外の撮影が即破棄される)。
       const requestSessionId = activeSessionIdRef.current;
-      if (!requestSessionId) return;
       if (createCandidateOpenRef.current) return;
       cameraPhotoFileRef.current = file;
       if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -632,7 +649,12 @@ export default function FieldSurveyMap({
           if (!fsMapMountedRef.current) return;
           if (
             currentLocationRequestIdRef.current !== requestId ||
-            activeSessionIdRef.current !== requestSessionId
+            // 巡回中に始めた撮影は session 切替で無効化する (従来どおり)。
+            // 巡回外で始めた撮影 (requestSessionId=null) は、取得中に巡回が
+            // 開始されても破棄しない。保存時に activeSession?.id を見るので
+            // 新しい巡回へ自然に紐づく (写真を黙って失わない)。
+            (requestSessionId !== null &&
+              activeSessionIdRef.current !== requestSessionId)
           ) {
             // 共有 token の bump / session 切替で無効化された遅延 callback。
             // 自分がまだ最新のカメラ要求なら (新しい撮影が始まっていなければ)
@@ -671,7 +693,12 @@ export default function FieldSurveyMap({
           if (!fsMapMountedRef.current) return;
           if (
             currentLocationRequestIdRef.current !== requestId ||
-            activeSessionIdRef.current !== requestSessionId
+            // 巡回中に始めた撮影は session 切替で無効化する (従来どおり)。
+            // 巡回外で始めた撮影 (requestSessionId=null) は、取得中に巡回が
+            // 開始されても破棄しない。保存時に activeSession?.id を見るので
+            // 新しい巡回へ自然に紐づく (写真を黙って失わない)。
+            (requestSessionId !== null &&
+              activeSessionIdRef.current !== requestSessionId)
           ) {
             // 成功側と同じ後始末 (locating 固着防止)。
             if (cameraRequestIdRef.current === requestId) {
@@ -769,14 +796,16 @@ export default function FieldSurveyMap({
       },
       file: File | null,
     ) => {
-      if (!activeSession) return;
       const r = await pinMutations.createPin({
         lat: input.lat,
         lng: input.lng,
         accuracy: input.accuracy,
         pinType: input.pinType,
         memo: input.memo === "" ? null : input.memo,
-        sessionId: activeSession.id,
+        // 巡回中は必ず sessionId を付ける (session touch = 12h放置確認/24h自動終了の
+        // 誤発火防止が働く)。巡回外は undefined → hook が body から落とすので
+        // 「終了済み/他人 session に紐づけない」不変条件を一切踏まない。
+        sessionId: activeSession?.id,
       });
       if (!r.ok || !r.data) return;
       // 保存成功した種類を次のモーダル初期値へ引き継ぐ (連続ピンの入力時短)。
@@ -842,7 +871,10 @@ export default function FieldSurveyMap({
     (latLng: { lat: number; lng: number }) => {
       // 既に modal 表示中はスルー (誤操作防止)
       if (createCandidate) return;
-      if (!activeSession) return;
+      // 巡回中でなくても、巡回なし撮影の「地図をタップして場所を指定」
+      // (現在地が取れない HTTP 本番での主経路) だけは通す。
+      // ピン追加モード経由の新規作成は従来どおり巡回中のみ (後段のモード判定で止まる)。
+      if (!activeSession && cameraFirstPhase !== "awaiting-map-tap") return;
       // 詳細パネルで作業中なら新規作成のタップを無視する (パネルは維持)。
       if (detailPinId && detailPanelBusyRef.current) return;
       // カメラファーストの位置指定待ちを最優先 (pin 追加モードと独立に動く)。
@@ -890,6 +922,7 @@ export default function FieldSurveyMap({
   // カメラファーストボタンの表示 / 無効判定 (純関数)。
   const cameraButton = cameraFirstButtonState({
     hasActiveSession: !!activeSession,
+    canCaptureWithoutTrip: canQuickCapture,
     canWrite: canWritePin,
     phase: cameraFirstPhase,
     modalOpen: !!createCandidate,
@@ -984,7 +1017,8 @@ export default function FieldSurveyMap({
             表示切替パネルを開かなくても撮影→ピン登録へ直行できる。
             モバイルでパネル展開中 (panelOpen) はパネル下部を覆いタップを
             遮るため FAB / banner を描画しない (md+ はトグル自体が無い)。 */}
-        {cameraButton.visible && !panelOpen && (
+        {/* 巡回中は「撮って登録」だけを中央に置く (従来どおり)。 */}
+        {activeSession && cameraButton.visible && !panelOpen && (
           <CameraFirstButton
             disabled={cameraButton.disabled}
             locating={cameraFirstPhase === "locating"}
@@ -992,17 +1026,29 @@ export default function FieldSurveyMap({
             onPhotoCaptured={handleCameraPhotoCaptured}
           />
         )}
-        {activeSession && cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
+        {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
           <CameraFirstBanner
             notice={cameraFirstNotice}
             onCancel={resetCameraFirst}
           />
         )}
 
-        {/* 巡回していない時は「巡回を開始」を地図に直置きする (パネルを開いて
-            探す必要をなくす)。押すとパネルを開き開始確認 modal を直接出す。 */}
+        {/* 巡回していない時の地図下部。「巡回なしで撮影」権限があれば
+            「📷撮って登録」を主ボタンとして左に、「🚶巡回を開始」を副ボタンとして
+            右に横並びで置く (両方 bottom-14 left-1/2 だと完全に重なるため、
+            ここでは行レイアウトにして CameraFirstButton を inline で描画する)。
+            権限が無ければ従来どおり「巡回を開始」だけを中央に出す。 */}
         {!activeSession && !panelOpen && (
-          <div className="pointer-events-none absolute bottom-14 left-1/2 z-10 -translate-x-1/2">
+          <div className="pointer-events-none absolute bottom-14 left-1/2 z-10 flex -translate-x-1/2 items-start gap-2">
+            {cameraButton.visible && (
+              <CameraFirstButton
+                inline
+                disabled={cameraButton.disabled}
+                locating={cameraFirstPhase === "locating"}
+                permissionDenied={canWritePin === false}
+                onPhotoCaptured={handleCameraPhotoCaptured}
+              />
+            )}
             <button
               type="button"
               data-testid="trip-quick-start"
@@ -1011,7 +1057,12 @@ export default function FieldSurveyMap({
                 setPanelOpen(true);
                 startTripRef.current?.();
               }}
-              className="pointer-events-auto flex items-center gap-2 rounded-full border border-emerald-700 bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-lg hover:bg-emerald-700 dark:border-emerald-500"
+              className={
+                cameraButton.visible
+                  ? // 撮影が主導線のときは巡回開始を控えめな副ボタンにする。
+                    "pointer-events-auto flex items-center gap-1.5 whitespace-nowrap rounded-full border border-emerald-700 bg-white px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lg hover:bg-emerald-50 dark:border-emerald-500 dark:bg-gray-900 dark:text-emerald-300 dark:hover:bg-gray-800"
+                  : "pointer-events-auto flex items-center gap-2 whitespace-nowrap rounded-full border border-emerald-700 bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-lg hover:bg-emerald-700 dark:border-emerald-500"
+              }
             >
               <span aria-hidden="true">🚶</span>
               巡回を開始
@@ -1088,15 +1139,18 @@ export default function FieldSurveyMap({
           </div>
         )}
 
-        {createCandidate && activeSession && (
+        {createCandidate && (
           <PinCreateModal
             initialLat={createCandidate.lat}
             initialLng={createCandidate.lng}
             initialAccuracy={createCandidate.accuracy ?? null}
             initialPhotoFile={createCandidate.cameraPhoto ?? null}
             initialPhotoPreviewUrl={createCandidate.cameraPhotoPreviewUrl ?? null}
-            initialPinType={lastPinType}
-            sessionId={activeSession.id}
+            // 巡回外の撮影は必ず「物件化候補」で始める。完成待ち一覧は
+            // candidate/open/未物件化しか出さないため、種類引継ぎ (lastPinType)
+            // がそのまま効くと巡回履歴にも一覧にも出ない孤児ピンになる。
+            initialPinType={activeSession ? lastPinType : "candidate"}
+            sessionId={activeSession?.id ?? null}
             saving={pinMutations.createLoading}
             serverError={pinMutations.createError}
             photoUploading={photoMutations.uploadLoading}
@@ -1667,7 +1721,8 @@ function PinInfo({ row, onOpenDetail }: { row: PinRow; onOpenDetail: () => void 
         <dt>状態</dt>
         <dd>{formatPinStatus(row.status)}</dd>
         <dt>巡回</dt>
-        <dd>{row.sessionId ? "あり" : "—"}</dd>
+        {/* 巡回なし撮影が入ったため「—」が常態になる。何が起きたか分かる語にする。 */}
+        <dd>{row.sessionId ? "あり" : "巡回外の撮影"}</dd>
         <dt>物件</dt>
         <dd>
           {row.propertyId ? (
