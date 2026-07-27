@@ -202,9 +202,14 @@ export default function PinDetailPanel({
     const saveTargetPinId = pinId;
     if (detail.id !== saveTargetPinId) return;
     if (detail.staffUserId !== currentUserId) return;
+    // 巡回に紐づかない pin は種類を候補に固定する (編集 UI も選択肢を出さないが、
+    // 開いている間に紐づけが外れた場合でも stale な下書きを送らないよう送信側でも
+    // 倒す = API の 422 に当てない)。
+    const effectiveDraftPinType: FieldSurveyPinType =
+      detail.sessionId === null ? "candidate" : draftPinType;
     const patch = buildPinPatch(
       { pinType: detail.pinType, status: detail.status, memo: detail.memo },
-      { pinType: draftPinType, status: draftStatus, memo: draftMemo },
+      { pinType: effectiveDraftPinType, status: draftStatus, memo: draftMemo },
     );
     if (!patch) {
       // 変更なし: PATCH を打たず編集モード終了
@@ -725,28 +730,47 @@ function EditView({
   onCancel: () => void;
   onSave: () => void;
 }) {
+  // 巡回に紐づかない pin (巡回なし撮影) は種類を「物件化候補」に固定する。
+  // 巡回外 pin は巡回履歴に出ないため、候補以外にすると完成待ち一覧からも外れ、
+  // どの一覧にも出なくなる (API も 422 で拒否する)。選べる形で出して保存時に
+  // 422 を返すのが最悪の体験なので、選択肢自体を出さない (@codex #328 R3 P2)。
+  const lockPinType = detail.sessionId === null;
   return (
     <>
-      <fieldset className="mb-3" disabled={saving}>
-        <legend className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-          種類
-        </legend>
-        <div className="grid grid-cols-2 gap-1">
-          {FIELD_SURVEY_PIN_TYPES.map((t) => (
-            <label key={t} className="flex items-center gap-1 text-[11px]">
-              <input
-                type="radio"
-                name="pin-edit-type"
-                value={t}
-                checked={draftPinType === t}
-                onChange={() => onChangePinType(t)}
-                data-testid={`pin-edit-type-${t}`}
-              />
-              <span className="dark:text-gray-200">{formatPinType(t)}</span>
-            </label>
-          ))}
+      {lockPinType ? (
+        <div className="mb-3" data-testid="pin-edit-type-locked">
+          <p className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+            種類
+          </p>
+          <p className="text-[11px] text-gray-700 dark:text-gray-200">
+            {formatPinType("candidate")}
+            <span className="ml-1 text-gray-500 dark:text-gray-400">
+              （巡回外の撮影は「物件化の完成待ち」に必ず出すため、種類は変更できません）
+            </span>
+          </p>
         </div>
-      </fieldset>
+      ) : (
+        <fieldset className="mb-3" disabled={saving}>
+          <legend className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+            種類
+          </legend>
+          <div className="grid grid-cols-2 gap-1">
+            {FIELD_SURVEY_PIN_TYPES.map((t) => (
+              <label key={t} className="flex items-center gap-1 text-[11px]">
+                <input
+                  type="radio"
+                  name="pin-edit-type"
+                  value={t}
+                  checked={draftPinType === t}
+                  onChange={() => onChangePinType(t)}
+                  data-testid={`pin-edit-type-${t}`}
+                />
+                <span className="dark:text-gray-200">{formatPinType(t)}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
       <fieldset className="mb-3" disabled={saving}>
         <legend className="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-200">

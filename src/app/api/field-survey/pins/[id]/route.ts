@@ -209,31 +209,41 @@ export async function PATCH(
     // 更新するため最終行が「巡回なし × 候補以外」= 防ごうとした孤児状態になる
     // (@codex #328 R2 P1)。判定の根拠列 (sessionId / pinType) を条件に含めた
     // updateMany で CAS し、0 件なら 409 にして再試行させる。
-    const casResult = await prisma.fieldSurveyPin.updateMany({
-      where: {
-        id,
-        sessionId: existing.sessionId,
-        pinType: existing.pinType,
-      },
-      data: {
-        ...(patch.pinType !== undefined && { pinType: patch.pinType }),
-        ...(patch.status !== undefined && { status: patch.status }),
-        ...(patch.memo !== undefined && { memo: patch.memo }),
-        ...(patch.propertyId !== undefined && { propertyId: patch.propertyId }),
-        ...(patch.sessionId !== undefined && { sessionId: patch.sessionId }),
-      },
+    // CAS と読み直しは同一 transaction 内で行う。updateMany が行ロックを取るため、
+    // 続く findUniqueOrThrow は「自分の更新後の姿」を読み、並行 PATCH は
+    // commit まで待たされる。分離すると、CAS 述語に含まれない列だけを変える
+    // 2 本 (例: status closed と archived) が双方成功し、読み直しで相手の結果を
+    // 拾って応答と AuditLog の statusAfter が食い違う (@codex #328 R3 P2)。
+    const updated = await prisma.$transaction(async (tx) => {
+      const casResult = await tx.fieldSurveyPin.updateMany({
+        where: {
+          id,
+          sessionId: existing.sessionId,
+          pinType: existing.pinType,
+        },
+        data: {
+          ...(patch.pinType !== undefined && { pinType: patch.pinType }),
+          ...(patch.status !== undefined && { status: patch.status }),
+          ...(patch.memo !== undefined && { memo: patch.memo }),
+          ...(patch.propertyId !== undefined && {
+            propertyId: patch.propertyId,
+          }),
+          ...(patch.sessionId !== undefined && { sessionId: patch.sessionId }),
+        },
+      });
+      if (casResult.count === 0) return null;
+      return tx.fieldSurveyPin.findUniqueOrThrow({
+        where: { id },
+        select: SELECT_PIN,
+      });
     });
-    if (casResult.count === 0) {
+    if (updated === null) {
       throw new ApiError(
         409,
         "ほかの操作と競合しました。画面を更新してからやり直してください。",
         "CONCURRENT_UPDATE",
       );
     }
-    const updated = await prisma.fieldSurveyPin.findUniqueOrThrow({
-      where: { id },
-      select: SELECT_PIN,
-    });
 
     const changedFields: string[] = [];
     if (patch.pinType !== undefined && patch.pinType !== existing.pinType) {

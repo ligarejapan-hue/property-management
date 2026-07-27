@@ -186,6 +186,34 @@ describe("巡回外は種類を候補に固定する (@codex R1: 初期値だけ
   });
 });
 
+describe("編集フォームも巡回外は候補固定 (@codex #328 R3 P2)", () => {
+  const DETAIL_SRC = read("src/components/field-survey/pin-detail-panel.tsx");
+
+  it("detail.sessionId が null なら種類のラジオを出さない (押して422にしない)", () => {
+    expect(DETAIL_SRC).toMatch(
+      /const lockPinType = detail\.sessionId === null;/,
+    );
+    expect(DETAIL_SRC).toMatch(/data-testid="pin-edit-type-locked"/);
+    expect(DETAIL_SRC).toMatch(/種類は変更できません/);
+  });
+
+  it("保存時の送信値も巡回外なら候補に倒す (下書きが stale でも 422 にしない)", () => {
+    expect(DETAIL_SRC).toMatch(
+      /detail\.sessionId === null \? "candidate" : draftPinType/,
+    );
+    expect(DETAIL_SRC).toMatch(/pinType: effectiveDraftPinType/);
+  });
+
+  it("CAS と読み直しは同一 transaction 内で行う (応答と監査ログの取り違え防止)", () => {
+    const patchSrc = read("src/app/api/field-survey/pins/[id]/route.ts");
+    expect(patchSrc).toMatch(
+      /prisma\.\$transaction\(async \(tx\) => \{[\s\S]{0,400}?tx\.fieldSurveyPin\.updateMany/,
+    );
+    expect(patchSrc).toMatch(/tx\.fieldSurveyPin\.findUniqueOrThrow/);
+    expect(patchSrc).toMatch(/if \(updated === null\) \{/);
+  });
+});
+
 describe("クライアント配線 (field-survey-map)", () => {
   it("provider 配布の権限から canQuickCapture を導出する", () => {
     expect(MAP_SRC).toMatch(
