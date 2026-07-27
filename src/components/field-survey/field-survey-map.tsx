@@ -730,9 +730,9 @@ export default function FieldSurveyMap({
       if (createCandidateOpenRef.current) return;
       cameraPhotoFileRef.current = file;
 
-      const fallbackToMapTap = (code: number | null) => {
+      const fallbackToMapTap = (code: number | null, notice?: string) => {
         setCameraFirstPhase("awaiting-map-tap");
-        setCameraFirstNotice(cameraFirstFallbackMessage(code));
+        setCameraFirstNotice(notice ?? cameraFirstFallbackMessage(code));
       };
 
       // 取得結果を state へ反映する。requestId は結果を持ってきた prefetch の
@@ -783,11 +783,53 @@ export default function FieldSurveyMap({
         });
       };
 
-      // 未解決の prefetch を待つ (従来の locating 表示)。
-      const waitFor = (entry: { requestId: number; promise: Promise<CameraPrefetchResult> }) => {
+      // prefetch の結果を消費する。settled / 未解決のどちらの経路でも
+      // **同じ鮮度検証**を通す。
+      // ⚠settled=false でも「カメラ起動前に取得済み」の場合がある
+      // (ネイティブカメラがページを一時停止すると、解決済みでも .then が
+      //  走らないまま change が先に届く。@codex #329 R2)。待機側で検証を
+      // 省くとこの経路だけ古い座標が通ってしまう。
+      // 取り直しは1回まで。2回目も古ければ手動指定へ回す (無限ループ防止)。
+      const consume = (
+        entry: { requestId: number; promise: Promise<CameraPrefetchResult>; settled: boolean; result?: CameraPrefetchResult },
+        attempt: number,
+      ) => {
+        const finish = (r: CameraPrefetchResult) => {
+          // 取り直し/別経路で token が進んでいたら apply のガードに委ねる
+          // (ここで再取得を重ねない)。
+          if (currentLocationRequestIdRef.current !== entry.requestId) {
+            apply(entry.requestId, r);
+            return;
+          }
+          if (r.ok && !isCameraPrefetchFresh(r.pos)) {
+            if (attempt >= 1) {
+              // 2回続けて古い = ページ停止などで撮影時刻に追いつけない。
+              // 誤った座標でピンを立てるより手動指定に倒す。
+              fallbackToMapTap(
+                null,
+                "撮った場所の現在地を取得できませんでした。地図をタップして、撮った場所を指定してください。",
+              );
+              return;
+            }
+            startCameraLocationPrefetch();
+            const renewed = cameraLocationPrefetchRef.current;
+            if (!renewed) {
+              fallbackToMapTap(null);
+              return;
+            }
+            consume(renewed, attempt + 1);
+            return;
+          }
+          apply(entry.requestId, r);
+        };
+        if (entry.settled && entry.result) {
+          // 待たせずにその場で判定 (新しければ locating を一瞬も出さない)。
+          finish(entry.result);
+          return;
+        }
         setCameraFirstPhase("locating");
         setCameraFirstNotice(null);
-        void entry.promise.then((r) => apply(entry.requestId, r));
+        void entry.promise.then(finish);
       };
 
       const prefetch = cameraLocationPrefetchRef.current;
@@ -797,26 +839,7 @@ export default function FieldSurveyMap({
         fallbackToMapTap(null);
         return;
       }
-
-      if (prefetch.settled && prefetch.result) {
-        const r = prefetch.result;
-        // 失敗はそのまま反映 (鮮度は関係ない)。成功は撮影時点で十分新しい
-        // ものだけ即採用し、古ければ取り直す (移動した分だけピンがずれる)。
-        if (!r.ok || isCameraPrefetchFresh(r.pos)) {
-          apply(prefetch.requestId, r);
-          return;
-        }
-        startCameraLocationPrefetch();
-        const renewed = cameraLocationPrefetchRef.current;
-        if (!renewed) {
-          fallbackToMapTap(null);
-          return;
-        }
-        waitFor(renewed);
-        return;
-      }
-      // まだ取得中: 解決するのは撮影後なので鮮度は満たされる。
-      waitFor(prefetch);
+      consume(prefetch, 0);
     },
     [resetCameraFirst, startCameraLocationPrefetch],
   );

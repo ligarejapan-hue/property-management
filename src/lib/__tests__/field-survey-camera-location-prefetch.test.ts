@@ -102,29 +102,43 @@ describe("撮影後: 新しければ待たせない / 古ければ取り直す /
     expect(HANDLER.length).toBeGreaterThan(200);
   });
 
-  it("解決済みの成功結果は鮮度で振り分ける", () => {
-    expect(HANDLER).toMatch(/if \(prefetch\.settled && prefetch\.result\) \{/);
-    // 失敗はそのまま反映 / 成功は鮮度を見てから即採用
-    expect(HANDLER).toMatch(
-      /if \(!r\.ok \|\| isCameraPrefetchFresh\(r\.pos\)\) \{/,
-    );
-    expect(HANDLER).toMatch(/apply\(prefetch\.requestId, r\);/);
+  it("解決済み・未解決を同じ consume() で扱い、鮮度検証を共通化する", () => {
+    // ⚠settled=false でも「カメラ起動前に取得済み」の場合がある
+    // (ネイティブカメラがページを止めると .then が走らないまま change が届く)。
+    // 待機側だけ検証を省くとその経路から古い座標が通る (@codex #329 R2)。
+    expect(HANDLER).toMatch(/const consume = \(/);
+    expect(HANDLER).toMatch(/if \(entry\.settled && entry\.result\) \{/);
+    expect(HANDLER).toMatch(/void entry\.promise\.then\(finish\);/);
+    expect(HANDLER).toMatch(/consume\(prefetch, 0\);/);
+    // 鮮度判定は finish 内の 1 箇所だけ = 経路差が生まれない
+    const freshChecks = HANDLER.match(/isCameraPrefetchFresh\(/g) ?? [];
+    expect(freshChecks.length).toBe(1);
   });
 
-  it("古い成功結果は即採用せず取り直して待つ", () => {
+  it("成功かつ古い場合だけ取り直す (失敗はそのまま反映)", () => {
+    expect(HANDLER).toMatch(/if \(r\.ok && !isCameraPrefetchFresh\(r\.pos\)\) \{/);
     expect(HANDLER).toMatch(/startCameraLocationPrefetch\(\);/);
-    expect(HANDLER).toMatch(/waitFor\(renewed\);/);
-    // 取り直しは鮮度判定より後にある (新しければ取り直さない)
-    const freshIdx = HANDLER.indexOf("isCameraPrefetchFresh(r.pos)");
+    expect(HANDLER).toMatch(/consume\(renewed, attempt \+ 1\);/);
+  });
+
+  it("取り直しは1回まで。2回目も古ければ手動指定へ倒す (無限ループ防止)", () => {
+    expect(HANDLER).toMatch(/if \(attempt >= 1\) \{/);
+    expect(HANDLER).toMatch(/撮った場所の現在地を取得できませんでした/);
+    // 誤った座標でピンを立てない = apply へ進まない
+    const limitIdx = HANDLER.indexOf("if (attempt >= 1) {");
     const renewIdx = HANDLER.indexOf("startCameraLocationPrefetch();");
-    expect(freshIdx).toBeGreaterThan(-1);
-    expect(renewIdx).toBeGreaterThan(freshIdx);
+    expect(limitIdx).toBeGreaterThan(-1);
+    expect(limitIdx).toBeLessThan(renewIdx);
+  });
+
+  it("token が進んでいたら再取得を重ねず apply のガードに委ねる", () => {
+    expect(HANDLER).toMatch(
+      /if \(currentLocationRequestIdRef\.current !== entry\.requestId\) \{\s*\n?\s*apply\(entry\.requestId, r\);\s*\n?\s*return;/,
+    );
   });
 
   it("未解決なら locating 表示にして結果を待つ", () => {
-    expect(HANDLER).toMatch(/const waitFor = \(/);
     expect(HANDLER).toMatch(/setCameraFirstPhase\("locating"\);/);
-    expect(HANDLER).toMatch(/waitFor\(prefetch\);/);
   });
 
   it("撮影後に getCurrentPosition を呼び直さない (直列取得の撤去)", () => {
@@ -145,9 +159,9 @@ describe("撮影後: 新しければ待たせない / 古ければ取り直す /
     expect(HANDLER).toMatch(
       /const apply = \(requestId: number, result: CameraPrefetchResult\) =>/,
     );
-    expect(HANDLER).toMatch(
-      /void entry\.promise\.then\(\(r\) => apply\(entry\.requestId, r\)\)/,
-    );
+    // 待機の継続は finish 経由 (鮮度検証を通す)。適用時は entry の requestId を渡す。
+    expect(HANDLER).toMatch(/void entry\.promise\.then\(finish\);/);
+    expect(HANDLER).toMatch(/apply\(entry\.requestId, r\);/);
   });
 
   it("既存のガード (mount / token / session / modal 競合 / 失敗理由) を維持する", () => {
