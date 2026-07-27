@@ -48,6 +48,7 @@ import {
   cameraFirstButtonState,
   cameraFirstCandidateFromPosition,
   cameraFirstFallbackMessage,
+  isCameraPrefetchFresh,
   type CameraFirstPhase,
 } from "@/lib/field-survey-camera-first";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
@@ -713,10 +714,12 @@ export default function FieldSurveyMap({
 
   // カメラファースト: 撮影ボタンを押した時点で開始した現在地取得 (prefetch) の
   // 結果を使って、作成 modal を写真選択済みで開く。
-  // - 解決済みなら「現在地を取得中…」を出さずにそのまま開く (待ち時間ゼロ)
-  // - まだ取得中なら従来どおり locating 表示にして待つ (最大30秒)
+  // - 解決済みかつ十分に新しければ「現在地を取得中…」を出さずに開く (待ちゼロ)
+  // - 古い場合は取り直す。カメラを開けたまま移動すると、撮影地点ではなく
+  //   ボタンを押した地点の座標でピンが立ってしまう (@codex #329 R1)
+  // - まだ取得中なら従来どおり locating 表示にして待つ
   // - 取れない環境 (http / 権限拒否 / タイムアウト) は「地図をタップして場所を
-  //   指定」へフォールバックする
+  //   指定」へフォールバックする (写真は保持=撮り直し不要)
   // token / mount / session ガードは「現在地を使う」と同型。
   const handleCameraPhotoCaptured = useCallback(
     (file: File) => {
@@ -727,18 +730,14 @@ export default function FieldSurveyMap({
       if (createCandidateOpenRef.current) return;
       cameraPhotoFileRef.current = file;
 
-      const prefetch = cameraLocationPrefetchRef.current;
-      if (!prefetch) {
-        // geolocation 非対応、または撮影開始の通知が来ていない (想定外) 場合は
-        // 場所指定へ回す。写真は保持したままなので撮り直しは不要。
+      const fallbackToMapTap = (code: number | null) => {
         setCameraFirstPhase("awaiting-map-tap");
-        setCameraFirstNotice(cameraFirstFallbackMessage(null));
-        return;
-      }
-      const requestId = prefetch.requestId;
+        setCameraFirstNotice(cameraFirstFallbackMessage(code));
+      };
 
-      // 取得結果を state へ反映する共通処理 (解決済み/待ち のどちらからも呼ぶ)。
-      const apply = (result: CameraPrefetchResult) => {
+      // 取得結果を state へ反映する。requestId は結果を持ってきた prefetch の
+      // もの (取り直した場合は新しい requestId) を使う。
+      const apply = (requestId: number, result: CameraPrefetchResult) => {
         if (!fsMapMountedRef.current) return;
         if (
           currentLocationRequestIdRef.current !== requestId ||
@@ -751,7 +750,7 @@ export default function FieldSurveyMap({
         ) {
           // 共有 token の bump / session 切替で無効化された遅延結果。
           // 自分がまだ最新のカメラ要求なら (新しい撮影が始まっていなければ)
-          // locating 固着と写真リークを防ぐため状態を後始末する。
+          // "locating" 固着と写真リークを防ぐため状態を後始末する。
           if (cameraRequestIdRef.current === requestId) {
             resetCameraFirst();
           }
@@ -764,14 +763,12 @@ export default function FieldSurveyMap({
           return;
         }
         if (!result.ok) {
-          setCameraFirstPhase("awaiting-map-tap");
-          setCameraFirstNotice(cameraFirstFallbackMessage(result.code));
+          fallbackToMapTap(result.code);
           return;
         }
         const cand = cameraFirstCandidateFromPosition(result.pos);
         if (!cand) {
-          setCameraFirstPhase("awaiting-map-tap");
-          setCameraFirstNotice(cameraFirstFallbackMessage(null));
+          fallbackToMapTap(null);
           return;
         }
         const photo = cameraPhotoFileRef.current ?? undefined;
@@ -786,17 +783,42 @@ export default function FieldSurveyMap({
         });
       };
 
-      if (prefetch.settled && prefetch.result) {
-        // 撮影中に取得が終わっている = 待たせずにそのまま保存画面へ。
-        apply(prefetch.result);
+      // 未解決の prefetch を待つ (従来の locating 表示)。
+      const waitFor = (entry: { requestId: number; promise: Promise<CameraPrefetchResult> }) => {
+        setCameraFirstPhase("locating");
+        setCameraFirstNotice(null);
+        void entry.promise.then((r) => apply(entry.requestId, r));
+      };
+
+      const prefetch = cameraLocationPrefetchRef.current;
+      if (!prefetch) {
+        // geolocation 非対応、または撮影開始の通知が来ていない (想定外) 場合は
+        // 場所指定へ回す。写真は保持したままなので撮り直しは不要。
+        fallbackToMapTap(null);
         return;
       }
-      // まだ取得中: 従来どおり進行表示を出して待つ。
-      setCameraFirstPhase("locating");
-      setCameraFirstNotice(null);
-      void prefetch.promise.then(apply);
+
+      if (prefetch.settled && prefetch.result) {
+        const r = prefetch.result;
+        // 失敗はそのまま反映 (鮮度は関係ない)。成功は撮影時点で十分新しい
+        // ものだけ即採用し、古ければ取り直す (移動した分だけピンがずれる)。
+        if (!r.ok || isCameraPrefetchFresh(r.pos)) {
+          apply(prefetch.requestId, r);
+          return;
+        }
+        startCameraLocationPrefetch();
+        const renewed = cameraLocationPrefetchRef.current;
+        if (!renewed) {
+          fallbackToMapTap(null);
+          return;
+        }
+        waitFor(renewed);
+        return;
+      }
+      // まだ取得中: 解決するのは撮影後なので鮮度は満たされる。
+      waitFor(prefetch);
     },
-    [resetCameraFirst],
+    [resetCameraFirst, startCameraLocationPrefetch],
   );
 
   const pinMutations = useFieldSurveyPinMutations();

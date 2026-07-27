@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
+import {
+  CAMERA_PREFETCH_MAX_AGE_MS,
+  isCameraPrefetchFresh,
+} from "@/lib/field-survey-camera-first";
 
 // 撮影と現在地取得の並行化 (2026-07-28 ユーザー要望
 // 「携帯から撮って登録の際現在地の取得も一緒にやってほしい」)。
@@ -10,13 +14,22 @@ import path from "path";
 // 開始してカメラ起動と並行させ、写真が返った時点で解決済みなら待ち時間ゼロで
 // 保存画面へ進める。
 //
-// env=node のため behavioral test が書けない領域なので、構造を固定する。
+// ⚠ただし解決済みでも「撮影時点で古い」座標は使わない (@codex #329 R1)。
+// カメラを開けたまま移動すると、ボタンを押した地点でピンが立ってしまう。
+//
+// env=node のため behavioral test が書けない領域は構造を固定する。
 
 const read = (p: string) =>
   fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
 
 const MAP_SRC = read("src/components/field-survey/field-survey-map.tsx");
 const BUTTON_SRC = read("src/components/field-survey/camera-first-button.tsx");
+
+/** 撮影ハンドラ本体 (依存配列までを 1 塊で取り出す)。 */
+const HANDLER =
+  MAP_SRC.match(
+    /const handleCameraPhotoCaptured = useCallback\([\s\S]*?startCameraLocationPrefetch\],\s*\n\s*\);/,
+  )?.[0] ?? "";
 
 describe("撮影ボタン: カメラ起動と同じ操作で現在地取得を開始する", () => {
   it("onCaptureStart prop を持つ (optional)", () => {
@@ -26,9 +39,7 @@ describe("撮影ボタン: カメラ起動と同じ操作で現在地取得を�
   it("click ハンドラで onCaptureStart → カメラ起動の順に呼ぶ", () => {
     // 同じ click の中で呼ぶこと (別 effect にすると権限プロンプトが
     // ユーザージェスチャ由来にならない)。順序も固定する。
-    const onClick = MAP_SRC.length > 0 ? BUTTON_SRC.match(
-      /onClick=\{\(\) => \{[\s\S]*?\}\}/,
-    ) : null;
+    const onClick = BUTTON_SRC.match(/onClick=\{\(\) => \{[\s\S]*?\}\}/);
     expect(onClick).not.toBeNull();
     const m = onClick?.[0] ?? "";
     const startIdx = m.indexOf("onCaptureStart?.()");
@@ -39,112 +50,154 @@ describe("撮影ボタン: カメラ起動と同じ操作で現在地取得を�
   });
 
   it("両方の描画箇所 (巡回中・巡回外) で配線する", () => {
-    const wired = MAP_SRC.match(
-      /onCaptureStart=\{startCameraLocationPrefetch\}/g,
-    );
+    const wired = MAP_SRC.match(/onCaptureStart=\{startCameraLocationPrefetch\}/g);
     expect(wired?.length).toBe(2);
   });
 });
 
 describe("先読み取得 (startCameraLocationPrefetch)", () => {
+  const FN =
+    MAP_SRC.match(
+      /const startCameraLocationPrefetch = useCallback\([\s\S]*?\}, \[\]\);/,
+    )?.[0] ?? "";
+
+  it("関数を取得できる", () => {
+    expect(FN.length).toBeGreaterThan(200);
+  });
+
   it("geolocation 非対応なら prefetch を張らない (場所指定へ倒す)", () => {
-    expect(MAP_SRC).toMatch(
-      /if \(typeof navigator === "undefined" \|\| !navigator\.geolocation\) \{\s*\n?\s*cameraLocationPrefetchRef\.current = null;/,
-    );
+    expect(FN).toMatch(/!navigator\.geolocation/);
+    expect(FN).toMatch(/cameraLocationPrefetchRef\.current = null;/);
   });
 
   it("共有 token を bump して自分の requestId を記録する (他経路の取得を無効化)", () => {
-    expect(MAP_SRC).toMatch(
-      /currentLocationRequestIdRef\.current \+= 1;\s*\n?\s*const requestId = currentLocationRequestIdRef\.current;\s*\n?\s*cameraRequestIdRef\.current = requestId;/,
-    );
+    expect(FN).toMatch(/currentLocationRequestIdRef\.current \+= 1;/);
+    expect(FN).toMatch(/cameraRequestIdRef\.current = requestId;/);
   });
 
   it("結果は promise + settled で保持し、prefetch 自体は state を触らない", () => {
     // カメラを閉じただけ (写真なし) のとき何も起きないようにするため、
     // getCurrentPosition の callback では resolve するだけにする。
-    const fn = MAP_SRC.match(
-      /const startCameraLocationPrefetch = useCallback\([\s\S]*?\}, \[\]\);/,
-    );
-    expect(fn).not.toBeNull();
-    const m = fn?.[0] ?? "";
-    expect(m).toMatch(/new Promise<CameraPrefetchResult>/);
-    expect(m).toMatch(/resolve\(\{ ok: true, pos \}\)/);
-    expect(m).toMatch(/resolve\(\{ ok: false, code:/);
-    expect(m).toMatch(/entry\.settled = true;/);
-    // prefetch 中に画面状態を書き換えない (locating にしない)
-    expect(m).not.toMatch(/setCameraFirstPhase/);
-    expect(m).not.toMatch(/setCreateCandidate/);
+    expect(FN).toMatch(/new Promise<CameraPrefetchResult>/);
+    expect(FN).toMatch(/resolve\(\{ ok: true, pos \}\)/);
+    expect(FN).toMatch(/resolve\(\{ ok: false, code:/);
+    expect(FN).toMatch(/entry\.settled = true;/);
+    expect(FN).not.toMatch(/setCameraFirstPhase/);
+    expect(FN).not.toMatch(/setCreateCandidate/);
     // 座標を console に出さない (PII)
-    expect(m).not.toMatch(/console\./);
+    expect(FN).not.toMatch(/console\./);
   });
 
   it("リセットで先読み結果も捨てる (古い座標を次の撮影に使わない)", () => {
-    const fn = MAP_SRC.match(
-      /const resetCameraFirst = useCallback\([\s\S]*?\}, \[\]\);/,
-    );
-    expect(fn?.[0] ?? "").toMatch(/cameraLocationPrefetchRef\.current = null;/);
+    const reset =
+      MAP_SRC.match(
+        /const resetCameraFirst = useCallback\([\s\S]*?\}, \[\]\);/,
+      )?.[0] ?? "";
+    expect(reset).toMatch(/cameraLocationPrefetchRef\.current = null;/);
   });
 });
 
-describe("撮影後: 解決済みなら待たせない / 未解決なら従来どおり待つ", () => {
-  const handler =
-    MAP_SRC.match(
-      /const handleCameraPhotoCaptured = useCallback\([\s\S]*?\n    \[resetCameraFirst\],\n  \);/,
-    )?.[0] ?? "";
-
+describe("撮影後: 新しければ待たせない / 古ければ取り直す / 未解決なら待つ", () => {
   it("ハンドラを取得できる", () => {
-    expect(handler.length).toBeGreaterThan(200);
+    expect(HANDLER.length).toBeGreaterThan(200);
   });
 
-  it("解決済みなら locating を出さずそのまま適用する", () => {
-    expect(handler).toMatch(
-      /if \(prefetch\.settled && prefetch\.result\) \{\s*\n?[\s\S]{0,160}?apply\(prefetch\.result\);\s*\n?\s*return;/,
+  it("解決済みの成功結果は鮮度で振り分ける", () => {
+    expect(HANDLER).toMatch(/if \(prefetch\.settled && prefetch\.result\) \{/);
+    // 失敗はそのまま反映 / 成功は鮮度を見てから即採用
+    expect(HANDLER).toMatch(
+      /if \(!r\.ok \|\| isCameraPrefetchFresh\(r\.pos\)\) \{/,
     );
-    // 待ちに入るのは未解決のときだけ (解決済み分岐より後)
-    const settledIdx = handler.indexOf("prefetch.settled && prefetch.result");
-    const locatingIdx = handler.indexOf('setCameraFirstPhase("locating")');
-    expect(settledIdx).toBeGreaterThan(-1);
-    expect(locatingIdx).toBeGreaterThan(settledIdx);
+    expect(HANDLER).toMatch(/apply\(prefetch\.requestId, r\);/);
+  });
+
+  it("古い成功結果は即採用せず取り直して待つ", () => {
+    expect(HANDLER).toMatch(/startCameraLocationPrefetch\(\);/);
+    expect(HANDLER).toMatch(/waitFor\(renewed\);/);
+    // 取り直しは鮮度判定より後にある (新しければ取り直さない)
+    const freshIdx = HANDLER.indexOf("isCameraPrefetchFresh(r.pos)");
+    const renewIdx = HANDLER.indexOf("startCameraLocationPrefetch();");
+    expect(freshIdx).toBeGreaterThan(-1);
+    expect(renewIdx).toBeGreaterThan(freshIdx);
   });
 
   it("未解決なら locating 表示にして結果を待つ", () => {
-    expect(handler).toMatch(
-      /setCameraFirstPhase\("locating"\);[\s\S]{0,120}?void prefetch\.promise\.then\(apply\);/,
-    );
+    expect(HANDLER).toMatch(/const waitFor = \(/);
+    expect(HANDLER).toMatch(/setCameraFirstPhase\("locating"\);/);
+    expect(HANDLER).toMatch(/waitFor\(prefetch\);/);
   });
 
   it("撮影後に getCurrentPosition を呼び直さない (直列取得の撤去)", () => {
-    expect(handler).not.toMatch(/geolocation\.getCurrentPosition/);
+    expect(HANDLER).not.toMatch(/geolocation\.getCurrentPosition/);
   });
 
   it("prefetch が無い場合は場所指定へフォールバックする (写真は保持)", () => {
-    expect(handler).toMatch(
-      /if \(!prefetch\) \{[\s\S]{0,220}?setCameraFirstPhase\("awaiting-map-tap"\)/,
-    );
+    expect(HANDLER).toMatch(/if \(!prefetch\) \{/);
+    expect(HANDLER).toMatch(/fallbackToMapTap\(null\);/);
     // 写真は ref に入れてから分岐する = 撮り直しを要求しない
-    const photoIdx = handler.indexOf("cameraPhotoFileRef.current = file;");
-    const branchIdx = handler.indexOf("if (!prefetch)");
+    const photoIdx = HANDLER.indexOf("cameraPhotoFileRef.current = file;");
+    const branchIdx = HANDLER.indexOf("if (!prefetch)");
     expect(photoIdx).toBeGreaterThan(-1);
     expect(photoIdx).toBeLessThan(branchIdx);
   });
 
-  it("既存のガード (mount / token / session / modal 競合) を維持する", () => {
-    expect(handler).toMatch(/if \(!fsMapMountedRef\.current\) return;/);
-    expect(handler).toMatch(
-      /currentLocationRequestIdRef\.current !== requestId/,
+  it("適用は requestId 付きで行う (取り直し後も正しい token で照合する)", () => {
+    expect(HANDLER).toMatch(
+      /const apply = \(requestId: number, result: CameraPrefetchResult\) =>/,
     );
-    // 巡回外で始めた撮影は巡回開始で破棄しない (@codex #326 R1)
-    expect(handler).toMatch(
-      /requestSessionId !== null &&\s*\n?\s*activeSessionIdRef\.current !== requestSessionId/,
-    );
-    expect(handler).toMatch(/if \(createCandidateOpenRef\.current\) \{/);
-    // 取得失敗は理由つきで場所指定へ
-    expect(handler).toMatch(
-      /if \(!result\.ok\) \{[\s\S]{0,160}?cameraFirstFallbackMessage\(result\.code\)/,
+    expect(HANDLER).toMatch(
+      /void entry\.promise\.then\(\(r\) => apply\(entry\.requestId, r\)\)/,
     );
   });
 
+  it("既存のガード (mount / token / session / modal 競合 / 失敗理由) を維持する", () => {
+    expect(HANDLER).toMatch(/if \(!fsMapMountedRef\.current\) return;/);
+    expect(HANDLER).toMatch(/currentLocationRequestIdRef\.current !== requestId/);
+    // 巡回外で始めた撮影は巡回開始で破棄しない (@codex #326 R1)
+    expect(HANDLER).toMatch(
+      /requestSessionId !== null &&\s*\n?\s*activeSessionIdRef\.current !== requestSessionId/,
+    );
+    expect(HANDLER).toMatch(/if \(createCandidateOpenRef\.current\) \{/);
+    expect(HANDLER).toMatch(/fallbackToMapTap\(result\.code\);/);
+  });
+
   it("座標を console に出さない (PII)", () => {
-    expect(handler).not.toMatch(/console\./);
+    expect(HANDLER).not.toMatch(/console\./);
+  });
+});
+
+describe("鮮度判定 isCameraPrefetchFresh (純関数)", () => {
+  const now = 1_000_000;
+
+  it("しきい値は徒歩の移動を考慮した 20 秒", () => {
+    expect(CAMERA_PREFETCH_MAX_AGE_MS).toBe(20_000);
+  });
+
+  it("しきい値内なら新しいと判定する", () => {
+    expect(isCameraPrefetchFresh({ timestamp: now }, now)).toBe(true);
+    expect(isCameraPrefetchFresh({ timestamp: now - 19_999 }, now)).toBe(true);
+    expect(isCameraPrefetchFresh({ timestamp: now - 20_000 }, now)).toBe(true);
+  });
+
+  it("しきい値を超えたら古いと判定する (取り直しに回す)", () => {
+    expect(isCameraPrefetchFresh({ timestamp: now - 20_001 }, now)).toBe(false);
+    expect(isCameraPrefetchFresh({ timestamp: now - 120_000 }, now)).toBe(false);
+  });
+
+  it("timestamp が取れない場合は安全側 (古い扱い)", () => {
+    expect(isCameraPrefetchFresh(null, now)).toBe(false);
+    expect(isCameraPrefetchFresh(undefined, now)).toBe(false);
+    expect(isCameraPrefetchFresh({}, now)).toBe(false);
+    expect(isCameraPrefetchFresh({ timestamp: NaN }, now)).toBe(false);
+  });
+
+  it("端末時計のずれで未来時刻でも新しい扱い (取り直しループを避ける)", () => {
+    expect(isCameraPrefetchFresh({ timestamp: now + 5_000 }, now)).toBe(true);
+  });
+
+  it("しきい値は引数で上書きできる (将来の調整用)", () => {
+    expect(isCameraPrefetchFresh({ timestamp: now - 30_000 }, now, 60_000)).toBe(
+      true,
+    );
   });
 });
