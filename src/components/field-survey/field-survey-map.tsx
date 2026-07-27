@@ -48,6 +48,7 @@ import {
   cameraFirstButtonState,
   cameraFirstCandidateFromPosition,
   cameraFirstFallbackMessage,
+  isCameraPrefetchFresh,
   type CameraFirstPhase,
 } from "@/lib/field-survey-camera-first";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
@@ -118,6 +119,14 @@ interface PinRow {
 }
 
 type Layer = "properties" | "pins";
+
+/**
+ * 撮影と並行して走らせる現在地取得の結果。
+ * 座標は保持するが console / ログには出さない (PII 扱い)。
+ */
+type CameraPrefetchResult =
+  | { ok: true; pos: GeolocationPosition }
+  | { ok: false; code: number | null };
 
 export default function FieldSurveyMap({
   apiKey,
@@ -586,10 +595,69 @@ export default function FieldSurveyMap({
     );
   }, []);
 
+  // 撮影と並行して走らせる現在地取得の結果入れ。撮影ボタンを押した瞬間に開始し、
+  // 写真が返ってきた時点で解決済みなら待たずに保存画面を開く。
+  // この ref 自体は state を触らない (= カメラを閉じただけの場合は何も起きない)。
+  const cameraLocationPrefetchRef = useRef<{
+    requestId: number;
+    promise: Promise<CameraPrefetchResult>;
+    settled: boolean;
+    result?: CameraPrefetchResult;
+  } | null>(null);
+
+  /**
+   * 撮影ボタンを押した瞬間に現在地の取得を開始する (カメラ起動と並行)。
+   *
+   * 従来は「撮影完了 → 取得開始」の直列で、GPS が確定するまで保存画面が開かず
+   * 「現在地を取得中…」で待たせていた。撮影中に取得を進めておけば、写真が
+   * 返った時点で解決済みのことが多く、待ち時間なしで保存画面へ進める。
+   *
+   * - state は触らない。カメラを閉じただけ (写真なし) の場合は何も起きず、
+   *   結果は次のリセット / 次回の撮影開始で捨てられる。
+   * - 共有 token を bump するので、進行中だった別経路の取得は無効化される
+   *   (「現在地を使う」と同じ規約)。
+   */
+  const startCameraLocationPrefetch = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      cameraLocationPrefetchRef.current = null;
+      return;
+    }
+    currentLocationRequestIdRef.current += 1;
+    const requestId = currentLocationRequestIdRef.current;
+    cameraRequestIdRef.current = requestId;
+    const entry: {
+      requestId: number;
+      promise: Promise<CameraPrefetchResult>;
+      settled: boolean;
+      result?: CameraPrefetchResult;
+    } = {
+      requestId,
+      settled: false,
+      promise: new Promise<CameraPrefetchResult>((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ ok: true, pos }),
+          (err) => {
+            const code = (err as { code?: number })?.code;
+            resolve({ ok: false, code: typeof code === "number" ? code : null });
+          },
+          { enableHighAccuracy: true, maximumAge: 5_000, timeout: 30_000 },
+        );
+      }),
+    };
+    // 解決済みかを同期的に判定できるようにしておく (待ちゼロなら
+    // 「現在地を取得中…」を一瞬も出さずに保存画面へ進める)。
+    void entry.promise.then((r) => {
+      entry.settled = true;
+      entry.result = r;
+    });
+    cameraLocationPrefetchRef.current = entry;
+  }, []);
+
   // カメラファースト状態の一括リセット。撮影待ちの写真は破棄し、進行中の
   // 現在地取得 callback も token bump で無効化する。
   const resetCameraFirst = useCallback(() => {
     currentLocationRequestIdRef.current += 1;
+    cameraLocationPrefetchRef.current = null;
     // 照合 ID も無効化する (Codex P2): reset 後に届いた旧カメラ callback の
     // 後始末分岐を発火させない。残したままだと後始末の resetCameraFirst が
     // 共有 token を再 bump し、モーダルの「現在地を使う」など reset 後に
@@ -644,9 +712,14 @@ export default function FieldSurveyMap({
     };
   }, []);
 
-  // カメラファースト: 撮影直後に現在地を単発取得し、取れたら作成 modal を
-  // 写真選択済みで開く。取れない環境 (http / 権限拒否 / タイムアウト) は
-  // 「地図をタップして場所を指定」へフォールバックする。
+  // カメラファースト: 撮影ボタンを押した時点で開始した現在地取得 (prefetch) の
+  // 結果を使って、作成 modal を写真選択済みで開く。
+  // - 解決済みかつ十分に新しければ「現在地を取得中…」を出さずに開く (待ちゼロ)
+  // - 古い場合は取り直す。カメラを開けたまま移動すると、撮影地点ではなく
+  //   ボタンを押した地点の座標でピンが立ってしまう (@codex #329 R1)
+  // - まだ取得中なら従来どおり locating 表示にして待つ
+  // - 取れない環境 (http / 権限拒否 / タイムアウト) は「地図をタップして場所を
+  //   指定」へフォールバックする (写真は保持=撮り直し不要)
   // token / mount / session ガードは「現在地を使う」と同型。
   const handleCameraPhotoCaptured = useCallback(
     (file: File) => {
@@ -656,94 +729,142 @@ export default function FieldSurveyMap({
       const requestSessionId = activeSessionIdRef.current;
       if (createCandidateOpenRef.current) return;
       cameraPhotoFileRef.current = file;
-      if (typeof navigator === "undefined" || !navigator.geolocation) {
+
+      const fallbackToMapTap = (code: number | null, notice?: string) => {
         setCameraFirstPhase("awaiting-map-tap");
-        setCameraFirstNotice(cameraFirstFallbackMessage(null));
+        setCameraFirstNotice(notice ?? cameraFirstFallbackMessage(code));
+      };
+
+      // 取得結果を state へ反映する。requestId は結果を持ってきた prefetch の
+      // もの (取り直した場合は新しい requestId) を使う。
+      const apply = (requestId: number, result: CameraPrefetchResult) => {
+        if (!fsMapMountedRef.current) return;
+        if (
+          currentLocationRequestIdRef.current !== requestId ||
+          // 巡回中に始めた撮影は session 切替で無効化する (従来どおり)。
+          // 巡回外で始めた撮影 (requestSessionId=null) は、取得中に巡回が
+          // 開始されても破棄しない。保存時に activeSession?.id を見るので
+          // 新しい巡回へ自然に紐づく (写真を黙って失わない)。
+          (requestSessionId !== null &&
+            activeSessionIdRef.current !== requestSessionId)
+        ) {
+          // 共有 token の bump / session 切替で無効化された遅延結果。
+          // 自分がまだ最新のカメラ要求なら (新しい撮影が始まっていなければ)
+          // "locating" 固着と写真リークを防ぐため状態を後始末する。
+          if (cameraRequestIdRef.current === requestId) {
+            resetCameraFirst();
+          }
+          return;
+        }
+        if (createCandidateOpenRef.current) {
+          // 取得中に別経路 (ピン追加モードの地図タップ) で modal が開いた。
+          // カメラ側の写真は破棄して衝突させない。
+          resetCameraFirst();
+          return;
+        }
+        if (!result.ok) {
+          fallbackToMapTap(result.code);
+          return;
+        }
+        const cand = cameraFirstCandidateFromPosition(result.pos);
+        if (!cand) {
+          fallbackToMapTap(null);
+          return;
+        }
+        const photo = cameraPhotoFileRef.current ?? undefined;
+        cameraPhotoFileRef.current = null;
+        createdFromCameraRef.current = true;
+        setCameraFirstPhase("idle");
+        setCameraFirstNotice(null);
+        setCreateCandidate({
+          ...cand,
+          cameraPhoto: photo,
+          cameraPhotoPreviewUrl: photo ? URL.createObjectURL(photo) : undefined,
+        });
+      };
+
+      // prefetch の結果を消費する。settled / 未解決のどちらの経路でも
+      // **同じ鮮度検証**を通す。
+      // ⚠settled=false でも「カメラ起動前に取得済み」の場合がある
+      // (ネイティブカメラがページを一時停止すると、解決済みでも .then が
+      //  走らないまま change が先に届く。@codex #329 R2)。待機側で検証を
+      // 省くとこの経路だけ古い座標が通ってしまう。
+      // 取り直しは1回まで (無限ループ防止)。撮った写真は捨てない。
+      const consume = (
+        entry: {
+          requestId: number;
+          promise: Promise<CameraPrefetchResult>;
+          settled: boolean;
+          result?: CameraPrefetchResult;
+        },
+        attempt: number,
+      ) => {
+        // 取り直す (1回まで)。上限に達したら手動指定へ倒す。いずれの経路でも
+        // 撮影済みの写真は保持したまま = 撮り直しを要求しない。
+        const retryOrFallback = (code: number | null, notice?: string) => {
+          if (attempt >= 1) {
+            fallbackToMapTap(code, notice);
+            return;
+          }
+          startCameraLocationPrefetch();
+          const renewed = cameraLocationPrefetchRef.current;
+          if (!renewed) {
+            fallbackToMapTap(code, notice);
+            return;
+          }
+          consume(renewed, attempt + 1);
+        };
+        const finish = (r: CameraPrefetchResult) => {
+          if (currentLocationRequestIdRef.current !== entry.requestId) {
+            // より新しい撮影が始まった / 別経路で作成 modal が開いた場合は
+            // 従来どおり破棄する (apply のガードに委ねる)。
+            if (
+              createCandidateOpenRef.current ||
+              cameraRequestIdRef.current !== entry.requestId
+            ) {
+              apply(entry.requestId, r);
+              return;
+            }
+            // 自分がまだ最新の撮影なのに token だけ進んでいる = 巡回の復元
+            // (null→active) などで共有 token が bump されたケース
+            // (@codex #329 R3)。撮った写真を捨てず、取り直して続行する。
+            retryOrFallback(null, "撮った場所の現在地を取得できませんでした。地図をタップして、撮った場所を指定してください。");
+            return;
+          }
+          if (r.ok && !isCameraPrefetchFresh(r.pos)) {
+            // カメラを開けたまま移動した = 撮影地点とずれる。取り直す。
+            retryOrFallback(null, "撮った場所の現在地を取得できませんでした。地図をタップして、撮った場所を指定してください。");
+            return;
+          }
+          if (!r.ok && r.code !== 1) {
+            // 一時的な失敗 (timeout / 位置不明 / 不詳) は撮影後に取り直せば
+            // 成功し得る。カメラ滞在が prefetch の制限時間を超えた場合に
+            // 即あきらめないため (@codex #329 R3)。
+            // 権限拒否 (code 1) は取り直しても無駄なので即フォールバック。
+            retryOrFallback(r.code);
+            return;
+          }
+          apply(entry.requestId, r);
+        };
+        if (entry.settled && entry.result) {
+          // 待たせずにその場で判定 (新しければ locating を一瞬も出さない)。
+          finish(entry.result);
+          return;
+        }
+        setCameraFirstPhase("locating");
+        setCameraFirstNotice(null);
+        void entry.promise.then(finish);
+      };
+      const prefetch = cameraLocationPrefetchRef.current;
+      if (!prefetch) {
+        // geolocation 非対応、または撮影開始の通知が来ていない (想定外) 場合は
+        // 場所指定へ回す。写真は保持したままなので撮り直しは不要。
+        fallbackToMapTap(null);
         return;
       }
-      currentLocationRequestIdRef.current += 1;
-      const requestId = currentLocationRequestIdRef.current;
-      cameraRequestIdRef.current = requestId;
-      setCameraFirstPhase("locating");
-      setCameraFirstNotice(null);
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          if (!fsMapMountedRef.current) return;
-          if (
-            currentLocationRequestIdRef.current !== requestId ||
-            // 巡回中に始めた撮影は session 切替で無効化する (従来どおり)。
-            // 巡回外で始めた撮影 (requestSessionId=null) は、取得中に巡回が
-            // 開始されても破棄しない。保存時に activeSession?.id を見るので
-            // 新しい巡回へ自然に紐づく (写真を黙って失わない)。
-            (requestSessionId !== null &&
-              activeSessionIdRef.current !== requestSessionId)
-          ) {
-            // 共有 token の bump / session 切替で無効化された遅延 callback。
-            // 自分がまだ最新のカメラ要求なら (新しい撮影が始まっていなければ)
-            // "locating" 固着と写真リークを防ぐため状態を後始末する。
-            if (cameraRequestIdRef.current === requestId) {
-              resetCameraFirst();
-            }
-            return;
-          }
-          if (createCandidateOpenRef.current) {
-            // 取得中に別経路 (ピン追加モードの地図タップ) で modal が開いた。
-            // カメラ側の写真は破棄して衝突させない。
-            resetCameraFirst();
-            return;
-          }
-          const cand = cameraFirstCandidateFromPosition(pos);
-          if (!cand) {
-            setCameraFirstPhase("awaiting-map-tap");
-            setCameraFirstNotice(cameraFirstFallbackMessage(null));
-            return;
-          }
-          const photo = cameraPhotoFileRef.current ?? undefined;
-          cameraPhotoFileRef.current = null;
-          createdFromCameraRef.current = true;
-          setCameraFirstPhase("idle");
-          setCameraFirstNotice(null);
-          setCreateCandidate({
-            ...cand,
-            cameraPhoto: photo,
-            cameraPhotoPreviewUrl: photo
-              ? URL.createObjectURL(photo)
-              : undefined,
-          });
-        },
-        (err) => {
-          if (!fsMapMountedRef.current) return;
-          if (
-            currentLocationRequestIdRef.current !== requestId ||
-            // 巡回中に始めた撮影は session 切替で無効化する (従来どおり)。
-            // 巡回外で始めた撮影 (requestSessionId=null) は、取得中に巡回が
-            // 開始されても破棄しない。保存時に activeSession?.id を見るので
-            // 新しい巡回へ自然に紐づく (写真を黙って失わない)。
-            (requestSessionId !== null &&
-              activeSessionIdRef.current !== requestSessionId)
-          ) {
-            // 成功側と同じ後始末 (locating 固着防止)。
-            if (cameraRequestIdRef.current === requestId) {
-              resetCameraFirst();
-            }
-            return;
-          }
-          if (createCandidateOpenRef.current) {
-            // 成功側と同じ競合ガード: modal 表示中に awaiting-map-tap へ
-            // 遷移させず、カメラ側の写真を破棄する。
-            resetCameraFirst();
-            return;
-          }
-          const code = (err as { code?: number })?.code;
-          setCameraFirstPhase("awaiting-map-tap");
-          setCameraFirstNotice(
-            cameraFirstFallbackMessage(typeof code === "number" ? code : null),
-          );
-        },
-        { enableHighAccuracy: true, maximumAge: 5_000, timeout: 30_000 },
-      );
+      consume(prefetch, 0);
     },
-    [resetCameraFirst],
+    [resetCameraFirst, startCameraLocationPrefetch],
   );
 
   const pinMutations = useFieldSurveyPinMutations();
@@ -1045,6 +1166,7 @@ export default function FieldSurveyMap({
             disabled={cameraButton.disabled}
             locating={cameraFirstPhase === "locating"}
             permissionDenied={canWritePin === false}
+            onCaptureStart={startCameraLocationPrefetch}
             onPhotoCaptured={handleCameraPhotoCaptured}
           />
         )}
@@ -1068,7 +1190,8 @@ export default function FieldSurveyMap({
                 disabled={cameraButton.disabled}
                 locating={cameraFirstPhase === "locating"}
                 permissionDenied={canWritePin === false}
-                onPhotoCaptured={handleCameraPhotoCaptured}
+                onCaptureStart={startCameraLocationPrefetch}
+            onPhotoCaptured={handleCameraPhotoCaptured}
               />
             )}
             <button

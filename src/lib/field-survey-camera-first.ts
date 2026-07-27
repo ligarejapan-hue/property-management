@@ -90,3 +90,32 @@ export function cameraFirstButtonState(input: {
   const disabled = input.canWrite === false || input.phase === "locating";
   return { visible, disabled };
 }
+
+/**
+ * 撮影と並行取得した現在地を「そのまま採用してよいか」の鮮度しきい値 (ms)。
+ *
+ * カメラを開けたまま歩いて移動すると、ボタンを押した地点の座標で撮影地点の
+ * ピンが立ってしまう (@codex #329 R1)。徒歩の移動速度 (概ね 1.4m/s) で
+ * 20 秒 ≒ 30m 弱のずれに収まる範囲を上限とし、これを超えたら取り直す。
+ * 精度の琥珀警告しきい値 (100m) より十分小さい。
+ */
+export const CAMERA_PREFETCH_MAX_AGE_MS = 20_000;
+
+/**
+ * 先読みした位置が撮影時点でまだ十分新しいか。
+ *
+ * `GeolocationPosition.timestamp` は取得時刻 (maximumAge のキャッシュ採用分も
+ * 反映される) なので、これを基準に判定する。timestamp が取れない実装では
+ * 安全側 (古い扱い = 取り直す) に倒す。
+ */
+export function isCameraPrefetchFresh(
+  pos: { timestamp?: number } | null | undefined,
+  now: number = Date.now(),
+  maxAgeMs: number = CAMERA_PREFETCH_MAX_AGE_MS,
+): boolean {
+  const ts = pos?.timestamp;
+  if (typeof ts !== "number" || !Number.isFinite(ts)) return false;
+  const age = now - ts;
+  // 端末時計のずれ等で未来時刻になった場合は「新しい」として扱う (age<0)。
+  return age <= maxAgeMs;
+}
