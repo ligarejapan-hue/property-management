@@ -135,6 +135,13 @@ export default function PinCreateModal({
   const [pinType, setPinType] = useState<FieldSurveyPinType>(
     lockPinType ? "candidate" : (initialPinType ?? "candidate"),
   );
+  // 開いている最中に巡回が終了すると (親が sessionId を null に差し替え) 初期化子は
+  // 再実行されないため、選択済みの候補以外がそのまま送られ POST が 422 になる
+  // (@codex #328 R2 P2)。送信・表示は常にこの派生値を使い、lock 中は candidate に
+  // 倒す (effect で setState しないので cascading render も起こさない)。
+  const effectivePinType: FieldSurveyPinType = lockPinType
+    ? "candidate"
+    : pinType;
   const [memo, setMemo] = useState<string>("");
   // カメラファースト経由の写真は選択済み状態で開始する。preview の objectURL は
   // 親がイベントハンドラ内で生成済み (render 中に createObjectURL を呼ばない)。
@@ -188,7 +195,7 @@ export default function PinCreateModal({
   const handleSubmit = () => {
     if (!canSubmit) return;
     onSubmit(
-      { lat: initialLat, lng: initialLng, pinType, memo },
+      { lat: initialLat, lng: initialLng, pinType: effectivePinType, memo },
       photoFile,
     );
   };
@@ -286,7 +293,7 @@ export default function PinCreateModal({
                     type="radio"
                     name="pin-create-type"
                     value={t}
-                    checked={pinType === t}
+                    checked={effectivePinType === t}
                     onChange={() => setPinType(t)}
                     data-testid={`pin-create-type-${t}`}
                   />

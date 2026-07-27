@@ -203,8 +203,18 @@ export async function PATCH(
       await assertPropertyAccessible(patch.propertyId, session, permissions);
     }
 
-    const updated = await prisma.fieldSurveyPin.update({
-      where: { id },
+    // 「巡回外は候補のみ」の判定は上で読んだ行に基づく = check-then-write。
+    // 同一 pin に対する 2 本の PATCH ({pinType:"blocked"} と {sessionId:null}) が
+    // 並行すると、双方が同じ旧行を読んで個別に判定を通り、それぞれ別フィールドだけ
+    // 更新するため最終行が「巡回なし × 候補以外」= 防ごうとした孤児状態になる
+    // (@codex #328 R2 P1)。判定の根拠列 (sessionId / pinType) を条件に含めた
+    // updateMany で CAS し、0 件なら 409 にして再試行させる。
+    const casResult = await prisma.fieldSurveyPin.updateMany({
+      where: {
+        id,
+        sessionId: existing.sessionId,
+        pinType: existing.pinType,
+      },
       data: {
         ...(patch.pinType !== undefined && { pinType: patch.pinType }),
         ...(patch.status !== undefined && { status: patch.status }),
@@ -212,6 +222,16 @@ export async function PATCH(
         ...(patch.propertyId !== undefined && { propertyId: patch.propertyId }),
         ...(patch.sessionId !== undefined && { sessionId: patch.sessionId }),
       },
+    });
+    if (casResult.count === 0) {
+      throw new ApiError(
+        409,
+        "ほかの操作と競合しました。画面を更新してからやり直してください。",
+        "CONCURRENT_UPDATE",
+      );
+    }
+    const updated = await prisma.fieldSurveyPin.findUniqueOrThrow({
+      where: { id },
       select: SELECT_PIN,
     });
 

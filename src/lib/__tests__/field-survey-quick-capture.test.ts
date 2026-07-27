@@ -169,6 +169,13 @@ describe("巡回外は種類を候補に固定する (@codex R1: 初期値だけ
       /nextSessionId === null && nextPinType !== "candidate"/,
     );
     expect(patchSrc).toMatch(/QUICK_CAPTURE_PIN_TYPE/);
+    // check-then-write の競合で孤児状態を作られないよう、判定の根拠列を
+    // where に含めた CAS (updateMany + 件数 0 で 409) で更新する。
+    expect(patchSrc).toMatch(
+      /updateMany\(\{[\s\S]{0,240}?sessionId: existing\.sessionId,[\s\S]{0,80}?pinType: existing\.pinType,/,
+    );
+    expect(patchSrc).toMatch(/casResult\.count === 0/);
+    expect(patchSrc).toMatch(/CONCURRENT_UPDATE/);
   });
 
   it("サーバも巡回外の候補以外を拒否する (API 直叩きでも孤児ピンを作れない)", () => {
