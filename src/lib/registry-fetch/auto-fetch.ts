@@ -728,6 +728,35 @@ function createPlaywrightRegistryPage(
           throw new RegistryFetchError("service_hours");
         if (unavailableNow === "missing")
           throw new RegistryFetchError(classifyRegistryMissingPage(new Date()));
+        // ⚠待機が予算を使い切っただけのケースを auth_failed にしない
+        // (@codex #331 R1)。送信後の待機に内側デッドラインを入れた結果、
+        // 「サイトが遅くて着地マーカーが出ない」= 一時的な遅延まで
+        // **資格情報の誤りとして報告**されるようになってしまう。これは
+        // 「常にタイムアウト表示」の裏返しで、やはり運用者を誤った対処へ導く。
+        //
+        // 資格情報の誤りは**積極的に検出する**: 登記情報提供サービスは
+        // ログインを弾くとログイン画面へ戻す (= #userId が再び DOM に居る)。
+        // フォームが戻っていれば auth_failed、そうでなければ「判らない」=
+        // 予算切れの timeout として扱う。
+        //
+        // ⚠残る限界: 弾かれた際にフォームを含まないエラーページを返す実装
+        // だった場合、資格情報の誤りが timeout として出る。ただし
+        // 「遅いだけを資格情報の誤りと言う」より害が小さい (再試行で解決し得る
+        // 案内になる) ため、判別不能時は timeout 側へ倒す。
+        if (isTimeoutError(err)) {
+          const loginFormBack = await page
+            .evaluate(
+              (sel) => !!document.querySelector(sel),
+              REGISTRY_SELECTORS.loginId,
+            )
+            .catch(() => false);
+          if (!loginFormBack) {
+            console.warn(
+              "[registry-login] post-submit wait exhausted the budget; classified as timeout",
+            );
+            throw new RegistryFetchError("timeout");
+          }
+        }
         // ログイン確認に至らない = 認証失敗扱い（生メッセージ非載・secret 非露出）。
         // どの段階/種別で失敗したか（TimeoutError とセレクタ名など）は運用診断のため分類ログに残す。
         // secret（loginId/password）に加え、baseUrl/loginUrl（env でカスタム/内部エンドポイントに

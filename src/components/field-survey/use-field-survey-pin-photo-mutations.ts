@@ -53,23 +53,48 @@ export interface PinPhotoMutationResult<T> {
  * 初回 GET が DELETE の commit より先に終わり、**削除済みの写真が一覧に残る**。
  * そのまま消そうとすると 404 になる。upload と同様、完了で読み直させる。
  */
+/**
+ * 完了通知に載せる結果。
+ *
+ * ⚠**成否を載せないと足りない** (@codex #331 R1)。閉じてすぐ開き直したあとに
+ * 通信・認証・変換・検証で失敗した場合、通知だけでは「送信中」表示が消えて
+ * 一覧を読み直すだけになり、**「出ますのでお待ちください」と案内したのに
+ * 何も出ず、エラーも出ない**。写真が端末のピッカーにしか無い状況で、
+ * 利用者は失敗に気づけない。結果を運んで再マウント側で案内する。
+ *
+ * error は pinApiErrorMessage 由来の汎用文言のみ (PII / 生レスポンスを載せない)。
+ */
+export interface PhotoMutationOutcome {
+  kind: "upload" | "delete";
+  ok: boolean;
+  error?: string;
+}
+
 const inFlightUploads = new Map<string, number>();
-const mutationSettledListeners = new Set<(pinId: string) => void>();
+const mutationSettledListeners = new Set<
+  (pinId: string, outcome: PhotoMutationOutcome) => void
+>();
 
 /** upload / delete の完了を、その pin を表示している一覧へ知らせる。 */
-function notifyPhotoMutationSettled(pinId: string): void {
-  for (const listener of mutationSettledListeners) listener(pinId);
+function notifyPhotoMutationSettled(
+  pinId: string,
+  outcome: PhotoMutationOutcome,
+): void {
+  for (const listener of mutationSettledListeners) listener(pinId, outcome);
 }
 
 function markUploadStarted(pinId: string): void {
   inFlightUploads.set(pinId, (inFlightUploads.get(pinId) ?? 0) + 1);
 }
 
-function markUploadSettled(pinId: string): void {
+function markUploadSettled(
+  pinId: string,
+  outcome: PhotoMutationOutcome,
+): void {
   const next = (inFlightUploads.get(pinId) ?? 1) - 1;
   if (next <= 0) inFlightUploads.delete(pinId);
   else inFlightUploads.set(pinId, next);
-  notifyPhotoMutationSettled(pinId);
+  notifyPhotoMutationSettled(pinId, outcome);
 }
 
 /** その pin に送信中の写真があるか (再マウント直後の案内表示用)。 */
@@ -79,7 +104,7 @@ export function hasInFlightPhotoUpload(pinId: string): boolean {
 
 /** upload / delete の完了 (成功/失敗どちらも) を購読する。戻り値で解除。 */
 export function subscribePhotoMutationSettled(
-  listener: (pinId: string) => void,
+  listener: (pinId: string, outcome: PhotoMutationOutcome) => void,
 ): () => void {
   mutationSettledListeners.add(listener);
   return () => {
@@ -184,6 +209,12 @@ export function useFieldSurveyPinPhotoMutations() {
       setUploadStateIfMounted({ loading: true, error: null });
       // unmount を跨いでも完了を再マウント側へ伝えられるようにする。
       markUploadStarted(pinId);
+      // finally で通知するため、返す結果をここに集約する。
+      let outcome: PhotoMutationOutcome = {
+        kind: "upload",
+        ok: false,
+        error: pinApiErrorMessage(0),
+      };
       try {
         // 送信前に端末内で自動変換 (HEIC → JPEG / 8MB 超の縮小)。変換できない
         // 端末ではサーバー 422 の代わりに平易な案内 (「互換性優先」設定) を返す。
@@ -193,6 +224,7 @@ export function useFieldSurveyPinPhotoMutations() {
         const prepared = await prepareFieldSurveyPhotoForUpload(file);
         if (!prepared.ok) {
           setUploadStateIfMounted({ loading: false, error: prepared.error });
+          outcome = { kind: "upload", ok: false, error: prepared.error };
           return { ok: false, error: prepared.error };
         }
         const formData = new FormData();
@@ -208,21 +240,24 @@ export function useFieldSurveyPinPhotoMutations() {
         if (!res.ok) {
           const msg = pinApiErrorMessage(res.status);
           setUploadStateIfMounted({ loading: false, error: msg });
+          outcome = { kind: "upload", ok: false, error: msg };
           return { ok: false, error: msg };
         }
         const body = (await res.json().catch(() => null)) as
           | { data?: PinPhoto }
           | null;
         setUploadStateIfMounted({ loading: false, error: null });
+        outcome = { kind: "upload", ok: true };
         return { ok: true, data: body?.data };
       } catch {
         const msg = pinApiErrorMessage(0);
         setUploadStateIfMounted({ loading: false, error: msg });
+        outcome = { kind: "upload", ok: false, error: msg };
         return { ok: false, error: msg };
       } finally {
-        // 成功・失敗・early return のいずれでも必ず通知する
+        // 成功・失敗のいずれでも必ず通知する
         // (通知漏れは「送信中」が残り続けて案内が消えないことになる)。
-        markUploadSettled(pinId);
+        markUploadSettled(pinId, outcome);
       }
     },
     [],
@@ -242,6 +277,11 @@ export function useFieldSurveyPinPhotoMutations() {
         if (mountedRef.current) setDeleteState(next);
       };
       setDeleteStateIfMounted({ loading: true, error: null });
+      let outcome: PhotoMutationOutcome = {
+        kind: "delete",
+        ok: false,
+        error: pinApiErrorMessage(0),
+      };
       try {
         const res = await fetch(
           `/api/field-survey/pins/${encodeURIComponent(pinId)}/photos/${encodeURIComponent(photoId)}`,
@@ -250,18 +290,21 @@ export function useFieldSurveyPinPhotoMutations() {
         if (!res.ok) {
           const msg = pinApiErrorMessage(res.status);
           setDeleteStateIfMounted({ loading: false, error: msg });
+          outcome = { kind: "delete", ok: false, error: msg };
           return { ok: false, error: msg };
         }
         setDeleteStateIfMounted({ loading: false, error: null });
+        outcome = { kind: "delete", ok: true };
         return { ok: true };
       } catch {
         const msg = pinApiErrorMessage(0);
         setDeleteStateIfMounted({ loading: false, error: msg });
+        outcome = { kind: "delete", ok: false, error: msg };
         return { ok: false, error: msg };
       } finally {
         // 削除も完了を通知する。通知が無いと、閉じてすぐ開き直したときに
         // **削除済みの写真が一覧に残り**、もう一度消そうとして 404 になる。
-        notifyPhotoMutationSettled(pinId);
+        notifyPhotoMutationSettled(pinId, outcome);
       }
     },
     [],

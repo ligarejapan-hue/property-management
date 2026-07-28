@@ -467,6 +467,66 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     ).rejects.toMatchObject({ code: "auth_failed" });
   });
 
+  it("送信後の待機が予算切れなら timeout (遅いだけを資格情報の誤りにしない・@codex #331 R1)", async () => {
+    // ⚠内側デッドラインを入れた副作用: 「サイトが遅くて着地マーカーが出ない」も
+    // catch へ落ちるので、無条件に auth_failed にすると**一時的な遅延を
+    // 資格情報の誤りとして報告**してしまう。これは「常にタイムアウト表示」の
+    // 裏返しで、やはり運用者を誤った対処へ導く。
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async (sel: string) => {
+      // 着地マーカーが出ない (グループセレクタ待ちが timeout)
+      if (sel.includes(",")) throw makeTimeoutError();
+      return {};
+    });
+    // ログイン画面へ戻っていない = 弾かれた証拠が無い
+    f.page.evaluate = vi.fn(async () => false);
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+    ).rejects.toMatchObject({ code: "timeout" });
+  });
+
+  it("ログイン画面へ戻っていれば auth_failed (弾かれた証拠を積極検出する)", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async (sel: string) => {
+      if (sel.includes(",")) throw makeTimeoutError();
+      return {};
+    });
+    // detectRegistryUnavailablePage は "" (閉局でない)、#userId は在る
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: unknown) =>
+      arg === "" ? "" : true,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+    ).rejects.toMatchObject({ code: "auth_failed" });
+  });
+
+  it("時間外の判定は timeout より優先される (既存の分類を壊さない)", async () => {
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async (sel: string) => {
+      if (sel.includes(",")) throw makeTimeoutError();
+      return {};
+    });
+    // 送信後に閉局へ切り替わったケース
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: unknown) =>
+      arg === "" ? "closed" : false,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+    ).rejects.toMatchObject({ code: "service_hours" });
+  });
+
   it("C3b: submit の evaluate 関数は対象セレクタ要素の DOM click() を呼ぶ（覆い/actionability に非依存）", async () => {
     const f = makeFakeChromium();
     let evaluatedFn: ((arg: string) => unknown) | undefined;

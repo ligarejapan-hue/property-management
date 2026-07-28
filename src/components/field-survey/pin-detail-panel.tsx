@@ -437,6 +437,9 @@ function PinPhotoSection({
   // パネルを閉じて開き直したとき、まだ送信中の写真があるか
   // (この一覧には未反映でも、送信は続いている)。
   const [detachedUploading, setDetachedUploading] = useState(false);
+  // パネルを離れている間に失敗した送信・削除の案内 (hook の state は
+  // unmount 後の更新を抑止するため、こちらで受け取って表示する)。
+  const [detachedError, setDetachedError] = useState<string | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const latestPinIdRef = useRef(pinId);
@@ -467,9 +470,14 @@ function PinPhotoSection({
   // 送信中があれば案内を出し、upload / delete どちらの完了でも自動で読み直す。
   useEffect(() => {
     setDetachedUploading(hasInFlightPhotoUpload(pinId));
-    return subscribePhotoMutationSettled((settledPinId) => {
+    setDetachedError(null);
+    return subscribePhotoMutationSettled((settledPinId, outcome) => {
       if (settledPinId !== pinId) return;
       setDetachedUploading(hasInFlightPhotoUpload(pinId));
+      // ⚠失敗をここで出さないと、「出ますのでお待ちください」と案内したまま
+      // 何も出ず・エラーも出ない状態になる (@codex #331 R1)。写真が端末の
+      // ピッカーにしか無い場面なので、必ず気づける形にする。
+      setDetachedError(outcome.ok ? null : (outcome.error ?? null));
       void reload();
     });
   }, [pinId, reload]);
@@ -629,6 +637,16 @@ function PinPhotoSection({
               写真を追加
             </button>
           </div>
+          {detachedError && (
+            <p
+              role="alert"
+              data-testid="pin-photo-detached-error"
+              className="mt-1 rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15 px-2 py-1 text-[11px] text-red-800 dark:text-red-300"
+            >
+              パネルを離れている間の写真の処理が失敗しました（{detachedError}）。
+              もう一度お試しください。
+            </p>
+          )}
           {detachedUploading && !photoMutations.uploadLoading && (
             <p
               role="status"

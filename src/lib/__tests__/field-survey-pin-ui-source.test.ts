@@ -996,7 +996,11 @@ describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
       PHOTO_HOOK_SRC.indexOf("const deletePhoto"),
     );
     expect(upload).toMatch(/markUploadStarted\(pinId\)/);
-    expect(upload).toMatch(/finally \{[\s\S]*?markUploadSettled\(pinId\)/);
+    // 通知には**結果**を載せる (成否が無いと、失敗しても「送信中」表示が消えて
+    // 一覧を読み直すだけになり、利用者は失敗に気づけない)。
+    expect(upload).toMatch(/finally \{[\s\S]*?markUploadSettled\(pinId, outcome\)/);
+    expect(upload).toMatch(/outcome = \{ kind: "upload", ok: true \}/);
+    expect(upload).toMatch(/outcome = \{ kind: "upload", ok: false, error: msg \}/);
   });
 
   it("保持するのは pinId と件数だけ (PII を持たない)", () => {
@@ -1119,7 +1123,32 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     // ⚠通知が無いと、閉じてすぐ開き直したとき初回 GET が DELETE の commit より
     // 先に終わり、削除済みの写真が一覧に残る。もう一度消そうとすると 404。
     const del = PHOTO_HOOK_SRC.slice(PHOTO_HOOK_SRC.indexOf("const deletePhoto"));
-    expect(del).toMatch(/finally \{[\s\S]*?notifyPhotoMutationSettled\(pinId\)/);
+    expect(del).toMatch(
+      /finally \{[\s\S]*?notifyPhotoMutationSettled\(pinId, outcome\)/,
+    );
+    expect(del).toMatch(/outcome = \{ kind: "delete", ok: true \}/);
+  });
+
+  it("離れている間の失敗を画面に出す (@codex #331 R1)", () => {
+    // ⚠通知に成否が無いと、「出ますのでお待ちください」と案内したまま
+    // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
+    // 場面なので、必ず気づける形にする。
+    expect(PANEL_SRC).toMatch(/setDetachedError\(/);
+    expect(PANEL_SRC).toMatch(/outcome\.ok \? null : \(outcome\.error \?\? null\)/);
+    expect(PANEL_SRC).toContain('data-testid="pin-photo-detached-error"');
+    expect(PANEL_SRC).toContain('role="alert"');
+    expect(PANEL_SRC).toContain("もう一度お試しください");
+  });
+
+  it("案内に載せるのは汎用文言だけ (PII / 生レスポンスを出さない)", () => {
+    // outcome.error は pinApiErrorMessage 由来 (status → 固定文言) のみ。
+    const registry = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("export interface PhotoMutationOutcome"),
+      PHOTO_HOOK_SRC.indexOf("export function useFieldSurveyPinPhotoMutations"),
+    );
+    for (const forbidden of ["fileName", "fileUrl", "storageKey", "res.text", "gps"]) {
+      expect(registry).not.toContain(forbidden);
+    }
   });
 
   it("送信中がある間は「もう一度送らずに待って」と案内する", () => {
