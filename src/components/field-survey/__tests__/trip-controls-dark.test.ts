@@ -109,6 +109,14 @@ describe("trip-controls.tsx dark: 配色 (field-survey phase)", () => {
   it("ライトモード text-blue-700 は残っている", () => {
     expect(src).toContain("text-blue-700");
   });
+  // 2026-07-29: 初回だけ出す位置記録の同意ブロック (開始確認 modal 内)
+  it("初回同意ブロックの面に dark:bg-gray-800/40 がある (bg-gray-50 対応)", () => {
+    expect(src).toContain("dark:bg-gray-800/40");
+  });
+  it("初回同意ブロックの枠 border-gray-300 に dark:border-gray-700 がある", () => {
+    expect(src).toContain("dark:border-gray-700");
+  });
+
   it("ライトモード bg-indigo-600 solid ボタンは残っている (ModalActions agree)", () => {
     expect(src).toContain("bg-indigo-600");
   });

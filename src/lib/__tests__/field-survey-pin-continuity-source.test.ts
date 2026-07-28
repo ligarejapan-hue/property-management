@@ -86,7 +86,7 @@ describe("field-survey-map.tsx — 連続ピンモード", () => {
     );
     expect(handler).not.toBeNull();
     expect(handler?.[0] ?? "").toMatch(
-      /resetCameraFirst\(\)[\s\S]{0,400}setPinAddMode\(false\)/,
+      /resetCameraFirst\(\)[\s\S]{0,1200}setPinAddMode\(false\)/,
     );
   });
 

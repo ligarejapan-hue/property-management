@@ -33,6 +33,9 @@ const HOOK_SRC = readSrc(
 const CONTROLS_SRC = readSrc(
   "src/components/field-survey/location-recorder-controls.tsx",
 );
+// 2026-07-29: 記録の開始が巡回開始に統合されたため、**同意文の保証は
+// 巡回開始の確認 modal 側 (TRIP_SRC) へ移った**。文言が消えていないことは
+// 引き続き見張る (置き場所が変わっただけで、要件は落としていない)。
 const POLYLINE_SRC = readSrc(
   "src/components/field-survey/route-polyline.tsx",
 );
@@ -135,23 +138,31 @@ describe("location-recorder-controls — UI / consent", () => {
     expect(CONTROLS_SRC.trim().startsWith('"use client"')).toBe(true);
   });
 
-  it("位置記録 開始 / 停止 button が存在する", () => {
-    expect(CONTROLS_SRC).toMatch(/位置記録開始/);
+  it("位置記録 再開 / 停止 button が存在する", () => {
+    // 開始は巡回開始に統合済み。ここに残るのは「止めた人が戻す」導線。
+    expect(CONTROLS_SRC).toMatch(/位置記録を再開/);
     expect(CONTROLS_SRC).toMatch(/位置記録停止/);
     expect(CONTROLS_SRC).toMatch(/data-testid="location-record-start-button"/);
     expect(CONTROLS_SRC).toMatch(/data-testid="location-record-stop-button"/);
   });
 
-  it("同意 modal に 常時監視ではない / 業務中のみ / 端末保存しない 文言がある", () => {
-    expect(CONTROLS_SRC).toMatch(/常時監視ではありません/);
-    expect(CONTROLS_SRC).toMatch(/業務.*巡回.*中のみ|巡回.*中のみ/);
-    expect(CONTROLS_SRC).toMatch(/端末側には保存しません/);
-    expect(CONTROLS_SRC).toMatch(/data-testid="location-record-consent-modal"/);
+  it("同意文に 常時監視ではない / 巡回中のみ / 端末保存しない 文言がある", () => {
+    expect(TRIP_SRC).toMatch(/常時監視ではありません/);
+    expect(TRIP_SRC).toMatch(/記録は巡回中だけ/);
+    expect(TRIP_SRC).toMatch(/端末側には保存しません/);
+    expect(TRIP_SRC).toMatch(/data-testid="trip-start-location-consent"/);
   });
 
   it("ブラウザを閉じると失われる注意がある", () => {
-    expect(CONTROLS_SRC).toMatch(/ブラウザを閉じ/);
-    expect(CONTROLS_SRC).toMatch(/失われる/);
+    expect(TRIP_SRC).toMatch(/ブラウザを閉じ/);
+    expect(TRIP_SRC).toMatch(/失われる/);
+  });
+
+  it("同意文は初回だけ出す (毎回は出さない)", () => {
+    // 毎日の業務で毎回出ると邪魔になるという業務判断 (2026-07-29)。
+    expect(TRIP_SRC).toMatch(/showLocationConsent &&/);
+    expect(TRIP_SRC).toMatch(/hasLocationConsent\(\)/);
+    expect(TRIP_SRC).toMatch(/markLocationConsent\(\)/);
   });
 
   it("UI 側でも localStorage / sessionStorage / IndexedDB / Wake Lock を使わない", () => {

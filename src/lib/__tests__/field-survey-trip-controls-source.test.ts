@@ -51,6 +51,23 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
     );
   });
 
+  // 2026-07-29: 同意文を初回だけ出すため、専用 module 経由で「印」ひとつだけ
+  // 端末に置く。**session / 位置情報を端末に残さない**という元の趣旨は不変で、
+  // 下の表明 (直接呼び出し禁止) と合わせて二重に固定する。
+  it("端末に置くのは同意の印だけ (session / 座標を含めない)", () => {
+    const consent = fs.readFileSync(
+      path.resolve(process.cwd(), "src/lib/field-survey-location-consent.ts"),
+      "utf8",
+    );
+    // 書き込む値は固定の印ひとつ。テンプレートや変数を混ぜない。
+    expect(consent).toMatch(/const CONSENT_MARK = "1";/);
+    expect(consent).toMatch(/s\.setItem\(FIELD_SURVEY_LOCATION_CONSENT_KEY, CONSENT_MARK\)/);
+    // session id / 座標を持ち込まない
+    expect(consent).not.toMatch(/sessionId|lat|lng|latitude|longitude/i);
+    // 印を読む以外の localStorage 操作をしない (removeItem / clear / key 列挙)
+    expect(consent).not.toMatch(/\.(removeItem|clear|key)\(/);
+  });
+
   it("localStorage / sessionStorage / IndexedDB の API 呼び出しが無い", () => {
     // bare word はコメントで負/不使用を明示している箇所があるため、実 API 呼び出し
     // パターン (.setItem / .getItem / window.* / indexedDB.open / .transaction) のみ検出。

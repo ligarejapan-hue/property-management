@@ -10,10 +10,16 @@
  * - 巡回終了: 確認 modal → PATCH /api/field-survey/sessions/[id]
  *   - 409 INVALID_STATE は再取得で UI 整合
  *
- * 今回スコープ外 (Phase 1-F-2 以降で実装):
- *   - navigator.geolocation 利用 (本ファイルでは一切呼ばない)
+ * 本ファイルで扱わないもの:
+ *   - navigator.geolocation 利用 (一切呼ばない)
  *   - TrackPoint 送信 / route polyline / 現在位置 marker
- *   - Wake Lock / IndexedDB / localStorage / sessionStorage 保存
+ *   - Wake Lock / IndexedDB / sessionStorage
+ *
+ * 端末保存について (2026-07-29):
+ *   同意文を初回だけ出すため、**「同意文を出したか」の印だけ**を端末に置く
+ *   (`field-survey-location-consent.ts`)。置くのは固定文字の印ひとつで、
+ *   session id・座標・氏名は一切含めない。本ファイルは localStorage を直接
+ *   触らず、その module 経由でのみ読み書きする。
  *
  * privacy:
  *   - API response を console に出さない
@@ -22,6 +28,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  hasLocationConsent,
+  markLocationConsent,
+} from "@/lib/field-survey-location-consent";
 import {
   classifyTripApiResponse,
   extractApiErrorCode,
@@ -86,7 +96,20 @@ interface TripControlsProps {
    * 通知 callback。session 詳細 (lat/lng/memo) は持たない最小情報のみ。
    * 未指定なら呼ばれない (Phase 1-F-1 互換)。
    */
-  onActiveSessionChange?: (session: ActiveSessionLike | null) => void;
+  onActiveSessionChange?: (
+    session: ActiveSessionLike | null,
+    opts?: {
+      /**
+       * ⚠**この通知が「今この操作で始まった巡回」か**。再読込や画面復帰で
+       * 既存の巡回を復元しただけの時は false。
+       *
+       * 親はこれを見て位置記録を自動開始する。区別しないと、休憩中に自分で
+       * 「位置記録停止」を押した人が、アプリを開き直しただけで記録を再開
+       * されてしまう (本人の意思に反して休憩場所が残る)。
+       */
+      justStarted?: boolean;
+    },
+  ) => void;
   /**
    * Phase 1-F-2: 巡回終了 API を叩く直前に await される hook。
    * 親側で位置記録 (watchPosition / flush timer / 残 buffer chunk flush) を
@@ -194,14 +217,23 @@ export default function TripControls({
   // まだ session 取得中 (phase="loading") に押された場合は取得完了まで予約し、
   // idle に確定した時点で確認 modal を開く (取得中の空打ちで無反応になるのを防ぐ)。
   const pendingStartRef = useRef(false);
+  // 「今この操作で始まった巡回」の id。復元 (再読込・画面復帰) と区別するため。
+  const justStartedIdRef = useRef<string | null>(null);
+  // 同意文は初回だけ出す (2026-07-29 業務判断)。端末に印が無いときだけ、
+  // 開始確認に位置記録の説明を載せる。印は端末ローカルにしか持たない。
+  const [needsLocationConsent, setNeedsLocationConsent] = useState(false);
+  const refreshConsentNeed = useCallback(() => {
+    setNeedsLocationConsent(!hasLocationConsent());
+  }, []);
   const requestStart = useCallback(() => {
+    refreshConsentNeed();
     setPhase((p) => {
       if (p === "idle") return "confirmStart";
       // loading 中は予約だけして、fetchActiveSession の解決時に開く。
       if (p === "loading") pendingStartRef.current = true;
       return p;
     });
-  }, []);
+  }, [refreshConsentNeed]);
   useEffect(() => {
     registerStartRequest?.(requestStart);
     return () => {
@@ -294,6 +326,7 @@ export default function TripControls({
           // loading 中に地図の「巡回を開始」が押されていた → 取得完了 (active
           // session 無し) で開始確認 modal を開く (空打ちを取りこぼさない)。
           pendingStartRef.current = false;
+          refreshConsentNeed();
           setPhase("confirmStart");
         } else {
           setPhase("idle");
@@ -317,7 +350,7 @@ export default function TripControls({
         if (timer) clearTimeout(timer);
       }
     },
-    [currentUserId],
+    [currentUserId, refreshConsentNeed],
   );
 
   useEffect(() => {
@@ -356,7 +389,10 @@ export default function TripControls({
   // session detail (memo / lat / lng) は持たないが、親側でも PII を扱わない前提。
   useEffect(() => {
     if (!onActiveSessionChange) return;
-    onActiveSessionChange(session);
+    const justStarted = !!session && justStartedIdRef.current === session.id;
+    // 一度伝えたら降ろす (同じ session の再通知で二度立てない)。
+    if (justStarted) justStartedIdRef.current = null;
+    onActiveSessionChange(session, { justStarted });
   }, [session, onActiveSessionChange]);
 
   const startSession = useCallback(async () => {
@@ -387,6 +423,7 @@ export default function TripControls({
         extractApiErrorCode(body),
       );
       if (outcome.kind === "ok" && body?.data) {
+        justStartedIdRef.current = body.data.id;
         setSession(body.data);
         setPhase("active");
         return;
@@ -791,7 +828,10 @@ export default function TripControls({
         />
       ) : (
         <IdleView
-          onStart={() => setPhase("confirmStart")}
+          onStart={() => {
+            refreshConsentNeed();
+            setPhase("confirmStart");
+          }}
           disabled={phase === "starting"}
         />
       )}
@@ -834,8 +874,13 @@ export default function TripControls({
 
       {phase === "confirmStart" && (
         <ConfirmStartModal
+          showLocationConsent={needsLocationConsent}
           onCancel={() => setPhase("idle")}
-          onAgree={() => void startSession()}
+          onAgree={() => {
+            // 印は「出した」ではなく「同意された」時にだけ残す。
+            if (needsLocationConsent) markLocationConsent();
+            void startSession();
+          }}
         />
       )}
 
@@ -888,8 +933,7 @@ function IdleView({
         巡回開始
       </button>
       <p className="text-[10px] leading-tight text-gray-400 dark:text-gray-500">
-        ※ 位置情報の記録は別途「位置記録開始」を押した時のみ行われます。
-        巡回開始だけでは GPS は使われません。
+        ※ 押すと位置の記録が始まり、地図が現在地へ移動します。
       </p>
     </>
   );
@@ -936,29 +980,52 @@ function ActiveSessionView({
 }
 
 function ConfirmStartModal({
+  showLocationConsent,
   onCancel,
   onAgree,
 }: {
+  /**
+   * 位置記録の説明を載せるか。**その端末で初めて巡回を始めるときだけ true**。
+   * 毎回出すと日々の業務で邪魔になるという業務判断 (2026-07-29)。
+   */
+  showLocationConsent: boolean;
   onCancel: () => void;
   onAgree: () => void;
 }) {
   return (
     <ModalShell title="🗺 巡回開始の確認" testId="trip-confirm-start-modal">
       <ul className="mb-3 ml-4 list-disc space-y-1 text-[11px] text-gray-700 dark:text-gray-200">
+        <li>巡回中は位置を記録します。常時監視ではありません。</li>
+        <li>「巡回終了」を押すまでの間だけです。</li>
         <li>
-          本機能は「巡回開始」を押してから「巡回終了」を押すまでの間のみ、
-          業務上の位置情報を扱う前提です。
-        </li>
-        <li>常時監視ではありません。</li>
-        <li>
-          ブラウザを閉じても session が active のまま残る場合があります。
-          再ログイン時に「巡回終了」を押してください。
-        </li>
-        <li>
-          位置情報の記録は、別途「位置記録開始」を押した時のみ開始されます。
-          巡回開始だけでは GPS は使われません。
+          ブラウザを閉じても巡回が続いたままになることがあります。
+          その場合は次に開いたときに「巡回終了」を押してください。
         </li>
       </ul>
+      {showLocationConsent && (
+        <div
+          data-testid="trip-start-location-consent"
+          className="mb-3 rounded border border-gray-300 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800/40"
+        >
+          <p className="mb-1 text-[11px] font-semibold text-gray-800 dark:text-gray-100">
+            📍 位置記録について (初回のみ)
+          </p>
+          <ul className="ml-4 list-disc space-y-1 text-[11px] text-gray-700 dark:text-gray-200">
+            <li>歩いた場所は、次にどのエリアを回るか決めるために使います。</li>
+            <li>
+              記録は巡回中だけです。止めたいときはパネルの「位置記録停止」で
+              いつでも止められます。
+            </li>
+            <li>
+              ブラウザを閉じたり画面を切り替えると、記録が止まることがあります。
+            </li>
+            <li>
+              未送信の記録はブラウザを閉じると失われることがあります
+              (端末側には保存しません)。
+            </li>
+          </ul>
+        </div>
+      )}
       <ModalActions
         onCancel={onCancel}
         onAgree={onAgree}

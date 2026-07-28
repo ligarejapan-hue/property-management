@@ -6,10 +6,12 @@
  * - useFieldSurveyLocationRecorder の戻り値を受け取って描画するだけ。
  *   位置情報取得 / fetch / setInterval は hook 側に閉じる。
  * - active session がある場合のみ呼び出し側 (FieldSurveyMap) が render する。
+ * - ⚠**記録の開始は巡回開始に統合された** (2026-07-29)。ここに残るのは
+ *   「一度止めた人が戻すための再開」と「停止」だけ。同意文は巡回開始の
+ *   確認 modal 側に移した (初回のみ表示)。
  * - lat / lng / raw API response を console / UI に出さない。
  */
 
-import { useState } from "react";
 import type { RecorderStatus } from "@/components/field-survey/use-field-survey-location-recorder";
 
 export interface LocationRecorderControlsProps {
@@ -35,7 +37,6 @@ export default function LocationRecorderControls({
   onStart,
   onStop,
 }: LocationRecorderControlsProps) {
-  const [confirming, setConfirming] = useState(false);
   const recording = status === "recording" || status === "preparing";
 
   return (
@@ -59,11 +60,11 @@ export default function LocationRecorderControls({
       {!recording && status !== "stopping" && (
         <button
           type="button"
-          onClick={() => setConfirming(true)}
+          onClick={() => onStart()}
           className="mt-2 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
           data-testid="location-record-start-button"
         >
-          位置記録開始
+          位置記録を再開
         </button>
       )}
       {(recording || status === "stopping") && (
@@ -85,16 +86,6 @@ export default function LocationRecorderControls({
         >
           {error}
         </p>
-      )}
-
-      {confirming && (
-        <ConsentModal
-          onCancel={() => setConfirming(false)}
-          onAgree={() => {
-            setConfirming(false);
-            onStart();
-          }}
-        />
       )}
     </div>
   );
@@ -162,59 +153,4 @@ function Counters({
 function formatTime(d: Date): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-function ConsentModal({
-  onCancel,
-  onAgree,
-}: {
-  onCancel: () => void;
-  onAgree: () => void;
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      data-testid="location-record-consent-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-    >
-      <div className="w-full max-w-md rounded-md bg-white p-4 text-sm shadow-lg dark:bg-gray-900">
-        <h3 className="mb-2 text-base font-semibold text-gray-800 dark:text-gray-100">
-          📍 位置記録の確認
-        </h3>
-        <ul className="mb-3 ml-4 list-disc space-y-1 text-[11px] text-gray-700 dark:text-gray-200">
-          <li>
-            業務 (巡回) 中のみ位置情報を記録します。常時監視ではありません。
-          </li>
-          <li>
-            この画面を開き、「位置記録開始」を押している間のみ記録されます。
-          </li>
-          <li>巡回終了または「位置記録停止」で記録は停止します。</li>
-          <li>
-            ブラウザを閉じたり画面を切り替えると、記録が止まることがあります。
-          </li>
-          <li>
-            未送信の位置情報はブラウザを閉じると失われる可能性があります
-            (端末側には保存しません)。
-          </li>
-        </ul>
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            キャンセル
-          </button>
-          <button
-            type="button"
-            onClick={onAgree}
-            className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700"
-          >
-            同意して記録開始
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }

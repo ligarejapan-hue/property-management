@@ -19,9 +19,6 @@ describe("location-recorder-controls.tsx dark: 配色 (field-survey phase)", () 
   it("dl カウンター本文に dark:text-gray-200 がある (text-gray-700 対応)", () => {
     expect(src).toContain("dark:text-gray-200");
   });
-  it("モーダルタイトルに dark:text-gray-100 がある (text-gray-800 対応)", () => {
-    expect(src).toContain("dark:text-gray-100");
-  });
 
   // --- 枠 ---
   it("セクション区切り border-gray-200 に dark:border-gray-800 がある", () => {
@@ -96,9 +93,6 @@ describe("location-recorder-controls.tsx dark: 配色 (field-survey phase)", () 
   });
   it("ライトモード text-blue-700 は残っている", () => {
     expect(src).toContain("text-blue-700");
-  });
-  it("ライトモード bg-indigo-600 solid ボタンは残っている", () => {
-    expect(src).toContain("bg-indigo-600");
   });
   it("ライトモード text-red-600 は残っている (● 位置記録中)", () => {
     expect(src).toContain("text-red-600");
