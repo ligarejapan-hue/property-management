@@ -149,16 +149,24 @@ export function parseMgmtIdQuery(rawQ: string): { normalized: string; parsed: Pa
 
 // 1 つの branch を id cursor ベースでページングし、各ページで Property 実在
 // チェックを実施して verifiedIds に積み上げる。target に達したら早期 return。
+/**
+ * 1 branch の走査がどう終わったか。
+ * - "exhausted": 入力行を最後まで見た (= この branch に取りこぼしは無いと**証明できた**)
+ * - "target-reached": 目標件数に達した (= 超過が**証明できた**)
+ * - "scan-cap": 走査上限で打ち切った (= 取りこぼしの有無が**判らない**)
+ */
+type CollectOutcome = "exhausted" | "target-reached" | "scan-cap";
+
 async function paginatedCollect(
   prisma: PrismaLike,
   branchWhere: Record<string, unknown>,
   verifiedIds: Set<string>,
   target: number,
-): Promise<void> {
+): Promise<CollectOutcome> {
   let cursor: string | undefined = undefined;
   const maxPages = maxPagesForTake(target);
   for (let page = 0; page < maxPages; page++) {
-    if (verifiedIds.size >= target) return;
+    if (verifiedIds.size >= target) return "target-reached";
 
     const where = cursor
       ? { ...branchWhere, id: { gt: cursor } }
@@ -170,7 +178,7 @@ async function paginatedCollect(
       take: INTERNAL_PAGE_SIZE,
     })) as { id: string; createdId: string | null }[];
 
-    if (rows.length === 0) return;
+    if (rows.length === 0) return "exhausted";
     cursor = rows[rows.length - 1].id;
 
     const newCandidates = Array.from(
@@ -188,20 +196,28 @@ async function paginatedCollect(
       });
       for (const p of props) {
         verifiedIds.add(p.id);
-        if (verifiedIds.size >= target) return;
+        if (verifiedIds.size >= target) return "target-reached";
       }
     }
 
-    if (rows.length < INTERNAL_PAGE_SIZE) return;
+    if (rows.length < INTERNAL_PAGE_SIZE) return "exhausted";
   }
+  return "scan-cap";
 }
 
 /**
  * 管理ID 一致を解決し、**上限超過を件数と別に**返す。
  *
- * 呼び出し側 (CSV / DM差込CSV) は overflowed が true なら、他の絞り込み条件で
- * 最終行数が上限未満に収まっていても出力してはいけない (切り捨てた id にだけ
- * 条件を満たす行があり得るため・@codex #330 R2)。
+ * 呼び出し側 (CSV / DM差込CSV / 有料の DM 生成) は overflowed が true なら、
+ * 他の絞り込み条件で最終行数が上限未満に収まっていても出力してはいけない
+ * (切り捨てた id にだけ条件を満たす行があり得るため・@codex #330 R2)。
+ *
+ * ⚠overflowed は「超えたと判った」だけでなく「**超えていないと証明できなかった**」
+ * ときも true にする (fail closed・@codex #330 R3)。走査は ImportJobRow 側の
+ * 行数で上限を切るため、1 物件が 3 行以上の取込行を持つ / 非 Property 行が
+ * 混在すると、10,000 件を超える物件があっても走査窓に収まらず
+ * 「超過していない」と誤って報告し得る。証明できたのは
+ * 「入力行を最後まで見た (exhausted)」ときだけ。
  */
 export async function resolveMgmtIdMatches(
   prisma: PrismaLike,
@@ -210,8 +226,15 @@ export async function resolveMgmtIdMatches(
 ): Promise<MgmtIdMatches> {
   const limit = options.limit ?? MGMT_ID_MATCH_LIMIT;
   // 上限より 1 件多く探し、超えたかどうかを判定する。
-  const ids = await collectMgmtIdMatches(prisma, rawQ, limit + 1);
-  return { ids: ids.slice(0, limit), overflowed: ids.length > limit };
+  const { ids, indeterminate } = await collectMgmtIdMatches(
+    prisma,
+    rawQ,
+    limit + 1,
+  );
+  return {
+    ids: ids.slice(0, limit),
+    overflowed: ids.length > limit || indeterminate,
+  };
 }
 
 /**
@@ -223,64 +246,87 @@ export async function resolveMgmtIdToPropertyIds(
   rawQ: string,
   options: ResolveMgmtIdOptions = {},
 ): Promise<string[]> {
-  return collectMgmtIdMatches(prisma, rawQ, options.take ?? MGMT_ID_MATCH_LIMIT);
+  const { ids } = await collectMgmtIdMatches(
+    prisma,
+    rawQ,
+    options.take ?? MGMT_ID_MATCH_LIMIT,
+  );
+  return ids;
 }
 
 async function collectMgmtIdMatches(
   prisma: PrismaLike,
   rawQ: string,
   take: number,
-): Promise<string[]> {
+): Promise<{ ids: string[]; indeterminate: boolean }> {
   const { normalized, parsed } = parseMgmtIdQuery(rawQ);
-  if (!normalized) return [];
+  if (!normalized) return { ids: [], indeterminate: false };
   // 範囲外・不正な rowNumber は 0 件扱い（Prisma Int 範囲外を渡すと
   // runtime error/500 になり得るため、他 branch にも進まない）。
-  if (parsed.invalidRowNumber) return [];
+  if (parsed.invalidRowNumber) return { ids: [], indeterminate: false };
 
   const verifiedIds = new Set<string>();
   const baseWhere = { status: "success" as const, createdId: { not: null } };
+  // どれか 1 branch でも走査上限で打ち切っていたら、全体として
+  // 「取りこぼしが無いと証明できていない」。
+  let indeterminate = false;
+  const note = (outcome: CollectOutcome): void => {
+    if (outcome === "scan-cap") indeterminate = true;
+  };
 
   if (parsed.fileNameHint && parsed.rowNumber !== null) {
-    await paginatedCollect(
-      prisma,
-      {
-        ...baseWhere,
-        rowNumber: parsed.rowNumber,
-        job: { fileName: { contains: parsed.fileNameHint, mode: "insensitive" } },
-      },
-      verifiedIds,
-      take,
+    note(
+      await paginatedCollect(
+        prisma,
+        {
+          ...baseWhere,
+          rowNumber: parsed.rowNumber,
+          job: {
+            fileName: { contains: parsed.fileNameHint, mode: "insensitive" },
+          },
+        },
+        verifiedIds,
+        take,
+      ),
     );
   } else if (parsed.rowNumber !== null) {
-    await paginatedCollect(
-      prisma,
-      { ...baseWhere, rowNumber: parsed.rowNumber },
-      verifiedIds,
-      take,
+    note(
+      await paginatedCollect(
+        prisma,
+        { ...baseWhere, rowNumber: parsed.rowNumber },
+        verifiedIds,
+        take,
+      ),
     );
   } else if (parsed.fileNameHint) {
-    await paginatedCollect(
-      prisma,
-      {
-        ...baseWhere,
-        job: { fileName: { contains: parsed.fileNameHint, mode: "insensitive" } },
-      },
-      verifiedIds,
-      take,
+    note(
+      await paginatedCollect(
+        prisma,
+        {
+          ...baseWhere,
+          job: {
+            fileName: { contains: parsed.fileNameHint, mode: "insensitive" },
+          },
+        },
+        verifiedIds,
+        take,
+      ),
     );
   }
 
   if (verifiedIds.size < take) {
-    await paginatedCollect(
-      prisma,
-      {
-        ...baseWhere,
-        rawData: { path: ["__sourceRef"], string_contains: normalized },
-      },
-      verifiedIds,
-      take,
+    note(
+      await paginatedCollect(
+        prisma,
+        {
+          ...baseWhere,
+          rawData: { path: ["__sourceRef"], string_contains: normalized },
+        },
+        verifiedIds,
+        take,
+      ),
     );
   }
 
-  return Array.from(verifiedIds).slice(0, take);
+  return { ids: Array.from(verifiedIds).slice(0, take), indeterminate };
 }

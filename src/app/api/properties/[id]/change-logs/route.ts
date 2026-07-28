@@ -63,10 +63,13 @@ export async function GET(
       throw new ApiError(403, "この物件を閲覧する権限がありません", "FORBIDDEN");
     }
 
-    const ownerLinks = await prisma.propertyOwner.findMany({
-      where: { propertyId },
-      select: { id: true },
-    });
+    const hasOwnerRead = hasPermission(perms, "owner", "read");
+    const ownerLinks = hasOwnerRead
+      ? await prisma.propertyOwner.findMany({
+          where: { propertyId },
+          select: { id: true },
+        })
+      : [];
     const ownerLinkIds = ownerLinks.map((o) => o.id);
     const buildingId = propertyRow.buildingId;
 
@@ -74,7 +77,12 @@ export async function GET(
     const targetFilters: Array<Record<string, unknown>> = [
       { targetTable: "properties", targetId: propertyId },
     ];
-    if (ownerLinkIds.length > 0) {
+    // ⚠所有者リンクの履歴は owner:read を持つ人にだけ出す (@codex #330 R3)。
+    // property_owners の ChangeLog は oldValue/newValue に**自由記述の note** を
+    // そのまま保持する。物件詳細 route は property:read だけの利用者に対して
+    // 所有者を `{ id }` まで削ぎ落として返しており、履歴からそれを回り込めては
+    // 意味がない。owner:read が無ければこの枝ごと積まない。
+    if (hasOwnerRead && ownerLinkIds.length > 0) {
       targetFilters.push({
         targetTable: "property_owners",
         targetId: { in: ownerLinkIds },

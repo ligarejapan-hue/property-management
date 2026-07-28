@@ -108,7 +108,19 @@ export async function POST(request: NextRequest) {
       if (query.dmStatus !== undefined && query.dmStatus !== "send") {
         throw new ApiError(400, "送付可(dmStatus=send)以外の絞り込みではDMを作成できません", "INVALID_DM_STATUS_FILTER");
       }
-      const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
+      const { where, mgmtShortCircuitEmpty, mgmtOverflowed } =
+        await buildPropertyListWhere(query, session);
+      // ⚠管理ID の一致が上限を超えて切り捨てられているときは、AI 生成 (課金) の
+      // 前に止める (@codex #330 R3)。ここは並べ替えたうえで先頭 50 件を選ぶが、
+      // その母集団が「取込行の並び順で先頭 10,000 件」に化けているため、
+      // **本来選ばれるべきでない宛先に有料で文面を作って送る**ことになる。
+      if (mgmtOverflowed) {
+        throw new ApiError(
+          400,
+          "管理IDに一致する物件が多すぎます（上限10,000件）。管理IDをより具体的に指定するか、他の条件で絞り込んでください。",
+          "MGMT_ID_LIMIT_EXCEEDED",
+        );
+      }
       orderBy = buildPropertyListOrderBy(query);
       if (mgmtShortCircuitEmpty) {
         whereClause = null;

@@ -31,7 +31,11 @@ vi.mock("@/lib/api-helpers", () => ({
       ),
   ),
 }));
-vi.mock("@/lib/permissions", () => ({ hasPermission: () => true }));
+const permOverride = { owner: true };
+vi.mock("@/lib/permissions", () => ({
+  hasPermission: (_p: unknown, resource: string) =>
+    resource === "owner" ? permOverride.owner : true,
+}));
 vi.mock("@/lib/prisma", () => ({
   default: {
     propertyOwner: { findMany: vi.fn() },
@@ -63,6 +67,7 @@ async function runAndGetOr() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  permOverride.owner = true;
   (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "admin" });
   (getUserPermissions as Mock).mockResolvedValue([]);
   (prisma.changeLog.findMany as unknown as Mock).mockResolvedValue([]);
@@ -200,5 +205,41 @@ describe("field_staff は担当外物件の履歴を読めない (@codex #330 R2
     (prisma.property.findUnique as unknown as Mock).mockResolvedValue(null);
     const res = await GET(req, ctx);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("owner:read が無ければ所有者リンクの履歴を出さない (@codex #330 R3)", () => {
+  // property_owners の ChangeLog は oldValue/newValue に**自由記述の note** を
+  // そのまま持つ。物件詳細 route は property:read だけの利用者に所有者を
+  // `{ id }` まで削って返しており、履歴からそれを回り込めては意味がない。
+  beforeEach(() => {
+    permOverride.owner = false;
+    (prisma.propertyOwner.findMany as unknown as Mock).mockResolvedValue([
+      { id: OWNER_LINK_1 },
+    ]);
+  });
+
+  it("property_owners の条件を積まない", async () => {
+    const or = await runAndGetOr();
+    expect(or.some((c) => c.targetTable === "property_owners")).toBe(false);
+  });
+
+  it("所有者リンクの id を DB から引くこともしない", async () => {
+    await GET(req, ctx);
+    expect(prisma.propertyOwner.findMany).not.toHaveBeenCalled();
+  });
+
+  it("物件本体・棟の履歴は従来どおり出す", async () => {
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue({
+      id: PROPERTY_ID,
+      buildingId: BUILDING_ID,
+      createdBy: "u1",
+      assignedTo: null,
+    });
+    const or = await runAndGetOr();
+    expect(or.map((c) => c.targetTable).sort()).toEqual([
+      "buildings",
+      "properties",
+    ]);
   });
 });

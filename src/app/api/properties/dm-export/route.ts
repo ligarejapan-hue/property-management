@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
     if (mgmtOverflowed) {
       throw new ApiError(
         400,
-        "管理IDに一致する物件が上限（10,000件）を超えています。管理IDをより具体的に指定するか、他の条件で絞り込んでください。",
+        "管理IDに一致する物件が多すぎます（上限10,000件）。管理IDをより具体的に指定するか、他の条件で絞り込んでください。",
         "EXPORT_LIMIT_EXCEEDED",
       );
     }

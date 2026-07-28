@@ -492,3 +492,38 @@ describe("走査上限は take から導出する (@codex #330 R1)", () => {
     expect(ids).toEqual(["deep"]);
   });
 });
+
+describe("超過判定は fail closed (@codex #330 R3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("走査上限で打ち切ったら『超えていない』と言わない", async () => {
+    // 1 物件あたり取込行が 3 行あると、10,000 件を超える物件が実在しても
+    // 走査窓 (行数ベース) に収まらず、件数だけ見ると上限未満に見える。
+    // ここで overflowed=false を返すと、CSV は取りこぼしたまま出てしまう。
+    // 同じ物件 id が 3 行ずつ並ぶ (取込を 3 回やり直した受付帳を模す)。
+    const pages = Array.from({ length: 60 }, (_, page) =>
+      Array.from({ length: 500 }, (_, i) => ({
+        createdId: `p${Math.floor((page * 500 + i) / 3)}`,
+      })),
+    );
+    const all = Array.from({ length: 10_000 }, (_, i) => `p${i}`);
+    const { prisma } = makePrisma({ rowsByCall: pages, propertyIds: all });
+
+    const res = await resolveMgmtIdMatches(prisma, "受付帳.xlsx");
+    // 走査上限に当たった = 取りこぼしの有無が判らない → 出力を止める側へ倒す
+    expect(res.overflowed).toBe(true);
+  });
+
+  it("入力行を最後まで見られたら超過ではないと言い切れる", async () => {
+    const rows = Array.from({ length: 30 }, (_, i) => ({ createdId: `p${i}` }));
+    const { prisma } = makePrisma({
+      rowsByCall: [rows],
+      propertyIds: rows.map((r) => r.createdId),
+    });
+    const res = await resolveMgmtIdMatches(prisma, "受付帳.xlsx");
+    expect(res.overflowed).toBe(false);
+    expect(res.ids.length).toBe(30);
+  });
+});

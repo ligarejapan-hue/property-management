@@ -72,20 +72,26 @@ describe("CSV 出力経路は overflowed で必ず止める", () => {
     "src/app/api/properties/export/route.ts",
     "src/app/api/properties/dm-export/route.ts",
     "src/app/api/properties/property-dm-export/route.ts",
+    // 有料の AI 文面生成。並べ替えたうえで先頭 50 件を選ぶため、母集団が
+    // 「取込行の並び順で先頭 10,000 件」に化けると**本来選ばれない宛先に
+    // 課金して文面を作る** (@codex #330 R3)。
+    "src/app/api/properties/sale-dm/campaigns/route.ts",
   ];
 
   it.each(ROUTES)("%s は mgmtOverflowed を受け取り 400 で中止する", (path) => {
     const src = readFileSync(path, "utf8");
     expect(src).toMatch(/mgmtOverflowed/);
-    expect(src).toMatch(/if \(mgmtOverflowed\) \{[\s\S]*?EXPORT_LIMIT_EXCEEDED/);
+    expect(src).toMatch(
+      /if \(mgmtOverflowed\) \{[\s\S]*?(EXPORT_LIMIT_EXCEEDED|MGMT_ID_LIMIT_EXCEEDED)/,
+    );
   });
 
-  it.each(ROUTES)("%s の中止は行を取得する前に行う", (path) => {
+  it.each(ROUTES)("%s の中止は物件行を取得する前に行う", (path) => {
     const src = readFileSync(path, "utf8");
     // 取りこぼした行を作ってから判定しても意味がない (出力直前で気づけない)。
     expect(src.indexOf("if (mgmtOverflowed)")).toBeGreaterThan(-1);
     expect(src.indexOf("if (mgmtOverflowed)")).toBeLessThan(
-      src.indexOf("findMany"),
+      src.indexOf("prisma.property.findMany"),
     );
   });
 });
