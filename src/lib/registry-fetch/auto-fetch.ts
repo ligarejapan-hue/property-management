@@ -620,6 +620,10 @@ function createPlaywrightRegistryPage(
       // 誤分類しないための旗 (@codex #331 R1)。送信前はログインフォームが
       // 出ているのが正常なので、フォームの有無では判別できない。
       let submitted = false;
+      // 二重ログイン確認画面「ご利用中の方へ」に到達したか。ここで詰まるのは
+      // **前回セッションが残っている**問題なので、遅延ではなく認証側の問題として
+      // 扱う (@codex #331 R1)。catch から読めるよう try の外で宣言する。
+      let sawForceLoginConfirm = false;
       // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
       // loginPath は env（REGISTRY_FETCH_LOGIN_PATH）で上書き可能（live キャリブレーション）。
       const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
@@ -717,7 +721,6 @@ function createPlaywrightRegistryPage(
         // 確認画面か否かの「判定」だけを内側 try に閉じる(未出現=通常メニュー着地=正常スキップ)。
         // 突破処理(ボタン待ち→click→消失確認)は外側 try 内に置き、その timeout は auth_failed に
         // 正しく落とす(「確認画面ありなのに突破できない」を正常スキップと混同しない)。
-        let sawForceLoginConfirm = false;
         try {
           // マーカーは hidden input のため state:"attached"(DOM 存在で判定)にする。
           // 既定の "visible" 待ちでは hidden 要素が可視にならず永遠に timeout する
@@ -798,8 +801,13 @@ function createPlaywrightRegistryPage(
           // 「印の無い #userId が在る」= 別 document に置き換わった
           // = 遷移して戻された = 弾かれた証拠。印が残っていれば元のフォームが
           // まだ生きている (= 遷移していない = 遅いだけ)。
+          // 確認画面に到達していたなら、そこで詰まったということ = 認証側の問題
+          // (前回セッションが残る / 突破ボタンが効かない)。運用者に「再試行」でなく
+          // 「ログインセッションを調べる」を促すため auth_failed を保つ。
+          const stuckOnForceLoginConfirm = submitted && sawForceLoginConfirm;
           const loginFormBack =
             submitted &&
+            !stuckOnForceLoginConfirm &&
             (await page
               .evaluate((sel) => {
                 const parts = sel.split("|");
@@ -807,7 +815,7 @@ function createPlaywrightRegistryPage(
                 return !!el && !el.hasAttribute(parts[1]);
               }, `${REGISTRY_SELECTORS.loginId}|${REGISTRY_LOGIN_FORM_PROBE_ATTR}`)
               .catch(() => false));
-          if (!loginFormBack) {
+          if (!loginFormBack && !stuckOnForceLoginConfirm) {
             console.warn(
               submitted
                 ? "[registry-login] post-submit wait exhausted the budget; classified as timeout"

@@ -769,9 +769,13 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
         chromiumLoader: f.loader,
       });
       const page = await factory!();
+      // ⚠分類まで固定する (@codex #331 R1)。ここで詰まるのは前回セッションが
+      // 残っている問題なので、timeout(= 再試行を促す) ではなく auth_failed
+      // (= ログインセッションを調べる) が正しい。共有デッドライン導入で
+      // 内側の待機が先に切れるようになったため、明示的に固定しておく。
       await expect(
         page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
-      ).rejects.toThrow(RegistryFetchError);
+      ).rejects.toMatchObject({ code: "auth_failed" });
     } finally {
       warnSpy.mockRestore();
     }
