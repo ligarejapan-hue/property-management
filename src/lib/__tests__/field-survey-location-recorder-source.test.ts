@@ -12,8 +12,19 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 
+/**
+ * ⚠改行コードを LF に正規化してから照合する。
+ *
+ * Windows の checkout（git の autocrlf）ではソースが CRLF で落ちてくるため、
+ * 文字数の上限を切った表明（`[\s\S]{0,240}`）が行数ぶんの `\r` を余計に数えて
+ * **中身は正しいのに落ちる**。ここで正規化しておくと Linux（本番・CI）の
+ * LF checkout と同じ文字列になるので、表明の意味を変えずに OS 差だけを消せる
+ *（LF 環境では恒等変換）。
+ */
 function readSrc(relPath: string): string {
-  return fs.readFileSync(path.resolve(process.cwd(), relPath), "utf8");
+  return fs
+    .readFileSync(path.resolve(process.cwd(), relPath), "utf8")
+    .replace(/\r\n/g, "\n");
 }
 
 const HOOK_SRC = readSrc(

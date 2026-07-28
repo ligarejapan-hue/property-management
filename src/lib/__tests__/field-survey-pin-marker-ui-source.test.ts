@@ -8,8 +8,19 @@ import * as fs from "fs";
 import * as path from "path";
 import PinMarkerLegend from "@/components/field-survey/pin-marker-legend";
 
+/**
+ * ⚠改行コードを LF に正規化してから照合する。
+ *
+ * Windows の checkout（git の autocrlf）ではソースが CRLF で落ちてくるため、
+ * `/\bPin,\n/` や `/<MapDataLayer\n/` のように `\n` を直接含む表明が
+ * **中身は正しいのに落ちる**（実際には `Pin,\r\n` が入っている）。
+ * ここで正規化しておくと、Linux（本番・CI）の LF checkout と同じ文字列に
+ * なるので、表明の意味を変えずに OS 差だけを消せる（LF 環境では恒等変換）。
+ */
 function readSrc(relPath: string): string {
-  return fs.readFileSync(path.resolve(process.cwd(), relPath), "utf8");
+  return fs
+    .readFileSync(path.resolve(process.cwd(), relPath), "utf8")
+    .replace(/\r\n/g, "\n");
 }
 
 const MAP_SRC = readSrc("src/components/field-survey/field-survey-map.tsx");

@@ -352,8 +352,14 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
   });
 
   it("layer / refetchNonce で marker 再 fetch を発火する", () => {
-    // useEffect deps に refetchNonce を含める
-    expect(MAP_SRC).toMatch(/\[layers\.properties,\s*layers\.pins,\s*refetchNonce\]/);
+    // useEffect deps に refetchNonce を含める。
+    // 踏破ヒート追加後は layers.coverage と coverageDays も deps に入る
+    // (期間を切り替えたら取り直す必要があるため)。順序に依存しない形で確認する。
+    const deps = MAP_SRC.match(/\}, \[layers\.properties,[^\]]*\]\);/);
+    expect(deps).not.toBeNull();
+    for (const dep of ["layers.properties", "layers.pins", "refetchNonce"]) {
+      expect(deps![0]).toContain(dep);
+    }
   });
 
   it("getCurrentPosition は単発のみ。watchPosition / wakeLock は使わない", () => {

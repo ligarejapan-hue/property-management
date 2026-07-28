@@ -10,6 +10,10 @@ import ConvertPinToPropertyModal from "@/components/field-survey/convert-pin-to-
 import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
 import { formatPinCreatedAt } from "@/lib/field-survey-pin-util";
 import {
+  buildExternalMapUrl,
+  buildStreetViewUrl,
+} from "@/lib/external-maps-url";
+import {
   describeCandidateAge,
   msUntilNextJstMidnight,
   CANDIDATE_LIST_LIMIT,
@@ -29,7 +33,103 @@ import {
  *   落とす。表示ゲートは DELETE の認可 (own=field_survey:write / 他人=manage)
  *   と一致させ、押しても 403 になるボタンを出さない (fail-closed)。
  *   currentUserId は server component が確定した値のみ使う (client 推測なし)。
+ * - 場所の確認 (「現地の様子」) は一般向け Google マップ / ストリートビューを
+ *   別タブで開く。⚠アプリ内に地図やストリートビューを埋め込むと Maps Platform
+ *   の課金対象になるが、リンクを開くだけなら費用が出ない。既存の「地図で見る」
+ *   (アプリ内地図) は残しつつ、費用の出ない外部リンクを並べる。
+ *   ⚠この費用の話は利用者向けの文言には出さない (業務画面に費用の話は載せない)。
  */
+/**
+ * 1 件分の座標を「座標のみ射影」API から取る。
+ * - 詳細 GET (/pins/[id]) は memo 本文まで返すため、位置だけ見る操作では使わない
+ *   (地図の ?focusPin と同じ endpoint / 同じ理由)。
+ * - 認可はサーバー側 (own=field_survey:read / 他人=read_all|manage)。403/404 も
+ *   通信失敗も null にまとめ、理由を呼び出し元・画面へ持ち出さない (fail-closed)。
+ * - 失敗を console に出さない (座標・PII をログに残さない方針)。
+ * component の外に置くのは、hook の中に try/finally を持ち込まないため。
+ */
+async function fetchPinLocation(
+  pinId: string,
+): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const res = await fetch(
+      `/api/field-survey/pins/${encodeURIComponent(pinId)}/location`,
+      { credentials: "same-origin" },
+    );
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as {
+      data?: { lat?: unknown; lng?: unknown };
+    } | null;
+    const lat = Number(body?.data?.lat);
+    const lng = Number(body?.data?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  } catch {
+    // 通信失敗 (オフライン等)。押し直しで再試行できるので静かに諦める。
+    return null;
+  }
+}
+
+/**
+ * 行内チップ (写真 / 地図 / 現地の様子) の共通スタイル。3 つ以上並ぶので
+ * 大きさと形を揃え、はみ出したら折り返す (スマホでも崩れない)。
+ */
+const ROW_CHIP_CLASS =
+  "inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800";
+
+/**
+ * 候補行の「現地の様子」外部リンク 2 本 (ストリートビュー / Google マップ)。
+ *
+ * ⚠アプリ内に地図やストリートビューを埋め込むと Maps Platform の課金対象だが、
+ *   ここは一般向け Google マップを別タブで開くだけなので費用が出ない。
+ *   (この理由は利用者には見せない = 画面文言には書かない。)
+ * - 座標が無い / 範囲外の行は build*Url が null を返すため、そのリンクを出さない。
+ * - 外部サイトへ出るので target="_blank" + rel="noopener noreferrer" を必ず付ける
+ *   (開いた先から window.opener 経由でこの画面を触られないようにする)。
+ * - 座標は URL 組み立てにだけ使い、画面にも console にも出さない。
+ *
+ * 表示専用なので export し、node 環境の vitest から renderToStaticMarkup で検証する。
+ */
+export function CandidatePlaceLinks({
+  lat,
+  lng,
+}: {
+  lat: number | null | undefined;
+  lng: number | null | undefined;
+}) {
+  const streetViewUrl = buildStreetViewUrl(lat, lng);
+  const externalMapUrl = buildExternalMapUrl(lat, lng);
+  if (!streetViewUrl && !externalMapUrl) return null;
+  return (
+    <>
+      {streetViewUrl && (
+        <a
+          data-testid="candidate-streetview-link"
+          href={streetViewUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={ROW_CHIP_CLASS}
+        >
+          <span aria-hidden="true">👁</span>
+          ストリートビュー
+        </a>
+      )}
+      {externalMapUrl && (
+        <a
+          data-testid="candidate-google-map-link"
+          href={externalMapUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={ROW_CHIP_CLASS}
+        >
+          <span aria-hidden="true">🌐</span>
+          Googleマップ
+        </a>
+      )}
+    </>
+  );
+}
+
 export default function CandidateQueue({
   currentUserId,
 }: {
@@ -143,6 +243,22 @@ export default function CandidateQueue({
     });
   }, []);
 
+  // 「現地の様子」用の座標。押した行だけ取りに行く (写真の遅延読込と同方針)。
+  // - 一覧 API は座標を返さない設計 (一覧に座標は出さない = 非PII) なので、
+  //   座標のみ射影の /pins/[id]/location から取る (memo 本文を client に乗せない)。
+  // - その API は他人の pin を見たとき監査ログを残す。一覧を開いただけで全行分の
+  //   「見た」記録が積まれると監査が意味を失うため、押した行だけ取得する。
+  // - 取得した座標は state に持つだけで、画面にも console にも出さない。
+  const [placeCoords, setPlaceCoords] = useState<
+    Map<string, { lat: number; lng: number }>
+  >(() => new Map());
+  const [placeLoadingIds, setPlaceLoadingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [placeErrorIds, setPlaceErrorIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
   // 並び順切替の競合ガード: 先行リクエストの遅延応答が後から届いても、
   // 現在の並び順のリクエストでなければ破棄する (Codex P2: 切替直後に
   // 古い応答が rows/truncated を上書きし、表示と選択が食い違う)。
@@ -157,6 +273,9 @@ export default function CandidateQueue({
     setError(null);
     setShownPhotoIds(new Set());
     setBrokenThumbIds(new Set());
+    setPlaceCoords(new Map());
+    setPlaceLoadingIds(new Set());
+    setPlaceErrorIds(new Set());
     try {
       const r = await listCandidatePins(order);
       if (generation !== loadGenerationRef.current) return;
@@ -173,6 +292,46 @@ export default function CandidateQueue({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: 一覧データ取得エフェクトの標準形（sales-sheets/new と同様）。取得開始時に error をリセットする同期 setState。
     void load();
   }, [load]);
+
+  // 「現地の様子」を押した行の座標を取得する。取得できた行だけ外部リンクを出す。
+  // - 認可はサーバー側 (own=field_survey:read / 他人=read_all|manage)。403/404 は
+  //   静かに「取得できません」に倒す (fail-closed・理由は画面に出さない)。
+  // - 一覧を読み直した後に届いた遅延応答は世代ガードで捨てる (並び順切替と同じ)。
+  // - 失敗しても座標や生の応答を console / 文言に出さない。
+  const showPlace = useCallback(async (pinId: string) => {
+    const generation = loadGenerationRef.current;
+    setPlaceErrorIds((prev) => {
+      if (!prev.has(pinId)) return prev;
+      const next = new Set(prev);
+      next.delete(pinId);
+      return next;
+    });
+    setPlaceLoadingIds((prev) => {
+      const next = new Set(prev);
+      next.add(pinId);
+      return next;
+    });
+    const coords = await fetchPinLocation(pinId);
+    // 一覧を読み直していたら破棄する。load() が loading / error / coords を
+    // 初期化済みなので、ここで後片付けする必要は無い。
+    if (generation !== loadGenerationRef.current) return;
+    setPlaceLoadingIds((prev) => {
+      if (!prev.has(pinId)) return prev;
+      const next = new Set(prev);
+      next.delete(pinId);
+      return next;
+    });
+    if (!coords) {
+      setPlaceErrorIds((prev) => {
+        if (prev.has(pinId)) return prev;
+        const next = new Set(prev);
+        next.add(pinId);
+        return next;
+      });
+      return;
+    }
+    setPlaceCoords((prev) => new Map(prev).set(pinId, coords));
+  }, []);
 
   // 「外す」確定。論理削除に成功したら一覧を取り直す (行が消えるのが成功の
   // 見た目のフィードバック)。失敗は確認ボックス内に理由を出して留まる。
@@ -309,6 +468,9 @@ export default function CandidateQueue({
             const photoCount = r.photoCount ?? 0;
             const photoShown = shownPhotoIds.has(r.id);
             const photoBroken = brokenThumbIds.has(r.id);
+            const place = placeCoords.get(r.id) ?? null;
+            const placeLoading = placeLoadingIds.has(r.id);
+            const placeFailed = placeErrorIds.has(r.id);
             // DELETE の認可と一致: own は write、他人は manage のみ。
             const canReject =
               canManageFieldSurvey ||
@@ -342,24 +504,58 @@ export default function CandidateQueue({
                           data-testid="candidate-photo-toggle"
                           onClick={() => togglePhoto(r.id)}
                           aria-expanded={photoShown}
-                          className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                          className={ROW_CHIP_CLASS}
                         >
                           <span aria-hidden="true">📷</span>
                           写真{photoCount}枚{photoShown ? "を隠す" : "を見る"}
                         </button>
                       )}
+                    </div>
+                    {/* 場所を確かめる導線。3 つ以上並ぶので日時の行とは分け、
+                        独立した折り返し行にまとめる (PC は横並び、スマホは
+                        自然に折り返して潰れない)。 */}
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       {/* 場所特定の導線: 地図を指定ピンへ寄せて開く。座標は URL に
                           載せず (id のみ)、地図側が pin 詳細 API から取得する。 */}
                       <Link
                         data-testid="candidate-map-link"
                         href={`/field-survey/map?focusPin=${r.id}`}
-                        className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                        className={ROW_CHIP_CLASS}
                       >
                         <span aria-hidden="true">🗺</span>
                         地図で見る
                       </Link>
+                      {place ? (
+                        <CandidatePlaceLinks lat={place.lat} lng={place.lng} />
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="candidate-place-toggle"
+                          onClick={() => {
+                            void showPlace(r.id);
+                          }}
+                          disabled={placeLoading}
+                          className={ROW_CHIP_CLASS}
+                        >
+                          <span aria-hidden="true">👁</span>
+                          {placeLoading
+                            ? "現地の様子を準備中…"
+                            : placeFailed
+                              ? "現地の様子をもう一度"
+                              : "現地の様子を見る"}
+                        </button>
+                      )}
+                      {placeFailed && (
+                        <span
+                          role="status"
+                          data-testid="candidate-place-error"
+                          className="text-[11px] text-gray-500 dark:text-gray-400"
+                        >
+                          場所を取得できませんでした。
+                        </span>
+                      )}
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{r.hasMemo ? "メモあり" : "メモなし"}</div>
+                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{r.hasMemo ? "メモあり" : "メモなし"}</div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {canReject && (

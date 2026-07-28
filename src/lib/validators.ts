@@ -506,3 +506,59 @@ export const fieldSurveyMapPropertyListQuerySchema = z
       return;
     }
   });
+
+/**
+ * 踏破ヒート（歩いた場所の蓄積表示）の集計クエリ。
+ *
+ * bbox の作法は fieldSurveyMapPropertyListQuerySchema と揃える（同じ地図が呼ぶので
+ * 片方だけ緩いと「物件は出るのに色は出ない」のような食い違いが起きる）。
+ *
+ * ⚠scope（自分の分/全員の分）は**持たない**。色は最初から全社合計で、
+ * 「Aさんが1度通れば1回、Bさんが1度通れば2回」（ユーザー決定 2026-07-28）。
+ * 誰の分かを区別しないため、返す値に人を識別する情報が一切入らない。
+ */
+export const fieldSurveyCoverageQuerySchema = z
+  .object({
+    north: z.coerce.number().min(-90).max(90),
+    south: z.coerce.number().min(-90).max(90),
+    east: z.coerce.number().min(-180).max(180),
+    west: z.coerce.number().min(-180).max(180),
+    // 期間は「直近1年(365)」と「全期間(0)」だけ（ユーザー決定）。
+    days: z.coerce.number().int().refine((v) => v === 365 || v === 0, {
+      message: "days は 365(直近1年) か 0(全期間) のみ指定できます",
+    }).default(365),
+  })
+  .superRefine((v, ctx) => {
+    if (v.north < v.south) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "north は south 以上である必要があります",
+        path: ["north"],
+      });
+      return;
+    }
+    if (v.east < v.west) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "east は west 以上である必要があります",
+        path: ["east"],
+      });
+      return;
+    }
+    if (v.north - v.south > FIELD_SURVEY_MAP_BBOX_MAX_DEG) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `緯度差は ${FIELD_SURVEY_MAP_BBOX_MAX_DEG} 度以下にしてください`,
+        path: ["north"],
+      });
+      return;
+    }
+    if (v.east - v.west > FIELD_SURVEY_MAP_BBOX_MAX_DEG) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `経度差は ${FIELD_SURVEY_MAP_BBOX_MAX_DEG} 度以下にしてください`,
+        path: ["east"],
+      });
+      return;
+    }
+  });
