@@ -379,3 +379,45 @@ describe("resolveMgmtIdToPropertyIds", () => {
     expect(findManyImportRow).not.toHaveBeenCalled();
   });
 });
+
+describe("返却上限 (総点検 2026-07-27: CSV/DM の取りこぼし)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("200 件を超えても切り捨てない (旧実装は 200 で打ち切っていた)", async () => {
+    // 6,000 行の受付帳をファイル名だけで絞った状況を模す。
+    const many = Array.from({ length: 1500 }, (_, i) => `p${i}`);
+    const { prisma } = makePrisma({
+      rowsByCall: [many.map((id) => ({ createdId: id }))],
+      propertyIds: many,
+    });
+    const ids = await resolveMgmtIdToPropertyIds(prisma, "受付帳.xlsx");
+    // 旧実装ではここが 200 になり、一覧の件数も CSV の行数も 200 に化けていた。
+    expect(ids.length).toBe(1500);
+  });
+
+  it("CSV の安全上限 (10,000) を超える分は 10,001 件で止める", async () => {
+    // 10,001 件返せば、CSV 側の「> 10,000 なら 400 で中止」に必ず到達する
+    // (= 黙って一部だけ出力される事故が起きない)。
+    const many = Array.from({ length: 10_050 }, (_, i) => `p${i}`);
+    const { prisma } = makePrisma({
+      rowsByCall: [many.map((id) => ({ createdId: id }))],
+      propertyIds: many,
+    });
+    const ids = await resolveMgmtIdToPropertyIds(prisma, "受付帳.xlsx");
+    expect(ids.length).toBe(10_001);
+  });
+
+  it("take を明示すればその値が優先される (呼び出し側の上書きは維持)", async () => {
+    const many = Array.from({ length: 100 }, (_, i) => `p${i}`);
+    const { prisma } = makePrisma({
+      rowsByCall: [many.map((id) => ({ createdId: id }))],
+      propertyIds: many,
+    });
+    const ids = await resolveMgmtIdToPropertyIds(prisma, "受付帳.xlsx", {
+      take: 10,
+    });
+    expect(ids.length).toBe(10);
+  });
+});

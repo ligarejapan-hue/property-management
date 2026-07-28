@@ -20,6 +20,18 @@ import {
   similarityScore,
 } from "@/lib/address-normalizer";
 
+/**
+ * 地番一致の走査上限。住所 prefix で同一エリアに絞った母集団の中を JS で
+ * 正規化比較するので、無条件スキャンだった頃の 50 件より大きく取れる。
+ */
+const LOT_MATCH_SCAN_LIMIT = 500;
+
+/**
+ * 不動産番号一致の取得上限。番号は全国一意なので通常 0〜1 件だが、
+ * 取込ミス等での重複登録に備えて余裕を持たせる。
+ */
+const REAL_ESTATE_NUMBER_MATCH_LIMIT = 50;
+
 interface CandidateResult {
   id: string;
   address: string;
@@ -163,13 +175,24 @@ export async function GET(
     }
 
     // --- Strategy 3: Lot number matching ---
-    if (property.lotNumber) {
+    // ⚠以前は「地番が入っている物件」を無条件に先頭 50 件だけ取り、JS で
+    // 正規化比較していた (総点検 2026-07-27)。DB 側の値フィルタも並び順も
+    // 無いため、地番入りが数千件ある本番では本当の重複が 50 件に入る確率が
+    // 低く、重複検出が実質機能していなかった。
+    //
+    // 地番の正規化 (全半角・ハイフン統一・漢数字→算用数字) は SQL で再現
+    // できないため DB 側で完全一致は取れない。代わりに **同一エリアに限定**
+    // して母集団を小さくし、その中を JS で正規化比較する。同じ「1番1」でも
+    // 市区町村が違えば重複ではないので、住所での絞り込みは性能面だけでなく
+    // 意味の上でも正しい (Strategy 2 と同じ prefix を使う)。
+    if (property.lotNumber && addrPrefix.length >= 4) {
       const normalizedLot = normalizeLotNumber(property.lotNumber);
       const lotMatches = await prisma.property.findMany({
         where: {
           id: { not: id },
           isArchived: false,
           lotNumber: { not: null },
+          address: { contains: addrPrefix },
         },
         select: {
           id: true,
@@ -179,7 +202,7 @@ export async function GET(
           propertyType: true,
           caseStatus: true,
         },
-        take: 50,
+        take: LOT_MATCH_SCAN_LIMIT,
       });
 
       for (const p of lotMatches) {
@@ -203,26 +226,49 @@ export async function GET(
     }
 
     // --- Strategy 4: Real estate number matching ---
+    // 不動産番号は全国で一意なので、地番と違いエリアで絞れない。以前は
+    // 「番号が入っている物件」の先頭 50 件だけを見ていて実質機能していな
+    // かった (総点検 2026-07-27)。
+    // JS の normalizeRealEstateNumber は「①全角数字→半角 ②数字以外を除去」の
+    // 2 段。SQL で ② だけ再現すると全角数字が「数字以外」として丸ごと消え、
+    // 全角で登録された行を必ず取りこぼす (PostgreSQL の [0-9] は ASCII のみで
+    // 全角 U+FF10-FF19 にマッチしない)。しかも validators の
+    // optionalRealEstateNumber は全角を許容するだけで変換していないため、
+    // 全角のまま保存された行が現実に存在し得る。
+    // → translate() で ① を行ってから regexp_replace で ② を行い、JS と
+    //   完全に同じ正規化にする (パラメータ化クエリ)。
     if (property.realEstateNumber) {
       const normalizedNum = normalizeRealEstateNumber(
         property.realEstateNumber,
       );
-      const reMatches = await prisma.property.findMany({
-        where: {
-          id: { not: id },
-          isArchived: false,
-          realEstateNumber: { not: null },
-        },
-        select: {
-          id: true,
-          address: true,
-          lotNumber: true,
-          realEstateNumber: true,
-          propertyType: true,
-          caseStatus: true,
-        },
-        take: 50,
-      });
+      const reMatches = normalizedNum
+        ? await prisma.$queryRaw<
+            Array<{
+              id: string;
+              address: string;
+              lotNumber: string | null;
+              realEstateNumber: string | null;
+              propertyType: string;
+              caseStatus: string;
+            }>
+          >`
+            SELECT id,
+                   address,
+                   lot_number AS "lotNumber",
+                   real_estate_number AS "realEstateNumber",
+                   property_type AS "propertyType",
+                   case_status AS "caseStatus"
+            FROM properties
+            WHERE id <> ${id}::uuid
+              AND is_archived = false
+              AND real_estate_number IS NOT NULL
+              AND regexp_replace(
+                    translate(real_estate_number, '０１２３４５６７８９', '0123456789'),
+                    '[^0-9]', '', 'g'
+                  ) = ${normalizedNum}
+            LIMIT ${REAL_ESTATE_NUMBER_MATCH_LIMIT}
+          `
+        : [];
 
       for (const p of reMatches) {
         if (candidateMap.has(p.id) || !p.realEstateNumber) continue;

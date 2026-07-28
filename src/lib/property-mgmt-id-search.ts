@@ -20,7 +20,18 @@ import type { PrismaClient } from "@/generated/prisma";
 // - rowNumber は 32-bit signed int の範囲のみ有効。範囲外は 0 件扱い。
 
 const FULLWIDTH_COLON_RE = /：/g;
-const DEFAULT_TAKE = 200;
+// 解決した propertyId の返却上限。
+//
+// ⚠200 件だった頃の不具合 (総点検 2026-07-27): 一覧の where が
+// `id: { in: [200件] }` に縮退し、件数表示も 200 になるうえ、CSV 出力 /
+// DM差込CSV も **警告なく 200 行だけ**出力されていた。CSV 側は本来
+// 「全件出す or 上限超過なら 400 で中止」の契約なのに、その判定に到達しない
+// (= 送付対象 6,000 件のうち 200 件分しか宛先が出ず、残りへ DM が届かない)。
+//
+// 上限を CSV の安全上限 (10,000) + 1 に合わせることで、超過時は切り捨てでは
+// なく CSV 側の 400「絞り込んでください」に必ず倒れる。内部スキャン上限
+// (INTERNAL_PAGE_SIZE * MAX_PAGES_PER_BRANCH = 10,000 候補/branch) とも整合する。
+const DEFAULT_TAKE = 10_001;
 const INTERNAL_PAGE_SIZE = 500;
 const MAX_PAGES_PER_BRANCH = 20; // 500 * 20 = 10,000 候補/branch 上限
 const PRISMA_INT_MIN = 1;
