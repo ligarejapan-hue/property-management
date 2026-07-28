@@ -224,6 +224,21 @@ export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
 export const REGISTRY_FORCE_LOGIN_MARKER = 'input[name="from"][value="elogin"]';
 
 /**
+ * 送信前のログインフォームに付ける印。
+ *
+ * ⚠「#userId が在る」だけでは**弾かれて戻ってきたフォーム**と
+ * **まだ遷移していない元のフォーム**を区別できない (@codex #331 R1)。
+ * 送信は JS の form.submit() なので、応答が遅ければ元の document がそのまま
+ * 生きており #userId も在る。それを「弾かれた」と読むと、遅いだけを
+ * 資格情報の誤りとして報告してしまう (この修正が消そうとしている誤診断)。
+ *
+ * 送信直前に元のフォームへこの属性を付け、失敗時に「印の無い #userId」が
+ * 在るかで判定する = 別 document に置き換わった (= 遷移して戻された) 証拠。
+ * 印はこちらのブラウザ内 DOM にしか付かず、外部サービスへは何も送らない。
+ */
+const REGISTRY_LOGIN_FORM_PROBE_ATTR = "data-pm-login-probe";
+
+/**
  * 「ご利用中の方へ」画面か否かの判定待ち時間(ms)。この待機の前に「確認画面 or 通常メニュー」
  * の着地をログイン全体タイムアウト内で確定させる(応答遅延の吸収)ため、ここは既に着地済みの
  * DOM に対する短時間判定でよい。マーカーが在れば即 resolve、通常メニュー着地なら在らずに短く
@@ -662,6 +677,16 @@ function createPlaywrightRegistryPage(
         await page.waitForSelector(REGISTRY_SELECTORS.loginSubmit, {
           timeout: stepMs(),
         });
+        // 送信直前に元のフォームへ印を付ける (下の分類で「戻ってきたフォーム」と
+        // 「まだ遷移していない元のフォーム」を区別するため)。
+        await page
+          .evaluate((sel) => {
+            const parts = sel.split("|");
+            const el = document.querySelector(parts[0]);
+            if (el) el.setAttribute(parts[1], "1");
+            return "";
+          }, `${REGISTRY_SELECTORS.loginId}|${REGISTRY_LOGIN_FORM_PROBE_ATTR}`)
+          .catch(() => "");
         await page.evaluate((sel) => {
           const el = document.querySelector(sel);
           if (el && typeof (el as { click?: unknown }).click === "function") {
@@ -764,13 +789,17 @@ function createPlaywrightRegistryPage(
           // (@codex #331 R1)。しかも送信前はログインフォームが出ているのが
           // 正常なので、フォームの有無では判別できず、放置すると
           // 「ログインページが遅い」が「資格情報の誤り」として出る。
+          // 「印の無い #userId が在る」= 別 document に置き換わった
+          // = 遷移して戻された = 弾かれた証拠。印が残っていれば元のフォームが
+          // まだ生きている (= 遷移していない = 遅いだけ)。
           const loginFormBack =
             submitted &&
             (await page
-              .evaluate(
-                (sel) => !!document.querySelector(sel),
-                REGISTRY_SELECTORS.loginId,
-              )
+              .evaluate((sel) => {
+                const parts = sel.split("|");
+                const el = document.querySelector(parts[0]);
+                return !!el && !el.hasAttribute(parts[1]);
+              }, `${REGISTRY_SELECTORS.loginId}|${REGISTRY_LOGIN_FORM_PROBE_ATTR}`)
               .catch(() => false));
           if (!loginFormBack) {
             console.warn(

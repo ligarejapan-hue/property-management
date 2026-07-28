@@ -670,7 +670,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" });
     // ログインボタン→強制ログインボタンの2回 DOM click(いずれも button.CForwardLong)。
     // 先頭の jikangai 判定 evaluate(arg="")は除外する。
-    expect(evaluatedArgs.filter((a) => a !== "")).toEqual([
+    expect(evaluatedArgs.filter((a) => a !== "" && !a.includes("|"))).toEqual([
       "button.CForwardLong",
       "button.CForwardLong",
     ]);
@@ -759,8 +759,9 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await expect(
       page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
     ).resolves.toBeUndefined();
-    // DOM click はログインボタンの1回のみ(強制ログインは押さない)。jikangai 判定(arg="")は除外。
-    expect(evaluatedArgs.filter((a) => a !== "")).toEqual(["button.CForwardLong"]);
+    // DOM click はログインボタンの1回のみ(強制ログインは押さない)。
+    // jikangai 判定(arg="") と送信前の印付け(arg に "|" を含む)は除外。
+    expect(evaluatedArgs.filter((a) => a !== "" && !a.includes("|"))).toEqual(["button.CForwardLong"]);
     // loggedIn は待つ。送信後の待機は明示 timeout を持つ (総点検 2026-07-27:
     // 無指定だと page 既定 = provider 全体予算と同値になり、全体タイマーが先に
     // 切れて auth_failed の分類に到達できず、常に「タイムアウト」表示になる)。

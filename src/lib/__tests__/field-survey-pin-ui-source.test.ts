@@ -1152,9 +1152,13 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
     // 場面なので、必ず気づける形にする。
     expect(PANEL_SRC).toMatch(/setDetachedError\(/);
-    expect(PANEL_SRC).toMatch(
-      /setDetachedError\(outcome\.ok \? null : \(outcome\.error \?\? null\)\)/,
-    );
+    expect(PANEL_SRC).toMatch(/setDetachedError\(outcome\.error \?\? null\)/);
+    // ⚠無関係な成功で失敗案内を消さない (@codex #331 R1)。離れている間の送信が
+    // 失敗し、そのあと新しく送った写真が成功すると、成功側が案内を消してしまい
+    // **最初の写真が失われたことが永久に隠れる**。案内は利用者が閉じるか、
+    // 別の pin を開くまで残す。
+    expect(PANEL_SRC).toMatch(/if \(!outcome\.ok\) \{/);
+    expect(PANEL_SRC).toContain("pin-photo-detached-error-dismiss");
     // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)
     expect(PANEL_SRC).toMatch(/takeLastPhotoMutationFailure\(pinId\)\?\.error/);
     // ⚠購読 effect の依存は pinId だけにする。reload は photoMutations 経由で

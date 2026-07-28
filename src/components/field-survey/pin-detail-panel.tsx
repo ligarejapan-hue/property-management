@@ -500,9 +500,16 @@ function PinPhotoSection({
       // ⚠失敗をここで出さないと、「出ますのでお待ちください」と案内したまま
       // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
       // 場面なので、必ず気づける形にする。
-      // 残っている分は消費しておく (同じ失敗を再マウントでもう一度出さない)。
-      takeLastPhotoMutationFailure(pinId);
-      setDetachedError(outcome.ok ? null : (outcome.error ?? null));
+      //
+      // ⚠**無関係な成功で失敗案内を消さない** (@codex #331 R1)。離れている間の
+      // 送信が失敗し、そのあと新しく送った写真が成功すると、成功側が案内を
+      // 消してしまい**最初の写真が失われたことが永久に隠れる**。案内は
+      // 利用者が閉じるか、別の pin を開くまで残す。
+      if (!outcome.ok) {
+        // 残っている分は消費しておく (同じ失敗を再マウントでもう一度出さない)。
+        takeLastPhotoMutationFailure(pinId);
+        setDetachedError(outcome.error ?? null);
+      }
       void reloadRef.current();
     });
   }, [pinId]);
@@ -665,14 +672,24 @@ function PinPhotoSection({
             </button>
           </div>
           {detachedError && (
-            <p
+            <div
               role="alert"
               data-testid="pin-photo-detached-error"
-              className="mt-1 rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15 px-2 py-1 text-[11px] text-red-800 dark:text-red-300"
+              className="mt-1 flex items-start gap-2 rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15 px-2 py-1 text-[11px] text-red-800 dark:text-red-300"
             >
-              パネルを離れている間の写真の処理が失敗しました（{detachedError}）。
-              もう一度お試しください。
-            </p>
+              <span className="flex-1">
+                パネルを離れている間の写真の処理が失敗しました（{detachedError}）。
+                もう一度お試しください。
+              </span>
+              <button
+                type="button"
+                onClick={() => setDetachedError(null)}
+                data-testid="pin-photo-detached-error-dismiss"
+                className="shrink-0 underline"
+              >
+                閉じる
+              </button>
+            </div>
           )}
           {detachedUploading && !photoMutations.uploadLoading && (
             <p
