@@ -159,19 +159,31 @@ export function useFieldSurveyPinPhotoMutations() {
     ): Promise<PinPhotoMutationResult<PinPhoto>> => {
       // ⚠先行の upload を abort しない。別の写真を続けて選んだとき、先に
       // 選んだ写真が消えてしまう (どちらもユーザーが送るつもりで選んでいる)。
-      if (mountedRef.current) setUploadState({ loading: true, error: null });
+      //
+      // ⚠**unmount で途中 return してはいけない** (@codex #331 R1)。
+      // 旧実装は端末内変換 (HEIC→JPEG / 8MB 超の縮小) の直後に unmount チェックで
+      // 打ち切っていたため、**変換中に × や編集を押すと POST に到達する前に
+      // 捨てられていた**。大きい写真の変換は数秒かかる
+      // ので、signal を外しただけでは「fetch まで到達した upload」しか守れない。
+      // mountedRef は **setState の抑止だけ**に使い、変換と POST は最後まで走らせる。
+      const setUploadStateIfMounted = (next: {
+        loading: boolean;
+        error: string | null;
+      }): void => {
+        if (mountedRef.current) setUploadState(next);
+      };
+      setUploadStateIfMounted({ loading: true, error: null });
       // unmount を跨いでも完了を再マウント側へ伝えられるようにする。
       markUploadStarted(pinId);
       try {
         // 送信前に端末内で自動変換 (HEIC → JPEG / 8MB 超の縮小)。変換できない
         // 端末ではサーバー 422 の代わりに平易な案内 (「互換性優先」設定) を返す。
         // decode 資源 (ImageBitmap / objectURL) は prepare 関数内部の
-        // try/finally で必ず解放されてから返るため、直後の unmount early
-        // return が資源を保持することはない。
+        // try/finally で必ず解放されてから返るため、unmount 後に走り続けても
+        // 資源を保持しない。
         const prepared = await prepareFieldSurveyPhotoForUpload(file);
-        if (!mountedRef.current) return { ok: false };
         if (!prepared.ok) {
-          setUploadState({ loading: false, error: prepared.error });
+          setUploadStateIfMounted({ loading: false, error: prepared.error });
           return { ok: false, error: prepared.error };
         }
         const formData = new FormData();
@@ -184,22 +196,19 @@ export function useFieldSurveyPinPhotoMutations() {
             body: formData,
           },
         );
-        if (!mountedRef.current) return { ok: false };
         if (!res.ok) {
           const msg = pinApiErrorMessage(res.status);
-          setUploadState({ loading: false, error: msg });
+          setUploadStateIfMounted({ loading: false, error: msg });
           return { ok: false, error: msg };
         }
         const body = (await res.json().catch(() => null)) as
           | { data?: PinPhoto }
           | null;
-        if (!mountedRef.current) return { ok: false };
-        setUploadState({ loading: false, error: null });
+        setUploadStateIfMounted({ loading: false, error: null });
         return { ok: true, data: body?.data };
-      } catch (err) {
-        if (isAbortError(err) || !mountedRef.current) return { ok: false };
+      } catch {
         const msg = pinApiErrorMessage(0);
-        setUploadState({ loading: false, error: msg });
+        setUploadStateIfMounted({ loading: false, error: msg });
         return { ok: false, error: msg };
       } finally {
         // 成功・失敗・early return のいずれでも必ず通知する
@@ -216,25 +225,29 @@ export function useFieldSurveyPinPhotoMutations() {
       photoId: string,
     ): Promise<PinPhotoMutationResult<null>> => {
       // ⚠先行の delete を abort しない (別写真の削除を巻き添えで止めない)。
-      if (mountedRef.current) setDeleteState({ loading: true, error: null });
+      // upload と同じ方針: mountedRef は setState の抑止だけに使う。
+      const setDeleteStateIfMounted = (next: {
+        loading: boolean;
+        error: string | null;
+      }): void => {
+        if (mountedRef.current) setDeleteState(next);
+      };
+      setDeleteStateIfMounted({ loading: true, error: null });
       try {
         const res = await fetch(
           `/api/field-survey/pins/${encodeURIComponent(pinId)}/photos/${encodeURIComponent(photoId)}`,
           { method: "DELETE", credentials: "same-origin" },
         );
-        if (!mountedRef.current) return { ok: false };
         if (!res.ok) {
           const msg = pinApiErrorMessage(res.status);
-          setDeleteState({ loading: false, error: msg });
+          setDeleteStateIfMounted({ loading: false, error: msg });
           return { ok: false, error: msg };
         }
-        if (!mountedRef.current) return { ok: false };
-        setDeleteState({ loading: false, error: null });
+        setDeleteStateIfMounted({ loading: false, error: null });
         return { ok: true };
-      } catch (err) {
-        if (isAbortError(err) || !mountedRef.current) return { ok: false };
+      } catch {
         const msg = pinApiErrorMessage(0);
-        setDeleteState({ loading: false, error: msg });
+        setDeleteStateIfMounted({ loading: false, error: msg });
         return { ok: false, error: msg };
       }
     },

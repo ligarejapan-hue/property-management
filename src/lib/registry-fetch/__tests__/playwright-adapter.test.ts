@@ -1349,6 +1349,37 @@ describe("ログイン送信後の待機は全体予算より必ず先に切れ�
     expect(timeouts.length).toBe(waits.length);
   });
 
+  it.each([500, 1_000, 3_000])(
+    "予算 %ims でも通常メニュー着地の確認画面プローブが予算を超えない",
+    async (budget) => {
+      // ⚠固定 1.5 秒のままだと、小さい予算では**正常なログイン**でも
+      // このプローブ中に外側タイマーが発火し timeout 表示になる (@codex #331 R1)。
+      // 通常メニュー着地ではマーカーが出ない = プローブは必ず timeout まで待つ。
+      process.env.REGISTRY_FETCH_TIMEOUT_MS = String(budget);
+      const f = makeFakeChromium();
+      const calls: Array<{ sel: string; opts: { timeout?: number } | undefined }> =
+        [];
+      f.page.waitForSelector = vi.fn(async (sel: string, opts?: unknown) => {
+        calls.push({ sel, opts: opts as { timeout?: number } | undefined });
+        if (sel === REGISTRY_FORCE_LOGIN_MARKER) throw makeTimeoutError();
+        return {};
+      });
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      // 正常ログイン = throw しない
+      await expect(
+        page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+      ).resolves.toBeUndefined();
+
+      const probe = calls.find((c) => c.sel === REGISTRY_FORCE_LOGIN_MARKER);
+      expect(probe?.opts?.timeout).toBeDefined();
+      expect(probe!.opts!.timeout!).toBeLessThan(budget);
+      delete process.env.REGISTRY_FETCH_TIMEOUT_MS;
+    },
+  );
+
   it("送信後の待機に渡る実値が全体予算より小さい (予算そのままに戻らない)", async () => {
     // ⚠expect.any(Number) では、全体予算をそのまま渡す退行を検出できない
     // (内部レビュー指摘)。実値を突き合わせる。

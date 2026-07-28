@@ -951,6 +951,37 @@ describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
     expect(list).toMatch(/signal:\s*ac\.signal/);
   });
 
+  it("端末内変換の途中でも捨てない (mountedRef は setState 抑止だけに使う)", () => {
+    // ⚠signal を外しただけでは「fetch まで到達した upload」しか守れない
+    // (@codex #331 R1)。旧実装は HEIC→JPEG / 8MB 超の縮小の**直後**に
+    // `if (!mountedRef.current) return` を置いていたため、変換中に × や編集を
+    // 押すと POST に到達する前に写真が捨てられていた。変換は数秒かかり得る。
+    const upload = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+      PHOTO_HOOK_SRC.indexOf("const deletePhoto"),
+    );
+    const del = PHOTO_HOOK_SRC.slice(PHOTO_HOOK_SRC.indexOf("const deletePhoto"));
+    // 途中で打ち切る early return が無いこと
+    expect(upload).not.toMatch(/if \(!mountedRef\.current\)\s*return/);
+    expect(del).not.toMatch(/if \(!mountedRef\.current\)\s*return/);
+    // mountedRef は setState を包むヘルパの中だけで使う
+    expect(upload).toMatch(/setUploadStateIfMounted/);
+    expect(del).toMatch(/setDeleteStateIfMounted/);
+    // 変換 → POST の順序が保たれている (変換結果を必ず送る)
+    expect(upload.indexOf("prepareFieldSurveyPhotoForUpload")).toBeLessThan(
+      upload.indexOf('method: "POST"'),
+    );
+  });
+
+  it("list(GET) だけは従来どおり途中で打ち切れる (読み取りなので安全)", () => {
+    const list = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const listPhotos"),
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+    );
+    expect(list).toMatch(/if \(!mountedRef\.current\)\s*return/);
+    expect(list).toMatch(/signal:\s*ac\.signal/);
+  });
+
   it("unmount を跨いだ upload の完了を再マウント側へ伝える (@codex #331 R1)", () => {
     // ⚠abort をやめただけでは足りない。閉じてすぐ開き直すと、新しい一覧の初回 GET が
     // upload の commit より先に終わり、保存された写真が次の再読込まで見えない。

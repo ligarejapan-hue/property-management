@@ -47,8 +47,10 @@ describe("use-field-survey-pin-photo-mutations — 送信前の自動変換", ()
       /const uploadPhoto\s*=\s*useCallback\([\s\S]*?\},\s*\[\],?\s*\);/,
     );
     const m = upload?.[0] ?? "";
+    // setUploadState は unmount 後の setState を抑止するヘルパ経由で呼ぶ
+    // (総点検 2026-07-27: 変換中に unmount しても送信は継続させるため)。
     expect(m).toMatch(
-      /if\s*\(!prepared\.ok\)\s*\{[\s\S]*?setUploadState\(\{\s*loading:\s*false,\s*error:\s*prepared\.error\s*\}\)[\s\S]*?return\s*\{\s*ok:\s*false,\s*error:\s*prepared\.error\s*\}/,
+      /if\s*\(!prepared\.ok\)\s*\{[\s\S]*?setUploadStateIfMounted\(\{\s*loading:\s*false,\s*error:\s*prepared\.error\s*\}\)[\s\S]*?return\s*\{\s*ok:\s*false,\s*error:\s*prepared\.error\s*\}/,
     );
   });
 });
