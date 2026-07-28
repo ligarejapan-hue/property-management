@@ -289,13 +289,27 @@ const LOGIN_CLASSIFY_MARGIN_MS = 2_000;
  * 1 段だけ正当に遅い (7.5秒 < 実際に必要な 10秒) ケースで**成功するはずの
  * ログインを auth_failed に化けさせる**。ここは「残り予算をほぼ全部使ってよい。
  * ただし分類の余裕だけ残す」= 共有デッドラインが正しい。
+ *
+ * ⚠余裕の確保に**下限を置いて外側を追い越してはいけない** (@codex #331 R1)。
+ * `max(1000, timeoutMs - 2000)` だと `timeoutMs <= 1000` で内側と外側が同時刻、
+ * `timeoutMs = 500` なら内側 1000ms > 外側 500ms で**必ず外側が先に発火**し、
+ * この修正が消そうとした「常に timeout 表示」がそのまま残る。
+ * 余裕は予算に比例させて縮め (最大 LOGIN_CLASSIFY_MARGIN_MS)、内側の期限は
+ * **常に外側より短く**する。極小予算では 0 = 即座に分類へ回す。
  */
 export function resolveLoginStepDeadline(
   startedAt: number,
   timeoutMs?: number,
 ): number | null {
   if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return null;
-  return startedAt + Math.max(1000, timeoutMs - LOGIN_CLASSIFY_MARGIN_MS);
+  // 予算が小さいときは余裕も比例縮小する (下限で外側を追い越さないため)。
+  const margin = Math.min(
+    LOGIN_CLASSIFY_MARGIN_MS,
+    Math.max(1, Math.ceil(timeoutMs / 2)),
+  );
+  // 常に外側 (timeoutMs) より短い位置に置く。
+  const offset = Math.min(timeoutMs - 1, Math.max(0, timeoutMs - margin));
+  return startedAt + Math.max(0, offset);
 }
 
 /**

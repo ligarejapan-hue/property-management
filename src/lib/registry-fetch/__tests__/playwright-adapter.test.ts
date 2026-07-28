@@ -1266,6 +1266,38 @@ describe("ログイン送信後の待機は全体予算より必ず先に切れ�
     expect(resolveLoginStepDeadline(1_000_000, 8_000)).toBe(1_006_000);
   });
 
+  it("どんな予算でも内側の期限は外側より必ず短い (@codex #331 R1)", () => {
+    // ⚠余裕の確保に下限を置くと、小さい予算で内側が外側を追い越し、
+    // 「常に timeout 表示」がそのまま残る。旧実装の max(1000, budget-2000) では
+    // budget=500 → 内側 1000ms > 外側 500ms で必ず外側が先に発火していた。
+    for (const budget of [
+      1, 2, 10, 100, 500, 999, 1_000, 1_001, 2_000, 2_999, 3_000, 8_000, 30_000,
+      120_000,
+    ]) {
+      const deadline = resolveLoginStepDeadline(0, budget)!;
+      expect(deadline).not.toBeNull();
+      // 内側の期限 < 外側のタイマー
+      expect(deadline).toBeLessThan(budget);
+      expect(deadline).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("極小予算では期限を 0 まで縮め、即座に分類へ回す", () => {
+    // 待てないほど短い予算では「待つ」より「分類して正しい原因を出す」が優先。
+    expect(resolveLoginStepDeadline(0, 1)).toBe(0);
+    expect(remainingLoginStepMs(resolveLoginStepDeadline(0, 1), 0)).toBe(1);
+    // 500ms 予算: 余裕は比例縮小 (250ms) → 期限 250ms < 外側 500ms
+    expect(resolveLoginStepDeadline(0, 500)).toBe(250);
+  });
+
+  it("余裕は予算に比例して縮む (十分な予算では 2 秒を確保)", () => {
+    expect(30_000 - resolveLoginStepDeadline(0, 30_000)!).toBe(2_000);
+    expect(8_000 - resolveLoginStepDeadline(0, 8_000)!).toBe(2_000);
+    // 予算 3 秒なら余裕は 1.5 秒 (2 秒を取ると外側を追い越すため)
+    expect(3_000 - resolveLoginStepDeadline(0, 3_000)!).toBe(1_500);
+    expect(1_000 - resolveLoginStepDeadline(0, 1_000)!).toBe(500);
+  });
+
   it("残り予算をほぼ全部使ってよい (痩せた割り当てで正当な遅延を殺さない)", () => {
     const deadline = resolveLoginStepDeadline(0, 30_000)!;
     // 送信までに5秒使っていても、残り23秒を1段の待機に使える
