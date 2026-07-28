@@ -730,10 +730,19 @@ export default function FieldSurveyMap({
         // 種類の引き継ぎも巡回単位でリセットする (別の巡回に前回の種類を
         // 持ち越さない。既定 = candidate)。
         setLastPinType("candidate");
+        // ⚠**巡回が終わったら踏破ヒートを取り直す** (@codex #332)。
+        // 集計は「終了した巡回」だけを数えるので、終了した瞬間に
+        //   ・進行中の軌跡の線は消える (activeSession が null になるため)
+        //   ・終わったばかりの巡回はまだ色に入っていない
+        // となり、**いま歩いたばかりの場所が「誰も通っていない」表示になる**。
+        // 地図を動かすまで直らないので、終了の遷移で明示的に取り直す。
+        if (prevId !== null && nextId === null) {
+          bumpRefetch();
+        }
       }
       setActiveSession(s);
     },
-    [resetCameraFirst],
+    [resetCameraFirst, bumpRefetch],
   );
 
   // 保存完了トーストの timer を unmount で必ず止める。

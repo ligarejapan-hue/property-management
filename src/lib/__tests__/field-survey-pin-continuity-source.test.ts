@@ -82,7 +82,7 @@ describe("field-survey-map.tsx — 連続ピンモード", () => {
     // OFF 導線 (パネル内トグル) は巡回中しか描画されないため、session が
     // 消えるタイミングでモードも畳む。次の巡回開始時の暗黙 ON 復活も防ぐ。
     const handler = MAP_SRC.match(
-      /const handleActiveSessionChange\s*=\s*useCallback\([\s\S]*?\[resetCameraFirst\],?\s*\);/,
+      /const handleActiveSessionChange\s*=\s*useCallback\([\s\S]*?\[resetCameraFirst[^\]]*\],?\s*\);/,
     );
     expect(handler).not.toBeNull();
     expect(handler?.[0] ?? "").toMatch(

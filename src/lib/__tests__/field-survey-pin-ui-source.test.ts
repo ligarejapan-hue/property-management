@@ -362,6 +362,18 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     }
   });
 
+  it("巡回が終わったら踏破ヒートを取り直す (@codex #332)", () => {
+    // 集計は「終了した巡回」だけを数えるので、終了した瞬間に線は消え、
+    // 終わったばかりの巡回はまだ色に入っていない。地図を動かすまで
+    // **いま歩いたばかりの場所が「誰も通っていない」表示**になる。
+    const handler = MAP_SRC.slice(
+      MAP_SRC.indexOf("const handleActiveSessionChange"),
+      MAP_SRC.indexOf("保存完了トーストの timer"),
+    );
+    expect(handler).toMatch(/prevId !== null && nextId === null/);
+    expect(handler).toContain("bumpRefetch()");
+  });
+
   it("問い合わせ開始時に前の色を消して「確認中」にする (@codex #332)", () => {
     // 期間を切り替えた直後などに古い色が残ると、選択と表示が食い違う
     // （集計は索引が無いぶん時間がかかるので、その食い違いが長く見える）。
