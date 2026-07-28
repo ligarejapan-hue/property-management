@@ -83,9 +83,18 @@ describe("完成待ち: 現地写真サムネイル (場所特定)", () => {
     expect(QUEUE).toMatch(/ほか\{photoCount - 1\}枚/);
   });
 
-  it("queue は座標・memo 本文・console を扱わない (継続ガード)", () => {
-    expect(QUEUE).not.toMatch(/\.lat\b/);
-    expect(QUEUE).not.toMatch(/\.lng\b/);
+  it("queue は一覧 API から座標・memo 本文を受け取らず console も使わない (継続ガード)", () => {
+    // 2026-07-28 更新: 事務所で現地の様子 (ストリートビュー / Google マップ) を
+    // 見たい要望により、queue は「現地の様子」を押した行に限り座標のみ射影
+    // (/pins/[id]/location) から座標を取り、外部地図 URL の組み立てにだけ使う。
+    // そのため「queue に .lat / .lng が一切現れない」ガードは成立しなくなった。
+    // ここでは一覧 API の応答 (r.*) に座標が乗らないこと = 一覧そのものの PII
+    // 境界が広がっていないことを引き続き固定する。取得が on-demand であること・
+    // 座標を画面や console に出さないことは
+    // components/field-survey/__tests__/candidate-queue-place-links.test.tsx が担保。
+    expect(QUEUE).not.toMatch(/\br\.lat\b/);
+    expect(QUEUE).not.toMatch(/\br\.lng\b/);
+    expect(QUEUE).not.toMatch(/\br\.memo\b/);
     expect(QUEUE).not.toMatch(/console\./);
   });
 });

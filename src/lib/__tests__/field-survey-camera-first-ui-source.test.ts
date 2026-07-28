@@ -203,7 +203,7 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     // effect での同期 setState を避け、TripControls からの session 通知 callback
     // 内で前回 id と比較して reset する。
     const handler = MAP_SRC.match(
-      /const handleActiveSessionChange\s*=\s*useCallback\([\s\S]*?\[resetCameraFirst\],?\s*\);/,
+      /const handleActiveSessionChange\s*=\s*useCallback\([\s\S]*?\[resetCameraFirst[^\]]*\],?\s*\);/,
     );
     expect(handler).not.toBeNull();
     const m = handler?.[0] ?? "";

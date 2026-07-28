@@ -38,6 +38,17 @@ import LocationRecorderControls from "@/components/field-survey/location-recorde
 import RoutePolyline, {
   type RoutePolylinePoint,
 } from "@/components/field-survey/route-polyline";
+import CoverageHeatLayer from "@/components/field-survey/coverage-heat-layer";
+import CoverageLegend from "@/components/field-survey/coverage-legend";
+import {
+  COVERAGE_DEFAULT_DAYS,
+  COVERAGE_PERIOD_DAYS,
+  coveragePeriodLabel,
+  type CoverageCell,
+  canTrustCoverageLegend,
+  type CoverageCellSize,
+  type CoverageStatus,
+} from "@/lib/field-survey-coverage";
 import { useFieldSurveyLocationRecorder } from "@/components/field-survey/use-field-survey-location-recorder";
 import type { ActiveSessionLike } from "@/lib/field-survey-trip-util";
 import PinAddModeToggle from "@/components/field-survey/pin-add-mode-toggle";
@@ -121,7 +132,7 @@ interface PinRow {
   hasMemo?: boolean;
 }
 
-type Layer = "properties" | "pins";
+type Layer = "properties" | "pins" | "coverage";
 
 /**
  * 撮影と並行して走らせる現在地取得の結果。
@@ -140,10 +151,30 @@ export default function FieldSurveyMap({
   // タッチ端末では地図ジェスチャを cooperative(1本指=ページスクロール / 2本指=地図移動)に
   // して、地図が画面を占有し周囲の UI に触れなくなる問題を避ける。PC は greedy 継続。共有フック。
   const mapGestureHandling = useMapGestureHandling();
+  // 踏破ヒートは**既定 ON**。この地図を開く主目的が「次にどこを回るか決める」
+  // なので毎回トグルさせない。
   const [layers, setLayers] = useState<Record<Layer, boolean>>({
     properties: true,
     pins: true,
+    coverage: true,
   });
+  // 踏破ヒートの期間 (365=直近1年 / 0=全期間)。ユーザー決定でこの2択のみ。
+  const [coverageDays, setCoverageDays] = useState<number>(COVERAGE_DEFAULT_DAYS);
+  // 踏破ヒートの状態 (1マスの実寸ラベル / 打ち切り有無)。凡例と注意書きに使う。
+  const [coverageState, setCoverageState] = useState<{
+    cellSize: CoverageCellSize | null;
+    status: CoverageStatus;
+  }>({ cellSize: null, status: "loading" });
+  const handleCoverageState = useCallback(
+    (next: { cellSize: CoverageCellSize | null; status: CoverageStatus }) => {
+      setCoverageState((prev) =>
+        prev.cellSize === next.cellSize && prev.status === next.status
+          ? prev
+          : next,
+      );
+    },
+    [],
+  );
   // 「対応済み (closed)」ピンを地図から一時的に隠す表示フィルタ。
   // 未対応だけを見たい巡回中の視認性向上が目的で、データは消さない (表示のみ)。
   // ブラウザ保存はしない方針のためページ滞在中のみ有効。
@@ -702,10 +733,19 @@ export default function FieldSurveyMap({
         // 種類の引き継ぎも巡回単位でリセットする (別の巡回に前回の種類を
         // 持ち越さない。既定 = candidate)。
         setLastPinType("candidate");
+        // ⚠**巡回が終わったら踏破ヒートを取り直す** (@codex #332)。
+        // 集計は「終了した巡回」だけを数えるので、終了した瞬間に
+        //   ・進行中の軌跡の線は消える (activeSession が null になるため)
+        //   ・終わったばかりの巡回はまだ色に入っていない
+        // となり、**いま歩いたばかりの場所が「誰も通っていない」表示になる**。
+        // 地図を動かすまで直らないので、終了の遷移で明示的に取り直す。
+        if (prevId !== null && nextId === null) {
+          bumpRefetch();
+        }
       }
       setActiveSession(s);
     },
-    [resetCameraFirst],
+    [resetCameraFirst, bumpRefetch],
   );
 
   // 保存完了トーストの timer を unmount で必ず止める。
@@ -1095,6 +1135,8 @@ export default function FieldSurveyMap({
           <MapDataLayer
             layers={layers}
             hideClosedPins={hideClosedPins}
+            coverageDays={coverageDays}
+            onCoverageState={handleCoverageState}
             onError={setError}
             refetchNonce={refetchNonce}
             currentUserId={currentUserId}
@@ -1141,6 +1183,10 @@ export default function FieldSurveyMap({
           }
           hideClosedPins={hideClosedPins}
           onToggleHideClosedPins={() => setHideClosedPins((v) => !v)}
+          coverageDays={coverageDays}
+          onChangeCoverageDays={setCoverageDays}
+          coverageCellSize={coverageState.cellSize}
+          coverageStatus={coverageState.status}
           panelOpen={panelOpen}
           onTogglePanelOpen={() => {
             quickStartRef.current = false;
@@ -1385,6 +1431,10 @@ function ControlPanel({
   onToggle,
   hideClosedPins,
   onToggleHideClosedPins,
+  coverageDays,
+  onChangeCoverageDays,
+  coverageCellSize,
+  coverageStatus,
   panelOpen,
   onTogglePanelOpen,
   currentUserId,
@@ -1409,6 +1459,16 @@ function ControlPanel({
   /** 「対応済みのピンを隠す」表示フィルタ (親 state。データは消さない)。 */
   hideClosedPins: boolean;
   onToggleHideClosedPins: () => void;
+  /** 踏破ヒートの期間 (365=直近1年 / 0=全期間)。 */
+  coverageDays: number;
+  onChangeCoverageDays: (days: number) => void;
+  /** 表示中の格子の粗さ (凡例に「1マス 約50m」を出すため)。取得前は null。 */
+  coverageCellSize: CoverageCellSize | null;
+  /**
+   * 踏破ヒートの状態。**"ready" のときだけ凡例を出す**。
+   * 「色が無い」の意味が状態で変わるため（誰も通っていない / まだ分からない）。
+   */
+  coverageStatus: CoverageStatus;
   /**
    * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
    * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
@@ -1500,6 +1560,70 @@ function ControlPanel({
       {/* ピンの配色凡例 (調査ピン表示中のみ)。 */}
       {layers.pins && <PinMarkerLegend showOthersHint={showOthersLegendHint} />}
 
+      {/* 踏破ヒート: 全員が歩いた場所の蓄積。この地図を開く主目的が
+          「次にどこを回るか決める」なので既定 ON。 */}
+      <label
+        className={`${layers.coverage ? "mb-1" : "mb-3"} mt-2 flex cursor-pointer items-center gap-2 border-t border-gray-200 pt-2 dark:border-gray-800`}
+      >
+        <input
+          type="checkbox"
+          checked={layers.coverage}
+          onChange={() => onToggle("coverage")}
+          data-testid="coverage-layer-toggle"
+        />
+        <span>歩いた場所</span>
+      </label>
+      {layers.coverage && (
+        <div className="mb-3 ml-6">
+          <label className="mb-1 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+            <span>期間</span>
+            <select
+              value={coverageDays}
+              onChange={(e) => onChangeCoverageDays(Number(e.target.value))}
+              data-testid="coverage-period-select"
+              className="rounded border border-gray-300 bg-white px-1 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-900"
+            >
+              {COVERAGE_PERIOD_DAYS.map((d) => (
+                <option key={d} value={d}>
+                  {coveragePeriodLabel(d)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {/* ⚠凡例（色なし＝誰も通っていません）を出してよいのは "ready" だけ。
+              まだ分からない状態で同じ見た目にすると、踏破済みのエリアへ人を
+              送り出すことになる。 */}
+          {canTrustCoverageLegend(coverageStatus) ? (
+            <CoverageLegend cellSize={coverageCellSize ?? undefined} />
+          ) : coverageStatus === "loading" ? (
+            <p
+              role="status"
+              data-testid="coverage-loading-notice"
+              className="mb-1 rounded border border-gray-300 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-300"
+            >
+              歩いた場所を確認中…
+            </p>
+          ) : coverageStatus === "too-wide" ? (
+            <p
+              role="status"
+              data-testid="coverage-truncated-notice"
+              className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              範囲が広すぎて歩いた場所を出せません。地図を寄せてください。
+            </p>
+          ) : coverageStatus === "unavailable" ? (
+            <p
+              role="alert"
+              data-testid="coverage-unavailable-notice"
+              className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              歩いた場所を取得できませんでした。
+              <b>色が付いていない場所も、通っている可能性があります。</b>
+            </p>
+          ) : null}
+        </div>
+      )}
+
       {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
           Phase 1-F-2: 終了前に位置記録 (watchPosition / flush timer / buffer)
           を確実に停止するため onBeforeSessionEnd を渡す。 */}
@@ -1588,6 +1712,8 @@ function MapDataLayer({
   captureMapClick,
   onMapClick,
   onOpenPinDetail,
+  coverageDays,
+  onCoverageState,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -1595,6 +1721,13 @@ function MapDataLayer({
    * 間引く (トグルのたびに再取得しない。closed は #315 の灰✓ marker)。
    */
   hideClosedPins: boolean;
+  /** 踏破ヒートの期間 (365=直近1年 / 0=全期間)。 */
+  coverageDays: number;
+  /** 踏破ヒートの状態を親へ返す (凡例と注意書きの表示に使う)。 */
+  onCoverageState: (state: {
+    cellSize: CoverageCellSize | null;
+    status: CoverageStatus;
+  }) => void;
   onError: (msg: string | null) => void;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
@@ -1607,6 +1740,12 @@ function MapDataLayer({
   const map = useMap();
   const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [pins, setPins] = useState<PinRow[]>([]);
+  // 踏破ヒート。cells は「格子番号と回数」だけで、座標も人名も含まない。
+  const [coverageCells, setCoverageCells] = useState<CoverageCell[]>([]);
+  const [coverageStep, setCoverageStep] = useState<{
+    latStep: number;
+    lngStep: number;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<
     | { kind: "property"; row: PropertyRow }
@@ -1626,6 +1765,13 @@ function MapDataLayer({
             "表示範囲が広すぎます。ズームインしてください。",
           );
         }
+        // ⚠ここでも**古い色を必ず消す** (@codex #332 P2)。消さないと、取得を
+        // 行っていない広い範囲に前の色が残り、周りの無色を「誰も通っていない」
+        // と誤読させる。飛んでいる古い要求が後から色を戻すのも防ぐ。
+        if (abortRef.current) abortRef.current.abort();
+        setCoverageCells([]);
+        setCoverageStep(null);
+        onCoverageState({ cellSize: null, status: "too-wide" });
         return;
       }
       onError(null);
@@ -1669,6 +1815,76 @@ function MapDataLayer({
           );
         }
 
+        // ⚠踏破ヒートは**既存の地図データと同じ Promise.all に入れない**
+        // (@codex #332 P2)。集計は座標の索引が無いぶん重くなり得るので、
+        // 同じ待ち行列に入れると**物件とピンの更新まで一緒に止まる**。
+        // 中断(AbortController)と debounce は共有したまま、待ち合わせだけ分ける。
+        const coveragePromise = layers.coverage
+          ? fetch(
+              "/api/field-survey/coverage/cells?" +
+                new URLSearchParams({
+                  north: String(b.north),
+                  south: String(b.south),
+                  east: String(b.east),
+                  west: String(b.west),
+                  days: String(coverageDays),
+                }).toString(),
+              { signal: ac.signal, credentials: "same-origin" },
+            )
+          : null;
+
+        if (coveragePromise) {
+          // ⚠問い合わせ開始時に**前の色を消して「確認中」にする** (@codex #332)。
+          // 期間を「全期間」から「直近1年」へ変えた直後などに古い色が残ると、
+          // 選択と表示が食い違ったまま（集計は索引が無いぶん時間がかかる）。
+          setCoverageCells([]);
+          onCoverageState({ cellSize: null, status: "loading" });
+          void coveragePromise
+            .then(async (r) => {
+              if (ac.signal.aborted) return;
+              if (!r.ok) {
+                handleHttpError(r.status, onError);
+                setCoverageCells([]);
+                onCoverageState({ cellSize: null, status: "unavailable" });
+                return;
+              }
+              const j = (await r.json()) as {
+                data?: {
+                  cells?: CoverageCell[];
+                  latStep?: number;
+                  lngStep?: number;
+                  truncated?: boolean;
+                  cell?: CoverageCellSize;
+                };
+              };
+              if (ac.signal.aborted) return;
+              const d = j.data;
+              // ⚠打ち切り時は**色を一切描かない**(サーバも空配列を返す)。
+              // この画面は「色が無い＝誰も通っていない」と読ませるので、
+              // 一部だけ描くと踏破済みエリアへ人を送り出すことになる。
+              const truncated = d?.truncated === true;
+              setCoverageCells(truncated ? [] : (d?.cells ?? []));
+              setCoverageStep(
+                d?.latStep != null && d?.lngStep != null
+                  ? { latStep: d.latStep, lngStep: d.lngStep }
+                  : null,
+              );
+              onCoverageState({
+                cellSize: d?.cell ?? null,
+                status: truncated ? "too-wide" : "ready",
+              });
+            })
+            .catch((err: unknown) => {
+              if ((err as { name?: string }).name === "AbortError") return;
+              // 通信失敗でも古い色を残さない(古い期間の色を描き続けない)。
+              setCoverageCells([]);
+              onCoverageState({ cellSize: null, status: "unavailable" });
+            });
+        } else {
+          setCoverageCells([]);
+          onCoverageState({ cellSize: null, status: "off" });
+        }
+
         const results = await Promise.all(tasks);
         let idx = 0;
         if (layers.properties) {
@@ -1699,13 +1915,20 @@ function MapDataLayer({
         }
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
+        // ⚠通信失敗でも**古い色を必ず消す** (@codex #332 P2)。残すと、期間を
+        // 「直近1年」から「全期間」へ切り替えた直後に失敗した場合、画面は新しい
+        // 期間を選んだ状態のまま**古い期間の色**を描き続ける。
+        // 「色が無い＝誰も通っていない」と読ませる画面なので、古い色が残ることは
+        // 誤った指示に直結する。
+        setCoverageCells([]);
+        onCoverageState({ cellSize: null, status: "unavailable" });
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");
       } finally {
         setLoading(false);
       }
     },
-    [layers.properties, layers.pins, onError],
+    [layers.properties, layers.pins, layers.coverage, coverageDays, onError, onCoverageState],
   );
 
   // map idle イベントで bbox を debounce 取得
@@ -1749,7 +1972,7 @@ function MapDataLayer({
       west: sw.lng(),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layers.properties, layers.pins, refetchNonce]);
+  }, [layers.properties, layers.pins, layers.coverage, coverageDays, refetchNonce]);
 
   // Phase 1-G: pin 追加モード中 (またはカメラファーストの地図タップ待ち中) のみ
   // map click を pin 作成候補に転送する。
@@ -1774,6 +1997,16 @@ function MapDataLayer({
 
   return (
     <>
+      {/* 踏破ヒート。zIndex 0 で最下層に敷き、軌跡の線やピンが必ず上に乗る。
+          clickable:false なので地図タップ (ピン追加・撮影後の場所指定) を奪わない。 */}
+      {coverageStep && (
+        <CoverageHeatLayer
+          cells={coverageCells}
+          latStep={coverageStep.latStep}
+          lngStep={coverageStep.lngStep}
+          visible={layers.coverage}
+        />
+      )}
       {layers.properties &&
         properties.map((p) => (
           <AdvancedMarker
