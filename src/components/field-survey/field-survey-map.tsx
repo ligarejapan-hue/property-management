@@ -53,7 +53,10 @@ import {
 } from "@/lib/field-survey-camera-first";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
 import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
-import { useFieldSurveyPinPhotoMutations } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
+import {
+  clearPhotoMutationFailure,
+  useFieldSurveyPinPhotoMutations,
+} from "@/components/field-survey/use-field-survey-pin-photo-mutations";
 import {
   formatPinStatus,
   formatPinType,
@@ -992,6 +995,11 @@ export default function FieldSurveyMap({
     if (!pinId || !file) return;
     const up = await photoMutations.uploadPhoto(pinId, file);
     if (up.ok) {
+      // ⚠再試行が成功したら、保持されている失敗を解決済みとして捨てる
+      // (@codex #331 R1)。この画面は自前の再試行 UI で失敗を出しており
+      // 写真セクションの購読者が居ないため、捨てないと後でこの pin を開いた
+      // ときに「離れている間に失敗しました」と蒸し返される (写真は在るのに)。
+      clearPhotoMutationFailure(pinId);
       finalizePinCreate(pinId, true);
     }
   }, [photoMutations, finalizePinCreate]);

@@ -116,6 +116,19 @@ export function takeLastPhotoMutationFailure(
   return failure;
 }
 
+/**
+ * 保持している失敗を「解決済み」として捨てる。
+ *
+ * ⚠成功で一律に消してはいけない (別写真の失敗を隠す) が、**同じ写真を
+ * 撮り直して再送し成功した**ときは、その失敗はもう解決している。呼び出し側が
+ * 「これは再試行だ」と分かる場面でだけ明示的に捨てる (@codex #331 R1)。
+ * 捨てないと、あとでその pin を開いたときに「離れている間に失敗しました」と
+ * 蒸し返される (写真はちゃんと在るのに)。
+ */
+export function clearPhotoMutationFailure(pinId: string): void {
+  lastFailures.delete(pinId);
+}
+
 /** upload / delete の完了を、その pin を表示している一覧へ知らせる。 */
 function notifyPhotoMutationSettled(
   pinId: string,

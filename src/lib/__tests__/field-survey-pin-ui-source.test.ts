@@ -1195,6 +1195,25 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     expect(PHOTO_HOOK_SRC).toMatch(/lastFailures\.delete\(pinId\)/);
   });
 
+  it("再試行が成功したら保持した失敗を解決済みにする (@codex #331 R1)", () => {
+    // ⚠成功で一律に消すと別写真の失敗を隠す。だが**同じ写真を撮り直して**
+    // 再送し成功したなら、その失敗はもう解決している。捨てないと後でその pin を
+    // 開いたときに「離れている間に失敗しました」と蒸し返される (写真は在るのに)。
+    expect(PHOTO_HOOK_SRC).toMatch(/export function clearPhotoMutationFailure/);
+    const MAP_SRC = readSrc("src/components/field-survey/field-survey-map.tsx");
+    // ピン作成時の写真は自前の再試行 UI を持ち、写真セクションの購読者が居ない。
+    // 再試行ハンドラの中で、成功時に失敗を捨ててから完了処理へ進むこと。
+    const retry = MAP_SRC.slice(
+      MAP_SRC.indexOf("const handleRetryPhoto"),
+      MAP_SRC.indexOf("const handleFinishWithoutPhoto"),
+    );
+    expect(retry).toContain("photoMutations.uploadPhoto(pinId, file)");
+    expect(retry.indexOf("clearPhotoMutationFailure(pinId)")).toBeGreaterThan(-1);
+    expect(retry.indexOf("clearPhotoMutationFailure(pinId)")).toBeLessThan(
+      retry.indexOf("finalizePinCreate(pinId, true)"),
+    );
+  });
+
   it("案内に載せるのは汎用文言だけ (PII / 生レスポンスを出さない)", () => {
     // outcome.error は pinApiErrorMessage 由来 (status → 固定文言) のみ。
     const registry = PHOTO_HOOK_SRC.slice(
