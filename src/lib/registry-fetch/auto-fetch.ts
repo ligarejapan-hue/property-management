@@ -648,8 +648,14 @@ function createPlaywrightRegistryPage(
         // タイマーと同値になり、全体タイマー(goto の前から進行)が先に切れてこの分類に到達
         // できない(@codex P1)。待ち時間は全体予算から導出(resolveLoginFormDetectMs・@codex P2)。
         try {
+          // ⚠固定 15 秒 (formDetectTimeoutMs) のままにしない (@codex #331 R1)。
+          // goto が予算の大半を食った場合 (例: 30 秒予算のうち 16 秒)、残り 12 秒
+          // しか無いのに 15 秒待とうとして、外側タイマーが先に発火する。すると
+          // 「フォームが現れない = 閉局/接続不可」の分類 (service_hours /
+          // service_unavailable) に到達できず、また generic timeout に化ける。
+          // 短い専用待機という性質は保ったまま、残り予算を超えないよう押さえる。
           await page.waitForSelector(REGISTRY_SELECTORS.loginId, {
-            timeout: formDetectTimeoutMs,
+            timeout: Math.min(formDetectTimeoutMs, stepMs()),
           });
         } catch (err) {
           if (isTimeoutError(err)) {
@@ -1183,7 +1189,11 @@ async function defaultChromiumLoader(): Promise<RegistryChromiumLike> {
  * ★ C-1: playwright は defaultChromiumLoader 内の動的 import でのみ読む（静的 import / require なし）。
  */
 export function resolveDefaultRegistryBrowserFactory(
-  deps: { chromiumLoader?: () => Promise<RegistryChromiumLike> } = {},
+  deps: {
+    chromiumLoader?: () => Promise<RegistryChromiumLike>;
+    /** テスト用の時計差し替え (goto が予算を食う状況の再現に使う)。 */
+    now?: () => number;
+  } = {},
 ): RegistryBrowserFactory | undefined {
   // 本番経路は明示 opt-in + セレクタ校正フラグの両方を要求（テスト注入時は不要）。
   // CodexP1: 校正フラグ無し（TODO プレースホルダのまま）の opt-in では誤セレクタで実サイトを
@@ -1237,6 +1247,7 @@ export function resolveDefaultRegistryBrowserFactory(
           Number.isFinite(timeoutMs) ? timeoutMs : undefined,
         ),
         timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+        now: deps.now,
       },
     );
   };

@@ -494,6 +494,40 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     ).rejects.toMatchObject({ code: "timeout" });
   });
 
+  it("goto が予算を食ってもフォーム出現待ちが外側タイマーを追い越さない (@codex #331 R1)", async () => {
+    // ⚠固定 15 秒のままだと、30 秒予算のうち goto が 16 秒使った場面で残り 12 秒
+    // しか無いのに 15 秒待とうとし、外側タイマーが先に発火する。すると
+    // 「フォームが現れない = 閉局/接続不可」の分類に到達できず generic timeout に化ける。
+    process.env.REGISTRY_FETCH_TIMEOUT_MS = "30000";
+    const f = makeFakeChromium();
+    // 疑似時計: goto で 16 秒進める
+    let clock = 0;
+    f.page.goto = vi.fn(async (_url: string) => {
+      clock += 16_000;
+      return undefined;
+    });
+    const calls: Array<{ sel: string; opts: { timeout?: number } | undefined }> = [];
+    f.page.waitForSelector = vi.fn(async (sel: string, opts?: unknown) => {
+      calls.push({ sel, opts: opts as { timeout?: number } | undefined });
+      if (sel === REGISTRY_FORCE_LOGIN_MARKER) throw makeTimeoutError();
+      return {};
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+      now: () => clock,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" });
+
+    const formWait = calls.find((c) => c.sel.includes("userId"));
+    expect(formWait?.opts?.timeout).toBeDefined();
+    // 残り予算 (28,000 - 16,000 = 12,000) を超えない
+    expect(formWait!.opts!.timeout!).toBeLessThanOrEqual(12_000);
+    // 固定 15 秒に戻っていない
+    expect(formWait!.opts!.timeout!).toBeLessThan(15_000);
+    delete process.env.REGISTRY_FETCH_TIMEOUT_MS;
+  });
+
   it("送信前の timeout は auth_failed にしない (@codex #331 R1)", async () => {
     // ⚠送信前 (goto / fill / ログインボタン待ち) はログインフォームが出ているのが
     // 正常なので、フォームの有無では判別できない。放置すると「ログインページが
