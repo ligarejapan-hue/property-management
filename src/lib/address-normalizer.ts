@@ -186,6 +186,30 @@ export function similarityScore(a: string, b: string): number {
 }
 
 /**
+ * 住所の「番地の手前」を切り出すために、**番地表記に使われている漢数字だけ**を
+ * 算用数字に直す。
+ *
+ * ⚠漢数字を一律に変換してはいけない: 地名に漢数字は普通に含まれる
+ * (四日市市・八王子市・十日町市・六本木・一番町…)。一律変換すると
+ * 「三重県四日市市…」が「3重県4日市市…」になり、先頭で切れてキーが空になる。
+ * 逆に変換を一切しないと、札幌のように**同じ場所が二通りに書かれる**
+ * (「北一条西二丁目」と「北1条西2丁目」) 表記が別キーになり、正規化すれば
+ * 一致する相手を DB 段階で落とす (@codex #330 R6)。
+ *
+ * そこで「直後が 条 / 丁目」= その位置の漢数字は住所の番号だと確定できる
+ * ときだけ変換する。地名側で 丁 単独が続く「八丁堀」等を巻き込まないよう、
+ * 丁 単独は対象にしない。
+ */
+const ADDRESS_NUMBER_COUNTER_RE = /([一二三四五六七八九十百千]+)(条|丁目)/g;
+
+function arabicizeAddressCounters(address: string): string {
+  return address.replace(ADDRESS_NUMBER_COUNTER_RE, (whole, kanji, counter) => {
+    const num = kanjiToArabic(kanji);
+    return Number.isNaN(num) ? whole : `${num}${counter}`;
+  });
+}
+
+/**
  * 住所から「表記ゆれに影響されないエリアキー」を取り出す。
  *
  * 重複候補の DB 側プレフィルタ用。生の先頭N文字を使うと
@@ -194,30 +218,24 @@ export function similarityScore(a: string, b: string): number {
  * (@codex #330 R1)。番地は最初の数字以降にしか現れないので、
  * **最初の数字の手前まで**を取れば表記差の影響を受けない。
  *
- * 例: "東京都港区芝公園4-2-8"   → "東京都港区芝公園"
- *     "東京都港区芝公園4丁目2-8" → "東京都港区芝公園"
- *     "東京都港区芝公園四丁目"   → "東京都港区芝公園"
+ * 漢数字は arabicizeAddressCounters で「条/丁目 が続くときだけ」算用数字に
+ * 直してから境界を探す (上記コメント参照・@codex #330 R2/R6)。
  *
- * ⚠漢数字はそれ単体を境界にしてはいけない (@codex #330 R2)。**地名に漢数字は
- * 普通に含まれる**ため (四日市市・八王子市・十日町市・三鷹市・六本木…)、
- * 「最初の漢数字で切る」と "三重県四日市市諏訪町1-1" が空キー、
- * "東京都八王子市横山町1-1" が "東京都" になり、どちらも呼び出し側の最低
- * 文字数を割って**地番の重複検出そのものが丸ごとスキップ**される。
- * 漢数字は「直後に 丁目 が続く」ときだけ番地表記とみなす
- * (八丁堀のような 丁目 でない地名を巻き込まないよう 丁 単独は境界にしない)。
+ * 例: "東京都港区芝公園4-2-8"       → "東京都港区芝公園"
+ *     "東京都港区芝公園4丁目2-8"     → "東京都港区芝公園"
+ *     "東京都港区芝公園四丁目2-8"     → "東京都港区芝公園"
+ *     "三重県四日市市諏訪町1-1"       → "三重県四日市市諏訪町" (地名の漢数字は残す)
+ *     "札幌市中央区北一条西二丁目1-1" → "札幌市中央区北"
+ *     "札幌市中央区北1条西2丁目1-1"   → "札幌市中央区北" (同じキーになる)
  *
  * ⚠都道府県の省略 (「港区芝公園…」) や市町村合併による表記変更までは吸収
  * できない。DB 絞り込みは「安全に母集団を狭める」ためのもので、最終判定は
  * 呼び出し側の正規化比較が行う。
  */
 export function addressAreaKey(address: string): string {
-  const boundaries = [
-    // 算用数字 (半角/全角)。番地は必ずここ以降。
-    address.search(/[0-9０-９]/),
-    // 漢数字の丁目表記 ("四丁目")。地名中の漢数字とはここで区別する。
-    address.search(/[一二三四五六七八九十]+丁目/),
-  ].filter((i) => i >= 0);
-  const stem =
-    boundaries.length > 0 ? address.slice(0, Math.min(...boundaries)) : address;
+  const arabicized = arabicizeAddressCounters(address);
+  // 番地は最初の算用数字 (半角/全角) 以降にしか現れない。
+  const boundary = arabicized.search(/[0-9０-９]/);
+  const stem = boundary >= 0 ? arabicized.slice(0, boundary) : arabicized;
   return stem.replace(/[\s　]+/g, "").trim();
 }

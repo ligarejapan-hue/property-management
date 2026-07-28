@@ -483,3 +483,56 @@ describe("地番の突き合わせは件数で打ち切らない (@codex #330 R5
     expect(json.scanTruncated).toBe(false);
   });
 });
+
+describe("同じ場所の二通りの書き方が同じキーになる (@codex #330 R6)", () => {
+  // 札幌のように「北一条西二丁目」と「北1条西2丁目」が併存する地域では、
+  // 漢数字を変換しないと別キーになり、正規化すれば一致する相手を DB 段階で
+  // 落としてしまう。逆に一律変換すると地名の漢数字 (四日市/八王子) を壊す。
+  // → 「直後が 条 / 丁目」= 住所の番号だと確定できるときだけ変換する。
+  it("条 の漢数字/算用数字が同じキーになる", () => {
+    const kanji = addressAreaKey("札幌市中央区北一条西二丁目1-1");
+    const arabic = addressAreaKey("札幌市中央区北1条西2丁目1-1");
+    expect(kanji).toBe(arabic);
+    expect(kanji).toBe("札幌市中央区北");
+  });
+
+  it("十条 のような位取りのある漢数字も同じ扱いになる", () => {
+    expect(addressAreaKey("札幌市北区北十条西1-1")).toBe(
+      addressAreaKey("札幌市北区北10条西1-1"),
+    );
+  });
+
+  it("地名の漢数字は壊さない (条/丁目 が続かないので変換しない)", () => {
+    expect(addressAreaKey("三重県四日市市諏訪町1-1")).toBe("三重県四日市市諏訪町");
+    expect(addressAreaKey("東京都八王子市横山町1-1")).toBe("東京都八王子市横山町");
+    expect(addressAreaKey("新潟県十日町市本町1-1")).toBe("新潟県十日町市本町");
+    expect(addressAreaKey("東京都港区六本木6-10-1")).toBe("東京都港区六本木");
+    // 「一番町」は 番 が続くだけ (条/丁目 ではない) ので変換対象外 = キーが痩せない
+    expect(addressAreaKey("東京都千代田区一番町6-4")).toBe("東京都千代田区一番町");
+    // 「八丁堀」は 丁 単独なので変換対象外
+    expect(addressAreaKey("東京都中央区八丁堀2-1")).toBe("東京都中央区八丁堀");
+  });
+
+  it("条 表記が違う同一エリアの物件を DB 段階で落とさない", async () => {
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
+      baseProperty({ address: "札幌市中央区北一条西二丁目1-1" }),
+    );
+    mockRaw({
+      "lot_number IS NOT NULL": [
+        {
+          id: "dup5",
+          address: "札幌市中央区北1条西2丁目1-2", // 算用数字表記
+          lotNumber: "1番1",
+          realEstateNumber: null,
+          propertyType: "land",
+          caseStatus: "new_case",
+        },
+      ],
+    });
+    const res = await GET(req, ctx);
+    const json = (await res.json()) as { data: Array<{ id: string }> };
+    expect(json.data.some((c) => c.id === "dup5")).toBe(true);
+    // 送った絞り込みキーも表記に依存しない
+    expect(lotQuery()!.values).toContain("札幌市中央区北");
+  });
+});
