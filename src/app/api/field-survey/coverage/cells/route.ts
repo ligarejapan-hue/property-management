@@ -96,6 +96,17 @@ export async function GET(request: NextRequest) {
     // 「同じ日」の境界が業務実感とずれる（既存の日付フィルタも JST 境界で
     // 統一済み = property-list-query.ts の jstDayBoundary）。
     //
+    // ⚠`recorded_at` は **timestamp without time zone に UTC の壁時計値**が
+    // 入っている。そこへいきなり `AT TIME ZONE 'Asia/Tokyo'` を当てると
+    // 「その値は既に東京時刻である」と解釈され、9 時間ずれる (@codex #332 P2)。
+    // 本番実測: 保存値 `2026-07-20 23:00`(= JST 7/21 08:00) が
+    //   いきなり Asia/Tokyo → 7/20 ✗ / 一度 UTC と解釈してから → 7/21 ✓
+    // つまり **JST の 0〜9 時に記録した点が前日に数えられていた**。朝から歩く
+    // 業務なので実害がある。必ず `AT TIME ZONE 'UTC'` を先に通すこと。
+    //
+    // ⚠同じ理由で期間の下限比較も naive(UTC) 同士で行う。timestamptz と直接
+    // 比べると、naive 側が**セッションのタイムゾーン**で解釈されて 9 時間ずれる。
+    //
     // ⚠staff_user_id は集計の内側だけで使い、応答には出さない（誰の分かは返さない）。
     //
     // ⚠**終了した巡回だけ**を数える (@codex #332 P1)。cancelled を除くだけでは
@@ -110,7 +121,7 @@ export async function GET(request: NextRequest) {
              floor(tp.lng / ${lngStep}::numeric)::int AS "x",
              count(DISTINCT (
                s.staff_user_id,
-               (tp.recorded_at AT TIME ZONE 'Asia/Tokyo')::date
+               ((tp.recorded_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo')::date
              ))::int                                  AS "p"
       FROM field_survey_track_points tp
       JOIN field_survey_sessions s ON s.id = tp.session_id
@@ -119,7 +130,10 @@ export async function GET(request: NextRequest) {
         AND tp.lng >= ${west}::numeric
         AND tp.lng <= ${east}::numeric
         AND s.status::text = 'ended'
-        AND (${fromAt}::timestamptz IS NULL OR tp.recorded_at >= ${fromAt}::timestamptz)
+        AND (
+          ${fromAt}::timestamptz IS NULL
+          OR tp.recorded_at >= (${fromAt}::timestamptz AT TIME ZONE 'UTC')
+        )
       GROUP BY 1, 2
       ORDER BY 1, 2
       LIMIT ${COVERAGE_CELL_LIMIT + 1}

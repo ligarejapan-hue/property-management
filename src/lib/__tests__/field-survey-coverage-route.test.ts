@@ -549,3 +549,53 @@ describe("SQL に生の値を埋め込まない", () => {
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("日付は JST の暦日で切る（保存値は UTC の壁時計）", () => {
+  // ⚠recorded_at は timestamp without time zone に **UTC の壁時計値**が入る。
+  // そこへいきなり AT TIME ZONE 'Asia/Tokyo' を当てると「その値は既に東京時刻」
+  // と解釈され 9 時間ずれる (@codex #332 P2)。
+  // 本番実測: 保存値 2026-07-20 23:00 (= JST 7/21 08:00) が
+  //   いきなり Asia/Tokyo → 7/20 ✗ / 一度 UTC と解釈してから → 7/21 ✓
+  // = **JST の 0〜9 時に記録した点が前日に数えられていた**。朝から歩く業務なので
+  // 「同じ人が同じ日に何度通っても1回」が壊れ、回数と色が狂う。
+
+  it("UTC として解釈してから JST へ変換する（順序が逆だと 9 時間ずれる）", async () => {
+    await GET(makeReq(FINE_BBOX));
+    const sql = rawCall()!.sql;
+    expect(sql).toContain("AT TIME ZONE 'UTC'");
+    expect(sql).toContain("AT TIME ZONE 'Asia/Tokyo'");
+    // UTC への解釈が先であること（この順序が壊れると前日に寄る）
+    expect(sql.indexOf("AT TIME ZONE 'UTC'")).toBeLessThan(
+      sql.indexOf("AT TIME ZONE 'Asia/Tokyo'"),
+    );
+    // 「いきなり Asia/Tokyo」に戻っていないこと
+    expect(sql).not.toMatch(/recorded_at AT TIME ZONE 'Asia\/Tokyo'/);
+  });
+
+  it("期間の下限も naive(UTC) 同士で比べる（セッションTZに依存させない）", async () => {
+    await GET(makeReq(FINE_BBOX + "&days=365"));
+    const sql = rawCall()!.sql;
+    // timestamptz と naive を直接比べると、naive 側がセッションTZで解釈されてずれる
+    expect(sql).toMatch(/recorded_at >= \(\?::timestamptz AT TIME ZONE 'UTC'\)/);
+  });
+
+  it("境界の意味を固定する（SQL の意図を JS で再現して突き合わせる）", () => {
+    // 実 DB は使えないので、SQL の意味を JS で再現する。
+    // 保存値は UTC の壁時計なので、JST の暦日 = UTC + 9時間 の日付。
+    const jstDayOf = (storedUtcWallClock: string): string => {
+      const asUtc = new Date(storedUtcWallClock + "Z");
+      const jst = new Date(asUtc.getTime() + 9 * 60 * 60 * 1000);
+      return jst.toISOString().slice(0, 10);
+    };
+    // 朝 8 時の巡回 (= UTC 前日 23:00)
+    expect(jstDayOf("2026-07-20T23:00:00")).toBe("2026-07-21");
+    // 深夜 0:30 (= UTC 前日 15:30)
+    expect(jstDayOf("2026-07-20T15:30:00")).toBe("2026-07-21");
+    // 日中はそのまま
+    expect(jstDayOf("2026-07-21T03:00:00")).toBe("2026-07-21");
+    // JST 23:59 (= UTC 14:59) はまだ同じ日
+    expect(jstDayOf("2026-07-21T14:59:00")).toBe("2026-07-21");
+    // JST 翌 0:00 (= UTC 15:00) で日が変わる
+    expect(jstDayOf("2026-07-21T15:00:00")).toBe("2026-07-22");
+  });
+});
