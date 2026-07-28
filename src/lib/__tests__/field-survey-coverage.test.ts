@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  snapBboxToCells,
   COVERAGE_CELL_LIMIT,
   coarserCoverageCellSize,
   maxCellsForBbox,
@@ -329,3 +330,77 @@ function maxSpanForCell(cell: "fine" | "mid" | "wide"): {
   };
   return { lat: find("lat"), lng: find("lng") };
 }
+
+describe("集計の範囲は格子の境界まで広げる (@codex #332)", () => {
+  // ⚠画面の端が1つのセルを横切っていると、そのセルは**画面内の点しか
+  // 数えられない**。クライアントはセル全体を塗るので、数ピクセル動かすだけで
+  // 同じセルの色が変わる（3回歩いた道が1回に見える／見えている部分が
+  // 未踏破に見える）。集計の入力をセル単位に揃えて、どこから見ても同じ値にする。
+
+  const step = COVERAGE_CELL_STEPS.fine;
+
+  it("四辺が必ず格子の線に乗る", () => {
+    const q = snapBboxToCells(
+      { south: 35.681234, north: 35.685678, west: 139.761234, east: 139.765678 },
+      step,
+    );
+    for (const [v, s2] of [
+      [q.south, step.latStep],
+      [q.north, step.latStep],
+      [q.west, step.lngStep],
+      [q.east, step.lngStep],
+    ]) {
+      expect(Math.abs(v / s2 - Math.round(v / s2))).toBeLessThan(1e-6);
+    }
+  });
+
+  it("必ず外側へ広がる（内側に食い込んで点を落とさない）", () => {
+    const bbox = {
+      south: 35.681234,
+      north: 35.685678,
+      west: 139.761234,
+      east: 139.765678,
+    };
+    const q = snapBboxToCells(bbox, step);
+    expect(q.south).toBeLessThanOrEqual(bbox.south);
+    expect(q.north).toBeGreaterThanOrEqual(bbox.north);
+    expect(q.west).toBeLessThanOrEqual(bbox.west);
+    expect(q.east).toBeGreaterThanOrEqual(bbox.east);
+  });
+
+  it("少しずらしても同じセル境界に落ちる（動かすたびに色が変わらない）", () => {
+    // 1セルの 1/10 だけずらした2つの画面
+    const a = snapBboxToCells(
+      { south: 35.6812, north: 35.6857, west: 139.7612, east: 139.7657 },
+      step,
+    );
+    const b = snapBboxToCells(
+      {
+        south: 35.6812 + step.latStep / 10,
+        north: 35.6857 + step.latStep / 10,
+        west: 139.7612,
+        east: 139.7657,
+      },
+      step,
+    );
+    // 端のセルが増減することはあっても、共通部分のセル境界は一致する
+    expect(Math.abs((a.south - b.south) / step.latStep) % 1).toBeLessThan(1e-6);
+  });
+
+  it("広がるのは縦横それぞれ最大1セル分（上限を破らない）", () => {
+    const bbox = { south: 35.0, north: 35.0 + 0.0189, west: 139.0, east: 139.0 + 0.0231 };
+    const q = snapBboxToCells(bbox, step);
+    expect(maxCellsForBbox(q, "fine")).toBeLessThanOrEqual(COVERAGE_CELL_LIMIT);
+  });
+
+  it("既に境界に乗っていれば変えない", () => {
+    const south = 100 * step.latStep;
+    const west = 200 * step.lngStep;
+    const q = snapBboxToCells(
+      { south, north: south + step.latStep, west, east: west + step.lngStep },
+      step,
+    );
+    expect(Math.abs(q.south - south)).toBeLessThan(1e-9);
+    expect(Math.abs(q.west - west)).toBeLessThan(1e-9);
+  });
+});

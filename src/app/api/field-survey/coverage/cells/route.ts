@@ -15,6 +15,7 @@ import {
   coverageCellLabel,
   coverageFromAt,
   resolveCoverageCellSize,
+  snapBboxToCells,
   type CoverageCell,
 } from "@/lib/field-survey-coverage";
 
@@ -78,6 +79,12 @@ export async function GET(request: NextRequest) {
     const { latStep, lngStep } = COVERAGE_CELL_STEPS[cell];
     const fromAt = coverageFromAt(days, new Date());
 
+    // ⚠集計の範囲は**格子の境界まで広げる** (@codex #332 P2)。画面の端が
+    // セルを横切っていると、そのセルは画面内の点しか数えられず、
+    // クライアントはセル全体を塗るので**数ピクセル動かすだけで色が変わる**
+    // （3回歩いた道が1回に見える／見えている部分が未踏破に見える）。
+    const q = snapBboxToCells({ north, south, east, west }, { latStep, lngStep });
+
     // ⚠Prisma の groupBy は式でグループ化できないため $queryRaw を使う。
     // 作法は properties/[id]/candidates/route.ts と同じ（タグ付きテンプレート +
     // ${} 束縛 + 明示キャスト + AS "camelCase"）。$queryRawUnsafe は使わない。
@@ -125,10 +132,10 @@ export async function GET(request: NextRequest) {
              ))::int                                  AS "p"
       FROM field_survey_track_points tp
       JOIN field_survey_sessions s ON s.id = tp.session_id
-      WHERE tp.lat >= ${south}::numeric
-        AND tp.lat <= ${north}::numeric
-        AND tp.lng >= ${west}::numeric
-        AND tp.lng <= ${east}::numeric
+      WHERE tp.lat >= ${q.south}::numeric
+        AND tp.lat < ${q.north}::numeric
+        AND tp.lng >= ${q.west}::numeric
+        AND tp.lng < ${q.east}::numeric
         AND s.status::text = 'ended'
         AND (
           ${fromAt}::timestamptz IS NULL

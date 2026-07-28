@@ -1718,6 +1718,13 @@ function MapDataLayer({
             "表示範囲が広すぎます。ズームインしてください。",
           );
         }
+        // ⚠ここでも**古い色を必ず消す** (@codex #332 P2)。消さないと、取得を
+        // 行っていない広い範囲に前の色が残り、周りの無色を「誰も通っていない」
+        // と誤読させる。飛んでいる古い要求が後から色を戻すのも防ぐ。
+        if (abortRef.current) abortRef.current.abort();
+        setCoverageCells([]);
+        setCoverageStep(null);
+        onCoverageState({ cellSize: null, truncated: false });
         return;
       }
       onError(null);
@@ -1761,22 +1768,66 @@ function MapDataLayer({
           );
         }
 
-        if (layers.coverage) {
-          // 踏破ヒート = 全社合計の集計。既存の bbox・debounce・中断に相乗りする
-          // ので、pan/zoom あたりの往復は増えない。
-          const covQs = new URLSearchParams({
-            north: String(b.north),
-            south: String(b.south),
-            east: String(b.east),
-            west: String(b.west),
-            days: String(coverageDays),
-          });
-          tasks.push(
-            fetch("/api/field-survey/coverage/cells?" + covQs.toString(), {
-              signal: ac.signal,
-              credentials: "same-origin",
-            }),
-          );
+        // ⚠踏破ヒートは**既存の地図データと同じ Promise.all に入れない**
+        // (@codex #332 P2)。集計は座標の索引が無いぶん重くなり得るので、
+        // 同じ待ち行列に入れると**物件とピンの更新まで一緒に止まる**。
+        // 中断(AbortController)と debounce は共有したまま、待ち合わせだけ分ける。
+        const coveragePromise = layers.coverage
+          ? fetch(
+              "/api/field-survey/coverage/cells?" +
+                new URLSearchParams({
+                  north: String(b.north),
+                  south: String(b.south),
+                  east: String(b.east),
+                  west: String(b.west),
+                  days: String(coverageDays),
+                }).toString(),
+              { signal: ac.signal, credentials: "same-origin" },
+            )
+          : null;
+
+        if (coveragePromise) {
+          void coveragePromise
+            .then(async (r) => {
+              if (ac.signal.aborted) return;
+              if (!r.ok) {
+                handleHttpError(r.status, onError);
+                setCoverageCells([]);
+                onCoverageState({ cellSize: null, truncated: false });
+                return;
+              }
+              const j = (await r.json()) as {
+                data?: {
+                  cells?: CoverageCell[];
+                  latStep?: number;
+                  lngStep?: number;
+                  truncated?: boolean;
+                  cell?: CoverageCellSize;
+                };
+              };
+              if (ac.signal.aborted) return;
+              const d = j.data;
+              // ⚠打ち切り時は**色を一切描かない**(サーバも空配列を返す)。
+              // この画面は「色が無い＝誰も通っていない」と読ませるので、
+              // 一部だけ描くと踏破済みエリアへ人を送り出すことになる。
+              const truncated = d?.truncated === true;
+              setCoverageCells(truncated ? [] : (d?.cells ?? []));
+              setCoverageStep(
+                d?.latStep != null && d?.lngStep != null
+                  ? { latStep: d.latStep, lngStep: d.lngStep }
+                  : null,
+              );
+              onCoverageState({ cellSize: d?.cell ?? null, truncated });
+            })
+            .catch((err: unknown) => {
+              if ((err as { name?: string }).name === "AbortError") return;
+              // 通信失敗でも古い色を残さない(古い期間の色を描き続けない)。
+              setCoverageCells([]);
+              onCoverageState({ cellSize: null, truncated: false });
+            });
+        } else {
+          setCoverageCells([]);
+          onCoverageState({ cellSize: null, truncated: false });
         }
 
         const results = await Promise.all(tasks);
@@ -1806,44 +1857,6 @@ function MapDataLayer({
           }
         } else {
           setPins([]);
-        }
-        if (layers.coverage) {
-          const r = results[idx++];
-          if (r.ok) {
-            const j = (await r.json()) as {
-              data?: {
-                cells?: CoverageCell[];
-                latStep?: number;
-                lngStep?: number;
-                cellLabel?: string;
-                truncated?: boolean;
-                cell?: CoverageCellSize;
-              };
-            };
-            const d = j.data;
-            // ⚠打ち切り時は**色を一切描かない**(サーバも空配列を返す)。
-            // この画面は「色が無い＝誰も通っていない」と読ませるので、
-            // 一部だけ描くと踏破済みエリアへ人を送り出すことになる。
-            const truncated = d?.truncated === true;
-            setCoverageCells(truncated ? [] : (d?.cells ?? []));
-            setCoverageStep(
-              d?.latStep != null && d?.lngStep != null
-                ? { latStep: d.latStep, lngStep: d.lngStep }
-                : null,
-            );
-            onCoverageState({
-              cellSize: d?.cell ?? null,
-              truncated,
-            });
-          } else {
-            handleHttpError(r.status, onError);
-            // 取得に失敗したときも色を消す (古い色を残すと誤読の元)。
-            setCoverageCells([]);
-            onCoverageState({ cellSize: null, truncated: false });
-          }
-        } else {
-          setCoverageCells([]);
-          onCoverageState({ cellSize: null, truncated: false });
         }
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;

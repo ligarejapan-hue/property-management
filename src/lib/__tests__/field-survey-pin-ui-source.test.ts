@@ -362,6 +362,34 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     }
   });
 
+  it("表示範囲が広すぎて中断するときも古い色を消す (@codex #332)", () => {
+    // 取得を行っていない広い範囲に前の色が残ると、周りの無色を
+    // 「誰も通っていない」と誤読させる。飛んでいる古い要求も止める。
+    const guard = MAP_SRC.slice(
+      MAP_SRC.indexOf("表示範囲が広すぎます"),
+      MAP_SRC.indexOf("先行 request を中断する"),
+    );
+    expect(guard).toContain("setCoverageCells([])");
+    expect(guard).toContain("setCoverageStep(null)");
+    expect(guard).toContain("abortRef.current.abort()");
+  });
+
+  it("踏破ヒートは既存の地図データと待ち合わせない (@codex #332)", () => {
+    // 集計は座標の索引が無いぶん重くなり得る。同じ Promise.all に入れると
+    // 物件とピンの更新まで一緒に止まる。
+    expect(MAP_SRC).toContain("const coveragePromise");
+    // Promise.all へ積むのは物件とピンの2本だけ（coverage は積まない）
+    const tasksBlock = MAP_SRC.slice(
+      MAP_SRC.indexOf("const tasks: Promise<Response>[] = []"),
+      MAP_SRC.indexOf("const results = await Promise.all(tasks)"),
+    );
+    expect(tasksBlock.match(/tasks\.push\(/g)).toHaveLength(2);
+    // coverage の fetch は tasks.push ではなく coveragePromise に入る
+    expect(tasksBlock).toMatch(/const coveragePromise[\s\S]{0,200}?coverage\/cells/);
+    // 中断は共有する（画面を動かしたら古い集計も止める）
+    expect(MAP_SRC).toMatch(/coveragePromise[\s\S]{0,400}?ac\.signal\.aborted/);
+  });
+
   it("通信失敗でも踏破ヒートの古い色を残さない (@codex #332)", () => {
     // 期間を切り替えた直後に失敗すると、画面は新しい期間なのに古い色を描き続ける。
     // 「色が無い＝誰も通っていない」と読ませる画面なので誤指示に直結する。

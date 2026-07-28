@@ -526,10 +526,20 @@ describe("SQL に生の値を埋め込まない", () => {
       expect(q.sqlRaw).not.toContain(v);
     }
     // 束縛側には出ている
-    expect(q.values).toContain(35.698);
-    expect(q.values).toContain(35.68);
-    expect(q.values).toContain(139.78);
-    expect(q.values).toContain(139.76);
+    // ⚠画面端の生値ではなく**格子に揃えた値**が束縛される (@codex #332)。
+    // 端がセルを横切ると色が動くのを防ぐため、集計はセル単位で行う。
+    const bound = q.values.filter((v): v is number => typeof v === "number");
+    for (const v of bound.filter((x) => x > 35 && x < 36)) {
+      const k = v / COVERAGE_CELL_STEPS.fine.latStep;
+      expect(Math.abs(k - Math.round(k))).toBeLessThan(1e-6);
+    }
+    // 生値をそのまま埋めていない
+    expect(bound).not.toContain(35.698);
+    // 経度側も同様に格子へ揃う
+    for (const v of bound.filter((x) => x > 139 && x < 140)) {
+      const k = v / COVERAGE_CELL_STEPS.fine.lngStep;
+      expect(Math.abs(k - Math.round(k))).toBeLessThan(1e-6);
+    }
     // 型を固定するキャストが付いている (numeric 比較が文字列比較にならない)
     expect(q.sql).toContain("::numeric");
     expect(q.sql).toContain("::timestamptz");
@@ -539,9 +549,11 @@ describe("SQL に生の値を埋め込まない", () => {
     await GET(makeReq(FINE_BBOX));
     const { sql } = rawCall()!;
     expect(sql).toMatch(/tp\.lat >= /);
-    expect(sql).toMatch(/tp\.lat <= /);
+    // ⚠上端・右端は `<`（半開区間）。セル番号は floor で決まるので、
+    // 境界ちょうどの点は上のセルに属する。`<=` だと隣のセルへ二重計上される。
+    expect(sql).toMatch(/tp\.lat < /);
     expect(sql).toMatch(/tp\.lng >= /);
-    expect(sql).toMatch(/tp\.lng <= /);
+    expect(sql).toMatch(/tp\.lng < /);
   });
 
   it("集計は一度の問い合わせで済ませる（地図の pan/zoom ごとに呼ばれるため）", async () => {
@@ -597,5 +609,30 @@ describe("日付は JST の暦日で切る（保存値は UTC の壁時計）", 
     expect(jstDayOf("2026-07-21T14:59:00")).toBe("2026-07-21");
     // JST 翌 0:00 (= UTC 15:00) で日が変わる
     expect(jstDayOf("2026-07-21T15:00:00")).toBe("2026-07-22");
+  });
+});
+
+describe("集計は格子境界に揃えた範囲で行う (@codex #332)", () => {
+  it("画面の端がセルを横切っていても、集計はセル単位で行う", async () => {
+    // 端が半端な位置の bbox を渡す
+    await GET(makeReq("north=35.6857&south=35.68123&east=139.7657&west=139.76123"));
+    const { values } = rawCall()!;
+    // 束縛値のうち緯度・経度は格子の倍数になっているはず
+    const nums = values.filter((v): v is number => typeof v === "number");
+    const lat = nums.filter((v) => v > 35 && v < 36);
+    const lng = nums.filter((v) => v > 139 && v < 140);
+    expect(lat.length).toBeGreaterThan(0);
+    expect(lng.length).toBeGreaterThan(0);
+    for (const v of lat) {
+      const k = v / COVERAGE_CELL_STEPS.fine.latStep;
+      expect(Math.abs(k - Math.round(k))).toBeLessThan(1e-6);
+    }
+    for (const v of lng) {
+      const k = v / COVERAGE_CELL_STEPS.fine.lngStep;
+      expect(Math.abs(k - Math.round(k))).toBeLessThan(1e-6);
+    }
+    // 生の画面端の値をそのまま渡していないこと
+    expect(nums).not.toContain(35.68123);
+    expect(nums).not.toContain(139.76123);
   });
 });

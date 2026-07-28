@@ -99,6 +99,30 @@ export function maxCellsForBbox(
   return rows * cols;
 }
 
+/**
+ * bbox を**格子の境界まで外側へ広げる**。
+ *
+ * ⚠これが無いと、画面の端が1つのセルを横切ったとき、そのセルは
+ * **画面内に入っている部分の点しか数えられない**。クライアントはセル全体を
+ * 塗るので、数ピクセル動かしただけで同じセルの色が変わる（3回歩いた道が
+ * 1回に見える／見えている部分が未踏破に見える）。
+ * 集計の入力を必ずセル単位に揃えることで、どこから見ても同じ値になる。
+ *
+ * 広がるのは縦横それぞれ最大1セル分で、これは maxCellsForBbox が
+ * 既に +1 行/列を見込んでいる範囲に収まる（上限を破らない）。
+ */
+export function snapBboxToCells(
+  bbox: CoverageBbox,
+  step: CoverageCellStep,
+): CoverageBbox {
+  return {
+    south: Math.floor(bbox.south / step.latStep) * step.latStep,
+    north: Math.ceil(bbox.north / step.latStep) * step.latStep,
+    west: Math.floor(bbox.west / step.lngStep) * step.lngStep,
+    east: Math.ceil(bbox.east / step.lngStep) * step.lngStep,
+  };
+}
+
 /** 1段粗い粒度。wide より粗い段は無いので null。 */
 export function coarserCoverageCellSize(
   cell: CoverageCellSize,
