@@ -448,6 +448,10 @@ function PinPhotoSection({
     latestPinIdRef.current = pinId;
   }, [pinId]);
 
+  // reload は photoMutations 経由で毎レンダー変わるため、購読 effect からは
+  // ref 経由で最新を呼ぶ (effect を貼り直さない)。
+  const reloadRef = useRef<() => Promise<void>>(async () => {});
+
   const reload = useCallback(async () => {
     const r = await photoMutations.listPhotos(pinId);
     if (!r.ok || !r.data) return;
@@ -455,6 +459,10 @@ function PinPhotoSection({
     setPhotos(r.data);
     setBrokenIds(new Set());
   }, [photoMutations, pinId]);
+
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
 
   useEffect(() => {
     setPhotos([]);
@@ -469,28 +477,30 @@ function PinPhotoSection({
   // 利用者は消えたと思って同じ写真をもう一度送る (= 重複)。
   // 削除も同じで、**削除済みの写真が残り**、もう一度消そうとして 404 になる。
   // 送信中があれば案内を出し、upload / delete どちらの完了でも自動で読み直す。
+  //
+  // ⚠**この effect の依存は pinId だけにする** (@codex #331 R1)。
+  // reload は photoMutations(毎レンダー新しいオブジェクト)に依存するため
+  // 毎レンダー変わる。deps に入れると、コールバックが失敗を表示した直後の
+  // 再レンダーで effect が再実行され、**セットしたエラーがその場で消える**
+  // (= 案内が一瞬も出ない)。購読も毎レンダー張り替わる。
+  // reload は ref 経由で最新を呼ぶ。
   useEffect(() => {
     setDetachedUploading(hasInFlightPhotoUpload(pinId));
     // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)。
+    // pin 切替時は前の pin のエラーを消す意味も兼ねる。
     setDetachedError(takeLastPhotoMutationFailure(pinId)?.error ?? null);
     return subscribePhotoMutationSettled((settledPinId, outcome) => {
       if (settledPinId !== pinId) return;
       setDetachedUploading(hasInFlightPhotoUpload(pinId));
       // ⚠失敗をここで出さないと、「出ますのでお待ちください」と案内したまま
-      // 何も出ず・エラーも出ない状態になる (@codex #331 R1)。写真が端末の
-      // ピッカーにしか無い場面なので、必ず気づける形にする。
-      // 成功で消すのは「その pin の失敗表示」だけ。失敗は残っている分も
-      // 消費して一度だけ出す。
-      if (outcome.ok) {
-        takeLastPhotoMutationFailure(pinId);
-        setDetachedError(null);
-      } else {
-        takeLastPhotoMutationFailure(pinId);
-        setDetachedError(outcome.error ?? null);
-      }
-      void reload();
+      // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
+      // 場面なので、必ず気づける形にする。
+      // 残っている分は消費しておく (同じ失敗を再マウントでもう一度出さない)。
+      takeLastPhotoMutationFailure(pinId);
+      setDetachedError(outcome.ok ? null : (outcome.error ?? null));
+      void reloadRef.current();
     });
-  }, [pinId, reload]);
+  }, [pinId]);
 
   const handleFilePicked = async (file: File | null) => {
     if (!file) return;

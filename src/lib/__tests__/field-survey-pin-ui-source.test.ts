@@ -1134,9 +1134,15 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
     // 場面なので、必ず気づける形にする。
     expect(PANEL_SRC).toMatch(/setDetachedError\(/);
-    expect(PANEL_SRC).toMatch(/setDetachedError\(outcome\.error \?\? null\)/);
+    expect(PANEL_SRC).toMatch(
+      /setDetachedError\(outcome\.ok \? null : \(outcome\.error \?\? null\)\)/,
+    );
     // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)
     expect(PANEL_SRC).toMatch(/takeLastPhotoMutationFailure\(pinId\)\?\.error/);
+    // ⚠購読 effect の依存は pinId だけにする。reload は photoMutations 経由で
+    // 毎レンダー変わるため deps に入れると、失敗を表示した直後の再レンダーで
+    // effect が再実行され**セットしたエラーがその場で消える** (案内が出ない)。
+    expect(PANEL_SRC).toMatch(/void reloadRef\.current\(\)/);
     expect(PANEL_SRC).toContain('data-testid="pin-photo-detached-error"');
     expect(PANEL_SRC).toContain('role="alert"');
     expect(PANEL_SRC).toContain("もう一度お試しください");
