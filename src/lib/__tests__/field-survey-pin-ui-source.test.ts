@@ -1166,8 +1166,9 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     // ⚠自分が始めた操作の失敗は hook の uploadError / deleteError で既に出る。
     // この赤い案内まで出すと二重表示かつ「離れている間」という事実と違う文言になる
     // (@codex #331 R1)。他インスタンス由来だけに限る。
+    // 失敗は所有者に関わらず消費し (蒸し返さない)、表示だけを他インスタンス由来に絞る
     expect(PANEL_SRC).toMatch(
-      /if \(!outcome\.ok && outcome\.ownerId !== ownInstanceId\) \{/,
+      /if \(!outcome\.ok\) \{[\s\S]*?takeLastPhotoMutationFailure\(pinId\);[\s\S]*?if \(outcome\.ownerId !== ownInstanceId\) \{[\s\S]*?setDetachedError\(outcome\.error \?\? null\)/,
     );
     expect(PHOTO_HOOK_SRC).toMatch(/let photoHookInstanceSeq = 0/);
     expect(PHOTO_HOOK_SRC).toMatch(/ownerId: number/);

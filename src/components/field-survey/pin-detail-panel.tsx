@@ -509,10 +509,17 @@ function PinPhotoSection({
       // 送信が失敗し、そのあと新しく送った写真が成功すると、成功側が案内を
       // 消してしまい**最初の写真が失われたことが永久に隠れる**。案内は
       // 利用者が閉じるか、別の pin を開くまで残す。
-      if (!outcome.ok && outcome.ownerId !== ownInstanceId) {
-        // 残っている分は消費しておく (同じ失敗を再マウントでもう一度出さない)。
+      if (!outcome.ok) {
+        // ⚠**自分が始めた失敗も必ず消費する** (@codex #331 R1)。表示しないからと
+        // いって残すと、次にこのパネルを開いた/この pin に戻ったときに
+        // 「離れている間に失敗しました」として蒸し返され、しかも**その後
+        // 再送して成功していても出てしまう**。
         takeLastPhotoMutationFailure(pinId);
-        setDetachedError(outcome.error ?? null);
+        // 表示するのは他インスタンス由来だけ (自分の分は hook の
+        // uploadError / deleteError が出している)。
+        if (outcome.ownerId !== ownInstanceId) {
+          setDetachedError(outcome.error ?? null);
+        }
       }
       void reloadRef.current();
     });
