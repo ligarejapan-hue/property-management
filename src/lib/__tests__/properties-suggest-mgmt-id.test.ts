@@ -72,6 +72,7 @@ import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { POST } from "../../app/api/properties/suggest/route";
+import { MGMT_ID_SUGGEST_LIMIT } from "@/lib/property-mgmt-id-search";
 
 const pm = prisma as unknown as {
   property: { findMany: Mock };
@@ -316,5 +317,33 @@ describe("POST /api/properties/suggest 管理ID組込", () => {
     expect(json).toContain("受付帳.xlsx:120行");
     // rawData 内の他のフィールドはレスポンスに含まれない
     expect(json).not.toContain("PII漏れ防止確認用文字列");
+  });
+});
+
+describe("補完の管理ID解決は小さく上限を切る (@codex #330 R2)", () => {
+  it("1打鍵で数千件の id を検証して巨大な IN 句を組まない", async () => {
+    // 共有既定 (CSV 向け 10,000) のまま使うと、よくある取込ファイル名に一致する
+    // 2 文字クエリで 1 打鍵ごとに最大 10,001 件をページングして実在チェックし、
+    // その UUID 全部を IN 句に載せてしまう。候補は 10 件しか返さない。
+    const many = Array.from({ length: 3000 }, (_, i) => ({
+      id: `row-${i}`,
+      createdId: `p${i}`,
+    }));
+    pm.importJobRow.findMany.mockImplementation(async ({ take }: any) =>
+      many.slice(0, take ?? many.length),
+    );
+    pm.property.findMany.mockImplementation(async (arg: any) =>
+      arg?.where?.id?.in
+        ? (arg.where.id.in as string[]).map((id) => ({ id }))
+        : [],
+    );
+
+    await POST(makeRequest({ q: "受付" }));
+
+    const call = listCall();
+    const or = (call as any)[0].where.AND?.[0]?.OR ?? [];
+    const mgmtCond = or.find((c: any) => c?.id?.in !== undefined);
+    expect(mgmtCond).toBeDefined();
+    expect(mgmtCond.id.in.length).toBeLessThanOrEqual(MGMT_ID_SUGGEST_LIMIT);
   });
 });

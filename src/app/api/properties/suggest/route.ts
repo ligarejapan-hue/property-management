@@ -10,7 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
-import { resolveMgmtIdToPropertyIds } from "@/lib/property-mgmt-id-search";
+import {
+  MGMT_ID_SUGGEST_LIMIT,
+  resolveMgmtIdToPropertyIds,
+} from "@/lib/property-mgmt-id-search";
 
 // ---------- POST /api/properties/suggest ----------
 // 物件一覧の入力中候補表示用。property:read 必須。
@@ -84,7 +87,11 @@ export async function POST(request: NextRequest) {
 
     // 管理ID（取込元 fileName / rowNumber / __sourceRef）でも候補に hit させる。
     // helper で候補 propertyId[] を解決し、既存 OR 条件と合算する。
-    const mgmtPropertyIds = await resolveMgmtIdToPropertyIds(prisma, q);
+    // ⚠上限を明示する (@codex #330 R2)。既定は CSV 向けの 10,000 件で、候補を 10 件
+    // しか返さない補完で使うと 1 打鍵ごとに数千件の id を検証し巨大な IN 句を組む。
+    const mgmtPropertyIds = await resolveMgmtIdToPropertyIds(prisma, q, {
+      take: MGMT_ID_SUGGEST_LIMIT,
+    });
     const mgmtOrCondition =
       mgmtPropertyIds.length > 0 ? [{ id: { in: mgmtPropertyIds } }] : [];
 

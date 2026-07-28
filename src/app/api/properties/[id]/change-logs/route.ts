@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 // ---------- GET /api/properties/:id/change-logs ----------
 
@@ -32,14 +33,67 @@ export async function GET(
     const from = searchParams.get("from") ?? "";
     const to = searchParams.get("to") ?? "";
 
+    // 関連レコードの ChangeLog は「その行の id」で記録されている。
+    // property_owners は PropertyOwner.id、buildings は Building.id であって
+    // propertyId ではないため、propertyId で引くと構造的に常に 0 件になり、
+    // 所有者の続柄変更・主所有者切替・棟情報の変更が履歴タブに一切出なかった
+    // (総点検 2026-07-27)。実 id を引いてから検索する。
+    // ※記録済みのデータは残っているので、現存するリンクの履歴は遡って表示される。
+    //
+    // ⚠既知の制限: PropertyOwner は物理削除 (ソフトデリート列なし) のため、
+    // **紐づけ解除された**リンクの履歴 (解除イベント自体と、解除前にその
+    // リンクへ行った続柄変更・主所有者切替) はここから引けない。ChangeLog は
+    // targetTable/targetId しか持たず propertyId を保持しないため、消えた
+    // リンク id を物件から逆引きする手段が無い。
+    // 解決には ChangeLog に propertyId を持たせる等のスキーマ変更が要るので
+    // 別タスク (要承認)。mislink/merge 経由の削除でも同じ。
+    // レコード単位のアクセス制御 (物件詳細 API GET /api/properties/[id] と同方針)。
+    // ⚠関連レコードを引く前に必ず弾く (@codex #330 R2)。この route は
+    // property:read しか見ていなかったため、field_staff が担当外の物件 id を
+    // 指定すると変更履歴が読めていた。関連の所有者リンク/棟まで引くようにした
+    // 分だけ (続柄・主所有者・棟情報の変更) 読める範囲が広がってしまう。
+    const propertyRow = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { id: true, buildingId: true, createdBy: true, assignedTo: true },
+    });
+    if (!propertyRow) {
+      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+    if (!canAccessPropertyRecord(session, propertyRow)) {
+      throw new ApiError(403, "この物件を閲覧する権限がありません", "FORBIDDEN");
+    }
+
+    const hasOwnerRead = hasPermission(perms, "owner", "read");
+    const ownerLinks = hasOwnerRead
+      ? await prisma.propertyOwner.findMany({
+          where: { propertyId },
+          select: { id: true },
+        })
+      : [];
+    const ownerLinkIds = ownerLinks.map((o) => o.id);
+    const buildingId = propertyRow.buildingId;
+
+    // 対象が無いテーブルは OR から外す (常に 0 件の条件を積まない)。
+    const targetFilters: Array<Record<string, unknown>> = [
+      { targetTable: "properties", targetId: propertyId },
+    ];
+    // ⚠所有者リンクの履歴は owner:read を持つ人にだけ出す (@codex #330 R3)。
+    // property_owners の ChangeLog は oldValue/newValue に**自由記述の note** を
+    // そのまま保持する。物件詳細 route は property:read だけの利用者に対して
+    // 所有者を `{ id }` まで削ぎ落として返しており、履歴からそれを回り込めては
+    // 意味がない。owner:read が無ければこの枝ごと積まない。
+    if (hasOwnerRead && ownerLinkIds.length > 0) {
+      targetFilters.push({
+        targetTable: "property_owners",
+        targetId: { in: ownerLinkIds },
+      });
+    }
+    if (buildingId) {
+      targetFilters.push({ targetTable: "buildings", targetId: buildingId });
+    }
+
     // Fetch change logs for this property and its related owners
-    const where: Record<string, unknown> = {
-      OR: [
-        { targetTable: "properties", targetId: propertyId },
-        { targetTable: "property_owners", targetId: propertyId },
-        { targetTable: "buildings", targetId: propertyId },
-      ],
-    };
+    const where: Record<string, unknown> = { OR: targetFilters };
 
     if (fieldName) where.fieldName = fieldName;
     if (source) where.source = source;
@@ -67,24 +121,14 @@ export async function GET(
     const [fieldNames, sources] = await Promise.all([
       prisma.changeLog.groupBy({
         by: ["fieldName"],
-        where: {
-          OR: [
-            { targetTable: "properties", targetId: propertyId },
-            { targetTable: "property_owners", targetId: propertyId },
-            { targetTable: "buildings", targetId: propertyId },
-          ],
-        },
+        // 一覧と同じ対象条件を使う (片方だけ古い条件だと、履歴には出るのに
+        // フィルタの選択肢に出ない/その逆が起きる)。
+        where: { OR: targetFilters },
         orderBy: { fieldName: "asc" },
       }),
       prisma.changeLog.groupBy({
         by: ["source"],
-        where: {
-          OR: [
-            { targetTable: "properties", targetId: propertyId },
-            { targetTable: "property_owners", targetId: propertyId },
-            { targetTable: "buildings", targetId: propertyId },
-          ],
-        },
+        where: { OR: targetFilters },
         orderBy: { source: "asc" },
       }),
     ]);

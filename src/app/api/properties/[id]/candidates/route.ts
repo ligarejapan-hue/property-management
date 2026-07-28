@@ -8,17 +8,47 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
+import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 import {
   haversineDistance,
   getCandidateStrength,
   CANDIDATE_THRESHOLDS,
 } from "@/lib/geo";
 import {
+  addressAreaKey,
+  isAreaKeyNotationStable,
   normalizeAddress,
   normalizeLotNumber,
   normalizeRealEstateNumber,
   similarityScore,
 } from "@/lib/address-normalizer";
+
+/** 地番一致の走査ページサイズ (エリア内を最後まで読み切るための単位)。 */
+const LOT_MATCH_PAGE_SIZE = 500;
+
+/**
+ * 地番走査の暴走防止ページ数。**通常は使われない** (エリアは丁目相当の狭い
+ * 範囲なので数十件で読み切る)。ここに当たった場合は
+ * 「見切れている」ことを応答で明示する (黙って打ち切らない)。
+ */
+const LOT_MATCH_MAX_PAGES = 40;
+
+/**
+ * 不動産番号一致の取得上限。番号は全国一意なので通常 0〜1 件だが、
+ * 取込ミス等での重複登録に備えて余裕を持たせる。
+ */
+const REAL_ESTATE_NUMBER_MATCH_LIMIT = 50;
+
+/** 生 SQL (地番 / 不動産番号) が返す行。CandidateResult へ組み立てる材料。 */
+interface CandidateRow {
+  id: string;
+  address: string;
+  lotNumber: string | null;
+  realEstateNumber: string | null;
+  propertyType: string;
+  caseStatus: string;
+}
 
 interface CandidateResult {
   id: string;
@@ -57,12 +87,27 @@ export async function GET(
         realEstateNumber: true,
         gpsLat: true,
         gpsLng: true,
+        createdBy: true,
+        assignedTo: true,
       },
     });
 
     if (!property) {
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
     }
+
+    // ⚠レコード単位のアクセス制御 (物件詳細 / 変更履歴 route と同方針・@codex #330 R5)。
+    // この route は property:read しか見ておらず、field_staff が担当外の物件 id を
+    // 指定すると**他物件の住所・地番・不動産番号・種別・案件状況**が返っていた。
+    // 検索を実際に効くようにした分だけ返る中身が増えるので、まず入口で弾く。
+    if (!canAccessPropertyRecord(session, property)) {
+      throw new ApiError(403, "この物件を閲覧する権限がありません", "FORBIDDEN");
+    }
+    // 返す候補側も同じスコープに閉じる (入口を通っても、担当外の物件を
+    // 「重複候補」として見せてはいけない)。
+    const visibilityScope = propertyVisibilityScopeWhere(session);
+    // 生 SQL 用: field_staff のときだけ自分の id、それ以外は null (= 制限なし)。
+    const scopeUserId = visibilityScope ? session.id : null;
 
     const candidateMap = new Map<string, CandidateResult>();
 
@@ -79,6 +124,7 @@ export async function GET(
           isArchived: false,
           gpsLat: { gte: baseLat - latDelta, lte: baseLat + latDelta },
           gpsLng: { gte: baseLng - lngDelta, lte: baseLng + lngDelta },
+          ...(visibilityScope ?? {}),
         },
         select: {
           id: true,
@@ -129,6 +175,7 @@ export async function GET(
           id: { not: id },
           isArchived: false,
           address: { contains: addrPrefix },
+          ...(visibilityScope ?? {}),
         },
         select: {
           id: true,
@@ -163,24 +210,96 @@ export async function GET(
     }
 
     // --- Strategy 3: Lot number matching ---
+    // ⚠以前は「地番が入っている物件」を無条件に先頭 50 件だけ取り、JS で
+    // 正規化比較していた (総点検 2026-07-27)。DB 側の値フィルタも並び順も
+    // 無いため、地番入りが数千件ある本番では本当の重複が 50 件に入る確率が
+    // 低く、重複検出が実質機能していなかった。
+    //
+    // 地番の正規化 (全半角・ハイフン統一・漢数字→算用数字) は SQL で再現
+    // できないため DB 側で完全一致は取れない。代わりに **同一エリアに限定**
+    // して母集団を小さくし、その中を JS で正規化比較する。同じ「1番1」でも
+    // 市区町村が違えば重複ではないので、住所での絞り込みは性能面だけでなく
+    // 意味の上でも正しい。
+    //
+    // ⚠絞り込みキーに生の先頭10文字 (Strategy 2 の addrPrefix) を使うと、
+    // 「芝公園4-2-8」と「芝公園4丁目2-8」のような**丁目/ハイフンの表記差**が
+    // prefix に食い込み、正規化すれば一致する相手を DB 段階で落としてしまう
+    // (@codex #330 R1)。番地は最初の数字以降にしか出ないので、数字の手前まで
+    // (= addressAreaKey) を使えば表記差の影響を受けない。
+    //
+    // ⚠エリアキーは空白を落とすので、DB 側も落としてから比較する
+    // (@codex #330 R4)。素の `contains` だと「東京都港区芝公園4-2-8」と
+    // 「東京都 港区 芝公園 4-2-8」が食い違い、**保存側に空白がある物件だけ**が
+    // 正規化比較の手前で落ちる。translate で半角/全角スペースを除去して
+    // JS 側 addressAreaKey と同じ土俵に乗せる。
+    //
+    // ⚠件数で打ち切らない (@codex #330 R5)。並び順のない LIMIT は「エリア内の
+    // 適当な N 件」を選ぶだけで、本当の重複がその外にいれば黙って取りこぼす
+    // (= この修正が消そうとした事故と同じ形で、閾値が 50 → 500 に上がるだけ)。
+    // 地番の正規化は漢数字の位取り (十/百/千) を含むため SQL では再現できない
+    // ので、**エリア内を id カーソルで最後まで読み切る**。エリアは丁目相当の
+    // 狭い範囲なので通常は 1 ページで終わる。万一の暴走上限に当たった場合は
+    // 黙って打ち切らず scanTruncated として応答に出す。
+    // ⚠エリアキーは**速さのための最適化**であって、正しさの根拠にしない
+    // (@codex #330 R7)。漢数字が残るキー (「一番町」「四日市市」など) は
+    // 表記に依存し、同じ場所が「1番町」で登録されていると取りこぼす。
+    // その場合は住所での絞り込みを外して全件を読み切る (下の areaKeyFilter が
+    // null になると SQL 側の position 条件が無効化される)。本番の active な
+    // 物件は 667 件なので、読み切っても実コストはほぼ無い。
+    const areaKey = addressAreaKey(property.address);
+    const areaKeyFilter =
+      areaKey.length >= 4 && isAreaKeyNotationStable(areaKey) ? areaKey : null;
+    let lotScanTruncated = false;
     if (property.lotNumber) {
       const normalizedLot = normalizeLotNumber(property.lotNumber);
-      const lotMatches = await prisma.property.findMany({
-        where: {
-          id: { not: id },
-          isArchived: false,
-          lotNumber: { not: null },
-        },
-        select: {
-          id: true,
-          address: true,
-          lotNumber: true,
-          realEstateNumber: true,
-          propertyType: true,
-          caseStatus: true,
-        },
-        take: 50,
-      });
+      const lotMatches: CandidateRow[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; ; page++) {
+        if (page >= LOT_MATCH_MAX_PAGES) {
+          lotScanTruncated = true;
+          break;
+        }
+        const rows: CandidateRow[] = await prisma.$queryRaw<CandidateRow[]>`
+          SELECT id,
+                 address,
+                 lot_number AS "lotNumber",
+                 real_estate_number AS "realEstateNumber",
+                 property_type AS "propertyType",
+                 case_status AS "caseStatus"
+          FROM properties
+          WHERE id <> ${id}::uuid
+            AND is_archived = false
+            AND lot_number IS NOT NULL
+            -- 空白除去は JS 側 addressAreaKey と同じ土俵に乗せるため。
+            -- PostgreSQL の [[:space:]] は全角スペース(U+3000)や NBSP を含まないので
+            -- 除去対象を chr() で明示する (半角/タブ/改行/CR/NBSP/全角)。
+            -- 包含判定は position を使う: 住所に % や _ が混じっても
+            -- ワイルドカードとして解釈されない。
+            -- null = キーが表記に依存するため絞り込まない (全件を読み切る)
+            AND (
+              ${areaKeyFilter}::text IS NULL
+              OR position(
+                   ${areaKeyFilter} IN translate(
+                     address,
+                     ' ' || chr(9) || chr(10) || chr(13) || chr(160) || chr(12288),
+                     ''
+                   )
+                 ) > 0
+            )
+            -- field_staff は自分が作成/担当する物件のみ (null = 制限なし)
+            AND (
+              ${scopeUserId}::uuid IS NULL
+              OR created_by = ${scopeUserId}::uuid
+              OR assigned_to = ${scopeUserId}::uuid
+            )
+            AND (${cursor}::uuid IS NULL OR id > ${cursor}::uuid)
+          ORDER BY id
+          LIMIT ${LOT_MATCH_PAGE_SIZE}
+        `;
+        lotMatches.push(...rows);
+        if (rows.length < LOT_MATCH_PAGE_SIZE) break;
+        cursor = rows[rows.length - 1].id;
+      }
 
       for (const p of lotMatches) {
         if (candidateMap.has(p.id) || !p.lotNumber) continue;
@@ -203,26 +322,46 @@ export async function GET(
     }
 
     // --- Strategy 4: Real estate number matching ---
+    // 不動産番号は全国で一意なので、地番と違いエリアで絞れない。以前は
+    // 「番号が入っている物件」の先頭 50 件だけを見ていて実質機能していな
+    // かった (総点検 2026-07-27)。
+    // JS の normalizeRealEstateNumber は「①全角数字→半角 ②数字以外を除去」の
+    // 2 段。SQL で ② だけ再現すると全角数字が「数字以外」として丸ごと消え、
+    // 全角で登録された行を必ず取りこぼす (PostgreSQL の [0-9] は ASCII のみで
+    // 全角 U+FF10-FF19 にマッチしない)。しかも validators の
+    // optionalRealEstateNumber は全角を許容するだけで変換していないため、
+    // 全角のまま保存された行が現実に存在し得る。
+    // → translate() で ① を行ってから regexp_replace で ② を行い、JS と
+    //   完全に同じ正規化にする (パラメータ化クエリ)。
     if (property.realEstateNumber) {
       const normalizedNum = normalizeRealEstateNumber(
         property.realEstateNumber,
       );
-      const reMatches = await prisma.property.findMany({
-        where: {
-          id: { not: id },
-          isArchived: false,
-          realEstateNumber: { not: null },
-        },
-        select: {
-          id: true,
-          address: true,
-          lotNumber: true,
-          realEstateNumber: true,
-          propertyType: true,
-          caseStatus: true,
-        },
-        take: 50,
-      });
+      const reMatches: CandidateRow[] = normalizedNum
+        ? await prisma.$queryRaw<CandidateRow[]>`
+            SELECT id,
+                   address,
+                   lot_number AS "lotNumber",
+                   real_estate_number AS "realEstateNumber",
+                   property_type AS "propertyType",
+                   case_status AS "caseStatus"
+            FROM properties
+            WHERE id <> ${id}::uuid
+              AND is_archived = false
+              AND real_estate_number IS NOT NULL
+              -- field_staff は自分が作成/担当する物件のみ (null = 制限なし)
+              AND (
+                ${scopeUserId}::uuid IS NULL
+                OR created_by = ${scopeUserId}::uuid
+                OR assigned_to = ${scopeUserId}::uuid
+              )
+              AND regexp_replace(
+                    translate(real_estate_number, '０１２３４５６７８９', '0123456789'),
+                    '[^0-9]', '', 'g'
+                  ) = ${normalizedNum}
+            LIMIT ${REAL_ESTATE_NUMBER_MATCH_LIMIT}
+          `
+        : [];
 
       for (const p of reMatches) {
         if (candidateMap.has(p.id) || !p.realEstateNumber) continue;
@@ -257,6 +396,9 @@ export async function GET(
     return apiResponse({
       data: candidates,
       thresholds: CANDIDATE_THRESHOLDS,
+      // エリア内を読み切れなかった (暴走上限に当たった) ことを隠さない。
+      // 画面はこれを見て「一部しか確認できていない」旨を出す。
+      scanTruncated: lotScanTruncated,
     });
   } catch (error) {
     return handleApiError(error);
