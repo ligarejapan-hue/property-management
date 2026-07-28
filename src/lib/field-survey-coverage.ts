@@ -190,6 +190,32 @@ export function coverageCellLabel(cell: CoverageCellSize): string {
   return `約${m}m`;
 }
 
+/**
+ * 踏破ヒートの表示状態。
+ *
+ * ⚠**「色が無い」の意味は状態によって違う**。この画面は「色が無い＝誰も
+ * 通っていない」と読ませるので、まだ分からない状態を ready と同じ見た目に
+ * すると**踏破済みのエリアへ人を送り出す** (@codex #332)。
+ *  - "off"         レイヤーを消している（利用者が意図して消した）
+ *  - "loading"     問い合わせ中。**前の色は消す**（期間を変えた直後に古い期間の
+ *                  色が残ると、選択と表示が食い違う）
+ *  - "ready"       取得できた。**このときだけ凡例を出してよい**
+ *  - "too-wide"    範囲が広すぎて出せない（地図を寄せてもらう）
+ *  - "unavailable" 取得に失敗した。色が無いのは「通っていない」ではなく
+ *                  「分からない」。凡例を出してはいけない
+ */
+export type CoverageStatus =
+  | "off"
+  | "loading"
+  | "ready"
+  | "too-wide"
+  | "unavailable";
+
+/** 凡例（色なし＝誰も通っていない）を出してよい状態か。 */
+export function canTrustCoverageLegend(status: CoverageStatus): boolean {
+  return status === "ready";
+}
+
 /** 集計結果の 1 セル。**格子番号と回数だけ**（生座標・人名・日時を持たない）。 */
 export interface CoverageCell {
   /** 緯度方向の格子番号 = floor(lat / latStep)。 */

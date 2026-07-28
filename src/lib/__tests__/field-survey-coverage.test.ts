@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  canTrustCoverageLegend,
   snapBboxToCells,
   COVERAGE_CELL_LIMIT,
   coarserCoverageCellSize,
@@ -402,5 +403,19 @@ describe("集計の範囲は格子の境界まで広げる (@codex #332)", () =>
     );
     expect(Math.abs(q.south - south)).toBeLessThan(1e-9);
     expect(Math.abs(q.west - west)).toBeLessThan(1e-9);
+  });
+});
+
+describe("凡例を出してよいのは取得できたときだけ (@codex #332)", () => {
+  // ⚠この画面は「色が無い＝誰も通っていない」と読ませる。まだ分からない状態で
+  // 同じ凡例を出すと、踏破済みのエリアへ人を送り出すことになる。
+  it("ready のときだけ true", () => {
+    expect(canTrustCoverageLegend("ready")).toBe(true);
+  });
+
+  it("確認中・範囲過大・取得失敗・レイヤーOFF では false", () => {
+    for (const s of ["loading", "too-wide", "unavailable", "off"] as const) {
+      expect(canTrustCoverageLegend(s)).toBe(false);
+    }
   });
 });

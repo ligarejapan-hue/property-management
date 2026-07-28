@@ -45,7 +45,9 @@ import {
   COVERAGE_PERIOD_DAYS,
   coveragePeriodLabel,
   type CoverageCell,
+  canTrustCoverageLegend,
   type CoverageCellSize,
+  type CoverageStatus,
 } from "@/lib/field-survey-coverage";
 import { useFieldSurveyLocationRecorder } from "@/components/field-survey/use-field-survey-location-recorder";
 import type { ActiveSessionLike } from "@/lib/field-survey-trip-util";
@@ -158,12 +160,12 @@ export default function FieldSurveyMap({
   // 踏破ヒートの状態 (1マスの実寸ラベル / 打ち切り有無)。凡例と注意書きに使う。
   const [coverageState, setCoverageState] = useState<{
     cellSize: CoverageCellSize | null;
-    truncated: boolean;
-  }>({ cellSize: null, truncated: false });
+    status: CoverageStatus;
+  }>({ cellSize: null, status: "loading" });
   const handleCoverageState = useCallback(
-    (next: { cellSize: CoverageCellSize | null; truncated: boolean }) => {
+    (next: { cellSize: CoverageCellSize | null; status: CoverageStatus }) => {
       setCoverageState((prev) =>
-        prev.cellSize === next.cellSize && prev.truncated === next.truncated
+        prev.cellSize === next.cellSize && prev.status === next.status
           ? prev
           : next,
       );
@@ -1165,7 +1167,7 @@ export default function FieldSurveyMap({
           coverageDays={coverageDays}
           onChangeCoverageDays={setCoverageDays}
           coverageCellSize={coverageState.cellSize}
-          coverageTruncated={coverageState.truncated}
+          coverageStatus={coverageState.status}
           panelOpen={panelOpen}
           onTogglePanelOpen={() => {
             quickStartRef.current = false;
@@ -1408,7 +1410,7 @@ function ControlPanel({
   coverageDays,
   onChangeCoverageDays,
   coverageCellSize,
-  coverageTruncated,
+  coverageStatus,
   panelOpen,
   onTogglePanelOpen,
   currentUserId,
@@ -1438,8 +1440,11 @@ function ControlPanel({
   onChangeCoverageDays: (days: number) => void;
   /** 表示中の格子の粗さ (凡例に「1マス 約50m」を出すため)。取得前は null。 */
   coverageCellSize: CoverageCellSize | null;
-  /** 範囲が広すぎて色を出せない状態。true の間は色を一切描かない。 */
-  coverageTruncated: boolean;
+  /**
+   * 踏破ヒートの状態。**"ready" のときだけ凡例を出す**。
+   * 「色が無い」の意味が状態で変わるため（誰も通っていない / まだ分からない）。
+   */
+  coverageStatus: CoverageStatus;
   /**
    * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
    * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
@@ -1561,9 +1566,20 @@ function ControlPanel({
               ))}
             </select>
           </label>
-          {/* ⚠打ち切り時は色を一切描かない。「色が無い＝誰も通っていない」と
-              読ませる画面なので、欠けたまま出すと踏破済みへ人を出す。 */}
-          {coverageTruncated ? (
+          {/* ⚠凡例（色なし＝誰も通っていません）を出してよいのは "ready" だけ。
+              まだ分からない状態で同じ見た目にすると、踏破済みのエリアへ人を
+              送り出すことになる。 */}
+          {canTrustCoverageLegend(coverageStatus) ? (
+            <CoverageLegend cellSize={coverageCellSize ?? undefined} />
+          ) : coverageStatus === "loading" ? (
+            <p
+              role="status"
+              data-testid="coverage-loading-notice"
+              className="mb-1 rounded border border-gray-300 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-300"
+            >
+              歩いた場所を確認中…
+            </p>
+          ) : coverageStatus === "too-wide" ? (
             <p
               role="status"
               data-testid="coverage-truncated-notice"
@@ -1571,9 +1587,16 @@ function ControlPanel({
             >
               範囲が広すぎて歩いた場所を出せません。地図を寄せてください。
             </p>
-          ) : (
-            <CoverageLegend cellSize={coverageCellSize ?? undefined} />
-          )}
+          ) : coverageStatus === "unavailable" ? (
+            <p
+              role="alert"
+              data-testid="coverage-unavailable-notice"
+              className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              歩いた場所を取得できませんでした。
+              <b>色が付いていない場所も、通っている可能性があります。</b>
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -1679,7 +1702,7 @@ function MapDataLayer({
   /** 踏破ヒートの状態を親へ返す (凡例と注意書きの表示に使う)。 */
   onCoverageState: (state: {
     cellSize: CoverageCellSize | null;
-    truncated: boolean;
+    status: CoverageStatus;
   }) => void;
   onError: (msg: string | null) => void;
   refetchNonce: number;
@@ -1724,7 +1747,7 @@ function MapDataLayer({
         if (abortRef.current) abortRef.current.abort();
         setCoverageCells([]);
         setCoverageStep(null);
-        onCoverageState({ cellSize: null, truncated: false });
+        onCoverageState({ cellSize: null, status: "too-wide" });
         return;
       }
       onError(null);
@@ -1787,13 +1810,18 @@ function MapDataLayer({
           : null;
 
         if (coveragePromise) {
+          // ⚠問い合わせ開始時に**前の色を消して「確認中」にする** (@codex #332)。
+          // 期間を「全期間」から「直近1年」へ変えた直後などに古い色が残ると、
+          // 選択と表示が食い違ったまま（集計は索引が無いぶん時間がかかる）。
+          setCoverageCells([]);
+          onCoverageState({ cellSize: null, status: "loading" });
           void coveragePromise
             .then(async (r) => {
               if (ac.signal.aborted) return;
               if (!r.ok) {
                 handleHttpError(r.status, onError);
                 setCoverageCells([]);
-                onCoverageState({ cellSize: null, truncated: false });
+                onCoverageState({ cellSize: null, status: "unavailable" });
                 return;
               }
               const j = (await r.json()) as {
@@ -1817,17 +1845,20 @@ function MapDataLayer({
                   ? { latStep: d.latStep, lngStep: d.lngStep }
                   : null,
               );
-              onCoverageState({ cellSize: d?.cell ?? null, truncated });
+              onCoverageState({
+                cellSize: d?.cell ?? null,
+                status: truncated ? "too-wide" : "ready",
+              });
             })
             .catch((err: unknown) => {
               if ((err as { name?: string }).name === "AbortError") return;
               // 通信失敗でも古い色を残さない(古い期間の色を描き続けない)。
               setCoverageCells([]);
-              onCoverageState({ cellSize: null, truncated: false });
+              onCoverageState({ cellSize: null, status: "unavailable" });
             });
         } else {
           setCoverageCells([]);
-          onCoverageState({ cellSize: null, truncated: false });
+          onCoverageState({ cellSize: null, status: "off" });
         }
 
         const results = await Promise.all(tasks);
@@ -1866,7 +1897,7 @@ function MapDataLayer({
         // 「色が無い＝誰も通っていない」と読ませる画面なので、古い色が残ることは
         // 誤った指示に直結する。
         setCoverageCells([]);
-        onCoverageState({ cellSize: null, truncated: false });
+        onCoverageState({ cellSize: null, status: "unavailable" });
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");
       } finally {

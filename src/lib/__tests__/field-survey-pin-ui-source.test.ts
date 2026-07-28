@@ -362,6 +362,28 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     }
   });
 
+  it("問い合わせ開始時に前の色を消して「確認中」にする (@codex #332)", () => {
+    // 期間を切り替えた直後などに古い色が残ると、選択と表示が食い違う
+    // （集計は索引が無いぶん時間がかかるので、その食い違いが長く見える）。
+    const start = MAP_SRC.slice(
+      MAP_SRC.indexOf("if (coveragePromise) {"),
+      MAP_SRC.indexOf("void coveragePromise"),
+    );
+    expect(start).toContain("setCoverageCells([])");
+    expect(start).toContain('status: "loading"');
+  });
+
+  it("凡例を出すのは取得できたときだけ (@codex #332)", () => {
+    // 「色が無い」の意味が状態で変わる（誰も通っていない / まだ分からない）。
+    expect(MAP_SRC).toContain("canTrustCoverageLegend(coverageStatus)");
+    // 状態ごとの案内が揃っていること
+    expect(MAP_SRC).toContain('data-testid="coverage-loading-notice"');
+    expect(MAP_SRC).toContain('data-testid="coverage-truncated-notice"');
+    expect(MAP_SRC).toContain('data-testid="coverage-unavailable-notice"');
+    // 取得失敗時は「通っている可能性がある」と明言する
+    expect(MAP_SRC).toContain("通っている可能性があります");
+  });
+
   it("表示範囲が広すぎて中断するときも古い色を消す (@codex #332)", () => {
     // 取得を行っていない広い範囲に前の色が残ると、周りの無色を
     // 「誰も通っていない」と誤読させる。飛んでいる古い要求も止める。
@@ -399,6 +421,10 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     );
     expect(catchBlock).toContain("setCoverageCells([])");
     expect(catchBlock).toContain("cellSize: null");
+    // ⚠**取得できなかったことを状態として残す** (@codex #332)。
+    // 「色が無い＝誰も通っていない」の凡例を出したままにすると、
+    // 踏破済みのエリアへ人を送り出す。
+    expect(catchBlock).toContain('status: "unavailable"');
   });
 
   it("getCurrentPosition は単発のみ。watchPosition / wakeLock は使わない", () => {
