@@ -362,6 +362,17 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     }
   });
 
+  it("通信失敗でも踏破ヒートの古い色を残さない (@codex #332)", () => {
+    // 期間を切り替えた直後に失敗すると、画面は新しい期間なのに古い色を描き続ける。
+    // 「色が無い＝誰も通っていない」と読ませる画面なので誤指示に直結する。
+    const catchBlock = MAP_SRC.slice(
+      MAP_SRC.indexOf("AbortError\") return;"),
+      MAP_SRC.indexOf("地図データの取得に失敗しました"),
+    );
+    expect(catchBlock).toContain("setCoverageCells([])");
+    expect(catchBlock).toContain("cellSize: null");
+  });
+
   it("getCurrentPosition は単発のみ。watchPosition / wakeLock は使わない", () => {
     expect(MAP_SRC).toMatch(/navigator\.geolocation\.getCurrentPosition/);
     expect(MAP_SRC).not.toMatch(/navigator\.geolocation\.watchPosition/);

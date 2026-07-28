@@ -33,6 +33,12 @@ import {
 //  - field_survey:read のみ。**read_all は要求しない**。
 //    返すのは格子番号と回数だけで人を識別できないため、他人の生軌跡を見る権限
 //    （= 勤怠の証拠にあたる sessions/[id]/track-points）とは別物として扱う。
+//  - ⚠ただし「集計だから個人は分からない」は**それだけでは成り立たない**
+//    (@codex #332 P1)。稼働が2〜3人の職場で進行中の巡回まで含めると、地図を
+//    更新し続けるだけで同僚の現在の移動が追えてしまう（50m マスが増えていく
+//    様子がその人の経路そのものになる）。**終了した巡回だけを数える**ことで
+//    この経路を塞いでいる（下の SQL の status='ended'）。この2つは
+//    セットで初めて「read だけで全社分を見せてよい」が成立する。
 //
 // response:
 //  - **生座標を1つも返さない**。格子番号 (y, x) と通過した巡回本数 (p) のみ。
@@ -92,7 +98,13 @@ export async function GET(request: NextRequest) {
     //
     // ⚠staff_user_id は集計の内側だけで使い、応答には出さない（誰の分かは返さない）。
     //
-    // cancelled のセッションは数えない（開始してすぐ取り消した巡回は踏破ではない）。
+    // ⚠**終了した巡回だけ**を数える (@codex #332 P1)。cancelled を除くだけでは
+    // 足りない。進行中の巡回を含めると、稼働が2〜3人の職場では**地図を更新し
+    // 続けるだけで同僚の現在の移動が追える**（50m マスが増えていく様子がその人の
+    // 経路そのものになる）。集計で人名を伏せても、少人数かつリアルタイムだと
+    // 実質的に個人の追跡になる。
+    // 終了後に出るのは業務上は十分（「今日そこを歩いた」= 二度歩きを避ける情報は
+    // 巡回が終わってから効く）。自分の進行中の経路は地図上の線で見えている。
     const rows = await prisma.$queryRaw<CoverageRow[]>`
       SELECT floor(tp.lat / ${latStep}::numeric)::int AS "y",
              floor(tp.lng / ${lngStep}::numeric)::int AS "x",
@@ -106,7 +118,7 @@ export async function GET(request: NextRequest) {
         AND tp.lat <= ${north}::numeric
         AND tp.lng >= ${west}::numeric
         AND tp.lng <= ${east}::numeric
-        AND s.status::text <> 'cancelled'
+        AND s.status::text = 'ended'
         AND (${fromAt}::timestamptz IS NULL OR tp.recorded_at >= ${fromAt}::timestamptz)
       GROUP BY 1, 2
       ORDER BY 1, 2

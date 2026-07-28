@@ -1847,6 +1847,13 @@ function MapDataLayer({
         }
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
+        // ⚠通信失敗でも**古い色を必ず消す** (@codex #332 P2)。残すと、期間を
+        // 「直近1年」から「全期間」へ切り替えた直後に失敗した場合、画面は新しい
+        // 期間を選んだ状態のまま**古い期間の色**を描き続ける。
+        // 「色が無い＝誰も通っていない」と読ませる画面なので、古い色が残ることは
+        // 誤った指示に直結する。
+        setCoverageCells([]);
+        onCoverageState({ cellSize: null, truncated: false });
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");
       } finally {
