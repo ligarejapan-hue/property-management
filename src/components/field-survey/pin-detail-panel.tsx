@@ -31,6 +31,8 @@ import {
   type PinDetail,
 } from "@/components/field-survey/use-field-survey-pin-mutations";
 import {
+  hasInFlightPhotoUpload,
+  subscribePhotoUploadSettled,
   useFieldSurveyPinPhotoMutations,
   type PinPhoto,
 } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
@@ -432,6 +434,9 @@ function PinPhotoSection({
   }, [onBusyChange]);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [brokenIds, setBrokenIds] = useState<Set<string>>(new Set());
+  // パネルを閉じて開き直したとき、まだ送信中の写真があるか
+  // (この一覧には未反映でも、送信は続いている)。
+  const [detachedUploading, setDetachedUploading] = useState(false);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const latestPinIdRef = useRef(pinId);
@@ -454,6 +459,19 @@ function PinPhotoSection({
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinId]);
+
+  // ⚠閉じてすぐ開き直すと、初回 GET が送信中 upload の commit より先に終わり、
+  // **保存された写真が次の再読込まで見えない**ことがある (@codex #331 R1)。
+  // 利用者は消えたと思って同じ写真をもう一度送る (= 重複)。
+  // 送信中があれば案内を出し、完了したら自動で読み直す。
+  useEffect(() => {
+    setDetachedUploading(hasInFlightPhotoUpload(pinId));
+    return subscribePhotoUploadSettled((settledPinId) => {
+      if (settledPinId !== pinId) return;
+      setDetachedUploading(hasInFlightPhotoUpload(pinId));
+      void reload();
+    });
+  }, [pinId, reload]);
 
   const handleFilePicked = async (file: File | null) => {
     if (!file) return;
@@ -610,6 +628,16 @@ function PinPhotoSection({
               写真を追加
             </button>
           </div>
+          {detachedUploading && !photoMutations.uploadLoading && (
+            <p
+              role="status"
+              data-testid="pin-photo-detached-uploading"
+              className="mt-1 rounded border border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 px-2 py-1 text-[11px] text-blue-900 dark:text-blue-300"
+            >
+              前に選んだ写真を送信中です。終わり次第この一覧に出ますので、
+              もう一度送らずにお待ちください。
+            </p>
+          )}
           {photoMutations.uploadError && (
             <p
               role="status"

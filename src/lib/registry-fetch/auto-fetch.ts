@@ -676,9 +676,13 @@ function createPlaywrightRegistryPage(
           // マーカーは hidden input のため state:"attached"(DOM 存在で判定)にする。
           // 既定の "visible" 待ちでは hidden 要素が可視にならず永遠に timeout する
           // (2026-07-17 本番実測で確認: これを付けないと確認画面でも突破できない)。
+          // ⚠固定 1.5 秒のままにしない (@codex #331 R1)。着地待ちが共有
+          // デッドライン近くまで使っていた場合、この 1.5 秒が分類の余裕を食い潰し、
+          // 外側のタイマーが先に発火して「常に timeout 表示」に戻る。
+          // 短時間判定である性質は保ったまま、残り予算を超えないよう頭を押さえる。
           await page.waitForSelector(REGISTRY_SELECTORS.forceLoginMarker, {
             state: "attached",
-            timeout: FORCE_LOGIN_CONFIRM_DETECT_MS,
+            timeout: Math.min(FORCE_LOGIN_CONFIRM_DETECT_MS, stepMs()),
           });
           sawForceLoginConfirm = true;
         } catch (err) {

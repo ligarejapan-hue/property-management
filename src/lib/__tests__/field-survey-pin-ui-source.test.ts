@@ -951,6 +951,33 @@ describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
     expect(list).toMatch(/signal:\s*ac\.signal/);
   });
 
+  it("unmount を跨いだ upload の完了を再マウント側へ伝える (@codex #331 R1)", () => {
+    // ⚠abort をやめただけでは足りない。閉じてすぐ開き直すと、新しい一覧の初回 GET が
+    // upload の commit より先に終わり、保存された写真が次の再読込まで見えない。
+    // 利用者は消えたと思って同じ写真をもう一度送る (= 重複)。
+    // 進行中件数と完了通知を hook インスタンスの外 (module スコープ) に置く。
+    expect(PHOTO_HOOK_SRC).toMatch(/const inFlightUploads = new Map/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function hasInFlightPhotoUpload/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function subscribePhotoUploadSettled/);
+    // 成功・失敗・early return のいずれでも通知する = finally
+    const upload = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+      PHOTO_HOOK_SRC.indexOf("const deletePhoto"),
+    );
+    expect(upload).toMatch(/markUploadStarted\(pinId\)/);
+    expect(upload).toMatch(/finally \{[\s\S]*?markUploadSettled\(pinId\)/);
+  });
+
+  it("保持するのは pinId と件数だけ (PII を持たない)", () => {
+    const registry = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const inFlightUploads"),
+      PHOTO_HOOK_SRC.indexOf("export function useFieldSurveyPinPhotoMutations"),
+    );
+    for (const forbidden of ["fileName", "fileUrl", "storageKey", "File", "gps"]) {
+      expect(registry).not.toContain(forbidden);
+    }
+  });
+
   it("console に画像情報 / response 全文を出さない / Storage を使わない", () => {
     expect(PHOTO_HOOK_SRC).not.toMatch(/console\.\w+\(/);
     expect(PHOTO_HOOK_SRC).not.toMatch(/localStorage\s*\.\s*(setItem|getItem)/);
@@ -1039,5 +1066,27 @@ describe("Phase 1-I — field-survey-map 削除連携", () => {
     expect(MAP_SRC).toMatch(
       /action\s*===\s*"manage"[\s\S]{0,80}granted\s*===\s*true/,
     );
+  });
+});
+
+describe("再マウント後も送信中の写真を取りこぼさない (@codex #331 R1)", () => {
+  const PANEL_SRC = readSrc("src/components/field-survey/pin-detail-panel.tsx");
+
+  it("完了通知を購読して自動で読み直す", () => {
+    expect(PANEL_SRC).toMatch(/subscribePhotoUploadSettled\(/);
+    // 自分の pin 以外の通知では読み直さない
+    expect(PANEL_SRC).toMatch(/settledPinId !== pinId/);
+    expect(PANEL_SRC).toMatch(/void reload\(\)/);
+  });
+
+  it("購読は解除される (unmount でリスナーが残らない)", () => {
+    // subscribe の戻り値をそのまま useEffect の cleanup として返す形
+    expect(PANEL_SRC).toMatch(/return subscribePhotoUploadSettled\(/);
+  });
+
+  it("送信中がある間は「もう一度送らずに待って」と案内する", () => {
+    expect(PANEL_SRC).toMatch(/hasInFlightPhotoUpload\(pinId\)/);
+    expect(PANEL_SRC).toContain('data-testid="pin-photo-detached-uploading"');
+    expect(PANEL_SRC).toContain("もう一度送らずにお待ちください");
   });
 });

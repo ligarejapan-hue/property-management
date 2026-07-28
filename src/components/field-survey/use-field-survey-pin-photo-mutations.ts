@@ -36,6 +36,48 @@ export interface PinPhotoMutationResult<T> {
   error?: string;
 }
 
+/**
+ * unmount を跨いで走り続ける upload の状況を、**hook インスタンスの外**で持つ。
+ *
+ * ⚠abort をやめただけでは足りない (@codex #331 R1)。パネルを閉じてすぐ開き直すと、
+ * 新しい写真セクションの初回 GET が upload の commit より先に終わることがある。
+ * 古い hook は mountedRef で完了処理を抑止するため、新しい一覧に「増えたよ」と
+ * 伝える手段が無く、**保存された写真が次の再読込まで見えない**。利用者は消えたと
+ * 思って同じ写真をもう一度送る (= 重複)。
+ *
+ * そこで pinId ごとの進行中件数と完了通知を module スコープに置き、再マウント側が
+ * 「送信中がある」ことを知り、完了時に自動で読み直せるようにする。
+ * PII は持たない (pinId のみ・件数のみ)。
+ */
+const inFlightUploads = new Map<string, number>();
+const uploadSettledListeners = new Set<(pinId: string) => void>();
+
+function markUploadStarted(pinId: string): void {
+  inFlightUploads.set(pinId, (inFlightUploads.get(pinId) ?? 0) + 1);
+}
+
+function markUploadSettled(pinId: string): void {
+  const next = (inFlightUploads.get(pinId) ?? 1) - 1;
+  if (next <= 0) inFlightUploads.delete(pinId);
+  else inFlightUploads.set(pinId, next);
+  for (const listener of uploadSettledListeners) listener(pinId);
+}
+
+/** その pin に送信中の写真があるか (再マウント直後の案内表示用)。 */
+export function hasInFlightPhotoUpload(pinId: string): boolean {
+  return (inFlightUploads.get(pinId) ?? 0) > 0;
+}
+
+/** upload の完了 (成功/失敗どちらも) を購読する。戻り値で解除。 */
+export function subscribePhotoUploadSettled(
+  listener: (pinId: string) => void,
+): () => void {
+  uploadSettledListeners.add(listener);
+  return () => {
+    uploadSettledListeners.delete(listener);
+  };
+}
+
 export function useFieldSurveyPinPhotoMutations() {
   const [listState, setListState] = useState<{
     loading: boolean;
@@ -118,6 +160,8 @@ export function useFieldSurveyPinPhotoMutations() {
       // ⚠先行の upload を abort しない。別の写真を続けて選んだとき、先に
       // 選んだ写真が消えてしまう (どちらもユーザーが送るつもりで選んでいる)。
       if (mountedRef.current) setUploadState({ loading: true, error: null });
+      // unmount を跨いでも完了を再マウント側へ伝えられるようにする。
+      markUploadStarted(pinId);
       try {
         // 送信前に端末内で自動変換 (HEIC → JPEG / 8MB 超の縮小)。変換できない
         // 端末ではサーバー 422 の代わりに平易な案内 (「互換性優先」設定) を返す。
@@ -157,6 +201,10 @@ export function useFieldSurveyPinPhotoMutations() {
         const msg = pinApiErrorMessage(0);
         setUploadState({ loading: false, error: msg });
         return { ok: false, error: msg };
+      } finally {
+        // 成功・失敗・early return のいずれでも必ず通知する
+        // (通知漏れは「送信中」が残り続けて案内が消えないことになる)。
+        markUploadSettled(pinId);
       }
     },
     [],
