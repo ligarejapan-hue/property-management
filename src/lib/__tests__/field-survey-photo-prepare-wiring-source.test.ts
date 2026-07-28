@@ -29,7 +29,7 @@ const MAP_SRC = readSrc("src/components/field-survey/field-survey-map.tsx");
 describe("use-field-survey-pin-photo-mutations — 送信前の自動変換", () => {
   it("uploadPhoto は FormData 前に prepare を通し、変換後 file を送る", () => {
     const upload = HOOK_SRC.match(
-      /const uploadPhoto\s*=\s*useCallback\([\s\S]*?\},\s*\[\],?\s*\);/,
+      /const uploadPhoto\s*=\s*useCallback\([\s\S]*?\},\s*\[[^\]]*\],?\s*\);/,
     );
     expect(upload).not.toBeNull();
     const m = upload?.[0] ?? "";
@@ -44,7 +44,7 @@ describe("use-field-survey-pin-photo-mutations — 送信前の自動変換", ()
 
   it("変換失敗はサーバーへ送らず、案内文言を uploadError に流して返す", () => {
     const upload = HOOK_SRC.match(
-      /const uploadPhoto\s*=\s*useCallback\([\s\S]*?\},\s*\[\],?\s*\);/,
+      /const uploadPhoto\s*=\s*useCallback\([\s\S]*?\},\s*\[[^\]]*\],?\s*\);/,
     );
     const m = upload?.[0] ?? "";
     // setUploadState は unmount 後の setState を抑止するヘルパ経由で呼ぶ

@@ -999,8 +999,12 @@ describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
     // 通知には**結果**を載せる (成否が無いと、失敗しても「送信中」表示が消えて
     // 一覧を読み直すだけになり、利用者は失敗に気づけない)。
     expect(upload).toMatch(/finally \{[\s\S]*?markUploadSettled\(pinId, outcome\)/);
-    expect(upload).toMatch(/outcome = \{ kind: "upload", ok: true \}/);
-    expect(upload).toMatch(/outcome = \{ kind: "upload", ok: false, error: msg \}/);
+    expect(upload).toMatch(
+      /outcome = \{ kind: "upload", ok: true, ownerId: instanceId \}/,
+    );
+    expect(upload).toMatch(
+      /outcome = \{ kind: "upload", ok: false, error: msg, ownerId: instanceId \}/,
+    );
   });
 
   it("保持するのは pinId と件数だけ (PII を持たない)", () => {
@@ -1126,7 +1130,9 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     expect(del).toMatch(
       /finally \{[\s\S]*?markDeleteSettled\(pinId, photoId, outcome\)/,
     );
-    expect(del).toMatch(/outcome = \{ kind: "delete", ok: true \}/);
+    expect(del).toMatch(
+      /outcome = \{ kind: "delete", ok: true, ownerId: instanceId \}/,
+    );
     // markDeleteSettled は進行中集合から外したうえで通知する
     expect(PHOTO_HOOK_SRC).toMatch(
       /function markDeleteSettled\([\s\S]*?set\.delete\(photoId\)[\s\S]*?notifyPhotoMutationSettled\(pinId, outcome\)/,
@@ -1157,7 +1163,14 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     // 失敗し、そのあと新しく送った写真が成功すると、成功側が案内を消してしまい
     // **最初の写真が失われたことが永久に隠れる**。案内は利用者が閉じるか、
     // 別の pin を開くまで残す。
-    expect(PANEL_SRC).toMatch(/if \(!outcome\.ok\) \{/);
+    // ⚠自分が始めた操作の失敗は hook の uploadError / deleteError で既に出る。
+    // この赤い案内まで出すと二重表示かつ「離れている間」という事実と違う文言になる
+    // (@codex #331 R1)。他インスタンス由来だけに限る。
+    expect(PANEL_SRC).toMatch(
+      /if \(!outcome\.ok && outcome\.ownerId !== ownInstanceId\) \{/,
+    );
+    expect(PHOTO_HOOK_SRC).toMatch(/let photoHookInstanceSeq = 0/);
+    expect(PHOTO_HOOK_SRC).toMatch(/ownerId: number/);
     expect(PANEL_SRC).toContain("pin-photo-detached-error-dismiss");
     // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)
     expect(PANEL_SRC).toMatch(/takeLastPhotoMutationFailure\(pinId\)\?\.error/);

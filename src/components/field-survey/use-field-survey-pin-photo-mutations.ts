@@ -68,7 +68,19 @@ export interface PhotoMutationOutcome {
   kind: "upload" | "delete";
   ok: boolean;
   error?: string;
+  /**
+   * この操作を開始した hook インスタンスの識別子。
+   *
+   * ⚠これが無いと、**パネルを開いたまま**失敗したときにも「離れている間に
+   * 失敗しました」の赤い案内が出てしまう (@codex #331 R1)。その場合は hook 自身の
+   * uploadError / deleteError が既に出ているので、二重表示かつ事実と違う文言になる。
+   * 購読側は「自分が始めた操作でない」ものだけを離席中の失敗として扱う。
+   */
+  ownerId: number;
 }
+
+/** hook インスタンスの連番 (どのインスタンスが始めた操作かの識別に使う)。 */
+let photoHookInstanceSeq = 0;
 
 const inFlightUploads = new Map<string, number>();
 /**
@@ -183,6 +195,13 @@ export function useFieldSurveyPinPhotoMutations() {
 
   const listAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  // このインスタンスの識別子 (ライフタイム中不変)。
+  const instanceIdRef = useRef(0);
+  if (instanceIdRef.current === 0) {
+    photoHookInstanceSeq += 1;
+    instanceIdRef.current = photoHookInstanceSeq;
+  }
+  const instanceId = instanceIdRef.current;
 
   // ⚠unmount で中断してよいのは list(GET) だけ (総点検 2026-07-27)。
   //
@@ -269,6 +288,7 @@ export function useFieldSurveyPinPhotoMutations() {
         kind: "upload",
         ok: false,
         error: pinApiErrorMessage(0),
+        ownerId: instanceId,
       };
       try {
         // 送信前に端末内で自動変換 (HEIC → JPEG / 8MB 超の縮小)。変換できない
@@ -279,7 +299,7 @@ export function useFieldSurveyPinPhotoMutations() {
         const prepared = await prepareFieldSurveyPhotoForUpload(file);
         if (!prepared.ok) {
           setUploadStateIfMounted({ loading: false, error: prepared.error });
-          outcome = { kind: "upload", ok: false, error: prepared.error };
+          outcome = { kind: "upload", ok: false, error: prepared.error, ownerId: instanceId };
           return { ok: false, error: prepared.error };
         }
         const formData = new FormData();
@@ -295,19 +315,19 @@ export function useFieldSurveyPinPhotoMutations() {
         if (!res.ok) {
           const msg = pinApiErrorMessage(res.status);
           setUploadStateIfMounted({ loading: false, error: msg });
-          outcome = { kind: "upload", ok: false, error: msg };
+          outcome = { kind: "upload", ok: false, error: msg, ownerId: instanceId };
           return { ok: false, error: msg };
         }
         const body = (await res.json().catch(() => null)) as
           | { data?: PinPhoto }
           | null;
         setUploadStateIfMounted({ loading: false, error: null });
-        outcome = { kind: "upload", ok: true };
+        outcome = { kind: "upload", ok: true, ownerId: instanceId };
         return { ok: true, data: body?.data };
       } catch {
         const msg = pinApiErrorMessage(0);
         setUploadStateIfMounted({ loading: false, error: msg });
-        outcome = { kind: "upload", ok: false, error: msg };
+        outcome = { kind: "upload", ok: false, error: msg, ownerId: instanceId };
         return { ok: false, error: msg };
       } finally {
         // 成功・失敗のいずれでも必ず通知する
@@ -315,7 +335,7 @@ export function useFieldSurveyPinPhotoMutations() {
         markUploadSettled(pinId, outcome);
       }
     },
-    [],
+    [instanceId],
   );
 
   const deletePhoto = useCallback(
@@ -337,6 +357,7 @@ export function useFieldSurveyPinPhotoMutations() {
         kind: "delete",
         ok: false,
         error: pinApiErrorMessage(0),
+        ownerId: instanceId,
       };
       try {
         const res = await fetch(
@@ -346,16 +367,16 @@ export function useFieldSurveyPinPhotoMutations() {
         if (!res.ok) {
           const msg = pinApiErrorMessage(res.status);
           setDeleteStateIfMounted({ loading: false, error: msg });
-          outcome = { kind: "delete", ok: false, error: msg };
+          outcome = { kind: "delete", ok: false, error: msg, ownerId: instanceId };
           return { ok: false, error: msg };
         }
         setDeleteStateIfMounted({ loading: false, error: null });
-        outcome = { kind: "delete", ok: true };
+        outcome = { kind: "delete", ok: true, ownerId: instanceId };
         return { ok: true };
       } catch {
         const msg = pinApiErrorMessage(0);
         setDeleteStateIfMounted({ loading: false, error: msg });
-        outcome = { kind: "delete", ok: false, error: msg };
+        outcome = { kind: "delete", ok: false, error: msg, ownerId: instanceId };
         return { ok: false, error: msg };
       } finally {
         // 削除も完了を通知する。通知が無いと、閉じてすぐ開き直したときに
@@ -363,10 +384,11 @@ export function useFieldSurveyPinPhotoMutations() {
         markDeleteSettled(pinId, photoId, outcome);
       }
     },
-    [],
+    [instanceId],
   );
 
   return {
+    instanceId,
     listPhotos,
     uploadPhoto,
     deletePhoto,

@@ -422,6 +422,10 @@ function PinPhotoSection({
   onBusyChange?: (busy: boolean) => void;
 }) {
   const photoMutations = useFieldSurveyPinPhotoMutations();
+  // この写真セクションが始めた操作の識別子 (ライフタイム中不変)。
+  // 自分が始めた失敗は hook の uploadError / deleteError で出るので、
+  // 「離れている間に失敗しました」の案内は**他インスタンス由来だけ**に限る。
+  const ownInstanceId = photoMutations.instanceId;
   const [photos, setPhotos] = useState<PinPhoto[]>([]);
   // 送信・削除の進行中を親へ通知する (unmount 時は必ず false へ戻す)。
   const photoBusy =
@@ -505,14 +509,14 @@ function PinPhotoSection({
       // 送信が失敗し、そのあと新しく送った写真が成功すると、成功側が案内を
       // 消してしまい**最初の写真が失われたことが永久に隠れる**。案内は
       // 利用者が閉じるか、別の pin を開くまで残す。
-      if (!outcome.ok) {
+      if (!outcome.ok && outcome.ownerId !== ownInstanceId) {
         // 残っている分は消費しておく (同じ失敗を再マウントでもう一度出さない)。
         takeLastPhotoMutationFailure(pinId);
         setDetachedError(outcome.error ?? null);
       }
       void reloadRef.current();
     });
-  }, [pinId]);
+  }, [pinId, ownInstanceId]);
 
   const handleFilePicked = async (file: File | null) => {
     if (!file) return;
