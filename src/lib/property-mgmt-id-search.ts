@@ -30,10 +30,30 @@ const FULLWIDTH_COLON_RE = /：/g;
 //
 // 上限を CSV の安全上限 (10,000) + 1 に合わせることで、超過時は切り捨てでは
 // なく CSV 側の 400「絞り込んでください」に必ず倒れる。内部スキャン上限
-// (INTERNAL_PAGE_SIZE * MAX_PAGES_PER_BRANCH = 10,000 候補/branch) とも整合する。
 const DEFAULT_TAKE = 10_001;
 const INTERNAL_PAGE_SIZE = 500;
-const MAX_PAGES_PER_BRANCH = 20; // 500 * 20 = 10,000 候補/branch 上限
+// 走査ページ数の下限 (従来値)。非 Property 行が先頭を大量に占有しても
+// 実在 Property を取りこぼさないための最低保証。
+const MIN_PAGES_PER_BRANCH = 20;
+// take を満たすのに見込む入力行の倍率。1 行が生む id は最大 1 件で、
+// createdId が無い行・重複も混ざるため余裕を持たせる。
+const SCAN_ROW_MARGIN = 2;
+// 暴走防止の絶対上限 (行数)。
+const MAX_SCAN_ROWS_PER_BRANCH = 50_000;
+
+/**
+ * take を満たすために走査してよいページ数。
+ *
+ * ⚠固定 20 ページ (= 10,000 行) だと、DEFAULT_TAKE=10,001 に**到達できない**。
+ * その結果 export へ渡る id が必ず 10,000 で止まり、CSV 側の「> 10,000 なら
+ * 400 で中止」ガードが発火せず、**警告なく 10,000 行だけの CSV/DM** が出る
+ * (この修正が消そうとしている事故そのもの・@codex #330 R1)。
+ * take から必要ページ数を導出し、従来の下限は保ちつつ上限で暴走を防ぐ。
+ */
+function maxPagesForTake(target: number): number {
+  const rows = Math.min(target * SCAN_ROW_MARGIN, MAX_SCAN_ROWS_PER_BRANCH);
+  return Math.max(MIN_PAGES_PER_BRANCH, Math.ceil(rows / INTERNAL_PAGE_SIZE));
+}
 const PRISMA_INT_MIN = 1;
 const PRISMA_INT_MAX = 2147483647; // Prisma Int (PostgreSQL int4) の上限
 
@@ -119,7 +139,8 @@ async function paginatedCollect(
   target: number,
 ): Promise<void> {
   let cursor: string | undefined = undefined;
-  for (let page = 0; page < MAX_PAGES_PER_BRANCH; page++) {
+  const maxPages = maxPagesForTake(target);
+  for (let page = 0; page < maxPages; page++) {
     if (verifiedIds.size >= target) return;
 
     const where = cursor

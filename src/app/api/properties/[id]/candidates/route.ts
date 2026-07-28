@@ -14,6 +14,7 @@ import {
   CANDIDATE_THRESHOLDS,
 } from "@/lib/geo";
 import {
+  addressAreaKey,
   normalizeAddress,
   normalizeLotNumber,
   normalizeRealEstateNumber,
@@ -184,15 +185,22 @@ export async function GET(
     // できないため DB 側で完全一致は取れない。代わりに **同一エリアに限定**
     // して母集団を小さくし、その中を JS で正規化比較する。同じ「1番1」でも
     // 市区町村が違えば重複ではないので、住所での絞り込みは性能面だけでなく
-    // 意味の上でも正しい (Strategy 2 と同じ prefix を使う)。
-    if (property.lotNumber && addrPrefix.length >= 4) {
+    // 意味の上でも正しい。
+    //
+    // ⚠絞り込みキーに生の先頭10文字 (Strategy 2 の addrPrefix) を使うと、
+    // 「芝公園4-2-8」と「芝公園4丁目2-8」のような**丁目/ハイフンの表記差**が
+    // prefix に食い込み、正規化すれば一致する相手を DB 段階で落としてしまう
+    // (@codex #330 R1)。番地は最初の数字以降にしか出ないので、数字の手前まで
+    // (= addressAreaKey) を使えば表記差の影響を受けない。
+    const areaKey = addressAreaKey(property.address);
+    if (property.lotNumber && areaKey.length >= 4) {
       const normalizedLot = normalizeLotNumber(property.lotNumber);
       const lotMatches = await prisma.property.findMany({
         where: {
           id: { not: id },
           isArchived: false,
           lotNumber: { not: null },
-          address: { contains: addrPrefix },
+          address: { contains: areaKey },
         },
         select: {
           id: true,

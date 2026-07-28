@@ -41,7 +41,10 @@ vi.mock("@/lib/prisma", () => ({
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { GET } from "@/app/api/properties/[id]/candidates/route";
-import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
+import {
+  addressAreaKey,
+  normalizeRealEstateNumber,
+} from "@/lib/address-normalizer";
 
 const ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const req = new Request("http://x/y") as never;
@@ -89,7 +92,7 @@ describe("地番一致: 同一エリアに絞ってから正規化比較する",
     const q = lotQuery();
     expect(q).toBeDefined();
     // 同じ「1番1」でも市区町村が違えば重複ではない = 意味の上でも正しい絞り込み
-    expect(q.where.address).toEqual({ contains: "東京都港区芝公園4-" });
+    expect(q.where.address).toEqual({ contains: "東京都港区芝公園" });
     expect(q.where.isArchived).toBe(false);
     expect(q.where.id).toEqual({ not: ID });
   });
@@ -219,5 +222,51 @@ describe("SQL 側の正規化が JS 側 normalizeRealEstateNumber と一致す�
     const fullWidth = "１２３４５６７８９０１２３";
     expect(withoutTranslate(fullWidth)).toBe("");
     expect(normalizeRealEstateNumber(fullWidth)).toBe("1234567890123");
+  });
+});
+
+describe("エリアキーは表記ゆれに影響されない (@codex #330 R1)", () => {
+  it("丁目/ハイフンの違いで同じキーになる", () => {
+    // 生の先頭10文字だと "東京都港区芝公園4-" と "東京都港区芝公園4丁" に
+    // 分かれ、正規化すれば一致する相手を DB 段階で落としていた。
+    expect(addressAreaKey("東京都港区芝公園4-2-8")).toBe("東京都港区芝公園");
+    expect(addressAreaKey("東京都港区芝公園4丁目2-8")).toBe("東京都港区芝公園");
+    expect(addressAreaKey("東京都港区芝公園四丁目2-8")).toBe("東京都港区芝公園");
+    expect(addressAreaKey("東京都港区芝公園４−２−８")).toBe("東京都港区芝公園");
+  });
+
+  it("空白は落とす / 数字が無い住所はそのまま", () => {
+    expect(addressAreaKey("東京都 港区 芝公園 4-2-8")).toBe("東京都港区芝公園");
+    expect(addressAreaKey("東京都港区芝公園")).toBe("東京都港区芝公園");
+  });
+
+  it("キーが短すぎる住所では地番検索を行わない (母集団を絞れないため)", async () => {
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
+      baseProperty({ address: "港区1-2-3" }),
+    );
+    await GET(req, ctx);
+    // areaKey = "港区" (2文字) < 4 → 走らせない
+    expect(lotQuery()).toBeUndefined();
+  });
+
+  it("表記が違う同一エリアの物件を DB 段階で落とさない", async () => {
+    (prisma.property.findMany as unknown as Mock).mockImplementation(
+      async (arg: { where?: { lotNumber?: { not: null } } }) =>
+        arg?.where?.lotNumber?.not === null
+          ? [
+              {
+                id: "dup3",
+                address: "東京都港区芝公園4丁目2-9", // 丁目表記
+                lotNumber: "1番1",
+                realEstateNumber: null,
+                propertyType: "land",
+                caseStatus: "new_case",
+              },
+            ]
+          : [],
+    );
+    const res = await GET(req, ctx);
+    const json = (await res.json()) as { data: Array<{ id: string }> };
+    expect(json.data.some((c) => c.id === "dup3")).toBe(true);
   });
 });

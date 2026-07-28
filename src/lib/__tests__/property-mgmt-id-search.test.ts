@@ -421,3 +421,45 @@ describe("返却上限 (総点検 2026-07-27: CSV/DM の取りこぼし)", () =>
     expect(ids.length).toBe(10);
   });
 });
+
+describe("走査上限は take から導出する (@codex #330 R1)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("10,000 行を超えて走査でき、10,001 に到達できる", async () => {
+    // 固定20ページ (=10,000行) のままだと 10,001 に到達できず、export の
+    // 「> 10,000 なら 400」ガードが発火しないまま 10,000 行の CSV が出ていた。
+    const pages: Array<Array<{ createdId: string }>> = [];
+    let n = 0;
+    // 1ページ500行 × 25ページ = 12,500 行を返せるようにする
+    for (let p = 0; p < 25; p++) {
+      pages.push(
+        Array.from({ length: 500 }, () => ({ createdId: `p${n++}` })),
+      );
+    }
+    const all = Array.from({ length: n }, (_, i) => `p${i}`);
+    const { prisma } = makePrisma({ rowsByCall: pages, propertyIds: all });
+
+    const ids = await resolveMgmtIdToPropertyIds(prisma, "受付帳.xlsx");
+    expect(ids.length).toBe(10_001);
+  });
+
+  it("小さい take でも従来の最低ページ数は下回らない (非Property行の占有対策)", async () => {
+    // 先頭に createdId 無しの行が大量に並んでも、実在 Property を拾えること。
+    const pages: Array<Array<{ createdId: string | null }>> = [];
+    for (let p = 0; p < 19; p++) {
+      pages.push(Array.from({ length: 500 }, () => ({ createdId: null })));
+    }
+    pages.push([{ createdId: "deep" }]);
+    const { prisma } = makePrisma({
+      rowsByCall: pages as never,
+      propertyIds: ["deep"],
+    });
+
+    const ids = await resolveMgmtIdToPropertyIds(prisma, "受付帳.xlsx", {
+      take: 5,
+    });
+    expect(ids).toEqual(["deep"]);
+  });
+});

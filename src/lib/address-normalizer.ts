@@ -184,3 +184,27 @@ export function similarityScore(a: string, b: string): number {
 
   return (2 * maxLen) / (a.length + b.length);
 }
+
+/**
+ * 住所から「表記ゆれに影響されないエリアキー」を取り出す。
+ *
+ * 重複候補の DB 側プレフィルタ用。生の先頭N文字を使うと
+ * 「芝公園4-2-8」と「芝公園4丁目2-8」のように **丁目/ハイフンの表記差**が
+ * prefix に食い込み、正規化すれば一致するはずの相手を DB 段階で落としてしまう
+ * (@codex #330 R1)。番地は最初の数字以降にしか現れないので、
+ * **最初の数字の手前まで**を取れば表記差の影響を受けない。
+ *
+ * 例: "東京都港区芝公園4-2-8"   → "東京都港区芝公園"
+ *     "東京都港区芝公園4丁目2-8" → "東京都港区芝公園"
+ *     "東京都港区芝公園四丁目"   → "東京都港区芝公園"
+ *
+ * ⚠都道府県の省略 (「港区芝公園…」) や市町村合併による表記変更までは吸収
+ * できない。DB 絞り込みは「安全に母集団を狭める」ためのもので、最終判定は
+ * 呼び出し側の正規化比較が行う。
+ */
+export function addressAreaKey(address: string): string {
+  // 数字 (半角/全角) と漢数字の直前で切る。
+  const m = address.match(/[0-9０-９一二三四五六七八九十百千]/);
+  const stem = m?.index != null ? address.slice(0, m.index) : address;
+  return stem.replace(/[\s　]+/g, "").trim();
+}
