@@ -34,6 +34,8 @@ import {
   detectRegistryUnavailablePage,
   classifyRegistryMissingPage,
   resolveLoginFormDetectMs,
+  resolveLoginStepDeadline,
+  remainingLoginStepMs,
   normalizeChibanForDialog,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
@@ -671,8 +673,13 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     ).resolves.toBeUndefined();
     // DOM click はログインボタンの1回のみ(強制ログインは押さない)。jikangai 判定(arg="")は除外。
     expect(evaluatedArgs.filter((a) => a !== "")).toEqual(["button.CForwardLong"]);
-    // loggedIn は待つ。
-    expect(f.page.waitForSelector).toHaveBeenCalledWith('form[name="logoutForm"]');
+    // loggedIn は待つ。送信後の待機は明示 timeout を持つ (総点検 2026-07-27:
+    // 無指定だと page 既定 = provider 全体予算と同値になり、全体タイマーが先に
+    // 切れて auth_failed の分類に到達できず、常に「タイムアウト」表示になる)。
+    expect(f.page.waitForSelector).toHaveBeenCalledWith(
+      'form[name="logoutForm"]',
+      { timeout: expect.any(Number) },
+    );
   });
 
   it("C4: searchByRealEstateNumber が番号 fill・検索 click へ委譲し found を返す", async () => {
@@ -1242,5 +1249,101 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     await expect(factory!()).rejects.toBe(boom);
     expect(f.browser.close).not.toHaveBeenCalled();
     expect(f.context.close).not.toHaveBeenCalled();
+  });
+});
+
+describe("ログイン送信後の待機は全体予算より必ず先に切れる (総点検 2026-07-27)", () => {
+  // ⚠これが崩れると、資格情報の誤り・アカウントロック・セレクタドリフトなど
+  // **送信後の失敗が必ず「謄本取得サービスがタイムアウトしました」(504)** になる。
+  // 運用者は「サイトが重いだけ」と読んで資格情報を疑わず、復旧できないまま
+  // 再試行を繰り返す。分類 (auth_failed=502) に到達させるのが目的。
+
+  it("分類の余裕(2秒)だけ手前に共有デッドラインを置く", () => {
+    // 各段に予算の一定割合を配る方式にはしない: 送信後の待機は5段あるので
+    // 合計で予算を超えるうえ、1段だけ正当に遅いケースで成功するはずの
+    // ログインを auth_failed に化けさせる (内部レビュー指摘)。
+    expect(resolveLoginStepDeadline(1_000_000, 30_000)).toBe(1_028_000);
+    expect(resolveLoginStepDeadline(1_000_000, 8_000)).toBe(1_006_000);
+  });
+
+  it("残り予算をほぼ全部使ってよい (痩せた割り当てで正当な遅延を殺さない)", () => {
+    const deadline = resolveLoginStepDeadline(0, 30_000)!;
+    // 送信までに5秒使っていても、残り23秒を1段の待機に使える
+    expect(remainingLoginStepMs(deadline, 5_000)).toBe(23_000);
+  });
+
+  it("5段すべてが同じデッドラインを共有し、合計が予算を超えない", () => {
+    const budget = 30_000;
+    const deadline = resolveLoginStepDeadline(0, budget)!;
+    let clock = 0;
+    let total = 0;
+    for (let step = 0; step < 5; step++) {
+      const allowed = remainingLoginStepMs(deadline, clock);
+      total += allowed;
+      clock += allowed; // 各段が上限まで使い切った最悪ケース
+    }
+    // 最悪ケースでも「予算 - 分類の余裕」で止まる (下限1秒ぶんの誤差を許容)
+    expect(clock).toBeLessThanOrEqual(budget);
+    expect(total).toBeLessThanOrEqual(budget);
+    // 1段目に大半を渡している = 割り当てで痩せていない
+    expect(remainingLoginStepMs(deadline, 0)).toBe(28_000);
+  });
+
+  it("デッドライン超過後は 1ms (0や負値を渡さない・合計も膨らませない)", () => {
+    const deadline = resolveLoginStepDeadline(0, 30_000)!;
+    expect(remainingLoginStepMs(deadline, 999_999)).toBe(1);
+  });
+
+  it("予算未設定なら従来どおり (Playwright 既定と同値・挙動不変)", () => {
+    expect(resolveLoginStepDeadline(1_000, undefined)).toBeNull();
+    expect(resolveLoginStepDeadline(1_000, 0)).toBeNull();
+    expect(resolveLoginStepDeadline(1_000, Number.NaN)).toBeNull();
+    expect(remainingLoginStepMs(null, 12_345)).toBe(30_000);
+  });
+
+  it("login 内の待機はすべて明示 timeout を持つ (page 既定に頼らない)", async () => {
+    const { readFileSync } = await import("fs");
+    const src = readFileSync("src/lib/registry-fetch/auto-fetch.ts", "utf8");
+    const loginBody = src.slice(
+      src.indexOf("async login(input)"),
+      src.indexOf("async searchByRealEstateNumber"),
+    );
+    const waits = loginBody.match(/waitForSelector\(/g) ?? [];
+    // フォーム出現 / ログインボタン / 着地 / 確認画面判定 / 強制ログインボタン /
+    // 確認画面の消失 / ログイン成功要素
+    expect(waits.length).toBe(7);
+    // 全ての待機が timeout を伴うこと (page 既定 = 全体予算に落ちない)
+    const timeouts = loginBody.match(/timeout:/g) ?? [];
+    expect(timeouts.length).toBe(waits.length);
+  });
+
+  it("送信後の待機に渡る実値が全体予算より小さい (予算そのままに戻らない)", async () => {
+    // ⚠expect.any(Number) では、全体予算をそのまま渡す退行を検出できない
+    // (内部レビュー指摘)。実値を突き合わせる。
+    process.env.REGISTRY_FETCH_TIMEOUT_MS = "30000";
+    const f = makeFakeChromium();
+    const calls: Array<{ sel: string; opts: { timeout?: number } | undefined }> = [];
+    f.page.waitForSelector = vi.fn(async (sel: string, opts?: unknown) => {
+      calls.push({ sel, opts: opts as { timeout?: number } | undefined });
+      if (sel === REGISTRY_FORCE_LOGIN_MARKER) throw makeTimeoutError();
+      return {};
+    });
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" });
+
+    // 着地待ち (グループセレクタ) と loggedIn の実値を確認
+    const landing = calls.find((c) => c.sel.includes(","));
+    const loggedIn = calls.find((c) => c.sel === 'form[name="logoutForm"]');
+    for (const c of [landing, loggedIn]) {
+      expect(c?.opts?.timeout).toBeDefined();
+      // 全体予算(30000)より小さい = 分類が先に走れる
+      expect(c!.opts!.timeout!).toBeLessThan(30_000);
+      // 分類の余裕(2秒)を引いた上限以下
+      expect(c!.opts!.timeout!).toBeLessThanOrEqual(28_000);
+    }
+    delete process.env.REGISTRY_FETCH_TIMEOUT_MS;
   });
 });

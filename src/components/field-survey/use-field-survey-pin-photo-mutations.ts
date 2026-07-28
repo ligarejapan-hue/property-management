@@ -6,7 +6,8 @@
  * - 既存 API (`/api/field-survey/pins/[id]/photos` GET/POST、
  *   `/api/field-survey/pins/[id]/photos/[photoId]` DELETE) を呼ぶ。
  * - upload は multipart/form-data (Content-Type は fetch が自動付与)。
- * - AbortController + mountedRef で stale request 中断 / unmount 後 setState 抑止。
+ * - list(GET) のみ AbortController で stale request 中断。**upload(POST)/delete(DELETE)
+ *   は中断しない**(下記)。unmount 後の setState は mountedRef で抑止する。
  * - 画像情報 / fileUrl / fileName / API key / raw response 全文を console や
  *   error UI に出さない。エラーは status から汎用文言にマップ。
  * - localStorage / sessionStorage / IndexedDB は使わない。
@@ -50,17 +51,24 @@ export function useFieldSurveyPinPhotoMutations() {
   }>({ loading: false, error: null });
 
   const listAbortRef = useRef<AbortController | null>(null);
-  const uploadAbortRef = useRef<AbortController | null>(null);
-  const deleteAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
+  // ⚠unmount で中断してよいのは list(GET) だけ (総点検 2026-07-27)。
+  //
+  // 旧実装は upload(POST)/delete(DELETE) も unmount で abort していた。
+  // 写真セクションは「詳細パネルの × を押した」「編集ボタンを押した
+  // (= 写真セクションが !editing 条件で消える)」だけで unmount するため、
+  // **送信中に × か編集を押すと、撮ったばかりの写真が黙って消えていた**。
+  // 現地で撮った写真は端末にしか無いことがあり、取り返しがつかない。
+  //
+  // unmount 後の setState 抑止は mountedRef が担っているので、abort は
+  // そもそも不要だった。送信済みのリクエストは最後まで走らせ、サーバー側で
+  // 保存を完了させる (次にパネルを開いたとき一覧に出る)。
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       if (listAbortRef.current) listAbortRef.current.abort();
-      if (uploadAbortRef.current) uploadAbortRef.current.abort();
-      if (deleteAbortRef.current) deleteAbortRef.current.abort();
     };
   }, []);
 
@@ -107,9 +115,8 @@ export function useFieldSurveyPinPhotoMutations() {
       pinId: string,
       file: File,
     ): Promise<PinPhotoMutationResult<PinPhoto>> => {
-      if (uploadAbortRef.current) uploadAbortRef.current.abort();
-      const ac = new AbortController();
-      uploadAbortRef.current = ac;
+      // ⚠先行の upload を abort しない。別の写真を続けて選んだとき、先に
+      // 選んだ写真が消えてしまう (どちらもユーザーが送るつもりで選んでいる)。
       if (mountedRef.current) setUploadState({ loading: true, error: null });
       try {
         // 送信前に端末内で自動変換 (HEIC → JPEG / 8MB 超の縮小)。変換できない
@@ -131,7 +138,6 @@ export function useFieldSurveyPinPhotoMutations() {
             method: "POST",
             credentials: "same-origin",
             body: formData,
-            signal: ac.signal,
           },
         );
         if (!mountedRef.current) return { ok: false };
@@ -161,14 +167,12 @@ export function useFieldSurveyPinPhotoMutations() {
       pinId: string,
       photoId: string,
     ): Promise<PinPhotoMutationResult<null>> => {
-      if (deleteAbortRef.current) deleteAbortRef.current.abort();
-      const ac = new AbortController();
-      deleteAbortRef.current = ac;
+      // ⚠先行の delete を abort しない (別写真の削除を巻き添えで止めない)。
       if (mountedRef.current) setDeleteState({ loading: true, error: null });
       try {
         const res = await fetch(
           `/api/field-survey/pins/${encodeURIComponent(pinId)}/photos/${encodeURIComponent(photoId)}`,
-          { method: "DELETE", credentials: "same-origin", signal: ac.signal },
+          { method: "DELETE", credentials: "same-origin" },
         );
         if (!mountedRef.current) return { ok: false };
         if (!res.ok) {

@@ -918,13 +918,37 @@ describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
     expect(PHOTO_HOOK_SRC).toMatch(/FormData/);
   });
 
-  it("AbortController を list/upload/delete 別に持ち unmount で abort", () => {
+  it("unmount で中断するのは list(GET) だけ (総点検 2026-07-27)", () => {
+    // ⚠upload(POST)/delete(DELETE) も abort していた頃は、詳細パネルの × か
+    // 編集ボタンを押すだけで写真セクションが unmount し、**送信中の写真が
+    // 黙って消えていた**。現地で撮った写真は端末にしか無いことがあり
+    // 取り返しがつかない。unmount 後の setState 抑止は mountedRef が担うので
+    // abort は不要だった。
     expect(PHOTO_HOOK_SRC).toMatch(/listAbortRef/);
-    expect(PHOTO_HOOK_SRC).toMatch(/uploadAbortRef/);
-    expect(PHOTO_HOOK_SRC).toMatch(/deleteAbortRef/);
+    expect(PHOTO_HOOK_SRC).not.toMatch(/uploadAbortRef/);
+    expect(PHOTO_HOOK_SRC).not.toMatch(/deleteAbortRef/);
+    // cleanup は mountedRef を倒し、list だけ abort する
     expect(PHOTO_HOOK_SRC).toMatch(
-      /return\s*\(\)\s*=>\s*\{[\s\S]*?mountedRef\.current\s*=\s*false[\s\S]*?abort\(\)/,
+      /return\s*\(\)\s*=>\s*\{[\s\S]*?mountedRef\.current\s*=\s*false[\s\S]*?listAbortRef\.current\.abort\(\)/,
     );
+    // abort 呼び出しは 1 箇所 (list の stale guard 兼 cleanup) のみ
+    expect(PHOTO_HOOK_SRC.match(/\.abort\(\)/g)?.length).toBe(2);
+  });
+
+  it("POST / DELETE に signal を渡さない (中断できない = 送信を守る)", () => {
+    const upload = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+      PHOTO_HOOK_SRC.indexOf("const deletePhoto"),
+    );
+    const del = PHOTO_HOOK_SRC.slice(PHOTO_HOOK_SRC.indexOf("const deletePhoto"));
+    expect(upload).not.toMatch(/signal:/);
+    expect(del).not.toMatch(/signal:/);
+    // list(GET) は従来どおり signal を渡す (読み取りなので中断して良い)
+    const list = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const listPhotos"),
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+    );
+    expect(list).toMatch(/signal:\s*ac\.signal/);
   });
 
   it("console に画像情報 / response 全文を出さない / Storage を使わない", () => {
