@@ -31,6 +31,10 @@ import {
   type PinDetail,
 } from "@/components/field-survey/use-field-survey-pin-mutations";
 import {
+  hasInFlightPhotoUpload,
+  pendingPhotoDeleteIds,
+  subscribePhotoMutationSettled,
+  takeLastPhotoMutationFailure,
   useFieldSurveyPinPhotoMutations,
   type PinPhoto,
 } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
@@ -418,6 +422,10 @@ function PinPhotoSection({
   onBusyChange?: (busy: boolean) => void;
 }) {
   const photoMutations = useFieldSurveyPinPhotoMutations();
+  // この写真セクションが始めた操作の識別子 (ライフタイム中不変)。
+  // 自分が始めた失敗は hook の uploadError / deleteError で出るので、
+  // 「離れている間に失敗しました」の案内は**他インスタンス由来だけ**に限る。
+  const ownInstanceId = photoMutations.instanceId;
   const [photos, setPhotos] = useState<PinPhoto[]>([]);
   // 送信・削除の進行中を親へ通知する (unmount 時は必ず false へ戻す)。
   const photoBusy =
@@ -432,12 +440,24 @@ function PinPhotoSection({
   }, [onBusyChange]);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [brokenIds, setBrokenIds] = useState<Set<string>>(new Set());
+  // パネルを閉じて開き直したとき、まだ送信中の写真があるか
+  // (この一覧には未反映でも、送信は続いている)。
+  const [detachedUploading, setDetachedUploading] = useState(false);
+  // パネルを離れている間に失敗した送信・削除の案内 (hook の state は
+  // unmount 後の更新を抑止するため、こちらで受け取って表示する)。
+  const [detachedError, setDetachedError] = useState<string | null>(null);
+  // パネルを離れている間も走っている削除の対象 (一覧にはまだ残って見える)。
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const latestPinIdRef = useRef(pinId);
   useEffect(() => {
     latestPinIdRef.current = pinId;
   }, [pinId]);
+
+  // reload は photoMutations 経由で毎レンダー変わるため、購読 effect からは
+  // ref 経由で最新を呼ぶ (effect を貼り直さない)。
+  const reloadRef = useRef<() => Promise<void>>(async () => {});
 
   const reload = useCallback(async () => {
     const r = await photoMutations.listPhotos(pinId);
@@ -448,12 +468,62 @@ function PinPhotoSection({
   }, [photoMutations, pinId]);
 
   useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
+
+  useEffect(() => {
     setPhotos([]);
     setPreviewId(null);
     setBrokenIds(new Set());
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinId]);
+
+  // ⚠閉じてすぐ開き直すと、初回 GET が送信中 upload の commit より先に終わり、
+  // **保存された写真が次の再読込まで見えない**ことがある (@codex #331 R1)。
+  // 利用者は消えたと思って同じ写真をもう一度送る (= 重複)。
+  // 削除も同じで、**削除済みの写真が残り**、もう一度消そうとして 404 になる。
+  // 送信中があれば案内を出し、upload / delete どちらの完了でも自動で読み直す。
+  //
+  // ⚠**この effect の依存は pinId だけにする** (@codex #331 R1)。
+  // reload は photoMutations(毎レンダー新しいオブジェクト)に依存するため
+  // 毎レンダー変わる。deps に入れると、コールバックが失敗を表示した直後の
+  // 再レンダーで effect が再実行され、**セットしたエラーがその場で消える**
+  // (= 案内が一瞬も出ない)。購読も毎レンダー張り替わる。
+  // reload は ref 経由で最新を呼ぶ。
+  useEffect(() => {
+    setDetachedUploading(hasInFlightPhotoUpload(pinId));
+    setPendingDeleteIds(pendingPhotoDeleteIds(pinId));
+    // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)。
+    // pin 切替時は前の pin のエラーを消す意味も兼ねる。
+    setDetachedError(takeLastPhotoMutationFailure(pinId)?.error ?? null);
+    return subscribePhotoMutationSettled((settledPinId, outcome) => {
+      if (settledPinId !== pinId) return;
+      setDetachedUploading(hasInFlightPhotoUpload(pinId));
+      setPendingDeleteIds(pendingPhotoDeleteIds(pinId));
+      // ⚠失敗をここで出さないと、「出ますのでお待ちください」と案内したまま
+      // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
+      // 場面なので、必ず気づける形にする。
+      //
+      // ⚠**無関係な成功で失敗案内を消さない** (@codex #331 R1)。離れている間の
+      // 送信が失敗し、そのあと新しく送った写真が成功すると、成功側が案内を
+      // 消してしまい**最初の写真が失われたことが永久に隠れる**。案内は
+      // 利用者が閉じるか、別の pin を開くまで残す。
+      if (!outcome.ok) {
+        // ⚠**自分が始めた失敗も必ず消費する** (@codex #331 R1)。表示しないからと
+        // いって残すと、次にこのパネルを開いた/この pin に戻ったときに
+        // 「離れている間に失敗しました」として蒸し返され、しかも**その後
+        // 再送して成功していても出てしまう**。
+        takeLastPhotoMutationFailure(pinId);
+        // 表示するのは他インスタンス由来だけ (自分の分は hook の
+        // uploadError / deleteError が出している)。
+        if (outcome.ownerId !== ownInstanceId) {
+          setDetachedError(outcome.error ?? null);
+        }
+      }
+      void reloadRef.current();
+    });
+  }, [pinId, ownInstanceId]);
 
   const handleFilePicked = async (file: File | null) => {
     if (!file) return;
@@ -532,12 +602,14 @@ function PinPhotoSection({
                   onClick={() => {
                     void handleDelete(p.id);
                   }}
-                  disabled={photoMutations.deleteLoading}
+                  disabled={
+                    photoMutations.deleteLoading || pendingDeleteIds.includes(p.id)
+                  }
                   data-testid="pin-photo-delete"
                   className="absolute right-0 top-0 rounded-bl bg-black/60 px-1 text-[10px] text-white disabled:opacity-60"
                   aria-label="写真を削除"
                 >
-                  写真を削除
+                  {pendingDeleteIds.includes(p.id) ? "削除中…" : "写真を削除"}
                 </button>
               )}
             </li>
@@ -610,6 +682,36 @@ function PinPhotoSection({
               写真を追加
             </button>
           </div>
+          {detachedError && (
+            <div
+              role="alert"
+              data-testid="pin-photo-detached-error"
+              className="mt-1 flex items-start gap-2 rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15 px-2 py-1 text-[11px] text-red-800 dark:text-red-300"
+            >
+              <span className="flex-1">
+                パネルを離れている間の写真の処理が失敗しました（{detachedError}）。
+                もう一度お試しください。
+              </span>
+              <button
+                type="button"
+                onClick={() => setDetachedError(null)}
+                data-testid="pin-photo-detached-error-dismiss"
+                className="shrink-0 underline"
+              >
+                閉じる
+              </button>
+            </div>
+          )}
+          {detachedUploading && !photoMutations.uploadLoading && (
+            <p
+              role="status"
+              data-testid="pin-photo-detached-uploading"
+              className="mt-1 rounded border border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 px-2 py-1 text-[11px] text-blue-900 dark:text-blue-300"
+            >
+              前に選んだ写真を送信中です。終わり次第この一覧に出ますので、
+              もう一度送らずにお待ちください。
+            </p>
+          )}
           {photoMutations.uploadError && (
             <p
               role="status"

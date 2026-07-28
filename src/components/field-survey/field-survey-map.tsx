@@ -53,7 +53,10 @@ import {
 } from "@/lib/field-survey-camera-first";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
 import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
-import { useFieldSurveyPinPhotoMutations } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
+import {
+  clearPhotoMutationFailure,
+  useFieldSurveyPinPhotoMutations,
+} from "@/components/field-survey/use-field-survey-pin-photo-mutations";
 import {
   formatPinStatus,
   formatPinType,
@@ -878,6 +881,12 @@ export default function FieldSurveyMap({
   // 詳細パネルを開く (写真の追加先を提示するため)。
   const finalizePinCreate = useCallback(
     (pinId: string, hadPhoto: boolean) => {
+      // ⚠この画面の写真送信は自前の再試行 UI で失敗を出しており、写真セクションの
+      // 購読者が居ない。作成フローを完了する時点で利用者はその失敗を見て
+      // 「再試行」か「写真なしで完了」を選んでいるので、保持している失敗は
+      // 解決済みとして捨てる (@codex #331 R1)。捨てないと直後に開く詳細パネルが
+      // 「離れている間に写真の処理が失敗しました」と蒸し返す。
+      clearPhotoMutationFailure(pinId);
       invalidateCurrentLocationRequest();
       setCreateCandidate(null);
       setPhotoUploadFailed(false);
@@ -992,6 +1001,7 @@ export default function FieldSurveyMap({
     if (!pinId || !file) return;
     const up = await photoMutations.uploadPhoto(pinId, file);
     if (up.ok) {
+      // 保持している失敗の破棄は finalizePinCreate が行う (完了の単一入口)。
       finalizePinCreate(pinId, true);
     }
   }, [photoMutations, finalizePinCreate]);
@@ -1304,6 +1314,11 @@ export default function FieldSurveyMap({
             onCancel={() => {
               // Codex P2: pending geolocation callback を無効化してから modal を閉じる
               invalidateCurrentLocationRequest();
+              // キャンセルは finalizePinCreate を通らないので個別に捨てる
+              // (作成済み pin があり写真送信が失敗していたケース)。
+              if (createdPinIdRef.current) {
+                clearPhotoMutationFailure(createdPinIdRef.current);
+              }
               setCreateCandidate(null);
               setCurrentLocationError(null);
               setPhotoUploadFailed(false);

@@ -918,13 +918,103 @@ describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
     expect(PHOTO_HOOK_SRC).toMatch(/FormData/);
   });
 
-  it("AbortController を list/upload/delete 別に持ち unmount で abort", () => {
+  it("unmount で中断するのは list(GET) だけ (総点検 2026-07-27)", () => {
+    // ⚠upload(POST)/delete(DELETE) も abort していた頃は、詳細パネルの × か
+    // 編集ボタンを押すだけで写真セクションが unmount し、**送信中の写真が
+    // 黙って消えていた**。現地で撮った写真は端末にしか無いことがあり
+    // 取り返しがつかない。unmount 後の setState 抑止は mountedRef が担うので
+    // abort は不要だった。
     expect(PHOTO_HOOK_SRC).toMatch(/listAbortRef/);
-    expect(PHOTO_HOOK_SRC).toMatch(/uploadAbortRef/);
-    expect(PHOTO_HOOK_SRC).toMatch(/deleteAbortRef/);
+    expect(PHOTO_HOOK_SRC).not.toMatch(/uploadAbortRef/);
+    expect(PHOTO_HOOK_SRC).not.toMatch(/deleteAbortRef/);
+    // cleanup は mountedRef を倒し、list だけ abort する
     expect(PHOTO_HOOK_SRC).toMatch(
-      /return\s*\(\)\s*=>\s*\{[\s\S]*?mountedRef\.current\s*=\s*false[\s\S]*?abort\(\)/,
+      /return\s*\(\)\s*=>\s*\{[\s\S]*?mountedRef\.current\s*=\s*false[\s\S]*?listAbortRef\.current\.abort\(\)/,
     );
+    // abort 呼び出しは 1 箇所 (list の stale guard 兼 cleanup) のみ
+    expect(PHOTO_HOOK_SRC.match(/\.abort\(\)/g)?.length).toBe(2);
+  });
+
+  it("POST / DELETE に signal を渡さない (中断できない = 送信を守る)", () => {
+    const upload = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+      PHOTO_HOOK_SRC.indexOf("const deletePhoto"),
+    );
+    const del = PHOTO_HOOK_SRC.slice(PHOTO_HOOK_SRC.indexOf("const deletePhoto"));
+    expect(upload).not.toMatch(/signal:/);
+    expect(del).not.toMatch(/signal:/);
+    // list(GET) は従来どおり signal を渡す (読み取りなので中断して良い)
+    const list = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const listPhotos"),
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+    );
+    expect(list).toMatch(/signal:\s*ac\.signal/);
+  });
+
+  it("端末内変換の途中でも捨てない (mountedRef は setState 抑止だけに使う)", () => {
+    // ⚠signal を外しただけでは「fetch まで到達した upload」しか守れない
+    // (@codex #331 R1)。旧実装は HEIC→JPEG / 8MB 超の縮小の**直後**に
+    // `if (!mountedRef.current) return` を置いていたため、変換中に × や編集を
+    // 押すと POST に到達する前に写真が捨てられていた。変換は数秒かかり得る。
+    const upload = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+      PHOTO_HOOK_SRC.indexOf("const deletePhoto"),
+    );
+    const del = PHOTO_HOOK_SRC.slice(PHOTO_HOOK_SRC.indexOf("const deletePhoto"));
+    // 途中で打ち切る early return が無いこと
+    expect(upload).not.toMatch(/if \(!mountedRef\.current\)\s*return/);
+    expect(del).not.toMatch(/if \(!mountedRef\.current\)\s*return/);
+    // mountedRef は setState を包むヘルパの中だけで使う
+    expect(upload).toMatch(/setUploadStateIfMounted/);
+    expect(del).toMatch(/setDeleteStateIfMounted/);
+    // 変換 → POST の順序が保たれている (変換結果を必ず送る)
+    expect(upload.indexOf("prepareFieldSurveyPhotoForUpload")).toBeLessThan(
+      upload.indexOf('method: "POST"'),
+    );
+  });
+
+  it("list(GET) だけは従来どおり途中で打ち切れる (読み取りなので安全)", () => {
+    const list = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const listPhotos"),
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+    );
+    expect(list).toMatch(/if \(!mountedRef\.current\)\s*return/);
+    expect(list).toMatch(/signal:\s*ac\.signal/);
+  });
+
+  it("unmount を跨いだ upload の完了を再マウント側へ伝える (@codex #331 R1)", () => {
+    // ⚠abort をやめただけでは足りない。閉じてすぐ開き直すと、新しい一覧の初回 GET が
+    // upload の commit より先に終わり、保存された写真が次の再読込まで見えない。
+    // 利用者は消えたと思って同じ写真をもう一度送る (= 重複)。
+    // 進行中件数と完了通知を hook インスタンスの外 (module スコープ) に置く。
+    expect(PHOTO_HOOK_SRC).toMatch(/const inFlightUploads = new Map/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function hasInFlightPhotoUpload/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function subscribePhotoMutationSettled/);
+    // 成功・失敗・early return のいずれでも通知する = finally
+    const upload = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
+      PHOTO_HOOK_SRC.indexOf("const deletePhoto"),
+    );
+    expect(upload).toMatch(/markUploadStarted\(pinId\)/);
+    // 通知には**結果**を載せる (成否が無いと、失敗しても「送信中」表示が消えて
+    // 一覧を読み直すだけになり、利用者は失敗に気づけない)。
+    expect(upload).toMatch(/finally \{[\s\S]*?markUploadSettled\(pinId, outcome\)/);
+    expect(upload).toMatch(
+      /outcome = \{ kind: "upload", ok: true, ownerId: instanceId \}/,
+    );
+    expect(upload).toMatch(
+      /outcome = \{ kind: "upload", ok: false, error: msg, ownerId: instanceId \}/,
+    );
+  });
+
+  it("保持するのは pinId と件数だけ (PII を持たない)", () => {
+    const registry = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("const inFlightUploads"),
+      PHOTO_HOOK_SRC.indexOf("export function useFieldSurveyPinPhotoMutations"),
+    );
+    for (const forbidden of ["fileName", "fileUrl", "storageKey", "File", "gps"]) {
+      expect(registry).not.toContain(forbidden);
+    }
   });
 
   it("console に画像情報 / response 全文を出さない / Storage を使わない", () => {
@@ -1015,5 +1105,130 @@ describe("Phase 1-I — field-survey-map 削除連携", () => {
     expect(MAP_SRC).toMatch(
       /action\s*===\s*"manage"[\s\S]{0,80}granted\s*===\s*true/,
     );
+  });
+});
+
+describe("再マウント後も送信中の写真を取りこぼさない (@codex #331 R1)", () => {
+  const PANEL_SRC = readSrc("src/components/field-survey/pin-detail-panel.tsx");
+
+  it("完了通知を購読して自動で読み直す", () => {
+    expect(PANEL_SRC).toMatch(/subscribePhotoMutationSettled\(/);
+    // 自分の pin 以外の通知では読み直さない
+    expect(PANEL_SRC).toMatch(/settledPinId !== pinId/);
+    expect(PANEL_SRC).toMatch(/void reload\(\)/);
+  });
+
+  it("購読は解除される (unmount でリスナーが残らない)", () => {
+    // subscribe の戻り値をそのまま useEffect の cleanup として返す形
+    expect(PANEL_SRC).toMatch(/return subscribePhotoMutationSettled\(/);
+  });
+
+  it("削除の完了も通知される (削除済み写真が残って 404 にならない)", () => {
+    // ⚠通知が無いと、閉じてすぐ開き直したとき初回 GET が DELETE の commit より
+    // 先に終わり、削除済みの写真が一覧に残る。もう一度消そうとすると 404。
+    const del = PHOTO_HOOK_SRC.slice(PHOTO_HOOK_SRC.indexOf("const deletePhoto"));
+    expect(del).toMatch(
+      /finally \{[\s\S]*?markDeleteSettled\(pinId, photoId, outcome\)/,
+    );
+    expect(del).toMatch(
+      /outcome = \{ kind: "delete", ok: true, ownerId: instanceId \}/,
+    );
+    // markDeleteSettled は進行中集合から外したうえで通知する
+    expect(PHOTO_HOOK_SRC).toMatch(
+      /function markDeleteSettled\([\s\S]*?set\.delete\(photoId\)[\s\S]*?notifyPhotoMutationSettled\(pinId, outcome\)/,
+    );
+  });
+
+  it("削除中の写真は再マウント後も削除ボタンを押させない (@codex #331 R1)", () => {
+    // ⚠upload だけ追跡していると、削除中に閉じてすぐ開き直したとき初回 GET が
+    // DELETE の commit より先に終わり、**まだ在る写真が削除ボタン付きで**出る。
+    // 押すと二重 DELETE になり、後発の 404 が「離れている間に失敗しました」と
+    // いう誤った案内になる。
+    expect(PHOTO_HOOK_SRC).toMatch(/const inFlightDeletes = new Map/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function pendingPhotoDeleteIds/);
+    expect(PHOTO_HOOK_SRC).toMatch(/markDeleteStarted\(pinId, photoId\)/);
+    // 画面側: 進行中の photoId は disabled かつ「削除中…」表示
+    expect(PANEL_SRC).toMatch(/pendingDeleteIds\.includes\(p\.id\)/);
+    expect(PANEL_SRC).toContain("削除中…");
+    expect(PANEL_SRC).toMatch(/setPendingDeleteIds\(pendingPhotoDeleteIds\(pinId\)\)/);
+  });
+
+  it("離れている間の失敗を画面に出す (@codex #331 R1)", () => {
+    // ⚠通知に成否が無いと、「出ますのでお待ちください」と案内したまま
+    // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
+    // 場面なので、必ず気づける形にする。
+    expect(PANEL_SRC).toMatch(/setDetachedError\(/);
+    expect(PANEL_SRC).toMatch(/setDetachedError\(outcome\.error \?\? null\)/);
+    // ⚠無関係な成功で失敗案内を消さない (@codex #331 R1)。離れている間の送信が
+    // 失敗し、そのあと新しく送った写真が成功すると、成功側が案内を消してしまい
+    // **最初の写真が失われたことが永久に隠れる**。案内は利用者が閉じるか、
+    // 別の pin を開くまで残す。
+    // ⚠自分が始めた操作の失敗は hook の uploadError / deleteError で既に出る。
+    // この赤い案内まで出すと二重表示かつ「離れている間」という事実と違う文言になる
+    // (@codex #331 R1)。他インスタンス由来だけに限る。
+    // 失敗は所有者に関わらず消費し (蒸し返さない)、表示だけを他インスタンス由来に絞る
+    expect(PANEL_SRC).toMatch(
+      /if \(!outcome\.ok\) \{[\s\S]*?takeLastPhotoMutationFailure\(pinId\);[\s\S]*?if \(outcome\.ownerId !== ownInstanceId\) \{[\s\S]*?setDetachedError\(outcome\.error \?\? null\)/,
+    );
+    expect(PHOTO_HOOK_SRC).toMatch(/let photoHookInstanceSeq = 0/);
+    expect(PHOTO_HOOK_SRC).toMatch(/ownerId: number/);
+    expect(PANEL_SRC).toContain("pin-photo-detached-error-dismiss");
+    // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)
+    expect(PANEL_SRC).toMatch(/takeLastPhotoMutationFailure\(pinId\)\?\.error/);
+    // ⚠購読 effect の依存は pinId だけにする。reload は photoMutations 経由で
+    // 毎レンダー変わるため deps に入れると、失敗を表示した直後の再レンダーで
+    // effect が再実行され**セットしたエラーがその場で消える** (案内が出ない)。
+    expect(PANEL_SRC).toMatch(/void reloadRef\.current\(\)/);
+    expect(PANEL_SRC).toContain('data-testid="pin-photo-detached-error"');
+    expect(PANEL_SRC).toContain('role="alert"');
+    expect(PANEL_SRC).toContain("もう一度お試しください");
+  });
+
+  it("開く前に確定した失敗も一度だけ出す (@codex #331 R1)", () => {
+    // ⚠購読者が居るときだけ通知する形では、閉じたあとに失敗が確定し、その後で
+    // 開き直した場合に誰も受け取っておらず利用者は気づけない。
+    expect(PHOTO_HOOK_SRC).toMatch(/const lastFailures = new Map/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function takeLastPhotoMutationFailure/);
+    // 購読者が居なくても失敗は残す
+    expect(PHOTO_HOOK_SRC).toMatch(/if \(!outcome\.ok\) lastFailures\.set/);
+    // 取り出したら消す = 同じ失敗を繰り返し出さない
+    expect(PHOTO_HOOK_SRC).toMatch(/lastFailures\.delete\(pinId\)/);
+  });
+
+  it("再試行が成功したら保持した失敗を解決済みにする (@codex #331 R1)", () => {
+    // ⚠成功で一律に消すと別写真の失敗を隠す。だが**同じ写真を撮り直して**
+    // 再送し成功したなら、その失敗はもう解決している。捨てないと後でその pin を
+    // 開いたときに「離れている間に失敗しました」と蒸し返される (写真は在るのに)。
+    expect(PHOTO_HOOK_SRC).toMatch(/export function clearPhotoMutationFailure/);
+    const MAP_SRC = readSrc("src/components/field-survey/field-survey-map.tsx");
+    // ピン作成時の写真は自前の再試行 UI を持ち、写真セクションの購読者が居ない。
+    // 完了の単一入口 (finalizePinCreate) で捨てることで、「再試行して成功」も
+    // 「写真なしで完了」も同じく解決済みになる (@codex #331 R1)。
+    const finalize = MAP_SRC.slice(
+      MAP_SRC.indexOf("const finalizePinCreate"),
+      MAP_SRC.indexOf("const handleRetryPhoto"),
+    );
+    expect(finalize).toContain("clearPhotoMutationFailure(pinId)");
+    // キャンセルは finalize を通らないので個別に捨てる
+    expect(MAP_SRC).toContain(
+      "clearPhotoMutationFailure(createdPinIdRef.current)",
+    );
+  });
+
+  it("案内に載せるのは汎用文言だけ (PII / 生レスポンスを出さない)", () => {
+    // outcome.error は pinApiErrorMessage 由来 (status → 固定文言) のみ。
+    const registry = PHOTO_HOOK_SRC.slice(
+      PHOTO_HOOK_SRC.indexOf("export interface PhotoMutationOutcome"),
+      PHOTO_HOOK_SRC.indexOf("export function useFieldSurveyPinPhotoMutations"),
+    );
+    for (const forbidden of ["fileName", "fileUrl", "storageKey", "res.text", "gps"]) {
+      expect(registry).not.toContain(forbidden);
+    }
+  });
+
+  it("送信中がある間は「もう一度送らずに待って」と案内する", () => {
+    expect(PANEL_SRC).toMatch(/hasInFlightPhotoUpload\(pinId\)/);
+    expect(PANEL_SRC).toContain('data-testid="pin-photo-detached-uploading"');
+    expect(PANEL_SRC).toContain("もう一度送らずにお待ちください");
   });
 });

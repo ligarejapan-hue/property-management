@@ -137,7 +137,8 @@ interface RegistryReadableLike {
 interface RegistryPageLike {
   setDefaultTimeout?(ms: number): void;
   goto(url: string, options?: unknown): Promise<unknown>;
-  fill(selector: string, value: string): Promise<void>;
+  // options は Playwright の FillOptions 相当 (timeout を渡すため)。
+  fill(selector: string, value: string, options?: unknown): Promise<void>;
   click(selector: string): Promise<void>;
   // 所在検索は多段UI(都道府県プルダウン・直接入力チェック)を伴う。実 Playwright Page の
   // selectOption/check に委譲する(fake page はテストで mock)。
@@ -223,6 +224,21 @@ export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
 export const REGISTRY_FORCE_LOGIN_MARKER = 'input[name="from"][value="elogin"]';
 
 /**
+ * 送信前のログインフォームに付ける印。
+ *
+ * ⚠「#userId が在る」だけでは**弾かれて戻ってきたフォーム**と
+ * **まだ遷移していない元のフォーム**を区別できない (@codex #331 R1)。
+ * 送信は JS の form.submit() なので、応答が遅ければ元の document がそのまま
+ * 生きており #userId も在る。それを「弾かれた」と読むと、遅いだけを
+ * 資格情報の誤りとして報告してしまう (この修正が消そうとしている誤診断)。
+ *
+ * 送信直前に元のフォームへこの属性を付け、失敗時に「印の無い #userId」が
+ * 在るかで判定する = 別 document に置き換わった (= 遷移して戻された) 証拠。
+ * 印はこちらのブラウザ内 DOM にしか付かず、外部サービスへは何も送らない。
+ */
+const REGISTRY_LOGIN_FORM_PROBE_ATTR = "data-pm-login-probe";
+
+/**
  * 「ご利用中の方へ」画面か否かの判定待ち時間(ms)。この待機の前に「確認画面 or 通常メニュー」
  * の着地をログイン全体タイムアウト内で確定させる(応答遅延の吸収)ため、ここは既に着地済みの
  * DOM に対する短時間判定でよい。マーカーが在れば即 resolve、通常メニュー着地なら在らずに短く
@@ -257,6 +273,76 @@ export function resolveLoginFormDetectMs(timeoutMs?: number): number {
     1000,
     Math.min(LOGIN_FORM_DETECT_MS, Math.floor(timeoutMs / 2)),
   );
+}
+
+/**
+ * **ログイン送信後**の待機 (着地待ち / 強制ログインボタン / 確認画面の消失 /
+ * ログイン成功要素) に使う既定上限。予算未設定時は Playwright 既定と同値
+ * = 現状維持 (予算が無ければ provider 全体タイマーも無く、分類レースが起きない)。
+ */
+const LOGIN_STEP_DETECT_MS = 30_000;
+
+/**
+ * 分類 (ページ再確認 → RegistryFetchError の送出) に必要な余裕 (ms)。
+ * provider 全体タイマーより**これだけ手前**で内側の待機を切ることで、
+ * catch 節の分類に必ず到達させる。
+ */
+const LOGIN_CLASSIFY_MARGIN_MS = 2_000;
+
+/**
+ * ログイン送信後の待機の**共有デッドライン**(epoch ms)。予算未設定なら null。
+ *
+ * ⚠これが無いと、送信後の失敗が必ず「タイムアウト」(504) として表示される
+ * (総点検 2026-07-27)。理由: 送信後の待機は明示 timeout を持たず
+ * page.setDefaultTimeout(timeoutMs) に従うが、その timeoutMs は provider 全体
+ * タイマーと同値で、全体タイマーの方が先に進んでいる。よって内側の待機が切れる
+ * 前に必ず全体タイマーが切れ、catch 節の分類 (auth_failed / service_hours) に
+ * 到達できない。「タイムアウト」表示は運用者に「サイトが重いだけ」と読ませ、
+ * 資格情報を疑わせない = 復旧できないまま再試行を繰り返させる。
+ *
+ * ⚠**各待機に予算の一定割合を配る方式にはしない**(内部レビュー指摘)。
+ * 送信後の待機は 5 段あるため、1 段あたり budget/4 だと合計で予算を超えるうえ、
+ * 1 段だけ正当に遅い (7.5秒 < 実際に必要な 10秒) ケースで**成功するはずの
+ * ログインを auth_failed に化けさせる**。ここは「残り予算をほぼ全部使ってよい。
+ * ただし分類の余裕だけ残す」= 共有デッドラインが正しい。
+ *
+ * ⚠余裕の確保に**下限を置いて外側を追い越してはいけない** (@codex #331 R1)。
+ * `max(1000, timeoutMs - 2000)` だと `timeoutMs <= 1000` で内側と外側が同時刻、
+ * `timeoutMs = 500` なら内側 1000ms > 外側 500ms で**必ず外側が先に発火**し、
+ * この修正が消そうとした「常に timeout 表示」がそのまま残る。
+ * 余裕は予算に比例させて縮め (最大 LOGIN_CLASSIFY_MARGIN_MS)、内側の期限は
+ * **常に外側より短く**する。極小予算では 0 = 即座に分類へ回す。
+ */
+export function resolveLoginStepDeadline(
+  startedAt: number,
+  timeoutMs?: number,
+): number | null {
+  if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return null;
+  // 予算が小さいときは余裕も比例縮小する (下限で外側を追い越さないため)。
+  const margin = Math.min(
+    LOGIN_CLASSIFY_MARGIN_MS,
+    Math.max(1, Math.ceil(timeoutMs / 2)),
+  );
+  // 常に外側 (timeoutMs) より短い位置に置く。
+  const offset = Math.min(timeoutMs - 1, Math.max(0, timeoutMs - margin));
+  return startedAt + Math.max(0, offset);
+}
+
+/**
+ * 共有デッドラインまでの残り (ms)。デッドライン無しなら既定値。
+ *
+ * ⚠デッドライン超過後の下限は 1ms にする。1秒などにすると、5段の待機が
+ * それぞれ下限ぶん上乗せして**合計が予算を超え**、分類の余裕を食い潰す。
+ * 1ms なら Playwright は「既に存在する要素は即 resolve / 無ければ即 timeout」に
+ * なるので、デッドライン超過を「今すぐ分類へ回す」意味に使える。
+ * (予算そのものが極小な場合は resolveLoginStepDeadline 側の下限 1 秒が効く。)
+ */
+export function remainingLoginStepMs(
+  deadlineAt: number | null,
+  now: number,
+): number {
+  if (deadlineAt === null) return LOGIN_STEP_DETECT_MS;
+  return Math.max(1, deadlineAt - now);
 }
 
 /**
@@ -507,21 +593,48 @@ function createPlaywrightRegistryPage(
     context: RegistryContextLike;
     page: RegistryPageLike;
   },
-  config: { loginPath: string; formDetectTimeoutMs?: number } = {
+  config: {
+    loginPath: string;
+    formDetectTimeoutMs?: number;
+    /** provider 全体予算 (REGISTRY_FETCH_TIMEOUT_MS)。送信後の待機の共有デッドライン算出に使う。 */
+    timeoutMs?: number;
+    /** テスト用の時計差し替え。 */
+    now?: () => number;
+  } = {
     loginPath: DEFAULT_REGISTRY_LOGIN_PATH,
   },
 ): RegistryBrowserPage {
   const { browser, context, page } = handles;
   const { loginPath } = config;
   const formDetectTimeoutMs = config.formDetectTimeoutMs ?? LOGIN_FORM_DETECT_MS;
+  const nowMs = config.now ?? (() => Date.now());
+  const budgetMs = config.timeoutMs;
   return {
     async login(input) {
+      // 送信後の待機は**共有デッドライン**で切る (各段に割り当てない)。
+      // 段ごとに予算の一定割合を配ると、5段あるため合計で予算を超えるうえ、
+      // 1段だけ正当に遅いケースで成功するはずのログインを auth_failed に化けさせる。
+      const stepDeadlineAt = resolveLoginStepDeadline(nowMs(), budgetMs);
+      const stepMs = () => remainingLoginStepMs(stepDeadlineAt, nowMs());
+      // 資格情報を**送信したか**。送信前の timeout を「資格情報の誤り」に
+      // 誤分類しないための旗 (@codex #331 R1)。送信前はログインフォームが
+      // 出ているのが正常なので、フォームの有無では判別できない。
+      let submitted = false;
+      // 二重ログイン確認画面「ご利用中の方へ」に到達したか。ここで詰まるのは
+      // **前回セッションが残っている**問題なので、遅延ではなく認証側の問題として
+      // 扱う (@codex #331 R1)。catch から読めるよう try の外で宣言する。
+      let sawForceLoginConfirm = false;
       // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
       // loginPath は env（REGISTRY_FETCH_LOGIN_PATH）で上書き可能（live キャリブレーション）。
       const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
       const loginUrl = `${base}${loginPath}`;
       try {
-        await page.goto(loginUrl);
+        // ⚠送信前の goto / fill も共有デッドラインで縛る (@codex #331 R1)。
+        // 縛らないと、遅いページ表示や fill が予算の大半を食ってしまい、
+        // 送信後の待機に 1ms しか残らないうえ**catch へ入る前に外側タイマーが
+        // 発火**して、約束した分類の余裕が消える (= 資格情報が誤っていても
+        // timeout として出る)。
+        await page.goto(loginUrl, { timeout: stepMs() });
         // 利用時間外だとログイン画面が出ない(jikangai 誘導 or サイト全体404)。この場合
         // #userId は現れず fill が 30秒 timeout → auth_failed に見えてしまう。利用不可を先に検出し、
         // 「認証失敗」でなく「利用時間外(または接続不可)」として明示する(資格情報を疑わせない)。
@@ -539,8 +652,14 @@ function createPlaywrightRegistryPage(
         // タイマーと同値になり、全体タイマー(goto の前から進行)が先に切れてこの分類に到達
         // できない(@codex P1)。待ち時間は全体予算から導出(resolveLoginFormDetectMs・@codex P2)。
         try {
+          // ⚠固定 15 秒 (formDetectTimeoutMs) のままにしない (@codex #331 R1)。
+          // goto が予算の大半を食った場合 (例: 30 秒予算のうち 16 秒)、残り 12 秒
+          // しか無いのに 15 秒待とうとして、外側タイマーが先に発火する。すると
+          // 「フォームが現れない = 閉局/接続不可」の分類 (service_hours /
+          // service_unavailable) に到達できず、また generic timeout に化ける。
+          // 短い専用待機という性質は保ったまま、残り予算を超えないよう押さえる。
           await page.waitForSelector(REGISTRY_SELECTORS.loginId, {
-            timeout: formDetectTimeoutMs,
+            timeout: Math.min(formDetectTimeoutMs, stepMs()),
           });
         } catch (err) {
           if (isTimeoutError(err)) {
@@ -554,20 +673,37 @@ function createPlaywrightRegistryPage(
           }
           throw err;
         }
-        await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
-        await page.fill(REGISTRY_SELECTORS.password, input.password);
+        await page.fill(REGISTRY_SELECTORS.loginId, input.loginId, {
+          timeout: stepMs(),
+        });
+        await page.fill(REGISTRY_SELECTORS.password, input.password, {
+          timeout: stepMs(),
+        });
         // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
         // requireCheck() が JS で form.submit() する特殊構造。page.click() は隣接する float
         // ヒント要素の被りや actionability チェックで空振りし、送信に至らないことがある
         // （実画面HTMLでのオフライン再現で確認）。DOM の click() を評価で直接発火し、被り/
         // 可視状態に左右されず onclick(=送信) を確実にトリガーする。
-        await page.waitForSelector(REGISTRY_SELECTORS.loginSubmit);
+        await page.waitForSelector(REGISTRY_SELECTORS.loginSubmit, {
+          timeout: stepMs(),
+        });
+        // 送信直前に元のフォームへ印を付ける (下の分類で「戻ってきたフォーム」と
+        // 「まだ遷移していない元のフォーム」を区別するため)。
+        await page
+          .evaluate((sel) => {
+            const parts = sel.split("|");
+            const el = document.querySelector(parts[0]);
+            if (el) el.setAttribute(parts[1], "1");
+            return "";
+          }, `${REGISTRY_SELECTORS.loginId}|${REGISTRY_LOGIN_FORM_PROBE_ATTR}`)
+          .catch(() => "");
         await page.evaluate((sel) => {
           const el = document.querySelector(sel);
           if (el && typeof (el as { click?: unknown }).click === "function") {
             (el as unknown as { click: () => void }).click();
           }
         }, REGISTRY_SELECTORS.loginSubmit);
+        submitted = true;
         // ログイン送信後の着地を待つ。「確認画面固有マーカー」か「通常メニュー固有リンク」の
         // どちらかが DOM に現れるまで、ログイン全体のタイムアウト内で待つ(グループセレクタ)。
         // 固定の短い猶予だと応答が遅いとき確認画面の到着前に打ち切ってしまい、その後に現れる
@@ -575,7 +711,7 @@ function createPlaywrightRegistryPage(
         // 確定させてから、確認画面か否かを判定する。
         await page.waitForSelector(
           `${REGISTRY_SELECTORS.forceLoginMarker}, ${REGISTRY_SELECTORS.loggedInMenuLink}`,
-          { state: "attached" },
+          { state: "attached", timeout: stepMs() },
         );
         // 「ご利用中の方へ」(二重ログイン確認)が挟まれば「強制ログイン」で突破する。
         // 登記情報提供サービスは1IDにつき同時1セッションのため、前回セッションが残っていると
@@ -585,14 +721,17 @@ function createPlaywrightRegistryPage(
         // 確認画面か否かの「判定」だけを内側 try に閉じる(未出現=通常メニュー着地=正常スキップ)。
         // 突破処理(ボタン待ち→click→消失確認)は外側 try 内に置き、その timeout は auth_failed に
         // 正しく落とす(「確認画面ありなのに突破できない」を正常スキップと混同しない)。
-        let sawForceLoginConfirm = false;
         try {
           // マーカーは hidden input のため state:"attached"(DOM 存在で判定)にする。
           // 既定の "visible" 待ちでは hidden 要素が可視にならず永遠に timeout する
           // (2026-07-17 本番実測で確認: これを付けないと確認画面でも突破できない)。
+          // ⚠固定 1.5 秒のままにしない (@codex #331 R1)。着地待ちが共有
+          // デッドライン近くまで使っていた場合、この 1.5 秒が分類の余裕を食い潰し、
+          // 外側のタイマーが先に発火して「常に timeout 表示」に戻る。
+          // 短時間判定である性質は保ったまま、残り予算を超えないよう頭を押さえる。
           await page.waitForSelector(REGISTRY_SELECTORS.forceLoginMarker, {
             state: "attached",
-            timeout: FORCE_LOGIN_CONFIRM_DETECT_MS,
+            timeout: Math.min(FORCE_LOGIN_CONFIRM_DETECT_MS, stepMs()),
           });
           sawForceLoginConfirm = true;
         } catch (err) {
@@ -603,7 +742,9 @@ function createPlaywrightRegistryPage(
           // 「強制ログイン」ボタンの出現を待ってから押す。確認画面のパース途中では marker(hidden)
           // だけが先に attached になり、ボタン未描画のまま evaluate すると querySelector が null で
           // 空振り(無操作)になる。初回ログインの loginSubmit 待ちと同じ race 回避(@codex 指摘)。
-          await page.waitForSelector(REGISTRY_SELECTORS.forceLoginSubmit);
+          await page.waitForSelector(REGISTRY_SELECTORS.forceLoginSubmit, {
+            timeout: stepMs(),
+          });
           await page.evaluate((sel) => {
             const el = document.querySelector(sel);
             if (el && typeof (el as { click?: unknown }).click === "function") {
@@ -616,10 +757,13 @@ function createPlaywrightRegistryPage(
           // 消失(detached)を待ち、確実に画面を抜けたことを積極確認する(@codex 指摘)。
           await page.waitForSelector(REGISTRY_SELECTORS.forceLoginMarker, {
             state: "detached",
+            timeout: stepMs(),
           });
         }
         // ログイン成功を固有要素で確認（URL だけで判定しない）。
-        await page.waitForSelector(REGISTRY_SELECTORS.loggedIn);
+        await page.waitForSelector(REGISTRY_SELECTORS.loggedIn, {
+          timeout: stepMs(),
+        });
       } catch (err) {
         // 既に分類済み(service_hours 等)はそのまま保持し、auth_failed で上書きしない。
         if (err instanceof RegistryFetchError) throw err;
@@ -633,6 +777,53 @@ function createPlaywrightRegistryPage(
           throw new RegistryFetchError("service_hours");
         if (unavailableNow === "missing")
           throw new RegistryFetchError(classifyRegistryMissingPage(new Date()));
+        // ⚠待機が予算を使い切っただけのケースを auth_failed にしない
+        // (@codex #331 R1)。送信後の待機に内側デッドラインを入れた結果、
+        // 「サイトが遅くて着地マーカーが出ない」= 一時的な遅延まで
+        // **資格情報の誤りとして報告**されるようになってしまう。これは
+        // 「常にタイムアウト表示」の裏返しで、やはり運用者を誤った対処へ導く。
+        //
+        // 資格情報の誤りは**積極的に検出する**: 登記情報提供サービスは
+        // ログインを弾くとログイン画面へ戻す (= #userId が再び DOM に居る)。
+        // フォームが戻っていれば auth_failed、そうでなければ「判らない」=
+        // 予算切れの timeout として扱う。
+        //
+        // ⚠残る限界: 弾かれた際にフォームを含まないエラーページを返す実装
+        // だった場合、資格情報の誤りが timeout として出る。ただし
+        // 「遅いだけを資格情報の誤りと言う」より害が小さい (再試行で解決し得る
+        // 案内になる) ため、判別不能時は timeout 側へ倒す。
+        if (isTimeoutError(err)) {
+          // ⚠送信前 (goto / fill / ログインボタン待ち) の timeout は、そもそも
+          // 資格情報を送っていないので auth_failed にしてはいけない
+          // (@codex #331 R1)。しかも送信前はログインフォームが出ているのが
+          // 正常なので、フォームの有無では判別できず、放置すると
+          // 「ログインページが遅い」が「資格情報の誤り」として出る。
+          // 「印の無い #userId が在る」= 別 document に置き換わった
+          // = 遷移して戻された = 弾かれた証拠。印が残っていれば元のフォームが
+          // まだ生きている (= 遷移していない = 遅いだけ)。
+          // 確認画面に到達していたなら、そこで詰まったということ = 認証側の問題
+          // (前回セッションが残る / 突破ボタンが効かない)。運用者に「再試行」でなく
+          // 「ログインセッションを調べる」を促すため auth_failed を保つ。
+          const stuckOnForceLoginConfirm = submitted && sawForceLoginConfirm;
+          const loginFormBack =
+            submitted &&
+            !stuckOnForceLoginConfirm &&
+            (await page
+              .evaluate((sel) => {
+                const parts = sel.split("|");
+                const el = document.querySelector(parts[0]);
+                return !!el && !el.hasAttribute(parts[1]);
+              }, `${REGISTRY_SELECTORS.loginId}|${REGISTRY_LOGIN_FORM_PROBE_ATTR}`)
+              .catch(() => false));
+          if (!loginFormBack && !stuckOnForceLoginConfirm) {
+            console.warn(
+              submitted
+                ? "[registry-login] post-submit wait exhausted the budget; classified as timeout"
+                : "[registry-login] pre-submit step timed out; classified as timeout",
+            );
+            throw new RegistryFetchError("timeout");
+          }
+        }
         // ログイン確認に至らない = 認証失敗扱い（生メッセージ非載・secret 非露出）。
         // どの段階/種別で失敗したか（TimeoutError とセレクタ名など）は運用診断のため分類ログに残す。
         // secret（loginId/password）に加え、baseUrl/loginUrl（env でカスタム/内部エンドポイントに
@@ -1006,7 +1197,11 @@ async function defaultChromiumLoader(): Promise<RegistryChromiumLike> {
  * ★ C-1: playwright は defaultChromiumLoader 内の動的 import でのみ読む（静的 import / require なし）。
  */
 export function resolveDefaultRegistryBrowserFactory(
-  deps: { chromiumLoader?: () => Promise<RegistryChromiumLike> } = {},
+  deps: {
+    chromiumLoader?: () => Promise<RegistryChromiumLike>;
+    /** テスト用の時計差し替え (goto が予算を食う状況の再現に使う)。 */
+    now?: () => number;
+  } = {},
 ): RegistryBrowserFactory | undefined {
   // 本番経路は明示 opt-in + セレクタ校正フラグの両方を要求（テスト注入時は不要）。
   // CodexP1: 校正フラグ無し（TODO プレースホルダのまま）の opt-in では誤セレクタで実サイトを
@@ -1059,6 +1254,8 @@ export function resolveDefaultRegistryBrowserFactory(
         formDetectTimeoutMs: resolveLoginFormDetectMs(
           Number.isFinite(timeoutMs) ? timeoutMs : undefined,
         ),
+        timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+        now: deps.now,
       },
     );
   };

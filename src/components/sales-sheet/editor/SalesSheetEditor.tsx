@@ -113,6 +113,28 @@ function assertAuthedResponse(res: Response): void {
   }
 }
 
+/**
+ * API が返した理由文を取り出す (総点検 2026-07-27)。
+ *
+ * ⚠これが無いと、保存・出力の失敗が理由不明の「保存に失敗しました」になる。
+ * 販売図面の保存は用紙外・画像枚数・画像サイズ・権限で弾かれ、サーバーは
+ * 「入力内容に問題があります: elements.3.x: …」のように**直し方が判る文言**を
+ * 返しているのに、画面はそれを捨てて汎用文言だけ出していた。何が悪いのか
+ * 判らないまま同じ操作を繰り返す(= 実質詰む)状態だった。
+ *
+ * セッション切れで HTML が返る場合もあるため、JSON でなければ fallback に倒す。
+ * 生のレスポンス本文をそのまま出さない(message フィールドだけを読む)。
+ */
+async function apiErrorMessage(res: Response, fallback: string): Promise<string> {
+  const body = (await res.json().catch(() => null)) as
+    | { error?: { message?: unknown } }
+    | null;
+  const message = body?.error?.message;
+  return typeof message === "string" && message.trim() !== ""
+    ? message
+    : fallback;
+}
+
 export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   const router = useRouter();
   // EditorState + 元に戻す/やり直す履歴を単一の純 reducer(editorHistoryReducer)で管理。
@@ -486,7 +508,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     );
     if (res.status === 409) throw new Error("他で更新されました。再読込してください");
     assertAuthedResponse(res);
-    if (!res.ok) throw new Error("保存に失敗しました");
+    if (!res.ok) throw new Error(await apiErrorMessage(res, "保存に失敗しました"));
     // セッション切れで HTML が返っても JSON.parse で落ちない(生エラーを出さず再ログイン案内にする)。
     const data = (await res.json().catch(() => null)) as { updatedAt: string } | null;
     if (!data || typeof data.updatedAt !== "string") {
@@ -519,7 +541,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         if (res.status === 409) throw new Error("他で更新されました。再読込してください");
         if (res.status === 503) throw new Error("PDF生成エンジン未準備");
         assertAuthedResponse(res);
-        if (!res.ok) throw new Error("出力に失敗しました");
+        if (!res.ok) throw new Error(await apiErrorMessage(res, "出力に失敗しました"));
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -538,7 +560,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       { method: "DELETE" },
     );
     assertAuthedResponse(res);
-    if (!res.ok) throw new Error("削除に失敗しました");
+    if (!res.ok) throw new Error(await apiErrorMessage(res, "削除に失敗しました"));
     router.push(`/properties/${initial.propertyId}`);
   }
 
