@@ -48,9 +48,18 @@ export interface PinPhotoMutationResult<T> {
  * そこで pinId ごとの進行中件数と完了通知を module スコープに置き、再マウント側が
  * 「送信中がある」ことを知り、完了時に自動で読み直せるようにする。
  * PII は持たない (pinId のみ・件数のみ)。
+ *
+ * ⚠**削除も同じ通知に乗せる** (@codex #331 R1)。削除中に閉じてすぐ開き直すと、
+ * 初回 GET が DELETE の commit より先に終わり、**削除済みの写真が一覧に残る**。
+ * そのまま消そうとすると 404 になる。upload と同様、完了で読み直させる。
  */
 const inFlightUploads = new Map<string, number>();
-const uploadSettledListeners = new Set<(pinId: string) => void>();
+const mutationSettledListeners = new Set<(pinId: string) => void>();
+
+/** upload / delete の完了を、その pin を表示している一覧へ知らせる。 */
+function notifyPhotoMutationSettled(pinId: string): void {
+  for (const listener of mutationSettledListeners) listener(pinId);
+}
 
 function markUploadStarted(pinId: string): void {
   inFlightUploads.set(pinId, (inFlightUploads.get(pinId) ?? 0) + 1);
@@ -60,7 +69,7 @@ function markUploadSettled(pinId: string): void {
   const next = (inFlightUploads.get(pinId) ?? 1) - 1;
   if (next <= 0) inFlightUploads.delete(pinId);
   else inFlightUploads.set(pinId, next);
-  for (const listener of uploadSettledListeners) listener(pinId);
+  notifyPhotoMutationSettled(pinId);
 }
 
 /** その pin に送信中の写真があるか (再マウント直後の案内表示用)。 */
@@ -68,13 +77,13 @@ export function hasInFlightPhotoUpload(pinId: string): boolean {
   return (inFlightUploads.get(pinId) ?? 0) > 0;
 }
 
-/** upload の完了 (成功/失敗どちらも) を購読する。戻り値で解除。 */
-export function subscribePhotoUploadSettled(
+/** upload / delete の完了 (成功/失敗どちらも) を購読する。戻り値で解除。 */
+export function subscribePhotoMutationSettled(
   listener: (pinId: string) => void,
 ): () => void {
-  uploadSettledListeners.add(listener);
+  mutationSettledListeners.add(listener);
   return () => {
-    uploadSettledListeners.delete(listener);
+    mutationSettledListeners.delete(listener);
   };
 }
 
@@ -249,6 +258,10 @@ export function useFieldSurveyPinPhotoMutations() {
         const msg = pinApiErrorMessage(0);
         setDeleteStateIfMounted({ loading: false, error: msg });
         return { ok: false, error: msg };
+      } finally {
+        // 削除も完了を通知する。通知が無いと、閉じてすぐ開き直したときに
+        // **削除済みの写真が一覧に残り**、もう一度消そうとして 404 になる。
+        notifyPhotoMutationSettled(pinId);
       }
     },
     [],

@@ -32,7 +32,7 @@ import {
 } from "@/components/field-survey/use-field-survey-pin-mutations";
 import {
   hasInFlightPhotoUpload,
-  subscribePhotoUploadSettled,
+  subscribePhotoMutationSettled,
   useFieldSurveyPinPhotoMutations,
   type PinPhoto,
 } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
@@ -463,10 +463,11 @@ function PinPhotoSection({
   // ⚠閉じてすぐ開き直すと、初回 GET が送信中 upload の commit より先に終わり、
   // **保存された写真が次の再読込まで見えない**ことがある (@codex #331 R1)。
   // 利用者は消えたと思って同じ写真をもう一度送る (= 重複)。
-  // 送信中があれば案内を出し、完了したら自動で読み直す。
+  // 削除も同じで、**削除済みの写真が残り**、もう一度消そうとして 404 になる。
+  // 送信中があれば案内を出し、upload / delete どちらの完了でも自動で読み直す。
   useEffect(() => {
     setDetachedUploading(hasInFlightPhotoUpload(pinId));
-    return subscribePhotoUploadSettled((settledPinId) => {
+    return subscribePhotoMutationSettled((settledPinId) => {
       if (settledPinId !== pinId) return;
       setDetachedUploading(hasInFlightPhotoUpload(pinId));
       void reload();

@@ -989,7 +989,7 @@ describe("Phase 1-H — use-field-survey-pin-photo-mutations", () => {
     // 進行中件数と完了通知を hook インスタンスの外 (module スコープ) に置く。
     expect(PHOTO_HOOK_SRC).toMatch(/const inFlightUploads = new Map/);
     expect(PHOTO_HOOK_SRC).toMatch(/export function hasInFlightPhotoUpload/);
-    expect(PHOTO_HOOK_SRC).toMatch(/export function subscribePhotoUploadSettled/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function subscribePhotoMutationSettled/);
     // 成功・失敗・early return のいずれでも通知する = finally
     const upload = PHOTO_HOOK_SRC.slice(
       PHOTO_HOOK_SRC.indexOf("const uploadPhoto"),
@@ -1104,7 +1104,7 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
   const PANEL_SRC = readSrc("src/components/field-survey/pin-detail-panel.tsx");
 
   it("完了通知を購読して自動で読み直す", () => {
-    expect(PANEL_SRC).toMatch(/subscribePhotoUploadSettled\(/);
+    expect(PANEL_SRC).toMatch(/subscribePhotoMutationSettled\(/);
     // 自分の pin 以外の通知では読み直さない
     expect(PANEL_SRC).toMatch(/settledPinId !== pinId/);
     expect(PANEL_SRC).toMatch(/void reload\(\)/);
@@ -1112,7 +1112,14 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
 
   it("購読は解除される (unmount でリスナーが残らない)", () => {
     // subscribe の戻り値をそのまま useEffect の cleanup として返す形
-    expect(PANEL_SRC).toMatch(/return subscribePhotoUploadSettled\(/);
+    expect(PANEL_SRC).toMatch(/return subscribePhotoMutationSettled\(/);
+  });
+
+  it("削除の完了も通知される (削除済み写真が残って 404 にならない)", () => {
+    // ⚠通知が無いと、閉じてすぐ開き直したとき初回 GET が DELETE の commit より
+    // 先に終わり、削除済みの写真が一覧に残る。もう一度消そうとすると 404。
+    const del = PHOTO_HOOK_SRC.slice(PHOTO_HOOK_SRC.indexOf("const deletePhoto"));
+    expect(del).toMatch(/finally \{[\s\S]*?notifyPhotoMutationSettled\(pinId\)/);
   });
 
   it("送信中がある間は「もう一度送らずに待って」と案内する", () => {
