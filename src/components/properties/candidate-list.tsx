@@ -241,6 +241,8 @@ export default function CandidateList({
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [judgments, setJudgments] = useState<Record<string, Judgment>>({});
+  // 同一エリアの物件が多すぎて全部は確認できていない状態。黙って隠さない。
+  const [scanTruncated, setScanTruncated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,6 +251,7 @@ export default function CandidateList({
         const json = await apiFetchCandidates(propertyId);
         if (!cancelled) {
           setCandidates(json.data as Candidate[]);
+          setScanTruncated(json.scanTruncated === true);
         }
       } catch {
         if (!cancelled) setMessage("候補の取得に失敗しました");
@@ -283,7 +286,10 @@ export default function CandidateList({
 
   if (candidates.length === 0) {
     return (
-      <p className="text-xs text-gray-400 dark:text-gray-500 py-4">候補物件はありません</p>
+      <div className="py-4 space-y-2">
+        <p className="text-xs text-gray-400 dark:text-gray-500">候補物件はありません</p>
+        {scanTruncated && <ScanTruncatedNotice />}
+      </div>
     );
   }
 
@@ -294,6 +300,7 @@ export default function CandidateList({
           {candidates.length}件中 {judgedCount}件判定済み
         </p>
       </div>
+      {scanTruncated && <ScanTruncatedNotice />}
       {candidates.map((c) => (
         <CandidateCard
           key={c.id}
@@ -303,5 +310,22 @@ export default function CandidateList({
         />
       ))}
     </div>
+  );
+}
+
+/**
+ * 同一エリアの物件が多く、地番の突き合わせを最後まで行えなかったときの注意書き。
+ * 「候補なし」と「確認しきれていない」を利用者が取り違えないようにする
+ * (黙って打ち切ると、重複が無いと誤解して二重管理・二重DMにつながる)。
+ */
+function ScanTruncatedNotice() {
+  return (
+    <p
+      role="status"
+      className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+    >
+      同じエリアに物件が多いため、地番の突き合わせを一部しか行えていません。
+      重複が無いとは限らないので、住所での検索でもご確認ください。
+    </p>
   );
 }

@@ -659,9 +659,9 @@ export async function fetchChangeLogs(
 export async function fetchCandidates(propertyId: string) {
   if (USE_MOCK) {
     await mockDelay();
-    return { data: MOCK_CANDIDATES };
+    return { data: MOCK_CANDIDATES, scanTruncated: false };
   }
-  return apiFetch<{ data: typeof MOCK_CANDIDATES }>(
+  return apiFetch<{ data: typeof MOCK_CANDIDATES; scanTruncated?: boolean }>(
     `/api/properties/${propertyId}/candidates`,
   );
 }

@@ -367,3 +367,119 @@ describe("エリア絞り込みは空白の有無に左右されない (@codex #
     expect(json.data.some((c) => c.id === "dup4")).toBe(true);
   });
 });
+
+describe("重複候補もレコード単位のスコープに閉じる (@codex #330 R5)", () => {
+  // この route は property:read しか見ておらず、field_staff が担当外の物件 id を
+  // 指定すると**他物件の住所・地番・不動産番号・種別・案件状況**が返っていた。
+  // 検索が実際に効くようにした分だけ返る中身が増えるので、入口と候補の両方を閉じる。
+
+  it("担当外の物件を指定したら 403 で、候補検索を一切走らせない", async () => {
+    (getApiSession as Mock).mockResolvedValue({
+      id: "staff1",
+      role: "field_staff",
+    });
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
+      baseProperty({ createdBy: "someone-else", assignedTo: "another" }),
+    );
+
+    const res = await GET(req, ctx);
+    expect(res.status).toBe(403);
+    expect((prisma.$queryRaw as unknown as Mock).mock.calls.length).toBe(0);
+    expect((prisma.property.findMany as unknown as Mock).mock.calls.length).toBe(
+      0,
+    );
+  });
+
+  it("自分の物件なら通り、候補側にも自分の id で絞りをかける", async () => {
+    (getApiSession as Mock).mockResolvedValue({
+      id: "staff1",
+      role: "field_staff",
+    });
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
+      baseProperty({ createdBy: "staff1", assignedTo: null }),
+    );
+
+    const res = await GET(req, ctx);
+    expect(res.status).toBe(200);
+    const lot = lotQuery()!;
+    expect(lot.sql).toMatch(/created_by = /);
+    expect(lot.sql).toMatch(/assigned_to = /);
+    expect(lot.values).toContain("staff1");
+    const num = numberQuery()!;
+    expect(num.sql).toMatch(/created_by = /);
+    expect(num.values).toContain("staff1");
+  });
+
+  it("管理者はスコープ無し (null を渡して制限しない)", async () => {
+    await GET(req, ctx);
+    const lot = lotQuery()!;
+    // null = 制限なし。id と areaKey は渡るが、ユーザー id は渡らない。
+    expect(lot.values).toContain(null);
+    expect(lot.values).not.toContain("u1");
+  });
+});
+
+describe("地番の突き合わせは件数で打ち切らない (@codex #330 R5)", () => {
+  // 並び順のない LIMIT は「エリア内の適当な N 件」を選ぶだけで、本当の重複が
+  // その外にいれば黙って取りこぼす (閾値が 50 → 500 に上がるだけ)。
+  it("1ページ埋まったら次のページを読む (id カーソル)", async () => {
+    const page1 = Array.from({ length: 500 }, (_, i) => ({
+      id: `a${String(i).padStart(4, "0")}`,
+      address: "東京都港区芝公園4-2-9",
+      lotNumber: "9番9",
+      realEstateNumber: null,
+      propertyType: "land",
+      caseStatus: "new_case",
+    }));
+    const page2 = [
+      {
+        id: "b0001",
+        address: "東京都港区芝公園4-2-10",
+        lotNumber: "1番1", // ← 本命の重複はページ2にいる
+        realEstateNumber: null,
+        propertyType: "land",
+        caseStatus: "new_case",
+      },
+    ];
+    let lotCall = 0;
+    (prisma.$queryRaw as unknown as Mock).mockImplementation(
+      async (strings: string[]) => {
+        const sql = strings.join("?");
+        if (!sql.includes("lot_number IS NOT NULL")) return [];
+        lotCall += 1;
+        return lotCall === 1 ? page1 : page2;
+      },
+    );
+
+    const res = await GET(req, ctx);
+    const json = (await res.json()) as { data: Array<{ id: string }> };
+    expect(lotCall).toBe(2);
+    // 500件の壁の向こうにいた重複を拾えている
+    expect(json.data.some((c) => c.id === "b0001")).toBe(true);
+  });
+
+  it("暴走上限に当たったら黙らず scanTruncated を返す", async () => {
+    const full = Array.from({ length: 500 }, (_, i) => ({
+      id: `x${String(i).padStart(4, "0")}`,
+      address: "東京都港区芝公園4-2-9",
+      lotNumber: "9番9",
+      realEstateNumber: null,
+      propertyType: "land",
+      caseStatus: "new_case",
+    }));
+    (prisma.$queryRaw as unknown as Mock).mockImplementation(
+      async (strings: string[]) =>
+        strings.join("?").includes("lot_number IS NOT NULL") ? full : [],
+    );
+
+    const res = await GET(req, ctx);
+    const json = (await res.json()) as { scanTruncated: boolean };
+    expect(json.scanTruncated).toBe(true);
+  });
+
+  it("読み切れたときは scanTruncated=false", async () => {
+    const res = await GET(req, ctx);
+    const json = (await res.json()) as { scanTruncated: boolean };
+    expect(json.scanTruncated).toBe(false);
+  });
+});
