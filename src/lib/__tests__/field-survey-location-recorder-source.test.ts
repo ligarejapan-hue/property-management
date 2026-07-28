@@ -36,6 +36,10 @@ const CONTROLS_SRC = readSrc(
 // 2026-07-29: 記録の開始が巡回開始に統合されたため、**同意文の保証は
 // 巡回開始の確認 modal 側 (TRIP_SRC) へ移った**。文言が消えていないことは
 // 引き続き見張る (置き場所が変わっただけで、要件は落としていない)。
+// 本文そのものは共有部品 (NOTICE_SRC) が正本。
+const NOTICE_SRC = readSrc(
+  "src/components/field-survey/location-consent-notice.tsx",
+);
 const POLYLINE_SRC = readSrc(
   "src/components/field-survey/route-polyline.tsx",
 );
@@ -148,14 +152,15 @@ describe("location-recorder-controls — UI / consent", () => {
 
   it("同意文に 常時監視ではない / 巡回中のみ / 端末保存しない 文言がある", () => {
     expect(TRIP_SRC).toMatch(/常時監視ではありません/);
-    expect(TRIP_SRC).toMatch(/記録は巡回中だけ/);
-    expect(TRIP_SRC).toMatch(/端末側には保存しません/);
     expect(TRIP_SRC).toMatch(/data-testid="trip-start-location-consent"/);
+    // 説明の本文は共有部品が正本 (巡回開始の確認と「再開」の2箇所で使う)
+    expect(NOTICE_SRC).toMatch(/記録は巡回中だけ/);
+    expect(NOTICE_SRC).toMatch(/端末側には保存しません/);
   });
 
   it("ブラウザを閉じると失われる注意がある", () => {
-    expect(TRIP_SRC).toMatch(/ブラウザを閉じ/);
-    expect(TRIP_SRC).toMatch(/失われる/);
+    expect(NOTICE_SRC).toMatch(/ブラウザを閉じ/);
+    expect(NOTICE_SRC).toMatch(/失われる/);
   });
 
   it("同意文は初回だけ出す (毎回は出さない)", () => {

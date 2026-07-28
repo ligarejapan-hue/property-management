@@ -24,6 +24,11 @@ const TRIP_SRC = read("src/components/field-survey/trip-controls.tsx");
 const CONTROLS_SRC = read(
   "src/components/field-survey/location-recorder-controls.tsx",
 );
+// 説明文の正本。表示箇所が2つある (巡回開始の確認 / 印の無い端末での再開)
+// ので、本文はこのファイルにしか置かない。
+const NOTICE_SRC = read(
+  "src/components/field-survey/location-consent-notice.tsx",
+);
 
 describe("1. 巡回開始で位置記録も始まる", () => {
   it("巡回が始まった遷移で自動開始を予約する", () => {
@@ -135,8 +140,10 @@ describe("3. 同意文は初回だけ", () => {
   });
 
   it("初回だけ位置記録の説明を出す", () => {
-    expect(TRIP_SRC).toMatch(/showLocationConsent \?\?[\s\S]{0,80}|showLocationConsent &&/);
+    expect(TRIP_SRC).toMatch(/showLocationConsent &&/);
     expect(TRIP_SRC).toMatch(/巡回中は位置を記録します/);
+    // 本文は共有部品から出す (2箇所で文言がずれないように)
+    expect(TRIP_SRC).toMatch(/<LocationConsentNotice \/>/);
   });
 
   it("「別途ボタンを押した時のみ記録」という古い説明を残さない", () => {
@@ -153,9 +160,11 @@ describe("3. 同意文は初回だけ", () => {
 });
 
 describe("4. 位置記録パネルは「再開」だけを持つ", () => {
-  it("同意 modal をパネル側に持たない (開始確認へ移した)", () => {
-    expect(CONTROLS_SRC).not.toMatch(/location-record-consent-modal/);
-    expect(CONTROLS_SRC).not.toMatch(/同意して記録開始/);
+  it("説明文の本文をパネル側に複製しない (正本は共有部品)", () => {
+    // 2箇所で別々に書くと、片方だけ直して文言がずれる。
+    expect(CONTROLS_SRC).not.toMatch(/歩いた場所は、次にどのエリア/);
+    expect(CONTROLS_SRC).toMatch(/LocationConsentModal/);
+    expect(NOTICE_SRC).toMatch(/端末側には保存しません/);
   });
 
   it("止めた後に戻せる導線を残す (任意機能のまま)", () => {
@@ -164,14 +173,23 @@ describe("4. 位置記録パネルは「再開」だけを持つ", () => {
     expect(CONTROLS_SRC).toMatch(/data-testid="location-record-stop-button"/);
   });
 
-  it("再開はワンタップ (確認を挟まない)", () => {
-    const btn =
+  it("印のある端末ではワンタップで再開する", () => {
+    expect(CONTROLS_SRC).toMatch(
+      /if \(hasLocationConsent\(\)\) \{[\s\S]{0,80}?onStart\(\);[\s\S]{0,40}?return;/,
+    );
+  });
+
+  it("印の無い端末では再開でも説明を出してから始める (@codex #333 P2)", () => {
+    // 巡回を復元しただけの時 (機種変更 / 別ブラウザ / 履歴削除 / この反映より
+    // 前に始まった巡回) は巡回開始の確認 modal を通らない。ここを素通しに
+    // すると、同意文を一度も見ていない端末で押した瞬間に記録が始まる。
+    expect(CONTROLS_SRC).toMatch(/setConfirming\(true\)/);
+    const agree =
       CONTROLS_SRC.match(
-        /data-testid="location-record-start-button"[\s\S]{0,400}?<\/button>/,
+        /onAgree=\{\(\) => \{[\s\S]{0,240}?\}\}/,
       )?.[0] ?? "";
-    expect(btn).not.toBe("");
-    // onStart を直接呼ぶ (中間 state を挟まない)
-    expect(CONTROLS_SRC).toMatch(/onClick=\{\(\) => onStart\(\)\}/);
+    expect(agree).toContain("markLocationConsent()");
+    expect(agree).toContain("onStart()");
   });
 });
 

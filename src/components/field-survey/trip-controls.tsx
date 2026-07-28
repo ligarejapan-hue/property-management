@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LocationConsentNotice } from "@/components/field-survey/location-consent-notice";
 import {
   hasLocationConsent,
   markLocationConsent,
@@ -1010,20 +1011,7 @@ function ConfirmStartModal({
           <p className="mb-1 text-[11px] font-semibold text-gray-800 dark:text-gray-100">
             📍 位置記録について (初回のみ)
           </p>
-          <ul className="ml-4 list-disc space-y-1 text-[11px] text-gray-700 dark:text-gray-200">
-            <li>歩いた場所は、次にどのエリアを回るか決めるために使います。</li>
-            <li>
-              記録は巡回中だけです。止めたいときはパネルの「位置記録停止」で
-              いつでも止められます。
-            </li>
-            <li>
-              ブラウザを閉じたり画面を切り替えると、記録が止まることがあります。
-            </li>
-            <li>
-              未送信の記録はブラウザを閉じると失われることがあります
-              (端末側には保存しません)。
-            </li>
-          </ul>
+          <LocationConsentNotice />
         </div>
       )}
       <ModalActions
