@@ -67,6 +67,19 @@ function baseProperty(over: Record<string, unknown> = {}) {
   };
 }
 
+/** SQL 断片 → 返す行 で $queryRaw を差し替える。 */
+function mockRaw(byFragment: Record<string, unknown[]>) {
+  (prisma.$queryRaw as unknown as Mock).mockImplementation(
+    async (strings: string[]) => {
+      const sql = strings.join("?");
+      for (const [fragment, rows] of Object.entries(byFragment)) {
+        if (sql.includes(fragment)) return rows;
+      }
+      return [];
+    },
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "admin" });
@@ -78,28 +91,40 @@ beforeEach(() => {
   (prisma.$queryRaw as unknown as Mock).mockResolvedValue([]);
 });
 
-/** findMany の呼び出しのうち、地番検索のものを取り出す。 */
+/** $queryRaw の呼び出しを SQL 断片で選ぶ (地番検索 / 不動産番号検索)。 */
+function rawCall(fragment: string) {
+  const calls = (prisma.$queryRaw as unknown as Mock).mock.calls;
+  return calls.find(([strings]) => (strings as string[]).join("?").includes(fragment));
+}
+/** 地番検索の呼び出し (SQL 文字列 + パラメータ)。 */
 function lotQuery() {
-  const calls = (prisma.property.findMany as unknown as Mock).mock.calls;
-  return calls
-    .map(([arg]) => arg)
-    .find((arg) => arg?.where?.lotNumber?.not === null);
+  const call = rawCall("lot_number IS NOT NULL");
+  if (!call) return undefined;
+  const [strings, ...values] = call;
+  return { sql: (strings as string[]).join("?"), values };
+}
+/** 不動産番号検索の呼び出し。 */
+function numberQuery() {
+  const call = rawCall("real_estate_number IS NOT NULL");
+  if (!call) return undefined;
+  const [strings, ...values] = call;
+  return { sql: (strings as string[]).join("?"), values };
 }
 
 describe("地番一致: 同一エリアに絞ってから正規化比較する", () => {
-  it("住所 prefix で母集団を絞る (無条件スキャンに戻さない)", async () => {
+  it("住所のエリアキーで母集団を絞る (無条件スキャンに戻さない)", async () => {
     await GET(req, ctx);
     const q = lotQuery();
     expect(q).toBeDefined();
     // 同じ「1番1」でも市区町村が違えば重複ではない = 意味の上でも正しい絞り込み
-    expect(q.where.address).toEqual({ contains: "東京都港区芝公園" });
-    expect(q.where.isArchived).toBe(false);
-    expect(q.where.id).toEqual({ not: ID });
+    expect(q!.values).toContain("東京都港区芝公園");
+    expect(q!.sql).toMatch(/is_archived = false/);
+    expect(q!.values).toContain(ID);
   });
 
   it("走査上限を 50 件から引き上げる (エリア内なら安全に広く見られる)", async () => {
     await GET(req, ctx);
-    expect(lotQuery().take).toBe(500);
+    expect(lotQuery()!.values).toContain(500);
   });
 
   it("住所が短すぎて prefix を作れない物件では地番検索を行わない", async () => {
@@ -111,21 +136,18 @@ describe("地番一致: 同一エリアに絞ってから正規化比較する",
   });
 
   it("正規化が違っても同じ地番なら候補に出る (全角・漢数字)", async () => {
-    (prisma.property.findMany as unknown as Mock).mockImplementation(
-      async (arg: { where?: { lotNumber?: { not: null } } }) =>
-        arg?.where?.lotNumber?.not === null
-          ? [
-              {
-                id: "dup",
-                address: "東京都港区芝公園4-2-9",
-                lotNumber: "１番１", // 全角
-                realEstateNumber: null,
-                propertyType: "land",
-                caseStatus: "new_case",
-              },
-            ]
-          : [],
-    );
+    mockRaw({
+      "lot_number IS NOT NULL": [
+        {
+          id: "dup",
+          address: "東京都港区芝公園4-2-9",
+          lotNumber: "１番１", // 全角
+          realEstateNumber: null,
+          propertyType: "land",
+          caseStatus: "new_case",
+        },
+      ],
+    });
     const res = await GET(req, ctx);
     const json = (await res.json()) as {
       data: Array<{ id: string; matchType: string }>;
@@ -139,11 +161,9 @@ describe("地番一致: 同一エリアに絞ってから正規化比較する",
 describe("不動産番号一致: 全件から桁だけを比較して正確に引く", () => {
   it("DB 側で数字以外を除去して完全一致させる (先頭50件スキャンに戻さない)", async () => {
     await GET(req, ctx);
-    // $queryRaw を使う = エリアで絞れない全国一意の番号を正確に引くため
-    expect((prisma.$queryRaw as unknown as Mock).mock.calls.length).toBe(1);
-    const [strings, ...values] = (prisma.$queryRaw as unknown as Mock).mock
-      .calls[0];
-    const sql = (strings as string[]).join("?");
+    const q = numberQuery();
+    expect(q).toBeDefined();
+    const { sql, values } = q!;
     // ⚠PostgreSQL の [0-9] は ASCII のみで全角 (U+FF10-FF19) にマッチしない。
     // JS 側は「全角→半角」してから数字以外を除去するので、SQL でも translate で
     // 全角を半角に直してから除去しないと、全角で登録された行を必ず取りこぼす
@@ -164,7 +184,7 @@ describe("不動産番号一致: 全件から桁だけを比較して正確に�
       baseProperty({ realEstateNumber: "----" }),
     );
     await GET(req, ctx);
-    expect((prisma.$queryRaw as unknown as Mock).mock.calls.length).toBe(0);
+    expect(numberQuery()).toBeUndefined();
   });
 
   it("番号が無い物件では問い合わせない", async () => {
@@ -172,20 +192,22 @@ describe("不動産番号一致: 全件から桁だけを比較して正確に�
       baseProperty({ realEstateNumber: null }),
     );
     await GET(req, ctx);
-    expect((prisma.$queryRaw as unknown as Mock).mock.calls.length).toBe(0);
+    expect(numberQuery()).toBeUndefined();
   });
 
   it("桁が一致すれば区切り文字が違っても候補に出る", async () => {
-    (prisma.$queryRaw as unknown as Mock).mockResolvedValue([
-      {
-        id: "dup2",
-        address: "東京都千代田区1-1",
-        lotNumber: null,
-        realEstateNumber: "1234-5678-9012-3", // 区切りあり
-        propertyType: "land",
-        caseStatus: "new_case",
-      },
-    ]);
+    mockRaw({
+      "real_estate_number IS NOT NULL": [
+        {
+          id: "dup2",
+          address: "東京都千代田区1-1",
+          lotNumber: null,
+          realEstateNumber: "1234-5678-9012-3", // 区切りあり
+          propertyType: "land",
+          caseStatus: "new_case",
+        },
+      ],
+    });
     const res = await GET(req, ctx);
     const json = (await res.json()) as {
       data: Array<{ id: string; matchType: string; strength: string }>;
@@ -267,23 +289,81 @@ describe("エリアキーは表記ゆれに影響されない (@codex #330 R1)",
   });
 
   it("表記が違う同一エリアの物件を DB 段階で落とさない", async () => {
-    (prisma.property.findMany as unknown as Mock).mockImplementation(
-      async (arg: { where?: { lotNumber?: { not: null } } }) =>
-        arg?.where?.lotNumber?.not === null
-          ? [
-              {
-                id: "dup3",
-                address: "東京都港区芝公園4丁目2-9", // 丁目表記
-                lotNumber: "1番1",
-                realEstateNumber: null,
-                propertyType: "land",
-                caseStatus: "new_case",
-              },
-            ]
-          : [],
-    );
+    mockRaw({
+      "lot_number IS NOT NULL": [
+        {
+          id: "dup3",
+          address: "東京都港区芝公園4丁目2-9", // 丁目表記
+          lotNumber: "1番1",
+          realEstateNumber: null,
+          propertyType: "land",
+          caseStatus: "new_case",
+        },
+      ],
+    });
     const res = await GET(req, ctx);
     const json = (await res.json()) as { data: Array<{ id: string }> };
     expect(json.data.some((c) => c.id === "dup3")).toBe(true);
+  });
+});
+
+describe("エリア絞り込みは空白の有無に左右されない (@codex #330 R4)", () => {
+  // addressAreaKey は空白を落とすので、DB 側も落としてから比較しないと
+  // 「東京都港区芝公園4-2-8」と「東京都 港区 芝公園 4-2-8」が食い違い、
+  // **保存側に空白がある物件だけ**が正規化比較の手前で落ちる。
+  it("DB 側でも空白を除去してから包含判定する", async () => {
+    await GET(req, ctx);
+    const { sql } = lotQuery()!;
+    expect(sql).toMatch(/translate\(/);
+    // 全角スペース(U+3000) と NBSP(160) は [[:space:]] に入らないので明示が必要
+    expect(sql).toContain("chr(12288)");
+    expect(sql).toContain("chr(160)");
+    // % / _ をワイルドカードにしないため LIKE ではなく position
+    expect(sql).toMatch(/position\(/);
+    expect(sql).not.toMatch(/LIKE/);
+  });
+
+  it("SQL 側の空白除去が JS 側 addressAreaKey と同じ結果になる", () => {
+    // 実 DB は使えないので translate の意味を JS で再現して突き合わせる。
+    // translate(address, ' ' || chr(9) || chr(10) || chr(13) || chr(160) || chr(12288), '')
+    const SQL_STRIPPED_CHARS = [
+      " ",
+      "\t",
+      "\n",
+      "\r",
+      "\u00a0",
+      "\u3000",
+    ];
+    const sqlLikeStrip = (v: string) =>
+      SQL_STRIPPED_CHARS.reduce((acc, ch) => acc.split(ch).join(""), v);
+    for (const stored of [
+      "東京都 港区 芝公園 4-2-8",
+      "東京都　港区　芝公園　4-2-8", // 全角スペース
+      "東京都 港区 芝公園 4-2-8", // NBSP
+      "東京都港区芝公園4-2-8",
+    ]) {
+      // 保存側の空白を落とした文字列に、エリアキーが含まれること
+      expect(sqlLikeStrip(stored)).toContain(
+        addressAreaKey("東京都港区芝公園4-2-8"),
+      );
+    }
+  });
+
+  it("空白入りで保存された同一エリアの物件を落とさない", async () => {
+    mockRaw({
+      "lot_number IS NOT NULL": [
+        {
+          id: "dup4",
+          address: "東京都 港区 芝公園 4-2-9",
+          lotNumber: "1番1",
+          realEstateNumber: null,
+          propertyType: "land",
+          caseStatus: "new_case",
+        },
+      ],
+    });
+    const res = await GET(req, ctx);
+    const json = (await res.json()) as { data: Array<{ id: string }> };
+    expect(json.data.some((c) => c.id === "dup4")).toBe(true);
   });
 });

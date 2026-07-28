@@ -192,26 +192,49 @@ export async function GET(
     // prefix に食い込み、正規化すれば一致する相手を DB 段階で落としてしまう
     // (@codex #330 R1)。番地は最初の数字以降にしか出ないので、数字の手前まで
     // (= addressAreaKey) を使えば表記差の影響を受けない。
+    //
+    // ⚠エリアキーは空白を落とすので、DB 側も落としてから比較する
+    // (@codex #330 R4)。素の `contains` だと「東京都港区芝公園4-2-8」と
+    // 「東京都 港区 芝公園 4-2-8」が食い違い、**保存側に空白がある物件だけ**が
+    // 正規化比較の手前で落ちる。translate で半角/全角スペースを除去して
+    // JS 側 addressAreaKey と同じ土俵に乗せる。
     const areaKey = addressAreaKey(property.address);
     if (property.lotNumber && areaKey.length >= 4) {
       const normalizedLot = normalizeLotNumber(property.lotNumber);
-      const lotMatches = await prisma.property.findMany({
-        where: {
-          id: { not: id },
-          isArchived: false,
-          lotNumber: { not: null },
-          address: { contains: areaKey },
-        },
-        select: {
-          id: true,
-          address: true,
-          lotNumber: true,
-          realEstateNumber: true,
-          propertyType: true,
-          caseStatus: true,
-        },
-        take: LOT_MATCH_SCAN_LIMIT,
-      });
+      const lotMatches = await prisma.$queryRaw<
+        Array<{
+          id: string;
+          address: string;
+          lotNumber: string | null;
+          realEstateNumber: string | null;
+          propertyType: string;
+          caseStatus: string;
+        }>
+      >`
+        SELECT id,
+               address,
+               lot_number AS "lotNumber",
+               real_estate_number AS "realEstateNumber",
+               property_type AS "propertyType",
+               case_status AS "caseStatus"
+        FROM properties
+        WHERE id <> ${id}::uuid
+          AND is_archived = false
+          AND lot_number IS NOT NULL
+          -- 空白除去は JS 側 addressAreaKey と同じ土俵に乗せるため。
+          -- PostgreSQL の [[:space:]] は全角スペース(U+3000)や NBSP を含まないので
+          -- 除去対象を chr() で明示する (半角/タブ/改行/CR/NBSP/全角)。
+          -- 包含判定は position を使う: 住所に % や _ が混じっても
+          -- ワイルドカードとして解釈されない。
+          AND position(
+                ${areaKey} IN translate(
+                  address,
+                  ' ' || chr(9) || chr(10) || chr(13) || chr(160) || chr(12288),
+                  ''
+                )
+              ) > 0
+        LIMIT ${LOT_MATCH_SCAN_LIMIT}
+      `;
 
       for (const p of lotMatches) {
         if (candidateMap.has(p.id) || !p.lotNumber) continue;
