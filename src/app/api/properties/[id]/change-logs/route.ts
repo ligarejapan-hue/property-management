@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 // ---------- GET /api/properties/:id/change-logs ----------
 
@@ -46,18 +47,28 @@ export async function GET(
     // リンク id を物件から逆引きする手段が無い。
     // 解決には ChangeLog に propertyId を持たせる等のスキーマ変更が要るので
     // 別タスク (要承認)。mislink/merge 経由の削除でも同じ。
-    const [ownerLinks, propertyRow] = await Promise.all([
-      prisma.propertyOwner.findMany({
-        where: { propertyId },
-        select: { id: true },
-      }),
-      prisma.property.findUnique({
-        where: { id: propertyId },
-        select: { buildingId: true },
-      }),
-    ]);
+    // レコード単位のアクセス制御 (物件詳細 API GET /api/properties/[id] と同方針)。
+    // ⚠関連レコードを引く前に必ず弾く (@codex #330 R2)。この route は
+    // property:read しか見ていなかったため、field_staff が担当外の物件 id を
+    // 指定すると変更履歴が読めていた。関連の所有者リンク/棟まで引くようにした
+    // 分だけ (続柄・主所有者・棟情報の変更) 読める範囲が広がってしまう。
+    const propertyRow = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { id: true, buildingId: true, createdBy: true, assignedTo: true },
+    });
+    if (!propertyRow) {
+      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+    if (!canAccessPropertyRecord(session, propertyRow)) {
+      throw new ApiError(403, "この物件を閲覧する権限がありません", "FORBIDDEN");
+    }
+
+    const ownerLinks = await prisma.propertyOwner.findMany({
+      where: { propertyId },
+      select: { id: true },
+    });
     const ownerLinkIds = ownerLinks.map((o) => o.id);
-    const buildingId = propertyRow?.buildingId ?? null;
+    const buildingId = propertyRow.buildingId;
 
     // 対象が無いテーブルは OR から外す (常に 0 件の条件を積まない)。
     const targetFilters: Array<Record<string, unknown>> = [

@@ -116,10 +116,22 @@ export async function GET(request: NextRequest) {
     const query = propertyListQuerySchema.parse(queryObj);
 
     // 一覧 API と同一の where / sort / field_staff スコープを共有ロジックで組み立てる。
-    const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(
+    const { where, mgmtShortCircuitEmpty, mgmtOverflowed } = await buildPropertyListWhere(
       query,
       session,
     );
+
+    // ⚠管理ID の一致が上限を超えて切り捨てられているときは、**最終行数が上限未満でも**
+    // 出力しない (@codex #330 R2)。この route は dmStatus=send を後から強制するので、
+    // 切り捨てた id 側にだけ送付可の物件があると、行数ガードが発火しないまま
+    // 宛先を取りこぼした差込 CSV が出てしまう(= DM が届かない世帯が出る)。
+    if (mgmtOverflowed) {
+      throw new ApiError(
+        400,
+        "管理IDに一致する物件が上限（10,000件）を超えています。管理IDをより具体的に指定するか、他の条件で絞り込んでください。",
+        "EXPORT_LIMIT_EXCEEDED",
+      );
+    }
 
     // サーバ側で強制: 送付可のみ・アーカイブ除外。
     // クライアントが dmStatus=hold/no_send を渡しても無視し、send のみ出力する。

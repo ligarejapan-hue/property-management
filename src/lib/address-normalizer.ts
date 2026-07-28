@@ -198,13 +198,26 @@ export function similarityScore(a: string, b: string): number {
  *     "東京都港区芝公園4丁目2-8" → "東京都港区芝公園"
  *     "東京都港区芝公園四丁目"   → "東京都港区芝公園"
  *
+ * ⚠漢数字はそれ単体を境界にしてはいけない (@codex #330 R2)。**地名に漢数字は
+ * 普通に含まれる**ため (四日市市・八王子市・十日町市・三鷹市・六本木…)、
+ * 「最初の漢数字で切る」と "三重県四日市市諏訪町1-1" が空キー、
+ * "東京都八王子市横山町1-1" が "東京都" になり、どちらも呼び出し側の最低
+ * 文字数を割って**地番の重複検出そのものが丸ごとスキップ**される。
+ * 漢数字は「直後に 丁目 が続く」ときだけ番地表記とみなす
+ * (八丁堀のような 丁目 でない地名を巻き込まないよう 丁 単独は境界にしない)。
+ *
  * ⚠都道府県の省略 (「港区芝公園…」) や市町村合併による表記変更までは吸収
  * できない。DB 絞り込みは「安全に母集団を狭める」ためのもので、最終判定は
  * 呼び出し側の正規化比較が行う。
  */
 export function addressAreaKey(address: string): string {
-  // 数字 (半角/全角) と漢数字の直前で切る。
-  const m = address.match(/[0-9０-９一二三四五六七八九十百千]/);
-  const stem = m?.index != null ? address.slice(0, m.index) : address;
+  const boundaries = [
+    // 算用数字 (半角/全角)。番地は必ずここ以降。
+    address.search(/[0-9０-９]/),
+    // 漢数字の丁目表記 ("四丁目")。地名中の漢数字とはここで区別する。
+    address.search(/[一二三四五六七八九十]+丁目/),
+  ].filter((i) => i >= 0);
+  const stem =
+    boundaries.length > 0 ? address.slice(0, Math.min(...boundaries)) : address;
   return stem.replace(/[\s　]+/g, "").trim();
 }

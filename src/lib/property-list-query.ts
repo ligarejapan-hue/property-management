@@ -10,7 +10,7 @@
  *  - PII（mgmtId 生値・所有者名など）はここでは扱わず、呼び出し側の責務とする。
  */
 import prisma from "@/lib/prisma";
-import { resolveMgmtIdToPropertyIds } from "@/lib/property-mgmt-id-search";
+import { resolveMgmtIdMatches } from "@/lib/property-mgmt-id-search";
 import { propertyListQuerySchema } from "@/lib/validators";
 import type { z } from "zod";
 
@@ -30,6 +30,15 @@ export interface BuildPropertyListWhereResult {
   mgmtShortCircuitEmpty: boolean;
   /** mgmtId 検索の hit 件数（未検索時は null） */
   mgmtHitCount: number | null;
+  /**
+   * mgmtId 一致が上限を超え、id を切り捨てている。
+   *
+   * ⚠CSV / DM差込CSV はこれが true なら **最終行数が上限未満でも出力してはいけない**
+   * (@codex #330 R2)。where は管理IDに加えて案件状況・DM状況・日付・field_staff
+   * スコープを AND するため、切り捨てた id 側にだけ条件を満たす行があると、
+   * 行数ガードが発火しないまま**取りこぼした CSV** が出てしまう。
+   */
+  mgmtOverflowed: boolean;
   /** trim 済み mgmtId（未指定時は空文字） */
   mgmtIdTrimmed: string;
 }
@@ -119,12 +128,14 @@ export async function buildPropertyListWhere(
   const mgmtIdTrimmed = (mgmtId ?? "").trim();
   let mgmtHitCount: number | null = null;
   let mgmtShortCircuitEmpty = false;
+  let mgmtOverflowed = false;
   if (mgmtIdTrimmed) {
-    const mgmtPropertyIds = await resolveMgmtIdToPropertyIds(
+    const { ids: mgmtPropertyIds, overflowed } = await resolveMgmtIdMatches(
       client,
       mgmtIdTrimmed,
     );
     mgmtHitCount = mgmtPropertyIds.length;
+    mgmtOverflowed = overflowed;
     if (mgmtPropertyIds.length === 0) {
       mgmtShortCircuitEmpty = true;
     } else {
@@ -171,7 +182,13 @@ export async function buildPropertyListWhere(
     where.AND = [...(where.AND ?? []), { dmLogs: { none: {} } }];
   }
 
-  return { where, mgmtShortCircuitEmpty, mgmtHitCount, mgmtIdTrimmed };
+  return {
+    where,
+    mgmtShortCircuitEmpty,
+    mgmtHitCount,
+    mgmtOverflowed,
+    mgmtIdTrimmed,
+  };
 }
 
 /**

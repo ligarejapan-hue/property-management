@@ -149,3 +149,56 @@ describe("GET /api/properties/[id]/change-logs — 関連レコードの実 id �
     }
   });
 });
+
+describe("field_staff は担当外物件の履歴を読めない (@codex #330 R2)", () => {
+  // この route は property:read しか見ておらず、担当外の物件 id を渡せば
+  // 変更履歴が読めていた。関連レコード(所有者リンク/棟)まで引くようにした分だけ
+  // 読める範囲が広がる(続柄・主所有者切替・棟情報)ため、関連を引く前に弾く。
+  beforeEach(() => {
+    (getApiSession as Mock).mockResolvedValue({ id: "staff1", role: "field_staff" });
+  });
+
+  it("createdBy / assignedTo のどちらでもなければ 403 で、関連レコードを引かない", async () => {
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue({
+      id: PROPERTY_ID,
+      buildingId: BUILDING_ID,
+      createdBy: "someone-else",
+      assignedTo: "another",
+    });
+
+    const res = await GET(req, ctx);
+    expect(res.status).toBe(403);
+    // 弾く前に関連を引いてしまうと、担当外の所有者リンク id が DB から出てしまう
+    expect(prisma.propertyOwner.findMany).not.toHaveBeenCalled();
+    expect(prisma.changeLog.findMany).not.toHaveBeenCalled();
+    expect(prisma.changeLog.groupBy).not.toHaveBeenCalled();
+  });
+
+  it("自分が作成した物件なら読める", async () => {
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue({
+      id: PROPERTY_ID,
+      buildingId: null,
+      createdBy: "staff1",
+      assignedTo: null,
+    });
+    const res = await GET(req, ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("自分が担当の物件なら読める", async () => {
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue({
+      id: PROPERTY_ID,
+      buildingId: null,
+      createdBy: "someone-else",
+      assignedTo: "staff1",
+    });
+    const res = await GET(req, ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("物件が存在しなければ 404 (存在の有無を 403/404 で区別しない設計は他 route と同じ)", async () => {
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(null);
+    const res = await GET(req, ctx);
+    expect(res.status).toBe(404);
+  });
+});

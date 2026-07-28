@@ -20,17 +20,28 @@ import type { PrismaClient } from "@/generated/prisma";
 // - rowNumber は 32-bit signed int の範囲のみ有効。範囲外は 0 件扱い。
 
 const FULLWIDTH_COLON_RE = /：/g;
-// 解決した propertyId の返却上限。
-//
-// ⚠200 件だった頃の不具合 (総点検 2026-07-27): 一覧の where が
-// `id: { in: [200件] }` に縮退し、件数表示も 200 になるうえ、CSV 出力 /
-// DM差込CSV も **警告なく 200 行だけ**出力されていた。CSV 側は本来
-// 「全件出す or 上限超過なら 400 で中止」の契約なのに、その判定に到達しない
-// (= 送付対象 6,000 件のうち 200 件分しか宛先が出ず、残りへ DM が届かない)。
-//
-// 上限を CSV の安全上限 (10,000) + 1 に合わせることで、超過時は切り捨てでは
-// なく CSV 側の 400「絞り込んでください」に必ず倒れる。内部スキャン上限
-const DEFAULT_TAKE = 10_001;
+/**
+ * 管理ID 一致の既定上限。CSV / DM差込CSV の安全上限と同値。
+ *
+ * ⚠200 件だった頃の不具合 (総点検 2026-07-27): 一覧の where が
+ * `id: { in: [200件] }` に縮退し、件数表示も 200 になるうえ、CSV 出力 /
+ * DM差込CSV も **警告なく 200 行だけ**出力されていた (= 送付対象 6,000 件の
+ * うち 200 件分しか宛先が出ず、残りへ DM が届かない)。
+ *
+ * ⚠「上限+1 件返せば CSV 側の行数ガードに引っかかる」で代用してはいけない
+ * (@codex #330 R2)。CSV の where は管理ID に加えて案件状況・DM状況・日付・
+ * field_staff スコープを **AND** するので、切り捨てた 10,001 件目以降にだけ
+ * 条件を満たす行があると、最終行数は上限未満に収まりガードが発火しない。
+ * 超過は行数ではなく **overflowed フラグで別途表現**し、呼び出し側が
+ * 「切り捨てたまま出力する」経路を持てないようにする。
+ */
+export const MGMT_ID_MATCH_LIMIT = 10_000;
+/**
+ * 入力補完 (`/api/properties/suggest`) 用の上限。候補は 10 件しか返さないため、
+ * 1 打鍵ごとに数千件の id を検証して巨大な IN 句を組むのは無駄 (@codex #330 R2)。
+ * OR の一要素に足すだけなので、多少取りこぼしても補完としては成立する。
+ */
+export const MGMT_ID_SUGGEST_LIMIT = 50;
 const INTERNAL_PAGE_SIZE = 500;
 // 走査ページ数の下限 (従来値)。非 Property 行が先頭を大量に占有しても
 // 実在 Property を取りこぼさないための最低保証。
@@ -42,13 +53,12 @@ const SCAN_ROW_MARGIN = 2;
 const MAX_SCAN_ROWS_PER_BRANCH = 50_000;
 
 /**
- * take を満たすために走査してよいページ数。
+ * target を満たすために走査してよいページ数。
  *
- * ⚠固定 20 ページ (= 10,000 行) だと、DEFAULT_TAKE=10,001 に**到達できない**。
- * その結果 export へ渡る id が必ず 10,000 で止まり、CSV 側の「> 10,000 なら
- * 400 で中止」ガードが発火せず、**警告なく 10,000 行だけの CSV/DM** が出る
- * (この修正が消そうとしている事故そのもの・@codex #330 R1)。
- * take から必要ページ数を導出し、従来の下限は保ちつつ上限で暴走を防ぐ。
+ * ⚠固定 20 ページ (= 10,000 行) だと、上限 +1 件目 (超過判定用) に**到達できない**。
+ * その結果「超過していないのに超過扱い」ではなく「超過しているのに気づけない」
+ * 側へ倒れ、切り捨てたまま CSV/DM が出る (@codex #330 R1)。
+ * target から必要ページ数を導出し、従来の下限は保ちつつ上限で暴走を防ぐ。
  */
 function maxPagesForTake(target: number): number {
   const rows = Math.min(target * SCAN_ROW_MARGIN, MAX_SCAN_ROWS_PER_BRANCH);
@@ -61,6 +71,13 @@ type PrismaLike = Pick<PrismaClient, "importJobRow" | "property">;
 
 export interface ResolveMgmtIdOptions {
   take?: number;
+}
+
+export interface MgmtIdMatches {
+  /** 上限までの一致 propertyId。 */
+  ids: string[];
+  /** 上限を超える一致があった (= ids は先頭 limit 件で、後続を切り捨てている)。 */
+  overflowed: boolean;
 }
 
 interface ParsedQ {
@@ -179,12 +196,41 @@ async function paginatedCollect(
   }
 }
 
+/**
+ * 管理ID 一致を解決し、**上限超過を件数と別に**返す。
+ *
+ * 呼び出し側 (CSV / DM差込CSV) は overflowed が true なら、他の絞り込み条件で
+ * 最終行数が上限未満に収まっていても出力してはいけない (切り捨てた id にだけ
+ * 条件を満たす行があり得るため・@codex #330 R2)。
+ */
+export async function resolveMgmtIdMatches(
+  prisma: PrismaLike,
+  rawQ: string,
+  options: { limit?: number } = {},
+): Promise<MgmtIdMatches> {
+  const limit = options.limit ?? MGMT_ID_MATCH_LIMIT;
+  // 上限より 1 件多く探し、超えたかどうかを判定する。
+  const ids = await collectMgmtIdMatches(prisma, rawQ, limit + 1);
+  return { ids: ids.slice(0, limit), overflowed: ids.length > limit };
+}
+
+/**
+ * 管理ID 一致の propertyId[] だけを返す薄いラッパ。
+ * 上限超過を知る必要がある経路 (CSV/DM) は resolveMgmtIdMatches を使うこと。
+ */
 export async function resolveMgmtIdToPropertyIds(
   prisma: PrismaLike,
   rawQ: string,
   options: ResolveMgmtIdOptions = {},
 ): Promise<string[]> {
-  const take = options.take ?? DEFAULT_TAKE;
+  return collectMgmtIdMatches(prisma, rawQ, options.take ?? MGMT_ID_MATCH_LIMIT);
+}
+
+async function collectMgmtIdMatches(
+  prisma: PrismaLike,
+  rawQ: string,
+  take: number,
+): Promise<string[]> {
   const { normalized, parsed } = parseMgmtIdQuery(rawQ);
   if (!normalized) return [];
   // 範囲外・不正な rowNumber は 0 件扱い（Prisma Int 範囲外を渡すと

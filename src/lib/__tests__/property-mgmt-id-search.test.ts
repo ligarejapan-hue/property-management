@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import {
+  MGMT_ID_MATCH_LIMIT,
+  MGMT_ID_SUGGEST_LIMIT,
   parseMgmtIdQuery,
+  resolveMgmtIdMatches,
   resolveMgmtIdToPropertyIds,
 } from "../property-mgmt-id-search";
 
@@ -397,16 +400,42 @@ describe("返却上限 (総点検 2026-07-27: CSV/DM の取りこぼし)", () =>
     expect(ids.length).toBe(1500);
   });
 
-  it("CSV の安全上限 (10,000) を超える分は 10,001 件で止める", async () => {
-    // 10,001 件返せば、CSV 側の「> 10,000 なら 400 で中止」に必ず到達する
-    // (= 黙って一部だけ出力される事故が起きない)。
+  it("上限超過は件数でなく overflowed で表す (@codex #330 R2)", async () => {
+    // ⚠「上限+1 件返して CSV の行数ガードに当てる」で代用してはいけない。
+    // CSV の where は管理IDに加えて案件状況・DM状況・日付・field_staff スコープを
+    // AND するため、切り捨てた 10,001 件目以降にだけ条件を満たす行があると、
+    // 最終行数は上限未満に収まり行数ガードが発火しない(= 黙って取りこぼす)。
     const many = Array.from({ length: 10_050 }, (_, i) => `p${i}`);
     const { prisma } = makePrisma({
       rowsByCall: [many.map((id) => ({ createdId: id }))],
       propertyIds: many,
     });
-    const ids = await resolveMgmtIdToPropertyIds(prisma, "受付帳.xlsx");
-    expect(ids.length).toBe(10_001);
+    const res = await resolveMgmtIdMatches(prisma, "受付帳.xlsx");
+    expect(res.overflowed).toBe(true);
+    expect(res.ids.length).toBe(MGMT_ID_MATCH_LIMIT);
+  });
+
+  it("上限ちょうどは超過ではない (境界)", async () => {
+    const many = Array.from({ length: MGMT_ID_MATCH_LIMIT }, (_, i) => `p${i}`);
+    const { prisma } = makePrisma({
+      rowsByCall: [many.map((id) => ({ createdId: id }))],
+      propertyIds: many,
+    });
+    const res = await resolveMgmtIdMatches(prisma, "受付帳.xlsx");
+    expect(res.overflowed).toBe(false);
+    expect(res.ids.length).toBe(MGMT_ID_MATCH_LIMIT);
+  });
+
+  it("補完用の小さい上限を渡せる (1打鍵ごとの巨大 IN 句を防ぐ)", async () => {
+    const many = Array.from({ length: 500 }, (_, i) => `p${i}`);
+    const { prisma } = makePrisma({
+      rowsByCall: [many.map((id) => ({ createdId: id }))],
+      propertyIds: many,
+    });
+    const ids = await resolveMgmtIdToPropertyIds(prisma, "受付帳.xlsx", {
+      take: MGMT_ID_SUGGEST_LIMIT,
+    });
+    expect(ids.length).toBe(MGMT_ID_SUGGEST_LIMIT);
   });
 
   it("take を明示すればその値が優先される (呼び出し側の上書きは維持)", async () => {
@@ -427,9 +456,9 @@ describe("走査上限は take から導出する (@codex #330 R1)", () => {
     vi.clearAllMocks();
   });
 
-  it("10,000 行を超えて走査でき、10,001 に到達できる", async () => {
-    // 固定20ページ (=10,000行) のままだと 10,001 に到達できず、export の
-    // 「> 10,000 なら 400」ガードが発火しないまま 10,000 行の CSV が出ていた。
+  it("10,000 行を超えて走査でき、超過を検出できる", async () => {
+    // 固定20ページ (=10,000行) のままだと上限+1 件目に到達できず、
+    // 「超過しているのに気づけない」側へ倒れて切り捨てた CSV が出ていた。
     const pages: Array<Array<{ createdId: string }>> = [];
     let n = 0;
     // 1ページ500行 × 25ページ = 12,500 行を返せるようにする
@@ -441,8 +470,8 @@ describe("走査上限は take から導出する (@codex #330 R1)", () => {
     const all = Array.from({ length: n }, (_, i) => `p${i}`);
     const { prisma } = makePrisma({ rowsByCall: pages, propertyIds: all });
 
-    const ids = await resolveMgmtIdToPropertyIds(prisma, "受付帳.xlsx");
-    expect(ids.length).toBe(10_001);
+    const res = await resolveMgmtIdMatches(prisma, "受付帳.xlsx");
+    expect(res.overflowed).toBe(true);
   });
 
   it("小さい take でも従来の最低ページ数は下回らない (非Property行の占有対策)", async () => {

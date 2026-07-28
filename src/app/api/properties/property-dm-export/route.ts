@@ -101,7 +101,20 @@ export async function GET(request: NextRequest) {
     const query = propertyListQuerySchema.parse(queryObj);
 
     // 一覧 API と同一の where / sort / field_staff スコープを共有ロジックで組み立てる。
-    const { where, mgmtShortCircuitEmpty } = await buildPropertyListWhere(query, session);
+    const { where, mgmtShortCircuitEmpty, mgmtOverflowed } = await buildPropertyListWhere(query, session);
+
+    // ⚠管理ID の一致が上限を超えて切り捨てられているときは、**最終行数が上限未満でも**
+    // 出力しない (@codex #330 R2)。where は管理IDに加えて案件状況・DM状況・日付・
+    // field_staff スコープを AND するため、切り捨てた id 側にだけ条件を満たす行が
+    // あると、下の行数ガードが発火しないまま取りこぼした CSV が出てしまう。
+    if (mgmtOverflowed) {
+      throw new ApiError(
+        400,
+        "管理IDに一致する物件が上限（10,000件）を超えています。管理IDをより具体的に指定するか、他の条件で絞り込んでください。",
+        "EXPORT_LIMIT_EXCEEDED",
+      );
+    }
+
 
     // サーバ側で強制: 送付可のみ・アーカイブ除外。client の dmStatus/includeArchived は無視。
     where.dmStatus = "send";
