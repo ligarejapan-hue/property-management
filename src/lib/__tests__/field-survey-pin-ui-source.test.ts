@@ -1202,15 +1202,16 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     expect(PHOTO_HOOK_SRC).toMatch(/export function clearPhotoMutationFailure/);
     const MAP_SRC = readSrc("src/components/field-survey/field-survey-map.tsx");
     // ピン作成時の写真は自前の再試行 UI を持ち、写真セクションの購読者が居ない。
-    // 再試行ハンドラの中で、成功時に失敗を捨ててから完了処理へ進むこと。
-    const retry = MAP_SRC.slice(
+    // 完了の単一入口 (finalizePinCreate) で捨てることで、「再試行して成功」も
+    // 「写真なしで完了」も同じく解決済みになる (@codex #331 R1)。
+    const finalize = MAP_SRC.slice(
+      MAP_SRC.indexOf("const finalizePinCreate"),
       MAP_SRC.indexOf("const handleRetryPhoto"),
-      MAP_SRC.indexOf("const handleFinishWithoutPhoto"),
     );
-    expect(retry).toContain("photoMutations.uploadPhoto(pinId, file)");
-    expect(retry.indexOf("clearPhotoMutationFailure(pinId)")).toBeGreaterThan(-1);
-    expect(retry.indexOf("clearPhotoMutationFailure(pinId)")).toBeLessThan(
-      retry.indexOf("finalizePinCreate(pinId, true)"),
+    expect(finalize).toContain("clearPhotoMutationFailure(pinId)");
+    // キャンセルは finalize を通らないので個別に捨てる
+    expect(MAP_SRC).toContain(
+      "clearPhotoMutationFailure(createdPinIdRef.current)",
     );
   });
 
