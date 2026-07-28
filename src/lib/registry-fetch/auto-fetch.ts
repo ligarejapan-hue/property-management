@@ -601,6 +601,10 @@ function createPlaywrightRegistryPage(
       // 1段だけ正当に遅いケースで成功するはずのログインを auth_failed に化けさせる。
       const stepDeadlineAt = resolveLoginStepDeadline(nowMs(), budgetMs);
       const stepMs = () => remainingLoginStepMs(stepDeadlineAt, nowMs());
+      // 資格情報を**送信したか**。送信前の timeout を「資格情報の誤り」に
+      // 誤分類しないための旗 (@codex #331 R1)。送信前はログインフォームが
+      // 出ているのが正常なので、フォームの有無では判別できない。
+      let submitted = false;
       // baseUrl 省略時は documented default を用いる（相対 "/login" 遷移を防ぐ）。
       // loginPath は env（REGISTRY_FETCH_LOGIN_PATH）で上書き可能（live キャリブレーション）。
       const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
@@ -664,6 +668,7 @@ function createPlaywrightRegistryPage(
             (el as unknown as { click: () => void }).click();
           }
         }, REGISTRY_SELECTORS.loginSubmit);
+        submitted = true;
         // ログイン送信後の着地を待つ。「確認画面固有マーカー」か「通常メニュー固有リンク」の
         // どちらかが DOM に現れるまで、ログイン全体のタイムアウト内で待つ(グループセレクタ)。
         // 固定の短い猶予だと応答が遅いとき確認画面の到着前に打ち切ってしまい、その後に現れる
@@ -754,15 +759,24 @@ function createPlaywrightRegistryPage(
         // 「遅いだけを資格情報の誤りと言う」より害が小さい (再試行で解決し得る
         // 案内になる) ため、判別不能時は timeout 側へ倒す。
         if (isTimeoutError(err)) {
-          const loginFormBack = await page
-            .evaluate(
-              (sel) => !!document.querySelector(sel),
-              REGISTRY_SELECTORS.loginId,
-            )
-            .catch(() => false);
+          // ⚠送信前 (goto / fill / ログインボタン待ち) の timeout は、そもそも
+          // 資格情報を送っていないので auth_failed にしてはいけない
+          // (@codex #331 R1)。しかも送信前はログインフォームが出ているのが
+          // 正常なので、フォームの有無では判別できず、放置すると
+          // 「ログインページが遅い」が「資格情報の誤り」として出る。
+          const loginFormBack =
+            submitted &&
+            (await page
+              .evaluate(
+                (sel) => !!document.querySelector(sel),
+                REGISTRY_SELECTORS.loginId,
+              )
+              .catch(() => false));
           if (!loginFormBack) {
             console.warn(
-              "[registry-login] post-submit wait exhausted the budget; classified as timeout",
+              submitted
+                ? "[registry-login] post-submit wait exhausted the budget; classified as timeout"
+                : "[registry-login] pre-submit step timed out; classified as timeout",
             );
             throw new RegistryFetchError("timeout");
           }

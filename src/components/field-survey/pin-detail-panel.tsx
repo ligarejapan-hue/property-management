@@ -32,6 +32,7 @@ import {
 } from "@/components/field-survey/use-field-survey-pin-mutations";
 import {
   hasInFlightPhotoUpload,
+  pendingPhotoDeleteIds,
   subscribePhotoMutationSettled,
   takeLastPhotoMutationFailure,
   useFieldSurveyPinPhotoMutations,
@@ -441,6 +442,8 @@ function PinPhotoSection({
   // パネルを離れている間に失敗した送信・削除の案内 (hook の state は
   // unmount 後の更新を抑止するため、こちらで受け取って表示する)。
   const [detachedError, setDetachedError] = useState<string | null>(null);
+  // パネルを離れている間も走っている削除の対象 (一覧にはまだ残って見える)。
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const latestPinIdRef = useRef(pinId);
@@ -486,12 +489,14 @@ function PinPhotoSection({
   // reload は ref 経由で最新を呼ぶ。
   useEffect(() => {
     setDetachedUploading(hasInFlightPhotoUpload(pinId));
+    setPendingDeleteIds(pendingPhotoDeleteIds(pinId));
     // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)。
     // pin 切替時は前の pin のエラーを消す意味も兼ねる。
     setDetachedError(takeLastPhotoMutationFailure(pinId)?.error ?? null);
     return subscribePhotoMutationSettled((settledPinId, outcome) => {
       if (settledPinId !== pinId) return;
       setDetachedUploading(hasInFlightPhotoUpload(pinId));
+      setPendingDeleteIds(pendingPhotoDeleteIds(pinId));
       // ⚠失敗をここで出さないと、「出ますのでお待ちください」と案内したまま
       // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
       // 場面なので、必ず気づける形にする。
@@ -579,12 +584,14 @@ function PinPhotoSection({
                   onClick={() => {
                     void handleDelete(p.id);
                   }}
-                  disabled={photoMutations.deleteLoading}
+                  disabled={
+                    photoMutations.deleteLoading || pendingDeleteIds.includes(p.id)
+                  }
                   data-testid="pin-photo-delete"
                   className="absolute right-0 top-0 rounded-bl bg-black/60 px-1 text-[10px] text-white disabled:opacity-60"
                   aria-label="写真を削除"
                 >
-                  写真を削除
+                  {pendingDeleteIds.includes(p.id) ? "削除中…" : "写真を削除"}
                 </button>
               )}
             </li>

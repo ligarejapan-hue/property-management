@@ -1124,9 +1124,27 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     // 先に終わり、削除済みの写真が一覧に残る。もう一度消そうとすると 404。
     const del = PHOTO_HOOK_SRC.slice(PHOTO_HOOK_SRC.indexOf("const deletePhoto"));
     expect(del).toMatch(
-      /finally \{[\s\S]*?notifyPhotoMutationSettled\(pinId, outcome\)/,
+      /finally \{[\s\S]*?markDeleteSettled\(pinId, photoId, outcome\)/,
     );
     expect(del).toMatch(/outcome = \{ kind: "delete", ok: true \}/);
+    // markDeleteSettled は進行中集合から外したうえで通知する
+    expect(PHOTO_HOOK_SRC).toMatch(
+      /function markDeleteSettled\([\s\S]*?set\.delete\(photoId\)[\s\S]*?notifyPhotoMutationSettled\(pinId, outcome\)/,
+    );
+  });
+
+  it("削除中の写真は再マウント後も削除ボタンを押させない (@codex #331 R1)", () => {
+    // ⚠upload だけ追跡していると、削除中に閉じてすぐ開き直したとき初回 GET が
+    // DELETE の commit より先に終わり、**まだ在る写真が削除ボタン付きで**出る。
+    // 押すと二重 DELETE になり、後発の 404 が「離れている間に失敗しました」と
+    // いう誤った案内になる。
+    expect(PHOTO_HOOK_SRC).toMatch(/const inFlightDeletes = new Map/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function pendingPhotoDeleteIds/);
+    expect(PHOTO_HOOK_SRC).toMatch(/markDeleteStarted\(pinId, photoId\)/);
+    // 画面側: 進行中の photoId は disabled かつ「削除中…」表示
+    expect(PANEL_SRC).toMatch(/pendingDeleteIds\.includes\(p\.id\)/);
+    expect(PANEL_SRC).toContain("削除中…");
+    expect(PANEL_SRC).toMatch(/setPendingDeleteIds\(pendingPhotoDeleteIds\(pinId\)\)/);
   });
 
   it("離れている間の失敗を画面に出す (@codex #331 R1)", () => {

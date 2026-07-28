@@ -494,6 +494,29 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     ).rejects.toMatchObject({ code: "timeout" });
   });
 
+  it("送信前の timeout は auth_failed にしない (@codex #331 R1)", async () => {
+    // ⚠送信前 (goto / fill / ログインボタン待ち) はログインフォームが出ているのが
+    // 正常なので、フォームの有無では判別できない。放置すると「ログインページが
+    // 遅い」が「資格情報の誤り」として出る。
+    const f = makeFakeChromium();
+    f.page.waitForSelector = vi.fn(async (sel: string) => {
+      // ログインボタン待ちで timeout (= まだ送信していない)
+      if (sel === "button.CForwardLong") throw makeTimeoutError();
+      return {};
+    });
+    // ログインフォームは在る (送信前なので当然)
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: unknown) =>
+      arg === "" ? "" : true,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await expect(
+      page.login({ loginId: "id", password: "pw", baseUrl: "https://reg.test" }),
+    ).rejects.toMatchObject({ code: "timeout" });
+  });
+
   it("ログイン画面へ戻っていれば auth_failed (弾かれた証拠を積極検出する)", async () => {
     const f = makeFakeChromium();
     f.page.waitForSelector = vi.fn(async (sel: string) => {

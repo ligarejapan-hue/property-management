@@ -71,6 +71,15 @@ export interface PhotoMutationOutcome {
 }
 
 const inFlightUploads = new Map<string, number>();
+/**
+ * 進行中の削除 (pinId → photoId の集合)。
+ *
+ * ⚠upload だけ追跡していると足りない (@codex #331 R1)。削除中に閉じてすぐ
+ * 開き直すと、初回 GET が DELETE の commit より先に終わって**まだ在る写真が
+ * 削除ボタン付きで表示される**。押すと二重 DELETE になり、後発が 404 を返して
+ * 「離れている間に失敗しました」という誤った案内が出る。
+ */
+const inFlightDeletes = new Map<string, Set<string>>();
 const mutationSettledListeners = new Set<
   (pinId: string, outcome: PhotoMutationOutcome) => void
 >();
@@ -122,6 +131,30 @@ function markUploadSettled(
 /** その pin に送信中の写真があるか (再マウント直後の案内表示用)。 */
 export function hasInFlightPhotoUpload(pinId: string): boolean {
   return (inFlightUploads.get(pinId) ?? 0) > 0;
+}
+
+/** その pin で削除中の photoId (再マウント後に削除ボタンを押させないため)。 */
+export function pendingPhotoDeleteIds(pinId: string): string[] {
+  return Array.from(inFlightDeletes.get(pinId) ?? []);
+}
+
+function markDeleteStarted(pinId: string, photoId: string): void {
+  const set = inFlightDeletes.get(pinId) ?? new Set<string>();
+  set.add(photoId);
+  inFlightDeletes.set(pinId, set);
+}
+
+function markDeleteSettled(
+  pinId: string,
+  photoId: string,
+  outcome: PhotoMutationOutcome,
+): void {
+  const set = inFlightDeletes.get(pinId);
+  if (set) {
+    set.delete(photoId);
+    if (set.size === 0) inFlightDeletes.delete(pinId);
+  }
+  notifyPhotoMutationSettled(pinId, outcome);
 }
 
 /** upload / delete の完了 (成功/失敗どちらも) を購読する。戻り値で解除。 */
@@ -299,6 +332,7 @@ export function useFieldSurveyPinPhotoMutations() {
         if (mountedRef.current) setDeleteState(next);
       };
       setDeleteStateIfMounted({ loading: true, error: null });
+      markDeleteStarted(pinId, photoId);
       let outcome: PhotoMutationOutcome = {
         kind: "delete",
         ok: false,
@@ -326,7 +360,7 @@ export function useFieldSurveyPinPhotoMutations() {
       } finally {
         // 削除も完了を通知する。通知が無いと、閉じてすぐ開き直したときに
         // **削除済みの写真が一覧に残り**、もう一度消そうとして 404 になる。
-        notifyPhotoMutationSettled(pinId, outcome);
+        markDeleteSettled(pinId, photoId, outcome);
       }
     },
     [],
