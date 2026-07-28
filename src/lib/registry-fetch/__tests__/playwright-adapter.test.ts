@@ -321,8 +321,13 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       baseUrl: "https://reg.test",
     });
     expect(f.page.goto).toHaveBeenCalled();
-    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "the-id");
-    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "the-pw");
+    // fill には共有デッドライン由来の timeout を渡す (@codex #331 R1)
+    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "the-id", {
+      timeout: expect.any(Number),
+    });
+    expect(f.page.fill).toHaveBeenCalledWith(expect.any(String), "the-pw", {
+      timeout: expect.any(Number),
+    });
     // ログインボタンは type="button"+onclick(requireCheck→form.submit)の特殊構造。
     // page.click は周辺要素の被り/actionability で空振りするため、DOM click を evaluate で発火する。
     expect(f.page.evaluate).toHaveBeenCalledWith(
@@ -1404,9 +1409,14 @@ describe("ログイン送信後の待機は全体予算より必ず先に切れ�
     // フォーム出現 / ログインボタン / 着地 / 確認画面判定 / 強制ログインボタン /
     // 確認画面の消失 / ログイン成功要素
     expect(waits.length).toBe(7);
-    // 全ての待機が timeout を伴うこと (page 既定 = 全体予算に落ちない)
+    // 送信前の goto / fill も共有デッドラインで縛る (@codex #331 R1)。
+    // 縛らないと pre-submit が予算を食い、catch へ入る前に外側タイマーが発火する。
+    expect(loginBody).toMatch(/page\.goto\(loginUrl, \{ timeout: stepMs\(\) \}\)/);
+    const fills = loginBody.match(/page\.fill\(/g) ?? [];
+    expect(fills.length).toBe(2);
+    // 全ての待機 + goto + fill×2 が timeout を伴うこと
     const timeouts = loginBody.match(/timeout:/g) ?? [];
-    expect(timeouts.length).toBe(waits.length);
+    expect(timeouts.length).toBe(waits.length + 1 + fills.length);
   });
 
   it.each([500, 1_000, 3_000])(

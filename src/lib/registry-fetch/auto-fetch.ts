@@ -137,7 +137,8 @@ interface RegistryReadableLike {
 interface RegistryPageLike {
   setDefaultTimeout?(ms: number): void;
   goto(url: string, options?: unknown): Promise<unknown>;
-  fill(selector: string, value: string): Promise<void>;
+  // options は Playwright の FillOptions 相当 (timeout を渡すため)。
+  fill(selector: string, value: string, options?: unknown): Promise<void>;
   click(selector: string): Promise<void>;
   // 所在検索は多段UI(都道府県プルダウン・直接入力チェック)を伴う。実 Playwright Page の
   // selectOption/check に委譲する(fake page はテストで mock)。
@@ -605,7 +606,12 @@ function createPlaywrightRegistryPage(
       const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
       const loginUrl = `${base}${loginPath}`;
       try {
-        await page.goto(loginUrl);
+        // ⚠送信前の goto / fill も共有デッドラインで縛る (@codex #331 R1)。
+        // 縛らないと、遅いページ表示や fill が予算の大半を食ってしまい、
+        // 送信後の待機に 1ms しか残らないうえ**catch へ入る前に外側タイマーが
+        // 発火**して、約束した分類の余裕が消える (= 資格情報が誤っていても
+        // timeout として出る)。
+        await page.goto(loginUrl, { timeout: stepMs() });
         // 利用時間外だとログイン画面が出ない(jikangai 誘導 or サイト全体404)。この場合
         // #userId は現れず fill が 30秒 timeout → auth_failed に見えてしまう。利用不可を先に検出し、
         // 「認証失敗」でなく「利用時間外(または接続不可)」として明示する(資格情報を疑わせない)。
@@ -638,8 +644,12 @@ function createPlaywrightRegistryPage(
           }
           throw err;
         }
-        await page.fill(REGISTRY_SELECTORS.loginId, input.loginId);
-        await page.fill(REGISTRY_SELECTORS.password, input.password);
+        await page.fill(REGISTRY_SELECTORS.loginId, input.loginId, {
+          timeout: stepMs(),
+        });
+        await page.fill(REGISTRY_SELECTORS.password, input.password, {
+          timeout: stepMs(),
+        });
         // 実サイトのログインボタンは `<button type="button" onclick="requireCheck()">` で、
         // requireCheck() が JS で form.submit() する特殊構造。page.click() は隣接する float
         // ヒント要素の被りや actionability チェックで空振りし、送信に至らないことがある

@@ -74,12 +74,34 @@ const inFlightUploads = new Map<string, number>();
 const mutationSettledListeners = new Set<
   (pinId: string, outcome: PhotoMutationOutcome) => void
 >();
+/**
+ * 直近の失敗を pin ごとに保持する。
+ *
+ * ⚠購読者が居るときだけ通知する形では足りない (@codex #331 R1)。パネルを閉じた
+ * あとに失敗が確定し、その**あとで**開き直した場合は誰も受け取っておらず、
+ * 「送信中」表示も消えているため、利用者は失敗に気づけないまま終わる。
+ * 失敗を残しておき、次にその pin の一覧が立ち上がったときに一度だけ出す。
+ * 保持するのは pinId と汎用文言だけ (PII は載らない)。
+ */
+const lastFailures = new Map<string, PhotoMutationOutcome>();
+
+/** その pin の直近の失敗を取り出す (取り出したら消す = 一度だけ出す)。 */
+export function takeLastPhotoMutationFailure(
+  pinId: string,
+): PhotoMutationOutcome | null {
+  const failure = lastFailures.get(pinId);
+  if (!failure) return null;
+  lastFailures.delete(pinId);
+  return failure;
+}
 
 /** upload / delete の完了を、その pin を表示している一覧へ知らせる。 */
 function notifyPhotoMutationSettled(
   pinId: string,
   outcome: PhotoMutationOutcome,
 ): void {
+  // 購読者が居なくても失敗は残す (開き直した時に出せるようにする)。
+  if (!outcome.ok) lastFailures.set(pinId, outcome);
   for (const listener of mutationSettledListeners) listener(pinId, outcome);
 }
 

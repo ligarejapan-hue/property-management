@@ -1134,10 +1134,23 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     // 何も出ず・エラーも出ない状態になる。写真が端末のピッカーにしか無い
     // 場面なので、必ず気づける形にする。
     expect(PANEL_SRC).toMatch(/setDetachedError\(/);
-    expect(PANEL_SRC).toMatch(/outcome\.ok \? null : \(outcome\.error \?\? null\)/);
+    expect(PANEL_SRC).toMatch(/setDetachedError\(outcome\.error \?\? null\)/);
+    // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)
+    expect(PANEL_SRC).toMatch(/takeLastPhotoMutationFailure\(pinId\)\?\.error/);
     expect(PANEL_SRC).toContain('data-testid="pin-photo-detached-error"');
     expect(PANEL_SRC).toContain('role="alert"');
     expect(PANEL_SRC).toContain("もう一度お試しください");
+  });
+
+  it("開く前に確定した失敗も一度だけ出す (@codex #331 R1)", () => {
+    // ⚠購読者が居るときだけ通知する形では、閉じたあとに失敗が確定し、その後で
+    // 開き直した場合に誰も受け取っておらず利用者は気づけない。
+    expect(PHOTO_HOOK_SRC).toMatch(/const lastFailures = new Map/);
+    expect(PHOTO_HOOK_SRC).toMatch(/export function takeLastPhotoMutationFailure/);
+    // 購読者が居なくても失敗は残す
+    expect(PHOTO_HOOK_SRC).toMatch(/if \(!outcome\.ok\) lastFailures\.set/);
+    // 取り出したら消す = 同じ失敗を繰り返し出さない
+    expect(PHOTO_HOOK_SRC).toMatch(/lastFailures\.delete\(pinId\)/);
   });
 
   it("案内に載せるのは汎用文言だけ (PII / 生レスポンスを出さない)", () => {

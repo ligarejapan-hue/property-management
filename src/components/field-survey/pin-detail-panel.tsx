@@ -33,6 +33,7 @@ import {
 import {
   hasInFlightPhotoUpload,
   subscribePhotoMutationSettled,
+  takeLastPhotoMutationFailure,
   useFieldSurveyPinPhotoMutations,
   type PinPhoto,
 } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
@@ -470,14 +471,23 @@ function PinPhotoSection({
   // 送信中があれば案内を出し、upload / delete どちらの完了でも自動で読み直す。
   useEffect(() => {
     setDetachedUploading(hasInFlightPhotoUpload(pinId));
-    setDetachedError(null);
+    // 開く前に確定していた失敗も拾う (通知は購読中しか届かない)。
+    setDetachedError(takeLastPhotoMutationFailure(pinId)?.error ?? null);
     return subscribePhotoMutationSettled((settledPinId, outcome) => {
       if (settledPinId !== pinId) return;
       setDetachedUploading(hasInFlightPhotoUpload(pinId));
       // ⚠失敗をここで出さないと、「出ますのでお待ちください」と案内したまま
       // 何も出ず・エラーも出ない状態になる (@codex #331 R1)。写真が端末の
       // ピッカーにしか無い場面なので、必ず気づける形にする。
-      setDetachedError(outcome.ok ? null : (outcome.error ?? null));
+      // 成功で消すのは「その pin の失敗表示」だけ。失敗は残っている分も
+      // 消費して一度だけ出す。
+      if (outcome.ok) {
+        takeLastPhotoMutationFailure(pinId);
+        setDetachedError(null);
+      } else {
+        takeLastPhotoMutationFailure(pinId);
+        setDetachedError(outcome.error ?? null);
+      }
       void reload();
     });
   }, [pinId, reload]);
