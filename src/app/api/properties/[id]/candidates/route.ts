@@ -17,6 +17,7 @@ import {
 } from "@/lib/geo";
 import {
   addressAreaKey,
+  isAreaKeyNotationStable,
   normalizeAddress,
   normalizeLotNumber,
   normalizeRealEstateNumber,
@@ -239,9 +240,17 @@ export async function GET(
     // ので、**エリア内を id カーソルで最後まで読み切る**。エリアは丁目相当の
     // 狭い範囲なので通常は 1 ページで終わる。万一の暴走上限に当たった場合は
     // 黙って打ち切らず scanTruncated として応答に出す。
+    // ⚠エリアキーは**速さのための最適化**であって、正しさの根拠にしない
+    // (@codex #330 R7)。漢数字が残るキー (「一番町」「四日市市」など) は
+    // 表記に依存し、同じ場所が「1番町」で登録されていると取りこぼす。
+    // その場合は住所での絞り込みを外して全件を読み切る (下の areaKeyFilter が
+    // null になると SQL 側の position 条件が無効化される)。本番の active な
+    // 物件は 667 件なので、読み切っても実コストはほぼ無い。
     const areaKey = addressAreaKey(property.address);
+    const areaKeyFilter =
+      areaKey.length >= 4 && isAreaKeyNotationStable(areaKey) ? areaKey : null;
     let lotScanTruncated = false;
-    if (property.lotNumber && areaKey.length >= 4) {
+    if (property.lotNumber) {
       const normalizedLot = normalizeLotNumber(property.lotNumber);
       const lotMatches: CandidateRow[] = [];
       let cursor: string | null = null;
@@ -266,13 +275,17 @@ export async function GET(
             -- 除去対象を chr() で明示する (半角/タブ/改行/CR/NBSP/全角)。
             -- 包含判定は position を使う: 住所に % や _ が混じっても
             -- ワイルドカードとして解釈されない。
-            AND position(
-                  ${areaKey} IN translate(
-                    address,
-                    ' ' || chr(9) || chr(10) || chr(13) || chr(160) || chr(12288),
-                    ''
-                  )
-                ) > 0
+            -- null = キーが表記に依存するため絞り込まない (全件を読み切る)
+            AND (
+              ${areaKeyFilter}::text IS NULL
+              OR position(
+                   ${areaKeyFilter} IN translate(
+                     address,
+                     ' ' || chr(9) || chr(10) || chr(13) || chr(160) || chr(12288),
+                     ''
+                   )
+                 ) > 0
+            )
             -- field_staff は自分が作成/担当する物件のみ (null = 制限なし)
             AND (
               ${scopeUserId}::uuid IS NULL

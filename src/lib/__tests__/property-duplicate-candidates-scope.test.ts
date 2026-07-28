@@ -43,6 +43,7 @@ import prisma from "@/lib/prisma";
 import { GET } from "@/app/api/properties/[id]/candidates/route";
 import {
   addressAreaKey,
+  isAreaKeyNotationStable,
   normalizeRealEstateNumber,
 } from "@/lib/address-normalizer";
 
@@ -127,12 +128,19 @@ describe("地番一致: 同一エリアに絞ってから正規化比較する",
     expect(lotQuery()!.values).toContain(500);
   });
 
-  it("住所が短すぎて prefix を作れない物件では地番検索を行わない", async () => {
+  it("住所が短すぎてキーを作れないときは、絞り込まず全件を読み切る", async () => {
+    // ⚠検索自体をやめてはいけない (@codex #330 R7)。絞り込みは速さのための
+    // 最適化であって、正しさの根拠ではない。キーが作れないなら絞り込みを外して
+    // 全件を JS の正規化比較にかける (本番の active な物件は 667 件)。
     (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
       baseProperty({ address: "東京" }),
     );
     await GET(req, ctx);
-    expect(lotQuery()).toBeUndefined();
+    const q = lotQuery();
+    expect(q).toBeDefined();
+    // 絞り込みキーは null で渡り、SQL 側の position 条件が無効化される
+    expect(q!.values).toContain(null);
+    expect(q!.sql).toMatch(/IS NULL\s*\n?\s*OR position\(/);
   });
 
   it("正規化が違っても同じ地番なら候補に出る (全角・漢数字)", async () => {
@@ -279,13 +287,16 @@ describe("エリアキーは表記ゆれに影響されない (@codex #330 R1)",
     expect(addressAreaKey("東京都港区芝公園")).toBe("東京都港区芝公園");
   });
 
-  it("キーが短すぎる住所では地番検索を行わない (母集団を絞れないため)", async () => {
+  it("キーが短すぎる住所では絞り込みを外す (検索自体はやめない)", async () => {
     (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
       baseProperty({ address: "港区1-2-3" }),
     );
     await GET(req, ctx);
-    // areaKey = "港区" (2文字) < 4 → 走らせない
-    expect(lotQuery()).toBeUndefined();
+    // areaKey = "港区" (2文字) < 4 → 絞り込みキーは渡さず、全件を読み切る
+    const q = lotQuery();
+    expect(q).toBeDefined();
+    expect(q!.values).toContain(null);
+    expect(q!.values).not.toContain("港区");
   });
 
   it("表記が違う同一エリアの物件を DB 段階で落とさない", async () => {
@@ -502,15 +513,23 @@ describe("同じ場所の二通りの書き方が同じキーになる (@codex #
     );
   });
 
-  it("地名の漢数字は壊さない (条/丁目 が続かないので変換しない)", () => {
+  it("地名の漢数字は壊さない (算用数字で書かれることが無いので変換しない)", () => {
+    // これらは「1代田区」「4日市市」のようには書かれない = 表記の揺れが起きない。
     expect(addressAreaKey("三重県四日市市諏訪町1-1")).toBe("三重県四日市市諏訪町");
     expect(addressAreaKey("東京都八王子市横山町1-1")).toBe("東京都八王子市横山町");
     expect(addressAreaKey("新潟県十日町市本町1-1")).toBe("新潟県十日町市本町");
     expect(addressAreaKey("東京都港区六本木6-10-1")).toBe("東京都港区六本木");
-    // 「一番町」は 番 が続くだけ (条/丁目 ではない) ので変換対象外 = キーが痩せない
-    expect(addressAreaKey("東京都千代田区一番町6-4")).toBe("東京都千代田区一番町");
-    // 「八丁堀」は 丁 単独なので変換対象外
+    expect(addressAreaKey("千葉県千葉市中央区本町1-1")).toBe("千葉県千葉市中央区本町");
+    // 「八丁堀」は 丁 単独 (丁目 でない) = 番号ではなく地名なので変換しない
     expect(addressAreaKey("東京都中央区八丁堀2-1")).toBe("東京都中央区八丁堀");
+  });
+
+  it("番 / 号 も算用数字に直す (「一番町」と「1番町」を同じキーにする)", () => {
+    // ⚠キーは痩せる (町名まで入らない) が、それは母集団が広がるだけで安全側。
+    // 変換しないと表記で非対称になり、登録の書き方次第で重複を見落とす。
+    expect(addressAreaKey("東京都千代田区一番町6-4")).toBe("東京都千代田区");
+    expect(addressAreaKey("東京都千代田区1番町6-4")).toBe("東京都千代田区");
+    expect(addressAreaKey("東京都港区芝公園四番二号")).toBe("東京都港区芝公園");
   });
 
   it("条 表記が違う同一エリアの物件を DB 段階で落とさない", async () => {
@@ -534,5 +553,89 @@ describe("同じ場所の二通りの書き方が同じキーになる (@codex #
     expect(json.data.some((c) => c.id === "dup5")).toBe(true);
     // 送った絞り込みキーも表記に依存しない
     expect(lotQuery()!.values).toContain("札幌市中央区北");
+  });
+});
+
+describe("エリアキーは最適化であって正しさの根拠にしない (@codex #330 R7)", () => {
+  // 住所の数字表記の揺れは字句だけでは地名か番地か判別できない
+  // (四日市市/八王子市 は地名 / 一番町 は「1番町」とも書かれる)。どんな境界規則でも
+  // 片方の表記だけキーが短くなる非対称が残り、「どちらの表記で登録されているか」で
+  // 重複が見つかる/見つからないが変わってしまう。
+  // → 漢数字が残るキーは「表記に依存する」と判定し、絞り込みを外して全件読み切る。
+
+  it("変換しなかった counter (漢数字+丁) が残るキーだけ信頼できないと判定する", () => {
+    // 八丁堀型: 丁目 でないので変換しない = 「8丁堀」で登録されていたら食い違う
+    expect(isAreaKeyNotationStable("東京都中央区八丁堀")).toBe(false);
+  });
+
+  it("地名の漢数字だけなら信頼できる (絞り込みを捨てない)", () => {
+    // ⚠「漢数字を含むか」で判定すると、千代田・千葉・三鷹・四日市…がすべて
+    // 全件走査になり絞り込みの意味が無くなる。これらは表記が揺れない。
+    expect(isAreaKeyNotationStable("東京都千代田区")).toBe(true);
+    expect(isAreaKeyNotationStable("千葉県千葉市中央区本町")).toBe(true);
+    expect(isAreaKeyNotationStable("三重県四日市市諏訪町")).toBe(true);
+    expect(isAreaKeyNotationStable("東京都港区六本木")).toBe(true);
+  });
+
+  it("漢数字を含まないキーは信頼できる", () => {
+    expect(isAreaKeyNotationStable("東京都港区芝公園")).toBe(true);
+    expect(isAreaKeyNotationStable("札幌市中央区北")).toBe(true);
+  });
+
+  it("表記に依存するキーの物件は、絞り込みを外して全件を読み切る", async () => {
+    // 八丁堀型 = 変換しない counter が残る → キーを使わない
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
+      baseProperty({ address: "東京都中央区八丁堀2-1" }),
+    );
+    await GET(req, ctx);
+    const q = lotQuery()!;
+    // position 条件が無効化され、全件が母集団になる
+    expect(q.values).not.toContain("東京都中央区八丁堀");
+    expect(q.sql).toMatch(/IS NULL\s*\n?\s*OR position\(/);
+  });
+
+  it("信頼できるキーなら絞り込みに使う (最適化は捨てない)", async () => {
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
+      baseProperty({ address: "東京都千代田区一番町6-4" }),
+    );
+    await GET(req, ctx);
+    // 「一番町」は 番 を変換して "東京都千代田区" になり、1番町 と同じキー
+    expect(lotQuery()!.values).toContain("東京都千代田区");
+  });
+
+  it("「一番町」と「1番町」のどちらで登録されていても重複を拾う (非対称の解消)", async () => {
+    const stored = {
+      id: "dup6",
+      address: "東京都千代田区1番町6-5", // 算用数字で登録された同一エリア
+      lotNumber: "1番1",
+      realEstateNumber: null,
+      propertyType: "land",
+      caseStatus: "new_case",
+    };
+
+    // (1) 見ている側が漢数字表記
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
+      baseProperty({ address: "東京都千代田区一番町6-4" }),
+    );
+    mockRaw({ "lot_number IS NOT NULL": [stored] });
+    let json = (await (await GET(req, ctx)).json()) as {
+      data: Array<{ id: string }>;
+    };
+    expect(json.data.some((c) => c.id === "dup6")).toBe(true);
+
+    // (2) 見ている側が算用数字表記 (キーは "東京都千代田区" で信頼できる)
+    vi.clearAllMocks();
+    (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "admin" });
+    (getUserPermissions as Mock).mockResolvedValue([]);
+    (prisma.property.findMany as unknown as Mock).mockResolvedValue([]);
+    (prisma.property.findUnique as unknown as Mock).mockResolvedValue(
+      baseProperty({ address: "東京都千代田区1番町6-4" }),
+    );
+    mockRaw({ "lot_number IS NOT NULL": [stored] });
+    json = (await (await GET(req, ctx)).json()) as {
+      data: Array<{ id: string }>;
+    };
+    expect(json.data.some((c) => c.id === "dup6")).toBe(true);
+    expect(lotQuery()!.values).toContain("東京都千代田区");
   });
 });
