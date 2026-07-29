@@ -136,6 +136,8 @@ interface TrackBody {
     droppedTrips: number;
     truncated: boolean;
     droppedTripsExact: boolean;
+    /** 点が足りず線にできなかった本数。量の打ち切りとは別 (@codex #334 P2)。 */
+    unrenderableTrips: number;
     lineCount: number;
     pointCount: number;
     lines: { lat: number; lng: number }[][];
@@ -387,8 +389,11 @@ describe("3-b. 記録が途切れた所で線を切る（@codex #334 P2）", () 
       });
   });
 
-  it("切った結果1本も線が残らなければ落とした件数に数える（黙って減らさない）", () => {
+  it("切った結果1本も線が残らない巡回は「量」と別に数える（@codex #334 P2）", () => {
     // 3点すべてが離れていると、どの断片も1点になり線にならない。
+    // ⚠droppedTrips（量の打ち切り）に混ぜない。UI が「寄せるか期間を絞ると
+    // 出る」と案内するが、点が足りない巡回は寄せても出ない（しかも古い
+    // 巡回とは限らない）。黙って減らさないのは同じで、断りの種類を分ける。
     mockQueries(
       [sess("s1", 3)],
       [
@@ -401,8 +406,9 @@ describe("3-b. 記録が途切れた所で線を切る（@codex #334 P2）", () 
       .then((res) => res.json() as Promise<TrackBody>)
       .then((body) => {
         expect(body.data.lineCount).toBe(0);
-        expect(body.data.droppedTrips).toBeGreaterThanOrEqual(1);
-        expect(body.data.truncated).toBe(true);
+        expect(body.data.unrenderableTrips).toBe(1);
+        expect(body.data.droppedTrips).toBe(0);
+        expect(body.data.truncated).toBe(false);
       });
   });
 
@@ -468,6 +474,8 @@ describe("4. 量が多すぎる時", () => {
     // 「2件以上」と表示され、下限のはずの数字が嘘になる。
     expect(body.data.droppedTrips).toBe(1);
     expect(body.data.droppedTripsExact).toBe(false);
+    // 安全弁で落ちた巡回は「量」側。描けない巡回の数には混ぜない。
+    expect(body.data.unrenderableTrips).toBe(0);
   });
 
   it("対象が無ければ空で返す（2本目のクエリを投げない）", async () => {

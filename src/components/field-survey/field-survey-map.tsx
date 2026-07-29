@@ -175,12 +175,23 @@ export default function FieldSurveyMap({
     droppedTrips: number;
     /** false なら「droppedTrips 件以上」の意味 (@codex #334 P2)。 */
     droppedTripsExact: boolean;
-  }>({ status: "off", droppedTrips: 0, droppedTripsExact: true });
+    /**
+     * 点が足りず線にできなかった本数 (@codex #334 P2)。量の打ち切りとは
+     * 別の断り（寄せても期間を絞っても出ないので、混ぜると嘘の案内になる）。
+     */
+    unrenderableTrips: number;
+  }>({
+    status: "off",
+    droppedTrips: 0,
+    droppedTripsExact: true,
+    unrenderableTrips: 0,
+  });
   const handleTracksState = useCallback(
     (v: {
       status: CoverageStatus;
       droppedTrips: number;
       droppedTripsExact: boolean;
+      unrenderableTrips: number;
     }) => setTracksState(v),
     [],
   );
@@ -1274,6 +1285,7 @@ export default function FieldSurveyMap({
           tracksStatus={tracksState.status}
           tracksDroppedTrips={tracksState.droppedTrips}
           tracksDroppedTripsExact={tracksState.droppedTripsExact}
+          tracksUnrenderableTrips={tracksState.unrenderableTrips}
           panelOpen={panelOpen}
           onTogglePanelOpen={() => {
             quickStartRef.current = false;
@@ -1525,6 +1537,7 @@ function ControlPanel({
   tracksStatus,
   tracksDroppedTrips,
   tracksDroppedTripsExact,
+  tracksUnrenderableTrips,
   panelOpen,
   onTogglePanelOpen,
   currentUserId,
@@ -1564,6 +1577,8 @@ function ControlPanel({
   tracksDroppedTrips: number;
   /** false なら「◯件以上」と伝える (@codex #334 P2)。 */
   tracksDroppedTripsExact: boolean;
+  /** 点が足りず線にできなかった本数。量の断りとは別の文で出す (@codex #334 P2)。 */
+  tracksUnrenderableTrips: number;
   /**
    * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
    * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
@@ -1772,23 +1787,40 @@ function ControlPanel({
               歩いた道筋を取得できませんでした。
               <b>線が無い場所も、通っている可能性があります。</b>
             </p>
-          ) : tracksDroppedTrips > 0 ? (
-            /* ⚠黙って減らさない。線が出ていない場所を「歩いていない」と
-               読まれると無駄足の指示になる。 */
-            <p
-              role="status"
-              data-testid="tracks-dropped-notice"
-              className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
-            >
-              線が多いため、古い巡回 {tracksDroppedTrips}
-              {tracksDroppedTripsExact ? " 件" : " 件以上"}
-              は表示していません。地図を寄せるか期間を「直近1年」にすると
-              全部出ます。
-            </p>
           ) : (
-            <p className="mb-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-              灰色の線＝過去に歩いた道。青い線＝いま巡回中の道。
-            </p>
+            <>
+              {tracksDroppedTrips > 0 && (
+                /* ⚠黙って減らさない。線が出ていない場所を「歩いていない」と
+                   読まれると無駄足の指示になる。 */
+                <p
+                  role="status"
+                  data-testid="tracks-dropped-notice"
+                  className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+                >
+                  線が多いため、古い巡回 {tracksDroppedTrips}
+                  {tracksDroppedTripsExact ? " 件" : " 件以上"}
+                  は表示していません。地図を寄せるか期間を「直近1年」にすると
+                  全部出ます。
+                </p>
+              )}
+              {tracksUnrenderableTrips > 0 && (
+                /* ⚠量の断りと**混ぜない** (@codex #334 P2)。点が足りない巡回は
+                   寄せても期間を絞っても出ないので、「寄せると出る」文に
+                   含めると嘘の案内になる（しかも古い巡回とは限らない）。 */
+                <p
+                  role="status"
+                  data-testid="tracks-unrenderable-notice"
+                  className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+                >
+                  記録の点が足りず線にできない巡回が {tracksUnrenderableTrips}{" "}
+                  件あります（開始してすぐ記録を止めた等）。その分の道筋は
+                  地図を寄せても出ません。
+                </p>
+              )}
+              <p className="mb-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                灰色の線＝過去に歩いた道。青い線＝いま巡回中の道。
+              </p>
+            </>
           )}
         </div>
       )}
@@ -1898,6 +1930,7 @@ function MapDataLayer({
     status: CoverageStatus;
     droppedTrips: number;
     droppedTripsExact: boolean;
+    unrenderableTrips: number;
   }) => void;
   onCoverageState: (state: {
     cellSize: CoverageCellSize | null;
@@ -1955,6 +1988,7 @@ function MapDataLayer({
           status: "too-wide",
           droppedTrips: 0,
           droppedTripsExact: true,
+          unrenderableTrips: 0,
         });
         return;
       }
@@ -2039,6 +2073,7 @@ function MapDataLayer({
             status: "loading",
             droppedTrips: 0,
             droppedTripsExact: true,
+            unrenderableTrips: 0,
           });
           void tracksPromise
             .then(async (r) => {
@@ -2050,6 +2085,7 @@ function MapDataLayer({
                   status: "unavailable",
                   droppedTrips: 0,
                   droppedTripsExact: true,
+                  unrenderableTrips: 0,
                 });
                 return;
               }
@@ -2058,6 +2094,7 @@ function MapDataLayer({
                   lines?: RoutePolylinePoint[][];
                   droppedTrips?: number;
                   droppedTripsExact?: boolean;
+                  unrenderableTrips?: number;
                 };
               };
               if (ac.signal.aborted) return;
@@ -2069,6 +2106,7 @@ function MapDataLayer({
                 status: "ready",
                 droppedTrips: j.data?.droppedTrips ?? 0,
                 droppedTripsExact: j.data?.droppedTripsExact !== false,
+                unrenderableTrips: j.data?.unrenderableTrips ?? 0,
               });
             })
             .catch((err: unknown) => {
@@ -2078,6 +2116,7 @@ function MapDataLayer({
                 status: "unavailable",
                 droppedTrips: 0,
                 droppedTripsExact: true,
+                unrenderableTrips: 0,
               });
             });
         } else {
@@ -2086,6 +2125,7 @@ function MapDataLayer({
             status: "off",
             droppedTrips: 0,
             droppedTripsExact: true,
+            unrenderableTrips: 0,
           });
         }
 
@@ -2183,6 +2223,7 @@ function MapDataLayer({
           status: "unavailable",
           droppedTrips: 0,
           droppedTripsExact: true,
+          unrenderableTrips: 0,
         });
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");

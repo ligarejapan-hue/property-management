@@ -154,6 +154,23 @@ describe("4. 黙って減らさない", () => {
     expect(MAP_SRC).toMatch(/線が無い場所も、通っている可能性があります/);
   });
 
+  it("点が足りず描けない巡回は「量」と別の文で断る (@codex #334 P2)", () => {
+    // 量の断り（寄せるか期間を絞ると出ます）に混ぜると、寄せても出ない
+    // 巡回に嘘の案内をすることになる（しかも古い巡回とは限らない）。
+    expect(MAP_SRC).toMatch(/data-testid="tracks-unrenderable-notice"/);
+    expect(MAP_SRC).toMatch(/tracksUnrenderableTrips > 0/);
+    const notice =
+      MAP_SRC.match(
+        /data-testid="tracks-unrenderable-notice"[\s\S]{0,600}?<\/p>/,
+      )?.[0] ?? "";
+    expect(notice).toContain("線にできない巡回");
+    // 「量が多い」「古い」「全部出ます」を主張しない
+    expect(notice).not.toContain("線が多いため");
+    expect(notice).not.toContain("古い巡回");
+    expect(notice).not.toContain("全部出ます");
+    expect(notice).toContain("寄せても出ません");
+  });
+
   it("線の色の意味を説明する（青＝いま巡回中）", () => {
     expect(MAP_SRC).toMatch(/灰色の線＝過去に歩いた道。青い線＝いま巡回中の道。/);
   });

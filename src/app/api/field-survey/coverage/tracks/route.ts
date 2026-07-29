@@ -165,6 +165,7 @@ export async function GET(request: NextRequest) {
         thinStep: plan.thinStep,
         droppedTrips: droppedBase,
         droppedTripsExact: exactBase,
+        unrenderableTrips: 0,
         truncated: plan.truncated || hasMoreCandidates,
         lines: [],
       });
@@ -325,18 +326,22 @@ export async function GET(request: NextRequest) {
       pts.push({ lat: r.lat, lng: r.lng, gapBefore: r.gapBefore });
     }
     const lines: { lat: number; lng: number }[][] = [];
-    let vanished = 0;
+    // ⚠**点が足りず線にできない巡回は、量の打ち切りと分けて数える**
+    //   (@codex #334 P2)。droppedTrips に混ぜると、UI が「線が多いため古い
+    //   巡回を省いた。寄せるか期間を絞ると出る」と案内するが、描けない巡回は
+    //   寄せても出ないし、一番新しい巡回のこともある（開始してすぐ記録を
+    //   止めた巡回など）。嘘の指示になるので別の断りとして返す。
+    let unrenderableTrips = 0;
     for (const pts of byId.values()) {
       const segs = splitTrackAtGaps(pts);
-      // 全部が1点未満の断片になって消えた巡回は「落とした」に数える
-      //（黙って減らさない）。
-      if (segs.length === 0) vanished += 1;
+      // 全部が1点未満の断片になって消えた巡回（黙って減らさない）。
+      if (segs.length === 0) unrenderableTrips += 1;
       lines.push(...segs);
     }
-    // 選んだのに1本も線にならなかった巡回も落とした扱いにする。
-    vanished += ids.length - byId.size;
-    if (vanished > 0) {
-      droppedTrips += vanished;
+    // 安全弁で丸ごと落とした巡回（byId に現れない）は量の打ち切り側。
+    const capDropped = ids.length - byId.size;
+    if (capDropped > 0) {
+      droppedTrips += capDropped;
       truncated = true;
     }
 
@@ -345,6 +350,7 @@ export async function GET(request: NextRequest) {
       thinStep: plan.thinStep,
       droppedTrips,
       droppedTripsExact,
+      unrenderableTrips,
       truncated,
       lines,
     });
@@ -356,9 +362,15 @@ export async function GET(request: NextRequest) {
 function trackResponse(data: {
   days: number;
   thinStep: number;
+  /** 量が多くて落とした本数。寄せる/期間を絞ると解消する種類の欠け。 */
   droppedTrips: number;
   /** false なら「droppedTrips 件以上」の意味。画面の文言を変える。 */
   droppedTripsExact: boolean;
+  /**
+   * 点が足りず線にできなかった本数 (@codex #334 P2)。量とは別の断り。
+   * 寄せても出ないので「寄せると出る」と案内してはいけない。常に正確な数。
+   */
+  unrenderableTrips: number;
   truncated: boolean;
   lines: { lat: number; lng: number }[][];
 }) {
