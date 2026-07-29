@@ -15,6 +15,8 @@ import {
   COVERAGE_TRACK_POINT_BUDGET,
   COVERAGE_TRACK_SESSION_LIMIT,
   planTrackFetch,
+  splitTrackAtGaps,
+  type TrackPointInput,
   type TrackSessionCandidate,
 } from "@/lib/field-survey-tracks";
 
@@ -67,11 +69,17 @@ interface SessionRow {
   pointCount: number;
 }
 
-/** 線の点。session ごとに分けるためのキーは応答に出さない。 */
+/**
+ * 線の点。
+ * ⚠`sessionId` と `at` は**サーバ内でしか使わない**（線の切り分け判定用）。
+ * 応答には座標しか載せない。
+ */
 interface PointRow {
   sessionId: string;
   lat: number;
   lng: number;
+  /** epoch ミリ秒。記録が途切れた所で線を切るためだけに使う。 */
+  at: number;
 }
 
 /**
@@ -159,9 +167,12 @@ export async function GET(request: NextRequest) {
     // 「出た所」と「戻った所」が直線で結ばれ、通っていない道を横切る線が
     // 描かれる。範囲外は地図側が勝手に切り取ってくれる。
     //
-    // ⚠間引きは `sequence % step`（sequence は巡回ごとの連番）。先頭から
-    // 等間隔に間引かれるので、線の形は保たれる。途中で打ち切る方式は採らない
-    //（途切れた線は「そこで引き返した」ように見えて誤読を生む）。
+    // ⚠間引きは巡回内の**通し番号 (rn) の剰余**で行い、**各巡回の最初と最後は
+    //   必ず残す** (@codex #334 P1)。`sequence` の生の剰余だと、点が2つしかない
+    //   短い巡回が `thinStep=2` で1点に減り、後段の「2点未満は線にしない」で
+    //   黙って消える。planTrackFetch は残した数に数えているので落とした件数にも
+    //   出ず、**歩いた道が「誰も通っていない」ように見える**。
+    //   rn は連番の抜け（保存失敗など）にも影響されない。
     //
     // ⚠**期間の下限は点にも掛ける** (@codex #334 P2)。境をまたぐ巡回は
     //   「最近の点が1つでもある」だけで候補に入るので、掛けないと「直近1年」の
@@ -173,17 +184,29 @@ export async function GET(request: NextRequest) {
     //   返し、JSON 化で文字列になってクライアントの描画が全滅する。
     const ids = plan.sessionIds;
     const pointRows = await prisma.$queryRaw<PointRow[]>`
-      SELECT tp.session_id::text AS "sessionId",
-             tp.lat::float8      AS "lat",
-             tp.lng::float8      AS "lng"
-      FROM field_survey_track_points tp
-      WHERE tp.session_id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
-        AND (
-          ${fromAt}::timestamptz IS NULL
-          OR tp.recorded_at >= (${fromAt}::timestamptz AT TIME ZONE 'UTC')
-        )
-        AND (${plan.thinStep}::int = 1 OR tp.sequence % ${plan.thinStep}::int = 0)
-      ORDER BY tp.session_id, tp.sequence
+      SELECT x."sessionId", x."lat", x."lng", x."at"
+      FROM (
+        SELECT tp.session_id::text AS "sessionId",
+               tp.lat::float8      AS "lat",
+               tp.lng::float8      AS "lng",
+               (extract(epoch from (tp.recorded_at AT TIME ZONE 'UTC')) * 1000)::float8
+                                   AS "at",
+               row_number() OVER (
+                 PARTITION BY tp.session_id ORDER BY tp.sequence
+               )                   AS rn,
+               count(*) OVER (PARTITION BY tp.session_id) AS cnt
+        FROM field_survey_track_points tp
+        WHERE tp.session_id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
+          AND (
+            ${fromAt}::timestamptz IS NULL
+            OR tp.recorded_at >= (${fromAt}::timestamptz AT TIME ZONE 'UTC')
+          )
+      ) x
+      WHERE ${plan.thinStep}::int = 1
+         OR x.rn = 1
+         OR x.rn = x.cnt
+         OR (x.rn - 1) % ${plan.thinStep}::int = 0
+      ORDER BY x."sessionId", x.rn
       LIMIT ${HARD_ROW_CAP + 1}
     `;
 
@@ -204,18 +227,35 @@ export async function GET(request: NextRequest) {
       truncated = true;
     }
 
-    // ── 3. 巡回ごとに線へまとめる（id は応答に出さない） ───────────
-    const byId = new Map<string, { lat: number; lng: number }[]>();
+    // ── 3. 巡回ごとにまとめ、記録の途切れで線を切る（id は応答に出さない） ──
+    //
+    // ⚠**同じ巡回でも切る必要がある** (@codex #334 P2)。位置記録を途中で止めて
+    // 再開したり GPS が一時停止すると、次の点は同じ巡回のまま遠く離れる。
+    // 1本につなぐとその間を直線が横切り、**通っていない道を「歩いた」と示す**。
+    const byId = new Map<string, TrackPointInput[]>();
     for (const r of rows) {
-      let line = byId.get(r.sessionId);
-      if (!line) {
-        line = [];
-        byId.set(r.sessionId, line);
+      let pts = byId.get(r.sessionId);
+      if (!pts) {
+        pts = [];
+        byId.set(r.sessionId, pts);
       }
-      line.push({ lat: r.lat, lng: r.lng });
+      pts.push({ lat: r.lat, lng: r.lng, at: r.at });
     }
-    // 点が 1 つしかない巡回は線にならない（描いても何も出ない）。
-    const lines = [...byId.values()].filter((line) => line.length >= 2);
+    const lines: { lat: number; lng: number }[][] = [];
+    let vanished = 0;
+    for (const pts of byId.values()) {
+      const segs = splitTrackAtGaps(pts);
+      // 全部が1点未満の断片になって消えた巡回は「落とした」に数える
+      //（黙って減らさない）。
+      if (segs.length === 0) vanished += 1;
+      lines.push(...segs);
+    }
+    // 選んだのに1本も線にならなかった巡回も落とした扱いにする。
+    vanished += ids.length - byId.size;
+    if (vanished > 0) {
+      droppedTrips += vanished;
+      truncated = true;
+    }
 
     return trackResponse({
       days,

@@ -122,6 +122,20 @@ describe("3. 地図側の配線", () => {
   });
 });
 
+describe("3-b. 期間は面と線の共通設定として出す（@codex #334 P2）", () => {
+  it("どちらか一方でも ON なら期間セレクタを出す", () => {
+    // 面だけ OFF にすると選択肢が消えるのに、線は既定（直近1年）で絞られ
+    // 続ける。古い道が出ていないことに気づけない。
+    expect(MAP_SRC).toMatch(
+      /\{\(layers\.coverage \|\| layers\.tracks\) && \([\s\S]{0,400}?coverage-period-select/,
+    );
+  });
+
+  it("共通の設定だと分かるように書く", () => {
+    expect(MAP_SRC).toMatch(/（色と線の両方）/);
+  });
+});
+
 describe("4. 黙って減らさない", () => {
   it("落とした巡回があれば本数を出す", () => {
     expect(MAP_SRC).toMatch(/data-testid="tracks-dropped-notice"/);

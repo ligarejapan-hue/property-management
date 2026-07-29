@@ -142,11 +142,16 @@ interface TrackBody {
 
 /** id と点数だけの巡回候補行。 */
 const sess = (id: string, pointCount: number) => ({ id, pointCount });
-/** 点の行。 */
-const pt = (sessionId: string, lat: number, lng: number) => ({
+/**
+ * 点の行。`at`（epoch ms）は**線の切り分け判定にだけ**使い、応答には出さない。
+ * 既定は 10 秒刻みで、しきい値（2分 / 200m）に掛からない連続した点にする。
+ */
+let ptClock = 0;
+const pt = (sessionId: string, lat: number, lng: number, at?: number) => ({
   sessionId,
   lat,
   lng,
+  at: at ?? (ptClock += 10_000),
 });
 
 function mockQueries(sessions: unknown[], points: unknown[]) {
@@ -156,6 +161,7 @@ function mockQueries(sessions: unknown[], points: unknown[]) {
 }
 
 beforeEach(() => {
+  ptClock = 0;
   vi.clearAllMocks();
   // ⚠clearAllMocks は mockResolvedValueOnce の待ち行列を消さない。
   // 消さないと、DB を呼ばなかったテスト（403 など）の残りが次のテストへ
@@ -216,7 +222,7 @@ describe("2. 返さないもの（勤怠の証拠にしない）", () => {
   });
 
   it("生座標を返すので端末・プロキシに残さない (no-store)", async () => {
-    mockQueries([sess("s1", 2)], [pt("s1", 1, 2), pt("s1", 1.1, 2.1)]);
+    mockQueries([sess("s1", 2)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
     const res = await GET(makeReq());
     expect(res.headers.get("Cache-Control")).toContain("no-store");
     expect(res.headers.get("Cache-Control")).toContain("private");
@@ -231,7 +237,7 @@ describe("2. 返さないもの（勤怠の証拠にしない）", () => {
 
 describe("3. 線が嘘にならないこと", () => {
   it("点の取得を表示範囲で切らない（切ると通っていない道を横切る直線が出る）", async () => {
-    mockQueries([sess("s1", 4)], [pt("s1", 1, 2), pt("s1", 1.1, 2.1)]);
+    mockQueries([sess("s1", 4)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
     await GET(makeReq());
     const points = rawCall(1);
     expect(points).toBeDefined();
@@ -245,7 +251,7 @@ describe("3. 線が嘘にならないこと", () => {
   it("点の取得にも期間の下限を掛ける（@codex #334 P2）", async () => {
     // 境をまたぐ巡回は「最近の点が1つでもある」だけで候補に入る。掛けないと
     // 「直近1年」の線に1年より前の座標が混ざり、面の色と期間が食い違う。
-    mockQueries([sess("s1", 4)], [pt("s1", 1, 2), pt("s1", 1.1, 2.1)]);
+    mockQueries([sess("s1", 4)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
     await GET(makeReq(`${BBOX}&days=365`));
     expect(rawCall(1)?.sql).toContain("AT TIME ZONE 'UTC'");
   });
@@ -253,7 +259,7 @@ describe("3. 線が嘘にならないこと", () => {
   it("点が1つしかない巡回は線にしない", async () => {
     mockQueries(
       [sess("a", 1), sess("b", 2)],
-      [pt("a", 1, 2), pt("b", 3, 4), pt("b", 3.1, 4.1)],
+      [pt("a", 35.68, 139.76), pt("b", 35.69, 139.77), pt("b", 35.6901, 139.7701)],
     );
     const res = await GET(makeReq());
     const body = (await res.json()) as TrackBody;
@@ -264,7 +270,12 @@ describe("3. 線が嘘にならないこと", () => {
   it("巡回ごとに線を分ける（別の巡回を1本につなげない）", async () => {
     mockQueries(
       [sess("a", 2), sess("b", 2)],
-      [pt("a", 1, 2), pt("a", 1.1, 2.1), pt("b", 30, 40), pt("b", 30.1, 40.1)],
+      [
+        pt("a", 35.68, 139.76),
+        pt("a", 35.6801, 139.7601),
+        pt("b", 35.69, 139.77),
+        pt("b", 35.6901, 139.7701),
+      ],
     );
     const res = await GET(makeReq());
     const body = (await res.json()) as TrackBody;
@@ -272,14 +283,93 @@ describe("3. 線が嘘にならないこと", () => {
     expect(body.data.pointCount).toBe(4);
   });
 
-  it("間引きは連番の剰余で行う（途中で打ち切らない）", async () => {
+  it("間引きは巡回内の通し番号の剰余で行い、最初と最後は必ず残す（@codex #334 P1）", async () => {
+    // ⚠sequence の生の剰余だと、点が2つしかない短い巡回が thinStep=2 で
+    // 1点に減り「2点未満は線にしない」で黙って消える。落とした件数にも
+    // 出ないので、歩いた道が「誰も通っていない」ように見える。
     const big = COVERAGE_TRACK_POINT_BUDGET * 3;
-    mockQueries([sess("s1", big)], [pt("s1", 1, 2), pt("s1", 1.1, 2.1)]);
+    mockQueries([sess("s1", big)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
     await GET(makeReq());
     const points = rawCall(1);
-    expect(points?.sql).toContain("tp.sequence %");
+    expect(points?.sql).toContain("row_number() OVER");
+    expect(points?.sql).toContain("x.rn = 1");
+    expect(points?.sql).toContain("x.rn = x.cnt");
+    expect(points?.sql).toContain("(x.rn - 1) %");
     // 間引き幅が束縛値に載っている
     expect(points?.values).toContain(3);
+  });
+});
+
+describe("3-b. 記録が途切れた所で線を切る（@codex #334 P2）", () => {
+  it("同じ巡回でも時間が大きく空いたら別の線にする", () => {
+    // 位置記録を止めて再開した / GPS が一時停止した場合、次の点は同じ巡回の
+    // まま遠く離れる。1本につなぐと通っていない道を直線が横切る。
+    mockQueries(
+      [sess("s1", 4)],
+      [
+        pt("s1", 35.68, 139.76, 0),
+        pt("s1", 35.681, 139.761, 10_000),
+        // 30 分後（しきい値 2 分を大きく超える）
+        pt("s1", 35.7, 139.78, 1_810_000),
+        pt("s1", 35.701, 139.781, 1_820_000),
+      ],
+    );
+    return GET(makeReq())
+      .then((res) => res.json() as Promise<TrackBody>)
+      .then((body) => {
+        expect(body.data.lineCount).toBe(2);
+        expect(body.data.lines[0]).toHaveLength(2);
+        expect(body.data.lines[1]).toHaveLength(2);
+      });
+  });
+
+  it("時間が空いていなくても遠く離れたら別の線にする", () => {
+    mockQueries(
+      [sess("s1", 4)],
+      [
+        pt("s1", 35.68, 139.76, 0),
+        pt("s1", 35.681, 139.761, 10_000),
+        // 10 秒で約 2km（徒歩ではありえない）
+        pt("s1", 35.7, 139.76, 20_000),
+        pt("s1", 35.701, 139.761, 30_000),
+      ],
+    );
+    return GET(makeReq())
+      .then((res) => res.json() as Promise<TrackBody>)
+      .then((body) => {
+        expect(body.data.lineCount).toBe(2);
+      });
+  });
+
+  it("切った結果1本も線が残らなければ落とした件数に数える（黙って減らさない）", () => {
+    // 3点すべてが離れていると、どの断片も1点になり線にならない。
+    mockQueries(
+      [sess("s1", 3)],
+      [
+        pt("s1", 35.6, 139.7, 0),
+        pt("s1", 35.9, 139.9, 600_000),
+        pt("s1", 36.2, 140.1, 1_200_000),
+      ],
+    );
+    return GET(makeReq())
+      .then((res) => res.json() as Promise<TrackBody>)
+      .then((body) => {
+        expect(body.data.lineCount).toBe(0);
+        expect(body.data.droppedTrips).toBeGreaterThanOrEqual(1);
+        expect(body.data.truncated).toBe(true);
+      });
+  });
+
+  it("時刻を応答に載せない（切り分けにだけ使う）", () => {
+    mockQueries(
+      [sess("s1", 2)],
+      [pt("s1", 35.68, 139.76, 0), pt("s1", 35.681, 139.761, 10_000)],
+    );
+    return GET(makeReq())
+      .then((res) => res.json() as Promise<TrackBody>)
+      .then((body) => {
+        expect(JSON.stringify(body)).not.toMatch(/"at"/);
+      });
   });
 });
 
@@ -291,7 +381,7 @@ describe("4. 量が多すぎる時", () => {
     const many = Array.from({ length: COVERAGE_TRACK_SESSION_LIMIT + 1 }, (_, i) =>
       sess(`s${i}`, 1),
     );
-    mockQueries(many, [pt("s0", 1, 2), pt("s0", 1.1, 2.1)]);
+    mockQueries(many, [pt("s0", 35.68, 139.76), pt("s0", 35.6801, 139.7601)]);
     const res = await GET(makeReq());
     const body = (await res.json()) as TrackBody;
     expect(body.data.truncated).toBe(true);
@@ -302,7 +392,7 @@ describe("4. 量が多すぎる時", () => {
   it("上限内なら本数は正確に出す", async () => {
     mockQueries(
       [sess("a", 2), sess("b", 2)],
-      [pt("a", 1, 2), pt("a", 1.1, 2.1), pt("b", 3, 4), pt("b", 3.1, 4.1)],
+      [pt("a", 35.68, 139.76), pt("a", 35.6801, 139.7601), pt("b", 35.69, 139.77), pt("b", 35.6901, 139.7701)],
     );
     const res = await GET(makeReq());
     const body = (await res.json()) as TrackBody;
@@ -314,7 +404,7 @@ describe("4. 量が多すぎる時", () => {
     const cap = COVERAGE_TRACK_POINT_BUDGET * 2;
     // cap + 1 行返す。末尾 (= cap 番目) の巡回は点が欠けている可能性がある。
     const rows = [
-      ...Array.from({ length: cap }, () => pt("full", 1, 2)),
+      ...Array.from({ length: cap }, () => pt("full", 35.68, 139.76)),
       pt("partial", 9, 9),
     ];
     mockQueries([sess("full", cap), sess("partial", 10)], rows);

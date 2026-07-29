@@ -105,3 +105,93 @@ export function planTrackFetch(
     truncated: droppedTrips > 0,
   };
 }
+
+/**
+ * 線を切る間隔のしきい値（秒）。
+ *
+ * ⚠**同じ巡回の中でも線を切る必要がある** (@codex #334 P2)。位置記録を途中で
+ * 止めて再開したり、GPS が一時的に止まったりすると、次の点は同じ巡回のまま
+ * **遠く離れた場所**になる。全部を1本につなぐと、その間を直線が横切り、
+ * **通っていない道や建物を「歩いた」と示してしまう**。
+ *
+ * 記録は 5〜10 秒に 1 点なので、2 分空いたら明らかに異常。
+ */
+export const COVERAGE_TRACK_GAP_SECONDS = 120;
+
+/**
+ * 線を切る距離のしきい値（m）。
+ *
+ * 時間が空いていなくても、車で移動した等で一気に離れることがある。徒歩なら
+ * 10 秒で最大 20m 程度なので、200m 離れていれば歩いてはいない。
+ */
+export const COVERAGE_TRACK_GAP_METERS = 200;
+
+/** 線を引く点（時刻は切り分けの判定にだけ使い、応答には出さない）。 */
+export interface TrackPointInput {
+  lat: number;
+  lng: number;
+  /** epoch ミリ秒。 */
+  at: number;
+}
+
+const EARTH_RADIUS_M = 6_371_000;
+
+/** 2点間の距離 (m)。geolocation-util の haversine と同式（server で使うため再掲）。 */
+export function trackDistanceMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const la = toRad(a.lat);
+  const lb = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(la) * Math.cos(lb) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * 1 本の巡回の点列を、記録の途切れで**複数の線に切り分ける**。
+ *
+ * ⚠切らずに 1 本で返すと、記録を止めていた区間を直線が横切り、
+ * 通っていない道を「歩いた」と示す。線は「ここを通った」と読ませる図なので、
+ * これは誤った指示に直結する。
+ *
+ * 点が 1 つしかない断片は線にならないので落とす。
+ */
+export function splitTrackAtGaps(
+  points: TrackPointInput[],
+  opts: { gapSeconds?: number; gapMeters?: number } = {},
+): { lat: number; lng: number }[][] {
+  const gapMs = (opts.gapSeconds ?? COVERAGE_TRACK_GAP_SECONDS) * 1000;
+  const gapM = opts.gapMeters ?? COVERAGE_TRACK_GAP_METERS;
+
+  const out: { lat: number; lng: number }[][] = [];
+  let cur: { lat: number; lng: number }[] = [];
+  let prev: TrackPointInput | null = null;
+
+  for (const pt of points) {
+    if (
+      !Number.isFinite(pt.lat) ||
+      !Number.isFinite(pt.lng) ||
+      !Number.isFinite(pt.at)
+    ) {
+      continue;
+    }
+    if (prev) {
+      const dt = pt.at - prev.at;
+      const dm = trackDistanceMeters(prev, pt);
+      // ⚠時刻が巻き戻る端末があるので絶対値で見る。
+      if (Math.abs(dt) > gapMs || dm > gapM) {
+        if (cur.length >= 2) out.push(cur);
+        cur = [];
+      }
+    }
+    cur.push({ lat: pt.lat, lng: pt.lng });
+    prev = pt;
+  }
+  if (cur.length >= 2) out.push(cur);
+  return out;
+}

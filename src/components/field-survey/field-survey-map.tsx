@@ -1668,23 +1668,34 @@ function ControlPanel({
         />
         <span>歩いた場所</span>
       </label>
+      {/* ⚠期間は**面と線の共通設定**。以前は「歩いた場所」の下に置いていたが、
+          面だけ OFF にすると選択肢が消えるのに線は既定（直近1年）で絞られ
+          続け、**古い道が出ていないことに気づけない**（@codex #334 P2）。
+          どちらか一方でも ON なら必ず出す。 */}
+      {(layers.coverage || layers.tracks) && (
+        <label
+          className="mb-2 ml-6 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"
+        >
+          <span>期間</span>
+          <select
+            value={coverageDays}
+            onChange={(e) => onChangeCoverageDays(Number(e.target.value))}
+            data-testid="coverage-period-select"
+            className="rounded border border-gray-300 bg-white px-1 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-900"
+          >
+            {COVERAGE_PERIOD_DAYS.map((d) => (
+              <option key={d} value={d}>
+                {coveragePeriodLabel(d)}
+              </option>
+            ))}
+          </select>
+          <span className="text-[10px] text-gray-500 dark:text-gray-400">
+            （色と線の両方）
+          </span>
+        </label>
+      )}
       {layers.coverage && (
         <div className="mb-3 ml-6">
-          <label className="mb-1 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-            <span>期間</span>
-            <select
-              value={coverageDays}
-              onChange={(e) => onChangeCoverageDays(Number(e.target.value))}
-              data-testid="coverage-period-select"
-              className="rounded border border-gray-300 bg-white px-1 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-900"
-            >
-              {COVERAGE_PERIOD_DAYS.map((d) => (
-                <option key={d} value={d}>
-                  {coveragePeriodLabel(d)}
-                </option>
-              ))}
-            </select>
-          </label>
           {/* ⚠凡例（色なし＝誰も通っていません）を出してよいのは "ready" だけ。
               まだ分からない状態で同じ見た目にすると、踏破済みのエリアへ人を
               送り出すことになる。 */}
