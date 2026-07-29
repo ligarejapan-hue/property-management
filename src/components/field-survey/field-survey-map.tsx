@@ -497,7 +497,8 @@ export default function FieldSurveyMap({
   const cameraToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  // modal 表示中かを closure から読むための ref (locating 完了時の競合ガード)。
+  // modal 表示中かを closure から読むための ref (撮影完了時の二重オープン防止。
+  // ⚠旧 GPS 取得段は #336 で廃止済み。コメントのみ現状に更新)。
   const createCandidateOpenRef = useRef(false);
   useEffect(() => {
     createCandidateOpenRef.current = !!createCandidate;
@@ -2039,8 +2040,15 @@ function MapDataLayer({
 
       {/* ⚠タップ待ち中 (captureMapClick) は吹き出しを描かない (@codex #336 P2
           と同根)。開いたままの吹き出しが撮影した家を覆うと、タップ先そのものが
-          塞がれる。タップ待ちが終われば (キャンセルで戻れば) 再表示される。 */}
-      {selected && !captureMapClick && selected.kind === "property" && (
+          塞がれる。タップ待ちが終われば (キャンセルで戻れば) 再表示される。
+          ⚠**レイヤー OFF なら吹き出しも消す**（総点検P3）。marker は
+          layers.properties で消えるのに吹き出しだけ残ると、位置の手がかりが
+          無い浮遊 UI になる（「対応済みを隠す」の既修正と同じ理屈をレイヤー
+          切替にも適用）。ON に戻せば再表示される。 */}
+      {selected &&
+        !captureMapClick &&
+        layers.properties &&
+        selected.kind === "property" && (
         <InfoWindow
           position={{ lat: selected.row.gpsLat, lng: selected.row.gpsLng }}
           onCloseClick={() => setSelected(null)}
@@ -2050,9 +2058,11 @@ function MapDataLayer({
       )}
       {/* 開いたまま「対応済みを隠す」を ON にした closed ピンの吹き出しは
           marker と一緒に非表示にする (marker が消えたのに吹き出しだけ残ると
-          位置の手がかりが無い浮遊 UI になる)。OFF に戻せば再表示される。 */}
+          位置の手がかりが無い浮遊 UI になる)。OFF に戻せば再表示される。
+          レイヤー OFF (layers.pins) も同じ理屈で吹き出しごと消す（総点検P3）。 */}
       {selected &&
         !captureMapClick &&
+        layers.pins &&
         selected.kind === "pin" &&
         !(hideClosedPins && selected.row.status === "closed") && (
         <InfoWindow

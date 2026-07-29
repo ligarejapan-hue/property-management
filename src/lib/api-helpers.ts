@@ -235,6 +235,11 @@ export async function getOwnerDisplayConfig(
 /**
  * リクエスト本文を JSON として読む。
  *  - 空ボディは `{}` として扱う（オプションキーのみの POST/PATCH を許容）
+ *  - JSON リテラルの `null` も `{}` に正規化する（総点検P3）。`null` は**有効な
+ *    JSON** なので catch に落ちず、そのまま返すと呼び出し側の
+ *    `(body as { x?: unknown }).x` が TypeError で 500 になる（auto-fetch /
+ *    sale-dm regenerate で実在した）。「何も指定していない」= {} に揃えれば、
+ *    各 route 自身の検証（confirmed 必須等）が正しい 400/422 を返す。
  *  - malformed JSON は ApiError(400, INVALID_JSON) を投げる（state mutation 前に reject）
  *
  * 既存の `request.json().catch(() => ({}))` パターンは malformed と空を
@@ -244,7 +249,8 @@ export async function parseJsonBody(request: Request): Promise<unknown> {
   const text = await request.text();
   if (text.trim() === "") return {};
   try {
-    return JSON.parse(text);
+    const parsed: unknown = JSON.parse(text);
+    return parsed === null ? {} : parsed;
   } catch {
     throw new ApiError(
       400,

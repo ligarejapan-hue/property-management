@@ -596,6 +596,37 @@ describe("GET /api/field-survey/sessions", () => {
     expect(where.staffUserId).toBeUndefined();
   });
 
+  it("scope=all の一覧閲覧は監査する（詳細/軌跡の他人閲覧監査と対称・総点検P3）", async () => {
+    // session 詳細 (field_survey_session_view) と軌跡 GET は他人閲覧を監査する
+    // のに、同じメタ情報（担当者・開始/終了時刻 = 勤怠相当）をまとめて見られる
+    // 一覧だけ無監査だった。1 リクエスト 1 件・detail に座標/氏名を入れない。
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    (prisma.fieldSurveySession.count as Mock).mockResolvedValue(0);
+    (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([]);
+    await GET(makeReq("http://x/api/field-survey/sessions?scope=all"));
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const call = (writeAuditLog as Mock).mock.calls[0][0];
+    expect(call.action).toBe("field_survey_session_list_view");
+    expect(call.detail.scope).toBe("all");
+    expect(JSON.stringify(call)).not.toMatch(/"lat"|"lng"|memo|staffName/);
+  });
+
+  it("read_all で他人 staffUserId を明示指定した一覧も監査する", async () => {
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    (prisma.fieldSurveySession.count as Mock).mockResolvedValue(0);
+    (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([]);
+    const target = "22222222-2222-4222-8222-222222222222";
+    await GET(
+      makeReq(`http://x/api/field-survey/sessions?staffUserId=${target}`),
+    );
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const call = (writeAuditLog as Mock).mock.calls[0][0];
+    expect(call.action).toBe("field_survey_session_list_view");
+    expect(call.detail.viewedStaffUserId).toBe(target);
+  });
+
   it("scope 未指定 (mine) は read_all 所持でも own 強制", async () => {
     (getApiSession as Mock).mockResolvedValue(officeUser);
     (getUserPermissions as Mock).mockResolvedValue(officePerms);
@@ -605,6 +636,8 @@ describe("GET /api/field-survey/sessions", () => {
     const where = (prisma.fieldSurveySession.findMany as Mock).mock.calls[0][0]
       .where;
     expect(where.staffUserId).toBe(officeUser.id);
+    // 自分の分のみの閲覧は監査しない（高頻度・自分のデータのため）
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("レスポンスに staffName / pinCount を含み、座標/memo/写真/PII を含まない", async () => {

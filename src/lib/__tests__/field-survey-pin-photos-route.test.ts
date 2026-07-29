@@ -94,9 +94,9 @@ vi.mock("@/lib/storage", () => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
-    fieldSurveyPin: { findUnique: vi.fn() },
+vi.mock("@/lib/prisma", () => {
+  const client: Record<string, unknown> = {
+    fieldSurveyPin: { findUnique: vi.fn(), updateMany: vi.fn() },
     fieldSurveyPinPhoto: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -104,8 +104,13 @@ vi.mock("@/lib/prisma", () => ({
       create: vi.fn(),
       delete: vi.fn(),
     },
-  },
-}));
+  };
+  // interactive transaction: callback へ同一 client を渡す (rollback は DB の責務)
+  client.$transaction = vi.fn(
+    async (fn: (tx: unknown) => Promise<unknown>) => fn(client),
+  );
+  return { default: client };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -340,9 +345,47 @@ beforeEach(() => {
   (prisma.fieldSurveyPinPhoto.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
     _max: { sortOrder: null },
   });
+  // POST は tx 内でピン行を条件付き touch して archived の並行遷移を弾く
+  // （総点検P3）。既定は「1 件成功」に倒し、並行 archive の検証テストだけ
+  // 0 に上書きする。
+  (
+    prisma.fieldSurveyPin.updateMany as ReturnType<typeof vi.fn>
+  ).mockResolvedValue({ count: 1 });
 });
 
 describe("POST photos", () => {
+  it("検証後に並行 archive されたら 409 + upload 済み実体を回収する（総点検P3）", async () => {
+    // 冒頭の archived チェックは通ったが、tx 内の条件付き touch までに別タブ /
+    // 別端末の DELETE (archive) が先行した。アーカイブ済みピンに写真が付くと
+    // UI から見えない場所に入るため、409 で rollback し blob も best-effort 削除。
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);
+    (prisma.fieldSurveyPin.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: OWNER.id,
+      status: "open", // 事前チェックは通る
+    });
+    (
+      prisma.fieldSurveyPin.updateMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce({ count: 0 }); // tx 内 touch で並行 archive が判明
+    const res = await POST(multipartReq(jpeg()), paramsP(PIN_ID));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_STATE");
+    // touch の条件 = archived でないこと（status を書き戻さない・touch のみ）
+    const guardArgs = (
+      prisma.fieldSurveyPin.updateMany as ReturnType<typeof vi.fn>
+    ).mock.calls[0][0];
+    expect(guardArgs.where).toEqual({ id: PIN_ID, status: { not: "archived" } });
+    expect(Object.keys(guardArgs.data)).toEqual(["updatedAt"]);
+    // DB 行は作られず、直前に upload した実体は回収される
+    expect(prisma.fieldSurveyPinPhoto.create).not.toHaveBeenCalled();
+    expect(storageStub.delete).toHaveBeenCalledWith(
+      `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+    );
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
   it("own pin + write で成功し、AuditLog に URL/storageKey/fileName を含めない", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue(OWNER);
     (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(writePerms);

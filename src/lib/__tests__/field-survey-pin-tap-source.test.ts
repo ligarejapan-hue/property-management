@@ -198,11 +198,14 @@ describe("3-d. タップ待ち中は既存マーカーがタップを奪わな�
   });
 
   it("タップ待ち中は吹き出しを描かない（撮影した家を覆わない）", () => {
+    // 総点検P3でレイヤー OFF 条件 (layers.properties / layers.pins) も加わった。
+    // ここでは「!captureMapClick が条件に入っている」ことだけを表明する
+    // (レイヤー条件の表明は field-survey-map-ui-source.test.ts 側)。
     expect(MAP_SRC).toMatch(
-      /\{selected && !captureMapClick && selected\.kind === "property"/,
+      /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*layers\.properties &&\s*\n\s*selected\.kind === "property"/,
     );
     expect(MAP_SRC).toMatch(
-      /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*selected\.kind === "pin"/,
+      /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*layers\.pins &&\s*\n\s*selected\.kind === "pin"/,
     );
   });
 

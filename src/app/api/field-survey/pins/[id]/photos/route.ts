@@ -175,27 +175,57 @@ export async function POST(
     const proxyFileUrl = toUploadProxyUrl(result.key);
     const proxyThumbnailUrl = toProxyThumbnailUrl(result.thumbnailUrl);
 
-    const maxSort = await prisma.fieldSurveyPinPhoto.aggregate({
-      where: { pinId: id },
-      _max: { sortOrder: true },
-    });
-    const nextSort = (maxSort._max.sortOrder ?? -1) + 1;
-
-    const photo = await prisma.fieldSurveyPinPhoto.create({
-      data: {
-        pinId: id,
-        fileUrl: proxyFileUrl,
-        thumbnailUrl: proxyThumbnailUrl,
-        fileName,
-        // 保存実体は strip 後 buffer のため、そのサイズを記録する
-        // (PNG/WebP は chunk drop で縮み得る。JPEG zero-fill は長さ不変)。
-        fileSize: uploadBuffer.length,
-        mimeType,
-        uploadedByUserId: session.id,
-        sortOrder: nextSort,
-      },
-      select: SELECT_PHOTO,
-    });
+    // ⚠冒頭の archived チェックは check-then-write で、検証と INSERT のすき間に
+    // ピンが archive されると**アーカイブ済みピンに写真が付く**（UI から見えない
+    // 場所に入る・総点検P3）。同一 tx 内でピン行を条件付き touch し、0 行なら
+    // 409 で rollback する。touch がピン行をロックするため、同一ピンへの並行
+    // 写真追加も直列化され sortOrder の重複も出ない。
+    let photo;
+    try {
+      photo = await prisma.$transaction(async (tx) => {
+        const guard = await tx.fieldSurveyPin.updateMany({
+          where: { id, status: { not: "archived" } },
+          data: { updatedAt: new Date() },
+        });
+        if (guard.count === 0) {
+          throw new ApiError(
+            409,
+            "アーカイブ済みのピンには写真を追加できません",
+            "INVALID_STATE",
+          );
+        }
+        const maxSort = await tx.fieldSurveyPinPhoto.aggregate({
+          where: { pinId: id },
+          _max: { sortOrder: true },
+        });
+        const nextSort = (maxSort._max.sortOrder ?? -1) + 1;
+        return tx.fieldSurveyPinPhoto.create({
+          data: {
+            pinId: id,
+            fileUrl: proxyFileUrl,
+            thumbnailUrl: proxyThumbnailUrl,
+            fileName,
+            // 保存実体は strip 後 buffer のため、そのサイズを記録する
+            // (PNG/WebP は chunk drop で縮み得る。JPEG zero-fill は長さ不変)。
+            fileSize: uploadBuffer.length,
+            mimeType,
+            uploadedByUserId: session.id,
+            sortOrder: nextSort,
+          },
+          select: SELECT_PHOTO,
+        });
+      });
+    } catch (txError) {
+      // rollback 時は直前に upload した実体を best-effort で回収する
+      // （key は randomUUID 入りでこのリクエスト専用 = 共有され得ない）。
+      // 失敗しても応答は変えない（DB が source of truth・orphan は残るだけ）。
+      try {
+        await storage.delete(result.key);
+      } catch {
+        // best-effort（key/fileName は console に出さない既存 PII ルール）
+      }
+      throw txError;
+    }
 
     await writeAuditLog({
       userId: session.id,

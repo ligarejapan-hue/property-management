@@ -258,6 +258,30 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
+    // ⚠**他人の巡回を含む一覧閲覧は監査する**（総点検P3）。session 詳細
+    // (field_survey_session_view) と軌跡 (track-points GET) の他人閲覧は監査
+    // 済みなのに、同じメタ情報（担当者・開始/終了時刻 = 勤怠に相当）を
+    // まとめて見られる一覧だけ無監査という非対称があった。1 リクエスト 1 件
+    // （ページ単位）で、detail に座標・氏名は入れない。自分の分のみの閲覧
+    // (mine) は従来どおり監査しない（高頻度・自分のデータのため）。
+    const listsOthers =
+      (scope === "all" && canSeeAll) ||
+      (canSeeAll && !!staffUserId && staffUserId !== session.id);
+    if (listsOthers) {
+      await writeAuditLog({
+        userId: session.id,
+        action: "field_survey_session_list_view",
+        targetTable: "field_survey_sessions",
+        // targetId は一覧のため無し（ページ単位の 1 件）
+        detail: {
+          scope: staffUserId ? "staff" : "all",
+          viewedStaffUserId: staffUserId ?? null,
+          page,
+          returned: sessions.length,
+        },
+      });
+    }
+
     // pinCount は archived を除いた紐付け pin 数。ページ分の session id をまとめて
     // groupBy で集計し N+1 を避ける (座標・memo 等は取得しない)。
     const ids = sessions.map((s) => s.id);
