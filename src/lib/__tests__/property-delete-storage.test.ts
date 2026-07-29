@@ -39,6 +39,28 @@ describe("Property DELETE — storage cleanup (cascade)", () => {
     expect(delIdx).toBeGreaterThan(findIdx);
   });
 
+  it("添付(Attachment)を同一 tx でゴミ箱入りさせてから Property を消す（総点検P3）", () => {
+    // FK が SET NULL のため添付は cascade されない。ゴミ箱入り(isDeleted=true +
+    // deletedAt)させないと、日次お掃除(isDeleted:true のみ対象)にも手動ゴミ箱
+    // (property relation null → 403)にも乗らず、謄本PDF等が永久に残留する。
+    const trashIdx = routeSrc.search(/tx\.attachment\.updateMany\(/);
+    const delIdx = routeSrc.search(/tx\.property\.delete\(/);
+    expect(trashIdx).toBeGreaterThan(0);
+    expect(delIdx).toBeGreaterThan(trashIdx);
+    // SET NULL 前の propertyId と弱参照 targetId の OR で冪等に拾う
+    expect(routeSrc).toMatch(
+      /OR:\s*\[\{\s*propertyId:\s*id\s*\},\s*\{\s*targetType:\s*"property",\s*targetId:\s*id\s*\}\]/,
+    );
+    // ゴミ箱済み行の 90 日時計をリセットしない + deletedAt を刻む
+    const trashBlock =
+      routeSrc.match(/tx\.attachment\.updateMany\(\{[\s\S]{0,500}?\}\);/)?.[0] ?? "";
+    expect(trashBlock).toContain("isDeleted: false");
+    expect(trashBlock).toContain("isDeleted: true");
+    expect(trashBlock).toContain("deletedAt: new Date()");
+    // 添付の storage 実体は即時削除しない(参照チェック持ちの purge job に委ねる)
+    expect(routeSrc).not.toMatch(/attachment[\s\S]{0,200}?getStorage\(\)\.delete/);
+  });
+
   it("transaction 成功後に storage.delete をループで呼ぶ", () => {
     const txCloseIdx = routeSrc.search(/\}\);\s*\n[\s\S]*?storageDeleteAttempted/);
     expect(txCloseIdx).toBeGreaterThan(0);

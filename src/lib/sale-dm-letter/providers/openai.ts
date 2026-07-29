@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { LetterProvider, BuiltPrompt } from "../types";
 import { SaleDmError } from "../types";
+import { AI_CALL_TIMEOUT_MS, AI_MAX_RETRIES } from "../limits";
 
 // テスト注入用: 実 SDK 呼び出しを差し替えられるようにする(claude.ts の createMessage 注入と同型)。
 type ChatMessage = { role: "system" | "user"; content: string };
@@ -31,7 +32,13 @@ export class OpenAiLetterProvider implements LetterProvider {
     if (opts.createCompletion) {
       this.createCompletion = opts.createCompletion;
     } else {
-      const client = new OpenAI({ apiKey: opts.apiKey });
+      // ⚠SDK 既定(timeout 10分×3試行)のままだと worst-case が数時間に達する
+      // （claude.ts と同じ理由・総点検P3・limits.ts 参照）。
+      const client = new OpenAI({
+        apiKey: opts.apiKey,
+        timeout: AI_CALL_TIMEOUT_MS,
+        maxRetries: AI_MAX_RETRIES,
+      });
       this.createCompletion = (args) =>
         client.chat.completions.create(args) as unknown as ReturnType<CreateCompletion>;
     }

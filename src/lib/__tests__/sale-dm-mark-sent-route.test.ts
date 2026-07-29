@@ -93,6 +93,30 @@ describe("POST mark-sent", () => {
     expect(writeAuditLog).toHaveBeenCalled();
   });
 
+  it("送付履歴の日付は JST の暦日で記録する（JST 0〜9時の送付が前日にならない）", async () => {
+    // PropertyDmLog.sentAt は @db.Date。Prisma は Date を UTC 壁時計で送るため
+    // DATE 列は UTC の暦日に切られる。素の now だと JST 7/30 08:00(=UTC 7/29
+    // 23:00) の送付が 7/29 として残る。+9h 平行移動で UTC 暦日 = JST 暦日。
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-29T23:00:00.000Z")); // JST 7/30 08:00
+      const res = await POST(req() as never, ctx());
+      expect(res.status).toBe(200);
+      const logArg = pm.propertyDmLog.create.mock.calls[0][0];
+      expect(logArg.data.sentAt).toBeInstanceOf(Date);
+      expect(
+        (logArg.data.sentAt as Date).toISOString().slice(0, 10),
+      ).toBe("2026-07-30");
+      // draft 側 sentAt(素の DateTime=瞬間)は実時刻のまま平行移動しない。
+      const draftArg = pm.dmRecipientDraft.updateMany.mock.calls[0][0];
+      expect((draftArg.data.sentAt as Date).toISOString()).toBe(
+        "2026-07-29T23:00:00.000Z",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("並行POSTで他リクエストが先に送付(count=0 かつ tx 内 re-read が sent)なら 200 alreadySent(冪等)", async () => {
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
     // 開始 read=confirmed(遷移を試みる)→ tx 内 re-read=sent(他リクエストが先に確定済み)。

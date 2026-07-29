@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { LetterProvider, BuiltPrompt } from "../types";
 import { SaleDmError } from "../types";
+import { AI_CALL_TIMEOUT_MS, AI_MAX_RETRIES } from "../limits";
 
 // テスト注入用: 実 SDK 呼び出しを差し替えられるようにする(address-lookup の fetchFn 注入と同型)。
 type CreateMessage = (args: {
@@ -26,7 +27,14 @@ export class ClaudeLetterProvider implements LetterProvider {
     if (opts.createMessage) {
       this.createMessage = opts.createMessage;
     } else {
-      const client = new Anthropic({ apiKey: opts.apiKey });
+      // ⚠SDK 既定(timeout 10分×3試行)のままだと 50 通生成の worst-case が数時間
+      // に達し、idempotency の孤児判定が生成中のクレームを誤って孤児扱いする
+      // （総点検P3・limits.ts 参照）。上限を明示して worst-case を計算可能にする。
+      const client = new Anthropic({
+        apiKey: opts.apiKey,
+        timeout: AI_CALL_TIMEOUT_MS,
+        maxRetries: AI_MAX_RETRIES,
+      });
       this.createMessage = (args) => client.messages.create(args) as unknown as ReturnType<CreateMessage>;
     }
   }
