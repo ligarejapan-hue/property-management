@@ -518,6 +518,11 @@ export default function FieldSurveyMap({
   // Phase 1-H: pin 作成済みだが写真アップロードだけ失敗した状態。modal を閉じず
   // 「写真だけ再試行 / 写真なしで完了」に誘導し、pin を作り直させない。
   const [photoUploadFailed, setPhotoUploadFailed] = useState(false);
+  // POST を撃つ前に client 側で確定できる保存不能の理由 (@codex #336 P2)。
+  // 例: タップ待ちの間に巡回が終了し quick_capture も無い場合、サーバは 403
+  // QUICK_CAPTURE_FORBIDDEN を返すが「権限がありません」では現場で直し方が
+  // 分からない。モーダル内の serverError と同じ場所に、直し方つきで出す。
+  const [clientCreateError, setClientCreateError] = useState<string | null>(null);
   // 作成済み pin id と再試行用の file を保持する (state 更新の非同期性を避け ref で持つ)。
   const createdPinIdRef = useRef<string | null>(null);
   const pendingPhotoFileRef = useRef<File | null>(null);
@@ -748,6 +753,18 @@ export default function FieldSurveyMap({
       },
       file: File | null,
     ) => {
+      // ⚠モーダルを開いている間に巡回が終了する経路が残る (12h放置確認/24h
+      // 自動終了・別端末からの終了)。quick_capture が無ければ POST は必ず 403
+      // なので、撃つ前に止めて**直し方**を案内する (@codex #336 P2)。写真は
+      // モーダル内に保持されたまま。「地図で置き直す」→ 巡回開始 → 再タップで
+      // そのまま保存できる。
+      if (!activeSession?.id && !canQuickCapture) {
+        setClientCreateError(
+          "巡回が終了したため、このままでは保存できません。「地図で置き直す」で一度戻り、「巡回を開始」を押してから、もう一度地図をタップしてください（写真は保持されます）。",
+        );
+        return;
+      }
+      setClientCreateError(null);
       const r = await pinMutations.createPin({
         lat: input.lat,
         lng: input.lng,
@@ -786,6 +803,7 @@ export default function FieldSurveyMap({
     },
     [
       activeSession,
+      canQuickCapture,
       pinMutations,
       photoMutations,
       bumpRefetch,
@@ -827,6 +845,18 @@ export default function FieldSurveyMap({
       // ⚠**タップ待ちの時だけ**受け付ける。巡回中かどうかは見ない
       // (巡回なし撮影 quick_capture も同じ経路を通るため)。
       if (cameraFirstPhase !== "awaiting-map-tap") return;
+      // ⚠**タップ待ちの間に巡回が終了した場合** (@codex #336 P2)。写真は保持
+      // したままだが、巡回なし撮影の権限 (quick_capture) が無い利用者は
+      // このまま保存すると POST が 403 で必ず失敗する。モーダルを開いてから
+      // 詰ませず、タップの時点で「巡回を開始してから」と案内する
+      // (この状態に入るのは巡回中に撮影→待機中に終了、の経路だけ。
+      //  巡回外で撮影を始められるのは quick_capture 保有者のみのため)。
+      if (!activeSession && !canQuickCapture) {
+        setError(
+          "巡回が終了しています。「巡回を開始」を押してから、もう一度地図をタップしてください（撮影した写真は保持されています）。",
+        );
+        return;
+      }
       // 詳細パネルで作業中なら新規作成のタップを無視する (パネルは維持)。
       if (detailPinId && detailPanelBusyRef.current) return;
 
@@ -834,6 +864,7 @@ export default function FieldSurveyMap({
       cameraPhotoFileRef.current = null;
       createdFromCameraRef.current = true;
       setCameraFirstPhase("idle");
+      setClientCreateError(null);
       // 開いたままの詳細パネルは閉じる (旧ピンのパネル残留と、スマホで
       // bottom sheet が保存トーストを覆い隠すのを防ぐ)。
       setDetailPinId(null);
@@ -844,19 +875,22 @@ export default function FieldSurveyMap({
         cameraPhotoPreviewUrl: photo ? URL.createObjectURL(photo) : undefined,
       });
     },
-    [createCandidate, cameraFirstPhase, detailPinId],
+    [createCandidate, cameraFirstPhase, detailPinId, activeSession, canQuickCapture],
   );
 
   // 「置き直す」: タップ位置を間違えたときに、**写真を保持したまま**もう一度
   // タップ待ちへ戻す。これが無いと直し方が「キャンセル＝写真ごと破棄」しか
   // 無くなる（ドラッグ移動は作らない方針のため。2026-07-29）。
-  const handleReplaceLocation = useCallback(() => {
+  // ⚠保持するのは**モーダル内で差し替えた現在の写真** (引数・@codex #336 P2)。
+  // 開いた時点の写真 (candidate.cameraPhoto) を使うと、モーダル内で撮り直した
+  // 写真が黙って元に戻り、次のタップで**別の家の写真**が付く。
+  const handleReplaceLocation = useCallback((currentPhoto: File | null) => {
+    cameraPhotoFileRef.current = currentPhoto;
     setCreateCandidate((c) => {
-      // 撮った写真を作成候補から回収してから閉じる。
-      cameraPhotoFileRef.current = c?.cameraPhoto ?? null;
       if (c?.cameraPhotoPreviewUrl) URL.revokeObjectURL(c.cameraPhotoPreviewUrl);
       return null;
     });
+    setClientCreateError(null);
     setCameraFirstPhase("awaiting-map-tap");
   }, []);
 
@@ -1094,7 +1128,7 @@ export default function FieldSurveyMap({
             initialPinType={activeSession ? lastPinType : "candidate"}
             sessionId={activeSession?.id ?? null}
             saving={pinMutations.createLoading}
-            serverError={pinMutations.createError}
+            serverError={clientCreateError ?? pinMutations.createError}
             photoUploading={photoMutations.uploadLoading}
             photoUploadFailed={photoUploadFailed}
             photoUploadErrorDetail={photoMutations.uploadError}
@@ -1106,6 +1140,7 @@ export default function FieldSurveyMap({
               }
               setCreateCandidate(null);
               setPhotoUploadFailed(false);
+              setClientCreateError(null);
               createdPinIdRef.current = null;
               pendingPhotoFileRef.current = null;
               // カメラファースト経由の candidate を破棄した場合も origin flag を戻す

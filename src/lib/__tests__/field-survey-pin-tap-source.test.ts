@@ -133,9 +133,67 @@ describe("3. タップし直せる（間違えても写真を捨てない）", (
       )?.[0] ?? "";
     expect(handler).not.toBe("");
     expect(handler).toContain('setCameraFirstPhase("awaiting-map-tap")');
-    // 写真を捨てる後始末を呼ばない（候補から写真を回収して持ち帰る）
+    // 写真を捨てる後始末を呼ばない（写真を持ち帰ってタップ待ちへ戻る）
     expect(handler).not.toContain("resetCameraFirst()");
-    expect(handler).toContain("cameraPhotoFileRef.current = c?.cameraPhoto");
+  });
+
+  it("保持するのはモーダル内で差し替えた「現在の」写真（@codex #336 P2）", () => {
+    // 開いた時点の写真 (candidate.cameraPhoto) に戻すと、モーダル内で
+    // 撮り直した写真が黙って元に戻り、次のタップで**別の家の写真**が付く。
+    const handler =
+      MAP_SRC.match(
+        /const handleReplaceLocation = useCallback\([\s\S]*?\n  \);/,
+      )?.[0] ?? "";
+    expect(handler).toContain("(currentPhoto: File | null)");
+    expect(handler).toContain("cameraPhotoFileRef.current = currentPhoto");
+    expect(handler).not.toContain("c?.cameraPhoto ?? null");
+    // モーダル側は現在の photoFile を渡す
+    expect(MODAL_SRC).toContain("onReplaceLocation(photoFile)");
+  });
+
+  it("写真の送信に失敗した後は「置き直す」を出さない（@codex #336 P2）", () => {
+    // pin は既に元の座標で作成済み。置き直してタップしても既存 pin の位置は
+    // 変わらず、同じ写真でもう1本の重複 pin を作ってしまう。
+    expect(MODAL_SRC).toMatch(
+      /\{!photoUploadFailed && \([\s\S]{0,700}?pin-create-replace-location/,
+    );
+  });
+});
+
+describe("3-b. 写真必須（写真なしピンをこの画面から作らせない・@codex #336 P2）", () => {
+  it("保存には写真が要る（canSubmit が photoFile を要求）", () => {
+    const canSubmit = MODAL_SRC.match(/const canSubmit =[\s\S]*?;/)?.[0] ?? "";
+    expect(canSubmit).toContain("photoFile !== null");
+  });
+
+  it("「写真を取り消す」を置かない（撮り直し/選び直しの差し替えのみ許す）", () => {
+    // 外して保存できると、廃止したはずの写真なしピンがこの画面から作れて
+    // しまう（全てのピンが写真とセット = 2026-07-29 業務判断）。
+    expect(MODAL_SRC).not.toContain("写真を取り消す");
+    expect(MODAL_SRC).not.toContain("pin-create-photo-clear");
+    expect(MODAL_SRC).toContain("写真（必須）");
+  });
+});
+
+describe("3-c. タップ待ち中に巡回が終了しても詰まない（@codex #336 P2）", () => {
+  it("quick_capture の無い利用者にはタップ時に巡回開始を案内する", () => {
+    // 保存が必ず 403 になる状態でモーダルを開かせない。写真は保持したまま。
+    const handler =
+      MAP_SRC.match(/const handleMapClick = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
+    expect(handler).toContain("!activeSession && !canQuickCapture");
+    expect(handler).toContain("巡回を開始");
+  });
+
+  it("モーダル表示中に巡回が終了した場合は POST の前に直し方つきで止める", () => {
+    // 12h放置確認/24h自動終了・別端末からの終了でモーダル中に session が
+    // 消える経路が残る。サーバの「権限がありません」では直し方が分からない。
+    const submit =
+      MAP_SRC.match(/const handlePinCreateSubmit = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
+    expect(submit).toContain("!activeSession?.id && !canQuickCapture");
+    expect(submit).toContain("setClientCreateError(");
+    expect(submit).toContain("地図で置き直す");
+    // client 側の理由はモーダルの serverError と同じ場所に出す
+    expect(MAP_SRC).toContain("serverError={clientCreateError ?? pinMutations.createError}");
   });
 });
 

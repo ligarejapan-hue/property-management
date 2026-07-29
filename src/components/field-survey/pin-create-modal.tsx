@@ -93,8 +93,13 @@ interface PinCreateModalProps {
   onReplaceRetryPhoto?: (file: File) => void;
   /** 写真なしで完了 (pin は保存済み)。 */
   onFinishWithoutPhoto: () => void;
-  /** 写真を保持したまま地図タップ待ちへ戻す。 */
-  onReplaceLocation: () => void;
+  /**
+   * 写真を保持したまま地図タップ待ちへ戻す。
+   * ⚠**モーダル内で差し替えた「現在の」写真**を引数で渡す (@codex #336 P2)。
+   * 親が保持しているのは開いた時点の写真 (cameraPhoto) だけなので、渡さないと
+   * 差し替え後の写真が黙って元に戻り、別の家の写真が付く。
+   */
+  onReplaceLocation: (currentPhoto: File | null) => void;
 }
 
 export default function PinCreateModal({
@@ -155,8 +160,16 @@ export default function PinCreateModal({
   // sessionId=null は「巡回なしで撮影」(field_survey:quick_capture) の正常系。
   // 巡回の有無を保存可否の条件にしない (権限判定はサーバーの POST /pins が行い、
   // 権限が無ければ 403 QUICK_CAPTURE_FORBIDDEN が serverError に出る)。
+  // ⚠**写真は必須** (@codex #336 P2)。この画面は撮影経由でしか開かない
+  // (ピン追加モード廃止 = 「写真なしのピンは作らない」2026-07-29 業務判断)。
+  // 写真を外して保存できると、廃止したはずの写真なしピンがここから作れて
+  // しまう。写真送信の失敗後 (photoUploadFailed) は pin 作成済みで、この
+  // 保存ボタン自体が出ない (回復用の再試行/終了ボタンに切り替わる)。
   const canSubmit =
-    !busy && Number.isFinite(initialLat) && Number.isFinite(initialLng);
+    !busy &&
+    Number.isFinite(initialLat) &&
+    Number.isFinite(initialLng) &&
+    photoFile !== null;
 
   const handleFilePicked = (file: File | null) => {
     if (!file) return;
@@ -168,16 +181,6 @@ export default function PinCreateModal({
     // 写真失敗中の選び直しは、親が保持する再試行用 file も差し替える
     // (「写真だけ再試行」が新しい写真を送るようにする)。
     if (photoUploadFailed) onReplaceRetryPhoto?.(file);
-  };
-
-  const clearPhoto = () => {
-    setPhotoPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
-    });
-    setPhotoFile(null);
-    if (cameraInputRef.current) cameraInputRef.current.value = "";
-    if (galleryInputRef.current) galleryInputRef.current.value = "";
   };
 
   const handleSubmit = () => {
@@ -209,21 +212,28 @@ export default function PinCreateModal({
 
         {/* ⚠位置を直す唯一の導線 (2026-07-29)。ドラッグ移動は作らない方針なので、
             これが無いと「タップを間違えた」時の直し方がキャンセル＝写真ごと破棄
-            しか無くなる。写真は保持したまま地図タップ待ちへ戻す。 */}
-        <div className="mb-3">
-          <button
-            type="button"
-            onClick={onReplaceLocation}
-            disabled={busy}
-            className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
-            data-testid="pin-create-replace-location"
-          >
-            地図で置き直す
-          </button>
-          <p className="mt-1 text-[11px] leading-tight text-gray-500 dark:text-gray-400">
-            写真はそのままで、もう一度地図をタップできます。
-          </p>
-        </div>
+            しか無くなる。写真は保持したまま地図タップ待ちへ戻す。
+            ⚠渡すのは**モーダル内で差し替えた現在の写真** (photoFile)。親が持つ
+            開いた時点の写真を使うと差し替えが黙って元に戻る (@codex #336 P2)。
+            ⚠写真送信の失敗後 (photoUploadFailed) は**出さない** (@codex #336 P2)。
+            pin は既に元の座標で作成済みで、置き直してタップしても既存 pin の
+            位置は変わらず、同じ写真でもう1本の重複 pin を作ってしまう。 */}
+        {!photoUploadFailed && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => onReplaceLocation(photoFile)}
+              disabled={busy}
+              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+              data-testid="pin-create-replace-location"
+            >
+              地図で置き直す
+            </button>
+            <p className="mt-1 text-[11px] leading-tight text-gray-500 dark:text-gray-400">
+              写真はそのままで、もう一度地図をタップできます。
+            </p>
+          </div>
+        )}
 
         {lockPinType ? (
           // 巡回外は候補固定。選べない理由まで書くと現場で迷わない。
@@ -280,10 +290,13 @@ export default function PinCreateModal({
           </span>
         </label>
 
-        {/* 写真 (任意 / 1 枚)。撮影 = 単発の写真取得。動画 / 連続撮影はしない。 */}
+        {/* 写真 (必須 / 1 枚)。撮影 = 単発の写真取得。動画 / 連続撮影はしない。
+            ⚠「取り消す」は置かない (@codex #336 P2)。全てのピンが写真とセット
+            (2026-07-29 業務判断) なので、外せると廃止したはずの写真なしピンが
+            ここから作れてしまう。撮り直し/選び直し (差し替え) だけを許す。 */}
         <div className="mb-3">
           <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
-            写真 (任意)
+            写真（必須）
           </span>
           <input
             ref={cameraInputRef}
@@ -335,15 +348,6 @@ export default function PinCreateModal({
                 data-testid="pin-create-photo-thumb"
                 className="h-16 w-16 rounded border border-gray-200 dark:border-gray-800 object-cover"
               />
-              <button
-                type="button"
-                onClick={clearPhoto}
-                disabled={busy || photoUploadFailed}
-                data-testid="pin-create-photo-clear"
-                className="text-[11px] text-gray-500 dark:text-gray-400 underline hover:text-gray-800 dark:hover:text-gray-100 disabled:opacity-60"
-              >
-                写真を取り消す
-              </button>
             </div>
           )}
         </div>
