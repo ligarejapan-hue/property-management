@@ -89,6 +89,9 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
 const DEFAULT_ZOOM = 14;
+// 巡回開始時に寄せる倍率。既定 (14) は市区町村が入る広さで、街を歩きながら
+// 使うには広すぎる。17 なら建物の並びが判別できる。
+const TRIP_START_ZOOM = 17;
 const FETCH_DEBOUNCE_MS = 500;
 const PROPERTY_LIMIT = 200;
 const PIN_LIMIT = 100;
@@ -707,8 +710,12 @@ export default function FieldSurveyMap({
   // 別 session 化) ではカメラファーストの撮影待ち状態を持ち越さない
   // (effect でなくイベント駆動で reset し、cascading render を避ける)。
   const prevActiveSessionIdRef = useRef<string | null>(null);
+  // 巡回開始時に一度だけ走らせる自動処理の予約。開始の瞬間には session id も
+  // 現在地もまだ無いため、その場では実行できない (下の effect で消化する)。
+  const autoStartRecordingRef = useRef(false);
+  const autoCenterOnStartRef = useRef(false);
   const handleActiveSessionChange = useCallback(
-    (s: ActiveSessionLike | null) => {
+    (s: ActiveSessionLike | null, opts?: { justStarted?: boolean }) => {
       const nextId = s?.id ?? null;
       const prevId = prevActiveSessionIdRef.current;
       if (prevId !== nextId) {
@@ -724,6 +731,24 @@ export default function FieldSurveyMap({
         // それ以外の遷移 (巡回の終了 / 別巡回への切替) は従来どおり破棄する。
         if (prevId !== null || nextId === null) {
           resetCameraFirst();
+        }
+        // ⚠**巡回開始 = 位置記録開始 + 現在地へ寄せる** (2026-07-29 業務判断)。
+        // 本番の巡回 11 件中 9 件が軌跡ゼロだった原因は、記録の開始が別操作
+        // でパネルの奥にあり資料にも載っていなかったこと。ここで予約し、
+        // session id が届いてから実行する (下の effect)。
+        //
+        // ⚠**復元 (justStarted=false) では自動開始しない**。再読込や画面復帰の
+        // たびに始めると、休憩中に自分で「位置記録停止」を押した人の意思を
+        // 覆して休憩場所を記録してしまう。
+        if (prevId === null && nextId !== null && opts?.justStarted) {
+          autoStartRecordingRef.current = true;
+          autoCenterOnStartRef.current = true;
+        }
+        // 終了したら予約を取り消す。位置が最後まで取れないまま終わった場合に
+        // 予約が残ると、次に地図が用意できた時点で意図せず寄ってしまう。
+        if (nextId === null) {
+          autoStartRecordingRef.current = false;
+          autoCenterOnStartRef.current = false;
         }
         // ピン追加モードも巡回の終了/切替で解除する。連続ピンモードで保存後も
         // ON が続くため、ここで畳まないと巡回終了後に「・ピン追加中」表示が
@@ -747,6 +772,43 @@ export default function FieldSurveyMap({
     },
     [resetCameraFirst, bumpRefetch],
   );
+
+  // 巡回が始まったら位置記録も始める。
+  // ⚠**同じイベントの中で recorder.start() を呼んではいけない**。recorder は
+  // sessionId を effect で ref に同期するため、handleActiveSessionChange の
+  // 時点では sessionId がまだ null で、start() が「巡回中でない」と判断して
+  // 何もせずに戻る。session id が state に載った後のこの effect で始める。
+  useEffect(() => {
+    if (!autoStartRecordingRef.current) return;
+    if (!activeSession?.id) return;
+    autoStartRecordingRef.current = false;
+    recorder.start();
+    // recorder は毎レンダー新しい object になるが、上の ref ガードにより
+    // 予約が立っている時しか走らないので再実行は無害。
+  }, [activeSession?.id, recorder]);
+
+  // 開始したら現在地へ寄せ、街歩き用の倍率まで上げる。
+  // ⚠位置が取れるまでは**予約を落とさずに戻る**。屋内・電波が弱い場所では
+  // 数十秒かかることがあり、ここで諦めると寄らないまま巡回が始まる。
+  // 位置が最後まで取れなくても巡回自体は続く (許可拒否・HTTP・圏外)。
+  useEffect(() => {
+    if (!autoCenterOnStartRef.current) return;
+    const pos = recorder.latestPositionForDisplay;
+    if (!pos) return;
+    const m = mapInstance as {
+      panTo?: (p: { lat: number; lng: number }) => void;
+      setZoom?: (z: number) => void;
+    } | null;
+    // 地図がまだ用意できていない間も予約を残す (用意でき次第この effect が
+    // 再実行される)。ここで落とすと「位置は取れたが地図が間に合わなかった」
+    // 時に永久に寄らない。
+    if (!m || typeof m.panTo !== "function") return;
+    autoCenterOnStartRef.current = false;
+    m.panTo({ lat: pos.lat, lng: pos.lng });
+    if (typeof m.setZoom === "function") m.setZoom(TRIP_START_ZOOM);
+    // activeSession?.id も依存に入れる。2回目の巡回で現在地の値がたまたま
+    // 前回と同一参照のままだと、予約を立てても再実行されず寄らない。
+  }, [activeSession?.id, mapInstance, recorder.latestPositionForDisplay]);
 
   // 保存完了トーストの timer を unmount で必ず止める。
   useEffect(() => {
