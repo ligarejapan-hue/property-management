@@ -417,11 +417,8 @@ describe("field-survey-map.tsx — Phase 1-F-3 統合", () => {
     expect(m).toMatch(/recorder\.status/);
   });
 
-  it("Phase 1-G の pin 追加 map click は維持されている (handleMapClick 経路)", () => {
-    expect(MAP_SRC).toMatch(/const handleMapClick/);
-    expect(MAP_SRC).toMatch(/onMapClick=\{handleMapClick\}/);
-    expect(MAP_SRC).toMatch(/pinAddMode/);
-  });
+  // ⚠2026-07-29: 地図タップは「撮影後のタップ待ち」専用になった
+  // （写真なしのピンは作らない）。判定は field-survey-pin-tap-source.test.ts。
 
   it("現在地マーカーで AdvancedMarker を使わない (pin click 干渉防止)", () => {
     // 現在地は CurrentLocationMarker (別ファイル・AdvancedMarker 不使用) を使う。

@@ -111,7 +111,7 @@ describe("2. 技術用語「session」の一掃 (利用者向け文言)", () => 
     expect(readSrc("src/components/field-survey/pin-create-modal.tsx")).toMatch(
       /巡回外の撮影として保存します/,
     );
-    expect(MAP_SRC).toMatch(/巡回を開始してから現在地を取得してください/);
+    // ⚠2026-07-29: 「現在地を使う」廃止によりこの文言は消えた。
     expect(readSrc("src/lib/field-survey-trip-util.ts")).toMatch(
       /すでに巡回中です/,
     );

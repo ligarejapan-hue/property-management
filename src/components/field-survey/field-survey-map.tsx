@@ -52,15 +52,11 @@ import {
 } from "@/lib/field-survey-coverage";
 import { useFieldSurveyLocationRecorder } from "@/components/field-survey/use-field-survey-location-recorder";
 import type { ActiveSessionLike } from "@/lib/field-survey-trip-util";
-import PinAddModeToggle from "@/components/field-survey/pin-add-mode-toggle";
 import PinCreateModal from "@/components/field-survey/pin-create-modal";
 import CameraFirstButton from "@/components/field-survey/camera-first-button";
 import CameraFirstBanner from "@/components/field-survey/camera-first-banner";
 import {
   cameraFirstButtonState,
-  cameraFirstCandidateFromPosition,
-  cameraFirstFallbackMessage,
-  isCameraPrefetchFresh,
   type CameraFirstPhase,
 } from "@/lib/field-survey-camera-first";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
@@ -137,14 +133,6 @@ interface PinRow {
 }
 
 type Layer = "properties" | "pins" | "coverage" | "tracks";
-
-/**
- * 撮影と並行して走らせる現在地取得の結果。
- * 座標は保持するが console / ログには出さない (PII 扱い)。
- */
-type CameraPrefetchResult =
-  | { ok: true; pos: GeolocationPosition }
-  | { ok: false; code: number | null };
 
 export default function FieldSurveyMap({
   apiKey,
@@ -289,9 +277,9 @@ export default function FieldSurveyMap({
   //
   // tristate を維持する: canWritePin / canManagePin は boolean | null。
   //   null  = 判定不能（取得中 / 取得失敗 / 進入時 refresh 中 / 未取得）→ UI は押下可とし
-  //           API 403 で委譲（PinAddModeToggle は disable しない）。
+  //           API 403 で委譲（撮影ボタンは disable しない）。
   //   true  = field_survey:write|manage を granted===true で保有。
-  //   false = 取得済みだが未付与 → PinAddModeToggle を disable。
+  //   false = 取得済みだが未付与 → 撮影ボタンを disable。
   // 取得中/取得失敗を [] や false へ collapse すると「権限がありません」を誤表示するため、
   // 従来の「fetch 未完了/失敗時は null 据え置き」を permissionsLoading/Error/null で再現する。
   // Codex P2: 明示 deny（granted:false）/ 欠損 entry は granted===true 判定で安全側 false。
@@ -338,7 +326,7 @@ export default function FieldSurveyMap({
 
   // tristate 導出（純関数・context 値の派生・state 持ち越しなし）。進入時 refresh 中
   // （pending）・provider 取得中（loading）・取得失敗（error）・未取得（null）は判定不能
-  // null（= API 403 委譲）に倒す。ここで [] や false に倒すと PinAddModeToggle が
+  // null（= API 403 委譲）に倒す。ここで [] や false に倒すと撮影ボタンが
   // 「権限がありません」を誤表示するため、tristate の null を維持して stale 権限表示を防ぐ。
   const {
     canWritePin,
@@ -413,7 +401,6 @@ export default function FieldSurveyMap({
     };
   }, [permissionsRefreshPending, permissionsLoading, permissionsError, mePermissions]);
 
-  const [pinAddMode, setPinAddMode] = useState(false);
   // 地図 click / 「現在地を使う」/ カメラファーストで確定した作成候補座標。
   // cameraPhoto はカメラファースト経由の撮影済み写真 (modal を選択済みで開く)。
   // cameraPhotoPreviewUrl は同写真の preview 用 objectURL (イベントハンドラ内で
@@ -492,11 +479,12 @@ export default function FieldSurveyMap({
   // カメラファースト (撮って登録): 撮影→現在地取得→ピン作成 modal の進行状態。
   const [cameraFirstPhase, setCameraFirstPhase] =
     useState<CameraFirstPhase>("idle");
-  // 現在地が取れず地図タップ待ちへフォールバックした理由の案内文。
-  const [cameraFirstNotice, setCameraFirstNotice] = useState<string | null>(
-    null,
-  );
-  // 撮影済みで位置未確定の写真 (locating / awaiting-map-tap の間だけ保持)。
+  // phase を closure から読むための ref（イベント駆動の後始末判定に使う）。
+  const cameraFirstPhaseRef = useRef<CameraFirstPhase>("idle");
+  useEffect(() => {
+    cameraFirstPhaseRef.current = cameraFirstPhase;
+  }, [cameraFirstPhase]);
+  // 撮影済みで位置未確定の写真 (地図タップ待ちの間だけ保持)。
   const cameraPhotoFileRef = useRef<File | null>(null);
   // 今回の作成候補がカメラファースト由来か。finalize で詳細パネルを開かず
   // トースト表示にして、次の撮影へすぐ移れるようにする。
@@ -514,11 +502,6 @@ export default function FieldSurveyMap({
   useEffect(() => {
     createCandidateOpenRef.current = !!createCandidate;
   }, [createCandidate]);
-  // 最新のカメラ発行 token。共有 token (currentLocationRequestIdRef) が他経路
-  // (モーダル操作 / 現在地を使う / session 再取得) で bump された遅延 callback が、
-  // 自分がまだ最新のカメラ要求か判定して後始末するための照合用。
-  // これが無いと phase が "locating" のまま固着し FAB が復帰不能になる。
-  const cameraRequestIdRef = useRef(0);
   // モバイルの表示切替パネル開閉 (ControlPanel から持ち上げ)。展開中は
   // FAB / banner がパネル下部を覆ってタップを遮るため描画を止める。
   const [panelOpen, setPanelOpen] = useState(false);
@@ -535,6 +518,11 @@ export default function FieldSurveyMap({
   // Phase 1-H: pin 作成済みだが写真アップロードだけ失敗した状態。modal を閉じず
   // 「写真だけ再試行 / 写真なしで完了」に誘導し、pin を作り直させない。
   const [photoUploadFailed, setPhotoUploadFailed] = useState(false);
+  // POST を撃つ前に client 側で確定できる保存不能の理由 (@codex #336 P2)。
+  // 例: タップ待ちの間に巡回が終了し quick_capture も無い場合、サーバは 403
+  // QUICK_CAPTURE_FORBIDDEN を返すが「権限がありません」では現場で直し方が
+  // 分からない。モーダル内の serverError と同じ場所に、直し方つきで出す。
+  const [clientCreateError, setClientCreateError] = useState<string | null>(null);
   // 作成済み pin id と再試行用の file を保持する (state 更新の非同期性を避け ref で持つ)。
   const createdPinIdRef = useRef<string | null>(null);
   const pendingPhotoFileRef = useRef<File | null>(null);
@@ -543,199 +531,19 @@ export default function FieldSurveyMap({
   const bumpRefetch = useCallback(() => {
     setRefetchNonce((n) => n + 1);
   }, []);
-  // 「現在地を使う」用の単発取得 state (RouteRecorder hook は流用しない)。
-  const [currentLocationLoading, setCurrentLocationLoading] = useState(false);
-  const [currentLocationError, setCurrentLocationError] = useState<string | null>(
-    null,
-  );
-  // Codex P2: getCurrentPosition は API 上キャンセル不能のため、late callback を
-  // 無視する token 方式で防御する。modal cancel / session 終了 / session 切替 /
-  // unmount で必ず token を進めて pending callback を無効化する。
-  const currentLocationRequestIdRef = useRef(0);
-  // activeSession.id を ref 同期して closure 内で最新値を読めるようにする
-  // (useCallback の stale closure 回避)。null = active session 無し。
-  const activeSessionIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    activeSessionIdRef.current = activeSession?.id ?? null;
-  }, [activeSession]);
+  // unmount 後の state 更新を止めるための印（遅延 callback の防御）。
   const fsMapMountedRef = useRef(true);
-  const invalidateCurrentLocationRequest = useCallback(() => {
-    currentLocationRequestIdRef.current += 1;
-    if (fsMapMountedRef.current) {
-      setCurrentLocationLoading(false);
-    }
-  }, []);
-  // unmount cleanup: late callback の state 更新を確実に止める
   useEffect(() => {
     fsMapMountedRef.current = true;
     return () => {
       fsMapMountedRef.current = false;
-      currentLocationRequestIdRef.current += 1;
     };
   }, []);
-  // active session が変わったら (null 化 / id 切替) pending request を無効化
-  useEffect(() => {
-    invalidateCurrentLocationRequest();
-  }, [activeSession, invalidateCurrentLocationRequest]);
-
-  const useCurrentLocationForCreate = useCallback(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setCurrentLocationError(
-        "この端末では位置情報の利用ができません。",
-      );
-      return;
-    }
-    // 巡回なし撮影 (quick_capture) では作成 modal が巡回外でも開くため、
-    // requestSessionId=null を正常系として通す (@codex R1)。位置情報が一時的に
-    // 失敗した後や、その場で許可を出し直した後に再取得できないと詰むため。
-    // 巡回外でも modal が開いていない状態での要求は従来どおり拒否する
-    // (パネルからの「現在地を使う」は巡回中のみ描画される)。
-    const requestSessionId = activeSessionIdRef.current;
-    if (!requestSessionId && !createCandidateOpenRef.current) {
-      setCurrentLocationError(
-        "巡回を開始してから現在地を取得してください。",
-      );
-      return;
-    }
-    // 新 token を発行 (= 進行中の旧 callback を無効化)
-    currentLocationRequestIdRef.current += 1;
-    const requestId = currentLocationRequestIdRef.current;
-    setCurrentLocationLoading(true);
-    setCurrentLocationError(null);
-    // 単発取得のみ。watchPosition は使わない。
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        // late callback ガード: unmount / token 不一致 / session 終了 or 切替
-        if (!fsMapMountedRef.current) return;
-        if (currentLocationRequestIdRef.current !== requestId) return;
-        // 巡回中に始めた取得は session 切替で無効化する (従来どおり)。巡回外
-        // (requestSessionId=null) の取得は途中で巡回が始まっても捨てない。
-        if (
-          requestSessionId !== null &&
-          activeSessionIdRef.current !== requestSessionId
-        )
-          return;
-        setCurrentLocationLoading(false);
-        // raw position を console / error に出さない
-        const lat = pos?.coords?.latitude;
-        const lng = pos?.coords?.longitude;
-        if (
-          typeof lat !== "number" ||
-          typeof lng !== "number" ||
-          !Number.isFinite(lat) ||
-          !Number.isFinite(lng)
-        ) {
-          setCurrentLocationError("現在地を取得できませんでした。");
-          return;
-        }
-        const acc = pos?.coords?.accuracy;
-        setCreateCandidate({
-          lat,
-          lng,
-          accuracy:
-            typeof acc === "number" && Number.isFinite(acc) ? acc : undefined,
-        });
-      },
-      (err) => {
-        if (!fsMapMountedRef.current) return;
-        if (currentLocationRequestIdRef.current !== requestId) return;
-        // 巡回中に始めた取得は session 切替で無効化する (従来どおり)。巡回外
-        // (requestSessionId=null) の取得は途中で巡回が始まっても捨てない。
-        if (
-          requestSessionId !== null &&
-          activeSessionIdRef.current !== requestSessionId
-        )
-          return;
-        setCurrentLocationLoading(false);
-        const code = (err as { code?: number })?.code;
-        if (code === 1) {
-          setCurrentLocationError(
-            "位置情報の利用が拒否されています。ブラウザ設定で許可してください。",
-          );
-        } else if (code === 3) {
-          setCurrentLocationError(
-            "現在地の取得がタイムアウトしました。",
-          );
-        } else {
-          setCurrentLocationError("現在地を取得できませんでした。");
-        }
-      },
-      { enableHighAccuracy: true, maximumAge: 5_000, timeout: 30_000 },
-    );
-  }, []);
-
-  // 撮影と並行して走らせる現在地取得の結果入れ。撮影ボタンを押した瞬間に開始し、
-  // 写真が返ってきた時点で解決済みなら待たずに保存画面を開く。
-  // この ref 自体は state を触らない (= カメラを閉じただけの場合は何も起きない)。
-  const cameraLocationPrefetchRef = useRef<{
-    requestId: number;
-    promise: Promise<CameraPrefetchResult>;
-    settled: boolean;
-    result?: CameraPrefetchResult;
-  } | null>(null);
-
-  /**
-   * 撮影ボタンを押した瞬間に現在地の取得を開始する (カメラ起動と並行)。
-   *
-   * 従来は「撮影完了 → 取得開始」の直列で、GPS が確定するまで保存画面が開かず
-   * 「現在地を取得中…」で待たせていた。撮影中に取得を進めておけば、写真が
-   * 返った時点で解決済みのことが多く、待ち時間なしで保存画面へ進める。
-   *
-   * - state は触らない。カメラを閉じただけ (写真なし) の場合は何も起きず、
-   *   結果は次のリセット / 次回の撮影開始で捨てられる。
-   * - 共有 token を bump するので、進行中だった別経路の取得は無効化される
-   *   (「現在地を使う」と同じ規約)。
-   */
-  const startCameraLocationPrefetch = useCallback(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      cameraLocationPrefetchRef.current = null;
-      return;
-    }
-    currentLocationRequestIdRef.current += 1;
-    const requestId = currentLocationRequestIdRef.current;
-    cameraRequestIdRef.current = requestId;
-    const entry: {
-      requestId: number;
-      promise: Promise<CameraPrefetchResult>;
-      settled: boolean;
-      result?: CameraPrefetchResult;
-    } = {
-      requestId,
-      settled: false,
-      promise: new Promise<CameraPrefetchResult>((resolve) => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({ ok: true, pos }),
-          (err) => {
-            const code = (err as { code?: number })?.code;
-            resolve({ ok: false, code: typeof code === "number" ? code : null });
-          },
-          { enableHighAccuracy: true, maximumAge: 5_000, timeout: 30_000 },
-        );
-      }),
-    };
-    // 解決済みかを同期的に判定できるようにしておく (待ちゼロなら
-    // 「現在地を取得中…」を一瞬も出さずに保存画面へ進める)。
-    void entry.promise.then((r) => {
-      entry.settled = true;
-      entry.result = r;
-    });
-    cameraLocationPrefetchRef.current = entry;
-  }, []);
-
-  // カメラファースト状態の一括リセット。撮影待ちの写真は破棄し、進行中の
-  // 現在地取得 callback も token bump で無効化する。
+  // 撮影状態の一括リセット。撮影待ちの写真は破棄する（「撮り直す」経路）。
   const resetCameraFirst = useCallback(() => {
-    currentLocationRequestIdRef.current += 1;
-    cameraLocationPrefetchRef.current = null;
-    // 照合 ID も無効化する (Codex P2): reset 後に届いた旧カメラ callback の
-    // 後始末分岐を発火させない。残したままだと後始末の resetCameraFirst が
-    // 共有 token を再 bump し、モーダルの「現在地を使う」など reset 後に
-    // 始まった新しい取得まで握り潰してしまう (取得中表示で固まる)。
-    cameraRequestIdRef.current = 0;
     cameraPhotoFileRef.current = null;
     createdFromCameraRef.current = false;
     setCameraFirstPhase("idle");
-    setCameraFirstNotice(null);
   }, []);
 
   // TripControls からの active session 通知。session の切替 (開始 / 終了 /
@@ -761,7 +569,15 @@ export default function FieldSurveyMap({
         // 場合は撮影を破棄しない (撮った写真を黙って失わない。@codex R1)。保存時に
         // activeSession?.id を見るので、そのまま新しい巡回へ紐づく。
         // それ以外の遷移 (巡回の終了 / 別巡回への切替) は従来どおり破棄する。
-        if (prevId !== null || nextId === null) {
+        // ⚠**地図タップ待ちの間は後始末しない** (2026-07-29)。位置をタップで
+        // 決めるようになり、待ち時間が「GPS 数秒」から「家を探してタップする
+        // まで数十秒」へ伸びた。この窓で巡回が終了/切替されると、撮った写真が
+        // 無言で消える。保存時に activeSession?.id を見るので、そのまま新しい
+        // 巡回へ紐づく（巡回開始側で既に採っている論法の対称適用）。
+        if (
+          (prevId !== null || nextId === null) &&
+          cameraFirstPhaseRef.current !== "awaiting-map-tap"
+        ) {
           resetCameraFirst();
         }
         // ⚠**巡回開始 = 位置記録開始 + 現在地へ寄せる** (2026-07-29 業務判断)。
@@ -782,11 +598,6 @@ export default function FieldSurveyMap({
           autoStartRecordingRef.current = false;
           autoCenterOnStartRef.current = false;
         }
-        // ピン追加モードも巡回の終了/切替で解除する。連続ピンモードで保存後も
-        // ON が続くため、ここで畳まないと巡回終了後に「・ピン追加中」表示が
-        // 残るのに OFF 導線 (パネル内トグル=巡回中のみ描画) が消えて復帰
-        // 不能になり、次の巡回開始時も暗黙 ON で復活してしまう。
-        setPinAddMode(false);
         // 種類の引き継ぎも巡回単位でリセットする (別の巡回に前回の種類を
         // 持ち越さない。既定 = candidate)。
         setLastPinType("candidate");
@@ -849,160 +660,21 @@ export default function FieldSurveyMap({
     };
   }, []);
 
-  // カメラファースト: 撮影ボタンを押した時点で開始した現在地取得 (prefetch) の
-  // 結果を使って、作成 modal を写真選択済みで開く。
-  // - 解決済みかつ十分に新しければ「現在地を取得中…」を出さずに開く (待ちゼロ)
-  // - 古い場合は取り直す。カメラを開けたまま移動すると、撮影地点ではなく
-  //   ボタンを押した地点の座標でピンが立ってしまう (@codex #329 R1)
-  // - まだ取得中なら従来どおり locating 表示にして待つ
-  // - 取れない環境 (http / 権限拒否 / タイムアウト) は「地図をタップして場所を
-  //   指定」へフォールバックする (写真は保持=撮り直し不要)
-  // token / mount / session ガードは「現在地を使う」と同型。
-  const handleCameraPhotoCaptured = useCallback(
-    (file: File) => {
-      // 巡回なし撮影では requestSessionId = null が正常系。撮影ボタン自体が
-      // 「巡回中 or quick_capture 権限」でしか描画されないため、ここで巡回を
-      // 要求しない (要求すると巡回外の撮影が即破棄される)。
-      const requestSessionId = activeSessionIdRef.current;
-      if (createCandidateOpenRef.current) return;
-      cameraPhotoFileRef.current = file;
-
-      const fallbackToMapTap = (code: number | null, notice?: string) => {
-        setCameraFirstPhase("awaiting-map-tap");
-        setCameraFirstNotice(notice ?? cameraFirstFallbackMessage(code));
-      };
-
-      // 取得結果を state へ反映する。requestId は結果を持ってきた prefetch の
-      // もの (取り直した場合は新しい requestId) を使う。
-      const apply = (requestId: number, result: CameraPrefetchResult) => {
-        if (!fsMapMountedRef.current) return;
-        if (
-          currentLocationRequestIdRef.current !== requestId ||
-          // 巡回中に始めた撮影は session 切替で無効化する (従来どおり)。
-          // 巡回外で始めた撮影 (requestSessionId=null) は、取得中に巡回が
-          // 開始されても破棄しない。保存時に activeSession?.id を見るので
-          // 新しい巡回へ自然に紐づく (写真を黙って失わない)。
-          (requestSessionId !== null &&
-            activeSessionIdRef.current !== requestSessionId)
-        ) {
-          // 共有 token の bump / session 切替で無効化された遅延結果。
-          // 自分がまだ最新のカメラ要求なら (新しい撮影が始まっていなければ)
-          // "locating" 固着と写真リークを防ぐため状態を後始末する。
-          if (cameraRequestIdRef.current === requestId) {
-            resetCameraFirst();
-          }
-          return;
-        }
-        if (createCandidateOpenRef.current) {
-          // 取得中に別経路 (ピン追加モードの地図タップ) で modal が開いた。
-          // カメラ側の写真は破棄して衝突させない。
-          resetCameraFirst();
-          return;
-        }
-        if (!result.ok) {
-          fallbackToMapTap(result.code);
-          return;
-        }
-        const cand = cameraFirstCandidateFromPosition(result.pos);
-        if (!cand) {
-          fallbackToMapTap(null);
-          return;
-        }
-        const photo = cameraPhotoFileRef.current ?? undefined;
-        cameraPhotoFileRef.current = null;
-        createdFromCameraRef.current = true;
-        setCameraFirstPhase("idle");
-        setCameraFirstNotice(null);
-        setCreateCandidate({
-          ...cand,
-          cameraPhoto: photo,
-          cameraPhotoPreviewUrl: photo ? URL.createObjectURL(photo) : undefined,
-        });
-      };
-
-      // prefetch の結果を消費する。settled / 未解決のどちらの経路でも
-      // **同じ鮮度検証**を通す。
-      // ⚠settled=false でも「カメラ起動前に取得済み」の場合がある
-      // (ネイティブカメラがページを一時停止すると、解決済みでも .then が
-      //  走らないまま change が先に届く。@codex #329 R2)。待機側で検証を
-      // 省くとこの経路だけ古い座標が通ってしまう。
-      // 取り直しは1回まで (無限ループ防止)。撮った写真は捨てない。
-      const consume = (
-        entry: {
-          requestId: number;
-          promise: Promise<CameraPrefetchResult>;
-          settled: boolean;
-          result?: CameraPrefetchResult;
-        },
-        attempt: number,
-      ) => {
-        // 取り直す (1回まで)。上限に達したら手動指定へ倒す。いずれの経路でも
-        // 撮影済みの写真は保持したまま = 撮り直しを要求しない。
-        const retryOrFallback = (code: number | null, notice?: string) => {
-          if (attempt >= 1) {
-            fallbackToMapTap(code, notice);
-            return;
-          }
-          startCameraLocationPrefetch();
-          const renewed = cameraLocationPrefetchRef.current;
-          if (!renewed) {
-            fallbackToMapTap(code, notice);
-            return;
-          }
-          consume(renewed, attempt + 1);
-        };
-        const finish = (r: CameraPrefetchResult) => {
-          if (currentLocationRequestIdRef.current !== entry.requestId) {
-            // より新しい撮影が始まった / 別経路で作成 modal が開いた場合は
-            // 従来どおり破棄する (apply のガードに委ねる)。
-            if (
-              createCandidateOpenRef.current ||
-              cameraRequestIdRef.current !== entry.requestId
-            ) {
-              apply(entry.requestId, r);
-              return;
-            }
-            // 自分がまだ最新の撮影なのに token だけ進んでいる = 巡回の復元
-            // (null→active) などで共有 token が bump されたケース
-            // (@codex #329 R3)。撮った写真を捨てず、取り直して続行する。
-            retryOrFallback(null, "撮った場所の現在地を取得できませんでした。地図をタップして、撮った場所を指定してください。");
-            return;
-          }
-          if (r.ok && !isCameraPrefetchFresh(r.pos)) {
-            // カメラを開けたまま移動した = 撮影地点とずれる。取り直す。
-            retryOrFallback(null, "撮った場所の現在地を取得できませんでした。地図をタップして、撮った場所を指定してください。");
-            return;
-          }
-          if (!r.ok && r.code !== 1) {
-            // 一時的な失敗 (timeout / 位置不明 / 不詳) は撮影後に取り直せば
-            // 成功し得る。カメラ滞在が prefetch の制限時間を超えた場合に
-            // 即あきらめないため (@codex #329 R3)。
-            // 権限拒否 (code 1) は取り直しても無駄なので即フォールバック。
-            retryOrFallback(r.code);
-            return;
-          }
-          apply(entry.requestId, r);
-        };
-        if (entry.settled && entry.result) {
-          // 待たせずにその場で判定 (新しければ locating を一瞬も出さない)。
-          finish(entry.result);
-          return;
-        }
-        setCameraFirstPhase("locating");
-        setCameraFirstNotice(null);
-        void entry.promise.then(finish);
-      };
-      const prefetch = cameraLocationPrefetchRef.current;
-      if (!prefetch) {
-        // geolocation 非対応、または撮影開始の通知が来ていない (想定外) 場合は
-        // 場所指定へ回す。写真は保持したままなので撮り直しは不要。
-        fallbackToMapTap(null);
-        return;
-      }
-      consume(prefetch, 0);
-    },
-    [resetCameraFirst, startCameraLocationPrefetch],
-  );
+  // 撮影が終わったら**必ず地図タップ待ちにする** (2026-07-29 業務判断)。
+  //
+  // ⚠以前はここで現在地 (GPS) を取り、その座標でピンを自動作成していた。
+  // GPS が返すのは「立っている場所」＝**道路**なので、ピンが道路に立ち、
+  // どの家の写真か分からなくなる。現地で家の前に立っているうちに家の上を
+  // タップしてもらう方が、手数は同じで確実。
+  //
+  // ⚠**同期で2手だけ**にする。写真を ref に入れてから phase を変える順序は
+  // 不変条件（先に phase を変えると、その瞬間の描画が写真の無い状態を掴む）。
+  const handleCameraPhotoCaptured = useCallback((file: File) => {
+    // 作成 modal が既に開いているなら二重に開かない (別経路との衝突防止)。
+    if (createCandidateOpenRef.current) return;
+    cameraPhotoFileRef.current = file;
+    setCameraFirstPhase("awaiting-map-tap");
+  }, []);
 
   const pinMutations = useFieldSurveyPinMutations();
   const photoMutations = useFieldSurveyPinPhotoMutations();
@@ -1021,7 +693,6 @@ export default function FieldSurveyMap({
       // 解決済みとして捨てる (@codex #331 R1)。捨てないと直後に開く詳細パネルが
       // 「離れている間に写真の処理が失敗しました」と蒸し返す。
       clearPhotoMutationFailure(pinId);
-      invalidateCurrentLocationRequest();
       setCreateCandidate(null);
       setPhotoUploadFailed(false);
       createdPinIdRef.current = null;
@@ -1042,7 +713,7 @@ export default function FieldSurveyMap({
       // Phase 1-H: 写真なしの作成後は detail panel を開く。
       setDetailPinId(pinId);
     },
-    [invalidateCurrentLocationRequest],
+    [],
   );
 
   // トーストの「取り消す」: 直前に作成した pin を論理削除 (アーカイブ) する。
@@ -1082,6 +753,18 @@ export default function FieldSurveyMap({
       },
       file: File | null,
     ) => {
+      // ⚠モーダルを開いている間に巡回が終了する経路が残る (12h放置確認/24h
+      // 自動終了・別端末からの終了)。quick_capture が無ければ POST は必ず 403
+      // なので、撃つ前に止めて**直し方**を案内する (@codex #336 P2)。写真は
+      // モーダル内に保持されたまま。「地図で置き直す」→ 巡回開始 → 再タップで
+      // そのまま保存できる。
+      if (!activeSession?.id && !canQuickCapture) {
+        setClientCreateError(
+          "巡回が終了したため、このままでは保存できません。「地図で置き直す」で一度戻り、「巡回を開始」を押してから、もう一度地図をタップしてください（写真は保持されます）。",
+        );
+        return;
+      }
+      setClientCreateError(null);
       const r = await pinMutations.createPin({
         lat: input.lat,
         lng: input.lng,
@@ -1101,7 +784,6 @@ export default function FieldSurveyMap({
         setLastPinType(input.pinType);
       }
       // pin 作成成功。pending な「現在地を使う」callback を無効化し marker を再取得。
-      invalidateCurrentLocationRequest();
       bumpRefetch();
       const newPinId = r.data.id;
       createdPinIdRef.current = newPinId;
@@ -1121,10 +803,10 @@ export default function FieldSurveyMap({
     },
     [
       activeSession,
+      canQuickCapture,
       pinMutations,
       photoMutations,
       bumpRefetch,
-      invalidateCurrentLocationRequest,
       finalizePinCreate,
     ],
   );
@@ -1154,59 +836,64 @@ export default function FieldSurveyMap({
     detailPanelBusyRef.current = busy;
   }, []);
 
+  // 地図タップで**ピンの位置を決める**。これが唯一のピン作成経路
+  // (2026-07-29 業務判断: 写真なしのピンは作らない / 現在地への自動配置もしない)。
   const handleMapClick = useCallback(
     (latLng: { lat: number; lng: number }) => {
-      // 既に modal 表示中はスルー (誤操作防止)
+      // 既に modal 表示中はスルー (誤操作防止)。
       if (createCandidate) return;
-      // 巡回中でなくても、巡回なし撮影の「地図をタップして場所を指定」
-      // (現在地が取れない HTTP 本番での主経路) だけは通す。
-      // ピン追加モード経由の新規作成は従来どおり巡回中のみ (後段のモード判定で止まる)。
-      if (!activeSession && cameraFirstPhase !== "awaiting-map-tap") return;
-      // 詳細パネルで作業中なら新規作成のタップを無視する (パネルは維持)。
-      if (detailPinId && detailPanelBusyRef.current) return;
-      // カメラファーストの位置指定待ちを最優先 (pin 追加モードと独立に動く)。
-      // タップ座標 + 撮影済み写真で作成 modal を開く。
-      if (cameraFirstPhase === "awaiting-map-tap") {
-        const photo = cameraPhotoFileRef.current ?? undefined;
-        cameraPhotoFileRef.current = null;
-        createdFromCameraRef.current = true;
-        setCameraFirstPhase("idle");
-        setCameraFirstNotice(null);
-        // 開いたままの詳細パネルは閉じる (旧ピンのパネル残留と、スマホで
-        // bottom sheet が保存トーストを覆い隠すのを防ぐ)。
-        setDetailPinId(null);
-        setCreateCandidate({
-          lat: latLng.lat,
-          lng: latLng.lng,
-          cameraPhoto: photo,
-          cameraPhotoPreviewUrl: photo ? URL.createObjectURL(photo) : undefined,
-        });
-        setCurrentLocationError(null);
+      // ⚠**タップ待ちの時だけ**受け付ける。巡回中かどうかは見ない
+      // (巡回なし撮影 quick_capture も同じ経路を通るため)。
+      if (cameraFirstPhase !== "awaiting-map-tap") return;
+      // ⚠**タップ待ちの間に巡回が終了した場合** (@codex #336 P2)。写真は保持
+      // したままだが、巡回なし撮影の権限 (quick_capture) が無い利用者は
+      // このまま保存すると POST が 403 で必ず失敗する。モーダルを開いてから
+      // 詰ませず、タップの時点で「巡回を開始してから」と案内する
+      // (この状態に入るのは巡回中に撮影→待機中に終了、の経路だけ。
+      //  巡回外で撮影を始められるのは quick_capture 保有者のみのため)。
+      if (!activeSession && !canQuickCapture) {
+        setError(
+          "巡回が終了しています。「巡回を開始」を押してから、もう一度地図をタップしてください（撮影した写真は保持されています）。",
+        );
         return;
       }
-      // mode OFF はスルー (誤操作防止)
-      if (!pinAddMode) return;
-      // 撮影の現在地取得中に通常経路で modal を開くなら、カメラ側は同期的に
-      // 破棄する (以後のモーダル操作による共有 token bump で "locating" に
-      // 固着させない。callback 側の後始末は防御の二重化)。
-      if (cameraFirstPhase === "locating") resetCameraFirst();
-      // 連続ピンモードでは詳細パネル表示中でも地図タップが有効なため、
-      // 新規作成の確定でパネルを閉じる (上と同旨)。
+      // 詳細パネルで作業中なら新規作成のタップを無視する (パネルは維持)。
+      if (detailPinId && detailPanelBusyRef.current) return;
+
+      const photo = cameraPhotoFileRef.current ?? undefined;
+      cameraPhotoFileRef.current = null;
+      createdFromCameraRef.current = true;
+      setCameraFirstPhase("idle");
+      setClientCreateError(null);
+      // 開いたままの詳細パネルは閉じる (旧ピンのパネル残留と、スマホで
+      // bottom sheet が保存トーストを覆い隠すのを防ぐ)。
       setDetailPinId(null);
-      setCreateCandidate({ lat: latLng.lat, lng: latLng.lng });
-      setCurrentLocationError(null);
+      setCreateCandidate({
+        lat: latLng.lat,
+        lng: latLng.lng,
+        cameraPhoto: photo,
+        cameraPhotoPreviewUrl: photo ? URL.createObjectURL(photo) : undefined,
+      });
     },
-    [
-      pinAddMode,
-      activeSession,
-      createCandidate,
-      cameraFirstPhase,
-      resetCameraFirst,
-      detailPinId,
-    ],
+    [createCandidate, cameraFirstPhase, detailPinId, activeSession, canQuickCapture],
   );
 
-  // カメラファーストボタンの表示 / 無効判定 (純関数)。
+  // 「置き直す」: タップ位置を間違えたときに、**写真を保持したまま**もう一度
+  // タップ待ちへ戻す。これが無いと直し方が「キャンセル＝写真ごと破棄」しか
+  // 無くなる（ドラッグ移動は作らない方針のため。2026-07-29）。
+  // ⚠保持するのは**モーダル内で差し替えた現在の写真** (引数・@codex #336 P2)。
+  // 開いた時点の写真 (candidate.cameraPhoto) を使うと、モーダル内で撮り直した
+  // 写真が黙って元に戻り、次のタップで**別の家の写真**が付く。
+  const handleReplaceLocation = useCallback((currentPhoto: File | null) => {
+    cameraPhotoFileRef.current = currentPhoto;
+    setCreateCandidate((c) => {
+      if (c?.cameraPhotoPreviewUrl) URL.revokeObjectURL(c.cameraPhotoPreviewUrl);
+      return null;
+    });
+    setClientCreateError(null);
+    setCameraFirstPhase("awaiting-map-tap");
+  }, []);
+
   const cameraButton = cameraFirstButtonState({
     hasActiveSession: !!activeSession,
     canCaptureWithoutTrip: canQuickCapture,
@@ -1235,7 +922,7 @@ export default function FieldSurveyMap({
             onError={setError}
             refetchNonce={refetchNonce}
             currentUserId={currentUserId}
-            captureMapClick={pinAddMode || cameraFirstPhase === "awaiting-map-tap"}
+            captureMapClick={cameraFirstPhase === "awaiting-map-tap"}
             onMapClick={handleMapClick}
             onOpenPinDetail={setDetailPinId}
           />
@@ -1252,13 +939,20 @@ export default function FieldSurveyMap({
               タップで詳細を開く: 前面 (zIndex) のこのマーカーが背後の通常マーカーの
               タップを奪うため onClick が無いと詳細を開けない。ユーザー操作時のみ
               setDetailPinId を呼ぶ (自動オープンしないので監査は二重計上されない・
-              タップは 1 回の意図的な閲覧として正しく監査される。@codex P2)。 */}
+              タップは 1 回の意図的な閲覧として正しく監査される。@codex P2)。
+              ⚠地図タップ待ちの間は onClick を渡さない (@codex #336 P2)。前面
+              (zIndex 1000) のこのマーカーが撮影した家を覆っていると、通常マーカー
+              以上に確実にタップを奪い、唯一の作成経路が成立しなくなる。 */}
           {focusPinPos && focusPinId && (
             <AdvancedMarker
               position={focusPinPos}
               zIndex={1000}
               title="指定した場所 (タップで詳細)"
-              onClick={() => setDetailPinId(focusPinId)}
+              onClick={
+                cameraFirstPhase === "awaiting-map-tap"
+                  ? undefined
+                  : () => setDetailPinId(focusPinId)
+              }
             >
               <Pin
                 background="#2563EB"
@@ -1304,9 +998,6 @@ export default function FieldSurveyMap({
           onBeforeSessionEnd={handleBeforeSessionEnd}
           recorder={recorder}
           hasActiveSession={!!activeSession}
-          pinAddMode={pinAddMode}
-          onTogglePinAddMode={() => setPinAddMode((v) => !v)}
-          canWritePin={canWritePin}
           showOthersLegendHint={canSeeOtherPins}
           onPanToCurrent={handlePanToCurrent}
         />
@@ -1319,17 +1010,12 @@ export default function FieldSurveyMap({
         {activeSession && cameraButton.visible && !panelOpen && (
           <CameraFirstButton
             disabled={cameraButton.disabled}
-            locating={cameraFirstPhase === "locating"}
             permissionDenied={canWritePin === false}
-            onCaptureStart={startCameraLocationPrefetch}
             onPhotoCaptured={handleCameraPhotoCaptured}
           />
         )}
         {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
-          <CameraFirstBanner
-            notice={cameraFirstNotice}
-            onCancel={resetCameraFirst}
-          />
+          <CameraFirstBanner onCancel={resetCameraFirst} />
         )}
 
         {/* 巡回していない時の地図下部。「巡回なしで撮影」権限があれば
@@ -1343,10 +1029,8 @@ export default function FieldSurveyMap({
               <CameraFirstButton
                 inline
                 disabled={cameraButton.disabled}
-                locating={cameraFirstPhase === "locating"}
                 permissionDenied={canWritePin === false}
-                onCaptureStart={startCameraLocationPrefetch}
-            onPhotoCaptured={handleCameraPhotoCaptured}
+                onPhotoCaptured={handleCameraPhotoCaptured}
               />
             )}
             <button
@@ -1443,7 +1127,6 @@ export default function FieldSurveyMap({
           <PinCreateModal
             initialLat={createCandidate.lat}
             initialLng={createCandidate.lng}
-            initialAccuracy={createCandidate.accuracy ?? null}
             initialPhotoFile={createCandidate.cameraPhoto ?? null}
             initialPhotoPreviewUrl={createCandidate.cameraPhotoPreviewUrl ?? null}
             // 巡回外の撮影は必ず「物件化候補」で始める。完成待ち一覧は
@@ -1452,21 +1135,19 @@ export default function FieldSurveyMap({
             initialPinType={activeSession ? lastPinType : "candidate"}
             sessionId={activeSession?.id ?? null}
             saving={pinMutations.createLoading}
-            serverError={pinMutations.createError}
+            serverError={clientCreateError ?? pinMutations.createError}
             photoUploading={photoMutations.uploadLoading}
             photoUploadFailed={photoUploadFailed}
             photoUploadErrorDetail={photoMutations.uploadError}
             onCancel={() => {
-              // Codex P2: pending geolocation callback を無効化してから modal を閉じる
-              invalidateCurrentLocationRequest();
               // キャンセルは finalizePinCreate を通らないので個別に捨てる
               // (作成済み pin があり写真送信が失敗していたケース)。
               if (createdPinIdRef.current) {
                 clearPhotoMutationFailure(createdPinIdRef.current);
               }
               setCreateCandidate(null);
-              setCurrentLocationError(null);
               setPhotoUploadFailed(false);
+              setClientCreateError(null);
               createdPinIdRef.current = null;
               pendingPhotoFileRef.current = null;
               // カメラファースト経由の candidate を破棄した場合も origin flag を戻す
@@ -1474,11 +1155,7 @@ export default function FieldSurveyMap({
             }}
             onSubmit={(payload, file) => {
               void handlePinCreateSubmit(
-                {
-                  ...payload,
-                  accuracy:
-                    payload.accuracy ?? createCandidate.accuracy ?? undefined,
-                },
+                payload,
                 file,
               );
             }}
@@ -1490,9 +1167,7 @@ export default function FieldSurveyMap({
               pendingPhotoFileRef.current = file;
             }}
             onFinishWithoutPhoto={handleFinishWithoutPhoto}
-            onUseCurrentLocation={useCurrentLocationForCreate}
-            currentLocationLoading={currentLocationLoading}
-            currentLocationError={currentLocationError}
+            onReplaceLocation={handleReplaceLocation}
           />
         )}
 
@@ -1551,9 +1226,6 @@ function ControlPanel({
   onBeforeSessionEnd,
   recorder,
   hasActiveSession,
-  pinAddMode,
-  onTogglePinAddMode,
-  canWritePin,
   showOthersLegendHint,
   onPanToCurrent,
 }: {
@@ -1604,9 +1276,6 @@ function ControlPanel({
   onBeforeSessionEnd: () => Promise<boolean>;
   recorder: ReturnType<typeof useFieldSurveyLocationRecorder>;
   hasActiveSession: boolean;
-  pinAddMode: boolean;
-  onTogglePinAddMode: () => void;
-  canWritePin: boolean | null;
   /** 凡例に「白いふちどり = 他の担当者」を出すか (read_all/manage 保持者のみ)。 */
   showOthersLegendHint: boolean;
   onPanToCurrent: () => void;
@@ -1625,10 +1294,9 @@ function ControlPanel({
         aria-expanded={panelOpen}
         className="pointer-events-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 md:hidden"
       >
-        {/* ラベルは排他表示で短く保つ (ピン追加は巡回中にしか ON にならない)。
-            併記で長くなると左上の地図/航空写真ボタンに重なりタップを奪う
-            (過去に実機で発生した既知ホットスポット)。 */}
-        表示切替{pinAddMode ? "・ピン追加" : hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
+        {/* ラベルは短く保つ。長くなると左上の地図/航空写真ボタンに重なり
+            タップを奪う (過去に実機で発生した既知ホットスポット)。 */}
+        表示切替{hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
       </button>
       <div
         className={`${panelOpen ? "mt-2 block" : "hidden"} pointer-events-auto min-h-0 w-56 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900 md:mt-0 md:block`}
@@ -1871,16 +1539,6 @@ function ControlPanel({
         />
       )}
 
-      {/* Phase 1-G: active session 中のみ ピン追加 toggle を出す。
-          field_survey:write 不所持と既知なら disable、判定不能なら API 403 を
-          汎用エラーで処理する。 */}
-      {hasActiveSession && (
-        <PinAddModeToggle
-          active={pinAddMode}
-          onToggle={onTogglePinAddMode}
-          canWrite={canWritePin}
-        />
-      )}
       </div>
     </div>
   );
@@ -2308,6 +1966,9 @@ function MapDataLayer({
         const lat = ll.lat();
         const lng = ll.lng();
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        // タップ待ち中に開いていた吹き出しは閉じる (作成モーダルの背後に
+        // 古い吹き出しが残らないように)。
+        setSelected(null);
         onMapClick({ lat, lng });
       },
     );
@@ -2331,12 +1992,22 @@ function MapDataLayer({
       {layers.tracks && (
         <CoverageTracksLayer lines={trackLines} visible={layers.tracks} />
       )}
+      {/* ⚠タップ待ち (captureMapClick) 中は marker に onClick を渡さない
+          (@codex #336 P2)。onClick を渡すと AdvancedMarker が clickable になり、
+          **撮影した家に既存の物件/ピン marker が乗っている場合、家の上への
+          タップが marker に奪われて吹き出しが開き、作成モーダルが永久に
+          開かない**。地図タップが唯一の作成経路なので、タップ待ち中は
+          marker を素通しにして map click へ落とす (タップした実座標が使える)。 */}
       {layers.properties &&
         properties.map((p) => (
           <AdvancedMarker
             key={p.id}
             position={{ lat: p.gpsLat, lng: p.gpsLng }}
-            onClick={() => setSelected({ kind: "property", row: p })}
+            onClick={
+              captureMapClick
+                ? undefined
+                : () => setSelected({ kind: "property", row: p })
+            }
             title={p.address}
           />
         ))}
@@ -2348,7 +2019,11 @@ function MapDataLayer({
           <AdvancedMarker
             key={pin.id}
             position={{ lat: pin.lat, lng: pin.lng }}
-            onClick={() => setSelected({ kind: "pin", row: pin })}
+            onClick={
+              captureMapClick
+                ? undefined
+                : () => setSelected({ kind: "pin", row: pin })
+            }
             title={formatPinType(pin.pinType)}
           >
             {/* 種別=色+グリフ / 対応済み=灰✓ / 他人=白縁 (凡例と純関数を共有) */}
@@ -2362,7 +2037,10 @@ function MapDataLayer({
           </AdvancedMarker>
         ))}
 
-      {selected && selected.kind === "property" && (
+      {/* ⚠タップ待ち中 (captureMapClick) は吹き出しを描かない (@codex #336 P2
+          と同根)。開いたままの吹き出しが撮影した家を覆うと、タップ先そのものが
+          塞がれる。タップ待ちが終われば (キャンセルで戻れば) 再表示される。 */}
+      {selected && !captureMapClick && selected.kind === "property" && (
         <InfoWindow
           position={{ lat: selected.row.gpsLat, lng: selected.row.gpsLng }}
           onCloseClick={() => setSelected(null)}
@@ -2374,6 +2052,7 @@ function MapDataLayer({
           marker と一緒に非表示にする (marker が消えたのに吹き出しだけ残ると
           位置の手がかりが無い浮遊 UI になる)。OFF に戻せば再表示される。 */}
       {selected &&
+        !captureMapClick &&
         selected.kind === "pin" &&
         !(hideClosedPins && selected.row.status === "closed") && (
         <InfoWindow

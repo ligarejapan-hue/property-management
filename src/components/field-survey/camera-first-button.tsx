@@ -15,8 +15,6 @@ import { useRef } from "react";
 
 interface CameraFirstButtonProps {
   disabled: boolean;
-  /** 現在地取得中 (撮影済み・位置解決待ち)。ラベルを進行表示に切替える。 */
-  locating: boolean;
   /** field_survey:write 未付与が確定している (title で理由を示す)。 */
   permissionDenied: boolean;
   /**
@@ -25,21 +23,13 @@ interface CameraFirstButtonProps {
    * bottom-14 left-1/2 を占めて重なるのを防ぐ)。
    */
   inline?: boolean;
-  /**
-   * 撮影を始める瞬間 (カメラ起動の直前) に一度だけ呼ばれる。
-   * 親はここで現在地の取得を先に走らせ、撮影と並行させる
-   * (撮影後に取得を始めると、その分だけ保存画面が開くのを待たせる)。
-   */
-  onCaptureStart?: () => void;
   onPhotoCaptured: (file: File) => void;
 }
 
 export default function CameraFirstButton({
   disabled,
-  locating,
   permissionDenied,
   inline = false,
-  onCaptureStart,
   onPhotoCaptured,
 }: CameraFirstButtonProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -70,13 +60,7 @@ export default function CameraFirstButton({
       />
       <button
         type="button"
-        onClick={() => {
-          // 現在地の取得を先に開始し、カメラ起動と並行させる。
-          // 同じユーザー操作 (click) 内で呼ぶので、権限プロンプトが必要な
-          // 初回でもジェスチャ由来として扱われる。
-          onCaptureStart?.();
-          inputRef.current?.click();
-        }}
+        onClick={() => inputRef.current?.click()}
         disabled={disabled}
         data-testid="camera-first-button"
         aria-label="写真を撮ってピンを登録"
@@ -84,7 +68,7 @@ export default function CameraFirstButton({
         className="pointer-events-auto flex items-center gap-2 rounded-full border border-indigo-700 bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500"
       >
         <span aria-hidden="true">📷</span>
-        {locating ? "現在地を取得中…" : "撮って登録"}
+        撮って登録
       </button>
       {/* title のツールチップはタッチ端末で出ないため、権限なしの理由は
           可視テキストでも示す (PinAddModeToggle と同文言)。 */}

@@ -17,47 +17,29 @@ function readSrc(rel: string): string {
 const MODAL = readSrc("src/components/field-survey/pin-create-modal.tsx");
 const MAP = readSrc("src/components/field-survey/field-survey-map.tsx");
 
-describe("ピン作成: GPS 精度表示 + 低精度警告", () => {
-  it("既存 util (formatAccuracyMeters / isLowAccuracyForDisplay) を再利用する", () => {
-    expect(MODAL).toMatch(
-      /import \{[\s\S]*?formatAccuracyMeters,[\s\S]*?isLowAccuracyForDisplay,[\s\S]*?\} from "@\/lib\/field-survey-current-location-util"/,
-    );
-    expect(MODAL).toMatch(
-      /const accuracyText = formatAccuracyMeters\(initialAccuracy\)/,
-    );
-    expect(MODAL).toMatch(
-      /const lowAccuracy = isLowAccuracyForDisplay\(initialAccuracy\)/,
-    );
+describe("ピン作成: GPS 精度表示は廃止 (2026-07-29)", () => {
+  // 位置を必ず地図タップで決めるようにしたので、GPS の精度はピンの位置と
+  // 無関係になった。「精度が低い」と出しても直しようがなく、判断を濁らせる。
+  // ⚠位置記録（巡回の軌跡）側の精度表示は別用途なので残っている。
+  it("作成モーダルに精度表示・低精度警告を持たない", () => {
+    expect(MODAL).not.toMatch(/pin-create-accuracy/);
+    expect(MODAL).not.toMatch(/pin-create-low-accuracy-warning/);
+    expect(MODAL).not.toMatch(/formatAccuracyMeters|isLowAccuracyForDisplay/);
   });
 
-  it("accuracy がある時だけ位置精度を表示する (地図タップは非表示)", () => {
-    expect(MODAL).toMatch(/initialAccuracy\?:\s*number \| null/);
-    // accuracyText が "—" (accuracy 無し) の時は精度行を出さない
-    expect(MODAL).toMatch(
-      /\{accuracyText !== "—" &&[\s\S]{0,200}?data-testid="pin-create-accuracy"/,
-    );
+  it("地図は accuracy を作成モーダルへ渡さない", () => {
+    expect(MAP).not.toMatch(/initialAccuracy/);
   });
 
-  it("低精度のときだけ警告を出し、取り直し/修正を案内する", () => {
-    const warn = MODAL.match(
-      /\{lowAccuracy &&[\s\S]*?data-testid="pin-create-low-accuracy-warning"[\s\S]*?<\/p>/,
+  it("位置記録側の精度表示は残す (別用途なので消さない)", () => {
+    const status = readSrc(
+      "src/components/field-survey/current-location-status.tsx",
     );
-    expect(warn).not.toBeNull();
-    const m = warn?.[0] ?? "";
-    expect(m).toMatch(/精度が低め/);
-    // 取り直し (現在地を使う) と 修正 (地図タップ) の両導線を案内
-    expect(m).toMatch(/現在地を使う/);
-    expect(m).toMatch(/地図をタップ/);
+    expect(status).toMatch(/field-survey-current-location-util/);
   });
 
-  it("map は createCandidate.accuracy を initialAccuracy として渡す", () => {
-    expect(MAP).toMatch(
-      /initialAccuracy=\{createCandidate\.accuracy \?\? null\}/,
-    );
-  });
-
-  it("accuracy / 座標を console に出さない (継続ガード)", () => {
-    // 精度・座標は表示専用。console/ログに流さない (PII 方針)。
+  // 継続: 座標を console に出さない
+  it("console に座標を出さない (継続)", () => {
     expect(MODAL).not.toMatch(/console\./);
   });
 });

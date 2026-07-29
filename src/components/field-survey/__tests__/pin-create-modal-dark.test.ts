@@ -104,13 +104,11 @@ describe("pin-create-modal dark mode", () => {
     expect(readSrc()).toContain("dark:border-gray-800");
   });
 
-  test("photo clear button has dark text (text-gray-400)", () => {
-    // text-gray-500 → dark:text-gray-400
+  // 「写真を取り消す」ボタンは廃止（写真必須化・@codex #336 P2）。
+  // 専用のダークモード表明 (dark:hover:text-gray-100) も一緒に落とした。
+  // dark:text-gray-400 は他要素（置き直す説明文など）でも使うため残して表明する。
+  test("photo section keeps dark text (text-gray-400)", () => {
     expect(readSrc()).toContain("dark:text-gray-400");
-  });
-
-  test("photo clear button has dark hover text (hover:text-gray-100)", () => {
-    expect(readSrc()).toContain("dark:hover:text-gray-100");
   });
 
   // ── Status banners ───────────────────────────────────────────────────────

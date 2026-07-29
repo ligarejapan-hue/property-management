@@ -25,10 +25,6 @@ import {
   type FieldSurveyPinType,
 } from "@/lib/field-survey-pin-util";
 import { FIELD_SURVEY_MEMO_MAX_LEN } from "@/lib/field-survey-constants";
-import {
-  formatAccuracyMeters,
-  isLowAccuracyForDisplay,
-} from "@/lib/field-survey-current-location-util";
 
 interface PinCreateModalProps {
   /** 地図クリック / 現在地で確定した座標。表示専用。 */
@@ -39,7 +35,6 @@ interface PinCreateModalProps {
    * (地図タップは undefined)。精度が悪い (>しきい値) と実際の家から離れた所に
    * ピンが落ちるため、値と低精度警告を表示して取り直し/修正を促す。
    */
-  initialAccuracy?: number | null;
   /**
    * カメラファースト (撮って登録) 経由で既に撮影済みの写真。
    * 指定時は modal を写真選択済み状態で開く (通常の地図タップ経路は null)。
@@ -98,15 +93,18 @@ interface PinCreateModalProps {
   onReplaceRetryPhoto?: (file: File) => void;
   /** 写真なしで完了 (pin は保存済み)。 */
   onFinishWithoutPhoto: () => void;
-  onUseCurrentLocation: () => void;
-  currentLocationLoading: boolean;
-  currentLocationError: string | null;
+  /**
+   * 写真を保持したまま地図タップ待ちへ戻す。
+   * ⚠**モーダル内で差し替えた「現在の」写真**を引数で渡す (@codex #336 P2)。
+   * 親が保持しているのは開いた時点の写真 (cameraPhoto) だけなので、渡さないと
+   * 差し替え後の写真が黙って元に戻り、別の家の写真が付く。
+   */
+  onReplaceLocation: (currentPhoto: File | null) => void;
 }
 
 export default function PinCreateModal({
   initialLat,
   initialLng,
-  initialAccuracy,
   initialPhotoFile,
   initialPhotoPreviewUrl,
   initialPinType,
@@ -121,9 +119,7 @@ export default function PinCreateModal({
   onRetryPhoto,
   onReplaceRetryPhoto,
   onFinishWithoutPhoto,
-  onUseCurrentLocation,
-  currentLocationLoading,
-  currentLocationError,
+  onReplaceLocation,
 }: PinCreateModalProps) {
   // 巡回なし撮影 (sessionId 無し) は種類を「物件化候補」に固定する。
   // 巡回外の pin は巡回履歴に出ないため、候補以外にすると完成待ち一覧
@@ -164,11 +160,16 @@ export default function PinCreateModal({
   // sessionId=null は「巡回なしで撮影」(field_survey:quick_capture) の正常系。
   // 巡回の有無を保存可否の条件にしない (権限判定はサーバーの POST /pins が行い、
   // 権限が無ければ 403 QUICK_CAPTURE_FORBIDDEN が serverError に出る)。
+  // ⚠**写真は必須** (@codex #336 P2)。この画面は撮影経由でしか開かない
+  // (ピン追加モード廃止 = 「写真なしのピンは作らない」2026-07-29 業務判断)。
+  // 写真を外して保存できると、廃止したはずの写真なしピンがここから作れて
+  // しまう。写真送信の失敗後 (photoUploadFailed) は pin 作成済みで、この
+  // 保存ボタン自体が出ない (回復用の再試行/終了ボタンに切り替わる)。
   const canSubmit =
-    !busy && Number.isFinite(initialLat) && Number.isFinite(initialLng);
-  // GPS 由来の精度表示 (地図タップは accuracy 無しで "—" → 非表示)。
-  const accuracyText = formatAccuracyMeters(initialAccuracy);
-  const lowAccuracy = isLowAccuracyForDisplay(initialAccuracy);
+    !busy &&
+    Number.isFinite(initialLat) &&
+    Number.isFinite(initialLng) &&
+    photoFile !== null;
 
   const handleFilePicked = (file: File | null) => {
     if (!file) return;
@@ -180,16 +181,6 @@ export default function PinCreateModal({
     // 写真失敗中の選び直しは、親が保持する再試行用 file も差し替える
     // (「写真だけ再試行」が新しい写真を送るようにする)。
     if (photoUploadFailed) onReplaceRetryPhoto?.(file);
-  };
-
-  const clearPhoto = () => {
-    setPhotoPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
-    });
-    setPhotoFile(null);
-    if (cameraInputRef.current) cameraInputRef.current.value = "";
-    if (galleryInputRef.current) galleryInputRef.current.value = "";
   };
 
   const handleSubmit = () => {
@@ -217,56 +208,32 @@ export default function PinCreateModal({
           <dd data-testid="pin-create-lat">{formatCoord(initialLat)}</dd>
           <dt>経度</dt>
           <dd data-testid="pin-create-lng">{formatCoord(initialLng)}</dd>
-          {accuracyText !== "—" && (
-            <>
-              <dt>位置精度</dt>
-              <dd
-                data-testid="pin-create-accuracy"
-                className={
-                  lowAccuracy
-                    ? "font-semibold text-amber-700 dark:text-amber-400"
-                    : ""
-                }
-              >
-                {accuracyText}
-              </dd>
-            </>
-          )}
         </dl>
 
-        {/* 低精度 (GPS が悪い) 警告: 現在地/カメラファーストで自動配置した位置が
-            実際の家から離れている恐れを、保存前に気づかせて取り直し/修正を促す。 */}
-        {lowAccuracy && (
-          <p
-            role="status"
-            data-testid="pin-create-low-accuracy-warning"
-            className="mb-3 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] leading-tight text-amber-900 dark:text-amber-300"
-          >
-            <span aria-hidden="true">⚠</span> 位置の精度が低めです ({accuracyText}
-            )。実際の建物から離れているかもしれません。ずれていれば「現在地を使う」で
-            取り直すか、一度キャンセルして地図をタップし直して修正してください。
-          </p>
-        )}
-
-        <div className="mb-3">
-          <button
-            type="button"
-            onClick={onUseCurrentLocation}
-            disabled={currentLocationLoading}
-            className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
-            data-testid="pin-create-use-current-location"
-          >
-            {currentLocationLoading ? "現在地を取得中…" : "現在地を使う"}
-          </button>
-          {currentLocationError && (
-            <p
-              role="status"
-              className="mt-1 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
+        {/* ⚠位置を直す唯一の導線 (2026-07-29)。ドラッグ移動は作らない方針なので、
+            これが無いと「タップを間違えた」時の直し方がキャンセル＝写真ごと破棄
+            しか無くなる。写真は保持したまま地図タップ待ちへ戻す。
+            ⚠渡すのは**モーダル内で差し替えた現在の写真** (photoFile)。親が持つ
+            開いた時点の写真を使うと差し替えが黙って元に戻る (@codex #336 P2)。
+            ⚠写真送信の失敗後 (photoUploadFailed) は**出さない** (@codex #336 P2)。
+            pin は既に元の座標で作成済みで、置き直してタップしても既存 pin の
+            位置は変わらず、同じ写真でもう1本の重複 pin を作ってしまう。 */}
+        {!photoUploadFailed && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => onReplaceLocation(photoFile)}
+              disabled={busy}
+              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+              data-testid="pin-create-replace-location"
             >
-              {currentLocationError}
+              地図で置き直す
+            </button>
+            <p className="mt-1 text-[11px] leading-tight text-gray-500 dark:text-gray-400">
+              写真はそのままで、もう一度地図をタップできます。
             </p>
-          )}
-        </div>
+          </div>
+        )}
 
         {lockPinType ? (
           // 巡回外は候補固定。選べない理由まで書くと現場で迷わない。
@@ -323,10 +290,13 @@ export default function PinCreateModal({
           </span>
         </label>
 
-        {/* 写真 (任意 / 1 枚)。撮影 = 単発の写真取得。動画 / 連続撮影はしない。 */}
+        {/* 写真 (必須 / 1 枚)。撮影 = 単発の写真取得。動画 / 連続撮影はしない。
+            ⚠「取り消す」は置かない (@codex #336 P2)。全てのピンが写真とセット
+            (2026-07-29 業務判断) なので、外せると廃止したはずの写真なしピンが
+            ここから作れてしまう。撮り直し/選び直し (差し替え) だけを許す。 */}
         <div className="mb-3">
           <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
-            写真 (任意)
+            写真（必須）
           </span>
           <input
             ref={cameraInputRef}
@@ -378,15 +348,6 @@ export default function PinCreateModal({
                 data-testid="pin-create-photo-thumb"
                 className="h-16 w-16 rounded border border-gray-200 dark:border-gray-800 object-cover"
               />
-              <button
-                type="button"
-                onClick={clearPhoto}
-                disabled={busy || photoUploadFailed}
-                data-testid="pin-create-photo-clear"
-                className="text-[11px] text-gray-500 dark:text-gray-400 underline hover:text-gray-800 dark:hover:text-gray-100 disabled:opacity-60"
-              >
-                写真を取り消す
-              </button>
             </div>
           )}
         </div>

@@ -69,26 +69,9 @@ describe("field-survey-map.tsx — 連続ピンモード", () => {
     expect(MAP_SRC).not.toMatch(/cameraSavedNotice/);
   });
 
-  it("スマホ折りたたみボタンにピン追加モード中の表示がある (排他・短ラベル)", () => {
-    // ピン追加は巡回中にしか ON にならないため排他表示で短く保つ。
-    // 併記 (・巡回中・ピン追加中) は幅が広がり左上の地図/航空写真ボタンに
-    // 重なってタップを奪う (実機で過去に発生した既知ホットスポット)。
-    expect(MAP_SRC).toMatch(
-      /表示切替\{pinAddMode\s*\?\s*"・ピン追加"\s*:\s*hasActiveSession\s*\?\s*"・巡回中"\s*:\s*""\}/,
-    );
-  });
+  // 「ピン追加モード」は 2026-07-29 廃止のため表示も無い。
 
-  it("巡回の終了/切替でピン追加モードを解除する (表示・OFF導線の残留防止)", () => {
-    // OFF 導線 (パネル内トグル) は巡回中しか描画されないため、session が
-    // 消えるタイミングでモードも畳む。次の巡回開始時の暗黙 ON 復活も防ぐ。
-    const handler = MAP_SRC.match(
-      /const handleActiveSessionChange\s*=\s*useCallback\([\s\S]*?\[resetCameraFirst[^\]]*\],?\s*\);/,
-    );
-    expect(handler).not.toBeNull();
-    expect(handler?.[0] ?? "").toMatch(
-      /resetCameraFirst\(\)[\s\S]{0,1200}setPinAddMode\(false\)/,
-    );
-  });
+  // 同上。撮影待ちの後始末は field-survey-pin-tap-source.test.ts が固定する。
 
   it("地図タップで新規作成を確定したら詳細パネルを閉じる (旧ピン残留・トースト遮蔽防止)", () => {
     // 連続ピンモードでは詳細パネル表示中も地図タップが有効。パネル (z-40
@@ -101,7 +84,7 @@ describe("field-survey-map.tsx — 連続ピンモード", () => {
     const closes =
       (handler?.[0] ?? "").match(/setDetailPinId\(null\)/g) ?? [];
     // カメラの地図タップ待ち経路 + 通常のピン追加モード経路の両方
-    expect(closes.length).toBeGreaterThanOrEqual(2);
+    expect(closes.length).toBeGreaterThanOrEqual(1);
   });
 
   it("詳細パネルで作業中は地図タップを無視する (下書き・送信中写真の喪失防止)", () => {
