@@ -1221,7 +1221,6 @@ export default function FieldSurveyMap({
             coverageDays={coverageDays}
             onCoverageState={handleCoverageState}
             onTracksState={handleTracksState}
-            canSeeOtherTracks={canSeeOtherPins}
             onError={setError}
             refetchNonce={refetchNonce}
             currentUserId={currentUserId}
@@ -1275,7 +1274,6 @@ export default function FieldSurveyMap({
           tracksStatus={tracksState.status}
           tracksDroppedTrips={tracksState.droppedTrips}
           tracksDroppedTripsExact={tracksState.droppedTripsExact}
-          canSeeOtherTracks={canSeeOtherPins}
           panelOpen={panelOpen}
           onTogglePanelOpen={() => {
             quickStartRef.current = false;
@@ -1527,7 +1525,6 @@ function ControlPanel({
   tracksStatus,
   tracksDroppedTrips,
   tracksDroppedTripsExact,
-  canSeeOtherTracks,
   panelOpen,
   onTogglePanelOpen,
   currentUserId,
@@ -1567,8 +1564,6 @@ function ControlPanel({
   tracksDroppedTrips: number;
   /** false なら「◯件以上」と伝える (@codex #334 P2)。 */
   tracksDroppedTripsExact: boolean;
-  /** 他の担当者の記録を見る権限。無ければ線の行そのものを出さない。 */
-  canSeeOtherTracks: boolean;
   /**
    * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
    * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
@@ -1726,11 +1721,8 @@ function ControlPanel({
 
       {/* 線: 実際に歩いた道筋。面（マス）は道より広く、点の間もつながないので
           「本当にこの道を歩いたか」は線でしか分からない。既定 ON。
-          ⚠**生の座標**を見ることになるので、他の担当者の記録を見る権限
-          (read_all / manage) が無い人には行ごと出さない (@codex #334 P1)。
-          その人にも「どこを誰も回っていないか」は上の色で届く。 */}
-      {canSeeOtherTracks && (
-      <>
+          ⚠発注者判断により**全員が見られる** (field_survey:read だけで通す)。
+          二度歩きを避けるのが目的なので、街を歩く当人が見られないと意味がない。 */}
       <label
         className={`${layers.tracks ? "mb-1" : "mb-3"} flex cursor-pointer items-center gap-2`}
       >
@@ -1788,8 +1780,6 @@ function ControlPanel({
             </p>
           )}
         </div>
-      )}
-      </>
       )}
 
       {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
@@ -1883,7 +1873,6 @@ function MapDataLayer({
   coverageDays,
   onCoverageState,
   onTracksState,
-  canSeeOtherTracks,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -1899,12 +1888,6 @@ function MapDataLayer({
     droppedTrips: number;
     droppedTripsExact: boolean;
   }) => void;
-  /**
-   * 他の担当者の記録を見られるか (read_all / manage)。
-   * ⚠線は**生の座標**なので、集計の色と違ってこの権限が要る (@codex #334 P1)。
-   * false のときは問い合わせも描画もしない (403 を叩き続けない)。
-   */
-  canSeeOtherTracks: boolean;
   onCoverageState: (state: {
     cellSize: CoverageCellSize | null;
     status: CoverageStatus;
@@ -2025,7 +2008,7 @@ function MapDataLayer({
 
         // ⚠線も**別の待ち行列**にする（面と同じ理由）。生点を読むので面より
         // 重くなり得る。面・物件・ピンの更新を線が止めないようにする。
-        const tracksPromise = layers.tracks && canSeeOtherTracks
+        const tracksPromise = layers.tracks
           ? fetch(
               "/api/field-survey/coverage/tracks?" +
                 new URLSearchParams({
@@ -2201,8 +2184,7 @@ function MapDataLayer({
       layers.pins,
       layers.coverage,
       layers.tracks,
-      canSeeOtherTracks,
-      coverageDays,
+          coverageDays,
       onError,
       onCoverageState,
       onTracksState,
@@ -2255,8 +2237,7 @@ function MapDataLayer({
     layers.pins,
     layers.coverage,
     layers.tracks,
-    canSeeOtherTracks,
-    coverageDays,
+      coverageDays,
     refetchNonce,
   ]);
 

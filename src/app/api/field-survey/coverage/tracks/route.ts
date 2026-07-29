@@ -28,18 +28,26 @@ import {
 // （ユーザー指摘 2026-07-29「以前のシステムは線で表示されていた」）。
 //
 // 権限:
-//  - field_survey:read **かつ** read_all または manage。
-//    ⚠当初は read だけで通す実装にしたが、それは既存の境界を崩していた
-//    (@codex #334 P1)。集計 (coverage/cells) が read だけで済むのは「格子番号と
-//    回数」しか返さないからで、こちらは**生の座標**を返す。ID や時刻を削っても
-//    「他人の GPS 軌跡そのもの」であることは変わらず、
-//    sessions/[id]/track-points が他人の巡回に read_all/manage を要求している
-//    のと同じ性質の情報である。
-//    → **誰に見せるかは権限画面で決める**。全員に見せたい職場なら現地スタッフに
-//      read_all を付ければよく、既定で崩す話ではない。
-//    → read だけの人にも「どこを誰も回っていないか」は coverage/cells の色で
-//      届くので、次に回るエリアを決める業務自体は成立する。
-//  - その上で、勤怠の証拠にあたる情報は**返さない**:
+//  - field_survey:read のみ。**read_all は要求しない**。
+//
+//    ⚠これは @codex #334 P1 の指摘（既存の sessions/[id]/track-points が他人の
+//    巡回に read_all/manage を要求しているのだから合わせるべき）と**意図的に
+//    異なる**。一度 read_all を要求する実装にしたが、発注者の判断で戻した。
+//
+//    発注者（不動産事業部責任者）の判断:
+//    **「歩いたルートは全員が見られるようにする。制限する必要のない情報」**
+//    （2026-07-28「全員の記録は見せていいよ」→ 2026-07-29 に再確認）。
+//
+//    業務上の根拠: この機能の目的は「同じ道を二度歩く無駄をなくす」こと。
+//    街を歩く当人が他の人の歩いた道を見られなければ意味がない。既定の権限
+//    テンプレートでは現地担当が read_all を持たないため、read_all を要求すると
+//    **歩く人だけが見られず、歩かない事務席が見られる**逆転が起きる。
+//
+//    ⚠したがって「read_all を足せば済む」ではなく、**この API は read で通す**
+//    のが正しい。read_all は他人のピンや、勤怠証拠にあたる生の巡回記録
+//    （時刻・担当者つき）まで広げてしまい、線を見せる目的には過大。
+//
+//  - 見せるのは道筋だけで、勤怠の証拠にあたる情報は**返さない**:
 //      * 誰の巡回か（staff_user_id・氏名）
 //      * いつ歩いたか（recorded_at・started_at・ended_at）
 //      * どの巡回か（session id）
@@ -78,20 +86,9 @@ export async function GET(request: NextRequest) {
     const session = await getApiSession();
     const permissions = await getUserPermissions(session.id);
 
+    // ⚠read だけで通す（発注者判断。上のコメント参照）。read_all は要求しない。
     if (!hasPermission(permissions, "field_survey", "read")) {
       throw new ApiError(403, "閲覧権限がありません", "FORBIDDEN");
-    }
-    // ⚠他人の生軌跡にあたるため、集計 (coverage/cells) より上の権限を要る。
-    // 既存の sessions/[id]/track-points と同じ境界に合わせる (@codex #334 P1)。
-    const canSeeOthers =
-      hasPermission(permissions, "field_survey", "read_all") ||
-      hasPermission(permissions, "field_survey", "manage");
-    if (!canSeeOthers) {
-      throw new ApiError(
-        403,
-        "他の担当者の記録を見る権限がありません",
-        "FORBIDDEN",
-      );
     }
 
     const { searchParams } = new URL(request.url);

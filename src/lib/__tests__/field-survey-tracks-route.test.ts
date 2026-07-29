@@ -5,7 +5,7 @@
  * 「実際に歩いた筋」が出ない。線はそれを補う（ユーザー指摘 2026-07-29）。
  *
  * ⚠この API は cells と違い**生の座標を返す**。そのため
- *   ①read_all / manage を要求する（cells は read だけで通る）
+ *   ①誰の・いつ・どの巡回かを返さない
  *   ②誰の・いつ・どの巡回かを返さない
  *   ③終了した巡回だけを対象にする
  * の3つで境界を作っている。どれが崩れても同僚の追跡になるので表明で固定する。
@@ -162,10 +162,10 @@ beforeEach(() => {
   // 流れて、まったく別の失敗として現れる。
   (prisma.$queryRaw as unknown as Mock).mockReset();
   (getApiSession as unknown as Mock).mockResolvedValue(fieldUser);
-  (getUserPermissions as unknown as Mock).mockResolvedValue(readAll);
+  (getUserPermissions as unknown as Mock).mockResolvedValue(readOnly);
 });
 
-describe("1. 権限（他人の生軌跡なので集計より上の権限が要る）", () => {
+describe("1. 権限（歩いた道筋は全員が見られる）", () => {
   it("read_all があれば見られる", async () => {
     mockQueries([sess("s1", 3)], [pt("s1", 35.69, 139.77), pt("s1", 35.691, 139.771)]);
     const res = await GET(makeReq());
@@ -179,14 +179,14 @@ describe("1. 権限（他人の生軌跡なので集計より上の権限が要�
     expect(res.status).toBe(200);
   });
 
-  it("read だけでは 403（@codex #334 P1）", async () => {
-    // ⚠現地スタッフの既定はこれ。集計の色 (coverage/cells) は read だけで
-    // 見られるが、生の座標は別。ID や時刻を削っても他人の GPS 軌跡である
-    // ことは変わらない。誰に見せるかは権限画面で決める。
+  it("read だけで見られる（発注者判断: 制限する必要のない情報）", async () => {
+    // ⚠@codex #334 P1 は read_all を要求すべきと指摘したが、発注者判断で read
+    // のまま通す。既定テンプレートでは現地担当が read_all を持たないため、
+    // 要求すると「街を歩く当人だけが見られない」逆転が起きる。
     (getUserPermissions as unknown as Mock).mockResolvedValue(readOnly);
+    mockQueries([sess("s1", 3)], [pt("s1", 35.69, 139.77), pt("s1", 35.691, 139.771)]);
     const res = await GET(makeReq());
-    expect(res.status).toBe(403);
-    expect(prisma.$queryRaw as unknown as Mock).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
   });
 
   it("巡回機能の権限が無ければ 403", async () => {

@@ -185,12 +185,6 @@ async function main() {
     { templateId: fieldStaffTemplate.id, resource: "owner_corporate_number", action: "full", granted: true },
     { templateId: fieldStaffTemplate.id, resource: "field_survey", action: "read", granted: true },
     { templateId: fieldStaffTemplate.id, resource: "field_survey", action: "write", granted: true },
-    // 2026-07-29 業務判断: **街を歩く現地担当にも「歩いた道筋（線）」を見せる**。
-    // 二度歩きを避けるのがこの機能の目的なので、当人が地図を見られないと
-    // 意味がない（従来は事務担当だけが read_all を持ち、歩く人が見られなかった）。
-    // ⚠この権限は他の担当者の生の軌跡（座標）を見られるようにする。
-    // 応答に氏名・時刻・巡回IDは含まれないが、道筋そのものは見える。
-    { templateId: fieldStaffTemplate.id, resource: "field_survey", action: "read_all", granted: true },
     // owner_note: not granted → hidden
     // 事務担当
     { templateId: officeStaffTemplate.id, resource: "property", action: "read", granted: true },

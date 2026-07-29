@@ -114,12 +114,11 @@ describe("3. 地図側の配線", () => {
     expect(MAP_SRC).toMatch(/status: "too-wide",[\s\S]{0,80}droppedTrips: 0/);
   });
 
-  it("他の担当者の記録を見る権限が無ければ問い合わせない (@codex #334 P1)", () => {
-    // 403 を叩き続けない。行そのものも出さない（押せない項目を置かない）。
-    expect(MAP_SRC).toMatch(/layers\.tracks && canSeeOtherTracks/);
-    expect(MAP_SRC).toMatch(/\{canSeeOtherTracks && \(/);
-    // 権限の判定は既存のピン凡例と同じ read_all / manage を使い回す
-    expect(MAP_SRC).toMatch(/canSeeOtherTracks=\{canSeeOtherPins\}/);
+  it("線は全員に見せる（権限で出し分けない）", () => {
+    // 発注者判断: 歩いたルートは制限する必要のない情報。二度歩きを避けるのが
+    // 目的なので、街を歩く当人が見られないと意味がない。
+    expect(MAP_SRC).not.toMatch(/canSeeOtherTracks/);
+    expect(MAP_SRC).toMatch(/const tracksPromise = layers.tracks$/m);
   });
 });
 
