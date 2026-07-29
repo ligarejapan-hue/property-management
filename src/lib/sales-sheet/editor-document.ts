@@ -33,14 +33,15 @@ import {
   footerDataEqual,
   type FooterBandData,
 } from "./footer-band";
-import type {
-  SalesSheetDocument,
-  SalesSheetElement,
-  TextElement,
-  ImageElement,
-  BadgeElement,
-  QrElement,
-  TableElement,
+import {
+  A4_LANDSCAPE,
+  type SalesSheetDocument,
+  type SalesSheetElement,
+  type TextElement,
+  type ImageElement,
+  type BadgeElement,
+  type QrElement,
+  type TableElement,
 } from "./document-schema";
 
 // ---------------------------------------------------------------------------
@@ -1240,6 +1241,18 @@ function geomEquals(
  */
 export function autoBalanceLayout(state: EditorState): EditorState {
   const { document } = state;
+  // ⚠版面エンジン(computeSpecSheetLayout)は A4横(297×210)専用の固定座標を返す
+  // （総点検P3・autoArrangePhotos の @codex #294 R5 と同根）。A4縦(幅210)に
+  // 適用すると右端287mm等の用紙外座標を書き込み、保存の幾何検証(±10000mm)は
+  // 素通りして壊れたレイアウトが永続化する。A4横以外では何もしない(fail-closed
+  // no-op・同一参照 return)。将来 A4縦へ正式対応する際はこのガードを外し、
+  // エンジンに page 寸法を渡す改修が必要。
+  if (
+    document.page.width !== A4_LANDSCAPE.width ||
+    document.page.height !== A4_LANDSCAPE.height
+  ) {
+    return state;
+  }
   const { elements } = document;
 
   const overviewIdx = elements.findIndex((e) => e.id === "overview" && e.type === "table");

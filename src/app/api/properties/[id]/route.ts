@@ -367,6 +367,22 @@ export async function DELETE(
           photoFileUrls.push(p.fileUrl);
         }
       }
+      // 添付(Attachment)は FK が SET NULL のため cascade で消えず、そのままだと
+      // isDeleted=false の孤児になる。孤児は日次お掃除(isDeleted=true のみ対象)にも
+      // 手動ゴミ箱投入(property relation が null だと 403)にも乗らず、DB 行と
+      // storage 実体(謄本PDF=PII を含む)が永久に残る。同一 tx でゴミ箱入りさせ、
+      // 既存の 90 日 purge ライフサイクルに乗せる。ここで即時 storage.delete
+      // しないのは、fileUrl の key が共有され得るため参照チェック持ちの purge job
+      // に委ねる既存の層分け(attachment-cleanup.ts)に従うもの。
+      // ⚠isDeleted:false ガード=ゴミ箱済み行の 90 日時計をリセットしない。
+      //   propertyId(SET NULL 前なので当たる)と弱参照 targetId の OR で冪等に拾う。
+      await tx.attachment.updateMany({
+        where: {
+          OR: [{ propertyId: id }, { targetType: "property", targetId: id }],
+          isDeleted: false,
+        },
+        data: { isDeleted: true, deletedAt: new Date() },
+      });
       await tx.property.delete({ where: { id } });
     });
 

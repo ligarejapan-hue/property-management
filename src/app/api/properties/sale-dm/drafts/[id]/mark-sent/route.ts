@@ -49,6 +49,14 @@ export async function POST(
     }
 
     const now = new Date();
+    // PropertyDmLog.sentAt は @db.Date(日付のみ)。Prisma は Date をオフセット無しの
+    // UTC 壁時計で送るため、DATE 列は **UTC の暦日**に切られる。素の now を渡すと
+    // JST 0〜9時の送付確定(例: JST 7/30 08:00 = UTC 7/29 23:00)が前日 7/29 として
+    // 記録され、送付履歴の表示もそのまま前日になる。+9h 平行移動して
+    // UTC 暦日 = JST 暦日 に揃える(既存規約: property-list-query.ts の
+    // jstDayBoundary / coverage cells の「UTC として解釈してから JST へ」と同じ
+    // JST 暦日基準)。draft.sentAt(素の DateTime=瞬間)と監査ログは実時刻のまま。
+    const sentOnJst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
     // 状態遷移を condition 付き updateMany(where status=confirmed)でアトミックに行い、
     // 勝った(count===1)リクエストだけが PropertyDmLog を作る。並行 POST が両方とも
     // pre-check(confirmed 読取)を通過しても、二重送付・送付履歴の二重作成を防ぐ。
@@ -69,7 +77,7 @@ export async function POST(
       await tx.propertyDmLog.create({
         data: {
           propertyId: draft.propertyId,
-          sentAt: now,
+          sentAt: sentOnJst,
           method: "sale_dm",
           sentBy: session.id,
         },

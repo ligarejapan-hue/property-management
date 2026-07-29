@@ -11,7 +11,7 @@ import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties, capRecipientsByProperty } from "@/lib/sale-dm-letter/recipients";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
-import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, resolveLetterModel, resolveProvider } from "@/lib/sale-dm-letter";
+import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, DEFAULT_CONCURRENCY, AI_CALL_TIMEOUT_MS, AI_MAX_RETRIES, resolveLetterModel, resolveProvider } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
@@ -71,14 +71,37 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
         }
         // status==="draft" = クレーム後・保存完了前。並行生成中(ライブ)か、プロセス死の孤児か区別が要る。
-        // 生成は数分以内に完了するため、生成時間を大きく超えて古い(STALE_MS 超)draft のみ孤児として削除し作り直す。
+        // 生成時間を大きく超えて古い(STALE_MS 超)draft のみ孤児として削除し作り直す。
         // まだ新しい draft は並行生成中とみなし削除せず 409(再試行を促す。完了すれば ready で冪等返却)。ライブの
         // クレームを消すと同キーの2リクエストが二重に有料生成し冪等性が破れる(Codex 指摘)ため、必ず新旧を判定する。
-        const STALE_MS = 10 * 60 * 1000;
+        //
+        // ⚠STALE_MS は生成の worst-case から**導出**する（総点検P3）。固定値(旧10分)だと、
+        // provider の timeout/リトライ設定と乖離した瞬間に「生成中のライブなクレームを孤児と
+        // 誤判定→削除→同キーで再生成＝AI 課金が二重」になる。worst-case =
+        // ワーカーあたりの直列呼び出し数 (MAX_GENERATE_ITEMS / DEFAULT_CONCURRENCY)
+        // × 1呼び出しの上限 (AI_CALL_TIMEOUT_MS × 試行回数(AI_MAX_RETRIES+1))。余裕×2。
+        const STALE_MS =
+          (MAX_GENERATE_ITEMS / DEFAULT_CONCURRENCY) *
+          AI_CALL_TIMEOUT_MS *
+          (AI_MAX_RETRIES + 1) *
+          2;
         if (Date.now() - new Date(existing.createdAt).getTime() < STALE_MS) {
           throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
-        await prisma.dmCampaign.delete({ where: { id: existing.id } }).catch(() => {});
+        // ⚠孤児削除は status=draft 条件付きで行う（総点検P3）。無条件 delete だと、
+        // この読み取りと削除のすき間に生成側の保存 tx が ready を確定した場合に、
+        // **完成済みキャンペーンを下書きごとカスケード削除**してしまう(variant/draft は
+        // onDelete: Cascade)。count=0 = 削除の瞬間に draft でなくなっていた(または
+        // 他リクエストが先に孤児を回収した)ので、読み直して完了済みなら冪等返却、
+        // それ以外は 409 で再試行を促す。
+        const del = await prisma.dmCampaign.deleteMany({ where: { id: existing.id, status: "draft" } });
+        if (del.count === 0) {
+          const settled = await prisma.dmCampaign.findUnique({ where: { id: existing.id }, select: { status: true } });
+          if (settled && settled.status !== "draft") {
+            return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+          }
+          throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
+        }
       }
     }
     // 対象の決め方: (A) チェックで選んだ propertyIds があればそれを対象にする(明示選択優先)。無ければ

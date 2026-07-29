@@ -539,7 +539,10 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
           { method: "POST" },
         );
         if (res.status === 409) throw new Error("他で更新されました。再読込してください");
-        if (res.status === 503) throw new Error("PDF生成エンジン未準備");
+        // ⚠503 を client 側の固定文言に潰さない（総点検P3）。サーバは混雑
+        // (RENDER_BUSY=「混み合っています。少し待って再実行」)と未準備
+        // (PDF_UNAVAILABLE=サーバ未設定)を別文言で返す。先回りして固定文言に
+        // 上書きすると、数秒待てば直る混雑まで恒久障害に見える。
         assertAuthedResponse(res);
         if (!res.ok) throw new Error(await apiErrorMessage(res, "出力に失敗しました"));
         const blob = await res.blob();

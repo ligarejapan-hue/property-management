@@ -107,6 +107,17 @@ describe("findPurgeableAttachments", () => {
     expect(arg.take).toBe(200);
     expect(arg.select).toEqual({ id: true, fileUrl: true });
   });
+
+  it("物件削除で propertyId=null になった孤児もゴミ箱入りしていれば対象になる（総点検P3）", async () => {
+    // 物件の物理削除は FK SET NULL で添付の propertyId を null にする。
+    // DELETE route が同一 tx でゴミ箱入りさせる前提で、purge 側は propertyId や
+    // property relation で絞ってはいけない（絞ると孤児が永久にスキャンされない）。
+    await findPurgeableAttachments(NOW, 200);
+    const arg = pm.attachment.findMany.mock.calls[0][0];
+    expect(arg.where.propertyId).toBeUndefined();
+    expect(arg.where.property).toBeUndefined();
+    expect(arg.where.targetId).toBeUndefined();
+  });
 });
 
 describe("purgeExpiredAttachments", () => {

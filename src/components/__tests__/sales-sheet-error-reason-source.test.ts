@@ -32,6 +32,14 @@ describe("販売図面: 失敗理由をサーバー応答から取り出して�
     }
   });
 
+  it("503 を固定文言に潰さない（混雑と未準備はサーバの理由文で区別する）", () => {
+    // サーバは混雑(RENDER_BUSY=少し待って再実行)と未準備(PDF_UNAVAILABLE=
+    // サーバ未設定)を 503 の body で区別して返す。client が status===503 を
+    // 先回りして固定文言にすると、数秒で直る混雑まで恒久障害に見える（総点検P3）。
+    expect(SRC).not.toContain("PDF生成エンジン未準備");
+    expect(SRC).not.toMatch(/status === 503/);
+  });
+
   it("理由が取れないときは従来の汎用文言に倒す", () => {
     // セッション切れで HTML が返る場合など。JSON でなければ fallback。
     expect(SRC).toMatch(/res\.json\(\)\.catch\(\(\) => null\)/);

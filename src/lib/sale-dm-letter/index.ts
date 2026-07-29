@@ -9,7 +9,10 @@ import { OpenAiLetterProvider } from "./providers/openai";
 import { saleDmConfigFromEnv, type SaleDmResolvedConfig } from "./config";
 
 export const MAX_GENERATE_ITEMS = 50;
-const DEFAULT_CONCURRENCY = 5;
+// campaigns route が idempotency の孤児判定(STALE_MS)を worst-case から導出する
+// ため export する（総点検P3・limits.ts の AI_CALL_TIMEOUT_MS と組で使う）。
+export const DEFAULT_CONCURRENCY = 5;
+export { AI_CALL_TIMEOUT_MS, AI_MAX_RETRIES } from "./limits";
 // provider 別の既定モデル(SALE_DM_LETTER_MODEL / 設定画面で上書き可)。
 export const DEFAULT_MODEL = "claude-sonnet-4-6";
 export const DEFAULT_OPENAI_MODEL = "gpt-4o";

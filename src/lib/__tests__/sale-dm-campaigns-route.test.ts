@@ -19,7 +19,7 @@ const { draftCreate } = vi.hoisted(() => ({ draftCreate: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findMany: vi.fn() },
-    dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), findUnique: vi.fn(async () => null), delete: vi.fn(async () => ({ id: "deleted" })) }, dmVariant: { create: vi.fn() }, dmRecipientDraft: { create: draftCreate },
+    dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), findUnique: vi.fn(async () => null), delete: vi.fn(async () => ({ id: "deleted" })), deleteMany: vi.fn(async () => ({ count: 1 })) }, dmVariant: { create: vi.fn() }, dmRecipientDraft: { create: draftCreate },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
       dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), update: vi.fn() },
       dmVariant: { create: vi.fn(async () => ({ id: "v1" })) },
@@ -62,6 +62,7 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { POST } from "../../app/api/properties/sale-dm/campaigns/route";
 import { isSenderConfigured } from "../sale-dm-letter/sender";
+import { MAX_GENERATE_ITEMS, DEFAULT_CONCURRENCY, AI_CALL_TIMEOUT_MS, AI_MAX_RETRIES } from "../sale-dm-letter";
 import { saleDmCampaignBodySchema } from "../validators-sale-dm";
 
 // getUserPermissions は { resource, action, granted } の配列を返す(dm-export route test と同形)。
@@ -356,27 +357,73 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
 
   it("冪等性キー: 孤児(status=draft の空 campaign)が見つかれば削除して作り直す(空キャンペーン固着を防ぐ・R34)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
-    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> } };
+    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn> } };
     // クレーム後・保存完了前にプロセスが落ちた孤児(status=draft かつ生成時間を大きく超えて古い)が残っている。
     pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-orphan", createdBy: "u1", status: "draft", createdAt: new Date("2020-01-01T00:00:00Z") });
     const res = await POST(req({ ...validBody, idempotencyKey: "key-orphan" }) as never);
     expect(res.status).toBe(200);
-    expect(pmc.dmCampaign.delete).toHaveBeenCalledWith({ where: { id: "c-orphan" } }); // 古い孤児を削除して
+    // ⚠削除は status=draft 条件付き(deleteMany)。無条件 delete だと読み取りと削除の
+    // すき間に ready 確定した完成済みキャンペーンをカスケード削除してしまう（総点検P3）。
+    expect(pmc.dmCampaign.deleteMany).toHaveBeenCalledWith({ where: { id: "c-orphan", status: "draft" } });
     expect(pmc.dmCampaign.create).toHaveBeenCalled(); // 作り直す(再クレーム+生成+保存)
     const json = await res.json();
     expect(json.campaignId).toBe("c1");
   });
 
+  it("冪等性キー: 孤児削除が count=0 (すき間に ready 確定) なら完成済みを冪等返却し再生成しない（総点検P3）", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn> };
+    pmc.dmCampaign.findUnique
+      .mockResolvedValueOnce({ id: "c-settled", createdBy: "u1", status: "draft", createdAt: new Date("2020-01-01T00:00:00Z") })
+      .mockResolvedValueOnce({ status: "ready" }); // 読み直し=保存 tx が完了していた
+    pmc.dmCampaign.deleteMany.mockResolvedValueOnce({ count: 0 });
+    const res = await POST(req({ ...validBody, idempotencyKey: "key-settled" }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.campaignId).toBe("c-settled");
+    expect(json.idempotent).toBe(true);
+    expect(pmc.dmCampaign.create).not.toHaveBeenCalled(); // 再クレーム・再生成しない
+    expect(pmc.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("冪等性キー: 孤児削除が count=0 で読み直しても draft のままなら 409（再試行を促す）", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn> } };
+    pmc.dmCampaign.findUnique
+      .mockResolvedValueOnce({ id: "c-race", createdBy: "u1", status: "draft", createdAt: new Date("2020-01-01T00:00:00Z") })
+      .mockResolvedValueOnce(null); // 他リクエストが先に孤児を回収して再クレーム中
+    pmc.dmCampaign.deleteMany.mockResolvedValueOnce({ count: 0 });
+    const res = await POST(req({ ...validBody, idempotencyKey: "key-race" }) as never);
+    expect(res.status).toBe(409);
+    expect(pmc.dmCampaign.create).not.toHaveBeenCalled();
+  });
+
   it("冪等性キー: 進行中(新しい draft)のクレームは削除せず 409(ライブの並行生成を壊さず二重課金を防ぐ・Codex)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
-    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn> };
+    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn> };
     // 新しい draft = 別リクエストが今まさに生成中。削除すると同キーで二重生成になるため、消さず 409 で再試行を促す。
     pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-live", createdBy: "u1", status: "draft", createdAt: new Date() });
     const res = await POST(req({ ...validBody, idempotencyKey: "key-live" }) as never);
     expect(res.status).toBe(409);
-    expect(pmc.dmCampaign.delete).not.toHaveBeenCalled(); // ライブのクレームを消さない
+    expect(pmc.dmCampaign.deleteMany).not.toHaveBeenCalled(); // ライブのクレームを消さない
     expect(pmc.dmCampaign.create).not.toHaveBeenCalled(); // 二重生成しない
     expect(pmc.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("冪等性キー: STALE_MS は生成の worst-case から導出され、旧固定値(10分)より長い draft も進行中扱いになる（総点検P3）", async () => {
+    // 旧実装は固定10分で、AI 呼び出しの worst-case(直列10回×timeout×試行回数)より
+    // 短く、生成中のライブなクレームを孤児と誤判定して削除→二重課金が起きていた。
+    // 30分前の draft = 旧実装なら削除・新実装(導出値40分)では進行中(409)。
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn> } };
+    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-slow", createdBy: "u1", status: "draft", createdAt: new Date(Date.now() - 30 * 60 * 1000) });
+    const res = await POST(req({ ...validBody, idempotencyKey: "key-slow" }) as never);
+    expect(res.status).toBe(409);
+    expect(pmc.dmCampaign.deleteMany).not.toHaveBeenCalled();
+    // 導出の不変条件: STALE_MS(=worst-case×2) が worst-case を上回る
+    const worstCase = (MAX_GENERATE_ITEMS / DEFAULT_CONCURRENCY) * AI_CALL_TIMEOUT_MS * (AI_MAX_RETRIES + 1);
+    expect(worstCase * 2).toBeGreaterThan(worstCase);
+    expect(30 * 60 * 1000).toBeLessThan(worstCase * 2); // このテストの前提(30分<導出値)を自己検証
   });
 
   it("冪等性キー: 新規キーはクレーム→生成→保存し、キーを campaign に保存する", async () => {

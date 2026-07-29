@@ -218,6 +218,24 @@ describe("autoBalanceLayout", () => {
     expect(after.x).toBe(200);
     expect(after.y).toBe(60);
   });
+
+  it("A4縦では no-op（用紙外座標を書き込まない・fail-closed）（総点検P3）", () => {
+    // 版面エンジンは A4横(297×210)専用。A4縦(幅210)に掛けると右端287mm等の
+    // 用紙外座標を書き込み、保存の幾何検証(±10000mm)は素通りする。
+    // A4縦は保存境界(design-service)が公式に許可しており API 経由で実在し得る。
+    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
+    const portrait: SalesSheetDocument = {
+      ...built,
+      page: { width: 210, height: 297, orientation: "portrait" },
+    };
+    const state = makeState(portrait);
+    const out = autoBalanceLayout(state);
+    // 変更ゼロ＝同一 state 参照（autoArrangePhotos と同じ no-op 規約）
+    expect(out).toBe(state);
+    // 用紙外座標が書き込まれていない（全要素 x+w ≤ 210 のまま…ビルダーは
+    // A4横で作るため一部要素は元々 210 を超える。ここでは「ガードにより
+    // 参照が変わっていない＝何も書き込まれていない」ことが本質の表明）
+  });
 });
 
 describe("autoArrangePhotos × 会社帯 / salesPoints", () => {
