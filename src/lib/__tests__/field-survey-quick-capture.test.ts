@@ -247,25 +247,28 @@ describe("クライアント配線 (field-survey-map)", () => {
     expect(MAP_SRC).toMatch(/row\.sessionId \? "あり" : "巡回外の撮影"/);
   });
 
-  it("撮影中に巡回が開始されても撮影を破棄しない (@codex R1)", () => {
-    // 巡回外→巡回中の遷移だけは resetCameraFirst を呼ばない。呼ぶと
-    // 隣の「巡回を開始」を押した瞬間に撮った写真が消える。
-    expect(MAP_SRC).toMatch(
-      /if \(prevId !== null \|\| nextId === null\) \{\s*\n?\s*resetCameraFirst\(\);/,
-    );
+  it("撮影は巡回の有無を見ない（巡回外の撮影を破棄しない）", () => {
+    // ⚠2026-07-29: 撮影は GPS を待たずに即タップ待ちへ入るので、
+    // 「取得中に巡回が始まった」という窓自体が無くなった。撮影処理が
+    // session を参照していないことをもって同じ性質を担保する。
+    const fn =
+      MAP_SRC.match(
+        /const handleCameraPhotoCaptured = useCallback\([\s\S]*?\n  \}, \[\]\);/,
+      )?.[0] ?? "";
+    expect(fn).not.toBe("");
+    expect(fn).not.toMatch(/activeSession|requestSessionId/);
   });
 
-  it("巡回外の作成 modal でも「現在地を使う」の再取得を許す (@codex R1)", () => {
-    // 位置情報が一時的に失敗した後・その場で許可を出し直した後に再取得できないと
-    // 巡回外フローが詰む。modal が開いている間は null session でも通す。
-    expect(MAP_SRC).toMatch(
-      /if \(!requestSessionId && !createCandidateOpenRef\.current\) \{/,
-    );
-    // 遅延 callback の session ガードも巡回中に限定する (巡回外の取得を捨てない)。
-    expect(MAP_SRC).toMatch(
-      /requestSessionId !== null &&\s*\n?\s*activeSessionIdRef\.current !== requestSessionId/,
-    );
+  it("地図タップ待ちの間は巡回の終了/切替で写真を捨てない", () => {
+    // タップ必須で待ち時間が伸びたぶん、この窓での取りこぼしが致命的になる。
+    const h =
+      MAP_SRC.match(
+        /const handleActiveSessionChange = useCallback\([\s\S]*?\n  \);/,
+      )?.[0] ?? "";
+    expect(h).toMatch(/cameraFirstPhaseRef\.current !== "awaiting-map-tap"/);
   });
+
+  // 「現在地を使う」は 2026-07-29 廃止（位置は必ず地図タップで決める）。
 });
 
 describe("権限の配線 (既定は誰も持たない fail-closed)", () => {

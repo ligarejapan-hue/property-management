@@ -17,7 +17,6 @@ describe("CameraFirstButton", () => {
     const html = renderToStaticMarkup(
       createElement(CameraFirstButton, {
         disabled: false,
-        locating: false,
         permissionDenied: false,
         onPhotoCaptured: noop,
       }),
@@ -32,7 +31,6 @@ describe("CameraFirstButton", () => {
     const html = renderToStaticMarkup(
       createElement(CameraFirstButton, {
         disabled: false,
-        locating: false,
         permissionDenied: false,
         onPhotoCaptured: noop,
       }),
@@ -43,24 +41,10 @@ describe("CameraFirstButton", () => {
     expect(html).toContain('capture="environment"');
   });
 
-  it("locating 中は「現在地を取得中…」表示で無効", () => {
-    const html = renderToStaticMarkup(
-      createElement(CameraFirstButton, {
-        disabled: true,
-        locating: true,
-        permissionDenied: false,
-        onPhotoCaptured: noop,
-      }),
-    );
-    expect(html).toContain("現在地を取得中");
-    expect(html).toContain('disabled=""');
-  });
-
   it("権限なし確定時は無効 + 権限がない旨の title", () => {
     const html = renderToStaticMarkup(
       createElement(CameraFirstButton, {
         disabled: true,
-        locating: false,
         permissionDenied: true,
         onPhotoCaptured: noop,
       }),
@@ -73,31 +57,30 @@ describe("CameraFirstButton", () => {
 });
 
 describe("CameraFirstBanner", () => {
-  it("notice なし: 既定の地図タップ誘導文を表示", () => {
+  // ⚠2026-07-29: これは「現在地が取れなかった時の代替」ではなく**通常の手順**に
+  // なった。失敗理由 (notice) を出す口は無くし、次にやることだけを書く。
+  it("家の上をタップするよう案内する（固定文）", () => {
     const html = renderToStaticMarkup(
-      createElement(CameraFirstBanner, { notice: null, onCancel: noop }),
+      createElement(CameraFirstBanner, { onCancel: noop }),
     );
     expect(html).toContain("写真を撮りました");
-    expect(html).toContain("地図をタップ");
+    expect(html).toContain("家の上をタップ");
     expect(html).toContain('data-testid="camera-first-banner"');
   });
 
-  it("notice あり: フォールバック理由の文言をそのまま表示", () => {
+  it("失敗理由や技術用語を出さない", () => {
     const html = renderToStaticMarkup(
-      createElement(CameraFirstBanner, {
-        notice:
-          "現在地の取得がタイムアウトしました。地図をタップして、撮った場所を指定してください。",
-        onCancel: noop,
-      }),
+      createElement(CameraFirstBanner, { onCancel: noop }),
     );
-    expect(html).toContain("タイムアウト");
+    expect(html).not.toContain("現在地");
+    expect(html).not.toMatch(/GPS|geolocation/i);
   });
 
-  it("「やり直す」ボタンを持つ", () => {
+  it("「撮り直す」ボタンを持つ（写真を捨てる操作だと分かる言葉）", () => {
     const html = renderToStaticMarkup(
-      createElement(CameraFirstBanner, { notice: null, onCancel: noop }),
+      createElement(CameraFirstBanner, { onCancel: noop }),
     );
     expect(html).toContain('data-testid="camera-first-cancel"');
-    expect(html).toContain("やり直す");
+    expect(html).toContain("撮り直す");
   });
 });

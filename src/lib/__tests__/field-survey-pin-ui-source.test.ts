@@ -23,9 +23,6 @@ function readSrc(relPath: string): string {
   return fs.readFileSync(path.resolve(process.cwd(), relPath), "utf8");
 }
 
-const TOGGLE_SRC = readSrc(
-  "src/components/field-survey/pin-add-mode-toggle.tsx",
-);
 const CREATE_SRC = readSrc(
   "src/components/field-survey/pin-create-modal.tsx",
 );
@@ -41,35 +38,10 @@ const MAP_SRC = readSrc(
 const UTIL_SRC = readSrc("src/lib/field-survey-pin-util.ts");
 
 // =======================================================================
-// pin-add-mode-toggle
 // =======================================================================
-describe("pin-add-mode-toggle.tsx", () => {
-  it("'use client' で始まる", () => {
-    expect(TOGGLE_SRC.trim().startsWith('"use client"')).toBe(true);
-  });
-
-  it("data-testid と aria-pressed を持つ", () => {
-    expect(TOGGLE_SRC).toMatch(/data-testid="pin-add-mode-toggle"/);
-    expect(TOGGLE_SRC).toMatch(/aria-pressed=\{active\}/);
-  });
-
-  it("canWrite === false で disabled", () => {
-    expect(TOGGLE_SRC).toMatch(/canWrite\s*===\s*false/);
-    expect(TOGGLE_SRC).toMatch(/disabled=\{disabled\}/);
-  });
-
-  it("権限不足文言「ピン追加の権限がありません」を持つ", () => {
-    expect(TOGGLE_SRC).toMatch(/ピン追加の権限がありません/);
-  });
-
-  it("console / lat / lng / API key を出さない", () => {
-    expect(TOGGLE_SRC).not.toMatch(/console\.\w+\(/);
-    expect(TOGGLE_SRC).not.toMatch(/lat|lng|AIza/);
-  });
-});
-
-// =======================================================================
-// pin-create-modal
+// pin-add-mode-toggle は 2026-07-29 に廃止（写真なしのピンを作らない方針）。
+// 「canWrite===false で disabled」「権限不足文言」の表明は撮影ボタン側
+// (camera-first-ui.test.tsx / field-survey-camera-first.test.ts) が引き継ぐ。
 // =======================================================================
 describe("pin-create-modal.tsx", () => {
   it("'use client' で始まる", () => {
@@ -284,15 +256,12 @@ describe("use-field-survey-pin-mutations.ts", () => {
 // field-survey-map.tsx (Phase 1-G 統合)
 // =======================================================================
 describe("field-survey-map.tsx — Phase 1-G 統合", () => {
-  it("PinAddModeToggle / PinCreateModal / PinDetailPanel を import", () => {
-    expect(MAP_SRC).toMatch(/import PinAddModeToggle/);
+  it("PinCreateModal / PinDetailPanel を import", () => {
     expect(MAP_SRC).toMatch(/import PinCreateModal/);
     expect(MAP_SRC).toMatch(/import PinDetailPanel/);
   });
 
-  it("active session 中のみ PinAddModeToggle を render", () => {
-    expect(MAP_SRC).toMatch(/hasActiveSession\s*&&\s*\(?\s*<PinAddModeToggle/);
-  });
+  // 「ピン追加モード」は 2026-07-29 廃止（写真なしのピンを作らない）。
 
   it("createCandidate があるときに create modal を mount し、巡回の有無で sessionId を出し分ける", () => {
     // 巡回なし撮影 (quick_capture) では activeSession が無い状態で開くのが正常系。
@@ -320,15 +289,14 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
   it("map.addListener('click', ...) は captureMapClick の時のみ effect が走る", () => {
     expect(MAP_SRC).toMatch(/addListener\(\s*"click"/);
     // useEffect 内で if (!captureMapClick) return;
-    // (captureMapClick = pinAddMode || カメラファーストの地図タップ待ち。
-    //  カメラファースト導入で pinAddMode 単独ゲートから統合フラグへ変更)
     const clickEffect = MAP_SRC.match(
       /useEffect\(\(\)\s*=>\s*\{[\s\S]*?if\s*\(!captureMapClick\)\s*return;[\s\S]*?addListener\(\s*"click"[\s\S]*?\}\,\s*\[map,\s*captureMapClick,\s*onMapClick\]/,
     );
     expect(clickEffect).not.toBeNull();
-    // 親からは pinAddMode とカメラファースト待ちの OR で渡す
+    // ⚠2026-07-29:「ピン追加モード」廃止により、地図タップを拾うのは
+    // **撮影後のタップ待ちだけ**になった（写真なしのピンは作らない）。
     expect(MAP_SRC).toMatch(
-      /captureMapClick=\{pinAddMode\s*\|\|\s*cameraFirstPhase\s*===\s*"awaiting-map-tap"\}/,
+      /captureMapClick=\{cameraFirstPhase === "awaiting-map-tap"\}/,
     );
   });
 
@@ -441,28 +409,8 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     expect(catchBlock).toContain('status: "unavailable"');
   });
 
-  it("getCurrentPosition は単発のみ。watchPosition / wakeLock は使わない", () => {
-    expect(MAP_SRC).toMatch(/navigator\.geolocation\.getCurrentPosition/);
-    expect(MAP_SRC).not.toMatch(/navigator\.geolocation\.watchPosition/);
-    expect(MAP_SRC).not.toMatch(/wakeLock/);
-  });
+  // 「現在地を使う」廃止。位置取得が無いことは別 describe で見張る。
 
-  it("RouteRecorder hook を pin 作成に流用しない (専用 state)", () => {
-    // recorder.start / stop を pin 作成経路で呼ばないことを構造的に確認:
-    // useCurrentLocationForCreate / handlePinCreateSubmit 内に recorder. が出ない
-    const useCurrentBlock = MAP_SRC.match(
-      /useCurrentLocationForCreate[\s\S]*?\}\,\s*\[\]\s*\);/,
-    );
-    expect(useCurrentBlock).not.toBeNull();
-    expect(useCurrentBlock?.[0]).not.toMatch(/recorder\./);
-    // handlePinCreateSubmit の useCallback 本体内で recorder.* を呼ばない
-    // (deps list は revision で変化しうるので body のみ捕捉)。
-    const submitBlock = MAP_SRC.match(
-      /handlePinCreateSubmit\s*=\s*useCallback\(\s*async[\s\S]*?\}\,\s*\[/,
-    );
-    expect(submitBlock).not.toBeNull();
-    expect(submitBlock?.[0]).not.toMatch(/recorder\./);
-  });
 
   it("InfoWindow の PinInfo に「詳細を見る」リンク + onOpenPinDetail", () => {
     expect(MAP_SRC).toMatch(/data-testid="pin-info-open-detail"/);
@@ -760,127 +708,24 @@ describe("Codex P2 — recheck latest pin before applying save results", () => {
 });
 
 // =======================================================================
-// Codex P2: guard late geolocation callbacks after cancel / session change
 // =======================================================================
-describe("Codex P2 — ignore stale geolocation callbacks", () => {
-  it("currentLocationRequestIdRef / activeSessionIdRef / fsMapMountedRef を持つ", () => {
-    expect(MAP_SRC).toMatch(/currentLocationRequestIdRef/);
-    expect(MAP_SRC).toMatch(/activeSessionIdRef/);
-    expect(MAP_SRC).toMatch(/fsMapMountedRef/);
+// ⚠2026-07-29: 「現在地を使う」は廃止した。ピンの位置は必ず地図タップで
+// 決めるので、地図側は位置取得を一切行わない。ここにあった「遅延 callback の
+// 3 段ガード」「token bump」の表明は、取得そのものが無くなり対象が消えた。
+// 復活していないことを下の2本で見張る。
+// =======================================================================
+describe("field-survey-map.tsx — 位置取得を持たない (2026-07-29)", () => {
+  it("地図側で現在地を取りに行かない", () => {
+    expect(MAP_SRC).not.toMatch(/getCurrentPosition/);
+    expect(MAP_SRC).not.toMatch(/useCurrentLocationForCreate/);
   });
 
-  it("invalidateCurrentLocationRequest が token を bump する helper として存在", () => {
-    expect(MAP_SRC).toMatch(/const\s+invalidateCurrentLocationRequest\s*=\s*useCallback/);
-    expect(MAP_SRC).toMatch(
-      /invalidateCurrentLocationRequest[\s\S]*?currentLocationRequestIdRef\.current\s*\+=\s*1/,
-    );
-  });
-
-  it("useCurrentLocationForCreate 実行時に新 token を発行し、requestSessionId を捕捉", () => {
-    const fn = MAP_SRC.match(
-      /const useCurrentLocationForCreate\s*=\s*useCallback\([\s\S]*?\}\,\s*\[\]\s*\);/,
-    );
-    expect(fn).not.toBeNull();
-    const m = fn?.[0] ?? "";
-    expect(m).toMatch(/currentLocationRequestIdRef\.current\s*\+=\s*1/);
-    expect(m).toMatch(/const requestId\s*=\s*currentLocationRequestIdRef\.current/);
-    expect(m).toMatch(
-      /const requestSessionId\s*=\s*activeSessionIdRef\.current/,
-    );
-  });
-
-  it("success / error callback の冒頭で 3 段ガード (mounted / requestId / sessionId) を確認", () => {
-    const fn = MAP_SRC.match(
-      /const useCurrentLocationForCreate\s*=\s*useCallback\([\s\S]*?\}\,\s*\[\]\s*\);/,
-    );
-    const m = fn?.[0] ?? "";
-    // success callback
-    const successBlock = m.match(/\(pos\)\s*=>\s*\{[\s\S]*?\}\,\s*\(err\)/);
-    expect(successBlock).not.toBeNull();
-    const sb = successBlock?.[0] ?? "";
-    expect(sb).toMatch(/if\s*\(!fsMapMountedRef\.current\)\s*return/);
-    expect(sb).toMatch(
-      /if\s*\(currentLocationRequestIdRef\.current\s*!==\s*requestId\)\s*return/,
-    );
-    // 巡回なし撮影 (quick_capture) の再取得を捨てないため、session ガードは
-    // 「巡回中に始めた取得」に限定する (requestSessionId !== null)。
-    expect(sb).toMatch(
-      /requestSessionId !== null &&\s*\n?\s*activeSessionIdRef\.current !== requestSessionId/,
-    );
-    // error callback
-    const errBlock = m.match(/\(err\)\s*=>\s*\{[\s\S]*?\}\,\s*\{[\s\S]*?enableHighAccuracy/);
-    expect(errBlock).not.toBeNull();
-    const eb = errBlock?.[0] ?? "";
-    expect(eb).toMatch(/if\s*\(!fsMapMountedRef\.current\)\s*return/);
-    expect(eb).toMatch(
-      /if\s*\(currentLocationRequestIdRef\.current\s*!==\s*requestId\)\s*return/,
-    );
-    expect(eb).toMatch(
-      /requestSessionId !== null &&\s*\n?\s*activeSessionIdRef\.current !== requestSessionId/,
-    );
-  });
-
-  it("modal cancel で invalidateCurrentLocationRequest を呼ぶ", () => {
-    expect(MAP_SRC).toMatch(
-      /onCancel=\{\s*\(\)\s*=>\s*\{[\s\S]*?invalidateCurrentLocationRequest\(\)/,
-    );
-  });
-
-  it("active session 変更で useEffect が invalidateCurrentLocationRequest を呼ぶ", () => {
-    expect(MAP_SRC).toMatch(
-      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?invalidateCurrentLocationRequest\(\)[\s\S]*?\}\,\s*\[activeSession,\s*invalidateCurrentLocationRequest\]/,
-    );
-  });
-
-  it("unmount 時に fsMapMountedRef=false + token を bump する", () => {
-    expect(MAP_SRC).toMatch(
-      /return\s*\(\)\s*=>\s*\{[\s\S]*?fsMapMountedRef\.current\s*=\s*false[\s\S]*?currentLocationRequestIdRef\.current\s*\+=\s*1/,
-    );
-  });
-
-  it("activeSessionIdRef は activeSession 変化時に同期される (stale closure 回避)", () => {
-    expect(MAP_SRC).toMatch(
-      /useEffect\(\(\)\s*=>\s*\{[\s\S]*?activeSessionIdRef\.current\s*=\s*activeSession\?\.id\s*\?\?\s*null[\s\S]*?\}\,\s*\[activeSession\]/,
-    );
-  });
-
-  it("単発取得のままで watchPosition を使わない / RouteRecorder hook を流用しない (継続)", () => {
-    expect(MAP_SRC).toMatch(/navigator\.geolocation\.getCurrentPosition/);
+  it("位置記録 (巡回の軌跡) は hook 側に閉じたままにする", () => {
+    // 地図側で watch を張らない（コメントでの言及は許容し、実行コードだけ見る）。
     expect(MAP_SRC).not.toMatch(/navigator\.geolocation\.watchPosition/);
-    // useCurrentLocationForCreate 経路で recorder を呼ばない
-    const fn = MAP_SRC.match(
-      /const useCurrentLocationForCreate\s*=\s*useCallback\([\s\S]*?\}\,\s*\[\]\s*\);/,
-    );
-    expect(fn?.[0]).not.toMatch(/recorder\./);
-  });
-
-  it("active session 無しで「現在地を使う」を押した場合は早期 return (汎用文言)", () => {
-    expect(MAP_SRC).toMatch(/巡回を開始してから現在地を取得してください/);
-  });
-
-  it("pin 作成成功時にも pending callback を invalidate する", () => {
-    expect(MAP_SRC).toMatch(
-      /handlePinCreateSubmit[\s\S]*?r\.ok[\s\S]*?invalidateCurrentLocationRequest\(\)[\s\S]*?setCreateCandidate\(null\)/,
-    );
-  });
-
-  it("token / session id / position を console に出さない (継続ガード)", () => {
-    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*requestId/i);
-    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*requestSessionId/i);
-    expect(MAP_SRC).not.toMatch(/console\.\w+\([^)]*position/i);
-    expect(MAP_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
-  });
-
-  it("localStorage / sessionStorage / IndexedDB を使わない (継続)", () => {
-    expect(MAP_SRC).not.toMatch(/localStorage\s*\.\s*(setItem|getItem|removeItem)/);
-    expect(MAP_SRC).not.toMatch(/sessionStorage\s*\.\s*(setItem|getItem|removeItem)/);
-    expect(MAP_SRC).not.toMatch(/\bindexedDB\s*\.\s*open/);
+    expect(MAP_SRC).toMatch(/useFieldSurveyLocationRecorder/);
   });
 });
-
-// =======================================================================
-// util: archived label の継続ガード
-// =======================================================================
 describe("field-survey-pin-util.ts — archived を「削除」と表記しない (継続)", () => {
   it("util ファイル全体で archived ラベルに「削除」を含めない", () => {
     expect(UTIL_SRC).not.toMatch(/archived[\s\S]{0,40}削除/);

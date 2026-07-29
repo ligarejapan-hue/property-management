@@ -26,9 +26,7 @@ function renderModal(initialPinType?: FieldSurveyPinType): string {
       onSubmit: noop,
       onRetryPhoto: noop,
       onFinishWithoutPhoto: noop,
-      onUseCurrentLocation: noop,
-      currentLocationLoading: false,
-      currentLocationError: null,
+      onReplaceLocation: noop,
       ...(initialPinType !== undefined ? { initialPinType } : {}),
     }),
   );

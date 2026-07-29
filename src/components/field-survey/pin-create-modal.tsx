@@ -25,10 +25,6 @@ import {
   type FieldSurveyPinType,
 } from "@/lib/field-survey-pin-util";
 import { FIELD_SURVEY_MEMO_MAX_LEN } from "@/lib/field-survey-constants";
-import {
-  formatAccuracyMeters,
-  isLowAccuracyForDisplay,
-} from "@/lib/field-survey-current-location-util";
 
 interface PinCreateModalProps {
   /** 地図クリック / 現在地で確定した座標。表示専用。 */
@@ -39,7 +35,6 @@ interface PinCreateModalProps {
    * (地図タップは undefined)。精度が悪い (>しきい値) と実際の家から離れた所に
    * ピンが落ちるため、値と低精度警告を表示して取り直し/修正を促す。
    */
-  initialAccuracy?: number | null;
   /**
    * カメラファースト (撮って登録) 経由で既に撮影済みの写真。
    * 指定時は modal を写真選択済み状態で開く (通常の地図タップ経路は null)。
@@ -98,15 +93,13 @@ interface PinCreateModalProps {
   onReplaceRetryPhoto?: (file: File) => void;
   /** 写真なしで完了 (pin は保存済み)。 */
   onFinishWithoutPhoto: () => void;
-  onUseCurrentLocation: () => void;
-  currentLocationLoading: boolean;
-  currentLocationError: string | null;
+  /** 写真を保持したまま地図タップ待ちへ戻す。 */
+  onReplaceLocation: () => void;
 }
 
 export default function PinCreateModal({
   initialLat,
   initialLng,
-  initialAccuracy,
   initialPhotoFile,
   initialPhotoPreviewUrl,
   initialPinType,
@@ -121,9 +114,7 @@ export default function PinCreateModal({
   onRetryPhoto,
   onReplaceRetryPhoto,
   onFinishWithoutPhoto,
-  onUseCurrentLocation,
-  currentLocationLoading,
-  currentLocationError,
+  onReplaceLocation,
 }: PinCreateModalProps) {
   // 巡回なし撮影 (sessionId 無し) は種類を「物件化候補」に固定する。
   // 巡回外の pin は巡回履歴に出ないため、候補以外にすると完成待ち一覧
@@ -166,9 +157,6 @@ export default function PinCreateModal({
   // 権限が無ければ 403 QUICK_CAPTURE_FORBIDDEN が serverError に出る)。
   const canSubmit =
     !busy && Number.isFinite(initialLat) && Number.isFinite(initialLng);
-  // GPS 由来の精度表示 (地図タップは accuracy 無しで "—" → 非表示)。
-  const accuracyText = formatAccuracyMeters(initialAccuracy);
-  const lowAccuracy = isLowAccuracyForDisplay(initialAccuracy);
 
   const handleFilePicked = (file: File | null) => {
     if (!file) return;
@@ -217,55 +205,24 @@ export default function PinCreateModal({
           <dd data-testid="pin-create-lat">{formatCoord(initialLat)}</dd>
           <dt>経度</dt>
           <dd data-testid="pin-create-lng">{formatCoord(initialLng)}</dd>
-          {accuracyText !== "—" && (
-            <>
-              <dt>位置精度</dt>
-              <dd
-                data-testid="pin-create-accuracy"
-                className={
-                  lowAccuracy
-                    ? "font-semibold text-amber-700 dark:text-amber-400"
-                    : ""
-                }
-              >
-                {accuracyText}
-              </dd>
-            </>
-          )}
         </dl>
 
-        {/* 低精度 (GPS が悪い) 警告: 現在地/カメラファーストで自動配置した位置が
-            実際の家から離れている恐れを、保存前に気づかせて取り直し/修正を促す。 */}
-        {lowAccuracy && (
-          <p
-            role="status"
-            data-testid="pin-create-low-accuracy-warning"
-            className="mb-3 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] leading-tight text-amber-900 dark:text-amber-300"
-          >
-            <span aria-hidden="true">⚠</span> 位置の精度が低めです ({accuracyText}
-            )。実際の建物から離れているかもしれません。ずれていれば「現在地を使う」で
-            取り直すか、一度キャンセルして地図をタップし直して修正してください。
-          </p>
-        )}
-
+        {/* ⚠位置を直す唯一の導線 (2026-07-29)。ドラッグ移動は作らない方針なので、
+            これが無いと「タップを間違えた」時の直し方がキャンセル＝写真ごと破棄
+            しか無くなる。写真は保持したまま地図タップ待ちへ戻す。 */}
         <div className="mb-3">
           <button
             type="button"
-            onClick={onUseCurrentLocation}
-            disabled={currentLocationLoading}
+            onClick={onReplaceLocation}
+            disabled={busy}
             className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
-            data-testid="pin-create-use-current-location"
+            data-testid="pin-create-replace-location"
           >
-            {currentLocationLoading ? "現在地を取得中…" : "現在地を使う"}
+            地図で置き直す
           </button>
-          {currentLocationError && (
-            <p
-              role="status"
-              className="mt-1 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
-            >
-              {currentLocationError}
-            </p>
-          )}
+          <p className="mt-1 text-[11px] leading-tight text-gray-500 dark:text-gray-400">
+            写真はそのままで、もう一度地図をタップできます。
+          </p>
         </div>
 
         {lockPinType ? (

@@ -106,70 +106,37 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     expect(MAP_SRC).toMatch(/onTogglePanelOpen/);
   });
 
-  it("撮影 callback は mount / token / session の 3 ガードを持つ (現在地を使う と同型)", () => {
-    // 終端は依存配列の "]," まで (関数単体に正しくスコープする)
-    const handler = MAP_SRC.match(
-      /const handleCameraPhotoCaptured\s*=\s*useCallback[\s\S]*?\}\,\s*\[[\s\S]*?\],?\s*\);/,
-    );
-    expect(handler).not.toBeNull();
-    const m = handler?.[0] ?? "";
-    expect(m).toMatch(/fsMapMountedRef\.current/);
-    expect(m).toMatch(/currentLocationRequestIdRef\.current\s*!==\s*requestId/);
-    expect(m).toMatch(/activeSessionIdRef\.current\s*!==\s*requestSessionId/);
-    // 変換は純関数経由 (raw position を直接 setState しない)
-    expect(m).toMatch(/cameraFirstCandidateFromPosition\(/);
-    // フォールバック文言も純関数経由
-    expect(m).toMatch(/cameraFirstFallbackMessage\(/);
-    // watchPosition は使わない (単発取得のみ)
-    expect(m).not.toMatch(/watchPosition/);
-  });
-
-  it("token 無効化で握り潰された遅延 callback は最新カメラ要求なら後始末する (locating 固着防止)", () => {
-    const handler = MAP_SRC.match(
-      /const handleCameraPhotoCaptured\s*=\s*useCallback[\s\S]*?\}\,\s*\[[\s\S]*?\],?\s*\);/,
-    );
-    expect(handler).not.toBeNull();
-    const m = handler?.[0] ?? "";
-    // 現在地取得の並行化 (撮影ボタン押下で prefetch 開始) に伴い、成功/失敗の
-    // 2 つの callback は単一の apply(result) に統合された。後始末・modal 競合
-    // ガードは「両方に書く」から「1 箇所で両方を賄う」へ変わっただけで、守って
-    // いる不変条件 (locating 固着させない / 写真をリークさせない / modal 競合時は
-    // 破棄) は同じ。むしろ error 側だけ書き忘れる余地が構造的に消えている。
-    expect(m).toMatch(/cameraRequestIdRef\.current\s*===\s*requestId/);
-    // 失敗も同じ経路を通る
-    expect(m).toMatch(/if \(!result\.ok\)/);
-    // modal 競合ガードは 捕捉時 + apply 内 の 2 箇所
-    const modalGuards = m.match(/createCandidateOpenRef\.current/g) ?? [];
-    expect(modalGuards.length).toBeGreaterThanOrEqual(2);
-    // 最新カメラ要求としての記録は prefetch 開始時に行う (撮影開始が起点)
-    expect(MAP_SRC).toMatch(/cameraRequestIdRef\.current\s*=\s*requestId/);
-  });
-
-  it("地図タップ待ち (awaiting-map-tap) はピン追加モードより先に処理される", () => {
-    const handler = MAP_SRC.match(
-      /const handleMapClick\s*=\s*useCallback[\s\S]*?\}\,\s*\[[\s\S]*?\],?\s*\);/,
-    );
-    expect(handler).not.toBeNull();
-    const m = handler?.[0] ?? "";
-    // awaiting-map-tap 分岐が pinAddMode ガードより前にある
-    const awaitingIdx = m.indexOf('"awaiting-map-tap"');
-    const pinModeIdx = m.indexOf("!pinAddMode");
-    expect(awaitingIdx).toBeGreaterThan(-1);
-    expect(pinModeIdx).toBeGreaterThan(-1);
-    expect(awaitingIdx).toBeLessThan(pinModeIdx);
-    // 通常経路で modal を開く際、撮影の現在地取得中ならカメラ側を同期破棄する
-    // (共有 token bump による "locating" 固着の根本予防)
-    expect(m).toMatch(
-      /cameraFirstPhase\s*===\s*"locating"\s*\)\s*resetCameraFirst\(\)/,
+  // ⚠2026-07-29: 撮影は GPS を待たなくなった（位置は地図タップで決める）ので、
+  // 遅延 callback の 3 ガードは対象そのものが無い。代わりに「同期2手だけ」を固定する。
+  it("撮影は同期で2手だけ（写真を保持→タップ待ちへ）", () => {
+    const fn = MAP_SRC.match(
+      /const handleCameraPhotoCaptured = useCallback\([\s\S]*?\n  \}, \[\]\);/,
+    )?.[0] ?? "";
+    expect(fn).not.toBe("");
+    expect(fn).not.toMatch(/await |\.then\(|getCurrentPosition/);
+    expect(fn.indexOf("cameraPhotoFileRef.current = file")).toBeLessThan(
+      fn.indexOf('setCameraFirstPhase("awaiting-map-tap")'),
     );
   });
 
-  it("map click listener はピン追加モードまたは地図タップ待ちで有効化される", () => {
+  it("作成モーダルが開いている間は撮影を二重に始めない", () => {
+    const fn = MAP_SRC.match(
+      /const handleCameraPhotoCaptured = useCallback\([\s\S]*?\n  \}, \[\]\);/,
+    )?.[0] ?? "";
+    expect(fn).toContain("createCandidateOpenRef.current");
+  });
+
+  it("地図タップはタップ待ちの時だけ受け付ける（写真なしのピンを作らない）", () => {
+    const m = MAP_SRC.match(/const handleMapClick = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
+    expect(m).not.toBe("");
+    expect(m).toContain('if (cameraFirstPhase !== "awaiting-map-tap") return;');
+    expect(m).not.toMatch(/pinAddMode/);
+  });
+
+  it("map click listener はタップ待ちの時だけ有効化される", () => {
     expect(MAP_SRC).toMatch(
-      /captureMapClick=\{pinAddMode\s*\|\|\s*cameraFirstPhase\s*===\s*"awaiting-map-tap"\}/,
+      /captureMapClick=\{cameraFirstPhase === "awaiting-map-tap"\}/,
     );
-    // MapDataLayer 側は captureMapClick で listener を gate
-    expect(MAP_SRC).toMatch(/if\s*\(\s*!captureMapClick\s*\)\s*return/);
   });
 
   it("カメラファースト由来の保存完了は詳細パネルを開かずトーストを出す", () => {
@@ -211,19 +178,18 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     expect(m).toMatch(/prevId\s*!==\s*nextId/);
     expect(m).toMatch(/resetCameraFirst\(\)/);
     expect(m).toMatch(/setActiveSession\(s\)/);
-    // reset は token bump + 写真破棄 + phase/notice 初期化を行う
+    // reset は写真破棄 + phase 初期化（位置取得は無くなったので token bump も無い）
     const reset = MAP_SRC.match(
       /const resetCameraFirst\s*=\s*useCallback\([\s\S]*?\}\,\s*\[\]\s*\);/,
     );
     expect(reset).not.toBeNull();
     const r = reset?.[0] ?? "";
-    expect(r).toMatch(/currentLocationRequestIdRef\.current\s*\+=\s*1/);
+    expect(r).not.toMatch(/currentLocationRequestIdRef/);
     expect(r).toMatch(/cameraPhotoFileRef\.current\s*=\s*null/);
     expect(r).toMatch(/setCameraFirstPhase\("idle"\)/);
-    // Codex P2: reset 後に届いた旧カメラ callback の後始末を発火させない
-    // (照合 ID を無効化しないと、後始末の再 bump が reset 後に始まった
-    //  「現在地を使う」等の新しい取得まで握り潰す)
-    expect(r).toMatch(/cameraRequestIdRef\.current\s*=\s*0/);
+    // ⚠2026-07-29: 遅延 callback の照合 ID は不要になった。撮影が GPS を
+    // 待たなくなり、後から届く callback そのものが存在しないため。
+    expect(r).not.toMatch(/cameraRequestIdRef/);
   });
 
   it("banner は awaiting-map-tap のときのみ render (巡回外の撮影でも出す)", () => {
@@ -259,12 +225,12 @@ describe("pin-create-modal.tsx — initialPhotoFile 受け取り", () => {
     // useState initializer 内で createObjectURL を呼ばない (コメント除外で判定)
     expect(MODAL_CODE).not.toMatch(/useState[\s\S]{0,200}?createObjectURL/);
     // 親はカメラ candidate 生成時 (イベントハンドラ内) に preview URL も作る
-    // (現在地成功 + 地図タップ待ちの 2 経路)
+    // 生成経路は地図タップの1本だけ（現在地からの自動配置は廃止）
     const gen =
       MAP_SRC.match(
         /cameraPhotoPreviewUrl:\s*photo\s*\?\s*URL\.createObjectURL\(photo\)/g,
       ) ?? [];
-    expect(gen.length).toBeGreaterThanOrEqual(2);
+    expect(gen.length).toBe(1);
     expect(MAP_SRC).toMatch(
       /initialPhotoPreviewUrl=\{createCandidate\.cameraPhotoPreviewUrl\s*\?\?\s*null\}/,
     );
