@@ -28,12 +28,18 @@ import {
 // （ユーザー指摘 2026-07-29「以前のシステムは線で表示されていた」）。
 //
 // 権限:
-//  - field_survey:read のみ。**read_all は要求しない**。
-//    ⚠これは coverage/cells（格子の集計）より踏み込んだ判断である。
-//    集計は「格子番号と回数」しか返さないが、こちらは**生の座標**を返す。
-//    発注者の業務判断（2026-07-28「全員の記録は見せていいよ」＝全員の踏破
-//    状況を全員が見て、次に回るエリアを自分で決めるための機能）に基づく。
-//  - 代わりに、勤怠の証拠にあたる情報は**返さない**:
+//  - field_survey:read **かつ** read_all または manage。
+//    ⚠当初は read だけで通す実装にしたが、それは既存の境界を崩していた
+//    (@codex #334 P1)。集計 (coverage/cells) が read だけで済むのは「格子番号と
+//    回数」しか返さないからで、こちらは**生の座標**を返す。ID や時刻を削っても
+//    「他人の GPS 軌跡そのもの」であることは変わらず、
+//    sessions/[id]/track-points が他人の巡回に read_all/manage を要求している
+//    のと同じ性質の情報である。
+//    → **誰に見せるかは権限画面で決める**。全員に見せたい職場なら現地スタッフに
+//      read_all を付ければよく、既定で崩す話ではない。
+//    → read だけの人にも「どこを誰も回っていないか」は coverage/cells の色で
+//      届くので、次に回るエリアを決める業務自体は成立する。
+//  - その上で、勤怠の証拠にあたる情報は**返さない**:
 //      * 誰の巡回か（staff_user_id・氏名）
 //      * いつ歩いたか（recorded_at・started_at・ended_at）
 //      * どの巡回か（session id）
@@ -75,6 +81,18 @@ export async function GET(request: NextRequest) {
     if (!hasPermission(permissions, "field_survey", "read")) {
       throw new ApiError(403, "閲覧権限がありません", "FORBIDDEN");
     }
+    // ⚠他人の生軌跡にあたるため、集計 (coverage/cells) より上の権限を要る。
+    // 既存の sessions/[id]/track-points と同じ境界に合わせる (@codex #334 P1)。
+    const canSeeOthers =
+      hasPermission(permissions, "field_survey", "read_all") ||
+      hasPermission(permissions, "field_survey", "manage");
+    if (!canSeeOthers) {
+      throw new ApiError(
+        403,
+        "他の担当者の記録を見る権限がありません",
+        "FORBIDDEN",
+      );
+    }
 
     const { searchParams } = new URL(request.url);
     const queryObj: Record<string, string> = {};
@@ -115,18 +133,25 @@ export async function GET(request: NextRequest) {
       LIMIT ${COVERAGE_TRACK_SESSION_LIMIT + 1}
     `;
 
-    const candidates: TrackSessionCandidate[] = sessionRows.map((r) => ({
-      id: r.id,
-      pointCount: r.pointCount,
-    }));
+    // ⚠上限 +1 で引いているので、**上限を超えた本数は分からない** (@codex #334 P2)。
+    // 「1件だけ足りない」と表示すると、実際は何十件も欠けているのに
+    // ほぼ完全に見えてしまう。分からないときは「◯件以上」と伝える。
+    const hasMoreCandidates = sessionRows.length > COVERAGE_TRACK_SESSION_LIMIT;
+    const candidates: TrackSessionCandidate[] = sessionRows
+      .slice(0, COVERAGE_TRACK_SESSION_LIMIT)
+      .map((r) => ({ id: r.id, pointCount: r.pointCount }));
     const plan = planTrackFetch(candidates);
+    /** 落とした本数を正確に数えられたか。false なら表示は「◯件以上」。 */
+    const exactBase = !hasMoreCandidates;
+    const droppedBase = plan.droppedTrips + (hasMoreCandidates ? 1 : 0);
 
     if (plan.sessionIds.length === 0) {
       return trackResponse({
         days,
         thinStep: plan.thinStep,
-        droppedTrips: plan.droppedTrips,
-        truncated: plan.truncated,
+        droppedTrips: droppedBase,
+        droppedTripsExact: exactBase,
+        truncated: plan.truncated || hasMoreCandidates,
         lines: [],
       });
     }
@@ -141,6 +166,12 @@ export async function GET(request: NextRequest) {
     // 等間隔に間引かれるので、線の形は保たれる。途中で打ち切る方式は採らない
     //（途切れた線は「そこで引き返した」ように見えて誤読を生む）。
     //
+    // ⚠**期間の下限は点にも掛ける** (@codex #334 P2)。境をまたぐ巡回は
+    //   「最近の点が1つでもある」だけで候補に入るので、掛けないと「直近1年」の
+    //   線に1年より前の座標が混ざり、面の色と期間が食い違う。
+    //   点は時刻順なので、下限で落ちるのは**先頭の連続した区間**だけ。
+    //   線の途中に穴が空いて直線で結ばれることはない。
+    //
     // ⚠lat/lng は Decimal(10,7)。`::float8` にしないと Prisma が Decimal を
     //   返し、JSON 化で文字列になってクライアントの描画が全滅する。
     const ids = plan.sessionIds;
@@ -150,6 +181,10 @@ export async function GET(request: NextRequest) {
              tp.lng::float8      AS "lng"
       FROM field_survey_track_points tp
       WHERE tp.session_id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
+        AND (
+          ${fromAt}::timestamptz IS NULL
+          OR tp.recorded_at >= (${fromAt}::timestamptz AT TIME ZONE 'UTC')
+        )
         AND (${plan.thinStep}::int = 1 OR tp.sequence % ${plan.thinStep}::int = 0)
       ORDER BY tp.session_id, tp.sequence
       LIMIT ${HARD_ROW_CAP + 1}
@@ -158,14 +193,17 @@ export async function GET(request: NextRequest) {
     // 安全弁に当たったら、末尾の巡回は点が欠けている可能性があるので丸ごと
     // 落とす（欠けた線をそのまま描くと、行っていない所を通ったように見える）。
     let rows = pointRows;
-    let droppedTrips = plan.droppedTrips;
-    let truncated = plan.truncated;
+    let droppedTrips = droppedBase;
+    let droppedTripsExact = exactBase;
+    let truncated = plan.truncated || hasMoreCandidates;
     if (pointRows.length > HARD_ROW_CAP) {
       const lastId = pointRows[HARD_ROW_CAP]?.sessionId ?? null;
       rows = pointRows
         .slice(0, HARD_ROW_CAP)
         .filter((r) => r.sessionId !== lastId);
       droppedTrips += 1;
+      // 安全弁に当たった時点で、その先に何本あるかは数えていない。
+      droppedTripsExact = false;
       truncated = true;
     }
 
@@ -186,6 +224,7 @@ export async function GET(request: NextRequest) {
       days,
       thinStep: plan.thinStep,
       droppedTrips,
+      droppedTripsExact,
       truncated,
       lines,
     });
@@ -198,6 +237,8 @@ function trackResponse(data: {
   days: number;
   thinStep: number;
   droppedTrips: number;
+  /** false なら「droppedTrips 件以上」の意味。画面の文言を変える。 */
+  droppedTripsExact: boolean;
   truncated: boolean;
   lines: { lat: number; lng: number }[][];
 }) {

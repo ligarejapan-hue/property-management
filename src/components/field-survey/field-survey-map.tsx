@@ -173,9 +173,15 @@ export default function FieldSurveyMap({
     status: CoverageStatus;
     /** 量が多くて描けなかった巡回の本数。0 より大きければ必ず断りを出す。 */
     droppedTrips: number;
-  }>({ status: "off", droppedTrips: 0 });
+    /** false なら「droppedTrips 件以上」の意味 (@codex #334 P2)。 */
+    droppedTripsExact: boolean;
+  }>({ status: "off", droppedTrips: 0, droppedTripsExact: true });
   const handleTracksState = useCallback(
-    (v: { status: CoverageStatus; droppedTrips: number }) => setTracksState(v),
+    (v: {
+      status: CoverageStatus;
+      droppedTrips: number;
+      droppedTripsExact: boolean;
+    }) => setTracksState(v),
     [],
   );
 
@@ -1215,6 +1221,7 @@ export default function FieldSurveyMap({
             coverageDays={coverageDays}
             onCoverageState={handleCoverageState}
             onTracksState={handleTracksState}
+            canSeeOtherTracks={canSeeOtherPins}
             onError={setError}
             refetchNonce={refetchNonce}
             currentUserId={currentUserId}
@@ -1267,6 +1274,8 @@ export default function FieldSurveyMap({
           coverageStatus={coverageState.status}
           tracksStatus={tracksState.status}
           tracksDroppedTrips={tracksState.droppedTrips}
+          tracksDroppedTripsExact={tracksState.droppedTripsExact}
+          canSeeOtherTracks={canSeeOtherPins}
           panelOpen={panelOpen}
           onTogglePanelOpen={() => {
             quickStartRef.current = false;
@@ -1517,6 +1526,8 @@ function ControlPanel({
   coverageStatus,
   tracksStatus,
   tracksDroppedTrips,
+  tracksDroppedTripsExact,
+  canSeeOtherTracks,
   panelOpen,
   onTogglePanelOpen,
   currentUserId,
@@ -1554,6 +1565,10 @@ function ControlPanel({
   /** 線（過去に歩いた道筋）の状態。落とした本数があれば必ず断りを出す。 */
   tracksStatus: CoverageStatus;
   tracksDroppedTrips: number;
+  /** false なら「◯件以上」と伝える (@codex #334 P2)。 */
+  tracksDroppedTripsExact: boolean;
+  /** 他の担当者の記録を見る権限。無ければ線の行そのものを出さない。 */
+  canSeeOtherTracks: boolean;
   /**
    * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
    * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
@@ -1710,7 +1725,12 @@ function ControlPanel({
       )}
 
       {/* 線: 実際に歩いた道筋。面（マス）は道より広く、点の間もつながないので
-          「本当にこの道を歩いたか」は線でしか分からない。既定 ON。 */}
+          「本当にこの道を歩いたか」は線でしか分からない。既定 ON。
+          ⚠**生の座標**を見ることになるので、他の担当者の記録を見る権限
+          (read_all / manage) が無い人には行ごと出さない (@codex #334 P1)。
+          その人にも「どこを誰も回っていないか」は上の色で届く。 */}
+      {canSeeOtherTracks && (
+      <>
       <label
         className={`${layers.tracks ? "mb-1" : "mb-3"} flex cursor-pointer items-center gap-2`}
       >
@@ -1757,8 +1777,10 @@ function ControlPanel({
               data-testid="tracks-dropped-notice"
               className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
             >
-              線が多いため、古い巡回 {tracksDroppedTrips} 件は表示していません。
-              地図を寄せるか期間を「直近1年」にすると全部出ます。
+              線が多いため、古い巡回 {tracksDroppedTrips}
+              {tracksDroppedTripsExact ? " 件" : " 件以上"}
+              は表示していません。地図を寄せるか期間を「直近1年」にすると
+              全部出ます。
             </p>
           ) : (
             <p className="mb-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
@@ -1766,6 +1788,8 @@ function ControlPanel({
             </p>
           )}
         </div>
+      )}
+      </>
       )}
 
       {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
@@ -1859,6 +1883,7 @@ function MapDataLayer({
   coverageDays,
   onCoverageState,
   onTracksState,
+  canSeeOtherTracks,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -1872,7 +1897,14 @@ function MapDataLayer({
   onTracksState: (state: {
     status: CoverageStatus;
     droppedTrips: number;
+    droppedTripsExact: boolean;
   }) => void;
+  /**
+   * 他の担当者の記録を見られるか (read_all / manage)。
+   * ⚠線は**生の座標**なので、集計の色と違ってこの権限が要る (@codex #334 P1)。
+   * false のときは問い合わせも描画もしない (403 を叩き続けない)。
+   */
+  canSeeOtherTracks: boolean;
   onCoverageState: (state: {
     cellSize: CoverageCellSize | null;
     status: CoverageStatus;
@@ -1925,7 +1957,11 @@ function MapDataLayer({
         // 線も同じ理由で消す。古い線が残ると、そこを歩いたのが今の範囲の
         // 話だと誤読される。
         setTrackLines([]);
-        onTracksState({ status: "too-wide", droppedTrips: 0 });
+        onTracksState({
+          status: "too-wide",
+          droppedTrips: 0,
+          droppedTripsExact: true,
+        });
         return;
       }
       onError(null);
@@ -1989,7 +2025,7 @@ function MapDataLayer({
 
         // ⚠線も**別の待ち行列**にする（面と同じ理由）。生点を読むので面より
         // 重くなり得る。面・物件・ピンの更新を線が止めないようにする。
-        const tracksPromise = layers.tracks
+        const tracksPromise = layers.tracks && canSeeOtherTracks
           ? fetch(
               "/api/field-survey/coverage/tracks?" +
                 new URLSearchParams({
@@ -2005,20 +2041,29 @@ function MapDataLayer({
 
         if (tracksPromise) {
           setTrackLines([]);
-          onTracksState({ status: "loading", droppedTrips: 0 });
+          onTracksState({
+            status: "loading",
+            droppedTrips: 0,
+            droppedTripsExact: true,
+          });
           void tracksPromise
             .then(async (r) => {
               if (ac.signal.aborted) return;
               if (!r.ok) {
                 handleHttpError(r.status, onError);
                 setTrackLines([]);
-                onTracksState({ status: "unavailable", droppedTrips: 0 });
+                onTracksState({
+                  status: "unavailable",
+                  droppedTrips: 0,
+                  droppedTripsExact: true,
+                });
                 return;
               }
               const j = (await r.json()) as {
                 data?: {
                   lines?: RoutePolylinePoint[][];
                   droppedTrips?: number;
+                  droppedTripsExact?: boolean;
                 };
               };
               if (ac.signal.aborted) return;
@@ -2029,16 +2074,25 @@ function MapDataLayer({
               onTracksState({
                 status: "ready",
                 droppedTrips: j.data?.droppedTrips ?? 0,
+                droppedTripsExact: j.data?.droppedTripsExact !== false,
               });
             })
             .catch((err: unknown) => {
               if ((err as { name?: string }).name === "AbortError") return;
               setTrackLines([]);
-              onTracksState({ status: "unavailable", droppedTrips: 0 });
+              onTracksState({
+                status: "unavailable",
+                droppedTrips: 0,
+                droppedTripsExact: true,
+              });
             });
         } else {
           setTrackLines([]);
-          onTracksState({ status: "off", droppedTrips: 0 });
+          onTracksState({
+            status: "off",
+            droppedTrips: 0,
+            droppedTripsExact: true,
+          });
         }
 
         if (coveragePromise) {
@@ -2131,7 +2185,11 @@ function MapDataLayer({
         setCoverageCells([]);
         onCoverageState({ cellSize: null, status: "unavailable" });
         setTrackLines([]);
-        onTracksState({ status: "unavailable", droppedTrips: 0 });
+        onTracksState({
+          status: "unavailable",
+          droppedTrips: 0,
+          droppedTripsExact: true,
+        });
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");
       } finally {
@@ -2143,6 +2201,7 @@ function MapDataLayer({
       layers.pins,
       layers.coverage,
       layers.tracks,
+      canSeeOtherTracks,
       coverageDays,
       onError,
       onCoverageState,
@@ -2196,6 +2255,7 @@ function MapDataLayer({
     layers.pins,
     layers.coverage,
     layers.tracks,
+    canSeeOtherTracks,
     coverageDays,
     refetchNonce,
   ]);

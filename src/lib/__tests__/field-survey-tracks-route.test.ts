@@ -4,9 +4,11 @@
  * 業務背景: 面（マス）の色だけでは、マスが道より広く、点の間もつながないので
  * 「実際に歩いた筋」が出ない。線はそれを補う（ユーザー指摘 2026-07-29）。
  *
- * ⚠この API は cells と違い**生の座標を返す**。何を返さないか（誰の・いつ・
- * どの巡回か）と、進行中を含めないことが、read だけで全員に見せてよい根拠
- * になっている。ここが崩れると同僚の追跡になるので、表明で固定する。
+ * ⚠この API は cells と違い**生の座標を返す**。そのため
+ *   ①read_all / manage を要求する（cells は read だけで通る）
+ *   ②誰の・いつ・どの巡回かを返さない
+ *   ③終了した巡回だけを対象にする
+ * の3つで境界を作っている。どれが崩れても同僚の追跡になるので表明で固定する。
  *
  * vitest は env=node。prisma / api-helpers / permissions の mock は
  * field-survey-coverage-route.test.ts に合わせる。
@@ -91,6 +93,17 @@ import {
 import { GET } from "@/app/api/field-survey/coverage/tracks/route";
 
 const fieldUser = { id: "u-field", email: "f@x", name: "現地", role: "field_staff" };
+/** 線を見るのに必要な権限（read だけでは足りない）。 */
+const readAll = [
+  { resource: "field_survey", action: "read", granted: true },
+  { resource: "field_survey", action: "read_all", granted: true },
+];
+/** manage でも通る（既存の track-points と同じ境界）。 */
+const manage = [
+  { resource: "field_survey", action: "read", granted: true },
+  { resource: "field_survey", action: "manage", granted: true },
+];
+/** 現地スタッフの既定（seed）。read はあるが read_all は無い。 */
 const readOnly = [{ resource: "field_survey", action: "read", granted: true }];
 const otherResourceOnly = [
   { resource: "property", action: "read", granted: true },
@@ -120,6 +133,7 @@ interface TrackBody {
     thinStep: number;
     droppedTrips: number;
     truncated: boolean;
+    droppedTripsExact: boolean;
     lineCount: number;
     pointCount: number;
     lines: { lat: number; lng: number }[][];
@@ -148,17 +162,34 @@ beforeEach(() => {
   // 流れて、まったく別の失敗として現れる。
   (prisma.$queryRaw as unknown as Mock).mockReset();
   (getApiSession as unknown as Mock).mockResolvedValue(fieldUser);
-  (getUserPermissions as unknown as Mock).mockResolvedValue(readOnly);
+  (getUserPermissions as unknown as Mock).mockResolvedValue(readAll);
 });
 
-describe("1. 権限", () => {
-  it("field_survey:read だけで見られる（read_all を要求しない）", async () => {
+describe("1. 権限（他人の生軌跡なので集計より上の権限が要る）", () => {
+  it("read_all があれば見られる", async () => {
     mockQueries([sess("s1", 3)], [pt("s1", 35.69, 139.77), pt("s1", 35.691, 139.771)]);
     const res = await GET(makeReq());
     expect(res.status).toBe(200);
   });
 
-  it("巡回機能の権限が無ければ 403（他人の軌跡は誰にでも出さない）", async () => {
+  it("manage でも見られる（既存の track-points と同じ境界）", async () => {
+    (getUserPermissions as unknown as Mock).mockResolvedValue(manage);
+    mockQueries([sess("s1", 3)], [pt("s1", 35.69, 139.77), pt("s1", 35.691, 139.771)]);
+    const res = await GET(makeReq());
+    expect(res.status).toBe(200);
+  });
+
+  it("read だけでは 403（@codex #334 P1）", async () => {
+    // ⚠現地スタッフの既定はこれ。集計の色 (coverage/cells) は read だけで
+    // 見られるが、生の座標は別。ID や時刻を削っても他人の GPS 軌跡である
+    // ことは変わらない。誰に見せるかは権限画面で決める。
+    (getUserPermissions as unknown as Mock).mockResolvedValue(readOnly);
+    const res = await GET(makeReq());
+    expect(res.status).toBe(403);
+    expect(prisma.$queryRaw as unknown as Mock).not.toHaveBeenCalled();
+  });
+
+  it("巡回機能の権限が無ければ 403", async () => {
     (getUserPermissions as unknown as Mock).mockResolvedValue(otherResourceOnly);
     const res = await GET(makeReq());
     expect(res.status).toBe(403);
@@ -211,6 +242,14 @@ describe("3. 線が嘘にならないこと", () => {
     expect(rawCall(0)?.sql).toContain("tp.lat >=");
   });
 
+  it("点の取得にも期間の下限を掛ける（@codex #334 P2）", async () => {
+    // 境をまたぐ巡回は「最近の点が1つでもある」だけで候補に入る。掛けないと
+    // 「直近1年」の線に1年より前の座標が混ざり、面の色と期間が食い違う。
+    mockQueries([sess("s1", 4)], [pt("s1", 1, 2), pt("s1", 1.1, 2.1)]);
+    await GET(makeReq(`${BBOX}&days=365`));
+    expect(rawCall(1)?.sql).toContain("AT TIME ZONE 'UTC'");
+  });
+
   it("点が1つしかない巡回は線にしない", async () => {
     mockQueries(
       [sess("a", 1), sess("b", 2)],
@@ -245,15 +284,30 @@ describe("3. 線が嘘にならないこと", () => {
 });
 
 describe("4. 量が多すぎる時", () => {
-  it("落とした巡回があれば必ず truncated を立てる（黙って減らさない）", async () => {
-    const many = Array.from({ length: COVERAGE_TRACK_SESSION_LIMIT + 5 }, (_, i) =>
+  it("候補の上限を超えたら「◯件以上」として伝える（@codex #334 P2）", async () => {
+    // ⚠SQL は上限+1 でしか引かないので、**何本あふれたかは分からない**。
+    // 「1件だけ足りない」と出すと、実際は何十件も欠けているのにほぼ完全に
+    // 見えてしまう。
+    const many = Array.from({ length: COVERAGE_TRACK_SESSION_LIMIT + 1 }, (_, i) =>
       sess(`s${i}`, 1),
     );
     mockQueries(many, [pt("s0", 1, 2), pt("s0", 1.1, 2.1)]);
     const res = await GET(makeReq());
     const body = (await res.json()) as TrackBody;
     expect(body.data.truncated).toBe(true);
-    expect(body.data.droppedTrips).toBe(5);
+    expect(body.data.droppedTrips).toBeGreaterThanOrEqual(1);
+    expect(body.data.droppedTripsExact).toBe(false);
+  });
+
+  it("上限内なら本数は正確に出す", async () => {
+    mockQueries(
+      [sess("a", 2), sess("b", 2)],
+      [pt("a", 1, 2), pt("a", 1.1, 2.1), pt("b", 3, 4), pt("b", 3.1, 4.1)],
+    );
+    const res = await GET(makeReq());
+    const body = (await res.json()) as TrackBody;
+    expect(body.data.droppedTrips).toBe(0);
+    expect(body.data.droppedTripsExact).toBe(true);
   });
 
   it("安全弁に当たったら末尾の巡回は丸ごと落とす（欠けた線を描かない）", async () => {

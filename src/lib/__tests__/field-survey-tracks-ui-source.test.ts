@@ -110,8 +110,16 @@ describe("3. 地図側の配線", () => {
     // 古い線が残ると、そこを歩いたのが今の範囲の話だと誤読される。
     const occurrences = MAP_SRC.match(/setTrackLines\(\[\]\)/g) ?? [];
     expect(occurrences.length).toBeGreaterThanOrEqual(4);
-    expect(MAP_SRC).toMatch(/status: "unavailable", droppedTrips: 0/);
-    expect(MAP_SRC).toMatch(/status: "too-wide", droppedTrips: 0/);
+    expect(MAP_SRC).toMatch(/status: "unavailable",[\s\S]{0,80}droppedTrips: 0/);
+    expect(MAP_SRC).toMatch(/status: "too-wide",[\s\S]{0,80}droppedTrips: 0/);
+  });
+
+  it("他の担当者の記録を見る権限が無ければ問い合わせない (@codex #334 P1)", () => {
+    // 403 を叩き続けない。行そのものも出さない（押せない項目を置かない）。
+    expect(MAP_SRC).toMatch(/layers\.tracks && canSeeOtherTracks/);
+    expect(MAP_SRC).toMatch(/\{canSeeOtherTracks && \(/);
+    // 権限の判定は既存のピン凡例と同じ read_all / manage を使い回す
+    expect(MAP_SRC).toMatch(/canSeeOtherTracks=\{canSeeOtherPins\}/);
   });
 });
 
@@ -119,7 +127,13 @@ describe("4. 黙って減らさない", () => {
   it("落とした巡回があれば本数を出す", () => {
     expect(MAP_SRC).toMatch(/data-testid="tracks-dropped-notice"/);
     expect(MAP_SRC).toMatch(/tracksDroppedTrips > 0/);
-    expect(MAP_SRC).toMatch(/古い巡回 \{tracksDroppedTrips\} 件は表示していません/);
+    expect(MAP_SRC).toMatch(/古い巡回 \{tracksDroppedTrips\}/);
+  });
+
+  it("正確に数えられない時は「件以上」と言う (@codex #334 P2)", () => {
+    // 候補の上限を超えた分は本数が分からない。「1件だけ足りない」と出すと、
+    // 実際は何十件も欠けているのにほぼ完全に見えてしまう。
+    expect(MAP_SRC).toMatch(/tracksDroppedTripsExact \? " 件" : " 件以上"/);
   });
 
   it("取得できなかった時は「線が無い＝歩いていない」ではないと明言する", () => {
