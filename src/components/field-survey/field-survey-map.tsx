@@ -39,6 +39,7 @@ import RoutePolyline, {
   type RoutePolylinePoint,
 } from "@/components/field-survey/route-polyline";
 import CoverageHeatLayer from "@/components/field-survey/coverage-heat-layer";
+import CoverageTracksLayer from "@/components/field-survey/coverage-tracks-layer";
 import CoverageLegend from "@/components/field-survey/coverage-legend";
 import {
   COVERAGE_DEFAULT_DAYS,
@@ -135,7 +136,7 @@ interface PinRow {
   hasMemo?: boolean;
 }
 
-type Layer = "properties" | "pins" | "coverage";
+type Layer = "properties" | "pins" | "coverage" | "tracks";
 
 /**
  * 撮影と並行して走らせる現在地取得の結果。
@@ -160,10 +161,24 @@ export default function FieldSurveyMap({
     properties: true,
     pins: true,
     coverage: true,
+    // 面の色だけでは実際に歩いた筋が出ない（マスが道より広い・点の間を
+    // つながない）。以前の画面は線だったので、線も既定 ON にする。
+    tracks: true,
   });
   // 踏破ヒートの期間 (365=直近1年 / 0=全期間)。ユーザー決定でこの2択のみ。
   const [coverageDays, setCoverageDays] = useState<number>(COVERAGE_DEFAULT_DAYS);
   // 踏破ヒートの状態 (1マスの実寸ラベル / 打ち切り有無)。凡例と注意書きに使う。
+  // 線（過去に歩いた道筋）の状態。面とは別に切り替えられるので状態も別に持つ。
+  const [tracksState, setTracksState] = useState<{
+    status: CoverageStatus;
+    /** 量が多くて描けなかった巡回の本数。0 より大きければ必ず断りを出す。 */
+    droppedTrips: number;
+  }>({ status: "off", droppedTrips: 0 });
+  const handleTracksState = useCallback(
+    (v: { status: CoverageStatus; droppedTrips: number }) => setTracksState(v),
+    [],
+  );
+
   const [coverageState, setCoverageState] = useState<{
     cellSize: CoverageCellSize | null;
     status: CoverageStatus;
@@ -1199,6 +1214,7 @@ export default function FieldSurveyMap({
             hideClosedPins={hideClosedPins}
             coverageDays={coverageDays}
             onCoverageState={handleCoverageState}
+            onTracksState={handleTracksState}
             onError={setError}
             refetchNonce={refetchNonce}
             currentUserId={currentUserId}
@@ -1249,6 +1265,8 @@ export default function FieldSurveyMap({
           onChangeCoverageDays={setCoverageDays}
           coverageCellSize={coverageState.cellSize}
           coverageStatus={coverageState.status}
+          tracksStatus={tracksState.status}
+          tracksDroppedTrips={tracksState.droppedTrips}
           panelOpen={panelOpen}
           onTogglePanelOpen={() => {
             quickStartRef.current = false;
@@ -1497,6 +1515,8 @@ function ControlPanel({
   onChangeCoverageDays,
   coverageCellSize,
   coverageStatus,
+  tracksStatus,
+  tracksDroppedTrips,
   panelOpen,
   onTogglePanelOpen,
   currentUserId,
@@ -1531,6 +1551,9 @@ function ControlPanel({
    * 「色が無い」の意味が状態で変わるため（誰も通っていない / まだ分からない）。
    */
   coverageStatus: CoverageStatus;
+  /** 線（過去に歩いた道筋）の状態。落とした本数があれば必ず断りを出す。 */
+  tracksStatus: CoverageStatus;
+  tracksDroppedTrips: number;
   /**
    * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
    * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
@@ -1686,6 +1709,65 @@ function ControlPanel({
         </div>
       )}
 
+      {/* 線: 実際に歩いた道筋。面（マス）は道より広く、点の間もつながないので
+          「本当にこの道を歩いたか」は線でしか分からない。既定 ON。 */}
+      <label
+        className={`${layers.tracks ? "mb-1" : "mb-3"} flex cursor-pointer items-center gap-2`}
+      >
+        <input
+          type="checkbox"
+          checked={layers.tracks}
+          onChange={() => onToggle("tracks")}
+          data-testid="tracks-layer-toggle"
+        />
+        <span>歩いた道筋（線）</span>
+      </label>
+      {layers.tracks && (
+        <div className="mb-3 ml-6">
+          {tracksStatus === "loading" ? (
+            <p
+              role="status"
+              data-testid="tracks-loading-notice"
+              className="mb-1 rounded border border-gray-300 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-300"
+            >
+              歩いた道筋を確認中…
+            </p>
+          ) : tracksStatus === "too-wide" ? (
+            <p
+              role="status"
+              data-testid="tracks-truncated-notice"
+              className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              範囲が広すぎて道筋を出せません。地図を寄せてください。
+            </p>
+          ) : tracksStatus === "unavailable" ? (
+            <p
+              role="alert"
+              data-testid="tracks-unavailable-notice"
+              className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              歩いた道筋を取得できませんでした。
+              <b>線が無い場所も、通っている可能性があります。</b>
+            </p>
+          ) : tracksDroppedTrips > 0 ? (
+            /* ⚠黙って減らさない。線が出ていない場所を「歩いていない」と
+               読まれると無駄足の指示になる。 */
+            <p
+              role="status"
+              data-testid="tracks-dropped-notice"
+              className="mb-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              線が多いため、古い巡回 {tracksDroppedTrips} 件は表示していません。
+              地図を寄せるか期間を「直近1年」にすると全部出ます。
+            </p>
+          ) : (
+            <p className="mb-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+              灰色の線＝過去に歩いた道。青い線＝いま巡回中の道。
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
           Phase 1-F-2: 終了前に位置記録 (watchPosition / flush timer / buffer)
           を確実に停止するため onBeforeSessionEnd を渡す。 */}
@@ -1776,6 +1858,7 @@ function MapDataLayer({
   onOpenPinDetail,
   coverageDays,
   onCoverageState,
+  onTracksState,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -1786,6 +1869,10 @@ function MapDataLayer({
   /** 踏破ヒートの期間 (365=直近1年 / 0=全期間)。 */
   coverageDays: number;
   /** 踏破ヒートの状態を親へ返す (凡例と注意書きの表示に使う)。 */
+  onTracksState: (state: {
+    status: CoverageStatus;
+    droppedTrips: number;
+  }) => void;
   onCoverageState: (state: {
     cellSize: CoverageCellSize | null;
     status: CoverageStatus;
@@ -1804,6 +1891,7 @@ function MapDataLayer({
   const [pins, setPins] = useState<PinRow[]>([]);
   // 踏破ヒート。cells は「格子番号と回数」だけで、座標も人名も含まない。
   const [coverageCells, setCoverageCells] = useState<CoverageCell[]>([]);
+  const [trackLines, setTrackLines] = useState<RoutePolylinePoint[][]>([]);
   const [coverageStep, setCoverageStep] = useState<{
     latStep: number;
     lngStep: number;
@@ -1834,6 +1922,10 @@ function MapDataLayer({
         setCoverageCells([]);
         setCoverageStep(null);
         onCoverageState({ cellSize: null, status: "too-wide" });
+        // 線も同じ理由で消す。古い線が残ると、そこを歩いたのが今の範囲の
+        // 話だと誤読される。
+        setTrackLines([]);
+        onTracksState({ status: "too-wide", droppedTrips: 0 });
         return;
       }
       onError(null);
@@ -1894,6 +1986,60 @@ function MapDataLayer({
               { signal: ac.signal, credentials: "same-origin" },
             )
           : null;
+
+        // ⚠線も**別の待ち行列**にする（面と同じ理由）。生点を読むので面より
+        // 重くなり得る。面・物件・ピンの更新を線が止めないようにする。
+        const tracksPromise = layers.tracks
+          ? fetch(
+              "/api/field-survey/coverage/tracks?" +
+                new URLSearchParams({
+                  north: String(b.north),
+                  south: String(b.south),
+                  east: String(b.east),
+                  west: String(b.west),
+                  days: String(coverageDays),
+                }).toString(),
+              { signal: ac.signal, credentials: "same-origin" },
+            )
+          : null;
+
+        if (tracksPromise) {
+          setTrackLines([]);
+          onTracksState({ status: "loading", droppedTrips: 0 });
+          void tracksPromise
+            .then(async (r) => {
+              if (ac.signal.aborted) return;
+              if (!r.ok) {
+                handleHttpError(r.status, onError);
+                setTrackLines([]);
+                onTracksState({ status: "unavailable", droppedTrips: 0 });
+                return;
+              }
+              const j = (await r.json()) as {
+                data?: {
+                  lines?: RoutePolylinePoint[][];
+                  droppedTrips?: number;
+                };
+              };
+              if (ac.signal.aborted) return;
+              // ⚠線は打ち切っても**描いたぶんは正しい**（面と違い、描けなかった
+              // 線が「歩いていない」を意味しない）。消さずに出し、落とした本数を
+              // 断りとして必ず添える。
+              setTrackLines(j.data?.lines ?? []);
+              onTracksState({
+                status: "ready",
+                droppedTrips: j.data?.droppedTrips ?? 0,
+              });
+            })
+            .catch((err: unknown) => {
+              if ((err as { name?: string }).name === "AbortError") return;
+              setTrackLines([]);
+              onTracksState({ status: "unavailable", droppedTrips: 0 });
+            });
+        } else {
+          setTrackLines([]);
+          onTracksState({ status: "off", droppedTrips: 0 });
+        }
 
         if (coveragePromise) {
           // ⚠問い合わせ開始時に**前の色を消して「確認中」にする** (@codex #332)。
@@ -1984,13 +2130,24 @@ function MapDataLayer({
         // 誤った指示に直結する。
         setCoverageCells([]);
         onCoverageState({ cellSize: null, status: "unavailable" });
+        setTrackLines([]);
+        onTracksState({ status: "unavailable", droppedTrips: 0 });
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");
       } finally {
         setLoading(false);
       }
     },
-    [layers.properties, layers.pins, layers.coverage, coverageDays, onError, onCoverageState],
+    [
+      layers.properties,
+      layers.pins,
+      layers.coverage,
+      layers.tracks,
+      coverageDays,
+      onError,
+      onCoverageState,
+      onTracksState,
+    ],
   );
 
   // map idle イベントで bbox を debounce 取得
@@ -2034,7 +2191,14 @@ function MapDataLayer({
       west: sw.lng(),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layers.properties, layers.pins, layers.coverage, coverageDays, refetchNonce]);
+  }, [
+    layers.properties,
+    layers.pins,
+    layers.coverage,
+    layers.tracks,
+    coverageDays,
+    refetchNonce,
+  ]);
 
   // Phase 1-G: pin 追加モード中 (またはカメラファーストの地図タップ待ち中) のみ
   // map click を pin 作成候補に転送する。
@@ -2068,6 +2232,11 @@ function MapDataLayer({
           lngStep={coverageStep.lngStep}
           visible={layers.coverage}
         />
+      )}
+      {/* 過去に歩いた道筋。面（マス）は道より広く点の間もつながないので、
+          実際に歩いた筋はこちらでしか出ない。 */}
+      {layers.tracks && (
+        <CoverageTracksLayer lines={trackLines} visible={layers.tracks} />
       )}
       {layers.properties &&
         properties.map((p) => (
