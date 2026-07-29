@@ -115,6 +115,10 @@ export function planTrackFetch(
  * **通っていない道や建物を「歩いた」と示してしまう**。
  *
  * 記録は 5〜10 秒に 1 点なので、2 分空いたら明らかに異常。
+ *
+ * ⚠判定そのものは SQL 側（coverage/tracks の lag）で行い、この定数を束縛する。
+ * JS 側で判定しないのは、切れ目は**間引く前の隣どうし**で見る必要があるため
+ * （下の TrackPointInput.gapBefore の説明を参照）。
  */
 export const COVERAGE_TRACK_GAP_SECONDS = 120;
 
@@ -123,74 +127,58 @@ export const COVERAGE_TRACK_GAP_SECONDS = 120;
  *
  * 時間が空いていなくても、車で移動した等で一気に離れることがある。徒歩なら
  * 10 秒で最大 20m 程度なので、200m 離れていれば歩いてはいない。
+ * 距離は haversine（geolocation-util と同式）で SQL 側が計算する。
  */
 export const COVERAGE_TRACK_GAP_METERS = 200;
 
-/** 線を引く点（時刻は切り分けの判定にだけ使い、応答には出さない）。 */
+/** 線を引く点。 */
 export interface TrackPointInput {
   lat: number;
   lng: number;
-  /** epoch ミリ秒。 */
-  at: number;
-}
-
-const EARTH_RADIUS_M = 6_371_000;
-
-/** 2点間の距離 (m)。geolocation-util の haversine と同式（server で使うため再掲）。 */
-export function trackDistanceMeters(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const la = toRad(a.lat);
-  const lb = toRad(b.lat);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(la) * Math.cos(lb) * Math.sin(dLng / 2) ** 2;
-  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
+  /**
+   * **生の（間引く前の）一つ前の点**との間に記録の途切れがあるか。
+   *
+   * ⚠切れ目の判定は間引く前の隣接点で行う必要があるため SQL 側で計算する
+   * (@codex #334 P2)。取ってきた点の時刻・距離から JS で判定し直すと、
+   * 間引き後は点の間隔が thinStep 倍に開くので、続けて移動した道にも偽の
+   * 切れ目が出る（例: 30km/h の移動は生の間隔 83m で連続だが、6点に1点へ
+   * 間引くと 500m 空いて「切れ目」に見える）。
+   */
+  gapBefore: boolean;
 }
 
 /**
- * 1 本の巡回の点列を、記録の途切れで**複数の線に切り分ける**。
+ * 1 本の巡回の点列を、記録の途切れ（gapBefore の印）で**複数の線に切り分ける**。
  *
  * ⚠切らずに 1 本で返すと、記録を止めていた区間を直線が横切り、
  * 通っていない道を「歩いた」と示す。線は「ここを通った」と読ませる図なので、
  * これは誤った指示に直結する。
  *
+ * 印は SQL が生の隣接点から立てる。印の付いた点と、その直前の生の点は
+ * 間引きでも必ず残るため、印の手前で切れば生データと同じ位置で線が切れる。
+ *
  * 点が 1 つしかない断片は線にならないので落とす。
  */
 export function splitTrackAtGaps(
   points: TrackPointInput[],
-  opts: { gapSeconds?: number; gapMeters?: number } = {},
 ): { lat: number; lng: number }[][] {
-  const gapMs = (opts.gapSeconds ?? COVERAGE_TRACK_GAP_SECONDS) * 1000;
-  const gapM = opts.gapMeters ?? COVERAGE_TRACK_GAP_METERS;
-
   const out: { lat: number; lng: number }[][] = [];
   let cur: { lat: number; lng: number }[] = [];
-  let prev: TrackPointInput | null = null;
+  // 数値でない点を飛ばすとき、その点の切れ目の印まで一緒に捨てると、
+  // 途切れの両側が 1 本につながってしまう。印は次の有効な点へ引き継ぐ。
+  let pendingGap = false;
 
   for (const pt of points) {
-    if (
-      !Number.isFinite(pt.lat) ||
-      !Number.isFinite(pt.lng) ||
-      !Number.isFinite(pt.at)
-    ) {
+    if (!Number.isFinite(pt.lat) || !Number.isFinite(pt.lng)) {
+      pendingGap = pendingGap || pt.gapBefore;
       continue;
     }
-    if (prev) {
-      const dt = pt.at - prev.at;
-      const dm = trackDistanceMeters(prev, pt);
-      // ⚠時刻が巻き戻る端末があるので絶対値で見る。
-      if (Math.abs(dt) > gapMs || dm > gapM) {
-        if (cur.length >= 2) out.push(cur);
-        cur = [];
-      }
+    if (pt.gapBefore || pendingGap) {
+      if (cur.length >= 2) out.push(cur);
+      cur = [];
     }
+    pendingGap = false;
     cur.push({ lat: pt.lat, lng: pt.lng });
-    prev = pt;
   }
   if (cur.length >= 2) out.push(cur);
   return out;

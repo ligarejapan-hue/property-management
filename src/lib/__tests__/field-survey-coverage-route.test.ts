@@ -280,8 +280,13 @@ describe("期間は「直近1年」か「全期間」だけ", () => {
   it("何も指定しなければ直近1年（既定で全期間を舐めない）", async () => {
     const res = await GET(makeReq(FINE_BBOX));
     expect((await getBody(res)).data.days).toBe(365);
-    // 下限時刻が束縛される = 期間で切れている
-    expect(rawCall()!.values.some((v) => v instanceof Date)).toBe(true);
+    // 下限時刻が束縛される = 期間で切れている（オフセット付き ISO 文字列。
+    // Date のまま束縛しない理由は「期間の下限も naive(UTC) 同士で比べる」参照）
+    expect(
+      rawCall()!.values.some(
+        (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(v),
+      ),
+    ).toBe(true);
   });
 
   it("365 を明示しても同じ", async () => {
@@ -586,9 +591,19 @@ describe("日付は JST の暦日で切る（保存値は UTC の壁時計）", 
 
   it("期間の下限も naive(UTC) 同士で比べる（セッションTZに依存させない）", async () => {
     await GET(makeReq(FINE_BBOX + "&days=365"));
-    const sql = rawCall()!.sql;
+    const { sql, values } = rawCall()!;
     // timestamptz と naive を直接比べると、naive 側がセッションTZで解釈されてずれる
     expect(sql).toMatch(/recorded_at >= \(\?::timestamptz AT TIME ZONE 'UTC'\)/);
+    // ⚠束縛は Date ではなく**オフセット付き ISO 文字列**で行う。Prisma は Date を
+    // オフセット無しの UTC 壁時計テキスト（例 '2026-07-01 03:16:40'）で送るため、
+    // ::timestamptz がセッション TZ で解釈して 9 時間ずれる（dev の Asia/Tokyo で
+    // 実測）。'...Z' 付きならどの TZ の DB でも同じ瞬間になる。
+    expect(values.every((v) => !(v instanceof Date))).toBe(true);
+    expect(
+      values.some(
+        (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(v),
+      ),
+    ).toBe(true);
   });
 
   it("境界の意味を固定する（SQL の意図を JS で再現して突き合わせる）", () => {

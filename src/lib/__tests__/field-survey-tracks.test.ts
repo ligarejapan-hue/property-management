@@ -20,12 +20,20 @@ import {
   COVERAGE_TRACK_POINT_BUDGET,
   COVERAGE_TRACK_SESSION_LIMIT,
   planTrackFetch,
+  splitTrackAtGaps,
+  type TrackPointInput,
   type TrackSessionCandidate,
 } from "@/lib/field-survey-tracks";
 
 const trip = (id: string, pointCount: number): TrackSessionCandidate => ({
   id,
   pointCount,
+});
+
+const p = (lat: number, lng: number, gapBefore = false): TrackPointInput => ({
+  lat,
+  lng,
+  gapBefore,
 });
 
 describe("planTrackFetch — 描く線の量を決める", () => {
@@ -111,5 +119,95 @@ describe("planTrackFetch — 描く線の量を決める", () => {
   it("落とした本数は必ず 0 以上（負の本数を出さない）", () => {
     const plan = planTrackFetch([trip("a", 1)]);
     expect(plan.droppedTrips).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("splitTrackAtGaps — 記録の途切れ（印）で線を切る", () => {
+  // ⚠切れ目の印（gapBefore）は SQL が**間引く前の生の隣接点**から立てる。
+  // JS で時刻・距離から判定し直さないのは、間引き後は点の間隔が thinStep 倍に
+  // 開き、続けて移動した道にも偽の切れ目が出るため（@codex #334 P2）。
+  // この関数は印に従って切るだけにして、判定の根拠を 1 箇所（SQL）に保つ。
+
+  it("印が無ければ 1 本のまま", () => {
+    const lines = splitTrackAtGaps([p(35.68, 139.76), p(35.681, 139.761), p(35.682, 139.762)]);
+    expect(lines).toEqual([
+      [
+        { lat: 35.68, lng: 139.76 },
+        { lat: 35.681, lng: 139.761 },
+        { lat: 35.682, lng: 139.762 },
+      ],
+    ]);
+  });
+
+  it("印のある点の手前で切る", () => {
+    const lines = splitTrackAtGaps([
+      p(1, 1),
+      p(2, 2),
+      p(9, 9, true),
+      p(10, 10),
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toEqual([
+      { lat: 1, lng: 1 },
+      { lat: 2, lng: 2 },
+    ]);
+    expect(lines[1]).toEqual([
+      { lat: 9, lng: 9 },
+      { lat: 10, lng: 10 },
+    ]);
+  });
+
+  it("1点だけの断片は線にしない", () => {
+    // 途切れに挟まれた孤立点（両側に印）は描けない。
+    const lines = splitTrackAtGaps([
+      p(1, 1),
+      p(2, 2),
+      p(5, 5, true),
+      p(9, 9, true),
+      p(10, 10),
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines.flat()).not.toContainEqual({ lat: 5, lng: 5 });
+  });
+
+  it("全部が断片なら空を返す", () => {
+    const lines = splitTrackAtGaps([p(1, 1), p(2, 2, true), p(3, 3, true)]);
+    expect(lines).toEqual([]);
+  });
+
+  it("先頭の点の印は無視する（線の頭が欠けない）", () => {
+    // 期間の下限で先頭が削られた巡回などで、最初の点に印が付くことは無いが、
+    // 付いていても空の断片を作るだけで線は欠けない。
+    const lines = splitTrackAtGaps([p(1, 1, true), p(2, 2)]);
+    expect(lines).toEqual([
+      [
+        { lat: 1, lng: 1 },
+        { lat: 2, lng: 2 },
+      ],
+    ]);
+  });
+
+  it("数値でない点は捨て、その点の印は次の有効な点へ引き継ぐ", () => {
+    // ⚠印ごと捨てると、途切れの両側が 1 本につながってしまう。
+    const lines = splitTrackAtGaps([
+      p(1, 1),
+      p(2, 2),
+      p(Number.NaN, 9, true),
+      p(10, 10),
+      p(11, 11),
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toEqual([
+      { lat: 1, lng: 1 },
+      { lat: 2, lng: 2 },
+    ]);
+    expect(lines[1]).toEqual([
+      { lat: 10, lng: 10 },
+      { lat: 11, lng: 11 },
+    ]);
+  });
+
+  it("空でも落ちない", () => {
+    expect(splitTrackAtGaps([])).toEqual([]);
   });
 });

@@ -12,6 +12,8 @@ import { hasPermission } from "@/lib/permissions";
 import { fieldSurveyCoverageQuerySchema } from "@/lib/validators";
 import { coverageFromAt } from "@/lib/field-survey-coverage";
 import {
+  COVERAGE_TRACK_GAP_METERS,
+  COVERAGE_TRACK_GAP_SECONDS,
   COVERAGE_TRACK_POINT_BUDGET,
   COVERAGE_TRACK_SESSION_LIMIT,
   planTrackFetch,
@@ -71,15 +73,15 @@ interface SessionRow {
 
 /**
  * 線の点。
- * ⚠`sessionId` と `at` は**サーバ内でしか使わない**（線の切り分け判定用）。
+ * ⚠`sessionId` と `gapBefore` は**サーバ内でしか使わない**（線の切り分け用）。
  * 応答には座標しか載せない。
  */
 interface PointRow {
   sessionId: string;
   lat: number;
   lng: number;
-  /** epoch ミリ秒。記録が途切れた所で線を切るためだけに使う。 */
-  at: number;
+  /** 生の（間引く前の）一つ前の点との間に記録の途切れがあるか。SQL が計算。 */
+  gapBefore: boolean;
 }
 
 /**
@@ -109,6 +111,11 @@ export async function GET(request: NextRequest) {
     const { north, south, east, west, days } =
       fieldSurveyCoverageQuerySchema.parse(queryObj);
     const fromAt = coverageFromAt(days, new Date());
+    // ⚠SQL には Date ではなく **オフセット付き ISO 文字列**で束縛する。
+    // Prisma は Date をオフセット無しの UTC 壁時計テキストで送るため、
+    // `::timestamptz` を当てるとセッションのタイムゾーンで解釈され、
+    // UTC 以外の DB では 9 時間ずれる（dev の Asia/Tokyo で実測。cells と同じ）。
+    const fromAtIso = fromAt?.toISOString() ?? null;
 
     // ── 1. 表示範囲に点を持つ「終了した巡回」を新しい順に拾う ──────────
     //
@@ -130,8 +137,8 @@ export async function GET(request: NextRequest) {
             AND tp.lng >= ${west}::numeric
             AND tp.lng < ${east}::numeric
             AND (
-              ${fromAt}::timestamptz IS NULL
-              OR tp.recorded_at >= (${fromAt}::timestamptz AT TIME ZONE 'UTC')
+              ${fromAtIso}::timestamptz IS NULL
+              OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')
             )
         )
       ORDER BY COALESCE(s.ended_at, s.started_at) DESC
@@ -174,38 +181,71 @@ export async function GET(request: NextRequest) {
     //   出ず、**歩いた道が「誰も通っていない」ように見える**。
     //   rn は連番の抜け（保存失敗など）にも影響されない。
     //
+    // ⚠**記録の途切れ（線を切る所）は間引く前に、生の隣どうしで判定する**
+    //   (@codex #334 P2)。lag で一つ前の点との間隔（2分 / haversine 200m）を
+    //   見て切れ目の印 `gapBefore` を立て、**印の付いた点と、その直前の点
+    //   （= 次の点に印がある点）は間引きでも必ず残す**。こうしないと
+    //     - 途切れの前後の点が間引きで落ち、断片が1点になって線ごと消える
+    //       （2点+途切れ+2点の巡回が thinStep=3 で全滅する）
+    //     - 取ってきた点から JS で判定し直すと、間引き後は間隔が thinStep 倍に
+    //       開くので、続けて移動した道にも偽の切れ目が出る
+    //   の2つが起きる。JS は印に従って切るだけで、間隔の再判定はしない。
+    //
     // ⚠**期間の下限は点にも掛ける** (@codex #334 P2)。境をまたぐ巡回は
     //   「最近の点が1つでもある」だけで候補に入るので、掛けないと「直近1年」の
     //   線に1年より前の座標が混ざり、面の色と期間が食い違う。
     //   点は時刻順なので、下限で落ちるのは**先頭の連続した区間**だけ。
     //   線の途中に穴が空いて直線で結ばれることはない。
+    //   （lag も除外後の並びで取るので、境の直後の点に偽の印は付かない。
+    //     先頭になった点は prev が無く、印なしで線の頭になるだけ。）
     //
     // ⚠lat/lng は Decimal(10,7)。`::float8` にしないと Prisma が Decimal を
     //   返し、JSON 化で文字列になってクライアントの描画が全滅する。
     const ids = plan.sessionIds;
     const pointRows = await prisma.$queryRaw<PointRow[]>`
-      SELECT x."sessionId", x."lat", x."lng", x."at"
+      SELECT x."sessionId", x."lat", x."lng", x."gapBefore"
       FROM (
-        SELECT tp.session_id::text AS "sessionId",
-               tp.lat::float8      AS "lat",
-               tp.lng::float8      AS "lng",
-               (extract(epoch from (tp.recorded_at AT TIME ZONE 'UTC')) * 1000)::float8
-                                   AS "at",
-               row_number() OVER (
-                 PARTITION BY tp.session_id ORDER BY tp.sequence
-               )                   AS rn,
-               count(*) OVER (PARTITION BY tp.session_id) AS cnt
-        FROM field_survey_track_points tp
-        WHERE tp.session_id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
-          AND (
-            ${fromAt}::timestamptz IS NULL
-            OR tp.recorded_at >= (${fromAt}::timestamptz AT TIME ZONE 'UTC')
-          )
+        SELECT m."sessionId", m."lat", m."lng", m.rn, m.cnt, m."gapBefore",
+               lead(m."gapBefore") OVER (
+                 PARTITION BY m."sessionId" ORDER BY m.rn
+               ) AS "gapAfter"
+        FROM (
+          SELECT r."sessionId", r."lat", r."lng", r.rn, r.cnt,
+                 (r.prev_at IS NOT NULL AND (
+                   abs(extract(epoch from (r.rec_at - r.prev_at)))
+                     > ${COVERAGE_TRACK_GAP_SECONDS}::float8
+                   OR 2 * 6371000 * asin(least(1.0::float8, sqrt(
+                        power(sin(radians(r."lat" - r.prev_lat) / 2), 2)
+                        + cos(radians(r.prev_lat)) * cos(radians(r."lat"))
+                          * power(sin(radians(r."lng" - r.prev_lng) / 2), 2)
+                      ))) > ${COVERAGE_TRACK_GAP_METERS}::float8
+                 )) AS "gapBefore"
+          FROM (
+            SELECT tp.session_id::text AS "sessionId",
+                   tp.lat::float8      AS "lat",
+                   tp.lng::float8      AS "lng",
+                   tp.recorded_at      AS rec_at,
+                   lag(tp.recorded_at) OVER win AS prev_at,
+                   lag(tp.lat::float8) OVER win AS prev_lat,
+                   lag(tp.lng::float8) OVER win AS prev_lng,
+                   row_number()        OVER win AS rn,
+                   count(*) OVER (PARTITION BY tp.session_id) AS cnt
+            FROM field_survey_track_points tp
+            WHERE tp.session_id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
+              AND (
+                ${fromAtIso}::timestamptz IS NULL
+                OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')
+              )
+            WINDOW win AS (PARTITION BY tp.session_id ORDER BY tp.sequence)
+          ) r
+        ) m
       ) x
       WHERE ${plan.thinStep}::int = 1
          OR x.rn = 1
          OR x.rn = x.cnt
          OR (x.rn - 1) % ${plan.thinStep}::int = 0
+         OR x."gapBefore"
+         OR COALESCE(x."gapAfter", false)
       ORDER BY x."sessionId", x.rn
       LIMIT ${HARD_ROW_CAP + 1}
     `;
@@ -221,7 +261,10 @@ export async function GET(request: NextRequest) {
       rows = pointRows
         .slice(0, HARD_ROW_CAP)
         .filter((r) => r.sessionId !== lastId);
-      droppedTrips += 1;
+      // ⚠ここでは本数を数えない (@codex #334 P2)。丸ごと落とした巡回は byId に
+      // 現れないので、後段の「選んだのに1本も線にならなかった巡回」
+      // (ids.length - byId.size) が1回だけ数える。ここでも足すと同じ巡回を
+      // 2回数え、「◯件以上」の下限が実際より大きい嘘になる。
       // 安全弁に当たった時点で、その先に何本あるかは数えていない。
       droppedTripsExact = false;
       truncated = true;
@@ -232,6 +275,7 @@ export async function GET(request: NextRequest) {
     // ⚠**同じ巡回でも切る必要がある** (@codex #334 P2)。位置記録を途中で止めて
     // 再開したり GPS が一時停止すると、次の点は同じ巡回のまま遠く離れる。
     // 1本につなぐとその間を直線が横切り、**通っていない道を「歩いた」と示す**。
+    // 切る位置は SQL が生の隣接点から立てた印（gapBefore）に従う。
     const byId = new Map<string, TrackPointInput[]>();
     for (const r of rows) {
       let pts = byId.get(r.sessionId);
@@ -239,7 +283,7 @@ export async function GET(request: NextRequest) {
         pts = [];
         byId.set(r.sessionId, pts);
       }
-      pts.push({ lat: r.lat, lng: r.lng, at: r.at });
+      pts.push({ lat: r.lat, lng: r.lng, gapBefore: r.gapBefore });
     }
     const lines: { lat: number; lng: number }[][] = [];
     let vanished = 0;

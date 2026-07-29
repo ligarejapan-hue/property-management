@@ -87,6 +87,8 @@ vi.mock("@/lib/prisma", () => ({
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import {
+  COVERAGE_TRACK_GAP_METERS,
+  COVERAGE_TRACK_GAP_SECONDS,
   COVERAGE_TRACK_POINT_BUDGET,
   COVERAGE_TRACK_SESSION_LIMIT,
 } from "@/lib/field-survey-tracks";
@@ -143,16 +145,17 @@ interface TrackBody {
 /** id と点数だけの巡回候補行。 */
 const sess = (id: string, pointCount: number) => ({ id, pointCount });
 /**
- * 点の行。`at`（epoch ms）は**線の切り分け判定にだけ**使い、応答には出さない。
- * 既定は 10 秒刻みで、しきい値（2分 / 200m）に掛からない連続した点にする。
+ * 点の行。`gapBefore`（生の一つ前の点との間に記録の途切れがあるか）は
+ * **SQL が間引く前の隣接点から計算**して返す。応答には出さない。
+ * ⚠時刻・距離のしきい値判定は SQL 側なので、この mock では判定結果の
+ * 印だけを与える（JS は印に従って切るだけ）。
  */
-let ptClock = 0;
-const pt = (sessionId: string, lat: number, lng: number, at?: number) => ({
-  sessionId,
-  lat,
-  lng,
-  at: at ?? (ptClock += 10_000),
-});
+const pt = (
+  sessionId: string,
+  lat: number,
+  lng: number,
+  gapBefore = false,
+) => ({ sessionId, lat, lng, gapBefore });
 
 function mockQueries(sessions: unknown[], points: unknown[]) {
   (prisma.$queryRaw as unknown as Mock)
@@ -161,7 +164,6 @@ function mockQueries(sessions: unknown[], points: unknown[]) {
 }
 
 beforeEach(() => {
-  ptClock = 0;
   vi.clearAllMocks();
   // ⚠clearAllMocks は mockResolvedValueOnce の待ち行列を消さない。
   // 消さないと、DB を呼ばなかったテスト（403 など）の残りが次のテストへ
@@ -173,6 +175,7 @@ beforeEach(() => {
 
 describe("1. 権限（歩いた道筋は全員が見られる）", () => {
   it("read_all があれば見られる", async () => {
+    (getUserPermissions as unknown as Mock).mockResolvedValue(readAll);
     mockQueries([sess("s1", 3)], [pt("s1", 35.69, 139.77), pt("s1", 35.691, 139.771)]);
     const res = await GET(makeReq());
     expect(res.status).toBe(200);
@@ -291,27 +294,55 @@ describe("3. 線が嘘にならないこと", () => {
     mockQueries([sess("s1", big)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
     await GET(makeReq());
     const points = rawCall(1);
-    expect(points?.sql).toContain("row_number() OVER");
+    expect(points?.sql).toContain("row_number()");
     expect(points?.sql).toContain("x.rn = 1");
     expect(points?.sql).toContain("x.rn = x.cnt");
     expect(points?.sql).toContain("(x.rn - 1) %");
     // 間引き幅が束縛値に載っている
     expect(points?.values).toContain(3);
   });
+
+  it("切れ目の前後の点は間引きでも必ず残す（@codex #334 P2）", async () => {
+    // ⚠間引きが切れ目の判定より先だと、途切れの前後の点が落ちて断片が
+    // 1点になり、線ごと消える（2点+途切れ+2点の巡回が thinStep=3 で全滅）。
+    // 印（gapBefore）と、次の点に印がある点（gapAfter）を WHERE で残す。
+    const big = COVERAGE_TRACK_POINT_BUDGET * 3;
+    mockQueries([sess("s1", big)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
+    await GET(makeReq());
+    const points = rawCall(1);
+    expect(points?.sql).toContain('x."gapBefore"');
+    expect(points?.sql).toContain('"gapAfter"');
+  });
+
+  it("切れ目は間引く前の生の隣どうしで判定する（しきい値は SQL に束縛）", async () => {
+    // ⚠取ってきた（間引き後の）点から JS で判定し直すと、間隔が thinStep 倍に
+    // 開くので、続けて移動した道にも偽の切れ目が出る（30km/h の移動は生の
+    // 間隔 83m で連続だが、6点に1点へ間引くと 500m 空いて「切れ目」に見える）。
+    // lag（生の一つ前の点）と haversine を SQL 側で使い、2分 / 200m を束縛する。
+    mockQueries([sess("s1", 4)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
+    await GET(makeReq());
+    const points = rawCall(1);
+    expect(points?.sql).toContain("lag(");
+    expect(points?.sql).toContain("asin(");
+    expect(points?.sql).toContain("radians(");
+    expect(points?.values).toContain(COVERAGE_TRACK_GAP_SECONDS);
+    expect(points?.values).toContain(COVERAGE_TRACK_GAP_METERS);
+  });
 });
 
 describe("3-b. 記録が途切れた所で線を切る（@codex #334 P2）", () => {
-  it("同じ巡回でも時間が大きく空いたら別の線にする", () => {
+  it("同じ巡回でも切れ目の印があれば別の線にする", () => {
     // 位置記録を止めて再開した / GPS が一時停止した場合、次の点は同じ巡回の
     // まま遠く離れる。1本につなぐと通っていない道を直線が横切る。
+    // 印は SQL が生の隣接点（2分 / 200m）から立てて返す。
     mockQueries(
       [sess("s1", 4)],
       [
-        pt("s1", 35.68, 139.76, 0),
-        pt("s1", 35.681, 139.761, 10_000),
-        // 30 分後（しきい値 2 分を大きく超える）
-        pt("s1", 35.7, 139.78, 1_810_000),
-        pt("s1", 35.701, 139.781, 1_820_000),
+        pt("s1", 35.68, 139.76),
+        pt("s1", 35.681, 139.761),
+        // ここで記録が途切れていた（SQL が印を立てた）
+        pt("s1", 35.7, 139.78, true),
+        pt("s1", 35.701, 139.781),
       ],
     );
     return GET(makeReq())
@@ -323,32 +354,14 @@ describe("3-b. 記録が途切れた所で線を切る（@codex #334 P2）", () 
       });
   });
 
-  it("時間が空いていなくても遠く離れたら別の線にする", () => {
-    mockQueries(
-      [sess("s1", 4)],
-      [
-        pt("s1", 35.68, 139.76, 0),
-        pt("s1", 35.681, 139.761, 10_000),
-        // 10 秒で約 2km（徒歩ではありえない）
-        pt("s1", 35.7, 139.76, 20_000),
-        pt("s1", 35.701, 139.761, 30_000),
-      ],
-    );
-    return GET(makeReq())
-      .then((res) => res.json() as Promise<TrackBody>)
-      .then((body) => {
-        expect(body.data.lineCount).toBe(2);
-      });
-  });
-
   it("切った結果1本も線が残らなければ落とした件数に数える（黙って減らさない）", () => {
     // 3点すべてが離れていると、どの断片も1点になり線にならない。
     mockQueries(
       [sess("s1", 3)],
       [
-        pt("s1", 35.6, 139.7, 0),
-        pt("s1", 35.9, 139.9, 600_000),
-        pt("s1", 36.2, 140.1, 1_200_000),
+        pt("s1", 35.6, 139.7),
+        pt("s1", 35.9, 139.9, true),
+        pt("s1", 36.2, 140.1, true),
       ],
     );
     return GET(makeReq())
@@ -360,15 +373,17 @@ describe("3-b. 記録が途切れた所で線を切る（@codex #334 P2）", () 
       });
   });
 
-  it("時刻を応答に載せない（切り分けにだけ使う）", () => {
+  it("切り分けの印を応答に載せない（サーバ内でだけ使う）", () => {
     mockQueries(
       [sess("s1", 2)],
-      [pt("s1", 35.68, 139.76, 0), pt("s1", 35.681, 139.761, 10_000)],
+      [pt("s1", 35.68, 139.76), pt("s1", 35.681, 139.761)],
     );
     return GET(makeReq())
       .then((res) => res.json() as Promise<TrackBody>)
       .then((body) => {
-        expect(JSON.stringify(body)).not.toMatch(/"at"/);
+        const json = JSON.stringify(body);
+        expect(json).not.toMatch(/"at"/);
+        expect(json).not.toMatch(/gapBefore|gapAfter/);
       });
   });
 });
@@ -415,6 +430,11 @@ describe("4. 量が多すぎる時", () => {
     const json = JSON.stringify(body.data.lines);
     expect(json).not.toContain("9,");
     expect(body.data.lineCount).toBe(1);
+    // ⚠落とした巡回は 1 回だけ数える（@codex #334 P2）。安全弁の分岐と
+    // 「byId に現れなかった巡回」の両方で数えると、1 本落としただけなのに
+    // 「2件以上」と表示され、下限のはずの数字が嘘になる。
+    expect(body.data.droppedTrips).toBe(1);
+    expect(body.data.droppedTripsExact).toBe(false);
   });
 
   it("対象が無ければ空で返す（2本目のクエリを投げない）", async () => {
@@ -431,6 +451,16 @@ describe("5. 期間と範囲（面の色と同じ条件で見る）", () => {
     mockQueries([], []);
     await GET(makeReq(`${BBOX}&days=365`));
     expect(rawCall(0)?.sql).toContain("AT TIME ZONE 'UTC'");
+    // ⚠束縛は Date ではなく**オフセット付き ISO 文字列**（cells と同じ理由。
+    // Prisma は Date をオフセット無しの UTC 壁時計テキストで送るため、
+    // ::timestamptz がセッション TZ で解釈して 9 時間ずれる）。
+    const values = rawCall(0)?.values ?? [];
+    expect(values.every((v) => !(v instanceof Date))).toBe(true);
+    expect(
+      values.some(
+        (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(v),
+      ),
+    ).toBe(true);
   });
 
   it("全期間 (days=0) では期間の下限を掛けない", async () => {
