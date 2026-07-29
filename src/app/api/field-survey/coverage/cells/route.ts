@@ -78,6 +78,12 @@ export async function GET(request: NextRequest) {
     const cell = resolveCoverageCellSize({ north, south, east, west });
     const { latStep, lngStep } = COVERAGE_CELL_STEPS[cell];
     const fromAt = coverageFromAt(days, new Date());
+    // ⚠SQL には Date ではなく **オフセット付き ISO 文字列**で束縛する。
+    // Prisma は Date をオフセット無しの UTC 壁時計テキスト
+    // （例 '2026-07-01 03:16:40'）で送るため、`::timestamptz` を当てると
+    // **セッションのタイムゾーンで解釈**され、UTC 以外の DB では 9 時間ずれる
+    // （dev の Asia/Tokyo で実測。'...Z' 付き文字列ならどの TZ でも同じ瞬間になる）。
+    const fromAtIso = fromAt?.toISOString() ?? null;
 
     // ⚠集計の範囲は**格子の境界まで広げる** (@codex #332 P2)。画面の端が
     // セルを横切っていると、そのセルは画面内の点しか数えられず、
@@ -138,8 +144,8 @@ export async function GET(request: NextRequest) {
         AND tp.lng < ${q.east}::numeric
         AND s.status::text = 'ended'
         AND (
-          ${fromAt}::timestamptz IS NULL
-          OR tp.recorded_at >= (${fromAt}::timestamptz AT TIME ZONE 'UTC')
+          ${fromAtIso}::timestamptz IS NULL
+          OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')
         )
       GROUP BY 1, 2
       ORDER BY 1, 2

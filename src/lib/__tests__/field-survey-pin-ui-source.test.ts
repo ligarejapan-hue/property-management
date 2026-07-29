@@ -355,7 +355,9 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
     // useEffect deps に refetchNonce を含める。
     // 踏破ヒート追加後は layers.coverage と coverageDays も deps に入る
     // (期間を切り替えたら取り直す必要があるため)。順序に依存しない形で確認する。
-    const deps = MAP_SRC.match(/\}, \[layers\.properties,[^\]]*\]\);/);
+    // deps が増えて複数行に折り返されても通るようにする（形ではなく
+    // 「どのキーが入っているか」を見たい表明のため）。
+    const deps = MAP_SRC.match(/\}, \[\s*layers\.properties,[^\]]*\]\);/);
     expect(deps).not.toBeNull();
     for (const dep of ["layers.properties", "layers.pins", "refetchNonce"]) {
       expect(deps![0]).toContain(dep);

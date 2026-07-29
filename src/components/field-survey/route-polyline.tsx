@@ -78,7 +78,9 @@ export default function RoutePolyline({
         strokeOpacity: 0.85,
         strokeWeight: 3,
         clickable: false,
-        zIndex: 1,
+        // ⚠**過去の線 (zIndex 1) より上**。進行中の巡回がいちばん手前に
+        // 来ないと、蓄積した線の中に今日の線が埋もれて自分の位置を見失う。
+        zIndex: 2,
       });
       polylineRef.current.setMap(map);
     }

@@ -37,7 +37,8 @@ describe("CoverageHeatLayer — 地図オーバーレイの性質", () => {
   });
 
   it("zIndex は 0（今日の線・現在地・ピンが過去の面の上に来る）", () => {
-    // 軌跡 polyline は zIndex:1。ここが 1 以上になると今日の線が埋もれる。
+    // 過去の線は zIndex:1、今日の線は zIndex:2。ここが 1 以上になると
+    // 線が面に埋もれる。
     expect(POLYGON_OPTIONS ?? "").toMatch(/zIndex:\s*0/);
   });
 
