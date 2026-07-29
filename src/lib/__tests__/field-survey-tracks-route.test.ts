@@ -239,16 +239,49 @@ describe("2. 返さないもの（勤怠の証拠にしない）", () => {
 });
 
 describe("3. 線が嘘にならないこと", () => {
-  it("点の取得を表示範囲で切らない（切ると通っていない道を横切る直線が出る）", async () => {
+  it("点の取得も表示範囲で絞る（画面外の生座標を配らず、予算も食わせない）", async () => {
+    // ⚠素朴に範囲で切ると、画面を出入りする巡回の「出た所」と「戻った所」が
+    // 1本につながり、通っていない道を横切る直線が出る。かといって絞らないと
+    // 画面をかすめただけの長い巡回の画面外の点が予算を食い尽くす
+    // (@codex #334 P2)。両立の形:
+    //   - 範囲内 + **出入りの境の1点だけ**食み出して残す（inb/prev_inb/next_inb）
+    //   - **範囲外を挟んで戻った所は切れ目**（prev2_inb まで見て判定）
     mockQueries([sess("s1", 4)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
     await GET(makeReq());
     const points = rawCall(1);
     expect(points).toBeDefined();
-    // 2本目のクエリ（点の取得）に bbox の条件を入れない
-    expect(points?.sql).not.toContain("tp.lat >=");
-    expect(points?.sql).not.toContain("tp.lng >=");
-    // 1本目（対象の巡回を選ぶ方）には入っている
+    // bbox の条件が点の取得にも入っている
+    expect(points?.sql).toContain("tp.lat >=");
+    expect(points?.sql).toContain("tp.lng >=");
+    // 境の1点の食み出し（前後どちらかが範囲内なら残す）
+    expect(points?.sql).toContain("prev_inb");
+    expect(points?.sql).toContain("next_inb");
+    // 範囲外を挟んで戻った所を切れ目にする（2つ前まで見る）
+    expect(points?.sql).toContain("prev2_inb");
+    // 1本目（対象の巡回を選ぶ方）にも入っている
     expect(rawCall(0)?.sql).toContain("tp.lat >=");
+  });
+
+  it("候補の点数は表示対象（範囲内・期間内）だけを数える（@codex #334 P2）", async () => {
+    // 巡回全体の点数 (s.point_count) で見積もると、画面をかすめただけの
+    // 長い巡回が予算を食い、画面内の他の巡回が落ちる。
+    mockQueries([], []);
+    await GET(makeReq());
+    const sql = rawCall(0)?.sql ?? "";
+    expect(sql).toContain("count(*)");
+    expect(sql).not.toContain("point_count");
+  });
+
+  it("点は候補の新しい順で読み、安全弁が切るのは常に一番古い巡回（@codex #334 P2）", async () => {
+    // sessionId（UUID の字句順）で並べると、安全弁の LIMIT がどの巡回を切るか
+    // 運任せになり、一番新しい巡回が丸ごと消えることがある。
+    // ids の並び（新しい順）を unnest WITH ORDINALITY の pos として持ち込む。
+    mockQueries([sess("s1", 4)], [pt("s1", 35.68, 139.76), pt("s1", 35.6801, 139.7601)]);
+    await GET(makeReq());
+    const points = rawCall(1);
+    expect(points?.sql).toContain("WITH ORDINALITY");
+    expect(points?.sql).toContain("ORDER BY x.pos, x.rn");
+    expect(points?.sql).not.toContain('ORDER BY x."sessionId"');
   });
 
   it("点の取得にも期間の下限を掛ける（@codex #334 P2）", async () => {

@@ -65,7 +65,12 @@ import {
 // ただし cells と違い生座標を返すため、**応答を保存させない**
 // （no-store。端末やプロキシに軌跡が残らないようにする）。
 
-/** 候補の巡回。点数は量の見積もりにだけ使う。 */
+/**
+ * 候補の巡回。点数は量の見積もりにだけ使う。
+ * ⚠pointCount は**表示対象（bbox 内かつ期間内）の点数** (@codex #334 P2)。
+ * 巡回全体の点数 (s.point_count) で見積もると、画面をかすめただけの長い
+ * 巡回が予算を食い尽くし、画面内の他の巡回が落ちる。
+ */
 interface SessionRow {
   id: string;
   pointCount: number;
@@ -124,23 +129,20 @@ export async function GET(request: NextRequest) {
     //   いるため、timestamptz と直接比べず naive(UTC) 同士で比べる
     //   （直接比べるとセッションのタイムゾーンで解釈されて 9 時間ずれる）。
     const sessionRows = await prisma.$queryRaw<SessionRow[]>`
-      SELECT s.id::text        AS "id",
-             s.point_count::int AS "pointCount"
+      SELECT s.id::text  AS "id",
+             count(*)::int AS "pointCount"
       FROM field_survey_sessions s
+      JOIN field_survey_track_points tp ON tp.session_id = s.id
       WHERE s.status::text = 'ended'
-        AND EXISTS (
-          SELECT 1
-          FROM field_survey_track_points tp
-          WHERE tp.session_id = s.id
-            AND tp.lat >= ${south}::numeric
-            AND tp.lat < ${north}::numeric
-            AND tp.lng >= ${west}::numeric
-            AND tp.lng < ${east}::numeric
-            AND (
-              ${fromAtIso}::timestamptz IS NULL
-              OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')
-            )
+        AND tp.lat >= ${south}::numeric
+        AND tp.lat < ${north}::numeric
+        AND tp.lng >= ${west}::numeric
+        AND tp.lng < ${east}::numeric
+        AND (
+          ${fromAtIso}::timestamptz IS NULL
+          OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')
         )
+      GROUP BY s.id
       ORDER BY COALESCE(s.ended_at, s.started_at) DESC
       LIMIT ${COVERAGE_TRACK_SESSION_LIMIT + 1}
     `;
@@ -170,9 +172,20 @@ export async function GET(request: NextRequest) {
 
     // ── 2. 選んだ巡回の点を読む ─────────────────────────────
     //
-    // ⚠**表示範囲で切らない**。範囲外の点を落とすと、画面を出入りする巡回で
-    // 「出た所」と「戻った所」が直線で結ばれ、通っていない道を横切る線が
-    // 描かれる。範囲外は地図側が勝手に切り取ってくれる。
+    // ⚠**表示範囲で絞る**が、素朴に切ってはいけない (@codex #334 P2)。
+    //   範囲外の点をただ落とすと、画面を出入りする巡回で「出た所」と
+    //   「戻った所」が1本につながり、通っていない道を横切る線が描かれる。
+    //   かといって絞らないと、画面をかすめただけの長い巡回の**画面外の点**が
+    //   点数予算を食い尽くし（寄せても直らない）、見えない場所の生座標まで
+    //   応答に載る。そこで
+    //     - 範囲内の点に加えて**出入りの境の1点だけ**食み出して残す
+    //       （inb / prev_inb / next_inb。線が画面端で不自然に止まらない）
+    //     - **範囲外を挟んで戻ってきた所は切れ目**にする（一つ前の生の点が
+    //       残っていない = NOT(prev2_inb OR prev_inb OR inb) を gapBefore に
+    //       合流。範囲外に3点以上出た場合だけ成立し、1〜2点かすめた程度は
+    //       境の点ごと残るので線は切れない）
+    //   とする。候補側の pointCount も表示対象の点数なので、予算は画面に
+    //   描く量だけで数えられる。
     //
     // ⚠間引きは巡回内の**通し番号 (rn) の剰余**で行い、**各巡回の最初と最後は
     //   必ず残す** (@codex #334 P1)。`sequence` の生の剰余だと、点が2つしかない
@@ -180,6 +193,8 @@ export async function GET(request: NextRequest) {
     //   黙って消える。planTrackFetch は残した数に数えているので落とした件数にも
     //   出ず、**歩いた道が「誰も通っていない」ように見える**。
     //   rn は連番の抜け（保存失敗など）にも影響されない。
+    //   rn/cnt は**表示対象に絞った後**の並びで振る（範囲外の点は最初から
+    //   描く対象ではないため）。
     //
     // ⚠**記録の途切れ（線を切る所）は間引く前に、生の隣どうしで判定する**
     //   (@codex #334 P2)。lag で一つ前の点との間隔（2分 / haversine 200m）を
@@ -199,46 +214,68 @@ export async function GET(request: NextRequest) {
     //   （lag も除外後の並びで取るので、境の直後の点に偽の印は付かない。
     //     先頭になった点は prev が無く、印なしで線の頭になるだけ。）
     //
+    // ⚠並び順は **候補の新しい順（ids の並び = unnest WITH ORDINALITY の pos）**
+    //   (@codex #334 P2)。sessionId（UUID の字句順）で並べると、安全弁の LIMIT が
+    //   どの巡回を切るか運任せになり、**一番新しい巡回が丸ごと消える**ことがある
+    //   （planTrackFetch は一番新しい1本を必ず残す約束をしている）。新しい順なら
+    //   切られるのは常に末尾 = 一番古い巡回。
+    //
     // ⚠lat/lng は Decimal(10,7)。`::float8` にしないと Prisma が Decimal を
     //   返し、JSON 化で文字列になってクライアントの描画が全滅する。
     const ids = plan.sessionIds;
     const pointRows = await prisma.$queryRaw<PointRow[]>`
       SELECT x."sessionId", x."lat", x."lng", x."gapBefore"
       FROM (
-        SELECT m."sessionId", m."lat", m."lng", m.rn, m.cnt, m."gapBefore",
-               lead(m."gapBefore") OVER (
-                 PARTITION BY m."sessionId" ORDER BY m.rn
-               ) AS "gapAfter"
+        SELECT k."sessionId", k."lat", k."lng", k."gapBefore", k.pos,
+               row_number()        OVER kwin AS rn,
+               count(*)            OVER (PARTITION BY k."sessionId") AS cnt,
+               lead(k."gapBefore") OVER kwin AS "gapAfter"
         FROM (
-          SELECT r."sessionId", r."lat", r."lng", r.rn, r.cnt,
-                 (r.prev_at IS NOT NULL AND (
-                   abs(extract(epoch from (r.rec_at - r.prev_at)))
+          SELECT w."sessionId", w."lat", w."lng", w.seq, w.pos,
+                 (w.prev_at IS NOT NULL AND (
+                   abs(extract(epoch from (w.rec_at - w.prev_at)))
                      > ${COVERAGE_TRACK_GAP_SECONDS}::float8
                    OR 2 * 6371000 * asin(least(1.0::float8, sqrt(
-                        power(sin(radians(r."lat" - r.prev_lat) / 2), 2)
-                        + cos(radians(r.prev_lat)) * cos(radians(r."lat"))
-                          * power(sin(radians(r."lng" - r.prev_lng) / 2), 2)
+                        power(sin(radians(w."lat" - w.prev_lat) / 2), 2)
+                        + cos(radians(w.prev_lat)) * cos(radians(w."lat"))
+                          * power(sin(radians(w."lng" - w.prev_lng) / 2), 2)
                       ))) > ${COVERAGE_TRACK_GAP_METERS}::float8
+                   OR NOT (COALESCE(w.prev2_inb, false)
+                           OR COALESCE(w.prev_inb, false) OR w.inb)
                  )) AS "gapBefore"
           FROM (
-            SELECT tp.session_id::text AS "sessionId",
-                   tp.lat::float8      AS "lat",
-                   tp.lng::float8      AS "lng",
-                   tp.recorded_at      AS rec_at,
-                   lag(tp.recorded_at) OVER win AS prev_at,
-                   lag(tp.lat::float8) OVER win AS prev_lat,
-                   lag(tp.lng::float8) OVER win AS prev_lng,
-                   row_number()        OVER win AS rn,
-                   count(*) OVER (PARTITION BY tp.session_id) AS cnt
-            FROM field_survey_track_points tp
-            WHERE tp.session_id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
-              AND (
-                ${fromAtIso}::timestamptz IS NULL
-                OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')
-              )
-            WINDOW win AS (PARTITION BY tp.session_id ORDER BY tp.sequence)
-          ) r
-        ) m
+            SELECT r."sessionId", r."lat", r."lng", r.seq, r.pos,
+                   r.rec_at, r.inb,
+                   lag(r.rec_at)   OVER win AS prev_at,
+                   lag(r."lat")    OVER win AS prev_lat,
+                   lag(r."lng")    OVER win AS prev_lng,
+                   lag(r.inb)      OVER win AS prev_inb,
+                   lag(r.inb, 2)   OVER win AS prev2_inb,
+                   lead(r.inb)     OVER win AS next_inb
+            FROM (
+              SELECT tp.session_id::text AS "sessionId",
+                     tp.lat::float8      AS "lat",
+                     tp.lng::float8      AS "lng",
+                     tp.sequence         AS seq,
+                     ord.pos             AS pos,
+                     tp.recorded_at      AS rec_at,
+                     (tp.lat >= ${south}::numeric AND tp.lat < ${north}::numeric
+                      AND tp.lng >= ${west}::numeric AND tp.lng < ${east}::numeric)
+                                         AS inb
+              FROM field_survey_track_points tp
+              JOIN unnest(ARRAY[${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))}])
+                   WITH ORDINALITY AS ord(sid, pos)
+                ON ord.sid = tp.session_id
+              WHERE (
+                  ${fromAtIso}::timestamptz IS NULL
+                  OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')
+                )
+            ) r
+            WINDOW win AS (PARTITION BY r."sessionId" ORDER BY r.seq)
+          ) w
+          WHERE COALESCE(w.prev_inb, false) OR w.inb OR COALESCE(w.next_inb, false)
+        ) k
+        WINDOW kwin AS (PARTITION BY k."sessionId" ORDER BY k.seq)
       ) x
       WHERE ${plan.thinStep}::int = 1
          OR x.rn = 1
@@ -246,12 +283,14 @@ export async function GET(request: NextRequest) {
          OR (x.rn - 1) % ${plan.thinStep}::int = 0
          OR x."gapBefore"
          OR COALESCE(x."gapAfter", false)
-      ORDER BY x."sessionId", x.rn
+      ORDER BY x.pos, x.rn
       LIMIT ${HARD_ROW_CAP + 1}
     `;
 
     // 安全弁に当たったら、末尾の巡回は点が欠けている可能性があるので丸ごと
     // 落とす（欠けた線をそのまま描くと、行っていない所を通ったように見える）。
+    // ⚠並びは候補の新しい順なので、切られる末尾は**常に一番古い巡回**
+    // (@codex #334 P2)。UUID 順だと一番新しい巡回が消えることがあった。
     let rows = pointRows;
     let droppedTrips = droppedBase;
     let droppedTripsExact = exactBase;
