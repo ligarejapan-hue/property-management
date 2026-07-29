@@ -1959,6 +1959,9 @@ function MapDataLayer({
         const lat = ll.lat();
         const lng = ll.lng();
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        // タップ待ち中に開いていた吹き出しは閉じる (作成モーダルの背後に
+        // 古い吹き出しが残らないように)。
+        setSelected(null);
         onMapClick({ lat, lng });
       },
     );
@@ -1982,12 +1985,22 @@ function MapDataLayer({
       {layers.tracks && (
         <CoverageTracksLayer lines={trackLines} visible={layers.tracks} />
       )}
+      {/* ⚠タップ待ち (captureMapClick) 中は marker に onClick を渡さない
+          (@codex #336 P2)。onClick を渡すと AdvancedMarker が clickable になり、
+          **撮影した家に既存の物件/ピン marker が乗っている場合、家の上への
+          タップが marker に奪われて吹き出しが開き、作成モーダルが永久に
+          開かない**。地図タップが唯一の作成経路なので、タップ待ち中は
+          marker を素通しにして map click へ落とす (タップした実座標が使える)。 */}
       {layers.properties &&
         properties.map((p) => (
           <AdvancedMarker
             key={p.id}
             position={{ lat: p.gpsLat, lng: p.gpsLng }}
-            onClick={() => setSelected({ kind: "property", row: p })}
+            onClick={
+              captureMapClick
+                ? undefined
+                : () => setSelected({ kind: "property", row: p })
+            }
             title={p.address}
           />
         ))}
@@ -1999,7 +2012,11 @@ function MapDataLayer({
           <AdvancedMarker
             key={pin.id}
             position={{ lat: pin.lat, lng: pin.lng }}
-            onClick={() => setSelected({ kind: "pin", row: pin })}
+            onClick={
+              captureMapClick
+                ? undefined
+                : () => setSelected({ kind: "pin", row: pin })
+            }
             title={formatPinType(pin.pinType)}
           >
             {/* 種別=色+グリフ / 対応済み=灰✓ / 他人=白縁 (凡例と純関数を共有) */}
@@ -2013,7 +2030,10 @@ function MapDataLayer({
           </AdvancedMarker>
         ))}
 
-      {selected && selected.kind === "property" && (
+      {/* ⚠タップ待ち中 (captureMapClick) は吹き出しを描かない (@codex #336 P2
+          と同根)。開いたままの吹き出しが撮影した家を覆うと、タップ先そのものが
+          塞がれる。タップ待ちが終われば (キャンセルで戻れば) 再表示される。 */}
+      {selected && !captureMapClick && selected.kind === "property" && (
         <InfoWindow
           position={{ lat: selected.row.gpsLat, lng: selected.row.gpsLng }}
           onCloseClick={() => setSelected(null)}
@@ -2025,6 +2045,7 @@ function MapDataLayer({
           marker と一緒に非表示にする (marker が消えたのに吹き出しだけ残ると
           位置の手がかりが無い浮遊 UI になる)。OFF に戻せば再表示される。 */}
       {selected &&
+        !captureMapClick &&
         selected.kind === "pin" &&
         !(hideClosedPins && selected.row.status === "closed") && (
         <InfoWindow

@@ -175,6 +175,34 @@ describe("3-b. 写真必須（写真なしピンをこの画面から作らせ�
   });
 });
 
+describe("3-d. タップ待ち中は既存マーカーがタップを奪わない（@codex #336 P2）", () => {
+  it("タップ待ち中は物件/ピンの marker に onClick を渡さない（素通しで map click へ）", () => {
+    // 撮影した家に既存 marker が乗っていると、家の上へのタップが marker に
+    // 奪われて吹き出しが開き、唯一の作成経路である地図タップが永久に成立しない。
+    // onClick を渡さなければ AdvancedMarker は clickable にならず、タップは
+    // 地図まで落ちて実座標が使える。
+    const matches = MAP_SRC.match(
+      /onClick=\{\s*captureMapClick\s*\?\s*undefined\s*:/g,
+    );
+    expect(matches?.length).toBe(2); // 物件 marker + ピン marker
+  });
+
+  it("タップ待ち中は吹き出しを描かない（撮影した家を覆わない）", () => {
+    expect(MAP_SRC).toMatch(
+      /\{selected && !captureMapClick && selected\.kind === "property"/,
+    );
+    expect(MAP_SRC).toMatch(
+      /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*selected\.kind === "pin"/,
+    );
+  });
+
+  it("タップで開いていた吹き出しを閉じてから作成へ進む（モーダル背後に残さない）", () => {
+    const listener =
+      MAP_SRC.match(/if \(!captureMapClick\) return;[\s\S]*?listener\.remove/)?.[0] ?? "";
+    expect(listener).toContain("setSelected(null)");
+  });
+});
+
 describe("3-c. タップ待ち中に巡回が終了しても詰まない（@codex #336 P2）", () => {
   it("quick_capture の無い利用者にはタップ時に巡回開始を案内する", () => {
     // 保存が必ず 403 になる状態でモーダルを開かせない。写真は保持したまま。
