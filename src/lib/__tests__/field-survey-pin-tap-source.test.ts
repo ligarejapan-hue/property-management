@@ -187,6 +187,16 @@ describe("3-d. タップ待ち中は既存マーカーがタップを奪わな�
     expect(matches?.length).toBe(2); // 物件 marker + ピン marker
   });
 
+  it("focusPin の強調マーカー (zIndex 1000) も同様に素通しにする", () => {
+    // 完成待ち一覧の「地図で見る」で開いた地図で撮影した場合、前面の強調
+    // マーカーが撮影した家を覆っていると、通常マーカー以上に確実にタップを
+    // 奪う (@codex #336 P2 R3)。
+    const matches = MAP_SRC.match(
+      /onClick=\{\s*cameraFirstPhase === "awaiting-map-tap"\s*\?\s*undefined\s*:/g,
+    );
+    expect(matches?.length).toBe(1); // focusPin 強調マーカー
+  });
+
   it("タップ待ち中は吹き出しを描かない（撮影した家を覆わない）", () => {
     expect(MAP_SRC).toMatch(
       /\{selected && !captureMapClick && selected\.kind === "property"/,

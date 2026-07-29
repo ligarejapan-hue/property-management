@@ -939,13 +939,20 @@ export default function FieldSurveyMap({
               タップで詳細を開く: 前面 (zIndex) のこのマーカーが背後の通常マーカーの
               タップを奪うため onClick が無いと詳細を開けない。ユーザー操作時のみ
               setDetailPinId を呼ぶ (自動オープンしないので監査は二重計上されない・
-              タップは 1 回の意図的な閲覧として正しく監査される。@codex P2)。 */}
+              タップは 1 回の意図的な閲覧として正しく監査される。@codex P2)。
+              ⚠地図タップ待ちの間は onClick を渡さない (@codex #336 P2)。前面
+              (zIndex 1000) のこのマーカーが撮影した家を覆っていると、通常マーカー
+              以上に確実にタップを奪い、唯一の作成経路が成立しなくなる。 */}
           {focusPinPos && focusPinId && (
             <AdvancedMarker
               position={focusPinPos}
               zIndex={1000}
               title="指定した場所 (タップで詳細)"
-              onClick={() => setDetailPinId(focusPinId)}
+              onClick={
+                cameraFirstPhase === "awaiting-map-tap"
+                  ? undefined
+                  : () => setDetailPinId(focusPinId)
+              }
             >
               <Pin
                 background="#2563EB"

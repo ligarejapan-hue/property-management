@@ -81,6 +81,11 @@ describe("field-survey: この場所を地図で見る (?focusPin)", () => {
     // @codex P2: 前面マーカーが背後の通常マーカーのタップを奪うため、この
     // マーカー自身の onClick (ユーザー操作) で詳細を開く。自動オープンではない
     // ので監査は二重計上されない。
-    expect(m).toMatch(/onClick=\{\(\) => setDetailPinId\(focusPinId\)\}/);
+    // ⚠地図タップ待ち (awaiting-map-tap) の間は onClick を渡さない
+    // (@codex #336 P2: 前面マーカーが撮影した家を覆うと、唯一の作成経路で
+    // ある地図タップが奪われるため素通しにする)。
+    expect(m).toMatch(
+      /onClick=\{\s*cameraFirstPhase === "awaiting-map-tap"\s*\?\s*undefined\s*:\s*\(\) => setDetailPinId\(focusPinId\)/,
+    );
   });
 });
