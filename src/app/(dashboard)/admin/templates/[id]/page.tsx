@@ -139,11 +139,15 @@ export default function TemplateEditPage({
   // 表示レベル以外は従来どおりの単純な on/off。
   function togglePermission(resource: string, action: string) {
     setPermissions((prev) =>
-      withExclusiveDisplayLevel(prev, resource, action, (r, a) => ({
-        resource: r,
-        action: a,
-        granted: true,
-      })),
+      withExclusiveDisplayLevel(
+        prev,
+        resource,
+        action,
+        (r, a) => ({ resource: r, action: a, granted: true }),
+        // この画面に「拒否」の概念は無い（granted:false は未選択のチップに見える）。
+        // 設定済み扱いにすると、押しても選択されず見えない行が消えるだけになる。
+        { deniedRowsAreVisible: false },
+      ),
     );
   }
 
@@ -248,12 +252,12 @@ export default function TemplateEditPage({
                 // 既に保存されているのに一覧に無いレベルも必ず出す。出さないと
                 // 「設定されているのに画面ではどれも選ばれていない」状態になり、
                 // うっかり別のレベルで上書きしてしまう。
+                // granted で絞らない（拒否の指定も見えないと管理者が消せない）。
                 const storedLevels = isLevelRow
                   ? permissions
                       .filter(
                         (p) =>
                           p.resource === res.key &&
-                          p.granted &&
                           isDisplayLevelAction(p.action) &&
                           !res.actions.includes(p.action),
                       )

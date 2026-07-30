@@ -158,40 +158,55 @@ export function describeDisplayLevelConflicts(
  *
  * 表示レベル以外（property:read など）は従来どおり単純な on/off。
  */
+export interface ToggleOptions {
+  /**
+   * 拒否行（granted:false）を「設定済み」として扱うか。
+   *
+   * - ユーザー個別権限画面 = true（既定）。あの画面は付与/拒否/既定の3状態を赤い
+   *   ボタンとして**見せている**ので、押されたら「その指定をやめる」が正しい。
+   * - テンプレート編集画面 = false。あの画面に拒否の概念は無く、拒否行は
+   *   未選択のチップにしか見えない。true のままだと**押しても選択されず、
+   *   見えない行が消えるだけ＝何も起きないように見える**。
+   */
+  deniedRowsAreVisible?: boolean;
+}
+
 export function withExclusiveDisplayLevel<T extends PermissionRowLike>(
   rows: readonly T[],
   resource: string,
   action: string,
   makeRow: (resource: string, action: string) => T,
+  options: ToggleOptions = {},
 ): T[] {
+  const { deniedRowsAreVisible = true } = options;
   const isExclusive =
     isDisplayLevelResource(resource) && isDisplayLevelAction(action);
 
-  // ⚠granted かどうかではなく**行があるか**で判定する。
-  // 個別権限画面には「このレベルを外す」拒否行（granted:false）が存在し得るので、
-  // granted だけを見ると「拒否を押す → 未設定に戻る」はずが**その場で付与に化ける**。
-  // 例: テンプレのマスクを継いでいる人に古い『全表示=拒否』が残っている状態で
-  // その赤いボタンを押すと、**マスクが外れて生値が見える**ようになってしまう。
-  const alreadyPresent = rows.some(
+  const existing = rows.find(
     (r) => r.resource === resource && r.action === action,
   );
+  // ⚠granted だけを見ると、拒否行を押したとき「未設定に戻る」はずが**その場で
+  // 付与に化ける**（テンプレのマスクを継いでいる人の古い『全表示=拒否』を押すと
+  // マスクが外れて生値が見える）。拒否を見せている画面では行の有無で判定する。
+  const isSet = deniedRowsAreVisible ? existing !== undefined : existing?.granted === true;
 
-  if (!isExclusive) {
-    if (alreadyPresent) {
-      return rows.filter(
-        (r) => !(r.resource === resource && r.action === action),
-      );
-    }
-    return [...rows, makeRow(resource, action)];
+  // 設定済みを押した＝その指定をやめる。**取り除くのは押した行だけ**。
+  // ⚠同じ項目の他の行は絶対に巻き込まない。個別に『マスク=付与』と
+  // 『全表示=拒否』が並んでいるとき、拒否を消すつもりでマスクの付与まで消えると、
+  // テンプレートの全表示に落ちて**生値が見える**。
+  if (isSet) {
+    return rows.filter(
+      (r) => !(r.resource === resource && r.action === action),
+    );
   }
 
-  // 同 resource の表示レベル行（付与・拒否とも）をすべて落としてから、
-  // 必要なら 1 つだけ足す。排他モデルでは「このレベルを拒否」という指定に意味が
-  // 無いため、拒否行もここで整理される。
-  const withoutLevels = rows.filter(
-    (r) => !(r.resource === resource && isDisplayLevelAction(r.action)),
-  );
-  return alreadyPresent
-    ? withoutLevels
-    : [...withoutLevels, makeRow(resource, action)];
+  // 選ぶとき。排他なら同じ項目のレベル行（付与・拒否とも）を片付けてから足す。
+  // 排他でなくても、押した行と同じキーの残骸は必ず除く（重複行を作らない＝
+  // 保存時に一意制約で落ちない）。
+  const base = isExclusive
+    ? rows.filter(
+        (r) => !(r.resource === resource && isDisplayLevelAction(r.action)),
+      )
+    : rows.filter((r) => !(r.resource === resource && r.action === action));
+  return [...base, makeRow(resource, action)];
 }

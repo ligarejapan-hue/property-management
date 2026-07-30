@@ -139,6 +139,30 @@ describe("画面の選択操作（1つ選ぶと他は外れる）", () => {
     expect(after.filter((r) => r.resource === "owner_phone")).toEqual([]);
   });
 
+  it("⚠拒否を消しても、同じ項目の有効な指定は巻き込まない", () => {
+    // 個別に『マスク=付与』と『全表示=拒否』が並んでいるとき、拒否を消すつもりで
+    // マスクの付与まで消えると、テンプレートの全表示に落ちて**生値が見える**。
+    const after = withExclusiveDisplayLevel(
+      [row("owner_phone", "masked"), row("owner_phone", "full", false)],
+      "owner_phone",
+      "full",
+      make,
+    );
+    expect(after.filter((r) => r.resource === "owner_phone")).toEqual([
+      row("owner_phone", "masked"),
+    ]);
+  });
+
+  it("付与を解除するときも押した行だけ消す", () => {
+    const after = withExclusiveDisplayLevel(
+      [row("owner_phone", "masked"), row("owner_name", "full")],
+      "owner_phone",
+      "masked",
+      make,
+    );
+    expect(after).toEqual([row("owner_name", "full")]);
+  });
+
   it("別のレベルを選ぶと拒否の指定も一緒に片付く", () => {
     const after = withExclusiveDisplayLevel(
       [row("owner_phone", "full", false), row("owner_phone", "masked")],
@@ -159,6 +183,45 @@ describe("画面の選択操作（1つ選ぶと他は外れる）", () => {
       make,
     );
     expect(after).toEqual([]);
+  });
+
+  describe("テンプレート編集画面（拒否の概念が無い画面）", () => {
+    const asTemplate = { deniedRowsAreVisible: false };
+
+    it("拒否行は未選択に見えるので、押したら選択される", () => {
+      // 設定済み扱いにすると、押しても選択されず見えない行が消えるだけ＝
+      // 管理者には「何も起きない」ように見える。
+      const after = withExclusiveDisplayLevel(
+        [row("owner_phone", "full", false)],
+        "owner_phone",
+        "full",
+        make,
+        asTemplate,
+      );
+      expect(after).toEqual([row("owner_phone", "full")]);
+    });
+
+    it("表示レベル以外でも同じキーの行が二重にならない（保存時の一意制約）", () => {
+      const after = withExclusiveDisplayLevel(
+        [row("property", "write", false)],
+        "property",
+        "write",
+        make,
+        asTemplate,
+      );
+      expect(after).toEqual([row("property", "write")]);
+    });
+
+    it("選択済みを押せば従来どおり解除される", () => {
+      const after = withExclusiveDisplayLevel(
+        [row("owner_phone", "masked")],
+        "owner_phone",
+        "masked",
+        make,
+        asTemplate,
+      );
+      expect(after).toEqual([]);
+    });
   });
 
   it("表示レベル以外は従来どおりの on/off（他を巻き込まない）", () => {
@@ -232,6 +295,21 @@ describe("権限画面が実態を表現できる", () => {
   it("一覧に無いレベルが保存されていても表示する（見えないまま上書きしない）", () => {
     for (const page of [TEMPLATES_PAGE, USERS_PAGE]) {
       expect(read(page)).toContain("storedLevels");
+    }
+  });
+
+  it("⚠拒否の指定も表示する（見えないと管理者が消せず、後で効き始める）", () => {
+    // 一覧から外したレベル（例: 備考の「全表示」）に拒否が残っていると、画面に
+    // 出ないのに保存時は往復し続け、テンプレートを変えた途端に効き始める。
+    for (const page of [TEMPLATES_PAGE, USERS_PAGE]) {
+      const src = read(page);
+      const block = src.slice(
+        src.indexOf("const storedLevels"),
+        src.indexOf("const actions = ["),
+      );
+      expect(block).toContain("isDisplayLevelAction(p.action)");
+      // granted で絞っていない＝拒否行も拾う
+      expect(block).not.toContain("p.granted &&");
     }
   });
 });

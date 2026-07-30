@@ -322,12 +322,15 @@ export default function UserPermissionsPage({
                 // 既に設定されているのに一覧に無いレベルも必ず出す。出さないと
                 // 「設定されているのに画面ではどれも選ばれていない」状態になり、
                 // うっかり別のレベルで上書きしてしまう。
+                // ⚠granted で絞らない。拒否の指定（granted:false）も出さないと、
+                // 一覧から外したレベル（例: 備考の「全表示」）に拒否が残っている
+                // 場合に**画面から見えないのに保存時は往復し続け**、テンプレートを
+                // 変えた途端に効き始める。見えなければ管理者は消せない。
                 const storedLevels = isLevelRow
                   ? [...overrides, ...templatePerms]
                       .filter(
                         (p) =>
                           p.resource === res.key &&
-                          p.granted &&
                           isDisplayLevelAction(p.action) &&
                           !res.actions.includes(p.action),
                       )
