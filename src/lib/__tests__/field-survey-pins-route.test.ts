@@ -160,6 +160,9 @@ beforeEach(() => {
   // 倒す。競合 (0 件 → 409 CONCURRENT_UPDATE) を検証するテストだけ個別に上書きする。
   // clearAllMocks が mockResolvedValue も消すのでここで張り直す。
   (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValue({ count: 1 });
+  // session の touch (POST/PATCH の紐付け確定ガード) も既定を「1 件成功」に倒す。
+  // 並行終了 (0 件 → 409 INVALID_STATE) の検証テストだけ個別に上書きする。
+  (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValue({ count: 1 });
 });
 
 function makeReq(url: string, init?: RequestInit) {
@@ -1590,6 +1593,88 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     expect(res.status).toBe(200);
     const call = writeAuditLog.mock.calls[0][0];
     expect(call.detail.changedFields).toContain("sessionId");
+    // 紐付けの確定は同一 tx 内の条件付き touch（総点検P3）。事前チェック
+    // (findUnique) だけでは検証と書込のすき間の並行終了を防げない。
+    const touchArgs = (prisma.fieldSurveySession.updateMany as Mock).mock
+      .calls[0][0];
+    expect(touchArgs.where).toEqual({ id: SESSION_ID, status: "active" });
+    expect(touchArgs.data.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("sessionId 紐付け: 検証後に session が並行終了したら 409 INVALID_STATE（touch 0 行・総点検P3）", async () => {
+    // 事前チェック時は active だったが、tx 内の touch までに終了した
+    // (トリップ終了 / 24h 自動終了)。終了済み巡回へピンが紐づくのを防ぎ、
+    // POST /pins と同じ「touch 0 行 = 409 で rollback」に揃える。
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveySession.findUnique as Mock).mockResolvedValue({
+      staffUserId: fieldUser.id,
+      status: "active", // 事前チェックは通る
+    });
+    (prisma.fieldSurveySession.updateMany as Mock).mockResolvedValueOnce({
+      count: 0, // tx 内の touch で並行終了が判明
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ sessionId: SESSION_ID }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_STATE");
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("sessionId 解除 (null) では session を touch しない", async () => {
+    // 解除は「どの session にも紐づかない」への遷移なので active 検証は不要。
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue([
+      ...fieldPerms,
+      { resource: "field_survey", action: "quick_capture", granted: true },
+    ]);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: SESSION_ID,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: 0,
+      lng: 0,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ sessionId: null }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(200);
+    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
   });
 
   it("既存の巡回なし×候補以外ピンでも、メモだけの更新は通す (旧データを編集不能にしない)", async () => {

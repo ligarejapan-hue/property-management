@@ -443,3 +443,19 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(PAGE_SRC).not.toMatch(/console\.\w+\([^)]*budget/i);
   });
 });
+
+describe("レイヤー OFF で吹き出しを浮遊させない（総点検P3）", () => {
+  it("物件の吹き出しは layers.properties が ON のときだけ描く", () => {
+    // marker は layers.properties で消えるのに吹き出しだけ残ると、位置の
+    // 手がかりが無い浮遊 UI になる（「対応済みを隠す」の既修正と同じ理屈）。
+    expect(MAP_SRC).toMatch(
+      /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*layers\.properties &&\s*\n\s*selected\.kind === "property"/,
+    );
+  });
+
+  it("ピンの吹き出しは layers.pins が ON のときだけ描く", () => {
+    expect(MAP_SRC).toMatch(
+      /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*layers\.pins &&\s*\n\s*selected\.kind === "pin"/,
+    );
+  });
+});

@@ -150,6 +150,30 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   pii_cut_attempt: new Set(["surface", "trigger"]),
   pii_contextmenu_attempt: new Set(["surface", "trigger"]),
   pii_print_attempt: new Set(["surface", "trigger"]),
+  // 巡回（現地調査）の他人閲覧監査。**誰の巡回を・どの権限で・何件見たか**が
+  // 監査の本体なのに、キーが allowlist 外で全て [REDACTED] になっていた
+  // （@codex #337。session_view / track_view は本 PR 以前からの漏れ）。
+  //   sessionId / viewedStaffUserId = UUID 識別子（氏名・住所ではない。他の *Id と同格）
+  //   scope = "all" | "staff" | "read_all" | "manage" の enum
+  //   returned / pointsReturned = 件数、hasFrom / hasTo = boolean（期間指定の有無）
+  // 氏名・座標・メモは detail に載せておらず、ここにも含めない（denylist も継続）。
+  field_survey_session_view: new Set([
+    "sessionId",
+    "viewedStaffUserId",
+    "scope",
+  ]),
+  field_survey_session_list_view: new Set([
+    "viewedStaffUserId",
+    "scope",
+    "returned",
+  ]),
+  field_survey_track_view: new Set([
+    "sessionId",
+    "viewedStaffUserId",
+    "pointsReturned",
+    "hasFrom",
+    "hasTo",
+  ]),
   // 売却促進DM: 操作事実の非PIIメタデータのみ allowlist(件数/enum/boolean/ISO日時)。
   // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。

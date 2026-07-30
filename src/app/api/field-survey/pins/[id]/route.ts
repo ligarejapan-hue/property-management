@@ -244,6 +244,24 @@ export async function PATCH(
         },
       });
       if (casResult.count === 0) return null;
+      // ⚠session 紐付けは同一 tx 内の条件付き touch で確定させる（総点検P3）。
+      // 上の active 検証は tx の外の check-then-write で、検証と書込のすき間に
+      // session が終了すると**終了済み巡回へピンが紐づく**。POST /pins と同じ
+      // 「touch の 0 行 = 並行終了の合図 → 409 で rollback」に揃える
+      // （touch は B-7 の最終活動時刻の更新も兼ねる）。
+      if (patch.sessionId !== undefined && patch.sessionId !== null) {
+        const touched = await tx.fieldSurveySession.updateMany({
+          where: { id: patch.sessionId, status: "active" },
+          data: { updatedAt: new Date() },
+        });
+        if (touched.count === 0) {
+          throw new ApiError(
+            409,
+            "active 状態でない session には紐付けられません",
+            "INVALID_STATE",
+          );
+        }
+      }
       return tx.fieldSurveyPin.findUniqueOrThrow({
         where: { id },
         select: SELECT_PIN,

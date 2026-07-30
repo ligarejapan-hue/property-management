@@ -128,6 +128,7 @@ const ACTION_LABELS: Record<string, string> = {
   field_survey_session_auto_end: "巡回の自動終了",
   field_survey_session_cancel: "巡回中止",
   field_survey_session_view: "巡回記録の閲覧",
+  field_survey_session_list_view: "巡回一覧の閲覧（他スタッフ分）",
   field_survey_track_view: "移動軌跡の閲覧",
   // --- 謄本・取込 ---
   registry_search: "謄本検索",
