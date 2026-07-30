@@ -275,6 +275,31 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     }
   });
 
+  it("【横断】CAS した後の読み直しは必ず同一 tx 内（@codex #338 R5/R6・#328 R3 の再発防止）", () => {
+    // updateMany の行ロックは文の終わりで解放される。読み直しを外に出すと
+    // 相手の結果を返す／相手が消していれば 500 になる。同じ指摘を2巡連続で
+    // 別ファイルに受けたので、**このPRが触る全ファイルを横断で固定**する。
+    const files = [
+      "src/app/api/properties/[id]/next-actions/[actionId]/route.ts",
+      "src/app/api/properties/[id]/candidates/[candidateId]/judge/route.ts",
+      "src/lib/investigation/fetch-investigation.ts",
+    ];
+    for (const p of files) {
+      const src = read(p);
+      // prisma 直呼びの findUniqueOrThrow（= tx 外の読み直し）が無いこと。
+      // tx 内は `tx.` 経由になるのでこの検査を素通りする。
+      expect(src, `${p}: tx 外の読み直しが残っている`).not.toMatch(
+        /await prisma\.\w+\.findUniqueOrThrow\(/,
+      );
+      // updateMany を使うなら $transaction も使っている
+      if (/\.updateMany\(/.test(src)) {
+        expect(src, `${p}: updateMany があるのに $transaction が無い`).toContain(
+          "$transaction",
+        );
+      }
+    }
+  });
+
   it("外部取得の結果保存はスコープで破棄しない（意図を明記してある）", () => {
     // 取得は認可された利用者が開始したもので、外部呼び出しに数秒かかる。
     // 途中で担当が変わったからといって取得済みの結果を捨てると、課金した

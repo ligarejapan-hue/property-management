@@ -72,24 +72,30 @@ export async function PATCH(
     // ⚠**書き込みはスコープを where に畳み込んで原子化する**（@codex #338 P2）。
     // 上のガードは受付時点の判定なので、判定から更新までの間に担当が付け替わると
     // 担当外の予定を書き換えてしまう。0 件 = その間に外れた（or 別物件の予定）→ 403。
+    // ⚠**更新と読み直しは同一トランザクション**（@codex #338 R6・候補判定と同じ）。
+    // updateMany の行ロックは文の終わりで解放されるので、分けたままだと同じ予定を
+    // 2人が同時に触ったとき、相手の値を返す／相手が消していれば読み直しで 500
+    // （しかも自分の更新は済んでいるのに監査が残らない）。
     const scope = propertyRecordScopeFilter(session);
-    const applied = await prisma.nextAction.updateMany({
-      where: { id: actionId, propertyId, ...(scope ? { property: scope } : {}) },
-      data: updateData,
-    });
-    if (applied.count === 0) {
-      throw new ApiError(
-        403,
-        "この物件を操作する権限がありません",
-        "FORBIDDEN",
-      );
-    }
-    const updated = await prisma.nextAction.findUniqueOrThrow({
-      where: { id: actionId },
-      include: {
-        assignee: { select: { id: true, name: true } },
-        creator: { select: { id: true, name: true } },
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      const applied = await tx.nextAction.updateMany({
+        where: { id: actionId, propertyId, ...(scope ? { property: scope } : {}) },
+        data: updateData,
+      });
+      if (applied.count === 0) {
+        throw new ApiError(
+          403,
+          "この物件を操作する権限がありません",
+          "FORBIDDEN",
+        );
+      }
+      return tx.nextAction.findUniqueOrThrow({
+        where: { id: actionId },
+        include: {
+          assignee: { select: { id: true, name: true } },
+          creator: { select: { id: true, name: true } },
+        },
+      });
     });
 
     await writeAuditLog({
