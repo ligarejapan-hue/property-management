@@ -14,7 +14,30 @@
  */
 
 import prisma from "@/lib/prisma";
+import { ApiError } from "@/lib/api-helpers";
+import {
+  lockPropertyRecordForWrite,
+  lockPropertyRow,
+  propertyRecordScopeFilter,
+} from "@/lib/property-record-guard";
 import { runInvestigation } from "./index";
+
+/**
+ * 担当者スコープを**書き込み文自体に畳み込む**ための共通処理（@codex #338 P2）。
+ * 呼び出し側のガードは受付時点の判定なので、判定から書込までの間に担当が
+ * 付け替わると担当外の物件へ編集が残る。0 件更新 = その間に外れた → 403。
+ *
+ * scope が undefined（admin / office_staff）のときは条件を積まない。
+ */
+function assertScopedWrite(count: number): void {
+  if (count === 0) {
+    throw new ApiError(
+      403,
+      "この物件を操作する権限がありません",
+      "FORBIDDEN",
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -218,6 +241,14 @@ export async function getInvestigation(propertyId: string): Promise<Investigatio
  *   2. runInvestigation (providers, server-side)
  *   3a. Success → update → status=needs_review + audit: fetch_succeeded
  *   3b. Failure → update → status=failed   + audit: fetch_failed
+ *
+ * ⚠**取得の結果保存には担当者スコープを畳み込まない = 途中の担当変更でも
+ * スコープで破棄しない**（@codex #338 R2 に対する設計判断）。
+ * 呼び出し元 (investigation/fetch route) が**送信前に**担当者スコープで弾いており、
+ * ここに来るのは認可された利用者が開始した取得だけ。外部呼び出しには数秒かかるため
+ * その間の担当変更で結果を捨てると、課金した取得が無駄になり status が fetching の
+ * まま残る（利用者の直接編集 = patchInvestigation / confirmInvestigationRecord は
+ * 結果が編集として残るため、あちらは updateMany + 0件403 で原子化してある）。
  */
 export async function runAndUpsertInvestigation(
   propertyId: string,
@@ -228,10 +259,23 @@ export async function runAndUpsertInvestigation(
     gpsLat: number | null;
     gpsLng: number | null;
     targetYear?: number;
-  }
+  },
+  /**
+   * 担当者スコープの判定に使うセッション（@codex #338 R8）。
+   * **取得開始（Step 1）でだけ**認可に使う。結果保存（Step 3）では認可には使わず、
+   * ロック順序を揃えるための素のロックだけを取る。
+   */
+  scopeSession?: { id: string; role: string },
 ): Promise<InvestigationRecord> {
   // ---- Step 1: set status=fetching ----------------------------------------
   const { invId, beforeStatus } = await prisma.$transaction(async (tx) => {
+    // ⚠**取得の開始も担当者スコープで守る**（@codex #338 R8）。「課金済みの結果は
+    // 捨てない」例外は Step 3 の話で、**まだ何も課金していない開始時点**を守らない
+    // 理由にはならない。ここで弾けば status=fetching・監査・外部呼び出し（=課金）の
+    // すべてが担当外の物件に対して起きない。
+    // ⚠ロックは常に親（物件）→ 子（調査/監査）の順（下の Step 3 と同じ理由）。
+    if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
+    else await lockPropertyRow(tx, propertyId);
     const existing = await tx.propertyInvestigation.findUnique({
       where: { propertyId },
       select: { id: true, status: true },
@@ -283,6 +327,13 @@ export async function runAndUpsertInvestigation(
     // ---- Step 3a: failure path --------------------------------------------
     const errMsg = err instanceof Error ? err.message : String(err);
     await prisma.$transaction(async (tx) => {
+      // ⚠**認可はしないがロックは取る**（自己レビューで検出したデッドロック回避）。
+      // 監査ログの INSERT は properties への FK 参照整合性トリガで親行に
+      // FOR KEY SHARE を取る = 何もしないと「子 → 親」順になる。編集経路は
+      // 親から FOR UPDATE を取るので、混ざると循環して 40P01（500）になり、
+      // しかもこの経路が犠牲になると課金済みの取得結果が rollback されて
+      // status が fetching のまま固着する。順序を「親 → 子」に揃えて防ぐ。
+      await lockPropertyRow(tx, propertyId);
       await tx.propertyInvestigation.update({
         where: { propertyId },
         data: {
@@ -378,6 +429,10 @@ export async function runAndUpsertInvestigation(
   const rawPayloadJson = JSON.parse(JSON.stringify(result));
 
   const inv = await prisma.$transaction(async (tx) => {
+    // ⚠認可はしないがロックは取る（Step 3a と同じ理由。ロック順序を親 → 子に統一）。
+    // この tx が 40P01 で落ちると**課金済みの取得結果を丸ごと失う**ので、
+    // ここを守ることの実害が最も大きい。
+    await lockPropertyRow(tx, propertyId);
     const updated = await tx.propertyInvestigation.update({
       where: { propertyId },
       data: {
@@ -460,42 +515,70 @@ export async function patchInvestigation(
     landPriceSummary: string | null;
     facilitySummary: string | null;
   }>,
-  note?: string
+  note?: string,
+  /**
+   * 担当者スコープの判定に使うセッション（field_staff のみ絞られる）。
+   * tx 冒頭で親の物件行をロックし、更新文にも述語を畳み込む（@codex #338 R7）。
+   */
+  scopeSession?: { id: string; role: string },
 ): Promise<InvestigationRecord> {
-  const existing = await prisma.propertyInvestigation.findUnique({
-    where: { propertyId },
-    select: {
-      id: true, status: true, zoningDistrict: true,
-      buildingCoverageRatio: true, floorAreaRatio: true,
-      hazardSummary: true, roadSummary: true, infrastructureSummary: true,
-      sourceSummary: true, normalizedAddress: true, landLotNumber: true,
-      latitude: true, longitude: true,
-      postalCode: true, municipalityCode: true, geocodePrecision: true,
-      firePreventionArea: true, heightDistrict: true,
-      nearbyPriceSummary: true, landPriceSummary: true, facilitySummary: true,
-    },
-  });
+  // ⚠スコープを更新文に畳み込んで原子化する（@codex #338 P2）。
+  // 0 件 = 判定から書込までの間に担当が外れた → 403（編集を残さない）。
+  // ⚠更新と監査ログは1トランザクション（@codex #338 R3・confirm と同じ理由）。
+  // 分けると「編集は残ったが監査が無い」中途状態が作れる。
+  const scope = scopeSession ? propertyRecordScopeFilter(scopeSession) : undefined;
+  const updated = await prisma.$transaction(async (tx) => {
+    // 親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。
+    if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
+    else await lockPropertyRow(tx, propertyId);
 
-  if (!existing) {
-    throw new Error("調査レコードが存在しません。先に調査情報を取得してください。");
-  }
+    // ⚠**監査の before 像もロック後に読む**（自己レビューで検出）。tx の外で読むと、
+    // 同じ物件を連続で編集したときに2件とも同じ before を記録し（A→B と A→C）、
+    // 実際の遷移（B→C）が監査から復元できなくなる。取得完了の直後の編集でも、
+    // 取得結果を before として記録できない。
+    const existing = await tx.propertyInvestigation.findUnique({
+      where: { propertyId },
+      select: {
+        id: true, status: true, zoningDistrict: true,
+        buildingCoverageRatio: true, floorAreaRatio: true,
+        hazardSummary: true, roadSummary: true, infrastructureSummary: true,
+        sourceSummary: true, normalizedAddress: true, landLotNumber: true,
+        latitude: true, longitude: true,
+        postalCode: true, municipalityCode: true, geocodePrecision: true,
+        firePreventionArea: true, heightDistrict: true,
+        nearbyPriceSummary: true, landPriceSummary: true, facilitySummary: true,
+      },
+    });
+    if (!existing) {
+      throw new ApiError(
+        404,
+        "調査レコードが存在しません。先に調査情報を取得してください。",
+        "NOT_FOUND",
+      );
+    }
+    const applied = await tx.propertyInvestigation.updateMany({
+      where: { propertyId, ...(scope ? { property: scope } : {}) },
+      data: { ...fields, version: { increment: 1 } },
+    });
+    assertScopedWrite(applied.count);
 
-  const updated = await prisma.propertyInvestigation.update({
-    where: { propertyId },
-    data: { ...fields, version: { increment: 1 } },
-    include: WITH_RELATIONS,
-  });
+    await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: existing.id,
+        action: "updated",
+        beforeJson: JSON.parse(JSON.stringify(existing)),
+        afterJson: JSON.parse(JSON.stringify(fields)),
+        note: note ?? null,
+        createdBy: userId,
+      },
+    });
 
-  await prisma.propertyInvestigationAuditLog.create({
-    data: {
-      propertyId,
-      investigationId: existing.id,
-      action: "updated",
-      beforeJson: JSON.parse(JSON.stringify(existing)),
-      afterJson: JSON.parse(JSON.stringify(fields)),
-      note: note ?? null,
-      createdBy: userId,
-    },
+    // 応答用の読み直しも同一 tx 内（自分の更新後の姿を返す）。
+    return tx.propertyInvestigation.findUniqueOrThrow({
+      where: { propertyId },
+      include: WITH_RELATIONS,
+    });
   });
 
   return serializeRecord(updated)!;
@@ -507,54 +590,87 @@ export async function patchInvestigation(
  */
 export async function confirmInvestigationRecord(
   propertyId: string,
-  userId: string
+  userId: string,
+  /** 担当者スコープ述語（field_staff のみ渡る・@codex #338 P2）。 */
+  /**
+   * 担当者スコープの判定に使うセッション（field_staff のみ絞られる）。
+   * tx 冒頭で親の物件行をロックし、更新文にも述語を畳み込む（@codex #338 R7）。
+   */
+  scopeSession?: { id: string; role: string },
 ): Promise<InvestigationRecord> {
-  const inv = await prisma.propertyInvestigation.findUnique({
-    where: { propertyId },
-    select: {
-      id: true, status: true,
-      zoningDistrict: true, buildingCoverageRatio: true, floorAreaRatio: true,
-    },
-  });
-
-  if (!inv) {
-    throw new Error("調査レコードが存在しません");
-  }
-
   const now = new Date();
 
-  const updated = await prisma.propertyInvestigation.update({
-    where: { propertyId },
-    data: {
-      status: "confirmed",
-      confirmedAt: now,
-      confirmedBy: userId,
-      version: { increment: 1 },
-    },
-    include: WITH_RELATIONS,
-  });
+  // ⚠スコープを更新文に畳み込んで原子化する（@codex #338 P2）。
+  // confirm は**物件本体にも書き戻す**ので、判定から書込までに担当が外れると
+  // 担当外の物件の用途地域・建蔽率まで書き換わる。0 件なら 403 で何も残さない。
+  //
+  // ⚠**3つの書き込みを1トランザクションで包む**（@codex #338 R3）。分けたままだと
+  // 「調査は confirmed になったが、物件へのコピーが 403 で止まり監査も無い」という
+  // 中途状態が残る（2文に分けたこと自体が持ち込んだ退行）。0 件拒否が「何も残さない」
+  // と言えるようにするには、拒否の throw で全体が rollback される必要がある。
+  const scope = scopeSession ? propertyRecordScopeFilter(scopeSession) : undefined;
+  const updated = await prisma.$transaction(async (tx) => {
+    // 親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。
+    if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
+    else await lockPropertyRow(tx, propertyId);
 
-  // Also write to Property fields for backward compat
-  await prisma.property.update({
-    where: { id: propertyId },
-    data: {
-      zoningDistrict: inv.zoningDistrict,
-      buildingCoverageRatio: inv.buildingCoverageRatio,
-      floorAreaRatio: inv.floorAreaRatio,
-      investigationConfirmedAt: now,
-      version: { increment: 1 },
-    },
-  });
+    // ⚠**物件へ書き戻す値はロックを取った後に読む**（自己レビューで検出）。
+    // 以前はこの読み取りが tx の外にあり、読んでから確認済みにする間に取得完了や
+    // 別の編集が用途地域・建蔽率・容積率を書き換えると、**調査は新しい値のまま
+    // confirmed になり、物件本体には古い値がコピーされる**（しかもその値は販売図面に
+    // 自動反映される）。ロック後に読めば、直列化された最新の値を書き戻せる。
+    const inv = await tx.propertyInvestigation.findUnique({
+      where: { propertyId },
+      select: {
+        id: true, status: true,
+        zoningDistrict: true, buildingCoverageRatio: true, floorAreaRatio: true,
+      },
+    });
+    if (!inv) {
+      throw new ApiError(404, "調査レコードが存在しません", "NOT_FOUND");
+    }
 
-  await prisma.propertyInvestigationAuditLog.create({
-    data: {
-      propertyId,
-      investigationId: inv.id,
-      action: "confirmed",
-      beforeJson: JSON.parse(JSON.stringify({ status: inv.status })),
-      afterJson: JSON.parse(JSON.stringify({ status: "confirmed", confirmedAt: now.toISOString() })),
-      createdBy: userId,
-    },
+    const applied = await tx.propertyInvestigation.updateMany({
+      where: { propertyId, ...(scope ? { property: scope } : {}) },
+      data: {
+        status: "confirmed",
+        confirmedAt: now,
+        confirmedBy: userId,
+        version: { increment: 1 },
+      },
+    });
+    assertScopedWrite(applied.count);
+
+    // Also write to Property fields for backward compat
+    // （こちらもスコープ付き。同じ不変条件を2文で担保する＝片方だけ守る形を残さない）
+    const propApplied = await tx.property.updateMany({
+      where: { id: propertyId, ...(scope ? scope : {}) },
+      data: {
+        zoningDistrict: inv.zoningDistrict,
+        buildingCoverageRatio: inv.buildingCoverageRatio,
+        floorAreaRatio: inv.floorAreaRatio,
+        investigationConfirmedAt: now,
+        version: { increment: 1 },
+      },
+    });
+    assertScopedWrite(propApplied.count);
+
+    await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: inv.id,
+        action: "confirmed",
+        beforeJson: JSON.parse(JSON.stringify({ status: inv.status })),
+        afterJson: JSON.parse(JSON.stringify({ status: "confirmed", confirmedAt: now.toISOString() })),
+        createdBy: userId,
+      },
+    });
+
+    // 応答用の読み直しも同一 tx 内（自分の更新後の姿を返す）。
+    return tx.propertyInvestigation.findUniqueOrThrow({
+      where: { propertyId },
+      include: WITH_RELATIONS,
+    });
   });
 
   return serializeRecord(updated)!;

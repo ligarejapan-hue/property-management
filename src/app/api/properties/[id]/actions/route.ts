@@ -11,6 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { hasPermission } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 /**
  * Action definitions — each action validates preconditions,
@@ -131,6 +132,18 @@ export async function POST(
     });
     if (!current) {
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+    }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30 の P1）。
+    // これが無いと field_staff が担当外の物件を書き換えられるだけでなく、
+    // **`assign_to_me` で自分を担当者にして以降の閲覧範囲を自力で広げられた**
+    // （権限の自己拡張）。全列を持つ current をそのまま判定に使う。
+    if (!canAccessPropertyRecord(session, current)) {
+      throw new ApiError(
+        403,
+        "この物件を操作する権限がありません",
+        "FORBIDDEN",
+      );
     }
 
     // Execute action

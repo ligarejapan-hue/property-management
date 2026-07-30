@@ -10,6 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import {
+  assertPropertyRecordAccess,
+  lockPropertyRecordForWrite,
+} from "@/lib/property-record-guard";
 
 const createNextActionSchema = z.object({
   assignedTo: z.string().uuid("担当者IDが不正です"),
@@ -32,6 +36,11 @@ export async function GET(
     if (!hasPermission(perms, "property", "read")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30）。物件本体と同じ可視範囲に
+    // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
+    // 対応予定は自由記述1000文字で顧客の事情が入るため、担当外には出さない。
+    await assertPropertyRecordAccess(propertyId, session, "read");
 
     const { searchParams } = new URL(request.url);
     const includeCompleted = searchParams.get("includeCompleted") === "true";
@@ -71,30 +80,32 @@ export async function POST(
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    const property = await prisma.property.findUnique({
-      where: { id: propertyId },
-      select: { id: true },
-    });
-    if (!property) {
-      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
-    }
+    // 物件の存在確認（404）と担当者スコープ（403）を兼ねる（発注者判断 2026-07-30）。
+    await assertPropertyRecordAccess(propertyId, session, "write");
 
     const body = await request.json();
     const data = createNextActionSchema.parse(body);
 
-    const action = await prisma.nextAction.create({
-      data: {
-        propertyId,
-        assignedTo: data.assignedTo,
-        scheduledAt: new Date(data.scheduledAt),
-        actionType: data.actionType ?? null,
-        content: data.content,
-        createdBy: session.id,
-      },
-      include: {
-        assignee: { select: { id: true, name: true } },
-        creator: { select: { id: true, name: true } },
-      },
+    // ⚠**作成もスコープに対して原子的にする**（@codex #338 R4）。
+    // create は where を持てないので、トランザクション内で物件行を
+    // FOR UPDATE でロックしてから作る（担当の付け替えを待たせる）。
+    // 0 件 = ロック時点で担当外 → 403（自由記述の対応予定を残さない）。
+    const action = await prisma.$transaction(async (tx) => {
+      await lockPropertyRecordForWrite(tx, propertyId, session);
+      return tx.nextAction.create({
+        data: {
+          propertyId,
+          assignedTo: data.assignedTo,
+          scheduledAt: new Date(data.scheduledAt),
+          actionType: data.actionType ?? null,
+          content: data.content,
+          createdBy: session.id,
+        },
+        include: {
+          assignee: { select: { id: true, name: true } },
+          creator: { select: { id: true, name: true } },
+        },
+      });
     });
 
     await writeAuditLog({
