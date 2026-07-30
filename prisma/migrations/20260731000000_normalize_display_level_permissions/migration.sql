@@ -29,9 +29,23 @@
 --   その人だけ備考が見えなくなる。挙動不変の原則を破るので、そういう項目は
 --   整理対象から外す（画面と API を排他化済みなので、新たな重複は増えない。
 --   残った重複は管理画面から選び直せば解消する）。
-WITH denied_levels AS (
-  SELECT DISTINCT up."resource"
+--   ⚠ガードは**その利用者が実際に受け取るテンプレート**に限って効かせる。
+--     resource だけで止めると、例えば現地担当の1人が owner_phone を拒否している
+--     せいで**管理者用テンプレートの owner_phone の重複まで残り**、本来直したい
+--     「緩い方が出続ける」状態が解消されない。
+--     利用者→テンプレートは role 名で解決される（getUserPermissions の
+--     templateNameMap と同じ対応。未知の role は現地担当用にフォールバック）。
+WITH denied_pairs AS (
+  SELECT DISTINCT pt."id" AS "template_id", up."resource"
   FROM "user_permissions" up
+  JOIN "users" u ON u."id" = up."user_id"
+  JOIN "permission_templates" pt
+    ON pt."name" = CASE u."role"
+         WHEN 'field_staff' THEN '現地担当用'
+         WHEN 'office_staff' THEN '事務担当用'
+         WHEN 'admin' THEN '管理者用'
+         ELSE '現地担当用'
+       END
   WHERE NOT up."granted"
     AND up."action" IN ('edit', 'full', 'read', 'partial', 'masked', 'hidden')
     AND up."resource" IN (
@@ -43,6 +57,7 @@ ranked AS (
   SELECT
     tp."id",
     tp."resource",
+    tp."template_id",
     ROW_NUMBER() OVER (
       PARTITION BY tp."template_id", tp."resource"
       ORDER BY CASE tp."action"
@@ -67,7 +82,12 @@ WHERE "id" IN (
   SELECT r."id"
   FROM ranked r
   WHERE r.rn > 1
-    AND r."resource" NOT IN (SELECT d."resource" FROM denied_levels d)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM denied_pairs d
+      WHERE d."template_id" = r."template_id"
+        AND d."resource" = r."resource"
+    )
 );
 
 -- 2) 個別上書き側。

@@ -127,6 +127,40 @@ describe("画面の選択操作（1つ選ぶと他は外れる）", () => {
     expect(after.filter((r) => r.resource === "owner_phone")).toEqual([]);
   });
 
+  it("⚠拒否の指定を押すと未設定に戻る（その場で付与に化けない）", () => {
+    // 化けると、テンプレのマスクを継いでいる人に古い『全表示=拒否』が残っている
+    // 状態でその赤いボタンを押しただけで**マスクが外れて生値が見える**。
+    const after = withExclusiveDisplayLevel(
+      [row("owner_phone", "full", false)],
+      "owner_phone",
+      "full",
+      make,
+    );
+    expect(after.filter((r) => r.resource === "owner_phone")).toEqual([]);
+  });
+
+  it("別のレベルを選ぶと拒否の指定も一緒に片付く", () => {
+    const after = withExclusiveDisplayLevel(
+      [row("owner_phone", "full", false), row("owner_phone", "masked")],
+      "owner_phone",
+      "hidden",
+      make,
+    );
+    expect(after.filter((r) => r.resource === "owner_phone")).toEqual([
+      row("owner_phone", "hidden"),
+    ]);
+  });
+
+  it("表示レベル以外でも拒否の指定を押すと未設定に戻る", () => {
+    const after = withExclusiveDisplayLevel(
+      [row("property", "write", false)],
+      "property",
+      "write",
+      make,
+    );
+    expect(after).toEqual([]);
+  });
+
   it("表示レベル以外は従来どおりの on/off（他を巻き込まない）", () => {
     const after = withExclusiveDisplayLevel(
       [row("property", "read")],
@@ -269,11 +303,21 @@ describe("既存データの整理（migration）", () => {
     // 消そうとしている下位レベルは「上位を外す」個別指定の受け皿になっていることが
     // ある。消すと落ちる先が無くなり hidden まで下がる＝その人だけ見えなくなる。
     const sql = read(MIGRATION);
-    expect(sql).toContain("denied_levels");
-    expect(sql).toContain("NOT up.\"granted\"");
-    expect(sql).toMatch(
-      /NOT IN \(SELECT d\."resource" FROM denied_levels d\)/,
-    );
+    expect(sql).toContain("denied_pairs");
+    expect(sql).toContain('NOT up."granted"');
+    expect(sql).toContain("NOT EXISTS");
+  });
+
+  it("⚠ガードは当人が受け取るテンプレートに限る（無関係なテンプレの重複まで残さない）", () => {
+    // resource だけで止めると、現地担当の1人の拒否で管理者用テンプレの重複まで
+    // 残り、本来直したい「緩い方が出続ける」状態が解消されない。
+    const sql = read(MIGRATION);
+    expect(sql).toContain('d."template_id" = r."template_id"');
+    // 利用者→テンプレートは role 名で解決する（getUserPermissions と同じ対応）
+    expect(sql).toContain("WHEN 'field_staff' THEN '現地担当用'");
+    expect(sql).toContain("WHEN 'office_staff' THEN '事務担当用'");
+    expect(sql).toContain("WHEN 'admin' THEN '管理者用'");
+    expect(sql).toContain("ELSE '現地担当用'");
   });
 
   it("表示レベルの8項目に限定し、オーナー自体の read/write は含めない", () => {

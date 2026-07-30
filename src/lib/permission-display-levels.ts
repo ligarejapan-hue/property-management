@@ -167,12 +167,17 @@ export function withExclusiveDisplayLevel<T extends PermissionRowLike>(
   const isExclusive =
     isDisplayLevelResource(resource) && isDisplayLevelAction(action);
 
-  const alreadyOn = rows.some(
-    (r) => r.resource === resource && r.action === action && r.granted,
+  // ⚠granted かどうかではなく**行があるか**で判定する。
+  // 個別権限画面には「このレベルを外す」拒否行（granted:false）が存在し得るので、
+  // granted だけを見ると「拒否を押す → 未設定に戻る」はずが**その場で付与に化ける**。
+  // 例: テンプレのマスクを継いでいる人に古い『全表示=拒否』が残っている状態で
+  // その赤いボタンを押すと、**マスクが外れて生値が見える**ようになってしまう。
+  const alreadyPresent = rows.some(
+    (r) => r.resource === resource && r.action === action,
   );
 
   if (!isExclusive) {
-    if (rows.some((r) => r.resource === resource && r.action === action)) {
+    if (alreadyPresent) {
       return rows.filter(
         (r) => !(r.resource === resource && r.action === action),
       );
@@ -180,13 +185,13 @@ export function withExclusiveDisplayLevel<T extends PermissionRowLike>(
     return [...rows, makeRow(resource, action)];
   }
 
-  // 同 resource の表示レベル行をすべて落としてから、必要なら 1 つだけ足す。
+  // 同 resource の表示レベル行（付与・拒否とも）をすべて落としてから、
+  // 必要なら 1 つだけ足す。排他モデルでは「このレベルを拒否」という指定に意味が
+  // 無いため、拒否行もここで整理される。
   const withoutLevels = rows.filter(
-    (r) =>
-      !(
-        r.resource === resource &&
-        isDisplayLevelAction(r.action)
-      ),
+    (r) => !(r.resource === resource && isDisplayLevelAction(r.action)),
   );
-  return alreadyOn ? withoutLevels : [...withoutLevels, makeRow(resource, action)];
+  return alreadyPresent
+    ? withoutLevels
+    : [...withoutLevels, makeRow(resource, action)];
 }
