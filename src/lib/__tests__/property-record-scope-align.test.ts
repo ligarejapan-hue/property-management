@@ -173,7 +173,7 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     // ⚠confirm は**物件本体にも書き戻す**ので、担当外の用途地域・建蔽率まで
     // 書き換わり得た。両方 updateMany + 0件403 にする。
     const lib = read("src/lib/investigation/fetch-investigation.ts");
-    expect(lib).toContain("scope?: PropertyRecordScope");
+    expect(lib).toContain("scopeSession?: { id: string; role: string }");
     expect(lib).toContain("assertScopedWrite(");
 
     // 対象は**利用者の直接編集**である2関数に限る。外部取得の結果保存
@@ -275,6 +275,46 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     }
   });
 
+  it("【横断】書き込みの tx は必ず親の物件行ロックで始まる（@codex #338 R7）", () => {
+    // ⚠リレーション述語だけでは親の properties 行がロックされず、READ COMMITTED では
+    // 文の開始スナップショットで古い担当を見て 1 件更新が通る（更新対象行が別なので
+    // 担当付け替えと同時に commit できる）。FOR UPDATE で親を押さえて順序を作る。
+    // 規約を1文に統一: **物件配下を書き換える tx は最初に lock を呼ぶ**。
+    // ⚠検査の単位は **route はファイル内の tx ごと / lib は関数ごと**。
+    // ソース全体を1つの正規表現で走査すると、意図的にスコープ対象外の経路
+    // （外部取得の結果保存にある監査ログ作成）まで拾って誤検知する（実際に踏んだ）。
+    const assertLockFirst = (label: string, text: string) => {
+      const writeIdx = text.search(/tx\.\w+\.(updateMany|deleteMany|create)\(/);
+      expect(writeIdx, `${label}: tx 内の書き込みが無い`).toBeGreaterThan(0);
+      const lockIdx = text.indexOf("lockPropertyRecordForWrite(tx,");
+      expect(lockIdx, `${label}: 書き込み tx が lock で始まっていない`).toBeGreaterThan(0);
+      expect(lockIdx, `${label}: lock が書き込みより後ろ`).toBeLessThan(writeIdx);
+    };
+
+    for (const p of [
+      "src/app/api/properties/[id]/comments/route.ts",
+      "src/app/api/properties/[id]/next-actions/route.ts",
+      "src/app/api/properties/[id]/next-actions/[actionId]/route.ts",
+      "src/app/api/properties/[id]/candidates/[candidateId]/judge/route.ts",
+    ]) {
+      const src = read(p);
+      const txs = src.match(/\$transaction\(async \(tx\) => \{[\s\S]*?\n {4}\}\);/g) ?? [];
+      const writeTxs = txs.filter((t) =>
+        /tx\.\w+\.(updateMany|deleteMany|create)\(/.test(t),
+      );
+      expect(writeTxs.length, `${p}: 書き込み tx が見つからない`).toBeGreaterThan(0);
+      for (const t of writeTxs) assertLockFirst(p, t);
+    }
+
+    // lib は「利用者の直接編集」の2関数だけ（取得経路は意図的に対象外）。
+    const lib = read("src/lib/investigation/fetch-investigation.ts");
+    for (const name of ["patchInvestigation", "confirmInvestigationRecord"]) {
+      const start = lib.indexOf(`export async function ${name}(`);
+      const next = lib.indexOf("\nexport ", start + 1);
+      assertLockFirst(name, lib.slice(start, next === -1 ? undefined : next));
+    }
+  });
+
   it("【横断】CAS した後の読み直しは必ず同一 tx 内（@codex #338 R5/R6・#328 R3 の再発防止）", () => {
     // updateMany の行ロックは文の終わりで解放される。読み直しを外に出すと
     // 相手の結果を返す／相手が消していれば 500 になる。同じ指摘を2巡連続で
@@ -308,12 +348,19 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     expect(lib).toMatch(/取得の結果保存[\s\S]{0,400}?スコープで破棄しない/);
   });
 
-  it("route はスコープ述語を lib へ渡している（渡し忘れると素通しになる）", () => {
-    for (const p of [
-      "src/app/api/properties/[id]/investigation/route.ts",
-      "src/app/api/properties/[id]/investigation/confirm/route.ts",
+  it("route はセッションを lib へ渡している（渡し忘れると素通しになる）", () => {
+    // lib 側が session からスコープ述語と親行ロックの両方を導出する（@codex #338 R7）。
+    // 渡し忘れると scopeSession が undefined になり、ロックも述語も掛からない。
+    for (const [p, fn] of [
+      ["src/app/api/properties/[id]/investigation/route.ts", "patchInvestigation"],
+      [
+        "src/app/api/properties/[id]/investigation/confirm/route.ts",
+        "confirmInvestigationRecord",
+      ],
     ]) {
-      expect(read(p)).toContain("propertyRecordScopeFilter(session)");
+      const src = read(p);
+      const call = src.slice(src.indexOf(`await ${fn}(`));
+      expect(call.slice(0, 260), p).toContain("session,");
     }
   });
 });

@@ -8,10 +8,7 @@ import {
   ApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import {
-  assertPropertyRecordAccess,
-  propertyRecordScopeFilter,
-} from "@/lib/property-record-guard";
+import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
 import {
   getInvestigation,
   patchInvestigation,
@@ -106,7 +103,7 @@ export async function PATCH(
       session.id,
       fields,
       note ?? undefined,
-      propertyRecordScopeFilter(session),
+      session,
     );
     return apiResponse({ investigation });
   } catch (error) {

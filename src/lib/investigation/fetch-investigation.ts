@@ -15,7 +15,10 @@
 
 import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
-import type { PropertyRecordScope } from "@/lib/property-record-guard";
+import {
+  lockPropertyRecordForWrite,
+  propertyRecordScopeFilter,
+} from "@/lib/property-record-guard";
 import { runInvestigation } from "./index";
 
 /**
@@ -492,7 +495,11 @@ export async function patchInvestigation(
    * 担当者スコープ述語（field_staff のみ渡る）。更新文の where に畳み込んで
    * 原子化する（@codex #338 P2）。undefined なら条件を積まない。
    */
-  scope?: PropertyRecordScope,
+  /**
+   * 担当者スコープの判定に使うセッション（field_staff のみ絞られる）。
+   * tx 冒頭で親の物件行をロックし、更新文にも述語を畳み込む（@codex #338 R7）。
+   */
+  scopeSession?: { id: string; role: string },
 ): Promise<InvestigationRecord> {
   const existing = await prisma.propertyInvestigation.findUnique({
     where: { propertyId },
@@ -516,7 +523,10 @@ export async function patchInvestigation(
   // 0 件 = 判定から書込までの間に担当が外れた → 403（編集を残さない）。
   // ⚠更新と監査ログは1トランザクション（@codex #338 R3・confirm と同じ理由）。
   // 分けると「編集は残ったが監査が無い」中途状態が作れる。
+  const scope = scopeSession ? propertyRecordScopeFilter(scopeSession) : undefined;
   const updated = await prisma.$transaction(async (tx) => {
+    // 親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。
+    if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
     const applied = await tx.propertyInvestigation.updateMany({
       where: { propertyId, ...(scope ? { property: scope } : {}) },
       data: { ...fields, version: { increment: 1 } },
@@ -553,7 +563,11 @@ export async function confirmInvestigationRecord(
   propertyId: string,
   userId: string,
   /** 担当者スコープ述語（field_staff のみ渡る・@codex #338 P2）。 */
-  scope?: PropertyRecordScope,
+  /**
+   * 担当者スコープの判定に使うセッション（field_staff のみ絞られる）。
+   * tx 冒頭で親の物件行をロックし、更新文にも述語を畳み込む（@codex #338 R7）。
+   */
+  scopeSession?: { id: string; role: string },
 ): Promise<InvestigationRecord> {
   const inv = await prisma.propertyInvestigation.findUnique({
     where: { propertyId },
@@ -577,7 +591,10 @@ export async function confirmInvestigationRecord(
   // 「調査は confirmed になったが、物件へのコピーが 403 で止まり監査も無い」という
   // 中途状態が残る（2文に分けたこと自体が持ち込んだ退行）。0 件拒否が「何も残さない」
   // と言えるようにするには、拒否の throw で全体が rollback される必要がある。
+  const scope = scopeSession ? propertyRecordScopeFilter(scopeSession) : undefined;
   const updated = await prisma.$transaction(async (tx) => {
+    // 親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。
+    if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
     const applied = await tx.propertyInvestigation.updateMany({
       where: { propertyId, ...(scope ? { property: scope } : {}) },
       data: {

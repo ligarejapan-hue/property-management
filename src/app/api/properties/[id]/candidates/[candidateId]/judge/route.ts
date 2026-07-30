@@ -11,6 +11,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import {
   assertPropertyRecordAccess,
+  lockPropertyRecordForWrite,
   propertyRecordScopeFilter,
 } from "@/lib/property-record-guard";
 
@@ -77,6 +78,9 @@ export async function POST(
     // ⚠これは #328 R3 と同じ結論。CAS を入れたら読み直しも必ず同じ tx に入れる。
     const scope = propertyRecordScopeFilter(session);
     const updated = await prisma.$transaction(async (tx) => {
+      // 親の物件行を先にロックする（@codex #338 R7）。リレーション述語だけでは
+      // 親行がロックされず、担当の付け替えが文の直後に commit されると通る。
+      await lockPropertyRecordForWrite(tx, id, session);
       const applied = await tx.propertyMatchCandidate.updateMany({
         where: {
           id: candidateId,

@@ -8,10 +8,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import {
-  assertPropertyRecordAccess,
-  propertyRecordScopeFilter,
-} from "@/lib/property-record-guard";
+import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
 import { confirmInvestigationRecord } from "@/lib/investigation/fetch-investigation";
 
 // ---------- POST /api/properties/[id]/investigation/confirm ----------
@@ -38,7 +35,7 @@ export async function POST(
     const investigation = await confirmInvestigationRecord(
       id,
       session.id,
-      propertyRecordScopeFilter(session),
+      session,
     );
 
     await writeAuditLog({

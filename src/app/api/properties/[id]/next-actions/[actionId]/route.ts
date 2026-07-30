@@ -12,6 +12,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import {
   assertPropertyRecordAccess,
+  lockPropertyRecordForWrite,
   propertyRecordScopeFilter,
 } from "@/lib/property-record-guard";
 
@@ -78,6 +79,8 @@ export async function PATCH(
     // （しかも自分の更新は済んでいるのに監査が残らない）。
     const scope = propertyRecordScopeFilter(session);
     const updated = await prisma.$transaction(async (tx) => {
+      // 親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。
+      await lockPropertyRecordForWrite(tx, propertyId, session);
       const applied = await tx.nextAction.updateMany({
         where: { id: actionId, propertyId, ...(scope ? { property: scope } : {}) },
         data: updateData,
@@ -142,17 +145,22 @@ export async function DELETE(
     await assertPropertyRecordAccess(propertyId, session, "write");
 
     // ⚠削除も where にスコープを畳み込んで原子化する（@codex #338 P2・上と同じ理由）。
+    // ⚠親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。述語だけでは
+    // 親行がロックされないため tx にして順序を「親 → 子」に揃える。
     const scope = propertyRecordScopeFilter(session);
-    const removed = await prisma.nextAction.deleteMany({
-      where: { id: actionId, propertyId, ...(scope ? { property: scope } : {}) },
+    await prisma.$transaction(async (tx) => {
+      await lockPropertyRecordForWrite(tx, propertyId, session);
+      const removed = await tx.nextAction.deleteMany({
+        where: { id: actionId, propertyId, ...(scope ? { property: scope } : {}) },
+      });
+      if (removed.count === 0) {
+        throw new ApiError(
+          403,
+          "この物件を操作する権限がありません",
+          "FORBIDDEN",
+        );
+      }
     });
-    if (removed.count === 0) {
-      throw new ApiError(
-        403,
-        "この物件を操作する権限がありません",
-        "FORBIDDEN",
-      );
-    }
 
     await writeAuditLog({
       userId: session.id,
