@@ -658,7 +658,10 @@ async function upsertOwnerAndLink(
     action: "owner_created_from_reception",
     targetTable: "owners",
     targetId: ownerId,
-    detail: { name, address: address ?? null, zip: zip ?? null },
+    // ⚠**氏名・住所・郵便番号を監査に生で残さない**（認可・PII 横断監査 2026-07-30）。
+    // 対象は targetId=ownerId で辿れるので、監査には「どの項目が入っていたか」の
+    // 有無だけを残す（同ファイルのジョブ監査が件数のみなのと同じ方針）。
+    detail: { hasAddress: address != null, hasZip: zip != null },
   });
 
   // 新規 owner は他 tx から見えないため archive 競合はない。通常の link 処理。
