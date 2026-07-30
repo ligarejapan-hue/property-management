@@ -230,6 +230,33 @@ describe("事務担当への付与（ゲートとセットで反映する）", (
   });
 });
 
+describe("画面のダウンロードリンクを route のゲートに揃える", () => {
+  // 揃っていないと、権限を外した利用者にリンクが出たまま＝押すたび 403 の
+  // JSON 画面へ飛ぶ（権限画面から無効化できる今回の設計と UI が矛盾する）。
+  const PAGE = "src/app/(dashboard)/import/jobs/[jobId]/page.tsx";
+
+  it("リンクの表示条件に権限判定が入っている", () => {
+    expect(read(PAGE)).toContain(
+      "{canDownloadErrorCsv && (counts.error > 0 || counts.needs_review > 0) && (",
+    );
+  });
+
+  it("表示条件は route と同じ権限の組み合わせで、取得中・失敗は非表示に倒す", () => {
+    const src = read(PAGE);
+    const block = src.slice(
+      src.indexOf("const canDownloadErrorCsv"),
+      src.indexOf("const [job, setJob]"),
+    );
+    expect(block).toContain('has("import", "write")');
+    expect(block).toContain('has("csv_export", "read")');
+    expect(block).toContain('has("import_error_csv", "read")');
+    expect(block).toContain('has("csv_export_personal", "read")');
+    // fail-safe（緩めない側に倒す）
+    expect(block).toContain("if (permissionsLoading) return false;");
+    expect(block).toContain("mePermissions ?? []");
+  });
+});
+
 describe("専用権限であることの回帰ガード（全件CSVを解禁しない）", () => {
   // 事務担当は property:read / owner:read / csv_export:read を既に持つため、
   // 共有の csv_export_personal を配ると下記まで一度に解禁されてしまう。

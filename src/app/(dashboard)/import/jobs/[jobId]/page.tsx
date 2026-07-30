@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from "react";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { formatJaDateTime } from "@/lib/format-datetime";
 import {
   useParams,
@@ -224,6 +225,24 @@ export default function ImportJobDetailPage() {
       ? (r as RowReason)
       : "all";
   })();
+
+  // エラー行CSVの表示可否。**route 側のゲートと同じ式**にする（不一致だと、押しても
+  // 必ず 403 JSON に飛ぶリンクを出してしまう）。権限は dashboard 全体を覆う
+  // ScreenProtectionProvider の配布値から導出し、取得中・取得失敗（null）は
+  // false＝リンク非表示に倒す（fail-safe・緩めない）。
+  const { permissions: mePermissions, permissionsLoading } = useScreenProtection();
+  const canDownloadErrorCsv = useMemo(() => {
+    if (permissionsLoading) return false;
+    const perms = mePermissions ?? [];
+    const has = (resource: string, action: string) =>
+      perms.some((p) => p.resource === resource && p.action === action && p.granted);
+    return (
+      has("import", "write") &&
+      has("csv_export", "read") &&
+      // 専用権限、または既に広い個人情報CSV権限（route 側と同じ OR 判定）
+      (has("import_error_csv", "read") || has("csv_export_personal", "read"))
+    );
+  }, [mePermissions, permissionsLoading]);
 
   const [job, setJob] = useState<ImportJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1052,10 +1071,12 @@ export default function ImportJobDetailPage() {
                 </span>
               )}
 
-            {/* CSV エクスポート: error / needs_review が1件以上あるときに表示
+            {/* CSV エクスポート: error / needs_review が1件以上 かつ 権限があるときに表示。
+                個人情報（氏名・住所・電話）を含むため route 側にゲートがあり、
+                表示条件を揃えないと押すたび 403 JSON に飛ぶ。
                 サーバ側 Content-Disposition で attachment 指定済み。
                 download 属性はファイル名のクライアント側ヒント。 */}
-            {(counts.error > 0 || counts.needs_review > 0) && (
+            {canDownloadErrorCsv && (counts.error > 0 || counts.needs_review > 0) && (
               <a
                 href={`/api/import/jobs/${jobId}/export-errors`}
                 download={`import-errors-${jobId}.csv`}
