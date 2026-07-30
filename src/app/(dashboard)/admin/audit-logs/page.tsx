@@ -82,6 +82,7 @@ const ACTION_LABELS: Record<string, string> = {
   property_csv_export: "物件CSVエクスポート",
   property_dm_csv_export: "DM宛先CSVエクスポート",
   property_address_dm_csv_export: "物件宛DM CSVエクスポート",
+  import_error_csv_export: "取込エラー行CSVエクスポート",
   // --- オーナー関連 ---
   owner_memo_create: "オーナーメモ作成",
   owner_csv_import: "オーナーCSVインポート",

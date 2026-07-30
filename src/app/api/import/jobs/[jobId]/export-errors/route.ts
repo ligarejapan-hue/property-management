@@ -7,6 +7,7 @@ import {
   handleApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
 import { encodeCsv } from "@/lib/csv-encode";
 import { classifyImportError } from "@/lib/import-error-display";
 
@@ -22,8 +23,20 @@ import { classifyImportError } from "@/lib/import-error-display";
 // 出力は UTF-8 BOM 付き / CRLF 改行 / Excel で文字化けしないフォーマット。
 // Content-Disposition で `import-errors-{jobId}.csv` をデフォルトファイル名に。
 //
-// 権限は他の取込 API と同じく `import:write`。すでに /import/jobs/:jobId 詳細を
-// 見られるユーザーは内容に到達できているため、ダウンロード化で権限境界は広がらない。
+// 権限は取込の `import:write` に加えて、**個人情報を含む CSV 出力の既定ゲート**
+// （`csv_export:read` + `csv_export_personal:read`）を要求し、出力を監査に残す。
+//
+// ⚠この CSV は rawData をそのまま列に展開するため、**所有者の氏名・住所・電話が
+// 生で入る**。他の CSV 出力（物件 CSV / DM 差込 / 所有者 CSV）はすべてこの2つを
+// 要求し誰が出したかを監査に残しているのに、ここだけ import:write で通り監査も
+// 無かった＝**個人情報 CSV の関門を唯一すり抜けていた**（認可・PII 横断監査 2026-07-30）。
+// 以前ここに書いていた「詳細画面を見られる人は内容に到達できている」という理由は、
+// **画面上の閲覧と、手元に残る CSV ファイルを同一視していた**点で誤りだった。
+//
+// ⚠発注者判断（2026-07-30）: ゲートを足すだけだと**事務担当がダウンロードできなく
+// なる**（事務担当は import を持つが csv_export_personal を持たない）。そこで
+// **事務担当用テンプレートに csv_export_personal を付与する**（seed + 本番向けの
+// データ migration）。この2つはセットで反映すること。
 
 export async function GET(
   _request: NextRequest,
@@ -36,6 +49,17 @@ export async function GET(
 
     if (!hasPermission(perms, "import", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
+    // 個人情報を含む CSV 出力の既定ゲート（他の CSV 出力3経路と同じ組み合わせ）。
+    if (!hasPermission(perms, "csv_export", "read")) {
+      throw new ApiError(403, "CSV出力の権限がありません", "FORBIDDEN");
+    }
+    if (!hasPermission(perms, "csv_export_personal", "read")) {
+      throw new ApiError(
+        403,
+        "個人情報を含むCSV出力の権限がありません",
+        "FORBIDDEN",
+      );
     }
 
     // ジョブ存在確認のみ。fileName 等は今のところ使わないが将来のヘッダ拡張用。
@@ -100,6 +124,21 @@ export async function GET(
     });
 
     const csv = encodeCsv(headers, csvRows, { bom: true });
+
+    // ⚠**誰が個人情報 CSV を出したかを残す**（他の CSV 出力3経路と同じ）。
+    // detail は非PIIのメタデータのみ（行数・列数）。rawData の中身や
+    // 列名（所有者名の見出しになり得る）は載せない。
+    await writeAuditLog({
+      userId: session.id,
+      action: "import_error_csv_export",
+      targetTable: "import_jobs",
+      targetId: jobId,
+      detail: {
+        rowCount: csvRows.length,
+        columnCount: headers.length,
+        exportedAt: new Date().toISOString(),
+      },
+    });
 
     return new Response(csv, {
       status: 200,
