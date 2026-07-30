@@ -10,6 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import {
+  findDisplayLevelConflicts,
+  describeDisplayLevelConflicts,
+} from "@/lib/permission-display-levels";
 
 // ---------- GET /api/admin/templates/:id ----------
 
@@ -82,6 +86,20 @@ export async function PUT(
     const body = await request.json();
     const data = updateTemplateSchema.parse(body);
 
+    // 表示レベル（非表示/マスク/一部表示/閲覧のみ/全表示/編集可）は**項目ごとに1つだけ**。
+    // 複数 granted だと解決側（getOwnerDisplayConfig）が**最も緩いものを採用**するため、
+    // 「マスク」を付けても「全表示」の行が残っていると生値が出続ける＝設定した人の
+    // 意図と実際の見え方が食い違う。画面側も排他にしているが、API を直接呼ばれても
+    // 崩れないようここで弾く（保存前に検証する＝壊れた組み合わせを保存しない）。
+    const conflicts = findDisplayLevelConflicts(data.permissions);
+    if (conflicts.length > 0) {
+      throw new ApiError(
+        400,
+        `表示レベルは項目ごとに1つだけ選べます（${describeDisplayLevelConflicts(conflicts)}）`,
+        "VALIDATION_ERROR",
+      );
+    }
+
     // Check name uniqueness (excluding self)
     const nameConflict = await prisma.permissionTemplate.findFirst({
       where: { name: data.name, id: { not: id } },
@@ -90,29 +108,30 @@ export async function PUT(
       throw new ApiError(409, "同名のテンプレートが既に存在します", "CONFLICT");
     }
 
-    // Delete existing permissions and recreate
-    await prisma.templatePermission.deleteMany({
-      where: { templateId: id },
-    });
-
-    const updated = await prisma.permissionTemplate.update({
-      where: { id },
-      data: {
-        name: data.name,
-        description: data.description ?? null,
-        templatePermissions: {
-          create: data.permissions.map((p) => ({
-            resource: p.resource,
-            action: p.action,
-            granted: p.granted,
-          })),
+    // 全消し→作り直しは**同一トランザクション**で行う。分けると、作り直しに失敗した
+    // ときにテンプレートの権限が空のまま残り、そのテンプレートを使う全員が一斉に
+    // 権限を失う（fail-safe 方向ではあるが業務は止まる）。
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.templatePermission.deleteMany({ where: { templateId: id } });
+      return tx.permissionTemplate.update({
+        where: { id },
+        data: {
+          name: data.name,
+          description: data.description ?? null,
+          templatePermissions: {
+            create: data.permissions.map((p) => ({
+              resource: p.resource,
+              action: p.action,
+              granted: p.granted,
+            })),
+          },
         },
-      },
-      include: {
-        templatePermissions: {
-          select: { resource: true, action: true, granted: true },
+        include: {
+          templatePermissions: {
+            select: { resource: true, action: true, granted: true },
+          },
         },
-      },
+      });
     });
 
     await writeAuditLog({
@@ -162,10 +181,13 @@ export async function DELETE(
       );
     }
 
-    await prisma.templatePermission.deleteMany({
-      where: { templateId: id },
+    // 権限行の削除とテンプレート本体の削除は同一トランザクションで。
+    // 分けると、後段が失敗したときに**権限だけ空になったテンプレート**が残り、
+    // それを使っている利用者が一斉に権限を失う。
+    await prisma.$transaction(async (tx) => {
+      await tx.templatePermission.deleteMany({ where: { templateId: id } });
+      await tx.permissionTemplate.delete({ where: { id } });
     });
-    await prisma.permissionTemplate.delete({ where: { id } });
 
     await writeAuditLog({
       userId: session.id,

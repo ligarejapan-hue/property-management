@@ -10,6 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import {
+  findDisplayLevelConflicts,
+  describeDisplayLevelConflicts,
+} from "@/lib/permission-display-levels";
 
 // ---------- GET /api/admin/users/:id/permissions ----------
 
@@ -111,19 +115,33 @@ export async function PUT(
     const body = await request.json();
     const data = updatePermissionsSchema.parse(body);
 
-    // Delete existing overrides and recreate
-    await prisma.userPermission.deleteMany({ where: { userId: id } });
-
-    if (data.overrides.length > 0) {
-      await prisma.userPermission.createMany({
-        data: data.overrides.map((o) => ({
-          userId: id,
-          resource: o.resource,
-          action: o.action,
-          granted: o.granted,
-        })),
-      });
+    // 表示レベルは**項目ごとに1つだけ**。複数 granted だと解決側が最も緩いものを
+    // 採用するため、「マスク」を選んでも「全表示」が残っていると生値が出続ける。
+    // 画面側も排他にしているが、API を直接呼ばれても崩れないようここで弾く。
+    const conflicts = findDisplayLevelConflicts(data.overrides);
+    if (conflicts.length > 0) {
+      throw new ApiError(
+        400,
+        `表示レベルは項目ごとに1つだけ選べます（${describeDisplayLevelConflicts(conflicts)}）`,
+        "VALIDATION_ERROR",
+      );
     }
+
+    // 全消し→作り直しは**同一トランザクション**で行う。分けると、作り直しに失敗した
+    // ときに個別上書きが消えたままになり、その利用者の権限が黙って変わってしまう。
+    await prisma.$transaction(async (tx) => {
+      await tx.userPermission.deleteMany({ where: { userId: id } });
+      if (data.overrides.length > 0) {
+        await tx.userPermission.createMany({
+          data: data.overrides.map((o) => ({
+            userId: id,
+            resource: o.resource,
+            action: o.action,
+            granted: o.granted,
+          })),
+        });
+      }
+    });
 
     // Log the change
     await prisma.permissionChangeLog.create({

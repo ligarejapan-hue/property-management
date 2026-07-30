@@ -10,6 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import {
+  findDisplayLevelConflicts,
+  describeDisplayLevelConflicts,
+} from "@/lib/permission-display-levels";
 
 // ---------- GET /api/admin/templates ----------
 
@@ -62,6 +66,17 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const data = createTemplateSchema.parse(body);
+
+    // 更新側と同じ検証。ここを抜くと**新規作成で壊れた組み合わせを作れてしまい**、
+    // 一度整理しても同じ状態が再生産される（表示レベルは項目ごとに1つだけ）。
+    const conflicts = findDisplayLevelConflicts(data.permissions);
+    if (conflicts.length > 0) {
+      throw new ApiError(
+        400,
+        `表示レベルは項目ごとに1つだけ選べます（${describeDisplayLevelConflicts(conflicts)}）`,
+        "VALIDATION_ERROR",
+      );
+    }
 
     const existing = await prisma.permissionTemplate.findUnique({
       where: { name: data.name },

@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { RenderBusyError } from "@/lib/sales-sheet/render-gate";
+import {
+  isDisplayLevelAction,
+  isDisplayLevelResource,
+} from "@/lib/permission-display-levels";
 
 // ---------- Custom error ----------
 
@@ -144,8 +148,38 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
   }));
 
   // 5. Merge: overrides take precedence
+  //
+  // ⚠表示レベル（非表示/マスク/一部表示/閲覧のみ/全表示/編集可）は resource ごとに
+  // 1 つだけ効く設計で、解決側（getOwnerDisplayConfig の resolveLevel）は**最も緩い
+  // ものを採用**する。そのため resource:action をキーに素朴にマージすると、
+  // 「テンプレ = 全表示」に「個別上書き = マスク」を足しても両方が残り、
+  // **緩い全表示が勝ってマスクが効かない**（個別に絞ったつもりが絞れていない）。
+  // → 個別上書きで表示レベルを指定している resource は、テンプレート由来の表示レベル
+  //   行を落としてから上書きを載せる＝上書きが確実に勝つようにする。
+  //   表示レベル以外（property:read 等）のマージ規則は従来どおり変更しない。
+  // ⚠**granted の上書きだけ**が対象。「このレベルを外す」だけの拒否上書き
+  // （granted:false）でテンプレ側のレベルまで消すと、従来 masked に落ちていたものが
+  // hidden になる等、意図しない変化が出る。拒否上書きは従来どおり同じキーを
+  // 打ち消すだけに留める。
+  const levelOverriddenResources = new Set(
+    overrides
+      .filter(
+        (o) =>
+          o.granted &&
+          isDisplayLevelResource(o.resource) &&
+          isDisplayLevelAction(o.action),
+      )
+      .map((o) => o.resource),
+  );
+
   const merged = new Map<string, PermissionEntry>();
   for (const p of templatePerms) {
+    if (
+      levelOverriddenResources.has(p.resource) &&
+      isDisplayLevelAction(p.action)
+    ) {
+      continue;
+    }
     merged.set(`${p.resource}:${p.action}`, p);
   }
   for (const o of overrides) {

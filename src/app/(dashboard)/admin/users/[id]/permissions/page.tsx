@@ -4,7 +4,15 @@ import { use, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Loader2, Save } from "lucide-react";
 import { ROLE_LABELS } from "@/lib/role-labels";
+import {
+  DISPLAY_LEVEL_LABELS,
+  isDisplayLevelAction,
+  isDisplayLevelResource,
+  withExclusiveDisplayLevel,
+} from "@/lib/permission-display-levels";
 
+// ⚠テンプレート編集画面（admin/templates/[id]）の RESOURCES と必ず同内容にすること
+//   （片方だけだとテンプレ運用環境で付与できず必ず 403。sale_dm で実際に起きた事故）。
 const RESOURCES = [
   { key: "property", label: "物件", actions: ["read", "write", "delete"] },
   { key: "owner", label: "オーナー", actions: ["read", "write", "delete"] },
@@ -12,9 +20,17 @@ const RESOURCES = [
   { key: "owner_name_kana", label: "オーナー名カナ", actions: ["hidden", "masked", "full"] },
   { key: "owner_phone", label: "オーナー電話番号", actions: ["hidden", "masked", "full"] },
   { key: "owner_zip", label: "オーナー郵便番号", actions: ["hidden", "masked", "full"] },
-  { key: "owner_address", label: "オーナー住所", actions: ["hidden", "masked", "full"] },
+  // 住所は「一部表示」(先頭数文字だけ)を実際に使っている(現地担当用の既定)。
+  { key: "owner_address", label: "オーナー住所", actions: ["hidden", "masked", "partial", "full"] },
   { key: "owner_email", label: "オーナーメールアドレス", actions: ["hidden", "masked", "full"] },
-  { key: "owner_note", label: "オーナー備考", actions: ["hidden", "masked", "full"] },
+  // 備考は「閲覧のみ」と「編集可」を区別する(編集可だけがメモを書ける)。
+  { key: "owner_note", label: "オーナー備考", actions: ["hidden", "masked", "read", "edit"] },
+  // 法人番号は既に全テンプレートで設定されているのに、この画面に行が無かった。
+  {
+    key: "owner_corporate_number",
+    label: "オーナー法人番号",
+    actions: ["hidden", "masked", "full"],
+  },
   { key: "csv_export", label: "CSVエクスポート", actions: ["read"] },
   { key: "csv_export_personal", label: "CSV個人情報エクスポート", actions: ["read"] },
   // 取込エラー行だけの CSV（個人情報を含むが、対象はその取込ジョブの失敗行のみ）。
@@ -144,6 +160,22 @@ export default function UserPermissionsPage({
     if (override !== null) {
       return { granted: override, source: "override" };
     }
+    // 表示レベルは項目ごとに1つだけ効く。この項目に「このレベルにする」という個別
+    // 指定があるなら、テンプレート側の別レベルはもう効かない（サーバ側の合成と同じ
+    // 規則）。ここを揃えないと、画面では両方が有効に見えるのに実際は片方だけ、という
+    // 食い違いが出る。
+    if (isDisplayLevelResource(resource) && isDisplayLevelAction(action)) {
+      const overriddenByAnotherLevel = overrides.some(
+        (o) =>
+          o.resource === resource &&
+          o.granted &&
+          isDisplayLevelAction(o.action) &&
+          o.action !== action,
+      );
+      if (overriddenByAnotherLevel) {
+        return { granted: false, source: "none" };
+      }
+    }
     if (isTemplateGranted(resource, action)) {
       return { granted: true, source: "template" };
     }
@@ -151,6 +183,21 @@ export default function UserPermissionsPage({
   }
 
   function toggleOverride(resource: string, action: string) {
+    // 表示レベルは**項目ごとに1つだけ**。ここは「付与/拒否/既定」の3状態ではなく、
+    // 「このレベルにする / 個別指定をやめてテンプレートに戻す」の2状態にする
+    // （レベルは択一なので「このレベルを拒否」という指定に意味がない）。
+    // 1つ選ぶと同じ項目の他のレベル指定は外れる＝マスクを選んだのに全表示が
+    // 残って生値が出続ける、という食い違いが起きない。
+    if (isDisplayLevelResource(resource) && isDisplayLevelAction(action)) {
+      setOverrides((prev) =>
+        withExclusiveDisplayLevel(prev, resource, action, (r, a) => ({
+          resource: r,
+          action: a,
+          granted: true,
+        })),
+      );
+      return;
+    }
     setOverrides((prev) => {
       const existing = prev.find(
         (o) => o.resource === resource && o.action === action,
@@ -274,14 +321,39 @@ export default function UserPermissionsPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-              {RESOURCES.map((res) => (
+              {RESOURCES.map((res) => {
+                const isLevelRow = isDisplayLevelResource(res.key);
+                // 既に設定されているのに一覧に無いレベルも必ず出す。出さないと
+                // 「設定されているのに画面ではどれも選ばれていない」状態になり、
+                // うっかり別のレベルで上書きしてしまう。
+                // ⚠granted で絞らない。拒否の指定（granted:false）も出さないと、
+                // 一覧から外したレベル（例: 備考の「全表示」）に拒否が残っている
+                // 場合に**画面から見えないのに保存時は往復し続け**、テンプレートを
+                // 変えた途端に効き始める。見えなければ管理者は消せない。
+                const storedLevels = isLevelRow
+                  ? [...overrides, ...templatePerms]
+                      .filter(
+                        (p) =>
+                          p.resource === res.key &&
+                          isDisplayLevelAction(p.action) &&
+                          !res.actions.includes(p.action),
+                      )
+                      .map((p) => p.action)
+                  : [];
+                const actions = [...res.actions, ...new Set(storedLevels)];
+                return (
                 <tr key={res.key} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                     {res.label}
+                    {isLevelRow && (
+                      <span className="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                        （1つだけ）
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">
-                      {res.actions.map((action) => {
+                      {actions.map((action) => {
                         const resolved = getResolved(res.key, action);
                         let bgColor = "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400";
                         let indicator = "";
@@ -311,7 +383,9 @@ export default function UserPermissionsPage({
                             onClick={() => toggleOverride(res.key, action)}
                             className={`inline-flex items-center rounded px-2.5 py-1 text-xs font-medium ${bgColor} hover:opacity-80 transition-opacity cursor-pointer`}
                           >
-                            {ACTION_LABELS[action] ?? action}
+                            {isLevelRow
+                              ? (DISPLAY_LEVEL_LABELS[action] ?? action)
+                              : (ACTION_LABELS[action] ?? action)}
                             {indicator}
                           </button>
                         );
@@ -319,7 +393,8 @@ export default function UserPermissionsPage({
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
