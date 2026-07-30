@@ -203,10 +203,14 @@ describe("権限画面が実態を表現できる", () => {
 });
 
 describe("保存API側でも弾く（画面を通さず呼ばれても崩れない）", () => {
+  // 書き込み経路すべて。新規作成を漏らすと、一度整理しても同じ状態が再生産される。
   const ROUTES = [
-    "src/app/api/admin/templates/[id]/route.ts",
-    "src/app/api/admin/users/[id]/permissions/route.ts",
+    "src/app/api/admin/templates/route.ts", // 新規作成
+    "src/app/api/admin/templates/[id]/route.ts", // 更新
+    "src/app/api/admin/users/[id]/permissions/route.ts", // 個別上書き
   ];
+  // 「全消し→作り直し」をする経路（新規作成は消さないので対象外）
+  const REPLACE_ROUTES = ROUTES.slice(1);
 
   it("重複していれば 400 で保存を拒否する", () => {
     for (const route of ROUTES) {
@@ -218,7 +222,7 @@ describe("保存API側でも弾く（画面を通さず呼ばれても崩れな�
   });
 
   it("検証は書き込みより先に行う（壊れた組み合わせを保存しない）", () => {
-    for (const route of ROUTES) {
+    for (const route of REPLACE_ROUTES) {
       const src = read(route);
       expect(src.indexOf("findDisplayLevelConflicts(")).toBeLessThan(
         src.indexOf("deleteMany"),
@@ -227,7 +231,7 @@ describe("保存API側でも弾く（画面を通さず呼ばれても崩れな�
   });
 
   it("全消し→作り直しは同一トランザクション（失敗して権限が消えたままにならない）", () => {
-    for (const route of ROUTES) {
+    for (const route of REPLACE_ROUTES) {
       const src = read(route);
       expect(src).toContain("$transaction(async (tx) => {");
       // トランザクション外に素の deleteMany を残さない
@@ -259,6 +263,17 @@ describe("既存データの整理（migration）", () => {
     const sql = read(MIGRATION);
     expect(sql).toContain('tp."granted"');
     expect(sql).toContain('up."granted"');
+  });
+
+  it("⚠拒否上書きがある項目はテンプレ側を整理しない（落ちる先を消さない）", () => {
+    // 消そうとしている下位レベルは「上位を外す」個別指定の受け皿になっていることが
+    // ある。消すと落ちる先が無くなり hidden まで下がる＝その人だけ見えなくなる。
+    const sql = read(MIGRATION);
+    expect(sql).toContain("denied_levels");
+    expect(sql).toContain("NOT up.\"granted\"");
+    expect(sql).toMatch(
+      /NOT IN \(SELECT d\."resource" FROM denied_levels d\)/,
+    );
   });
 
   it("表示レベルの8項目に限定し、オーナー自体の read/write は含めない", () => {
