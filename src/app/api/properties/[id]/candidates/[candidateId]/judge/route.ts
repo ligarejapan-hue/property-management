@@ -68,34 +68,43 @@ export async function POST(
     // スコープが効くのは**URL パスの物件 (id)**。A 側/B 側どちらが id かは
     // 上で検証済みなので、その側のリレーションにスコープを掛ける。
     // 0 件 = その間に担当が外れた → 403。
+    // ⚠**更新と読み直しは同一トランザクション**（@codex #338 R5）。
+    // updateMany の行ロックは文の終わりで解放されるので、分けたままだと同じ候補を
+    // 2人が同時に判定したとき、後の判定で上書きされた姿を読んでしまう
+    // （応答と監査ログに「same を送ったのに result=different」という食い違いが残る／
+    //   相手が消していれば findUniqueOrThrow が 500）。tx 内に置くと後続は
+    //   commit まで待たされ、自分の更新後の姿を確実に読める。
+    // ⚠これは #328 R3 と同じ結論。CAS を入れたら読み直しも必ず同じ tx に入れる。
     const scope = propertyRecordScopeFilter(session);
-    const applied = await prisma.propertyMatchCandidate.updateMany({
-      where: {
-        id: candidateId,
-        ...(scope
-          ? {
-              OR: [
-                { propertyAId: id, propertyA: scope },
-                { propertyBId: id, propertyB: scope },
-              ],
-            }
-          : {}),
-      },
-      data: {
-        result,
-        judgedBy: session.id,
-        judgedAt: new Date(),
-      },
-    });
-    if (applied.count === 0) {
-      throw new ApiError(
-        403,
-        "この物件を操作する権限がありません",
-        "FORBIDDEN",
-      );
-    }
-    const updated = await prisma.propertyMatchCandidate.findUniqueOrThrow({
-      where: { id: candidateId },
+    const updated = await prisma.$transaction(async (tx) => {
+      const applied = await tx.propertyMatchCandidate.updateMany({
+        where: {
+          id: candidateId,
+          ...(scope
+            ? {
+                OR: [
+                  { propertyAId: id, propertyA: scope },
+                  { propertyBId: id, propertyB: scope },
+                ],
+              }
+            : {}),
+        },
+        data: {
+          result,
+          judgedBy: session.id,
+          judgedAt: new Date(),
+        },
+      });
+      if (applied.count === 0) {
+        throw new ApiError(
+          403,
+          "この物件を操作する権限がありません",
+          "FORBIDDEN",
+        );
+      }
+      return tx.propertyMatchCandidate.findUniqueOrThrow({
+        where: { id: candidateId },
+      });
     });
 
     const labels: Record<string, string> = {
@@ -104,6 +113,13 @@ export async function POST(
       pending: "保留にしました",
     };
 
+    // ⚠監査ログは**意図的に tx の外**（@codex #338 R5 への判断）。
+    // writeAuditLog は内部で例外を握りつぶす設計（監査の失敗が業務操作を壊さない
+    // = audit.ts:29-32）で、リポジトリ全体がこの規約。tx 内に入れると監査の失敗が
+    // 判定そのものを rollback してしまい、規約が逆転する。
+    // 指摘にあった「judgment=same なのに result=different」の食い違いは、
+    // 読み直しを tx 内に入れたこと（= 自分の更新後の姿を読む）で解消済み。
+    // 403 の場合は throw が先なので監査行も残らない。
     await writeAuditLog({
       userId: session.id,
       action: "candidate_judge",

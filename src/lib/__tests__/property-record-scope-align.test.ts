@@ -233,6 +233,19 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     expect(src).toContain("{ propertyAId: id, propertyA: scope }");
     expect(src).toContain("{ propertyBId: id, propertyB: scope }");
     expect(src).toContain("applied.count === 0");
+
+    // ⚠CAS(updateMany) と読み直しは同一 tx（@codex #338 R5・#328 R3 と同じ結論）。
+    // 分けると同じ候補を2人が同時に判定したとき、相手の結果を読んで応答・監査に
+    // 食い違いが残る（更新は自分、result は相手）。
+    expect(src).toContain("prisma.$transaction(async (tx)");
+    const tx = src.slice(src.indexOf("prisma.$transaction"));
+    expect(tx).toContain("tx.propertyMatchCandidate.updateMany(");
+    expect(tx).toContain("tx.propertyMatchCandidate.findUniqueOrThrow(");
+    // 監査ログは意図的に tx の外（監査失敗で判定を rollback しない既存規約）
+    expect(src.indexOf("writeAuditLog(")).toBeGreaterThan(
+      src.indexOf("});", src.indexOf("findUniqueOrThrow(")),
+    );
+    expect(src).toMatch(/監査ログは\*\*意図的に tx の外\*\*/);
   });
 
   it("新規作成は行ロックで原子化する（create は where を持てない・@codex #338 R4）", () => {
