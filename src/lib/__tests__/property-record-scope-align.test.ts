@@ -38,7 +38,11 @@ vi.mock("@/lib/prisma", () => ({
 
 import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
-import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
+import {
+  assertPropertyRecordAccess,
+  propertyRecordScopeFilter,
+} from "@/lib/property-record-guard";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 const findUnique = (prisma as unknown as {
   property: { findUnique: Mock };
@@ -101,6 +105,66 @@ describe("assertPropertyRecordAccess", () => {
     await expect(
       assertPropertyRecordAccess(PROP, field, "write"),
     ).rejects.toMatchObject({ message: "この物件を操作する権限がありません" });
+  });
+});
+
+describe("propertyRecordScopeFilter（書き込みの where に畳み込む述語）", () => {
+  it("field_staff は作成 or 担当の OR 述語を返す", () => {
+    expect(propertyRecordScopeFilter(field)).toEqual({
+      OR: [{ createdBy: field.id }, { assignedTo: field.id }],
+    });
+  });
+
+  it("admin / office_staff は undefined（条件を積まない）", () => {
+    expect(propertyRecordScopeFilter(admin)).toBeUndefined();
+    expect(propertyRecordScopeFilter(office)).toBeUndefined();
+  });
+
+  it("canAccessPropertyRecord と同じ条件になっている（定義のズレを防ぐ）", () => {
+    // 述語と関数判定が食い違うと、読める物件が書けない（またはその逆）が起きる。
+    const pred = propertyRecordScopeFilter(field)!;
+    const own = { createdBy: field.id, assignedTo: null };
+    const assigned = { createdBy: "x", assignedTo: field.id };
+    const other = { createdBy: "x", assignedTo: "y" };
+    const matches = (p: { createdBy: string; assignedTo: string | null }) =>
+      pred.OR.some(
+        (c) =>
+          ("createdBy" in c && c.createdBy === p.createdBy) ||
+          ("assignedTo" in c && c.assignedTo === p.assignedTo),
+      );
+    expect(matches(own)).toBe(canAccessPropertyRecord(field, own));
+    expect(matches(assigned)).toBe(canAccessPropertyRecord(field, assigned));
+    expect(matches(other)).toBe(canAccessPropertyRecord(field, other));
+  });
+});
+
+describe("書き込みの原子性（@codex #338 P2）", () => {
+  const read = (p: string) =>
+    readFileSync(path.join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
+  const src = () =>
+    read("src/app/api/properties/[id]/next-actions/[actionId]/route.ts");
+
+  it("更新は updateMany + スコープ述語で、0 件なら 403", () => {
+    // 受付時点のガードだけでは、判定から更新までの間に担当が付け替わると
+    // 担当外の予定を書き換えてしまう。1 文に畳み込んで原子的にする。
+    const s = src();
+    expect(s).toMatch(/nextAction\.updateMany\(\{[\s\S]{0,200}?property: scope/);
+    expect(s).toContain("applied.count === 0");
+    expect(s).not.toMatch(/nextAction\.update\(\{/);
+  });
+
+  it("削除も deleteMany + スコープ述語で、0 件なら 403", () => {
+    const s = src();
+    expect(s).toMatch(/nextAction\.deleteMany\(\{[\s\S]{0,200}?property: scope/);
+    expect(s).toContain("removed.count === 0");
+    expect(s).not.toMatch(/nextAction\.delete\(\{/);
+  });
+
+  it("where には propertyId も含める（別物件の子を触らせない）", () => {
+    const s = src();
+    const wheres = s.match(/where: \{ id: actionId,[^}]*\}/g) ?? [];
+    expect(wheres.length).toBeGreaterThanOrEqual(2);
+    for (const w of wheres) expect(w).toContain("propertyId");
   });
 });
 

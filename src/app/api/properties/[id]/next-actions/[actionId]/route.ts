@@ -10,7 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
+import {
+  assertPropertyRecordAccess,
+  propertyRecordScopeFilter,
+} from "@/lib/property-record-guard";
 
 const updateNextActionSchema = z.object({
   isCompleted: z.boolean().optional(),
@@ -66,9 +69,23 @@ export async function PATCH(
       updateData.completedAt = data.isCompleted ? new Date() : null;
     }
 
-    const updated = await prisma.nextAction.update({
-      where: { id: actionId },
+    // ⚠**書き込みはスコープを where に畳み込んで原子化する**（@codex #338 P2）。
+    // 上のガードは受付時点の判定なので、判定から更新までの間に担当が付け替わると
+    // 担当外の予定を書き換えてしまう。0 件 = その間に外れた（or 別物件の予定）→ 403。
+    const scope = propertyRecordScopeFilter(session);
+    const applied = await prisma.nextAction.updateMany({
+      where: { id: actionId, propertyId, ...(scope ? { property: scope } : {}) },
       data: updateData,
+    });
+    if (applied.count === 0) {
+      throw new ApiError(
+        403,
+        "この物件を操作する権限がありません",
+        "FORBIDDEN",
+      );
+    }
+    const updated = await prisma.nextAction.findUniqueOrThrow({
+      where: { id: actionId },
       include: {
         assignee: { select: { id: true, name: true } },
         creator: { select: { id: true, name: true } },
@@ -118,7 +135,18 @@ export async function DELETE(
     // 対応予定は自由記述1000文字で顧客の事情が入るため、担当外には出さない。
     await assertPropertyRecordAccess(propertyId, session, "write");
 
-    await prisma.nextAction.delete({ where: { id: actionId } });
+    // ⚠削除も where にスコープを畳み込んで原子化する（@codex #338 P2・上と同じ理由）。
+    const scope = propertyRecordScopeFilter(session);
+    const removed = await prisma.nextAction.deleteMany({
+      where: { id: actionId, propertyId, ...(scope ? { property: scope } : {}) },
+    });
+    if (removed.count === 0) {
+      throw new ApiError(
+        403,
+        "この物件を操作する権限がありません",
+        "FORBIDDEN",
+      );
+    }
 
     await writeAuditLog({
       userId: session.id,
