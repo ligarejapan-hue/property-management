@@ -166,6 +166,56 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     expect(wheres.length).toBeGreaterThanOrEqual(2);
     for (const w of wheres) expect(w).toContain("propertyId");
   });
+
+  it("調査の編集・確認済み設定も更新文にスコープを畳み込む（@codex #338 R2）", () => {
+    // patchInvestigation / confirmInvestigationRecord は lib 内で無条件 update
+    // していたため、受付時点のガードを通った後に担当が外れても編集が残った。
+    // ⚠confirm は**物件本体にも書き戻す**ので、担当外の用途地域・建蔽率まで
+    // 書き換わり得た。両方 updateMany + 0件403 にする。
+    const lib = read("src/lib/investigation/fetch-investigation.ts");
+    expect(lib).toContain("scope?: PropertyRecordScope");
+    expect(lib).toContain("assertScopedWrite(");
+
+    // 対象は**利用者の直接編集**である2関数に限る。外部取得の結果保存
+    // (runAndUpsertInvestigation) は「認可された利用者が始めた処理の結果」なので
+    // 途中の担当変更で破棄しない（下の別テストで意図を固定）。
+    const body = (name: string) => {
+      const start = lib.indexOf(`export async function ${name}(`);
+      expect(start).toBeGreaterThan(0);
+      const next = lib.indexOf("\nexport ", start + 1);
+      return lib.slice(start, next === -1 ? undefined : next);
+    };
+    for (const name of ["patchInvestigation", "confirmInvestigationRecord"]) {
+      const fn = body(name);
+      // 無条件 update が残っていない
+      expect(fn, name).not.toMatch(/\.update\(\{/);
+      const scoped = fn.match(/updateMany\(\{[\s\S]{0,200}?\}\)/g) ?? [];
+      expect(scoped.length, name).toBeGreaterThanOrEqual(1);
+      for (const u of scoped) expect(u, name).toContain("scope");
+    }
+    // confirm は調査と物件の2文とも守る（片方だけ守る形を残さない）
+    expect(
+      (body("confirmInvestigationRecord").match(/assertScopedWrite\(/g) ?? [])
+        .length,
+    ).toBe(2);
+  });
+
+  it("外部取得の結果保存はスコープで破棄しない（意図を明記してある）", () => {
+    // 取得は認可された利用者が開始したもので、外部呼び出しに数秒かかる。
+    // 途中で担当が変わったからといって取得済みの結果を捨てると、課金した
+    // 取得が無駄になり status が fetching のまま残る。直接編集とは性質が違う。
+    const lib = read("src/lib/investigation/fetch-investigation.ts");
+    expect(lib).toMatch(/取得の結果保存[\s\S]{0,400}?スコープで破棄しない/);
+  });
+
+  it("route はスコープ述語を lib へ渡している（渡し忘れると素通しになる）", () => {
+    for (const p of [
+      "src/app/api/properties/[id]/investigation/route.ts",
+      "src/app/api/properties/[id]/investigation/confirm/route.ts",
+    ]) {
+      expect(read(p)).toContain("propertyRecordScopeFilter(session)");
+    }
+  });
 });
 
 describe("配線: 物件配下 route が担当者スコープを通している", () => {

@@ -8,7 +8,10 @@ import {
   ApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
+import {
+  assertPropertyRecordAccess,
+  propertyRecordScopeFilter,
+} from "@/lib/property-record-guard";
 import {
   getInvestigation,
   patchInvestigation,
@@ -97,7 +100,14 @@ export async function PATCH(
     }
 
     const { note, ...fields } = parsed.data;
-    const investigation = await patchInvestigation(id, session.id, fields, note ?? undefined);
+    // 第5引数のスコープで**更新文自体を原子化**する（@codex #338 P2）。
+    const investigation = await patchInvestigation(
+      id,
+      session.id,
+      fields,
+      note ?? undefined,
+      propertyRecordScopeFilter(session),
+    );
     return apiResponse({ investigation });
   } catch (error) {
     return handleApiError(error);

@@ -14,7 +14,26 @@
  */
 
 import prisma from "@/lib/prisma";
+import { ApiError } from "@/lib/api-helpers";
+import type { PropertyRecordScope } from "@/lib/property-record-guard";
 import { runInvestigation } from "./index";
+
+/**
+ * 担当者スコープを**書き込み文自体に畳み込む**ための共通処理（@codex #338 P2）。
+ * 呼び出し側のガードは受付時点の判定なので、判定から書込までの間に担当が
+ * 付け替わると担当外の物件へ編集が残る。0 件更新 = その間に外れた → 403。
+ *
+ * scope が undefined（admin / office_staff）のときは条件を積まない。
+ */
+function assertScopedWrite(count: number): void {
+  if (count === 0) {
+    throw new ApiError(
+      403,
+      "この物件を操作する権限がありません",
+      "FORBIDDEN",
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -218,6 +237,14 @@ export async function getInvestigation(propertyId: string): Promise<Investigatio
  *   2. runInvestigation (providers, server-side)
  *   3a. Success → update → status=needs_review + audit: fetch_succeeded
  *   3b. Failure → update → status=failed   + audit: fetch_failed
+ *
+ * ⚠**取得の結果保存には担当者スコープを畳み込まない = 途中の担当変更でも
+ * スコープで破棄しない**（@codex #338 R2 に対する設計判断）。
+ * 呼び出し元 (investigation/fetch route) が**送信前に**担当者スコープで弾いており、
+ * ここに来るのは認可された利用者が開始した取得だけ。外部呼び出しには数秒かかるため
+ * その間の担当変更で結果を捨てると、課金した取得が無駄になり status が fetching の
+ * まま残る（利用者の直接編集 = patchInvestigation / confirmInvestigationRecord は
+ * 結果が編集として残るため、あちらは updateMany + 0件403 で原子化してある）。
  */
 export async function runAndUpsertInvestigation(
   propertyId: string,
@@ -460,7 +487,12 @@ export async function patchInvestigation(
     landPriceSummary: string | null;
     facilitySummary: string | null;
   }>,
-  note?: string
+  note?: string,
+  /**
+   * 担当者スコープ述語（field_staff のみ渡る）。更新文の where に畳み込んで
+   * 原子化する（@codex #338 P2）。undefined なら条件を積まない。
+   */
+  scope?: PropertyRecordScope,
 ): Promise<InvestigationRecord> {
   const existing = await prisma.propertyInvestigation.findUnique({
     where: { propertyId },
@@ -480,9 +512,15 @@ export async function patchInvestigation(
     throw new Error("調査レコードが存在しません。先に調査情報を取得してください。");
   }
 
-  const updated = await prisma.propertyInvestigation.update({
-    where: { propertyId },
+  // ⚠スコープを更新文に畳み込んで原子化する（@codex #338 P2）。
+  // 0 件 = 判定から書込までの間に担当が外れた → 403（編集を残さない）。
+  const applied = await prisma.propertyInvestigation.updateMany({
+    where: { propertyId, ...(scope ? { property: scope } : {}) },
     data: { ...fields, version: { increment: 1 } },
+  });
+  assertScopedWrite(applied.count);
+  const updated = await prisma.propertyInvestigation.findUniqueOrThrow({
+    where: { propertyId },
     include: WITH_RELATIONS,
   });
 
@@ -507,7 +545,9 @@ export async function patchInvestigation(
  */
 export async function confirmInvestigationRecord(
   propertyId: string,
-  userId: string
+  userId: string,
+  /** 担当者スコープ述語（field_staff のみ渡る・@codex #338 P2）。 */
+  scope?: PropertyRecordScope,
 ): Promise<InvestigationRecord> {
   const inv = await prisma.propertyInvestigation.findUnique({
     where: { propertyId },
@@ -523,20 +563,29 @@ export async function confirmInvestigationRecord(
 
   const now = new Date();
 
-  const updated = await prisma.propertyInvestigation.update({
-    where: { propertyId },
+  // ⚠スコープを更新文に畳み込んで原子化する（@codex #338 P2）。
+  // confirm は**物件本体にも書き戻す**ので、判定から書込までに担当が外れると
+  // 担当外の物件の用途地域・建蔽率まで書き換わる。0 件なら 403 で何も残さない。
+  const applied = await prisma.propertyInvestigation.updateMany({
+    where: { propertyId, ...(scope ? { property: scope } : {}) },
     data: {
       status: "confirmed",
       confirmedAt: now,
       confirmedBy: userId,
       version: { increment: 1 },
     },
+  });
+  assertScopedWrite(applied.count);
+  const updated = await prisma.propertyInvestigation.findUniqueOrThrow({
+    where: { propertyId },
     include: WITH_RELATIONS,
   });
 
   // Also write to Property fields for backward compat
-  await prisma.property.update({
-    where: { id: propertyId },
+  // （こちらもスコープ付き。調査側が通ってここだけ外れる状況は理論上ないが、
+  //   同じ不変条件を2文で担保する＝どちらか片方だけ守る形を残さない）
+  const propApplied = await prisma.property.updateMany({
+    where: { id: propertyId, ...(scope ? scope : {}) },
     data: {
       zoningDistrict: inv.zoningDistrict,
       buildingCoverageRatio: inv.buildingCoverageRatio,
@@ -545,6 +594,7 @@ export async function confirmInvestigationRecord(
       version: { increment: 1 },
     },
   });
+  assertScopedWrite(propApplied.count);
 
   await prisma.propertyInvestigationAuditLog.create({
     data: {

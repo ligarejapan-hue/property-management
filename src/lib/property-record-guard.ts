@@ -73,10 +73,14 @@ export async function assertPropertyRecordAccess(
  * 戻り値が undefined（field_staff 以外）のときは条件を積まない。
  * ⚠スコープ条件は canAccessPropertyRecord と同じ定義に保つこと。
  */
+export type PropertyRecordScope = {
+  OR: [{ createdBy: string }, { assignedTo: string }];
+};
+
 export function propertyRecordScopeFilter(session: {
   id: string;
   role: string;
-}): { OR: [{ createdBy: string }, { assignedTo: string }] } | undefined {
+}): PropertyRecordScope | undefined {
   if (session.role !== "field_staff") return undefined;
   return { OR: [{ createdBy: session.id }, { assignedTo: session.id }] };
 }

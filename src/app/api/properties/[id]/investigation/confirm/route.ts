@@ -8,7 +8,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
+import {
+  assertPropertyRecordAccess,
+  propertyRecordScopeFilter,
+} from "@/lib/property-record-guard";
 import { confirmInvestigationRecord } from "@/lib/investigation/fetch-investigation";
 
 // ---------- POST /api/properties/[id]/investigation/confirm ----------
@@ -31,7 +34,12 @@ export async function POST(
     // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
     await assertPropertyRecordAccess(id, session, "write");
 
-    const investigation = await confirmInvestigationRecord(id, session.id);
+    // 第3引数のスコープで**更新文自体を原子化**する（@codex #338 P2）。
+    const investigation = await confirmInvestigationRecord(
+      id,
+      session.id,
+      propertyRecordScopeFilter(session),
+    );
 
     await writeAuditLog({
       userId: session.id,
