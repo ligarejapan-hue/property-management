@@ -243,6 +243,127 @@ describe("画面の選択操作（1つ選ぶと他は外れる）", () => {
   });
 });
 
+describe("選択操作の全組み合わせ（状態遷移の総当たり）", () => {
+  // このロジックは3巡続けて「直した修正が次の穴を作る」ことが起きた箇所
+  // （拒否が付与に化ける → 拒否の解除で兄弟の付与まで消える）。個別のケースを
+  // 足すのではなく、**取り得る状態 × 押す場所**を全部作って不変条件で縛る。
+  const LEVELS = ["full", "masked", "hidden"] as const;
+  // 各レベルの状態: 行なし / 付与 / 拒否（同じキーで付与と拒否は同時に持てない）
+  const STATES = ["absent", "granted", "denied"] as const;
+  const make = (resource: string, action: string) => row(resource, action);
+
+  const buildRows = (combo: readonly (typeof STATES)[number][]) =>
+    LEVELS.flatMap((level, i) =>
+      combo[i] === "absent" ? [] : [row("owner_phone", level, combo[i] === "granted")],
+    );
+
+  const allCombos: (typeof STATES)[number][][] = [];
+  for (const a of STATES)
+    for (const b of STATES) for (const c of STATES) allCombos.push([a, b, c]);
+
+  const grantedLevels = (rows: readonly ReturnType<typeof row>[]) =>
+    rows.filter((r) => r.resource === "owner_phone" && r.granted).map((r) => r.action);
+
+  for (const deniedRowsAreVisible of [true, false]) {
+    const modeName = deniedRowsAreVisible ? "個別権限画面" : "テンプレート編集画面";
+
+    it(`${modeName}: 同じ指定が二重にならない / 押していないレベルを勝手に付与しない`, () => {
+      for (const combo of allCombos) {
+        for (const clicked of LEVELS) {
+          const before = buildRows(combo);
+          const after = withExclusiveDisplayLevel(
+            before,
+            "owner_phone",
+            clicked,
+            make,
+            { deniedRowsAreVisible },
+          );
+
+          // 1) 同じ (項目, レベル) の行が二重に出ない（保存時の一意制約違反を防ぐ）
+          const keys = after.map((r) => `${r.resource}:${r.action}`);
+          expect(new Set(keys).size).toBe(keys.length);
+
+          // 2) 押していないレベルを勝手に付与しない
+          //    （拒否を押したら付与に化ける、という R2 の不具合を封じる）
+          for (const level of grantedLevels(after)) {
+            expect(
+              level === clicked || grantedLevels(before).includes(level),
+            ).toBe(true);
+          }
+
+          // 3) 元が正しい状態（付与は多くても1つ）なら、操作後も1つを超えない
+          if (grantedLevels(before).length <= 1) {
+            expect(grantedLevels(after).length).toBeLessThanOrEqual(1);
+          }
+        }
+      }
+    });
+
+    it(`${modeName}: 解除は押した行だけを消す（兄弟の指定を巻き込まない）`, () => {
+      // R3 の不具合。拒否を消すつもりで有効なマスクまで消えると、テンプレートの
+      // 全表示に落ちて生値が見える。
+      for (const combo of allCombos) {
+        for (const clicked of LEVELS) {
+          const before = buildRows(combo);
+          const existing = before.find((r) => r.action === clicked);
+          const isSet = deniedRowsAreVisible
+            ? existing !== undefined
+            : existing?.granted === true;
+          if (!isSet) continue;
+
+          const after = withExclusiveDisplayLevel(
+            before,
+            "owner_phone",
+            clicked,
+            make,
+            { deniedRowsAreVisible },
+          );
+          expect(after).toEqual(before.filter((r) => r.action !== clicked));
+        }
+      }
+    });
+
+    it(`${modeName}: 選択すると、その1つだけが残る`, () => {
+      for (const combo of allCombos) {
+        for (const clicked of LEVELS) {
+          const before = buildRows(combo);
+          const existing = before.find((r) => r.action === clicked);
+          const isSet = deniedRowsAreVisible
+            ? existing !== undefined
+            : existing?.granted === true;
+          if (isSet) continue;
+
+          const after = withExclusiveDisplayLevel(
+            before,
+            "owner_phone",
+            clicked,
+            make,
+            { deniedRowsAreVisible },
+          );
+          expect(after.filter((r) => r.resource === "owner_phone")).toEqual([
+            row("owner_phone", clicked),
+          ]);
+        }
+      }
+    });
+  }
+
+  it("他の項目は何をしても巻き込まれない", () => {
+    const untouched = [row("owner_name", "full"), row("property", "read")];
+    for (const combo of allCombos) {
+      for (const clicked of LEVELS) {
+        const after = withExclusiveDisplayLevel(
+          [...untouched, ...buildRows(combo)],
+          "owner_phone",
+          clicked,
+          make,
+        );
+        for (const keep of untouched) expect(after).toContainEqual(keep);
+      }
+    }
+  });
+});
+
 describe("ラベル", () => {
   it("全レベルに日本語ラベルがある", () => {
     for (const level of DISPLAY_LEVELS) {
