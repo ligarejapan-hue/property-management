@@ -8,6 +8,7 @@ import {
   ApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
 
 // ---------- GET /api/properties/[id]/investigation/audit-logs ----------
 // Returns investigation audit log entries for a property (newest first)
@@ -24,6 +25,10 @@ export async function GET(
     if (!hasPermission(permissions, "property", "read")) {
       throw new ApiError(403, "物件閲覧の権限がありません", "FORBIDDEN");
     }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30）。物件本体と同じ可視範囲に
+    // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
+    await assertPropertyRecordAccess(id, session, "read");
 
     const url = new URL(request.url);
     const limit = Math.min(Number(url.searchParams.get("limit") ?? "50"), 100);

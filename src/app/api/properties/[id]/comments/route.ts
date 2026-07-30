@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
 
 const createCommentSchema = z.object({
   body: z.string().min(1, "コメント本文は必須です").max(2000),
@@ -30,6 +31,11 @@ export async function GET(
     if (!hasPermission(perms, "property", "read")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30）。物件本体と同じ可視範囲に
+    // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
+    // コメント本文は自由記述で顧客の話が入るため、担当外には出さない。
+    await assertPropertyRecordAccess(propertyId, session, "read");
 
     // Fetch top-level comments with one level of replies
     const comments = await prisma.comment.findMany({
@@ -63,18 +69,16 @@ export async function POST(
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
 
-    if (!hasPermission(perms, "property", "read")) {
+    // ⚠コメントの投稿は**書き込み**なので property:write を要求する
+    //（認可・PII 横断監査 2026-07-30。read だけで投稿できていた＝閲覧しか
+    // 許していない利用者が物件の記録を書き足せる状態だった）。
+    if (!hasPermission(perms, "property", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    // Verify property exists
-    const property = await prisma.property.findUnique({
-      where: { id: propertyId },
-      select: { id: true },
-    });
-    if (!property) {
-      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
-    }
+    // 物件の存在確認（404）と担当者スコープ（403）を兼ねる。
+    // 物件本体と同じ可視範囲に揃える（発注者判断 2026-07-30）。
+    await assertPropertyRecordAccess(propertyId, session, "write");
 
     const body = await request.json();
     const data = createCommentSchema.parse(body);

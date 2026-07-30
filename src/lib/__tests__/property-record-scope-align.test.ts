@@ -1,0 +1,180 @@
+/**
+ * 物件配下 API の**担当者スコープ統一**（認可・PII 横断監査 2026-07-30）。
+ *
+ * 【背景】物件本体 (GET/PATCH /api/properties/[id]) は field_staff を担当分だけに
+ * 絞るのに、配下のコメント・次アクション・調査情報・重複候補判定は絞っておらず、
+ * **同じ物件なのに経路によって見える範囲が違う**状態だった。
+ *
+ * 【発注者判断 2026-07-30】
+ *   「担当外に見せてよいのは地図上の線やヒートマップ。顧客一覧は話が違う」
+ *   → 顧客・物件に紐づくデータは**物件本体と同じ担当分だけ**に揃える。
+ *   → 踏破の面 (coverage/cells) と線 (coverage/tracks) は**対象外**で全員閲覧を維持。
+ *
+ * ここでは共通ガード `assertPropertyRecordAccess` の振る舞いと、
+ * 各 route が実際にそれを通しているか（＝スコープを一箇所に集約できているか）を固定する。
+ * route ごとの HTTP 検証は既存の route テスト群（property-access-routes-scope 等）に倣い、
+ * ここでは「どの route が通っているか」の配線をソースで固定する。
+ */
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+vi.mock("@/lib/api-helpers", () => {
+  class MockApiError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, message: string, code = "ERROR") {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  }
+  return { ApiError: MockApiError };
+});
+
+vi.mock("@/lib/prisma", () => ({
+  default: { property: { findUnique: vi.fn() } },
+}));
+
+import prisma from "@/lib/prisma";
+import { ApiError } from "@/lib/api-helpers";
+import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
+
+const findUnique = (prisma as unknown as {
+  property: { findUnique: Mock };
+}).property.findUnique;
+
+const PROP = "11111111-1111-4111-8111-111111111111";
+const field = { id: "u-field", role: "field_staff" };
+const office = { id: "u-office", role: "office_staff" };
+const admin = { id: "u-admin", role: "admin" };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("assertPropertyRecordAccess", () => {
+  it("担当者スコープの判定に必要な列だけを読む（PII を巻き込まない）", async () => {
+    findUnique.mockResolvedValue({ createdBy: field.id, assignedTo: null });
+    await assertPropertyRecordAccess(PROP, field);
+    const arg = findUnique.mock.calls[0][0];
+    expect(arg.where).toEqual({ id: PROP });
+    // address / memo 等を select しない（判定に不要な PII を読まない）
+    expect(Object.keys(arg.select).sort()).toEqual(["assignedTo", "createdBy"]);
+  });
+
+  it("field_staff は自分が作成した物件を通す", async () => {
+    findUnique.mockResolvedValue({ createdBy: field.id, assignedTo: null });
+    await expect(assertPropertyRecordAccess(PROP, field)).resolves.toBeUndefined();
+  });
+
+  it("field_staff は自分が担当の物件を通す", async () => {
+    findUnique.mockResolvedValue({ createdBy: "someone", assignedTo: field.id });
+    await expect(assertPropertyRecordAccess(PROP, field)).resolves.toBeUndefined();
+  });
+
+  it("field_staff は担当外の物件で 403（作成者でも担当者でもない）", async () => {
+    findUnique.mockResolvedValue({ createdBy: "someone", assignedTo: "other" });
+    const p = assertPropertyRecordAccess(PROP, field);
+    await expect(p).rejects.toBeInstanceOf(ApiError);
+    await expect(p).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+  });
+
+  it("admin / office_staff は素通し（既存の可視範囲を狭めない）", async () => {
+    findUnique.mockResolvedValue({ createdBy: "someone", assignedTo: "other" });
+    await expect(assertPropertyRecordAccess(PROP, admin)).resolves.toBeUndefined();
+    await expect(assertPropertyRecordAccess(PROP, office)).resolves.toBeUndefined();
+  });
+
+  it("存在しない物件は 404（スコープ判定より先）", async () => {
+    // ⚠順序が逆だと、担当外の物件について「存在するか」だけが漏れる。
+    findUnique.mockResolvedValue(null);
+    const p = assertPropertyRecordAccess(PROP, field);
+    await expect(p).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
+  });
+
+  it("文言は読み取り系と更新系で出し分ける", async () => {
+    findUnique.mockResolvedValue({ createdBy: "someone", assignedTo: "other" });
+    await expect(
+      assertPropertyRecordAccess(PROP, field, "read"),
+    ).rejects.toMatchObject({ message: "この物件を閲覧する権限がありません" });
+    await expect(
+      assertPropertyRecordAccess(PROP, field, "write"),
+    ).rejects.toMatchObject({ message: "この物件を操作する権限がありません" });
+  });
+});
+
+describe("配線: 物件配下 route が担当者スコープを通している", () => {
+  const read = (p: string) =>
+    readFileSync(path.join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
+
+  const guarded = [
+    "src/app/api/properties/[id]/comments/route.ts",
+    "src/app/api/properties/[id]/next-actions/route.ts",
+    "src/app/api/properties/[id]/next-actions/[actionId]/route.ts",
+    "src/app/api/properties/[id]/investigation/route.ts",
+    "src/app/api/properties/[id]/investigation/audit-logs/route.ts",
+    "src/app/api/properties/[id]/investigation/confirm/route.ts",
+    "src/app/api/properties/[id]/candidates/[candidateId]/judge/route.ts",
+  ];
+
+  it.each(guarded)("%s が共通ガードを呼ぶ", (p) => {
+    const src = read(p);
+    expect(src).toContain("assertPropertyRecordAccess");
+    expect(src).toContain('from "@/lib/property-record-guard"');
+  });
+
+  it("各ハンドラの数だけガードが入っている（片方の口だけ守る取りこぼしを防ぐ）", () => {
+    for (const p of guarded) {
+      const src = read(p);
+      const handlers = (src.match(/export async function (GET|POST|PATCH|PUT|DELETE)\b/g) ?? []).length;
+      const guards = (src.match(/await assertPropertyRecordAccess\(/g) ?? []).length;
+      expect(guards, `${p}: handlers=${handlers} guards=${guards}`).toBe(handlers);
+    }
+  });
+
+  it("コメント投稿は property:write を要求する（read で書けない）", () => {
+    const src = read("src/app/api/properties/[id]/comments/route.ts");
+    const post = src.slice(src.indexOf("export async function POST"));
+    expect(post).toContain('hasPermission(perms, "property", "write")');
+  });
+
+  it("調査の外部取得は住所を送る前に担当者スコープで弾く", () => {
+    // 担当外の物件の住所を外部プロバイダへ送信させられる経路のため、
+    // 送信処理 (runAndUpsertInvestigation) より前にガードが来ること。
+    const src = read("src/app/api/properties/[id]/investigation/fetch/route.ts");
+    const guardIdx = src.indexOf("canAccessPropertyRecord(session, property)");
+    const sendIdx = src.indexOf("runAndUpsertInvestigation(");
+    expect(guardIdx).toBeGreaterThan(0);
+    expect(sendIdx).toBeGreaterThan(guardIdx);
+  });
+
+  it("物件横断検索はキーワード条件を AND で包む（OR の枝にしない）", () => {
+    // OR の枝として足すと「キーワード一致 or 自分の物件」になり全物件が出る。
+    const src = read("src/app/api/properties/search/route.ts");
+    expect(src).toContain("fieldStaffScope");
+    expect(src).toMatch(/AND:\s*\[\s*\n\s*\.\.\.fieldStaffScope/);
+  });
+
+  it("クイック操作は担当者スコープを持つ（assign_to_me による自己拡張を防ぐ）", () => {
+    const src = read("src/app/api/properties/[id]/actions/route.ts");
+    expect(src).toContain("canAccessPropertyRecord(session, current)");
+    // 判定は execute（assign_to_me を含む）より前
+    expect(src.indexOf("canAccessPropertyRecord(session, current)")).toBeLessThan(
+      src.indexOf("actionDef.execute("),
+    );
+  });
+
+  it("踏破の面と線は対象外のまま（全員が見られる設計を維持）", () => {
+    // 発注者判断: 担当外に見せてよいのは地図の線・ヒートマップ。
+    // 二度歩きを避けるのが目的なので、歩く当人が他の人の踏破を見られないと意味がない。
+    for (const p of [
+      "src/app/api/field-survey/coverage/cells/route.ts",
+      "src/app/api/field-survey/coverage/tracks/route.ts",
+    ]) {
+      const src = read(p);
+      expect(src).not.toContain("assertPropertyRecordAccess");
+      expect(src).not.toContain("canAccessPropertyRecord");
+    }
+  });
+});

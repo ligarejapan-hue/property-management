@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
 
 const updateNextActionSchema = z.object({
   isCompleted: z.boolean().optional(),
@@ -45,6 +46,11 @@ export async function PATCH(
     if (!existing || existing.propertyId !== propertyId) {
       throw new ApiError(404, "アクションが見つかりません", "NOT_FOUND");
     }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30）。物件本体と同じ可視範囲に
+    // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
+    // 対応予定は自由記述1000文字で顧客の事情が入るため、担当外には出さない。
+    await assertPropertyRecordAccess(propertyId, session, "write");
 
     const body = await request.json();
     const data = updateNextActionSchema.parse(body);
@@ -106,6 +112,11 @@ export async function DELETE(
     if (!existing || existing.propertyId !== propertyId) {
       throw new ApiError(404, "アクションが見つかりません", "NOT_FOUND");
     }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30）。物件本体と同じ可視範囲に
+    // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
+    // 対応予定は自由記述1000文字で顧客の事情が入るため、担当外には出さない。
+    await assertPropertyRecordAccess(propertyId, session, "write");
 
     await prisma.nextAction.delete({ where: { id: actionId } });
 

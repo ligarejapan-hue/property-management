@@ -8,6 +8,7 @@ import {
   ApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
 import {
   getInvestigation,
   patchInvestigation,
@@ -28,6 +29,10 @@ export async function GET(
     if (!hasPermission(permissions, "property", "read")) {
       throw new ApiError(403, "物件閲覧の権限がありません", "FORBIDDEN");
     }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30）。物件本体と同じ可視範囲に
+    // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
+    await assertPropertyRecordAccess(id, session, "read");
 
     const investigation = await getInvestigation(id);
     return apiResponse({ investigation });
@@ -80,6 +85,10 @@ export async function PATCH(
     if (!hasPermission(permissions, "property", "write")) {
       throw new ApiError(403, "物件編集の権限がありません", "FORBIDDEN");
     }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30）。物件本体と同じ可視範囲に
+    // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
+    await assertPropertyRecordAccess(id, session, "write");
 
     const body = await request.json();
     const parsed = patchSchema.safeParse(body);

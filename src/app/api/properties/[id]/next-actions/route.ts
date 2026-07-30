@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
 
 const createNextActionSchema = z.object({
   assignedTo: z.string().uuid("担当者IDが不正です"),
@@ -32,6 +33,11 @@ export async function GET(
     if (!hasPermission(perms, "property", "read")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
+
+    // ⚠担当者スコープ（認可・PII 横断監査 2026-07-30）。物件本体と同じ可視範囲に
+    // 揃える（発注者判断: 担当外に見せてよいのは地図の線・ヒートマップだけ）。
+    // 対応予定は自由記述1000文字で顧客の事情が入るため、担当外には出さない。
+    await assertPropertyRecordAccess(propertyId, session, "read");
 
     const { searchParams } = new URL(request.url);
     const includeCompleted = searchParams.get("includeCompleted") === "true";
@@ -71,13 +77,8 @@ export async function POST(
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    const property = await prisma.property.findUnique({
-      where: { id: propertyId },
-      select: { id: true },
-    });
-    if (!property) {
-      throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
-    }
+    // 物件の存在確認（404）と担当者スコープ（403）を兼ねる（発注者判断 2026-07-30）。
+    await assertPropertyRecordAccess(propertyId, session, "write");
 
     const body = await request.json();
     const data = createNextActionSchema.parse(body);
