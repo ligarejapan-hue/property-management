@@ -131,7 +131,10 @@ async function main() {
         owner_email: { full: true },
         owner_corporate_number: { full: true },
         csv_export: { read: true },
-        csv_export_personal: { read: false },
+        // 取込エラー行 CSV に個人情報ゲートを掛けたため事務担当にも付与
+        //（発注者判断 2026-07-30・下の templateEntries と対で維持すること）。
+        // 共有の csv_export_personal ではなく専用権限＝全件CSVは解禁しない。
+        import_error_csv: { read: true },
         import: { read: true, write: true },
         user_management: { read: false, write: false },
         audit_log: { read: false },
@@ -200,6 +203,10 @@ async function main() {
     { templateId: officeStaffTemplate.id, resource: "owner_email", action: "full", granted: true },
     { templateId: officeStaffTemplate.id, resource: "owner_corporate_number", action: "full", granted: true },
     { templateId: officeStaffTemplate.id, resource: "csv_export", action: "read", granted: true },
+    // ⚠取込エラー行 CSV に個人情報のゲートを掛けたため、事務担当にも付与する
+    //（発注者判断 2026-07-30）。付与しないと事務担当が取込エラー行を落とせなくなる。
+    // 共有の csv_export_personal は付けない＝全物件/全所有者の一括CSVまで解禁しないため。
+    { templateId: officeStaffTemplate.id, resource: "import_error_csv", action: "read", granted: true },
     { templateId: officeStaffTemplate.id, resource: "import", action: "write", granted: true },
     { templateId: officeStaffTemplate.id, resource: "field_survey", action: "read", granted: true },
     { templateId: officeStaffTemplate.id, resource: "field_survey", action: "read_all", granted: true },

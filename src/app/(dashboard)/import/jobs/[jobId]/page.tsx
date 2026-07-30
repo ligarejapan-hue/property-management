@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from "react";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { canDownloadImportErrorCsv } from "@/lib/import-error-csv-access";
 import { formatJaDateTime } from "@/lib/format-datetime";
 import {
   useParams,
@@ -224,6 +226,57 @@ export default function ImportJobDetailPage() {
       ? (r as RowReason)
       : "all";
   })();
+
+  // エラー行CSVの表示可否。**route 側のゲートと同じ式**にする（不一致だと、押しても
+  // 必ず 403 JSON に飛ぶリンクを出してしまう）。判定式は `canDownloadImportErrorCsv`
+  // に集約し、ここは鮮度（loading / 進入時 refresh の pending）を渡すだけにする。
+  const {
+    permissions: mePermissions,
+    permissionsLoading,
+    refetchPermissions,
+  } = useScreenProtection();
+
+  // 権限鮮度の再確認（物件一覧と同じ理由・同じ手順）。dashboard の layout は client
+  // navigation をまたいで保持されるため、provider の mount 時 1 回 fetch だけでは
+  // 滞在中の権限剥奪に追従できない＝別画面で権限を外された後にこの画面へ遷移すると
+  // stale な granted でリンクが復活し、押すと 403 になる。進入あたり最大 1 回だけ
+  // 再取得し、完了までは pending＝非表示に倒す（初回の transient 失敗からの復旧も兼ねる）。
+  // ref ガード＋provider 側 in-flight dedupe の二重防御で多重 fetch・無限リトライなし。
+  // このページは /api/me/permissions を直接 fetch しない（provider 経由のみ）。
+  const permissionsRefreshRequestedRef = useRef(false);
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
+  useEffect(() => {
+    if (permissionsRefreshRequestedRef.current) return;
+    // 進行中は完了を待つ（追加 fetch しない・ref はまだ立てない）。
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && mePermissions !== null) {
+      // mount 時に進行中だった取得が成功 → この画面が見ているデータは最新。
+      permissionsRefreshRequestedRef.current = true;
+      return;
+    }
+    // mount 時点で取得完了済みだった（stale の可能性）、または mount 時に進行中だった
+    // 取得が失敗した（permissions===null・復旧）→ 1 回だけ再確認する。
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, mePermissions, refetchPermissions]);
+
+  const canDownloadErrorCsv = useMemo(
+    () =>
+      canDownloadImportErrorCsv(mePermissions, {
+        loading: permissionsLoading,
+        refreshPending: permissionsRefreshPending,
+      }),
+    [mePermissions, permissionsLoading, permissionsRefreshPending],
+  );
 
   const [job, setJob] = useState<ImportJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1052,10 +1105,12 @@ export default function ImportJobDetailPage() {
                 </span>
               )}
 
-            {/* CSV エクスポート: error / needs_review が1件以上あるときに表示
+            {/* CSV エクスポート: error / needs_review が1件以上 かつ 権限があるときに表示。
+                個人情報（氏名・住所・電話）を含むため route 側にゲートがあり、
+                表示条件を揃えないと押すたび 403 JSON に飛ぶ。
                 サーバ側 Content-Disposition で attachment 指定済み。
                 download 属性はファイル名のクライアント側ヒント。 */}
-            {(counts.error > 0 || counts.needs_review > 0) && (
+            {canDownloadErrorCsv && (counts.error > 0 || counts.needs_review > 0) && (
               <a
                 href={`/api/import/jobs/${jobId}/export-errors`}
                 download={`import-errors-${jobId}.csv`}

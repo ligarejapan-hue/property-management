@@ -17,6 +17,9 @@ const RESOURCES = [
   { key: "owner_note", label: "オーナー備考", actions: ["hidden", "masked", "full"] },
   { key: "csv_export", label: "CSVエクスポート", actions: ["read"] },
   { key: "csv_export_personal", label: "CSV個人情報エクスポート", actions: ["read"] },
+  // 取込エラー行だけの CSV（個人情報を含むが、対象はその取込ジョブの失敗行のみ）。
+  // 全件CSVを解禁せずに事務担当へ渡すための専用権限。
+  { key: "import_error_csv", label: "取込エラー行CSV", actions: ["read"] },
   { key: "import", label: "インポート", actions: ["write"] },
   { key: "user_management", label: "ユーザー管理", actions: ["read", "write", "delete"] },
   { key: "audit_log", label: "監査ログ", actions: ["read"] },
