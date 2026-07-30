@@ -80,6 +80,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import prisma from "@/lib/prisma";
+import { canDownloadImportErrorCsv } from "@/lib/import-error-csv-access";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { GET } from "@/app/api/import/jobs/[jobId]/export-errors/route";
 
@@ -230,30 +231,92 @@ describe("事務担当への付与（ゲートとセットで反映する）", (
   });
 });
 
-describe("画面のダウンロードリンクを route のゲートに揃える", () => {
+describe("画面のダウンロードリンクの表示判定（純関数として検証）", () => {
   // 揃っていないと、権限を外した利用者にリンクが出たまま＝押すたび 403 の
   // JSON 画面へ飛ぶ（権限画面から無効化できる今回の設計と UI が矛盾する）。
+  const FRESH = { loading: false, refreshPending: false };
+  const full = [
+    p("import", "write"),
+    p("csv_export", "read"),
+    p("import_error_csv", "read"),
+  ];
+
+  it("専用権限が揃えば出す", () => {
+    expect(canDownloadImportErrorCsv(full, FRESH)).toBe(true);
+  });
+
+  it("共有の個人情報CSV権限でも出す（route と同じ OR 判定）", () => {
+    expect(
+      canDownloadImportErrorCsv(
+        [p("import", "write"), p("csv_export", "read"), p("csv_export_personal", "read")],
+        FRESH,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["import:write", "import"],
+    ["csv_export:read", "csv_export"],
+    ["個人情報側", "import_error_csv"],
+  ])("%s を欠くと出さない", (_label, resource) => {
+    const perms = full.filter((x) => x.resource !== resource);
+    expect(canDownloadImportErrorCsv(perms, FRESH)).toBe(false);
+  });
+
+  it("granted:false は持っていない扱い", () => {
+    const revoked = full.map((x) =>
+      x.resource === "import_error_csv" ? { ...x, granted: false } : x,
+    );
+    expect(canDownloadImportErrorCsv(revoked, FRESH)).toBe(false);
+  });
+
+  // ⚠ここが本命。dashboard の layout は client navigation をまたいで保持されるため、
+  // 別画面で権限を剥奪された後もこの画面へ遷移すると stale な granted が残り得る。
+  // 進入時の再取得が終わるまでは「出さない」に倒すことで、一瞬でも押せる状態を作らない。
+  it("権限が揃っていても、進入時の再取得が終わるまでは出さない（stale 対策）", () => {
+    expect(
+      canDownloadImportErrorCsv(full, { loading: false, refreshPending: true }),
+    ).toBe(false);
+  });
+
+  it("provider が取得中は出さない", () => {
+    expect(
+      canDownloadImportErrorCsv(full, { loading: true, refreshPending: false }),
+    ).toBe(false);
+  });
+
+  it("取得失敗（null）は権限なし扱いで出さない", () => {
+    expect(canDownloadImportErrorCsv(null, FRESH)).toBe(false);
+  });
+});
+
+describe("画面が判定関数と鮮度確認を正しく配線している", () => {
   const PAGE = "src/app/(dashboard)/import/jobs/[jobId]/page.tsx";
 
-  it("リンクの表示条件に権限判定が入っている", () => {
+  it("リンクは判定結果で出し分ける", () => {
     expect(read(PAGE)).toContain(
       "{canDownloadErrorCsv && (counts.error > 0 || counts.needs_review > 0) && (",
     );
   });
 
-  it("表示条件は route と同じ権限の組み合わせで、取得中・失敗は非表示に倒す", () => {
+  it("判定は共有の純関数を使い、独自実装を持たない", () => {
     const src = read(PAGE);
-    const block = src.slice(
-      src.indexOf("const canDownloadErrorCsv"),
-      src.indexOf("const [job, setJob]"),
+    expect(src).toContain(
+      'import { canDownloadImportErrorCsv } from "@/lib/import-error-csv-access"',
     );
-    expect(block).toContain('has("import", "write")');
-    expect(block).toContain('has("csv_export", "read")');
-    expect(block).toContain('has("import_error_csv", "read")');
-    expect(block).toContain('has("csv_export_personal", "read")');
-    // fail-safe（緩めない側に倒す）
-    expect(block).toContain("if (permissionsLoading) return false;");
-    expect(block).toContain("mePermissions ?? []");
+    expect(src).toContain("canDownloadImportErrorCsv(mePermissions, {");
+    // 画面側に権限名を直書きした判定を残さない（route との二重管理を防ぐ）
+    expect(src).not.toContain('has("csv_export_personal"');
+  });
+
+  it("進入時に権限を再取得し、その完了までは pending として扱う", () => {
+    const src = read(PAGE);
+    expect(src).toContain("refetchPermissions().finally(() => {");
+    expect(src).toContain("setPermissionsRefreshPending(false);");
+    expect(src).toContain("refreshPending: permissionsRefreshPending,");
+    // provider 経由のみ（ページ独自の権限 fetch を増やさない）。
+    // ⚠コメント本文にも同じパスが出てくるので、**実際の呼び出し形**で照合する。
+    expect(src).not.toMatch(/fetch\(\s*["'`]\/api\/me\/permissions/);
   });
 });
 
