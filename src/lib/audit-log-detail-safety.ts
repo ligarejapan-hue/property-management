@@ -174,6 +174,25 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "hasFrom",
     "hasTo",
   ]),
+  // 所有者一覧: 検索語そのものは保存せず**長さだけ**を残す（PII を監査に溜めない）。
+  // mgmtIdLen が ALWAYS_SAFE にある前例と同格だが、action 固有に留める。
+  owner_list: new Set(["keywordLen"]),
+  // 受付帳×所有者取込: 氏名住所の生保存をやめた代わりの boolean。
+  // hasZip は denylist に当たらないのでこちら、hasAddress は /addr/i に当たるため
+  // force-safe 側（両方が必要＝片方だけだと片側が [REDACTED] になる）。
+  owner_created_from_reception: new Set(["hasZip"]),
+  // 調査ピンの他人閲覧監査。#337 で直した3 action と**同じ型の取り残し**
+  // （認可・PII 横断監査 2026-07-30 で検出）。detail が全て [REDACTED] だと
+  // 「誰のピンを・何件見たか」が監査から消える。
+  //   pinId / viewedStaffUserId は UUID 識別子、*Returned は件数、has* は boolean。
+  //   ⚠ownerStaffUserId は /owner/i denylist に当たるため force-safe 側で扱う。
+  field_survey_pin_view: new Set(["pinId", "hasProperty"]),
+  field_survey_pin_list_others: new Set([
+    "viewedStaffUserId",
+    "pinsReturned",
+    "hasSessionFilter",
+    "hasPropertyFilter",
+  ]),
   // 売却促進DM: 操作事実の非PIIメタデータのみ allowlist(件数/enum/boolean/ISO日時)。
   // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
@@ -355,6 +374,27 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
  */
 const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   import_job_rollback: new Set(["fieldNames"]),
+  // ⚠**所有者の識別子 (UUID) が監査から消えていた**（認可・PII 横断監査 2026-07-30）。
+  // ownerId / sourceOwnerId / targetOwnerId は ALWAYS_SAFE_KEYS に「安全」として
+  // 登録されているのに、denylist の /owner/i が**先に**当たって常に [REDACTED] に
+  // なっていた。結果「誰に対する操作か」が所有者系の監査から読めない。
+  // 値は UUID で氏名・住所は入らないため、実際にこのキーを書いている action に
+  // 限って force-safe で保持する（全 action 一律にすると ownerName 等の
+  // 取りこぼしリスクが出るため、action を明示する）。
+  owner_memo_create: new Set(["ownerId"]),
+  owner_correction_merge: new Set(["sourceOwnerId", "targetOwnerId"]),
+  owner_correction_mislink: new Set([
+    "propertyOwnerId",
+    "previousOwnerId",
+    "newOwnerId",
+  ]),
+  // 調査ピンの他人閲覧監査。「誰のピンを見たか」= ownerStaffUserId も UUID だが
+  // /owner/i に当たるため force-safe 側で保持する（#337 と同じ型の取り残し）。
+  field_survey_pin_view: new Set(["ownerStaffUserId"]),
+  // 受付帳×所有者取込: 氏名住所を生保存する代わりに「項目が入っていたか」の
+  // boolean を残す。hasAddress は /addr/i denylist に当たるため force-safe 側
+  // （値は boolean ゆえ PII 流入余地なし。attachment_search の hasFileName と同型）。
+  owner_created_from_reception: new Set(["hasAddress"]),
   // display_name_audit_view の owner-prefixed な真偽メタデータ。/owner/i denylist に
   // 当たるが PII ではなく「owner 群を切り捨てたか / owner 名を生値表示できたか」の
   // boolean 監査情報。force-safe で保持する（値は boolean ゆえ PII 流入余地なし）。

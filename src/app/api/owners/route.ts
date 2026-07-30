@@ -104,7 +104,11 @@ export async function GET(request: NextRequest) {
       action: "owner_list",
       targetTable: undefined,
       targetId: undefined,
-      detail: { keyword, page, resultCount: total },
+      // ⚠**検索語そのものを保存しない**（認可・PII 横断監査 2026-07-30）。
+      // keyword には所有者の氏名・電話・住所が入る＝監査ログに PII が平文で溜まる。
+      // 同じ値を扱う owners/search は意図的に保存しておらず、非対称だった。
+      // 「検索したか・何件出たか」は長さと件数で足りる（物件一覧の mgmtIdLen と同型）。
+      detail: { keywordLen: keyword.length, page, resultCount: total },
     });
 
     return apiResponse({
