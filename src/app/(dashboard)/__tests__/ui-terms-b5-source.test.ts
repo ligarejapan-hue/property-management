@@ -146,6 +146,14 @@ describe("B-5: 監査ログの操作種別を日本語化", () => {
     expect(src).toMatch(/company_profile_update:/);
   });
 
+  it("巡回一覧の閲覧監査 (総点検P3) も日本語ラベルを収載する", () => {
+    // 新 action を足すときはこの辞書も更新する。未収載だと監査画面と
+    // フィルタ選択肢に生の内部識別子がそのまま出る (@codex #337)。
+    expect(src).toMatch(
+      /field_survey_session_list_view:\s*"巡回一覧の閲覧（他スタッフ分）"/,
+    );
+  });
+
   it("動的生成 action (三項演算子/ヘルパ経由) も収載する(@codex R3)", () => {
     expect(src).toMatch(/registry_pdf_download:/);
     expect(src).toMatch(/registry_pdf_preview:/);
