@@ -235,6 +235,33 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     expect(src).toContain("applied.count === 0");
   });
 
+  it("新規作成は行ロックで原子化する（create は where を持てない・@codex #338 R4）", () => {
+    // create にスコープ述語は書けないので、トランザクション内で物件行を
+    // FOR UPDATE でロックし、担当の付け替えを待たせて窓を閉じる。
+    const guard = read("src/lib/property-record-guard.ts");
+    expect(guard).toContain("lockPropertyRecordForWrite");
+    expect(guard).toContain("FOR UPDATE");
+    // スコープはパラメータのみで表現（生SQLの既存前例と同じ形）
+    expect(guard).toContain("${scopeUserId}::uuid IS NULL");
+    // updatedAt を触る touch 方式は採らない（一覧の更新日が意味を失う）
+    expect(guard).not.toContain("updatedAt: new Date()");
+
+    for (const p of [
+      "src/app/api/properties/[id]/comments/route.ts",
+      "src/app/api/properties/[id]/next-actions/route.ts",
+    ]) {
+      const src = read(p);
+      // 作成が tx 内で、ロックの後に来ている
+      expect(src, p).toContain("lockPropertyRecordForWrite(tx, propertyId, session)");
+      const tx = src.slice(src.indexOf("prisma.$transaction"));
+      expect(tx.indexOf("lockPropertyRecordForWrite"), p).toBeLessThan(
+        tx.indexOf(".create({"),
+      );
+      // tx 外の素の create が残っていない
+      expect(src, p).not.toMatch(/await prisma\.(comment|nextAction)\.create\(/);
+    }
+  });
+
   it("外部取得の結果保存はスコープで破棄しない（意図を明記してある）", () => {
     // 取得は認可された利用者が開始したもので、外部呼び出しに数秒かかる。
     // 途中で担当が変わったからといって取得済みの結果を捨てると、課金した

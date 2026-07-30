@@ -10,7 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
+import {
+  assertPropertyRecordAccess,
+  lockPropertyRecordForWrite,
+} from "@/lib/property-record-guard";
 
 const createNextActionSchema = z.object({
   assignedTo: z.string().uuid("担当者IDが不正です"),
@@ -83,19 +86,26 @@ export async function POST(
     const body = await request.json();
     const data = createNextActionSchema.parse(body);
 
-    const action = await prisma.nextAction.create({
-      data: {
-        propertyId,
-        assignedTo: data.assignedTo,
-        scheduledAt: new Date(data.scheduledAt),
-        actionType: data.actionType ?? null,
-        content: data.content,
-        createdBy: session.id,
-      },
-      include: {
-        assignee: { select: { id: true, name: true } },
-        creator: { select: { id: true, name: true } },
-      },
+    // ⚠**作成もスコープに対して原子的にする**（@codex #338 R4）。
+    // create は where を持てないので、トランザクション内で物件行を
+    // FOR UPDATE でロックしてから作る（担当の付け替えを待たせる）。
+    // 0 件 = ロック時点で担当外 → 403（自由記述の対応予定を残さない）。
+    const action = await prisma.$transaction(async (tx) => {
+      await lockPropertyRecordForWrite(tx, propertyId, session);
+      return tx.nextAction.create({
+        data: {
+          propertyId,
+          assignedTo: data.assignedTo,
+          scheduledAt: new Date(data.scheduledAt),
+          actionType: data.actionType ?? null,
+          content: data.content,
+          createdBy: session.id,
+        },
+        include: {
+          assignee: { select: { id: true, name: true } },
+          creator: { select: { id: true, name: true } },
+        },
+      });
     });
 
     await writeAuditLog({

@@ -10,7 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
+import {
+  assertPropertyRecordAccess,
+  lockPropertyRecordForWrite,
+} from "@/lib/property-record-guard";
 
 const createCommentSchema = z.object({
   body: z.string().min(1, "コメント本文は必須です").max(2000),
@@ -94,16 +97,23 @@ export async function POST(
       }
     }
 
-    const comment = await prisma.comment.create({
-      data: {
-        propertyId,
-        authorId: session.id,
-        body: data.body,
-        parentId: data.parentId ?? null,
-      },
-      include: {
-        author: { select: { id: true, name: true } },
-      },
+    // ⚠**作成もスコープに対して原子的にする**（@codex #338 R4）。
+    // create は where を持てないので、トランザクション内で物件行を
+    // FOR UPDATE でロックしてから作る（担当の付け替えを待たせる）。
+    // 0 件 = ロック時点で担当外 → 403（コメントを残さない）。
+    const comment = await prisma.$transaction(async (tx) => {
+      await lockPropertyRecordForWrite(tx, propertyId, session);
+      return tx.comment.create({
+        data: {
+          propertyId,
+          authorId: session.id,
+          body: data.body,
+          parentId: data.parentId ?? null,
+        },
+        include: {
+          author: { select: { id: true, name: true } },
+        },
+      });
     });
 
     await writeAuditLog({

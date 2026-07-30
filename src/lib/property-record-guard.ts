@@ -77,6 +77,57 @@ export type PropertyRecordScope = {
   OR: [{ createdBy: string }, { assignedTo: string }];
 };
 
+/** $transaction のコールバックが受け取るクライアント（$queryRaw だけ使う）。 */
+type TxLike = {
+  $queryRaw: <T>(
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<T>;
+};
+
+/**
+ * 新規作成（`create`）のためにトランザクション内で**物件行をロックしつつ**
+ * 担当者スコープを確認する（@codex #338 R4）。
+ *
+ * `create` は `where` を持てないので updateMany のようにスコープを畳み込めない。
+ * かわりに `SELECT … FOR UPDATE` で対象の物件行をロックし、**担当の付け替えを
+ * このトランザクションが終わるまで待たせる**ことで窓を閉じる。
+ * 0 件 = ロック時点で担当外（または物件が無い）→ 403。
+ *
+ * ⚠`updatedAt` を触る「touch」方式は採らない。物件の更新日時が
+ *   コメント追加のような別操作で動くと、一覧の「更新日」が意味を失う。
+ * ⚠スコープは生 SQL でもパラメータだけで表現する（既存の前例 =
+ *   properties/[id]/candidates/route.ts:291-293 と同じ形）。
+ *   scopeUserId が NULL（admin / office_staff）なら条件は素通り。
+ * ⚠**存在しない物件の 404 は呼び出し側の assertPropertyRecordAccess が担う**
+ *   （ロックでは 404 と 403 を区別できないため、先にそちらを通しておく）。
+ */
+export async function lockPropertyRecordForWrite(
+  tx: TxLike,
+  propertyId: string,
+  session: { id: string; role: string },
+): Promise<void> {
+  const scopeUserId = session.role === "field_staff" ? session.id : null;
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id
+    FROM properties
+    WHERE id = ${propertyId}::uuid
+      AND (
+        ${scopeUserId}::uuid IS NULL
+        OR created_by = ${scopeUserId}::uuid
+        OR assigned_to = ${scopeUserId}::uuid
+      )
+    FOR UPDATE
+  `;
+  if (rows.length === 0) {
+    throw new ApiError(
+      403,
+      "この物件を操作する権限がありません",
+      "FORBIDDEN",
+    );
+  }
+}
+
 export function propertyRecordScopeFilter(session: {
   id: string;
   role: string;
