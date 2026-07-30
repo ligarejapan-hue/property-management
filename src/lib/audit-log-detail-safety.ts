@@ -254,6 +254,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "timeBudgetExhausted",
     "summary",
   ]),
+  // 取込エラー行 CSV の出力監査。detail は非PII の件数のみ（何行・何列出したか）。
+  // ⚠rawData の中身はもちろん**列名も route 側で記録していない**（列名は「所有者名」等、
+  //   見出しがそのまま項目名になり得るため）。ここも件数2つだけを許可する。
+  //   allowlist のみ（force-safe ではない）ので他 action では保持されない。
+  import_error_csv_export: new Set(["rowCount", "columnCount"]),
   // DQ-03: 住所登記文字列 cleanup の監査メタデータ（非PII: 検出 type 配列・件数・boolean・
   // 結果コード・HTTP ステータス）。住所本文・検出文字列の生値は route 側で記録せず、
   // 混入しても allowlist 外 + denylist(/addr/i 等) で引き続き [REDACTED]。

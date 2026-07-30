@@ -81,6 +81,10 @@ vi.mock("@/lib/prisma", () => ({
 
 import prisma from "@/lib/prisma";
 import { canDownloadImportErrorCsv } from "@/lib/import-error-csv-access";
+import {
+  sanitizeAuditDetail,
+  REDACTED,
+} from "@/lib/audit-log-detail-safety";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { GET } from "@/app/api/import/jobs/[jobId]/export-errors/route";
 
@@ -317,6 +321,47 @@ describe("画面が判定関数と鮮度確認を正しく配線している", (
     // provider 経由のみ（ページ独自の権限 fetch を増やさない）。
     // ⚠コメント本文にも同じパスが出てくるので、**実際の呼び出し形**で照合する。
     expect(src).not.toMatch(/fetch\(\s*["'`]\/api\/me\/permissions/);
+  });
+});
+
+describe("監査 detail が管理画面で読めること", () => {
+  // sanitizeAuditDetail は**許可リストに無いキーを既定で伏せる**ため、監査に
+  // 残した件数も登録しないと管理画面では [REDACTED] になり、追加した意味が無くなる。
+  const sanitize = (detail: Record<string, unknown>) =>
+    sanitizeAuditDetail("import_error_csv_export", detail) as Record<
+      string,
+      unknown
+    >;
+
+  it("行数・列数・出力時刻は残る", () => {
+    const out = sanitize({
+      rowCount: 12,
+      columnCount: 9,
+      exportedAt: "2026-07-30T00:00:00.000Z",
+    });
+    expect(out.rowCount).toBe(12);
+    expect(out.columnCount).toBe(9);
+    expect(out.exportedAt).toBe("2026-07-30T00:00:00.000Z");
+  });
+
+  it("同じ action でも PII らしいキーは伏せる（許可は件数だけ）", () => {
+    const out = sanitize({
+      rowCount: 1,
+      ownerName: "山田太郎",
+      address: "東京都…",
+      columnNames: ["所有者名"],
+    });
+    expect(out.rowCount).toBe(1);
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.address).toBe(REDACTED);
+    expect(out.columnNames).toBe(REDACTED);
+  });
+
+  it("他の action では同じキーでも残さない（allowlist は action 限定）", () => {
+    const out = sanitizeAuditDetail("some_other_action", {
+      columnCount: 3,
+    }) as Record<string, unknown>;
+    expect(out.columnCount).toBe(REDACTED);
   });
 });
 
