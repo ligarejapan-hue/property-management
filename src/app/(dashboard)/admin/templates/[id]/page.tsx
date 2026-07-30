@@ -4,6 +4,12 @@ import { use, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Save } from "lucide-react";
+import {
+  DISPLAY_LEVEL_LABELS,
+  isDisplayLevelAction,
+  isDisplayLevelResource,
+  withExclusiveDisplayLevel,
+} from "@/lib/permission-display-levels";
 
 const RESOURCES = [
   { key: "property", label: "物件", actions: ["read", "write", "delete"] },
@@ -12,9 +18,20 @@ const RESOURCES = [
   { key: "owner_name_kana", label: "オーナー名カナ", actions: ["hidden", "masked", "full"] },
   { key: "owner_phone", label: "オーナー電話番号", actions: ["hidden", "masked", "full"] },
   { key: "owner_zip", label: "オーナー郵便番号", actions: ["hidden", "masked", "full"] },
-  { key: "owner_address", label: "オーナー住所", actions: ["hidden", "masked", "full"] },
+  // 住所は「一部表示」(先頭数文字だけ)を実際に使っている(現地担当用の既定)。
+  // 選べる形にしていないと、画面上どれも選ばれていないように見えて全表示に
+  // 上書きされてしまう。
+  { key: "owner_address", label: "オーナー住所", actions: ["hidden", "masked", "partial", "full"] },
   { key: "owner_email", label: "オーナーメールアドレス", actions: ["hidden", "masked", "full"] },
-  { key: "owner_note", label: "オーナー備考", actions: ["hidden", "masked", "full"] },
+  // 備考は「閲覧のみ」と「編集可」を区別する(編集可だけがメモを書ける)。
+  { key: "owner_note", label: "オーナー備考", actions: ["hidden", "masked", "read", "edit"] },
+  // 法人番号は既に全テンプレートで設定されているのに、この画面に行が無かった＝
+  // 設定されていることが見えず変更もできなかった。
+  {
+    key: "owner_corporate_number",
+    label: "オーナー法人番号",
+    actions: ["hidden", "masked", "full"],
+  },
   { key: "csv_export", label: "CSVエクスポート", actions: ["read"] },
   { key: "csv_export_personal", label: "CSV個人情報エクスポート", actions: ["read"] },
   { key: "import", label: "インポート", actions: ["write"] },
@@ -116,20 +133,18 @@ export default function TemplateEditPage({
     );
   }
 
+  // 表示レベル（非表示/マスク/一部表示/閲覧のみ/全表示/編集可）は**項目ごとに1つだけ**。
+  // 1つ選ぶと同じ項目の他のレベルは外れる。以前は複数チェックできてしまい、
+  // 「マスク」を付けても「全表示」が残ると**生値が出続けた**（緩い方が優先されるため）。
+  // 表示レベル以外は従来どおりの単純な on/off。
   function togglePermission(resource: string, action: string) {
-    setPermissions((prev) => {
-      const existing = prev.find(
-        (p) => p.resource === resource && p.action === action,
-      );
-      if (existing) {
-        // Remove it
-        return prev.filter(
-          (p) => !(p.resource === resource && p.action === action),
-        );
-      }
-      // Add it
-      return [...prev, { resource, action, granted: true }];
-    });
+    setPermissions((prev) =>
+      withExclusiveDisplayLevel(prev, resource, action, (r, a) => ({
+        resource: r,
+        action: a,
+        granted: true,
+      })),
+    );
   }
 
   async function handleSave() {
@@ -228,14 +243,36 @@ export default function TemplateEditPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-              {RESOURCES.map((res) => (
+              {RESOURCES.map((res) => {
+                const isLevelRow = isDisplayLevelResource(res.key);
+                // 既に保存されているのに一覧に無いレベルも必ず出す。出さないと
+                // 「設定されているのに画面ではどれも選ばれていない」状態になり、
+                // うっかり別のレベルで上書きしてしまう。
+                const storedLevels = isLevelRow
+                  ? permissions
+                      .filter(
+                        (p) =>
+                          p.resource === res.key &&
+                          p.granted &&
+                          isDisplayLevelAction(p.action) &&
+                          !res.actions.includes(p.action),
+                      )
+                      .map((p) => p.action)
+                  : [];
+                const actions = [...res.actions, ...new Set(storedLevels)];
+                return (
                 <tr key={res.key} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                     {res.label}
+                    {isLevelRow && (
+                      <span className="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                        （1つだけ）
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">
-                      {res.actions.map((action) => {
+                      {actions.map((action) => {
                         const granted = isGranted(res.key, action);
                         return (
                           <label
@@ -247,19 +284,36 @@ export default function TemplateEditPage({
                             }`}
                           >
                             <input
-                              type="checkbox"
+                              // 表示レベルは排他なので radio。選択済みをもう一度押すと
+                              // 解除できるよう onChange ではなく onClick で拾う
+                              // （radio は checked のとき change が発火しないため）。
+                              type={isLevelRow ? "radio" : "checkbox"}
+                              name={isLevelRow ? `level-${res.key}` : undefined}
                               checked={granted}
-                              onChange={() => togglePermission(res.key, action)}
+                              readOnly={isLevelRow}
+                              onChange={
+                                isLevelRow
+                                  ? undefined
+                                  : () => togglePermission(res.key, action)
+                              }
+                              onClick={
+                                isLevelRow
+                                  ? () => togglePermission(res.key, action)
+                                  : undefined
+                              }
                               className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-700 text-indigo-600 focus:ring-indigo-500 dark:text-indigo-400"
                             />
-                            {ACTION_LABELS[action] ?? action}
+                            {isLevelRow
+                              ? (DISPLAY_LEVEL_LABELS[action] ?? action)
+                              : (ACTION_LABELS[action] ?? action)}
                           </label>
                         );
                       })}
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
