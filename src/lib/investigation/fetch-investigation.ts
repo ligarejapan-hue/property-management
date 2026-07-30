@@ -514,26 +514,32 @@ export async function patchInvestigation(
 
   // ⚠スコープを更新文に畳み込んで原子化する（@codex #338 P2）。
   // 0 件 = 判定から書込までの間に担当が外れた → 403（編集を残さない）。
-  const applied = await prisma.propertyInvestigation.updateMany({
-    where: { propertyId, ...(scope ? { property: scope } : {}) },
-    data: { ...fields, version: { increment: 1 } },
-  });
-  assertScopedWrite(applied.count);
-  const updated = await prisma.propertyInvestigation.findUniqueOrThrow({
-    where: { propertyId },
-    include: WITH_RELATIONS,
-  });
+  // ⚠更新と監査ログは1トランザクション（@codex #338 R3・confirm と同じ理由）。
+  // 分けると「編集は残ったが監査が無い」中途状態が作れる。
+  const updated = await prisma.$transaction(async (tx) => {
+    const applied = await tx.propertyInvestigation.updateMany({
+      where: { propertyId, ...(scope ? { property: scope } : {}) },
+      data: { ...fields, version: { increment: 1 } },
+    });
+    assertScopedWrite(applied.count);
 
-  await prisma.propertyInvestigationAuditLog.create({
-    data: {
-      propertyId,
-      investigationId: existing.id,
-      action: "updated",
-      beforeJson: JSON.parse(JSON.stringify(existing)),
-      afterJson: JSON.parse(JSON.stringify(fields)),
-      note: note ?? null,
-      createdBy: userId,
-    },
+    await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: existing.id,
+        action: "updated",
+        beforeJson: JSON.parse(JSON.stringify(existing)),
+        afterJson: JSON.parse(JSON.stringify(fields)),
+        note: note ?? null,
+        createdBy: userId,
+      },
+    });
+
+    // 応答用の読み直しも同一 tx 内（自分の更新後の姿を返す）。
+    return tx.propertyInvestigation.findUniqueOrThrow({
+      where: { propertyId },
+      include: WITH_RELATIONS,
+    });
   });
 
   return serializeRecord(updated)!;
@@ -566,45 +572,53 @@ export async function confirmInvestigationRecord(
   // ⚠スコープを更新文に畳み込んで原子化する（@codex #338 P2）。
   // confirm は**物件本体にも書き戻す**ので、判定から書込までに担当が外れると
   // 担当外の物件の用途地域・建蔽率まで書き換わる。0 件なら 403 で何も残さない。
-  const applied = await prisma.propertyInvestigation.updateMany({
-    where: { propertyId, ...(scope ? { property: scope } : {}) },
-    data: {
-      status: "confirmed",
-      confirmedAt: now,
-      confirmedBy: userId,
-      version: { increment: 1 },
-    },
-  });
-  assertScopedWrite(applied.count);
-  const updated = await prisma.propertyInvestigation.findUniqueOrThrow({
-    where: { propertyId },
-    include: WITH_RELATIONS,
-  });
+  //
+  // ⚠**3つの書き込みを1トランザクションで包む**（@codex #338 R3）。分けたままだと
+  // 「調査は confirmed になったが、物件へのコピーが 403 で止まり監査も無い」という
+  // 中途状態が残る（2文に分けたこと自体が持ち込んだ退行）。0 件拒否が「何も残さない」
+  // と言えるようにするには、拒否の throw で全体が rollback される必要がある。
+  const updated = await prisma.$transaction(async (tx) => {
+    const applied = await tx.propertyInvestigation.updateMany({
+      where: { propertyId, ...(scope ? { property: scope } : {}) },
+      data: {
+        status: "confirmed",
+        confirmedAt: now,
+        confirmedBy: userId,
+        version: { increment: 1 },
+      },
+    });
+    assertScopedWrite(applied.count);
 
-  // Also write to Property fields for backward compat
-  // （こちらもスコープ付き。調査側が通ってここだけ外れる状況は理論上ないが、
-  //   同じ不変条件を2文で担保する＝どちらか片方だけ守る形を残さない）
-  const propApplied = await prisma.property.updateMany({
-    where: { id: propertyId, ...(scope ? scope : {}) },
-    data: {
-      zoningDistrict: inv.zoningDistrict,
-      buildingCoverageRatio: inv.buildingCoverageRatio,
-      floorAreaRatio: inv.floorAreaRatio,
-      investigationConfirmedAt: now,
-      version: { increment: 1 },
-    },
-  });
-  assertScopedWrite(propApplied.count);
+    // Also write to Property fields for backward compat
+    // （こちらもスコープ付き。同じ不変条件を2文で担保する＝片方だけ守る形を残さない）
+    const propApplied = await tx.property.updateMany({
+      where: { id: propertyId, ...(scope ? scope : {}) },
+      data: {
+        zoningDistrict: inv.zoningDistrict,
+        buildingCoverageRatio: inv.buildingCoverageRatio,
+        floorAreaRatio: inv.floorAreaRatio,
+        investigationConfirmedAt: now,
+        version: { increment: 1 },
+      },
+    });
+    assertScopedWrite(propApplied.count);
 
-  await prisma.propertyInvestigationAuditLog.create({
-    data: {
-      propertyId,
-      investigationId: inv.id,
-      action: "confirmed",
-      beforeJson: JSON.parse(JSON.stringify({ status: inv.status })),
-      afterJson: JSON.parse(JSON.stringify({ status: "confirmed", confirmedAt: now.toISOString() })),
-      createdBy: userId,
-    },
+    await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: inv.id,
+        action: "confirmed",
+        beforeJson: JSON.parse(JSON.stringify({ status: inv.status })),
+        afterJson: JSON.parse(JSON.stringify({ status: "confirmed", confirmedAt: now.toISOString() })),
+        createdBy: userId,
+      },
+    });
+
+    // 応答用の読み直しも同一 tx 内（自分の更新後の姿を返す）。
+    return tx.propertyInvestigation.findUniqueOrThrow({
+      where: { propertyId },
+      include: WITH_RELATIONS,
+    });
   });
 
   return serializeRecord(updated)!;

@@ -9,7 +9,10 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
-import { assertPropertyRecordAccess } from "@/lib/property-record-guard";
+import {
+  assertPropertyRecordAccess,
+  propertyRecordScopeFilter,
+} from "@/lib/property-record-guard";
 
 // Map UI judgment values to DB enum
 const judgmentToResult: Record<string, "related" | "different" | "pending"> = {
@@ -59,13 +62,40 @@ export async function POST(
     }
 
     // Update judgment
-    const updated = await prisma.propertyMatchCandidate.update({
-      where: { id: candidateId },
+    // ⚠**スコープを更新文に畳み込んで原子化する**（@codex #338 R3）。
+    // 上のガードは受付時点の判定なので、判定から更新までに担当が外れると
+    // 担当外の物件の重複判定が残る。候補は2物件(A/B)を参照するが、
+    // スコープが効くのは**URL パスの物件 (id)**。A 側/B 側どちらが id かは
+    // 上で検証済みなので、その側のリレーションにスコープを掛ける。
+    // 0 件 = その間に担当が外れた → 403。
+    const scope = propertyRecordScopeFilter(session);
+    const applied = await prisma.propertyMatchCandidate.updateMany({
+      where: {
+        id: candidateId,
+        ...(scope
+          ? {
+              OR: [
+                { propertyAId: id, propertyA: scope },
+                { propertyBId: id, propertyB: scope },
+              ],
+            }
+          : {}),
+      },
       data: {
         result,
         judgedBy: session.id,
         judgedAt: new Date(),
       },
+    });
+    if (applied.count === 0) {
+      throw new ApiError(
+        403,
+        "この物件を操作する権限がありません",
+        "FORBIDDEN",
+      );
+    }
+    const updated = await prisma.propertyMatchCandidate.findUniqueOrThrow({
+      where: { id: candidateId },
     });
 
     const labels: Record<string, string> = {

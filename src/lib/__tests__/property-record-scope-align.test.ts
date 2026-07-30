@@ -200,6 +200,41 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     ).toBe(2);
   });
 
+  it("調査の書き込みは1トランザクション（0件403で中途状態を残さない・@codex #338 R3）", () => {
+    // ⚠2文に分けたままだと「調査は confirmed になったが物件へのコピーが 403 で
+    // 止まり監査も無い」中途状態が残る（2文化そのものが持ち込んだ退行）。
+    // 「0件なら何も残さない」と言うには、拒否の throw で全体が rollback される必要がある。
+    const lib = read("src/lib/investigation/fetch-investigation.ts");
+    const body = (name: string) => {
+      const start = lib.indexOf(`export async function ${name}(`);
+      const next = lib.indexOf("\nexport ", start + 1);
+      return lib.slice(start, next === -1 ? undefined : next);
+    };
+    for (const name of ["patchInvestigation", "confirmInvestigationRecord"]) {
+      const fn = body(name);
+      expect(fn, name).toContain("prisma.$transaction(async (tx)");
+      // 書き込みと監査ログが tx 経由（prisma 直呼びが残っていない）
+      expect(fn, name).not.toMatch(/await prisma\.propertyInvestigationAuditLog\.create/);
+      expect(fn, name).toContain("tx.propertyInvestigationAuditLog.create");
+      // 0件拒否は tx の中（外に出すと rollback されない）
+      const txBody = fn.slice(fn.indexOf("$transaction"));
+      expect(txBody, name).toContain("assertScopedWrite(");
+    }
+  });
+
+  it("重複候補の判定もスコープを畳み込む（パス物件側のリレーションで・@codex #338 R3）", () => {
+    // 候補は2物件(A/B)を参照するが、スコープが効くのは URL パスの物件。
+    // A/B どちらが該当かは route が検証済みなので、その側にスコープを掛ける。
+    const src = read(
+      "src/app/api/properties/[id]/candidates/[candidateId]/judge/route.ts",
+    );
+    expect(src).not.toMatch(/propertyMatchCandidate\.update\(\{/);
+    expect(src).toContain("propertyMatchCandidate.updateMany(");
+    expect(src).toContain("{ propertyAId: id, propertyA: scope }");
+    expect(src).toContain("{ propertyBId: id, propertyB: scope }");
+    expect(src).toContain("applied.count === 0");
+  });
+
   it("外部取得の結果保存はスコープで破棄しない（意図を明記してある）", () => {
     // 取得は認可された利用者が開始したもので、外部呼び出しに数秒かかる。
     // 途中で担当が変わったからといって取得済みの結果を捨てると、課金した
