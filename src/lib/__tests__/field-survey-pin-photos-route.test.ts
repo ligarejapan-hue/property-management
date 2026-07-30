@@ -368,6 +368,13 @@ describe("POST photos", () => {
     (
       prisma.fieldSurveyPin.updateMany as ReturnType<typeof vi.fn>
     ).mockResolvedValueOnce({ count: 0 }); // tx 内 touch で並行 archive が判明
+    // backend が別実体の thumbnail を返すケース。rollback では DB 行が残らず
+    // 後から発見できないため、本体と併せて回収する必要がある (@codex #337)。
+    storageStub.upload.mockResolvedValueOnce({
+      url: "http://storage.internal:9000/files/server-direct.jpg",
+      key: `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+      thumbnailUrl: `/uploads/field-survey/pins/${PIN_ID}/photos/abc_thumb.jpg`,
+    });
     const res = await POST(multipartReq(jpeg()), paramsP(PIN_ID));
     expect(res.status).toBe(409);
     const body = await res.json();
@@ -378,10 +385,13 @@ describe("POST photos", () => {
     ).mock.calls[0][0];
     expect(guardArgs.where).toEqual({ id: PIN_ID, status: { not: "archived" } });
     expect(Object.keys(guardArgs.data)).toEqual(["updatedAt"]);
-    // DB 行は作られず、直前に upload した実体は回収される
+    // DB 行は作られず、直前に upload した実体は本体+thumbnail とも回収される
     expect(prisma.fieldSurveyPinPhoto.create).not.toHaveBeenCalled();
     expect(storageStub.delete).toHaveBeenCalledWith(
       `field-survey/pins/${PIN_ID}/photos/abc.jpg`,
+    );
+    expect(storageStub.delete).toHaveBeenCalledWith(
+      `field-survey/pins/${PIN_ID}/photos/abc_thumb.jpg`,
     );
     expect(writeAuditLog).not.toHaveBeenCalled();
   });

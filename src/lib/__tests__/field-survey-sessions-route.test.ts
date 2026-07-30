@@ -612,6 +612,22 @@ describe("GET /api/field-survey/sessions", () => {
     expect(JSON.stringify(call)).not.toMatch(/"lat"|"lng"|memo|staffName/);
   });
 
+  it("scope=all でも staffUserId=自分 なら監査しない（実際は自分の分しか返らない・@codex #337）", async () => {
+    // where 構築は staffUserId 明示指定を scope より優先して絞るため、
+    // `scope=all&staffUserId=<自分>` の応答は自分の分だけ。scope だけ見て
+    // 「他人を含む」と扱うと監査記録として嘘になる。
+    (getApiSession as Mock).mockResolvedValue(officeUser);
+    (getUserPermissions as Mock).mockResolvedValue(officePerms);
+    (prisma.fieldSurveySession.count as Mock).mockResolvedValue(0);
+    (prisma.fieldSurveySession.findMany as Mock).mockResolvedValue([]);
+    await GET(
+      makeReq(
+        `http://x/api/field-survey/sessions?scope=all&staffUserId=${officeUser.id}`,
+      ),
+    );
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
   it("read_all で他人 staffUserId を明示指定した一覧も監査する", async () => {
     (getApiSession as Mock).mockResolvedValue(officeUser);
     (getUserPermissions as Mock).mockResolvedValue(officePerms);

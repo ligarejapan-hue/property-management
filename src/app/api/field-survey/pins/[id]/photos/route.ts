@@ -11,6 +11,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage, validateFile, ALLOWED_PHOTO_MIMES } from "@/lib/storage";
+import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 import { stripFieldSurveyPhotoMetadata } from "@/lib/field-survey/exif-strip";
 import { normalizeFileUrl, normalizeFileUrlsInRecord } from "@/lib/url-normalize";
 
@@ -218,11 +219,20 @@ export async function POST(
     } catch (txError) {
       // rollback 時は直前に upload した実体を best-effort で回収する
       // （key は randomUUID 入りでこのリクエスト専用 = 共有され得ない）。
+      // ⚠backend が別実体の thumbnail を返す場合はそれも回収する (@codex #337)。
+      //   DB 行が残らないため、ここで消さないと後から発見する手段が無い
+      //   （通常の写真 DELETE は本体+thumbnail の両方を消すのと同じ扱い）。
+      //   key の復元は DELETE 経路と同じ extractStorageKeyFromUrl（proxy 相対のみ
+      //   受け付け・復元不能な形式は skip = 誤爆防止）。
       // 失敗しても応答は変えない（DB が source of truth・orphan は残るだけ）。
-      try {
-        await storage.delete(result.key);
-      } catch {
-        // best-effort（key/fileName は console に出さない既存 PII ルール）
+      const thumbnailKey = extractStorageKeyFromUrl(proxyThumbnailUrl);
+      for (const key of [result.key, thumbnailKey]) {
+        if (key == null) continue;
+        try {
+          await storage.delete(key);
+        } catch {
+          // best-effort（key/fileName は console に出さない既存 PII ルール）
+        }
       }
       throw txError;
     }
