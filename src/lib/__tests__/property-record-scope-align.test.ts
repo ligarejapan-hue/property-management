@@ -340,6 +340,83 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
     }
   });
 
+  it("【デッドロック回避】取得経路も親→子のロック順にする（認可はしない・自己レビュー検出）", () => {
+    // ⚠監査ログ (property_investigation_audit_logs) は properties への必須 FK を持つ
+    // ため、その INSERT で参照整合性トリガが親行に FOR KEY SHARE を取る。つまり
+    // 「子を更新 → 監査を INSERT」の順に書くと**暗黙に子→親**の順でロックする。
+    // 編集経路は親から FOR UPDATE を取るので、混ざると循環して 40P01（500）になり、
+    // 取得経路が犠牲になると**課金済みの取得結果が rollback されて status が
+    // fetching のまま固着する**（この差分の R7 が持ち込んだ新しい危険）。
+    const lib = read("src/lib/investigation/fetch-investigation.ts");
+    const body = (name: string) => {
+      const start = lib.indexOf(`export async function ${name}(`);
+      const next = lib.indexOf("\nexport ", start + 1);
+      return lib.slice(start, next === -1 ? undefined : next);
+    };
+    const fetchFn = body("runAndUpsertInvestigation");
+    // ⚠tx の終端を正規表現で当てるのは脆い（インデントで誤爆する）。
+    // 「$transaction の出現位置から次の $transaction まで」で区切る。
+    const marker = "$transaction(async (tx) => {";
+    const segments: string[] = [];
+    let from = fetchFn.indexOf(marker);
+    while (from !== -1) {
+      const next = fetchFn.indexOf(marker, from + marker.length);
+      segments.push(fetchFn.slice(from, next === -1 ? undefined : next));
+      from = next;
+    }
+    const writeSegments = segments.filter((s) =>
+      /tx\.\w+\.(update|upsert|create|updateMany)\(/.test(s),
+    );
+    expect(writeSegments.length, "取得経路の書き込み tx が3つ見つからない").toBe(3);
+    for (const t of writeSegments) {
+      const lockIdx = t.search(/lockPropertyRow\(tx,|lockPropertyRecordForWrite\(tx,/);
+      const writeIdx = t.search(/tx\.\w+\.(update|upsert|create|updateMany)\(/);
+      expect(lockIdx, "取得経路の tx がロックで始まっていない").toBeGreaterThan(0);
+      expect(lockIdx, "ロックが書き込みより後ろ").toBeLessThan(writeIdx);
+    }
+    // 結果保存は認可しない（スコープ述語を付けない）が、ロックは取る
+    expect(lib).toContain("export async function runAndUpsertInvestigation");
+    expect(read("src/lib/property-record-guard.ts")).toContain(
+      "export async function lockPropertyRow(",
+    );
+  });
+
+  it("取得の開始は担当者スコープで守る（開始前ならまだ課金していない・@codex #338 R8）", () => {
+    const lib = read("src/lib/investigation/fetch-investigation.ts");
+    const start = lib.indexOf("export async function runAndUpsertInvestigation(");
+    const step1End = lib.indexOf("Step 2", start);
+    const step1 = lib.slice(start, step1End === -1 ? start + 3000 : step1End);
+    // Step 1 だけは認可つきロック（scopeSession があれば）
+    expect(step1).toContain("lockPropertyRecordForWrite(tx, propertyId, scopeSession)");
+    // route が session を渡している
+    expect(read("src/app/api/properties/[id]/investigation/fetch/route.ts")).toMatch(
+      /runAndUpsertInvestigation\([\s\S]{0,400}?session,\s*\n\s*\);/,
+    );
+  });
+
+  it("物件へ書き戻す値と監査の before はロック後に読む（自己レビュー検出）", () => {
+    // tx/ロックの外で読むと、確認済みにした調査の値と物件へコピーされる値が
+    // 食い違う（しかもその値は販売図面に自動反映される）。監査の before 像も
+    // 連続編集で同じ値を2回記録し、実際の遷移が復元できなくなる。
+    const lib = read("src/lib/investigation/fetch-investigation.ts");
+    for (const name of ["patchInvestigation", "confirmInvestigationRecord"]) {
+      const start = lib.indexOf(`export async function ${name}(`);
+      const next = lib.indexOf("\nexport ", start + 1);
+      const fn = lib.slice(start, next === -1 ? undefined : next);
+      // tx の前に prisma 直の findUnique を置かない（= 読み取りが tx 内）
+      const beforeTx = fn.slice(0, fn.indexOf("$transaction"));
+      expect(beforeTx, `${name}: ロック前に読んでいる`).not.toMatch(
+        /prisma\.propertyInvestigation\.findUnique\(/,
+      );
+      // tx 内でロックより後に読む
+      const tx = fn.slice(fn.indexOf("$transaction"));
+      const lockIdx = tx.search(/lockPropertyRow\(tx,|lockPropertyRecordForWrite\(tx,/);
+      const readIdx = tx.indexOf("tx.propertyInvestigation.findUnique(");
+      expect(readIdx, `${name}: tx 内の読み取りが無い`).toBeGreaterThan(0);
+      expect(lockIdx, `${name}: 読み取りがロックより前`).toBeLessThan(readIdx);
+    }
+  });
+
   it("外部取得の結果保存はスコープで破棄しない（意図を明記してある）", () => {
     // 取得は認可された利用者が開始したもので、外部呼び出しに数秒かかる。
     // 途中で担当が変わったからといって取得済みの結果を捨てると、課金した

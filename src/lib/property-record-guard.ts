@@ -102,7 +102,16 @@ type TxLike = {
  *
  * ⚠リレーション述語は**残す**（ロックが主・述語は多層防御）。ロックの呼び忘れが
  * あっても述語が窓を1文に狭める。両方あることをテストで固定している。
- * ⚠ロックは常に「親の物件 → 子の行」の順で取る（全経路で同じ順序 = デッドロック回避）。
+ *
+ * ⚠**ロックは必ず「親の物件 → 子の行」の順で取る。** これは認可のためだけでなく
+ * **デッドロック回避のため**に全経路で守る必要がある（自己レビューで検出）。
+ * 子テーブルに `properties` への必須 FK がある場合、その INSERT で Postgres の
+ * 参照整合性トリガが親行に `FOR KEY SHARE` を取る。つまり「子を更新 → 監査ログを
+ * INSERT」の順に書くと、**暗黙に**「子 → 親」の順でロックを取ることになる。
+ * こちらが `FOR UPDATE`（KEY SHARE と衝突する）を親から取る経路と混ざると循環し、
+ * 40P01 で 500 になる。認可の対象外の経路（外部取得の結果保存など）でも
+ * **ロックだけは取る**必要があるため、スコープ判定を伴わない
+ * `lockPropertyRow` を用意してある。
  *
  * ⚠`updatedAt` を触る「touch」方式は採らない。物件の更新日時が
  *   コメント追加のような別操作で動くと、一覧の「更新日」が意味を失う。
@@ -118,7 +127,38 @@ export async function lockPropertyRecordForWrite(
   session: { id: string; role: string },
 ): Promise<void> {
   const scopeUserId = session.role === "field_staff" ? session.id : null;
-  const rows = await tx.$queryRaw<{ id: string }[]>`
+  const rows = await lockPropertyRowInternal(tx, propertyId, scopeUserId);
+  if (rows.length === 0) {
+    throw new ApiError(
+      403,
+      "この物件を操作する権限がありません",
+      "FORBIDDEN",
+    );
+  }
+}
+
+/**
+ * **スコープ判定を伴わない**素の親行ロック。
+ *
+ * 用途: 担当者スコープの対象外と決めた書き込み（外部取得の結果保存など）でも、
+ * **ロック順序だけは全経路で「親 → 子」に揃える**ために呼ぶ（自己レビューで
+ * 検出したデッドロック回避。上の説明を参照）。
+ * 物件が無ければ何もしない（存在確認は呼び出し側の責務。取得経路は既に
+ * 物件を読んでいる）。
+ */
+export async function lockPropertyRow(
+  tx: TxLike,
+  propertyId: string,
+): Promise<void> {
+  await lockPropertyRowInternal(tx, propertyId, null);
+}
+
+function lockPropertyRowInternal(
+  tx: TxLike,
+  propertyId: string,
+  scopeUserId: string | null,
+): Promise<{ id: string }[]> {
+  return tx.$queryRaw<{ id: string }[]>`
     SELECT id
     FROM properties
     WHERE id = ${propertyId}::uuid
@@ -129,13 +169,6 @@ export async function lockPropertyRecordForWrite(
       )
     FOR UPDATE
   `;
-  if (rows.length === 0) {
-    throw new ApiError(
-      403,
-      "この物件を操作する権限がありません",
-      "FORBIDDEN",
-    );
-  }
 }
 
 export function propertyRecordScopeFilter(session: {

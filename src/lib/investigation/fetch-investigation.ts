@@ -17,6 +17,7 @@ import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import {
   lockPropertyRecordForWrite,
+  lockPropertyRow,
   propertyRecordScopeFilter,
 } from "@/lib/property-record-guard";
 import { runInvestigation } from "./index";
@@ -258,10 +259,23 @@ export async function runAndUpsertInvestigation(
     gpsLat: number | null;
     gpsLng: number | null;
     targetYear?: number;
-  }
+  },
+  /**
+   * 担当者スコープの判定に使うセッション（@codex #338 R8）。
+   * **取得開始（Step 1）でだけ**認可に使う。結果保存（Step 3）では認可には使わず、
+   * ロック順序を揃えるための素のロックだけを取る。
+   */
+  scopeSession?: { id: string; role: string },
 ): Promise<InvestigationRecord> {
   // ---- Step 1: set status=fetching ----------------------------------------
   const { invId, beforeStatus } = await prisma.$transaction(async (tx) => {
+    // ⚠**取得の開始も担当者スコープで守る**（@codex #338 R8）。「課金済みの結果は
+    // 捨てない」例外は Step 3 の話で、**まだ何も課金していない開始時点**を守らない
+    // 理由にはならない。ここで弾けば status=fetching・監査・外部呼び出し（=課金）の
+    // すべてが担当外の物件に対して起きない。
+    // ⚠ロックは常に親（物件）→ 子（調査/監査）の順（下の Step 3 と同じ理由）。
+    if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
+    else await lockPropertyRow(tx, propertyId);
     const existing = await tx.propertyInvestigation.findUnique({
       where: { propertyId },
       select: { id: true, status: true },
@@ -313,6 +327,13 @@ export async function runAndUpsertInvestigation(
     // ---- Step 3a: failure path --------------------------------------------
     const errMsg = err instanceof Error ? err.message : String(err);
     await prisma.$transaction(async (tx) => {
+      // ⚠**認可はしないがロックは取る**（自己レビューで検出したデッドロック回避）。
+      // 監査ログの INSERT は properties への FK 参照整合性トリガで親行に
+      // FOR KEY SHARE を取る = 何もしないと「子 → 親」順になる。編集経路は
+      // 親から FOR UPDATE を取るので、混ざると循環して 40P01（500）になり、
+      // しかもこの経路が犠牲になると課金済みの取得結果が rollback されて
+      // status が fetching のまま固着する。順序を「親 → 子」に揃えて防ぐ。
+      await lockPropertyRow(tx, propertyId);
       await tx.propertyInvestigation.update({
         where: { propertyId },
         data: {
@@ -408,6 +429,10 @@ export async function runAndUpsertInvestigation(
   const rawPayloadJson = JSON.parse(JSON.stringify(result));
 
   const inv = await prisma.$transaction(async (tx) => {
+    // ⚠認可はしないがロックは取る（Step 3a と同じ理由。ロック順序を親 → 子に統一）。
+    // この tx が 40P01 で落ちると**課金済みの取得結果を丸ごと失う**ので、
+    // ここを守ることの実害が最も大きい。
+    await lockPropertyRow(tx, propertyId);
     const updated = await tx.propertyInvestigation.update({
       where: { propertyId },
       data: {
@@ -492,33 +517,11 @@ export async function patchInvestigation(
   }>,
   note?: string,
   /**
-   * 担当者スコープ述語（field_staff のみ渡る）。更新文の where に畳み込んで
-   * 原子化する（@codex #338 P2）。undefined なら条件を積まない。
-   */
-  /**
    * 担当者スコープの判定に使うセッション（field_staff のみ絞られる）。
    * tx 冒頭で親の物件行をロックし、更新文にも述語を畳み込む（@codex #338 R7）。
    */
   scopeSession?: { id: string; role: string },
 ): Promise<InvestigationRecord> {
-  const existing = await prisma.propertyInvestigation.findUnique({
-    where: { propertyId },
-    select: {
-      id: true, status: true, zoningDistrict: true,
-      buildingCoverageRatio: true, floorAreaRatio: true,
-      hazardSummary: true, roadSummary: true, infrastructureSummary: true,
-      sourceSummary: true, normalizedAddress: true, landLotNumber: true,
-      latitude: true, longitude: true,
-      postalCode: true, municipalityCode: true, geocodePrecision: true,
-      firePreventionArea: true, heightDistrict: true,
-      nearbyPriceSummary: true, landPriceSummary: true, facilitySummary: true,
-    },
-  });
-
-  if (!existing) {
-    throw new Error("調査レコードが存在しません。先に調査情報を取得してください。");
-  }
-
   // ⚠スコープを更新文に畳み込んで原子化する（@codex #338 P2）。
   // 0 件 = 判定から書込までの間に担当が外れた → 403（編集を残さない）。
   // ⚠更新と監査ログは1トランザクション（@codex #338 R3・confirm と同じ理由）。
@@ -527,6 +530,32 @@ export async function patchInvestigation(
   const updated = await prisma.$transaction(async (tx) => {
     // 親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。
     if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
+    else await lockPropertyRow(tx, propertyId);
+
+    // ⚠**監査の before 像もロック後に読む**（自己レビューで検出）。tx の外で読むと、
+    // 同じ物件を連続で編集したときに2件とも同じ before を記録し（A→B と A→C）、
+    // 実際の遷移（B→C）が監査から復元できなくなる。取得完了の直後の編集でも、
+    // 取得結果を before として記録できない。
+    const existing = await tx.propertyInvestigation.findUnique({
+      where: { propertyId },
+      select: {
+        id: true, status: true, zoningDistrict: true,
+        buildingCoverageRatio: true, floorAreaRatio: true,
+        hazardSummary: true, roadSummary: true, infrastructureSummary: true,
+        sourceSummary: true, normalizedAddress: true, landLotNumber: true,
+        latitude: true, longitude: true,
+        postalCode: true, municipalityCode: true, geocodePrecision: true,
+        firePreventionArea: true, heightDistrict: true,
+        nearbyPriceSummary: true, landPriceSummary: true, facilitySummary: true,
+      },
+    });
+    if (!existing) {
+      throw new ApiError(
+        404,
+        "調査レコードが存在しません。先に調査情報を取得してください。",
+        "NOT_FOUND",
+      );
+    }
     const applied = await tx.propertyInvestigation.updateMany({
       where: { propertyId, ...(scope ? { property: scope } : {}) },
       data: { ...fields, version: { increment: 1 } },
@@ -569,18 +598,6 @@ export async function confirmInvestigationRecord(
    */
   scopeSession?: { id: string; role: string },
 ): Promise<InvestigationRecord> {
-  const inv = await prisma.propertyInvestigation.findUnique({
-    where: { propertyId },
-    select: {
-      id: true, status: true,
-      zoningDistrict: true, buildingCoverageRatio: true, floorAreaRatio: true,
-    },
-  });
-
-  if (!inv) {
-    throw new Error("調査レコードが存在しません");
-  }
-
   const now = new Date();
 
   // ⚠スコープを更新文に畳み込んで原子化する（@codex #338 P2）。
@@ -595,6 +612,24 @@ export async function confirmInvestigationRecord(
   const updated = await prisma.$transaction(async (tx) => {
     // 親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。
     if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
+    else await lockPropertyRow(tx, propertyId);
+
+    // ⚠**物件へ書き戻す値はロックを取った後に読む**（自己レビューで検出）。
+    // 以前はこの読み取りが tx の外にあり、読んでから確認済みにする間に取得完了や
+    // 別の編集が用途地域・建蔽率・容積率を書き換えると、**調査は新しい値のまま
+    // confirmed になり、物件本体には古い値がコピーされる**（しかもその値は販売図面に
+    // 自動反映される）。ロック後に読めば、直列化された最新の値を書き戻せる。
+    const inv = await tx.propertyInvestigation.findUnique({
+      where: { propertyId },
+      select: {
+        id: true, status: true,
+        zoningDistrict: true, buildingCoverageRatio: true, floorAreaRatio: true,
+      },
+    });
+    if (!inv) {
+      throw new ApiError(404, "調査レコードが存在しません", "NOT_FOUND");
+    }
+
     const applied = await tx.propertyInvestigation.updateMany({
       where: { propertyId, ...(scope ? { property: scope } : {}) },
       data: {

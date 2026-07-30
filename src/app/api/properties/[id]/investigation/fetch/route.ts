@@ -66,13 +66,20 @@ export async function POST(
       // Empty body is fine
     }
 
-    const investigation = await runAndUpsertInvestigation(id, session.id, {
-      address: property.address,
-      lotNumber: property.lotNumber,
-      gpsLat: property.gpsLat ? Number(property.gpsLat) : null,
-      gpsLng: property.gpsLng ? Number(property.gpsLng) : null,
-      targetYear,
-    });
+    // 第4引数の session で**取得の開始**を担当者スコープで守る（@codex #338 R8）。
+    // 開始時点ならまだ外部呼び出し（=課金）が発生していないので、ここで弾くのが正しい。
+    const investigation = await runAndUpsertInvestigation(
+      id,
+      session.id,
+      {
+        address: property.address,
+        lotNumber: property.lotNumber,
+        gpsLat: property.gpsLat ? Number(property.gpsLat) : null,
+        gpsLng: property.gpsLng ? Number(property.gpsLng) : null,
+        targetYear,
+      },
+      session,
+    );
 
     await writeAuditLog({
       userId: session.id,
