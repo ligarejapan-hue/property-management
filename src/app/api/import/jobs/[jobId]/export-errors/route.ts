@@ -23,8 +23,9 @@ import { classifyImportError } from "@/lib/import-error-display";
 // 出力は UTF-8 BOM 付き / CRLF 改行 / Excel で文字化けしないフォーマット。
 // Content-Disposition で `import-errors-{jobId}.csv` をデフォルトファイル名に。
 //
-// 権限は取込の `import:write` に加えて、**個人情報を含む CSV 出力の既定ゲート**
-// （`csv_export:read` + `csv_export_personal:read`）を要求し、出力を監査に残す。
+// 権限は取込の `import:write` に加えて `csv_export:read` と、**この CSV 専用の
+// `import_error_csv:read`**（または既に広い `csv_export_personal:read`）を要求し、
+// 出力を監査に残す。
 //
 // ⚠この CSV は rawData をそのまま列に展開するため、**所有者の氏名・住所・電話が
 // 生で入る**。他の CSV 出力（物件 CSV / DM 差込 / 所有者 CSV）はすべてこの2つを
@@ -33,10 +34,14 @@ import { classifyImportError } from "@/lib/import-error-display";
 // 以前ここに書いていた「詳細画面を見られる人は内容に到達できている」という理由は、
 // **画面上の閲覧と、手元に残る CSV ファイルを同一視していた**点で誤りだった。
 //
-// ⚠発注者判断（2026-07-30）: ゲートを足すだけだと**事務担当がダウンロードできなく
-// なる**（事務担当は import を持つが csv_export_personal を持たない）。そこで
-// **事務担当用テンプレートに csv_export_personal を付与する**（seed + 本番向けの
-// データ migration）。この2つはセットで反映すること。
+// ⚠発注者判断（2026-07-30）「事務担当にも個人情報CSV権限を付ける」: ゲートを足す
+// だけだと**事務担当がダウンロードできなくなる**（import は持つが個人情報CSVの権限が
+// 無い）ため、事務担当用テンプレートに付与する（seed + 本番向けデータ migration）。
+// この2つはセットで反映すること。
+// ⚠ただし付与するのは共有の `csv_export_personal` ではなく**専用の
+// `import_error_csv`**。共有権限を配ると全物件・全所有者の一括CSVまで解禁され、
+// ご依頼（取込エラー行を落とせるようにする）より広くなるため。全件CSVも事務担当に
+// 許可したい場合は、コード変更なしで権限画面から付与できる。
 
 export async function GET(
   _request: NextRequest,
@@ -50,11 +55,18 @@ export async function GET(
     if (!hasPermission(perms, "import", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
-    // 個人情報を含む CSV 出力の既定ゲート（他の CSV 出力3経路と同じ組み合わせ）。
     if (!hasPermission(perms, "csv_export", "read")) {
       throw new ApiError(403, "CSV出力の権限がありません", "FORBIDDEN");
     }
-    if (!hasPermission(perms, "csv_export_personal", "read")) {
+    // 個人情報を含む出力のゲート。**専用権限 `import_error_csv:read` で通す**のが要点で、
+    // 共有の `csv_export_personal` を事務担当に配ると、この CSV だけでなく
+    // 全物件CSV(所有者名入り)・DM差込CSV・物件宛DM CSV まで一度に解禁されてしまう
+    // （事務担当は property:read / owner:read / csv_export:read を既に持つため）。
+    // 既に広い権限を持つ人（管理者）は従来どおり通す＝この PR で失う権限は無い。
+    const canExportErrorCsv =
+      hasPermission(perms, "import_error_csv", "read") ||
+      hasPermission(perms, "csv_export_personal", "read");
+    if (!canExportErrorCsv) {
       throw new ApiError(
         403,
         "個人情報を含むCSV出力の権限がありません",
