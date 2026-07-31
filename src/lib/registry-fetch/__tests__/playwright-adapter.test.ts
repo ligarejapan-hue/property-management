@@ -1574,6 +1574,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       prevRowIds?: string[];
       /** 確定前の一覧が読めない状態を模す(@codex R3 P1: 基準なしでは課金しない)。 */
       baselineUnreadable?: boolean;
+      /** 絞り込みが確認できない状態を模す(@codex R6 P1: 未検証の絞り込みで課金しない)。 */
+      filterUnverified?: boolean;
     } = {},
   ) {
     const clicked: string[] = [];
@@ -1601,6 +1603,21 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       if (parsed.tableSel === "#cbnDlgChibanCheckTbl") {
         return opts.dialogFind ?? "checked";
+      }
+      // 絞り込みの検証(@codex R6 P1)。既定は「効いている」。myPageSeq は消費しない。
+      if (
+        typeof parsed.filterSel === "string" &&
+        typeof parsed.tableSel === "string"
+      ) {
+        return JSON.stringify(
+          opts.filterUnverified
+            ? { ok: false, hard: true }
+            : { ok: true, hard: false },
+        );
+      }
+      // 絞り込みの適用(戻り値は使われない)。
+      if (typeof parsed.filterSel === "string") {
+        return undefined;
       }
       // 確定前の既存行ID読み取り(@codex R2 P1: 作成同一性の土台)。myPageSeq は消費しない。
       if (parsed.probe === "row-ids") {
@@ -1704,6 +1721,19 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).toContain(SEIKYU); // 課金は押している=だから分類が変わる
   });
 
+  it("S8: ⚠絞り込みが効いたことを確認できなければ、確定の前に中止する（@codex R6 P1）", async () => {
+    // 「掛けたつもり」の絞り込みを信用すると、隠れていた未請求残骸が確定後に
+    // 「新規」へ化ける。検証は結果そのもの(選択中ラベル+全行の状態列)で行う。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { filterUnverified: true });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM); // 確定を押していない=カート行なし
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
   it("S7: ⚠確定前の一覧(基準)が読めなければ、確定の前に中止する（カート行も作らない）", async () => {
     // 基準なしで進むと「ちょうど1件」規則に落ち、既存の未請求残骸へ課金し得る
     // (@codex #345 R3 P1)。確定前に止めれば外部は完全に無傷。
@@ -1770,6 +1800,21 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     // R5 で状態待ちと再選択を1つの探索へ統合(見つけたその場で選択)。紐付けは1箇所。
     expect(src).toContain("rowId: chargedRowId,");
     expect(src).toContain("rowId ? trId !== rowId :");
+  });
+
+  it("⚠課金後の各走査は先頭ページから始める(@codex R6 P1: 末尾に居座って見逃さない)", () => {
+    expect(src).toContain("await resetMyPageToFirst();");
+    // 走査ループ(pageNo)より前に呼ぶ
+    expect(src.indexOf("await resetMyPageToFirst();")).toBeLessThan(
+      src.indexOf("for (let pageNo = 0; pageNo < 10; pageNo++)"),
+    );
+  });
+
+  it("⚠絞り込みは結果で検証する(@codex R6 P1: ラベル一致+全行の状態列が未請求)", () => {
+    expect(src).toContain("verifyPendingView");
+    expect(src).toContain("selectedOptions");
+    // 全行の状態列チェック(効いていない絞り込みを見抜く)
+    expect(src).toContain("if (status !== label)");
   });
 
   it("⚠基準は全行のIDが読めた時だけ成立する(@codex R4 P1: 不完全な基準で課金しない)", () => {

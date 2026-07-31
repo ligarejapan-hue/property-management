@@ -449,6 +449,7 @@ const REGISTRY_SELECTORS = {
   myPageSeikyuButton: "#myPageSeikyu", // [確定] **請求=課金**(状態が「未請求」の行のみ)
   myPageReloadButton: "#myReloadButton", // [要live] 一覧の「最新表示」(請求済への遷移を待つのに使う)
   myPageNextButton: "#myPageTable_next", // [確定] 一覧のページ送り(基準の完全性チェックに使う)
+  myPagePrevButton: "#myPageTable_previous", // [確定] 一覧のページ戻し(再走査の先頭復帰に使う)
 } as const;
 
 /**
@@ -1294,9 +1295,9 @@ function createPlaywrightRegistryPage(
         }));
       // 一覧に次ページがあるか。基準/行選択は**1ページに収まっている時だけ**進める
       // (見えていない行がある状態の一覧は、基準としても選択対象としても不完全)。
-      const myPageHasNext = async (): Promise<boolean> =>
-        (await page.evaluate((sel) => {
-          const b = document.querySelector(sel) as {
+      const pagerEnabled = async (sel: string): Promise<boolean> =>
+        (await page.evaluate((s) => {
+          const b = document.querySelector(s) as {
             disabled?: boolean;
             className?: string;
           } | null;
@@ -1305,7 +1306,71 @@ function createPlaywrightRegistryPage(
           if (st.display === "none" || st.visibility === "hidden") return false;
           // dataTables 系は disabled を class で表すことがある
           return !/disabled/.test(String(b.className ?? ""));
-        }, REGISTRY_SELECTORS.myPageNextButton)) === true;
+        }, sel)) === true;
+      const myPageHasNext = () =>
+        pagerEnabled(REGISTRY_SELECTORS.myPageNextButton);
+      // 再走査の前に一覧を先頭ページへ戻す(@codex #345 R6 P1)。前へボタンが有効な間
+      // 押し戻す(最大10回)。戻さないと前回の走査で末尾ページに居座り、リロード後に
+      // 先頭側へ挿入された行を**残りの全 attempt で見逃す**。
+      const resetMyPageToFirst = async (): Promise<void> => {
+        for (let i = 0; i < 10; i++) {
+          if (!(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton))) break;
+          await page.click(REGISTRY_SELECTORS.myPagePrevButton);
+          await sleep(800);
+        }
+      };
+      // ⚠絞り込みは「掛けたつもり」を信用しない(@codex #345 R6 P1)。select が無い/
+      // option が無い/非同期でまだ効いていない、のいずれでも「表示中の行=未請求の
+      // 全体」という前提が崩れ、隠れていた残骸が確定後に「新規」へ化ける。
+      // 検証は**結果そのもの**で行う: 選択中 option のラベル一致+読み込み中でない+
+      // **表示中の全実データ行の状態列が「未請求」**。確認できなければ課金前に中止。
+      const verifyPendingView = async (): Promise<boolean> => {
+        for (let i = 0; i < 5; i++) {
+          const okJson = (await page.evaluate((json) => {
+            const { filterSel, tableSel, label } = JSON.parse(json) as {
+              filterSel: string;
+              tableSel: string;
+              label: string;
+            };
+            const el = document.querySelector(
+              filterSel,
+            ) as HTMLSelectElement | null;
+            // select 自体が無い=このページ状態では確認不能(hard)。
+            if (!el) return JSON.stringify({ ok: false, hard: true });
+            const opt = el.selectedOptions?.[0];
+            if (!opt || (opt.textContent ?? "").trim() !== label) {
+              return JSON.stringify({ ok: false, hard: false });
+            }
+            const t = document.querySelector(tableSel);
+            if (!t) return JSON.stringify({ ok: false, hard: false });
+            if (/データ取得中/.test(t.textContent ?? "")) {
+              return JSON.stringify({ ok: false, hard: false });
+            }
+            const rows = Array.from(t.querySelectorAll("tbody tr")).filter(
+              (tr) => tr.querySelectorAll("td").length >= 7,
+            );
+            for (const tr of rows) {
+              const status = (
+                tr.querySelectorAll("td")[5]?.textContent ?? ""
+              ).trim();
+              // 別状態の行が見えている=絞り込みが効いていない。
+              if (status !== label) {
+                return JSON.stringify({ ok: false, hard: false });
+              }
+            }
+            return JSON.stringify({ ok: true, hard: false });
+          }, JSON.stringify({
+            filterSel: REGISTRY_SELECTORS.myPageFilter,
+            tableSel: REGISTRY_SELECTORS.myPageTable,
+            label: "未請求",
+          }))) as string;
+          const st = JSON.parse(okJson) as { ok: boolean; hard: boolean };
+          if (st.ok) return true;
+          if (st.hard) return false;
+          await sleep(1200);
+        }
+        return false;
+      };
       // ---- 課金前ゾーン(④: 対象行の特定と確定) ----
       try {
         try {
@@ -1454,7 +1519,13 @@ function createPlaywrightRegistryPage(
         // 基準としても選択対象としても不完全=残骸が「新規」に化ける余地になる。
         // 課金され得るのは未請求行だけなので、未請求に絞れば全体集合が最小になる。
         await applyMyPageFilter("未請求");
-        await sleep(1200);
+        if (!(await verifyPendingView())) {
+          // 絞り込みが効いたことを確認できない=表示中の行を全体と見なせない。
+          console.warn(
+            "[registry-fetch] pending filter unverified; refusing before confirm (not charged)",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
         if (await myPageHasNext()) {
           console.warn(
             "[registry-fetch] my-page pending list is paginated; refusing before confirm (not charged)",
@@ -1525,10 +1596,15 @@ function createPlaywrightRegistryPage(
           timeout: DIALOG_RESULT_TIMEOUT_MS,
         });
         await sleep(1000);
-        // 遷移でフィルタが既定に戻り得るため、選択フェーズも「未請求×1ページ」を
-        // 要求する(@codex R5 P1)。満たさなければ課金前に中止(基準と同じ規則)。
+        // 遷移でフィルタが既定に戻り得るため、選択フェーズも「未請求(検証つき)×1ページ」
+        // を要求する(@codex R5/R6 P1)。満たさなければ課金前に中止(基準と同じ規則)。
         await applyMyPageFilter("未請求");
-        await sleep(1200);
+        if (!(await verifyPendingView())) {
+          console.warn(
+            "[registry-fetch] pending filter unverified at pick; refusing (not charged)",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
         if (await myPageHasNext()) {
           console.warn(
             "[registry-fetch] my-page pending list is paginated at pick; refusing (not charged)",
@@ -1678,6 +1754,9 @@ function createPlaywrightRegistryPage(
         let ready = false;
         for (let attempt = 0; attempt < 20 && !ready; attempt++) {
           await sleep(3000);
+          // ⚠各走査は**先頭ページから**(@codex R6 P1)。前回の走査で末尾ページに
+          // 居座ったままだと、リロード後に先頭側へ入った行を以降ずっと見逃す。
+          await resetMyPageToFirst();
           for (let pageNo = 0; pageNo < 10; pageNo++) {
             const readyJson = (await page.evaluate((json) => {
               const { tableSel, target, rowId } = JSON.parse(json) as {
