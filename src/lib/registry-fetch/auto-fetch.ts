@@ -451,6 +451,26 @@ const REGISTRY_SELECTORS = {
 } as const;
 
 /**
+ * マイページ一覧の「所在」セルが対象の地番/家屋番号を指しているかの判定（段階②）。
+ *
+ * ⚠部分一致は禁物(@codex #345 P1): 「1-1」は「1-10」「11-1」の所在にも部分一致し、
+ * **別の登記を課金してしまう**。所在セルは「地番区域＋地番」の形なので、
+ * **正規化後に末尾一致**かつ**直前の文字が数字/ハイフンでない**（=地番の境界）ことを要求する。
+ * ブラウザ内(evaluate)の判定と同じ規則。片方だけ直すと再発するため、単体テストは
+ * この関数で行い、evaluate 内には同一ロジックを複製する(コメントで対で維持と明記)。
+ */
+export function registryRowMatchesChiban(
+  cellText: string,
+  normalizedTarget: string,
+): boolean {
+  const norm = normalizeChibanForDialog(cellText);
+  if (normalizedTarget.length === 0) return false;
+  if (!norm.endsWith(normalizedTarget)) return false;
+  const prev = norm[norm.length - normalizedTarget.length - 1];
+  return prev === undefined || !/[0-9-]/.test(prev);
+}
+
+/**
  * 請求事項のうち**所有者事項以外**のチェックボックス（段階②）。
  * 請求前にすべて外す＝所有者事項だけを買う。外し漏れは追加課金になるため、
  * 設定後に実際の checked 状態を読み戻して検証する（fail-closed・課金前）。
@@ -1409,6 +1429,14 @@ function createPlaywrightRegistryPage(
               .replace(/-+/g, "-")
               .replace(/^-+|-+$/g, "")
               .toLowerCase();
+          // 対象地番の判定は registryRowMatchesChiban と**同一規則を複製**(対で維持)。
+          // ⚠部分一致は「1-1」が「1-10」に当たり別の登記を課金する(@codex #345 P1)。
+          const hits = (cell: string): boolean => {
+            const n = norm(cell);
+            if (!n.endsWith(target)) return false;
+            const prev = n[n.length - target.length - 1];
+            return prev === undefined || !/[0-9-]/.test(prev);
+          };
           // 列: 0=checkbox 1=行id 2=種別 3=詳細 4=所在 5=状態 6=日時 7=料金 8=PDF 9=期限
           const rows = Array.from(
             document.querySelectorAll(`${tableSel} tbody tr`),
@@ -1418,8 +1446,7 @@ function createPlaywrightRegistryPage(
             const tds = tr.querySelectorAll("td");
             if (tds.length < 7) continue;
             const status = (tds[5]?.textContent ?? "").trim();
-            const shozai = norm(tds[4]?.textContent ?? "");
-            if (status === "未請求" && shozai.includes(target)) {
+            if (status === "未請求" && hits(tds[4]?.textContent ?? "")) {
               matches.push({ tr, when: (tds[6]?.textContent ?? "").trim() });
             }
           }
@@ -1477,6 +1504,9 @@ function createPlaywrightRegistryPage(
 
       // ---- ⑧ ここから課金。以降の失敗はすべて charged_but_failed ----
       try {
+        // ⚠課金境界フラグ(@codex #345 P1)。押す**直前**に立てる=外側 timeout が
+        // ここ以降で発火しても provider が charged_but_failed に分類できる。
+        if (input.chargeState) input.chargeState.charged = true;
         await domClick(REGISTRY_SELECTORS.myPageSeikyuButton);
         // ⑨ 状態が「請求済」になるまで待つ(最新表示をはさんで poll)。[要live] 反映時間。
         let ready = false;
@@ -1500,14 +1530,20 @@ function createPlaywrightRegistryPage(
             const rows = Array.from(
               document.querySelectorAll(`${tableSel} tbody tr`),
             );
+            // registryRowMatchesChiban と同一規則を複製(対で維持・部分一致禁止)。
+            const hits = (cell: string): boolean => {
+              const n = norm(cell);
+              if (!n.endsWith(target)) return false;
+              const prev = n[n.length - target.length - 1];
+              return prev === undefined || !/[0-9-]/.test(prev);
+            };
             // 対象所在の行のうち**最新日時**の行を見る(過去の請求済と混同しない)。
             let best: { status: string; expiry: string; when: string } | null =
               null;
             for (const tr of rows) {
               const tds = tr.querySelectorAll("td");
               if (tds.length < 7) continue;
-              const shozai = norm(tds[4]?.textContent ?? "");
-              if (!shozai.includes(target)) continue;
+              if (!hits(tds[4]?.textContent ?? "")) continue;
               const row = {
                 status: (tds[5]?.textContent ?? "").trim(),
                 expiry: (tds[9]?.textContent ?? "").trim(),
@@ -1553,13 +1589,19 @@ function createPlaywrightRegistryPage(
           const rows = Array.from(
             document.querySelectorAll(`${tableSel} tbody tr`),
           );
+          // registryRowMatchesChiban と同一規則を複製(対で維持・部分一致禁止)。
+          const hits = (cell: string): boolean => {
+            const n = norm(cell);
+            if (!n.endsWith(target)) return false;
+            const prev = n[n.length - target.length - 1];
+            return prev === undefined || !/[0-9-]/.test(prev);
+          };
           let best: { tr: Element; when: string } | null = null;
           for (const tr of rows) {
             const tds = tr.querySelectorAll("td");
             if (tds.length < 7) continue;
             const status = (tds[5]?.textContent ?? "").trim();
-            const shozai = norm(tds[4]?.textContent ?? "");
-            if (status === "請求済" && shozai.includes(target)) {
+            if (status === "請求済" && hits(tds[4]?.textContent ?? "")) {
               const when = (tds[6]?.textContent ?? "").trim();
               if (!best || when > best.when) best = { tr, when };
             }
@@ -1887,6 +1929,22 @@ export function isRegistryLocationSearchConfigured(
 }
 
 /**
+ * 段階②(2026-08-01): 候補からの**有料取得**が使えるかの capability。
+ * 所在検索(無料)より さらに厳しく、専用オプトイン `REGISTRY_FETCH_PURCHASE_ENABLED`
+ * を要求する(@codex #345 P1: 無料検索の校正フラグだけで課金操作を露出させない)。
+ * server 側 enforce(runRegistryAutoFetch の 501)と**対**。UI はこれが false のとき
+ * 取得ボタンを準備中表示にする。
+ */
+export function isRegistryPurchaseConfigured(
+  options: ResolveRegistryFetchProviderOptions = {},
+): boolean {
+  return (
+    process.env.REGISTRY_FETCH_PURCHASE_ENABLED === "true" &&
+    isRegistryLocationSearchConfigured(options)
+  );
+}
+
+/**
  * 自動取得の中核。route から呼ばれ、戻り値がそのまま API レスポンス body になる。
  * ハードエラーは ApiError を throw し、route 側 catch → handleApiError で HTTP 化する。
  *
@@ -1971,6 +2029,16 @@ export async function runRegistryAutoFetch(
     !!args.locationCandidate &&
     !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
   if (willPurchaseByLocation && args.locationCandidate) {
+    // ⚠有料取得の専用オプトイン(@codex #345 P1)。所在検索(無料)の校正フラグだけで
+    // 課金操作まで露出させない。実課金1回の通しテストを発注者承認のもとで終えるまで、
+    // 本番ではこのフラグを立てない=fail-closed。UI 側 capability(registryPurchase)と対。
+    if (process.env.REGISTRY_FETCH_PURCHASE_ENABLED !== "true") {
+      throw new ApiError(
+        501,
+        "謄本の有料取得はまだ有効化されていません（管理者にお問い合わせください）",
+        "REGISTRY_PURCHASE_NOT_ENABLED",
+      );
+    }
     const lotOrBuilding = (
       args.locationCandidate.lotNumber ??
       args.locationCandidate.buildingNumber ??
@@ -2084,6 +2152,26 @@ export async function runRegistryAutoFetch(
       ref: property.id,
     });
 
+    // ⚠台帳は provider が返った**直後**に書く(@codex #345 P1)。ここまで来た時点で
+    // 課金は済んでいる。後段(PDF検証・抽出・添付)で失敗しても台帳が無いと、
+    // 再実行で**同じ謄本にもう一度課金**できてしまう。書き込み自体の失敗は
+    // 処理を止めない(PDFは支払済み=添付まで進める方が利用者の利益)。
+    if (purchaseKeyHash) {
+      try {
+        await writeAuditLog({
+          userId: session.id,
+          action: REGISTRY_PURCHASE_AUDIT_ACTION,
+          targetTable: "properties",
+          targetId: propertyId,
+          detail: { purchaseKeyHash, outcome: "charged" },
+        });
+      } catch {
+        console.warn(
+          "[registry-fetch] purchase ledger write failed (continuing; charge already made)",
+        );
+      }
+    }
+
     // 取得物が PDF でなければ取込に進まない（real provider 差し替え時の防御）。
     if (!isPdfBuffer(fetchResult.pdfBuffer)) {
       throw new ApiError(
@@ -2123,16 +2211,8 @@ export async function runRegistryAutoFetch(
       data: { registryStatus: "obtained", version: { increment: 1 } },
     });
 
-    // 段階②: 有料取得の台帳(成功)。二重課金ガードの正。ハッシュのみ=非PII。
-    if (purchaseKeyHash) {
-      await writeAuditLog({
-        userId: session.id,
-        action: REGISTRY_PURCHASE_AUDIT_ACTION,
-        targetTable: "properties",
-        targetId: propertyId,
-        detail: { purchaseKeyHash, outcome: "succeeded" },
-      });
-    }
+    // 台帳は provider 返却直後に outcome:"charged" で記録済み(@codex #345 P1)。
+    // ここでの追記は不要(照合は purchaseKeyHash のみで行い outcome は見ない)。
 
     // 成功 AuditLog（非PII のみ）。PDF本文/抽出テキスト/所有者名・住所/郵便番号/
     // fileUrl 全文/APIキー/credential/raw レスポンスは載せない。件数・ID・分類のみ。

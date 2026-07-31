@@ -16,6 +16,13 @@ interface RegistryLocationSearchButtonProps {
   canAutoFetch: boolean;
   /** /api/me/permissions の capabilities.registryAutoFetch。本番 provider が設定済みか。 */
   providerConfigured: boolean;
+  /**
+   * capabilities.registryPurchase(段階②・2026-08-01)。**有料取得の専用オプトイン**
+   * (REGISTRY_FETCH_PURCHASE_ENABLED)が立っているか。false のとき検索(無料)は使えるが
+   * 取得ボタンは準備中表示にする(@codex #345 P1: 無料検索の校正だけで課金操作を露出させない。
+   * server 側も 501 で enforce)。
+   */
+  purchaseEnabled: boolean;
   /** 取得成功時に親へ通知（物件を再取得し registryStatus 等を反映する）。 */
   onComplete: () => void;
 }
@@ -41,6 +48,7 @@ export default function RegistryLocationSearchButton({
   propertyId,
   canAutoFetch,
   providerConfigured,
+  purchaseEnabled,
   onComplete,
 }: RegistryLocationSearchButtonProps) {
   const [state, setState] = useState<State>("idle");
@@ -211,9 +219,12 @@ export default function RegistryLocationSearchButton({
               <p className="font-medium text-gray-700 dark:text-gray-200">
                 候補（{candidates.length}件）が見つかりました
               </p>
-              {/* 段階②(2026-07-31): 候補を選んで有料の請求→PDF取得まで実行できる。 */}
+              {/* 段階②(2026-07-31): 候補を選んで有料の請求→PDF取得まで実行できる。
+                  ⚠有料取得は専用オプトイン(purchaseEnabled)が立つまで準備中表示(@codex #345 P1)。 */}
               <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                取得は有料です（謄本1通ごとに登記情報提供サービスの利用料がかかります）。
+                {purchaseEnabled
+                  ? "取得は有料です（謄本1通ごとに登記情報提供サービスの利用料がかかります）。"
+                  : "候補からの謄本取得（有料）は現在準備中です。"}
               </p>
               <ul className="flex flex-col gap-1">
                 {candidates.map((c) => (
@@ -231,11 +242,20 @@ export default function RegistryLocationSearchButton({
                     </span>
                     <button
                       type="button"
+                      disabled={!purchaseEnabled}
+                      title={
+                        purchaseEnabled ? undefined : "有料取得は準備中です"
+                      }
                       onClick={() => {
+                        if (!purchaseEnabled) return;
                         setSelected(c);
                         setState("confirmObtain");
                       }}
-                      className="shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
+                      className={
+                        purchaseEnabled
+                          ? "shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
+                          : "shrink-0 rounded bg-gray-300 dark:bg-gray-700 px-2 py-1 font-medium text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                      }
                     >
                       取得
                     </button>

@@ -845,8 +845,28 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
     return { provider, promise };
   }
 
+  // ⚠有料取得の専用オプトイン(@codex #345 P1)。テストでは明示的に有効化し、必ず戻す。
+  const PURCHASE_ENV = "REGISTRY_FETCH_PURCHASE_ENABLED";
+  let savedPurchaseEnv: string | undefined;
   beforeEach(() => {
+    savedPurchaseEnv = process.env[PURCHASE_ENV];
+    process.env[PURCHASE_ENV] = "true";
     setProperty({ address: "テスト市テスト町一丁目" });
+  });
+  afterEach(() => {
+    if (savedPurchaseEnv === undefined) delete process.env[PURCHASE_ENV];
+    else process.env[PURCHASE_ENV] = savedPurchaseEnv;
+  });
+
+  it("⚠専用オプトインが無ければ 501 で止まる（provider もロックも呼ばない）", async () => {
+    delete process.env[PURCHASE_ENV];
+    const { provider, promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({
+      status: 501,
+      code: "REGISTRY_PURCHASE_NOT_ENABLED",
+    });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
   });
 
   it("台帳に無ければ provider へ location を渡して実行し、成功を台帳に記録する", async () => {
@@ -865,7 +885,7 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
       .map((c) => c[0])
       .filter((a) => a.action === "registry_location_purchase");
     expect(ledger).toHaveLength(1);
-    expect(ledger[0].detail.outcome).toBe("succeeded");
+    expect(ledger[0].detail.outcome).toBe("charged");
     expect(typeof ledger[0].detail.purchaseKeyHash).toBe("string");
     expect(JSON.stringify(ledger[0].detail)).not.toContain("1-1");
   });
@@ -902,6 +922,19 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
       .filter((a) => a.action === "registry_location_purchase");
     expect(ledger).toHaveLength(1);
     expect(ledger[0].detail.outcome).toBe("charged_but_failed");
+  });
+
+  it("⚠provider 成功後に PDF 処理が失敗しても台帳は残る（@codex #345 P1: 台帳は provider 返却直後）", async () => {
+    // 課金は provider が返った時点で済んでいる。後段（PDF検証）で失敗しても台帳が
+    // 無いと再実行で同じ謄本にもう一度課金できてしまう。
+    (isPdfBuffer as Mock).mockReturnValue(false); // PDF検証で 422 に落とす
+    const { promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({ status: 422 });
+    const ledger = (writeAuditLog as Mock).mock.calls
+      .map((c) => c[0])
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].detail.outcome).toBe("charged");
   });
 
   it("課金前の失敗(provider_error等)は台帳に書かない（まだ買っていない=再実行してよい）", async () => {

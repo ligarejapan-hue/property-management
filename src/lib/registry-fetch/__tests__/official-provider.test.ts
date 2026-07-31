@@ -449,7 +449,8 @@ describe("段階②: 所在候補の有料取得（fetchByLocation・fake page �
   it("L2: login → fetchByLocationCandidate の順で実行し PDF を返す", async () => {
     const page = makeFakePage({
       fetchByLocationCandidate: async (input) => {
-        expect(input).toEqual(LOCATION);
+        // 課金境界フラグ(chargeState)が provider から注入される(@codex #345 P1)。
+        expect(input).toEqual({ ...LOCATION, chargeState: { charged: false } });
         return VALID_PDF;
       },
     });
@@ -494,6 +495,50 @@ describe("段階②: 所在候補の有料取得（fetchByLocation・fake page �
     expect(Buffer.isBuffer(result.pdfBuffer)).toBe(true);
     expect(page.calls).toContain("search");
     expect(page.calls).not.toContain("fetchByLocation");
+  });
+
+  it("L6: ⚠外側timeoutが課金後に発火しても charged_but_failed に分類する（素の timeout にしない）", async () => {
+    // 素の timeout で返すと呼び出し側は台帳に書かず再実行できてしまう=二重課金(@codex #345 P1)。
+    const page = makeFakePage({
+      fetchByLocationCandidate: async (input) => {
+        // adapter が請求ボタンを押した直後を模す: フラグを立ててから固まる。
+        (input as { chargeState?: { charged: boolean } }).chargeState!.charged = true;
+        await new Promise(() => {}); // 外側 withTimeout が切るまで解決しない
+        return VALID_PDF;
+      },
+    });
+    const { provider } = makeProvider({ page, timeoutMs: 30 });
+    await expect(
+      provider.fetchRegistryPdf({ location: LOCATION, ref: "p1" }),
+    ).rejects.toMatchObject({ code: "charged_but_failed" });
+    expect(page.closed).toBe(true);
+  });
+
+  it("L7: ⚠検索のログインも購入と同じミューテックスを通る（購入中の検索が先発セッションを切らない）", async () => {
+    const order: string[] = [];
+    let releasePurchase!: () => void;
+    const gate = new Promise<void>((r) => { releasePurchase = r; });
+    const page = makeFakePage({
+      fetchByLocationCandidate: async () => {
+        order.push("purchase-start");
+        await gate;
+        order.push("purchase-end");
+        return VALID_PDF;
+      },
+    });
+    (page as unknown as { searchByLocation: unknown }).searchByLocation = async () => {
+      order.push("search-run");
+      return [];
+    };
+    const { provider } = makeProvider({ page });
+    const purchase = provider.fetchRegistryPdf({ location: LOCATION, ref: "p1" });
+    const search = provider.searchCandidates!({ address: "テスト市1" });
+    await new Promise((r) => setTimeout(r, 20));
+    // 検索は購入が終わるまで走らない(=先発の購入セッションを強制ログアウトさせない)。
+    expect(order).toEqual(["purchase-start"]);
+    releasePurchase();
+    await Promise.all([purchase, search]);
+    expect(order).toEqual(["purchase-start", "purchase-end", "search-run"]);
   });
 
   it("L5: ⚠購入は1件ずつ直列化される（1IDにつき同時1セッション=並行すると先発の課金だけ残る）", async () => {

@@ -37,6 +37,7 @@ import {
   resolveLoginStepDeadline,
   remainingLoginStepMs,
   normalizeChibanForDialog,
+  registryRowMatchesChiban,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
 } from "../auto-fetch";
@@ -1701,5 +1702,22 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     ).rejects.toMatchObject({ code: "provider_error" });
     expect(clicked).toHaveLength(0);
     expect(f.page.fill).not.toHaveBeenCalled();
+  });
+});
+
+describe("段階②: マイページ行の地番一致（部分一致で別の登記を買わない）", () => {
+  // ⚠「1-1」が「1-10」「11-1」の所在にも当たると**別の登記に課金**する(@codex #345 P1)。
+  // ブラウザ内(evaluate)の判定はこの関数と同一規則を複製している(対で維持)。
+  it.each([
+    ["千代田区丸の内一丁目１－１", "1-1", true], // 全角の実表記
+    ["千代田区丸の内一丁目1-1", "1-1", true],
+    ["千代田区丸の内一丁目1-10", "1-1", false], // 末尾不一致
+    ["千代田区丸の内一丁目11-1", "1-1", false], // 境界が数字
+    ["千代田区丸の内一丁目21-1", "1-1", false],
+    ["テスト町1番1", "1-1", true], // 慣用表記も正規化して一致
+    ["", "1-1", false],
+    ["千代田区丸の内一丁目1-1", "", false], // 空の対象は常に不一致(全行一致を防ぐ)
+  ])("%s × %s → %s", (cell, target, want) => {
+    expect(registryRowMatchesChiban(cell, target)).toBe(want);
   });
 });

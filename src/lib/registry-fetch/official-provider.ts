@@ -86,6 +86,12 @@ export interface RegistryBrowserPage {
     lotNumber?: string | null;
     buildingNumber?: string | null;
     certificateType: "owner";
+    /**
+     * 課金境界の共有フラグ(@codex #345 P1)。adapter は**請求ボタンを押す直前**に
+     * `charged = true` を立てる。provider は外側 timeout 等で adapter の catch を
+     * 経由せず失敗した場合でも、これを見て charged_but_failed に分類できる。
+     */
+    chargeState?: { charged: boolean };
   }): Promise<Buffer>;
   /** 検索ヒット後、謄本PDFを取得して Buffer で返す。 */
   downloadRegistryPdf(): Promise<Buffer>;
@@ -207,45 +213,51 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     //    provider_error へ正規化して生メッセージの伝播を防ぐ（RegistryFetchError は分類コード
     //    を保ったまま伝播）。timeout で打ち切った後に factory が遅れて page を返した場合は、
     //    宙に浮いたブラウザ/コンテキストをリークさせないよう、その page を best-effort で閉じる。
-    let page: RegistryBrowserPage;
-    try {
-      page = await this.withStartupTimeout(() => this.browserFactory!());
-    } catch (err) {
-      throw classifyRegistryFetchError(err);
-    }
-
-    try {
-      const pdfBuffer = await this.withTimeout(async () => {
-        await page.login({
-          loginId: this.loginId,
-          password: this.password,
-          baseUrl: this.baseUrl,
-        });
-        const outcome = await page.searchByRealEstateNumber(realEstateNumber);
-        if (!outcome.found) {
-          throw new RegistryFetchError("not_found");
-        }
-        return page.downloadRegistryPdf();
-      });
-
-      return {
-        pdfBuffer,
-        // 非PII の generic filename（不動産番号・所有者名を埋め込まない）。
-        fileName: `registry-auto-${requestId}.pdf`,
-        source: this.name,
-        fetchedAt: this.now(),
-        providerRequestId: requestId,
-      };
-    } catch (err) {
-      throw classifyRegistryFetchError(err);
-    } finally {
-      // 例外経路でも必ず close（Cookie/セッション/DL ファイル等の中間成果物を残さない）。
+    // ⚠アカウント同時1セッション制約(@codex #345 P1): 番号取得のログインも購入と同じ
+    // ミューテックスに通す。別経路のログインが並行すると、**進行中の購入セッションを
+    // 強制ログアウトさせ、課金だけ済んでPDFを取り逃す**。search/fetch の throttle キーが
+    // 別なのはレート制御の話で、セッションの排他はここで一元化する。
+    return runExclusivePurchase(async () => {
+      let page: RegistryBrowserPage;
       try {
-        await page.close();
-      } catch {
-        // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        page = await this.withStartupTimeout(() => this.browserFactory!());
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
       }
-    }
+
+      try {
+        const pdfBuffer = await this.withTimeout(async () => {
+          await page.login({
+            loginId: this.loginId,
+            password: this.password,
+            baseUrl: this.baseUrl,
+          });
+          const outcome = await page.searchByRealEstateNumber(realEstateNumber);
+          if (!outcome.found) {
+            throw new RegistryFetchError("not_found");
+          }
+          return page.downloadRegistryPdf();
+        });
+
+        return {
+          pdfBuffer,
+          // 非PII の generic filename（不動産番号・所有者名を埋め込まない）。
+          fileName: `registry-auto-${requestId}.pdf`,
+          source: this.name,
+          fetchedAt: this.now(),
+          providerRequestId: requestId,
+        };
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
+      } finally {
+        // 例外経路でも必ず close（Cookie/セッション/DL ファイル等の中間成果物を残さない）。
+        try {
+          await page.close();
+        } catch {
+          // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        }
+      }
+    });
   }
 
   /**
@@ -283,6 +295,12 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       } catch (err) {
         throw classifyRegistryFetchError(err);
       }
+      // ⚠課金境界の追跡(@codex #345 P1): 外側の withTimeout(REGISTRY_FETCH_TIMEOUT_MS)は
+      // **請求ボタンを押した後**に発火し得る(adapter は請求済への反映を最大60秒待つ)。
+      // その timeout を素の "timeout" で返すと、呼び出し側は台帳に書かず再実行できて
+      // しまう=二重課金。adapter が請求を押す直前に立てるこのフラグを catch で見て、
+      // 課金後なら分類を charged_but_failed に固定する。
+      const chargeState = { charged: false };
       try {
         // adapter 未対応（fake page 等）は login(実外部接続)の**前に** fail-fast
         // （searchCandidates と同じ方針・無駄な実ログインをしない・課金前）。
@@ -296,7 +314,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
             password: this.password,
             baseUrl: this.baseUrl,
           });
-          return fetchByLocationCandidate.call(page, location);
+          return fetchByLocationCandidate.call(page, { ...location, chargeState });
         });
         return {
           pdfBuffer,
@@ -307,6 +325,16 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           providerRequestId: requestId,
         };
       } catch (err) {
+        if (chargeState.charged) {
+          // 請求済み(の可能性)。timeout も含め charged_but_failed に固定する。
+          if (
+            err instanceof RegistryFetchError &&
+            err.code === "charged_but_failed"
+          ) {
+            throw err;
+          }
+          throw new RegistryFetchError("charged_but_failed");
+        }
         throw classifyRegistryFetchError(err);
       } finally {
         try {
@@ -342,52 +370,57 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       throw new RegistryFetchError("provider_error");
     }
 
-    // 実況パネル (#317 とは別機能): ステップ進行の通知。label は固定文言のみ
-    // (所在・地番・資格情報を入れない)。reporter は非 throw 契約だが、実況が
-    // 検索本体を壊さないよう optional chain のみで触る。
-    request.live?.step("自動操作ブラウザを起動しています…");
-    let page: RegistryBrowserPage;
-    try {
-      page = await this.withStartupTimeout(() => this.browserFactory!());
-    } catch (err) {
-      throw classifyRegistryFetchError(err);
-    }
-
-    try {
-      // searchByLocation は optional(seam)。未提供の adapter では login(実外部接続)の前に
-      // fail-fast し無駄な実ログインを避ける → provider_error。実 adapter は実装済みだが、
-      // 本番は provider 未解決(休眠フラグ)=501 ゆえ、この経路は fake page 注入テストで到達する。
-      const searchByLocation = page.searchByLocation;
-      if (!searchByLocation) {
-        throw new RegistryFetchError("provider_error");
-      }
-      return await this.withTimeout(async () => {
-        // ログイン場面は撮影しない (ID/PW が画面に写り得るため文言のみ =
-        // ユーザー合意済みの「ぼかし or 省略」の省略側)。
-        request.live?.step(
-          "登記情報提供サービスへログインしています…(この画面の表示は省略されます)",
-        );
-        await page.login({
-          loginId: this.loginId,
-          password: this.password,
-          baseUrl: this.baseUrl,
-        });
-        return searchByLocation.call(page, {
-          address: request.address,
-          lotNumber: request.lotNumber,
-          buildingNumber: request.buildingNumber,
-          live: request.live,
-        });
-      });
-    } catch (err) {
-      throw classifyRegistryFetchError(err);
-    } finally {
+    // ⚠アカウント同時1セッション制約(@codex #345 P1): **検索のログインも購入と同じ
+    // ミューテックス**に通す。検索が購入と並行してログインすると、進行中の購入
+    // セッションを強制ログアウトさせ、**課金だけ済んでPDFを取り逃す**。
+    return runExclusivePurchase(async () => {
+      // 実況パネル (#317 とは別機能): ステップ進行の通知。label は固定文言のみ
+      // (所在・地番・資格情報を入れない)。reporter は非 throw 契約だが、実況が
+      // 検索本体を壊さないよう optional chain のみで触る。
+      request.live?.step("自動操作ブラウザを起動しています…");
+      let page: RegistryBrowserPage;
       try {
-        await page.close();
-      } catch {
-        // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        page = await this.withStartupTimeout(() => this.browserFactory!());
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
       }
-    }
+
+      try {
+        // searchByLocation は optional(seam)。未提供の adapter では login(実外部接続)の前に
+        // fail-fast し無駄な実ログインを避ける → provider_error。実 adapter は実装済みだが、
+        // 本番は provider 未解決(休眠フラグ)=501 ゆえ、この経路は fake page 注入テストで到達する。
+        const searchByLocation = page.searchByLocation;
+        if (!searchByLocation) {
+          throw new RegistryFetchError("provider_error");
+        }
+        return await this.withTimeout(async () => {
+          // ログイン場面は撮影しない (ID/PW が画面に写り得るため文言のみ =
+          // ユーザー合意済みの「ぼかし or 省略」の省略側)。
+          request.live?.step(
+            "登記情報提供サービスへログインしています…(この画面の表示は省略されます)",
+          );
+          await page.login({
+            loginId: this.loginId,
+            password: this.password,
+            baseUrl: this.baseUrl,
+          });
+          return searchByLocation.call(page, {
+            address: request.address,
+            lotNumber: request.lotNumber,
+            buildingNumber: request.buildingNumber,
+            live: request.live,
+          });
+        });
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
+      } finally {
+        try {
+          await page.close();
+        } catch {
+          // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        }
+      }
+    });
   }
 
   /**
