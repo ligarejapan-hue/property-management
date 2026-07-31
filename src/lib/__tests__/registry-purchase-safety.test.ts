@@ -61,6 +61,13 @@ describe("PDFを取ってよい行の判定（サイト側 myPageDownload と同
       false,
     );
   });
+
+  it("⚠期限が空(PDF準備前)はまだ取れない（@codex #345 R5 P2）", () => {
+    // 状態が「請求済」に変わってもPDF・期限が入るまで間があり得る。空を「期限内」と
+    // 読むと準備前にDLへ進んで失敗し、課金境界の向こうなので再実行不可で固定される。
+    expect(canDownloadRow(REGISTRY_ROW_STATUS.requested, "")).toBe(false);
+    expect(canDownloadRow(REGISTRY_ROW_STATUS.requested, "  ")).toBe(false);
+  });
 });
 
 describe("状態の説明（黙って握りつぶさない）", () => {

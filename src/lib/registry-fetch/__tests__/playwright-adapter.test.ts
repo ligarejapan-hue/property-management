@@ -1640,8 +1640,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const { clicked } = wireStage2(f, {
       myPageSeq: [
         { result: "checked", checkedCount: 1, rowId: "ROW-9" }, // 行選択(行ID付き)
-        { status: "請求済", expiry: "2026/09/01", when: "t" }, // 状態確認
-        "checked", // DL 前の再選択
+        { result: "ready" }, // 請求済+PDF準備完了(見つけたその場で選択済み)
       ],
     });
     const page = await makeStage2Page(f);
@@ -1690,13 +1689,12 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).not.toContain(SEIKYU);
   });
 
-  it("S5: ⚠請求後にダウンロード行を選び直せなければ charged_but_failed（provider_error にしない）", async () => {
+  it("S5: ⚠請求後に行が準備完了に到達しなければ charged_but_failed（provider_error にしない）", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, {
       myPageSeq: [
-        { result: "checked", checkedCount: 1 },
-        { status: "請求済", expiry: "2026/09/01", when: "t" },
-        "not-found", // 再選択に失敗
+        { result: "checked", checkedCount: 1, rowId: "ROW-9" },
+        { result: "not-found" }, // 課金後、行が見つからないまま(以降も繰り返し)
       ],
     });
     const page = await makeStage2Page(f);
@@ -1768,10 +1766,9 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     expect(src).toContain("prevIds.includes(rowId)");
   });
 
-  it("課金後の状態待ちとDL再選択は行IDに紐付ける(地番の再一致より強い同定)", () => {
+  it("課金後の探索・選択は行IDに紐付ける(地番の再一致より強い同定)", () => {
+    // R5 で状態待ちと再選択を1つの探索へ統合(見つけたその場で選択)。紐付けは1箇所。
     expect(src).toContain("rowId: chargedRowId,");
-    // 状態待ち・再選択の両方(2箇所)
-    expect(src.split("rowId: chargedRowId,").length - 1).toBe(2);
     expect(src).toContain("rowId ? trId !== rowId :");
   });
 

@@ -50,13 +50,20 @@ export function canChargeRow(status: string): boolean {
 }
 
 /**
- * その行から**PDFを取得してよいか**。サイト側 `myPageDownload()` と同じ判定。
- * 請求済み かつ 期限内。
+ * その行から**PDFを取得してよいか**。サイト側 `myPageDownload()` と同じ判定に加え、
+ * **期限が空でない**ことも要求する(@codex #345 R5 P2)。
+ *
+ * ⚠状態が「請求済」に変わっても PDF・期限のデータが入るまでに間があり得る。
+ * 空の期限を「期限内」と読むと**準備前にダウンロードへ進んで失敗**し、
+ * 課金境界の向こう側なので charged_but_failed(再実行不可)で固定されてしまう。
+ * 期限が実際に入ってから=PDFが用意できてから、だけ true。
  */
 export function canDownloadRow(status: string, pdfExpiry: string): boolean {
+  const expiry = pdfExpiry.trim();
   return (
     status.trim() === REGISTRY_ROW_STATUS.requested &&
-    pdfExpiry.trim() !== REGISTRY_PDF_EXPIRED
+    expiry !== "" &&
+    expiry !== REGISTRY_PDF_EXPIRED
   );
 }
 

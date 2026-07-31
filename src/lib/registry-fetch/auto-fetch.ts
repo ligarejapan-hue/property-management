@@ -448,6 +448,7 @@ const REGISTRY_SELECTORS = {
   myPageFilter: "#siborikomi", // [確定] 状態の絞り込み(すべて/未請求/請求済…)
   myPageSeikyuButton: "#myPageSeikyu", // [確定] **請求=課金**(状態が「未請求」の行のみ)
   myPageReloadButton: "#myReloadButton", // [要live] 一覧の「最新表示」(請求済への遷移を待つのに使う)
+  myPageNextButton: "#myPageTable_next", // [確定] 一覧のページ送り(基準の完全性チェックに使う)
 } as const;
 
 /**
@@ -1265,6 +1266,46 @@ function createPlaywrightRegistryPage(
       // 課金対象として選んだマイページ行の行ID(列1)。状態待ち・再選択はこれに紐付ける
       // (@codex #345 R2 P1: 地番の再一致だけだと過去の行と取り違え得る)。
       let chargedRowId = "";
+      // マイページ一覧の絞り込み(@codex #345 R5 P1)。基準・行選択は「未請求」だけに
+      // 絞る=課金され得る行の全体集合を最小化し、ページ分割の可能性も下げる。
+      // 値は option の表示ラベルで選ぶ(実 value は[要live]のため)。change を発火して
+      // 一覧の再描画を促す(ハンドラ未接続でも後段のページ分割チェックが守る)。
+      const applyMyPageFilter = (label: string) =>
+        page.evaluate((json) => {
+          const { filterSel, label } = JSON.parse(json) as {
+            filterSel: string;
+            label: string;
+          };
+          const el = document.querySelector(
+            filterSel,
+          ) as HTMLSelectElement | null;
+          if (!el) return;
+          const opt = Array.from(el.options).find(
+            (o) => (o.textContent ?? "").trim() === label,
+          );
+          if (!opt) return;
+          if (el.value !== opt.value) {
+            el.value = opt.value;
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }, JSON.stringify({
+          filterSel: REGISTRY_SELECTORS.myPageFilter,
+          label,
+        }));
+      // 一覧に次ページがあるか。基準/行選択は**1ページに収まっている時だけ**進める
+      // (見えていない行がある状態の一覧は、基準としても選択対象としても不完全)。
+      const myPageHasNext = async (): Promise<boolean> =>
+        (await page.evaluate((sel) => {
+          const b = document.querySelector(sel) as {
+            disabled?: boolean;
+            className?: string;
+          } | null;
+          if (!b || b.disabled) return false;
+          const st = getComputedStyle(b as unknown as Element);
+          if (st.display === "none" || st.visibility === "hidden") return false;
+          // dataTables 系は disabled を class で表すことがある
+          return !/disabled/.test(String(b.className ?? ""));
+        }, REGISTRY_SELECTORS.myPageNextButton)) === true;
       // ---- 課金前ゾーン(④: 対象行の特定と確定) ----
       try {
         try {
@@ -1408,6 +1449,18 @@ function createPlaywrightRegistryPage(
         // 確定で作られる行を「確定前に無かった行」として同定する=**作成同一性**での紐付け。
         // 状態+地番だけの一致だと、過去の未請求残骸(exe運用等・実probeで実在確認)が
         // 1件だけ見えている時にそれへ課金してしまう。
+        // ⚠一覧を「未請求」に絞り、**1ページに収まっている時だけ**進める
+        // (@codex #345 R5 P1)。絞り込み・ページ分割で見えない行がある一覧は、
+        // 基準としても選択対象としても不完全=残骸が「新規」に化ける余地になる。
+        // 課金され得るのは未請求行だけなので、未請求に絞れば全体集合が最小になる。
+        await applyMyPageFilter("未請求");
+        await sleep(1200);
+        if (await myPageHasNext()) {
+          console.warn(
+            "[registry-fetch] my-page pending list is paginated; refusing before confirm (not charged)",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
         // ⚠基準は**全行のIDが読めた時だけ**成立(@codex #345 R4 P1)。読み込み中や
         // ID欠けの行を黙って落とすと present:true のまま不完全な基準になり、
         // 確定後にその行がIDを得て「新規」に見え、**残骸へ課金**し得る。
@@ -1472,6 +1525,16 @@ function createPlaywrightRegistryPage(
           timeout: DIALOG_RESULT_TIMEOUT_MS,
         });
         await sleep(1000);
+        // 遷移でフィルタが既定に戻り得るため、選択フェーズも「未請求×1ページ」を
+        // 要求する(@codex R5 P1)。満たさなければ課金前に中止(基準と同じ規則)。
+        await applyMyPageFilter("未請求");
+        await sleep(1200);
+        if (await myPageHasNext()) {
+          console.warn(
+            "[registry-fetch] my-page pending list is paginated at pick; refusing (not charged)",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
         // ⑦ 対象行の特定。新規行の描画が遅れることがあるため、見つからない間は
         // 最新表示をはさんで数回だけ再確認する(それでも無ければ課金せず中止)。
         let pick: { result: string; checkedCount?: number; rowId?: string } = {
@@ -1605,133 +1668,103 @@ function createPlaywrightRegistryPage(
         // ここ以降で発火しても provider が charged_but_failed に分類できる。
         if (input.chargeState) input.chargeState.charged = true;
         await domClick(REGISTRY_SELECTORS.myPageSeikyuButton);
-        // ⑨ 状態が「請求済」になるまで待つ(最新表示をはさんで poll)。[要live] 反映時間。
+        // ⑨⑩ 課金した行が「請求済+PDF準備完了」になるのを待ち、**見つけたその場で**
+        // 選択して DL へ進む(探索と選択を分けるとページ跨ぎで取り違え得る)。
+        // 課金後はフィルタを「請求済」へ(課金した行が状態遷移後も見えるように)。
+        // ⚠一覧はページ分割され得るため、行IDが見つからない時は次ページを最大10ページ
+        // 探索する(@codex R5 P1)。課金後なので中止はせず、見つからなければ再試行→
+        // 使い切ったら charged_but_failed(台帳は記録済み・マイページ確認を案内)。
+        await applyMyPageFilter("請求済");
         let ready = false;
-        for (let attempt = 0; attempt < 20; attempt++) {
+        for (let attempt = 0; attempt < 20 && !ready; attempt++) {
           await sleep(3000);
-          const stateJson = (await page.evaluate((json) => {
-            const { tableSel, target, rowId } = JSON.parse(json) as {
-              tableSel: string;
-              target: string;
-              rowId: string;
-            };
-            const norm = (s: string) =>
-              s
-                .normalize("NFKC")
-                .replace(/[‐‑‒–—―ー−]/g, "-")
-                .replace(/番地/g, "-")
-                .replace(/[番号の]/g, "-")
-                .replace(/\s+/g, "")
-                .replace(/-+/g, "-")
-                .replace(/^-+|-+$/g, "")
-                .toLowerCase();
-            const rows = Array.from(
-              document.querySelectorAll(`${tableSel} tbody tr`),
-            );
-            // registryRowMatchesChiban と同一規則を複製(対で維持・部分一致禁止)。
-            const hits = (cell: string): boolean => {
-              const n = norm(cell);
-              if (!n.endsWith(target)) return false;
-              const prev = n[n.length - target.length - 1];
-              return prev === undefined || !/[0-9-]/.test(prev);
-            };
-            // ⚠課金した行の**行ID**に紐付けて見る(@codex R2 P1)。行IDが取れなかった
-            // 場合のみ、地番一致×最新日時のフォールバック(過去の請求済と混同しない)。
-            let best: { status: string; expiry: string; when: string } | null =
-              null;
-            for (const tr of rows) {
-              const tds = tr.querySelectorAll("td");
-              if (tds.length < 7) continue;
-              const trId = (tds[1]?.textContent ?? "").trim();
-              if (rowId ? trId !== rowId : !hits(tds[4]?.textContent ?? ""))
-                continue;
-              const row = {
-                status: (tds[5]?.textContent ?? "").trim(),
-                expiry: (tds[9]?.textContent ?? "").trim(),
-                when: (tds[6]?.textContent ?? "").trim(),
+          for (let pageNo = 0; pageNo < 10; pageNo++) {
+            const readyJson = (await page.evaluate((json) => {
+              const { tableSel, target, rowId } = JSON.parse(json) as {
+                tableSel: string;
+                target: string;
+                rowId: string;
               };
-              if (!best || row.when > best.when) best = row;
+              const norm = (s: string) =>
+                s
+                  .normalize("NFKC")
+                  .replace(/[‐‑‒–—―ー−]/g, "-")
+                  .replace(/番地/g, "-")
+                  .replace(/[番号の]/g, "-")
+                  .replace(/\s+/g, "")
+                  .replace(/-+/g, "-")
+                  .replace(/^-+|-+$/g, "")
+                  .toLowerCase();
+              // registryRowMatchesChiban と同一規則を複製(対で維持・部分一致禁止)。
+              const hits = (cell: string): boolean => {
+                const n = norm(cell);
+                if (!n.endsWith(target)) return false;
+                const prev = n[n.length - target.length - 1];
+                return prev === undefined || !/[0-9-]/.test(prev);
+              };
+              const rows = Array.from(
+                document.querySelectorAll(`${tableSel} tbody tr`),
+              );
+              // ⚠課金した行の**行ID**に紐付ける(@codex R2 P1)。行IDが取れなかった
+              // 場合のみ、地番一致×最新日時のフォールバック。
+              let best: { tr: Element; when: string } | null = null;
+              for (const tr of rows) {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length < 7) continue;
+                const trId = (tds[1]?.textContent ?? "").trim();
+                if (rowId ? trId !== rowId : !hits(tds[4]?.textContent ?? ""))
+                  continue;
+                const when = (tds[6]?.textContent ?? "").trim();
+                if (!best || when > best.when) best = { tr, when };
+              }
+              if (!best) return JSON.stringify({ result: "not-found" });
+              const tds = best.tr.querySelectorAll("td");
+              const status = (tds[5]?.textContent ?? "").trim();
+              const expiry = (tds[9]?.textContent ?? "").trim();
+              // canDownloadRow と同一規則を複製(対で維持): 請求済+期限が**非空**+期間内。
+              // 空の期限=PDF準備前(@codex R5 P2)。準備前にDLへ進むと失敗が
+              // charged_but_failed で固定される。
+              if (status !== "請求済" || expiry === "" || expiry === "期間超過") {
+                return JSON.stringify({ result: "pending", status });
+              }
+              // 見つけたその場で選択まで済ませる(他の行の check は全て外す)。
+              for (const cb of Array.from(
+                document.querySelectorAll(
+                  `${tableSel} tbody input[type="checkbox"]`,
+                ),
+              ) as HTMLInputElement[]) {
+                if (cb.checked) cb.click();
+              }
+              const cb = best.tr.querySelector(
+                'input[type="checkbox"]',
+              ) as HTMLInputElement | null;
+              if (!cb) return JSON.stringify({ result: "no-checkbox" });
+              if (!cb.checked) cb.click();
+              return JSON.stringify({ result: "ready" });
+            }, JSON.stringify({
+              tableSel: REGISTRY_SELECTORS.myPageTable,
+              target: targetKey,
+              rowId: chargedRowId,
+            }))) as string;
+            const st = JSON.parse(readyJson) as { result: string };
+            if (st.result === "ready") {
+              ready = true;
+              break;
             }
-            return JSON.stringify(best ?? { status: "", expiry: "", when: "" });
-          }, JSON.stringify({
-            tableSel: REGISTRY_SELECTORS.myPageTable,
-            target: targetKey,
-            rowId: chargedRowId,
-          }))) as string;
-          const state = JSON.parse(stateJson) as {
-            status: string;
-            expiry: string;
-          };
-          if (canDownloadRow(state.status, state.expiry)) {
-            ready = true;
-            break;
+            // pending(行は見えたが準備前)/no-checkbox → リロードして次の attempt へ。
+            if (st.result !== "not-found") break;
+            // not-found → 次ページを探索(無ければ break → リロードして次の attempt)。
+            if (!(await myPageHasNext())) break;
+            await page.click(REGISTRY_SELECTORS.myPageNextButton);
+            await sleep(1200);
           }
-          // まだ反映前(未請求/請求中/空)なら最新表示して再確認。
-          await domClick(REGISTRY_SELECTORS.myPageReloadButton).catch(() => {});
+          if (!ready) {
+            await domClick(REGISTRY_SELECTORS.myPageReloadButton).catch(
+              () => {},
+            );
+          }
         }
         if (!ready) {
-          throw new RegistryFetchError("charged_but_failed");
-        }
-        // ⑩ 同じ行を選び直して「表示・保存」→ download を受ける。
-        //    ⚠課金した行の**行ID**優先(@codex R2 P1・取れなかった場合のみ地番×最新)。
-        const reJson = (await page.evaluate((json) => {
-          const { tableSel, target, rowId } = JSON.parse(json) as {
-            tableSel: string;
-            target: string;
-            rowId: string;
-          };
-          const norm = (s: string) =>
-            s
-              .normalize("NFKC")
-              .replace(/[‐‑‒–—―ー−]/g, "-")
-              .replace(/番地/g, "-")
-              .replace(/[番号の]/g, "-")
-              .replace(/\s+/g, "")
-              .replace(/-+/g, "-")
-              .replace(/^-+|-+$/g, "")
-              .toLowerCase();
-          const rows = Array.from(
-            document.querySelectorAll(`${tableSel} tbody tr`),
-          );
-          // registryRowMatchesChiban と同一規則を複製(対で維持・部分一致禁止)。
-          const hits = (cell: string): boolean => {
-            const n = norm(cell);
-            if (!n.endsWith(target)) return false;
-            const prev = n[n.length - target.length - 1];
-            return prev === undefined || !/[0-9-]/.test(prev);
-          };
-          let best: { tr: Element; when: string } | null = null;
-          for (const tr of rows) {
-            const tds = tr.querySelectorAll("td");
-            if (tds.length < 7) continue;
-            const status = (tds[5]?.textContent ?? "").trim();
-            if (status !== "請求済") continue;
-            const trId = (tds[1]?.textContent ?? "").trim();
-            if (rowId ? trId !== rowId : !hits(tds[4]?.textContent ?? ""))
-              continue;
-            const when = (tds[6]?.textContent ?? "").trim();
-            if (!best || when > best.when) best = { tr, when };
-          }
-          if (!best) return "not-found";
-          for (const cb of Array.from(
-            document.querySelectorAll(
-              `${tableSel} tbody input[type="checkbox"]`,
-            ),
-          ) as HTMLInputElement[]) {
-            if (cb.checked) cb.click();
-          }
-          const cb = best.tr.querySelector(
-            'input[type="checkbox"]',
-          ) as HTMLInputElement | null;
-          if (!cb) return "no-checkbox";
-          if (!cb.checked) cb.click();
-          return "checked";
-        }, JSON.stringify({
-          tableSel: REGISTRY_SELECTORS.myPageTable,
-          target: targetKey,
-          rowId: chargedRowId,
-        }))) as string;
-        if (reJson !== "checked") {
           throw new RegistryFetchError("charged_but_failed");
         }
         const [download] = await Promise.all([
