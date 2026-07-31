@@ -1817,6 +1817,14 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     expect(src).toContain("if (status !== label)");
   });
 
+  it("⚠課金後のダウンロード待ちは明示予算を渡す(@codex R9 P1: 既定30秒に先取りされない)", () => {
+    // page.setDefaultTimeout は通常予算のまま。timeout を渡さないと provider の
+    // 延長予算(10分)より先にブラウザ側の既定が打ち切り、支払済みが台帳固定される。
+    expect(src).toContain(
+      'page.waitForEvent("download", { timeout: PAID_DOWNLOAD_WAIT_MS })',
+    );
+  });
+
   it("⚠単一ページ判定は前後両方のページ送りが無効であること(@codex R7 P1)", () => {
     // 次ページだけ見ると最終ページ(次=無効・前=有効)を単一ページと誤認し、
     // 先頭側の行が基準から漏れる。基準・選択の前には先頭復帰も行う。

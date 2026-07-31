@@ -473,6 +473,15 @@ export function registryRowMatchesChiban(
 }
 
 /**
+ * 課金後のダウンロード開始待ち(ms)。⚠page.setDefaultTimeout は通常予算
+ * (REGISTRY_FETCH_TIMEOUT_MS・例30秒)のままなので、`waitForEvent("download")` に
+ * timeout を渡さないと**ブラウザ側の既定30秒が provider の延長予算(10分)より先に
+ * 打ち切り**、支払済みなのに charged_but_failed で台帳固定される(@codex #345 R9 P1)。
+ * 課金境界の向こうの待ちには、この明示予算を必ず渡す。
+ */
+export const PAID_DOWNLOAD_WAIT_MS = 120_000;
+
+/**
  * 請求事項のうち**所有者事項以外**のチェックボックス（段階②）。
  * 請求前にすべて外す＝所有者事項だけを買う。外し漏れは追加課金になるため、
  * 設定後に実際の checked 状態を読み戻して検証する（fail-closed・課金前）。
@@ -1858,8 +1867,10 @@ function createPlaywrightRegistryPage(
         if (!ready) {
           throw new RegistryFetchError("charged_but_failed");
         }
+        // ⚠課金後の待ちには明示予算を渡す(@codex R9 P1)。渡さないと page の既定
+        // timeout(通常予算=例30秒)が provider の延長予算(10分)より先に打ち切る。
         const [download] = await Promise.all([
-          page.waitForEvent("download", {}),
+          page.waitForEvent("download", { timeout: PAID_DOWNLOAD_WAIT_MS }),
           domClick(REGISTRY_SELECTORS.downloadButton),
         ]);
         const stream = await download.createReadStream();
