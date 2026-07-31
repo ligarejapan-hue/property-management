@@ -90,8 +90,14 @@ export interface RegistryBrowserPage {
      * 課金境界の共有フラグ(@codex #345 P1)。adapter は**請求ボタンを押す直前**に
      * `charged = true` を立てる。provider は外側 timeout 等で adapter の catch を
      * 経由せず失敗した場合でも、これを見て charged_but_failed に分類できる。
+     *
+     * ⚠aborted(@codex R10 P1): provider が**課金前タイムアウト**で reject した印。
+     * reject しても実行中の op はキャンセルされない(JS の Promise は中断不能)ため、
+     * 裏で走り続けた adapter が後から請求してしまうと**記録なき課金**になる。
+     * adapter は**請求ボタンを押す直前に必ずこの印を確認**し、立っていれば課金せず
+     * 中止する(charged への代入と同一同期区間で確認する=競合の隙間なし)。
      */
-    chargeState?: { charged: boolean };
+    chargeState?: { charged: boolean; aborted?: boolean };
   }): Promise<Buffer>;
   /** 検索ヒット後、謄本PDFを取得して Buffer で返す。 */
   downloadRegistryPdf(): Promise<Buffer>;
@@ -316,7 +322,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       // その timeout を素の "timeout" で返すと、呼び出し側は台帳に書かず再実行できて
       // しまう=二重課金。adapter が請求を押す直前に立てるこのフラグを catch で見て、
       // 課金後なら分類を charged_but_failed に固定する。
-      const chargeState = { charged: false };
+      const chargeState = { charged: false, aborted: false };
       try {
         // adapter 未対応（fake page 等）は login(実外部接続)の**前に** fail-fast
         // （searchCandidates と同じ方針・無駄な実ログインをしない・課金前）。
@@ -463,7 +469,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
    */
   private withPaidTimeout<T>(
     op: () => Promise<T>,
-    chargeState: { charged: boolean },
+    chargeState: { charged: boolean; aborted?: boolean },
   ): Promise<T> {
     const timeoutMs = this.timeoutMs;
     if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -475,6 +481,10 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       const softTimer = setTimeout(() => {
         if (!chargeState.charged) {
           // 課金前=無料。従来どおりの打ち切り。
+          // ⚠reject しても op はキャンセルされない(@codex R10 P1)。裏で走り続けた
+          // adapter が後から請求すると**記録なき課金**になるため、中止の印を先に
+          // 立てる(adapter は請求ボタンの直前で必ずこれを確認する)。
+          chargeState.aborted = true;
           reject(new RegistryFetchError("timeout"));
           return;
         }

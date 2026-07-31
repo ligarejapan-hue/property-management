@@ -1747,6 +1747,26 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).not.toContain(SEIKYU);
   });
 
+  it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
+    // provider が課金前タイムアウトで reject した後も、この関数は裏で走り続ける。
+    // 印を見ずに押すと、呼び出し側は timeout(台帳なし・ロック解除済み)として処理を
+    // 終えているのに課金だけが起きる=記録なき課金。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      myPageSeq: [{ result: "checked", checkedCount: 1, rowId: "ROW-9" }],
+    });
+    const page = await makeStage2Page(f);
+    await expect(
+      (page as unknown as {
+        fetchByLocationCandidate: (input: unknown) => Promise<Buffer>;
+      }).fetchByLocationCandidate({
+        ...INPUT,
+        chargeState: { charged: false, aborted: true },
+      }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).not.toContain(SEIKYU); // 請求は押していない
+  });
+
   it("S6: 買う対象(地番/家屋番号)が空なら何もせず provider_error（ページに触れない）", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f);

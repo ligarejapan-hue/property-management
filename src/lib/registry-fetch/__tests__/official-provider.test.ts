@@ -451,8 +451,11 @@ describe("段階②: 所在候補の有料取得（fetchByLocation・fake page �
   it("L2: login → fetchByLocationCandidate の順で実行し PDF を返す", async () => {
     const page = makeFakePage({
       fetchByLocationCandidate: async (input) => {
-        // 課金境界フラグ(chargeState)が provider から注入される(@codex #345 P1)。
-        expect(input).toEqual({ ...LOCATION, chargeState: { charged: false } });
+        // 課金境界フラグ(chargeState)が provider から注入される(@codex #345 P1/R10)。
+        expect(input).toEqual({
+          ...LOCATION,
+          chargeState: { charged: false, aborted: false },
+        });
         return VALID_PDF;
       },
     });
@@ -615,5 +618,47 @@ describe("段階②: 所在候補の有料取得（fetchByLocation・fake page �
     releaseFirst();
     await Promise.all([p1, p2]);
     expect(order).toEqual(["start-1", "end-1", "start-2", "end-2"]);
+  });
+});
+
+describe("段階②: 課金前タイムアウトの競合（@codex #345 R10 P1）", () => {
+  beforeEach(() => {
+    __resetPurchaseChainForTest();
+  });
+
+  const LOCATION2 = {
+    address: "テスト市テスト町一丁目",
+    lotNumber: "1-1",
+    buildingNumber: null,
+    certificateType: "owner" as const,
+  };
+
+  it("L10: 課金前タイムアウトで reject する際、中止の印(aborted)を立てる", async () => {
+    // reject しても op はキャンセルされない。裏で走り続けた adapter が後から
+    // 請求しないよう、印を見て自主的に止まれる状態にする。
+    let seen: { charged: boolean; aborted?: boolean } | null = null;
+    const page = makeFakePage({
+      fetchByLocationCandidate: async (input) => {
+        seen = (
+          input as unknown as {
+            chargeState: { charged: boolean; aborted?: boolean };
+          }
+        ).chargeState;
+        await new Promise((r) => setTimeout(r, 120)); // 課金前のまま soft timeout を跨ぐ
+        return VALID_PDF;
+      },
+    });
+    const { provider } = makeProvider({
+      page,
+      timeoutMs: 30,
+      paidFlowExtraTimeoutMs: 500,
+    });
+    await expect(
+      provider.fetchRegistryPdf({ location: LOCATION2, ref: "p1" }),
+    ).rejects.toMatchObject({ code: "timeout" });
+    // reject 時点で中止の印が立っている(裏で走る adapter が請求直前に見て止まる)。
+    expect(seen).not.toBeNull();
+    expect(seen!.aborted).toBe(true);
+    expect(seen!.charged).toBe(false);
   });
 });

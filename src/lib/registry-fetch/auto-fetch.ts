@@ -1759,6 +1759,17 @@ function createPlaywrightRegistryPage(
         throw new RegistryFetchError("provider_error");
       }
 
+      // ⚠中止の印を**請求ボタンの直前**で確認(@codex R10 P1)。provider が課金前
+      // タイムアウトで reject した後も、この関数は裏で走り続けている可能性がある。
+      // ここで確認せず押すと、呼び出し側は timeout(=台帳なし・ロック解除済み)として
+      // 処理を終えているのに課金だけが起きる=**記録なき課金**。
+      // この確認〜下の charged 代入は同一同期区間(間に await なし)=競合の隙間なし。
+      // ⚠課金後 try の**外**で確認する(まだ課金していない失敗を charged_but_failed に
+      // 分類しないため)。
+      if (input.chargeState?.aborted) {
+        throw new RegistryFetchError("provider_error");
+      }
+
       // ---- ⑧ ここから課金。以降の失敗はすべて charged_but_failed ----
       try {
         // ⚠課金境界フラグ(@codex #345 P1)。押す**直前**に立てる=外側 timeout が
