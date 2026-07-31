@@ -131,7 +131,19 @@ export interface OfficialRegistryProviderOptions {
   requestIdFactory?: () => string;
   /** 所在検索の実装/セレクタが校正済みか(専用フラグ)。true のときだけ supportsLocationSearch。 */
   supportsLocationSearch?: boolean;
+  /**
+   * 課金後の延長予算(ms)。既定 PAID_FLOW_EXTRA_TIMEOUT_MS。テスト注入用。
+   * 課金後の有界ループ(最悪≈500秒)を打ち切らないための値で、短くしすぎると
+   * 支払済みPDFを取り切れず charged_but_failed に固定される。
+   */
+  paidFlowExtraTimeoutMs?: number;
 }
+
+/**
+ * 課金後の延長予算の既定値(10分)。adapter の課金後ループの最悪値から導出:
+ * attempt 20回 × (sleep3s + 先頭復帰≤8s + ページ探索≤12s) ≈ 460s + DL待ち ≈ 500s。
+ */
+export const PAID_FLOW_EXTRA_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** 未分類の例外を provider_error に潰す（生メッセージ＝secret/PII を例外に載せない）。 */
 function classifyRegistryFetchError(err: unknown): RegistryFetchError {
@@ -161,6 +173,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
   private readonly requestIdFactory: () => string;
   /** 所在検索が使えるか(専用校正フラグ由来)。isRegistryLocationSearchConfigured が参照。 */
   readonly supportsLocationSearch: boolean;
+  /** 課金後の延長予算(ms)。withPaidTimeout が参照。 */
+  private readonly paidFlowExtraTimeoutMs: number;
 
   constructor(options: OfficialRegistryProviderOptions) {
     this.loginId = options.loginId;
@@ -174,6 +188,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       options.requestIdFactory ??
       (() => `official-${Math.random().toString(36).slice(2, 10)}`);
     this.supportsLocationSearch = options.supportsLocationSearch === true;
+    this.paidFlowExtraTimeoutMs =
+      options.paidFlowExtraTimeoutMs ?? PAID_FLOW_EXTRA_TIMEOUT_MS;
   }
 
   async fetchRegistryPdf(
@@ -308,14 +324,16 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         if (!fetchByLocationCandidate) {
           throw new RegistryFetchError("provider_error");
         }
-        const pdfBuffer = await this.withTimeout(async () => {
+        // ⚠有料フローは二段タイムアウト(@codex R8 P1): 課金前=通常予算 /
+        // 課金後=延長予算(支払済みPDFを取り切るため)。
+        const pdfBuffer = await this.withPaidTimeout(async () => {
           await page.login({
             loginId: this.loginId,
             password: this.password,
             baseUrl: this.baseUrl,
           });
           return fetchByLocationCandidate.call(page, { ...location, chargeState });
-        });
+        }, chargeState);
         return {
           pdfBuffer,
           // 非PII の generic filename（地番・所有者名を埋め込まない）。
@@ -427,6 +445,61 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
    * timeoutMs 指定時、op をタイムアウト付きで実行する。期限超過は RegistryFetchError("timeout")。
    * 未指定なら op をそのまま await（タイムアウト無し）。
    */
+  /**
+   * 有料フロー用の二段タイムアウト(@codex #345 R8 P1)。
+   *
+   * 通常の withTimeout(REGISTRY_FETCH_TIMEOUT_MS・例30秒)は、課金後の
+   * 「請求済+PDF準備完了」待ち(最大60秒+ページ探索)より**短くなり得る**。
+   * その場合、支払いは済んでいるのに打ち切られ、台帳に charged_but_failed で
+   * 固定される(実際は数十秒後に取れるのに)。
+   *
+   * そこで予算を課金境界で分ける:
+   *  - **課金前**(chargeState.charged=false): 従来どおり timeoutMs で打ち切り(timeout)。
+   *    まだ無料なので早く諦めてよい。
+   *  - **課金後**: 打ち切らず paidFlowExtraTimeoutMs まで延長。adapter の課金後
+   *    ループは attempt/ページ数/各待ちがすべて有界(最悪 ≈500秒)なので、この
+   *    延長は暴走ではなく「支払済みPDFを取り切るための予算」。それでも尽きたら
+   *    charged_but_failed(台帳記録は呼び出し側で行われる)。
+   */
+  private withPaidTimeout<T>(
+    op: () => Promise<T>,
+    chargeState: { charged: boolean },
+  ): Promise<T> {
+    const timeoutMs = this.timeoutMs;
+    if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return op();
+    }
+    const extraMs = this.paidFlowExtraTimeoutMs;
+    return new Promise<T>((resolve, reject) => {
+      let hardTimer: ReturnType<typeof setTimeout> | null = null;
+      const softTimer = setTimeout(() => {
+        if (!chargeState.charged) {
+          // 課金前=無料。従来どおりの打ち切り。
+          reject(new RegistryFetchError("timeout"));
+          return;
+        }
+        // 課金後=支払済み。準備待ちに十分な予算まで延長する。
+        hardTimer = setTimeout(() => {
+          reject(new RegistryFetchError("charged_but_failed"));
+        }, extraMs);
+      }, timeoutMs);
+      const clear = () => {
+        clearTimeout(softTimer);
+        if (hardTimer) clearTimeout(hardTimer);
+      };
+      op().then(
+        (value) => {
+          clear();
+          resolve(value);
+        },
+        (err) => {
+          clear();
+          reject(err);
+        },
+      );
+    });
+  }
+
   private withTimeout<T>(op: () => Promise<T>): Promise<T> {
     const timeoutMs = this.timeoutMs;
     if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {

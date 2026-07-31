@@ -79,6 +79,7 @@ function makeProvider(opts: {
   baseUrl?: string;
   timeoutMs?: number;
   throttle?: ReturnType<typeof createRegistryFetchThrottle>;
+  paidFlowExtraTimeoutMs?: number;
   now?: () => Date;
 }) {
   const page = opts.page ?? makeFakePage();
@@ -96,6 +97,7 @@ function makeProvider(opts: {
     timeoutMs: opts.timeoutMs,
     browserFactory: factory,
     throttle: opts.throttle,
+    paidFlowExtraTimeoutMs: opts.paidFlowExtraTimeoutMs,
     now: opts.now ?? (() => new Date(0)),
     requestIdFactory: () => "req-fixed",
   });
@@ -497,21 +499,65 @@ describe("段階②: 所在候補の有料取得（fetchByLocation・fake page �
     expect(page.calls).not.toContain("fetchByLocation");
   });
 
-  it("L6: ⚠外側timeoutが課金後に発火しても charged_but_failed に分類する（素の timeout にしない）", async () => {
+  it("L6: ⚠課金後に予算が尽きたら charged_but_failed に分類する（素の timeout にしない）", async () => {
     // 素の timeout で返すと呼び出し側は台帳に書かず再実行できてしまう=二重課金(@codex #345 P1)。
     const page = makeFakePage({
       fetchByLocationCandidate: async (input) => {
         // adapter が請求ボタンを押した直後を模す: フラグを立ててから固まる。
         (input as { chargeState?: { charged: boolean } }).chargeState!.charged = true;
-        await new Promise(() => {}); // 外側 withTimeout が切るまで解決しない
+        await new Promise(() => {}); // 予算が尽きるまで解決しない
         return VALID_PDF;
       },
     });
-    const { provider } = makeProvider({ page, timeoutMs: 30 });
+    const { provider } = makeProvider({
+      page,
+      timeoutMs: 30,
+      paidFlowExtraTimeoutMs: 50, // テストでは延長予算も短く注入
+    });
     await expect(
       provider.fetchRegistryPdf({ location: LOCATION, ref: "p1" }),
     ).rejects.toMatchObject({ code: "charged_but_failed" });
     expect(page.closed).toBe(true);
+  });
+
+  it("L8: ⚠課金後は通常予算を超えても延長予算内なら完走する（@codex #345 R8 P1）", async () => {
+    // 通常予算(例30秒)は課金後の「請求済+PDF準備」待ち(最大60秒+)より短くなり得る。
+    // 支払済みなのに打ち切って charged_but_failed に固定しない=延長予算で取り切る。
+    const page = makeFakePage({
+      fetchByLocationCandidate: async (input) => {
+        (input as { chargeState?: { charged: boolean } }).chargeState!.charged = true;
+        await new Promise((r) => setTimeout(r, 80)); // 通常予算(30ms)は超えるが延長内
+        return VALID_PDF;
+      },
+    });
+    const { provider } = makeProvider({
+      page,
+      timeoutMs: 30,
+      paidFlowExtraTimeoutMs: 500,
+    });
+    const result = await provider.fetchRegistryPdf({
+      location: LOCATION,
+      ref: "p1",
+    });
+    expect(result.pdfBuffer).toBe(VALID_PDF);
+  });
+
+  it("L9: 課金前は通常予算どおり打ち切る（timeout のまま・無料なので早く諦めてよい）", async () => {
+    const page = makeFakePage({
+      fetchByLocationCandidate: async () => {
+        // charged を立てずに固まる=課金前のハング。
+        await new Promise(() => {});
+        return VALID_PDF;
+      },
+    });
+    const { provider } = makeProvider({
+      page,
+      timeoutMs: 30,
+      paidFlowExtraTimeoutMs: 500,
+    });
+    await expect(
+      provider.fetchRegistryPdf({ location: LOCATION, ref: "p1" }),
+    ).rejects.toMatchObject({ code: "timeout" });
   });
 
   it("L7: ⚠検索のログインも購入と同じミューテックスを通る（購入中の検索が先発セッションを切らない）", async () => {
