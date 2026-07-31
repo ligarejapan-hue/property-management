@@ -1817,6 +1817,21 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     expect(src).toContain("if (status !== label)");
   });
 
+  it("⚠単一ページ判定は前後両方のページ送りが無効であること(@codex R7 P1)", () => {
+    // 次ページだけ見ると最終ページ(次=無効・前=有効)を単一ページと誤認し、
+    // 先頭側の行が基準から漏れる。基準・選択の前には先頭復帰も行う。
+    expect(src).toContain("myPageIsSinglePage");
+    expect(src).toContain("myPagePrevButton))");
+    // 基準(row-ids 読み取り)より前に先頭復帰+単一ページ判定がある
+    const baselineIdx = src.indexOf('probe: "row-ids"');
+    const resetIdx = src.indexOf("await resetMyPageToFirst();");
+    const singleIdx = src.indexOf("await myPageIsSinglePage()");
+    expect(resetIdx).toBeGreaterThan(-1);
+    expect(singleIdx).toBeGreaterThan(-1);
+    expect(resetIdx).toBeLessThan(baselineIdx);
+    expect(singleIdx).toBeLessThan(baselineIdx);
+  });
+
   it("⚠基準は全行のIDが読めた時だけ成立する(@codex R4 P1: 不完全な基準で課金しない)", () => {
     // ID欠けの行を黙って落とすと present:true のまま不完全な基準になり、
     // 確定後にその行がIDを得て「新規」に見え、残骸へ課金し得る。

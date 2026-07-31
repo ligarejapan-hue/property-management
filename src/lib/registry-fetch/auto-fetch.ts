@@ -1309,6 +1309,12 @@ function createPlaywrightRegistryPage(
         }, sel)) === true;
       const myPageHasNext = () =>
         pagerEnabled(REGISTRY_SELECTORS.myPageNextButton);
+      // ⚠「1ページに収まっている」は**前後どちらのページ送りも無効**であること
+      // (@codex #345 R7 P1)。次ページだけ見ると、最終ページに居るとき(次=無効・
+      // 前=有効)に単一ページと誤認し、先頭側の行が基準から漏れる。
+      const myPageIsSinglePage = async (): Promise<boolean> =>
+        !(await pagerEnabled(REGISTRY_SELECTORS.myPageNextButton)) &&
+        !(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton));
       // 再走査の前に一覧を先頭ページへ戻す(@codex #345 R6 P1)。前へボタンが有効な間
       // 押し戻す(最大10回)。戻さないと前回の走査で末尾ページに居座り、リロード後に
       // 先頭側へ挿入された行を**残りの全 attempt で見逃す**。
@@ -1526,7 +1532,11 @@ function createPlaywrightRegistryPage(
           );
           throw new RegistryFetchError("provider_error");
         }
-        if (await myPageHasNext()) {
+        // ⚠先頭ページへ戻してから単一ページ判定(@codex R7 P1)。フィルタが既に
+        // 「未請求」で最終ページに居ると applyMyPageFilter は no-op になり、
+        // 次ページだけの判定では「最終ページ=単一ページ」と誤認する。
+        await resetMyPageToFirst();
+        if (!(await myPageIsSinglePage())) {
           console.warn(
             "[registry-fetch] my-page pending list is paginated; refusing before confirm (not charged)",
           );
@@ -1605,7 +1615,9 @@ function createPlaywrightRegistryPage(
           );
           throw new RegistryFetchError("provider_error");
         }
-        if (await myPageHasNext()) {
+        // 選択フェーズも先頭復帰→前後無効の単一ページ判定(基準と同じ規則・@codex R7 P1)。
+        await resetMyPageToFirst();
+        if (!(await myPageIsSinglePage())) {
           console.warn(
             "[registry-fetch] my-page pending list is paginated at pick; refusing (not charged)",
           );
