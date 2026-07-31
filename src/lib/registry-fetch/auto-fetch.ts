@@ -387,9 +387,13 @@ const REGISTRY_SELECTORS = {
   // 番号取得(不動産番号での請求)。請求画面で請求方法=不動産番号を選ぶ同一フロー。
   searchMethodNumberRadio: "#fuSeikyuMethodFUDOSAN_NO", // [確定] 請求方法=不動産番号 ラジオ
   searchInput: "#fuFudosanNo", // [要live] 不動産番号入力欄(番号請求時の実操作画面で確定)
-  searchSubmit: "#myPageSeikyu", // [要live] 請求実行/次へ
+  // ⚠2026-07-31 実サイト校正で是正: 旧値は `#myPageSeikyu`(=マイページ一覧の**課金**ボタン)を
+  // 「検索の送信」として使っており役割を取り違えていた。請求条件の送信は id 無しの「確定」
+  // ボタン(onclick=fuBtnForward())で、押しても**課金されず**カートに `未請求` で載るだけ。
+  searchSubmit: 'button[onclick*="fuBtnForward"]', // [確定] 請求条件の確定(無料・カートへ)
   searchResult: "#fudosanIchiranTbl", // [確定] 請求リスト(一覧)テーブル=ヒットの目印
-  downloadButton: "#download-pdf", // [要live] PDFダウンロード
+  // ⚠2026-07-31 是正: `#download-pdf` は**実サイトに存在しない**プレースホルダだった。
+  downloadButton: 'button[onclick*="myPageDownload"]', // [確定] 「表示・保存」(請求済のみ)
   // 所在検索: 実サイトは多段UI。直接入力モードでダイアログを避ける(堅牢)。
   searchMethodLocationRadio: "#fuSeikyuMethodSHOZAI", // [確定] 請求方法=所在 ラジオ
   locationTypeLandRadio: "#fuShozaiTypeTOCHI", // [確定] 種別=土地
@@ -408,6 +412,16 @@ const REGISTRY_SELECTORS = {
   dialogResultCheckbox: "#cbnDlgChibanCheckTbl input[type=checkbox]", // [確定] 候補行チェックボックス
   dialogPageNext: "#cbnDlgBtnPageNext", // [確定] 候補一覧の次ページ(複数ページ時)
   dialogCancel: "#cbnDlgBtnCancel", // [確定] ダイアログ取消(課金しない閉じ方)
+  dialogOk: "#cbnDlgBtnOk", // [確定] ダイアログ確定(選んだ地番を親フォームへ反映・無料)
+  // 請求事項(謄本種別)のチェックボックス群。2026-07-31 実サイト校正で確定。
+  // ⚠ラジオではなく**チェックボックス**で、複数同時に請求できる形。
+  certificateAllCheck: "#fuAll", // [確定] 全部事項
+  certificateOwnerCheck: "#fuShoyusya", // [確定] 所有者事項(アプリ既定 certificateType=owner)
+  // マイページ(請求一覧)。課金とPDF取得はここで行う。
+  myPageTab: "a[onclick*=\"selectTab('tabMy')\"]", // [確定] マイページタブ
+  myPageTable: "#myPageTable", // [確定] 請求一覧テーブル
+  myPageFilter: "#siborikomi", // [確定] 状態の絞り込み(すべて/未請求/請求済…)
+  myPageSeikyuButton: "#myPageSeikyu", // [確定] **請求=課金**(状態が「未請求」の行のみ)
 } as const;
 
 /**
