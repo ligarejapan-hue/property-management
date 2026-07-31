@@ -3,6 +3,7 @@ import {
   canTrustCoverageLegend,
   snapBboxToCells,
   COVERAGE_CELL_LIMIT,
+  COVERAGE_CELL_SIZES,
   coarserCoverageCellSize,
   maxCellsForBbox,
   COVERAGE_CELL_STEPS,
@@ -19,6 +20,7 @@ import {
   groupCoverageCellsByTier,
   resolveCoverageCellSize,
   type CoverageCell,
+  type CoverageCellSize,
 } from "../field-survey-coverage";
 
 // 踏破ヒート（巡回で歩いた場所の蓄積表示）の純関数。
@@ -28,6 +30,30 @@ import {
 // 色は**全社合計**（Aさん1回 + Bさん1回 = 2回）で、誰の分かは区別しない。
 
 describe("格子の粗さは bbox から自動で決まる（利用者に選ばせない）", () => {
+  it("さらに寄った（約1km四方まで）は 25m 格子", () => {
+    // 2026-07-31 追加の最細段。街を1本ずつ見るための粒度。
+    // 上限は 42 マス分 = 約 1.07km 四方（描画上限 2,000 マスから逆算）。
+    expect(
+      resolveCoverageCellSize({
+        south: 35.68,
+        north: 35.68 + 0.009,
+        west: 139.76,
+        east: 139.76 + 0.011,
+      }),
+    ).toBe("ultrafine");
+  });
+
+  it("約1.1km四方を超えたら 50m 格子へ落ちる（境界の外側）", () => {
+    expect(
+      resolveCoverageCellSize({
+        south: 35.68,
+        north: 35.68 + 0.0105,
+        west: 139.76,
+        east: 139.76 + 0.0125,
+      }),
+    ).toBe("fine");
+  });
+
   it("街を歩く寄り（約2km四方まで）は 50m 格子", () => {
     // ⚠上限は「3km四方」から狭めた。50m 格子で 3km 四方だと最大 3,600 マスになり
     // 描画上限(2,000)を超えて色が全部消えるため（= 踏破済みを未踏破と誤読する）。
@@ -98,28 +124,53 @@ describe("格子の粗さは bbox から自動で決まる（利用者に選ば�
   });
 });
 
-describe("粗い段は細かい段のちょうど5倍（寄り引きで境界が食い違わない）", () => {
-  it("mid は fine の5倍・wide は mid の5倍", () => {
-    const { fine, mid, wide } = COVERAGE_CELL_STEPS;
+describe("粗い段は細かい段のちょうど整数倍（寄り引きで境界が食い違わない）", () => {
+  it("fine は ultrafine の2倍・mid は fine の5倍・wide は mid の5倍", () => {
+    const { ultrafine, fine, mid, wide } = COVERAGE_CELL_STEPS;
     // 浮動小数の誤差を避けるため整数比で比較する
+    expect(Math.round((fine.latStep / ultrafine.latStep) * 1e6)).toBe(2 * 1e6);
+    expect(Math.round((fine.lngStep / ultrafine.lngStep) * 1e6)).toBe(2 * 1e6);
     expect(Math.round((mid.latStep / fine.latStep) * 1e6)).toBe(5 * 1e6);
     expect(Math.round((mid.lngStep / fine.lngStep) * 1e6)).toBe(5 * 1e6);
     expect(Math.round((wide.latStep / mid.latStep) * 1e6)).toBe(5 * 1e6);
     expect(Math.round((wide.lngStep / mid.lngStep) * 1e6)).toBe(5 * 1e6);
   });
 
+  it("隣り合う段は必ず整数倍（段を足しても崩れないことを総当たりで縛る）", () => {
+    // ⚠段が増えたときに1組だけ書き忘れる、を防ぐ。
+    for (let i = 0; i < COVERAGE_CELL_SIZES.length - 1; i++) {
+      const finer = COVERAGE_CELL_STEPS[COVERAGE_CELL_SIZES[i]];
+      const coarser = COVERAGE_CELL_STEPS[COVERAGE_CELL_SIZES[i + 1]];
+      for (const axis of ["latStep", "lngStep"] as const) {
+        const ratio = coarser[axis] / finer[axis];
+        expect(Math.abs(ratio - Math.round(ratio))).toBeLessThan(1e-9);
+        expect(Math.round(ratio)).toBeGreaterThan(1);
+      }
+    }
+  });
+
   it("細かいセルは粗いセルに完全に含まれる（境界がまたがらない）", () => {
-    const { fine, mid } = COVERAGE_CELL_STEPS;
     const lat = 35.6812345;
     const lng = 139.7654321;
-    const fineIdx = coverageCellIndexOf(lat, lng, fine);
-    const midIdx = coverageCellIndexOf(lat, lng, mid);
-    const fineBounds = coverageCellBounds(fineIdx, fine);
-    const midBounds = coverageCellBounds(midIdx, mid);
-    expect(fineBounds.south).toBeGreaterThanOrEqual(midBounds.south - 1e-9);
-    expect(fineBounds.north).toBeLessThanOrEqual(midBounds.north + 1e-9);
-    expect(fineBounds.west).toBeGreaterThanOrEqual(midBounds.west - 1e-9);
-    expect(fineBounds.east).toBeLessThanOrEqual(midBounds.east + 1e-9);
+    // 全ての隣接段で確認する（ultrafine⊂fine / fine⊂mid / mid⊂wide）
+    for (let i = 0; i < COVERAGE_CELL_SIZES.length - 1; i++) {
+      const finer = COVERAGE_CELL_STEPS[COVERAGE_CELL_SIZES[i]];
+      const coarser = COVERAGE_CELL_STEPS[COVERAGE_CELL_SIZES[i + 1]];
+      const finerBounds = coverageCellBounds(
+        coverageCellIndexOf(lat, lng, finer),
+        finer,
+      );
+      const coarserBounds = coverageCellBounds(
+        coverageCellIndexOf(lat, lng, coarser),
+        coarser,
+      );
+      expect(finerBounds.south).toBeGreaterThanOrEqual(
+        coarserBounds.south - 1e-9,
+      );
+      expect(finerBounds.north).toBeLessThanOrEqual(coarserBounds.north + 1e-9);
+      expect(finerBounds.west).toBeGreaterThanOrEqual(coarserBounds.west - 1e-9);
+      expect(finerBounds.east).toBeLessThanOrEqual(coarserBounds.east + 1e-9);
+    }
   });
 });
 
@@ -157,6 +208,12 @@ describe("セル番号と矩形は往復できる（描画のズレを防ぐ）"
 });
 
 describe("1マスの実寸（画面に出す説明）", () => {
+  it("ultrafine は約25m 四方", () => {
+    const m = coverageCellMeters("ultrafine");
+    expect(m.lat).toBe(25);
+    expect(m.lng).toBe(25);
+  });
+
   it("fine は約50m 四方", () => {
     const m = coverageCellMeters("fine");
     expect(m.lat).toBe(50);
@@ -169,6 +226,7 @@ describe("1マスの実寸（画面に出す説明）", () => {
   });
 
   it("ラベルは m と km を使い分ける", () => {
+    expect(coverageCellLabel("ultrafine")).toBe("約25m");
     expect(coverageCellLabel("fine")).toBe("約50m");
     expect(coverageCellLabel("mid")).toBe("約250m");
     expect(coverageCellLabel("wide")).toBe("約1.3km");
@@ -270,7 +328,8 @@ describe("上限（取りこぼしを黙って出さないための値）", () =
     //
     // 以前この表明は `<= COVERAGE_CELL_LIMIT * 2` で、名前に反して
     // **上限内に収まることを検査していなかった**（実値 3,600 > 2,000）。
-    for (const cell of ["fine", "mid", "wide"] as const) {
+    // ⚠段を足したらここも自動で増えるよう、定義そのものを回す。
+    for (const cell of COVERAGE_CELL_SIZES) {
       // その段が選ばれる最大の bbox = 1段細かい判定を外れる直前の広さ
       const span = maxSpanForCell(cell);
       const worst = maxCellsForBbox(
@@ -290,6 +349,7 @@ describe("上限（取りこぼしを黙って出さないための値）", () =
   });
 
   it("1段粗い粒度をたどれる（超過時に粗くして描き切るため）", () => {
+    expect(coarserCoverageCellSize("ultrafine")).toBe("fine");
     expect(coarserCoverageCellSize("fine")).toBe("mid");
     expect(coarserCoverageCellSize("mid")).toBe("wide");
     // wide より粗い段は無い = ここまで来て溢れたら fail-closed しかない
@@ -310,7 +370,7 @@ describe("この層は人を識別する情報を持たない（PII 露出面を
  * ⚠実装の閾値を直接読めないので、判定関数を二分探索して**実際に選ばれる境界**を
  * 求める。閾値定数を変えてもこのテストが追随する。
  */
-function maxSpanForCell(cell: "fine" | "mid" | "wide"): {
+function maxSpanForCell(cell: CoverageCellSize): {
   lat: number;
   lng: number;
 } {

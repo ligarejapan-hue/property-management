@@ -98,6 +98,8 @@ import { hasPermission } from "@/lib/permissions";
 import {
   COVERAGE_CELL_LIMIT,
   COVERAGE_CELL_STEPS,
+  resolveCoverageCellSize,
+  type CoverageCellSize,
 } from "@/lib/field-survey-coverage";
 import { GET } from "@/app/api/field-survey/coverage/cells/route";
 
@@ -143,7 +145,7 @@ function rawCall() {
 /** 応答 body (apiResponse は `{ data: ... }` をそのまま JSON にする)。 */
 interface CoverageBody {
   data: {
-    cell: "fine" | "mid" | "wide";
+    cell: CoverageCellSize;
     cellLabel: string;
     latStep: number;
     lngStep: number;
@@ -454,6 +456,18 @@ describe("取りこぼしたら色を一切出さない（未踏破と誤って�
 });
 
 describe("マスの大きさは地図の寄り引きで自動で決まる（利用者に選ばせない）", () => {
+  it("さらに寄ると 25m マスになる（2026-07-31 追加の最細段）", async () => {
+    // 約 0.9km 四方（ultrafine の上限 ≒1.07km 以内）
+    const res = await GET(
+      makeReq("north=35.6840&south=35.6760&east=139.7700&west=139.7600"),
+    );
+    const body = await getBody(res);
+    expect(body.data.cell).toBe("ultrafine");
+    expect(body.data.latStep).toBe(COVERAGE_CELL_STEPS.ultrafine.latStep);
+    expect(body.data.lngStep).toBe(COVERAGE_CELL_STEPS.ultrafine.lngStep);
+    expect(body.data.cellLabel).toBe("約25m");
+  });
+
   it("街歩きの寄りでは細かいマス", async () => {
     const res = await GET(makeReq(FINE_BBOX));
     const body = await getBody(res);
@@ -630,8 +644,21 @@ describe("日付は JST の暦日で切る（保存値は UTC の壁時計）", 
 describe("集計は格子境界に揃えた範囲で行う (@codex #332)", () => {
   it("画面の端がセルを横切っていても、集計はセル単位で行う", async () => {
     // 端が半端な位置の bbox を渡す
-    await GET(makeReq("north=35.6857&south=35.68123&east=139.7657&west=139.76123"));
+    const bbox = {
+      north: 35.6857,
+      south: 35.68123,
+      east: 139.7657,
+      west: 139.76123,
+    };
+    await GET(
+      makeReq(
+        `north=${bbox.north}&south=${bbox.south}&east=${bbox.east}&west=${bbox.west}`,
+      ),
+    );
     const { values } = rawCall()!;
+    // ⚠揃える先は**その bbox で実際に選ばれた段**の格子。段を決め打ちすると、
+    // 段が増えた（ultrafine 追加）ときに実装が正しくてもテストだけ落ちる。
+    const step = COVERAGE_CELL_STEPS[resolveCoverageCellSize(bbox)];
     // 束縛値のうち緯度・経度は格子の倍数になっているはず
     const nums = values.filter((v): v is number => typeof v === "number");
     const lat = nums.filter((v) => v > 35 && v < 36);
@@ -639,11 +666,11 @@ describe("集計は格子境界に揃えた範囲で行う (@codex #332)", () =>
     expect(lat.length).toBeGreaterThan(0);
     expect(lng.length).toBeGreaterThan(0);
     for (const v of lat) {
-      const k = v / COVERAGE_CELL_STEPS.fine.latStep;
+      const k = v / step.latStep;
       expect(Math.abs(k - Math.round(k))).toBeLessThan(1e-6);
     }
     for (const v of lng) {
-      const k = v / COVERAGE_CELL_STEPS.fine.lngStep;
+      const k = v / step.lngStep;
       expect(Math.abs(k - Math.round(k))).toBeLessThan(1e-6);
     }
     // 生の画面端の値をそのまま渡していないこと

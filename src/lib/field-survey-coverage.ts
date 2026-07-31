@@ -27,10 +27,21 @@ const REFERENCE_COS_LAT = 0.8121;
 /** 経度1度あたりの距離(m)（代表緯度での固定値）。 */
 const METERS_PER_DEG_LNG = METERS_PER_DEG_LAT * REFERENCE_COS_LAT;
 
-/** 格子の粗さ。fine=街歩き / mid=市内 / wide=市外まで。 */
-export type CoverageCellSize = "fine" | "mid" | "wide";
+/**
+ * 格子の粗さ。ultrafine=街を1本ずつ / fine=街歩き / mid=市内 / wide=市外まで。
+ *
+ * ultrafine は「もう少しマスを短く」という要望（2026-07-31）で追加した最細段。
+ * **既存3段はそのまま**なので、これまでの寄りでの見え方も地図の重さも変わらない
+ * （さらに寄ったときだけ 25m 格子に切り替わる）。
+ */
+export type CoverageCellSize = "ultrafine" | "fine" | "mid" | "wide";
 
-export const COVERAGE_CELL_SIZES = ["fine", "mid", "wide"] as const;
+export const COVERAGE_CELL_SIZES = [
+  "ultrafine",
+  "fine",
+  "mid",
+  "wide",
+] as const;
 
 export interface CoverageCellStep {
   /** 緯度方向の格子幅（度）。 */
@@ -42,18 +53,24 @@ export interface CoverageCellStep {
 /**
  * 粒度ごとの格子幅。
  *
- * ⚠**粗い段は細かい段のちょうど5倍**にしてある。これにより粗いセルは細かい
- * セル 5×5 をきれいに束ねた形になり、寄り引きで境界が食い違わない
+ * ⚠**粗い段は細かい段のちょうど整数倍**にしてある（fine=ultrafine の2倍、
+ * mid=fine の5倍、wide=mid の5倍）。これにより粗いセルは細かいセルをきれいに
+ * 束ねた形になり、寄り引きで境界が食い違わない
  * （= 同じ道が寄ると青、引くと赤、のような矛盾が起きない）。
+ * 倍率は 2 でも 5 でも整数なら成立する（格子はどの段も原点0から刻むため）。
+ * ⚠実測: 0.00045/0.000225 も 0.00055/0.000275 も**浮動小数で厳密に 2**に
+ * なるので、この刻み幅なら整数倍の前提が誤差で崩れない。
  *
  * 実寸（代表緯度）:
- *   fine 0.00045° ≒ 50.1m / 0.00055° ≒ 49.7m
- *   mid  0.00225° ≒ 250m  / 0.00275° ≒ 249m
- *   wide 0.01125° ≒ 1.25km / 0.01375° ≒ 1.24km
+ *   ultrafine 0.000225° ≒ 25.0m / 0.000275° ≒ 24.9m
+ *   fine      0.00045°  ≒ 50.1m / 0.00055°  ≒ 49.7m
+ *   mid       0.00225°  ≒ 250m  / 0.00275°  ≒ 249m
+ *   wide      0.01125°  ≒ 1.25km / 0.01375° ≒ 1.24km
  */
 export const COVERAGE_CELL_STEPS: Readonly<
   Record<CoverageCellSize, CoverageCellStep>
 > = {
+  ultrafine: { latStep: 0.000225, lngStep: 0.000275 },
   fine: { latStep: 0.00045, lngStep: 0.00055 },
   mid: { latStep: 0.00225, lngStep: 0.00275 },
   wide: { latStep: 0.01125, lngStep: 0.01375 },
@@ -77,6 +94,10 @@ export const COVERAGE_CELL_LIMIT = 2000;
  */
 const MAX_CELLS_PER_AXIS = 42;
 
+const ULTRAFINE_MAX_LAT_DEG =
+  COVERAGE_CELL_STEPS.ultrafine.latStep * MAX_CELLS_PER_AXIS; // ≒ 1.07km
+const ULTRAFINE_MAX_LNG_DEG =
+  COVERAGE_CELL_STEPS.ultrafine.lngStep * MAX_CELLS_PER_AXIS; // ≒ 1.07km
 const FINE_MAX_LAT_DEG = COVERAGE_CELL_STEPS.fine.latStep * MAX_CELLS_PER_AXIS; // ≒ 2.15km
 const FINE_MAX_LNG_DEG = COVERAGE_CELL_STEPS.fine.lngStep * MAX_CELLS_PER_AXIS; // ≒ 2.14km
 const MID_MAX_LAT_DEG = COVERAGE_CELL_STEPS.mid.latStep * MAX_CELLS_PER_AXIS; // ≒ 10.8km
@@ -127,6 +148,7 @@ export function snapBboxToCells(
 export function coarserCoverageCellSize(
   cell: CoverageCellSize,
 ): CoverageCellSize | null {
+  if (cell === "ultrafine") return "fine";
   if (cell === "fine") return "mid";
   if (cell === "mid") return "wide";
   return null;
@@ -156,6 +178,12 @@ const SPAN_EPSILON_DEG = 1e-9;
 export function resolveCoverageCellSize(bbox: CoverageBbox): CoverageCellSize {
   const latSpan = Math.abs(bbox.north - bbox.south);
   const lngSpan = Math.abs(bbox.east - bbox.west);
+  if (
+    latSpan <= ULTRAFINE_MAX_LAT_DEG + SPAN_EPSILON_DEG &&
+    lngSpan <= ULTRAFINE_MAX_LNG_DEG + SPAN_EPSILON_DEG
+  ) {
+    return "ultrafine";
+  }
   if (
     latSpan <= FINE_MAX_LAT_DEG + SPAN_EPSILON_DEG &&
     lngSpan <= FINE_MAX_LNG_DEG + SPAN_EPSILON_DEG
