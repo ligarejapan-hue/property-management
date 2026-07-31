@@ -29,8 +29,19 @@
 - 都道府県 `selectOption` に渡す**実 option 値/ラベルの一致**(`splitAddressForLocationSearch` が
   返す "東京都" 等がそのまま option value か、ラベル一致指定が要るか)。
 - 直接入力モードで**市区町村ダイアログを完全に回避できるか**(できなければダイアログ操作を追加)。
-- 番号取得側の `searchInput`(不動産番号入力欄)/`searchSubmit`/`downloadButton`
+- 番号取得側の `searchInput`(不動産番号入力欄)
   (請求方法=不動産番号 `#fuSeikyuMethodFUDOSAN_NO` は[確定])。
+  ⚠**2026-07-31 更新**: 旧記載の `searchSubmit`/`downloadButton` は要校正ではなくなった。
+  - `searchSubmit` は**廃止**。旧値 `#myPageSeikyu` は実体が**マイページ一覧の課金ボタン**で
+    役割を取り違えていた。請求条件の送信は id 無しの「確定」で、
+    現在は段階②専用の `requestConfirmButton`(`button[onclick*="fuBtnForward"]`)。
+  - `downloadButton` は**確定値**に是正済み(`button[onclick*="myPageDownload"]`)。
+    旧値 `#download-pdf` は**実サイトに存在しなかった**。
+  ⚠**番号取得の経路は段階②(請求→PDF)が配線されるまで fail-closed**。
+    「確定」は無料でも**カートに `未請求` の行を実際に作る**ため、通せないうちに押すと
+    失敗のたびに御社のマイページへゴミ行が積み上がる。実装は
+    `searchByRealEstateNumber` がページに触れる前に停止する形にしてある。
+  詳細= `deliverables/registry-calibration/stage2-flow-20260731.md`
 
 差し替えたら `splitAddressForLocationSearch`/`extractLocationCandidateRows` の
 既存テスト(`playwright-adapter.test.ts`)が緑のままか確認する。
