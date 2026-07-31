@@ -809,19 +809,24 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     );
   });
 
-  it("C4: searchByRealEstateNumber が番号 fill・検索 click へ委譲し found を返す", async () => {
+  it("C4: ⚠番号取得は段階②未配線のうち、実サイトに触れる前に止める（カートを汚さない）", async () => {
+    // 実フローは「番号入力 → **確定** → (マイページで)請求[課金] → PDF」で、確定から先が未実装。
+    // 「確定」は無料だが**カートに `未請求` の行を実際に作る**ため、ここで進めると PDF に
+    // 到達できないまま外部に行が残り、再試行のたびにゴミ行が積み上がる（@codex #344 P1）。
     const f = makeFakeChromium();
     const factory = resolveDefaultRegistryBrowserFactory({
       chromiumLoader: f.loader,
     });
     const page = await factory!();
-    const outcome = await page.searchByRealEstateNumber("1234567890123");
-    expect(f.page.fill).toHaveBeenCalledWith(
-      expect.any(String),
-      "1234567890123",
-    );
-    expect(f.page.click).toHaveBeenCalled();
-    expect(outcome.found).toBe(true);
+
+    await expect(
+      page.searchByRealEstateNumber("1234567890123"),
+    ).rejects.toMatchObject({ code: "provider_error" });
+
+    // ★本質: **一切ページを操作していない**こと（番号も送っていない）。
+    expect(f.page.fill).not.toHaveBeenCalled();
+    expect(f.page.click).not.toHaveBeenCalled();
+    expect(f.page.waitForSelector).not.toHaveBeenCalled();
   });
 
   it("C5: downloadRegistryPdf が download を待って Buffer を返す（fetch( 不使用）", async () => {
@@ -1198,11 +1203,11 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(gotoUrl).toBe(`https://reg.test${DEFAULT_REGISTRY_LOGIN_PATH}`);
   });
 
-  it("C9: searchByRealEstateNumber の結果待ち(waitForSelector)の timeout は not_found にせず timeout 系に分類する（CodexP2）", async () => {
-    // CodexP2: 検索ページが遅い / セレクタ変更 / 結果行レンダリング前の timeout を
-    // 「該当なし（found:false → not_found 404）」と誤分類しない。結果待ちの TimeoutError は
-    // 連携不備（リトライ可能）であって「謄本が存在しない」ではないため timeout/provider_error
-    // に分類し、真の「結果なし」とは区別する。
+  it("C9: 番号取得は「該当なし」にはせず、必ず連携不備として返す（誤って not_found にしない）", async () => {
+    // 元々の意図（CodexP2）: 検索ページが遅い / セレクタ変更 / 結果行レンダリング前の
+    // timeout を「該当なし（found:false → not_found 404）」と誤分類しない。
+    // 段階②未配線のあいだは実サイトに触れずに落とすが、**not_found にしない**という
+    // この性質は維持する（「謄本が存在しない」と誤って伝えない）。
     const f = makeFakeChromium();
     f.page.waitForSelector = vi.fn(async () => {
       throw makeTimeoutError();
@@ -1211,13 +1216,13 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       chromiumLoader: f.loader,
     });
     const page = await factory!();
-    // found:false（not_found 経路）にはならず、RegistryFetchError（timeout 系）を投げる。
     await expect(
       page.searchByRealEstateNumber("1234567890123"),
     ).rejects.toBeInstanceOf(RegistryFetchError);
+    // found:false（not_found 経路）には決してならない。
     await expect(
       page.searchByRealEstateNumber("1234567890123"),
-    ).rejects.toMatchObject({ code: "timeout" });
+    ).rejects.not.toMatchObject({ code: "not_found" });
   });
 
   it("C9b: search の fill が timeout を投げたら provider_error（not_found にしない）", async () => {

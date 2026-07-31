@@ -387,9 +387,16 @@ const REGISTRY_SELECTORS = {
   // 番号取得(不動産番号での請求)。請求画面で請求方法=不動産番号を選ぶ同一フロー。
   searchMethodNumberRadio: "#fuSeikyuMethodFUDOSAN_NO", // [確定] 請求方法=不動産番号 ラジオ
   searchInput: "#fuFudosanNo", // [要live] 不動産番号入力欄(番号請求時の実操作画面で確定)
-  searchSubmit: "#myPageSeikyu", // [要live] 請求実行/次へ
   searchResult: "#fudosanIchiranTbl", // [確定] 請求リスト(一覧)テーブル=ヒットの目印
-  downloadButton: "#download-pdf", // [要live] PDFダウンロード
+  // ⚠ここから下は**段階②(有料の請求→PDF取得)専用**。段階②が配線されるまで
+  //   どの経路からも押さない。理由: 「確定」は無料だが**カートに `未請求` の行を
+  //   実際に作る**ので、請求→ダウンロードまで通せない状態で押すと、
+  //   失敗するたびに御社のマイページへゴミ行が積み上がる(@codex #344 P1)。
+  // ⚠2026-07-31 実サイト校正で是正した2件（旧値はどちらも実物と違っていた）:
+  //   - 請求条件の送信 = 旧 `#myPageSeikyu`(実体はマイページ一覧の**課金**ボタン) → 下記
+  //   - PDFダウンロード = 旧 `#download-pdf`(**実サイトに存在しない**) → 下記
+  requestConfirmButton: 'button[onclick*="fuBtnForward"]', // [確定] 請求条件の確定(無料・カートへ)
+  downloadButton: 'button[onclick*="myPageDownload"]', // [確定] 「表示・保存」(請求済のみ)
   // 所在検索: 実サイトは多段UI。直接入力モードでダイアログを避ける(堅牢)。
   searchMethodLocationRadio: "#fuSeikyuMethodSHOZAI", // [確定] 請求方法=所在 ラジオ
   locationTypeLandRadio: "#fuShozaiTypeTOCHI", // [確定] 種別=土地
@@ -408,6 +415,16 @@ const REGISTRY_SELECTORS = {
   dialogResultCheckbox: "#cbnDlgChibanCheckTbl input[type=checkbox]", // [確定] 候補行チェックボックス
   dialogPageNext: "#cbnDlgBtnPageNext", // [確定] 候補一覧の次ページ(複数ページ時)
   dialogCancel: "#cbnDlgBtnCancel", // [確定] ダイアログ取消(課金しない閉じ方)
+  dialogOk: "#cbnDlgBtnOk", // [確定] ダイアログ確定(選んだ地番を親フォームへ反映・無料)
+  // 請求事項(謄本種別)のチェックボックス群。2026-07-31 実サイト校正で確定。
+  // ⚠ラジオではなく**チェックボックス**で、複数同時に請求できる形。
+  certificateAllCheck: "#fuAll", // [確定] 全部事項
+  certificateOwnerCheck: "#fuShoyusya", // [確定] 所有者事項(アプリ既定 certificateType=owner)
+  // マイページ(請求一覧)。課金とPDF取得はここで行う。
+  myPageTab: "a[onclick*=\"selectTab('tabMy')\"]", // [確定] マイページタブ
+  myPageTable: "#myPageTable", // [確定] 請求一覧テーブル
+  myPageFilter: "#siborikomi", // [確定] 状態の絞り込み(すべて/未請求/請求済…)
+  myPageSeikyuButton: "#myPageSeikyu", // [確定] **請求=課金**(状態が「未請求」の行のみ)
 } as const;
 
 /**
@@ -842,38 +859,27 @@ function createPlaywrightRegistryPage(
       }
     },
     async searchByRealEstateNumber(realEstateNumber) {
-      // CodexP2: timeout を「provider 連携の不具合（リトライ可能）」と「真の結果なし（not_found）」で
-      // 弁別する。
-      //   - fill/click（フォーム入力・送信のセットアップ段）由来の TimeoutError は
-      //     セレクタ校正ズレ/ページ未準備（= 連携不備）→ provider_error。
-      //   - 結果待ち（waitForSelector）の TimeoutError は「検索ページが遅い/セレクタ変更/結果行が
-      //     描画される前のタイムアウト」を意味し、**「謄本が存在しない」ではない**。これを
-      //     found:false（→ not_found 404）と誤分類するとリトライ/監視を誤誘導し、一時的な障害を
-      //     偽陰性（該当なし）にしてしまう。よって timeout 系（RegistryFetchError("timeout")）へ
-      //     分類し、真の「結果なし」とは区別する。
-      //   - 真の「結果なし」（明示の no-result インジケータ）の検出は live キャリブレーションで
-      //     導入し、その経路でのみ found:false（→ not_found）を返す（TODO(calibrate)）。
-      // いずれも生メッセージ（selector/入力が混入しうる）は例外に載せない。
-      try {
-        // 実サイトは請求画面で「請求方法=不動産番号」を選んでから番号を入力する。
-        // ラジオ [確定]。番号入力欄/請求ボタンは番号モードの実操作画面で確定(=[要live])。
-        await page.click(REGISTRY_SELECTORS.searchMethodNumberRadio);
-        await page.fill(REGISTRY_SELECTORS.searchInput, realEstateNumber);
-        await page.click(REGISTRY_SELECTORS.searchSubmit);
-      } catch {
-        // セットアップ（fill/click）由来の失敗は timeout 含め provider_error 扱い。
-        throw new RegistryFetchError("provider_error");
-      }
-      try {
-        await page.waitForSelector(REGISTRY_SELECTORS.searchResult);
-        return { found: true };
-      } catch (err) {
-        if (err instanceof RegistryFetchError) throw err;
-        // 結果待ちの TimeoutError は連携不備（リトライ可能）= timeout。not_found にしない。
-        if (isTimeoutError(err)) throw new RegistryFetchError("timeout");
-        // それ以外（非 timeout の生例外）は provider_error。
-        throw new RegistryFetchError("provider_error");
-      }
+      // ⚠**段階②(請求→PDF取得)が配線されるまで、実サイトに触れる前に止める**(@codex #344 P1)。
+      //
+      // 番号取得の実フローは「請求方法=不動産番号 → 番号入力 → **確定** → (マイページで)
+      // 請求[課金] → PDF」で、**確定から先が未実装**。2026-07-31 の実サイト校正で
+      // 「確定」は無料だが**カートに `未請求` の行を実際に作る**と判明したため、ここで
+      // 確定まで進めると PDF に到達できないまま外部に行が残り、**再試行のたびに御社の
+      // マイページへゴミ行が積み上がる**。外部の状態を変えてから失敗するくらいなら、
+      // **何も触らずに失敗する**方が安全。
+      //
+      // 呼び出し側から見た結果は従来と同じ `provider_error`（従来も、隠れている
+      // ボタンを押そうとして actionability timeout → provider_error に落ちていた）。
+      // 変わるのは「カートを汚さない」ことと、原因が診断ログに残ること。
+      //
+      // 段階②の配線時に、この早期 return を外して
+      // 「確定 → マイページで対象行を選択 → 請求 → 請求済を待つ → 表示・保存」を実装する。
+      void realEstateNumber; // 実サイトへは送らない（未配線のため）
+      console.warn(
+        "[registry-fetch] number-based obtain is not wired yet (stage 2 pending); " +
+          "refusing before touching the external request cart",
+      );
+      throw new RegistryFetchError("provider_error");
     },
     async searchByLocation(input) {
       // 実サイトの所在検索(2026-07-17 本番probe で全確定)。ログイン後の「請求情報受付メニュー」
