@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
 /**
  * PR-2: resolveDefaultRegistryBrowserFactory の Playwright adapter（外部接続なし）。
  *
@@ -1568,6 +1570,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       dialogFind?: string;
       cert?: { owner: string; extraResults: string[] };
       myPageSeq?: unknown[];
+      /** 確定前に存在した行ID(作成同一性の判定材料)。 */
+      prevRowIds?: string[];
     } = {},
   ) {
     const clicked: string[] = [];
@@ -1595,6 +1599,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       if (parsed.tableSel === "#cbnDlgChibanCheckTbl") {
         return opts.dialogFind ?? "checked";
+      }
+      // 確定前の既存行ID読み取り(@codex R2 P1: 作成同一性の土台)。myPageSeq は消費しない。
+      if (parsed.probe === "row-ids") {
+        return JSON.stringify({ present: true, ids: opts.prevRowIds ?? [] });
       }
       if (parsed.tableSel === "#myPageTable") {
         const next = myPageSeq.length > 0 ? myPageSeq.shift() : lastMyPage;
@@ -1626,7 +1634,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, {
       myPageSeq: [
-        { result: "checked", checkedCount: 1 }, // 行選択
+        { result: "checked", checkedCount: 1, rowId: "ROW-9" }, // 行選択(行ID付き)
         { status: "請求済", expiry: "2026/09/01", when: "t" }, // 状態確認
         "checked", // DL 前の再選択
       ],
@@ -1719,5 +1727,33 @@ describe("段階②: マイページ行の地番一致（部分一致で別の�
     ["千代田区丸の内一丁目1-1", "", false], // 空の対象は常に不一致(全行一致を防ぐ)
   ])("%s × %s → %s", (cell, target, want) => {
     expect(registryRowMatchesChiban(cell, target)).toBe(want);
+  });
+});
+
+describe("段階②: 課金対象は「確定で作られた行」に紐付ける（@codex #345 R2 P1・ソース固定）", () => {
+  // 行の同定ロジックは evaluate 内(ブラウザで実行)にあり fake page では実行されないため、
+  // ここでは**配線の存在**をソースで固定する(実挙動の最終確認は実課金テスト)。
+  const src = readFileSync(
+    joinPath(process.cwd(), "src", "lib", "registry-fetch", "auto-fetch.ts"),
+    "utf8",
+  );
+
+  it("確定の前に既存行IDを控える(作成同一性の材料)", () => {
+    expect(src).toContain('probe: "row-ids"');
+    // 読み取りは確定クリックより前
+    expect(src.indexOf('probe: "row-ids"')).toBeLessThan(
+      src.indexOf("REGISTRY_SELECTORS.requestConfirmButton)"),
+    );
+  });
+
+  it("行選択は「確定前から存在した行」を除外する", () => {
+    expect(src).toContain("prevIds.includes(rowId)");
+  });
+
+  it("課金後の状態待ちとDL再選択は行IDに紐付ける(地番の再一致より強い同定)", () => {
+    expect(src).toContain("rowId: chargedRowId,");
+    // 状態待ち・再選択の両方(2箇所)
+    expect(src.split("rowId: chargedRowId,").length - 1).toBe(2);
+    expect(src).toContain("rowId ? trId !== rowId :");
   });
 });

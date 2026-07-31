@@ -922,6 +922,23 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
       .filter((a) => a.action === "registry_location_purchase");
     expect(ledger).toHaveLength(1);
     expect(ledger[0].detail.outcome).toBe("charged_but_failed");
+
+    // ⚠台帳はロック解除より**先**(@codex #345 R2 P1)。解除が先だと
+    // 「ロック無し×台帳無し」の隙間で同じ候補に再課金できる。
+    const ledgerCallOrder = (writeAuditLog as Mock).mock.invocationCallOrder[
+      (writeAuditLog as Mock).mock.calls.findIndex(
+        (c) => c[0].action === "registry_location_purchase",
+      )
+    ];
+    const releaseCall = pm.property.updateMany.mock.calls.findIndex(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "unconfirmed",
+    );
+    expect(releaseCall).toBeGreaterThanOrEqual(0);
+    const releaseCallOrder =
+      pm.property.updateMany.mock.invocationCallOrder[releaseCall];
+    expect(ledgerCallOrder).toBeLessThan(releaseCallOrder);
   });
 
   it("⚠provider 成功後に PDF 処理が失敗しても台帳は残る（@codex #345 P1: 台帳は provider 返却直後）", async () => {
