@@ -1408,22 +1408,48 @@ function createPlaywrightRegistryPage(
         // 確定で作られる行を「確定前に無かった行」として同定する=**作成同一性**での紐付け。
         // 状態+地番だけの一致だと、過去の未請求残骸(exe運用等・実probeで実在確認)が
         // 1件だけ見えている時にそれへ課金してしまう。
-        const prevRowsJson = (await page.evaluate((json) => {
-          const { tableSel } = JSON.parse(json) as { tableSel: string };
-          const t = document.querySelector(tableSel);
-          if (!t) return JSON.stringify({ present: false, ids: [] });
-          const ids = Array.from(t.querySelectorAll("tbody tr"))
-            .map((tr) => (tr.querySelectorAll("td")[1]?.textContent ?? "").trim())
-            .filter((v) => v.length > 0);
-          return JSON.stringify({ present: true, ids });
-        }, JSON.stringify({
-          probe: "row-ids",
-          tableSel: REGISTRY_SELECTORS.myPageTable,
-        }))) as string;
-        const prevRows = JSON.parse(prevRowsJson) as {
-          present: boolean;
-          ids: string[];
+        // ⚠基準は**全行のIDが読めた時だけ**成立(@codex #345 R4 P1)。読み込み中や
+        // ID欠けの行を黙って落とすと present:true のまま不完全な基準になり、
+        // 確定後にその行がIDを得て「新規」に見え、**残骸へ課金**し得る。
+        // 一時的な読み込み中に備え、少し待って数回だけ再読する(ダメなら確定前に中止)。
+        let prevRows: { present: boolean; ids: string[] } = {
+          present: false,
+          ids: [],
         };
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await sleep(1500);
+          const prevRowsJson = (await page.evaluate((json) => {
+            const { tableSel } = JSON.parse(json) as { tableSel: string };
+            const t = document.querySelector(tableSel);
+            if (!t) return JSON.stringify({ present: false, ids: [] });
+            // 読み込み中の表は基準にしない(行が出そろっていない)。
+            if (/データ取得中/.test(t.textContent ?? "")) {
+              return JSON.stringify({ present: false, ids: [] });
+            }
+            // 実データ行(列が揃った行)のみ対象。空状態のプレースホルダ行は除く。
+            const rows = Array.from(t.querySelectorAll("tbody tr")).filter(
+              (tr) => tr.querySelectorAll("td").length >= 7,
+            );
+            const ids: string[] = [];
+            for (const tr of rows) {
+              const id = (
+                tr.querySelectorAll("td")[1]?.textContent ?? ""
+              ).trim();
+              // ⚠IDが読めない行が1つでもあれば基準不成立(all-or-nothing)。
+              if (!id) return JSON.stringify({ present: false, ids: [] });
+              ids.push(id);
+            }
+            return JSON.stringify({ present: true, ids });
+          }, JSON.stringify({
+            probe: "row-ids",
+            tableSel: REGISTRY_SELECTORS.myPageTable,
+          }))) as string;
+          prevRows = JSON.parse(prevRowsJson) as {
+            present: boolean;
+            ids: string[];
+          };
+          if (prevRows.present) break;
+        }
         // ⚠基準が読めなければ**確定前に**中止(@codex #345 R3 P1)。基準なしで進むと
         // 「ちょうど1件」規則に落ち、既存の未請求残骸へ課金し得る。ここで止めれば
         // カート行も作られない(完全に無傷)。

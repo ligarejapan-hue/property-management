@@ -1774,4 +1774,19 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     expect(src.split("rowId: chargedRowId,").length - 1).toBe(2);
     expect(src).toContain("rowId ? trId !== rowId :");
   });
+
+  it("⚠基準は全行のIDが読めた時だけ成立する(@codex R4 P1: 不完全な基準で課金しない)", () => {
+    // ID欠けの行を黙って落とすと present:true のまま不完全な基準になり、
+    // 確定後にその行がIDを得て「新規」に見え、残骸へ課金し得る。
+    const baseline = src.slice(
+      src.indexOf('probe: "row-ids"') - 2600,
+      src.indexOf('probe: "row-ids"'),
+    );
+    // all-or-nothing: ID が読めない行が1つでもあれば基準不成立
+    expect(baseline).toContain(
+      'if (!id) return JSON.stringify({ present: false, ids: [] });',
+    );
+    // 読み込み中の表は基準にしない
+    expect(baseline).toContain("データ取得中");
+  });
 });
