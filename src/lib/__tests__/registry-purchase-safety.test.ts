@@ -87,7 +87,6 @@ describe("状態の説明（黙って握りつぶさない）", () => {
 describe("二重課金の鍵（表記ゆれで別物と誤認しない）", () => {
   const base = {
     propertyId: "p1",
-    address: "千代田区丸の内一丁目",
     lotOrBuilding: "1-1",
     certificateType: "owner",
   };
@@ -101,10 +100,25 @@ describe("二重課金の鍵（表記ゆれで別物と誤認しない）", () =
     ["長音記号", "1ー1"],
     ["空白入り", " 1 - 1 "],
     ["全角数字", "１-１"],
+    ["登記の慣用表記（番）", "1番1"],
+    ["登記の慣用表記（の）", "1の1"],
+    ["末尾の番地", "1-1番地"],
   ])("%s でも同じ鍵になる（＝二重課金しない）", (_label, lot) => {
     expect(purchaseIdempotencyKey({ ...base, lotOrBuilding: lot })).toBe(
       purchaseIdempotencyKey(base),
     );
+  });
+
+  it("⚠住所を直しても鍵は変わらない（表記直しで防止をすり抜けない）", () => {
+    // 住所は物件編集でいつでも直せるので鍵に含めない（@codex #344 P2）。
+    // 「一丁目」→「1丁目」のような直しで再課金できてしまってはいけない。
+    const key = purchaseIdempotencyKey(base);
+    const withAddressFields = {
+      ...base,
+      // 呼び出し側が余分な項目を持っていても鍵に混ざらないことを示す
+      address: "千代田区1丁目",
+    } as typeof base & { address: string };
+    expect(purchaseIdempotencyKey(withAddressFields)).toBe(key);
   });
 
   it("物件・地番・種別のどれかが違えば別の鍵", () => {
@@ -115,6 +129,12 @@ describe("二重課金の鍵（表記ゆれで別物と誤認しない）", () =
       purchaseIdempotencyKey(base),
     );
     expect(purchaseIdempotencyKey({ ...base, certificateType: "all" })).not.toBe(
+      purchaseIdempotencyKey(base),
+    );
+  });
+
+  it("地番の違いは潰さない（1-1 と 11 を同一視しない）", () => {
+    expect(purchaseIdempotencyKey({ ...base, lotOrBuilding: "11" })).not.toBe(
       purchaseIdempotencyKey(base),
     );
   });

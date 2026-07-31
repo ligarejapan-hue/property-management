@@ -83,32 +83,52 @@ export function describeRowStatus(status: string): string {
 
 export interface PurchaseTarget {
   propertyId: string;
-  /** 所在（地番区域）。 */
-  address: string;
-  /** 地番 または 家屋番号。 */
+  /**
+   * 地番 または 家屋番号。**物件の中でどの登記かを決める値**。
+   * ⚠これが変わったら「別の登記を買う」＝別物として扱ってよい。
+   */
   lotOrBuilding: string;
   /** 謄本種別（既定は所有者事項）。 */
   certificateType: string;
 }
 
 /**
+ * 地番・家屋番号の表記を正規化する。
+ *
+ * ⚠**表記ゆれで別物と誤認すると二重課金になる**。登記の慣用表記（「1番1」「1の1」）と
+ * ハイフン表記（「1-1」）、全角/半角、空白の違いを吸収して同一視する。
+ */
+function normalizeLotNumber(raw: string): string {
+  return raw
+    .normalize("NFKC") // 全角数字・全角記号 → 半角
+    .replace(/[‐‑‒–—―ー−]/g, "-") // 各種ダッシュ・長音 → "-"
+    .replace(/番地/g, "-") // ⚠「番」より先に処理（後だと「地」が残る）
+    .replace(/[番号の]/g, "-") // 「1番1」「1の1」→「1-1」
+    .replace(/\s+/g, "")
+    .replace(/-+/g, "-") // 連続ハイフンを1つに
+    .replace(/^-|-$/g, "") // 前後のハイフンを落とす（「1番地」→「1」）
+    .toLowerCase();
+}
+
+/**
  * 二重課金防止の鍵。**同じ物件・同じ地番・同じ種別**は 1 件とみなす。
  *
- * ⚠表記ゆれで別物と誤認すると二重課金になるので、比較前に正規化する:
- * 全角→半角、ハイフン各種→"-"、空白除去、大文字小文字。
+ * ⚠**住所（所在）は鍵に含めない**（@codex #344 P2）。住所は物件編集でいつでも直せるため、
+ * 「一丁目」→「1丁目」のような**表記の直しだけで鍵が変わり、二重課金の防止をすり抜ける**。
+ * 物件そのものは `propertyId` で一意に決まり、その中のどの登記かは地番/家屋番号で決まるので、
+ * 識別には**変わらない項目（propertyId）と、買う対象そのもの（地番・種別）**だけを使う。
+ *
+ * ⚠逆に「別の場所だと分かって物件の住所を直した」場合は、同じ地番でも別の登記になり得るが、
+ * その時は地番も変わるのが通常。もし本当に同じ物件IDで別物を買い直す必要が出たら、
+ * 「取得済み」を利用者に見せたうえで明示的に上書きさせる（黙って再課金しない）。
  */
 export function purchaseIdempotencyKey(target: PurchaseTarget): string {
-  const norm = (v: string) =>
-    v
-      .normalize("NFKC")
-      .replace(/[‐‑‒–—―ー−]/g, "-")
-      .replace(/\s+/g, "")
-      .toLowerCase();
+  const normType = (v: string) =>
+    v.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
   return [
     target.propertyId,
-    norm(target.address),
-    norm(target.lotOrBuilding),
-    norm(target.certificateType),
+    normalizeLotNumber(target.lotOrBuilding),
+    normType(target.certificateType),
   ].join("|");
 }
 
