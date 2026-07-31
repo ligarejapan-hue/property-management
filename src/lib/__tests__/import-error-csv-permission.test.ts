@@ -384,24 +384,65 @@ describe("専用権限であることの回帰ガード（全件CSVを解禁し�
     }
   });
 
-  it("事務担当テンプレに共有権限 csv_export_personal を付けていない", () => {
-    const seed = read("prisma/seed.ts");
-    const officeEntries = seed
-      .split("\n")
-      .filter((l) => l.includes("officeStaffTemplate.id"));
-    expect(officeEntries.length).toBeGreaterThan(0);
-    expect(
-      officeEntries.filter((l) => l.includes("csv_export_personal")),
-    ).toEqual([]);
+  it("取込エラー行の migration は専用権限だけを配る（役割を混ぜない）", () => {
+    // 全件CSVの許可は別 migration に分ける＝どの判断でどこまで開いたかが追える。
+    expect(read(MIGRATION)).not.toContain("'csv_export_personal'");
+  });
+});
 
+describe("全件CSVの許可（発注者判断 2026-07-31）", () => {
+  // ⚠**方針転換**。2026-07-30 時点は「取込エラー行だけ開ける」だったが、
+  // 発注者判断で**全件CSVも事務担当に許可する**ことになった。
+  // ここは「うっかり広がった」ではなく「意図して広げた」ことを固定する。
+  const GRANT_MIGRATION =
+    "prisma/migrations/20260731040000_grant_csv_export_personal_to_office_staff/migration.sql";
+
+  it("seed の事務担当テンプレに共有権限がある（宣言側と行生成側の2箇所とも）", () => {
+    const seed = read("prisma/seed.ts");
     const officeBlock = seed.slice(
       seed.indexOf('name: "事務担当用"'),
       seed.indexOf('name: "管理者用"'),
     );
-    expect(officeBlock).not.toMatch(/csv_export_personal: \{/);
+    expect(officeBlock).toMatch(/csv_export_personal: \{ read: true \}/);
+    expect(seed).toMatch(
+      /officeStaffTemplate\.id, resource: "csv_export_personal", action: "read", granted: true/,
+    );
   });
 
-  it("migration も共有権限を配っていない", () => {
-    expect(read(MIGRATION)).not.toContain("'csv_export_personal'");
+  it("本番へ届く経路（データ migration）がある", () => {
+    const sql = read(GRANT_MIGRATION);
+    expect(sql).toContain('INSERT INTO "template_permissions"');
+    expect(sql).toContain("'csv_export_personal', 'read', true");
+    expect(sql).toContain("pt.\"name\" = '事務担当用'");
+    expect(sql).toContain("ON CONFLICT");
+    expect(sql).not.toMatch(/ALTER TABLE|CREATE TABLE|DROP/i);
+  });
+
+  it("専用権限 import_error_csv は残す（より狭い付与のために要る）", () => {
+    // 事務担当には冗長になるが、「取込エラー行だけ落とせる」付与（アルバイト等）に必要。
+    const seed = read("prisma/seed.ts");
+    expect(seed).toMatch(
+      /officeStaffTemplate\.id, resource: "import_error_csv", action: "read", granted: true/,
+    );
+    // route 側の OR 判定も残っていること
+    expect(
+      read("src/app/api/import/jobs/[jobId]/export-errors/route.ts"),
+    ).toContain('hasPermission(perms, "import_error_csv", "read")');
+  });
+
+  it("全件CSV3経路のゲート自体は緩めていない（権限を配っただけ）", () => {
+    for (const route of [
+      "src/app/api/properties/export/route.ts",
+      "src/app/api/properties/dm-export/route.ts",
+      "src/app/api/properties/property-dm-export/route.ts",
+    ]) {
+      const src = read(route);
+      expect(src).toMatch(
+        /hasPermission\(\s*permissions,\s*"csv_export",\s*"read"\s*\)/,
+      );
+      expect(src).toMatch(
+        /hasPermission\(\s*permissions,\s*"csv_export_personal",\s*"read"\s*\)/,
+      );
+    }
   });
 });
