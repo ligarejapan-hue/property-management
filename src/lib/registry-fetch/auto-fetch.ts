@@ -1424,6 +1424,15 @@ function createPlaywrightRegistryPage(
           present: boolean;
           ids: string[];
         };
+        // ⚠基準が読めなければ**確定前に**中止(@codex #345 R3 P1)。基準なしで進むと
+        // 「ちょうど1件」規則に落ち、既存の未請求残骸へ課金し得る。ここで止めれば
+        // カート行も作られない(完全に無傷)。
+        if (!prevRows.present) {
+          console.warn(
+            "[registry-fetch] my-page baseline unreadable; refusing before confirm (not charged)",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
 
         await domClick(REGISTRY_SELECTORS.requestConfirmButton);
         // 遷移先は請求リスト(#fudosanIchiranTbl)またはマイページ(#myPageTable) [要live]。
@@ -1489,9 +1498,12 @@ function createPlaywrightRegistryPage(
               if (status !== "未請求") continue;
               if (!hits(tds[4]?.textContent ?? "")) continue;
               // ⚠作成同一性(@codex R2 P1): 確定前から存在した行(過去の残骸)は対象外。
-              // 確定前に一覧が読めていた場合のみ適用できる(読めなかった時は従来の
-              // 「ちょうど1件」規則が残りの防御=[要live]で最終確認)。
-              if (prevPresent && rowId && prevIds.includes(rowId)) continue;
+              // 基準(prevIds)が読めなかった場合はここへ到達しない(確定前に中止済み
+              // =@codex R3 P1。prevPresent は防御的に残すが常に true)。
+              if (!prevPresent) return JSON.stringify({ result: "no-baseline" });
+              if (rowId && prevIds.includes(rowId)) continue;
+              // 行IDが読めない行は同定できない=対象にしない(残骸かもしれない行を買わない)。
+              if (!rowId) continue;
               matches.push({ tr, rowId });
             }
             if (matches.length === 0)
@@ -2223,21 +2235,28 @@ export async function runRegistryAutoFetch(
 
     // ⚠台帳は provider が返った**直後**に書く(@codex #345 P1)。ここまで来た時点で
     // 課金は済んでいる。後段(PDF検証・抽出・添付)で失敗しても台帳が無いと、
-    // 再実行で**同じ謄本にもう一度課金**できてしまう。書き込み自体の失敗は
-    // 処理を止めない(PDFは支払済み=添付まで進める方が利用者の利益)。
+    // 再実行で**同じ謄本にもう一度課金**できてしまう。
+    // ⚠writeAuditLog は**使わない**(@codex R3 P1): あれは内部で失敗を握りつぶし
+    // mockモードでは何も書かない=「唯一の30日マーカー」が黙って消え得る。
+    // 台帳は監査ではなく**正しさの根拠**なので、throw する直書き(prisma)で永続を
+    // 確認する。書けなければ処理を止め(添付はしない)、charged_but_failed へ
+    // 変換して catch 側の再試行+ロック保持の防御に入る。
     if (purchaseKeyHash) {
       try {
-        await writeAuditLog({
-          userId: session.id,
-          action: REGISTRY_PURCHASE_AUDIT_ACTION,
-          targetTable: "properties",
-          targetId: propertyId,
-          detail: { purchaseKeyHash, outcome: "charged" },
+        await prisma.auditLog.create({
+          data: {
+            userId: session.id,
+            action: REGISTRY_PURCHASE_AUDIT_ACTION,
+            targetTable: "properties",
+            targetId: propertyId,
+            detail: { purchaseKeyHash, outcome: "charged" },
+          },
         });
       } catch {
         console.warn(
-          "[registry-fetch] purchase ledger write failed (continuing; charge already made)",
+          "[registry-fetch] CRITICAL: charged but ledger persist failed; aborting before attach",
         );
+        throw new RegistryFetchError("charged_but_failed");
       }
     }
 
@@ -2333,27 +2352,40 @@ export async function runRegistryAutoFetch(
   } catch (err) {
     // 段階②: **課金後の失敗は、ロックを解除する前に台帳へ残す**(@codex #345 R2 P1)。
     // 解除が先だと「ロック無し×台帳無し」の隙間ができ、その間に同じ候補の再実行が
-    // 通って**もう一度課金**できてしまう。書けなくても元のエラーを優先。
+    // 通って**もう一度課金**できてしまう。
+    // ⚠さらに(@codex R3 P1): 台帳が**書けなかった場合はロックを解除しない**。
+    // 「台帳無し×ロック無し」は再課金可能な状態そのもの。scheduled のまま残せば
+    // 取得APIは 409 で止まり続ける(fail-closed)。解消は運用(状態の手動リセット)。
+    let ledgerPersisted = true;
     if (
       purchaseKeyHash &&
       err instanceof RegistryFetchError &&
       err.code === "charged_but_failed"
     ) {
       try {
-        await writeAuditLog({
-          userId: session.id,
-          action: REGISTRY_PURCHASE_AUDIT_ACTION,
-          targetTable: "properties",
-          targetId: propertyId,
-          detail: { purchaseKeyHash, outcome: "charged_but_failed" },
+        // writeAuditLog は失敗を握りつぶすため使わない(直書きで永続を確認する)。
+        await prisma.auditLog.create({
+          data: {
+            userId: session.id,
+            action: REGISTRY_PURCHASE_AUDIT_ACTION,
+            targetTable: "properties",
+            targetId: propertyId,
+            detail: { purchaseKeyHash, outcome: "charged_but_failed" },
+          },
         });
       } catch {
-        // 台帳書き込み失敗は握りつぶす(元のエラー=charged_but_failed を利用者へ返す方が重要)。
+        ledgerPersisted = false;
+        console.warn(
+          "[registry-fetch] CRITICAL: charged-failure ledger persist failed; leaving property locked",
+        );
       }
     }
 
     // 失敗 → ロック解除（previousStatus へ戻す）。best-effort・元のエラー優先。
-    await releaseSchedulingLock(propertyId, previousStatus);
+    // ⚠課金済みで台帳が書けなかった場合だけは解除しない(上記 fail-closed)。
+    if (ledgerPersisted) {
+      await releaseSchedulingLock(propertyId, previousStatus);
+    }
 
     // provider 失敗は安全なレスポンスにマップ（分類コードのみ・PII/認証情報/生レスポンスなし）。
     if (err instanceof RegistryFetchError) {

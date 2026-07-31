@@ -112,7 +112,7 @@ vi.mock("@/lib/prisma", () => ({
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn() },
-    auditLog: { findFirst: vi.fn() },
+    auditLog: { findFirst: vi.fn(), create: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -161,7 +161,7 @@ const pm = prisma as unknown as {
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock };
-  auditLog: { findFirst: Mock };
+  auditLog: { findFirst: Mock; create: Mock };
   $transaction: Mock;
 };
 
@@ -239,6 +239,7 @@ beforeEach(() => {
   setProperty();
   // 段階②の台帳(二重課金ガード)は既定「記録なし」= 通る。
   pm.auditLog.findFirst.mockResolvedValue(null);
+  pm.auditLog.create.mockResolvedValue({ id: "ledger-1" });
   pm.property.updateMany.mockResolvedValue({ count: 1 });
   pm.property.update.mockResolvedValue({});
   pm.property.findFirst.mockResolvedValue(null);
@@ -881,8 +882,8 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
       certificateType: "owner",
     });
     // 台帳(成功)が書かれる。detail はハッシュと outcome のみ(地番そのものは載せない)。
-    const ledger = (writeAuditLog as Mock).mock.calls
-      .map((c) => c[0])
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
       .filter((a) => a.action === "registry_location_purchase");
     expect(ledger).toHaveLength(1);
     expect(ledger[0].detail.outcome).toBe("charged");
@@ -917,17 +918,19 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
         provider,
       ),
     ).rejects.toMatchObject({ status: 502 });
-    const ledger = (writeAuditLog as Mock).mock.calls
-      .map((c) => c[0])
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
       .filter((a) => a.action === "registry_location_purchase");
     expect(ledger).toHaveLength(1);
     expect(ledger[0].detail.outcome).toBe("charged_but_failed");
 
     // ⚠台帳はロック解除より**先**(@codex #345 R2 P1)。解除が先だと
     // 「ロック無し×台帳無し」の隙間で同じ候補に再課金できる。
-    const ledgerCallOrder = (writeAuditLog as Mock).mock.invocationCallOrder[
-      (writeAuditLog as Mock).mock.calls.findIndex(
-        (c) => c[0].action === "registry_location_purchase",
+    const ledgerCallOrder = pm.auditLog.create.mock.invocationCallOrder[
+      pm.auditLog.create.mock.calls.findIndex(
+        (c) =>
+          (c[0] as { data: { action: string } }).data.action ===
+          "registry_location_purchase",
       )
     ];
     const releaseCall = pm.property.updateMany.mock.calls.findIndex(
@@ -947,11 +950,57 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
     (isPdfBuffer as Mock).mockReturnValue(false); // PDF検証で 422 に落とす
     const { promise } = runLocation();
     await expect(promise).rejects.toMatchObject({ status: 422 });
-    const ledger = (writeAuditLog as Mock).mock.calls
-      .map((c) => c[0])
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
       .filter((a) => a.action === "registry_location_purchase");
     expect(ledger).toHaveLength(1);
     expect(ledger[0].detail.outcome).toBe("charged");
+  });
+
+  it("⚠課金後失敗の台帳が書けなければロックを解除しない（@codex #345 R3 P1: fail-closed）", async () => {
+    // 「台帳無し×ロック無し」は再課金可能な状態そのもの。台帳が永続できないなら
+    // scheduled のまま残し、取得APIを 409 で止め続ける(解消は運用)。
+    pm.auditLog.create.mockRejectedValue(new Error("db down"));
+    const provider = successProvider();
+    provider.fetchRegistryPdf.mockRejectedValue(
+      new RegistryFetchError("charged_but_failed"),
+    );
+    await expect(
+      runRegistryAutoFetch(
+        {
+          session: SESSION,
+          propertyId: PROP_ID,
+          confirmed: true,
+          locationCandidate: LC,
+        },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+    // ロック解除(registryStatus を元に戻す updateMany)が**呼ばれない**。
+    const releaseCalls = pm.property.updateMany.mock.calls.filter(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "unconfirmed",
+    );
+    expect(releaseCalls).toHaveLength(0);
+  });
+
+  it("⚠provider成功後、台帳(charged)が書けなければ添付に進まず charged_but_failed（fail-closed）", async () => {
+    // writeAuditLog(失敗を握りつぶす)ではなく throw する直書きであることの検証。
+    // 台帳が無いまま添付まで成功すると、30日マーカー無しで再実行=再課金できてしまう。
+    pm.auditLog.create.mockRejectedValue(new Error("db down"));
+    const { promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({ status: 502 });
+    // 添付処理(ImportJob作成)へ進んでいない。
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    // catch 側でも台帳を再試行している(計2回)。両方失敗したのでロックは保持。
+    expect(pm.auditLog.create).toHaveBeenCalledTimes(2);
+    const releaseCalls = pm.property.updateMany.mock.calls.filter(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "unconfirmed",
+    );
+    expect(releaseCalls).toHaveLength(0);
   });
 
   it("課金前の失敗(provider_error等)は台帳に書かない（まだ買っていない=再実行してよい）", async () => {
@@ -970,8 +1019,8 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
         provider,
       ),
     ).rejects.toMatchObject({ status: 502 });
-    const ledger = (writeAuditLog as Mock).mock.calls
-      .map((c) => c[0])
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
       .filter((a) => a.action === "registry_location_purchase");
     expect(ledger).toHaveLength(0);
   });

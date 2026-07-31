@@ -1572,6 +1572,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       myPageSeq?: unknown[];
       /** 確定前に存在した行ID(作成同一性の判定材料)。 */
       prevRowIds?: string[];
+      /** 確定前の一覧が読めない状態を模す(@codex R3 P1: 基準なしでは課金しない)。 */
+      baselineUnreadable?: boolean;
     } = {},
   ) {
     const clicked: string[] = [];
@@ -1602,7 +1604,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       // 確定前の既存行ID読み取り(@codex R2 P1: 作成同一性の土台)。myPageSeq は消費しない。
       if (parsed.probe === "row-ids") {
-        return JSON.stringify({ present: true, ids: opts.prevRowIds ?? [] });
+        return JSON.stringify({
+          present: opts.baselineUnreadable ? false : true,
+          ids: opts.prevRowIds ?? [],
+        });
       }
       if (parsed.tableSel === "#myPageTable") {
         const next = myPageSeq.length > 0 ? myPageSeq.shift() : lastMyPage;
@@ -1699,6 +1704,19 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       code: "charged_but_failed",
     });
     expect(clicked).toContain(SEIKYU); // 課金は押している=だから分類が変わる
+  });
+
+  it("S7: ⚠確定前の一覧(基準)が読めなければ、確定の前に中止する（カート行も作らない）", async () => {
+    // 基準なしで進むと「ちょうど1件」規則に落ち、既存の未請求残骸へ課金し得る
+    // (@codex #345 R3 P1)。確定前に止めれば外部は完全に無傷。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { baselineUnreadable: true });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM); // 確定を押していない=カート行なし
+    expect(clicked).not.toContain(SEIKYU);
   });
 
   it("S6: 買う対象(地番/家屋番号)が空なら何もせず provider_error（ページに触れない）", async () => {
