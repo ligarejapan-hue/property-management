@@ -46,6 +46,8 @@ import {
   type RegistryFetchThrottle,
 } from "@/lib/registry-fetch/throttle";
 import { fingerprintProperty } from "./candidate-cache";
+import { canDownloadRow, purchaseIdempotencyKey } from "./purchase-safety";
+import { createHash } from "crypto";
 
 export interface RunRegistryAutoFetchArgs {
   /** 認証済みセッション（route の getApiSession から id/role のみ）。 */
@@ -64,7 +66,24 @@ export interface RunRegistryAutoFetchArgs {
    * ここで version-lock する行の指紋がこれと一致しなければ 409（resolve〜取得の間の編集を弾く）。
    */
   expectedFingerprint?: string;
+  /**
+   * 段階②(2026-07-31): 所在検索で選ばれた候補(地番/家屋番号)での**有料取得**。
+   * realEstateNumber と排他（両方指定は番号を優先）。値は秘匿情報＝log/監査/応答に出さない。
+   */
+  locationCandidate?: {
+    lotNumber: string | null;
+    buildingNumber: string | null;
+  } | null;
 }
+
+/**
+ * 有料取得の台帳 AuditLog action(段階②)。detail は purchaseKeyHash(鍵のsha256先頭32桁・
+ * 非PII)と outcome のみ。**二重課金ガードの正**としてここを検索する。
+ */
+export const REGISTRY_PURCHASE_AUDIT_ACTION = "registry_location_purchase";
+
+/** 台帳の照合窓。この期間内の同一鍵の購入は再実行させない(30日)。 */
+const PURCHASE_LEDGER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 // provider 失敗（RegistryFetchError）の分類コード → 安全な HTTP ステータス。
 // 外部レスポンス本文・認証情報・PII は載せず、分類のみで応答する。
@@ -78,6 +97,9 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   provider_error: 502,
   service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
   service_unavailable: 503, // 接続不可(時間外の可能性)=同じく一時的利用不可。
+  // ⚠課金後の失敗。502 だが「リトライ可能な upstream 障害」ではない(メッセージ側で
+  // 再実行禁止とマイページ確認を案内)。
+  charged_but_failed: 502,
 };
 
 /**
@@ -425,7 +447,24 @@ const REGISTRY_SELECTORS = {
   myPageTable: "#myPageTable", // [確定] 請求一覧テーブル
   myPageFilter: "#siborikomi", // [確定] 状態の絞り込み(すべて/未請求/請求済…)
   myPageSeikyuButton: "#myPageSeikyu", // [確定] **請求=課金**(状態が「未請求」の行のみ)
+  myPageReloadButton: "#myReloadButton", // [要live] 一覧の「最新表示」(請求済への遷移を待つのに使う)
 } as const;
+
+/**
+ * 請求事項のうち**所有者事項以外**のチェックボックス（段階②）。
+ * 請求前にすべて外す＝所有者事項だけを買う。外し漏れは追加課金になるため、
+ * 設定後に実際の checked 状態を読み戻して検証する（fail-closed・課金前）。
+ * ⚠`#fuHeisaTokibo`(閉鎖登記記録)は「全部事項の時のみ選択可」= disabled のことがあるので、
+ * 操作は DOM click（actionability 待ちで固まらない）で行う。
+ */
+const REGISTRY_CERTIFICATE_EXTRA_CHECKS: readonly string[] = [
+  "#fuAll", // 全部事項
+  "#fuChizu", // 地図
+  "#fuShozai", // 土地所在図/地積測量図
+  "#fuChieki", // 地役権図面
+  "#fuZumen", // 建物図面/各階平面図
+  "#fuHeisaTokibo", // 閉鎖登記記録
+];
 
 /**
  * CodexP1: REGISTRY_SELECTORS が **実サイトに校正済み** だと運用者が明示宣言したかを判定する。
@@ -1131,6 +1170,443 @@ function createPlaywrightRegistryPage(
         throw new RegistryFetchError("provider_error");
       }
     },
+    async fetchByLocationCandidate(input) {
+      // 段階②(2026-07-31): 所在検索で選ばれた候補(地番/家屋番号)の**有料取得**。
+      // フロー(実サイト校正= deliverables/registry-calibration/stage2-flow-20260731.md):
+      //   [課金前] ①不動産請求へ遷移 ②条件入力 ③地番ダイアログ検索 ④対象行を check→確定
+      //           ⑤請求事項=所有者事項のみに揃える(検証つき) ⑥「確定」(無料・カートに未請求で載る)
+      //           ⑦マイページで対象行(未請求×所在一致×最新)を1件だけ特定して check
+      //   [課金]   ⑧「請求」 ⑨状態が「請求済」になるまで待つ ⑩同じ行を選び「表示・保存」→PDF
+      // ⚠⑧より前の失敗は provider_error/not_found(お金は動いていない)。
+      // ⚠⑧より後の失敗は **charged_but_failed**(課金済みの可能性。呼び出し側が再試行禁止+台帳記録)。
+      // ⚠[要live] ⑥以降の画面遷移・請求後の反映時間は実課金テストで最終確定する。
+      const isBuilding = !!(
+        input.buildingNumber && input.buildingNumber.trim().length > 0
+      );
+      const rawTarget = (
+        (isBuilding ? input.buildingNumber : input.lotNumber) ?? ""
+      ).trim();
+      const targetKey = normalizeChibanForDialog(rawTarget);
+      if (targetKey.length === 0) {
+        // 取得対象(地番/家屋番号)が無い候補は買えない(課金前・fail-closed)。
+        throw new RegistryFetchError("provider_error");
+      }
+      const domClick = (sel: string) =>
+        page.evaluate((s) => {
+          const el = document.querySelector(s);
+          if (el && typeof (el as { click?: unknown }).click === "function") {
+            (el as unknown as { click: () => void }).click();
+          }
+        }, sel);
+      // PageLike の evaluate は string 引数のみ(既存契約)なので、複合引数は JSON で渡す。
+      const sleep = (ms: number) =>
+        page
+          .waitForFunction(() => false, undefined, { timeout: ms })
+          .catch(() => {});
+
+      // ---- 課金前ゾーン(①〜③: ナビゲーション+条件入力+ダイアログ検索) ----
+      try {
+        await page.waitForSelector(REGISTRY_SELECTORS.fudosanRequestLink, {
+          state: "attached",
+        });
+        await domClick(REGISTRY_SELECTORS.fudosanRequestLink);
+        await page.waitForSelector(REGISTRY_SELECTORS.searchMethodLocationRadio);
+        await page.click(REGISTRY_SELECTORS.searchMethodLocationRadio);
+        await page.click(
+          isBuilding
+            ? REGISTRY_SELECTORS.locationTypeBuildingRadio
+            : REGISTRY_SELECTORS.locationTypeLandRadio,
+        );
+        const { prefecture, rest } = splitAddressForLocationSearch(input.address);
+        if (prefecture) {
+          await page.selectOption(
+            REGISTRY_SELECTORS.locationPrefectureSelect,
+            prefecture,
+          );
+        }
+        await page.check(REGISTRY_SELECTORS.locationDirectInputCheck);
+        await page.fill(
+          REGISTRY_SELECTORS.locationSearchAddress,
+          rest.length > 0 ? rest : input.address,
+        );
+        await page.fill(REGISTRY_SELECTORS.locationSearchLotBuilding, targetKey);
+        await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
+        await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
+        await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
+        await page.click(REGISTRY_SELECTORS.dialogSearch);
+      } catch (err) {
+        console.warn(
+          "[registry-fetch] paid flow setup failed (not charged):",
+          summarizeRegistrySearchError(err),
+        );
+        throw new RegistryFetchError("provider_error");
+      }
+
+      // ---- 課金前ゾーン(④: 対象行の特定と確定) ----
+      try {
+        try {
+          await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
+            state: "attached",
+            timeout: DIALOG_RESULT_TIMEOUT_MS,
+          });
+        } catch (waitErr) {
+          if (!isTimeoutError(waitErr)) throw waitErr;
+          const loaded = await page.evaluate((sel) => {
+            const t = document.querySelector(sel);
+            return !!t && !/データ取得中/.test(t.textContent ?? "");
+          }, REGISTRY_SELECTORS.dialogResultTable);
+          if (!loaded) throw new RegistryFetchError("timeout");
+          // 真の0件=検索時の候補が消えた(登記側の変化)。課金せず not_found。
+          await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+          throw new RegistryFetchError("not_found");
+        }
+        // 対象の地番セルを探して check(複数ページは searchByLocation と同じ防御で送る)。
+        let found = false;
+        for (let pageNo = 0; pageNo < MAX_DIALOG_PAGES; pageNo++) {
+          const result = (await page.evaluate((json) => {
+            const { tableSel, target } = JSON.parse(json) as {
+              tableSel: string;
+              target: string;
+            };
+            // normalizeChibanForDialog と同じ規則(browser 内で自己完結させるため複製)。
+            const norm = (s: string) =>
+              s
+                .normalize("NFKC")
+                .replace(/[‐‑‒–—―ー−]/g, "-")
+                .replace(/番地/g, "-")
+                .replace(/[番号の]/g, "-")
+                .replace(/\s+/g, "")
+                .replace(/-+/g, "-")
+                .replace(/^-+|-+$/g, "")
+                .toLowerCase();
+            const t = document.querySelector(tableSel);
+            if (!t) return "no-table";
+            const cells = Array.from(
+              t.querySelectorAll('td[id^="cbnDlgChibanDt_"]'),
+            );
+            for (const cell of cells) {
+              if (norm(cell.textContent ?? "") === target) {
+                const row = cell.closest("tr");
+                const cb = row?.querySelector(
+                  'input[type="checkbox"]',
+                ) as HTMLInputElement | null;
+                if (!cb) return "no-checkbox";
+                if (!cb.checked) cb.click();
+                return "checked";
+              }
+            }
+            return "not-found";
+          }, JSON.stringify({
+            tableSel: REGISTRY_SELECTORS.dialogResultTable,
+            target: targetKey,
+          }))) as string;
+          if (result === "checked") {
+            found = true;
+            break;
+          }
+          if (result !== "not-found") break; // no-table / no-checkbox = 想定外DOM → 中止
+          // 次ページへ(無ければ終了)。searchByLocation と同じ「内容が変わるまで」待ち。
+          const hasNext = await page.evaluate((sel) => {
+            const b = document.querySelector(sel) as { disabled?: boolean } | null;
+            if (!b || b.disabled) return false;
+            const style = getComputedStyle(b as unknown as Element);
+            return style.display !== "none" && style.visibility !== "hidden";
+          }, REGISTRY_SELECTORS.dialogPageNext);
+          if (!hasNext) break;
+          const prevFirst = (await page.evaluate((sel) => {
+            const c = document
+              .querySelector(sel)
+              ?.querySelector('td[id^="cbnDlgChibanDt_"]');
+            return (c?.textContent ?? "").trim();
+          }, REGISTRY_SELECTORS.dialogResultTable)) as string;
+          await page.click(REGISTRY_SELECTORS.dialogPageNext);
+          await page.waitForFunction(
+            (arg) => {
+              const { tableSel, prevRef } = arg as {
+                tableSel: string;
+                prevRef: string;
+              };
+              const t = document.querySelector(tableSel);
+              if (!t) return false;
+              if (/データ取得中/.test(t.textContent ?? "")) return false;
+              const firstCell = t.querySelector('td[id^="cbnDlgChibanDt_"]');
+              const val = (firstCell?.textContent ?? "").trim();
+              return val !== "" && val !== prevRef;
+            },
+            {
+              tableSel: REGISTRY_SELECTORS.dialogResultTable,
+              prevRef: prevFirst,
+            },
+            { timeout: DIALOG_RESULT_TIMEOUT_MS },
+          );
+        }
+        if (!found) {
+          // 検索時に選んだ地番が今は見つからない → 課金せず終了(候補の再検索を促す)。
+          await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+          throw new RegistryFetchError("not_found");
+        }
+        await domClick(REGISTRY_SELECTORS.dialogOk);
+        await sleep(1500); // 確定値のフォーム反映を待つ(ダイアログは閉じる)
+
+        // ---- ⑤ 請求事項=**所有者事項のみ**(検証つき・課金前) ----
+        // 外し漏れ=追加課金なので、操作後に checked を読み戻して検証する。
+        // disabled があり得る(#fuHeisaTokibo)ため DOM click で操作する。
+        const certJson = (await page.evaluate((json) => {
+          const { ownerSel, extras } = JSON.parse(json) as {
+            ownerSel: string;
+            extras: string[];
+          };
+          const set = (sel: string, want: boolean): string => {
+            const el = document.querySelector(sel) as HTMLInputElement | null;
+            if (!el) return want ? "missing" : "absent-ok";
+            if (el.checked !== want) el.click();
+            return el.checked === want ? "ok" : "failed";
+          };
+          const owner = set(ownerSel, true);
+          const extraResults = extras.map((sel) => set(sel, false));
+          return JSON.stringify({ owner, extraResults });
+        }, JSON.stringify({
+          ownerSel: REGISTRY_SELECTORS.certificateOwnerCheck,
+          extras: [...REGISTRY_CERTIFICATE_EXTRA_CHECKS],
+        }))) as string;
+        const cert = JSON.parse(certJson) as {
+          owner: string;
+          extraResults: string[];
+        };
+        if (
+          cert.owner !== "ok" ||
+          cert.extraResults.some((r) => r !== "ok" && r !== "absent-ok")
+        ) {
+          // 種別を意図どおりに揃えられない → 課金前に中止(余計なものを買わない)。
+          throw new RegistryFetchError("provider_error");
+        }
+
+        // ---- ⑥ 確定(無料)→ ⑦ マイページで対象行を1件だけ特定 ----
+        await domClick(REGISTRY_SELECTORS.requestConfirmButton);
+        // 遷移先は請求リスト(#fudosanIchiranTbl)またはマイページ(#myPageTable) [要live]。
+        await page.waitForSelector(
+          `${REGISTRY_SELECTORS.searchResult}, ${REGISTRY_SELECTORS.myPageTable}`,
+          { state: "attached", timeout: DIALOG_RESULT_TIMEOUT_MS },
+        );
+        await domClick(REGISTRY_SELECTORS.myPageTab);
+        await page.waitForSelector(REGISTRY_SELECTORS.myPageTable, {
+          state: "attached",
+          timeout: DIALOG_RESULT_TIMEOUT_MS,
+        });
+        await sleep(1000);
+        const pickJson = (await page.evaluate((json) => {
+          const { tableSel, target } = JSON.parse(json) as {
+            tableSel: string;
+            target: string;
+          };
+          const norm = (s: string) =>
+            s
+              .normalize("NFKC")
+              .replace(/[‐‑‒–—―ー−]/g, "-")
+              .replace(/番地/g, "-")
+              .replace(/[番号の]/g, "-")
+              .replace(/\s+/g, "")
+              .replace(/-+/g, "-")
+              .replace(/^-+|-+$/g, "")
+              .toLowerCase();
+          // 列: 0=checkbox 1=行id 2=種別 3=詳細 4=所在 5=状態 6=日時 7=料金 8=PDF 9=期限
+          const rows = Array.from(
+            document.querySelectorAll(`${tableSel} tbody tr`),
+          );
+          const matches: { tr: Element; when: string }[] = [];
+          for (const tr of rows) {
+            const tds = tr.querySelectorAll("td");
+            if (tds.length < 7) continue;
+            const status = (tds[5]?.textContent ?? "").trim();
+            const shozai = norm(tds[4]?.textContent ?? "");
+            if (status === "未請求" && shozai.includes(target)) {
+              matches.push({ tr, when: (tds[6]?.textContent ?? "").trim() });
+            }
+          }
+          if (matches.length === 0) return JSON.stringify({ result: "not-found" });
+          if (matches.length > 1) {
+            // 同じ所在の未請求が複数=どれを買うか確定できない。課金前に中止する。
+            return JSON.stringify({ result: "ambiguous", count: matches.length });
+          }
+          // 既存の check をすべて外してから対象だけ check(他の行を巻き込んで課金しない)。
+          for (const cb of Array.from(
+            document.querySelectorAll(
+              `${tableSel} tbody input[type="checkbox"]`,
+            ),
+          ) as HTMLInputElement[]) {
+            if (cb.checked) cb.click();
+          }
+          const cb = matches[0].tr.querySelector(
+            'input[type="checkbox"]',
+          ) as HTMLInputElement | null;
+          if (!cb) return JSON.stringify({ result: "no-checkbox" });
+          if (!cb.checked) cb.click();
+          const checkedCount = (
+            Array.from(
+              document.querySelectorAll(
+                `${tableSel} tbody input[type="checkbox"]`,
+              ),
+            ) as HTMLInputElement[]
+          ).filter((c) => c.checked).length;
+          return JSON.stringify({ result: "checked", checkedCount });
+        }, JSON.stringify({
+          tableSel: REGISTRY_SELECTORS.myPageTable,
+          target: targetKey,
+        }))) as string;
+        const pick = JSON.parse(pickJson) as {
+          result: string;
+          checkedCount?: number;
+        };
+        if (pick.result !== "checked" || pick.checkedCount !== 1) {
+          // 対象行を1件に確定できない/複数選択になった → 課金前に中止。
+          console.warn(
+            "[registry-fetch] my-page row selection failed (not charged):",
+            pick.result,
+          );
+          throw new RegistryFetchError("provider_error");
+        }
+      } catch (err) {
+        if (err instanceof RegistryFetchError) throw err;
+        console.warn(
+          "[registry-fetch] paid flow pre-charge failed (not charged):",
+          summarizeRegistrySearchError(err),
+        );
+        if (isTimeoutError(err)) throw new RegistryFetchError("timeout");
+        throw new RegistryFetchError("provider_error");
+      }
+
+      // ---- ⑧ ここから課金。以降の失敗はすべて charged_but_failed ----
+      try {
+        await domClick(REGISTRY_SELECTORS.myPageSeikyuButton);
+        // ⑨ 状態が「請求済」になるまで待つ(最新表示をはさんで poll)。[要live] 反映時間。
+        let ready = false;
+        for (let attempt = 0; attempt < 20; attempt++) {
+          await sleep(3000);
+          const stateJson = (await page.evaluate((json) => {
+            const { tableSel, target } = JSON.parse(json) as {
+              tableSel: string;
+              target: string;
+            };
+            const norm = (s: string) =>
+              s
+                .normalize("NFKC")
+                .replace(/[‐‑‒–—―ー−]/g, "-")
+                .replace(/番地/g, "-")
+                .replace(/[番号の]/g, "-")
+                .replace(/\s+/g, "")
+                .replace(/-+/g, "-")
+                .replace(/^-+|-+$/g, "")
+                .toLowerCase();
+            const rows = Array.from(
+              document.querySelectorAll(`${tableSel} tbody tr`),
+            );
+            // 対象所在の行のうち**最新日時**の行を見る(過去の請求済と混同しない)。
+            let best: { status: string; expiry: string; when: string } | null =
+              null;
+            for (const tr of rows) {
+              const tds = tr.querySelectorAll("td");
+              if (tds.length < 7) continue;
+              const shozai = norm(tds[4]?.textContent ?? "");
+              if (!shozai.includes(target)) continue;
+              const row = {
+                status: (tds[5]?.textContent ?? "").trim(),
+                expiry: (tds[9]?.textContent ?? "").trim(),
+                when: (tds[6]?.textContent ?? "").trim(),
+              };
+              if (!best || row.when > best.when) best = row;
+            }
+            return JSON.stringify(best ?? { status: "", expiry: "", when: "" });
+          }, JSON.stringify({
+            tableSel: REGISTRY_SELECTORS.myPageTable,
+            target: targetKey,
+          }))) as string;
+          const state = JSON.parse(stateJson) as {
+            status: string;
+            expiry: string;
+          };
+          if (canDownloadRow(state.status, state.expiry)) {
+            ready = true;
+            break;
+          }
+          // まだ反映前(未請求/請求中/空)なら最新表示して再確認。
+          await domClick(REGISTRY_SELECTORS.myPageReloadButton).catch(() => {});
+        }
+        if (!ready) {
+          throw new RegistryFetchError("charged_but_failed");
+        }
+        // ⑩ 同じ行(最新の請求済)を選び直して「表示・保存」→ download を受ける。
+        const reJson = (await page.evaluate((json) => {
+          const { tableSel, target } = JSON.parse(json) as {
+            tableSel: string;
+            target: string;
+          };
+          const norm = (s: string) =>
+            s
+              .normalize("NFKC")
+              .replace(/[‐‑‒–—―ー−]/g, "-")
+              .replace(/番地/g, "-")
+              .replace(/[番号の]/g, "-")
+              .replace(/\s+/g, "")
+              .replace(/-+/g, "-")
+              .replace(/^-+|-+$/g, "")
+              .toLowerCase();
+          const rows = Array.from(
+            document.querySelectorAll(`${tableSel} tbody tr`),
+          );
+          let best: { tr: Element; when: string } | null = null;
+          for (const tr of rows) {
+            const tds = tr.querySelectorAll("td");
+            if (tds.length < 7) continue;
+            const status = (tds[5]?.textContent ?? "").trim();
+            const shozai = norm(tds[4]?.textContent ?? "");
+            if (status === "請求済" && shozai.includes(target)) {
+              const when = (tds[6]?.textContent ?? "").trim();
+              if (!best || when > best.when) best = { tr, when };
+            }
+          }
+          if (!best) return "not-found";
+          for (const cb of Array.from(
+            document.querySelectorAll(
+              `${tableSel} tbody input[type="checkbox"]`,
+            ),
+          ) as HTMLInputElement[]) {
+            if (cb.checked) cb.click();
+          }
+          const cb = best.tr.querySelector(
+            'input[type="checkbox"]',
+          ) as HTMLInputElement | null;
+          if (!cb) return "no-checkbox";
+          if (!cb.checked) cb.click();
+          return "checked";
+        }, JSON.stringify({
+          tableSel: REGISTRY_SELECTORS.myPageTable,
+          target: targetKey,
+        }))) as string;
+        if (reJson !== "checked") {
+          throw new RegistryFetchError("charged_but_failed");
+        }
+        const [download] = await Promise.all([
+          page.waitForEvent("download", {}),
+          domClick(REGISTRY_SELECTORS.downloadButton),
+        ]);
+        const stream = await download.createReadStream();
+        if (!stream) {
+          throw new RegistryFetchError("charged_but_failed");
+        }
+        return await readStreamToBuffer(stream);
+      } catch (err) {
+        // ⚠課金境界を越えている。分類を charged_but_failed に固定し(既にそうならそのまま)、
+        // 詳細は診断ログへ(secret/PII 除去済みの要約のみ)。
+        console.warn(
+          "[registry-fetch] paid flow failed AFTER charge:",
+          summarizeRegistrySearchError(err),
+        );
+        if (err instanceof RegistryFetchError && err.code === "charged_but_failed") {
+          throw err;
+        }
+        throw new RegistryFetchError("charged_but_failed");
+      }
+    },
     async downloadRegistryPdf() {
       try {
         // download イベントの待受を click より先に張る（Playwright 推奨）。
@@ -1484,6 +1960,60 @@ export async function runRegistryAutoFetch(
     );
   }
 
+  // 4.5 段階②(2026-07-31): 有料取得の**二重課金ガード(台帳)**。
+  //     サイト側の歯止め(請求済は再請求不可)は「確定」のたびに新しいカート行ができるため
+  //     アプリからの再実行には効かない。**アプリ側の台帳(AuditLog)を主**に、同じ
+  //     物件×地番×種別 の購入(成功 or 課金後失敗)が直近にあれば実行前に止める。
+  //     台帳に残すのは鍵の**ハッシュのみ**(地番=秘匿情報を監査に載せない)。
+  // ⚠番号があれば番号取得(無料フローと同じ扱い)が優先され購入は起きない=台帳も見ない。
+  let purchaseKeyHash: string | null = null;
+  const willPurchaseByLocation =
+    !!args.locationCandidate &&
+    !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
+  if (willPurchaseByLocation && args.locationCandidate) {
+    const lotOrBuilding = (
+      args.locationCandidate.lotNumber ??
+      args.locationCandidate.buildingNumber ??
+      ""
+    ).trim();
+    if (!lotOrBuilding || !(property.address ?? "").trim()) {
+      // 買う対象(地番/家屋番号)か所在が無い候補は購入できない(課金前・fail-closed)。
+      throw new ApiError(
+        409,
+        "選択した候補が見つかりません。物件情報が変わった可能性があります。もう一度検索してから取得してください",
+        "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+      );
+    }
+    purchaseKeyHash = createHash("sha256")
+      .update(
+        purchaseIdempotencyKey({
+          propertyId,
+          lotOrBuilding,
+          certificateType: "owner",
+        }),
+      )
+      .digest("hex")
+      .slice(0, 32);
+    const prior = await prisma.auditLog.findFirst({
+      where: {
+        action: REGISTRY_PURCHASE_AUDIT_ACTION,
+        targetId: propertyId,
+        createdAt: {
+          gte: new Date(Date.now() - PURCHASE_LEDGER_WINDOW_MS),
+        },
+        detail: { path: ["purchaseKeyHash"], equals: purchaseKeyHash },
+      },
+      select: { id: true },
+    });
+    if (prior) {
+      throw new ApiError(
+        409,
+        "この候補の謄本は最近取得済み（または請求済み）です。添付を確認するか、登記情報提供サービスのマイページで請求状態を確認してください",
+        "REGISTRY_PURCHASE_ALREADY_DONE",
+      );
+    }
+  }
+
   // 5. 楽観ロック取得: version 一致 かつ まだ scheduled でない物件だけを scheduled にする。
   //    count===0 は並行取得 or バージョン変化 → 409（二重実行させない）。
   const previousStatus = property.registryStatus;
@@ -1536,10 +2066,21 @@ export async function runRegistryAutoFetch(
   // 6. provider 取得 → PDF 検証 → text 抽出 → processRegistryPdf 接続 → 成功 status。
   //    いずれの失敗でも scheduled で固着させないよう、catch で必ずロック解除する。
   try {
-    // 取得キーは非PIIのみ（realEstateNumber / 物件UUID）。所有者名・住所は渡さない。
+    // 取得キーは非PIIのみ（realEstateNumber / 物件UUID）。所有者名は渡さない。
     // cond③: 所在検索の候補取得では server 再解決した override を優先（物件は番号未保持）。
+    // 段階②: 地番候補の有料取得は location を渡す（番号があれば番号を優先）。
+    const effectiveNumber = args.realEstateNumber ?? property.realEstateNumber;
     const fetchResult = await provider.fetchRegistryPdf({
-      realEstateNumber: args.realEstateNumber ?? property.realEstateNumber,
+      realEstateNumber: effectiveNumber,
+      location:
+        args.locationCandidate && !effectiveNumber?.trim()
+          ? {
+              address: property.address ?? "",
+              lotNumber: args.locationCandidate.lotNumber,
+              buildingNumber: args.locationCandidate.buildingNumber,
+              certificateType: "owner",
+            }
+          : null,
       ref: property.id,
     });
 
@@ -1581,6 +2122,17 @@ export async function runRegistryAutoFetch(
       where: { id: propertyId },
       data: { registryStatus: "obtained", version: { increment: 1 } },
     });
+
+    // 段階②: 有料取得の台帳(成功)。二重課金ガードの正。ハッシュのみ=非PII。
+    if (purchaseKeyHash) {
+      await writeAuditLog({
+        userId: session.id,
+        action: REGISTRY_PURCHASE_AUDIT_ACTION,
+        targetTable: "properties",
+        targetId: propertyId,
+        detail: { purchaseKeyHash, outcome: "succeeded" },
+      });
+    }
 
     // 成功 AuditLog（非PII のみ）。PDF本文/抽出テキスト/所有者名・住所/郵便番号/
     // fileUrl 全文/APIキー/credential/raw レスポンスは載せない。件数・ID・分類のみ。
@@ -1632,6 +2184,26 @@ export async function runRegistryAutoFetch(
   } catch (err) {
     // 失敗 → ロック解除（previousStatus へ戻す）。best-effort・元のエラー優先。
     await releaseSchedulingLock(propertyId, previousStatus);
+
+    // 段階②: **課金後の失敗も台帳に残す**(課金は済んでいる可能性がある=同じ鍵の再実行を
+    // 台帳で止めないと、失敗→再実行で二重課金になる)。書けなくても元のエラーを優先。
+    if (
+      purchaseKeyHash &&
+      err instanceof RegistryFetchError &&
+      err.code === "charged_but_failed"
+    ) {
+      try {
+        await writeAuditLog({
+          userId: session.id,
+          action: REGISTRY_PURCHASE_AUDIT_ACTION,
+          targetTable: "properties",
+          targetId: propertyId,
+          detail: { purchaseKeyHash, outcome: "charged_but_failed" },
+        });
+      } catch {
+        // 台帳書き込み失敗は握りつぶす(元のエラー=charged_but_failed を利用者へ返す方が重要)。
+      }
+    }
 
     // provider 失敗は安全なレスポンスにマップ（分類コードのみ・PII/認証情報/生レスポンスなし）。
     if (err instanceof RegistryFetchError) {

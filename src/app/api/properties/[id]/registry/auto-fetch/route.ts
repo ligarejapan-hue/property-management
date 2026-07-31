@@ -81,7 +81,7 @@ export async function POST(
       typeof candidateRefRaw === "string" ? candidateRefRaw.trim() : "";
 
     if (candidateRef) {
-      const { realEstateNumber, fingerprint } = await resolveRegistryCandidate({
+      const { candidate, fingerprint } = await resolveRegistryCandidate({
         session: { id: session.id, role: session.role },
         propertyId: id,
         confirmed,
@@ -92,7 +92,16 @@ export async function POST(
           session: { id: session.id, role: session.role },
           propertyId: id,
           confirmed,
-          realEstateNumber,
+          // 候補の種類で取得キーを分ける。number=従来の番号取得 /
+          // location=段階②(2026-07-31)の有料請求→PDF取得(地番/家屋番号)。
+          ...(candidate.kind === "number"
+            ? { realEstateNumber: candidate.realEstateNumber }
+            : {
+                locationCandidate: {
+                  lotNumber: candidate.lotNumber,
+                  buildingNumber: candidate.buildingNumber,
+                },
+              }),
           // @codex P2: lock する行の指紋が resolve 時と一致する時だけ override を使う。
           expectedFingerprint: fingerprint,
         },

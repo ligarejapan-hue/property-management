@@ -80,7 +80,11 @@ beforeEach(() => {
     fetchRegistryPdf: vi.fn(),
   });
   (runRegistryAutoFetch as Mock).mockResolvedValue({ status: "obtained" });
-  (resolveRegistryCandidate as Mock).mockResolvedValue({ realEstateNumber: "RESOLVED-REN", fingerprint: "FP-RESOLVE" });
+  // 段階②(2026-07-31): 解決結果は判別付き(number / location)。既定は番号候補。
+  (resolveRegistryCandidate as Mock).mockResolvedValue({
+    candidate: { kind: "number", realEstateNumber: "RESOLVED-REN" },
+    fingerprint: "FP-RESOLVE",
+  });
 });
 
 describe("auto-fetch route: candidateRef 分岐（cond③ 再解決の配線）", () => {
@@ -94,6 +98,19 @@ describe("auto-fetch route: candidateRef 分岐（cond③ 再解決の配線）"
       expect.objectContaining({ propertyId: PROP_ID, confirmed: true, realEstateNumber: "RESOLVED-REN", expectedFingerprint: "FP-RESOLVE" }),
       expect.anything(),
     );
+  });
+
+  it("段階②: location 候補は locationCandidate として渡す（番号は渡さない）", async () => {
+    (resolveRegistryCandidate as Mock).mockResolvedValue({
+      candidate: { kind: "location", lotNumber: "1-1", buildingNumber: null },
+      fingerprint: "FP-RESOLVE",
+    });
+    const res = await callRoute({ confirmed: true, candidateRef: "１－１" });
+    expect(res.status).toBe(200);
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    expect(arg.locationCandidate).toEqual({ lotNumber: "1-1", buildingNumber: null });
+    expect(arg.realEstateNumber).toBeUndefined();
+    expect(arg.expectedFingerprint).toBe("FP-RESOLVE");
   });
 
   it("candidateRef 無し → 従来の物件番号取得（resolve は呼ばない・override 無し）", async () => {

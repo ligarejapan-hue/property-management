@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../official-provider";
 import { createRegistryFetchThrottle } from "../throttle";
 import { RegistryFetchError } from "../errors";
+import { __resetPurchaseChainForTest } from "../purchase-safety";
 import type { RegistryFetchProvider, RegistryFetchErrorCode } from "../types";
 
 const VALID_PDF = Buffer.from("%PDF-1.4 mock registry bytes");
@@ -21,6 +22,13 @@ function makeFakePage(
     login: (input: { loginId: string; password: string; baseUrl?: string }) => Promise<void>;
     searchByRealEstateNumber: (n: string) => Promise<{ found: boolean }>;
     downloadRegistryPdf: () => Promise<Buffer>;
+    /** 段階②: 有料の地番取得。指定時のみ adapter が対応している状態を模す。 */
+    fetchByLocationCandidate: (input: {
+      address: string;
+      lotNumber?: string | null;
+      buildingNumber?: string | null;
+      certificateType: "owner";
+    }) => Promise<Buffer>;
   }> = {},
 ): RegistryBrowserPage & { calls: string[]; closed: boolean } {
   const state = { calls: [] as string[], closed: false };
@@ -29,6 +37,20 @@ function makeFakePage(
     get closed() {
       return state.closed;
     },
+    // over に fetchByLocationCandidate がある時だけメソッドを生やす(optional seam の模擬)。
+    ...(over.fetchByLocationCandidate
+      ? {
+          async fetchByLocationCandidate(input: {
+            address: string;
+            lotNumber?: string | null;
+            buildingNumber?: string | null;
+            certificateType: "owner";
+          }) {
+            state.calls.push("fetchByLocation");
+            return over.fetchByLocationCandidate!(input);
+          },
+        }
+      : {}),
     async login(input) {
       state.calls.push("login");
       if (over.login) await over.login(input);
@@ -399,5 +421,108 @@ describe("OfficialRegistryProvider: supportsLocationSearch(所在検索の専用
         supportsLocationSearch: true,
       }).supportsLocationSearch,
     ).toBe(true);
+  });
+});
+
+describe("段階②: 所在候補の有料取得（fetchByLocation・fake page 注入・外部接続なし）", () => {
+  const LOCATION = {
+    address: "テスト市テスト町一丁目",
+    lotNumber: "1-1",
+    buildingNumber: null,
+    certificateType: "owner" as const,
+  };
+
+  beforeEach(() => {
+    __resetPurchaseChainForTest();
+  });
+
+  it("L1: adapter が未対応(メソッド無し)なら login の前に provider_error（実ログインを無駄にしない・課金前）", async () => {
+    const page = makeFakePage(); // fetchByLocationCandidate 無し
+    const { provider } = makeProvider({ page });
+    await expect(
+      provider.fetchRegistryPdf({ location: LOCATION, ref: "p1" }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(page.calls).not.toContain("login");
+    expect(page.closed).toBe(true); // 失敗経路でも必ず close
+  });
+
+  it("L2: login → fetchByLocationCandidate の順で実行し PDF を返す", async () => {
+    const page = makeFakePage({
+      fetchByLocationCandidate: async (input) => {
+        expect(input).toEqual(LOCATION);
+        return VALID_PDF;
+      },
+    });
+    const { provider } = makeProvider({ page });
+    const result = await provider.fetchRegistryPdf({
+      location: LOCATION,
+      ref: "p1",
+    });
+    expect(result.pdfBuffer).toBe(VALID_PDF);
+    expect(result.source).toBe("official");
+    // 非PII filename（地番・所有者名を含まない）
+    expect(result.fileName).toBe("registry-auto-req-fixed.pdf");
+    expect(page.calls).toEqual(["login", "fetchByLocation", "close"]);
+  });
+
+  it("L3: ⚠課金後の失敗(charged_but_failed)は分類を変えずに上げる（provider_error に潰さない）", async () => {
+    // 潰すと呼び出し側が「リトライ可能な upstream 障害」と誤認し、再実行=二重課金につながる。
+    const page = makeFakePage({
+      fetchByLocationCandidate: async () => {
+        throw new RegistryFetchError("charged_but_failed");
+      },
+    });
+    const { provider } = makeProvider({ page });
+    await expect(
+      provider.fetchRegistryPdf({ location: LOCATION, ref: "p1" }),
+    ).rejects.toMatchObject({ code: "charged_but_failed" });
+    expect(page.closed).toBe(true);
+  });
+
+  it("L4: 不動産番号があれば番号取得を優先し、有料の地番フローには入らない", async () => {
+    const page = makeFakePage({
+      fetchByLocationCandidate: async () => {
+        throw new Error("should not be called");
+      },
+    });
+    const { provider } = makeProvider({ page });
+    const result = await provider.fetchRegistryPdf({
+      realEstateNumber: "0123456789012",
+      location: LOCATION,
+      ref: "p1",
+    });
+    expect(Buffer.isBuffer(result.pdfBuffer)).toBe(true);
+    expect(page.calls).toContain("search");
+    expect(page.calls).not.toContain("fetchByLocation");
+  });
+
+  it("L5: ⚠購入は1件ずつ直列化される（1IDにつき同時1セッション=並行すると先発の課金だけ残る）", async () => {
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let call = 0;
+    const page = makeFakePage({
+      fetchByLocationCandidate: async () => {
+        const n = ++call;
+        order.push(`start-${n}`);
+        if (n === 1) await firstGate; // 1件目を保留し、2件目が追い越さないことを見る
+        order.push(`end-${n}`);
+        return VALID_PDF;
+      },
+    });
+    const { provider } = makeProvider({ page });
+    const p1 = provider.fetchRegistryPdf({ location: LOCATION, ref: "p1" });
+    const p2 = provider.fetchRegistryPdf({
+      location: { ...LOCATION, lotNumber: "2-2" },
+      ref: "p2",
+    });
+    // 2件目が追い越していないことを確認してから 1件目を解放する。
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual(["start-1"]);
+    releaseFirst();
+    await Promise.all([p1, p2]);
+    expect(order).toEqual(["start-1", "end-1", "start-2", "end-2"]);
   });
 });

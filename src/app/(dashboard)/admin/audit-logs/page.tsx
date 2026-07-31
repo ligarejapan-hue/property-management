@@ -134,6 +134,7 @@ const ACTION_LABELS: Record<string, string> = {
   // --- 謄本・取込 ---
   registry_search: "謄本検索",
   registry_auto_fetch: "謄本自動取得",
+  registry_location_purchase: "謄本の有料請求（台帳）",
   registry_settings_update: "謄本設定更新",
   registry_ocr_draft: "謄本OCR下書き",
   registry_pdf_bulk_upload: "謄本PDF一括取込",

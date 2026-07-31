@@ -35,6 +35,7 @@ import type {
   RegistryLiveReporter,
 } from "./types";
 import { RegistryFetchError } from "./errors";
+import { runExclusivePurchase } from "./purchase-safety";
 import type { RegistryFetchThrottle } from "./throttle";
 
 /** login に渡す資格情報＋遷移先（page 側に保持させない＝呼び出し都度渡す契約）。 */
@@ -74,6 +75,18 @@ export interface RegistryBrowserPage {
     /** 実況パネル通知先 (任意・best-effort)。adapter がステップ+スクショを報告。 */
     live?: RegistryLiveReporter;
   }): Promise<RegistryCandidate[]>;
+  /**
+   * 段階②(2026-07-31): 所在検索で選ばれた候補(地番/家屋番号)の謄本を
+   * **有料の請求→PDFダウンロード**まで通して取得する（任意実装）。
+   * ⚠課金を伴う。**請求ボタンを押した後**の失敗は RegistryFetchError("charged_but_failed")
+   * で返すこと（呼び出し側が再試行禁止・台帳記録に使う）。
+   */
+  fetchByLocationCandidate?(input: {
+    address: string;
+    lotNumber?: string | null;
+    buildingNumber?: string | null;
+    certificateType: "owner";
+  }): Promise<Buffer>;
   /** 検索ヒット後、謄本PDFを取得して Buffer で返す。 */
   downloadRegistryPdf(): Promise<Buffer>;
   /** ページ/コンテキスト/ブラウザを閉じて中間成果物を破棄する（best-effort）。 */
@@ -160,9 +173,13 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
   async fetchRegistryPdf(
     request: RegistryFetchRequest,
   ): Promise<RegistryFetchResult> {
-    // 1. PR-2: 不動産番号がある物件に限定。空なら検索キーが無く取得不能（非PII前提を維持）。
-    //    所在系（地番/家屋番号/所在）での検索は PR-2b（契約拡張・別 PII 評価）。
+    // 段階②(2026-07-31): 所在検索の候補(地番/家屋番号)での有料取得。番号があれば番号を優先。
+    const location = request.location ?? null;
     const realEstateNumber = request.realEstateNumber?.trim();
+    if (!realEstateNumber && location) {
+      return this.fetchByLocation(location);
+    }
+    // PR-2: 不動産番号がある物件に限定。空なら検索キーが無く取得不能（非PII前提を維持）。
     if (!realEstateNumber) {
       throw new RegistryFetchError("not_found");
     }
@@ -229,6 +246,76 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
       }
     }
+  }
+
+  /**
+   * 段階②(2026-07-31): 所在検索の候補(地番/家屋番号)での**有料取得**。
+   * 構造は fetchRegistryPdf と同じ（throttle → browserFactory → 起動timeout → login →
+   * 実行 → 必ず close）だが、**全体を runExclusivePurchase で直列化**する。
+   *
+   * ⚠直列化はお金の安全機構（purchase-safety.ts §「3つの防御」）:
+   * 登記サービスは**1IDにつき同時1セッション**で、別物件の購入が並行すると後発が先発を
+   * 強制ログアウトさせ、**先発は課金だけ済んでPDFを取り逃す**。DB の物件ロックは物件が
+   * 違うと効かないため、プロセス内でここを1件ずつにする（本番は単一プロセス運用・実測済）。
+   *
+   * ⚠課金後の失敗（adapter が charged_but_failed を投げた場合）は**分類を変えずに**上げる。
+   * classifyRegistryFetchError は RegistryFetchError をそのまま通すので保持される。
+   */
+  private async fetchByLocation(
+    location: NonNullable<RegistryFetchRequest["location"]>,
+  ): Promise<RegistryFetchResult> {
+    // レート制御は番号取得と同じ fetch キー（公式アクセス前に判定）。
+    if (
+      this.throttle &&
+      !this.throttle.tryAcquire(`${this.name}:fetch`, this.now().getTime())
+    ) {
+      throw new RegistryFetchError("rate_limited");
+    }
+    if (!this.browserFactory) {
+      throw new RegistryFetchError("provider_error");
+    }
+    const requestId = this.requestIdFactory();
+
+    return runExclusivePurchase(async () => {
+      let page: RegistryBrowserPage;
+      try {
+        page = await this.withStartupTimeout(() => this.browserFactory!());
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
+      }
+      try {
+        // adapter 未対応（fake page 等）は login(実外部接続)の**前に** fail-fast
+        // （searchCandidates と同じ方針・無駄な実ログインをしない・課金前）。
+        const fetchByLocationCandidate = page.fetchByLocationCandidate;
+        if (!fetchByLocationCandidate) {
+          throw new RegistryFetchError("provider_error");
+        }
+        const pdfBuffer = await this.withTimeout(async () => {
+          await page.login({
+            loginId: this.loginId,
+            password: this.password,
+            baseUrl: this.baseUrl,
+          });
+          return fetchByLocationCandidate.call(page, location);
+        });
+        return {
+          pdfBuffer,
+          // 非PII の generic filename（地番・所有者名を埋め込まない）。
+          fileName: `registry-auto-${requestId}.pdf`,
+          source: this.name,
+          fetchedAt: this.now(),
+          providerRequestId: requestId,
+        };
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
+      } finally {
+        try {
+          await page.close();
+        } catch {
+          // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        }
+      }
+    });
   }
 
   /**

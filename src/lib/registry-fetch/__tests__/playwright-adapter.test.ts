@@ -1547,3 +1547,159 @@ describe("ログイン送信後の待機は全体予算より必ず先に切れ�
     delete process.env.REGISTRY_FETCH_TIMEOUT_MS;
   });
 });
+
+describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandidate・fake page）", () => {
+  // ⚠ここで守るのは「お金」。課金ボタン(#myPageSeikyu)が押される条件と、
+  // 押した後の失敗分類(charged_but_failed)を固定する。
+  //
+  // fake の evaluate は引数の内容で分岐する:
+  //  - "#..." 等のセレクタ文字列 = domClick(押した記録を残す)
+  //  - JSON(tableSel=ダイアログ) = 対象地番の探索結果
+  //  - JSON(ownerSel) = 請求事項チェックの結果
+  //  - JSON(tableSel=マイページ) = 呼び出し順に [行選択, 状態確認…, 再選択] を返す
+  const SEIKYU = "#myPageSeikyu";
+  const DIALOG_OK = "#cbnDlgBtnOk";
+  const CONFIRM = 'button[onclick*="fuBtnForward"]';
+
+  function wireStage2(
+    f: ReturnType<typeof makeFakeChromium>,
+    opts: {
+      dialogFind?: string;
+      cert?: { owner: string; extraResults: string[] };
+      myPageSeq?: unknown[];
+    } = {},
+  ) {
+    const clicked: string[] = [];
+    const myPageSeq = [...(opts.myPageSeq ?? [])];
+    let lastMyPage: unknown = myPageSeq[myPageSeq.length - 1];
+    f.page.evaluate.mockImplementation(async (_fn, arg: string) => {
+      if (typeof arg !== "string") return undefined;
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(arg) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+      if (!parsed || typeof parsed !== "object") {
+        clicked.push(arg); // domClick / hasNext 等のセレクタ引数
+        return undefined;
+      }
+      if (typeof parsed.ownerSel === "string") {
+        return JSON.stringify(
+          opts.cert ?? {
+            owner: "ok",
+            extraResults: ["ok", "ok", "ok", "ok", "ok", "ok"],
+          },
+        );
+      }
+      if (parsed.tableSel === "#cbnDlgChibanCheckTbl") {
+        return opts.dialogFind ?? "checked";
+      }
+      if (parsed.tableSel === "#myPageTable") {
+        const next = myPageSeq.length > 0 ? myPageSeq.shift() : lastMyPage;
+        lastMyPage = next;
+        return typeof next === "string" ? next : JSON.stringify(next);
+      }
+      return undefined;
+    });
+    return { clicked };
+  }
+
+  const INPUT = {
+    address: "テスト市テスト町一丁目",
+    lotNumber: "1-1",
+    buildingNumber: null,
+    certificateType: "owner" as const,
+  };
+
+  async function makeStage2Page(f: ReturnType<typeof makeFakeChromium>) {
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    return (await factory!()) as unknown as {
+      fetchByLocationCandidate: (input: typeof INPUT) => Promise<Buffer>;
+    };
+  }
+
+  it("S1: 幸せ経路 — 確定→行選択→請求→請求済→表示・保存で PDF を返す(請求は1回だけ)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      myPageSeq: [
+        { result: "checked", checkedCount: 1 }, // 行選択
+        { status: "請求済", expiry: "2026/09/01", when: "t" }, // 状態確認
+        "checked", // DL 前の再選択
+      ],
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked).toContain(DIALOG_OK);
+    expect(clicked).toContain(CONFIRM);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
+  });
+
+  it("S2: ⚠対象の地番が見つからなければ not_found で終了し、確定も請求も押さない", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { dialogFind: "not-found" });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(clicked).not.toContain(DIALOG_OK);
+    expect(clicked).not.toContain(CONFIRM);
+    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).toContain("#cbnDlgBtnCancel"); // ダイアログは閉じる
+  });
+
+  it("S3: ⚠請求事項を所有者事項だけに揃えられなければ、請求を押さずに中止（余計なものを買わない）", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      cert: { owner: "ok", extraResults: ["failed", "ok", "ok", "ok", "ok", "ok"] },
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM);
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("S4: ⚠マイページで対象行を1件に確定できなければ請求しない（別の行を買わない）", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      myPageSeq: [{ result: "ambiguous", count: 2 }],
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("S5: ⚠請求後にダウンロード行を選び直せなければ charged_but_failed（provider_error にしない）", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      myPageSeq: [
+        { result: "checked", checkedCount: 1 },
+        { status: "請求済", expiry: "2026/09/01", when: "t" },
+        "not-found", // 再選択に失敗
+      ],
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "charged_but_failed",
+    });
+    expect(clicked).toContain(SEIKYU); // 課金は押している=だから分類が変わる
+  });
+
+  it("S6: 買う対象(地番/家屋番号)が空なら何もせず provider_error（ページに触れない）", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f);
+    const page = await makeStage2Page(f);
+    await expect(
+      page.fetchByLocationCandidate({ ...INPUT, lotNumber: "  " }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).toHaveLength(0);
+    expect(f.page.fill).not.toHaveBeenCalled();
+  });
+});

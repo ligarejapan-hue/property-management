@@ -37,12 +37,14 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
   it("cond②: 候補（所在等）を console/log に出さない", () => {
     expect(src).not.toContain("console.");
   });
-  it("段階①: 候補一覧は表示するが取得ボタンは準備中(disabled)でゲートする", () => {
-    // 候補の取得ボタンは disabled + 「準備中」ラベル。誤って有料取得を起動させない。
-    expect(src).toContain("取得（準備中）");
-    expect(src).toContain("現在準備中です");
-    // 候補行の取得ボタンに disabled が付く(段階②で有効化)。
-    expect(src).toContain('title="謄本取得は準備中です"');
+  it("段階②(2026-07-31): 取得ボタンは有効で、押すと確認画面(confirmObtain)を経由する", () => {
+    // 「準備中」ゲートは撤去済み。ただし**ワンクリック課金にはしない**:
+    // 候補の「取得」→ 確認画面(有料の明示+選んだ地番の表示) → 「取得する」の2段。
+    expect(src).not.toContain("準備中");
+    expect(src).toContain('setState("confirmObtain")');
+    // 確認画面に有料である旨と、何を買うか(地番/家屋番号)が出る。
+    expect(src).toContain("利用料が発生します");
+    expect(src).toContain("この候補で謄本を取得しますか？");
   });
 });
 
