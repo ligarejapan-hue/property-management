@@ -43,12 +43,14 @@ describe("parseAbrTownCsv(町字マスター)", () => {
     expect(r.skipped).toBe(0);
   });
 
-  it("政令市は city+ward を連結・小字は大字に連結・丁目なしは chome 空", () => {
+  it("政令市は city+ward・郡部は county+city を連結・小字は大字に連結・丁目なしは chome 空", () => {
     const r = parseAbrTownCsv(
       [
         TOWN_HEADER,
         townRow({ 0: "141305", 9: "横浜市", 12: "中区", 15: "本町", 18: "", 20: "" }),
         townRow({ 1: "0001001", 15: "大字上高井戸", 21: "小字前原", 18: "", 20: "" }),
+        // 郡部(Codex P2: 郡を落とすと「東京都檜原村…」の不完全住所になる)
+        townRow({ 0: "133078", 6: "西多摩郡", 9: "檜原村", 15: "本宿", 18: "", 20: "" }),
       ].join("\n"),
     );
     expect(r.towns.get("141305:0029003")).toEqual({
@@ -61,6 +63,12 @@ describe("parseAbrTownCsv(町字マスター)", () => {
       prefecture: "東京都",
       city: "杉並区",
       town: "大字上高井戸小字前原",
+      chome: "",
+    });
+    expect(r.towns.get("133078:0029003")).toEqual({
+      prefecture: "東京都",
+      city: "西多摩郡檜原村",
+      town: "本宿",
       chome: "",
     });
   });

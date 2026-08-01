@@ -63,7 +63,7 @@ export function parseAbrTownCsv(text: string): AbrTownParseResult {
   const header = splitCsvLine(lines[0]);
   const col = requireColumns(
     header,
-    ["lg_code", "machiaza_id", "pref", "city", "ward", "oaza_cho", "chome_number", "koaza", "ablt_date"],
+    ["lg_code", "machiaza_id", "pref", "county", "city", "ward", "oaza_cho", "chome_number", "koaza", "ablt_date"],
     "町字マスター",
   );
   const towns = new Map<string, AbrTownEntry>();
@@ -73,8 +73,10 @@ export function parseAbrTownCsv(text: string): AbrTownParseResult {
     const lg = (c[col.lg_code] ?? "").trim();
     const machiaza = (c[col.machiaza_id] ?? "").trim();
     const prefecture = (c[col.pref] ?? "").trim();
-    // 政令市は city=「横浜市」+ ward=「中区」に分かれる → 表示は連結。
-    const city = `${(c[col.city] ?? "").trim()}${(c[col.ward] ?? "").trim()}`;
+    // 郡部は county=「西多摩郡」+ city=「檜原村」、政令市は city=「横浜市」+
+    // ward=「中区」に分かれる → 表示は 郡+市町村+区 の連結(Codex P2: 郡を
+    // 落とすと「東京都檜原村…」のような不完全な住所が保存される)。
+    const city = `${(c[col.county] ?? "").trim()}${(c[col.city] ?? "").trim()}${(c[col.ward] ?? "").trim()}`;
     const town = `${(c[col.oaza_cho] ?? "").trim()}${(c[col.koaza] ?? "").trim()}`;
     const chome = (c[col.chome_number] ?? "").trim();
     if ((c[col.ablt_date] ?? "").trim() !== "") continue; // 廃止済み町字
