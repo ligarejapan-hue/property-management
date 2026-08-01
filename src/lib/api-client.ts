@@ -2832,8 +2832,8 @@ export async function suggestPinAddress(
     return {
       result: {
         found: true,
-        address: "東京都杉並区西荻北3-1",
-        precision: "block",
+        address: "東京都杉並区西荻北3-19-4",
+        precision: "rsdt",
       },
     };
   }

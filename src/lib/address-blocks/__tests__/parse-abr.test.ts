@@ -13,6 +13,13 @@ import {
   pickNearestResidence,
   RSDT_MAX_DISTANCE_M,
 } from "@/lib/address-blocks/nearest";
+import { strictUtf8LinesFromChunks } from "@/lib/address-blocks/import-files";
+
+async function collect(chunks: Uint8Array[]): Promise<string[]> {
+  const out: string[] = [];
+  for await (const line of strictUtf8LinesFromChunks(chunks)) out.push(line);
+  return out;
+}
 
 // 実測ヘッダ(mt_town_pref13.csv)。
 const TOWN_HEADER =
@@ -148,6 +155,19 @@ describe("parseAbrRsdtLine(住居点・実測フォーマット)", () => {
     expect(parseAbrRsdtLine(posLine({ 8: "51.5", 7: "-0.12" }), col, towns)).toBeNull();
   });
 
+  it("ABR の予約IDレンジは実番号でない=skip(社内レビュー・大阪/北海道の実データで裏取り)", () => {
+    // 街区ID 000 = 道路方式(北海道浦河町で実在)。901+ = 特殊街区符号の連番
+    // (大阪市西区千代崎=京セラドームで実在。「903」を番にすると実在しない住所になる)。
+    expect(parseAbrRsdtLine(posLine({ 2: "000" }), col, towns)).toBeNull();
+    expect(parseAbrRsdtLine(posLine({ 2: "901" }), col, towns)).toBeNull();
+    expect(parseAbrRsdtLine(posLine({ 3: "000" }), col, towns)).toBeNull();
+    expect(parseAbrRsdtLine(posLine({ 3: "999" }), col, towns)).toBeNull();
+    expect(parseAbrRsdtLine(posLine({ 4: "10001" }), col, towns)).toBeNull();
+    // 予約レンジ直前は通常値として通る。
+    expect(parseAbrRsdtLine(posLine({ 2: "900" }), col, towns)!.block).toBe("900");
+    expect(parseAbrRsdtLine(posLine({ 4: "10000" }), col, towns)!.rsdt).toBe("4-10000");
+  });
+
   it("ヘッダの列名ドリフトは throw", () => {
     expect(() => parseAbrRsdtHeader(POS_HEADER.replace("rep_lat", "renamed"))).toThrow(
       /列「rep_lat」がありません/,
@@ -195,5 +215,41 @@ describe("formatResidenceAddress / pickNearestResidence", () => {
       pickNearestResidence(35.7042, 139.5995, [{ ...ROW, lat: 35.705, lng: 139.6 }]),
     ).toBeNull();
     expect(pickNearestResidence(35.7042, 139.5995, [])).toBeNull();
+  });
+});
+
+describe("strictUtf8LinesFromChunks(streaming 厳格デコード・社内レビュー指摘のテスト固定)", () => {
+  const enc = (s: string) => new TextEncoder().encode(s);
+
+  it("チャンク境界でマルチバイト文字が分断されても正しく復元する", async () => {
+    const bytes = enc("東京都\n杉並区\n");
+    // 「京」の3バイトの途中で分割
+    const lines = await collect([bytes.subarray(0, 4), bytes.subarray(4)]);
+    expect(lines).toEqual(["東京都", "杉並区"]);
+  });
+
+  it("CRLF の \r と \n が別チャンクに割れても行を分断しない", async () => {
+    const a = enc("line1\r");
+    const b = enc("\nline2\r\n");
+    expect(await collect([a, b])).toEqual(["line1", "line2"]);
+  });
+
+  it("改行なしの最終行を落とさない(末尾の住居点が黙って消えない)", async () => {
+    expect(await collect([enc("a\nb\nlast-no-newline")])).toEqual([
+      "a",
+      "b",
+      "last-no-newline",
+    ]);
+  });
+
+  it("不正な UTF-8 バイトは TypeError(取込側が文字コード破損として停止する契約)", async () => {
+    const bad = new Uint8Array([0x61, 0x0a, 0xff, 0xfe, 0x62]);
+    await expect(collect([bad])).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it("空チャンク・空入力・LF のみ", async () => {
+    expect(await collect([])).toEqual([]);
+    expect(await collect([enc("")])).toEqual([]);
+    expect(await collect([enc("a\n\nb\n")])).toEqual(["a", "", "b"]);
   });
 });

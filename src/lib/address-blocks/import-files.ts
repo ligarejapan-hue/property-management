@@ -39,19 +39,38 @@ export function collectCsvFiles(paths: string[]): string[] {
 }
 
 /**
- * 大きな UTF-8 ファイルを**厳格 decode**(不正バイトで throw)しながら行単位で流す。
- * 文字化けデータの混入防止(Shift_JIS 側の fatal:true と同じ方針)をメモリに載る
- * サイズ制限なしで行うため streaming にする(東京都の住居点 CSV は約2GB弱まで想定)。
+ * chunk 列を**厳格 UTF-8 decode**(不正バイトで TypeError)しながら行単位で流す純ロジック
+ * (テスト対象)。チャンク境界でのマルチバイト文字の分断は TextDecoder の stream:true が、
+ * CRLF の分断(\r と \n が別チャンク)と改行なし最終行は carry の持ち回りが吸収する。
  */
-export async function* strictUtf8Lines(path: string): AsyncGenerator<string> {
+export async function* strictUtf8LinesFromChunks(
+  chunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+): AsyncGenerator<string> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let carry = "";
-  for await (const chunk of createReadStream(path)) {
-    carry += decoder.decode(chunk as Buffer, { stream: true });
-    const parts = carry.split(/\r?\n/);
-    carry = parts.pop() ?? "";
+  for await (const chunk of chunks) {
+    carry += decoder.decode(chunk, { stream: true });
+    // \r\n の \r がチャンク末尾に来た場合に \r| \n で分断されないよう、
+    // 末尾の \r は次チャンクへ持ち越す。
+    const holdCr = carry.endsWith("\r");
+    const usable = holdCr ? carry.slice(0, -1) : carry;
+    const parts = usable.split(/\r?\n/);
+    carry = (parts.pop() ?? "") + (holdCr ? "\r" : "");
     for (const p of parts) yield p;
   }
   carry += decoder.decode();
-  if (carry !== "") yield carry;
+  // 最後に単独の \r が残った場合は行区切りとして扱う(空行は呼び出し側が無視)。
+  const parts = carry.split(/\r?\n/);
+  for (const p of parts) if (p !== "") yield p.replace(/\r$/, "");
+}
+
+/**
+ * 大きな UTF-8 ファイルを**厳格 decode**(不正バイトで throw)しながら行単位で流す。
+ * 文字化けデータの混入防止(Shift_JIS 側の fatal:true と同じ方針)をメモリに載る
+ * サイズ制限なしで行うため streaming にする(東京都の住居点 CSV は約180MB)。
+ */
+export async function* strictUtf8Lines(path: string): AsyncGenerator<string> {
+  yield* strictUtf8LinesFromChunks(
+    createReadStream(path) as AsyncIterable<Uint8Array>,
+  );
 }

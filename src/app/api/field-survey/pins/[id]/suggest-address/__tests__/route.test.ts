@@ -232,7 +232,7 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     expect(reverseGeocode).not.toHaveBeenCalled();
   });
 
-  it("住居点にヒット → 号までの住所を precision:'rsdt' で返し、街区もGSIも呼ばない", async () => {
+  it("住居点にヒット → 号までの住所を precision:'rsdt' で返し、外部(GSI)を呼ばない", async () => {
     (findNearestResidence as Mock).mockResolvedValue({
       address: "東京都杉並区西荻北3-19-4",
       town: "西荻北3丁目",
@@ -248,8 +248,48 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
         precision: "rsdt",
       },
     });
-    expect(findNearestBlock).not.toHaveBeenCalled();
     expect(reverseGeocode).not.toHaveBeenCalled();
+  });
+
+  it("住居表示/未実施の境界: より近い地番の街区点があれば番段を優先(地番の初期値を失わない)", async () => {
+    (findNearestResidence as Mock).mockResolvedValue({
+      address: "東京都八王子市高尾町1-2-3",
+      town: "高尾町1丁目",
+      distanceM: 45, // 境界越しの住居点
+    });
+    (findNearestBlock as Mock).mockResolvedValue({
+      address: "東京都八王子市裏高尾町1234番地",
+      town: "裏高尾町",
+      block: "1234",
+      distanceM: 5, // 目の前の地番点
+      isResidential: false,
+    });
+    const body = await (await POST(req, ctx)).json();
+    expect(body.result).toEqual({
+      found: true,
+      address: "東京都八王子市裏高尾町1234番地",
+      town: "裏高尾町",
+      precision: "block",
+      lotNumber: "1234",
+    });
+  });
+
+  it("街区点が住居表示(粗い代表点)なら、より近くても住居点(号)を優先する", async () => {
+    (findNearestResidence as Mock).mockResolvedValue({
+      address: "東京都杉並区西荻北3-19-4",
+      town: "西荻北3丁目",
+      distanceM: 20,
+    });
+    (findNearestBlock as Mock).mockResolvedValue({
+      address: "東京都杉並区西荻北3-1",
+      town: "西荻北三丁目",
+      block: "1",
+      distanceM: 10, // 近いが住居表示の代表点=粗い
+      isResidential: true,
+    });
+    const body = await (await POST(req, ctx)).json();
+    expect(body.result.precision).toBe("rsdt");
+    expect(body.result.address).toBe("東京都杉並区西荻北3-19-4");
   });
 
   it("住居点の DB 障害も fail-closed=500(外部へ座標を送らない)", async () => {

@@ -165,7 +165,11 @@ async function main(): Promise<number> {
     return 1;
   }
   const files = collectCsvFiles(opts.paths);
-  const townFiles = files.filter((f) => basename(f).startsWith("mt_town"));
+  // ⚠「mt_town_pos(町字マスター位置参照拡張)」は別データセット(社内レビュー指摘)。
+  // prefix 一致で町字マスターに誤分類しない。
+  const townFiles = files.filter(
+    (f) => basename(f).startsWith("mt_town") && !basename(f).startsWith("mt_town_pos"),
+  );
   const posFiles = files.filter((f) =>
     basename(f).startsWith("mt_rsdtdsp_rsdt_pos"),
   );
@@ -190,7 +194,14 @@ async function main(): Promise<number> {
       console.error(`停止: ${file} の文字コードが壊れています(UTF-8 として不正)。再ダウンロードしてください`);
       return 1;
     }
-    const r = parseAbrTownCsv(text);
+    let r;
+    try {
+      r = parseAbrTownCsv(text);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`停止: ${file}: ${msg}(別種のファイルが混ざっていないか確認してください)`);
+      return 1;
+    }
     townSkipped += r.skipped;
     if (r.towns.size === 0) {
       console.error(`停止: ${file} に有効な町字がありません(ヘッダのみ?)。再ダウンロードしてください`);

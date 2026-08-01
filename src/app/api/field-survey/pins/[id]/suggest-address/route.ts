@@ -151,8 +151,18 @@ export async function POST(
     //   第3弾: 住居点(号まで・50m以内) → 第2弾: 街区点(番まで・100m以内) →
     //   国土地理院(町丁目まで・座標のみ送信)。
     // 号データは家1軒ごとに点があり(実測2〜14m)、番だけの街区代表点より精度も高い。
+    //
+    // ⚠住居表示の実施/未実施の**境界**では、境界越しの住居点(50m以内)より
+    // 手前に地番の街区点があることがある(社内レビュー指摘)。住居点データは
+    // 住居表示地域にしか存在しないため、**より近い地番(非住居表示)の街区点が
+    // あれば番段を優先**する(正しい地番の住所+地番欄初期値を失わない)。
+    // 街区点が住居表示(粗い代表点)の場合は距離比較せず住居点を優先する。
     const residence = await findNearestResidence(lat, lng);
-    if (residence) {
+    const block = await findNearestBlock(lat, lng);
+    if (
+      residence &&
+      !(block && !block.isResidential && block.distanceM < residence.distanceM)
+    ) {
       return apiResponse({
         result: {
           found: true,
@@ -162,8 +172,6 @@ export async function POST(
         },
       });
     }
-
-    const block = await findNearestBlock(lat, lng);
     if (block) {
       return apiResponse({
         result: {

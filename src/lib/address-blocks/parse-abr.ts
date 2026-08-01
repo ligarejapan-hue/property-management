@@ -125,6 +125,14 @@ function isPlausibleJapan(lat: number, lng: number): boolean {
 /**
  * 位置参照拡張の1データ行 → 行データ。町字に紐づかない・不正値は null(=skip)。
  * ⚠大きなファイル(東京都175万行)を streaming で読む前提の行単位 API。
+ *
+ * ⚠ABR の**予約IDレンジ**は実番号ではない(社内レビュー実データ検証・大阪/北海道で実在):
+ *   - 街区ID「000」= 道路方式(街区なし・北海道浦河町等)
+ *   - 街区ID「901〜999」= 数字以外を含む街区符号(「南2」「中2」等)の独自連番
+ *     (大阪市西区千代崎=京セラドーム周辺で実在。ID から実符号は復元不能)
+ *   - 住居ID「901〜999」・住居2ID「10001〜」も同様の連番
+ *   これらを parseInt すると「千代崎3-903-1」のような**実在しない住所**を組み立てて
+ *   しまうため skip する(該当地点は番データ/GSI へフォールバック)。
  */
 export function parseAbrRsdtLine(
   line: string,
@@ -149,10 +157,20 @@ export function parseAbrRsdtLine(
   ) {
     return null;
   }
-  const block = String(parseInt(blkRaw, 10));
-  const rsdt =
-    String(parseInt(rsdtRaw, 10)) +
-    (rsdt2Raw !== "" ? `-${parseInt(rsdt2Raw, 10)}` : "");
+  const blkNum = parseInt(blkRaw, 10);
+  const rsdtNum = parseInt(rsdtRaw, 10);
+  const rsdt2Num = rsdt2Raw !== "" ? parseInt(rsdt2Raw, 10) : null;
+  if (
+    blkNum <= 0 ||
+    blkNum >= 901 ||
+    rsdtNum <= 0 ||
+    rsdtNum >= 901 ||
+    (rsdt2Num !== null && (rsdt2Num <= 0 || rsdt2Num >= 10001))
+  ) {
+    return null; // 予約レンジ=実番号でない(上記コメント参照)
+  }
+  const block = String(blkNum);
+  const rsdt = String(rsdtNum) + (rsdt2Num !== null ? `-${rsdt2Num}` : "");
   return { ...townEntry, block, rsdt, lat, lng };
 }
 
