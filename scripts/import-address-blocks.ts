@@ -97,6 +97,25 @@ async function importPrefecture(
       const staleWhere = { prefecture, sourceVersion: { not: version } };
       const stale = await tx.addressBlockPoint.count({ where: staleWhere });
       if (stale > 0 && pruneStale) {
+        // 市区町村の境目でちょうど切れた CSV は「行ゼロ」でも「縮小」でもなく、
+        // 欠けた市区町村ごと cityGroups から消える(Codex #348 R2 P2 と同型の穴)。
+        // 既存の市区町村が新データに全て存在することを確認してから消す。
+        const existingCities = await tx.addressBlockPoint.findMany({
+          where: { prefecture },
+          distinct: ["city"],
+          select: { city: true },
+        });
+        const incoming = new Set(cityGroups.map((g) => g.city));
+        const missing = existingCities
+          .map((e) => e.city)
+          .filter((c) => !incoming.has(c));
+        if (missing.length > 0 && !allowShrink) {
+          throw new Error(
+            `${prefecture}: 既存の ${missing.length} 市区町村(${missing.slice(0, 5).join("、")}${missing.length > 5 ? " ほか" : ""})が新データにありません。` +
+              "CSV が途中で切れているか、市町村合併の可能性があります。再ダウンロードして確認してください" +
+              "(合併等で意図した消滅なら --allow-shrink を付けてください)",
+          );
+        }
         await tx.addressBlockPoint.deleteMany({ where: staleWhere });
       }
       return stale;
