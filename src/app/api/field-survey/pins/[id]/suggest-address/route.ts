@@ -1,6 +1,12 @@
-// GET /api/field-survey/pins/:id/suggest-address
+// POST /api/field-survey/pins/:id/suggest-address
 // 調査ピンの座標から住所（**住居表示・町丁目まで**）を提案する。物件化フォームの
 // 「住所を自動入力」用。
+//
+// - ⚠**POST であること自体が防御**（Codex R7 P2）: この操作は「保護対象の座標を
+//   外部（国土地理院）へ送信する」副作用を持つ。GET だと SameSite=Lax cookie が
+//   cross-site のトップレベル遷移に同乗し、リンクを踏むだけで本人の明示操作なしに
+//   送信が発動し得る。本リポジトリの CSRF 姿勢（Lax が cross-site POST を遮る）に
+//   合わせ、読み取り風の操作でも副作用があるので POST に固定する。
 //
 // - ⚠座標は**クライアントへ渡さず**、server がピンから読んで逆ジオコーディングする。
 //   完成待ち一覧（candidates）は意図的に座標を返さない設計のため、この機能のために
@@ -50,7 +56,7 @@ function mapError(err: ReverseGeocodeError): ApiError {
   );
 }
 
-export async function GET(
+export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {

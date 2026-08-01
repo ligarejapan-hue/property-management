@@ -2818,9 +2818,13 @@ export async function suggestPinAddress(
     await mockDelay();
     return { result: { found: true, address: "東京都杉並区西荻北三丁目" } };
   }
+  // POST 固定: 座標を外部へ送る副作用を持つため、cross-site 遷移(GET)で
+  // 発動しないようにする(SameSite=Lax が cross-site POST を遮る)。
   return apiFetch<{
     result: { found: true; address: string } | { found: false };
-  }>(`/api/field-survey/pins/${encodeURIComponent(pinId)}/suggest-address`);
+  }>(`/api/field-survey/pins/${encodeURIComponent(pinId)}/suggest-address`, {
+    method: "POST",
+  });
 }
 
 export interface CandidatePinRow {

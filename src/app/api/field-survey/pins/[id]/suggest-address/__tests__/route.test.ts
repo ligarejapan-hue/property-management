@@ -1,9 +1,10 @@
 /**
- * GET /api/field-survey/pins/:id/suggest-address のテスト。
+ * POST /api/field-survey/pins/:id/suggest-address のテスト。
  *
  * 要点:
  * - 認可は物件化(convert-to-property)と同一ゲート
  * - **座標はクライアントへ返さない**（返すのは組み立て済み住所のみ）
+ * - **POST 固定**（座標の外部送信という副作用を cross-site 遷移で発動させない）
  * - env 未設定 = 503 休眠 / 上流失敗 = 502 / 海上等 = 200 + found:false
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
@@ -48,7 +49,7 @@ import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { reverseGeocode, ReverseGeocodeError } from "@/lib/reverse-geocode";
-import { GET } from "../route";
+import { POST } from "../route";
 
 const pm = prisma as unknown as { fieldSurveyPin: { findUnique: Mock } };
 const FS_READ = { resource: "field_survey", action: "read", granted: true };
@@ -60,6 +61,9 @@ const PIN_ID = "11111111-1111-1111-1111-111111111111";
 
 const req = new Request(
   `http://localhost/api/field-survey/pins/${PIN_ID}/suggest-address`,
+  // POST 固定(Codex R7 P2): 座標の外部送信という副作用を持つため
+  // cross-site 遷移(GET)では発動させない。
+  { method: "POST" },
 ) as unknown as import("next/server").NextRequest;
 const ctx = { params: Promise.resolve({ id: PIN_ID }) };
 
@@ -82,7 +86,7 @@ function pin(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
+describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (getApiSession as Mock).mockResolvedValue({ id: "user-1", role: "member" });
@@ -93,7 +97,7 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
 
   it("property:write が無ければ 403（pin を読まない・外部も呼ばない）", async () => {
     (getUserPermissions as Mock).mockResolvedValue([FS_READ]);
-    const res = await GET(req, ctx);
+    const res = await POST(req, ctx);
     expect(res.status).toBe(403);
     expect(pm.fieldSurveyPin.findUnique).not.toHaveBeenCalled();
     expect(reverseGeocode).not.toHaveBeenCalled();
@@ -101,21 +105,21 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
 
   it("field_survey:read が無ければ 403", async () => {
     (getUserPermissions as Mock).mockResolvedValue(WRITE_ONLY);
-    const res = await GET(req, ctx);
+    const res = await POST(req, ctx);
     expect(res.status).toBe(403);
     expect(pm.fieldSurveyPin.findUnique).not.toHaveBeenCalled();
   });
 
   it("pin が無ければ 404", async () => {
     pm.fieldSurveyPin.findUnique.mockResolvedValue(null);
-    const res = await GET(req, ctx);
+    const res = await POST(req, ctx);
     expect(res.status).toBe(404);
     expect(reverseGeocode).not.toHaveBeenCalled();
   });
 
   it("他人の pin は read_all/manage が無ければ 403（外部を呼ばない）", async () => {
     pm.fieldSurveyPin.findUnique.mockResolvedValue(pin({ staffUserId: "other" }));
-    const res = await GET(req, ctx);
+    const res = await POST(req, ctx);
     expect(res.status).toBe(403);
     expect(reverseGeocode).not.toHaveBeenCalled();
   });
@@ -128,7 +132,7 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
     async (_label, perms) => {
       (getUserPermissions as Mock).mockResolvedValue(perms);
       pm.fieldSurveyPin.findUnique.mockResolvedValue(pin({ staffUserId: "other" }));
-      const res = await GET(req, ctx);
+      const res = await POST(req, ctx);
       expect(res.status).toBe(200);
       // location route と同じ cross-staff 追跡(Codex P2)。detail は ID のみ。
       expect(writeAuditLog).toHaveBeenCalledWith(
@@ -147,7 +151,7 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
   );
 
   it("自分の pin → 200・住所を返す。⚠座標(lat/lng)は応答に含めない・監査も残さない", async () => {
-    const res = await GET(req, ctx);
+    const res = await POST(req, ctx);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ result: FOUND });
@@ -161,7 +165,7 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
 
   it("海上・国外(found:false)は 200 でそのまま返す（エラーにしない）", async () => {
     (reverseGeocode as Mock).mockResolvedValue({ found: false });
-    const res = await GET(req, ctx);
+    const res = await POST(req, ctx);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ result: { found: false } });
   });
@@ -170,7 +174,7 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
     pm.fieldSurveyPin.findUnique.mockResolvedValue(
       pin({ lat: { toString: () => "0" }, lng: { toString: () => "0" } }),
     );
-    const res = await GET(req, ctx);
+    const res = await POST(req, ctx);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ result: { found: false } });
     expect(reverseGeocode).not.toHaveBeenCalled();
@@ -180,7 +184,7 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
     (reverseGeocode as Mock).mockRejectedValue(
       new ReverseGeocodeError("NOT_CONFIGURED"),
     );
-    const res = await GET(req, ctx);
+    const res = await POST(req, ctx);
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body.error.code).toBe("NOT_CONFIGURED");
@@ -190,7 +194,7 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
     "上流失敗(%s) → 502（メッセージに内部情報を含めない）",
     async (code) => {
       (reverseGeocode as Mock).mockRejectedValue(new ReverseGeocodeError(code));
-      const res = await GET(req, ctx);
+      const res = await POST(req, ctx);
       expect(res.status).toBe(502);
       const body = await res.json();
       expect(body.error.code).toBe("UPSTREAM_ERROR");

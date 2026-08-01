@@ -55,7 +55,7 @@ describe("api-client: convertPinToProperty / listCandidatePins", () => {
     expect(String(url)).not.toContain("view=map");
   });
 
-  it("suggestPinAddress はピン単位の提案エンドポイントへ GET する(座標は送らない)", async () => {
+  it("suggestPinAddress はピン単位の提案エンドポイントへ POST する(座標は送らない)", async () => {
     const fetchMock = vi.fn(
       async (_url: string, _init?: RequestInit) =>
         new Response(
@@ -71,8 +71,9 @@ describe("api-client: convertPinToProperty / listCandidatePins", () => {
     expect(r.result).toMatchObject({ found: true });
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toContain("/api/field-survey/pins/pin-9/suggest-address");
-    // GET・body なし = client からは pin の ID しか送らない(座標は server がピンから読む)
-    expect(init?.method ?? "GET").toBe("GET");
+    // POST 固定(cross-site 遷移で座標送信が発動しないように)・body なし =
+    // client からは pin の ID しか送らない(座標は server がピンから読む)。
+    expect(init?.method).toBe("POST");
     expect(init?.body ?? null).toBeNull();
   });
 });
