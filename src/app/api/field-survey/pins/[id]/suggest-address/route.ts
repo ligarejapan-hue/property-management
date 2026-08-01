@@ -41,7 +41,10 @@ import {
   isReverseGeocodeConfigured,
   reverseGeocode,
 } from "@/lib/reverse-geocode";
-import { findNearestBlock } from "@/lib/address-blocks/lookup";
+import {
+  findNearestBlock,
+  LOT_PREFILL_MAX_DISTANCE_M,
+} from "@/lib/address-blocks/lookup";
 
 function mapError(err: ReverseGeocodeError): ApiError {
   if (err.code === "NOT_CONFIGURED") {
@@ -157,7 +160,12 @@ export async function POST(
           // 住居表示未実施の地域では block 値=**地番そのもの**(Codex R3 P2)。
           // 捨てると謄本の所在検索に使える値を失うため、地番欄の初期値候補として
           // 返す(UI 側は空欄のときだけ入れ、要確認の案内を出す)。
-          ...(block.isResidential ? {} : { lotNumber: block.block }),
+          // ⚠誤った地番は謄本の誤請求につながるため、点のほぼ真上(50m以内)の
+          // ときだけ提案する(Codex R7 P2: 境界越しの誤マッチ対策)。
+          ...(block.isResidential ||
+          block.distanceM > LOT_PREFILL_MAX_DISTANCE_M
+            ? {}
+            : { lotNumber: block.block }),
         },
       });
     }

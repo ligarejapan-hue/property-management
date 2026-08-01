@@ -49,10 +49,13 @@ vi.mock("@/lib/reverse-geocode", async (importOriginal) => {
     isReverseGeocodeConfigured: vi.fn(),
   };
 });
-// ローカル街区照合(第2弾)。既定はデータ無し=null(GSI フォールバック)。
-vi.mock("@/lib/address-blocks/lookup", () => ({
-  findNearestBlock: vi.fn(),
-}));
+// ローカル街区照合(第2弾)。findNearestBlock だけ差し替え、距離定数
+// (LOT_PREFILL_MAX_DISTANCE_M 等)は実物を使う。既定はデータ無し=null(GSI フォールバック)。
+vi.mock("@/lib/address-blocks/lookup", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/address-blocks/lookup")>();
+  return { ...actual, findNearestBlock: vi.fn() };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -262,6 +265,19 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
       precision: "block",
       lotNumber: "1234",
     });
+  });
+
+  it("地番の提案は点から50m以内のときだけ(Codex R7 P2: 遠いヒットの誤地番で謄本を誤請求しない)", async () => {
+    (findNearestBlock as Mock).mockResolvedValue({
+      address: "埼玉県秩父市大字上影森1234番地",
+      town: "大字上影森",
+      block: "1234",
+      distanceM: 80, // 50m 超 → 住所は返すが地番は提案しない
+      isResidential: false,
+    });
+    const body = await (await POST(req, ctx)).json();
+    expect(body.result.found).toBe(true);
+    expect(body.result).not.toHaveProperty("lotNumber");
   });
 
   it("ローカル照合の DB 障害は fail-closed=500(外部へ座標を送らない・Codex R5 P2)", async () => {

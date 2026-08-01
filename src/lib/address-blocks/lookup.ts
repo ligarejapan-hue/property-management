@@ -11,6 +11,7 @@ import { pickNearestBlock, type BlockLookupHit } from "./nearest";
 
 export {
   MAX_BLOCK_DISTANCE_M,
+  LOT_PREFILL_MAX_DISTANCE_M,
   haversineMeters,
   pickNearestBlock,
   type BlockLookupHit,

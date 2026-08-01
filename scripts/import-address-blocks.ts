@@ -89,11 +89,25 @@ async function importPrefecture(
   cityGroups: CityGroup[],
   version: string,
   pruneStale: boolean,
+  allowShrink: boolean,
 ): Promise<number> {
   return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('address_block_import'), hashtext(${prefecture}))`;
       for (const g of cityGroups) {
+        // 行として正常なまま**途中で切れた** CSV は不正行率では検知できない
+        // (Codex R7 P2)。既存スナップショットの半分未満へ縮む置換は、データ欠損の
+        // 疑いとして停止する(throw で県 tx ごと rollback)。強行は --allow-shrink。
+        const existing = await tx.addressBlockPoint.count({
+          where: { prefecture: g.prefecture, city: g.city },
+        });
+        if (existing > 0 && g.rows.length * 2 < existing && !allowShrink) {
+          throw new Error(
+            `${g.prefecture}${g.city}: 新データ ${g.rows.length} 点が既存 ${existing} 点の半分未満です。` +
+              "CSV が途中で切れている可能性があります。再ダウンロードして再実行してください" +
+              "(意図した縮小なら --allow-shrink を付けてください)",
+          );
+        }
         await tx.addressBlockPoint.deleteMany({
           where: { prefecture: g.prefecture, city: g.city },
         });
@@ -130,7 +144,7 @@ async function main(): Promise<number> {
   const opts = parseImportArgs(process.argv.slice(2));
   if (!opts) {
     console.log(
-      "usage: npx tsx scripts/import-address-blocks.ts --version <例 24.0a> [--dry-run] [--prune-stale] [--allow-skipped] <CSVファイル or フォルダ>...",
+      "usage: npx tsx scripts/import-address-blocks.ts --version <例 24.0a> [--dry-run] [--prune-stale] [--allow-skipped] [--allow-shrink] <CSVファイル or フォルダ>...",
     );
     return 2;
   }
@@ -209,6 +223,7 @@ async function main(): Promise<number> {
           cityGroups,
           opts.version,
           opts.pruneStale,
+          opts.allowShrink,
         );
         if (stale > 0) {
           if (opts.pruneStale) {

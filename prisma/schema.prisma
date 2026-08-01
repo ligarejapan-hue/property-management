@@ -1154,5 +1154,7 @@ model AddressBlockPoint {
   sourceVersion String  @map("source_version")
 
   @@index([lat, lng])
+  // 取込(市区町村単位の全置換)・版掃除の述語用。
+  @@index([prefecture, city])
   @@map("address_block_points")
 }

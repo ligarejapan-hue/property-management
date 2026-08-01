@@ -202,6 +202,7 @@ describe("parseImportArgs(取込CLIの引数解釈)", () => {
       dryRun: false,
       pruneStale: false,
       allowSkipped: false,
+      allowShrink: false,
       paths: ["dir1"],
     });
     expect(parseImportArgs(["--version", "24.0a", "--dry-run", "a.csv", "b"])).toEqual({
@@ -209,6 +210,7 @@ describe("parseImportArgs(取込CLIの引数解釈)", () => {
       dryRun: true,
       pruneStale: false,
       allowSkipped: false,
+      allowShrink: false,
       paths: ["a.csv", "b"],
     });
     expect(parseImportArgs(["--version", "25.0a", "--prune-stale", "dir"])).toEqual({
@@ -216,6 +218,7 @@ describe("parseImportArgs(取込CLIの引数解釈)", () => {
       dryRun: false,
       pruneStale: true,
       allowSkipped: false,
+      allowShrink: false,
       paths: ["dir"],
     });
   });
@@ -232,6 +235,18 @@ describe("parseImportArgs(取込CLIの引数解釈)", () => {
       dryRun: false,
       pruneStale: false,
       allowSkipped: true,
+      allowShrink: false,
+      paths: ["dir"],
+    });
+  });
+
+  it("--allow-shrink(縮小置換の明示強行)を解釈する", () => {
+    expect(parseImportArgs(["--version", "24.0a", "--allow-shrink", "dir"])).toEqual({
+      version: "24.0a",
+      dryRun: false,
+      pruneStale: false,
+      allowSkipped: false,
+      allowShrink: true,
       paths: ["dir"],
     });
   });

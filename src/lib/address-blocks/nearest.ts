@@ -3,8 +3,14 @@
  */
 import { formatBlockAddress } from "./format";
 
-/** これより遠い最近傍は不採用(隣町を拾わない)。実測の点間隔は市街地で数十m。 */
-export const MAX_BLOCK_DISTANCE_M = 150;
+/** これより遠い最近傍は不採用。実測の点間隔は市街地で数十m(実測ヒットは12〜19m)。
+ * ⚠取込エリアの**境界の外**に立つピンが、境界越しの点を拾う誤マッチ(Codex R7 P2)を
+ * 減らすため控えめにする。カバー範囲外は GSI(町丁目)へフォールバックするだけで壊れない。 */
+export const MAX_BLOCK_DISTANCE_M = 100;
+
+/** 地番の自動セット(物件の地番欄)はさらに厳しく。誤った地番は謄本取得の誤請求に
+ * つながり得るため、点のほぼ真上(実測の正常ヒット水準)のときだけ提案する。 */
+export const LOT_PREFILL_MAX_DISTANCE_M = 50;
 
 export interface BlockLookupHit {
   address: string;
