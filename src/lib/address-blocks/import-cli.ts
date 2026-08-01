@@ -13,6 +13,8 @@ export interface ImportCliOptions {
    * ⚠都道府県一括の CSV を取り込むときだけ使うこと(一部市区町村だけの取込で使うと
    * 同県の他市区町村の正当なデータまで消える)。 */
   pruneStale: boolean;
+  /** 不正行率が閾値(1%)を超えても取込を強行する(既定は停止=壊れたCSVで全置換しない)。 */
+  allowSkipped: boolean;
   paths: string[];
 }
 
@@ -22,6 +24,7 @@ export function parseImportArgs(argv: string[]): ImportCliOptions | null {
   let version = "";
   let dryRun = false;
   let pruneStale = false;
+  let allowSkipped = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--version") {
@@ -34,6 +37,8 @@ export function parseImportArgs(argv: string[]): ImportCliOptions | null {
       dryRun = true;
     } else if (a === "--prune-stale") {
       pruneStale = true;
+    } else if (a === "--allow-skipped") {
+      allowSkipped = true;
     } else if (a === "--help" || a === "-h") {
       return null;
     } else if (a.startsWith("-")) {
@@ -44,5 +49,5 @@ export function parseImportArgs(argv: string[]): ImportCliOptions | null {
     }
   }
   if (!version || paths.length === 0) return null;
-  return { version, dryRun, pruneStale, paths };
+  return { version, dryRun, pruneStale, allowSkipped, paths };
 }

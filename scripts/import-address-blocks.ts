@@ -130,7 +130,7 @@ async function main(): Promise<number> {
   const opts = parseImportArgs(process.argv.slice(2));
   if (!opts) {
     console.log(
-      "usage: npx tsx scripts/import-address-blocks.ts --version <例 24.0a> [--dry-run] [--prune-stale] <CSVファイル or フォルダ>...",
+      "usage: npx tsx scripts/import-address-blocks.ts --version <例 24.0a> [--dry-run] [--prune-stale] [--allow-skipped] <CSVファイル or フォルダ>...",
     );
     return 2;
   }
@@ -168,6 +168,23 @@ async function main(): Promise<number> {
   console.log(
     `解析結果: ${groups.size} 市区町村 / ${totalRows} 点 (除外: 不正 ${totalSkipped} / 履歴 ${totalHistory})`,
   );
+
+  // 壊れた CSV での全置換を防ぐ(Codex R5 P2): 不正行が一定割合(1%)を超えたら、
+  // 残った行だけで既存スナップショットを置き換える前に停止する。ダウンロードし直しを
+  // 促し、意図的に強行する場合のみ --allow-skipped を要求する。
+  const totalParsed = totalRows + totalSkipped;
+  if (
+    totalSkipped > 0 &&
+    totalParsed > 0 &&
+    totalSkipped / totalParsed > 0.01 &&
+    !opts.allowSkipped
+  ) {
+    console.error(
+      `停止: 不正・欠損行が ${totalSkipped}/${totalParsed} 件(1%超)あり、CSV が壊れている可能性があります。` +
+        "再ダウンロードして再実行してください。この内容で強行する場合のみ --allow-skipped を付けてください",
+    );
+    return 1;
+  }
 
   if (!opts.dryRun) {
     const adapter = new PrismaPg(connectionString as string);

@@ -264,6 +264,15 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     });
   });
 
+  it("ローカル照合の DB 障害は fail-closed=500(外部へ座標を送らない・Codex R5 P2)", async () => {
+    // 「手元のデータで見つからない場合のみ送信」の事前開示に反しないよう、
+    // 障害を「データ無し」と同一視して GSI へフォールバックしない。
+    (findNearestBlock as Mock).mockRejectedValue(new Error("db down"));
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(500);
+    expect(reverseGeocode).not.toHaveBeenCalled();
+  });
+
   it("街区データに無ければ GSI(町丁目まで)へフォールバック", async () => {
     (findNearestBlock as Mock).mockResolvedValue(null);
     const res = await POST(req, ctx);

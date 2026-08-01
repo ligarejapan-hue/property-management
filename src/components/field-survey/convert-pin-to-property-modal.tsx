@@ -61,6 +61,7 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   const handleSuggestAddress = async () => {
     const startAddress = addressRef.current;
     const startZip = postalCodeRef.current;
+    const startLot = lotNumberRef.current;
     // 手入力済みの住所（番地・号まで入っていることもある）を、確認なしで町丁目まで
     // の粗い値に上書きしない（Codex R9 P2）。取得（=座標の外部送信）より前に確認を
     // 求めるので、確認だけなら外部送信も発生しない。
@@ -112,13 +113,15 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
             ? "ピンの位置から番まで自動入力しました（出典: 国土交通省 位置参照情報）。続き（号など）は現地やGoogleマップで確認して追記してください。"
             : "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。";
         // 住居表示未実施の地域では取得値が地番そのもの(Codex R3 P2)。捨てると
-        // 謄本の所在検索に使える値を失うため、**地番欄が空のときだけ**初期値として
-        // 入れる(取得中に手入力があれば非空=そのまま尊重される)。要確認の案内を出す。
+        // 謄本の所在検索に使える値を失うため、**開始時から空のまま変化が無い**
+        // ときだけ初期値として入れる(Codex R5 P2: 取得中に「消した」操作も編集=
+        // 復元しない。開始時 snapshot と現在値の両方で判定)。要確認の案内を出す。
         let filledLot = false;
         if (
           result.precision === "block" &&
           result.lotNumber &&
-          lotNumberRef.current.trim() === ""
+          startLot.trim() === "" &&
+          lotNumberRef.current === startLot
         ) {
           setLotNumber(result.lotNumber);
           filledLot = true;

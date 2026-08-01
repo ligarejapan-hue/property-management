@@ -21,36 +21,33 @@ const BBOX_DEG = 0.002;
 
 /**
  * DB から最近傍の街区を引く。データ未取込の地域・閾値超過は null。
- * DB エラーは throw せず null(自動入力は補助機能=ローカル照合の障害で全体を
- * 落とさず、呼び出し側の GSI フォールバックに任せる)。
+ * ⚠DB エラーは**握りつぶさず throw**(Codex R5 P2): null に落とすと「ローカルに
+ * 無い」と区別できず GSI フォールバック=座標の外部送信が走り、UI の
+ * 「手元のデータで見つからない場合のみ送信」という事前開示に反する。
+ * 呼び出し側(route)の共通エラーハンドラで 500 に落ち、外部送信は発生しない。
  */
 export async function findNearestBlock(
   lat: number,
   lng: number,
 ): Promise<BlockLookupHit | null> {
-  try {
-    const rows = await prisma.addressBlockPoint.findMany({
-      where: {
-        lat: { gte: lat - BBOX_DEG, lte: lat + BBOX_DEG },
-        lng: { gte: lng - BBOX_DEG, lte: lng + BBOX_DEG },
-      },
-      select: {
-        prefecture: true,
-        city: true,
-        town: true,
-        block: true,
-        lat: true,
-        lng: true,
-        isResidential: true,
-      },
-    });
-    return pickNearestBlock(
-      lat,
-      lng,
-      rows.map((r) => ({ ...r, lat: Number(r.lat), lng: Number(r.lng) })),
-    );
-  } catch {
-    // ⚠座標・エラー詳細はログへ出さない(位置情報を漏らさない)。
-    return null;
-  }
+  const rows = await prisma.addressBlockPoint.findMany({
+    where: {
+      lat: { gte: lat - BBOX_DEG, lte: lat + BBOX_DEG },
+      lng: { gte: lng - BBOX_DEG, lte: lng + BBOX_DEG },
+    },
+    select: {
+      prefecture: true,
+      city: true,
+      town: true,
+      block: true,
+      lat: true,
+      lng: true,
+      isResidential: true,
+    },
+  });
+  return pickNearestBlock(
+    lat,
+    lng,
+    rows.map((r) => ({ ...r, lat: Number(r.lat), lng: Number(r.lng) })),
+  );
 }

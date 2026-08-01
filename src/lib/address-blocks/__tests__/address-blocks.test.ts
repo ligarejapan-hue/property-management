@@ -201,18 +201,21 @@ describe("parseImportArgs(取込CLIの引数解釈)", () => {
       version: "24.0a",
       dryRun: false,
       pruneStale: false,
+      allowSkipped: false,
       paths: ["dir1"],
     });
     expect(parseImportArgs(["--version", "24.0a", "--dry-run", "a.csv", "b"])).toEqual({
       version: "24.0a",
       dryRun: true,
       pruneStale: false,
+      allowSkipped: false,
       paths: ["a.csv", "b"],
     });
     expect(parseImportArgs(["--version", "25.0a", "--prune-stale", "dir"])).toEqual({
       version: "25.0a",
       dryRun: false,
       pruneStale: true,
+      allowSkipped: false,
       paths: ["dir"],
     });
   });
@@ -221,6 +224,16 @@ describe("parseImportArgs(取込CLIの引数解釈)", () => {
     // 社内レビュー確定指摘: これが通ると version=\"--dry-run\"・dryRun=false で実書込みされる。
     expect(parseImportArgs(["--version", "--dry-run", "dir"])).toBeNull();
     expect(parseImportArgs(["--version"])).toBeNull();
+  });
+
+  it("--allow-skipped(不正行率超過の明示強行)を解釈する", () => {
+    expect(parseImportArgs(["--version", "24.0a", "--allow-skipped", "dir"])).toEqual({
+      version: "24.0a",
+      dryRun: false,
+      pruneStale: false,
+      allowSkipped: true,
+      paths: ["dir"],
+    });
   });
 
   it("未知のフラグ・version欠落・パス無しは null(usage 表示)", () => {

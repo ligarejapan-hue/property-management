@@ -151,13 +151,14 @@ describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => 
     expect(source).toContain("追記");
   });
 
-  it("地番地域では地番欄が**空のときだけ**初期値を入れ、要確認の案内を出す(Codex R3 P2)", () => {
+  it("地番地域では地番欄が**開始時から空のまま**のときだけ初期値を入れる(Codex R3/R5 P2)", () => {
     const handler = source.slice(
       source.indexOf("handleSuggestAddress"),
       source.indexOf("handleSubmit"),
     );
-    // 応答到着時の現在値(ref)で空チェック=取得中の手入力を上書きしない。
-    expect(handler).toMatch(/result\.lotNumber[\s\S]{0,120}lotNumberRef\.current\.trim\(\) === ""/);
+    // 開始時 snapshot が空 かつ 取得中に変化なし(消した/入れた操作は編集=触らない)。
+    expect(handler).toMatch(/startLot\.trim\(\) === ""/);
+    expect(handler).toMatch(/lotNumberRef\.current === startLot/);
     expect(handler).toContain("setLotNumber(result.lotNumber)");
     expect(handler).toContain("謄本・公図で必ず確認");
   });
