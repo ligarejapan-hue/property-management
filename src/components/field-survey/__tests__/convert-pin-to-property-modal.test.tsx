@@ -53,8 +53,15 @@ describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => 
     expect(source).not.toMatch(/pin\.(lat|lng)/);
   });
 
-  it("自動入力後は手入力扱い(setAddressEdited(true))=郵便番号補完に上書きされない", () => {
-    expect(source).toMatch(/result\.found[\s\S]{0,200}setAddressEdited\(true\)/);
+  it("自動入力で addressEdited を立てない(Codex P1: 立てると住所補完へ二次送信される)", () => {
+    // handleSuggestAddress の成功分岐に setAddressEdited(true) が無いこと。
+    // 既存住所の上書き保護は AddressLookupControls の確認 UI(非空住所→pending)が担う。
+    const handler = source.slice(
+      source.indexOf("handleSuggestAddress"),
+      source.indexOf("handleSubmit"),
+    );
+    expect(handler).toContain("setAddress(result.address)");
+    expect(handler).not.toContain("setAddressEdited(true)");
   });
 
   it("出典(国土地理院)と番・号の追記案内をユーザーに示す", () => {

@@ -35,6 +35,7 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/prisma", () => ({
   default: { fieldSurveyPin: { findUnique: vi.fn() } },
 }));
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 // ReverseGeocodeError / isPlausibleJapanCoordinate は実物を使い、外部接続する
 // reverseGeocode だけ差し替える（instanceof 判定を実クラスで通すため）。
 vi.mock("@/lib/reverse-geocode", async (importOriginal) => {
@@ -45,6 +46,7 @@ vi.mock("@/lib/reverse-geocode", async (importOriginal) => {
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { writeAuditLog } from "@/lib/audit";
 import { reverseGeocode, ReverseGeocodeError } from "@/lib/reverse-geocode";
 import { GET } from "../route";
 
@@ -121,18 +123,35 @@ describe("GET /api/field-survey/pins/[id]/suggest-address", () => {
   it.each([
     ["read_all", WRITE_READ_ALL],
     ["manage", WRITE_MANAGE],
-  ])("他人の pin でも %s があれば 200", async (_label, perms) => {
-    (getUserPermissions as Mock).mockResolvedValue(perms);
-    pm.fieldSurveyPin.findUnique.mockResolvedValue(pin({ staffUserId: "other" }));
-    const res = await GET(req, ctx);
-    expect(res.status).toBe(200);
-  });
+  ])(
+    "他人の pin でも %s があれば 200 + field_survey_pin_view 監査(座標・住所なし)",
+    async (_label, perms) => {
+      (getUserPermissions as Mock).mockResolvedValue(perms);
+      pm.fieldSurveyPin.findUnique.mockResolvedValue(pin({ staffUserId: "other" }));
+      const res = await GET(req, ctx);
+      expect(res.status).toBe(200);
+      // location route と同じ cross-staff 追跡(Codex P2)。detail は ID のみ。
+      expect(writeAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "user-1",
+          action: "field_survey_pin_view",
+          targetTable: "field_survey_pins",
+          targetId: PIN_ID,
+          detail: { pinId: PIN_ID, ownerStaffUserId: "other" },
+        }),
+      );
+      const logged = JSON.stringify((writeAuditLog as Mock).mock.calls);
+      expect(logged).not.toContain("35.7237362");
+      expect(logged).not.toContain("西荻北");
+    },
+  );
 
-  it("自分の pin → 200・住所を返す。⚠座標(lat/lng)は応答に含めない", async () => {
+  it("自分の pin → 200・住所を返す。⚠座標(lat/lng)は応答に含めない・監査も残さない", async () => {
     const res = await GET(req, ctx);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ result: FOUND });
+    expect(writeAuditLog).not.toHaveBeenCalled();
     // 応答のどこにも座標が漏れていないこと（数値・文字列どちらの形でも）
     const raw = JSON.stringify(body);
     expect(raw).not.toContain("35.7237362");

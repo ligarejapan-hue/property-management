@@ -45,7 +45,9 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
       const { result } = await suggestPinAddress(pinId);
       if (result.found) {
         setAddress(result.address);
-        setAddressEdited(true); // 郵便番号補完による上書きを防ぐ（手入力と同じ扱い）
+        // ⚠addressEdited は立てない（Codex P1）: 立てると AddressLookupControls が
+        // user-edit とみなし、この住所を日本郵便 API へ自動送信してしまう（二次送信）。
+        // 郵便番号補完による上書きは「住所欄が非空なら確認 UI を出す」既存フローが防ぐ。
         setSuggestNote(
           "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。",
         );

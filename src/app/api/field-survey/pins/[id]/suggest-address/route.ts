@@ -11,7 +11,9 @@
 //   外部へ送るのは**座標のみ**（PII は送らない）。env 未設定なら 503 休眠。
 // - **地番（lotNumber）は対象外**（座標から地番は引けない）。番・号も返らない仕様
 //   （無料APIの限界）＝利用者が確認して追記する前提（UI 側に明記）。
-// - 監査ログは残さない（読み取りのみ・保存なし・座標をログに書かない）。
+// - 監査ログ: **他スタッフの pin への実行時のみ** location route と同じ
+//   `field_survey_pin_view`（ID のみ・座標/住所は detail に入れない）を記録する。
+//   位置情報由来データへの cross-staff アクセス経路として既存の追跡と揃える（Codex P2）。
 
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
@@ -23,6 +25,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
 import {
   ReverseGeocodeError,
   isPlausibleJapanCoordinate,
@@ -69,8 +72,9 @@ export async function GET(
     if (!pin) {
       throw new ApiError(404, "調査ピンが見つかりません", "NOT_FOUND");
     }
+    const isOwn = pin.staffUserId === session.id;
     const visible =
-      pin.staffUserId === session.id ||
+      isOwn ||
       hasPermission(permissions, "field_survey", "read_all") ||
       hasPermission(permissions, "field_survey", "manage");
     if (!visible) {
@@ -79,6 +83,18 @@ export async function GET(
         "この調査ピンにアクセスする権限がありません",
         "FORBIDDEN",
       );
+    }
+
+    if (!isOwn) {
+      // 他スタッフ pin の位置由来データ取得 = location route と同じ追跡を残す（Codex P2）。
+      await writeAuditLog({
+        userId: session.id,
+        action: "field_survey_pin_view",
+        targetTable: "field_survey_pins",
+        targetId: pin.id,
+        // 座標・住所は監査 detail に入れない (id / owner のみ)。
+        detail: { pinId: pin.id, ownerStaffUserId: pin.staffUserId },
+      });
     }
 
     // Prisma の Decimal を number に（既存 route と同じ Number() 変換）。
