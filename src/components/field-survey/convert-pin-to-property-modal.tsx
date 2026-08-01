@@ -6,6 +6,7 @@ import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { convertPinToProperty, suggestPinAddress } from "@/lib/api-client";
 import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 interface Props {
   pinId: string;
@@ -36,6 +37,10 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   //  - 値は通常の入力欄なのでいつでも手で直せる
   const [suggesting, setSuggesting] = useState(false);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
+  // env 未設定の環境では「ピンの位置から住所を入力」導線ごと出さない（押すと必ず
+  // 503 になるため・Codex R5 P2）。capabilities=null（未取得/失敗）も出さない側へ倒す。
+  const { capabilities } = useScreenProtection();
+  const reverseGeocodeEnabled = capabilities?.reverseGeocode === true;
   // 取得中(最長8秒)の手編集を応答で上書きしないための現在値 ref（Codex R2 P2）。
   const addressRef = useRef(address);
   useEffect(() => {
@@ -198,29 +203,33 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
             <div className="mt-1.5 flex flex-col gap-1.5">
-              <div>
-                <button
-                  type="button"
-                  onClick={handleSuggestAddress}
-                  disabled={submitting || suggesting}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-800 disabled:opacity-50"
-                  title="ピンの位置から住所（町丁目まで）を自動入力します（無料）"
-                >
-                  {suggesting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <MapPin className="h-3.5 w-3.5" />
-                  )}
-                  ピンの位置から住所を入力
-                </button>
-              </div>
-              {/* 位置情報(座標)は保護対象 → 押す前に「どこへ何を送るか」を明示する
-                  (Codex R4 P2: 事前開示なしに座標を外部送信しない)。結果表示後は
-                  suggestNote に置き換わる(1行ずつ・画面を混雑させない)。 */}
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {suggestNote ??
-                  "ボタンを押すと、ピンの座標を国土地理院（国の機関・無料）に送信して住所を調べます。座標以外の情報は送信しません。"}
-              </p>
+              {reverseGeocodeEnabled && (
+                <>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleSuggestAddress}
+                      disabled={submitting || suggesting}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                      title="ピンの位置から住所（町丁目まで）を自動入力します（無料）"
+                    >
+                      {suggesting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <MapPin className="h-3.5 w-3.5" />
+                      )}
+                      ピンの位置から住所を入力
+                    </button>
+                  </div>
+                  {/* 位置情報(座標)は保護対象 → 押す前に「どこへ何を送るか」を明示する
+                      (Codex R4 P2: 事前開示なしに座標を外部送信しない)。結果表示後は
+                      suggestNote に置き換わる(1行ずつ・画面を混雑させない)。 */}
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {suggestNote ??
+                      "ボタンを押すと、ピンの座標を国土地理院（国の機関・無料）に送信して住所を調べます。座標以外の情報は送信しません。"}
+                  </p>
+                </>
+              )}
               <AddressLookupControls
                 zip={postalCode}
                 address={address}

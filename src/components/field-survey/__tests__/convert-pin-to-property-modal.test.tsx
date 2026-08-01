@@ -9,8 +9,16 @@ import { dirname, join } from "node:path";
 vi.mock("@/components/address/address-lookup-controls", () => ({
   AddressLookupControls: () => null,
 }));
+// capability は provider 経由。既定は「逆ジオコーディング有効」で SSR する
+// (無効時の出し分けは専用テストで mock を差し替えて検証)。
+vi.mock("@/components/screen-protection/screen-protection-provider", () => ({
+  useScreenProtection: vi.fn(() => ({
+    capabilities: { reverseGeocode: true },
+  })),
+}));
 
 import ConvertPinToPropertyModal from "../convert-pin-to-property-modal";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 describe("ConvertPinToPropertyModal", () => {
   const props = { pinId: "pin-1", onClose: () => {}, onConverted: () => {} };
@@ -42,6 +50,21 @@ describe("ConvertPinToPropertyModal", () => {
     expect(html).toContain("送信して住所を調べます");
     expect(html).toContain("座標以外の情報は送信しません");
   });
+
+  it.each([
+    ["未設定(false)", { capabilities: { reverseGeocode: false } }],
+    ["capabilities 未取得(null)", { capabilities: null }],
+  ])(
+    "逆ジオコーディング %s なら導線ごと出さない(Codex R5 P2: 押すと必ず503のボタンを出さない)",
+    (_label, state) => {
+      (useScreenProtection as ReturnType<typeof vi.fn>).mockReturnValueOnce(state);
+      const html = renderToStaticMarkup(createElement(ConvertPinToPropertyModal, props));
+      expect(html).not.toContain("ピンの位置から住所を入力");
+      expect(html).not.toContain("ピンの座標を国土地理院");
+      // 住所欄そのもの・郵便番号補完は残る(手入力は普通にできる)。
+      expect(html).toContain("この場所を物件にする");
+    },
+  );
 });
 
 describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => {
