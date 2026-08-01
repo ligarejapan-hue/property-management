@@ -111,6 +111,21 @@ describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => 
     expect(handler).toContain("郵便番号は新しい住所に合わせて入れ直してください");
   });
 
+  it("非空住所の上書きは確認してから(Codex R9 P2: 番地・号入りの手入力を1クリックで消さない)", () => {
+    const handler = source.slice(
+      source.indexOf("handleSuggestAddress"),
+      source.indexOf("handleSubmit"),
+    );
+    // 1回目のクリックは予告のみで return(外部送信も発生しない)。
+    expect(handler).toMatch(/startAddress\.trim\(\) !== ""\s*&&\s*!confirmOverwrite/);
+    expect(handler).toContain("setConfirmOverwrite(true)");
+    expect(handler).toContain("もう一度ボタンを押してください");
+    // 確認ゲートは suggestPinAddress(外部送信)より前にある。
+    expect(handler.indexOf("setConfirmOverwrite(true)")).toBeLessThan(
+      handler.indexOf("suggestPinAddress(pinId)"),
+    );
+  });
+
   it("取得中の手編集を応答で上書きしない(Codex R2 P2: 開始時の値と比較して skip)", () => {
     const handler = source.slice(
       source.indexOf("handleSuggestAddress"),

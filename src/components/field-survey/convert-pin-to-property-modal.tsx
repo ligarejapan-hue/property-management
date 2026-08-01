@@ -37,6 +37,9 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   //  - 値は通常の入力欄なのでいつでも手で直せる
   const [suggesting, setSuggesting] = useState(false);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
+  // 非空住所の上書きは確認してから（AddressLookupControls の確認 UI と同じ姿勢・
+  // Codex R9 P2）。1回目のクリックで予告し、続けてもう一度押したときだけ実行する。
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   // env 未設定の環境では「ピンの位置から住所を入力」導線ごと出さない（押すと必ず
   // 503 になるため・Codex R5 P2）。capabilities=null（未取得/失敗）も出さない側へ倒す。
   const { capabilities } = useScreenProtection();
@@ -54,6 +57,17 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   const handleSuggestAddress = async () => {
     const startAddress = addressRef.current;
     const startZip = postalCodeRef.current;
+    // 手入力済みの住所（番地・号まで入っていることもある）を、確認なしで町丁目まで
+    // の粗い値に上書きしない（Codex R9 P2）。取得（=座標の外部送信）より前に確認を
+    // 求めるので、確認だけなら外部送信も発生しない。
+    if (startAddress.trim() !== "" && !confirmOverwrite) {
+      setConfirmOverwrite(true);
+      setSuggestNote(
+        "入力済みの住所をピンの位置の住所（町丁目まで）で上書きします。よろしければもう一度ボタンを押してください。",
+      );
+      return;
+    }
+    setConfirmOverwrite(false);
     setSuggesting(true);
     setSuggestNote(null);
     setError(null);
