@@ -53,15 +53,32 @@ describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => 
     expect(source).not.toMatch(/pin\.(lat|lng)/);
   });
 
-  it("自動入力で addressEdited を立てない(Codex P1: 立てると住所補完へ二次送信される)", () => {
-    // handleSuggestAddress の成功分岐に setAddressEdited(true) が無いこと。
+  it("自動入力は addressEdited を false に戻す(Codex P1: 立ったままだと住所補完へ二次送信される)", () => {
+    // handleSuggestAddress の成功分岐: setAddressEdited(false) があり true 化は無いこと。
+    // ボタン押下前の手入力で signal が既に立っているケースも下ろす=このprogrammatic な
+    // address 変化で AddressLookupControls が日本郵便へ検索を飛ばさない。
     // 既存住所の上書き保護は AddressLookupControls の確認 UI(非空住所→pending)が担う。
     const handler = source.slice(
       source.indexOf("handleSuggestAddress"),
       source.indexOf("handleSubmit"),
     );
     expect(handler).toContain("setAddress(result.address)");
+    expect(handler).toContain("setAddressEdited(false)");
     expect(handler).not.toContain("setAddressEdited(true)");
+  });
+
+  it("取得中の手編集を応答で上書きしない(Codex R2 P2: 開始時の値と比較して skip)", () => {
+    const handler = source.slice(
+      source.indexOf("handleSuggestAddress"),
+      source.indexOf("handleSubmit"),
+    );
+    // リクエスト開始時 snapshot と応答時の現在値(ref)を比較し、変わっていたら反映しない。
+    expect(handler).toContain("const startAddress = addressRef.current");
+    expect(handler).toMatch(/addressRef\.current !== startAddress/);
+    // 反映 skip の分岐が setAddress より前にある(上書きしてから気付く順序ではない)。
+    expect(handler.indexOf("addressRef.current !== startAddress")).toBeLessThan(
+      handler.indexOf("setAddress(result.address)"),
+    );
   });
 
   it("出典(国土地理院)と番・号の追記案内をユーザーに示す", () => {

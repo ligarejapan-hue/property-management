@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Loader2, AlertTriangle, MapPin } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { convertPinToProperty, suggestPinAddress } from "@/lib/api-client";
@@ -36,18 +36,34 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   //  - 値は通常の入力欄なのでいつでも手で直せる
   const [suggesting, setSuggesting] = useState(false);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
+  // 取得中(最長8秒)の手編集を応答で上書きしないための現在値 ref（Codex R2 P2）。
+  const addressRef = useRef(address);
+  useEffect(() => {
+    addressRef.current = address;
+  }, [address]);
 
   const handleSuggestAddress = async () => {
+    const startAddress = addressRef.current;
     setSuggesting(true);
     setSuggestNote(null);
     setError(null);
     try {
       const { result } = await suggestPinAddress(pinId);
       if (result.found) {
+        if (addressRef.current !== startAddress) {
+          // 取得中にユーザーが住所を編集した → 新しい入力を勝たせる（Codex R2 P2）。
+          setSuggestNote(
+            "取得中に住所が編集されたため、自動入力は反映しませんでした。もう一度ボタンを押すと再取得します。",
+          );
+          return;
+        }
         setAddress(result.address);
-        // ⚠addressEdited は立てない（Codex P1）: 立てると AddressLookupControls が
-        // user-edit とみなし、この住所を日本郵便 API へ自動送信してしまう（二次送信）。
+        // user-edit signal を明示的に下ろす（Codex R2 P1）: ボタン押下前に手入力が
+        // あると addressEdited=true のまま残り、この programmatic な住所変更を
+        // AddressLookupControls が user-edit とみなして日本郵便 API へ自動送信して
+        // しまう（二次送信）。false に戻せばこの address 変化では検索されない。
         // 郵便番号補完による上書きは「住所欄が非空なら確認 UI を出す」既存フローが防ぐ。
+        setAddressEdited(false);
         setSuggestNote(
           "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。",
         );
