@@ -63,9 +63,9 @@ async function importPrefecture(
         const existing = await tx.addressResidencePoint.count({
           where: { prefecture: g.prefecture, city: g.city },
         });
-        if (existing > 0 && g.rows.length * 2 < existing && !allowShrink) {
+        if (existing > 0 && g.rows.length < existing * 0.95 && !allowShrink) {
           throw new Error(
-            `${g.prefecture}${g.city}: 新データ ${g.rows.length} 点が既存 ${existing} 点の半分未満です。` +
+            `${g.prefecture}${g.city}: 新データ ${g.rows.length} 点が既存 ${existing} 点より5%以上少ないです。` +
               "CSV が途中で切れている可能性があります。再ダウンロードして再実行してください" +
               "(意図した縮小なら --allow-shrink を付けてください)",
           );
@@ -206,6 +206,10 @@ async function main(): Promise<number> {
   let totalSkipped = 0;
   const corrupt: Array<{ file: string; skipped: number; parsed: number }> = [];
   const empty: string[] = [];
+  // 同一市区町村が複数の位置参照ファイルから来る正当なケースは無い(新旧2版の
+  // フォルダを両方指定した等の誤り=Codex R4 P2)。重複挿入・版の混在になるため
+  // 検知して停止する(強行オプション無し=正しい組み合わせの再指定一択)。
+  const citySources = new Map<string, Set<string>>();
   for (const file of posFiles) {
     let col: Record<string, number> | null = null;
     let fileRows = 0;
@@ -224,6 +228,9 @@ async function main(): Promise<number> {
         }
         fileRows++;
         const key = `${row.prefecture}|${row.city}`;
+        const src = citySources.get(key) ?? new Set<string>();
+        src.add(file);
+        citySources.set(key, src);
         const g = groups.get(key) ?? {
           prefecture: row.prefecture,
           city: row.city,
@@ -250,6 +257,18 @@ async function main(): Promise<number> {
   console.log(
     `解析結果: ${groups.size} 市区町村 / ${totalRows} 点 (除外: ${totalSkipped})`,
   );
+
+  const overlapping = [...citySources.entries()].filter(([, s]) => s.size >= 2);
+  if (overlapping.length > 0) {
+    for (const [key, s] of overlapping.slice(0, 5)) {
+      console.error(`  重複: ${key.replace("|", "")} が ${s.size} ファイルに含まれています`);
+    }
+    console.error(
+      "停止: 同じ市区町村が複数の位置参照ファイルに含まれています(新旧2版のフォルダを両方指定した等)。" +
+        "取り込むフォルダを1版分だけにして再実行してください",
+    );
+    return 1;
+  }
 
   if ((corrupt.length > 0 || empty.length > 0) && !opts.allowSkipped) {
     for (const c of corrupt) {

@@ -67,9 +67,9 @@ async function importPrefecture(
         const existing = await tx.addressBlockPoint.count({
           where: { prefecture: g.prefecture, city: g.city },
         });
-        if (existing > 0 && g.rows.length * 2 < existing && !allowShrink) {
+        if (existing > 0 && g.rows.length < existing * 0.95 && !allowShrink) {
           throw new Error(
-            `${g.prefecture}${g.city}: 新データ ${g.rows.length} 点が既存 ${existing} 点の半分未満です。` +
+            `${g.prefecture}${g.city}: 新データ ${g.rows.length} 点が既存 ${existing} 点より5%以上少ないです。` +
               "CSV が途中で切れている可能性があります。再ダウンロードして再実行してください" +
               "(意図した縮小なら --allow-shrink を付けてください)",
           );
@@ -184,6 +184,9 @@ async function main(): Promise<number> {
   // fatal:true で厳格に decode し、失敗ファイルは**強行オプションでも通さず**停止する
   // (文字化け住所を DB に入れる正当な理由は無い=再ダウンロード一択)。
   const broken: string[] = [];
+  // 同一市区町村が複数ファイルから来る正当なケースは無い(新旧2版の併用・市区町村zip
+  // と都道府県一括zipの併用等の誤り=Codex #348 R4 P2 と同型)。重複挿入になるため停止。
+  const citySources = new Map<string, Set<string>>();
   for (const file of files) {
     let text: string;
     try {
@@ -207,6 +210,9 @@ async function main(): Promise<number> {
     }
     for (const r of rows) {
       const key = `${r.prefecture}|${r.city}`;
+      const src = citySources.get(key) ?? new Set<string>();
+      src.add(file);
+      citySources.set(key, src);
       const g = groups.get(key) ?? { prefecture: r.prefecture, city: r.city, rows: [] };
       g.rows.push(r);
       groups.set(key, g);
@@ -218,6 +224,17 @@ async function main(): Promise<number> {
   console.log(
     `解析結果: ${groups.size} 市区町村 / ${totalRows} 点 (除外: 不正 ${totalSkipped} / 履歴 ${totalHistory})`,
   );
+
+  const overlapping = [...citySources.entries()].filter(([, s2]) => s2.size >= 2);
+  if (overlapping.length > 0) {
+    for (const [key, s2] of overlapping.slice(0, 5)) {
+      console.error(`  重複: ${key.replace("|", "")} が ${s2.size} ファイルに含まれています`);
+    }
+    console.error(
+      "停止: 同じ市区町村が複数の CSV に含まれています(新旧2版の併用・市区町村zipと都道府県一括zipの併用等)。取り込むフォルダを1版分だけにして再実行してください",
+    );
+    return 1;
+  }
 
   if (broken.length > 0) {
     for (const f of broken) {
