@@ -38,17 +38,31 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 // ReverseGeocodeError / isPlausibleJapanCoordinate は実物を使い、外部接続する
-// reverseGeocode だけ差し替える（instanceof 判定を実クラスで通すため）。
+// reverseGeocode と env 依存の isReverseGeocodeConfigured だけ差し替える
+// （instanceof 判定を実クラスで通すため）。
 vi.mock("@/lib/reverse-geocode", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/lib/reverse-geocode")>();
-  return { ...actual, reverseGeocode: vi.fn() };
+  return {
+    ...actual,
+    reverseGeocode: vi.fn(),
+    isReverseGeocodeConfigured: vi.fn(),
+  };
 });
+// ローカル街区照合(第2弾)。既定はデータ無し=null(GSI フォールバック)。
+vi.mock("@/lib/address-blocks/lookup", () => ({
+  findNearestBlock: vi.fn(),
+}));
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { reverseGeocode, ReverseGeocodeError } from "@/lib/reverse-geocode";
+import {
+  reverseGeocode,
+  isReverseGeocodeConfigured,
+  ReverseGeocodeError,
+} from "@/lib/reverse-geocode";
+import { findNearestBlock } from "@/lib/address-blocks/lookup";
 import { POST } from "../route";
 
 const pm = prisma as unknown as { fieldSurveyPin: { findUnique: Mock } };
@@ -71,7 +85,14 @@ const FOUND = {
   found: true,
   address: "東京都杉並区西荻北三丁目",
   town: "西荻北三丁目",
+  precision: "town",
   municipalityCode: "13115",
+};
+const BLOCK_HIT = {
+  address: "東京都杉並区西荻北3-1",
+  town: "西荻北三丁目",
+  distanceM: 18,
+  isResidential: true,
 };
 
 function pin(overrides: Record<string, unknown> = {}) {
@@ -95,6 +116,8 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     (getApiSession as Mock).mockResolvedValue({ id: "user-1", role: "member" });
     (getUserPermissions as Mock).mockResolvedValue(WRITE);
     pm.fieldSurveyPin.findUnique.mockResolvedValue(pin());
+    (isReverseGeocodeConfigured as Mock).mockReturnValue(true);
+    (findNearestBlock as Mock).mockResolvedValue(null); // 既定: 街区データ未取込
     (reverseGeocode as Mock).mockResolvedValue(FOUND);
   });
 
@@ -200,14 +223,39 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     expect(reverseGeocode).not.toHaveBeenCalled();
   });
 
-  it("env 未設定(NOT_CONFIGURED) → 503 休眠", async () => {
-    (reverseGeocode as Mock).mockRejectedValue(
-      new ReverseGeocodeError("NOT_CONFIGURED"),
-    );
+  it("街区データにヒット → 番までの住所を precision:'block' で返し、外部(GSI)を呼ばない", async () => {
+    (findNearestBlock as Mock).mockResolvedValue(BLOCK_HIT);
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      result: {
+        found: true,
+        address: "東京都杉並区西荻北3-1",
+        town: "西荻北三丁目",
+        precision: "block",
+      },
+    });
+    // ローカルで引けたら座標の外部送信は発生しない。
+    expect(reverseGeocode).not.toHaveBeenCalled();
+  });
+
+  it("街区データに無ければ GSI(町丁目まで)へフォールバック", async () => {
+    (findNearestBlock as Mock).mockResolvedValue(null);
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ result: FOUND });
+    expect(findNearestBlock).toHaveBeenCalledTimes(1);
+    expect(reverseGeocode).toHaveBeenCalledTimes(1);
+  });
+
+  it("env 未設定(NOT_CONFIGURED) → 503 休眠。ローカル街区照合も含め一切動かない", async () => {
+    (isReverseGeocodeConfigured as Mock).mockReturnValue(false);
     const res = await POST(req, ctx);
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body.error.code).toBe("NOT_CONFIGURED");
+    expect(findNearestBlock).not.toHaveBeenCalled();
+    expect(reverseGeocode).not.toHaveBeenCalled();
   });
 
   it.each(["TIMEOUT", "NETWORK", "UPSTREAM_ERROR", "PARSE_ERROR"] as const)(

@@ -59,6 +59,7 @@ export function parseGsiResponse(json: unknown): ReverseGeocodeResult {
     found: true,
     address: `${municipality}${town}`,
     town,
+    precision: "town", // GSI は町丁目まで(番・号は返らない)
     municipalityCode: String(parseInt(muniCd, 10)),
   };
 }

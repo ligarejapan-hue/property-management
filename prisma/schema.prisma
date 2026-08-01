@@ -1136,3 +1136,23 @@ model CompanyProfile {
 
   @@map("company_profile")
 }
+
+// 座標→住所の「番」精細化(住所自動入力 第2弾)。国土交通省「位置参照情報」
+// 街区レベル(無料・出典明記で利用可)を scripts/import-address-blocks.ts で取込み、
+// ピン座標の最近傍から「都道府県+市区町村+町丁目+番」を組み立てる。
+// runtime の外部送信ゼロ(ローカルDBで完結・見つからない場合のみ既存GSIへフォールバック)。
+// isResidential=true は街区符号(住居表示の「番」)・false は地番。
+model AddressBlockPoint {
+  id            Int     @id @default(autoincrement())
+  prefecture    String
+  city          String
+  town          String
+  block         String
+  lat           Decimal @db.Decimal(10, 7)
+  lng           Decimal @db.Decimal(10, 7)
+  isResidential Boolean @map("is_residential")
+  sourceVersion String  @map("source_version")
+
+  @@index([lat, lng])
+  @@map("address_block_points")
+}

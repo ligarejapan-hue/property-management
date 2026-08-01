@@ -1,6 +1,7 @@
 // POST /api/field-survey/pins/:id/suggest-address
-// 調査ピンの座標から住所（**住居表示・町丁目まで**）を提案する。物件化フォームの
-// 「住所を自動入力」用。
+// 調査ピンの座標から住所（**住居表示**）を提案する。物件化フォームの「住所を自動入力」用。
+// 第2弾: 取込済みの街区データ(国土交通省・ローカルDB)があれば**番まで**
+// (precision:"block")、無ければ国土地理院で**町丁目まで**(precision:"town")。
 //
 // - ⚠**POST であること自体が防御**（Codex R7 P2）: この操作は「保護対象の座標を
 //   外部（国土地理院）へ送信する」副作用を持つ。GET だと SameSite=Lax cookie が
@@ -37,8 +38,10 @@ import { writeAuditLog } from "@/lib/audit";
 import {
   ReverseGeocodeError,
   isPlausibleJapanCoordinate,
+  isReverseGeocodeConfigured,
   reverseGeocode,
 } from "@/lib/reverse-geocode";
+import { findNearestBlock } from "@/lib/address-blocks/lookup";
 
 function mapError(err: ReverseGeocodeError): ApiError {
   if (err.code === "NOT_CONFIGURED") {
@@ -132,6 +135,27 @@ export async function POST(
     if (!isPlausibleJapanCoordinate(lat, lng)) {
       // ピンの座標が壊れている（通常起き得ない）。上流へ無駄打ちしない。
       return apiResponse({ result: { found: false } });
+    }
+
+    // 機能全体の休眠ゲート(env 未設定なら 503)。ローカル照合(外部送信ゼロ)も
+    // このゲートの内側=「機能を有効化するまで一切動かない」を単純に保つ。
+    if (!isReverseGeocodeConfigured()) {
+      throw mapError(new ReverseGeocodeError("NOT_CONFIGURED"));
+    }
+
+    // 第2弾: まず取込済みの街区データ(国土交通省)で「番」まで引く(ローカル完結・
+    // 外部送信ゼロ)。データ未取込の地域・最近傍150m超のみ、従来どおり国土地理院
+    // (町丁目まで・座標のみ送信)へフォールバックする。
+    const block = await findNearestBlock(lat, lng);
+    if (block) {
+      return apiResponse({
+        result: {
+          found: true,
+          address: block.address,
+          town: block.town,
+          precision: "block",
+        },
+      });
     }
 
     try {

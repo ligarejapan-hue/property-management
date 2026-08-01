@@ -63,7 +63,7 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
     if (startAddress.trim() !== "" && !confirmOverwrite) {
       setConfirmOverwrite(true);
       setSuggestNote(
-        "入力済みの住所をピンの位置の住所（町丁目まで）で上書きします。よろしければもう一度ボタンを押してください。",
+        "入力済みの住所をピンの位置から調べた住所で上書きします。よろしければもう一度ボタンを押してください。",
       );
       return;
     }
@@ -101,8 +101,14 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
         const clearedZip =
           result.address !== startAddress && startZip.trim() !== "";
         if (clearedZip) setPostalCode("");
+        // 精度で案内を変える: block=番まで入った(出典: 国土交通省 位置参照情報) /
+        // town=町丁目まで(出典: 国土地理院)。
+        const base =
+          result.precision === "block"
+            ? "ピンの位置から番まで自動入力しました（出典: 国土交通省 位置参照情報）。続き（号など）は現地やGoogleマップで確認して追記してください。"
+            : "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。";
         setSuggestNote(
-          "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。" +
+          base +
             (clearedZip
               ? "郵便番号は新しい住所に合わせて入れ直してください。"
               : ""),
@@ -232,7 +238,7 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
                       onClick={handleSuggestAddress}
                       disabled={submitting || suggesting}
                       className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-800 disabled:opacity-50"
-                      title="ピンの位置から住所（町丁目まで）を自動入力します（無料）"
+                      title="ピンの位置から住所を自動入力します（無料）"
                     >
                       {suggesting ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -247,7 +253,7 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
                       suggestNote に置き換わる(1行ずつ・画面を混雑させない)。 */}
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {suggestNote ??
-                      "ボタンを押すと、ピンの座標を国土地理院（国の機関・無料）に送信して住所を調べます。座標以外の情報は送信しません。"}
+                      "ボタンを押すと、ピンの位置から住所を調べます（無料）。手元の住所データで見つからない場合のみ、ピンの座標を国土地理院（国の機関）に送信します。座標以外の情報は送信しません。"}
                   </p>
                 </>
               )}

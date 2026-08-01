@@ -71,6 +71,7 @@ describe("parseGsiResponse（API応答の解釈）", () => {
       found: true,
       address: "東京都杉並区西荻北三丁目",
       town: "西荻北三丁目",
+      precision: "town",
       municipalityCode: "13115",
     });
   });
@@ -158,6 +159,7 @@ describe("provider 解決（env 未設定なら休眠=fail-closed）", () => {
       found: true,
       address: "東京都杉並区西荻北三丁目",
       town: "西荻北三丁目",
+      precision: "town",
       municipalityCode: "13115",
     });
     expect(isReverseGeocodeConfigured()).toBe(true);
