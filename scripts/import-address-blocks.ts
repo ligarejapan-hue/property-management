@@ -150,11 +150,20 @@ async function main(): Promise<number> {
   const groups = new Map<string, { prefecture: string; city: string; rows: IsjBlockRow[] }>();
   let totalSkipped = 0;
   let totalHistory = 0;
+  // 壊れた CSV での全置換を防ぐ(Codex R5/R6 P2): 不正行率は**ファイル単位**で判定する。
+  // 全体集計だと大きな市区町村の正常行が小さな市区町村の重大な破損を 1% 未満に
+  // 薄めてしまい、破損ファイルの市区町村が欠けたまま置換(+--prune-stale なら
+  // 旧データ削除)が通ってしまうため。
+  const corrupt: Array<{ file: string; skipped: number; parsed: number }> = [];
   for (const file of files) {
     const text = new TextDecoder("shift_jis").decode(readFileSync(file));
     const { rows, skipped, history } = parseIsjCsv(text);
     totalSkipped += skipped;
     totalHistory += history;
+    const parsed = rows.length + skipped;
+    if (skipped > 0 && parsed > 0 && skipped / parsed > 0.01) {
+      corrupt.push({ file, skipped, parsed });
+    }
     for (const r of rows) {
       const key = `${r.prefecture}|${r.city}`;
       const g = groups.get(key) ?? { prefecture: r.prefecture, city: r.city, rows: [] };
@@ -169,19 +178,13 @@ async function main(): Promise<number> {
     `解析結果: ${groups.size} 市区町村 / ${totalRows} 点 (除外: 不正 ${totalSkipped} / 履歴 ${totalHistory})`,
   );
 
-  // 壊れた CSV での全置換を防ぐ(Codex R5 P2): 不正行が一定割合(1%)を超えたら、
-  // 残った行だけで既存スナップショットを置き換える前に停止する。ダウンロードし直しを
-  // 促し、意図的に強行する場合のみ --allow-skipped を要求する。
-  const totalParsed = totalRows + totalSkipped;
-  if (
-    totalSkipped > 0 &&
-    totalParsed > 0 &&
-    totalSkipped / totalParsed > 0.01 &&
-    !opts.allowSkipped
-  ) {
+  if (corrupt.length > 0 && !opts.allowSkipped) {
+    for (const c of corrupt) {
+      console.error(`  破損疑い: ${c.file} (不正 ${c.skipped}/${c.parsed} 件・1%超)`);
+    }
     console.error(
-      `停止: 不正・欠損行が ${totalSkipped}/${totalParsed} 件(1%超)あり、CSV が壊れている可能性があります。` +
-        "再ダウンロードして再実行してください。この内容で強行する場合のみ --allow-skipped を付けてください",
+      "停止: 上記の CSV が壊れている可能性があります。再ダウンロードして再実行してください。" +
+        "この内容で強行する場合のみ --allow-skipped を付けてください",
     );
     return 1;
   }
