@@ -87,6 +87,7 @@ export function parseIsjCsv(text: string): IsjParseResult {
     [0, "都道府県名"],
     [1, "市区町村名"],
     [2, "大字・丁目名"],
+    [3, "小字・通称名"],
     [4, "街区符号・地番"],
     [8, "緯度"],
     [9, "経度"],
@@ -116,7 +117,12 @@ export function parseIsjCsv(text: string): IsjParseResult {
     }
     const prefecture = c[0].trim();
     const city = c[1].trim();
-    const town = c[2].trim();
+    // 小字・通称名(列3)は大字に連結して保持する(Codex P2: 捨てると地番地域で
+    // 「大字+小字+地番」の小字が欠け、同じ地番を持つ別の小字と区別できない)。
+    // 大字(列2)が空の行は不正として弾く(小字だけの住所は組み立てない)。
+    const oaza = c[2].trim();
+    const koaza = c[3].trim();
+    const town = oaza === "" ? "" : `${oaza}${koaza}`;
     const block = c[4].trim();
     const lat = Number(c[8]);
     const lng = Number(c[9]);

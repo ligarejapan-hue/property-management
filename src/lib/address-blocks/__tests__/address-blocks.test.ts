@@ -154,6 +154,17 @@ describe("parseIsjCsv(実測フォーマット 24.0a)", () => {
     expect(r.rows[1].block).toBe("1234");
   });
 
+  it("小字・通称名(列3)は大字に連結して保持する(Codex P2: 地番地域の小字を捨てない)", () => {
+    const r = parseIsjCsv(
+      [HEADER, row({ 2: "大字上影森", 3: "小字前原", 4: "1234", 10: "0" })].join("\n"),
+    );
+    expect(r.rows[0].town).toBe("大字上影森小字前原");
+    // 大字が空で小字だけの行は不正として弾く(小字だけの住所を組み立てない)。
+    const bad = parseIsjCsv([HEADER, row({ 2: "", 3: "小字前原" })].join("\n"));
+    expect(bad.rows).toHaveLength(0);
+    expect(bad.skipped).toBe(1);
+  });
+
   it("更新前履歴フラグ=1 の行(旧データ)は除外し件数を返す", () => {
     const r = parseIsjCsv([HEADER, row(), row({ 12: "1" })].join("\n"));
     expect(r.rows).toHaveLength(1);
