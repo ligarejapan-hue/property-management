@@ -53,6 +53,13 @@ describe("lookupMunicipality（先頭ゼロの正規化）", () => {
     expect(lookupMunicipality("abc")).toBeNull();
     expect(lookupMunicipality("")).toBeNull();
   });
+
+  it("数字+ゴミの混在コードは null（Codex P2: parseInt の切り詰めで通さない）", () => {
+    expect(lookupMunicipality("13115junk")).toBeNull();
+    expect(lookupMunicipality("13115 ")).toBeNull();
+    expect(lookupMunicipality("1e5")).toBeNull();
+    expect(lookupMunicipality("131150")).toBeNull(); // 6桁(5桁上限超)
+  });
 });
 
 describe("parseGsiResponse（API応答の解釈）", () => {
@@ -88,6 +95,12 @@ describe("parseGsiResponse（API応答の解釈）", () => {
   it("変換表に無いコードは found:false（コードだけの住所を出さない）", () => {
     expect(
       parseGsiResponse({ results: { muniCd: "99999", lv01Nm: "どこか" } }),
+    ).toEqual({ found: false });
+  });
+
+  it("不正な混在コードは found:false（Codex P2: 見かけ上正しい住所を組み立てない）", () => {
+    expect(
+      parseGsiResponse({ results: { muniCd: "13115junk", lv01Nm: "西荻北三丁目" } }),
     ).toEqual({ found: false });
   });
 });

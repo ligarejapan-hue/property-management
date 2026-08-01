@@ -31,8 +31,10 @@ const TIMEOUT_MS = 8_000;
  * 未知のコード（新設合併等で表が古い場合）は null（呼び出し側で found:false 扱い）。
  */
 export function lookupMunicipality(muniCd: string): string | null {
-  const normalized = String(parseInt(muniCd, 10));
-  if (!/^\d+$/.test(normalized) || normalized === "NaN") return null;
+  // 数字のみ・最大5桁を先に検証する（Codex P2: "13115junk" を parseInt が
+  // 13115 へ切り詰め、不正な上流データから住所を組み立ててしまうのを防ぐ）。
+  if (!/^\d{1,5}$/.test(muniCd)) return null;
+  const normalized = String(parseInt(muniCd, 10)); // 先頭ゼロだけ落とす
   return GSI_MUNICIPALITIES[normalized] ?? null;
 }
 

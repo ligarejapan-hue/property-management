@@ -67,6 +67,18 @@ describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => 
     expect(handler).not.toContain("setAddressEdited(true)");
   });
 
+  it("住所差し替え時は旧住所の郵便番号を残さない(Codex R3 P2: 不一致ペアの保存防止)", () => {
+    const handler = source.slice(
+      source.indexOf("handleSuggestAddress"),
+      source.indexOf("handleSubmit"),
+    );
+    // 非空の郵便番号は消す。ただし取得中に郵便番号が編集されていたらユーザー入力を勝たせる。
+    expect(handler).toContain('setPostalCode("")');
+    expect(handler).toMatch(/postalCodeRef\.current === startZip/);
+    // 消したときはユーザーへ入れ直し案内を出す。
+    expect(handler).toContain("郵便番号は新しい住所に合わせて入れ直してください");
+  });
+
   it("取得中の手編集を応答で上書きしない(Codex R2 P2: 開始時の値と比較して skip)", () => {
     const handler = source.slice(
       source.indexOf("handleSuggestAddress"),

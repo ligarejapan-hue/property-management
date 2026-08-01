@@ -41,9 +41,14 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   useEffect(() => {
     addressRef.current = address;
   }, [address]);
+  const postalCodeRef = useRef(postalCode);
+  useEffect(() => {
+    postalCodeRef.current = postalCode;
+  }, [postalCode]);
 
   const handleSuggestAddress = async () => {
     const startAddress = addressRef.current;
+    const startZip = postalCodeRef.current;
     setSuggesting(true);
     setSuggestNote(null);
     setError(null);
@@ -64,8 +69,17 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
         // しまう（二次送信）。false に戻せばこの address 変化では検索されない。
         // 郵便番号補完による上書きは「住所欄が非空なら確認 UI を出す」既存フローが防ぐ。
         setAddressEdited(false);
+        // 旧住所に対応していた郵便番号を残すと「郵便番号と住所の不一致」のまま
+        // 保存され得る（Codex R3 P2）→ 住所を差し替えたら郵便番号も消す。
+        // 取得中にユーザーが郵便番号を編集していた場合はその入力を勝たせる。
+        const clearedZip =
+          startZip.trim() !== "" && postalCodeRef.current === startZip;
+        if (clearedZip) setPostalCode("");
         setSuggestNote(
-          "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。",
+          "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。" +
+            (clearedZip
+              ? "郵便番号は新しい住所に合わせて入れ直してください。"
+              : ""),
         );
       } else {
         setSuggestNote(
