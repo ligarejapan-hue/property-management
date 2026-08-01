@@ -46,11 +46,12 @@ describe("parseAbrTownCsv(町字マスター)", () => {
       city: "杉並区",
       town: "西荻北",
       chome: "3",
+      koaza: "",
     });
     expect(r.skipped).toBe(0);
   });
 
-  it("政令市は city+ward・郡部は county+city を連結・小字は大字に連結・丁目なしは chome 空", () => {
+  it("政令市は city+ward・郡部は county+city を連結・小字は独立保持・丁目なしは chome 空", () => {
     const r = parseAbrTownCsv(
       [
         TOWN_HEADER,
@@ -65,18 +66,21 @@ describe("parseAbrTownCsv(町字マスター)", () => {
       city: "横浜市中区",
       town: "本町",
       chome: "",
+      koaza: "",
     });
     expect(r.towns.get("131156:0001001")).toEqual({
       prefecture: "東京都",
       city: "杉並区",
-      town: "大字上高井戸小字前原",
+      town: "大字上高井戸",
       chome: "",
+      koaza: "小字前原",
     });
     expect(r.towns.get("133078:0029003")).toEqual({
       prefecture: "東京都",
       city: "西多摩郡檜原村",
       town: "本宿",
       chome: "",
+      koaza: "",
     });
   });
 
@@ -138,6 +142,7 @@ describe("parseAbrRsdtLine(住居点・実測フォーマット)", () => {
       city: "杉並区",
       town: "西荻北",
       chome: "3",
+      koaza: "",
       block: "19",
       rsdt: "4",
       lat: 35.7042,
@@ -181,9 +186,35 @@ describe("formatResidenceAddress / pickNearestResidence", () => {
     city: "杉並区",
     town: "西荻北",
     chome: "3",
+    koaza: "",
     block: "19",
     rsdt: "4",
   };
+
+  it("小字あり → 大字→丁目→小字の正順(Codex R5 P2: 「大字小字3-…」の並び崩れ防止)", () => {
+    expect(
+      formatResidenceAddress({
+        prefecture: "青森県",
+        city: "八戸市",
+        town: "大字市川町",
+        chome: "3",
+        koaza: "小字桔梗野",
+        block: "1",
+        rsdt: "2",
+      }),
+    ).toBe("青森県八戸市大字市川町3丁目小字桔梗野1-2");
+    expect(
+      formatResidenceAddress({
+        prefecture: "青森県",
+        city: "八戸市",
+        town: "大字市川町",
+        chome: "",
+        koaza: "小字桔梗野",
+        block: "1",
+        rsdt: "2",
+      }),
+    ).toBe("青森県八戸市大字市川町小字桔梗野1-2");
+  });
 
   it("丁目あり → 3-19-4 / 丁目なし → 10-3 のハイフン形", () => {
     expect(formatResidenceAddress(ROW)).toBe("東京都杉並区西荻北3-19-4");
@@ -193,6 +224,7 @@ describe("formatResidenceAddress / pickNearestResidence", () => {
         city: "千代田区",
         town: "一番町",
         chome: "",
+        koaza: "",
         block: "10",
         rsdt: "3",
       }),

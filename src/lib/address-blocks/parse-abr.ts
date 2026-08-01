@@ -20,9 +20,12 @@ import { splitCsvLine } from "./parse-isj";
 export interface AbrTownEntry {
   prefecture: string;
   city: string;
+  /** 大字・町名(小字は含めない=丁目の後に置く必要があるため別フィールド)。 */
   town: string;
   /** 丁目(算用数字の文字列)。丁目なし町字は ""。 */
   chome: string;
+  /** 小字・通称名。表示順は 大字→丁目→小字(Codex R5 P2)。無ければ ""。 */
+  koaza: string;
 }
 
 /** ヘッダ行から使用列の位置を列名で解決する(列順ドリフト検知)。 */
@@ -77,14 +80,15 @@ export function parseAbrTownCsv(text: string): AbrTownParseResult {
     // ward=「中区」に分かれる → 表示は 郡+市町村+区 の連結(Codex P2: 郡を
     // 落とすと「東京都檜原村…」のような不完全な住所が保存される)。
     const city = `${(c[col.county] ?? "").trim()}${(c[col.city] ?? "").trim()}${(c[col.ward] ?? "").trim()}`;
-    const town = `${(c[col.oaza_cho] ?? "").trim()}${(c[col.koaza] ?? "").trim()}`;
+    const town = (c[col.oaza_cho] ?? "").trim();
+    const koaza = (c[col.koaza] ?? "").trim();
     const chome = (c[col.chome_number] ?? "").trim();
     if ((c[col.ablt_date] ?? "").trim() !== "") continue; // 廃止済み町字
     if (!lg || !machiaza || !prefecture || !city || !town || (chome !== "" && !/^\d+$/.test(chome))) {
       skipped++;
       continue;
     }
-    towns.set(`${lg}:${machiaza}`, { prefecture, city, town, chome });
+    towns.set(`${lg}:${machiaza}`, { prefecture, city, town, chome, koaza });
   }
   return { towns, skipped };
 }
@@ -94,6 +98,7 @@ export interface AbrResidenceRow {
   city: string;
   town: string;
   chome: string;
+  koaza: string;
   /** 番(先頭ゼロなし)。 */
   block: string;
   /** 号(枝番があれば "4-2" 形)。 */
@@ -178,15 +183,22 @@ export function parseAbrRsdtLine(
  * 号までの住所文字列を組み立てる。
  * - 丁目あり: 東京都杉並区西荻北3-19-4
  * - 丁目なし: 東京都千代田区一番町10-3 (正式は「10番3号」だが追記不要のハイフン形で統一)
+ * - 小字あり: 大字→丁目→小字の**正順**(Codex R5 P2: 大字小字3-…の並び崩れ防止)。
+ *   例: ○○県○○市大字X3丁目小字Y1-2
  */
 export function formatResidenceAddress(row: {
   prefecture: string;
   city: string;
   town: string;
   chome: string;
+  koaza: string;
   block: string;
   rsdt: string;
 }): string {
+  if (row.koaza !== "") {
+    const chomePart = row.chome !== "" ? `${row.chome}丁目` : "";
+    return `${row.prefecture}${row.city}${row.town}${chomePart}${row.koaza}${row.block}-${row.rsdt}`;
+  }
   const chomePart = row.chome !== "" ? `${row.chome}-` : "";
   return `${row.prefecture}${row.city}${row.town}${chomePart}${row.block}-${row.rsdt}`;
 }

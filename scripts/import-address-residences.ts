@@ -106,6 +106,7 @@ async function importPrefecture(
               city: r.city,
               town: r.town,
               chome: r.chome,
+              koaza: r.koaza,
               block: r.block,
               rsdt: r.rsdt,
               lat: r.lat,
@@ -207,7 +208,19 @@ async function main(): Promise<number> {
       console.error(`停止: ${file} に有効な町字がありません(ヘッダのみ?)。再ダウンロードしてください`);
       return 1;
     }
-    for (const [k, v] of r.towns) towns.set(k, v);
+    // 町字マスターの新旧2版が混在すると last-write-wins で誤った名前が選ばれ得る
+    // (Codex R5 P2)。同一キーで値が食い違ったら停止する(同一値の重複は無害)。
+    for (const [k, v] of r.towns) {
+      const prev = towns.get(k);
+      if (prev && JSON.stringify(prev) !== JSON.stringify(v)) {
+        console.error(
+          `停止: 町字マスターの内容が食い違っています(${k}: 「${prev.town}」vs「${v.town}」等)。` +
+            "新旧2版のファイルが混在していないか確認し、1版分だけで再実行してください",
+        );
+        return 1;
+      }
+      towns.set(k, v);
+    }
   }
   console.log(`町字: ${towns.size} 件 (除外: ${townSkipped})`);
 

@@ -28,6 +28,7 @@ export async function findNearestResidence(
       city: true,
       town: true,
       chome: true,
+      koaza: true,
       block: true,
       rsdt: true,
       lat: true,

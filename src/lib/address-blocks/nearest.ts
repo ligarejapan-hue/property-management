@@ -97,6 +97,7 @@ export function pickNearestResidence(
     city: string;
     town: string;
     chome: string;
+    koaza: string;
     block: string;
     rsdt: string;
     lat: number;
@@ -111,7 +112,7 @@ export function pickNearestResidence(
     if (best === null || d < best.distanceM) {
       best = {
         address: formatResidenceAddress(c),
-        town: `${c.town}${c.chome !== "" ? `${c.chome}丁目` : ""}`,
+        town: `${c.town}${c.chome !== "" ? `${c.chome}丁目` : ""}${c.koaza}`,
         distanceM: d,
       };
     }

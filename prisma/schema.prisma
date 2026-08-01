@@ -1169,6 +1169,7 @@ model AddressResidencePoint {
   city          String
   town          String
   chome         String
+  koaza         String  @default("")
   block         String
   rsdt          String
   lat           Decimal @db.Decimal(10, 7)
