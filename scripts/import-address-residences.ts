@@ -70,6 +70,32 @@ async function importPrefecture(
               "(意図した縮小なら --allow-shrink を付けてください)",
           );
         }
+        // 市区町村の**途中**で切れた CSV(50%超が残る)は点数の縮小ガードを通過する
+        // (Codex R3 P2)。既存の町丁目が新データに全て存在することも照合する
+        // (ファイル末尾側の町丁目が黙って消えるのを防ぐ)。町名変更等の意図的な
+        // 再編のみ --allow-shrink で続行。
+        if (existing > 0 && !allowShrink) {
+          const existingTowns = await tx.addressResidencePoint.findMany({
+            where: { prefecture: g.prefecture, city: g.city },
+            distinct: ["town", "chome"],
+            select: { town: true, chome: true },
+          });
+          const incomingTowns = new Set(g.rows.map((r) => `${r.town}|${r.chome}`));
+          const missingTowns = existingTowns
+            .map((t) => `${t.town}|${t.chome}`)
+            .filter((k) => !incomingTowns.has(k));
+          if (missingTowns.length > 0) {
+            const label = missingTowns
+              .slice(0, 5)
+              .map((k) => k.replace("|", ""))
+              .join("、");
+            throw new Error(
+              `${g.prefecture}${g.city}: 既存の ${missingTowns.length} 町丁目(${label}${missingTowns.length > 5 ? " ほか" : ""})が新データにありません。` +
+                "CSV が途中で切れているか、町名の再編の可能性があります。再ダウンロードして確認してください" +
+                "(意図した再編なら --allow-shrink を付けてください)",
+            );
+          }
+        }
         await tx.addressResidencePoint.deleteMany({
           where: { prefecture: g.prefecture, city: g.city },
         });

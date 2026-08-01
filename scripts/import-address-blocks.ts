@@ -74,6 +74,27 @@ async function importPrefecture(
               "(意図した縮小なら --allow-shrink を付けてください)",
           );
         }
+        // 市区町村の**途中**で切れた CSV(50%超が残る)は点数の縮小ガードを通過する
+        // (Codex #348 R3 P2 と同型の穴)。既存の町丁目が新データに全て存在することも
+        // 照合する。町名変更等の意図的な再編のみ --allow-shrink で続行。
+        if (existing > 0 && !allowShrink) {
+          const existingTowns = await tx.addressBlockPoint.findMany({
+            where: { prefecture: g.prefecture, city: g.city },
+            distinct: ["town"],
+            select: { town: true },
+          });
+          const incomingTowns = new Set(g.rows.map((r) => r.town));
+          const missingTowns = existingTowns
+            .map((t) => t.town)
+            .filter((t) => !incomingTowns.has(t));
+          if (missingTowns.length > 0) {
+            throw new Error(
+              `${g.prefecture}${g.city}: 既存の ${missingTowns.length} 町丁目(${missingTowns.slice(0, 5).join("、")}${missingTowns.length > 5 ? " ほか" : ""})が新データにありません。` +
+                "CSV が途中で切れているか、町名の再編の可能性があります。再ダウンロードして確認してください" +
+                "(意図した再編なら --allow-shrink を付けてください)",
+            );
+          }
+        }
         await tx.addressBlockPoint.deleteMany({
           where: { prefecture: g.prefecture, city: g.city },
         });
