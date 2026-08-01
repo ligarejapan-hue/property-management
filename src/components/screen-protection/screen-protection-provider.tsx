@@ -53,6 +53,8 @@ export interface MeCapabilities {
   registryLocationSearch: boolean;
   /** 段階②(2026-08-01): 候補からの有料取得が有効か(専用オプトイン込み)。 */
   registryPurchase: boolean;
+  /** ピン座標→住所の自動入力(逆ジオコーディング)が有効か(env 未設定なら導線を出さない)。 */
+  reverseGeocode: boolean;
   /** scanned 謄本の OCR 下書き生成が使えるか（OCR 設定済み ∧ admin を server 側で束ねた値）。 */
   registryOcrDraft: boolean;
   /** 売却促進DM の文面生成 provider が設定済みか（未設定なら作成導線を出さない）。 */
@@ -154,6 +156,7 @@ export default function ScreenProtectionProvider({
           registryAutoFetch: json.capabilities?.registryAutoFetch === true,
           registryLocationSearch: json.capabilities?.registryLocationSearch === true,
           registryPurchase: json.capabilities?.registryPurchase === true,
+          reverseGeocode: json.capabilities?.reverseGeocode === true,
           registryOcrDraft: json.capabilities?.registryOcrDraft === true,
           saleDmLetter: json.capabilities?.saleDmLetter === true,
         });

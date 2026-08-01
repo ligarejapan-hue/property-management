@@ -54,4 +54,26 @@ describe("api-client: convertPinToProperty / listCandidatePins", () => {
     expect(String(url)).toContain("/api/field-survey/pins/candidates");
     expect(String(url)).not.toContain("view=map");
   });
+
+  it("suggestPinAddress はピン単位の提案エンドポイントへ POST する(座標は送らない)", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({ result: { found: true, address: "東京都杉並区西荻北三丁目" } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { suggestPinAddress } = await import("../api-client");
+    const r = await suggestPinAddress("pin-9");
+
+    expect(r.result).toMatchObject({ found: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/field-survey/pins/pin-9/suggest-address");
+    // POST 固定(cross-site 遷移で座標送信が発動しないように)・body なし =
+    // client からは pin の ID しか送らない(座標は server がピンから読む)。
+    expect(init?.method).toBe("POST");
+    expect(init?.body ?? null).toBeNull();
+  });
 });

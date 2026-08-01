@@ -2810,6 +2810,23 @@ export async function convertPinToProperty(
   );
 }
 
+/** ピンの座標から住所（住居表示・町丁目まで）を提案。座標は client に降ろさず server で解決。 */
+export async function suggestPinAddress(
+  pinId: string,
+): Promise<{ result: { found: true; address: string } | { found: false } }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { result: { found: true, address: "東京都杉並区西荻北三丁目" } };
+  }
+  // POST 固定: 座標を外部へ送る副作用を持つため、cross-site 遷移(GET)で
+  // 発動しないようにする(SameSite=Lax が cross-site POST を遮る)。
+  return apiFetch<{
+    result: { found: true; address: string } | { found: false };
+  }>(`/api/field-survey/pins/${encodeURIComponent(pinId)}/suggest-address`, {
+    method: "POST",
+  });
+}
+
 export interface CandidatePinRow {
   id: string;
   staffUserId: string;

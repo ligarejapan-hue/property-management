@@ -77,6 +77,10 @@ vi.mock("@/lib/registry-fetch/config-store", () => ({
   })),
 }));
 
+vi.mock("@/lib/reverse-geocode", () => ({
+  isReverseGeocodeConfigured: vi.fn(),
+}));
+
 vi.mock("@/lib/registry-ocr/client", () => ({
   isRegistryOcrConfigured: vi.fn(),
 }));
@@ -105,6 +109,7 @@ import {
   isRegistryPurchaseConfigured,
 } from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
+import { isReverseGeocodeConfigured } from "@/lib/reverse-geocode";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
@@ -133,6 +138,7 @@ beforeEach(() => {
   (isRegistryLocationSearchConfigured as Mock).mockReturnValue(false);
   (isRegistryPurchaseConfigured as Mock).mockReturnValue(false);
   (isRegistryOcrConfigured as Mock).mockReturnValue(false);
+  (isReverseGeocodeConfigured as Mock).mockReturnValue(false);
   (isSaleDmConfigured as Mock).mockReturnValue(false);
 });
 
@@ -174,6 +180,8 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       registryPurchase: false,
       // office_staff（非 admin）かつ OCR 未設定 → false
       registryOcrDraft: false,
+      // 逆ジオコーディング(座標→住所) env 未設定 → false
+      reverseGeocode: false,
       saleDmLetter: false,
     });
     expect(isCorporateLookupConfigured).toHaveBeenCalledTimes(1);
@@ -190,6 +198,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       registryLocationSearch: false,
       registryOcrDraft: false,
       registryPurchase: false,
+      reverseGeocode: false,
       saleDmLetter: false,
     });
   });
@@ -208,6 +217,13 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     const body = await (await GET()).json();
     expect(body.capabilities.registryLocationSearch).toBe(true);
     expect(isRegistryLocationSearchConfigured).toHaveBeenCalledTimes(1);
+  });
+
+  it("reverseGeocode は isReverseGeocodeConfigured() を素通しで返す", async () => {
+    (isReverseGeocodeConfigured as Mock).mockReturnValue(true);
+    const body = await (await GET()).json();
+    expect(body.capabilities.reverseGeocode).toBe(true);
+    expect(isReverseGeocodeConfigured).toHaveBeenCalledTimes(1);
   });
 
   it("registryOcrDraft は OCR 設定済み かつ admin のときだけ true", async () => {
@@ -237,6 +253,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       "registryLocationSearch",
       "registryOcrDraft",
       "registryPurchase",
+      "reverseGeocode",
       "saleDmLetter",
     ]);
   });

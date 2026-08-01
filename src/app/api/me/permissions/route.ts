@@ -11,6 +11,7 @@ import {
   isRegistryPurchaseConfigured,
 } from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
+import { isReverseGeocodeConfigured } from "@/lib/reverse-geocode";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
@@ -43,6 +44,9 @@ export async function GET() {
       registryPurchase: isRegistryPurchaseConfigured({ credentials: registryCreds }),
       // scanned 謄本の OCR 下書き生成が「この利用者に」使えるか。
       // OCR サービス設定済み（localhost allowlist 通過）かつ admin のときだけ true。
+      // ピン座標→住所の自動入力(逆ジオコーディング)が有効か。env 未設定の環境で
+      // 「ピンの位置から住所を入力」ボタンを出さない(押すと必ず 503 になるため)。
+      reverseGeocode: isReverseGeocodeConfigured(),
       registryOcrDraft:
         isRegistryOcrConfigured() && session.role === "admin",
       // 売却促進DM を「作成して印刷できる」前提が揃っているか（boolean のみ）。AI provider 設定に加え、郵送QRに

@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { X, Loader2, AlertTriangle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { X, Loader2, AlertTriangle, MapPin } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
-import { convertPinToProperty } from "@/lib/api-client";
+import { convertPinToProperty, suggestPinAddress } from "@/lib/api-client";
 import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 interface Props {
   pinId: string;
@@ -30,6 +31,95 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   const [realEstateNumber, setRealEstateNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ピンの座標からの住所自動入力（住居表示・町丁目まで）。
+  //  - 座標は client に降ろさない（server がピンから読んで逆ジオコーディングする）
+  //  - 無料APIの限界で**番・号は入らない**→ 取得後に追記を促すヒントを出す
+  //  - 値は通常の入力欄なのでいつでも手で直せる
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
+  // 非空住所の上書きは確認してから（AddressLookupControls の確認 UI と同じ姿勢・
+  // Codex R9 P2）。1回目のクリックで予告し、続けてもう一度押したときだけ実行する。
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  // env 未設定の環境では「ピンの位置から住所を入力」導線ごと出さない（押すと必ず
+  // 503 になるため・Codex R5 P2）。capabilities=null（未取得/失敗）も出さない側へ倒す。
+  const { capabilities } = useScreenProtection();
+  const reverseGeocodeEnabled = capabilities?.reverseGeocode === true;
+  // 取得中(最長8秒)の手編集を応答で上書きしないための現在値 ref（Codex R2 P2）。
+  const addressRef = useRef(address);
+  useEffect(() => {
+    addressRef.current = address;
+  }, [address]);
+  const postalCodeRef = useRef(postalCode);
+  useEffect(() => {
+    postalCodeRef.current = postalCode;
+  }, [postalCode]);
+
+  const handleSuggestAddress = async () => {
+    const startAddress = addressRef.current;
+    const startZip = postalCodeRef.current;
+    // 手入力済みの住所（番地・号まで入っていることもある）を、確認なしで町丁目まで
+    // の粗い値に上書きしない（Codex R9 P2）。取得（=座標の外部送信）より前に確認を
+    // 求めるので、確認だけなら外部送信も発生しない。
+    if (startAddress.trim() !== "" && !confirmOverwrite) {
+      setConfirmOverwrite(true);
+      setSuggestNote(
+        "入力済みの住所をピンの位置の住所（町丁目まで）で上書きします。よろしければもう一度ボタンを押してください。",
+      );
+      return;
+    }
+    setConfirmOverwrite(false);
+    setSuggesting(true);
+    setSuggestNote(null);
+    setError(null);
+    try {
+      const { result } = await suggestPinAddress(pinId);
+      if (result.found) {
+        if (
+          addressRef.current !== startAddress ||
+          postalCodeRef.current !== startZip
+        ) {
+          // 取得中にユーザーが住所または郵便番号を編集した（郵便番号候補の適用は
+          // 住所+郵便番号を同時に書き換える）→ 提案全体を stale として反映しない
+          // （Codex R2/R8 P2: 片方だけ勝たせると不一致ペアが保存され得る）。
+          setSuggestNote(
+            "取得中に住所または郵便番号が編集されたため、自動入力は反映しませんでした。もう一度ボタンを押すと再取得します。",
+          );
+          return;
+        }
+        setAddress(result.address);
+        // user-edit signal を明示的に下ろす（Codex R2 P1）: ボタン押下前に手入力が
+        // あると addressEdited=true のまま残り、この programmatic な住所変更を
+        // AddressLookupControls が user-edit とみなして日本郵便 API へ自動送信して
+        // しまう（二次送信）。false に戻せばこの address 変化では検索されない。
+        // 郵便番号補完による上書きは「住所欄が非空なら確認 UI を出す」既存フローが防ぐ。
+        setAddressEdited(false);
+        // 旧住所に対応していた郵便番号を残すと「郵便番号と住所の不一致」のまま
+        // 保存され得る（Codex R3 P2）→ 住所を**実際に置き換えたときだけ**郵便番号も消す。
+        // 取得結果が現在の住所と同一なら消さない（検索候補で入れた正しい郵便番号を
+        // 巻き添えにしない・Codex R6 P2）。取得中の編集は上の stale ガードで反映ごと
+        // 中止済み＝ここでは住所・郵便番号とも開始時の値のまま。
+        const clearedZip =
+          result.address !== startAddress && startZip.trim() !== "";
+        if (clearedZip) setPostalCode("");
+        setSuggestNote(
+          "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。" +
+            (clearedZip
+              ? "郵便番号は新しい住所に合わせて入れ直してください。"
+              : ""),
+        );
+      } else {
+        setSuggestNote(
+          "この位置の住所を取得できませんでした。お手数ですが手で入力してください。",
+        );
+      }
+    } catch (err) {
+      setSuggestNote(
+        err instanceof Error ? err.message : "住所の自動取得に失敗しました",
+      );
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,7 +223,34 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
               placeholder="例: 東京都千代田区丸の内1-1-1"
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
-            <div className="mt-1.5">
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              {reverseGeocodeEnabled && (
+                <>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleSuggestAddress}
+                      disabled={submitting || suggesting}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                      title="ピンの位置から住所（町丁目まで）を自動入力します（無料）"
+                    >
+                      {suggesting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <MapPin className="h-3.5 w-3.5" />
+                      )}
+                      ピンの位置から住所を入力
+                    </button>
+                  </div>
+                  {/* 位置情報(座標)は保護対象 → 押す前に「どこへ何を送るか」を明示する
+                      (Codex R4 P2: 事前開示なしに座標を外部送信しない)。結果表示後は
+                      suggestNote に置き換わる(1行ずつ・画面を混雑させない)。 */}
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {suggestNote ??
+                      "ボタンを押すと、ピンの座標を国土地理院（国の機関・無料）に送信して住所を調べます。座標以外の情報は送信しません。"}
+                  </p>
+                </>
+              )}
               <AddressLookupControls
                 zip={postalCode}
                 address={address}
