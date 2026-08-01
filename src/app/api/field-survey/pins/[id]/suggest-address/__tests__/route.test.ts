@@ -91,6 +91,7 @@ const FOUND = {
 const BLOCK_HIT = {
   address: "東京都杉並区西荻北3-1",
   town: "西荻北三丁目",
+  block: "1",
   distanceM: 18,
   isResidential: true,
 };
@@ -237,6 +238,30 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     });
     // ローカルで引けたら座標の外部送信は発生しない。
     expect(reverseGeocode).not.toHaveBeenCalled();
+  });
+
+  it("住居表示の街区(isResidential=true)では lotNumber を返さない(街区符号は地番ではない)", async () => {
+    (findNearestBlock as Mock).mockResolvedValue(BLOCK_HIT);
+    const body = await (await POST(req, ctx)).json();
+    expect(body.result).not.toHaveProperty("lotNumber");
+  });
+
+  it("住居表示未実施(isResidential=false)では block=地番を lotNumber として返す(Codex R3 P2)", async () => {
+    (findNearestBlock as Mock).mockResolvedValue({
+      address: "埼玉県秩父市大字上影森1234番地",
+      town: "大字上影森",
+      block: "1234",
+      distanceM: 25,
+      isResidential: false,
+    });
+    const body = await (await POST(req, ctx)).json();
+    expect(body.result).toEqual({
+      found: true,
+      address: "埼玉県秩父市大字上影森1234番地",
+      town: "大字上影森",
+      precision: "block",
+      lotNumber: "1234",
+    });
   });
 
   it("街区データに無ければ GSI(町丁目まで)へフォールバック", async () => {

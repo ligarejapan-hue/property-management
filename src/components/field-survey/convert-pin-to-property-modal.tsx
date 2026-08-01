@@ -53,6 +53,10 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   useEffect(() => {
     postalCodeRef.current = postalCode;
   }, [postalCode]);
+  const lotNumberRef = useRef(lotNumber);
+  useEffect(() => {
+    lotNumberRef.current = lotNumber;
+  }, [lotNumber]);
 
   const handleSuggestAddress = async () => {
     const startAddress = addressRef.current;
@@ -107,8 +111,23 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
           result.precision === "block"
             ? "ピンの位置から番まで自動入力しました（出典: 国土交通省 位置参照情報）。続き（号など）は現地やGoogleマップで確認して追記してください。"
             : "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。";
+        // 住居表示未実施の地域では取得値が地番そのもの(Codex R3 P2)。捨てると
+        // 謄本の所在検索に使える値を失うため、**地番欄が空のときだけ**初期値として
+        // 入れる(取得中に手入力があれば非空=そのまま尊重される)。要確認の案内を出す。
+        let filledLot = false;
+        if (
+          result.precision === "block" &&
+          result.lotNumber &&
+          lotNumberRef.current.trim() === ""
+        ) {
+          setLotNumber(result.lotNumber);
+          filledLot = true;
+        }
         setSuggestNote(
           base +
+            (filledLot
+              ? "この地域は住居表示未実施のため、地番欄にも同じ番号を入れました（登記に使う地番は謄本・公図で必ず確認してください）。"
+              : "") +
             (clearedZip
               ? "郵便番号は新しい住所に合わせて入れ直してください。"
               : ""),

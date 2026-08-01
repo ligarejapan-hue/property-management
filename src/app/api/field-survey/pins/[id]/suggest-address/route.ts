@@ -154,6 +154,10 @@ export async function POST(
           address: block.address,
           town: block.town,
           precision: "block",
+          // 住居表示未実施の地域では block 値=**地番そのもの**(Codex R3 P2)。
+          // 捨てると謄本の所在検索に使える値を失うため、地番欄の初期値候補として
+          // 返す(UI 側は空欄のときだけ入れ、要確認の案内を出す)。
+          ...(block.isResidential ? {} : { lotNumber: block.block }),
         },
       });
     }

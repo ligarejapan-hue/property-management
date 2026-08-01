@@ -9,6 +9,9 @@ export const MAX_BLOCK_DISTANCE_M = 150;
 export interface BlockLookupHit {
   address: string;
   town: string;
+  /** 街区符号(住居表示) or 地番(住居表示未実施)。isResidential=false のとき
+   * この値は**地番そのもの**=物件の地番欄の初期値候補として返す(要確認)。 */
+  block: string;
   /** 街区点までの距離(m・整数)。応答には含めずログ/テスト用。 */
   distanceM: number;
   isResidential: boolean;
@@ -58,6 +61,7 @@ export function pickNearestBlock(
       best = {
         address: formatBlockAddress(c),
         town: c.town,
+        block: c.block,
         distanceM: Math.round(d), // 丸めは表示用の返り値のみ
         isResidential: c.isResidential,
       };

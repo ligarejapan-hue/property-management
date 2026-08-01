@@ -64,6 +64,11 @@ async function importGroup(
 ): Promise<void> {
   await prisma.$transaction(
     async (tx) => {
+      // 同一市区町村への同時実行を直列化する(Codex R3 P2: 2本の取込が同時に走ると
+      // 両方の delete→insert が通って点が二重になる)。tx スコープの advisory lock は
+      // commit/rollback で自動解放。後着は先着の完了を待ってから全置換するので、
+      // どちらの順でも最終状態は「どちらか一方のスナップショット」に収束する。
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prefecture}), hashtext(${city}))`;
       await tx.addressBlockPoint.deleteMany({ where: { prefecture, city } });
       for (let i = 0; i < rows.length; i += CHUNK) {
         await tx.addressBlockPoint.createMany({

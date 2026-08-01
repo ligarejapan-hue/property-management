@@ -248,13 +248,15 @@ describe("pickNearestBlock / haversineMeters", () => {
     expect(d).toBeLessThan(117);
   });
 
-  it("最も近い点の街区を採用し、住所を組み立てる", () => {
+  it("最も近い点の街区を採用し、住所を組み立てる(生の block 値も保持=地番欄の初期値用)", () => {
     const hit = pickNearestBlock(35.7042, 139.5995, [
       C(35.7041, 139.5996, "1"), // ~14m
       C(35.705, 139.601, "9"), // ~160m
     ]);
     expect(hit).not.toBeNull();
     expect(hit!.address).toBe("東京都杉並区西荻北3-1");
+    expect(hit!.block).toBe("1");
+    expect(hit!.isResidential).toBe(true);
     expect(hit!.distanceM).toBeLessThan(30);
   });
 

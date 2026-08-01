@@ -150,4 +150,15 @@ describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => 
     expect(source).toContain("出典: 国土地理院");
     expect(source).toContain("追記");
   });
+
+  it("地番地域では地番欄が**空のときだけ**初期値を入れ、要確認の案内を出す(Codex R3 P2)", () => {
+    const handler = source.slice(
+      source.indexOf("handleSuggestAddress"),
+      source.indexOf("handleSubmit"),
+    );
+    // 応答到着時の現在値(ref)で空チェック=取得中の手入力を上書きしない。
+    expect(handler).toMatch(/result\.lotNumber[\s\S]{0,120}lotNumberRef\.current\.trim\(\) === ""/);
+    expect(handler).toContain("setLotNumber(result.lotNumber)");
+    expect(handler).toContain("謄本・公図で必ず確認");
+  });
 });
