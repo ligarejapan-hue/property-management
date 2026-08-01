@@ -5,19 +5,22 @@
  * **地番**（登記の土地番号・`lotNumber`）は座標から引けないため対象外＝触らない。
  *
  * 無料API（国土地理院）は**町丁目まで**しか返さない（番・号は返らない）。
- * 番・号は利用者が Google マップ等で確認して手で追記する前提の設計。
+ * 第2弾で「番」まで返すローカル照合（address-blocks・国土交通省データ）を追加した。
+ * どちらの精度で引けたかは precision で区別する（"block"=番まで / "town"=町丁目まで）。
  */
 
 /** 逆ジオコーディングの結果。found:false は「その座標に対応する住所が無い」（海上・国外等）。 */
 export type ReverseGeocodeResult =
   | {
       found: true;
-      /** 組み立て済み住所（都道府県+市区町村+町丁目）。例「東京都杉並区西荻北三丁目」 */
+      /** 組み立て済み住所。例「東京都杉並区西荻北3-1」(block) /「東京都杉並区西荻北三丁目」(town) */
       address: string;
-      /** 町丁目（lv01Nm）。表示・デバッグ用。 */
+      /** 町丁目。表示・デバッグ用。 */
       town: string;
-      /** 市区町村コード（正規化済み・先頭ゼロなし）。 */
-      municipalityCode: string;
+      /** 精度: "block"=番まで(ローカル照合) / "town"=町丁目まで(国土地理院)。 */
+      precision: "block" | "town";
+      /** 市区町村コード（正規化済み・先頭ゼロなし）。town 精度(GSI由来)のみ。 */
+      municipalityCode?: string;
     }
   | { found: false };
 

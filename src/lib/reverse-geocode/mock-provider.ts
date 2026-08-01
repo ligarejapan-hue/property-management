@@ -20,6 +20,7 @@ export class MockReverseGeocodeProvider implements ReverseGeocodeProvider {
       found: true,
       address: "東京都杉並区西荻北三丁目",
       town: "西荻北三丁目",
+      precision: "town",
       municipalityCode: "13115",
     };
   }
