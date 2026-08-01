@@ -24,46 +24,12 @@
  *   - ⚠個人情報は扱わない(公開データの地点座標のみ)。
  */
 
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { parseIsjCsv, type IsjBlockRow } from "../src/lib/address-blocks/parse-isj";
 import { parseImportArgs } from "../src/lib/address-blocks/import-cli";
-
-/**
- * 指定パス(ファイル or フォルダ)から .csv を列挙する(フォルダは1階層下まで)。
- * 重複指定(フォルダとその中のファイルを両方渡す・同じファイルを2回渡す・symlink 経由等)は
- * **物理パス**(realpath)で dedupe する(Codex R4/R8 P2: 重複すると同じ点が二重挿入される)。
- */
-function collectCsvFiles(paths: string[]): string[] {
-  const seen = new Set<string>();
-  const files: string[] = [];
-  const push = (p: string) => {
-    const canonical = realpathSync(p);
-    if (seen.has(canonical)) return;
-    seen.add(canonical);
-    files.push(canonical);
-  };
-  for (const p of paths) {
-    const st = statSync(p);
-    if (st.isFile()) {
-      push(p);
-      continue;
-    }
-    for (const name of readdirSync(p)) {
-      const child = join(p, name);
-      if (statSync(child).isDirectory()) {
-        for (const inner of readdirSync(child)) {
-          if (inner.toLowerCase().endsWith(".csv")) push(join(child, inner));
-        }
-      } else if (name.toLowerCase().endsWith(".csv")) {
-        push(child);
-      }
-    }
-  }
-  return files;
-}
+import { collectCsvFiles } from "../src/lib/address-blocks/import-files";
 
 const CHUNK = 1000;
 

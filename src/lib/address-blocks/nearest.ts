@@ -1,7 +1,9 @@
 /**
- * 最近傍の街区点選択(純関数・prisma 非依存)。DB I/O は lookup.ts が担う。
+ * 最近傍の街区点/住居点選択(純関数・prisma 非依存)。DB I/O は lookup.ts /
+ * residence-lookup.ts が担う。
  */
 import { formatBlockAddress } from "./format";
+import { formatResidenceAddress } from "./parse-abr";
 
 /** これより遠い最近傍は不採用。実測の点間隔は市街地で数十m(実測ヒットは12〜19m)。
  * ⚠取込エリアの**境界の外**に立つピンが、境界越しの点を拾う誤マッチ(Codex R7 P2)を
@@ -69,6 +71,48 @@ export function pickNearestBlock(
         block: c.block,
         distanceM: d,
         isResidential: c.isResidential,
+      };
+    }
+  }
+  return best;
+}
+
+/** 号レベル(住居点)の採用閾値。点は家1軒ごとにあり実測ヒットは数m〜十数m。
+ * 遠い点は隣家・境界越しの誤りやすさが増すため街区(100m)より厳しくする。 */
+export const RSDT_MAX_DISTANCE_M = 50;
+
+export interface ResidenceLookupHit {
+  address: string;
+  town: string;
+  /** 住居点までの距離(m・実数のまま丸めない)。 */
+  distanceM: number;
+}
+
+/** 候補行(既に number 化済み)から最近傍の住居点を選ぶ。閾値超過・候補ゼロは null。 */
+export function pickNearestResidence(
+  lat: number,
+  lng: number,
+  candidates: Array<{
+    prefecture: string;
+    city: string;
+    town: string;
+    chome: string;
+    block: string;
+    rsdt: string;
+    lat: number;
+    lng: number;
+  }>,
+  maxDistanceM: number = RSDT_MAX_DISTANCE_M,
+): ResidenceLookupHit | null {
+  let best: ResidenceLookupHit | null = null;
+  for (const c of candidates) {
+    const d = haversineMeters(lat, lng, c.lat, c.lng);
+    if (d > maxDistanceM) continue;
+    if (best === null || d < best.distanceM) {
+      best = {
+        address: formatResidenceAddress(c),
+        town: `${c.town}${c.chome !== "" ? `${c.chome}丁目` : ""}`,
+        distanceM: d,
       };
     }
   }

@@ -51,6 +51,9 @@ vi.mock("@/lib/reverse-geocode", async (importOriginal) => {
 });
 // ローカル街区照合(第2弾)。findNearestBlock だけ差し替え、距離定数
 // (LOT_PREFILL_MAX_DISTANCE_M 等)は実物を使う。既定はデータ無し=null(GSI フォールバック)。
+vi.mock("@/lib/address-blocks/residence-lookup", () => ({
+  findNearestResidence: vi.fn(),
+}));
 vi.mock("@/lib/address-blocks/lookup", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/lib/address-blocks/lookup")>();
@@ -66,6 +69,7 @@ import {
   ReverseGeocodeError,
 } from "@/lib/reverse-geocode";
 import { findNearestBlock } from "@/lib/address-blocks/lookup";
+import { findNearestResidence } from "@/lib/address-blocks/residence-lookup";
 import { POST } from "../route";
 
 const pm = prisma as unknown as { fieldSurveyPin: { findUnique: Mock } };
@@ -121,6 +125,7 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     (getUserPermissions as Mock).mockResolvedValue(WRITE);
     pm.fieldSurveyPin.findUnique.mockResolvedValue(pin());
     (isReverseGeocodeConfigured as Mock).mockReturnValue(true);
+    (findNearestResidence as Mock).mockResolvedValue(null); // 既定: 住居点データ未取込
     (findNearestBlock as Mock).mockResolvedValue(null); // 既定: 街区データ未取込
     (reverseGeocode as Mock).mockResolvedValue(FOUND);
   });
@@ -227,6 +232,33 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     expect(reverseGeocode).not.toHaveBeenCalled();
   });
 
+  it("住居点にヒット → 号までの住所を precision:'rsdt' で返し、街区もGSIも呼ばない", async () => {
+    (findNearestResidence as Mock).mockResolvedValue({
+      address: "東京都杉並区西荻北3-19-4",
+      town: "西荻北3丁目",
+      distanceM: 2.1,
+    });
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      result: {
+        found: true,
+        address: "東京都杉並区西荻北3-19-4",
+        town: "西荻北3丁目",
+        precision: "rsdt",
+      },
+    });
+    expect(findNearestBlock).not.toHaveBeenCalled();
+    expect(reverseGeocode).not.toHaveBeenCalled();
+  });
+
+  it("住居点の DB 障害も fail-closed=500(外部へ座標を送らない)", async () => {
+    (findNearestResidence as Mock).mockRejectedValue(new Error("db down"));
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(500);
+    expect(reverseGeocode).not.toHaveBeenCalled();
+  });
+
   it("街区データにヒット → 番までの住所を precision:'block' で返し、外部(GSI)を呼ばない", async () => {
     (findNearestBlock as Mock).mockResolvedValue(BLOCK_HIT);
     const res = await POST(req, ctx);
@@ -307,6 +339,7 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body.error.code).toBe("NOT_CONFIGURED");
+    expect(findNearestResidence).not.toHaveBeenCalled();
     expect(findNearestBlock).not.toHaveBeenCalled();
     expect(reverseGeocode).not.toHaveBeenCalled();
   });

@@ -45,6 +45,7 @@ import {
   findNearestBlock,
   LOT_PREFILL_MAX_DISTANCE_M,
 } from "@/lib/address-blocks/lookup";
+import { findNearestResidence } from "@/lib/address-blocks/residence-lookup";
 
 function mapError(err: ReverseGeocodeError): ApiError {
   if (err.code === "NOT_CONFIGURED") {
@@ -146,9 +147,22 @@ export async function POST(
       throw mapError(new ReverseGeocodeError("NOT_CONFIGURED"));
     }
 
-    // 第2弾: まず取込済みの街区データ(国土交通省)で「番」まで引く(ローカル完結・
-    // 外部送信ゼロ)。データ未取込の地域・最近傍150m超のみ、従来どおり国土地理院
-    // (町丁目まで・座標のみ送信)へフォールバックする。
+    // 三段構え(すべてローカル→最後だけ外部):
+    //   第3弾: 住居点(号まで・50m以内) → 第2弾: 街区点(番まで・100m以内) →
+    //   国土地理院(町丁目まで・座標のみ送信)。
+    // 号データは家1軒ごとに点があり(実測2〜14m)、番だけの街区代表点より精度も高い。
+    const residence = await findNearestResidence(lat, lng);
+    if (residence) {
+      return apiResponse({
+        result: {
+          found: true,
+          address: residence.address,
+          town: residence.town,
+          precision: "rsdt",
+        },
+      });
+    }
+
     const block = await findNearestBlock(lat, lng);
     if (block) {
       return apiResponse({

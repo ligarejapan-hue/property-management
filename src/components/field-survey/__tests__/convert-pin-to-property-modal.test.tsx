@@ -144,10 +144,14 @@ describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => 
     );
   });
 
-  it("出典と追記案内を精度で出し分ける(block=国土交通省・番まで / town=国土地理院・町丁目まで)", () => {
+  it("出典と案内を精度で出し分ける(rsdt=デジタル庁・号まで / block=国土交通省・番まで / town=国土地理院)", () => {
+    expect(source).toMatch(/precision === "rsdt"/);
     expect(source).toMatch(/precision === "block"/);
+    expect(source).toContain("出典: デジタル庁 アドレス・ベース・レジストリ");
     expect(source).toContain("出典: 国土交通省 位置参照情報");
     expect(source).toContain("出典: 国土地理院");
+    // 号精度でも自動判定の限界(隣の建物)を明示して確認を促す。
+    expect(source).toContain("隣の建物の号が入ることがあります");
     expect(source).toContain("追記");
   });
 

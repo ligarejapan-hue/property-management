@@ -1158,3 +1158,24 @@ model AddressBlockPoint {
   @@index([prefecture, city])
   @@map("address_block_points")
 }
+
+// 座標→住所の「号」精細化(住所自動入力 第3弾)。デジタル庁アドレス・ベース・レジストリの
+// 住居表示-住居マスター位置参照拡張(号ごとの代表点・全47都道府県整備済み)を
+// scripts/import-address-residences.ts で取込み、最近傍から号まで組み立てる。
+// runtime の外部送信ゼロ。chome は算用数字(丁目なしは空文字)・rsdt=号(枝番 "4-2" 形)。
+model AddressResidencePoint {
+  id            Int     @id @default(autoincrement())
+  prefecture    String
+  city          String
+  town          String
+  chome         String
+  block         String
+  rsdt          String
+  lat           Decimal @db.Decimal(10, 7)
+  lng           Decimal @db.Decimal(10, 7)
+  sourceVersion String  @map("source_version")
+
+  @@index([lat, lng])
+  @@index([prefecture, city])
+  @@map("address_residence_points")
+}
