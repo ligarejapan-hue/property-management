@@ -51,6 +51,8 @@ export interface MeCapabilities {
   registryAutoFetch: boolean;
   /** 所在検索（番号無し物件を所在で検索して取得）が使えるか（provider が所在検索対応のときのみ）。 */
   registryLocationSearch: boolean;
+  /** 段階②(2026-08-01): 候補からの有料取得が有効か(専用オプトイン込み)。 */
+  registryPurchase: boolean;
   /** scanned 謄本の OCR 下書き生成が使えるか（OCR 設定済み ∧ admin を server 側で束ねた値）。 */
   registryOcrDraft: boolean;
   /** 売却促進DM の文面生成 provider が設定済みか（未設定なら作成導線を出さない）。 */
@@ -151,6 +153,7 @@ export default function ScreenProtectionProvider({
           corporateLookup: json.capabilities?.corporateLookup === true,
           registryAutoFetch: json.capabilities?.registryAutoFetch === true,
           registryLocationSearch: json.capabilities?.registryLocationSearch === true,
+          registryPurchase: json.capabilities?.registryPurchase === true,
           registryOcrDraft: json.capabilities?.registryOcrDraft === true,
           saleDmLetter: json.capabilities?.saleDmLetter === true,
         });

@@ -17,6 +17,21 @@ export interface RegistryFetchRequest {
   /** 不動産番号（最も一意。あれば最優先で使用）。 */
   realEstateNumber?: string | null;
   /**
+   * 所在検索の候補（地番/家屋番号）で取得する場合の入力（段階②・2026-07-31）。
+   * 不動産番号を持たない物件は、所在＋地番で候補を選び**有料の請求→PDF取得**まで進む。
+   * realEstateNumber と排他（両方あれば番号を優先）。値は秘匿情報＝log/監査/応答に出さない。
+   */
+  location?: {
+    /** 所在（地番区域。例「千代田区丸の内一丁目」）。 */
+    address: string;
+    /** 地番（土地）。buildingNumber と排他で、どちらか一方は必須。 */
+    lotNumber?: string | null;
+    /** 家屋番号（建物）。 */
+    buildingNumber?: string | null;
+    /** 謄本種別。現状は "owner"（所有者事項）のみ。 */
+    certificateType: "owner";
+  } | null;
+  /**
    * トレース用の非PII参照ラベル（例: ImportJobId / 物件UUID）。
    * 所有者名・住所等の PII を入れてはならない。
    */
@@ -60,7 +75,11 @@ export type RegistryFetchErrorCode =
   // 祝日夜(平日曜日だが18時閉局)はコード上判別できず、設定ミス/サイト側停止の可能性も
   // あるため「時間外」と断定せず可能性として案内する(@codex P2: 営業時間内の404を
   // 時間外と誤案内しない)。
-  | "service_unavailable";
+  | "service_unavailable"
+  // ⚠段階②(有料取得): **請求(課金)ボタンを押した後**に失敗した。課金は発生している
+  // 可能性がある。**自動でも手動でも安易に再実行してはいけない**(再実行=二重課金)。
+  // 利用者にはマイページでの状態確認を案内する。
+  | "charged_but_failed";
 
 /**
  * 所在検索の入力（PR-2b）。所在/地番/家屋番号で謄本候補を検索する。

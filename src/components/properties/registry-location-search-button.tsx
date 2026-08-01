@@ -16,6 +16,13 @@ interface RegistryLocationSearchButtonProps {
   canAutoFetch: boolean;
   /** /api/me/permissions の capabilities.registryAutoFetch。本番 provider が設定済みか。 */
   providerConfigured: boolean;
+  /**
+   * capabilities.registryPurchase(段階②・2026-08-01)。**有料取得の専用オプトイン**
+   * (REGISTRY_FETCH_PURCHASE_ENABLED)が立っているか。false のとき検索(無料)は使えるが
+   * 取得ボタンは準備中表示にする(@codex #345 P1: 無料検索の校正だけで課金操作を露出させない。
+   * server 側も 501 で enforce)。
+   */
+  purchaseEnabled: boolean;
   /** 取得成功時に親へ通知（物件を再取得し registryStatus 等を反映する）。 */
   onComplete: () => void;
 }
@@ -41,6 +48,7 @@ export default function RegistryLocationSearchButton({
   propertyId,
   canAutoFetch,
   providerConfigured,
+  purchaseEnabled,
   onComplete,
 }: RegistryLocationSearchButtonProps) {
   const [state, setState] = useState<State>("idle");
@@ -97,8 +105,8 @@ export default function RegistryLocationSearchButton({
     }
   };
 
-  // 段階①では取得ボタンを「準備中」で disabled にしており、この経路は起動されない。
-  // 取得(有料の請求→PDF)は段階②で実サイトの地番ベース請求フローとして実装し、ここを差し替える。
+  // 段階②(2026-07-31): 候補(地番)の有料取得。server 側が候補をキャッシュから再解決し、
+  // 二重課金台帳→直列化→請求→PDF→物件添付まで行う。confirmed:true は api-client が付ける。
   const runObtain = async () => {
     if (!selected) return;
     setState("obtaining");
@@ -211,9 +219,12 @@ export default function RegistryLocationSearchButton({
               <p className="font-medium text-gray-700 dark:text-gray-200">
                 候補（{candidates.length}件）が見つかりました
               </p>
-              {/* 段階①: 候補一覧の表示まで。実取得(有料の請求→PDF)は段階②で対応=ボタンは準備中。 */}
+              {/* 段階②(2026-07-31): 候補を選んで有料の請求→PDF取得まで実行できる。
+                  ⚠有料取得は専用オプトイン(purchaseEnabled)が立つまで準備中表示(@codex #345 P1)。 */}
               <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                候補からの謄本取得は現在準備中です（近日対応）。
+                {purchaseEnabled
+                  ? "取得は有料です（謄本1通ごとに登記情報提供サービスの利用料がかかります）。"
+                  : "候補からの謄本取得（有料）は現在準備中です。"}
               </p>
               <ul className="flex flex-col gap-1">
                 {candidates.map((c) => (
@@ -231,11 +242,22 @@ export default function RegistryLocationSearchButton({
                     </span>
                     <button
                       type="button"
-                      disabled
-                      title="謄本取得は準備中です"
-                      className="shrink-0 rounded bg-gray-300 dark:bg-gray-700 px-2 py-1 font-medium text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                      disabled={!purchaseEnabled}
+                      title={
+                        purchaseEnabled ? undefined : "有料取得は準備中です"
+                      }
+                      onClick={() => {
+                        if (!purchaseEnabled) return;
+                        setSelected(c);
+                        setState("confirmObtain");
+                      }}
+                      className={
+                        purchaseEnabled
+                          ? "shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
+                          : "shrink-0 rounded bg-gray-300 dark:bg-gray-700 px-2 py-1 font-medium text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                      }
                     >
-                      取得（準備中）
+                      取得
                     </button>
                   </li>
                 ))}
@@ -252,8 +274,16 @@ export default function RegistryLocationSearchButton({
         <div className="flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-2 text-xs">
           <p className="font-medium text-indigo-800 dark:text-indigo-300">この候補で謄本を取得しますか？</p>
           <p className="truncate text-indigo-700 dark:text-indigo-300">{selected.address ?? "（所在不明）"}</p>
+          <p className="truncate text-indigo-700 dark:text-indigo-300">
+            {[
+              selected.lotNumber && `地番 ${selected.lotNumber}`,
+              selected.buildingNumber && `家屋番号 ${selected.buildingNumber}`,
+            ]
+              .filter(Boolean)
+              .join(" / ")}
+          </p>
           <p className="text-indigo-700 dark:text-indigo-300">
-            登記情報の取得は有料処理になり得ます。実行には明示的な確認が必要です。
+            取得すると謄本1通分の利用料が発生します（所有者事項）。取得後は物件に自動で添付されます。
           </p>
           <div className="mt-1 flex gap-1">
             <button type="button" onClick={runObtain} className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700">

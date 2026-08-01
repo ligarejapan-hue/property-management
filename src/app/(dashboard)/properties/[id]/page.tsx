@@ -364,6 +364,7 @@ export default function PropertyDetailPage({
     canAutoFetchRegistry,
     registryAutoFetchConfigured,
     registryLocationSearchConfigured,
+    registryPurchaseConfigured,
     ownerEditableFields,
   } = useMemo(() => {
     const effectivePermissions =
@@ -381,6 +382,11 @@ export default function PropertyDetailPage({
     const registryLocationSearchConfigured = collapseCapabilities
       ? false
       : meCapabilities?.registryLocationSearch === true;
+    // 段階②(2026-08-01): 有料取得はさらに厳しく、専用オプトイン
+    // (REGISTRY_FETCH_PURCHASE_ENABLED)込みの capability(@codex #345 P1)。
+    const registryPurchaseConfigured = collapseCapabilities
+      ? false
+      : meCapabilities?.registryPurchase === true;
     const canAutoFetchRegistry = effectivePermissions.some(
       (p) => p.resource === "registry" && p.action === "auto_fetch" && p.granted,
     );
@@ -430,6 +436,7 @@ export default function PropertyDetailPage({
       canAutoFetchRegistry,
       registryAutoFetchConfigured,
       registryLocationSearchConfigured,
+      registryPurchaseConfigured,
       ownerEditableFields,
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions, meCapabilities]);
@@ -555,6 +562,7 @@ export default function PropertyDetailPage({
         propertyId={property.id}
         canAutoFetch={canAutoFetchRegistry}
         providerConfigured={registryLocationSearchConfigured}
+        purchaseEnabled={registryPurchaseConfigured}
         onComplete={fetchProperty}
       />
 

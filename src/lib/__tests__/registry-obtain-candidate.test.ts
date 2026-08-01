@@ -84,7 +84,11 @@ describe("resolveRegistryCandidate（cond③: 認可済み検索の mapping か�
   it("検索直後（指紋一致）は不動産番号＋指紋を解決して返す", async () => {
     seed();
     const r = await resolve();
-    expect(r.realEstateNumber).toBe(EXPECTED_REN);
+    // 段階②(2026-07-31)から解決結果は判別付き（number=番号取得 / location=有料の地番取得）。
+    expect(r.candidate).toEqual({
+      kind: "number",
+      realEstateNumber: EXPECTED_REN,
+    });
     expect(typeof r.fingerprint).toBe("string"); // 取得側の TOCTOU 再検証に渡す指紋
   });
 

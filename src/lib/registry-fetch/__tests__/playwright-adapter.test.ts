@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
 /**
  * PR-2: resolveDefaultRegistryBrowserFactory の Playwright adapter（外部接続なし）。
  *
@@ -37,6 +39,7 @@ import {
   resolveLoginStepDeadline,
   remainingLoginStepMs,
   normalizeChibanForDialog,
+  registryRowMatchesChiban,
   splitAddressForLocationSearch,
   summarizeRegistryLoginError,
 } from "../auto-fetch";
@@ -1545,5 +1548,330 @@ describe("ログイン送信後の待機は全体予算より必ず先に切れ�
       expect(c!.opts!.timeout!).toBeLessThanOrEqual(28_000);
     }
     delete process.env.REGISTRY_FETCH_TIMEOUT_MS;
+  });
+});
+
+describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandidate・fake page）", () => {
+  // ⚠ここで守るのは「お金」。課金ボタン(#myPageSeikyu)が押される条件と、
+  // 押した後の失敗分類(charged_but_failed)を固定する。
+  //
+  // fake の evaluate は引数の内容で分岐する:
+  //  - "#..." 等のセレクタ文字列 = domClick(押した記録を残す)
+  //  - JSON(tableSel=ダイアログ) = 対象地番の探索結果
+  //  - JSON(ownerSel) = 請求事項チェックの結果
+  //  - JSON(tableSel=マイページ) = 呼び出し順に [行選択, 状態確認…, 再選択] を返す
+  const SEIKYU = "#myPageSeikyu";
+  const DIALOG_OK = "#cbnDlgBtnOk";
+  const CONFIRM = 'button[onclick*="fuBtnForward"]';
+
+  function wireStage2(
+    f: ReturnType<typeof makeFakeChromium>,
+    opts: {
+      dialogFind?: string;
+      cert?: { owner: string; extraResults: string[] };
+      myPageSeq?: unknown[];
+      /** 確定前に存在した行ID(作成同一性の判定材料)。 */
+      prevRowIds?: string[];
+      /** 確定前の一覧が読めない状態を模す(@codex R3 P1: 基準なしでは課金しない)。 */
+      baselineUnreadable?: boolean;
+      /** 絞り込みが確認できない状態を模す(@codex R6 P1: 未検証の絞り込みで課金しない)。 */
+      filterUnverified?: boolean;
+    } = {},
+  ) {
+    const clicked: string[] = [];
+    const myPageSeq = [...(opts.myPageSeq ?? [])];
+    let lastMyPage: unknown = myPageSeq[myPageSeq.length - 1];
+    f.page.evaluate.mockImplementation(async (_fn, arg: string) => {
+      if (typeof arg !== "string") return undefined;
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(arg) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+      if (!parsed || typeof parsed !== "object") {
+        clicked.push(arg); // domClick / hasNext 等のセレクタ引数
+        return undefined;
+      }
+      if (typeof parsed.ownerSel === "string") {
+        return JSON.stringify(
+          opts.cert ?? {
+            owner: "ok",
+            extraResults: ["ok", "ok", "ok", "ok", "ok", "ok"],
+          },
+        );
+      }
+      if (parsed.tableSel === "#cbnDlgChibanCheckTbl") {
+        return opts.dialogFind ?? "checked";
+      }
+      // 絞り込みの検証(@codex R6 P1)。既定は「効いている」。myPageSeq は消費しない。
+      if (
+        typeof parsed.filterSel === "string" &&
+        typeof parsed.tableSel === "string"
+      ) {
+        return JSON.stringify(
+          opts.filterUnverified
+            ? { ok: false, hard: true }
+            : { ok: true, hard: false },
+        );
+      }
+      // 絞り込みの適用(戻り値は使われない)。
+      if (typeof parsed.filterSel === "string") {
+        return undefined;
+      }
+      // 確定前の既存行ID読み取り(@codex R2 P1: 作成同一性の土台)。myPageSeq は消費しない。
+      if (parsed.probe === "row-ids") {
+        return JSON.stringify({
+          present: opts.baselineUnreadable ? false : true,
+          ids: opts.prevRowIds ?? [],
+        });
+      }
+      if (parsed.tableSel === "#myPageTable") {
+        const next = myPageSeq.length > 0 ? myPageSeq.shift() : lastMyPage;
+        lastMyPage = next;
+        return typeof next === "string" ? next : JSON.stringify(next);
+      }
+      return undefined;
+    });
+    return { clicked };
+  }
+
+  const INPUT = {
+    address: "テスト市テスト町一丁目",
+    lotNumber: "1-1",
+    buildingNumber: null,
+    certificateType: "owner" as const,
+  };
+
+  async function makeStage2Page(f: ReturnType<typeof makeFakeChromium>) {
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    return (await factory!()) as unknown as {
+      fetchByLocationCandidate: (input: typeof INPUT) => Promise<Buffer>;
+    };
+  }
+
+  it("S1: 幸せ経路 — 確定→行選択→請求→請求済→表示・保存で PDF を返す(請求は1回だけ)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      myPageSeq: [
+        { result: "checked", checkedCount: 1, rowId: "ROW-9" }, // 行選択(行ID付き)
+        { result: "ready" }, // 請求済+PDF準備完了(見つけたその場で選択済み)
+      ],
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked).toContain(DIALOG_OK);
+    expect(clicked).toContain(CONFIRM);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
+  });
+
+  it("S2: ⚠対象の地番が見つからなければ not_found で終了し、確定も請求も押さない", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { dialogFind: "not-found" });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(clicked).not.toContain(DIALOG_OK);
+    expect(clicked).not.toContain(CONFIRM);
+    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).toContain("#cbnDlgBtnCancel"); // ダイアログは閉じる
+  });
+
+  it("S3: ⚠請求事項を所有者事項だけに揃えられなければ、請求を押さずに中止（余計なものを買わない）", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      cert: { owner: "ok", extraResults: ["failed", "ok", "ok", "ok", "ok", "ok"] },
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM);
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("S4: ⚠マイページで対象行を1件に確定できなければ請求しない（別の行を買わない）", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      myPageSeq: [{ result: "ambiguous", count: 2 }],
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("S5: ⚠請求後に行が準備完了に到達しなければ charged_but_failed（provider_error にしない）", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      myPageSeq: [
+        { result: "checked", checkedCount: 1, rowId: "ROW-9" },
+        { result: "not-found" }, // 課金後、行が見つからないまま(以降も繰り返し)
+      ],
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "charged_but_failed",
+    });
+    expect(clicked).toContain(SEIKYU); // 課金は押している=だから分類が変わる
+  });
+
+  it("S8: ⚠絞り込みが効いたことを確認できなければ、確定の前に中止する（@codex R6 P1）", async () => {
+    // 「掛けたつもり」の絞り込みを信用すると、隠れていた未請求残骸が確定後に
+    // 「新規」へ化ける。検証は結果そのもの(選択中ラベル+全行の状態列)で行う。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { filterUnverified: true });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM); // 確定を押していない=カート行なし
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("S7: ⚠確定前の一覧(基準)が読めなければ、確定の前に中止する（カート行も作らない）", async () => {
+    // 基準なしで進むと「ちょうど1件」規則に落ち、既存の未請求残骸へ課金し得る
+    // (@codex #345 R3 P1)。確定前に止めれば外部は完全に無傷。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { baselineUnreadable: true });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM); // 確定を押していない=カート行なし
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
+    // provider が課金前タイムアウトで reject した後も、この関数は裏で走り続ける。
+    // 印を見ずに押すと、呼び出し側は timeout(台帳なし・ロック解除済み)として処理を
+    // 終えているのに課金だけが起きる=記録なき課金。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      myPageSeq: [{ result: "checked", checkedCount: 1, rowId: "ROW-9" }],
+    });
+    const page = await makeStage2Page(f);
+    await expect(
+      (page as unknown as {
+        fetchByLocationCandidate: (input: unknown) => Promise<Buffer>;
+      }).fetchByLocationCandidate({
+        ...INPUT,
+        chargeState: { charged: false, aborted: true },
+      }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).not.toContain(SEIKYU); // 請求は押していない
+  });
+
+  it("S6: 買う対象(地番/家屋番号)が空なら何もせず provider_error（ページに触れない）", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f);
+    const page = await makeStage2Page(f);
+    await expect(
+      page.fetchByLocationCandidate({ ...INPUT, lotNumber: "  " }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).toHaveLength(0);
+    expect(f.page.fill).not.toHaveBeenCalled();
+  });
+});
+
+describe("段階②: マイページ行の地番一致（部分一致で別の登記を買わない）", () => {
+  // ⚠「1-1」が「1-10」「11-1」の所在にも当たると**別の登記に課金**する(@codex #345 P1)。
+  // ブラウザ内(evaluate)の判定はこの関数と同一規則を複製している(対で維持)。
+  it.each([
+    ["千代田区丸の内一丁目１－１", "1-1", true], // 全角の実表記
+    ["千代田区丸の内一丁目1-1", "1-1", true],
+    ["千代田区丸の内一丁目1-10", "1-1", false], // 末尾不一致
+    ["千代田区丸の内一丁目11-1", "1-1", false], // 境界が数字
+    ["千代田区丸の内一丁目21-1", "1-1", false],
+    ["テスト町1番1", "1-1", true], // 慣用表記も正規化して一致
+    ["", "1-1", false],
+    ["千代田区丸の内一丁目1-1", "", false], // 空の対象は常に不一致(全行一致を防ぐ)
+  ])("%s × %s → %s", (cell, target, want) => {
+    expect(registryRowMatchesChiban(cell, target)).toBe(want);
+  });
+});
+
+describe("段階②: 課金対象は「確定で作られた行」に紐付ける（@codex #345 R2 P1・ソース固定）", () => {
+  // 行の同定ロジックは evaluate 内(ブラウザで実行)にあり fake page では実行されないため、
+  // ここでは**配線の存在**をソースで固定する(実挙動の最終確認は実課金テスト)。
+  const src = readFileSync(
+    joinPath(process.cwd(), "src", "lib", "registry-fetch", "auto-fetch.ts"),
+    "utf8",
+  );
+
+  it("確定の前に既存行IDを控える(作成同一性の材料)", () => {
+    expect(src).toContain('probe: "row-ids"');
+    // 読み取りは確定クリックより前
+    expect(src.indexOf('probe: "row-ids"')).toBeLessThan(
+      src.indexOf("REGISTRY_SELECTORS.requestConfirmButton)"),
+    );
+  });
+
+  it("行選択は「確定前から存在した行」を除外する", () => {
+    expect(src).toContain("prevIds.includes(rowId)");
+  });
+
+  it("課金後の探索・選択は行IDに紐付ける(地番の再一致より強い同定)", () => {
+    // R5 で状態待ちと再選択を1つの探索へ統合(見つけたその場で選択)。紐付けは1箇所。
+    expect(src).toContain("rowId: chargedRowId,");
+    expect(src).toContain("rowId ? trId !== rowId :");
+  });
+
+  it("⚠課金後の各走査は先頭ページから始める(@codex R6 P1: 末尾に居座って見逃さない)", () => {
+    expect(src).toContain("await resetMyPageToFirst();");
+    // 走査ループ(pageNo)より前に呼ぶ
+    expect(src.indexOf("await resetMyPageToFirst();")).toBeLessThan(
+      src.indexOf("for (let pageNo = 0; pageNo < 10; pageNo++)"),
+    );
+  });
+
+  it("⚠絞り込みは結果で検証する(@codex R6 P1: ラベル一致+全行の状態列が未請求)", () => {
+    expect(src).toContain("verifyPendingView");
+    expect(src).toContain("selectedOptions");
+    // 全行の状態列チェック(効いていない絞り込みを見抜く)
+    expect(src).toContain("if (status !== label)");
+  });
+
+  it("⚠課金後のダウンロード待ちは明示予算を渡す(@codex R9 P1: 既定30秒に先取りされない)", () => {
+    // page.setDefaultTimeout は通常予算のまま。timeout を渡さないと provider の
+    // 延長予算(10分)より先にブラウザ側の既定が打ち切り、支払済みが台帳固定される。
+    expect(src).toContain(
+      'page.waitForEvent("download", { timeout: PAID_DOWNLOAD_WAIT_MS })',
+    );
+  });
+
+  it("⚠単一ページ判定は前後両方のページ送りが無効であること(@codex R7 P1)", () => {
+    // 次ページだけ見ると最終ページ(次=無効・前=有効)を単一ページと誤認し、
+    // 先頭側の行が基準から漏れる。基準・選択の前には先頭復帰も行う。
+    expect(src).toContain("myPageIsSinglePage");
+    expect(src).toContain("myPagePrevButton))");
+    // 基準(row-ids 読み取り)より前に先頭復帰+単一ページ判定がある
+    const baselineIdx = src.indexOf('probe: "row-ids"');
+    const resetIdx = src.indexOf("await resetMyPageToFirst();");
+    const singleIdx = src.indexOf("await myPageIsSinglePage()");
+    expect(resetIdx).toBeGreaterThan(-1);
+    expect(singleIdx).toBeGreaterThan(-1);
+    expect(resetIdx).toBeLessThan(baselineIdx);
+    expect(singleIdx).toBeLessThan(baselineIdx);
+  });
+
+  it("⚠基準は全行のIDが読めた時だけ成立する(@codex R4 P1: 不完全な基準で課金しない)", () => {
+    // ID欠けの行を黙って落とすと present:true のまま不完全な基準になり、
+    // 確定後にその行がIDを得て「新規」に見え、残骸へ課金し得る。
+    const baseline = src.slice(
+      src.indexOf('probe: "row-ids"') - 2600,
+      src.indexOf('probe: "row-ids"'),
+    );
+    // all-or-nothing: ID が読めない行が1つでもあれば基準不成立
+    expect(baseline).toContain(
+      'if (!id) return JSON.stringify({ present: false, ids: [] });',
+    );
+    // 読み込み中の表は基準にしない
+    expect(baseline).toContain("データ取得中");
   });
 });

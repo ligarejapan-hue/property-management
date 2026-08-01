@@ -12,8 +12,22 @@
  * cond②/cond③: 不動産番号は server 内部の取得キーとしてのみ保持し、log/応答には出さない。
  * キーは (userId, propertyId, candidateRef) で、他ユーザー/他物件の候補は解決できない。
  */
+/**
+ * 覚える候補は2種類（段階②・2026-07-31 拡張）:
+ *  - number:   不動産番号を持つ候補（従来の番号取得キー）。
+ *  - location: 地番/家屋番号の候補（所在検索が返す実サイトの形）。有料の請求→PDF取得
+ *              (段階②)の取得キーになる。値は秘匿情報＝log/応答に出さない。
+ */
+export type ResolvedCandidate =
+  | { kind: "number"; realEstateNumber: string }
+  | {
+      kind: "location";
+      lotNumber: string | null;
+      buildingNumber: string | null;
+    };
+
 interface CachedCandidate {
-  realEstateNumber: string;
+  resolved: ResolvedCandidate;
   /** 検索時点の物件スナップショット指紋。取得時に一致しなければ無効（物件が編集された）。 */
   fingerprint: string;
   expiresAt: number;
@@ -55,14 +69,23 @@ export function fingerprintProperty(p: PropertyFingerprintSource): string {
 }
 
 /**
- * 認可済み検索が返した候補を覚える（candidateRef → 不動産番号）。不動産番号を持たない候補は
- * 取得キーにできないため覚えない。fingerprint は検索時点の物件指紋。now はテスト注入用。
+ * 認可済み検索が返した候補を覚える（candidateRef → 取得キー）。fingerprint は検索時点の
+ * 物件指紋。now はテスト注入用。
+ *
+ * 段階②(2026-07-31): 不動産番号を持たない候補（実サイトの所在検索が返す地番候補）も、
+ * **地番/家屋番号を取得キーとして**覚える（有料の請求→PDF取得に使う）。
+ * 番号も地番も無い候補は取得キーにできないため従来どおり覚えない。
  */
 export function rememberSearchCandidates(
   userId: string,
   propertyId: string,
   fingerprint: string,
-  candidates: ReadonlyArray<{ candidateRef?: string | null; realEstateNumber?: string | null }>,
+  candidates: ReadonlyArray<{
+    candidateRef?: string | null;
+    realEstateNumber?: string | null;
+    lotNumber?: string | null;
+    buildingNumber?: string | null;
+  }>,
   now: number = Date.now(),
 ): void {
   // @codex P2 ×2: 追加前に掃除する。(a) 期限切れエントリを全体から削除して Map の際限ない増大と
@@ -76,16 +99,34 @@ export function rememberSearchCandidates(
   }
   for (const c of candidates) {
     const ref = c.candidateRef?.trim();
+    if (!ref) continue;
     const ren = c.realEstateNumber?.trim();
-    if (ref && ren) {
-      store.set(key(userId, propertyId, ref), { realEstateNumber: ren, fingerprint, expiresAt: now + TTL_MS });
+    const lot = c.lotNumber?.trim();
+    const bld = c.buildingNumber?.trim();
+    let resolved: ResolvedCandidate | null = null;
+    if (ren) {
+      resolved = { kind: "number", realEstateNumber: ren };
+    } else if (lot || bld) {
+      resolved = {
+        kind: "location",
+        lotNumber: lot || null,
+        buildingNumber: bld || null,
+      };
+    }
+    if (resolved) {
+      store.set(key(userId, propertyId, ref), {
+        resolved,
+        fingerprint,
+        expiresAt: now + TTL_MS,
+      });
     }
   }
 }
 
 /**
- * 取得時に candidateRef から不動産番号を解決する。未検索/改ざん/TTL 超過は null（route 側で 409）。
- * client の candidateRef は「一致するか」だけに使い、番号は server が覚えた値のみ返す（cond③）。
+ * 取得時に candidateRef から取得キー（不動産番号 or 地番/家屋番号）を解決する。
+ * 未検索/改ざん/TTL 超過は null（route 側で 409）。
+ * client の candidateRef は「一致するか」だけに使い、キーは server が覚えた値のみ返す（cond③）。
  */
 export function resolveCachedCandidate(
   userId: string,
@@ -93,7 +134,7 @@ export function resolveCachedCandidate(
   candidateRef: string,
   fingerprint: string,
   now: number = Date.now(),
-): string | null {
+): ResolvedCandidate | null {
   const k = key(userId, propertyId, candidateRef);
   const entry = store.get(k);
   if (!entry) return null;
@@ -106,7 +147,7 @@ export function resolveCachedCandidate(
     store.delete(k);
     return null;
   }
-  return entry.realEstateNumber;
+  return entry.resolved;
 }
 
 /** テスト用: プロセス内キャッシュを空にする。 */

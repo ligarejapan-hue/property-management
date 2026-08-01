@@ -8,6 +8,7 @@ import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
 import {
   isRegistryAutoFetchProviderConfigured,
   isRegistryLocationSearchConfigured,
+  isRegistryPurchaseConfigured,
 } from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
@@ -37,6 +38,9 @@ export async function GET() {
       // 所在検索（番号無し物件を所在で検索して取得）が使えるか。自動取得より厳しく、provider が
       // supportsLocationSearch を宣言している場合のみ true（未対応で「所在で検索」ボタンを出さない）。
       registryLocationSearch: isRegistryLocationSearchConfigured({ credentials: registryCreds }),
+      // 段階②(2026-08-01): 候補からの**有料取得**が使えるか。所在検索よりさらに厳しく、
+      // 専用オプトイン(REGISTRY_FETCH_PURCHASE_ENABLED)を要求する(@codex #345 P1)。
+      registryPurchase: isRegistryPurchaseConfigured({ credentials: registryCreds }),
       // scanned 謄本の OCR 下書き生成が「この利用者に」使えるか。
       // OCR サービス設定済み（localhost allowlist 通過）かつ admin のときだけ true。
       registryOcrDraft:

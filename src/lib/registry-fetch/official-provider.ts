@@ -35,6 +35,7 @@ import type {
   RegistryLiveReporter,
 } from "./types";
 import { RegistryFetchError } from "./errors";
+import { runExclusivePurchase } from "./purchase-safety";
 import type { RegistryFetchThrottle } from "./throttle";
 
 /** login に渡す資格情報＋遷移先（page 側に保持させない＝呼び出し都度渡す契約）。 */
@@ -74,6 +75,30 @@ export interface RegistryBrowserPage {
     /** 実況パネル通知先 (任意・best-effort)。adapter がステップ+スクショを報告。 */
     live?: RegistryLiveReporter;
   }): Promise<RegistryCandidate[]>;
+  /**
+   * 段階②(2026-07-31): 所在検索で選ばれた候補(地番/家屋番号)の謄本を
+   * **有料の請求→PDFダウンロード**まで通して取得する（任意実装）。
+   * ⚠課金を伴う。**請求ボタンを押した後**の失敗は RegistryFetchError("charged_but_failed")
+   * で返すこと（呼び出し側が再試行禁止・台帳記録に使う）。
+   */
+  fetchByLocationCandidate?(input: {
+    address: string;
+    lotNumber?: string | null;
+    buildingNumber?: string | null;
+    certificateType: "owner";
+    /**
+     * 課金境界の共有フラグ(@codex #345 P1)。adapter は**請求ボタンを押す直前**に
+     * `charged = true` を立てる。provider は外側 timeout 等で adapter の catch を
+     * 経由せず失敗した場合でも、これを見て charged_but_failed に分類できる。
+     *
+     * ⚠aborted(@codex R10 P1): provider が**課金前タイムアウト**で reject した印。
+     * reject しても実行中の op はキャンセルされない(JS の Promise は中断不能)ため、
+     * 裏で走り続けた adapter が後から請求してしまうと**記録なき課金**になる。
+     * adapter は**請求ボタンを押す直前に必ずこの印を確認**し、立っていれば課金せず
+     * 中止する(charged への代入と同一同期区間で確認する=競合の隙間なし)。
+     */
+    chargeState?: { charged: boolean; aborted?: boolean };
+  }): Promise<Buffer>;
   /** 検索ヒット後、謄本PDFを取得して Buffer で返す。 */
   downloadRegistryPdf(): Promise<Buffer>;
   /** ページ/コンテキスト/ブラウザを閉じて中間成果物を破棄する（best-effort）。 */
@@ -112,7 +137,19 @@ export interface OfficialRegistryProviderOptions {
   requestIdFactory?: () => string;
   /** 所在検索の実装/セレクタが校正済みか(専用フラグ)。true のときだけ supportsLocationSearch。 */
   supportsLocationSearch?: boolean;
+  /**
+   * 課金後の延長予算(ms)。既定 PAID_FLOW_EXTRA_TIMEOUT_MS。テスト注入用。
+   * 課金後の有界ループ(最悪≈500秒)を打ち切らないための値で、短くしすぎると
+   * 支払済みPDFを取り切れず charged_but_failed に固定される。
+   */
+  paidFlowExtraTimeoutMs?: number;
 }
+
+/**
+ * 課金後の延長予算の既定値(10分)。adapter の課金後ループの最悪値から導出:
+ * attempt 20回 × (sleep3s + 先頭復帰≤8s + ページ探索≤12s) ≈ 460s + DL待ち ≈ 500s。
+ */
+export const PAID_FLOW_EXTRA_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** 未分類の例外を provider_error に潰す（生メッセージ＝secret/PII を例外に載せない）。 */
 function classifyRegistryFetchError(err: unknown): RegistryFetchError {
@@ -142,6 +179,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
   private readonly requestIdFactory: () => string;
   /** 所在検索が使えるか(専用校正フラグ由来)。isRegistryLocationSearchConfigured が参照。 */
   readonly supportsLocationSearch: boolean;
+  /** 課金後の延長予算(ms)。withPaidTimeout が参照。 */
+  private readonly paidFlowExtraTimeoutMs: number;
 
   constructor(options: OfficialRegistryProviderOptions) {
     this.loginId = options.loginId;
@@ -155,14 +194,20 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       options.requestIdFactory ??
       (() => `official-${Math.random().toString(36).slice(2, 10)}`);
     this.supportsLocationSearch = options.supportsLocationSearch === true;
+    this.paidFlowExtraTimeoutMs =
+      options.paidFlowExtraTimeoutMs ?? PAID_FLOW_EXTRA_TIMEOUT_MS;
   }
 
   async fetchRegistryPdf(
     request: RegistryFetchRequest,
   ): Promise<RegistryFetchResult> {
-    // 1. PR-2: 不動産番号がある物件に限定。空なら検索キーが無く取得不能（非PII前提を維持）。
-    //    所在系（地番/家屋番号/所在）での検索は PR-2b（契約拡張・別 PII 評価）。
+    // 段階②(2026-07-31): 所在検索の候補(地番/家屋番号)での有料取得。番号があれば番号を優先。
+    const location = request.location ?? null;
     const realEstateNumber = request.realEstateNumber?.trim();
+    if (!realEstateNumber && location) {
+      return this.fetchByLocation(location);
+    }
+    // PR-2: 不動産番号がある物件に限定。空なら検索キーが無く取得不能（非PII前提を維持）。
     if (!realEstateNumber) {
       throw new RegistryFetchError("not_found");
     }
@@ -190,45 +235,139 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     //    provider_error へ正規化して生メッセージの伝播を防ぐ（RegistryFetchError は分類コード
     //    を保ったまま伝播）。timeout で打ち切った後に factory が遅れて page を返した場合は、
     //    宙に浮いたブラウザ/コンテキストをリークさせないよう、その page を best-effort で閉じる。
-    let page: RegistryBrowserPage;
-    try {
-      page = await this.withStartupTimeout(() => this.browserFactory!());
-    } catch (err) {
-      throw classifyRegistryFetchError(err);
-    }
-
-    try {
-      const pdfBuffer = await this.withTimeout(async () => {
-        await page.login({
-          loginId: this.loginId,
-          password: this.password,
-          baseUrl: this.baseUrl,
-        });
-        const outcome = await page.searchByRealEstateNumber(realEstateNumber);
-        if (!outcome.found) {
-          throw new RegistryFetchError("not_found");
-        }
-        return page.downloadRegistryPdf();
-      });
-
-      return {
-        pdfBuffer,
-        // 非PII の generic filename（不動産番号・所有者名を埋め込まない）。
-        fileName: `registry-auto-${requestId}.pdf`,
-        source: this.name,
-        fetchedAt: this.now(),
-        providerRequestId: requestId,
-      };
-    } catch (err) {
-      throw classifyRegistryFetchError(err);
-    } finally {
-      // 例外経路でも必ず close（Cookie/セッション/DL ファイル等の中間成果物を残さない）。
+    // ⚠アカウント同時1セッション制約(@codex #345 P1): 番号取得のログインも購入と同じ
+    // ミューテックスに通す。別経路のログインが並行すると、**進行中の購入セッションを
+    // 強制ログアウトさせ、課金だけ済んでPDFを取り逃す**。search/fetch の throttle キーが
+    // 別なのはレート制御の話で、セッションの排他はここで一元化する。
+    return runExclusivePurchase(async () => {
+      let page: RegistryBrowserPage;
       try {
-        await page.close();
-      } catch {
-        // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        page = await this.withStartupTimeout(() => this.browserFactory!());
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
       }
+
+      try {
+        const pdfBuffer = await this.withTimeout(async () => {
+          await page.login({
+            loginId: this.loginId,
+            password: this.password,
+            baseUrl: this.baseUrl,
+          });
+          const outcome = await page.searchByRealEstateNumber(realEstateNumber);
+          if (!outcome.found) {
+            throw new RegistryFetchError("not_found");
+          }
+          return page.downloadRegistryPdf();
+        });
+
+        return {
+          pdfBuffer,
+          // 非PII の generic filename（不動産番号・所有者名を埋め込まない）。
+          fileName: `registry-auto-${requestId}.pdf`,
+          source: this.name,
+          fetchedAt: this.now(),
+          providerRequestId: requestId,
+        };
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
+      } finally {
+        // 例外経路でも必ず close（Cookie/セッション/DL ファイル等の中間成果物を残さない）。
+        try {
+          await page.close();
+        } catch {
+          // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        }
+      }
+    });
+  }
+
+  /**
+   * 段階②(2026-07-31): 所在検索の候補(地番/家屋番号)での**有料取得**。
+   * 構造は fetchRegistryPdf と同じ（throttle → browserFactory → 起動timeout → login →
+   * 実行 → 必ず close）だが、**全体を runExclusivePurchase で直列化**する。
+   *
+   * ⚠直列化はお金の安全機構（purchase-safety.ts §「3つの防御」）:
+   * 登記サービスは**1IDにつき同時1セッション**で、別物件の購入が並行すると後発が先発を
+   * 強制ログアウトさせ、**先発は課金だけ済んでPDFを取り逃す**。DB の物件ロックは物件が
+   * 違うと効かないため、プロセス内でここを1件ずつにする（本番は単一プロセス運用・実測済）。
+   *
+   * ⚠課金後の失敗（adapter が charged_but_failed を投げた場合）は**分類を変えずに**上げる。
+   * classifyRegistryFetchError は RegistryFetchError をそのまま通すので保持される。
+   */
+  private async fetchByLocation(
+    location: NonNullable<RegistryFetchRequest["location"]>,
+  ): Promise<RegistryFetchResult> {
+    // レート制御は番号取得と同じ fetch キー（公式アクセス前に判定）。
+    if (
+      this.throttle &&
+      !this.throttle.tryAcquire(`${this.name}:fetch`, this.now().getTime())
+    ) {
+      throw new RegistryFetchError("rate_limited");
     }
+    if (!this.browserFactory) {
+      throw new RegistryFetchError("provider_error");
+    }
+    const requestId = this.requestIdFactory();
+
+    return runExclusivePurchase(async () => {
+      let page: RegistryBrowserPage;
+      try {
+        page = await this.withStartupTimeout(() => this.browserFactory!());
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
+      }
+      // ⚠課金境界の追跡(@codex #345 P1): 外側の withTimeout(REGISTRY_FETCH_TIMEOUT_MS)は
+      // **請求ボタンを押した後**に発火し得る(adapter は請求済への反映を最大60秒待つ)。
+      // その timeout を素の "timeout" で返すと、呼び出し側は台帳に書かず再実行できて
+      // しまう=二重課金。adapter が請求を押す直前に立てるこのフラグを catch で見て、
+      // 課金後なら分類を charged_but_failed に固定する。
+      const chargeState = { charged: false, aborted: false };
+      try {
+        // adapter 未対応（fake page 等）は login(実外部接続)の**前に** fail-fast
+        // （searchCandidates と同じ方針・無駄な実ログインをしない・課金前）。
+        const fetchByLocationCandidate = page.fetchByLocationCandidate;
+        if (!fetchByLocationCandidate) {
+          throw new RegistryFetchError("provider_error");
+        }
+        // ⚠有料フローは二段タイムアウト(@codex R8 P1): 課金前=通常予算 /
+        // 課金後=延長予算(支払済みPDFを取り切るため)。
+        const pdfBuffer = await this.withPaidTimeout(async () => {
+          await page.login({
+            loginId: this.loginId,
+            password: this.password,
+            baseUrl: this.baseUrl,
+          });
+          return fetchByLocationCandidate.call(page, { ...location, chargeState });
+        }, chargeState);
+        return {
+          pdfBuffer,
+          // 非PII の generic filename（地番・所有者名を埋め込まない）。
+          fileName: `registry-auto-${requestId}.pdf`,
+          source: this.name,
+          fetchedAt: this.now(),
+          providerRequestId: requestId,
+        };
+      } catch (err) {
+        if (chargeState.charged) {
+          // 請求済み(の可能性)。timeout も含め charged_but_failed に固定する。
+          if (
+            err instanceof RegistryFetchError &&
+            err.code === "charged_but_failed"
+          ) {
+            throw err;
+          }
+          throw new RegistryFetchError("charged_but_failed");
+        }
+        throw classifyRegistryFetchError(err);
+      } finally {
+        try {
+          await page.close();
+        } catch {
+          // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        }
+      }
+    });
   }
 
   /**
@@ -255,58 +394,122 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       throw new RegistryFetchError("provider_error");
     }
 
-    // 実況パネル (#317 とは別機能): ステップ進行の通知。label は固定文言のみ
-    // (所在・地番・資格情報を入れない)。reporter は非 throw 契約だが、実況が
-    // 検索本体を壊さないよう optional chain のみで触る。
-    request.live?.step("自動操作ブラウザを起動しています…");
-    let page: RegistryBrowserPage;
-    try {
-      page = await this.withStartupTimeout(() => this.browserFactory!());
-    } catch (err) {
-      throw classifyRegistryFetchError(err);
-    }
-
-    try {
-      // searchByLocation は optional(seam)。未提供の adapter では login(実外部接続)の前に
-      // fail-fast し無駄な実ログインを避ける → provider_error。実 adapter は実装済みだが、
-      // 本番は provider 未解決(休眠フラグ)=501 ゆえ、この経路は fake page 注入テストで到達する。
-      const searchByLocation = page.searchByLocation;
-      if (!searchByLocation) {
-        throw new RegistryFetchError("provider_error");
-      }
-      return await this.withTimeout(async () => {
-        // ログイン場面は撮影しない (ID/PW が画面に写り得るため文言のみ =
-        // ユーザー合意済みの「ぼかし or 省略」の省略側)。
-        request.live?.step(
-          "登記情報提供サービスへログインしています…(この画面の表示は省略されます)",
-        );
-        await page.login({
-          loginId: this.loginId,
-          password: this.password,
-          baseUrl: this.baseUrl,
-        });
-        return searchByLocation.call(page, {
-          address: request.address,
-          lotNumber: request.lotNumber,
-          buildingNumber: request.buildingNumber,
-          live: request.live,
-        });
-      });
-    } catch (err) {
-      throw classifyRegistryFetchError(err);
-    } finally {
+    // ⚠アカウント同時1セッション制約(@codex #345 P1): **検索のログインも購入と同じ
+    // ミューテックス**に通す。検索が購入と並行してログインすると、進行中の購入
+    // セッションを強制ログアウトさせ、**課金だけ済んでPDFを取り逃す**。
+    return runExclusivePurchase(async () => {
+      // 実況パネル (#317 とは別機能): ステップ進行の通知。label は固定文言のみ
+      // (所在・地番・資格情報を入れない)。reporter は非 throw 契約だが、実況が
+      // 検索本体を壊さないよう optional chain のみで触る。
+      request.live?.step("自動操作ブラウザを起動しています…");
+      let page: RegistryBrowserPage;
       try {
-        await page.close();
-      } catch {
-        // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        page = await this.withStartupTimeout(() => this.browserFactory!());
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
       }
-    }
+
+      try {
+        // searchByLocation は optional(seam)。未提供の adapter では login(実外部接続)の前に
+        // fail-fast し無駄な実ログインを避ける → provider_error。実 adapter は実装済みだが、
+        // 本番は provider 未解決(休眠フラグ)=501 ゆえ、この経路は fake page 注入テストで到達する。
+        const searchByLocation = page.searchByLocation;
+        if (!searchByLocation) {
+          throw new RegistryFetchError("provider_error");
+        }
+        return await this.withTimeout(async () => {
+          // ログイン場面は撮影しない (ID/PW が画面に写り得るため文言のみ =
+          // ユーザー合意済みの「ぼかし or 省略」の省略側)。
+          request.live?.step(
+            "登記情報提供サービスへログインしています…(この画面の表示は省略されます)",
+          );
+          await page.login({
+            loginId: this.loginId,
+            password: this.password,
+            baseUrl: this.baseUrl,
+          });
+          return searchByLocation.call(page, {
+            address: request.address,
+            lotNumber: request.lotNumber,
+            buildingNumber: request.buildingNumber,
+            live: request.live,
+          });
+        });
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
+      } finally {
+        try {
+          await page.close();
+        } catch {
+          // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
+        }
+      }
+    });
   }
 
   /**
    * timeoutMs 指定時、op をタイムアウト付きで実行する。期限超過は RegistryFetchError("timeout")。
    * 未指定なら op をそのまま await（タイムアウト無し）。
    */
+  /**
+   * 有料フロー用の二段タイムアウト(@codex #345 R8 P1)。
+   *
+   * 通常の withTimeout(REGISTRY_FETCH_TIMEOUT_MS・例30秒)は、課金後の
+   * 「請求済+PDF準備完了」待ち(最大60秒+ページ探索)より**短くなり得る**。
+   * その場合、支払いは済んでいるのに打ち切られ、台帳に charged_but_failed で
+   * 固定される(実際は数十秒後に取れるのに)。
+   *
+   * そこで予算を課金境界で分ける:
+   *  - **課金前**(chargeState.charged=false): 従来どおり timeoutMs で打ち切り(timeout)。
+   *    まだ無料なので早く諦めてよい。
+   *  - **課金後**: 打ち切らず paidFlowExtraTimeoutMs まで延長。adapter の課金後
+   *    ループは attempt/ページ数/各待ちがすべて有界(最悪 ≈500秒)なので、この
+   *    延長は暴走ではなく「支払済みPDFを取り切るための予算」。それでも尽きたら
+   *    charged_but_failed(台帳記録は呼び出し側で行われる)。
+   */
+  private withPaidTimeout<T>(
+    op: () => Promise<T>,
+    chargeState: { charged: boolean; aborted?: boolean },
+  ): Promise<T> {
+    const timeoutMs = this.timeoutMs;
+    if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return op();
+    }
+    const extraMs = this.paidFlowExtraTimeoutMs;
+    return new Promise<T>((resolve, reject) => {
+      let hardTimer: ReturnType<typeof setTimeout> | null = null;
+      const softTimer = setTimeout(() => {
+        if (!chargeState.charged) {
+          // 課金前=無料。従来どおりの打ち切り。
+          // ⚠reject しても op はキャンセルされない(@codex R10 P1)。裏で走り続けた
+          // adapter が後から請求すると**記録なき課金**になるため、中止の印を先に
+          // 立てる(adapter は請求ボタンの直前で必ずこれを確認する)。
+          chargeState.aborted = true;
+          reject(new RegistryFetchError("timeout"));
+          return;
+        }
+        // 課金後=支払済み。準備待ちに十分な予算まで延長する。
+        hardTimer = setTimeout(() => {
+          reject(new RegistryFetchError("charged_but_failed"));
+        }, extraMs);
+      }, timeoutMs);
+      const clear = () => {
+        clearTimeout(softTimer);
+        if (hardTimer) clearTimeout(hardTimer);
+      };
+      op().then(
+        (value) => {
+          clear();
+          resolve(value);
+        },
+        (err) => {
+          clear();
+          reject(err);
+        },
+      );
+    });
+  }
+
   private withTimeout<T>(op: () => Promise<T>): Promise<T> {
     const timeoutMs = this.timeoutMs;
     if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {

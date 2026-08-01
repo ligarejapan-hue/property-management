@@ -67,6 +67,7 @@ vi.mock("@/lib/corporate-lookup", () => ({
 vi.mock("@/lib/registry-fetch/auto-fetch", () => ({
   isRegistryAutoFetchProviderConfigured: vi.fn(),
   isRegistryLocationSearchConfigured: vi.fn(),
+  isRegistryPurchaseConfigured: vi.fn(),
 }));
 vi.mock("@/lib/registry-fetch/config-store", () => ({
   loadRegistryFetchCredentials: vi.fn(async () => ({
@@ -101,6 +102,7 @@ import { isCorporateLookupConfigured } from "@/lib/corporate-lookup";
 import {
   isRegistryAutoFetchProviderConfigured,
   isRegistryLocationSearchConfigured,
+  isRegistryPurchaseConfigured,
 } from "@/lib/registry-fetch/auto-fetch";
 import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
@@ -129,6 +131,7 @@ beforeEach(() => {
   (isCorporateLookupConfigured as Mock).mockReturnValue(true);
   (isRegistryAutoFetchProviderConfigured as Mock).mockReturnValue(false);
   (isRegistryLocationSearchConfigured as Mock).mockReturnValue(false);
+  (isRegistryPurchaseConfigured as Mock).mockReturnValue(false);
   (isRegistryOcrConfigured as Mock).mockReturnValue(false);
   (isSaleDmConfigured as Mock).mockReturnValue(false);
 });
@@ -167,6 +170,8 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       corporateLookup: true,
       registryAutoFetch: false,
       registryLocationSearch: false,
+      // 段階②: 有料取得の専用オプトイン(未設定=false)。
+      registryPurchase: false,
       // office_staff（非 admin）かつ OCR 未設定 → false
       registryOcrDraft: false,
       saleDmLetter: false,
@@ -184,6 +189,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       registryAutoFetch: true,
       registryLocationSearch: false,
       registryOcrDraft: false,
+      registryPurchase: false,
       saleDmLetter: false,
     });
   });
@@ -230,6 +236,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       "registryAutoFetch",
       "registryLocationSearch",
       "registryOcrDraft",
+      "registryPurchase",
       "saleDmLetter",
     ]);
   });

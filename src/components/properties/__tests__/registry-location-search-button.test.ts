@@ -37,12 +37,19 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
   it("cond②: 候補（所在等）を console/log に出さない", () => {
     expect(src).not.toContain("console.");
   });
-  it("段階①: 候補一覧は表示するが取得ボタンは準備中(disabled)でゲートする", () => {
-    // 候補の取得ボタンは disabled + 「準備中」ラベル。誤って有料取得を起動させない。
-    expect(src).toContain("取得（準備中）");
-    expect(src).toContain("現在準備中です");
-    // 候補行の取得ボタンに disabled が付く(段階②で有効化)。
-    expect(src).toContain('title="謄本取得は準備中です"');
+  it("段階②(2026-08-01): 取得は purchaseEnabled(専用オプトイン)のときだけ有効・確認画面を経由する", () => {
+    // @codex #345 P1: 無料検索の校正フラグだけで課金操作を露出させない。
+    // capabilities.registryPurchase(=REGISTRY_FETCH_PURCHASE_ENABLED)が false のとき
+    // 取得ボタンは disabled + 準備中表示(server 側も 501 で enforce)。
+    expect(src).toContain("purchaseEnabled: boolean");
+    expect(src).toContain("disabled={!purchaseEnabled}");
+    expect(src).toContain("有料取得は準備中です");
+    // 有効時も**ワンクリック課金にはしない**: 「取得」→確認画面→「取得する」の2段。
+    expect(src).toContain('setState("confirmObtain")');
+    expect(src).toContain("利用料が発生します");
+    expect(src).toContain("この候補で謄本を取得しますか？");
+    // 押下ハンドラも purchaseEnabled を再確認する(disabled 迂回への二重防御)。
+    expect(src).toContain("if (!purchaseEnabled) return;");
   });
 });
 

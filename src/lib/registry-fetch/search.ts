@@ -31,6 +31,7 @@ import {
   rememberSearchCandidates,
   resolveCachedCandidate,
   fingerprintProperty,
+  type ResolvedCandidate,
 } from "./candidate-cache";
 
 export interface RunRegistrySearchArgs {
@@ -57,6 +58,7 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   provider_error: 502,
   service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
   service_unavailable: 503, // 接続不可(時間外の可能性)=同じく一時的利用不可。
+  charged_but_failed: 502, // 課金後の失敗(検索経路では発生しないが網羅性のため)。
 };
 
 /**
@@ -150,19 +152,16 @@ export async function runRegistrySearch(
       args.live ? { ...built.request, live: args.live } : built.request,
     );
 
-    // 段階①(所在検索フル対応): 候補一覧の表示まで。実サイトの所在検索は不動産番号を返さず、候補は
-    // **地番(candidateRef)**（不動産番号は有料の請求まで進まないと得られない=サイト仕様）。旧実装は
-    // 不動産番号の無い候補を捨てていたが、それでは実サイトの候補が全て消える（実質「候補なし」）。
-    // ここでは candidateRef を持つ候補を表示用に通す。取得(段階②)は candidateRef=地番を選んで
-    // 請求する別経路で実装し、UI 側は段階①では取得を「準備中」にゲートする。
-    // 安全: 取得 API は resolveCachedCandidate が地番候補(不動産番号未キャッシュ)に null を返し
-    // 409(課金なし)になるため、表示を広げても誤課金は起きない。
+    // 実サイトの所在検索は不動産番号を返さず、候補は**地番(candidateRef)**
+    // （不動産番号は有料の請求まで進まないと得られない=サイト仕様）。
+    // candidateRef を持つ候補を表示用に通す。取得(段階②・2026-07-31 配線)は
+    // 選んだ候補の地番/家屋番号をキャッシュから解決し、有料の請求→PDF取得へ進む。
     const displayable = candidates.filter((c) => !!c.candidateRef?.trim());
 
-    // 取得側（resolveRegistryCandidate）が provider を再検索せず候補→不動産番号を解決できるよう、
+    // 取得側（resolveRegistryCandidate）が provider を再検索せず候補→取得キーを解決できるよう、
     // 認可済み検索の結果を server 内メモリに覚える（@codex P1: throttle 二重消費の回避）。
-    // realEstateNumber を持つ候補（番号検索/mock 経路）のみキャッシュされる。地番のみの候補は
-    // キャッシュされず（rememberSearchCandidates 側で ren 必須）、取得は 409（段階②で対応）。
+    // 段階②(2026-07-31): 地番のみの候補も**地番/家屋番号を取得キーとして**覚える
+    // （有料の請求→PDF取得の入力になる）。番号候補は従来どおり不動産番号で覚える。
     // 物件指紋も一緒に覚え、取得時に物件が編集されていたら古い候補を無効化する（@codex P1）。
     rememberSearchCandidates(
       session.id,
@@ -247,17 +246,18 @@ export interface ResolveRegistryCandidateArgs {
 }
 
 /**
- * cond③: 取得時に client の candidateRef を信頼せず、不動産番号は「認可済み検索が server に残した
- * マッピング」からのみ解決する（改ざん対策）。取得側で provider を再検索しない（@codex P1: search と
- * fetch の間で provider throttle を二重に消費して 429 になるのを避ける）。
+ * cond③: 取得時に client の candidateRef を信頼せず、取得キー（不動産番号 or 地番/家屋番号）は
+ * 「認可済み検索が server に残したマッピング」からのみ解決する（改ざん対策）。取得側で provider を
+ * 再検索しない（@codex P1: search と fetch の間で provider throttle を二重に消費して 429 になるのを
+ * 避ける）。
  *
  * scope（field_staff 可視範囲）と物件存在・楽観ロックは後続の runRegistryAutoFetch が再確認する。
  * キャッシュ自体も (userId, propertyId, candidateRef) キーゆえ他ユーザー/他物件の候補は解決しない。
- * 解決した realEstateNumber は取得キーとして内部利用のみ（応答・log・AuditLog に出さない／cond②）。
+ * 解決したキーは取得の内部利用のみ（応答・log・AuditLog に出さない／cond②）。
  */
 export async function resolveRegistryCandidate(
   args: ResolveRegistryCandidateArgs,
-): Promise<{ realEstateNumber: string; fingerprint: string }> {
+): Promise<{ candidate: ResolvedCandidate; fingerprint: string }> {
   const { session, propertyId, confirmed, candidateRef } = args;
 
   // 確認フラグ必須（true 以外は解決しない／cond①）。
@@ -301,11 +301,11 @@ export async function resolveRegistryCandidate(
     );
   }
 
-  // 認可済み検索が覚えた候補からのみ不動産番号を解決する（client の値は一致判定にのみ使う）。
+  // 認可済み検索が覚えた候補からのみ取得キーを解決する（client の値は一致判定にのみ使う）。
   // @codex P1: 検索時の物件指紋と現在が一致する場合だけ有効（編集後の古い候補は使わせない）。
   const fingerprint = fingerprintProperty(property);
-  const realEstateNumber = resolveCachedCandidate(session.id, propertyId, ref, fingerprint);
-  if (!realEstateNumber) {
+  const candidate = resolveCachedCandidate(session.id, propertyId, ref, fingerprint);
+  if (!candidate) {
     // 未検索 / 改ざん / TTL 超過 / 物件編集で指紋不一致 → 409。秘匿情報は載せない。
     throw new ApiError(
       409,
@@ -316,5 +316,5 @@ export async function resolveRegistryCandidate(
 
   // @codex P2: 取得側(runRegistryAutoFetch)が version-lock する行の指紋とこれが一致する時だけ
   // override を使うよう、解決に使った指紋も返す（resolve〜取得の間の編集による TOCTOU 防止）。
-  return { realEstateNumber, fingerprint };
+  return { candidate, fingerprint };
 }

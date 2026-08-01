@@ -24,8 +24,8 @@ describe("candidate-cache", () => {
       { candidateRef: "c1", realEstateNumber: "REN-1" },
       { candidateRef: "c2", realEstateNumber: "REN-2" },
     ]);
-    expect(resolveCachedCandidate(USER, PROP, "c1", FP)).toBe("REN-1");
-    expect(resolveCachedCandidate(USER, PROP, "c2", FP)).toBe("REN-2");
+    expect(resolveCachedCandidate(USER, PROP, "c1", FP)).toEqual({ kind: "number", realEstateNumber: "REN-1" });
+    expect(resolveCachedCandidate(USER, PROP, "c2", FP)).toEqual({ kind: "number", realEstateNumber: "REN-2" });
   });
 
   it("未知の candidateRef は null（改ざん/未検索 → route 側で 409）", () => {
@@ -44,7 +44,7 @@ describe("candidate-cache", () => {
     expect(resolveCachedCandidate(USER, "other-prop", "c1", FP)).toBeNull();
   });
 
-  it("不動産番号の無い候補は覚えない（取得キーにできない）", () => {
+  it("番号も地番も無い候補は覚えない（取得キーにできない）", () => {
     rememberSearchCandidates(USER, PROP, FP, [
       { candidateRef: "c1", realEstateNumber: null },
       { candidateRef: "c2" },
@@ -53,10 +53,37 @@ describe("candidate-cache", () => {
     expect(resolveCachedCandidate(USER, PROP, "c2", FP)).toBeNull();
   });
 
+  it("段階②: 地番のみの候補は location として覚える（有料取得の取得キー）", () => {
+    rememberSearchCandidates(USER, PROP, FP, [
+      { candidateRef: "１－１", lotNumber: "１－１" },
+      { candidateRef: "家1", buildingNumber: "1-1-1" },
+    ]);
+    expect(resolveCachedCandidate(USER, PROP, "１－１", FP)).toEqual({
+      kind: "location",
+      lotNumber: "１－１",
+      buildingNumber: null,
+    });
+    expect(resolveCachedCandidate(USER, PROP, "家1", FP)).toEqual({
+      kind: "location",
+      lotNumber: null,
+      buildingNumber: "1-1-1",
+    });
+  });
+
+  it("段階②: 不動産番号がある候補は地番があっても number を優先（番号取得の方が確実）", () => {
+    rememberSearchCandidates(USER, PROP, FP, [
+      { candidateRef: "c1", realEstateNumber: "REN-1", lotNumber: "1-1" },
+    ]);
+    expect(resolveCachedCandidate(USER, PROP, "c1", FP)).toEqual({
+      kind: "number",
+      realEstateNumber: "REN-1",
+    });
+  });
+
   it("TTL 経過後は解決しない（now を注入して検証）", () => {
     const t0 = 1_000_000;
     rememberSearchCandidates(USER, PROP, FP, [{ candidateRef: "c1", realEstateNumber: "REN-1" }], t0);
-    expect(resolveCachedCandidate(USER, PROP, "c1", FP, t0 + 60_000)).toBe("REN-1"); // TTL 内
+    expect(resolveCachedCandidate(USER, PROP, "c1", FP, t0 + 60_000)).toEqual({ kind: "number", realEstateNumber: "REN-1" }); // TTL 内
     expect(resolveCachedCandidate(USER, PROP, "c1", FP, t0 + 60 * 60_000)).toBeNull(); // TTL 超過
   });
 
@@ -64,7 +91,7 @@ describe("candidate-cache", () => {
     rememberSearchCandidates(USER, PROP, FP, [{ candidateRef: "old", realEstateNumber: "REN-old" }]);
     rememberSearchCandidates(USER, PROP, FP, [{ candidateRef: "new", realEstateNumber: "REN-new" }]);
     expect(resolveCachedCandidate(USER, PROP, "old", FP)).toBeNull(); // 前回候補は消える
-    expect(resolveCachedCandidate(USER, PROP, "new", FP)).toBe("REN-new");
+    expect(resolveCachedCandidate(USER, PROP, "new", FP)).toEqual({ kind: "number", realEstateNumber: "REN-new" });
   });
 
   it("追加時に期限切れエントリを掃除する（@codex P2: Map の際限ない増大を防ぐ）", () => {
@@ -74,7 +101,7 @@ describe("candidate-cache", () => {
     // TTL 超過後に別物件を検索 → 期限切れの prop-A エントリは掃除され、prop-B のみ残る。
     rememberSearchCandidates(USER, "prop-B", FP, [{ candidateRef: "b", realEstateNumber: "REN-B" }], t0 + 11 * 60_000);
     expect(__candidateCacheSizeForTests()).toBe(1);
-    expect(resolveCachedCandidate(USER, "prop-B", "b", FP, t0 + 11 * 60_000)).toBe("REN-B");
+    expect(resolveCachedCandidate(USER, "prop-B", "b", FP, t0 + 11 * 60_000)).toEqual({ kind: "number", realEstateNumber: "REN-B" });
   });
 });
 

@@ -112,6 +112,7 @@ vi.mock("@/lib/prisma", () => ({
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn() },
+    auditLog: { findFirst: vi.fn(), create: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -131,6 +132,7 @@ import {
   type RegistryFetchProvider,
 } from "@/lib/registry-fetch";
 import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
+import { RegistryFetchError } from "@/lib/registry-fetch/errors";
 import { fingerprintProperty } from "@/lib/registry-fetch/candidate-cache";
 import * as routeModule from "@/app/api/properties/[id]/registry/auto-fetch/route";
 
@@ -159,6 +161,7 @@ const pm = prisma as unknown as {
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock };
+  auditLog: { findFirst: Mock; create: Mock };
   $transaction: Mock;
 };
 
@@ -234,6 +237,9 @@ function callRoute(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   setProperty();
+  // 段階②の台帳(二重課金ガード)は既定「記録なし」= 通る。
+  pm.auditLog.findFirst.mockResolvedValue(null);
+  pm.auditLog.create.mockResolvedValue({ id: "ledger-1" });
   pm.property.updateMany.mockResolvedValue({ count: 1 });
   pm.property.update.mockResolvedValue({});
   pm.property.findFirst.mockResolvedValue(null);
@@ -363,6 +369,8 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(provider.fetchRegistryPdf).toHaveBeenCalledTimes(1);
     expect(provider.fetchRegistryPdf).toHaveBeenCalledWith({
       realEstateNumber: "1234567890123",
+      // 段階②(2026-07-31): location フィールドが増えた(番号取得では null=有料の地番フローに入らない)。
+      location: null,
       ref: PROP_ID,
     });
   });
@@ -812,5 +820,244 @@ describe("PR4: source-assertion（スコープ固定）", () => {
     expect(routeSrc).not.toMatch(/new\s+\w*Provider/);
     expect(routeSrc).toMatch(/REGISTRY_AUTO_FETCH_PROVIDER_NOT_CONFIGURED/);
     expect(routeSrc).toMatch(/501/);
+  });
+});
+
+describe("段階②: 地番候補の有料取得（台帳=二重課金ガード）", () => {
+  const LC = { lotNumber: "1-1", buildingNumber: null };
+
+  function runLocation(over: { locationCandidate?: typeof LC | null } = {}) {
+    const provider = successProvider();
+    const promise = runRegistryAutoFetch(
+      {
+        session: SESSION,
+        propertyId: PROP_ID,
+        confirmed: true,
+        locationCandidate: over.locationCandidate ?? LC,
+        expectedFingerprint: fingerprintProperty({
+          address: "テスト市テスト町一丁目",
+          lotNumber: null,
+          buildingNumber: null,
+          realEstateNumber: null,
+        }),
+      },
+      provider,
+    );
+    return { provider, promise };
+  }
+
+  // ⚠有料取得の専用オプトイン(@codex #345 P1)。テストでは明示的に有効化し、必ず戻す。
+  const PURCHASE_ENV = "REGISTRY_FETCH_PURCHASE_ENABLED";
+  let savedPurchaseEnv: string | undefined;
+  beforeEach(() => {
+    savedPurchaseEnv = process.env[PURCHASE_ENV];
+    process.env[PURCHASE_ENV] = "true";
+    setProperty({ address: "テスト市テスト町一丁目" });
+  });
+  afterEach(() => {
+    if (savedPurchaseEnv === undefined) delete process.env[PURCHASE_ENV];
+    else process.env[PURCHASE_ENV] = savedPurchaseEnv;
+  });
+
+  it("⚠専用オプトインが無ければ 501 で止まる（provider もロックも呼ばない）", async () => {
+    delete process.env[PURCHASE_ENV];
+    const { provider, promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({
+      status: 501,
+      code: "REGISTRY_PURCHASE_NOT_ENABLED",
+    });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("台帳に無ければ provider へ location を渡して実行し、成功を台帳に記録する", async () => {
+    const { provider, promise } = runLocation();
+    await promise;
+    expect(provider.fetchRegistryPdf).toHaveBeenCalledTimes(1);
+    const req = provider.fetchRegistryPdf.mock.calls[0][0];
+    expect(req.location).toEqual({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "1-1",
+      buildingNumber: null,
+      certificateType: "owner",
+    });
+    // 台帳(成功)が書かれる。detail はハッシュと outcome のみ(地番そのものは載せない)。
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].detail.outcome).toBe("charged");
+    expect(typeof ledger[0].detail.purchaseKeyHash).toBe("string");
+    expect(JSON.stringify(ledger[0].detail)).not.toContain("1-1");
+  });
+
+  it("⚠台帳に既にあれば 409 で止まり、provider もロックも呼ばない（二重課金しない）", async () => {
+    pm.auditLog.findFirst.mockResolvedValue({ id: "prior" });
+    const { provider, promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_PURCHASE_ALREADY_DONE",
+    });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠課金後の失敗(charged_but_failed)も台帳に記録する（再実行=二重課金を台帳で止める）", async () => {
+    const provider = successProvider();
+    provider.fetchRegistryPdf.mockRejectedValue(
+      new RegistryFetchError("charged_but_failed"),
+    );
+    await expect(
+      runRegistryAutoFetch(
+        {
+          session: SESSION,
+          propertyId: PROP_ID,
+          confirmed: true,
+          locationCandidate: LC,
+        },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].detail.outcome).toBe("charged_but_failed");
+
+    // ⚠台帳はロック解除より**先**(@codex #345 R2 P1)。解除が先だと
+    // 「ロック無し×台帳無し」の隙間で同じ候補に再課金できる。
+    const ledgerCallOrder = pm.auditLog.create.mock.invocationCallOrder[
+      pm.auditLog.create.mock.calls.findIndex(
+        (c) =>
+          (c[0] as { data: { action: string } }).data.action ===
+          "registry_location_purchase",
+      )
+    ];
+    const releaseCall = pm.property.updateMany.mock.calls.findIndex(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "unconfirmed",
+    );
+    expect(releaseCall).toBeGreaterThanOrEqual(0);
+    const releaseCallOrder =
+      pm.property.updateMany.mock.invocationCallOrder[releaseCall];
+    expect(ledgerCallOrder).toBeLessThan(releaseCallOrder);
+  });
+
+  it("⚠provider 成功後に PDF 処理が失敗しても台帳は残る（@codex #345 P1: 台帳は provider 返却直後）", async () => {
+    // 課金は provider が返った時点で済んでいる。後段（PDF検証）で失敗しても台帳が
+    // 無いと再実行で同じ謄本にもう一度課金できてしまう。
+    (isPdfBuffer as Mock).mockReturnValue(false); // PDF検証で 422 に落とす
+    const { promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({ status: 422 });
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].detail.outcome).toBe("charged");
+  });
+
+  it("⚠課金後失敗の台帳が書けなければロックを解除しない（@codex #345 R3 P1: fail-closed）", async () => {
+    // 「台帳無し×ロック無し」は再課金可能な状態そのもの。台帳が永続できないなら
+    // scheduled のまま残し、取得APIを 409 で止め続ける(解消は運用)。
+    pm.auditLog.create.mockRejectedValue(new Error("db down"));
+    const provider = successProvider();
+    provider.fetchRegistryPdf.mockRejectedValue(
+      new RegistryFetchError("charged_but_failed"),
+    );
+    await expect(
+      runRegistryAutoFetch(
+        {
+          session: SESSION,
+          propertyId: PROP_ID,
+          confirmed: true,
+          locationCandidate: LC,
+        },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+    // ロック解除(registryStatus を元に戻す updateMany)が**呼ばれない**。
+    const releaseCalls = pm.property.updateMany.mock.calls.filter(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "unconfirmed",
+    );
+    expect(releaseCalls).toHaveLength(0);
+  });
+
+  it("⚠provider成功後、台帳(charged)が書けなければ添付に進まず charged_but_failed（fail-closed）", async () => {
+    // writeAuditLog(失敗を握りつぶす)ではなく throw する直書きであることの検証。
+    // 台帳が無いまま添付まで成功すると、30日マーカー無しで再実行=再課金できてしまう。
+    pm.auditLog.create.mockRejectedValue(new Error("db down"));
+    const { promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({ status: 502 });
+    // 添付処理(ImportJob作成)へ進んでいない。
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    // catch 側でも台帳を再試行している(計2回)。両方失敗したのでロックは保持。
+    expect(pm.auditLog.create).toHaveBeenCalledTimes(2);
+    const releaseCalls = pm.property.updateMany.mock.calls.filter(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "unconfirmed",
+    );
+    expect(releaseCalls).toHaveLength(0);
+  });
+
+  it("課金前の失敗(provider_error等)は台帳に書かない（まだ買っていない=再実行してよい）", async () => {
+    const provider = successProvider();
+    provider.fetchRegistryPdf.mockRejectedValue(
+      new RegistryFetchError("provider_error"),
+    );
+    await expect(
+      runRegistryAutoFetch(
+        {
+          session: SESSION,
+          propertyId: PROP_ID,
+          confirmed: true,
+          locationCandidate: LC,
+        },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger).toHaveLength(0);
+  });
+
+  it("不動産番号を持つ物件では番号を優先し location を渡さない", async () => {
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      realEstateNumber: "0123456789012",
+    });
+    const provider = successProvider();
+    await runRegistryAutoFetch(
+      {
+        session: SESSION,
+        propertyId: PROP_ID,
+        confirmed: true,
+        locationCandidate: LC,
+      },
+      provider,
+    );
+    const req = provider.fetchRegistryPdf.mock.calls[0][0];
+    expect(req.realEstateNumber).toBe("0123456789012");
+    expect(req.location).toBeNull();
+  });
+
+  it("地番も家屋番号も無い候補は 409（買う対象が無い・provider を呼ばない）", async () => {
+    const provider = successProvider();
+    await expect(
+      runRegistryAutoFetch(
+        {
+          session: SESSION,
+          propertyId: PROP_ID,
+          confirmed: true,
+          locationCandidate: { lotNumber: null, buildingNumber: null },
+        },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
   });
 });
