@@ -103,8 +103,10 @@ describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => 
       source.indexOf("handleSuggestAddress"),
       source.indexOf("handleSubmit"),
     );
-    // 非空の郵便番号は消す。ただし取得中に郵便番号が編集されていたらユーザー入力を勝たせる。
+    // 非空の郵便番号は消す。ただし (a)住所が実際に置き換わったときだけ(同一住所の
+    // 再取得で正しい郵便番号を巻き添えにしない・R6) (b)取得中の手編集は勝たせる。
     expect(handler).toContain('setPostalCode("")');
+    expect(handler).toMatch(/result\.address !== startAddress/);
     expect(handler).toMatch(/postalCodeRef\.current === startZip/);
     // 消したときはユーザーへ入れ直し案内を出す。
     expect(handler).toContain("郵便番号は新しい住所に合わせて入れ直してください");

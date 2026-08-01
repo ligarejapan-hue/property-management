@@ -75,10 +75,13 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
         // 郵便番号補完による上書きは「住所欄が非空なら確認 UI を出す」既存フローが防ぐ。
         setAddressEdited(false);
         // 旧住所に対応していた郵便番号を残すと「郵便番号と住所の不一致」のまま
-        // 保存され得る（Codex R3 P2）→ 住所を差し替えたら郵便番号も消す。
-        // 取得中にユーザーが郵便番号を編集していた場合はその入力を勝たせる。
+        // 保存され得る（Codex R3 P2）→ 住所を**実際に置き換えたときだけ**郵便番号も消す。
+        // 取得結果が現在の住所と同一なら消さない（検索候補で入れた正しい郵便番号を
+        // 巻き添えにしない・Codex R6 P2）。取得中の郵便番号手編集も勝たせる。
         const clearedZip =
-          startZip.trim() !== "" && postalCodeRef.current === startZip;
+          result.address !== startAddress &&
+          startZip.trim() !== "" &&
+          postalCodeRef.current === startZip;
         if (clearedZip) setPostalCode("");
         setSuggestNote(
           "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。" +
