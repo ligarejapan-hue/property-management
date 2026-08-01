@@ -196,16 +196,24 @@ describe("parseIsjCsv(実測フォーマット 24.0a)", () => {
 });
 
 describe("parseImportArgs(取込CLIの引数解釈)", () => {
-  it("正常系: version + パス(複数可) + --dry-run", () => {
+  it("正常系: version + パス(複数可) + --dry-run / --prune-stale", () => {
     expect(parseImportArgs(["--version", "24.0a", "dir1"])).toEqual({
       version: "24.0a",
       dryRun: false,
+      pruneStale: false,
       paths: ["dir1"],
     });
     expect(parseImportArgs(["--version", "24.0a", "--dry-run", "a.csv", "b"])).toEqual({
       version: "24.0a",
       dryRun: true,
+      pruneStale: false,
       paths: ["a.csv", "b"],
+    });
+    expect(parseImportArgs(["--version", "25.0a", "--prune-stale", "dir"])).toEqual({
+      version: "25.0a",
+      dryRun: false,
+      pruneStale: true,
+      paths: ["dir"],
     });
   });
 

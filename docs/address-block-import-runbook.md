@@ -23,14 +23,19 @@
 # 件数の事前確認(DB に書かない)
 npx tsx scripts/import-address-blocks.ts --version 24.0a --dry-run /path/to/csv-folder
 
-# 取込(市区町村単位で全置換 = 再実行しても二重にならない)
+# 取込(市区町村単位で全置換 = 同じデータの再実行は二重にならない)
 npx tsx scripts/import-address-blocks.ts --version 24.0a /path/to/csv-folder
+
+# 版の更新(都道府県一括で取り込み直すとき): --prune-stale で旧版の残存も掃除する
+# ⚠市区町村の改称・合併があると旧名の行が置換では消えないため。
+# ⚠一部の市区町村だけを取り込むときは付けない(同県の他市区町村まで消える)
+npx tsx scripts/import-address-blocks.ts --version 25.0a --prune-stale /path/to/new-csv-folder
 ```
 
 - `DATABASE_URL` が必要。**本番(VPS)では root で `set -a; . /etc/property-management/app.env; set +a`
   してから www-data で実行**(vps-deploy の他スクリプトと同じ流儀)。devDeps の tsx が必要なので
   `npm ci --include=dev` 後・`npm prune` 前に実行する。
-- 版の更新時は同じコマンドを新しい CSV で再実行するだけ(全置換)。
+- 版の更新は同じコマンドを新しい CSV で再実行する。**都道府県一括なら --prune-stale を付けて**旧版の残存(改称・合併で消えた旧市区町村名)も掃除する。残存があると取込後に警告が出る。
 
 ## 目安(実測 2026-08-01)
 

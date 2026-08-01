@@ -9,6 +9,10 @@
 export interface ImportCliOptions {
   version: string;
   dryRun: boolean;
+  /** 取込対象の都道府県内で、今回の版以外の残存行(市区町村の改称・合併の名残)を削除する。
+   * ⚠都道府県一括の CSV を取り込むときだけ使うこと(一部市区町村だけの取込で使うと
+   * 同県の他市区町村の正当なデータまで消える)。 */
+  pruneStale: boolean;
   paths: string[];
 }
 
@@ -17,6 +21,7 @@ export function parseImportArgs(argv: string[]): ImportCliOptions | null {
   const paths: string[] = [];
   let version = "";
   let dryRun = false;
+  let pruneStale = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--version") {
@@ -27,6 +32,8 @@ export function parseImportArgs(argv: string[]): ImportCliOptions | null {
       version = v;
     } else if (a === "--dry-run") {
       dryRun = true;
+    } else if (a === "--prune-stale") {
+      pruneStale = true;
     } else if (a === "--help" || a === "-h") {
       return null;
     } else if (a.startsWith("-")) {
@@ -37,5 +44,5 @@ export function parseImportArgs(argv: string[]): ImportCliOptions | null {
     }
   }
   if (!version || paths.length === 0) return null;
-  return { version, dryRun, paths };
+  return { version, dryRun, pruneStale, paths };
 }
