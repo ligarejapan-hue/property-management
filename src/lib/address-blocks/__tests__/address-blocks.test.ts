@@ -239,6 +239,16 @@ describe("pickNearestBlock / haversineMeters", () => {
     expect(hit!.distanceM).toBeLessThan(30);
   });
 
+  it("ほぼ等距離の2点は丸めない生距離で比較する(Codex P2: 10.6m vs 10.8m で遠い方を選ばない)", () => {
+    // 緯度オフセットのみ: 9.523e-5° ≒ 10.6m / 9.702e-5° ≒ 10.8m。
+    // 近い方(block 1)を先に置く=丸め比較のバグだと後の 10.8m が 11m 未満で勝ってしまう並び。
+    const hit = pickNearestBlock(35.7, 139.6, [
+      C(35.7 + 9.523e-5, 139.6, "1"),
+      C(35.7 + 9.702e-5, 139.6, "2"),
+    ]);
+    expect(hit!.address).toBe("東京都杉並区西荻北3-1");
+  });
+
   it(`全候補が閾値(${MAX_BLOCK_DISTANCE_M}m)超なら null(隣町を拾わない)`, () => {
     expect(pickNearestBlock(35.7042, 139.5995, [C(35.71, 139.61, "1")])).toBeNull();
   });

@@ -47,14 +47,18 @@ export function pickNearestBlock(
   maxDistanceM: number = MAX_BLOCK_DISTANCE_M,
 ): BlockLookupHit | null {
   let best: BlockLookupHit | null = null;
+  // 比較は**丸めない生距離**で行う(Codex P2: 丸め済み distanceM と比較すると
+  // 10.6m→11m の後に 10.8m が「より近い」と誤判定され、境界で遠い街区を選ぶ)。
+  let bestDist = Infinity;
   for (const c of candidates) {
     const d = haversineMeters(lat, lng, c.lat, c.lng);
     if (d > maxDistanceM) continue;
-    if (best === null || d < best.distanceM) {
+    if (d < bestDist) {
+      bestDist = d;
       best = {
         address: formatBlockAddress(c),
         town: c.town,
-        distanceM: Math.round(d),
+        distanceM: Math.round(d), // 丸めは表示用の返り値のみ
         isResidential: c.isResidential,
       };
     }
