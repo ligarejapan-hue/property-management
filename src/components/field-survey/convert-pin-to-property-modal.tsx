@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { X, Loader2, AlertTriangle } from "lucide-react";
+import { X, Loader2, AlertTriangle, MapPin } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
-import { convertPinToProperty } from "@/lib/api-client";
+import { convertPinToProperty, suggestPinAddress } from "@/lib/api-client";
 import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
@@ -30,6 +30,38 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   const [realEstateNumber, setRealEstateNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ピンの座標からの住所自動入力（住居表示・町丁目まで）。
+  //  - 座標は client に降ろさない（server がピンから読んで逆ジオコーディングする）
+  //  - 無料APIの限界で**番・号は入らない**→ 取得後に追記を促すヒントを出す
+  //  - 値は通常の入力欄なのでいつでも手で直せる
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
+
+  const handleSuggestAddress = async () => {
+    setSuggesting(true);
+    setSuggestNote(null);
+    setError(null);
+    try {
+      const { result } = await suggestPinAddress(pinId);
+      if (result.found) {
+        setAddress(result.address);
+        setAddressEdited(true); // 郵便番号補完による上書きを防ぐ（手入力と同じ扱い）
+        setSuggestNote(
+          "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。",
+        );
+      } else {
+        setSuggestNote(
+          "この位置の住所を取得できませんでした。お手数ですが手で入力してください。",
+        );
+      }
+    } catch (err) {
+      setSuggestNote(
+        err instanceof Error ? err.message : "住所の自動取得に失敗しました",
+      );
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,7 +165,26 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
               placeholder="例: 東京都千代田区丸の内1-1-1"
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
-            <div className="mt-1.5">
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              <div>
+                <button
+                  type="button"
+                  onClick={handleSuggestAddress}
+                  disabled={submitting || suggesting}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                  title="ピンの位置から住所（町丁目まで）を自動入力します（無料）"
+                >
+                  {suggesting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <MapPin className="h-3.5 w-3.5" />
+                  )}
+                  ピンの位置から住所を入力
+                </button>
+              </div>
+              {suggestNote && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">{suggestNote}</p>
+              )}
               <AddressLookupControls
                 zip={postalCode}
                 address={address}
