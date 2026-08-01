@@ -9,6 +9,7 @@ import {
   formatBlockAddress,
 } from "@/lib/address-blocks/format";
 import { splitCsvLine, parseIsjCsv } from "@/lib/address-blocks/parse-isj";
+import { parseImportArgs } from "@/lib/address-blocks/import-cli";
 import {
   pickNearestBlock,
   haversineMeters,
@@ -180,6 +181,34 @@ describe("parseIsjCsv(実測フォーマット 24.0a)", () => {
 
   it("空文字列は空結果", () => {
     expect(parseIsjCsv("")).toEqual({ rows: [], skipped: 0, history: 0 });
+  });
+});
+
+describe("parseImportArgs(取込CLIの引数解釈)", () => {
+  it("正常系: version + パス(複数可) + --dry-run", () => {
+    expect(parseImportArgs(["--version", "24.0a", "dir1"])).toEqual({
+      version: "24.0a",
+      dryRun: false,
+      paths: ["dir1"],
+    });
+    expect(parseImportArgs(["--version", "24.0a", "--dry-run", "a.csv", "b"])).toEqual({
+      version: "24.0a",
+      dryRun: true,
+      paths: ["a.csv", "b"],
+    });
+  });
+
+  it("--version の値の書き忘れで次のフラグを吸い込まない(dry-runのつもりが実書込みになる事故防止)", () => {
+    // 社内レビュー確定指摘: これが通ると version=\"--dry-run\"・dryRun=false で実書込みされる。
+    expect(parseImportArgs(["--version", "--dry-run", "dir"])).toBeNull();
+    expect(parseImportArgs(["--version"])).toBeNull();
+  });
+
+  it("未知のフラグ・version欠落・パス無しは null(usage 表示)", () => {
+    expect(parseImportArgs(["--version", "24.0a", "--dryrun", "dir"])).toBeNull(); // タイポ
+    expect(parseImportArgs(["dir"])).toBeNull();
+    expect(parseImportArgs(["--version", "24.0a"])).toBeNull();
+    expect(parseImportArgs(["--help"])).toBeNull();
   });
 });
 
