@@ -60,10 +60,15 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
     try {
       const { result } = await suggestPinAddress(pinId);
       if (result.found) {
-        if (addressRef.current !== startAddress) {
-          // 取得中にユーザーが住所を編集した → 新しい入力を勝たせる（Codex R2 P2）。
+        if (
+          addressRef.current !== startAddress ||
+          postalCodeRef.current !== startZip
+        ) {
+          // 取得中にユーザーが住所または郵便番号を編集した（郵便番号候補の適用は
+          // 住所+郵便番号を同時に書き換える）→ 提案全体を stale として反映しない
+          // （Codex R2/R8 P2: 片方だけ勝たせると不一致ペアが保存され得る）。
           setSuggestNote(
-            "取得中に住所が編集されたため、自動入力は反映しませんでした。もう一度ボタンを押すと再取得します。",
+            "取得中に住所または郵便番号が編集されたため、自動入力は反映しませんでした。もう一度ボタンを押すと再取得します。",
           );
           return;
         }
@@ -77,11 +82,10 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
         // 旧住所に対応していた郵便番号を残すと「郵便番号と住所の不一致」のまま
         // 保存され得る（Codex R3 P2）→ 住所を**実際に置き換えたときだけ**郵便番号も消す。
         // 取得結果が現在の住所と同一なら消さない（検索候補で入れた正しい郵便番号を
-        // 巻き添えにしない・Codex R6 P2）。取得中の郵便番号手編集も勝たせる。
+        // 巻き添えにしない・Codex R6 P2）。取得中の編集は上の stale ガードで反映ごと
+        // 中止済み＝ここでは住所・郵便番号とも開始時の値のまま。
         const clearedZip =
-          result.address !== startAddress &&
-          startZip.trim() !== "" &&
-          postalCodeRef.current === startZip;
+          result.address !== startAddress && startZip.trim() !== "";
         if (clearedZip) setPostalCode("");
         setSuggestNote(
           "ピンの位置から自動入力しました（町丁目まで・出典: 国土地理院）。番・号は現地やGoogleマップで確認して追記してください。" +

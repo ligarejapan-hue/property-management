@@ -75,7 +75,15 @@ export async function POST(
 
     const pin = await prisma.fieldSurveyPin.findUnique({
       where: { id },
-      select: { id: true, staffUserId: true, lat: true, lng: true },
+      select: {
+        id: true,
+        staffUserId: true,
+        lat: true,
+        lng: true,
+        pinType: true,
+        status: true,
+        propertyId: true,
+      },
     });
     if (!pin) {
       throw new ApiError(404, "調査ピンが見つかりません", "NOT_FOUND");
@@ -91,6 +99,19 @@ export async function POST(
         "この調査ピンにアクセスする権限がありません",
         "FORBIDDEN",
       );
+    }
+
+    // 物件化できる状態のピンに限定する（convert-to-property と同一の状態チェック・
+    // Codex R8 P2）。古い modal や直接リクエストで、変換不能なピン（候補外/対応済み/
+    // アーカイブ/物件化済み）の座標を外部送信しない。監査・外部呼び出しより前に弾く。
+    if (pin.pinType !== "candidate") {
+      throw new ApiError(422, "物件化候補ではないため住所を提案できません", "NOT_CANDIDATE");
+    }
+    if (pin.status !== "open") {
+      throw new ApiError(409, "未対応の候補ピンのみ住所を提案できます", "PIN_NOT_OPEN");
+    }
+    if (pin.propertyId) {
+      throw new ApiError(409, "この調査ピンは既に物件化済みです", "ALREADY_CONVERTED");
     }
 
     if (!isOwn) {

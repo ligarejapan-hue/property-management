@@ -82,6 +82,9 @@ function pin(overrides: Record<string, unknown> = {}) {
     staffUserId: "user-1",
     lat: { toString: () => "35.7237362" } as unknown,
     lng: { toString: () => "139.5992861" } as unknown,
+    pinType: "candidate",
+    status: "open",
+    propertyId: null,
     ...overrides,
   };
 }
@@ -123,6 +126,23 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     expect(res.status).toBe(403);
     expect(reverseGeocode).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["候補外(blocked)", { pinType: "blocked" }, 422],
+    ["対応済み(closed)", { status: "closed" }, 409],
+    ["アーカイブ済み", { status: "archived" }, 409],
+    ["物件化済み", { propertyId: "prop-1" }, 409],
+  ] as const)(
+    "変換できない状態のピン(%s)は %i(外部送信・監査より前に弾く=Codex R8 P2)",
+    async (_label, overrides, status) => {
+      pm.fieldSurveyPin.findUnique.mockResolvedValue(pin(overrides));
+      const res = await POST(req, ctx);
+      expect(res.status).toBe(status);
+      // 座標を外部へ送らない・監査も書かない(状態チェックが先)。
+      expect(reverseGeocode).not.toHaveBeenCalled();
+      expect(writeAuditLog).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ["read_all", WRITE_READ_ALL],
