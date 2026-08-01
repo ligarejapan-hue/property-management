@@ -24,8 +24,8 @@
  *   - ⚠個人情報は扱わない(公開データの地点座標のみ)。
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { parseIsjCsv, type IsjBlockRow } from "../src/lib/address-blocks/parse-isj";
@@ -33,14 +33,14 @@ import { parseImportArgs } from "../src/lib/address-blocks/import-cli";
 
 /**
  * 指定パス(ファイル or フォルダ)から .csv を列挙する(フォルダは1階層下まで)。
- * 重複指定(フォルダとその中のファイルを両方渡す・同じファイルを2回渡す等)は
- * 正規化パスで dedupe する(Codex R4 P2: 重複すると同じ点が二重挿入される)。
+ * 重複指定(フォルダとその中のファイルを両方渡す・同じファイルを2回渡す・symlink 経由等)は
+ * **物理パス**(realpath)で dedupe する(Codex R4/R8 P2: 重複すると同じ点が二重挿入される)。
  */
 function collectCsvFiles(paths: string[]): string[] {
   const seen = new Set<string>();
   const files: string[] = [];
   const push = (p: string) => {
-    const canonical = resolve(p);
+    const canonical = realpathSync(p);
     if (seen.has(canonical)) return;
     seen.add(canonical);
     files.push(canonical);
@@ -169,11 +169,19 @@ async function main(): Promise<number> {
   // 薄めてしまい、破損ファイルの市区町村が欠けたまま置換(+--prune-stale なら
   // 旧データ削除)が通ってしまうため。
   const corrupt: Array<{ file: string; skipped: number; parsed: number }> = [];
+  // ヘッダのみ(現行行ゼロ)の CSV は不正行率でも縮小ガードでも検知できない
+  // (Codex R8 P2: グループが作られないため --prune-stale がその市区町村の旧データ
+  // だけを「残存」として消す)。行ゼロのファイルは破損疑いとして停止対象にする。
+  const empty: string[] = [];
   for (const file of files) {
     const text = new TextDecoder("shift_jis").decode(readFileSync(file));
     const { rows, skipped, history } = parseIsjCsv(text);
     totalSkipped += skipped;
     totalHistory += history;
+    if (rows.length === 0) {
+      empty.push(file);
+      continue;
+    }
     const parsed = rows.length + skipped;
     if (skipped > 0 && parsed > 0 && skipped / parsed > 0.01) {
       corrupt.push({ file, skipped, parsed });
@@ -192,9 +200,12 @@ async function main(): Promise<number> {
     `解析結果: ${groups.size} 市区町村 / ${totalRows} 点 (除外: 不正 ${totalSkipped} / 履歴 ${totalHistory})`,
   );
 
-  if (corrupt.length > 0 && !opts.allowSkipped) {
+  if ((corrupt.length > 0 || empty.length > 0) && !opts.allowSkipped) {
     for (const c of corrupt) {
       console.error(`  破損疑い: ${c.file} (不正 ${c.skipped}/${c.parsed} 件・1%超)`);
+    }
+    for (const f of empty) {
+      console.error(`  破損疑い: ${f} (現行の行が 0 件=ヘッダのみ?)`);
     }
     console.error(
       "停止: 上記の CSV が壊れている可能性があります。再ダウンロードして再実行してください。" +
