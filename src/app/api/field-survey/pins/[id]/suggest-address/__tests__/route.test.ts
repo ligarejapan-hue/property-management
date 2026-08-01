@@ -267,12 +267,15 @@ describe("POST /api/field-survey/pins/[id]/suggest-address", () => {
     });
   });
 
-  it("地番の提案は点から50m以内のときだけ(Codex R7 P2: 遠いヒットの誤地番で謄本を誤請求しない)", async () => {
+  it.each([
+    [80, "50m 超"],
+    [50.4, "丸めれば50だが生値は50超(Codex R10 P2)"],
+  ])("地番の提案は点から50m以内のときだけ: %s m (%s) では出さない", async (distanceM) => {
     (findNearestBlock as Mock).mockResolvedValue({
       address: "埼玉県秩父市大字上影森1234番地",
       town: "大字上影森",
       block: "1234",
-      distanceM: 80, // 50m 超 → 住所は返すが地番は提案しない
+      distanceM,
       isResidential: false,
     });
     const body = await (await POST(req, ctx)).json();
