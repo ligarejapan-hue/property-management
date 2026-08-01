@@ -16,37 +16,49 @@
  * 設計:
  *   - CSV の解釈は src/lib/address-blocks/parse-isj.ts(純関数・テスト済)。本ファイルは
  *     I/O(ファイル走査・Shift_JIS decode・prisma 書込・stdout)に限定した薄い wrapper。
- *   - 書込は市区町村単位の全置換(tx: deleteMany→createMany)=同じ市区町村は再実行冪等。
- *     ⚠改称・合併で新版から消えた旧市区町村名の行は置換対象にならず残存する→取込後に
- *     残存を警告し、都道府県一括の取込なら --prune-stale で掃除できる。
+ *   - 書込は**都道府県単位の1tx**(県 advisory lock+市区町村ごとの全置換+prune を原子化)。
+ *     同じデータの再実行は冪等。⚠改称・合併で新版から消えた旧市区町村名の行は
+ *     置換対象にならず残存する→取込後に残存を警告し、都道府県一括の取込なら
+ *     --prune-stale で同一 tx 内で掃除できる。
  *   - --dry-run は DB に書かず件数レポートのみ。
  *   - ⚠個人情報は扱わない(公開データの地点座標のみ)。
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { parseIsjCsv, type IsjBlockRow } from "../src/lib/address-blocks/parse-isj";
 import { parseImportArgs } from "../src/lib/address-blocks/import-cli";
 
-/** 指定パス(ファイル or フォルダ)から .csv を列挙する(フォルダは1階層下まで)。 */
+/**
+ * 指定パス(ファイル or フォルダ)から .csv を列挙する(フォルダは1階層下まで)。
+ * 重複指定(フォルダとその中のファイルを両方渡す・同じファイルを2回渡す等)は
+ * 正規化パスで dedupe する(Codex R4 P2: 重複すると同じ点が二重挿入される)。
+ */
 function collectCsvFiles(paths: string[]): string[] {
+  const seen = new Set<string>();
   const files: string[] = [];
+  const push = (p: string) => {
+    const canonical = resolve(p);
+    if (seen.has(canonical)) return;
+    seen.add(canonical);
+    files.push(canonical);
+  };
   for (const p of paths) {
     const st = statSync(p);
     if (st.isFile()) {
-      files.push(p);
+      push(p);
       continue;
     }
     for (const name of readdirSync(p)) {
       const child = join(p, name);
       if (statSync(child).isDirectory()) {
         for (const inner of readdirSync(child)) {
-          if (inner.toLowerCase().endsWith(".csv")) files.push(join(child, inner));
+          if (inner.toLowerCase().endsWith(".csv")) push(join(child, inner));
         }
       } else if (name.toLowerCase().endsWith(".csv")) {
-        files.push(child);
+        push(child);
       }
     }
   }
@@ -55,38 +67,62 @@ function collectCsvFiles(paths: string[]): string[] {
 
 const CHUNK = 1000;
 
-async function importGroup(
+interface CityGroup {
+  prefecture: string;
+  city: string;
+  rows: IsjBlockRow[];
+}
+
+/**
+ * 都道府県単位の1トランザクションで、配下の市区町村を順に全置換し、--prune-stale
+ * なら旧版の残存も同じ tx 内で削除する(原子化)。
+ *
+ * 直列化(Codex R3/R4 P2): 同時実行の競合(全置換の二重挿入・prune が他プロセスの
+ * 取込済み市区町村を消す)は、**都道府県単位の advisory lock を1本**に統一して防ぐ。
+ * 市区町村ごとの細粒度ロックだと prune(県全体の削除)と鍵が噛み合わず、
+ * ロックの意味が無くなるため。tx スコープの lock は commit/rollback で自動解放。
+ * 戻り値は旧版の残存数(prune した場合は削除数)。
+ */
+async function importPrefecture(
   prisma: PrismaClient,
   prefecture: string,
-  city: string,
-  rows: IsjBlockRow[],
+  cityGroups: CityGroup[],
   version: string,
-): Promise<void> {
-  await prisma.$transaction(
+  pruneStale: boolean,
+): Promise<number> {
+  return prisma.$transaction(
     async (tx) => {
-      // 同一市区町村への同時実行を直列化する(Codex R3 P2: 2本の取込が同時に走ると
-      // 両方の delete→insert が通って点が二重になる)。tx スコープの advisory lock は
-      // commit/rollback で自動解放。後着は先着の完了を待ってから全置換するので、
-      // どちらの順でも最終状態は「どちらか一方のスナップショット」に収束する。
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prefecture}), hashtext(${city}))`;
-      await tx.addressBlockPoint.deleteMany({ where: { prefecture, city } });
-      for (let i = 0; i < rows.length; i += CHUNK) {
-        await tx.addressBlockPoint.createMany({
-          data: rows.slice(i, i + CHUNK).map((r) => ({
-            prefecture: r.prefecture,
-            city: r.city,
-            town: r.town,
-            block: r.block,
-            lat: r.lat,
-            lng: r.lng,
-            isResidential: r.isResidential,
-            sourceVersion: version,
-          })),
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('address_block_import'), hashtext(${prefecture}))`;
+      for (const g of cityGroups) {
+        await tx.addressBlockPoint.deleteMany({
+          where: { prefecture: g.prefecture, city: g.city },
         });
+        for (let i = 0; i < g.rows.length; i += CHUNK) {
+          await tx.addressBlockPoint.createMany({
+            data: g.rows.slice(i, i + CHUNK).map((r) => ({
+              prefecture: r.prefecture,
+              city: r.city,
+              town: r.town,
+              block: r.block,
+              lat: r.lat,
+              lng: r.lng,
+              isResidential: r.isResidential,
+              sourceVersion: version,
+            })),
+          });
+        }
+        console.log(`  取込: ${g.prefecture}${g.city} ${g.rows.length} 点`);
       }
+      // 改称・合併で新版に現れない旧市区町村名の残存(取込と同じ tx 内=原子)。
+      const staleWhere = { prefecture, sourceVersion: { not: version } };
+      const stale = await tx.addressBlockPoint.count({ where: staleWhere });
+      if (stale > 0 && pruneStale) {
+        await tx.addressBlockPoint.deleteMany({ where: staleWhere });
+      }
+      return stale;
     },
-    // 大きい市区町村(数万点)でも1txで置換できる余裕を持つ。
-    { timeout: 120_000 },
+    // 都道府県一括(東京都≒15万点)でも1txで置換できる余裕を持つ。
+    { timeout: 600_000 },
   );
 }
 
@@ -137,34 +173,34 @@ async function main(): Promise<number> {
     const adapter = new PrismaPg(connectionString as string);
     const prisma = new PrismaClient({ adapter });
     try {
+      // 都道府県ごとに1つの tx(県 lock+置換+prune を原子化)。
+      const byPrefecture = new Map<string, CityGroup[]>();
       for (const g of [...groups.values()].sort((a, b) =>
         `${a.prefecture}${a.city}`.localeCompare(`${b.prefecture}${b.city}`, "ja"),
       )) {
-        await importGroup(prisma, g.prefecture, g.city, g.rows, opts.version);
-        console.log(`  取込: ${g.prefecture}${g.city} ${g.rows.length} 点`);
+        const list = byPrefecture.get(g.prefecture) ?? [];
+        list.push(g);
+        byPrefecture.set(g.prefecture, list);
       }
-
-      // 市区町村の改称・合併で「新版の CSV に現れなくなった旧名」の行は上の置換では
-      // 消えない(置換は新データに存在する市区町村単位のため)。残存すると廃止済みの
-      // 市区町村名が最近傍照合で提案され得る(社内レビュー指摘)ので、取込対象の
-      // 都道府県内で今回の版以外の残存を数えて警告し、--prune-stale なら削除する。
-      const prefectures = [...new Set([...groups.values()].map((g) => g.prefecture))];
-      const staleWhere = {
-        prefecture: { in: prefectures },
-        sourceVersion: { not: opts.version },
-      };
-      const stale = await prisma.addressBlockPoint.count({ where: staleWhere });
-      if (stale > 0) {
-        if (opts.pruneStale) {
-          await prisma.addressBlockPoint.deleteMany({ where: staleWhere });
-          console.log(`旧版の残存 ${stale} 点を削除しました(--prune-stale)`);
-        } else {
-          console.warn(
-            `⚠取込対象の都道府県内に今回の版(${opts.version})以外の点が ${stale} 点残っています。` +
-              "市区町村の改称・合併があった場合、旧名の住所が提案され得ます。" +
-              "都道府県一括で取り込み直す場合は --prune-stale で掃除できます" +
-              "(一部市区町村だけの取込では使わないこと)",
-          );
+      for (const [prefecture, cityGroups] of byPrefecture) {
+        const stale = await importPrefecture(
+          prisma,
+          prefecture,
+          cityGroups,
+          opts.version,
+          opts.pruneStale,
+        );
+        if (stale > 0) {
+          if (opts.pruneStale) {
+            console.log(`  ${prefecture}: 旧版の残存 ${stale} 点を削除しました(--prune-stale)`);
+          } else {
+            console.warn(
+              `⚠${prefecture}に今回の版(${opts.version})以外の点が ${stale} 点残っています。` +
+                "市区町村の改称・合併があった場合、旧名の住所が提案され得ます。" +
+                "都道府県一括で取り込み直す場合は --prune-stale で掃除できます" +
+                "(一部市区町村だけの取込では使わないこと)",
+            );
+          }
         }
       }
 
