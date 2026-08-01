@@ -173,8 +173,21 @@ async function main(): Promise<number> {
   // (Codex R8 P2: グループが作られないため --prune-stale がその市区町村の旧データ
   // だけを「残存」として消す)。行ゼロのファイルは破損疑いとして停止対象にする。
   const empty: string[] = [];
+  // 壊れた Shift_JIS バイトの検知(Codex R9 P2): 既定の TextDecoder は不正バイトを
+  // 「�」に置換して通すため、文字化けした住所が正常行として全置換に入り込む。
+  // fatal:true で厳格に decode し、失敗ファイルは**強行オプションでも通さず**停止する
+  // (文字化け住所を DB に入れる正当な理由は無い=再ダウンロード一択)。
+  const broken: string[] = [];
   for (const file of files) {
-    const text = new TextDecoder("shift_jis").decode(readFileSync(file));
+    let text: string;
+    try {
+      text = new TextDecoder("shift_jis", { fatal: true }).decode(
+        readFileSync(file),
+      );
+    } catch {
+      broken.push(file);
+      continue;
+    }
     const { rows, skipped, history } = parseIsjCsv(text);
     totalSkipped += skipped;
     totalHistory += history;
@@ -199,6 +212,16 @@ async function main(): Promise<number> {
   console.log(
     `解析結果: ${groups.size} 市区町村 / ${totalRows} 点 (除外: 不正 ${totalSkipped} / 履歴 ${totalHistory})`,
   );
+
+  if (broken.length > 0) {
+    for (const f of broken) {
+      console.error(`  文字コード破損: ${f} (Shift_JIS として不正なバイトを含む)`);
+    }
+    console.error(
+      "停止: 上記の CSV は文字コードが壊れています(文字化け住所の混入を防ぐため強行不可)。再ダウンロードしてください",
+    );
+    return 1;
+  }
 
   if ((corrupt.length > 0 || empty.length > 0) && !opts.allowSkipped) {
     for (const c of corrupt) {
